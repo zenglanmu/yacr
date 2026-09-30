@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "fixtures": [],
+  "notice": "No authorized DWG, fonts or golden images yet. Contract tests are synthetic and do not establish CAD compatibility."
+}

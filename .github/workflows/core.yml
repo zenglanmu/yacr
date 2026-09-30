@@ -1,0 +1,18 @@
+name: Core contracts
+on: [push, pull_request]
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - run: cargo check --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked
+      - run: cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked
+      - run: cargo check --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --lib --target wasm32-unknown-unknown --locked
+      - run: python3 scripts/check-architecture.py
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
+# Platform/GPU/shader runtime jobs are not provided; no hardware acceptance implied.

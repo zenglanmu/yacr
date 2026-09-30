@@ -5,7 +5,8 @@ Rust 工业 CAD 查看、测量与批注系统。规范：`CAD_IMPLEMENTATION_SP
 
 ## 仓库结构
 
-Cargo workspace，核心无平台依赖。依赖方向（**不可反转**）：
+Cargo workspace，核心无平台依赖。下面是分层示意（不是逐 crate 依赖边）；
+实际依赖以 Cargo manifests 和 `scripts/check-architecture.py` 为准，**不可反转**：
 
 ```
 cad-domain
@@ -31,14 +32,15 @@ apps/app-android  apps/app-web
 
 ## 构建
 
-工具链见 `rust-toolchain.toml`（1.98.1）。Android 需要 JDK 17、Android SDK
-build-tools 34、NDK 27.0.12077973 与 `cargo-apk 0.10.0`。
+工具链见 `rust-toolchain.toml`（1.98.1）。当前是契约框架，没有可运行 APK/Web UI。
+Android JDK/SDK/NDK/打包器组合尚待锁定并验证，不得凭 metadata 宣称兼容。
 
 ```bash
-cargo test --workspace --exclude app-android --exclude app-web   # 纯核心测试
-cargo check --target aarch64-linux-android -p cad-ui-slint       # Android 编译路径
-cargo apk build -p app-android --release                         # 产出 APK
-scripts/build-web.sh                                             # 浏览器产物
+cargo test --workspace --locked
+cargo check --workspace --lib --target wasm32-unknown-unknown --locked
+python3 scripts/check-architecture.py
+# Android 核心路径，先安装 rust target（不等于 APK）
+cargo check --target aarch64-linux-android -p cad-ui-slint --locked
 ```
 
 ## 约束（来自规范）
@@ -48,6 +50,8 @@ scripts/build-web.sh                                             # 浏览器产�
 3. 业务层只操作数据库/命令/事务，GPU 提交封装在渲染器内。
 4. 增量更新：ChangeSet → 依赖失效 → 显示表示重建，不重解析底图。
 5. 每项功能同步补充契约测试与文档。
+6. 先读 `docs/handoff.md` 和 `docs/requirements.md`；`pending("模块.操作")`
+   是可搜索交接点，替换时必须增加验收测试，禁止改成空成功。
 
 ## 文档
 
