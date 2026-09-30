@@ -1,0 +1,23 @@
+[package]
+name = "app-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cad-ui-slint.workspace = true
+cad-app.workspace = true
+cad-platform.workspace = true
+cad-domain.workspace = true
+
+[package.metadata.android]
+package = "dev.yacr.app"
+apk_name = "yacr"
+build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]
+min_sdk_version = 26
+target_sdk_version = 34

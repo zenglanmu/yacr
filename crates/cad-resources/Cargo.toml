@@ -1,0 +1,11 @@
+[package]
+name = "cad-resources"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Font, image and xref resolution contracts and caches."
+
+[dependencies]
+cad-domain.workspace = true

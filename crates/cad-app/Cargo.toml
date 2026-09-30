@@ -1,0 +1,23 @@
+[package]
+name = "cad-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Session/Workspace, commands, capability and tool state."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-dependencies.workspace = true
+cad-history.workspace = true
+cad-annotations.workspace = true
+cad-measure.workspace = true
+cad-import-acadrust.workspace = true
+cad-representation.workspace = true
+cad-scene.workspace = true
+cad-query.workspace = true
+cad-diagnostics.workspace = true
+cad-platform.workspace = true
+cad-resources.workspace = true

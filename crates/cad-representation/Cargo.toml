@@ -1,0 +1,16 @@
+[package]
+name = "cad-representation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Entity display protocol: line/mesh/text/instance representations."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-geometry.workspace = true
+cad-kernel-adapter.workspace = true
+cad-proxy.workspace = true
+cad-resources.workspace = true

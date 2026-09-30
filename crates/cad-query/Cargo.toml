@@ -1,0 +1,14 @@
+[package]
+name = "cad-query"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Panel queries, ViewModel and incremental updates."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-dependencies.workspace = true
+cad-annotations.workspace = true

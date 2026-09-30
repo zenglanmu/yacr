@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+*.apk
+*.aab
+.gradle/
+build/
+node_modules/
+dist/
+*.keystore
+*.jks
+keystore.properties
+.local/

@@ -1,0 +1,20 @@
+[package]
+name = "cad-cli-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Headless core CLI: scan drawings, proxy reports, commands, benchmarks."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-acadrust.workspace = true
+cad-proxy.workspace = true
+cad-representation.workspace = true
+cad-annotations.workspace = true
+cad-measure.workspace = true
+cad-diagnostics.workspace = true
+cad-resources.workspace = true
+cad-app.workspace = true

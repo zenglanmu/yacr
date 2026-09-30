@@ -1,0 +1,16 @@
+[package]
+name = "app-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cad-ui-slint.workspace = true
+cad-app.workspace = true
+cad-platform.workspace = true
+cad-domain.workspace = true

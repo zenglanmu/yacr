@@ -1,0 +1,12 @@
+[package]
+name = "cad-spatial"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Spatial index, instance queries, ray candidates."
+
+[dependencies]
+cad-domain.workspace = true
+cad-geometry.workspace = true

@@ -1,0 +1,22 @@
+[package]
+name = "cad-import-acadrust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "acadrust adapter: read plus database Builder, import report."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-proxy.workspace = true
+cad-resources.workspace = true
+cad-diagnostics.workspace = true
+acadrust.workspace = true
+glam.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+log.workspace = true
+sha2.workspace = true

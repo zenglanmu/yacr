@@ -1,0 +1,80 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cad-domain",
+    "crates/cad-db",
+    "crates/cad-dependencies",
+    "crates/cad-history",
+    "crates/cad-geometry",
+    "crates/cad-kernel-adapter",
+    "crates/cad-representation",
+    "crates/cad-spatial",
+    "crates/cad-scene",
+    "crates/cad-render-wgpu",
+    "crates/cad-measure",
+    "crates/cad-annotations",
+    "crates/cad-proxy",
+    "crates/cad-import-acadrust",
+    "crates/cad-resources",
+    "crates/cad-query",
+    "crates/cad-app",
+    "crates/cad-ui-slint",
+    "crates/cad-platform",
+    "crates/cad-diagnostics",
+    "crates/cad-cli-tools",
+    "apps/app-android",
+    "apps/app-web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0 OR MIT"
+authors = ["yacr contributors"]
+repository = "https://example.invalid/yacr"
+
+[workspace.dependencies]
+cad-domain = { path = "crates/cad-domain" }
+cad-db = { path = "crates/cad-db" }
+cad-dependencies = { path = "crates/cad-dependencies" }
+cad-history = { path = "crates/cad-history" }
+cad-geometry = { path = "crates/cad-geometry" }
+cad-kernel-adapter = { path = "crates/cad-kernel-adapter" }
+cad-representation = { path = "crates/cad-representation" }
+cad-spatial = { path = "crates/cad-spatial" }
+cad-scene = { path = "crates/cad-scene" }
+cad-render-wgpu = { path = "crates/cad-render-wgpu" }
+cad-measure = { path = "crates/cad-measure" }
+cad-annotations = { path = "crates/cad-annotations" }
+cad-proxy = { path = "crates/cad-proxy" }
+cad-import-acadrust = { path = "crates/cad-import-acadrust" }
+cad-resources = { path = "crates/cad-resources" }
+cad-query = { path = "crates/cad-query" }
+cad-app = { path = "crates/cad-app" }
+cad-ui-slint = { path = "crates/cad-ui-slint" }
+cad-platform = { path = "crates/cad-platform" }
+cad-diagnostics = { path = "crates/cad-diagnostics" }
+
+# Integration candidates only: not linked or validated by the scaffold.
+acadrust = "=0.5.5"
+slint = "=1.18.1"
+slint-build = "=1.18.1"
+wgpu = "=30.0.1"
+glam = { version = "0.33", features = ["serde", "bytemuck"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde", "js"] }
+bytemuck = { version = "1", features = ["derive"] }
+log = "0.4"
+sha2 = "0.10"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1

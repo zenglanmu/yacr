@@ -1,0 +1,11 @@
+[package]
+name = "cad-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "File, task, storage, lifecycle and composition contracts."
+
+[dependencies]
+cad-domain.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "cad-render-wgpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "2D/3D pipelines, buffers/textures, draw statistics."
+
+[dependencies]
+cad-domain.workspace = true
+cad-scene.workspace = true
+cad-geometry.workspace = true

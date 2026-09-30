@@ -1,0 +1,8 @@
+[package]
+name = "cad-history"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true

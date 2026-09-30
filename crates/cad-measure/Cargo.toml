@@ -1,0 +1,14 @@
+[package]
+name = "cad-measure"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Snapping, measurement, units and precision reporting."
+
+[dependencies]
+cad-domain.workspace = true
+cad-geometry.workspace = true
+cad-spatial.workspace = true
+cad-db.workspace = true
