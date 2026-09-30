@@ -36,11 +36,13 @@ apps/app-android  apps/app-web
 Android JDK/SDK/NDK/打包器组合尚待锁定并验证，不得凭 metadata 宣称兼容。
 
 ```bash
-cargo test --workspace --locked
+# 纯核心测试（宿主无 fontconfig 开发头，故排除 Slint/宿主 crate）
+cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 python3 scripts/check-architecture.py
-# Android 核心路径，先安装 rust target（不等于 APK）
-cargo check --target aarch64-linux-android -p cad-ui-slint --locked
+# Android 核心路径与 APK
+cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked
+scripts/build-android.sh   # 产出 target/<profile>/apk/yacr.apk
 ```
 
 ## 约束（来自规范）

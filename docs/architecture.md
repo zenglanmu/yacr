@@ -1,10 +1,13 @@
 # 架构与公共契约
 
-需求权威：`CAD_IMPLEMENTATION_SPEC.md` v2.0。本仓库仅搭建框架。
+需求权威：`CAD_IMPLEMENTATION_SPEC.md` v2.0。
 
 数据流：UI/CLI → Application/权限 → AnnotationService → DB transaction →
 ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → Renderer → RenderHost。
-当前数据流接线未完成，除已存在的基础数据库实现外，业务路径显式返回 NotImplemented。
+
+已接线：导入→数据库、显示表示→场景→wgpu、批注事务→撤销/重做、依赖失效、查询分页、
+Slint↔wgpu 合成（`cad-ui-slint/src/bridge.rs`）。仍返回 NotImplemented 的业务路径：
+文件选择/导入导出（宿主）、后端切换、3D 渲染、ACIS 离散。详见 `docs/validation.md`。
 
 | 层 | 包与关键契约 |
 |---|---|
