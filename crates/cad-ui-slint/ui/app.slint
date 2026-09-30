@@ -1,0 +1,13 @@
+// Candidate shared shell, not compiled or platform-validated yet.
+import { Button, VerticalBox } from "std-widgets.slint";
+export component YacrWindow inherits Window {
+    in property <string> application-title;
+    in property <string> open-label;
+    in property <string> status-label;
+    callback open-requested();
+    title: application-title;
+    VerticalBox {
+        Button { text: root.open-label; clicked => { root.open-requested(); } }
+        Rectangle { background: #20242b; Text { text: root.status-label; color: white; } }
+    }
+}

@@ -1,0 +1,8 @@
+{
+  "app.title": "yacr — CAD 查看与批注",
+  "file.open": "打开图纸",
+  "status.scaffold": "框架占位：尚未接入 CAD 画布",
+  "tool.confirm": "确认",
+  "tool.cancel": "取消",
+  "units.unknown": "图纸单位"
+}

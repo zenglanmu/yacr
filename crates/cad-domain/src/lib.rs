@@ -86,7 +86,7 @@ impl TaskStamp {
         if self == current { Ok(()) } else { Err(CadError::StaleResult) }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SemanticGeometry {
     Line { start: Point3, end: Point3 },
     Polyline { points: Vec<Point3>, bulges: Vec<f64>, closed: bool },
@@ -98,7 +98,7 @@ pub enum SemanticGeometry {
     Text { text: String, position: Point3, style: StyleId, height: f64, rotation: f64 },
     Opaque { type_key: String, version: u32, payload: Vec<u8> },
 }
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mesh {
     pub vertices: Vec<Point3>, pub triangles: Vec<[u32; 3]>, pub normals: Vec<Point3>,
     pub face_sources: Vec<Option<SubElementId>>,
