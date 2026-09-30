@@ -5,8 +5,11 @@
    请以当前源码和最新构建证据确认状态，不覆盖陌生变更。
 2. 运行 README 的 check/test/architecture 命令；不要删除陌生的已有实现。
 3. 用 `rg 'pending\(' crates apps` 查找显式占位；文件路径与字符串标识对应实施单元。
-4. 首先验证 Android/Web 的 Slint + wgpu 组合（规范 §12.3），核查锁定版本实际 API。
-   这一步尚未完成，不能以本机纯 Rust 编译代替。记录 ADR 和运行证据后再引入 GPU 业务。
+4. Android 的 Slint + wgpu 组合已验证到打包层：见 ADR 0002
+   （docs/adr/0002-gpu-ui-composition.md）与 docs/validation.md；
+   `scripts/build-android.sh --release` 产出并签名 aarch64 APK。
+   真机/模拟器运行仍未执行，不能以打包成功代替。Web 组合仍未完成
+   （`host.web.file_api_canvas_composition`），不能以本机 Rust 编译代替。
 5. 逐项实现 Builder/事务/历史 → 导入/基础语义 → 显示/索引/场景 → 应用/工具 → 宿主闭环；
    不把这个依赖顺序当作排期，也不绕过优先 GPU/UI 验证。
 6. 每次移除占位同步补齐规范测试、能力表、构建说明、Git 提交。
