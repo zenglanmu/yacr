@@ -105,7 +105,7 @@ pub enum Precision {
     Approximate { error_bound: Option<f64> },
     Unknown,
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupportStatus {
     NotImplemented,
     Unsupported,
