@@ -4,7 +4,7 @@
 //! that actually depends on them is invalidated. A change that only touches
 //! metadata does not invalidate representations; a change to geometry does.
 
-use cad_db::{ChangeMask, ChangeSet};
+use cad_db::{ChangeMask, ChangeSet, ObjectChange};
 use cad_domain::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 

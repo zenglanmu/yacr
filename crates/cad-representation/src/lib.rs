@@ -129,7 +129,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 });
             }
             SemanticGeometry::Opaque { type_key, .. } => {
-                representation.completeness = Completeness::Unsupported;
+                representation.completeness = Completeness::Missing(vec!["no display representation in this build".into()]);
                 representation.diagnostics.push(Diagnostic {
                     object: Some(ObjectId(entity.id.0)),
                     code: "representation.opaque".into(),
@@ -145,7 +145,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                         primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
                     });
                 } else {
-                    representation.completeness = Completeness::Unsupported;
+                    representation.completeness = Completeness::Missing(vec!["no display representation in this build".into()]);
                     representation.diagnostics.push(Diagnostic {
                         object: Some(ObjectId(entity.id.0)),
                         code: "representation.empty".into(),
@@ -217,7 +217,7 @@ impl ProviderRegistry {
         if matching.is_empty() {
             return Ok(DisplayRepresentation {
                 fragments: Vec::new(),
-                completeness: Completeness::Unsupported,
+                completeness: Completeness::Missing(vec!["no representation provider matched".into()]),
                 diagnostics: vec![Diagnostic {
                     object: Some(ObjectId(entity.id.0)),
                     code: "representation.no_provider".into(),
@@ -293,7 +293,7 @@ mod tests {
             SemanticGeometry::Opaque { type_key: "ACIS".into(), version: 1, payload: vec![1, 2, 3] },
         );
         let r = registry.build(&e, &context()).unwrap();
-        assert_eq!(r.completeness, Completeness::Unsupported);
+        assert!(matches!(r.completeness, Completeness::Missing(_)));
         assert!(!r.diagnostics.is_empty());
     }
 
