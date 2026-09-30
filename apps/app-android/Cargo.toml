@@ -7,26 +7,26 @@ authors.workspace = true
 publish = false
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-cad-app.workspace = true
-cad-domain.workspace = true
-cad-platform.workspace = true
-
-# The Android composition root only links the shared Slint shell for the Android
-# target. Keeping it target-specific lets `cargo test -p app-android` build the
-# host-testable command router without the host GUI backend (fontconfig/Skia).
-[target.'cfg(target_os = "android")'.dependencies]
 cad-ui-slint.workspace = true
+cad-app.workspace = true
+cad-platform.workspace = true
+cad-import-acadrust.workspace = true
+cad-db.workspace = true
+cad-domain.workspace = true
 slint.workspace = true
+log.workspace = true
+android-activity = { version = "0.6", features = ["native-activity"] }
+jni = "0.21"
+ndk-context = "0.1"
+ndk-sys = "0.6"
+android_logger = "0.14"
 
 [package.metadata.android]
 package = "dev.yacr.app"
 apk_name = "yacr"
-# Only the ABI whose Skia/wgpu prebuilt and APK packaging was actually verified
-# (see docs/adr/0002-android-host-and-apk.md). Other ABIs are candidates, not
-# verified targets.
-build_targets = ["aarch64-linux-android"]
+build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]
 min_sdk_version = 26
 target_sdk_version = 34

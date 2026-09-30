@@ -59,6 +59,18 @@ pub struct ImportReport {
     pub parse_ms: Option<f64>,
 }
 
+impl ImportReport {
+    /// Short human-facing completeness label for the UI status line.
+    pub fn completeness_label(&self) -> String {
+        match &self.completeness {
+            Completeness::Complete => "完整".to_string(),
+            Completeness::Partial(items) => format!("部分（{} 项）", items.len()),
+            Completeness::Missing(items) => format!("缺失（{} 项）", items.len()),
+            Completeness::Unverified => "未验证".to_string(),
+        }
+    }
+}
+
 pub struct ImportedDrawing {
     pub database: DrawingDatabase,
     pub units: UnitContext,

@@ -10,9 +10,14 @@ description = "Shared Slint controls and responsive layout."
 
 [dependencies]
 cad-domain.workspace = true
+cad-db.workspace = true
 cad-app.workspace = true
 cad-query.workspace = true
 cad-measure.workspace = true
+cad-render-wgpu.workspace = true
+cad-scene.workspace = true
+cad-geometry.workspace = true
+cad-representation.workspace = true
 slint = { workspace = true, features = [
     "std",
     "compat-1-2",

@@ -17,6 +17,9 @@ pub const ZH_CN_MESSAGES: &str = include_str!("../i18n/zh-CN.json");
 
 slint::include_modules!();
 
+pub mod bridge;
+pub use bridge::{install as install_cad_bridge, IncomingDocument};
+
 use slint::{ComponentHandle, Image, Weak};
 
 /// Layout/locale configuration for the shell.
@@ -79,6 +82,11 @@ impl UiHandle {
     pub fn request_redraw(&self) -> CadResult<()> {
         self.with(|ui| ui.window().request_redraw())
     }
+
+    /// Current physical size of the window, if it still exists.
+    pub fn physical_size(&self) -> Option<slint::PhysicalSize> {
+        Some(self.ui.upgrade()?.window().size())
+    }
 }
 
 /// Owns the Slint component and routes UI callbacks into commands.
@@ -102,43 +110,58 @@ impl UiAdapter {
         let viewport = configuration.viewport;
         let shared: Rc<RefCell<S>> = Rc::new(RefCell::new(sink));
 
-        let make = {
-            let document = document.clone();
-            move |id: CommandId| Command {
-                schema_version: 1,
-                id,
-                document: document.clone(),
-                viewport,
-                payload: CommandPayload::None,
-            }
-        };
-
+        // A command is built inside each callback: Command is not Clone and the
+        // payload set is heterogeneous.
         {
             let s = shared.clone();
-            let cmd = make(CommandId::OpenDrawing);
+            let doc = document.clone();
             ui.on_open_requested(move || {
-                let _ = s.borrow_mut().send(cmd.clone());
+                let _ = s.borrow_mut().send(Command {
+                    schema_version: 1,
+                    id: CommandId::OpenDrawing,
+                    document: doc.clone(),
+                    viewport,
+                    payload: CommandPayload::None,
+                });
             });
         }
         {
             let s = shared.clone();
-            let cmd = make(CommandId::Measure);
+            let doc = document.clone();
             ui.on_measure_requested(move || {
-                let _ = s.borrow_mut().send(cmd.clone());
+                let _ = s.borrow_mut().send(Command {
+                    schema_version: 1,
+                    id: CommandId::Measure,
+                    document: doc.clone(),
+                    viewport,
+                    payload: CommandPayload::None,
+                });
             });
         }
         {
             let s = shared.clone();
-            let cmd = make(CommandId::CreateAnnotation);
+            let doc = document.clone();
             ui.on_annotate_requested(move || {
-                let _ = s.borrow_mut().send(cmd.clone());
+                let _ = s.borrow_mut().send(Command {
+                    schema_version: 1,
+                    id: CommandId::CreateAnnotation,
+                    document: doc.clone(),
+                    viewport,
+                    payload: CommandPayload::None,
+                });
             });
         }
         {
             let s = shared.clone();
-            let cmd = make(CommandId::FitDrawing);
+            let doc = document.clone();
             ui.on_fit_requested(move || {
-                let _ = s.borrow_mut().send(cmd.clone());
+                let _ = s.borrow_mut().send(Command {
+                    schema_version: 1,
+                    id: CommandId::FitDrawing,
+                    document: doc.clone(),
+                    viewport,
+                    payload: CommandPayload::None,
+                });
             });
         }
 

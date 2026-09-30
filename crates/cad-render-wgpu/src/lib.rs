@@ -5,6 +5,8 @@
 //! host composites. Camera navigation updates only small uniform buffers, never
 //! the static vertex buffers.
 
+pub use wgpu;
+
 use cad_domain::*;
 use cad_scene::SceneDelta;
 

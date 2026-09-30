@@ -59,8 +59,7 @@ pub struct ToolStateModel {
 /// Tracks the last revision a query published, so gaps can trigger a rebuild.
 #[derive(Default)]
 pub struct QueryService {
-    last_revision: Option<Revision>,
-    last_document: Option<DocumentId>,
+    last: std::cell::RefCell<Option<(DocumentId, Revision)>>,
 }
 
 impl QueryService {
@@ -69,7 +68,7 @@ impl QueryService {
     }
 
     fn check_fresh(&self, request: &QueryRequest) -> CadResult<()> {
-        if let Some(doc) = &self.last_document {
+        if let Some((doc, _)) = self.last.borrow().as_ref() {
             if doc != &request.document {
                 // Document switched: the caller should rebuild, not reuse.
                 return Err(CadError::StaleResult);
@@ -78,9 +77,8 @@ impl QueryService {
         Ok(())
     }
 
-    fn remember(&mut self, request: &QueryRequest) {
-        self.last_revision = Some(request.revision);
-        self.last_document = Some(request.document.clone());
+    fn remember(&self, document: &DocumentId, revision: Revision) {
+        *self.last.borrow_mut() = Some((document.clone(), revision));
     }
 
     pub fn layers(&self, database: &DrawingDatabase, mut request: QueryRequest) -> CadResult<QueryPage<LayerRow>> {
@@ -90,6 +88,7 @@ impl QueryService {
             .map(|l| LayerRow { id: l.id, name: l.name.clone(), visible: l.visible })
             .collect();
         request.revision = database.revision();
+        self.remember(&request.document, request.revision);
         emit(request, all)
     }
 
@@ -104,6 +103,7 @@ impl QueryService {
             })
             .collect();
         request.revision = database.revision();
+        self.remember(&request.document, request.revision);
         emit(request, all)
     }
 
@@ -127,24 +127,26 @@ impl QueryService {
             rows.dedup_by(|a, b| a.key == b.key && matches!(a.value, PropertyValue::Unset));
         }
         request.revision = Revision(request.revision.0);
+        self.remember(&request.document, request.revision);
         emit(request, rows)
     }
 
     /// Note a change set; a non-continuous revision forces a snapshot rebuild.
     pub fn update(&mut self, changes: &ChangeSet) -> CadResult<()> {
-        if let Some(last) = self.last_revision {
-            if changes.after.0 != last.0 && changes.after.0 != last.0 + 1 {
+        let mut last = self.last.borrow_mut();
+        if let Some((_, revision)) = last.as_ref() {
+            if changes.after.0 != revision.0 && changes.after.0 != revision.0 + 1 {
                 // Subscribers must rebuild from the database (spec §4.6).
-                self.last_revision = Some(changes.after);
+                *last = Some((DocumentId(0), changes.after));
                 return Err(CadError::StaleResult);
             }
         }
-        self.last_revision = Some(changes.after);
+        *last = Some((DocumentId(0), changes.after));
         Ok(())
     }
 
     pub fn last_revision(&self) -> Option<Revision> {
-        self.last_revision
+        self.last.borrow().as_ref().map(|(_, r)| *r)
     }
 }
 
@@ -213,7 +215,7 @@ mod tests {
 
     #[test]
     fn document_switch_is_stale() {
-        let mut service = QueryService::new();
+        let service = QueryService::new();
         let db = DrawingDatabaseBuilder::new(DatabaseId(1)).finish().unwrap();
         service.layers(&db, request(0, 10)).unwrap();
         let mut other = request(0, 10);

@@ -47,7 +47,11 @@ export component YacrWindow inherits Window {
         Rectangle {
             height: 28px;
             background: #181c22;
-            Text { text: root.status-label; color: white; vertical-alignment: center; padding-left: 8px; }
+            HorizontalLayout {
+                padding-left: 8px;
+                alignment: center;
+                Text { text: root.status-label; color: white; }
+            }
         }
     }
 }
