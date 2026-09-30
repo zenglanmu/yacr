@@ -231,6 +231,7 @@ pub struct Command {
     pub payload: CommandPayload,
 }
 
+#[derive(Debug)]
 pub struct CommandOutcome {
     pub objects: Vec<ObjectId>,
     pub changes: Option<ChangeSet>,
