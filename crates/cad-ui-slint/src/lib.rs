@@ -90,7 +90,7 @@ pub struct UiAdapter {
 impl UiAdapter {
     /// Build the shell and connect its callbacks to `sink`.
     pub fn new<S: UiCommandSink>(configuration: UiConfiguration, sink: S, work_mode: bool) -> CadResult<Self> {
-        let ui = YacrWindow::new().map_err(|e| CadError::Internal(format!("slint: {e}")))?;
+        let ui = YacrWindow::new().map_err(|e| CadError::Invariant(format!("slint: {e}")))?;
         ui.set_application_title(configuration.application_title.clone().into());
         ui.set_open_label("打开".into());
         ui.set_measure_label("测量".into());
@@ -161,8 +161,8 @@ impl UiAdapter {
     pub fn run(&self) -> CadResult<()> {
         self.ui
             .show()
-            .map_err(|e| CadError::Internal(format!("slint show: {e}")))?;
-        slint::run_event_loop().map_err(|e| CadError::Internal(format!("slint loop: {e}")))?;
+            .map_err(|e| CadError::Invariant(format!("slint show: {e}")))?;
+        slint::run_event_loop().map_err(|e| CadError::Invariant(format!("slint loop: {e}")))?;
         Ok(())
     }
 

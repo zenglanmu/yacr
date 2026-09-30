@@ -11,3 +11,7 @@ description = "2D/3D pipelines, buffers/textures, draw statistics."
 cad-domain.workspace = true
 cad-scene.workspace = true
 cad-geometry.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
+log.workspace = true
