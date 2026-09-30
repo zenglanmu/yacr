@@ -16,8 +16,12 @@ cad-platform.workspace = true
 cad-import-acadrust.workspace = true
 cad-db.workspace = true
 cad-domain.workspace = true
-slint.workspace = true
 log.workspace = true
+
+# The android-activity stack is Android-only; keeping it target-scoped lets the
+# rest of the workspace compile for wasm/host targets.
+[target.'cfg(target_os = "android")'.dependencies]
+slint.workspace = true
 android-activity = { version = "0.6", features = ["native-activity"] }
 jni = "0.21"
 ndk-context = "0.1"

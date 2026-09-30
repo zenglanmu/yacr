@@ -18,16 +18,20 @@ cad-render-wgpu.workspace = true
 cad-scene.workspace = true
 cad-geometry.workspace = true
 cad-representation.workspace = true
-slint = { workspace = true, features = [
-    "std",
-    "compat-1-2",
-    "backend-winit",
-    "backend-android-activity-06",
-    "renderer-skia",
-    "unstable-wgpu-30",
-    "log",
-] }
 log.workspace = true
+
+# Android uses the official android-activity backend (Skia behind wgpu). Other
+# targets get the selector without a windowing backend: the desktop host is a
+# reserved slot (ADR 0002) and the web host is not implemented, so pulling
+# winit/glutin there would only add untested dependencies.
+[target.'cfg(target_os = "android")'.dependencies]
+slint = { workspace = true, features = [
+    "std", "compat-1-2", "backend-android-activity-06", "renderer-skia",
+    "unstable-wgpu-30", "log",
+] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+slint = { workspace = true, features = ["std", "compat-1-2", "unstable-wgpu-30", "log"] }
 
 [build-dependencies]
 slint-build.workspace = true

@@ -113,7 +113,7 @@ struct HostSink {
 }
 
 impl HostSink {
-    fn status(&self, text: impl Into<slint::SharedString>) {
+    fn status(&self, text: impl Into<String>) {
         let text = text.into();
         if let Some(handle) = self.handle.borrow().as_ref() {
             let _ = handle.set_status(text);
