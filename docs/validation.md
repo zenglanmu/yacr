@@ -41,8 +41,11 @@ pkg-config，本环境无 sudo）；其 Slint 编译由 Android target 检查覆
 - `cargo check --target aarch64-linux-android -p app-android`：通过。
 - 探针 APK（Slint Android 后端 + `unstable-wgpu-30`）：`cargo apk build` 产出
   `slintprobe.apk`（arm64-v8a，debug 258 MB），证明 Slint+Android 打包路径。
-- 本仓库 APK：`cargo apk build -p app-android --target aarch64-linux-android --lib`
-  （见 `docs/build.md`）。
+- 本仓库发布 APK：`cargo apk build -p app-android --target aarch64-linux-android
+  --lib --release` 产出 `target/release/apk/yacr.apk`（11.6 MB，arm64-v8a，
+  使用本地 gitignored 开发密钥签名；manifest package=dev.yacr.app，
+  实测 minSdk 23 / targetSdk 30）。
+- 本仓库调试 APK：`... --lib` 产出 `target/debug/apk/yacr.apk`（445 MB，调试签名）。
 
 ## 未执行（明确标注）
 

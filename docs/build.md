@@ -20,14 +20,31 @@ NDK 27.0.12077973、`cargo-apk 0.10.0`。
 
 ```bash
 export ANDROID_HOME="$HOME/android-sdk"
-export ANDROID_NDK_HOME="$ANDROID_SDK/ndk/27.0.12077973"
+export ANDROID_NDK="$ANDROID_HOME/ndk/27.0.12077973"      # skia-bindings 需要
+export ANDROID_NDK_HOME="$ANDROID_NDK"
 export JAVA_HOME="$HOME/jdk17"
 export PATH="$HOME/.cargo/bin:$JAVA_HOME/bin:$PATH"
 
 rustup target add aarch64-linux-android
+# 调试 APK（445 MB，调试签名）
 cargo apk build -p app-android --target aarch64-linux-android --lib
-# 产物：target/<profile>/apk/yacr.apk
+# 发布 APK（11.6 MB）；需要本地开发签名密钥（见下）
+cargo apk build -p app-android --target aarch64-linux-android --lib --release
+# 产物：target/{debug,release}/apk/yacr.apk
 ```
+
+发布签名：`[package.metadata.android.signing.release]` 指向 `dev-release.jks`，
+该文件被 `.gitignore` 的 `*.jks` 排除，需本地生成：
+
+```bash
+keytool -genkeypair -keystore apps/app-android/dev-release.jks -alias yacr \
+  -keyalg RSA -keysize 2048 -validity 10000 -storepass yacrdev -keypass yacrdev \
+  -dname "CN=yacr dev, O=yacr"
+```
+
+生产密钥绝不进入仓库（规范 §9.1）。注意：`min_sdk_version`/`target_sdk_version`
+metadata 未生效，实测 manifest 为 minSdk 23 / targetSdk 30；最低支持范围尚未在真机
+验证，不得作为兼容性声明。
 
 仅 Rust 检查（不需要链接）：
 
