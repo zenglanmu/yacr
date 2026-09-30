@@ -6,7 +6,14 @@ use cad_domain::{Mesh, Point3};
 ///
 /// Degenerate (zero-area) triangles contribute nothing rather than NaN.
 pub fn compute_vertex_normals(mesh: &Mesh) -> Vec<Point3> {
-    let mut normals = vec![Point3 { x: 0.0, y: 0.0, z: 0.0 }; mesh.vertices.len()];
+    let mut normals = vec![
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0
+        };
+        mesh.vertices.len()
+    ];
     for tri in &mesh.triangles {
         let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
         if i0 >= mesh.vertices.len() || i1 >= mesh.vertices.len() || i2 >= mesh.vertices.len() {
@@ -25,7 +32,11 @@ pub fn compute_vertex_normals(mesh: &Mesh) -> Vec<Point3> {
     for n in &mut normals {
         let l = length(*n);
         if l > 1e-12 {
-            *n = Point3 { x: n.x / l, y: n.y / l, z: n.z / l };
+            *n = Point3 {
+                x: n.x / l,
+                y: n.y / l,
+                z: n.z / l,
+            };
         }
     }
     normals
@@ -38,18 +49,34 @@ pub fn mesh_bounds(mesh: &Mesh) -> Option<(Point3, Point3)> {
     let mut min = first;
     let mut max = first;
     for p in it {
-        min = Point3 { x: min.x.min(p.x), y: min.y.min(p.y), z: min.z.min(p.z) };
-        max = Point3 { x: max.x.max(p.x), y: max.y.max(p.y), z: max.z.max(p.z) };
+        min = Point3 {
+            x: min.x.min(p.x),
+            y: min.y.min(p.y),
+            z: min.z.min(p.z),
+        };
+        max = Point3 {
+            x: max.x.max(p.x),
+            y: max.y.max(p.y),
+            z: max.z.max(p.z),
+        };
     }
     Some((min, max))
 }
 
 fn add(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+    Point3 {
+        x: a.x + b.x,
+        y: a.y + b.y,
+        z: a.z + b.z,
+    }
 }
 
 fn sub(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+    Point3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
 }
 
 fn cross(a: Point3, b: Point3) -> Point3 {
@@ -77,9 +104,21 @@ mod tests {
     fn normals_point_along_z_for_ccw_triangle() {
         let mesh = Mesh {
             vertices: vec![
-                Point3 { x: 0.0, y: 0.0, z: 0.0 },
-                Point3 { x: 1.0, y: 0.0, z: 0.0 },
-                Point3 { x: 0.0, y: 1.0, z: 0.0 },
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
             ],
             triangles: vec![[0, 1, 2]],
             normals: Vec::<Point3>::new(),

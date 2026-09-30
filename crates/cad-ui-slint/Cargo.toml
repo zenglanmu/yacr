@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
 description = "Shared Slint controls and responsive layout."
 
 [dependencies]
@@ -12,3 +13,16 @@ cad-domain.workspace = true
 cad-app.workspace = true
 cad-query.workspace = true
 cad-measure.workspace = true
+slint = { workspace = true, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "backend-android-activity-06",
+    "renderer-skia",
+    "unstable-wgpu-30",
+    "log",
+] }
+log.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true

@@ -13,18 +13,36 @@ pub mod clip;
 pub mod mesh;
 
 pub use area::{measure_polygon_area, signed_area, AreaError};
-pub use clip::{clip_segment_to_xy_rect, clip_polyline_to_xy_rect};
+pub use clip::{clip_polyline_to_xy_rect, clip_segment_to_xy_rect};
 pub use mesh::{compute_vertex_normals, mesh_bounds};
 
 use cad_domain::*;
 
 /// Curve and geometry operations over [`SemanticGeometry`].
 pub trait GeometryEngine {
-    fn transform(&self, geometry: &SemanticGeometry, transform: &Transform3) -> CadResult<SemanticGeometry>;
+    fn transform(
+        &self,
+        geometry: &SemanticGeometry,
+        transform: &Transform3,
+    ) -> CadResult<SemanticGeometry>;
     fn bounds(&self, geometry: &SemanticGeometry) -> CadResult<Bounds3>;
-    fn tessellate_curve(&self, geometry: &SemanticGeometry, tolerance: &TolerancePolicy) -> CadResult<Vec<Point3>>;
-    fn intersect_local(&self, a: &SemanticGeometry, b: &SemanticGeometry, tolerance: &TolerancePolicy) -> CadResult<Vec<Point3>>;
-    fn ray_plane(&self, ray: &Ray3, plane: &WorkPlane, tolerance: &TolerancePolicy) -> CadResult<Option<Point3>>;
+    fn tessellate_curve(
+        &self,
+        geometry: &SemanticGeometry,
+        tolerance: &TolerancePolicy,
+    ) -> CadResult<Vec<Point3>>;
+    fn intersect_local(
+        &self,
+        a: &SemanticGeometry,
+        b: &SemanticGeometry,
+        tolerance: &TolerancePolicy,
+    ) -> CadResult<Vec<Point3>>;
+    fn ray_plane(
+        &self,
+        ray: &Ray3,
+        plane: &WorkPlane,
+        tolerance: &TolerancePolicy,
+    ) -> CadResult<Option<Point3>>;
 }
 
 /// Parameters controlling curve discretisation.
@@ -38,7 +56,11 @@ pub struct TessellationParams {
 
 impl Default for TessellationParams {
     fn default() -> Self {
-        TessellationParams { tolerance: 0.01, max_segments: 4096, min_segments: 8 }
+        TessellationParams {
+            tolerance: 0.01,
+            max_segments: 4096,
+            min_segments: 8,
+        }
     }
 }
 
@@ -49,7 +71,10 @@ impl TessellationParams {
     /// converts it to the world-space chord error used here.
     pub fn from_policy(policy: &TolerancePolicy, world_per_px: f64) -> Self {
         let tol = (policy.display_pixels * world_per_px).max(1e-12);
-        TessellationParams { tolerance: tol, ..Self::default() }
+        TessellationParams {
+            tolerance: tol,
+            ..Self::default()
+        }
     }
 }
 
@@ -58,38 +83,82 @@ impl TessellationParams {
 pub struct DefaultGeometryEngine;
 
 impl GeometryEngine for DefaultGeometryEngine {
-    fn transform(&self, geometry: &SemanticGeometry, t: &Transform3) -> CadResult<SemanticGeometry> {
+    fn transform(
+        &self,
+        geometry: &SemanticGeometry,
+        t: &Transform3,
+    ) -> CadResult<SemanticGeometry> {
         use SemanticGeometry as G;
         let tp = |p: Point3| apply_point(t, p);
         let td = |v: Point3| apply_vector(t, v);
         let ok = match geometry {
-            G::Line { start, end } => G::Line { start: tp(*start), end: tp(*end) },
-            G::Polyline { points, bulges, closed } => {
+            G::Line { start, end } => G::Line {
+                start: tp(*start),
+                end: tp(*end),
+            },
+            G::Polyline {
+                points,
+                bulges,
+                closed,
+            } => {
                 // Non-uniform scaling turns bulge arcs into ellipses; rather
                 // than silently mis-drawing them we keep the points and drop
                 // bulge only when the transform is not uniform.
-                let bulges = if is_uniform(t) { bulges.clone() } else { vec![0.0; points.len()] };
-                G::Polyline { points: points.iter().map(|p| tp(*p)).collect(), bulges, closed: *closed }
+                let bulges = if is_uniform(t) {
+                    bulges.clone()
+                } else {
+                    vec![0.0; points.len()]
+                };
+                G::Polyline {
+                    points: points.iter().map(|p| tp(*p)).collect(),
+                    bulges,
+                    closed: *closed,
+                }
             }
-            G::Circle { center, normal, radius } => {
+            G::Circle {
+                center,
+                normal,
+                radius,
+            } => {
                 let r = radius * uniform_scale(t);
-                G::Circle { center: tp(*center), normal: td(*normal), radius: r }
+                G::Circle {
+                    center: tp(*center),
+                    normal: td(*normal),
+                    radius: r,
+                }
             }
-            G::Arc { center, normal, radius, start, sweep } => G::Arc {
+            G::Arc {
+                center,
+                normal,
+                radius,
+                start,
+                sweep,
+            } => G::Arc {
                 center: tp(*center),
                 normal: td(*normal),
                 radius: radius * uniform_scale(t),
                 start: *start,
                 sweep: *sweep,
             },
-            G::Ellipse { center, major_axis, ratio, start, sweep } => G::Ellipse {
+            G::Ellipse {
+                center,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            } => G::Ellipse {
                 center: tp(*center),
                 major_axis: td(*major_axis),
                 ratio: *ratio,
                 start: *start,
                 sweep: *sweep,
             },
-            G::Spline { degree, knots, control_points, weights } => G::Spline {
+            G::Spline {
+                degree,
+                knots,
+                control_points,
+                weights,
+            } => G::Spline {
                 degree: *degree,
                 knots: knots.clone(),
                 control_points: control_points.iter().map(|p| tp(*p)).collect(),
@@ -107,19 +176,35 @@ impl GeometryEngine for DefaultGeometryEngine {
                 }
                 G::Mesh(m2)
             }
-            G::Insert { block, transform: inner } => {
-                G::Insert { block: *block, transform: t.matrix_mul(inner) }
-            }
-            G::Text { text, position, style, height, rotation } => G::Text {
+            G::Insert {
+                block,
+                transform: inner,
+            } => G::Insert {
+                block: *block,
+                transform: t.matrix_mul(inner),
+            },
+            G::Text {
+                text,
+                position,
+                style,
+                height,
+                rotation,
+            } => G::Text {
                 text: text.clone(),
                 position: tp(*position),
                 style: *style,
                 height: height * uniform_scale(t),
                 rotation: rotation + rotation_of(t),
             },
-            G::Opaque { type_key, version, payload } => {
-                G::Opaque { type_key: type_key.clone(), version: *version, payload: payload.clone() }
-            }
+            G::Opaque {
+                type_key,
+                version,
+                payload,
+            } => G::Opaque {
+                type_key: type_key.clone(),
+                version: *version,
+                payload: payload.clone(),
+            },
         };
         Ok(ok)
     }
@@ -127,24 +212,61 @@ impl GeometryEngine for DefaultGeometryEngine {
     fn bounds(&self, geometry: &SemanticGeometry) -> CadResult<Bounds3> {
         let mut acc = BoundsAccumulator::new();
         acc.add_geometry(geometry);
-        acc.finish().ok_or(CadError::InvalidInput("geometry has no finite extent".to_string()))
+        acc.finish().ok_or(CadError::InvalidInput(
+            "geometry has no finite extent".to_string(),
+        ))
     }
 
-    fn tessellate_curve(&self, geometry: &SemanticGeometry, tolerance: &TolerancePolicy) -> CadResult<Vec<Point3>> {
+    fn tessellate_curve(
+        &self,
+        geometry: &SemanticGeometry,
+        tolerance: &TolerancePolicy,
+    ) -> CadResult<Vec<Point3>> {
         // With no camera available, the policy's pixel budget is interpreted as
         // the world-space chord error; the app scales it by zoom before calling.
-        let params = TessellationParams { tolerance: tolerance.display_pixels.max(1e-12), ..Default::default() };
+        let params = TessellationParams {
+            tolerance: tolerance.display_pixels.max(1e-12),
+            ..Default::default()
+        };
         Ok(tessellate_geometry(geometry, params))
     }
 
-    fn intersect_local(&self, a: &SemanticGeometry, b: &SemanticGeometry, tolerance: &TolerancePolicy) -> CadResult<Vec<Point3>> {
-        let pa = tessellate_geometry(a, TessellationParams { tolerance: tolerance.display_pixels.max(1e-9), min_segments: 4, ..Default::default() });
-        let pb = tessellate_geometry(b, TessellationParams { tolerance: tolerance.display_pixels.max(1e-9), min_segments: 4, ..Default::default() });
+    fn intersect_local(
+        &self,
+        a: &SemanticGeometry,
+        b: &SemanticGeometry,
+        tolerance: &TolerancePolicy,
+    ) -> CadResult<Vec<Point3>> {
+        let pa = tessellate_geometry(
+            a,
+            TessellationParams {
+                tolerance: tolerance.display_pixels.max(1e-9),
+                min_segments: 4,
+                ..Default::default()
+            },
+        );
+        let pb = tessellate_geometry(
+            b,
+            TessellationParams {
+                tolerance: tolerance.display_pixels.max(1e-9),
+                min_segments: 4,
+                ..Default::default()
+            },
+        );
         let mut out = Vec::new();
         for i in 0..pa.len().saturating_sub(1) {
             for j in 0..pb.len().saturating_sub(1) {
-                if let Some(p) = segment_segment_intersection_3d(pa[i], pa[i + 1], pb[j], pb[j + 1], tolerance.computation_world) {
-                    if !out.iter().any(|q: &Point3| distance(*q, p) < tolerance.topology_world.max(1e-9)) {
+                if let Some(p) = segment_segment_intersection_3d(
+                    pa[i],
+                    pa[i + 1],
+                    pb[j],
+                    pb[j + 1],
+                    tolerance.computation_world,
+                ) {
+                    if !out
+                        .iter()
+                        .any(|q: &Point3| distance(*q, p) < tolerance.topology_world.max(1e-9))
+                    {
                         out.push(p);
                     }
                 }
@@ -153,11 +275,18 @@ impl GeometryEngine for DefaultGeometryEngine {
         Ok(out)
     }
 
-    fn ray_plane(&self, ray: &Ray3, plane: &WorkPlane, tolerance: &TolerancePolicy) -> CadResult<Option<Point3>> {
+    fn ray_plane(
+        &self,
+        ray: &Ray3,
+        plane: &WorkPlane,
+        tolerance: &TolerancePolicy,
+    ) -> CadResult<Option<Point3>> {
         let normal = cross(plane.u, plane.v);
         let nlen = length(normal);
         if nlen < tolerance.computation_world.max(1e-12) {
-            return Err(CadError::InvalidInput("work plane basis is degenerate".to_string()));
+            return Err(CadError::InvalidInput(
+                "work plane basis is degenerate".to_string(),
+            ));
         }
         let normal = scale(normal, 1.0 / nlen);
         let denom = dot(ray.direction, normal);
@@ -180,35 +309,68 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
     use SemanticGeometry as G;
     match geometry {
         G::Line { start, end } => vec![*start, *end],
-        G::Polyline { points, bulges, closed } => polyline_with_bulges(points, bulges, *closed, params),
-        G::Circle { center, normal, radius } => {
+        G::Polyline {
+            points,
+            bulges,
+            closed,
+        } => polyline_with_bulges(points, bulges, *closed, params),
+        G::Circle {
+            center,
+            normal,
+            radius,
+        } => {
             let (ax, ay, _) = arbitrary_axis(*normal);
             let mut out = Vec::new();
             let n = arc_segments_for_tolerance(*radius, std::f64::consts::TAU, params);
             for i in 0..=n {
                 let t = std::f64::consts::TAU * (i as f64) / (n as f64);
-                out.push(add(*center, add(scale(ax, t.cos() * radius), scale(ay, t.sin() * radius))));
+                out.push(add(
+                    *center,
+                    add(scale(ax, t.cos() * radius), scale(ay, t.sin() * radius)),
+                ));
             }
             out
         }
-        G::Arc { center, normal, radius, start, sweep } => {
+        G::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => {
             let (ax, ay, _) = arbitrary_axis(*normal);
             let sweep = normalize_sweep(*sweep);
             let n = arc_segments_for_tolerance(*radius, sweep, params);
             let mut out = Vec::with_capacity(n + 1);
             for i in 0..=n {
                 let t = start + sweep * (i as f64) / (n as f64);
-                out.push(add(*center, add(scale(ax, t.cos() * radius), scale(ay, t.sin() * radius))));
+                out.push(add(
+                    *center,
+                    add(scale(ax, t.cos() * radius), scale(ay, t.sin() * radius)),
+                ));
             }
             out
         }
-        G::Ellipse { center, major_axis, ratio, start, sweep } => {
+        G::Ellipse {
+            center,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => {
             let major_len = length(*major_axis);
             if major_len < 1e-12 {
                 return vec![*center];
             }
             let u = scale(*major_axis, 1.0 / major_len);
-            let normal = cross(u, Point3 { x: 0.0, y: 0.0, z: 1.0 });
+            let normal = cross(
+                u,
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+            );
             let minor = scale(normal, major_len * ratio.abs());
             let sweep = if sweep.abs() >= std::f64::consts::TAU - 1e-9 {
                 std::f64::consts::TAU
@@ -220,18 +382,34 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             let mut out = Vec::with_capacity(n + 1);
             for i in 0..=n {
                 let t = start + sweep * (i as f64) / (n as f64);
-                out.push(add(*center, add(scale(*major_axis, t.cos()), scale(minor, t.sin()))));
+                out.push(add(
+                    *center,
+                    add(scale(*major_axis, t.cos()), scale(minor, t.sin())),
+                ));
             }
             out
         }
-        G::Spline { degree, control_points, .. } => tessellate_bspline(control_points, *degree, params),
+        G::Spline {
+            degree,
+            control_points,
+            ..
+        } => tessellate_bspline(control_points, *degree, params),
         G::Point(p) => vec![*p, *p],
-        G::Text { position, height, text, .. } => {
+        G::Text {
+            position,
+            height,
+            text,
+            ..
+        } => {
             // A text placeholder box edge, sufficient for picking bounds.
             let h = height.abs().max(1e-9);
             vec![
                 *position,
-                Point3 { x: position.x + h * text.chars().count() as f64, y: position.y + h, z: position.z },
+                Point3 {
+                    x: position.x + h * text.chars().count() as f64,
+                    y: position.y + h,
+                    z: position.z,
+                },
             ]
         }
         G::Mesh(_) | G::Insert { .. } | G::Opaque { .. } => Vec::new(),
@@ -265,13 +443,22 @@ fn normalize_sweep(sweep: f64) -> f64 {
     s
 }
 
-fn polyline_with_bulges(points: &[Point3], bulges: &[f64], closed: bool, params: TessellationParams) -> Vec<Point3> {
+fn polyline_with_bulges(
+    points: &[Point3],
+    bulges: &[f64],
+    closed: bool,
+    params: TessellationParams,
+) -> Vec<Point3> {
     if points.is_empty() {
         return Vec::new();
     }
     let mut out: Vec<Point3> = Vec::with_capacity(points.len() * 4);
     let count = points.len();
-    let last = if closed { count } else { count.saturating_sub(1) };
+    let last = if closed {
+        count
+    } else {
+        count.saturating_sub(1)
+    };
     for i in 0..last {
         let a = points[i];
         let b = points[(i + 1) % count];
@@ -289,7 +476,13 @@ fn polyline_with_bulges(points: &[Point3], bulges: &[f64], closed: bool, params:
 }
 
 /// Append the arc described by a bulge (`bulge = tan(theta/4)`).
-fn append_bulge_arc(a: Point3, b: Point3, bulge: f64, params: TessellationParams, out: &mut Vec<Point3>) {
+fn append_bulge_arc(
+    a: Point3,
+    b: Point3,
+    bulge: f64,
+    params: TessellationParams,
+    out: &mut Vec<Point3>,
+) {
     let chord = sub(b, a);
     let chord_len = length(chord);
     if chord_len < 1e-12 {
@@ -307,9 +500,21 @@ fn append_bulge_arc(a: Point3, b: Point3, bulge: f64, params: TessellationParams
     let radius_abs = (half_chord * half_chord + sagitta * sagitta) / (2.0 * sagitta.abs());
     let mid = scale(add(a, b), 0.5);
     // Work in the XY plane; bulge polylines are planar by definition.
-    let dir = Point3 { x: chord.x / chord_len, y: chord.y / chord_len, z: 0.0 };
-    let left = Point3 { x: -dir.y, y: dir.x, z: 0.0 };
-    let u = if sagitta >= 0.0 { left } else { scale(left, -1.0) };
+    let dir = Point3 {
+        x: chord.x / chord_len,
+        y: chord.y / chord_len,
+        z: 0.0,
+    };
+    let left = Point3 {
+        x: -dir.y,
+        y: dir.x,
+        z: 0.0,
+    };
+    let u = if sagitta >= 0.0 {
+        left
+    } else {
+        scale(left, -1.0)
+    };
     let center = sub(mid, scale(u, radius_abs * half.cos()));
     let start_angle = (a.y - center.y).atan2(a.x - center.x);
     let n = arc_segments_for_tolerance(radius_abs, theta, params);
@@ -369,7 +574,11 @@ fn de_boor(pts: &[Point3], knots: &[f64], k: usize, t: f64) -> Point3 {
         for j in (r..=k).rev() {
             let i = span - k + j;
             let denom = knots[i + k + 1 - r] - knots[i];
-            let alpha = if denom.abs() > 1e-12 { (t - knots[i]) / denom } else { 0.0 };
+            let alpha = if denom.abs() > 1e-12 {
+                (t - knots[i]) / denom
+            } else {
+                0.0
+            };
             d[j] = add(scale(d[j - 1], 1.0 - alpha), scale(d[j], alpha));
         }
     }
@@ -378,14 +587,44 @@ fn de_boor(pts: &[Point3], knots: &[f64], k: usize, t: f64) -> Point3 {
 
 /// The AutoCAD arbitrary axis algorithm.
 pub fn arbitrary_axis(normal: Point3) -> (Point3, Point3, Point3) {
-    let n = if length(normal) < 1e-24 { Point3 { x: 0.0, y: 0.0, z: 1.0 } } else { normalize(normal) };
+    let n = if length(normal) < 1e-24 {
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        }
+    } else {
+        normalize(normal)
+    };
     const ONE_64TH: f64 = 1.0 / 64.0;
     let ax = if n.x.abs() < ONE_64TH && n.y.abs() < ONE_64TH {
-        cross(Point3 { x: 0.0, y: 1.0, z: 0.0 }, n)
+        cross(
+            Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            n,
+        )
     } else {
-        cross(Point3 { x: 0.0, y: 0.0, z: 1.0 }, n)
+        cross(
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            n,
+        )
     };
-    let ax = if length(ax) < 1e-24 { Point3 { x: 1.0, y: 0.0, z: 0.0 } } else { normalize(ax) };
+    let ax = if length(ax) < 1e-24 {
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    } else {
+        normalize(ax)
+    };
     let ay = normalize(cross(n, ax));
     (ax, ay, n)
 }
@@ -406,8 +645,16 @@ impl Default for BoundsAccumulator {
 impl BoundsAccumulator {
     pub fn new() -> Self {
         BoundsAccumulator {
-            min: Point3 { x: f64::INFINITY, y: f64::INFINITY, z: f64::INFINITY },
-            max: Point3 { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY, z: f64::NEG_INFINITY },
+            min: Point3 {
+                x: f64::INFINITY,
+                y: f64::INFINITY,
+                z: f64::INFINITY,
+            },
+            max: Point3 {
+                x: f64::NEG_INFINITY,
+                y: f64::NEG_INFINITY,
+                z: f64::NEG_INFINITY,
+            },
             any: false,
         }
     }
@@ -416,13 +663,28 @@ impl BoundsAccumulator {
         if !is_finite(p) {
             return;
         }
-        self.min = Point3 { x: self.min.x.min(p.x), y: self.min.y.min(p.y), z: self.min.z.min(p.z) };
-        self.max = Point3 { x: self.max.x.max(p.x), y: self.max.y.max(p.y), z: self.max.z.max(p.z) };
+        self.min = Point3 {
+            x: self.min.x.min(p.x),
+            y: self.min.y.min(p.y),
+            z: self.min.z.min(p.z),
+        };
+        self.max = Point3 {
+            x: self.max.x.max(p.x),
+            y: self.max.y.max(p.y),
+            z: self.max.z.max(p.z),
+        };
         self.any = true;
     }
 
     pub fn add_geometry(&mut self, geometry: &SemanticGeometry) {
-        for p in tessellate_geometry(geometry, TessellationParams { tolerance: 0.1, max_segments: 256, min_segments: 4 }) {
+        for p in tessellate_geometry(
+            geometry,
+            TessellationParams {
+                tolerance: 0.1,
+                max_segments: 256,
+                min_segments: 4,
+            },
+        ) {
             self.add_point(p);
         }
         if let SemanticGeometry::Mesh(m) = geometry {
@@ -438,7 +700,10 @@ impl BoundsAccumulator {
 
     pub fn finish(&self) -> Option<Bounds3> {
         if self.any {
-            Some(Bounds3 { min: self.min, max: self.max })
+            Some(Bounds3 {
+                min: self.min,
+                max: self.max,
+            })
         } else {
             None
         }
@@ -448,15 +713,27 @@ impl BoundsAccumulator {
 // ---- Point3 helpers (kept local so no external math crate leaks) ----
 
 pub fn add(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+    Point3 {
+        x: a.x + b.x,
+        y: a.y + b.y,
+        z: a.z + b.z,
+    }
 }
 
 pub fn sub(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+    Point3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
 }
 
 pub fn scale(a: Point3, s: f64) -> Point3 {
-    Point3 { x: a.x * s, y: a.y * s, z: a.z * s }
+    Point3 {
+        x: a.x * s,
+        y: a.y * s,
+        z: a.z * s,
+    }
 }
 
 pub fn dot(a: Point3, b: Point3) -> f64 {
@@ -532,7 +809,13 @@ fn rotation_of(t: &Transform3) -> f64 {
     t.matrix[1][0].atan2(t.matrix[0][0])
 }
 
-fn segment_segment_intersection_3d(a1: Point3, a2: Point3, b1: Point3, b2: Point3, tol: f64) -> Option<Point3> {
+fn segment_segment_intersection_3d(
+    a1: Point3,
+    a2: Point3,
+    b1: Point3,
+    b2: Point3,
+    tol: f64,
+) -> Option<Point3> {
     // Project onto XY and intersect, then reject if the Z separation is large.
     let r = sub(a2, a1);
     let s = sub(b2, b1);
@@ -551,7 +834,11 @@ fn segment_segment_intersection_3d(a1: Point3, a2: Point3, b1: Point3, b2: Point
     if (p.z - p2.z).abs() > tol.max(1e-9) * 1000.0 {
         return None;
     }
-    Some(Point3 { x: p.x, y: p.y, z: (p.z + p2.z) * 0.5 })
+    Some(Point3 {
+        x: p.x,
+        y: p.y,
+        z: (p.z + p2.z) * 0.5,
+    })
 }
 
 #[cfg(test)]
@@ -564,7 +851,10 @@ mod tests {
 
     #[test]
     fn line_bounds_are_exact() {
-        let g = SemanticGeometry::Line { start: p(1.0, 2.0), end: p(5.0, -3.0) };
+        let g = SemanticGeometry::Line {
+            start: p(1.0, 2.0),
+            end: p(5.0, -3.0),
+        };
         let b = DefaultGeometryEngine.bounds(&g).unwrap();
         assert_eq!(b.min, p(1.0, -3.0));
         assert_eq!(b.max, p(5.0, 2.0));
@@ -572,9 +862,31 @@ mod tests {
 
     #[test]
     fn circle_tessellation_respects_tolerance() {
-        let g = SemanticGeometry::Circle { center: p(0.0, 0.0), normal: Point3 { x: 0.0, y: 0.0, z: 1.0 }, radius: 100.0 };
-        let coarse = tessellate_geometry(&g, TessellationParams { tolerance: 1.0, max_segments: 4096, min_segments: 8 });
-        let fine = tessellate_geometry(&g, TessellationParams { tolerance: 0.01, max_segments: 4096, min_segments: 8 });
+        let g = SemanticGeometry::Circle {
+            center: p(0.0, 0.0),
+            normal: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            radius: 100.0,
+        };
+        let coarse = tessellate_geometry(
+            &g,
+            TessellationParams {
+                tolerance: 1.0,
+                max_segments: 4096,
+                min_segments: 8,
+            },
+        );
+        let fine = tessellate_geometry(
+            &g,
+            TessellationParams {
+                tolerance: 0.01,
+                max_segments: 4096,
+                min_segments: 8,
+            },
+        );
         assert!(fine.len() > coarse.len());
         // All points lie on the circle.
         for q in &fine {
@@ -609,23 +921,49 @@ mod tests {
     fn ray_hits_work_plane() {
         let plane = WorkPlane {
             origin: p(0.0, 0.0),
-            u: Point3 { x: 1.0, y: 0.0, z: 0.0 },
-            v: Point3 { x: 0.0, y: 1.0, z: 0.0 },
+            u: Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            v: Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
         };
         let ray = Ray3 {
-            origin: Point3 { x: 0.0, y: 0.0, z: 5.0 },
-            direction: Point3 { x: 0.0, y: 0.0, z: -1.0 },
+            origin: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 5.0,
+            },
+            direction: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            },
         };
-        let hit = DefaultGeometryEngine.ray_plane(&ray, &plane, &TolerancePolicy::default()).unwrap();
+        let hit = DefaultGeometryEngine
+            .ray_plane(&ray, &plane, &TolerancePolicy::default())
+            .unwrap();
         assert!(hit.is_some());
         assert!(distance(hit.unwrap(), p(0.0, 0.0)) < 1e-9);
     }
 
     #[test]
     fn local_intersection_finds_crossing_lines() {
-        let a = SemanticGeometry::Line { start: p(-1.0, 0.0), end: p(1.0, 0.0) };
-        let b = SemanticGeometry::Line { start: p(0.0, -1.0), end: p(0.0, 1.0) };
-        let hits = DefaultGeometryEngine.intersect_local(&a, &b, &TolerancePolicy::default()).unwrap();
+        let a = SemanticGeometry::Line {
+            start: p(-1.0, 0.0),
+            end: p(1.0, 0.0),
+        };
+        let b = SemanticGeometry::Line {
+            start: p(0.0, -1.0),
+            end: p(0.0, 1.0),
+        };
+        let hits = DefaultGeometryEngine
+            .intersect_local(&a, &b, &TolerancePolicy::default())
+            .unwrap();
         assert_eq!(hits.len(), 1);
         assert!(distance(hits[0], p(0.0, 0.0)) < 1e-9);
     }

@@ -1,13 +1,53 @@
-// Candidate shared shell, not compiled or platform-validated yet.
-import { Button, VerticalBox } from "std-widgets.slint";
+// Candidate shared shell, not platform-validated yet.
+import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
 export component YacrWindow inherits Window {
     in property <string> application-title;
     in property <string> open-label;
+    in property <string> measure-label;
+    in property <string> annotate-label;
     in property <string> status-label;
+    in property <image> cad-frame;
+    in property <bool> work-mode;
+
     callback open-requested();
+    callback measure-requested();
+    callback annotate-requested();
+    callback fit-requested();
+
     title: application-title;
+    background: #20242b;
+
     VerticalBox {
-        Button { text: root.open-label; clicked => { root.open-requested(); } }
-        Rectangle { background: #20242b; Text { text: root.status-label; color: white; } }
+        HorizontalBox {
+            spacing: 6px;
+            padding: 6px;
+            Button { text: root.open-label; clicked => { root.open-requested(); } }
+            Button { text: "适应"; clicked => { root.fit-requested(); } }
+            Button {
+                text: root.measure-label;
+                enabled: root.work-mode;
+                clicked => { root.measure-requested(); }
+            }
+            Button {
+                text: root.annotate-label;
+                enabled: root.work-mode;
+                clicked => { root.annotate-requested(); }
+            }
+        }
+        Rectangle {
+            background: #10131a;
+            // The CAD frame is produced by the wgpu renderer and shared as a
+            // texture; it is composited by Slint, never read back per frame.
+            Image {
+                source: root.cad-frame;
+                image-fit: contain;
+            }
+        }
+        Rectangle {
+            height: 28px;
+            background: #181c22;
+            Text { text: root.status-label; color: white; vertical-alignment: center; padding-left: 8px; }
+        }
     }
 }

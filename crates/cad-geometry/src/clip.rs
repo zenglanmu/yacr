@@ -16,7 +16,12 @@ pub fn clip_segment_to_xy_rect(
     let dy = b.y - a.y;
     let mut t0 = 0.0f64;
     let mut t1 = 1.0f64;
-    let checks = [(-dx, a.x - min.0), (dx, max.0 - a.x), (-dy, a.y - min.1), (dy, max.1 - a.y)];
+    let checks = [
+        (-dx, a.x - min.0),
+        (dx, max.0 - a.x),
+        (-dy, a.y - min.1),
+        (dy, max.1 - a.y),
+    ];
     for (p, q) in checks {
         if p.abs() < 1e-12 {
             if q < 0.0 {
@@ -41,7 +46,11 @@ pub fn clip_segment_to_xy_rect(
             }
         }
     }
-    let lerp = |t: f64| Point3 { x: a.x + dx * t, y: a.y + dy * t, z: a.z };
+    let lerp = |t: f64| Point3 {
+        x: a.x + dx * t,
+        y: a.y + dy * t,
+        z: a.z,
+    };
     Some((lerp(t0), lerp(t1)))
 }
 
@@ -49,7 +58,11 @@ pub fn clip_segment_to_xy_rect(
 ///
 /// The result keeps only the parts inside the rectangle, splitting the
 /// polyline where it exits and re-enters.
-pub fn clip_polyline_to_xy_rect(points: &[Point3], min: (f64, f64), max: (f64, f64)) -> Vec<Vec<Point3>> {
+pub fn clip_polyline_to_xy_rect(
+    points: &[Point3],
+    min: (f64, f64),
+    max: (f64, f64),
+) -> Vec<Vec<Point3>> {
     let mut runs: Vec<Vec<Point3>> = Vec::new();
     let mut current: Vec<Point3> = Vec::new();
     for w in points.windows(2) {
@@ -94,19 +107,30 @@ mod tests {
 
     #[test]
     fn narrows_a_crossing_segment() {
-        let (a, b) = clip_segment_to_xy_rect(p(-5.0, 5.0), p(15.0, 5.0), (0.0, 0.0), (10.0, 10.0)).unwrap();
+        let (a, b) =
+            clip_segment_to_xy_rect(p(-5.0, 5.0), p(15.0, 5.0), (0.0, 0.0), (10.0, 10.0)).unwrap();
         assert!((a.x - 0.0).abs() < 1e-9);
         assert!((b.x - 10.0).abs() < 1e-9);
     }
 
     #[test]
     fn rejects_a_segment_outside() {
-        assert!(clip_segment_to_xy_rect(p(20.0, 20.0), p(30.0, 30.0), (0.0, 0.0), (10.0, 10.0)).is_none());
+        assert!(
+            clip_segment_to_xy_rect(p(20.0, 20.0), p(30.0, 30.0), (0.0, 0.0), (10.0, 10.0))
+                .is_none()
+        );
     }
 
     #[test]
     fn splits_a_polyline_that_exits_and_reenters() {
-        let pts = vec![p(0.0, 5.0), p(5.0, 5.0), p(5.0, 20.0), p(10.0, 20.0), p(10.0, 5.0), p(15.0, 5.0)];
+        let pts = vec![
+            p(0.0, 5.0),
+            p(5.0, 5.0),
+            p(5.0, 20.0),
+            p(10.0, 20.0),
+            p(10.0, 5.0),
+            p(15.0, 5.0),
+        ];
         let runs = clip_polyline_to_xy_rect(&pts, (0.0, 0.0), (10.0, 10.0));
         assert_eq!(runs.len(), 2);
     }

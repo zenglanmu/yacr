@@ -20,3 +20,6 @@ serde.workspace = true
 thiserror.workspace = true
 log.workspace = true
 sha2.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "=0.3.4", features = ["wasm_js"] }

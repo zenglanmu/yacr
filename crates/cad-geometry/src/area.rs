@@ -82,7 +82,8 @@ fn is_coplanar(pts: &[Point3], tol: f64) -> bool {
         }
     }
     let Some(n) = normal else { return true };
-    pts.iter().all(|p| dot(sub(*p, pts[0]), n).abs() <= tol * 1000.0)
+    pts.iter()
+        .all(|p| dot(sub(*p, pts[0]), n).abs() <= tol * 1000.0)
 }
 
 fn self_intersects(pts: &[Point3]) -> bool {
@@ -118,7 +119,11 @@ fn orient(a: Point3, b: Point3, c: Point3) -> f64 {
 }
 
 fn sub(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+    Point3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
 }
 
 fn cross(a: Point3, b: Point3) -> Point3 {
@@ -142,7 +147,11 @@ fn normalize(a: Point3) -> Point3 {
     if l < 1e-24 {
         a
     } else {
-        Point3 { x: a.x / l, y: a.y / l, z: a.z / l }
+        Point3 {
+            x: a.x / l,
+            y: a.y / l,
+            z: a.z / l,
+        }
     }
 }
 
@@ -168,16 +177,35 @@ mod tests {
     #[test]
     fn bowtie_is_rejected() {
         let bowtie = [p(0.0, 0.0), p(1.0, 1.0), p(1.0, 0.0), p(0.0, 1.0)];
-        assert_eq!(measure_polygon_area(&bowtie, 1e-6), Err(AreaError::SelfIntersecting));
+        assert_eq!(
+            measure_polygon_area(&bowtie, 1e-6),
+            Err(AreaError::SelfIntersecting)
+        );
     }
 
     #[test]
     fn non_planar_ring_is_rejected() {
         let ring = [
-            Point3 { x: 0.0, y: 0.0, z: 0.0 },
-            Point3 { x: 1.0, y: 0.0, z: 0.0 },
-            Point3 { x: 1.0, y: 1.0, z: 5.0 },
-            Point3 { x: 0.0, y: 1.0, z: 0.0 },
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 1.0,
+                z: 5.0,
+            },
+            Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
         ];
         assert_eq!(measure_polygon_area(&ring, 1e-6), Err(AreaError::NonPlanar));
     }

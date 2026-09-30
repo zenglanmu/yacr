@@ -13,10 +13,16 @@ fn main() -> std::process::ExitCode {
         Some("build-representation") => cad_cli_tools::CliOperation::BuildRepresentation,
         Some("render") => cad_cli_tools::CliOperation::FixedViewportRender,
         Some("benchmark") => cad_cli_tools::CliOperation::Benchmark,
-        _ => { eprintln!("Unknown operation; use --help"); return std::process::ExitCode::from(2); }
+        _ => {
+            eprintln!("Unknown operation; use --help");
+            return std::process::ExitCode::from(2);
+        }
     };
     match cad_cli_tools::run_operation(operation, &[]) {
         Ok(_) => std::process::ExitCode::SUCCESS,
-        Err(error) => { eprintln!("{error}"); std::process::ExitCode::FAILURE }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::ExitCode::FAILURE
+        }
     }
 }

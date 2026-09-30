@@ -87,7 +87,11 @@ pub enum AnnotationGeometry {
     Text(Point3),
     Leader(Vec<Point3>),
     Rectangle([Point3; 2]),
-    Ellipse { center: Point3, axis_u: Point3, axis_v: Point3 },
+    Ellipse {
+        center: Point3,
+        axis_u: Point3,
+        axis_v: Point3,
+    },
     Freehand(Vec<Point3>),
     Cloud(Vec<Point3>),
     Measurement(MeasurementRecord),
@@ -102,7 +106,11 @@ impl AnnotationGeometry {
             | AnnotationGeometry::Freehand(v)
             | AnnotationGeometry::Cloud(v) => v.clone(),
             AnnotationGeometry::Rectangle(pair) => pair.to_vec(),
-            AnnotationGeometry::Ellipse { center, axis_u, axis_v } => vec![
+            AnnotationGeometry::Ellipse {
+                center,
+                axis_u,
+                axis_v,
+            } => vec![
                 add(*center, *axis_u),
                 add(*center, *axis_v),
                 sub(*center, *axis_u),
@@ -142,7 +150,11 @@ pub struct AnnotationStyle {
 
 impl Default for AnnotationStyle {
     fn default() -> Self {
-        AnnotationStyle { rgba: [0xE5, 0x39, 0x35, 0xFF], logical_width: 2.0, text_height: 2.5 }
+        AnnotationStyle {
+            rgba: [0xE5, 0x39, 0x35, 0xFF],
+            logical_width: 2.0,
+            text_height: 2.5,
+        }
     }
 }
 
@@ -280,16 +292,25 @@ impl DrawingDatabase {
 
     /// Entities in model space, in draw order.
     pub fn model_space(&self) -> Vec<&DbEntity> {
-        let mut v: Vec<&DbEntity> =
-            self.entities.values().filter(|e| matches!(e.space, SpaceId::Model)).collect();
+        let mut v: Vec<&DbEntity> = self
+            .entities
+            .values()
+            .filter(|e| matches!(e.space, SpaceId::Model))
+            .collect();
         v.sort_by_key(|e| e.draw_order);
         v
     }
 
     /// Entities of a block definition, in draw order.
     pub fn block_entities(&self, id: BlockId) -> Vec<&DbEntity> {
-        let Some(block) = self.blocks.get(&id) else { return Vec::new() };
-        let mut v: Vec<&DbEntity> = block.entities.iter().filter_map(|e| self.entities.get(e)).collect();
+        let Some(block) = self.blocks.get(&id) else {
+            return Vec::new();
+        };
+        let mut v: Vec<&DbEntity> = block
+            .entities
+            .iter()
+            .filter_map(|e| self.entities.get(e))
+            .collect();
         v.sort_by_key(|e| e.draw_order);
         v
     }
@@ -331,8 +352,16 @@ impl Default for BoundsAccumulator {
 impl BoundsAccumulator {
     pub fn new() -> Self {
         BoundsAccumulator {
-            min: Point3 { x: f64::INFINITY, y: f64::INFINITY, z: f64::INFINITY },
-            max: Point3 { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY, z: f64::NEG_INFINITY },
+            min: Point3 {
+                x: f64::INFINITY,
+                y: f64::INFINITY,
+                z: f64::INFINITY,
+            },
+            max: Point3 {
+                x: f64::NEG_INFINITY,
+                y: f64::NEG_INFINITY,
+                z: f64::NEG_INFINITY,
+            },
             any: false,
         }
     }
@@ -341,8 +370,16 @@ impl BoundsAccumulator {
         if !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite() {
             return;
         }
-        self.min = Point3 { x: self.min.x.min(p.x), y: self.min.y.min(p.y), z: self.min.z.min(p.z) };
-        self.max = Point3 { x: self.max.x.max(p.x), y: self.max.y.max(p.y), z: self.max.z.max(p.z) };
+        self.min = Point3 {
+            x: self.min.x.min(p.x),
+            y: self.min.y.min(p.y),
+            z: self.min.z.min(p.z),
+        };
+        self.max = Point3 {
+            x: self.max.x.max(p.x),
+            y: self.max.y.max(p.y),
+            z: self.max.z.max(p.z),
+        };
         self.any = true;
     }
 
@@ -363,7 +400,12 @@ impl BoundsAccumulator {
             SemanticGeometry::Arc { center, radius, .. } => {
                 self.add_sphere(*center, *radius);
             }
-            SemanticGeometry::Ellipse { center, major_axis, ratio, .. } => {
+            SemanticGeometry::Ellipse {
+                center,
+                major_axis,
+                ratio,
+                ..
+            } => {
                 let r = length(*major_axis).max(length(*major_axis) * ratio.abs());
                 self.add_sphere(*center, r);
             }
@@ -381,10 +423,19 @@ impl BoundsAccumulator {
             // Inserts expand through their block instances elsewhere; a bare
             // insert contributes no bounds here.
             SemanticGeometry::Insert { .. } => {}
-            SemanticGeometry::Text { position, height, text, .. } => {
+            SemanticGeometry::Text {
+                position,
+                height,
+                text,
+                ..
+            } => {
                 self.add_point(*position);
                 let h = height.abs().max(1e-9);
-                self.add_point(Point3 { x: position.x + h * text.chars().count() as f64, y: position.y + h, z: position.z });
+                self.add_point(Point3 {
+                    x: position.x + h * text.chars().count() as f64,
+                    y: position.y + h,
+                    z: position.z,
+                });
             }
             SemanticGeometry::Opaque { .. } => {}
         }
@@ -392,8 +443,16 @@ impl BoundsAccumulator {
 
     fn add_sphere(&mut self, center: Point3, radius: f64) {
         let r = radius.abs();
-        self.add_point(Point3 { x: center.x - r, y: center.y - r, z: center.z - r });
-        self.add_point(Point3 { x: center.x + r, y: center.y + r, z: center.z + r });
+        self.add_point(Point3 {
+            x: center.x - r,
+            y: center.y - r,
+            z: center.z - r,
+        });
+        self.add_point(Point3 {
+            x: center.x + r,
+            y: center.y + r,
+            z: center.z + r,
+        });
     }
 
     pub fn finish(&self) -> Option<(Point3, Point3)> {
@@ -493,7 +552,9 @@ impl DrawingDatabaseBuilder {
         }
         if !self.errors.is_empty() {
             let joined = self.errors.join("; ");
-            return Err(CadError::Invariant(format!("import validation failed: {joined}")));
+            return Err(CadError::Invariant(format!(
+                "import validation failed: {joined}"
+            )));
         }
         Ok(self.database)
     }
@@ -510,7 +571,12 @@ pub struct AnnotationDatabase {
 
 impl AnnotationDatabase {
     pub fn new(id: DatabaseId) -> Self {
-        Self { id, revision: Revision(0), annotations: BTreeMap::new(), saved_revision: Revision(0) }
+        Self {
+            id,
+            revision: Revision(0),
+            annotations: BTreeMap::new(),
+            saved_revision: Revision(0),
+        }
     }
 
     pub fn id(&self) -> DatabaseId {
@@ -552,7 +618,11 @@ impl AnnotationDatabase {
         Ok(())
     }
 
-    pub fn begin(&mut self, reason: &str, id: TransactionId) -> CadResult<AnnotationTransaction<'_>> {
+    pub fn begin(
+        &mut self,
+        reason: &str,
+        id: TransactionId,
+    ) -> CadResult<AnnotationTransaction<'_>> {
         AnnotationTransaction::new(self, reason, id)
     }
 
@@ -575,7 +645,9 @@ impl AnnotationDatabase {
                 )));
             }
             if change.is_none() && !self.annotations.contains_key(id) {
-                return Err(CadError::Invariant(format!("annotation {id:?} does not exist")));
+                return Err(CadError::Invariant(format!(
+                    "annotation {id:?} does not exist"
+                )));
             }
         }
 
@@ -630,9 +702,15 @@ pub struct AnnotationTransaction<'a> {
 }
 
 impl<'a> AnnotationTransaction<'a> {
-    fn new(database: &'a mut AnnotationDatabase, reason: &str, transaction: TransactionId) -> CadResult<Self> {
+    fn new(
+        database: &'a mut AnnotationDatabase,
+        reason: &str,
+        transaction: TransactionId,
+    ) -> CadResult<Self> {
         if reason.trim().is_empty() {
-            return Err(CadError::InvalidInput("transaction reason is required".to_string()));
+            return Err(CadError::InvalidInput(
+                "transaction reason is required".to_string(),
+            ));
         }
         Ok(AnnotationTransaction {
             database,
@@ -650,7 +728,9 @@ impl<'a> AnnotationTransaction<'a> {
     pub fn insert_annotation(&mut self, annotation: Annotation) -> CadResult<AnnotationId> {
         let id = annotation.id;
         if self.database.annotations.contains_key(&id) {
-            return Err(CadError::Invariant(format!("annotation {id:?} already exists")));
+            return Err(CadError::Invariant(format!(
+                "annotation {id:?} already exists"
+            )));
         }
         self.staged.insert(id, Some(annotation));
         Ok(id)
@@ -659,7 +739,9 @@ impl<'a> AnnotationTransaction<'a> {
     pub fn update_annotation(&mut self, annotation: Annotation) -> CadResult<()> {
         let id = annotation.id;
         if !self.database.annotations.contains_key(&id) {
-            return Err(CadError::Invariant(format!("annotation {id:?} does not exist")));
+            return Err(CadError::Invariant(format!(
+                "annotation {id:?} does not exist"
+            )));
         }
         self.staged.insert(id, Some(annotation));
         Ok(())
@@ -667,7 +749,9 @@ impl<'a> AnnotationTransaction<'a> {
 
     pub fn delete_annotation(&mut self, id: AnnotationId) -> CadResult<()> {
         if !self.database.annotations.contains_key(&id) {
-            return Err(CadError::Invariant(format!("annotation {id:?} does not exist")));
+            return Err(CadError::Invariant(format!(
+                "annotation {id:?} does not exist"
+            )));
         }
         self.staged.insert(id, None);
         Ok(())
@@ -687,11 +771,19 @@ impl<'a> AnnotationTransaction<'a> {
 }
 
 fn add(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+    Point3 {
+        x: a.x + b.x,
+        y: a.y + b.y,
+        z: a.z + b.z,
+    }
 }
 
 fn sub(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+    Point3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
 }
 
 fn length(v: Point3) -> f64 {
@@ -706,7 +798,11 @@ mod tests {
         Annotation {
             id: AnnotationId(id),
             space: SpaceId::Model,
-            geometry: AnnotationGeometry::Text(Point3 { x: 0.0, y: 0.0, z: 0.0 }),
+            geometry: AnnotationGeometry::Text(Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }),
             text: "note".to_string(),
             style: AnnotationStyle::default(),
             created_unix_ms: 0,
@@ -784,13 +880,26 @@ mod tests {
     fn builder_rejects_dangling_layer_reference() {
         let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
         b.insert_entity(DbEntity {
-            object: DbObject { id: ObjectId(1), type_key: "AcDbLine".into(), revision: Revision(0), source_handle: None },
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbLine".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
             id: EntityId(1),
             layer: LayerId(42),
             space: SpaceId::Model,
             geometry: SemanticGeometry::Line {
-                start: Point3 { x: 0.0, y: 0.0, z: 0.0 },
-                end: Point3 { x: 1.0, y: 0.0, z: 0.0 },
+                start: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
             },
             draw_order: 0,
         })
@@ -801,15 +910,33 @@ mod tests {
     #[test]
     fn builder_accepts_consistent_database_and_computes_bounds() {
         let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
-        b.insert_layer(Layer { id: LayerId(0), name: "0".into(), visible: true }).unwrap();
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
         b.insert_entity(DbEntity {
-            object: DbObject { id: ObjectId(1), type_key: "AcDbLine".into(), revision: Revision(0), source_handle: Some("1A".into()) },
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbLine".into(),
+                revision: Revision(0),
+                source_handle: Some("1A".into()),
+            },
             id: EntityId(1),
             layer: LayerId(0),
             space: SpaceId::Model,
             geometry: SemanticGeometry::Line {
-                start: Point3 { x: 0.0, y: 0.0, z: 0.0 },
-                end: Point3 { x: 3.0, y: 4.0, z: 0.0 },
+                start: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 3.0,
+                    y: 4.0,
+                    z: 0.0,
+                },
             },
             draw_order: 0,
         })
