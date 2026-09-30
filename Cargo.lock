@@ -200,7 +200,6 @@ name = "cad-geometry"
 version = "0.1.0"
 dependencies = [
  "cad-domain",
- "glam",
  "thiserror 2.0.21",
 ]
 

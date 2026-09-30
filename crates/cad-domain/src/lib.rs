@@ -103,3 +103,186 @@ pub struct Mesh {
     pub vertices: Vec<Point3>, pub triangles: Vec<[u32; 3]>, pub normals: Vec<Point3>,
     pub face_sources: Vec<Option<SubElementId>>,
 }
+
+// ---------------------------------------------------------------------------
+// Defaults and helpers.
+//
+// The contract types above are intentionally plain data; these impls provide
+// the neutral defaults the rest of the system builds on. They deliberately do
+// not encode policy (e.g. no unit is assumed to be millimetres).
+// ---------------------------------------------------------------------------
+
+impl Default for TolerancePolicy {
+    fn default() -> Self {
+        TolerancePolicy {
+            // world-space predicate tolerance; scales with coordinate magnitude
+            computation_world: 1e-9,
+            // topology join tolerance (larger than the predicate tolerance)
+            topology_world: 1e-6,
+            // display discretisation budget in logical pixels
+            display_pixels: 0.6,
+            // interaction/snap radius in logical pixels
+            interaction_logical_pixels: 12.0,
+            // decimal places for user-facing numbers
+            formatting_decimals: 3,
+        }
+    }
+}
+
+impl Default for UnitContext {
+    fn default() -> Self {
+        UnitContext {
+            source: Unit::DrawingUnits,
+            display: Unit::DrawingUnits,
+            display_per_source: None,
+            decimal_places: 3,
+        }
+    }
+}
+
+impl UnitContext {
+    /// Unknown units: values are drawing units, never assumed millimetres.
+    pub fn drawing_units() -> Self {
+        Self::default()
+    }
+
+    /// A known unit context where one source unit equals one metre.
+    pub fn from_meter() -> Self {
+        UnitContext {
+            source: Unit::Meter,
+            display: Unit::Meter,
+            display_per_source: Some(1.0),
+            decimal_places: 3,
+        }
+    }
+
+    /// Human-facing unit label.
+    pub fn label(&self) -> &'static str {
+        match self.display {
+            Unit::DrawingUnits => "drawing units",
+            Unit::Millimeter => "mm",
+            Unit::Meter => "m",
+            Unit::Inch => "in",
+            Unit::Foot => "ft",
+        }
+    }
+
+    /// Convert a source length to display units, when the ratio is known.
+    pub fn to_display(&self, source_value: f64) -> Option<f64> {
+        self.display_per_source.map(|r| source_value * r)
+    }
+}
+
+impl Transform3 {
+    pub fn identity() -> Self {
+        let mut m = [[0.0f64; 4]; 4];
+        m[0][0] = 1.0;
+        m[1][1] = 1.0;
+        m[2][2] = 1.0;
+        m[3][3] = 1.0;
+        Transform3 { matrix: m }
+    }
+
+    pub fn translation(t: Point3) -> Self {
+        let mut m = Self::identity().matrix;
+        m[0][3] = t.x;
+        m[1][3] = t.y;
+        m[2][3] = t.z;
+        Transform3 { matrix: m }
+    }
+
+    /// Uniform scale about the origin.
+    pub fn scale(s: f64) -> Self {
+        let mut m = Self::identity().matrix;
+        m[0][0] = s;
+        m[1][1] = s;
+        m[2][2] = s;
+        Transform3 { matrix: m }
+    }
+
+    /// Compose: apply `rhs` first, then `self`.
+    pub fn matrix_mul(&self, rhs: &Transform3) -> Transform3 {
+        let mut out = [[0.0f64; 4]; 4];
+        for (r, row) in out.iter_mut().enumerate() {
+            for (c, cell) in row.iter_mut().enumerate() {
+                let mut acc = 0.0;
+                for k in 0..4 {
+                    acc += self.matrix[r][k] * rhs.matrix[k][c];
+                }
+                *cell = acc;
+            }
+        }
+        Transform3 { matrix: out }
+    }
+
+    pub fn apply_point(&self, p: Point3) -> Point3 {
+        let m = &self.matrix;
+        Point3 {
+            x: m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3],
+            y: m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3],
+            z: m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3],
+        }
+    }
+}
+
+impl Default for Transform3 {
+    fn default() -> Self {
+        Self::identity()
+    }
+}
+
+impl Default for Registration {
+    fn default() -> Self {
+        Registration {
+            type_key: String::new(),
+            version: 1,
+            priority: 0,
+            entity_types: Vec::new(),
+            capabilities: Vec::new(),
+        }
+    }
+}
+
+impl TaskStamp {
+    pub fn new(document: DocumentId, generation: u64) -> Self {
+        TaskStamp {
+            document,
+            generation,
+            object_revision: Revision(0),
+            dependency_version: 0,
+            configuration_version: 0,
+        }
+    }
+}
+
+impl SpaceId {
+    pub fn is_model(&self) -> bool {
+        matches!(self, SpaceId::Model)
+    }
+}
+
+impl DocumentIdentity {
+    /// Short human-facing identity for diagnostics.
+    pub fn short(&self) -> String {
+        match self {
+            DocumentIdentity::Temporary(id) => format!("tmp-{id:032x}"),
+            DocumentIdentity::Sha256(bytes) => {
+                let mut s = String::with_capacity(16);
+                for b in bytes.iter().take(8) {
+                    s.push_str(&format!("{b:02x}"));
+                }
+                s
+            }
+        }
+    }
+}
+
+impl Mesh {
+    pub fn triangle_count(&self) -> usize {
+        self.triangles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.triangles.is_empty()
+    }
+}

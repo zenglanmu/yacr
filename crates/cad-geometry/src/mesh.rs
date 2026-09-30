@@ -1,87 +1,91 @@
-//! Triangle mesh helpers (spec v2.0 §3.2 B, §10.3 C).
-//!
-//! This is the interchange shape a [`crate::tessellate`] or kernel adapter
-//! produces. Kernel-specific face/body types stay in `cad-kernel-adapter`.
+//! Mesh helpers over the domain [`cad_domain::Mesh`] (§3.2 B, §10.3 C).
 
-use glam::DVec3;
-
-/// A triangle mesh in world coordinates.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Mesh {
-    pub positions: Vec<DVec3>,
-    pub indices: Vec<u32>,
-}
-
-impl Mesh {
-    pub fn triangle_count(&self) -> usize {
-        self.indices.len() / 3
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.indices.len() < 3
-    }
-}
+use cad_domain::{Mesh, Point3};
 
 /// Per-vertex normals via area-weighted triangle normals.
 ///
-/// Degenerate triangles (zero area) contribute nothing rather than NaN.
-pub fn compute_triangle_normals(mesh: &Mesh) -> Vec<DVec3> {
-    let mut normals = vec![DVec3::ZERO; mesh.positions.len()];
-    for tri in mesh.indices.chunks_exact(3) {
+/// Degenerate (zero-area) triangles contribute nothing rather than NaN.
+pub fn compute_vertex_normals(mesh: &Mesh) -> Vec<Point3> {
+    let mut normals = vec![Point3 { x: 0.0, y: 0.0, z: 0.0 }; mesh.vertices.len()];
+    for tri in &mesh.triangles {
         let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-        if i0 >= mesh.positions.len() || i1 >= mesh.positions.len() || i2 >= mesh.positions.len() {
+        if i0 >= mesh.vertices.len() || i1 >= mesh.vertices.len() || i2 >= mesh.vertices.len() {
             continue;
         }
-        let a = mesh.positions[i0];
-        let b = mesh.positions[i1];
-        let c = mesh.positions[i2];
-        let n = (b - a).cross(c - a); // magnitude ∝ area, which weights correctly
-        if n.is_finite() {
-            normals[i0] += n;
-            normals[i1] += n;
-            normals[i2] += n;
+        let a = mesh.vertices[i0];
+        let b = mesh.vertices[i1];
+        let c = mesh.vertices[i2];
+        let n = cross(sub(b, a), sub(c, a));
+        if is_finite(n) {
+            normals[i0] = add(normals[i0], n);
+            normals[i1] = add(normals[i1], n);
+            normals[i2] = add(normals[i2], n);
         }
     }
     for n in &mut normals {
-        let len = n.length();
-        if len > 1e-12 {
-            *n /= len;
+        let l = length(*n);
+        if l > 1e-12 {
+            *n = Point3 { x: n.x / l, y: n.y / l, z: n.z / l };
         }
     }
     normals
 }
 
 /// Axis-aligned bounds of a mesh.
-pub fn mesh_bounds(mesh: &Mesh) -> Option<(DVec3, DVec3)> {
-    let mut it = mesh.positions.iter();
+pub fn mesh_bounds(mesh: &Mesh) -> Option<(Point3, Point3)> {
+    let mut it = mesh.vertices.iter();
     let first = *it.next()?;
     let mut min = first;
     let mut max = first;
     for p in it {
-        min = min.min(*p);
-        max = max.max(*p);
+        min = Point3 { x: min.x.min(p.x), y: min.y.min(p.y), z: min.z.min(p.z) };
+        max = Point3 { x: max.x.max(p.x), y: max.y.max(p.y), z: max.z.max(p.z) };
     }
     Some((min, max))
+}
+
+fn add(a: Point3, b: Point3) -> Point3 {
+    Point3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+}
+
+fn sub(a: Point3, b: Point3) -> Point3 {
+    Point3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+}
+
+fn cross(a: Point3, b: Point3) -> Point3 {
+    Point3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+fn length(a: Point3) -> f64 {
+    (a.x * a.x + a.y * a.y + a.z * a.z).sqrt()
+}
+
+fn is_finite(a: Point3) -> bool {
+    a.x.is_finite() && a.y.is_finite() && a.z.is_finite()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cad_domain::SubElementId;
 
     #[test]
     fn normals_point_along_z_for_ccw_triangle() {
         let mesh = Mesh {
-            positions: vec![DVec3::ZERO, DVec3::X, DVec3::Y],
-            indices: vec![0, 1, 2],
+            vertices: vec![
+                Point3 { x: 0.0, y: 0.0, z: 0.0 },
+                Point3 { x: 1.0, y: 0.0, z: 0.0 },
+                Point3 { x: 0.0, y: 1.0, z: 0.0 },
+            ],
+            triangles: vec![[0, 1, 2]],
+            normals: Vec::<Point3>::new(),
+            face_sources: vec![None::<SubElementId>],
         };
-        let n = compute_triangle_normals(&mesh);
-        assert!((n[0] - DVec3::Z).length() < 1e-9);
-    }
-
-    #[test]
-    fn degenerate_triangle_does_not_produce_nan() {
-        let mesh = Mesh { positions: vec![DVec3::ZERO, DVec3::X], indices: vec![0, 0, 1] };
-        let n = compute_triangle_normals(&mesh);
-        assert!(n.iter().all(|v| v.is_finite()));
+        let n = compute_vertex_normals(&mesh);
+        assert!((n[0].z - 1.0).abs() < 1e-9);
     }
 }

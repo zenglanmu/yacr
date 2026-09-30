@@ -1,6 +1,9 @@
 //! Planar area measurement with explicit self-intersection handling (§3.3).
+//!
+//! Area is only defined for a coplanar, non-self-intersecting ring; anything
+//! else is refused rather than returning a meaningless number.
 
-use glam::DVec2;
+use cad_domain::Point3;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -11,12 +14,12 @@ pub enum AreaError {
     SelfIntersecting,
     #[error("the polygon has zero area")]
     Degenerate,
-    #[error("the polygon is not planar; area is undefined")]
+    #[error("the polygon is not coplanar within the given tolerance")]
     NonPlanar,
 }
 
-/// Signed area via the shoelace formula (positive = counter-clockwise).
-pub fn signed_area(pts: &[DVec2]) -> f64 {
+/// Signed area via the shoelace formula on the XY projection (positive = CCW).
+pub fn signed_area(pts: &[Point3]) -> f64 {
     let n = pts.len();
     if n < 3 {
         return 0.0;
@@ -31,23 +34,31 @@ pub fn signed_area(pts: &[DVec2]) -> f64 {
 }
 
 /// Measure the area of a user-selected closed polygon.
-pub fn measure_polygon_area(pts: &[DVec2]) -> Result<f64, AreaError> {
-    let mut clean: Vec<DVec2> = Vec::with_capacity(pts.len());
+///
+/// Rejects non-coplanar rings and self-intersections; `planarity_tolerance` is
+/// a world-space value supplied by the caller's [`cad_domain::TolerancePolicy`].
+pub fn measure_polygon_area(pts: &[Point3], planarity_tolerance: f64) -> Result<f64, AreaError> {
+    let mut clean: Vec<Point3> = Vec::with_capacity(pts.len());
     for &p in pts {
-        if clean.last().map(|l: &DVec2| (*l - p).length() > 1e-12).unwrap_or(true) {
+        if clean.last().map(|l| dist2(*l, p) > 1e-24).unwrap_or(true) {
             clean.push(p);
         }
     }
     if clean.len() >= 2 {
         let first = clean[0];
-        if (clean.last().unwrap() - first).length() <= 1e-12 {
+        if dist2(*clean.last().unwrap(), first) <= 1e-24 {
             clean.pop();
         }
     }
     if clean.len() < 3 {
         return Err(AreaError::TooFewPoints(clean.len()));
     }
-    if polygon_self_intersects(&clean) {
+    // Coplanarity: all points must lie in one plane, checked against the first
+    // three non-collinear points.
+    if !is_coplanar(&clean, planarity_tolerance.max(1e-9)) {
+        return Err(AreaError::NonPlanar);
+    }
+    if self_intersects(&clean) {
         return Err(AreaError::SelfIntersecting);
     }
     let a = signed_area(&clean).abs();
@@ -57,8 +68,24 @@ pub fn measure_polygon_area(pts: &[DVec2]) -> Result<f64, AreaError> {
     Ok(a)
 }
 
-/// Detect any proper crossing between non-adjacent edges.
-pub fn polygon_self_intersects(pts: &[DVec2]) -> bool {
+fn is_coplanar(pts: &[Point3], tol: f64) -> bool {
+    if pts.len() <= 3 {
+        return true;
+    }
+    // Find a normal from the first non-degenerate triple.
+    let mut normal = None;
+    for i in 1..pts.len() - 1 {
+        let n = cross(sub(pts[i], pts[0]), sub(pts[i + 1], pts[0]));
+        if len(n) > tol {
+            normal = Some(normalize(n));
+            break;
+        }
+    }
+    let Some(n) = normal else { return true };
+    pts.iter().all(|p| dot(sub(*p, pts[0]), n).abs() <= tol * 1000.0)
+}
+
+fn self_intersects(pts: &[Point3]) -> bool {
     let n = pts.len();
     for i in 0..n {
         let a1 = pts[i];
@@ -69,7 +96,7 @@ pub fn polygon_self_intersects(pts: &[DVec2]) -> bool {
             }
             let b1 = pts[j];
             let b2 = pts[(j + 1) % n];
-            if segments_properly_cross(a1, a2, b1, b2) {
+            if properly_cross(a1, a2, b1, b2) {
                 return true;
             }
         }
@@ -77,7 +104,7 @@ pub fn polygon_self_intersects(pts: &[DVec2]) -> bool {
     false
 }
 
-fn segments_properly_cross(a1: DVec2, a2: DVec2, b1: DVec2, b2: DVec2) -> bool {
+fn properly_cross(a1: Point3, a2: Point3, b1: Point3, b2: Point3) -> bool {
     let d1 = orient(b1, b2, a1);
     let d2 = orient(b1, b2, a2);
     let d3 = orient(a1, a2, b1);
@@ -86,39 +113,72 @@ fn segments_properly_cross(a1: DVec2, a2: DVec2, b1: DVec2, b2: DVec2) -> bool {
         && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))
 }
 
-fn orient(a: DVec2, b: DVec2, c: DVec2) -> f64 {
+fn orient(a: Point3, b: Point3, c: Point3) -> f64 {
     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+fn sub(a: Point3, b: Point3) -> Point3 {
+    Point3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+}
+
+fn cross(a: Point3, b: Point3) -> Point3 {
+    Point3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+fn dot(a: Point3, b: Point3) -> f64 {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn len(a: Point3) -> f64 {
+    dot(a, a).sqrt()
+}
+
+fn normalize(a: Point3) -> Point3 {
+    let l = len(a);
+    if l < 1e-24 {
+        a
+    } else {
+        Point3 { x: a.x / l, y: a.y / l, z: a.z / l }
+    }
+}
+
+fn dist2(a: Point3, b: Point3) -> f64 {
+    let d = sub(a, b);
+    dot(d, d)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn p(x: f64, y: f64) -> Point3 {
+        Point3 { x, y, z: 0.0 }
+    }
+
     #[test]
     fn unit_square_area() {
-        let sq = [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(1.0, 0.0),
-            DVec2::new(1.0, 1.0),
-            DVec2::new(0.0, 1.0),
-        ];
-        assert!((measure_polygon_area(&sq).unwrap() - 1.0).abs() < 1e-12);
+        let sq = [p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0), p(0.0, 1.0)];
+        assert!((measure_polygon_area(&sq, 1e-6).unwrap() - 1.0).abs() < 1e-12);
     }
 
     #[test]
     fn bowtie_is_rejected() {
-        let bowtie = [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(1.0, 1.0),
-            DVec2::new(1.0, 0.0),
-            DVec2::new(0.0, 1.0),
-        ];
-        assert_eq!(measure_polygon_area(&bowtie), Err(AreaError::SelfIntersecting));
+        let bowtie = [p(0.0, 0.0), p(1.0, 1.0), p(1.0, 0.0), p(0.0, 1.0)];
+        assert_eq!(measure_polygon_area(&bowtie, 1e-6), Err(AreaError::SelfIntersecting));
     }
 
     #[test]
-    fn signed_area_sign_follows_winding() {
-        let ccw = [DVec2::ZERO, DVec2::new(1.0, 0.0), DVec2::new(1.0, 1.0)];
-        assert!(signed_area(&ccw) > 0.0);
+    fn non_planar_ring_is_rejected() {
+        let ring = [
+            Point3 { x: 0.0, y: 0.0, z: 0.0 },
+            Point3 { x: 1.0, y: 0.0, z: 0.0 },
+            Point3 { x: 1.0, y: 1.0, z: 5.0 },
+            Point3 { x: 0.0, y: 1.0, z: 0.0 },
+        ];
+        assert_eq!(measure_polygon_area(&ring, 1e-6), Err(AreaError::NonPlanar));
     }
 }

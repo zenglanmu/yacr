@@ -10,5 +10,4 @@ description = "Curve, transform, tolerance and geometry operations (f64)."
 
 [dependencies]
 cad-domain.workspace = true
-glam.workspace = true
 thiserror.workspace = true
