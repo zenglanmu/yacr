@@ -25,6 +25,10 @@ pub enum FontKind {
     Shx,
     /// Outline font (`.ttf`/`.otf`/`.woff`).
     Mesh,
+    /// A declared type this crate does not recognise (for example `woff2`).
+    ///
+    /// Kept as an explicit variant so a catalog entry cannot be silently
+    /// treated as a usable face: [`plan_fonts_report`] surfaces it instead.
     Other(String),
 }
 
@@ -164,7 +168,10 @@ pub struct PlannedFont {
 /// Resolve the fonts a document asks for into catalog faces and fetch URLs.
 ///
 /// Unknown names are skipped (the host may then fall back), and each file is
-/// planned once even if several names resolve to it.
+/// planned once even if several names resolve to it. This preserves the
+/// original behaviour for hosts that fetch first and rely on the shaping engine
+/// to reject undecodable bytes; use [`plan_fonts_report`] to classify
+/// unresolved and unsupported technologies up front.
 pub fn plan_fonts(catalog: &FontCatalog, requested: &[String], base: &str) -> Vec<PlannedFont> {
     let mut planned: Vec<PlannedFont> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -186,6 +193,89 @@ pub fn plan_fonts(catalog: &FontCatalog, requested: &[String], base: &str) -> Ve
     planned
 }
 
+/// Result of planning fonts, with every request accounted for.
+///
+/// The audit (F10) found `plan_fonts` silently dropped unknown names. This
+/// report keeps the dropped requests plus a structured [`ResourceIssue`] per
+/// name so a missing or unsupported font is an explicit diagnostic.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FontPlanReport {
+    /// Faces that resolved to a catalog entry and can be fetched.
+    pub planned: Vec<PlannedFont>,
+    /// Requests that resolved to no catalog entry.
+    pub unresolved: Vec<String>,
+    /// Requests that resolved but whose declared technology is not supported.
+    pub unsupported: Vec<String>,
+    /// Structured reasons for `unresolved` and `unsupported`.
+    pub issues: Vec<ResourceIssue>,
+}
+
+impl FontPlanReport {
+    /// True when every requested name was planned (no gaps).
+    pub fn is_complete(&self) -> bool {
+        self.unresolved.is_empty() && self.unsupported.is_empty()
+    }
+
+    /// Planned faces only; convenience for callers that ignore the report.
+    pub fn into_planned(self) -> Vec<PlannedFont> {
+        self.planned
+    }
+}
+
+/// Like [`plan_fonts`] but accounts for every requested name.
+///
+/// Names that resolve to nothing become [`ResourceIssue`]s instead of being
+/// dropped, and catalog entries whose declared technology this crate does not
+/// support (for example `woff2`, parsed as [`FontKind::Other`]) are reported as
+/// unsupported rather than planned as if usable.
+pub fn plan_fonts_report(
+    catalog: &FontCatalog,
+    requested: &[String],
+    base: &str,
+) -> FontPlanReport {
+    let mut report = FontPlanReport::default();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for request in requested {
+        let Some(face) = catalog.get(request) else {
+            report.unresolved.push(request.clone());
+            let code = codes::FONT_UNRESOLVED;
+            if !report.issues.iter().any(|issue| {
+                issue.code == code
+                    && issue.key.as_deref() == Some(ResourceKey::sanitize(request).0.as_str())
+            }) {
+                report.issues.push(ResourceIssue::font_unresolved(request));
+            }
+            continue;
+        };
+        if !supported_font_kind(&face.kind) {
+            report.unsupported.push(request.clone());
+            report
+                .issues
+                .push(ResourceIssue::font_unsupported(request, &face.kind));
+            continue;
+        }
+        if !seen.insert(face.file.clone()) {
+            continue;
+        }
+        report.planned.push(PlannedFont {
+            request: request.clone(),
+            file: face.file.clone(),
+            kind: face.kind.clone(),
+            encoding: face.encoding.clone(),
+            url: face_url(base, face),
+        });
+    }
+    report
+}
+
+/// Whether a catalog font technology can be turned into glyphs by core.
+///
+/// Mirrors `cad-representation::text`: sfnt (TTF/OTF/WOFF1) and SHX are
+/// decodable; anything else (for example WOFF2) is not.
+pub fn supported_font_kind(kind: &FontKind) -> bool {
+    matches!(kind, FontKind::Shx | FontKind::Mesh)
+}
+
 /// A logical, platform-independent resource identifier.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ResourceKey(pub String);
@@ -201,12 +291,91 @@ impl ResourceKey {
     }
 }
 
+/// Category of an external resource.
+///
+/// The category is what the capability table and budgets key off; it is
+/// deliberately finer-grained than a raw `ResourceKind` so BigFont and image
+/// data can be reported separately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ResourceKind {
     FontTtf,
     FontShx,
     BigFont,
     Image,
     ExternalReference,
+}
+
+impl ResourceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ResourceKind::FontTtf => "font_ttf",
+            ResourceKind::FontShx => "font_shx",
+            ResourceKind::BigFont => "big_font",
+            ResourceKind::Image => "image",
+            ResourceKind::ExternalReference => "external_reference",
+        }
+    }
+}
+
+/// What this crate can actually do with a resource category.
+///
+/// The audit (F10/F11) found the old model implied every [`ResourceKind`] was
+/// supported because the enum existed. This table states the truth: planning a
+/// fetch URL is not decoding, and BigFont/image/xref are not implemented here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceCapability {
+    pub kind: ResourceKind,
+    /// Whether a logical fetch URL / resolver lookup is available.
+    pub resolve: SupportStatus,
+    /// Whether the bytes can be turned into glyphs/geometry anywhere in core.
+    pub decode: SupportStatus,
+}
+
+/// The capability table for every known resource category.
+///
+/// `resolve` is what `cad-resources` itself provides; `decode` records the
+/// upstream state so a report cannot claim a category is fully supported.
+/// These values must be updated alongside the corresponding implementation,
+/// never pre-emptively.
+pub fn resource_capabilities() -> Vec<ResourceCapability> {
+    vec![
+        ResourceCapability {
+            kind: ResourceKind::FontTtf,
+            resolve: SupportStatus::Verified,
+            // TTF/OTF/WOFF1 outlining exists but has no authorized-font evidence.
+            decode: SupportStatus::Unverified,
+        },
+        ResourceCapability {
+            kind: ResourceKind::FontShx,
+            resolve: SupportStatus::Verified,
+            // SHX shape fonts parse, but bigfont/encoding coverage is untested.
+            decode: SupportStatus::Partial,
+        },
+        ResourceCapability {
+            kind: ResourceKind::BigFont,
+            resolve: SupportStatus::Unverified,
+            // No dedicated big-font handling exists.
+            decode: SupportStatus::NotImplemented,
+        },
+        ResourceCapability {
+            kind: ResourceKind::Image,
+            resolve: SupportStatus::NotImplemented,
+            decode: SupportStatus::NotImplemented,
+        },
+        ResourceCapability {
+            kind: ResourceKind::ExternalReference,
+            resolve: SupportStatus::NotImplemented,
+            decode: SupportStatus::NotImplemented,
+        },
+    ]
+}
+
+/// Look up the capability for one category.
+pub fn resource_capability(kind: ResourceKind) -> ResourceCapability {
+    resource_capabilities()
+        .into_iter()
+        .find(|capability| capability.kind == kind)
+        .expect("resource capability table must cover every ResourceKind")
 }
 
 pub struct ResourceRequest {
@@ -221,11 +390,137 @@ pub struct ResourceData {
     pub license_hint: Option<String>,
 }
 
+/// Stable, machine-readable resource diagnostic codes (schema keys).
+pub mod codes {
+    /// A resource is not available from any resolver.
+    pub const RESOURCE_MISSING: &str = "resource.missing";
+    /// A resource exceeds a configured budget.
+    pub const RESOURCE_OVER_BUDGET: &str = "resource.over_budget";
+    /// A reference nested deeper than the configured recursion limit.
+    pub const RESOURCE_RECURSION_LIMIT: &str = "resource.recursion_limit";
+    /// A requested font name resolved to no catalog entry.
+    pub const FONT_UNRESOLVED: &str = "resource.font_unresolved";
+    /// A referenced font resolved but its technology is not supported.
+    pub const FONT_UNSUPPORTED: &str = "resource.font_unsupported";
+}
+
+/// Which budget a [`ResourceIssue`] exceeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceBudget {
+    /// A single resource's own size cap (`ResourceLimits::max_bytes`).
+    PerResource,
+    /// The running total of granted bytes (`ResourceLimits::total_bytes`).
+    TotalBytes,
+    /// The font-cache byte cap (`ResourceLimits::font_cache_bytes`).
+    FontCache,
+    /// The decoded-image pixel cap (`ResourceLimits::max_image_pixels`).
+    ImagePixels,
+    /// The external-reference recursion depth (`ResourceLimits::max_xref_depth`).
+    XrefDepth,
+}
+
+impl ResourceBudget {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ResourceBudget::PerResource => "per_resource",
+            ResourceBudget::TotalBytes => "total_bytes",
+            ResourceBudget::FontCache => "font_cache_bytes",
+            ResourceBudget::ImagePixels => "image_pixels",
+            ResourceBudget::XrefDepth => "xref_depth",
+        }
+    }
+}
+
+/// A structured, locale-independent reason a resource operation did not fully
+/// succeed. Callers aggregate these instead of a bare `Err` string so an
+/// over-budget drop cannot be mistaken for success.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceIssue {
+    pub code: String,
+    pub kind: Option<ResourceKind>,
+    pub budget: Option<ResourceBudget>,
+    /// The measured value (bytes, pixels or depth) that triggered the issue.
+    pub actual: u64,
+    /// The configured limit that was exceeded.
+    pub limit: u64,
+    /// Logical key of the resource, when known (already sanitized).
+    pub key: Option<String>,
+}
+
+impl ResourceIssue {
+    fn new(code: &str) -> Self {
+        ResourceIssue {
+            code: code.to_string(),
+            kind: None,
+            budget: None,
+            actual: 0,
+            limit: 0,
+            key: None,
+        }
+    }
+
+    pub fn over_budget(
+        key: Option<&str>,
+        kind: Option<ResourceKind>,
+        budget: ResourceBudget,
+        actual: u64,
+        limit: u64,
+    ) -> Self {
+        ResourceIssue {
+            code: codes::RESOURCE_OVER_BUDGET.to_string(),
+            kind,
+            budget: Some(budget),
+            actual,
+            limit,
+            key: key.map(str::to_string),
+        }
+    }
+
+    pub fn recursion_limit(key: Option<&str>, actual: u64, limit: u64) -> Self {
+        ResourceIssue {
+            code: codes::RESOURCE_RECURSION_LIMIT.to_string(),
+            kind: Some(ResourceKind::ExternalReference),
+            budget: Some(ResourceBudget::XrefDepth),
+            actual,
+            limit,
+            key: key.map(str::to_string),
+        }
+    }
+
+    pub fn font_unresolved(request: &str) -> Self {
+        let mut issue = Self::new(codes::FONT_UNRESOLVED);
+        issue.kind = Some(ResourceKind::FontShx);
+        issue.key = Some(ResourceKey::sanitize(request).0);
+        issue
+    }
+
+    pub fn font_unsupported(request: &str, kind: &FontKind) -> Self {
+        let mut issue = Self::new(codes::FONT_UNSUPPORTED);
+        issue.kind = Some(match kind {
+            FontKind::Shx => ResourceKind::FontShx,
+            FontKind::Mesh => ResourceKind::FontTtf,
+            FontKind::Other(_) => ResourceKind::FontTtf,
+        });
+        issue.key = Some(ResourceKey::sanitize(request).0);
+        issue
+    }
+
+    /// A stable machine identifier for the category, when known.
+    pub fn kind_name(&self) -> Option<&'static str> {
+        self.kind.map(ResourceKind::as_str)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceLimits {
     pub max_bytes: usize,
     pub max_image_pixels: u64,
     pub max_xref_depth: usize,
     pub font_cache_bytes: usize,
+    /// Running total of every granted resource; the previous model only capped a
+    /// single payload, so an unbounded number of grants could exhaust memory
+    /// (audit F10).
+    pub total_bytes: usize,
 }
 
 impl Default for ResourceLimits {
@@ -235,7 +530,37 @@ impl Default for ResourceLimits {
             max_image_pixels: 8192 * 8192,
             max_xref_depth: 8,
             font_cache_bytes: 64 * 1024 * 1024,
+            total_bytes: 256 * 1024 * 1024,
         }
+    }
+}
+
+impl ResourceLimits {
+    /// Enforce the image pixel cap for a declared decode size.
+    pub fn check_image_pixels(&self, width: u64, height: u64) -> Result<u64, ResourceIssue> {
+        let pixels = width.saturating_mul(height);
+        if pixels > self.max_image_pixels {
+            return Err(ResourceIssue::over_budget(
+                None,
+                Some(ResourceKind::Image),
+                ResourceBudget::ImagePixels,
+                pixels,
+                self.max_image_pixels,
+            ));
+        }
+        Ok(pixels)
+    }
+
+    /// Enforce the external-reference recursion limit at `depth`.
+    pub fn check_xref_depth(&self, key: Option<&str>, depth: usize) -> Result<(), ResourceIssue> {
+        if depth > self.max_xref_depth {
+            return Err(ResourceIssue::recursion_limit(
+                key,
+                depth as u64,
+                self.max_xref_depth as u64,
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -295,6 +620,7 @@ pub fn is_safe_reference(raw: &str) -> bool {
 pub struct MapResolver {
     entries: HashMap<String, (Arc<[u8]>, String)>,
     limits: ResourceLimits,
+    used_bytes: usize,
 }
 
 impl MapResolver {
@@ -302,30 +628,53 @@ impl MapResolver {
         MapResolver {
             entries: HashMap::new(),
             limits,
+            used_bytes: 0,
         }
     }
 
-    /// Grant a resource. Rejects unsafe keys and oversized payloads.
+    /// Grant a resource. Rejects unsafe keys, oversized payloads and, unlike the
+    /// previous per-payload-only check, anything that pushes the running total
+    /// over [`ResourceLimits::total_bytes`].
+    ///
+    /// Returns a structured [`ResourceIssue`] so an over-budget grant is an
+    /// explicit diagnostic rather than a silent drop.
     pub fn grant(
         &mut self,
         raw_key: &str,
         bytes: Arc<[u8]>,
         license_hint: impl Into<String>,
-    ) -> CadResult<()> {
+    ) -> Result<(), ResourceIssue> {
         if !is_safe_reference(raw_key) {
-            return Err(CadError::ResourceMissing(format!(
-                "resource key '{raw_key}' was rejected by the path policy"
-            )));
+            let mut issue = ResourceIssue::new(codes::RESOURCE_MISSING);
+            issue.key = Some(ResourceKey::sanitize(raw_key).0);
+            return Err(issue);
         }
         if bytes.len() > self.limits.max_bytes {
-            return Err(CadError::ResourceMissing(format!(
-                "resource '{raw_key}' is {} bytes, over the {} byte limit",
-                bytes.len(),
-                self.limits.max_bytes
-            )));
+            return Err(ResourceIssue::over_budget(
+                Some(&ResourceKey::sanitize(raw_key).0),
+                None,
+                ResourceBudget::PerResource,
+                bytes.len() as u64,
+                self.limits.max_bytes as u64,
+            ));
+        }
+        if self.used_bytes.saturating_add(bytes.len()) > self.limits.total_bytes {
+            return Err(ResourceIssue::over_budget(
+                Some(&ResourceKey::sanitize(raw_key).0),
+                None,
+                ResourceBudget::TotalBytes,
+                self.used_bytes.saturating_add(bytes.len()) as u64,
+                self.limits.total_bytes as u64,
+            ));
         }
         let key = ResourceKey::sanitize(raw_key).0;
-        self.entries.insert(key, (bytes, license_hint.into()));
+        if let Some((previous, _)) = self
+            .entries
+            .insert(key, (bytes.clone(), license_hint.into()))
+        {
+            self.used_bytes = self.used_bytes.saturating_sub(previous.len());
+        }
+        self.used_bytes = self.used_bytes.saturating_add(bytes.len());
         Ok(())
     }
 
@@ -335,6 +684,15 @@ impl MapResolver {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// Bytes currently granted against this resolver's total budget.
+    pub fn used_bytes(&self) -> usize {
+        self.used_bytes
+    }
+
+    pub fn limits(&self) -> &ResourceLimits {
+        &self.limits
     }
 }
 
@@ -532,5 +890,145 @@ mod tests {
         assert!(plan[0].url.starts_with(DEFAULT_FONT_BASE_URL));
         assert_eq!(plan[1].file, "simplex.shx");
         assert_eq!(plan[1].kind, FontKind::Shx);
+    }
+
+    #[test]
+    fn grant_enforces_the_running_total_budget() {
+        let limits = ResourceLimits {
+            max_bytes: 1024,
+            total_bytes: 100,
+            ..ResourceLimits::default()
+        };
+        let mut resolver = MapResolver::new(limits);
+        resolver
+            .grant("a.shx", Arc::from(vec![0u8; 60]), "pack")
+            .unwrap();
+        assert_eq!(resolver.used_bytes(), 60);
+        // A second grant that would push the total over 100 is rejected with a
+        // structured over-budget issue, not silently dropped.
+        let issue = resolver
+            .grant("b.shx", Arc::from(vec![0u8; 60]), "pack")
+            .unwrap_err();
+        assert_eq!(issue.code, codes::RESOURCE_OVER_BUDGET);
+        assert_eq!(issue.budget, Some(ResourceBudget::TotalBytes));
+        assert_eq!(issue.actual, 120);
+        assert_eq!(issue.limit, 100);
+        // The rejected grant did not consume budget.
+        assert_eq!(resolver.used_bytes(), 60);
+        // A later grant that fits still succeeds.
+        resolver
+            .grant("c.shx", Arc::from(vec![0u8; 40]), "pack")
+            .unwrap();
+        assert_eq!(resolver.used_bytes(), 100);
+    }
+
+    #[test]
+    fn per_resource_and_pixel_budgets_are_explicit() {
+        let limits = ResourceLimits {
+            max_bytes: 10,
+            max_image_pixels: 100,
+            ..ResourceLimits::default()
+        };
+        let mut resolver = MapResolver::new(limits.clone());
+        let issue = resolver
+            .grant("big.shx", Arc::from(vec![0u8; 11]), "pack")
+            .unwrap_err();
+        assert_eq!(issue.budget, Some(ResourceBudget::PerResource));
+        // Image decoding is capped before allocation.
+        assert!(limits.check_image_pixels(10, 10).is_ok());
+        let issue = limits.check_image_pixels(11, 10).unwrap_err();
+        assert_eq!(issue.budget, Some(ResourceBudget::ImagePixels));
+        assert_eq!(issue.kind, Some(ResourceKind::Image));
+    }
+
+    #[test]
+    fn xref_recursion_limit_is_enforced() {
+        let limits = ResourceLimits {
+            max_xref_depth: 2,
+            ..ResourceLimits::default()
+        };
+        assert!(limits.check_xref_depth(Some("base.dwg"), 2).is_ok());
+        let issue = limits.check_xref_depth(Some("base.dwg"), 3).unwrap_err();
+        assert_eq!(issue.code, codes::RESOURCE_RECURSION_LIMIT);
+        assert_eq!(issue.budget, Some(ResourceBudget::XrefDepth));
+        assert_eq!(issue.actual, 3);
+        assert_eq!(issue.limit, 2);
+    }
+
+    #[test]
+    fn capability_table_does_not_claim_unsupported_categories() {
+        let table = resource_capabilities();
+        // Every category is described exactly once.
+        for kind in [
+            ResourceKind::FontTtf,
+            ResourceKind::FontShx,
+            ResourceKind::BigFont,
+            ResourceKind::Image,
+            ResourceKind::ExternalReference,
+        ] {
+            assert_eq!(
+                table.iter().filter(|c| c.kind == kind).count(),
+                1,
+                "missing capability for {}",
+                kind.as_str()
+            );
+        }
+        // The old model implied every kind was supported. Image and xref are
+        // not implemented and must say so.
+        assert_eq!(
+            resource_capability(ResourceKind::Image).decode,
+            SupportStatus::NotImplemented
+        );
+        assert_eq!(
+            resource_capability(ResourceKind::ExternalReference).resolve,
+            SupportStatus::NotImplemented
+        );
+        assert_eq!(
+            resource_capability(ResourceKind::BigFont).decode,
+            SupportStatus::NotImplemented
+        );
+        // Fonts are resolvable but not yet verified as fully decoded.
+        assert_ne!(
+            resource_capability(ResourceKind::FontTtf).decode,
+            SupportStatus::Verified
+        );
+    }
+
+    #[test]
+    fn font_plan_report_accounts_for_unresolved_and_unsupported() {
+        let catalog = FontCatalog::from_json(CATALOG).unwrap();
+        // Extend the catalog with an unknown-technology entry: it must not be
+        // planned as if it were usable.
+        let catalog_with_woff2 = FontCatalog::from_json(
+            r#"[
+                { "file": "simplex.shx", "name": ["simplex"], "type": "shx" },
+                { "file": "modern.woff2", "name": ["modern"], "type": "woff2" }
+            ]"#,
+        )
+        .unwrap();
+        let requested = vec![
+            "simplex".to_string(),
+            "modern".to_string(),
+            "ghost.ttf".to_string(),
+        ];
+        let report = plan_fonts_report(&catalog_with_woff2, &requested, DEFAULT_FONT_BASE_URL);
+        assert_eq!(report.planned.len(), 1);
+        assert_eq!(report.planned[0].file, "simplex.shx");
+        assert_eq!(report.unresolved, vec!["ghost.ttf".to_string()]);
+        assert_eq!(report.unsupported, vec!["modern".to_string()]);
+        assert!(!report.is_complete());
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == codes::FONT_UNRESOLVED));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == codes::FONT_UNSUPPORTED));
+        // The legacy `plan_fonts` still returns just the planned faces.
+        assert_eq!(
+            plan_fonts(&catalog, &requested, DEFAULT_FONT_BASE_URL).len(),
+            1
+        );
     }
 }
