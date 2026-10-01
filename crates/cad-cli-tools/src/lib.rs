@@ -129,6 +129,8 @@ fn run_scan(controller: &HostController) -> CadResult<serde_json::Value> {
         "schema_version": 1,
         "operation": "scan",
         "entities": document.drawing.entity_count(),
+        "model_entities": document.drawing.model_space().len(),
+        "block_definitions": document.drawing.blocks().count(),
         "layers": document.drawing.layers().count(),
         "bounds": bounds,
         "units": format!("{:?}", document.units.source),
@@ -273,17 +275,25 @@ fn run_build_representation(controller: &HostController) -> CadResult<serde_json
         TolerancePolicy::default(),
         TaskStamp::new(controller.document_id, controller.session.generation),
     );
-    let mut batches = 0usize;
+    let (mut lines, mut meshes, mut texts, mut instances, mut images) = (0usize, 0, 0, 0, 0);
     let mut vertices = 0usize;
     let mut failures: Vec<serde_json::Value> = Vec::new();
     for entity in document.drawing.model_space() {
-        match registry.build(entity, &context) {
+        match registry.build_expanded(&document.drawing, entity, &context) {
             Ok(representation) => {
                 for fragment in &representation.fragments {
-                    if let cad_representation::DisplayPrimitive::Lines(points) = &fragment.primitive
-                    {
-                        batches += 1;
-                        vertices += points.len();
+                    match &fragment.primitive {
+                        cad_representation::DisplayPrimitive::Lines(points) => {
+                            lines += 1;
+                            vertices += points.len();
+                        }
+                        cad_representation::DisplayPrimitive::Mesh(mesh) => {
+                            meshes += 1;
+                            vertices += mesh.vertices.len();
+                        }
+                        cad_representation::DisplayPrimitive::Text { .. } => texts += 1,
+                        cad_representation::DisplayPrimitive::Instance { .. } => instances += 1,
+                        cad_representation::DisplayPrimitive::Image { .. } => images += 1,
                     }
                 }
             }
@@ -293,11 +303,19 @@ fn run_build_representation(controller: &HostController) -> CadResult<serde_json
             })),
         }
     }
+    let primitives = lines + meshes + texts + instances + images;
     Ok(serde_json::json!({
         "schema_version": 1,
         "operation": "build-representation",
-        "primitives": batches,
+        "primitives": primitives,
         "vertices": vertices,
+        "kind_counts": {
+            "lines": lines,
+            "meshes": meshes,
+            "texts": texts,
+            "instances": instances,
+            "images": images,
+        },
         "failures": failures,
     }))
 }

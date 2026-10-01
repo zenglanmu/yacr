@@ -56,7 +56,7 @@ pub fn build_scene(database: &DrawingDatabase, stamp: TaskStamp) -> CadResult<Sc
         removed_chunks: Vec::new(),
     };
     for entity in database.model_space() {
-        let representation = registry.build(entity, &context)?;
+        let representation = registry.build_expanded(database, entity, &context)?;
         let delta = cache.build(&representation, stamp.clone())?;
         combined.added.extend(delta.added);
     }

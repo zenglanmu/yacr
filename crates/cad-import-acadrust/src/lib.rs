@@ -327,7 +327,7 @@ impl<'a> ImporterBuilder<'a> {
     fn read_layouts(&mut self) -> CadResult<()> {
         let mut order = 0u128;
         for block in self.acad.block_records.iter() {
-            if !block.name.starts_with("*Paper_Space") {
+            if !is_paper_space_name(&block.name) {
                 continue;
             }
             let id = LayoutId(order + 1);
@@ -394,7 +394,7 @@ impl<'a> ImporterBuilder<'a> {
     fn read_blocks(&mut self) -> CadResult<()> {
         let mut next = 0u128;
         for block in self.acad.block_records.iter() {
-            if block.name == "*Model_Space" || block.name.starts_with("*Paper_Space") {
+            if is_space_block_name(&block.name) {
                 continue;
             }
             let id = BlockId(next);
@@ -414,9 +414,11 @@ impl<'a> ImporterBuilder<'a> {
         for entity in self.acad.model_space_entities() {
             self.push_entity(entity, SpaceId::Model, model_space);
         }
-        // Block definitions are stored but not drawn as top-level geometry.
+        // Block definitions are stored in block space; they are only drawn when
+        // an INSERT expands them (audit B15). Storing them as model space would
+        // draw the block library at the origin.
         for block in self.acad.block_records.iter() {
-            if block.name == "*Model_Space" || block.name.starts_with("*Paper_Space") {
+            if is_space_block_name(&block.name) {
                 continue;
             }
             let Some(id) = self.block_ids.get(&block.name).copied() else {
@@ -424,7 +426,7 @@ impl<'a> ImporterBuilder<'a> {
             };
             let mut entity_ids = Vec::new();
             for entity in self.acad.entities_in_block(&block.name) {
-                if let Some(e) = self.push_entity(entity, SpaceId::Model, self.model_layout) {
+                if let Some(e) = self.push_entity(entity, SpaceId::Block(id), self.model_layout) {
                     entity_ids.push(e);
                 }
             }
@@ -924,6 +926,20 @@ fn entity_class_name(e: &EntityType) -> String {
 /// A DWG file starts with an `AC10xx` version signature.
 fn looks_like_dwg(bytes: &[u8]) -> bool {
     bytes.len() >= 6 && &bytes[0..2] == b"AC" && bytes[2..6].iter().all(|b| b.is_ascii_digit())
+}
+
+/// True for the model/paper space records rather than a user block.
+///
+/// DWG version differences use mixed case (`*Model_Space`) and upper case
+/// (`*MODEL_SPACE`, `*PAPER_SPACE`); matching only one casing imports the model
+/// space twice (audit: R14 files).
+fn is_space_block_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    upper == "*MODEL_SPACE" || upper.starts_with("*PAPER_SPACE")
+}
+
+fn is_paper_space_name(name: &str) -> bool {
+    name.to_ascii_uppercase().starts_with("*PAPER_SPACE")
 }
 
 fn compute_identity(bytes: &[u8]) -> DocumentIdentity {

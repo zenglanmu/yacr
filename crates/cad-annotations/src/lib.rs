@@ -464,12 +464,16 @@ fn encode_space(space: &SpaceId) -> Value {
     match space {
         SpaceId::Model => json!("Model"),
         SpaceId::Paper(id) => json!({ "Paper": id.0.to_string() }),
+        SpaceId::Block(id) => json!({ "Block": id.0.to_string() }),
     }
 }
 
 fn decode_space(value: Option<&Value>) -> SpaceId {
     match value {
         Some(Value::Object(m)) => {
+            if let Some(block) = m.get("Block").and_then(|v| v.as_str()) {
+                return SpaceId::Block(BlockId(block.parse::<u128>().unwrap_or(0)));
+            }
             let id = m
                 .get("Paper")
                 .and_then(|v| v.as_str())

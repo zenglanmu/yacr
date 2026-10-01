@@ -345,13 +345,45 @@ impl DrawingDatabase {
         v
     }
 
-    /// World bounds of model-space geometry.
+    /// World bounds of model-space geometry, expanding INSERT instances.
     pub fn bounds(&self) -> Option<(Point3, Point3)> {
         let mut acc = BoundsAccumulator::new();
+        let mut stack: Vec<BlockId> = Vec::new();
         for e in self.model_space() {
-            acc.add_geometry(&e.geometry);
+            self.accumulate_bounds(&mut acc, e, &Transform3::identity(), 0, &mut stack);
         }
         acc.finish()
+    }
+
+    /// Recursively fold one model-space entity (and any inserts) into `acc`.
+    ///
+    /// Nesting is bounded and cycles are cut so a malformed block graph cannot
+    /// loop forever; a truncated/cyclic branch simply contributes no bounds.
+    fn accumulate_bounds(
+        &self,
+        acc: &mut BoundsAccumulator,
+        entity: &DbEntity,
+        transform: &Transform3,
+        depth: usize,
+        stack: &mut Vec<BlockId>,
+    ) {
+        if let SemanticGeometry::Insert {
+            block,
+            transform: insert,
+        } = &entity.geometry
+        {
+            if depth >= MAX_INSTANCE_DEPTH || stack.contains(block) {
+                return;
+            }
+            let composed = transform.matrix_mul(insert);
+            stack.push(*block);
+            for child in self.block_entities(*block) {
+                self.accumulate_bounds(acc, child, &composed, depth + 1, stack);
+            }
+            stack.pop();
+        } else {
+            acc.add_geometry_transformed(&entity.geometry, transform);
+        }
     }
 }
 
@@ -403,21 +435,31 @@ impl BoundsAccumulator {
     }
 
     pub fn add_geometry(&mut self, geometry: &SemanticGeometry) {
+        self.add_geometry_transformed(geometry, &Transform3::identity());
+    }
+
+    /// Accumulate bounds of `geometry` after applying `transform`.
+    ///
+    /// Curved bounds are expanded conservatively by the transform's largest
+    /// scale so a rotated/scaled instance still fits the box.
+    pub fn add_geometry_transformed(
+        &mut self,
+        geometry: &SemanticGeometry,
+        transform: &Transform3,
+    ) {
         match geometry {
             SemanticGeometry::Line { start, end } => {
-                self.add_point(*start);
-                self.add_point(*end);
+                self.add_point(transform.apply_point(*start));
+                self.add_point(transform.apply_point(*end));
             }
             SemanticGeometry::Polyline { points, .. } => {
                 for p in points {
-                    self.add_point(*p);
+                    self.add_point(transform.apply_point(*p));
                 }
             }
-            SemanticGeometry::Circle { center, radius, .. } => {
-                self.add_sphere(*center, *radius);
-            }
-            SemanticGeometry::Arc { center, radius, .. } => {
-                self.add_sphere(*center, *radius);
+            SemanticGeometry::Circle { center, radius, .. }
+            | SemanticGeometry::Arc { center, radius, .. } => {
+                self.add_sphere_transformed(*center, *radius, transform);
             }
             SemanticGeometry::Ellipse {
                 center,
@@ -426,21 +468,21 @@ impl BoundsAccumulator {
                 ..
             } => {
                 let r = length(*major_axis).max(length(*major_axis) * ratio.abs());
-                self.add_sphere(*center, r);
+                self.add_sphere_transformed(*center, r, transform);
             }
             SemanticGeometry::Spline { control_points, .. } => {
                 for p in control_points {
-                    self.add_point(*p);
+                    self.add_point(transform.apply_point(*p));
                 }
             }
-            SemanticGeometry::Point(p) => self.add_point(*p),
+            SemanticGeometry::Point(p) => self.add_point(transform.apply_point(*p)),
             SemanticGeometry::Mesh(mesh) => {
                 for p in &mesh.vertices {
-                    self.add_point(*p);
+                    self.add_point(transform.apply_point(*p));
                 }
             }
-            // Inserts expand through their block instances elsewhere; a bare
-            // insert contributes no bounds here.
+            // Inserts are expanded by `DrawingDatabase::bounds`, which owns the
+            // block definitions; a bare insert contributes no bounds here.
             SemanticGeometry::Insert { .. } => {}
             SemanticGeometry::Text {
                 position,
@@ -448,29 +490,31 @@ impl BoundsAccumulator {
                 text,
                 ..
             } => {
-                self.add_point(*position);
-                let h = height.abs().max(1e-9);
+                let p = transform.apply_point(*position);
+                let h = height.abs().max(1e-9) * transform_scale(transform);
+                self.add_point(p);
                 self.add_point(Point3 {
-                    x: position.x + h * text.chars().count() as f64,
-                    y: position.y + h,
-                    z: position.z,
+                    x: p.x + h * text.chars().count() as f64,
+                    y: p.y + h,
+                    z: p.z,
                 });
             }
             SemanticGeometry::Opaque { .. } => {}
         }
     }
 
-    fn add_sphere(&mut self, center: Point3, radius: f64) {
-        let r = radius.abs();
+    fn add_sphere_transformed(&mut self, center: Point3, radius: f64, transform: &Transform3) {
+        let c = transform.apply_point(center);
+        let r = radius.abs() * transform_scale(transform);
         self.add_point(Point3 {
-            x: center.x - r,
-            y: center.y - r,
-            z: center.z - r,
+            x: c.x - r,
+            y: c.y - r,
+            z: c.z - r,
         });
         self.add_point(Point3 {
-            x: center.x + r,
-            y: center.y + r,
-            z: center.z + r,
+            x: c.x + r,
+            y: c.y + r,
+            z: c.z + r,
         });
     }
 
@@ -809,6 +853,22 @@ fn length(v: Point3) -> f64 {
     (v.x * v.x + v.y * v.y + v.z * v.z).sqrt()
 }
 
+/// Maximum INSERT nesting the database will expand while computing bounds.
+pub const MAX_INSTANCE_DEPTH: usize = 32;
+
+/// Conservative upper bound on a transform's linear scale (Frobenius norm of
+/// the 3×3 part), used to grow circular bounds under scale/rotation.
+fn transform_scale(t: &Transform3) -> f64 {
+    let m = &t.matrix;
+    let mut sum = 0.0;
+    for row in m.iter().take(3) {
+        for value in row.iter().take(3) {
+            sum += value * value;
+        }
+    }
+    sum.sqrt().max(1e-12)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -966,6 +1026,96 @@ mod tests {
         assert_eq!(min.x, 0.0);
         assert_eq!(max.x, 3.0);
         assert_eq!(max.y, 4.0);
+    }
+
+    fn point(x: f64, y: f64) -> Point3 {
+        Point3 { x, y, z: 0.0 }
+    }
+
+    fn raw_entity(id: u128, space: SpaceId, geometry: SemanticGeometry) -> DbEntity {
+        DbEntity {
+            object: DbObject {
+                id: ObjectId(id),
+                type_key: "AcDbEntity".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(id),
+            layer: LayerId(0),
+            space,
+            geometry,
+            draw_order: id as i64,
+        }
+    }
+
+    fn insert_at(block: u128, dx: f64) -> SemanticGeometry {
+        SemanticGeometry::Insert {
+            block: BlockId(block),
+            transform: Transform3::translation(point(dx, 0.0)),
+        }
+    }
+
+    #[test]
+    fn block_entities_are_not_model_space_and_inserts_expand_in_bounds() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        // Block 0 owns a unit line; two model inserts place it at x=10 and x=20.
+        b.insert_block(BlockDefinition {
+            id: BlockId(0),
+            entities: vec![EntityId(2)],
+        })
+        .unwrap();
+        b.insert_entity(raw_entity(
+            2,
+            SpaceId::Block(BlockId(0)),
+            SemanticGeometry::Line {
+                start: point(0.0, 0.0),
+                end: point(1.0, 0.0),
+            },
+        ))
+        .unwrap();
+        b.insert_entity(raw_entity(1, SpaceId::Model, insert_at(0, 10.0)))
+            .unwrap();
+        b.insert_entity(raw_entity(3, SpaceId::Model, insert_at(0, 20.0)))
+            .unwrap();
+        let db = b.finish().unwrap();
+
+        // The block definition is not drawn top-level (audit B15).
+        assert_eq!(db.model_space().len(), 2);
+        assert_eq!(db.block_entities(BlockId(0)).len(), 1);
+        // Bounds expand both instances: 10 .. 21.
+        let (min, max) = db.bounds().unwrap();
+        assert_eq!(min.x, 10.0);
+        assert_eq!(max.x, 21.0);
+    }
+
+    #[test]
+    fn cyclic_block_reference_does_not_loop_bounds() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        // Block 0 inserts itself.
+        b.insert_block(BlockDefinition {
+            id: BlockId(0),
+            entities: vec![EntityId(2)],
+        })
+        .unwrap();
+        b.insert_entity(raw_entity(2, SpaceId::Block(BlockId(0)), insert_at(0, 1.0)))
+            .unwrap();
+        b.insert_entity(raw_entity(1, SpaceId::Model, insert_at(0, 0.0)))
+            .unwrap();
+        let db = b.finish().unwrap();
+        // Must terminate; a self-referential block contributes no bounds.
+        assert!(db.bounds().is_none());
     }
 
     #[test]

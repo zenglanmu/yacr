@@ -90,6 +90,9 @@ pub struct Ray3 {
 pub enum SpaceId {
     Model,
     Paper(LayoutId),
+    /// Geometry owned by a block definition. Not drawn directly; it is only
+    /// reached through an `INSERT` (see audit B15).
+    Block(BlockId),
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstancePath(pub Vec<EntityId>);
