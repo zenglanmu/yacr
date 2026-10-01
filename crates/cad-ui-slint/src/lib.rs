@@ -22,6 +22,7 @@ slint::include_modules!();
 
 pub mod bridge;
 pub mod i18n;
+pub mod responsive;
 pub mod status;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
@@ -31,6 +32,7 @@ pub use bridge::{
     IncomingDocument,
 };
 pub use i18n::{Locale, LocaleResolution, Message, MessageCatalog, MessageSource};
+pub use responsive::{Breakpoint, ResponsiveMetrics, MIN_POINTER_TARGET, MIN_TOUCH_TARGET};
 pub use status::{DiagnosticRowUi, DiagnosticsPanelState, ReasonText};
 
 use slint::{ComponentHandle, Image, Weak};
@@ -53,6 +55,16 @@ pub trait CanvasPickMapper: 'static {
     /// `logical` is relative to the CAD content rectangle. Returns `None` when
     /// this host cannot resolve a point yet.
     fn to_world(&self, logical: [f64; 2]) -> Option<Point3>;
+}
+
+/// Receives a paper-space switch chosen in the layout panel (audit F04/U03).
+///
+/// The UI cannot select a space by itself: which layouts are drawable and how a
+/// viewport is clipped lives in the host's representation pipeline. A host
+/// installs this via [`UiAdapter::set_layout_switch_sink`]; until then a click is
+/// reported as unwired, never silently ignored.
+pub trait LayoutSwitchSink: 'static {
+    fn select(&mut self, space: cad_representation::SpaceSelection);
 }
 
 /// Snapshot of the measurement panel state pushed into the shell (audit U03/U04).
@@ -412,6 +424,7 @@ fn apply_chrome(ui: &YacrWindow, messages: &MessageSource) {
     ui.set_annotate_confirm_label(messages.text("tool.confirm", &[]).into());
     ui.set_annotate_cancel_label(messages.text("tool.cancel", &[]).into());
     ui.set_annotation_text_placeholder(messages.text("annotation.text_placeholder", &[]).into());
+    ui.set_annotation_delete_label(messages.text("annotation.delete", &[]).into());
     ui.set_annotation_kind_labels(string_model(&status::annotation_kind_labels(messages)));
 
     // Layer + property panels.
@@ -428,6 +441,36 @@ fn apply_chrome(ui: &YacrWindow, messages: &MessageSource) {
     ui.set_diagnostics_drawer_title(messages.text("diagnostics.title", &[]).into());
     ui.set_diagnostics_close_label(messages.text("diagnostics.close", &[]).into());
     ui.set_diagnostics_empty_label(messages.text("diagnostics.empty", &[]).into());
+
+    // Layout panel chrome (F04/U03).
+    ui.set_layout_panel_label(messages.text("layout.panel", &[]).into());
+    ui.set_layout_model_space_label(messages.text("layout.model_space", &[]).into());
+    ui.set_layout_unsupported_marker(messages.text("layout.unsupported_marker", &[]).into());
+    ui.set_layout_empty_label(messages.text("layout.empty", &[]).into());
+
+    // Responsive chrome (U01): the grouped-bar and drawer entry labels.
+    ui.set_tools_label(messages.text("shell.tools", &[]).into());
+    ui.set_drawer_label(messages.text("shell.drawer", &[]).into());
+    ui.set_nav_label(messages.text("shell.nav", &[]).into());
+    ui.set_view_mode_label(messages.text("shell.mode_view", &[]).into());
+    ui.set_work_mode_label(messages.text("shell.mode_work", &[]).into());
+}
+
+/// Push the derived responsive geometry into the shell (audit U01/U07).
+///
+/// This is the wire that consumes [`UiConfiguration::compact`] and the current
+/// logical viewport instead of leaving compact dead. It writes only geometry
+/// properties, so pushing it never disturbs pushed panel data.
+pub fn apply_responsive(ui: &YacrWindow, logical_size: [f64; 2], compact_config: bool) {
+    let metrics = ResponsiveMetrics::derive(logical_size, compact_config);
+    ui.set_compact_shell(metrics.compact);
+    ui.set_phone_shell(metrics.breakpoint == Breakpoint::Phone);
+    ui.set_control_height(metrics.control_height);
+    ui.set_touch_target(metrics.touch_target);
+    ui.set_side_panel_width(metrics.side_panel_width);
+    ui.set_side_panel_collapsed(metrics.side_panel_collapsed);
+    ui.set_drawer_height(metrics.drawer_height);
+    ui.set_show_floating_nav(metrics.breakpoint.shows_floating_nav());
 }
 
 /// Build a Slint string model from owned labels.
@@ -448,6 +491,11 @@ fn selected_count_label(messages: &MessageSource, count: usize) -> String {
         "properties.selected_count",
         &[("count", &count.to_string())],
     )
+}
+
+/// Localized "N hidden" text for the annotation management panel.
+fn annotation_hidden_label(messages: &MessageSource, count: usize) -> String {
+    messages.text("annotation.hidden_count", &[("count", &count.to_string())])
 }
 
 /// Localized "Renderer backend: X" line for the diagnostics drawer.
@@ -480,10 +528,14 @@ pub struct UiHandle {
     /// Ordered `LayerId`s matching the pushed `layer-rows` model, so a toggle
     /// callback index maps back to the exact id.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
+    /// Ordered `LayoutId`s matching the pushed `layout-rows` model.
+    layout_order: Rc<RefCell<Vec<cad_domain::LayoutId>>>,
     /// Last pushed override/selection counts, so a locale switch can reformat
     /// their labels without the host re-pushing the whole panel.
     layer_override_count: Rc<Cell<i32>>,
     selection_count: Rc<Cell<i32>>,
+    /// Last pushed annotation hidden count, for locale reformatting.
+    annotation_hidden_count: Rc<Cell<i32>>,
 }
 
 impl UiHandle {
@@ -577,6 +629,40 @@ impl UiHandle {
         })
     }
 
+    /// Push the layout (paper-space) list state (audit F04/U03).
+    ///
+    /// Rows come from the database's real layout table via
+    /// [`bridge::layout_descriptors`]; until a host pushes them the panel shows
+    /// its explicit empty state, never a fabricated layout. Also records the
+    /// ordered `LayoutId`s so a later switch callback can map a row index back to
+    /// the exact layout without a lossy cast.
+    pub fn set_layout_state(
+        &self,
+        state: &LayoutPanelState,
+        order: &[cad_domain::LayoutId],
+    ) -> CadResult<()> {
+        *self.layout_order.borrow_mut() = order.to_vec();
+        let rows: Vec<LayoutRow> = state
+            .rows
+            .iter()
+            .map(|row| LayoutRow {
+                id: row.id,
+                name: row.name.clone().into(),
+                supported: row.supported,
+                reason: row.reason.clone().into(),
+                viewport_count: row.viewport_count,
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let active = state.active_index.unwrap_or(-1);
+        let empty = state.empty_label.clone();
+        self.with(|ui| {
+            ui.set_layout_rows(model);
+            ui.set_layout_active_index(active);
+            ui.set_layout_empty_label(empty.into());
+        })
+    }
+
     /// Push the read-only properties panel state (audit F05/U03).
     pub fn set_property_state(&self, state: &PropertyPanelState) -> CadResult<()> {
         let rows: Vec<PropertyRow> = state
@@ -631,11 +717,15 @@ impl UiHandle {
             .collect();
         let model = slint::ModelRc::new(slint::VecModel::from(rows));
         let hidden = state.hidden_count as i32;
+        self.annotation_hidden_count.set(hidden);
         let empty = state.empty_label.clone();
         let step = state.tool_step_label.clone();
+        let messages = self.messages.borrow().clone();
+        let hidden_label = annotation_hidden_label(&messages, state.hidden_count);
         self.with(|ui| {
             ui.set_annotation_rows(model);
             ui.set_annotation_hidden_count(hidden);
+            ui.set_annotation_hidden_label(hidden_label.into());
             ui.set_annotation_empty_label(empty.into());
             ui.set_annotation_tool_active(state.tool_active);
             ui.set_annotation_tool_can_confirm(state.tool_can_confirm);
@@ -663,12 +753,15 @@ impl UiHandle {
         *self.messages.borrow_mut() = messages.clone();
         let override_count = self.layer_override_count.get().max(0) as usize;
         let selection_count = self.selection_count.get().max(0) as usize;
+        let hidden_count = self.annotation_hidden_count.get().max(0) as usize;
         let override_label = layer_override_label(&messages, override_count);
         let selected_label = selected_count_label(&messages, selection_count);
+        let hidden_label = annotation_hidden_label(&messages, hidden_count);
         self.with(|ui| {
             apply_chrome(ui, &messages);
             ui.set_layer_override_label(override_label.into());
             ui.set_property_selected_label(selected_label.into());
+            ui.set_annotation_hidden_label(hidden_label.into());
         })?;
         Ok(resolution)
     }
@@ -724,6 +817,9 @@ pub struct UiAdapter {
     ui: YacrWindow,
     view_input: Rc<RefCell<Option<Rc<dyn ViewInput>>>>,
     pick_mapper: Rc<RefCell<Option<Rc<dyn CanvasPickMapper>>>>,
+    /// Host sink for layout (paper-space) switches (F04); see
+    /// [`LayoutSwitchSink`]. `None` makes the layout click report "unwired".
+    layout_switch: Rc<RefCell<Option<Box<dyn LayoutSwitchSink>>>>,
     /// Kind currently selected in the shell; the Measure button and the canvas
     /// picks both use it so they cannot disagree.
     selected_kind: Rc<Cell<MeasurementToolKind>>,
@@ -740,11 +836,14 @@ pub struct UiAdapter {
     annotation_order: Rc<RefCell<Vec<AnnotationId>>>,
     /// Ordered `LayerId`s matching the pushed `layer-rows` model.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
+    /// Ordered `LayoutId`s matching the pushed `layout-rows` model.
+    layout_order: Rc<RefCell<Vec<cad_domain::LayoutId>>>,
     /// The active catalog, shared with every handle.
     messages: Rc<RefCell<MessageSource>>,
     /// Last pushed counts, mirrored into handles for locale reformatting.
     layer_override_count: Rc<Cell<i32>>,
     selection_count: Rc<Cell<i32>>,
+    annotation_hidden_count: Rc<Cell<i32>>,
 }
 
 /// Build the command a shell callback emits for the configured document.
@@ -791,6 +890,9 @@ impl UiAdapter {
             );
         }
         apply_chrome(&ui, &messages);
+        // Consume the compact config and the initial viewport: the responsive
+        // geometry is derived once here and on every resize (audit U01).
+        apply_responsive(&ui, configuration.logical_size, configuration.compact);
         ui.set_status_label(messages.text("status.scaffold", &[]).into());
         ui.set_work_mode(work_mode);
 
@@ -800,6 +902,8 @@ impl UiAdapter {
         let view_input: Rc<RefCell<Option<Rc<dyn ViewInput>>>> = Rc::new(RefCell::new(None));
         let pick_mapper: Rc<RefCell<Option<Rc<dyn CanvasPickMapper>>>> =
             Rc::new(RefCell::new(None));
+        let layout_switch: Rc<RefCell<Option<Box<dyn LayoutSwitchSink>>>> =
+            Rc::new(RefCell::new(None));
         let selected_kind: Rc<Cell<MeasurementToolKind>> =
             Rc::new(Cell::new(MeasurementToolKind::Distance));
         let measurement_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
@@ -808,9 +912,12 @@ impl UiAdapter {
         let annotation_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
         let annotation_order: Rc<RefCell<Vec<AnnotationId>>> = Rc::new(RefCell::new(Vec::new()));
         let layer_order: Rc<RefCell<Vec<LayerId>>> = Rc::new(RefCell::new(Vec::new()));
+        let layout_order: Rc<RefCell<Vec<cad_domain::LayoutId>>> =
+            Rc::new(RefCell::new(Vec::new()));
         let messages_slot: Rc<RefCell<MessageSource>> = Rc::new(RefCell::new(messages.clone()));
         let layer_override_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
         let selection_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
+        let annotation_hidden_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
 
         {
             let s = shared.clone();
@@ -1153,6 +1260,46 @@ impl UiAdapter {
             });
         }
         {
+            // Layout switch (F04). The panel sends a row index (-1 = model
+            // space); the adapter resolves it to the exact LayoutId from the
+            // pushed order. Until a host installs a switch sink, the click is
+            // reported as unwired in the status line, never silently dropped.
+            let order = layout_order.clone();
+            let report = ui_weak.clone();
+            let messages = messages_slot.clone();
+            let layout_switch = layout_switch.clone();
+            ui.on_layout_selected(move |index| {
+                let space = if index < 0 {
+                    Some(cad_representation::SpaceSelection::Model)
+                } else {
+                    usize::try_from(index)
+                        .ok()
+                        .and_then(|i| order.borrow().get(i).copied())
+                        .map(cad_representation::SpaceSelection::Paper)
+                };
+                match space {
+                    Some(space) => match layout_switch.borrow_mut().as_mut() {
+                        Some(sink) => sink.select(space),
+                        None => {
+                            if let Some(ui) = report.upgrade() {
+                                ui.set_status_label(
+                                    messages.borrow().text("layout.switch_unwired", &[]).into(),
+                                );
+                            }
+                        }
+                    },
+                    None => {
+                        // No such row in the pushed model: report, do not act.
+                        if let Some(ui) = report.upgrade() {
+                            ui.set_status_label(
+                                messages.borrow().text("layout.switch_unwired", &[]).into(),
+                            );
+                        }
+                    }
+                }
+            });
+        }
+        {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_backend_selected(move |name| {
@@ -1237,15 +1384,18 @@ impl UiAdapter {
             ui,
             view_input,
             pick_mapper,
+            layout_switch,
             selected_kind,
             measurement_active,
             selected_annotation_kind,
             annotation_active,
             annotation_order,
             layer_order,
+            layout_order,
             messages: messages_slot,
             layer_override_count,
             selection_count,
+            annotation_hidden_count,
         })
     }
 
@@ -1263,6 +1413,15 @@ impl UiAdapter {
         *self.pick_mapper.borrow_mut() = Some(mapper);
     }
 
+    /// Install the sink that switches model/paper space when the layout panel
+    /// emits `layout-selected` (F04/U03).
+    ///
+    /// Until this is installed, clicking a layout reports "layout switch not
+    /// wired" in the status line instead of silently doing nothing.
+    pub fn set_layout_switch_sink(&self, sink: Box<dyn LayoutSwitchSink>) {
+        *self.layout_switch.borrow_mut() = Some(sink);
+    }
+
     /// A handle for pushing state from the host.
     pub fn handle(&self) -> UiHandle {
         UiHandle {
@@ -1274,13 +1433,39 @@ impl UiAdapter {
             annotation_active: self.annotation_active.clone(),
             annotation_order: self.annotation_order.clone(),
             layer_order: self.layer_order.clone(),
+            layout_order: self.layout_order.clone(),
             layer_override_count: self.layer_override_count.clone(),
             selection_count: self.selection_count.clone(),
+            annotation_hidden_count: self.annotation_hidden_count.clone(),
         }
     }
 
     pub fn window(&self) -> &slint::Window {
         self.ui.window()
+    }
+
+    /// Resize the window so its logical size is `logical_size` at `scale`.
+    ///
+    /// Mirrors the size back into the recorded configuration and lets a host
+    /// that owns the platform surface (Android/web) resize it to the same
+    /// physical pixels, so the CAD frame matches the canvas rectangle (U07).
+    /// Returns the physical size so the caller can log or forward it.
+    pub fn fit_window_to_logical(
+        &mut self,
+        logical_size: [f64; 2],
+        scale: f32,
+    ) -> slint::PhysicalSize {
+        let physical = self.fitted_physical_size(logical_size, scale);
+        self.ui.window().set_size(physical);
+        self.configuration.logical_size = logical_size;
+        physical
+    }
+
+    /// Physical size the window must have to fit `logical_size` at `scale`.
+    fn fitted_physical_size(&self, logical_size: [f64; 2], scale: f32) -> slint::PhysicalSize {
+        let width = (logical_size[0].max(1.0) as f32 * scale).round() as u32;
+        let height = (logical_size[1].max(1.0) as f32 * scale).round() as u32;
+        slint::PhysicalSize::new(width.max(1), height.max(1))
     }
 
     /// The measurement algorithm currently selected in the shell.
@@ -1346,6 +1531,79 @@ mod tests {
         assert!(UI_DEFINITION.contains("confirm-measurement-requested"));
         assert!(UI_DEFINITION.contains("cancel-measurement-requested"));
         assert!(UI_DEFINITION.contains("canvas-pick"));
+    }
+
+    #[test]
+    fn shell_is_responsive_and_consumes_compact_config() {
+        // U01: the arrangement is width-driven, not a single hardcoded row.
+        for property in [
+            "compact-shell",
+            "phone-shell",
+            "control-height",
+            "touch-target",
+            "side-panel-width",
+            "side-panel-collapsed",
+            "drawer-height",
+            "show-floating-nav",
+        ] {
+            assert!(
+                UI_DEFINITION.contains(property),
+                "shell must expose responsive {property}"
+            );
+        }
+        // The three arrangements are all present in one component.
+        assert!(UI_DEFINITION.contains("side-panel-open"));
+        assert!(UI_DEFINITION.contains("tools-open"));
+        // A phone drawer entry and a wide collapsible panel entry exist; the
+        // desktop bar and phone bar are separate branches, not a squash.
+        assert!(UI_DEFINITION.contains("phone-shell && root.tools-open"));
+        assert!(UI_DEFINITION.contains("show-floating-nav"));
+    }
+
+    #[test]
+    fn shell_reaches_every_merged_panel_and_layout_list() {
+        // U03: every already-merged panel is reachable from the shell.
+        for marker in [
+            "layer-rows",
+            "property-rows",
+            "annotation-rows",
+            "diagnostics-rows",
+            "layout-rows",
+            "layout-selected",
+            "layout-empty-label",
+        ] {
+            assert!(
+                UI_DEFINITION.contains(marker),
+                "missing panel marker {marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn layout_rows_and_active_index_are_pushed_faithfully() {
+        let mut state = LayoutPanelState::default();
+        state.rows.push(LayoutRowUi {
+            id: 7,
+            name: "Sheet A".into(),
+            supported: true,
+            reason: String::new(),
+            viewport_count: 2,
+        });
+        state.rows.push(LayoutRowUi {
+            id: 8,
+            name: "Sheet B".into(),
+            supported: false,
+            reason: "unsupported viewport".into(),
+            viewport_count: 1,
+        });
+        state.active_index = Some(1);
+        assert_eq!(state.rows[1].name, "Sheet B");
+        assert!(!state.rows[1].supported);
+        assert_eq!(state.active_index, Some(1));
+
+        // Model space has no active layout row.
+        state.active_index = None;
+        assert_eq!(state.active_index, None);
     }
 
     #[test]
@@ -1549,6 +1807,10 @@ mod tests {
             "layer-panel-label",
             "property-panel-label",
             "diagnostics-drawer-title",
+            "layout-panel-label",
+            "tools-label",
+            "drawer-label",
+            "nav-label",
         ] {
             assert!(
                 UI_DEFINITION.contains(property),
