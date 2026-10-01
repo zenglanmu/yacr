@@ -657,59 +657,46 @@ impl<'a> ImporterBuilder<'a> {
                 },
                 Completeness::Complete,
             ),
-            EntityType::Ellipse(e) => (
-                SemanticGeometry::Ellipse {
-                    center: p3(e.center),
-                    major_axis: p3(e.major_axis),
-                    ratio: e.minor_axis_ratio,
-                    start: e.start_parameter,
-                    sweep: normalize_sweep(e.end_parameter - e.start_parameter),
-                },
-                Completeness::Complete,
-            ),
+            EntityType::Ellipse(e) => ellipse_semantics(e),
             EntityType::Point(p) => (
                 SemanticGeometry::Point(p3(p.location)),
                 Completeness::Complete,
             ),
             EntityType::LwPolyline(pl) => {
-                let points: Vec<Point3> = pl
-                    .vertices
-                    .iter()
-                    .map(|v| Point3 {
-                        x: v.location.x,
-                        y: v.location.y,
-                        z: pl.elevation,
-                    })
-                    .collect();
+                let normal = p3(pl.normal);
+                let points = polyline_ocs_points(
+                    normal,
+                    pl.elevation,
+                    pl.vertices.iter().map(|v| (v.location.x, v.location.y)),
+                );
                 let bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
+                let completeness = polyline_completeness(normal, pl.vertices.len(), &bulges);
                 (
                     SemanticGeometry::Polyline {
                         points,
                         bulges,
                         closed: pl.is_closed,
                     },
-                    Completeness::Complete,
+                    completeness,
                 )
             }
             EntityType::Polyline2D(pl) => {
-                let points: Vec<Point3> = pl
-                    .vertices
-                    .iter()
-                    .map(|v| Point3 {
-                        x: v.location.x,
-                        y: v.location.y,
-                        z: pl.elevation,
-                    })
-                    .collect();
+                let normal = p3(pl.normal);
+                let points = polyline_ocs_points(
+                    normal,
+                    pl.elevation,
+                    pl.vertices.iter().map(|v| (v.location.x, v.location.y)),
+                );
                 let bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
                 let closed = pl.flags.bits() & 1 != 0;
+                let completeness = polyline_completeness(normal, pl.vertices.len(), &bulges);
                 (
                     SemanticGeometry::Polyline {
                         points,
                         bulges,
                         closed,
                     },
-                    Completeness::Complete,
+                    completeness,
                 )
             }
             EntityType::Polyline3D(pl) => {
@@ -766,19 +753,7 @@ impl<'a> ImporterBuilder<'a> {
                     Completeness::Complete,
                 )
             }
-            EntityType::Spline(s) => (
-                SemanticGeometry::Spline {
-                    degree: s.degree.max(1) as u32,
-                    knots: s.knots.clone(),
-                    control_points: s.control_points.iter().map(|p| p3(*p)).collect(),
-                    weights: s.weights.clone(),
-                },
-                if s.weights.is_empty() {
-                    Completeness::Complete
-                } else {
-                    Completeness::Partial(vec!["weighted spline".into()])
-                },
-            ),
+            EntityType::Spline(s) => spline_semantics(s),
             EntityType::Solid(s) => {
                 let m = quad_mesh([
                     p3(s.first_corner),
@@ -1210,6 +1185,117 @@ fn p3(v: acadrust::Vector3) -> Point3 {
         y: v.y,
         z: v.z,
     }
+}
+
+/// The world-Z direction, for the common `(0, 0, 1)` extrusion.
+#[cfg(test)]
+fn world_z() -> Point3 {
+    Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    }
+}
+
+/// True when an extrusion/direction is parallel to the world Z axis.
+///
+/// A zero vector is treated as world Z: acadrust defaults an absent normal to
+/// `UNIT_Z`, and a degenerate normal has no other meaningful plane.
+fn is_world_z(normal: Point3) -> bool {
+    let n = cad_geometry::normalize(normal);
+    n.x.abs() <= 1e-9 && n.y.abs() <= 1e-9
+}
+
+/// Map a 2D OCS (object coordinate system) point to WCS.
+///
+/// A 2D polyline's vertices live in the plane defined by its extrusion
+/// (`normal`); `elevation` offsets the plane along that normal. The AutoCAD
+/// arbitrary-axis algorithm supplies the in-plane axes. The previous importer
+/// ignored the extrusion and used `(x, y, elevation)` for every polyline,
+/// treating a tilted OCS entity as if it were flat on the WCS XY plane.
+fn ocs_to_wcs(normal: Point3, elevation: f64, x: f64, y: f64) -> Point3 {
+    let (ax, ay, az) = arbitrary_axis(normal);
+    cad_geometry::add(
+        cad_geometry::scale(az, elevation),
+        cad_geometry::add(cad_geometry::scale(ax, x), cad_geometry::scale(ay, y)),
+    )
+}
+
+/// Normalise a 2D polyline's OCS vertices to WCS.
+fn polyline_ocs_points(
+    normal: Point3,
+    elevation: f64,
+    vertices: impl IntoIterator<Item = (f64, f64)>,
+) -> Vec<Point3> {
+    if is_world_z(normal) {
+        // Fast/identity path: the common drawing keeps `z = elevation` exactly.
+        return vertices
+            .into_iter()
+            .map(|(x, y)| Point3 { x, y, z: elevation })
+            .collect();
+    }
+    vertices
+        .into_iter()
+        .map(|(x, y)| ocs_to_wcs(normal, elevation, x, y))
+        .collect()
+}
+
+/// Completeness of a 2D polyline whose vertices were mapped to WCS.
+///
+/// A tilted extrusion is exact for straight segments (the vertices carry the
+/// plane). A bulge arc is exact too once the polyline has at least three
+/// points to fix its plane; a two-point tilted bulge has no unique plane and is
+/// reported Partial rather than silently drawn flat.
+fn polyline_completeness(normal: Point3, point_count: usize, bulges: &[f64]) -> Completeness {
+    let has_bulge = bulges.iter().any(|b| b.abs() > 1e-12);
+    if !is_world_z(normal) && has_bulge && point_count < 3 {
+        Completeness::Partial(vec![
+            "tilted extrusion with a two-vertex bulge: the arc plane is ambiguous".into(),
+        ])
+    } else {
+        Completeness::Complete
+    }
+}
+
+/// Convert an ELLIPSE, accounting for its extrusion.
+///
+/// The domain `Ellipse` carries only a major axis and ratio, so its plane is
+/// implicitly parallel to world XY. An ellipse on a tilted OCS plane cannot be
+/// represented exactly and is reported Partial instead of being flattened.
+fn ellipse_semantics(e: &acadrust::entities::Ellipse) -> (SemanticGeometry, Completeness) {
+    let normal = p3(e.normal);
+    let geometry = SemanticGeometry::Ellipse {
+        center: p3(e.center),
+        major_axis: p3(e.major_axis),
+        ratio: e.minor_axis_ratio,
+        start: e.start_parameter,
+        sweep: normalize_sweep(e.end_parameter - e.start_parameter),
+    };
+    let completeness = if is_world_z(normal) {
+        Completeness::Complete
+    } else {
+        Completeness::Partial(vec![
+            "ellipse on a tilted extrusion cannot be encoded exactly; plane approximated by world XY"
+                .into(),
+        ])
+    };
+    (geometry, completeness)
+}
+
+/// Convert a SPLINE, preserving the source's own knots and weights.
+fn spline_semantics(s: &acadrust::entities::Spline) -> (SemanticGeometry, Completeness) {
+    let geometry = SemanticGeometry::Spline {
+        degree: s.degree.max(1) as u32,
+        knots: s.knots.clone(),
+        control_points: s.control_points.iter().map(|p| p3(*p)).collect(),
+        weights: s.weights.clone(),
+    };
+    let completeness = if s.weights.is_empty() {
+        Completeness::Complete
+    } else {
+        Completeness::Partial(vec!["weighted spline".into()])
+    };
+    (geometry, completeness)
 }
 
 fn sub(a: Point3, b: Point3) -> Point3 {
@@ -1732,5 +1818,161 @@ mod tests {
         assert!((directed_sweep(0.0, half, true) - half).abs() < 1e-9);
         // A full turn is kept, not collapsed to zero.
         assert!((directed_sweep(0.0, 0.0, true) - tau).abs() < 1e-9);
+    }
+
+    // ---- B23/B31: OCS normalisation of 2D polylines (importer side) ----
+
+    fn x_axis() -> Point3 {
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    }
+
+    #[test]
+    fn world_z_extrusion_is_left_untouched() {
+        // The common case must stay exactly `(x, y, elevation)`.
+        let pts = polyline_ocs_points(world_z(), 7.0, [(1.0, 2.0), (3.0, 4.0)]);
+        assert_eq!(
+            pts,
+            vec![
+                Point3 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 7.0
+                },
+                Point3 {
+                    x: 3.0,
+                    y: 4.0,
+                    z: 7.0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn non_z_extrusion_is_transformed_to_wcs_not_treated_as_flat() {
+        // Extrusion +X: the AutoCAD arbitrary axis gives ax=+Y, ay=+Z, so an
+        // OCS point (x, y) at elevation e maps to (e, x, y). The old code
+        // returned (x, y, e) and treated the tilted entity as flat.
+        let p = ocs_to_wcs(x_axis(), 5.0, 2.0, 3.0);
+        assert!((p.x - 5.0).abs() < 1e-9, "{p:?}");
+        assert!((p.y - 2.0).abs() < 1e-9, "{p:?}");
+        assert!((p.z - 3.0).abs() < 1e-9, "{p:?}");
+        // The mapped point must lie on the extrusion plane through elevation.
+        assert!(!is_world_z(x_axis()));
+    }
+
+    #[test]
+    fn tilted_lwpolyline_vertices_carry_the_ocs_plane() {
+        // A real acadrust entity, no DWG needed: a two-vertex LWPOLYLINE with
+        // an +X extrusion and elevation 4.
+        let mut pl = acadrust::entities::LwPolyline::from_points(vec![
+            acadrust::types::Vector2::new(1.0, 0.0),
+            acadrust::types::Vector2::new(0.0, 2.0),
+        ]);
+        pl.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+        pl.elevation = 4.0;
+
+        let points = polyline_ocs_points(
+            p3(pl.normal),
+            pl.elevation,
+            pl.vertices.iter().map(|v| (v.location.x, v.location.y)),
+        );
+        // (1,0) -> (4,1,0); (0,2) -> (4,0,2).
+        assert_eq!(
+            points,
+            vec![
+                Point3 {
+                    x: 4.0,
+                    y: 1.0,
+                    z: 0.0
+                },
+                Point3 {
+                    x: 4.0,
+                    y: 0.0,
+                    z: 2.0
+                },
+            ]
+        );
+        // Both vertices share the plane x = elevation; not flat on XY.
+        assert!(points.iter().all(|p| (p.x - 4.0).abs() < 1e-9));
+        assert!(points.iter().any(|p| p.z.abs() > 1e-9));
+    }
+
+    #[test]
+    fn tilted_bulge_completeness_tracks_plane_representability() {
+        // A tilted polyline with >=3 vertices fixes its own plane, so a bulge
+        // is exact and the import is Complete. A two-vertex tilted bulge has no
+        // unique plane and must not claim Complete.
+        assert_eq!(
+            polyline_completeness(x_axis(), 4, &[0.0, 0.0, 0.0, 0.0]),
+            Completeness::Complete
+        );
+        assert_eq!(
+            polyline_completeness(x_axis(), 4, &[0.5, 0.0, 0.0, 0.0]),
+            Completeness::Complete
+        );
+        assert!(matches!(
+            polyline_completeness(x_axis(), 2, &[0.5, 0.0]),
+            Completeness::Partial(_)
+        ));
+        // A world-Z bulge polyline is always fully supported.
+        assert_eq!(
+            polyline_completeness(world_z(), 2, &[0.5, 0.0]),
+            Completeness::Complete
+        );
+    }
+
+    #[test]
+    fn tilted_ellipse_is_partial_but_world_z_is_complete() {
+        let mut e = acadrust::entities::Ellipse::new();
+        e.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+        let (geom, completeness) = ellipse_semantics(&e);
+        assert!(matches!(geom, SemanticGeometry::Ellipse { .. }));
+        assert!(
+            matches!(completeness, Completeness::Partial(_)),
+            "tilted ellipse must not be silently flattened: {completeness:?}"
+        );
+        e.normal = acadrust::types::Vector3::UNIT_Z;
+        assert_eq!(ellipse_semantics(&e).1, Completeness::Complete);
+    }
+
+    // ---- B23: source spline knots and weights survive the importer ----
+
+    #[test]
+    fn source_spline_knots_and_weights_survive_import() {
+        let mut s = acadrust::entities::Spline::new();
+        s.degree = 2;
+        // Explicit non-uniform clamped knots, not the uniform ones acadrust
+        // would fabricate.
+        s.knots = vec![0.0, 0.0, 0.0, 0.3, 0.7, 1.0, 1.0, 1.0];
+        s.control_points = vec![
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(1.0, 2.0, 0.0),
+            acadrust::types::Vector3::new(2.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(3.0, 2.0, 0.0),
+            acadrust::types::Vector3::new(4.0, 0.0, 0.0),
+        ];
+        s.weights = vec![1.0, 3.0, 1.0, 3.0, 1.0];
+
+        let (geometry, completeness) = spline_semantics(&s);
+        match geometry {
+            SemanticGeometry::Spline {
+                degree,
+                knots,
+                control_points,
+                weights,
+            } => {
+                assert_eq!(degree, 2);
+                assert_eq!(knots, s.knots, "source knots must not be uniformised");
+                assert_eq!(weights, s.weights, "source weights must survive");
+                assert_eq!(control_points.len(), 5);
+            }
+            other => panic!("expected spline, got {other:?}"),
+        }
+        // Rational splines are still not tessellated exactly by every backend.
+        assert!(matches!(completeness, Completeness::Partial(_)));
     }
 }

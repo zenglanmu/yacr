@@ -597,6 +597,10 @@ fn polyline_with_bulges(
     if points.is_empty() {
         return Vec::new();
     }
+    // Bulge arcs lie in the polyline's own plane, which need not be world XY
+    // (an OCS/tilted polyline from the importer). Derive that plane from the
+    // vertices so a tilted bulge is not silently flattened (audit B23).
+    let plane_normal = polyline_plane_normal(points);
     let mut out: Vec<Point3> = Vec::with_capacity(points.len() * 4);
     let count = points.len();
     let last = if closed {
@@ -616,20 +620,57 @@ fn polyline_with_bulges(
             }
             out.push(b);
         } else {
-            append_bulge_arc(a, b, bulge, params, &mut out);
+            append_bulge_arc(a, b, bulge, plane_normal, params, &mut out);
         }
     }
     out
 }
 
+/// The best-fit plane normal of a polyline, using Newell's method.
+///
+/// The closing edge is always included so the polygon normal is well defined
+/// even for an open polyline. Falls back to world Z for degenerate input
+/// (fewer than three points, or collinear points).
+fn polyline_plane_normal(points: &[Point3]) -> Point3 {
+    let world_z = Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    };
+    let n = points.len();
+    if n < 3 {
+        return world_z;
+    }
+    let mut acc = Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    for i in 0..n {
+        let a = points[i];
+        let b = points[(i + 1) % n];
+        acc.x += (a.y - b.y) * (a.z + b.z);
+        acc.y += (a.z - b.z) * (a.x + b.x);
+        acc.z += (a.x - b.x) * (a.y + b.y);
+    }
+    if length(acc) < 1e-12 {
+        world_z
+    } else {
+        normalize(acc)
+    }
+}
+
 /// Append the arc described by a bulge (`bulge = tan(theta/4)`).
 ///
 /// The point `a` is always emitted first so the returned polyline is
-/// continuous even when a straight segment precedes this arc (audit B23).
+/// continuous even when a straight segment precedes this arc (audit B23). The
+/// arc is computed in the polyline's own plane (`plane_normal`); world-Z
+/// polylines reduce to the original XY math.
 fn append_bulge_arc(
     a: Point3,
     b: Point3,
     bulge: f64,
+    plane_normal: Point3,
     params: TessellationParams,
     out: &mut Vec<Point3>,
 ) {
@@ -653,36 +694,41 @@ fn append_bulge_arc(
         return;
     }
     let radius_abs = (half_chord * half_chord + sagitta * sagitta) / (2.0 * sagitta.abs());
-    let mid = scale(add(a, b), 0.5);
-    // Work in the XY plane; bulge polylines are planar by definition.
-    let dir = Point3 {
-        x: chord.x / chord_len,
-        y: chord.y / chord_len,
-        z: 0.0,
-    };
-    let left = Point3 {
-        x: -dir.y,
-        y: dir.x,
-        z: 0.0,
-    };
-    let u = if sagitta >= 0.0 {
-        left
+    // Orthonormal in-plane axes; `a` is the 2D origin, the chord is `d2`.
+    let (ax, ay, _) = arbitrary_axis(plane_normal);
+    let d2 = [dot(chord, ax), dot(chord, ay)];
+    let chord2_len = (d2[0] * d2[0] + d2[1] * d2[1]).sqrt();
+    if chord2_len < 1e-12 {
+        // The chord is parallel to the plane normal: no in-plane arc exists.
+        if !ends_at(out, a) {
+            out.push(a);
+        }
+        out.push(b);
+        return;
+    }
+    let dir2 = [d2[0] / chord2_len, d2[1] / chord2_len];
+    let left2 = [-dir2[1], dir2[0]];
+    let u2 = if sagitta >= 0.0 {
+        left2
     } else {
-        scale(left, -1.0)
+        [-left2[0], -left2[1]]
     };
-    let center = sub(mid, scale(u, radius_abs * half.cos()));
-    let start_angle = (a.y - center.y).atan2(a.x - center.x);
+    let mid2 = [d2[0] * 0.5, d2[1] * 0.5];
+    let center2 = [
+        mid2[0] - u2[0] * radius_abs * half.cos(),
+        mid2[1] - u2[1] * radius_abs * half.cos(),
+    ];
+    // `a` is the origin, so its angle is measured against the reflected centre.
+    let start_angle = (-center2[1]).atan2(-center2[0]);
     let n = arc_segments_for_tolerance(radius_abs, theta, params);
     if !ends_at(out, a) {
         out.push(a);
     }
     for i in 1..=n {
         let t = start_angle + theta * (i as f64) / (n as f64);
-        out.push(Point3 {
-            x: center.x + t.cos() * radius_abs,
-            y: center.y + t.sin() * radius_abs,
-            z: a.z,
-        });
+        let px = center2[0] + t.cos() * radius_abs;
+        let py = center2[1] + t.sin() * radius_abs;
+        out.push(add(a, add(scale(ax, px), scale(ay, py))));
     }
     // Snap the final sample exactly onto the arc endpoint so a polyline that
     // closes on itself shares the vertex exactly (audit B23).
