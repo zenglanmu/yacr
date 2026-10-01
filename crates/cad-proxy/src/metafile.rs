@@ -69,6 +69,13 @@ pub fn decode(data: &[u8], limits: DecodeLimits) -> CadResult<Vec<RawRecord<'_>>
                 "proxy record is smaller than its header".into(),
             ));
         }
+        let payload_size = record_size - RECORD_HEADER_SIZE;
+        if payload_size > limits.max_bytes {
+            return Err(CadError::Unsupported(format!(
+                "proxy record payload of {payload_size} bytes exceeds the {} byte limit",
+                limits.max_bytes
+            )));
+        }
         let record_end = offset
             .checked_add(record_size)
             .ok_or_else(|| CadError::CorruptData("proxy record size overflow".into()))?;
