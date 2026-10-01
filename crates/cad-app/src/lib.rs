@@ -14,9 +14,14 @@ use cad_measure::{MeasurementEngine, MeasurementRequest, MeasurementSpace};
 use cad_query::QueryService;
 use std::{collections::BTreeMap, sync::Arc};
 
+pub mod camera;
 pub mod host;
 pub mod measure_tool;
 
+pub use camera::{
+    orthonormal_work_plane, xy_work_plane, Camera, Projection, ProjectionKind, StandardView,
+    ViewBasis,
+};
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,39 +185,18 @@ impl SessionState {
     }
 }
 
-pub enum Projection {
-    Orthographic { scale: f64 },
-    Perspective { vertical_fov_radians: f64 },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StandardView {
-    Top,
-    Bottom,
-    Front,
-    Back,
-    Left,
-    Right,
-    Isometric,
-}
-
 pub enum DisplayStyle {
     Wireframe,
     Shaded,
     ShadedWithEdges,
 }
 
-pub struct Camera {
-    pub eye: Point3,
-    pub target: Point3,
-    pub up: Point3,
-    pub projection: Projection,
-}
-
 pub struct Viewport {
     pub id: ViewportId,
     pub document: DocumentId,
     pub camera: Camera,
+    /// The observation mode; `TwoD` stores the camera to restore on switch-back.
+    pub view_mode: ViewMode2d3d,
     pub work_plane: WorkPlane,
     pub logical_size: [f64; 2],
     pub dpi_scale: f64,
@@ -220,46 +204,46 @@ pub struct Viewport {
     pub style: DisplayStyle,
 }
 
+/// Whether the viewport observes the drawing in 2D (plan) or 3D.
+///
+/// The switch is *lossless*: entering 3D snapshots the exact 2D camera, and a
+/// switch back restores it bit-for-bit rather than re-deriving a top view
+/// (audit F13 "回到 2D"). A fresh viewport starts in 2D.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewMode2d3d {
+    /// Plan view. Carries the camera to restore after a 3D excursion.
+    TwoD { saved: Camera },
+    /// 3D orbit view. Carries the 2D camera captured when the excursion began.
+    ThreeD { saved_2d: Camera },
+}
+
+impl ViewMode2d3d {
+    /// The kind without the saved camera payload.
+    pub fn kind(&self) -> ProjectionKind {
+        match self {
+            ViewMode2d3d::TwoD { .. } => ProjectionKind::TwoD,
+            ViewMode2d3d::ThreeD { .. } => ProjectionKind::ThreeD,
+        }
+    }
+
+    /// The 2D camera that a switch back to plan will restore.
+    pub fn saved_2d_camera(&self) -> Camera {
+        match self {
+            ViewMode2d3d::TwoD { saved } => *saved,
+            ViewMode2d3d::ThreeD { saved_2d } => *saved_2d,
+        }
+    }
+}
+
 impl Viewport {
     pub fn new(id: ViewportId, document: DocumentId, logical_size: [f64; 2]) -> Self {
+        let camera = Camera::top_view_2d();
         Viewport {
             id,
             document,
-            camera: Camera {
-                eye: Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1000.0,
-                },
-                target: Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                up: Point3 {
-                    x: 0.0,
-                    y: 1.0,
-                    z: 0.0,
-                },
-                projection: Projection::Orthographic { scale: 1.0 },
-            },
-            work_plane: WorkPlane {
-                origin: Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                u: Point3 {
-                    x: 1.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                v: Point3 {
-                    x: 0.0,
-                    y: 1.0,
-                    z: 0.0,
-                },
-            },
+            camera,
+            view_mode: ViewMode2d3d::TwoD { saved: camera },
+            work_plane: xy_work_plane(0.0),
             logical_size,
             dpi_scale: 1.0,
             clip: None,
@@ -270,7 +254,7 @@ impl Viewport {
     /// World units per logical pixel in the top-down 2D view.
     pub fn world_per_px(&self) -> f64 {
         match self.camera.projection {
-            Projection::Orthographic { scale } => scale.max(1e-9),
+            Projection::Orthographic { scale } => scale.max(camera::MIN_ORTHO_SCALE),
             Projection::Perspective { .. } => 1.0,
         }
     }
@@ -290,24 +274,35 @@ impl Viewport {
         logical: [f64; 2],
         canvas_logical_size: [f64; 2],
     ) -> Option<Point3> {
-        if !logical[0].is_finite()
-            || !logical[1].is_finite()
-            || !canvas_logical_size[0].is_finite()
-            || !canvas_logical_size[1].is_finite()
-            || canvas_logical_size[0] <= 0.0
-            || canvas_logical_size[1] <= 0.0
-        {
-            return None;
+        self.camera
+            .screen_to_plan_world(logical, canvas_logical_size)
+            .map(|p| Point3 {
+                z: self.work_plane.origin.z,
+                ..p
+            })
+    }
+
+    /// Switch the observation mode, preserving the 2D camera on a round trip.
+    ///
+    /// Entering `ThreeD` snapshots the current 2D camera and promotes the
+    /// projection to perspective. Returning `TwoD` restores the exact camera
+    /// captured on the way in, so the round trip is lossless.
+    pub fn set_view_mode(&mut self, mode: ViewMode2d3d) -> CadResult<()> {
+        match mode {
+            ViewMode2d3d::ThreeD { saved_2d } => {
+                if self.camera.projection.is_orthographic() {
+                    self.camera.projection =
+                        Projection::perspective(camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
+                }
+                self.view_mode = ViewMode2d3d::ThreeD { saved_2d };
+                Ok(())
+            }
+            ViewMode2d3d::TwoD { saved } => {
+                self.camera = saved;
+                self.view_mode = ViewMode2d3d::TwoD { saved };
+                Ok(())
+            }
         }
-        let scale = self.world_per_px();
-        let target = self.camera.target;
-        let dx = (logical[0] - canvas_logical_size[0] * 0.5) * scale;
-        let dy = (logical[1] - canvas_logical_size[1] * 0.5) * scale;
-        Some(Point3 {
-            x: target.x + dx,
-            y: target.y - dy,
-            z: self.work_plane.origin.z,
-        })
     }
 }
 
@@ -332,6 +327,19 @@ pub enum CommandPayload {
     Backend(BackendChoice),
     /// Start (or restart) a measurement tool with an explicit algorithm.
     MeasureTool(MeasurementToolKind),
+    /// Orbit the current view: yaw about world +Z, pitch about the view right
+    /// axis, both in radians. Preserves the eye-target distance (audit F13).
+    Orbit {
+        yaw: f64,
+        pitch: f64,
+    },
+    /// Structured zoom: a positive factor plus the cursor in logical pixels that
+    /// must stay anchored. Distinct from the legacy `Points`-payload zoom that
+    /// takes no cursor.
+    ZoomAt {
+        factor: f64,
+        cursor: [f64; 2],
+    },
 }
 
 pub struct Command {
@@ -463,18 +471,27 @@ impl Application {
             CommandId::Undo => self.undo(&command),
             CommandId::Redo => self.redo(&command),
             CommandId::SwitchProjection => {
+                // Explicit toggle of the projection kind, preserving the target.
+                // 2D/3D mode is updated to stay consistent with the projection.
                 let viewport = self.viewport_mut(&command)?;
-                viewport.camera.projection = match viewport.camera.projection {
-                    Projection::Orthographic { scale } => Projection::Perspective {
-                        vertical_fov_radians: 45f64.to_radians() * scale,
-                    },
-                    Projection::Perspective { .. } => Projection::Orthographic { scale: 1.0 },
-                };
+                match viewport.camera.projection {
+                    Projection::Orthographic { .. } => {
+                        viewport.camera.projection =
+                            Projection::perspective(camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
+                        let saved = viewport.view_mode.saved_2d_camera();
+                        viewport.view_mode = ViewMode2d3d::ThreeD { saved_2d: saved };
+                    }
+                    Projection::Perspective { .. } => {
+                        let saved = viewport.view_mode.saved_2d_camera();
+                        viewport.camera = saved;
+                        viewport.view_mode = ViewMode2d3d::TwoD { saved };
+                    }
+                }
                 Ok(CommandOutcome::none())
             }
             CommandId::StandardView => {
                 if let CommandPayload::StandardView(view) = command.payload {
-                    self.apply_standard_view(&command, view)?;
+                    self.apply_standard_view(session, &command, view)?;
                     Ok(CommandOutcome::none())
                 } else {
                     Err(CadError::InvalidInput(
@@ -484,12 +501,10 @@ impl Application {
             }
             CommandId::ResetView => {
                 let viewport = self.viewport_mut(&command)?;
-                viewport.camera.target = Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                };
-                viewport.camera.projection = Projection::Orthographic { scale: 1.0 };
+                let camera = Camera::top_view_2d();
+                viewport.camera = camera;
+                viewport.view_mode = ViewMode2d3d::TwoD { saved: camera };
+                viewport.work_plane = xy_work_plane(0.0);
                 Ok(CommandOutcome::none())
             }
             CommandId::Pan => self.pan(&command),
@@ -527,9 +542,75 @@ impl Application {
                     ))
                 }
             }
-            CommandId::Switch2d3d => pending("app.command.switch_2d3d"),
-            CommandId::Orbit => pending("app.command.orbit"),
+            CommandId::Switch2d3d => self.switch_2d3d(session, &command),
+            CommandId::Orbit => self.orbit(&command),
         }
+    }
+
+    /// Toggle between the 2D plan view and a 3D perspective view.
+    ///
+    /// Entering 3D promotes the projection to perspective and snapshots the 2D
+    /// camera; returning to 2D restores that camera exactly (audit F13). This is
+    /// pure camera state — no GPU view or depth buffer is involved here.
+    fn switch_2d3d(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let viewport = self.viewport_mut(command)?;
+        let message = match viewport.view_mode.kind() {
+            ProjectionKind::TwoD => {
+                let saved = viewport.camera;
+                viewport.set_view_mode(ViewMode2d3d::ThreeD { saved_2d: saved })?;
+                "已切换到三维视图（透视）"
+            }
+            ProjectionKind::ThreeD => {
+                let saved = viewport.view_mode.saved_2d_camera();
+                viewport.set_view_mode(ViewMode2d3d::TwoD { saved })?;
+                "已回到二维俯视图"
+            }
+        };
+        session.generation = session.generation.saturating_add(1);
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "view.mode".into(),
+                message: message.into(),
+            }],
+            measurement: None,
+        })
+    }
+
+    /// Orbit the current view about its target (spec F13).
+    ///
+    /// Requires an `Orbit { yaw, pitch }` payload; the camera must be in 3D mode
+    /// so an accidental orbit never disturbs the exact 2D view. The near-plane
+    /// guard lives in [`Camera::orbit`].
+    fn orbit(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::Orbit { yaw, pitch } = command.payload else {
+            return Err(CadError::InvalidInput(
+                "Orbit needs a { yaw, pitch } payload in radians".into(),
+            ));
+        };
+        let viewport = self.viewport_mut(command)?;
+        if viewport.view_mode.kind() != ProjectionKind::ThreeD {
+            return Err(CadError::InvalidInput(
+                "Orbit is only defined in the three-dimensional view".into(),
+            ));
+        }
+        viewport.camera.orbit(yaw, pitch)?;
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "view.orbit".into(),
+                message: format!("轨道旋转 yaw={yaw:.4} pitch={pitch:.4}"),
+            }],
+            measurement: None,
+        })
     }
 
     /// Report the resources the open document references (spec F10/F11).
@@ -615,6 +696,9 @@ impl Application {
 
     /// Fit a viewport to the current document bounds. Hosts call this after an
     /// import so the first frame is usable without a synthetic command.
+    ///
+    /// Fitting always returns the viewport to the 2D plan view (audit F13), so a
+    /// fit is a deterministic reset-and-frame, not a 3D manipulation.
     pub fn fit_viewport(
         &mut self,
         session: &mut SessionState,
@@ -638,26 +722,40 @@ impl Application {
         };
         let cx = (min.x + max.x) * 0.5;
         let cy = (min.y + max.y) * 0.5;
-        viewport.camera.target = Point3 {
-            x: cx,
-            y: cy,
-            z: 0.0,
-        };
-        viewport.camera.eye = Point3 {
-            x: cx,
-            y: cy,
-            z: viewport.camera.eye.z,
-        };
         let ex = (max.x - min.x).max(1e-6);
         let ey = (max.y - min.y).max(1e-6);
         let w = viewport.logical_size[0].max(1.0);
         let h = viewport.logical_size[1].max(1.0);
-        let scale = (ex / w).max(ey / h) * 1.05;
-        viewport.camera.projection = Projection::Orthographic { scale };
+        let scale = ((ex / w).max(ey / h) * 1.05).max(camera::MIN_ORTHO_SCALE);
+        let camera = Camera {
+            eye: Point3 {
+                x: cx,
+                y: cy,
+                z: viewport.camera.eye.z,
+            },
+            target: Point3 {
+                x: cx,
+                y: cy,
+                z: 0.0,
+            },
+            up: Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            projection: Projection::Orthographic { scale },
+        };
+        viewport.camera = camera;
+        viewport.view_mode = ViewMode2d3d::TwoD { saved: camera };
         session.generation += 1;
         Ok(())
     }
 
+    /// Pan the view by a world-space delta.
+    ///
+    /// Only the eye and target move; the projection and the orbit frame are
+    /// preserved. The 2D plan pan is the special case where `eye` and `target`
+    /// share an `x/y`, so this works unchanged in 3D.
     fn pan(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Points(points) = &command.payload else {
             return Err(CadError::InvalidInput(
@@ -667,108 +765,131 @@ impl Application {
         let delta = *points
             .first()
             .ok_or_else(|| CadError::InvalidInput("Pan delta missing".into()))?;
+        if !camera::is_finite_point(delta) {
+            return Err(CadError::InvalidInput("Pan delta must be finite".into()));
+        }
         let viewport = self.viewport_mut(command)?;
-        viewport.camera.target = Point3 {
-            x: viewport.camera.target.x - delta.x,
-            y: viewport.camera.target.y - delta.y,
+        // The delta is a screen-plane world offset; shift both eye and target so
+        // the view direction and distance are unchanged (audit F02 large coords).
+        let shift = Point3 {
+            x: -delta.x,
+            y: -delta.y,
             z: 0.0,
         };
-        viewport.camera.eye = Point3 {
-            x: viewport.camera.target.x,
-            y: viewport.camera.target.y,
-            z: viewport.camera.eye.z,
-        };
+        viewport.camera.target = camera::add(viewport.camera.target, shift);
+        viewport.camera.eye = camera::add(viewport.camera.eye, shift);
+        // Keep a saved 2D camera in sync while in plan mode.
+        if let ViewMode2d3d::TwoD { .. } = viewport.view_mode {
+            viewport.view_mode = ViewMode2d3d::TwoD {
+                saved: viewport.camera,
+            };
+        }
         Ok(CommandOutcome::none())
     }
 
+    /// Zoom the view.
+    ///
+    /// Two payloads are accepted for compatibility:
+    /// * [`CommandPayload::ZoomAt`] — a factor plus the logical cursor to anchor
+    ///   (the real zoom-to-cursor path used by both 2D and 3D).
+    /// * [`CommandPayload::Points`] — the legacy factor-only zoom (no cursor),
+    ///   retained for direct callers and the CLI.
     fn zoom(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        let CommandPayload::Points(points) = &command.payload else {
-            return Err(CadError::InvalidInput("Zoom needs a scale factor".into()));
-        };
-        let factor = points
-            .first()
-            .map(|p| p.x)
-            .ok_or_else(|| CadError::InvalidInput("Zoom factor missing".into()))?;
+        match &command.payload {
+            CommandPayload::ZoomAt { factor, cursor } => self.zoom_at(command, *factor, *cursor),
+            CommandPayload::Points(points) => {
+                let factor = points
+                    .first()
+                    .map(|p| p.x)
+                    .ok_or_else(|| CadError::InvalidInput("Zoom factor missing".into()))?;
+                // Centre-of-canvas cursor for the legacy, anchor-free path.
+                let size = self.viewport_mut(command)?.logical_size;
+                self.zoom_at(command, factor, [size[0] * 0.5, size[1] * 0.5])
+            }
+            _ => Err(CadError::InvalidInput(
+                "Zoom needs a factor or a { factor, cursor } payload".into(),
+            )),
+        }
+    }
+
+    /// Apply a zoom factor anchored at a logical cursor in both projections.
+    fn zoom_at(
+        &mut self,
+        command: &Command,
+        factor: f64,
+        cursor: [f64; 2],
+    ) -> CadResult<CommandOutcome> {
         if factor <= 0.0 || !factor.is_finite() {
             return Err(CadError::InvalidInput(
                 "Zoom factor must be positive and finite".into(),
             ));
         }
         let viewport = self.viewport_mut(command)?;
-        if let Projection::Orthographic { scale } = viewport.camera.projection {
-            viewport.camera.projection = Projection::Orthographic {
-                scale: (scale / factor).max(1e-9),
+        let size = viewport.logical_size;
+        viewport.camera.zoom_at(factor, cursor, size)?;
+        if let ViewMode2d3d::TwoD { .. } = viewport.view_mode {
+            viewport.view_mode = ViewMode2d3d::TwoD {
+                saved: viewport.camera,
             };
         }
         Ok(CommandOutcome::none())
     }
 
-    fn apply_standard_view(&mut self, command: &Command, view: StandardView) -> CadResult<()> {
+    /// Apply a named standard view to the current target.
+    ///
+    /// The camera is placed at `target + offset * distance`, where `offset` is
+    /// the standard view's unit eye direction; the distance is taken from the
+    /// current camera (or the drawing's diagonal the first time). The resulting
+    /// basis is right-handed and orthonormal ([`Camera::view_basis`]). The plan
+    /// (top) view returns the viewport to 2D mode with an orthographic
+    /// projection; every other standard view is a 3D view.
+    fn apply_standard_view(
+        &mut self,
+        _session: &mut SessionState,
+        command: &Command,
+        view: StandardView,
+    ) -> CadResult<()> {
         let viewport = self.viewport_mut(command)?;
-        let t = viewport.camera.target;
-        let d = 1000.0;
-        viewport.camera.up = Point3 {
-            x: 0.0,
-            y: 1.0,
-            z: 0.0,
+        let target = viewport.camera.target;
+        let distance = {
+            let d = viewport.camera.distance();
+            if d.is_finite() && d > 1e-6 {
+                d
+            } else {
+                1000.0
+            }
         };
-        match view {
-            StandardView::Top => {
-                viewport.camera.eye = Point3 {
-                    x: t.x,
-                    y: t.y,
-                    z: t.z + d,
-                };
-                viewport.camera.up = Point3 {
-                    x: 0.0,
-                    y: 1.0,
-                    z: 0.0,
-                };
+        let offset = camera::scale3(view.eye_offset(), distance);
+        let eye = camera::add(target, offset);
+        let camera = Camera {
+            eye,
+            target,
+            up: view.up_hint(),
+            projection: viewport.camera.projection,
+        };
+        camera.validate()?;
+        viewport.camera = camera;
+
+        if view.is_plan() {
+            // The plan view is the canonical 2D view: force orthographic and keep
+            // the current scale, then remember the camera for 2D↔3D round trips.
+            let scale = match viewport.camera.projection {
+                Projection::Orthographic { scale } => scale,
+                Projection::Perspective { .. } => camera::DEFAULT_ORTHO_SCALE,
+            };
+            viewport.camera.projection = Projection::Orthographic { scale };
+            viewport.view_mode = ViewMode2d3d::TwoD {
+                saved: viewport.camera,
+            };
+        } else {
+            // A non-plan standard view is a 3D observation.
+            if viewport.camera.projection.is_orthographic() {
+                viewport.camera.projection =
+                    Projection::perspective(camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
             }
-            StandardView::Bottom => {
-                viewport.camera.eye = Point3 {
-                    x: t.x,
-                    y: t.y,
-                    z: t.z - d,
-                }
-            }
-            StandardView::Front => {
-                viewport.camera.eye = Point3 {
-                    x: t.x,
-                    y: t.y - d,
-                    z: t.z,
-                }
-            }
-            StandardView::Back => {
-                viewport.camera.eye = Point3 {
-                    x: t.x,
-                    y: t.y + d,
-                    z: t.z,
-                }
-            }
-            StandardView::Left => {
-                viewport.camera.eye = Point3 {
-                    x: t.x - d,
-                    y: t.y,
-                    z: t.z,
-                }
-            }
-            StandardView::Right => {
-                viewport.camera.eye = Point3 {
-                    x: t.x + d,
-                    y: t.y,
-                    z: t.z,
-                }
-            }
-            StandardView::Isometric => {
-                viewport.camera.eye = Point3 {
-                    x: t.x + d,
-                    y: t.y - d,
-                    z: t.z + d,
-                }
-            }
+            let saved = viewport.view_mode.saved_2d_camera();
+            viewport.view_mode = ViewMode2d3d::ThreeD { saved_2d: saved };
         }
-        viewport.camera.target = t;
         Ok(())
     }
 
@@ -1107,6 +1228,17 @@ pub trait Tool {
 mod tests {
     use super::*;
     use cad_db::{Annotation, AnnotationGeometry, AnnotationStyle, DrawingDatabaseBuilder};
+
+    // Aliases kept local so the tests read without re-importing camera helpers.
+    fn cam_xy_work_plane(z: f64) -> WorkPlane {
+        xy_work_plane(z)
+    }
+    fn cad_app_len(v: Point3) -> f64 {
+        camera::length3(v)
+    }
+    fn cad_app_dot(a: Point3, b: Point3) -> f64 {
+        camera::dot3(a, b)
+    }
 
     fn application_with_document() -> (Application, SessionState) {
         let mut app = Application::new();
@@ -1607,13 +1739,146 @@ mod tests {
     }
 
     #[test]
-    fn switch_2d3d_and_orbit_stay_pending() {
+    fn switch_2d3d_and_orbit_are_real_transitions() {
         let (mut app, mut session) = application_with_document();
-        for id in [CommandId::Switch2d3d, CommandId::Orbit] {
-            assert!(matches!(
-                app.execute(&mut session, command(id, CommandPayload::None)),
-                Err(CadError::NotImplemented(_))
-            ));
-        }
+        // Start in 2D orthographic.
+        let before = app.workspace.viewports[&ViewportId(1)].camera;
+        assert!(before.projection.is_orthographic());
+
+        // Switch to 3D: perspective, still 3D mode.
+        app.execute(
+            &mut session,
+            command(CommandId::Switch2d3d, CommandPayload::None),
+        )
+        .unwrap();
+        let vp = &app.workspace.viewports[&ViewportId(1)];
+        assert!(!vp.camera.projection.is_orthographic());
+        assert_eq!(vp.view_mode.kind(), ProjectionKind::ThreeD);
+
+        // Orbit in 3D succeeds and preserves the eye-target distance.
+        let d = app.workspace.viewports[&ViewportId(1)].camera.distance();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Orbit,
+                CommandPayload::Orbit {
+                    yaw: 0.3,
+                    pitch: 0.2,
+                },
+            ),
+        )
+        .unwrap();
+        let after_orbit = app.workspace.viewports[&ViewportId(1)].camera.distance();
+        assert!((after_orbit - d).abs() < 1e-9);
+
+        // Switch back restores the exact 2D camera.
+        app.execute(
+            &mut session,
+            command(CommandId::Switch2d3d, CommandPayload::None),
+        )
+        .unwrap();
+        let vp = &app.workspace.viewports[&ViewportId(1)];
+        assert_eq!(vp.camera, before);
+        assert_eq!(vp.view_mode.kind(), ProjectionKind::TwoD);
+    }
+
+    #[test]
+    fn orbit_outside_3d_is_rejected_without_changing_the_camera() {
+        let (mut app, mut session) = application_with_document();
+        let before = app.workspace.viewports[&ViewportId(1)].camera;
+        let result = app.execute(
+            &mut session,
+            command(
+                CommandId::Orbit,
+                CommandPayload::Orbit {
+                    yaw: 0.1,
+                    pitch: 0.1,
+                },
+            ),
+        );
+        assert!(matches!(result, Err(CadError::InvalidInput(_))));
+        assert_eq!(app.workspace.viewports[&ViewportId(1)].camera, before);
+    }
+
+    #[test]
+    fn orbit_without_payload_is_rejected() {
+        let (mut app, mut session) = application_with_document();
+        assert!(matches!(
+            app.execute(
+                &mut session,
+                command(CommandId::Orbit, CommandPayload::None)
+            ),
+            Err(CadError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn standard_view_is_a_real_projection_and_plan_returns_to_2d() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::StandardView,
+                CommandPayload::StandardView(StandardView::Front),
+            ),
+        )
+        .unwrap();
+        let vp = &app.workspace.viewports[&ViewportId(1)];
+        assert_eq!(vp.view_mode.kind(), ProjectionKind::ThreeD);
+        let basis = vp.camera.view_basis().unwrap();
+        assert!(basis.is_orthonormal(1e-9));
+
+        // Top (plan) returns to 2D orthographic.
+        app.execute(
+            &mut session,
+            command(
+                CommandId::StandardView,
+                CommandPayload::StandardView(StandardView::Top),
+            ),
+        )
+        .unwrap();
+        let vp = &app.workspace.viewports[&ViewportId(1)];
+        assert_eq!(vp.view_mode.kind(), ProjectionKind::TwoD);
+        assert!(vp.camera.projection.is_orthographic());
+    }
+
+    #[test]
+    fn zoom_at_anchors_the_cursor_in_2d() {
+        let (mut app, mut session) = application_with_document();
+        let cursor = [200.0, 150.0];
+        let size = [800.0, 600.0];
+        let world_before = app.workspace.viewports[&ViewportId(1)]
+            .camera
+            .screen_to_plan_world(cursor, size)
+            .unwrap();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Zoom,
+                CommandPayload::ZoomAt {
+                    factor: 2.0,
+                    cursor,
+                },
+            ),
+        )
+        .unwrap();
+        let world_after = app.workspace.viewports[&ViewportId(1)]
+            .camera
+            .screen_to_plan_world(cursor, size)
+            .unwrap();
+        assert!((world_before.x - world_after.x).abs() < 1e-9);
+        assert!((world_before.y - world_after.y).abs() < 1e-9);
+        // The scale actually changed.
+        assert!(app.workspace.viewports[&ViewportId(1)].world_per_px() < 1.0);
+    }
+
+    #[test]
+    fn work_plane_is_right_handed_and_orthonormal() {
+        let plane = cam_xy_work_plane(0.0);
+        assert!((cad_app_len(plane.u) - 1.0).abs() < 1e-12);
+        assert!((cad_app_len(plane.v) - 1.0).abs() < 1e-12);
+        assert!(cad_app_dot(plane.u, plane.v).abs() < 1e-12);
+        let n = camera::cross(plane.u, plane.v);
+        assert!(n.z > 0.0, "normal points +Z in the plan view");
     }
 }
