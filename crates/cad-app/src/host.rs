@@ -149,6 +149,7 @@ fn class_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Text { .. } => "AcDbText",
         SemanticGeometry::Point(_) => "AcDbPoint",
         SemanticGeometry::Opaque { .. } => "AcDbUnknown",
+        SemanticGeometry::Compound(_) => "AcDbCompound",
     }
 }
 

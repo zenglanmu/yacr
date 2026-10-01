@@ -500,6 +500,11 @@ impl BoundsAccumulator {
                 });
             }
             SemanticGeometry::Opaque { .. } => {}
+            SemanticGeometry::Compound(children) => {
+                for child in children {
+                    self.add_geometry_transformed(child, transform);
+                }
+            }
         }
     }
 

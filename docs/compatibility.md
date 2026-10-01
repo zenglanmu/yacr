@@ -17,7 +17,7 @@
 | SOLID / TRACE / 3DFACE | 实现 | 网格(四边形→三角) | 网格 | 实现 | 不支持 |
 | INSERT / 块 | 实现(定义与实例分离) | 实现 | 实例展开块几何(嵌套有界，保留 InstancePath) | 实现 | 不支持 |
 | TEXT / MTEXT | 实现(保留字体名/字高/旋转) | 实现 | 整形为线段：outline(TTF/OTF/WOFF)+SHX(shapes/unifont/bigfont)，缺失字体走回退链 | 同上 | 不支持 |
-| HATCH | 实现 | 部分(椭圆/样条边界近似) | **不支持**(落 Opaque，无表示) | **不支持** | 不支持 |
+| HATCH | 实现 | 部分(椭圆/样条边界近似) | 边界环 + 实心填充(单环) / 图案线(偶奇扫描) | 经边界(AABB) | 不支持 |
 | DIMENSION | 实现 | 经匿名块引用 | 展开匿名块几何(线/箭头/文字)；无块名时 Partial | 经展开几何(AABB) | 不支持 |
 | MESH / PolyfaceMesh | 部分 | 网格契约 | 网格 | 实现 | 不支持 |
 | 3DSOLID / BODY / REGION / SURFACE (ACIS) | Opaque(未解码) | 交换契约 | 未实现 | 未实现 | 不支持 |

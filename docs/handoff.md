@@ -20,12 +20,13 @@
 块定义入 `SpaceId::Block`）、B20（能力/完整性按可绘性判定）、字体目录与 CDN 来源
 （`docs/fonts.md`）、文字整形（sfnt/WOFF1 + SHX shapes/unifont/bigfont，缺失字体走回退
 链）、TEXT/MTEXT 对齐、TTF kerning、主机接缝（`plan_fonts`、`FontLoader`、
-`CadView::set_fonts`）。核心测试 136 passed / 0 failed；Wasm/Android target、fmt、clippy、
-架构脚本通过；字体相关测试可用 `YACR_TEST_FONT`/`YACR_TEST_SHX` 指向真实字体。
+`CadView::set_fonts`）、DIMENSION（展开匿名块）与 HATCH（边界/实心/图案）。核心测试
+146 passed / 0 failed；Wasm/Android target、fmt、clippy、架构脚本通过；字体相关测试可用
+`YACR_TEST_FONT`/`YACR_TEST_SHX` 指向真实字体。
 
-仍开放：HATCH/DIMENSION/MultiLeader/ACIS/3D 渲染；Web/Android 实际取字体与真机/浏览器运行；
-复杂文字整形与 MTEXT 高级排版；路线图 C 段交互（U01–U12、F01–F12）、D 段（F13–F15）、
-N01 双语、N02 CI 完整层次。`fixtures/manifest` 仍为空（未授权样本不入库）。
+仍开放：MultiLeader/ACIS/3D 渲染；Web/Android 实际取字体与真机/浏览器运行；复杂文字整形
+与 MTEXT 高级排版；路线图 C 段交互（U01–U12、F01–F12）、D 段（F13–F15）、N01 双语、
+N02 CI 完整层次。`fixtures/manifest` 仍为空（未授权样本不入库）。
 
 ## 已定义，但尚需设计审查
 

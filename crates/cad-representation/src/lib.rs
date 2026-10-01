@@ -176,6 +176,30 @@ impl RepresentationProvider for DefaultRepresentationProvider {
         entity: &DbEntity,
         context: &RepresentationContext,
     ) -> CadResult<DisplayRepresentation> {
+        // A compound entity (for example a HATCH) renders as a group; recurse
+        // per child and merge the results in order.
+        if let SemanticGeometry::Compound(children) = &entity.geometry {
+            let mut representation = DisplayRepresentation {
+                fragments: Vec::new(),
+                completeness: Completeness::Complete,
+                diagnostics: Vec::new(),
+            };
+            for child in children {
+                let mut child_entity = entity.clone();
+                child_entity.geometry = child.clone();
+                let child_representation = self.build(&child_entity, context)?;
+                representation
+                    .fragments
+                    .extend(child_representation.fragments);
+                representation
+                    .diagnostics
+                    .extend(child_representation.diagnostics);
+                representation.completeness = representation
+                    .completeness
+                    .combine(child_representation.completeness);
+            }
+            return Ok(representation);
+        }
         let source = SelectionRef {
             document: context.document,
             entity: entity.id,

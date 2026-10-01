@@ -162,10 +162,10 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
 
 | 样本 | entities | model | 块定义 | layers | primitives | 绘制类型 | build_ms | completeness |
 |---|---|---|---|---|---|---|---|---|
-| baseline-sample | 192 | 166 | 9 | 21 | 149 | 86 line + 3 mesh + 60 text | 0.5 | partial（Text/Hatch/Region/Insert…） |
-| canteen | 29212 | 25123 | 108 | 14 | 41917 | 41594 line + 323 text | 978.8 | partial（Text/Hatch/3dSolid…） |
+| baseline-sample | 192 | 166 | 9 | 21 | 1086 | 1021 line + 5 mesh + 60 text | 0.5 | partial（Text/Region/Insert…） |
+| canteen | 29212 | 25123 | 108 | 14 | 43191 | 42749 line + 119 mesh + 323 text | 978.8 | partial（Text/3dSolid…） |
 | lockers | 1834 | 1801 | 3 | 4 | 1829 | 1796 line + 33 text | 8.1 | partial（**仅 AcDbText** 不可绘） |
-| map-of-uae | 137 | 129 | 3 | 6 | 119 | 87 line + 32 text | 2.4 | partial（Text/Hatch/Insert…） |
+| map-of-uae | 137 | 129 | 3 | 6 | 231 | 173 line + 26 mesh + 32 text | 2.4 | partial（Text/Insert…） |
 | patient-chairs | 11884 | 27 | 27 | 3 | 11855 | 11855 line | 42.1 | **complete** |
 
 要点：
@@ -173,10 +173,9 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
 - `patient-chairs`：模型空间只有 27 个 INSERT，展开后 11855 条线段，全部可绘 → `complete`。
 - `lockers`：唯一不可绘项是 `AcDbText`；一旦文字渲染落地即可 `complete`。
 - `canteen`：2.6 MB / 25k 模型实体，展开 108 个块约 979 ms，无失败；缺口是
-  Text/Hatch/Dimension/3dSolid，属已知未支持项。
-- 所有样本都产出 `text` 基元（60/295/33/32 个）；`cad-scene` 会跳过未整形的 `Text`。注入
-  outline 字体后，TrueType 文本被转成线段并绘制，SHX 文本保持不可绘——这正是“渲染效果
-  测试”暴露出的分界。字体来源、`FontEngine` 与 `--font` 用法见 `docs/fonts.md`。
+  Text/3dSolid，属已知未支持项。
+- 所有样本都产出 `text` 基元；`cad-scene` 会跳过未整形的 `Text`。注入 outline/SHX 字体后
+  文本被转成线段并绘制。字体来源、`FontEngine` 与 `--font` 用法见 `docs/fonts.md`。
 - 文字整形实测（`build-representation --font ...`，lines/texts）。注册
   `simplex/txt/romans.shx` + `arial.woff` 后所有文本均整形（SHX 与 outline 均覆盖），
   图纸引用了未注册字体（如 canteen 的 GOST）时靠回退链替代：
@@ -185,15 +184,18 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
   |---|---|---|---|
   | AutoCAD_2000 | 19 / 11 | 55 / 0 | SHX |
   | AutoCAD_2013 | 0 / 3 | 30 / 0 | outline |
-  | baseline-sample | 86 / 60 | 2363 / 0 | outline |
+  | baseline-sample | 1021 / 60 | 3298 / 0 | outline |
   | lockers | 1796 / 33 | 2747 / 0 | outline |
-  | map-of-uae | 87 / 32 | 459 / 0 | outline |
+  | map-of-uae | 173 / 32 | 545 / 0 | outline |
   | korean-DBCS-hangul | 2 / 3 | 96 / 0 | 回退 |
-  | canteen | 41594 / 323 | 43809 / 0 | GOST SHX 未注册，靠回退 |
+  | canteen | 42749 / 323 | 44964 / 0 | GOST SHX 未注册，靠回退 |
 
-- 文字整形见上表；**DIMENSION** 现展开其匿名块（`*D...`）的线/箭头/文字，`canteen` 的
-  28 处标注带来 +224 线段 / +28 文字（`41594 line + 323 text`），注入字体后文字归零。
-  无块名或块缺失时记 `Partial`，不伪造几何。
+- **DIMENSION** 现展开其匿名块（`*D...`）的线/箭头/文字，`canteen` 的 28 处标注带来
+  +224 线段 / +28 文字；无块名或块缺失时记 `Partial`，不伪造几何。
+- **HATCH** 现渲染：边界环恒绘制；单环实心填充经简化后耳切三角化；图案填充按偶奇扫描线
+  生成图案线（含 dash 与双线）；多环实心/渐变记 `Partial`（只画边界），超过
+  `MAX_FILL_POINTS` 的复杂单环也记 `Partial` 而不做三次方裁剪。`baseline` 86→1021 线
+  +5 网格、`map-of-uae` 87→173 线 +26 网格、`canteen` +1155 线 +119 网格。
 
 ## 未执行（明确标注）
 

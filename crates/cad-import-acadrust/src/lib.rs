@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use acadrust::entities::EntityCommon;
 use acadrust::entities::{
-    AttachmentPoint, DimensionBase, TextHorizontalAlignment, TextVerticalAlignment,
+    AttachmentPoint, BoundaryEdge, DimensionBase, Hatch, TextHorizontalAlignment,
+    TextVerticalAlignment,
 };
 use acadrust::{DwgReadOptions, DwgReader, EntityType, ReadStats};
 use cad_db::{
@@ -18,6 +19,7 @@ use cad_db::{
     PaperViewport, Style,
 };
 use cad_domain::*;
+use cad_geometry::{arbitrary_axis, tessellate_bspline, PatternLine, TessellationParams};
 use cad_proxy::{DecodeLimits, ProxyPlayer, ProxySource};
 
 /// Bounds applied to an untrusted drawing.
@@ -808,6 +810,7 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::Extended(x) if x.class_name() == "ACAD_PROXY_ENTITY" => {
                 self.proxy_geometry(x.class_name(), common, None)
             }
+            EntityType::Hatch(h) => self.hatch_geometry(h),
             EntityType::Dimension(d) => {
                 // A dimension's visible geometry lives in an anonymous block
                 // (`*D...`); expand it like an insert instead of dropping it.
@@ -938,6 +941,126 @@ impl<'a> ImporterBuilder<'a> {
             .unwrap_or(BlockId(u128::MAX))
     }
 
+    /// Convert a HATCH into a compound of boundary loops plus a solid fill or
+    /// pattern lines. Boundaries are always emitted; fills that cannot be
+    /// generated are reported as Partial rather than faked.
+    fn hatch_geometry(&self, h: &Hatch) -> (SemanticGeometry, Completeness) {
+        let normal = p3(h.normal);
+        let (ux, uy, un) = arbitrary_axis(normal);
+        let origin = cad_geometry::scale(un, h.elevation);
+        let to_world = |p: [f64; 2]| {
+            cad_geometry::add(
+                origin,
+                cad_geometry::add(cad_geometry::scale(ux, p[0]), cad_geometry::scale(uy, p[1])),
+            )
+        };
+        let params = TessellationParams {
+            tolerance: hatch_tolerance(h),
+            ..TessellationParams::default()
+        };
+        let mut loops: Vec<Vec<[f64; 2]>> = Vec::new();
+        let mut children: Vec<SemanticGeometry> = Vec::new();
+        for path in &h.paths {
+            let mut points: Vec<[f64; 2]> = Vec::new();
+            for edge in &path.edges {
+                append_boundary_edge(edge, &mut points, &params);
+            }
+            dedup_loop(&mut points);
+            if points.len() < 3 {
+                continue;
+            }
+            children.push(SemanticGeometry::Polyline {
+                points: points.iter().map(|p| to_world(*p)).collect(),
+                bulges: Vec::new(),
+                closed: true,
+            });
+            loops.push(points);
+        }
+        if loops.is_empty() {
+            return (
+                SemanticGeometry::Opaque {
+                    type_key: "AcDbHatch".into(),
+                    version: 1,
+                    payload: Vec::new(),
+                },
+                Completeness::Partial(vec!["hatch has no usable boundary".into()]),
+            );
+        }
+        let mut completeness = Completeness::Complete;
+        let solid = h.is_solid || h.pattern.name.eq_ignore_ascii_case("SOLID");
+        if solid {
+            if loops.len() == 1 {
+                // Simplify tessellated curves before filling (ear clipping is
+                // cubic in the worst case).
+                let loop2 = &loops[0];
+                let (min, max) = loop2.iter().fold(
+                    ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]),
+                    |(mut lo, mut hi), p| {
+                        lo[0] = lo[0].min(p[0]);
+                        lo[1] = lo[1].min(p[1]);
+                        hi[0] = hi[0].max(p[0]);
+                        hi[1] = hi[1].max(p[1]);
+                        (lo, hi)
+                    },
+                );
+                let diagonal = ((max[0] - min[0]).powi(2) + (max[1] - min[1]).powi(2)).sqrt();
+                let tolerance = (diagonal * 1e-3).max(1e-9);
+                let mut closed = loop2.clone();
+                closed.push(closed[0]);
+                let mut simplified = cad_geometry::simplify(&closed, tolerance);
+                if simplified.len() > 1 && simplified.last() == simplified.first() {
+                    simplified.pop();
+                }
+                if simplified.len() > cad_geometry::MAX_FILL_POINTS {
+                    completeness = Completeness::Partial(vec![
+                        "solid hatch boundary is too complex to fill".into(),
+                    ]);
+                } else {
+                    let triangles = cad_geometry::triangulate(&simplified);
+                    if triangles.is_empty() {
+                        completeness = Completeness::Partial(vec![
+                            "solid hatch boundary could not be triangulated".into(),
+                        ]);
+                    } else {
+                        let vertices: Vec<Point3> =
+                            simplified.iter().map(|p| to_world(*p)).collect();
+                        let normals = vec![un; vertices.len()];
+                        children.push(SemanticGeometry::Mesh(Mesh {
+                            vertices,
+                            triangles,
+                            normals,
+                            face_sources: Vec::new(),
+                        }));
+                    }
+                }
+            } else {
+                completeness = Completeness::Partial(vec![
+                    "solid hatch islands are outlined but not filled".into(),
+                ]);
+            }
+        } else if h.gradient_color.enabled {
+            completeness =
+                Completeness::Partial(vec!["gradient hatch renders its boundary only".into()]);
+        } else {
+            let families = pattern_families(h);
+            if families.is_empty() {
+                completeness =
+                    Completeness::Partial(vec!["hatch pattern has no line families".into()]);
+            } else {
+                for line in cad_geometry::pattern_polylines(&loops, &families) {
+                    if line.len() >= 2 {
+                        children.push(SemanticGeometry::Polyline {
+                            points: line.iter().map(|p| to_world(*p)).collect(),
+                            bulges: Vec::new(),
+                            closed: false,
+                        });
+                    }
+                }
+            }
+        }
+        (SemanticGeometry::Compound(children), completeness)
+    }
+
     fn note_capability(
         &mut self,
         class_name: &str,
@@ -985,15 +1108,25 @@ impl<'a> ImporterBuilder<'a> {
 fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, SupportStatus) {
     match geometry {
         SemanticGeometry::Opaque { .. } => (SupportStatus::Unsupported, SupportStatus::Unsupported),
-        // Outline fonts (TTF/OTF/WOFF) can be shaped once the host supplies
-        // them; SHX and unknown fonts have no decoder yet.
+        // Outline fonts (TTF/OTF/WOFF) and SHX shape fonts can be shaped once
+        // the host supplies them; an unknown/absent font has no decoder.
         SemanticGeometry::Text { font, .. } => match font.as_deref().map(font_extension) {
-            Some(ext) if ext == "ttf" || ext == "otf" || ext == "woff" => {
+            Some(ext) if matches!(ext.as_str(), "ttf" | "otf" | "woff" | "shx") => {
                 (SupportStatus::Unverified, SupportStatus::Unverified)
             }
             _ => (SupportStatus::Unsupported, SupportStatus::Unsupported),
         },
         SemanticGeometry::Insert { .. } => (SupportStatus::Unverified, SupportStatus::Unverified),
+        SemanticGeometry::Compound(children) => {
+            let mut render = SupportStatus::Verified;
+            let mut pick = SupportStatus::Verified;
+            for child in children {
+                let (r, p) = display_support(child);
+                render = weaker(render, r);
+                pick = weaker(pick, p);
+            }
+            (render, pick)
+        }
         _ => (SupportStatus::Verified, SupportStatus::Verified),
     }
 }
@@ -1163,6 +1296,199 @@ fn placement_transform(
     m[1][3] = origin.y;
     m[2][3] = origin.z;
     Transform3 { matrix: m }
+}
+
+const HATCH_EPS: f64 = 1e-9;
+
+/// A tessellation tolerance scaled to the hatch's own coordinate magnitude.
+///
+/// Hatch spline edges are tessellated eagerly (the pattern needs 2D loops), so
+/// a fixed world tolerance would explode for drawings in the tens of thousands
+/// of units. A relative tolerance keeps the segment count bounded.
+fn hatch_tolerance(h: &Hatch) -> f64 {
+    let mut magnitude = 0.0f64;
+    let mut bump = |x: f64, y: f64| {
+        magnitude = magnitude.max(x.abs()).max(y.abs());
+    };
+    for path in &h.paths {
+        for edge in &path.edges {
+            match edge {
+                BoundaryEdge::Line(l) => {
+                    bump(l.start.x, l.start.y);
+                    bump(l.end.x, l.end.y);
+                }
+                BoundaryEdge::CircularArc(a) => {
+                    bump(a.center.x, a.center.y);
+                    bump(a.center.x + a.radius, a.center.y + a.radius);
+                }
+                BoundaryEdge::EllipticArc(a) => {
+                    bump(a.center.x, a.center.y);
+                    bump(
+                        a.center.x + a.major_axis_endpoint.x,
+                        a.center.y + a.major_axis_endpoint.y,
+                    );
+                }
+                BoundaryEdge::Spline(s) => {
+                    for p in &s.control_points {
+                        bump(p.x, p.y);
+                    }
+                }
+                BoundaryEdge::Polyline(pl) => {
+                    for v in &pl.vertices {
+                        bump(v.x, v.y);
+                    }
+                }
+            }
+        }
+    }
+    (magnitude * 1e-4).max(1e-6)
+}
+
+/// Append one HATCH boundary edge, sampled into the hatch plane (2D).
+fn append_boundary_edge(edge: &BoundaryEdge, out: &mut Vec<[f64; 2]>, params: &TessellationParams) {
+    match edge {
+        BoundaryEdge::Line(l) => {
+            push_hatch_point(out, [l.start.x, l.start.y]);
+            push_hatch_point(out, [l.end.x, l.end.y]);
+        }
+        BoundaryEdge::CircularArc(a) => {
+            let sweep = directed_sweep(a.start_angle, a.end_angle, a.counter_clockwise);
+            let n = arc_steps(sweep);
+            for i in 0..=n {
+                let t = a.start_angle + sweep * (i as f64) / (n as f64);
+                push_hatch_point(
+                    out,
+                    [
+                        a.center.x + a.radius * t.cos(),
+                        a.center.y + a.radius * t.sin(),
+                    ],
+                );
+            }
+        }
+        BoundaryEdge::EllipticArc(a) => {
+            let major = [a.major_axis_endpoint.x, a.major_axis_endpoint.y];
+            let major_len = (major[0] * major[0] + major[1] * major[1]).sqrt();
+            if major_len < HATCH_EPS {
+                return;
+            }
+            let u = [major[0] / major_len, major[1] / major_len];
+            let minor = [
+                -u[1] * major_len * a.minor_axis_ratio,
+                u[0] * major_len * a.minor_axis_ratio,
+            ];
+            let sweep = directed_sweep(a.start_angle, a.end_angle, a.counter_clockwise);
+            let n = arc_steps(sweep);
+            for i in 0..=n {
+                let t = a.start_angle + sweep * (i as f64) / (n as f64);
+                let (sin, cos) = t.sin_cos();
+                push_hatch_point(
+                    out,
+                    [
+                        a.center.x + u[0] * major_len * cos + minor[0] * sin,
+                        a.center.y + u[1] * major_len * cos + minor[1] * sin,
+                    ],
+                );
+            }
+        }
+        BoundaryEdge::Spline(s) => {
+            if s.control_points.len() < 2 {
+                return;
+            }
+            let control: Vec<Point3> = s.control_points.iter().map(|p| p3(*p)).collect();
+            let degree = s.degree.max(1) as u32;
+            for p in tessellate_bspline(&control, degree, *params) {
+                push_hatch_point(out, [p.x, p.y]);
+            }
+        }
+        BoundaryEdge::Polyline(pl) => {
+            for v in &pl.vertices {
+                push_hatch_point(out, [v.x, v.y]);
+            }
+            if pl.is_closed {
+                if let Some(first) = pl.vertices.first() {
+                    push_hatch_point(out, [first.x, first.y]);
+                }
+            }
+        }
+    }
+}
+
+fn push_hatch_point(out: &mut Vec<[f64; 2]>, p: [f64; 2]) {
+    if let Some(last) = out.last() {
+        if (last[0] - p[0]).abs() <= HATCH_EPS && (last[1] - p[1]).abs() <= HATCH_EPS {
+            return;
+        }
+    }
+    out.push(p);
+}
+
+/// Drop a duplicated closing vertex (loops are closed implicitly).
+fn dedup_loop(points: &mut Vec<[f64; 2]>) {
+    if points.len() >= 2 {
+        let first = points[0];
+        let last = points[points.len() - 1];
+        if (first[0] - last[0]).abs() <= HATCH_EPS && (first[1] - last[1]).abs() <= HATCH_EPS {
+            points.pop();
+        }
+    }
+}
+
+fn directed_sweep(start: f64, end: f64, counter_clockwise: bool) -> f64 {
+    let tau = std::f64::consts::TAU;
+    let mut sweep = end - start;
+    if counter_clockwise {
+        while sweep <= 0.0 {
+            sweep += tau;
+        }
+    } else {
+        while sweep >= 0.0 {
+            sweep -= tau;
+        }
+    }
+    sweep
+}
+
+fn arc_steps(sweep: f64) -> usize {
+    ((sweep.abs() / 0.05).ceil() as usize).clamp(2, 4096)
+}
+
+/// Build the (possibly doubled) pattern line families, applying the hatch's
+/// pattern angle and scale.
+fn pattern_families(h: &Hatch) -> Vec<PatternLine> {
+    let (sin, cos) = h.pattern_angle.sin_cos();
+    let mut families = Vec::new();
+    for line in &h.pattern.lines {
+        let base_raw = [line.base_point.x, line.base_point.y];
+        let base = [
+            cos * base_raw[0] - sin * base_raw[1],
+            sin * base_raw[0] + cos * base_raw[1],
+        ];
+        let offset = [
+            line.offset.x * h.pattern_scale,
+            line.offset.y * h.pattern_scale,
+        ];
+        let dashes = line
+            .dash_lengths
+            .iter()
+            .map(|d| d * h.pattern_scale)
+            .collect::<Vec<_>>();
+        let angle = line.angle + h.pattern_angle;
+        families.push(PatternLine {
+            angle,
+            base,
+            offset,
+            dashes: dashes.clone(),
+        });
+        if h.is_double {
+            families.push(PatternLine {
+                angle: angle + std::f64::consts::FRAC_PI_2,
+                base,
+                offset: [-offset[1], offset[0]],
+                dashes,
+            });
+        }
+    }
+    families
 }
 
 fn weaker(a: SupportStatus, b: SupportStatus) -> SupportStatus {
@@ -1396,5 +1722,15 @@ mod tests {
         assert!((p.x - 1.0).abs() < 1e-9, "{p:?}");
         assert!((p.y - 4.0).abs() < 1e-9, "{p:?}");
         assert!((p.z - 3.0).abs() < 1e-9, "{p:?}");
+    }
+
+    #[test]
+    fn hatch_sweeps_follow_their_winding() {
+        let tau = std::f64::consts::TAU;
+        let half = std::f64::consts::PI / 2.0;
+        assert!((directed_sweep(half, 0.0, false) + half).abs() < 1e-9);
+        assert!((directed_sweep(0.0, half, true) - half).abs() < 1e-9);
+        // A full turn is kept, not collapsed to zero.
+        assert!((directed_sweep(0.0, 0.0, true) - tau).abs() < 1e-9);
     }
 }

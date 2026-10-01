@@ -146,6 +146,43 @@ pub enum Completeness {
     Missing(Vec<String>),
     Unverified,
 }
+
+impl Completeness {
+    fn severity(&self) -> u8 {
+        match self {
+            Completeness::Complete => 0,
+            Completeness::Partial(_) => 1,
+            Completeness::Unverified => 2,
+            Completeness::Missing(_) => 3,
+        }
+    }
+
+    fn reasons(&self) -> &[String] {
+        match self {
+            Completeness::Partial(v) | Completeness::Missing(v) => v,
+            _ => &[],
+        }
+    }
+
+    /// Combine two completeness verdicts, keeping the more severe and merging
+    /// any reasons. Used when one source entity yields several primitives.
+    pub fn combine(self, other: Completeness) -> Completeness {
+        if self.severity() < other.severity() {
+            return other.combine(self);
+        }
+        match self {
+            Completeness::Partial(mut v) => {
+                v.extend_from_slice(other.reasons());
+                Completeness::Partial(v)
+            }
+            Completeness::Missing(mut v) => {
+                v.extend_from_slice(other.reasons());
+                Completeness::Missing(v)
+            }
+            keep => keep,
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct Diagnostic {
     pub object: Option<ObjectId>,
@@ -284,6 +321,11 @@ pub enum SemanticGeometry {
         version: u32,
         payload: Vec<u8>,
     },
+    /// Sub-geometries belonging to a single source entity, rendered in order.
+    ///
+    /// Used where one imported entity yields several primitives (for example a
+    /// HATCH's boundary loops plus its fill or pattern). Consumers recurse.
+    Compound(Vec<SemanticGeometry>),
 }
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mesh {

@@ -14,7 +14,10 @@ pub mod mesh;
 
 pub use area::{measure_polygon_area, signed_area, AreaError};
 pub use clip::{clip_polyline_to_xy_rect, clip_segment_to_xy_rect};
+pub use hatch::{pattern_polylines, simplify, triangulate, Loop, PatternLine, MAX_FILL_POINTS};
 pub use mesh::{compute_vertex_normals, mesh_bounds};
+
+pub mod hatch;
 
 use cad_domain::*;
 
@@ -211,6 +214,13 @@ impl GeometryEngine for DefaultGeometryEngine {
                 version: *version,
                 payload: payload.clone(),
             },
+            G::Compound(children) => {
+                let mut out = Vec::with_capacity(children.len());
+                for child in children {
+                    out.push(self.transform(child, t)?);
+                }
+                G::Compound(out)
+            }
         };
         Ok(ok)
     }
@@ -419,6 +429,13 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             ]
         }
         G::Mesh(_) | G::Insert { .. } | G::Opaque { .. } => Vec::new(),
+        G::Compound(children) => {
+            let mut out = Vec::new();
+            for child in children {
+                out.extend(tessellate_geometry(child, params));
+            }
+            out
+        }
     }
 }
 
@@ -535,7 +552,11 @@ fn append_bulge_arc(
 }
 
 /// Tessellate a clamped uniform B-spline from control points.
-fn tessellate_bspline(control: &[Point3], degree: u32, params: TessellationParams) -> Vec<Point3> {
+pub fn tessellate_bspline(
+    control: &[Point3],
+    degree: u32,
+    params: TessellationParams,
+) -> Vec<Point3> {
     let n = control.len();
     if n == 0 {
         return Vec::new();

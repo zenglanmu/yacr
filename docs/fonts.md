@@ -92,11 +92,11 @@
 |---|---|---|
 | AutoCAD_2000（SHX） | 19 / 11 | 55 / 0 |
 | AutoCAD_2013 | 0 / 3 | 30 / 0 |
-| baseline-sample | 86 / 60 | 2363 / 0 |
+| baseline-sample | 1021 / 60 | 3298 / 0 |
 | lockers | 1796 / 33 | 2747 / 0 |
-| map-of-uae | 87 / 32 | 459 / 0 |
+| map-of-uae | 173 / 32 | 545 / 0 |
 | korean-DBCS-hangul | 2 / 3 | 96 / 0 |
-| canteen（GOST，靠回退） | 41594 / 323 | 43809 / 0 |
+| canteen（GOST，靠回退） | 42749 / 323 | 44964 / 0 |
 
 ## 未完成
 
