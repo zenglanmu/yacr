@@ -30,6 +30,8 @@
   "annotation.kind.freehand": "Freehand",
   "annotation.kind.cloud": "Cloud",
   "annotation.text_placeholder": "Annotation text",
+  "annotation.hidden_count": "{count} hidden",
+  "annotation.delete": "Delete",
   "layers.panel": "Layers",
   "layers.override_count": "{count} overridden",
   "layers.restore": "Restore",
@@ -72,5 +74,15 @@
   "diagnostic.param.bytes": "bytes {value}",
   "diagnostic.param.limit": "limit {value}",
   "diagnostic.param.depth": "depth {value}",
-  "units.unknown": "Drawing units"
+  "units.unknown": "Drawing units",
+  "layout.panel": "Layouts",
+  "layout.model_space": "Model space",
+  "layout.unsupported_marker": "unsupported",
+  "layout.empty": "No layouts",
+  "layout.switch_unwired": "Layout switch not wired: host provides no space selection",
+  "shell.tools": "Tools & panels",
+  "shell.drawer": "Panels",
+  "shell.nav": "Navigation",
+  "shell.mode_view": "View",
+  "shell.mode_work": "Work"
 }

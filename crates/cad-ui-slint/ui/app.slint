@@ -3,6 +3,16 @@
 // Every user-facing string here is bound to a property pushed from
 // `cad_ui_slint::i18n::MessageSource` (N01). No chrome label is hardcoded:
 // `scripts/check-i18n.py` treats a CJK literal in this file as a failure.
+//
+// Responsive arrangement (audit U01/U10). The geometry below is chosen from
+// width-derived properties pushed by `cad_ui_slint::responsive` /
+// `apply_responsive`, never from hardcoded pixel sizes per control:
+//   - wide view     : large canvas + a floating navigation strip (bottom-left);
+//   - wide work     : a collapsible side panel grouped by tools/panels;
+//   - phone         : a bottom grouped bar + a drawer holding the panels, with
+//                     touch targets >= 48px (the desktop bar is not squashed).
+// Panels bind only to real pushed models; an empty model shows its explicit
+// empty-state label and is never replaced with fabricated rows.
 import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit } from "std-widgets.slint";
 
 // One row of the layer panel, pushed from `cad_app::layers::LayerRow`.
@@ -44,6 +54,18 @@ export struct DiagnosticRow {
     details: string,
 }
 
+// One paper-space layout row pushed from `cad_ui_slint::LayoutPanelState`.
+// `supported` is false when this build cannot draw the layout's viewports;
+// `reason` then explains why. No synthetic rows: an empty model is an empty
+// state.
+export struct LayoutRow {
+    id: int,
+    name: string,
+    supported: bool,
+    reason: string,
+    viewport_count: int,
+}
+
 export component YacrWindow inherits Window {
     in property <string> application-title;
     in property <string> open-label;
@@ -51,6 +73,8 @@ export component YacrWindow inherits Window {
     in property <string> annotate-label;
     in property <string> status-label;
     in property <image> cad-frame;
+    // Whether the session is in work mode. The grouped tools are only enabled
+    // in work mode; view mode is canvas + navigation.
     in property <bool> work-mode;
     in property <string> mode-label;
     // Undo and redo availability are independent so undoing to empty still
@@ -66,6 +90,28 @@ export component YacrWindow inherits Window {
     in property <string> export-label;
     in property <string> import-label;
     in property <string> diagnostics-label;
+
+    // --- Responsive geometry (audit U01), pushed by `apply_responsive` -----
+    // `compact` is the consumed compact/stretch configuration (config compact
+    // OR a phone viewport); `phone` selects the bottom-bar + drawer
+    // arrangement; `control-height` / `touch-target` are the derived sizes so a
+    // phone never gets the squashed desktop bar.
+    in property <bool> compact-shell: false;
+    in property <bool> phone-shell: false;
+    in property <length> control-height: 40px;
+    in property <length> touch-target: 32px;
+    in property <length> side-panel-width: 0px;
+    in property <bool> side-panel-collapsed: false;
+    in property <length> drawer-height: 0px;
+    in property <bool> show-floating-nav: false;
+    in-out property <bool> side-panel-open: false;
+    in-out property <bool> tools-open: false;
+    // Localized labels for the responsive chrome primitives.
+    in property <string> tools-label;
+    in property <string> drawer-label;
+    in property <string> nav-label;
+    in property <string> view-mode-label;
+    in property <string> work-mode-label;
 
     // --- Measurement tool panel (audit U03/U04) --------------------------
     // All values are pushed from the application state; the shell invents
@@ -107,6 +153,7 @@ export component YacrWindow inherits Window {
     // selection. No synthetic rows; an empty model is an explicit empty state.
     in property <[AnnotationRow]> annotation-rows: [];
     in property <int> annotation-hidden-count: 0;
+    in property <string> annotation-hidden-label: "";
     in property <string> annotation-empty-label: "";
     in property <bool> annotation-tool-active: false;
     in property <bool> annotation-tool-can-confirm: false;
@@ -114,6 +161,7 @@ export component YacrWindow inherits Window {
     in property <[string]> annotation-kind-labels: [];
     in property <string> annotation-panel-label;
     in property <string> annotation-text-placeholder;
+    in property <string> annotation-delete-label;
     in property <string> annotate-confirm-label;
     in property <string> annotate-cancel-label;
     in property <string> annotation-step-label: "";
@@ -123,6 +171,17 @@ export component YacrWindow inherits Window {
     // Two-way text payload edited in the shell and pushed back to the adapter,
     // which copies it into the active tool (audit F07).
     in-out property <string> annotation-text-input: "";
+
+    // --- Layout panel (audit F04/U03) -----------------------------------
+    // Rows are the database's real paper-layout table via
+    // `bridge::layout_descriptors`; `active-index` is -1 for model space. No
+    // synthetic rows: an empty model is an explicit empty state.
+    in property <[LayoutRow]> layout-rows: [];
+    in property <int> layout-active-index: -1;
+    in property <string> layout-panel-label;
+    in property <string> layout-model-space-label;
+    in property <string> layout-unsupported-marker;
+    in property <string> layout-empty-label: "";
 
     // --- Diagnostics drawer (audit U08) ---------------------------------
     // The status bar stays a one-line summary; the drawer holds the full,
@@ -162,6 +221,11 @@ export component YacrWindow inherits Window {
     callback annotation-selected(index: int);
     callback annotation-delete-requested(index: int);
     callback annotation-visibility-toggled(index: int, visible: bool);
+    // Layout switch (F04). `index` addresses `layout-rows`; -1 means model
+    // space. The adapter maps it back to the exact LayoutId. The callback is
+    // only emitted when a host has installed a switch sink; otherwise the
+    // adapter reports "layout switch not wired" (never a silent no-op).
+    callback layout-selected(index: int);
     callback backend-selected(name: string);
     callback export-requested();
     callback import-requested();
@@ -178,52 +242,96 @@ export component YacrWindow inherits Window {
     background: #20242b;
 
     VerticalBox {
-        HorizontalBox {
-            spacing: 6px;
-            padding: 6px;
-            Button { text: root.open-label; clicked => { root.open-requested(); } }
-            Button { text: root.fit-label; clicked => { root.fit-requested(); } }
-            Button {
-                text: root.undo-label;
-                enabled: root.work-mode && root.can-undo;
-                clicked => { root.undo-requested(); }
-            }
-            Button {
-                text: root.redo-label;
-                enabled: root.work-mode && root.can-redo;
-                clicked => { root.redo-requested(); }
-            }
-            Button {
-                text: root.measure-label;
-                enabled: root.work-mode;
-                clicked => { root.measure-requested(); }
-            }
-            Button {
-                text: root.annotate-label;
-                enabled: root.work-mode;
-                clicked => { root.annotate-requested(); }
-            }
-            ComboBox {
-                width: 96px;
-                model: root.backend-labels;
-                current-index: root.backend-index;
-                selected(value) => { root.backend-selected(value); }
-            }
-            Button { text: root.export-label; clicked => { root.export-requested(); } }
-            Button { text: root.import-label; clicked => { root.import-requested(); } }
-            Button {
-                text: root.diagnostics-label;
-                clicked => {
-                    root.diagnostics-open = !root.diagnostics-open;
-                    root.diagnostics-requested();
+        // --- Top bar: grouped tools + the drawer/side-panel toggles ---------
+        // The stretch desktop keeps the stride; the compact configuration and a
+        // phone shrink the padding (never the touch target, which only grows).
+        Rectangle {
+            height: root.control-height;
+            background: #1b2029;
+            HorizontalBox {
+                padding: root.compact-shell ? 4px : 8px;
+                spacing: 6px;
+                alignment: start;
+                Button {
+                    text: root.open-label;
+                    min-height: root.touch-target;
+                    clicked => { root.open-requested(); }
+                }
+                Button {
+                    text: root.fit-label;
+                    min-height: root.touch-target;
+                    clicked => { root.fit-requested(); }
+                }
+                if !root.compact-shell : Button {
+                    text: root.undo-label;
+                    min-height: root.touch-target;
+                    enabled: root.work-mode && root.can-undo;
+                    clicked => { root.undo-requested(); }
+                }
+                if !root.compact-shell : Button {
+                    text: root.redo-label;
+                    min-height: root.touch-target;
+                    enabled: root.work-mode && root.can-redo;
+                    clicked => { root.redo-requested(); }
+                }
+                if !root.compact-shell : Button {
+                    text: root.measure-label;
+                    min-height: root.touch-target;
+                    enabled: root.work-mode;
+                    clicked => { root.measure-requested(); }
+                }
+                if !root.compact-shell : Button {
+                    text: root.annotate-label;
+                    min-height: root.touch-target;
+                    enabled: root.work-mode;
+                    clicked => { root.annotate-requested(); }
+                }
+                if !root.compact-shell : ComboBox {
+                    width: 96px;
+                    min-height: root.touch-target;
+                    model: root.backend-labels;
+                    current-index: root.backend-index;
+                    selected(value) => { root.backend-selected(value); }
+                }
+                if !root.compact-shell : Button {
+                    text: root.export-label;
+                    min-height: root.touch-target;
+                    clicked => { root.export-requested(); }
+                }
+                if !root.compact-shell : Button {
+                    text: root.import-label;
+                    min-height: root.touch-target;
+                    clicked => { root.import-requested(); }
+                }
+                // Wide work screens toggle the collapsible side panel; a phone
+                // toggles the bottom drawer instead (same "grouped tools" verb,
+                // different arrangement).
+                if root.phone-shell : Button {
+                    text: root.drawer-label;
+                    min-height: root.touch-target;
+                    clicked => { root.tools-open = !root.tools-open; }
+                }
+                if !root.phone-shell && root.side-panel-width > 0px : Button {
+                    text: root.tools-label;
+                    min-height: root.touch-target;
+                    clicked => { root.side-panel-open = !root.side-panel-open; }
+                }
+                Button {
+                    text: root.diagnostics-label;
+                    min-height: root.touch-target;
+                    clicked => {
+                        root.diagnostics-open = !root.diagnostics-open;
+                        root.diagnostics-requested();
+                    }
                 }
             }
         }
 
-        // Diagnostics drawer (audit U08). Shown above the canvas as an overlay
-        // strip; it lists every real reason a host pushed, not just the first.
+        // --- Diagnostics drawer (audit U08) --------------------------------
+        // Shown above the canvas as an overlay strip; it lists every real reason
+        // a host pushed, not just the first.
         if root.diagnostics-open : Rectangle {
-            height: 160px;
+            height: root.phone-shell ? 200px : 160px;
             background: #1b2029;
             border-width: 1px;
             border-color: #3a4351;
@@ -250,6 +358,7 @@ export component YacrWindow inherits Window {
                     }
                     Button {
                         text: root.diagnostics-close-label;
+                        min-height: root.touch-target;
                         clicked => { root.diagnostics-closed(); }
                     }
                 }
@@ -296,23 +405,274 @@ export component YacrWindow inherits Window {
             }
         }
 
-        // Compact tool/properties panel. Measurement is the only tool wired so
-        // far; other panels are intentionally absent (see docs/ui.md).
+        // --- Main canvas area ----------------------------------------------
+        // A wide work screen splits it into the collapsible side panel + canvas.
+        // Everything else keeps the canvas full width; the phone drawer overlays
+        // it below.
         Rectangle {
-            height: 40px;
+            background: #10131a;
+            HorizontalBox {
+                // Collapsible side panel: grouped tools + panels, wide screens
+                // only. It starts collapsed (audit U01 "collapsible side panel").
+                if (!root.phone-shell && root.side-panel-width > 0px && !root.side-panel-collapsed) || root.side-panel-open : Rectangle {
+                    width: root.side-panel-width;
+                    background: #1c222b;
+                    border-width: 1px;
+                    border-color: #2c3542;
+                    VerticalBox {
+                        padding: 6px;
+                        spacing: 6px;
+                        Text {
+                            text: root.tools-label;
+                            color: #c8d0dc;
+                        }
+                        // Group 1: mode + history. These are real state, gated
+                        // by work-mode as before.
+                        HorizontalBox {
+                            spacing: 4px;
+                            Text {
+                                text: root.work-mode ? root.work-mode-label : root.view-mode-label;
+                                color: #e6b450;
+                                vertical-alignment: center;
+                            }
+                            Button {
+                                text: root.undo-label;
+                                min-height: root.touch-target;
+                                enabled: root.work-mode && root.can-undo;
+                                clicked => { root.undo-requested(); }
+                            }
+                            Button {
+                                text: root.redo-label;
+                                min-height: root.touch-target;
+                                enabled: root.work-mode && root.can-redo;
+                                clicked => { root.redo-requested(); }
+                            }
+                        }
+                        // Group 2: tools (measure / annotate).
+                        HorizontalBox {
+                            spacing: 4px;
+                            Button {
+                                text: root.measure-label;
+                                min-height: root.touch-target;
+                                enabled: root.work-mode;
+                                clicked => { root.measure-requested(); }
+                            }
+                            Button {
+                                text: root.annotate-label;
+                                min-height: root.touch-target;
+                                enabled: root.work-mode;
+                                clicked => { root.annotate-requested(); }
+                            }
+                        }
+                        // Group 3: import/export + backend.
+                        HorizontalBox {
+                            spacing: 4px;
+                            Button {
+                                text: root.export-label;
+                                min-height: root.touch-target;
+                                clicked => { root.export-requested(); }
+                            }
+                            Button {
+                                text: root.import-label;
+                                min-height: root.touch-target;
+                                clicked => { root.import-requested(); }
+                            }
+                            ComboBox {
+                                width: 96px;
+                                min-height: root.touch-target;
+                                model: root.backend-labels;
+                                current-index: root.backend-index;
+                                selected(value) => { root.backend-selected(value); }
+                            }
+                        }
+                    }
+                }
+                // Canvas: the CAD frame plus its input surface. The nested
+                // rectangle takes the remaining width so the TouchArea covers
+                // only the canvas, never the side panel buttons.
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
+                    Image {
+                        source: root.cad-frame;
+                        image-fit: contain;
+                    }
+                    TouchArea {
+                        // kind: 0=down 1=up 2=move 3=cancel; button: 0=none 1=left 2=right 3=middle
+                        pointer-event(e) => {
+                            root.pointer-input(
+                                e.kind == PointerEventKind.down ? 0 :
+                                (e.kind == PointerEventKind.up ? 1 :
+                                (e.kind == PointerEventKind.move ? 2 : 3)),
+                                e.button == PointerEventButton.left ? 1 :
+                                (e.button == PointerEventButton.right ? 2 :
+                                (e.button == PointerEventButton.middle ? 3 : 0)),
+                                self.mouse-x, self.mouse-y);
+                            // A completed left click is offered as a measurement pick.
+                            if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
+                                root.canvas-pick(self.mouse-x / 1px, self.mouse-y / 1px);
+                            }
+                        }
+                        scroll-event(e) => {
+                            root.scroll-input(e.delta-x / 1px, e.delta-y / 1px);
+                            return EventResult.accept;
+                        }
+                    }
+                }
+            }
+            // Floating navigation strip (wide *view* screens only). A phone has
+            // the bottom grouped bar instead, so it is never shown there.
+            if root.show-floating-nav : Rectangle {
+                x: 12px;
+                y: parent.height - root.control-height - 12px;
+                width: 240px;
+                height: root.control-height;
+                background: #20242bcc;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #3a4351;
+                HorizontalBox {
+                    padding: 4px;
+                    spacing: 6px;
+                    alignment: start;
+                    Text {
+                        text: root.nav-label;
+                        color: #9aa7b8;
+                        vertical-alignment: center;
+                    }
+                    Button {
+                        text: root.fit-label;
+                        min-height: root.touch-target;
+                        clicked => { root.fit-requested(); }
+                    }
+                    Button {
+                        text: root.undo-label;
+                        min-height: root.touch-target;
+                        enabled: root.work-mode && root.can-undo;
+                        clicked => { root.undo-requested(); }
+                    }
+                    Button {
+                        text: root.redo-label;
+                        min-height: root.touch-target;
+                        enabled: root.work-mode && root.can-redo;
+                        clicked => { root.redo-requested(); }
+                    }
+                }
+            }
+
+            // --- Phone drawer (audit U01/U03) ------------------------------
+            // A bottom sheet holding the grouped tool/panel entries. Each entry
+            // is a real control bound to real state; the tool bars below stay
+            // the sole confirm/cancel affordances (no duplicated controls).
+            if root.phone-shell && root.tools-open : Rectangle {
+                y: parent.height - root.drawer-height;
+                height: root.drawer-height;
+                width: 100%;
+                background: #1b2029ee;
+                border-width: 1px;
+                border-color: #3a4351;
+                VerticalBox {
+                    padding: 8px;
+                    spacing: 8px;
+                    HorizontalBox {
+                        spacing: 8px;
+                        Text {
+                            text: root.drawer-label;
+                            color: #e6edf7;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: root.work-mode ? root.work-mode-label : root.view-mode-label;
+                            color: #e6b450;
+                            vertical-alignment: center;
+                        }
+                        Button {
+                            text: root.diagnostics-close-label;
+                            min-height: root.touch-target;
+                            clicked => { root.tools-open = false; }
+                        }
+                    }
+                    // Grouped entries: history / tools / file+backend, each a
+                    // >= 48px touch target.
+                    ScrollView {
+                        vertical-scrollbar-policy: as-needed;
+                        VerticalBox {
+                            spacing: 8px;
+                            HorizontalBox {
+                                spacing: 8px;
+                                Button {
+                                    text: root.undo-label;
+                                    min-height: root.touch-target;
+                                    enabled: root.work-mode && root.can-undo;
+                                    clicked => { root.undo-requested(); }
+                                }
+                                Button {
+                                    text: root.redo-label;
+                                    min-height: root.touch-target;
+                                    enabled: root.work-mode && root.can-redo;
+                                    clicked => { root.redo-requested(); }
+                                }
+                            }
+                            HorizontalBox {
+                                spacing: 8px;
+                                Button {
+                                    text: root.measure-label;
+                                    min-height: root.touch-target;
+                                    enabled: root.work-mode;
+                                    clicked => { root.measure-requested(); }
+                                }
+                                Button {
+                                    text: root.annotate-label;
+                                    min-height: root.touch-target;
+                                    enabled: root.work-mode;
+                                    clicked => { root.annotate-requested(); }
+                                }
+                            }
+                            HorizontalBox {
+                                spacing: 8px;
+                                Button {
+                                    text: root.export-label;
+                                    min-height: root.touch-target;
+                                    clicked => { root.export-requested(); }
+                                }
+                                Button {
+                                    text: root.import-label;
+                                    min-height: root.touch-target;
+                                    clicked => { root.import-requested(); }
+                                }
+                                ComboBox {
+                                    min-height: root.touch-target;
+                                    model: root.backend-labels;
+                                    current-index: root.backend-index;
+                                    selected(value) => { root.backend-selected(value); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Measurement tool strip (F06/U04) ------------------------------
+        // The step text comes from the tool state machine; confirm/cancel are
+        // gated by real state. It stays outside the drawer/collapsible panel so
+        // the workflow is always visible.
+        Rectangle {
+            height: root.control-height;
             background: #262b33;
             HorizontalBox {
                 spacing: 8px;
                 padding: 4px;
-                alignment: center;
+                alignment: start;
                 Text {
                     text: root.measurement-panel-label;
                     color: #c8d0dc;
                     vertical-alignment: center;
                 }
-                ComboBox {
+                if root.work-mode : ComboBox {
                     width: 120px;
-                    enabled: root.work-mode;
+                    min-height: root.touch-target;
                     // Mirrors MeasurementToolKind::ALL; the adapter owns the
                     // mapping so the two lists cannot drift silently.
                     model: root.measurement-kind-labels;
@@ -321,11 +681,13 @@ export component YacrWindow inherits Window {
                 }
                 Button {
                     text: root.measure-confirm-label;
+                    min-height: root.touch-target;
                     enabled: root.work-mode && root.measurement-can-confirm;
                     clicked => { root.confirm-measurement-requested(); }
                 }
                 Button {
                     text: root.measure-cancel-label;
+                    min-height: root.touch-target;
                     enabled: root.work-mode && root.measurement-active;
                     clicked => { root.cancel-measurement-requested(); }
                 }
@@ -344,43 +706,44 @@ export component YacrWindow inherits Window {
             }
         }
 
-        // Annotation creation tool strip (F07/U04). The step text comes from the
-        // tool state machine; confirm/cancel are gated by real state.
+        // --- Annotation creation tool strip (F07/U04) ----------------------
         Rectangle {
-            height: 40px;
+            height: root.control-height;
             background: #262b33;
             HorizontalBox {
                 spacing: 8px;
                 padding: 4px;
-                alignment: center;
+                alignment: start;
                 Text {
                     text: root.annotation-panel-label;
                     color: #c8d0dc;
                     vertical-alignment: center;
                 }
-                ComboBox {
+                if root.work-mode : ComboBox {
                     width: 96px;
-                    enabled: root.work-mode;
+                    min-height: root.touch-target;
                     // Mirrors AnnotationToolKind::ALL; the adapter owns the
                     // mapping so the lists cannot drift silently.
                     model: root.annotation-kind-labels;
                     current-index: root.annotation-kind-index;
                     selected(value) => { root.annotation-kind-selected(value); }
                 }
-                LineEdit {
+                if root.work-mode && root.annotation-requires-text : LineEdit {
                     width: 180px;
-                    enabled: root.work-mode && root.annotation-requires-text;
+                    min-height: root.touch-target;
                     placeholder-text: root.annotation-text-placeholder;
                     text <=> root.annotation-text-input;
                     edited(text) => { root.annotation-text-edited(text); }
                 }
                 Button {
                     text: root.annotate-confirm-label;
+                    min-height: root.touch-target;
                     enabled: root.work-mode && root.annotation-tool-can-confirm;
                     clicked => { root.confirm-annotation-requested(); }
                 }
                 Button {
                     text: root.annotate-cancel-label;
+                    min-height: root.touch-target;
                     enabled: root.work-mode && root.annotation-tool-active;
                     clicked => { root.cancel-annotation-requested(); }
                 }
@@ -394,8 +757,10 @@ export component YacrWindow inherits Window {
             }
         }
 
-        // Layer list + read-only properties. Both bind to real application
-        // state; empty models show an explicit empty-state label.
+        // --- Layer + layout + property panels ------------------------------
+        // Bound to real application state; empty models show explicit
+        // empty-state labels. The panel row height grows with the responsive
+        // control height so it never squashes a phone.
         Rectangle {
             height: 132px;
             background: #222831;
@@ -404,7 +769,7 @@ export component YacrWindow inherits Window {
                 padding: 4px;
                 // Layer list (F03).
                 VerticalBox {
-                    width: 260px;
+                    width: 240px;
                     spacing: 2px;
                     HorizontalBox {
                         spacing: 4px;
@@ -421,6 +786,7 @@ export component YacrWindow inherits Window {
                         }
                         Button {
                             text: root.layer-restore-label;
+                            min-height: root.touch-target;
                             enabled: root.work-mode && root.layer-override-count > 0;
                             clicked => { root.restore-layers-requested(); }
                         }
@@ -451,6 +817,43 @@ export component YacrWindow inherits Window {
                         }
                     }
                 }
+                // Layout list (F04). Model space is always present as a real
+                // sentinel row (index -1), then every database layout.
+                VerticalBox {
+                    width: 200px;
+                    spacing: 2px;
+                    Text {
+                        text: root.layout-panel-label;
+                        color: #c8d0dc;
+                    }
+                    Text {
+                        text: root.layout-empty-label;
+                        color: #9aa7b8;
+                        vertical-alignment: center;
+                        visible: root.layout-rows.length == 0;
+                    }
+                    ScrollView {
+                        vertical-scrollbar-policy: as-needed;
+                        VerticalBox {
+                            spacing: 2px;
+                            Button {
+                                text: root.layout-model-space-label
+                                    + (root.layout-active-index == -1 ? " *" : "");
+                                min-height: root.touch-target;
+                                enabled: root.work-mode;
+                                clicked => { root.layout-selected(-1); }
+                            }
+                            for row[index] in root.layout-rows : Button {
+                                text: row.name
+                                    + (row.supported ? "" : " (" + root.layout-unsupported-marker + ")")
+                                    + (index == root.layout-active-index ? " *" : "");
+                                min-height: root.touch-target;
+                                enabled: root.work-mode && row.supported;
+                                clicked => { root.layout-selected(index); }
+                            }
+                        }
+                    }
+                }
                 // Properties of the current selection (F05).
                 VerticalBox {
                     spacing: 2px;
@@ -469,6 +872,7 @@ export component YacrWindow inherits Window {
                         }
                         Button {
                             text: root.property-clear-label;
+                            min-height: root.touch-target;
                             enabled: root.selection-count > 0;
                             clicked => { root.clear-selection-requested(); }
                         }
@@ -507,38 +911,78 @@ export component YacrWindow inherits Window {
             }
         }
 
+        // --- Annotation management list (F09/U03) --------------------------
         Rectangle {
-            background: #10131a;
-            // The CAD frame is produced by the wgpu renderer and shared as a
-            // texture; it is composited by Slint, never read back per frame.
-            Image {
-                source: root.cad-frame;
-                image-fit: contain;
-            }
-            TouchArea {
-                // kind: 0=down 1=up 2=move 3=cancel; button: 0=none 1=left 2=right 3=middle
-                pointer-event(e) => {
-                    root.pointer-input(
-                        e.kind == PointerEventKind.down ? 0 :
-                        (e.kind == PointerEventKind.up ? 1 :
-                        (e.kind == PointerEventKind.move ? 2 : 3)),
-                        e.button == PointerEventButton.left ? 1 :
-                        (e.button == PointerEventButton.right ? 2 :
-                        (e.button == PointerEventButton.middle ? 3 : 0)),
-                        self.mouse-x, self.mouse-y);
-                    // A completed left click is offered as a measurement pick.
-                    if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
-                        root.canvas-pick(self.mouse-x / 1px, self.mouse-y / 1px);
+            height: 120px;
+            background: #222831;
+            VerticalBox {
+                spacing: 2px;
+                padding: 4px;
+                HorizontalBox {
+                    spacing: 6px;
+                    Text {
+                        text: root.annotation-panel-label;
+                        color: #c8d0dc;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: root.annotation-hidden-count > 0 ? root.annotation-hidden-label : "";
+                        color: #e6b450;
+                        vertical-alignment: center;
                     }
                 }
-                scroll-event(e) => {
-                    root.scroll-input(e.delta-x / 1px, e.delta-y / 1px);
-                    return EventResult.accept;
+                Text {
+                    text: root.annotation-empty-label;
+                    color: #9aa7b8;
+                    vertical-alignment: center;
+                    visible: root.annotation-rows.length == 0;
+                }
+                ScrollView {
+                    vertical-scrollbar-policy: as-needed;
+                    for row[index] in root.annotation-rows : HorizontalBox {
+                        spacing: 6px;
+                        Button {
+                            text: row.selected ? "*" : " ";
+                            min-height: root.touch-target;
+                            clicked => { root.annotation-selected(index); }
+                        }
+                        Text {
+                            text: row.kind;
+                            color: #9aa7b8;
+                            width: 72px;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: row.text;
+                            color: #e6edf7;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        CheckBox {
+                            text: "";
+                            checked: row.visible;
+                            enabled: root.work-mode;
+                            toggled => {
+                                root.annotation-visibility-toggled(index, self.checked);
+                            }
+                        }
+                        Button {
+                            text: root.annotation-delete-label;
+                            min-height: root.touch-target;
+                            enabled: root.work-mode;
+                            clicked => { root.annotation-delete-requested(index); }
+                        }
+                    }
                 }
             }
         }
+
+        // --- Status bar (audit U08/U10) ------------------------------------
+        // A one-line summary only; the diagnostics drawer holds the details.
+        // Height follows the responsive control height instead of a fixed 28px.
         Rectangle {
-            height: 28px;
+            height: root.control-height;
             background: #181c22;
             HorizontalLayout {
                 padding-left: 8px;

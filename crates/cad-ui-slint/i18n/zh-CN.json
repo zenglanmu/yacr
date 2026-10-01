@@ -30,6 +30,8 @@
   "annotation.kind.freehand": "自由线",
   "annotation.kind.cloud": "云线",
   "annotation.text_placeholder": "批注文字",
+  "annotation.hidden_count": "已隐藏 {count}",
+  "annotation.delete": "删除",
   "layers.panel": "图层",
   "layers.override_count": "临时覆盖 {count}",
   "layers.restore": "恢复",
@@ -72,5 +74,15 @@
   "diagnostic.param.bytes": "字节 {value}",
   "diagnostic.param.limit": "限额 {value}",
   "diagnostic.param.depth": "深度 {value}",
-  "units.unknown": "图纸单位"
+  "units.unknown": "图纸单位",
+  "layout.panel": "布局",
+  "layout.model_space": "模型空间",
+  "layout.unsupported_marker": "不支持",
+  "layout.empty": "无布局",
+  "layout.switch_unwired": "布局切换未接线：宿主未提供空间切换",
+  "shell.tools": "工具与面板",
+  "shell.drawer": "面板",
+  "shell.nav": "导航",
+  "shell.mode_view": "查看",
+  "shell.mode_work": "工作"
 }

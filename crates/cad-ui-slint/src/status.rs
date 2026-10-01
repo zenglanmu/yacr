@@ -374,14 +374,14 @@ mod tests {
             ),
         );
         model.add_document(DiagnosticReason::unverified(
-            codes::RESOURCE_FONT_UNRESOLVED,
+            codes::FONT_UNRESOLVED,
             vec![DiagnosticParameter::Key("font:arial".into())],
         ));
 
         let state = DiagnosticsPanelState::from_model(&model, &zh(), "WebGPU");
         // Document reason + both object reasons are all kept.
         assert_eq!(state.rows.len(), 3);
-        assert_eq!(state.rows[0].code, codes::RESOURCE_FONT_UNRESOLVED);
+        assert_eq!(state.rows[0].code, codes::FONT_UNRESOLVED);
         assert_eq!(state.rows[1].code, codes::REPRESENTATION_UNAVAILABLE);
         assert_eq!(state.rows[2].code, codes::REPRESENTATION_APPROXIMATE);
         // The summary must not claim complete for a missing object.
