@@ -381,13 +381,17 @@ impl HostController {
 
     /// Import a sidecar file as one transaction, recording one undo step.
     ///
-    /// The caller chooses the fingerprint policy; mismatches never attach
-    /// silently (spec §3.4).
+    /// Host-owned I/O stays here, but the business import is gated by the same
+    /// Work-only permission as the command path, so a Viewer session cannot
+    /// import through the host API, JS or CLI (audit B08). Mismatches never
+    /// attach silently (spec §3.4).
     pub fn import_annotations_json(
         &mut self,
         text: &str,
         policy: FingerprintPolicy,
     ) -> CadResult<usize> {
+        // Authorize before any decoding so a rejected import changes nothing.
+        self.session.authorize(crate::CommandId::ImportAnnotations)?;
         let document = self
             .application
             .workspace
@@ -572,6 +576,32 @@ mod tests {
         assert!(!target.application.workspace.documents[&target.document_id]
             .annotations
             .is_dirty());
+    }
+
+    #[test]
+    fn import_annotations_is_rejected_in_viewer_mode() {
+        // A Viewer session must not import through the host API even though the
+        // bytes are decoded here (audit B08).
+        let mut source = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        source
+            .apply_annotation(AnnotationCommand::Create(text_note(1, "note")))
+            .unwrap();
+        let json = source.export_annotations_json().unwrap();
+
+        let mut viewer = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        viewer.session.switch_mode(AppMode::Viewer).unwrap();
+        let revision_before = viewer.workspace_annotations().unwrap().revision();
+        assert!(matches!(
+            viewer.import_annotations_json(&json, FingerprintPolicy::ImportUnanchored),
+            Err(CadError::PermissionDenied)
+        ));
+        // Nothing changed: no annotations, no revision advance, no history.
+        assert_eq!(viewer.workspace_annotations().unwrap().len(), 0);
+        assert_eq!(
+            viewer.workspace_annotations().unwrap().revision(),
+            revision_before
+        );
+        assert!(!viewer.application.can_undo(&viewer.document_id));
     }
 
     #[test]
