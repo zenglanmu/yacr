@@ -9,6 +9,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use acadrust::entities::EntityCommon;
+use acadrust::entities::{AttachmentPoint, TextHorizontalAlignment, TextVerticalAlignment};
 use acadrust::{DwgReadOptions, DwgReader, EntityType, ReadStats};
 use cad_db::{
     BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Layout,
@@ -718,28 +719,49 @@ impl<'a> ImporterBuilder<'a> {
                     Completeness::Complete,
                 )
             }
-            EntityType::Text(t) => (
-                SemanticGeometry::Text {
-                    text: t.value.clone(),
-                    position: p3(t.insertion_point),
-                    style: self.style_id(&t.style),
-                    height: t.height,
-                    rotation: t.rotation,
-                    font: self.style_font(&t.style),
-                },
-                Completeness::Complete,
-            ),
-            EntityType::MText(t) => (
-                SemanticGeometry::Text {
-                    text: t.value.clone(),
-                    position: p3(t.insertion_point),
-                    style: self.style_id(&t.style),
-                    height: t.height,
-                    rotation: t.rotation,
-                    font: self.style_font(&t.style),
-                },
-                Completeness::Complete,
-            ),
+            EntityType::Text(t) => {
+                let (h_align, v_align) = (
+                    map_h_align(t.horizontal_alignment),
+                    map_v_align(t.vertical_alignment),
+                );
+                // DXF places aligned text at the alignment point when one is set.
+                let position = if t.alignment_point.is_some()
+                    && (h_align != TextAlignH::Left || v_align != TextAlignV::Baseline)
+                {
+                    t.alignment_point.unwrap_or(t.insertion_point)
+                } else {
+                    t.insertion_point
+                };
+                (
+                    SemanticGeometry::Text {
+                        text: t.value.clone(),
+                        position: p3(position),
+                        style: self.style_id(&t.style),
+                        height: t.height,
+                        rotation: t.rotation,
+                        font: self.style_font(&t.style),
+                        h_align,
+                        v_align,
+                    },
+                    Completeness::Complete,
+                )
+            }
+            EntityType::MText(t) => {
+                let (h_align, v_align) = attach_align(t.attachment_point);
+                (
+                    SemanticGeometry::Text {
+                        text: t.value.clone(),
+                        position: p3(t.insertion_point),
+                        style: self.style_id(&t.style),
+                        height: t.height,
+                        rotation: t.rotation,
+                        font: self.style_font(&t.style),
+                        h_align,
+                        v_align,
+                    },
+                    Completeness::Complete,
+                )
+            }
             EntityType::Spline(s) => (
                 SemanticGeometry::Spline {
                     degree: s.degree.max(1) as u32,
@@ -956,6 +978,41 @@ fn font_extension(name: &str) -> String {
     name.rsplit_once('.')
         .map(|(_, ext)| ext.trim().to_ascii_lowercase())
         .unwrap_or_default()
+}
+
+fn map_h_align(align: TextHorizontalAlignment) -> TextAlignH {
+    match align {
+        TextHorizontalAlignment::Center | TextHorizontalAlignment::Middle => TextAlignH::Center,
+        TextHorizontalAlignment::Right => TextAlignH::Right,
+        // Aligned/Fit still start at the left point; we do not stretch.
+        TextHorizontalAlignment::Left
+        | TextHorizontalAlignment::Aligned
+        | TextHorizontalAlignment::Fit => TextAlignH::Left,
+    }
+}
+
+fn map_v_align(align: TextVerticalAlignment) -> TextAlignV {
+    match align {
+        TextVerticalAlignment::Baseline => TextAlignV::Baseline,
+        TextVerticalAlignment::Bottom => TextAlignV::Bottom,
+        TextVerticalAlignment::Middle => TextAlignV::Middle,
+        TextVerticalAlignment::Top => TextAlignV::Top,
+    }
+}
+
+fn attach_align(attachment: AttachmentPoint) -> (TextAlignH, TextAlignV) {
+    use AttachmentPoint::*;
+    let h = match attachment {
+        TopLeft | MiddleLeft | BottomLeft => TextAlignH::Left,
+        TopCenter | MiddleCenter | BottomCenter => TextAlignH::Center,
+        TopRight | MiddleRight | BottomRight => TextAlignH::Right,
+    };
+    let v = match attachment {
+        TopLeft | TopCenter | TopRight => TextAlignV::Top,
+        MiddleLeft | MiddleCenter | MiddleRight => TextAlignV::Middle,
+        BottomLeft | BottomCenter | BottomRight => TextAlignV::Bottom,
+    };
+    (h, v)
 }
 
 /// Combine import-stage problems with the render support of model content.
@@ -1214,6 +1271,8 @@ mod tests {
             height: 1.0,
             rotation: 0.0,
             font: None,
+            h_align: TextAlignH::Left,
+            v_align: TextAlignV::Baseline,
         };
         assert_eq!(display_support(&text).0, SupportStatus::Unsupported);
         let opaque = SemanticGeometry::Opaque {

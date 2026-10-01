@@ -20,6 +20,15 @@ pub trait FileAccess {
     fn read(&self, token: &FileToken) -> HostFuture<'_, Arc<[u8]>>;
     fn export_atomic(&self, name_hint: &str, bytes: Arc<[u8]>) -> HostFuture<'_, FileGrant>;
 }
+
+/// Host-side font fetching.
+///
+/// The core only builds catalog URLs (`cad-resources::plan_fonts`); the host
+/// performs the actual network/asset access, applies the font licence and
+/// caches the bytes before they are registered with the shaping engine.
+pub trait FontLoader {
+    fn load_font(&self, url: &str) -> HostFuture<'_, Arc<[u8]>>;
+}
 pub trait Persistence {
     /// Recovery cache is not a permanent user backup.
     fn save_recovery(&self, document: DocumentId, bytes: Arc<[u8]>) -> HostFuture<'_, ()>;

@@ -218,6 +218,8 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 height,
                 rotation,
                 font,
+                h_align,
+                v_align,
             } => {
                 let font_key = font.as_deref();
                 let mut shaped = false;
@@ -228,6 +230,8 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                         *position,
                         height.abs(),
                         *rotation,
+                        *h_align,
+                        *v_align,
                     ) {
                         Ok(polylines) => {
                             for polyline in polylines {

@@ -205,6 +205,23 @@ impl TaskStamp {
         }
     }
 }
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TextAlignH {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TextAlignV {
+    #[default]
+    Baseline,
+    Bottom,
+    Middle,
+    Top,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SemanticGeometry {
     Line {
@@ -257,6 +274,10 @@ pub enum SemanticGeometry {
         /// when the source style declares one. Display providers resolve it
         /// through the font catalog; `None` means the font is unknown.
         font: Option<String>,
+        /// Horizontal placement of the run relative to `position`.
+        h_align: TextAlignH,
+        /// Vertical placement of the run relative to `position`.
+        v_align: TextAlignV,
     },
     Opaque {
         type_key: String,

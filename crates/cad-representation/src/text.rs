@@ -5,7 +5,7 @@
 //! line geometry. A fallback chain is applied when a drawing's referenced font
 //! is not registered or cannot be parsed, so text is not silently dropped.
 
-use cad_domain::{CadError, CadResult, Point3};
+use cad_domain::{CadError, CadResult, Point3, TextAlignH, TextAlignV};
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
@@ -119,6 +119,7 @@ impl FontEngine {
     /// `height` is the cap/em height in world units and `rotation` is radians
     /// about the origin. When the requested font is missing, the fallback chain
     /// is used.
+    #[allow(clippy::too_many_arguments)]
     pub fn outline(
         &self,
         font_key: &str,
@@ -126,6 +127,8 @@ impl FontEngine {
         origin: Point3,
         height: f64,
         rotation: f64,
+        h_align: TextAlignH,
+        v_align: TextAlignV,
     ) -> CadResult<Vec<Vec<Point3>>> {
         // Primary face, then the fallback chain. A face we recognised but
         // cannot decode is skipped so a usable fallback still renders.
@@ -149,8 +152,12 @@ impl FontEngine {
                 FaceData::Unsupported(reason) => {
                     unsupported.get_or_insert_with(|| reason.clone());
                 }
-                FaceData::Sfnt(data) => return outline_with(data, text, origin, height, rotation),
-                FaceData::Shx(font) => return outline_shx(font, text, origin, height, rotation),
+                FaceData::Sfnt(data) => {
+                    return outline_with(data, text, origin, height, rotation, h_align, v_align)
+                }
+                FaceData::Shx(font) => {
+                    return outline_shx(font, text, origin, height, rotation, h_align, v_align)
+                }
             }
         }
         Err(CadError::Unsupported(unsupported.unwrap_or_else(|| {
@@ -209,6 +216,8 @@ fn outline_shx(
     origin: Point3,
     height: f64,
     rotation: f64,
+    h_align: TextAlignH,
+    v_align: TextAlignV,
 ) -> CadResult<Vec<Vec<Point3>>> {
     let size = height.abs();
     if !size.is_finite() || size <= 0.0 {
@@ -216,39 +225,22 @@ fn outline_shx(
             "text height must be a positive finite value".into(),
         ));
     }
-    let (sin, cos) = rotation.sin_cos();
-    let line_step = -1.2 * size;
-    let mut polys = Vec::new();
-    let mut pen = [0.0f64, 0.0];
-    for ch in text.chars() {
-        if ch == '\n' {
-            pen = [0.0, pen[1] + line_step];
-            continue;
-        }
-        let Some(glyph) = font.glyph(ch, size) else {
-            continue;
-        };
-        for poly in &glyph.polylines {
-            if poly.len() < 2 {
-                continue;
-            }
-            let points: Vec<Point3> = poly
-                .iter()
-                .map(|p| {
-                    let lx = p[0] + pen[0];
-                    let ly = p[1] + pen[1];
-                    Point3 {
-                        x: origin.x + cos * lx - sin * ly,
-                        y: origin.y + sin * lx + cos * ly,
-                        z: origin.z,
-                    }
-                })
-                .collect();
-            polys.push(points);
-        }
-        pen[0] += glyph.advance;
-    }
-    Ok(polys)
+    let lines = layout_glyphs(text, |ch, pen| {
+        let glyph = font.glyph(ch, size)?;
+        let polys: Vec<Vec<[f64; 2]>> = glyph
+            .polylines
+            .iter()
+            .map(|poly| {
+                poly.iter()
+                    .map(|p| [p[0] + pen[0], p[1] + pen[1]])
+                    .collect()
+            })
+            .collect();
+        Some((polys, glyph.advance))
+    });
+    Ok(finalize_lines(
+        lines, size, origin, rotation, h_align, v_align,
+    ))
 }
 
 /// Reconstruct an sfnt (TTF) container from a WOFF1 file.
@@ -352,26 +344,20 @@ fn woff_to_sfnt(data: &[u8]) -> CadResult<Vec<u8>> {
     Ok(out)
 }
 
-/// Flatten a glyph outline into polylines with a fixed subdivision per curve.
+/// Flatten a glyph outline into polylines in glyph-local, scaled coordinates.
 struct OutlineToPolylines {
     scale: f64,
     pen: [f64; 2],
-    origin: Point3,
-    cos: f64,
-    sin: f64,
-    polys: Vec<Vec<Point3>>,
-    current: Vec<Point3>,
+    polys: Vec<Vec<[f64; 2]>>,
+    current: Vec<[f64; 2]>,
     last: [f64; 2],
 }
 
 impl OutlineToPolylines {
-    fn new(scale: f64, pen: [f64; 2], origin: Point3, rotation: f64) -> Self {
+    fn new(scale: f64, pen: [f64; 2]) -> Self {
         OutlineToPolylines {
             scale,
             pen,
-            origin,
-            cos: rotation.cos(),
-            sin: rotation.sin(),
             polys: Vec::new(),
             current: Vec::new(),
             last: [0.0, 0.0],
@@ -379,13 +365,8 @@ impl OutlineToPolylines {
     }
 
     fn emit(&mut self, x: f64, y: f64) {
-        let lx = x * self.scale + self.pen[0];
-        let ly = y * self.scale + self.pen[1];
-        self.current.push(Point3 {
-            x: self.origin.x + self.cos * lx - self.sin * ly,
-            y: self.origin.y + self.sin * lx + self.cos * ly,
-            z: self.origin.z,
-        });
+        self.current
+            .push([x * self.scale + self.pen[0], y * self.scale + self.pen[1]]);
         self.last = [x, y];
     }
 
@@ -454,13 +435,15 @@ impl OutlineBuilder for OutlineToPolylines {
     }
 }
 
-/// Outline `text` using already-decoded font bytes.
+/// Outline `text` using already-decoded sfnt bytes.
 fn outline_with(
     data: &[u8],
     text: &str,
     origin: Point3,
     height: f64,
     rotation: f64,
+    h_align: TextAlignH,
+    v_align: TextAlignV,
 ) -> CadResult<Vec<Vec<Point3>>> {
     let face = ttf_parser::Face::parse(data, 0)
         .map_err(|e| CadError::CorruptData(format!("font cannot be parsed: {e}")))?;
@@ -471,27 +454,92 @@ fn outline_with(
             "text height must be a positive finite value".into(),
         ));
     }
-    let line_step = -1.2 * height.abs();
-
-    let mut polys = Vec::new();
-    let mut pen = [0.0f64, 0.0];
-    for ch in text.chars() {
-        if ch == '\n' {
-            pen = [0.0, pen[1] + line_step];
-            continue;
-        }
-        let Some(glyph) = face.glyph_index(ch) else {
-            continue;
-        };
+    let lines = layout_glyphs(text, |ch, pen| {
+        let glyph = face.glyph_index(ch)?;
         let advance = face.glyph_hor_advance(glyph).unwrap_or(0) as f64 * scale;
-        let mut builder = OutlineToPolylines::new(scale, pen, origin, rotation);
+        let mut builder = OutlineToPolylines::new(scale, pen);
         if face.outline_glyph(glyph, &mut builder).is_some() {
             builder.flush();
-            polys.extend(builder.polys);
         }
-        pen[0] += advance;
+        Some((std::mem::take(&mut builder.polys), advance))
+    });
+    Ok(finalize_lines(
+        lines,
+        height.abs(),
+        origin,
+        rotation,
+        h_align,
+        v_align,
+    ))
+}
+
+/// Lay out each `\n`-separated line: place glyphs at the pen and record the
+/// line's advance width. The glyph callback receives the pen position and
+/// returns glyph-local polylines plus its advance.
+fn layout_glyphs<F>(text: &str, mut glyph: F) -> Vec<(Vec<Vec<[f64; 2]>>, f64)>
+where
+    F: FnMut(char, [f64; 2]) -> Option<(Vec<Vec<[f64; 2]>>, f64)>,
+{
+    let mut lines = Vec::new();
+    for line in text.split('\n') {
+        let mut pen = [0.0f64, 0.0];
+        let mut polys = Vec::new();
+        for ch in line.chars() {
+            if let Some((glyph_polys, advance)) = glyph(ch, pen) {
+                polys.extend(glyph_polys);
+                pen[0] += advance;
+            }
+        }
+        lines.push((polys, pen[0]));
     }
-    Ok(polys)
+    lines
+}
+
+/// Apply horizontal/vertical alignment, rotation and translation.
+fn finalize_lines(
+    lines: Vec<(Vec<Vec<[f64; 2]>>, f64)>,
+    size: f64,
+    origin: Point3,
+    rotation: f64,
+    h_align: TextAlignH,
+    v_align: TextAlignV,
+) -> Vec<Vec<Point3>> {
+    let line_height = 1.2 * size;
+    let vertical_shift = match v_align {
+        TextAlignV::Baseline => 0.0,
+        TextAlignV::Bottom => 0.2 * size,
+        TextAlignV::Middle => 0.5 * size,
+        TextAlignV::Top => size,
+    };
+    let (sin, cos) = rotation.sin_cos();
+    let mut out = Vec::new();
+    for (index, (polys, width)) in lines.into_iter().enumerate() {
+        let dx = match h_align {
+            TextAlignH::Left => 0.0,
+            TextAlignH::Center => -width / 2.0,
+            TextAlignH::Right => -width,
+        };
+        let line_y = -(index as f64) * line_height + vertical_shift;
+        for poly in polys {
+            if poly.len() < 2 {
+                continue;
+            }
+            let points: Vec<Point3> = poly
+                .iter()
+                .map(|p| {
+                    let lx = p[0] + dx;
+                    let ly = p[1] + line_y;
+                    Point3 {
+                        x: origin.x + cos * lx - sin * ly,
+                        y: origin.y + sin * lx + cos * ly,
+                        z: origin.z,
+                    }
+                })
+                .collect();
+            out.push(points);
+        }
+    }
+    out
 }
 
 /// Strip MTEXT/TEXT formatting so the raw glyph text can be shaped.
@@ -582,7 +630,15 @@ mod tests {
     fn unregistered_font_is_reported_not_faked() {
         let engine = FontEngine::new();
         let err = engine
-            .outline("arial.ttf", "hi", Point3::default(), 2.0, 0.0)
+            .outline(
+                "arial.ttf",
+                "hi",
+                Point3::default(),
+                2.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
             .unwrap_err();
         assert!(matches!(err, CadError::ResourceMissing(_)));
         assert!(engine.is_empty());
@@ -605,7 +661,15 @@ mod tests {
             .register("x.woff2", Arc::from(b"wOF2....".to_vec()))
             .unwrap();
         let err = engine
-            .outline("x.woff2", "hi", Point3::default(), 2.0, 0.0)
+            .outline(
+                "x.woff2",
+                "hi",
+                Point3::default(),
+                2.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
             .unwrap_err();
         assert!(matches!(err, CadError::Unsupported(_)));
     }
@@ -616,7 +680,15 @@ mod tests {
         let engine = FontEngine::new();
         assert!(matches!(
             engine
-                .outline("arial.ttf", "hi", Point3::default(), 2.0, 0.0)
+                .outline(
+                    "arial.ttf",
+                    "hi",
+                    Point3::default(),
+                    2.0,
+                    0.0,
+                    TextAlignH::Left,
+                    TextAlignV::Baseline
+                )
                 .unwrap_err(),
             CadError::ResourceMissing(_)
         ));
@@ -632,7 +704,15 @@ mod tests {
         // unsupported reason rather than a missing-font error.
         engine.set_fallback(vec!["also-missing".into()]);
         let err = engine
-            .outline("bad.woff2", "x", Point3::default(), 2.0, 0.0)
+            .outline(
+                "bad.woff2",
+                "x",
+                Point3::default(),
+                2.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
             .unwrap_err();
         assert!(matches!(err, CadError::Unsupported(_)));
     }
@@ -654,7 +734,15 @@ mod tests {
             .register("arial.woff", Arc::from(bytes.into_boxed_slice()))
             .unwrap();
         let polys = engine
-            .outline("arial.ttf", "AB", Point3::default(), 10.0, 0.0)
+            .outline(
+                "arial.ttf",
+                "AB",
+                Point3::default(),
+                10.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
             .unwrap();
         assert!(!polys.is_empty(), "no glyph outlines produced");
         let mut min_x = f64::INFINITY;
@@ -683,7 +771,15 @@ mod tests {
             .register("txt.shx", Arc::from(bytes.into_boxed_slice()))
             .unwrap();
         let polys = engine
-            .outline("txt.shx", "AB", Point3::default(), 10.0, 0.0)
+            .outline(
+                "txt.shx",
+                "AB",
+                Point3::default(),
+                10.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
             .unwrap();
         assert!(!polys.is_empty(), "no SHX glyph outlines");
         let max_x = polys
@@ -707,8 +803,48 @@ mod tests {
             .register("fallback.shx", Arc::from(bytes.into_boxed_slice()))
             .unwrap();
         let polys = engine
-            .outline("not-installed.shx", "A", Point3::default(), 10.0, 0.0)
+            .outline(
+                "not-installed.shx",
+                "A",
+                Point3::default(),
+                10.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
             .unwrap();
         assert!(!polys.is_empty(), "fallback did not render");
+    }
+
+    #[test]
+    fn alignment_shifts_the_run_relative_to_its_anchor() {
+        let lines = vec![(vec![vec![[0.0, 0.0], [10.0, 0.0]]], 10.0)];
+        let left = finalize_lines(
+            lines.clone(),
+            2.0,
+            Point3::default(),
+            0.0,
+            TextAlignH::Left,
+            TextAlignV::Baseline,
+        );
+        let center = finalize_lines(
+            lines.clone(),
+            2.0,
+            Point3::default(),
+            0.0,
+            TextAlignH::Center,
+            TextAlignV::Baseline,
+        );
+        let right = finalize_lines(
+            lines,
+            2.0,
+            Point3::default(),
+            0.0,
+            TextAlignH::Right,
+            TextAlignV::Baseline,
+        );
+        assert_eq!(left[0][0].x, 0.0);
+        assert_eq!(center[0][0].x, -5.0);
+        assert_eq!(right[0][0].x, -10.0);
     }
 }

@@ -150,6 +150,42 @@ pub fn default_font_url(face: &FontFace) -> String {
     face_url(DEFAULT_FONT_BASE_URL, face)
 }
 
+/// A font a drawing needs, resolved against the catalog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedFont {
+    /// The name the drawing referenced (for example `arial.ttf`).
+    pub request: String,
+    pub file: String,
+    pub kind: FontKind,
+    pub encoding: Option<String>,
+    pub url: String,
+}
+
+/// Resolve the fonts a document asks for into catalog faces and fetch URLs.
+///
+/// Unknown names are skipped (the host may then fall back), and each file is
+/// planned once even if several names resolve to it.
+pub fn plan_fonts(catalog: &FontCatalog, requested: &[String], base: &str) -> Vec<PlannedFont> {
+    let mut planned: Vec<PlannedFont> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for request in requested {
+        let Some(face) = catalog.get(request) else {
+            continue;
+        };
+        if !seen.insert(face.file.clone()) {
+            continue;
+        }
+        planned.push(PlannedFont {
+            request: request.clone(),
+            file: face.file.clone(),
+            kind: face.kind.clone(),
+            encoding: face.encoding.clone(),
+            url: face_url(base, face),
+        });
+    }
+    planned
+}
+
 /// A logical, platform-independent resource identifier.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ResourceKey(pub String);
@@ -477,5 +513,24 @@ mod tests {
         // Missing/blank file entries are skipped, not panicked on.
         let catalog = FontCatalog::from_json(r#"[{"name":["x"]},{"file":""}]"#).unwrap();
         assert!(catalog.is_empty());
+    }
+
+    #[test]
+    fn font_plan_maps_requests_to_urls_and_dedups_files() {
+        let catalog = FontCatalog::from_json(CATALOG).unwrap();
+        let requested = vec![
+            "SimSun".to_string(),
+            "宋体".to_string(),
+            "simplex.shx".to_string(),
+            "missing.ttf".to_string(),
+        ];
+        let plan = plan_fonts(&catalog, &requested, DEFAULT_FONT_BASE_URL);
+        // SimSun and 宋体 share one file; simplex resolves; missing drops.
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[0].file, "simsun.woff");
+        assert_eq!(plan[0].request, "SimSun");
+        assert!(plan[0].url.starts_with(DEFAULT_FONT_BASE_URL));
+        assert_eq!(plan[1].file, "simplex.shx");
+        assert_eq!(plan[1].kind, FontKind::Shx);
     }
 }

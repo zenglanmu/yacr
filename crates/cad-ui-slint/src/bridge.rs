@@ -16,7 +16,7 @@ use cad_domain::{
 use cad_render_wgpu::{
     ActiveBackend, BackendCapabilities, BackendPreference, Camera2d, RenderTarget, Renderer,
 };
-use cad_representation::{ProviderRegistry, RepresentationContext};
+use cad_representation::{FontEngine, ProviderRegistry, RepresentationContext};
 use cad_scene::{SceneBudget, SceneCache, SceneDelta};
 
 use crate::{UiHandle, YacrWindow};
@@ -46,9 +46,21 @@ impl Default for BridgeCamera {
 
 /// Build scene batches from a drawing database through the provider chain.
 pub fn build_scene(database: &DrawingDatabase, stamp: TaskStamp) -> CadResult<SceneDelta> {
+    build_scene_with_fonts(database, stamp, None)
+}
+
+/// Build scene batches, shaping text with `fonts` when supplied.
+pub fn build_scene_with_fonts(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+) -> CadResult<SceneDelta> {
     let registry = ProviderRegistry::with_default_provider();
-    let context =
+    let mut context =
         RepresentationContext::new(DocumentId(0), TolerancePolicy::default(), stamp.clone());
+    if let Some(fonts) = fonts {
+        context = context.with_fonts(fonts);
+    }
     let mut cache = SceneCache::new(SceneBudget::default());
     let mut combined = SceneDelta {
         stamp: stamp.clone(),
@@ -90,6 +102,7 @@ struct BridgeState {
     image_size: Option<(u32, u32)>,
     error: Option<String>,
     caps: Option<BackendCapabilities>,
+    fonts_present: bool,
 }
 
 impl Default for BridgeState {
@@ -101,6 +114,7 @@ impl Default for BridgeState {
             image_size: None,
             error: None,
             caps: None,
+            fonts_present: false,
         }
     }
 }
@@ -114,6 +128,7 @@ pub struct CadView {
     state: Rc<RefCell<BridgeState>>,
     handle: UiHandle,
     incoming: IncomingDocument,
+    fonts: Rc<RefCell<Option<Arc<FontEngine>>>>,
     preference: BackendPreference,
 }
 
@@ -164,6 +179,21 @@ impl CadView {
         let _ = self.handle.request_redraw();
     }
 
+    /// Install the shaping fonts the host loaded from the font catalog.
+    ///
+    /// The next frame rebuilds the scene so text is shaped; passing a new set
+    /// (for example after the CDN fetch resolves) triggers a rebuild too.
+    pub fn set_fonts(&self, fonts: Arc<FontEngine>) {
+        *self.fonts.borrow_mut() = Some(fonts);
+        let _ = self.handle.request_redraw();
+    }
+
+    /// Drop the shaping fonts; text falls back to unshaped primitives.
+    pub fn clear_fonts(&self) {
+        *self.fonts.borrow_mut() = None;
+        let _ = self.handle.request_redraw();
+    }
+
     /// Drop derived GPU resources (device loss or backend rebuild).
     pub fn teardown(&self) {
         let mut s = self.state.borrow_mut();
@@ -194,6 +224,8 @@ pub fn install_with_preference(
     let state_for_notifier = state.clone();
     let frame_handle = handle.clone();
     let scene_incoming = incoming.clone();
+    let fonts_slot: Rc<RefCell<Option<Arc<FontEngine>>>> = Rc::new(RefCell::new(None));
+    let scene_fonts = fonts_slot.clone();
 
     window
         .set_rendering_notifier(move |render_state, graphics_api| {
@@ -222,13 +254,16 @@ pub fn install_with_preference(
                         // id: a different drawing reusing the same id must still
                         // rebuild the GPU batches (audit B04).
                         let identity = doc.scene_identity();
-                        if s.document != Some(identity) {
-                            if let Ok(delta) = build_scene(&doc, stamp.clone()) {
+                        let fonts = scene_fonts.borrow().clone();
+                        let has_fonts = fonts.is_some();
+                        if s.document != Some(identity) || s.fonts_present != has_fonts {
+                            if let Ok(delta) = build_scene_with_fonts(&doc, stamp.clone(), fonts) {
                                 if let Some(renderer) = s.renderer.as_mut() {
                                     renderer.clear_batches();
                                     let _ = renderer.upload(&delta);
                                 }
                                 s.document = Some(identity);
+                                s.fonts_present = has_fonts;
                                 s.image_size = None;
                             }
                         }
@@ -271,6 +306,7 @@ pub fn install_with_preference(
         state,
         handle,
         incoming,
+        fonts: fonts_slot,
         preference,
     })
 }
