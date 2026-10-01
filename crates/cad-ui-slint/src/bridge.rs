@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use cad_db::DrawingDatabase;
+use cad_db::{AnnotationDatabase, DrawingDatabase};
 use cad_domain::{
     CadError, CadResult, DocumentId, Point3, SceneIdentity, TaskStamp, TolerancePolicy,
 };
@@ -20,16 +20,23 @@ use cad_representation::layout::{build_paper_space, enumerate_layouts};
 use cad_representation::{
     FontEngine, LayoutDescriptor, ProviderRegistry, RepresentationContext, SpaceSelection,
 };
-use cad_scene::{SceneBudget, SceneCache, SceneDelta};
+use cad_scene::{
+    annotation_batches, AnnotationScene, AnnotationSceneOptions, FrameBudget, SceneBudget,
+    SceneCache, SceneDelta,
+};
 
 use cad_app::layers::LayerOverrideSet;
 use cad_app::recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
+use cad_app::AnnotationVisibilitySet;
 use cad_app::BackendChoice;
 
 use crate::{UiHandle, YacrWindow};
 
 /// A shared slot the application fills when a drawing becomes available.
 pub type IncomingDocument = Rc<RefCell<Option<Arc<DrawingDatabase>>>>;
+
+/// A shared slot the application fills when the annotation sidecar is available.
+pub type IncomingAnnotations = Rc<RefCell<Option<Arc<AnnotationDatabase>>>>;
 
 /// Camera the bridge keeps in sync with the UI.
 #[derive(Clone, Copy)]
@@ -136,6 +143,74 @@ pub fn layout_descriptors(database: &DrawingDatabase) -> Vec<LayoutDescriptor> {
     enumerate_layouts(database)
 }
 
+/// Build the drawing scene plus the annotation overlay into one delta (spec F07).
+///
+/// This is the wire-up that makes stored annotations visible: the drawing batches
+/// come from [`build_scene_with_overrides`] unchanged, and the annotation batches
+/// come from [`cad_scene::annotation_batches`]. The two are concatenated into a
+/// single [`SceneDelta`] so the renderer uploads both in one pass — there is no
+/// second renderer and no separate submit path.
+///
+/// `visibility` is the session override set from `cad-app`; a hidden annotation
+/// contributes no batch and is *not* reported as a gap. `annotations` is optional
+/// so a host without a sidecar keeps working (an absent sidecar is an empty
+/// overlay, not a silent drop of a known database).
+///
+/// The returned [`AnnotationScene`] carries the completeness and diagnostics of
+/// the conversion; callers can surface them without re-running the conversion.
+pub fn build_scene_with_annotations(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    overrides: &LayerOverrideSet,
+    annotations: Option<&AnnotationDatabase>,
+    visibility: &AnnotationVisibilitySet,
+    annotation_document: DocumentId,
+) -> CadResult<(SceneDelta, AnnotationScene)> {
+    let mut delta = build_scene_with_overrides(database, stamp.clone(), fonts.clone(), overrides)?;
+    let budget = FrameBudget::from_scene(&SceneBudget::default());
+    let options = AnnotationSceneOptions {
+        document: annotation_document,
+        fonts: fonts.as_deref(),
+        budget,
+        ..AnnotationSceneOptions::default()
+    };
+    let annotation_scene = match annotations {
+        Some(db) => annotation_batches(db.annotations(), |id| visibility.effective(id), &options),
+        None => annotation_batches(std::iter::empty(), |_| false, &options),
+    };
+    delta.added.extend(annotation_scene.batches.iter().cloned());
+    Ok((delta, annotation_scene))
+}
+
+/// A stable fingerprint of the annotation database and its visibility state.
+///
+/// The bridge rebuilds when this changes, so an annotation create/update/delete
+/// (which advances the database revision) or a hide/show (which does not) both
+/// trigger exactly one rebuild. It is computed here rather than on
+/// [`AnnotationDatabase`] because `cad-app`'s visibility set and `cad-db` are
+/// outside this crate's mutable scope.
+pub fn annotation_fingerprint(
+    annotations: Option<&AnnotationDatabase>,
+    visibility: &AnnotationVisibilitySet,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    match annotations {
+        Some(db) => {
+            db.id().0.hash(&mut hasher);
+            db.revision().0.hash(&mut hasher);
+            db.len().hash(&mut hasher);
+        }
+        None => 0u8.hash(&mut hasher),
+    }
+    for (id, visible) in visibility.iter() {
+        id.0.hash(&mut hasher);
+        visible.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 /// Compute a fit-to-drawing camera from the database bounds.
 pub fn fit_camera(database: &DrawingDatabase, logical_size: [f64; 2]) -> BridgeCamera {
     match database.bounds() {
@@ -171,6 +246,9 @@ struct BridgeState {
     fonts_present: bool,
     /// Fingerprint of the applied layer overrides; a change forces a rebuild.
     overrides_fingerprint: u64,
+    /// Fingerprint of the annotation database revision plus session visibility;
+    /// a change forces a rebuild (F07).
+    annotations_fingerprint: u64,
     /// Generation of the device the current `document` identity was built for.
     /// A device rebuild bumps this so the next frame re-uploads from the DB.
     built_generation: Option<u64>,
@@ -187,6 +265,7 @@ impl Default for BridgeState {
             caps: None,
             fonts_present: false,
             overrides_fingerprint: 0,
+            annotations_fingerprint: 0,
             built_generation: None,
         }
     }
@@ -202,6 +281,8 @@ pub struct CadView {
     handle: UiHandle,
     fonts: Rc<RefCell<Option<Arc<FontEngine>>>>,
     overrides: Rc<RefCell<LayerOverrideSet>>,
+    annotations: IncomingAnnotations,
+    annotation_visibility: Rc<RefCell<AnnotationVisibilitySet>>,
     preference: BackendPreference,
     /// Shared catalog so backend failure text follows the active language.
     messages: Rc<RefCell<crate::i18n::MessageSource>>,
@@ -322,6 +403,43 @@ impl CadView {
         let _ = self.handle.request_redraw();
     }
 
+    /// Adopt the annotation database whose overlay is drawn on the canvas (F07).
+    ///
+    /// Passing a new database (a different sidecar or a reopened document)
+    /// triggers a rebuild; the annotation revision already inside the fingerprint
+    /// means an in-place edit through the annotation transaction path also
+    /// rebuilds without the host having to call this again.
+    pub fn set_annotations(&self, annotations: Arc<AnnotationDatabase>) {
+        *self.annotations.borrow_mut() = Some(annotations);
+        let _ = self.handle.request_redraw();
+    }
+
+    /// Drop the annotation overlay; the drawing keeps rendering.
+    pub fn clear_annotations(&self) {
+        *self.annotations.borrow_mut() = None;
+        let _ = self.handle.request_redraw();
+    }
+
+    /// Apply the session annotation visibility overrides (F07/F09).
+    ///
+    /// Visibility is a session state and does not advance the annotation
+    /// revision; the fingerprint folds it in so hiding or showing an annotation
+    /// rebuilds exactly one frame later.
+    pub fn set_annotation_visibility(&self, visibility: AnnotationVisibilitySet) {
+        *self.annotation_visibility.borrow_mut() = visibility;
+        let _ = self.handle.request_redraw();
+    }
+
+    /// The visibility overrides currently applied to the overlay.
+    pub fn annotation_visibility(&self) -> AnnotationVisibilitySet {
+        self.annotation_visibility.borrow().clone()
+    }
+
+    /// The annotation database currently adopted, if any.
+    pub fn annotations(&self) -> Option<Arc<AnnotationDatabase>> {
+        self.annotations.borrow().clone()
+    }
+
     /// Drop derived GPU resources (device loss or backend rebuild).
     ///
     /// The document slot is **not** cleared: the authoritative drawing lives in
@@ -417,6 +535,11 @@ pub fn install_with_preference(
     let overrides_slot: Rc<RefCell<LayerOverrideSet>> =
         Rc::new(RefCell::new(LayerOverrideSet::new()));
     let scene_overrides = overrides_slot.clone();
+    let annotations_slot: IncomingAnnotations = Rc::new(RefCell::new(None));
+    let scene_annotations = annotations_slot.clone();
+    let visibility_slot: Rc<RefCell<AnnotationVisibilitySet>> =
+        Rc::new(RefCell::new(AnnotationVisibilitySet::new()));
+    let scene_visibility = visibility_slot.clone();
     let messages = handle.messages.clone();
 
     window
@@ -469,15 +592,29 @@ pub fn install_with_preference(
                         let has_fonts = fonts.is_some();
                         let overrides = scene_overrides.borrow().clone();
                         let overrides_fingerprint = overrides.fingerprint();
+                        let annotations = scene_annotations.borrow().clone();
+                        let visibility = scene_visibility.borrow().clone();
+                        let annotations_fingerprint =
+                            annotation_fingerprint(annotations.as_deref(), &visibility);
                         let generation = s.renderer.as_ref().map(|r| r.device_generation());
                         if s.document != Some(identity)
                             || s.fonts_present != has_fonts
                             || s.overrides_fingerprint != overrides_fingerprint
+                            || s.annotations_fingerprint != annotations_fingerprint
                             || s.built_generation != generation
                         {
-                            if let Ok(delta) =
-                                build_scene_with_overrides(&doc, stamp.clone(), fonts, &overrides)
-                            {
+                            // The annotation overlay is concatenated into the
+                            // same delta, so a hidden/created/edited annotation
+                            // rebuilds the GPU batches exactly once (F07).
+                            if let Ok((delta, _scene)) = build_scene_with_annotations(
+                                &doc,
+                                stamp.clone(),
+                                fonts,
+                                &overrides,
+                                annotations.as_deref(),
+                                &visibility,
+                                DocumentId(0),
+                            ) {
                                 if let Some(renderer) = s.renderer.as_mut() {
                                     renderer.clear_batches();
                                     let _ = renderer.upload(&delta);
@@ -485,6 +622,7 @@ pub fn install_with_preference(
                                 s.document = Some(identity);
                                 s.fonts_present = has_fonts;
                                 s.overrides_fingerprint = overrides_fingerprint;
+                                s.annotations_fingerprint = annotations_fingerprint;
                                 s.built_generation = generation;
                                 s.image_size = None;
                             }
@@ -551,6 +689,8 @@ pub fn install_with_preference(
         handle,
         fonts: fonts_slot,
         overrides: overrides_slot,
+        annotations: annotations_slot,
+        annotation_visibility: visibility_slot,
         preference,
         messages,
     })

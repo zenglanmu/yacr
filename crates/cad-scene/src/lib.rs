@@ -10,6 +10,13 @@ use cad_domain::*;
 use cad_representation::{DisplayPrimitive, DisplayRepresentation};
 use std::collections::BTreeMap;
 
+pub mod annotations;
+
+pub use annotations::{
+    all_visible, annotation_batches, annotation_geometry_source, conversion_supported,
+    tessellate_ellipse, AnnotationScene, AnnotationSceneOptions, DEFAULT_ANNOTATION_FONT,
+};
+
 /// Identity of a cached chunk; any component change invalidates it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheKey {

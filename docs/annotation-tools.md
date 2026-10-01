@@ -1,7 +1,7 @@
 # 批注创建工具与管理面板（F07/F08/F09）
 
 本轮在 `cad-app` 与 `cad-ui-slint` 落地了六类批注的**捕获状态机**与**管理通道**，
-核心逻辑可测；渲染层叠加尚未接线（见“未完成”）。
+核心逻辑可测；渲染层叠加已接线（见 `docs/annotation-render.md`）。
 
 ## 已实现
 
@@ -36,8 +36,10 @@
 
 ## 未完成（显式）
 
-- **批注叠加渲染未接线**：`cad-scene`/`cad-render-wgpu` 不消费批注库；面板显示的是真实数据，
-  但画布上看不到既有批注。详见 `docs/render-backends.md` 的渲染工作流。
+- **批注叠加渲染**已由后续工作接线（见 `docs/annotation-render.md`）：`cad-scene` 把批注几何
+  转成线段批次，桥接合并进场景并随批注 revision/可见性重建。仍未做：RGB 颜色（批次只带
+  alpha）、绘制顺序（`draw_order` 已填充但渲染按上传顺序）、修订云扇贝造型、
+  测量几何叠加（属测量路径）。真机/GPU 运行未验证。
 - **Slint 渲染未运行**：本机缺 fontconfig，`cad-ui-slint` 不能原生构建；其测试为字符串/结构断言，
   仅由 wasm32 `cargo check` 保证可编译，无视觉/真机验收。
 - **宿主连接器（`apps/**`）尚未调用** `set_annotation_state`：未调用时降级为显式空面板 + 禁用按钮，
