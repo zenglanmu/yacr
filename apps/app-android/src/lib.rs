@@ -239,10 +239,10 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     adapter.run()
 }
 
-/// Android entry point.
+/// Android entry point (`android-activity` 0.6 calls `fn android_main(app)`).
 #[cfg(target_os = "android")]
 #[no_mangle]
-pub extern "C" fn android_main(app: slint::android::AndroidApp) {
+pub fn android_main(app: slint::android::AndroidApp) {
     android_logger::init_once(
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
     );
