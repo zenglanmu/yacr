@@ -10,7 +10,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cad_db::DrawingDatabase;
-use cad_domain::{CadError, CadResult, DocumentId, Point3, TaskStamp, TolerancePolicy};
+use cad_domain::{
+    CadError, CadResult, DocumentId, Point3, SceneIdentity, TaskStamp, TolerancePolicy,
+};
 use cad_render_wgpu::{
     ActiveBackend, BackendCapabilities, BackendPreference, Camera2d, RenderTarget, Renderer,
 };
@@ -84,13 +86,11 @@ pub fn fit_camera(database: &DrawingDatabase, logical_size: [f64; 2]) -> BridgeC
 struct BridgeState {
     renderer: Option<Renderer>,
     camera: BridgeCamera,
-    document: Option<DatabaseIdKey>,
+    document: Option<SceneIdentity>,
     image_size: Option<(u32, u32)>,
     error: Option<String>,
     caps: Option<BackendCapabilities>,
 }
-
-type DatabaseIdKey = cad_domain::DatabaseId;
 
 impl Default for BridgeState {
     fn default() -> Self {
@@ -218,13 +218,17 @@ pub fn install_with_preference(
                     // by the application viewport and mirrored through `CadView`.
                     if let Some(doc) = scene_incoming.borrow().clone() {
                         let stamp = TaskStamp::new(DocumentId(0), 0);
-                        if s.document != Some(doc.id()) {
+                        // Compare full content identity, not the bare database
+                        // id: a different drawing reusing the same id must still
+                        // rebuild the GPU batches (audit B04).
+                        let identity = doc.scene_identity();
+                        if s.document != Some(identity) {
                             if let Ok(delta) = build_scene(&doc, stamp.clone()) {
                                 if let Some(renderer) = s.renderer.as_mut() {
                                     renderer.clear_batches();
                                     let _ = renderer.upload(&delta);
                                 }
-                                s.document = Some(doc.id());
+                                s.document = Some(identity);
                                 s.image_size = None;
                             }
                         }

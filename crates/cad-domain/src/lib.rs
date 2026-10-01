@@ -23,6 +23,20 @@ ids!(
 );
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Revision(pub u64);
+
+/// Content identity of a drawing database for cache/scene staleness checks.
+///
+/// Two opens with the same `DatabaseId` but different content produce different
+/// identities, so derived render state is rebuilt instead of showing stale
+/// geometry (audit B04).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneIdentity {
+    pub database: DatabaseId,
+    pub revision: Revision,
+    pub entities: u64,
+    pub layers: u64,
+    pub bounds: [Point3; 2],
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CadError {
     NotImplemented(&'static str),

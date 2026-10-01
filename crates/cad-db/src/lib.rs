@@ -250,6 +250,25 @@ impl DrawingDatabase {
         self.revision
     }
 
+    /// Content identity used to decide whether a render/scene cache is stale.
+    ///
+    /// A bare `DatabaseId` is not enough: hosts may reuse the same id for a
+    /// different drawing, which would leave old GPU batches on screen (audit
+    /// B04). The identity therefore mixes the id, revision, structural counts
+    /// and model-space bounds.
+    pub fn scene_identity(&self) -> SceneIdentity {
+        let (min, max) = self
+            .bounds()
+            .unwrap_or((Point3::default(), Point3::default()));
+        SceneIdentity {
+            database: self.id,
+            revision: self.revision,
+            entities: self.entities.len() as u64,
+            layers: self.layers.len() as u64,
+            bounds: [min, max],
+        }
+    }
+
     pub fn entity(&self, id: EntityId) -> Option<&DbEntity> {
         self.entities.get(&id)
     }
@@ -947,5 +966,52 @@ mod tests {
         assert_eq!(min.x, 0.0);
         assert_eq!(max.x, 3.0);
         assert_eq!(max.y, 4.0);
+    }
+
+    #[test]
+    fn scene_identity_distinguishes_same_id_different_content() {
+        // Two databases that reuse DatabaseId(1) but hold different drawings
+        // must not compare equal, or a host would keep stale GPU batches on
+        // screen after opening the second one (audit B04).
+        let make = |end_x: f64| {
+            let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+            b.insert_layer(Layer {
+                id: LayerId(0),
+                name: "0".into(),
+                visible: true,
+            })
+            .unwrap();
+            b.insert_entity(DbEntity {
+                object: DbObject {
+                    id: ObjectId(1),
+                    type_key: "AcDbLine".into(),
+                    revision: Revision(0),
+                    source_handle: Some("1A".into()),
+                },
+                id: EntityId(1),
+                layer: LayerId(0),
+                space: SpaceId::Model,
+                geometry: SemanticGeometry::Line {
+                    start: Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    end: Point3 {
+                        x: end_x,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                },
+                draw_order: 0,
+            })
+            .unwrap();
+            b.finish().unwrap()
+        };
+        let a = make(10.0);
+        let b = make(20.0);
+        assert_eq!(a.id(), b.id(), "same DatabaseId");
+        assert_ne!(a.scene_identity(), b.scene_identity());
+        assert_eq!(a.scene_identity(), a.scene_identity());
     }
 }
