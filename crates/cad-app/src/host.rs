@@ -458,6 +458,27 @@ impl HostController {
     pub fn history_availability(&self) -> crate::HistoryAvailability {
         self.application.history_availability(&self.document_id)
     }
+
+    /// Active measurement preview for the tool panel, if a tool is running.
+    ///
+    /// Pure getter: it reads `SessionState::measurement_preview()` and never
+    /// dispatches a command or advances the tool (audit U04).
+    pub fn measurement_preview(&self) -> Option<crate::MeasurementPreview> {
+        self.session.measurement_preview()
+    }
+
+    /// Human-facing unit label of the open document, for the status area.
+    ///
+    /// Unknown units report the spec's "drawing units" default rather than
+    /// assuming millimetres (spec §16, audit N01).
+    pub fn unit_label(&self) -> &'static str {
+        self.application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .map(|d| d.units.label())
+            .unwrap_or("drawing units")
+    }
 }
 
 #[cfg(test)]
@@ -629,6 +650,38 @@ mod tests {
             revision,
             controller.workspace_annotations().unwrap().revision()
         );
+    }
+
+    #[test]
+    fn measurement_preview_getter_is_pure_and_reports_the_active_tool() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        // No tool: no preview and no command dispatched.
+        assert!(controller.measurement_preview().is_none());
+
+        controller
+            .execute(Command {
+                schema_version: 1,
+                id: crate::CommandId::Measure,
+                document: controller.document_id,
+                viewport: controller.viewport_id,
+                payload: crate::CommandPayload::None,
+            })
+            .unwrap();
+        let preview = controller.measurement_preview().expect("active preview");
+        assert_eq!(preview.kind, crate::MeasurementToolKind::Distance);
+        assert!(preview.points.is_empty());
+
+        // Reading the preview twice is stable: no points are captured.
+        let again = controller.measurement_preview().unwrap();
+        assert_eq!(again.points.len(), preview.points.len());
+        assert_eq!(controller.session.measurement_preview().unwrap(), again);
+    }
+
+    #[test]
+    fn unit_label_reports_the_document_unit_context() {
+        let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        // The demo document has unknown units: never silently "mm".
+        assert_eq!(controller.unit_label(), "drawing units");
     }
 
     #[test]

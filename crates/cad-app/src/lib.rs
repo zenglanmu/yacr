@@ -274,6 +274,41 @@ impl Viewport {
             Projection::Perspective { .. } => 1.0,
         }
     }
+
+    /// Map a canvas point in logical pixels to a world point on the work plane.
+    ///
+    /// `logical` is measured from the top-left of the CAD content rectangle with
+    /// y growing downwards (the Slint/pointer convention); the world y axis
+    /// points up, so the sign flips. The camera target sits at the rectangle
+    /// centre. This is the inverse of the 2D view mapping and is the function a
+    /// host uses to turn a measurement pick into a real point.
+    ///
+    /// Returns `None` for a non-finite or degenerate input rather than producing
+    /// a fabricated point (audit B17/B24).
+    pub fn screen_to_world(
+        &self,
+        logical: [f64; 2],
+        canvas_logical_size: [f64; 2],
+    ) -> Option<Point3> {
+        if !logical[0].is_finite()
+            || !logical[1].is_finite()
+            || !canvas_logical_size[0].is_finite()
+            || !canvas_logical_size[1].is_finite()
+            || canvas_logical_size[0] <= 0.0
+            || canvas_logical_size[1] <= 0.0
+        {
+            return None;
+        }
+        let scale = self.world_per_px();
+        let target = self.camera.target;
+        let dx = (logical[0] - canvas_logical_size[0] * 0.5) * scale;
+        let dy = (logical[1] - canvas_logical_size[1] * 0.5) * scale;
+        Some(Point3 {
+            x: target.x + dx,
+            y: target.y - dy,
+            z: self.work_plane.origin.z,
+        })
+    }
 }
 
 pub struct PreviewState {
@@ -833,20 +868,7 @@ impl Application {
         let Some(preview) = session.measurement_preview() else {
             return CommandOutcome::none();
         };
-        let message = if preview.remaining > 0 {
-            format!(
-                "{}：已选 {} 点，还需 {} 点",
-                preview.kind.label(),
-                preview.points.len(),
-                preview.remaining
-            )
-        } else {
-            format!(
-                "{}：已选 {} 点，可确认",
-                preview.kind.label(),
-                preview.points.len()
-            )
-        };
+        let message = preview.status_line();
         CommandOutcome {
             objects: Vec::new(),
             changes: None,
@@ -1532,6 +1554,47 @@ mod tests {
         let availability = app.history_availability(&DocumentId(1));
         assert!(availability.can_undo);
         assert!(!availability.can_redo);
+    }
+
+    #[test]
+    fn screen_center_maps_to_camera_target_and_corners_are_symmetric() {
+        let mut viewport = Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]);
+        viewport.camera.target = Point3 {
+            x: 100.0,
+            y: 50.0,
+            z: 0.0,
+        };
+        viewport.camera.projection = Projection::Orthographic { scale: 2.0 };
+
+        let center = viewport.screen_to_world([400.0, 300.0], [800.0, 600.0]);
+        assert_eq!(
+            center,
+            Some(Point3 {
+                x: 100.0,
+                y: 50.0,
+                z: 0.0
+            })
+        );
+
+        // Top-left is left of and above the centre; world y flips relative to
+        // the downward-growing screen y.
+        let top_left = viewport
+            .screen_to_world([0.0, 0.0], [800.0, 600.0])
+            .unwrap();
+        assert!((top_left.x - (100.0 - 400.0 * 2.0)).abs() < 1e-9);
+        assert!((top_left.y - (50.0 + 300.0 * 2.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn screen_to_world_rejects_degenerate_input() {
+        let viewport = Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]);
+        assert!(viewport
+            .screen_to_world([f64::NAN, 0.0], [800.0, 600.0])
+            .is_none());
+        assert!(viewport.screen_to_world([0.0, 0.0], [0.0, 600.0]).is_none());
+        assert!(viewport
+            .screen_to_world([0.0, 0.0], [800.0, -1.0])
+            .is_none());
     }
 
     #[test]
