@@ -41,6 +41,24 @@ pub trait FontLoader {
 }
 
 pub mod fonts;
+
+/// Drive a [`HostFuture`] to completion on a no-op waker.
+///
+/// This is only sound for host futures whose steps are always ready (asset
+/// reads, in-memory caches, localStorage) — the Android asset loader and the
+/// tests use it. A future that truly parks (network/GPU) must run on the host's
+/// own executor instead; the caller decides which it has.
+pub fn block_on<F: Future>(future: F) -> F::Output {
+    let mut future = Box::pin(future);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    loop {
+        match future.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(value) => return value,
+            std::task::Poll::Pending => std::thread::yield_now(),
+        }
+    }
+}
+
 pub trait Persistence {
     /// Recovery cache is not a permanent user backup.
     fn save_recovery(&self, document: DocumentId, bytes: Arc<[u8]>) -> HostFuture<'_, ()>;

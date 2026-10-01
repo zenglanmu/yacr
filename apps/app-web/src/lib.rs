@@ -11,15 +11,19 @@
 //! host in `web/main.js`.
 
 #[cfg(target_arch = "wasm32")]
-use cad_app::host::HostController;
-
-#[cfg(target_arch = "wasm32")]
 mod browser {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::sync::Arc;
 
     use wasm_bindgen::JsCast;
+
+    use cad_app::host::HostController;
+    use cad_app::host_files::{
+        export_annotations_atomically, load_recovery, parse_decision, parse_recovery,
+        persist_recovery, resolve_leave,
+    };
+    use cad_platform::{HostFuture, Persistence};
 
     use cad_app::{Command, CommandId, CommandPayload};
     use cad_domain::*;
@@ -31,8 +35,6 @@ mod browser {
         UiHandle, ViewInput,
     };
     use wasm_bindgen_futures::JsFuture;
-
-    use super::HostController;
 
     type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
 
@@ -74,6 +76,56 @@ mod browser {
                 }
             }
         }
+    }
+
+    /// Browser recovery cache over `localStorage` (audit B06).
+    ///
+    /// The browser host keeps a single recovery slot (`cad_ui_slint::web`), so
+    /// the `DocumentId` is recorded inside the encoded snapshot rather than in
+    /// the storage key; the strict fingerprint policy still refuses a snapshot
+    /// that belongs to another drawing. A failed `setItem` returns an error so
+    /// the caller never reloads and never reports unsaved work as preserved.
+    struct WebPersistence;
+
+    impl Persistence for WebPersistence {
+        fn save_recovery(&self, _document: DocumentId, bytes: Arc<[u8]>) -> HostFuture<'_, ()> {
+            Box::pin(async move {
+                let text = std::str::from_utf8(&bytes).map_err(|e| {
+                    CadError::CorruptData(format!("recovery snapshot is not UTF-8: {e}"))
+                })?;
+                cad_ui_slint::web::store_recovery_snapshot(text)
+            })
+        }
+
+        fn load_recovery(&self, _document: DocumentId) -> HostFuture<'_, Option<Arc<[u8]>>> {
+            Box::pin(async move {
+                Ok(cad_ui_slint::web::peek_recovery_snapshot()
+                    .map(|text| Arc::from(text.into_bytes().into_boxed_slice())))
+            })
+        }
+
+        fn discard_recovery_after_confirmation(&self, _document: DocumentId) -> HostFuture<'_, ()> {
+            Box::pin(async move {
+                cad_ui_slint::web::clear_recovery_snapshot();
+                Ok(())
+            })
+        }
+    }
+
+    /// The authoritative viewport camera as a recovery snapshot's camera.
+    fn viewport_camera(controller: &HostController) -> ([f64; 3], f64) {
+        controller
+            .application
+            .workspace
+            .viewports
+            .get(&controller.viewport_id)
+            .map(|vp| {
+                (
+                    [vp.camera.target.x, vp.camera.target.y, vp.camera.target.z],
+                    vp.world_per_px(),
+                )
+            })
+            .unwrap_or(([0.0, 0.0, 0.0], 1.0))
     }
 
     fn preference_for(choice: cad_app::BackendChoice) -> cad_ui_slint::web::BackendPreference {
@@ -368,30 +420,16 @@ mod browser {
                     return Ok(());
                 }
                 CommandId::ExportAnnotations => {
-                    // Prepare (pure getter) → download → confirm on success.
-                    let prepared = {
-                        let c = self.controller.borrow();
-                        c.prepare_annotation_export()
-                    };
-                    match prepared {
-                        Ok((json, revision)) => {
-                            if download_text("annotations.cadnotes.json", &json) {
-                                let confirmed = self
-                                    .controller
-                                    .borrow_mut()
-                                    .confirm_annotation_export(revision);
-                                match confirmed {
-                                    Ok(()) => {
-                                        set_status(format!("已导出 {} 字节批注 JSON", json.len()))
-                                    }
-                                    Err(e) => set_status(format!("导出确认失败：{e}")),
-                                }
-                            } else {
-                                // The download could not be started: keep dirty.
-                                set_status("导出失败：下载未能启动，批注仍为未保存".into());
-                            }
-                        }
-                        Err(e) => set_status(format!("导出失败：{e}")),
+                    // Atomic path shared with Android: prepare (pure) → host
+                    // write → confirm the exact revision. A failed download
+                    // never marks the document saved (audit B07).
+                    let result =
+                        export_annotations_atomically(&mut self.controller.borrow_mut(), |json| {
+                            download_text("annotations.cadnotes.json", json)
+                        });
+                    match result {
+                        Ok(()) => set_status("批注已确认保存到下载文件".into()),
+                        Err(e) => set_status(format!("导出失败：{e}（批注仍为未保存）")),
                     }
                     return Ok(());
                 }
@@ -404,26 +442,38 @@ mod browser {
                     if let CommandPayload::Backend(choice) = command.payload {
                         let preference = preference_for(choice);
                         // Protect unsaved annotations across the reload (B06):
-                        // persist a recovery snapshot first; only reload if the
+                        // capture a recovery snapshot and persist it through the
+                        // shared Persistence contract first; only reload if the
                         // snapshot is durable (or there is nothing unsaved).
-                        let snapshot = {
+                        {
                             let c = self.controller.borrow();
-                            if c.workspace_annotations()
-                                .map(|a| a.is_dirty())
-                                .unwrap_or(false)
-                            {
-                                c.prepare_annotation_export().ok().map(|(json, _)| json)
-                            } else {
-                                None
+                            let signal = c.unsaved_signal();
+                            if signal.dirty {
+                                let (center, wpp) = viewport_camera(&c);
+                                let snapshot = match c.capture_recovery_snapshot(center, wpp) {
+                                    Ok(snapshot) => snapshot,
+                                    Err(e) => {
+                                        set_status(format!(
+                                            "切换失败：无法生成恢复快照（{e}），未重载"
+                                        ));
+                                        return Ok(());
+                                    }
+                                };
+                                if let Err(e) = cad_platform::block_on(persist_recovery(
+                                    &WebPersistence,
+                                    c.document_id,
+                                    &snapshot,
+                                )) {
+                                    set_status(format!(
+                                        "切换失败：恢复快照未能持久化（{e}），未重载"
+                                    ));
+                                    return Ok(());
+                                }
                             }
-                        };
+                        }
                         set_status(format!("切换后端为 {preference:?}，重建渲染会话…"));
-                        match cad_ui_slint::web::store_preference_and_reload_protected(
-                            preference,
-                            snapshot.as_deref(),
-                        ) {
-                            Ok(()) => {}
-                            Err(e) => set_status(format!("切换失败：{e}（未保存批注未丢失）")),
+                        if let Err(e) = cad_ui_slint::web::store_preference_and_reload(preference) {
+                            set_status(format!("切换失败：{e}（未保存批注未丢失）"));
                         }
                     } else {
                         set_status("SwitchBackend 需要后端参数".into());
@@ -595,10 +645,11 @@ mod browser {
         }));
 
         let backend_label = backend_status(chosen);
-        if cad_ui_slint::web::has_recovery_snapshot() {
-            let _ = handle
-                .set_status("检测到上次后端切换的未保存批注恢复快照：可恢复或丢弃（未自动覆盖）");
-        } else {
+        // Restore any persisted recovery snapshot for the starting document;
+        // only a matching fingerprint is applied, otherwise it is reported and
+        // left for an explicit restore/discard.
+        restore_startup_recovery(&controller, &handle);
+        if !cad_ui_slint::web::has_recovery_snapshot() {
             let _ = handle.set_status(format!("就绪（{backend_label}）"));
         }
 
@@ -618,8 +669,53 @@ mod browser {
         adapter.run()
     }
 
-    /// Open a drawing selected through the File API (bytes already read in JS).
-    pub fn open_document(name: &str, bytes: Vec<u8>) -> Result<(), String> {
+    /// Install an opened drawing into the bridge and shell state.
+    fn install_opened(
+        name: &str,
+        opened: &cad_app::host::OpenedDrawing,
+        controller: &Rc<RefCell<HostController>>,
+        handle: &UiHandle,
+        view: &CadView,
+        incoming: &IncomingDocument,
+        viewport: &ViewportId,
+    ) {
+        let drawing = {
+            let mut c = controller.borrow_mut();
+            let _ = c.fit();
+            c.drawing()
+        };
+        *incoming.borrow_mut() = drawing;
+        {
+            let c = controller.borrow();
+            sync_view_camera(&c, view, viewport);
+        }
+        view.request_redraw();
+        let _ = handle.set_status(format!("已打开 {name}: {}", opened.completeness_label));
+        // Fetch the fonts the drawing references (best effort).
+        spawn_font_load();
+    }
+
+    /// Whether the current document has unsaved annotations.
+    ///
+    /// The JS host calls this before opening a file so it can prompt for an
+    /// explicit decision; there is no silent default.
+    pub fn open_needs_decision() -> bool {
+        with_runtime(|rt| rt.controller.borrow().unsaved_signal().dirty).unwrap_or(false)
+    }
+
+    /// Open a drawing after the host supplied an explicit unsaved-work decision.
+    ///
+    /// `decision` is one of `save` / `recovery` / `discard` / `cancel`. The host
+    /// writes happen here (`save` = download of the prepared sidecar, `recovery`
+    /// = localStorage snapshot); a failed write is an error and never replaces
+    /// the document. `Cancel` leaves everything untouched.
+    pub fn open_document_decided(
+        name: &str,
+        bytes: Vec<u8>,
+        decision: &str,
+    ) -> Result<String, String> {
+        let decision = parse_decision(decision)
+            .ok_or_else(|| format!("未知未保存决策：{decision}（save/recovery/discard/cancel）"))?;
         let (controller, handle, view, incoming, viewport) = with_runtime(|rt| {
             (
                 rt.controller.clone(),
@@ -631,28 +727,125 @@ mod browser {
         })
         .ok_or_else(|| "浏览器宿主尚未启动".to_string())?;
         let bytes: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
+        let (center, wpp) = {
+            let c = controller.borrow();
+            viewport_camera(&c)
+        };
+        let persistence = WebPersistence;
+        let resolution = cad_platform::block_on(resolve_leave(
+            &mut controller.borrow_mut(),
+            decision,
+            center,
+            wpp,
+            Some(&persistence as &dyn Persistence),
+            |ctrl| {
+                export_annotations_atomically(ctrl, |json| {
+                    download_text("annotations.cadnotes.json", json)
+                })
+            },
+        ));
+        let resolution = match resolution {
+            Ok(resolution) => resolution,
+            Err(CadError::Cancelled) => {
+                let _ = handle.set_status(format!("已取消打开 {name}：当前文档与未保存批注保留"));
+                return Err("cancelled".into());
+            }
+            Err(e) => {
+                let _ = handle.set_status(format!("打开 {name} 失败：{e}"));
+                return Err(e.to_string());
+            }
+        };
+        let result = controller.borrow_mut().open_bytes_leaving(
+            bytes,
+            name,
+            decision,
+            resolution.saved,
+            resolution.recovery_persisted,
+        );
+        match result {
+            Ok(opened) => {
+                install_opened(
+                    name,
+                    &opened,
+                    &controller,
+                    &handle,
+                    &view,
+                    &incoming,
+                    &viewport,
+                );
+                Ok(format!("已打开 {name}: {}", opened.completeness_label))
+            }
+            Err(e) => {
+                let _ = handle.set_status(format!("打开 {name} 失败：{e}"));
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Open a drawing selected through the File API (bytes already read in JS).
+    ///
+    /// This is the conservative entry: a document with unsaved annotations is
+    /// refused (the bytes are not applied) and the JS host must ask the user and
+    /// call `open_document_decided` with the explicit decision.
+    pub fn open_document(name: &str, bytes: Vec<u8>) -> Result<(), String> {
+        let (controller, handle, view, incoming, viewport) = with_runtime(|rt| {
+            (
+                rt.controller.clone(),
+                rt.handle.clone(),
+                rt.view.clone(),
+                rt.incoming.clone(),
+                rt.viewport.clone(),
+            )
+        })
+        .ok_or_else(|| "浏览器宿主尚未启动".to_string())?;
+        if controller.borrow().unsaved_signal().dirty {
+            let _ = handle.set_status(format!(
+                "打开 {name} 需要未保存决策：请选择保存/保留恢复/丢弃/取消"
+            ));
+            return Err("需要未保存决策".into());
+        }
+        let bytes: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
         let result = controller.borrow_mut().open_bytes(bytes, name);
         match result {
             Ok(opened) => {
-                let drawing = {
-                    let mut c = controller.borrow_mut();
-                    let _ = c.fit();
-                    c.drawing()
-                };
-                *incoming.borrow_mut() = drawing;
-                {
-                    let c = controller.borrow();
-                    sync_view_camera(&c, &view, &viewport);
-                }
-                view.request_redraw();
-                let _ = handle.set_status(format!("已打开 {name}: {}", opened.completeness_label));
-                // Fetch the fonts the drawing references (best effort).
-                spawn_font_load();
+                install_opened(
+                    name,
+                    &opened,
+                    &controller,
+                    &handle,
+                    &view,
+                    &incoming,
+                    &viewport,
+                );
                 Ok(())
             }
             Err(e) => {
                 let _ = handle.set_status(format!("打开 {name} 失败：{e}"));
                 Err(e.to_string())
+            }
+        }
+    }
+
+    /// Attempt to restore a persisted recovery snapshot for the demo/start
+    /// document. Called once at start; a mismatch is reported, never applied.
+    fn restore_startup_recovery(controller: &Rc<RefCell<HostController>>, handle: &UiHandle) {
+        let persistence = WebPersistence;
+        let document = controller.borrow().document_id;
+        match cad_platform::block_on(load_recovery(&persistence, document)) {
+            Ok(Some(snapshot)) => {
+                match controller.borrow_mut().restore_recovery_snapshot(&snapshot) {
+                    Ok(count) => {
+                        let _ = handle.set_status(format!("已从恢复快照恢复 {count} 条批注"));
+                    }
+                    Err(e) => {
+                        let _ = handle
+                            .set_status(format!("检测到恢复快照但未应用（{e}）；可恢复或丢弃"));
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                let _ = handle.set_status(format!("恢复快照损坏，未应用：{e}"));
             }
         }
     }
@@ -719,21 +912,27 @@ mod browser {
         Ok(count)
     }
 
-    /// The pending backend-switch recovery snapshot, if any (audit B06).
-    pub fn pending_recovery_snapshot() -> Option<String> {
-        cad_ui_slint::web::peek_recovery_snapshot()
-    }
-
-    /// Restore annotations from the pending recovery snapshot.
+    /// Restore annotations from the pending recovery snapshot (audit B06).
     ///
-    /// Uses `ImportUnanchored` because the snapshot was taken before a reload
-    /// that may have changed nothing about the document; the fingerprint policy
-    /// is resolved by the caller if it is a mismatch.
+    /// The stored bytes are a [`cad_app::RecoverySnapshot`]; it is decoded and
+    /// applied through the same strict single-transaction path a sidecar import
+    /// uses. Corrupt bytes or an identity mismatch are errors and the snapshot
+    /// is kept (never cleared), so the recovery copy is not lost to a failed
+    /// restore.
     pub fn restore_pending_recovery_snapshot() -> Result<usize, String> {
-        let snapshot =
-            cad_ui_slint::web::peek_recovery_snapshot().ok_or_else(|| "无恢复快照".to_string())?;
-        let count = import_annotations_json(&snapshot)?;
+        let (controller, handle) = with_runtime(|rt| (rt.controller.clone(), rt.handle.clone()))
+            .ok_or_else(|| "浏览器宿主尚未启动".to_string())?;
+        let persistence = WebPersistence;
+        let document = controller.borrow().document_id;
+        let snapshot = cad_platform::block_on(load_recovery(&persistence, document))
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "无恢复快照".to_string())?;
+        let count = controller
+            .borrow_mut()
+            .restore_recovery_snapshot(&snapshot)
+            .map_err(|e| e.to_string())?;
         cad_ui_slint::web::clear_recovery_snapshot();
+        let _ = handle.set_status(format!("已从恢复快照恢复 {count} 条批注"));
         Ok(count)
     }
 
@@ -741,12 +940,28 @@ mod browser {
     pub fn drop_pending_recovery_snapshot() {
         cad_ui_slint::web::clear_recovery_snapshot();
     }
+
+    /// Decode the pending recovery snapshot for diagnostics (never clears it).
+    ///
+    /// Returns the encoded snapshot as stored, or `None`. A stored but
+    /// undecodable value is surfaced separately so a corrupt copy is visible.
+    pub fn pending_recovery_snapshot() -> Option<String> {
+        cad_ui_slint::web::peek_recovery_snapshot()
+    }
+
+    /// Whether the pending recovery snapshot is a valid encoded snapshot.
+    pub fn pending_recovery_is_valid() -> bool {
+        cad_ui_slint::web::peek_recovery_snapshot()
+            .map(|text| parse_recovery(text.as_bytes()).is_ok())
+            .unwrap_or(false)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 pub use browser::{
     confirm_annotation_export, export_annotations_json, font_report, import_annotations_json,
-    open_document, pending_recovery_snapshot, renderer_report, start,
+    open_document, open_document_decided, open_needs_decision, pending_recovery_is_valid,
+    pending_recovery_snapshot, renderer_report, start,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -760,10 +975,35 @@ pub async fn start_web() -> Result<(), JsValue> {
 }
 
 /// Open a drawing from bytes read by the JS File API host.
+///
+/// Refuses to replace a document with unsaved annotations; the JS host must
+/// call `open_needs_decision`, prompt, then `open_document_bytes_decided`.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn open_document_bytes(name: String, bytes: Vec<u8>) -> Result<(), JsValue> {
     open_document(&name, bytes).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Whether the current document has unsaved annotations that need a decision.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn open_requires_decision() -> bool {
+    open_needs_decision()
+}
+
+/// Open a drawing after the JS host supplied an explicit unsaved-work decision.
+///
+/// `decision` is `save`, `recovery`, `discard` or `cancel`. Returns a status
+/// string; `cancel` and a failed write are errors and never replace the
+/// document.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn open_document_bytes_decided(
+    name: String,
+    bytes: Vec<u8>,
+    decision: String,
+) -> Result<String, JsValue> {
+    open_document_decided(&name, bytes, &decision).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Serializable renderer/state report for the diagnostics panel and tests.
