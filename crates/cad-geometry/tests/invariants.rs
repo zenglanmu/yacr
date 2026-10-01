@@ -201,6 +201,27 @@ fn closed_polyline_all_bulges_are_continuous() {
 }
 
 #[test]
+fn tilted_bulge_arc_stays_in_the_polyline_plane() {
+    // A polyline lying in the vertical plane y = 5, with a bulge on the first
+    // segment. The arc must remain in that plane and bow along Z. The old code
+    // worked in world XY, so the arc leaked out of the plane and its Z was
+    // pinned flat (audit B23 / importer OCS).
+    let poly = SemanticGeometry::Polyline {
+        points: vec![pz(0.0, 5.0, 0.0), pz(2.0, 5.0, 0.0), pz(2.0, 5.0, 2.0)],
+        bulges: vec![0.5, 0.0, 0.0],
+        closed: false,
+    };
+    let pts = tessellate_geometry(&poly, TessellationParams::default());
+    assert!(pts.len() > 3);
+    for q in &pts {
+        assert!((q.y - 5.0).abs() < 1e-9, "arc left the plane: {q:?}");
+    }
+    // The bulge actually uses the in-plane Z extent (not flattened to z = 0).
+    let bowed = pts.iter().filter(|q| q.z.abs() > 1e-6).count();
+    assert!(bowed > 0, "tilted bulge was flattened: {pts:?}");
+}
+
+#[test]
 fn spline_honours_source_knots_instead_of_uniformising() {
     // A single quadratic Bezier with explicit clamped knots is a parabola;
     // rebuilding uniform knots through 3 points would give a straight line

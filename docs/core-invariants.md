@@ -10,10 +10,10 @@ replace it. Every "closed" row names the test that would fail before the fix
 and passes after.
 
 Scope of this change: `crates/cad-domain/**`, `crates/cad-geometry/**`,
-`crates/cad-db/**` and their `tests/**`. `cad-import-acadrust`,
+`crates/cad-db/**`, `crates/cad-import-acadrust/**` and their `tests/**`.
 `cad-representation`, `cad-app`, `cad-ui-slint`, `cad-measure`, `cad-scene`,
-`cad-query`, `cad-history`, `cad-cli-tools` were **not** modified, so any item
-whose fix must land in those crates stays open here.
+`cad-query`, `cad-history`, `cad-annotations`, `cad-cli-tools` were **not**
+modified, so any item whose fix must land in those crates stays open here.
 
 ## Closed items
 
@@ -31,13 +31,17 @@ whose fix must land in those crates stays open here.
 | B12 (annotation validation + atomicity) | A single invalid change (NaN geometry, key/id mismatch, zero-axis ellipse, negative style, empty leader, `modified < created`, non-finite/empty anchor, skewed measurement plane) rejects the whole transaction; no partial insert and **no revision bump**. | `invalid_annotation_rejects_whole_transaction_atomically`, `change_key_must_match_annotation_id`, `zero_axis_ellipse_annotation_is_rejected`, `negative_or_non_finite_style_is_rejected`, `modified_before_created_is_rejected`, `empty_leader_geometry_is_rejected`, `measurement_with_skewed_plane_is_rejected`, `non_finite_anchor_fallback_is_rejected`, `empty_anchor_handle_is_rejected` | `AnnotationDatabase::apply_annotation_changes`, `validate_annotation` |
 | B12 (precise change mask) | A metadata/timestamp edit reports `ChangeMask::METADATA` and does not invalidate representations; a text/style edit reports `STYLE`, a geometry edit `GEOMETRY`, an anchor move `TRANSFORM`. | `metadata_only_update_reports_metadata_mask`, `text_payload_change_reports_style_mask_not_geometry`, `geometry_change_reports_geometry_mask`, `anchor_move_reports_transform_mask`, `committed_metadata_only_update_is_reported_as_metadata` | `ChangeMask::for_annotation_update` |
 | B12 (database invariants) | Commits are ordered, `ChangeSet::follows` holds, revision is monotonic, an empty transaction does not advance revision, a dangling block/layout reference is refused by the builder, and a future export revision is refused while dirty state persists. | `commit_is_ordered_and_revision_is_monotonic`, `empty_transaction_does_not_advance_revision_or_claim_changes`, `builder_accepts_nested_blocks_and_rejects_dangling_block_entity`, `layout_entities_require_an_existing_layout`, `marking_a_future_revision_is_refused_and_dirty_stays`, `later_edit_after_mark_is_dirty_again` | `AnnotationDatabase`, `DrawingDatabaseBuilder::finish`, `ChangeSet::follows` |
+| B23/B31 (importer OCS normalisation) | A LWPOLYLINE/2D polyline with a non-Z extrusion is mapped from OCS to WCS through the AutoCAD arbitrary-axis algorithm instead of being copied as `(x, y, elevation)`. `+X` extrusion: OCS `(x, y)` at elevation `e` → WCS `(e, x, y)`. World-Z extrusions keep the exact identity path. | `non_z_extrusion_is_transformed_to_wcs_not_treated_as_flat`, `tilted_lwpolyline_vertices_carry_the_ocs_plane`, `world_z_extrusion_is_left_untouched` | `ocs_to_wcs`, `polyline_ocs_points`, `is_world_z` (`cad-import-acadrust`) |
+| B23 (tilted bulge arc stays in its plane) | A bulge arc is tessellated in the polyline's own plane (Newell normal) rather than forced into world XY; a polyline in the plane `y = 5` keeps `y = 5` and bows along Z. World-Z polylines reduce exactly to the previous XY maths. A tilted bulge with fewer than three vertices has no unique plane and is reported `Partial`, not drawn flat. | `tilted_bulge_arc_stays_in_the_polyline_plane`, `tilted_bulge_completeness_tracks_plane_representability` | `polyline_plane_normal`, `polyline_with_bulges`, `append_bulge_arc` (`cad-geometry`), `polyline_completeness` |
+| B23/B31 (importer source knots/weights) | Source spline knots and weights are carried into `SemanticGeometry::Spline` unchanged; a rational spline keeps its non-uniform clamped knots and is flagged `Partial` (tessellation exactness is a backend concern), never silently uniformised. | `source_spline_knots_and_weights_survive_import` | `spline_semantics` (`cad-import-acadrust`) |
+| B23/B31 (tilted ellipse honesty) | An ELLIPSE on a non-Z extrusion cannot be encoded by the domain `Ellipse` (which has no normal) and is reported `Partial` with a reason instead of being silently flattened; a world-Z ellipse stays `Complete`. | `tilted_ellipse_is_partial_but_world_z_is_complete` | `ellipse_semantics` (`cad-import-acadrust`) |
 
 ## Still open
 
 | Item | Why it stays open |
 |---|---|
-| B23 (non-Z-plane circle under non-uniform transform, exactness flag) | The domain `Ellipse` has no extrusion normal, so a circle whose plane is not parallel to world Z, scaled non-uniformly, cannot be encoded exactly. It is currently approximated; a truthful `Partial`/`Unsupported` flag would need a representation/completeness channel or an `extrusion` field added across `cad-domain`, `cad-import-acadrust` and the annotation codec — out of this change's scope. |
-| B23 (importer supplying source knots/OCS) | The importer must read the real DWG ellipse extrusion and spline knots/weights from acadrust; `cad-import-acadrust` is out of scope and needs real DWG samples to verify. |
+| B23 (non-Z-plane circle under non-uniform transform, exactness flag) | The domain `Ellipse` has no extrusion normal, so a circle whose plane is not parallel to world Z, scaled non-uniformly, cannot be encoded exactly. It is currently approximated; a truthful `Partial`/`Unsupported` flag would need a representation/completeness channel or an `extrusion` field added across `cad-domain`, `cad-import-acadrust` and the annotation codec — the annotation codec is out of this change's scope. Importer-side: a tilted ELLIPSE is now flagged `Partial` (see closed items), but the geometry engine still cannot represent it exactly. |
+| B31 (source units) | DXF `$INSUNITS = 5` is centimetres, but `Unit` has no `Centimeter` variant, so `read_units` currently returns `source: Unit::Meter` with `display_per_source: 0.01` — the ratio is right for cm→m but the `source` label is false. Adding `Unit::Centimeter` fails to compile the exhaustive `encode_unit`/`decode_unit` in `cad-annotations` (`E0004`, verified), and that crate is out of scope. A truthful fix adds the variant here plus the codec mapping there; until then the unit is left as-is and this stays open. |
 | B24 (snap rejecting points behind the camera, measure space constraints) | The snap ray-parameter and paper/world space rules live in `cad-measure`, which is out of scope. The geometry-layer predicates (this change) are a prerequisite, not the fix. |
 | B24 (area work-plane projection in `cad-measure`) | `PlanarPolygonArea` flattens points to z=0 in `cad-measure`; must call `validate_work_plane`/coplanarity there. Out of scope. |
 | B12 (Builder robustness: text style existence, grid index, non-finite numeric fields) | `DrawingDatabaseBuilder` validates layer/layout/block references but not `Text.style` existence or per-geometry numeric finiteness. A focused follow-up can reuse `geometry_is_finite`-style checks inside the builder. |
@@ -47,7 +51,7 @@ whose fix must land in those crates stays open here.
 | B27 (scene/GPU incremental + budget) | `cad-scene`, `cad-render-wgpu`; out of scope. |
 | B29 (web polling/smoke test) | `apps/app-web`, `scripts/check-web-ui.mjs`; out of scope. |
 | B30 (CLI atomic export/diagnostics) | `cad-cli-tools`; out of scope. |
-| B31 (importer/proxy limits, source units) | `cad-import-acadrust`, `cad-proxy`; out of scope and needs real DWG samples. |
+| B31 (importer/proxy limits) | Import cancel/budget (`max_block_depth`, `proxy_limits`, segmented hashing, INSERT base-point/array semantics) needs real DWG samples and touches `cad-proxy`; out of this change. The OCS and source-knot/weight importer gaps are now closed above; the source-unit gap is listed separately. |
 
 ## Verification
 
@@ -57,3 +61,5 @@ The invariant tests are:
 - `crates/cad-domain/tests/invariants.rs`
 - `crates/cad-geometry/tests/invariants.rs`
 - `crates/cad-db/tests/invariants.rs`
+- `crates/cad-import-acadrust/src/lib.rs` (inline `mod tests`: OCS normalisation,
+  tilted bulge/ellipse honesty and source spline knots/weights)
