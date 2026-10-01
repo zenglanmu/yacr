@@ -1,12 +1,14 @@
 //! yacr headless CLI (spec v2.0 §19).
 //!
-//! Every operation goes through the same application/database path as the UI
-//! and prints structured JSON on stdout. Errors are printed on stderr and exit
-//! with a non-zero status; there is no opaque success string.
+//! Every operation goes through the same application/database path as the UI.
+//! stdout carries exactly the structured JSON result (or, with `--out`, is
+//! empty); all human-facing text and every error goes to stderr. Errors are
+//! structured and the process exits non-zero — there is no opaque success.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cad_cli_tools::{CliInvocation, CliOperation};
+use cad_cli_tools::{CliError, CliInvocation, CliOperation, Locale};
 use cad_domain::Point3;
 
 const USAGE: &str = "\
@@ -28,6 +30,10 @@ Operations:
 Options:
   --notes <file>          annotation sidecar path (import/export)
   --points \"x,y;x,y;...\"  measurement points in drawing units
+  --out <file>            write the JSON result to <file> atomically
+                          (same-dir temp file + rename); stdout stays empty
+  --locale <tag>          human-facing stderr language: zh-CN (default) or en.
+                          Machine output keys/schema never change with locale.
   --allow-fingerprint-mismatch  import despite a mismatched drawing hash
   --font <name=path>      register a TTF/OTF/WOFF font for text shaping
                           (repeatable; name defaults to the file name)
@@ -40,43 +46,67 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let Some(operation) = CliOperation::parse(&arguments[0]) else {
-        eprintln!("unknown operation: {}", arguments[0]);
+        let locale = pre_scan_locale(&arguments);
+        let error = CliError::usage(format!("unknown operation: {}", arguments[0]));
+        let exit = error.exit_code();
         eprint!("{USAGE}");
-        return ExitCode::from(2);
+        report(
+            &error.with_locale(locale),
+            operation_for_unknown(&arguments[0]),
+        );
+        return ExitCode::from(exit);
     };
+
     let mut input: Option<String> = None;
     let mut invocation = CliInvocation::new(operation, "");
+    let mut out: Option<PathBuf> = None;
+    // Pre-scan `--locale` so a bad option's human message uses the requested
+    // language regardless of argument order.
+    let locale = pre_scan_locale(&arguments);
+    invocation.locale = locale;
     let mut index = 1;
     while index < arguments.len() {
         match arguments[index].as_str() {
             "--notes" => {
                 index += 1;
                 let Some(value) = arguments.get(index) else {
-                    eprintln!("--notes needs a path");
-                    return ExitCode::from(2);
+                    return fail(CliError::usage("--notes needs a path"), operation, locale);
                 };
                 invocation.notes = Some(value.into());
             }
             "--points" => {
                 index += 1;
                 let Some(value) = arguments.get(index) else {
-                    eprintln!("--points needs a value");
-                    return ExitCode::from(2);
+                    return fail(CliError::usage("--points needs a value"), operation, locale);
                 };
                 match parse_points(value) {
                     Ok(points) => invocation.points = points,
-                    Err(error) => {
-                        eprintln!("{error}");
-                        return ExitCode::from(2);
-                    }
+                    Err(error) => return fail(CliError::usage(error), operation, locale),
                 }
+            }
+            "--out" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(CliError::usage("--out needs a path"), operation, locale);
+                };
+                out = Some(value.into());
+            }
+            "--locale" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(CliError::usage("--locale needs a tag"), operation, locale);
+                };
+                invocation.locale = Locale::parse(value);
             }
             "--allow-fingerprint-mismatch" => invocation.allow_fingerprint_mismatch = true,
             "--font" => {
                 index += 1;
                 let Some(value) = arguments.get(index) else {
-                    eprintln!("--font needs <name=path> or <path>");
-                    return ExitCode::from(2);
+                    return fail(
+                        CliError::usage("--font needs <name=path> or <path>"),
+                        operation,
+                        locale,
+                    );
                 };
                 let (name, path) = match value.split_once('=') {
                     Some((name, path)) => (name.to_string(), path.to_string()),
@@ -92,14 +122,19 @@ fn main() -> ExitCode {
                 invocation.fonts.push((name, path.into()));
             }
             other if other.starts_with("--") => {
-                eprintln!("unknown option: {other}");
-                eprint!("{USAGE}");
-                return ExitCode::from(2);
+                return fail(
+                    CliError::usage(format!("unknown option: {other}")),
+                    operation,
+                    locale,
+                );
             }
             other => {
                 if input.is_some() {
-                    eprintln!("unexpected extra argument: {other}");
-                    return ExitCode::from(2);
+                    return fail(
+                        CliError::usage(format!("unexpected extra argument: {other}")),
+                        operation,
+                        locale,
+                    );
                 }
                 input = Some(other.to_string());
             }
@@ -107,22 +142,86 @@ fn main() -> ExitCode {
         index += 1;
     }
     let Some(input) = input else {
-        eprintln!("missing input drawing path");
-        eprint!("{USAGE}");
-        return ExitCode::from(2);
+        return fail(
+            CliError::usage("missing input drawing path"),
+            operation,
+            locale,
+        );
     };
     invocation.input = input.into();
 
-    match cad_cli_tools::run(&invocation) {
+    match cad_cli_tools::run_to_output(&invocation, out.as_deref()) {
         Ok(json) => {
-            println!("{json}");
+            // stdout stays pure JSON: with `--out` it is intentionally empty.
+            if out.is_none() {
+                println!("{json}");
+            }
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            eprintln!("{error}");
-            ExitCode::FAILURE
-        }
+        Err(error) => fail(error.with_locale(locale), operation, locale),
     }
+}
+
+/// Find a `--locale <tag>` pair anywhere in the arguments, for early errors.
+fn pre_scan_locale(arguments: &[String]) -> Locale {
+    let mut index = 0;
+    while index < arguments.len() {
+        if arguments[index] == "--locale" {
+            if let Some(tag) = arguments.get(index + 1) {
+                return Locale::parse(tag);
+            }
+        }
+        index += 1;
+    }
+    Locale::default()
+}
+
+/// Localize the structured error message and print it to stderr, then return
+/// the non-zero exit code. The machine `code` is locale-independent.
+fn fail(error: CliError, operation: CliOperation, locale: Locale) -> ExitCode {
+    let exit = error.exit_code();
+    report(&error.with_locale(locale), operation);
+    ExitCode::from(exit)
+}
+
+fn report(error: &CliError, operation: CliOperation) {
+    eprintln!("{}", human_message(error, operation));
+    match serde_json::to_string_pretty(&error.to_json(operation)) {
+        Ok(json) => eprintln!("{json}"),
+        Err(_) => eprintln!(
+            "{{\"schema_version\":1,\"operation\":\"{}\"}}",
+            operation.as_str()
+        ),
+    }
+}
+
+/// A short human-facing line; the structured document follows on the next line.
+///
+/// `--locale` only affects this line (and the default zh-CN case), never the
+/// stable machine keys or error codes.
+fn human_message(error: &CliError, operation: CliOperation) -> String {
+    // The locale is echoed in the invocation; the human prefix is intentionally
+    // minimal and does not encode any machine-relevant data beyond the code.
+    if error.locale() == Locale::En {
+        format!(
+            "[{}] error {}: {}",
+            operation.as_str(),
+            error.code,
+            error.message
+        )
+    } else {
+        format!(
+            "[{}] 错误 {}: {}",
+            operation.as_str(),
+            error.code,
+            error.message
+        )
+    }
+}
+
+/// Unknown operations have no `CliOperation`; report under a stable placeholder.
+fn operation_for_unknown(_name: &str) -> CliOperation {
+    CliOperation::Scan
 }
 
 fn parse_points(value: &str) -> Result<Vec<Point3>, String> {
