@@ -225,7 +225,7 @@ fn outline_shx(
             "text height must be a positive finite value".into(),
         ));
     }
-    let lines = layout_glyphs(text, |ch, pen| {
+    let lines = layout_glyphs(text, |ch, pen, _first| {
         let glyph = font.glyph(ch, size)?;
         let polys: Vec<Vec<[f64; 2]>> = glyph
             .polylines
@@ -454,14 +454,32 @@ fn outline_with(
             "text height must be a positive finite value".into(),
         ));
     }
-    let lines = layout_glyphs(text, |ch, pen| {
+    let kern_table = face.tables().kern;
+    let mut previous: Option<ttf_parser::GlyphId> = None;
+    let lines = layout_glyphs(text, |ch, pen, first| {
+        if first {
+            previous = None;
+        }
         let glyph = face.glyph_index(ch)?;
+        let mut kerning = 0.0;
+        if let (Some(table), Some(prev)) = (kern_table.as_ref(), previous) {
+            for subtable in table.subtables {
+                if subtable.horizontal {
+                    if let Some(value) = subtable.glyphs_kerning(prev, glyph) {
+                        kerning = value as f64;
+                        break;
+                    }
+                }
+            }
+        }
+        previous = Some(glyph);
         let advance = face.glyph_hor_advance(glyph).unwrap_or(0) as f64 * scale;
-        let mut builder = OutlineToPolylines::new(scale, pen);
+        let kern = kerning * scale;
+        let mut builder = OutlineToPolylines::new(scale, [pen[0] + kern, pen[1]]);
         if face.outline_glyph(glyph, &mut builder).is_some() {
             builder.flush();
         }
-        Some((std::mem::take(&mut builder.polys), advance))
+        Some((std::mem::take(&mut builder.polys), advance + kern))
     });
     Ok(finalize_lines(
         lines,
@@ -478,17 +496,19 @@ fn outline_with(
 /// returns glyph-local polylines plus its advance.
 fn layout_glyphs<F>(text: &str, mut glyph: F) -> Vec<(Vec<Vec<[f64; 2]>>, f64)>
 where
-    F: FnMut(char, [f64; 2]) -> Option<(Vec<Vec<[f64; 2]>>, f64)>,
+    F: FnMut(char, [f64; 2], bool) -> Option<(Vec<Vec<[f64; 2]>>, f64)>,
 {
     let mut lines = Vec::new();
     for line in text.split('\n') {
         let mut pen = [0.0f64, 0.0];
         let mut polys = Vec::new();
+        let mut first = true;
         for ch in line.chars() {
-            if let Some((glyph_polys, advance)) = glyph(ch, pen) {
+            if let Some((glyph_polys, advance)) = glyph(ch, pen, first) {
                 polys.extend(glyph_polys);
                 pen[0] += advance;
             }
+            first = false;
         }
         lines.push((polys, pen[0]));
     }

@@ -64,8 +64,9 @@
   （如 WOFF2/不支持的 SHX 类型）时，按顺序改用可用的回退字体，**不会静默丢弃文本**；
   全部不可用才报告错误。`resolve_face` 可查询实际使用的字体。
 - 键匹配：注册键 + 文件主名。图纸引用 `arial.ttf`、库只有 `arial.woff` 时按主名 `arial` 命中。
-- 排版：按字形 advance 前进（SHX 用 ink-width + cell 边距策略），`\n`/`\P` 换行；
-  `sanitize_text` 处理 `%%d/%%p/%%c`、`\P`、`\~`、花括号与 `\X...;` 格式码（近似）。
+- 排版：按字形 advance 前进（SHX 用 ink-width + cell 边距策略；TTF 应用 `kern` 字距），
+  `\n`/`\P` 换行；`sanitize_text` 处理 `%%d/%%p/%%c`、`\P`、`\~`、花括号与 `\X...;`
+  格式码（近似）。
 - **对齐**：TEXT 的 `horizontal_alignment`/`vertical_alignment`（含 `alignment_point`）与
   MTEXT 的 `attachment_point` 映射为 `TextAlignH/TextAlignV`，在排版时按行宽/行高偏移；
   `Aligned/Fit` 按左对齐处理（不拉伸）。
@@ -99,8 +100,8 @@
 
 ## 未完成
 
-1. **排版完备性**：字距/kerning、复杂文字整形（bidi/shaping）、MTEXT 全格式码（堆叠、
-   列、制表）与精确行距；当前是逐字、固定 1.2×行距、近似垂直对齐。
+1. **排版完备性**：复杂文字整形（bidi/上下文 shaping）、MTEXT 全格式码（堆叠、列、
+   制表）与精确行距/垂直对齐；当前逐字、TTF `kern` 已应用、行距固定 1.2×、垂直对齐近似。
 2. **平台取字节代码**：`FontLoader`/`plan_fonts`/`set_fonts` 契约已就绪，Web
    `fetch`/Android HTTP 的实际实现与真机/浏览器验证尚未完成。
 
