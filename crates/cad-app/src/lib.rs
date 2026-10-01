@@ -6,7 +6,8 @@
 
 use cad_annotations::{AnnotationCommand, AnnotationService};
 use cad_db::{
-    AnnotationDatabase, ChangeSet, DrawingDatabase, MeasurementAlgorithm, MeasurementRecord,
+    AnnotationDatabase, AnnotationStyle, ChangeSet, DrawingDatabase, MeasurementAlgorithm,
+    MeasurementRecord,
 };
 use cad_domain::*;
 use cad_history::{patch, History, UndoRecord};
@@ -14,12 +15,16 @@ use cad_measure::{MeasurementEngine, MeasurementRequest, MeasurementSpace};
 use cad_query::QueryService;
 use std::{collections::BTreeMap, sync::Arc};
 
+pub mod annotation_list;
+pub mod annotation_tool;
 pub mod camera;
 pub mod host;
 pub mod layers;
 pub mod measure_tool;
 pub mod selection;
 
+pub use annotation_list::{annotation_rows, geometry_kind, AnnotationRow, AnnotationVisibilitySet};
+pub use annotation_tool::{AnnotationPreview, AnnotationTool, AnnotationToolKind};
 pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Projection, ProjectionKind, StandardView,
     ViewBasis,
@@ -55,6 +60,28 @@ pub enum CommandId {
     CreateAnnotation,
     UpdateAnnotation,
     DeleteAnnotation,
+    /// Delete one annotation addressed by payload id (UI-friendly form of
+    /// `DeleteAnnotation`, which needs the raw annotation command payload).
+    DeleteAnnotationById,
+    /// Start (or restart) an annotation creation tool for an explicit kind.
+    ///
+    /// This is *not* the same as `CreateAnnotation`, which commits a fully
+    /// specified `AnnotationCommand`. `BeginAnnotationTool` only opens the
+    /// capture state machine and commits nothing by itself.
+    BeginAnnotationTool,
+    /// Confirm the annotation captured by the active tool: exactly one
+    /// transaction through the shared history path.
+    ConfirmAnnotationTool,
+    /// Cancel the active annotation tool; never opens a transaction.
+    CancelAnnotationTool,
+    /// Append world points to the active annotation tool.
+    AppendAnnotationPoints,
+    /// Supply the text payload for the active annotation tool (text/leader).
+    AnnotationText,
+    /// Temporarily hide or show one existing annotation (session state only).
+    SetAnnotationVisibility,
+    /// Select one annotation for edit/delete, or clear the selection (None).
+    SelectAnnotation,
     Undo,
     Redo,
     ImportAnnotations,
@@ -77,6 +104,14 @@ impl CommandId {
                 | Self::CreateAnnotation
                 | Self::UpdateAnnotation
                 | Self::DeleteAnnotation
+                | Self::DeleteAnnotationById
+                | Self::BeginAnnotationTool
+                | Self::ConfirmAnnotationTool
+                | Self::CancelAnnotationTool
+                | Self::AppendAnnotationPoints
+                | Self::AnnotationText
+                | Self::SetAnnotationVisibility
+                | Self::SelectAnnotation
                 | Self::Undo
                 | Self::Redo
                 | Self::ImportAnnotations
@@ -98,7 +133,7 @@ pub enum ToolState {
     Idle,
     Selecting,
     Measuring(MeasurementTool),
-    Annotating { points: Vec<Point3> },
+    Annotating(AnnotationTool),
     Panning,
 }
 
@@ -110,6 +145,15 @@ pub struct SessionState {
     /// Temporary layer visibility. Never the drawing's layer table (F03).
     pub layer_overrides: LayerOverrideSet,
     pub tool: ToolState,
+    /// Session-scoped temporary annotation visibility, keyed by annotation id.
+    ///
+    /// `AnnotationDatabase` has no hidden field and the sidecar format does not
+    /// carry one, so visibility is a *session override* exactly like the layer
+    /// overrides (F03/F09). It never mutates an annotation, never raises the
+    /// annotation revision and therefore never creates a history entry.
+    pub annotation_visibility: AnnotationVisibilitySet,
+    /// The annotation currently selected for edit/delete in the management UI.
+    pub selected_annotation: Option<AnnotationId>,
     pub generation: u64,
     /// Recorded CAD backend preference; the host rebuilds the render session.
     pub backend: BackendChoice,
@@ -132,6 +176,8 @@ impl SessionState {
             selection: SelectionSet::new(),
             layer_overrides: LayerOverrideSet::new(),
             tool: ToolState::Idle,
+            annotation_visibility: AnnotationVisibilitySet::new(),
+            selected_annotation: None,
             generation: 0,
             backend: BackendChoice::Auto,
         }
@@ -188,6 +234,74 @@ impl SessionState {
                 "no measurement tool is active".into(),
             )),
         }
+    }
+
+    /// Snapshot of the active annotation tool for preview, if any.
+    pub fn annotation_preview(&self) -> Option<AnnotationPreview> {
+        match &self.tool {
+            ToolState::Annotating(tool) => Some(tool.preview()),
+            _ => None,
+        }
+    }
+
+    /// Move the annotation preview cursor without capturing a point.
+    ///
+    /// Pure state update: no command, no database write.
+    pub fn set_annotation_cursor(&mut self, cursor: Option<Point3>) -> CadResult<()> {
+        match &mut self.tool {
+            ToolState::Annotating(tool) => {
+                tool.set_cursor(cursor);
+                Ok(())
+            }
+            _ => Err(CadError::InvalidInput(
+                "no annotation tool is active".into(),
+            )),
+        }
+    }
+
+    /// Set the text payload of the active annotation tool.
+    pub fn set_annotation_text(&mut self, text: impl Into<String>) -> CadResult<()> {
+        match &mut self.tool {
+            ToolState::Annotating(tool) => tool.set_text(text),
+            _ => Err(CadError::InvalidInput(
+                "no annotation tool is active".into(),
+            )),
+        }
+    }
+
+    /// Effective visibility of one annotation id under the session overrides.
+    ///
+    /// Absent overrides mean visible: the sidecar format has no hidden flag, so
+    /// "visible" is the honest default and a hide is an explicit session action.
+    pub fn annotation_visible(&self, id: AnnotationId) -> bool {
+        self.annotation_visibility.effective(id)
+    }
+
+    /// Whether the session has hidden this annotation.
+    pub fn annotation_hidden(&self, id: AnnotationId) -> bool {
+        self.annotation_visibility.is_hidden(id)
+    }
+
+    /// Apply a temporary visibility override for one annotation.
+    pub fn set_annotation_visibility(&mut self, id: AnnotationId, visible: bool) {
+        self.annotation_visibility.set(id, visible);
+    }
+
+    /// Drop every annotation visibility override.
+    pub fn clear_annotation_visibility(&mut self) {
+        self.annotation_visibility.clear();
+    }
+
+    /// Read-only management rows for the annotation list panel.
+    ///
+    /// Pure projection of the document database plus the session visibility and
+    /// selection; it never dispatches a command.
+    pub fn annotation_rows(&self, database: &AnnotationDatabase) -> Vec<AnnotationRow> {
+        annotation_list::annotation_rows(
+            database,
+            &self.annotation_visibility,
+            self.selected_annotation,
+        )
     }
 }
 
@@ -333,6 +447,21 @@ pub enum CommandPayload {
     Backend(BackendChoice),
     /// Start (or restart) a measurement tool with an explicit algorithm.
     MeasureTool(MeasurementToolKind),
+    /// Start (or restart) an annotation creation tool with an explicit kind.
+    AnnotationTool(AnnotationToolKind),
+    /// Append world points to the active capture tool (measure or annotation).
+    ///
+    /// Reuses `Points`; the active tool decides what the points mean. Kept as a
+    /// named variant so a caller can be explicit.
+    AppendAnnotationPoints(Vec<Point3>),
+    /// Text payload for the active annotation tool (text/leader kinds).
+    AnnotationText(String),
+    /// Hide/show one existing annotation. Session state only, no transaction.
+    AnnotationVisibility(AnnotationId, bool),
+    /// Select one annotation for edit/delete in the management panel.
+    SelectAnnotation(Option<AnnotationId>),
+    /// Delete one annotation by id. Opens exactly one transaction.
+    DeleteAnnotation(AnnotationId),
     /// Orbit the current view: yaw about world +Z, pitch about the view right
     /// axis, both in radians. Preserves the eye-target distance (audit F13).
     Orbit {
@@ -366,6 +495,8 @@ pub struct CommandOutcome {
     pub diagnostics: Vec<Diagnostic>,
     /// Structured measurement result, when the command produced one (spec F06).
     pub measurement: Option<MeasurementRecord>,
+    /// The annotation created/updated by a command, when it produced one.
+    pub annotation: Option<AnnotationId>,
 }
 
 impl CommandOutcome {
@@ -375,6 +506,7 @@ impl CommandOutcome {
             changes: None,
             diagnostics: Vec::new(),
             measurement: None,
+            annotation: None,
         }
     }
 }
@@ -470,6 +602,23 @@ impl Application {
                 }
             }
             CommandId::Measure => self.measure(session, &command),
+            CommandId::AppendAnnotationPoints => match &command.payload {
+                CommandPayload::AppendAnnotationPoints(points) | CommandPayload::Points(points) => {
+                    self.capture_annotation_points(session, points)
+                }
+                _ => Err(CadError::InvalidInput(
+                    "AppendAnnotationPoints needs a points payload".into(),
+                )),
+            },
+            CommandId::AnnotationText => match &command.payload {
+                CommandPayload::AnnotationText(text) => {
+                    session.set_annotation_text(text.clone())?;
+                    Ok(self.annotation_preview_outcome(session))
+                }
+                _ => Err(CadError::InvalidInput(
+                    "AnnotationText needs a text payload".into(),
+                )),
+            },
             CommandId::ConfirmMeasurement => self.confirm_measurement(session, &command),
             CommandId::CancelMeasurement => {
                 // Cancelling is always allowed and never opens a transaction.
@@ -479,6 +628,62 @@ impl Application {
             CommandId::CreateAnnotation
             | CommandId::UpdateAnnotation
             | CommandId::DeleteAnnotation => self.annotation_command(&command),
+            CommandId::DeleteAnnotationById => match &command.payload {
+                CommandPayload::DeleteAnnotation(id) => {
+                    let forwarded = Command {
+                        schema_version: command.schema_version,
+                        id: CommandId::DeleteAnnotation,
+                        document: command.document,
+                        viewport: command.viewport,
+                        payload: CommandPayload::Annotation(Box::new(AnnotationCommand::Delete(
+                            *id,
+                        ))),
+                    };
+                    self.annotation_command(&forwarded)
+                }
+                _ => Err(CadError::InvalidInput(
+                    "DeleteAnnotation needs an id payload".into(),
+                )),
+            },
+            CommandId::BeginAnnotationTool => self.begin_annotation_tool(session, &command),
+            CommandId::ConfirmAnnotationTool => self.confirm_annotation_tool(session),
+            CommandId::CancelAnnotationTool => {
+                // Cancelling is always allowed and never opens a transaction.
+                session.cancel_tool()?;
+                Ok(CommandOutcome::none())
+            }
+            CommandId::SetAnnotationVisibility => match &command.payload {
+                CommandPayload::AnnotationVisibility(id, visible) => {
+                    session.set_annotation_visibility(*id, *visible);
+                    Ok(CommandOutcome {
+                        objects: Vec::new(),
+                        changes: None,
+                        diagnostics: vec![Diagnostic {
+                            object: None,
+                            code: "annotation.visibility".into(),
+                            message: format!(
+                                "批注 {} 临时{}（不写库）",
+                                id.0,
+                                if *visible { "显示" } else { "隐藏" }
+                            ),
+                        }],
+                        measurement: None,
+                        annotation: None,
+                    })
+                }
+                _ => Err(CadError::InvalidInput(
+                    "SetAnnotationVisibility needs a visibility payload".into(),
+                )),
+            },
+            CommandId::SelectAnnotation => match &command.payload {
+                CommandPayload::SelectAnnotation(id) => {
+                    session.selected_annotation = *id;
+                    Ok(CommandOutcome::none())
+                }
+                _ => Err(CadError::InvalidInput(
+                    "SelectAnnotation needs a selection payload".into(),
+                )),
+            },
             CommandId::Undo => self.undo(&command),
             CommandId::Redo => self.redo(&command),
             CommandId::SwitchProjection => {
@@ -551,6 +756,7 @@ impl Application {
                             message: format!("后端偏好：{choice:?}（渲染会话由宿主重建）"),
                         }],
                         measurement: None,
+                        annotation: None,
                     })
                 } else {
                     Err(CadError::InvalidInput(
@@ -596,6 +802,7 @@ impl Application {
                 message: message.into(),
             }],
             measurement: None,
+            annotation: None,
         })
     }
 
@@ -626,6 +833,7 @@ impl Application {
                 message: format!("轨道旋转 yaw={yaw:.4} pitch={pitch:.4}"),
             }],
             measurement: None,
+            annotation: None,
         })
     }
 
@@ -650,6 +858,7 @@ impl Application {
                 message: format!("资源引用 {}：{keys}", document.resource_keys.len()),
             }],
             measurement: None,
+            annotation: None,
         })
     }
 
@@ -691,6 +900,7 @@ impl Application {
                 },
             ],
             measurement: None,
+            annotation: None,
         })
     }
 
@@ -915,7 +1125,11 @@ impl Application {
     /// count. A stateless `Points` payload with no active tool keeps the old
     /// convenience inference for direct callers and CLI; the interactive tool
     /// path is the one the UI uses.
-    fn measure(&self, session: &mut SessionState, command: &Command) -> CadResult<CommandOutcome> {
+    fn measure(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
         match &command.payload {
             CommandPayload::MeasureTool(kind) => {
                 session.tool = ToolState::Measuring(MeasurementTool::new(*kind));
@@ -936,7 +1150,7 @@ impl Application {
 
     /// Capture points for the active tool, or evaluate the stateless fallback.
     fn capture_measure_points(
-        &self,
+        &mut self,
         session: &mut SessionState,
         command: &Command,
         points: &[Point3],
@@ -963,6 +1177,11 @@ impl Application {
         }
         if matches!(session.tool, ToolState::Measuring(_)) {
             return Ok(self.measure_preview_outcome(session));
+        }
+        // An annotation tool captures through the same point channel so a host
+        // only has to map a click once, regardless of which tool is active.
+        if matches!(session.tool, ToolState::Annotating(_)) {
+            return self.capture_annotation_points(session, points);
         }
 
         // No active tool: stateless inference retained for direct callers/CLI.
@@ -1015,6 +1234,7 @@ impl Application {
                 message,
             }],
             measurement: None,
+            annotation: None,
         }
     }
 
@@ -1069,24 +1289,170 @@ impl Application {
                 message: format!("{:?}: {:.6}", record.algorithm, record.value),
             }],
             measurement: Some(record),
+            annotation: None,
         })
     }
 
     fn annotation_command(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let document_id = command.document;
-        let CommandPayload::Annotation(annotation_command) = &command.payload else {
+        let payload = match &command.payload {
+            CommandPayload::Annotation(annotation_command) => annotation_command.as_ref(),
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "annotation command needs an annotation payload".into(),
+                ))
+            }
+        };
+        self.commit_annotation(document_id, payload)
+    }
+
+    /// Start (or restart) an annotation creation tool (spec F07/U04).
+    fn begin_annotation_tool(
+        &self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::AnnotationTool(kind) = &command.payload else {
             return Err(CadError::InvalidInput(
-                "annotation command needs an annotation payload".into(),
+                "BeginAnnotationTool needs an annotation kind payload".into(),
             ));
         };
+        session.tool = ToolState::Annotating(AnnotationTool::new(*kind));
+        Ok(self.annotation_preview_outcome(session))
+    }
+
+    /// Capture world points / text into the active annotation tool.
+    ///
+    /// Fixed-point kinds capture the exact complement and then return; open
+    /// ended kinds accumulate until an explicit confirm. A stray point with no
+    /// active tool is refused rather than silently ignored.
+    fn capture_annotation_points(
+        &mut self,
+        session: &mut SessionState,
+        points: &[Point3],
+    ) -> CadResult<CommandOutcome> {
+        let outcome = match &mut session.tool {
+            ToolState::Annotating(tool) => {
+                for point in points {
+                    tool.push_point(*point)?;
+                }
+                if tool.auto_ready() {
+                    Some(self.build_annotation_outcome(session)?)
+                } else {
+                    None
+                }
+            }
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "no annotation tool is active".into(),
+                ))
+            }
+        };
+        if let Some(outcome) = outcome {
+            // A one-shot tool returns to navigation after committing.
+            session.tool = ToolState::Idle;
+            return Ok(outcome);
+        }
+        Ok(self.annotation_preview_outcome(session))
+    }
+
+    /// Confirm an annotation tool: build and commit exactly one transaction.
+    ///
+    /// The tool is cleared only after the transaction has been applied, so a
+    /// rejected commit leaves the captured parameters in place for the user to
+    /// fix (mirroring the measurement tool).
+    fn confirm_annotation_tool(&mut self, session: &mut SessionState) -> CadResult<CommandOutcome> {
+        let outcome = self.build_annotation_outcome(session)?;
+        session.tool = ToolState::Idle;
+        Ok(outcome)
+    }
+
+    /// Build and commit the annotation described by the active tool.
+    fn build_annotation_outcome(&mut self, session: &SessionState) -> CadResult<CommandOutcome> {
+        let (annotation, document_id) = {
+            let tool = match &session.tool {
+                ToolState::Annotating(tool) => tool,
+                _ => {
+                    return Err(CadError::InvalidInput(
+                        "no annotation tool is active".into(),
+                    ))
+                }
+            };
+            let id = self.next_annotation_id(session.document);
+            let annotation = tool.build(
+                id,
+                session.active_space.clone(),
+                0,
+                0,
+                AnnotationStyle::default(),
+            )?;
+            (annotation, session.document)
+        };
+        let command = AnnotationCommand::Create(annotation);
+        self.commit_annotation(document_id, &command)
+    }
+
+    /// Allocate the next annotation id in the open document's id space.
+    ///
+    /// Deterministic and monotonic: one past the highest existing id, so a
+    /// delete never lets a later create reuse an id (which would make a stale
+    /// visibility override or selection point at the wrong annotation). A real
+    /// host may prefer UUIDs, but id allocation is not the tool's concern and a
+    /// stable sequence keeps the command path reproducible for tests and the CLI.
+    fn next_annotation_id(&self, document: DocumentId) -> AnnotationId {
+        let next = self
+            .workspace
+            .documents
+            .get(&document)
+            .map(|d| {
+                d.annotations
+                    .annotations()
+                    .map(|a| a.id.0)
+                    .max()
+                    .unwrap_or(0)
+                    + 1
+            })
+            .unwrap_or(1);
+        AnnotationId(next)
+    }
+
+    fn annotation_preview_outcome(&self, session: &SessionState) -> CommandOutcome {
+        let Some(preview) = session.annotation_preview() else {
+            return CommandOutcome::none();
+        };
+        CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "annotation.preview".into(),
+                message: preview.status_line(),
+            }],
+            measurement: None,
+            annotation: None,
+        }
+    }
+
+    /// Commit one annotation command through the shared history path.
+    ///
+    /// This is the single write entry used both by the tool confirm and by the
+    /// management UI's delete/edit actions, so there is exactly one transaction
+    /// and one undo record per user action. Any failure leaves the database,
+    /// its revision and history untouched (the service rolls the transaction
+    /// back before this function records anything).
+    fn commit_annotation(
+        &mut self,
+        document_id: DocumentId,
+        command: &AnnotationCommand,
+    ) -> CadResult<CommandOutcome> {
         let document = self
             .workspace
             .documents
-            .get_mut(&command.document)
+            .get_mut(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
 
         // Build the undo patch from the before/after state.
-        let (patch, label) = match annotation_command.as_ref() {
+        let (patch, label) = match command {
             AnnotationCommand::Create(a) => {
                 (patch(a.id, None, Some(a.clone())), "create annotation")
             }
@@ -1099,7 +1465,11 @@ impl Application {
                 (patch(*id, before, None), "delete annotation")
             }
         };
-        let inner = match annotation_command.as_ref() {
+        let annotation = match command {
+            AnnotationCommand::Create(a) | AnnotationCommand::Update(a) => a.id,
+            AnnotationCommand::Delete(id) => *id,
+        };
+        let inner = match command {
             AnnotationCommand::Create(a) => AnnotationCommand::Create(a.clone()),
             AnnotationCommand::Update(a) => AnnotationCommand::Update(a.clone()),
             AnnotationCommand::Delete(id) => AnnotationCommand::Delete(*id),
@@ -1120,6 +1490,7 @@ impl Application {
             changes: Some(changes),
             diagnostics: Vec::new(),
             measurement: None,
+            annotation: Some(annotation),
         })
     }
 
@@ -1136,6 +1507,7 @@ impl Application {
             changes: Some(changes),
             diagnostics: Vec::new(),
             measurement: None,
+            annotation: None,
         })
     }
 
@@ -1152,6 +1524,7 @@ impl Application {
             changes: Some(changes),
             diagnostics: Vec::new(),
             measurement: None,
+            annotation: None,
         })
     }
 
@@ -1977,5 +2350,405 @@ mod tests {
         assert!(cad_app_dot(plane.u, plane.v).abs() < 1e-12);
         let n = camera::cross(plane.u, plane.v);
         assert!(n.z > 0.0, "normal points +Z in the plan view");
+    }
+
+    // --- F07/F08/F09 annotation tool + management ---------------
+
+    fn annotation_count(app: &Application) -> usize {
+        app.workspace.documents[&DocumentId(1)].annotations.len()
+    }
+
+    #[test]
+    fn begin_annotation_tool_previews_without_committing() {
+        let (mut app, mut session) = application_with_document();
+        let outcome = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::BeginAnnotationTool,
+                    CommandPayload::AnnotationTool(AnnotationToolKind::Rectangle),
+                ),
+            )
+            .unwrap();
+        assert!(outcome.changes.is_none());
+        assert!(outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "annotation.preview"));
+        let preview = session.annotation_preview().expect("active preview");
+        assert_eq!(preview.kind, AnnotationToolKind::Rectangle);
+        assert_eq!(preview.remaining, 2);
+        assert_eq!(annotation_count(&app), 0);
+        assert!(!app.can_undo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn rectangle_tool_auto_commits_exactly_one_transaction() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::BeginAnnotationTool,
+                CommandPayload::AnnotationTool(AnnotationToolKind::Rectangle),
+            ),
+        )
+        .unwrap();
+        let first = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::AppendAnnotationPoints,
+                    CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0)]),
+                ),
+            )
+            .unwrap();
+        assert!(first.changes.is_none(), "not committed until complete");
+        assert!(session.annotation_preview().is_some());
+
+        let second = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::AppendAnnotationPoints,
+                    CommandPayload::AppendAnnotationPoints(vec![point(4.0, 3.0)]),
+                ),
+            )
+            .unwrap();
+        // Completing the rectangle commits exactly one transaction.
+        assert_eq!(second.changes.as_ref().map(|c| c.changes.len()), Some(1));
+        assert_eq!(second.annotation, Some(AnnotationId(1)));
+        assert!(matches!(session.tool, ToolState::Idle));
+        assert_eq!(annotation_count(&app), 1);
+        assert!(app.can_undo(&DocumentId(1)));
+        assert!(!app.can_redo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn text_tool_requires_text_before_confirm() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::BeginAnnotationTool,
+                CommandPayload::AnnotationTool(AnnotationToolKind::Text),
+            ),
+        )
+        .unwrap();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::AppendAnnotationPoints,
+                CommandPayload::AppendAnnotationPoints(vec![point(1.0, 2.0)]),
+            ),
+        )
+        .unwrap();
+        // Missing text: confirm is rejected and the tool survives.
+        assert!(matches!(
+            app.execute(
+                &mut session,
+                command(CommandId::ConfirmAnnotationTool, CommandPayload::None),
+            ),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert!(session.annotation_preview().is_some());
+        assert_eq!(annotation_count(&app), 0);
+
+        app.execute(
+            &mut session,
+            command(
+                CommandId::AnnotationText,
+                CommandPayload::AnnotationText("检查批注".into()),
+            ),
+        )
+        .unwrap();
+        let outcome = app
+            .execute(
+                &mut session,
+                command(CommandId::ConfirmAnnotationTool, CommandPayload::None),
+            )
+            .unwrap();
+        assert_eq!(outcome.changes.as_ref().map(|c| c.changes.len()), Some(1));
+        assert_eq!(annotation_count(&app), 1);
+        let stored = app.workspace.documents[&DocumentId(1)]
+            .annotations
+            .get(AnnotationId(1))
+            .unwrap();
+        assert_eq!(stored.text, "检查批注");
+    }
+
+    #[test]
+    fn cancelling_an_annotation_tool_produces_zero_transactions() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::BeginAnnotationTool,
+                CommandPayload::AnnotationTool(AnnotationToolKind::Freehand),
+            ),
+        )
+        .unwrap();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::AppendAnnotationPoints,
+                CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0), point(1.0, 1.0)]),
+            ),
+        )
+        .unwrap();
+        let revision_before = app.workspace.documents[&DocumentId(1)]
+            .annotations
+            .revision();
+        let outcome = app
+            .execute(
+                &mut session,
+                command(CommandId::CancelAnnotationTool, CommandPayload::None),
+            )
+            .unwrap();
+        assert!(outcome.changes.is_none());
+        assert!(session.annotation_preview().is_none());
+        assert!(matches!(session.tool, ToolState::Idle));
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)]
+                .annotations
+                .revision(),
+            revision_before
+        );
+        assert!(!app.can_undo(&DocumentId(1)));
+        assert!(!app.can_redo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn freehand_needs_an_explicit_confirm_and_commits_once() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::BeginAnnotationTool,
+                CommandPayload::AnnotationTool(AnnotationToolKind::Freehand),
+            ),
+        )
+        .unwrap();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::AppendAnnotationPoints,
+                CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0), point(1.0, 0.0)]),
+            ),
+        )
+        .unwrap();
+        // Open-ended: no auto-commit even when the minimum is met.
+        assert!(session.annotation_preview().is_some());
+        assert_eq!(annotation_count(&app), 0);
+        let outcome = app
+            .execute(
+                &mut session,
+                command(CommandId::ConfirmAnnotationTool, CommandPayload::None),
+            )
+            .unwrap();
+        assert_eq!(outcome.changes.as_ref().map(|c| c.changes.len()), Some(1));
+        assert_eq!(outcome.annotation, Some(AnnotationId(1)));
+        assert_eq!(annotation_count(&app), 1);
+    }
+
+    #[test]
+    fn annotation_points_without_an_active_tool_are_refused() {
+        let (mut app, mut session) = application_with_document();
+        assert!(matches!(
+            app.execute(
+                &mut session,
+                command(
+                    CommandId::AppendAnnotationPoints,
+                    CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0)]),
+                ),
+            ),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert_eq!(annotation_count(&app), 0);
+    }
+
+    #[test]
+    fn confirm_without_an_active_tool_produces_no_transaction() {
+        let (mut app, mut session) = application_with_document();
+        assert!(matches!(
+            app.execute(
+                &mut session,
+                command(CommandId::ConfirmAnnotationTool, CommandPayload::None),
+            ),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert_eq!(annotation_count(&app), 0);
+        assert!(!app.can_undo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn ellipse_tool_reads_center_and_axes_from_two_points() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::BeginAnnotationTool,
+                CommandPayload::AnnotationTool(AnnotationToolKind::Ellipse),
+            ),
+        )
+        .unwrap();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::AppendAnnotationPoints,
+                CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0), point(2.0, 1.0)]),
+            ),
+        )
+        .unwrap();
+        let stored = app.workspace.documents[&DocumentId(1)]
+            .annotations
+            .get(AnnotationId(1))
+            .unwrap();
+        match &stored.geometry {
+            cad_db::AnnotationGeometry::Ellipse {
+                center,
+                axis_u,
+                axis_v,
+            } => {
+                assert_eq!(*center, point(0.0, 0.0));
+                assert_eq!(*axis_u, point(2.0, 0.0));
+                assert_eq!(*axis_v, point(0.0, 1.0));
+            }
+            other => panic!("expected ellipse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn annotation_visibility_round_trips_without_a_transaction() {
+        let (mut app, mut session) = application_with_document();
+        // Seed one annotation directly through the command path.
+        app.execute(
+            &mut session,
+            command(
+                CommandId::CreateAnnotation,
+                CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(9)))),
+            ),
+        )
+        .unwrap();
+        let revision_before = app.workspace.documents[&DocumentId(1)]
+            .annotations
+            .revision();
+
+        let outcome = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::SetAnnotationVisibility,
+                    CommandPayload::AnnotationVisibility(AnnotationId(9), false),
+                ),
+            )
+            .unwrap();
+        assert!(outcome.changes.is_none(), "visibility writes nothing");
+        assert!(session.annotation_hidden(AnnotationId(9)));
+        let rows = session.annotation_rows(&app.workspace.documents[&DocumentId(1)].annotations);
+        assert!(!rows[0].visible);
+        assert!(rows[0].is_overridden());
+        // The database revision and history are untouched.
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)]
+                .annotations
+                .revision(),
+            revision_before
+        );
+        assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
+
+        // Show again: state round-trips back to visible.
+        app.execute(
+            &mut session,
+            command(
+                CommandId::SetAnnotationVisibility,
+                CommandPayload::AnnotationVisibility(AnnotationId(9), true),
+            ),
+        )
+        .unwrap();
+        assert!(session.annotation_visible(AnnotationId(9)));
+    }
+
+    #[test]
+    fn selecting_an_annotation_is_read_only_state() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::SelectAnnotation,
+                CommandPayload::SelectAnnotation(Some(AnnotationId(4))),
+            ),
+        )
+        .unwrap();
+        assert_eq!(session.selected_annotation, Some(AnnotationId(4)));
+        assert!(!app.can_undo(&DocumentId(1)));
+        app.execute(
+            &mut session,
+            command(
+                CommandId::SelectAnnotation,
+                CommandPayload::SelectAnnotation(None),
+            ),
+        )
+        .unwrap();
+        assert_eq!(session.selected_annotation, None);
+    }
+
+    #[test]
+    fn annotation_transactions_drive_undo_and_redo_availability() {
+        let (mut app, mut session) = application_with_document();
+        // One confirmed annotation tool = one undoable transaction.
+        app.execute(
+            &mut session,
+            command(
+                CommandId::BeginAnnotationTool,
+                CommandPayload::AnnotationTool(AnnotationToolKind::Rectangle),
+            ),
+        )
+        .unwrap();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::AppendAnnotationPoints,
+                CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0), point(1.0, 1.0)]),
+            ),
+        )
+        .unwrap();
+        assert!(app.can_undo(&DocumentId(1)));
+        assert!(!app.can_redo(&DocumentId(1)));
+
+        // Undo removes it; redo stays available (U11).
+        app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+            .unwrap();
+        assert_eq!(annotation_count(&app), 0);
+        assert!(!app.can_undo(&DocumentId(1)));
+        assert!(app.can_redo(&DocumentId(1)));
+
+        // Redo restores it.
+        app.execute(&mut session, command(CommandId::Redo, CommandPayload::None))
+            .unwrap();
+        assert_eq!(annotation_count(&app), 1);
+        assert!(app.can_undo(&DocumentId(1)));
+        assert!(!app.can_redo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn viewer_mode_rejects_annotation_tool_commands() {
+        let (mut app, _) = application_with_document();
+        let mut viewer = SessionState::new(DocumentId(1), AppMode::Viewer);
+        for id in [
+            CommandId::BeginAnnotationTool,
+            CommandId::ConfirmAnnotationTool,
+            CommandId::CancelAnnotationTool,
+            CommandId::AppendAnnotationPoints,
+            CommandId::AnnotationText,
+            CommandId::SetAnnotationVisibility,
+            CommandId::SelectAnnotation,
+        ] {
+            assert_eq!(
+                app.execute(&mut viewer, command(id, CommandPayload::None))
+                    .unwrap_err(),
+                CadError::PermissionDenied,
+                "{id:?} must be Work-only"
+            );
+        }
     }
 }
