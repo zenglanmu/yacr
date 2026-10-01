@@ -4,6 +4,29 @@
 //! run into world-space polylines so the scene can batch text like any other
 //! line geometry. A fallback chain is applied when a drawing's referenced font
 //! is not registered or cannot be parsed, so text is not silently dropped.
+//!
+//! ## Known limitations (explicit, not silently approximated)
+//!
+//! This is a glyph-per-glyph outline renderer, not a text shaping engine. The
+//! following remain unsupported:
+//!
+//! - **Bidirectional text and complex-script reordering** are not performed; the
+//!   logical order is rendered as-is.
+//! - **Contextual shaping** (Arabic joining, Indic reordering, ligature
+//!   substitution) is not applied; the OpenType `kern` table is the only layout
+//!   feature consulted.
+//! - **MTEXT columns** are not laid out; column/justification codes are consumed
+//!   by [`sanitize_text`] but do not affect the result.
+//! - **Exact line spacing / vertical metrics** are not read from the font; line
+//!   spacing is the fixed `1.2 * height` used by [`finalize_lines`].
+//! - **MTEXT stacked fractions** (`\S`) are rendered as two stacked lines with
+//!   that normal line spacing and no fraction bar or vertical scaling.
+//! - **Tabs** are expanded to a fixed run of spaces (see `TAB_STEP`); true
+//!   tab-stop alignment against proportional advances is not implemented.
+//! - **Per-glyph fallback only**: a missing glyph is substituted from the next
+//!   face in the chain. There is no per-style (bold/italic) or per-script fallback.
+//!
+//! See `docs/fonts.md` §未完成 for the tracked gaps.
 
 use cad_domain::{CadError, CadResult, Point3, TextAlignH, TextAlignV};
 use std::collections::HashMap;
@@ -22,6 +45,21 @@ enum FaceData {
     Shx(ShxFont),
     /// A face we recognised but cannot decode yet; reported explicitly.
     Unsupported(String),
+}
+
+/// A face from the resolved fallback chain that can actually supply glyphs.
+///
+/// `Sfnt` faces are parsed once per [`FontEngine::outline`] call and borrow the
+/// caller's kept-alive `Arc<[u8]>`; `Shx` faces are borrowed from the chain.
+enum ResolvedFace<'a> {
+    Sfnt {
+        // Boxed: `ttf_parser::Face` is several KiB and would dominate this enum.
+        face: Box<ttf_parser::Face<'a>>,
+        kern: Option<ttf_parser::kern::Table<'a>>,
+        /// World units per font unit: `height / units_per_em`.
+        scale: f64,
+    },
+    Shx(&'a ShxFont),
 }
 
 /// A bounded, in-memory set of font faces with an optional fallback chain.
@@ -119,6 +157,12 @@ impl FontEngine {
     /// `height` is the cap/em height in world units and `rotation` is radians
     /// about the origin. When the requested font is missing, the fallback chain
     /// is used.
+    ///
+    /// Fallback is resolved **per glyph**: each character is drawn with the
+    /// first face in the chain (primary, then fallbacks in order) that actually
+    /// contains it, and the pen advances by that face's advance. When the
+    /// primary face has every glyph, the result is byte-for-byte the same as
+    /// single-face rendering.
     #[allow(clippy::too_many_arguments)]
     pub fn outline(
         &self,
@@ -130,6 +174,13 @@ impl FontEngine {
         h_align: TextAlignH,
         v_align: TextAlignV,
     ) -> CadResult<Vec<Vec<Point3>>> {
+        let size = height.abs();
+        if !size.is_finite() || size <= 0.0 {
+            return Err(CadError::InvalidInput(
+                "text height must be a positive finite value".into(),
+            ));
+        }
+
         // Primary face, then the fallback chain. A face we recognised but
         // cannot decode is skipped so a usable fallback still renders.
         let mut chain: Vec<Arc<FaceData>> = Vec::new();
@@ -146,23 +197,111 @@ impl FontEngine {
                 "font '{font_key}' is not registered and no fallback is available"
             )));
         }
+
+        // Keep every sfnt `Arc<[u8]>` alive for the whole call so the parsed
+        // faces (which borrow the bytes) stay valid. Each Sfnt candidate is
+        // parsed exactly once, regardless of how many glyphs come from it.
+        let keepalive: Vec<Arc<[u8]>> = chain
+            .iter()
+            .filter_map(|face| match &**face {
+                FaceData::Sfnt(data) => Some(data.clone()),
+                _ => None,
+            })
+            .collect();
+
         let mut unsupported = None;
+        let mut resolved: Vec<ResolvedFace<'_>> = Vec::new();
+        let mut sfnt_index = 0usize;
         for face in &chain {
             match &**face {
                 FaceData::Unsupported(reason) => {
                     unsupported.get_or_insert_with(|| reason.clone());
                 }
-                FaceData::Sfnt(data) => {
-                    return outline_with(data, text, origin, height, rotation, h_align, v_align)
+                FaceData::Sfnt(_) => {
+                    let data: &[u8] = &keepalive[sfnt_index];
+                    sfnt_index += 1;
+                    // Registration already proved parseability; skip defensively
+                    // so a bad fallback does not abort a usable chain.
+                    if let Ok(parsed) = ttf_parser::Face::parse(data, 0) {
+                        let upem = parsed.units_per_em().max(1) as f64;
+                        let scale = size / upem;
+                        if scale.is_finite() && scale > 0.0 {
+                            let kern = parsed.tables().kern;
+                            resolved.push(ResolvedFace::Sfnt {
+                                face: Box::new(parsed),
+                                kern,
+                                scale,
+                            });
+                        }
+                    }
                 }
-                FaceData::Shx(font) => {
-                    return outline_shx(font, text, origin, height, rotation, h_align, v_align)
-                }
+                FaceData::Shx(font) => resolved.push(ResolvedFace::Shx(font)),
             }
         }
-        Err(CadError::Unsupported(unsupported.unwrap_or_else(|| {
-            "no usable font in the fallback chain".into()
-        })))
+        if resolved.is_empty() {
+            return Err(CadError::Unsupported(
+                unsupported.unwrap_or_else(|| "no usable font in the fallback chain".into()),
+            ));
+        }
+
+        // `previous` remembers which face supplied the preceding glyph so that
+        // kerning is only applied within a single face (cross-face pairs are
+        // meaningless).
+        let mut previous: Option<(usize, ttf_parser::GlyphId)> = None;
+        let lines = layout_glyphs(text, |ch, pen, first| {
+            if first {
+                previous = None;
+            }
+            for (index, candidate) in resolved.iter().enumerate() {
+                match candidate {
+                    ResolvedFace::Sfnt { face, kern, scale } => {
+                        let Some(glyph) = face.glyph_index(ch) else {
+                            continue;
+                        };
+                        let mut kerning = 0.0;
+                        if let (Some(table), Some((prev_index, prev))) = (kern.as_ref(), previous) {
+                            if prev_index == index {
+                                for subtable in table.subtables {
+                                    if subtable.horizontal {
+                                        if let Some(value) = subtable.glyphs_kerning(prev, glyph) {
+                                            kerning = value as f64;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        previous = Some((index, glyph));
+                        let advance = face.glyph_hor_advance(glyph).unwrap_or(0) as f64 * scale;
+                        let shift = kerning * scale;
+                        let mut builder = OutlineToPolylines::new(*scale, [pen[0] + shift, pen[1]]);
+                        if face.outline_glyph(glyph, &mut builder).is_some() {
+                            builder.flush();
+                        }
+                        return Some((std::mem::take(&mut builder.polys), advance + shift));
+                    }
+                    ResolvedFace::Shx(font) => {
+                        if let Some(glyph) = font.glyph(ch, size) {
+                            previous = None;
+                            let polys: Vec<Vec<[f64; 2]>> = glyph
+                                .polylines
+                                .iter()
+                                .map(|poly| {
+                                    poly.iter()
+                                        .map(|p| [p[0] + pen[0], p[1] + pen[1]])
+                                        .collect()
+                                })
+                                .collect();
+                            return Some((polys, glyph.advance));
+                        }
+                    }
+                }
+            }
+            None
+        });
+        Ok(finalize_lines(
+            lines, size, origin, rotation, h_align, v_align,
+        ))
     }
 }
 
@@ -207,40 +346,6 @@ fn prepare_font(bytes: &[u8]) -> CadResult<Arc<[u8]>> {
     } else {
         Ok(Arc::from(bytes.to_vec()))
     }
-}
-
-/// Layout an SHX run into world-space polylines.
-fn outline_shx(
-    font: &ShxFont,
-    text: &str,
-    origin: Point3,
-    height: f64,
-    rotation: f64,
-    h_align: TextAlignH,
-    v_align: TextAlignV,
-) -> CadResult<Vec<Vec<Point3>>> {
-    let size = height.abs();
-    if !size.is_finite() || size <= 0.0 {
-        return Err(CadError::InvalidInput(
-            "text height must be a positive finite value".into(),
-        ));
-    }
-    let lines = layout_glyphs(text, |ch, pen, _first| {
-        let glyph = font.glyph(ch, size)?;
-        let polys: Vec<Vec<[f64; 2]>> = glyph
-            .polylines
-            .iter()
-            .map(|poly| {
-                poly.iter()
-                    .map(|p| [p[0] + pen[0], p[1] + pen[1]])
-                    .collect()
-            })
-            .collect();
-        Some((polys, glyph.advance))
-    });
-    Ok(finalize_lines(
-        lines, size, origin, rotation, h_align, v_align,
-    ))
 }
 
 /// Reconstruct an sfnt (TTF) container from a WOFF1 file.
@@ -435,62 +540,6 @@ impl OutlineBuilder for OutlineToPolylines {
     }
 }
 
-/// Outline `text` using already-decoded sfnt bytes.
-fn outline_with(
-    data: &[u8],
-    text: &str,
-    origin: Point3,
-    height: f64,
-    rotation: f64,
-    h_align: TextAlignH,
-    v_align: TextAlignV,
-) -> CadResult<Vec<Vec<Point3>>> {
-    let face = ttf_parser::Face::parse(data, 0)
-        .map_err(|e| CadError::CorruptData(format!("font cannot be parsed: {e}")))?;
-    let upem = face.units_per_em().max(1) as f64;
-    let scale = height.abs() / upem;
-    if !scale.is_finite() || scale <= 0.0 {
-        return Err(CadError::InvalidInput(
-            "text height must be a positive finite value".into(),
-        ));
-    }
-    let kern_table = face.tables().kern;
-    let mut previous: Option<ttf_parser::GlyphId> = None;
-    let lines = layout_glyphs(text, |ch, pen, first| {
-        if first {
-            previous = None;
-        }
-        let glyph = face.glyph_index(ch)?;
-        let mut kerning = 0.0;
-        if let (Some(table), Some(prev)) = (kern_table.as_ref(), previous) {
-            for subtable in table.subtables {
-                if subtable.horizontal {
-                    if let Some(value) = subtable.glyphs_kerning(prev, glyph) {
-                        kerning = value as f64;
-                        break;
-                    }
-                }
-            }
-        }
-        previous = Some(glyph);
-        let advance = face.glyph_hor_advance(glyph).unwrap_or(0) as f64 * scale;
-        let kern = kerning * scale;
-        let mut builder = OutlineToPolylines::new(scale, [pen[0] + kern, pen[1]]);
-        if face.outline_glyph(glyph, &mut builder).is_some() {
-            builder.flush();
-        }
-        Some((std::mem::take(&mut builder.polys), advance + kern))
-    });
-    Ok(finalize_lines(
-        lines,
-        height.abs(),
-        origin,
-        rotation,
-        h_align,
-        v_align,
-    ))
-}
-
 /// Lay out each `\n`-separated line: place glyphs at the pen and record the
 /// line's advance width. The glyph callback receives the pen position and
 /// returns glyph-local polylines plus its advance.
@@ -562,17 +611,59 @@ fn finalize_lines(
     out
 }
 
+/// Spaces a tab expands to.
+///
+/// Tabs are rendered as a fixed run of spaces rather than snapping the pen to
+/// proportional tab stops, so `\t`/`^I` spacing is an explicit approximation
+/// (see the module-level limitations).
+const TAB_STEP: usize = 4;
+
+/// Consume a `\X...;` parameter code whose value begins at `start` (the index
+/// just after the code letter), returning the index just past the terminating
+/// `;` — or the end of input when no `;` is present.
+fn skip_param_code(chars: &[char], start: usize) -> usize {
+    let mut j = start;
+    while j < chars.len() && chars[j] != ';' {
+        j += 1;
+    }
+    if j < chars.len() {
+        j + 1
+    } else {
+        j
+    }
+}
+
 /// Strip MTEXT/TEXT formatting so the raw glyph text can be shaped.
 ///
-/// Handles `\P` line breaks, `%%d`/`%%p`/`%%c` symbols, brace grouping and
-/// simple `\X...;` codes. Unknown escapes are dropped; this is an
-/// approximation, not a full MTEXT layout engine.
+/// Handles:
+///
+/// - `\P`/`\p` line breaks, `\~` non-breaking space and `\\` escapes;
+/// - `%%d`/`%%p`/`%%c` symbols and brace grouping;
+/// - `\S<num><sep><den>;` stacked fractions, rendered as two lines (see below);
+/// - `\t` and `^I` tabs, expanded to `TAB_STEP` spaces;
+/// - no-argument toggles `\L`/`\l` (underline), `\O`/`\o` (overline) and
+///   `\K`/`\k` (strikethrough), which affect styling we do not render;
+/// - parameter codes `\H`, `\W`, `\A`, `\Q`, `\C`, `\f`, `\F`, … terminated by
+///   `;`, consumed without emitting text.
+///
+/// Unknown escapes are dropped. This is an approximation, not a full MTEXT
+/// layout engine: stacked fractions use the normal line spacing with no
+/// fraction bar or vertical scaling, tabs do not align to true tab stops, and
+/// MTEXT columns are ignored.
 pub fn sanitize_text(raw: &str) -> String {
     let chars: Vec<char> = raw.chars().collect();
     let mut out = String::new();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
+        // DXF caret notation: `^I` is a TAB control character.
+        if c == '^' && i + 1 < chars.len() && matches!(chars[i + 1], 'I' | 'i') {
+            for _ in 0..TAB_STEP {
+                out.push(' ');
+            }
+            i += 2;
+            continue;
+        }
         if c == '\\' {
             if i + 1 >= chars.len() {
                 i += 1;
@@ -592,12 +683,29 @@ pub fn sanitize_text(raw: &str) -> String {
                     out.push('\\');
                     i += 2;
                 }
-                _ if n.is_ascii_alphabetic() => {
-                    let mut j = i + 2;
-                    while j < chars.len() && chars[j] != ';' {
-                        j += 1;
+                't' => {
+                    // `\t` is a tab; expand to a fixed run of spaces.
+                    for _ in 0..TAB_STEP {
+                        out.push(' ');
                     }
-                    i = if j < chars.len() { j + 1 } else { chars.len() };
+                    i += 2;
+                }
+                'S' => {
+                    i = push_stacked_fraction(&chars, i, &mut out);
+                }
+                // No-argument style toggles. These must not scan for `;`, or
+                // they would swallow the rest of the run.
+                'L' | 'l' | 'O' | 'o' | 'K' | 'k' => {
+                    i += 2;
+                }
+                // Parameter codes: `\H<val>;`, `\W<val>;`, `\A<val>;`,
+                // `\Q<val>;`, `\C<val>;`, `\f<name|…>;`, etc. Consume the value
+                // and its terminating `;` without emitting text.
+                'H' | 'W' | 'A' | 'Q' | 'C' | 'f' | 'F' => {
+                    i = skip_param_code(&chars, i + 2);
+                }
+                _ if n.is_ascii_alphabetic() => {
+                    i = skip_param_code(&chars, i + 2);
                 }
                 _ => i += 2,
             }
@@ -633,6 +741,36 @@ pub fn sanitize_text(raw: &str) -> String {
     out
 }
 
+/// Render an MTEXT stacked fraction starting at the `\` of `\S`.
+///
+/// The separator is the first of `^` (centre), `/` (horizontal bar) or `#`
+/// (diagonal). All three are rendered the same way here: numerator and
+/// denominator on consecutive lines, in the order written, using the normal
+/// line spacing. There is no fraction bar, no vertical scaling and no reduced
+/// font size — a deliberate, documented approximation. Returns the index just
+/// past the consumed `\S…;` code.
+fn push_stacked_fraction(chars: &[char], backslash: usize, out: &mut String) -> usize {
+    let end = skip_param_code(chars, backslash + 2);
+    let content_end = if end > backslash + 2 && chars.get(end - 1) == Some(&';') {
+        end - 1
+    } else {
+        end
+    };
+    let content: String = chars[backslash + 2..content_end].iter().collect();
+    match content
+        .char_indices()
+        .find(|(_, ch)| matches!(ch, '^' | '/' | '#'))
+    {
+        Some((idx, sep)) => {
+            out.push_str(&sanitize_text(&content[..idx]));
+            out.push('\n');
+            out.push_str(&sanitize_text(&content[idx + sep.len_utf8()..]));
+        }
+        None => out.push_str(&sanitize_text(&content)),
+    }
+    end
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -644,6 +782,49 @@ mod tests {
         assert_eq!(sanitize_text("45%%d"), "45°");
         assert_eq!(sanitize_text("plain"), "plain");
         assert_eq!(sanitize_text("a\\~b"), "a b");
+    }
+
+    #[test]
+    fn sanitize_stacks_fractions_on_two_lines() {
+        // `^`, `/` and `#` all render as numerator over denominator.
+        assert_eq!(sanitize_text("\\S1/2;"), "1\n2");
+        assert_eq!(sanitize_text("x\\Sa^b;y"), "xa\nby");
+        assert_eq!(sanitize_text("\\S10#3;"), "10\n3");
+        // No separator: the payload is emitted verbatim (sans the code).
+        assert_eq!(sanitize_text("\\Sabc;"), "abc");
+        // Missing terminator is tolerated.
+        assert_eq!(sanitize_text("\\S1/2"), "1\n2");
+    }
+
+    #[test]
+    fn sanitize_expands_tabs() {
+        let four = " ".repeat(TAB_STEP);
+        assert_eq!(sanitize_text("a\\tb"), format!("a{four}b"));
+        assert_eq!(sanitize_text("a^Ib"), format!("a{four}b"));
+        // A caret that is not `^I` is left alone.
+        assert_eq!(sanitize_text("a^b"), "a^b");
+    }
+
+    #[test]
+    fn sanitize_consumes_style_toggles_without_swallowing_text() {
+        // No-argument toggles must consume exactly two characters.
+        assert_eq!(sanitize_text("\\Lunder\\l"), "under");
+        assert_eq!(sanitize_text("\\Oover\\o"), "over");
+        assert_eq!(sanitize_text("\\Kstrike\\k"), "strike");
+        // Regression: `\L` must not scan the rest of the run for a `;`.
+        assert_eq!(sanitize_text("a\\Lb"), "ab");
+    }
+
+    #[test]
+    fn sanitize_consumes_parameter_codes() {
+        assert_eq!(sanitize_text("\\H2.5;Hi"), "Hi");
+        assert_eq!(sanitize_text("\\W0.8;Hi"), "Hi");
+        assert_eq!(sanitize_text("\\A1;Hi"), "Hi");
+        assert_eq!(sanitize_text("\\Q45;Hi"), "Hi");
+        assert_eq!(sanitize_text("\\C1;Hi"), "Hi");
+        assert_eq!(sanitize_text("{\\fArial|b0;Hi}"), "Hi");
+        // Codes may follow one another without corrupting the text.
+        assert_eq!(sanitize_text("\\H1;\\W2;\\C3;ok"), "ok");
     }
 
     #[test]
@@ -834,6 +1015,99 @@ mod tests {
             )
             .unwrap();
         assert!(!polys.is_empty(), "fallback did not render");
+    }
+
+    /// Outline a run with the standard test parameters.
+    fn outline_run(engine: &FontEngine, key: &str, text: &str) -> Vec<Vec<Point3>> {
+        engine
+            .outline(
+                key,
+                text,
+                Point3::default(),
+                10.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
+            .unwrap()
+    }
+
+    fn max_x(polys: &[Vec<Point3>]) -> f64 {
+        polys
+            .iter()
+            .flatten()
+            .map(|p| p.x)
+            .fold(f64::NEG_INFINITY, f64::max)
+    }
+
+    /// Opt-in per-glyph fallback test (needs both `YACR_TEST_FONT` and
+    /// `YACR_TEST_SHX`).
+    ///
+    /// The SHX face is the primary and the sfnt face the fallback, so this also
+    /// exercises the branch where the sfnt face is only consulted for glyphs the
+    /// primary lacks.
+    #[test]
+    fn per_glyph_fallback_uses_first_face_with_the_glyph() {
+        let (Ok(sfnt_path), Ok(shx_path)) = (
+            std::env::var("YACR_TEST_FONT"),
+            std::env::var("YACR_TEST_SHX"),
+        ) else {
+            return;
+        };
+        let sfnt_bytes = std::fs::read(sfnt_path).unwrap();
+        let shx_bytes = std::fs::read(shx_path).unwrap();
+
+        let mut sfnt_only = FontEngine::new();
+        sfnt_only
+            .register(
+                "arial.woff",
+                Arc::from(sfnt_bytes.clone().into_boxed_slice()),
+            )
+            .unwrap();
+        let mut shx_only = FontEngine::new();
+        shx_only
+            .register(
+                "simplex.shx",
+                Arc::from(shx_bytes.clone().into_boxed_slice()),
+            )
+            .unwrap();
+
+        // Find a probe glyph the SHX primary lacks but the sfnt fallback has.
+        let probe = ['Ω', 'Ж', 'é', '→', '∑']
+            .into_iter()
+            .find(|p| {
+                let text = p.to_string();
+                !outline_run(&sfnt_only, "arial.woff", &text).is_empty()
+                    && outline_run(&shx_only, "simplex.shx", &text).is_empty()
+            })
+            .expect("no probe glyph shared by the supplied test fonts");
+
+        let mut mixed = FontEngine::new();
+        mixed
+            .register("simplex.shx", Arc::from(shx_bytes.into_boxed_slice()))
+            .unwrap();
+        mixed
+            .register("arial.woff", Arc::from(sfnt_bytes.into_boxed_slice()))
+            .unwrap();
+        mixed.set_fallback(vec!["arial.woff".into()]);
+
+        // The glyph missing from the primary is supplied by the fallback.
+        let probe_text = probe.to_string();
+        let fallback_polys = outline_run(&mixed, "simplex.shx", &probe_text);
+        assert!(
+            !fallback_polys.is_empty(),
+            "fallback did not supply {probe:?}"
+        );
+
+        // A glyph the primary has still renders exactly as the primary alone.
+        let primary_only = outline_run(&shx_only, "simplex.shx", "A");
+        let primary_mixed = outline_run(&mixed, "simplex.shx", "A");
+        assert_eq!(primary_only, primary_mixed);
+
+        // A run mixing both sources advances past either source alone.
+        let mixed_run = outline_run(&mixed, "simplex.shx", &format!("A{probe}"));
+        assert!(max_x(&mixed_run) > max_x(&primary_mixed));
+        assert!(max_x(&mixed_run) > max_x(&fallback_polys));
     }
 
     #[test]
