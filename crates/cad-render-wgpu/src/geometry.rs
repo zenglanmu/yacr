@@ -314,6 +314,152 @@ pub struct OverBudget {
     pub skipped_batches: usize,
 }
 
+// ---------------------------------------------------------------------------
+// Draw order + transparency policy (F14)
+// ---------------------------------------------------------------------------
+//
+// These are pure CPU decisions so they can be tested without a GPU. The renderer
+// feeds them the same values it uploads, and the two draw passes follow the
+// resulting plan. The full policy, including the evidence boundary, is written
+// in `docs/render-order.md`.
+
+/// Alpha bucket a batch falls into after clamping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlphaClass {
+    /// `alpha >= 1`: drawn in the opaque pass, depth order controlled by the
+    /// depth buffer.
+    Opaque,
+    /// `0 < alpha < 1`: drawn after opaque geometry, back-to-front by centroid
+    /// distance so blending composites correctly.
+    Transparent,
+    /// `alpha <= 0`: contributes nothing; it is skipped and reported, never
+    /// silently counted as a normal draw.
+    Invisible,
+}
+
+/// Clamp a batch alpha into `[0, 1]`.
+///
+/// Policy for out-of-range and non-finite input, documented in
+/// `docs/render-order.md`:
+/// * `NaN` (and infinities are clamped by the same rule) is treated as fully
+///   **opaque** (`1.0`) — the conservative choice: an unreadable opacity must not
+///   make geometry disappear;
+/// * `alpha < 0` clamps to `0` (invisible), `alpha > 1` clamps to `1` (opaque).
+pub fn clamp_alpha(alpha: f32) -> f32 {
+    if alpha.is_nan() {
+        return 1.0;
+    }
+    alpha.clamp(0.0, 1.0)
+}
+
+/// Bucket a raw alpha value (it is clamped first).
+pub fn classify_alpha(alpha: f32) -> AlphaClass {
+    let a = clamp_alpha(alpha);
+    if a <= 0.0 {
+        AlphaClass::Invisible
+    } else if a >= 1.0 {
+        AlphaClass::Opaque
+    } else {
+        AlphaClass::Transparent
+    }
+}
+
+/// The ordering-relevant view of one batch.
+///
+/// `centroid` is world-space; `draw_order` is the caller's paint order.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BatchOrderEntry {
+    pub draw_order: i64,
+    pub alpha: f32,
+    /// World-space centroid, used only by the transparent back-to-front sort.
+    pub centroid: [f32; 3],
+}
+
+/// Indices of a batch set partitioned and ordered for submission.
+///
+/// All three vectors hold indices into the slice passed to [`plan_draw_order`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DrawOrderPlan {
+    /// Opaque batches, ascending `draw_order` (stable: upload order breaks ties).
+    pub opaque: Vec<usize>,
+    /// Transparent (`0 < alpha < 1`) batches. Back-to-front by centroid distance
+    /// from the camera when one is supplied; otherwise ascending `draw_order`.
+    pub transparent: Vec<usize>,
+    /// `alpha <= 0` batches: not drawn at all.
+    pub invisible: Vec<usize>,
+}
+
+impl DrawOrderPlan {
+    /// Number of batches that will actually be submitted.
+    pub fn drawn(&self) -> usize {
+        self.opaque.len() + self.transparent.len()
+    }
+}
+
+/// Stable draw-order plan for a frame.
+///
+/// Tie-break, documented and tested:
+/// 1. opaque batches sort by ascending `draw_order`;
+/// 2. transparent batches sort back-to-front by descending squared distance from
+///    `camera` (so the farthest batch is drawn first);
+/// 3. equal keys keep the input (upload) order, because every sort is stable and
+///    the input index is the final comparator term.
+///
+/// `camera = None` means the caller has no camera position (for example a 2D
+/// frame without a depth axis): transparent batches then fall back to ascending
+/// `draw_order` only. This is deterministic but **not** depth-correct; the caller
+/// can detect the fallback by inspecting the returned plan and the renderer
+/// records it as an explicit limitation.
+pub fn plan_draw_order(entries: &[BatchOrderEntry], camera: Option<[f32; 3]>) -> DrawOrderPlan {
+    let mut opaque = Vec::new();
+    let mut transparent = Vec::new();
+    let mut invisible = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        match classify_alpha(entry.alpha) {
+            AlphaClass::Opaque => opaque.push(index),
+            AlphaClass::Transparent => transparent.push(index),
+            AlphaClass::Invisible => invisible.push(index),
+        }
+    }
+
+    // 1. Opaque: ascending draw order. `sort_by_key` is stable, so equal keys
+    //    retain upload order (the input index order).
+    opaque.sort_by_key(|&index| entries[index].draw_order);
+
+    // 2. Transparent: back-to-front, then draw order, then upload index.
+    match camera {
+        Some(eye) => transparent.sort_by(|&a, &b| {
+            let da = squared_distance(entries[a].centroid, eye);
+            let db = squared_distance(entries[b].centroid, eye);
+            // Descending distance: farther batches first so nearer ones blend on
+            // top. `partial_cmp` falls back to `Equal` on a non-finite distance,
+            // and the draw_order/index terms keep the result deterministic.
+            db.partial_cmp(&da)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| entries[a].draw_order.cmp(&entries[b].draw_order))
+                .then_with(|| a.cmp(&b))
+        }),
+        None => transparent.sort_by_key(|&index| entries[index].draw_order),
+    }
+
+    DrawOrderPlan {
+        opaque,
+        transparent,
+        invisible,
+    }
+}
+
+/// Squared Euclidean distance between two world-space points.
+///
+/// Squared distance is monotonic in distance, so it orders identically while
+/// avoiding the square root.
+pub fn squared_distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    let dz = a[2] - b[2];
+    dx * dx + dy * dy + dz * dz
+}
+
 fn mat4_mul(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f32; 4]; 4] {
     // Column-major (WGSL): (a*b)[col][row] = sum_k a[k][row] * b[col][k].
     let mut out = [[0.0f32; 4]; 4];
@@ -546,5 +692,129 @@ mod tests {
             *cell = m[0][r] * v[0] + m[1][r] * v[1] + m[2][r] * v[2] + m[3][r] * v[3];
         }
         out
+    }
+
+    // --- Draw order + transparency policy (F14) ---
+
+    fn entry(draw_order: i64, alpha: f32, x: f32) -> BatchOrderEntry {
+        BatchOrderEntry {
+            draw_order,
+            alpha,
+            centroid: [x, 0.0, 0.0],
+        }
+    }
+
+    #[test]
+    fn alpha_is_clamped_and_nan_is_opaque() {
+        assert_eq!(clamp_alpha(0.5), 0.5);
+        assert_eq!(clamp_alpha(-1.0), 0.0);
+        assert_eq!(clamp_alpha(2.0), 1.0);
+        // An unreadable opacity must not delete geometry: NaN is opaque.
+        assert_eq!(clamp_alpha(f32::NAN), 1.0);
+        assert_eq!(clamp_alpha(f32::INFINITY), 1.0);
+        assert_eq!(clamp_alpha(f32::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn alpha_classification_covers_the_three_buckets() {
+        assert_eq!(classify_alpha(1.0), AlphaClass::Opaque);
+        assert_eq!(classify_alpha(2.0), AlphaClass::Opaque);
+        assert_eq!(classify_alpha(f32::NAN), AlphaClass::Opaque);
+        assert_eq!(classify_alpha(0.25), AlphaClass::Transparent);
+        assert_eq!(classify_alpha(0.0), AlphaClass::Invisible);
+        assert_eq!(classify_alpha(-0.5), AlphaClass::Invisible);
+    }
+
+    #[test]
+    fn opaque_batches_sort_by_draw_order_and_keep_upload_order_on_ties() {
+        // Draw orders: [5, 1, 1, 3]; the two `1`s must keep upload order (1 before 2).
+        let entries = [
+            entry(5, 1.0, 0.0),
+            entry(1, 1.0, 0.0),
+            entry(1, 1.0, 0.0),
+            entry(3, 1.0, 0.0),
+        ];
+        let plan = plan_draw_order(&entries, None);
+        assert_eq!(plan.opaque, vec![1, 2, 3, 0]);
+        assert!(plan.transparent.is_empty());
+        assert!(plan.invisible.is_empty());
+        assert_eq!(plan.drawn(), 4);
+    }
+
+    #[test]
+    fn transparent_batches_are_back_to_front_by_camera_distance() {
+        // Camera at x = 0; nearer batch at x = 1, farther at x = 10.
+        let entries = [entry(0, 0.5, 1.0), entry(0, 0.5, 10.0), entry(0, 0.5, 5.0)];
+        let plan = plan_draw_order(&entries, Some([0.0, 0.0, 0.0]));
+        // Farthest first: index 1 (x=10), then 2 (x=5), then 0 (x=1).
+        assert_eq!(plan.transparent, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn transparent_distance_ties_fall_back_to_draw_order_then_index() {
+        // Same distance; draw_order decides, then upload index.
+        let entries = [entry(9, 0.5, 3.0), entry(1, 0.5, 3.0), entry(1, 0.5, 3.0)];
+        let plan = plan_draw_order(&entries, Some([0.0, 0.0, 0.0]));
+        assert_eq!(plan.transparent, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn without_a_camera_transparent_batches_use_draw_order_only() {
+        let entries = [entry(4, 0.5, 1.0), entry(2, 0.5, 99.0)];
+        let plan = plan_draw_order(&entries, None);
+        // Distance is ignored; ascending draw order, stable.
+        assert_eq!(plan.transparent, vec![1, 0]);
+    }
+
+    #[test]
+    fn zero_alpha_batches_are_partitioned_out_not_drawn() {
+        let entries = [entry(0, 1.0, 0.0), entry(0, 0.0, 0.0), entry(0, 0.4, 0.0)];
+        let plan = plan_draw_order(&entries, Some([0.0, 0.0, 0.0]));
+        assert_eq!(plan.opaque, vec![0]);
+        assert_eq!(plan.transparent, vec![2]);
+        assert_eq!(plan.invisible, vec![1]);
+        assert_eq!(plan.drawn(), 2);
+    }
+
+    #[test]
+    fn opaque_always_precedes_transparent_regardless_of_draw_order() {
+        // A transparent batch with a huge draw_order must still follow opaque.
+        let entries = [entry(1_000_000, 0.5, 0.0), entry(0, 1.0, 0.0)];
+        let plan = plan_draw_order(&entries, Some([0.0, 0.0, 0.0]));
+        assert_eq!(plan.opaque, vec![1]);
+        assert_eq!(plan.transparent, vec![0]);
+    }
+
+    #[test]
+    fn plan_is_deterministic_for_the_same_input() {
+        let entries = [
+            entry(5, 0.5, 2.0),
+            entry(1, 1.0, 0.0),
+            entry(0, 0.0, 0.0),
+            entry(5, 0.5, 8.0),
+        ];
+        let a = plan_draw_order(&entries, Some([1.0, 2.0, 3.0]));
+        let b = plan_draw_order(&entries, Some([1.0, 2.0, 3.0]));
+        assert_eq!(a, b);
+        // Sanity: the partition covers every input exactly once.
+        let mut all: Vec<usize> = a
+            .opaque
+            .iter()
+            .chain(a.transparent.iter())
+            .chain(a.invisible.iter())
+            .copied()
+            .collect();
+        all.sort_unstable();
+        assert_eq!(all, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn moving_camera_changes_the_transparent_order() {
+        let entries = [entry(0, 0.5, -10.0), entry(0, 0.5, 10.0)];
+        let from_left = plan_draw_order(&entries, Some([-100.0, 0.0, 0.0]));
+        let from_right = plan_draw_order(&entries, Some([100.0, 0.0, 0.0]));
+        // From the left, x=10 is farther; from the right, x=-10 is farther.
+        assert_eq!(from_left.transparent, vec![1, 0]);
+        assert_eq!(from_right.transparent, vec![0, 1]);
     }
 }

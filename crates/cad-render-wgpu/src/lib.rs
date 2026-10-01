@@ -19,9 +19,11 @@ use cad_diagnostics::{DiagnosticParameter, DiagnosticReason};
 use cad_domain::*;
 use cad_scene::{FrameBudget, RenderTopology, SceneDelta};
 use geometry::OverBudget;
-pub use geometry::{Camera2d, Camera3d};
-
+pub use geometry::{
+    clamp_alpha, classify_alpha, plan_draw_order, AlphaClass, BatchOrderEntry, DrawOrderPlan,
+};
 pub use geometry::{front_face_ccw, normals_need_repair, repaired_normals, winding_is_flipped};
+pub use geometry::{Camera2d, Camera3d};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendPreference {
@@ -93,6 +95,12 @@ pub struct FrameStats {
     /// was crossed. The caller must surface this; batches are never silently
     /// dropped.
     pub over_budget: Option<OverBudgetReason>,
+    /// Opaque batches submitted this frame.
+    pub opaque_batches: usize,
+    /// Transparent batches (`0 < alpha < 1`) submitted after the opaque pass.
+    pub transparent_batches: usize,
+    /// Batches skipped because `alpha <= 0`. Reported, never silently drawn.
+    pub invisible_batches: usize,
 }
 
 /// A structured over-budget reason, mirroring [`geometry::OverBudget`] with a
@@ -177,6 +185,11 @@ struct GpuBatch {
     mirrored: bool,
     /// Constant per-object alpha.
     alpha: f32,
+    /// Paint order relative to sibling batches (larger is later/on top). The
+    /// frame's draw plan performs a stable sort on this key.
+    draw_order: i64,
+    /// World-space centroid, the transparent pass's back-to-front sort key.
+    centroid: [f32; 3],
     origin: [f32; 3],
     camera: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -204,6 +217,11 @@ pub struct Renderer {
     /// Mirrored mesh pipeline: same shader but `front_face = Cw`, so mirrored
     /// batches cull the correct side instead of the visible one.
     mesh_pipeline_mirrored: Option<wgpu::RenderPipeline>,
+    /// Transparent (`0 < alpha < 1`) mesh pipelines: same shaders, but depth
+    /// writes are disabled so a back-to-front transparent pass does not occlude
+    /// the geometry behind it with its own depth.
+    mesh_pipeline_transparent: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_mirrored_transparent: Option<wgpu::RenderPipeline>,
     target: Option<wgpu::Texture>,
     target_view: Option<wgpu::TextureView>,
     depth_view: Option<wgpu::TextureView>,
@@ -242,6 +260,8 @@ impl Renderer {
             line_pipeline: None,
             mesh_pipeline: None,
             mesh_pipeline_mirrored: None,
+            mesh_pipeline_transparent: None,
+            mesh_pipeline_mirrored_transparent: None,
             target: None,
             target_view: None,
             depth_view: None,
@@ -337,6 +357,7 @@ impl Renderer {
             &mesh_shader,
             self.target_format,
             wgpu::FrontFace::Ccw,
+            true,
             "cad-mesh-pipeline",
         );
         let mesh_pipeline_mirrored = Self::create_mesh_pipeline(
@@ -345,7 +366,28 @@ impl Renderer {
             &mesh_shader,
             self.target_format,
             wgpu::FrontFace::Cw,
+            true,
             "cad-mesh-pipeline-mirrored",
+        );
+        // Transparent variants: depth-tested but not depth-written, so the
+        // back-to-front pass composites instead of hiding geometry behind it.
+        let mesh_pipeline_transparent = Self::create_mesh_pipeline(
+            &device,
+            &pipeline_layout,
+            &mesh_shader,
+            self.target_format,
+            wgpu::FrontFace::Ccw,
+            false,
+            "cad-mesh-pipeline-transparent",
+        );
+        let mesh_pipeline_mirrored_transparent = Self::create_mesh_pipeline(
+            &device,
+            &pipeline_layout,
+            &mesh_shader,
+            self.target_format,
+            wgpu::FrontFace::Cw,
+            false,
+            "cad-mesh-pipeline-mirrored-transparent",
         );
 
         self.device = Some(device);
@@ -354,6 +396,8 @@ impl Renderer {
         self.line_pipeline = Some(line_pipeline);
         self.mesh_pipeline = Some(mesh_pipeline);
         self.mesh_pipeline_mirrored = Some(mesh_pipeline_mirrored);
+        self.mesh_pipeline_transparent = Some(mesh_pipeline_transparent);
+        self.mesh_pipeline_mirrored_transparent = Some(mesh_pipeline_mirrored_transparent);
         self.active_backend = Some(caps.actual);
         self.device_generation += 1;
         self.device_lost = false;
@@ -366,6 +410,7 @@ impl Renderer {
         shader: &wgpu::ShaderModule,
         format: wgpu::TextureFormat,
         front_face: wgpu::FrontFace,
+        depth_write: bool,
         label: &str,
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -388,7 +433,7 @@ impl Renderer {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
+                depth_write_enabled: Some(depth_write),
                 depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
@@ -594,6 +639,8 @@ impl Renderer {
                 edge_index_count: edge_indices.len() as u32,
                 mirrored: batch.mirrored,
                 alpha: batch.alpha,
+                draw_order: batch.draw_order,
+                centroid: batch.centroid(),
                 origin: [
                     batch.local_origin.x as f32,
                     batch.local_origin.y as f32,
@@ -654,6 +701,8 @@ impl Renderer {
         self.line_pipeline = None;
         self.mesh_pipeline = None;
         self.mesh_pipeline_mirrored = None;
+        self.mesh_pipeline_transparent = None;
+        self.mesh_pipeline_mirrored_transparent = None;
         self.layout = None;
         self.target = None;
         self.target_view = None;
@@ -686,6 +735,8 @@ impl Renderer {
         self.line_pipeline = None;
         self.mesh_pipeline = None;
         self.mesh_pipeline_mirrored = None;
+        self.mesh_pipeline_transparent = None;
+        self.mesh_pipeline_mirrored_transparent = None;
         self.layout = None;
         self.target = None;
         self.target_view = None;
@@ -733,7 +784,15 @@ impl Renderer {
                 1.0,
             ]);
         }
-        self.render_with_transforms(transforms, target)
+        self.render_with_transforms(
+            transforms,
+            [
+                camera.center.x as f32,
+                camera.center.y as f32,
+                camera.center.z as f32,
+            ],
+            target,
+        )
     }
 
     /// Render one frame into the offscreen target using a 3D camera.
@@ -757,12 +816,18 @@ impl Renderer {
             .iter()
             .map(|batch| translate_left(&vp, batch.origin))
             .collect();
-        self.render_with_transforms(transforms, target)
+        let eye = [
+            camera.eye.x as f32,
+            camera.eye.y as f32,
+            camera.eye.z as f32,
+        ];
+        self.render_with_transforms(transforms, eye, target)
     }
 
     fn render_with_transforms(
         &mut self,
         transforms: Vec<[f32; 16]>,
+        camera_position: [f32; 3],
         target: &RenderTarget,
     ) -> Result<FrameStats, RenderError> {
         if self.device_lost {
@@ -794,6 +859,18 @@ impl Renderer {
                 "renderer resources missing".into(),
             ));
         };
+        let Some(mesh_pipeline_transparent) = self.mesh_pipeline_transparent.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer resources missing".into(),
+            ));
+        };
+        let Some(mesh_pipeline_mirrored_transparent) =
+            self.mesh_pipeline_mirrored_transparent.as_ref()
+        else {
+            return Err(RenderError::NotInitialized(
+                "renderer resources missing".into(),
+            ));
+        };
         let Some(view) = self.target_view.as_ref() else {
             return Err(RenderError::NotInitialized(
                 "renderer target missing".into(),
@@ -806,16 +883,35 @@ impl Renderer {
         };
 
         // Write the per-batch uniforms before encoding. The uniform is the
-        // transform matrix followed by the constant per-batch alpha.
+        // transform matrix followed by the constant per-batch alpha (clamped by
+        // the same policy that drives the draw plan).
         for (batch, m) in self.batches.iter().zip(transforms.iter()) {
             let mut uniform = [0.0f32; 20];
             uniform[..16].copy_from_slice(m);
-            uniform[16] = batch.alpha.clamp(0.0, 1.0);
+            uniform[16] = clamp_alpha(batch.alpha);
             queue.write_buffer(&batch.camera, 0, bytemuck::cast_slice(&uniform));
         }
 
-        // Enforce the per-frame vertex/triangle budget explicitly.
-        let plan = plan_from_gpu(&self.batches, &self.frame_budget);
+        // Enforce the per-frame vertex/triangle budget explicitly (in upload
+        // order, unchanged).
+        let budget_plan = plan_from_gpu(&self.batches, &self.frame_budget);
+
+        // Order the *accepted* batches into an opaque pass and a back-to-front
+        // transparent pass. `alpha <= 0` batches are partitioned out and
+        // reported rather than drawn.
+        let entries: Vec<BatchOrderEntry> = budget_plan
+            .accepted
+            .iter()
+            .map(|&i| BatchOrderEntry {
+                draw_order: self.batches[i].draw_order,
+                alpha: self.batches[i].alpha,
+                centroid: self.batches[i].centroid,
+            })
+            .collect();
+        let passes = draw_passes(&budget_plan.accepted, &entries, Some(camera_position));
+        let opaque = passes.opaque;
+        let transparent = passes.transparent;
+        let invisible_batches = passes.invisible;
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("cad-encoder"),
@@ -849,66 +945,33 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            // Line topology batches use the line pipeline.
-            pass.set_pipeline(line_pipeline);
-            for &i in plan.accepted.iter() {
-                let batch = &self.batches[i];
-                if batch.topology != RenderTopology::Lines {
-                    continue;
-                }
-                pass.set_bind_group(0, &batch.bind_group, &[]);
-                pass.set_vertex_buffer(0, batch.vertices.slice(..));
-                if let Some(indices) = &batch.indices {
-                    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..batch.index_count, 0, 0..1);
-                } else {
-                    pass.draw(0..batch.vertex_count, 0..1);
-                }
-            }
-            // Mesh batches use the mesh pipeline; mirrored batches select the
-            // `Cw` front-face variant so back-face culling stays correct.
-            for &i in plan.accepted.iter() {
-                let batch = &self.batches[i];
-                if batch.topology != RenderTopology::Mesh {
-                    continue;
-                }
-                pass.set_pipeline(if batch.mirrored {
-                    mesh_pipeline_mirrored
-                } else {
-                    mesh_pipeline
-                });
-                pass.set_bind_group(0, &batch.bind_group, &[]);
-                pass.set_vertex_buffer(0, batch.vertices.slice(..));
-                if let Some(normals) = &batch.normals {
-                    pass.set_vertex_buffer(1, normals.slice(..));
-                }
-                pass.set_index_buffer(
-                    batch.indices.as_ref().unwrap().slice(..),
-                    wgpu::IndexFormat::Uint32,
+
+            // Pass 1 — opaque, in ascending draw order. Depth writes are on.
+            for &i in &opaque {
+                draw_batch(
+                    &mut pass,
+                    &self.batches[i],
+                    line_pipeline,
+                    if self.batches[i].mirrored {
+                        mesh_pipeline_mirrored
+                    } else {
+                        mesh_pipeline
+                    },
                 );
-                pass.draw_indexed(0..batch.index_count, 0, 0..1);
-                // Optional wireframe overlay over the shared mesh vertices.
-                if let Some(edges) = &batch.edge_indices {
-                    pass.set_pipeline(line_pipeline);
-                    pass.set_vertex_buffer(0, batch.vertices.slice(..));
-                    pass.set_index_buffer(edges.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..batch.edge_index_count, 0, 0..1);
-                }
             }
-            // MeshEdges topology batches draw their own line index list.
-            pass.set_pipeline(line_pipeline);
-            for &i in plan.accepted.iter() {
-                let batch = &self.batches[i];
-                if batch.topology != RenderTopology::MeshEdges {
-                    continue;
-                }
-                pass.set_bind_group(0, &batch.bind_group, &[]);
-                pass.set_vertex_buffer(0, batch.vertices.slice(..));
-                pass.set_index_buffer(
-                    batch.indices.as_ref().unwrap().slice(..),
-                    wgpu::IndexFormat::Uint32,
+            // Pass 2 — transparent, back-to-front. Depth writes are off so each
+            // blended layer composites over the already-resolved opaque pass.
+            for &i in &transparent {
+                draw_batch(
+                    &mut pass,
+                    &self.batches[i],
+                    line_pipeline,
+                    if self.batches[i].mirrored {
+                        mesh_pipeline_mirrored_transparent
+                    } else {
+                        mesh_pipeline_transparent
+                    },
                 );
-                pass.draw_indexed(0..batch.index_count, 0, 0..1);
             }
         }
 
@@ -917,7 +980,7 @@ impl Renderer {
         // the submission; the host's device-lost callback is the authoritative
         // loss signal (see `note_device_lost`).
         let outcome = self.device_scope_outcome(device, submission);
-        let draw_calls = plan.accepted.len() as u64;
+        let draw_calls = (opaque.len() + transparent.len()) as u64;
         self.draw_calls = draw_calls;
         match outcome {
             ScopeOutcome::Clean => {}
@@ -936,9 +999,12 @@ impl Renderer {
             gpu_ms: None,
             draw_calls,
             uploaded_bytes: self.uploaded_bytes,
-            vertices: plan.usage.vertices,
-            triangles: plan.usage.triangles,
-            over_budget: plan.over_budget,
+            vertices: budget_plan.usage.vertices,
+            triangles: budget_plan.usage.triangles,
+            over_budget: budget_plan.over_budget,
+            opaque_batches: opaque.len(),
+            transparent_batches: transparent.len(),
+            invisible_batches,
         })
     }
 
@@ -995,6 +1061,92 @@ struct GpuPlan {
     accepted: Vec<usize>,
     usage: cad_scene::FrameUsage,
     over_budget: Option<OverBudgetReason>,
+}
+
+/// The ordered, budget-accepted batch indices split into the two draw passes.
+struct DrawPasses {
+    opaque: Vec<usize>,
+    transparent: Vec<usize>,
+    invisible: usize,
+}
+
+/// Turn the pure [`DrawOrderPlan`] over the accepted sub-set back into global
+/// batch indices, preserving the plan's order.
+///
+/// `accepted` are the global indices the budget kept (upload order); `entries`
+/// are their ordering keys in the same order. Splitting this out keeps the index
+/// remapping testable without a GPU.
+fn draw_passes(
+    accepted: &[usize],
+    entries: &[BatchOrderEntry],
+    camera_position: Option<[f32; 3]>,
+) -> DrawPasses {
+    debug_assert_eq!(accepted.len(), entries.len());
+    let order = plan_draw_order(entries, camera_position);
+    let remap = |positions: &[usize]| -> Vec<usize> {
+        positions.iter().map(|&pos| accepted[pos]).collect()
+    };
+    DrawPasses {
+        opaque: remap(&order.opaque),
+        transparent: remap(&order.transparent),
+        invisible: order.invisible.len(),
+    }
+}
+
+/// Submit one batch, dispatching on its topology.
+///
+/// The caller chooses the mesh pipeline (opaque vs transparent, mirrored vs
+/// normal); line and `MeshEdges` topologies always use the line pipeline. A mesh
+/// batch also draws its optional wireframe overlay.
+fn draw_batch(
+    pass: &mut wgpu::RenderPass<'_>,
+    batch: &GpuBatch,
+    line_pipeline: &wgpu::RenderPipeline,
+    mesh_pipeline: &wgpu::RenderPipeline,
+) {
+    match batch.topology {
+        RenderTopology::Lines => {
+            pass.set_pipeline(line_pipeline);
+            pass.set_bind_group(0, &batch.bind_group, &[]);
+            pass.set_vertex_buffer(0, batch.vertices.slice(..));
+            if let Some(indices) = &batch.indices {
+                pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..batch.index_count, 0, 0..1);
+            } else {
+                pass.draw(0..batch.vertex_count, 0..1);
+            }
+        }
+        RenderTopology::Mesh => {
+            pass.set_pipeline(mesh_pipeline);
+            pass.set_bind_group(0, &batch.bind_group, &[]);
+            pass.set_vertex_buffer(0, batch.vertices.slice(..));
+            if let Some(normals) = &batch.normals {
+                pass.set_vertex_buffer(1, normals.slice(..));
+            }
+            let Some(indices) = batch.indices.as_ref() else {
+                return;
+            };
+            pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..batch.index_count, 0, 0..1);
+            // Optional wireframe overlay over the shared mesh vertices.
+            if let Some(edges) = &batch.edge_indices {
+                pass.set_pipeline(line_pipeline);
+                pass.set_vertex_buffer(0, batch.vertices.slice(..));
+                pass.set_index_buffer(edges.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..batch.edge_index_count, 0, 0..1);
+            }
+        }
+        RenderTopology::MeshEdges => {
+            pass.set_pipeline(line_pipeline);
+            pass.set_bind_group(0, &batch.bind_group, &[]);
+            pass.set_vertex_buffer(0, batch.vertices.slice(..));
+            let Some(indices) = batch.indices.as_ref() else {
+                return;
+            };
+            pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..batch.index_count, 0, 0..1);
+        }
+    }
 }
 
 fn plan_from_gpu(batches: &[GpuBatch], budget: &FrameBudget) -> GpuPlan {
@@ -1183,5 +1335,57 @@ mod tests {
     fn device_lost_diagnostic_has_stable_code() {
         let reason = Renderer::device_lost_reason("test");
         assert_eq!(reason.code, codes::RENDER_DEVICE_LOST);
+    }
+
+    #[test]
+    fn draw_passes_remap_accepted_positions_to_global_indices() {
+        // The budget accepted global batches 10, 11, 12 (upload order). Batch 10
+        // is transparent and farthest, 11 opaque with the higher draw order, and
+        // 12 opaque with a lower draw order.
+        let accepted = vec![10usize, 11, 12];
+        let entries = vec![
+            BatchOrderEntry {
+                draw_order: 0,
+                alpha: 0.5,
+                centroid: [100.0, 0.0, 0.0],
+            },
+            BatchOrderEntry {
+                draw_order: 5,
+                alpha: 1.0,
+                centroid: [1.0, 0.0, 0.0],
+            },
+            BatchOrderEntry {
+                draw_order: 1,
+                alpha: 1.0,
+                centroid: [2.0, 0.0, 0.0],
+            },
+        ];
+        let passes = draw_passes(&accepted, &entries, Some([0.0, 0.0, 0.0]));
+        // Opaque first, ascending draw order: global 12 (order 1), then 11 (5).
+        assert_eq!(passes.opaque, vec![12, 11]);
+        // Transparent after, single element global 10.
+        assert_eq!(passes.transparent, vec![10]);
+        assert_eq!(passes.invisible, 0);
+    }
+
+    #[test]
+    fn draw_passes_report_invisible_batches() {
+        let accepted = vec![0usize, 1];
+        let entries = vec![
+            BatchOrderEntry {
+                draw_order: 0,
+                alpha: 0.0,
+                centroid: [0.0; 3],
+            },
+            BatchOrderEntry {
+                draw_order: 0,
+                alpha: 1.0,
+                centroid: [0.0; 3],
+            },
+        ];
+        let passes = draw_passes(&accepted, &entries, Some([0.0; 3]));
+        assert_eq!(passes.opaque, vec![1]);
+        assert!(passes.transparent.is_empty());
+        assert_eq!(passes.invisible, 1);
     }
 }
