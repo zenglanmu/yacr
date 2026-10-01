@@ -14,6 +14,12 @@ pub mod text;
 
 pub mod shx;
 
+pub mod layout;
+
+pub use layout::{
+    clip_polyline_to_rect, enumerate_layouts, viewport_transform, LayoutDescriptor, SpaceSelection,
+    ViewportState, ViewportTransform,
+};
 pub use text::{sanitize_text, FontEngine};
 
 /// One drawable piece of an entity, in world coordinates.

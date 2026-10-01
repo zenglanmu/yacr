@@ -24,7 +24,11 @@ pub mod bridge;
 pub mod i18n;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
-pub use bridge::{install as install_cad_bridge, CadView, IncomingDocument};
+pub use bridge::{
+    build_scene, build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
+    fit_camera, install as install_cad_bridge, layout_descriptors, BridgeCamera, CadView,
+    IncomingDocument,
+};
 pub use i18n::{Locale, LocaleResolution, Message, MessageCatalog, MessageSource};
 
 use slint::{ComponentHandle, Image, Weak};
@@ -147,6 +151,63 @@ impl LayerPanelState {
                 })
                 .collect(),
             override_count: rows.iter().filter(|r| r.is_overridden()).count(),
+            empty_label: empty_label.into(),
+        }
+    }
+}
+
+/// One layout row pushed into the shell (audit F04/U03).
+///
+/// `id` is a display value; the adapter keeps the ordered `LayoutId` list so a
+/// switch maps back to the exact id. `supported` is false when the layout has a
+/// viewport this build cannot draw; `reason` then explains why.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutRowUi {
+    pub id: i32,
+    pub name: String,
+    pub supported: bool,
+    pub reason: String,
+    pub viewport_count: i32,
+}
+
+/// Layout-panel snapshot derived from the database's real layout table.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LayoutPanelState {
+    pub rows: Vec<LayoutRowUi>,
+    /// Index of the active row in `rows`, or `None` for model space.
+    pub active_index: Option<i32>,
+    /// Explicit empty-state text shown when the drawing has no paper layouts.
+    pub empty_label: String,
+}
+
+impl LayoutPanelState {
+    /// Build the panel state from the representation layer's descriptors.
+    pub fn from_descriptors(
+        descriptors: &[cad_representation::LayoutDescriptor],
+        active: cad_representation::SpaceSelection,
+        empty_label: impl Into<String>,
+    ) -> Self {
+        let rows: Vec<LayoutRowUi> = descriptors
+            .iter()
+            .map(|d| LayoutRowUi {
+                // Display-only: the low 32 bits label a row; the exact LayoutId
+                // round-trips through the adapter's order.
+                id: (d.id.0 & 0xFFFF_FFFF) as i32,
+                name: d.name.clone(),
+                supported: d.supported,
+                reason: d.reason.clone(),
+                viewport_count: d.viewport_count as i32,
+            })
+            .collect();
+        let active_index = active.layout().and_then(|id| {
+            descriptors
+                .iter()
+                .position(|d| d.id == id)
+                .map(|i| i as i32)
+        });
+        LayoutPanelState {
+            rows,
+            active_index,
             empty_label: empty_label.into(),
         }
     }
@@ -1130,6 +1191,48 @@ mod tests {
         assert!(UI_DEFINITION.contains("property-empty-label"));
         assert!(UI_DEFINITION.contains("property-mixed-label"));
         assert!(UI_DEFINITION.contains("clear-selection-requested"));
+    }
+
+    #[test]
+    fn layout_panel_state_mirrors_descriptors_and_marks_the_active_row() {
+        use cad_domain::LayoutId;
+        use cad_representation::{LayoutDescriptor, SpaceSelection};
+
+        let descriptors = vec![
+            LayoutDescriptor {
+                id: LayoutId(1),
+                name: "Layout1".into(),
+                supported: true,
+                reason: String::new(),
+                viewport_count: 1,
+            },
+            LayoutDescriptor {
+                id: LayoutId(2),
+                name: "Layout2".into(),
+                supported: false,
+                reason: "viewport scale must be positive".into(),
+                viewport_count: 1,
+            },
+        ];
+        let state = LayoutPanelState::from_descriptors(
+            &descriptors,
+            SpaceSelection::Paper(LayoutId(2)),
+            "无布局",
+        );
+        assert_eq!(state.rows.len(), 2);
+        assert!(state.rows[0].supported);
+        assert!(!state.rows[1].supported);
+        assert_eq!(state.active_index, Some(1));
+
+        // Model space selects no row.
+        let model =
+            LayoutPanelState::from_descriptors(&descriptors, SpaceSelection::Model, "无布局");
+        assert_eq!(model.active_index, None);
+
+        // Empty input yields an empty model, not a fabricated row.
+        let empty = LayoutPanelState::from_descriptors(&[], SpaceSelection::Model, "无布局");
+        assert!(empty.rows.is_empty());
+        assert_eq!(empty.empty_label, "无布局");
     }
 
     #[test]
