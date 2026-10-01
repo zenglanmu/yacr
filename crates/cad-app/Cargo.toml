@@ -18,6 +18,7 @@ cad-import-acadrust.workspace = true
 cad-representation.workspace = true
 cad-scene.workspace = true
 cad-query.workspace = true
+cad-spatial.workspace = true
 cad-diagnostics.workspace = true
 cad-platform.workspace = true
 cad-resources.workspace = true

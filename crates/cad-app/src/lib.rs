@@ -22,11 +22,15 @@ pub mod host;
 pub mod input;
 pub mod layers;
 pub mod measure_tool;
+pub mod picking;
 pub mod recovery;
 pub mod selection;
 
 pub use annotation_list::{annotation_rows, geometry_kind, AnnotationRow, AnnotationVisibilitySet};
 pub use annotation_tool::{AnnotationPreview, AnnotationTool, AnnotationToolKind};
+pub use cad_spatial::{
+    BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
+};
 pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Projection, ProjectionKind, StandardView,
     ViewBasis,
@@ -37,6 +41,7 @@ pub use input::{
     PointerPhase, PointerUpdate, StatusModel, ToolStatus, ViewMetrics, DRAG_THRESHOLD_LOGICAL_PX,
 };
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
+pub use picking::{drawing_pick_items, filter_by_index, pick_at_screen, pick_ray, pick_tolerance};
 pub use recovery::{
     ActiveBackendKind, BackendFailure, BackendOutcome, RecoverySnapshot, UnsavedDecision,
     UnsavedFlow, UnsavedOutcome,

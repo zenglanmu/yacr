@@ -114,3 +114,72 @@ fn a_confirmed_drag_is_one_undo_and_a_cancel_leaves_nothing() {
     let session = SessionState::new(DocumentId(1), AppMode::Work);
     assert_eq!(session.authorize(CommandId::Undo), Ok(()));
 }
+
+#[test]
+fn screen_pick_produces_a_selection_ref_the_select_command_accepts() {
+    use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbLine".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Line {
+                start: Point3 {
+                    x: 0.0,
+                    y: -1.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+    let database = builder.finish().unwrap();
+
+    let camera = Camera::top_view_2d();
+    let size = [800.0, 600.0];
+    let report = pick_at_screen(
+        &database,
+        DocumentId(1),
+        &camera,
+        [size[0] * 0.5, size[1] * 0.5],
+        size,
+        &TolerancePolicy::default(),
+        BackFacePolicy::Cull,
+    )
+    .expect("a valid pick runs");
+    let hit = report.hit.expect("the centre line is hit");
+    assert_eq!(hit.source.entity, EntityId(1));
+
+    // The hit feeds the read-only selection command unchanged.
+    let mut app = Application::new();
+    let mut session = SessionState::new(DocumentId(1), AppMode::Viewer);
+    let command = Command {
+        schema_version: 1,
+        id: CommandId::Select,
+        document: DocumentId(1),
+        viewport: ViewportId(1),
+        payload: CommandPayload::Selection(vec![hit.source.clone()]),
+    };
+    app.execute(&mut session, command).unwrap();
+    assert_eq!(session.selection.len(), 1);
+    assert_eq!(session.selection.refs()[0], hit.source);
+}

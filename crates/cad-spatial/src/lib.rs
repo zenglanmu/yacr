@@ -6,16 +6,28 @@
 
 use cad_domain::*;
 
+pub mod pick;
+pub use pick::{
+    hit_geometry, pick_closest, ray_segment_closest, ray_triangle, validate_ray, BackFacePolicy,
+    GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
+    MAX_PICK_SEGMENTS, MIN_RAY_DIRECTION,
+};
+
 #[derive(Debug, Clone)]
 pub struct SpatialEntry {
     pub source: SelectionRef,
     pub bounds: Bounds3,
 }
 
-#[derive(Debug, Clone)]
+/// A precise pick: the selected object, the world point, and the depth.
+#[derive(Debug, Clone, PartialEq)]
 pub struct PickHit {
     pub source: SelectionRef,
     pub point: Point3,
+    /// Distance along the unit pick ray; the primary hit ordering.
+    pub distance: f64,
+    /// Perpendicular distance from the ray; the tie-break at equal depth.
+    pub offset: f64,
     pub precision: Precision,
     pub geometry_source: GeometrySource,
 }
