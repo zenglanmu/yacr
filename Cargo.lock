@@ -315,6 +315,7 @@ dependencies = [
  "cad-app",
  "cad-domain",
  "cad-platform",
+ "cad-resources",
  "cad-ui-slint",
  "js-sys",
  "wasm-bindgen",
@@ -849,7 +850,10 @@ dependencies = [
 name = "cad-platform"
 version = "0.1.0"
 dependencies = [
+ "cad-db",
  "cad-domain",
+ "cad-representation",
+ "cad-resources",
 ]
 
 [[package]]

@@ -78,13 +78,44 @@
 
 - **清单与计划**：`cad-resources::plan_fonts(catalog, requested, base)` 把图纸引用的字体名
   解析为 `PlannedFont { request, file, kind, encoding, url }`，按文件去重，未知名跳过。
-- **加载契约**：`cad-platform::FontLoader::load_font(url) -> HostFuture<Arc<[u8]>>`。核心只
-  生成 URL，主机负责网络/资源访问、授权与缓存。
-- **显示**：主机把加载到的字节 `FontEngine::register(_with_encoding)` 后调用
-  `CadView::set_fonts(Arc<FontEngine>)`；桥接下一帧重建场景并整形文字（字体到达后也会重建）。
-- 典型流程：`fonts.json` → `plan_fonts` → 主机按 `url` 取字节 → `register` →
-  `set_fonts`。Web 用 `fetch().arrayBuffer()`，Android 用 HTTP/asset；这些具体取字节代码
-  尚未在本仓库实现（无真机/浏览器验证环境）。
+- **加载契约**：`cad-platform::FontLoader::load_font(url) -> HostFuture<Arc<[u8]>>`（另有
+  默认实现 `load_catalog(url)`，可按字节流覆写目录获取）。核心只生成 URL，主机负责网络/资源访问、
+  授权与缓存。
+- **共用宿主编排**（`cad-platform::fonts`，Web 与 Android 共用）：
+  - `requested_fonts(&DrawingDatabase)`：只读地收集图纸引用的字体键——`TEXT` 几何的 `font`
+    字段与文本样式的 `Style::resource_keys`（导入器写入该样式的 SHX/BigFont/TTF 名）。只做
+    名称收集，不查目录、不联网、不做路径解析。
+  - `catalog_url(base)`：`{base}/fonts.json`。
+  - `load_font_engine(loader, requested, base)`：取目录 JSON → `FontCatalog::from_json` →
+    `plan_fonts` → 逐个 `load_font` → `FontEngine::register_with_encoding(file, bytes, encoding)`
+    → `set_fallback(已注册键)`；返回 `(Arc<FontEngine>, FontLoadReport)`。
+    `FontLoadReport` 逐项记录目录条目、请求、计划、注册、失败（含原因），不把失败折成成功。
+- **显示**：主机把加载到的字节经上述流程注册后调用 `CadView::set_fonts(Arc<FontEngine>)`；
+  注册为空时调用 `CadView::clear_fonts()`（而不是安装一个所有字形都会失败的空引擎）。
+  桥接下一帧重建场景并整形文字（字体到达后也会重建）。
+- 典型流程：`fonts.json` → `requested_fonts` → `plan_fonts` → 主机按 `url` 取字节 →
+  `register_with_encoding` → `set_fonts`。
+  - **Web**（`apps/app-web`）：`WebFontLoader` 用 `fetch().arrayBuffer()` 取字节，目录为
+    `DEFAULT_FONT_BASE_URL`；`open_document` 后 `spawn_font_load()` 异步加载，过期结果
+    （期间换了图纸）以 `StaleResult` 丢弃。导出 `load_web_fonts()` / `font_load_report()`
+    供 JS 宿主与无头验证等待并读取 `FontLoadReport::summary()`。
+  - **Android**（`apps/app-android`）：`AssetFontLoader` 从活动 `AssetManager` 读
+    `assets/fonts/…`（基址 `asset://fonts/`），目录为 `asset://fonts/fonts.json`。
+    走同一个 `load_font_engine`。**不内置任何字体文件**（授权，见上），未打包时报告
+    `ResourceMissing`（`font asset not packaged …`），不伪造空字体集。
+
+## 主机取字节实现现状
+
+| 宿主 | 目录来源 | 字体字节来源 | 状态 |
+|---|---|---|---|
+| Web (wasm) | `DEFAULT_FONT_BASE_URL/fonts.json`（jsDelivr，CORS） | `fetch().arrayBuffer()` | 代码完成；本环境**未跑浏览器验证** |
+| Android | `asset://fonts/fonts.json`（APK assets） | `AssetManager` | 代码完成并编译；本环境**无真机/无打包字体资产** |
+| CLI | `--font name=path` | 本地文件 | 已实现（见 `cad-cli-tools`） |
+
+Web 的 `fetch` 依赖 CDN 的 CORS 头；非 2xx 响应记为 `ResourceMissing`，不当作空字节。
+Android 若未把字体目录放进 `assets/fonts/`（含 `fonts.json`），打开带文本的图纸会以缺资源
+报告，属预期而非缺陷。取字节的**浏览器/真机行为尚未在本仓库验证**。
+
 
 实测（`docs/validation.md` 语料；注册 `simplex/txt/romans.shx` + `arial.woff` 并启用回退）：
 
@@ -102,8 +133,10 @@
 
 1. **排版完备性**：复杂文字整形（bidi/上下文 shaping）、MTEXT 全格式码（堆叠、列、
    制表）与精确行距/垂直对齐；当前逐字、TTF `kern` 已应用、行距固定 1.2×、垂直对齐近似。
-2. **平台取字节代码**：`FontLoader`/`plan_fonts`/`set_fonts` 契约已就绪，Web
-   `fetch`/Android HTTP 的实际实现与真机/浏览器验证尚未完成。
+2. **平台验证**：`FontLoader`/`plan_fonts`/`set_fonts` 契约与 Web/Android 取字节代码均已
+   实现并编译（见上表），但**浏览器与真机上的实际下载/整形/重绘尚未在本仓库验证**；
+   Android 也未随 APK 打包任何字体资产。
+3. **Android 网络路径**：当前只实现 asset 路径；运行时 HTTP 下载（含授权与缓存策略）未实现。
 
 含文本的图纸在导入报告里不会被报告为 `Complete`（导入阶段不知道宿主是否有字体）；
 在 `build-representation` 注入字体后文本即可绘。

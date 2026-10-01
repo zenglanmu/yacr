@@ -28,7 +28,19 @@ pub trait FileAccess {
 /// caches the bytes before they are registered with the shaping engine.
 pub trait FontLoader {
     fn load_font(&self, url: &str) -> HostFuture<'_, Arc<[u8]>>;
+
+    /// Fetch the font catalog JSON.
+    ///
+    /// Defaults to the same byte-fetch path as individual fonts; hosts with a
+    /// dedicated catalog source can override it. The catalog URL is derived by
+    /// [`fonts::catalog_url`] from the base passed to
+    /// [`fonts::load_font_engine`].
+    fn load_catalog(&self, url: &str) -> HostFuture<'_, Arc<[u8]>> {
+        self.load_font(url)
+    }
 }
+
+pub mod fonts;
 pub trait Persistence {
     /// Recovery cache is not a permanent user backup.
     fn save_recovery(&self, document: DocumentId, bytes: Arc<[u8]>) -> HostFuture<'_, ()>;

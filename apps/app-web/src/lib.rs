@@ -23,10 +23,14 @@ mod browser {
 
     use cad_app::{Command, CommandId, CommandPayload};
     use cad_domain::*;
+    use cad_platform::fonts::{load_font_engine, requested_fonts, FontLoadReport};
+    use cad_platform::FontLoader;
+    use cad_resources::DEFAULT_FONT_BASE_URL;
     use cad_ui_slint::{
         install_cad_bridge, CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration,
         UiHandle, ViewInput,
     };
+    use wasm_bindgen_futures::JsFuture;
 
     use super::HostController;
 
@@ -140,6 +144,143 @@ mod browser {
 
     fn with_runtime<T>(f: impl FnOnce(&HostRuntime) -> T) -> Option<T> {
         HOST.with(|slot| slot.borrow().as_ref().map(f))
+    }
+
+    // Last font-loading report, surfaced for diagnostics and headless tests.
+    thread_local! {
+        static FONT_REPORT: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+
+    fn set_font_status(handle: &UiHandle, text: String) {
+        let _ = handle.set_status(text.clone());
+        FONT_REPORT.with(|slot| *slot.borrow_mut() = Some(text));
+    }
+
+    /// Human-readable font report (catalog/plan/registered/failed counts).
+    pub fn font_report() -> String {
+        FONT_REPORT
+            .with(|slot| slot.borrow().clone())
+            .unwrap_or_else(|| "字体：未加载".to_string())
+    }
+
+    /// Fetches font bytes through the browser Fetch API (`fetch().arrayBuffer()`).
+    ///
+    /// Implements [`cad_platform::FontLoader`] so the catalog/plan/register
+    /// pipeline is the same one Android uses. Cross-origin reads rely on the
+    /// CDN's CORS headers; a non-OK response is an explicit error, never empty
+    /// bytes.
+    pub struct WebFontLoader;
+
+    async fn fetch_bytes(url: &str) -> CadResult<Arc<[u8]>> {
+        let window = web_sys::window()
+            .ok_or_else(|| CadError::Invariant("font fetch needs a browser window".into()))?;
+        let response_value = JsFuture::from(window.fetch_with_str(url))
+            .await
+            .map_err(|e| {
+                CadError::ResourceMissing(format!("font fetch failed for {url}: {e:?}"))
+            })?;
+        let response: web_sys::Response = response_value.dyn_into().map_err(|_| {
+            CadError::Invariant(format!("font fetch {url} did not return a Response"))
+        })?;
+        if !response.ok() {
+            return Err(CadError::ResourceMissing(format!(
+                "font fetch {url} returned HTTP {}",
+                response.status()
+            )));
+        }
+        let buffer = response.array_buffer().map_err(|e| {
+            CadError::Invariant(format!("font arrayBuffer failed for {url}: {e:?}"))
+        })?;
+        let buffer = JsFuture::from(buffer)
+            .await
+            .map_err(|e| CadError::ResourceMissing(format!("font body failed for {url}: {e:?}")))?;
+        let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+        Ok(Arc::from(bytes.into_boxed_slice()))
+    }
+
+    impl FontLoader for WebFontLoader {
+        fn load_font(&self, url: &str) -> cad_platform::HostFuture<'_, Arc<[u8]>> {
+            let url = url.to_string();
+            Box::pin(async move { fetch_bytes(&url).await })
+        }
+    }
+
+    /// Load and install the shaping fonts the current drawing references.
+    ///
+    /// Reads the referenced keys from the public database API, fetches the
+    /// catalog from [`DEFAULT_FONT_BASE_URL`], registers each planned face with
+    /// its catalog encoding and installs the registered keys as a fallback
+    /// chain. A stale load (another drawing was opened while fetching) is
+    /// discarded with [`CadError::StaleResult`]; an empty engine clears fonts
+    /// rather than installing one that would fail every glyph.
+    pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
+        let (controller, handle, view, incoming) = with_runtime(|rt| {
+            (
+                rt.controller.clone(),
+                rt.handle.clone(),
+                rt.view.clone(),
+                rt.incoming.clone(),
+            )
+        })
+        .ok_or_else(|| CadError::Invariant("浏览器宿主尚未启动".into()))?;
+
+        let (requested, identity) = {
+            let controller = controller.borrow();
+            match controller.drawing() {
+                Some(drawing) => (
+                    requested_fonts(drawing.as_ref()),
+                    Some(drawing.scene_identity()),
+                ),
+                None => (Vec::new(), None),
+            }
+        };
+
+        if requested.is_empty() {
+            view.clear_fonts();
+            let report = FontLoadReport::default();
+            set_font_status(&handle, "字体：图纸未引用 CAD 文本字体".into());
+            return Ok(report);
+        }
+
+        let (engine, report) =
+            load_font_engine(&WebFontLoader, &requested, DEFAULT_FONT_BASE_URL).await?;
+
+        // Another drawing may have replaced this one while the fetch was in
+        // flight; do not apply old fonts to the new content.
+        let current = incoming.borrow().as_ref().map(|d| d.scene_identity());
+        if current != identity {
+            return Err(CadError::StaleResult);
+        }
+
+        if report.registered.is_empty() {
+            view.clear_fonts();
+        } else {
+            view.set_fonts(engine);
+        }
+        let text = format!(
+            "字体：目录 {}，引用 {}，计划 {}，注册 {}，失败 {}",
+            report.catalog_entries,
+            requested.len(),
+            report.planned.len(),
+            report.registered.len(),
+            report.failed.len(),
+        );
+        set_font_status(&handle, text);
+        Ok(report)
+    }
+
+    /// Kick off a best-effort font load for the current drawing.
+    ///
+    /// Used after an open; failures are surfaced on the status line and never
+    /// affect the already-open document.
+    pub fn spawn_font_load() {
+        wasm_bindgen_futures::spawn_local(async {
+            if let Err(e) = load_current_fonts().await {
+                if let Some(handle) = with_runtime(|rt| rt.handle.clone()) {
+                    let _ = handle.set_status(format!("字体加载未完成：{e}"));
+                }
+            }
+        });
     }
 
     /// Mirror the authoritative application viewport into the render camera.
@@ -505,6 +646,8 @@ mod browser {
                 }
                 view.request_redraw();
                 let _ = handle.set_status(format!("已打开 {name}: {}", opened.completeness_label));
+                // Fetch the fonts the drawing references (best effort).
+                spawn_font_load();
                 Ok(())
             }
             Err(e) => {
@@ -602,8 +745,8 @@ mod browser {
 
 #[cfg(target_arch = "wasm32")]
 pub use browser::{
-    confirm_annotation_export, export_annotations_json, import_annotations_json, open_document,
-    pending_recovery_snapshot, renderer_report, start,
+    confirm_annotation_export, export_annotations_json, font_report, import_annotations_json,
+    open_document, pending_recovery_snapshot, renderer_report, start,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -628,6 +771,26 @@ pub fn open_document_bytes(name: String, bytes: Vec<u8>) -> Result<(), JsValue> 
 #[wasm_bindgen]
 pub fn renderer_state_report() -> String {
     renderer_report()
+}
+
+/// Load the fonts the current drawing references; resolves to a summary.
+///
+/// Exposed so the JS host (and headless verification) can await the real
+/// catalog fetch, font fetches and registration instead of guessing.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub async fn load_web_fonts() -> Result<String, JsValue> {
+    browser::load_current_fonts()
+        .await
+        .map(|report| report.summary())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// The last font-loading report (catalog/plan/registered/failed).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn font_load_report() -> String {
+    font_report()
 }
 
 /// Annotation JSON export (caller downloads the returned text). The revision
