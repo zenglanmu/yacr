@@ -9,7 +9,9 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use acadrust::entities::EntityCommon;
-use acadrust::entities::{AttachmentPoint, TextHorizontalAlignment, TextVerticalAlignment};
+use acadrust::entities::{
+    AttachmentPoint, DimensionBase, TextHorizontalAlignment, TextVerticalAlignment,
+};
 use acadrust::{DwgReadOptions, DwgReader, EntityType, ReadStats};
 use cad_db::{
     BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Layout,
@@ -806,6 +808,29 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::Extended(x) if x.class_name() == "ACAD_PROXY_ENTITY" => {
                 self.proxy_geometry(x.class_name(), common, None)
             }
+            EntityType::Dimension(d) => {
+                // A dimension's visible geometry lives in an anonymous block
+                // (`*D...`); expand it like an insert instead of dropping it.
+                let base = d.base();
+                if base.block_name.is_empty() {
+                    (
+                        SemanticGeometry::Opaque {
+                            type_key: "AcDbDimension".into(),
+                            version: 1,
+                            payload: Vec::new(),
+                        },
+                        Completeness::Partial(vec!["dimension has no geometry block".into()]),
+                    )
+                } else {
+                    (
+                        SemanticGeometry::Insert {
+                            block: self.block_id(&base.block_name),
+                            transform: dimension_transform(base),
+                        },
+                        Completeness::Complete,
+                    )
+                }
+            }
             EntityType::Solid3D(_)
             | EntityType::Region(_)
             | EntityType::Body(_)
@@ -1112,6 +1137,34 @@ fn insert_transform(i: &acadrust::entities::Insert) -> Transform3 {
     Transform3 { matrix: m }
 }
 
+fn dimension_transform(base: &DimensionBase) -> Transform3 {
+    placement_transform(
+        base.insertion_point,
+        base.insertion_rotation,
+        base.insertion_scale,
+    )
+}
+
+/// Scale, then rotate about Z, then translate. Used by dimension blocks.
+fn placement_transform(
+    origin: acadrust::types::Vector3,
+    rotation: f64,
+    scale: acadrust::types::Vector3,
+) -> Transform3 {
+    let (s, c) = rotation.sin_cos();
+    let mut m = [[0.0f64; 4]; 4];
+    m[0][0] = c * scale.x;
+    m[0][1] = -s * scale.y;
+    m[1][0] = s * scale.x;
+    m[1][1] = c * scale.y;
+    m[2][2] = scale.z;
+    m[3][3] = 1.0;
+    m[0][3] = origin.x;
+    m[1][3] = origin.y;
+    m[2][3] = origin.z;
+    Transform3 { matrix: m }
+}
+
 fn weaker(a: SupportStatus, b: SupportStatus) -> SupportStatus {
     let rank = |s: &SupportStatus| match s {
         SupportStatus::Verified => 4,
@@ -1324,5 +1377,24 @@ mod tests {
             vec!["stream".into()],
         );
         assert!(matches!(c, Completeness::Partial(_)), "{c:?}");
+    }
+
+    #[test]
+    fn dimension_placement_scales_rotates_then_translates() {
+        // Scale (2,2,1), rotate +90 deg about Z, translate (1,2,3).
+        let t = placement_transform(
+            acadrust::types::Vector3::new(1.0, 2.0, 3.0),
+            std::f64::consts::FRAC_PI_2,
+            acadrust::types::Vector3::new(2.0, 2.0, 1.0),
+        );
+        // (1,0,0) -> scale (2,0,0) -> rotate (0,2,0) -> translate (1,4,3).
+        let p = t.apply_point(Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        assert!((p.x - 1.0).abs() < 1e-9, "{p:?}");
+        assert!((p.y - 4.0).abs() < 1e-9, "{p:?}");
+        assert!((p.z - 3.0).abs() < 1e-9, "{p:?}");
     }
 }

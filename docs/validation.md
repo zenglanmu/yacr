@@ -163,7 +163,7 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
 | 样本 | entities | model | 块定义 | layers | primitives | 绘制类型 | build_ms | completeness |
 |---|---|---|---|---|---|---|---|---|
 | baseline-sample | 192 | 166 | 9 | 21 | 149 | 86 line + 3 mesh + 60 text | 0.5 | partial（Text/Hatch/Region/Insert…） |
-| canteen | 29212 | 25123 | 108 | 14 | 41665 | 41370 line + 295 text | 978.8 | partial（Text/Hatch/Dimension/3dSolid…） |
+| canteen | 29212 | 25123 | 108 | 14 | 41917 | 41594 line + 323 text | 978.8 | partial（Text/Hatch/3dSolid…） |
 | lockers | 1834 | 1801 | 3 | 4 | 1829 | 1796 line + 33 text | 8.1 | partial（**仅 AcDbText** 不可绘） |
 | map-of-uae | 137 | 129 | 3 | 6 | 119 | 87 line + 32 text | 2.4 | partial（Text/Hatch/Insert…） |
 | patient-chairs | 11884 | 27 | 27 | 3 | 11855 | 11855 line | 42.1 | **complete** |
@@ -189,7 +189,11 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
   | lockers | 1796 / 33 | 2747 / 0 | outline |
   | map-of-uae | 87 / 32 | 459 / 0 | outline |
   | korean-DBCS-hangul | 2 / 3 | 96 / 0 | 回退 |
-  | canteen | 41370 / 295 | 43464 / 0 | GOST SHX 未注册，靠回退 |
+  | canteen | 41594 / 323 | 43809 / 0 | GOST SHX 未注册，靠回退 |
+
+- 文字整形见上表；**DIMENSION** 现展开其匿名块（`*D...`）的线/箭头/文字，`canteen` 的
+  28 处标注带来 +224 线段 / +28 文字（`41594 line + 323 text`），注入字体后文字归零。
+  无块名或块缺失时记 `Partial`，不伪造几何。
 
 ## 未执行（明确标注）
 

@@ -96,7 +96,7 @@
 | lockers | 1796 / 33 | 2747 / 0 |
 | map-of-uae | 87 / 32 | 459 / 0 |
 | korean-DBCS-hangul | 2 / 3 | 96 / 0 |
-| canteen（GOST，靠回退） | 41370 / 295 | 43464 / 0 |
+| canteen（GOST，靠回退） | 41594 / 323 | 43809 / 0 |
 
 ## 未完成
 
