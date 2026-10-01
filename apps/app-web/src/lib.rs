@@ -33,26 +33,32 @@ mod browser {
     type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
 
     /// Trigger a browser download for the exported sidecar JSON.
-    fn download_text(filename: &str, text: &str) {
+    ///
+    /// Returns whether the download was successfully initiated. The host must
+    /// only mark the document saved when this is `true` (audit B07).
+    fn download_text(filename: &str, text: &str) -> bool {
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-            return;
+            return false;
         };
         let parts = js_sys::Array::new();
         parts.push(&wasm_bindgen::JsValue::from_str(text));
         let Ok(blob) = web_sys::Blob::new_with_str_sequence(&parts) else {
-            return;
+            return false;
         };
         let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else {
-            return;
+            return false;
         };
+        let mut clicked = false;
         if let Ok(element) = document.create_element("a") {
             if let Ok(anchor) = element.dyn_into::<web_sys::HtmlAnchorElement>() {
                 anchor.set_href(&url);
                 anchor.set_download(filename);
                 anchor.click();
+                clicked = true;
             }
         }
         let _ = web_sys::Url::revoke_object_url(&url);
+        clicked
     }
 
     /// Ask the JS host to open the annotation sidecar picker.
@@ -221,10 +227,28 @@ mod browser {
                     return Ok(());
                 }
                 CommandId::ExportAnnotations => {
-                    match export_annotations_json() {
-                        Ok(json) => {
-                            download_text("annotations.cadnotes.json", &json);
-                            set_status(format!("已导出 {} 字节批注 JSON", json.len()));
+                    // Prepare (pure getter) → download → confirm on success.
+                    let prepared = {
+                        let c = self.controller.borrow();
+                        c.prepare_annotation_export()
+                    };
+                    match prepared {
+                        Ok((json, revision)) => {
+                            if download_text("annotations.cadnotes.json", &json) {
+                                let confirmed = self
+                                    .controller
+                                    .borrow_mut()
+                                    .confirm_annotation_export(revision);
+                                match confirmed {
+                                    Ok(()) => {
+                                        set_status(format!("已导出 {} 字节批注 JSON", json.len()))
+                                    }
+                                    Err(e) => set_status(format!("导出确认失败：{e}")),
+                                }
+                            } else {
+                                // The download could not be started: keep dirty.
+                                set_status("导出失败：下载未能启动，批注仍为未保存".into());
+                            }
                         }
                         Err(e) => set_status(format!("导出失败：{e}")),
                     }
@@ -238,8 +262,28 @@ mod browser {
                 CommandId::SwitchBackend => {
                     if let CommandPayload::Backend(choice) = command.payload {
                         let preference = preference_for(choice);
+                        // Protect unsaved annotations across the reload (B06):
+                        // persist a recovery snapshot first; only reload if the
+                        // snapshot is durable (or there is nothing unsaved).
+                        let snapshot = {
+                            let c = self.controller.borrow();
+                            if c.workspace_annotations()
+                                .map(|a| a.is_dirty())
+                                .unwrap_or(false)
+                            {
+                                c.prepare_annotation_export().ok().map(|(json, _)| json)
+                            } else {
+                                None
+                            }
+                        };
                         set_status(format!("切换后端为 {preference:?}，重建渲染会话…"));
-                        let _ = cad_ui_slint::web::store_preference_and_reload(preference);
+                        match cad_ui_slint::web::store_preference_and_reload_protected(
+                            preference,
+                            snapshot.as_deref(),
+                        ) {
+                            Ok(()) => {}
+                            Err(e) => set_status(format!("切换失败：{e}（未保存批注未丢失）")),
+                        }
                     } else {
                         set_status("SwitchBackend 需要后端参数".into());
                     }
@@ -410,7 +454,12 @@ mod browser {
         }));
 
         let backend_label = backend_status(chosen);
-        let _ = handle.set_status(format!("就绪（{backend_label}）"));
+        if cad_ui_slint::web::has_recovery_snapshot() {
+            let _ = handle
+                .set_status("检测到上次后端切换的未保存批注恢复快照：可恢复或丢弃（未自动覆盖）");
+        } else {
+            let _ = handle.set_status(format!("就绪（{backend_label}）"));
+        }
 
         HOST.with(|slot| {
             *slot.borrow_mut() = Some(HostRuntime {
@@ -488,20 +537,30 @@ mod browser {
     }
 
     /// Export annotation JSON for the JS host to download.
-    pub fn export_annotations_json() -> Result<String, String> {
+    ///
+    /// This is a pure getter: it never marks the document saved. A caller that
+    /// downloads the bytes must call [`confirm_annotation_export`] with the
+    /// returned revision only after the write is confirmed (audit B07).
+    pub fn export_annotations_json() -> Result<(String, u64), String> {
+        let controller = with_runtime(|rt| rt.controller.clone())
+            .ok_or_else(|| "浏览器宿主尚未启动".to_string())?;
+        let (json, revision) = controller
+            .borrow()
+            .prepare_annotation_export()
+            .map_err(|e| e.to_string())?;
+        Ok((json, revision.0))
+    }
+
+    /// Confirm that the export at `revision` was durably written.
+    pub fn confirm_annotation_export(revision: u64) -> Result<(), String> {
         let (controller, handle) = with_runtime(|rt| (rt.controller.clone(), rt.handle.clone()))
             .ok_or_else(|| "浏览器宿主尚未启动".to_string())?;
-        let json = controller
-            .borrow()
-            .export_annotations_json()
-            .map_err(|e| e.to_string())?;
-        // Only mark saved after the bytes are in hand for the download.
         controller
             .borrow_mut()
-            .mark_annotations_saved()
+            .confirm_annotation_export(Revision(revision))
             .map_err(|e| e.to_string())?;
-        let _ = handle.set_status(format!("已导出 {} 字节批注 JSON", json.len()));
-        Ok(json)
+        let _ = handle.set_status("批注已确认保存".to_string());
+        Ok(())
     }
 
     /// Import annotations from JSON text chosen by the user.
@@ -516,11 +575,35 @@ mod browser {
         let _ = handle.set_status(format!("已导入 {count} 条批注"));
         Ok(count)
     }
+
+    /// The pending backend-switch recovery snapshot, if any (audit B06).
+    pub fn pending_recovery_snapshot() -> Option<String> {
+        cad_ui_slint::web::peek_recovery_snapshot()
+    }
+
+    /// Restore annotations from the pending recovery snapshot.
+    ///
+    /// Uses `ImportUnanchored` because the snapshot was taken before a reload
+    /// that may have changed nothing about the document; the fingerprint policy
+    /// is resolved by the caller if it is a mismatch.
+    pub fn restore_pending_recovery_snapshot() -> Result<usize, String> {
+        let snapshot =
+            cad_ui_slint::web::peek_recovery_snapshot().ok_or_else(|| "无恢复快照".to_string())?;
+        let count = import_annotations_json(&snapshot)?;
+        cad_ui_slint::web::clear_recovery_snapshot();
+        Ok(count)
+    }
+
+    /// Explicitly discard the pending recovery snapshot.
+    pub fn drop_pending_recovery_snapshot() {
+        cad_ui_slint::web::clear_recovery_snapshot();
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 pub use browser::{
-    export_annotations_json, import_annotations_json, open_document, renderer_report, start,
+    confirm_annotation_export, export_annotations_json, import_annotations_json, open_document,
+    pending_recovery_snapshot, renderer_report, start,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -547,11 +630,29 @@ pub fn renderer_state_report() -> String {
     renderer_report()
 }
 
-/// Annotation JSON export (caller downloads the returned text).
+/// Annotation JSON export (caller downloads the returned text). The revision
+/// must be passed back to `annotation_confirm_export` after a successful write.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn annotation_export_json() -> Result<String, JsValue> {
-    export_annotations_json().map_err(|e| JsValue::from_str(&e))
+pub fn annotation_export_json() -> Result<JsValue, JsValue> {
+    let (json, revision) = export_annotations_json().map_err(|e| JsValue::from_str(&e))?;
+    let out = js_sys::Object::new();
+    js_sys::Reflect::set(&out, &"json".into(), &JsValue::from_str(&json))
+        .map_err(|_| JsValue::from_str("failed to build export object"))?;
+    js_sys::Reflect::set(
+        &out,
+        &"revision".into(),
+        &JsValue::from_f64(revision as f64),
+    )
+    .map_err(|_| JsValue::from_str("failed to build export object"))?;
+    Ok(out.into())
+}
+
+/// Confirm that the export at `revision` was durably written.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn annotation_confirm_export(revision: f64) -> Result<(), JsValue> {
+    confirm_annotation_export(revision as u64).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Annotation JSON import from user-chosen text.
@@ -559,6 +660,27 @@ pub fn annotation_export_json() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn annotation_import_json(text: &str) -> Result<usize, JsValue> {
     import_annotations_json(text).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Whether a backend-switch recovery snapshot is waiting (audit B06).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn has_recovery_snapshot() -> bool {
+    cad_ui_slint::web::has_recovery_snapshot()
+}
+
+/// Restore the pending recovery snapshot (returns the annotation count).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn restore_recovery_snapshot() -> Result<usize, JsValue> {
+    browser::restore_pending_recovery_snapshot().map_err(|e| JsValue::from_str(&e))
+}
+
+/// Discard the pending recovery snapshot explicitly.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn discard_recovery_snapshot() {
+    browser::drop_pending_recovery_snapshot()
 }
 
 /// Native builds cannot run the browser host; this is a platform constraint,

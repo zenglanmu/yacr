@@ -320,6 +320,15 @@ impl HostController {
     /// Spec §3.4: schema_version, fingerprint, name hint, unit context and the
     /// annotation list are mandatory; the format is independent of the DWG.
     pub fn export_annotations_json(&self) -> CadResult<String> {
+        Ok(self.prepare_annotation_export()?.0)
+    }
+
+    /// Prepare an export bundle: the JSON plus the revision it was taken at.
+    ///
+    /// This is a pure getter and never marks the document saved. The caller must
+    /// confirm the durable write with [`HostController::confirm_annotation_export`]
+    /// and the same revision (audit B07).
+    pub fn prepare_annotation_export(&self) -> CadResult<(String, Revision)> {
         let document = self
             .application
             .workspace
@@ -337,8 +346,24 @@ impl HostController {
             extensions_json: Default::default(),
         };
         let bytes = AnnotationService.encode(&file)?;
-        String::from_utf8(bytes)
-            .map_err(|e| CadError::Invariant(format!("annotation JSON is not UTF-8: {e}")))
+        let json = String::from_utf8(bytes)
+            .map_err(|e| CadError::Invariant(format!("annotation JSON is not UTF-8: {e}")))?;
+        Ok((json, document.annotations.revision()))
+    }
+
+    /// Mark the exact exported revision as durably saved.
+    ///
+    /// Only call after the write is confirmed to have succeeded. Using the
+    /// exported revision prevents a later edit from being marked saved by an
+    /// earlier export (audit B07).
+    pub fn confirm_annotation_export(&mut self, revision: Revision) -> CadResult<()> {
+        let document = self
+            .application
+            .workspace
+            .documents
+            .get_mut(&self.document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        document.annotations.mark_exported(revision)
     }
 
     /// Mark the current annotation revision as durably exported. Only called
@@ -348,10 +373,10 @@ impl HostController {
             .application
             .workspace
             .documents
-            .get_mut(&self.document_id)
+            .get(&self.document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
         let revision = document.annotations.revision();
-        document.annotations.mark_exported(revision)
+        self.confirm_annotation_export(revision)
     }
 
     /// Import a sidecar file as one transaction, recording one undo step.
@@ -506,7 +531,6 @@ mod tests {
 
     #[test]
     fn annotation_export_import_roundtrip_records_one_undo_step() {
-        use cad_db::{Annotation, AnnotationGeometry, AnnotationStyle};
         let mut source = HostController::with_demo_document([800.0, 600.0]).unwrap();
         source
             .apply_annotation(AnnotationCommand::Create(Annotation {
@@ -548,5 +572,43 @@ mod tests {
         assert!(!target.application.workspace.documents[&target.document_id]
             .annotations
             .is_dirty());
+    }
+
+    #[test]
+    fn export_prepare_is_a_pure_getter() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(1, "note")))
+            .unwrap();
+        assert!(controller.workspace_annotations().unwrap().is_dirty());
+        let (json, revision) = controller.prepare_annotation_export().unwrap();
+        assert!(json.contains("schema_version"));
+        // Preparing the export must not mark the document saved.
+        assert!(controller.workspace_annotations().unwrap().is_dirty());
+        assert_eq!(
+            revision,
+            controller.workspace_annotations().unwrap().revision()
+        );
+    }
+
+    #[test]
+    fn export_at_rev_n_does_not_mark_later_rev_n_plus_1_saved() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(1, "first")))
+            .unwrap();
+        let (_, rev_n) = controller.prepare_annotation_export().unwrap();
+        // A later edit raises the revision.
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(2, "second")))
+            .unwrap();
+        let rev_n1 = controller.workspace_annotations().unwrap().revision();
+        assert_ne!(rev_n, rev_n1);
+        // Confirming the older export only marks that revision: still dirty.
+        controller.confirm_annotation_export(rev_n).unwrap();
+        assert!(controller.workspace_annotations().unwrap().is_dirty());
+        // Confirming the current revision clears dirty.
+        controller.confirm_annotation_export(rev_n1).unwrap();
+        assert!(!controller.workspace_annotations().unwrap().is_dirty());
     }
 }

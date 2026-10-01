@@ -9,6 +9,11 @@ import init, {
   open_document_bytes,
   renderer_state_report,
   annotation_import_json,
+  annotation_export_json,
+  annotation_confirm_export,
+  has_recovery_snapshot,
+  restore_recovery_snapshot,
+  discard_recovery_snapshot,
 } from "./pkg/yacr.js";
 
 const element = (id) => document.getElementById(id);
@@ -16,6 +21,31 @@ const element = (id) => document.getElementById(id);
 function setState(text) {
   const node = element("host-state");
   if (node) node.textContent = text;
+}
+
+/// Trigger a download of the exported annotation JSON and only confirm the
+/// export to the core host once the download has actually started (audit B07).
+function exportAnnotations() {
+  let bundle;
+  try {
+    bundle = annotation_export_json();
+  } catch (error) {
+    setState("导出失败：" + error);
+    return;
+  }
+  const blob = new Blob([bundle.json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "annotations.cadnotes.json";
+  anchor.click();
+  URL.revokeObjectURL(url);
+  try {
+    annotation_confirm_export(bundle.revision);
+    setState(`已导出 ${bundle.json.length} 字节批注 JSON`);
+  } catch (error) {
+    setState("导出确认失败：" + error);
+  }
 }
 
 async function readBytes(file) {
@@ -109,9 +139,17 @@ async function main() {
   window.yacr = {
     renderer_state_report,
     open_document_bytes: (name, bytes) => open_document_bytes(name, bytes),
+    export_annotations: exportAnnotations,
+    has_recovery_snapshot,
+    restore_recovery_snapshot,
+    discard_recovery_snapshot,
   };
 
   startStatePolling();
+
+  if (has_recovery_snapshot()) {
+    setState("检测到未保存批注恢复快照：调用 window.yacr.restore_recovery_snapshot() 恢复或 discard_recovery_snapshot() 丢弃");
+  }
 
   try {
     await start_web();
