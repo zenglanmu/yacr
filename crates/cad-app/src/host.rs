@@ -229,10 +229,11 @@ impl HostController {
 
     /// Import a DWG byte stream through the single importer boundary.
     ///
-    /// This is the no-decision entry used when the caller has already resolved
-    /// any unsaved work. If the current document has unsaved annotations it is
-    /// rejected with `Cancelled`; call [`HostController::open_bytes_decided`]
-    /// with an explicit decision instead.
+    /// This is the no-decision entry for callers that open a file without an
+    /// unsaved-work interaction (CLI, a fresh open). A clean document proceeds;
+    /// if the current document has unsaved annotations it is rejected with
+    /// `Cancelled`, and the caller must resolve the decision via
+    /// [`HostController::open_bytes_leaving`].
     pub fn open_bytes(&mut self, bytes: Arc<[u8]>, label: &str) -> CadResult<OpenedDrawing> {
         self.open_bytes_decided(bytes, label, UnsavedDecision::Cancel)
     }

@@ -211,7 +211,8 @@ impl UnsavedFlow {
     /// * `PreserveRecovery` on a dirty document proceeds only when
     ///   `recovery_succeeded` is true.
     /// * `Discard` always proceeds (the user asked to drop the work).
-    /// * `Cancel` never proceeds.
+    /// * `Cancel` on a dirty document never proceeds; on a clean document there
+    ///   is no unsaved work to protect, so it proceeds too.
     pub fn apply(
         self,
         decision: UnsavedDecision,
@@ -219,12 +220,9 @@ impl UnsavedFlow {
         recovery_succeeded: bool,
     ) -> UnsavedOutcome {
         if !self.dirty {
-            // Nothing unsaved: a Cancel still means "keep current", but a clean
-            // document needs no protection, so proceed.
-            return match decision {
-                UnsavedDecision::Cancel => UnsavedOutcome::Cancelled,
-                _ => UnsavedOutcome::Proceed,
-            };
+            // Nothing unsaved, so nothing needs protecting: a caller who has not
+            // asked to overwrite unsaved work proceeds either way.
+            return UnsavedOutcome::Proceed;
         }
         match decision {
             UnsavedDecision::Save => {
@@ -470,16 +468,22 @@ mod tests {
     }
 
     #[test]
-    fn clean_document_short_circuits_except_cancel() {
+    fn clean_document_proceeds_for_every_decision() {
         let flow = UnsavedFlow::new(false);
-        assert_eq!(
-            flow.apply(UnsavedDecision::Save, false, false),
-            UnsavedOutcome::Proceed
-        );
-        assert_eq!(
-            flow.apply(UnsavedDecision::Cancel, false, false),
-            UnsavedOutcome::Cancelled
-        );
+        // With nothing unsaved there is nothing Cancel could protect, so every
+        // decision proceeds rather than blocking the caller.
+        for decision in [
+            UnsavedDecision::Save,
+            UnsavedDecision::PreserveRecovery,
+            UnsavedDecision::Discard,
+            UnsavedDecision::Cancel,
+        ] {
+            assert_eq!(
+                flow.apply(decision, false, false),
+                UnsavedOutcome::Proceed,
+                "{decision:?}"
+            );
+        }
     }
 
     #[test]
