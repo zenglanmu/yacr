@@ -20,5 +20,12 @@ cad-resources.workspace = true
 cad-app.workspace = true
 serde_json.workspace = true
 
+# The real `render` operation is native-only: it drives the wgpu renderer
+# against a headless software-Vulkan adapter. Browser/CLI wasm keeps the
+# explicit "unsupported" answer (no device handed in).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cad-scene.workspace = true
+cad-render-wgpu.workspace = true
+
 [dev-dependencies]
 serde_json.workspace = true

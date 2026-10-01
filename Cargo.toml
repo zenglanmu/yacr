@@ -74,6 +74,10 @@ time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 ttf-parser = "0.25"
 flate2 = "1"
 encoding_rs = "0.8"
+# Headless (native) software-Vulkan render path: blocking on wgpu's async
+# adapter/device requests, and encoding the offscreen frame to PNG.
+png = "0.18"
+futures-lite = "2.6"
 
 # Browser host (wasm32 only). Pinned to the versions already in Cargo.lock via
 # the Slint/wgpu web stack; wasm-bindgen-cli must match `wasm-bindgen` exactly.

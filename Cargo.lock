@@ -758,8 +758,10 @@ dependencies = [
  "cad-import-acadrust",
  "cad-measure",
  "cad-proxy",
+ "cad-render-wgpu",
  "cad-representation",
  "cad-resources",
+ "cad-scene",
  "serde_json",
 ]
 
@@ -885,10 +887,12 @@ dependencies = [
  "cad-domain",
  "cad-geometry",
  "cad-scene",
+ "futures-lite",
  "glam",
  "js-sys",
  "log",
  "naga",
+ "png",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

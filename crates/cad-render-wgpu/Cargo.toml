@@ -22,6 +22,12 @@ log.workspace = true
 # wgpu 30.0.1 embeds so validation matches the runtime parser.
 naga = { version = "=30.0.1", features = ["wgsl-in"] }
 
+# Headless software-Vulkan path (native only): blocking on wgpu's async
+# adapter/device requests and PNG-encoding the readback for golden inspection.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+png.workspace = true
+futures-lite.workspace = true
+
 # The browser surface path lives here so wgpu stays inside the renderer crate
 # (spec §4.5/§5.3): hosts hand in a canvas, never a wgpu object.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
