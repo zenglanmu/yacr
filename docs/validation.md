@@ -71,23 +71,24 @@ GitHub `raw.githubusercontent.com` 被网络策略重置，改由 `api.github.co
 | anonymous-names.dwg | AC1032 | 13947 | ea5b55f7e99d2ad412779ef7f3e71ff3bd7f6c4147f6217d936eed02171291b9 | hakanaktt/acadrust tests |
 | point_object_id.dwg | AC1032 | 13637 | 9eef9375c77d72881dc202b9fb94b9c414a048dfdfab8374419b44830337c49d | hakanaktt/acadrust tests/datatable |
 
-### 导入结果（B15 修复后）
+### 导入结果（B15、B20 修复后）
 
-`scan` 现在分别报告总实体、模型空间实体与块定义数；`build-representation` 会展开 INSERT。
+`scan` 分别报告总实体、模型空间实体与块定义数；`build-representation` 会展开 INSERT；
+completeness 反映“实际能画什么”，不再只看解析是否成功。
 
-| 样本 | entities | model | 块定义 | layers | primitives | 绘制类型 | 模型空间 bounds |
-|---|---|---|---|---|---|---|---|
-| AutoCAD_97_98.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | [0,0]–[73.8,23.0] |
-| AutoCAD_2000.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | [0,0]–[73.8,23.0] |
-| AutoCAD_2004.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | [0,0]–[73.8,23.0] |
-| AutoCAD_2007.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | [0,0]–[73.8,23.0] |
-| AutoCAD_2010.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | [0,0]–[73.8,23.0] |
-| AutoCAD_2013.dwg | 3 | 3 | 0 | 1 | 3 | 3 text | [721.4,921.8]–[18318.7,3205.4] |
-| Kitchens-master-1.dwg | 782 | 21 | 21 | 1 | 757 | 757 line | [-121.9,0]–[241.9,179.5] |
-| Kitchens-revised-1.dwg | 782 | 21 | 21 | 1 | 757 | 757 line | [-61.3,0]–[241.9,179.5] |
-| korean-DBCS-hangul.dwg | 79 | 6 | 2 | 2 | 5 | 2 line + 3 text | [347.5,-11.4]–[825.1,247.0] |
-| anonymous-names.dwg | 10 | 5 | 5 | 1 | 0 | —（块内仅 ATTDEF） | none |
-| point_object_id.dwg | 0 | 0 | 0 | 1 | 0 | — | none |
+| 样本 | entities | model | 块定义 | layers | primitives | 绘制类型 | completeness | 模型空间 bounds |
+|---|---|---|---|---|---|---|---|---|
+| AutoCAD_97_98.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | partial（Text/ATTDEF 不可绘） | [0,0]–[73.8,23.0] |
+| AutoCAD_2000.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | partial（同上） | [0,0]–[73.8,23.0] |
+| AutoCAD_2004.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | partial | [0,0]–[73.8,23.0] |
+| AutoCAD_2007.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | partial | [0,0]–[73.8,23.0] |
+| AutoCAD_2010.dwg | 34 | 33 | 0 | 1 | 30 | 19 line + 11 text | partial | [0,0]–[73.8,23.0] |
+| AutoCAD_2013.dwg | 3 | 3 | 0 | 1 | 3 | 3 text | **missing**（无可绘内容） | [721.4,921.8]–[18318.7,3205.4] |
+| Kitchens-master-1.dwg | 782 | 21 | 21 | 1 | 757 | 757 line | **complete** | [-121.9,0]–[241.9,179.5] |
+| Kitchens-revised-1.dwg | 782 | 21 | 21 | 1 | 757 | 757 line | **complete** | [-61.3,0]–[241.9,179.5] |
+| korean-DBCS-hangul.dwg | 79 | 6 | 2 | 2 | 5 | 2 line + 3 text | partial（Text/Table 不可绘） | [347.5,-11.4]–[825.1,247.0] |
+| anonymous-names.dwg | 10 | 5 | 5 | 1 | 0 | —（块内仅 ATTDEF） | **missing** | none |
+| point_object_id.dwg | 0 | 0 | 0 | 1 | 0 | — | complete（空图） | none |
 
 Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT 展开的块几何；
 两份 Kitchens 的 bounds 不再相同（master 最小 x=-121.9，revised 最小 x=-61.3），
@@ -112,15 +113,24 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
 - **CLI 统计所有图元**：`build-representation` 报告 `lines/meshes/texts/instances/images`
   分解，不再只看 `Lines`。
 
+### 已修复（本轮，审计 B20）
+
+- **render/pick 不再由解析完整性推导**：`note_capability` 改为接收独立的
+  `render`/`pick` 状态，由 `display_support(geometry)` 判定——文本与 Opaque/ACIS 为
+  `Unsupported`，INSERT 继承其块定义的解析状态。CLI `proxy-report` 现在如实显示
+  `AcDbText/AcDbMText render=unsupported`，Kitchens 的 `AcDbBlockReference render=verified`
+  （因其块几何确实可绘）。
+- **导入 completeness 反映可绘性**：`aggregate_completeness` 结合 import 诊断与模型空间
+  渲染状态；全部可绘才 `Complete`，混合为 `Partial`，完全不可绘为 `Missing`。纯文字图
+  （AutoCAD_2013）由 `complete` 改为 `missing`，块库图（Kitchens）保持 `complete`。
+
 ### 仍开放的缺陷（未修复）
 
 - **TEXT 不进场景**：`cad-scene/src/lib.rs` 仍跳过 `Text`/`Instance`/`Image`，故
   AutoCAD_2013 这类纯文字图纸 GPU 渲染为空；文字 shaping/图集未实现。`build_expanded`
   之后已无 `Instance` 片段，但 `Text` 仍需专门子系统。
-- **完整性与能力过度声明（B20）**：`note_capability` 仍以解析完整性推导 `render/pick`，
-  无 `import.*` 诊断时整图即 `Complete`；`AcDbText` 等仍报 `render=verified`。
 - **ATTDEF 为 Opaque**：`anonymous-names` 的块内只有 `AttributeDefinition`，展开后无可绘制
-  图元（诚实报告为空，非崩溃，但属性文本未渲染）。
+  图元（现在 completeness 如实报 `Missing`，属性文本本身仍未渲染）。
 - **截断 DWG** 退出码为 0、`completeness=partial`、实体 0；损坏与合法空图不易区分，
   F01“损坏 DWG”验收未闭环。
 
@@ -132,7 +142,7 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
 - 指纹不匹配的批注导入默认拒绝，`--allow-fingerprint-mismatch` 才放行（F09/B10 生效）。
 - `measure` 距离/角度/折线长度返回结构化 JSON 与单位；未知单位显示 `DrawingUnits`。
 - `render` 在无 GPU 环境显式返回 `Unsupported`，不空成功。
-- 本轮同时复核：`cargo test`（核心，114 passed/0 failed）、完整 workspace Wasm `--lib`、
+- 本轮同时复核：`cargo test`（核心，117 passed/0 failed）、完整 workspace Wasm `--lib`、
   `cargo fmt --check`、`clippy`（0 警告）、`scripts/check-architecture.py` 均通过。
 
 ## 未执行（明确标注）

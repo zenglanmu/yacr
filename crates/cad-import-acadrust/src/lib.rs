@@ -4,7 +4,7 @@
 //! block definitions → proxy supplement → normalise into the database. The
 //! library is never modified and nothing here assumes internal hooks.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -164,6 +164,22 @@ struct ImporterBuilder<'a> {
     dropped: usize,
     proxy: ProxyPlayer,
     model_layout: LayoutId,
+    /// Per block: the display status of each child, with the referenced block
+    /// when the child is an INSERT (so nesting can be resolved).
+    block_members: HashMap<BlockId, Vec<BlockMember>>,
+    /// Resolved render status of each block definition (weakest child).
+    block_status: HashMap<BlockId, SupportStatus>,
+    /// Weakest render status and offending types over model-space entities.
+    model_render: SupportStatus,
+    model_drawable: bool,
+    model_render_types: BTreeSet<String>,
+}
+
+/// A block child classified for display, before nesting is resolved.
+#[derive(Debug, Clone, Copy)]
+struct BlockMember {
+    render: SupportStatus,
+    insert_block: Option<BlockId>,
 }
 
 impl<'a> ImporterBuilder<'a> {
@@ -195,6 +211,11 @@ impl<'a> ImporterBuilder<'a> {
             dropped: 0,
             proxy,
             model_layout: LayoutId(0),
+            block_members: HashMap::new(),
+            block_status: HashMap::new(),
+            model_render: SupportStatus::Verified,
+            model_drawable: false,
+            model_render_types: BTreeSet::new(),
         }
     }
 
@@ -217,6 +238,11 @@ impl<'a> ImporterBuilder<'a> {
         let mut diagnostics = std::mem::take(&mut self.diagnostics);
         let dropped = self.dropped;
         let stream_completed = self.stats.stream_completed;
+        let model_render = self.model_render;
+        let model_drawable = self.model_drawable;
+        let model_render_types: Vec<String> = std::mem::take(&mut self.model_render_types)
+            .into_iter()
+            .collect();
         let database = self.builder.finish()?;
 
         if dropped > 0 {
@@ -233,11 +259,20 @@ impl<'a> ImporterBuilder<'a> {
                 message: "source stream did not complete; recovery data may be partial".into(),
             });
         }
-        let completeness = if diagnostics.iter().any(|d| d.code.starts_with("import.")) {
-            Completeness::Partial(diagnostics.iter().map(|d| d.message.clone()).collect())
-        } else {
-            Completeness::Complete
-        };
+        // Completeness reflects what can actually be drawn, not merely whether
+        // parsing succeeded (audit B20). A drawing whose content cannot be
+        // rendered must not report `Complete`.
+        let import_items: Vec<String> = diagnostics
+            .iter()
+            .filter(|d| d.code.starts_with("import."))
+            .map(|d| d.message.clone())
+            .collect();
+        let completeness = aggregate_completeness(
+            model_render,
+            model_drawable,
+            model_render_types,
+            import_items,
+        );
         Ok(ImportedDrawing {
             database,
             units,
@@ -409,14 +444,8 @@ impl<'a> ImporterBuilder<'a> {
     }
 
     fn read_entities(&mut self) -> CadResult<()> {
-        // Model space.
-        let model_space = self.model_space_id();
-        for entity in self.acad.model_space_entities() {
-            self.push_entity(entity, SpaceId::Model, model_space);
-        }
-        // Block definitions are stored in block space; they are only drawn when
-        // an INSERT expands them (audit B15). Storing them as model space would
-        // draw the block library at the origin.
+        // Block definitions first, so model-space INSERTs can resolve the
+        // display status of the block they reference (audit B15/B20).
         for block in self.acad.block_records.iter() {
             if is_space_block_name(&block.name) {
                 continue;
@@ -435,6 +464,13 @@ impl<'a> ImporterBuilder<'a> {
                 entities: entity_ids,
             })?;
         }
+        self.resolve_block_status();
+
+        // Model space: the primary drawable set.
+        let model_space = self.model_space_id();
+        for entity in self.acad.model_space_entities() {
+            self.push_entity(entity, SpaceId::Model, model_space);
+        }
         // Paper space.
         for (name, layout) in self.layout_ids.clone() {
             for entity in self.acad.entities_in_block(&name) {
@@ -442,6 +478,38 @@ impl<'a> ImporterBuilder<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Resolve each block's render status from its children, iterating to a
+    /// fixpoint so nested INSERTs are accounted for. Cycles settle at
+    /// `Unverified` instead of looping.
+    fn resolve_block_status(&mut self) {
+        let ids: Vec<BlockId> = self.block_members.keys().copied().collect();
+        for _ in 0..=ids.len() {
+            let mut changed = false;
+            for id in &ids {
+                let members = self.block_members.get(id).cloned().unwrap_or_default();
+                let mut status = SupportStatus::Verified;
+                for member in &members {
+                    let child = match member.insert_block {
+                        Some(block) => self
+                            .block_status
+                            .get(&block)
+                            .copied()
+                            .unwrap_or(SupportStatus::Unverified),
+                        None => member.render,
+                    };
+                    status = weaker(status, child);
+                }
+                if self.block_status.get(id).copied() != Some(status) {
+                    self.block_status.insert(*id, status);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
     }
 
     fn model_space_id(&self) -> LayoutId {
@@ -474,13 +542,44 @@ impl<'a> ImporterBuilder<'a> {
 
         let (geometry, completeness) = self.convert(entity, common);
 
+        // Render/pick are judged from the drawn result, not from parse success
+        // (audit B20). An INSERT inherits the resolved status of its block.
+        let (mut render, mut pick) = display_support(&geometry);
+        let insert_block = match &geometry {
+            SemanticGeometry::Insert { block, .. } => Some(*block),
+            _ => None,
+        };
+        if let Some(block) = insert_block {
+            if let Some(status) = self.block_status.get(&block) {
+                render = *status;
+                pick = *status;
+            }
+        }
+        if let SpaceId::Block(block) = &space {
+            self.block_members
+                .entry(*block)
+                .or_default()
+                .push(BlockMember {
+                    render,
+                    insert_block,
+                });
+        }
+        if matches!(&space, SpaceId::Model) {
+            self.model_render = weaker(self.model_render, render);
+            if render == SupportStatus::Verified {
+                self.model_drawable = true;
+            } else {
+                self.model_render_types.insert(class_name.clone());
+            }
+        }
+
         let entity_id = EntityId(self.next_entity);
         let object_id = ObjectId(self.next_object);
         self.next_entity += 1;
         self.next_object += 1;
         self.entity_total += 1;
 
-        self.note_capability(&class_name, &geometry, &completeness);
+        self.note_capability(&class_name, &geometry, &completeness, render, pick);
 
         let record = DbEntity {
             object: DbObject {
@@ -774,6 +873,8 @@ impl<'a> ImporterBuilder<'a> {
         class_name: &str,
         geometry: &SemanticGeometry,
         completeness: &Completeness,
+        render: SupportStatus,
+        pick: SupportStatus,
     ) {
         let semantic = match completeness {
             Completeness::Complete => SupportStatus::Verified,
@@ -794,15 +895,59 @@ impl<'a> ImporterBuilder<'a> {
                 type_key: class_name.to_string(),
                 read: SupportStatus::Verified,
                 semantic,
-                render: semantic,
-                pick: semantic,
+                render,
+                pick,
                 measure,
             });
         // Keep the weakest status observed for the class.
         entry.semantic = weaker(entry.semantic, semantic);
-        entry.render = weaker(entry.render, semantic);
-        entry.pick = weaker(entry.pick, semantic);
+        entry.render = weaker(entry.render, render);
+        entry.pick = weaker(entry.pick, pick);
         entry.measure = weaker(entry.measure, measure);
+    }
+}
+
+/// Whether the display pipeline can actually draw this geometry (audit B20).
+///
+/// Text has no scene batching yet and opaque/ACIS geometry has no
+/// representation, so neither is `Verified`; an INSERT depends on its block
+/// contents and is resolved by the caller.
+fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, SupportStatus) {
+    match geometry {
+        SemanticGeometry::Text { .. } | SemanticGeometry::Opaque { .. } => {
+            (SupportStatus::Unsupported, SupportStatus::Unsupported)
+        }
+        SemanticGeometry::Insert { .. } => (SupportStatus::Unverified, SupportStatus::Unverified),
+        _ => (SupportStatus::Verified, SupportStatus::Verified),
+    }
+}
+
+/// Combine import-stage problems with the render support of model content.
+///
+/// `Complete` only when everything in model space can be drawn and the stream
+/// was whole; otherwise `Partial`, or `Missing` when nothing at all is
+/// drawable and there was no separate import fault to report.
+fn aggregate_completeness(
+    model_render: SupportStatus,
+    model_drawable: bool,
+    mut model_render_types: Vec<String>,
+    import_items: Vec<String>,
+) -> Completeness {
+    let mut items = import_items;
+    let has_import_item = !items.is_empty();
+    if model_render != SupportStatus::Verified {
+        model_render_types.sort();
+        items.push(format!(
+            "no display representation for: {}",
+            model_render_types.join(", ")
+        ));
+    }
+    if items.is_empty() {
+        Completeness::Complete
+    } else if model_drawable || has_import_item {
+        Completeness::Partial(items)
+    } else {
+        Completeness::Missing(items)
     }
 }
 
@@ -1000,5 +1145,88 @@ mod tests {
         let importer = AcadrustImporter::new();
         let result = importer.import(&request(vec![0u8; 64]), &|| true);
         assert!(matches!(result, Err(CadError::Cancelled)));
+    }
+
+    #[test]
+    fn space_block_names_are_case_insensitive() {
+        for name in ["*Model_Space", "*MODEL_SPACE", "*model_space"] {
+            assert!(is_space_block_name(name), "{name}");
+        }
+        for name in ["*Paper_Space", "*PAPER_SPACE", "*Paper_Space0"] {
+            assert!(is_space_block_name(name), "{name}");
+            assert!(is_paper_space_name(name), "{name}");
+        }
+        assert!(!is_space_block_name("MyBlock"));
+        assert!(!is_paper_space_name("*Model_Space"));
+    }
+
+    #[test]
+    fn display_support_separates_drawn_from_unrendered() {
+        let line = SemanticGeometry::Line {
+            start: Point3::default(),
+            end: Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+        assert_eq!(display_support(&line).0, SupportStatus::Verified);
+        let text = SemanticGeometry::Text {
+            text: "x".into(),
+            position: Point3::default(),
+            style: StyleId(0),
+            height: 1.0,
+            rotation: 0.0,
+        };
+        assert_eq!(display_support(&text).0, SupportStatus::Unsupported);
+        let opaque = SemanticGeometry::Opaque {
+            type_key: "ACIS".into(),
+            version: 1,
+            payload: Vec::new(),
+        };
+        assert_eq!(display_support(&opaque).0, SupportStatus::Unsupported);
+        let insert = SemanticGeometry::Insert {
+            block: BlockId(0),
+            transform: Transform3::identity(),
+        };
+        assert_eq!(display_support(&insert).0, SupportStatus::Unverified);
+    }
+
+    #[test]
+    fn completeness_never_reports_complete_for_unrendered_content() {
+        // Text-only drawing: parsed but not drawable -> Missing, never Complete.
+        let c = aggregate_completeness(
+            SupportStatus::Unsupported,
+            false,
+            vec!["AcDbText".into()],
+            vec![],
+        );
+        assert!(matches!(c, Completeness::Missing(_)), "{c:?}");
+        // Mixed drawable + unrendered -> Partial.
+        let c = aggregate_completeness(
+            SupportStatus::Unsupported,
+            true,
+            vec!["AcDbText".into()],
+            vec![],
+        );
+        assert!(matches!(c, Completeness::Partial(_)), "{c:?}");
+        // Fully drawable -> Complete.
+        assert_eq!(
+            aggregate_completeness(SupportStatus::Verified, true, vec![], vec![]),
+            Completeness::Complete
+        );
+        // Empty drawing with no fault -> Complete.
+        assert_eq!(
+            aggregate_completeness(SupportStatus::Verified, false, vec![], vec![]),
+            Completeness::Complete
+        );
+        // A separate import fault is still Partial, not Complete.
+        let c = aggregate_completeness(
+            SupportStatus::Verified,
+            false,
+            vec![],
+            vec!["stream".into()],
+        );
+        assert!(matches!(c, Completeness::Partial(_)), "{c:?}");
     }
 }
