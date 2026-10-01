@@ -8,9 +8,10 @@ name: CI
 #   i18n-contracts: bilingual catalog parity + no hardcoded chrome literals (required)
 #   android-check : aarch64 UI+host check, capability-dependent (gated, see below)
 #
-# Jobs required by N02 §6.2 that are NOT implemented yet (see docs/ci.md):
-#   web-build, web-smoke, android-apk, shader-validation.
-# They need pinned extra toolchains / real runners and must not be faked green.
+# The remaining N02 §6.2 layers live in `.github/workflows/build.yml`:
+#   web-build, shader-validation, android-apk (gated), web-smoke (gated).
+# Jobs that need a real device/GPU are modelled as skipped with a not-run summary;
+# nothing is faked green. See docs/ci.md.
 #
 # Action pins: `actions/checkout@v4` and `dtolnay/rust-toolchain@1.98.1` are the
 # exact pins already used by this repository. `actions/cache@v4` is the one new

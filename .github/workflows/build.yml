@@ -1,0 +1,358 @@
+name: CI build layers
+
+# N02 §6.2 build/validation layers that need extra toolchains beyond core.yml.
+#
+# Real jobs (run on GitHub-hosted ubuntu-latest):
+#   web-build        : scripts/build-web.sh -> web-dist artifact + wasm/js pairing
+#   shader-validation: offline naga WGSL test (no GPU needed; forced to fail on
+#                      a broken shader)
+#
+# Capability-gated jobs (reported SKIPPED, never green, until a maintainer
+# provisions the runner / variable):
+#   android-apk  : scripts/build-android.sh -> APK artifact + real manifest facts
+#   web-smoke    : scripts/check-web-ui.mjs under Playwright (software GPU only)
+#
+# Anything that genuinely needs a real device / real GPU is modelled as a skipped
+# job with an explicit not-run summary and documented in docs/ci.md "NOT RUN".
+# No job sets `continue-on-error`, so a green check is a real pass.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: read-only. Artifact upload needs no repo write permission.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned tool versions. Keep in lock-step with docs/build.md and Cargo.lock;
+  # each job re-verifies the pin at runtime and fails loudly on drift.
+  WASM_BINDGEN_VERSION: "0.2.129"     # == wasm-bindgen crate in Cargo.lock
+  CARGO_APK_VERSION: "0.10.0"         # docs/build.md
+  ANDROID_NDK_VERSION: "27.0.12077973" # docs/build.md
+  ANDROID_BUILD_TOOLS: "34.0.0"        # docs/build.md
+  ANDROID_PLATFORM: "android-34"        # docs/build.md
+  ANDROID_TARGET_SDK: "30"             # REQUIRED, must match aapt2 manifest facts
+  ANDROID_ABI: "arm64-v8a"             # aarch64-linux-android only (build_targets metadata includes armv7/x86_64 but cargo-apk builds the --target ABI)
+  NODE_VERSION: "22.22.1"              # pinned Node major/minor
+  PLAYWRIGHT_VERSION: "1.55.1"        # pinned Playwright npm package
+
+jobs:
+  web-build:
+    name: web-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo (registry / git / target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-web-build-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-web-build-
+
+      - name: Verify wasm-bindgen-cli pin matches Cargo.lock (fail loudly)
+        run: |
+          set -euo pipefail
+          LOCKED="$(python3 - <<'PY'
+          import re, pathlib
+          text = pathlib.Path("Cargo.lock").read_text()
+          # First wasm-bindgen package block is the crate itself.
+          m = re.search(r'name = "wasm-bindgen"\nversion = "([^"]+)"', text)
+          assert m, "wasm-bindgen crate not found in Cargo.lock"
+          print(m.group(1))
+          PY
+          )"
+          echo "Cargo.lock wasm-bindgen = $LOCKED ; pinned cli = $WASM_BINDGEN_VERSION"
+          if [ "$LOCKED" != "$WASM_BINDGEN_VERSION" ]; then
+            echo "::error::wasm-bindgen-cli pin $WASM_BINDGEN_VERSION != Cargo.lock $LOCKED" >&2
+            echo "Update the pin in .github/workflows/build.yml and docs/build.md together." >&2
+            exit 1
+          fi
+          # Install exactly the pinned cli; fail if that version is unavailable.
+          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked
+          HAVE="$(wasm-bindgen --version | awk '{print $2}')"
+          echo "installed wasm-bindgen $HAVE"
+          if [ "$HAVE" != "$WASM_BINDGEN_VERSION" ]; then
+            echo "::error::wasm-bindgen $HAVE != pinned $WASM_BINDGEN_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Build web-dist (scripts/build-web.sh)
+        env:
+          DIST: ${{ github.workspace }}/web-dist
+          PROFILE: release
+        run: scripts/build-web.sh
+
+      - name: Fail if Cargo.lock was rewritten
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- Cargo.lock; then
+            echo "::error::Cargo.lock changed during the build; builds must not rewrite the lock file" >&2
+            git diff -- Cargo.lock
+            exit 1
+          fi
+          echo "Cargo.lock unchanged"
+
+      - name: Verify wasm/js pairing and static entry points
+        run: |
+          set -euo pipefail
+          test -s web-dist/index.html
+          test -s web-dist/main.js
+          test -s web-dist/style.css
+          test -s web-dist/pkg/yacr.js
+          test -s web-dist/pkg/yacr_bg.wasm
+          # wasm-bindgen emits a wasm import name that must match the JS glue's
+          # expected module; mismatch is the classic silent break. Check the JS
+          # names the same basename the glue file uses.
+          grep -q "yacr_bg.wasm" web-dist/pkg/yacr.js
+          WASM_BYTES=$(stat -c %s web-dist/pkg/yacr_bg.wasm)
+          echo "web-dist/pkg/yacr_bg.wasm = ${WASM_BYTES} bytes"
+          {
+            echo "## web-build"
+            echo ""
+            echo "- profile: ${PROFILE:-release}"
+            echo "- index.html / main.js / style.css present"
+            echo "- pkg/yacr.js + pkg/yacr_bg.wasm paired"
+            echo "- yacr_bg.wasm bytes: ${WASM_BYTES}"
+            echo "- wasm-bindgen-cli: ${WASM_BINDGEN_VERSION} (matched Cargo.lock)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload web-dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web-dist/
+          retention-days: 14
+
+  shader-validation:
+    name: shader-validation
+    # Offline WGSL parse/validate via the naga dev-dependency of cad-render-wgpu;
+    # no GPU or display is required. The test also asserts a deliberately broken
+    # shader fails, so it cannot silently become a no-op.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Cache cargo (registry / git / target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-shader-validation-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-shader-validation-
+
+      - name: WGSL naga validation (offline, no GPU)
+        run: cargo test -p cad-render-wgpu --test wgsl_validation --locked
+
+  android-apk:
+    name: android-apk
+    # Capability-gated. Needs the pinned JDK 17 + Android SDK build-tools 34.0.0
+    # + NDK 27.0.12077973; GitHub-hosted runners do not ship these. When the
+    # variable is unset the job is SKIPPED (never a pass). See docs/ci.md.
+    if: ${{ vars.ANDROID_CI_ENABLED == 'true' }}
+    runs-on: ${{ vars.ANDROID_RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo (registry / git / target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-android-apk-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-apk-
+
+      - name: Require pinned Android toolchain (fail loudly when absent)
+        run: |
+          set -euo pipefail
+          : "${ANDROID_HOME:?ANDROID_HOME is not set: provision the runner per docs/build.md}"
+          : "${JAVA_HOME:?JAVA_HOME (JDK 17) is not set: provision the runner per docs/build.md}"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "JAVA_HOME=$JAVA_HOME"
+          JAVA_MAJOR="$("$JAVA_HOME/bin/java" -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1)"
+          echo "JDK major = $JAVA_MAJOR (required 17)"
+          [ "$JAVA_MAJOR" = "17" ] || { echo "::error::JDK $JAVA_MAJOR != required 17" >&2; exit 1; }
+          NDK="$ANDROID_NDK_HOME"
+          echo "ANDROID_NDK_HOME=$NDK"
+          [ -d "$NDK" ] || { echo "::error::NDK $NDK_MISSING not found; required $ANDROID_NDK_VERSION (docs/build.md)" >&2; exit 1; }
+          BT="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
+          [ -x "$BT/aapt2" ] || { echo "::error::aapt2 not found at $BT; required build-tools $ANDROID_BUILD_TOOLS" >&2; exit 1; }
+          echo "aapt2 = $BT/aapt2"
+
+      - name: Install pinned cargo-apk
+        run: |
+          set -euo pipefail
+          cargo install cargo-apk --version "$CARGO_APK_VERSION" --locked
+          command -v cargo-apk >/dev/null
+
+      - name: Build signed release debug APK (scripts/build-android.sh)
+        # The script defaults ANDROID_NDK_HOME to $ANDROID_HOME/ndk/27.0.12077973
+        # and runs its target checks with --locked. `cargo apk` has no --locked
+        # flag, so lock integrity is asserted explicitly below.
+        run: scripts/build-android.sh --release
+
+      - name: Fail if Cargo.lock was rewritten
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- Cargo.lock; then
+            echo "::error::Cargo.lock changed during the build; builds must not rewrite the lock file" >&2
+            git diff -- Cargo.lock
+            exit 1
+          fi
+          echo "Cargo.lock unchanged"
+
+      - name: Record REAL manifest facts (never press facts into a green claim)
+        run: |
+          set -euo pipefail
+          APK="$(ls target/*/apk/yacr.apk 2>/dev/null | tail -1)"
+          [ -n "$APK" ] || { echo "::error::no yacr.apk produced" >&2; exit 1; }
+          echo "APK = $APK ($(stat -c %s "$APK") bytes)"
+          AAPT2="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt2"
+          BADGING="$("$AAPT2" dump badging "$APK" | tr -d '\r')"
+          echo "$BADGING" | grep -E '^(package|sdkVersion|targetSdkVersion|native-code)'
+          PKG="$(echo "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          MIN="$(echo "$BADGING" | sed -n "s/^sdkVersion:'\([^']*\)'.*/\1/p")"
+          TGT="$(echo "$BADGING" | sed -n "s/^targetSdkVersion:'\([^']*\)'.*/\1/p")"
+          CODES="$(echo "$BADGING" | sed -n "s/^native-code: \(.*\)/\1/p")"
+          SIG="none"
+          unzip -l "$APK" 2>/dev/null | grep -qiE 'META-INF/.*\.(RSA|DSA|EC)$' && SIG="jarsigner (v1 debug/dev keystore)"
+          {
+            echo "## android-apk (NOT install-run)"
+            echo ""
+            echo "| fact | value |"
+            echo "|---|---|"
+            echo "| package | ${PKG} |"
+            echo "| minSdk (actual manifest) | ${MIN} |"
+            echo "| targetSdk (actual manifest) | ${TGT} |"
+            echo "| ABI | ${CODES} |"
+            echo "| signing | ${SIG} |"
+            echo "| apk bytes | $(stat -c %s "$APK") |"
+            echo ""
+            echo "This records the artifact only. It is **not** an install/run result:"
+            echo "no device or emulator was used. See docs/ci.md \"NOT RUN\"."
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Contract check against the documented expectations; a mismatch is a
+          # regression in packaging metadata and must fail the job.
+          [ "$TGT" = "$ANDROID_TARGET_SDK" ] || { echo "::error::targetSdk $TGT != pinned $ANDROID_TARGET_SDK" >&2; exit 1; }
+          echo "$CODES" | grep -q "$ANDROID_ABI" || { echo "::error::ABI $CODES missing $ANDROID_ABI" >&2; exit 1; }
+          # minSdk metadata (26) does NOT take effect (build.md); record 23 but do
+          # not silently accept a change without review.
+          [ "$MIN" = "23" ] || { echo "::error::minSdk changed to $MIN; update docs/build.md and the pin" >&2; exit 1; }
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: target/*/apk/yacr.apk
+          retention-days: 14
+
+  web-smoke:
+    name: web-smoke
+    # Capability-gated. Builds the web-dist (software SWIFTSHADER WebGL2 path),
+    # then drives scripts/check-web-ui.mjs. This exercises a software GPU only;
+    # it is explicitly NOT a mobile/real-device or WebGPU acceptance. When the
+    # variable is unset the job is SKIPPED, never green.
+    if: ${{ vars.WEB_SMOKE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache cargo (registry / git / target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-web-smoke-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-web-smoke-
+
+      - name: Install pinned wasm-bindgen-cli and build web-dist
+        env:
+          DIST: ${{ github.workspace }}/web-dist
+        run: |
+          set -euo pipefail
+          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked
+          HAVE="$(wasm-bindgen --version | awk '{print $2}')"
+          [ "$HAVE" = "$WASM_BINDGEN_VERSION" ] || { echo "::error::wasm-bindgen $HAVE != $WASM_BINDGEN_VERSION" >&2; exit 1; }
+          scripts/build-web.sh
+
+      - name: Install pinned Playwright Chromium
+        run: |
+          set -euo pipefail
+          npm install --no-save "playwright@${PLAYWRIGHT_VERSION}"
+          npx playwright --version
+          npx playwright install --with-deps chromium
+
+      - name: Serve web-dist and run headless browser check
+        env:
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.js
+        run: |
+          set -euo pipefail
+          python3 scripts/serve-web.py --directory web-dist --port 8090 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          # Wait for the static server before driving the browser.
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8090/ -o /dev/null && break
+            sleep 1
+          done
+          node scripts/check-web-ui.mjs http://127.0.0.1:8090/ /tmp/opencode/yacr-web.png 2>&1 | tee /tmp/opencode/web-smoke.log
+          {
+            echo "## web-smoke (software GPU only, NOT a real device)"
+            echo ""
+            echo "- Playwright ${PLAYWRIGHT_VERSION} / Node ${NODE_VERSION}"
+            echo "- backend: see JSON report (software SWIFTSHADER)"
+            echo "- WebGPU: not asserted here; absence must not be reported as a pass."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload web-smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke
+          path: |
+            /tmp/opencode/yacr-web.png
+            /tmp/opencode/yacr-web.json
+            /tmp/opencode/web-smoke.log
+          if-no-files-found: warn
+          retention-days: 14

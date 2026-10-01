@@ -5,7 +5,10 @@ Standard library only. What it checks:
 
   * at least one workflow file exists under ``.github/workflows`` and is non-empty;
   * every required job is declared as a job key in some workflow
-    (``core-quality``, ``wasm-check``, ``i18n-contracts``, ``android-check``);
+    (``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
+    ``web-build``, ``android-check``, ``android-apk``, ``web-smoke``; the last
+    three are capability-gated but still must be *declared* so their absence is
+    visible rather than silent);
   * no required job declares ``continue-on-error: true`` (job-level or step-level);
   * each required job still contains its expected command fragment, so the job
     keeps mirroring the real gate instead of drifting into an empty success.
@@ -25,6 +28,12 @@ WORKFLOW_DIR = ROOT / ".github" / "workflows"
 WORKFLOW_SUFFIXES = (".yml", ".yaml")
 
 # Job key -> command fragments that must appear inside that job.
+#
+# `shader-validation`, `web-build`, `android-check`, `android-apk` and
+# `web-smoke` are all required to be *declared*. The gated jobs
+# (`android-check`, `android-apk`, `web-smoke`) must keep their explicit
+# `if:` capability guard, checked separately below, so a gate can never be
+# mistaken for a silent skip-to-green.
 REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     "core-quality": (
         "cargo fmt --all -- --check",
@@ -40,9 +49,37 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     "i18n-contracts": (
         "python3 scripts/check-i18n.py",
     ),
+    "shader-validation": (
+        "cargo test -p cad-render-wgpu --test wgsl_validation --locked",
+    ),
+    "web-build": (
+        "scripts/build-web.sh",
+        "wasm-bindgen-cli",
+        "actions/upload-artifact",
+    ),
     "android-check": (
         "cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked",
     ),
+    "android-apk": (
+        "scripts/build-android.sh",
+        "dump badging",
+        "actions/upload-artifact",
+    ),
+    "web-smoke": (
+        "scripts/check-web-ui.mjs",
+        "scripts/serve-web.py",
+    ),
+}
+
+# Jobs that are capability-gated: they must carry an explicit `if:` guard so
+# that when the capability is absent GitHub reports SKIPPED, never a pass.
+GATED_JOBS: tuple[str, ...] = ("android-check", "android-apk", "web-smoke")
+
+# `if:` fragment each gated job must retain (the capability switch).
+GATED_JOB_IF: dict[str, str] = {
+    "android-check": "vars.ANDROID_CI_ENABLED",
+    "android-apk": "vars.ANDROID_CI_ENABLED",
+    "web-smoke": "vars.WEB_SMOKE_ENABLED",
 }
 
 TRUE_CONTINUE_ON_ERROR = re.compile(r"continue-on-error\s*:\s*true\b", re.IGNORECASE)
@@ -109,6 +146,11 @@ def structural_pass(
                         f"{rel}: required job '{key}' is missing command fragment "
                         f"{fragment!r}"
                     )
+            if key in GATED_JOB_IF and GATED_JOB_IF[key] not in block:
+                errors.append(
+                    f"{rel}: gated job '{key}' is missing its capability guard "
+                    f"{GATED_JOB_IF[key]!r} (a gate must SKIP, never pass silently)"
+                )
     return declared, errors
 
 
@@ -151,6 +193,13 @@ def yaml_pass(
                 errors.append(
                     f"{rel}: required job '{key}' sets 'continue-on-error: true'"
                 )
+            if key in GATED_JOB_IF:
+                condition = job.get("if")
+                if not isinstance(condition, str) or GATED_JOB_IF[key] not in condition:
+                    errors.append(
+                        f"{rel}: gated job '{key}' is missing its capability guard "
+                        f"{GATED_JOB_IF[key]!r} (a gate must SKIP, never pass silently)"
+                    )
             steps = job.get("steps") or []
             if not isinstance(steps, list):
                 errors.append(f"{rel}: required job '{key}' has non-list 'steps'")
@@ -202,7 +251,8 @@ def main() -> int:
     for key in REQUIRED_JOBS:
         locations = declared.get(key, [])
         if locations:
-            print(f"  [ok]   required job '{key}' declared in {', '.join(sorted(set(locations)))}")
+            tag = " (gated)" if key in GATED_JOBS else ""
+            print(f"  [ok]   required job '{key}'{tag} declared in {', '.join(sorted(set(locations)))}")
         else:
             print(f"  [FAIL] required job '{key}' is not declared")
             errors.append(f"required job '{key}' is not declared in any workflow")

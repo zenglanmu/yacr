@@ -17,8 +17,8 @@ TARGET="${TARGET:-aarch64-linux-android}"
 command -v cargo-apk >/dev/null || { echo "install cargo-apk 0.10.0: cargo install cargo-apk --version 0.10.0 --locked"; exit 1; }
 
 rustup target add "$TARGET"
-cargo check --target "$TARGET" -p cad-ui-slint
-cargo check --target "$TARGET" -p app-android
+cargo check --target "$TARGET" -p cad-ui-slint --locked
+cargo check --target "$TARGET" -p app-android --locked
 cargo apk build -p app-android --target "$TARGET" --lib "$@"
 
 echo "APK: target/*/apk/yacr.apk"
