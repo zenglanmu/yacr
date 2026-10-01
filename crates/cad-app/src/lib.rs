@@ -19,6 +19,7 @@ pub mod annotation_list;
 pub mod annotation_tool;
 pub mod camera;
 pub mod host;
+pub mod input;
 pub mod layers;
 pub mod measure_tool;
 pub mod recovery;
@@ -29,6 +30,11 @@ pub use annotation_tool::{AnnotationPreview, AnnotationTool, AnnotationToolKind}
 pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Projection, ProjectionKind, StandardView,
     ViewBasis,
+};
+pub use input::{
+    apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
+    DiagnosticsDrawer, EscapeAction, InputOutcome, InputPolicy, KeyAction, LoadingState,
+    PointerPhase, PointerUpdate, StatusModel, ToolStatus, ViewMetrics, DRAG_THRESHOLD_LOGICAL_PX,
 };
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 pub use recovery::{
@@ -310,12 +316,14 @@ impl SessionState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayStyle {
     Wireframe,
     Shaded,
     ShadedWithEdges,
 }
 
+#[derive(Debug)]
 pub struct Viewport {
     pub id: ViewportId,
     pub document: DocumentId,
