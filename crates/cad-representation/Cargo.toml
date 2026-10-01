@@ -16,3 +16,4 @@ cad-proxy.workspace = true
 cad-resources.workspace = true
 ttf-parser.workspace = true
 flate2.workspace = true
+encoding_rs.workspace = true

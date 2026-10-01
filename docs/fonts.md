@@ -51,37 +51,45 @@
 - **不把任何字体文件提交进本仓库**；只在运行时/测试时按需下载。
 - 使用前必须核实目标字体的授权，不能默认可再分发。
 
-## 字形渲染（已实现，outline 路径）
+## 字形渲染（已实现：sfnt + SHX）
 
 `cad-representation` 的 `FontEngine` 把文本转成世界坐标折线，`cad-scene` 按普通线段绘制：
 
-- 支持 **TTF / OTF** 原始 sfnt，以及 **WOFF1**（`woff_to_sfnt` 用 flate2 解压重建 sfnt）；
-  拒收 **WOFF2**（显式 `Unsupported`）。注册时校验可解析，坏字节报错，不伪造。
-- 键匹配：注册键 + 文件主名。图纸引用 `arial.ttf`、请库只有 `arial.woff` 时按主名
-  `arial` 命中。
-- 排版：按字形 advance 前进，`\n`/`\P` 换行；quad/cubic 以固定步数离散成折线；
+- **SFNT**：TTF/OTF 原始 sfnt，以及 **WOFF1**（`woff_to_sfnt` 用 flate2 解压重建 sfnt）；
+  拒收 **WOFF2**（记为 `Unsupported`，可被回退取代）。注册时校验可解析，坏字节报错。
+- **SHX**：移植自 MIT 的 `@mlightcad/shx-parser`，支持编译 shape 字体的三种内容布局
+  `shapes` / `unifont` / `bigfont`（含八分圆/分数/凸度圆弧、子形状、缩放与进退笔），
+  按 `encoding`（gbk/shift-jis/…）把 Unicode 映射回字体码。
+- **回退链**：`FontEngine::set_fallback(keys)`。图纸引用的字体未注册、或注册了但不可解码
+  （如 WOFF2/不支持的 SHX 类型）时，按顺序改用可用的回退字体，**不会静默丢弃文本**；
+  全部不可用才报告错误。`resolve_face` 可查询实际使用的字体。
+- 键匹配：注册键 + 文件主名。图纸引用 `arial.ttf`、库只有 `arial.woff` 时按主名 `arial` 命中。
+- 排版：按字形 advance 前进（SHX 用 ink-width + cell 边距策略），`\n`/`\P` 换行；
   `sanitize_text` 处理 `%%d/%%p/%%c`、`\P`、`\~`、花括号与 `\X...;` 格式码（近似）。
 - 主机通过 `RepresentationContext::with_fonts(Arc<FontEngine>)` 注入；CLI 用
-  `--font <name=path>`（可重复）。未注入字体时文本仍为不可绘的 `DisplayPrimitive::Text`。
+  `--font <name=path>`（可重复），并自动把所有已注册字体设为回退。未注入字体时文本仍为
+  不可绘的 `DisplayPrimitive::Text`。
 
-实测（`docs/validation.md` 第二组语料，字体 `arial.woff`）：
+实测（`docs/validation.md` 语料；注册 `simplex/txt/romans.shx` + `arial.woff` 并启用回退）：
 
 | 样本 | 无字体 lines/texts | 有字体 lines/texts |
 |---|---|---|
+| AutoCAD_2000（SHX） | 19 / 11 | 55 / 0 |
+| AutoCAD_2013 | 0 / 3 | 30 / 0 |
 | baseline-sample | 86 / 60 | 2363 / 0 |
 | lockers | 1796 / 33 | 2747 / 0 |
 | map-of-uae | 87 / 32 | 459 / 0 |
-| canteen（GOST 等 SHX） | 41370 / 295 | 41388 / 294 |
+| korean-DBCS-hangul | 2 / 3 | 96 / 0 |
+| canteen（GOST，靠回退） | 41370 / 295 | 43464 / 0 |
 
 ## 未完成
 
-1. **SHX 字形**：编译 shape 字体（`.shx`）尚未解析；`canteen` 的 GOST 文本仍不显示，
-   `display_support` 对 `.shx` 文本报 `Unsupported`（诚实降级）。
-2. **排版完备性**：字距/kerning、复杂文字整形、MTEXT 全格式码、对齐/行距精确值、
-   字体回退链尚未实现；当前是逐字、固定换行。
+1. **排版完备性**：字距/kerning、复杂文字整形（bidi/shaping）、MTEXT 全格式码（堆叠、
+   列、制表）、对齐/行距精确值；当前是逐字、固定换行。
+2. **TEXT 对齐**：插入点/对齐点（halign/valign）尚未驱动放置。
 3. **字体获取**：核心不联网；宿主需下载/读取字体并经 `MapResolver` 授权。真机/浏览器
-   路径尚未接线。
+   路径尚未接线（见 `docs/build.md`）。
 
-在此之前，含文本的图纸不会被报告为 `Complete`（见 `docs/validation.md`）；`.ttf/.otf/.woff`
-文本已可绘，`.shx` 仍记 `Unsupported`。
+含文本的图纸在导入报告里不会被报告为 `Complete`（导入阶段不知道宿主是否有字体）；
+在 `build-representation` 注入字体后文本即可绘。
 

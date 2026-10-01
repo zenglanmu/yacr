@@ -177,14 +177,19 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
 - 所有样本都产出 `text` 基元（60/295/33/32 个）；`cad-scene` 会跳过未整形的 `Text`。注入
   outline 字体后，TrueType 文本被转成线段并绘制，SHX 文本保持不可绘——这正是“渲染效果
   测试”暴露出的分界。字体来源、`FontEngine` 与 `--font` 用法见 `docs/fonts.md`。
-- 文字整形实测（`build-representation --font arial.ttf=<arial.woff>`，lines/texts）：
+- 文字整形实测（`build-representation --font ...`，lines/texts）。注册
+  `simplex/txt/romans.shx` + `arial.woff` 后所有文本均整形（SHX 与 outline 均覆盖），
+  图纸引用了未注册字体（如 canteen 的 GOST）时靠回退链替代：
 
-  | 样本 | 无字体 | 有字体 | 说明 |
+  | 样本 | 无字体 | 有字体+回退 | 说明 |
   |---|---|---|---|
-  | baseline-sample | 86 / 60 | 2363 / 0 | 全部 TTF 文本已整形 |
-  | lockers | 1796 / 33 | 2747 / 0 | 全部整形 |
-  | map-of-uae | 87 / 32 | 459 / 0 | 全部 MTEXT 整形 |
-  | canteen | 41370 / 295 | 41388 / 294 | 绝大多数为 GOST SHX，未整形 |
+  | AutoCAD_2000 | 19 / 11 | 55 / 0 | SHX |
+  | AutoCAD_2013 | 0 / 3 | 30 / 0 | outline |
+  | baseline-sample | 86 / 60 | 2363 / 0 | outline |
+  | lockers | 1796 / 33 | 2747 / 0 | outline |
+  | map-of-uae | 87 / 32 | 459 / 0 | outline |
+  | korean-DBCS-hangul | 2 / 3 | 96 / 0 | 回退 |
+  | canteen | 41370 / 295 | 43464 / 0 | GOST SHX 未注册，靠回退 |
 
 ## 未执行（明确标注）
 

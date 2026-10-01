@@ -361,11 +361,15 @@ fn load_fonts(
         return Ok(None);
     }
     let mut engine = cad_representation::FontEngine::new();
+    let mut keys = Vec::new();
     for (key, path) in entries {
         let bytes = std::fs::read(path)
             .map_err(|e| CadError::InvalidInput(format!("font read failed: {e}")))?;
         engine.register(key, Arc::from(bytes.into_boxed_slice()))?;
+        keys.push(key.clone());
     }
+    // Any registered font can stand in for a missing one.
+    engine.set_fallback(keys);
     Ok(Some(Arc::new(engine)))
 }
 

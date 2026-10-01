@@ -1,9 +1,9 @@
-//! TrueType/OpenType text outlining (spec v2.0 §3.2, §7.1).
+//! Text outlining: TrueType/OpenType and compiled SHX shape fonts (spec §3.2, §7.1).
 //!
-//! Hosts supply font bytes (raw sfnt, or WOFF1 which is decoded here); this
-//! module turns a text run into world-space polylines so the scene can batch
-//! text like any other line geometry. SHX shape fonts are not decoded yet and
-//! are reported as unsupported rather than faked.
+//! Hosts supply font bytes (raw sfnt, WOFF1, or SHX); this module turns a text
+//! run into world-space polylines so the scene can batch text like any other
+//! line geometry. A fallback chain is applied when a drawing's referenced font
+//! is not registered or cannot be parsed, so text is not silently dropped.
 
 use cad_domain::{CadError, CadResult, Point3};
 use std::collections::HashMap;
@@ -12,14 +12,27 @@ use std::sync::Arc;
 
 use ttf_parser::OutlineBuilder;
 
-/// A bounded, in-memory set of font faces.
+use crate::shx::ShxFont;
+
+/// A parsed font face.
+enum FaceData {
+    /// Raw sfnt bytes (TTF/OTF, or WOFF1 already decoded to sfnt).
+    Sfnt(Arc<[u8]>),
+    /// Compiled AutoCAD shape font.
+    Shx(ShxFont),
+    /// A face we recognised but cannot decode yet; reported explicitly.
+    Unsupported(String),
+}
+
+/// A bounded, in-memory set of font faces with an optional fallback chain.
 ///
 /// Faces are keyed by the name a drawing references (`arial.ttf`) and by the
 /// file stem (`arial`), so a drawing that names a `.ttf` still resolves to the
 /// matching `.woff` catalog entry. No I/O happens here.
 #[derive(Default)]
 pub struct FontEngine {
-    faces: HashMap<String, Arc<[u8]>>,
+    faces: HashMap<String, Arc<FaceData>>,
+    fallback: Vec<String>,
 }
 
 impl FontEngine {
@@ -29,21 +42,42 @@ impl FontEngine {
 
     /// Register font bytes under `key` plus its file stem.
     ///
-    /// WOFF1 is decoded to sfnt; WOFF2 is rejected explicitly. The result must
-    /// parse as a font face or the registration fails.
+    /// SHX shape fonts, raw sfnt and WOFF1 are recognised; WOFF2 is rejected
+    /// explicitly. The result must parse or the registration fails.
     pub fn register(&mut self, key: &str, bytes: Arc<[u8]>) -> CadResult<()> {
-        let data = prepare_font(&bytes)?;
-        ttf_parser::Face::parse(&data, 0)
-            .map_err(|e| CadError::CorruptData(format!("font '{key}' cannot be parsed: {e}")))?;
+        self.register_with_encoding(key, bytes, None)
+    }
+
+    /// Like [`register`](Self::register) but declares the SHX code page used to
+    /// map Unicode back to the font's character codes (for example `gbk`).
+    pub fn register_with_encoding(
+        &mut self,
+        key: &str,
+        bytes: Arc<[u8]>,
+        encoding: Option<&str>,
+    ) -> CadResult<()> {
         let normalized = normalize_key(key);
         if normalized.is_empty() {
             return Err(CadError::InvalidInput("font key is empty".into()));
         }
-        self.faces.insert(normalized.clone(), data.clone());
+        let face = Arc::new(parse_face(&normalized, &bytes, encoding)?);
+        self.faces.insert(normalized.clone(), face.clone());
         if let Some(stem) = stem_of(&normalized) {
-            self.faces.entry(stem).or_insert(data);
+            self.faces.entry(stem).or_insert(face);
         }
         Ok(())
+    }
+
+    /// Set the fallback chain used when a referenced font is missing.
+    ///
+    /// Keys are matched as in [`register`](Self::register); the first that
+    /// resolves to a face is used for the whole run.
+    pub fn set_fallback(&mut self, keys: Vec<String>) {
+        self.fallback = keys;
+    }
+
+    pub fn fallback_keys(&self) -> &[String] {
+        &self.fallback
     }
 
     pub fn len(&self) -> usize {
@@ -59,7 +93,7 @@ impl FontEngine {
         self.lookup(key).is_some()
     }
 
-    fn lookup(&self, key: &str) -> Option<Arc<[u8]>> {
+    fn lookup(&self, key: &str) -> Option<Arc<FaceData>> {
         let normalized = normalize_key(key);
         if let Some(data) = self.faces.get(&normalized) {
             return Some(data.clone());
@@ -67,11 +101,24 @@ impl FontEngine {
         stem_of(&normalized).and_then(|stem| self.faces.get(&stem).cloned())
     }
 
+    /// The face used for `font_key`: the primary face, else the first available
+    /// fallback. Public so hosts can report which font actually rendered.
+    pub fn resolve_face<'a>(&'a self, font_key: &'a str) -> Option<&'a str> {
+        if self.lookup(font_key).is_some() {
+            return Some(font_key);
+        }
+        self.fallback
+            .iter()
+            .find(|key| self.lookup(key).is_some())
+            .map(String::as_str)
+    }
+
     /// Outline `text` into world-space polylines at `origin`.
     ///
     /// One polyline per glyph contour; multiple lines are separated by `\n`.
     /// `height` is the cap/em height in world units and `rotation` is radians
-    /// about the origin.
+    /// about the origin. When the requested font is missing, the fallback chain
+    /// is used.
     pub fn outline(
         &self,
         font_key: &str,
@@ -80,11 +127,58 @@ impl FontEngine {
         height: f64,
         rotation: f64,
     ) -> CadResult<Vec<Vec<Point3>>> {
-        let data = self.lookup(font_key).ok_or_else(|| {
-            CadError::ResourceMissing(format!("font '{font_key}' is not registered"))
-        })?;
-        outline_with(&data, text, origin, height, rotation)
+        // Primary face, then the fallback chain. A face we recognised but
+        // cannot decode is skipped so a usable fallback still renders.
+        let mut chain: Vec<Arc<FaceData>> = Vec::new();
+        if let Some(face) = self.lookup(font_key) {
+            chain.push(face);
+        }
+        for key in &self.fallback {
+            if let Some(face) = self.lookup(key) {
+                chain.push(face);
+            }
+        }
+        if chain.is_empty() {
+            return Err(CadError::ResourceMissing(format!(
+                "font '{font_key}' is not registered and no fallback is available"
+            )));
+        }
+        let mut unsupported = None;
+        for face in &chain {
+            match &**face {
+                FaceData::Unsupported(reason) => {
+                    unsupported.get_or_insert_with(|| reason.clone());
+                }
+                FaceData::Sfnt(data) => return outline_with(data, text, origin, height, rotation),
+                FaceData::Shx(font) => return outline_shx(font, text, origin, height, rotation),
+            }
+        }
+        Err(CadError::Unsupported(unsupported.unwrap_or_else(|| {
+            "no usable font in the fallback chain".into()
+        })))
     }
+}
+
+/// Parse bytes into a face, detecting SHX, sfnt and WOFF.
+fn parse_face(key: &str, bytes: &[u8], encoding: Option<&str>) -> CadResult<FaceData> {
+    if bytes.starts_with(b"AutoCAD-") {
+        return match ShxFont::parse(bytes, encoding) {
+            Ok(font) => Ok(FaceData::Shx(font)),
+            // Recognised but undecodable: keep the face so the fallback chain
+            // can substitute it, instead of failing registration outright.
+            Err(CadError::Unsupported(reason)) => Ok(FaceData::Unsupported(reason)),
+            Err(other) => Err(other),
+        };
+    }
+    if bytes.len() >= 4 && &bytes[0..4] == b"wOF2" {
+        return Ok(FaceData::Unsupported(
+            "WOFF2 fonts are not supported yet".into(),
+        ));
+    }
+    let data = prepare_font(bytes)?;
+    ttf_parser::Face::parse(&data, 0)
+        .map_err(|e| CadError::CorruptData(format!("font '{key}' cannot be parsed: {e}")))?;
+    Ok(FaceData::Sfnt(data))
 }
 
 fn normalize_key(raw: &str) -> String {
@@ -99,17 +193,62 @@ fn stem_of(name: &str) -> Option<String> {
         .filter(|stem| !stem.is_empty())
 }
 
-/// Decode WOFF1 to sfnt; pass raw sfnt through; reject WOFF2.
+/// Decode WOFF1 to sfnt; pass raw sfnt through.
 fn prepare_font(bytes: &[u8]) -> CadResult<Arc<[u8]>> {
     if bytes.len() >= 4 && &bytes[0..4] == b"wOFF" {
         woff_to_sfnt(bytes).map(Arc::from)
-    } else if bytes.len() >= 4 && &bytes[0..4] == b"wOF2" {
-        Err(CadError::Unsupported(
-            "WOFF2 fonts are not supported yet".into(),
-        ))
     } else {
         Ok(Arc::from(bytes.to_vec()))
     }
+}
+
+/// Layout an SHX run into world-space polylines.
+fn outline_shx(
+    font: &ShxFont,
+    text: &str,
+    origin: Point3,
+    height: f64,
+    rotation: f64,
+) -> CadResult<Vec<Vec<Point3>>> {
+    let size = height.abs();
+    if !size.is_finite() || size <= 0.0 {
+        return Err(CadError::InvalidInput(
+            "text height must be a positive finite value".into(),
+        ));
+    }
+    let (sin, cos) = rotation.sin_cos();
+    let line_step = -1.2 * size;
+    let mut polys = Vec::new();
+    let mut pen = [0.0f64, 0.0];
+    for ch in text.chars() {
+        if ch == '\n' {
+            pen = [0.0, pen[1] + line_step];
+            continue;
+        }
+        let Some(glyph) = font.glyph(ch, size) else {
+            continue;
+        };
+        for poly in &glyph.polylines {
+            if poly.len() < 2 {
+                continue;
+            }
+            let points: Vec<Point3> = poly
+                .iter()
+                .map(|p| {
+                    let lx = p[0] + pen[0];
+                    let ly = p[1] + pen[1];
+                    Point3 {
+                        x: origin.x + cos * lx - sin * ly,
+                        y: origin.y + sin * lx + cos * ly,
+                        z: origin.z,
+                    }
+                })
+                .collect();
+            polys.push(points);
+        }
+        pen[0] += glyph.advance;
+    }
+    Ok(polys)
 }
 
 /// Reconstruct an sfnt (TTF) container from a WOFF1 file.
@@ -461,8 +600,39 @@ mod tests {
     #[test]
     fn woff2_is_explicitly_unsupported() {
         let mut engine = FontEngine::new();
-        let err = engine
+        // Registration keeps the face so it can be reported; outlining it fails.
+        engine
             .register("x.woff2", Arc::from(b"wOF2....".to_vec()))
+            .unwrap();
+        let err = engine
+            .outline("x.woff2", "hi", Point3::default(), 2.0, 0.0)
+            .unwrap_err();
+        assert!(matches!(err, CadError::Unsupported(_)));
+    }
+
+    #[test]
+    fn missing_font_uses_the_fallback_chain() {
+        // No real face registered: outline must not invent glyphs.
+        let engine = FontEngine::new();
+        assert!(matches!(
+            engine
+                .outline("arial.ttf", "hi", Point3::default(), 2.0, 0.0)
+                .unwrap_err(),
+            CadError::ResourceMissing(_)
+        ));
+    }
+
+    #[test]
+    fn unsupported_primary_falls_through_to_fallback() {
+        let mut engine = FontEngine::new();
+        engine
+            .register("bad.woff2", Arc::from(b"wOF2....".to_vec()))
+            .unwrap();
+        // A usable autumn font is not present here, so the chain exposes the
+        // unsupported reason rather than a missing-font error.
+        engine.set_fallback(vec!["also-missing".into()]);
+        let err = engine
+            .outline("bad.woff2", "x", Point3::default(), 2.0, 0.0)
             .unwrap_err();
         assert!(matches!(err, CadError::Unsupported(_)));
     }
@@ -499,5 +669,46 @@ mod tests {
         }
         // Two glyphs at height 10 stay within a modest horizontal span.
         assert!(min_x >= -1.0 && max_x <= 30.0, "span {min_x}..{max_x}");
+    }
+
+    /// Opt-in SHX test: run with `YACR_TEST_SHX=/path/to/txt.shx`.
+    #[test]
+    fn outlines_a_real_shx_when_provided() {
+        let Ok(path) = std::env::var("YACR_TEST_SHX") else {
+            return;
+        };
+        let bytes = std::fs::read(path).unwrap();
+        let mut engine = FontEngine::new();
+        engine
+            .register("txt.shx", Arc::from(bytes.into_boxed_slice()))
+            .unwrap();
+        let polys = engine
+            .outline("txt.shx", "AB", Point3::default(), 10.0, 0.0)
+            .unwrap();
+        assert!(!polys.is_empty(), "no SHX glyph outlines");
+        let max_x = polys
+            .iter()
+            .flatten()
+            .map(|p| p.x)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(max_x > 0.0, "SHX advance produced no horizontal extent");
+    }
+
+    /// Opt-in fallback test: a missing primary font uses a registered fallback.
+    #[test]
+    fn missing_primary_uses_registered_fallback_when_provided() {
+        let Ok(path) = std::env::var("YACR_TEST_SHX") else {
+            return;
+        };
+        let bytes = std::fs::read(&path).unwrap();
+        let mut engine = FontEngine::new();
+        engine.set_fallback(vec!["fallback.shx".into()]);
+        engine
+            .register("fallback.shx", Arc::from(bytes.into_boxed_slice()))
+            .unwrap();
+        let polys = engine
+            .outline("not-installed.shx", "A", Point3::default(), 10.0, 0.0)
+            .unwrap();
+        assert!(!polys.is_empty(), "fallback did not render");
     }
 }

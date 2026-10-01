@@ -12,6 +12,8 @@ use std::sync::Arc;
 
 pub mod text;
 
+pub mod shx;
+
 pub use text::{sanitize_text, FontEngine};
 
 /// One drawable piece of an entity, in world coordinates.
