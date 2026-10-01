@@ -40,7 +40,11 @@ fn command_path_checks_mode_and_document_before_dispatch() {
     assert!(matches!(
         app.execute(
             &mut session,
-            command(CommandId::DeleteAnnotation, DocumentId(1), CommandPayload::None)
+            command(
+                CommandId::DeleteAnnotation,
+                DocumentId(1),
+                CommandPayload::None
+            )
         ),
         Err(CadError::PermissionDenied)
     ));
@@ -59,14 +63,48 @@ fn command_path_checks_mode_and_document_before_dispatch() {
         ),
         Err(CadError::InvalidInput(_))
     ));
-    // Remaining genuinely-unimplemented commands still report NotImplemented.
+    // SwitchBackend is implemented: a missing payload is rejected as invalid
+    // input rather than pretending to be unimplemented (audit B01).
     assert!(matches!(
         app.execute(
             &mut session,
-            command(CommandId::SwitchBackend, DocumentId(1), CommandPayload::None)
+            command(
+                CommandId::SwitchBackend,
+                DocumentId(1),
+                CommandPayload::None
+            )
         ),
-        Err(CadError::NotImplemented(_))
+        Err(CadError::InvalidInput(_))
     ));
+    // A command addressed to a different document than the session's is stale
+    // and must be rejected before dispatch.
+    assert!(matches!(
+        app.execute(
+            &mut session,
+            command(
+                CommandId::SwitchBackend,
+                DocumentId(2),
+                CommandPayload::Backend(BackendChoice::WebGl2)
+            )
+        ),
+        Err(CadError::StaleResult)
+    ));
+    // A valid backend choice records the preference and reports it.
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::SwitchBackend,
+                DocumentId(1),
+                CommandPayload::Backend(BackendChoice::WebGl2),
+            ),
+        )
+        .expect("valid backend choice executes");
+    assert_eq!(session.backend, BackendChoice::WebGl2);
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "backend.preference"));
 }
 
 #[test]

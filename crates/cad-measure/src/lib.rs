@@ -13,7 +13,10 @@ pub enum MeasurementSpace {
     Plane(WorkPlane),
     World3d,
     Paper(LayoutId),
-    ViewportModel { layout: LayoutId, inverse: Transform3 },
+    ViewportModel {
+        layout: LayoutId,
+        inverse: Transform3,
+    },
 }
 
 pub struct MeasurementRequest {
@@ -39,14 +42,9 @@ pub struct SnapCandidate {
     pub logical_pixel_distance: f64,
 }
 
+#[derive(Default)]
 pub struct MeasurementEngine {
     pub tolerance: TolerancePolicy,
-}
-
-impl Default for MeasurementEngine {
-    fn default() -> Self {
-        MeasurementEngine { tolerance: TolerancePolicy::default() }
-    }
 }
 
 impl MeasurementEngine {
@@ -59,7 +57,9 @@ impl MeasurementEngine {
     pub fn measure(&self, request: &MeasurementRequest) -> CadResult<MeasurementRecord> {
         for p in &request.points {
             if !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite() {
-                return Err(CadError::InvalidInput("measurement point is not finite".to_string()));
+                return Err(CadError::InvalidInput(
+                    "measurement point is not finite".to_string(),
+                ));
             }
         }
         let tol = self.tolerance.computation_world.max(1e-12);
@@ -74,7 +74,9 @@ impl MeasurementEngine {
             }
             MeasurementAlgorithm::PolylineLength => {
                 if request.points.len() < 2 {
-                    return Err(CadError::InvalidInput("polyline needs at least two points".to_string()));
+                    return Err(CadError::InvalidInput(
+                        "polyline needs at least two points".to_string(),
+                    ));
                 }
                 let mut total = 0.0;
                 for w in request.points.windows(2) {
@@ -84,13 +86,17 @@ impl MeasurementEngine {
                     };
                 }
                 if total <= tol {
-                    return Err(CadError::InvalidInput("polyline has zero length".to_string()));
+                    return Err(CadError::InvalidInput(
+                        "polyline has zero length".to_string(),
+                    ));
                 }
                 total
             }
             MeasurementAlgorithm::Angle3Points => {
                 if request.points.len() != 3 {
-                    return Err(CadError::InvalidInput("angle needs exactly three points".to_string()));
+                    return Err(CadError::InvalidInput(
+                        "angle needs exactly three points".to_string(),
+                    ));
                 }
                 let (a, v, b) = (request.points[0], request.points[1], request.points[2]);
                 let v1 = sub(a, v);
@@ -98,15 +104,26 @@ impl MeasurementEngine {
                 let l1 = length(v1);
                 let l2 = length(v2);
                 if l1 < tol || l2 < tol {
-                    return Err(CadError::InvalidInput("angle has a degenerate arm".to_string()));
+                    return Err(CadError::InvalidInput(
+                        "angle has a degenerate arm".to_string(),
+                    ));
                 }
-                (dot(v1, v2) / (l1 * l2)).clamp(-1.0, 1.0).acos().to_degrees()
+                (dot(v1, v2) / (l1 * l2))
+                    .clamp(-1.0, 1.0)
+                    .acos()
+                    .to_degrees()
             }
             MeasurementAlgorithm::PlanarPolygonArea => {
                 if request.points.len() < 3 {
-                    return Err(CadError::InvalidInput("area needs at least three points".to_string()));
+                    return Err(CadError::InvalidInput(
+                        "area needs at least three points".to_string(),
+                    ));
                 }
-                let flat = project_to_plane(&request.points, &request.space, self.tolerance.topology_world)?;
+                let flat = project_to_plane(
+                    &request.points,
+                    &request.space,
+                    self.tolerance.topology_world,
+                )?;
                 measure_polygon_area(&flat, self.tolerance.topology_world)
                     .map_err(|e| CadError::InvalidInput(format!("area rejected: {e}")))?
             }
@@ -161,7 +178,12 @@ impl MeasurementEngine {
     }
 
     /// Contract entry: snapping needs candidate geometry from the database.
-    pub fn snap(&self, _viewport: ViewportId, _candidates: &[SelectionRef], _ray: Ray3) -> CadResult<Option<SnapCandidate>> {
+    pub fn snap(
+        &self,
+        _viewport: ViewportId,
+        _candidates: &[SelectionRef],
+        _ray: Ray3,
+    ) -> CadResult<Option<SnapCandidate>> {
         Err(CadError::Unsupported(
             "snap needs candidate geometry; use snap_to_points with points resolved from the database".into(),
         ))
@@ -182,8 +204,11 @@ fn point_ray_distance(ray: &Ray3, p: Point3) -> f64 {
     length(sub(v, closest))
 }
 
-fn two(points: &[Point3]) -> CadResult<[Point3; 2]> {    if points.len() != 2 {
-        return Err(CadError::InvalidInput("distance needs exactly two points".to_string()));
+fn two(points: &[Point3]) -> CadResult<[Point3; 2]> {
+    if points.len() != 2 {
+        return Err(CadError::InvalidInput(
+            "distance needs exactly two points".to_string(),
+        ));
     }
     Ok([points[0], points[1]])
 }
@@ -199,7 +224,9 @@ fn distance_in_plane(a: Point3, b: Point3, space: &MeasurementSpace, tol: f64) -
         MeasurementSpace::Plane(plane) => {
             let nx = normalize(cross(plane.u, plane.v));
             if length(nx) < tol {
-                return Err(CadError::InvalidInput("measurement plane is degenerate".to_string()));
+                return Err(CadError::InvalidInput(
+                    "measurement plane is degenerate".to_string(),
+                ));
             }
             // Remove the plane-normal component so this is a true in-plane distance.
             let n = nx;
@@ -212,45 +239,70 @@ fn distance_in_plane(a: Point3, b: Point3, space: &MeasurementSpace, tol: f64) -
             // Paper/viewport measurement requires a correct inverse transform;
             // without it we must not guess a model distance (spec §3.3).
             Err(CadError::Unsupported(
-                "paper-space/viewport measurement needs a verified inverse viewport transform".into(),
+                "paper-space/viewport measurement needs a verified inverse viewport transform"
+                    .into(),
             ))
         }
     }
 }
 
 /// Project points into the measurement plane's 2D coordinates.
-fn project_to_plane(points: &[Point3], space: &MeasurementSpace, tol: f64) -> CadResult<Vec<Point3>> {
+fn project_to_plane(
+    points: &[Point3],
+    space: &MeasurementSpace,
+    tol: f64,
+) -> CadResult<Vec<Point3>> {
     match space {
         MeasurementSpace::Plane(plane) => {
             let u = normalize(plane.u);
             let v = normalize(plane.v);
             if length(cross(u, v)) < tol {
-                return Err(CadError::InvalidInput("measurement plane is degenerate".to_string()));
+                return Err(CadError::InvalidInput(
+                    "measurement plane is degenerate".to_string(),
+                ));
             }
             Ok(points
                 .iter()
                 .map(|p| {
                     let d = sub(*p, plane.origin);
-                    Point3 { x: dot(d, u), y: dot(d, v), z: 0.0 }
+                    Point3 {
+                        x: dot(d, u),
+                        y: dot(d, v),
+                        z: 0.0,
+                    }
                 })
                 .collect())
         }
         MeasurementSpace::World3d => Ok(points.to_vec()),
-        _ => Err(CadError::Unsupported("area requires a defined measurement plane".into())),
+        _ => Err(CadError::Unsupported(
+            "area requires a defined measurement plane".into(),
+        )),
     }
 }
 
 fn sub(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+    Point3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
 }
 fn scale(a: Point3, s: f64) -> Point3 {
-    Point3 { x: a.x * s, y: a.y * s, z: a.z * s }
+    Point3 {
+        x: a.x * s,
+        y: a.y * s,
+        z: a.z * s,
+    }
 }
 fn dot(a: Point3, b: Point3) -> f64 {
     a.x * b.x + a.y * b.y + a.z * b.z
 }
 fn cross(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }
+    Point3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
 }
 fn length(a: Point3) -> f64 {
     dot(a, a).sqrt()
@@ -288,7 +340,18 @@ mod tests {
         let r = engine()
             .measure(&request(
                 MeasurementAlgorithm::Distance3d,
-                vec![Point3 { x: 0.0, y: 0.0, z: 0.0 }, Point3 { x: 3.0, y: 4.0, z: 0.0 }],
+                vec![
+                    Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 3.0,
+                        y: 4.0,
+                        z: 0.0,
+                    },
+                ],
             ))
             .unwrap();
         assert!((r.value - 5.0).abs() < 1e-12);
@@ -300,9 +363,21 @@ mod tests {
             .measure(&request(
                 MeasurementAlgorithm::Angle3Points,
                 vec![
-                    Point3 { x: 1.0, y: 0.0, z: 0.0 },
-                    Point3 { x: 0.0, y: 0.0, z: 0.0 },
-                    Point3 { x: 0.0, y: 1.0, z: 0.0 },
+                    Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 0.0,
+                        y: 1.0,
+                        z: 0.0,
+                    },
                 ],
             ))
             .unwrap();
@@ -313,7 +388,18 @@ mod tests {
     fn non_finite_points_are_rejected() {
         let r = engine().measure(&request(
             MeasurementAlgorithm::Distance3d,
-            vec![Point3 { x: f64::NAN, y: 0.0, z: 0.0 }, Point3 { x: 0.0, y: 0.0, z: 0.0 }],
+            vec![
+                Point3 {
+                    x: f64::NAN,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ],
         ));
         assert!(r.is_err());
     }
@@ -321,10 +407,26 @@ mod tests {
     #[test]
     fn polygon_area_rejects_self_intersection() {
         let bowtie = vec![
-            Point3 { x: 0.0, y: 0.0, z: 0.0 },
-            Point3 { x: 1.0, y: 1.0, z: 0.0 },
-            Point3 { x: 1.0, y: 0.0, z: 0.0 },
-            Point3 { x: 0.0, y: 1.0, z: 0.0 },
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
         ];
         let r = engine().measure(&request(MeasurementAlgorithm::PlanarPolygonArea, bowtie));
         assert!(r.is_err());
@@ -332,8 +434,25 @@ mod tests {
 
     #[test]
     fn paper_measurement_is_refused_without_inverse_transform() {
-        let mut req = request(MeasurementAlgorithm::Distance2d, vec![Point3 { x: 0.0, y: 0.0, z: 0.0 }, Point3 { x: 1.0, y: 0.0, z: 0.0 }]);
+        let mut req = request(
+            MeasurementAlgorithm::Distance2d,
+            vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ],
+        );
         req.space = MeasurementSpace::Paper(LayoutId(1));
-        assert!(matches!(engine().measure(&req), Err(CadError::Unsupported(_))));
+        assert!(matches!(
+            engine().measure(&req),
+            Err(CadError::Unsupported(_))
+        ));
     }
 }

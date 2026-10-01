@@ -42,7 +42,11 @@ impl Default for GridSpatialIndex {
     fn default() -> Self {
         GridSpatialIndex {
             entries: Vec::new(),
-            min: Point3 { x: 0.0, y: 0.0, z: 0.0 },
+            min: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
             cell: 1.0,
             cols: 0,
             rows: 0,
@@ -62,11 +66,27 @@ impl GridSpatialIndex {
     }
 
     fn layout(&mut self, target_cells: usize) {
-        let mut min = Point3 { x: f64::INFINITY, y: f64::INFINITY, z: f64::INFINITY };
-        let mut max = Point3 { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY, z: f64::NEG_INFINITY };
+        let mut min = Point3 {
+            x: f64::INFINITY,
+            y: f64::INFINITY,
+            z: f64::INFINITY,
+        };
+        let mut max = Point3 {
+            x: f64::NEG_INFINITY,
+            y: f64::NEG_INFINITY,
+            z: f64::NEG_INFINITY,
+        };
         for e in &self.entries {
-            min = Point3 { x: min.x.min(e.bounds.min.x), y: min.y.min(e.bounds.min.y), z: min.z.min(e.bounds.min.z) };
-            max = Point3 { x: max.x.max(e.bounds.max.x), y: max.y.max(e.bounds.max.y), z: max.z.max(e.bounds.max.z) };
+            min = Point3 {
+                x: min.x.min(e.bounds.min.x),
+                y: min.y.min(e.bounds.min.y),
+                z: min.z.min(e.bounds.min.z),
+            };
+            max = Point3 {
+                x: max.x.max(e.bounds.max.x),
+                y: max.y.max(e.bounds.max.y),
+                z: max.z.max(e.bounds.max.z),
+            };
         }
         if !min.x.is_finite() || !max.x.is_finite() {
             self.cols = 0;
@@ -136,13 +156,13 @@ impl SpatialIndex for GridSpatialIndex {
 
     fn update(&mut self, inserted: &[SpatialEntry], removed: &[SelectionRef]) -> CadResult<()> {
         if !removed.is_empty() {
-            let removed: std::collections::BTreeSet<_> =
-                removed.iter().map(source_key).collect();
-            self.entries.retain(|e| !removed.contains(&source_key(&e.source)));
+            let removed: std::collections::BTreeSet<_> = removed.iter().map(source_key).collect();
+            self.entries
+                .retain(|e| !removed.contains(&source_key(&e.source)));
         }
         self.entries.extend(inserted.iter().map(|e| SpatialEntry {
             source: e.source.clone(),
-            bounds: e.bounds.clone(),
+            bounds: e.bounds,
         }));
         let target = (self.entries.len() / 4).clamp(16, 65536);
         self.layout(target);
@@ -171,14 +191,19 @@ impl SpatialIndex for GridSpatialIndex {
 
 fn source_key(s: &SelectionRef) -> (DocumentId, EntityId, Vec<(EntityId, String)>) {
     (
-        s.document.clone(),
+        s.document,
         s.entity,
         s.instance.0.iter().map(|id| (*id, String::new())).collect(),
     )
 }
 
 fn intersects(a: &Bounds3, b: &Bounds3) -> bool {
-    a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.y <= b.max.y && a.max.y >= b.min.y && a.min.z <= b.max.z && a.max.z >= b.min.z
+    a.min.x <= b.max.x
+        && a.max.x >= b.min.x
+        && a.min.y <= b.max.y
+        && a.max.y >= b.min.y
+        && a.min.z <= b.max.z
+        && a.max.z >= b.min.z
 }
 
 /// Slab test for a ray against an axis-aligned box.
@@ -216,16 +241,16 @@ pub struct PendingSpatialIndex;
 
 impl SpatialIndex for PendingSpatialIndex {
     fn rebuild(&mut self, _: &[SpatialEntry]) -> CadResult<()> {
-        Err(CadError::NotImplemented("spatial.rebuild".into()))
+        Err(CadError::NotImplemented("spatial.rebuild"))
     }
     fn update(&mut self, _: &[SpatialEntry], _: &[SelectionRef]) -> CadResult<()> {
-        Err(CadError::NotImplemented("spatial.update".into()))
+        Err(CadError::NotImplemented("spatial.update"))
     }
     fn query_bounds(&self, _: &Bounds3) -> CadResult<Vec<SelectionRef>> {
-        Err(CadError::NotImplemented("spatial.query_bounds".into()))
+        Err(CadError::NotImplemented("spatial.query_bounds"))
     }
     fn ray_candidates(&self, _: &Ray3) -> CadResult<Vec<SelectionRef>> {
-        Err(CadError::NotImplemented("spatial.ray_candidates".into()))
+        Err(CadError::NotImplemented("spatial.ray_candidates"))
     }
 }
 
@@ -242,8 +267,16 @@ mod tests {
                 sub_element: None,
             },
             bounds: Bounds3 {
-                min: Point3 { x: x - 1.0, y: y - 1.0, z: -1.0 },
-                max: Point3 { x: x + 1.0, y: y + 1.0, z: 1.0 },
+                min: Point3 {
+                    x: x - 1.0,
+                    y: y - 1.0,
+                    z: -1.0,
+                },
+                max: Point3 {
+                    x: x + 1.0,
+                    y: y + 1.0,
+                    z: 1.0,
+                },
             },
         }
     }
@@ -251,11 +284,21 @@ mod tests {
     #[test]
     fn query_returns_only_intersecting_entries() {
         let mut index = GridSpatialIndex::new();
-        index.rebuild(&[entry(1, 0.0, 0.0), entry(2, 100.0, 100.0)]).unwrap();
+        index
+            .rebuild(&[entry(1, 0.0, 0.0), entry(2, 100.0, 100.0)])
+            .unwrap();
         let hits = index
             .query_bounds(&Bounds3 {
-                min: Point3 { x: -5.0, y: -5.0, z: -5.0 },
-                max: Point3 { x: 5.0, y: 5.0, z: 5.0 },
+                min: Point3 {
+                    x: -5.0,
+                    y: -5.0,
+                    z: -5.0,
+                },
+                max: Point3 {
+                    x: 5.0,
+                    y: 5.0,
+                    z: 5.0,
+                },
             })
             .unwrap();
         assert_eq!(hits.len(), 1);
@@ -265,10 +308,20 @@ mod tests {
     #[test]
     fn ray_candidates_use_aabb_slab_test() {
         let mut index = GridSpatialIndex::new();
-        index.rebuild(&[entry(1, 0.0, 0.0), entry(2, 50.0, 0.0)]).unwrap();
+        index
+            .rebuild(&[entry(1, 0.0, 0.0), entry(2, 50.0, 0.0)])
+            .unwrap();
         let ray = Ray3 {
-            origin: Point3 { x: -10.0, y: 0.0, z: 0.0 },
-            direction: Point3 { x: 1.0, y: 0.0, z: 0.0 },
+            origin: Point3 {
+                x: -10.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            direction: Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
         };
         let hits = index.ray_candidates(&ray).unwrap();
         assert_eq!(hits.len(), 2);

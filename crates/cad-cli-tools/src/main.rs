@@ -116,9 +116,16 @@ fn parse_points(value: &str) -> Result<Vec<Point3>, String> {
         }
         let mut numbers = [0.0f64; 3];
         for (slot, text) in numbers.iter_mut().zip(coordinates.iter()) {
-            *slot = text.trim().parse::<f64>().map_err(|_| format!("point '{pair}' is not numeric"))?;
+            *slot = text
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| format!("point '{pair}' is not numeric"))?;
         }
-        points.push(Point3 { x: numbers[0], y: numbers[1], z: numbers[2] });
+        points.push(Point3 {
+            x: numbers[0],
+            y: numbers[1],
+            z: numbers[2],
+        });
     }
     Ok(points)
 }

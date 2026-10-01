@@ -190,15 +190,39 @@ impl Viewport {
             id,
             document,
             camera: Camera {
-                eye: Point3 { x: 0.0, y: 0.0, z: 1000.0 },
-                target: Point3 { x: 0.0, y: 0.0, z: 0.0 },
-                up: Point3 { x: 0.0, y: 1.0, z: 0.0 },
+                eye: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1000.0,
+                },
+                target: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                up: Point3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
                 projection: Projection::Orthographic { scale: 1.0 },
             },
             work_plane: WorkPlane {
-                origin: Point3 { x: 0.0, y: 0.0, z: 0.0 },
-                u: Point3 { x: 1.0, y: 0.0, z: 0.0 },
-                v: Point3 { x: 0.0, y: 1.0, z: 0.0 },
+                origin: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                u: Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                v: Point3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
             },
             logical_size,
             dpi_scale: 1.0,
@@ -229,7 +253,7 @@ pub struct Workspace {
 
 pub enum CommandPayload {
     None,
-    Annotation(AnnotationCommand),
+    Annotation(Box<AnnotationCommand>),
     Points(Vec<Point3>),
     Layer(LayerId, bool),
     Space(SpaceId),
@@ -254,7 +278,11 @@ pub struct CommandOutcome {
 
 impl CommandOutcome {
     pub fn none() -> Self {
-        CommandOutcome { objects: Vec::new(), changes: None, diagnostics: Vec::new() }
+        CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: Vec::new(),
+        }
     }
 }
 
@@ -267,7 +295,12 @@ pub struct CommandDeclaration {
 
 pub trait CommandHandler {
     fn declaration(&self) -> CommandDeclaration;
-    fn execute(&self, session: &mut SessionState, document: &mut Document, command: &Command) -> CadResult<CommandOutcome>;
+    fn execute(
+        &self,
+        session: &mut SessionState,
+        document: &mut Document,
+        command: &Command,
+    ) -> CadResult<CommandOutcome>;
 }
 
 pub struct Application {
@@ -290,13 +323,17 @@ impl Application {
             workspace: Workspace::default(),
             history: BTreeMap::new(),
             measurement: MeasurementEngine::default(),
-            annotations: AnnotationService::default(),
+            annotations: AnnotationService,
             query: QueryService::new(),
         }
     }
 
     /// Execute a command. This is the single entry point shared by UI and CLI.
-    pub fn execute(&mut self, session: &mut SessionState, command: Command) -> CadResult<CommandOutcome> {
+    pub fn execute(
+        &mut self,
+        session: &mut SessionState,
+        command: Command,
+    ) -> CadResult<CommandOutcome> {
         session.authorize(command.id)?;
         if session.document != command.document {
             return Err(CadError::StaleResult);
@@ -312,7 +349,9 @@ impl Application {
                     session.layer_overrides.insert(id, visible);
                     Ok(CommandOutcome::none())
                 } else {
-                    Err(CadError::InvalidInput("ToggleLayer needs a layer payload".into()))
+                    Err(CadError::InvalidInput(
+                        "ToggleLayer needs a layer payload".into(),
+                    ))
                 }
             }
             CommandId::SwitchSpace => {
@@ -320,19 +359,23 @@ impl Application {
                     session.active_space = space;
                     Ok(CommandOutcome::none())
                 } else {
-                    Err(CadError::InvalidInput("SwitchSpace needs a space payload".into()))
+                    Err(CadError::InvalidInput(
+                        "SwitchSpace needs a space payload".into(),
+                    ))
                 }
             }
             CommandId::Measure => self.measure(&command),
-            CommandId::CreateAnnotation | CommandId::UpdateAnnotation | CommandId::DeleteAnnotation => {
-                self.annotation_command(&command)
-            }
+            CommandId::CreateAnnotation
+            | CommandId::UpdateAnnotation
+            | CommandId::DeleteAnnotation => self.annotation_command(&command),
             CommandId::Undo => self.undo(&command),
             CommandId::Redo => self.redo(&command),
             CommandId::SwitchProjection => {
                 let viewport = self.viewport_mut(&command)?;
                 viewport.camera.projection = match viewport.camera.projection {
-                    Projection::Orthographic { scale } => Projection::Perspective { vertical_fov_radians: 45f64.to_radians() * scale },
+                    Projection::Orthographic { scale } => Projection::Perspective {
+                        vertical_fov_radians: 45f64.to_radians() * scale,
+                    },
                     Projection::Perspective { .. } => Projection::Orthographic { scale: 1.0 },
                 };
                 Ok(CommandOutcome::none())
@@ -342,12 +385,18 @@ impl Application {
                     self.apply_standard_view(&command, view)?;
                     Ok(CommandOutcome::none())
                 } else {
-                    Err(CadError::InvalidInput("StandardView needs a view payload".into()))
+                    Err(CadError::InvalidInput(
+                        "StandardView needs a view payload".into(),
+                    ))
                 }
             }
             CommandId::ResetView => {
                 let viewport = self.viewport_mut(&command)?;
-                viewport.camera.target = Point3 { x: 0.0, y: 0.0, z: 0.0 };
+                viewport.camera.target = Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                };
                 viewport.camera.projection = Projection::Orthographic { scale: 1.0 };
                 Ok(CommandOutcome::none())
             }
@@ -356,9 +405,11 @@ impl Application {
             CommandId::OpenDrawing | CommandId::CancelLoading => Err(CadError::Unsupported(
                 "file open/cancel is performed by the platform host, not the application".into(),
             )),
-            CommandId::ImportAnnotations | CommandId::ExportAnnotations => Err(CadError::Unsupported(
-                "annotation file I/O is performed by the platform host".into(),
-            )),
+            CommandId::ImportAnnotations | CommandId::ExportAnnotations => {
+                Err(CadError::Unsupported(
+                    "annotation file I/O is performed by the platform host".into(),
+                ))
+            }
             CommandId::Select => {
                 session.tool = ToolState::Selecting;
                 Ok(CommandOutcome::none())
@@ -378,7 +429,9 @@ impl Application {
                         }],
                     })
                 } else {
-                    Err(CadError::InvalidInput("SwitchBackend needs a backend payload".into()))
+                    Err(CadError::InvalidInput(
+                        "SwitchBackend needs a backend payload".into(),
+                    ))
                 }
             }
             CommandId::Switch2d3d => pending("app.command.switch_2d3d"),
@@ -432,11 +485,19 @@ impl Application {
                         "图元 {}，批注 {}（{}），单位 {:?}",
                         document.drawing.entity_count(),
                         document.annotations.len(),
-                        if document.annotations.is_dirty() { "未保存" } else { "已保存" },
+                        if document.annotations.is_dirty() {
+                            "未保存"
+                        } else {
+                            "已保存"
+                        },
                         document.units.source
                     ),
                 },
-                Diagnostic { object: None, code: "diagnostics.bounds".into(), message: bounds },
+                Diagnostic {
+                    object: None,
+                    code: "diagnostics.bounds".into(),
+                    message: bounds,
+                },
             ],
         })
     }
@@ -448,14 +509,22 @@ impl Application {
             .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))
     }
 
-    fn fit_drawing(&mut self, session: &mut SessionState, command: &Command) -> CadResult<CommandOutcome> {
+    fn fit_drawing(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
         self.fit_viewport(session, &command.viewport)?;
         Ok(CommandOutcome::none())
     }
 
     /// Fit a viewport to the current document bounds. Hosts call this after an
     /// import so the first frame is usable without a synthetic command.
-    pub fn fit_viewport(&mut self, session: &mut SessionState, viewport_id: &ViewportId) -> CadResult<()> {
+    pub fn fit_viewport(
+        &mut self,
+        session: &mut SessionState,
+        viewport_id: &ViewportId,
+    ) -> CadResult<()> {
         let document = self
             .workspace
             .documents
@@ -468,12 +537,22 @@ impl Application {
             .get_mut(viewport_id)
             .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
         let Some((min, max)) = bounds else {
-            return Err(CadError::InvalidInput("drawing has no measurable extent".into()));
+            return Err(CadError::InvalidInput(
+                "drawing has no measurable extent".into(),
+            ));
         };
         let cx = (min.x + max.x) * 0.5;
         let cy = (min.y + max.y) * 0.5;
-        viewport.camera.target = Point3 { x: cx, y: cy, z: 0.0 };
-        viewport.camera.eye = Point3 { x: cx, y: cy, z: viewport.camera.eye.z };
+        viewport.camera.target = Point3 {
+            x: cx,
+            y: cy,
+            z: 0.0,
+        };
+        viewport.camera.eye = Point3 {
+            x: cx,
+            y: cy,
+            z: viewport.camera.eye.z,
+        };
         let ex = (max.x - min.x).max(1e-6);
         let ey = (max.y - min.y).max(1e-6);
         let w = viewport.logical_size[0].max(1.0);
@@ -486,12 +565,24 @@ impl Application {
 
     fn pan(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Points(points) = &command.payload else {
-            return Err(CadError::InvalidInput("Pan needs a world-space delta point".into()));
+            return Err(CadError::InvalidInput(
+                "Pan needs a world-space delta point".into(),
+            ));
         };
-        let delta = *points.first().ok_or_else(|| CadError::InvalidInput("Pan delta missing".into()))?;
+        let delta = *points
+            .first()
+            .ok_or_else(|| CadError::InvalidInput("Pan delta missing".into()))?;
         let viewport = self.viewport_mut(command)?;
-        viewport.camera.target = Point3 { x: viewport.camera.target.x - delta.x, y: viewport.camera.target.y - delta.y, z: 0.0 };
-        viewport.camera.eye = Point3 { x: viewport.camera.target.x, y: viewport.camera.target.y, z: viewport.camera.eye.z };
+        viewport.camera.target = Point3 {
+            x: viewport.camera.target.x - delta.x,
+            y: viewport.camera.target.y - delta.y,
+            z: 0.0,
+        };
+        viewport.camera.eye = Point3 {
+            x: viewport.camera.target.x,
+            y: viewport.camera.target.y,
+            z: viewport.camera.eye.z,
+        };
         Ok(CommandOutcome::none())
     }
 
@@ -499,13 +590,20 @@ impl Application {
         let CommandPayload::Points(points) = &command.payload else {
             return Err(CadError::InvalidInput("Zoom needs a scale factor".into()));
         };
-        let factor = points.first().map(|p| p.x).ok_or_else(|| CadError::InvalidInput("Zoom factor missing".into()))?;
+        let factor = points
+            .first()
+            .map(|p| p.x)
+            .ok_or_else(|| CadError::InvalidInput("Zoom factor missing".into()))?;
         if factor <= 0.0 || !factor.is_finite() {
-            return Err(CadError::InvalidInput("Zoom factor must be positive and finite".into()));
+            return Err(CadError::InvalidInput(
+                "Zoom factor must be positive and finite".into(),
+            ));
         }
         let viewport = self.viewport_mut(command)?;
         if let Projection::Orthographic { scale } = viewport.camera.projection {
-            viewport.camera.projection = Projection::Orthographic { scale: (scale / factor).max(1e-9) };
+            viewport.camera.projection = Projection::Orthographic {
+                scale: (scale / factor).max(1e-9),
+            };
         }
         Ok(CommandOutcome::none())
     }
@@ -514,18 +612,66 @@ impl Application {
         let viewport = self.viewport_mut(command)?;
         let t = viewport.camera.target;
         let d = 1000.0;
-        viewport.camera.up = Point3 { x: 0.0, y: 1.0, z: 0.0 };
+        viewport.camera.up = Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
         match view {
             StandardView::Top => {
-                viewport.camera.eye = Point3 { x: t.x, y: t.y, z: t.z + d };
-                viewport.camera.up = Point3 { x: 0.0, y: 1.0, z: 0.0 };
+                viewport.camera.eye = Point3 {
+                    x: t.x,
+                    y: t.y,
+                    z: t.z + d,
+                };
+                viewport.camera.up = Point3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                };
             }
-            StandardView::Bottom => viewport.camera.eye = Point3 { x: t.x, y: t.y, z: t.z - d },
-            StandardView::Front => viewport.camera.eye = Point3 { x: t.x, y: t.y - d, z: t.z },
-            StandardView::Back => viewport.camera.eye = Point3 { x: t.x, y: t.y + d, z: t.z },
-            StandardView::Left => viewport.camera.eye = Point3 { x: t.x - d, y: t.y, z: t.z },
-            StandardView::Right => viewport.camera.eye = Point3 { x: t.x + d, y: t.y, z: t.z },
-            StandardView::Isometric => viewport.camera.eye = Point3 { x: t.x + d, y: t.y - d, z: t.z + d },
+            StandardView::Bottom => {
+                viewport.camera.eye = Point3 {
+                    x: t.x,
+                    y: t.y,
+                    z: t.z - d,
+                }
+            }
+            StandardView::Front => {
+                viewport.camera.eye = Point3 {
+                    x: t.x,
+                    y: t.y - d,
+                    z: t.z,
+                }
+            }
+            StandardView::Back => {
+                viewport.camera.eye = Point3 {
+                    x: t.x,
+                    y: t.y + d,
+                    z: t.z,
+                }
+            }
+            StandardView::Left => {
+                viewport.camera.eye = Point3 {
+                    x: t.x - d,
+                    y: t.y,
+                    z: t.z,
+                }
+            }
+            StandardView::Right => {
+                viewport.camera.eye = Point3 {
+                    x: t.x + d,
+                    y: t.y,
+                    z: t.z,
+                }
+            }
+            StandardView::Isometric => {
+                viewport.camera.eye = Point3 {
+                    x: t.x + d,
+                    y: t.y - d,
+                    z: t.z + d,
+                }
+            }
         }
         viewport.camera.target = t;
         Ok(())
@@ -541,7 +687,8 @@ impl Application {
             n if n >= 4 => cad_db::MeasurementAlgorithm::PolylineLength,
             _ => {
                 return Err(CadError::InvalidInput(
-                    "measurement needs two (distance), three (angle) or more (length) points".into(),
+                    "measurement needs two (distance), three (angle) or more (length) points"
+                        .into(),
                 ))
             }
         };
@@ -571,9 +718,11 @@ impl Application {
     }
 
     fn annotation_command(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        let document_id = command.document.clone();
+        let document_id = command.document;
         let CommandPayload::Annotation(annotation_command) = &command.payload else {
-            return Err(CadError::InvalidInput("annotation command needs an annotation payload".into()));
+            return Err(CadError::InvalidInput(
+                "annotation command needs an annotation payload".into(),
+            ));
         };
         let document = self
             .workspace
@@ -582,8 +731,10 @@ impl Application {
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
 
         // Build the undo patch from the before/after state.
-        let (patch, label) = match annotation_command {
-            AnnotationCommand::Create(a) => (patch(a.id, None, Some(a.clone())), "create annotation"),
+        let (patch, label) = match annotation_command.as_ref() {
+            AnnotationCommand::Create(a) => {
+                (patch(a.id, None, Some(a.clone())), "create annotation")
+            }
             AnnotationCommand::Update(a) => {
                 let before = document.annotations.get(a.id).cloned();
                 (patch(a.id, before, Some(a.clone())), "update annotation")
@@ -593,7 +744,7 @@ impl Application {
                 (patch(*id, before, None), "delete annotation")
             }
         };
-        let inner = match annotation_command {
+        let inner = match annotation_command.as_ref() {
             AnnotationCommand::Create(a) => AnnotationCommand::Create(a.clone()),
             AnnotationCommand::Update(a) => AnnotationCommand::Update(a.clone()),
             AnnotationCommand::Delete(id) => AnnotationCommand::Delete(*id),
@@ -609,7 +760,11 @@ impl Application {
             merge_key: None,
         })?;
 
-        Ok(CommandOutcome { objects: Vec::new(), changes: Some(changes), diagnostics: Vec::new() })
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(changes),
+            diagnostics: Vec::new(),
+        })
     }
 
     fn undo(&mut self, command: &Command) -> CadResult<CommandOutcome> {
@@ -618,9 +773,13 @@ impl Application {
             .documents
             .get_mut(&command.document)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let history = self.history.entry(command.document.clone()).or_default();
+        let history = self.history.entry(command.document).or_default();
         let changes = history.undo(&mut document.annotations)?;
-        Ok(CommandOutcome { objects: Vec::new(), changes: Some(changes), diagnostics: Vec::new() })
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(changes),
+            diagnostics: Vec::new(),
+        })
     }
 
     fn redo(&mut self, command: &Command) -> CadResult<CommandOutcome> {
@@ -629,18 +788,29 @@ impl Application {
             .documents
             .get_mut(&command.document)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let history = self.history.entry(command.document.clone()).or_default();
+        let history = self.history.entry(command.document).or_default();
         let changes = history.redo(&mut document.annotations)?;
-        Ok(CommandOutcome { objects: Vec::new(), changes: Some(changes), diagnostics: Vec::new() })
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(changes),
+            diagnostics: Vec::new(),
+        })
     }
 
     pub fn can_undo(&self, document: &DocumentId) -> bool {
-        self.history.get(document).map(|h| h.can_undo()).unwrap_or(false)
+        self.history
+            .get(document)
+            .map(|h| h.can_undo())
+            .unwrap_or(false)
     }
 
     /// Guard a document switch/exit; an unsaved annotation is never discarded
     /// without an explicit user decision (spec §16.3).
-    pub fn prepare_leave(&mut self, document: DocumentId, decision: UnsavedDecision) -> CadResult<()> {
+    pub fn prepare_leave(
+        &mut self,
+        document: DocumentId,
+        decision: UnsavedDecision,
+    ) -> CadResult<()> {
         let dirty = self
             .workspace
             .documents
@@ -668,15 +838,30 @@ pub enum UnsavedDecision {
 }
 
 pub enum InputEvent {
-    Pointer { logical_position: [f64; 2], contacts: u8 },
+    Pointer {
+        logical_position: [f64; 2],
+        contacts: u8,
+    },
     Confirm,
     Cancel,
-    Key { key: String, composing: bool, text_focus: bool },
-    ViewMetrics { logical_size: [f64; 2], dpi_scale: f64 },
+    Key {
+        key: String,
+        composing: bool,
+        text_focus: bool,
+    },
+    ViewMetrics {
+        logical_size: [f64; 2],
+        dpi_scale: f64,
+    },
 }
 
 pub trait Tool {
-    fn handle(&mut self, event: InputEvent, session: &mut SessionState, preview: &mut PreviewState) -> CadResult<Option<Command>>;
+    fn handle(
+        &mut self,
+        event: InputEvent,
+        session: &mut SessionState,
+        preview: &mut PreviewState,
+    ) -> CadResult<Option<Command>>;
 }
 
 #[cfg(test)]
@@ -689,9 +874,9 @@ mod tests {
         let document_id = DocumentId(1);
         let drawing = DrawingDatabaseBuilder::new(DatabaseId(1)).finish().unwrap();
         app.workspace.documents.insert(
-            document_id.clone(),
+            document_id,
             Document {
-                id: document_id.clone(),
+                id: document_id,
                 drawing: Arc::new(drawing),
                 annotations: AnnotationDatabase::new(DatabaseId(2)),
                 identity: DocumentIdentity::Sha256([0u8; 32]),
@@ -699,22 +884,33 @@ mod tests {
                 resource_keys: Vec::new(),
             },
         );
-        app.workspace
-            .viewports
-            .insert(ViewportId(1), Viewport::new(ViewportId(1), document_id.clone(), [800.0, 600.0]));
+        app.workspace.viewports.insert(
+            ViewportId(1),
+            Viewport::new(ViewportId(1), document_id, [800.0, 600.0]),
+        );
         let session = SessionState::new(document_id, AppMode::Work);
         (app, session)
     }
 
     fn command(id: CommandId, payload: CommandPayload) -> Command {
-        Command { schema_version: 1, id, document: DocumentId(1), viewport: ViewportId(1), payload }
+        Command {
+            schema_version: 1,
+            id,
+            document: DocumentId(1),
+            viewport: ViewportId(1),
+            payload,
+        }
     }
 
     fn ann(id: u128) -> Annotation {
         Annotation {
             id: AnnotationId(id),
             space: SpaceId::Model,
-            geometry: AnnotationGeometry::Text(Point3 { x: 0.0, y: 0.0, z: 0.0 }),
+            geometry: AnnotationGeometry::Text(Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }),
             text: "note".into(),
             style: AnnotationStyle::default(),
             created_unix_ms: 0,
@@ -728,22 +924,64 @@ mod tests {
     fn viewer_mode_rejects_annotation_commands_at_the_command_layer() {
         let (mut app, mut session) = application_with_document();
         let mut viewer = SessionState::new(DocumentId(1), AppMode::Viewer);
-        let cmd = command(CommandId::CreateAnnotation, CommandPayload::Annotation(AnnotationCommand::Create(ann(1))));
-        assert_eq!(app.execute(&mut viewer, cmd).unwrap_err(), CadError::PermissionDenied);
+        let cmd = command(
+            CommandId::CreateAnnotation,
+            CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(1)))),
+        );
+        assert_eq!(
+            app.execute(&mut viewer, cmd).unwrap_err(),
+            CadError::PermissionDenied
+        );
         // Work mode succeeds.
-        let cmd = command(CommandId::CreateAnnotation, CommandPayload::Annotation(AnnotationCommand::Create(ann(1))));
+        let cmd = command(
+            CommandId::CreateAnnotation,
+            CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(1)))),
+        );
         app.execute(&mut session, cmd).unwrap();
     }
 
     #[test]
     fn create_then_undo_then_redo_through_the_application() {
         let (mut app, mut session) = application_with_document();
-        app.execute(&mut session, command(CommandId::CreateAnnotation, CommandPayload::Annotation(AnnotationCommand::Create(ann(5))))).unwrap();
-        assert_eq!(app.workspace.documents.get(&DocumentId(1)).unwrap().annotations.len(), 1);
-        app.execute(&mut session, command(CommandId::Undo, CommandPayload::None)).unwrap();
-        assert_eq!(app.workspace.documents.get(&DocumentId(1)).unwrap().annotations.len(), 0);
-        app.execute(&mut session, command(CommandId::Redo, CommandPayload::None)).unwrap();
-        assert_eq!(app.workspace.documents.get(&DocumentId(1)).unwrap().annotations.len(), 1);
+        app.execute(
+            &mut session,
+            command(
+                CommandId::CreateAnnotation,
+                CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(5)))),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            app.workspace
+                .documents
+                .get(&DocumentId(1))
+                .unwrap()
+                .annotations
+                .len(),
+            1
+        );
+        app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+            .unwrap();
+        assert_eq!(
+            app.workspace
+                .documents
+                .get(&DocumentId(1))
+                .unwrap()
+                .annotations
+                .len(),
+            0
+        );
+        app.execute(&mut session, command(CommandId::Redo, CommandPayload::None))
+            .unwrap();
+        assert_eq!(
+            app.workspace
+                .documents
+                .get(&DocumentId(1))
+                .unwrap()
+                .annotations
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -751,7 +989,10 @@ mod tests {
         let (mut app, mut session) = application_with_document();
         let mut cmd = command(CommandId::FitDrawing, CommandPayload::None);
         cmd.document = DocumentId(99);
-        assert_eq!(app.execute(&mut session, cmd).unwrap_err(), CadError::StaleResult);
+        assert_eq!(
+            app.execute(&mut session, cmd).unwrap_err(),
+            CadError::StaleResult
+        );
     }
 
     #[test]
@@ -760,28 +1001,72 @@ mod tests {
         let cmd = command(
             CommandId::Measure,
             CommandPayload::Points(vec![
-                Point3 { x: 0.0, y: 0.0, z: 0.0 },
-                Point3 { x: 3.0, y: 4.0, z: 0.0 },
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 3.0,
+                    y: 4.0,
+                    z: 0.0,
+                },
             ]),
         );
         let outcome = app.execute(&mut session, cmd).unwrap();
-        assert!(outcome.diagnostics.iter().any(|d| d.code == "measure.result"));
+        assert!(outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "measure.result"));
     }
 
     #[test]
     fn layer_override_does_not_touch_the_database() {
         let (mut app, mut session) = application_with_document();
-        let before = app.workspace.documents.get(&DocumentId(1)).unwrap().drawing.revision();
-        app.execute(&mut session, command(CommandId::ToggleLayer, CommandPayload::Layer(LayerId(3), false))).unwrap();
+        let before = app
+            .workspace
+            .documents
+            .get(&DocumentId(1))
+            .unwrap()
+            .drawing
+            .revision();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::ToggleLayer,
+                CommandPayload::Layer(LayerId(3), false),
+            ),
+        )
+        .unwrap();
         assert_eq!(session.layer_overrides.get(&LayerId(3)), Some(&false));
-        assert_eq!(app.workspace.documents.get(&DocumentId(1)).unwrap().drawing.revision(), before);
+        assert_eq!(
+            app.workspace
+                .documents
+                .get(&DocumentId(1))
+                .unwrap()
+                .drawing
+                .revision(),
+            before
+        );
     }
 
     #[test]
     fn leave_with_unsaved_annotations_requires_a_decision() {
         let (mut app, mut session) = application_with_document();
-        app.execute(&mut session, command(CommandId::CreateAnnotation, CommandPayload::Annotation(AnnotationCommand::Create(ann(1))))).unwrap();
-        assert!(matches!(app.prepare_leave(DocumentId(1), UnsavedDecision::Cancel), Err(CadError::Cancelled)));
-        assert!(app.prepare_leave(DocumentId(1), UnsavedDecision::ExplicitDiscard).is_ok());
+        app.execute(
+            &mut session,
+            command(
+                CommandId::CreateAnnotation,
+                CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(1)))),
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            app.prepare_leave(DocumentId(1), UnsavedDecision::Cancel),
+            Err(CadError::Cancelled)
+        ));
+        assert!(app
+            .prepare_leave(DocumentId(1), UnsavedDecision::ExplicitDiscard)
+            .is_ok());
     }
 }

@@ -68,7 +68,8 @@ impl CliInvocation {
 }
 
 fn read_input(path: &Path) -> CadResult<Arc<[u8]>> {
-    let bytes = std::fs::read(path).map_err(|e| CadError::InvalidInput(format!("read failed: {e}")))?;
+    let bytes =
+        std::fs::read(path).map_err(|e| CadError::InvalidInput(format!("read failed: {e}")))?;
     Ok(Arc::from(bytes.into_boxed_slice()))
 }
 
@@ -171,7 +172,10 @@ fn run_proxy_report(controller: &HostController) -> CadResult<serde_json::Value>
     }))
 }
 
-fn run_measure(controller: &mut HostController, invocation: &CliInvocation) -> CadResult<serde_json::Value> {
+fn run_measure(
+    controller: &mut HostController,
+    invocation: &CliInvocation,
+) -> CadResult<serde_json::Value> {
     if invocation.points.len() < 2 {
         return Err(CadError::InvalidInput(
             "measure needs two (distance), three (angle) or more (length) points".into(),
@@ -180,8 +184,8 @@ fn run_measure(controller: &mut HostController, invocation: &CliInvocation) -> C
     let command = Command {
         schema_version: 1,
         id: CommandId::Measure,
-        document: controller.document_id.clone(),
-        viewport: controller.viewport_id.clone(),
+        document: controller.document_id,
+        viewport: controller.viewport_id,
         payload: CommandPayload::Points(invocation.points.clone()),
     };
     let outcome = controller.execute(command)?;
@@ -204,7 +208,10 @@ fn run_measure(controller: &mut HostController, invocation: &CliInvocation) -> C
     }))
 }
 
-fn run_export_notes(controller: &mut HostController, invocation: &CliInvocation) -> CadResult<serde_json::Value> {
+fn run_export_notes(
+    controller: &mut HostController,
+    invocation: &CliInvocation,
+) -> CadResult<serde_json::Value> {
     let target = invocation
         .notes
         .clone()
@@ -229,7 +236,10 @@ fn run_export_notes(controller: &mut HostController, invocation: &CliInvocation)
     }))
 }
 
-fn run_import_notes(controller: &mut HostController, invocation: &CliInvocation) -> CadResult<serde_json::Value> {
+fn run_import_notes(
+    controller: &mut HostController,
+    invocation: &CliInvocation,
+) -> CadResult<serde_json::Value> {
     let source = invocation
         .notes
         .clone()
@@ -259,9 +269,9 @@ fn run_build_representation(controller: &HostController) -> CadResult<serde_json
         .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
     let registry = cad_representation::ProviderRegistry::with_default_provider();
     let context = cad_representation::RepresentationContext::new(
-        controller.document_id.clone(),
+        controller.document_id,
         TolerancePolicy::default(),
-        TaskStamp::new(controller.document_id.clone(), controller.session.generation),
+        TaskStamp::new(controller.document_id, controller.session.generation),
     );
     let mut batches = 0usize;
     let mut vertices = 0usize;
@@ -270,7 +280,8 @@ fn run_build_representation(controller: &HostController) -> CadResult<serde_json
         match registry.build(entity, &context) {
             Ok(representation) => {
                 for fragment in &representation.fragments {
-                    if let cad_representation::DisplayPrimitive::Lines(points) = &fragment.primitive {
+                    if let cad_representation::DisplayPrimitive::Lines(points) = &fragment.primitive
+                    {
                         batches += 1;
                         vertices += points.len();
                     }
@@ -291,7 +302,10 @@ fn run_build_representation(controller: &HostController) -> CadResult<serde_json
     }))
 }
 
-fn run_benchmark(controller: &HostController, invocation: &CliInvocation) -> CadResult<serde_json::Value> {
+fn run_benchmark(
+    controller: &HostController,
+    invocation: &CliInvocation,
+) -> CadResult<serde_json::Value> {
     let bytes = std::fs::metadata(&invocation.input)
         .map(|m| m.len())
         .unwrap_or(0);
@@ -341,7 +355,16 @@ mod tests {
 
     #[test]
     fn cli_operation_names_parse() {
-        for name in ["scan", "proxy-report", "measure", "import-notes", "export-notes", "build-representation", "render", "benchmark"] {
+        for name in [
+            "scan",
+            "proxy-report",
+            "measure",
+            "import-notes",
+            "export-notes",
+            "build-representation",
+            "render",
+            "benchmark",
+        ] {
             assert!(CliOperation::parse(name).is_some(), "{name}");
         }
         assert!(CliOperation::parse("nope").is_none());

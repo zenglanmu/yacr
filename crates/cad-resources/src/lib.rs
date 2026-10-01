@@ -77,7 +77,10 @@ pub fn bare_name(raw: &str) -> String {
         Some((prefix, rest)) if prefix.len() == 1 => rest,
         _ => last,
     };
-    let cleaned: String = last.chars().filter(|c| !c.is_control() && *c != '\0').collect();
+    let cleaned: String = last
+        .chars()
+        .filter(|c| !c.is_control() && *c != '\0')
+        .collect();
     let cleaned = cleaned.trim();
     if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
         "unnamed".to_string()
@@ -119,11 +122,19 @@ pub struct MapResolver {
 
 impl MapResolver {
     pub fn new(limits: ResourceLimits) -> Self {
-        MapResolver { entries: HashMap::new(), limits }
+        MapResolver {
+            entries: HashMap::new(),
+            limits,
+        }
     }
 
     /// Grant a resource. Rejects unsafe keys and oversized payloads.
-    pub fn grant(&mut self, raw_key: &str, bytes: Arc<[u8]>, license_hint: impl Into<String>) -> CadResult<()> {
+    pub fn grant(
+        &mut self,
+        raw_key: &str,
+        bytes: Arc<[u8]>,
+        license_hint: impl Into<String>,
+    ) -> CadResult<()> {
         if !is_safe_reference(raw_key) {
             return Err(CadError::ResourceMissing(format!(
                 "resource key '{raw_key}' was rejected by the path policy"
@@ -176,7 +187,10 @@ pub struct ResolverChain<'a> {
 
 impl ResolverChain<'_> {
     pub fn resolve(&self, request: &ResourceRequest) -> CadResult<ResourceData> {
-        for resolver in [self.user_pack, self.document_map, self.bundled].into_iter().flatten() {
+        for resolver in [self.user_pack, self.document_map, self.bundled]
+            .into_iter()
+            .flatten()
+        {
             if let Ok(data) = resolver.resolve(request) {
                 return Ok(data);
             }
@@ -205,7 +219,11 @@ mod tests {
     use super::*;
 
     fn request(key: &str) -> ResourceRequest {
-        ResourceRequest { document: DocumentId(1), key: ResourceKey::sanitize(key), kind: ResourceKind::FontShx }
+        ResourceRequest {
+            document: DocumentId(1),
+            key: ResourceKey::sanitize(key),
+            kind: ResourceKind::FontShx,
+        }
     }
 
     #[test]
@@ -221,17 +239,27 @@ mod tests {
     #[test]
     fn sanitize_strips_directories_and_lowercases() {
         assert_eq!(bare_name("fonts/simplex.shx"), "simplex.shx");
-        assert_eq!(ResourceKey::sanitize("dir/Romans.SHX").as_str(), "romans.shx");
+        assert_eq!(
+            ResourceKey::sanitize("dir/Romans.SHX").as_str(),
+            "romans.shx"
+        );
     }
 
     #[test]
     fn chain_follows_priority_order() {
         let mut user = MapResolver::new(ResourceLimits::default());
-        user.grant("romans.shx", Arc::from(b"user".to_vec()), "user pack").unwrap();
+        user.grant("romans.shx", Arc::from(b"user".to_vec()), "user pack")
+            .unwrap();
         let mut bundled = MapResolver::new(ResourceLimits::default());
-        bundled.grant("romans.shx", Arc::from(b"bundled".to_vec()), "bundled").unwrap();
+        bundled
+            .grant("romans.shx", Arc::from(b"bundled".to_vec()), "bundled")
+            .unwrap();
         let empty = MapResolver::new(ResourceLimits::default());
-        let chain = ResolverChain { user_pack: Some(&user), document_map: Some(&empty), bundled: Some(&bundled) };
+        let chain = ResolverChain {
+            user_pack: Some(&user),
+            document_map: Some(&empty),
+            bundled: Some(&bundled),
+        };
         let data = chain.resolve(&request("romans.shx")).unwrap();
         assert_eq!(&*data.bytes, b"user");
     }
@@ -246,6 +274,8 @@ mod tests {
     #[test]
     fn unsafe_grant_is_rejected() {
         let mut r = MapResolver::new(ResourceLimits::default());
-        assert!(r.grant("../evil.shx", Arc::from(b"x".to_vec()), "x").is_err());
+        assert!(r
+            .grant("../evil.shx", Arc::from(b"x".to_vec()), "x")
+            .is_err());
     }
 }

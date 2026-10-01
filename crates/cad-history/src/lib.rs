@@ -59,7 +59,12 @@ impl Default for History {
 
 impl History {
     pub fn new(memory_budget_bytes: usize) -> Self {
-        History { memory_budget_bytes, undo: VecDeque::new(), redo: Vec::new(), used_bytes: 0 }
+        History {
+            memory_budget_bytes,
+            undo: VecDeque::new(),
+            redo: Vec::new(),
+            used_bytes: 0,
+        }
     }
 
     pub fn can_undo(&self) -> bool {
@@ -81,7 +86,9 @@ impl History {
     /// Record a committed change. Clears the redo stack.
     pub fn record(&mut self, record: UndoRecord) -> CadResult<()> {
         if record.patches.is_empty() {
-            return Err(CadError::InvalidInput("an undo record needs at least one patch".to_string()));
+            return Err(CadError::InvalidInput(
+                "an undo record needs at least one patch".to_string(),
+            ));
         }
         // Coalesce with the previous record when the merge key matches.
         if let Some(key) = &record.merge_key {
@@ -122,8 +129,11 @@ impl History {
             .pop_back()
             .ok_or_else(|| CadError::InvalidInput("nothing to undo".to_string()))?;
         self.used_bytes = self.used_bytes.saturating_sub(record.approx_bytes());
-        let changes: Vec<(AnnotationId, Option<Annotation>)> =
-            record.patches.iter().map(|p| (p.id, p.before.clone())).collect();
+        let changes: Vec<(AnnotationId, Option<Annotation>)> = record
+            .patches
+            .iter()
+            .map(|p| (p.id, p.before.clone()))
+            .collect();
         let change_set = database.apply_annotation_changes(
             &format!("undo: {}", record.label),
             record.transaction,
@@ -139,8 +149,11 @@ impl History {
             .redo
             .pop()
             .ok_or_else(|| CadError::InvalidInput("nothing to redo".to_string()))?;
-        let changes: Vec<(AnnotationId, Option<Annotation>)> =
-            record.patches.iter().map(|p| (p.id, p.after.clone())).collect();
+        let changes: Vec<(AnnotationId, Option<Annotation>)> = record
+            .patches
+            .iter()
+            .map(|p| (p.id, p.after.clone()))
+            .collect();
         let change_set = database.apply_annotation_changes(
             &format!("redo: {}", record.label),
             record.transaction,
@@ -195,8 +208,11 @@ impl RecoveryJournal for MemoryJournal {
     fn recover(&self, database: &mut AnnotationDatabase) -> CadResult<Vec<ChangeSet>> {
         let mut out = Vec::new();
         for record in &self.records {
-            let changes: Vec<(AnnotationId, Option<Annotation>)> =
-                record.patches.iter().map(|p| (p.id, p.after.clone())).collect();
+            let changes: Vec<(AnnotationId, Option<Annotation>)> = record
+                .patches
+                .iter()
+                .map(|p| (p.id, p.after.clone()))
+                .collect();
             out.push(database.apply_annotation_changes(
                 &format!("recover: {}", record.label),
                 record.transaction,
@@ -208,7 +224,11 @@ impl RecoveryJournal for MemoryJournal {
 }
 
 /// Build a patch from the difference between two annotation states.
-pub fn patch(id: AnnotationId, before: Option<Annotation>, after: Option<Annotation>) -> AnnotationPatch {
+pub fn patch(
+    id: AnnotationId,
+    before: Option<Annotation>,
+    after: Option<Annotation>,
+) -> AnnotationPatch {
     AnnotationPatch { id, before, after }
 }
 
@@ -221,7 +241,11 @@ mod tests {
         Annotation {
             id: AnnotationId(id),
             space: SpaceId::Model,
-            geometry: AnnotationGeometry::Text(Point3 { x: 0.0, y: 0.0, z: 0.0 }),
+            geometry: AnnotationGeometry::Text(Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }),
             text: text.to_string(),
             style: AnnotationStyle::default(),
             created_unix_ms: 0,
@@ -233,8 +257,12 @@ mod tests {
 
     fn database_with() -> AnnotationDatabase {
         let mut db = AnnotationDatabase::new(DatabaseId(1));
-        db.apply_annotation_changes("seed", TransactionId(0), vec![(AnnotationId(1), Some(ann(1, "a")))])
-            .unwrap();
+        db.apply_annotation_changes(
+            "seed",
+            TransactionId(0),
+            vec![(AnnotationId(1), Some(ann(1, "a")))],
+        )
+        .unwrap();
         db
     }
 
@@ -243,15 +271,20 @@ mod tests {
         let mut db = database_with();
         let mut history = History::default();
         // The creation of annotation 5 was already committed elsewhere:
-        db.apply_annotation_changes("create", TransactionId(1), vec![(AnnotationId(5), Some(ann(5, "b")))])
-            .unwrap();
-        history.record(UndoRecord {
-            transaction: TransactionId(1),
-            label: "create b".into(),
-            patches: vec![patch(AnnotationId(5), None, Some(ann(5, "b")))],
-            merge_key: None,
-        })
+        db.apply_annotation_changes(
+            "create",
+            TransactionId(1),
+            vec![(AnnotationId(5), Some(ann(5, "b")))],
+        )
         .unwrap();
+        history
+            .record(UndoRecord {
+                transaction: TransactionId(1),
+                label: "create b".into(),
+                patches: vec![patch(AnnotationId(5), None, Some(ann(5, "b")))],
+                merge_key: None,
+            })
+            .unwrap();
 
         history.undo(&mut db).unwrap();
         assert!(db.get(AnnotationId(5)).is_none());
@@ -263,13 +296,21 @@ mod tests {
     fn update_restores_previous_value() {
         let mut db = database_with();
         let mut history = History::default();
-        db.apply_annotation_changes("update", TransactionId(2), vec![(AnnotationId(1), Some(ann(1, "edited")))])
-            .unwrap();
+        db.apply_annotation_changes(
+            "update",
+            TransactionId(2),
+            vec![(AnnotationId(1), Some(ann(1, "edited")))],
+        )
+        .unwrap();
         history
             .record(UndoRecord {
                 transaction: TransactionId(2),
                 label: "edit a".into(),
-                patches: vec![patch(AnnotationId(1), Some(ann(1, "a")), Some(ann(1, "edited")))],
+                patches: vec![patch(
+                    AnnotationId(1),
+                    Some(ann(1, "a")),
+                    Some(ann(1, "edited")),
+                )],
                 merge_key: None,
             })
             .unwrap();
@@ -294,7 +335,12 @@ mod tests {
     #[test]
     fn empty_record_is_rejected() {
         let mut history = History::default();
-        let r = UndoRecord { transaction: TransactionId(1), label: "noop".into(), patches: vec![], merge_key: None };
+        let r = UndoRecord {
+            transaction: TransactionId(1),
+            label: "noop".into(),
+            patches: vec![],
+            merge_key: None,
+        };
         assert!(history.record(r).is_err());
     }
 

@@ -78,27 +78,43 @@ impl QueryService {
     }
 
     fn remember(&self, document: &DocumentId, revision: Revision) {
-        *self.last.borrow_mut() = Some((document.clone(), revision));
+        *self.last.borrow_mut() = Some((*document, revision));
     }
 
-    pub fn layers(&self, database: &DrawingDatabase, mut request: QueryRequest) -> CadResult<QueryPage<LayerRow>> {
+    pub fn layers(
+        &self,
+        database: &DrawingDatabase,
+        mut request: QueryRequest,
+    ) -> CadResult<QueryPage<LayerRow>> {
         self.check_fresh(&request)?;
         let all: Vec<LayerRow> = database
             .layers()
-            .map(|l| LayerRow { id: l.id, name: l.name.clone(), visible: l.visible })
+            .map(|l| LayerRow {
+                id: l.id,
+                name: l.name.clone(),
+                visible: l.visible,
+            })
             .collect();
         request.revision = database.revision();
         self.remember(&request.document, request.revision);
         emit(request, all)
     }
 
-    pub fn annotations(&self, database: &AnnotationDatabase, mut request: QueryRequest) -> CadResult<QueryPage<AnnotationRow>> {
+    pub fn annotations(
+        &self,
+        database: &AnnotationDatabase,
+        mut request: QueryRequest,
+    ) -> CadResult<QueryPage<AnnotationRow>> {
         self.check_fresh(&request)?;
         let all: Vec<AnnotationRow> = database
             .annotations()
             .map(|a| AnnotationRow {
                 id: a.id,
-                label: if a.text.is_empty() { format!("{:?}", a.geometry) } else { a.text.clone() },
+                label: if a.text.is_empty() {
+                    format!("{:?}", a.geometry)
+                } else {
+                    a.text.clone()
+                },
                 hidden: false,
             })
             .collect();
@@ -108,9 +124,16 @@ impl QueryService {
     }
 
     /// Selection properties; multi-select differing values become `Mixed`.
-    pub fn properties(&self, selection: &[SelectionRef], mut request: QueryRequest) -> CadResult<QueryPage<SelectionProperty>> {
+    pub fn properties(
+        &self,
+        selection: &[SelectionRef],
+        mut request: QueryRequest,
+    ) -> CadResult<QueryPage<SelectionProperty>> {
         let mut rows = Vec::new();
-        let entities: Vec<String> = selection.iter().map(|s| format!("{}", s.entity.0)).collect();
+        let entities: Vec<String> = selection
+            .iter()
+            .map(|s| format!("{}", s.entity.0))
+            .collect();
         rows.push(SelectionProperty {
             key: "entity".into(),
             value: match unify(&entities) {
@@ -123,7 +146,10 @@ impl QueryService {
             value: PropertyValue::Value(selection.len().to_string()),
         });
         if selection.is_empty() {
-            rows.push(SelectionProperty { key: "entity".into(), value: PropertyValue::Unset });
+            rows.push(SelectionProperty {
+                key: "entity".into(),
+                value: PropertyValue::Unset,
+            });
             rows.dedup_by(|a, b| a.key == b.key && matches!(a.value, PropertyValue::Unset));
         }
         request.revision = Revision(request.revision.0);
@@ -166,7 +192,11 @@ fn emit<T>(request: QueryRequest, all: Vec<T>) -> CadResult<QueryPage<T>> {
         .skip(request.offset)
         .take(request.limit.max(1))
         .collect();
-    Ok(QueryPage { request, rows, total })
+    Ok(QueryPage {
+        request,
+        rows,
+        total,
+    })
 }
 
 #[cfg(test)]
@@ -175,7 +205,13 @@ mod tests {
     use cad_db::{AnnotationDatabase, DrawingDatabaseBuilder, Layer};
 
     fn request(offset: usize, limit: usize) -> QueryRequest {
-        QueryRequest { document: DocumentId(1), revision: Revision(0), request: RequestId(1), offset, limit }
+        QueryRequest {
+            document: DocumentId(1),
+            revision: Revision(0),
+            request: RequestId(1),
+            offset,
+            limit,
+        }
     }
 
     #[test]
@@ -183,7 +219,11 @@ mod tests {
         let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
         for i in 0..5u128 {
             builder
-                .insert_layer(Layer { id: LayerId(i), name: format!("L{i}"), visible: true })
+                .insert_layer(Layer {
+                    id: LayerId(i),
+                    name: format!("L{i}"),
+                    visible: true,
+                })
                 .unwrap();
         }
         let db = builder.finish().unwrap();
@@ -198,15 +238,28 @@ mod tests {
     fn empty_selection_reports_unset() {
         let service = QueryService::new();
         let page = service.properties(&[], request(0, 10)).unwrap();
-        assert!(page.rows.iter().any(|r| matches!(r.value, PropertyValue::Unset)));
+        assert!(page
+            .rows
+            .iter()
+            .any(|r| matches!(r.value, PropertyValue::Unset)));
     }
 
     #[test]
     fn multi_select_differing_values_are_mixed() {
         let service = QueryService::new();
         let selection = vec![
-            SelectionRef { document: DocumentId(1), entity: EntityId(1), instance: InstancePath::default(), sub_element: None },
-            SelectionRef { document: DocumentId(1), entity: EntityId(2), instance: InstancePath::default(), sub_element: None },
+            SelectionRef {
+                document: DocumentId(1),
+                entity: EntityId(1),
+                instance: InstancePath::default(),
+                sub_element: None,
+            },
+            SelectionRef {
+                document: DocumentId(1),
+                entity: EntityId(2),
+                instance: InstancePath::default(),
+                sub_element: None,
+            },
         ];
         let page = service.properties(&selection, request(0, 10)).unwrap();
         let entity = page.rows.iter().find(|r| r.key == "entity").unwrap();
@@ -220,7 +273,10 @@ mod tests {
         service.layers(&db, request(0, 10)).unwrap();
         let mut other = request(0, 10);
         other.document = DocumentId(2);
-        assert_eq!(service.layers(&db, other).unwrap_err(), CadError::StaleResult);
+        assert_eq!(
+            service.layers(&db, other).unwrap_err(),
+            CadError::StaleResult
+        );
     }
 
     #[test]

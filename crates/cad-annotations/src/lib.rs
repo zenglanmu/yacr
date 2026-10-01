@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use cad_db::{
-    Annotation, AnnotationDatabase, AnnotationGeometry, AnnotationStyle, ChangeSet,
-    EntityAnchor, MeasurementAlgorithm, MeasurementRecord,
+    Annotation, AnnotationDatabase, AnnotationGeometry, AnnotationStyle, ChangeSet, EntityAnchor,
+    MeasurementAlgorithm, MeasurementRecord,
 };
 use cad_domain::*;
 use serde_json::{json, Map, Value};
@@ -59,7 +59,11 @@ fn next_transaction() -> TransactionId {
 
 impl AnnotationService {
     /// Apply a command as a single transaction and return its change set.
-    pub fn apply(&self, database: &mut AnnotationDatabase, command: AnnotationCommand) -> CadResult<ChangeSet> {
+    pub fn apply(
+        &self,
+        database: &mut AnnotationDatabase,
+        command: AnnotationCommand,
+    ) -> CadResult<ChangeSet> {
         let reason = match &command {
             AnnotationCommand::Create(_) => "create annotation",
             AnnotationCommand::Update(_) => "update annotation",
@@ -82,14 +86,22 @@ impl AnnotationService {
     }
 
     /// Decode and migrate an annotation file.
-    pub fn decode(&self, bytes: &[u8], identity: &DocumentIdentity, policy: FingerprintPolicy) -> CadResult<AnnotationFile> {
+    pub fn decode(
+        &self,
+        bytes: &[u8],
+        identity: &DocumentIdentity,
+        policy: FingerprintPolicy,
+    ) -> CadResult<AnnotationFile> {
         let value: Value = serde_json::from_slice(bytes)
             .map_err(|e| CadError::CorruptData(format!("annotation JSON is malformed: {e}")))?;
         let object = value
             .as_object()
             .ok_or_else(|| CadError::CorruptData("annotation file is not a JSON object".into()))?;
 
-        let schema_version = object.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        let schema_version = object
+            .get("schema_version")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
         if schema_version > SCHEMA_VERSION {
             return Err(CadError::Unsupported(format!(
                 "annotation schema version {schema_version} is newer than this build supports ({SCHEMA_VERSION})"
@@ -115,7 +127,8 @@ impl AnnotationService {
                         "annotation file does not match the open drawing; supply an explicit mapping policy".into(),
                     ));
                 }
-                FingerprintPolicy::ImportUnanchored | FingerprintPolicy::ExplicitCoordinateMapping(_) => {}
+                FingerprintPolicy::ImportUnanchored
+                | FingerprintPolicy::ExplicitCoordinateMapping(_) => {}
             }
         }
 
@@ -153,7 +166,11 @@ impl AnnotationService {
                 .unwrap_or_default()
                 .to_string(),
             document_fingerprint: file_fingerprint,
-            document_name_hint: object.get("document_name_hint").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            document_name_hint: object
+                .get("document_name_hint")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
             unit_context: decode_units(object.get("unit_context")),
             annotations,
             view_bookmarks: Vec::new(),
@@ -165,8 +182,14 @@ impl AnnotationService {
     pub fn encode(&self, file: &AnnotationFile) -> CadResult<Vec<u8>> {
         let mut root = Map::new();
         root.insert("schema_version".into(), json!(SCHEMA_VERSION));
-        root.insert("application_version".into(), json!(file.application_version));
-        root.insert("document_fingerprint".into(), encode_identity(&file.document_fingerprint));
+        root.insert(
+            "application_version".into(),
+            json!(file.application_version),
+        );
+        root.insert(
+            "document_fingerprint".into(),
+            encode_identity(&file.document_fingerprint),
+        );
         root.insert("document_name_hint".into(), json!(file.document_name_hint));
         root.insert("unit_context".into(), encode_units(&file.unit_context));
         let annotations: Vec<Value> = file.annotations.iter().map(encode_annotation).collect();
@@ -215,7 +238,9 @@ fn encode_units(units: &UnitContext) -> Value {
 }
 
 fn decode_units(value: Option<&Value>) -> UnitContext {
-    let Some(v) = value else { return UnitContext::drawing_units() };
+    let Some(v) = value else {
+        return UnitContext::drawing_units();
+    };
     let display = match v.get("display").and_then(|d| d.as_str()) {
         Some("Millimeter") => Unit::Millimeter,
         Some("Meter") => Unit::Meter,
@@ -227,7 +252,10 @@ fn decode_units(value: Option<&Value>) -> UnitContext {
         source: display.clone(),
         display,
         display_per_source: v.get("display_per_source").and_then(|d| d.as_f64()),
-        decimal_places: v.get("decimal_places").and_then(|d| d.as_u64()).unwrap_or(3) as u8,
+        decimal_places: v
+            .get("decimal_places")
+            .and_then(|d| d.as_u64())
+            .unwrap_or(3) as u8,
     }
 }
 
@@ -241,7 +269,11 @@ fn encode_space(space: &SpaceId) -> Value {
 fn decode_space(value: Option<&Value>) -> SpaceId {
     match value {
         Some(Value::Object(m)) => {
-            let id = m.get("Paper").and_then(|v| v.as_str()).and_then(|s| s.parse::<u128>().ok()).unwrap_or(0);
+            let id = m
+                .get("Paper")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u128>().ok())
+                .unwrap_or(0);
             SpaceId::Paper(LayoutId(id))
         }
         _ => SpaceId::Model,
@@ -251,16 +283,28 @@ fn decode_space(value: Option<&Value>) -> SpaceId {
 fn encode_geometry(geometry: &AnnotationGeometry) -> Value {
     match geometry {
         AnnotationGeometry::Text(p) => json!({ "kind": "text", "position": encode_point(*p) }),
-        AnnotationGeometry::Leader(points) => json!({ "kind": "leader", "points": points.iter().map(|p| encode_point(*p)).collect::<Vec<_>>() }),
-        AnnotationGeometry::Rectangle(pair) => json!({ "kind": "rectangle", "a": encode_point(pair[0]), "b": encode_point(pair[1]) }),
-        AnnotationGeometry::Ellipse { center, axis_u, axis_v } => json!({
+        AnnotationGeometry::Leader(points) => {
+            json!({ "kind": "leader", "points": points.iter().map(|p| encode_point(*p)).collect::<Vec<_>>() })
+        }
+        AnnotationGeometry::Rectangle(pair) => {
+            json!({ "kind": "rectangle", "a": encode_point(pair[0]), "b": encode_point(pair[1]) })
+        }
+        AnnotationGeometry::Ellipse {
+            center,
+            axis_u,
+            axis_v,
+        } => json!({
             "kind": "ellipse",
             "center": encode_point(*center),
             "axis_u": encode_point(*axis_u),
             "axis_v": encode_point(*axis_v),
         }),
-        AnnotationGeometry::Freehand(v) => json!({ "kind": "freehand", "points": v.iter().map(|p| encode_point(*p)).collect::<Vec<_>>() }),
-        AnnotationGeometry::Cloud(v) => json!({ "kind": "cloud", "points": v.iter().map(|p| encode_point(*p)).collect::<Vec<_>>() }),
+        AnnotationGeometry::Freehand(v) => {
+            json!({ "kind": "freehand", "points": v.iter().map(|p| encode_point(*p)).collect::<Vec<_>>() })
+        }
+        AnnotationGeometry::Cloud(v) => {
+            json!({ "kind": "cloud", "points": v.iter().map(|p| encode_point(*p)).collect::<Vec<_>>() })
+        }
         AnnotationGeometry::Measurement(m) => json!({
             "kind": "measurement",
             "algorithm": format!("{:?}", m.algorithm),
@@ -273,10 +317,18 @@ fn encode_geometry(geometry: &AnnotationGeometry) -> Value {
 fn decode_geometry(value: &Value) -> Option<AnnotationGeometry> {
     let kind = value.get("kind").and_then(|v| v.as_str())?;
     match kind {
-        "text" => Some(AnnotationGeometry::Text(decode_point(value.get("position")?)?)),
-        "leader" => Some(AnnotationGeometry::Leader(decode_points(value.get("points")?)?)),
-        "freehand" => Some(AnnotationGeometry::Freehand(decode_points(value.get("points")?)?)),
-        "cloud" => Some(AnnotationGeometry::Cloud(decode_points(value.get("points")?)?)),
+        "text" => Some(AnnotationGeometry::Text(decode_point(
+            value.get("position")?,
+        )?)),
+        "leader" => Some(AnnotationGeometry::Leader(decode_points(
+            value.get("points")?,
+        )?)),
+        "freehand" => Some(AnnotationGeometry::Freehand(decode_points(
+            value.get("points")?,
+        )?)),
+        "cloud" => Some(AnnotationGeometry::Cloud(decode_points(
+            value.get("points")?,
+        )?)),
         "rectangle" => Some(AnnotationGeometry::Rectangle([
             decode_point(value.get("a")?)?,
             decode_point(value.get("b")?)?,
@@ -351,7 +403,11 @@ fn encode_annotation(annotation: &Annotation) -> Value {
 
 fn decode_annotation(value: &Value) -> Option<Annotation> {
     let geometry = decode_geometry(value.get("geometry")?)?;
-    let id = value.get("id").and_then(|v| v.as_str()).map(parse_uuid_bits).unwrap_or(0);
+    let id = value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(parse_uuid_bits)
+        .unwrap_or(0);
     let rgba = value
         .get("style")
         .and_then(|s| s.get("rgba"))
@@ -377,10 +433,24 @@ fn decode_annotation(value: &Value) -> Option<Annotation> {
         id: AnnotationId(id),
         space: decode_space(value.get("space")),
         geometry,
-        text: value.get("text").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-        style: AnnotationStyle { rgba, logical_width: 2.0, text_height: 2.5 },
-        created_unix_ms: value.get("created_unix_ms").and_then(|v| v.as_i64()).unwrap_or(0),
-        modified_unix_ms: value.get("modified_unix_ms").and_then(|v| v.as_i64()).unwrap_or(0),
+        text: value
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        style: AnnotationStyle {
+            rgba,
+            logical_width: 2.0,
+            text_height: 2.5,
+        },
+        created_unix_ms: value
+            .get("created_unix_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
+        modified_unix_ms: value
+            .get("modified_unix_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
         anchor,
         precision: Precision::Analytic,
     })
@@ -394,7 +464,11 @@ mod tests {
         Annotation {
             id: AnnotationId(id),
             space: SpaceId::Model,
-            geometry: AnnotationGeometry::Text(Point3 { x: 1.0, y: 2.0, z: 0.0 }),
+            geometry: AnnotationGeometry::Text(Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 0.0,
+            }),
             text: text.to_string(),
             style: AnnotationStyle::default(),
             created_unix_ms: 10,
@@ -406,18 +480,22 @@ mod tests {
 
     #[test]
     fn create_then_delete_round_trips_through_the_database() {
-        let service = AnnotationService::default();
+        let service = AnnotationService;
         let mut db = AnnotationDatabase::new(DatabaseId(1));
-        let changes = service.apply(&mut db, AnnotationCommand::Create(ann(1, "hello"))).unwrap();
+        let changes = service
+            .apply(&mut db, AnnotationCommand::Create(ann(1, "hello")))
+            .unwrap();
         assert_eq!(changes.after, Revision(1));
         assert_eq!(db.len(), 1);
-        service.apply(&mut db, AnnotationCommand::Delete(AnnotationId(1))).unwrap();
+        service
+            .apply(&mut db, AnnotationCommand::Delete(AnnotationId(1)))
+            .unwrap();
         assert_eq!(db.len(), 0);
     }
 
     #[test]
     fn encode_decode_round_trip_preserves_annotation() {
-        let service = AnnotationService::default();
+        let service = AnnotationService;
         let identity = DocumentIdentity::Sha256([7u8; 32]);
         let mut extensions = BTreeMap::new();
         extensions.insert("future_field".to_string(), "{\"a\":1}".to_string());
@@ -442,7 +520,7 @@ mod tests {
 
     #[test]
     fn mismatched_fingerprint_is_refused_by_default() {
-        let service = AnnotationService::default();
+        let service = AnnotationService;
         let file = AnnotationFile {
             schema_version: SCHEMA_VERSION,
             application_version: "test".into(),
@@ -455,14 +533,18 @@ mod tests {
         };
         let bytes = service.encode(&file).unwrap();
         let other = DocumentIdentity::Sha256([2u8; 32]);
-        assert!(service.decode(&bytes, &other, FingerprintPolicy::RejectMismatch).is_err());
-        assert!(service.decode(&bytes, &other, FingerprintPolicy::ImportUnanchored).is_ok());
+        assert!(service
+            .decode(&bytes, &other, FingerprintPolicy::RejectMismatch)
+            .is_err());
+        assert!(service
+            .decode(&bytes, &other, FingerprintPolicy::ImportUnanchored)
+            .is_ok());
     }
 
     #[test]
     fn newer_schema_is_rejected() {
         let json = br#"{"schema_version": 99, "annotations": []}"#;
-        let service = AnnotationService::default();
+        let service = AnnotationService;
         let identity = DocumentIdentity::Sha256([0u8; 32]);
         assert!(matches!(
             service.decode(json, &identity, FingerprintPolicy::ImportUnanchored),

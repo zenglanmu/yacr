@@ -84,7 +84,15 @@ pub struct Camera2d {
 
 impl Default for Camera2d {
     fn default() -> Self {
-        Camera2d { center: Point3 { x: 0.0, y: 0.0, z: 0.0 }, world_per_px: 1.0, z_plane: 0.0 }
+        Camera2d {
+            center: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            world_per_px: 1.0,
+            z_plane: 0.0,
+        }
     }
 }
 
@@ -99,11 +107,17 @@ struct GpuBatch {
 /// The widest 2D texture dimension a host can rely on.
 pub const MIN_GUARANTEED_TEXTURE_DIMENSION: u32 = 2048;
 
+// Compile-time floor: mirrors `texture_dimension_floor_is_guaranteed`.
+const _: () = assert!(MIN_GUARANTEED_TEXTURE_DIMENSION >= 2048);
+
 /// The CAD renderer. Owns only derived GPU resources.
 pub struct Renderer {
     pub preference: BackendPreference,
     pub recovery_limit: u32,
-    active_backend: ActiveBackend,
+    /// Real activated backend. `None` until a device is initialized: the host
+    /// preference is not the same thing as the backend that actually came up
+    /// (audit B02).
+    active_backend: Option<ActiveBackend>,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     layout: Option<wgpu::BindGroupLayout>,
@@ -129,8 +143,8 @@ impl Renderer {
         Renderer {
             preference,
             recovery_limit: 2,
-            // Native hosts (Android/desktop) never use the browser backend labels.
-            active_backend: ActiveBackend::Native,
+            // No device yet, so no backend has actually been activated.
+            active_backend: None,
             device: None,
             queue: None,
             layout: None,
@@ -220,7 +234,7 @@ impl Renderer {
         self.queue = Some(queue);
         self.layout = Some(layout);
         self.pipeline = Some(pipeline);
-        self.active_backend = caps.actual;
+        self.active_backend = Some(caps.actual);
         self.device_generation += 1;
         Ok(caps)
     }
@@ -245,19 +259,24 @@ impl Renderer {
                 compute: false,
                 storage_buffers: false,
                 indirect_draw: false,
-                max_texture_dimension: limits.max_texture_dimension_2d.max(MIN_GUARANTEED_TEXTURE_DIMENSION),
+                max_texture_dimension: limits
+                    .max_texture_dimension_2d
+                    .max(MIN_GUARANTEED_TEXTURE_DIMENSION),
             },
             _ => BackendCapabilities {
                 actual,
                 compute: true,
                 storage_buffers: true,
                 indirect_draw: true,
-                max_texture_dimension: limits.max_texture_dimension_2d.max(MIN_GUARANTEED_TEXTURE_DIMENSION),
+                max_texture_dimension: limits
+                    .max_texture_dimension_2d
+                    .max(MIN_GUARANTEED_TEXTURE_DIMENSION),
             },
         }
     }
 
-    pub fn active_backend(&self) -> ActiveBackend {
+    /// Activated backend, or `None` before a device has been initialized.
+    pub fn active_backend(&self) -> Option<ActiveBackend> {
         self.active_backend
     }
 
@@ -268,10 +287,14 @@ impl Renderer {
     }
 
     fn ensure_target(&mut self, target: &RenderTarget) -> CadResult<()> {
-        if self.target.is_some() && self.target_size == (target.width.max(1), target.height.max(1)) {
+        if self.target.is_some() && self.target_size == (target.width.max(1), target.height.max(1))
+        {
             return Ok(());
         }
-        let device = self.device.as_ref().ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
+        let device = self
+            .device
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
         let size = wgpu::Extent3d {
             width: target.width.max(1),
             height: target.height.max(1),
@@ -295,20 +318,19 @@ impl Renderer {
 
     // Upload CPU batches as static GPU buffers (once per change).
     pub fn upload(&mut self, delta: &SceneDelta) -> CadResult<()> {
-        let device = self.device.as_ref().ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
-        let layout = self.layout.as_ref().ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
+        let device = self
+            .device
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
+        let layout = self
+            .layout
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
         for batch in &delta.added {
             let bytes: Vec<u8> = batch
                 .vertices
                 .iter()
-                .flat_map(|v| {
-                    [
-                        v[0].to_le_bytes(),
-                        v[1].to_le_bytes(),
-                        v[2].to_le_bytes(),
-                    ]
-                    .concat()
-                })
+                .flat_map(|v| [v[0].to_le_bytes(), v[1].to_le_bytes(), v[2].to_le_bytes()].concat())
                 .collect();
             let vertices = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("cad-batch"),
@@ -328,7 +350,10 @@ impl Renderer {
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("cad-batch-bind"),
                 layout,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: camera.as_entire_binding() }],
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera.as_entire_binding(),
+                }],
             });
             self.uploaded_bytes += bytes.len() as u64;
             self.batches.push(GpuBatch {
@@ -357,7 +382,9 @@ impl Renderer {
         self.target = None;
         self.target_view = None;
         self.batches.clear();
-        Err(CadError::GpuFailure("device rebuild requires a new shared device from the host".into()))
+        Err(CadError::GpuFailure(
+            "device rebuild requires a new shared device from the host".into(),
+        ))
     }
 
     pub fn switch_backend(&mut self, preference: BackendPreference) -> CadResult<()> {
@@ -392,9 +419,18 @@ impl Renderer {
             let oy = batch.origin[1] as f64;
             let oz = batch.origin[2] as f64;
             let m: [f32; 16] = [
-                sx as f32, 0.0, 0.0, 0.0,
-                0.0, sy as f32, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
+                sx as f32,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                sy as f32,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
                 (sx * (ox - camera.center.x)) as f32,
                 (sy * (oy - camera.center.y)) as f32,
                 (oz - camera.center.z) as f32 + camera.z_plane,
@@ -403,7 +439,9 @@ impl Renderer {
             queue.write_buffer(&batch.camera, 0, bytemuck::cast_slice(&m));
         }
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("cad-encoder") });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("cad-encoder"),
+        });
         let mut draw_calls = 0u64;
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -412,7 +450,12 @@ impl Renderer {
                     view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.06, g: 0.07, b: 0.10, a: 1.0 }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.06,
+                            g: 0.07,
+                            b: 0.10,
+                            a: 1.0,
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -432,7 +475,12 @@ impl Renderer {
         }
         queue.submit(Some(encoder.finish()));
         self.draw_calls = draw_calls;
-        Ok(FrameStats { cpu_ms: 0.0, gpu_ms: None, draw_calls, uploaded_bytes: self.uploaded_bytes })
+        Ok(FrameStats {
+            cpu_ms: 0.0,
+            gpu_ms: None,
+            draw_calls,
+            uploaded_bytes: self.uploaded_bytes,
+        })
     }
 
     pub fn frame_texture(&self) -> Option<&wgpu::Texture> {
@@ -445,32 +493,6 @@ impl Renderer {
 
     pub fn batch_count(&self) -> usize {
         self.batches.len()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn webgl2_tier_reports_no_compute_or_storage_buffers() {
-        // The base tier is bounded by what WebGL2 can do; the host resolves
-        // Auto before device creation, so only explicit choices reach here.
-        let renderer = Renderer::new(BackendPreference::WebGl2);
-        assert_eq!(renderer.active_backend(), ActiveBackend::WebGl2);
-        assert!(renderer.capabilities().is_none(), "no device yet");
-    }
-
-    #[test]
-    fn backend_names_are_stable() {
-        assert_eq!(ActiveBackend::WebGpu.as_str(), "webgpu");
-        assert_eq!(ActiveBackend::WebGl2.as_str(), "webgl2");
-        assert_eq!(ActiveBackend::Native.as_str(), "native");
-    }
-
-    #[test]
-    fn texture_dimension_floor_is_guaranteed() {
-        assert!(MIN_GUARANTEED_TEXTURE_DIMENSION >= 2048);
     }
 }
 
@@ -488,3 +510,41 @@ fn fs_main() -> @location(0) vec4<f32> {
     return vec4<f32>(0.85, 0.88, 0.92, 1.0);
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uninitialized_renderer_reports_no_active_backend() {
+        // A preference is not an activated backend. Before the host supplies a
+        // device there is no actual backend and no capabilities (audit B02).
+        for preference in [
+            BackendPreference::Auto,
+            BackendPreference::WebGpu,
+            BackendPreference::WebGl2,
+        ] {
+            let renderer = Renderer::new(preference);
+            assert_eq!(renderer.active_backend(), None);
+            assert!(
+                renderer.capabilities().is_none(),
+                "no device yet for {preference:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn preference_and_active_backend_are_distinct_concepts() {
+        // The requested preference is retained even while activation is pending.
+        let renderer = Renderer::new(BackendPreference::WebGl2);
+        assert_eq!(renderer.preference, BackendPreference::WebGl2);
+        assert_eq!(renderer.active_backend(), None);
+    }
+
+    #[test]
+    fn backend_names_are_stable() {
+        assert_eq!(ActiveBackend::WebGpu.as_str(), "webgpu");
+        assert_eq!(ActiveBackend::WebGl2.as_str(), "webgl2");
+        assert_eq!(ActiveBackend::Native.as_str(), "native");
+    }
+}

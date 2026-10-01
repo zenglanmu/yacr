@@ -5,11 +5,15 @@
 //! `Application::execute` command path. Hosts own platform I/O (files, GPU,
 //! lifecycle); this module owns the business path so hosts cannot drift apart.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-use cad_annotations::{AnnotationCommand, AnnotationFile, AnnotationService, FingerprintPolicy, SCHEMA_VERSION};
-use cad_db::{AnnotationDatabase, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer};
+use cad_annotations::{
+    AnnotationCommand, AnnotationFile, AnnotationService, FingerprintPolicy, SCHEMA_VERSION,
+};
+use cad_db::{
+    AnnotationDatabase, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer,
+};
 use cad_domain::*;
 use cad_history::{patch, UndoRecord};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportReport, ImportRequest, Importer};
@@ -28,8 +32,20 @@ fn next_transaction() -> TransactionId {
 /// exercises the shared UI/render pipeline with known geometry.
 pub fn demo_database() -> DrawingDatabase {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
-    builder.insert_layer(Layer { id: LayerId(0), name: "0".into(), visible: true }).unwrap();
-    builder.insert_layer(Layer { id: LayerId(1), name: "WALLS".into(), visible: true }).unwrap();
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_layer(Layer {
+            id: LayerId(1),
+            name: "WALLS".into(),
+            visible: true,
+        })
+        .unwrap();
 
     let mut push = |id: u128, geometry: SemanticGeometry, layer: LayerId, order: i64| {
         builder
@@ -50,11 +66,52 @@ pub fn demo_database() -> DrawingDatabase {
     };
 
     // A simple room outline with a circle and a polyline-with-bulge.
-    push(1, SemanticGeometry::Line { start: p(0.0, 0.0), end: p(4000.0, 0.0) }, LayerId(1), 0);
-    push(2, SemanticGeometry::Line { start: p(4000.0, 0.0), end: p(4000.0, 3000.0) }, LayerId(1), 1);
-    push(3, SemanticGeometry::Line { start: p(4000.0, 3000.0), end: p(0.0, 3000.0) }, LayerId(1), 2);
-    push(4, SemanticGeometry::Line { start: p(0.0, 3000.0), end: p(0.0, 0.0) }, LayerId(1), 3);
-    push(5, SemanticGeometry::Circle { center: p(2000.0, 1500.0), normal: pz(0.0, 0.0, 1.0), radius: 800.0 }, LayerId(0), 4);
+    push(
+        1,
+        SemanticGeometry::Line {
+            start: p(0.0, 0.0),
+            end: p(4000.0, 0.0),
+        },
+        LayerId(1),
+        0,
+    );
+    push(
+        2,
+        SemanticGeometry::Line {
+            start: p(4000.0, 0.0),
+            end: p(4000.0, 3000.0),
+        },
+        LayerId(1),
+        1,
+    );
+    push(
+        3,
+        SemanticGeometry::Line {
+            start: p(4000.0, 3000.0),
+            end: p(0.0, 3000.0),
+        },
+        LayerId(1),
+        2,
+    );
+    push(
+        4,
+        SemanticGeometry::Line {
+            start: p(0.0, 3000.0),
+            end: p(0.0, 0.0),
+        },
+        LayerId(1),
+        3,
+    );
+    push(
+        5,
+        SemanticGeometry::Circle {
+            center: p(2000.0, 1500.0),
+            normal: pz(0.0, 0.0, 1.0),
+            radius: 800.0,
+        },
+        LayerId(0),
+        4,
+    );
     push(
         6,
         SemanticGeometry::Polyline {
@@ -122,9 +179,9 @@ impl HostController {
         let mut application = Application::new();
         let drawing = Arc::new(demo_database());
         application.workspace.documents.insert(
-            document_id.clone(),
+            document_id,
             Document {
-                id: document_id.clone(),
+                id: document_id,
                 drawing,
                 annotations: AnnotationDatabase::new(DatabaseId(2)),
                 identity: DocumentIdentity::Temporary(0),
@@ -132,13 +189,13 @@ impl HostController {
                 resource_keys: Vec::new(),
             },
         );
-        application
-            .workspace
-            .viewports
-            .insert(viewport_id.clone(), Viewport::new(viewport_id.clone(), document_id.clone(), logical_size));
+        application.workspace.viewports.insert(
+            viewport_id,
+            Viewport::new(viewport_id, document_id, logical_size),
+        );
         Ok(HostController {
             application,
-            session: SessionState::new(document_id.clone(), AppMode::Work),
+            session: SessionState::new(document_id, AppMode::Work),
             document_id,
             viewport_id,
             last_status: "就绪（内置演示几何，非兼容性声明）".to_string(),
@@ -149,7 +206,11 @@ impl HostController {
 
     /// The current immutable drawing, for the render/composition pipeline.
     pub fn drawing(&self) -> Option<Arc<DrawingDatabase>> {
-        self.application.workspace.documents.get(&self.document_id).map(|d| d.drawing.clone())
+        self.application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .map(|d| d.drawing.clone())
     }
 
     /// Import a DWG byte stream through the single importer boundary.
@@ -157,7 +218,7 @@ impl HostController {
     /// Import failures leave the current document untouched.
     pub fn open_bytes(&mut self, bytes: Arc<[u8]>, label: &str) -> CadResult<OpenedDrawing> {
         let request = ImportRequest {
-            document: self.document_id.clone(),
+            document: self.document_id,
             database: DatabaseId(1),
             bytes,
             limits: ImportLimits::default(),
@@ -171,14 +232,17 @@ impl HostController {
             diagnostics: imported.report.diagnostics.clone(),
         };
         let document = Document {
-            id: self.document_id.clone(),
+            id: self.document_id,
             drawing: Arc::new(imported.database),
             annotations: AnnotationDatabase::new(DatabaseId(2)),
             identity: imported.report.identity.clone(),
             units: imported.units,
             resource_keys: Vec::new(),
         };
-        self.application.workspace.documents.insert(self.document_id.clone(), document);
+        self.application
+            .workspace
+            .documents
+            .insert(self.document_id, document);
         self.session.generation += 1;
         self.document_name_hint = label.to_string();
         self.last_import_report = Some(imported.report.clone());
@@ -197,7 +261,8 @@ impl HostController {
 
     /// Fit the active viewport to the current drawing bounds.
     pub fn fit(&mut self) -> CadResult<()> {
-        self.application.fit_viewport(&mut self.session, &self.viewport_id)
+        self.application
+            .fit_viewport(&mut self.session, &self.viewport_id)
     }
 
     /// Serialise the document's annotations as the versioned sidecar JSON.
@@ -243,7 +308,11 @@ impl HostController {
     ///
     /// The caller chooses the fingerprint policy; mismatches never attach
     /// silently (spec §3.4).
-    pub fn import_annotations_json(&mut self, text: &str, policy: FingerprintPolicy) -> CadResult<usize> {
+    pub fn import_annotations_json(
+        &mut self,
+        text: &str,
+        policy: FingerprintPolicy,
+    ) -> CadResult<usize> {
         let document = self
             .application
             .workspace
@@ -262,14 +331,21 @@ impl HostController {
             patches.push(patch(annotation.id, before, Some(annotation.clone())));
         }
         let transaction = next_transaction();
-        let change_set =
-            document.annotations.apply_annotation_changes("import annotations", transaction, changes)?;
-        self.application.history.entry(self.document_id.clone()).or_default().record(UndoRecord {
-            transaction: change_set.transaction,
-            label: "import annotations".to_string(),
-            patches,
-            merge_key: None,
-        })?;
+        let change_set = document.annotations.apply_annotation_changes(
+            "import annotations",
+            transaction,
+            changes,
+        )?;
+        self.application
+            .history
+            .entry(self.document_id)
+            .or_default()
+            .record(UndoRecord {
+                transaction: change_set.transaction,
+                label: "import annotations".to_string(),
+                patches,
+                merge_key: None,
+            })?;
         self.last_status = format!("已导入 {} 条批注", file.annotations.len());
         Ok(file.annotations.len())
     }
@@ -283,9 +359,9 @@ impl HostController {
                 AnnotationCommand::Update(_) => crate::CommandId::UpdateAnnotation,
                 AnnotationCommand::Delete(_) => crate::CommandId::DeleteAnnotation,
             },
-            document: self.document_id.clone(),
-            viewport: self.viewport_id.clone(),
-            payload: crate::CommandPayload::Annotation(command),
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::Annotation(Box::new(command)),
         };
         self.execute(command)
     }
@@ -325,7 +401,11 @@ mod tests {
             .apply_annotation(AnnotationCommand::Create(Annotation {
                 id: AnnotationId(42),
                 space: SpaceId::Model,
-                geometry: AnnotationGeometry::Text(Point3 { x: 1.0, y: 2.0, z: 0.0 }),
+                geometry: AnnotationGeometry::Text(Point3 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 0.0,
+                }),
                 text: "检验批注".into(),
                 style: AnnotationStyle::default(),
                 created_unix_ms: 0,
@@ -339,14 +419,23 @@ mod tests {
         assert!(json.contains("document_fingerprint"));
 
         let mut target = HostController::with_demo_document([800.0, 600.0]).unwrap();
-        let count = target.import_annotations_json(&json, FingerprintPolicy::ImportUnanchored).unwrap();
+        let count = target
+            .import_annotations_json(&json, FingerprintPolicy::ImportUnanchored)
+            .unwrap();
         assert_eq!(count, 1);
-        let document = target.application.workspace.documents.get(&target.document_id).unwrap();
+        let document = target
+            .application
+            .workspace
+            .documents
+            .get(&target.document_id)
+            .unwrap();
         assert_eq!(document.annotations.len(), 1);
         assert!(document.annotations.is_dirty());
         assert!(target.application.can_undo(&target.document_id));
 
         target.mark_annotations_saved().unwrap();
-        assert!(!target.application.workspace.documents[&target.document_id].annotations.is_dirty());
+        assert!(!target.application.workspace.documents[&target.document_id]
+            .annotations
+            .is_dirty());
     }
 }

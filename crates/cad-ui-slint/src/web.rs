@@ -61,7 +61,9 @@ pub fn store_preference_and_reload(preference: BackendPreference) -> CadResult<(
         let _ = storage.set_item(BACKEND_STORAGE_KEY, preference_name(preference));
     }
     let location = window.location();
-    location.reload().map_err(|_| CadError::Invariant("reload failed".into()))?;
+    location
+        .reload()
+        .map_err(|_| CadError::Invariant("reload failed".into()))?;
     Ok(())
 }
 
@@ -100,7 +102,10 @@ pub async fn webgpu_available() -> bool {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::BROWSER_WEBGPU;
     let instance = wgpu::Instance::new(descriptor);
-    instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.is_ok()
+    instance
+        .request_adapter(&wgpu::RequestAdapterOptions::default())
+        .await
+        .is_ok()
 }
 
 /// Whether `navigator.gpu` exists, without claiming an adapter is available.
@@ -200,8 +205,15 @@ mod tests {
 
     #[test]
     fn backend_names_round_trip() {
-        for preference in [BackendPreference::Auto, BackendPreference::WebGpu, BackendPreference::WebGl2] {
-            assert_eq!(parse_preference(preference_name(preference)), Some(preference));
+        for preference in [
+            BackendPreference::Auto,
+            BackendPreference::WebGpu,
+            BackendPreference::WebGl2,
+        ] {
+            assert_eq!(
+                parse_preference(preference_name(preference)),
+                Some(preference)
+            );
         }
         assert_eq!(parse_preference("nonsense"), None);
     }

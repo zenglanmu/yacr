@@ -34,11 +34,17 @@ mod browser {
 
     /// Trigger a browser download for the exported sidecar JSON.
     fn download_text(filename: &str, text: &str) {
-        let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
+        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
         let parts = js_sys::Array::new();
         parts.push(&wasm_bindgen::JsValue::from_str(text));
-        let Ok(blob) = web_sys::Blob::new_with_str_sequence(&parts) else { return };
-        let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else { return };
+        let Ok(blob) = web_sys::Blob::new_with_str_sequence(&parts) else {
+            return;
+        };
+        let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else {
+            return;
+        };
         if let Ok(element) = document.create_element("a") {
             if let Ok(anchor) = element.dyn_into::<web_sys::HtmlAnchorElement>() {
                 anchor.set_href(&url);
@@ -79,8 +85,16 @@ mod browser {
     /// Logical viewport size from `window.innerWidth/innerHeight` (CSS pixels).
     fn web_viewport_size() -> [f64; 2] {
         let window = web_sys::window();
-        let width = window.as_ref().map(|w| w.inner_width().ok()).flatten().and_then(|v| v.as_f64());
-        let height = window.as_ref().map(|w| w.inner_height().ok()).flatten().and_then(|v| v.as_f64());
+        let width = window
+            .as_ref()
+            .map(|w| w.inner_width().ok())
+            .flatten()
+            .and_then(|v| v.as_f64());
+        let height = window
+            .as_ref()
+            .map(|w| w.inner_height().ok())
+            .flatten()
+            .and_then(|v| v.as_f64());
         [
             width.unwrap_or(1280.0).max(320.0),
             height.unwrap_or(800.0).max(240.0),
@@ -91,7 +105,10 @@ mod browser {
     fn backend_status(preference: cad_ui_slint::web::BackendPreference) -> String {
         let webgpu_api = cad_ui_slint::web::webgpu_api_present();
         let webgl2 = cad_ui_slint::web::webgl2_available();
-        format!("{}（navigator.gpu={webgpu_api}, webgl2={webgl2}）", preference_name(preference))
+        format!(
+            "{}（navigator.gpu={webgpu_api}, webgl2={webgl2}）",
+            preference_name(preference)
+        )
     }
 
     fn preference_name(preference: cad_ui_slint::web::BackendPreference) -> &'static str {
@@ -160,9 +177,10 @@ mod browser {
                     status = format!("命令失败：{e}");
                 }
             }
-            if let (Some(view), Some(vp)) =
-                (view.borrow().as_ref(), c.application.workspace.viewports.get(viewport))
-            {
+            if let (Some(view), Some(vp)) = (
+                view.borrow().as_ref(),
+                c.application.workspace.viewports.get(viewport),
+            ) {
                 view.set_camera(vp.camera.target, vp.world_per_px());
             }
         }
@@ -229,7 +247,13 @@ mod browser {
                 }
                 _ => {}
             }
-            dispatch(&self.controller, &self.handle, &self.view, &self.viewport, command);
+            dispatch(
+                &self.controller,
+                &self.handle,
+                &self.view,
+                &self.viewport,
+                command,
+            );
             Ok(())
         }
     }
@@ -254,7 +278,13 @@ mod browser {
                 viewport: self.viewport.clone(),
                 payload,
             };
-            dispatch(&self.controller, &self.handle, &self.view, &self.viewport, command);
+            dispatch(
+                &self.controller,
+                &self.handle,
+                &self.view,
+                &self.viewport,
+                command,
+            );
         }
     }
 
@@ -280,7 +310,11 @@ mod browser {
                             .map(|v| v.world_per_px())
                             .unwrap_or(1.0);
                         // Command delta is in world units; screen y is inverted.
-                        let delta = Point3 { x: (x - last[0]) * wpp, y: -(y - last[1]) * wpp, z: 0.0 };
+                        let delta = Point3 {
+                            x: (x - last[0]) * wpp,
+                            y: -(y - last[1]) * wpp,
+                            z: 0.0,
+                        };
                         self.send(CommandId::Pan, CommandPayload::Points(vec![delta]));
                     }
                     self.last.set([x, y]);
@@ -296,7 +330,14 @@ mod browser {
         fn scroll(&self, _dx: f64, dy: f64) {
             let factor = (1.0 - dy * 0.0015).clamp(0.2, 5.0);
             self.last.set([0.0, 0.0]);
-            self.send(CommandId::Zoom, CommandPayload::Points(vec![Point3 { x: factor, y: 0.0, z: 0.0 }]));
+            self.send(
+                CommandId::Zoom,
+                CommandPayload::Points(vec![Point3 {
+                    x: factor,
+                    y: 0.0,
+                    z: 0.0,
+                }]),
+            );
         }
     }
 
@@ -312,11 +353,14 @@ mod browser {
                 if preference == cad_ui_slint::web::BackendPreference::Auto {
                     return Err(e);
                 }
-                cad_ui_slint::web::select_backend(cad_ui_slint::web::BackendPreference::WebGl2).await?
+                cad_ui_slint::web::select_backend(cad_ui_slint::web::BackendPreference::WebGl2)
+                    .await?
             }
         };
 
-        let controller = Rc::new(RefCell::new(HostController::with_demo_document([1280.0, 720.0])?));
+        let controller = Rc::new(RefCell::new(HostController::with_demo_document([
+            1280.0, 720.0,
+        ])?));
         let (drawing, document_id, viewport_id) = {
             let mut c = controller.borrow_mut();
             let _ = c.fit();
@@ -387,7 +431,13 @@ mod browser {
     /// Open a drawing selected through the File API (bytes already read in JS).
     pub fn open_document(name: &str, bytes: Vec<u8>) -> Result<(), String> {
         let (controller, handle, view, incoming, viewport) = with_runtime(|rt| {
-            (rt.controller.clone(), rt.handle.clone(), rt.view.clone(), rt.incoming.clone(), rt.viewport.clone())
+            (
+                rt.controller.clone(),
+                rt.handle.clone(),
+                rt.view.clone(),
+                rt.incoming.clone(),
+                rt.viewport.clone(),
+            )
         })
         .ok_or_else(|| "浏览器宿主尚未启动".to_string())?;
         let bytes: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
@@ -425,7 +475,11 @@ mod browser {
                 rt.view.active_backend(),
                 rt.view.capabilities(),
                 rt.view.last_error(),
-                rt.incoming.borrow().as_ref().map(|d| d.entity_count()).unwrap_or(0),
+                rt.incoming
+                    .borrow()
+                    .as_ref()
+                    .map(|d| d.entity_count())
+                    .unwrap_or(0),
                 rt.view.camera().world_per_px,
                 controller.status(),
             )
@@ -437,9 +491,15 @@ mod browser {
     pub fn export_annotations_json() -> Result<String, String> {
         let (controller, handle) = with_runtime(|rt| (rt.controller.clone(), rt.handle.clone()))
             .ok_or_else(|| "浏览器宿主尚未启动".to_string())?;
-        let json = controller.borrow().export_annotations_json().map_err(|e| e.to_string())?;
+        let json = controller
+            .borrow()
+            .export_annotations_json()
+            .map_err(|e| e.to_string())?;
         // Only mark saved after the bytes are in hand for the download.
-        controller.borrow_mut().mark_annotations_saved().map_err(|e| e.to_string())?;
+        controller
+            .borrow_mut()
+            .mark_annotations_saved()
+            .map_err(|e| e.to_string())?;
         let _ = handle.set_status(format!("已导出 {} 字节批注 JSON", json.len()));
         Ok(json)
     }
@@ -459,7 +519,9 @@ mod browser {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::{export_annotations_json, import_annotations_json, open_document, renderer_report, start};
+pub use browser::{
+    export_annotations_json, import_annotations_json, open_document, renderer_report, start,
+};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;

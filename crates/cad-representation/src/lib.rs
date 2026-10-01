@@ -14,9 +14,20 @@ use std::sync::Arc;
 pub enum DisplayPrimitive {
     Lines(Arc<[Point3]>),
     Mesh(Arc<Mesh>),
-    Text { text: String, origin: Point3, font: ResourceKey, height: f64 },
-    Image { resource: ResourceKey, transform: Transform3 },
-    Instance { block: BlockId, transform: Transform3 },
+    Text {
+        text: String,
+        origin: Point3,
+        font: ResourceKey,
+        height: f64,
+    },
+    Image {
+        resource: ResourceKey,
+        transform: Transform3,
+    },
+    Instance {
+        block: BlockId,
+        transform: Transform3,
+    },
 }
 
 /// A primitive plus the source reference needed for picking after batching.
@@ -34,7 +45,11 @@ pub struct DisplayRepresentation {
 
 impl DisplayRepresentation {
     pub fn empty(completeness: Completeness) -> Self {
-        DisplayRepresentation { fragments: Vec::new(), completeness, diagnostics: Vec::new() }
+        DisplayRepresentation {
+            fragments: Vec::new(),
+            completeness,
+            diagnostics: Vec::new(),
+        }
     }
 }
 
@@ -46,13 +61,21 @@ pub struct RepresentationContext {
 
 impl RepresentationContext {
     pub fn new(document: DocumentId, tolerance: TolerancePolicy, stamp: TaskStamp) -> Self {
-        RepresentationContext { document, tolerance, stamp }
+        RepresentationContext {
+            document,
+            tolerance,
+            stamp,
+        }
     }
 }
 
 pub trait RepresentationProvider {
     fn registration(&self) -> Registration;
-    fn build(&self, entity: &DbEntity, context: &RepresentationContext) -> CadResult<DisplayRepresentation>;
+    fn build(
+        &self,
+        entity: &DbEntity,
+        context: &RepresentationContext,
+    ) -> CadResult<DisplayRepresentation>;
 }
 
 /// The built-in provider for the core entity set (spec §3.2).
@@ -80,13 +103,22 @@ impl RepresentationProvider for DefaultRepresentationProvider {
             version: 1,
             priority: 0,
             entity_types: vec![], // matches any database entity
-            capabilities: vec!["lines".into(), "mesh".into(), "text".into(), "instance".into()],
+            capabilities: vec![
+                "lines".into(),
+                "mesh".into(),
+                "text".into(),
+                "instance".into(),
+            ],
         }
     }
 
-    fn build(&self, entity: &DbEntity, context: &RepresentationContext) -> CadResult<DisplayRepresentation> {
+    fn build(
+        &self,
+        entity: &DbEntity,
+        context: &RepresentationContext,
+    ) -> CadResult<DisplayRepresentation> {
         let source = SelectionRef {
-            document: context.document.clone(),
+            document: context.document,
             entity: entity.id,
             instance: InstancePath::default(),
             sub_element: None,
@@ -106,17 +138,27 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                     primitive: DisplayPrimitive::Mesh(Arc::new(mesh.clone())),
                 });
                 if mesh.triangles.is_empty() {
-                    representation.completeness = Completeness::Partial(vec!["mesh has no triangles".into()]);
+                    representation.completeness =
+                        Completeness::Partial(vec!["mesh has no triangles".into()]);
                 }
             }
             SemanticGeometry::Insert { block, transform } => {
                 representation.fragments.push(DisplayFragment {
                     source,
                     geometry_source,
-                    primitive: DisplayPrimitive::Instance { block: *block, transform: *transform },
+                    primitive: DisplayPrimitive::Instance {
+                        block: *block,
+                        transform: *transform,
+                    },
                 });
             }
-            SemanticGeometry::Text { text, position, style, height, .. } => {
+            SemanticGeometry::Text {
+                text,
+                position,
+                style,
+                height,
+                ..
+            } => {
                 representation.fragments.push(DisplayFragment {
                     source,
                     geometry_source,
@@ -129,7 +171,8 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 });
             }
             SemanticGeometry::Opaque { type_key, .. } => {
-                representation.completeness = Completeness::Missing(vec!["no display representation in this build".into()]);
+                representation.completeness =
+                    Completeness::Missing(vec!["no display representation in this build".into()]);
                 representation.diagnostics.push(Diagnostic {
                     object: Some(ObjectId(entity.id.0)),
                     code: "representation.opaque".into(),
@@ -145,7 +188,9 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                         primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
                     });
                 } else {
-                    representation.completeness = Completeness::Missing(vec!["no display representation in this build".into()]);
+                    representation.completeness = Completeness::Missing(vec![
+                        "no display representation in this build".into(),
+                    ]);
                     representation.diagnostics.push(Diagnostic {
                         object: Some(ObjectId(entity.id.0)),
                         code: "representation.empty".into(),
@@ -189,9 +234,15 @@ impl ProviderRegistry {
     pub fn register(&mut self, provider: Box<dyn RepresentationProvider>) -> CadResult<()> {
         let new_reg = provider.registration();
         if new_reg.type_key.is_empty() {
-            return Err(CadError::Invariant("provider registration needs a type key".to_string()));
+            return Err(CadError::Invariant(
+                "provider registration needs a type key".to_string(),
+            ));
         }
-        if self.providers.iter().any(|p| p.registration().type_key == new_reg.type_key) {
+        if self
+            .providers
+            .iter()
+            .any(|p| p.registration().type_key == new_reg.type_key)
+        {
             return Err(CadError::Invariant(format!(
                 "a provider for type key '{}' is already registered",
                 new_reg.type_key
@@ -203,11 +254,18 @@ impl ProviderRegistry {
 
     fn matches(registration: &Registration, entity_type_key: &str) -> bool {
         registration.entity_types.is_empty()
-            || registration.entity_types.iter().any(|t| t == entity_type_key)
+            || registration
+                .entity_types
+                .iter()
+                .any(|t| t == entity_type_key)
     }
 
     /// Build a representation using the highest-priority matching provider.
-    pub fn build(&self, entity: &DbEntity, context: &RepresentationContext) -> CadResult<DisplayRepresentation> {
+    pub fn build(
+        &self,
+        entity: &DbEntity,
+        context: &RepresentationContext,
+    ) -> CadResult<DisplayRepresentation> {
         let entity_type = &entity.object.type_key;
         let mut matching: Vec<&Box<dyn RepresentationProvider>> = self
             .providers
@@ -217,7 +275,9 @@ impl ProviderRegistry {
         if matching.is_empty() {
             return Ok(DisplayRepresentation {
                 fragments: Vec::new(),
-                completeness: Completeness::Missing(vec!["no representation provider matched".into()]),
+                completeness: Completeness::Missing(vec![
+                    "no representation provider matched".into()
+                ]),
                 diagnostics: vec![Diagnostic {
                     object: Some(ObjectId(entity.id.0)),
                     code: "representation.no_provider".into(),
@@ -234,7 +294,9 @@ impl ProviderRegistry {
         if top.len() > 1 {
             return Err(CadError::Invariant(format!(
                 "ambiguous providers for '{entity_type}' at priority {top_priority}: {:?}",
-                top.iter().map(|p| p.registration().type_key).collect::<Vec<_>>()
+                top.iter()
+                    .map(|p| p.registration().type_key)
+                    .collect::<Vec<_>>()
             )));
         }
         top[0].build(entity, context)
@@ -263,7 +325,11 @@ mod tests {
     }
 
     fn context() -> RepresentationContext {
-        RepresentationContext::new(DocumentId(1), TolerancePolicy::default(), TaskStamp::new(DocumentId(1), 0))
+        RepresentationContext::new(
+            DocumentId(1),
+            TolerancePolicy::default(),
+            TaskStamp::new(DocumentId(1), 0),
+        )
     }
 
     #[test]
@@ -272,8 +338,16 @@ mod tests {
         let e = entity(
             1,
             SemanticGeometry::Line {
-                start: Point3 { x: 0.0, y: 0.0, z: 0.0 },
-                end: Point3 { x: 10.0, y: 0.0, z: 0.0 },
+                start: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 10.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
             },
         );
         let r = registry.build(&e, &context()).unwrap();
@@ -290,7 +364,11 @@ mod tests {
         let registry = ProviderRegistry::with_default_provider();
         let e = entity(
             2,
-            SemanticGeometry::Opaque { type_key: "ACIS".into(), version: 1, payload: vec![1, 2, 3] },
+            SemanticGeometry::Opaque {
+                type_key: "ACIS".into(),
+                version: 1,
+                payload: vec![1, 2, 3],
+            },
         );
         let r = registry.build(&e, &context()).unwrap();
         assert!(matches!(r.completeness, Completeness::Missing(_)));
@@ -300,7 +378,11 @@ mod tests {
     #[test]
     fn duplicate_provider_type_key_is_rejected() {
         let mut registry = ProviderRegistry::new();
-        registry.register(Box::new(DefaultRepresentationProvider)).unwrap();
-        assert!(registry.register(Box::new(DefaultRepresentationProvider)).is_err());
+        registry
+            .register(Box::new(DefaultRepresentationProvider))
+            .unwrap();
+        assert!(registry
+            .register(Box::new(DefaultRepresentationProvider))
+            .is_err());
     }
 }

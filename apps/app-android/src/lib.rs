@@ -11,10 +11,16 @@ use std::sync::Arc;
 use cad_app::host::HostController;
 use cad_app::{Command, CommandId};
 use cad_domain::*;
-use cad_ui_slint::{CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration, UiHandle};
+use cad_ui_slint::{
+    CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration, UiHandle,
+};
 
 type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
 type SharedView = Rc<RefCell<Option<CadView>>>;
+
+/// Initial logical size of the demo viewport. The UI configuration and the
+/// initial viewport must agree; real dimensions arrive from the surface later.
+const DEMO_LOGICAL_SIZE: [f64; 2] = [1080.0, 1920.0];
 
 pub struct AndroidHostConfiguration {
     pub recovery_enabled: bool,
@@ -54,7 +60,11 @@ impl HostSink {
         let controller = self.controller.borrow();
         if let (Some(view), Some(viewport)) = (
             self.view.borrow().as_ref(),
-            controller.application.workspace.viewports.get(&controller.viewport_id),
+            controller
+                .application
+                .workspace
+                .viewports
+                .get(&controller.viewport_id),
         ) {
             view.set_camera(viewport.camera.target, viewport.world_per_px());
         }
@@ -137,11 +147,17 @@ impl UiCommandSink for HostSink {
 pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     cad_ui_slint::select_wgpu_backend()?;
 
-    let controller = Rc::new(RefCell::new(HostController::with_demo_document([1080.0, 1920.0])?));
+    let controller = Rc::new(RefCell::new(HostController::with_demo_document(
+        DEMO_LOGICAL_SIZE,
+    )?));
     let (drawing, document_id, viewport_id) = {
         let mut controller = controller.borrow_mut();
         let _ = controller.fit();
-        (controller.drawing(), controller.document_id.clone(), controller.viewport_id.clone())
+        (
+            controller.drawing(),
+            controller.document_id.clone(),
+            controller.viewport_id.clone(),
+        )
     };
     let incoming: IncomingDocument = Rc::new(RefCell::new(drawing));
 
@@ -150,6 +166,7 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         locale: "zh-CN".into(),
         safe_insets: [0.0; 4],
         application_title: "yacr CAD".into(),
+        logical_size: DEMO_LOGICAL_SIZE,
         document: document_id,
         viewport: viewport_id,
     };
@@ -171,8 +188,13 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     let view = cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming)?;
     {
         let controller = controller.borrow();
-        if let Some(viewport) = controller.application.workspace.viewports.get(&controller.viewport_id) {
-            view.set_camera(viewport.camera.target, view.world_per_px());
+        if let Some(viewport) = controller
+            .application
+            .workspace
+            .viewports
+            .get(&controller.viewport_id)
+        {
+            view.set_camera(viewport.camera.target, viewport.world_per_px());
         }
     }
     *shared_view.borrow_mut() = Some(view);

@@ -123,12 +123,22 @@ fn command_for(
     viewport: ViewportId,
     payload: CommandPayload,
 ) -> Command {
-    Command { schema_version: 1, id, document: document.clone(), viewport, payload }
+    Command {
+        schema_version: 1,
+        id,
+        document: document.clone(),
+        viewport,
+        payload,
+    }
 }
 
 impl UiAdapter {
     /// Build the shell and connect its callbacks to `sink`.
-    pub fn new<S: UiCommandSink>(configuration: UiConfiguration, sink: S, work_mode: bool) -> CadResult<Self> {
+    pub fn new<S: UiCommandSink>(
+        configuration: UiConfiguration,
+        sink: S,
+        work_mode: bool,
+    ) -> CadResult<Self> {
         let ui = YacrWindow::new().map_err(|e| CadError::Invariant(format!("slint: {e}")))?;
         ui.set_application_title(configuration.application_title.clone().into());
         ui.window().set_size(slint::LogicalSize::new(
@@ -150,42 +160,72 @@ impl UiAdapter {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_open_requested(move || {
-                let _ = s.borrow_mut().send(command_for(CommandId::OpenDrawing, &doc, viewport, CommandPayload::None));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::OpenDrawing,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_fit_requested(move || {
-                let _ = s.borrow_mut().send(command_for(CommandId::FitDrawing, &doc, viewport, CommandPayload::None));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::FitDrawing,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_measure_requested(move || {
-                let _ = s.borrow_mut().send(command_for(CommandId::Measure, &doc, viewport, CommandPayload::None));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::Measure,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_annotate_requested(move || {
-                let _ = s.borrow_mut().send(command_for(CommandId::CreateAnnotation, &doc, viewport, CommandPayload::None));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::CreateAnnotation,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_undo_requested(move || {
-                let _ = s.borrow_mut().send(command_for(CommandId::Undo, &doc, viewport, CommandPayload::None));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::Undo,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_redo_requested(move || {
-                let _ = s.borrow_mut().send(command_for(CommandId::Redo, &doc, viewport, CommandPayload::None));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::Redo,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
@@ -209,21 +249,36 @@ impl UiAdapter {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_export_requested(move || {
-                let _ = s.borrow_mut().send(command_for(CommandId::ExportAnnotations, &doc, viewport, CommandPayload::None));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::ExportAnnotations,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_import_requested(move || {
-                let _ = s.borrow_mut().send(command_for(CommandId::ImportAnnotations, &doc, viewport, CommandPayload::None));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::ImportAnnotations,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_diagnostics_requested(move || {
-                let _ = s.borrow_mut().send(command_for(CommandId::Diagnostics, &doc, viewport, CommandPayload::None));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::Diagnostics,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
@@ -243,7 +298,11 @@ impl UiAdapter {
             });
         }
 
-        Ok(UiAdapter { configuration, ui, view_input })
+        Ok(UiAdapter {
+            configuration,
+            ui,
+            view_input,
+        })
     }
 
     /// Route canvas input to the CAD view; call once the view exists.
@@ -253,7 +312,9 @@ impl UiAdapter {
 
     /// A handle for pushing state from the host.
     pub fn handle(&self) -> UiHandle {
-        UiHandle { ui: self.ui.as_weak() }
+        UiHandle {
+            ui: self.ui.as_weak(),
+        }
     }
 
     pub fn window(&self) -> &slint::Window {

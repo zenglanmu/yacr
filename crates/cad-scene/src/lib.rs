@@ -64,7 +64,11 @@ pub struct SceneBudget {
 
 impl Default for SceneBudget {
     fn default() -> Self {
-        SceneBudget { cpu_bytes: 128 * 1024 * 1024, queued_tasks: 8, upload_bytes_per_frame: 4 * 1024 * 1024 }
+        SceneBudget {
+            cpu_bytes: 128 * 1024 * 1024,
+            queued_tasks: 8,
+            upload_bytes_per_frame: 4 * 1024 * 1024,
+        }
     }
 }
 
@@ -84,7 +88,12 @@ impl Default for SceneCache {
 
 impl SceneCache {
     pub fn new(budget: SceneBudget) -> Self {
-        SceneCache { budget, chunks: BTreeMap::new(), next_chunk: 1, used_bytes: 0 }
+        SceneCache {
+            budget,
+            chunks: BTreeMap::new(),
+            next_chunk: 1,
+            used_bytes: 0,
+        }
     }
 
     pub fn chunk_count(&self) -> usize {
@@ -107,7 +116,9 @@ impl SceneCache {
         let mut dirty: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
         for change in &changes.changes {
             match change {
-                ObjectChange::Insert(id) | ObjectChange::Update(id, _) | ObjectChange::Delete(id) => {
+                ObjectChange::Insert(id)
+                | ObjectChange::Update(id, _)
+                | ObjectChange::Delete(id) => {
                     // ObjectId and EntityId share the same numeric space during
                     // import; a finer mapping is a documented follow-up.
                     dirty.insert(EntityId(id.0));
@@ -133,20 +144,42 @@ impl SceneCache {
     }
 
     /// Convert a display representation into render batches.
-    pub fn build(&mut self, representation: &DisplayRepresentation, stamp: TaskStamp) -> CadResult<SceneDelta> {
-        let mut delta = SceneDelta { stamp, added: Vec::new(), removed_chunks: Vec::new() };
+    pub fn build(
+        &mut self,
+        representation: &DisplayRepresentation,
+        stamp: TaskStamp,
+    ) -> CadResult<SceneDelta> {
+        let mut delta = SceneDelta {
+            stamp,
+            added: Vec::new(),
+            removed_chunks: Vec::new(),
+        };
         for fragment in &representation.fragments {
             let (vertices, local_origin) = match &fragment.primitive {
                 DisplayPrimitive::Lines(points) => {
-                    let origin = points.first().copied().unwrap_or(Point3 { x: 0.0, y: 0.0, z: 0.0 });
+                    let origin = points.first().copied().unwrap_or(Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    });
                     let verts: Vec<[f32; 3]> = points
                         .iter()
-                        .map(|p| [(p.x - origin.x) as f32, (p.y - origin.y) as f32, (p.z - origin.z) as f32])
+                        .map(|p| {
+                            [
+                                (p.x - origin.x) as f32,
+                                (p.y - origin.y) as f32,
+                                (p.z - origin.z) as f32,
+                            ]
+                        })
                         .collect();
                     (verts, origin)
                 }
                 DisplayPrimitive::Mesh(mesh) => {
-                    let origin = mesh.vertices.first().copied().unwrap_or(Point3 { x: 0.0, y: 0.0, z: 0.0 });
+                    let origin = mesh.vertices.first().copied().unwrap_or(Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    });
                     let mut verts = Vec::with_capacity(mesh.triangles.len() * 3);
                     for tri in &mesh.triangles {
                         for &idx in tri.iter() {
@@ -164,7 +197,9 @@ impl SceneCache {
                 // Text/instance/image batching is handled by their own
                 // subsystems; a scene batch that pretends to draw them would be
                 // a fake success.
-                DisplayPrimitive::Text { .. } | DisplayPrimitive::Instance { .. } | DisplayPrimitive::Image { .. } => {
+                DisplayPrimitive::Text { .. }
+                | DisplayPrimitive::Instance { .. }
+                | DisplayPrimitive::Image { .. } => {
                     continue;
                 }
             };
@@ -183,7 +218,10 @@ impl SceneCache {
 
     /// Commit a delta if its stamp still matches the current task context.
     pub fn publish(&mut self, delta: SceneDelta, current: &TaskStamp) -> CadResult<()> {
-        delta.stamp.validate(current).map_err(|_| CadError::StaleResult)?;
+        delta
+            .stamp
+            .validate(current)
+            .map_err(|_| CadError::StaleResult)?;
         for key in delta.removed_chunks {
             self.remove_chunk(key);
         }
@@ -200,7 +238,9 @@ impl SceneCache {
     /// Drop oldest chunks until the cache is under budget.
     pub fn evict(&mut self, required_bytes: usize) -> CadResult<()> {
         while self.used_bytes + required_bytes > self.budget.cpu_bytes {
-            let Some(oldest) = self.chunks.keys().next().copied() else { break };
+            let Some(oldest) = self.chunks.keys().next().copied() else {
+                break;
+            };
             self.remove_chunk(oldest);
         }
         Ok(())
@@ -240,8 +280,16 @@ mod tests {
         let rep = line_representation(
             1,
             vec![
-                Point3 { x: 1_000_000.0, y: 2_000_000.0, z: 0.0 },
-                Point3 { x: 1_000_010.0, y: 2_000_000.0, z: 0.0 },
+                Point3 {
+                    x: 1_000_000.0,
+                    y: 2_000_000.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1_000_010.0,
+                    y: 2_000_000.0,
+                    z: 0.0,
+                },
             ],
         );
         let delta = cache.build(&rep, stamp()).unwrap();
@@ -255,7 +303,21 @@ mod tests {
     #[test]
     fn publish_rejects_stale_stamp() {
         let mut cache = SceneCache::default();
-        let rep = line_representation(1, vec![Point3 { x: 0.0, y: 0.0, z: 0.0 }, Point3 { x: 1.0, y: 0.0, z: 0.0 }]);
+        let rep = line_representation(
+            1,
+            vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ],
+        );
         let delta = cache.build(&rep, TaskStamp::new(DocumentId(1), 5)).unwrap();
         let current = TaskStamp::new(DocumentId(1), 6);
         assert_eq!(cache.publish(delta, &current), Err(CadError::StaleResult));
@@ -265,7 +327,21 @@ mod tests {
     #[test]
     fn change_set_removes_affected_chunks() {
         let mut cache = SceneCache::default();
-        let rep = line_representation(1, vec![Point3 { x: 0.0, y: 0.0, z: 0.0 }, Point3 { x: 1.0, y: 0.0, z: 0.0 }]);
+        let rep = line_representation(
+            1,
+            vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ],
+        );
         let delta = cache.build(&rep, stamp()).unwrap();
         cache.publish(delta, &stamp()).unwrap();
         assert_eq!(cache.chunk_count(), 1);
@@ -275,7 +351,10 @@ mod tests {
             after: Revision(1),
             transaction: TransactionId(1),
             reason: "edit".into(),
-            changes: vec![ObjectChange::Update(ObjectId(1), cad_db::ChangeMask::GEOMETRY)],
+            changes: vec![ObjectChange::Update(
+                ObjectId(1),
+                cad_db::ChangeMask::GEOMETRY,
+            )],
         };
         cache.apply_changes(&changes).unwrap();
         assert_eq!(cache.chunk_count(), 0);
@@ -283,11 +362,30 @@ mod tests {
 
     #[test]
     fn eviction_respects_budget() {
-        let mut cache = SceneCache::new(SceneBudget { cpu_bytes: 40, ..Default::default() });
+        let mut cache = SceneCache::new(SceneBudget {
+            cpu_bytes: 40,
+            ..Default::default()
+        });
         for i in 0..4 {
             let rep = line_representation(
                 i,
-                vec![Point3 { x: 0.0, y: 0.0, z: 0.0 }, Point3 { x: 1.0, y: 0.0, z: 0.0 }, Point3 { x: 2.0, y: 0.0, z: 0.0 }],
+                vec![
+                    Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 2.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                ],
             );
             let delta = cache.build(&rep, stamp()).unwrap();
             cache.publish(delta, &stamp()).unwrap();

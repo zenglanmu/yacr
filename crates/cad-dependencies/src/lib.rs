@@ -67,11 +67,21 @@ impl DependencyIndex {
     }
 
     /// Register that `consumer` depends on `dependency` with a change mask.
-    pub fn register_masked(&mut self, consumer: ObjectId, dependency: ObjectId, mask: ChangeMask) -> CadResult<()> {
+    pub fn register_masked(
+        &mut self,
+        consumer: ObjectId,
+        dependency: ObjectId,
+        mask: ChangeMask,
+    ) -> CadResult<()> {
         if consumer == dependency {
-            return Err(CadError::Invariant("an object cannot depend on itself".to_string()));
+            return Err(CadError::Invariant(
+                "an object cannot depend on itself".to_string(),
+            ));
         }
-        self.dependencies.entry(consumer).or_default().insert(dependency);
+        self.dependencies
+            .entry(consumer)
+            .or_default()
+            .insert(dependency);
         let edges = self.dependents.entry(dependency).or_default();
         if let Some(existing) = edges.iter_mut().find(|e| e.consumer == consumer) {
             existing.mask = existing.mask.union(mask);
@@ -128,8 +138,12 @@ impl DependencyIndex {
 
         for change in &changes.changes {
             let (id, mask) = match change {
-                ObjectChange::Insert(id) => (*id, ChangeMask::GEOMETRY.union(ChangeMask::REFERENCES)),
-                ObjectChange::Delete(id) => (*id, ChangeMask::GEOMETRY.union(ChangeMask::REFERENCES)),
+                ObjectChange::Insert(id) => {
+                    (*id, ChangeMask::GEOMETRY.union(ChangeMask::REFERENCES))
+                }
+                ObjectChange::Delete(id) => {
+                    (*id, ChangeMask::GEOMETRY.union(ChangeMask::REFERENCES))
+                }
                 ObjectChange::Update(id, mask) => (*id, *mask),
             };
             // Only representation-affecting changes propagate downward.
@@ -177,14 +191,17 @@ impl DependencyIndex {
     /// Rebuild after a missed event: everything must be re-derived.
     pub fn force_rebuild(&mut self, revision: Revision) -> Invalidation {
         self.last_revision = Some(revision);
-        Invalidation { rebuild_snapshot: true, ..Default::default() }
+        Invalidation {
+            rebuild_snapshot: true,
+            ..Default::default()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cad_db::{ObjectChange, ChangeSet};
+    use cad_db::{ChangeSet, ObjectChange};
 
     fn change_set(before: u64, after: u64, changes: Vec<ObjectChange>) -> ChangeSet {
         ChangeSet {
@@ -202,7 +219,11 @@ mod tests {
         let mut index = DependencyIndex::new(8, 100);
         index.register(ObjectId(100), ObjectId(1)).unwrap();
         let inv = index
-            .invalidate(&change_set(0, 1, vec![ObjectChange::Update(ObjectId(1), ChangeMask::GEOMETRY)]))
+            .invalidate(&change_set(
+                0,
+                1,
+                vec![ObjectChange::Update(ObjectId(1), ChangeMask::GEOMETRY)],
+            ))
             .unwrap();
         assert!(!inv.rebuild_snapshot);
         assert!(inv.representations.contains(&ObjectId(100)));
@@ -213,9 +234,16 @@ mod tests {
         let mut index = DependencyIndex::new(8, 100);
         index.register(ObjectId(100), ObjectId(1)).unwrap();
         let inv = index
-            .invalidate(&change_set(0, 1, vec![ObjectChange::Update(ObjectId(1), ChangeMask::METADATA)]))
+            .invalidate(&change_set(
+                0,
+                1,
+                vec![ObjectChange::Update(ObjectId(1), ChangeMask::METADATA)],
+            ))
             .unwrap();
-        assert!(inv.is_empty(), "metadata change must not invalidate representations");
+        assert!(
+            inv.is_empty(),
+            "metadata change must not invalidate representations"
+        );
     }
 
     #[test]
@@ -224,7 +252,11 @@ mod tests {
         index.register(ObjectId(2), ObjectId(1)).unwrap();
         index.register(ObjectId(3), ObjectId(2)).unwrap();
         let inv = index
-            .invalidate(&change_set(0, 1, vec![ObjectChange::Update(ObjectId(1), ChangeMask::GEOMETRY)]))
+            .invalidate(&change_set(
+                0,
+                1,
+                vec![ObjectChange::Update(ObjectId(1), ChangeMask::GEOMETRY)],
+            ))
             .unwrap();
         assert!(inv.representations.contains(&ObjectId(2)));
         assert!(inv.representations.contains(&ObjectId(3)));
@@ -236,7 +268,11 @@ mod tests {
         index.invalidate(&change_set(0, 1, vec![])).unwrap();
         // Jump from revision 1 to 5: not continuous.
         let inv = index
-            .invalidate(&change_set(4, 5, vec![ObjectChange::Update(ObjectId(1), ChangeMask::GEOMETRY)]))
+            .invalidate(&change_set(
+                4,
+                5,
+                vec![ObjectChange::Update(ObjectId(1), ChangeMask::GEOMETRY)],
+            ))
             .unwrap();
         assert!(inv.rebuild_snapshot);
     }

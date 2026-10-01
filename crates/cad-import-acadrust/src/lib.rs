@@ -11,7 +11,7 @@ use std::sync::Arc;
 use acadrust::entities::EntityCommon;
 use acadrust::{DwgReadOptions, DwgReader, EntityType, ReadStats};
 use cad_db::{
-    BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layout, Layer,
+    BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Layout,
     PaperViewport, Style,
 };
 use cad_domain::*;
@@ -27,7 +27,11 @@ pub struct ImportLimits {
 
 impl Default for ImportLimits {
     fn default() -> Self {
-        ImportLimits { max_file_bytes: 512 * 1024 * 1024, max_entities: 2_000_000, max_block_depth: 32 }
+        ImportLimits {
+            max_file_bytes: 512 * 1024 * 1024,
+            max_entities: 2_000_000,
+            max_block_depth: 32,
+        }
     }
 }
 
@@ -79,7 +83,11 @@ pub struct ImportedDrawing {
 }
 
 pub trait Importer {
-    fn import(&self, request: &ImportRequest, cancelled: &dyn Fn() -> bool) -> CadResult<ImportedDrawing>;
+    fn import(
+        &self,
+        request: &ImportRequest,
+        cancelled: &dyn Fn() -> bool,
+    ) -> CadResult<ImportedDrawing>;
 }
 
 /// The acadrust-backed importer.
@@ -95,7 +103,11 @@ impl AcadrustImporter {
 }
 
 impl Importer for AcadrustImporter {
-    fn import(&self, request: &ImportRequest, cancelled: &dyn Fn() -> bool) -> CadResult<ImportedDrawing> {
+    fn import(
+        &self,
+        request: &ImportRequest,
+        cancelled: &dyn Fn() -> bool,
+    ) -> CadResult<ImportedDrawing> {
         if cancelled() {
             return Err(CadError::Cancelled);
         }
@@ -127,11 +139,10 @@ impl Importer for AcadrustImporter {
         }
 
         let builder = ImporterBuilder::new(request, &outcome.document, outcome.stats, identity);
-        builder.run()
-            .map(|mut drawing| {
-                drawing.report.parse_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
-                drawing
-            })
+        builder.run().map(|mut drawing| {
+            drawing.report.parse_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+            drawing
+        })
     }
 }
 
@@ -197,7 +208,9 @@ impl<'a> ImporterBuilder<'a> {
         // Capture everything we need before the builder is consumed.
         let units = self.read_units();
         let capabilities: Vec<EntityCapability> = {
-            let mut v: Vec<_> = std::mem::take(&mut self.capabilities).into_values().collect();
+            let mut v: Vec<_> = std::mem::take(&mut self.capabilities)
+                .into_values()
+                .collect();
             v.sort_by(|a, b| a.type_key.cmp(&b.type_key));
             v
         };
@@ -228,17 +241,48 @@ impl<'a> ImporterBuilder<'a> {
         Ok(ImportedDrawing {
             database,
             units,
-            report: ImportReport { identity: self.identity.clone(), capabilities, completeness, diagnostics, parse_ms: None },
+            report: ImportReport {
+                identity: self.identity.clone(),
+                capabilities,
+                completeness,
+                diagnostics,
+                parse_ms: None,
+            },
         })
     }
 
     fn read_units(&self) -> UnitContext {
         match self.acad.header.insertion_units {
-            1 => UnitContext { source: Unit::Inch, display: Unit::Inch, display_per_source: Some(1.0), decimal_places: 3 },
-            2 => UnitContext { source: Unit::Foot, display: Unit::Foot, display_per_source: Some(1.0), decimal_places: 3 },
-            4 => UnitContext { source: Unit::Millimeter, display: Unit::Millimeter, display_per_source: Some(1.0), decimal_places: 3 },
-            5 => UnitContext { source: Unit::Meter, display: Unit::Meter, display_per_source: Some(0.01), decimal_places: 3 },
-            6 => UnitContext { source: Unit::Meter, display: Unit::Meter, display_per_source: Some(1.0), decimal_places: 3 },
+            1 => UnitContext {
+                source: Unit::Inch,
+                display: Unit::Inch,
+                display_per_source: Some(1.0),
+                decimal_places: 3,
+            },
+            2 => UnitContext {
+                source: Unit::Foot,
+                display: Unit::Foot,
+                display_per_source: Some(1.0),
+                decimal_places: 3,
+            },
+            4 => UnitContext {
+                source: Unit::Millimeter,
+                display: Unit::Millimeter,
+                display_per_source: Some(1.0),
+                decimal_places: 3,
+            },
+            5 => UnitContext {
+                source: Unit::Meter,
+                display: Unit::Meter,
+                display_per_source: Some(0.01),
+                decimal_places: 3,
+            },
+            6 => UnitContext {
+                source: Unit::Meter,
+                display: Unit::Meter,
+                display_per_source: Some(1.0),
+                decimal_places: 3,
+            },
             _ => UnitContext::drawing_units(),
         }
     }
@@ -248,7 +292,11 @@ impl<'a> ImporterBuilder<'a> {
             let id = LayerId(index as u128);
             self.layer_ids.insert(layer.name.clone(), id);
             let visible = !layer.flags.off && !layer.flags.frozen;
-            self.builder.insert_layer(Layer { id, name: layer.name.clone(), visible })?;
+            self.builder.insert_layer(Layer {
+                id,
+                name: layer.name.clone(),
+                visible,
+            })?;
         }
         Ok(())
     }
@@ -267,7 +315,11 @@ impl<'a> ImporterBuilder<'a> {
             if !style.true_type_font.is_empty() {
                 keys.push(style.true_type_font.clone());
             }
-            self.builder.insert_style(Style { id, name: style.name.clone(), resource_keys: keys })?;
+            self.builder.insert_style(Style {
+                id,
+                name: style.name.clone(),
+                resource_keys: keys,
+            })?;
         }
         Ok(())
     }
@@ -286,19 +338,30 @@ impl<'a> ImporterBuilder<'a> {
                 if let EntityType::Viewport(v) = entity {
                     let center = p3(v.center);
                     let half = p3(acadrust::Vector3::new(v.width / 2.0, v.height / 2.0, 0.0));
-                    let scale = if v.height.abs() > 1e-12 { v.view_height / v.height } else { 1.0 };
+                    let scale = if v.height.abs() > 1e-12 {
+                        v.view_height / v.height
+                    } else {
+                        1.0
+                    };
                     let complex = !v.clip_boundary_handle.null_or_value_zero();
                     if complex {
                         self.diagnostics.push(Diagnostic {
                             object: None,
                             code: "import.viewport_complex_clip".into(),
-                            message: format!("layout {}: non-rectangular viewport clip is not applied", block.name),
+                            message: format!(
+                                "layout {}: non-rectangular viewport clip is not applied",
+                                block.name
+                            ),
                         });
                     }
                     viewports.push(PaperViewport {
                         clip: vec![
                             sub(center, half),
-                            Point3 { x: center.x + half.x, y: center.y - half.y, z: 0.0 },
+                            Point3 {
+                                x: center.x + half.x,
+                                y: center.y - half.y,
+                                z: 0.0,
+                            },
                             p3(v.view_center),
                         ],
                         model_to_paper: Transform3::scale(scale),
@@ -310,11 +373,19 @@ impl<'a> ImporterBuilder<'a> {
                     });
                 }
             }
-            self.builder.insert_layout(Layout { id, name: block.name.clone(), viewports })?;
+            self.builder.insert_layout(Layout {
+                id,
+                name: block.name.clone(),
+                viewports,
+            })?;
         }
         if self.layout_ids.is_empty() {
             let id = LayoutId(0);
-            self.builder.insert_layout(Layout { id, name: "Model".into(), viewports: Vec::new() })?;
+            self.builder.insert_layout(Layout {
+                id,
+                name: "Model".into(),
+                viewports: Vec::new(),
+            })?;
             self.model_layout = id;
         }
         Ok(())
@@ -329,7 +400,10 @@ impl<'a> ImporterBuilder<'a> {
             let id = BlockId(next);
             next += 1;
             self.block_ids.insert(block.name.clone(), id);
-            self.builder.insert_block(BlockDefinition { id, entities: Vec::new() })?;
+            self.builder.insert_block(BlockDefinition {
+                id,
+                entities: Vec::new(),
+            })?;
         }
         Ok(())
     }
@@ -345,14 +419,19 @@ impl<'a> ImporterBuilder<'a> {
             if block.name == "*Model_Space" || block.name.starts_with("*Paper_Space") {
                 continue;
             }
-            let Some(id) = self.block_ids.get(&block.name).copied() else { continue };
+            let Some(id) = self.block_ids.get(&block.name).copied() else {
+                continue;
+            };
             let mut entity_ids = Vec::new();
             for entity in self.acad.entities_in_block(&block.name) {
                 if let Some(e) = self.push_entity(entity, SpaceId::Model, self.model_layout) {
                     entity_ids.push(e);
                 }
             }
-            self.builder.insert_block(BlockDefinition { id, entities: entity_ids })?;
+            self.builder.insert_block(BlockDefinition {
+                id,
+                entities: entity_ids,
+            })?;
         }
         // Paper space.
         for (name, layout) in self.layout_ids.clone() {
@@ -364,10 +443,18 @@ impl<'a> ImporterBuilder<'a> {
     }
 
     fn model_space_id(&self) -> LayoutId {
-        self.layout_ids.get("*Model_Space").copied().unwrap_or(self.model_layout)
+        self.layout_ids
+            .get("*Model_Space")
+            .copied()
+            .unwrap_or(self.model_layout)
     }
 
-    fn push_entity(&mut self, entity: &EntityType, space: SpaceId, _layout: LayoutId) -> Option<EntityId> {
+    fn push_entity(
+        &mut self,
+        entity: &EntityType,
+        space: SpaceId,
+        _layout: LayoutId,
+    ) -> Option<EntityId> {
         if matches!(entity, EntityType::Block(_) | EntityType::BlockEnd(_)) {
             return None;
         }
@@ -417,11 +504,25 @@ impl<'a> ImporterBuilder<'a> {
         Some(entity_id)
     }
 
-    fn convert(&mut self, entity: &EntityType, common: &EntityCommon) -> (SemanticGeometry, Completeness) {
+    fn convert(
+        &mut self,
+        entity: &EntityType,
+        common: &EntityCommon,
+    ) -> (SemanticGeometry, Completeness) {
         match entity {
-            EntityType::Line(l) => (SemanticGeometry::Line { start: p3(l.start), end: p3(l.end) }, Completeness::Complete),
+            EntityType::Line(l) => (
+                SemanticGeometry::Line {
+                    start: p3(l.start),
+                    end: p3(l.end),
+                },
+                Completeness::Complete,
+            ),
             EntityType::Circle(c) => (
-                SemanticGeometry::Circle { center: p3(c.center), normal: p3(c.normal), radius: c.radius },
+                SemanticGeometry::Circle {
+                    center: p3(c.center),
+                    normal: p3(c.normal),
+                    radius: c.radius,
+                },
                 Completeness::Complete,
             ),
             EntityType::Arc(a) => (
@@ -444,22 +545,59 @@ impl<'a> ImporterBuilder<'a> {
                 },
                 Completeness::Complete,
             ),
-            EntityType::Point(p) => (SemanticGeometry::Point(p3(p.location)), Completeness::Complete),
+            EntityType::Point(p) => (
+                SemanticGeometry::Point(p3(p.location)),
+                Completeness::Complete,
+            ),
             EntityType::LwPolyline(pl) => {
-                let points: Vec<Point3> = pl.vertices.iter().map(|v| Point3 { x: v.location.x, y: v.location.y, z: pl.elevation }).collect();
+                let points: Vec<Point3> = pl
+                    .vertices
+                    .iter()
+                    .map(|v| Point3 {
+                        x: v.location.x,
+                        y: v.location.y,
+                        z: pl.elevation,
+                    })
+                    .collect();
                 let bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
-                (SemanticGeometry::Polyline { points, bulges, closed: pl.is_closed }, Completeness::Complete)
+                (
+                    SemanticGeometry::Polyline {
+                        points,
+                        bulges,
+                        closed: pl.is_closed,
+                    },
+                    Completeness::Complete,
+                )
             }
             EntityType::Polyline2D(pl) => {
-                let points: Vec<Point3> = pl.vertices.iter().map(|v| Point3 { x: v.location.x, y: v.location.y, z: pl.elevation }).collect();
+                let points: Vec<Point3> = pl
+                    .vertices
+                    .iter()
+                    .map(|v| Point3 {
+                        x: v.location.x,
+                        y: v.location.y,
+                        z: pl.elevation,
+                    })
+                    .collect();
                 let bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
                 let closed = pl.flags.bits() & 1 != 0;
-                (SemanticGeometry::Polyline { points, bulges, closed }, Completeness::Complete)
+                (
+                    SemanticGeometry::Polyline {
+                        points,
+                        bulges,
+                        closed,
+                    },
+                    Completeness::Complete,
+                )
             }
             EntityType::Polyline3D(pl) => {
                 let points: Vec<Point3> = pl.vertices.iter().map(|v| p3(v.position)).collect();
                 (
-                    SemanticGeometry::Polyline { points, bulges: Vec::new(), closed: pl.flags.closed },
+                    SemanticGeometry::Polyline {
+                        points,
+                        bulges: Vec::new(),
+                        closed: pl.flags.closed,
+                    },
                     Completeness::Complete,
                 )
             }
@@ -490,31 +628,57 @@ impl<'a> ImporterBuilder<'a> {
                     control_points: s.control_points.iter().map(|p| p3(*p)).collect(),
                     weights: s.weights.clone(),
                 },
-                if s.weights.is_empty() { Completeness::Complete } else { Completeness::Partial(vec!["weighted spline".into()]) },
+                if s.weights.is_empty() {
+                    Completeness::Complete
+                } else {
+                    Completeness::Partial(vec!["weighted spline".into()])
+                },
             ),
             EntityType::Solid(s) => {
-                let m = quad_mesh([p3(s.first_corner), p3(s.second_corner), p3(s.third_corner), p3(s.fourth_corner)]);
+                let m = quad_mesh([
+                    p3(s.first_corner),
+                    p3(s.second_corner),
+                    p3(s.third_corner),
+                    p3(s.fourth_corner),
+                ]);
                 (SemanticGeometry::Mesh(m), Completeness::Complete)
             }
             EntityType::Face3D(f) => {
-                let m = quad_mesh([p3(f.first_corner), p3(f.second_corner), p3(f.third_corner), p3(f.fourth_corner)]);
+                let m = quad_mesh([
+                    p3(f.first_corner),
+                    p3(f.second_corner),
+                    p3(f.third_corner),
+                    p3(f.fourth_corner),
+                ]);
                 (SemanticGeometry::Mesh(m), Completeness::Complete)
             }
             EntityType::Insert(i) => (
-                SemanticGeometry::Insert { block: self.block_id(&i.block_name), transform: insert_transform(i) },
+                SemanticGeometry::Insert {
+                    block: self.block_id(&i.block_name),
+                    transform: insert_transform(i),
+                },
                 Completeness::Complete,
             ),
-            EntityType::Unknown(u) => self.proxy_geometry(&u.dxf_name, common, u.raw_dwg_data.as_deref()),
+            EntityType::Unknown(u) => {
+                self.proxy_geometry(&u.dxf_name, common, u.raw_dwg_data.as_deref())
+            }
             EntityType::Extended(x) if x.class_name() == "ACAD_PROXY_ENTITY" => {
                 self.proxy_geometry(x.class_name(), common, None)
             }
-            EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Body(_) | EntityType::Surface(_) => (
-                SemanticGeometry::Opaque { type_key: entity_class_name(entity).into(), version: 1, payload: Vec::new() },
+            EntityType::Solid3D(_)
+            | EntityType::Region(_)
+            | EntityType::Body(_)
+            | EntityType::Surface(_) => (
+                SemanticGeometry::Opaque {
+                    type_key: entity_class_name(entity),
+                    version: 1,
+                    payload: Vec::new(),
+                },
                 Completeness::Unverified,
             ),
             other => (
                 SemanticGeometry::Opaque {
-                    type_key: entity_class_name(other).into(),
+                    type_key: entity_class_name(other),
                     version: 1,
                     payload: Vec::new(),
                 },
@@ -523,7 +687,12 @@ impl<'a> ImporterBuilder<'a> {
         }
     }
 
-    fn proxy_geometry(&mut self, class_name: &str, common: &EntityCommon, raw: Option<&[u8]>) -> (SemanticGeometry, Completeness) {
+    fn proxy_geometry(
+        &mut self,
+        class_name: &str,
+        common: &EntityCommon,
+        raw: Option<&[u8]>,
+    ) -> (SemanticGeometry, Completeness) {
         let source = ProxySource {
             handle: format!("{:X}", common.handle.value()),
             class_name: class_name.to_string(),
@@ -540,7 +709,11 @@ impl<'a> ImporterBuilder<'a> {
                 Ok(out) => {
                     self.diagnostics.extend(out.diagnostics);
                     (
-                        SemanticGeometry::Opaque { type_key: class_name.to_string(), version: 1, payload: Vec::new() },
+                        SemanticGeometry::Opaque {
+                            type_key: class_name.to_string(),
+                            version: 1,
+                            payload: Vec::new(),
+                        },
                         out.completeness,
                     )
                 }
@@ -551,7 +724,11 @@ impl<'a> ImporterBuilder<'a> {
                         message: format!("{class_name}: {e}"),
                     });
                     (
-                        SemanticGeometry::Opaque { type_key: class_name.to_string(), version: 1, payload: Vec::new() },
+                        SemanticGeometry::Opaque {
+                            type_key: class_name.to_string(),
+                            version: 1,
+                            payload: Vec::new(),
+                        },
                         Completeness::Partial(vec!["proxy decode failed".into()]),
                     )
                 }
@@ -563,10 +740,16 @@ impl<'a> ImporterBuilder<'a> {
                 self.diagnostics.push(Diagnostic {
                     object: None,
                     code: "import.proxy_no_cache".into(),
-                    message: format!("{class_name} has no proxy graphics cache; shown as a placeholder"),
+                    message: format!(
+                        "{class_name} has no proxy graphics cache; shown as a placeholder"
+                    ),
                 });
                 (
-                    SemanticGeometry::Opaque { type_key: class_name.to_string(), version: 1, payload: Vec::new() },
+                    SemanticGeometry::Opaque {
+                        type_key: class_name.to_string(),
+                        version: 1,
+                        payload: Vec::new(),
+                    },
                     Completeness::Missing(vec!["no proxy cache in the source drawing".into()]),
                 )
             }
@@ -578,10 +761,18 @@ impl<'a> ImporterBuilder<'a> {
     }
 
     fn block_id(&self, name: &str) -> BlockId {
-        self.block_ids.get(name).copied().unwrap_or(BlockId(u128::MAX))
+        self.block_ids
+            .get(name)
+            .copied()
+            .unwrap_or(BlockId(u128::MAX))
     }
 
-    fn note_capability(&mut self, class_name: &str, geometry: &SemanticGeometry, completeness: &Completeness) {
+    fn note_capability(
+        &mut self,
+        class_name: &str,
+        geometry: &SemanticGeometry,
+        completeness: &Completeness,
+    ) {
         let semantic = match completeness {
             Completeness::Complete => SupportStatus::Verified,
             Completeness::Partial(_) => SupportStatus::Partial,
@@ -589,17 +780,22 @@ impl<'a> ImporterBuilder<'a> {
             Completeness::Unverified => SupportStatus::Unverified,
         };
         let measure = match geometry {
-            SemanticGeometry::Mesh(_) | SemanticGeometry::Opaque { .. } | SemanticGeometry::Text { .. } => SupportStatus::Unsupported,
+            SemanticGeometry::Mesh(_)
+            | SemanticGeometry::Opaque { .. }
+            | SemanticGeometry::Text { .. } => SupportStatus::Unsupported,
             _ => semantic,
         };
-        let entry = self.capabilities.entry(class_name.to_string()).or_insert(EntityCapability {
-            type_key: class_name.to_string(),
-            read: SupportStatus::Verified,
-            semantic,
-            render: semantic,
-            pick: semantic,
-            measure,
-        });
+        let entry = self
+            .capabilities
+            .entry(class_name.to_string())
+            .or_insert(EntityCapability {
+                type_key: class_name.to_string(),
+                read: SupportStatus::Verified,
+                semantic,
+                render: semantic,
+                pick: semantic,
+                measure,
+            });
         // Keep the weakest status observed for the class.
         entry.semantic = weaker(entry.semantic, semantic);
         entry.render = weaker(entry.render, semantic);
@@ -611,11 +807,19 @@ impl<'a> ImporterBuilder<'a> {
 // ---- small helpers ----
 
 fn p3(v: acadrust::Vector3) -> Point3 {
-    Point3 { x: v.x, y: v.y, z: v.z }
+    Point3 {
+        x: v.x,
+        y: v.y,
+        z: v.z,
+    }
 }
 
 fn sub(a: Point3, b: Point3) -> Point3 {
-    Point3 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+    Point3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
 }
 
 fn normalize_sweep(sweep: f64) -> f64 {
@@ -631,14 +835,23 @@ fn quad_mesh(corners: [Point3; 4]) -> Mesh {
     let mut vertices = corners.to_vec();
     // A SOLID/TRACE/FACE with repeated corners is a triangle.
     let degenerate = corners[2] == corners[3];
-    let triangles = if degenerate { vec![[0, 1, 2]] } else { vec![[0, 1, 2], [0, 2, 3]] };
+    let triangles = if degenerate {
+        vec![[0, 1, 2]]
+    } else {
+        vec![[0, 1, 2], [0, 2, 3]]
+    };
     let normals = cad_geometry::compute_vertex_normals(&Mesh {
         vertices: vertices.clone(),
         triangles: triangles.clone(),
         normals: Vec::new(),
         face_sources: Vec::new(),
     });
-    Mesh { vertices: std::mem::take(&mut vertices), triangles, normals, face_sources: Vec::new() }
+    Mesh {
+        vertices: std::mem::take(&mut vertices),
+        triangles,
+        normals,
+        face_sources: Vec::new(),
+    }
 }
 
 fn insert_transform(i: &acadrust::entities::Insert) -> Transform3 {
@@ -697,7 +910,13 @@ fn entity_class_name(e: &EntityType) -> String {
         EntityType::Dimension(_) => "AcDbDimension",
         EntityType::Unknown(u) => return u.dxf_name.clone(),
         EntityType::Extended(x) => return x.class_name().to_string(),
-        other => return format!("{other:?}").split('(').next().unwrap_or("Unknown").to_string(),
+        other => {
+            return format!("{other:?}")
+                .split('(')
+                .next()
+                .unwrap_or("Unknown")
+                .to_string()
+        }
     }
     .to_string()
 }
@@ -743,7 +962,9 @@ mod tests {
     #[test]
     fn garbage_input_fails_without_panicking() {
         let importer = AcadrustImporter::new();
-        let result = importer.import(&request(vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01]), &|| false);
+        let result = importer.import(&request(vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01]), &|| {
+            false
+        });
         assert!(result.is_err(), "random bytes must not import as a drawing");
     }
 
@@ -752,7 +973,10 @@ mod tests {
         let importer = AcadrustImporter::new();
         let mut req = request(vec![0u8; 64]);
         req.limits.max_file_bytes = 8;
-        assert!(matches!(importer.import(&req, &|| false), Err(CadError::InvalidInput(_))));
+        assert!(matches!(
+            importer.import(&req, &|| false),
+            Err(CadError::InvalidInput(_))
+        ));
     }
 
     #[test]

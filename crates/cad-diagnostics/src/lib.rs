@@ -130,7 +130,10 @@ impl DiagnosticPackage {
     }
 
     /// Encode a model's entries with completeness, redacted.
-    pub fn encode_model_redacted(model: &DiagnosticsModel, build_version: &str) -> CadResult<Vec<u8>> {
+    pub fn encode_model_redacted(
+        model: &DiagnosticsModel,
+        build_version: &str,
+    ) -> CadResult<Vec<u8>> {
         let entries: Vec<serde_json::Value> = model
             .entries
             .iter()
