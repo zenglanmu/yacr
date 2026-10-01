@@ -904,6 +904,7 @@ name = "cad-resources"
 version = "0.1.0"
 dependencies = [
  "cad-domain",
+ "serde_json",
 ]
 
 [[package]]

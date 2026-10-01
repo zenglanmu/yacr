@@ -8,6 +8,7 @@ acadrust 0.5.5。核心无平台依赖，可单独测试并用于 CLI。
 * 构建（含 Android APK）：`docs/build.md`
 * 验证与运行证据：`docs/validation.md`
 * 兼容性/能力表：`docs/compatibility.md`
+* 字体来源：`docs/fonts.md`
 * 渲染后端：`docs/render-backends.md`
 * 代理支持：`docs/proxy-support.md`
 * 性能与预算：`docs/performance.md`

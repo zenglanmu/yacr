@@ -145,6 +145,38 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
 - 本轮同时复核：`cargo test`（核心，117 passed/0 failed）、完整 workspace Wasm `--lib`、
   `cargo fmt --check`、`clippy`（0 警告）、`scripts/check-architecture.py` 均通过。
 
+### 第二组：mlightcad/cad-data 语料
+
+同一日期另取 5 份来自 `mlightcad/cad-data` 的真实 DWG（`cad-viewer` 网页版使用的同一
+数据仓库，经 jsDelivr CDN 获取）。样本同样只存 `/tmp`，未入库。
+
+| 样本 | 版本 | 字节 | sha256 |
+|---|---|---|---|
+| baseline-sample.dwg | AC1032 | 81659 | 4a8e5195e600ac8f6b4e37869cac812fe54c5359b4b97ca19e27ad57422ddc64 |
+| canteen.dwg | AC1021 | 2618816 | 818f54cd3b413ce3ab00a6aa849bc29cd8cc8581a39fc31a723691f40141fdbc |
+| lockers.dwg | AC1021 | 2245248 | fb82491c63fb4d4b5cb80a534bbfe56ee53c46f201a685d9ce1dabbd4bfb3ee4 |
+| map-of-uae.dwg | AC1021 | 195040 | b154073d6edd9b074d5bca40e7ad34bd8b75e89ca67ffb4cc99e10f4f3eb14bc |
+| patient-chairs.dwg | AC1021 | 568736 | bba7327d855e0efb665fbd1b5aa280d1a07be7450ea8d9a0ac387d1c4f22f51e |
+
+`cad-cli-tools` 结果（`build-representation` 全部 `failures=0`）：
+
+| 样本 | entities | model | 块定义 | layers | primitives | 绘制类型 | build_ms | completeness |
+|---|---|---|---|---|---|---|---|---|
+| baseline-sample | 192 | 166 | 9 | 21 | 149 | 86 line + 3 mesh + 60 text | 0.5 | partial（Text/Hatch/Region/Insert…） |
+| canteen | 29212 | 25123 | 108 | 14 | 41665 | 41370 line + 295 text | 978.8 | partial（Text/Hatch/Dimension/3dSolid…） |
+| lockers | 1834 | 1801 | 3 | 4 | 1829 | 1796 line + 33 text | 8.1 | partial（**仅 AcDbText** 不可绘） |
+| map-of-uae | 137 | 129 | 3 | 6 | 119 | 87 line + 32 text | 2.4 | partial（Text/Hatch/Insert…） |
+| patient-chairs | 11884 | 27 | 27 | 3 | 11855 | 11855 line | 42.1 | **complete** |
+
+要点：
+
+- `patient-chairs`：模型空间只有 27 个 INSERT，展开后 11855 条线段，全部可绘 → `complete`。
+- `lockers`：唯一不可绘项是 `AcDbText`；一旦文字渲染落地即可 `complete`。
+- `canteen`：2.6 MB / 25k 模型实体，展开 108 个块约 979 ms，无失败；缺口是
+  Text/Hatch/Dimension/3dSolid，属已知未支持项。
+- 所有样本都产出 `text` 基元（60/295/33/32 个），但 `cad-scene` 跳过 Text，故文字
+  实际不显示——这正是“渲染效果测试”暴露出的最大缺口。字体来源与接线见 `docs/fonts.md`。
+
 ## 未执行（明确标注）
 
 - 真机/模拟器安装与运行：本环境无 adb/emulator，**未运行**。

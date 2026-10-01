@@ -9,3 +9,4 @@ description = "Font, image and xref resolution contracts and caches."
 
 [dependencies]
 cad-domain.workspace = true
+serde_json.workspace = true
