@@ -64,11 +64,21 @@ pub struct RenderBatch {
     /// `true` when the source transform has a negative determinant, so triangle
     /// winding is mirrored and the renderer must flip back-face culling.
     pub mirrored: bool,
-    /// Constant per-object alpha in `[0, 1]`. Until entity transparency is
-    /// plumbed through the importer this is always `1.0`; the mesh pipeline
-    /// still carries the value so the alpha path is not a silent no-op.
+    /// Constant per-object alpha in `[0, 1]`. This is the one transparency
+    /// channel the batch can carry: `DisplayPrimitive` has no alpha, so
+    /// [`SceneCache::build`] always emits `1.0`, while the annotation overlay
+    /// ([`annotations::annotation_batches`]) sets it from the annotation style's
+    /// A channel. The renderer clamps and classifies it (see
+    /// `cad-render-wgpu::geometry::classify_alpha`).
     pub alpha: f32,
     pub sources: Vec<SelectionRef>,
+    /// Paint order relative to sibling batches: larger values are drawn later
+    /// (on top). The renderer performs a stable sort on this key, so batches with
+    /// equal `draw_order` keep the upload order as the final tie-break. The scene
+    /// builder currently emits `0` (the importer's `DbEntity::draw_order` is not
+    /// yet reachable through `DisplayFragment`), while the annotation overlay
+    /// uses `AnnotationSceneOptions::draw_order_base` (default 1_000_000) so
+    /// annotations sort after drawing geometry.
     pub draw_order: i64,
 }
 
@@ -83,6 +93,36 @@ impl RenderBatch {
 
     pub fn approx_bytes(&self) -> usize {
         (self.vertices.len() + self.normals.len() + self.edges.len()) * 12 + self.indices.len() * 12
+    }
+
+    /// World-space centroid used as the transparent-pass depth-sort key.
+    ///
+    /// It is `local_origin + mean(vertices)`. The mean is taken in `f64` before
+    /// narrowing so large coordinates do not lose precision. A batch with no
+    /// vertices falls back to its `local_origin`.
+    pub fn centroid(&self) -> [f32; 3] {
+        let n = self.vertices.len();
+        if n == 0 {
+            return [
+                self.local_origin.x as f32,
+                self.local_origin.y as f32,
+                self.local_origin.z as f32,
+            ];
+        }
+        let mut sx = 0.0f64;
+        let mut sy = 0.0f64;
+        let mut sz = 0.0f64;
+        for v in &self.vertices {
+            sx += v[0] as f64;
+            sy += v[1] as f64;
+            sz += v[2] as f64;
+        }
+        let inv = 1.0 / n as f64;
+        [
+            (self.local_origin.x + sx * inv) as f32,
+            (self.local_origin.y + sy * inv) as f32,
+            (self.local_origin.z + sz * inv) as f32,
+        ]
     }
 }
 
@@ -263,6 +303,12 @@ impl SceneCache {
     }
 
     /// Convert a display representation into render batches.
+    ///
+    /// `alpha` is fixed at `1.0` here: `DisplayPrimitive` carries no opacity, so
+    /// the importer's transparency (if any) is not reachable from this layer.
+    /// This is explicit rather than a silent default — see `docs/render-order.md`.
+    /// The annotation overlay path ([`annotations::annotation_batches`]) is the
+    /// one producer that supplies real per-batch alpha today.
     pub fn build(
         &mut self,
         representation: &DisplayRepresentation,
@@ -702,5 +748,64 @@ mod tests {
         assert_eq!(exceeded.requested, 4);
         assert_eq!(exceeded.limit, 3);
         assert_eq!(usage.triangles, 2);
+    }
+
+    #[test]
+    fn centroid_is_origin_plus_mean_vertex() {
+        let mut cache = SceneCache::default();
+        let delta = cache
+            .build(&mesh_representation(1, quad()), stamp())
+            .unwrap();
+        let batch = &delta.added[0];
+        // Quad spans (0,0)-(1,1) with origin (0,0,0): centroid is (0.5, 0.5, 0).
+        let c = batch.centroid();
+        assert!((c[0] - 0.5).abs() < 1e-6, "got {c:?}");
+        assert!((c[1] - 0.5).abs() < 1e-6, "got {c:?}");
+        assert!(c[2].abs() < 1e-6, "got {c:?}");
+    }
+
+    #[test]
+    fn centroid_keeps_precision_at_large_coordinates() {
+        let mut cache = SceneCache::default();
+        let rep = line_representation(
+            1,
+            vec![
+                Point3 {
+                    x: 1_000_000.0,
+                    y: 2_000_000.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1_000_010.0,
+                    y: 2_000_000.0,
+                    z: 0.0,
+                },
+            ],
+        );
+        let delta = cache.build(&rep, stamp()).unwrap();
+        let c = delta.added[0].centroid();
+        assert!((c[0] - 1_000_005.0).abs() < 1e-3, "got {c:?}");
+        assert!((c[1] - 2_000_000.0).abs() < 1e-3, "got {c:?}");
+    }
+
+    #[test]
+    fn empty_batch_centroid_falls_back_to_local_origin() {
+        let batch = RenderBatch {
+            local_origin: Point3 {
+                x: 3.0,
+                y: 4.0,
+                z: 5.0,
+            },
+            topology: RenderTopology::Lines,
+            vertices: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+            edges: Vec::new(),
+            mirrored: false,
+            alpha: 1.0,
+            sources: Vec::new(),
+            draw_order: 0,
+        };
+        assert_eq!(batch.centroid(), [3.0, 4.0, 5.0]);
     }
 }
