@@ -420,7 +420,7 @@ impl Renderer {
                 module: shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(mesh_vertex_layout())],
+                buffers: &[Some(mesh_vertex_layout()), Some(mesh_normal_layout())],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -1243,6 +1243,18 @@ fn mesh_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
     }
 }
 
+/// Per-vertex normals travel in their own vertex buffer (slot 1, see
+/// `draw_batch`). `mesh.wgsl` reads them at `@location(1)`, so the pipeline must
+/// declare this layout too or `create_render_pipeline` fails validation with
+/// "Location[1] ... is not provided by the previous stage outputs".
+fn mesh_normal_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: 12,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![1 => Float32x3],
+    }
+}
+
 // Shaders are checked into `shaders/` so they can be validated as files and
 // stay reviewable; `include_str!` keeps a single source of truth.
 const LINE_SHADER: &str = include_str!("../shaders/line.wgsl");
@@ -1287,6 +1299,22 @@ mod tests {
         assert_eq!(ActiveBackend::WebGpu.as_str(), "webgpu");
         assert_eq!(ActiveBackend::WebGl2.as_str(), "webgl2");
         assert_eq!(ActiveBackend::Native.as_str(), "native");
+    }
+
+    #[test]
+    fn mesh_pipeline_declares_position_and_normal_attributes() {
+        // Regression: `mesh.wgsl` reads `@location(0)` position and
+        // `@location(1)` normal from two separate vertex buffers. The pipeline
+        // must declare both layouts or wgpu rejects `cad-mesh-pipeline` at
+        // creation ("Location[1] ... is not provided by the previous stage
+        // outputs").
+        let layouts = [mesh_vertex_layout(), mesh_normal_layout()];
+        let locations: Vec<u32> = layouts
+            .iter()
+            .flat_map(|layout| layout.attributes.iter().map(|attr| attr.shader_location))
+            .collect();
+        assert_eq!(locations, vec![0, 1]);
+        assert!(layouts.iter().all(|layout| layout.array_stride == 12));
     }
 
     #[test]
