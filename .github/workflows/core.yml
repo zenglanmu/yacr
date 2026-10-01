@@ -57,6 +57,8 @@ jobs:
         run: cargo clippy --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
       - name: Architecture boundaries
         run: python3 scripts/check-architecture.py
+      - name: Fixture manifest
+        run: python3 scripts/check-fixture-manifest.py
       - name: Core contract tests
         run: cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked --no-fail-fast
 

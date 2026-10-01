@@ -30,6 +30,7 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "cargo fmt --all -- --check",
         "cargo clippy",
         "check-architecture.py",
+        "check-fixture-manifest.py",
         "--no-fail-fast",
     ),
     "wasm-check": (
