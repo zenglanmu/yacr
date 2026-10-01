@@ -1,5 +1,21 @@
 // Candidate shared shell, not platform-validated yet.
-import { Button, VerticalBox, HorizontalBox, ComboBox } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView } from "std-widgets.slint";
+
+// One row of the layer panel, pushed from `cad_app::layers::LayerRow`.
+// `visible` is the effective visibility the scene honours; `overridden` marks a
+// temporary session override that does not touch the DWG layer table.
+export struct LayerRow {
+    id: int,
+    name: string,
+    visible: bool,
+    overridden: bool,
+}
+
+// One read-only property row pushed from `cad_app::selection::PropertyRow`.
+export struct PropertyRow {
+    key: string,
+    value: string,
+}
 
 export component YacrWindow inherits Window {
     in property <string> application-title;
@@ -25,6 +41,18 @@ export component YacrWindow inherits Window {
     in property <string> measurement-step-label: "";
     in property <string> unit-label: "";
 
+    // --- Layer panel (audit F03/U03) ------------------------------------
+    // Rows are the real drawing-database layer table plus the session's
+    // temporary overrides. No synthetic rows; an empty model is an empty state.
+    in property <[LayerRow]> layer-rows: [];
+    in property <int> layer-override-count: 0;
+    in property <string> layer-empty-label: "";
+    // --- Properties panel (audit F05/U03) -------------------------------
+    in property <[PropertyRow]> property-rows: [];
+    in property <string> property-mixed-label: "";
+    in property <string> property-empty-label: "";
+    in property <int> selection-count: 0;
+
     callback open-requested();
     callback measure-requested();
     callback annotate-requested();
@@ -36,6 +64,11 @@ export component YacrWindow inherits Window {
     callback measure-kind-selected(name: string);
     callback confirm-measurement-requested();
     callback cancel-measurement-requested();
+    // Layer visibility toggle. `index` addresses the pushed `layer-rows` model
+    // so the adapter maps it back to the exact LayerId without a lossy cast.
+    callback layer-visibility-toggled(index: int, visible: bool);
+    callback restore-layers-requested();
+    callback clear-selection-requested();
     callback backend-selected(name: string);
     callback export-requested();
     callback import-requested();
@@ -131,6 +164,119 @@ export component YacrWindow inherits Window {
                     text: root.unit-label;
                     color: #9aa7b8;
                     vertical-alignment: center;
+                }
+            }
+        }
+
+        // Layer list + read-only properties. Both bind to real application
+        // state; empty models show an explicit empty-state label.
+        Rectangle {
+            height: 132px;
+            background: #222831;
+            HorizontalBox {
+                spacing: 8px;
+                padding: 4px;
+                // Layer list (F03).
+                VerticalBox {
+                    width: 260px;
+                    spacing: 2px;
+                    HorizontalBox {
+                        spacing: 4px;
+                        Text {
+                            text: "图层";
+                            color: #c8d0dc;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: root.layer-override-count > 0 ? "临时覆盖 " + root.layer-override-count : "";
+                            color: #e6b450;
+                            vertical-alignment: center;
+                        }
+                        Button {
+                            text: "恢复";
+                            enabled: root.work-mode && root.layer-override-count > 0;
+                            clicked => { root.restore-layers-requested(); }
+                        }
+                    }
+                    Text {
+                        text: root.layer-empty-label;
+                        color: #9aa7b8;
+                        vertical-alignment: center;
+                        visible: root.layer-rows.length == 0;
+                    }
+                    ScrollView {
+                        vertical-scrollbar-policy: as-needed;
+                        for row[index] in root.layer-rows : HorizontalBox {
+                            spacing: 4px;
+                            CheckBox {
+                                text: row.name;
+                                checked: row.visible;
+                                enabled: root.work-mode;
+                                toggled => {
+                                    root.layer-visibility-toggled(index, self.checked);
+                                }
+                            }
+                            Text {
+                                text: row.overridden ? "临时" : "";
+                                color: #e6b450;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                // Properties of the current selection (F05).
+                VerticalBox {
+                    spacing: 2px;
+                    HorizontalBox {
+                        spacing: 4px;
+                        Text {
+                            text: "属性";
+                            color: #c8d0dc;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: root.selection-count > 0 ? "已选 " + root.selection-count : "";
+                            color: #9aa7b8;
+                            vertical-alignment: center;
+                        }
+                        Button {
+                            text: "清除选择";
+                            enabled: root.selection-count > 0;
+                            clicked => { root.clear-selection-requested(); }
+                        }
+                    }
+                    Text {
+                        text: root.property-empty-label;
+                        color: #9aa7b8;
+                        vertical-alignment: center;
+                        visible: root.property-rows.length == 0;
+                    }
+                    Text {
+                        text: root.property-mixed-label;
+                        color: #e6b450;
+                        vertical-alignment: center;
+                        visible: root.property-mixed-label != "";
+                    }
+                    ScrollView {
+                        vertical-scrollbar-policy: as-needed;
+                        for row[index] in root.property-rows : HorizontalBox {
+                            spacing: 6px;
+                            Text {
+                                text: row.key;
+                                color: #9aa7b8;
+                                width: 110px;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: row.value;
+                                color: #e6edf7;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
+                        }
+                    }
                 }
             }
         }

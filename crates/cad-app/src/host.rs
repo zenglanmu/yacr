@@ -479,6 +479,95 @@ impl HostController {
             .map(|d| d.units.label())
             .unwrap_or("drawing units")
     }
+
+    /// The open document's immutable drawing, or an error when none is loaded.
+    fn drawing_required(&self) -> CadResult<&DrawingDatabase> {
+        self.application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .map(|d| d.drawing.as_ref())
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))
+    }
+
+    /// Full layer-panel projection: database layer table + temporary overrides.
+    ///
+    /// Pure getter (F03): it never rewrites the DWG layer table and never
+    /// dispatches a command.
+    pub fn layer_rows(&self) -> CadResult<Vec<crate::layers::LayerRow>> {
+        let drawing = self.drawing_required()?;
+        Ok(crate::layers::layer_rows(
+            drawing,
+            &self.session.layer_overrides,
+        ))
+    }
+
+    /// Layer rows filtered by a case-insensitive name needle (search entry).
+    pub fn search_layers(&self, needle: &str) -> CadResult<Vec<crate::layers::LayerRow>> {
+        Ok(crate::layers::filter_layer_rows(
+            &self.layer_rows()?,
+            needle,
+        ))
+    }
+
+    /// Ordered layer ids matching [`HostController::layer_rows`].
+    ///
+    /// The UI panel addresses rows by index, so the host passes this list to
+    /// `UiHandle::set_layer_state` to keep index→LayerId exact (no lossy cast).
+    pub fn layer_ids(&self) -> CadResult<Vec<LayerId>> {
+        Ok(self.layer_rows()?.into_iter().map(|row| row.id).collect())
+    }
+
+    /// Apply a temporary layer visibility through the command path.
+    pub fn set_layer_visible(&mut self, layer: LayerId, visible: bool) -> CadResult<()> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::ToggleLayer,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::Layer(layer, visible),
+        })?;
+        Ok(())
+    }
+
+    /// Drop every temporary layer override through the command path.
+    pub fn restore_layers(&mut self) -> CadResult<()> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::RestoreLayers,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::None,
+        })?;
+        Ok(())
+    }
+
+    /// The current selection set (read-only view).
+    pub fn selection(&self) -> &crate::SelectionSet {
+        &self.session.selection
+    }
+
+    /// Replace the selection through the command path. Read-only: never writes
+    /// the DWG and produces no history entry (F05).
+    pub fn set_selection(&mut self, refs: Vec<SelectionRef>) -> CadResult<()> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::Select,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::Selection(refs),
+        })?;
+        Ok(())
+    }
+
+    /// Read-only property projection for the current selection.
+    pub fn selection_properties(&self) -> CadResult<crate::SelectionProperties> {
+        let drawing = self.drawing_required()?;
+        Ok(crate::SelectionProperties::extract(
+            drawing,
+            &self.session.selection,
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -682,6 +771,72 @@ mod tests {
         let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
         // The demo document has unknown units: never silently "mm".
         assert_eq!(controller.unit_label(), "drawing units");
+    }
+
+    #[test]
+    fn layer_rows_come_from_the_demo_database_and_track_overrides() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let rows = controller.layer_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        // Both demo layers are stored visible and start un-overridden.
+        assert!(rows.iter().all(|r| r.database_visible));
+        assert!(rows.iter().all(|r| !r.is_overridden()));
+
+        controller.set_layer_visible(LayerId(1), false).unwrap();
+        let rows = controller.layer_rows().unwrap();
+        let walls = rows.iter().find(|r| r.id == LayerId(1)).unwrap();
+        assert!(!walls.effective_visible);
+        assert!(walls.database_visible, "stored flag is untouched");
+        assert!(walls.is_overridden());
+
+        controller.restore_layers().unwrap();
+        let rows = controller.layer_rows().unwrap();
+        assert!(rows.iter().all(|r| !r.is_overridden()));
+        assert!(rows.iter().all(|r| r.effective_visible));
+
+        // layer_ids matches layer_rows order.
+        let ids = controller.layer_ids().unwrap();
+        assert_eq!(ids, rows.iter().map(|r| r.id).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn layer_search_returns_real_matches_only() {
+        let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        assert_eq!(controller.search_layers("wall").unwrap().len(), 1);
+        assert!(controller.search_layers("roof").unwrap().is_empty());
+    }
+
+    #[test]
+    fn selection_properties_are_read_only_and_report_demo_geometry() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        // Empty selection is explicit.
+        assert!(controller.selection_properties().unwrap().empty);
+
+        let revision_before = controller.drawing().unwrap().revision();
+        controller
+            .set_selection(vec![SelectionRef {
+                document: controller.document_id,
+                entity: EntityId(1),
+                instance: InstancePath::default(),
+                sub_element: None,
+            }])
+            .unwrap();
+        let props = controller.selection_properties().unwrap();
+        assert_eq!(props.count, 1);
+        let row = |key: &str| {
+            props
+                .rows
+                .iter()
+                .find(|r| r.key == key)
+                .map(|r| r.value.clone())
+        };
+        assert_eq!(row("id").as_deref(), Some("1"));
+        assert_eq!(row("type").as_deref(), Some("AcDbLine"));
+        assert_eq!(row("layer").as_deref(), Some("WALLS (1)"));
+        assert_eq!(row("length").as_deref(), Some("4000.000000"));
+        // Selection did not mutate the drawing or create history.
+        assert_eq!(controller.drawing().unwrap().revision(), revision_before);
+        assert!(!controller.application.can_undo(&controller.document_id));
     }
 
     #[test]

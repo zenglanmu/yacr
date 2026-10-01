@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cad_app::{Command, CommandId, CommandPayload, MeasurementToolKind};
-use cad_domain::{CadError, CadResult, DocumentId, Point3, ViewportId};
+use cad_domain::{CadError, CadResult, DocumentId, LayerId, Point3, ViewportId};
 
 /// Source of the shared shell, kept for packaging/documentation tooling.
 pub const UI_DEFINITION: &str = include_str!("../ui/app.slint");
@@ -107,6 +107,105 @@ impl MeasurementUiState {
     }
 }
 
+/// One layer row pushed into the shell (audit F03/U03).
+///
+/// `id` is only a display value; the adapter keeps the ordered `LayerId` list so
+/// a toggle maps back to the exact id without a lossy `u128 → i32` cast.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerRowUi {
+    pub id: i32,
+    pub name: String,
+    /// Effective visibility the scene honours (database flag ⊕ override).
+    pub visible: bool,
+    /// Whether a temporary session override is active for this layer.
+    pub overridden: bool,
+}
+
+/// Layer-panel snapshot derived from [`cad_app::layers::LayerRow`]s.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LayerPanelState {
+    pub rows: Vec<LayerRowUi>,
+    /// Number of layers currently overridden; drives the "restore" affordance.
+    pub override_count: usize,
+    /// Explicit empty-state text shown when there are no layers.
+    pub empty_label: String,
+}
+
+impl LayerPanelState {
+    /// Build the panel state from real layer rows.
+    pub fn from_rows(rows: &[cad_app::layers::LayerRow], empty_label: impl Into<String>) -> Self {
+        LayerPanelState {
+            rows: rows
+                .iter()
+                .map(|row| LayerRowUi {
+                    // Display-only: the low 32 bits are enough to label a row;
+                    // the exact LayerId round-trips through the adapter's order.
+                    id: (row.id.0 & 0xFFFF_FFFF) as i32,
+                    name: row.name.clone(),
+                    visible: row.effective_visible,
+                    overridden: row.is_overridden(),
+                })
+                .collect(),
+            override_count: rows.iter().filter(|r| r.is_overridden()).count(),
+            empty_label: empty_label.into(),
+        }
+    }
+}
+
+/// One read-only property row pushed into the shell (audit F05/U03).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PropertyRowUi {
+    pub key: String,
+    pub value: String,
+}
+
+/// Properties-panel snapshot for the current selection.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PropertyPanelState {
+    pub rows: Vec<PropertyRowUi>,
+    /// Count of selected objects (0 = empty state).
+    pub count: usize,
+    /// Explicit empty-state text when nothing is selected.
+    pub empty_label: String,
+    /// Text describing keys whose values differ across a multi-select.
+    pub mixed_label: String,
+}
+
+impl PropertyPanelState {
+    /// Build the panel state from a real [`cad_app::SelectionProperties`].
+    pub fn from_properties(
+        properties: &cad_app::SelectionProperties,
+        empty_label: impl Into<String>,
+        mixed_label: impl Fn(&[&'static str]) -> String,
+    ) -> Self {
+        if properties.empty {
+            return PropertyPanelState {
+                rows: Vec::new(),
+                count: 0,
+                empty_label: empty_label.into(),
+                mixed_label: String::new(),
+            };
+        }
+        PropertyPanelState {
+            rows: properties
+                .rows
+                .iter()
+                .map(|row| PropertyRowUi {
+                    key: row.key.to_string(),
+                    value: row.value.clone(),
+                })
+                .collect(),
+            count: properties.count,
+            empty_label: empty_label.into(),
+            mixed_label: if properties.mixed_keys.is_empty() {
+                String::new()
+            } else {
+                mixed_label(&properties.mixed_keys)
+            },
+        }
+    }
+}
+
 /// Layout/locale configuration for the shell.
 #[derive(Debug, Clone)]
 pub struct UiConfiguration {
@@ -149,6 +248,9 @@ pub struct UiHandle {
     /// Shared with the adapter; canvas clicks only act as picks while a
     /// measurement tool is running, so navigation clicks stay silent.
     measurement_active: Rc<Cell<bool>>,
+    /// Ordered `LayerId`s matching the pushed `layer-rows` model, so a toggle
+    /// callback index maps back to the exact id.
+    layer_order: Rc<RefCell<Vec<LayerId>>>,
 }
 
 impl UiHandle {
@@ -212,6 +314,54 @@ impl UiHandle {
         })
     }
 
+    /// Push the layer panel state (audit F03/U03).
+    ///
+    /// Also records the ordered `LayerId`s so a later toggle callback can map
+    /// its row index back to the real layer without a lossy cast.
+    pub fn set_layer_state(&self, state: &LayerPanelState, order: &[LayerId]) -> CadResult<()> {
+        *self.layer_order.borrow_mut() = order.to_vec();
+        let rows: Vec<LayerRow> = state
+            .rows
+            .iter()
+            .map(|row| LayerRow {
+                id: row.id,
+                name: row.name.clone().into(),
+                visible: row.visible,
+                overridden: row.overridden,
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let override_count = state.override_count as i32;
+        let empty = state.empty_label.clone();
+        self.with(|ui| {
+            ui.set_layer_rows(model);
+            ui.set_layer_override_count(override_count);
+            ui.set_layer_empty_label(empty.into());
+        })
+    }
+
+    /// Push the read-only properties panel state (audit F05/U03).
+    pub fn set_property_state(&self, state: &PropertyPanelState) -> CadResult<()> {
+        let rows: Vec<PropertyRow> = state
+            .rows
+            .iter()
+            .map(|row| PropertyRow {
+                key: row.key.clone().into(),
+                value: row.value.clone().into(),
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let count = state.count as i32;
+        let empty = state.empty_label.clone();
+        let mixed = state.mixed_label.clone();
+        self.with(|ui| {
+            ui.set_property_rows(model);
+            ui.set_selection_count(count);
+            ui.set_property_empty_label(empty.into());
+            ui.set_property_mixed_label(mixed.into());
+        })
+    }
+
     pub fn set_backend_index(&self, index: i32) -> CadResult<()> {
         self.with(|ui| ui.set_backend_index(index))
     }
@@ -253,6 +403,8 @@ pub struct UiAdapter {
     /// Mirrors `MeasurementUiState::active` so canvas clicks are only picks
     /// while a tool runs.
     measurement_active: Rc<Cell<bool>>,
+    /// Ordered `LayerId`s matching the pushed `layer-rows` model.
+    layer_order: Rc<RefCell<Vec<LayerId>>>,
 }
 
 /// Build the command a shell callback emits for the configured document.
@@ -311,6 +463,7 @@ impl UiAdapter {
         let selected_kind: Rc<Cell<MeasurementToolKind>> =
             Rc::new(Cell::new(MeasurementToolKind::Distance));
         let measurement_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+        let layer_order: Rc<RefCell<Vec<LayerId>>> = Rc::new(RefCell::new(Vec::new()));
 
         {
             let s = shared.clone();
@@ -391,6 +544,52 @@ impl UiAdapter {
                     &doc,
                     viewport,
                     CommandPayload::None,
+                ));
+            });
+        }
+        {
+            // Layer visibility toggle: the panel sends a row index; the adapter
+            // resolves it to the exact LayerId from the pushed model order.
+            let s = shared.clone();
+            let doc = document.clone();
+            let order = layer_order.clone();
+            ui.on_layer_visibility_toggled(move |index, visible| {
+                let layer = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| order.borrow().get(i).copied());
+                if let Some(layer) = layer {
+                    let _ = s.borrow_mut().send(command_for(
+                        CommandId::ToggleLayer,
+                        &doc,
+                        viewport,
+                        CommandPayload::Layer(layer, visible),
+                    ));
+                }
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_restore_layers_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::RestoreLayers,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+            });
+        }
+        {
+            // Clearing the selection is a real, read-only Select command with an
+            // empty payload; the application records it and mutates nothing.
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_clear_selection_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::Select,
+                    &doc,
+                    viewport,
+                    CommandPayload::Selection(Vec::new()),
                 ));
             });
         }
@@ -546,6 +745,7 @@ impl UiAdapter {
             pick_mapper,
             selected_kind,
             measurement_active,
+            layer_order,
         })
     }
 
@@ -569,6 +769,7 @@ impl UiAdapter {
             ui: self.ui.as_weak(),
             selected_kind: self.selected_kind.clone(),
             measurement_active: self.measurement_active.clone(),
+            layer_order: self.layer_order.clone(),
         }
     }
 
@@ -633,6 +834,78 @@ mod tests {
         assert!(UI_DEFINITION.contains("confirm-measurement-requested"));
         assert!(UI_DEFINITION.contains("cancel-measurement-requested"));
         assert!(UI_DEFINITION.contains("canvas-pick"));
+    }
+
+    #[test]
+    fn shell_exposes_layer_and_property_panels() {
+        // F03: layer list with visibility toggles + restore affordance.
+        assert!(UI_DEFINITION.contains("layer-rows"));
+        assert!(UI_DEFINITION.contains("layer-visibility-toggled"));
+        assert!(UI_DEFINITION.contains("restore-layers-requested"));
+        // F05: read-only properties + explicit empty/mixed states.
+        assert!(UI_DEFINITION.contains("property-rows"));
+        assert!(UI_DEFINITION.contains("property-empty-label"));
+        assert!(UI_DEFINITION.contains("property-mixed-label"));
+        assert!(UI_DEFINITION.contains("clear-selection-requested"));
+    }
+
+    #[test]
+    fn layer_panel_state_mirrors_real_rows() {
+        use cad_app::layers::{LayerOverrideSet, LayerRow};
+        use cad_domain::LayerId;
+
+        let mut overrides = LayerOverrideSet::new();
+        overrides.set(LayerId(1), false);
+        let rows = vec![
+            LayerRow {
+                id: LayerId(0),
+                name: "0".into(),
+                database_visible: true,
+                override_visible: None,
+                effective_visible: true,
+            },
+            LayerRow {
+                id: LayerId(1),
+                name: "WALLS".into(),
+                database_visible: true,
+                override_visible: Some(false),
+                effective_visible: false,
+            },
+        ];
+        let state = LayerPanelState::from_rows(&rows, "无图层");
+        assert_eq!(state.rows.len(), 2);
+        assert_eq!(state.override_count, 1);
+        assert!(!state.rows[1].visible);
+        assert!(state.rows[1].overridden);
+        assert_eq!(state.empty_label, "无图层");
+
+        // Empty input yields an empty model, not a fabricated row.
+        let empty = LayerPanelState::from_rows(&[], "无图层");
+        assert!(empty.rows.is_empty());
+        assert_eq!(empty.override_count, 0);
+    }
+
+    #[test]
+    fn property_panel_state_tracks_empty_and_mixed() {
+        use cad_app::SelectionProperties;
+
+        let empty = SelectionProperties::default();
+        let state = PropertyPanelState::from_properties(&empty, "未选择", |_| String::new());
+        assert_eq!(state.count, 0);
+        assert!(state.rows.is_empty());
+        assert_eq!(state.empty_label, "未选择");
+
+        let mixed = SelectionProperties {
+            count: 2,
+            rows: Vec::new(),
+            mixed_keys: vec!["id", "length"],
+            empty: false,
+        };
+        let state = PropertyPanelState::from_properties(&mixed, "未选择", |keys| {
+            format!("多值: {}", keys.join(","))
+        });
+        assert_eq!(state.count, 2);
+        assert_eq!(state.mixed_label, "多值: id,length");
     }
 
     #[test]
