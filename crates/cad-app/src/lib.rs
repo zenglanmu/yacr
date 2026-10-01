@@ -895,19 +895,28 @@ impl Application {
             .documents
             .get(&command.document)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let space = if matches!(algorithm, MeasurementAlgorithm::PlanarPolygonArea) {
-            let viewport = self
-                .workspace
-                .viewports
-                .get(&command.viewport)
-                .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
-            MeasurementSpace::Plane(viewport.work_plane)
-        } else {
-            MeasurementSpace::World3d
+        let space = match algorithm {
+            // Planar algorithms (2D distance, polyline length and area) are
+            // only defined on an explicit work plane; the viewport supplies it.
+            MeasurementAlgorithm::Distance2d
+            | MeasurementAlgorithm::PolylineLength
+            | MeasurementAlgorithm::PlanarPolygonArea => {
+                let viewport = self
+                    .workspace
+                    .viewports
+                    .get(&command.viewport)
+                    .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+                MeasurementSpace::Plane(viewport.work_plane)
+            }
+            // 3D distance and angle are spatial model measurements.
+            MeasurementAlgorithm::Distance3d | MeasurementAlgorithm::Angle3Points => {
+                MeasurementSpace::World3d
+            }
         };
         let request = MeasurementRequest {
             algorithm,
             points,
+            tapped: Vec::new(),
             space,
             units: document.units.clone(),
             source: GeometrySource::UserPoints,
