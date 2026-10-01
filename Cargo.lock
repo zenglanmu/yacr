@@ -897,6 +897,8 @@ dependencies = [
  "cad-kernel-adapter",
  "cad-proxy",
  "cad-resources",
+ "flate2",
+ "ttf-parser",
 ]
 
 [[package]]

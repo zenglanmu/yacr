@@ -189,12 +189,14 @@ impl GeometryEngine for DefaultGeometryEngine {
                 style,
                 height,
                 rotation,
+                font,
             } => G::Text {
                 text: text.clone(),
                 position: tp(*position),
                 style: *style,
                 height: height * uniform_scale(t),
                 rotation: rotation + rotation_of(t),
+                font: font.clone(),
             },
             G::Opaque {
                 type_key,

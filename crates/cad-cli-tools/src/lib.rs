@@ -52,6 +52,8 @@ pub struct CliInvocation {
     pub points: Vec<Point3>,
     /// Annotation import: attach despite a fingerprint mismatch.
     pub allow_fingerprint_mismatch: bool,
+    /// Fonts to shape text with, as `(key, path)`.
+    pub fonts: Vec<(String, PathBuf)>,
 }
 
 impl CliInvocation {
@@ -63,6 +65,7 @@ impl CliInvocation {
             notes: None,
             points: Vec::new(),
             allow_fingerprint_mismatch: false,
+            fonts: Vec::new(),
         }
     }
 }
@@ -262,7 +265,10 @@ fn run_import_notes(
     }))
 }
 
-fn run_build_representation(controller: &HostController) -> CadResult<serde_json::Value> {
+fn run_build_representation(
+    controller: &HostController,
+    fonts: Option<&Arc<cad_representation::FontEngine>>,
+) -> CadResult<serde_json::Value> {
     let document = controller
         .application
         .workspace
@@ -270,11 +276,14 @@ fn run_build_representation(controller: &HostController) -> CadResult<serde_json
         .get(&controller.document_id)
         .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
     let registry = cad_representation::ProviderRegistry::with_default_provider();
-    let context = cad_representation::RepresentationContext::new(
+    let mut context = cad_representation::RepresentationContext::new(
         controller.document_id,
         TolerancePolicy::default(),
         TaskStamp::new(controller.document_id, controller.session.generation),
     );
+    if let Some(fonts) = fonts {
+        context = context.with_fonts(fonts.clone());
+    }
     let (mut lines, mut meshes, mut texts, mut instances, mut images) = (0usize, 0, 0, 0, 0);
     let mut vertices = 0usize;
     let mut failures: Vec<serde_json::Value> = Vec::new();
@@ -323,12 +332,13 @@ fn run_build_representation(controller: &HostController) -> CadResult<serde_json
 fn run_benchmark(
     controller: &HostController,
     invocation: &CliInvocation,
+    fonts: Option<&Arc<cad_representation::FontEngine>>,
 ) -> CadResult<serde_json::Value> {
     let bytes = std::fs::metadata(&invocation.input)
         .map(|m| m.len())
         .unwrap_or(0);
     let start = std::time::Instant::now();
-    let built = run_build_representation(controller)?;
+    let built = run_build_representation(controller, fonts)?;
     let build_ms = start.elapsed().as_secs_f64() * 1000.0;
     Ok(serde_json::json!({
         "schema_version": 1,
@@ -343,6 +353,22 @@ fn run_benchmark(
     }))
 }
 
+/// Load the `--font` entries into a shaping engine, if any were given.
+fn load_fonts(
+    entries: &[(String, PathBuf)],
+) -> CadResult<Option<Arc<cad_representation::FontEngine>>> {
+    if entries.is_empty() {
+        return Ok(None);
+    }
+    let mut engine = cad_representation::FontEngine::new();
+    for (key, path) in entries {
+        let bytes = std::fs::read(path)
+            .map_err(|e| CadError::InvalidInput(format!("font read failed: {e}")))?;
+        engine.register(key, Arc::from(bytes.into_boxed_slice()))?;
+    }
+    Ok(Some(Arc::new(engine)))
+}
+
 /// Execute one CLI operation and return structured JSON.
 pub fn run(invocation: &CliInvocation) -> CadResult<String> {
     if invocation.operation == CliOperation::FixedViewportRender {
@@ -352,6 +378,7 @@ pub fn run(invocation: &CliInvocation) -> CadResult<String> {
             "fixed-viewport rendering requires a GPU environment; not run".into(),
         ));
     }
+    let fonts = load_fonts(&invocation.fonts)?;
     let mut controller = load_document(invocation)?;
     let value = match invocation.operation {
         CliOperation::Scan => run_scan(&controller)?,
@@ -359,8 +386,8 @@ pub fn run(invocation: &CliInvocation) -> CadResult<String> {
         CliOperation::Measure => run_measure(&mut controller, invocation)?,
         CliOperation::ImportNotes => run_import_notes(&mut controller, invocation)?,
         CliOperation::ExportNotes => run_export_notes(&mut controller, invocation)?,
-        CliOperation::BuildRepresentation => run_build_representation(&controller)?,
-        CliOperation::Benchmark => run_benchmark(&controller, invocation)?,
+        CliOperation::BuildRepresentation => run_build_representation(&controller, fonts.as_ref())?,
+        CliOperation::Benchmark => run_benchmark(&controller, invocation, fonts.as_ref())?,
         CliOperation::FixedViewportRender => unreachable!(),
     };
     serde_json::to_string_pretty(&value)

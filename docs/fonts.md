@@ -51,14 +51,37 @@
 - **不把任何字体文件提交进本仓库**；只在运行时/测试时按需下载。
 - 使用前必须核实目标字体的授权，不能默认可再分发。
 
+## 字形渲染（已实现，outline 路径）
+
+`cad-representation` 的 `FontEngine` 把文本转成世界坐标折线，`cad-scene` 按普通线段绘制：
+
+- 支持 **TTF / OTF** 原始 sfnt，以及 **WOFF1**（`woff_to_sfnt` 用 flate2 解压重建 sfnt）；
+  拒收 **WOFF2**（显式 `Unsupported`）。注册时校验可解析，坏字节报错，不伪造。
+- 键匹配：注册键 + 文件主名。图纸引用 `arial.ttf`、请库只有 `arial.woff` 时按主名
+  `arial` 命中。
+- 排版：按字形 advance 前进，`\n`/`\P` 换行；quad/cubic 以固定步数离散成折线；
+  `sanitize_text` 处理 `%%d/%%p/%%c`、`\P`、`\~`、花括号与 `\X...;` 格式码（近似）。
+- 主机通过 `RepresentationContext::with_fonts(Arc<FontEngine>)` 注入；CLI 用
+  `--font <name=path>`（可重复）。未注入字体时文本仍为不可绘的 `DisplayPrimitive::Text`。
+
+实测（`docs/validation.md` 第二组语料，字体 `arial.woff`）：
+
+| 样本 | 无字体 lines/texts | 有字体 lines/texts |
+|---|---|---|
+| baseline-sample | 86 / 60 | 2363 / 0 |
+| lockers | 1796 / 33 | 2747 / 0 |
+| map-of-uae | 87 / 32 | 459 / 0 |
+| canteen（GOST 等 SHX） | 41370 / 295 | 41388 / 294 |
+
 ## 未完成
 
-字体目录只是接线。**字形渲染尚未实现**：`cad-scene` 仍跳过 `Text` 基元，文字不会
-出现在画布上。后续需要：
+1. **SHX 字形**：编译 shape 字体（`.shx`）尚未解析；`canteen` 的 GOST 文本仍不显示，
+   `display_support` 对 `.shx` 文本报 `Unsupported`（诚实降级）。
+2. **排版完备性**：字距/kerning、复杂文字整形、MTEXT 全格式码、对齐/行距精确值、
+   字体回退链尚未实现；当前是逐字、固定换行。
+3. **字体获取**：核心不联网；宿主需下载/读取字体并经 `MapResolver` 授权。真机/浏览器
+   路径尚未接线。
 
-1. SHX（编译 shape 字体）与 outline（TTF/WOFF，WOFF 需解压）的字形轮廓提取；
-2. 文本排版（字距、行距、MTEXT 格式码、旋转、对齐）；
-3. 轮廓 → 折线/网格，接入 `cad-scene` 批次；
-4. 缺失字体与替代字体的显式诊断。
+在此之前，含文本的图纸不会被报告为 `Complete`（见 `docs/validation.md`）；`.ttf/.otf/.woff`
+文本已可绘，`.shx` 仍记 `Unsupported`。
 
-在此之前，含文本的图纸不会被报告为 `Complete`（见 `docs/validation.md`）。

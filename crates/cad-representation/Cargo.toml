@@ -14,3 +14,5 @@ cad-geometry.workspace = true
 cad-kernel-adapter.workspace = true
 cad-proxy.workspace = true
 cad-resources.workspace = true
+ttf-parser.workspace = true
+flate2.workspace = true

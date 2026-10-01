@@ -29,6 +29,8 @@ Options:
   --notes <file>          annotation sidecar path (import/export)
   --points \"x,y;x,y;...\"  measurement points in drawing units
   --allow-fingerprint-mismatch  import despite a mismatched drawing hash
+  --font <name=path>      register a TTF/OTF/WOFF font for text shaping
+                          (repeatable; name defaults to the file name)
 ";
 
 fn main() -> ExitCode {
@@ -70,6 +72,25 @@ fn main() -> ExitCode {
                 }
             }
             "--allow-fingerprint-mismatch" => invocation.allow_fingerprint_mismatch = true,
+            "--font" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    eprintln!("--font needs <name=path> or <path>");
+                    return ExitCode::from(2);
+                };
+                let (name, path) = match value.split_once('=') {
+                    Some((name, path)) => (name.to_string(), path.to_string()),
+                    None => {
+                        let path = value.clone();
+                        let name = std::path::Path::new(&path)
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| path.clone());
+                        (name, path)
+                    }
+                };
+                invocation.fonts.push((name, path.into()));
+            }
             other if other.starts_with("--") => {
                 eprintln!("unknown option: {other}");
                 eprint!("{USAGE}");

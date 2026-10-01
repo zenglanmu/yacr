@@ -71,6 +71,8 @@ log = "0.4"
 sha2 = "0.10"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+ttf-parser = "0.25"
+flate2 = "1"
 
 # Browser host (wasm32 only). Pinned to the versions already in Cargo.lock via
 # the Slint/wgpu web stack; wasm-bindgen-cli must match `wasm-bindgen` exactly.

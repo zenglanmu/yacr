@@ -150,6 +150,7 @@ impl ProxyRecordDecoder for KnownOpcodeDecoder {
                     style: StyleId(0),
                     height: t.2,
                     rotation: t.3,
+                    font: None,
                 }])
             }
             other => Err(CadError::Unsupported(format!(

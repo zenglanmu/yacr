@@ -174,8 +174,17 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
 - `lockers`：唯一不可绘项是 `AcDbText`；一旦文字渲染落地即可 `complete`。
 - `canteen`：2.6 MB / 25k 模型实体，展开 108 个块约 979 ms，无失败；缺口是
   Text/Hatch/Dimension/3dSolid，属已知未支持项。
-- 所有样本都产出 `text` 基元（60/295/33/32 个），但 `cad-scene` 跳过 Text，故文字
-  实际不显示——这正是“渲染效果测试”暴露出的最大缺口。字体来源与接线见 `docs/fonts.md`。
+- 所有样本都产出 `text` 基元（60/295/33/32 个）；`cad-scene` 会跳过未整形的 `Text`。注入
+  outline 字体后，TrueType 文本被转成线段并绘制，SHX 文本保持不可绘——这正是“渲染效果
+  测试”暴露出的分界。字体来源、`FontEngine` 与 `--font` 用法见 `docs/fonts.md`。
+- 文字整形实测（`build-representation --font arial.ttf=<arial.woff>`，lines/texts）：
+
+  | 样本 | 无字体 | 有字体 | 说明 |
+  |---|---|---|---|
+  | baseline-sample | 86 / 60 | 2363 / 0 | 全部 TTF 文本已整形 |
+  | lockers | 1796 / 33 | 2747 / 0 | 全部整形 |
+  | map-of-uae | 87 / 32 | 459 / 0 | 全部 MTEXT 整形 |
+  | canteen | 41370 / 295 | 41388 / 294 | 绝大多数为 GOST SHX，未整形 |
 
 ## 未执行（明确标注）
 

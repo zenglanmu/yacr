@@ -156,6 +156,8 @@ struct ImporterBuilder<'a> {
     capabilities: HashMap<String, EntityCapability>,
     layer_ids: HashMap<String, LayerId>,
     style_ids: HashMap<String, StyleId>,
+    /// Lower-cased style name -> primary font file name.
+    style_fonts: HashMap<String, String>,
     block_ids: HashMap<String, BlockId>,
     layout_ids: HashMap<String, LayoutId>,
     next_entity: u128,
@@ -203,6 +205,7 @@ impl<'a> ImporterBuilder<'a> {
             capabilities: HashMap::new(),
             layer_ids: HashMap::new(),
             style_ids: HashMap::new(),
+            style_fonts: HashMap::new(),
             block_ids: HashMap::new(),
             layout_ids: HashMap::new(),
             next_entity: 1,
@@ -349,6 +352,19 @@ impl<'a> ImporterBuilder<'a> {
             }
             if !style.true_type_font.is_empty() {
                 keys.push(style.true_type_font.clone());
+            }
+            // Primary font for this style, used to shape text geometry. Prefer
+            // the TrueType face when the drawing names one explicitly.
+            let primary = if !style.true_type_font.is_empty() {
+                Some(style.true_type_font.clone())
+            } else if !style.font_file.is_empty() {
+                Some(style.font_file.clone())
+            } else {
+                None
+            };
+            if let Some(font) = primary {
+                self.style_fonts
+                    .insert(style.name.to_ascii_lowercase(), font);
             }
             self.builder.insert_style(Style {
                 id,
@@ -709,6 +725,7 @@ impl<'a> ImporterBuilder<'a> {
                     style: self.style_id(&t.style),
                     height: t.height,
                     rotation: t.rotation,
+                    font: self.style_font(&t.style),
                 },
                 Completeness::Complete,
             ),
@@ -719,6 +736,7 @@ impl<'a> ImporterBuilder<'a> {
                     style: self.style_id(&t.style),
                     height: t.height,
                     rotation: t.rotation,
+                    font: self.style_font(&t.style),
                 },
                 Completeness::Complete,
             ),
@@ -861,6 +879,11 @@ impl<'a> ImporterBuilder<'a> {
         self.style_ids.get(name).copied().unwrap_or(StyleId(0))
     }
 
+    /// Primary font file declared by a named text style, if any.
+    fn style_font(&self, name: &str) -> Option<String> {
+        self.style_fonts.get(&name.to_ascii_lowercase()).cloned()
+    }
+
     fn block_id(&self, name: &str) -> BlockId {
         self.block_ids
             .get(name)
@@ -914,12 +937,25 @@ impl<'a> ImporterBuilder<'a> {
 /// contents and is resolved by the caller.
 fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, SupportStatus) {
     match geometry {
-        SemanticGeometry::Text { .. } | SemanticGeometry::Opaque { .. } => {
-            (SupportStatus::Unsupported, SupportStatus::Unsupported)
-        }
+        SemanticGeometry::Opaque { .. } => (SupportStatus::Unsupported, SupportStatus::Unsupported),
+        // Outline fonts (TTF/OTF/WOFF) can be shaped once the host supplies
+        // them; SHX and unknown fonts have no decoder yet.
+        SemanticGeometry::Text { font, .. } => match font.as_deref().map(font_extension) {
+            Some(ext) if ext == "ttf" || ext == "otf" || ext == "woff" => {
+                (SupportStatus::Unverified, SupportStatus::Unverified)
+            }
+            _ => (SupportStatus::Unsupported, SupportStatus::Unsupported),
+        },
         SemanticGeometry::Insert { .. } => (SupportStatus::Unverified, SupportStatus::Unverified),
         _ => (SupportStatus::Verified, SupportStatus::Verified),
     }
+}
+
+/// Lower-cased extension of a font reference, without the dot.
+fn font_extension(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(_, ext)| ext.trim().to_ascii_lowercase())
+        .unwrap_or_default()
 }
 
 /// Combine import-stage problems with the render support of model content.
@@ -1177,6 +1213,7 @@ mod tests {
             style: StyleId(0),
             height: 1.0,
             rotation: 0.0,
+            font: None,
         };
         assert_eq!(display_support(&text).0, SupportStatus::Unsupported);
         let opaque = SemanticGeometry::Opaque {

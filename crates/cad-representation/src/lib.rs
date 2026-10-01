@@ -10,6 +10,10 @@ use cad_geometry::{tessellate_geometry, TessellationParams};
 use cad_resources::ResourceKey;
 use std::sync::Arc;
 
+pub mod text;
+
+pub use text::{sanitize_text, FontEngine};
+
 /// One drawable piece of an entity, in world coordinates.
 pub enum DisplayPrimitive {
     Lines(Arc<[Point3]>),
@@ -100,6 +104,9 @@ pub struct RepresentationContext {
     pub document: DocumentId,
     pub tolerance: TolerancePolicy,
     pub stamp: TaskStamp,
+    /// Optional font set for shaping text into line geometry. Without it, text
+    /// stays an unshaped `DisplayPrimitive::Text` (not drawn by the scene).
+    pub fonts: Option<Arc<FontEngine>>,
 }
 
 impl RepresentationContext {
@@ -108,7 +115,14 @@ impl RepresentationContext {
             document,
             tolerance,
             stamp,
+            fonts: None,
         }
+    }
+
+    /// Attach a font set so text can be outlined into drawable polylines.
+    pub fn with_fonts(mut self, fonts: Arc<FontEngine>) -> Self {
+        self.fonts = Some(fonts);
+        self
     }
 }
 
@@ -200,18 +214,73 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 position,
                 style,
                 height,
-                ..
+                rotation,
+                font,
             } => {
-                representation.fragments.push(DisplayFragment {
-                    source,
-                    geometry_source,
-                    primitive: DisplayPrimitive::Text {
-                        text: text.clone(),
-                        origin: *position,
-                        font: ResourceKey(format!("style:{}", style.0)),
-                        height: height.abs(),
-                    },
-                });
+                let font_key = font.as_deref();
+                let mut shaped = false;
+                if let (Some(engine), Some(key)) = (&context.fonts, font_key) {
+                    match engine.outline(
+                        key,
+                        &sanitize_text(text),
+                        *position,
+                        height.abs(),
+                        *rotation,
+                    ) {
+                        Ok(polylines) => {
+                            for polyline in polylines {
+                                if polyline.len() >= 2 {
+                                    representation.fragments.push(DisplayFragment {
+                                        source: source.clone(),
+                                        geometry_source: geometry_source.clone(),
+                                        primitive: DisplayPrimitive::Lines(Arc::from(
+                                            polyline.into_boxed_slice(),
+                                        )),
+                                    });
+                                }
+                            }
+                            shaped = true;
+                            if representation.fragments.is_empty() {
+                                representation.completeness = Completeness::Missing(vec![
+                                    "text produced no drawable outlines".into(),
+                                ]);
+                                representation.diagnostics.push(Diagnostic {
+                                    object: Some(ObjectId(entity.id.0)),
+                                    code: "text.empty_outline".into(),
+                                    message: format!(
+                                        "font '{key}' produced no outline for the text"
+                                    ),
+                                });
+                            }
+                        }
+                        Err(error) => {
+                            representation.completeness = Completeness::Partial(vec![format!(
+                                "text font '{key}' unavailable: {error}"
+                            )]);
+                            representation.diagnostics.push(Diagnostic {
+                                object: Some(ObjectId(entity.id.0)),
+                                code: "text.font_unavailable".into(),
+                                message: error.to_string(),
+                            });
+                        }
+                    }
+                }
+                if !shaped {
+                    representation.fragments.push(DisplayFragment {
+                        source,
+                        geometry_source,
+                        primitive: DisplayPrimitive::Text {
+                            text: text.clone(),
+                            origin: *position,
+                            font: ResourceKey(
+                                font_key
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| format!("style:{}", style.0)),
+                            ),
+                            height: height.abs(),
+                        },
+                    });
+                }
             }
             SemanticGeometry::Opaque { type_key, .. } => {
                 representation.completeness =

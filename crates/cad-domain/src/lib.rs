@@ -253,6 +253,10 @@ pub enum SemanticGeometry {
         style: StyleId,
         height: f64,
         rotation: f64,
+        /// Resource key of the font this text uses (for example `arial.ttf`),
+        /// when the source style declares one. Display providers resolve it
+        /// through the font catalog; `None` means the font is unknown.
+        font: Option<String>,
     },
     Opaque {
         type_key: String,
