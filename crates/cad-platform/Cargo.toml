@@ -9,3 +9,6 @@ description = "File, task, storage, lifecycle and composition contracts."
 
 [dependencies]
 cad-domain.workspace = true
+cad-db.workspace = true
+cad-resources.workspace = true
+cad-representation.workspace = true

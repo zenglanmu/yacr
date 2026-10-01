@@ -8,6 +8,8 @@ import init, {
   start_web,
   open_document_bytes,
   renderer_state_report,
+  load_web_fonts,
+  font_load_report,
   annotation_import_json,
   annotation_export_json,
   annotation_confirm_export,
@@ -139,6 +141,8 @@ async function main() {
   window.yacr = {
     renderer_state_report,
     open_document_bytes: (name, bytes) => open_document_bytes(name, bytes),
+    load_fonts: () => load_web_fonts(),
+    font_load_report,
     export_annotations: exportAnnotations,
     has_recovery_snapshot,
     restore_recovery_snapshot,

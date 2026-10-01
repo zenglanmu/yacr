@@ -15,6 +15,7 @@ cad-app.workspace = true
 cad-platform.workspace = true
 cad-domain.workspace = true
 cad-annotations.workspace = true
+cad-resources.workspace = true
 
 # Browser host stack. wasm-bindgen must match the wasm-bindgen-cli used to
 # post-process the module; Slint already pins these versions in Cargo.lock.
@@ -25,4 +26,5 @@ js-sys.workspace = true
 web-sys = { workspace = true, features = [
     "Window", "Document", "Element", "HtmlInputElement", "File", "FileList",
     "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "console",
+    "Response",
 ] }
