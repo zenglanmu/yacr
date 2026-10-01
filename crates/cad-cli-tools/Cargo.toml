@@ -19,3 +19,6 @@ cad-diagnostics.workspace = true
 cad-resources.workspace = true
 cad-app.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
