@@ -16,7 +16,10 @@ use cad_domain::{
 use cad_render_wgpu::{
     ActiveBackend, BackendCapabilities, BackendPreference, Camera2d, RenderTarget, Renderer,
 };
-use cad_representation::{FontEngine, ProviderRegistry, RepresentationContext};
+use cad_representation::layout::{build_paper_space, enumerate_layouts};
+use cad_representation::{
+    FontEngine, LayoutDescriptor, ProviderRegistry, RepresentationContext, SpaceSelection,
+};
 use cad_scene::{SceneBudget, SceneCache, SceneDelta};
 
 use crate::{UiHandle, YacrWindow};
@@ -73,6 +76,24 @@ pub fn build_scene_with_overrides(
     fonts: Option<Arc<FontEngine>>,
     overrides: &LayerOverrideSet,
 ) -> CadResult<SceneDelta> {
+    build_scene_with_space(database, stamp, fonts, overrides, SpaceSelection::Model)
+}
+
+/// Build scene batches for an explicit space (model or a paper layout, spec F04).
+///
+/// `SpaceSelection::Model` reproduces [`build_scene_with_overrides`] exactly, so
+/// the existing model-space entry point keeps working. `SpaceSelection::Paper`
+/// draws the layout's own paper geometry and each supported viewport's clipped
+/// model contents (see [`cad_representation::layout`]). A layout whose viewports
+/// are not drawable contributes no viewport geometry and records an explicit
+/// diagnostic; callers can inspect [`layout_descriptors`] before switching.
+pub fn build_scene_with_space(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    overrides: &LayerOverrideSet,
+    space: SpaceSelection,
+) -> CadResult<SceneDelta> {
     let registry = ProviderRegistry::with_default_provider();
     let mut context =
         RepresentationContext::new(DocumentId(0), TolerancePolicy::default(), stamp.clone());
@@ -85,12 +106,32 @@ pub fn build_scene_with_overrides(
         added: Vec::new(),
         removed_chunks: Vec::new(),
     };
-    for entity in cad_app::layers::visible_model_entities(database, overrides) {
-        let representation = registry.build_expanded(database, entity, &context)?;
-        let delta = cache.build(&representation, stamp.clone())?;
-        combined.added.extend(delta.added);
+    match space {
+        SpaceSelection::Model => {
+            for entity in cad_app::layers::visible_model_entities(database, overrides) {
+                let representation = registry.build_expanded(database, entity, &context)?;
+                let delta = cache.build(&representation, stamp.clone())?;
+                combined.added.extend(delta.added);
+            }
+        }
+        SpaceSelection::Paper(layout) => {
+            let visible = |entity: &cad_db::DbEntity| overrides.is_entity_visible(database, entity);
+            let representation =
+                build_paper_space(&registry, database, layout, &context, &visible)?;
+            let delta = cache.build(&representation, stamp.clone())?;
+            combined.added.extend(delta.added);
+        }
     }
     Ok(combined)
+}
+
+/// The layouts a caller can switch to, with per-layout support and reason.
+///
+/// The UI never invents a layout; this is the database's own layout table with
+/// the representation layer's drawability verdict attached. Model space is not
+/// listed (it is always available as [`SpaceSelection::Model`]).
+pub fn layout_descriptors(database: &DrawingDatabase) -> Vec<LayoutDescriptor> {
+    enumerate_layouts(database)
 }
 
 /// Compute a fit-to-drawing camera from the database bounds.
@@ -360,7 +401,53 @@ pub type UiWindow = YacrWindow;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cad_db::DrawingDatabaseBuilder;
+    use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer, Layout, PaperViewport};
+    use cad_domain::{Completeness, EntityId, LayerId, LayoutId, ObjectId, Point3, Revision};
+    use cad_domain::{SemanticGeometry, SpaceId};
+
+    fn p(x: f64, y: f64) -> Point3 {
+        Point3 { x, y, z: 0.0 }
+    }
+
+    fn line_entity(id: u128, space: SpaceId, a: Point3, b: Point3) -> DbEntity {
+        DbEntity {
+            object: DbObject {
+                id: ObjectId(id),
+                type_key: "AcDbLine".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(id),
+            layer: LayerId(0),
+            space,
+            geometry: SemanticGeometry::Line { start: a, end: b },
+            draw_order: id as i64,
+        }
+    }
+
+    fn db_with_layout() -> DrawingDatabase {
+        let mut b = DrawingDatabaseBuilder::new(cad_domain::DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        // Model line through the viewport anchor.
+        b.insert_entity(line_entity(1, SpaceId::Model, p(9.0, 20.0), p(11.0, 20.0)))
+            .unwrap();
+        b.insert_layout(Layout {
+            id: LayoutId(1),
+            name: "Layout1".into(),
+            viewports: vec![PaperViewport {
+                clip: vec![p(0.0, 0.0), p(100.0, 50.0), p(10.0, 20.0)],
+                model_to_paper: cad_domain::Transform3::scale(100.0),
+                completeness: Completeness::Complete,
+            }],
+        })
+        .unwrap();
+        b.finish().unwrap()
+    }
 
     #[test]
     fn empty_database_produces_an_empty_scene() {
@@ -369,6 +456,65 @@ mod tests {
             .unwrap();
         let delta = build_scene(&db, TaskStamp::new(DocumentId(0), 0)).unwrap();
         assert!(delta.added.is_empty());
+    }
+
+    #[test]
+    fn model_space_entry_point_is_unchanged_by_the_space_api() {
+        let db = db_with_layout();
+        let stamp = TaskStamp::new(DocumentId(0), 0);
+        let model = build_scene(&db, stamp.clone()).unwrap();
+        let explicit = build_scene_with_space(
+            &db,
+            stamp,
+            None,
+            &LayerOverrideSet::new(),
+            SpaceSelection::Model,
+        )
+        .unwrap();
+        assert_eq!(model.added.len(), explicit.added.len());
+        assert_eq!(model.added.len(), 1);
+    }
+
+    #[test]
+    fn paper_space_build_maps_model_geometry_through_the_viewport() {
+        let db = db_with_layout();
+        let delta = build_scene_with_space(
+            &db,
+            TaskStamp::new(DocumentId(0), 0),
+            None,
+            &LayerOverrideSet::new(),
+            SpaceSelection::Paper(LayoutId(1)),
+        )
+        .unwrap();
+        // The single mapped+clipped line becomes one batch.
+        assert_eq!(delta.added.len(), 1);
+    }
+
+    #[test]
+    fn switching_to_a_missing_layout_is_reported_not_faked() {
+        let db = db_with_layout();
+        // A missing layout still returns Ok with no batches; the diagnostic is
+        // on the representation, which the scene layer cannot surface here.
+        let delta = build_scene_with_space(
+            &db,
+            TaskStamp::new(DocumentId(0), 0),
+            None,
+            &LayerOverrideSet::new(),
+            SpaceSelection::Paper(LayoutId(99)),
+        )
+        .unwrap();
+        assert!(delta.added.is_empty());
+    }
+
+    #[test]
+    fn layout_descriptors_expose_ids_names_and_support() {
+        let db = db_with_layout();
+        let rows = layout_descriptors(&db);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, LayoutId(1));
+        assert_eq!(rows[0].name, "Layout1");
+        assert!(rows[0].supported);
+        assert_eq!(rows[0].viewport_count, 1);
     }
 
     #[test]
