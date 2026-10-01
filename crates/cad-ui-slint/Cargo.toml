@@ -12,6 +12,7 @@ description = "Shared Slint controls and responsive layout."
 cad-domain.workspace = true
 cad-db.workspace = true
 cad-app.workspace = true
+cad-diagnostics.workspace = true
 cad-query.workspace = true
 cad-measure.workspace = true
 cad-render-wgpu.workspace = true

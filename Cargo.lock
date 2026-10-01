@@ -943,6 +943,7 @@ version = "0.1.0"
 dependencies = [
  "cad-app",
  "cad-db",
+ "cad-diagnostics",
  "cad-domain",
  "cad-geometry",
  "cad-measure",

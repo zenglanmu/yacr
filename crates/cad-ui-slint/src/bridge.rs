@@ -203,6 +203,8 @@ pub struct CadView {
     fonts: Rc<RefCell<Option<Arc<FontEngine>>>>,
     overrides: Rc<RefCell<LayerOverrideSet>>,
     preference: BackendPreference,
+    /// Shared catalog so backend failure text follows the active language.
+    messages: Rc<RefCell<crate::i18n::MessageSource>>,
 }
 
 impl CadView {
@@ -260,14 +262,23 @@ impl CadView {
     }
 
     /// Failure reason when no backend is live, else `None`.
+    ///
+    /// The text is localized from the active catalog (N01); the structured
+    /// `BackendFailure` each host can inspect is unchanged.
     pub fn last_error(&self) -> Option<String> {
+        let messages = self.messages.borrow().clone();
         match self.state.borrow().outcome.as_ref() {
             Some(BackendOutcome::Failed { failure, .. }) => Some(match failure {
-                BackendFailure::NoBackendAvailable => "无可用的 WebGPU/WebGL2 设备".to_string(),
-                BackendFailure::ForcedUnavailable { reason } => {
-                    format!("强制后端不可用：{reason}")
+                BackendFailure::NoBackendAvailable => {
+                    messages.text("status.backend.no_device", &[])
                 }
-                BackendFailure::InitFailed { reason } => format!("设备初始化失败：{reason}"),
+                BackendFailure::ForcedUnavailable { reason } => messages.text(
+                    "status.backend.forced_unavailable",
+                    &[("reason", reason.as_str())],
+                ),
+                BackendFailure::InitFailed { reason } => {
+                    messages.text("status.backend.init_failed", &[("reason", reason.as_str())])
+                }
             }),
             _ => None,
         }
@@ -406,6 +417,7 @@ pub fn install_with_preference(
     let overrides_slot: Rc<RefCell<LayerOverrideSet>> =
         Rc::new(RefCell::new(LayerOverrideSet::new()));
     let scene_overrides = overrides_slot.clone();
+    let messages = handle.messages.clone();
 
     window
         .set_rendering_notifier(move |render_state, graphics_api| {
@@ -540,9 +552,9 @@ pub fn install_with_preference(
         fonts: fonts_slot,
         overrides: overrides_slot,
         preference,
+        messages,
     })
 }
-
 /// The Slint component type, re-exported for hosts.
 pub type UiWindow = YacrWindow;
 

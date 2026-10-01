@@ -5,7 +5,7 @@ Standard library only. What it checks:
 
   * at least one workflow file exists under ``.github/workflows`` and is non-empty;
   * every required job is declared as a job key in some workflow
-    (``core-quality``, ``wasm-check``, ``android-check``);
+    (``core-quality``, ``wasm-check``, ``i18n-contracts``, ``android-check``);
   * no required job declares ``continue-on-error: true`` (job-level or step-level);
   * each required job still contains its expected command fragment, so the job
     keeps mirroring the real gate instead of drifting into an empty success.
@@ -35,6 +35,9 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     "wasm-check": (
         "cargo check --workspace --lib --target wasm32-unknown-unknown --locked",
         "cargo check -p app-web --target wasm32-unknown-unknown --locked",
+    ),
+    "i18n-contracts": (
+        "python3 scripts/check-i18n.py",
     ),
     "android-check": (
         "cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked",
