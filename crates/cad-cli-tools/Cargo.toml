@@ -18,3 +18,4 @@ cad-measure.workspace = true
 cad-diagnostics.workspace = true
 cad-resources.workspace = true
 cad-app.workspace = true
+serde_json.workspace = true

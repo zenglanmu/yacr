@@ -50,6 +50,7 @@ pub enum ImportStage {
     Uploading,
 }
 
+#[derive(Debug, Clone)]
 pub struct ImportReport {
     pub identity: DocumentIdentity,
     pub capabilities: Vec<EntityCapability>,

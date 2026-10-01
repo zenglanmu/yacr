@@ -18,9 +18,18 @@ pub const ZH_CN_MESSAGES: &str = include_str!("../i18n/zh-CN.json");
 slint::include_modules!();
 
 pub mod bridge;
-pub use bridge::{install as install_cad_bridge, IncomingDocument};
+#[cfg(target_arch = "wasm32")]
+pub mod web;
+pub use bridge::{install as install_cad_bridge, CadView, IncomingDocument};
 
 use slint::{ComponentHandle, Image, Weak};
+
+/// Navigator input routed from the shell's canvas into the CAD view.
+pub trait ViewInput {
+    /// kind: 0=down 1=up 2=move 3=cancel; button: 0=none 1=left 2=right 3=middle.
+    fn pointer(&self, kind: i32, button: i32, x: f64, y: f64);
+    fn scroll(&self, dx: f64, dy: f64);
+}
 
 /// Layout/locale configuration for the shell.
 #[derive(Debug, Clone)]
@@ -31,6 +40,8 @@ pub struct UiConfiguration {
     pub application_title: String,
     pub document: DocumentId,
     pub viewport: ViewportId,
+    /// Initial logical window size; hosts keep it in sync with the surface.
+    pub logical_size: [f64; 2],
 }
 
 impl Default for UiConfiguration {
@@ -42,6 +53,7 @@ impl Default for UiConfiguration {
             application_title: "yacr CAD".to_string(),
             document: DocumentId(0),
             viewport: ViewportId(0),
+            logical_size: [1280.0, 800.0],
         }
     }
 }
@@ -78,6 +90,14 @@ impl UiHandle {
         self.with(|ui| ui.set_work_mode(work))
     }
 
+    pub fn set_can_undo(&self, can_undo: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_can_undo(can_undo))
+    }
+
+    pub fn set_backend_index(&self, index: i32) -> CadResult<()> {
+        self.with(|ui| ui.set_backend_index(index))
+    }
+
     /// Trigger a redraw without restarting the event loop.
     pub fn request_redraw(&self) -> CadResult<()> {
         self.with(|ui| ui.window().request_redraw())
@@ -93,6 +113,17 @@ impl UiHandle {
 pub struct UiAdapter {
     pub configuration: UiConfiguration,
     ui: YacrWindow,
+    view_input: Rc<RefCell<Option<Rc<dyn ViewInput>>>>,
+}
+
+/// Build the command a shell callback emits for the configured document.
+fn command_for(
+    id: CommandId,
+    document: &DocumentId,
+    viewport: ViewportId,
+    payload: CommandPayload,
+) -> Command {
+    Command { schema_version: 1, id, document: document.clone(), viewport, payload }
 }
 
 impl UiAdapter {
@@ -100,6 +131,10 @@ impl UiAdapter {
     pub fn new<S: UiCommandSink>(configuration: UiConfiguration, sink: S, work_mode: bool) -> CadResult<Self> {
         let ui = YacrWindow::new().map_err(|e| CadError::Invariant(format!("slint: {e}")))?;
         ui.set_application_title(configuration.application_title.clone().into());
+        ui.window().set_size(slint::LogicalSize::new(
+            configuration.logical_size[0].max(1.0) as f32,
+            configuration.logical_size[1].max(1.0) as f32,
+        ));
         ui.set_open_label("打开".into());
         ui.set_measure_label("测量".into());
         ui.set_annotate_label("批注".into());
@@ -109,63 +144,111 @@ impl UiAdapter {
         let document = configuration.document.clone();
         let viewport = configuration.viewport;
         let shared: Rc<RefCell<S>> = Rc::new(RefCell::new(sink));
+        let view_input: Rc<RefCell<Option<Rc<dyn ViewInput>>>> = Rc::new(RefCell::new(None));
 
-        // A command is built inside each callback: Command is not Clone and the
-        // payload set is heterogeneous.
         {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_open_requested(move || {
-                let _ = s.borrow_mut().send(Command {
-                    schema_version: 1,
-                    id: CommandId::OpenDrawing,
-                    document: doc.clone(),
-                    viewport,
-                    payload: CommandPayload::None,
-                });
-            });
-        }
-        {
-            let s = shared.clone();
-            let doc = document.clone();
-            ui.on_measure_requested(move || {
-                let _ = s.borrow_mut().send(Command {
-                    schema_version: 1,
-                    id: CommandId::Measure,
-                    document: doc.clone(),
-                    viewport,
-                    payload: CommandPayload::None,
-                });
-            });
-        }
-        {
-            let s = shared.clone();
-            let doc = document.clone();
-            ui.on_annotate_requested(move || {
-                let _ = s.borrow_mut().send(Command {
-                    schema_version: 1,
-                    id: CommandId::CreateAnnotation,
-                    document: doc.clone(),
-                    viewport,
-                    payload: CommandPayload::None,
-                });
+                let _ = s.borrow_mut().send(command_for(CommandId::OpenDrawing, &doc, viewport, CommandPayload::None));
             });
         }
         {
             let s = shared.clone();
             let doc = document.clone();
             ui.on_fit_requested(move || {
-                let _ = s.borrow_mut().send(Command {
-                    schema_version: 1,
-                    id: CommandId::FitDrawing,
-                    document: doc.clone(),
+                let _ = s.borrow_mut().send(command_for(CommandId::FitDrawing, &doc, viewport, CommandPayload::None));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_measure_requested(move || {
+                let _ = s.borrow_mut().send(command_for(CommandId::Measure, &doc, viewport, CommandPayload::None));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_annotate_requested(move || {
+                let _ = s.borrow_mut().send(command_for(CommandId::CreateAnnotation, &doc, viewport, CommandPayload::None));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_undo_requested(move || {
+                let _ = s.borrow_mut().send(command_for(CommandId::Undo, &doc, viewport, CommandPayload::None));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_redo_requested(move || {
+                let _ = s.borrow_mut().send(command_for(CommandId::Redo, &doc, viewport, CommandPayload::None));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_backend_selected(move |name| {
+                let choice = match name.as_str() {
+                    "WebGPU" => cad_app::BackendChoice::WebGpu,
+                    "WebGL2" => cad_app::BackendChoice::WebGl2,
+                    _ => cad_app::BackendChoice::Auto,
+                };
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::SwitchBackend,
+                    &doc,
                     viewport,
-                    payload: CommandPayload::None,
-                });
+                    CommandPayload::Backend(choice),
+                ));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_export_requested(move || {
+                let _ = s.borrow_mut().send(command_for(CommandId::ExportAnnotations, &doc, viewport, CommandPayload::None));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_import_requested(move || {
+                let _ = s.borrow_mut().send(command_for(CommandId::ImportAnnotations, &doc, viewport, CommandPayload::None));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_diagnostics_requested(move || {
+                let _ = s.borrow_mut().send(command_for(CommandId::Diagnostics, &doc, viewport, CommandPayload::None));
+            });
+        }
+        {
+            let input = view_input.clone();
+            ui.on_pointer_input(move |kind, button, x, y| {
+                if let Some(input) = input.borrow().as_ref() {
+                    input.pointer(kind, button, x as f64, y as f64);
+                }
+            });
+        }
+        {
+            let input = view_input.clone();
+            ui.on_scroll_input(move |dx, dy| {
+                if let Some(input) = input.borrow().as_ref() {
+                    input.scroll(dx as f64, dy as f64);
+                }
             });
         }
 
-        Ok(UiAdapter { configuration, ui })
+        Ok(UiAdapter { configuration, ui, view_input })
+    }
+
+    /// Route canvas input to the CAD view; call once the view exists.
+    pub fn set_view_input(&self, input: Rc<dyn ViewInput>) {
+        *self.view_input.borrow_mut() = Some(input);
     }
 
     /// A handle for pushing state from the host.
@@ -180,7 +263,8 @@ impl UiAdapter {
     /// Show the window and run the platform event loop.
     ///
     /// On Android this is called after `slint::android::init()`; on desktop it
-    /// is the winit event loop.
+    /// is the winit event loop; on the web it hands over to the browser event
+    /// loop (the call may not return — see `apps/app-web`).
     pub fn run(&self) -> CadResult<()> {
         self.ui
             .show()
@@ -199,7 +283,8 @@ impl UiAdapter {
 ///
 /// Must be called before creating any window. On Android the backend is Skia
 /// behind wgpu (`unstable-wgpu-30`), which is what makes a shared texture
-/// possible at all; see `docs/render-backends.md`.
+/// possible at all; on the web `web::select_backend` chooses WebGPU or WebGL2.
+/// See `docs/render-backends.md`.
 pub fn select_wgpu_backend() -> CadResult<()> {
     slint::BackendSelector::new()
         .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::default())

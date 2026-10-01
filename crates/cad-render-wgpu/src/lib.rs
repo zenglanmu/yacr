@@ -24,6 +24,17 @@ pub enum ActiveBackend {
     Native,
 }
 
+impl ActiveBackend {
+    /// Stable lowercase name for UI/CLI/diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActiveBackend::WebGpu => "webgpu",
+            ActiveBackend::WebGl2 => "webgl2",
+            ActiveBackend::Native => "native",
+        }
+    }
+}
+
 pub struct BackendCapabilities {
     pub actual: ActiveBackend,
     pub compute: bool,
@@ -85,10 +96,14 @@ struct GpuBatch {
     bind_group: wgpu::BindGroup,
 }
 
+/// The widest 2D texture dimension a host can rely on.
+pub const MIN_GUARANTEED_TEXTURE_DIMENSION: u32 = 2048;
+
 /// The CAD renderer. Owns only derived GPU resources.
 pub struct Renderer {
     pub preference: BackendPreference,
     pub recovery_limit: u32,
+    active_backend: ActiveBackend,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     layout: Option<wgpu::BindGroupLayout>,
@@ -114,6 +129,8 @@ impl Renderer {
         Renderer {
             preference,
             recovery_limit: 2,
+            // Native hosts (Android/desktop) never use the browser backend labels.
+            active_backend: ActiveBackend::Native,
             device: None,
             queue: None,
             layout: None,
@@ -138,7 +155,7 @@ impl Renderer {
         device: wgpu::Device,
         queue: wgpu::Queue,
     ) -> CadResult<BackendCapabilities> {
-        let caps = Self::caps_for(&device);
+        let caps = Self::caps_for(&device, self.preference);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cad-lines"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -203,19 +220,51 @@ impl Renderer {
         self.queue = Some(queue);
         self.layout = Some(layout);
         self.pipeline = Some(pipeline);
+        self.active_backend = caps.actual;
         self.device_generation += 1;
         Ok(caps)
     }
 
-    fn caps_for(device: &wgpu::Device) -> BackendCapabilities {
+    /// Capability snapshot derived from adapter limits and the host preference.
+    ///
+    /// WebGPU is the enhanced tier; WebGL2 is the base tier and therefore never
+    /// advertises compute, storage buffers or indirect draw even if some
+    /// adapter reports the limits.
+    fn caps_for(device: &wgpu::Device, preference: BackendPreference) -> BackendCapabilities {
         let limits = device.limits();
-        BackendCapabilities {
-            actual: ActiveBackend::WebGpu,
-            compute: true,
-            storage_buffers: true,
-            indirect_draw: true,
-            max_texture_dimension: limits.max_texture_dimension_2d,
+        let actual = match preference {
+            BackendPreference::WebGpu => ActiveBackend::WebGpu,
+            BackendPreference::WebGl2 => ActiveBackend::WebGl2,
+            // Auto: the host resolves Auto before creating the device, so this
+            // only happens for native or misconfigured hosts.
+            BackendPreference::Auto => ActiveBackend::Native,
+        };
+        match actual {
+            ActiveBackend::WebGl2 => BackendCapabilities {
+                actual,
+                compute: false,
+                storage_buffers: false,
+                indirect_draw: false,
+                max_texture_dimension: limits.max_texture_dimension_2d.max(MIN_GUARANTEED_TEXTURE_DIMENSION),
+            },
+            _ => BackendCapabilities {
+                actual,
+                compute: true,
+                storage_buffers: true,
+                indirect_draw: true,
+                max_texture_dimension: limits.max_texture_dimension_2d.max(MIN_GUARANTEED_TEXTURE_DIMENSION),
+            },
         }
+    }
+
+    pub fn active_backend(&self) -> ActiveBackend {
+        self.active_backend
+    }
+
+    pub fn capabilities(&self) -> Option<(ActiveBackend, bool, u32)> {
+        let device = self.device.as_ref()?;
+        let caps = Self::caps_for(device, self.preference);
+        Some((caps.actual, caps.compute, caps.max_texture_dimension))
     }
 
     fn ensure_target(&mut self, target: &RenderTarget) -> CadResult<()> {
@@ -396,6 +445,32 @@ impl Renderer {
 
     pub fn batch_count(&self) -> usize {
         self.batches.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webgl2_tier_reports_no_compute_or_storage_buffers() {
+        // The base tier is bounded by what WebGL2 can do; the host resolves
+        // Auto before device creation, so only explicit choices reach here.
+        let renderer = Renderer::new(BackendPreference::WebGl2);
+        assert_eq!(renderer.active_backend(), ActiveBackend::WebGl2);
+        assert!(renderer.capabilities().is_none(), "no device yet");
+    }
+
+    #[test]
+    fn backend_names_are_stable() {
+        assert_eq!(ActiveBackend::WebGpu.as_str(), "webgpu");
+        assert_eq!(ActiveBackend::WebGl2.as_str(), "webgl2");
+        assert_eq!(ActiveBackend::Native.as_str(), "native");
+    }
+
+    #[test]
+    fn texture_dimension_floor_is_guaranteed() {
+        assert!(MIN_GUARANTEED_TEXTURE_DIMENSION >= 2048);
     }
 }
 

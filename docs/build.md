@@ -57,15 +57,35 @@ cargo check --target aarch64-linux-android -p app-android --locked
 不申请不必要的全盘权限。**当前 SAF 文件选择器未实现**：宿主按候选路径尝试打开
 DWG，找不到时显示内置演示几何并明确提示（见 `app-android`），不能宣称 F01 已验收。
 
-## Web（仅 Rust 编译路径）
+## Web（Wasm 静态产物 + 最小 JS 宿主）
 
 ```bash
-cargo check --workspace --lib --target wasm32-unknown-unknown --locked
+scripts/build-web.sh                 # 产出 web-dist/（index.html、main.js、pkg/yacr.js、yacr_bg.wasm）
+scripts/serve-web.py --directory web-dist --port 8090
+# 浏览器打开 http://127.0.0.1:8090/
 ```
 
-**无 Wasm 导出与最小 JS 宿主**，因此尚无浏览器可运行产物。后续需加 wasm-bindgen
-导出、File API、Worker、IndexedDB/下载导出与静态打包脚本；部署需 application/wasm
-MIME、HTTPS/安全上下文。COOP/COEP 仅可选共享内存路径需要。
+- 需要 wasm-bindgen-cli **0.2.129**（与 Cargo.lock 中的 wasm-bindgen 严格匹配）与
+  `wasm32-unknown-unknown` target。
+- 服务必须发送 `application/wasm`；`scripts/serve-web.py` 已设置，部署到静态托管时同样配置。
+  HTTPS/安全上下文为 File API 与持久化所需；COOP/COEP 仅可选共享内存路径需要
+  （`--coi` 打开）。
+- 宿主为最小 JS：`apps/app-web/web/main.js` 只负责加载 wasm、连接 File API 选择器、
+  下载导出批注，并吞掉 winit 在 wasm 上用于移交事件循环的已记录异常。
+- 后端选择：UI 工具栏 “Auto / WebGPU / WebGL2”。Auto 会真实请求 WebGPU adapter，
+  失败才回退 WebGL2；强制选择失败时记录原因并回退 WebGL2（写入 localStorage 后重建会话，
+  规范 §6 允许重启渲染会话）。`?backend=webgl2` 可覆盖。
+- 无头浏览器验证：
+
+```bash
+scripts/serve-web.py --directory web-dist &
+node scripts/check-web-ui.mjs http://127.0.0.1:8090/ /tmp/opencode/yacr-web.png
+```
+
+脚本检查 wasm 启动、渲染后端就绪、截图非空白（内置 PNG 解码统计）并收集控制台错误。
+它记录“浏览器（无头 Chromium）通过”，不等于桌面/移动浏览器矩阵或真机通过。
+
+仅 Rust 检查（不需要链接）：
 
 ## 桌面 / iOS
 

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>yacr CAD</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Slint (winit backend) looks up this id and renders the shared shell. -->
+  <canvas id="canvas"></canvas>
+
+  <!-- Hidden pickers driven by the Rust host; never styled to be visible. -->
+  <input type="file" id="file-input" accept=".dwg" hidden>
+  <input type="file" id="annotation-input" accept=".json,application/json" hidden>
+
+  <div id="host-state" role="status" aria-live="polite">正在加载 wasm…</div>
+  <noscript>需要启用 JavaScript 才能运行 yacr CAD。</noscript>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

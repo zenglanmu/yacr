@@ -1,21 +1,20 @@
 //! Android host: Activity entry, lifecycle, file access and GPU composition.
 //!
 //! Spec v2.0 §9.1, §5.3. This host wires the shared Slint UI to the CAD core and
-//! the wgpu renderer. It does not re-implement CAD logic: opening a drawing goes
-//! through the importer into the database, and rendering goes through the shared
-//! representation/scene/renderer path.
+//! the wgpu renderer through `cad_app::host::HostController`. It does not
+//! re-implement CAD logic or duplicate the web host's business path.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use cad_app::{AppMode, Application, Command, CommandId, SessionState};
-use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer};
+use cad_app::host::HostController;
+use cad_app::{Command, CommandId};
 use cad_domain::*;
-use cad_import_acadrust::Importer;
-use cad_ui_slint::{IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration, UiHandle};
+use cad_ui_slint::{CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration, UiHandle};
 
 type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
+type SharedView = Rc<RefCell<Option<CadView>>>;
 
 pub struct AndroidHostConfiguration {
     pub recovery_enabled: bool,
@@ -35,91 +34,35 @@ impl Default for AndroidHostConfiguration {
     }
 }
 
-/// A synthetic drawing so the app has something to show before a real DWG is
-/// opened. This is *not* a compatibility claim; the fixture manifest is empty.
-pub fn demo_database() -> DrawingDatabase {
-    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
-    builder.insert_layer(Layer { id: LayerId(0), name: "0".into(), visible: true }).unwrap();
-    builder.insert_layer(Layer { id: LayerId(1), name: "WALLS".into(), visible: true }).unwrap();
-
-    let mut push = |id: u128, geometry: SemanticGeometry, layer: LayerId, order: i64| {
-        builder
-            .insert_entity(DbEntity {
-                object: DbObject {
-                    id: ObjectId(id),
-                    type_key: class_name(&geometry).into(),
-                    revision: Revision(0),
-                    source_handle: Some(format!("{id:X}")),
-                },
-                id: EntityId(id),
-                layer,
-                space: SpaceId::Model,
-                geometry,
-                draw_order: order,
-            })
-            .unwrap();
-    };
-
-    // A simple room outline with a circle and a polyline-with-bulge.
-    push(1, SemanticGeometry::Line { start: p(0.0, 0.0), end: p(4000.0, 0.0) }, LayerId(1), 0);
-    push(2, SemanticGeometry::Line { start: p(4000.0, 0.0), end: p(4000.0, 3000.0) }, LayerId(1), 1);
-    push(3, SemanticGeometry::Line { start: p(4000.0, 3000.0), end: p(0.0, 3000.0) }, LayerId(1), 2);
-    push(4, SemanticGeometry::Line { start: p(0.0, 3000.0), end: p(0.0, 0.0) }, LayerId(1), 3);
-    push(5, SemanticGeometry::Circle { center: p(2000.0, 1500.0), normal: pz(0.0, 0.0, 1.0), radius: 800.0 }, LayerId(0), 4);
-    push(
-        6,
-        SemanticGeometry::Polyline {
-            points: vec![p(500.0, 500.0), p(1500.0, 500.0), p(1500.0, 1000.0)],
-            bulges: vec![0.0, 1.0, 0.0],
-            closed: false,
-        },
-        LayerId(0),
-        5,
-    );
-    builder.finish().unwrap()
-}
-
-fn p(x: f64, y: f64) -> Point3 {
-    Point3 { x, y, z: 0.0 }
-}
-
-fn pz(x: f64, y: f64, z: f64) -> Point3 {
-    Point3 { x, y, z }
-}
-
-fn class_name(geometry: &SemanticGeometry) -> &'static str {
-    match geometry {
-        SemanticGeometry::Line { .. } => "AcDbLine",
-        SemanticGeometry::Circle { .. } => "AcDbCircle",
-        SemanticGeometry::Polyline { .. } => "AcDbPolyline",
-        SemanticGeometry::Arc { .. } => "AcDbArc",
-        SemanticGeometry::Ellipse { .. } => "AcDbEllipse",
-        SemanticGeometry::Spline { .. } => "AcDbSpline",
-        SemanticGeometry::Mesh(_) => "AcDbSubDMesh",
-        SemanticGeometry::Insert { .. } => "AcDbBlockReference",
-        SemanticGeometry::Text { .. } => "AcDbText",
-        SemanticGeometry::Point(_) => "AcDbPoint",
-        SemanticGeometry::Opaque { .. } => "AcDbUnknown",
-    }
-}
-
 /// Commands from the UI are executed through the shared application layer.
 struct HostSink {
-    application: Application,
-    session: SessionState,
-    incoming: IncomingDocument,
+    controller: Rc<RefCell<HostController>>,
     handle: SharedHandle,
+    view: SharedView,
+    incoming: IncomingDocument,
     configuration: AndroidHostConfiguration,
 }
 
 impl HostSink {
     fn status(&self, text: impl Into<String>) {
-        let text = text.into();
         if let Some(handle) = self.handle.borrow().as_ref() {
-            let _ = handle.set_status(text);
+            let _ = handle.set_status(text.into());
         }
     }
 
+    fn sync_camera(&self) {
+        let controller = self.controller.borrow();
+        if let (Some(view), Some(viewport)) = (
+            self.view.borrow().as_ref(),
+            controller.application.workspace.viewports.get(&controller.viewport_id),
+        ) {
+            view.set_camera(viewport.camera.target, viewport.world_per_px());
+        }
+    }
+
+    /// Open a DWG from the candidate paths. Real SAF integration is not part of
+    /// this build; the search is explicitly reported so it is not mistaken for
+    /// a file picker (spec §9.1).
     fn open_drawing(&mut self) {
         for path in &self.configuration.sample_paths {
             let candidate = std::path::Path::new(path);
@@ -128,27 +71,21 @@ impl HostSink {
             }
             match std::fs::read(candidate) {
                 Ok(bytes) => {
-                    let request = cad_import_acadrust::ImportRequest {
-                        document: self.session.document.clone(),
-                        database: DatabaseId(1),
-                        bytes: Arc::from(bytes.into_boxed_slice()),
-                        limits: cad_import_acadrust::ImportLimits::default(),
-                        generation: 0,
-                    };
-                    let importer = cad_import_acadrust::AcadrustImporter::new();
-                    match importer.import(&request, &|| false) {
-                        Ok(imported) => {
-                            let document = cad_app::Document {
-                                id: self.session.document.clone(),
-                                drawing: Arc::new(imported.database),
-                                annotations: cad_db::AnnotationDatabase::new(DatabaseId(2)),
-                                identity: imported.report.identity.clone(),
-                                units: imported.units,
-                                resource_keys: Vec::new(),
+                    let bytes: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
+                    let opened = self.controller.borrow_mut().open_bytes(bytes, path);
+                    match opened {
+                        Ok(opened) => {
+                            let drawing = {
+                                let mut controller = self.controller.borrow_mut();
+                                let _ = controller.fit();
+                                controller.drawing()
                             };
-                            *self.incoming.borrow_mut() = Some(document.drawing.clone());
-                            self.application.workspace.documents.insert(self.session.document.clone(), document);
-                            self.status(format!("已打开 {path}: {}", imported.report.completeness_label()));
+                            *self.incoming.borrow_mut() = drawing;
+                            self.sync_camera();
+                            if let Some(view) = self.view.borrow().as_ref() {
+                                view.request_redraw();
+                            }
+                            self.status(format!("已打开 {path}: {}", opened.completeness_label));
                             return;
                         }
                         Err(e) => self.status(format!("打开 {path} 失败: {e}")),
@@ -168,8 +105,17 @@ impl UiCommandSink for HostSink {
             self.open_drawing();
             return Ok(());
         }
-        match self.application.execute(&mut self.session, command) {
+        let outcome = self.controller.borrow_mut().execute(command);
+        match outcome {
             Ok(outcome) => {
+                self.sync_camera();
+                let can_undo = {
+                    let controller = self.controller.borrow();
+                    controller.application.can_undo(&controller.document_id)
+                };
+                if let Some(handle) = self.handle.borrow().as_ref() {
+                    let _ = handle.set_can_undo(can_undo);
+                }
                 if let Some(diag) = outcome.diagnostics.first() {
                     self.status(diag.message.clone());
                 }
@@ -191,28 +137,13 @@ impl UiCommandSink for HostSink {
 pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     cad_ui_slint::select_wgpu_backend()?;
 
-    let incoming: IncomingDocument = Rc::new(RefCell::new(None));
-    let document_id = DocumentId(1);
-    let session = SessionState::new(document_id.clone(), AppMode::Work);
-
-    let mut application = Application::new();
-    let drawing = Arc::new(demo_database());
-    application.workspace.documents.insert(
-        document_id.clone(),
-        cad_app::Document {
-            id: document_id.clone(),
-            drawing: drawing.clone(),
-            annotations: cad_db::AnnotationDatabase::new(DatabaseId(2)),
-            identity: DocumentIdentity::Temporary(0),
-            units: UnitContext::drawing_units(),
-            resource_keys: Vec::new(),
-        },
-    );
-    application
-        .workspace
-        .viewports
-        .insert(ViewportId(1), cad_app::Viewport::new(ViewportId(1), document_id.clone(), [1080.0, 1920.0]));
-    *incoming.borrow_mut() = Some(drawing);
+    let controller = Rc::new(RefCell::new(HostController::with_demo_document([1080.0, 1920.0])?));
+    let (drawing, document_id, viewport_id) = {
+        let mut controller = controller.borrow_mut();
+        let _ = controller.fit();
+        (controller.drawing(), controller.document_id.clone(), controller.viewport_id.clone())
+    };
+    let incoming: IncomingDocument = Rc::new(RefCell::new(drawing));
 
     let ui_config = UiConfiguration {
         compact: true,
@@ -220,22 +151,31 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         safe_insets: [0.0; 4],
         application_title: "yacr CAD".into(),
         document: document_id,
-        viewport: ViewportId(1),
+        viewport: viewport_id,
     };
 
     // The sink needs the UI handle, which only exists after the adapter is
     // built, so it is shared through a slot filled immediately afterwards.
     let shared_handle: SharedHandle = Rc::new(RefCell::new(None));
+    let shared_view: SharedView = Rc::new(RefCell::new(None));
     let sink = HostSink {
-        application,
-        session,
-        incoming: incoming.clone(),
+        controller: controller.clone(),
         handle: shared_handle.clone(),
+        view: shared_view.clone(),
+        incoming: incoming.clone(),
         configuration,
     };
     let adapter = UiAdapter::new(ui_config, sink, true)?;
-    *shared_handle.borrow_mut() = Some(adapter.handle());
-    cad_ui_slint::install_cad_bridge(adapter.handle(), adapter.window(), incoming)?;
+    let handle = adapter.handle();
+    *shared_handle.borrow_mut() = Some(handle.clone());
+    let view = cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming)?;
+    {
+        let controller = controller.borrow();
+        if let Some(viewport) = controller.application.workspace.viewports.get(&controller.viewport_id) {
+            view.set_camera(viewport.camera.target, view.world_per_px());
+        }
+    }
+    *shared_view.borrow_mut() = Some(view);
     adapter.run()
 }
 
@@ -261,7 +201,8 @@ mod tests {
 
     #[test]
     fn demo_database_has_geometry_and_bounds() {
-        let db = demo_database();
+        let controller = HostController::with_demo_document([1080.0, 1920.0]).unwrap();
+        let db = controller.drawing().unwrap();
         assert!(db.entity_count() >= 6);
         let (min, max) = db.bounds().unwrap();
         assert!(max.x - min.x > 0.0);

@@ -12,6 +12,8 @@ use cad_measure::{MeasurementEngine, MeasurementRequest, MeasurementSpace};
 use cad_query::QueryService;
 use std::{collections::BTreeMap, sync::Arc};
 
+pub mod host;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
     Viewer,
@@ -88,6 +90,16 @@ pub struct SessionState {
     pub layer_overrides: BTreeMap<LayerId, bool>,
     pub tool: ToolState,
     pub generation: u64,
+    /// Recorded CAD backend preference; the host rebuilds the render session.
+    pub backend: BackendChoice,
+}
+
+/// CAD backend preference shared by UI, app state and hosts (spec §6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendChoice {
+    Auto,
+    WebGpu,
+    WebGl2,
 }
 
 impl SessionState {
@@ -100,6 +112,7 @@ impl SessionState {
             layer_overrides: BTreeMap::new(),
             tool: ToolState::Idle,
             generation: 0,
+            backend: BackendChoice::Auto,
         }
     }
 
@@ -221,6 +234,7 @@ pub enum CommandPayload {
     Layer(LayerId, bool),
     Space(SpaceId),
     StandardView(StandardView),
+    Backend(BackendChoice),
 }
 
 pub struct Command {
@@ -349,12 +363,82 @@ impl Application {
                 session.tool = ToolState::Selecting;
                 Ok(CommandOutcome::none())
             }
-            CommandId::Resources => pending("app.command.resources"),
-            CommandId::Diagnostics => pending("app.command.diagnostics"),
-            CommandId::SwitchBackend => pending("app.command.switch_backend"),
+            CommandId::Resources => self.resources_report(&command),
+            CommandId::Diagnostics => self.diagnostics_report(&command),
+            CommandId::SwitchBackend => {
+                if let CommandPayload::Backend(choice) = command.payload {
+                    session.backend = choice;
+                    Ok(CommandOutcome {
+                        objects: Vec::new(),
+                        changes: None,
+                        diagnostics: vec![Diagnostic {
+                            object: None,
+                            code: "backend.preference".into(),
+                            message: format!("后端偏好：{choice:?}（渲染会话由宿主重建）"),
+                        }],
+                    })
+                } else {
+                    Err(CadError::InvalidInput("SwitchBackend needs a backend payload".into()))
+                }
+            }
             CommandId::Switch2d3d => pending("app.command.switch_2d3d"),
             CommandId::Orbit => pending("app.command.orbit"),
         }
+    }
+
+    /// Report the resources the open document references (spec F10/F11).
+    fn resources_report(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let document = self
+            .workspace
+            .documents
+            .get(&command.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let keys = if document.resource_keys.is_empty() {
+            "无外部资源引用".to_string()
+        } else {
+            document.resource_keys.join(", ")
+        };
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "resources.summary".into(),
+                message: format!("资源引用 {}：{keys}", document.resource_keys.len()),
+            }],
+        })
+    }
+
+    /// Structured diagnostics summary for the UI panel and CLI (spec §19).
+    fn diagnostics_report(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let document = self
+            .workspace
+            .documents
+            .get(&command.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let bounds = document
+            .drawing
+            .bounds()
+            .map(|(min, max)| format!("范围 {:.3},{:.3} → {:.3},{:.3}", min.x, min.y, max.x, max.y))
+            .unwrap_or_else(|| "空图纸".to_string());
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![
+                Diagnostic {
+                    object: None,
+                    code: "diagnostics.summary".into(),
+                    message: format!(
+                        "图元 {}，批注 {}（{}），单位 {:?}",
+                        document.drawing.entity_count(),
+                        document.annotations.len(),
+                        if document.annotations.is_dirty() { "未保存" } else { "已保存" },
+                        document.units.source
+                    ),
+                },
+                Diagnostic { object: None, code: "diagnostics.bounds".into(), message: bounds },
+            ],
+        })
     }
 
     fn viewport_mut(&mut self, command: &Command) -> CadResult<&mut Viewport> {
@@ -365,6 +449,13 @@ impl Application {
     }
 
     fn fit_drawing(&mut self, session: &mut SessionState, command: &Command) -> CadResult<CommandOutcome> {
+        self.fit_viewport(session, &command.viewport)?;
+        Ok(CommandOutcome::none())
+    }
+
+    /// Fit a viewport to the current document bounds. Hosts call this after an
+    /// import so the first frame is usable without a synthetic command.
+    pub fn fit_viewport(&mut self, session: &mut SessionState, viewport_id: &ViewportId) -> CadResult<()> {
         let document = self
             .workspace
             .documents
@@ -374,7 +465,7 @@ impl Application {
         let viewport = self
             .workspace
             .viewports
-            .get_mut(&command.viewport)
+            .get_mut(viewport_id)
             .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
         let Some((min, max)) = bounds else {
             return Err(CadError::InvalidInput("drawing has no measurable extent".into()));
@@ -390,7 +481,7 @@ impl Application {
         let scale = (ex / w).max(ey / h) * 1.05;
         viewport.camera.projection = Projection::Orthographic { scale };
         session.generation += 1;
-        Ok(CommandOutcome::none())
+        Ok(())
     }
 
     fn pan(&mut self, command: &Command) -> CadResult<CommandOutcome> {

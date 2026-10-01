@@ -33,5 +33,14 @@ slint = { workspace = true, features = [
 [target.'cfg(not(target_os = "android"))'.dependencies]
 slint = { workspace = true, features = ["std", "compat-1-2", "unstable-wgpu-30", "log"] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = [
+    "Window", "Navigator", "Location", "Storage", "console",
+    "Document", "Element", "HtmlCanvasElement",
+] }
+
 [build-dependencies]
 slint-build.workspace = true

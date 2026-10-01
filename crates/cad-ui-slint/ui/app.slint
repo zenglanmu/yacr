@@ -1,5 +1,5 @@
 // Candidate shared shell, not platform-validated yet.
-import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, ComboBox } from "std-widgets.slint";
 
 export component YacrWindow inherits Window {
     in property <string> application-title;
@@ -9,11 +9,22 @@ export component YacrWindow inherits Window {
     in property <string> status-label;
     in property <image> cad-frame;
     in property <bool> work-mode;
+    in property <string> mode-label: "增强";
+    in property <bool> can-undo;
+    in property <int> backend-index: 0;
 
     callback open-requested();
     callback measure-requested();
     callback annotate-requested();
     callback fit-requested();
+    callback undo-requested();
+    callback redo-requested();
+    callback backend-selected(name: string);
+    callback export-requested();
+    callback import-requested();
+    callback diagnostics-requested();
+    callback pointer-input(kind: int, button: int, x: length, y: length);
+    callback scroll-input(dx: float, dy: float);
 
     title: application-title;
     background: #20242b;
@@ -25,6 +36,16 @@ export component YacrWindow inherits Window {
             Button { text: root.open-label; clicked => { root.open-requested(); } }
             Button { text: "适应"; clicked => { root.fit-requested(); } }
             Button {
+                text: "撤销";
+                enabled: root.work-mode && root.can-undo;
+                clicked => { root.undo-requested(); }
+            }
+            Button {
+                text: "重做";
+                enabled: root.work-mode && root.can-undo;
+                clicked => { root.redo-requested(); }
+            }
+            Button {
                 text: root.measure-label;
                 enabled: root.work-mode;
                 clicked => { root.measure-requested(); }
@@ -34,6 +55,15 @@ export component YacrWindow inherits Window {
                 enabled: root.work-mode;
                 clicked => { root.annotate-requested(); }
             }
+            ComboBox {
+                width: 96px;
+                model: ["Auto", "WebGPU", "WebGL2"];
+                current-index: root.backend-index;
+                selected(value) => { root.backend-selected(value); }
+            }
+            Button { text: "导出"; clicked => { root.export-requested(); } }
+            Button { text: "导入"; clicked => { root.import-requested(); } }
+            Button { text: "诊断"; clicked => { root.diagnostics-requested(); } }
         }
         Rectangle {
             background: #10131a;
@@ -42,6 +72,23 @@ export component YacrWindow inherits Window {
             Image {
                 source: root.cad-frame;
                 image-fit: contain;
+            }
+            TouchArea {
+                // kind: 0=down 1=up 2=move 3=cancel; button: 0=none 1=left 2=right 3=middle
+                pointer-event(e) => {
+                    root.pointer-input(
+                        e.kind == PointerEventKind.down ? 0 :
+                        (e.kind == PointerEventKind.up ? 1 :
+                        (e.kind == PointerEventKind.move ? 2 : 3)),
+                        e.button == PointerEventButton.left ? 1 :
+                        (e.button == PointerEventButton.right ? 2 :
+                        (e.button == PointerEventButton.middle ? 3 : 0)),
+                        self.mouse-x, self.mouse-y);
+                }
+                scroll-event(e) => {
+                    root.scroll-input(e.delta-x / 1px, e.delta-y / 1px);
+                    return EventResult.accept;
+                }
             }
         }
         Rectangle {

@@ -9,3 +9,4 @@ description = "Reports, core self-tests, benchmarks and fixed-view tools."
 
 [dependencies]
 cad-domain.workspace = true
+serde_json.workspace = true

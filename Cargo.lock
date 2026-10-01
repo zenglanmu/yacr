@@ -311,10 +311,15 @@ dependencies = [
 name = "app-web"
 version = "0.1.0"
 dependencies = [
+ "cad-annotations",
  "cad-app",
  "cad-domain",
  "cad-platform",
  "cad-ui-slint",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -752,6 +757,7 @@ dependencies = [
  "cad-proxy",
  "cad-representation",
  "cad-resources",
+ "serde_json",
 ]
 
 [[package]]
@@ -776,6 +782,7 @@ name = "cad-diagnostics"
 version = "0.1.0"
 dependencies = [
  "cad-domain",
+ "serde_json",
 ]
 
 [[package]]
@@ -872,7 +879,11 @@ dependencies = [
  "cad-geometry",
  "cad-scene",
  "glam",
+ "js-sys",
  "log",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "wgpu",
 ]
 
@@ -928,9 +939,13 @@ dependencies = [
  "cad-render-wgpu",
  "cad-representation",
  "cad-scene",
+ "js-sys",
  "log",
  "slint",
  "slint-build",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

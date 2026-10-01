@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use cad_db::DrawingDatabase;
 use cad_domain::{CadError, CadResult, DocumentId, Point3, TaskStamp, TolerancePolicy};
-use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
+use cad_render_wgpu::{ActiveBackend, BackendCapabilities, BackendPreference, Camera2d, RenderTarget, Renderer};
 use cad_representation::{ProviderRegistry, RepresentationContext};
 use cad_scene::{SceneBudget, SceneCache, SceneDelta};
 
@@ -68,45 +68,131 @@ struct BridgeState {
     document: Option<DatabaseIdKey>,
     image_size: Option<(u32, u32)>,
     error: Option<String>,
+    caps: Option<BackendCapabilities>,
 }
 
 type DatabaseIdKey = cad_domain::DatabaseId;
 
 impl Default for BridgeState {
     fn default() -> Self {
-        BridgeState { renderer: None, camera: BridgeCamera::default(), document: None, image_size: None, error: None }
+        BridgeState {
+            renderer: None,
+            camera: BridgeCamera::default(),
+            document: None,
+            image_size: None,
+            error: None,
+            caps: None,
+        }
+    }
+}
+
+/// Cloneable view control the host uses to navigate and inspect the CAD frame.
+///
+/// The authoritative camera lives in the application `Viewport`; the host syncs
+/// it here after every command, so there is exactly one camera truth (spec §4.2).
+#[derive(Clone)]
+pub struct CadView {
+    state: Rc<RefCell<BridgeState>>,
+    handle: UiHandle,
+    incoming: IncomingDocument,
+    preference: BackendPreference,
+}
+
+impl CadView {
+    /// Mirror the authoritative viewport camera into the render state.
+    pub fn set_camera(&self, center: Point3, world_per_px: f64) {
+        if !world_per_px.is_finite() || world_per_px <= 0.0 {
+            return;
+        }
+        let mut s = self.state.borrow_mut();
+        s.camera.center = Point3 { x: center.x, y: center.y, z: 0.0 };
+        s.camera.world_per_px = world_per_px.clamp(1e-12, 1e18);
+        drop(s);
+        let _ = self.handle.request_redraw();
+    }
+
+    /// Snapshot of the render camera for diagnostics/tests.
+    pub fn camera(&self) -> BridgeCamera {
+        self.state.borrow().camera
+    }
+
+    pub fn active_backend(&self) -> Option<ActiveBackend> {
+        self.state.borrow().caps.as_ref().map(|c| c.actual)
+    }
+
+    pub fn capabilities(&self) -> Option<(ActiveBackend, bool, u32)> {
+        self.state.borrow().caps.as_ref().map(|c| (c.actual, c.compute, c.max_texture_dimension))
+    }
+
+    pub fn last_error(&self) -> Option<String> {
+        self.state.borrow().error.clone()
+    }
+
+    pub fn preference(&self) -> BackendPreference {
+        self.preference
+    }
+
+    /// Request a frame; used after the host mutates the document slot.
+    pub fn request_redraw(&self) {
+        let _ = self.handle.request_redraw();
+    }
+
+    /// Drop derived GPU resources (device loss or backend rebuild).
+    pub fn teardown(&self) {
+        let mut s = self.state.borrow_mut();
+        s.renderer = None;
+        s.image_size = None;
+        s.caps = None;
+        self.incoming.borrow_mut().take();
     }
 }
 
 /// Install the CAD rendering notifier on the Slint window.
-pub fn install(handle: UiHandle, window: &slint::Window, incoming: IncomingDocument) -> CadResult<()> {
+pub fn install(
+    handle: UiHandle,
+    window: &slint::Window,
+    incoming: IncomingDocument,
+) -> CadResult<CadView> {
+    install_with_preference(handle, window, incoming, BackendPreference::WebGpu)
+}
+
+/// Install with an explicit renderer preference (hosts choose the device).
+pub fn install_with_preference(
+    handle: UiHandle,
+    window: &slint::Window,
+    incoming: IncomingDocument,
+    preference: BackendPreference,
+) -> CadResult<CadView> {
     let state = Rc::new(RefCell::new(BridgeState::default()));
     let state_for_notifier = state.clone();
     let frame_handle = handle.clone();
+    let scene_incoming = incoming.clone();
 
     window
         .set_rendering_notifier(move |render_state, graphics_api| match (render_state, graphics_api) {
             (slint::RenderingState::RenderingSetup, slint::GraphicsAPI::WGPU30 { device, queue, .. }) => {
                 let mut s = state_for_notifier.borrow_mut();
-                let mut renderer = Renderer::new(BackendPreference::WebGpu);
+                let mut renderer = Renderer::new(preference);
                 match renderer.initialize_with_device(device.clone(), queue.clone()) {
-                    Ok(_) => s.renderer = Some(renderer),
+                    Ok(caps) => {
+                        s.caps = Some(caps);
+                        s.renderer = Some(renderer);
+                    }
                     Err(e) => s.error = Some(format!("CAD renderer init failed: {e}")),
                 }
             }
             (slint::RenderingState::BeforeRendering, _) => {
                 let mut s = state_for_notifier.borrow_mut();
-                // Adopt a newly opened drawing exactly once.
-                if let Some(doc) = incoming.borrow().clone() {
+                // Adopt a newly opened drawing exactly once. The camera is owned
+                // by the application viewport and mirrored through `CadView`.
+                if let Some(doc) = scene_incoming.borrow().clone() {
+                    let stamp = TaskStamp::new(DocumentId(0), 0);
                     if s.document != Some(doc.id()) {
-                        let stamp = TaskStamp::new(DocumentId(0), 0);
                         if let Ok(delta) = build_scene(&doc, stamp.clone()) {
                             if let Some(renderer) = s.renderer.as_mut() {
                                 renderer.clear_batches();
                                 let _ = renderer.upload(&delta);
                             }
-                            let size = frame_handle.physical_size().unwrap_or(slint::PhysicalSize::new(1, 1));
-                            s.camera = fit_camera(&doc, [size.width as f64, size.height as f64]);
                             s.document = Some(doc.id());
                             s.image_size = None;
                         }
@@ -134,11 +220,12 @@ pub fn install(handle: UiHandle, window: &slint::Window, incoming: IncomingDocum
                 let mut s = state_for_notifier.borrow_mut();
                 s.renderer = None;
                 s.image_size = None;
+                s.caps = None;
             }
             _ => {}
         })
         .map_err(|e| CadError::GpuFailure(format!("set_rendering_notifier failed: {e}")))?;
-    Ok(())
+    Ok(CadView { state, handle, incoming, preference })
 }
 
 /// The Slint component type, re-exported for hosts.
@@ -161,5 +248,12 @@ mod tests {
         let db = DrawingDatabaseBuilder::new(cad_domain::DatabaseId(1)).finish().unwrap();
         let c = fit_camera(&db, [100.0, 100.0]);
         assert_eq!(c.world_per_px, 1.0);
+    }
+
+    #[test]
+    fn camera_stays_finite_under_extreme_zoom() {
+        let db = DrawingDatabaseBuilder::new(cad_domain::DatabaseId(1)).finish().unwrap();
+        let c = fit_camera(&db, [100.0, 100.0]);
+        assert!(c.world_per_px.is_finite());
     }
 }
