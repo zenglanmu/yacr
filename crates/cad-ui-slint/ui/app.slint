@@ -10,8 +10,20 @@ export component YacrWindow inherits Window {
     in property <image> cad-frame;
     in property <bool> work-mode;
     in property <string> mode-label: "增强";
+    // Undo and redo availability are independent so undoing to empty still
+    // permits redo (audit U11); never share the undo flag.
     in property <bool> can-undo;
+    in property <bool> can-redo;
     in property <int> backend-index: 0;
+
+    // --- Measurement tool panel (audit U03/U04) --------------------------
+    // All values are pushed from the application state; the shell invents
+    // nothing. `measurement-active` gates the confirm/cancel affordances.
+    in property <bool> measurement-active: false;
+    in property <bool> measurement-can-confirm: false;
+    in property <int> measurement-kind-index: 0;
+    in property <string> measurement-step-label: "";
+    in property <string> unit-label: "";
 
     callback open-requested();
     callback measure-requested();
@@ -19,12 +31,21 @@ export component YacrWindow inherits Window {
     callback fit-requested();
     callback undo-requested();
     callback redo-requested();
+    // Label of the chosen model entry; the adapter maps it to the shared
+    // MeasurementToolKind::ALL labels so no second ordering list exists.
+    callback measure-kind-selected(name: string);
+    callback confirm-measurement-requested();
+    callback cancel-measurement-requested();
     callback backend-selected(name: string);
     callback export-requested();
     callback import-requested();
     callback diagnostics-requested();
     callback pointer-input(kind: int, button: int, x: length, y: length);
     callback scroll-input(dx: float, dy: float);
+    // A single left-button click on the canvas, in logical pixels relative to
+    // the image. The adapter turns it into a measurement point when a mapper is
+    // installed (see docs/ui.md).
+    callback canvas-pick(x: float, y: float);
 
     title: application-title;
     background: #20242b;
@@ -42,7 +63,7 @@ export component YacrWindow inherits Window {
             }
             Button {
                 text: "重做";
-                enabled: root.work-mode && root.can-undo;
+                enabled: root.work-mode && root.can-redo;
                 clicked => { root.redo-requested(); }
             }
             Button {
@@ -65,6 +86,55 @@ export component YacrWindow inherits Window {
             Button { text: "导入"; clicked => { root.import-requested(); } }
             Button { text: "诊断"; clicked => { root.diagnostics-requested(); } }
         }
+
+        // Compact tool/properties panel. Measurement is the only tool wired so
+        // far; other panels are intentionally absent (see docs/ui.md).
+        Rectangle {
+            height: 40px;
+            background: #262b33;
+            HorizontalBox {
+                spacing: 8px;
+                padding: 4px;
+                alignment: center;
+                Text {
+                    text: "测量";
+                    color: #c8d0dc;
+                    vertical-alignment: center;
+                }
+                ComboBox {
+                    width: 120px;
+                    enabled: root.work-mode;
+                    // Mirrors MeasurementToolKind::ALL; the adapter owns the
+                    // mapping so the two lists cannot drift silently.
+                    model: ["距离", "折线长度", "角度", "面积"];
+                    current-index: root.measurement-kind-index;
+                    selected(value) => { root.measure-kind-selected(value); }
+                }
+                Button {
+                    text: "确认";
+                    enabled: root.work-mode && root.measurement-can-confirm;
+                    clicked => { root.confirm-measurement-requested(); }
+                }
+                Button {
+                    text: "取消";
+                    enabled: root.work-mode && root.measurement-active;
+                    clicked => { root.cancel-measurement-requested(); }
+                }
+                Text {
+                    text: root.measurement-step-label;
+                    color: #e6edf7;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.unit-label;
+                    color: #9aa7b8;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
         Rectangle {
             background: #10131a;
             // The CAD frame is produced by the wgpu renderer and shared as a
@@ -84,6 +154,10 @@ export component YacrWindow inherits Window {
                         (e.button == PointerEventButton.right ? 2 :
                         (e.button == PointerEventButton.middle ? 3 : 0)),
                         self.mouse-x, self.mouse-y);
+                    // A completed left click is offered as a measurement pick.
+                    if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
+                        root.canvas-pick(self.mouse-x / 1px, self.mouse-y / 1px);
+                    }
                 }
                 scroll-event(e) => {
                     root.scroll-input(e.delta-x / 1px, e.delta-y / 1px);

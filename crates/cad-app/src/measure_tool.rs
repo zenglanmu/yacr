@@ -19,6 +19,61 @@ pub enum MeasurementToolKind {
 }
 
 impl MeasurementToolKind {
+    /// Every kind, in the order the UI selector presents them. This is the one
+    /// authoritative ordering; the Slint panel mirrors it instead of keeping a
+    /// second hand-written list that can drift.
+    pub const ALL: [MeasurementToolKind; 4] = [
+        MeasurementToolKind::Distance,
+        MeasurementToolKind::PolylineLength,
+        MeasurementToolKind::Angle,
+        MeasurementToolKind::Area,
+    ];
+
+    /// Stable, locale-independent machine key (never translated).
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Distance => "distance",
+            Self::PolylineLength => "polyline",
+            Self::Angle => "angle",
+            Self::Area => "area",
+        }
+    }
+
+    /// Parse a machine key back to a kind; unknown keys are rejected instead of
+    /// silently falling back to a default algorithm.
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "distance" => Some(Self::Distance),
+            "polyline" => Some(Self::PolylineLength),
+            "angle" => Some(Self::Angle),
+            "area" => Some(Self::Area),
+            _ => None,
+        }
+    }
+
+    /// Resolve a kind from its user-facing label (as displayed by a combobox).
+    ///
+    /// The labels come from [`Self::label`], so the UI model and this lookup
+    /// share one source of truth. Unknown labels are rejected.
+    pub fn from_label(label: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|kind| kind.label() == label)
+    }
+
+    /// Position in [`Self::ALL`], for a combobox `current-index`.
+    pub fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|kind| *kind == self)
+            .expect("every kind is listed in ALL")
+    }
+
+    /// Kind at a UI index, or `None` for an out-of-range index.
+    pub fn from_index(index: i32) -> Option<Self> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| Self::ALL.get(i).copied())
+    }
+
     /// The engine algorithm this tool evaluates with.
     pub fn algorithm(self) -> MeasurementAlgorithm {
         match self {
@@ -75,6 +130,40 @@ pub struct MeasurementPreview {
     /// Whether the current capture can be evaluated. Open-ended tools are still
     /// `ready` only after an explicit confirm.
     pub ready: bool,
+}
+
+impl MeasurementPreview {
+    /// Whether the captured points can be committed right now.
+    ///
+    /// Open-ended tools (polyline/area) are only confirmable after an explicit
+    /// confirm; auto-completing tools commit as soon as they are ready. The UI
+    /// uses this to enable its confirm affordance without guessing.
+    pub fn can_confirm(&self) -> bool {
+        self.ready
+    }
+
+    /// One-line, locale-facing capture step for the tool panel.
+    ///
+    /// Kept in `cad-app` so the Slint layer never re-implements the state
+    /// machine's counting rules.
+    pub fn status_line(&self) -> String {
+        if self.remaining > 0 {
+            format!(
+                "{}：已选 {} 点，还需 {} 点",
+                self.kind.label(),
+                self.points.len(),
+                self.remaining
+            )
+        } else if self.ready {
+            format!(
+                "{}：已选 {} 点，可确认",
+                self.kind.label(),
+                self.points.len()
+            )
+        } else {
+            format!("{}：已选 {} 点", self.kind.label(), self.points.len())
+        }
+    }
 }
 
 /// Measurement tool state machine.
@@ -196,5 +285,53 @@ mod tests {
         assert!(tool.is_ready());
         assert!(!tool.auto_ready());
         assert_eq!(tool.preview().points.len(), 2);
+    }
+
+    #[test]
+    fn kind_keys_round_trip_and_index_matches_all() {
+        for (index, kind) in MeasurementToolKind::ALL.iter().copied().enumerate() {
+            assert_eq!(kind.index(), index);
+            assert_eq!(MeasurementToolKind::from_index(index as i32), Some(kind));
+            assert_eq!(MeasurementToolKind::from_key(kind.key()), Some(kind));
+        }
+        // Unknown keys/indices are rejected, never silently defaulted.
+        assert_eq!(MeasurementToolKind::from_key("radius"), None);
+        assert_eq!(MeasurementToolKind::from_index(-1), None);
+        assert_eq!(
+            MeasurementToolKind::from_index(MeasurementToolKind::ALL.len() as i32),
+            None
+        );
+        // The combobox labels are unique and resolve back to their kind.
+        for kind in MeasurementToolKind::ALL {
+            assert_eq!(MeasurementToolKind::from_label(kind.label()), Some(kind));
+        }
+        assert_eq!(MeasurementToolKind::from_label("半径"), None);
+    }
+
+    #[test]
+    fn preview_status_and_confirm_follow_the_state_machine() {
+        let mut tool = MeasurementTool::new(MeasurementToolKind::Angle);
+        // Not enough points: cannot confirm, status still counts down.
+        tool.push_point(p(0.0, 0.0));
+        let preview = tool.preview();
+        assert!(!preview.can_confirm());
+        assert_eq!(preview.status_line(), "角度：已选 1 点，还需 2 点");
+
+        // Ready: confirmable.
+        tool.push_point(p(1.0, 0.0));
+        tool.push_point(p(0.0, 1.0));
+        let preview = tool.preview();
+        assert!(preview.can_confirm());
+        assert_eq!(preview.status_line(), "角度：已选 3 点，可确认");
+    }
+
+    #[test]
+    fn open_ended_preview_is_confirmable_once_minimum_met() {
+        let mut tool = MeasurementTool::new(MeasurementToolKind::Area);
+        assert!(!tool.preview().can_confirm());
+        for point in [p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0)] {
+            tool.push_point(point);
+        }
+        assert!(tool.preview().can_confirm());
     }
 }
