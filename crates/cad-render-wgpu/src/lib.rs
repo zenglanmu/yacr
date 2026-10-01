@@ -1,14 +1,27 @@
-//! wgpu 2D pipelines over CPU scene batches.
+//! wgpu pipelines over CPU scene batches.
 //!
 //! Spec v2.0 §5.2, §8: the renderer does not own the window or the device. The
 //! host (Slint) provides a shared `Device`/`Queue`; CAD draws into a texture the
 //! host composites. Camera navigation updates only small uniform buffers, never
 //! the static vertex buffers.
+//!
+//! Two pipelines are provided: a `LineList` pipeline for polylines and a
+//! `TriangleList` pipeline for mesh geometry with a depth buffer, back-face
+//! culling and per-fragment shading (audit F14). The pure geometry decisions
+//! live in [`geometry`] and are unit tested without a GPU.
 
 pub use wgpu;
 
+pub mod geometry;
+
+use cad_diagnostics::codes;
+use cad_diagnostics::{DiagnosticParameter, DiagnosticReason};
 use cad_domain::*;
-use cad_scene::SceneDelta;
+use cad_scene::{FrameBudget, RenderTopology, SceneDelta};
+use geometry::OverBudget;
+pub use geometry::{Camera2d, Camera3d};
+
+pub use geometry::{front_face_ccw, normals_need_repair, repaired_normals, winding_is_flipped};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendPreference {
@@ -72,33 +85,98 @@ pub struct FrameStats {
     pub gpu_ms: Option<f64>,
     pub draw_calls: u64,
     pub uploaded_bytes: u64,
+    /// Vertices submitted this frame (post-budget).
+    pub vertices: usize,
+    /// Triangles submitted this frame (post-budget).
+    pub triangles: usize,
+    /// Present when part of the scene was held back because the frame budget
+    /// was crossed. The caller must surface this; batches are never silently
+    /// dropped.
+    pub over_budget: Option<OverBudgetReason>,
 }
 
-/// Camera used by the CAD viewport, in world units.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Camera2d {
-    pub center: Point3,
-    pub world_per_px: f64,
-    pub z_plane: f32,
+/// A structured over-budget reason, mirroring [`geometry::OverBudget`] with a
+/// stable diagnostic code attached.
+#[derive(Debug, Clone)]
+pub struct OverBudgetReason {
+    pub report: OverBudget,
+    pub reason: DiagnosticReason,
 }
 
-impl Default for Camera2d {
-    fn default() -> Self {
-        Camera2d {
-            center: Point3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            world_per_px: 1.0,
-            z_plane: 0.0,
+impl OverBudgetReason {
+    pub fn diagnostic(&self) -> &DiagnosticReason {
+        &self.reason
+    }
+}
+
+/// A renderer failure that the caller can distinguish from a bad frame.
+///
+/// Audit F12: a device loss must not be confused with a per-frame validation
+/// error, and the renderer must not silently recreate state while batches are
+/// lost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RenderError {
+    /// The GPU device was lost (driver reset, `destroy`, backend failure). All
+    /// derived GPU resources are gone; the host must supply a new device and the
+    /// scene must be re-uploaded via [`Renderer::upload`].
+    DeviceLost(String),
+    /// A per-frame validation/back-end error that is *not* a device loss. The
+    /// device and its batches are intact; the frame was rejected.
+    Frame(String),
+    /// The renderer was used before a device was initialized, or a required
+    /// derived resource is missing. Not a device loss.
+    NotInitialized(String),
+}
+
+impl RenderError {
+    /// Whether the caller should tear down and rebuild GPU state.
+    pub fn is_device_loss(&self) -> bool {
+        matches!(self, RenderError::DeviceLost(_))
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            RenderError::DeviceLost(m) | RenderError::Frame(m) | RenderError::NotInitialized(m) => {
+                m
+            }
         }
     }
 }
 
+impl std::fmt::Display for RenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for RenderError {}
+
+/// Where a render call's error scope reported a failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScopeOutcome {
+    Clean,
+    FrameError,
+    DeviceLost,
+}
+
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
 struct GpuBatch {
     vertices: wgpu::Buffer,
     vertex_count: u32,
+    /// Per-vertex normals (mesh topology only); kept alive for binding.
+    normals: Option<wgpu::Buffer>,
+    topology: RenderTopology,
+    /// Triangle index buffer (mesh topology only).
+    indices: Option<wgpu::Buffer>,
+    index_count: u32,
+    /// Line index buffer over the shared mesh vertices (wireframe only).
+    edge_indices: Option<wgpu::Buffer>,
+    edge_index_count: u32,
+    /// `true` when the batch's transform mirrors winding.
+    mirrored: bool,
+    /// Constant per-object alpha.
+    alpha: f32,
     origin: [f32; 3],
     camera: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -114,22 +192,31 @@ const _: () = assert!(MIN_GUARANTEED_TEXTURE_DIMENSION >= 2048);
 pub struct Renderer {
     pub preference: BackendPreference,
     pub recovery_limit: u32,
-    /// Real activated backend. `None` until a device is initialized: the host
-    /// preference is not the same thing as the backend that actually came up
-    /// (audit B02).
+    /// Per-frame vertex/triangle budget, enforced before submission.
+    pub frame_budget: FrameBudget,
+    /// Real activated backend. `None` until a device is initialized.
     active_backend: Option<ActiveBackend>,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     layout: Option<wgpu::BindGroupLayout>,
-    pipeline: Option<wgpu::RenderPipeline>,
+    line_pipeline: Option<wgpu::RenderPipeline>,
+    mesh_pipeline: Option<wgpu::RenderPipeline>,
+    /// Mirrored mesh pipeline: same shader but `front_face = Cw`, so mirrored
+    /// batches cull the correct side instead of the visible one.
+    mesh_pipeline_mirrored: Option<wgpu::RenderPipeline>,
     target: Option<wgpu::Texture>,
     target_view: Option<wgpu::TextureView>,
+    depth_view: Option<wgpu::TextureView>,
     target_size: (u32, u32),
     target_format: wgpu::TextureFormat,
     batches: Vec<GpuBatch>,
     device_generation: u64,
     uploaded_bytes: u64,
     draw_calls: u64,
+    /// Set once a device-loss is observed, until the host rebuilds.
+    device_lost: bool,
+    /// Detail string carried by the last device-loss observation.
+    last_device_lost: Option<String>,
 }
 
 impl Default for Renderer {
@@ -143,20 +230,29 @@ impl Renderer {
         Renderer {
             preference,
             recovery_limit: 2,
+            frame_budget: FrameBudget {
+                max_vertices: 8_000_000,
+                max_triangles: 2_000_000,
+            },
             // No device yet, so no backend has actually been activated.
             active_backend: None,
             device: None,
             queue: None,
             layout: None,
-            pipeline: None,
+            line_pipeline: None,
+            mesh_pipeline: None,
+            mesh_pipeline_mirrored: None,
             target: None,
             target_view: None,
+            depth_view: None,
             target_size: (1, 1),
             target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
             batches: Vec::new(),
             device_generation: 0,
             uploaded_bytes: 0,
             draw_calls: 0,
+            device_lost: false,
+            last_device_lost: None,
         }
     }
 
@@ -170,15 +266,19 @@ impl Renderer {
         queue: wgpu::Queue,
     ) -> CadResult<BackendCapabilities> {
         let caps = Self::caps_for(&device, self.preference);
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cad-lines"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(LINE_SHADER.into()),
+        });
+        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-mesh"),
+            source: wgpu::ShaderSource::Wgsl(MESH_SHADER.into()),
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("cad-camera-layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -192,18 +292,14 @@ impl Renderer {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("cad-lines-pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &line_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: (std::mem::size_of::<f32>() * 3) as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3],
-                })],
+                buffers: &[Some(position_only_layout())],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::LineList,
@@ -214,10 +310,16 @@ impl Renderer {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &line_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -229,21 +331,85 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let mesh_pipeline = Self::create_mesh_pipeline(
+            &device,
+            &pipeline_layout,
+            &mesh_shader,
+            self.target_format,
+            wgpu::FrontFace::Ccw,
+            "cad-mesh-pipeline",
+        );
+        let mesh_pipeline_mirrored = Self::create_mesh_pipeline(
+            &device,
+            &pipeline_layout,
+            &mesh_shader,
+            self.target_format,
+            wgpu::FrontFace::Cw,
+            "cad-mesh-pipeline-mirrored",
+        );
 
         self.device = Some(device);
         self.queue = Some(queue);
         self.layout = Some(layout);
-        self.pipeline = Some(pipeline);
+        self.line_pipeline = Some(line_pipeline);
+        self.mesh_pipeline = Some(mesh_pipeline);
+        self.mesh_pipeline_mirrored = Some(mesh_pipeline_mirrored);
         self.active_backend = Some(caps.actual);
         self.device_generation += 1;
+        self.device_lost = false;
         Ok(caps)
     }
 
+    fn create_mesh_pipeline(
+        device: &wgpu::Device,
+        pipeline_layout: &wgpu::PipelineLayout,
+        shader: &wgpu::ShaderModule,
+        format: wgpu::TextureFormat,
+        front_face: wgpu::FrontFace,
+        label: &str,
+    ) -> wgpu::RenderPipeline {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(mesh_vertex_layout())],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
+
     /// Capability snapshot derived from adapter limits and the host preference.
-    ///
-    /// WebGPU is the enhanced tier; WebGL2 is the base tier and therefore never
-    /// advertises compute, storage buffers or indirect draw even if some
-    /// adapter reports the limits.
     fn caps_for(device: &wgpu::Device, preference: BackendPreference) -> BackendCapabilities {
         let limits = device.limits();
         let actual = match preference {
@@ -286,7 +452,12 @@ impl Renderer {
         Some((caps.actual, caps.compute, caps.max_texture_dimension))
     }
 
-    fn ensure_target(&mut self, target: &RenderTarget) -> CadResult<()> {
+    /// Whether the device has been observed lost and still needs rebuilding.
+    pub fn is_device_lost(&self) -> bool {
+        self.device_lost
+    }
+
+    fn ensure_target(&mut self, target: &RenderTarget) -> Result<(), RenderError> {
         if self.target.is_some() && self.target_size == (target.width.max(1), target.height.max(1))
         {
             return Ok(());
@@ -294,7 +465,7 @@ impl Renderer {
         let device = self
             .device
             .as_ref()
-            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
+            .ok_or_else(|| RenderError::NotInitialized("renderer not initialized".into()))?;
         let size = wgpu::Extent3d {
             width: target.width.max(1),
             height: target.height.max(1),
@@ -310,13 +481,48 @@ impl Renderer {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
+        let depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("cad-depth"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
         self.target_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.depth_view = Some(depth.create_view(&wgpu::TextureViewDescriptor::default()));
         self.target = Some(texture);
         self.target_size = (size.width, size.height);
         Ok(())
     }
 
+    fn make_uniform(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+    ) -> (wgpu::Buffer, wgpu::BindGroup) {
+        let camera = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cad-batch-camera"),
+            size: 128,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cad-batch-bind"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera.as_entire_binding(),
+            }],
+        });
+        (camera, bind_group)
+    }
+
     // Upload CPU batches as static GPU buffers (once per change).
+    //
+    // Mesh batches get an index buffer and a repaired normal buffer; line
+    // batches keep the position-only layout.
     pub fn upload(&mut self, delta: &SceneDelta) -> CadResult<()> {
         let device = self
             .device
@@ -327,38 +533,67 @@ impl Renderer {
             .as_ref()
             .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
         for batch in &delta.added {
-            let bytes: Vec<u8> = batch
-                .vertices
-                .iter()
-                .flat_map(|v| [v[0].to_le_bytes(), v[1].to_le_bytes(), v[2].to_le_bytes()].concat())
-                .collect();
-            let vertices = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("cad-batch"),
-                size: bytes.len().max(12) as wgpu::BufferAddress,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            if let Some(queue) = self.queue.as_ref() {
-                queue.write_buffer(&vertices, 0, &bytes);
-            }
-            let camera = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("cad-batch-camera"),
-                size: 64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("cad-batch-bind"),
-                layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera.as_entire_binding(),
-                }],
-            });
-            self.uploaded_bytes += bytes.len() as u64;
+            let (vertices, indices, edge_indices, normals) = match batch.topology {
+                RenderTopology::Mesh => {
+                    let verts = pack_positions(&batch.vertices);
+                    let idx: Vec<u32> = batch
+                        .indices
+                        .iter()
+                        .flat_map(|t| [t[0], t[1], t[2]])
+                        .collect();
+                    let edges = geometry::sorted_edge_indices(&batch.indices);
+                    let normals = geometry::repaired_normals(batch);
+                    (verts, idx, edges, pack_positions(&normals))
+                }
+                RenderTopology::MeshEdges => {
+                    let verts = pack_positions(&batch.vertices);
+                    let idx: Vec<u32> = (0..batch.vertices.len() as u32).collect();
+                    (verts, Vec::new(), idx, Vec::new())
+                }
+                RenderTopology::Lines => (
+                    pack_positions(&batch.vertices),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+            };
+
+            let is_mesh = batch.topology == RenderTopology::Mesh;
+            let vertex_buffer = Self::vertex_buffer(device, self.queue.as_ref(), &vertices);
+            let index_buffer = if indices.is_empty() {
+                None
+            } else {
+                Some(Self::index_buffer(device, self.queue.as_ref(), &indices))
+            };
+            let edge_buffer = if edge_indices.is_empty() {
+                None
+            } else {
+                Some(Self::index_buffer(
+                    device,
+                    self.queue.as_ref(),
+                    &edge_indices,
+                ))
+            };
+            let normal_buffer = if is_mesh {
+                Some(Self::vertex_buffer(device, self.queue.as_ref(), &normals))
+            } else {
+                None
+            };
+
+            let (camera, bind_group) = Self::make_uniform(device, layout);
+            let bytes = vertices.len() + indices.len() * 4 + edge_indices.len() * 4 + normals.len();
+            self.uploaded_bytes += bytes as u64;
             self.batches.push(GpuBatch {
-                vertices,
+                vertices: vertex_buffer,
                 vertex_count: batch.vertices.len() as u32,
+                normals: normal_buffer,
+                topology: batch.topology,
+                indices: index_buffer,
+                index_count: indices.len() as u32,
+                edge_indices: edge_buffer,
+                edge_index_count: edge_indices.len() as u32,
+                mirrored: batch.mirrored,
+                alpha: batch.alpha,
                 origin: [
                     batch.local_origin.x as f32,
                     batch.local_origin.y as f32,
@@ -371,17 +606,63 @@ impl Renderer {
         Ok(())
     }
 
+    fn vertex_buffer(
+        device: &wgpu::Device,
+        queue: Option<&wgpu::Queue>,
+        bytes: &[u8],
+    ) -> wgpu::Buffer {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cad-batch"),
+            size: bytes.len().max(12) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        if let Some(queue) = queue {
+            queue.write_buffer(&buffer, 0, bytes);
+        }
+        buffer
+    }
+
+    fn index_buffer(
+        device: &wgpu::Device,
+        queue: Option<&wgpu::Queue>,
+        indices: &[u32],
+    ) -> wgpu::Buffer {
+        let bytes: Vec<u8> = indices.iter().flat_map(|i| i.to_le_bytes()).collect();
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cad-batch-index"),
+            size: bytes.len().max(4) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        if let Some(queue) = queue {
+            queue.write_buffer(&buffer, 0, &bytes);
+        }
+        buffer
+    }
+
     pub fn clear_batches(&mut self) {
         self.batches.clear();
     }
 
     /// Reset derived GPU resources after a device loss.
+    ///
+    /// The old device cannot be reused, so this only tears state down and marks
+    /// the renderer as lost. The host must call [`Renderer::initialize_with_device`]
+    /// and re-upload the scene; batches are *not* silently recreated here.
     pub fn rebuild_device(&mut self, _target: &RenderTarget) -> CadResult<()> {
-        self.pipeline = None;
+        self.line_pipeline = None;
+        self.mesh_pipeline = None;
+        self.mesh_pipeline_mirrored = None;
         self.layout = None;
         self.target = None;
         self.target_view = None;
+        self.depth_view = None;
         self.batches.clear();
+        self.device = None;
+        self.queue = None;
+        self.active_backend = None;
+        self.device_lost = true;
         Err(CadError::GpuFailure(
             "device rebuild requires a new shared device from the host".into(),
         ))
@@ -393,32 +674,47 @@ impl Renderer {
         Ok(())
     }
 
-    /// Render one frame into the offscreen target.
-    pub fn render(&mut self, camera: Camera2d, target: &RenderTarget) -> CadResult<FrameStats> {
-        self.ensure_target(target)?;
-        let Some(queue) = self.queue.as_ref() else {
-            return Err(CadError::GpuFailure("renderer not initialized".into()));
-        };
-        let device = self.device.as_ref().unwrap();
-        let Some(pipeline) = self.pipeline.as_ref() else {
-            return Err(CadError::GpuFailure("renderer resources missing".into()));
-        };
-        let Some(view) = self.target_view.as_ref() else {
-            return Err(CadError::GpuFailure("renderer target missing".into()));
-        };
+    /// Mark the device as lost after the host's device-lost callback fires.
+    ///
+    /// The renderer cannot own the lost callback itself because the device is
+    /// shared with the host (Slint). The host calls this when wgpu reports
+    /// `DeviceLostReason`, or when a backend/surface failure is observed. All
+    /// derived GPU resources are dropped; the host must re-initialize and
+    /// re-upload the scene. Batches are never silently recreated.
+    pub fn note_device_lost(&mut self, detail: impl Into<String>) -> RenderError {
+        let detail = detail.into();
+        self.line_pipeline = None;
+        self.mesh_pipeline = None;
+        self.mesh_pipeline_mirrored = None;
+        self.layout = None;
+        self.target = None;
+        self.target_view = None;
+        self.depth_view = None;
+        self.batches.clear();
+        self.active_backend = None;
+        self.device_lost = true;
+        self.last_device_lost = Some(detail.clone());
+        RenderError::DeviceLost(detail)
+    }
 
-        let w = self.target_size.0 as f64;
-        let h = self.target_size.1 as f64;
+    /// Render one frame into the offscreen target using a 2D camera.
+    ///
+    /// The error is explicit: callers can tell a device loss from a rejected
+    /// frame via [`RenderError::is_device_loss`].
+    pub fn render(
+        &mut self,
+        camera: Camera2d,
+        target: &RenderTarget,
+    ) -> Result<FrameStats, RenderError> {
+        let w = target.width.max(1) as f64;
+        let h = target.height.max(1) as f64;
         let sx = 2.0 / (w * camera.world_per_px);
         let sy = -2.0 / (h * camera.world_per_px);
-
-        // Per-batch uniform = M * T(batch origin), so relative vertices land at
-        // their true world position while staying precise in f32.
+        let mut transforms = Vec::with_capacity(self.batches.len());
         for batch in &self.batches {
             let ox = batch.origin[0] as f64;
             let oy = batch.origin[1] as f64;
-            let oz = batch.origin[2] as f64;
-            let m: [f32; 16] = [
+            transforms.push([
                 sx as f32,
                 0.0,
                 0.0,
@@ -433,16 +729,97 @@ impl Renderer {
                 0.0,
                 (sx * (ox - camera.center.x)) as f32,
                 (sy * (oy - camera.center.y)) as f32,
-                (oz - camera.center.z) as f32 + camera.z_plane,
+                (batch.origin[2] as f64 - camera.center.z) as f32 + camera.z_plane,
                 1.0,
-            ];
-            queue.write_buffer(&batch.camera, 0, bytemuck::cast_slice(&m));
+            ]);
         }
+        self.render_with_transforms(transforms, target)
+    }
+
+    /// Render one frame into the offscreen target using a 3D camera.
+    ///
+    /// Returns [`RenderError::Frame`] (no GPU work submitted) when the camera
+    /// projection is degenerate.
+    pub fn render_3d(
+        &mut self,
+        camera: Camera3d,
+        target: &RenderTarget,
+    ) -> Result<FrameStats, RenderError> {
+        let aspect = target.width.max(1) as f64 / target.height.max(1) as f64;
+        let Some(vp) = camera.view_projection(aspect) else {
+            return Err(RenderError::Frame(
+                "camera has no usable 3D projection".into(),
+            ));
+        };
+        // Per-batch uniform = VP * T(batch origin).
+        let transforms = self
+            .batches
+            .iter()
+            .map(|batch| translate_left(&vp, batch.origin))
+            .collect();
+        self.render_with_transforms(transforms, target)
+    }
+
+    fn render_with_transforms(
+        &mut self,
+        transforms: Vec<[f32; 16]>,
+        target: &RenderTarget,
+    ) -> Result<FrameStats, RenderError> {
+        if self.device_lost {
+            return Err(RenderError::DeviceLost(
+                self.last_device_lost
+                    .clone()
+                    .unwrap_or_else(|| "device lost; rebuild required".into()),
+            ));
+        }
+        self.ensure_target(target)?;
+        let Some(queue) = self.queue.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer not initialized".into(),
+            ));
+        };
+        let device = self.device.as_ref().unwrap();
+        let Some(line_pipeline) = self.line_pipeline.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer resources missing".into(),
+            ));
+        };
+        let Some(mesh_pipeline) = self.mesh_pipeline.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer resources missing".into(),
+            ));
+        };
+        let Some(mesh_pipeline_mirrored) = self.mesh_pipeline_mirrored.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer resources missing".into(),
+            ));
+        };
+        let Some(view) = self.target_view.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer target missing".into(),
+            ));
+        };
+        let Some(depth_view) = self.depth_view.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer depth target missing".into(),
+            ));
+        };
+
+        // Write the per-batch uniforms before encoding. The uniform is the
+        // transform matrix followed by the constant per-batch alpha.
+        for (batch, m) in self.batches.iter().zip(transforms.iter()) {
+            let mut uniform = [0.0f32; 20];
+            uniform[..16].copy_from_slice(m);
+            uniform[16] = batch.alpha.clamp(0.0, 1.0);
+            queue.write_buffer(&batch.camera, 0, bytemuck::cast_slice(&uniform));
+        }
+
+        // Enforce the per-frame vertex/triangle budget explicitly.
+        let plan = plan_from_gpu(&self.batches, &self.frame_budget);
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("cad-encoder"),
         });
-        let mut draw_calls = 0u64;
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("cad-pass"),
@@ -460,27 +837,132 @@ impl Renderer {
                     },
                     depth_slice: None,
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(pipeline);
-            for batch in &self.batches {
+            // Line topology batches use the line pipeline.
+            pass.set_pipeline(line_pipeline);
+            for &i in plan.accepted.iter() {
+                let batch = &self.batches[i];
+                if batch.topology != RenderTopology::Lines {
+                    continue;
+                }
                 pass.set_bind_group(0, &batch.bind_group, &[]);
                 pass.set_vertex_buffer(0, batch.vertices.slice(..));
-                pass.draw(0..batch.vertex_count, 0..1);
-                draw_calls += 1;
+                if let Some(indices) = &batch.indices {
+                    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..batch.index_count, 0, 0..1);
+                } else {
+                    pass.draw(0..batch.vertex_count, 0..1);
+                }
+            }
+            // Mesh batches use the mesh pipeline; mirrored batches select the
+            // `Cw` front-face variant so back-face culling stays correct.
+            for &i in plan.accepted.iter() {
+                let batch = &self.batches[i];
+                if batch.topology != RenderTopology::Mesh {
+                    continue;
+                }
+                pass.set_pipeline(if batch.mirrored {
+                    mesh_pipeline_mirrored
+                } else {
+                    mesh_pipeline
+                });
+                pass.set_bind_group(0, &batch.bind_group, &[]);
+                pass.set_vertex_buffer(0, batch.vertices.slice(..));
+                if let Some(normals) = &batch.normals {
+                    pass.set_vertex_buffer(1, normals.slice(..));
+                }
+                pass.set_index_buffer(
+                    batch.indices.as_ref().unwrap().slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..batch.index_count, 0, 0..1);
+                // Optional wireframe overlay over the shared mesh vertices.
+                if let Some(edges) = &batch.edge_indices {
+                    pass.set_pipeline(line_pipeline);
+                    pass.set_vertex_buffer(0, batch.vertices.slice(..));
+                    pass.set_index_buffer(edges.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..batch.edge_index_count, 0, 0..1);
+                }
+            }
+            // MeshEdges topology batches draw their own line index list.
+            pass.set_pipeline(line_pipeline);
+            for &i in plan.accepted.iter() {
+                let batch = &self.batches[i];
+                if batch.topology != RenderTopology::MeshEdges {
+                    continue;
+                }
+                pass.set_bind_group(0, &batch.bind_group, &[]);
+                pass.set_vertex_buffer(0, batch.vertices.slice(..));
+                pass.set_index_buffer(
+                    batch.indices.as_ref().unwrap().slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..batch.index_count, 0, 0..1);
             }
         }
-        queue.submit(Some(encoder.finish()));
+
+        let submission = queue.submit(Some(encoder.finish()));
+        // Distinguish device loss from a bad frame. A bounded wait classifies
+        // the submission; the host's device-lost callback is the authoritative
+        // loss signal (see `note_device_lost`).
+        let outcome = self.device_scope_outcome(device, submission);
+        let draw_calls = plan.accepted.len() as u64;
         self.draw_calls = draw_calls;
+        match outcome {
+            ScopeOutcome::Clean => {}
+            ScopeOutcome::FrameError => {
+                return Err(RenderError::Frame(
+                    "frame rejected by GPU validation".into(),
+                ));
+            }
+            ScopeOutcome::DeviceLost => {
+                let report = self.note_device_lost("GPU device lost while rendering");
+                return Err(report);
+            }
+        }
         Ok(FrameStats {
             cpu_ms: 0.0,
             gpu_ms: None,
             draw_calls,
             uploaded_bytes: self.uploaded_bytes,
+            vertices: plan.usage.vertices,
+            triangles: plan.usage.triangles,
+            over_budget: plan.over_budget,
         })
+    }
+
+    /// Poll the device and classify the frame's outcome.
+    ///
+    /// A `Timeout` means the device made no progress in the bound (1 s): on
+    /// native backends that is the observable proxy for a lost/reset device, so
+    /// it is reported as [`ScopeOutcome::DeviceLost`]. A wrong submission index
+    /// is a frame-level mistake, not a loss. A clean poll means no error the
+    /// renderer can observe synchronously; the host's device-lost callback still
+    /// remains authoritative.
+    fn device_scope_outcome(
+        &self,
+        device: &wgpu::Device,
+        submission: wgpu::SubmissionIndex,
+    ) -> ScopeOutcome {
+        match device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout: Some(std::time::Duration::from_secs(1)),
+        }) {
+            Ok(_) => ScopeOutcome::Clean,
+            Err(wgpu::PollError::Timeout) => ScopeOutcome::DeviceLost,
+            Err(wgpu::PollError::WrongSubmissionIndex(..)) => ScopeOutcome::FrameError,
+        }
     }
 
     pub fn frame_texture(&self) -> Option<&wgpu::Texture> {
@@ -494,22 +976,129 @@ impl Renderer {
     pub fn batch_count(&self) -> usize {
         self.batches.len()
     }
+
+    /// Diagnostic for an over-budget frame, if any is pending.
+    pub fn over_budget_reason(report: &OverBudget) -> DiagnosticReason {
+        over_budget_reason(report)
+    }
+
+    /// Diagnostic describing a device loss.
+    pub fn device_lost_reason(detail: &str) -> DiagnosticReason {
+        DiagnosticReason::missing(
+            codes::RENDER_DEVICE_LOST,
+            vec![DiagnosticParameter::Identifier(detail.to_string())],
+        )
+    }
 }
 
-const SHADER: &str = r#"
-struct Camera { transform: mat4x4<f32> };
-@group(0) @binding(0) var<uniform> camera: Camera;
-
-@vertex
-fn vs_main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
-    return camera.transform * vec4<f32>(position, 1.0);
+struct GpuPlan {
+    accepted: Vec<usize>,
+    usage: cad_scene::FrameUsage,
+    over_budget: Option<OverBudgetReason>,
 }
 
-@fragment
-fn fs_main() -> @location(0) vec4<f32> {
-    return vec4<f32>(0.85, 0.88, 0.92, 1.0);
+fn plan_from_gpu(batches: &[GpuBatch], budget: &FrameBudget) -> GpuPlan {
+    let mut usage = cad_scene::FrameUsage::default();
+    let mut accepted = Vec::with_capacity(batches.len());
+    for (i, batch) in batches.iter().enumerate() {
+        let vertices = batch.vertex_count as usize;
+        let triangles = if batch.topology == RenderTopology::Mesh {
+            batch.index_count as usize / 3
+        } else {
+            0
+        };
+        match budget.charge(&mut usage, vertices, triangles) {
+            Ok(()) => accepted.push(i),
+            Err(exceeded) => {
+                let report = OverBudget {
+                    category: exceeded.category,
+                    requested: exceeded.requested,
+                    limit: exceeded.limit,
+                    skipped_batches: batches.len() - accepted.len(),
+                };
+                return GpuPlan {
+                    accepted,
+                    usage,
+                    over_budget: Some(OverBudgetReason {
+                        reason: over_budget_reason(&report),
+                        report,
+                    }),
+                };
+            }
+        }
+    }
+    GpuPlan {
+        accepted,
+        usage,
+        over_budget: None,
+    }
 }
-"#;
+
+fn over_budget_reason(report: &OverBudget) -> DiagnosticReason {
+    DiagnosticReason::partial(
+        codes::RENDER_FRAME_OVER_BUDGET,
+        vec![
+            DiagnosticParameter::Identifier(report.category.to_string()),
+            DiagnosticParameter::Count(report.requested as u64),
+            DiagnosticParameter::Limit(report.limit as u64),
+            DiagnosticParameter::Count(report.skipped_batches as u64),
+        ],
+    )
+}
+
+fn pack_positions(vectors: &[[f32; 3]]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(vectors.len() * 12);
+    for v in vectors {
+        bytes.extend_from_slice(&v[0].to_le_bytes());
+        bytes.extend_from_slice(&v[1].to_le_bytes());
+        bytes.extend_from_slice(&v[2].to_le_bytes());
+    }
+    bytes
+}
+
+fn translate_left(vp: &[[f32; 4]; 4], origin: [f32; 3]) -> [f32; 16] {
+    // Column-major mat4x4 * translation(origin). Translation only affects the
+    // last column: out[.][3] = vp[.][0]*ox + vp[.][1]*oy + vp[.][2]*oz + vp[.][3].
+    let mut m = [0.0f32; 16];
+    for col in 0..4 {
+        for row in 0..4 {
+            m[col * 4 + row] = vp[col][row];
+        }
+    }
+    let ox = origin[0];
+    let oy = origin[1];
+    let oz = origin[2];
+    for row in 0..4 {
+        let base = vp[0][row] * ox + vp[1][row] * oy + vp[2][row] * oz + vp[3][row];
+        m[12 + row] = base;
+    }
+    m
+}
+
+fn position_only_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: 12,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+    }
+}
+
+fn mesh_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: 12,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+    }
+}
+
+// Shaders are checked into `shaders/` so they can be validated as files and
+// stay reviewable; `include_str!` keeps a single source of truth.
+const LINE_SHADER: &str = include_str!("../shaders/line.wgsl");
+
+// Mesh shader. Shading is intentionally explicit: a single fixed headlight
+// direction, N·L diffuse plus a constant ambient term. There is no claim of
+// physically based rendering, environment lighting or specular response.
+const MESH_SHADER: &str = include_str!("../shaders/mesh.wgsl");
 
 #[cfg(test)]
 mod tests {
@@ -546,5 +1135,53 @@ mod tests {
         assert_eq!(ActiveBackend::WebGpu.as_str(), "webgpu");
         assert_eq!(ActiveBackend::WebGl2.as_str(), "webgl2");
         assert_eq!(ActiveBackend::Native.as_str(), "native");
+    }
+
+    #[test]
+    fn render_errors_distinguish_device_loss_from_a_bad_frame() {
+        assert!(RenderError::DeviceLost("reset".into()).is_device_loss());
+        assert!(!RenderError::Frame("validation".into()).is_device_loss());
+        assert!(!RenderError::NotInitialized("no device".into()).is_device_loss());
+    }
+
+    #[test]
+    fn render_before_init_is_not_a_device_loss() {
+        let mut renderer = Renderer::default();
+        let target = RenderTarget::new(64, 64);
+        let frame = renderer.render(Camera2d::default(), &target);
+        assert!(matches!(frame, Err(RenderError::NotInitialized(_))));
+        assert!(!renderer.is_device_lost());
+    }
+
+    #[test]
+    fn noted_device_loss_is_explicit_and_clears_batches() {
+        let mut renderer = Renderer::default();
+        // Simulate a batch having been uploaded, then a host-observed loss.
+        let loss = renderer.note_device_lost("driver reset");
+        assert!(loss.is_device_loss());
+        assert!(renderer.is_device_lost());
+        assert_eq!(renderer.batch_count(), 0);
+        let target = RenderTarget::new(64, 64);
+        let frame = renderer.render(Camera2d::default(), &target);
+        assert!(matches!(frame, Err(RenderError::DeviceLost(_))));
+    }
+
+    #[test]
+    fn over_budget_diagnostic_carries_structured_parameters() {
+        let report = OverBudget {
+            category: "vertices",
+            requested: 100,
+            limit: 50,
+            skipped_batches: 3,
+        };
+        let reason = Renderer::over_budget_reason(&report);
+        assert_eq!(reason.code, codes::RENDER_FRAME_OVER_BUDGET);
+        assert!(reason.parameters.contains(&DiagnosticParameter::Limit(50)));
+    }
+
+    #[test]
+    fn device_lost_diagnostic_has_stable_code() {
+        let reason = Renderer::device_lost_reason("test");
+        assert_eq!(reason.code, codes::RENDER_DEVICE_LOST);
     }
 }

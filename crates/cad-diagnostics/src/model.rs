@@ -38,6 +38,10 @@ pub mod codes {
     pub const IMPORT_UNKNOWN_ENTITY: &str = "import.unknown_entity";
     /// A proxy record could not be decoded.
     pub const PROXY_UNDECODED: &str = "proxy.undecoded";
+    /// A frame's vertex/triangle submission crossed its configured budget.
+    pub const RENDER_FRAME_OVER_BUDGET: &str = "render.frame_over_budget";
+    /// The GPU device was lost or the backend failed; derived resources are gone.
+    pub const RENDER_DEVICE_LOST: &str = "render.device_lost";
 }
 
 /// How severe a single reason is.

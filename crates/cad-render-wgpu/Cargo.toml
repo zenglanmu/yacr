@@ -11,10 +11,16 @@ description = "2D/3D pipelines, buffers/textures, draw statistics."
 cad-domain.workspace = true
 cad-scene.workspace = true
 cad-geometry.workspace = true
+cad-diagnostics.workspace = true
 wgpu.workspace = true
 bytemuck.workspace = true
 glam.workspace = true
 log.workspace = true
+
+[dev-dependencies]
+# Used only by the offline WGSL validation test; pinned to the exact naga that
+# wgpu 30.0.1 embeds so validation matches the runtime parser.
+naga = { version = "=30.0.1", features = ["wgsl-in"] }
 
 # The browser surface path lives here so wgpu stays inside the renderer crate
 # (spec §4.5/§5.3): hosts hand in a canvas, never a wgpu object.
