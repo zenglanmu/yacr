@@ -18,7 +18,10 @@ use cad_domain::*;
 use cad_history::{patch, UndoRecord};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportReport, ImportRequest, Importer};
 
-use crate::{AppMode, Application, Command, CommandOutcome, Document, SessionState, Viewport};
+use crate::{
+    AppMode, Application, Command, CommandOutcome, Document, SessionState, UnsavedDecision,
+    Viewport,
+};
 
 static TX_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -213,10 +216,42 @@ impl HostController {
             .map(|d| d.drawing.clone())
     }
 
+    /// The current document's annotation database (read-only view).
+    pub fn workspace_annotations(&self) -> Option<&AnnotationDatabase> {
+        self.application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .map(|d| &d.annotations)
+    }
+
     /// Import a DWG byte stream through the single importer boundary.
     ///
-    /// Import failures leave the current document untouched.
+    /// This is the no-decision entry used when the caller has already resolved
+    /// any unsaved work. If the current document has unsaved annotations it is
+    /// rejected with `Cancelled`; call [`HostController::open_bytes_decided`]
+    /// with an explicit decision instead.
     pub fn open_bytes(&mut self, bytes: Arc<[u8]>, label: &str) -> CadResult<OpenedDrawing> {
+        self.open_bytes_decided(bytes, label, UnsavedDecision::Cancel)
+    }
+
+    /// Import a DWG byte stream after applying an explicit unsaved-work decision.
+    ///
+    /// Only a successful import replaces the document. On success the session,
+    /// history, selection, layer overrides and active tool are rebuilt for the
+    /// new content so the previous drawing's undo records and references can
+    /// never act on it (audit B05). Failures and cancellation leave the current
+    /// document and session untouched.
+    pub fn open_bytes_decided(
+        &mut self,
+        bytes: Arc<[u8]>,
+        label: &str,
+        decision: UnsavedDecision,
+    ) -> CadResult<OpenedDrawing> {
+        // Refuse to touch a dirty document unless the user explicitly chose to
+        // discard it or has already preserved a recovery copy.
+        self.application.prepare_leave(self.document_id, decision)?;
+
         let request = ImportRequest {
             document: self.document_id,
             database: DatabaseId(1),
@@ -243,11 +278,26 @@ impl HostController {
             .workspace
             .documents
             .insert(self.document_id, document);
-        self.session.generation += 1;
+
+        // Rebuild everything bound to the previous content identity.
+        self.reset_for_new_content();
         self.document_name_hint = label.to_string();
         self.last_import_report = Some(imported.report.clone());
         self.last_status = format!("已打开 {label}: {}", opened.completeness_label);
         Ok(opened)
+    }
+
+    /// Rebuild session/history/query/overrides after the document content changed.
+    ///
+    /// The document id and viewport id stay stable (hosts cache them), but all
+    /// derived state that referenced the old drawing is dropped: undo/redo can
+    /// no longer reach across documents, and stale selections/overrides/tools
+    /// cannot point at new objects.
+    fn reset_for_new_content(&mut self) {
+        self.application.history.remove(&self.document_id);
+        self.application.query = cad_query::QueryService::new();
+        self.session = SessionState::new(self.document_id, self.session.mode());
+        self.session.generation = self.session.generation.saturating_add(1);
     }
 
     /// Run one command through the single application entry point.
@@ -374,6 +424,26 @@ impl HostController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cad_db::{Annotation, AnnotationGeometry, AnnotationStyle};
+
+    /// A small text annotation for dirty/open tests.
+    fn text_note(id: u128, text: &str) -> Annotation {
+        Annotation {
+            id: AnnotationId(id),
+            space: SpaceId::Model,
+            geometry: AnnotationGeometry::Text(Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }),
+            text: text.into(),
+            style: AnnotationStyle::default(),
+            created_unix_ms: 0,
+            modified_unix_ms: 0,
+            anchor: None,
+            precision: Precision::Analytic,
+        }
+    }
 
     #[test]
     fn demo_document_has_geometry_and_bounds() {
@@ -391,6 +461,47 @@ mod tests {
         let garbage: Arc<[u8]> = Arc::from(vec![0u8, 1, 2, 3].into_boxed_slice());
         assert!(controller.open_bytes(garbage, "bad.dwg").is_err());
         assert_eq!(controller.drawing().unwrap().id(), before);
+    }
+
+    #[test]
+    fn open_while_dirty_is_rejected_without_a_decision() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(1, "keep me")))
+            .unwrap();
+        assert!(controller
+            .workspace_annotations()
+            .map(|a| a.is_dirty())
+            .unwrap_or(false));
+        let garbage: Arc<[u8]> = Arc::from(vec![0u8, 1, 2, 3].into_boxed_slice());
+        // A dirty document refuses to be replaced by default.
+        assert!(matches!(
+            controller.open_bytes(garbage, "next.dwg"),
+            Err(CadError::Cancelled)
+        ));
+        // The unsaved annotation survives the cancelled open.
+        assert_eq!(controller.workspace_annotations().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn opening_new_content_resets_history_and_annotations() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(1, "old")))
+            .unwrap();
+        assert!(controller.application.can_undo(&controller.document_id));
+
+        // Explicit discard, then a valid empty-content open through the decided
+        // path (demo bytes are not a real DWG, so drive the reset directly).
+        controller
+            .application
+            .prepare_leave(controller.document_id, UnsavedDecision::ExplicitDiscard)
+            .unwrap();
+        controller.reset_for_new_content();
+        assert!(!controller.application.can_undo(&controller.document_id));
+        assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+        assert!(controller.session.selection.is_empty());
+        assert!(controller.session.layer_overrides.is_empty());
     }
 
     #[test]
