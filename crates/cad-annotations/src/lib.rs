@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use cad_db::{
-    Annotation, AnnotationDatabase, AnnotationGeometry, AnnotationStyle, ChangeSet, EntityAnchor,
-    MeasurementAlgorithm, MeasurementRecord,
+    AnchorStatus, Annotation, AnnotationDatabase, AnnotationGeometry, AnnotationStyle, ChangeSet,
+    EntityAnchor, MeasurementAlgorithm, MeasurementRecord,
 };
 use cad_domain::*;
 use serde_json::{json, Map, Value};
@@ -98,10 +98,26 @@ impl AnnotationService {
             .as_object()
             .ok_or_else(|| CadError::CorruptData("annotation file is not a JSON object".into()))?;
 
-        let schema_version = object
-            .get("schema_version")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
+        let schema_version = match object.get("schema_version") {
+            Some(v) => {
+                let raw = v.as_u64().ok_or_else(|| {
+                    CadError::CorruptData("schema_version must be an unsigned integer".into())
+                })?;
+                u32::try_from(raw).map_err(|_| {
+                    CadError::CorruptData("schema_version does not fit in 32 bits".into())
+                })?
+            }
+            None => {
+                return Err(CadError::CorruptData(
+                    "annotation file has no schema_version".into(),
+                ))
+            }
+        };
+        if schema_version == 0 {
+            return Err(CadError::CorruptData(
+                "annotation schema_version 0 is not valid".into(),
+            ));
+        }
         if schema_version > SCHEMA_VERSION {
             return Err(CadError::Unsupported(format!(
                 "annotation schema version {schema_version} is newer than this build supports ({SCHEMA_VERSION})"
@@ -111,9 +127,22 @@ impl AnnotationService {
         let file_fingerprint = match object.get("document_fingerprint") {
             Some(Value::String(s)) => DocumentIdentity::Temporary(parse_uuid_bits(s)),
             Some(Value::Array(a)) => {
+                // A SHA-256 fingerprint is exactly 32 bytes in 0..=255; a short
+                // or over-long array must not be zero-padded or truncated into a
+                // plausible-looking identity (audit B11).
+                if a.len() != 32 {
+                    return Err(CadError::CorruptData(
+                        "document_fingerprint must be 32 bytes".into(),
+                    ));
+                }
                 let mut bytes = [0u8; 32];
-                for (i, v) in a.iter().take(32).enumerate() {
-                    bytes[i] = v.as_u64().unwrap_or(0) as u8;
+                for (i, v) in a.iter().enumerate() {
+                    let n = v.as_u64().ok_or_else(|| {
+                        CadError::CorruptData("document_fingerprint byte is not an integer".into())
+                    })?;
+                    bytes[i] = u8::try_from(n).map_err(|_| {
+                        CadError::CorruptData("document_fingerprint byte out of range".into())
+                    })?;
                 }
                 DocumentIdentity::Sha256(bytes)
             }
@@ -134,10 +163,13 @@ impl AnnotationService {
 
         let mut annotations = Vec::new();
         if let Some(Value::Array(items)) = object.get("annotations") {
-            for item in items {
-                if let Some(a) = decode_annotation(item) {
-                    annotations.push(a);
-                }
+            for (index, item) in items.iter().enumerate() {
+                // A malformed annotation is reported, not silently dropped
+                // (audit B11): a caller must never believe a lossy import is OK.
+                let a = decode_annotation(item).ok_or_else(|| {
+                    CadError::CorruptData(format!("annotation at index {index} is invalid"))
+                })?;
+                annotations.push(a);
             }
         }
 
@@ -173,7 +205,18 @@ impl AnnotationService {
                 .to_string(),
             unit_context: decode_units(object.get("unit_context")),
             annotations,
-            view_bookmarks: Vec::new(),
+            view_bookmarks: match object.get("view_bookmarks") {
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| {
+                        decode_bookmark(b).ok_or_else(|| {
+                            CadError::CorruptData(format!("view bookmark at index {i} is invalid"))
+                        })
+                    })
+                    .collect::<CadResult<Vec<_>>>()?,
+                _ => Vec::new(),
+            },
             extensions_json,
         })
     }
@@ -194,7 +237,8 @@ impl AnnotationService {
         root.insert("unit_context".into(), encode_units(&file.unit_context));
         let annotations: Vec<Value> = file.annotations.iter().map(encode_annotation).collect();
         root.insert("annotations".into(), Value::Array(annotations));
-        root.insert("view_bookmarks".into(), Value::Array(Vec::new()));
+        let bookmarks: Vec<Value> = file.view_bookmarks.iter().map(encode_bookmark).collect();
+        root.insert("view_bookmarks".into(), Value::Array(bookmarks));
         for (k, v) in &file.extensions_json {
             if let Ok(parsed) = serde_json::from_str::<Value>(v) {
                 root.insert(k.clone(), parsed);
@@ -224,32 +268,49 @@ fn uuid_string(bits: u128) -> String {
 }
 
 fn parse_uuid_bits(s: &str) -> u128 {
-    let hex: String = s.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-    u128::from_str_radix(&hex, 16).unwrap_or(0)
+    parse_uuid_strict(s).unwrap_or(0)
 }
 
 fn encode_units(units: &UnitContext) -> Value {
     json!({
-        "source": format!("{:?}", units.source),
-        "display": format!("{:?}", units.display),
+        "source": encode_unit(&units.source),
+        "display": encode_unit(&units.display),
         "display_per_source": units.display_per_source,
         "decimal_places": units.decimal_places,
     })
+}
+
+fn encode_unit(unit: &Unit) -> Value {
+    json!(match unit {
+        Unit::DrawingUnits => "DrawingUnits",
+        Unit::Millimeter => "Millimeter",
+        Unit::Meter => "Meter",
+        Unit::Inch => "Inch",
+        Unit::Foot => "Foot",
+    })
+}
+
+fn decode_unit(value: Option<&Value>) -> Option<Unit> {
+    match value.and_then(|v| v.as_str()) {
+        Some("DrawingUnits") => Some(Unit::DrawingUnits),
+        Some("Millimeter") => Some(Unit::Millimeter),
+        Some("Meter") => Some(Unit::Meter),
+        Some("Inch") => Some(Unit::Inch),
+        Some("Foot") => Some(Unit::Foot),
+        _ => None,
+    }
 }
 
 fn decode_units(value: Option<&Value>) -> UnitContext {
     let Some(v) = value else {
         return UnitContext::drawing_units();
     };
-    let display = match v.get("display").and_then(|d| d.as_str()) {
-        Some("Millimeter") => Unit::Millimeter,
-        Some("Meter") => Unit::Meter,
-        Some("Inch") => Unit::Inch,
-        Some("Foot") => Unit::Foot,
-        _ => Unit::DrawingUnits,
-    };
+    // Never silently coerce a missing source into the display unit (audit B09):
+    // an unreadable source stays Unknown (DrawingUnits).
+    let source = decode_unit(v.get("source")).unwrap_or(Unit::DrawingUnits);
+    let display = decode_unit(v.get("display")).unwrap_or(Unit::DrawingUnits);
     UnitContext {
-        source: display.clone(),
+        source,
         display,
         display_per_source: v.get("display_per_source").and_then(|d| d.as_f64()),
         decimal_places: v
@@ -280,6 +341,55 @@ fn decode_space(value: Option<&Value>) -> SpaceId {
     }
 }
 
+fn encode_bookmark(bookmark: &ViewBookmark) -> Value {
+    json!({
+        "name": bookmark.name,
+        "viewport": bookmark.viewport.0.to_string(),
+        "space": encode_space(&bookmark.space),
+        "camera_transform": encode_transform(&bookmark.camera_transform),
+    })
+}
+
+fn decode_bookmark(value: &Value) -> Option<ViewBookmark> {
+    Some(ViewBookmark {
+        name: value.get("name")?.as_str()?.to_string(),
+        viewport: ViewportId(value.get("viewport")?.as_str()?.parse::<u128>().ok()?),
+        space: decode_space(value.get("space")),
+        camera_transform: decode_transform(value.get("camera_transform")?)?,
+    })
+}
+
+fn encode_transform(t: &Transform3) -> Value {
+    Value::Array(
+        t.matrix
+            .iter()
+            .map(|row| Value::Array(row.iter().map(|v| json!(v)).collect()))
+            .collect(),
+    )
+}
+
+fn decode_transform(value: &Value) -> Option<Transform3> {
+    let rows = value.as_array()?;
+    if rows.len() != 4 {
+        return None;
+    }
+    let mut matrix = [[0.0f64; 4]; 4];
+    for (i, row) in rows.iter().enumerate() {
+        let cols = row.as_array()?;
+        if cols.len() != 4 {
+            return None;
+        }
+        for (j, v) in cols.iter().enumerate() {
+            let n = v.as_f64()?;
+            if !n.is_finite() {
+                return None;
+            }
+            matrix[i][j] = n;
+        }
+    }
+    Some(Transform3 { matrix })
+}
+
 fn encode_geometry(geometry: &AnnotationGeometry) -> Value {
     match geometry {
         AnnotationGeometry::Text(p) => json!({ "kind": "text", "position": encode_point(*p) }),
@@ -307,10 +417,94 @@ fn encode_geometry(geometry: &AnnotationGeometry) -> Value {
         }
         AnnotationGeometry::Measurement(m) => json!({
             "kind": "measurement",
-            "algorithm": format!("{:?}", m.algorithm),
+            "algorithm": encode_algorithm(&m.algorithm),
             "value": m.value,
             "points": m.inputs.iter().map(|p| encode_point(*p)).collect::<Vec<_>>(),
+            "plane": m.plane.map(encode_plane),
+            "units": encode_units(&m.units),
+            "source": encode_geometry_source(&m.source),
+            "precision": encode_precision(&m.precision),
         }),
+    }
+}
+
+fn encode_plane(plane: WorkPlane) -> Value {
+    json!({
+        "origin": encode_point(plane.origin),
+        "u": encode_point(plane.u),
+        "v": encode_point(plane.v),
+    })
+}
+
+fn decode_plane(value: &Value) -> Option<WorkPlane> {
+    Some(WorkPlane {
+        origin: decode_point(value.get("origin")?)?,
+        u: decode_point(value.get("u")?)?,
+        v: decode_point(value.get("v")?)?,
+    })
+}
+
+fn encode_algorithm(algorithm: &MeasurementAlgorithm) -> Value {
+    json!(match algorithm {
+        MeasurementAlgorithm::Distance2d => "Distance2d",
+        MeasurementAlgorithm::Distance3d => "Distance3d",
+        MeasurementAlgorithm::PolylineLength => "PolylineLength",
+        MeasurementAlgorithm::Angle3Points => "Angle3Points",
+        MeasurementAlgorithm::PlanarPolygonArea => "PlanarPolygonArea",
+    })
+}
+
+fn decode_algorithm(value: Option<&Value>) -> Option<MeasurementAlgorithm> {
+    match value.and_then(|v| v.as_str()) {
+        Some("Distance2d") => Some(MeasurementAlgorithm::Distance2d),
+        Some("Distance3d") => Some(MeasurementAlgorithm::Distance3d),
+        Some("PolylineLength") => Some(MeasurementAlgorithm::PolylineLength),
+        Some("Angle3Points") => Some(MeasurementAlgorithm::Angle3Points),
+        Some("PlanarPolygonArea") => Some(MeasurementAlgorithm::PlanarPolygonArea),
+        _ => None,
+    }
+}
+
+fn encode_geometry_source(source: &GeometrySource) -> Value {
+    json!(match source {
+        GeometrySource::Analytic => "Analytic",
+        GeometrySource::DirectMesh => "DirectMesh",
+        GeometrySource::ProxyCache => "ProxyCache",
+        GeometrySource::KernelMesh => "KernelMesh",
+        GeometrySource::UserPoints => "UserPoints",
+    })
+}
+
+fn decode_geometry_source(value: Option<&Value>) -> Option<GeometrySource> {
+    match value.and_then(|v| v.as_str()) {
+        Some("Analytic") => Some(GeometrySource::Analytic),
+        Some("DirectMesh") => Some(GeometrySource::DirectMesh),
+        Some("ProxyCache") => Some(GeometrySource::ProxyCache),
+        Some("KernelMesh") => Some(GeometrySource::KernelMesh),
+        Some("UserPoints") => Some(GeometrySource::UserPoints),
+        _ => None,
+    }
+}
+
+fn encode_precision(precision: &Precision) -> Value {
+    match precision {
+        Precision::Analytic => json!({ "kind": "analytic" }),
+        Precision::Approximate { error_bound } => {
+            json!({ "kind": "approximate", "error_bound": error_bound })
+        }
+        Precision::Unknown => json!({ "kind": "unknown" }),
+    }
+}
+
+fn decode_precision(value: Option<&Value>) -> Option<Precision> {
+    let v = value?;
+    match v.get("kind").and_then(|k| k.as_str()) {
+        Some("analytic") => Some(Precision::Analytic),
+        Some("approximate") => Some(Precision::Approximate {
+            error_bound: v.get("error_bound").and_then(|b| b.as_f64()),
+        }),
+        Some("unknown") => Some(Precision::Unknown),
+        _ => None,
     }
 }
 
@@ -339,21 +533,21 @@ fn decode_geometry(value: &Value) -> Option<AnnotationGeometry> {
             axis_v: decode_point(value.get("axis_v")?)?,
         }),
         "measurement" => {
-            let algorithm = match value.get("algorithm").and_then(|v| v.as_str()) {
-                Some("Distance2d") => MeasurementAlgorithm::Distance2d,
-                Some("PolylineLength") => MeasurementAlgorithm::PolylineLength,
-                Some("Angle3Points") => MeasurementAlgorithm::Angle3Points,
-                Some("PlanarPolygonArea") => MeasurementAlgorithm::PlanarPolygonArea,
-                _ => MeasurementAlgorithm::Distance3d,
-            };
+            // Missing algorithm/units/source/precision must not be silently
+            // approximated as analytic/UserPoints (audit B09).
+            let algorithm = decode_algorithm(value.get("algorithm"))?;
+            let units = value.get("units").map(|u| decode_units(Some(u)));
+            let units = units.unwrap_or_else(UnitContext::drawing_units);
+            let source = decode_geometry_source(value.get("source"))?;
+            let precision = decode_precision(value.get("precision")).unwrap_or(Precision::Unknown);
             Some(AnnotationGeometry::Measurement(MeasurementRecord {
                 algorithm,
-                inputs: decode_points(value.get("points")?).unwrap_or_default(),
-                plane: None,
-                value: value.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                units: UnitContext::drawing_units(),
-                source: GeometrySource::UserPoints,
-                precision: Precision::Analytic,
+                inputs: decode_points(value.get("points")?)?,
+                plane: value.get("plane").and_then(decode_plane),
+                value: value.get("value").and_then(|v| v.as_f64())?,
+                units,
+                source,
+                precision,
             }))
         }
         _ => None,
@@ -366,14 +560,18 @@ fn encode_point(p: Point3) -> Value {
 
 fn decode_point(value: &Value) -> Option<Point3> {
     let a = value.as_array()?;
-    if a.len() < 3 {
+    if a.len() != 3 {
         return None;
     }
-    Some(Point3 {
+    let p = Point3 {
         x: a[0].as_f64()?,
         y: a[1].as_f64()?,
         z: a[2].as_f64()?,
-    })
+    };
+    if !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite() {
+        return None;
+    }
+    Some(p)
 }
 
 fn decode_points(value: &Value) -> Option<Vec<Point3>> {
@@ -393,42 +591,82 @@ fn encode_annotation(annotation: &Annotation) -> Value {
         },
         "created_unix_ms": annotation.created_unix_ms,
         "modified_unix_ms": annotation.modified_unix_ms,
-        "anchor": annotation.anchor.as_ref().map(|a| json!({
-            "source_handle": a.source_handle,
-            "fallback": encode_point(a.fallback),
-        })),
-        "precision": format!("{:?}", annotation.precision),
+        "anchor": annotation.anchor.as_ref().map(encode_anchor),
+        "precision": encode_precision(&annotation.precision),
     })
+}
+
+fn encode_anchor(anchor: &EntityAnchor) -> Value {
+    json!({
+        "source_handle": anchor.source_handle,
+        "instance": encode_instance_path(&anchor.instance),
+        "sub_element": anchor.sub_element.as_ref().map(|s| json!({
+            "source_key": s.source_key,
+            "topology_revision": s.topology_revision.0,
+        })),
+        "fallback": encode_point(anchor.fallback),
+        "status": encode_anchor_status(&anchor.status),
+    })
+}
+
+fn encode_instance_path(path: &InstancePath) -> Value {
+    Value::Array(path.0.iter().map(|e| json!(e.0.to_string())).collect())
+}
+
+fn decode_instance_path(value: Option<&Value>) -> Option<InstancePath> {
+    let Some(Value::Array(items)) = value else {
+        return Some(InstancePath::default());
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let raw = item.as_str()?;
+        out.push(EntityId(raw.parse::<u128>().ok()?));
+    }
+    Some(InstancePath(out))
+}
+
+fn encode_anchor_status(status: &AnchorStatus) -> Value {
+    json!(match status {
+        AnchorStatus::Valid => "Valid",
+        AnchorStatus::Stale => "Stale",
+        AnchorStatus::Unresolved => "Unresolved",
+    })
+}
+
+fn decode_anchor_status(value: Option<&Value>) -> Option<AnchorStatus> {
+    match value.and_then(|v| v.as_str()) {
+        Some("Valid") => Some(AnchorStatus::Valid),
+        Some("Stale") => Some(AnchorStatus::Stale),
+        Some("Unresolved") => Some(AnchorStatus::Unresolved),
+        _ => None,
+    }
 }
 
 fn decode_annotation(value: &Value) -> Option<Annotation> {
     let geometry = decode_geometry(value.get("geometry")?)?;
-    let id = value
-        .get("id")
-        .and_then(|v| v.as_str())
-        .map(parse_uuid_bits)
-        .unwrap_or(0);
-    let rgba = value
-        .get("style")
-        .and_then(|s| s.get("rgba"))
-        .and_then(|r| r.as_array())
-        .map(|a| {
-            let mut out = [0u8; 4];
-            for (i, v) in a.iter().take(4).enumerate() {
-                out[i] = v.as_u64().unwrap_or(0) as u8;
-            }
-            out
-        })
-        .unwrap_or([0xE5, 0x39, 0x35, 0xFF]);
-    let anchor = value.get("anchor").and_then(|a| {
-        Some(EntityAnchor {
-            source_handle: a.get("source_handle")?.as_str()?.to_string(),
-            instance: InstancePath::default(),
-            sub_element: None,
-            fallback: decode_point(a.get("fallback")?)?,
-            status: cad_db::AnchorStatus::Valid,
-        })
-    });
+    let id = decode_id(value.get("id")?)?;
+    let rgba = decode_rgba(value.get("style"))?;
+    let style = AnnotationStyle {
+        rgba,
+        logical_width: value
+            .get("style")
+            .and_then(|s| s.get("logical_width"))
+            .and_then(|v| v.as_f64())?,
+        text_height: value
+            .get("style")
+            .and_then(|s| s.get("text_height"))
+            .and_then(|v| v.as_f64())?,
+    };
+    if !style.logical_width.is_finite() || !style.text_height.is_finite() {
+        return None;
+    }
+    let created = value.get("created_unix_ms").and_then(|v| v.as_i64())?;
+    let modified = value.get("modified_unix_ms").and_then(|v| v.as_i64())?;
+    let anchor = match value.get("anchor") {
+        None | Some(Value::Null) => None,
+        Some(anchor) => Some(decode_anchor(anchor)?),
+    };
+    let precision = decode_precision(value.get("precision")).unwrap_or(Precision::Unknown);
     Some(Annotation {
         id: AnnotationId(id),
         space: decode_space(value.get("space")),
@@ -438,22 +676,63 @@ fn decode_annotation(value: &Value) -> Option<Annotation> {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string(),
-        style: AnnotationStyle {
-            rgba,
-            logical_width: 2.0,
-            text_height: 2.5,
-        },
-        created_unix_ms: value
-            .get("created_unix_ms")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0),
-        modified_unix_ms: value
-            .get("modified_unix_ms")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0),
+        style,
+        created_unix_ms: created,
+        modified_unix_ms: modified,
         anchor,
-        precision: Precision::Analytic,
+        precision,
     })
+}
+
+fn decode_rgba(style: Option<&Value>) -> Option<[u8; 4]> {
+    let a = style?.get("rgba")?.as_array()?;
+    if a.len() != 4 {
+        return None;
+    }
+    let mut out = [0u8; 4];
+    for (i, v) in a.iter().enumerate() {
+        out[i] = u8::try_from(v.as_u64()?).ok()?;
+    }
+    Some(out)
+}
+
+fn decode_anchor(value: &Value) -> Option<EntityAnchor> {
+    let source_handle = value.get("source_handle")?.as_str()?.to_string();
+    if source_handle.is_empty() {
+        return None;
+    }
+    let instance = decode_instance_path(value.get("instance"))?;
+    let sub_element = match value.get("sub_element") {
+        None | Some(Value::Null) => None,
+        Some(s) => Some(SubElementId {
+            source_key: s.get("source_key")?.as_str()?.to_string(),
+            topology_revision: Revision(s.get("topology_revision")?.as_u64()?),
+        }),
+    };
+    Some(EntityAnchor {
+        source_handle,
+        instance,
+        sub_element,
+        fallback: decode_point(value.get("fallback")?)?,
+        status: decode_anchor_status(value.get("status")).unwrap_or(AnchorStatus::Unresolved),
+    })
+}
+
+/// Decode an annotation id with strict UUID validation (audit B11).
+///
+/// A malformed id is an error, not a silent `AnnotationId(0)`.
+fn decode_id(value: &Value) -> Option<u128> {
+    let s = value.as_str()?;
+    parse_uuid_strict(s)
+}
+
+fn parse_uuid_strict(s: &str) -> Option<u128> {
+    // Accept canonical 8-4-4-4-12 UUIDs and bare 32-hex-digit strings.
+    let hex: String = s.chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    u128::from_str_radix(&hex, 16).ok()
 }
 
 #[cfg(test)]
@@ -549,6 +828,183 @@ mod tests {
         assert!(matches!(
             service.decode(json, &identity, FingerprintPolicy::ImportUnanchored),
             Err(CadError::Unsupported(_))
+        ));
+    }
+
+    fn round_trip(annotation: Annotation) -> Annotation {
+        let service = AnnotationService;
+        let identity = DocumentIdentity::Sha256([7u8; 32]);
+        let file = AnnotationFile {
+            schema_version: SCHEMA_VERSION,
+            application_version: "test".into(),
+            document_fingerprint: identity.clone(),
+            document_name_hint: "sample.dwg".into(),
+            unit_context: UnitContext::drawing_units(),
+            annotations: vec![annotation],
+            view_bookmarks: Vec::new(),
+            extensions_json: BTreeMap::new(),
+        };
+        let bytes = service.encode(&file).unwrap();
+        let decoded = service
+            .decode(&bytes, &identity, FingerprintPolicy::RejectMismatch)
+            .unwrap();
+        decoded.annotations.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn full_fidelity_round_trip_preserves_all_fields() {
+        // Every geometry variant, style, precision and a multi-INSERT anchor
+        // must survive the round trip byte-for-byte on the struct (audit B09).
+        let style = AnnotationStyle {
+            rgba: [1, 2, 3, 4],
+            logical_width: 7.5,
+            text_height: 3.25,
+        };
+        let geoms = vec![
+            AnnotationGeometry::Text(Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            }),
+            AnnotationGeometry::Leader(vec![
+                Point3::default(),
+                Point3 {
+                    x: 9.0,
+                    y: 8.0,
+                    z: 0.0,
+                },
+            ]),
+            AnnotationGeometry::Rectangle([
+                Point3::default(),
+                Point3 {
+                    x: 5.0,
+                    y: 6.0,
+                    z: 0.0,
+                },
+            ]),
+            AnnotationGeometry::Ellipse {
+                center: Point3::default(),
+                axis_u: Point3 {
+                    x: 4.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                axis_v: Point3 {
+                    x: 0.0,
+                    y: 2.0,
+                    z: 0.0,
+                },
+            },
+            AnnotationGeometry::Freehand(vec![Point3::default()]),
+            AnnotationGeometry::Cloud(vec![Point3::default()]),
+            AnnotationGeometry::Measurement(MeasurementRecord {
+                algorithm: MeasurementAlgorithm::PlanarPolygonArea,
+                inputs: vec![
+                    Point3::default(),
+                    Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                ],
+                plane: Some(WorkPlane {
+                    origin: Point3::default(),
+                    u: Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    v: Point3 {
+                        x: 0.0,
+                        y: 1.0,
+                        z: 0.0,
+                    },
+                }),
+                value: 12.5,
+                units: UnitContext {
+                    source: Unit::Millimeter,
+                    display: Unit::Meter,
+                    display_per_source: Some(0.001),
+                    decimal_places: 4,
+                },
+                source: GeometrySource::ProxyCache,
+                precision: Precision::Approximate {
+                    error_bound: Some(0.01),
+                },
+            }),
+        ];
+        for geometry in geoms {
+            let mut a = ann(0x1234_5678_9abc_def0_1234_5678_9abc_def0, "x");
+            a.geometry = geometry;
+            a.style = style.clone();
+            a.space = SpaceId::Paper(LayoutId(9));
+            a.precision = Precision::Approximate {
+                error_bound: Some(0.5),
+            };
+            a.created_unix_ms = 111;
+            a.modified_unix_ms = 222;
+            let decoded = round_trip(a.clone());
+            assert_eq!(decoded, a);
+        }
+    }
+
+    #[test]
+    fn multi_insert_anchor_keeps_instance_and_status() {
+        let mut a = ann(1, "anchored");
+        a.anchor = Some(EntityAnchor {
+            source_handle: "2F".into(),
+            instance: InstancePath(vec![EntityId(10), EntityId(20)]),
+            sub_element: Some(SubElementId {
+                source_key: "edge-3".into(),
+                topology_revision: Revision(4),
+            }),
+            fallback: Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 0.0,
+            },
+            status: AnchorStatus::Stale,
+        });
+        assert_eq!(round_trip(a.clone()), a);
+    }
+
+    #[test]
+    fn unknown_measurement_algorithm_is_rejected_not_approximated() {
+        // A future algorithm must not be silently downgraded to Distance2d.
+        let service = AnnotationService;
+        let identity = DocumentIdentity::Sha256([0u8; 32]);
+        let json =
+            br#"{"schema_version":1,"annotations":[{"id":"00000000-0000-0000-0000-000000000001",
+            "geometry":{"kind":"measurement","algorithm":"Future4d","value":1.0,"points":[[0,0,0]],
+            "source":"UserPoints","precision":{"kind":"analytic"}},"style":{"rgba":[1,2,3,4],
+            "logical_width":1.0,"text_height":1.0},"created_unix_ms":0,"modified_unix_ms":0}]}"#;
+        assert!(matches!(
+            service.decode(json, &identity, FingerprintPolicy::ImportUnanchored),
+            Err(CadError::CorruptData(_))
+        ));
+    }
+
+    #[test]
+    fn malformed_annotation_id_is_rejected() {
+        let service = AnnotationService;
+        let identity = DocumentIdentity::Sha256([0u8; 32]);
+        let json = br#"{"schema_version":1,"annotations":[{"id":"not-a-uuid",
+            "geometry":{"kind":"text","position":[0,0,0]},"style":{"rgba":[1,2,3,4],
+            "logical_width":1.0,"text_height":1.0},"created_unix_ms":0,"modified_unix_ms":0}]}"#;
+        assert!(matches!(
+            service.decode(json, &identity, FingerprintPolicy::ImportUnanchored),
+            Err(CadError::CorruptData(_))
+        ));
+    }
+
+    #[test]
+    fn short_fingerprint_array_is_rejected() {
+        let service = AnnotationService;
+        let identity = DocumentIdentity::Sha256([0u8; 32]);
+        let json = br#"{"schema_version":1,"document_fingerprint":[1,2,3],"annotations":[]}"#;
+        assert!(matches!(
+            service.decode(json, &identity, FingerprintPolicy::ImportUnanchored),
+            Err(CadError::CorruptData(_))
         ));
     }
 }

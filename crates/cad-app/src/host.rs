@@ -391,7 +391,8 @@ impl HostController {
         policy: FingerprintPolicy,
     ) -> CadResult<usize> {
         // Authorize before any decoding so a rejected import changes nothing.
-        self.session.authorize(crate::CommandId::ImportAnnotations)?;
+        self.session
+            .authorize(crate::CommandId::ImportAnnotations)?;
         let document = self
             .application
             .workspace
