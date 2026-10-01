@@ -28,6 +28,7 @@ const KNOWN_TOP_LEVEL: [&str; 7] = [
     "view_bookmarks",
 ];
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct ViewBookmark {
     pub name: String,
     pub viewport: ViewportId,
@@ -35,6 +36,7 @@ pub struct ViewBookmark {
     pub camera_transform: Transform3,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct AnnotationFile {
     pub schema_version: u32,
     pub application_version: String,
@@ -47,10 +49,45 @@ pub struct AnnotationFile {
     pub extensions_json: BTreeMap<String, String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FingerprintPolicy {
     RejectMismatch,
     ExplicitCoordinateMapping(Transform3),
     ImportUnanchored,
+}
+
+/// A deterministic, diagnosable account of how a decoded file's fingerprint was
+/// reconciled with the open drawing (audit B10).
+///
+/// Decoding never silently discards a mismatch: the caller can inspect this
+/// report (via [`AnnotationService::decode_with_report`]) to explain an import
+/// before committing it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FingerprintReport {
+    /// The fingerprint stored in the sidecar.
+    pub file_fingerprint: DocumentIdentity,
+    /// The identity of the drawing the file is being decoded against.
+    pub open_fingerprint: DocumentIdentity,
+    /// Whether the two fingerprints were identical.
+    pub matched: bool,
+    /// Whether the returned file was rebound to the open drawing's identity
+    /// (true exactly when a mismatch was accepted by policy).
+    pub rebound: bool,
+    /// The policy that was applied.
+    pub policy: FingerprintPolicy,
+    /// Number of anchors that were detached because the drawing did not match.
+    pub anchors_detached: usize,
+    /// Whether annotation geometry was transformed by an explicit mapping.
+    pub geometry_transformed: bool,
+    /// Number of view bookmarks transformed by an explicit mapping.
+    pub bookmarks_transformed: usize,
+}
+
+/// The decoded file together with the fingerprint reconciliation report.
+#[derive(Clone, Debug)]
+pub struct DecodeOutcome {
+    pub file: AnnotationFile,
+    pub fingerprint: FingerprintReport,
 }
 
 pub enum AnnotationCommand {
@@ -66,6 +103,36 @@ static TX_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 fn next_transaction() -> TransactionId {
     TransactionId(TX_COUNTER.fetch_add(1, Ordering::Relaxed) as u128)
+}
+
+/// A malformed sidecar value: reported, never silently coerced (audit B11).
+fn corrupt(message: impl Into<String>) -> CadError {
+    CadError::CorruptData(message.into())
+}
+
+/// Fetch a required field, naming it when absent.
+fn require<'a>(object: &'a Map<String, Value>, field: &str) -> CadResult<&'a Value> {
+    object
+        .get(field)
+        .ok_or_else(|| corrupt(format!("missing required field '{field}'")))
+}
+
+fn require_str<'a>(object: &'a Map<String, Value>, field: &str) -> CadResult<&'a str> {
+    require(object, field)?
+        .as_str()
+        .ok_or_else(|| corrupt(format!("field '{field}' must be a string")))
+}
+
+fn require_u64(object: &Map<String, Value>, field: &str) -> CadResult<u64> {
+    require(object, field)?
+        .as_u64()
+        .ok_or_else(|| corrupt(format!("field '{field}' must be an unsigned integer")))
+}
+
+fn require_f64(object: &Map<String, Value>, field: &str) -> CadResult<f64> {
+    require(object, field)?
+        .as_f64()
+        .ok_or_else(|| corrupt(format!("field '{field}' must be a number")))
 }
 
 impl AnnotationService {
@@ -97,12 +164,34 @@ impl AnnotationService {
     }
 
     /// Decode and migrate an annotation file.
+    ///
+    /// Thin wrapper over [`AnnotationService::decode_with_report`] that discards
+    /// the fingerprint report. Use the report form when the caller must explain
+    /// (or log) how a mismatch was reconciled.
     pub fn decode(
         &self,
         bytes: &[u8],
         identity: &DocumentIdentity,
         policy: FingerprintPolicy,
     ) -> CadResult<AnnotationFile> {
+        Ok(self.decode_with_report(bytes, identity, policy)?.file)
+    }
+
+    /// Decode an annotation file, returning the fingerprint reconciliation
+    /// report alongside it (audit B10).
+    ///
+    /// The format is versioned JSON. This build reads schema version
+    /// [`SCHEMA_VERSION`] (currently 1); newer versions are refused with
+    /// [`CadError::Unsupported`]. Unknown top-level fields are preserved verbatim
+    /// so a newer writer's data survives an older reader. Malformed values are
+    /// reported as [`CadError::CorruptData`] and never silently coerced
+    /// (audit B11).
+    pub fn decode_with_report(
+        &self,
+        bytes: &[u8],
+        identity: &DocumentIdentity,
+        policy: FingerprintPolicy,
+    ) -> CadResult<DecodeOutcome> {
         let value: Value = serde_json::from_slice(bytes)
             .map_err(|e| CadError::CorruptData(format!("annotation JSON is malformed: {e}")))?;
         let object = value
@@ -135,30 +224,9 @@ impl AnnotationService {
             )));
         }
 
-        let file_fingerprint = match object.get("document_fingerprint") {
-            Some(Value::String(s)) => DocumentIdentity::Temporary(parse_uuid_bits(s)),
-            Some(Value::Array(a)) => {
-                // A SHA-256 fingerprint is exactly 32 bytes in 0..=255; a short
-                // or over-long array must not be zero-padded or truncated into a
-                // plausible-looking identity (audit B11).
-                if a.len() != 32 {
-                    return Err(CadError::CorruptData(
-                        "document_fingerprint must be 32 bytes".into(),
-                    ));
-                }
-                let mut bytes = [0u8; 32];
-                for (i, v) in a.iter().enumerate() {
-                    let n = v.as_u64().ok_or_else(|| {
-                        CadError::CorruptData("document_fingerprint byte is not an integer".into())
-                    })?;
-                    bytes[i] = u8::try_from(n).map_err(|_| {
-                        CadError::CorruptData("document_fingerprint byte out of range".into())
-                    })?;
-                }
-                DocumentIdentity::Sha256(bytes)
-            }
-            _ => DocumentIdentity::Temporary(0),
-        };
+        // A missing fingerprint is corruption, not an implicit match with
+        // `Temporary(0)` (audit B11).
+        let file_fingerprint = decode_identity(object.get("document_fingerprint"))?;
         let matches = file_fingerprint == *identity;
         if !matches {
             match policy {
@@ -172,15 +240,28 @@ impl AnnotationService {
             }
         }
 
-        let mut annotations = Vec::new();
-        if let Some(Value::Array(items)) = object.get("annotations") {
-            for (index, item) in items.iter().enumerate() {
-                // A malformed annotation is reported, not silently dropped
-                // (audit B11): a caller must never believe a lossy import is OK.
-                let a = decode_annotation(item).ok_or_else(|| {
-                    CadError::CorruptData(format!("annotation at index {index} is invalid"))
-                })?;
-                annotations.push(a);
+        let annotations_value = object.get("annotations").ok_or_else(|| {
+            CadError::CorruptData("annotation file has no 'annotations' array".into())
+        })?;
+        let items = annotations_value
+            .as_array()
+            .ok_or_else(|| CadError::CorruptData("'annotations' must be an array".into()))?;
+        let mut annotations = Vec::with_capacity(items.len());
+        for (index, item) in items.iter().enumerate() {
+            // A malformed annotation is reported, not silently dropped
+            // (audit B11): a caller must never believe a lossy import is OK.
+            let a = decode_annotation(item)
+                .map_err(|e| corrupt(format!("annotation at index {index}: {}", e)))?;
+            annotations.push(a);
+        }
+        // Duplicate ids would silently collapse on import; refuse them instead.
+        let mut seen_ids = std::collections::BTreeSet::new();
+        for annotation in &annotations {
+            if !seen_ids.insert(annotation.id) {
+                return Err(corrupt(format!(
+                    "annotation id {:?} appears more than once",
+                    annotation.id
+                )));
             }
         }
 
@@ -192,59 +273,118 @@ impl AnnotationService {
             }
         }
 
+        // Decode bookmarks before the fingerprint policy so an explicit mapping
+        // can move their camera transforms too (audit B10).
+        let mut view_bookmarks = match object.get("view_bookmarks") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(items)) => items
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    decode_bookmark(b)
+                        .map_err(|e| corrupt(format!("view bookmark at index {i}: {}", e)))
+                })
+                .collect::<CadResult<Vec<_>>>()?,
+            Some(_) => {
+                return Err(CadError::CorruptData(
+                    "'view_bookmarks' must be an array".into(),
+                ))
+            }
+        };
+
         // Apply the fingerprint policy to the decoded content (audit B10). A
         // mismatch must not leave anchors pointing into a document they were not
         // bound to, and an explicit mapping must actually move the geometry.
+        let mut anchors_detached = 0usize;
+        let mut geometry_transformed = false;
+        let mut bookmarks_transformed = 0usize;
         if !matches {
             match policy {
                 FingerprintPolicy::RejectMismatch => unreachable!("rejected above"),
                 FingerprintPolicy::ImportUnanchored => {
                     for annotation in &mut annotations {
-                        annotation.anchor = None;
+                        if annotation.anchor.take().is_some() {
+                            anchors_detached += 1;
+                        }
                     }
                 }
                 FingerprintPolicy::ExplicitCoordinateMapping(transform) => {
                     let mapping = CoordinateMapping::validate(&transform)?;
                     for annotation in &mut annotations {
+                        if annotation.anchor.is_some() {
+                            anchors_detached += 1;
+                        }
                         mapping.apply_annotation(annotation)?;
+                    }
+                    geometry_transformed = !annotations.is_empty();
+                    for bookmark in &mut view_bookmarks {
+                        bookmark.camera_transform =
+                            mapping.map_transform(&bookmark.camera_transform)?;
+                        bookmarks_transformed += 1;
                     }
                 }
             }
         }
 
-        Ok(AnnotationFile {
+        let outcome_file = AnnotationFile {
             schema_version: schema_version.max(1),
-            application_version: object
-                .get("application_version")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            document_fingerprint: file_fingerprint,
-            document_name_hint: object
-                .get("document_name_hint")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            unit_context: decode_units(object.get("unit_context")),
-            annotations,
-            view_bookmarks: match object.get("view_bookmarks") {
-                Some(Value::Array(items)) => items
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| {
-                        decode_bookmark(b).ok_or_else(|| {
-                            CadError::CorruptData(format!("view bookmark at index {i} is invalid"))
-                        })
-                    })
-                    .collect::<CadResult<Vec<_>>>()?,
-                _ => Vec::new(),
+            application_version: match object.get("application_version") {
+                None | Some(Value::Null) => String::new(),
+                Some(v) => v
+                    .as_str()
+                    .ok_or_else(|| corrupt("'application_version' must be a string"))?
+                    .to_string(),
             },
+            document_fingerprint: if matches {
+                file_fingerprint.clone()
+            } else {
+                // The mismatch was accepted by policy, so the imported content
+                // now belongs to the open drawing; rebind the identity instead
+                // of re-emitting a fingerprint that can never match (audit B10).
+                identity.clone()
+            },
+            document_name_hint: match object.get("document_name_hint") {
+                None | Some(Value::Null) => String::new(),
+                Some(v) => v
+                    .as_str()
+                    .ok_or_else(|| corrupt("'document_name_hint' must be a string"))?
+                    .to_string(),
+            },
+            unit_context: decode_units(object.get("unit_context"))?,
+            annotations,
+            view_bookmarks: std::mem::take(&mut view_bookmarks),
             extensions_json,
+        };
+
+        Ok(DecodeOutcome {
+            file: outcome_file,
+            fingerprint: FingerprintReport {
+                file_fingerprint,
+                open_fingerprint: identity.clone(),
+                matched: matches,
+                rebound: !matches,
+                policy,
+                anchors_detached,
+                geometry_transformed,
+                bookmarks_transformed,
+            },
         })
     }
 
     /// Encode an annotation file to JSON.
+    ///
+    /// The output always carries the current [`SCHEMA_VERSION`]; a file claiming
+    /// a newer version is refused rather than silently downgraded. Extension
+    /// fields that collide with a known schema field are refused rather than
+    /// silently dropped, so an export can never report success while losing data
+    /// (audit B11).
     pub fn encode(&self, file: &AnnotationFile) -> CadResult<Vec<u8>> {
+        if file.schema_version > SCHEMA_VERSION {
+            return Err(CadError::Unsupported(format!(
+                "cannot encode annotation schema version {} (this build writes {SCHEMA_VERSION})",
+                file.schema_version
+            )));
+        }
         let mut root = Map::new();
         root.insert("schema_version".into(), json!(SCHEMA_VERSION));
         root.insert(
@@ -263,10 +403,12 @@ impl AnnotationService {
         root.insert("view_bookmarks".into(), Value::Array(bookmarks));
         for (k, v) in &file.extensions_json {
             // Never let a preserved/unknown field override a schema field
-            // (audit B11): extension keys that collide with the known schema
-            // are dropped rather than allowed to corrupt the output.
+            // (audit B11): refuse rather than drop, so the caller learns the
+            // export would be lossy instead of silently succeeding.
             if KNOWN_TOP_LEVEL.contains(&k.as_str()) {
-                continue;
+                return Err(CadError::InvalidInput(format!(
+                    "extension field '{k}' collides with a schema field"
+                )));
             }
             if let Ok(parsed) = serde_json::from_str::<Value>(v) {
                 root.insert(k.clone(), parsed);
@@ -278,6 +420,25 @@ impl AnnotationService {
         }
         serde_json::to_vec_pretty(&Value::Object(root))
             .map_err(|e| CadError::Invariant(format!("annotation encode failed: {e}")))
+    }
+
+    /// Atomically export `file` for the current database revision.
+    ///
+    /// The bytes are produced first; only if encoding fully succeeds is the
+    /// captured revision marked saved. A failed encode therefore returns an
+    /// error, leaves the database dirty and does not advance its revision
+    /// (audit B07/F09). Hosts that must wait for a durable write should instead
+    /// call [`AnnotationService::encode`] and confirm with
+    /// [`AnnotationDatabase::mark_exported`] once the write succeeds.
+    pub fn export_sidecar(
+        &self,
+        database: &mut AnnotationDatabase,
+        file: &AnnotationFile,
+    ) -> CadResult<Vec<u8>> {
+        let revision = database.revision();
+        let bytes = self.encode(file)?;
+        database.mark_exported(revision)?;
+        Ok(bytes)
     }
 }
 
@@ -387,6 +548,55 @@ impl CoordinateMapping {
         }
         Ok(out)
     }
+
+    /// Transform a camera/placement transform by composing `mapping` on the
+    /// left: the mapped world of the file feeds the original transform.
+    fn map_transform(&self, t: &Transform3) -> CadResult<Transform3> {
+        let composed = self.transform.matrix_mul(t);
+        for row in &composed.matrix {
+            for v in row {
+                if !v.is_finite() {
+                    return Err(CadError::InvalidInput(
+                        "coordinate mapping produced a non-finite transform".into(),
+                    ));
+                }
+            }
+        }
+        Ok(composed)
+    }
+}
+
+/// Decode a document fingerprint with strict, exact typing (audit B11).
+///
+/// A missing, malformed or wrong-typed fingerprint is corruption; it is never
+/// coerced into `Temporary(0)`.
+fn decode_identity(value: Option<&Value>) -> CadResult<DocumentIdentity> {
+    match value {
+        Some(Value::String(s)) => parse_uuid_strict(s)
+            .map(DocumentIdentity::Temporary)
+            .ok_or_else(|| corrupt("document_fingerprint is not a valid UUID string")),
+        Some(Value::Array(a)) => {
+            // A SHA-256 fingerprint is exactly 32 bytes in 0..=255; a short or
+            // over-long array must not be zero-padded or truncated into a
+            // plausible-looking identity (audit B11).
+            if a.len() != 32 {
+                return Err(corrupt("document_fingerprint must be 32 bytes"));
+            }
+            let mut bytes = [0u8; 32];
+            for (i, v) in a.iter().enumerate() {
+                let n = v
+                    .as_u64()
+                    .ok_or_else(|| corrupt("document_fingerprint byte is not an integer"))?;
+                bytes[i] = u8::try_from(n)
+                    .map_err(|_| corrupt("document_fingerprint byte out of range"))?;
+            }
+            Ok(DocumentIdentity::Sha256(bytes))
+        }
+        Some(_) => Err(corrupt(
+            "document_fingerprint must be a UUID string or a 32-byte array",
+        )),
+        None => Err(corrupt("annotation file has no document_fingerprint")),
+    }
 }
 
 fn encode_identity(identity: &DocumentIdentity) -> Value {
@@ -405,10 +615,6 @@ fn uuid_string(bits: u128) -> String {
         (bits >> 48) as u16,
         (bits & 0xffff_ffff_ffff) as u64
     )
-}
-
-fn parse_uuid_bits(s: &str) -> u128 {
-    parse_uuid_strict(s).unwrap_or(0)
 }
 
 fn encode_units(units: &UnitContext) -> Value {
@@ -430,34 +636,62 @@ fn encode_unit(unit: &Unit) -> Value {
     })
 }
 
-fn decode_unit(value: Option<&Value>) -> Option<Unit> {
-    match value.and_then(|v| v.as_str()) {
-        Some("DrawingUnits") => Some(Unit::DrawingUnits),
-        Some("Millimeter") => Some(Unit::Millimeter),
-        Some("Meter") => Some(Unit::Meter),
-        Some("Inch") => Some(Unit::Inch),
-        Some("Foot") => Some(Unit::Foot),
-        _ => None,
+fn decode_unit(value: Option<&Value>) -> CadResult<Unit> {
+    match value {
+        // A missing unit is intentionally Unknown (DrawingUnits); this is the
+        // documented "unreadable source stays Unknown" rule (audit B09).
+        None | Some(Value::Null) => Ok(Unit::DrawingUnits),
+        Some(v) => match v.as_str() {
+            Some("DrawingUnits") => Ok(Unit::DrawingUnits),
+            Some("Millimeter") => Ok(Unit::Millimeter),
+            Some("Meter") => Ok(Unit::Meter),
+            Some("Inch") => Ok(Unit::Inch),
+            Some("Foot") => Ok(Unit::Foot),
+            // An unrecognized unit string is corruption, not silence.
+            Some(other) => Err(corrupt(format!("unknown unit '{other}'"))),
+            None => Err(corrupt("unit must be a string")),
+        },
     }
 }
 
-fn decode_units(value: Option<&Value>) -> UnitContext {
+/// Decode a unit context, bounded and strict (audit B09/B11).
+///
+/// `decimal_places` is range-checked instead of being truncated by an `as u8`
+/// cast; `display_per_source` must be finite when present.
+fn decode_units(value: Option<&Value>) -> CadResult<UnitContext> {
     let Some(v) = value else {
-        return UnitContext::drawing_units();
+        return Ok(UnitContext::drawing_units());
     };
-    // Never silently coerce a missing source into the display unit (audit B09):
-    // an unreadable source stays Unknown (DrawingUnits).
-    let source = decode_unit(v.get("source")).unwrap_or(Unit::DrawingUnits);
-    let display = decode_unit(v.get("display")).unwrap_or(Unit::DrawingUnits);
-    UnitContext {
-        source,
-        display,
-        display_per_source: v.get("display_per_source").and_then(|d| d.as_f64()),
-        decimal_places: v
-            .get("decimal_places")
-            .and_then(|d| d.as_u64())
-            .unwrap_or(3) as u8,
-    }
+    let object = v
+        .as_object()
+        .ok_or_else(|| corrupt("unit_context must be an object"))?;
+    let decimal_places = match object.get("decimal_places") {
+        None | Some(Value::Null) => 3u8,
+        Some(d) => {
+            let raw = d
+                .as_u64()
+                .ok_or_else(|| corrupt("decimal_places must be an unsigned integer"))?;
+            u8::try_from(raw).map_err(|_| corrupt("decimal_places does not fit in 8 bits"))?
+        }
+    };
+    let display_per_source = match object.get("display_per_source") {
+        None | Some(Value::Null) => None,
+        Some(d) => {
+            let n = d
+                .as_f64()
+                .ok_or_else(|| corrupt("display_per_source must be a number"))?;
+            if !n.is_finite() {
+                return Err(corrupt("display_per_source must be finite"));
+            }
+            Some(n)
+        }
+    };
+    Ok(UnitContext {
+        source: decode_unit(object.get("source"))?,
+        display: decode_unit(object.get("display"))?,
+        display_per_source,
+        decimal_places,
+    })
 }
 
 fn encode_space(space: &SpaceId) -> Value {
@@ -468,20 +702,34 @@ fn encode_space(space: &SpaceId) -> Value {
     }
 }
 
-fn decode_space(value: Option<&Value>) -> SpaceId {
+/// Decode a space id strictly: a malformed or unknown space is corruption, not
+/// a silent `Model`/`Paper(0)` (audit B11).
+fn decode_space(value: Option<&Value>) -> CadResult<SpaceId> {
     match value {
+        Some(Value::String(s)) if s == "Model" => Ok(SpaceId::Model),
         Some(Value::Object(m)) => {
-            if let Some(block) = m.get("Block").and_then(|v| v.as_str()) {
-                return SpaceId::Block(BlockId(block.parse::<u128>().unwrap_or(0)));
+            if let Some(block) = m.get("Block") {
+                let raw = block
+                    .as_str()
+                    .ok_or_else(|| corrupt("space 'Block' id must be a string"))?;
+                let id = raw
+                    .parse::<u128>()
+                    .map_err(|_| corrupt("space 'Block' id is not a valid integer"))?;
+                return Ok(SpaceId::Block(BlockId(id)));
             }
-            let id = m
-                .get("Paper")
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.parse::<u128>().ok())
-                .unwrap_or(0);
-            SpaceId::Paper(LayoutId(id))
+            if let Some(paper) = m.get("Paper") {
+                let raw = paper
+                    .as_str()
+                    .ok_or_else(|| corrupt("space 'Paper' id must be a string"))?;
+                let id = raw
+                    .parse::<u128>()
+                    .map_err(|_| corrupt("space 'Paper' id is not a valid integer"))?;
+                return Ok(SpaceId::Paper(LayoutId(id)));
+            }
+            Err(corrupt("space object must name 'Paper' or 'Block'"))
         }
-        _ => SpaceId::Model,
+        Some(_) => Err(corrupt("space must be \"Model\" or an object")),
+        None => Err(corrupt("missing required field 'space'")),
     }
 }
 
@@ -494,12 +742,19 @@ fn encode_bookmark(bookmark: &ViewBookmark) -> Value {
     })
 }
 
-fn decode_bookmark(value: &Value) -> Option<ViewBookmark> {
-    Some(ViewBookmark {
-        name: value.get("name")?.as_str()?.to_string(),
-        viewport: ViewportId(value.get("viewport")?.as_str()?.parse::<u128>().ok()?),
-        space: decode_space(value.get("space")),
-        camera_transform: decode_transform(value.get("camera_transform")?)?,
+fn decode_bookmark(value: &Value) -> CadResult<ViewBookmark> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| corrupt("view bookmark must be an object"))?;
+    let viewport_raw = require_str(object, "viewport")?;
+    let viewport = viewport_raw
+        .parse::<u128>()
+        .map_err(|_| corrupt("view bookmark 'viewport' is not a valid integer"))?;
+    Ok(ViewBookmark {
+        name: require_str(object, "name")?.to_string(),
+        viewport: ViewportId(viewport),
+        space: decode_space(object.get("space"))?,
+        camera_transform: decode_transform(require(object, "camera_transform")?)?,
     })
 }
 
@@ -512,26 +767,32 @@ fn encode_transform(t: &Transform3) -> Value {
     )
 }
 
-fn decode_transform(value: &Value) -> Option<Transform3> {
-    let rows = value.as_array()?;
+fn decode_transform(value: &Value) -> CadResult<Transform3> {
+    let rows = value
+        .as_array()
+        .ok_or_else(|| corrupt("transform must be a 4x4 array"))?;
     if rows.len() != 4 {
-        return None;
+        return Err(corrupt("transform must have 4 rows"));
     }
     let mut matrix = [[0.0f64; 4]; 4];
     for (i, row) in rows.iter().enumerate() {
-        let cols = row.as_array()?;
+        let cols = row
+            .as_array()
+            .ok_or_else(|| corrupt("transform row must be an array"))?;
         if cols.len() != 4 {
-            return None;
+            return Err(corrupt("transform row must have 4 columns"));
         }
         for (j, v) in cols.iter().enumerate() {
-            let n = v.as_f64()?;
+            let n = v
+                .as_f64()
+                .ok_or_else(|| corrupt("transform entry must be a number"))?;
             if !n.is_finite() {
-                return None;
+                return Err(corrupt("transform entry must be finite"));
             }
             matrix[i][j] = n;
         }
     }
-    Some(Transform3 { matrix })
+    Ok(Transform3 { matrix })
 }
 
 fn encode_geometry(geometry: &AnnotationGeometry) -> Value {
@@ -580,11 +841,14 @@ fn encode_plane(plane: WorkPlane) -> Value {
     })
 }
 
-fn decode_plane(value: &Value) -> Option<WorkPlane> {
-    Some(WorkPlane {
-        origin: decode_point(value.get("origin")?)?,
-        u: decode_point(value.get("u")?)?,
-        v: decode_point(value.get("v")?)?,
+fn decode_plane(value: &Value) -> CadResult<WorkPlane> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| corrupt("work plane must be an object"))?;
+    Ok(WorkPlane {
+        origin: decode_point(require(object, "origin")?)?,
+        u: decode_point(require(object, "u")?)?,
+        v: decode_point(require(object, "v")?)?,
     })
 }
 
@@ -598,14 +862,15 @@ fn encode_algorithm(algorithm: &MeasurementAlgorithm) -> Value {
     })
 }
 
-fn decode_algorithm(value: Option<&Value>) -> Option<MeasurementAlgorithm> {
+fn decode_algorithm(value: Option<&Value>) -> CadResult<MeasurementAlgorithm> {
     match value.and_then(|v| v.as_str()) {
-        Some("Distance2d") => Some(MeasurementAlgorithm::Distance2d),
-        Some("Distance3d") => Some(MeasurementAlgorithm::Distance3d),
-        Some("PolylineLength") => Some(MeasurementAlgorithm::PolylineLength),
-        Some("Angle3Points") => Some(MeasurementAlgorithm::Angle3Points),
-        Some("PlanarPolygonArea") => Some(MeasurementAlgorithm::PlanarPolygonArea),
-        _ => None,
+        Some("Distance2d") => Ok(MeasurementAlgorithm::Distance2d),
+        Some("Distance3d") => Ok(MeasurementAlgorithm::Distance3d),
+        Some("PolylineLength") => Ok(MeasurementAlgorithm::PolylineLength),
+        Some("Angle3Points") => Ok(MeasurementAlgorithm::Angle3Points),
+        Some("PlanarPolygonArea") => Ok(MeasurementAlgorithm::PlanarPolygonArea),
+        Some(other) => Err(corrupt(format!("unknown measurement algorithm '{other}'"))),
+        None => Err(corrupt("measurement algorithm is required")),
     }
 }
 
@@ -619,14 +884,15 @@ fn encode_geometry_source(source: &GeometrySource) -> Value {
     })
 }
 
-fn decode_geometry_source(value: Option<&Value>) -> Option<GeometrySource> {
+fn decode_geometry_source(value: Option<&Value>) -> CadResult<GeometrySource> {
     match value.and_then(|v| v.as_str()) {
-        Some("Analytic") => Some(GeometrySource::Analytic),
-        Some("DirectMesh") => Some(GeometrySource::DirectMesh),
-        Some("ProxyCache") => Some(GeometrySource::ProxyCache),
-        Some("KernelMesh") => Some(GeometrySource::KernelMesh),
-        Some("UserPoints") => Some(GeometrySource::UserPoints),
-        _ => None,
+        Some("Analytic") => Ok(GeometrySource::Analytic),
+        Some("DirectMesh") => Ok(GeometrySource::DirectMesh),
+        Some("ProxyCache") => Ok(GeometrySource::ProxyCache),
+        Some("KernelMesh") => Ok(GeometrySource::KernelMesh),
+        Some("UserPoints") => Ok(GeometrySource::UserPoints),
+        Some(other) => Err(corrupt(format!("unknown geometry source '{other}'"))),
+        None => Err(corrupt("measurement geometry source is required")),
     }
 }
 
@@ -640,61 +906,80 @@ fn encode_precision(precision: &Precision) -> Value {
     }
 }
 
-fn decode_precision(value: Option<&Value>) -> Option<Precision> {
-    let v = value?;
-    match v.get("kind").and_then(|k| k.as_str()) {
-        Some("analytic") => Some(Precision::Analytic),
-        Some("approximate") => Some(Precision::Approximate {
-            error_bound: v.get("error_bound").and_then(|b| b.as_f64()),
-        }),
-        Some("unknown") => Some(Precision::Unknown),
-        _ => None,
+fn decode_precision(value: Option<&Value>) -> CadResult<Precision> {
+    let v = value.ok_or_else(|| corrupt("precision is required"))?;
+    let object = v
+        .as_object()
+        .ok_or_else(|| corrupt("precision must be an object"))?;
+    match require_str(object, "kind")? {
+        "analytic" => Ok(Precision::Analytic),
+        "approximate" => match object.get("error_bound") {
+            None | Some(Value::Null) => Ok(Precision::Approximate { error_bound: None }),
+            Some(b) => {
+                let n = b
+                    .as_f64()
+                    .ok_or_else(|| corrupt("precision error_bound must be a number"))?;
+                if !n.is_finite() {
+                    return Err(corrupt("precision error_bound must be finite"));
+                }
+                Ok(Precision::Approximate {
+                    error_bound: Some(n),
+                })
+            }
+        },
+        "unknown" => Ok(Precision::Unknown),
+        other => Err(corrupt(format!("unknown precision kind '{other}'"))),
     }
 }
 
-fn decode_geometry(value: &Value) -> Option<AnnotationGeometry> {
-    let kind = value.get("kind").and_then(|v| v.as_str())?;
+fn decode_geometry(value: &Value) -> CadResult<AnnotationGeometry> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| corrupt("geometry must be an object"))?;
+    let kind = require_str(object, "kind")?;
     match kind {
-        "text" => Some(AnnotationGeometry::Text(decode_point(
-            value.get("position")?,
-        )?)),
-        "leader" => Some(AnnotationGeometry::Leader(decode_points(
-            value.get("points")?,
-        )?)),
-        "freehand" => Some(AnnotationGeometry::Freehand(decode_points(
-            value.get("points")?,
-        )?)),
-        "cloud" => Some(AnnotationGeometry::Cloud(decode_points(
-            value.get("points")?,
-        )?)),
-        "rectangle" => Some(AnnotationGeometry::Rectangle([
-            decode_point(value.get("a")?)?,
-            decode_point(value.get("b")?)?,
+        "text" => Ok(AnnotationGeometry::Text(decode_point(require(
+            object, "position",
+        )?)?)),
+        "leader" => Ok(AnnotationGeometry::Leader(decode_points(require(
+            object, "points",
+        )?)?)),
+        "freehand" => Ok(AnnotationGeometry::Freehand(decode_points(require(
+            object, "points",
+        )?)?)),
+        "cloud" => Ok(AnnotationGeometry::Cloud(decode_points(require(
+            object, "points",
+        )?)?)),
+        "rectangle" => Ok(AnnotationGeometry::Rectangle([
+            decode_point(require(object, "a")?)?,
+            decode_point(require(object, "b")?)?,
         ])),
-        "ellipse" => Some(AnnotationGeometry::Ellipse {
-            center: decode_point(value.get("center")?)?,
-            axis_u: decode_point(value.get("axis_u")?)?,
-            axis_v: decode_point(value.get("axis_v")?)?,
+        "ellipse" => Ok(AnnotationGeometry::Ellipse {
+            center: decode_point(require(object, "center")?)?,
+            axis_u: decode_point(require(object, "axis_u")?)?,
+            axis_v: decode_point(require(object, "axis_v")?)?,
         }),
         "measurement" => {
-            // Missing algorithm/units/source/precision must not be silently
-            // approximated as analytic/UserPoints (audit B09).
-            let algorithm = decode_algorithm(value.get("algorithm"))?;
-            let units = value.get("units").map(|u| decode_units(Some(u)));
-            let units = units.unwrap_or_else(UnitContext::drawing_units);
-            let source = decode_geometry_source(value.get("source"))?;
-            let precision = decode_precision(value.get("precision")).unwrap_or(Precision::Unknown);
-            Some(AnnotationGeometry::Measurement(MeasurementRecord {
+            // Missing/invalid algorithm, units, source or precision must not be
+            // silently approximated as analytic/UserPoints (audit B09).
+            let algorithm = decode_algorithm(object.get("algorithm"))?;
+            let units = decode_units(object.get("units"))?;
+            let source = decode_geometry_source(object.get("source"))?;
+            let precision = decode_precision(object.get("precision"))?;
+            Ok(AnnotationGeometry::Measurement(MeasurementRecord {
                 algorithm,
-                inputs: decode_points(value.get("points")?)?,
-                plane: value.get("plane").and_then(decode_plane),
-                value: value.get("value").and_then(|v| v.as_f64())?,
+                inputs: decode_points(require(object, "points")?)?,
+                plane: match object.get("plane") {
+                    None | Some(Value::Null) => None,
+                    Some(plane) => Some(decode_plane(plane)?),
+                },
+                value: require_f64(object, "value")?,
                 units,
                 source,
                 precision,
             }))
         }
-        _ => None,
+        other => Err(corrupt(format!("unknown geometry kind '{other}'"))),
     }
 }
 
@@ -702,24 +987,35 @@ fn encode_point(p: Point3) -> Value {
     json!([p.x, p.y, p.z])
 }
 
-fn decode_point(value: &Value) -> Option<Point3> {
-    let a = value.as_array()?;
+fn decode_point(value: &Value) -> CadResult<Point3> {
+    let a = value
+        .as_array()
+        .ok_or_else(|| corrupt("point must be an array"))?;
     if a.len() != 3 {
-        return None;
+        return Err(corrupt("point must have exactly 3 coordinates"));
     }
+    let read = |i: usize| {
+        a[i].as_f64()
+            .ok_or_else(|| corrupt("point coordinate must be a number"))
+    };
     let p = Point3 {
-        x: a[0].as_f64()?,
-        y: a[1].as_f64()?,
-        z: a[2].as_f64()?,
+        x: read(0)?,
+        y: read(1)?,
+        z: read(2)?,
     };
     if !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite() {
-        return None;
+        return Err(corrupt("point coordinate must be finite"));
     }
-    Some(p)
+    Ok(p)
 }
 
-fn decode_points(value: &Value) -> Option<Vec<Point3>> {
-    value.as_array()?.iter().map(decode_point).collect()
+fn decode_points(value: &Value) -> CadResult<Vec<Point3>> {
+    value
+        .as_array()
+        .ok_or_else(|| corrupt("points must be an array"))?
+        .iter()
+        .map(decode_point)
+        .collect()
 }
 
 fn encode_annotation(annotation: &Annotation) -> Value {
@@ -757,16 +1053,22 @@ fn encode_instance_path(path: &InstancePath) -> Value {
     Value::Array(path.0.iter().map(|e| json!(e.0.to_string())).collect())
 }
 
-fn decode_instance_path(value: Option<&Value>) -> Option<InstancePath> {
-    let Some(Value::Array(items)) = value else {
-        return Some(InstancePath::default());
-    };
+fn decode_instance_path(value: Option<&Value>) -> CadResult<InstancePath> {
+    let items = value
+        .ok_or_else(|| corrupt("anchor instance path is required"))?
+        .as_array()
+        .ok_or_else(|| corrupt("anchor instance path must be an array"))?;
     let mut out = Vec::with_capacity(items.len());
     for item in items {
-        let raw = item.as_str()?;
-        out.push(EntityId(raw.parse::<u128>().ok()?));
+        let raw = item
+            .as_str()
+            .ok_or_else(|| corrupt("anchor instance id must be a string"))?;
+        let id = raw
+            .parse::<u128>()
+            .map_err(|_| corrupt("anchor instance id is not a valid integer"))?;
+        out.push(EntityId(id));
     }
-    Some(InstancePath(out))
+    Ok(InstancePath(out))
 }
 
 fn encode_anchor_status(status: &AnchorStatus) -> Value {
@@ -777,97 +1079,113 @@ fn encode_anchor_status(status: &AnchorStatus) -> Value {
     })
 }
 
-fn decode_anchor_status(value: Option<&Value>) -> Option<AnchorStatus> {
+fn decode_anchor_status(value: Option<&Value>) -> CadResult<AnchorStatus> {
     match value.and_then(|v| v.as_str()) {
-        Some("Valid") => Some(AnchorStatus::Valid),
-        Some("Stale") => Some(AnchorStatus::Stale),
-        Some("Unresolved") => Some(AnchorStatus::Unresolved),
-        _ => None,
+        Some("Valid") => Ok(AnchorStatus::Valid),
+        Some("Stale") => Ok(AnchorStatus::Stale),
+        Some("Unresolved") => Ok(AnchorStatus::Unresolved),
+        Some(other) => Err(corrupt(format!("unknown anchor status '{other}'"))),
+        None => Err(corrupt("anchor status is required")),
     }
 }
 
-fn decode_annotation(value: &Value) -> Option<Annotation> {
-    let geometry = decode_geometry(value.get("geometry")?)?;
-    let id = decode_id(value.get("id")?)?;
-    let rgba = decode_rgba(value.get("style"))?;
+/// Decode one annotation, rejecting any missing or malformed required field
+/// instead of defaulting it (audit B09/B11).
+fn decode_annotation(value: &Value) -> CadResult<Annotation> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| corrupt("annotation must be an object"))?;
+    let geometry = decode_geometry(require(object, "geometry")?)?;
+    let id = decode_id(require(object, "id")?)?;
+    let style_value = require(object, "style")?;
+    let style_object = style_value
+        .as_object()
+        .ok_or_else(|| corrupt("annotation style must be an object"))?;
     let style = AnnotationStyle {
-        rgba,
-        logical_width: value
-            .get("style")
-            .and_then(|s| s.get("logical_width"))
-            .and_then(|v| v.as_f64())?,
-        text_height: value
-            .get("style")
-            .and_then(|s| s.get("text_height"))
-            .and_then(|v| v.as_f64())?,
+        rgba: decode_rgba(style_object)?,
+        logical_width: require_f64(style_object, "logical_width")?,
+        text_height: require_f64(style_object, "text_height")?,
     };
     if !style.logical_width.is_finite() || !style.text_height.is_finite() {
-        return None;
+        return Err(corrupt("annotation style must be finite"));
     }
-    let created = value.get("created_unix_ms").and_then(|v| v.as_i64())?;
-    let modified = value.get("modified_unix_ms").and_then(|v| v.as_i64())?;
-    let anchor = match value.get("anchor") {
+    let created = require(object, "created_unix_ms")?
+        .as_i64()
+        .ok_or_else(|| corrupt("created_unix_ms must be a signed integer"))?;
+    let modified = require(object, "modified_unix_ms")?
+        .as_i64()
+        .ok_or_else(|| corrupt("modified_unix_ms must be a signed integer"))?;
+    let anchor = match object.get("anchor") {
         None | Some(Value::Null) => None,
         Some(anchor) => Some(decode_anchor(anchor)?),
     };
-    let precision = decode_precision(value.get("precision")).unwrap_or(Precision::Unknown);
-    Some(Annotation {
+    Ok(Annotation {
         id: AnnotationId(id),
-        space: decode_space(value.get("space")),
+        space: decode_space(object.get("space"))?,
         geometry,
-        text: value
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
+        text: require_str(object, "text")?.to_string(),
         style,
         created_unix_ms: created,
         modified_unix_ms: modified,
         anchor,
-        precision,
+        precision: decode_precision(object.get("precision"))?,
     })
 }
 
-fn decode_rgba(style: Option<&Value>) -> Option<[u8; 4]> {
-    let a = style?.get("rgba")?.as_array()?;
+fn decode_rgba(style: &Map<String, Value>) -> CadResult<[u8; 4]> {
+    let a = require(style, "rgba")?
+        .as_array()
+        .ok_or_else(|| corrupt("style rgba must be an array"))?;
     if a.len() != 4 {
-        return None;
+        return Err(corrupt("style rgba must have 4 channels"));
     }
     let mut out = [0u8; 4];
     for (i, v) in a.iter().enumerate() {
-        out[i] = u8::try_from(v.as_u64()?).ok()?;
+        let n = v
+            .as_u64()
+            .ok_or_else(|| corrupt("style rgba channel must be an unsigned integer"))?;
+        out[i] = u8::try_from(n).map_err(|_| corrupt("style rgba channel out of range"))?;
     }
-    Some(out)
+    Ok(out)
 }
 
-fn decode_anchor(value: &Value) -> Option<EntityAnchor> {
-    let source_handle = value.get("source_handle")?.as_str()?.to_string();
-    if source_handle.is_empty() {
-        return None;
+fn decode_anchor(value: &Value) -> CadResult<EntityAnchor> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| corrupt("anchor must be an object"))?;
+    let source_handle = require_str(object, "source_handle")?.to_string();
+    if source_handle.trim().is_empty() {
+        return Err(corrupt("anchor source_handle must not be empty"));
     }
-    let instance = decode_instance_path(value.get("instance"))?;
-    let sub_element = match value.get("sub_element") {
+    let sub_element = match object.get("sub_element") {
         None | Some(Value::Null) => None,
-        Some(s) => Some(SubElementId {
-            source_key: s.get("source_key")?.as_str()?.to_string(),
-            topology_revision: Revision(s.get("topology_revision")?.as_u64()?),
-        }),
+        Some(s) => {
+            let sub = s
+                .as_object()
+                .ok_or_else(|| corrupt("anchor sub_element must be an object"))?;
+            Some(SubElementId {
+                source_key: require_str(sub, "source_key")?.to_string(),
+                topology_revision: Revision(require_u64(sub, "topology_revision")?),
+            })
+        }
     };
-    Some(EntityAnchor {
+    Ok(EntityAnchor {
         source_handle,
-        instance,
+        instance: decode_instance_path(object.get("instance"))?,
         sub_element,
-        fallback: decode_point(value.get("fallback")?)?,
-        status: decode_anchor_status(value.get("status")).unwrap_or(AnchorStatus::Unresolved),
+        fallback: decode_point(require(object, "fallback")?)?,
+        status: decode_anchor_status(object.get("status"))?,
     })
 }
 
 /// Decode an annotation id with strict UUID validation (audit B11).
 ///
 /// A malformed id is an error, not a silent `AnnotationId(0)`.
-fn decode_id(value: &Value) -> Option<u128> {
-    let s = value.as_str()?;
-    parse_uuid_strict(s)
+fn decode_id(value: &Value) -> CadResult<u128> {
+    let s = value
+        .as_str()
+        .ok_or_else(|| corrupt("annotation id must be a string"))?;
+    parse_uuid_strict(s).ok_or_else(|| corrupt("annotation id is not a valid UUID"))
 }
 
 fn parse_uuid_strict(s: &str) -> Option<u128> {
@@ -1112,18 +1430,28 @@ mod tests {
         assert_eq!(round_trip(a.clone()), a);
     }
 
+    /// A matching all-zero SHA-256 fingerprint, so a test can reach the
+    /// annotation-level decoders without tripping the fingerprint check.
+    const ZERO_FP: &str = r#""document_fingerprint":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"#;
+
     #[test]
     fn unknown_measurement_algorithm_is_rejected_not_approximated() {
         // A future algorithm must not be silently downgraded to Distance2d.
         let service = AnnotationService;
         let identity = DocumentIdentity::Sha256([0u8; 32]);
-        let json =
-            br#"{"schema_version":1,"annotations":[{"id":"00000000-0000-0000-0000-000000000001",
-            "geometry":{"kind":"measurement","algorithm":"Future4d","value":1.0,"points":[[0,0,0]],
-            "source":"UserPoints","precision":{"kind":"analytic"}},"style":{"rgba":[1,2,3,4],
-            "logical_width":1.0,"text_height":1.0},"created_unix_ms":0,"modified_unix_ms":0}]}"#;
+        let json = format!(
+            r#"{{"schema_version":1,{ZERO_FP}"annotations":[{{"id":"00000000-0000-0000-0000-000000000001",
+            "space":"Model","geometry":{{"kind":"measurement","algorithm":"Future4d","value":1.0,"points":[[0,0,0]],
+            "units":{{"source":"Millimeter","display":"Millimeter","decimal_places":3}},
+            "source":"UserPoints","precision":{{"kind":"analytic"}}}},"text":"t","style":{{"rgba":[1,2,3,4],
+            "logical_width":1.0,"text_height":1.0}},"created_unix_ms":0,"modified_unix_ms":0,"precision":{{"kind":"analytic"}}}}]}}"#
+        );
         assert!(matches!(
-            service.decode(json, &identity, FingerprintPolicy::ImportUnanchored),
+            service.decode(
+                json.as_bytes(),
+                &identity,
+                FingerprintPolicy::ImportUnanchored
+            ),
             Err(CadError::CorruptData(_))
         ));
     }
@@ -1132,11 +1460,17 @@ mod tests {
     fn malformed_annotation_id_is_rejected() {
         let service = AnnotationService;
         let identity = DocumentIdentity::Sha256([0u8; 32]);
-        let json = br#"{"schema_version":1,"annotations":[{"id":"not-a-uuid",
-            "geometry":{"kind":"text","position":[0,0,0]},"style":{"rgba":[1,2,3,4],
-            "logical_width":1.0,"text_height":1.0},"created_unix_ms":0,"modified_unix_ms":0}]}"#;
+        let json = format!(
+            r#"{{"schema_version":1,{ZERO_FP}"annotations":[{{"id":"not-a-uuid",
+            "space":"Model","geometry":{{"kind":"text","position":[0,0,0]}},"text":"t","style":{{"rgba":[1,2,3,4],
+            "logical_width":1.0,"text_height":1.0}},"created_unix_ms":0,"modified_unix_ms":0,"precision":{{"kind":"analytic"}}}}]}}"#
+        );
         assert!(matches!(
-            service.decode(json, &identity, FingerprintPolicy::ImportUnanchored),
+            service.decode(
+                json.as_bytes(),
+                &identity,
+                FingerprintPolicy::ImportUnanchored
+            ),
             Err(CadError::CorruptData(_))
         ));
     }
