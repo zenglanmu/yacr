@@ -14,6 +14,12 @@ pub use wgpu;
 
 pub mod geometry;
 
+/// Native headless path: create a software device, render offscreen, read the
+/// target back and encode PNG. Native only; the browser path gets its device
+/// from the host canvas instead.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod headless;
+
 use cad_diagnostics::codes;
 use cad_diagnostics::{DiagnosticParameter, DiagnosticReason};
 use cad_domain::*;
@@ -523,7 +529,12 @@ impl Renderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: self.target_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            // COPY_SRC lets the headless evidence path read the frame back to a
+            // buffer (`Renderer::read_target_rgba`); production composition never
+            // does a per-frame GPU→CPU copy.
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let depth = device.create_texture(&wgpu::TextureDescriptor {
