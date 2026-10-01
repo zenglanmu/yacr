@@ -18,6 +18,7 @@ pub mod camera;
 pub mod host;
 pub mod layers;
 pub mod measure_tool;
+pub mod recovery;
 pub mod selection;
 
 pub use camera::{
@@ -25,6 +26,10 @@ pub use camera::{
     ViewBasis,
 };
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
+pub use recovery::{
+    ActiveBackendKind, BackendFailure, BackendOutcome, RecoverySnapshot, UnsavedDecision,
+    UnsavedFlow, UnsavedOutcome,
+};
 pub use selection::{entity_property_rows, PropertyRow, SelectionProperties, SelectionSet};
 
 use layers::LayerOverrideSet;
@@ -1182,35 +1187,49 @@ impl Application {
 
     /// Guard a document switch/exit; an unsaved annotation is never discarded
     /// without an explicit user decision (spec §16.3).
+    ///
+    /// This is the decision-only half of the leave flow: the host owns the real
+    /// save/recovery writes, so `Save`/`PreserveRecovery` are treated as
+    /// "recorded intent" here and the host confirms the durable write through
+    /// [`Application::resolve_leave`] with the actual write results.
     pub fn prepare_leave(
         &mut self,
         document: DocumentId,
         decision: UnsavedDecision,
     ) -> CadResult<()> {
+        match self.resolve_leave(document, decision, true, true) {
+            UnsavedOutcome::Proceed => Ok(()),
+            UnsavedOutcome::Cancelled => Err(CadError::Cancelled),
+            UnsavedOutcome::SaveFailed => Err(CadError::Unsupported(
+                "annotation save must be confirmed by the platform host".into(),
+            )),
+            UnsavedOutcome::RecoveryFailed => Err(CadError::Invariant(
+                "recovery snapshot could not be persisted".into(),
+            )),
+        }
+    }
+
+    /// Apply the unsaved-work decision model and return its structured outcome.
+    ///
+    /// `save_succeeded` / `recovery_succeeded` are the host's results for the
+    /// real atomic export and recovery write. A failed save never proceeds and
+    /// never clears dirty (audit B07); a `Cancel` keeps the current document and
+    /// any recovery data (audit U09). This method performs no writes itself.
+    pub fn resolve_leave(
+        &self,
+        document: DocumentId,
+        decision: UnsavedDecision,
+        save_succeeded: bool,
+        recovery_succeeded: bool,
+    ) -> UnsavedOutcome {
         let dirty = self
             .workspace
             .documents
             .get(&document)
             .map(|d| d.annotations.is_dirty())
             .unwrap_or(false);
-        if !dirty {
-            return Ok(());
-        }
-        match decision {
-            UnsavedDecision::Cancel => Err(CadError::Cancelled),
-            UnsavedDecision::Save => Err(CadError::Unsupported(
-                "annotation export is performed by the platform host".into(),
-            )),
-            UnsavedDecision::PreserveRecovery | UnsavedDecision::ExplicitDiscard => Ok(()),
-        }
+        UnsavedFlow::new(dirty).apply(decision, save_succeeded, recovery_succeeded)
     }
-}
-
-pub enum UnsavedDecision {
-    Save,
-    PreserveRecovery,
-    ExplicitDiscard,
-    Cancel,
 }
 
 pub enum InputEvent {
@@ -1534,7 +1553,7 @@ mod tests {
             Err(CadError::Cancelled)
         ));
         assert!(app
-            .prepare_leave(DocumentId(1), UnsavedDecision::ExplicitDiscard)
+            .prepare_leave(DocumentId(1), UnsavedDecision::Discard)
             .is_ok());
     }
 

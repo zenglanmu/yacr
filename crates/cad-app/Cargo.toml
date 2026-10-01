@@ -21,3 +21,4 @@ cad-query.workspace = true
 cad-diagnostics.workspace = true
 cad-platform.workspace = true
 cad-resources.workspace = true
+serde_json.workspace = true

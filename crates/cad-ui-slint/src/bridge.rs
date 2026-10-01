@@ -19,9 +19,11 @@ use cad_render_wgpu::{
 use cad_representation::{FontEngine, ProviderRegistry, RepresentationContext};
 use cad_scene::{SceneBudget, SceneCache, SceneDelta};
 
-use crate::{UiHandle, YacrWindow};
-
 use cad_app::layers::LayerOverrideSet;
+use cad_app::recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
+use cad_app::BackendChoice;
+
+use crate::{UiHandle, YacrWindow};
 
 /// A shared slot the application fills when a drawing becomes available.
 pub type IncomingDocument = Rc<RefCell<Option<Arc<DrawingDatabase>>>>;
@@ -118,11 +120,19 @@ struct BridgeState {
     camera: BridgeCamera,
     document: Option<SceneIdentity>,
     image_size: Option<(u32, u32)>,
-    error: Option<String>,
+    /// Result of the last backend selection/init attempt.
+    ///
+    /// Replaces the old generic `error: Option<String>`: callers can now tell a
+    /// live backend from a failure and always see which backend really ran
+    /// (audit F12).
+    outcome: Option<BackendOutcome>,
     caps: Option<BackendCapabilities>,
     fonts_present: bool,
     /// Fingerprint of the applied layer overrides; a change forces a rebuild.
     overrides_fingerprint: u64,
+    /// Generation of the device the current `document` identity was built for.
+    /// A device rebuild bumps this so the next frame re-uploads from the DB.
+    built_generation: Option<u64>,
 }
 
 impl Default for BridgeState {
@@ -132,10 +142,11 @@ impl Default for BridgeState {
             camera: BridgeCamera::default(),
             document: None,
             image_size: None,
-            error: None,
+            outcome: None,
             caps: None,
             fonts_present: false,
             overrides_fingerprint: 0,
+            built_generation: None,
         }
     }
 }
@@ -148,7 +159,6 @@ impl Default for BridgeState {
 pub struct CadView {
     state: Rc<RefCell<BridgeState>>,
     handle: UiHandle,
-    incoming: IncomingDocument,
     fonts: Rc<RefCell<Option<Arc<FontEngine>>>>,
     overrides: Rc<RefCell<LayerOverrideSet>>,
     preference: BackendPreference,
@@ -188,8 +198,43 @@ impl CadView {
             .map(|c| (c.actual, c.compute, c.max_texture_dimension))
     }
 
+    /// The full backend outcome: live backend or a specific failure (F12).
+    pub fn backend_outcome(&self) -> Option<BackendOutcome> {
+        self.state.borrow().outcome.clone()
+    }
+
+    /// Whether a backend is actually initialized and rendering.
+    pub fn backend_is_live(&self) -> bool {
+        self.state
+            .borrow()
+            .outcome
+            .as_ref()
+            .map(BackendOutcome::is_live)
+            .unwrap_or(false)
+    }
+
+    /// Human-facing backend label that follows the real device, not the wish.
+    pub fn backend_label(&self) -> Option<String> {
+        self.state.borrow().outcome.as_ref().map(|o| o.label())
+    }
+
+    /// Failure reason when no backend is live, else `None`.
     pub fn last_error(&self) -> Option<String> {
-        self.state.borrow().error.clone()
+        match self.state.borrow().outcome.as_ref() {
+            Some(BackendOutcome::Failed { failure, .. }) => Some(match failure {
+                BackendFailure::NoBackendAvailable => "无可用的 WebGPU/WebGL2 设备".to_string(),
+                BackendFailure::ForcedUnavailable { reason } => {
+                    format!("强制后端不可用：{reason}")
+                }
+                BackendFailure::InitFailed { reason } => format!("设备初始化失败：{reason}"),
+            }),
+            _ => None,
+        }
+    }
+
+    /// The requested preference as the shared app-level choice.
+    pub fn preference_choice(&self) -> BackendChoice {
+        preference_choice(self.preference)
     }
 
     pub fn preference(&self) -> BackendPreference {
@@ -226,12 +271,72 @@ impl CadView {
     }
 
     /// Drop derived GPU resources (device loss or backend rebuild).
+    ///
+    /// The document slot is **not** cleared: the authoritative drawing lives in
+    /// the application database, so a rebuild re-uploads from the database rather
+    /// than from any lost GPU batches. Only the scene-identity marker is reset so
+    /// the next frame rebuilds (audit F12).
     pub fn teardown(&self) {
         let mut s = self.state.borrow_mut();
         s.renderer = None;
         s.image_size = None;
         s.caps = None;
-        self.incoming.borrow_mut().take();
+        s.document = None;
+        s.built_generation = None;
+    }
+
+    /// Handle a device loss reported by the renderer (F12).
+    ///
+    /// Calls `note_device_lost` on the renderer so it drops its derived GPU
+    /// state, then marks the scene identity stale so the next frame rebuilds the
+    /// scene from the database. Annotations and the document are untouched: they
+    /// are not GPU state. Returns the `RenderError` for the caller to report.
+    pub fn note_device_lost(&self, detail: impl Into<String>) -> Option<String> {
+        let mut s = self.state.borrow_mut();
+        let detail = detail.into();
+        let message = s
+            .renderer
+            .as_mut()
+            .map(|renderer| {
+                renderer
+                    .note_device_lost(detail.clone())
+                    .message()
+                    .to_string()
+            })
+            .unwrap_or(detail);
+        // A lost device means no backend is active until the host reinitializes.
+        let preference = preference_choice(self.preference);
+        s.outcome = Some(BackendOutcome::Failed {
+            preference,
+            failure: BackendFailure::InitFailed {
+                reason: message.clone(),
+            },
+        });
+        s.caps = None;
+        s.image_size = None;
+        // Force a full rebuild from the database on the next frame.
+        s.document = None;
+        s.built_generation = None;
+        drop(s);
+        let _ = self.handle.request_redraw();
+        Some(message)
+    }
+}
+
+/// Map a renderer [`ActiveBackend`] to the app-level backend kind.
+fn backend_kind(actual: ActiveBackend) -> ActiveBackendKind {
+    match actual {
+        ActiveBackend::WebGpu => ActiveBackendKind::WebGpu,
+        ActiveBackend::WebGl2 => ActiveBackendKind::WebGl2,
+        ActiveBackend::Native => ActiveBackendKind::Native,
+    }
+}
+
+fn preference_choice(preference: BackendPreference) -> BackendChoice {
+    match preference {
+        BackendPreference::Auto => BackendChoice::Auto,
+        BackendPreference::WebGpu => BackendChoice::WebGpu,
+        BackendPreference::WebGl2 => BackendChoice::WebGl2,
     }
 }
 
@@ -272,10 +377,29 @@ pub fn install_with_preference(
                     let mut renderer = Renderer::new(preference);
                     match renderer.initialize_with_device(device.clone(), queue.clone()) {
                         Ok(caps) => {
+                            // Truthful label: the actual backend comes from the
+                            // device's own capabilities, never from the wish.
+                            s.outcome = Some(BackendOutcome::Initialized {
+                                preference: preference_choice(preference),
+                                actual: backend_kind(caps.actual),
+                            });
                             s.caps = Some(caps);
                             s.renderer = Some(renderer);
+                            s.document = None;
+                            s.built_generation = None;
                         }
-                        Err(e) => s.error = Some(format!("CAD renderer init failed: {e}")),
+                        Err(e) => {
+                            // The device exists but the renderer could not build
+                            // its derived state: a specific, non-generic failure.
+                            s.outcome = Some(BackendOutcome::Failed {
+                                preference: preference_choice(preference),
+                                failure: BackendFailure::InitFailed {
+                                    reason: e.to_string(),
+                                },
+                            });
+                            s.caps = None;
+                            s.renderer = None;
+                        }
                     }
                 }
                 (slint::RenderingState::BeforeRendering, _) => {
@@ -292,9 +416,11 @@ pub fn install_with_preference(
                         let has_fonts = fonts.is_some();
                         let overrides = scene_overrides.borrow().clone();
                         let overrides_fingerprint = overrides.fingerprint();
+                        let generation = s.renderer.as_ref().map(|r| r.device_generation());
                         if s.document != Some(identity)
                             || s.fonts_present != has_fonts
                             || s.overrides_fingerprint != overrides_fingerprint
+                            || s.built_generation != generation
                         {
                             if let Ok(delta) =
                                 build_scene_with_overrides(&doc, stamp.clone(), fonts, &overrides)
@@ -306,6 +432,7 @@ pub fn install_with_preference(
                                 s.document = Some(identity);
                                 s.fonts_present = has_fonts;
                                 s.overrides_fingerprint = overrides_fingerprint;
+                                s.built_generation = generation;
                                 s.image_size = None;
                             }
                         }
@@ -320,7 +447,27 @@ pub fn install_with_preference(
                         z_plane: 0.0,
                     };
                     let rendered = match s.renderer.as_mut() {
-                        Some(renderer) => renderer.render(camera, &target).is_ok(),
+                        Some(renderer) => match renderer.render(camera, &target) {
+                            Ok(_) => true,
+                            Err(e) if e.is_device_loss() => {
+                                // Device loss is explicit: drop the derived GPU
+                                // state and force a rebuild from the database on
+                                // the next frame. The document slot still holds
+                                // the authoritative drawing and annotations.
+                                let reason = e.message().to_string();
+                                renderer.note_device_lost(reason.clone());
+                                s.outcome = Some(BackendOutcome::Failed {
+                                    preference: preference_choice(preference),
+                                    failure: BackendFailure::InitFailed { reason },
+                                });
+                                s.caps = None;
+                                s.document = None;
+                                s.built_generation = None;
+                                s.image_size = None;
+                                false
+                            }
+                            Err(_) => false,
+                        },
                         None => return,
                     };
                     if rendered && s.image_size != Some((target.width, target.height)) {
@@ -339,6 +486,8 @@ pub fn install_with_preference(
                     s.renderer = None;
                     s.image_size = None;
                     s.caps = None;
+                    s.document = None;
+                    s.built_generation = None;
                 }
                 _ => {}
             }
@@ -347,7 +496,6 @@ pub fn install_with_preference(
     Ok(CadView {
         state,
         handle,
-        incoming,
         fonts: fonts_slot,
         overrides: overrides_slot,
         preference,
@@ -387,5 +535,38 @@ mod tests {
             .unwrap();
         let c = fit_camera(&db, [100.0, 100.0]);
         assert!(c.world_per_px.is_finite());
+    }
+
+    #[test]
+    fn backend_kind_mapping_is_truthful() {
+        // The bridge must label the device that actually ran, never the wish.
+        assert_eq!(
+            backend_kind(ActiveBackend::WebGpu),
+            ActiveBackendKind::WebGpu
+        );
+        assert_eq!(
+            backend_kind(ActiveBackend::WebGl2),
+            ActiveBackendKind::WebGl2
+        );
+        assert_eq!(
+            backend_kind(ActiveBackend::Native),
+            ActiveBackendKind::Native
+        );
+    }
+
+    #[test]
+    fn preference_maps_to_the_shared_app_choice() {
+        assert_eq!(
+            preference_choice(BackendPreference::Auto),
+            BackendChoice::Auto
+        );
+        assert_eq!(
+            preference_choice(BackendPreference::WebGpu),
+            BackendChoice::WebGpu
+        );
+        assert_eq!(
+            preference_choice(BackendPreference::WebGl2),
+            BackendChoice::WebGl2
+        );
     }
 }
