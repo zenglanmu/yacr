@@ -742,6 +742,7 @@ dependencies = [
  "cad-representation",
  "cad-resources",
  "cad-scene",
+ "cad-spatial",
  "serde_json",
 ]
 
