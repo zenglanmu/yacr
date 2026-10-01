@@ -18,6 +18,7 @@ use cad_domain::*;
 use cad_history::{patch, UndoRecord};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportReport, ImportRequest, Importer};
 
+use crate::recovery::{RecoverySnapshot, UnsavedOutcome};
 use crate::{
     AppMode, Application, Command, CommandOutcome, Document, SessionState, UnsavedDecision,
     Viewport,
@@ -243,15 +244,53 @@ impl HostController {
     /// new content so the previous drawing's undo records and references can
     /// never act on it (audit B05). Failures and cancellation leave the current
     /// document and session untouched.
+    ///
+    /// `Save`/`PreserveRecovery` are refused here because this entry point does
+    /// not perform the host-owned writes; the host must first persist and confirm
+    /// them, then call [`HostController::open_bytes_leaving`] with the results.
     pub fn open_bytes_decided(
         &mut self,
         bytes: Arc<[u8]>,
         label: &str,
         decision: UnsavedDecision,
     ) -> CadResult<OpenedDrawing> {
-        // Refuse to touch a dirty document unless the user explicitly chose to
-        // discard it or has already preserved a recovery copy.
-        self.application.prepare_leave(self.document_id, decision)?;
+        self.open_bytes_leaving(bytes, label, decision, false, false)
+    }
+
+    /// Import a DWG byte stream, applying the decision with explicit write results.
+    ///
+    /// `save_succeeded` / `recovery_succeeded` are the host's confirmed results
+    /// for the atomic annotation export and the recovery snapshot. A failed save
+    /// or recovery never replaces the document (audit B07/U09); `Discard`
+    /// proceeds and `Cancel` keeps everything.
+    pub fn open_bytes_leaving(
+        &mut self,
+        bytes: Arc<[u8]>,
+        label: &str,
+        decision: UnsavedDecision,
+        save_succeeded: bool,
+        recovery_succeeded: bool,
+    ) -> CadResult<OpenedDrawing> {
+        // Refuse to touch a dirty document unless the decision model allows it.
+        match self.application.resolve_leave(
+            self.document_id,
+            decision,
+            save_succeeded,
+            recovery_succeeded,
+        ) {
+            UnsavedOutcome::Proceed => {}
+            UnsavedOutcome::Cancelled => return Err(CadError::Cancelled),
+            UnsavedOutcome::SaveFailed => {
+                return Err(CadError::Unsupported(
+                    "保存未确认成功，未替换当前文档".into(),
+                ))
+            }
+            UnsavedOutcome::RecoveryFailed => {
+                return Err(CadError::Invariant(
+                    "恢复快照未能持久化，未替换当前文档".into(),
+                ))
+            }
+        }
 
         let request = ImportRequest {
             document: self.document_id,
@@ -378,6 +417,55 @@ impl HostController {
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
         let revision = document.annotations.revision();
         self.confirm_annotation_export(revision)
+    }
+
+    /// Capture a recovery snapshot of the current unsaved annotation work.
+    ///
+    /// The snapshot uses the same atomic export encoder as the sidecar export,
+    /// so a partially-encoded snapshot is impossible: either the annotations
+    /// fully encode or this returns an error and no snapshot is produced. The
+    /// snapshot carries the document identity and camera so a restored session
+    /// rebuilds the scene from the database, never from lost GPU batches
+    /// (audit F12). Preparing a snapshot does **not** mark the document saved.
+    pub fn capture_recovery_snapshot(
+        &self,
+        camera_center: [f64; 3],
+        camera_world_per_px: f64,
+    ) -> CadResult<RecoverySnapshot> {
+        let (annotations_json, _revision) = self.prepare_annotation_export()?;
+        let identity = self
+            .application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .identity
+            .clone();
+        Ok(RecoverySnapshot {
+            identity,
+            name_hint: self.document_name_hint.clone(),
+            annotations_json,
+            camera_center,
+            camera_world_per_px: if camera_world_per_px.is_finite() && camera_world_per_px > 0.0 {
+                camera_world_per_px
+            } else {
+                1.0
+            },
+        })
+    }
+
+    /// Restore a recovery snapshot into the current document.
+    ///
+    /// The annotation payload is decoded with the document's own identity using
+    /// the strict fingerprint policy; a mismatch or corrupt payload is an error
+    /// and nothing is applied (the recovery copy must not silently attach to the
+    /// wrong drawing). Restoration re-imports through the same transaction path
+    /// as a sidecar import, so it records one undo step and publishes changes.
+    pub fn restore_recovery_snapshot(&mut self, snapshot: &RecoverySnapshot) -> CadResult<usize> {
+        self.import_annotations_json(
+            &snapshot.annotations_json,
+            FingerprintPolicy::RejectMismatch,
+        )
     }
 
     /// Import a sidecar file as one transaction, recording one undo step.
@@ -718,7 +806,7 @@ mod tests {
         // path (demo bytes are not a real DWG, so drive the reset directly).
         controller
             .application
-            .prepare_leave(controller.document_id, UnsavedDecision::ExplicitDiscard)
+            .prepare_leave(controller.document_id, UnsavedDecision::Discard)
             .unwrap();
         controller.reset_for_new_content();
         assert!(!controller.application.can_undo(&controller.document_id));
@@ -996,5 +1084,94 @@ mod tests {
         let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
         assert!(controller.delete_annotation(AnnotationId(99)).is_err());
         assert!(!controller.application.can_undo(&controller.document_id));
+    }
+
+    #[test]
+    fn failed_save_does_not_replace_the_document() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(1, "unsaved")))
+            .unwrap();
+        let drawing_before = controller.drawing().unwrap().id();
+        let garbage: Arc<[u8]> = Arc::from(vec![0u8, 1, 2, 3].into_boxed_slice());
+        // Save chosen but the host could not confirm the write: never proceed,
+        // never report saved (audit B07).
+        assert!(matches!(
+            controller.open_bytes_leaving(
+                garbage.clone(),
+                "next.dwg",
+                UnsavedDecision::Save,
+                false,
+                false,
+            ),
+            Err(CadError::Unsupported(_))
+        ));
+        assert_eq!(controller.drawing().unwrap().id(), drawing_before);
+        assert!(controller.workspace_annotations().unwrap().is_dirty());
+        assert_eq!(controller.workspace_annotations().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn failed_recovery_write_does_not_replace_the_document() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(1, "unsaved")))
+            .unwrap();
+        let garbage: Arc<[u8]> = Arc::from(vec![0u8, 1, 2, 3].into_boxed_slice());
+        assert!(matches!(
+            controller.open_bytes_leaving(
+                garbage.clone(),
+                "next.dwg",
+                UnsavedDecision::PreserveRecovery,
+                false,
+                false,
+            ),
+            Err(CadError::Invariant(_))
+        ));
+        assert!(controller.workspace_annotations().unwrap().is_dirty());
+        // A confirmed recovery write is allowed past the leave guard; the
+        // subsequent import still fails on the garbage bytes…
+        assert!(controller
+            .open_bytes_leaving(
+                garbage,
+                "next.dwg",
+                UnsavedDecision::PreserveRecovery,
+                false,
+                true,
+            )
+            .is_err());
+        // …and that import failure also leaves the document untouched.
+        assert!(controller.workspace_annotations().unwrap().is_dirty());
+    }
+
+    #[test]
+    fn recovery_snapshot_round_trips_annotations_through_the_host() {
+        let mut source = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        source
+            .apply_annotation(AnnotationCommand::Create(text_note(7, "recovered")))
+            .unwrap();
+        let snapshot = source
+            .capture_recovery_snapshot([10.0, 20.0, 0.0], 0.5)
+            .unwrap();
+        // Capturing a snapshot is a pure getter: still dirty, still unsaved.
+        assert!(source.workspace_annotations().unwrap().is_dirty());
+
+        // Encode/decode through the storage form, then restore into a fresh
+        // host that has the same document identity.
+        let decoded = crate::RecoverySnapshot::decode(&snapshot.encode()).unwrap();
+        let mut target = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        // Demo identities are Temporary(0) on both hosts, so the strict
+        // fingerprint policy accepts the recovery copy.
+        let restored = target.restore_recovery_snapshot(&decoded).unwrap();
+        assert_eq!(restored, 1);
+        assert_eq!(target.workspace_annotations().unwrap().len(), 1);
+        let annotation = target
+            .workspace_annotations()
+            .unwrap()
+            .annotations()
+            .next()
+            .unwrap();
+        assert_eq!(annotation.id, AnnotationId(7));
+        assert_eq!(annotation.text, "recovered");
     }
 }
