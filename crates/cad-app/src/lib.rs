@@ -5,7 +5,9 @@
 //! enforced here at the command layer, not by hiding UI buttons.
 
 use cad_annotations::{AnnotationCommand, AnnotationService};
-use cad_db::{AnnotationDatabase, ChangeSet, DrawingDatabase};
+use cad_db::{
+    AnnotationDatabase, ChangeSet, DrawingDatabase, MeasurementAlgorithm, MeasurementRecord,
+};
 use cad_domain::*;
 use cad_history::{patch, History, UndoRecord};
 use cad_measure::{MeasurementEngine, MeasurementRequest, MeasurementSpace};
@@ -13,6 +15,9 @@ use cad_query::QueryService;
 use std::{collections::BTreeMap, sync::Arc};
 
 pub mod host;
+pub mod measure_tool;
+
+pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
@@ -33,6 +38,10 @@ pub enum CommandId {
     SwitchSpace,
     Select,
     Measure,
+    /// Confirm the points captured by the active open-ended measurement tool.
+    ConfirmMeasurement,
+    /// Cancel the active tool without committing anything.
+    CancelMeasurement,
     CreateAnnotation,
     UpdateAnnotation,
     DeleteAnnotation,
@@ -54,6 +63,7 @@ impl CommandId {
         matches!(
             self,
             Self::Measure
+                | Self::ConfirmMeasurement
                 | Self::CreateAnnotation
                 | Self::UpdateAnnotation
                 | Self::DeleteAnnotation
@@ -77,7 +87,7 @@ pub struct Document {
 pub enum ToolState {
     Idle,
     Selecting,
-    Measuring { points: Vec<Point3> },
+    Measuring(MeasurementTool),
     Annotating { points: Vec<Point3> },
     Panning,
 }
@@ -138,9 +148,35 @@ impl SessionState {
     }
 
     /// Cancel the current tool and any preview, returning to navigation.
+    ///
+    /// Cancelling never opens a transaction, so a cancelled measurement always
+    /// leaves the annotation database and history untouched.
     pub fn cancel_tool(&mut self) -> CadResult<()> {
         self.tool = ToolState::Idle;
         Ok(())
+    }
+
+    /// Snapshot of the active measurement for preview rendering, if any.
+    pub fn measurement_preview(&self) -> Option<MeasurementPreview> {
+        match &self.tool {
+            ToolState::Measuring(tool) => Some(tool.preview()),
+            _ => None,
+        }
+    }
+
+    /// Move the measurement preview cursor without capturing a point.
+    ///
+    /// This is a pure state update: it emits no command and touches no database.
+    pub fn set_measurement_cursor(&mut self, cursor: Option<Point3>) -> CadResult<()> {
+        match &mut self.tool {
+            ToolState::Measuring(tool) => {
+                tool.set_cursor(cursor);
+                Ok(())
+            }
+            _ => Err(CadError::InvalidInput(
+                "no measurement tool is active".into(),
+            )),
+        }
     }
 }
 
@@ -259,6 +295,8 @@ pub enum CommandPayload {
     Space(SpaceId),
     StandardView(StandardView),
     Backend(BackendChoice),
+    /// Start (or restart) a measurement tool with an explicit algorithm.
+    MeasureTool(MeasurementToolKind),
 }
 
 pub struct Command {
@@ -274,6 +312,8 @@ pub struct CommandOutcome {
     pub objects: Vec<ObjectId>,
     pub changes: Option<ChangeSet>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Structured measurement result, when the command produced one (spec F06).
+    pub measurement: Option<MeasurementRecord>,
 }
 
 impl CommandOutcome {
@@ -282,6 +322,7 @@ impl CommandOutcome {
             objects: Vec::new(),
             changes: None,
             diagnostics: Vec::new(),
+            measurement: None,
         }
     }
 }
@@ -301,6 +342,16 @@ pub trait CommandHandler {
         document: &mut Document,
         command: &Command,
     ) -> CadResult<CommandOutcome>;
+}
+
+/// Independent undo/redo availability for one document.
+///
+/// UI layers must bind undo and redo to their own flags (audit U11); reading
+/// this snapshot is a pure operation and never emits a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HistoryAvailability {
+    pub can_undo: bool,
+    pub can_redo: bool,
 }
 
 pub struct Application {
@@ -364,7 +415,13 @@ impl Application {
                     ))
                 }
             }
-            CommandId::Measure => self.measure(&command),
+            CommandId::Measure => self.measure(session, &command),
+            CommandId::ConfirmMeasurement => self.confirm_measurement(session, &command),
+            CommandId::CancelMeasurement => {
+                // Cancelling is always allowed and never opens a transaction.
+                session.cancel_tool()?;
+                Ok(CommandOutcome::none())
+            }
             CommandId::CreateAnnotation
             | CommandId::UpdateAnnotation
             | CommandId::DeleteAnnotation => self.annotation_command(&command),
@@ -427,6 +484,7 @@ impl Application {
                             code: "backend.preference".into(),
                             message: format!("后端偏好：{choice:?}（渲染会话由宿主重建）"),
                         }],
+                        measurement: None,
                     })
                 } else {
                     Err(CadError::InvalidInput(
@@ -459,6 +517,7 @@ impl Application {
                 code: "resources.summary".into(),
                 message: format!("资源引用 {}：{keys}", document.resource_keys.len()),
             }],
+            measurement: None,
         })
     }
 
@@ -499,6 +558,7 @@ impl Application {
                     message: bounds,
                 },
             ],
+            measurement: None,
         })
     }
 
@@ -677,14 +737,67 @@ impl Application {
         Ok(())
     }
 
-    fn measure(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        let CommandPayload::Points(points) = &command.payload else {
-            return Err(CadError::InvalidInput("Measure needs picked points".into()));
+    /// Dispatch the measurement tool (spec F06/U04).
+    ///
+    /// The algorithm comes from the active tool kind, never from the raw point
+    /// count. A stateless `Points` payload with no active tool keeps the old
+    /// convenience inference for direct callers and CLI; the interactive tool
+    /// path is the one the UI uses.
+    fn measure(&self, session: &mut SessionState, command: &Command) -> CadResult<CommandOutcome> {
+        match &command.payload {
+            CommandPayload::MeasureTool(kind) => {
+                session.tool = ToolState::Measuring(MeasurementTool::new(*kind));
+                Ok(self.measure_preview_outcome(session))
+            }
+            CommandPayload::None => {
+                // The shell currently sends no algorithm; default to distance.
+                session.tool =
+                    ToolState::Measuring(MeasurementTool::new(MeasurementToolKind::Distance));
+                Ok(self.measure_preview_outcome(session))
+            }
+            CommandPayload::Points(points) => self.capture_measure_points(session, command, points),
+            _ => Err(CadError::InvalidInput(
+                "Measure needs picked points or a measurement tool".into(),
+            )),
+        }
+    }
+
+    /// Capture points for the active tool, or evaluate the stateless fallback.
+    fn capture_measure_points(
+        &self,
+        session: &mut SessionState,
+        command: &Command,
+        points: &[Point3],
+    ) -> CadResult<CommandOutcome> {
+        let auto_complete = if let ToolState::Measuring(tool) = &mut session.tool {
+            for point in points {
+                tool.push_point(*point);
+            }
+            if tool.auto_ready() {
+                Some((tool.kind(), tool.points().to_vec()))
+            } else {
+                None
+            }
+        } else {
+            None
         };
+
+        if let Some((kind, captured)) = auto_complete {
+            let outcome = self.evaluate_measurement(command, kind.algorithm(), captured)?;
+            // A one-shot tool returns to navigation after a result; open-ended
+            // tools stay active until confirmed or cancelled.
+            session.tool = ToolState::Idle;
+            return Ok(outcome);
+        }
+        if matches!(session.tool, ToolState::Measuring(_)) {
+            return Ok(self.measure_preview_outcome(session));
+        }
+
+        // No active tool: stateless inference retained for direct callers/CLI.
         let algorithm = match points.len() {
-            2 => cad_db::MeasurementAlgorithm::Distance3d,
-            3 => cad_db::MeasurementAlgorithm::Angle3Points,
-            n if n >= 4 => cad_db::MeasurementAlgorithm::PolylineLength,
+            2 => MeasurementAlgorithm::Distance3d,
+            3 => MeasurementAlgorithm::Angle3Points,
+            n if n >= 4 => MeasurementAlgorithm::PolylineLength,
             _ => {
                 return Err(CadError::InvalidInput(
                     "measurement needs two (distance), three (angle) or more (length) points"
@@ -692,15 +805,88 @@ impl Application {
                 ))
             }
         };
+        self.evaluate_measurement(command, algorithm, points.to_vec())
+    }
+
+    /// Confirm an open-ended measurement tool (polyline/area) and evaluate it.
+    fn confirm_measurement(
+        &self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let (kind, points) = match &session.tool {
+            ToolState::Measuring(tool) if tool.is_ready() => (tool.kind(), tool.points().to_vec()),
+            ToolState::Measuring(tool) => {
+                return Err(CadError::InvalidInput(format!(
+                    "measurement needs {} more point(s)",
+                    tool.remaining()
+                )))
+            }
+            _ => return Err(CadError::InvalidInput("no measurement in progress".into())),
+        };
+        let outcome = self.evaluate_measurement(command, kind.algorithm(), points)?;
+        session.tool = ToolState::Idle;
+        Ok(outcome)
+    }
+
+    fn measure_preview_outcome(&self, session: &SessionState) -> CommandOutcome {
+        let Some(preview) = session.measurement_preview() else {
+            return CommandOutcome::none();
+        };
+        let message = if preview.remaining > 0 {
+            format!(
+                "{}：已选 {} 点，还需 {} 点",
+                preview.kind.label(),
+                preview.points.len(),
+                preview.remaining
+            )
+        } else {
+            format!(
+                "{}：已选 {} 点，可确认",
+                preview.kind.label(),
+                preview.points.len()
+            )
+        };
+        CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "measure.preview".into(),
+                message,
+            }],
+            measurement: None,
+        }
+    }
+
+    /// Evaluate a measurement through the engine and return the structured
+    /// record. Area uses the viewport work plane so non-coplanar input is
+    /// rejected rather than silently flattened (audit B24).
+    fn evaluate_measurement(
+        &self,
+        command: &Command,
+        algorithm: MeasurementAlgorithm,
+        points: Vec<Point3>,
+    ) -> CadResult<CommandOutcome> {
         let document = self
             .workspace
             .documents
             .get(&command.document)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let space = if matches!(algorithm, MeasurementAlgorithm::PlanarPolygonArea) {
+            let viewport = self
+                .workspace
+                .viewports
+                .get(&command.viewport)
+                .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+            MeasurementSpace::Plane(viewport.work_plane)
+        } else {
+            MeasurementSpace::World3d
+        };
         let request = MeasurementRequest {
             algorithm,
-            points: points.clone(),
-            space: MeasurementSpace::World3d,
+            points,
+            space,
             units: document.units.clone(),
             source: GeometrySource::UserPoints,
             precision: Precision::Analytic,
@@ -714,6 +900,7 @@ impl Application {
                 code: "measure.result".into(),
                 message: format!("{:?}: {:.6}", record.algorithm, record.value),
             }],
+            measurement: Some(record),
         })
     }
 
@@ -764,6 +951,7 @@ impl Application {
             objects: Vec::new(),
             changes: Some(changes),
             diagnostics: Vec::new(),
+            measurement: None,
         })
     }
 
@@ -779,6 +967,7 @@ impl Application {
             objects: Vec::new(),
             changes: Some(changes),
             diagnostics: Vec::new(),
+            measurement: None,
         })
     }
 
@@ -794,6 +983,7 @@ impl Application {
             objects: Vec::new(),
             changes: Some(changes),
             diagnostics: Vec::new(),
+            measurement: None,
         })
     }
 
@@ -802,6 +992,24 @@ impl Application {
             .get(document)
             .map(|h| h.can_undo())
             .unwrap_or(false)
+    }
+
+    /// Whether the document has a redo record. Derived from the redo stack, not
+    /// from `can_undo` (audit U11): after undoing to empty, redo stays available.
+    pub fn can_redo(&self, document: &DocumentId) -> bool {
+        self.history
+            .get(document)
+            .map(|h| h.can_redo())
+            .unwrap_or(false)
+    }
+
+    /// Pure snapshot of undo/redo availability. UI refreshes call this instead
+    /// of dispatching a command, so no duplicate command is emitted.
+    pub fn history_availability(&self, document: &DocumentId) -> HistoryAvailability {
+        HistoryAvailability {
+            can_undo: self.can_undo(document),
+            can_redo: self.can_redo(document),
+        }
     }
 
     /// Guard a document switch/exit; an unsaved annotation is never discarded
@@ -1068,5 +1276,272 @@ mod tests {
         assert!(app
             .prepare_leave(DocumentId(1), UnsavedDecision::ExplicitDiscard)
             .is_ok());
+    }
+
+    fn point(x: f64, y: f64) -> Point3 {
+        Point3 { x, y, z: 0.0 }
+    }
+
+    #[test]
+    fn measure_tool_selects_the_algorithm_from_the_active_kind() {
+        let (mut app, mut session) = application_with_document();
+        // Three points would be inferred as an angle by the stateless path, but
+        // an explicit polyline tool must measure length (audit F06).
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::MeasureTool(MeasurementToolKind::PolylineLength),
+            ),
+        )
+        .unwrap();
+        let outcome = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Measure,
+                    CommandPayload::Points(vec![point(0.0, 0.0), point(3.0, 0.0), point(3.0, 4.0)]),
+                ),
+            )
+            .unwrap();
+        // Open-ended tools capture but do not auto-complete.
+        assert!(outcome.measurement.is_none());
+        assert_eq!(
+            session.measurement_preview().map(|p| p.kind),
+            Some(MeasurementToolKind::PolylineLength)
+        );
+        let confirmed = app
+            .execute(
+                &mut session,
+                command(CommandId::ConfirmMeasurement, CommandPayload::None),
+            )
+            .unwrap();
+        let record = confirmed.measurement.expect("structured record");
+        assert_eq!(record.algorithm, MeasurementAlgorithm::PolylineLength);
+        assert!((record.value - 7.0).abs() < 1e-9);
+        assert!(matches!(session.tool, ToolState::Idle));
+    }
+
+    #[test]
+    fn measure_tool_captures_points_across_commands_and_auto_completes() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::MeasureTool(MeasurementToolKind::Distance),
+            ),
+        )
+        .unwrap();
+        let first = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Measure,
+                    CommandPayload::Points(vec![point(0.0, 0.0)]),
+                ),
+            )
+            .unwrap();
+        assert!(first.measurement.is_none());
+        let preview = session.measurement_preview().expect("preview");
+        assert_eq!(preview.points.len(), 1);
+        assert_eq!(preview.remaining, 1);
+        assert!(!preview.ready);
+
+        let second = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Measure,
+                    CommandPayload::Points(vec![point(3.0, 4.0)]),
+                ),
+            )
+            .unwrap();
+        let record = second.measurement.expect("auto-completed record");
+        assert_eq!(record.algorithm, MeasurementAlgorithm::Distance3d);
+        assert!((record.value - 5.0).abs() < 1e-9);
+        assert!(session.measurement_preview().is_none());
+        assert!(matches!(session.tool, ToolState::Idle));
+    }
+
+    #[test]
+    fn measure_none_starts_a_distance_tool_without_capturing() {
+        let (mut app, mut session) = application_with_document();
+        let outcome = app
+            .execute(
+                &mut session,
+                command(CommandId::Measure, CommandPayload::None),
+            )
+            .unwrap();
+        assert!(outcome.measurement.is_none());
+        let preview = session.measurement_preview().expect("preview");
+        assert_eq!(preview.kind, MeasurementToolKind::Distance);
+        assert!(preview.points.is_empty());
+    }
+
+    #[test]
+    fn measure_area_uses_the_viewport_work_plane() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::MeasureTool(MeasurementToolKind::Area),
+            ),
+        )
+        .unwrap();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::Points(vec![
+                    point(0.0, 0.0),
+                    point(2.0, 0.0),
+                    point(2.0, 3.0),
+                    point(0.0, 3.0),
+                ]),
+            ),
+        )
+        .unwrap();
+        let outcome = app
+            .execute(
+                &mut session,
+                command(CommandId::ConfirmMeasurement, CommandPayload::None),
+            )
+            .unwrap();
+        let record = outcome.measurement.expect("area record");
+        assert_eq!(record.algorithm, MeasurementAlgorithm::PlanarPolygonArea);
+        assert!((record.value - 6.0).abs() < 1e-9);
+        assert!(record.plane.is_some());
+    }
+
+    #[test]
+    fn cancelled_measurement_produces_zero_transactions() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::MeasureTool(MeasurementToolKind::Angle),
+            ),
+        )
+        .unwrap();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::Points(vec![point(1.0, 0.0)]),
+            ),
+        )
+        .unwrap();
+        let revision_before = app.workspace.documents[&DocumentId(1)]
+            .annotations
+            .revision();
+        let outcome = app
+            .execute(
+                &mut session,
+                command(CommandId::CancelMeasurement, CommandPayload::None),
+            )
+            .unwrap();
+        assert!(outcome.changes.is_none());
+        assert!(matches!(session.tool, ToolState::Idle));
+        assert!(session.measurement_preview().is_none());
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)]
+                .annotations
+                .revision(),
+            revision_before
+        );
+        assert!(!app.can_undo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn confirm_before_enough_points_is_rejected_without_changes() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::MeasureTool(MeasurementToolKind::Area),
+            ),
+        )
+        .unwrap();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::Points(vec![point(0.0, 0.0)]),
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            app.execute(
+                &mut session,
+                command(CommandId::ConfirmMeasurement, CommandPayload::None),
+            ),
+            Err(CadError::InvalidInput(_))
+        ));
+        // The in-progress tool and its captured point survive the rejection.
+        assert_eq!(
+            session.measurement_preview().map(|p| p.points.len()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn undo_to_empty_still_allows_redo_and_refresh_is_pure() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::CreateAnnotation,
+                CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(7)))),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            app.history_availability(&DocumentId(1)),
+            HistoryAvailability {
+                can_undo: true,
+                can_redo: false
+            }
+        );
+
+        app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+            .unwrap();
+        // Undo to empty: undo disabled, but redo must stay available (U11).
+        let availability = app.history_availability(&DocumentId(1));
+        assert!(!availability.can_undo);
+        assert!(availability.can_redo);
+        assert!(!app.can_undo(&DocumentId(1)));
+        assert!(app.can_redo(&DocumentId(1)));
+
+        // A pure refresh repeats the same snapshot and changes nothing.
+        let annotation_count = app.workspace.documents[&DocumentId(1)].annotations.len();
+        assert_eq!(
+            app.history_availability(&DocumentId(1)),
+            app.history_availability(&DocumentId(1))
+        );
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)].annotations.len(),
+            annotation_count
+        );
+
+        app.execute(&mut session, command(CommandId::Redo, CommandPayload::None))
+            .unwrap();
+        let availability = app.history_availability(&DocumentId(1));
+        assert!(availability.can_undo);
+        assert!(!availability.can_redo);
+    }
+
+    #[test]
+    fn switch_2d3d_and_orbit_stay_pending() {
+        let (mut app, mut session) = application_with_document();
+        for id in [CommandId::Switch2d3d, CommandId::Orbit] {
+            assert!(matches!(
+                app.execute(&mut session, command(id, CommandPayload::None)),
+                Err(CadError::NotImplemented(_))
+            ));
+        }
     }
 }

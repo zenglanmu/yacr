@@ -450,6 +450,14 @@ impl HostController {
     pub fn status(&self) -> &str {
         &self.last_status
     }
+
+    /// Independent undo/redo availability for the shell to bind to (audit U11).
+    ///
+    /// This is a pure getter: refreshing button state never dispatches a
+    /// command.
+    pub fn history_availability(&self) -> crate::HistoryAvailability {
+        self.application.history_availability(&self.document_id)
+    }
 }
 
 #[cfg(test)]
