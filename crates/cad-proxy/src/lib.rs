@@ -8,6 +8,17 @@
 //! opcode may change state for all following records, so replay stops emitting
 //! geometry and the output is marked incomplete. Nothing is guessed, and raw
 //! DWG records are never mixed into `graphic_data`.
+//!
+//! # Fail-closed contract
+//!
+//! Any record we cannot decode with evidence — unknown opcode, malformed
+//! payload, over-limit vertex budget, or a decoder chain deeper than
+//! [`DecodeLimits::max_stack_depth`] — is reported as
+//! [`Completeness::Partial`]/[`Completeness::Missing`] and the *raw payload is
+//! retained* in [`ProxyOutput::unsupported`]. We never emit partially-wrong
+//! geometry: a record either decodes fully under the documented layout or it is
+//! reported as unsupported. See `docs/proxy-support.md` for the per-opcode
+//! evidence table.
 
 use cad_domain::*;
 
@@ -49,6 +60,20 @@ pub struct ProxyRecord<'a> {
     pub data: &'a [u8],
 }
 
+/// A record that could not be decoded with evidence, kept verbatim.
+///
+/// The raw payload is retained so a caller (or an evidence collector) can
+/// inspect it later without re-parsing the cache; nothing here is interpreted
+/// as geometry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsupportedRecord {
+    pub record_type: u32,
+    /// Why the record was rejected (unknown opcode, malformed payload, limit).
+    pub reason: String,
+    /// The exact payload bytes after the 8-byte record header.
+    pub data: Vec<u8>,
+}
+
 /// Replay state carried across records.
 #[derive(Debug, Clone)]
 pub struct ReplayState {
@@ -76,6 +101,11 @@ pub struct ProxyOutput {
     pub geometry: Vec<SemanticGeometry>,
     pub completeness: Completeness,
     pub diagnostics: Vec<Diagnostic>,
+    /// Records rejected while replaying, with their raw payloads retained.
+    ///
+    /// Empty means every record present was decoded with evidence (which may
+    /// still be [`Completeness::Missing`] if the cache itself was empty).
+    pub unsupported: Vec<UnsupportedRecord>,
 }
 
 impl ProxyOutput {
@@ -84,6 +114,7 @@ impl ProxyOutput {
             geometry: Vec::new(),
             completeness: Completeness::Missing(vec![reason.into()]),
             diagnostics: Vec::new(),
+            unsupported: Vec::new(),
         }
     }
 }
@@ -134,8 +165,13 @@ impl ProxyRecordDecoder for KnownOpcodeDecoder {
         }
         match record.record_type {
             Self::FILL_OFF => {
+                // acadrust 0.5.5 only types type 21 as FillOff when the payload
+                // is empty; a non-empty payload is `Unknown` there, so we must
+                // not silently drop the bytes or treat it as a decoded fill-off.
                 if !record.data.is_empty() {
-                    return Err(CadError::CorruptData("FillOff record has a payload".into()));
+                    return Err(CadError::Unsupported(
+                        "type 21 is only FillOff when its payload is empty".into(),
+                    ));
                 }
                 state.fill = false;
                 Ok(Vec::new())
@@ -163,6 +199,21 @@ impl ProxyRecordDecoder for KnownOpcodeDecoder {
 }
 
 /// Decode `(text, position, height, rotation)` from a type-36 record.
+///
+/// The layout is exactly acadrust 0.5.5's: `position`/`normal`/`direction`
+/// vectors at 0/24/48, then `height`/`width_factor`/`oblique_angle` at
+/// 72/80/88, then little-endian UTF-16 units terminated by `0x0000` (and, in
+/// acadrust's encoder, 4-byte alignment padding). This decoder is deliberately
+/// stricter than acadrust's `Option` fallback:
+///
+/// * a missing/absent terminator or an odd trailing byte is rejected instead of
+///   being silently truncated;
+/// * invalid UTF-16 (unpaired surrogates) is rejected instead of being lossily
+///   replaced;
+/// * non-finite vectors/height are rejected.
+///
+/// Each rejection becomes `CorruptData`, which `replay` records as an
+/// unsupported record with the raw bytes retained.
 fn decode_unicode_text(data: &[u8]) -> CadResult<(String, Point3, f64, f64)> {
     const FIXED: usize = KnownOpcodeDecoder::UNICODE_TEXT_FIXED;
     if data.len() < FIXED + 2 {
@@ -180,26 +231,33 @@ fn decode_unicode_text(data: &[u8]) -> CadResult<(String, Point3, f64, f64)> {
         y: f(8),
         z: f(16),
     };
-    // bytes 24..48 normal, 48..72 direction
+    // bytes 24..48 normal (retained by acadrust; unused for 2D placement),
+    // 48..72 direction.
     let direction = Point3 {
         x: f(48),
         y: f(56),
         z: f(64),
     };
     let height = f(72);
-    // width_factor at 80, oblique at 88 (reserved for later style support)
-    let mut units: Vec<u16> = Vec::new();
-    let mut i = FIXED;
-    while i + 1 < data.len() {
-        let u = u16::from_le_bytes([data[i], data[i + 1]]);
-        if u == 0 {
-            break;
-        }
-        units.push(u);
-        i += 2;
+    // width_factor at 80, oblique at 88 (reserved for later style support).
+
+    let tail = &data[FIXED..];
+    if tail.len() % 2 != 0 {
+        return Err(CadError::CorruptData(
+            "Unicode text has an odd number of tail bytes".into(),
+        ));
     }
+    let units: Vec<u16> = tail
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    let terminator = units.iter().position(|u| *u == 0).ok_or_else(|| {
+        CadError::CorruptData("Unicode text is missing its 0x0000 terminator".into())
+    })?;
+    let text = String::from_utf16(&units[..terminator])
+        .map_err(|_| CadError::CorruptData("Unicode text has invalid UTF-16".into()))?;
+
     let rotation = direction.y.atan2(direction.x);
-    let text = String::from_utf16_lossy(&units);
     if !position.x.is_finite()
         || !position.y.is_finite()
         || !position.z.is_finite()
@@ -243,6 +301,17 @@ impl ProxyPlayer {
         record: &ProxyRecord<'_>,
         state: &mut ReplayState,
     ) -> CadResult<Vec<SemanticGeometry>> {
+        // The decoder chain is caller-extensible (`with_decoder`), so it is the
+        // one genuinely unbounded dispatch path in this crate. Bound it by
+        // `max_stack_depth` and fail closed rather than consulting an
+        // arbitrarily deep chain.
+        if self.decoders.len() > self.limits.max_stack_depth {
+            return Err(CadError::Unsupported(format!(
+                "decoder chain of {} exceeds the stack-depth limit of {}",
+                self.decoders.len(),
+                self.limits.max_stack_depth
+            )));
+        }
         let mut ordered: Vec<&Box<dyn ProxyRecordDecoder>> = self.decoders.iter().collect();
         ordered.sort_by_key(|d| std::cmp::Reverse(d.registration().priority));
         let mut last: Option<CadError> = None;
@@ -287,94 +356,112 @@ impl ProxyPlayer {
                 source.dwg_version
             ),
         }];
-        let mut unknowns: Vec<u32> = Vec::new();
+        let mut unsupported: Vec<UnsupportedRecord> = Vec::new();
+        let mut stop_reason: Option<String> = None;
         let mut vertices = 0usize;
-        let mut stopped = false;
+        let mut decoded_records = 0usize;
 
-        for record in &records {
-            if geometry.len() + unknowns.len() >= self.limits.max_records {
-                diagnostics.push(Diagnostic {
-                    object: None,
-                    code: "proxy.limit".into(),
-                    message: format!("stopped after {} records (limit)", self.limits.max_records),
-                });
-                return Ok(ProxyOutput {
-                    geometry,
-                    completeness: Completeness::Partial(vec!["record limit reached".into()]),
-                    diagnostics,
-                });
-            }
-            if !state.state_reliable {
-                // Replay stopped; keep counting would need the framing loop, so
-                // we stop here and report.
+        for (index, raw) in records.iter().enumerate() {
+            if index >= self.limits.max_records {
+                if stop_reason.is_none() {
+                    stop_reason = Some(format!(
+                        "record limit of {} reached",
+                        self.limits.max_records
+                    ));
+                    diagnostics.push(Diagnostic {
+                        object: None,
+                        code: "proxy.limit".into(),
+                        message: format!(
+                            "stopped after {} records (limit)",
+                            self.limits.max_records
+                        ),
+                    });
+                }
                 break;
             }
+            if !state.state_reliable {
+                // Replay already stopped on an undecodable record; later
+                // records are untrusted, so we neither decode nor report them
+                // again. The remaining framing is still bounded by max_records.
+                continue;
+            }
             let record = ProxyRecord {
-                record_type: record.record_type,
-                data: record.data,
+                record_type: raw.record_type,
+                data: raw.data,
             };
             match self.decode_record(&record, &mut state) {
-                Ok(mut g) => {
-                    vertices += g.iter().map(vertex_count).sum::<usize>();
-                    if vertices > self.limits.max_vertices {
+                Ok(g) => {
+                    let record_vertices = g.iter().map(vertex_count).sum::<usize>();
+                    // Enforce the vertex budget *before* emitting: appending the
+                    // over-budget primitive would hand callers geometry the
+                    // limit was meant to reject (audit B/F11).
+                    if vertices + record_vertices > self.limits.max_vertices {
+                        stop_reason = Some("vertex limit reached".into());
+                        state.state_reliable = false;
                         diagnostics.push(Diagnostic {
                             object: None,
                             code: "proxy.limit".into(),
-                            message: "vertex limit reached".into(),
-                        });
-                        geometry.append(&mut g);
-                        return Ok(ProxyOutput {
-                            geometry,
-                            completeness: Completeness::Partial(
-                                vec!["vertex limit reached".into()],
+                            message: format!(
+                                "record {} would exceed the vertex limit of {}",
+                                raw.record_type, self.limits.max_vertices
                             ),
-                            diagnostics,
                         });
+                        continue;
                     }
-                    geometry.append(&mut g);
+                    vertices += record_vertices;
+                    geometry.extend(g);
+                    decoded_records += 1;
                 }
                 Err(CadError::Unsupported(msg)) => {
                     // Unknown opcode: an unrecognised opcode may be a state
-                    // instruction affecting everything after it.
-                    unknowns.push(record.record_type);
+                    // instruction affecting everything after it, so replay stops
+                    // and the raw payload is retained for evidence.
+                    unsupported.push(UnsupportedRecord {
+                        record_type: raw.record_type,
+                        reason: msg.clone(),
+                        data: raw.data.to_vec(),
+                    });
                     state.state_reliable = false;
-                    stopped = true;
+                    stop_reason = Some(format!("unrecognised opcode(s): [{}]", raw.record_type));
                     diagnostics.push(Diagnostic {
                         object: None,
                         code: "proxy.unknown_opcode".into(),
-                        message: format!("record type {}: {msg}", record.record_type),
+                        message: format!("record type {}: {msg}", raw.record_type),
                     });
                 }
                 Err(CadError::CorruptData(msg)) => {
+                    // A malformed payload inside a framed record: retain the
+                    // exact bytes, emit nothing for this record, and stop.
+                    unsupported.push(UnsupportedRecord {
+                        record_type: raw.record_type,
+                        reason: msg.clone(),
+                        data: raw.data.to_vec(),
+                    });
+                    state.state_reliable = false;
+                    stop_reason = Some(format!("malformed record type {}", raw.record_type));
                     diagnostics.push(Diagnostic {
                         object: None,
                         code: "proxy.corrupt".into(),
-                        message: msg,
-                    });
-                    return Ok(ProxyOutput {
-                        geometry,
-                        completeness: Completeness::Partial(vec!["malformed proxy record".into()]),
-                        diagnostics,
+                        message: format!("record type {}: {msg}", raw.record_type),
                     });
                 }
                 Err(other) => return Err(other),
             }
         }
 
-        let completeness = if unknowns.is_empty() && !stopped {
-            Completeness::Complete
-        } else if geometry.is_empty() {
-            Completeness::Missing(vec![format!("unrecognised proxy opcodes: {unknowns:?}")])
-        } else {
-            Completeness::Partial(vec![format!(
-                "{} records decoded before unrecognised opcode(s) {unknowns:?}",
+        let completeness = match &stop_reason {
+            None => Completeness::Complete,
+            Some(reason) if geometry.is_empty() => Completeness::Missing(vec![reason.clone()]),
+            Some(reason) => Completeness::Partial(vec![format!(
+                "{decoded_records} of {} records decoded before {reason}",
                 records.len()
-            )])
+            )]),
         };
         Ok(ProxyOutput {
             geometry,
             completeness,
             diagnostics,
+            unsupported,
         })
     }
 
@@ -394,6 +481,7 @@ impl ProxyPlayer {
                     raw.len()
                 ),
             }],
+            unsupported: Vec::new(),
         })
     }
 }
@@ -474,6 +562,174 @@ mod tests {
         };
         let player = ProxyPlayer::new(limits);
         assert!(player.replay(&source(), &[0u8; 32]).is_err());
+    }
+
+    /// A truncated type-36 payload must not yield guessed text; the record is
+    /// reported unsupported and its raw bytes retained.
+    #[test]
+    fn truncated_text_record_is_unsupported_with_raw_bytes() {
+        // The framing is valid, but the payload is far shorter than 96 bytes.
+        let body = encode_for_test(36, &[0xAB; 8]);
+        let data = metafile::concat(&[body]);
+        let out = ProxyPlayer::default().replay(&source(), &data).unwrap();
+        assert!(out.geometry.is_empty());
+        assert!(matches!(out.completeness, Completeness::Missing(_)));
+        assert!(out
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "proxy.corrupt" && d.message.contains("truncated")));
+        assert_eq!(out.unsupported.len(), 1);
+        assert_eq!(out.unsupported[0].record_type, 36);
+        assert_eq!(out.unsupported[0].data, vec![0xAB; 8]);
+    }
+
+    /// A type-36 payload with no `0x0000` terminator is rejected rather than
+    /// silently accepting the whole tail (which acadrust types as `Unknown`).
+    #[test]
+    fn text_without_terminator_is_unsupported() {
+        let mut payload = vec![0u8; KnownOpcodeDecoder::UNICODE_TEXT_FIXED];
+        payload[72..80].copy_from_slice(&2.5f64.to_le_bytes());
+        // "hi" with no terminator.
+        for u in "hi".encode_utf16() {
+            payload.extend_from_slice(&u.to_le_bytes());
+        }
+        let data = metafile::concat(&[encode_for_test(36, &payload)]);
+        let out = ProxyPlayer::default().replay(&source(), &data).unwrap();
+        assert!(out.geometry.is_empty());
+        assert_eq!(out.unsupported.len(), 1);
+        assert!(out.unsupported[0].reason.contains("terminator"));
+    }
+
+    /// An absurd vertex count from a decoder must be rejected before any of its
+    /// geometry is emitted (this previously appended the over-limit primitive).
+    #[test]
+    fn absurd_vertex_count_is_rejected_before_emitting() {
+        struct BombDecoder;
+        impl ProxyRecordDecoder for BombDecoder {
+            fn registration(&self) -> Registration {
+                Registration {
+                    type_key: "test.bomb".into(),
+                    version: 1,
+                    priority: 1,
+                    entity_types: vec!["ACAD_PROXY_ENTITY".into()],
+                    capabilities: vec!["bomb".into()],
+                }
+            }
+            fn decode(
+                &self,
+                _record: &ProxyRecord<'_>,
+                _state: &mut ReplayState,
+                _limits: &DecodeLimits,
+            ) -> CadResult<Vec<SemanticGeometry>> {
+                Ok(vec![SemanticGeometry::Polyline {
+                    points: vec![Point3::default(); 1_000],
+                    bulges: Vec::new(),
+                    closed: false,
+                }])
+            }
+        }
+        let limits = DecodeLimits {
+            max_vertices: 4,
+            ..Default::default()
+        };
+        let player = ProxyPlayer::new(limits).with_decoder(Box::new(BombDecoder));
+        let data = metafile::concat(&[encode_for_test(77, &[0u8; 4])]);
+        let out = player.replay(&source(), &data).unwrap();
+        assert!(
+            out.geometry.is_empty(),
+            "over-budget geometry must not be emitted: {:?}",
+            out.geometry
+        );
+        // Nothing was emitted, so the result is Missing, never a faked Partial.
+        assert!(matches!(out.completeness, Completeness::Missing(_)));
+        assert!(out
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "proxy.limit" && d.message.contains("vertex")));
+    }
+
+    /// A decoder chain deeper than `max_stack_depth` is rejected before it is
+    /// consulted, so a caller cannot build an unbounded dispatch bomb.
+    #[test]
+    fn recursion_bomb_decoder_chain_is_bounded() {
+        struct NoopDecoder(u32);
+        impl ProxyRecordDecoder for NoopDecoder {
+            fn registration(&self) -> Registration {
+                Registration {
+                    type_key: format!("test.noop.{}", self.0),
+                    version: 1,
+                    priority: 0,
+                    entity_types: vec!["ACAD_PROXY_ENTITY".into()],
+                    capabilities: vec!["noop".into()],
+                }
+            }
+            fn decode(
+                &self,
+                _record: &ProxyRecord<'_>,
+                _state: &mut ReplayState,
+                _limits: &DecodeLimits,
+            ) -> CadResult<Vec<SemanticGeometry>> {
+                Err(CadError::Unsupported("noop".into()))
+            }
+        }
+        let limits = DecodeLimits {
+            max_stack_depth: 2,
+            ..Default::default()
+        };
+        // One built-in decoder + three extras = 4 > 2.
+        let mut player = ProxyPlayer::new(limits);
+        for i in 0..3 {
+            player = player.with_decoder(Box::new(NoopDecoder(i)));
+        }
+        let data = metafile::concat(&[encode_for_test(77, &[])]);
+        let out = player.replay(&source(), &data).unwrap();
+        assert!(out.geometry.is_empty());
+        assert!(matches!(out.completeness, Completeness::Missing(_)));
+        assert!(out.unsupported[0].reason.contains("stack-depth"));
+    }
+
+    /// A mixed sequence: the known FillOff decodes, the unknown opcode is
+    /// reported, and the trailing text (after the unknown) is not claimed.
+    #[test]
+    fn mixed_known_then_unknown_keeps_known_and_reports_unknown() {
+        let data = metafile::concat(&[
+            encode_for_test(21, &[]),
+            encode_for_test(999, &[9u8, 9, 9]),
+            text_record("after"),
+        ]);
+        let out = ProxyPlayer::default().replay(&source(), &data).unwrap();
+        assert_eq!(out.unsupported.len(), 1);
+        assert_eq!(out.unsupported[0].record_type, 999);
+        assert_eq!(out.unsupported[0].data, vec![9u8, 9, 9]);
+        assert!(
+            out.geometry.is_empty(),
+            "the only decoded record is state-only FillOff"
+        );
+        // Known state decoded + unknown reported => partial/missing, never complete.
+        assert_ne!(out.completeness, Completeness::Complete);
+        assert!(out
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "proxy.unknown_opcode"));
+    }
+
+    /// A known record before an unknown one still contributes geometry.
+    #[test]
+    fn known_geometry_before_unknown_is_preserved() {
+        let data = metafile::concat(&[
+            text_record("before"),
+            encode_for_test(999, &[1u8, 2]),
+            text_record("after"),
+        ]);
+        let out = ProxyPlayer::default().replay(&source(), &data).unwrap();
+        assert_eq!(out.geometry.len(), 1);
+        match &out.geometry[0] {
+            SemanticGeometry::Text { text, .. } => assert_eq!(text, "before"),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(matches!(out.completeness, Completeness::Partial(_)));
+        assert_eq!(out.unsupported.len(), 1);
+        assert!(!out.unsupported[0].data.is_empty());
     }
 
     #[test]
