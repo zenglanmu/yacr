@@ -1,0 +1,200 @@
+//! Interactive measurement tool: point capture, preview and cancel.
+//!
+//! Spec v2.0 §3.3 (tasks F06/U04). The tool selects its algorithm from the
+//! active tool kind instead of guessing from the raw point count, so a
+//! three-point polyline is never silently measured as an angle. Measurement is
+//! read-only and opens no database transaction, so cancelling produces zero
+//! transactions by construction.
+
+use cad_db::MeasurementAlgorithm;
+use cad_domain::Point3;
+
+/// Algorithm a measurement tool is capturing for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeasurementToolKind {
+    Distance,
+    PolylineLength,
+    Angle,
+    Area,
+}
+
+impl MeasurementToolKind {
+    /// The engine algorithm this tool evaluates with.
+    pub fn algorithm(self) -> MeasurementAlgorithm {
+        match self {
+            Self::Distance => MeasurementAlgorithm::Distance3d,
+            Self::PolylineLength => MeasurementAlgorithm::PolylineLength,
+            Self::Angle => MeasurementAlgorithm::Angle3Points,
+            Self::Area => MeasurementAlgorithm::PlanarPolygonArea,
+        }
+    }
+
+    /// Points required before an evaluation is defined.
+    pub fn min_points(self) -> usize {
+        match self {
+            Self::Distance | Self::PolylineLength => 2,
+            Self::Angle | Self::Area => 3,
+        }
+    }
+
+    /// Exact point count for tools that commit as soon as they are complete.
+    pub fn exact_points(self) -> Option<usize> {
+        match self {
+            Self::Distance => Some(2),
+            Self::Angle => Some(3),
+            Self::PolylineLength | Self::Area => None,
+        }
+    }
+
+    /// Whether the tool commits automatically once it has enough points.
+    pub fn auto_completes(self) -> bool {
+        self.exact_points().is_some()
+    }
+
+    /// Short user-facing label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Distance => "距离",
+            Self::PolylineLength => "折线长度",
+            Self::Angle => "角度",
+            Self::Area => "面积",
+        }
+    }
+}
+
+/// Snapshot of an in-progress measurement for the UI preview layer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeasurementPreview {
+    pub kind: MeasurementToolKind,
+    /// Captured points in order.
+    pub points: Vec<Point3>,
+    /// Live cursor position, if any; never part of a result until captured.
+    pub cursor: Option<Point3>,
+    /// Captured points still needed before the measurement is defined.
+    pub remaining: usize,
+    /// Whether the current capture can be evaluated. Open-ended tools are still
+    /// `ready` only after an explicit confirm.
+    pub ready: bool,
+}
+
+/// Measurement tool state machine.
+#[derive(Debug, Clone)]
+pub struct MeasurementTool {
+    kind: MeasurementToolKind,
+    points: Vec<Point3>,
+    cursor: Option<Point3>,
+}
+
+impl MeasurementTool {
+    pub fn new(kind: MeasurementToolKind) -> Self {
+        Self {
+            kind,
+            points: Vec::new(),
+            cursor: None,
+        }
+    }
+
+    pub fn kind(&self) -> MeasurementToolKind {
+        self.kind
+    }
+
+    pub fn points(&self) -> &[Point3] {
+        &self.points
+    }
+
+    pub fn cursor(&self) -> Option<Point3> {
+        self.cursor
+    }
+
+    /// Move the preview cursor without capturing a point.
+    pub fn set_cursor(&mut self, cursor: Option<Point3>) {
+        self.cursor = cursor;
+    }
+
+    /// Capture one point. Capture is unbounded; [`Self::is_ready`] decides when
+    /// an evaluation is defined.
+    pub fn push_point(&mut self, point: Point3) {
+        self.points.push(point);
+    }
+
+    pub fn is_ready(&self) -> bool {
+        match self.kind.exact_points() {
+            Some(exact) => self.points.len() == exact,
+            None => self.points.len() >= self.kind.min_points(),
+        }
+    }
+
+    /// True when the tool commits as soon as it is ready (no explicit confirm).
+    pub fn auto_ready(&self) -> bool {
+        self.kind.auto_completes() && self.is_ready()
+    }
+
+    pub fn remaining(&self) -> usize {
+        self.kind.min_points().saturating_sub(self.points.len())
+    }
+
+    pub fn preview(&self) -> MeasurementPreview {
+        MeasurementPreview {
+            kind: self.kind,
+            points: self.points.clone(),
+            cursor: self.cursor,
+            remaining: self.remaining(),
+            ready: self.is_ready(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(x: f64, y: f64) -> Point3 {
+        Point3 { x, y, z: 0.0 }
+    }
+
+    #[test]
+    fn each_kind_selects_its_own_algorithm() {
+        assert_eq!(
+            MeasurementToolKind::Distance.algorithm(),
+            MeasurementAlgorithm::Distance3d
+        );
+        assert_eq!(
+            MeasurementToolKind::PolylineLength.algorithm(),
+            MeasurementAlgorithm::PolylineLength
+        );
+        assert_eq!(
+            MeasurementToolKind::Angle.algorithm(),
+            MeasurementAlgorithm::Angle3Points
+        );
+        assert_eq!(
+            MeasurementToolKind::Area.algorithm(),
+            MeasurementAlgorithm::PlanarPolygonArea
+        );
+    }
+
+    #[test]
+    fn point_capture_advances_the_preview_and_ready_state() {
+        let mut tool = MeasurementTool::new(MeasurementToolKind::Angle);
+        assert_eq!(tool.remaining(), 3);
+        assert!(!tool.is_ready());
+        tool.push_point(p(0.0, 0.0));
+        assert_eq!(tool.remaining(), 2);
+        tool.push_point(p(1.0, 0.0));
+        assert_eq!(tool.remaining(), 1);
+        assert!(!tool.is_ready());
+        tool.push_point(p(0.0, 1.0));
+        assert_eq!(tool.remaining(), 0);
+        assert!(tool.is_ready());
+        assert!(tool.auto_ready());
+    }
+
+    #[test]
+    fn open_ended_tool_is_ready_but_not_auto_complete() {
+        let mut tool = MeasurementTool::new(MeasurementToolKind::PolylineLength);
+        tool.push_point(p(0.0, 0.0));
+        tool.push_point(p(1.0, 0.0));
+        assert!(tool.is_ready());
+        assert!(!tool.auto_ready());
+        assert_eq!(tool.preview().points.len(), 2);
+    }
+}
