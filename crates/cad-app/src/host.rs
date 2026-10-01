@@ -218,6 +218,20 @@ impl HostController {
             .map(|d| d.drawing.clone())
     }
 
+    /// Human-facing state of the current document for an unsaved-work prompt.
+    ///
+    /// Pure getter: it reports whether the annotations are dirty, how many there
+    /// are and the name hint, without performing any write. Hosts use this to
+    /// decide whether a prompt is needed before replacing the document.
+    pub fn unsaved_signal(&self) -> crate::host_files::UnsavedSignal {
+        let annotations = self.workspace_annotations();
+        crate::host_files::UnsavedSignal {
+            dirty: annotations.map(|a| a.is_dirty()).unwrap_or(false),
+            annotation_count: annotations.map(|a| a.len()).unwrap_or(0),
+            name_hint: self.document_name_hint.clone(),
+        }
+    }
+
     /// The current document's annotation database (read-only view).
     pub fn workspace_annotations(&self) -> Option<&AnnotationDatabase> {
         self.application

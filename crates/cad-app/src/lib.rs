@@ -19,6 +19,7 @@ pub mod annotation_list;
 pub mod annotation_tool;
 pub mod camera;
 pub mod host;
+pub mod host_files;
 pub mod input;
 pub mod layers;
 pub mod measure_tool;
@@ -34,6 +35,10 @@ pub use cad_spatial::{
 pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Projection, ProjectionKind, StandardView,
     ViewBasis,
+};
+pub use host_files::{
+    decision_name, parse_decision, plan_leave, LeavePlan, LeaveResolution, UnsavedDecisionSource,
+    UnsavedSignal,
 };
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,

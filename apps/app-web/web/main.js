@@ -7,6 +7,8 @@
 import init, {
   start_web,
   open_document_bytes,
+  open_requires_decision,
+  open_document_bytes_decided,
   renderer_state_report,
   load_web_fonts,
   font_load_report,
@@ -23,6 +25,43 @@ const element = (id) => document.getElementById(id);
 function setState(text) {
   const node = element("host-state");
   if (node) node.textContent = text;
+}
+
+/// Ask the user what to do with unsaved annotations. Returns one of
+/// save/recovery/discard/cancel, or null when the host cannot ask. There is no
+/// silent default: a null result must keep the current document.
+function promptUnsavedDecision() {
+  const choice = window.prompt(
+    "当前图纸有未保存的批注。请输入：save（保存）/ recovery（保留恢复副本）" +
+      " / discard（丢弃）/ cancel（取消打开）",
+    "cancel",
+  );
+  if (choice === null) return null;
+  const normalized = choice.trim().toLowerCase();
+  return ["save", "recovery", "preserve", "discard", "cancel"].includes(normalized)
+    ? normalized
+    : null;
+}
+
+/// Open a drawing through the explicit unsaved-decision flow (audit B05/B07).
+function openDrawing(file) {
+  return file.arrayBuffer().then((buffer) => {
+    const bytes = new Uint8Array(buffer);
+    let decision = "discard";
+    if (open_requires_decision()) {
+      decision = promptUnsavedDecision();
+      if (!decision) {
+        setState("已取消打开：当前文档与未保存批注保留");
+        return;
+      }
+    }
+    try {
+      setState(open_document_bytes_decided(file.name, bytes, decision));
+    } catch (error) {
+      console.error("yacr: open failed", error);
+      setState("打开失败：" + error);
+    }
+  });
 }
 
 /// Trigger a download of the exported annotation JSON and only confirm the
@@ -50,17 +89,13 @@ function exportAnnotations() {
   }
 }
 
-async function readBytes(file) {
-  return new Uint8Array(await file.arrayBuffer());
-}
-
 function wireFilePickers() {
   const drawingInput = element("file-input");
   drawingInput.addEventListener("change", async () => {
     const file = drawingInput.files && drawingInput.files[0];
     if (!file) return;
     try {
-      open_document_bytes(file.name, await readBytes(file));
+      await openDrawing(file);
     } catch (error) {
       console.error("yacr: open failed", error);
       setState("打开失败：" + error);
@@ -141,6 +176,9 @@ async function main() {
   window.yacr = {
     renderer_state_report,
     open_document_bytes: (name, bytes) => open_document_bytes(name, bytes),
+    open_requires_decision,
+    open_document_decided: (name, bytes, decision) =>
+      open_document_bytes_decided(name, bytes, decision),
     load_fonts: () => load_web_fonts(),
     font_load_report,
     export_annotations: exportAnnotations,
