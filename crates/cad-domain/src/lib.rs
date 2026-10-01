@@ -384,6 +384,16 @@ impl Transform3 {
             z: m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3],
         }
     }
+
+    /// Determinant of the 3x3 linear part (translation excluded).
+    ///
+    /// Used to reject singular mappings that cannot be inverted (audit B10).
+    pub fn determinant(&self) -> f64 {
+        let m = &self.matrix;
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    }
 }
 
 impl Default for Transform3 {

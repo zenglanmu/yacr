@@ -17,6 +17,17 @@ use serde_json::{json, Map, Value};
 
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// Top-level schema fields that extension data must never override.
+const KNOWN_TOP_LEVEL: [&str; 7] = [
+    "schema_version",
+    "application_version",
+    "document_fingerprint",
+    "document_name_hint",
+    "unit_context",
+    "annotations",
+    "view_bookmarks",
+];
+
 pub struct ViewBookmark {
     pub name: String,
     pub viewport: ViewportId,
@@ -174,19 +185,30 @@ impl AnnotationService {
         }
 
         // Preserve unknown top-level fields verbatim.
-        let known = [
-            "schema_version",
-            "application_version",
-            "document_fingerprint",
-            "document_name_hint",
-            "unit_context",
-            "annotations",
-            "view_bookmarks",
-        ];
         let mut extensions_json = BTreeMap::new();
         for (k, v) in object {
-            if !known.contains(&k.as_str()) {
+            if !KNOWN_TOP_LEVEL.contains(&k.as_str()) {
                 extensions_json.insert(k.clone(), v.to_string());
+            }
+        }
+
+        // Apply the fingerprint policy to the decoded content (audit B10). A
+        // mismatch must not leave anchors pointing into a document they were not
+        // bound to, and an explicit mapping must actually move the geometry.
+        if !matches {
+            match policy {
+                FingerprintPolicy::RejectMismatch => unreachable!("rejected above"),
+                FingerprintPolicy::ImportUnanchored => {
+                    for annotation in &mut annotations {
+                        annotation.anchor = None;
+                    }
+                }
+                FingerprintPolicy::ExplicitCoordinateMapping(transform) => {
+                    let mapping = CoordinateMapping::validate(&transform)?;
+                    for annotation in &mut annotations {
+                        mapping.apply_annotation(annotation)?;
+                    }
+                }
             }
         }
 
@@ -240,12 +262,130 @@ impl AnnotationService {
         let bookmarks: Vec<Value> = file.view_bookmarks.iter().map(encode_bookmark).collect();
         root.insert("view_bookmarks".into(), Value::Array(bookmarks));
         for (k, v) in &file.extensions_json {
+            // Never let a preserved/unknown field override a schema field
+            // (audit B11): extension keys that collide with the known schema
+            // are dropped rather than allowed to corrupt the output.
+            if KNOWN_TOP_LEVEL.contains(&k.as_str()) {
+                continue;
+            }
             if let Ok(parsed) = serde_json::from_str::<Value>(v) {
                 root.insert(k.clone(), parsed);
+            } else {
+                return Err(CadError::CorruptData(format!(
+                    "extension field '{k}' is not valid JSON"
+                )));
             }
         }
         serde_json::to_vec_pretty(&Value::Object(root))
             .map_err(|e| CadError::Invariant(format!("annotation encode failed: {e}")))
+    }
+}
+
+/// A validated affine mapping applied when importing a mismatched file.
+struct CoordinateMapping {
+    transform: Transform3,
+}
+
+impl CoordinateMapping {
+    /// Reject non-finite or singular (non-invertible) mappings (audit B10).
+    fn validate(transform: &Transform3) -> CadResult<Self> {
+        for row in &transform.matrix {
+            for v in row {
+                if !v.is_finite() {
+                    return Err(CadError::InvalidInput(
+                        "coordinate mapping contains non-finite values".into(),
+                    ));
+                }
+            }
+        }
+        if transform.determinant().abs() < 1e-12 {
+            return Err(CadError::InvalidInput(
+                "coordinate mapping is singular and cannot be applied".into(),
+            ));
+        }
+        Ok(CoordinateMapping {
+            transform: *transform,
+        })
+    }
+
+    fn map_point(&self, p: Point3) -> CadResult<Point3> {
+        let out = self.transform.apply_point(p);
+        if !out.x.is_finite() || !out.y.is_finite() || !out.z.is_finite() {
+            return Err(CadError::InvalidInput(
+                "coordinate mapping produced a non-finite point".into(),
+            ));
+        }
+        Ok(out)
+    }
+
+    /// Move all geometry and anchor fallbacks, then mark anchors Unresolved:
+    /// the match was not verified, so they must not claim `Valid`.
+    fn apply_annotation(&self, annotation: &mut Annotation) -> CadResult<()> {
+        annotation.geometry = self.map_geometry(&annotation.geometry)?;
+        if let Some(anchor) = annotation.anchor.as_mut() {
+            anchor.fallback = self.map_point(anchor.fallback)?;
+            anchor.status = AnchorStatus::Unresolved;
+        }
+        Ok(())
+    }
+
+    fn map_geometry(&self, geometry: &AnnotationGeometry) -> CadResult<AnnotationGeometry> {
+        let map = |p: Point3| self.map_point(p);
+        Ok(match geometry {
+            AnnotationGeometry::Text(p) => AnnotationGeometry::Text(map(*p)?),
+            AnnotationGeometry::Leader(v) => {
+                AnnotationGeometry::Leader(v.iter().map(|p| map(*p)).collect::<CadResult<_>>()?)
+            }
+            AnnotationGeometry::Rectangle(pair) => {
+                AnnotationGeometry::Rectangle([map(pair[0])?, map(pair[1])?])
+            }
+            AnnotationGeometry::Ellipse {
+                center,
+                axis_u,
+                axis_v,
+            } => AnnotationGeometry::Ellipse {
+                center: map(*center)?,
+                // Axes are directions: use the linear part without translation.
+                axis_u: self.map_vector(*axis_u)?,
+                axis_v: self.map_vector(*axis_v)?,
+            },
+            AnnotationGeometry::Freehand(v) => {
+                AnnotationGeometry::Freehand(v.iter().map(|p| map(*p)).collect::<CadResult<_>>()?)
+            }
+            AnnotationGeometry::Cloud(v) => {
+                AnnotationGeometry::Cloud(v.iter().map(|p| map(*p)).collect::<CadResult<_>>()?)
+            }
+            AnnotationGeometry::Measurement(m) => {
+                let mut m = m.clone();
+                m.inputs = m.inputs.iter().map(|p| map(*p)).collect::<CadResult<_>>()?;
+                if let Some(plane) = m.plane.as_mut() {
+                    plane.origin = map(plane.origin)?;
+                    plane.u = self.map_vector(plane.u)?;
+                    plane.v = self.map_vector(plane.v)?;
+                }
+                AnnotationGeometry::Measurement(m)
+            }
+        })
+    }
+
+    fn map_vector(&self, v: Point3) -> CadResult<Point3> {
+        let origin = self.map_point(Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        })?;
+        let tip = self.map_point(v)?;
+        let out = Point3 {
+            x: tip.x - origin.x,
+            y: tip.y - origin.y,
+            z: tip.z - origin.z,
+        };
+        if !out.x.is_finite() || !out.y.is_finite() || !out.z.is_finite() {
+            return Err(CadError::InvalidInput(
+                "coordinate mapping produced a non-finite vector".into(),
+            ));
+        }
+        Ok(out)
     }
 }
 
@@ -1005,6 +1145,122 @@ mod tests {
         assert!(matches!(
             service.decode(json, &identity, FingerprintPolicy::ImportUnanchored),
             Err(CadError::CorruptData(_))
+        ));
+    }
+
+    #[test]
+    fn explicit_mapping_moves_geometry_and_unresolves_anchors() {
+        let service = AnnotationService;
+        let identity = DocumentIdentity::Sha256([0u8; 32]);
+        let mut a = ann(1, "note");
+        a.geometry = AnnotationGeometry::Text(Point3 {
+            x: 1.0,
+            y: 2.0,
+            z: 0.0,
+        });
+        a.anchor = Some(EntityAnchor {
+            source_handle: "A".into(),
+            instance: InstancePath::default(),
+            sub_element: None,
+            fallback: Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 0.0,
+            },
+            status: AnchorStatus::Valid,
+        });
+        let file = AnnotationFile {
+            schema_version: SCHEMA_VERSION,
+            application_version: "t".into(),
+            document_fingerprint: DocumentIdentity::Sha256([9u8; 32]),
+            document_name_hint: "a.dwg".into(),
+            unit_context: UnitContext::drawing_units(),
+            annotations: vec![a],
+            view_bookmarks: Vec::new(),
+            extensions_json: BTreeMap::new(),
+        };
+        let bytes = service.encode(&file).unwrap();
+        let mapping = Transform3::translation(Point3 {
+            x: 10.0,
+            y: -3.0,
+            z: 0.0,
+        });
+        let decoded = service
+            .decode(
+                &bytes,
+                &identity,
+                FingerprintPolicy::ExplicitCoordinateMapping(mapping),
+            )
+            .unwrap();
+        let out = &decoded.annotations[0];
+        assert_eq!(
+            out.geometry,
+            AnnotationGeometry::Text(Point3 {
+                x: 11.0,
+                y: -1.0,
+                z: 0.0
+            })
+        );
+        let anchor = out.anchor.as_ref().unwrap();
+        assert_eq!(anchor.fallback.x, 11.0);
+        assert_eq!(anchor.fallback.y, -1.0);
+        assert_eq!(anchor.status, AnchorStatus::Unresolved);
+    }
+
+    #[test]
+    fn unanchored_import_clears_anchors() {
+        let service = AnnotationService;
+        let identity = DocumentIdentity::Sha256([0u8; 32]);
+        let mut a = ann(1, "note");
+        a.anchor = Some(EntityAnchor {
+            source_handle: "A".into(),
+            instance: InstancePath::default(),
+            sub_element: None,
+            fallback: Point3::default(),
+            status: AnchorStatus::Valid,
+        });
+        let file = AnnotationFile {
+            schema_version: SCHEMA_VERSION,
+            application_version: "t".into(),
+            document_fingerprint: DocumentIdentity::Sha256([9u8; 32]),
+            document_name_hint: "a.dwg".into(),
+            unit_context: UnitContext::drawing_units(),
+            annotations: vec![a],
+            view_bookmarks: Vec::new(),
+            extensions_json: BTreeMap::new(),
+        };
+        let bytes = service.encode(&file).unwrap();
+        let decoded = service
+            .decode(&bytes, &identity, FingerprintPolicy::ImportUnanchored)
+            .unwrap();
+        assert!(decoded.annotations[0].anchor.is_none());
+    }
+
+    #[test]
+    fn singular_mapping_is_rejected() {
+        let service = AnnotationService;
+        let identity = DocumentIdentity::Sha256([0u8; 32]);
+        let file = AnnotationFile {
+            schema_version: SCHEMA_VERSION,
+            application_version: "t".into(),
+            document_fingerprint: DocumentIdentity::Sha256([9u8; 32]),
+            document_name_hint: "a.dwg".into(),
+            unit_context: UnitContext::drawing_units(),
+            annotations: vec![ann(1, "note")],
+            view_bookmarks: Vec::new(),
+            extensions_json: BTreeMap::new(),
+        };
+        let bytes = service.encode(&file).unwrap();
+        let mut matrix = [[0.0f64; 4]; 4];
+        matrix[3][3] = 1.0; // all-zero linear part => singular
+        let singular = Transform3 { matrix };
+        assert!(matches!(
+            service.decode(
+                &bytes,
+                &identity,
+                FingerprintPolicy::ExplicitCoordinateMapping(singular)
+            ),
+            Err(CadError::InvalidInput(_))
         ));
     }
 }
