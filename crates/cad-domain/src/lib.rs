@@ -464,6 +464,63 @@ impl Transform3 {
             - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
             + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
     }
+
+    /// Whether the 3x3 linear part is a similarity (uniform scale + rotation +
+    /// optional mirror), i.e. it maps every circle to a circle.
+    ///
+    /// Judgment is ratio-based so it is independent of the transform's scale:
+    /// the three column lengths must agree with each other and the columns must
+    /// be mutually orthogonal. A non-uniform scale, shear or singular matrix is
+    /// not uniform. This is the predicate a caller must use before assuming a
+    /// `Circle`/`Arc` stays a circle (audit B23).
+    pub fn is_uniform_scale(&self, tolerance: f64) -> bool {
+        let scale = self.max_scale();
+        if !scale.is_finite() || scale <= 0.0 {
+            return false;
+        }
+        let tolerance = tolerance.max(0.0);
+        let m = &self.matrix;
+        let col = |i: usize| Point3 {
+            x: m[0][i],
+            y: m[1][i],
+            z: m[2][i],
+        };
+        let c0 = col(0);
+        let c1 = col(1);
+        let c2 = col(2);
+        let dot3 = |a: Point3, b: Point3| a.x * b.x + a.y * b.y + a.z * b.z;
+        let l0 = dot3(c0, c0).sqrt();
+        let l1 = dot3(c1, c1).sqrt();
+        let l2 = dot3(c2, c2).sqrt();
+        let rel = |a: f64, b: f64| (a - b).abs() / scale;
+        if rel(l0, l1) > tolerance || rel(l1, l2) > tolerance {
+            return false;
+        }
+        // Orthogonality, again relative to the overall scale.
+        let ortho = |a: Point3, b: Point3| dot3(a, b).abs() / (scale * scale) <= tolerance;
+        ortho(c0, c1) && ortho(c1, c2) && ortho(c0, c2)
+    }
+
+    /// Largest absolute linear scale factor, used to bound circular bounds and
+    /// to normalise scale comparisons (audit B23).
+    pub fn max_scale(&self) -> f64 {
+        let m = &self.matrix;
+        let mut max = 0.0f64;
+        for (i, j) in [
+            (0, 0),
+            (0, 1),
+            (0, 2),
+            (1, 0),
+            (1, 1),
+            (1, 2),
+            (2, 0),
+            (2, 1),
+            (2, 2),
+        ] {
+            max = max.max(m[i][j].abs());
+        }
+        max
+    }
 }
 
 impl Default for Transform3 {

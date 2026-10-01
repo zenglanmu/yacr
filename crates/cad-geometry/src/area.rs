@@ -35,9 +35,18 @@ pub fn signed_area(pts: &[Point3]) -> f64 {
 
 /// Measure the area of a user-selected closed polygon.
 ///
-/// Rejects non-coplanar rings and self-intersections; `planarity_tolerance` is
-/// a world-space value supplied by the caller's [`cad_domain::TolerancePolicy`].
+/// Rejects non-coplanar rings, self-intersections and non-finite input;
+/// `planarity_tolerance` is a world-space value supplied by the caller's
+/// [`cad_domain::TolerancePolicy`].
 pub fn measure_polygon_area(pts: &[Point3], planarity_tolerance: f64) -> Result<f64, AreaError> {
+    // A non-finite coordinate would make the shoelace sum NaN and could still
+    // compare as "not degenerate"; refuse it up front (audit B24).
+    if pts
+        .iter()
+        .any(|p| !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite())
+    {
+        return Err(AreaError::Degenerate);
+    }
     let mut clean: Vec<Point3> = Vec::with_capacity(pts.len());
     for &p in pts {
         if clean.last().map(|l| dist2(*l, p) > 1e-24).unwrap_or(true) {
@@ -62,7 +71,7 @@ pub fn measure_polygon_area(pts: &[Point3], planarity_tolerance: f64) -> Result<
         return Err(AreaError::SelfIntersecting);
     }
     let a = signed_area(&clean).abs();
-    if a <= 1e-15 {
+    if !a.is_finite() || a <= 1e-15 {
         return Err(AreaError::Degenerate);
     }
     Ok(a)

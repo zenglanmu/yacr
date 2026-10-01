@@ -197,6 +197,49 @@ impl ChangeMask {
             || self.contains(ChangeMask::TRANSFORM)
             || self.contains(ChangeMask::REFERENCES)
     }
+
+    /// The precise mask describing how one annotation changed.
+    ///
+    /// A pure metadata/identity edit (anchor, text payload, timestamps,
+    /// precision) must not force a full geometry rebuild; only the geometry,
+    /// style, anchor transform and reference fields do (audit B12).
+    pub fn for_annotation_update(before: &Annotation, after: &Annotation) -> Self {
+        let mut mask = Self(0);
+        if before.geometry != after.geometry {
+            mask = mask.union(Self::GEOMETRY);
+        }
+        if before.style != after.style || before.space != after.space || before.text != after.text {
+            mask = mask.union(Self::STYLE);
+        }
+        match (&before.anchor, &after.anchor) {
+            (None, None) => {}
+            (Some(a), Some(b)) if a == b => {}
+            (Some(a), Some(b)) => {
+                if a.fallback != b.fallback || a.instance != b.instance {
+                    mask = mask.union(Self::TRANSFORM);
+                }
+                if a.source_handle != b.source_handle
+                    || a.sub_element != b.sub_element
+                    || a.status != b.status
+                {
+                    mask = mask.union(Self::REFERENCES);
+                }
+            }
+            // An anchor appearing or disappearing changes both what the
+            // annotation references and where it resolves.
+            _ => mask = mask.union(Self::TRANSFORM).union(Self::REFERENCES),
+        }
+        if before.precision != after.precision
+            || before.created_unix_ms != after.created_unix_ms
+            || before.modified_unix_ms != after.modified_unix_ms
+        {
+            mask = mask.union(Self::METADATA);
+        }
+        if mask.0 == 0 {
+            mask = Self::METADATA;
+        }
+        mask
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -705,6 +748,9 @@ impl AnnotationDatabase {
         changes: Vec<(AnnotationId, Option<Annotation>)>,
     ) -> CadResult<ChangeSet> {
         // Validate first; do not touch the map until every change is legal.
+        // Validation covers id/key agreement, geometry finiteness/validity and
+        // style bounds so a poisoned annotation can never enter the store
+        // (audit B12).
         let mut seen = BTreeSet::new();
         for (id, change) in &changes {
             if !seen.insert(*id) {
@@ -712,10 +758,23 @@ impl AnnotationDatabase {
                     "transaction {transaction:?} modifies annotation {id:?} twice"
                 )));
             }
-            if change.is_none() && !self.annotations.contains_key(id) {
-                return Err(CadError::Invariant(format!(
-                    "annotation {id:?} does not exist"
-                )));
+            match change {
+                Some(annotation) => {
+                    if annotation.id != *id {
+                        return Err(CadError::Invariant(format!(
+                            "change key {id:?} does not match annotation id {:?}",
+                            annotation.id
+                        )));
+                    }
+                    validate_annotation(annotation)?;
+                }
+                None => {
+                    if !self.annotations.contains_key(id) {
+                        return Err(CadError::Invariant(format!(
+                            "annotation {id:?} does not exist"
+                        )));
+                    }
+                }
             }
         }
 
@@ -735,7 +794,10 @@ impl AnnotationDatabase {
         for (id, change) in changes {
             match change {
                 Some(annotation) => {
-                    let mask = ChangeMask::GEOMETRY;
+                    let mask = match self.annotations.get(&id) {
+                        Some(previous) => ChangeMask::for_annotation_update(previous, &annotation),
+                        None => ChangeMask::GEOMETRY.union(ChangeMask::STYLE),
+                    };
                     if self.annotations.insert(id, annotation).is_some() {
                         ordered.push(ObjectChange::Update(ObjectId(id.0), mask));
                     } else {
@@ -860,6 +922,106 @@ fn length(v: Point3) -> f64 {
 
 /// Maximum INSERT nesting the database will expand while computing bounds.
 pub const MAX_INSTANCE_DEPTH: usize = 32;
+
+/// Validate an annotation before it is written (audit B12).
+///
+/// Checks id/geometry finiteness, style bounds and anchor references. This is
+/// deliberately conservative: a value that cannot be drawn or measured safely
+/// is refused rather than stored.
+pub fn validate_annotation(annotation: &Annotation) -> CadResult<()> {
+    fn finite(p: Point3) -> bool {
+        p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
+    }
+    let geometry_ok = match &annotation.geometry {
+        AnnotationGeometry::Text(p) => finite(*p),
+        AnnotationGeometry::Leader(v)
+        | AnnotationGeometry::Freehand(v)
+        | AnnotationGeometry::Cloud(v) => !v.is_empty() && v.iter().all(|p| finite(*p)),
+        AnnotationGeometry::Rectangle(pair) => finite(pair[0]) && finite(pair[1]),
+        AnnotationGeometry::Ellipse {
+            center,
+            axis_u,
+            axis_v,
+        } => {
+            finite(*center)
+                && finite(*axis_u)
+                && finite(*axis_v)
+                // A zero-length axis collapses the ellipse; refuse it rather
+                // than storing an undrawable annotation.
+                && length(*axis_u) > 1e-12
+                && length(*axis_v) > 1e-12
+        }
+        AnnotationGeometry::Measurement(record) => finite_measurement(record),
+    };
+    if !geometry_ok {
+        return Err(CadError::Invariant(
+            "annotation geometry is degenerate or non-finite".to_string(),
+        ));
+    }
+    if !finite_style(&annotation.style) {
+        return Err(CadError::Invariant(
+            "annotation style has non-finite or negative values".to_string(),
+        ));
+    }
+    // Timestamps: modified must not precede created.
+    if annotation.modified_unix_ms < annotation.created_unix_ms {
+        return Err(CadError::Invariant(
+            "annotation modified time precedes created time".to_string(),
+        ));
+    }
+    if let Some(anchor) = &annotation.anchor {
+        if anchor.source_handle.trim().is_empty() {
+            return Err(CadError::Invariant(
+                "annotation anchor has an empty source handle".to_string(),
+            ));
+        }
+        if !finite(anchor.fallback) {
+            return Err(CadError::Invariant(
+                "annotation anchor fallback is non-finite".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn finite_style(style: &AnnotationStyle) -> bool {
+    style.logical_width.is_finite()
+        && style.logical_width >= 0.0
+        && style.text_height.is_finite()
+        && style.text_height >= 0.0
+}
+
+fn finite_measurement(record: &MeasurementRecord) -> bool {
+    if !record.value.is_finite()
+        || !record
+            .inputs
+            .iter()
+            .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+    {
+        return false;
+    }
+    if let Some(plane) = &record.plane {
+        let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+        if !finite(plane.origin) || !finite(plane.u) || !finite(plane.v) {
+            return false;
+        }
+        // A degenerate or skewed basis cannot support a projected area.
+        let lu = length(plane.u);
+        let lv = length(plane.v);
+        if lu < 1e-12 || lv < 1e-12 {
+            return false;
+        }
+        let ortho = dot(plane.u, plane.v).abs() / (lu * lv);
+        if ortho > 1e-6 {
+            return false;
+        }
+    }
+    true
+}
+
+fn dot(a: Point3, b: Point3) -> f64 {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
 
 /// Conservative upper bound on a transform's linear scale (Frobenius norm of
 /// the 3×3 part), used to grow circular bounds under scale/rotation.

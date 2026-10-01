@@ -21,6 +21,40 @@ pub mod hatch;
 
 use cad_domain::*;
 
+/// Validate that a [`WorkPlane`] is a usable orthonormal frame.
+///
+/// A measurement work plane must have finite, non-degenerate and mutually
+/// orthogonal `u`/`v`; a skewed or non-finite basis silently distorts projected
+/// area, so callers must reject it (audit B24).
+pub fn validate_work_plane(plane: &WorkPlane, tolerance: f64) -> CadResult<()> {
+    if !is_finite(plane.origin) || !is_finite(plane.u) || !is_finite(plane.v) {
+        return Err(CadError::InvalidInput(
+            "work plane has non-finite values".to_string(),
+        ));
+    }
+    let lu = length(plane.u);
+    let lv = length(plane.v);
+    let tol = tolerance.max(1e-12);
+    if lu < tol || lv < tol {
+        return Err(CadError::InvalidInput(
+            "work plane basis vectors are degenerate".to_string(),
+        ));
+    }
+    let ortho = dot(plane.u, plane.v).abs() / (lu * lv);
+    if ortho > tol.max(1e-9) {
+        return Err(CadError::InvalidInput(
+            "work plane basis is not orthogonal".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Unsigned distance of `p` from the plane through `origin` with unit `normal`.
+pub fn distance_to_plane(p: Point3, origin: Point3, normal: Point3) -> f64 {
+    let n = normalize(normal);
+    dot(sub(p, origin), n).abs()
+}
+
 /// Curve and geometry operations over [`SemanticGeometry`].
 pub trait GeometryEngine {
     fn transform(
@@ -123,11 +157,18 @@ impl GeometryEngine for DefaultGeometryEngine {
                 normal,
                 radius,
             } => {
-                let r = radius * uniform_scale(t);
-                G::Circle {
-                    center: tp(*center),
-                    normal: td(*normal),
-                    radius: r,
+                // A circle only stays a circle under a similarity transform;
+                // under a non-uniform scale or shear it is a genuine ellipse
+                // and must be reported as one rather than mis-drawn as a
+                // circle (audit B23).
+                if t.is_uniform_scale(1e-9) {
+                    G::Circle {
+                        center: tp(*center),
+                        normal: normalize(td(*normal)),
+                        radius: radius * uniform_scale(t),
+                    }
+                } else {
+                    circle_to_ellipse(*center, *normal, *radius, t)
                 }
             }
             G::Arc {
@@ -136,26 +177,72 @@ impl GeometryEngine for DefaultGeometryEngine {
                 radius,
                 start,
                 sweep,
-            } => G::Arc {
-                center: tp(*center),
-                normal: td(*normal),
-                radius: radius * uniform_scale(t),
-                start: *start,
-                sweep: *sweep,
-            },
+            } => {
+                if t.is_uniform_scale(1e-9) {
+                    G::Arc {
+                        center: tp(*center),
+                        normal: normalize(td(*normal)),
+                        radius: radius * uniform_scale(t),
+                        start: *start,
+                        sweep: *sweep,
+                    }
+                } else {
+                    let ellipse = circle_to_ellipse(*center, *normal, *radius, t);
+                    match ellipse {
+                        G::Ellipse {
+                            center: ec,
+                            major_axis,
+                            ratio,
+                            start: es,
+                            sweep: _ew,
+                        } => G::Ellipse {
+                            center: ec,
+                            major_axis,
+                            ratio,
+                            // `circle_to_ellipse` reports the parameter angle of
+                            // the original circle's θ=0 image, so the arc's own
+                            // start shifts by it and keeps its sweep.
+                            start: es + *start,
+                            sweep: *sweep,
+                        },
+                        other => other,
+                    }
+                }
+            }
             G::Ellipse {
                 center,
                 major_axis,
                 ratio,
                 start,
                 sweep,
-            } => G::Ellipse {
-                center: tp(*center),
-                major_axis: td(*major_axis),
-                ratio: *ratio,
-                start: *start,
-                sweep: *sweep,
-            },
+            } => {
+                // Keep the ellipse's own plane. The domain defines the minor
+                // axis as `cross(world_z, major)`, so the transformed minor is
+                // the transform of that direction (audit B23).
+                let major = td(*major_axis);
+                let major_len = length(major);
+                let major_unit = normalize(*major_axis);
+                let minor_unit = ellipse_minor_dir(major_unit);
+                let minor = td(minor_unit);
+                if major_len < 1e-12 {
+                    G::Ellipse {
+                        center: tp(*center),
+                        major_axis: major,
+                        ratio: *ratio,
+                        start: *start,
+                        sweep: *sweep,
+                    }
+                } else {
+                    let ratio2 = ratio.abs() * (length(minor) / major_len);
+                    G::Ellipse {
+                        center: tp(*center),
+                        major_axis: major,
+                        ratio: ratio2,
+                        start: *start,
+                        sweep: *sweep,
+                    }
+                }
+            }
             G::Spline {
                 degree,
                 knots,
@@ -163,8 +250,11 @@ impl GeometryEngine for DefaultGeometryEngine {
                 weights,
             } => G::Spline {
                 degree: *degree,
+                // Source knots and weights are geometry: transforming a spline
+                // must not re-invent them. A non-finite control point is
+                // reported rather than silently produced (audit B23).
                 knots: knots.clone(),
-                control_points: control_points.iter().map(|p| tp(*p)).collect(),
+                control_points: control_points.iter().map(|p| tp(*p)).collect::<Vec<_>>(),
                 weights: weights.clone(),
             },
             G::Point(p) => G::Point(tp(*p)),
@@ -222,6 +312,14 @@ impl GeometryEngine for DefaultGeometryEngine {
                 G::Compound(out)
             }
         };
+        // A transform that maps a finite source to a non-finite point is not a
+        // usable result; report it instead of returning poisoned geometry
+        // (audit B12/B23).
+        if !geometry_is_finite(&ok) {
+            return Err(CadError::InvalidInput(
+                "transform produced non-finite geometry".to_string(),
+            ));
+        }
         Ok(ok)
     }
 
@@ -238,10 +336,13 @@ impl GeometryEngine for DefaultGeometryEngine {
         geometry: &SemanticGeometry,
         tolerance: &TolerancePolicy,
     ) -> CadResult<Vec<Point3>> {
-        // With no camera available, the policy's pixel budget is interpreted as
-        // the world-space chord error; the app scales it by zoom before calling.
+        // Discretisation is presentation only: the chord tolerance is derived
+        // from the world-space computation tolerance, never from the display
+        // pixel budget, so a change of display LOD cannot change measurement or
+        // snapping semantics (audit B23). Callers that want screen-relative
+        // density use `TessellationParams::from_policy` with a zoom factor.
         let params = TessellationParams {
-            tolerance: tolerance.display_pixels.max(1e-12),
+            tolerance: tolerance.computation_world.max(1e-12),
             ..Default::default()
         };
         Ok(tessellate_geometry(geometry, params))
@@ -253,10 +354,16 @@ impl GeometryEngine for DefaultGeometryEngine {
         b: &SemanticGeometry,
         tolerance: &TolerancePolicy,
     ) -> CadResult<Vec<Point3>> {
+        // The intersection is a measured point, so its tolerance must come from
+        // the world-space predicate policy, not the display LOD (audit B23).
+        // The chord tolerance is deliberately coarse relative to the predicate
+        // tolerance so a curved entity is approximated by segments while the
+        // final acceptance test stays geometric.
+        let chord = tolerance.computation_world.max(1e-9);
         let pa = tessellate_geometry(
             a,
             TessellationParams {
-                tolerance: tolerance.display_pixels.max(1e-9),
+                tolerance: chord,
                 min_segments: 4,
                 ..Default::default()
             },
@@ -264,7 +371,7 @@ impl GeometryEngine for DefaultGeometryEngine {
         let pb = tessellate_geometry(
             b,
             TessellationParams {
-                tolerance: tolerance.display_pixels.max(1e-9),
+                tolerance: chord,
                 min_segments: 4,
                 ..Default::default()
             },
@@ -297,6 +404,16 @@ impl GeometryEngine for DefaultGeometryEngine {
         plane: &WorkPlane,
         tolerance: &TolerancePolicy,
     ) -> CadResult<Option<Point3>> {
+        if !is_finite(plane.origin) || !is_finite(plane.u) || !is_finite(plane.v) {
+            return Err(CadError::InvalidInput(
+                "work plane has non-finite values".to_string(),
+            ));
+        }
+        if !is_finite(ray.origin) || !is_finite(ray.direction) {
+            return Err(CadError::InvalidInput(
+                "ray has non-finite values".to_string(),
+            ));
+        }
         let normal = cross(plane.u, plane.v);
         let nlen = length(normal);
         if nlen < tolerance.computation_world.max(1e-12) {
@@ -305,7 +422,17 @@ impl GeometryEngine for DefaultGeometryEngine {
             ));
         }
         let normal = scale(normal, 1.0 / nlen);
-        let denom = dot(ray.direction, normal);
+        // The ray only reaches behind the origin at t < 0; the direction's
+        // magnitude is irrelevant, so judge (and parametrise) against the unit
+        // direction (audit B24/B23).
+        let dir_len = length(ray.direction);
+        if dir_len < tolerance.computation_world.max(1e-12) {
+            return Err(CadError::InvalidInput(
+                "ray direction is degenerate".to_string(),
+            ));
+        }
+        let dir = scale(ray.direction, 1.0 / dir_len);
+        let denom = dot(dir, normal);
         if denom.abs() < tolerance.computation_world.max(1e-12) {
             return Ok(None);
         }
@@ -313,7 +440,7 @@ impl GeometryEngine for DefaultGeometryEngine {
         if !t.is_finite() || t < 0.0 {
             return Ok(None);
         }
-        Ok(Some(add(ray.origin, scale(ray.direction, t))))
+        Ok(Some(add(ray.origin, scale(dir, t))))
     }
 }
 
@@ -379,15 +506,9 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
                 return vec![*center];
             }
             let u = scale(*major_axis, 1.0 / major_len);
-            let normal = cross(
-                u,
-                Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
-            );
-            let minor = scale(normal, major_len * ratio.abs());
+            // The minor axis lies in the ellipse's own plane, defined by the
+            // documented convention `minor = cross(world_z, major)` (audit B23).
+            let minor = scale(ellipse_minor_dir(u), major_len * ratio.abs());
             let sweep = if sweep.abs() >= std::f64::consts::TAU - 1e-9 {
                 std::f64::consts::TAU
             } else {
@@ -407,9 +528,10 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
         }
         G::Spline {
             degree,
+            knots,
             control_points,
-            ..
-        } => tessellate_bspline(control_points, *degree, params),
+            weights,
+        } => tessellate_spline(control_points, knots, weights, *degree, params),
         G::Point(p) => vec![*p, *p],
         G::Text {
             position,
@@ -485,11 +607,13 @@ fn polyline_with_bulges(
     for i in 0..last {
         let a = points[i];
         let b = points[(i + 1) % count];
-        if out.is_empty() {
-            out.push(a);
-        }
         let bulge = bulges.get(i).copied().unwrap_or(0.0);
+        // `a` is always the previous segment's endpoint, so the first point of
+        // each segment is pushed by whichever branch runs (audit B23).
         if bulge.abs() < 1e-12 {
+            if out.is_empty() {
+                out.push(a);
+            }
             out.push(b);
         } else {
             append_bulge_arc(a, b, bulge, params, &mut out);
@@ -499,6 +623,9 @@ fn polyline_with_bulges(
 }
 
 /// Append the arc described by a bulge (`bulge = tan(theta/4)`).
+///
+/// The point `a` is always emitted first so the returned polyline is
+/// continuous even when a straight segment precedes this arc (audit B23).
 fn append_bulge_arc(
     a: Point3,
     b: Point3,
@@ -509,7 +636,9 @@ fn append_bulge_arc(
     let chord = sub(b, a);
     let chord_len = length(chord);
     if chord_len < 1e-12 {
-        out.push(b);
+        if !ends_at(out, b) {
+            out.push(b);
+        }
         return;
     }
     let theta = 4.0 * bulge.atan();
@@ -517,6 +646,9 @@ fn append_bulge_arc(
     let half_chord = chord_len * 0.5;
     let sagitta = bulge * half_chord;
     if sagitta.abs() < 1e-12 {
+        if !ends_at(out, a) {
+            out.push(a);
+        }
         out.push(b);
         return;
     }
@@ -541,6 +673,9 @@ fn append_bulge_arc(
     let center = sub(mid, scale(u, radius_abs * half.cos()));
     let start_angle = (a.y - center.y).atan2(a.x - center.x);
     let n = arc_segments_for_tolerance(radius_abs, theta, params);
+    if !ends_at(out, a) {
+        out.push(a);
+    }
     for i in 1..=n {
         let t = start_angle + theta * (i as f64) / (n as f64);
         out.push(Point3 {
@@ -549,11 +684,48 @@ fn append_bulge_arc(
             z: a.z,
         });
     }
+    // Snap the final sample exactly onto the arc endpoint so a polyline that
+    // closes on itself shares the vertex exactly (audit B23).
+    if let Some(last) = out.last_mut() {
+        *last = b;
+    }
+}
+
+/// Whether the polyline `out` already ends at `p` (within a small tolerance).
+fn ends_at(out: &[Point3], p: Point3) -> bool {
+    out.last().map(|l| distance(*l, p) < 1e-9).unwrap_or(false)
 }
 
 /// Tessellate a clamped uniform B-spline from control points.
+///
+/// Convenience wrapper used by hatch boundaries that carry no source knots;
+/// it synthesises clamped uniform knots. Source splines with explicit knots or
+/// weights go through [`tessellate_spline`] instead (audit B23).
 pub fn tessellate_bspline(
     control: &[Point3],
+    degree: u32,
+    params: TessellationParams,
+) -> Vec<Point3> {
+    let n = control.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let k = (degree as usize).max(1).min(n.saturating_sub(1));
+    let knots = clamped_uniform_knots(n, k);
+    let weights = vec![1.0; n];
+    tessellate_spline(control, &knots, &weights, degree, params)
+}
+
+/// Tessellate a rational B-spline using its source knots and weights.
+///
+/// The source knot vector is authoritative: uniform/periodic/clamped and
+/// rational arcs all keep their true shape. Malformed knot vectors (wrong
+/// length or non-monotone) fall back to the clamped-uniform convention rather
+/// than silently producing a garbled curve.
+pub fn tessellate_spline(
+    control: &[Point3],
+    knots: &[f64],
+    weights: &[f64],
     degree: u32,
     params: TessellationParams,
 ) -> Vec<Point3> {
@@ -565,14 +737,32 @@ pub fn tessellate_bspline(
     if n <= k {
         return control.to_vec();
     }
-    let knots = clamped_uniform_knots(n, k);
+    let owned_knots: Vec<f64>;
+    let knots: &[f64] = if knots.len() == n + k + 1 && knots.windows(2).all(|w| w[1] >= w[0]) {
+        knots
+    } else {
+        owned_knots = clamped_uniform_knots(n, k);
+        &owned_knots
+    };
+    let weights: Vec<f64> = if weights.len() == n {
+        weights
+            .iter()
+            .map(|w| if w.is_finite() && *w > 0.0 { *w } else { 1.0 })
+            .collect()
+    } else {
+        vec![1.0; n]
+    };
     let spans = n - k;
     let per_span = (params.max_segments / spans.max(1)).clamp(8, 64);
-    let mut out = Vec::with_capacity(spans * per_span + 1);
+    let t_min = knots[k];
     let t_max = knots[n];
+    if !t_min.is_finite() || !t_max.is_finite() || t_max <= t_min {
+        return control.to_vec();
+    }
+    let mut out = Vec::with_capacity(spans * per_span + 1);
     for s in 0..=(spans * per_span) {
-        let t = t_max * (s as f64) / ((spans * per_span) as f64);
-        out.push(de_boor(control, &knots, k, t));
+        let t = t_min + (t_max - t_min) * (s as f64) / ((spans * per_span) as f64);
+        out.push(de_boor_rational(control, knots, &weights, k, t));
     }
     out
 }
@@ -590,13 +780,20 @@ fn clamped_uniform_knots(n: usize, k: usize) -> Vec<f64> {
     knots
 }
 
-fn de_boor(pts: &[Point3], knots: &[f64], k: usize, t: f64) -> Point3 {
+fn de_boor_rational(pts: &[Point3], knots: &[f64], weights: &[f64], k: usize, t: f64) -> Point3 {
     let n = pts.len();
     let mut span = k;
     while span < n - 1 && t >= knots[span + 1] {
         span += 1;
     }
-    let mut d: Vec<Point3> = (0..=k).map(|j| pts[span - k + j]).collect();
+    // Homogeneous coordinates (w*x, w*y, w*z, w); the rational point is the
+    // perspective divide of the de Boor result.
+    let hom = |j: usize| {
+        let w = weights[span - k + j];
+        let p = pts[span - k + j];
+        [p.x * w, p.y * w, p.z * w, w]
+    };
+    let mut d: Vec<[f64; 4]> = (0..=k).map(hom).collect();
     for r in 1..=k {
         for j in (r..=k).rev() {
             let i = span - k + j;
@@ -606,10 +803,29 @@ fn de_boor(pts: &[Point3], knots: &[f64], k: usize, t: f64) -> Point3 {
             } else {
                 0.0
             };
-            d[j] = add(scale(d[j - 1], 1.0 - alpha), scale(d[j], alpha));
+            let prev = d[j - 1];
+            let cur = d[j];
+            let mut out = [0.0; 4];
+            for c in 0..4 {
+                out[c] = prev[c] * (1.0 - alpha) + cur[c] * alpha;
+            }
+            d[j] = out;
         }
     }
-    d[k]
+    let w = d[k][3];
+    if w.abs() < 1e-12 {
+        Point3 {
+            x: d[k][0],
+            y: d[k][1],
+            z: d[k][2],
+        }
+    } else {
+        Point3 {
+            x: d[k][0] / w,
+            y: d[k][1] / w,
+            z: d[k][2] / w,
+        }
+    }
 }
 
 /// The AutoCAD arbitrary axis algorithm.
@@ -796,6 +1012,79 @@ pub fn is_finite(p: Point3) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
 }
 
+/// Whether every scalar and point in `geometry` is finite.
+///
+/// Used after a transform to refuse poisoned output (audit B12/B23).
+pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
+    use SemanticGeometry as G;
+    let finite = |p: Point3| is_finite(p);
+    let all_points = |pts: &[Point3]| pts.iter().all(|p| finite(*p));
+    match geometry {
+        G::Line { start, end } => finite(*start) && finite(*end),
+        G::Polyline { points, bulges, .. } => {
+            all_points(points) && bulges.iter().all(|b| b.is_finite())
+        }
+        G::Circle {
+            center,
+            normal,
+            radius,
+        } => finite(*center) && finite(*normal) && radius.is_finite(),
+        G::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => {
+            finite(*center)
+                && finite(*normal)
+                && radius.is_finite()
+                && start.is_finite()
+                && sweep.is_finite()
+        }
+        G::Ellipse {
+            center,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => {
+            finite(*center)
+                && finite(*major_axis)
+                && ratio.is_finite()
+                && start.is_finite()
+                && sweep.is_finite()
+        }
+        G::Spline {
+            knots,
+            control_points,
+            weights,
+            ..
+        } => {
+            all_points(control_points)
+                && knots.iter().all(|k| k.is_finite())
+                && weights.iter().all(|w| w.is_finite())
+        }
+        G::Point(p) => finite(*p),
+        G::Mesh(m) => {
+            all_points(&m.vertices)
+                && m.normals.iter().all(|n| finite(*n))
+                && m.triangles
+                    .iter()
+                    .all(|t| t.iter().all(|i| (*i as usize) < m.vertices.len()))
+        }
+        G::Insert { transform, .. } => transform.matrix.iter().flatten().all(|v| v.is_finite()),
+        G::Text {
+            position,
+            height,
+            rotation,
+            ..
+        } => finite(*position) && height.is_finite() && rotation.is_finite(),
+        G::Opaque { .. } => true,
+        G::Compound(children) => children.iter().all(geometry_is_finite),
+    }
+}
+
 fn apply_point(t: &Transform3, p: Point3) -> Point3 {
     let m = &t.matrix;
     Point3 {
@@ -815,6 +1104,7 @@ fn apply_vector(t: &Transform3, v: Point3) -> Point3 {
 }
 
 fn uniform_scale(t: &Transform3) -> f64 {
+    // Mean column length; used only after `is_uniform` has accepted the matrix.
     let m = &t.matrix;
     let sx = (m[0][0] * m[0][0] + m[1][0] * m[1][0] + m[2][0] * m[2][0]).sqrt();
     let sy = (m[0][1] * m[0][1] + m[1][1] * m[1][1] + m[2][1] * m[2][1]).sqrt();
@@ -822,13 +1112,72 @@ fn uniform_scale(t: &Transform3) -> f64 {
     ((sx + sy + sz) / 3.0).max(1e-12)
 }
 
+/// Whether a transform keeps circles circular (similarity, no shear).
 fn is_uniform(t: &Transform3) -> bool {
-    let m = &t.matrix;
-    let sx = (m[0][0] * m[0][0] + m[1][0] * m[1][0] + m[2][0] * m[2][0]).sqrt();
-    let sy = (m[0][1] * m[0][1] + m[1][1] * m[1][1] + m[2][1] * m[2][1]).sqrt();
-    let sz = (m[0][2] * m[0][2] + m[1][2] * m[1][2] + m[2][2] * m[2][2]).sqrt();
-    let scale_max = sx.max(sy).max(sz).max(1e-12);
-    (sx - sy).abs() / scale_max < 1e-9 && (sy - sz).abs() / scale_max < 1e-9
+    t.is_uniform_scale(1e-9)
+}
+
+/// Unit minor-axis direction for an ellipse with unit major axis `major_unit`.
+fn ellipse_minor_dir(major_unit: Point3) -> Point3 {
+    let minor = cross(
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+        major_unit,
+    );
+    if length(minor) < 1e-9 {
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    } else {
+        normalize(minor)
+    }
+}
+
+/// Map a circle through an affine transform as an exact ellipse.
+///
+/// The transformed plane is spanned by the images of the two in-plane basis
+/// vectors; the longer image is the major axis. `ratio` is the axis ratio and
+/// `start` is the parameter angle (in radians) of the original circle angle 0,
+/// so the affine image of `circle(θ)` matches `ellipse(start + θ)`.
+fn circle_to_ellipse(
+    center: Point3,
+    normal: Point3,
+    radius: f64,
+    t: &Transform3,
+) -> SemanticGeometry {
+    let radius = radius.abs();
+    let n = normalize(normal);
+    let (ax, ay, _) = arbitrary_axis(n);
+    let ex = apply_vector(t, ax);
+    let ey = apply_vector(t, ay);
+    let c = apply_point(t, center);
+    let lx = length(ex);
+    let ly = length(ey);
+    if lx < 1e-12 && ly < 1e-12 {
+        // The plane collapsed under a singular/near-singular map.
+        return SemanticGeometry::Point(c);
+    }
+    let (major_axis, ratio, phi) = if lx >= ly {
+        let phi = ex.y.atan2(ex.x);
+        let ratio = if lx > 1e-12 { ly / lx } else { 0.0 };
+        (scale(ex, radius), ratio, phi)
+    } else {
+        let phi = ey.y.atan2(ey.x);
+        let ratio = if ly > 1e-12 { lx / ly } else { 0.0 };
+        (scale(ey, radius), ratio, phi)
+    };
+    SemanticGeometry::Ellipse {
+        center: c,
+        major_axis,
+        ratio,
+        start: phi,
+        sweep: std::f64::consts::TAU,
+    }
 }
 
 fn rotation_of(t: &Transform3) -> f64 {
