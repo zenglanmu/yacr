@@ -16,17 +16,23 @@
 
 ## 本轮状态（compact，2026-10-01）
 
-已完成并推送（main）：真实 DWG 端到端证据（`docs/validation.md`）、审计 B15（INSERT 展开、
-块定义入 `SpaceId::Block`）、B20（能力/完整性按可绘性判定）、字体目录与 CDN 来源
-（`docs/fonts.md`）、文字整形（sfnt/WOFF1 + SHX shapes/unifont/bigfont，缺失字体走回退
-链）、TEXT/MTEXT 对齐、TTF kerning、主机接缝（`plan_fonts`、`FontLoader`、
-`CadView::set_fonts`）、DIMENSION（展开匿名块）与 HATCH（边界/实心/图案）。核心测试
-146 passed / 0 failed；Wasm/Android target、fmt、clippy、架构脚本通过；字体相关测试可用
-`YACR_TEST_FONT`/`YACR_TEST_SHX` 指向真实字体。
+已完成并推送（main）：真实 DWG 端到端证据（`docs/validation.md`）、审计 B15/B20/B23/B24/B12、
+字体目录与来源（`docs/fonts.md`）、文字整形（sfnt/WOFF1+SHX，逐字形回退）、TEXT/MTEXT 对齐、
+TTF kerning、宿主取字体（web fetch / android assets）、DIMENSION/HATCH、F06 测量状态机、
+F03/F05 面板、F13 相机/投影/标准视图、F14 网格管线+深度+绘制顺序+透明+CPU 拾取、
+F15 ACIS 契约缝、代理解码失败关闭、CLI 结构化/原子输出、批注编解码与叠加渲染、
+诊断聚合与资源预算、F04 布局、F07–F09 批注工具与管理、F12 后端回退/未保存决策/恢复、
+N01 zh-CN+en（含真实 chrome）、N02 分层 CI（core/wasm/i18n/web-build/shader-validation，
+android-apk/web-smoke 门控）、`fixtures/manifest` 校验与出处策略。
 
-仍开放：MultiLeader/ACIS/3D 渲染；Web/Android 实际取字体与真机/浏览器运行；复杂文字整形
-与 MTEXT 高级排版；路线图 C 段交互（U01–U12、F01–F12）、D 段（F13–F15）、N01 双语、
-N02 CI 完整层次。`fixtures/manifest` 仍为空（未授权样本不入库）。
+核心测试 **535 passed / 0 failed**；Wasm、Android target、fmt、clippy(0)、架构、
+`check-i18n.py`、`check-fixture-manifest.py`、`check-workflows.py` 全通过。
+字体相关测试可用 `YACR_TEST_FONT`/`YACR_TEST_SHX` 指向真实字体。
+
+仍开放（受环境/外部依赖限制）：**F15 真实 ACIS 离散**（需内核 + SAT/SAB 解析器 + 授权样本）；
+**真机/浏览器/GPU 实际运行**（无 adb/浏览器/adapter）；自托管 GPU/Android runner；
+**授权 DWG/字体/黄金图**（`fixtures/manifest` 仍无授权样本）；MultiLeader；复杂文字整形；
+透明排序与导入端 alpha 打磨；自动保存/崩溃恢复策略。详见各功能 `docs/*.md` 的"未完成"。
 
 ## 已定义，但尚需设计审查
 
