@@ -879,12 +879,14 @@ name = "cad-render-wgpu"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "cad-diagnostics",
  "cad-domain",
  "cad-geometry",
  "cad-scene",
  "glam",
  "js-sys",
  "log",
+ "naga",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
