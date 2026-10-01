@@ -1,5 +1,5 @@
 // Candidate shared shell, not platform-validated yet.
-import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit } from "std-widgets.slint";
 
 // One row of the layer panel, pushed from `cad_app::layers::LayerRow`.
 // `visible` is the effective visibility the scene honours; `overridden` marks a
@@ -15,6 +15,18 @@ export struct LayerRow {
 export struct PropertyRow {
     key: string,
     value: string,
+}
+
+// One annotation management row pushed from `cad_app::AnnotationRow`.
+// `visible` is the effective visibility (a session override; the sidecar has no
+// hidden field, so it is never persisted). `overridden` marks that override.
+export struct AnnotationRow {
+    id: int,
+    kind: string,
+    text: string,
+    visible: bool,
+    overridden: bool,
+    selected: bool,
 }
 
 export component YacrWindow inherits Window {
@@ -53,6 +65,23 @@ export component YacrWindow inherits Window {
     in property <string> property-empty-label: "";
     in property <int> selection-count: 0;
 
+    // --- Annotation management + tool panel (audit F07/F09/U03) ----------
+    // Rows are the real annotation database plus the session visibility and
+    // selection. No synthetic rows; an empty model is an explicit empty state.
+    in property <[AnnotationRow]> annotation-rows: [];
+    in property <int> annotation-hidden-count: 0;
+    in property <string> annotation-empty-label: "";
+    in property <bool> annotation-tool-active: false;
+    in property <bool> annotation-tool-can-confirm: false;
+    in property <int> annotation-kind-index: 0;
+    in property <string> annotation-step-label: "";
+    // The text payload is only relevant for text/leader tools.
+    in property <bool> annotation-requires-text: false;
+    in property <bool> annotation-text-supplied: false;
+    // Two-way text payload edited in the shell and pushed back to the adapter,
+    // which copies it into the active tool (audit F07).
+    in-out property <string> annotation-text-input: "";
+
     callback open-requested();
     callback measure-requested();
     callback annotate-requested();
@@ -69,6 +98,15 @@ export component YacrWindow inherits Window {
     callback layer-visibility-toggled(index: int, visible: bool);
     callback restore-layers-requested();
     callback clear-selection-requested();
+    // Annotation tool + management callbacks (F07/F09). Row callbacks address
+    // the pushed `annotation-rows` model so the adapter maps back exactly.
+    callback annotation-kind-selected(name: string);
+    callback confirm-annotation-requested();
+    callback cancel-annotation-requested();
+    callback annotation-text-edited(text: string);
+    callback annotation-selected(index: int);
+    callback annotation-delete-requested(index: int);
+    callback annotation-visibility-toggled(index: int, visible: bool);
     callback backend-selected(name: string);
     callback export-requested();
     callback import-requested();
@@ -164,6 +202,56 @@ export component YacrWindow inherits Window {
                     text: root.unit-label;
                     color: #9aa7b8;
                     vertical-alignment: center;
+                }
+            }
+        }
+
+        // Annotation creation tool strip (F07/U04). The step text comes from the
+        // tool state machine; confirm/cancel are gated by real state.
+        Rectangle {
+            height: 40px;
+            background: #262b33;
+            HorizontalBox {
+                spacing: 8px;
+                padding: 4px;
+                alignment: center;
+                Text {
+                    text: "批注";
+                    color: #c8d0dc;
+                    vertical-alignment: center;
+                }
+                ComboBox {
+                    width: 96px;
+                    enabled: root.work-mode;
+                    // Mirrors AnnotationToolKind::ALL; the adapter owns the
+                    // mapping so the lists cannot drift silently.
+                    model: ["文字", "引线", "矩形", "椭圆", "自由线", "云线"];
+                    current-index: root.annotation-kind-index;
+                    selected(value) => { root.annotation-kind-selected(value); }
+                }
+                LineEdit {
+                    width: 180px;
+                    enabled: root.work-mode && root.annotation-requires-text;
+                    placeholder-text: "批注文字";
+                    text <=> root.annotation-text-input;
+                    edited(text) => { root.annotation-text-edited(text); }
+                }
+                Button {
+                    text: "确认";
+                    enabled: root.work-mode && root.annotation-tool-can-confirm;
+                    clicked => { root.confirm-annotation-requested(); }
+                }
+                Button {
+                    text: "取消";
+                    enabled: root.work-mode && root.annotation-tool-active;
+                    clicked => { root.cancel-annotation-requested(); }
+                }
+                Text {
+                    text: root.annotation-step-label;
+                    color: #e6edf7;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
                 }
             }
         }

@@ -568,6 +568,80 @@ impl HostController {
             &self.session.selection,
         ))
     }
+
+    /// Read-only management rows for the annotation list panel (F09).
+    ///
+    /// Pure getter: it projects the document's annotation database plus the
+    /// session visibility overrides and the current selection. It dispatches no
+    /// command and never mutates an annotation.
+    pub fn annotation_rows(&self) -> CadResult<Vec<crate::AnnotationRow>> {
+        let document = self
+            .application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        Ok(self.session.annotation_rows(&document.annotations))
+    }
+
+    /// The annotation currently selected for edit/delete, if any.
+    pub fn selected_annotation(&self) -> Option<AnnotationId> {
+        self.session.selected_annotation
+    }
+
+    /// Temporary annotation visibility set (session-scoped, never persisted).
+    pub fn annotation_visibility(&self) -> &crate::AnnotationVisibilitySet {
+        &self.session.annotation_visibility
+    }
+
+    /// Hide or show one annotation through the command path.
+    ///
+    /// Session state only: no transaction, no history entry and no change to
+    /// the annotation revision or sidecar.
+    pub fn set_annotation_visible(&mut self, id: AnnotationId, visible: bool) -> CadResult<()> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::SetAnnotationVisibility,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::AnnotationVisibility(id, visible),
+        })?;
+        Ok(())
+    }
+
+    /// Select (or clear) an annotation for edit/delete through the command path.
+    pub fn select_annotation(&mut self, id: Option<AnnotationId>) -> CadResult<()> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::SelectAnnotation,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::SelectAnnotation(id),
+        })?;
+        Ok(())
+    }
+
+    /// Delete one annotation through the shared transaction/history path.
+    ///
+    /// Exactly one transaction and one undo record; a missing id is refused by
+    /// the database before anything is recorded.
+    pub fn delete_annotation(&mut self, id: AnnotationId) -> CadResult<()> {
+        self.apply_annotation(AnnotationCommand::Delete(id))?;
+        // A deleted annotation must not linger as a hidden override or as the
+        // management selection; clear both so the panel cannot show a ghost.
+        self.session.annotation_visibility.remove(id);
+        if self.session.selected_annotation == Some(id) {
+            self.session.selected_annotation = None;
+        }
+        Ok(())
+    }
+
+    /// Active annotation tool preview for the tool panel, if a tool is running.
+    ///
+    /// Pure getter (audit U04): it never dispatches a command or advances tool.
+    pub fn annotation_preview(&self) -> Option<crate::AnnotationPreview> {
+        self.session.annotation_preview()
+    }
 }
 
 #[cfg(test)]
@@ -858,5 +932,69 @@ mod tests {
         // Confirming the current revision clears dirty.
         controller.confirm_annotation_export(rev_n1).unwrap();
         assert!(!controller.workspace_annotations().unwrap().is_dirty());
+    }
+
+    #[test]
+    fn annotation_rows_project_the_database_and_track_visibility() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        // Empty: explicit empty list, no fabricated rows.
+        assert!(controller.annotation_rows().unwrap().is_empty());
+
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(1, "note one")))
+            .unwrap();
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(2, "note two")))
+            .unwrap();
+        let rows = controller.annotation_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, AnnotationId(1));
+        assert_eq!(rows[0].kind, "text");
+        assert_eq!(rows[0].text, "note one");
+        assert!(rows.iter().all(|r| r.visible));
+
+        // Hide one: session state only.
+        let revision_before = controller.workspace_annotations().unwrap().revision();
+        controller
+            .set_annotation_visible(AnnotationId(1), false)
+            .unwrap();
+        let rows = controller.annotation_rows().unwrap();
+        assert!(!rows[0].visible);
+        assert!(rows[0].is_overridden());
+        assert_eq!(
+            controller.workspace_annotations().unwrap().revision(),
+            revision_before
+        );
+
+        // Show again: round-trips.
+        controller
+            .set_annotation_visible(AnnotationId(1), true)
+            .unwrap();
+        assert!(controller.annotation_rows().unwrap()[0].visible);
+    }
+
+    #[test]
+    fn selecting_and_deleting_an_annotation_uses_the_shared_path() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller
+            .apply_annotation(AnnotationCommand::Create(text_note(7, "doomed")))
+            .unwrap();
+        controller.select_annotation(Some(AnnotationId(7))).unwrap();
+        assert_eq!(controller.selected_annotation(), Some(AnnotationId(7)));
+        assert!(controller.annotation_rows().unwrap()[0].selected);
+
+        controller.delete_annotation(AnnotationId(7)).unwrap();
+        assert!(controller.workspace_annotations().unwrap().is_empty());
+        // Delete is one undoable transaction and clears the selection.
+        assert!(controller.application.can_undo(&controller.document_id));
+        assert_eq!(controller.selected_annotation(), None);
+        assert!(controller.annotation_rows().unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_missing_annotation_is_refused_and_records_nothing() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        assert!(controller.delete_annotation(AnnotationId(99)).is_err());
+        assert!(!controller.application.can_undo(&controller.document_id));
     }
 }

@@ -7,8 +7,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use cad_app::{Command, CommandId, CommandPayload, MeasurementToolKind};
-use cad_domain::{CadError, CadResult, DocumentId, LayerId, Point3, ViewportId};
+use cad_app::{AnnotationToolKind, Command, CommandId, CommandPayload, MeasurementToolKind};
+use cad_domain::{AnnotationId, CadError, CadResult, DocumentId, LayerId, Point3, ViewportId};
 
 /// Source of the shared shell, kept for packaging/documentation tooling.
 pub const UI_DEFINITION: &str = include_str!("../ui/app.slint");
@@ -159,6 +159,88 @@ pub struct PropertyRowUi {
     pub value: String,
 }
 
+/// One annotation row pushed into the shell (audit F09/U03).
+///
+/// As with layers, the `int` id is display-only; the adapter keeps the ordered
+/// `AnnotationId` list so a visibility toggle / delete maps back exactly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotationRowUi {
+    pub id: i32,
+    pub kind: String,
+    pub text: String,
+    /// Effective visibility the scene should honour.
+    pub visible: bool,
+    /// Whether a temporary session override is active for this annotation.
+    pub overridden: bool,
+    /// Whether this annotation is the current management selection.
+    pub selected: bool,
+}
+
+/// Annotation management panel snapshot (F09) plus the active tool state (F07).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AnnotationPanelState {
+    pub rows: Vec<AnnotationRowUi>,
+    /// Number of annotations currently hidden by a session override.
+    pub hidden_count: usize,
+    /// Explicit empty-state text shown when there are no annotations.
+    pub empty_label: String,
+    /// Whether an annotation creation tool is running (drives confirm/cancel).
+    pub tool_active: bool,
+    /// Whether the active tool has all its required parameters.
+    pub tool_can_confirm: bool,
+    /// Selected kind index for the tool selector.
+    pub tool_kind_index: i32,
+    /// Human-facing step text from the tool state machine; empty when idle.
+    pub tool_step_label: String,
+    /// Whether the tool's text payload has been supplied (text/leader kinds).
+    pub text_supplied: bool,
+    /// Whether the active kind needs a text payload at all.
+    pub requires_text: bool,
+}
+
+impl AnnotationPanelState {
+    /// Build the panel state from real management rows plus the tool preview.
+    pub fn from_rows(
+        rows: &[cad_app::AnnotationRow],
+        preview: Option<&cad_app::AnnotationPreview>,
+        empty_label: impl Into<String>,
+    ) -> Self {
+        let (active, can_confirm, kind_index, step, text_supplied, requires_text) = match preview {
+            Some(preview) => (
+                true,
+                preview.can_confirm(),
+                preview.kind.index() as i32,
+                preview.status_line(),
+                preview.text_supplied,
+                preview.requires_text,
+            ),
+            None => (false, false, 0, String::new(), false, false),
+        };
+        AnnotationPanelState {
+            rows: rows
+                .iter()
+                .map(|row| AnnotationRowUi {
+                    // Display-only; the adapter keeps the exact ids in order.
+                    id: (row.id.0 & 0xFFFF_FFFF) as i32,
+                    kind: row.kind_label.to_string(),
+                    text: row.text.clone(),
+                    visible: row.visible,
+                    overridden: row.overridden,
+                    selected: row.selected,
+                })
+                .collect(),
+            hidden_count: rows.iter().filter(|r| r.is_hidden()).count(),
+            empty_label: empty_label.into(),
+            tool_active: active,
+            tool_can_confirm: can_confirm,
+            tool_kind_index: kind_index,
+            tool_step_label: step,
+            text_supplied,
+            requires_text,
+        }
+    }
+}
+
 /// Properties-panel snapshot for the current selection.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PropertyPanelState {
@@ -248,6 +330,15 @@ pub struct UiHandle {
     /// Shared with the adapter; canvas clicks only act as picks while a
     /// measurement tool is running, so navigation clicks stay silent.
     measurement_active: Rc<Cell<bool>>,
+    /// Shared with the adapter; the annotation tool selector and the Annotate
+    /// button use the same kind so they cannot disagree.
+    selected_annotation_kind: Rc<Cell<AnnotationToolKind>>,
+    /// Shared with the adapter; canvas picks while an annotation tool is active
+    /// become annotation points rather than measurement points.
+    annotation_active: Rc<Cell<bool>>,
+    /// Ordered `AnnotationId`s matching the pushed `annotation-rows` model, so a
+    /// visibility toggle / delete callback index maps back to the exact id.
+    annotation_order: Rc<RefCell<Vec<AnnotationId>>>,
     /// Ordered `LayerId`s matching the pushed `layer-rows` model, so a toggle
     /// callback index maps back to the exact id.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
@@ -362,6 +453,49 @@ impl UiHandle {
         })
     }
 
+    /// Push the annotation management + tool panel state (audit F07/F09/U03).
+    ///
+    /// Also records the ordered `AnnotationId`s so a later visibility/delete
+    /// callback can map its row index back to the real annotation.
+    pub fn set_annotation_state(
+        &self,
+        state: &AnnotationPanelState,
+        order: &[AnnotationId],
+    ) -> CadResult<()> {
+        *self.annotation_order.borrow_mut() = order.to_vec();
+        if let Some(kind) = AnnotationToolKind::from_index(state.tool_kind_index) {
+            self.selected_annotation_kind.set(kind);
+        }
+        self.annotation_active.set(state.tool_active);
+        let rows: Vec<AnnotationRow> = state
+            .rows
+            .iter()
+            .map(|row| AnnotationRow {
+                id: row.id,
+                kind: row.kind.clone().into(),
+                text: row.text.clone().into(),
+                visible: row.visible,
+                overridden: row.overridden,
+                selected: row.selected,
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let hidden = state.hidden_count as i32;
+        let empty = state.empty_label.clone();
+        let step = state.tool_step_label.clone();
+        self.with(|ui| {
+            ui.set_annotation_rows(model);
+            ui.set_annotation_hidden_count(hidden);
+            ui.set_annotation_empty_label(empty.into());
+            ui.set_annotation_tool_active(state.tool_active);
+            ui.set_annotation_tool_can_confirm(state.tool_can_confirm);
+            ui.set_annotation_kind_index(state.tool_kind_index);
+            ui.set_annotation_step_label(step.into());
+            ui.set_annotation_requires_text(state.requires_text);
+            ui.set_annotation_text_supplied(state.text_supplied);
+        })
+    }
+
     pub fn set_backend_index(&self, index: i32) -> CadResult<()> {
         self.with(|ui| ui.set_backend_index(index))
     }
@@ -403,6 +537,14 @@ pub struct UiAdapter {
     /// Mirrors `MeasurementUiState::active` so canvas clicks are only picks
     /// while a tool runs.
     measurement_active: Rc<Cell<bool>>,
+    /// Kind currently selected for annotation creation (Annotate button +
+    /// canvas picks agree with the selector).
+    selected_annotation_kind: Rc<Cell<AnnotationToolKind>>,
+    /// Mirrors whether an annotation tool is active, so canvas picks route to
+    /// the annotation tool rather than the measurement tool.
+    annotation_active: Rc<Cell<bool>>,
+    /// Ordered `AnnotationId`s matching the pushed `annotation-rows` model.
+    annotation_order: Rc<RefCell<Vec<AnnotationId>>>,
     /// Ordered `LayerId`s matching the pushed `layer-rows` model.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
 }
@@ -463,6 +605,10 @@ impl UiAdapter {
         let selected_kind: Rc<Cell<MeasurementToolKind>> =
             Rc::new(Cell::new(MeasurementToolKind::Distance));
         let measurement_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+        let selected_annotation_kind: Rc<Cell<AnnotationToolKind>> =
+            Rc::new(Cell::new(AnnotationToolKind::Text));
+        let annotation_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+        let annotation_order: Rc<RefCell<Vec<AnnotationId>>> = Rc::new(RefCell::new(Vec::new()));
         let layer_order: Rc<RefCell<Vec<LayerId>>> = Rc::new(RefCell::new(Vec::new()));
 
         {
@@ -602,10 +748,13 @@ impl UiAdapter {
             let mapper = pick_mapper.clone();
             let report = ui_weak.clone();
             let active = measurement_active.clone();
+            let annotating = annotation_active.clone();
             ui.on_canvas_pick(move |x, y| {
                 // Ordinary navigation clicks must stay silent; only an active
-                // measurement turns a click into a pick.
-                if !active.get() {
+                // capture tool turns a click into a pick.
+                let measure = active.get();
+                let annotate = annotating.get();
+                if !measure && !annotate {
                     return;
                 }
                 let world = mapper
@@ -614,12 +763,17 @@ impl UiAdapter {
                     .and_then(|mapper| mapper.to_world([x as f64, y as f64]));
                 match world {
                     Some(world) => {
-                        let _ = s.borrow_mut().send(command_for(
-                            CommandId::Measure,
-                            &doc,
-                            viewport,
-                            CommandPayload::Points(vec![world]),
-                        ));
+                        let (id, payload) = if annotate {
+                            (
+                                CommandId::AppendAnnotationPoints,
+                                CommandPayload::AppendAnnotationPoints(vec![world]),
+                            )
+                        } else {
+                            (CommandId::Measure, CommandPayload::Points(vec![world]))
+                        };
+                        let _ = s
+                            .borrow_mut()
+                            .send(command_for(id, &doc, viewport, payload));
                     }
                     None => {
                         // Explicit, never a silent no-op: no mapper (or an
@@ -633,15 +787,132 @@ impl UiAdapter {
             });
         }
         {
+            // Annotate starts (or restarts) the selected annotation kind instead
+            // of sending a payload-free command (audit U04/F07).
             let s = shared.clone();
             let doc = document.clone();
+            let kind = selected_annotation_kind.clone();
             ui.on_annotate_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
-                    CommandId::CreateAnnotation,
+                    CommandId::BeginAnnotationTool,
+                    &doc,
+                    viewport,
+                    CommandPayload::AnnotationTool(kind.get()),
+                ));
+            });
+        }
+        {
+            // Selecting a kind immediately starts that tool; this is the explicit
+            // user choice, not a default.
+            let s = shared.clone();
+            let doc = document.clone();
+            let kind_slot = selected_annotation_kind.clone();
+            ui.on_annotation_kind_selected(move |name| {
+                let Some(kind) = AnnotationToolKind::from_label(name.as_str()) else {
+                    return;
+                };
+                kind_slot.set(kind);
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::BeginAnnotationTool,
+                    &doc,
+                    viewport,
+                    CommandPayload::AnnotationTool(kind),
+                ));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_confirm_annotation_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::ConfirmAnnotationTool,
                     &doc,
                     viewport,
                     CommandPayload::None,
                 ));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_cancel_annotation_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::CancelAnnotationTool,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+            });
+        }
+        {
+            // Text payload for text/leader annotate tools. The shell only sends
+            // it when the active kind requires text; the application validates
+            // that again.
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_annotation_text_edited(move |text| {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::AnnotationText,
+                    &doc,
+                    viewport,
+                    CommandPayload::AnnotationText(text.to_string()),
+                ));
+            });
+        }
+        {
+            // Row click selects the annotation for edit/delete. The adapter
+            // resolves the row index to the exact id from the pushed order.
+            let s = shared.clone();
+            let doc = document.clone();
+            let order = annotation_order.clone();
+            ui.on_annotation_selected(move |index| {
+                let id = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| order.borrow().get(i).copied());
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::SelectAnnotation,
+                    &doc,
+                    viewport,
+                    CommandPayload::SelectAnnotation(id),
+                ));
+            });
+        }
+        {
+            // Delete the selected annotation row (resolved through the order).
+            let s = shared.clone();
+            let doc = document.clone();
+            let order = annotation_order.clone();
+            ui.on_annotation_delete_requested(move |index| {
+                let id = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| order.borrow().get(i).copied());
+                if let Some(id) = id {
+                    let _ = s.borrow_mut().send(command_for(
+                        CommandId::DeleteAnnotationById,
+                        &doc,
+                        viewport,
+                        CommandPayload::DeleteAnnotation(id),
+                    ));
+                }
+            });
+        }
+        {
+            // Annotation visibility toggle: session state only, no transaction.
+            let s = shared.clone();
+            let doc = document.clone();
+            let order = annotation_order.clone();
+            ui.on_annotation_visibility_toggled(move |index, visible| {
+                let id = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| order.borrow().get(i).copied());
+                if let Some(id) = id {
+                    let _ = s.borrow_mut().send(command_for(
+                        CommandId::SetAnnotationVisibility,
+                        &doc,
+                        viewport,
+                        CommandPayload::AnnotationVisibility(id, visible),
+                    ));
+                }
             });
         }
         {
@@ -745,6 +1016,9 @@ impl UiAdapter {
             pick_mapper,
             selected_kind,
             measurement_active,
+            selected_annotation_kind,
+            annotation_active,
+            annotation_order,
             layer_order,
         })
     }
@@ -769,6 +1043,9 @@ impl UiAdapter {
             ui: self.ui.as_weak(),
             selected_kind: self.selected_kind.clone(),
             measurement_active: self.measurement_active.clone(),
+            selected_annotation_kind: self.selected_annotation_kind.clone(),
+            annotation_active: self.annotation_active.clone(),
+            annotation_order: self.annotation_order.clone(),
             layer_order: self.layer_order.clone(),
         }
     }
@@ -780,6 +1057,12 @@ impl UiAdapter {
     /// The measurement algorithm currently selected in the shell.
     pub fn selected_measurement_kind(&self) -> MeasurementToolKind {
         self.selected_kind.get()
+    }
+
+    /// The annotation kind currently selected in the shell (Annotate button and
+    /// canvas picks agree with the selector).
+    pub fn selected_annotation_kind(&self) -> AnnotationToolKind {
+        self.selected_annotation_kind.get()
     }
 
     /// Show the window and run the platform event loop.
