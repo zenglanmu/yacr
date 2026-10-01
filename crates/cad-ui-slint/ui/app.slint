@@ -1,4 +1,8 @@
 // Candidate shared shell, not platform-validated yet.
+//
+// Every user-facing string here is bound to a property pushed from
+// `cad_ui_slint::i18n::MessageSource` (N01). No chrome label is hardcoded:
+// `scripts/check-i18n.py` treats a CJK literal in this file as a failure.
 import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit } from "std-widgets.slint";
 
 // One row of the layer panel, pushed from `cad_app::layers::LayerRow`.
@@ -29,6 +33,17 @@ export struct AnnotationRow {
     selected: bool,
 }
 
+// One localized diagnostics row pushed from
+// `cad_ui_slint::status::DiagnosticRowUi`. `code` is the stable machine code and
+// is shown verbatim; everything else is already localized by the adapter.
+export struct DiagnosticRow {
+    code: string,
+    severity: string,
+    description: string,
+    object: string,
+    details: string,
+}
+
 export component YacrWindow inherits Window {
     in property <string> application-title;
     in property <string> open-label;
@@ -37,12 +52,20 @@ export component YacrWindow inherits Window {
     in property <string> status-label;
     in property <image> cad-frame;
     in property <bool> work-mode;
-    in property <string> mode-label: "增强";
+    in property <string> mode-label;
     // Undo and redo availability are independent so undoing to empty still
     // permits redo (audit U11); never share the undo flag.
     in property <bool> can-undo;
     in property <bool> can-redo;
     in property <int> backend-index: 0;
+    // Localized chrome labels (N01). Resolved from the active catalog by the
+    // adapter; the shell holds no second copy of any user-facing string.
+    in property <string> fit-label;
+    in property <string> undo-label;
+    in property <string> redo-label;
+    in property <string> export-label;
+    in property <string> import-label;
+    in property <string> diagnostics-label;
 
     // --- Measurement tool panel (audit U03/U04) --------------------------
     // All values are pushed from the application state; the shell invents
@@ -50,19 +73,33 @@ export component YacrWindow inherits Window {
     in property <bool> measurement-active: false;
     in property <bool> measurement-can-confirm: false;
     in property <int> measurement-kind-index: 0;
+    in property <[string]> measurement-kind-labels: [];
+    in property <string> measurement-panel-label;
+    in property <string> measure-confirm-label;
+    in property <string> measure-cancel-label;
     in property <string> measurement-step-label: "";
     in property <string> unit-label: "";
+    // Backend choices are localized for `Auto`; `WebGPU`/`WebGL2` are product
+    // names and stay as-is.
+    in property <[string]> backend-labels: [];
 
     // --- Layer panel (audit F03/U03) ------------------------------------
     // Rows are the real drawing-database layer table plus the session's
     // temporary overrides. No synthetic rows; an empty model is an empty state.
     in property <[LayerRow]> layer-rows: [];
     in property <int> layer-override-count: 0;
+    in property <string> layer-override-label: "";
+    in property <string> layer-panel-label;
+    in property <string> layer-restore-label;
+    in property <string> layer-overridden-marker;
     in property <string> layer-empty-label: "";
     // --- Properties panel (audit F05/U03) -------------------------------
     in property <[PropertyRow]> property-rows: [];
     in property <string> property-mixed-label: "";
     in property <string> property-empty-label: "";
+    in property <string> property-panel-label;
+    in property <string> property-selected-label: "";
+    in property <string> property-clear-label;
     in property <int> selection-count: 0;
 
     // --- Annotation management + tool panel (audit F07/F09/U03) ----------
@@ -74,6 +111,11 @@ export component YacrWindow inherits Window {
     in property <bool> annotation-tool-active: false;
     in property <bool> annotation-tool-can-confirm: false;
     in property <int> annotation-kind-index: 0;
+    in property <[string]> annotation-kind-labels: [];
+    in property <string> annotation-panel-label;
+    in property <string> annotation-text-placeholder;
+    in property <string> annotate-confirm-label;
+    in property <string> annotate-cancel-label;
     in property <string> annotation-step-label: "";
     // The text payload is only relevant for text/leader tools.
     in property <bool> annotation-requires-text: false;
@@ -81,6 +123,19 @@ export component YacrWindow inherits Window {
     // Two-way text payload edited in the shell and pushed back to the adapter,
     // which copies it into the active tool (audit F07).
     in-out property <string> annotation-text-input: "";
+
+    // --- Diagnostics drawer (audit U08) ---------------------------------
+    // The status bar stays a one-line summary; the drawer holds the full,
+    // object-level reasons and the real backend label. Rows are only what a host
+    // explicitly pushed from `cad_diagnostics::DiagnosticsModel`; before that the
+    // explicit empty state shows instead of fabricated rows.
+    in-out property <bool> diagnostics-open: false;
+    in property <string> diagnostics-drawer-title;
+    in property <string> diagnostics-close-label;
+    in property <string> diagnostics-backend-label: "";
+    in property <string> diagnostics-summary-label: "";
+    in property <string> diagnostics-empty-label: "";
+    in property <[DiagnosticRow]> diagnostics-rows: [];
 
     callback open-requested();
     callback measure-requested();
@@ -111,6 +166,7 @@ export component YacrWindow inherits Window {
     callback export-requested();
     callback import-requested();
     callback diagnostics-requested();
+    callback diagnostics-closed();
     callback pointer-input(kind: int, button: int, x: length, y: length);
     callback scroll-input(dx: float, dy: float);
     // A single left-button click on the canvas, in logical pixels relative to
@@ -126,14 +182,14 @@ export component YacrWindow inherits Window {
             spacing: 6px;
             padding: 6px;
             Button { text: root.open-label; clicked => { root.open-requested(); } }
-            Button { text: "适应"; clicked => { root.fit-requested(); } }
+            Button { text: root.fit-label; clicked => { root.fit-requested(); } }
             Button {
-                text: "撤销";
+                text: root.undo-label;
                 enabled: root.work-mode && root.can-undo;
                 clicked => { root.undo-requested(); }
             }
             Button {
-                text: "重做";
+                text: root.redo-label;
                 enabled: root.work-mode && root.can-redo;
                 clicked => { root.redo-requested(); }
             }
@@ -149,13 +205,95 @@ export component YacrWindow inherits Window {
             }
             ComboBox {
                 width: 96px;
-                model: ["Auto", "WebGPU", "WebGL2"];
+                model: root.backend-labels;
                 current-index: root.backend-index;
                 selected(value) => { root.backend-selected(value); }
             }
-            Button { text: "导出"; clicked => { root.export-requested(); } }
-            Button { text: "导入"; clicked => { root.import-requested(); } }
-            Button { text: "诊断"; clicked => { root.diagnostics-requested(); } }
+            Button { text: root.export-label; clicked => { root.export-requested(); } }
+            Button { text: root.import-label; clicked => { root.import-requested(); } }
+            Button {
+                text: root.diagnostics-label;
+                clicked => {
+                    root.diagnostics-open = !root.diagnostics-open;
+                    root.diagnostics-requested();
+                }
+            }
+        }
+
+        // Diagnostics drawer (audit U08). Shown above the canvas as an overlay
+        // strip; it lists every real reason a host pushed, not just the first.
+        if root.diagnostics-open : Rectangle {
+            height: 160px;
+            background: #1b2029;
+            border-width: 1px;
+            border-color: #3a4351;
+            VerticalBox {
+                spacing: 4px;
+                padding: 6px;
+                HorizontalBox {
+                    spacing: 8px;
+                    Text {
+                        text: root.diagnostics-drawer-title;
+                        color: #e6edf7;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: root.diagnostics-backend-label;
+                        color: #9aa7b8;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.diagnostics-summary-label;
+                        color: #e6b450;
+                        vertical-alignment: center;
+                    }
+                    Button {
+                        text: root.diagnostics-close-label;
+                        clicked => { root.diagnostics-closed(); }
+                    }
+                }
+                Text {
+                    text: root.diagnostics-empty-label;
+                    color: #9aa7b8;
+                    visible: root.diagnostics-rows.length == 0;
+                }
+                ScrollView {
+                    vertical-scrollbar-policy: as-needed;
+                    for row[index] in root.diagnostics-rows : HorizontalBox {
+                        spacing: 6px;
+                        Text {
+                            text: row.severity;
+                            color: #e6b450;
+                            width: 72px;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: row.object;
+                            color: #9aa7b8;
+                            width: 120px;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: row.description;
+                            color: #e6edf7;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: row.details;
+                            color: #9aa7b8;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: row.code;
+                            color: #6b7688;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
         }
 
         // Compact tool/properties panel. Measurement is the only tool wired so
@@ -168,7 +306,7 @@ export component YacrWindow inherits Window {
                 padding: 4px;
                 alignment: center;
                 Text {
-                    text: "测量";
+                    text: root.measurement-panel-label;
                     color: #c8d0dc;
                     vertical-alignment: center;
                 }
@@ -177,17 +315,17 @@ export component YacrWindow inherits Window {
                     enabled: root.work-mode;
                     // Mirrors MeasurementToolKind::ALL; the adapter owns the
                     // mapping so the two lists cannot drift silently.
-                    model: ["距离", "折线长度", "角度", "面积"];
+                    model: root.measurement-kind-labels;
                     current-index: root.measurement-kind-index;
                     selected(value) => { root.measure-kind-selected(value); }
                 }
                 Button {
-                    text: "确认";
+                    text: root.measure-confirm-label;
                     enabled: root.work-mode && root.measurement-can-confirm;
                     clicked => { root.confirm-measurement-requested(); }
                 }
                 Button {
-                    text: "取消";
+                    text: root.measure-cancel-label;
                     enabled: root.work-mode && root.measurement-active;
                     clicked => { root.cancel-measurement-requested(); }
                 }
@@ -216,7 +354,7 @@ export component YacrWindow inherits Window {
                 padding: 4px;
                 alignment: center;
                 Text {
-                    text: "批注";
+                    text: root.annotation-panel-label;
                     color: #c8d0dc;
                     vertical-alignment: center;
                 }
@@ -225,24 +363,24 @@ export component YacrWindow inherits Window {
                     enabled: root.work-mode;
                     // Mirrors AnnotationToolKind::ALL; the adapter owns the
                     // mapping so the lists cannot drift silently.
-                    model: ["文字", "引线", "矩形", "椭圆", "自由线", "云线"];
+                    model: root.annotation-kind-labels;
                     current-index: root.annotation-kind-index;
                     selected(value) => { root.annotation-kind-selected(value); }
                 }
                 LineEdit {
                     width: 180px;
                     enabled: root.work-mode && root.annotation-requires-text;
-                    placeholder-text: "批注文字";
+                    placeholder-text: root.annotation-text-placeholder;
                     text <=> root.annotation-text-input;
                     edited(text) => { root.annotation-text-edited(text); }
                 }
                 Button {
-                    text: "确认";
+                    text: root.annotate-confirm-label;
                     enabled: root.work-mode && root.annotation-tool-can-confirm;
                     clicked => { root.confirm-annotation-requested(); }
                 }
                 Button {
-                    text: "取消";
+                    text: root.annotate-cancel-label;
                     enabled: root.work-mode && root.annotation-tool-active;
                     clicked => { root.cancel-annotation-requested(); }
                 }
@@ -271,18 +409,18 @@ export component YacrWindow inherits Window {
                     HorizontalBox {
                         spacing: 4px;
                         Text {
-                            text: "图层";
+                            text: root.layer-panel-label;
                             color: #c8d0dc;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
                         Text {
-                            text: root.layer-override-count > 0 ? "临时覆盖 " + root.layer-override-count : "";
+                            text: root.layer-override-count > 0 ? root.layer-override-label : "";
                             color: #e6b450;
                             vertical-alignment: center;
                         }
                         Button {
-                            text: "恢复";
+                            text: root.layer-restore-label;
                             enabled: root.work-mode && root.layer-override-count > 0;
                             clicked => { root.restore-layers-requested(); }
                         }
@@ -306,7 +444,7 @@ export component YacrWindow inherits Window {
                                 }
                             }
                             Text {
-                                text: row.overridden ? "临时" : "";
+                                text: row.overridden ? root.layer-overridden-marker : "";
                                 color: #e6b450;
                                 vertical-alignment: center;
                             }
@@ -319,18 +457,18 @@ export component YacrWindow inherits Window {
                     HorizontalBox {
                         spacing: 4px;
                         Text {
-                            text: "属性";
+                            text: root.property-panel-label;
                             color: #c8d0dc;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
                         Text {
-                            text: root.selection-count > 0 ? "已选 " + root.selection-count : "";
+                            text: root.selection-count > 0 ? root.property-selected-label : "";
                             color: #9aa7b8;
                             vertical-alignment: center;
                         }
                         Button {
-                            text: "清除选择";
+                            text: root.property-clear-label;
                             enabled: root.selection-count > 0;
                             clicked => { root.clear-selection-requested(); }
                         }

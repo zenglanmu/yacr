@@ -22,6 +22,7 @@ slint::include_modules!();
 
 pub mod bridge;
 pub mod i18n;
+pub mod status;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 pub use bridge::{
@@ -30,6 +31,7 @@ pub use bridge::{
     IncomingDocument,
 };
 pub use i18n::{Locale, LocaleResolution, Message, MessageCatalog, MessageSource};
+pub use status::{DiagnosticRowUi, DiagnosticsPanelState, ReasonText};
 
 use slint::{ComponentHandle, Image, Weak};
 
@@ -381,10 +383,85 @@ pub trait UiCommandSink: 'static {
     fn send(&mut self, command: Command) -> CadResult<()>;
 }
 
+/// Push every catalog-driven chrome label/model into the shell (N01).
+///
+/// This is the single place that maps catalog keys to Slint properties, so a
+/// locale switch and the initial construction cannot drift. Combobox models are
+/// built from the application's authoritative `ALL` orderings, which is also how
+/// a localized label maps back to a kind without relying on Chinese-only
+/// `from_label`.
+fn apply_chrome(ui: &YacrWindow, messages: &MessageSource) {
+    // Toolbar + mode.
+    ui.set_open_label(messages.text("file.open", &[]).into());
+    ui.set_fit_label(messages.text("toolbar.fit", &[]).into());
+    ui.set_undo_label(messages.text("toolbar.undo", &[]).into());
+    ui.set_redo_label(messages.text("toolbar.redo", &[]).into());
+    ui.set_export_label(messages.text("toolbar.export", &[]).into());
+    ui.set_import_label(messages.text("toolbar.import", &[]).into());
+    ui.set_diagnostics_label(messages.text("toolbar.diagnostics", &[]).into());
+    ui.set_mode_label(messages.text("mode.enhanced", &[]).into());
+
+    // Measurement panel.
+    ui.set_measurement_panel_label(messages.text("measure.panel", &[]).into());
+    ui.set_measure_confirm_label(messages.text("tool.confirm", &[]).into());
+    ui.set_measure_cancel_label(messages.text("tool.cancel", &[]).into());
+    ui.set_measurement_kind_labels(string_model(&status::measurement_kind_labels(messages)));
+
+    // Annotation panel.
+    ui.set_annotation_panel_label(messages.text("annotation.panel", &[]).into());
+    ui.set_annotate_confirm_label(messages.text("tool.confirm", &[]).into());
+    ui.set_annotate_cancel_label(messages.text("tool.cancel", &[]).into());
+    ui.set_annotation_text_placeholder(messages.text("annotation.text_placeholder", &[]).into());
+    ui.set_annotation_kind_labels(string_model(&status::annotation_kind_labels(messages)));
+
+    // Layer + property panels.
+    ui.set_layer_panel_label(messages.text("layers.panel", &[]).into());
+    ui.set_layer_restore_label(messages.text("layers.restore", &[]).into());
+    ui.set_layer_overridden_marker(messages.text("layers.overridden_marker", &[]).into());
+    ui.set_layer_empty_label(messages.text("layers.empty", &[]).into());
+    ui.set_property_panel_label(messages.text("properties.panel", &[]).into());
+    ui.set_property_clear_label(messages.text("properties.clear_selection", &[]).into());
+    ui.set_property_empty_label(messages.text("properties.empty", &[]).into());
+
+    // Backend choice model and diagnostics drawer chrome.
+    ui.set_backend_labels(string_model(&status::backend_labels(messages)));
+    ui.set_diagnostics_drawer_title(messages.text("diagnostics.title", &[]).into());
+    ui.set_diagnostics_close_label(messages.text("diagnostics.close", &[]).into());
+    ui.set_diagnostics_empty_label(messages.text("diagnostics.empty", &[]).into());
+}
+
+/// Build a Slint string model from owned labels.
+fn string_model(labels: &[String]) -> slint::ModelRc<slint::SharedString> {
+    let values: Vec<slint::SharedString> =
+        labels.iter().map(|label| label.as_str().into()).collect();
+    slint::ModelRc::new(slint::VecModel::from(values))
+}
+
+/// Localized "temporary override N" text for the layer panel.
+fn layer_override_label(messages: &MessageSource, count: usize) -> String {
+    messages.text("layers.override_count", &[("count", &count.to_string())])
+}
+
+/// Localized "N selected" text for the properties panel.
+fn selected_count_label(messages: &MessageSource, count: usize) -> String {
+    messages.text(
+        "properties.selected_count",
+        &[("count", &count.to_string())],
+    )
+}
+
+/// Localized "Renderer backend: X" line for the diagnostics drawer.
+fn backend_label(messages: &MessageSource, backend: &str) -> String {
+    messages.text("backend.label", &[("backend", backend)])
+}
+
 /// Cloneable handle the host uses to push state into the UI.
 #[derive(Clone)]
 pub struct UiHandle {
     ui: Weak<YacrWindow>,
+    /// The active catalog. Shared with the adapter so `set_locale` can rebuild
+    /// every chrome label, not just the Open button.
+    messages: Rc<RefCell<MessageSource>>,
     /// Shared with the adapter so a state push also updates the algorithm the
     /// Measure button will start, keeping the panel and the button consistent.
     selected_kind: Rc<Cell<MeasurementToolKind>>,
@@ -403,6 +480,10 @@ pub struct UiHandle {
     /// Ordered `LayerId`s matching the pushed `layer-rows` model, so a toggle
     /// callback index maps back to the exact id.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
+    /// Last pushed override/selection counts, so a locale switch can reformat
+    /// their labels without the host re-pushing the whole panel.
+    layer_override_count: Rc<Cell<i32>>,
+    selection_count: Rc<Cell<i32>>,
 }
 
 impl UiHandle {
@@ -485,9 +566,13 @@ impl UiHandle {
         let model = slint::ModelRc::new(slint::VecModel::from(rows));
         let override_count = state.override_count as i32;
         let empty = state.empty_label.clone();
+        self.layer_override_count.set(override_count);
+        let messages = self.messages.borrow().clone();
+        let override_label = layer_override_label(&messages, state.override_count);
         self.with(|ui| {
             ui.set_layer_rows(model);
             ui.set_layer_override_count(override_count);
+            ui.set_layer_override_label(override_label.into());
             ui.set_layer_empty_label(empty.into());
         })
     }
@@ -506,9 +591,13 @@ impl UiHandle {
         let count = state.count as i32;
         let empty = state.empty_label.clone();
         let mixed = state.mixed_label.clone();
+        self.selection_count.set(count);
+        let messages = self.messages.borrow().clone();
+        let selected_label = selected_count_label(&messages, state.count);
         self.with(|ui| {
             ui.set_property_rows(model);
             ui.set_selection_count(count);
+            ui.set_property_selected_label(selected_label.into());
             ui.set_property_empty_label(empty.into());
             ui.set_property_mixed_label(mixed.into());
         })
@@ -561,18 +650,61 @@ impl UiHandle {
         self.with(|ui| ui.set_backend_index(index))
     }
 
-    /// Re-apply the catalog for `locale` and update the UI labels.
+    /// Re-apply the catalog for `locale` and update **all** chrome labels.
     ///
-    /// Returns the resolution actually applied; callers can log a fallback. Full
-    /// UI-chrome translation (every button, HTML lang, preference persistence) is
-    /// the ui3d/host workstream's job — this is the catalog/core hook.
+    /// Returns the resolution actually applied; callers can log a fallback. The
+    /// adapter reformats the currently displayed override/selection counts too,
+    /// so a live locale switch does not leave a stale Chinese count label. Hosts
+    /// that supply their own `empty_label`/`mixed_label` strings should re-push
+    /// the panel state with catalog-derived text after switching.
     pub fn set_locale(&self, locale: &str) -> CadResult<LocaleResolution> {
         let messages = MessageSource::from_request(locale);
-        let updated = messages.clone();
+        let resolution = messages.resolution().clone();
+        *self.messages.borrow_mut() = messages.clone();
+        let override_count = self.layer_override_count.get().max(0) as usize;
+        let selection_count = self.selection_count.get().max(0) as usize;
+        let override_label = layer_override_label(&messages, override_count);
+        let selected_label = selected_count_label(&messages, selection_count);
         self.with(|ui| {
-            ui.set_open_label(updated.text("file.open", &[]).into());
+            apply_chrome(ui, &messages);
+            ui.set_layer_override_label(override_label.into());
+            ui.set_property_selected_label(selected_label.into());
         })?;
-        Ok(messages.resolution().clone())
+        Ok(resolution)
+    }
+
+    /// Push the diagnostics drawer state (audit U08).
+    ///
+    /// The rows come from [`DiagnosticsPanelState`], which a host builds from the
+    /// real `cad_diagnostics::DiagnosticsModel`. Until a host pushes one, the
+    /// drawer shows its explicit empty state rather than fabricated rows.
+    pub fn set_diagnostics_state(&self, state: &DiagnosticsPanelState) -> CadResult<()> {
+        let rows: Vec<DiagnosticRow> = state
+            .rows
+            .iter()
+            .map(|row| DiagnosticRow {
+                code: row.code.clone().into(),
+                severity: row.severity.clone().into(),
+                description: row.description.clone().into(),
+                object: row.object.clone().into(),
+                details: row.details.clone().into(),
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let backend = backend_label(&self.messages.borrow().clone(), &state.backend);
+        let summary = state.summary.clone();
+        let empty = state.empty_label.clone();
+        self.with(|ui| {
+            ui.set_diagnostics_rows(model);
+            ui.set_diagnostics_backend_label(backend.into());
+            ui.set_diagnostics_summary_label(summary.into());
+            ui.set_diagnostics_empty_label(empty.into());
+        })
+    }
+
+    /// Open or close the diagnostics drawer without emitting a command.
+    pub fn set_diagnostics_open(&self, open: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_diagnostics_open(open))
     }
 
     /// Trigger a redraw without restarting the event loop.
@@ -608,6 +740,11 @@ pub struct UiAdapter {
     annotation_order: Rc<RefCell<Vec<AnnotationId>>>,
     /// Ordered `LayerId`s matching the pushed `layer-rows` model.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
+    /// The active catalog, shared with every handle.
+    messages: Rc<RefCell<MessageSource>>,
+    /// Last pushed counts, mirrored into handles for locale reformatting.
+    layer_override_count: Rc<Cell<i32>>,
+    selection_count: Rc<Cell<i32>>,
 }
 
 /// Build the command a shell callback emits for the configured document.
@@ -653,7 +790,7 @@ impl UiAdapter {
                 reason
             );
         }
-        ui.set_open_label(messages.text("file.open", &[]).into());
+        apply_chrome(&ui, &messages);
         ui.set_status_label(messages.text("status.scaffold", &[]).into());
         ui.set_work_mode(work_mode);
 
@@ -671,6 +808,9 @@ impl UiAdapter {
         let annotation_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
         let annotation_order: Rc<RefCell<Vec<AnnotationId>>> = Rc::new(RefCell::new(Vec::new()));
         let layer_order: Rc<RefCell<Vec<LayerId>>> = Rc::new(RefCell::new(Vec::new()));
+        let messages_slot: Rc<RefCell<MessageSource>> = Rc::new(RefCell::new(messages.clone()));
+        let layer_override_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
+        let selection_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
 
         {
             let s = shared.clone();
@@ -713,12 +853,17 @@ impl UiAdapter {
         }
         {
             // Selecting a kind immediately starts that tool; this is the explicit
-            // user choice of algorithm, not a default.
+            // user choice of algorithm, not a default. The label is localized, so
+            // it is mapped back through the same catalog-built ordering rather
+            // than the Chinese-only `from_label`.
             let s = shared.clone();
             let doc = document.clone();
             let kind_slot = selected_kind.clone();
+            let messages = messages_slot.clone();
             ui.on_measure_kind_selected(move |name| {
-                let Some(kind) = MeasurementToolKind::from_label(name.as_str()) else {
+                let messages = messages.borrow().clone();
+                let Some(kind) = status::measurement_kind_from_label(&messages, name.as_str())
+                else {
                     return;
                 };
                 kind_slot.set(kind);
@@ -810,6 +955,7 @@ impl UiAdapter {
             let report = ui_weak.clone();
             let active = measurement_active.clone();
             let annotating = annotation_active.clone();
+            let messages = messages_slot.clone();
             ui.on_canvas_pick(move |x, y| {
                 // Ordinary navigation clicks must stay silent; only an active
                 // capture tool turns a click into a pick.
@@ -841,7 +987,9 @@ impl UiAdapter {
                         // unresolved point) means the pick is not wired on this
                         // host yet.
                         if let Some(ui) = report.upgrade() {
-                            ui.set_status_label("取点未接线：宿主未提供画布→世界映射".into());
+                            ui.set_status_label(
+                                messages.borrow().text("status.pick_unwired", &[]).into(),
+                            );
                         }
                     }
                 }
@@ -864,12 +1012,16 @@ impl UiAdapter {
         }
         {
             // Selecting a kind immediately starts that tool; this is the explicit
-            // user choice, not a default.
+            // user choice, not a default. Localized labels map back through the
+            // catalog-built ordering.
             let s = shared.clone();
             let doc = document.clone();
             let kind_slot = selected_annotation_kind.clone();
+            let messages = messages_slot.clone();
             ui.on_annotation_kind_selected(move |name| {
-                let Some(kind) = AnnotationToolKind::from_label(name.as_str()) else {
+                let messages = messages.borrow().clone();
+                let Some(kind) = status::annotation_kind_from_label(&messages, name.as_str())
+                else {
                     return;
                 };
                 kind_slot.set(kind);
@@ -1054,6 +1206,16 @@ impl UiAdapter {
             });
         }
         {
+            // Closing the drawer is a pure presentation action; it emits no
+            // command (audit U08: the bar stays simple, the drawer is explicit).
+            let ui_weak = ui.as_weak();
+            ui.on_diagnostics_closed(move || {
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_diagnostics_open(false);
+                }
+            });
+        }
+        {
             let input = view_input.clone();
             ui.on_pointer_input(move |kind, button, x, y| {
                 if let Some(input) = input.borrow().as_ref() {
@@ -1081,6 +1243,9 @@ impl UiAdapter {
             annotation_active,
             annotation_order,
             layer_order,
+            messages: messages_slot,
+            layer_override_count,
+            selection_count,
         })
     }
 
@@ -1102,12 +1267,15 @@ impl UiAdapter {
     pub fn handle(&self) -> UiHandle {
         UiHandle {
             ui: self.ui.as_weak(),
+            messages: self.messages.clone(),
             selected_kind: self.selected_kind.clone(),
             measurement_active: self.measurement_active.clone(),
             selected_annotation_kind: self.selected_annotation_kind.clone(),
             annotation_active: self.annotation_active.clone(),
             annotation_order: self.annotation_order.clone(),
             layer_order: self.layer_order.clone(),
+            layer_override_count: self.layer_override_count.clone(),
+            selection_count: self.selection_count.clone(),
         }
     }
 
@@ -1363,5 +1531,49 @@ mod tests {
             MessageSource::for_locale(Locale::En).text("file.open", &[]),
             "Open drawing"
         );
+    }
+
+    #[test]
+    fn chrome_is_catalog_driven_not_hardcoded() {
+        // Every chrome control binds to a pushed property; the shell holds no
+        // literal label. This mirrors `scripts/check-i18n.py` in-crate.
+        for property in [
+            "fit-label",
+            "undo-label",
+            "redo-label",
+            "export-label",
+            "import-label",
+            "diagnostics-label",
+            "measurement-panel-label",
+            "annotation-panel-label",
+            "layer-panel-label",
+            "property-panel-label",
+            "diagnostics-drawer-title",
+        ] {
+            assert!(
+                UI_DEFINITION.contains(property),
+                "shell must expose {property}"
+            );
+        }
+        // A hardcoded CJK literal in the shell is a missing translation.
+        assert!(
+            !UI_DEFINITION.chars().any(is_cjk),
+            "ui/app.slint still contains a hardcoded CJK literal"
+        );
+    }
+
+    /// True for CJK ideographs and the CJK punctuation used in the chrome.
+    fn is_cjk(ch: char) -> bool {
+        let code = ch as u32;
+        (0x4E00..=0x9FFF).contains(&code) || (0x3000..=0x303F).contains(&code)
+    }
+
+    #[test]
+    fn diagnostics_panel_state_is_pushable_and_empty_by_default() {
+        let state = DiagnosticsPanelState::default();
+        assert!(state.is_empty());
+        // The drawer needs an explicit empty label; the adapter supplies the
+        // catalog one, never a fabricated row.
+        assert!(state.rows.is_empty());
     }
 }
