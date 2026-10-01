@@ -11,3 +11,8 @@ dist/
 *.jks
 keystore.properties
 .local/
+
+# Bundled CAD fonts for the Android APK are third-party and not committed;
+# fetch them with scripts/fetch-android-fonts.sh (see the README in that folder).
+apps/app-android/assets/fonts/*
+!apps/app-android/assets/fonts/README.md

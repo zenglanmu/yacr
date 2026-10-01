@@ -34,6 +34,11 @@ apk_name = "yacr"
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]
 min_sdk_version = 26
 target_sdk_version = 34
+# Bundle the optional font package under `assets/fonts/`. The host reads it via
+# the activity AssetManager (`android_fonts::ASSET_BASE = "asset://fonts/"`).
+# Fonts are third-party (mlightcad/cad-data) and included for on-device testing;
+# see docs/fonts.md for provenance and licensing.
+assets = "assets"
 
 # Development-only release signing. The keystore is gitignored (*.jks) and must
 # be generated locally (see docs/build.md). Production keys never enter the repo.
