@@ -13,14 +13,19 @@ use cad_domain::{CadError, CadResult, DocumentId, ViewportId};
 /// Source of the shared shell, kept for packaging/documentation tooling.
 pub const UI_DEFINITION: &str = include_str!("../ui/app.slint");
 /// Default (Chinese) UI strings; UI text is externalised per spec §3.5.
-pub const ZH_CN_MESSAGES: &str = include_str!("../i18n/zh-CN.json");
+///
+/// Re-exported from [`i18n::ZH_CN_JSON`]; the catalog module owns the source of
+/// truth. Kept for packaging/documentation tooling.
+pub const ZH_CN_MESSAGES: &str = i18n::ZH_CN_JSON;
 
 slint::include_modules!();
 
 pub mod bridge;
+pub mod i18n;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 pub use bridge::{install as install_cad_bridge, CadView, IncomingDocument};
+pub use i18n::{Locale, LocaleResolution, Message, MessageCatalog, MessageSource};
 
 use slint::{ComponentHandle, Image, Weak};
 
@@ -98,6 +103,20 @@ impl UiHandle {
         self.with(|ui| ui.set_backend_index(index))
     }
 
+    /// Re-apply the catalog for `locale` and update the UI labels.
+    ///
+    /// Returns the resolution actually applied; callers can log a fallback. Full
+    /// UI-chrome translation (every button, HTML lang, preference persistence) is
+    /// the ui3d/host workstream's job — this is the catalog/core hook.
+    pub fn set_locale(&self, locale: &str) -> CadResult<LocaleResolution> {
+        let messages = MessageSource::from_request(locale);
+        let updated = messages.clone();
+        self.with(|ui| {
+            ui.set_open_label(updated.text("file.open", &[]).into());
+        })?;
+        Ok(messages.resolution().clone())
+    }
+
     /// Trigger a redraw without restarting the event loop.
     pub fn request_redraw(&self) -> CadResult<()> {
         self.with(|ui| ui.window().request_redraw())
@@ -145,10 +164,19 @@ impl UiAdapter {
             configuration.logical_size[0].max(1.0) as f32,
             configuration.logical_size[1].max(1.0) as f32,
         ));
-        ui.set_open_label("打开".into());
-        ui.set_measure_label("测量".into());
-        ui.set_annotate_label("批注".into());
-        ui.set_status_label("就绪".into());
+        // The configured locale selects the catalog; no Rust string literals for
+        // user-facing text live here (N01). Fallbacks are recorded, never silent.
+        let messages = MessageSource::from_request(&configuration.locale);
+        if let Some(reason) = messages.resolution().fallback {
+            log::info!(
+                "locale {:?} resolved to {} ({:?})",
+                messages.resolution().requested,
+                messages.locale().tag(),
+                reason
+            );
+        }
+        ui.set_open_label(messages.text("file.open", &[]).into());
+        ui.set_status_label(messages.text("status.scaffold", &[]).into());
         ui.set_work_mode(work_mode);
 
         let document = configuration.document.clone();
@@ -361,5 +389,19 @@ mod tests {
     fn shell_definition_mentions_a_cad_frame_property() {
         assert!(UI_DEFINITION.contains("cad-frame"));
         assert!(ZH_CN_MESSAGES.contains('{'));
+    }
+
+    #[test]
+    fn catalog_drives_ui_defaults() {
+        // The shell no longer hardcodes its initial labels: they come from the
+        // embedded catalog, so both languages stay reachable through config.
+        assert_eq!(
+            MessageSource::for_locale(Locale::ZhCn).text("file.open", &[]),
+            "打开图纸"
+        );
+        assert_eq!(
+            MessageSource::for_locale(Locale::En).text("file.open", &[]),
+            "Open drawing"
+        );
     }
 }

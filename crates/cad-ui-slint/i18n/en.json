@@ -1,0 +1,8 @@
+{
+  "app.title": "yacr — CAD Viewer & Annotation",
+  "file.open": "Open drawing",
+  "status.scaffold": "Scaffold placeholder: CAD canvas not wired yet",
+  "tool.confirm": "Confirm",
+  "tool.cancel": "Cancel",
+  "units.unknown": "Drawing units"
+}
