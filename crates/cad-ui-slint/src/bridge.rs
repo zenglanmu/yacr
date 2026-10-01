@@ -21,6 +21,8 @@ use cad_scene::{SceneBudget, SceneCache, SceneDelta};
 
 use crate::{UiHandle, YacrWindow};
 
+use cad_app::layers::LayerOverrideSet;
+
 /// A shared slot the application fills when a drawing becomes available.
 pub type IncomingDocument = Rc<RefCell<Option<Arc<DrawingDatabase>>>>;
 
@@ -55,6 +57,22 @@ pub fn build_scene_with_fonts(
     stamp: TaskStamp,
     fonts: Option<Arc<FontEngine>>,
 ) -> CadResult<SceneDelta> {
+    build_scene_with_overrides(database, stamp, fonts, &LayerOverrideSet::new())
+}
+
+/// Build scene batches honouring temporary layer visibility (spec F03).
+///
+/// An entity whose layer is hidden — either by the drawing's own `visible` flag
+/// or by a session override — is skipped, so hiding a layer changes the batches
+/// without re-importing or re-parsing the drawing database. The override set is
+/// a plain value owned by `cad-app`; `cad-representation` and `cad-scene` are
+/// untouched, so this filter is the whole wire-up (see `docs/panels.md`).
+pub fn build_scene_with_overrides(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    overrides: &LayerOverrideSet,
+) -> CadResult<SceneDelta> {
     let registry = ProviderRegistry::with_default_provider();
     let mut context =
         RepresentationContext::new(DocumentId(0), TolerancePolicy::default(), stamp.clone());
@@ -67,7 +85,7 @@ pub fn build_scene_with_fonts(
         added: Vec::new(),
         removed_chunks: Vec::new(),
     };
-    for entity in database.model_space() {
+    for entity in cad_app::layers::visible_model_entities(database, overrides) {
         let representation = registry.build_expanded(database, entity, &context)?;
         let delta = cache.build(&representation, stamp.clone())?;
         combined.added.extend(delta.added);
@@ -103,6 +121,8 @@ struct BridgeState {
     error: Option<String>,
     caps: Option<BackendCapabilities>,
     fonts_present: bool,
+    /// Fingerprint of the applied layer overrides; a change forces a rebuild.
+    overrides_fingerprint: u64,
 }
 
 impl Default for BridgeState {
@@ -115,6 +135,7 @@ impl Default for BridgeState {
             error: None,
             caps: None,
             fonts_present: false,
+            overrides_fingerprint: 0,
         }
     }
 }
@@ -129,6 +150,7 @@ pub struct CadView {
     handle: UiHandle,
     incoming: IncomingDocument,
     fonts: Rc<RefCell<Option<Arc<FontEngine>>>>,
+    overrides: Rc<RefCell<LayerOverrideSet>>,
     preference: BackendPreference,
 }
 
@@ -194,6 +216,15 @@ impl CadView {
         let _ = self.handle.request_redraw();
     }
 
+    /// Apply the session's temporary layer overrides (spec F03).
+    ///
+    /// The next frame rebuilds the scene batches honouring the new visibility;
+    /// the drawing database is not re-parsed and its revision does not change.
+    pub fn set_layer_overrides(&self, overrides: LayerOverrideSet) {
+        *self.overrides.borrow_mut() = overrides;
+        let _ = self.handle.request_redraw();
+    }
+
     /// Drop derived GPU resources (device loss or backend rebuild).
     pub fn teardown(&self) {
         let mut s = self.state.borrow_mut();
@@ -226,6 +257,9 @@ pub fn install_with_preference(
     let scene_incoming = incoming.clone();
     let fonts_slot: Rc<RefCell<Option<Arc<FontEngine>>>> = Rc::new(RefCell::new(None));
     let scene_fonts = fonts_slot.clone();
+    let overrides_slot: Rc<RefCell<LayerOverrideSet>> =
+        Rc::new(RefCell::new(LayerOverrideSet::new()));
+    let scene_overrides = overrides_slot.clone();
 
     window
         .set_rendering_notifier(move |render_state, graphics_api| {
@@ -256,14 +290,22 @@ pub fn install_with_preference(
                         let identity = doc.scene_identity();
                         let fonts = scene_fonts.borrow().clone();
                         let has_fonts = fonts.is_some();
-                        if s.document != Some(identity) || s.fonts_present != has_fonts {
-                            if let Ok(delta) = build_scene_with_fonts(&doc, stamp.clone(), fonts) {
+                        let overrides = scene_overrides.borrow().clone();
+                        let overrides_fingerprint = overrides.fingerprint();
+                        if s.document != Some(identity)
+                            || s.fonts_present != has_fonts
+                            || s.overrides_fingerprint != overrides_fingerprint
+                        {
+                            if let Ok(delta) =
+                                build_scene_with_overrides(&doc, stamp.clone(), fonts, &overrides)
+                            {
                                 if let Some(renderer) = s.renderer.as_mut() {
                                     renderer.clear_batches();
                                     let _ = renderer.upload(&delta);
                                 }
                                 s.document = Some(identity);
                                 s.fonts_present = has_fonts;
+                                s.overrides_fingerprint = overrides_fingerprint;
                                 s.image_size = None;
                             }
                         }
@@ -307,6 +349,7 @@ pub fn install_with_preference(
         handle,
         incoming,
         fonts: fonts_slot,
+        overrides: overrides_slot,
         preference,
     })
 }

@@ -16,13 +16,18 @@ use std::{collections::BTreeMap, sync::Arc};
 
 pub mod camera;
 pub mod host;
+pub mod layers;
 pub mod measure_tool;
+pub mod selection;
 
 pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Projection, ProjectionKind, StandardView,
     ViewBasis,
 };
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
+pub use selection::{entity_property_rows, PropertyRow, SelectionProperties, SelectionSet};
+
+use layers::LayerOverrideSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
@@ -101,8 +106,9 @@ pub struct SessionState {
     pub document: DocumentId,
     mode: AppMode,
     pub active_space: SpaceId,
-    pub selection: Vec<SelectionRef>,
-    pub layer_overrides: BTreeMap<LayerId, bool>,
+    pub selection: SelectionSet,
+    /// Temporary layer visibility. Never the drawing's layer table (F03).
+    pub layer_overrides: LayerOverrideSet,
     pub tool: ToolState,
     pub generation: u64,
     /// Recorded CAD backend preference; the host rebuilds the render session.
@@ -123,8 +129,8 @@ impl SessionState {
             document,
             mode,
             active_space: SpaceId::Model,
-            selection: vec![],
-            layer_overrides: BTreeMap::new(),
+            selection: SelectionSet::new(),
+            layer_overrides: LayerOverrideSet::new(),
             tool: ToolState::Idle,
             generation: 0,
             backend: BackendChoice::Auto,
@@ -340,6 +346,9 @@ pub enum CommandPayload {
         factor: f64,
         cursor: [f64; 2],
     },
+    /// Replace the current selection with these refs (read-only; never writes
+    /// the DWG). An empty list clears the selection.
+    Selection(Vec<SelectionRef>),
 }
 
 pub struct Command {
@@ -435,12 +444,14 @@ impl Application {
         match command.id {
             CommandId::FitDrawing => self.fit_drawing(session, &command),
             CommandId::RestoreLayers => {
+                // Drop temporary overrides; the drawing's own layer flags remain
+                // the authority and the database revision is untouched (F03).
                 session.layer_overrides.clear();
                 Ok(CommandOutcome::none())
             }
             CommandId::ToggleLayer => {
                 if let CommandPayload::Layer(id, visible) = command.payload {
-                    session.layer_overrides.insert(id, visible);
+                    session.layer_overrides.set(id, visible);
                     Ok(CommandOutcome::none())
                 } else {
                     Err(CadError::InvalidInput(
@@ -518,7 +529,12 @@ impl Application {
                 ))
             }
             CommandId::Select => {
+                // Selection is read-only: it stores the picked refs and enters
+                // the Selecting tool state, but never writes the DWG (F05).
                 session.tool = ToolState::Selecting;
+                if let CommandPayload::Selection(refs) = command.payload {
+                    session.selection = SelectionSet::from_refs(refs);
+                }
                 Ok(CommandOutcome::none())
             }
             CommandId::Resources => self.resources_report(&command),
@@ -1409,7 +1425,7 @@ mod tests {
             ),
         )
         .unwrap();
-        assert_eq!(session.layer_overrides.get(&LayerId(3)), Some(&false));
+        assert_eq!(session.layer_overrides.get(LayerId(3)), Some(false));
         assert_eq!(
             app.workspace
                 .documents
@@ -1419,6 +1435,87 @@ mod tests {
                 .revision(),
             before
         );
+    }
+
+    #[test]
+    fn restore_layers_clears_overrides_without_touching_the_database() {
+        let (mut app, mut session) = application_with_document();
+        app.execute(
+            &mut session,
+            command(
+                CommandId::ToggleLayer,
+                CommandPayload::Layer(LayerId(0), false),
+            ),
+        )
+        .unwrap();
+        assert!(session.layer_overrides.clear_changed());
+
+        let before = app
+            .workspace
+            .documents
+            .get(&DocumentId(1))
+            .unwrap()
+            .drawing
+            .revision();
+        app.execute(
+            &mut session,
+            command(CommandId::RestoreLayers, CommandPayload::None),
+        )
+        .unwrap();
+        assert!(session.layer_overrides.is_empty());
+        assert_eq!(
+            app.workspace
+                .documents
+                .get(&DocumentId(1))
+                .unwrap()
+                .drawing
+                .revision(),
+            before
+        );
+    }
+
+    #[test]
+    fn select_command_records_selection_and_does_not_mutate_the_drawing() {
+        let (mut app, mut session) = application_with_document();
+        let revision_before = app.workspace.documents[&DocumentId(1)].drawing.revision();
+        // No entity exists in the empty database, but selection is still a pure
+        // state update: refs are recorded and the drawing is untouched.
+        let refs = vec![SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(7),
+            instance: InstancePath::default(),
+            sub_element: None,
+        }];
+        app.execute(
+            &mut session,
+            command(CommandId::Select, CommandPayload::Selection(refs)),
+        )
+        .unwrap();
+        assert_eq!(session.selection.len(), 1);
+        assert!(matches!(session.tool, ToolState::Selecting));
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)].drawing.revision(),
+            revision_before
+        );
+        assert!(!app.can_undo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn select_with_empty_payload_clears_the_selection() {
+        let (mut app, mut session) = application_with_document();
+        session.selection.replace([SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(1),
+            instance: InstancePath::default(),
+            sub_element: None,
+        }]);
+        assert_eq!(session.selection.len(), 1);
+        app.execute(
+            &mut session,
+            command(CommandId::Select, CommandPayload::Selection(Vec::new())),
+        )
+        .unwrap();
+        assert!(session.selection.is_empty());
     }
 
     #[test]
