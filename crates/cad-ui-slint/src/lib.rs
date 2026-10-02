@@ -114,6 +114,9 @@ pub struct UiHandle {
     /// Last authoritative mode, so a locale switch re-emits the correct mode
     /// label instead of resetting it to a default (audit U02).
     work_mode: Rc<Cell<bool>>,
+    /// Last pushed asynchronous-open snapshot (F01), so a locale switch can
+    /// reformat the phase/progress labels without the host re-polling.
+    import_snapshot: Rc<RefCell<Option<cad_app::ImportProgressSnapshot>>>,
 }
 
 /// Owns the Slint component and routes UI callbacks into commands.
@@ -155,6 +158,9 @@ pub struct UiAdapter {
     /// Last authoritative mode, shared with handles so a locale switch can
     /// re-emit the correct mode label (audit U02).
     work_mode: Rc<Cell<bool>>,
+    /// Last pushed asynchronous-open snapshot (F01), shared with handles so a
+    /// locale switch reforms the phase/progress labels.
+    import_snapshot: Rc<RefCell<Option<cad_app::ImportProgressSnapshot>>>,
 }
 
 mod adapter;

@@ -111,6 +111,42 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   `cad-ui-slint` 的 `mode_ui_state_reflects_the_authoritative_mode` 覆盖标签/标志
   （该 crate 原生测试受本机 fontconfig 限制，见 §5）。
 
+## 2.5 异步打开进度（F01）
+
+### 已接线（核心 + UI）
+
+- **纯快照**：`HostController::async_open_snapshot() -> Option<ImportProgressSnapshot>`
+  是纯 getter。字段 `running` / `phase: Option<_>` / `entities_done` /
+  `entities_total: Option<usize>` / `bytes: Option<u64>` / `cancellable` /
+  `terminal: Option<ImportTerminal>` 全部来自 manager 的真实轮询，绝不猜测。
+  `phase_key()` 输出稳定机器键（`reading`…），因此 `cad-ui-slint` 不依赖导入器 crate。
+- `ImportProgressSnapshot::from_poll(&AsyncOpenPoll, previous)` 是 manager→UI 的
+  唯一映射；`Running` 无新 tick 时保留上一次真实阶段/计数，终态被保留。
+- `begin_async_open` 写入「无 tick 的运行态」（`phase=None`）；`cancel_async_open`
+  置 `cancellable=false`；`poll_async_open` 只做投影，不重复 manager 判定。
+- **取消命令路径**：`CommandId::CancelLoading` 在 `HostController::execute` 被拦截
+  并转调 `cancel_async_open`（应用层原本返回 `Unsupported`）。适配器
+  `on_cancel_open_requested` 派发 `CancelLoading`，Web/Android 的 `UiCommandSink`
+  落到 `controller.execute` 后即生效，未改动既有调用者。
+- **面板状态**：`ImportProgressUiState::from_snapshot(snapshot, messages)`：
+  - `percent` 仅在 `entities_total == Some(>0)` 时给出，否则 `None` → 外壳以
+    `import-indeterminate` 渲染不确定进度条，绝不显示假百分比；
+  - `bytes` 仅在真实可测时拼入 `import-progress-text`，未知时**不**显示「0 字节」；
+  - `Opened` → 面板隐藏；`Cancelled`/`Failed` → 显式终态文案且保持可见；
+  - `cancellable` 启用/禁用取消按钮。
+- `UiHandle::set_import_state(&state)` 一次写入外壳 `import-*` 属性；
+  `set_locale` 用保留的原始快照按新目录重排文案（不会留下旧语言的阶段标签）。
+- 目录键（两语言）：`import.panel`、`import.cancel`、`import.phase.*`、
+  `import.progress.count`、`import.progress.indeterminate`、`import.progress.bytes`、
+  `import.detail.separator`、`import.terminal.cancelled`、`import.terminal.failed`。
+
+### 刻意未做 / 宿主待接线
+
+- **宿主 UI 尚未调用**：`apps/app-web`、`apps/app-android` 还没有「后台打开」按钮，
+  也没有在轮询后调用 `UiHandle::set_import_state`；它们仍走同步
+  `open_bytes`。因此面板当前不会被真实用户看到，本轮只交付核心+外壳契约。
+- 本轮**未**在浏览器/真机验证渲染，也不声称任何视觉结果。
+
 ## 3. 宿主连接器（本轮范围外）
 
 `cad-ui-slint` 只负责把状态推入外壳、把回调翻成命令；「应用状态 → 外壳」的
@@ -249,6 +285,18 @@ Android **刻意不安装** `LayoutSwitchSink`：一旦安装，适配器会改�
   `mode_ui_state_reflects_the_authoritative_mode`、
   `shell_exposes_the_save_and_mode_switch_affordances`、
   `mode_labels_resolve_in_both_catalogs`。
+- 本轮新增：`cad-app` 的 `snapshot_is_none_when_idle_and_never_fabricates_a_phase`、
+  `snapshot_keeps_unknown_totals_unknown_and_real_totals_exact`、
+  `snapshot_projection_retains_running_fields_and_maps_terminals`、
+  `controller_snapshot_tracks_a_real_async_open_to_its_terminal`、
+  `cancelling_via_the_command_path_flips_cancellable_and_reports_cancelled`、
+  `failed_open_retains_an_explicit_terminal_snapshot`（覆盖不确定 vs 确定、
+  终态、CancelLoading→cancel）。`cad-ui-slint` 新增
+  `shell_exposes_the_async_open_progress_panel_and_cancel`、
+  `import_ui_state_is_hidden_when_idle_or_opened`、
+  `import_ui_state_never_fabricates_a_percent_or_a_byte_count`、
+  `import_ui_state_reports_cancelled_and_failed_terminals_explicitly`、
+  `import_phase_keys_all_resolve_in_both_catalogs`。
 - `cad-ui-slint` 中 `MeasurementUiState` 与外壳定义字符串的测试位于该 crate 的
   `#[cfg(test)]`，但**本机无法构建 `cad-ui-slint` 测试**（宿主缺 fontconfig），
   因此这些测试本轮未执行；`cargo check --workspace --lib --target

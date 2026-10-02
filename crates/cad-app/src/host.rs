@@ -181,6 +181,13 @@ pub struct HostController {
     pub(crate) import_manager: crate::tasks::ImportManager,
     /// Label for the running asynchronous open, applied on publish.
     pub(crate) pending_open_label: Option<String>,
+    /// Last UI-facing snapshot of the asynchronous open (F01).
+    ///
+    /// This is a *projection* of [`crate::tasks::AsyncOpenPoll`], updated only
+    /// by `begin_async_open` / `cancel_async_open` / `poll_async_open`; the pure
+    /// getter [`HostController::async_open_snapshot`] just reads it, so reading
+    /// the panel state never drains progress or publishes a document.
+    pub(crate) async_open: Option<crate::tasks::ImportProgressSnapshot>,
 }
 
 impl HostController {
@@ -215,6 +222,7 @@ impl HostController {
             last_import_report: None,
             import_manager: crate::tasks::ImportManager::new(document_id),
             pending_open_label: None,
+            async_open: None,
         })
     }
 
@@ -388,12 +396,32 @@ impl HostController {
     }
 
     /// Run one command through the single application entry point.
+    ///
+    /// `CancelLoading` is intercepted here because file open/cancel is
+    /// host-owned I/O: the application layer does not run it (it returns
+    /// `Unsupported`). Routing it to [`HostController::cancel_async_open`] lets
+    /// the UI's cancel affordance work through the ordinary command path
+    /// without changing the application's contract.
     pub fn execute(&mut self, command: Command) -> CadResult<CommandOutcome> {
+        if command.id == crate::CommandId::CancelLoading {
+            self.cancel_async_open();
+            return Ok(CommandOutcome::none());
+        }
         let outcome = self.application.execute(&mut self.session, command)?;
         if let Some(diagnostic) = outcome.diagnostics.first() {
             self.last_status = diagnostic.message.clone();
         }
         Ok(outcome)
+    }
+
+    /// Pure getter: the last UI-facing snapshot of the asynchronous open (F01).
+    ///
+    /// Returns `None` when the controller is genuinely idle (no running job and
+    /// no retained terminal state). Reading it dispatches no command, drains no
+    /// progress and never publishes a document; hosts call it after
+    /// `poll_async_open` to push a progress panel.
+    pub fn async_open_snapshot(&self) -> Option<crate::tasks::ImportProgressSnapshot> {
+        self.async_open.clone()
     }
 
     /// Fit the active viewport to the current drawing bounds.

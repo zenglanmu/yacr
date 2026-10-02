@@ -263,6 +263,38 @@ impl UiHandle {
         self.with(|ui| ui.set_backend_index(index))
     }
 
+    /// Push the asynchronous-open progress panel state (F01).
+    ///
+    /// Stores the raw snapshot so a live locale switch can re-derive the
+    /// phase/progress labels, then writes the shell's progress properties. The
+    /// panel is hidden while idle and after a successful open; a cancelled or
+    /// failed terminal is explicit.
+    pub fn set_import_state(&self, state: &ImportProgressUiState) -> CadResult<()> {
+        *self.import_snapshot.borrow_mut() = state.source.clone();
+        let active = state.visible;
+        let phase = state.phase_label.clone();
+        let progress = state.progress_text.clone();
+        // The shell shows an indeterminate bar whenever no real total exists.
+        let indeterminate = state.percent.is_none();
+        let percent = state.percent.unwrap_or(0.0);
+        let cancellable = state.cancellable;
+        self.with(|ui| {
+            ui.set_import_active(active);
+            ui.set_import_phase_label(phase.into());
+            ui.set_import_progress_text(progress.into());
+            ui.set_import_indeterminate(indeterminate);
+            ui.set_import_percent(percent);
+            ui.set_import_cancellable(cancellable);
+        })
+    }
+
+    /// Re-derive and re-push the import panel labels for the active catalog.
+    fn refresh_import_labels(&self, messages: &MessageSource) -> CadResult<()> {
+        let snapshot = self.import_snapshot.borrow().clone();
+        let state = ImportProgressUiState::from_snapshot(snapshot.as_ref(), messages);
+        self.set_import_state(&state)
+    }
+
     /// Re-apply the catalog for `locale` and update **all** chrome labels.
     ///
     /// Returns the resolution actually applied; callers can log a fallback. The
@@ -287,6 +319,7 @@ impl UiHandle {
             ui.set_property_selected_label(selected_label.into());
             ui.set_annotation_hidden_label(hidden_label.into());
         })?;
+        self.refresh_import_labels(&messages)?;
         Ok(resolution)
     }
 

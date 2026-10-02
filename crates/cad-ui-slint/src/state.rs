@@ -121,6 +121,135 @@ impl Default for ModeUiState {
     }
 }
 
+/// UI-facing snapshot of the asynchronous open progress panel (F01).
+///
+/// Derived from [`cad_app::ImportProgressSnapshot`]. It carries **only** real
+/// values: `percent` is `Some` only when the importer reported an entity total
+/// (otherwise the shell must show an indeterminate bar), and no byte text is
+/// produced when the byte count is unknown (so a UI never renders "0 bytes").
+/// The panel is hidden while idle and after a successful open; cancelled and
+/// failed terminals are explicit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportProgressUiState {
+    /// Whether the progress panel should be shown.
+    pub visible: bool,
+    /// Localized phase label, or the explicit terminal text.
+    pub phase_label: String,
+    /// Completion in `0.0..=1.0`, only when the real entity total is known.
+    pub percent: Option<f32>,
+    /// Localized "entities N/M" or indeterminate text, plus bytes when known.
+    pub progress_text: String,
+    /// Whether the cancel affordance should be enabled.
+    pub cancellable: bool,
+    /// Whether this snapshot is a terminal cancelled/failed state.
+    pub terminal: bool,
+    /// The raw controller snapshot, kept so a live locale switch can re-derive
+    /// the labels without the host re-polling. `None` when idle.
+    pub source: Option<cad_app::ImportProgressSnapshot>,
+}
+
+impl Default for ImportProgressUiState {
+    fn default() -> Self {
+        ImportProgressUiState {
+            visible: false,
+            phase_label: String::new(),
+            percent: None,
+            progress_text: String::new(),
+            cancellable: false,
+            terminal: false,
+            source: None,
+        }
+    }
+}
+
+impl ImportProgressUiState {
+    /// Derive the panel state from a controller snapshot and the active catalog.
+    ///
+    /// `None` means the controller is idle: the panel is hidden and no label is
+    /// fabricated.
+    pub fn from_snapshot(
+        snapshot: Option<&cad_app::ImportProgressSnapshot>,
+        messages: &MessageSource,
+    ) -> Self {
+        let Some(snapshot) = snapshot else {
+            return ImportProgressUiState::default();
+        };
+        match &snapshot.terminal {
+            // A successful open replaces the document; the progress panel is
+            // done and hidden (the document itself is the feedback).
+            Some(cad_app::ImportTerminal::Opened { .. }) => ImportProgressUiState {
+                visible: false,
+                ..ImportProgressUiState::default()
+            },
+            // Cancelled/failed terminals are explicit and stay visible until a
+            // new open supersedes them.
+            Some(cad_app::ImportTerminal::Cancelled) => ImportProgressUiState {
+                visible: true,
+                phase_label: messages.text("import.terminal.cancelled", &[]),
+                percent: None,
+                progress_text: String::new(),
+                cancellable: false,
+                terminal: true,
+                source: Some(snapshot.clone()),
+            },
+            Some(cad_app::ImportTerminal::Failed { error }) => ImportProgressUiState {
+                visible: true,
+                phase_label: messages
+                    .text("import.terminal.failed", &[("error", &error.to_string())]),
+                percent: None,
+                progress_text: String::new(),
+                cancellable: false,
+                terminal: true,
+                source: Some(snapshot.clone()),
+            },
+            // Running (with or without a first tick yet).
+            None => {
+                let phase_key = snapshot.phase_key().unwrap_or("unknown");
+                let phase_label = messages.text(&format!("import.phase.{phase_key}"), &[]);
+                // A percent exists only for a known, positive total; a known
+                // zero total is indeterminate rather than a division by zero.
+                let percent = snapshot
+                    .entities_total
+                    .filter(|total| *total > 0)
+                    .map(|total| {
+                        (snapshot.entities_done.min(total) as f32 / total as f32).clamp(0.0, 1.0)
+                    });
+                let base = match snapshot.entities_total {
+                    Some(total) => messages.text(
+                        "import.progress.count",
+                        &[
+                            ("done", &snapshot.entities_done.to_string()),
+                            ("total", &total.to_string()),
+                        ],
+                    ),
+                    None => messages.text(
+                        "import.progress.indeterminate",
+                        &[("done", &snapshot.entities_done.to_string())],
+                    ),
+                };
+                let progress_text = match snapshot.bytes {
+                    Some(bytes) => {
+                        let separator = messages.text("import.detail.separator", &[]);
+                        let bytes_text = messages
+                            .text("import.progress.bytes", &[("bytes", &bytes.to_string())]);
+                        format!("{base}{separator}{bytes_text}")
+                    }
+                    None => base,
+                };
+                ImportProgressUiState {
+                    visible: true,
+                    phase_label,
+                    percent,
+                    progress_text,
+                    cancellable: snapshot.cancellable,
+                    terminal: false,
+                    source: Some(snapshot.clone()),
+                }
+            }
+        }
+    }
+}
+
 /// One layer row pushed into the shell (audit F03/U03).
 ///
 /// `id` is only a display value; the adapter keeps the ordered `LayerId` list so

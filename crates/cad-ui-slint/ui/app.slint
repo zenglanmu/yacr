@@ -1,5 +1,5 @@
 // Slint composition root. CAD business state is pushed from the Rust adapter.
-import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit, ProgressIndicator } from "std-widgets.slint";
 import { CadRibbon } from "ribbon.slint";
 import { CadCommandBar } from "command-bar.slint";
 import { CadCanvas } from "canvas.slint";
@@ -112,6 +112,14 @@ export component YacrWindow inherits Window {
     in property <string> diagnostics-summary-label;
     in property <string> diagnostics-empty-label;
     in property <[DiagnosticRow]> diagnostics-rows;
+    in property <bool> import-active;
+    in property <string> import-phase-label;
+    in property <string> import-progress-text;
+    in property <float> import-percent;
+    in property <bool> import-indeterminate;
+    in property <bool> import-cancellable;
+    in property <string> import-panel-label;
+    in property <string> import-cancel-label;
     in property <[string]> ribbon-tabs;
     in property <[string]> editing-labels;
     in property <string> command-title;
@@ -150,6 +158,7 @@ export component YacrWindow inherits Window {
     callback import-requested();
     callback diagnostics-requested();
     callback diagnostics-closed();
+    callback cancel-open-requested();
     callback pointer-input(int, int, length, length);
     callback scroll-input(float, float);
     callback canvas-pick(float, float);
@@ -236,6 +245,24 @@ export component YacrWindow inherits Window {
             ComboBox { model: root.annotation-kind-labels; current-index: root.annotation-kind-index; selected(v) => { root.annotation-kind-selected(v); } }
             Button { text: root.annotate-confirm-label; enabled: root.annotation-tool-can-confirm; clicked => { root.confirm-annotation-requested(); } }
             Button { text: root.annotate-cancel-label; clicked => { root.cancel-annotation-requested(); } }
+        }
+        // Asynchronous open progress (F01). Hidden while idle; shows a real
+        // percent only when the importer reported a total, otherwise an
+        // indeterminate bar.
+        if root.import-active : HorizontalBox {
+            height: root.phone-shell ? 56px : 44px;
+            Text { text: root.import-phase-label; color: #c8d0dc; vertical-alignment: center; }
+            ProgressIndicator {
+                horizontal-stretch: 1;
+                progress: root.import-percent;
+                indeterminate: root.import-indeterminate;
+            }
+            Text { text: root.import-progress-text; color: #9aa7b8; vertical-alignment: center; }
+            Button {
+                text: root.import-cancel-label;
+                enabled: root.import-cancellable;
+                clicked => { root.cancel-open-requested(); }
+            }
         }
         CadCommandBar {
             phone: root.phone-shell;

@@ -95,6 +95,8 @@ impl UiAdapter {
         let annotation_hidden_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
         let view_3d: Rc<Cell<bool>> = Rc::new(Cell::new(false));
         let orbit_last: Rc<Cell<Option<[f64; 2]>>> = Rc::new(Cell::new(None));
+        let import_snapshot: Rc<RefCell<Option<cad_app::ImportProgressSnapshot>>> =
+            Rc::new(RefCell::new(None));
 
         crate::command_line::connect(&ui, messages_slot.clone());
 
@@ -104,6 +106,21 @@ impl UiAdapter {
             ui.on_open_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::OpenDrawing,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+            });
+        }
+        {
+            // Cancel a running background open (F01). `CancelLoading` is routed
+            // by the host to `HostController::cancel_async_open`; the panel only
+            // enables this while a cancellable job is running.
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_cancel_open_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::CancelLoading,
                     &doc,
                     viewport,
                     CommandPayload::None,
@@ -717,6 +734,7 @@ impl UiAdapter {
             annotation_hidden_count,
             view_3d,
             work_mode,
+            import_snapshot,
         })
     }
 
@@ -760,6 +778,7 @@ impl UiAdapter {
             annotation_hidden_count: self.annotation_hidden_count.clone(),
             view_3d: self.view_3d.clone(),
             work_mode: self.work_mode.clone(),
+            import_snapshot: self.import_snapshot.clone(),
         }
     }
 

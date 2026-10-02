@@ -99,6 +99,10 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_diagnostics_close_label(messages.text("diagnostics.close", &[]).into());
     ui.set_diagnostics_empty_label(messages.text("diagnostics.empty", &[]).into());
 
+    // Asynchronous open progress panel chrome (F01).
+    ui.set_import_panel_label(messages.text("import.panel", &[]).into());
+    ui.set_import_cancel_label(messages.text("import.cancel", &[]).into());
+
     // Layout panel chrome (F04/U03).
     ui.set_layout_panel_label(messages.text("layout.panel", &[]).into());
     ui.set_layout_model_space_label(messages.text("layout.model_space", &[]).into());
