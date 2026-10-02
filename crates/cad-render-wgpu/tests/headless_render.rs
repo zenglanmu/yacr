@@ -8,9 +8,7 @@
 
 use cad_domain::{DocumentId, EntityId, InstancePath, Point3, SelectionRef, TaskStamp};
 use cad_render_wgpu::headless::{create_headless_gpu, encode_png, HeadlessGpu, RgbaImage};
-use cad_render_wgpu::{
-    BackendPreference, Camera2d, Camera3d, RenderError, RenderTarget, Renderer,
-};
+use cad_render_wgpu::{BackendPreference, Camera2d, Camera3d, RenderError, RenderTarget, Renderer};
 use cad_scene::{RenderBatch, RenderTopology, SceneDelta};
 
 fn source() -> SelectionRef {
@@ -196,10 +194,7 @@ fn mesh_render_uses_triangle_pipeline() {
     let stats = renderer
         .render(camera_2d(), &target)
         .expect("render mesh frame");
-    assert!(
-        stats.triangles >= 1,
-        "mesh batch reported no triangles"
-    );
+    assert!(stats.triangles >= 1, "mesh batch reported no triangles");
     assert_eq!(stats.opaque_batches, 1);
 
     let image = renderer.read_target_rgba().expect("read back mesh frame");

@@ -145,13 +145,12 @@ pub fn create_headless_gpu(preference: BackendPreference) -> CadResult<HeadlessG
         })?;
 
     let info = adapter_info(&adapter.get_info());
-    let (device, queue) = futures_lite::future::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
+    let (device, queue) =
+        futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("cad-headless-device"),
             ..Default::default()
-        },
-    ))
-    .map_err(|e| CadError::GpuFailure(format!("wgpu device request failed: {e}")))?;
+        }))
+        .map_err(|e| CadError::GpuFailure(format!("wgpu device request failed: {e}")))?;
 
     Ok(HeadlessGpu {
         device,
@@ -259,7 +258,9 @@ impl Renderer {
             ));
         };
         let Some(queue) = self.queue.as_ref() else {
-            return Err(RenderError::NotInitialized("no GPU queue initialized".into()));
+            return Err(RenderError::NotInitialized(
+                "no GPU queue initialized".into(),
+            ));
         };
         let Some(texture) = self.target.as_ref() else {
             return Err(RenderError::NotInitialized(
