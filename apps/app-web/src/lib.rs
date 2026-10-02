@@ -346,7 +346,8 @@ mod browser {
     /// Mirror the authoritative application viewport into the render camera.
     fn sync_view_camera(controller: &HostController, view: &CadView, viewport: &ViewportId) {
         if let Some(vp) = controller.application.workspace.viewports.get(viewport) {
-            view.set_camera(vp.camera.target, vp.world_per_px());
+            // Space + observation mode + full camera in one call (F04/F13).
+            view.sync_session(&controller.session.active_space, vp);
         }
     }
 
@@ -388,7 +389,7 @@ mod browser {
                 view.borrow().as_ref(),
                 c.application.workspace.viewports.get(viewport),
             ) {
-                view.set_camera(vp.camera.target, vp.world_per_px());
+                view.sync_session(&c.session.active_space, vp);
             }
         }
         if let Some(handle) = handle.borrow().as_ref() {
@@ -639,7 +640,7 @@ mod browser {
         {
             let c = controller.borrow();
             if let Some(vp) = c.application.workspace.viewports.get(&viewport_id) {
-                view.set_camera(vp.camera.target, vp.world_per_px());
+                view.sync_session(&c.session.active_space, vp);
             }
         }
         view.request_redraw();

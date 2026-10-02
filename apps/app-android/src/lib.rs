@@ -288,7 +288,10 @@ fn sync_view_camera(
         view.borrow().as_ref(),
         controller.application.workspace.viewports.get(&viewport),
     ) {
-        view.set_camera(viewport.camera.target, viewport.world_per_px());
+        // One call keeps the active space, the observation mode and the full
+        // camera in sync (F04/F13); a bare `set_camera` would leave the bridge
+        // stuck in model-space 2D (workstream C's host glue).
+        view.sync_session(&controller.session.active_space, viewport);
     }
 }
 

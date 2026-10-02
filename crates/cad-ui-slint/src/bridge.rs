@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use cad_db::{AnnotationDatabase, DrawingDatabase};
 use cad_domain::{
-    CadError, CadResult, DocumentId, Point3, SceneIdentity, TaskStamp, TolerancePolicy,
+    CadError, CadResult, DocumentId, Point3, SceneIdentity, SpaceId, TaskStamp, TolerancePolicy,
 };
 use cad_render_wgpu::{
     ActiveBackend, BackendCapabilities, BackendPreference, Camera2d, Camera3d, RenderTarget,
@@ -414,6 +414,33 @@ impl CadView {
     /// for a view reason.
     pub fn view_diagnostic(&self) -> Option<String> {
         self.state.borrow().view_diagnostic.clone()
+    }
+
+    /// Map a session [`SpaceId`] to a drawable [`SpaceSelection`].
+    ///
+    /// Block-definition geometry is only reached through an `INSERT` and is
+    /// never a top-level viewable space, so it maps to `None`; the caller keeps
+    /// the current space instead of fabricating one.
+    pub fn space_selection(space: &SpaceId) -> Option<SpaceSelection> {
+        match space {
+            SpaceId::Model => Some(SpaceSelection::Model),
+            SpaceId::Paper(layout) => Some(SpaceSelection::Paper(*layout)),
+            SpaceId::Block(_) => None,
+        }
+    }
+
+    /// Mirror a whole session view in one call: active space plus camera/mode.
+    ///
+    /// Hosts call this after every command that can change the view (open, fit,
+    /// `SwitchSpace`, `Switch2d3d`, standard view, orbit, zoom/pan). It is the
+    /// single place that keeps the bridge's space in sync with
+    /// [`cad_app::SessionState::active_space`]; an unsupported layout is
+    /// recorded in [`CadView::view_diagnostic`] rather than silently ignored.
+    pub fn sync_session(&self, active_space: &SpaceId, viewport: &Viewport) {
+        if let Some(space) = Self::space_selection(active_space) {
+            let _ = self.set_space(space);
+        }
+        self.sync_from_viewport(viewport);
     }
 
     /// Select the drawing space the bridge builds and renders.
@@ -990,6 +1017,22 @@ mod tests {
 
     fn p3(x: f64, y: f64, z: f64) -> Point3 {
         Point3 { x, y, z }
+    }
+
+    #[test]
+    fn space_selection_maps_session_spaces() {
+        use cad_domain::BlockId;
+        assert_eq!(
+            CadView::space_selection(&SpaceId::Model),
+            Some(SpaceSelection::Model)
+        );
+        let layout = LayoutId(3);
+        assert_eq!(
+            CadView::space_selection(&SpaceId::Paper(layout)),
+            Some(SpaceSelection::Paper(layout))
+        );
+        // Block-definition geometry is never a top-level space.
+        assert_eq!(CadView::space_selection(&SpaceId::Block(BlockId(1))), None);
     }
 
     fn line_entity(id: u128, space: SpaceId, a: Point3, b: Point3) -> DbEntity {
