@@ -5,8 +5,8 @@
 //! Slint, GPU objects or the event loop, and they never mutate the database.
 
 use cad_db::{
-    DbEntity, DrawingDatabase, EntityColor, EntityLineType, EntityLineWeight, EntityTransparency,
-    LinetypePattern,
+    DbEntity, DrawingDatabase, EntityColor, EntityLineType, EntityLineWeight,
+    EntityRenderAttributes, EntityTransparency, LinetypePattern,
 };
 use cad_domain::*;
 use cad_geometry::{tessellate_geometry, TessellationParams};

@@ -349,6 +349,9 @@ struct ImporterBuilder<'a> {
     style_ids: HashMap<String, StyleId>,
     /// Lower-cased style name -> primary font file name.
     style_fonts: HashMap<String, String>,
+    /// Source scale handle value -> name, for resolving an annotative entity's
+    /// per-scale context leaves (`ACDB_ANNOTATIONSCALES` list).
+    scale_names: ScaleNames,
     block_ids: HashMap<String, BlockId>,
     /// Block name -> the block's insertion base point. An INSERT maps the
     /// block's base point onto its insertion point, so expansion subtracts it
@@ -389,6 +392,9 @@ mod plot;
 mod style;
 mod support;
 
+mod annotative;
+
+use annotative::*;
 use geometry::*;
 use hatch::*;
 use plot::read_plot_settings;

@@ -6,7 +6,10 @@ use cad_domain::*;
 
 use crate::drawing::DrawingDatabase;
 use crate::entity::{DbEntity, EntityRenderAttributes};
-use crate::tables::{BlockDefinition, Layer, Layout, LineType, PlotSettingsRecord, Style};
+use crate::tables::{
+    ActiveAnnotationScale, BlockDefinition, Layer, Layout, LineType, PlotSettingsRecord, Scale,
+    Style,
+};
 
 /// The only sanctioned way to construct a [`DrawingDatabase`].
 ///
@@ -32,6 +35,8 @@ impl DrawingDatabaseBuilder {
                 linetype_scale: 1.0,
                 plot_settings: BTreeMap::new(),
                 render_attributes: BTreeMap::new(),
+                scales: BTreeMap::new(),
+                active_annotation_scale: None,
             },
             errors: Vec::new(),
         }
@@ -88,6 +93,56 @@ impl DrawingDatabaseBuilder {
 
     pub fn insert_linetype(&mut self, linetype: LineType) -> CadResult<()> {
         self.database.linetypes.insert(linetype.id, linetype);
+        Ok(())
+    }
+
+    /// Insert a named annotation scale.
+    ///
+    /// A scale with a non-finite ratio or an empty name is rejected: it could
+    /// not produce a usable factor and would poison annotative rendering. The
+    /// name is not required to be unique across ids (the importer assigns ids
+    /// from the source order), but a lookup by name takes the first match.
+    pub fn insert_scale(&mut self, scale: Scale) -> CadResult<()> {
+        if scale.name.trim().is_empty() {
+            return Err(CadError::InvalidInput(
+                "annotation scale name is empty".into(),
+            ));
+        }
+        if !scale.is_well_formed() {
+            return Err(CadError::InvalidInput(format!(
+                "annotation scale '{}' has a non-finite ratio",
+                scale.name
+            )));
+        }
+        self.database.scales.insert(scale.id, scale);
+        Ok(())
+    }
+
+    /// Set the drawing's active annotation scale (`CANNOSCALE`).
+    ///
+    /// `value` is the raw paper/drawing ratio from the header. An empty name is
+    /// rejected: a scale with no name cannot be matched against the table, and
+    /// a non-finite value would make the fallback factor unusable. The name is
+    /// **not** required to exist in the Scale table here — an unknown name is
+    /// exactly the `Partial` case the importer reports, and
+    /// [`DrawingDatabase::annotation_scale`] then falls back to `value`.
+    pub fn set_active_annotation_scale(&mut self, name: &str, value: f64) -> CadResult<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(CadError::InvalidInput(
+                "active annotation scale name is empty".into(),
+            ));
+        }
+        if !value.is_finite() || value <= 0.0 {
+            return Err(CadError::InvalidInput(format!(
+                "active annotation scale value must be a positive finite number, got {value}"
+            )));
+        }
+        self.database.active_annotation_scale = Some(ActiveAnnotationScale {
+            name: name.to_string(),
+            value,
+            named: self.database.scale_by_name(name).is_some(),
+        });
         Ok(())
     }
 

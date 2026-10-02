@@ -53,6 +53,83 @@ pub struct Style {
 }
 
 // ---------------------------------------------------------------------------
+// Annotation scales (spec §3.2 / capability matrix)
+// ---------------------------------------------------------------------------
+
+/// A named annotation scale from the drawing's `ACAD_SCALELIST`.
+///
+/// The values mirror the DWG `AcDbScale` object without leaking the acadrust
+/// type: `paper_units` / `drawing_units` are the raw ratio, and [`Scale::factor`]
+/// is the paper/drawing ratio that scales an annotative entity's glyph height
+/// (`1:100 -> 0.01`, `2:1 -> 2.0`, `1:1 -> 1.0`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Scale {
+    pub id: ScaleId,
+    pub name: String,
+    pub paper_units: f64,
+    pub drawing_units: f64,
+}
+
+impl Scale {
+    /// The paper/drawing scale factor.
+    ///
+    /// A degenerate `0` drawing-units value falls back to `1.0` rather than
+    /// producing an infinite factor, matching acadrust's `Scale::factor`.
+    pub fn factor(&self) -> f64 {
+        if self.drawing_units.abs() < 1e-10 {
+            1.0
+        } else {
+            self.paper_units / self.drawing_units
+        }
+    }
+
+    /// The drawing/paper inverse factor (`1:100 -> 100.0`).
+    pub fn inverse_factor(&self) -> f64 {
+        if self.paper_units.abs() < 1e-10 {
+            1.0
+        } else {
+            self.drawing_units / self.paper_units
+        }
+    }
+
+    /// Whether this is the unit scale (`1:1`) within tolerance.
+    pub fn is_unit_scale(&self) -> bool {
+        (self.factor() - 1.0).abs() < 1e-10
+    }
+
+    /// Whether this is a reduction (`factor < 1`, e.g. `1:100`).
+    pub fn is_reduction(&self) -> bool {
+        self.factor() < 1.0 - 1e-10
+    }
+
+    /// Whether this is an enlargement (`factor > 1`, e.g. `2:1`).
+    pub fn is_enlargement(&self) -> bool {
+        self.factor() > 1.0 + 1e-10
+    }
+
+    /// Whether both ratio components are finite.
+    pub fn is_well_formed(&self) -> bool {
+        self.paper_units.is_finite() && self.drawing_units.is_finite()
+    }
+}
+
+/// The drawing's active annotation scale (`CANNOSCALE` + `CANNOSCALEVALUE`).
+///
+/// `name` is the source name (for example `"1:100"`); `factor` is the raw
+/// paper/drawing value as stored in the header, kept so an unknown name still
+/// carries the real ratio. [`DrawingDatabase::annotation_scale`] prefers the
+/// named [`Scale`] from the table when it resolves, so the table is
+/// authoritative and the header value is the documented fallback.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveAnnotationScale {
+    pub name: String,
+    /// Paper/drawing factor from the header (`CANNOSCALEVALUE`).
+    pub value: f64,
+    /// `true` when the name resolved to an entry in the drawing's Scale table.
+    pub named: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Plot settings (paper-space output configuration)
 // ---------------------------------------------------------------------------
 

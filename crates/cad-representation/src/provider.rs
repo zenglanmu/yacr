@@ -9,11 +9,41 @@ pub trait RepresentationProvider {
         entity: &DbEntity,
         context: &RepresentationContext,
     ) -> CadResult<DisplayRepresentation>;
+
+    /// Build a representation with the importer-resolved attributes for the
+    /// entity.
+    ///
+    /// [`ProviderRegistry::build_expanded`] calls this so a provider can act on
+    /// data that lives beside the entity (currently annotative scaling). The
+    /// default ignores the attributes and delegates to
+    /// [`build`](Self::build), so existing providers keep compiling and behave
+    /// exactly as before.
+    fn build_with_attributes(
+        &self,
+        entity: &DbEntity,
+        attributes: &EntityRenderAttributes,
+        context: &RepresentationContext,
+    ) -> CadResult<DisplayRepresentation> {
+        let _ = attributes;
+        self.build(entity, context)
+    }
 }
 
 /// The built-in provider for the core entity set (spec §3.2).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultRepresentationProvider;
+
+/// The text/MTEXT annotation-scale adjustment for one build.
+///
+/// `factor` is the active scale's paper/drawing factor; `position`/`rotation`/
+/// `height` are an optional per-scale override (applied as-is when present).
+#[derive(Debug, Clone, Copy)]
+struct TextScale {
+    factor: f64,
+    position: Option<Point3>,
+    rotation: Option<f64>,
+    height: Option<f64>,
+}
 
 impl DefaultRepresentationProvider {
     /// Tolerance used for CPU display discretisation at the current zoom.
@@ -50,6 +80,87 @@ impl RepresentationProvider for DefaultRepresentationProvider {
         entity: &DbEntity,
         context: &RepresentationContext,
     ) -> CadResult<DisplayRepresentation> {
+        self.build_inner(entity, context, None)
+    }
+
+    /// Apply the imported annotative state: an annotative text/MTEXT entity is
+    /// scaled by the active annotation scale factor about its anchor, and a
+    /// per-scale placement override (when imported) replaces the base
+    /// position/rotation. A non-annotative entity, or a context without an
+    /// active annotation scale, builds exactly as before.
+    fn build_with_attributes(
+        &self,
+        entity: &DbEntity,
+        attributes: &EntityRenderAttributes,
+        context: &RepresentationContext,
+    ) -> CadResult<DisplayRepresentation> {
+        let annotative = attributes.annotative.annotative;
+        let Some(scale) = context.annotation_scale.as_ref().filter(|_| annotative) else {
+            return self.build_inner(entity, context, None);
+        };
+        let factor = scale.factor;
+        if !factor.is_finite() || factor <= 0.0 {
+            // An unusable factor must not silently scale by 1.0; report it and
+            // draw the base geometry so the entity is still visible.
+            let mut representation = self.build_inner(entity, context, None)?;
+            representation.completeness =
+                representation
+                    .completeness
+                    .combine(Completeness::Partial(vec![format!(
+                    "annotative scale '{}' has an invalid factor {factor}; drawn at its base size",
+                    scale.name
+                )]));
+            representation.diagnostics.push(Diagnostic {
+                object: Some(ObjectId(entity.id.0)),
+                code: "annotative.invalid_scale".into(),
+                message: format!("active annotation scale factor {factor} is not usable"),
+            });
+            return Ok(representation);
+        }
+        let over = attributes.annotative.override_for(&scale.name);
+        let mut representation = self.build_inner(
+            entity,
+            context,
+            Some(TextScale {
+                factor,
+                position: over.map(|o| o.position),
+                rotation: over.map(|o| o.rotation),
+                height: over.and_then(|o| o.height),
+            }),
+        )?;
+
+        // Annotative scaling is implemented for text/MTEXT only. Any other
+        // annotative geometry (dimension styles, multileader, hatch, blocks)
+        // is left at its base placement and reported `Partial`, never silently
+        // scaled as if it were exact.
+        if !matches!(entity.geometry, SemanticGeometry::Text { .. }) {
+            representation.completeness =
+                representation
+                    .completeness
+                    .combine(Completeness::Partial(vec![format!(
+                        "annotative scaling for {} is not implemented; drawn at its base size",
+                        entity.object.type_key
+                    )]));
+            representation.diagnostics.push(Diagnostic {
+                object: Some(ObjectId(entity.id.0)),
+                code: "annotative.unsupported_entity".into(),
+                message: format!(
+                    "{} is annotative but only TEXT/MTEXT annotative scaling is supported",
+                    entity.object.type_key
+                ),
+            });
+        }
+        Ok(representation)
+    }
+}
+
+impl DefaultRepresentationProvider {
+    fn build_inner(
+        &self,
+        entity: &DbEntity,
+        context: &RepresentationContext,
+        annotative: Option<TextScale>,
+    ) -> CadResult<DisplayRepresentation> {
         // A compound entity (for example a HATCH) renders as a group; recurse
         // per child and merge the results in order.
         if let SemanticGeometry::Compound(children) = &entity.geometry {
@@ -61,7 +172,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
             for child in children {
                 let mut child_entity = entity.clone();
                 child_entity.geometry = child.clone();
-                let child_representation = self.build(&child_entity, context)?;
+                let child_representation = self.build_inner(&child_entity, context, annotative)?;
                 representation
                     .fragments
                     .extend(child_representation.fragments);
@@ -138,14 +249,27 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 v_align,
             } => {
                 let font_key = font.as_deref();
+                // Annotative TEXT/MTEXT: the active annotation scale factor
+                // scales the glyph size about the anchor, and a per-scale
+                // placement override (when imported) replaces the base
+                // position/rotation. Non-annotative entities use the base
+                // geometry unchanged.
+                let (eff_position, eff_height, eff_rotation) = match annotative {
+                    Some(a) => (
+                        a.position.unwrap_or(*position),
+                        a.height.unwrap_or(height.abs() * a.factor),
+                        a.rotation.unwrap_or(*rotation),
+                    ),
+                    None => (*position, height.abs(), *rotation),
+                };
                 let mut shaped = false;
                 if let (Some(engine), Some(key)) = (&context.fonts, font_key) {
                     match engine.shape(
                         key,
                         text,
-                        *position,
-                        height.abs(),
-                        *rotation,
+                        eff_position,
+                        eff_height,
+                        eff_rotation,
                         *h_align,
                         *v_align,
                     ) {
@@ -232,13 +356,13 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                         linetype_scale: 1.0,
                         primitive: DisplayPrimitive::Text {
                             text: text.clone(),
-                            origin: *position,
+                            origin: eff_position,
                             font: ResourceKey(
                                 font_key
                                     .map(str::to_string)
                                     .unwrap_or_else(|| format!("style:{}", style.0)),
                             ),
-                            height: height.abs(),
+                            height: eff_height,
                         },
                     });
                 }
@@ -348,24 +472,55 @@ impl ProviderRegistry {
         entity: &DbEntity,
         context: &RepresentationContext,
     ) -> CadResult<DisplayRepresentation> {
-        let entity_type = &entity.object.type_key;
+        match self.select_provider(entity.id, &entity.object.type_key)? {
+            Ok(provider) => provider.build(entity, context),
+            Err(missing) => Ok(missing),
+        }
+    }
+
+    /// Like [`build`](Self::build) but passes the entity's imported render
+    /// attributes through to the provider (annotative scaling). Selection is
+    /// identical, so the two never disagree about which provider wins.
+    pub fn build_with_attributes(
+        &self,
+        entity: &DbEntity,
+        attributes: &EntityRenderAttributes,
+        context: &RepresentationContext,
+    ) -> CadResult<DisplayRepresentation> {
+        match self.select_provider(entity.id, &entity.object.type_key)? {
+            Ok(provider) => provider.build_with_attributes(entity, attributes, context),
+            Err(missing) => Ok(missing),
+        }
+    }
+
+    /// Resolve the single highest-priority provider for `entity_type`.
+    ///
+    /// `Ok(Ok(provider))` selects one; `Ok(Err(representation))` is the
+    /// documented no-match result; an ambiguous top priority is an invariant
+    /// error, never a guess.
+    #[allow(clippy::type_complexity)]
+    fn select_provider<'a>(
+        &'a self,
+        entity_id: EntityId,
+        entity_type: &str,
+    ) -> CadResult<Result<&'a dyn RepresentationProvider, DisplayRepresentation>> {
         let mut matching: Vec<&Box<dyn RepresentationProvider>> = self
             .providers
             .iter()
             .filter(|p| Self::matches(&p.registration(), entity_type))
             .collect();
         if matching.is_empty() {
-            return Ok(DisplayRepresentation {
+            return Ok(Err(DisplayRepresentation {
                 fragments: Vec::new(),
                 completeness: Completeness::Missing(vec![
                     "no representation provider matched".into()
                 ]),
                 diagnostics: vec![Diagnostic {
-                    object: Some(ObjectId(entity.id.0)),
+                    object: Some(ObjectId(entity_id.0)),
                     code: "representation.no_provider".into(),
                     message: format!("no representation provider matches '{entity_type}'"),
                 }],
-            });
+            }));
         }
         matching.sort_by_key(|p| std::cmp::Reverse(p.registration().priority));
         let top_priority = matching[0].registration().priority;
@@ -381,7 +536,7 @@ impl ProviderRegistry {
                     .collect::<Vec<_>>()
             )));
         }
-        top[0].build(entity, context)
+        Ok(Ok(&***top[0]))
     }
 }
 
@@ -425,6 +580,38 @@ impl ProviderRegistry {
         Ok(out)
     }
 
+    /// Rebuild the representations of every annotative entity under `scale`.
+    ///
+    /// This is the incremental update a host performs when the active
+    /// annotation scale changes: only entities the importer marked annotative
+    /// are re-derived, so an unrelated drawing does not get rebuilt. The
+    /// returned vector is keyed by entity so a caller can replace exactly the
+    /// affected scene chunks.
+    ///
+    /// `context` supplies the document, tolerance, stamp and fonts; its
+    /// `annotation_scale` is overridden by `scale`.
+    pub fn rebuild_annotative(
+        &self,
+        database: &DrawingDatabase,
+        context: &RepresentationContext,
+        scale: AnnotationScaleRef,
+    ) -> CadResult<Vec<(EntityId, DisplayRepresentation)>> {
+        let mut scoped = context.clone();
+        scoped.annotation_scale = Some(scale);
+        let mut out = Vec::new();
+        for entity in database.entities() {
+            if !database
+                .entity_render_attributes(entity.id)
+                .annotative
+                .annotative
+            {
+                continue;
+            }
+            out.push((entity.id, self.build_expanded(database, entity, &scoped)?));
+        }
+        Ok(out)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn expand_entity(
         &self,
@@ -442,13 +629,15 @@ impl ProviderRegistry {
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
     ) -> CadResult<()> {
-        let representation = self.build(entity, context)?;
         // The importer resolved this entity's effective opacity, colour,
         // lineweight and linetype into the database. `ByBlock` inherits the
         // containing INSERT's value, threaded down through the `parent_*`
         // arguments; at the model root those fall back to the documented
         // defaults.
         let attributes = database.entity_render_attributes(entity.id);
+        // The provider sees the attributes too, so annotative text can be
+        // scaled while it is shaped (the geometry is not post-processed).
+        let representation = self.build_with_attributes(entity, &attributes, context)?;
         let own_alpha = match attributes.transparency {
             EntityTransparency::Explicit(alpha) => alpha,
             EntityTransparency::ByBlock => parent_alpha,

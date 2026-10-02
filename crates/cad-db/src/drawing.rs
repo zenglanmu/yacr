@@ -7,8 +7,8 @@ use cad_domain::*;
 use crate::bounds::{BoundsAccumulator, MAX_INSTANCE_DEPTH};
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::tables::{
-    BlockDefinition, Layer, Layout, LineType, PlotMargins, PlotPaperUnits, PlotProvenance,
-    PlotRotation, PlotSettingsRecord, PlotType, Style,
+    ActiveAnnotationScale, BlockDefinition, Layer, Layout, LineType, PlotMargins, PlotPaperUnits,
+    PlotProvenance, PlotRotation, PlotSettingsRecord, PlotType, Scale, Style,
 };
 
 /// The authoritative, read-only-after-import drawing database.
@@ -34,6 +34,11 @@ pub struct DrawingDatabase {
     /// (transparency, geometry source). Absent entries are fully opaque
     /// analytic geometry, so older/hand-built databases stay valid.
     pub(crate) render_attributes: BTreeMap<EntityId, EntityRenderAttributes>,
+    /// Named annotation scales from the drawing's `ACAD_SCALELIST`. Empty for
+    /// hand-built databases; the importer fills it from the source drawing.
+    pub(crate) scales: BTreeMap<ScaleId, Scale>,
+    /// Drawing-global active annotation scale (`CANNOSCALE`), when set.
+    pub(crate) active_annotation_scale: Option<ActiveAnnotationScale>,
 }
 
 impl DrawingDatabase {
@@ -164,6 +169,70 @@ impl DrawingDatabase {
     /// Drawing-global linetype scale (`$LTSCALE`). Defaults to `1.0`.
     pub fn linetype_scale(&self) -> f64 {
         self.linetype_scale
+    }
+
+    /// Named annotation scales from the drawing's `ACAD_SCALELIST`.
+    pub fn scales(&self) -> impl Iterator<Item = &Scale> {
+        self.scales.values()
+    }
+
+    /// A named annotation scale by identity.
+    pub fn scale(&self, id: ScaleId) -> Option<&Scale> {
+        self.scales.get(&id)
+    }
+
+    /// A named annotation scale by name, matched exactly then case-insensitively.
+    ///
+    /// Drawing scale names are case-sensitive in principle but vendor exports
+    /// vary; the case-insensitive pass is the documented fallback and never
+    /// invents a factor.
+    pub fn scale_by_name(&self, name: &str) -> Option<&Scale> {
+        if let Some(scale) = self.scales.values().find(|s| s.name == name) {
+            return Some(scale);
+        }
+        self.scales
+            .values()
+            .find(|s| s.name.eq_ignore_ascii_case(name.trim()))
+    }
+
+    /// The raw active annotation scale as set by the importer, when present.
+    pub fn active_annotation_scale(&self) -> Option<&ActiveAnnotationScale> {
+        self.active_annotation_scale.as_ref()
+    }
+
+    /// The active annotation scale name, when one is set.
+    pub fn annotation_scale_name(&self) -> Option<&str> {
+        self.active_annotation_scale
+            .as_ref()
+            .map(|s| s.name.as_str())
+            .filter(|name| !name.is_empty())
+    }
+
+    /// The drawing's active annotation scale, resolved for rendering.
+    ///
+    /// Resolution order:
+    /// 1. A named [`Scale`] in the table matching the active name — the table is
+    ///    authoritative and its [`Scale::factor`] is used.
+    /// 2. The header `CANNOSCALEVALUE`, when finite and positive.
+    /// 3. `1.0` (no scaling), the safe fallback for a database with no scale
+    ///    information at all.
+    ///
+    /// Returns `(name, factor, resolved)`. `resolved` is `false` only when the
+    /// name was set but neither the table nor a valid header value could supply
+    /// a factor; callers that render annotative entities must report that as an
+    /// explicit `Partial` rather than silently scaling by `1.0`.
+    pub fn annotation_scale(&self) -> (Option<String>, f64, bool) {
+        let Some(active) = &self.active_annotation_scale else {
+            return (None, 1.0, true);
+        };
+        let name = (!active.name.is_empty()).then(|| active.name.clone());
+        if let Some(scale) = self.scale_by_name(&active.name) {
+            return (name, scale.factor(), true);
+        }
+        if active.value.is_finite() && active.value > 0.0 {
+            return (name, active.value, false);
+        }
+        (name, 1.0, false)
     }
 
     /// Entities in model space, in draw order.
