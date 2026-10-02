@@ -23,7 +23,7 @@ pub use annotations::{
 };
 pub use highlight::{
     highlight_batches, HighlightOptions, HighlightScene, DEFAULT_HIGHLIGHT_ALPHA,
-    HIGHLIGHT_DRAW_ORDER,
+    DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_DRAW_ORDER,
 };
 
 mod batch;

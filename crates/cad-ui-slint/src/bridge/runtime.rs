@@ -147,6 +147,10 @@ impl CadRenderRuntime {
         }
         let renderer = self.renderer.as_mut().expect("ready renderer");
         let base_changed = self.applied_base != Some(ready.base_revision);
+        // Base drawing batches are the prefix; the annotation overlay and the
+        // transient highlight/preview overlay are the replaceable suffix. A
+        // highlight-only change still re-uploads the suffix (the annotation
+        // batches are recomputed from their cached `Arc`), but never the base.
         let combined;
         let delta = if base_changed {
             combined = SceneDelta {
@@ -156,13 +160,25 @@ impl CadRenderRuntime {
                     .added
                     .iter()
                     .chain(ready.overlay.added.iter())
+                    .chain(ready.highlight.added.iter())
                     .cloned()
                     .collect(),
                 removed_chunks: vec![],
             };
             &combined
         } else {
-            &ready.overlay
+            combined = SceneDelta {
+                stamp: ready.overlay.stamp.clone(),
+                added: ready
+                    .overlay
+                    .added
+                    .iter()
+                    .chain(ready.highlight.added.iter())
+                    .cloned()
+                    .collect(),
+                removed_chunks: vec![],
+            };
+            &combined
         };
         let prepared = renderer.prepare_upload(delta)?;
         renderer.commit_upload(prepared, if base_changed { 0 } else { self.base_batches })?;

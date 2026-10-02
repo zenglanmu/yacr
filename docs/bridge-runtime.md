@@ -6,7 +6,9 @@
 ## 职责
 
 - `crates/cad-app/src/render_scene/`：`CadSceneController` 管理 CPU 场景准备、版本与
-  诊断。底图与批注分别缓存；批注 revision/显隐变化不重新构建底图。不可变文档
+  诊断。底图、批注与**瞬态高亮/预览叠加层**分别缓存；批注 revision/显隐变化不重新
+  构建底图，选择/预览变化也不重建底图或批注（`prepare_shared_with_overlays` 的
+  `annotation_version` 与 `visual_version` 各自失效）。不可变文档
   Arc 的身份在接收时计算并保留，平移/缩放不重复遍历数据库 bounds；不同打开即使
   id/revision/bounds 相同也重新准备。字体替换使用单调 resource revision。
 - `crates/cad-ui-slint/src/bridge/view.rs`：接收完整 `ViewSnapshot`，验证空间和相机
@@ -20,8 +22,9 @@
   texture revision + 尺寸；同尺寸的新附件也重新绑定。导入失败不推进 key，错误
   可诊断并允许重试。画布尺寸由 UiHandle 提供，而非整个窗口尺寸。
 - `cad-render-wgpu`：`prepare_upload` 暂存 GPU 批次；`commit_upload` 成功后替换
-  活动批次。runtime 此后才推进已应用场景版本。底图批次作为 prefix，批注替换
-  suffix；失败不会先 clear 旧场景。已准备资源不能提交到不同/丢失的设备。
+  活动批次。runtime 此后才推进已应用场景版本。底图批次作为 prefix，批注 + 选择高亮/
+  工具预览作为可替换 suffix（高亮变化只重传 suffix，底图 GPU 缓冲不变）；失败不会
+  先 clear 旧场景。已准备资源不能提交到不同/丢失的设备。
 
 `IncomingDocument` 是当前不可变数据库的共享引用，**不是待消费消息槽**。
 `None` 表示没有打开文档，准备并发布空场景，不遗留旧图。任务携带真实 viewport
