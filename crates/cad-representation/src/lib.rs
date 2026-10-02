@@ -7,6 +7,7 @@
 use cad_db::{DbEntity, DrawingDatabase, EntityTransparency};
 use cad_domain::*;
 use cad_geometry::{tessellate_geometry, TessellationParams};
+use cad_kernel_adapter::{TessellationMesh, TessellationOutcome, TessellationResult};
 use cad_resources::ResourceKey;
 use std::sync::Arc;
 
@@ -105,14 +106,26 @@ pub struct DisplayFragment {
 }
 
 /// Precision implied by how a fragment's geometry was produced.
+///
+/// `KernelMesh` is deliberately *not* analytic: a kernel tessellation is an
+/// approximation whose bound is carried by the tessellation result, not known
+/// from the source tag alone. Use [`precision_for_kernel_mesh`] when the result
+/// (and therefore the error bound) is available.
 pub fn precision_for_source(source: &GeometrySource) -> Precision {
     match source {
-        GeometrySource::ProxyCache => Precision::Approximate { error_bound: None },
-        GeometrySource::Analytic
-        | GeometrySource::DirectMesh
-        | GeometrySource::KernelMesh
-        | GeometrySource::UserPoints => Precision::Analytic,
+        GeometrySource::ProxyCache | GeometrySource::KernelMesh => {
+            Precision::Approximate { error_bound: None }
+        }
+        GeometrySource::Analytic | GeometrySource::DirectMesh | GeometrySource::UserPoints => {
+            Precision::Analytic
+        }
     }
+}
+
+/// Precision carried by a kernel tessellation: exact for planar facets, bounded
+/// for a curved approximation. Never invented here — the kernel reports it.
+pub fn precision_for_kernel_mesh(mesh: &TessellationMesh) -> Precision {
+    mesh.precision.clone()
 }
 
 pub struct DisplayRepresentation {
@@ -127,6 +140,94 @@ impl DisplayRepresentation {
             fragments: Vec::new(),
             completeness,
             diagnostics: Vec::new(),
+        }
+    }
+
+    /// Turn a kernel tessellation result into display primitives.
+    ///
+    /// A produced mesh becomes a [`DisplayPrimitive::Mesh`] with
+    /// [`GeometrySource::KernelMesh`] and the precision the kernel reported
+    /// (analytic for planar facets, a chordal bound for curved ones). An
+    /// unsupported or failed tessellation stays missing geometry with the
+    /// kernel's own diagnostics; it never becomes an empty-success fragment.
+    pub fn from_tessellation(
+        result: &TessellationResult,
+        source: SelectionRef,
+        alpha: f32,
+    ) -> Self {
+        let fragment = |geometry: &TessellationMesh| DisplayFragment {
+            source: source.clone(),
+            geometry_source: GeometrySource::KernelMesh,
+            precision: precision_for_kernel_mesh(geometry),
+            alpha,
+            primitive: DisplayPrimitive::Mesh(Arc::new(geometry.mesh.clone())),
+        };
+        match &result.outcome {
+            TessellationOutcome::Success {
+                geometry,
+                diagnostics,
+            } => {
+                if geometry.is_empty() {
+                    return DisplayRepresentation {
+                        fragments: Vec::new(),
+                        completeness: Completeness::Missing(vec![
+                            "kernel reported success but produced no facets".into(),
+                        ]),
+                        diagnostics: vec![Diagnostic {
+                            object: Some(ObjectId(source.entity.0)),
+                            code: "kernel.empty_mesh".into(),
+                            message: "success outcome carried no triangles".into(),
+                        }],
+                    };
+                }
+                DisplayRepresentation {
+                    fragments: vec![fragment(geometry)],
+                    completeness: Completeness::Complete,
+                    diagnostics: diagnostics.clone(),
+                }
+            }
+            TessellationOutcome::Partial {
+                geometry,
+                degradation,
+                diagnostics,
+            } => {
+                let kernel_diagnostics = degradation.diagnostics();
+                let mut all = kernel_diagnostics.clone();
+                all.extend(diagnostics.clone());
+                let reasons: Vec<String> = kernel_diagnostics
+                    .iter()
+                    .map(|d| format!("{}: {}", d.code, d.message))
+                    .collect();
+                let mut fragments = Vec::new();
+                if !geometry.is_empty() {
+                    fragments.push(fragment(geometry));
+                }
+                DisplayRepresentation {
+                    fragments,
+                    completeness: if reasons.is_empty() {
+                        Completeness::Partial(vec!["kernel reported degradation".into()])
+                    } else {
+                        Completeness::Partial(reasons)
+                    },
+                    diagnostics: all,
+                }
+            }
+            TessellationOutcome::Unsupported { reason } => DisplayRepresentation {
+                fragments: Vec::new(),
+                completeness: Completeness::Missing(vec![reason.detail.clone()]),
+                diagnostics: vec![Diagnostic {
+                    object: Some(ObjectId(source.entity.0)),
+                    code: "kernel.unsupported".into(),
+                    message: format!("{}: {}", reason.code, reason.detail),
+                }],
+            },
+            TessellationOutcome::Failed { diagnostics } => DisplayRepresentation {
+                fragments: Vec::new(),
+                completeness: Completeness::Missing(
+                    diagnostics.iter().map(|d| d.message.clone()).collect(),
+                ),
+                diagnostics: diagnostics.clone(),
+            },
         }
     }
 }
@@ -1050,5 +1151,130 @@ mod tests {
         assert_eq!(r.fragments[0].alpha, 1.0);
         assert_eq!(r.fragments[0].geometry_source, GeometrySource::Analytic);
         assert_eq!(r.fragments[0].precision, Precision::Analytic);
+    }
+
+    // ---- Kernel-mesh display path (F15 seam) ----
+
+    use cad_kernel_adapter::{
+        BrepCurve, BrepData, BrepFace, BrepLoop, BrepShell, BrepSurface, BrepTessellator,
+        GeometryHandle, SolidExchange, SolidTessellator, TessellationBudget, TessellationRequest,
+        TessellationTolerance,
+    };
+
+    fn selection() -> SelectionRef {
+        SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(42),
+            instance: InstancePath::default(),
+            sub_element: None,
+        }
+    }
+
+    fn square_brep(with_unsupported: bool) -> BrepData {
+        let loop_ = BrepLoop {
+            edges: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
+                .iter()
+                .map(|q| BrepCurve::Line {
+                    start: Point3 {
+                        x: q[0],
+                        y: q[1],
+                        z: 0.0,
+                    },
+                    end: Point3 {
+                        x: q[0],
+                        y: q[1],
+                        z: 0.0,
+                    },
+                })
+                .collect(),
+        };
+        let mut faces = vec![BrepFace {
+            id: 0,
+            surface: BrepSurface::Plane {
+                origin: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                normal: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+                u_dir: Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            reversed: false,
+            loops: vec![loop_],
+        }];
+        if with_unsupported {
+            faces.push(BrepFace {
+                id: 9,
+                surface: BrepSurface::Unsupported {
+                    type_key: "nurbs-surface".into(),
+                },
+                reversed: false,
+                loops: Vec::new(),
+            });
+        }
+        BrepData {
+            shells: vec![BrepShell { id: 0, faces }],
+            placement: None,
+        }
+    }
+
+    fn tessellate(exchange: SolidExchange) -> cad_kernel_adapter::TessellationResult {
+        let request = TessellationRequest {
+            geometry: GeometryHandle::Resolved(ObjectId(7)),
+            exchange,
+            tolerance: TessellationTolerance::default(),
+            budget: TessellationBudget::default(),
+            stamp: TaskStamp::new(DocumentId(1), 0),
+        };
+        BrepTessellator.tessellate(&request, &|| false).unwrap()
+    }
+
+    #[test]
+    fn kernel_mesh_becomes_a_display_mesh_with_kernel_source() {
+        // A lone planar square is an open sheet: usable facets, reported as
+        // Partial with open edges, never as a complete solid.
+        let result = tessellate(SolidExchange::Brep(square_brep(false)));
+        let rep = DisplayRepresentation::from_tessellation(&result, selection(), 1.0);
+        assert!(matches!(rep.completeness, Completeness::Partial(_)));
+        assert_eq!(rep.fragments.len(), 1);
+        assert_eq!(rep.fragments[0].geometry_source, GeometrySource::KernelMesh);
+        // Planar facets are exact, so the kernel reports analytic precision.
+        assert_eq!(rep.fragments[0].precision, Precision::Analytic);
+        match &rep.fragments[0].primitive {
+            DisplayPrimitive::Mesh(mesh) => assert_eq!(mesh.triangles.len(), 2),
+            _ => panic!("expected a mesh primitive"),
+        }
+    }
+
+    #[test]
+    fn unsupported_kernel_result_stays_missing_not_empty_success() {
+        let result = tessellate(SolidExchange::Sat(b"ACIS payload".to_vec()));
+        let rep = DisplayRepresentation::from_tessellation(&result, selection(), 1.0);
+        assert!(matches!(rep.completeness, Completeness::Missing(_)));
+        assert!(rep.fragments.is_empty());
+        assert!(rep
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "kernel.unsupported"));
+    }
+
+    #[test]
+    fn partial_kernel_result_reports_degradation_and_keeps_facets() {
+        let result = tessellate(SolidExchange::Brep(square_brep(true)));
+        let rep = DisplayRepresentation::from_tessellation(&result, selection(), 1.0);
+        assert!(matches!(rep.completeness, Completeness::Partial(_)));
+        assert_eq!(rep.fragments.len(), 1);
+        assert!(rep
+            .diagnostics
+            .iter()
+            .any(|d| d.code == cad_kernel_adapter::codes::KERNEL_MISSING_FACE));
     }
 }

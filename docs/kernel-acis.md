@@ -1,124 +1,176 @@
-# ACIS 实体离散契约（F15：契约已定义，内核未接入，功能未验收）
+# ACIS 实体离散（F15：已实现一个可复现的受限子集）
 
-本文件描述 `cad-kernel-adapter` 的对外契约，以及为什么 ACIS（SAT/SAB）实体
-在当前构建中仍**未实现**。契约是真实的、带类型与稳定诊断码的；但“契约存在”
-不等于“功能完成”，本文件不声明任何 ACIS 兼容性。
+本文件描述 `cad-kernel-adapter` 的对外契约，以及当前**真实**支持的 ACIS
+（SAT/SAB）离散子集。默认直通实现仍保持诚实的 `Unsupported`；只有显式选用
+`BrepTessellator` 且输入落在下述子集内时才会产出真实网格。
+
+“已实现”只指：对**本仓库可复现的合成 SAT/SAB**，在文档化的曲面/曲线类型上
+产出非空、闭合（或带有精确退化报告）的网格。它**不**声明对 AutoCAD /
+Tianzheng / TSSD 等第三方实体的兼容性。
 
 ## 1. 边界
 
-`cad-kernel-adapter` 是工作区中**唯一**允许接触内核/ACIS 交换数据的 crate。
-任何 kernel handle、SAT/SAB 解析器或曲面对象都不得越过该边界；跨边界只传递
-纯数据的 `TessellationRequest` 与结构化的 `TessellationResult`。
-`cad-domain`、`cad-representation`、`cad-app` 等只看到这些类型。
+`cad-kernel-adapter` 是工作区中**唯一**允许持有内核/ACIS 交换数据的 crate。
+跨边界只传递纯数据：
 
-## 2. 契约
+* `TessellationRequest` / `TessellationResult`（原始契约）；
+* `SolidExchange`（见 §2）与其中的中性 `BrepData`。
 
-### 请求
+`cad-import-acadrust` 是唯一依赖 acadrust 的 crate；它把 SAT/SAB 解析为
+`BrepData`，此后再无 acadrust 类型越过内核 seam。`cad-kernel-adapter` 自身
+**不**依赖 acadrust，也不解析 SAT/SAB 字节。
+
+## 2. 交换类型
 
 ```rust
-TessellationRequest {
-    geometry: GeometryHandle,     // Resolved(ObjectId) | Missing { key }
-    exchange: SolidExchange,      // Sat(Vec<u8>) | Sab(Vec<u8>) | Unsupported { type_key, data }
-    tolerance: TessellationTolerance, // linear_deflection + angular_deflection（世界单位，必须有限且 > 0）
-    budget: TessellationBudget,   // max_faces / max_vertices / max_edges（均须 > 0）
-    stamp: TaskStamp,             // 任务身份，用于过期检查
+pub enum SolidExchange {
+    Sat(Vec<u8>),        // 原始 SAT 文本（解析失败/未解析时保留）
+    Sab(Vec<u8>),        // 原始 SAB 二进制（同上）
+    Brep(BrepData),      // importer 解析后的中性 B-rep（真实网格路径）
+    Unsupported { type_key: String, data: Vec<u8> },
+}
+
+pub struct BrepData {
+    pub shells: Vec<BrepShell>,
+    pub placement: Option<BrepPlacement>, // world = scale·(p·M) + t
+}
+
+pub struct BrepFace {
+    pub id: u32,
+    pub surface: BrepSurface, // Plane | Sphere | Torus | Cylinder | Unsupported
+    pub reversed: bool,
+    pub loops: Vec<BrepLoop>,  // Line | Circle | Unsupported
 }
 ```
 
-* `SolidExchange` 的载荷保持**不透明字节**：在接入内核前不得解释。
-* `GeometryHandle::Missing` 表示句柄无法解析；必须显式报告，不得静默丢弃。
-* 容差是**世界空间伺服**量，不从显示像素直接驱动测量语义；`from_policy`
-  只把显示预算按缩放换算成线性伺服，角度伺服取文档化的默认值。
+* `BrepData` 是**中性纯数据**：没有 acadrust 句柄、解析器或曲面对象。
+* 未支持的曲面/曲线以 `BrepSurface::Unsupported` / `BrepCurve::Unsupported`
+  建模，绝不以近似网格顶替。
+* 原始 `Sat`/`Sab` 字节保留用于溯源；默认内核不解析它们。
 
-### 结果
+## 3. 两个离散器
+
+| 实现 | 行为 |
+|---|---|
+| `NoKernelTessellator`（默认，别名 `PendingTessellator`） | 对任何非空载荷返回 `Unsupported`，绝不伪造网格 |
+| `BrepTessellator`（显式选用） | 对 `SolidExchange::Brep` 求值文档化子集；其余返回 `Unsupported` |
+
+`BrepTessellator` 对原始 `Sat`/`Sab` 仍返回 `Unsupported(kernel.no_acis_kernel)`：
+解析只允许发生在 importer。
+
+## 4. 已支持子集（真实网格）
+
+曲面/边界：
+
+* **平面面**：直线边界多边形（凸/凹）与内环（洞）三角化；
+  洞边界可为直线或完整圆。
+* **完整圆**（`ellipse-curve` 且 `ratio == 1` 且首尾顶点相同）。
+* **球面**：无环（`first_loop == NULL`）、覆盖完整参数域的单面。
+* **圆环面（torus）**：同上，完整参数域单面。
+* **圆柱侧面**：`cone-surface` 且 `sin(half_angle) == 0`，由两个完整圆环围成。
+
+离散细节：
+
+* 平面：投影到面平面按 signed-area 区分外环/洞，桥接洞后 ear-clip，三角形
+  仅使用源环顶点（不会产生 T 形接点）。
+* 球/环/柱：按自然参数化采样；采样段数同时满足线性弦高与角度伺服，
+  **随容差单调**（容差更小 → 面片不少于、误差不高于）。
+* 网格顶点按位置焊接后检测边流形性：非“恰好两个面共享”的边以
+  `kernel.open_edge` 精确上报。
+* 精度：纯平面 → `Precision::Analytic`；含曲面 → `Approximate { error_bound }`
+  （弦高上界由采样段数与曲率算出）。
+
+## 5. 明确 Unsupported（返回缺面，不伪造）
+
+* `cone-surface` 且 `sin(half_angle) != 0`（圆锥侧面，含退化的顶点环）。
+* 部分圆弧 / 椭圆（`ratio != 1` / 首尾顶点不同）。
+* NURBS / spline / mesh 等未建模曲面。
+* 带修剪环（trimming loops）的球面或环面。
+* 无曲线记录的退化边（例如圆锥顶点奇点边）。
+* 当整个 B-rep 无任何可离散面且失败原因均为“不支持”时，整体返回
+  `Unsupported(kernel.unsupported_surface)`，而不是空网格。
+
+## 6. 结果与稳定诊断码
+
+保持“没有成功但空网格”的约束：
 
 ```rust
-TessellationResult {
-    stamp: TaskStamp,
-    outcome: TessellationOutcome,
-}
-
-TessellationOutcome {
-    Success { geometry: TessellationMesh, diagnostics },
-    Partial { geometry: TessellationMesh, degradation: TessellationDegradation, diagnostics },
-    Unsupported { reason: UnsupportedReason },
-    Failed { diagnostics },
-}
+TessellationOutcome::Success   { geometry, diagnostics }
+TessellationOutcome::Partial   { geometry, degradation, diagnostics }
+TessellationOutcome::Unsupported { reason }
+TessellationOutcome::Failed     { diagnostics }
 ```
 
-* **没有“成功但空网格”的变体**：产不出可用面片时只能是 `Unsupported` 或
-  `Failed`，绝不以 `Ok(空网格)` 冒充完成。
-* `TessellationDegradation` 显式记录 `missing_faces` / `open_edges` /
-  `dropped_shells`，每项带稳定原因，供诊断聚合与 UI 展示。
-* `UnsupportedReason { code, exchange, detail }` 用稳定码分类，UI 本地化
-  `detail`，不解析人类文本。
-
-### 入口
-
-* trait `SolidTessellator { registration(); tessellate(request, cancelled) }`。
-* 函数 `tessellate_solid(tessellator, request, cancelled)` 是唯一推荐调用点，
-  保证结果带上请求的 `stamp`。
-* 默认实现 `NoKernelTessellator`（别名 `PendingTessellator`）：对任何**非空**
-  SAT/SAB 返回 `Unsupported`，码为 `kernel.no_acis_kernel`；对未知交换类型返回
-  `kernel.unsupported_exchange`；空载荷返回 `Failed(kernel.empty_geometry)`；
-  句柄未解析返回 `Failed(kernel.missing_handle)`；取消返回 `CadError::Cancelled`；
-  非法容差/预算返回 `CadError::InvalidInput`。
-
-### 稳定诊断码
+`Partial` 的 `degradation` 显式记录 `missing_faces` / `open_edges` /
+`dropped_shells`（壳内无任何面成功时上报）。
 
 | 码 | 含义 |
 |---|---|
-| `kernel.no_acis_kernel` | 本构建未链接 ACIS 内核，SAT/SAB 无法求值 |
+| `kernel.no_acis_kernel` | 默认内核不解析 SAT/SAB 字节 |
 | `kernel.unsupported_exchange` | 无法分类的交换载荷 |
-| `kernel.empty_geometry` | 载荷为空字节 |
+| `kernel.unsupported_surface` | 中性 B-rep 含本构建无法求值的曲面/曲线 |
+| `kernel.empty_geometry` | 载荷为空字节，或 B-rep 无可离散面 |
 | `kernel.missing_handle` | 几何句柄无法解析 |
 | `kernel.invalid_tolerance` | 伺服容差非有限/非正 |
 | `kernel.invalid_budget` | 每实体预算非法（如为 0） |
-| `kernel.budget_exceeded` | 产出的网格超出请求预算 |
+| `kernel.budget_exceeded` | 产出的网格超出请求预算（不静默截断） |
 | `kernel.missing_face` | 源实体某个面未能离散 |
-| `kernel.open_edge` | 边界边未闭合 |
+| `kernel.open_edge` | 边界边未闭合/非流形 |
 | `kernel.dropped_shell` | 因缺面而丢弃的壳/体 |
-| `kernel.cancelled` | 请求在产出前被取消 |
+| `kernel.cancelled` | 请求在产出前被取消（`CadError::Cancelled`） |
 
-## 3. 为什么 ACIS 仍未实现
+## 7. importer 数据路径
 
-审计（`docs/code-audit-and-agent-handoff.md` F15）确认：
+`cad-import-acadrust`：
 
-1. **没有内核**：仓库未链接任何 ACIS 实体建模内核，也无许可证决策。
-2. **没有解析器**：没有 SAT/SAB 解析器，`SolidExchange` 载荷保持不透明；
-   importer 的 ACIS opaque payload 目前为空。
-3. **没有样本**：没有可交付的 3DSOLID/BODY/REGION/SURFACE 真实或脱敏夹具，
-   无法做分项验收，也就不能声称任何兼容性。
+* `solid_exchange_from_entity(&EntityType) -> Option<SolidExchange>`：对
+  `3DSOLID` / `REGION` / `BODY` / `SURFACE` 取 `AcisData`，解析成功则返回
+  `Brep(SolidExchange)`；解析失败保留原始 `Sat`/`Sab` 字节。
+* `acis_exchange(&AcisData) -> SolidExchange`、`sat_to_brep(&SatDocument)`、
+  `sab_to_brep(&[u8])` 为可单测的底层入口。
+* 导入时实体的 `SemanticGeometry::Opaque.payload` 现在保留原始 SAT/SAB 字节
+  （version 1 = SAT，2 = SAB）作为溯源；显示支持状态仍为 `Unchecked`，
+  除非显式走上表 §3 的 `BrepTessellator`。
 
-因此默认路径只做**诚实报告**：返回 `Unsupported`，绝不伪造网格。
-“返回 `Unsupported`”是契约正确行为，不是完成。
+acadrust API 使用：`entities::acis::{SatDocument, SabReader, SatFace, SatLoop,
+SatCoedge, SatEdge, SatVertex, SatPoint, SatPlaneSurface, SatConeSurface,
+SatSphereSurface, SatTorusSurface, SatEllipseCurve, Sense}`，以及
+`AcisData::{parse, is_binary, sat_data, sab_data}` 与
+`SatDocument::{placement, resolve, records}`。
 
-## 4. 未来接入必须提供的内容
+## 8. 显示路径
 
-接入方在把 F15 从“契约”推进到“已实现”前，必须补齐：
+`cad-representation::DisplayRepresentation::from_tessellation(result, source,
+alpha)` 把 `TessellationResult` 转为显示图元：
 
-* **输入**：可用的 SAT/SAB（或自有交换）载荷路径，并能从 importer 的
-  3DSOLID/BODY/REGION/SURFACE 得到非空字节。
-* **内核选择与许可**：明确的内核（自研或第三方）及其许可证；许可与
-  第三方声明写入 `THIRD_PARTY_NOTICES.md`；不得修改 acadrust，不得使用
-  Cargo `[patch]`。
-* **夹具样本**：按 3DSOLID/BODY/REGION/SURFACE 分类的真实/脱敏样本，
-  以及“缺面、开边、丢弃壳”的退化样本，纳入 `fixtures/manifest`。
+* 有网格 → `DisplayPrimitive::Mesh`，`GeometrySource::KernelMesh`，
+  `precision_for_kernel_mesh` 直接采用内核报告的上界；
+* `Unsupported`/`Failed` → `Completeness::Missing` + `kernel.unsupported`
+  诊断，绝不产生“空网格成功”。
 
-## 5. 验收标准
+`precision_for_source(KernelMesh)` 不再声称 `Analytic`（仅凭标签无法知道误差），
+改为 `Approximate { error_bound: None }`。
 
-一项实现只有同时满足以下条件才算完成：
+## 9. 夹具与测试
 
-1. 对分项样本产出**真实**面片；`Success` 的网格非空且闭合（或带
-   `Partial` 的显式退化报告）。
-2. 缺面 / 开边 / 丢弃壳均以 `kernel.missing_face` / `kernel.open_edge` /
-   `kernel.dropped_shell` 报告，且与样本预期一致。
-3. 容差单调性：更小的伺服容差产生不低于更粗容差的保真度（误差受控）。
-4. 预算被真实执行：超预算产出报告 `kernel.budget_exceeded`，不静默截断。
-5. 空载荷、未解析句柄、未知交换、取消、非法输入全部走到对应的
-   `Failed` / `Unsupported` / `CadError` 分支，且有契约测试覆盖。
-6. `cargo test -p cad-kernel-adapter --locked`、workspace 测试与 wasm 检查
-   全部通过；`docs/validation.md` 记录本轮可复现实据。
+夹具（`fixtures/acis/`，全部标注为 synthetic、本仓库自撰，见 `fixtures/manifest`）：
 
-在满足以上标准前，本模块必须保持 `Unsupported` 默认路径，并继续标注
-F15 为**未实现/未验收**。
+| 夹具 | 预期 |
+|---|---|
+| `cube.sat` | `Success`，12 三角形，面积 24，闭合 |
+| `box-with-square-hole.sat` | `Success`，10 面（含内环洞），面积 392，闭合 |
+| `cylinder.sat` | `Success`（两圆盖 + 圆柱侧面），带弦高上界 |
+| `sphere.sat` | `Success`，单面无环 |
+| `cone-unsupported.sat` | `Partial` + `kernel.missing_face`（圆锥侧面不支持） |
+
+覆盖：立方体三角形数/面积/闭合性、球面容差单调性、空载荷、未解析句柄、
+未知交换、取消、超预算、无法离散的面 → `Partial` + `kernel.missing_face`、
+全不支持 → `Unsupported(kernel.unsupported_surface)`、importer 的 SAT/SAB
+往返与中性提升、representation 的 kernel-mesh 转换。
+
+## 10. 诚实边界
+
+* 夹具由 acadrust 写出/手写，**不是**第三方图纸；不构成互操作证据。
+* 默认内核仍为 `Unsupported`；本文件不把 `BrepTessellator` 的可达子集等同于
+  F15 整体完成。
+* 未列于 §4 的曲面/曲线/退化情形一律按 §5 缺面上报。
