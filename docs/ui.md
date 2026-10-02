@@ -128,6 +128,34 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 `apps/app-android` 仍未接线（不在本轮范围）。以上仅为源码接线与编译证据，
 浏览器/真机验收待补，不构成视觉验收。
 
+### 3.2 Android 宿主接线（选择/预览/布局切换）
+
+`apps/app-android/src/state_push.rs::push_panel_state` 与 Web 同源：在启动、
+打开图纸成功、命令执行、画布点按/拖动/缩放后统一推送面板状态，并在同一快照中把
+**瞬态渲染叠加层**推入 `CadView`：
+
+- `CadView::set_selection_highlight(snapshot.selection)`：选择集来自
+  `HostController::selection()`；空选择推入空高亮（清除叠加层），命中则高亮真实
+  实体，不伪造几何。
+- `CadView::set_measurement_preview(snapshot.measurement_preview)` /
+  `CadView::set_annotation_preview(snapshot.annotation_preview)`：来自
+  `HostController::measurement_preview()` / `annotation_preview()`；无工具时传
+  `None`，取消预览叠加层（命令确认/取消后同样回到 `None`）。
+- 这些字段与面板一起放在纯 `PanelSnapshot` 中，因此宿主接线逻辑可在不打开 Slint
+  窗口的情况下单测（`android_snapshot_*` 系列）。
+
+**布局（图纸空间）切换走默认命令路径，未安装 `LayoutSwitchSink`**：适配器
+`on_layout_selected` 在宿主未安装 sink 时派发
+`CommandId::SwitchSpace` + `CommandPayload::Space(...)`；`HostSink::send` 将其交给
+`HostController::execute`，后者按真实布局表校验（未知布局显式拒绝），随后
+`sync_view_camera` 重同步相机与活动空间、`push_panel_state` 重推布局面板。
+Android **刻意不安装** `LayoutSwitchSink`：一旦安装，适配器会改调 sink 而**不再**
+发送 `SwitchSpace` 命令，反而绕过验证与相机重同步。宿主侧用
+`android_layout_selection_routes_through_switch_space`（含切回模型空间、未知布局被拒）
+断言该命令路径。
+
+以上仅为源码接线与 Android 目标类型检查证据；**未在设备上复测**，不构成视觉验收。
+
 ## 4. 工具面板（U03）
 
 新增一条紧凑的工具/状态栏（高度 40px），只显示真实状态：

@@ -197,6 +197,13 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         dragging: Cell::new(false),
         policy: RefCell::new(InputPolicy::new()),
     }));
+    // Layout (paper-space) switching intentionally uses the adapter's default
+    // command path: with no `LayoutSwitchSink` installed, `on_layout_selected`
+    // emits `CommandId::SwitchSpace` + `CommandPayload::Space(...)`, which
+    // `HostSink::send` runs through `HostController::execute` and then re-syncs
+    // the camera and the layout panel. Installing a sink here would *replace*
+    // that command, so it is deliberately not installed (see `docs/ui.md` §3.2
+    // and the `android_layout_selection_routes_through_switch_space` test).
     *shared_view.borrow_mut() = Some(view);
     // Populate every panel from real application state now that both the shell
     // and the render bridge exist (docs/ui.md §3, docs/panels.md §3.2).

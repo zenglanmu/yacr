@@ -14,7 +14,9 @@
 //! * the read-only property panel for the current selection,
 //! * the annotation management panel plus its ordered `AnnotationId`s,
 //! * the layout (paper-space) panel from the database's real layout table,
-//! * the diagnostics drawer from the last import report.
+//! * the diagnostics drawer from the last import report,
+//! * the transient render overlays: selection highlight, measurement preview and
+//!   annotation preview.
 //!
 //! When a getter has nothing to report the panels show their **explicit empty
 //! state**; no row is ever fabricated. A missing import report is reported as
@@ -54,6 +56,13 @@ pub(crate) struct PanelSnapshot {
     pub layouts: LayoutPanelState,
     pub layout_ids: Vec<LayoutId>,
     pub diagnostics: DiagnosticsPanelState,
+    /// Selection rendered as a highlight overlay. Empty when nothing is selected;
+    /// never a fabricated hit.
+    pub selection: cad_app::SelectionSet,
+    /// In-progress measurement preview, or `None` when no measurement tool runs.
+    pub measurement_preview: Option<cad_app::MeasurementPreview>,
+    /// In-progress annotation preview, or `None` when no annotation tool runs.
+    pub annotation_preview: Option<cad_app::AnnotationPreview>,
 }
 
 /// Build every panel model from the authoritative controller + view.
@@ -71,7 +80,11 @@ pub(crate) fn snapshot(
         controller_ref.measurement_preview().as_ref(),
         controller_ref.unit_label(),
     );
-
+    // Transient overlay inputs (docs/ui.md §2): the selection highlight and the
+    // active tool previews are pushed on the same snapshot as the panels, so a
+    // command, a pick, an open or a tool confirm/cancel keeps them current.
+    let selection = controller_ref.selection().clone();
+    let measurement_preview = controller_ref.measurement_preview();
     let (layer_rows, layer_ids) = match controller_ref.layer_rows() {
         Ok(rows) => {
             let ids = rows.iter().map(|row| row.id).collect();
@@ -150,15 +163,19 @@ pub(crate) fn snapshot(
         layouts,
         layout_ids,
         diagnostics,
+        selection,
+        measurement_preview,
+        annotation_preview,
     }
 }
 
 /// Push every derived panel model into the Slint shell in one place.
 ///
-/// Also mirrors the session's temporary layer overrides into the render bridge,
-/// so a layer toggle actually hides/shows geometry rather than only updating the
-/// panel (`docs/panels.md` §3.1). A missing view (before `install_cad_bridge`
-/// runs) still pushes the panels; the override sync is simply skipped.
+/// Also mirrors transient render state into the render bridge: the session's
+/// temporary layer overrides (`docs/panels.md` §3.1), the selection highlight and
+/// the active measurement/annotation previews (`docs/ui.md` §2). A missing view
+/// (before `install_cad_bridge` runs) still pushes the panels; the render-mirror
+/// sync is simply skipped.
 pub(crate) fn push_panel_state(
     controller: &Rc<RefCell<HostController>>,
     handle: &UiHandle,
@@ -178,6 +195,12 @@ pub(crate) fn push_panel_state(
     if let Some(view) = view.borrow().as_ref() {
         let overrides = controller.borrow().session.layer_overrides.clone();
         view.set_layer_overrides(overrides);
+        // Selection → highlight overlay; empty selection clears it. The preview
+        // setters take `None` when no tool is running, which cancels the overlay
+        // instead of leaving a stale one (docs/ui.md §2).
+        view.set_selection_highlight(snapshot.selection);
+        view.set_measurement_preview(snapshot.measurement_preview);
+        view.set_annotation_preview(snapshot.annotation_preview);
     }
 }
 
