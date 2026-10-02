@@ -115,8 +115,10 @@ I MESA    : exportSyncFdForQSRILocked: call for image ...
   接到 `ViewInput`（Web 宿主已接；Android 遗漏），画布无法平移/缩放。
 - 修复后截图可见 `01_baseline_fit.png` / `02_after_pan.png` / `03_after_fit.png`：
   虚线几何随拖动位移，点「适应」后回到基准。
-- 批注安全：Android 未安装 `CanvasPickMapper`，且 `canvas-pick` 仅在量测/批注工具激活时
-  才动作；因此画布手势不会误提交批注。批注面板保持空（`批注` 无行）。
+- 批注安全：本次改动后 Android 已安装 `CanvasPickMapper`（`screen_to_world`），量测/
+  批注工具激活时画布点按会产生真实世界点；无活动工具时点按走选择拾取。画布拖动手势
+  仍不会误提交批注/量测。以上仅在宿主本机做类型检查与纯逻辑单测（见 §8），**未在
+  模拟器上重新点击验证**；§5 的像素 diff 仍是未接线版本的历史证据。
 
 截图与日志已随本文件提交（`docs/evidence/android-runtime/`）：
 
@@ -162,20 +164,53 @@ NOT RUN**；仅做了 Android target 的类型检查。
 ## 8. 仍未完成 / 限制（全部显式记录）
 
 - **真机**：未执行。本文件全部为模拟器 SwiftShader 结果。
-- **surface 尺寸与安全区（audit U07）**：`UiConfiguration::safe_insets` 未被任何代码
-  消费；Android 未在 surface 变化时回传逻辑尺寸、未重算 `apply_responsive`，也未对
-  渲染目标做画布矩形偏移（`Image` 用完整窗口的帧）。导致顶部工具栏被状态栏遮挡、
-  布局按配置值 [1080,1920] 而非真实 surface 推导，并可能被裁切。
-- **量测/批注拾取**：Android（与 Web 相同）未安装 `CanvasPickMapper`；点击画布在工具
-  激活时仅报告 `status.pick_unwired`，不产生世界点。
-- **面板状态未推送**：Android 宿主未调用 `set_layer_state` / `set_layout_state` /
-  `set_annotation_state` / `set_diagnostics_state`，图层/布局/批注/诊断面板显示显式
-  空状态。
+- **surface 尺寸与安全区（audit U07）**：`UiConfiguration::safe_insets` 仍未被任何代码
+  消费；当次改动新增纯函数 `apply_surface_size(controller, size_logical, dpi_scale)`
+  （用 `apply_canvas_metrics` 更新 `Viewport.logical_size`/`dpi_scale` 且**不动相机**，
+  见 `apps/app-android/src/state_push.rs`），并在 `start()` 用配置逻辑尺寸调用一次。
+  **Activity 侧尚未把 `SurfaceHolder` 的尺寸/旋转回调转发到该函数**，因此真实 surface
+  变化仍未生效；未拍现场景不做假接线。剩余挂钩位置即此函数（见本节末“宿主侧待办”）。
+- **量测/批注拾取**：本次改动已在 Android 安装 `CanvasPickMapper`
+  （`AndroidCanvasPickMapper`，逻辑像素→`Viewport::screen_to_world`），量测/批注工具
+  激活时画布点按产生真实世界点，不再只报 `status.pick_unwired`。退化输入（无 surface、
+  非有限坐标）返回 `None`，不伪造点。**未在设备上复测**。
+- **面板状态已推送**：Android 宿主新增 `push_panel_state`，在启动、打开图纸成功、
+  命令执行与画布交互后推送历史可用性、测量、图层（+有序 id）、属性、批注（+有序 id）、
+  布局、诊断；无数据时是显式空态。渲染桥同时接收 `session.layer_overrides`，图层开关
+  会真正影响显示。**未在设备上复测**（面板可见性/命中等需截图验证）。
 - **SAF/文件选择器**：未实现（沿用候选路径）。
 - **打开 DWG**：NOT RUN（见 §6）。
 - **`shader_model: Sm5` 的 downlevel 警告**：`SURFACE_VIEW_FORMATS` 缺失属模拟器
   Vulkan 能力提示，未观察到渲染失败。
 - **helper 脚本**：见 §1 的 `find target` 退出码注意点。
+
+## 8b. 宿主接线状态（本次改动，未设备复测）
+
+本次新增 `apps/app-android/src/state_push.rs`（宿主→外壳连接器），并把它接入
+`start()`、打开图纸成功、命令执行与画布交互：
+
+| 连接器 | 位置 | 状态 |
+|---|---|---|
+| 历史可用性（undo+redo） | `push_panel_state` → `set_history_availability` | 已接线，替换了原来的 `set_can_undo` 单独调用（redo 不再陈旧） |
+| 测量面板 | `MeasurementUiState::from_preview` | 已接线 |
+| 图层面板 + 有序 `LayerId` | `LayerPanelState::from_rows` + `layer_ids` | 已接线；并把 `session.layer_overrides` 推入渲染桥 |
+| 属性面板 | `PropertyPanelState::from_properties` | 已接线（空选择为显式空态） |
+| 批注面板 + 有序 `AnnotationId` | `AnnotationPanelState::from_rows` | 已接线 |
+| 布局面板 + 有序 `LayoutId` | `layout_descriptors` + `from_descriptors` | 已接线（真实布局表；无布局为显式空态） |
+| 诊断抽屉 | `last_import_report.diagnostics` | 已接线；无报告时为空且摘要为“未验证”，不显示为完整 |
+| 画布→世界映射 | `AndroidCanvasPickMapper` → `set_canvas_pick_mapper` | 已接线；退化输入返回 `None` |
+| 点按选择 | `AndroidViewInput`（`InputPolicy` 区分 tap/drag） | 无捕获工具时点按 `pick_at_screen`，命中派发 `Select`+`Selection`，未命中清空选择并显示显式状态；拖动仍平移且不选择 |
+| surface 尺寸 | `apply_surface_size`（`apply_canvas_metrics`） | 纯函数 + 启动调用；**Activity resize 回调未转发**（见上） |
+
+**宿主侧待办（Activity）**：`android-activity` 的 `SurfaceHolder` 尺寸/旋转变化时需要
+调用 `apply_surface_size(&controller, [logical_w, logical_h], dpi_scale)`，再
+`push_panel_state` + `request_redraw`。当前 `apps/app-android` 的 `start()` 拿不到该
+回调，因此只落地纯函数与其单测，**未伪造 resize 行为**。
+
+**测试（本机 `#[cfg(test)]`，Android 目标 `cargo check --tests` 可编译；本机缺
+fontconfig 无法原生运行，标注 NOT RUN）**：`state_push` 派生（图层/布局/空面板/诊断
+行）、`apply_surface_size`（更新尺寸与 DPI 且保持相机 target 不变、退化输入报错）、
+选中点按/空白清除/拖动不选择、无 surface 时 pick mapper 返回 `None`。
 
 ## 9. 必跑检查结果（全部通过）
 
