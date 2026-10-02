@@ -241,6 +241,13 @@ pub struct Renderer {
     device_lost: bool,
     /// Detail string carried by the last device-loss observation.
     last_device_lost: Option<String>,
+    /// Bounded wait applied to a submitted frame before classification.
+    ///
+    /// Defaults to 1 s, which suits interactive native hosts. A software
+    /// adapter (Mesa lavapipe) can legitimately spend longer than that on a
+    /// large frame, so a headless caller raises it explicitly instead of the
+    /// renderer misreporting a slow CPU frame as a device loss.
+    poll_timeout: std::time::Duration,
 }
 
 impl Default for Renderer {
@@ -279,6 +286,7 @@ impl Renderer {
             draw_calls: 0,
             device_lost: false,
             last_device_lost: None,
+            poll_timeout: std::time::Duration::from_secs(1),
         }
     }
 
@@ -506,6 +514,15 @@ impl Renderer {
     /// Whether the device has been observed lost and still needs rebuilding.
     pub fn is_device_lost(&self) -> bool {
         self.device_lost
+    }
+
+    /// Set the bounded wait used to classify a submitted frame.
+    ///
+    /// The default (1 s) targets interactive hosts. Software Vulkan (lavapipe)
+    /// can take longer for a large frame; a headless caller raises this so a
+    /// slow CPU frame is not misclassified as [`RenderError::DeviceLost`].
+    pub fn set_poll_timeout(&mut self, timeout: std::time::Duration) {
+        self.poll_timeout = timeout;
     }
 
     fn ensure_target(&mut self, target: &RenderTarget) -> Result<(), RenderError> {
@@ -1034,7 +1051,7 @@ impl Renderer {
     ) -> ScopeOutcome {
         match device.poll(wgpu::PollType::Wait {
             submission_index: Some(submission),
-            timeout: Some(std::time::Duration::from_secs(1)),
+            timeout: Some(self.poll_timeout),
         }) {
             Ok(_) => ScopeOutcome::Clean,
             Err(wgpu::PollError::Timeout) => ScopeOutcome::DeviceLost,
