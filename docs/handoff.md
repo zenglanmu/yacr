@@ -16,7 +16,32 @@
 
 ## 本轮状态（compact，2026-10-02）
 
-**UI 宿主接线轮（最新）**：Ribbon 文档里"宿主连接器（本轮范围外）"与"预览几何尚未
+**UI 宿主接线轮 2（最新，iterations 2–4）**：Ribbon 文档的宿主接线与渲染叠加全部闭环，
+并继续补齐审计项。四个迭代的顺序合入均通过主控验证：
+
+- **叠加层宿主接线**：`CadView::set_selection_highlight/set_measurement_preview/
+  set_annotation_preview` 已由 Web 与 Android 的状态漏斗在每次命令/拾取/打开/确认取消后
+  推送；选择变化复用底图与批注 Arc。
+- **选择高亮端到端修复**：修复 Web 画布点击永不可选（`!was_dragging` 门把每次点击都当
+  拖动拒绝）；现在单击命中即派发 `Select`，无头截图证明圆被高亮且清空回到基线。
+- **测量存为批注（F06/F07）**：`CommandId::SaveMeasurementAsAnnotation`，一次事务/一次
+  撤销，无记录时 `InvalidInput`；UI 按钮「存为批注」仅在确认记录存在时可用。
+- **查看/工作模式（U02）**：`CommandId::SetMode` + 命令栏开关，权限仍在命令层强制。
+- **窄屏命令栏**：手机上模式开关移入可展开行，320px 不再挤压命令输入框。
+- **异步导入（F01）**：核心快照 + `ImportProgressUiState`；Web 在 wasm（无线程）只推真实
+  终态并诚实说明，Android 走真实 `std::thread` worker + 100ms 轮询 + 取消；面板无伪造进度。
+- **可访问性（U12）/ 状态重叠（U08）**：`aria-live=polite` 人类摘要区域、`role=application`
+  可聚焦画布、`host-state` 就绪时隐藏且不再双重播报。
+- **U07**：Android 暴露 `set_surface_size` 入口（Activity 回调仍为显式未接钩子）。
+
+证据：核心串行 **830 passed / 0 failed / 1 ignored**；JS 契约 **26 passed**；i18n
+**151 keys**；架构、fixture manifest、workflows、Android aarch64 检查全通过；无头
+Chromium（SwiftShader/WebGL2）ribbon/UI/mobile/overlay 四套脚本在 1280×800、390×844
+DPR3、320×740 DPR2 通过，并直接对 **Cloudflare Pages 生产 URL 重跑通过**。新增
+`scripts/check-web-overlay.mjs` 端到端证明选择高亮改变像素并清空回基线。仍开放：真机、
+WebGPU/真实 GPU、Android Activity resize/SAF、绘制/编辑（需可写数据库）。
+
+**UI 宿主接线轮（iteration 1）**：Ribbon 文档里"宿主连接器（本轮范围外）"与"预览几何尚未
 接线"两项已落地并端到端验证。三个并行 workstream 已合入 main：
 
 - **Web 宿主**：`browser/state_push.rs::push_panel_state` 成为唯一状态漏斗，在每次
