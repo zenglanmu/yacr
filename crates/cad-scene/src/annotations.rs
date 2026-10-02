@@ -79,6 +79,7 @@ impl Default for AnnotationSceneOptions<'_> {
             budget: FrameBudget {
                 max_vertices: 8_000_000,
                 max_triangles: 2_000_000,
+                max_bytes: usize::MAX,
             },
             tolerance: 0.01,
             draw_order_base: 1_000_000,
@@ -856,6 +857,7 @@ mod tests {
             budget: FrameBudget {
                 max_vertices: 3,
                 max_triangles: 0,
+                max_bytes: usize::MAX,
             },
             ..Default::default()
         };

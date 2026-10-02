@@ -107,7 +107,14 @@ pub(crate) fn plan_from_gpu(batches: &[GpuBatch], budget: &FrameBudget) -> GpuPl
         } else {
             0
         };
-        match budget.charge(&mut usage, vertices, triangles) {
+        // The GPU bytes actually submitted: position, normal and edge-index
+        // buffers plus the triangle index buffer. Derived from the packed GpuBatch
+        // so `upload_bytes_per_frame` is charged the same numbers the device sees.
+        let bytes = batch.upload_size_bytes();
+        let outcome = budget
+            .charge_bytes(&mut usage, bytes)
+            .and_then(|()| budget.charge(&mut usage, vertices, triangles));
+        match outcome {
             Ok(()) => accepted.push(i),
             Err(exceeded) => {
                 let report = OverBudget {

@@ -293,12 +293,15 @@ pub fn sorted_edge_indices(indices: &[[u32; 3]]) -> Vec<u32> {
     out
 }
 
-/// Accumulate a frame's vertex/triangle usage against a budget.
+/// Accumulate a frame's vertex/triangle/byte usage against a budget.
 ///
 /// Returns the list of batches that fit and a single explicit over-budget
 /// reason, or `None`, when a limit was crossed. The offending batch and every
 /// batch after it are *not* silently dropped: the caller receives the reason and
-/// can surface it. The counts are the same ones the GPU will submit.
+/// can surface it. The counts are the same ones the GPU will submit, and the
+/// byte charge is [`RenderBatch::upload_size_bytes`] — the exact packed size —
+/// so [`FrameBudget::upload_bytes_per_frame`] cannot be bypassed by a small
+/// vertex/triangle count.
 pub fn plan_frame<'a>(
     batches: &'a [RenderBatch],
     budget: &FrameBudget,
@@ -312,7 +315,13 @@ pub fn plan_frame<'a>(
         } else {
             0
         };
-        match budget.charge(&mut usage, vertices, triangles) {
+        let bytes = batch.upload_size_bytes();
+        // Charge bytes first so a batch that crosses several categories reports
+        // the size dimension consistently; vertices/triangles follow.
+        let outcome = budget
+            .charge_bytes(&mut usage, bytes)
+            .and_then(|()| budget.charge(&mut usage, vertices, triangles));
+        match outcome {
             Ok(()) => accepted.push(batch),
             Err(exceeded) => {
                 let skipped = batches.len() - accepted.len();
@@ -335,7 +344,7 @@ pub fn plan_frame<'a>(
 /// An explicit over-budget report produced by [`plan_frame`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OverBudget {
-    /// `"vertices"` or `"triangles"`.
+    /// `"vertices"`, `"triangles"` or `"bytes"`.
     pub category: &'static str,
     pub requested: usize,
     pub limit: usize,
@@ -668,6 +677,7 @@ mod tests {
         let budget = FrameBudget {
             max_vertices: 100,
             max_triangles: 100,
+            max_bytes: usize::MAX,
         };
         let (accepted, usage, over) = plan_frame(&batches, &budget);
         assert_eq!(accepted.len(), 1);
@@ -682,6 +692,7 @@ mod tests {
         let budget = FrameBudget {
             max_vertices: 4,
             max_triangles: 100,
+            max_bytes: usize::MAX,
         };
         let (accepted, usage, over) = plan_frame(&batches, &budget);
         assert_eq!(accepted.len(), 1);
@@ -690,6 +701,42 @@ mod tests {
         assert_eq!(over.category, "vertices");
         assert_eq!(over.limit, 4);
         assert_eq!(over.skipped_batches, 2);
+    }
+
+    #[test]
+    fn plan_frame_reports_over_byte_budget() {
+        // One mesh batch is 3 positions + 3 normals + 3 colours + 1 triangle
+        // index = 12*3 + 12*3 + 12*3 + 12 = 120 bytes, plus 3 distinct edges =>
+        // 6 edge indices * 4 = 24, total 144. A budget of 100 rejects it on the
+        // byte category.
+        let batches = vec![mesh_batch(false)];
+        assert_eq!(batches[0].upload_size_bytes(), 144);
+        let budget = FrameBudget {
+            max_vertices: usize::MAX,
+            max_triangles: usize::MAX,
+            max_bytes: 100,
+        };
+        let (accepted, usage, over) = plan_frame(&batches, &budget);
+        assert!(accepted.is_empty());
+        assert_eq!(usage.bytes, 0);
+        let over = over.expect("expected an over-budget report");
+        assert_eq!(over.category, "bytes");
+        assert_eq!(over.requested, 144);
+        assert_eq!(over.limit, 100);
+    }
+
+    #[test]
+    fn plan_frame_charges_exact_upload_bytes_on_success() {
+        let batches = vec![mesh_batch(false)];
+        let budget = FrameBudget {
+            max_vertices: usize::MAX,
+            max_triangles: usize::MAX,
+            max_bytes: usize::MAX,
+        };
+        let (accepted, usage, over) = plan_frame(&batches, &budget);
+        assert_eq!(accepted.len(), 1);
+        assert!(over.is_none());
+        assert_eq!(usage.bytes, batches[0].upload_size_bytes());
     }
 
     #[test]

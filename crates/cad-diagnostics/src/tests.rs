@@ -47,6 +47,114 @@ fn package_encoding_contains_no_paths() {
 }
 
 #[test]
+fn benchmark_report_schema_is_explicit_about_absence() {
+    let report = BenchmarkReport {
+        sample_hash: Some([0xab; 32]),
+        release_build: true,
+        timings: MeasuredTimings {
+            parse_ms: Some(1.25),
+            build_ms: Some(2.5),
+            upload_ms: None,
+            first_usable_ms: None,
+            complete_ms: Some(3.75),
+        },
+        memory: MeasuredMemory {
+            file_bytes: Some(100),
+            domain_bytes: None,
+            cpu_geometry_bytes: Some(200),
+            gpu_estimated_bytes: Some(300),
+            atlas_bytes: None,
+            attachment_bytes: None,
+        },
+        budgets: BenchmarkBudgets {
+            cpu_bytes: Some(1000),
+            upload_bytes_per_frame: Some(500),
+            queued_tasks: Some(8),
+            max_vertices_per_frame: Some(100),
+            max_triangles_per_frame: Some(50),
+        },
+        context: MeasuredContext {
+            sample_hash: Some([0xab; 32]),
+            device: Some("lavapipe".into()),
+            browser: None,
+            release_build: true,
+            viewport: None,
+            quality_configuration: Some("default".into()),
+        },
+        over_budget: vec!["bytes".into()],
+    };
+    let value = report.to_json();
+    assert_eq!(value["claim"], "measurement, not compatibility");
+    assert_eq!(value["environment"]["release_build"], true);
+    assert_eq!(value["environment"]["profile"], "release");
+    // A measured phase is a rounded number...
+    assert_eq!(value["timings_ms"]["parse"], 1.25);
+    assert_eq!(value["timings_ms"]["build"], 2.5);
+    // ...an unmeasured one is explicit null, never 0.
+    assert!(value["timings_ms"]["upload"].is_null());
+    assert!(value["timings_ms"]["first_usable"].is_null());
+    // Memory: present vs absent is distinguishable.
+    assert_eq!(value["memory_bytes"]["file"], 100);
+    assert!(value["memory_bytes"]["domain"].is_null());
+    // The hash is lower-case hex, never a path.
+    assert_eq!(value["sample_hash"], "ab".repeat(32));
+    assert_eq!(value["context"]["sample_hash"], "ab".repeat(32));
+    assert_eq!(value["context"]["device"], "lavapipe");
+    assert!(value["context"]["browser"].is_null());
+    assert_eq!(value["budgets"]["queued_tasks"], 8);
+    assert_eq!(value["over_budget"][0], "bytes");
+}
+
+#[test]
+fn absent_sample_hash_encodes_as_null_not_zeroes() {
+    let report = BenchmarkReport {
+        sample_hash: None,
+        release_build: false,
+        timings: MeasuredTimings::default(),
+        memory: MeasuredMemory::default(),
+        budgets: BenchmarkBudgets::default(),
+        context: MeasuredContext::default(),
+        over_budget: Vec::new(),
+    };
+    let value = report.to_json();
+    assert!(value["sample_hash"].is_null());
+    assert!(value["context"]["sample_hash"].is_null());
+    assert!(value["context"]["viewport"].is_null());
+    assert_eq!(value["environment"]["profile"], "debug");
+    assert!(value["timings_ms"]["complete"].is_null());
+}
+
+#[test]
+fn measured_timings_view_substitutes_zero_only_for_the_redacted_package() {
+    let timings = MeasuredTimings {
+        parse_ms: Some(4.0),
+        ..MeasuredTimings::default()
+    };
+    let load = timings.to_load_timings();
+    assert_eq!(load.parse_ms, 4.0);
+    assert_eq!(load.upload_ms, 0.0);
+}
+
+#[test]
+fn partial_context_never_upgrades_with_invented_fields() {
+    let mut context = MeasuredContext {
+        sample_hash: Some([1; 32]),
+        device: Some("lavapipe".into()),
+        browser: None,
+        release_build: true,
+        viewport: Some(ViewportId(7)),
+        quality_configuration: Some("default".into()),
+    };
+    // All required fields present: the full host context is recoverable.
+    let full = context.to_benchmark_context().expect("complete context");
+    assert_eq!(full.viewport, ViewportId(7));
+    assert_eq!(full.device, "lavapipe");
+    // Dropping a required field makes it explicitly unavailable, not invented.
+    context.viewport = None;
+    assert!(context.to_benchmark_context().is_none());
+}
+
+#[test]
 fn model_keeps_every_reason_not_just_the_first() {
     let mut model = DiagnosticsModel::new();
     model.add(

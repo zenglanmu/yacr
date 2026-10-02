@@ -10,6 +10,7 @@ impl Renderer {
             frame_budget: FrameBudget {
                 max_vertices: 8_000_000,
                 max_triangles: 2_000_000,
+                max_bytes: usize::MAX,
             },
             // No device yet, so no backend has actually been activated.
             active_backend: None,
@@ -29,6 +30,7 @@ impl Renderer {
             batches: Vec::new(),
             device_generation: 0,
             uploaded_bytes: 0,
+            last_upload_ms: None,
             draw_calls: 0,
             device_lost: false,
             last_device_lost: None,
@@ -355,6 +357,7 @@ impl Renderer {
             .layout
             .as_ref()
             .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
+        let started = std::time::Instant::now();
         for batch in &delta.added {
             let (vertices, indices, edge_indices, normals, colors) = match batch.topology {
                 RenderTopology::Mesh => {
@@ -419,11 +422,11 @@ impl Renderer {
             };
 
             let (camera, bind_group) = Self::make_uniform(device, layout);
-            let bytes = vertices.len()
-                + indices.len() * 4
-                + edge_indices.len() * 4
-                + normals.len()
-                + colors.len();
+            // The exact bytes this batch packed: positions/normals/colours 12 B
+            // per vertex, triangle and edge indices 4 B each. Kept in lockstep
+            // with `GpuBatch::upload_size_bytes`, which the frame budget charges.
+            let bytes =
+                normals.len() + vertices.len() + colors.len() + indices.len() * 4 + edge_indices.len() * 4;
             self.uploaded_bytes += bytes as u64;
             self.batches.push(GpuBatch {
                 vertices: vertex_buffer,
@@ -448,9 +451,19 @@ impl Renderer {
                 ],
                 camera,
                 bind_group,
+                upload_bytes: bytes,
             });
         }
+        self.last_upload_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
         Ok(())
+    }
+
+    /// Wall-clock milliseconds of the most recent [`Renderer::upload`] call.
+    ///
+    /// `None` until an upload has run. This is the real upload phase measured by
+    /// the renderer, not a derived estimate.
+    pub fn last_upload_ms(&self) -> Option<f64> {
+        self.last_upload_ms
     }
 
     fn vertex_buffer(

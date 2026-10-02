@@ -232,6 +232,21 @@ struct GpuBatch {
     origin: [f32; 3],
     camera: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    /// Exact bytes this batch uploads, cached at upload time so the per-frame
+    /// byte budget does not recompute the edge index list every frame.
+    upload_bytes: usize,
+}
+
+impl GpuBatch {
+    /// Exact bytes this batch uploads to the device.
+    ///
+    /// Positions/normals are 12 bytes per vertex, edge indices and the triangle
+    /// index buffer are `u32` (4 bytes) each. This matches the byte count
+    /// [`Renderer::upload`] accumulates, so the frame byte budget and the
+    /// reported `FrameStats::uploaded_bytes` cannot disagree.
+    fn upload_size_bytes(&self) -> usize {
+        self.upload_bytes
+    }
 }
 
 /// The widest 2D texture dimension a host can rely on.
@@ -269,6 +284,9 @@ pub struct Renderer {
     batches: Vec<GpuBatch>,
     device_generation: u64,
     uploaded_bytes: u64,
+    /// Wall-clock ms of the last `upload`, or `None` before the first upload.
+    /// Real measured upload time for `LoadTimings::upload_ms`.
+    last_upload_ms: Option<f64>,
     draw_calls: u64,
     /// Set once a device-loss is observed, until the host rebuilds.
     device_lost: bool,

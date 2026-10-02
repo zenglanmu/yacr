@@ -33,6 +33,53 @@ pub struct LoadTimings {
     pub complete_ms: f64,
 }
 
+/// Which wall-clock phases a caller actually measured on its path.
+///
+/// The benchmark report keeps each phase as an `Option` so a consumer can tell
+/// "0 ms, measured" from "not measured"; an unmeasured phase is `None` and
+/// encodes as JSON `null`. It is never fabricated.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct MeasuredTimings {
+    pub parse_ms: Option<f64>,
+    pub build_ms: Option<f64>,
+    pub upload_ms: Option<f64>,
+    pub first_usable_ms: Option<f64>,
+    pub complete_ms: Option<f64>,
+}
+
+impl MeasuredTimings {
+    /// A [`LoadTimings`] view where an unmeasured phase is `0.0`.
+    ///
+    /// Only for the redacted package, whose schema has always been plain
+    /// numbers; the benchmark JSON uses [`MeasuredTimings`] directly so absence
+    /// stays visible.
+    pub fn to_load_timings(self) -> LoadTimings {
+        LoadTimings {
+            parse_ms: self.parse_ms.unwrap_or(0.0),
+            build_ms: self.build_ms.unwrap_or(0.0),
+            upload_ms: self.upload_ms.unwrap_or(0.0),
+            first_usable_ms: self.first_usable_ms.unwrap_or(0.0),
+            complete_ms: self.complete_ms.unwrap_or(0.0),
+        }
+    }
+}
+
+/// Real byte accounting along the load path.
+///
+/// Mirrors `MemoryBudget` but every field is optional, because a caller may not
+/// know a category (for example a CLI run with no GPU has no
+/// `gpu_estimated_bytes`). The benchmark JSON reports these `Option`s plus the
+/// scene budgets they are charged against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MeasuredMemory {
+    pub file_bytes: Option<u64>,
+    pub domain_bytes: Option<u64>,
+    pub cpu_geometry_bytes: Option<u64>,
+    pub gpu_estimated_bytes: Option<u64>,
+    pub atlas_bytes: Option<u64>,
+    pub attachment_bytes: Option<u64>,
+}
+
 pub struct BenchmarkContext {
     pub sample_hash: [u8; 32],
     pub device: String,
@@ -49,6 +96,150 @@ pub struct DiagnosticPackage {
     pub memory: MemoryBudget,
     pub timings: LoadTimings,
     pub backend: String,
+}
+
+/// A reproducible measurement report (spec §11.3, §19).
+///
+/// Every numeric field is either real (a measured wall-clock time or an exact
+/// byte count) or explicitly absent. `claim` is fixed to
+/// `"measurement, not compatibility"`: this document makes no FPS, phone-budget
+/// or compatibility statement. `encode_json` is deterministic apart from the
+/// measured times themselves — key order is fixed and there is no map with
+/// insertion-order dependence.
+#[derive(Debug, Clone)]
+pub struct BenchmarkReport {
+    /// SHA-256 of the input sample, when the loader computed one. `None` when
+    /// this path did not import (never a zero-filled placeholder).
+    pub sample_hash: Option<[u8; 32]>,
+    pub release_build: bool,
+    pub timings: MeasuredTimings,
+    pub memory: MeasuredMemory,
+    /// Scene-budget ceilings the memory categories were charged against.
+    pub budgets: BenchmarkBudgets,
+    /// Identity fields known on this path (see [`MeasuredContext`]).
+    pub context: MeasuredContext,
+    /// Machine codes for budgets that were crossed while measuring.
+    pub over_budget: Vec<String>,
+}
+
+/// The enforced ceilings a benchmark run can charge against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BenchmarkBudgets {
+    pub cpu_bytes: Option<u64>,
+    pub upload_bytes_per_frame: Option<u64>,
+    pub queued_tasks: Option<u64>,
+    pub max_vertices_per_frame: Option<u64>,
+    pub max_triangles_per_frame: Option<u64>,
+}
+
+/// The benchmark identity actually known on a given path.
+///
+/// Fills the [`BenchmarkContext`] fields a caller can prove (`sample_hash`,
+/// `release_build`, and a free-form quality configuration) while keeping the
+/// host-specific ones (`device`, `browser`, `viewport`) optional. A CLI run owns
+/// no viewport or browser and may have no GPU device, so those stay `None`
+/// rather than being invented. The full [`BenchmarkContext`] belongs to a host
+/// that has all of them (UI/browser); this is the honest subset the core can
+/// report.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MeasuredContext {
+    pub sample_hash: Option<[u8; 32]>,
+    pub device: Option<String>,
+    pub browser: Option<String>,
+    pub release_build: bool,
+    pub viewport: Option<ViewportId>,
+    pub quality_configuration: Option<String>,
+}
+
+impl MeasuredContext {
+    /// Upgrade to a full [`BenchmarkContext`] when every host-specific field is
+    /// known (a UI/browser host): `device`, `browser`, `viewport` and
+    /// `quality_configuration` all present. Returns `None` otherwise, so a
+    /// partial identity is never padded with invented values.
+    pub fn to_benchmark_context(&self) -> Option<BenchmarkContext> {
+        Some(BenchmarkContext {
+            sample_hash: self.sample_hash?,
+            device: self.device.clone()?,
+            browser: self.browser.clone(),
+            release_build: self.release_build,
+            viewport: self.viewport?,
+            quality_configuration: self.quality_configuration.clone()?,
+        })
+    }
+}
+
+impl BenchmarkReport {
+    /// The stable claim text. Never a compatibility or performance grade.
+    pub const CLAIM: &'static str = "measurement, not compatibility";
+
+    /// Build the JSON document. One key per measured quantity; an unmeasured
+    /// phase is `null`, never a fabricated `0`. Times are rounded to
+    /// microseconds (3 decimal places of a millisecond) so two runs of the same
+    /// input produce byte-identical documents when the machine is stable.
+    pub fn to_json(&self) -> serde_json::Value {
+        let round = |value: Option<f64>| -> serde_json::Value {
+            match value {
+                Some(ms) => serde_json::json!((ms * 1000.0).round() / 1000.0),
+                None => serde_json::Value::Null,
+            }
+        };
+        let bytes = |value: Option<u64>| -> serde_json::Value {
+            match value {
+                Some(b) => serde_json::json!(b),
+                None => serde_json::Value::Null,
+            }
+        };
+        serde_json::json!({
+            "claim": Self::CLAIM,
+            "sample_hash": self.sample_hash.as_ref().map(hex).map(serde_json::Value::String),
+            "environment": {
+                "release_build": self.release_build,
+                "profile": if self.release_build { "release" } else { "debug" },
+            },
+            "context": {
+                "sample_hash": self.context.sample_hash.as_ref().map(hex).map(serde_json::Value::String),
+                "device": self.context.device,
+                "browser": self.context.browser,
+                "release_build": self.context.release_build,
+                "viewport": self.context.viewport.map(|v| v.0.to_string()),
+                "quality_configuration": self.context.quality_configuration,
+            },
+            "timings_ms": {
+                "parse": round(self.timings.parse_ms),
+                "build": round(self.timings.build_ms),
+                "upload": round(self.timings.upload_ms),
+                "first_usable": round(self.timings.first_usable_ms),
+                "complete": round(self.timings.complete_ms),
+            },
+            "memory_bytes": {
+                "file": bytes(self.memory.file_bytes),
+                "domain": bytes(self.memory.domain_bytes),
+                "cpu_geometry": bytes(self.memory.cpu_geometry_bytes),
+                "gpu_estimated": bytes(self.memory.gpu_estimated_bytes),
+                "atlas": bytes(self.memory.atlas_bytes),
+                "attachment": bytes(self.memory.attachment_bytes),
+            },
+            "budgets": {
+                "cpu_bytes": bytes(self.budgets.cpu_bytes),
+                "upload_bytes_per_frame": bytes(self.budgets.upload_bytes_per_frame),
+                "queued_tasks": bytes(self.budgets.queued_tasks),
+                "max_vertices_per_frame": bytes(self.budgets.max_vertices_per_frame),
+                "max_triangles_per_frame": bytes(self.budgets.max_triangles_per_frame),
+            },
+            "over_budget": self.over_budget,
+        })
+    }
+}
+
+/// Lower-case hex of a 32-byte hash. Stable and locale-independent.
+pub fn hex(hash: &[u8; 32]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(64);
+    for byte in hash {
+        out.push(DIGITS[(byte >> 4) as usize] as char);
+        out.push(DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 /// Replace absolute/relative path-like tokens with `«redacted»`.

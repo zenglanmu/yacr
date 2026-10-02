@@ -59,6 +59,12 @@ fn render_errors_distinguish_device_loss_from_a_bad_frame() {
 }
 
 #[test]
+fn upload_time_is_absent_before_any_upload() {
+    let renderer = Renderer::default();
+    assert!(renderer.last_upload_ms().is_none());
+}
+
+#[test]
 fn render_before_init_is_not_a_device_loss() {
     let mut renderer = Renderer::default();
     let target = RenderTarget::new(64, 64);
