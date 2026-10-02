@@ -831,6 +831,7 @@ dependencies = [
  "serde",
  "sha2",
  "thiserror 2.0.21",
+ "web-time",
 ]
 
 [[package]]
@@ -897,6 +898,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "web-time",
  "wgpu",
 ]
 

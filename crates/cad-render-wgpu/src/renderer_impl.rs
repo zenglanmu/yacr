@@ -2,6 +2,14 @@
 
 use super::*;
 
+// `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
+// implemented on this platform"); the browser gets `Performance.now()` through
+// `web-time`. Native keeps the std type.
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+
 impl Renderer {
     pub fn new(preference: BackendPreference) -> Self {
         Renderer {
@@ -357,7 +365,7 @@ impl Renderer {
             .layout
             .as_ref()
             .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         for batch in &delta.added {
             let (vertices, indices, edge_indices, normals, colors) = match batch.topology {
                 RenderTopology::Mesh => {

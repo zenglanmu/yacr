@@ -26,6 +26,14 @@ use cad_geometry::{
 };
 use cad_proxy::{DecodeLimits, ProxyPlayer, ProxySource};
 
+// `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
+// implemented on this platform"); the browser gets `Performance.now()` through
+// `web-time`. Native keeps the std type.
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+
 mod solid;
 pub use solid::{
     acis_exchange, acis_raw_payload, sab_to_brep, sat_to_brep, solid_exchange_from_entity,
@@ -247,7 +255,7 @@ impl Importer for AcadrustImporter {
                 "input is not a DWG (missing AC10xx signature); DXF is not handled by this importer".into(),
             ));
         }
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let identity = compute_identity(&request.bytes);
 
         // Read start: the byte count is real (it is the request itself).

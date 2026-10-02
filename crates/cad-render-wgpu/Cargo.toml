@@ -35,3 +35,6 @@ web-sys = { workspace = true, features = ["Window", "Document", "Element", "Html
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
+# `std::time::Instant` panics on wasm32-unknown-unknown; `web_time` uses
+# `Performance.now()` there and re-exports std elsewhere.
+web-time.workspace = true

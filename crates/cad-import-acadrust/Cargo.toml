@@ -24,3 +24,6 @@ sha2.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "=0.3.4", features = ["wasm_js"] }
+# `std::time::Instant` panics on wasm32-unknown-unknown; `web_time` uses
+# `Performance.now()` there and re-exports std elsewhere.
+web-time.workspace = true

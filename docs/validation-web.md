@@ -108,6 +108,17 @@ console 仅有一条预期告警：`No available adapters.`（`Auto` 探测 WebG
    用 `glBlitFramebuffer`；默认 `antialias:true` 的画布是多重采样默认帧缓冲，该 blit
    在 WebGL2 非法（`INVALID_OPERATION`），画布保持空白。`main.js` 在 Slint 创建上下文
    前强制 `antialias:false`（CAD 帧是纹理合成，只损失画布级 MSAA）。
+5. **wasm 时钟 panic（2026-10-02 回归修复）**：perf 提交
+   （`feat(perf): wire real memory/timing measurement`）在
+   `cad-render-wgpu::Renderer::upload` 与 `cad-import-acadrust` 引入了
+   `std::time::Instant::now()`。该函数在 `wasm32-unknown-unknown` 上直接 panic
+   （`time not implemented on this platform`）：首帧 `upload` 在 Slint
+   `BeforeRendering` 通知内 panic，通知持有的 `BridgeState` 可变借用未被释放，
+   随后 `main.js` 的 `renderer_state_report()` 轮询也以
+   `already mutably borrowed` panic，页面停留在“正在初始化渲染器”。改用
+   `web-time`（wasm 走 `Performance.now()`，native 仍为 `std::time::Instant`）
+   后恢复。`bf031c2` 之后未再跑浏览器验证，故该回归此前未被发现；`web-smoke`
+   仍是 capability-gated（`vars.WEB_SMOKE_ENABLED`），默认 SKIPPED。
 
 ### 3.2 i18n 宿主同步
 
@@ -121,6 +132,24 @@ console 仅有一条预期告警：`No available adapters.`（`Auto` 探测 WebG
   `cad_ui_slint::web::stored_locale()` 恢复。
 - 未完成项（见 `docs/i18n.md` §6.2）：Slint 抽屉内选择器、Rust 宿主动态状态/诊断
   文案、数值/单位本地化、`check-i18n.py` 未扫描 web 宿主字面量。
+
+### 3.3 复验（wasm 时钟修复后，2026-10-02）
+
+用 `WITH_FONTS=0` 的临时 bundle（`/tmp/opencode/web-dist-fixed`，wasm
+15,182,044 bytes）复跑 `scripts/check-web-ui.mjs`，退出 0（`web UI check passed`）：
+
+| 断言 | 复验观测值 |
+|---|---|
+| 渲染后端 | `chosen=WebGl2 adapter=Some(WebGl2) caps=Some((WebGl2, false, 8192)) error=None entities=6` |
+| 启动状态文案 | `渲染器就绪：WebGl2`（修复前停留在“正在初始化渲染器…”/“宿主尚未就绪”） |
+| 导航后变化 | `changedFraction=0.00328`（静态帧为 0） |
+| 语言切换 / 持久化 / 字体编排 | 均通过（与 §3 一致） |
+| console / page 错误 | `consoleErrors=0`、`pageErrors=0`；仅 1–2 条预期 `No available adapters.` 告警 |
+
+wasm 中仍存在 winit 及其 `std::sync` 通道单态化出来的 `std::time::Instant::now`
+引用（`wasm-objdump -x` 可见），属于上游在 wasm 上未走 `web-time` 的**潜在**路径；
+本轮所有已执行的启动/导航/切换/重载流程均未触发，记录为上游残余风险（不可用
+Cargo patch 修改）。
 
 ## 4. 必跑检查（全部通过）
 

@@ -79,6 +79,12 @@ encoding_rs = "0.8"
 png = "0.18"
 futures-lite = "2.6"
 
+# Portable wall clock. `std::time::Instant::now()` panics on
+# wasm32-unknown-unknown ("time not implemented"); `web-time` re-exports std on
+# native and uses `Performance.now()` in the browser. Already in the lock via
+# winit / Slint / acadrust.
+web-time = "1"
+
 # Browser host (wasm32 only). Pinned to the versions already in Cargo.lock via
 # the Slint/wgpu web stack; wasm-bindgen-cli must match `wasm-bindgen` exactly.
 wasm-bindgen = "=0.2.129"

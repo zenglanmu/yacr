@@ -114,6 +114,11 @@ scripts/serve-web.py --directory web-dist --port 8090
 
 - 需要 wasm-bindgen-cli **0.2.129**（与 Cargo.lock 中的 wasm-bindgen 严格匹配）与
   `wasm32-unknown-unknown` target。
+- **时钟**：`std::time::Instant::now()` / `SystemTime::now()` 在
+  `wasm32-unknown-unknown` 上会 panic（`time not implemented on this platform`），
+  且 `panic=abort` 会把 panic 点所在的 `RefCell` 借用永久卡住。wasm 运行时可达的
+  计时必须用 `web-time`（本仓 `cad-render-wgpu`、`cad-import-acadrust` 已在 wasm
+  目标下改为 `web_time::Instant`；见 `docs/validation-web.md` §3.1）。
 - 服务必须发送 `application/wasm`；`scripts/serve-web.py` 已设置，部署到静态托管时同样配置。
   HTTPS/安全上下文为 File API 与持久化所需；COOP/COEP 仅可选共享内存路径需要
   （`--coi` 打开）。
