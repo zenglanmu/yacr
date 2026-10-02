@@ -70,6 +70,10 @@ async function main() {
     has_recovery_snapshot: wasmModule.has_recovery_snapshot,
     restore_recovery_snapshot: wasmModule.restore_recovery_snapshot,
     discard_recovery_snapshot: wasmModule.discard_recovery_snapshot,
+    // Async open (F01): the heartbeat pushes the panel; these expose the raw
+    // export and the honest worker capability for diagnostics/headless checks.
+    async_open_poll: wasmModule.async_open_poll_json,
+    async_open_worker_available: wasmModule.async_open_worker_available,
   };
 
   startStatePolling(wasmModule, setStateKey, {

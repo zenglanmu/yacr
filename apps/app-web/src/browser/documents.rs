@@ -15,7 +15,12 @@ use super::persistence::{download_text, WebPersistence};
 use super::state_push;
 use super::{sync_view_camera, viewport_camera, with_runtime};
 
-fn install_opened(
+/// Install a successfully opened drawing into the shared view/incoming slot.
+///
+/// Shared by the synchronous fallback and the asynchronous poll, so the
+/// document swap, camera sync, panel push and font load happen in exactly one
+/// place (no duplicated open path).
+pub(super) fn install_opened(
     name: &str,
     opened: &cad_app::host::OpenedDrawing,
     controller: &Rc<RefCell<HostController>>,
@@ -83,6 +88,10 @@ pub fn open_document_decided(name: &str, bytes: Vec<u8>, decision: &str) -> Resu
         Ok(resolution) => resolution,
         Err(CadError::Cancelled) => {
             let _ = handle.set_status(format!("已取消打开 {name}：当前文档与未保存批注保留"));
+            // An explicit cancelled terminal keeps the progress panel truthful
+            // even though the synchronous fallback never started an import.
+            super::async_open::record_cancelled();
+            super::async_open::push_state(&controller, &handle);
             return Err("cancelled".into());
         }
         Err(e) => {
@@ -90,15 +99,17 @@ pub fn open_document_decided(name: &str, bytes: Vec<u8>, decision: &str) -> Resu
             return Err(e.to_string());
         }
     };
-    let result = controller.borrow_mut().open_bytes_leaving(
+
+    let started = super::async_open::start_or_apply(
+        &controller,
         bytes,
         name,
         decision,
         resolution.saved,
         resolution.recovery_persisted,
     );
-    match result {
-        Ok(opened) => {
+    match started {
+        Ok(super::async_open::OpenStart::Opened(opened)) => {
             install_opened(
                 name,
                 &opened,
@@ -109,6 +120,17 @@ pub fn open_document_decided(name: &str, bytes: Vec<u8>, decision: &str) -> Resu
                 &viewport,
             );
             Ok(format!("已打开 {name}: {}", opened.completeness_label))
+        }
+        Ok(super::async_open::OpenStart::Started) => {
+            // A cancellable background job is running; the poll heartbeat will
+            // install the document. Push the running panel now so it is visible
+            // before the next heartbeat, not one tick later.
+            super::async_open::push_state(&controller, &handle);
+            Ok(format!("正在后台打开 {name}…"))
+        }
+        Err(CadError::Cancelled) => {
+            let _ = handle.set_status(format!("已取消打开 {name}：当前文档与未保存批注保留"));
+            Err("cancelled".into())
         }
         Err(e) => {
             let _ = handle.set_status(format!("打开 {name} 失败：{e}"));
@@ -136,9 +158,16 @@ pub fn open_document(name: &str, bytes: Vec<u8>) -> Result<(), String> {
         return Err("需要未保存决策".into());
     }
     let bytes: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
-    let result = controller.borrow_mut().open_bytes(bytes, name);
-    match result {
-        Ok(opened) => {
+    let started = super::async_open::start_or_apply(
+        &controller,
+        bytes,
+        name,
+        cad_app::UnsavedDecision::Cancel,
+        false,
+        false,
+    );
+    match started {
+        Ok(super::async_open::OpenStart::Opened(opened)) => {
             install_opened(
                 name,
                 &opened,
@@ -148,6 +177,11 @@ pub fn open_document(name: &str, bytes: Vec<u8>) -> Result<(), String> {
                 &incoming,
                 &viewport,
             );
+            Ok(())
+        }
+        Ok(super::async_open::OpenStart::Started) => {
+            let _ = handle.set_status(format!("正在后台打开 {name}…"));
+            super::async_open::push_state(&controller, &handle);
             Ok(())
         }
         Err(e) => {

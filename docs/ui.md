@@ -140,12 +140,28 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   `import.progress.count`、`import.progress.indeterminate`、`import.progress.bytes`、
   `import.detail.separator`、`import.terminal.cancelled`、`import.terminal.failed`。
 
-### 刻意未做 / 宿主待接线
+### 宿主接线（`apps/app-web`，本轮）
 
-- **宿主 UI 尚未调用**：`apps/app-web`、`apps/app-android` 还没有「后台打开」按钮，
-  也没有在轮询后调用 `UiHandle::set_import_state`；它们仍走同步
-  `open_bytes`。因此面板当前不会被真实用户看到，本轮只交付核心+外壳契约。
-- 本轮**未**在浏览器/真机验证渲染，也不声称任何视觉结果。
+- `open_document_bytes*` / `OPEN` 经 `browser/async_open.rs::start_or_apply`：有线程的
+  宿主启动后台任务，浏览器（`wasm32` 无线程）走同步导入并把**真实**终态
+  (`ImportTerminal::Opened/Failed/Cancelled`) 经同一 `ImportProgressUiState` 映射推入
+  面板。无伪造进度。
+- 新 wasm 导出：`async_open_poll_json()`（轮询→至多发布一次→`install_opened`→
+  `set_import_state`→稳定 JSON）与 `async_open_worker_available()`（诚实暴露线程能力）。
+- 单一状态漏斗 `state_push::push_panel_state` 现在同时推 `set_import_state`，因此
+  命令、打开、取消都会刷新面板；`cancel-open-requested` → `CancelLoading` →
+  `cancel_async_open`，当前文档与未保存批注保留。
+- JS：`web/host/renderer.js` 心跳每轮调用 `async_open_poll_json`（`async-open.js`
+  纯解析），running 时收紧到 250ms；`window.yacrAsyncOpen` 暴露真实状态。
+
+### 平台限制（精确）
+
+- **浏览器看不到 running/cancellable 面板**：`cad-app` 的 worker 用 `std::thread`，
+  `wasm32-unknown-unknown` 无线程，调用 `begin_async_open` 会 panic。浏览器只推真实
+  **终态**面板（`Failed`/`Cancelled` 显式可见，`Opened` 隐藏）。详见
+  `docs/import-async.md` 的线程限制一节。
+- `apps/app-android` 未在本轮范围内接线。
+- 本轮未在浏览器/真机做视觉渲染验证（`docs/validation-web.md` 记录）。
 
 ## 3. 宿主连接器（本轮范围外）
 

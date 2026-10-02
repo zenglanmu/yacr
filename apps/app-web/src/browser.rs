@@ -13,6 +13,7 @@ use cad_ui_slint::{
 };
 
 mod annotations;
+mod async_open;
 mod documents;
 mod fonts;
 mod input;
@@ -26,6 +27,9 @@ pub use annotations::{
     confirm_annotation_export, drop_pending_recovery_snapshot, export_annotations_json,
     import_annotations_json, pending_recovery_is_valid, pending_recovery_snapshot,
     restore_pending_recovery_snapshot,
+};
+pub use async_open::{
+    poll_and_apply as async_open_poll, worker_available as async_open_worker_available,
 };
 pub use documents::{open_document, open_document_decided, open_needs_decision};
 pub use fonts::{font_report, load_current_fonts};
