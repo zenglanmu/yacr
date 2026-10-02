@@ -15,8 +15,8 @@ use acadrust::entities::{
 };
 use acadrust::{DwgReadOptions, DwgReader, EntityType, ReadStats};
 use cad_db::{
-    BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Layout,
-    PaperViewport, Style,
+    BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder,
+    EntityRenderAttributes, EntityTransparency, Layer, Layout, PaperViewport, Style,
 };
 use cad_domain::*;
 use cad_geometry::{arbitrary_axis, tessellate_bspline, PatternLine, TessellationParams};
@@ -160,6 +160,9 @@ struct ImporterBuilder<'a> {
     diagnostics: Vec<Diagnostic>,
     capabilities: HashMap<String, EntityCapability>,
     layer_ids: HashMap<String, LayerId>,
+    /// Effective display opacity of each layer, resolved from its DWG
+    /// transparency (0 = opaque, 255 = transparent).
+    layer_transparency: HashMap<LayerId, f32>,
     style_ids: HashMap<String, StyleId>,
     /// Lower-cased style name -> primary font file name.
     style_fonts: HashMap<String, String>,
@@ -209,6 +212,7 @@ impl<'a> ImporterBuilder<'a> {
             diagnostics: Vec::new(),
             capabilities: HashMap::new(),
             layer_ids: HashMap::new(),
+            layer_transparency: HashMap::new(),
             style_ids: HashMap::new(),
             style_fonts: HashMap::new(),
             block_ids: HashMap::new(),
@@ -334,6 +338,8 @@ impl<'a> ImporterBuilder<'a> {
         for (index, layer) in self.acad.layers.iter().enumerate() {
             let id = LayerId(index as u128);
             self.layer_ids.insert(layer.name.clone(), id);
+            self.layer_transparency
+                .insert(id, layer_opacity(layer.transparency));
             let visible = !layer.flags.off && !layer.flags.frozen;
             self.builder.insert_layer(Layer {
                 id,
@@ -602,6 +608,20 @@ impl<'a> ImporterBuilder<'a> {
 
         self.note_capability(&class_name, &geometry, &completeness, render, pick);
 
+        // Resolve the entity's effective display opacity and geometry source so
+        // the representation/scene layers can carry real transparency instead
+        // of always drawing opaque (audit F14). ByObject wins over ByLayer;
+        // ByBlock is kept symbolic for INSERT expansion to resolve.
+        let layer_alpha = self.layer_transparency.get(&layer).copied().unwrap_or(1.0);
+        let attributes = EntityRenderAttributes {
+            transparency: resolve_entity_transparency(common.transparency, layer_alpha),
+            geometry_source: if proxy_geometry_allowed(entity) {
+                GeometrySource::ProxyCache
+            } else {
+                GeometrySource::Analytic
+            },
+        };
+
         let record = DbEntity {
             object: DbObject {
                 id: object_id,
@@ -622,6 +642,18 @@ impl<'a> ImporterBuilder<'a> {
                 message: e.to_string(),
             });
             return None;
+        }
+        if let Err(e) = self
+            .builder
+            .set_entity_render_attributes(entity_id, attributes)
+        {
+            // The entity was just inserted, so this cannot fail today; report
+            // rather than pretend the transparency was recorded.
+            self.diagnostics.push(Diagnostic {
+                object: Some(object_id),
+                code: "import.render_attributes_failed".into(),
+                message: e.to_string(),
+            });
         }
         Some(entity_id)
     }
@@ -848,7 +880,11 @@ impl<'a> ImporterBuilder<'a> {
                 Ok(out) if !out.geometry.is_empty() => {
                     self.diagnostics.extend(out.diagnostics);
                     let completeness = out.completeness.clone();
-                    (out.geometry.into_iter().next().unwrap(), completeness)
+                    // Keep *every* decoded fragment (audit B21): `.next()` used
+                    // to silently drop all but the first proxy record. A single
+                    // item stays itself; several become a `Compound`, which the
+                    // representation layer draws one primitive at a time.
+                    (proxy_geometry_compound(out.geometry), completeness)
                 }
                 Ok(out) => {
                     self.diagnostics.extend(out.diagnostics);
@@ -1103,6 +1139,69 @@ fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, SupportStatus
             (render, pick)
         }
         _ => (SupportStatus::Verified, SupportStatus::Verified),
+    }
+}
+
+/// Convert acadrust's DWG transparency byte (0 opaque .. 255 transparent) to an
+/// opacity in `[0, 1]` (1 opaque .. 0 transparent).
+fn dwg_transparency_to_opacity(alpha: u8) -> f32 {
+    (1.0 - alpha as f32 / 255.0).clamp(0.0, 1.0)
+}
+
+/// Effective opacity of a layer entry.
+///
+/// A layer normally carries an explicit transparency; the `ByLayer`/`ByBlock`
+/// variants are degenerate on a layer and fall back to opaque rather than
+/// fabricating a value.
+fn layer_opacity(transparency: acadrust::Transparency) -> f32 {
+    match transparency {
+        acadrust::Transparency::Explicit(alpha) => dwg_transparency_to_opacity(alpha),
+        acadrust::Transparency::ByLayer | acadrust::Transparency::ByBlock => 1.0,
+    }
+}
+
+/// Resolve an entity's own DWG transparency into the effective display value.
+///
+/// `ByObject` (`Explicit`) overrides the layer; `ByLayer` uses the pre-resolved
+/// `layer_alpha`; `ByBlock` is kept symbolic so INSERT expansion substitutes the
+/// containing reference's opacity.
+fn resolve_entity_transparency(
+    transparency: acadrust::Transparency,
+    layer_alpha: f32,
+) -> EntityTransparency {
+    match transparency {
+        acadrust::Transparency::Explicit(alpha) => {
+            EntityTransparency::Explicit(dwg_transparency_to_opacity(alpha))
+        }
+        acadrust::Transparency::ByLayer => {
+            EntityTransparency::Explicit(layer_alpha.clamp(0.0, 1.0))
+        }
+        acadrust::Transparency::ByBlock => EntityTransparency::ByBlock,
+    }
+}
+
+/// Whether a proxy cache may contribute geometry for this entity.
+///
+/// Only entity types with no semantic representation of their own are expanded
+/// from `graphic_data`. A known entity (LINE, HATCH, ...) is drawn from its
+/// semantic geometry, so overlaying its proxy cache would draw it twice
+/// (audit B21; `docs/proxy-support.md` §4).
+fn proxy_geometry_allowed(entity: &EntityType) -> bool {
+    matches!(entity, EntityType::Unknown(_))
+        || matches!(entity, EntityType::Extended(x) if x.class_name() == "ACAD_PROXY_ENTITY")
+}
+
+/// Fold every geometry item decoded from one proxy cache into a single
+/// semantic geometry without dropping any.
+///
+/// One item stays itself; two or more become a [`SemanticGeometry::Compound`]
+/// so the representation layer emits one drawable per item. This replaces the
+/// previous `.into_iter().next()`, which silently discarded all but the first
+/// fragment (audit B21).
+fn proxy_geometry_compound(mut geometry: Vec<SemanticGeometry>) -> SemanticGeometry {
+    match geometry.len() {
+        1 => geometry.pop().expect("length checked"),
+        _ => SemanticGeometry::Compound(geometry),
     }
 }
 
@@ -1974,5 +2073,76 @@ mod tests {
         }
         // Rational splines are still not tessellated exactly by every backend.
         assert!(matches!(completeness, Completeness::Partial(_)));
+    }
+
+    // ---- F14/B21: transparency resolution + proxy fragment preservation ----
+
+    #[test]
+    fn transparency_resolution_prefers_byobject_then_layer_then_byblock() {
+        // acadrust packs transparency as a byte: 0 opaque, 255 transparent.
+        assert_eq!(
+            resolve_entity_transparency(acadrust::Transparency::new(0), 0.5),
+            EntityTransparency::Explicit(1.0)
+        );
+        // ByObject (Explicit) overrides the layer value.
+        assert_eq!(
+            resolve_entity_transparency(acadrust::Transparency::new(128), 0.5),
+            EntityTransparency::Explicit(1.0 - 128.0 / 255.0)
+        );
+        // ByLayer uses the pre-resolved layer opacity.
+        assert_eq!(
+            resolve_entity_transparency(acadrust::Transparency::BY_LAYER, 0.25),
+            EntityTransparency::Explicit(0.25)
+        );
+        // ByBlock stays symbolic so INSERT expansion can supply the value.
+        assert_eq!(
+            resolve_entity_transparency(acadrust::Transparency::BY_BLOCK, 0.25),
+            EntityTransparency::ByBlock
+        );
+    }
+
+    #[test]
+    fn layer_opacity_maps_dwg_bytes_to_opacity() {
+        assert_eq!(layer_opacity(acadrust::Transparency::OPAQUE), 1.0);
+        assert_eq!(layer_opacity(acadrust::Transparency::TRANSPARENT), 0.0);
+        // A degenerate ByLayer/ByBlock on a layer is opaque, not fabricated.
+        assert_eq!(layer_opacity(acadrust::Transparency::BY_LAYER), 1.0);
+    }
+
+    #[test]
+    fn all_proxy_fragments_survive_as_a_compound() {
+        let fragment = |id: u128| SemanticGeometry::Line {
+            start: Point3::default(),
+            end: Point3 {
+                x: id as f64,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+        match proxy_geometry_compound(vec![fragment(1), fragment(2), fragment(3)]) {
+            SemanticGeometry::Compound(children) => {
+                assert_eq!(children.len(), 3, "every proxy fragment must survive");
+            }
+            other => panic!("expected a compound, got {other:?}"),
+        }
+        // A single fragment stays itself: no needless wrapper.
+        assert!(matches!(
+            proxy_geometry_compound(vec![fragment(1)]),
+            SemanticGeometry::Line { .. }
+        ));
+    }
+
+    #[test]
+    fn proxy_cache_is_only_used_for_entities_without_semantic_geometry() {
+        let line = EntityType::Line(acadrust::entities::Line::new());
+        assert!(
+            !proxy_geometry_allowed(&line),
+            "a LINE is drawn from semantics; its cache must not double-draw"
+        );
+        let unknown =
+            EntityType::Unknown(acadrust::entities::UnknownEntity::new("ACAD_PROXY_ENTITY"));
+        assert!(proxy_geometry_allowed(&unknown));
+        let vendor = EntityType::Unknown(acadrust::entities::UnknownEntity::new("TCH_WALL"));
+        assert!(proxy_geometry_allowed(&vendor));
     }
 }

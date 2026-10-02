@@ -79,20 +79,36 @@ u32 record_count
 - `ProxyOutput.completeness`：全部记录证据解码成功 → `Complete`；有拒绝/超限 →
   `Partial`（已产出几何）或 `Missing`（无几何）。
 - `proxy.capture` 诊断记录类名、handle、缓存字节数、源版本。
-- 普通语义实体已成功绘制时不得再叠加代理缓存（由 `cad-import-acadrust` 负责，
-  本 crate 只产出几何与完整性）。
+- 普通语义实体已成功绘制时不得再叠加代理缓存。实现（audit B21，`cad-import-acadrust`）：
+  仅 `EntityType::Unknown(_)` 与 `EntityType::Extended(class_name == "ACAD_PROXY_ENTITY")`
+  走代理路径（`proxy_geometry_allowed`）；已知实体（LINE/HATCH/…）只画语义几何，其
+  `graphic_data` 不会被叠加，因此不会重复绘制。
+- **多片段保留（audit B21 已修）**：`proxy_geometry` 不再 `into_iter().next()`。一次回放
+  产出的**全部** `SemanticGeometry` 都保留：单条保持自身，多条包成
+  `SemanticGeometry::Compound`，由表示层逐条产出 primitive（例如一个实体里的多条
+  UnicodeText）。此前只有第一条存活，其余被静默丢弃。
+- **来源与精度标注**：代理实体的 `GeometrySource` 记为 `ProxyCache`（而非
+  `Analytic`），经 `cad-db::EntityRenderAttributes` → `DisplayFragment::geometry_source`
+  传递；普通语义几何保持 `Analytic`。对应的 `DisplayFragment::precision` 为
+  `Precision::Approximate { error_bound: None }`（代理缓存是厂商近似、错误界未暴露），
+  语义几何为 `Precision::Analytic`。精度即由该来源区分：代理缓存是近似/不完整证据，
+  不是解析解。
 - 代理展开进入普通表示/索引/批处理，不为每条指令创建 draw call。
 
 ## 5. 测试与样本
 
 - 单元测试（`crates/cad-proxy/src/lib.rs`）：截断记录、无终止符、超限顶点、
   递归炸弹（解码器链）、未知 opcode、已知+未知混合、空缓存、超限输入、
-  raw_dwg 不当缓存。
+  raw_dwg 不当缓存、**单次回放保留全部几何记录（三条 UnicodeText → 三条）**。
 - 合成字节语料（`crates/cad-proxy/tests/synthetic_corpus.rs` +
   `fixtures/proxy/*.hex`）：**合成，非厂商证据**，见
   `fixtures/proxy/README.md`。
+- 导入/表示契约（`crates/cad-import-acadrust`、`crates/cad-representation`）：
+  `proxy_geometry_compound` 保留全部片段、`proxy_geometry_allowed` 只对无语义几何的
+  实体放行、代理来源记为 `ProxyCache`、`ByObject/ByLayer/ByBlock` 透明度解析。
 - **仍缺**：天正/探索者真实样本（有缓存、无缓存、仅包围盒、不同版本、
   不同实体类别），以及损坏缓存的授权真实样本。没有这些，兼容性保持未验证。
+  多片段保留只证明“我们自己按证据解码的记录不会互相覆盖”，不证明厂商记录的语义。
 
 ## 6. 接手清单
 

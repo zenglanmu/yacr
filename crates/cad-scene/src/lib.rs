@@ -65,8 +65,9 @@ pub struct RenderBatch {
     /// winding is mirrored and the renderer must flip back-face culling.
     pub mirrored: bool,
     /// Constant per-object alpha in `[0, 1]`. This is the one transparency
-    /// channel the batch can carry: `DisplayPrimitive` has no alpha, so
-    /// [`SceneCache::build`] always emits `1.0`, while the annotation overlay
+    /// channel the batch carries; [`SceneCache::build`] takes it from
+    /// `DisplayFragment::alpha`, which the importer resolved from the source
+    /// entity/layer/block (see `docs/render-order.md`). The annotation overlay
     /// ([`annotations::annotation_batches`]) sets it from the annotation style's
     /// A channel. The renderer clamps and classifies it (see
     /// `cad-render-wgpu::geometry::classify_alpha`).
@@ -124,6 +125,20 @@ impl RenderBatch {
             (self.local_origin.z + sz * inv) as f32,
         ]
     }
+}
+
+/// Sanitise a raw alpha value from a display fragment into `[0, 1]`.
+///
+/// Policy (kept in lockstep with `cad-render-wgpu::geometry::clamp_alpha`, which
+/// re-clamps before upload): a non-finite value is treated as **opaque** so an
+/// unreadable opacity never deletes geometry; otherwise the value is clamped to
+/// `[0, 1]`. `alpha <= 0` is preserved (the renderer classifies it invisible)
+/// rather than being silently turned opaque.
+pub fn sanitize_alpha(alpha: f32) -> f32 {
+    if alpha.is_nan() {
+        return 1.0;
+    }
+    alpha.clamp(0.0, 1.0)
 }
 
 /// A publishable update to the scene cache.
@@ -304,11 +319,12 @@ impl SceneCache {
 
     /// Convert a display representation into render batches.
     ///
-    /// `alpha` is fixed at `1.0` here: `DisplayPrimitive` carries no opacity, so
-    /// the importer's transparency (if any) is not reachable from this layer.
-    /// This is explicit rather than a silent default — see `docs/render-order.md`.
-    /// The annotation overlay path ([`annotations::annotation_batches`]) is the
-    /// one producer that supplies real per-batch alpha today.
+    /// Every fragment's `alpha` (effective entity opacity in `[0, 1]`) is
+    /// sanitised and carried onto [`RenderBatch::alpha`]; the renderer then
+    /// clamps/classifies it into the opaque, transparent or invisible pass
+    /// (`cad-render-wgpu::geometry::classify_alpha`). The annotation overlay
+    /// path ([`annotations::annotation_batches`]) supplies its own alpha from
+    /// the annotation style.
     pub fn build(
         &mut self,
         representation: &DisplayRepresentation,
@@ -425,7 +441,7 @@ impl SceneCache {
                 indices,
                 edges,
                 mirrored: false,
-                alpha: 1.0,
+                alpha: sanitize_alpha(fragment.alpha),
                 sources: vec![fragment.source.clone()],
                 draw_order: 0,
             });
@@ -484,6 +500,8 @@ mod tests {
                     sub_element: None,
                 },
                 geometry_source: GeometrySource::Analytic,
+                precision: Precision::Analytic,
+                alpha: 1.0,
                 primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
             }],
             completeness: Completeness::Complete,
@@ -621,6 +639,8 @@ mod tests {
                     sub_element: None,
                 },
                 geometry_source: GeometrySource::DirectMesh,
+                precision: Precision::Analytic,
+                alpha: 1.0,
                 primitive: DisplayPrimitive::Mesh(std::sync::Arc::new(mesh)),
             }],
             completeness: Completeness::Complete,
@@ -807,5 +827,96 @@ mod tests {
             draw_order: 0,
         };
         assert_eq!(batch.centroid(), [3.0, 4.0, 5.0]);
+    }
+
+    fn line_representation_alpha(
+        entity: u128,
+        points: Vec<Point3>,
+        alpha: f32,
+    ) -> DisplayRepresentation {
+        let mut rep = line_representation(entity, points);
+        rep.fragments[0].alpha = alpha;
+        rep
+    }
+
+    #[test]
+    fn batch_alpha_comes_from_the_fragment() {
+        let mut cache = SceneCache::default();
+        let rep = line_representation_alpha(
+            1,
+            vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ],
+            0.25,
+        );
+        let delta = cache.build(&rep, stamp()).unwrap();
+        assert_eq!(delta.added.len(), 1);
+        assert_eq!(delta.added[0].alpha, 0.25);
+    }
+
+    #[test]
+    fn sanitize_alpha_matches_the_renderer_policy() {
+        assert_eq!(sanitize_alpha(0.5), 0.5);
+        assert_eq!(sanitize_alpha(-1.0), 0.0);
+        assert_eq!(sanitize_alpha(2.0), 1.0);
+        assert_eq!(sanitize_alpha(0.0), 0.0);
+        // An unreadable opacity must not delete geometry.
+        assert_eq!(sanitize_alpha(f32::NAN), 1.0);
+    }
+
+    #[test]
+    fn fully_transparent_fragment_is_carried_not_forced_opaque() {
+        let mut cache = SceneCache::default();
+        let rep = line_representation_alpha(
+            1,
+            vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ],
+            0.0,
+        );
+        let delta = cache.build(&rep, stamp()).unwrap();
+        // The batch keeps the real value; the renderer classifies it invisible.
+        assert_eq!(delta.added[0].alpha, 0.0);
+    }
+
+    #[test]
+    fn out_of_range_fragment_alpha_is_clamped_for_the_batch() {
+        let mut cache = SceneCache::default();
+        let rep = line_representation_alpha(
+            1,
+            vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ],
+            4.0,
+        );
+        let delta = cache.build(&rep, stamp()).unwrap();
+        assert_eq!(delta.added[0].alpha, 1.0);
     }
 }

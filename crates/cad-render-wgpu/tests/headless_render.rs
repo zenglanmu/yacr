@@ -206,6 +206,68 @@ fn mesh_render_uses_triangle_pipeline() {
     );
 }
 
+/// A translucent mesh batch must composite over the background differently from
+/// an opaque one, proving `RenderBatch::alpha` reaches the blend state. This is
+/// a real GPU test (software Vulkan/lavapipe under `VK_ICD_FILENAMES`), not a
+/// plan-level assertion.
+#[test]
+fn translucent_batch_composites_differently_from_opaque() {
+    let opaque_pixel = {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let mut renderer = init(gpu);
+        let mut batch = triangle_mesh();
+        batch.alpha = 1.0;
+        renderer
+            .upload(&scene(vec![batch]))
+            .expect("upload opaque mesh");
+        let target = RenderTarget::new(64, 64);
+        let stats = renderer
+            .render(camera_2d(), &target)
+            .expect("render opaque mesh");
+        assert_eq!(stats.opaque_batches, 1);
+        assert_eq!(stats.transparent_batches, 0);
+        renderer
+            .read_target_rgba()
+            .expect("read opaque frame")
+            .pixel(32, 32)
+    };
+
+    // A fresh renderer (new device) so the opaque batch is not still resident.
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let mut batch = triangle_mesh();
+    batch.alpha = 0.5;
+    renderer
+        .upload(&scene(vec![batch]))
+        .expect("upload translucent mesh");
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render translucent mesh");
+    assert_eq!(
+        stats.opaque_batches, 0,
+        "0.5 alpha must not be drawn in the opaque pass"
+    );
+    assert_eq!(stats.transparent_batches, 1);
+    let image = renderer.read_target_rgba().expect("read translucent frame");
+    let translucent_pixel = image.pixel(32, 32);
+    let background = image.pixel(0, 0);
+
+    assert_ne!(
+        translucent_pixel, background,
+        "the translucent triangle did not rasterize the center pixel"
+    );
+    assert_ne!(
+        opaque_pixel, translucent_pixel,
+        "alpha=0.5 must composite differently from an opaque batch (opaque {opaque_pixel:?}, \
+         translucent {translucent_pixel:?})"
+    );
+}
+
 #[test]
 fn render_3d_is_not_blank() {
     let Some(gpu) = gpu() else {

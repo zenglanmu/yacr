@@ -4,7 +4,7 @@
 //! context into display primitives and a completeness report. They never touch
 //! Slint, GPU objects or the event loop, and they never mutate the database.
 
-use cad_db::{DbEntity, DrawingDatabase};
+use cad_db::{DbEntity, DrawingDatabase, EntityTransparency};
 use cad_domain::*;
 use cad_geometry::{tessellate_geometry, TessellationParams};
 use cad_resources::ResourceKey;
@@ -89,7 +89,30 @@ impl DisplayPrimitive {
 pub struct DisplayFragment {
     pub source: SelectionRef,
     pub geometry_source: GeometrySource,
+    /// How exact the fragment's geometry is. Proxy-cache geometry is a
+    /// vendor-provided approximation with no exposed error bound; analytic
+    /// geometry is the source representation itself.
+    pub precision: Precision,
+    /// Effective per-entity opacity in `[0, 1]` (1.0 opaque, 0.0 transparent).
+    ///
+    /// `build` cannot resolve transparency (it only sees the entity), so it
+    /// emits `1.0`; [`ProviderRegistry::build_expanded`] applies the value the
+    /// importer resolved and stored in the database, including `ByBlock`
+    /// inheritance through INSERT expansion. The scene carries this straight
+    /// into `RenderBatch::alpha`.
+    pub alpha: f32,
     pub primitive: DisplayPrimitive,
+}
+
+/// Precision implied by how a fragment's geometry was produced.
+pub fn precision_for_source(source: &GeometrySource) -> Precision {
+    match source {
+        GeometrySource::ProxyCache => Precision::Approximate { error_bound: None },
+        GeometrySource::Analytic
+        | GeometrySource::DirectMesh
+        | GeometrySource::KernelMesh
+        | GeometrySource::UserPoints => Precision::Analytic,
+    }
 }
 
 pub struct DisplayRepresentation {
@@ -224,6 +247,8 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 representation.fragments.push(DisplayFragment {
                     source,
                     geometry_source,
+                    precision: Precision::Analytic,
+                    alpha: 1.0,
                     primitive: DisplayPrimitive::Mesh(Arc::new(mesh.clone())),
                 });
                 if mesh.triangles.is_empty() {
@@ -235,6 +260,8 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 representation.fragments.push(DisplayFragment {
                     source,
                     geometry_source,
+                    precision: Precision::Analytic,
+                    alpha: 1.0,
                     primitive: DisplayPrimitive::Instance {
                         block: *block,
                         transform: *transform,
@@ -269,6 +296,8 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                                     representation.fragments.push(DisplayFragment {
                                         source: source.clone(),
                                         geometry_source: geometry_source.clone(),
+                                        precision: Precision::Analytic,
+                                        alpha: 1.0,
                                         primitive: DisplayPrimitive::Lines(Arc::from(
                                             polyline.into_boxed_slice(),
                                         )),
@@ -305,6 +334,8 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                     representation.fragments.push(DisplayFragment {
                         source,
                         geometry_source,
+                        precision: Precision::Analytic,
+                        alpha: 1.0,
                         primitive: DisplayPrimitive::Text {
                             text: text.clone(),
                             origin: *position,
@@ -333,6 +364,8 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                     representation.fragments.push(DisplayFragment {
                         source,
                         geometry_source,
+                        precision: Precision::Analytic,
+                        alpha: 1.0,
                         primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
                     });
                 } else {
@@ -480,6 +513,7 @@ impl ProviderRegistry {
             &Transform3::identity(),
             &InstancePath::default(),
             0,
+            1.0,
             &mut stack,
             &mut out,
         )?;
@@ -495,10 +529,20 @@ impl ProviderRegistry {
         transform: &Transform3,
         path: &InstancePath,
         depth: usize,
+        parent_alpha: f32,
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
     ) -> CadResult<()> {
         let representation = self.build(entity, context)?;
+        // The importer resolved this entity's effective opacity and geometry
+        // source into the database. `ByBlock` inherits the containing INSERT's
+        // opacity, which is threaded down as `parent_alpha`; at the model root
+        // it falls back to opaque.
+        let attributes = database.entity_render_attributes(entity.id);
+        let own_alpha = match attributes.transparency {
+            EntityTransparency::Explicit(alpha) => alpha,
+            EntityTransparency::ByBlock => parent_alpha,
+        };
         out.completeness = weaker_completeness(&out.completeness, &representation.completeness);
         out.diagnostics.extend(representation.diagnostics);
         for fragment in representation.fragments {
@@ -546,6 +590,7 @@ impl ProviderRegistry {
                             &composed,
                             &child_path,
                             depth + 1,
+                            own_alpha,
                             stack,
                             out,
                         )?;
@@ -557,7 +602,9 @@ impl ProviderRegistry {
                     source.instance = path.clone();
                     out.fragments.push(DisplayFragment {
                         source,
-                        geometry_source: fragment.geometry_source,
+                        geometry_source: attributes.geometry_source.clone(),
+                        precision: precision_for_source(&attributes.geometry_source),
+                        alpha: own_alpha,
                         primitive: primitive.transformed(transform),
                     });
                 }
@@ -642,7 +689,10 @@ fn transform_mesh(mesh: &Mesh, t: &Transform3) -> Mesh {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cad_db::{BlockDefinition, DbObject, DrawingDatabaseBuilder, Layer};
+    use cad_db::{
+        BlockDefinition, DbObject, DrawingDatabaseBuilder, EntityRenderAttributes,
+        EntityTransparency, Layer,
+    };
 
     fn entity(id: u128, geometry: SemanticGeometry) -> DbEntity {
         DbEntity {
@@ -880,5 +930,125 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "representation.instance_cycle"));
+    }
+
+    fn attrs(transparency: EntityTransparency, source: GeometrySource) -> EntityRenderAttributes {
+        EntityRenderAttributes {
+            transparency,
+            geometry_source: source,
+        }
+    }
+
+    #[test]
+    fn build_expanded_carries_resolved_transparency_and_geometry_source() {
+        let mut b = empty_db();
+        // Model line 1: explicit 0.5 opacity, surviving from a proxy cache.
+        b.insert_entity(line_entity(1, SpaceId::Model, p(0.0, 0.0), p(1.0, 0.0)))
+            .unwrap();
+        b.set_entity_render_attributes(
+            EntityId(1),
+            attrs(
+                EntityTransparency::Explicit(0.5),
+                GeometrySource::ProxyCache,
+            ),
+        )
+        .unwrap();
+        let db = b.finish().unwrap();
+        let registry = ProviderRegistry::with_default_provider();
+
+        let rep = registry
+            .build_expanded(&db, db.entity(EntityId(1)).unwrap(), &context())
+            .unwrap();
+        assert_eq!(rep.fragments.len(), 1);
+        assert_eq!(rep.fragments[0].alpha, 0.5);
+        assert_eq!(rep.fragments[0].geometry_source, GeometrySource::ProxyCache);
+        assert_eq!(
+            rep.fragments[0].precision,
+            Precision::Approximate { error_bound: None },
+            "proxy-cache geometry is an approximation, not an exact source value"
+        );
+    }
+
+    #[test]
+    fn build_expanded_resolves_byblock_from_the_containing_insert() {
+        let mut b = empty_db();
+        // Block 2 holds a ByBlock line; the INSERT carries 0.25.
+        b.insert_block(BlockDefinition {
+            id: BlockId(2),
+            entities: vec![EntityId(12)],
+        })
+        .unwrap();
+        b.insert_entity(line_entity(
+            12,
+            SpaceId::Block(BlockId(2)),
+            p(0.0, 0.0),
+            p(0.0, 1.0),
+        ))
+        .unwrap();
+        b.set_entity_render_attributes(
+            EntityId(12),
+            attrs(EntityTransparency::ByBlock, GeometrySource::Analytic),
+        )
+        .unwrap();
+        b.insert_entity(insert_entity(2, SpaceId::Model, 2, 10.0))
+            .unwrap();
+        b.set_entity_render_attributes(
+            EntityId(2),
+            attrs(EntityTransparency::Explicit(0.25), GeometrySource::Analytic),
+        )
+        .unwrap();
+        let db = b.finish().unwrap();
+        let registry = ProviderRegistry::with_default_provider();
+
+        let rep = registry
+            .build_expanded(&db, db.entity(EntityId(2)).unwrap(), &context())
+            .unwrap();
+        assert_eq!(rep.fragments.len(), 1);
+        // The child has no opacity of its own: it inherits the INSERT's.
+        assert_eq!(rep.fragments[0].alpha, 0.25);
+    }
+
+    #[test]
+    fn byblock_at_the_model_root_falls_back_to_opaque() {
+        let mut b = empty_db();
+        b.insert_entity(line_entity(1, SpaceId::Model, p(0.0, 0.0), p(1.0, 0.0)))
+            .unwrap();
+        b.set_entity_render_attributes(
+            EntityId(1),
+            attrs(EntityTransparency::ByBlock, GeometrySource::Analytic),
+        )
+        .unwrap();
+        let db = b.finish().unwrap();
+        let registry = ProviderRegistry::with_default_provider();
+        let rep = registry
+            .build_expanded(&db, db.entity(EntityId(1)).unwrap(), &context())
+            .unwrap();
+        assert_eq!(rep.fragments[0].alpha, 1.0);
+    }
+
+    /// A hand-built database (or the non-expanded `build`) has no import
+    /// attributes, so it must stay fully opaque rather than guessing.
+    #[test]
+    fn build_without_import_attributes_is_opaque_analytic() {
+        let registry = ProviderRegistry::with_default_provider();
+        let e = entity(
+            7,
+            SemanticGeometry::Line {
+                start: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+        );
+        let r = registry.build(&e, &context()).unwrap();
+        assert_eq!(r.fragments[0].alpha, 1.0);
+        assert_eq!(r.fragments[0].geometry_source, GeometrySource::Analytic);
+        assert_eq!(r.fragments[0].precision, Precision::Analytic);
     }
 }

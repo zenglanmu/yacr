@@ -2,7 +2,7 @@
 //
 // Kept in sync with `LINE_SHADER` in `src/lib.rs` via `include_str!`. The
 // uniform is `transform` (mat4x4) followed by `tint`; `tint.x` is the constant
-// per-batch alpha (1.0 until entity transparency is carried by the scene).
+// per-batch alpha (the entity's effective opacity, clamped by the scene/renderer).
 
 struct Camera {
     transform: mat4x4<f32>,

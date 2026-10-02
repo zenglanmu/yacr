@@ -536,6 +536,25 @@ mod tests {
     }
 
     #[test]
+    fn all_geometry_records_are_preserved_not_just_the_first() {
+        // Three UnicodeText records before any unknown opcode: the decoder must
+        // return all three (audit B21: import used to keep only the first).
+        let data = metafile::concat(&[text_record("a"), text_record("b"), text_record("c")]);
+        let out = ProxyPlayer::default().replay(&source(), &data).unwrap();
+        assert_eq!(out.geometry.len(), 3);
+        assert_eq!(out.completeness, Completeness::Complete);
+        let texts: Vec<&str> = out
+            .geometry
+            .iter()
+            .map(|g| match g {
+                SemanticGeometry::Text { text, .. } => text.as_str(),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(texts, vec!["a", "b", "c"]);
+    }
+
+    #[test]
     fn unknown_opcode_degrades_and_flags_incomplete() {
         let data = metafile::concat(&[encode_for_test(999, &[1u8, 2, 3, 4]), text_record("after")]);
         let out = ProxyPlayer::default().replay(&source(), &data).unwrap();
