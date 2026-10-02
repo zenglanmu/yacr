@@ -331,12 +331,40 @@ PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假�
   代理保留全部片段与真实来源/精度。软件 Vulkan 透明合成测试通过。plot-style 表 alpha、
   透明线条深度写入策略仍为显式未实现。
 
+## 集成轮 2：曲线 / ACIS / 布局 / 捕捉（2026-10-02 执行，Linux 核心）
+
+四个核心 workstream 合入 `main`；仅构建/测试 Linux 核心目标（按委托要求），
+未构建 wasm/Android（合入前后各做一次 wasm `--lib` 检查）。
+
+- 核心测试 `cargo test --workspace --exclude cad-ui-slint --exclude app-android
+  --exclude app-web --locked`：**667 passed / 0 failed**；fmt、clippy（0 warning）、
+  架构（23 包）、i18n、`check-fixture-manifest.py` 全通过。
+- **曲线（B23）**：`cad-geometry` 新增真实 NURBS（源 degree/knot/weight，
+  求值与一阶导、弦高自适应离散）；椭圆保留 OCS 法向（`minor = cross(normal, major)`）；
+  非均匀仿射把圆/弧/椭圆重新解算为真椭圆（含镜像翻转）；bulge 在非均匀缩放下解析为
+  椭圆弧；线段/圆/弧/椭圆解析交点。详见 `docs/curve-geometry.md`、ADR 0004。
+- **ACIS（F15）**：`cad-import-acadrust` 用 acadrust 0.5.5 的 `entities::acis`
+  （`SatParser`/`SabReader`/`SatDocument`）把 SAT/SAB 提升为 `cad-kernel-adapter`
+  的中性 `BrepData`（acadrust 不越过导入边界）；内核离散平面多边形（含内环/孔）、
+  完整无环球面/环面、`sin_half_angle==0`（圆柱）侧面，闭合则 `Success`，否则
+  `Partial` + `kernel.missing_face/open_edge/dropped_shell`。**合成** SAT 夹具
+  `fixtures/acis/*.sat` 已入 `fixtures/manifest`（6 项，synthetic，本仓库自制）。
+  锥面/非圆椭圆/带环球环面/样条面仍 `Unsupported`（明确，不伪造）。
+- **布局与测量（F04/F06，B22）**：纸空间视口以真实 4 角矩形重建，比例方向修正
+  （1:100 → paper_per_model=0.01）；不支持的视口不发几何并降为 `Partial` + 稳定
+  原因码；测量区分纸面/视口模型（经**已验证**逆变换），无有效逆变换则显式禁用模型测量。
+- **捕捉与填充**：对象捕捉（端点/中点/圆心/象限/垂足/局部交点）按逻辑像素容差换算，
+  只取局部候选、拒绝射线背后点，候选带来源与精度；HATCH 多环实心填充按偶奇支持孔洞，
+  超预算/自交/退化仍 `Partial` 并保留边界。见 `docs/measure.md`。
+
 ## 未执行（明确标注）
 
 - **Android 真机**：未运行（仅模拟器 SwiftShader）。SAF、surface 尺寸/安全区、
   量测/批注拾取、面板状态推送未接线。
 - **WebGPU / 真实 GPU**：未运行；Web 仅无头 Chromium 的 WebGL2 软件路径。
-- **ACIS（F15）**：无内核、无 SAT/SAB 解析器、无授权样本，仍返回 Unsupported。
+- **ACIS（F15）真实样本**：已用 acadrust 解析 + 中性 B-rep 离散平面/球/柱/环面子集，
+  但夹具均为**本仓库自制合成 SAT**；无授权 3DSOLID/BODY/REGION/SURFACE 真实样本，
+  锥面/带环球面/非圆椭圆/样条面仍 `Unsupported`。真实图纸上的 ACIS 端到端 **未运行**。
 - 桌面/iOS/macOS/Windows 宿主：**未构建**；仅 `cad-platform` 抽象。
 - 授权真实 DWG/字体/黄金图入库、跨后端对照、性能基准：`fixtures/manifest` 为空，
   **未完成**；任何实体兼容性声明都不成立。临时样本的行为证据不等于验收。

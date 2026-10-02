@@ -35,6 +35,16 @@
 `check-i18n.py`（116 keys）、`check-fixture-manifest.py`、`check-workflows.py` 全通过；
 `cad-render-wgpu` 在 lavapipe 下 47 passed（含透明合成）。
 
+**集成轮 2（核心 CAD，Linux 构建）**：曲线升级为真实 NURBS + 椭圆 OCS 法向 +
+仿射真椭圆 + 解析交点（`docs/curve-geometry.md`）；F15 ACIS 打通
+acadrust SAT/SAB → 中性 B-rep → 平面/球/柱/环面子集离散（`docs/kernel-acis.md`，
+合成夹具入 manifest）；纸空间 4 角视口/正确比例 + 空间感知测量（`docs/layouts.md`、
+`docs/measure.md`）；对象捕捉六类 + HATCH 多环含孔洞填充。核心测试 **667 passed /
+0 failed**；fmt/clippy/架构/i18n/fixtures 通过；wasm `--lib` 合入前后各检查一次通过
+（本环境按委托只重构 Linux 核心，未构建 Android/Web）。仍开放：ACIS 真实授权样本、
+锥面/带环球面等、导入端视口变换仍为 3 点邻接（`docs/layouts.md` §3.1）、渐变 HATCH、
+实体颜色/线型/线宽渲染、选择高亮、异步导入、性能基准。
+
 仍开放（受环境/外部依赖限制）：**F15 真实 ACIS 离散**（需内核 + SAT/SAB 解析器 + 授权样本）；
 **真机**（模拟器 SwiftShader 不等同真机）；**WebGPU / 真实 GPU / 移动与桌面浏览器矩阵**；
 Android surface 尺寸/安全区（U07）、SAF、量测/批注拾取与面板状态推送；自托管 GPU/Android
