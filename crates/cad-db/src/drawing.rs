@@ -1,6 +1,6 @@
 //! The authoritative, read-only-after-import drawing database.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cad_domain::*;
 
@@ -12,6 +12,8 @@ use crate::tables::{
     PlotMargins, PlotPaperUnits, PlotProvenance, PlotRotation, PlotSettingsRecord, PlotType, Scale,
     Style,
 };
+use crate::transform::transform_geometry;
+use crate::validate::validate_entity;
 
 /// The authoritative, read-only-after-import drawing database.
 #[derive(Debug, Clone)]
@@ -41,6 +43,11 @@ pub struct DrawingDatabase {
     pub(crate) scales: BTreeMap<ScaleId, Scale>,
     /// Drawing-global active annotation scale (`CANNOSCALE`), when set.
     pub(crate) active_annotation_scale: Option<ActiveAnnotationScale>,
+    /// Next entity id to hand out. Monotonic and never reset when entities are
+    /// deleted, so a deleted id is never reused (its `ObjectId` would otherwise
+    /// alias a new object). Initialised by the builder from the largest existing
+    /// entity/block-member id.
+    pub(crate) next_entity_id: u128,
 }
 
 impl DrawingDatabase {
@@ -232,6 +239,172 @@ impl DrawingDatabase {
 
     pub fn layouts(&self) -> impl Iterator<Item = &Layout> {
         self.layouts.values()
+    }
+
+    // -----------------------------------------------------------------------
+    // Controlled drawing write path (docs/drawing-edit.md §1)
+    //
+    // The base drawing is read-only after import (spec §4.3); these methods are
+    // the single sanctioned mutation path, mirroring
+    // `AnnotationDatabase::apply_annotation_changes` and
+    // `set_block_visibility_state`: validate everything first, then mutate, then
+    // raise the revision and publish an ordered ChangeSet. A failure at any point
+    // leaves the database and its revision untouched.
+    // -----------------------------------------------------------------------
+
+    /// The next id [`Self::allocate_entity_id`] will return.
+    pub fn next_entity_id(&self) -> EntityId {
+        EntityId(self.next_entity_id)
+    }
+
+    /// Allocate a fresh, unused entity id.
+    ///
+    /// The allocator is monotonic and is never rewound by inserts or deletes, so
+    /// a deleted id is never handed out again — an id carries a generation-like
+    /// meaning and a stale reference can never alias a new entity. Allocation is
+    /// not itself a content write, so it does not raise the revision.
+    pub fn allocate_entity_id(&mut self) -> EntityId {
+        let id = EntityId(self.next_entity_id);
+        self.next_entity_id = self.next_entity_id.saturating_add(1);
+        id
+    }
+
+    /// Begin a staged, all-or-nothing drawing transaction.
+    ///
+    /// Nothing is written until [`DrawingTransaction::commit`]; an empty or
+    /// rolled-back transaction leaves the database exactly as it was.
+    pub fn begin_drawing_transaction(
+        &mut self,
+        reason: &str,
+        id: TransactionId,
+    ) -> CadResult<DrawingTransaction<'_>> {
+        DrawingTransaction::new(self, reason, id)
+    }
+
+    /// The single validated write path for drawing entities.
+    ///
+    /// `changes` maps an entity id to its new value (`None` = delete). All
+    /// changes are validated before any mutation, so on any error the database
+    /// and revision are unchanged. A non-empty, fully valid batch raises the
+    /// revision by one and returns a [`ChangeSet`] in the caller's order. An
+    /// empty batch returns a `before == after` ChangeSet with no bump and no
+    /// fabricated changes.
+    ///
+    /// This is shared by [`DrawingTransaction`] and, later, by history/undo: both
+    /// must go through here so validation and change-tracking cannot be bypassed.
+    pub fn apply_drawing_changes(
+        &mut self,
+        reason: &str,
+        transaction: TransactionId,
+        changes: Vec<(EntityId, Option<DbEntity>)>,
+    ) -> CadResult<ChangeSet> {
+        // Phase 1: validate everything. No mutation happens until this passes.
+        let mut seen = BTreeSet::new();
+        for (id, change) in &changes {
+            if !seen.insert(*id) {
+                return Err(CadError::Invariant(format!(
+                    "transaction {transaction:?} modifies entity {id:?} twice"
+                )));
+            }
+            match change {
+                Some(entity) => validate_entity(self, *id, entity)?,
+                None => {
+                    if !self.entities.contains_key(id) {
+                        return Err(CadError::Invariant(format!("entity {id:?} does not exist")));
+                    }
+                }
+            }
+        }
+
+        let before = self.revision;
+        if changes.is_empty() {
+            return Ok(ChangeSet {
+                database: self.id,
+                before,
+                after: before,
+                transaction,
+                reason: reason.to_string(),
+                changes: Vec::new(),
+            });
+        }
+
+        // Phase 2: mutate. The batch is known-valid; keep the caller's order.
+        let mut ordered = Vec::with_capacity(changes.len());
+        for (id, change) in changes {
+            match change {
+                Some(entity) => {
+                    let mask = match self.entities.get(&id) {
+                        Some(previous) => ChangeMask::for_entity_update(previous, &entity),
+                        None => ChangeMask::GEOMETRY.union(ChangeMask::STYLE),
+                    };
+                    let existed = self.entities.contains_key(&id);
+                    self.entities.insert(id, entity);
+                    // Keep the allocator ahead of any explicitly supplied id so
+                    // a later allocation can never collide (history/undo replays
+                    // insert with their recorded ids through this same path).
+                    self.next_entity_id = self.next_entity_id.max(id.0.saturating_add(1));
+                    // A new block-member entity must appear in its block's
+                    // member list, or the geometry would exist but never be
+                    // reachable through the INSERT.
+                    self.attach_block_membership(id);
+                    if existed {
+                        ordered.push(ObjectChange::Update(ObjectId(id.0), mask));
+                    } else {
+                        ordered.push(ObjectChange::Insert(ObjectId(id.0)));
+                    }
+                }
+                None => {
+                    self.remove_entity(id);
+                    ordered.push(ObjectChange::Delete(ObjectId(id.0)));
+                }
+            }
+        }
+        let after = Revision(before.0 + 1);
+        self.revision = after;
+        Ok(ChangeSet {
+            database: self.id,
+            before,
+            after,
+            transaction,
+            reason: reason.to_string(),
+            changes: ordered,
+        })
+    }
+
+    /// Ensure entity `id` is listed as a member of its block, if it is in one.
+    fn attach_block_membership(&mut self, id: EntityId) {
+        let Some(entity) = self.entities.get(&id) else {
+            return;
+        };
+        let SpaceId::Block(block) = entity.space else {
+            return;
+        };
+        if let Some(definition) = self.blocks.get_mut(&block) {
+            if !definition.entities.contains(&id) {
+                definition.entities.push(id);
+            }
+        }
+    }
+
+    /// Remove every dangling reference to a deleted entity.
+    ///
+    /// A delete must leave no reachable reference behind (docs/drawing-edit.md
+    /// §1.6): the entity row, its render attributes (keyed by id) and its
+    /// membership in any block member list are all removed. Dynamic-visibility
+    /// state/member lists are pruned too, since they are keyed by entity id;
+    /// leaving them would let a later switch name a nonexistent entity.
+    fn remove_entity(&mut self, id: EntityId) {
+        self.entities.remove(&id);
+        self.render_attributes.remove(&id);
+        for definition in self.blocks.values_mut() {
+            definition.entities.retain(|e| *e != id);
+            if let Some(visibility) = definition.dynamic_visibility.as_mut() {
+                visibility.member_entities.retain(|e| *e != id);
+                for state in &mut visibility.states {
+                    state.entities.retain(|e| *e != id);
+                }
+            }
+        }
     }
 
     /// Plot settings stored for a layout, exactly as read.
@@ -444,5 +617,153 @@ impl DrawingDatabase {
         } else {
             acc.add_geometry_transformed(&entity.geometry, transform);
         }
+    }
+}
+
+/// A staged, all-or-nothing drawing write transaction.
+///
+/// The transaction only stages intent; the database is not touched until
+/// [`Self::commit`], which delegates to
+/// [`DrawingDatabase::apply_drawing_changes`]. A dropped or rolled-back
+/// transaction leaves no state behind.
+pub struct DrawingTransaction<'a> {
+    database: &'a mut DrawingDatabase,
+    reason: String,
+    transaction: TransactionId,
+    /// Staged changes in call order (so the published ChangeSet preserves the
+    /// order in which the caller staged them, not id order).
+    staged: Vec<(EntityId, Option<DbEntity>)>,
+    /// Ids whose staged change is an affine move; used to add
+    /// [`ChangeMask::TRANSFORM`] to the resulting update. The shared apply path
+    /// cannot infer "move" from the before/after pair alone.
+    transformed: BTreeSet<EntityId>,
+    /// Ids staged so far, for early duplicate rejection.
+    seen: BTreeSet<EntityId>,
+}
+
+impl<'a> DrawingTransaction<'a> {
+    fn new(
+        database: &'a mut DrawingDatabase,
+        reason: &str,
+        transaction: TransactionId,
+    ) -> CadResult<Self> {
+        if reason.trim().is_empty() {
+            return Err(CadError::InvalidInput(
+                "transaction reason is required".to_string(),
+            ));
+        }
+        Ok(DrawingTransaction {
+            database,
+            reason: reason.to_string(),
+            transaction,
+            staged: Vec::new(),
+            transformed: BTreeSet::new(),
+            seen: BTreeSet::new(),
+        })
+    }
+
+    /// Number of staged changes (used by tests and the UI status).
+    pub fn staged_len(&self) -> usize {
+        self.staged.len()
+    }
+
+    /// Stage insertion of a new entity, returning its id.
+    ///
+    /// The id must not already exist in the database and must not have been
+    /// staged in this transaction. `object.id.0` must equal `entity.id.0`; the
+    /// full invariant check happens at commit through the shared apply path.
+    pub fn insert_entity(&mut self, entity: DbEntity) -> CadResult<EntityId> {
+        let id = entity.id;
+        if self.database.entities.contains_key(&id) {
+            return Err(CadError::Invariant(format!("entity {id:?} already exists")));
+        }
+        self.stage(id, Some(entity), false)?;
+        Ok(id)
+    }
+
+    /// Stage replacement of an existing entity. The id is preserved.
+    pub fn update_entity(&mut self, entity: DbEntity) -> CadResult<()> {
+        let id = entity.id;
+        if !self.database.entities.contains_key(&id) {
+            return Err(CadError::Invariant(format!("entity {id:?} does not exist")));
+        }
+        self.stage(id, Some(entity), false)
+    }
+
+    /// Stage deletion of an existing entity.
+    pub fn delete_entity(&mut self, id: EntityId) -> CadResult<()> {
+        if !self.database.entities.contains_key(&id) {
+            return Err(CadError::Invariant(format!("entity {id:?} does not exist")));
+        }
+        self.stage(id, None, false)
+    }
+
+    /// Stage a move: replace the entity's geometry with `transform` applied to
+    /// it, preserving id/object/space/layer/draw order.
+    ///
+    /// The move is baked into the geometry for the kinds listed in
+    /// [`crate::transform_geometry`]. An unsupported kind or a transform that
+    /// cannot be represented exactly (for example a non-uniform scale on a
+    /// circle) fails with [`CadError::Unsupported`] and stages nothing; a
+    /// mirror is never silently dropped. The committed update carries
+    /// [`ChangeMask::TRANSFORM`] **and** [`ChangeMask::GEOMETRY`]: the geometry
+    /// genuinely changed, and the transform bit tells the renderer a rigid move
+    /// produced it.
+    pub fn transform_entity(&mut self, id: EntityId, transform: &Transform3) -> CadResult<()> {
+        let Some(entity) = self.database.entities.get(&id) else {
+            return Err(CadError::Invariant(format!("entity {id:?} does not exist")));
+        };
+        let mut moved = entity.clone();
+        moved.geometry = transform_geometry(&entity.geometry, transform)?;
+        self.stage(id, Some(moved), true)
+    }
+
+    fn stage(
+        &mut self,
+        id: EntityId,
+        change: Option<DbEntity>,
+        is_transform: bool,
+    ) -> CadResult<()> {
+        if !self.seen.insert(id) {
+            return Err(CadError::Invariant(format!(
+                "entity {id:?} is modified more than once in one transaction"
+            )));
+        }
+        if is_transform {
+            self.transformed.insert(id);
+        }
+        self.staged.push((id, change));
+        Ok(())
+    }
+
+    /// Commit the staged changes through the shared validated write path.
+    ///
+    /// On success the database revision advances by one (unless nothing was
+    /// staged) and the returned ChangeSet lists the changes in staging order.
+    /// On failure the database is untouched.
+    pub fn commit(mut self) -> CadResult<ChangeSet> {
+        let staged = std::mem::take(&mut self.staged);
+        let transformed = std::mem::take(&mut self.transformed);
+        let mut changeset =
+            self.database
+                .apply_drawing_changes(&self.reason, self.transaction, staged)?;
+        // The apply path sees only before/after, so it cannot know a change was
+        // a deliberate move. Add the TRANSFORM bit here for the moved ids; the
+        // geometry/validation/mutation all happened in the shared path.
+        if !transformed.is_empty() {
+            for change in &mut changeset.changes {
+                if let ObjectChange::Update(object, mask) = change {
+                    if transformed.contains(&EntityId(object.0)) {
+                        *mask = mask.union(ChangeMask::TRANSFORM);
+                    }
+                }
+            }
+        }
+        Ok(changeset)
+    }
+
+    /// Uncommitted staged changes are discarded on drop.
+    pub fn rollback(self) {
+        // Dropping `self` discards `staged`; the database was never touched.
     }
 }

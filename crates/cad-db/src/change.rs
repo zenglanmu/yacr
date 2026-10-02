@@ -3,6 +3,7 @@
 use cad_domain::*;
 
 use crate::annotation::Annotation;
+use crate::entity::DbEntity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChangeMask(pub u8);
@@ -64,6 +65,45 @@ impl ChangeMask {
         if before.precision != after.precision
             || before.created_unix_ms != after.created_unix_ms
             || before.modified_unix_ms != after.modified_unix_ms
+        {
+            mask = mask.union(Self::METADATA);
+        }
+        if mask.0 == 0 {
+            mask = Self::METADATA;
+        }
+        mask
+    }
+
+    /// The precise mask describing how one drawing entity changed.
+    ///
+    /// Mirrors [`Self::for_annotation_update`] for [`DbEntity`]:
+    /// - geometry differs → [`Self::GEOMETRY`];
+    /// - layer, space or draw order differ → [`Self::STYLE`] (the entity's
+    ///   placement/display style, not its shape);
+    /// - object bookkeeping (type key, source handle, object revision) differs →
+    ///   [`Self::METADATA`];
+    /// - a byte-for-byte identical entity still reports [`Self::METADATA`] so an
+    ///   update never produces a zero mask that would look like "nothing".
+    ///
+    /// A caller must **not** use this to describe a MOVE: a rigid transform
+    /// changes the geometry but the mask additionally needs [`Self::TRANSFORM`]
+    /// so the renderer can take a transform fast path. Only
+    /// [`crate::DrawingTransaction::transform_entity`] knows that intent, and it
+    /// augments the mask; `for_entity_update` alone cannot infer it.
+    pub fn for_entity_update(before: &DbEntity, after: &DbEntity) -> Self {
+        let mut mask = Self(0);
+        if before.geometry != after.geometry {
+            mask = mask.union(Self::GEOMETRY);
+        }
+        if before.layer != after.layer
+            || before.space != after.space
+            || before.draw_order != after.draw_order
+        {
+            mask = mask.union(Self::STYLE);
+        }
+        if before.object.type_key != after.object.type_key
+            || before.object.source_handle != after.object.source_handle
+            || before.object.revision != after.object.revision
         {
             mask = mask.union(Self::METADATA);
         }
