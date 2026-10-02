@@ -357,6 +357,27 @@ PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假�
   只取局部候选、拒绝射线背后点，候选带来源与精度；HATCH 多环实心填充按偶奇支持孔洞，
   超预算/自交/退化仍 `Partial` 并保留边界。见 `docs/measure.md`。
 
+## 集成轮 3：样式 / MTEXT / 导入视口 / 拾取（2026-10-02，Linux 核心）
+
+四个 workstream 合入 `main`（含一个语义冲突的手工整合：`cad-scene::highlight` 补
+`RenderBatch` 新增的 color/lineweight 字段）。
+
+- 核心测试 **735 passed / 0 failed**；软件 Vulkan 渲染测试 **50 passed**；fmt、clippy(0)、
+  架构、i18n、fixtures 全通过；wasm `--lib` 检查通过。
+- **实体样式（§3.2/§7.1）**：importer 按 ByObject→ByLayer→ByBlock 解析颜色（ACI/RGB）
+  与线宽（mm）→ `DisplayFragment` → `RenderBatch` → line/mesh shader，lavapipe 帧差证明
+  不同颜色渲染不同；线宽被携带但**不绘制**（无便携宽线，显式 `render.lineweight_not_drawn`），
+  LINETYPE 虚线留待后续（`docs/entity-style.md`）。
+- **MTEXT（§3.2/§7.3）**：`parse_mtext` 解析分组/`\P`/`\H`/`\W`/`\Q`/`\f`/`\C`/`\c`/`\S` 等，
+  按 run 整形与换行；堆叠分数/颜色/装饰/`\A` 等为**显式 Partial**（带诊断码，不冒充保真）；
+  未知/畸形转义按字面降级不 panic（`docs/mtext.md`）。
+- **导入视口/块/OCS（B22/B31）**：4 角纸空间裁剪 + 完整 model→paper 变换（1:100 →
+  paper_per_model=0.01），INSERT 基点/OCS/旋转/阵列，SOLID/3DFACE 边界顺序与 2D OCS 抬升；
+  扭转/透视/复杂裁剪显式 Partial（`docs/layouts.md`）。**round-2 的导入端缺口已闭合。**
+- **拾取与高亮（F05/F14）**：网格面经 `face_sources` 映射为 `SubElementId`，两个 INSERT
+  实例可独立区分；新增选择高亮叠加层（独立 `highlight.rs`，带可配置 tint/alpha，不修改
+  权威场景；隐藏选择为空、不可解析来源显式报告）（`docs/picking-3d.md`）。
+
 ## 未执行（明确标注）
 
 - **Android 真机**：未运行（仅模拟器 SwiftShader）。SAF、surface 尺寸/安全区、
