@@ -673,7 +673,11 @@ impl<'a> ImporterBuilder<'a> {
             ),
             EntityType::Circle(c) => (
                 SemanticGeometry::Circle {
-                    center: p3(c.center),
+                    // A CIRCLE stores its centre in OCS; the extrusion normal
+                    // defines the plane. `center_wcs` runs the AutoCAD
+                    // arbitrary-axis frame so a tilted circle is placed in its
+                    // own plane, not flattened onto world XY (audit B23/B31).
+                    center: p3(c.center_wcs()),
                     normal: p3(c.normal),
                     radius: c.radius,
                 },
@@ -681,10 +685,13 @@ impl<'a> ImporterBuilder<'a> {
             ),
             EntityType::Arc(a) => (
                 SemanticGeometry::Arc {
-                    center: p3(a.center),
+                    center: p3(a.center_wcs()),
                     normal: p3(a.normal),
                     radius: a.radius,
                     start: a.start_angle,
+                    // Angles are measured in the OCS frame `arbitrary_axis`
+                    // rebuilds from the same normal, so the arc keeps its
+                    // sweep and side.
                     sweep: normalize_sweep(a.end_angle - a.start_angle),
                 },
                 Completeness::Complete,
@@ -1356,43 +1363,88 @@ fn polyline_completeness(normal: Point3, point_count: usize, bulges: &[f64]) -> 
     }
 }
 
-/// Convert an ELLIPSE, accounting for its extrusion.
+/// Convert an ELLIPSE, preserving its extrusion normal.
 ///
-/// The domain `Ellipse` carries only a major axis and ratio, so its plane is
-/// implicitly parallel to world XY. An ellipse on a tilted OCS plane cannot be
-/// represented exactly and is reported Partial instead of being flattened.
+/// An ELLIPSE stores its centre and major axis in world coordinates, but the
+/// minor axis direction is defined by the extrusion normal
+/// (`minor = cross(normal, major)`). Carrying the normal lets an ellipse on an
+/// arbitrary OCS plane stay in that plane instead of being folded onto world XY
+/// (audit B23/B31).
 fn ellipse_semantics(e: &acadrust::entities::Ellipse) -> (SemanticGeometry, Completeness) {
     let normal = p3(e.normal);
+    let normal = if is_world_z(normal) || cad_geometry::length(normal) < 1e-24 {
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        }
+    } else {
+        cad_geometry::normalize(normal)
+    };
     let geometry = SemanticGeometry::Ellipse {
         center: p3(e.center),
+        normal,
         major_axis: p3(e.major_axis),
         ratio: e.minor_axis_ratio,
         start: e.start_parameter,
         sweep: normalize_sweep(e.end_parameter - e.start_parameter),
     };
-    let completeness = if is_world_z(normal) {
+    let complete = is_finite_point(e.center)
+        && is_finite_point(e.major_axis)
+        && cad_geometry::length(p3(e.major_axis)) >= 1e-12
+        && e.minor_axis_ratio.is_finite();
+    let completeness = if complete {
         Completeness::Complete
     } else {
-        Completeness::Partial(vec![
-            "ellipse on a tilted extrusion cannot be encoded exactly; plane approximated by world XY"
-                .into(),
-        ])
+        Completeness::Partial(vec!["ellipse has a zero or non-finite axis/ratio".into()])
     };
     (geometry, completeness)
 }
 
-/// Convert a SPLINE, preserving the source's own knots and weights.
+fn is_finite_point(v: acadrust::types::Vector3) -> bool {
+    v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
+}
+
+/// Convert a SPLINE, preserving the source's own degree, knots and weights.
+///
+/// A rational spline is no longer downgraded: the geometry engine evaluates the
+/// source knot vector and weights exactly (audit B23). The status is `Partial`
+/// only when the source record cannot be represented faithfully — missing
+/// control points (a fit-point-only spline), or a knot/weight vector that does
+/// not match the control polygon length.
 fn spline_semantics(s: &acadrust::entities::Spline) -> (SemanticGeometry, Completeness) {
+    let degree = s.degree.max(1) as u32;
+    let control_points: Vec<Point3> = s.control_points.iter().map(|p| p3(*p)).collect();
     let geometry = SemanticGeometry::Spline {
-        degree: s.degree.max(1) as u32,
+        degree,
         knots: s.knots.clone(),
-        control_points: s.control_points.iter().map(|p| p3(*p)).collect(),
+        control_points: control_points.clone(),
         weights: s.weights.clone(),
     };
-    let completeness = if s.weights.is_empty() {
+    let n = control_points.len();
+    let mut reasons: Vec<String> = Vec::new();
+    if n == 0 && !s.fit_points.is_empty() {
+        reasons.push("fit-point spline is not interpolated to a NURBS control polygon".into());
+    }
+    if n > 0 {
+        let expected = n + degree as usize + 1;
+        if s.knots.len() != expected {
+            reasons.push(format!(
+                "knot vector has {} entries, expected {expected}",
+                s.knots.len()
+            ));
+        }
+        if !s.weights.is_empty() && s.weights.len() != n {
+            reasons.push(format!(
+                "weight vector has {} entries, expected {n}",
+                s.weights.len()
+            ));
+        }
+    }
+    let completeness = if reasons.is_empty() {
         Completeness::Complete
     } else {
-        Completeness::Partial(vec!["weighted spline".into()])
+        Completeness::Partial(reasons)
     };
     (geometry, completeness)
 }
@@ -2025,17 +2077,64 @@ mod tests {
     }
 
     #[test]
-    fn tilted_ellipse_is_partial_but_world_z_is_complete() {
+    fn tilted_ellipse_keeps_its_normal_and_is_complete() {
+        // A +X extrusion is now carried exactly (the domain Ellipse has a
+        // normal), so the ellipse is no longer flattened onto world XY.
         let mut e = acadrust::entities::Ellipse::new();
         e.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+        e.center = acadrust::types::Vector3::new(2.0, 3.0, 4.0);
+        e.major_axis = acadrust::types::Vector3::new(0.0, 5.0, 0.0);
         let (geom, completeness) = ellipse_semantics(&e);
-        assert!(matches!(geom, SemanticGeometry::Ellipse { .. }));
-        assert!(
-            matches!(completeness, Completeness::Partial(_)),
-            "tilted ellipse must not be silently flattened: {completeness:?}"
+        match geom {
+            SemanticGeometry::Ellipse {
+                normal,
+                major_axis,
+                ratio,
+                ..
+            } => {
+                assert!((normal.x - 1.0).abs() < 1e-12, "normal {normal:?}");
+                assert!(
+                    cad_geometry::length(major_axis) >= 4.0,
+                    "major axis lost: {major_axis:?}"
+                );
+                assert!(ratio > 0.0);
+            }
+            other => panic!("expected ellipse, got {other:?}"),
+        }
+        assert_eq!(completeness, Completeness::Complete);
+
+        // A degenerate extrusion defaults to world Z rather than collapsing.
+        e.normal = acadrust::types::Vector3::ZERO;
+        match ellipse_semantics(&e).0 {
+            SemanticGeometry::Ellipse { normal, .. } => {
+                assert!((normal.z - 1.0).abs() < 1e-12, "normal {normal:?}");
+            }
+            other => panic!("expected ellipse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tilted_circle_centre_is_mapped_from_ocs_to_wcs() {
+        // A CIRCLE stores its centre in OCS. With a +X extrusion the arbitrary
+        // axis frame maps OCS (x, y) at elevation z to WCS (z, x, y); reading
+        // the centre verbatim would put the circle in the wrong plane.
+        let mut c = acadrust::entities::Circle::new();
+        c.center = acadrust::types::Vector3::new(2.0, 3.0, 5.0);
+        c.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+        let wcs = c.center_wcs();
+        let expected = ocs_to_wcs(
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            5.0,
+            2.0,
+            3.0,
         );
-        e.normal = acadrust::types::Vector3::UNIT_Z;
-        assert_eq!(ellipse_semantics(&e).1, Completeness::Complete);
+        assert!((wcs.x - expected.x).abs() < 1e-9);
+        assert!((wcs.y - expected.y).abs() < 1e-9);
+        assert!((wcs.z - expected.z).abs() < 1e-9);
     }
 
     // ---- B23: source spline knots and weights survive the importer ----
@@ -2071,8 +2170,13 @@ mod tests {
             }
             other => panic!("expected spline, got {other:?}"),
         }
-        // Rational splines are still not tessellated exactly by every backend.
-        assert!(matches!(completeness, Completeness::Partial(_)));
+        // Rational splines are evaluated from the source knots and weights, so
+        // the record is complete rather than downgraded.
+        assert_eq!(completeness, Completeness::Complete);
+
+        // A mismatched weight vector is the honest Partial case.
+        s.weights = vec![1.0, 3.0];
+        assert!(matches!(spline_semantics(&s).1, Completeness::Partial(_)));
     }
 
     // ---- F14/B21: transparency resolution + proxy fragment preservation ----

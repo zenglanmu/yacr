@@ -284,6 +284,12 @@ pub enum SemanticGeometry {
     },
     Ellipse {
         center: Point3,
+        /// Plane normal (extrusion). The ellipse lies in the plane through
+        /// `center` with this normal; the minor axis is
+        /// `cross(normal, major_axis)`, so an ellipse on an arbitrary OCS plane
+        /// keeps its true orientation instead of being folded into world XY
+        /// (audit B23).
+        normal: Point3,
         major_axis: Point3,
         ratio: f64,
         start: f64,

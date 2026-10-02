@@ -134,6 +134,7 @@ fn tilted_ellipse_stays_in_its_own_plane_when_tessellated() {
     let major = pz(4.0, 0.0, 4.0);
     let ellipse = SemanticGeometry::Ellipse {
         center: pz(0.0, 0.0, 0.0),
+        normal: pz(0.0, 0.0, 1.0),
         major_axis: major,
         ratio: 0.5,
         start: 0.0,

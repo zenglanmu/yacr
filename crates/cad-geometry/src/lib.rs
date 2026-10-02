@@ -11,11 +11,13 @@
 pub mod area;
 pub mod clip;
 pub mod mesh;
+pub mod nurbs;
 
 pub use area::{measure_polygon_area, signed_area, AreaError};
 pub use clip::{clip_polyline_to_xy_rect, clip_segment_to_xy_rect};
 pub use hatch::{pattern_polylines, simplify, triangulate, Loop, PatternLine, MAX_FILL_POINTS};
 pub use mesh::{compute_vertex_normals, mesh_bounds};
+pub use nurbs::{clamped_uniform_knots, NurbsCurve};
 
 pub mod hatch;
 
@@ -138,18 +140,27 @@ impl GeometryEngine for DefaultGeometryEngine {
                 bulges,
                 closed,
             } => {
-                // Non-uniform scaling turns bulge arcs into ellipses; rather
-                // than silently mis-drawing them we keep the points and drop
-                // bulge only when the transform is not uniform.
-                let bulges = if is_uniform(t) {
-                    bulges.clone()
+                let has_bulge = bulges.iter().any(|b| b.abs() > 1e-12);
+                if is_uniform(t) || !has_bulge {
+                    // A similarity keeps a bulge a circular arc; a mirror flips
+                    // which side of the chord it bows to, so the sign follows
+                    // the determinant (audit B23).
+                    let flip = t.determinant() < 0.0;
+                    G::Polyline {
+                        points: points.iter().map(|p| tp(*p)).collect(),
+                        bulges: if flip {
+                            bulges.iter().map(|b| -b).collect()
+                        } else {
+                            bulges.clone()
+                        },
+                        closed: *closed,
+                    }
                 } else {
-                    vec![0.0; points.len()]
-                };
-                G::Polyline {
-                    points: points.iter().map(|p| tp(*p)).collect(),
-                    bulges,
-                    closed: *closed,
+                    // A non-uniform scale turns every bulge arc into an
+                    // elliptical arc. Dropping the bulge would draw a straight
+                    // segment, so the polyline becomes an explicit compound of
+                    // its exact line and elliptical-arc segments (audit B23).
+                    self.transform_polyline_affine(points, bulges, *closed, t)?
                 }
             }
             G::Circle {
@@ -168,7 +179,7 @@ impl GeometryEngine for DefaultGeometryEngine {
                         radius: radius * uniform_scale(t),
                     }
                 } else {
-                    circle_to_ellipse(*center, *normal, *radius, t)
+                    circle_to_geometry(*center, *normal, *radius, t)
                 }
             }
             G::Arc {
@@ -178,69 +189,64 @@ impl GeometryEngine for DefaultGeometryEngine {
                 start,
                 sweep,
             } => {
-                if t.is_uniform_scale(1e-9) {
+                if t.is_uniform_scale(1e-9) && t.determinant() > 0.0 {
+                    // A proper similarity rotates the OCS frame: the arc stays
+                    // an arc, but its start angle shifts by the in-plane
+                    // rotation between the old and new `arbitrary_axis` frames
+                    // (audit B23).
+                    let n_out = normalize(td(*normal));
+                    let (ax_in, _, _) = arbitrary_axis(*normal);
+                    let (ax_out, ay_out, _) = arbitrary_axis(n_out);
+                    let ax_img = td(ax_in);
+                    let phi = dot(ax_img, ay_out).atan2(dot(ax_img, ax_out));
                     G::Arc {
                         center: tp(*center),
-                        normal: normalize(td(*normal)),
+                        normal: n_out,
                         radius: radius * uniform_scale(t),
-                        start: *start,
+                        start: start + phi,
                         sweep: *sweep,
                     }
                 } else {
-                    let ellipse = circle_to_ellipse(*center, *normal, *radius, t);
-                    match ellipse {
-                        G::Ellipse {
-                            center: ec,
-                            major_axis,
-                            ratio,
-                            start: es,
-                            sweep: _ew,
-                        } => G::Ellipse {
-                            center: ec,
-                            major_axis,
-                            ratio,
-                            // `circle_to_ellipse` reports the parameter angle of
-                            // the original circle's θ=0 image, so the arc's own
-                            // start shifts by it and keeps its sweep.
-                            start: es + *start,
-                            sweep: *sweep,
-                        },
-                        other => other,
-                    }
+                    // A mirror or a non-uniform affine maps the arc to an
+                    // elliptical arc; map it through the general conic path
+                    // (audit B23).
+                    arc_to_geometry(*center, *normal, *radius, *start, *sweep, t)
                 }
             }
             G::Ellipse {
                 center,
+                normal,
                 major_axis,
                 ratio,
                 start,
                 sweep,
             } => {
-                // Keep the ellipse's own plane. The domain defines the minor
-                // axis as `cross(world_z, major)`, so the transformed minor is
-                // the transform of that direction (audit B23).
-                let major = td(*major_axis);
-                let major_len = length(major);
-                let major_unit = normalize(*major_axis);
-                let minor_unit = ellipse_minor_dir(major_unit);
-                let minor = td(minor_unit);
-                if major_len < 1e-12 {
+                if t.is_uniform_scale(1e-9) {
+                    // Similarity: the axis directions follow the linear map and
+                    // the ratio is unchanged; a mirror flips the parameter
+                    // direction.
+                    let (start, sweep) = oriented_after_reflection(t, *start, *sweep);
                     G::Ellipse {
                         center: tp(*center),
-                        major_axis: major,
-                        ratio: *ratio,
-                        start: *start,
-                        sweep: *sweep,
+                        normal: normalize(td(*normal)),
+                        major_axis: td(*major_axis),
+                        ratio: ratio.abs(),
+                        start,
+                        sweep,
                     }
                 } else {
-                    let ratio2 = ratio.abs() * (length(minor) / major_len);
-                    G::Ellipse {
-                        center: tp(*center),
-                        major_axis: major,
-                        ratio: ratio2,
-                        start: *start,
-                        sweep: *sweep,
-                    }
+                    // General affine image: re-derive the principal axes so the
+                    // result is still an ellipse with a true normal, never the
+                    // old circle with an averaged radius (audit B23).
+                    affine_ellipse_arc(
+                        *center,
+                        *normal,
+                        *major_axis,
+                        ratio.abs(),
+                        *start,
+                        *sweep,
+                        t,
+                    )
                 }
             }
             G::Spline {
@@ -356,6 +362,20 @@ impl GeometryEngine for DefaultGeometryEngine {
     ) -> CadResult<Vec<Point3>> {
         // The intersection is a measured point, so its tolerance must come from
         // the world-space predicate policy, not the display LOD (audit B23).
+        let tol = tolerance.computation_world.max(1e-12);
+        // For two conic primitives solve on the analytic curve first; this is
+        // independent of any sampling and therefore of the display budget
+        // (audit B23/F06).
+        if let (Some(ca), Some(cb)) = (conic_of(a), conic_of(b)) {
+            if let Some(mut hits) = analytic_intersections(&ca, &cb, tol) {
+                let dedup = tolerance.topology_world.max(1e-12);
+                let mut unique: Vec<Point3> = Vec::with_capacity(hits.len());
+                for p in hits.drain(..) {
+                    push_unique(&mut unique, p, dedup);
+                }
+                return Ok(unique);
+            }
+        }
         // The chord tolerance is deliberately coarse relative to the predicate
         // tolerance so a curved entity is approximated by segments while the
         // final acceptance test stays geometric.
@@ -444,6 +464,51 @@ impl GeometryEngine for DefaultGeometryEngine {
     }
 }
 
+impl DefaultGeometryEngine {
+    /// Transform a bulge polyline through a non-uniform affine as an explicit
+    /// compound of its exact line and elliptical-arc segments.
+    ///
+    /// Dropping the bulges would silently straighten the arcs, so each arc is
+    /// reconstructed as a circular arc in the source plane and mapped through
+    /// the general conic path (audit B23).
+    fn transform_polyline_affine(
+        &self,
+        points: &[Point3],
+        bulges: &[f64],
+        closed: bool,
+        t: &Transform3,
+    ) -> CadResult<SemanticGeometry> {
+        if points.is_empty() {
+            return Ok(SemanticGeometry::Polyline {
+                points: Vec::new(),
+                bulges: Vec::new(),
+                closed,
+            });
+        }
+        let plane_normal = polyline_plane_normal(points);
+        let count = points.len();
+        let last = if closed {
+            count
+        } else {
+            count.saturating_sub(1)
+        };
+        let mut children = Vec::with_capacity(last);
+        for i in 0..last {
+            let a = points[i];
+            let b = points[(i + 1) % count];
+            let bulge = bulges.get(i).copied().unwrap_or(0.0);
+            let segment = if bulge.abs() <= 1e-12 {
+                SemanticGeometry::Line { start: a, end: b }
+            } else {
+                bulge_arc_geometry(a, b, bulge, plane_normal)
+                    .unwrap_or(SemanticGeometry::Line { start: a, end: b })
+            };
+            children.push(self.transform(&segment, t)?);
+        }
+        Ok(SemanticGeometry::Compound(children))
+    }
+}
+
 /// Discretise any curve-like geometry into a point polyline.
 ///
 /// Meshes, inserts and opaque payloads yield an empty vector: they are handled
@@ -482,7 +547,13 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             sweep,
         } => {
             let (ax, ay, _) = arbitrary_axis(*normal);
-            let sweep = normalize_sweep(*sweep);
+            // Preserve the sweep's sign: a reflected/clockwise arc (for example
+            // from a mirror) must not be re-drawn as its complement (audit B23).
+            let sweep = if sweep.abs() >= std::f64::consts::TAU - 1e-9 {
+                std::f64::consts::TAU
+            } else {
+                *sweep
+            };
             let n = arc_segments_for_tolerance(*radius, sweep, params);
             let mut out = Vec::with_capacity(n + 1);
             for i in 0..=n {
@@ -496,6 +567,7 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
         }
         G::Ellipse {
             center,
+            normal,
             major_axis,
             ratio,
             start,
@@ -507,12 +579,14 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             }
             let u = scale(*major_axis, 1.0 / major_len);
             // The minor axis lies in the ellipse's own plane, defined by the
-            // documented convention `minor = cross(world_z, major)` (audit B23).
-            let minor = scale(ellipse_minor_dir(u), major_len * ratio.abs());
+            // stored extrusion normal: `minor = cross(normal, major)` (audit
+            // B23). This keeps an ellipse on an arbitrary OCS plane in that
+            // plane instead of folding it onto world XY.
+            let minor = scale(ellipse_minor_dir(*normal, u), major_len * ratio.abs());
             let sweep = if sweep.abs() >= std::f64::consts::TAU - 1e-9 {
                 std::f64::consts::TAU
             } else {
-                normalize_sweep(*sweep)
+                *sweep
             };
             let r = major_len.max(major_len * ratio.abs());
             let n = arc_segments_for_tolerance(r, sweep, params);
@@ -577,15 +651,6 @@ pub fn arc_segments_for_tolerance(radius: f64, sweep: f64, params: TessellationP
     let step = step.max(1e-6);
     let n = (sweep / step).ceil() as usize;
     n.clamp(params.min_segments.max(1), params.max_segments.max(1))
-}
-
-fn normalize_sweep(sweep: f64) -> f64 {
-    let tau = std::f64::consts::TAU;
-    let mut s = sweep % tau;
-    if s <= 0.0 {
-        s += tau;
-    }
-    s
 }
 
 fn polyline_with_bulges(
@@ -764,10 +829,11 @@ pub fn tessellate_bspline(
 
 /// Tessellate a rational B-spline using its source knots and weights.
 ///
-/// The source knot vector is authoritative: uniform/periodic/clamped and
-/// rational arcs all keep their true shape. Malformed knot vectors (wrong
-/// length or non-monotone) fall back to the clamped-uniform convention rather
-/// than silently producing a garbled curve.
+/// The source knot vector and weights are authoritative: uniform/periodic/
+/// clamped and rational arcs all keep their true shape, and the sampling is
+/// adaptive to the chord tolerance. Malformed input (wrong-length or
+/// non-monotone knots, bad degree) falls back to the clamped-uniform
+/// convention rather than silently producing a garbled curve (audit B23).
 pub fn tessellate_spline(
     control: &[Point3],
     knots: &[f64],
@@ -779,98 +845,26 @@ pub fn tessellate_spline(
     if n == 0 {
         return Vec::new();
     }
-    let k = (degree as usize).max(1).min(n.saturating_sub(1));
+    let k = (degree as usize).max(1);
     if n <= k {
         return control.to_vec();
     }
-    let owned_knots: Vec<f64>;
-    let knots: &[f64] = if knots.len() == n + k + 1 && knots.windows(2).all(|w| w[1] >= w[0]) {
-        knots
-    } else {
-        owned_knots = clamped_uniform_knots(n, k);
-        &owned_knots
-    };
-    let weights: Vec<f64> = if weights.len() == n {
-        weights
-            .iter()
-            .map(|w| if w.is_finite() && *w > 0.0 { *w } else { 1.0 })
-            .collect()
-    } else {
-        vec![1.0; n]
-    };
-    let spans = n - k;
-    let per_span = (params.max_segments / spans.max(1)).clamp(8, 64);
-    let t_min = knots[k];
-    let t_max = knots[n];
-    if !t_min.is_finite() || !t_max.is_finite() || t_max <= t_min {
-        return control.to_vec();
-    }
-    let mut out = Vec::with_capacity(spans * per_span + 1);
-    for s in 0..=(spans * per_span) {
-        let t = t_min + (t_max - t_min) * (s as f64) / ((spans * per_span) as f64);
-        out.push(de_boor_rational(control, knots, &weights, k, t));
-    }
-    out
-}
-
-fn clamped_uniform_knots(n: usize, k: usize) -> Vec<f64> {
-    let m = n + k + 1;
-    let mut knots = vec![0.0; m];
-    for i in 0..=k {
-        knots[n + i] = 1.0;
-    }
-    let inner = n.saturating_sub(k + 1);
-    for i in 1..=inner {
-        knots[k + i] = i as f64 / (inner + 1) as f64;
-    }
-    knots
-}
-
-fn de_boor_rational(pts: &[Point3], knots: &[f64], weights: &[f64], k: usize, t: f64) -> Point3 {
-    let n = pts.len();
-    let mut span = k;
-    while span < n - 1 && t >= knots[span + 1] {
-        span += 1;
-    }
-    // Homogeneous coordinates (w*x, w*y, w*z, w); the rational point is the
-    // perspective divide of the de Boor result.
-    let hom = |j: usize| {
-        let w = weights[span - k + j];
-        let p = pts[span - k + j];
-        [p.x * w, p.y * w, p.z * w, w]
-    };
-    let mut d: Vec<[f64; 4]> = (0..=k).map(hom).collect();
-    for r in 1..=k {
-        for j in (r..=k).rev() {
-            let i = span - k + j;
-            let denom = knots[i + k + 1 - r] - knots[i];
-            let alpha = if denom.abs() > 1e-12 {
-                (t - knots[i]) / denom
-            } else {
-                0.0
-            };
-            let prev = d[j - 1];
-            let cur = d[j];
-            let mut out = [0.0; 4];
-            for c in 0..4 {
-                out[c] = prev[c] * (1.0 - alpha) + cur[c] * alpha;
-            }
-            d[j] = out;
-        }
-    }
-    let w = d[k][3];
-    if w.abs() < 1e-12 {
-        Point3 {
-            x: d[k][0],
-            y: d[k][1],
-            z: d[k][2],
-        }
-    } else {
-        Point3 {
-            x: d[k][0] / w,
-            y: d[k][1] / w,
-            z: d[k][2] / w,
-        }
+    let curve =
+        NurbsCurve::new(k, control.to_vec(), knots.to_vec(), weights.to_vec()).or_else(|_| {
+            NurbsCurve::new(
+                k.min(n - 1),
+                control.to_vec(),
+                clamped_uniform_knots(n, k.min(n - 1)),
+                if weights.len() == n {
+                    weights.to_vec()
+                } else {
+                    Vec::new()
+                },
+            )
+        });
+    match curve {
+        Ok(curve) => curve.discretize(params.tolerance, &params),
+        Err(_) => control.to_vec(),
     }
 }
 
@@ -1090,12 +1084,14 @@ pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
         }
         G::Ellipse {
             center,
+            normal,
             major_axis,
             ratio,
             start,
             sweep,
         } => {
             finite(*center)
+                && finite(*normal)
                 && finite(*major_axis)
                 && ratio.is_finite()
                 && start.is_finite()
@@ -1163,67 +1159,235 @@ fn is_uniform(t: &Transform3) -> bool {
     t.is_uniform_scale(1e-9)
 }
 
-/// Unit minor-axis direction for an ellipse with unit major axis `major_unit`.
-fn ellipse_minor_dir(major_unit: Point3) -> Point3 {
-    let minor = cross(
-        Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 1.0,
-        },
-        major_unit,
-    );
-    if length(minor) < 1e-9 {
+fn world_z_axis() -> Point3 {
+    Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    }
+}
+
+/// A mirror (negative determinant) reverses the OCS handedness, so a traced
+/// curve keeps its image only if its parameter range is reversed as well.
+fn oriented_after_reflection(t: &Transform3, start: f64, sweep: f64) -> (f64, f64) {
+    if t.determinant() < 0.0 {
+        (-start, -sweep)
+    } else {
+        (start, sweep)
+    }
+}
+
+/// Unit minor-axis direction for an ellipse with plane normal `normal` and unit
+/// major axis `major_unit`: the in-plane `+90°` rotation `cross(normal, major)`.
+fn ellipse_minor_dir(normal: Point3, major_unit: Point3) -> Point3 {
+    let n = normalize(normal);
+    let m = normalize(major_unit);
+    let minor = cross(n, m);
+    if length(minor) >= 1e-9 {
+        return normalize(minor);
+    }
+    // The normal is parallel to the major axis: the ellipse is degenerate. Pick
+    // any perpendicular so callers still get a usable frame.
+    let fallback = cross(world_z_axis(), m);
+    if length(fallback) >= 1e-9 {
+        normalize(fallback)
+    } else {
         Point3 {
             x: 1.0,
             y: 0.0,
             z: 0.0,
         }
-    } else {
-        normalize(minor)
     }
 }
 
 /// Map a circle through an affine transform as an exact ellipse.
-///
-/// The transformed plane is spanned by the images of the two in-plane basis
-/// vectors; the longer image is the major axis. `ratio` is the axis ratio and
-/// `start` is the parameter angle (in radians) of the original circle angle 0,
-/// so the affine image of `circle(θ)` matches `ellipse(start + θ)`.
-fn circle_to_ellipse(
+fn circle_to_geometry(
     center: Point3,
     normal: Point3,
     radius: f64,
     t: &Transform3,
 ) -> SemanticGeometry {
     let radius = radius.abs();
+    if radius < 1e-12 {
+        return SemanticGeometry::Point(apply_point(t, center));
+    }
     let n = normalize(normal);
-    let (ax, ay, _) = arbitrary_axis(n);
-    let ex = apply_vector(t, ax);
-    let ey = apply_vector(t, ay);
+    let (ax, _, _) = arbitrary_axis(n);
+    affine_ellipse_arc(
+        center,
+        n,
+        scale(ax, radius),
+        1.0,
+        0.0,
+        std::f64::consts::TAU,
+        t,
+    )
+}
+
+/// Map a circular arc through an affine transform as an exact elliptical arc.
+fn arc_to_geometry(
+    center: Point3,
+    normal: Point3,
+    radius: f64,
+    start: f64,
+    sweep: f64,
+    t: &Transform3,
+) -> SemanticGeometry {
+    let radius = radius.abs();
+    if radius < 1e-12 {
+        return SemanticGeometry::Point(apply_point(t, center));
+    }
+    let n = normalize(normal);
+    let (ax, _, _) = arbitrary_axis(n);
+    affine_ellipse_arc(center, n, scale(ax, radius), 1.0, start, sweep, t)
+}
+
+/// The exact affine image of an elliptical arc.
+///
+/// An affine map sends the parameterisation
+/// `E(t) = c + u·cos t + v·sin t` to `c' + (A u)·cos t + (A v)·sin t`. Writing
+/// `M = [A u, A v]`, the 2×2 eigen-decomposition of `MᵀM` yields the principal
+/// axes (`s1 ≥ s2`), a rotation angle `θ` and an orthonormal frame `(w1, w2)`
+/// with `A u·cos t + A v·sin t = s1 w1·cos(t−θ) + s2 w2·sin(t−θ)`. The result is
+/// reported in the domain convention `minor = cross(normal, major)`, with the
+/// parameter shifted by `−θ` (audit B23).
+#[allow(clippy::too_many_arguments)]
+fn affine_ellipse_arc(
+    center: Point3,
+    normal: Point3,
+    major_axis: Point3,
+    ratio: f64,
+    start: f64,
+    sweep: f64,
+    t: &Transform3,
+) -> SemanticGeometry {
+    let a = length(major_axis);
+    if a < 1e-12 {
+        return SemanticGeometry::Point(apply_point(t, center));
+    }
+    let n = normalize(normal);
+    let major_unit = scale(major_axis, 1.0 / a);
+    let minor_vec = scale(ellipse_minor_dir(n, major_unit), a * ratio.abs().max(0.0));
+    let u = apply_vector(t, major_axis);
+    let v = apply_vector(t, minor_vec);
     let c = apply_point(t, center);
-    let lx = length(ex);
-    let ly = length(ey);
-    if lx < 1e-12 && ly < 1e-12 {
-        // The plane collapsed under a singular/near-singular map.
+
+    let uu = dot(u, u);
+    let vv = dot(v, v);
+    let uv = dot(u, v);
+    let trace = uu + vv;
+    let diff = uu - vv;
+    let disc = (diff * diff + 4.0 * uv * uv).sqrt();
+    let lam1 = 0.5 * (trace + disc);
+    let lam2 = (0.5 * (trace - disc)).max(0.0);
+    let s1 = lam1.max(0.0).sqrt();
+    let s2 = lam2.sqrt();
+    if s1 < 1e-300 {
+        // The whole plane collapsed to a point.
         return SemanticGeometry::Point(c);
     }
-    let (major_axis, ratio, phi) = if lx >= ly {
-        let phi = ex.y.atan2(ex.x);
-        let ratio = if lx > 1e-12 { ly / lx } else { 0.0 };
-        (scale(ex, radius), ratio, phi)
+    // Eigenvector of the larger eigenvalue.
+    let (ex, ey) = if uv.abs() > 1e-300 {
+        let len = (uv * uv + (lam1 - uu) * (lam1 - uu)).sqrt();
+        if len > 1e-300 {
+            (uv / len, (lam1 - uu) / len)
+        } else {
+            (1.0, 0.0)
+        }
+    } else if uu >= vv {
+        (1.0, 0.0)
     } else {
-        let phi = ey.y.atan2(ey.x);
-        let ratio = if ly > 1e-12 { lx / ly } else { 0.0 };
-        (scale(ey, radius), ratio, phi)
+        (0.0, 1.0)
+    };
+    let (e2x, e2y) = (-ey, ex);
+    let w1 = scale(add(scale(u, ex), scale(v, ey)), 1.0 / s1);
+    let w2 = if s2 > 1e-300 {
+        scale(add(scale(u, e2x), scale(v, e2y)), 1.0 / s2)
+    } else {
+        Point3::default()
+    };
+    let theta = ey.atan2(ex);
+    let normal_out = if s2 > 1e-300 {
+        let nn = cross(w1, w2);
+        if length(nn) >= 1e-12 {
+            normalize(nn)
+        } else {
+            affine_normal_fallback(t, n)
+        }
+    } else {
+        affine_normal_fallback(t, n)
     };
     SemanticGeometry::Ellipse {
         center: c,
-        major_axis,
-        ratio,
-        start: phi,
-        sweep: std::f64::consts::TAU,
+        normal: normal_out,
+        major_axis: scale(w1, s1),
+        ratio: s2 / s1,
+        start: start - theta,
+        sweep,
     }
+}
+
+fn affine_normal_fallback(t: &Transform3, n: Point3) -> Point3 {
+    let mapped = apply_vector(t, n);
+    if length(mapped) >= 1e-12 {
+        normalize(mapped)
+    } else {
+        world_z_axis()
+    }
+}
+
+/// Recover a bulge segment as an exact circular arc in the polyline's plane.
+///
+/// `bulge = tan(θ/4)`; the arc is the one bowing to the sign of the bulge. This
+/// mirrors the tessellator's construction so the analytic and sampled forms are
+/// the same curve (audit B23).
+fn bulge_arc_geometry(
+    a: Point3,
+    b: Point3,
+    bulge: f64,
+    plane_normal: Point3,
+) -> Option<SemanticGeometry> {
+    let chord = sub(b, a);
+    let chord_len = length(chord);
+    if chord_len < 1e-12 {
+        return None;
+    }
+    let theta = 4.0 * bulge.atan();
+    let half = theta * 0.5;
+    let half_chord = chord_len * 0.5;
+    let sagitta = bulge * half_chord;
+    if sagitta.abs() < 1e-12 {
+        return None;
+    }
+    let radius_abs = (half_chord * half_chord + sagitta * sagitta) / (2.0 * sagitta.abs());
+    let (ax, ay, _) = arbitrary_axis(plane_normal);
+    let d2 = [dot(chord, ax), dot(chord, ay)];
+    let chord2_len = (d2[0] * d2[0] + d2[1] * d2[1]).sqrt();
+    if chord2_len < 1e-12 {
+        // The chord is parallel to the plane normal: no in-plane arc exists.
+        return None;
+    }
+    let dir2 = [d2[0] / chord2_len, d2[1] / chord2_len];
+    let left2 = [-dir2[1], dir2[0]];
+    let u2 = if sagitta >= 0.0 {
+        left2
+    } else {
+        [-left2[0], -left2[1]]
+    };
+    let mid2 = [d2[0] * 0.5, d2[1] * 0.5];
+    let center2 = [
+        mid2[0] - u2[0] * radius_abs * half.cos(),
+        mid2[1] - u2[1] * radius_abs * half.cos(),
+    ];
+    let start_angle = (-center2[1]).atan2(-center2[0]);
+    let center = add(a, add(scale(ax, center2[0]), scale(ay, center2[1])));
+    Some(SemanticGeometry::Arc {
+        center,
+        normal: plane_normal,
+        radius: radius_abs,
+        start: start_angle,
+        sweep: theta,
+    })
 }
 
 fn rotation_of(t: &Transform3) -> f64 {
@@ -1231,6 +1395,10 @@ fn rotation_of(t: &Transform3) -> f64 {
     t.matrix[1][0].atan2(t.matrix[0][0])
 }
 
+/// Exact or near-exact intersection of two 3D segments.
+///
+/// Works for segments in any plane (the old version projected onto XY and only
+/// accepted lines that crossed there). `tol` is an absolute world tolerance.
 fn segment_segment_intersection_3d(
     a1: Point3,
     a2: Point3,
@@ -1238,29 +1406,498 @@ fn segment_segment_intersection_3d(
     b2: Point3,
     tol: f64,
 ) -> Option<Point3> {
-    // Project onto XY and intersect, then reject if the Z separation is large.
-    let r = sub(a2, a1);
-    let s = sub(b2, b1);
-    let denom = r.x * s.y - r.y * s.x;
-    if denom.abs() < tol.max(1e-12) {
+    let d1 = sub(a2, a1);
+    let d2 = sub(b2, b1);
+    // Closest-point formula from Ericson, *Real-Time Collision Detection*:
+    // r must go from the second segment's start to the first's.
+    let r = sub(a1, b1);
+    let aa = dot(d1, d1);
+    let ee = dot(d2, d2);
+    let bb = dot(d1, d2);
+    let cc = dot(d1, r);
+    let ff = dot(d2, r);
+    let denom = aa * ee - bb * bb;
+    let len_scale = (aa * ee).sqrt().max(1.0);
+    let (s, t) = if denom.abs() > 1e-15 * len_scale {
+        ((bb * ff - cc * ee) / denom, (aa * ff - bb * cc) / denom)
+    } else {
+        // Parallel: pick the projection of b1 onto a.
+        let s = if aa > 0.0 { cc / aa } else { 0.0 };
+        let t = if ee > 0.0 { ff / ee } else { 0.0 };
+        (s, t)
+    };
+    let slack = if len_scale > 0.0 {
+        (tol.max(1e-12) / len_scale.sqrt()).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    if s < -slack || s > 1.0 + slack || t < -slack || t > 1.0 + slack {
         return None;
     }
-    let qp = sub(b1, a1);
-    let t = (qp.x * s.y - qp.y * s.x) / denom;
-    let u = (qp.x * r.y - qp.y * r.x) / denom;
-    if !(0.0..=1.0).contains(&t) || !(0.0..=1.0).contains(&u) {
+    let p = add(a1, scale(d1, s.clamp(0.0, 1.0)));
+    let q = add(b1, scale(d2, t.clamp(0.0, 1.0)));
+    if distance(p, q) <= tol.max(1e-12) {
+        Some(scale(add(p, q), 0.5))
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Analytic curve/curve intersection (audit B23/F06).
+//
+// Measurement and snapping must not depend on the display tessellation. Where
+// both operands are conic primitives the intersection is solved on the analytic
+// curve; anything else falls back to adaptive sampling at the world-space
+// predicate tolerance.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+enum Conic {
+    Segment {
+        a: Point3,
+        b: Point3,
+    },
+    Circle {
+        center: Point3,
+        normal: Point3,
+        radius: f64,
+    },
+    Arc {
+        center: Point3,
+        normal: Point3,
+        radius: f64,
+        start: f64,
+        sweep: f64,
+    },
+    Ellipse {
+        center: Point3,
+        normal: Point3,
+        major_axis: Point3,
+        ratio: f64,
+        start: f64,
+        sweep: f64,
+    },
+}
+
+fn conic_of(geometry: &SemanticGeometry) -> Option<Conic> {
+    match geometry {
+        SemanticGeometry::Line { start, end } => Some(Conic::Segment { a: *start, b: *end }),
+        SemanticGeometry::Circle {
+            center,
+            normal,
+            radius,
+        } => Some(Conic::Circle {
+            center: *center,
+            normal: *normal,
+            radius: radius.abs(),
+        }),
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => Some(Conic::Arc {
+            center: *center,
+            normal: *normal,
+            radius: radius.abs(),
+            start: *start,
+            sweep: *sweep,
+        }),
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => Some(Conic::Ellipse {
+            center: *center,
+            normal: *normal,
+            major_axis: *major_axis,
+            ratio: ratio.abs(),
+            start: *start,
+            sweep: *sweep,
+        }),
+        _ => None,
+    }
+}
+
+/// Whether a parameter angle lies on the (possibly signed) arc.
+fn angle_on_arc(angle: f64, start: f64, sweep: f64, ang_tol: f64) -> bool {
+    let tau = std::f64::consts::TAU;
+    if sweep.abs() >= tau - 1e-9 {
+        return true;
+    }
+    let norm = |mut x: f64| {
+        x %= tau;
+        if x < 0.0 {
+            x += tau;
+        }
+        x
+    };
+    let s = norm(start);
+    let a = norm(angle);
+    if sweep >= 0.0 {
+        norm(a - s) <= sweep + ang_tol
+    } else {
+        norm(s - a) <= -sweep + ang_tol
+    }
+}
+
+fn push_unique(out: &mut Vec<Point3>, p: Point3, tol: f64) {
+    if !out.iter().any(|q| distance(*q, p) <= tol) {
+        out.push(p);
+    }
+}
+
+fn segment_circle_points(
+    a: Point3,
+    b: Point3,
+    center: Point3,
+    normal: Point3,
+    radius: f64,
+    tol: f64,
+) -> Vec<Point3> {
+    let mut out = Vec::new();
+    let n = normalize(normal);
+    let d = sub(b, a);
+    let dn = dot(d, n);
+    let ac = sub(a, center);
+    let a_off = dot(ac, n);
+    if dn.abs() > tol {
+        // The segment pierces the circle's plane at a single parameter.
+        let t = -a_off / dn;
+        if t >= -tol && t <= 1.0 + tol {
+            let p = add(a, scale(d, t.clamp(0.0, 1.0)));
+            if (distance(p, center) - radius).abs() <= tol {
+                push_unique(&mut out, p, tol);
+            }
+        }
+        return out;
+    }
+    // Parallel to the plane: only an in-plane segment can meet the circle.
+    if a_off.abs() > tol {
+        return out;
+    }
+    let qa = dot(d, d);
+    if qa <= tol * tol {
+        if (distance(a, center) - radius).abs() <= tol {
+            push_unique(&mut out, a, tol);
+        }
+        return out;
+    }
+    let qb = 2.0 * dot(ac, d);
+    let qc = dot(ac, ac) - radius * radius;
+    let disc = qb * qb - 4.0 * qa * qc;
+    if disc < 0.0 {
+        return out;
+    }
+    let sq = disc.sqrt();
+    for t in [(-qb - sq) / (2.0 * qa), (-qb + sq) / (2.0 * qa)] {
+        if (-tol..=1.0 + tol).contains(&t) {
+            push_unique(&mut out, add(a, scale(d, t.clamp(0.0, 1.0))), tol);
+        }
+    }
+    out
+}
+
+fn circle_circle_points(
+    c1: Point3,
+    n1: Point3,
+    r1: f64,
+    c2: Point3,
+    n2: Point3,
+    r2: f64,
+    tol: f64,
+) -> Option<Vec<Point3>> {
+    let u1 = normalize(n1);
+    let u2 = normalize(n2);
+    if length(cross(u1, u2)) > 1e-9 {
+        // Non-parallel planes: not handled analytically (caller samples).
         return None;
     }
-    let p = add(a1, scale(r, t));
-    let p2 = add(b1, scale(s, u));
-    if (p.z - p2.z).abs() > tol.max(1e-9) * 1000.0 {
+    if dot(sub(c2, c1), u1).abs() > tol {
         return None;
     }
-    Some(Point3 {
-        x: p.x,
-        y: p.y,
-        z: (p.z + p2.z) * 0.5,
-    })
+    let mut out = Vec::new();
+    let d_vec = sub(c2, c1);
+    let d = length(d_vec);
+    if d <= tol {
+        // Concentric: either the same circle (infinitely many points) or none.
+        return Some(out);
+    }
+    if d > r1 + r2 + tol || d < (r1 - r2).abs() - tol {
+        return Some(out);
+    }
+    let aa = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
+    let hh = r1 * r1 - aa * aa;
+    if hh < -tol {
+        return Some(out);
+    }
+    let h = hh.max(0.0).sqrt();
+    let dir = scale(d_vec, 1.0 / d);
+    let base = add(c1, scale(dir, aa));
+    let perp = normalize(cross(dir, u1));
+    push_unique(&mut out, add(base, scale(perp, h)), tol);
+    if h > tol {
+        push_unique(&mut out, sub(base, scale(perp, h)), tol);
+    }
+    Some(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn segment_ellipse_points(
+    a: Point3,
+    b: Point3,
+    center: Point3,
+    normal: Point3,
+    major_axis: Point3,
+    ratio: f64,
+    start: f64,
+    sweep: f64,
+    tol: f64,
+) -> Vec<Point3> {
+    let mut out = Vec::new();
+    let n = normalize(normal);
+    let ma = length(major_axis);
+    if ma < 1e-12 {
+        return out;
+    }
+    let major_unit = scale(major_axis, 1.0 / ma);
+    let mb = ma * ratio;
+    let minor_dir = ellipse_minor_dir(n, major_unit);
+    let d = sub(b, a);
+    let ac = sub(a, center);
+    let du = dot(d, major_unit);
+    let dv = dot(d, minor_dir);
+    let au = dot(ac, major_unit);
+    let av = dot(ac, minor_dir);
+    if mb < 1e-12 {
+        // Degenerate ellipse (a segment): the minor coordinate must be zero.
+        if dv.abs() > tol {
+            return out;
+        }
+        for u in [-ma, ma] {
+            let t = (u - au) / du;
+            if !(-tol..=1.0 + tol).contains(&t) {
+                continue;
+            }
+            let p = add(a, scale(d, t.clamp(0.0, 1.0)));
+            if dot(sub(p, center), n).abs() <= tol {
+                push_unique(&mut out, p, tol);
+            }
+        }
+        return out;
+    }
+    let qa = (du / ma).powi(2) + (dv / mb).powi(2);
+    if qa <= 1e-300 {
+        return out;
+    }
+    let qb = 2.0 * (au * du / (ma * ma) + av * dv / (mb * mb));
+    let qc = (au / ma).powi(2) + (av / mb).powi(2) - 1.0;
+    let disc = qb * qb - 4.0 * qa * qc;
+    if disc < 0.0 {
+        return out;
+    }
+    let sq = disc.sqrt();
+    let ang_tol = (tol / ma.max(mb)).max(1e-12);
+    for t in [(-qb - sq) / (2.0 * qa), (-qb + sq) / (2.0 * qa)] {
+        if !(-tol..=1.0 + tol).contains(&t) {
+            continue;
+        }
+        let p = add(a, scale(d, t.clamp(0.0, 1.0)));
+        if dot(sub(p, center), n).abs() > tol {
+            continue;
+        }
+        let u = dot(sub(p, center), major_unit) / ma;
+        let v = dot(sub(p, center), minor_dir) / mb;
+        if angle_on_arc(v.atan2(u), start, sweep, ang_tol) {
+            push_unique(&mut out, p, tol);
+        }
+    }
+    out
+}
+
+/// Analytic intersection when both operands are conic primitives.
+///
+/// Returns `None` when the pair is not solved analytically, so the caller can
+/// fall back to sampling.
+fn analytic_intersections(a: &Conic, b: &Conic, tol: f64) -> Option<Vec<Point3>> {
+    use Conic::*;
+    let mut out = Vec::new();
+    match (a, b) {
+        (Segment { a: a1, b: a2 }, Segment { a: b1, b: b2 }) => {
+            if let Some(p) = segment_segment_intersection_3d(*a1, *a2, *b1, *b2, tol) {
+                out.push(p);
+            }
+            Some(out)
+        }
+        (
+            Segment { a: a1, b: a2 },
+            Circle {
+                center,
+                normal,
+                radius,
+            },
+        )
+        | (
+            Circle {
+                center,
+                normal,
+                radius,
+            },
+            Segment { a: a1, b: a2 },
+        ) => Some(segment_circle_points(
+            *a1, *a2, *center, *normal, *radius, tol,
+        )),
+        (
+            Segment { a: a1, b: a2 },
+            Arc {
+                center,
+                normal,
+                radius,
+                start,
+                sweep,
+            },
+        )
+        | (
+            Arc {
+                center,
+                normal,
+                radius,
+                start,
+                sweep,
+            },
+            Segment { a: a1, b: a2 },
+        ) => {
+            let hits = segment_circle_points(*a1, *a2, *center, *normal, *radius, tol);
+            let (ax, ay, _) = arbitrary_axis(*normal);
+            let ang_tol = (tol / radius.abs().max(1e-12)).max(1e-12);
+            for p in hits {
+                let v = sub(p, *center);
+                if angle_on_arc(dot(v, ay).atan2(dot(v, ax)), *start, *sweep, ang_tol) {
+                    push_unique(&mut out, p, tol);
+                }
+            }
+            Some(out)
+        }
+        (
+            Segment { a: a1, b: a2 },
+            Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            },
+        )
+        | (
+            Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            },
+            Segment { a: a1, b: a2 },
+        ) => Some(segment_ellipse_points(
+            *a1,
+            *a2,
+            *center,
+            *normal,
+            *major_axis,
+            *ratio,
+            *start,
+            *sweep,
+            tol,
+        )),
+        (
+            Circle {
+                center: c1,
+                normal: n1,
+                radius: r1,
+            },
+            Circle {
+                center: c2,
+                normal: n2,
+                radius: r2,
+            },
+        ) => circle_circle_points(*c1, *n1, *r1, *c2, *n2, *r2, tol),
+        (
+            Circle {
+                center: c1,
+                normal: n1,
+                radius: r1,
+            },
+            Arc {
+                center: c2,
+                normal: n2,
+                radius: r2,
+                start,
+                sweep,
+            },
+        )
+        | (
+            Arc {
+                center: c2,
+                normal: n2,
+                radius: r2,
+                start,
+                sweep,
+            },
+            Circle {
+                center: c1,
+                normal: n1,
+                radius: r1,
+            },
+        ) => {
+            let hits = circle_circle_points(*c1, *n1, *r1, *c2, *n2, *r2, tol)?;
+            let (ax, ay, _) = arbitrary_axis(*n2);
+            let ang_tol = (tol / r2.abs().max(1e-12)).max(1e-12);
+            for p in hits {
+                let v = sub(p, *c2);
+                if angle_on_arc(dot(v, ay).atan2(dot(v, ax)), *start, *sweep, ang_tol) {
+                    push_unique(&mut out, p, tol);
+                }
+            }
+            Some(out)
+        }
+        (
+            Arc {
+                center: c1,
+                normal: n1,
+                radius: r1,
+                start: s1,
+                sweep: w1,
+            },
+            Arc {
+                center: c2,
+                normal: n2,
+                radius: r2,
+                start: s2,
+                sweep: w2,
+            },
+        ) => {
+            let hits = circle_circle_points(*c1, *n1, *r1, *c2, *n2, *r2, tol)?;
+            let (ax1, ay1, _) = arbitrary_axis(*n1);
+            let (ax2, ay2, _) = arbitrary_axis(*n2);
+            for p in hits {
+                let v1 = sub(p, *c1);
+                let v2 = sub(p, *c2);
+                let a1 = dot(v1, ay1).atan2(dot(v1, ax1));
+                let a2 = dot(v2, ay2).atan2(dot(v2, ax2));
+                if angle_on_arc(a1, *s1, *w1, 1e-9) && angle_on_arc(a2, *s2, *w2, 1e-9) {
+                    push_unique(&mut out, p, tol);
+                }
+            }
+            Some(out)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
