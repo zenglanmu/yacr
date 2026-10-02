@@ -122,6 +122,20 @@ impl UiHandle {
         })
     }
 
+    /// Push the draw/edit panel state (drawing-edit §4).
+    ///
+    /// A host calls this with the preview from `cad_app::DrawTool::preview()` so
+    /// the step text and confirm/cancel affordance track the capture state
+    /// machine. Idle (`active == false`) hides the row; nothing is fabricated.
+    pub fn set_draw_state(&self, state: &DrawUiState) -> CadResult<()> {
+        let step = state.step_label.clone();
+        self.with(|ui| {
+            ui.set_draw_tool_active(state.active);
+            ui.set_draw_can_confirm(state.can_confirm);
+            ui.set_draw_step_label(step.into());
+        })
+    }
+
     /// Push the layer panel state (audit F03/U03).
     ///
     /// Also records the ordered `LayerId`s so a later toggle callback can map

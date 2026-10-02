@@ -34,6 +34,9 @@ pub struct CadView {
     selection: Rc<RefCell<SelectionSet>>,
     measurement_preview: Rc<RefCell<Option<MeasurementPreview>>>,
     annotation_preview: Rc<RefCell<Option<AnnotationPreview>>>,
+    /// In-progress drawing/editing preview (drawing-edit §4); drawn through the
+    /// existing annotation preview overlay path.
+    draw_preview: Rc<RefCell<Option<cad_app::DrawPreview>>>,
     incoming: IncomingDocument,
     preference: BackendPreference,
     messages: Rc<RefCell<crate::i18n::MessageSource>>,
@@ -57,6 +60,7 @@ impl CadView {
             selection: Rc::new(RefCell::new(SelectionSet::new())),
             measurement_preview: Rc::new(RefCell::new(None)),
             annotation_preview: Rc::new(RefCell::new(None)),
+            draw_preview: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -238,10 +242,18 @@ impl CadView {
             state.preparation_scheduled = false;
             let doc = view.incoming.borrow().clone();
             let snapshot = state.view.clone();
+            // A real annotation tool preview wins; otherwise an in-progress
+            // drawing preview is drawn through the same overlay path.
+            let annotation_overlay = view.annotation_preview.borrow().clone().or_else(|| {
+                view.draw_preview
+                    .borrow()
+                    .as_ref()
+                    .map(crate::draw::draw_overlay_preview)
+            });
             let overlays = OverlayInputs {
                 selection: view.selection.borrow().clone(),
                 measurement: view.measurement_preview.borrow().clone(),
-                annotation: view.annotation_preview.borrow().clone(),
+                annotation: annotation_overlay,
             };
             let result = state.controller.prepare_shared_with_overlays(
                 doc,
@@ -346,6 +358,26 @@ impl CadView {
         *self.annotation_preview.borrow_mut() = preview;
         self.state.borrow_mut().overlay_revision += 1;
         self.request_redraw();
+    }
+
+    /// Store (or clear) the in-progress drawing/editing preview (drawing-edit
+    /// §4) and request a redraw. `None` cancels the preview overlay.
+    ///
+    /// The preview is drawn through the existing annotation preview overlay (a
+    /// rubber band for line/move/trim, a full circle for circle); committing
+    /// the actual geometry is the command layer's job, never this overlay's.
+    pub fn set_draw_preview(&self, preview: Option<cad_app::DrawPreview>) {
+        if *self.draw_preview.borrow() == preview {
+            return;
+        }
+        *self.draw_preview.borrow_mut() = preview;
+        self.state.borrow_mut().overlay_revision += 1;
+        self.request_redraw();
+    }
+
+    /// The drawing preview currently drawn as an overlay.
+    pub fn draw_preview(&self) -> Option<cad_app::DrawPreview> {
+        self.draw_preview.borrow().clone()
     }
 
     /// A monotonic counter of transient overlay (selection/preview) changes,

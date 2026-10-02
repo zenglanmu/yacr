@@ -25,9 +25,37 @@ Web 的 DOM 仅提供文件选择、语言/启动恢复与原生多点触控适�
 `OPEN` 打开真实 DWG 文件选择器，`FIT` / `ZOOM EXTENTS` 适应图纸，`UNDO` / `REDO`
 使用真实可用性；`TOOLS` / `RIBBON` 切换 Ribbon，`PANELS` 切换数据面板，
 `DIAGNOSTICS` 打开诊断。不是 AutoCAD 完整命令解析器。
-绘制/编辑 Ribbon（直线、圆、移动、修剪）明确禁用并标注尚未接入；未知命令
-显示明确未接入诊断。交接点：`pending("ui.command.editing")`、
-`pending("ui.ribbon.draw_modify")` 是代码注释，不伪造后端空成功。
+
+绘制/编辑 Ribbon（直线、圆、移动、修剪）与命令词 `LINE` / `CIRCLE` / `MOVE` /
+`TRIM`（别名 `L`/`C`/`M`/`TR`）已是真实工具，不再是禁用占位：
+`cad-app::draw_tool` 提供纯捕获状态机（`DrawToolKind`/`DrawTool`/`DrawPreview`/
+`DrawIntent`），shell 的 `begin-draw-tool` 启动捕获，画布取点进入状态机并推入
+状态行；确认恰好发出一次绘制命令，取消零事务。`docs/drawing-edit.md` §4 的
+`pending("ui.command.editing")` 与 `pending("ui.ribbon.draw_modify")` 占位已删除。
+未知命令显示 `command.unknown` 的明确文案，绝不是空成功。
+
+工具为 **Work-only**：Viewer 下按钮禁用，命令层仍会拒绝（`PermissionDenied` →
+目录文案 `draw.error.read_only`），不靠隐藏按钮。`MOVE` 需要非空选择，否则显式
+提示 `draw.error.selection_required` 且不启动；`TRIM` 按“先目标后边界”两步取点。
+多指手势由既有 `cad-app::input::InputPolicy` 处理：第二个手指落下即
+`ToolCancelled`，且绘制提交必须显式确认，因此多指**不可能**提交。预览经
+`CadView::set_draw_preview` 走既有预览叠加层（LINE/MOVE/TRIM 为橡皮筋，
+CIRCLE 为整圆），提交几何由命令层负责，叠加层从不写库。
+
+**仍未支持的图元**：`TRIM` 只支持 LINE 被 LINE/LWPOLYLINE 直线段裁剪；目标/边界
+含圆弧、SPLINE、INSERT 实例、Opaque 等返回显式 `Unsupported` 或 `Partial` 诊断且
+不改库（`docs/drawing-edit.md` §3）；`CreateLine`/`CreateCircle` 仅创建直线与圆。
+圆弧/样条/多段线绘制尚未支持。
+
+**宿主接线（超出本轮 UI 范围，需文档化）**：`cad-ui-slint` 的 shell 回调已全部接线
+到 `UiAdapter`，但 `MoveEntities`/`TrimEntity` 需要会话的 `SelectionRef`，shell 只有
+选择计数而非 refs，因此宿主需实现并安装两个 sink：
+`UiAdapter::set_draw_command_sink(DrawCommandSink)`（确认时按 `docs/drawing-edit.md`
+§2 映射为 `CommandId::CreateLine/CreateCircle/MoveEntities/TrimEntity` 并走共享
+`UiCommandSink`/事务/历史路径；未安装时状态行显式提示 `draw.error.unwired`），
+以及 `UiAdapter::set_draw_preview_sink(DrawPreviewSink)`（把预览转发到
+`CadView::set_draw_preview`；未安装则仅无实时叠加，状态行仍跟踪捕获）。
+`DrawCommandSink` 的 `commit` 契约与逐条映射记录在 `draw.rs` 文档注释。
 
 Web 在 CAD 区域内单指拖动平移、双指捏合缩放并跟随中心平移；**手指数变化只重新
 建立基准、不发出导航增量**（第二个手指落下或抬起时，基线在变化点重置，之后的移动

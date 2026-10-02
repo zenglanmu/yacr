@@ -13,13 +13,15 @@ export component CadRibbon inherits Rectangle {
     in property <bool> can-undo;
     in property <bool> can-redo;
     in property <bool> view-3d;
-    in property <string> pending-label;
+    in property <bool> work-mode;
+    in property <string> draw-status;
     in property <[string]> editing-labels;
     in-out property <bool> expanded: true;
     property <int> tab: 0;
     callback action(int);
     callback standard-view(string);
     callback backend(string);
+    callback draw-tool(string);
     height: root.expanded ? (root.phone ? 276px : 168px) : (root.phone ? 56px : 40px);
     background: #262d38;
     VerticalBox {
@@ -73,13 +75,19 @@ export component CadRibbon inherits Rectangle {
                 }
                 if !root.phone : VerticalBox {
                     padding: 0px;
-                    // pending("ui.ribbon.draw_modify"): drawing database is
-                    // read-only; no backend editing command is fabricated.
+                    // Real drawing/editing tools. Enabled only in Work mode; a
+                    // Viewer click is refused by the command layer too, so the
+                    // gate here is an affordance, not the enforcement.
                     HorizontalBox {
                         padding: 0px;
-                        for label in root.editing-labels : Button { text: label; enabled: false; min-height: root.target; }
+                        for label in root.editing-labels : Button {
+                            text: label;
+                            enabled: root.work-mode;
+                            min-height: root.target;
+                            clicked => { root.draw-tool(label); }
+                        }
                     }
-                    Text { text: root.pending-label; color: #aab5c5; horizontal-alignment: center; overflow: elide; }
+                    Text { text: root.draw-status; color: #aab5c5; horizontal-alignment: center; overflow: elide; }
                 }
             }
             if root.tab == 0 && root.phone : HorizontalBox {

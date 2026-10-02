@@ -21,6 +21,8 @@ slint::include_modules!();
 
 pub mod bridge;
 
+pub mod draw;
+
 pub mod i18n;
 
 pub mod responsive;
@@ -35,6 +37,11 @@ pub use bridge::{
     build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
     camera2d_from_params, camera3d_from_params, fit_camera, install as install_cad_bridge,
     install_with_preference, layout_descriptors, BridgeCamera, CadView, IncomingDocument,
+};
+
+pub use draw::{
+    draw_error_text, draw_kind_from_label, draw_kind_labels, draw_overlay_preview, DrawCommandSink,
+    DrawPreviewSink, DrawUiState,
 };
 
 pub use i18n::{Locale, LocaleResolution, Message, MessageCatalog, MessageSource};
@@ -128,6 +135,15 @@ pub struct UiAdapter {
     /// Host sink for layout (paper-space) switches (F04); see
     /// [`LayoutSwitchSink`]. `None` makes the layout click report "unwired".
     layout_switch: Rc<RefCell<Option<Box<dyn LayoutSwitchSink>>>>,
+    /// Host sink that turns a confirmed draw/edit [`cad_app::DrawIntent`] into
+    /// exactly one drawing command (drawing-edit §2/§4). `None` makes a confirm
+    /// report "unwired" instead of fabricating a command.
+    draw_command_sink: Rc<RefCell<Option<Box<dyn DrawCommandSink>>>>,
+    /// Host sink that receives the in-progress draw preview for the CAD overlay
+    /// ([`CadView::set_draw_preview`]). `None` simply means no live overlay.
+    draw_preview_sink: Rc<RefCell<Option<Rc<dyn DrawPreviewSink>>>>,
+    /// The active draw/edit capture state, driven by this adapter's callbacks.
+    draw_tool: Rc<RefCell<Option<cad_app::DrawTool>>>,
     /// Kind currently selected in the shell; the Measure button and the canvas
     /// picks both use it so they cannot disagree.
     selected_kind: Rc<Cell<MeasurementToolKind>>,
