@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use cad_app::host::HostController;
 use cad_app::layers::LayerRow;
-use cad_app::{AnnotationPreview, AnnotationRow, SelectionProperties};
+use cad_app::{AnnotationPreview, AnnotationRow, MeasurementPreview, SelectionProperties};
 use cad_diagnostics::model::{DiagnosticReason, DiagnosticsModel, Severity};
 use cad_domain::{AnnotationId, Completeness, Diagnostic, LayerId, LayoutId};
 use cad_ui_slint::{
@@ -133,11 +133,39 @@ pub(super) fn view_slot(view: &CadView) -> Rc<RefCell<Option<CadView>>> {
     Rc::new(RefCell::new(Some(view.clone())))
 }
 
+/// The triple of transient overlay inputs the funnel pushes into `CadView`.
+///
+/// Factored out of the funnel so the mapping is unit-testable without a Slint
+/// host: an empty selection and an idle tool must produce the explicit empty
+/// value (`SelectionSet::new()` / `None`), which clears the overlay rather than
+/// leaving the previous one drawn.
+pub(super) struct OverlayPush {
+    pub selection: cad_app::SelectionSet,
+    pub measurement: Option<MeasurementPreview>,
+    pub annotation: Option<AnnotationPreview>,
+}
+
+/// Read the authoritative overlay inputs from the controller.
+pub(super) fn derive_overlay_push(controller: &HostController) -> OverlayPush {
+    OverlayPush {
+        selection: controller.selection().clone(),
+        measurement: controller.measurement_preview(),
+        annotation: controller.annotation_preview(),
+    }
+}
+
 /// Push every derived panel state into the shell in one place.
 ///
 /// Called after every command execute, document open and annotation mutation.
 /// The history push replaces the old `set_can_undo`-only calls: it writes both
 /// undo and redo so undoing to empty leaves `can_redo` stale-free (audit U11).
+///
+/// It is also the **only** path that feeds the transient render overlay: the
+/// selection highlight and the active tool previews are pushed here so a
+/// command, a selection pick and a cancel all reach the GPU through the same
+/// funnel. A cleared selection or a stopped tool pushes the explicit empty
+/// value (`SelectionSet::new()` / `None`), which removes the overlay rather than
+/// leaving the previous one on screen.
 pub(super) fn push_panel_state(
     controller: &Rc<RefCell<HostController>>,
     handle: &UiHandle,
@@ -146,6 +174,16 @@ pub(super) fn push_panel_state(
     let messages = current_messages();
     let backend = backend_display(view);
     let controller = controller.borrow();
+
+    // Transient render overlay: selection highlight + tool previews. Kept in the
+    // funnel (not at call sites) so no command path can forget it; an empty
+    // selection or idle tool clears the overlay with the explicit empty value.
+    if let Some(view) = view.borrow().as_ref() {
+        let overlay = derive_overlay_push(&controller);
+        view.set_selection_highlight(overlay.selection);
+        view.set_measurement_preview(overlay.measurement);
+        view.set_annotation_preview(overlay.annotation);
+    }
 
     // Undo/redo: one snapshot drives both flags.
     let _ = handle.set_history_availability(controller.history_availability());
@@ -391,5 +429,59 @@ mod tests {
         let mut set = SelectionSet::new();
         assert!(set.insert(a.clone()));
         assert!(!set.insert(a));
+    }
+
+    #[test]
+    fn overlay_push_is_explicitly_empty_before_any_selection_or_tool() {
+        let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let overlay = derive_overlay_push(&controller);
+        // The highlight is the explicit empty set, and both previews are None:
+        // the funnel clears the overlay rather than leaving a stale one.
+        assert!(overlay.selection.is_empty());
+        assert_eq!(overlay.selection, cad_app::SelectionSet::new());
+        assert!(overlay.measurement.is_none());
+        assert!(overlay.annotation.is_none());
+    }
+
+    #[test]
+    fn overlay_push_carries_the_drawn_selection_and_active_preview() {
+        use cad_app::SelectionSet;
+        use cad_domain::{DocumentId, SelectionRef};
+        use std::rc::Rc;
+
+        let controller = Rc::new(RefCell::new(
+            HostController::with_demo_document([800.0, 600.0]).unwrap(),
+        ));
+        let reference = SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(1),
+            instance: InstancePath::default(),
+            sub_element: None,
+        };
+        controller
+            .borrow_mut()
+            .set_selection(vec![reference.clone()])
+            .unwrap();
+
+        let overlay = derive_overlay_push(&controller.borrow());
+        let mut expected = SelectionSet::new();
+        assert!(expected.insert(reference));
+        assert_eq!(overlay.selection, expected);
+        assert!(!overlay.selection.is_empty());
+
+        // Starting the distance tool makes the measurement preview non-None.
+        controller
+            .borrow_mut()
+            .execute(cad_app::Command {
+                schema_version: 1,
+                id: cad_app::CommandId::Measure,
+                document: controller.borrow().document_id,
+                viewport: controller.borrow().viewport_id,
+                payload: cad_app::CommandPayload::None,
+            })
+            .unwrap();
+        let overlay = derive_overlay_push(&controller.borrow());
+        assert!(overlay.measurement.is_some());
+        assert!(overlay.annotation.is_none());
     }
 }

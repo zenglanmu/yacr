@@ -163,7 +163,11 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
   **不重建底图或批注**；高亮 `draw_order = 900_000`（底图 0 与批注 1_000_000 之间），
   颜色为 `cad_scene::DEFAULT_HIGHLIGHT_COLOR` 且 `color_unresolved = false`。
   宿主仍需调用该 setter（见 `docs/ui.md` §3）；工具预览同路径，见
-  `overlay::preview_overlay`。真实 GPU 像素与浏览器行为**未在本轮验证**。
+  `overlay::preview_overlay`。**Web 宿主已接线**：`apps/app-web` 的
+  `browser/state_push.rs::push_panel_state` 在每条命令/选择拾取/确认取消路径统一推送
+  `set_selection_highlight`/`set_measurement_preview`/`set_annotation_preview`，空选择
+  与无工具分别推送空 `SelectionSet`/`None`（高亮与预览消失）；纯映射见
+  `derive_overlay_push`。真实 GPU 像素与浏览器行为**未在本轮验证**（headless 验收待补）。
 - **精确拾取**：把画布点击变成 `SelectionRef` 需要宿主安装画布→世界映射并做命中
   测试（`cad-spatial::GridSpatialIndex`）；UI 侧只回传逻辑像素，宿主未接线时同样
   显式提示，不静默丢弃（与测量 `canvas-pick` 同一条路径）。
