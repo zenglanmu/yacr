@@ -18,15 +18,25 @@ acadrust 0.5.5。核心无平台依赖，可单独测试并用于 CLI。
 ## 当前状态
 
 已实现并以合成契约测试覆盖：领域类型、数据库与事务、几何引擎、代理回放器、
-acadrust 导入、显示表示、空间索引、场景批处理、测量、批注（含版本化 JSON）、
-依赖失效、撤销/重做、查询层、应用命令层、wgpu 2D 渲染器、Slint UI 与 Android 宿主。
+acadrust 导入（含实体/图层透明度）、显示表示、空间索引、场景批处理（拓扑/法向/
+深度/绘制顺序/透明）、测量、批注（含版本化 JSON）、依赖失效、撤销/重做、查询层、
+应用命令层、wgpu 2D/3D 渲染器、Slint UI 与 Android/Web 宿主。
 
-构建产物：`target/debug/apk/yacr.apk`（arm64-v8a，debug 签名）。
+本轮已实际运行（2026-10-02）：
+
+- Android：x86_64 release APK 在无头 **模拟器**（KVM + SwiftShader）安装、启动、
+  渲染，画布平移/“适应”经像素 diff 验证（`docs/validation-android.md`）。
+- Web：`web-dist/` wasm 产物在无头 **Chromium**（Chrome for Testing 153）以 WebGL2
+  运行，加载/导航/双语切换通过（`docs/validation-web.md`）。
+- 3D/纸空间：Slint 桥按空间与视图模式分派 `render`/`render_3d`（`docs/view-3d.md`）。
+- 透明：acadrust `Transparency` → 场景 → 透明管线，含软件 Vulkan（lavapipe）合成测试。
 
 **明确未完成**（不得视为已交付）：
 
-- 无真实 DWG 样本、黄金图、跨后端对照或性能基准（`fixtures/manifest` 为空）。
-- Android 未在真机/模拟器运行；Web 无可运行产物（无 Wasm 导出/JS 宿主）。
+- 无授权真实 DWG 样本、黄金图、跨后端对照或性能基准（`fixtures/manifest` 为空）。
+- Android 未在真机运行；surface 尺寸/安全区、SAF、量测/批注拾取未接线。
+- Web 仅验证 WebGL2 软件路径；WebGPU、真实 GPU 与移动/桌面浏览器矩阵未验证。
 - 桌面/iOS 仅平台抽象，不提供宿主。
-- 3D 观察渲染、ACIS 曲面离散、SAF 文件选择器、字体 shaping、WebGL2 路径未实现。
+- ACIS 曲面离散（无内核/解析器/样本）仍未实现；复杂文字整形、动态块、复杂视口裁剪、
+  代理无缓存几何均按样本标记为未支持或未验证。
 - 未支持项在 `docs/compatibility.md` 中逐项标注；未验证即未验证，不冒充完成。

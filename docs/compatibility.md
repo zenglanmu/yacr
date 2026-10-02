@@ -26,16 +26,28 @@
 
 ## 三维
 
-- 观察（轨道/标准视图/正交-透视）：数据结构与命令存在（`StandardView`、
-  `Projection`），**渲染未实现**。
-- 直接网格（Mesh/3DFACE）：数据与离散实现，着色/法向可用于 GPU，**未运行**。
-- ACIS 曲面离散：`cad-kernel-adapter` 为契约（`SolidTessellator`），
-  **未实现**，返回 NotImplemented。
+- 观察（轨道/标准视图/正交-透视）：`cad-app` 的相机/投影/标准视图/轨道命令与 Slint
+  桥已接线，`BeforeRendering` 按当前空间与视图模式选择 `render`(2D) 或 `render_3d`
+  (`Camera3d`)，UI 提供 2D/3D、投影、标准视图与拖动轨道（`docs/view-3d.md`）。
+  **真实设备上的 3D 出图仍未验证**（模拟器 SwiftShader 只覆盖 2D；软件 Vulkan 的
+  网格测试见 `docs/validation.md`）。
+- 直接网格（Mesh/3DFACE）：数据、法向、深度、绘制顺序与透明通道已实现；透明合成有
+  软件 Vulkan（lavapipe）无头测试。真实 GPU 行为未验收。
+- 底图透明度：importer 读取 acadrust `Transparency`（`ByLayer`/`ByObject`/`ByBlock`）
+  → `DisplayFragment.alpha` → `RenderBatch.alpha`，由渲染器分类为不透明/透明/不可见
+  （`docs/render-order.md`）；plot-style 表 alpha 未应用（acadrust 未暴露解析值）。
+- ACIS 曲面离散：`cad-kernel-adapter` 为契约（`SolidTessellator`），**未实现**，
+  返回 `Unsupported`/`NotImplemented`（无内核、无 SAT/SAB 解析器、无授权样本）。
 
 ## 平台
 
-- Android：可编译并打包 APK（见 `docs/validation.md`）；**未真机运行**。
-- Web：无 Wasm 导出/JS 宿主，**不可运行**；WebGL2/WebGPU 均未验证。
+- Android：aarch64 可编译并打包 APK；x86_64 release APK 已在无头模拟器（KVM +
+  SwiftShader）**实际安装、启动、渲染并验证画布平移/缩放**（
+  `docs/validation-android.md`）。真机仍 **未运行**；SAF、surface 尺寸/安全区、
+  量测/批注拾取、面板状态推送未接线。
+- Web：wasm 静态产物可构建，`web-dist/` 在无头 Chromium（Chrome for Testing 153，
+  SwiftShader）以 **WebGL2 实际运行**，加载、导航与语言切换通过
+  （`docs/validation-web.md`）。WebGPU 路径、真实 GPU、移动/桌面浏览器矩阵 **未运行**。
 - iOS/Linux/macOS/Windows：仅 `cad-platform` 抽象，**无宿主**。
 
 ## 已明确的不支持项

@@ -14,6 +14,10 @@
   adapter `llvmpipe`，`deviceType=CPU`，Mesa 26.0.8-1ubuntu0.3 / LLVM 21.1.8，
   Vulkan instance 1.4.341）。无头渲染证据在 `VK_ICD_FILENAMES=.../lvp_icd.json`
   下取得，见下文“软件 Vulkan 无头渲染”。
+- Android：无头模拟器 `emulator-5554`（AVD `dev_api35`，API 35 `google_apis` x86_64，
+  KVM + `-gpu swiftshader`），`cargo-apk 0.10.0`。**是模拟器，不是真机。**
+- Web：`wasm-bindgen-cli 0.2.129`、Node 22；无头 Chromium
+  `Google Chrome for Testing 153.0.8010.12`（Playwright core 1.63，SwiftShader）。
 
 ## 已执行的测试
 
@@ -270,10 +274,69 @@ PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假�
 该包不含真实 DWG/字体/黄金图（`fixtures/manifest` 为空），也不含 lavapipe；
 运行时的软件适配器由宿主发行版的 Mesa 提供。
 
+## 集成轮：Android/Web 运行与显示链（2026-10-02 执行）
+
+四个并行 workstream 已合入 `main` 并按下述命令验证。详细证据见
+`docs/validation-android.md`、`docs/validation-web.md`、`docs/view-3d.md`、
+`docs/render-order.md`、`docs/proxy-support.md`。
+
+### 合入验证（在 main 的集成树上执行）
+
+- 核心测试 `cargo test --workspace --exclude cad-ui-slint --exclude app-android
+  --exclude app-web --locked`：**573 passed / 0 failed**（33 个测试目标）。
+- `VK_ICD_FILENAMES=.../lvp_icd.json cargo test -p cad-render-wgpu --locked`：
+  **47 passed / 0 failed**（含新增透明合成测试，真实提交到 lavapipe）。
+- `cargo fmt --all --check`、`cargo clippy ... --all-targets --locked`（0 warning）、
+  `python3 scripts/check-architecture.py`（23 packages）、
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`、
+  `cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked`、
+  `python3 scripts/check-i18n.py`（116 keys）、`check-workflows.py`、
+  `check-fixture-manifest.py`：全部通过。
+
+### Android：模拟器真实运行（**非真机**）
+
+- x86_64 release APK（约 12.8 MB，本地开发签名）在 `emulator-5554` 安装、启动；
+  进程存活，无 `FATAL`/`ANR`；内置演示几何真实渲染；后端日志
+  `preference=WebGpu actual=WebGpu ... max_texture_dimension=8192`，底层为模拟器
+  SwiftShader 上的 Vulkan（wgpu）+ Skia 合成。合入四个 workstream 与宿主
+  `sync_session` 接线后重建的 APK 再次安装运行（pid 4625），画布拖动像素 diff
+  **12951/2592000（0.50%）**，无崩溃——合并未破坏渲染与导航。
+- 修复：Android 宿主此前未接 `ViewInput`，画布拖动 **0 像素变化**；修复后拖动像素 diff
+  **21415/2592000（0.83%）**，点“适应”恢复到基准。截图与 logcat 见
+  `docs/evidence/android-runtime/`。
+- 局限：`safe_insets`/surface 尺寸未接线（顶部工具栏被状态栏遮挡，打开 DWG **NOT RUN**）；
+  量测/批注拾取未安装；图层/布局/批注/诊断面板状态未推送；SAF 未实现；真机未运行。
+
+### Web：无头 Chromium 真实运行（WebGL2）
+
+- `scripts/build-web.sh` 产出 `web-dist/`；工作流构建 `pkg/yacr_bg.wasm`
+  14,792,865 字节（sha256 `e742d153…`），合入 3D 接线与本轮宿主改动后的集成重建为
+  14,915,522 字节（sha256 `a49c3c6b…`）；`serve-web.py` MIME 为 `application/wasm`。
+- `check-web-ui.mjs` 在 Chrome for Testing 153 下通过（集成重建的 `web-dist` 再次运行
+  通过）：`chosen=WebGl2 adapter=Some(WebGl2)`，CAD 区域非空，导航后画面变化，语言
+  `zh-CN→en` 切换保留文档并持久化，`consoleErrors=0`、`pageErrors=0`。
+- 修复：桥固定 WebGPU、Slint 缺 `renderer-femtovg-wgpu`、wasm 轮询误判设备丢失、
+  WebGL2 多重采样 present 失败；B29 冒烟脚本改为裁剪 CAD 区域、导航后必须变化、
+  隐藏页停止轮询、意外错误失败。
+- 局限：WebGPU（本机无 `navigator.gpu`）、真实 GPU、移动/桌面浏览器矩阵 **NOT RUN**；
+  wasm 未做 `wasm-opt`。
+
+### 3D / 纸空间宿主接线与透明
+
+- `cad-ui-slint` 桥现在按 `SpaceSelection` 与 2D/3D 模式分派 `render`/`render_3d`，
+  UI 暴露 2D/3D、投影、标准视图、拖动轨道与布局选择；退化相机/不支持布局显式诊断。
+  宿主编排者补齐 `CadView::sync_session`（空间+相机+模式）。GPU 上的真实 3D 出图
+  未在真机观察。
+- 底图透明度：acadrust `Transparency` → `DisplayFragment.alpha` → `RenderBatch.alpha`；
+  代理保留全部片段与真实来源/精度。软件 Vulkan 透明合成测试通过。plot-style 表 alpha、
+  透明线条深度写入策略仍为显式未实现。
+
 ## 未执行（明确标注）
 
-- 真机/模拟器安装与运行：本环境无 adb/emulator，**未运行**。
-- 浏览器运行：无 Wasm 导出与 JS 宿主，**未运行**。
-- 桌面宿主：**未构建**（依赖缺失）。
+- **Android 真机**：未运行（仅模拟器 SwiftShader）。SAF、surface 尺寸/安全区、
+  量测/批注拾取、面板状态推送未接线。
+- **WebGPU / 真实 GPU**：未运行；Web 仅无头 Chromium 的 WebGL2 软件路径。
+- **ACIS（F15）**：无内核、无 SAT/SAB 解析器、无授权样本，仍返回 Unsupported。
+- 桌面/iOS/macOS/Windows 宿主：**未构建**；仅 `cad-platform` 抽象。
 - 授权真实 DWG/字体/黄金图入库、跨后端对照、性能基准：`fixtures/manifest` 为空，
-  **未完成**；任何实体兼容性声明都不成立。本轮临时样本的行为证据见上一节，不等于验收。
+  **未完成**；任何实体兼容性声明都不成立。临时样本的行为证据不等于验收。

@@ -5,34 +5,41 @@
    请以当前源码和最新构建证据确认状态，不覆盖陌生变更。
 2. 运行 README 的 check/test/architecture 命令；不要删除陌生的已有实现。
 3. 用 `rg 'pending\(' crates apps` 查找显式占位；文件路径与字符串标识对应实施单元。
-4. Android 的 Slint + wgpu 组合已验证到打包层：见 ADR 0002
-   （docs/adr/0002-gpu-ui-composition.md）与 docs/validation.md；
-   `scripts/build-android.sh --release` 产出并签名 aarch64 APK。
-   真机/模拟器运行仍未执行，不能以打包成功代替。Web 组合仍未完成
-   （`host.web.file_api_canvas_composition`），不能以本机 Rust 编译代替。
+4. Android 的 Slint + wgpu 组合已验证到打包层（ADR 0002、docs/validation.md）；
+   本轮进一步在无头模拟器（KVM + SwiftShader，x86_64）实际安装、启动、渲染并验证
+   画布平移/适应（docs/validation-android.md）。**真机仍未运行**。Web 已可运行：
+   wasm 静态产物在无头 Chromium 以 WebGL2 通过加载/导航/双语（docs/validation-web.md）；
+   **WebGPU 与真实 GPU 未验证**。
 5. 逐项实现 Builder/事务/历史 → 导入/基础语义 → 显示/索引/场景 → 应用/工具 → 宿主闭环；
    不把这个依赖顺序当作排期，也不绕过优先 GPU/UI 验证。
 6. 每次移除占位同步补齐规范测试、能力表、构建说明、Git 提交。
 
-## 本轮状态（compact，2026-10-01）
+## 本轮状态（compact，2026-10-02）
 
-已完成并推送（main）：真实 DWG 端到端证据（`docs/validation.md`）、审计 B15/B20/B23/B24/B12、
-字体目录与来源（`docs/fonts.md`）、文字整形（sfnt/WOFF1+SHX，逐字形回退）、TEXT/MTEXT 对齐、
-TTF kerning、宿主取字体（web fetch / android assets）、DIMENSION/HATCH、F06 测量状态机、
-F03/F05 面板、F13 相机/投影/标准视图、F14 网格管线+深度+绘制顺序+透明+CPU 拾取、
-F15 ACIS 契约缝、代理解码失败关闭、CLI 结构化/原子输出、批注编解码与叠加渲染、
-诊断聚合与资源预算、F04 布局、F07–F09 批注工具与管理、F12 后端回退/未保存决策/恢复、
-N01 zh-CN+en（含真实 chrome）、N02 分层 CI（core/wasm/i18n/web-build/shader-validation，
-android-apk/web-smoke 门控）、`fixtures/manifest` 校验与出处策略。
+四个并行 workstream 已合入 main 并验证：
 
-核心测试 **535 passed / 0 failed**；Wasm、Android target、fmt、clippy(0)、架构、
-`check-i18n.py`、`check-fixture-manifest.py`、`check-workflows.py` 全通过。
-字体相关测试可用 `YACR_TEST_FONT`/`YACR_TEST_SHX` 指向真实字体。
+- **Android 运行闭环**：x86_64 release APK 在无头模拟器安装/启动/渲染；修复画布输入
+  未接线（现在单指拖动平移、滚轮/捏合缩放）、初始状态文案、后端日志；像素 diff 证明
+  平移生效。证据 `docs/validation-android.md`（含截图/日志）。
+- **Web 运行闭环**：修复桥固定 WebGPU、Slint 缺 `renderer-femtovg-wgpu`、wasm 轮询
+  误判设备丢失、WebGL2 MSAA present 失败；`web-dist/` 在无头 Chromium 以 WebGL2 通过
+  加载/导航/双语，语言偏好持久化；B29 冒烟脚本修复。证据 `docs/validation-web.md`。
+- **3D / 纸空间宿主接线**：bridge 按 `SpaceSelection` 与视图模式分派 `render`/`render_3d`，
+  UI 提供 2D/3D、投影、标准视图、拖动轨道与布局选择；退化/不支持视图显式诊断。
+  宿主编排者已补 `CadView::sync_session`（空间+相机+模式）。`docs/view-3d.md`。
+- **透明度与代理**：acadrust `Transparency`（ByLayer/ByObject/ByBlock）经
+  `DisplayFragment.alpha` 进入透明管线；代理保留全部片段与真实来源/精度。软件 Vulkan
+  透明合成测试通过。`docs/render-order.md`、`docs/proxy-support.md`。
+
+核心测试 **573 passed / 0 failed**；Wasm、Android target、fmt、clippy(0)、架构、
+`check-i18n.py`（116 keys）、`check-fixture-manifest.py`、`check-workflows.py` 全通过；
+`cad-render-wgpu` 在 lavapipe 下 47 passed（含透明合成）。
 
 仍开放（受环境/外部依赖限制）：**F15 真实 ACIS 离散**（需内核 + SAT/SAB 解析器 + 授权样本）；
-**真机/浏览器/GPU 实际运行**（无 adb/浏览器/adapter）；自托管 GPU/Android runner；
-**授权 DWG/字体/黄金图**（`fixtures/manifest` 仍无授权样本）；MultiLeader；复杂文字整形；
-透明排序与导入端 alpha 打磨；自动保存/崩溃恢复策略。详见各功能 `docs/*.md` 的"未完成"。
+**真机**（模拟器 SwiftShader 不等同真机）；**WebGPU / 真实 GPU / 移动与桌面浏览器矩阵**；
+Android surface 尺寸/安全区（U07）、SAF、量测/批注拾取与面板状态推送；自托管 GPU/Android
+runner；**授权 DWG/字体/黄金图**（`fixtures/manifest` 仍无授权样本）；MultiLeader；
+复杂文字整形；自动保存/崩溃恢复保留策略。详见各功能 `docs/*.md` 的"未完成"。
 
 ## 已定义，但尚需设计审查
 
