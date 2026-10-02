@@ -36,6 +36,27 @@ pub(super) fn selection_allowed(tool: &ToolState) -> bool {
     !matches!(tool, ToolState::Measuring(_) | ToolState::Annotating(_))
 }
 
+/// Which capture tool a pointer move should feed its live preview cursor.
+///
+/// Pure classification so the pointer glue stays trivial: an inactive/idle tool
+/// reports [`PreviewCursor::None`], meaning the move must not touch the session
+/// or re-push the overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PreviewCursor {
+    Measurement,
+    Annotation,
+    None,
+}
+
+/// The capture tool whose preview cursor a move belongs to, if any.
+pub(super) fn preview_cursor_for(tool: &ToolState) -> PreviewCursor {
+    match tool {
+        ToolState::Measuring(_) => PreviewCursor::Measurement,
+        ToolState::Annotating(_) => PreviewCursor::Annotation,
+        _ => PreviewCursor::None,
+    }
+}
+
 pub(super) fn dispatch(
     controller: &Rc<RefCell<HostController>>,
     handle: &SharedHandle,
@@ -229,6 +250,52 @@ impl WebViewInput {
             }
         }
     }
+
+    /// Forward a pointer move as the active capture tool's live cursor.
+    ///
+    /// Cheap by construction: it maps the *same* logical point the renderer
+    /// would ([`pick::map_canvas_point`]) to the session's preview cursor and
+    /// re-runs the shared state-push funnel. It never captures a point, never
+    /// writes the database and never rebuilds the base scene — only the overlay
+    /// revision advances. A move with no capture tool is a no-op, so navigation
+    /// stays free of preview work.
+    fn preview_cursor_at(&self, logical: [f64; 2]) {
+        let mapped = {
+            let controller = self.controller.borrow();
+            match preview_cursor_for(&controller.session.tool) {
+                PreviewCursor::None => return,
+                PreviewCursor::Measurement | PreviewCursor::Annotation => {
+                    match controller
+                        .application
+                        .workspace
+                        .viewports
+                        .get(&self.viewport)
+                    {
+                        None => return,
+                        Some(viewport) => match pick::canvas_size(&self.handle, viewport) {
+                            None => return,
+                            Some(size) => pick::map_canvas_point(viewport, size, logical),
+                        },
+                    }
+                }
+            }
+        };
+        {
+            let mut controller = self.controller.borrow_mut();
+            let result = match preview_cursor_for(&controller.session.tool) {
+                PreviewCursor::Measurement => controller.session.set_measurement_cursor(mapped),
+                PreviewCursor::Annotation => controller.session.set_annotation_cursor(mapped),
+                // The tool stopped between the two borrows: nothing to preview.
+                PreviewCursor::None => return,
+            };
+            if result.is_err() {
+                return;
+            }
+        }
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            state_push::push_panel_state(&self.controller, handle, &self.view);
+        }
+    }
 }
 
 impl ViewInput for WebViewInput {
@@ -260,6 +327,10 @@ impl ViewInput for WebViewInput {
                         z: 0.0,
                     };
                     self.send(CommandId::Pan, CommandPayload::Points(vec![delta]));
+                } else {
+                    // Not a navigation drag: feed the active capture tool's
+                    // live preview cursor. Idle tools ignore this entirely.
+                    self.preview_cursor_at([x, y]);
                 }
                 self.last.set([x, y]);
             }
@@ -339,5 +410,29 @@ mod tests {
         assert!(!selection_allowed(&ToolState::Annotating(
             cad_app::AnnotationTool::new(cad_app::AnnotationToolKind::Text)
         )));
+    }
+
+    #[test]
+    fn only_capture_tools_receive_a_preview_cursor() {
+        // Navigation/idle states must never trigger preview work on a move.
+        assert_eq!(preview_cursor_for(&ToolState::Idle), PreviewCursor::None);
+        assert_eq!(
+            preview_cursor_for(&ToolState::Selecting),
+            PreviewCursor::None
+        );
+        assert_eq!(preview_cursor_for(&ToolState::Panning), PreviewCursor::None);
+        // Active capture tools are classified exactly.
+        assert_eq!(
+            preview_cursor_for(&ToolState::Measuring(MeasurementTool::new(
+                MeasurementToolKind::Distance
+            ))),
+            PreviewCursor::Measurement
+        );
+        assert_eq!(
+            preview_cursor_for(&ToolState::Annotating(cad_app::AnnotationTool::new(
+                cad_app::AnnotationToolKind::Text
+            ))),
+            PreviewCursor::Annotation
+        );
     }
 }

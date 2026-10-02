@@ -243,7 +243,21 @@ python3 scripts/check-i18n.py                                                   
 诊断抽屉经新增 wasm 导出 `diagnostics_report_json()` 与 `window.yacr.diagnostics_report`
 暴露。空/多值文案来自目录（新增 `annotation.empty`）。
 
-以上为源码接线与单元测试；**本机未重跑 wasm 构建、未跑浏览器脚本**。后续无头验证至少
-应断言：`window.yacr.diagnostics_report()` 在未导入时返回空模型 JSON、导入后出现
-`objects`/`document` 行；点击画布后 `renderer_state_report()` 的选择面板计数变化；
+同一条漏斗现在也是 **overlay（选择高亮 + 工具预览）的唯一入口**：每次推送调用
+`CadView::set_selection_highlight(controller.selection().clone())`、
+`set_measurement_preview(controller.measurement_preview())`、
+`set_annotation_preview(controller.annotation_preview())`。空选择集 → 显式空
+`SelectionSet`（高亮消失），无活动工具 → `None`（预览消失），因此命令、拾取与
+确认/取消都经同一路径清理，不会残留旧 overlay。此外在捕获工具活动且指针移动
+（非导航拖动）时，`browser/input.rs` 用 `pick::map_canvas_point` 追出世界点，经
+`SessionState::set_measurement_cursor`/`set_annotation_cursor` 写入并复用漏斗推送；
+空闲/导航状态不触发该路径。
+
+以上为源码接线与单元测试；**本机未重跑 wasm 构建、未跑浏览器脚本**。注意
+`browser` 模块仅在 `target_arch = "wasm32"` 编译，故新增纯测试
+（`derive_overlay_push` 的空/非空与预览、`preview_cursor_for` 的分类）**只能编译**，
+执行需要 wasm 测试运行器或浏览器；本机缺原生 `cad-ui-slint` 构建依赖，无法原生执行。
+后续无头验证至少应断言：`window.yacr.diagnostics_report()` 在未导入时返回空模型 JSON、
+导入后出现 `objects`/`document` 行；点击画布后 `renderer_state_report()` 的选择面板计数
+变化；启动测量工具后移动指针，`overlay_revision` 随预览变化递增而底图不重解析；
 `annotation.empty` 在两种语言下都解析成功。

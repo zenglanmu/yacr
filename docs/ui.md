@@ -102,6 +102,9 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   `CadView::set_annotation_preview(controller.annotation_preview())`：把工具预览
   送入叠加层（`None` 即取消）。
 
+> 更新（见 §3.1）：Web 宿主 `apps/app-web` 现已调用上述**全部**连接器
+> （历史/测量面板、画布映射、选择高亮与工具预览）；Android 宿主仍未接线。
+
 未调用时行为是**降级而非假装**：重做按钮保持禁用、面板显示空步骤并禁用确认/
 取消、测量点击提示「取点未接线」、选择/预览叠加层为空（不画假几何）。以上是本轮
 明确交接给宿主接线任务的开放项。
@@ -124,6 +127,20 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 
 诊断抽屉数据经 wasm 导出 `diagnostics_report_json()`（`encode_model_redacted`）与
 `window.yacr.diagnostics_report` 暴露；未导入报告前为显式空模型。
+
+**选择高亮与工具预览（已接线；无头验证待补）**：`push_panel_state` 现在是overlay
+的**唯一**入口，命令执行、选择拾取、确认/取消都经它把
+`CadView::set_selection_highlight(controller.selection().clone())`、
+`set_measurement_preview(controller.measurement_preview())`、
+`set_annotation_preview(controller.annotation_preview())` 送入渲染桥。空选择集推送
+显式空 `SelectionSet`（高亮消失），无工具推送 `None`（预览消失），因此每条命令路径
+都不会漏掉 overlay。纯映射抽为 `state_push::derive_overlay_push` 以便单测（见 §5）。
+
+**预览光标（可选，已接线）**：`browser/input.rs` 的指针移动在**捕获工具活动**且非
+拖动导航时，用与渲染同一套的 `pick::map_canvas_point` 求世界点，经
+`SessionState::set_measurement_cursor`/`set_annotation_cursor` 写入并复用同一
+state-push 漏斗；空闲/导航状态直接返回，不触碰底图。纯分类 `preview_cursor_for`
+可单测（`PreviewCursor::{Measurement,Annotation,None}`）。
 
 `apps/app-android` 仍未接线（不在本轮范围）。以上仅为源码接线与编译证据，
 浏览器/真机验收待补，不构成视觉验收。
