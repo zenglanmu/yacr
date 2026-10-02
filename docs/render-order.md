@@ -11,12 +11,21 @@
 | 字段 | 含义 | 当前生产者 |
 |---|---|---|
 | `draw_order: i64` | 与同级批次相对的绘制顺序，值越大越晚画（越在上层） | `SceneCache::build` 目前恒为 `0`；批注叠加层 `annotation_batches` 从 `AnnotationSceneOptions::draw_order_base`（默认 1_000_000）开始逐批递增 |
-| `alpha: f32` | 逐对象常量透明度 | `SceneCache::build` 恒为 `1.0`（`DisplayPrimitive` 无透明度）；批注叠加层取 `AnnotationStyle::rgba[3] / 255` |
+| `alpha: f32` | 逐对象常量透明度 | `SceneCache::build` 取 `DisplayFragment::alpha`（`cad-scene::sanitize_alpha` 钳制到 `[0,1]`）；importer 在 `EntityRenderAttributes` 里记录有效透明度，`build_expanded` 解析 `ByBlock` 后写入 fragment；批注叠加层取 `AnnotationStyle::rgba[3] / 255` |
 
-**显式未实现（不许冒充）**：importer 尚未把实体透明度（ByLayer/ByObject 的透明度、
-样式表 alpha）经 `DisplayFragment` 送到 `RenderBatch`，因此底图几何目前一律不透明。
-批注是当前唯一能从数据真实携带 `alpha < 1` 的路径，它已实测可进入透明通道。该缺口在
-`cad-scene::SceneCache::build` 的文档注释与本文件同时记录，不被当作已完成。
+**透明度数据路径（已实现）**：acadrust 0.5.5 暴露 `EntityCommon.transparency: Transparency`
+（`types/transparency.rs`：`ByLayer` / `ByBlock` / `Explicit(u8)`，0 不透明、255 全透明）
+与 `tables::Layer.transparency`。importer 在 `cad-import-acadrust` 里解析：
+
+- `ByObject`（`Explicit`）优先于 `ByLayer`：`Explicit(a)` → `alpha = 1 - a/255`；
+- `ByLayer` → 取该图层已解析的透明度（`Layer.transparency`，同样 0..255 映射）；
+- `ByBlock` → 保持符号值，由表示层的 INSERT 展开继承包含块引用的有效 alpha。
+
+解析结果存入 `cad-db::EntityRenderAttributes`（随实体旁存，`DbEntity` 不变），
+`ProviderRegistry::build_expanded` 沿 INSERT 链把 `ByBlock` 解析为外层 alpha 并写入
+`DisplayFragment::alpha`。**限制**：`ProviderRegistry::build`（非展开入口，测试/无数据库
+调用）只看到实体，没有数据库访问，因此保守地输出 `alpha = 1.0`；真实 UI 走
+`build_expanded`，透明度已端到端接通。
 
 渲染器在上传时把 `RenderBatch::centroid()`（世界坐标，`local_origin + 顶点均值`）与
 `draw_order`、`alpha` 缓存到 `GpuBatch`，供每帧排序使用；相机变化只重算排序，不重传
@@ -44,7 +53,7 @@
 升序（确定性但**非深度正确**）。当前 `Renderer::render`（2D）传相机中心、`render_3d`
 传 `Camera3d::eye`，因此两条渲染入口总是有排序位置。
 
-## 透明合成（GPU 侧行为，未运行验证）
+## 透明合成（GPU 侧行为）
 
 - 渲染通道拆成两个逻辑 pass：**不透明 pass** 先画（深度写入开启），随后**透明 pass**
   画不透明之后的批次。
@@ -91,12 +100,21 @@
   - 由远及近的平方距离排序键；
   - tie-break 顺序（距离→`draw_order`→上传下标）；
   - 相机移动改变透明顺序；
-  - alpha 钳制与 NaN 规则；
+  - alpha 钳制与 NaN 规则（`geometry::clamp_alpha`）；`cad-scene::sanitize_alpha` 同规则；
+  - `DisplayFragment::alpha` 进入 `RenderBatch::alpha`（含 `<1`、`0`、越界钳制）；
+  - `build_expanded` 的 `ByObject`/`ByLayer`/`ByBlock` 分辨率与 `geometry_source`；
   - `RenderBatch::centroid()` 的均值/大坐标精度/空批次回退。
-  见 `crates/cad-render-wgpu/src/geometry.rs` 与 `crates/cad-scene/src/lib.rs` 的单元测试
-  （`cargo test -p cad-scene -p cad-render-wgpu`）。
-- **静态校验**：shader 未改动，仍由 `crates/cad-render-wgpu/tests/wgsl_validation.rs`
-  用与 `wgpu 30.0.1` 同版本的 naga 解析校验。
-- **GPU 提交无法在本环境验证**：没有可用适配器/设备初始化路径。两个 pass 的实际绘制、
-  透明深度的真实合成、`depth_write_enabled = false` 的效果、镜像+透明组合的剔除、以及
-  2D 相机中心作为伪深度键的视觉结果，均**未运行验证**。不得据此宣称渲染正确。
+  见 `crates/cad-render-wgpu/src/geometry.rs` 与 `crates/cad-scene/src/lib.rs`、
+  `crates/cad-representation/src/lib.rs` 的单元测试。
+- **静态校验**：`mesh.wgsl` 未改动，仍由
+  `crates/cad-render-wgpu/tests/wgsl_validation.rs` 用与 `wgpu 30.0.1` 同版本的 naga
+  解析校验。
+- **GPU 合成已在软件 Vulkan（lavapipe）实跑并通过**：
+  `headless_render.rs::translucent_batch_composites_differently_from_opaque`
+  （`VK_ICD_FILENAMES=.../lvp_icd.json cargo test -p cad-render-wgpu`）渲染同一三角形，
+  分别 `alpha = 1.0`（不透明 pass）与 `alpha = 0.5`（透明 pass），断言帧缓冲中心像素
+  不同，且 `FrameStats` 分别报告 `opaque_batches = 1` / `transparent_batches = 1`。这证明
+  `RenderBatch::alpha` 确实到达混合状态、透明管线可用、alpha 改变了合成结果。
+- **仍未运行验证**：多层透明批次的由远及近真实合成顺序、`depth_write_enabled = false`
+  在遮挡关系下的视觉效果、镜像+透明组合的剔除、透明线条的深度写入、以及 2D 相机中心作为
+  伪深度键的视觉结果。不得据此宣称渲染视觉完全正确。

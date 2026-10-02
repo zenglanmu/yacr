@@ -32,6 +32,53 @@ impl DbEntity {
     }
 }
 
+/// How an entity's display opacity (`alpha`) is determined before batching.
+///
+/// Alpha is *opacity* in `[0, 1]`: `1.0` is fully opaque and `0.0` fully
+/// transparent. This is the inverse of acadrust's `Transparency` byte value
+/// (`0` opaque, `255` transparent); the importer performs that conversion when
+/// it records the attribute.
+///
+/// The importer resolves `ByObject` (an explicit entity value) and `ByLayer`
+/// before storing, because the representation layer has no access to the layer
+/// table. `ByBlock` is kept symbolic so INSERT expansion can substitute the
+/// containing block reference's opacity (audit B21 / F14).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EntityTransparency {
+    /// A resolved opacity in `[0, 1]`.
+    Explicit(f32),
+    /// Inherit the opacity of the containing block reference (`ByBlock`). At
+    /// the model root, or with no enclosing INSERT, this resolves to opaque.
+    ByBlock,
+}
+
+impl Default for EntityTransparency {
+    fn default() -> Self {
+        EntityTransparency::Explicit(1.0)
+    }
+}
+
+/// Import-time display attributes that are not part of the semantic geometry.
+///
+/// These live beside the entity in the database rather than in `DbEntity` so
+/// that adding a new attribute does not ripple into every entity constructor
+/// (and because the geometry itself remains the authoritative data).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityRenderAttributes {
+    pub transparency: EntityTransparency,
+    /// Which producer supplied the display geometry (proxy cache vs analytic).
+    pub geometry_source: GeometrySource,
+}
+
+impl Default for EntityRenderAttributes {
+    fn default() -> Self {
+        EntityRenderAttributes {
+            transparency: EntityTransparency::default(),
+            geometry_source: GeometrySource::Analytic,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
     pub id: LayerId,
@@ -282,6 +329,10 @@ pub struct DrawingDatabase {
     blocks: BTreeMap<BlockId, BlockDefinition>,
     layouts: BTreeMap<LayoutId, Layout>,
     styles: BTreeMap<StyleId, Style>,
+    /// Per-entity display attributes that the importer resolved from the source
+    /// (transparency, geometry source). Absent entries are fully opaque
+    /// analytic geometry, so older/hand-built databases stay valid.
+    render_attributes: BTreeMap<EntityId, EntityRenderAttributes>,
 }
 
 impl DrawingDatabase {
@@ -314,6 +365,14 @@ impl DrawingDatabase {
 
     pub fn entity(&self, id: EntityId) -> Option<&DbEntity> {
         self.entities.get(&id)
+    }
+
+    /// Display attributes the importer resolved for an entity.
+    ///
+    /// Missing entries mean "fully opaque analytic geometry", so a database
+    /// built without an importer (tests, hand-built fixtures) keeps working.
+    pub fn entity_render_attributes(&self, id: EntityId) -> EntityRenderAttributes {
+        self.render_attributes.get(&id).cloned().unwrap_or_default()
     }
 
     pub fn entities(&self) -> impl Iterator<Item = &DbEntity> {
@@ -595,6 +654,7 @@ impl DrawingDatabaseBuilder {
                 blocks: BTreeMap::new(),
                 layouts: BTreeMap::new(),
                 styles: BTreeMap::new(),
+                render_attributes: BTreeMap::new(),
             },
             errors: Vec::new(),
         }
@@ -608,6 +668,24 @@ impl DrawingDatabaseBuilder {
             )));
         }
         self.database.entities.insert(entity.id, entity);
+        Ok(())
+    }
+
+    /// Record the display attributes the importer resolved for an entity.
+    ///
+    /// The entity must already have been inserted; recording attributes for an
+    /// unknown id is a caller bug and is rejected rather than silently lost.
+    pub fn set_entity_render_attributes(
+        &mut self,
+        id: EntityId,
+        attributes: EntityRenderAttributes,
+    ) -> CadResult<()> {
+        if !self.database.entities.contains_key(&id) {
+            return Err(CadError::Invariant(format!(
+                "render attributes for unknown entity {id:?}"
+            )));
+        }
+        self.database.render_attributes.insert(id, attributes);
         Ok(())
     }
 

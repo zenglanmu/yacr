@@ -477,6 +477,7 @@ pub fn build_paper_space(
                             out.fragments.push(DisplayFragment {
                                 source: fragment.source.clone(),
                                 geometry_source: fragment.geometry_source.clone(),
+                                alpha: fragment.alpha,
                                 primitive: DisplayPrimitive::Lines(std::sync::Arc::from(
                                     run.into_boxed_slice(),
                                 )),
@@ -495,6 +496,7 @@ pub fn build_paper_space(
                         out.fragments.push(DisplayFragment {
                             source: fragment.source,
                             geometry_source: fragment.geometry_source,
+                            alpha: fragment.alpha,
                             primitive: other,
                         });
                     }
