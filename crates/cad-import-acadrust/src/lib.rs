@@ -817,7 +817,7 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::Extended(x) if x.class_name() == "ACAD_PROXY_ENTITY" => {
                 self.proxy_geometry(x.class_name(), common, None)
             }
-            EntityType::Hatch(h) => self.hatch_geometry(h),
+            EntityType::Hatch(h) => Self::hatch_geometry(h),
             EntityType::Dimension(d) => {
                 // A dimension's visible geometry lives in an anonymous block
                 // (`*D...`); expand it like an insert instead of dropping it.
@@ -955,8 +955,11 @@ impl<'a> ImporterBuilder<'a> {
     /// Convert a HATCH into a compound of boundary loops plus a solid fill or
     /// pattern lines. Boundaries are always emitted; fills that cannot be
     /// generated are reported as Partial rather than faked.
-    fn hatch_geometry(&self, h: &Hatch) -> (SemanticGeometry, Completeness) {
+    fn hatch_geometry(h: &Hatch) -> (SemanticGeometry, Completeness) {
         let normal = p3(h.normal);
+        // A degenerate normal cannot define a hatch plane; the boundary is still
+        // emitted, but any fill is honestly reported as boundary-only.
+        let plane_ok = cad_geometry::is_finite(normal) && cad_geometry::length(normal) > 1e-12;
         let (ux, uy, un) = arbitrary_axis(normal);
         let origin = cad_geometry::scale(un, h.elevation);
         let to_world = |p: [f64; 2]| {
@@ -1000,11 +1003,14 @@ impl<'a> ImporterBuilder<'a> {
         let mut completeness = Completeness::Complete;
         let solid = h.is_solid || h.pattern.name.eq_ignore_ascii_case("SOLID");
         if solid {
-            if loops.len() == 1 {
-                // Simplify tessellated curves before filling (ear clipping is
-                // cubic in the worst case).
-                let loop2 = &loops[0];
-                let (min, max) = loop2.iter().fold(
+            if !plane_ok {
+                completeness = Completeness::Partial(vec![
+                    "hatch plane normal is degenerate; boundary only".into(),
+                ]);
+            } else {
+                // Simplify every ring with a tolerance scaled to the hatch's own
+                // extent. This keeps the even-odd fill bounded (spec §3.2).
+                let (min, max) = loops.iter().flatten().fold(
                     ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]),
                     |(mut lo, mut hi), p| {
                         lo[0] = lo[0].min(p[0]);
@@ -1016,38 +1022,39 @@ impl<'a> ImporterBuilder<'a> {
                 );
                 let diagonal = ((max[0] - min[0]).powi(2) + (max[1] - min[1]).powi(2)).sqrt();
                 let tolerance = (diagonal * 1e-3).max(1e-9);
-                let mut closed = loop2.clone();
-                closed.push(closed[0]);
-                let mut simplified = cad_geometry::simplify(&closed, tolerance);
-                if simplified.len() > 1 && simplified.last() == simplified.first() {
-                    simplified.pop();
-                }
-                if simplified.len() > cad_geometry::MAX_FILL_POINTS {
-                    completeness = Completeness::Partial(vec![
-                        "solid hatch boundary is too complex to fill".into(),
-                    ]);
-                } else {
-                    let triangles = cad_geometry::triangulate(&simplified);
-                    if triangles.is_empty() {
-                        completeness = Completeness::Partial(vec![
-                            "solid hatch boundary could not be triangulated".into(),
-                        ]);
-                    } else {
+                let simplified: Vec<Vec<[f64; 2]>> = loops
+                    .iter()
+                    .filter_map(|loop2| {
+                        let mut closed = loop2.clone();
+                        closed.push(closed[0]);
+                        let mut s = cad_geometry::simplify(&closed, tolerance);
+                        if s.len() > 1 && s.last() == s.first() {
+                            s.pop();
+                        }
+                        (s.len() >= 3).then_some(s)
+                    })
+                    .collect();
+                // Multi-ring holes/islands go through the even-odd fill; a
+                // failure is reported as Partial (boundary only), never faked.
+                match cad_geometry::fill_rings(&simplified) {
+                    Ok(fill) => {
                         let vertices: Vec<Point3> =
-                            simplified.iter().map(|p| to_world(*p)).collect();
+                            fill.vertices.iter().map(|p| to_world(*p)).collect();
                         let normals = vec![un; vertices.len()];
                         children.push(SemanticGeometry::Mesh(Mesh {
                             vertices,
-                            triangles,
+                            triangles: fill.triangles,
                             normals,
                             face_sources: Vec::new(),
                         }));
                     }
+                    Err(error) => {
+                        completeness = Completeness::Partial(vec![format!(
+                            "solid hatch could not be filled: {}",
+                            error.reason()
+                        )]);
+                    }
                 }
-            } else {
-                completeness = Completeness::Partial(vec![
-                    "solid hatch islands are outlined but not filled".into(),
-                ]);
             }
         } else if h.gradient_color.enabled {
             completeness =
@@ -1766,6 +1773,7 @@ impl HandleExt for acadrust::Handle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acadrust::entities::BoundaryPath;
 
     fn request(bytes: Vec<u8>) -> ImportRequest {
         ImportRequest {
@@ -1917,6 +1925,114 @@ mod tests {
         assert!((directed_sweep(0.0, half, true) - half).abs() < 1e-9);
         // A full turn is kept, not collapsed to zero.
         assert!((directed_sweep(0.0, 0.0, true) - tau).abs() < 1e-9);
+    }
+
+    fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> BoundaryPath {
+        let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+        let mut path = BoundaryPath::new();
+        for i in 0..4 {
+            let a = corners[i];
+            let b = corners[(i + 1) % 4];
+            path.add_edge(BoundaryEdge::Line(acadrust::entities::LineEdge {
+                start: acadrust::types::Vector2::new(a.0, a.1),
+                end: acadrust::types::Vector2::new(b.0, b.1),
+            }));
+        }
+        path
+    }
+
+    fn mesh_area(geometry: &SemanticGeometry) -> Option<f64> {
+        let SemanticGeometry::Compound(children) = geometry else {
+            return None;
+        };
+        children.iter().find_map(|child| match child {
+            SemanticGeometry::Mesh(m) => Some(
+                m.triangles
+                    .iter()
+                    .map(|t| {
+                        let a = m.vertices[t[0] as usize];
+                        let b = m.vertices[t[1] as usize];
+                        let c = m.vertices[t[2] as usize];
+                        let ab = Point3 {
+                            x: b.x - a.x,
+                            y: b.y - a.y,
+                            z: b.z - a.z,
+                        };
+                        let ac = Point3 {
+                            x: c.x - a.x,
+                            y: c.y - a.y,
+                            z: c.z - a.z,
+                        };
+                        let cx = ab.y * ac.z - ab.z * ac.y;
+                        let cy = ab.z * ac.x - ab.x * ac.z;
+                        let cz = ab.x * ac.y - ab.y * ac.x;
+                        (cx * cx + cy * cy + cz * cz).sqrt() / 2.0
+                    })
+                    .sum(),
+            ),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn solid_hatch_with_a_hole_fills_the_solid_band_only() {
+        let mut hatch = acadrust::entities::Hatch::new();
+        hatch.is_solid = true;
+        hatch.paths = vec![
+            rect_path(0.0, 0.0, 10.0, 10.0),
+            rect_path(3.0, 3.0, 7.0, 7.0),
+        ];
+        let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+        assert_eq!(completeness, Completeness::Complete, "{completeness:?}");
+        let area = mesh_area(&geometry).expect("solid fill mesh");
+        assert!((area - 84.0).abs() < 1e-6, "hole area not excluded: {area}");
+    }
+
+    #[test]
+    fn over_budget_multi_ring_hatch_stays_partial_boundary_only() {
+        // A zig-zag star defeats Douglas-Peucker, so the loop stays over
+        // MAX_FILL_POINTS and the fill must be refused, never approximated.
+        let points = 2200usize;
+        let mut path = BoundaryPath::new();
+        for i in 0..points {
+            let t = i as f64 / points as f64 * std::f64::consts::TAU;
+            let r = if i % 2 == 0 { 10.0 } else { 1.0 };
+            let a = (r * t.cos(), r * t.sin());
+            let t2 = (i + 1) as f64 / points as f64 * std::f64::consts::TAU;
+            let r2 = if (i + 1) % 2 == 0 { 10.0 } else { 1.0 };
+            let b = (r2 * t2.cos(), r2 * t2.sin());
+            path.add_edge(BoundaryEdge::Line(acadrust::entities::LineEdge {
+                start: acadrust::types::Vector2::new(a.0, a.1),
+                end: acadrust::types::Vector2::new(b.0, b.1),
+            }));
+        }
+        let mut hatch = acadrust::entities::Hatch::new();
+        hatch.is_solid = true;
+        hatch.paths = vec![path, rect_path(0.0, 0.0, 20.0, 20.0)];
+        let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+        match completeness {
+            Completeness::Partial(reasons) => {
+                assert!(reasons.iter().any(|r| r.contains("budget")), "{reasons:?}");
+            }
+            other => panic!("expected Partial, got {other:?}"),
+        }
+        // The boundary loops are still present; no fill mesh was fabricated.
+        assert!(mesh_area(&geometry).is_none(), "{geometry:?}");
+    }
+
+    #[test]
+    fn degenerate_hatch_normal_reports_partial_boundary_only() {
+        let mut hatch = acadrust::entities::Hatch::new();
+        hatch.is_solid = true;
+        hatch.normal = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        hatch.paths = vec![rect_path(0.0, 0.0, 4.0, 4.0)];
+        let (_geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+        match completeness {
+            Completeness::Partial(reasons) => {
+                assert!(reasons.iter().any(|r| r.contains("normal")), "{reasons:?}");
+            }
+            other => panic!("expected Partial, got {other:?}"),
+        }
     }
 
     // ---- B23/B31: OCS normalisation of 2D polylines (importer side) ----

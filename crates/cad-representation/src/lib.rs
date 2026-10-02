@@ -746,6 +746,60 @@ mod tests {
     }
 
     #[test]
+    fn multi_ring_hatch_fill_flows_through_the_mesh_path() {
+        // Donut: 10x10 outer with a 4x4 hole; the hole-aware fill from
+        // cad-geometry is what the importer feeds into the compound.
+        let outer = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+        let hole = vec![[3.0, 3.0], [7.0, 3.0], [7.0, 7.0], [3.0, 7.0]];
+        let fill = cad_geometry::fill_rings(&[outer.clone(), hole.clone()]).expect("donut fill");
+        assert!((fill.area() - 84.0).abs() < 1e-6, "area {}", fill.area());
+        let to_world = |p: [f64; 2]| Point3 {
+            x: p[0],
+            y: p[1],
+            z: 0.0,
+        };
+        let vertices: Vec<Point3> = fill.vertices.iter().map(|p| to_world(*p)).collect();
+        let normals = vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            };
+            vertices.len()
+        ];
+        let mut children = Vec::new();
+        for ring in [&outer, &hole] {
+            children.push(SemanticGeometry::Polyline {
+                points: ring.iter().map(|p| to_world(*p)).collect(),
+                bulges: Vec::new(),
+                closed: true,
+            });
+        }
+        children.push(SemanticGeometry::Mesh(Mesh {
+            vertices,
+            triangles: fill.triangles,
+            normals,
+            face_sources: Vec::new(),
+        }));
+        let e = entity(9, SemanticGeometry::Compound(children));
+        let registry = ProviderRegistry::with_default_provider();
+        let r = registry.build(&e, &context()).unwrap();
+        assert_eq!(r.completeness, Completeness::Complete);
+        let meshes = r
+            .fragments
+            .iter()
+            .filter(|f| matches!(f.primitive, DisplayPrimitive::Mesh(_)))
+            .count();
+        let lines = r
+            .fragments
+            .iter()
+            .filter(|f| matches!(f.primitive, DisplayPrimitive::Lines(_)))
+            .count();
+        assert_eq!(meshes, 1, "the hole-aware fill becomes one mesh primitive");
+        assert_eq!(lines, 2, "both boundary loops stay outlined");
+    }
+
+    #[test]
     fn opaque_geometry_is_reported_unsupported_not_empty_success() {
         let registry = ProviderRegistry::with_default_provider();
         let e = entity(

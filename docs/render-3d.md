@@ -19,6 +19,23 @@
 
 `SceneCache::build` 会丢弃越界索引构成的三角形，而不是上传非法拓扑。
 
+### HATCH 多环填充（`cad-geometry` → `cad-import-acadrust` → `cad-representation`）
+
+`cad_geometry::hatch::fill_rings` 按**奇偶规则**填充多环 HATCH：环按包含深度分层，偶数深度为实体、
+奇数深度为孔、更深偶数深度为岛。实现是 y 波段梯形分解（波段只取顶点纵坐标，段内边单调，交点按序两两配对），
+每对生成两个一致的逆时针三角形，因此孔和岛都无需脆弱的桥接。结果用从嵌套关系推导的奇偶面积做交叉校验；
+不匹配即返回 `FillError::Degenerate`，绝不返回错误填充。
+
+- 预算：合并顶点数超过 `MAX_FILL_POINTS` 返回 `Budget`；三角形数超过 `MAX_FILL_TRIANGLES` 返回 `TooComplex`。
+- 线圈简化按 HATCH 自身范围缩放；模式填充（`pattern_polylines`）同样按奇偶规则排除孔与岛。
+- importer 只在 `fill_rings` 成功时追加 `SemanticGeometry::Mesh`，失败（预算/退化/非有限/退化平面法向）
+  一律追加边界并报告 `Completeness::Partial`（boundary only），不伪造填充。
+- `cad-representation` 把该 compound 的 Mesh 子几何走既有 `DisplayPrimitive::Mesh` 路径，
+  边界环同时保留为 `Lines`（契约测试 `multi_ring_hatch_fill_flows_through_the_mesh_path`）。
+
+**未完成**：非平面边界不可由 OCS 边的 2D 表达表示，故此处只报告退化平面法向为 Partial；真正 3D 非共面
+HATCH 的检测需要上游提供 3D 边界。渐变 HATCH 仍只绘制边界。
+
 ### 顶点/索引预算（`SceneBudget`）
 
 新增 `max_vertices_per_frame`、`max_triangles_per_frame`。`cad_scene::FrameBudget`

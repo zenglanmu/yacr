@@ -14,7 +14,10 @@ pub mod mesh;
 
 pub use area::{measure_polygon_area, signed_area, AreaError};
 pub use clip::{clip_polyline_to_xy_rect, clip_segment_to_xy_rect};
-pub use hatch::{pattern_polylines, simplify, triangulate, Loop, PatternLine, MAX_FILL_POINTS};
+pub use hatch::{
+    fill_rings, pattern_polylines, simplify, triangulate, FillError, FillMesh, Loop, PatternLine,
+    MAX_FILL_POINTS, MAX_FILL_TRIANGLES,
+};
 pub use mesh::{compute_vertex_normals, mesh_bounds};
 
 pub mod hatch;
