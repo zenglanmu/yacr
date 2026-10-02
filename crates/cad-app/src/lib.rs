@@ -13,7 +13,7 @@ use cad_domain::*;
 use cad_history::{patch, History, UndoRecord};
 use cad_measure::{MeasurementEngine, MeasurementRequest, MeasurementSpace};
 use cad_query::QueryService;
-use cad_representation::{enumerate_layouts, SpaceSelection};
+use cad_representation::{enumerate_layouts, viewport_transform, SpaceSelection, ViewportState};
 use std::{collections::BTreeMap, sync::Arc};
 
 pub mod annotation_list;
@@ -574,6 +574,79 @@ pub fn validate_space_id(database: &DrawingDatabase, space: &SpaceId) -> CadResu
         SpaceId::Block(_) => Err(CadError::InvalidInput(
             "block space is not a selectable drawing space".into(),
         )),
+    }
+}
+
+/// The measurement space for a pick in the session's active space.
+///
+/// Model space keeps the existing split (planar algorithms use the viewport work
+/// plane, spatial ones use [`MeasurementSpace::World3d`]). Paper space measures
+/// the sheet directly, so a distance becomes a planar paper distance and an
+/// angle (undefined on a 2D sheet) is refused rather than guessed. This is what
+/// keeps a paper distance distinguishable from a model distance (F04/F06).
+pub fn resolve_measurement_space(
+    active_space: &SpaceId,
+    work_plane: WorkPlane,
+    algorithm: MeasurementAlgorithm,
+) -> CadResult<(MeasurementAlgorithm, MeasurementSpace)> {
+    match active_space {
+        SpaceId::Model => {
+            let space = match algorithm {
+                MeasurementAlgorithm::Distance3d | MeasurementAlgorithm::Angle3Points => {
+                    MeasurementSpace::World3d
+                }
+                _ => MeasurementSpace::Plane(work_plane),
+            };
+            Ok((algorithm, space))
+        }
+        SpaceId::Paper(layout) => match algorithm {
+            // A 3D distance on a 2D sheet is a planar paper distance.
+            MeasurementAlgorithm::Distance3d => Ok((
+                MeasurementAlgorithm::Distance2d,
+                MeasurementSpace::Paper(*layout),
+            )),
+            MeasurementAlgorithm::Angle3Points => Err(CadError::Unsupported(format!(
+                "angle is not defined in paper space of layout {}; switch to model space",
+                layout.0
+            ))),
+            _ => Ok((algorithm, MeasurementSpace::Paper(*layout))),
+        },
+        SpaceId::Block(_) => Err(CadError::InvalidInput(
+            "block space is not a selectable drawing space".into(),
+        )),
+    }
+}
+
+/// The [`MeasurementSpace`] for measuring *inside* one layout viewport.
+///
+/// The returned space carries the viewport's verified paper→model inverse, so a
+/// pick on the sheet measures real model distance. A viewport whose state cannot
+/// be represented has no valid inverse and is refused with the representation
+/// layer's stable reason: model measurement is disabled, never guessed from
+/// paper pixels (F04).
+pub fn viewport_measurement_space(
+    database: &DrawingDatabase,
+    layout_id: LayoutId,
+    viewport_index: usize,
+) -> CadResult<MeasurementSpace> {
+    let layout = database
+        .layout(layout_id)
+        .ok_or_else(|| CadError::InvalidInput(format!("unknown paper layout {}", layout_id.0)))?;
+    let viewport = layout.viewports.get(viewport_index).ok_or_else(|| {
+        CadError::InvalidInput(format!(
+            "layout {} has no viewport {}",
+            layout_id.0, viewport_index
+        ))
+    })?;
+    match viewport_transform(viewport) {
+        ViewportState::Supported(t) => Ok(MeasurementSpace::ViewportModel {
+            layout: layout_id,
+            inverse: t.to_model,
+        }),
+        ViewportState::Unsupported(why) => Err(CadError::Unsupported(format!(
+            "layout {} viewport {} cannot be measured in model space: {why}",
+            layout_id.0, viewport_index
+        ))),
     }
 }
 
@@ -1246,7 +1319,12 @@ impl Application {
         };
 
         if let Some((kind, captured)) = auto_complete {
-            let outcome = self.evaluate_measurement(command, kind.algorithm(), captured)?;
+            let outcome = self.evaluate_measurement(
+                &session.active_space,
+                command,
+                kind.algorithm(),
+                captured,
+            )?;
             // A one-shot tool returns to navigation after a result; open-ended
             // tools stay active until confirmed or cancelled.
             session.tool = ToolState::Idle;
@@ -1273,7 +1351,7 @@ impl Application {
                 ))
             }
         };
-        self.evaluate_measurement(command, algorithm, points.to_vec())
+        self.evaluate_measurement(&session.active_space, command, algorithm, points.to_vec())
     }
 
     /// Confirm an open-ended measurement tool (polyline/area) and evaluate it.
@@ -1292,7 +1370,9 @@ impl Application {
             }
             _ => return Err(CadError::InvalidInput("no measurement in progress".into())),
         };
-        let outcome = self.evaluate_measurement(command, kind.algorithm(), points)?;
+        let active_space = session.active_space.clone();
+        let outcome =
+            self.evaluate_measurement(&active_space, command, kind.algorithm(), points)?;
         session.tool = ToolState::Idle;
         Ok(outcome)
     }
@@ -1316,10 +1396,12 @@ impl Application {
     }
 
     /// Evaluate a measurement through the engine and return the structured
-    /// record. Area uses the viewport work plane so non-coplanar input is
-    /// rejected rather than silently flattened (audit B24).
+    /// record. The space comes from the session's active space (F04) and the
+    /// algorithm from the tool; area uses the viewport work plane so non-coplanar
+    /// input is rejected rather than silently flattened (audit B24).
     fn evaluate_measurement(
         &self,
+        active_space: &SpaceId,
         command: &Command,
         algorithm: MeasurementAlgorithm,
         points: Vec<Point3>,
@@ -1329,24 +1411,13 @@ impl Application {
             .documents
             .get(&command.document)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let space = match algorithm {
-            // Planar algorithms (2D distance, polyline length and area) are
-            // only defined on an explicit work plane; the viewport supplies it.
-            MeasurementAlgorithm::Distance2d
-            | MeasurementAlgorithm::PolylineLength
-            | MeasurementAlgorithm::PlanarPolygonArea => {
-                let viewport = self
-                    .workspace
-                    .viewports
-                    .get(&command.viewport)
-                    .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
-                MeasurementSpace::Plane(viewport.work_plane)
-            }
-            // 3D distance and angle are spatial model measurements.
-            MeasurementAlgorithm::Distance3d | MeasurementAlgorithm::Angle3Points => {
-                MeasurementSpace::World3d
-            }
-        };
+        let viewport = self
+            .workspace
+            .viewports
+            .get(&command.viewport)
+            .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+        let (algorithm, space) =
+            resolve_measurement_space(active_space, viewport.work_plane, algorithm)?;
         let request = MeasurementRequest {
             algorithm,
             points,
@@ -2982,5 +3053,130 @@ mod tests {
         );
         assert!(matches!(result, Err(CadError::InvalidInput(_))));
         assert_eq!(session.active_space, SpaceId::Model);
+    }
+
+    #[test]
+    fn switch_space_does_not_mutate_the_drawing_or_open_a_change_set() {
+        let (mut app, mut session) = application_with_layouts();
+        let before = app.workspace.documents[&DocumentId(1)].drawing.revision();
+        let outcome = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::SwitchSpace,
+                    CommandPayload::Space(SpaceId::Paper(LayoutId(1))),
+                ),
+            )
+            .unwrap();
+        // A space switch is session state only: no data change, no transaction.
+        assert!(outcome.changes.is_none());
+        assert!(outcome.objects.is_empty());
+        assert_eq!(session.active_space, SpaceId::Paper(LayoutId(1)));
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)].drawing.revision(),
+            before
+        );
+    }
+
+    #[test]
+    fn paper_space_resolves_to_a_planar_paper_distance() {
+        let plane = xy_work_plane(0.0);
+        let (algorithm, space) = resolve_measurement_space(
+            &SpaceId::Paper(LayoutId(1)),
+            plane,
+            MeasurementAlgorithm::Distance3d,
+        )
+        .unwrap();
+        assert_eq!(algorithm, MeasurementAlgorithm::Distance2d);
+        assert!(matches!(space, MeasurementSpace::Paper(LayoutId(1))));
+
+        // An angle is undefined on the 2D sheet and is refused, not guessed.
+        assert!(matches!(
+            resolve_measurement_space(
+                &SpaceId::Paper(LayoutId(1)),
+                plane,
+                MeasurementAlgorithm::Angle3Points,
+            ),
+            Err(CadError::Unsupported(_))
+        ));
+
+        // Model space keeps the spatial algorithm and 3D space.
+        let (algorithm, space) =
+            resolve_measurement_space(&SpaceId::Model, plane, MeasurementAlgorithm::Distance3d)
+                .unwrap();
+        assert_eq!(algorithm, MeasurementAlgorithm::Distance3d);
+        assert!(matches!(space, MeasurementSpace::World3d));
+    }
+
+    #[test]
+    fn viewport_measurement_space_carries_a_verified_inverse() {
+        let (app, _) = application_with_layouts();
+        let db = &app.workspace.documents[&DocumentId(1)].drawing;
+        let space = viewport_measurement_space(db, LayoutId(1), 0).unwrap();
+        match space {
+            MeasurementSpace::ViewportModel { layout, inverse } => {
+                assert_eq!(layout, LayoutId(1));
+                // The paper centre maps to the view's model centre (10,20).
+                let model = inverse.apply_point(point(50.0, 25.0));
+                assert!((model.x - 10.0).abs() < 1e-9, "got {model:?}");
+                assert!((model.y - 20.0).abs() < 1e-9, "got {model:?}");
+            }
+            _ => panic!("expected a viewport model measurement space"),
+        }
+    }
+
+    #[test]
+    fn unsupported_viewport_disables_model_measurement() {
+        let (app, _) = application_with_layouts();
+        let db = &app.workspace.documents[&DocumentId(1)].drawing;
+        // Layout 2's viewport state cannot be represented → no valid inverse.
+        let result = viewport_measurement_space(db, LayoutId(2), 0);
+        assert!(
+            matches!(result, Err(CadError::Unsupported(_))),
+            "{result:?}"
+        );
+        // A missing viewport index is an explicit input error.
+        let result = viewport_measurement_space(db, LayoutId(1), 7);
+        assert!(
+            matches!(result, Err(CadError::InvalidInput(_))),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn paper_distance_and_model_distance_are_distinguishable() {
+        let (mut app, mut session) = application_with_layouts();
+        // Paper space: a 1-unit paper distance on the sheet.
+        session.active_space = SpaceId::Paper(LayoutId(1));
+        let paper = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Measure,
+                    CommandPayload::Points(vec![point(0.0, 0.0), point(1.0, 0.0)]),
+                ),
+            )
+            .unwrap()
+            .measurement
+            .expect("paper measurement");
+        assert!((paper.value - 1.0).abs() < 1e-12, "got {}", paper.value);
+
+        // The same paper picks inside the 1:100 viewport become model distance.
+        let db = app.workspace.documents[&DocumentId(1)].drawing.clone();
+        let space = viewport_measurement_space(&db, LayoutId(1), 0).unwrap();
+        let request = MeasurementRequest {
+            algorithm: MeasurementAlgorithm::Distance2d,
+            points: vec![point(0.0, 0.0), point(1.0, 0.0)],
+            tapped: Vec::new(),
+            space,
+            units: UnitContext::drawing_units(),
+            source: GeometrySource::UserPoints,
+            precision: Precision::Analytic,
+        };
+        let model = app.measurement.measure(&request).unwrap();
+        assert!((model.value - 100.0).abs() < 1e-9, "got {}", model.value);
+        assert_ne!(paper.value, model.value);
+        // Unknown units label the result honestly.
+        assert_eq!(model.units.label(), "drawing units");
     }
 }

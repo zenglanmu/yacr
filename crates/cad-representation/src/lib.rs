@@ -17,8 +17,9 @@ pub mod shx;
 pub mod layout;
 
 pub use layout::{
-    clip_polyline_to_rect, enumerate_layouts, viewport_transform, LayoutDescriptor, SpaceSelection,
-    ViewportState, ViewportTransform,
+    clip_polyline_to_rect, enumerate_layouts, paper_per_model_from_view, viewport_reason,
+    viewport_transform, LayoutDescriptor, SpaceSelection, ViewportState, ViewportTransform,
+    ViewportUnsupported,
 };
 pub use text::{sanitize_text, FontEngine};
 
