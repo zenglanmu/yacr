@@ -107,6 +107,25 @@ pub struct FrameStats {
     pub transparent_batches: usize,
     /// Batches skipped because `alpha <= 0`. Reported, never silently drawn.
     pub invisible_batches: usize,
+    /// Lineweights that were carried but **not drawn** this frame.
+    ///
+    /// Wide lines are not portable across wgpu backends (and the browser
+    /// WebGl2/WebGPU line width is always 1 px), so the renderer never claims a
+    /// lineweight it did not rasterize. Every submitted batch with a non-zero
+    /// lineweight is reported here, with the code
+    /// `render.lineweight_not_drawn`, so the gap is explicit rather than silent
+    /// (see `docs/entity-style.md`).
+    pub lineweight_not_drawn: Vec<LineweightNotDrawn>,
+    /// Set when at least one lineweight was not drawn; a single structured
+    /// reason aggregating the count, for callers that surface one diagnostic.
+    pub lineweight_reason: Option<DiagnosticReason>,
+}
+
+/// One batch whose lineweight was carried but not rasterized.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LineweightNotDrawn {
+    /// The requested lineweight in millimetres.
+    pub millimeters: f32,
 }
 
 /// A structured over-budget reason, mirroring [`geometry::OverBudget`] with a
@@ -194,6 +213,10 @@ struct GpuBatch {
     mirrored: bool,
     /// Constant per-object alpha.
     alpha: f32,
+    /// Constant per-object colour (normalized sRGB), sanitized at upload.
+    color: [f32; 3],
+    /// Requested lineweight in millimetres; carried but not drawn.
+    lineweight: f32,
     /// Paint order relative to sibling batches (larger is later/on top). The
     /// frame's draw plan performs a stable sort on this key.
     draw_order: i64,
@@ -670,6 +693,8 @@ impl Renderer {
                 edge_index_count: edge_indices.len() as u32,
                 mirrored: batch.mirrored,
                 alpha: batch.alpha,
+                color: batch.color,
+                lineweight: batch.lineweight,
                 draw_order: batch.draw_order,
                 centroid: batch.centroid(),
                 origin: [
@@ -914,12 +939,16 @@ impl Renderer {
         };
 
         // Write the per-batch uniforms before encoding. The uniform is the
-        // transform matrix followed by the constant per-batch alpha (clamped by
-        // the same policy that drives the draw plan).
+        // transform matrix followed by the constant per-batch colour (normalized
+        // sRGB) and alpha (both clamped by the same policy used for drawing).
         for (batch, m) in self.batches.iter().zip(transforms.iter()) {
             let mut uniform = [0.0f32; 20];
             uniform[..16].copy_from_slice(m);
-            uniform[16] = clamp_alpha(batch.alpha);
+            let [r, g, b] = renderer_color(batch.color);
+            uniform[16] = r;
+            uniform[17] = g;
+            uniform[18] = b;
+            uniform[19] = clamp_alpha(batch.alpha);
             queue.write_buffer(&batch.camera, 0, bytemuck::cast_slice(&uniform));
         }
 
@@ -943,6 +972,18 @@ impl Renderer {
         let opaque = passes.opaque;
         let transparent = passes.transparent;
         let invisible_batches = passes.invisible;
+
+        // Lineweight is carried, never drawn: collect every submitted batch that
+        // asks for a non-zero weight so the frame reports the gap explicitly
+        // instead of implying a width it did not rasterize.
+        let lineweight_not_drawn: Vec<LineweightNotDrawn> = self
+            .batches
+            .iter()
+            .filter(|batch| batch.lineweight > 0.0)
+            .map(|batch| LineweightNotDrawn {
+                millimeters: batch.lineweight,
+            })
+            .collect();
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("cad-encoder"),
@@ -1036,6 +1077,8 @@ impl Renderer {
             opaque_batches: opaque.len(),
             transparent_batches: transparent.len(),
             invisible_batches,
+            lineweight_not_drawn: lineweight_not_drawn.clone(),
+            lineweight_reason: lineweight_reason(&lineweight_not_drawn),
         })
     }
 
@@ -1258,6 +1301,40 @@ fn pack_positions(vectors: &[[f32; 3]]) -> Vec<u8> {
         bytes.extend_from_slice(&v[2].to_le_bytes());
     }
     bytes
+}
+
+/// Sanitise a batch colour for the uniform: finite `[0, 1]` channels.
+///
+/// Mirrors `cad_scene::sanitize_color` so a value that bypassed the scene cache
+/// still cannot put a NaN into the shader.
+fn renderer_color(color: [f32; 3]) -> [f32; 3] {
+    let channel = |c: f32| {
+        if c.is_finite() {
+            c.clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
+    };
+    [channel(color[0]), channel(color[1]), channel(color[2])]
+}
+
+/// Aggregate the "lineweight carried but not drawn" batches into one stable
+/// diagnostic reason. `None` when nothing asked for a non-zero weight.
+fn lineweight_reason(not_drawn: &[LineweightNotDrawn]) -> Option<DiagnosticReason> {
+    if not_drawn.is_empty() {
+        return None;
+    }
+    let max_mm = not_drawn
+        .iter()
+        .map(|l| l.millimeters)
+        .fold(0.0f32, f32::max);
+    Some(DiagnosticReason::partial(
+        codes::RENDER_LINEWEIGHT_NOT_DRAWN,
+        vec![
+            DiagnosticParameter::Count(not_drawn.len() as u64),
+            DiagnosticParameter::Identifier(format!("{max_mm:.2}mm")),
+        ],
+    ))
 }
 
 fn translate_left(vp: &[[f32; 4]; 4], origin: [f32; 3]) -> [f32; 16] {

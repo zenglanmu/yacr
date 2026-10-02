@@ -15,8 +15,9 @@ use acadrust::entities::{
 };
 use acadrust::{DwgReadOptions, DwgReader, EntityType, ReadStats};
 use cad_db::{
-    BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder,
-    EntityRenderAttributes, EntityTransparency, Layer, Layout, PaperViewport, Style,
+    BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, EntityColor,
+    EntityLineWeight, EntityRenderAttributes, EntityTransparency, Layer, Layout, PaperViewport,
+    Style,
 };
 use cad_domain::*;
 use cad_geometry::{arbitrary_axis, tessellate_bspline, PatternLine, TessellationParams};
@@ -168,6 +169,11 @@ struct ImporterBuilder<'a> {
     /// Effective display opacity of each layer, resolved from its DWG
     /// transparency (0 = opaque, 255 = transparent).
     layer_transparency: HashMap<LayerId, f32>,
+    /// Resolved sRGB colour of each layer, used to substitute `ByLayer` on an
+    /// entity (an acadrust `Color::Index` is resolved through its ACI table).
+    layer_colors: HashMap<LayerId, [u8; 3]>,
+    /// Resolved lineweight of each layer in millimetres.
+    layer_lineweights: HashMap<LayerId, f32>,
     style_ids: HashMap<String, StyleId>,
     /// Lower-cased style name -> primary font file name.
     style_fonts: HashMap<String, String>,
@@ -224,6 +230,8 @@ impl<'a> ImporterBuilder<'a> {
             capabilities: HashMap::new(),
             layer_ids: HashMap::new(),
             layer_transparency: HashMap::new(),
+            layer_colors: HashMap::new(),
+            layer_lineweights: HashMap::new(),
             style_ids: HashMap::new(),
             style_fonts: HashMap::new(),
             block_ids: HashMap::new(),
@@ -352,6 +360,10 @@ impl<'a> ImporterBuilder<'a> {
             self.layer_ids.insert(layer.name.clone(), id);
             self.layer_transparency
                 .insert(id, layer_opacity(layer.transparency));
+            self.layer_colors.insert(id, layer_rgb(layer.color));
+            if let Some(mm) = lineweight_mm(layer.line_weight) {
+                self.layer_lineweights.insert(id, mm);
+            }
             let visible = !layer.flags.off && !layer.flags.frozen;
             self.builder.insert_layer(Layer {
                 id,
@@ -614,13 +626,22 @@ impl<'a> ImporterBuilder<'a> {
 
         self.note_capability(&class_name, &geometry, &completeness, render, pick);
 
-        // Resolve the entity's effective display opacity and geometry source so
-        // the representation/scene layers can carry real transparency instead
-        // of always drawing opaque (audit F14). ByObject wins over ByLayer;
-        // ByBlock is kept symbolic for INSERT expansion to resolve.
+        // Resolve the entity's effective display opacity, colour and lineweight
+        // so the representation/scene layers can carry real style instead of
+        // always drawing opaque grey (audit F14 / §2.1.3). ByObject wins over
+        // ByLayer; ByBlock is kept symbolic for INSERT expansion to resolve.
+        //
+        // LINETYPE is deliberately NOT resolved this round: acadrust exposes
+        // `common.linetype` / `common.linetype_scale`, but dash generation is a
+        // separate round (`docs/entity-style.md` "显式未实现"). No dash pattern is
+        // fabricated here.
         let layer_alpha = self.layer_transparency.get(&layer).copied().unwrap_or(1.0);
+        let layer_color = self.layer_colors.get(&layer).copied();
+        let layer_lineweight = self.layer_lineweights.get(&layer).copied();
         let attributes = EntityRenderAttributes {
             transparency: resolve_entity_transparency(common.transparency, layer_alpha),
+            color: resolve_entity_color(common.color, layer_color),
+            lineweight: resolve_entity_lineweight(common.line_weight, layer_lineweight),
             geometry_source: if proxy_geometry_allowed(entity) {
                 GeometrySource::ProxyCache
             } else {
@@ -1254,6 +1275,80 @@ fn resolve_entity_transparency(
             EntityTransparency::Explicit(layer_alpha.clamp(0.0, 1.0))
         }
         acadrust::Transparency::ByBlock => EntityTransparency::ByBlock,
+    }
+}
+
+/// sRGB value of a concrete acadrust colour, or `None` when symbolic.
+fn concrete_rgb(color: acadrust::Color) -> Option<[u8; 3]> {
+    match color {
+        acadrust::Color::Rgb { r, g, b } => Some([r, g, b]),
+        // ACI indices resolve through acadrust's own canonical table, so an
+        // `Index(1)` becomes true red rather than a guessed constant.
+        acadrust::Color::Index(_) => color.rgb().map(|(r, g, b)| [r, g, b]),
+        acadrust::Color::ByLayer | acadrust::Color::ByBlock | acadrust::Color::None => None,
+    }
+}
+
+/// Resolve a layer's colour to sRGB bytes.
+///
+/// A layer carries a concrete colour in practice; the symbolic variants are
+/// degenerate on a layer and fall back to white (AutoCAD's nominal default
+/// entity colour) rather than fabricating a value.
+fn layer_rgb(color: acadrust::Color) -> [u8; 3] {
+    concrete_rgb(color).unwrap_or([255, 255, 255])
+}
+
+/// Resolve an entity's own colour into the effective display value.
+///
+/// An explicit entity colour (`ByObject`: true colour or an ACI index) wins over
+/// the layer. `ByLayer` uses the layer's pre-resolved colour. `ByBlock` is kept
+/// symbolic so INSERT expansion substitutes the containing reference's colour;
+/// `None` (no colour) is treated as unresolved `ByLayer` rather than drawn black.
+fn resolve_entity_color(color: acadrust::Color, layer_color: Option<[u8; 3]>) -> EntityColor {
+    match concrete_rgb(color) {
+        Some(rgb) => EntityColor::Explicit(rgb),
+        None => match color {
+            acadrust::Color::ByBlock => EntityColor::ByBlock,
+            _ => match layer_color {
+                Some(rgb) => EntityColor::Explicit(rgb),
+                None => EntityColor::ByLayer,
+            },
+        },
+    }
+}
+
+/// A lineweight in millimetres, or `None` for the symbolic/`Default` variants.
+///
+/// acadrust stores concrete weights as 1/100 mm; `LineWeight::millimeters`
+/// performs that conversion, so no scale factor is invented here.
+fn lineweight_mm(weight: acadrust::LineWeight) -> Option<f32> {
+    match weight {
+        acadrust::LineWeight::Value(_) => weight.millimeters().map(|mm| mm as f32),
+        acadrust::LineWeight::ByLayer
+        | acadrust::LineWeight::ByBlock
+        | acadrust::LineWeight::Default => None,
+    }
+}
+
+/// Resolve an entity's own lineweight into the effective display value.
+///
+/// A concrete entity weight wins over the layer; `ByLayer` uses the layer's
+/// pre-resolved weight; `ByBlock` stays symbolic for INSERT expansion;
+/// `Default` keeps acadrust's explicit "default" meaning.
+fn resolve_entity_lineweight(
+    weight: acadrust::LineWeight,
+    layer_weight: Option<f32>,
+) -> EntityLineWeight {
+    match weight {
+        acadrust::LineWeight::Value(_) => {
+            EntityLineWeight::Explicit(lineweight_mm(weight).unwrap_or(0.0))
+        }
+        acadrust::LineWeight::ByBlock => EntityLineWeight::ByBlock,
+        acadrust::LineWeight::Default => EntityLineWeight::Default,
+        acadrust::LineWeight::ByLayer => match layer_weight {
+            Some(mm) => EntityLineWeight::Explicit(mm),
+            None => EntityLineWeight::ByLayer,
+        },
     }
 }
 
@@ -3017,6 +3112,88 @@ mod tests {
         assert_eq!(layer_opacity(acadrust::Transparency::TRANSPARENT), 0.0);
         // A degenerate ByLayer/ByBlock on a layer is opaque, not fabricated.
         assert_eq!(layer_opacity(acadrust::Transparency::BY_LAYER), 1.0);
+    }
+
+    // ---- §3.2/§7.1: colour and lineweight resolution ----
+
+    #[test]
+    fn color_resolution_prefers_byobject_then_layer_then_byblock() {
+        // ByObject true colour wins over the layer.
+        assert_eq!(
+            resolve_entity_color(acadrust::Color::from_rgb(10, 20, 30), Some([1, 2, 3])),
+            EntityColor::Explicit([10, 20, 30])
+        );
+        // An ACI index resolves through acadrust's canonical table, not a guess.
+        assert_eq!(
+            resolve_entity_color(acadrust::Color::Index(1), Some([1, 2, 3])),
+            EntityColor::Explicit([255, 0, 0])
+        );
+        // ByLayer uses the layer's pre-resolved colour.
+        assert_eq!(
+            resolve_entity_color(acadrust::Color::ByLayer, Some([1, 2, 3])),
+            EntityColor::Explicit([1, 2, 3])
+        );
+        // A materialised `None` keeps the layer's colour rather than black.
+        assert_eq!(
+            resolve_entity_color(acadrust::Color::None, Some([4, 5, 6])),
+            EntityColor::Explicit([4, 5, 6])
+        );
+        // ByBlock stays symbolic so INSERT expansion can supply the value.
+        assert_eq!(
+            resolve_entity_color(acadrust::Color::ByBlock, Some([4, 5, 6])),
+            EntityColor::ByBlock
+        );
+        // ByLayer with no reachable layer stays unresolved, not fabricated.
+        assert_eq!(
+            resolve_entity_color(acadrust::Color::ByLayer, None),
+            EntityColor::ByLayer
+        );
+    }
+
+    #[test]
+    fn layer_rgb_resolves_index_and_rgb_and_falls_back_to_white() {
+        assert_eq!(layer_rgb(acadrust::Color::from_rgb(9, 8, 7)), [9, 8, 7]);
+        assert_eq!(layer_rgb(acadrust::Color::Index(5)), [0, 0, 255]);
+        // A degenerate symbolic layer colour falls back to white.
+        assert_eq!(layer_rgb(acadrust::Color::ByLayer), [255, 255, 255]);
+    }
+
+    #[test]
+    fn lineweight_resolution_prefers_byobject_then_layer_then_byblock() {
+        // A concrete weight is 1/100 mm; 35 -> 0.35 mm.
+        assert_eq!(
+            resolve_entity_lineweight(acadrust::LineWeight::Value(35), Some(0.5)),
+            EntityLineWeight::Explicit(0.35)
+        );
+        // ByLayer uses the layer's pre-resolved weight.
+        assert_eq!(
+            resolve_entity_lineweight(acadrust::LineWeight::ByLayer, Some(0.5)),
+            EntityLineWeight::Explicit(0.5)
+        );
+        // acadrust's Default keeps its explicit meaning.
+        assert_eq!(
+            resolve_entity_lineweight(acadrust::LineWeight::Default, Some(0.5)),
+            EntityLineWeight::Default
+        );
+        // ByBlock stays symbolic.
+        assert_eq!(
+            resolve_entity_lineweight(acadrust::LineWeight::ByBlock, Some(0.5)),
+            EntityLineWeight::ByBlock
+        );
+        // ByLayer with no reachable layer stays unresolved.
+        assert_eq!(
+            resolve_entity_lineweight(acadrust::LineWeight::ByLayer, None),
+            EntityLineWeight::ByLayer
+        );
+    }
+
+    #[test]
+    fn lineweight_mm_only_reports_concrete_values() {
+        assert_eq!(lineweight_mm(acadrust::LineWeight::Value(100)), Some(1.0));
+        assert_eq!(lineweight_mm(acadrust::LineWeight::W0_25), Some(0.25));
+        assert_eq!(lineweight_mm(acadrust::LineWeight::ByLayer), None);
+        assert_eq!(lineweight_mm(acadrust::LineWeight::ByBlock), None);
+        assert_eq!(lineweight_mm(acadrust::LineWeight::Default), None);
     }
 
     #[test]

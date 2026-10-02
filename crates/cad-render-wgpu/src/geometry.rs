@@ -552,6 +552,10 @@ mod tests {
             edges: Vec::new(),
             mirrored,
             alpha: 1.0,
+            color: cad_scene::DEFAULT_BATCH_COLOR,
+            color_unresolved: true,
+            lineweight: 0.0,
+            lineweight_unresolved: true,
             sources: vec![SelectionRef {
                 document: cad_domain::DocumentId(1),
                 entity: EntityId(1),

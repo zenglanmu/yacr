@@ -44,6 +44,10 @@ fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
         edges: Vec::new(),
         mirrored: false,
         alpha: 1.0,
+        color: cad_scene::DEFAULT_BATCH_COLOR,
+        color_unresolved: true,
+        lineweight: 0.0,
+        lineweight_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
     }
@@ -81,6 +85,10 @@ fn triangle_mesh() -> RenderBatch {
         edges: Vec::new(),
         mirrored: false,
         alpha: 1.0,
+        color: cad_scene::DEFAULT_BATCH_COLOR,
+        color_unresolved: true,
+        lineweight: 0.0,
+        lineweight_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
     }

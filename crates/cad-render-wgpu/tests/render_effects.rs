@@ -86,6 +86,10 @@ fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
         edges: Vec::new(),
         mirrored: false,
         alpha: 1.0,
+        color: cad_scene::DEFAULT_BATCH_COLOR,
+        color_unresolved: true,
+        lineweight: 0.0,
+        lineweight_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
     }
@@ -133,6 +137,10 @@ fn quad_mesh(
         edges: Vec::new(),
         mirrored: false,
         alpha,
+        color: cad_scene::DEFAULT_BATCH_COLOR,
+        color_unresolved: true,
+        lineweight: 0.0,
+        lineweight_unresolved: true,
         sources: vec![source()],
         draw_order,
     }
@@ -463,4 +471,143 @@ fn frame_png_is_written_and_valid() {
         &image.pixels[..],
         "PNG round-trip must be byte-identical to the readback"
     );
+}
+
+/// A line batch with an explicit colour, for the per-colour frame test.
+fn colored_line_batch(color: [f32; 3]) -> RenderBatch {
+    let mut batch = lines_batch(rectangle_lines());
+    batch.color = color;
+    batch.color_unresolved = false;
+    batch
+}
+
+/// Two entities with different colours must render differently. `RenderBatch`'s
+/// per-batch colour reaches the shader uniform; this is a real software-Vulkan
+/// (lavapipe) frame, not a plan-level assertion.
+#[test]
+fn batches_with_different_colors_render_different_frames() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+
+    renderer
+        .upload(&scene(vec![colored_line_batch([1.0, 0.0, 0.0])]))
+        .expect("upload red batch");
+    renderer.render(camera_2d(), &target).expect("render red");
+    let red = renderer.read_target_rgba().expect("read red frame");
+
+    renderer.clear_batches();
+    renderer
+        .upload(&scene(vec![colored_line_batch([0.0, 0.0, 1.0])]))
+        .expect("upload blue batch");
+    renderer.render(camera_2d(), &target).expect("render blue");
+    let blue = renderer.read_target_rgba().expect("read blue frame");
+
+    assert_ne!(
+        red.pixels, blue.pixels,
+        "the same geometry with different batch colours must produce different frames"
+    );
+    // The red frame must be redder than the blue frame on some pixel, and vice
+    // versa, rather than merely differing by antialiasing noise.
+    let redder = (0..64)
+        .flat_map(|y| (0..64).map(move |x| (x, y)))
+        .any(|(x, y)| red.pixel(x, y)[0] > blue.pixel(x, y)[0] + 8);
+    let bluer = (0..64)
+        .flat_map(|y| (0..64).map(move |x| (x, y)))
+        .any(|(x, y)| blue.pixel(x, y)[2] > red.pixel(x, y)[2] + 8);
+    assert!(
+        redder && bluer,
+        "each coloured frame must dominate its own channel"
+    );
+}
+
+/// ByLayer resolves to the layer colour upstream; at the renderer the important
+/// contract is that the resolved value travels into the uniform, so two batches
+/// that differ only in colour (one red, one the default white) are not equal.
+#[test]
+fn resolved_layer_color_reaches_the_uniform() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+
+    let mut default_batch = lines_batch(rectangle_lines());
+    default_batch.color = cad_scene::DEFAULT_BATCH_COLOR;
+    renderer
+        .upload(&scene(vec![default_batch]))
+        .expect("upload default batch");
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render default");
+    let default_frame = renderer.read_target_rgba().expect("read default");
+
+    renderer.clear_batches();
+    renderer
+        .upload(&scene(vec![colored_line_batch([1.0, 0.0, 0.0])]))
+        .expect("upload layer-colour batch");
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render layer-colour");
+    let layer_frame = renderer
+        .read_target_rgba()
+        .expect("read layer-colour frame");
+
+    assert_ne!(
+        default_frame.pixels, layer_frame.pixels,
+        "a batch whose colour came from the layer must render differently from \
+         the default colour"
+    );
+}
+
+/// Lineweight is carried but not drawn: the frame must report it explicitly.
+#[test]
+fn lineweight_is_reported_not_drawn() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let mut batch = lines_batch(rectangle_lines());
+    batch.lineweight = 0.5;
+    batch.lineweight_unresolved = false;
+    renderer
+        .upload(&scene(vec![batch]))
+        .expect("upload weighted batch");
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render weighted");
+
+    assert_eq!(
+        stats.lineweight_not_drawn.len(),
+        1,
+        "a non-zero lineweight must be reported as not drawn"
+    );
+    assert!((stats.lineweight_not_drawn[0].millimeters - 0.5).abs() < 1e-6);
+    let reason = stats
+        .lineweight_reason
+        .as_ref()
+        .expect("an explicit diagnostic reason must accompany the gap");
+    assert_eq!(
+        reason.code,
+        cad_diagnostics::codes::RENDER_LINEWEIGHT_NOT_DRAWN
+    );
+
+    // A batch that asks for no weight reports nothing.
+    renderer.clear_batches();
+    renderer
+        .upload(&scene(vec![lines_batch(rectangle_lines())]))
+        .expect("upload hairline batch");
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render hairline");
+    assert!(
+        stats.lineweight_not_drawn.is_empty(),
+        "a zero lineweight must not be reported, got {:?}",
+        stats.lineweight_not_drawn
+    );
+    assert!(stats.lineweight_reason.is_none());
 }
