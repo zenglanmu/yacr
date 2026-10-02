@@ -760,6 +760,19 @@ pub fn install_with_preference(
                         Ok(caps) => {
                             // Truthful label: the actual backend comes from the
                             // device's own capabilities, never from the wish.
+                            // Report it once so a device log shows which backend
+                            // really initialized (spec §6/F12).
+                            log::info!(
+                                "CAD renderer initialized: preference={:?} actual={:?} \
+                                 compute={} storage_buffers={} indirect_draw={} \
+                                 max_texture_dimension={}",
+                                preference_choice(preference),
+                                caps.actual,
+                                caps.compute,
+                                caps.storage_buffers,
+                                caps.indirect_draw,
+                                caps.max_texture_dimension
+                            );
                             s.outcome = Some(BackendOutcome::Initialized {
                                 preference: preference_choice(preference),
                                 actual: backend_kind(caps.actual),
@@ -773,6 +786,7 @@ pub fn install_with_preference(
                         Err(e) => {
                             // The device exists but the renderer could not build
                             // its derived state: a specific, non-generic failure.
+                            log::warn!("CAD renderer initialisation failed: {e}");
                             s.outcome = Some(BackendOutcome::Failed {
                                 preference: preference_choice(preference),
                                 failure: BackendFailure::InitFailed {

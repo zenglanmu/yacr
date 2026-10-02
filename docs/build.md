@@ -26,7 +26,7 @@ release `bin/cad-cli-tools`、文档与 `scripts/{fetch-test-dwg,render-smoke}.s
 运行时的无头渲染用软件 Vulkan（Mesa lavapipe）时，先按发行版把 `VK_ICD_FILENAMES`
 指向 `lvp_icd.json`；详见 `docs/headless-render.md` 与 `docs/validation.md`。
 
-## Android APK（已验证可编译打包）
+## Android APK（已验证编译、打包、安装与运行）
 
 依赖：JDK 17、Android SDK（build-tools 34.0.0、platform android-34/30）、
 NDK 27.0.12077973、`cargo-apk 0.10.0`。
@@ -69,6 +69,40 @@ cargo check --target aarch64-linux-android -p app-android --locked
 `min/target SDK` 与 ABI 是预留值，未在真机实测最低支持范围。发布签名密钥不入库，
 不申请不必要的全盘权限。**当前 SAF 文件选择器未实现**：宿主按候选路径尝试打开
 DWG，找不到时显示内置演示几何并明确提示（见 `app-android`），不能宣称 F01 已验收。
+
+### x86_64 模拟器安装与运行（已验证；SwiftShader，**非真机**）
+
+评测对象：已启动的无头模拟器 `emulator-5554`（`dev_api35`，API 35，`google_apis`
+x86_64，`-gpu swiftshader`）。APK 必须针对 **x86_64-linux-android**；aarch64 在
+x86_64 镜像上经 NDK translation 安装但运行 abort。
+
+```bash
+# 1) 从当前 checkout 构建 x86_64 release APK（约 12.8 MB，release 签名）
+YACR_REPO="$PWD" PROFILE=release ~/android-dev/build-apk.sh
+#    等价直接命令（CARGO_TARGET_DIR 指向仓库外时更稳）：
+#    cargo apk build -p app-android --target x86_64-linux-android --lib --release
+#    产物：$CARGO_TARGET_DIR/release/apk/yacr.apk
+
+# 2) 安装并启动 NativeActivity
+adb install -r -t target/release/apk/yacr.apk
+adb shell am start -n dev.yacr.app/android.app.NativeActivity
+adb shell pidof dev.yacr.app          # 进程存活即启动成功
+
+# 3) 抓日志与截图
+adb logcat -d > /tmp/yacr-logcat.txt
+adb exec-out screencap -p > /tmp/yacr.png
+```
+
+实测结果（完整证据见 `docs/validation-android.md`）：
+
+- 进程启动、Slint + wgpu 初始化，内置演示几何（虚线圆/弧）真实渲染；无崩溃/ANR。
+- 后端（设备日志原文）：`CAD renderer initialized: preference=WebGpu actual=WebGpu
+  ... max_texture_dimension=8192`；底层 wgpu 走 Android Vulkan（模拟器 SwiftShader），
+  Slint 合成器为 Skia。
+- 画布拖动平移、点按「适应」重定中心均已生效（像素 diff 非零；修复前为 0）。
+- **限制**：`safe_insets` 未被消费、surface 尺寸/旋转未回传（audit U07），顶部工具栏被
+  系统状态栏遮挡，Open/DWG 选择在本次运行中不可达（打开图纸 **NOT RUN**）；量测拾取未
+  接线；图层/布局/批注面板状态未推送。真机仍未验证。
 
 ## Web（Wasm 静态产物 + 最小 JS 宿主）
 
