@@ -90,6 +90,8 @@ pub mod viewport_reason {
     pub const MIRROR: &str = "viewport.mirror";
     /// The view direction is not perpendicular to the paper plane.
     pub const OFF_PLANE_VIEW: &str = "viewport.off_plane_view";
+    /// The viewport uses a perspective projection.
+    pub const PERSPECTIVE: &str = "viewport.perspective";
     /// A legacy three-point clip also carried a non-zero transform translation.
     pub const TRANSLATION_MISMATCH: &str = "viewport.translation_mismatch";
 }
@@ -496,6 +498,27 @@ fn invert_planar(to_paper: &Transform3, s: f64) -> Transform3 {
     Transform3 { matrix: m }
 }
 
+/// Map an importer-supplied partial reason onto a stable [`viewport_reason`]
+/// code, so an imported unsupported viewport reports the same machine-readable
+/// code the representation layer uses for its own refusals. Unknown reasons
+/// stay [`viewport_reason::COMPLEX_CLIP`] (the generic "not drawable" code).
+fn classify_import_reason(reason: &str) -> &'static str {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("twist") {
+        viewport_reason::TWISTED_TRANSFORM
+    } else if lower.contains("perpendicular") || lower.contains("off_plane") {
+        viewport_reason::OFF_PLANE_VIEW
+    } else if lower.contains("perspective") {
+        viewport_reason::PERSPECTIVE
+    } else if lower.contains("view_height") || lower.contains("scale") {
+        viewport_reason::SCALE
+    } else if lower.contains("non-finite") || lower.contains("not finite") {
+        viewport_reason::NON_FINITE
+    } else {
+        viewport_reason::COMPLEX_CLIP
+    }
+}
+
 /// Interpret a stored viewport exactly, or refuse it with a stable reason.
 ///
 /// See the module documentation for the accepted clip encodings and the
@@ -511,7 +534,7 @@ pub fn viewport_transform(viewport: &PaperViewport) -> ViewportState {
             .cloned()
             .unwrap_or_else(|| "partial viewport state".to_string());
         return ViewportState::Unsupported(ViewportUnsupported::new(
-            viewport_reason::COMPLEX_CLIP,
+            classify_import_reason(&why),
             format!("viewport is not fully supported: {why}"),
         ));
     }
@@ -956,6 +979,88 @@ mod tests {
         // The stored 100 is model-units-per-paper-unit; the mapping uses the
         // inverse (audit B22 "方向需纠正").
         assert_eq!(t.paper_per_model, 0.01);
+    }
+
+    /// Exactly the shape the importer now writes for a 1:100 top/plan viewport:
+    /// paper (0,0)-(100,50), model view target (10,20), model_per_paper = 100.
+    fn imported_one_to_one_hundred() -> PaperViewport {
+        let center = Point3 {
+            x: 50.0,
+            y: 25.0,
+            z: 0.0,
+        };
+        let target = Point3 {
+            x: 10.0,
+            y: 20.0,
+            z: 0.0,
+        };
+        let scale = 100.0;
+        let clip = vec![p(0.0, 0.0), p(100.0, 0.0), p(100.0, 50.0), p(0.0, 50.0)];
+        let mut m = Transform3::identity().matrix;
+        m[0][0] = scale;
+        m[1][1] = scale;
+        m[0][3] = target.x - scale * center.x;
+        m[1][3] = target.y - scale * center.y;
+        PaperViewport {
+            clip,
+            model_to_paper: Transform3 { matrix: m },
+            completeness: Completeness::Complete,
+        }
+    }
+
+    #[test]
+    fn imported_one_to_one_hundred_viewport_is_supported_and_correct() {
+        let ViewportState::Supported(t) = viewport_transform(&imported_one_to_one_hundred()) else {
+            panic!("the importer's four-corner 1:100 viewport must be supported");
+        };
+        // Four paper corners and the correct 1:100 scale direction.
+        assert_eq!(
+            t.paper_corners,
+            [p(0.0, 0.0), p(100.0, 0.0), p(100.0, 50.0), p(0.0, 50.0)]
+        );
+        assert!((t.paper_per_model - 0.01).abs() < 1e-12);
+        // The view target lands at the paper centre.
+        assert_eq!(t.model_anchor, p(10.0, 20.0));
+        assert_eq!(t.model_to_paper(p(10.0, 20.0)), p(50.0, 25.0));
+        // One paper unit is 100 model units through the exact inverse.
+        let a = t.paper_to_model(p(0.0, 0.0));
+        let b = t.paper_to_model(p(1.0, 0.0));
+        assert!((b.x - a.x - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn imported_rotated_viewport_is_partial_with_the_twist_code() {
+        // The importer writes a Partial record (with the same clip/transform)
+        // for a twisted view; the representation layer must surface the stable
+        // twist code, not square the rectangle off.
+        let mut vp = imported_one_to_one_hundred();
+        vp.completeness = Completeness::Partial(vec!["viewport has a view twist".into()]);
+        assert_eq!(unsupported_code(&vp), viewport_reason::TWISTED_TRANSFORM);
+    }
+
+    #[test]
+    fn imported_off_plane_viewport_is_partial_with_the_off_plane_code() {
+        let mut vp = imported_one_to_one_hundred();
+        vp.completeness = Completeness::Partial(vec![
+            "viewport view direction is not perpendicular to the paper plane".into(),
+        ]);
+        assert_eq!(unsupported_code(&vp), viewport_reason::OFF_PLANE_VIEW);
+    }
+
+    #[test]
+    fn imported_perspective_viewport_is_partial_with_the_perspective_code() {
+        let mut vp = imported_one_to_one_hundred();
+        vp.completeness =
+            Completeness::Partial(vec!["perspective viewport is not supported".into()]);
+        assert_eq!(unsupported_code(&vp), viewport_reason::PERSPECTIVE);
+    }
+
+    #[test]
+    fn imported_complex_clip_is_partial_with_the_complex_clip_code() {
+        let mut vp = imported_one_to_one_hundred();
+        vp.completeness =
+            Completeness::Partial(vec!["non-rectangular viewport clip is not applied".into()]);
+        assert_eq!(unsupported_code(&vp), viewport_reason::COMPLEX_CLIP);
     }
 
     #[test]

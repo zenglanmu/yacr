@@ -172,6 +172,10 @@ struct ImporterBuilder<'a> {
     /// Lower-cased style name -> primary font file name.
     style_fonts: HashMap<String, String>,
     block_ids: HashMap<String, BlockId>,
+    /// Block name -> the block's insertion base point. An INSERT maps the
+    /// block's base point onto its insertion point, so expansion subtracts it
+    /// (`world = insert * (local - base)`, audit B31).
+    block_base_points: HashMap<String, Point3>,
     layout_ids: HashMap<String, LayoutId>,
     next_entity: u128,
     next_object: u128,
@@ -191,10 +195,12 @@ struct ImporterBuilder<'a> {
 }
 
 /// A block child classified for display, before nesting is resolved.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct BlockMember {
     render: SupportStatus,
-    insert_block: Option<BlockId>,
+    /// Block definitions referenced by this child (one per array cell), so
+    /// nesting resolves through MINSERT arrays too.
+    insert_blocks: Vec<BlockId>,
 }
 
 impl<'a> ImporterBuilder<'a> {
@@ -221,6 +227,7 @@ impl<'a> ImporterBuilder<'a> {
             style_ids: HashMap::new(),
             style_fonts: HashMap::new(),
             block_ids: HashMap::new(),
+            block_base_points: HashMap::new(),
             layout_ids: HashMap::new(),
             next_entity: 1,
             next_object: 1,
@@ -403,41 +410,24 @@ impl<'a> ImporterBuilder<'a> {
             let mut viewports = Vec::new();
             for entity in self.acad.entities_in_block(&block.name) {
                 if let EntityType::Viewport(v) = entity {
-                    let center = p3(v.center);
-                    let half = p3(acadrust::Vector3::new(v.width / 2.0, v.height / 2.0, 0.0));
-                    let scale = if v.height.abs() > 1e-12 {
-                        v.view_height / v.height
-                    } else {
-                        1.0
+                    // The sheet viewport (`id == 1`) frames the paper itself, not
+                    // a model-space window, and an off viewport draws nothing;
+                    // neither is a content viewport (audit B22).
+                    let Some(viewport) = paper_viewport(v) else {
+                        continue;
                     };
-                    let complex = !v.clip_boundary_handle.null_or_value_zero();
-                    if complex {
+                    if let Completeness::Partial(reasons) = &viewport.completeness {
+                        let why = reasons
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| "unsupported viewport state".to_string());
                         self.diagnostics.push(Diagnostic {
                             object: None,
-                            code: "import.viewport_complex_clip".into(),
-                            message: format!(
-                                "layout {}: non-rectangular viewport clip is not applied",
-                                block.name
-                            ),
+                            code: "import.viewport_unsupported".into(),
+                            message: format!("layout {} viewport {}: {why}", block.name, v.id),
                         });
                     }
-                    viewports.push(PaperViewport {
-                        clip: vec![
-                            sub(center, half),
-                            Point3 {
-                                x: center.x + half.x,
-                                y: center.y - half.y,
-                                z: 0.0,
-                            },
-                            p3(v.view_center),
-                        ],
-                        model_to_paper: Transform3::scale(scale),
-                        completeness: if complex {
-                            Completeness::Partial(vec!["complex viewport clip".into()])
-                        } else {
-                            Completeness::Complete
-                        },
-                    });
+                    viewports.push(viewport);
                 }
             }
             self.builder.insert_layout(Layout {
@@ -467,6 +457,8 @@ impl<'a> ImporterBuilder<'a> {
             let id = BlockId(next);
             next += 1;
             self.block_ids.insert(block.name.clone(), id);
+            self.block_base_points
+                .insert(block.name.clone(), p3(block.base_point));
             self.builder.insert_block(BlockDefinition {
                 id,
                 entities: Vec::new(),
@@ -523,13 +515,21 @@ impl<'a> ImporterBuilder<'a> {
                 let members = self.block_members.get(id).cloned().unwrap_or_default();
                 let mut status = SupportStatus::Verified;
                 for member in &members {
-                    let child = match member.insert_block {
-                        Some(block) => self
-                            .block_status
-                            .get(&block)
-                            .copied()
-                            .unwrap_or(SupportStatus::Unverified),
-                        None => member.render,
+                    // A member that references blocks inherits the weakest of
+                    // its dependencies; a plain member uses its own status.
+                    let child = if member.insert_blocks.is_empty() {
+                        member.render
+                    } else {
+                        member
+                            .insert_blocks
+                            .iter()
+                            .map(|block| {
+                                self.block_status
+                                    .get(block)
+                                    .copied()
+                                    .unwrap_or(SupportStatus::Unverified)
+                            })
+                            .fold(SupportStatus::Verified, weaker)
                     };
                     status = weaker(status, child);
                 }
@@ -575,16 +575,17 @@ impl<'a> ImporterBuilder<'a> {
         let (geometry, completeness) = self.convert(entity, common);
 
         // Render/pick are judged from the drawn result, not from parse success
-        // (audit B20). An INSERT inherits the resolved status of its block.
+        // (audit B20). An INSERT inherits the resolved status of its block; an
+        // array INSERT is a Compound of Instances that all reference one block.
         let (mut render, mut pick) = display_support(&geometry);
-        let insert_block = match &geometry {
-            SemanticGeometry::Insert { block, .. } => Some(*block),
-            _ => None,
-        };
-        if let Some(block) = insert_block {
-            if let Some(status) = self.block_status.get(&block) {
-                render = *status;
-                pick = *status;
+        let insert_blocks = referenced_blocks(&geometry);
+        for block in &insert_blocks {
+            if let Some(status) = self.block_status.get(block) {
+                render = weaker(render, *status);
+                pick = weaker(pick, *status);
+            } else {
+                render = weaker(render, SupportStatus::Unverified);
+                pick = weaker(pick, SupportStatus::Unverified);
             }
         }
         if let SpaceId::Block(block) = &space {
@@ -593,7 +594,7 @@ impl<'a> ImporterBuilder<'a> {
                 .or_default()
                 .push(BlockMember {
                     render,
-                    insert_block,
+                    insert_blocks,
                 });
         }
         if matches!(&space, SpaceId::Model) {
@@ -798,16 +799,11 @@ impl<'a> ImporterBuilder<'a> {
                 )
             }
             EntityType::Spline(s) => spline_semantics(s),
-            EntityType::Solid(s) => {
-                let m = quad_mesh([
-                    p3(s.first_corner),
-                    p3(s.second_corner),
-                    p3(s.third_corner),
-                    p3(s.fourth_corner),
-                ]);
-                (SemanticGeometry::Mesh(m), Completeness::Complete)
-            }
+            EntityType::Solid(s) => solid_mesh_semantics(s),
             EntityType::Face3D(f) => {
+                // A 3DFACE stores its corners in WCS and in boundary order
+                // (first, second, third, fourth), unlike SOLID/TRACE
+                // (docs/layouts.md §4, audit B31).
                 let m = quad_mesh([
                     p3(f.first_corner),
                     p3(f.second_corner),
@@ -816,13 +812,7 @@ impl<'a> ImporterBuilder<'a> {
                 ]);
                 (SemanticGeometry::Mesh(m), Completeness::Complete)
             }
-            EntityType::Insert(i) => (
-                SemanticGeometry::Insert {
-                    block: self.block_id(&i.block_name),
-                    transform: insert_transform(i),
-                },
-                Completeness::Complete,
-            ),
+            EntityType::Insert(i) => self.insert_semantics(i),
             EntityType::Unknown(u) => {
                 self.proxy_geometry(&u.dxf_name, common, u.raw_dwg_data.as_deref())
             }
@@ -853,10 +843,10 @@ impl<'a> ImporterBuilder<'a> {
                     )
                 }
             }
-            EntityType::Solid3D(s) => solid_semantics(entity, &s.acis_data),
-            EntityType::Region(r) => solid_semantics(entity, &r.acis_data),
-            EntityType::Body(b) => solid_semantics(entity, &b.acis_data),
-            EntityType::Surface(s) => solid_semantics(entity, &s.acis_data),
+            EntityType::Solid3D(s) => acis_semantics(entity, &s.acis_data),
+            EntityType::Region(r) => acis_semantics(entity, &r.acis_data),
+            EntityType::Body(b) => acis_semantics(entity, &b.acis_data),
+            EntityType::Surface(s) => acis_semantics(entity, &s.acis_data),
             other => (
                 SemanticGeometry::Opaque {
                     type_key: entity_class_name(other),
@@ -955,6 +945,61 @@ impl<'a> ImporterBuilder<'a> {
             .get(name)
             .copied()
             .unwrap_or(BlockId(u128::MAX))
+    }
+
+    /// The block's insertion base point, defaulting to the origin.
+    fn block_base(&self, name: &str) -> Point3 {
+        self.block_base_points
+            .get(name)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Convert an INSERT (including an array / MINSERT) into expandable
+    /// geometry.
+    ///
+    /// One cell yields a single [`SemanticGeometry::Insert`]; `rows × columns`
+    /// cells yield a [`SemanticGeometry::Compound`] of them, one per cell (audit
+    /// B31). The block definition itself is never emitted directly, so it cannot
+    /// be double-drawn. Unknown block names are reported `Missing` rather than
+    /// expanded as an empty success.
+    fn insert_semantics(&self, i: &acadrust::entities::Insert) -> (SemanticGeometry, Completeness) {
+        let name = i.block_name.clone();
+        let base = self.block_base(&name);
+        let mut completeness = Completeness::Complete;
+        if !self.block_ids.contains_key(&name) {
+            completeness =
+                Completeness::Missing(vec![format!("insert references unknown block '{name}'")]);
+        }
+        let columns = i.column_count.max(1) as usize;
+        let rows = i.row_count.max(1) as usize;
+        // A non-finite spacing cannot produce distinct cells; drawing them all on
+        // top of each other would hide the state, so report it.
+        let spacing_bad = |s: f64| !s.is_finite();
+        if columns * rows > 1 && (spacing_bad(i.column_spacing) || spacing_bad(i.row_spacing)) {
+            completeness = Completeness::Partial(vec![
+                "insert array has a non-finite row/column spacing".into(),
+            ]);
+        }
+        let mut instances = Vec::with_capacity(columns * rows);
+        for row in 0..rows {
+            for column in 0..columns {
+                instances.push(SemanticGeometry::Insert {
+                    block: self.block_id(&name),
+                    transform: insert_array_transform(
+                        i,
+                        base,
+                        column as f64 * i.column_spacing,
+                        row as f64 * i.row_spacing,
+                    ),
+                });
+            }
+        }
+        let geometry = match instances.len() {
+            1 => instances.pop().expect("length checked"),
+            _ => SemanticGeometry::Compound(instances),
+        };
+        (geometry, completeness)
     }
 
     /// Convert a HATCH into a compound of boundary loops plus a solid fill or
@@ -1128,7 +1173,7 @@ impl<'a> ImporterBuilder<'a> {
 /// The neutral lift for tessellation is [`solid_exchange_from_entity`]; this
 /// opaque form keeps the raw SAT/SAB for provenance and for a later kernel
 /// provider, and deliberately claims no display support of its own.
-fn solid_semantics(
+fn acis_semantics(
     entity: &EntityType,
     acis: &acadrust::entities::AcisData,
 ) -> (SemanticGeometry, Completeness) {
@@ -1328,6 +1373,100 @@ fn world_z() -> Point3 {
     }
 }
 
+/// Convert a paper-space VIEWPORT entity into a database [`PaperViewport`].
+///
+/// Returns `None` for the sheet viewport (`id == 1`), which frames the paper
+/// sheet itself rather than a model-space window, and for a viewport switched
+/// off: neither has drawable content.
+///
+/// The clip is written as four axis-aligned paper corners
+/// (`center ± (width/2, height/2)`), and `model_to_paper` is the real
+/// paper→model map
+/// `model = (paper - paper_center) * model_per_paper + view_target`,
+/// so the representation layer recovers the view centre from the stored
+/// transform (audit B22).
+///
+/// Exact only for a top/plan view: a tilted view direction, a view twist, a
+/// perspective projection or a non-rectangular clip is reported `Partial` with
+/// the specific reason. The representation layer then refuses it with a stable
+/// code instead of drawing model space wrong.
+fn paper_viewport(v: &acadrust::entities::Viewport) -> Option<PaperViewport> {
+    if v.id == 1 || !v.status.is_on {
+        return None;
+    }
+    let mut reasons: Vec<String> = Vec::new();
+    // A non-rectangular (object) clip cannot be represented by four corners.
+    if !v.clip_boundary_handle.null_or_value_zero() {
+        reasons.push("non-rectangular viewport clip is not applied".into());
+    }
+    if !is_world_z(p3(v.view_direction)) {
+        reasons.push("viewport view direction is not perpendicular to the paper plane".into());
+    }
+    if v.twist_angle.abs() > 1e-12 {
+        reasons.push("viewport has a view twist".into());
+    }
+    if v.status.perspective {
+        reasons.push("perspective viewport is not supported".into());
+    }
+    let view_height = v.view_height;
+    let model_per_paper = if view_height.is_finite() && view_height.abs() > 1e-12 {
+        view_height / v.height
+    } else {
+        reasons.push("viewport view_height is missing, zero or non-finite".into());
+        0.0
+    };
+    let paper_center = p3(v.center);
+    let view_target = p3(v.view_target);
+    let finite = [paper_center, view_target]
+        .iter()
+        .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+        && v.width.is_finite()
+        && v.height.is_finite();
+    if !finite {
+        reasons.push("viewport geometry is non-finite".into());
+    }
+    let half_w = v.width / 2.0;
+    let half_h = v.height / 2.0;
+    let clip = vec![
+        Point3 {
+            x: paper_center.x - half_w,
+            y: paper_center.y - half_h,
+            z: 0.0,
+        },
+        Point3 {
+            x: paper_center.x + half_w,
+            y: paper_center.y - half_h,
+            z: 0.0,
+        },
+        Point3 {
+            x: paper_center.x + half_w,
+            y: paper_center.y + half_h,
+            z: 0.0,
+        },
+        Point3 {
+            x: paper_center.x - half_w,
+            y: paper_center.y + half_h,
+            z: 0.0,
+        },
+    ];
+    let mut matrix = Transform3::identity().matrix;
+    matrix[0][0] = model_per_paper;
+    matrix[1][1] = model_per_paper;
+    matrix[0][3] = view_target.x - model_per_paper * paper_center.x;
+    matrix[1][3] = view_target.y - model_per_paper * paper_center.y;
+    matrix[2][3] = view_target.z;
+    let completeness = if reasons.is_empty() {
+        Completeness::Complete
+    } else {
+        Completeness::Partial(reasons)
+    };
+    Some(PaperViewport {
+        clip,
+        model_to_paper: Transform3 { matrix },
+        completeness,
+    })
+}
+
 /// True when an extrusion/direction is parallel to the world Z axis.
 ///
 /// A zero vector is treated as world Z: acadrust defaults an absent normal to
@@ -1474,14 +1613,6 @@ fn spline_semantics(s: &acadrust::entities::Spline) -> (SemanticGeometry, Comple
     (geometry, completeness)
 }
 
-fn sub(a: Point3, b: Point3) -> Point3 {
-    Point3 {
-        x: a.x - b.x,
-        y: a.y - b.y,
-        z: a.z - b.z,
-    }
-}
-
 fn normalize_sweep(sweep: f64) -> f64 {
     let tau = std::f64::consts::TAU;
     let mut s = sweep % tau;
@@ -1514,22 +1645,146 @@ fn quad_mesh(corners: [Point3; 4]) -> Mesh {
     }
 }
 
-fn insert_transform(i: &acadrust::entities::Insert) -> Transform3 {
+/// A LWPOLYLINE/POLYLINE's OCS plane normal, defaulting a degenerate or absent
+/// normal to world Z.
+fn polyline_normal(normal: Point3) -> Point3 {
+    if cad_geometry::length(normal) < 1e-24 {
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        }
+    } else {
+        cad_geometry::normalize(normal)
+    }
+}
+
+/// Build the block-local shift that moves the block's insertion base point to
+/// the local origin, so the INSERT's insertion point lands on it.
+fn block_placement(base_point: Point3) -> Transform3 {
+    Transform3::translation(Point3 {
+        x: -base_point.x,
+        y: -base_point.y,
+        z: -base_point.z,
+    })
+}
+
+/// OCS (extrusion-direction) to WCS transform, the AutoCAD arbitrary-axis one.
+fn ocs_to_wcs_transform(normal: Point3) -> Transform3 {
+    let (ax, ay, az) = arbitrary_axis(polyline_normal(normal));
+    Transform3 {
+        matrix: [
+            [ax.x, ay.x, az.x, 0.0],
+            [ax.y, ay.y, az.y, 0.0],
+            [ax.z, ay.z, az.z, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    }
+}
+
+/// Build one INSERT array cell's placement matrix, including the block's base
+/// point and rotation.
+///
+/// The block's base point and rotation are folded in first (the same order as
+/// the stored `INSERT`): a block-space point *p* lands at
+/// `insert(OCS · scale · R · (p - base))`. `offset_x`/`offset_y` are the cell's
+/// pre-scale displacement, so the array spacing is not scaled by the INSERT's
+/// own scale factors.
+fn insert_array_transform(
+    i: &acadrust::entities::Insert,
+    base_point: Point3,
+    offset_x: f64,
+    offset_y: f64,
+) -> Transform3 {
+    let ocs = ocs_to_wcs_transform(p3(i.normal));
     let (s, c) = i.rotation.sin_cos();
-    let sx = i.x_scale();
-    let sy = i.y_scale();
-    let sz = i.z_scale();
-    let mut m = [[0.0f64; 4]; 4];
-    m[0][0] = c * sx;
-    m[0][1] = -s * sy;
-    m[1][0] = s * sx;
-    m[1][1] = c * sy;
-    m[2][2] = sz;
-    m[3][3] = 1.0;
-    m[0][3] = i.insert_point.x;
-    m[1][3] = i.insert_point.y;
-    m[2][3] = i.insert_point.z;
-    Transform3 { matrix: m }
+    let scale = Transform3 {
+        matrix: [
+            [i.x_scale(), 0.0, 0.0, offset_x],
+            [0.0, i.y_scale(), 0.0, offset_y],
+            [0.0, 0.0, i.z_scale(), 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+    let rotate = Transform3 {
+        matrix: [
+            [c, -s, 0.0, 0.0],
+            [s, c, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+    let translate = Transform3::translation(p3(i.insert_point));
+    ocs.matrix_mul(&translate)
+        .matrix_mul(&rotate)
+        .matrix_mul(&scale)
+        .matrix_mul(&block_placement(base_point))
+}
+
+/// Every block referenced by expanded geometry (one per array cell), so render
+/// status nesting resolves through MINSERTs as well.
+fn referenced_blocks(geometry: &SemanticGeometry) -> Vec<BlockId> {
+    match geometry {
+        SemanticGeometry::Insert { block, .. } => vec![*block],
+        SemanticGeometry::Compound(children) => {
+            children.iter().flat_map(referenced_blocks).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Expand a SOLID/TRACE into a mesh.
+///
+/// Unlike 3DFACE, a SOLID/TRACE stores its corners out of boundary order: the
+/// visible quadrilateral runs first, second, fourth, third. The previous
+/// importer emitted the stored order, which crossed the quad. Corners are also
+/// lifted from the entity's OCS to WCS, so a tilted SOLID is not flattened onto
+/// world XY (audit B31).
+///
+/// Returns `Partial` for the states this build cannot draw exactly: a
+/// non-finite corner, or a thickness extrusion (a prism, not a flat fill) — the
+/// flat face is still emitted.
+fn solid_mesh_semantics(s: &acadrust::entities::Solid) -> (SemanticGeometry, Completeness) {
+    let normal = polyline_normal(p3(s.normal));
+    let finite = [
+        s.first_corner,
+        s.second_corner,
+        s.third_corner,
+        s.fourth_corner,
+    ]
+    .iter()
+    .all(|v| is_finite_point(*v));
+    if !finite {
+        return (
+            SemanticGeometry::Opaque {
+                type_key: "AcDbTrace".into(),
+                version: 1,
+                payload: Vec::new(),
+            },
+            Completeness::Partial(vec!["SOLID/TRACE has a non-finite corner".into()]),
+        );
+    }
+    let (ax, ay, az) = arbitrary_axis(normal);
+    let w = |v: acadrust::types::Vector3| {
+        cad_geometry::add(
+            cad_geometry::add(cad_geometry::scale(ax, v.x), cad_geometry::scale(ay, v.y)),
+            cad_geometry::scale(az, v.z),
+        )
+    };
+    let first = w(s.first_corner);
+    let second = w(s.second_corner);
+    let third = w(s.third_corner);
+    let fourth = w(s.fourth_corner);
+    // Stored order is first, second, third, fourth; the visible boundary is
+    // first, second, fourth, third.
+    let boundary = [first, second, fourth, third];
+    let mut completeness = Completeness::Complete;
+    if s.thickness.abs() > 1e-12 {
+        completeness = Completeness::Partial(vec![
+            "thickness extrusion is not drawn (flat face only)".into(),
+        ]);
+    }
+    (SemanticGeometry::Mesh(quad_mesh(boundary)), completeness)
 }
 
 fn dimension_transform(base: &DimensionBase) -> Transform3 {
@@ -2269,6 +2524,423 @@ mod tests {
         assert!((wcs.x - expected.x).abs() < 1e-9);
         assert!((wcs.y - expected.y).abs() < 1e-9);
         assert!((wcs.z - expected.z).abs() < 1e-9);
+    }
+
+    // ---- B22: paper-space viewport → four corners + full transform ----
+
+    /// Build a top/plan VIEWPORT entity with the given paper rectangle, scale,
+    /// and model view target.
+    fn top_viewport(
+        center: (f64, f64),
+        w: f64,
+        h: f64,
+        view_height: f64,
+        view_target: (f64, f64),
+    ) -> acadrust::entities::Viewport {
+        let mut v = acadrust::entities::Viewport::new();
+        v.id = 2;
+        v.center = acadrust::types::Vector3::new(center.0, center.1, 0.0);
+        v.width = w;
+        v.height = h;
+        v.view_height = view_height;
+        v.view_direction = acadrust::types::Vector3::UNIT_Z;
+        v.view_target = acadrust::types::Vector3::new(view_target.0, view_target.1, 0.0);
+        v
+    }
+
+    #[test]
+    fn one_to_one_hundred_viewport_has_four_corners_and_the_real_transform() {
+        // 1:100: a 10000×5000 model region fits the 100×50 paper window, view
+        // centre (10, 20).
+        let vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+        let pv = paper_viewport(&vp).expect("id 2 is a content viewport");
+        assert_eq!(pv.completeness, Completeness::Complete);
+        assert_eq!(
+            pv.clip,
+            vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0
+                },
+                Point3 {
+                    x: 100.0,
+                    y: 0.0,
+                    z: 0.0
+                },
+                Point3 {
+                    x: 100.0,
+                    y: 50.0,
+                    z: 0.0
+                },
+                Point3 {
+                    x: 0.0,
+                    y: 50.0,
+                    z: 0.0
+                },
+            ]
+        );
+        // The stored paper→model transform maps the paper centre to the view
+        // target; 100 model units per paper unit.
+        let m = &pv.model_to_paper.matrix;
+        assert!((m[0][0] - 100.0).abs() < 1e-9, "{m:?}");
+        assert!((m[1][1] - 100.0).abs() < 1e-9, "{m:?}");
+        let model_centre = pv.model_to_paper.apply_point(Point3 {
+            x: 50.0,
+            y: 25.0,
+            z: 0.0,
+        });
+        assert!((model_centre.x - 10.0).abs() < 1e-9, "{model_centre:?}");
+        assert!((model_centre.y - 20.0).abs() < 1e-9, "{model_centre:?}");
+        // One paper unit right of centre is 100 model units.
+        let right = pv.model_to_paper.apply_point(Point3 {
+            x: 51.0,
+            y: 25.0,
+            z: 0.0,
+        });
+        assert!((right.x - 110.0).abs() < 1e-9, "{right:?}");
+    }
+
+    #[test]
+    fn sheet_viewport_and_off_viewport_are_not_content_viewports() {
+        let mut sheet = top_viewport((0.0, 0.0), 100.0, 100.0, 100.0, (0.0, 0.0));
+        sheet.id = 1;
+        assert!(paper_viewport(&sheet).is_none(), "id 1 is the sheet");
+        let mut off = top_viewport((0.0, 0.0), 100.0, 100.0, 100.0, (0.0, 0.0));
+        off.status.is_on = false;
+        assert!(
+            paper_viewport(&off).is_none(),
+            "an off viewport draws nothing"
+        );
+    }
+
+    #[test]
+    fn rotated_viewport_is_partial_with_a_twist_reason() {
+        let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+        vp.twist_angle = std::f64::consts::FRAC_PI_4;
+        let pv = paper_viewport(&vp).expect("still a content viewport");
+        match &pv.completeness {
+            Completeness::Partial(reasons) => {
+                assert!(reasons.iter().any(|r| r.contains("twist")), "{reasons:?}");
+            }
+            other => panic!("expected Partial, got {other:?}"),
+        }
+        // The four-corner rectangle is still present (the representation layer
+        // will refuse it with `viewport.twisted_transform`, never square it off).
+        assert_eq!(pv.clip.len(), 4);
+    }
+
+    #[test]
+    fn non_perpendicular_view_is_partial_with_an_off_plane_reason() {
+        let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+        vp.view_direction = acadrust::types::Vector3::new(1.0, 0.0, 1.0);
+        let pv = paper_viewport(&vp).unwrap();
+        match &pv.completeness {
+            Completeness::Partial(reasons) => {
+                assert!(
+                    reasons.iter().any(|r| r.contains("perpendicular")),
+                    "{reasons:?}"
+                );
+            }
+            other => panic!("expected Partial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn complex_clip_viewport_is_partial() {
+        let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+        vp.clip_boundary_handle = acadrust::types::Handle::new(0x1A);
+        let pv = paper_viewport(&vp).unwrap();
+        match &pv.completeness {
+            Completeness::Partial(reasons) => {
+                assert!(reasons.iter().any(|r| r.contains("clip")), "{reasons:?}");
+            }
+            other => panic!("expected Partial, got {other:?}"),
+        }
+    }
+
+    // ---- B31: INSERT base point, OCS normal and array semantics ----
+
+    #[test]
+    fn insert_subtracts_the_block_base_point() {
+        // A block whose base point is (1, 1) and an INSERT at (10, 10): the
+        // block point (1, 1) must land on (10, 10), not (11, 11).
+        let mut i = acadrust::entities::Insert::new(
+            "BLOCK",
+            acadrust::types::Vector3::new(10.0, 10.0, 0.0),
+        );
+        i.rotation = 0.0;
+        let t = insert_array_transform(
+            &i,
+            Point3 {
+                x: 1.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            0.0,
+            0.0,
+        );
+        let placed = t.apply_point(Point3 {
+            x: 1.0,
+            y: 1.0,
+            z: 0.0,
+        });
+        assert!((placed.x - 10.0).abs() < 1e-9, "{placed:?}");
+        assert!((placed.y - 10.0).abs() < 1e-9, "{placed:?}");
+        // The origin with base (1,1) lands one block unit left/below the insert.
+        let origin = t.apply_point(Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        assert!((origin.x - 9.0).abs() < 1e-9, "{origin:?}");
+        assert!((origin.y - 9.0).abs() < 1e-9, "{origin:?}");
+    }
+
+    #[test]
+    fn insert_positive_rotation_turns_counter_clockwise() {
+        let mut i = acadrust::entities::Insert::new("BLOCK", acadrust::types::Vector3::ZERO);
+        i.rotation = std::f64::consts::FRAC_PI_2;
+        // Base point (1,0). A block point (2,0) is (1,0) after base subtraction;
+        // +90° CCW turns it to (0,1).
+        let t = insert_array_transform(
+            &i,
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            0.0,
+            0.0,
+        );
+        let placed = t.apply_point(Point3 {
+            x: 2.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        assert!(placed.x.abs() < 1e-9, "{placed:?}");
+        assert!((placed.y - 1.0).abs() < 1e-9, "{placed:?}");
+        // The base point itself lands on the insert point (the origin).
+        let base = t.apply_point(Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        assert!(base.x.abs() < 1e-9 && base.y.abs() < 1e-9, "{base:?}");
+    }
+
+    #[test]
+    fn insert_ocs_normal_lifts_the_block_off_the_xy_plane() {
+        // A +X extrusion maps the OCS X/Y axes into world Y/Z, so a block
+        // point on its local X lands off the world XY plane (audit B31).
+        let mut i = acadrust::entities::Insert::new("BLOCK", acadrust::types::Vector3::ZERO);
+        i.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+        let t = insert_array_transform(&i, Point3::default(), 0.0, 0.0);
+        let w = t.apply_point(Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        // arbitrary_axis(+X) = (ax=+Y, ay=+Z); OCS (1,0) -> world (0,1).
+        assert!(w.x.abs() < 1e-9, "{w:?}");
+        assert!((w.y - 1.0).abs() < 1e-9, "{w:?}");
+        assert!(w.z.abs() < 1e-9, "{w:?}");
+    }
+
+    #[test]
+    fn insert_array_offsets_are_pre_scale_and_row_major() {
+        let mut i = acadrust::entities::Insert::new("BLOCK", acadrust::types::Vector3::ZERO);
+        // Non-uniform scale: the 10-unit column spacing must not be scaled by
+        // the 2× x-scale.
+        i.set_x_scale(2.0);
+        i.set_y_scale(3.0);
+        i.column_count = 2;
+        i.row_count = 2;
+        i.column_spacing = 10.0;
+        i.row_spacing = 20.0;
+
+        let cell = |col: usize, row: usize| {
+            insert_array_transform(
+                &i,
+                Point3::default(),
+                col as f64 * i.column_spacing,
+                row as f64 * i.row_spacing,
+            )
+            .apply_point(Point3::default())
+        };
+        // Row-major: cells are (col 0,row 0), (col 1,row 0), ...
+        assert_eq!(cell(0, 0).x, 0.0);
+        assert_eq!(cell(1, 0).x, 10.0);
+        assert_eq!(cell(0, 1).x, 0.0);
+        assert_eq!(cell(0, 1).y, 20.0);
+    }
+
+    #[test]
+    fn array_insert_is_a_compound_of_cell_instances() {
+        // referenced_blocks must see every cell so status nesting resolves
+        // through MINSERTs; insert_semantics builds one Instance per cell.
+        let geometry = SemanticGeometry::Compound(vec![
+            SemanticGeometry::Insert {
+                block: BlockId(7),
+                transform: Transform3::identity(),
+            },
+            SemanticGeometry::Insert {
+                block: BlockId(7),
+                transform: Transform3::identity(),
+            },
+        ]);
+        assert_eq!(referenced_blocks(&geometry), vec![BlockId(7), BlockId(7)]);
+        assert!(referenced_blocks(&SemanticGeometry::Line {
+            start: Point3::default(),
+            end: Point3::default(),
+        })
+        .is_empty());
+    }
+
+    #[test]
+    fn missing_block_is_reported_missing_not_an_empty_success() {
+        // A bare builder (no block table) resolves the insert block to the
+        // sentinel id; the record must be `Missing`, never a silent success.
+        let bytes = vec![0u8; 0];
+        let req = request(bytes);
+        let acad = acadrust::CadDocument::new();
+        let stats = ReadStats::default();
+        let builder = ImporterBuilder::new(&req, &acad, stats, compute_identity(&[]));
+        let mut i = acadrust::entities::Insert::new("NOPE", acadrust::types::Vector3::ZERO);
+        i.column_count = 1;
+        i.row_count = 1;
+        let (geometry, completeness) = builder.insert_semantics(&i);
+        assert!(matches!(geometry, SemanticGeometry::Insert { .. }));
+        match completeness {
+            Completeness::Missing(reasons) => {
+                assert!(reasons.iter().any(|r| r.contains("NOPE")), "{reasons:?}");
+            }
+            other => panic!("expected Missing, got {other:?}"),
+        }
+    }
+
+    // ---- B31: SOLID/TRACE boundary order and OCS lift ----
+
+    #[test]
+    fn solid_corners_use_the_visible_boundary_order() {
+        // Stored corners 1,2,3,4 with the visible quad 1,2,4,3. The extruded
+        // triangles must follow the boundary, not the stored order.
+        let mut s = acadrust::entities::Solid::new(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(2.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(0.0, 2.0, 0.0),
+            acadrust::types::Vector3::new(2.0, 2.0, 0.0),
+        );
+        s.normal = acadrust::types::Vector3::UNIT_Z;
+        let (geometry, completeness) = solid_mesh_semantics(&s);
+        assert_eq!(completeness, Completeness::Complete);
+        let SemanticGeometry::Mesh(mesh) = geometry else {
+            panic!("expected a mesh");
+        };
+        // Boundary order: (0,0), (2,0), (2,2), (0,2). Triangles (0,1,2) and
+        // (0,2,3) must be two triangles of a unit square (area 4 total).
+        let area: f64 = mesh
+            .triangles
+            .iter()
+            .map(|t| {
+                let a = mesh.vertices[t[0] as usize];
+                let b = mesh.vertices[t[1] as usize];
+                let c = mesh.vertices[t[2] as usize];
+                let ab = Point3 {
+                    x: b.x - a.x,
+                    y: b.y - a.y,
+                    z: 0.0,
+                };
+                let ac = Point3 {
+                    x: c.x - a.x,
+                    y: c.y - a.y,
+                    z: 0.0,
+                };
+                (ab.x * ac.y - ab.y * ac.x).abs() / 2.0
+            })
+            .sum();
+        assert!((area - 4.0).abs() < 1e-9, "crossed quad area {area}");
+    }
+
+    #[test]
+    fn solid_with_a_non_z_extrusion_is_lifted_to_wcs() {
+        let mut s = acadrust::entities::Solid::new(
+            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(0.0, 1.0, 0.0),
+            acadrust::types::Vector3::new(0.0, 0.0, 1.0),
+            acadrust::types::Vector3::new(1.0, 1.0, 1.0),
+        );
+        s.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+        let (geometry, completeness) = solid_mesh_semantics(&s);
+        assert_eq!(completeness, Completeness::Complete);
+        let SemanticGeometry::Mesh(mesh) = geometry else {
+            panic!("expected a mesh");
+        };
+        // With +X extrusion the arbitrary-axis frame maps OCS (x, y, z) to
+        // world (z, x, y). The old flat treatment would have left the first
+        // corner at (1,0,0); the lift must move it to (0,1,0).
+        assert!(mesh
+            .vertices
+            .iter()
+            .any(|p| { (p.x).abs() < 1e-9 && (p.y - 1.0).abs() < 1e-9 && p.z.abs() < 1e-9 }));
+        // The fourth OCS corner (1,1,1) -> world (1,1,1).
+        assert!(mesh.vertices.iter().any(|p| {
+            (p.x - 1.0).abs() < 1e-9 && (p.y - 1.0).abs() < 1e-9 && (p.z - 1.0).abs() < 1e-9
+        }));
+    }
+
+    #[test]
+    fn solid_thickness_is_partial_flat_face_only() {
+        let mut s = acadrust::entities::Solid::new(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(0.0, 1.0, 0.0),
+            acadrust::types::Vector3::new(1.0, 1.0, 0.0),
+        );
+        s.thickness = 5.0;
+        let (_geometry, completeness) = solid_mesh_semantics(&s);
+        match completeness {
+            Completeness::Partial(reasons) => {
+                assert!(
+                    reasons.iter().any(|r| r.contains("thickness")),
+                    "{reasons:?}"
+                );
+            }
+            other => panic!("expected Partial, got {other:?}"),
+        }
+    }
+
+    // ---- B23/B31: tilted OCS polyline length ----
+
+    #[test]
+    fn tilted_ocs_polyline_preserves_its_segment_length() {
+        // A 3-4-5 triangle drawn flat on the OCS XY plane at an +X extrusion.
+        // Lifting it to WCS must preserve each segment's length exactly, while
+        // the old flat treatment would have collapsed it onto the XY plane.
+        let mut pl = acadrust::entities::LwPolyline::from_points(vec![
+            acadrust::types::Vector2::new(0.0, 0.0),
+            acadrust::types::Vector2::new(3.0, 0.0),
+            acadrust::types::Vector2::new(3.0, 4.0),
+        ]);
+        pl.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+        pl.elevation = 7.0;
+        let points = polyline_ocs_points(
+            p3(pl.normal),
+            pl.elevation,
+            pl.vertices.iter().map(|v| (v.location.x, v.location.y)),
+        );
+        let seg = |a: Point3, b: Point3| {
+            let d = Point3 {
+                x: b.x - a.x,
+                y: b.y - a.y,
+                z: b.z - a.z,
+            };
+            (d.x * d.x + d.y * d.y + d.z * d.z).sqrt()
+        };
+        assert!((seg(points[0], points[1]) - 3.0).abs() < 1e-9, "{points:?}");
+        assert!((seg(points[1], points[2]) - 4.0).abs() < 1e-9, "{points:?}");
+        // Both vertices lie on the x = elevation plane.
+        assert!(points.iter().all(|p| (p.x - 7.0).abs() < 1e-9));
     }
 
     // ---- B23: source spline knots and weights survive the importer ----

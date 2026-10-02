@@ -132,6 +132,7 @@ paper = (model - view_center) * paper_per_model + paper_center
 | `viewport.non_uniform` | 变换错切或非均匀 |
 | `viewport.mirror` | 变换镜像 |
 | `viewport.off_plane_view` | 视线不垂直于纸面 |
+| `viewport.perspective` | 透视投影 |
 | `viewport.translation_mismatch` | 三点格式同时带变换平移，视图中心有歧义 |
 
 构建布局时，不支持视口不产生任何视口几何，写入诊断码
@@ -139,23 +140,64 @@ paper = (model - view_center) * paper_per_model + paper_center
 绘制，结果 completeness 降为 **`Partial`**（不是 `Missing`）；布局本身不存在时才
 是 `Missing`（`layout.missing`）。**「读到了视口结构」不等于「能正确显示」**。
 
-### 3.1 与当前 importer 的关键差距（必须显式记录）
+### 3.1 与当前 importer 的闭环（审计 B22）
 
-`cad-import-acadrust::read_layouts` 现在把 `clip` 写成两个**下角**（共享同一 y），
-没有存储纸面高度；`model_to_paper` 也只是标量 `view_height / height`（模型/纸面），
-没有 view center 平移、没有 view_direction / view_target / twist 的编码，比例方向也是
-B22 指出的反的。因此真实导入的视口目前会被显式拒绝（相邻角），而不是猜一个高度。
+`cad-import-acadrust::read_layouts` 现在为每个纸空间布局的**内容视口**写入：
 
-要闭环真实文件的纸空间显示，importer 必须：
+1. **四角纸面矩形**：`clip = [c0, c1, c2, c3]`，即 `center ± (width/2, height/2)` 的四个
+   轴对齐角点（acadrust 的 `Viewport.center` / `width` / `height`）。
+2. **真实纸面→模型变换**：`model = (paper - paper_center) * model_per_paper + view_target`，
+   其中 `model_per_paper = view_height / height`（acadrust 的 `view_height`、`height`、
+   `center`、`view_target`）。本层由它恢复视图中心（`stored(paper_center)`）。
+3. 因此 `viewport_transform` 直接返回 `Supported`，四角、比例方向与视图中心都正确
+   （见 §2.2 与 `paper_per_model_from_view`）。审计 B22 的两处方向/形状问题均已闭环。
 
-1. 把矩形写成**四角**（或至少两个真正的对角角点）；
-2. 让第三/四角编码视图中心（或把视图中心放入变换平移）；
-3. 保持比例方向与实现约定一致，并把 direction/target/twist 显式编码；本层已能识别
-   旋转/倾斜并显式拒绝。
+`id == 1` 的**图纸视口**（`Viewport.id`）与 `status.is_on == false` 的视口不写入：前者是
+纸面本身而非模型窗口，后者不显示（audit B22，与 OpenCADStudio 的 `is_sheet_viewport`
+一致，仅作行为参考）。
 
-上述属导入工作流，不在本轮 `cad-representation` / `cad-app` / `cad-measure` 范围。
-一旦导入侧给出四角矩形与正确变换，`viewport_transform` 立即支持，且已有测试覆盖。
-模型空间显示不受影响（始终可用）。
+导入侧对**当前无法精确绘制**的视口不猜：仍写入四角矩形与变换，但 `completeness` 置
+`Partial` 并给出具体原因，本层按 §3 的稳定原因码拒绝（`viewport_transform` 会把导入原因
+归类到对应码）：
+
+| 导入原因（`Completeness::Partial` 消息） | 映射原因码 |
+|---|---|
+| 非矩形裁剪（`clip_boundary_handle` 非空） | `viewport.complex_clip` |
+| 视线不垂直于纸面（`view_direction` 非世界 Z） | `viewport.off_plane_view` |
+| 视图扭转（`twist_angle != 0`） | `viewport.twisted_transform` |
+| 透视投影（`status.perspective`） | `viewport.perspective` |
+| `view_height` 缺失/零/非有限 | `viewport.scale` |
+| 几何非有限 | `viewport.non_finite` |
+
+### 3.2 INSERT / 块语义（审计 B31）
+
+块展开在本层（`ProviderRegistry::build_expanded`）完成，导入侧负责把每个 `INSERT` 的
+完整放置矩阵写入 `SemanticGeometry::Insert`：
+
+```text
+world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_scale, z_scale) · (p - base_point)
+```
+
+- **base point**：acadrust `BlockRecord.base_point` 被减去，块基点落在 `insert_point` 上。
+- **OCS/normal**：acadrust `Insert.normal` 经 AutoCAD 任意轴算法提升到 WCS。
+- **rotation**：正值逆时针（与 DXF/acadrust `Matrix4::rotation_z` 一致）。
+- **数组 / MINSERT**：`column_count` × `row_count` 个单元各生成一个 `Instance`，包成
+  `Compound`；单元位移在**缩放之前**施加，因此间距不被 `x_scale`/`y_scale` 缩放
+  （与 OpenCADStudio `insert_instance_transform` 的行为一致）。块定义本身不被直接发出，
+  不会重复绘制（审计 B31）。
+- 引用了未知块名的 `INSERT` 记为 `Missing`，不是空成功。
+
+### 3.3 2D OCS 与 SOLID/3DFACE 顶点序（审计 B31）
+
+- **2D LWPOLYLINE / POLYLINE**：顶点是 OCS 坐标，结合 `normal` 与 `elevation` 提升到
+  WCS（`polyline_ocs_points`）。倾斜挤出对直线段精确（长度守恒）；只有“倾斜 + 两顶点
+  + bulge”因弧平面不唯一而记 `Partial`。
+- **SOLID / TRACE**：acadrust 按 `first, second, third, fourth` 存储，但可见四边形边界是
+  `first, second, fourth, third`；导入按边界顺序三角化（`solid_mesh_semantics`），并把
+  角点从实体的 OCS（`Solid.normal`）提升到 WCS。有厚度（`thickness`）时只画平面并按
+  `Partial` 记录。
+- **3DFACE**：角点已是 WCS、且按 `first, second, third, fourth` 边界序存储，直接三角化。
+
 
 ## 4. 明确未完成（不是已支持）
 
@@ -163,7 +205,8 @@ B22 指出的反的。因此真实导入的视口目前会被显式拒绝（相�
   只做变换，并把 completeness 降为 `Partial`（`viewport clip applied to line geometry
   only`），不声称已裁剪。
 - **打印输出**：无 plot/打印路径。布局绘制是屏幕显示，不是可交付的图纸输出。
-- **旋转/非均匀视口、注释性缩放、动态块**：显式 `Unsupported`，按样本标记，不假装支持。
+- **倾斜/扭转/透视视口、非矩形裁剪、非均匀视口、注释性缩放、动态块**：导入时置
+  `Partial` 并给出原因，本层以稳定原因码显式 `Unsupported`，按样本标记，不假装支持。
 - **布局切换 UI 控件接线**：`LayoutPanelState`（`cad-ui-slint`）已把布局列表与支持/原因
   投影成面板状态；`.slint` 面板控件与宿主命令接线属 UI 工作流。`cad-app` 提供并测试了
   校验与切换命令（`SwitchSpace` 校验真实布局表、失败保留原空间、不修改图纸、不产生
@@ -176,9 +219,12 @@ B22 指出的反的。因此真实导入的视口目前会被显式拒绝（相�
 - 比例方向：`paper_per_model_from_view`（1:100 → 0.01，存储标量是其倒数）；
 - 四角裁剪：四角、中心/半宽高、边界、视图中心落于纸面中心、1:100 模型/纸面距离、
   四角经逆变换精确往返；
+- 导入闭环：importer 形状的 1:100 四角视口 → `Supported` 且比例/视图中心正确；导入的
+  扭转/倾斜/透视/复杂裁剪视口 → `Partial` 并映射到对应稳定原因码（`viewport.twisted_`
+  `transform` / `off_plane_view` / `perspective` / `complex_clip`）；
 - 三点旧格式：仍能推导矩形与锚点；带平移时显式拒绝；
 - 不支持拒绝（含稳定原因码）：复杂裁剪、旋转纸面矩形、扭转变换、镜像、非均匀、
-  倾斜视线、缺比例、相邻角、退化矩形、非有限、点数错误；
+  倾斜视线、透视、缺比例、相邻角、退化矩形、非有限、点数错误；
 - 矩形裁剪：跨越截断、完全在外丢弃、完全在内保留、连续合并、离开再进入拆分；
 - 布局枚举：真实布局表的 id/名称/支持/原因（原因以稳定码开头），空库为空；
 - 纸空间构建：模型几何映射并裁剪、不支持视口显式 `Partial` 且不绘制、纸面实体直接
@@ -187,6 +233,11 @@ B22 指出的反的。因此真实导入的视口目前会被显式拒绝（相�
 `cargo test -p cad-app` 覆盖布局校验与切换（未知 → `InvalidInput`、已知但不可绘 →
 `Unsupported`、失败保留原空间、成功不修改图纸且无 `ChangeSet`），以及
 `viewport_measurement_space` 提供已验证逆变换 / 不可支持时禁用模型测量。
+
+`cargo test -p cad-import-acadrust` 覆盖：1:100 视口四角与纸面→模型变换、图纸/关闭视口
+不写入、扭转/倾斜/复杂裁剪视口为 `Partial`；INSERT 基点相减、正值逆时针旋转、OCS normal
+提升、数组单元为 pre-scale 行主序、未知块为 `Missing`；SOLID 边界顶点序（面积守恒）与
+非 Z 挤出提升；倾斜 OCS 折线长度守恒。
 
 `cad-ui-slint` 的桥接测试与 `LayoutPanelState` 测试需在可构建 Slint 的宿主运行；
 本机缺 fontconfig，故以 wasm32 `--lib` 检查替代编译验证（见诚实边界说明）。
