@@ -18,7 +18,7 @@ use cad_app::host::HostController;
 use cad_app::layers::LayerRow;
 use cad_app::{AnnotationPreview, AnnotationRow, SelectionProperties};
 use cad_diagnostics::model::{DiagnosticReason, DiagnosticsModel, Severity};
-use cad_domain::{AnnotationId, Completeness, Diagnostic, LayoutId};
+use cad_domain::{AnnotationId, Completeness, Diagnostic, LayerId, LayoutId};
 use cad_ui_slint::{
     AnnotationPanelState, CadView, DiagnosticsPanelState, LayerPanelState, LayoutPanelState,
     MeasurementUiState, MessageSource, PropertyPanelState, UiHandle,
@@ -72,11 +72,7 @@ pub(super) fn derive_layout_state(
 ) -> (LayoutPanelState, Vec<LayoutId>) {
     let order = descriptors.iter().map(|d| d.id).collect();
     (
-        LayoutPanelState::from_descriptors(
-            descriptors,
-            active,
-            messages.text("layout.empty", &[]),
-        ),
+        LayoutPanelState::from_descriptors(descriptors, active, messages.text("layout.empty", &[])),
         order,
     )
 }
@@ -110,12 +106,8 @@ pub(super) fn diagnostics_model_from_import(diagnostics: &[Diagnostic]) -> Diagn
 
 /// Display-only severity word for a stable diagnostic code.
 fn severity_for_code(code: &str) -> Severity {
-    const ERROR_SUFFIXES: [&str; 4] = [
-        ".unavailable",
-        ".missing",
-        ".not_implemented",
-        ".undecoded",
-    ];
+    const ERROR_SUFFIXES: [&str; 4] =
+        [".unavailable", ".missing", ".not_implemented", ".undecoded"];
     if ERROR_SUFFIXES.iter().any(|suffix| code.ends_with(suffix)) {
         Severity::Error
     } else {
@@ -218,7 +210,9 @@ pub(super) fn push_panel_state_for_view(
 
 /// Display name of the renderer backend, for the diagnostics drawer header.
 fn backend_display(view: &Rc<RefCell<Option<CadView>>>) -> String {
-    let Some(view) = view.borrow().as_ref() else {
+    // Bind the `Ref` so the `&CadView` borrow outlives this expression.
+    let borrowed = view.borrow();
+    let Some(view) = borrowed.as_ref() else {
         return String::new();
     };
     // `BackendPreference` is a product name; only `Auto` is worded.

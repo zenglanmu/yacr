@@ -319,10 +319,7 @@ mod tests {
         assert!(!is_selection_tap(Some([0.0, 0.0]), [threshold, 0.0]));
         assert!(!is_selection_tap(Some([0.0, 0.0]), [0.0, threshold + 5.0]));
         // Just under the threshold is still a tap.
-        assert!(is_selection_tap(
-            Some([0.0, 0.0]),
-            [threshold - 0.5, 0.0]
-        ));
+        assert!(is_selection_tap(Some([0.0, 0.0]), [threshold - 0.5, 0.0]));
     }
 
     #[test]

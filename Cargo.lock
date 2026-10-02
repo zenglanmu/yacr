@@ -314,9 +314,12 @@ version = "0.1.0"
 dependencies = [
  "cad-annotations",
  "cad-app",
+ "cad-diagnostics",
  "cad-domain",
  "cad-platform",
+ "cad-representation",
  "cad-resources",
+ "cad-spatial",
  "cad-ui-slint",
  "js-sys",
  "wasm-bindgen",
