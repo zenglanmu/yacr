@@ -27,6 +27,7 @@ pub mod measure_tool;
 pub mod picking;
 pub mod recovery;
 pub mod selection;
+pub mod tasks;
 
 pub use annotation_list::{annotation_rows, geometry_kind, AnnotationRow, AnnotationVisibilitySet};
 pub use annotation_tool::{AnnotationPreview, AnnotationTool, AnnotationToolKind};
@@ -53,6 +54,7 @@ pub use recovery::{
     UnsavedFlow, UnsavedOutcome,
 };
 pub use selection::{entity_property_rows, PropertyRow, SelectionProperties, SelectionSet};
+pub use tasks::{AsyncOpenPoll, ImportJob, ImportManager};
 
 use layers::LayerOverrideSet;
 

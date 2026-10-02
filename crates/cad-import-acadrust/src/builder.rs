@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// How many walked source entities pass between entity-batch progress ticks.
+///
+/// A bounded batch keeps a million-entity drawing from emitting a million
+/// events while still advancing a progress bar several times per second. The
+/// value is a real work quantum, not a timer.
+pub(crate) const ENTITY_PROGRESS_BATCH: usize = 512;
+
 impl<'a> ImporterBuilder<'a> {
     pub(crate) fn new(
         request: &'a ImportRequest,
@@ -18,6 +25,8 @@ impl<'a> ImporterBuilder<'a> {
             acad,
             stats,
             identity,
+            cancelled: &NEVER_CANCELLED,
+            progress: &NoopProgress,
             builder: DrawingDatabaseBuilder::new(request.database),
             diagnostics: Vec::new(),
             capabilities: HashMap::new(),
@@ -44,12 +53,64 @@ impl<'a> ImporterBuilder<'a> {
         }
     }
 
+    pub(crate) fn with_progress(
+        mut self,
+        cancelled: &'a dyn Fn() -> bool,
+        progress: &'a dyn ImportProgressSink,
+    ) -> Self {
+        self.cancelled = cancelled;
+        self.progress = progress;
+        self
+    }
+
+    /// Abort with [`CadError::Cancelled`] when the host has cancelled.
+    pub(crate) fn check_cancelled(&self) -> CadResult<()> {
+        if (self.cancelled)() {
+            Err(CadError::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Emit a real progress tick at an entity batch boundary.
+    pub(crate) fn report_entities(&self, entities_total: usize) {
+        self.progress.report(ImportProgress {
+            phase: ImportPhase::Entities,
+            entities_done: self.entity_total,
+            entities_total: Some(entities_total),
+            bytes: None,
+            message: None,
+        });
+    }
+
     pub(crate) fn run(mut self) -> CadResult<ImportedDrawing> {
+        self.check_cancelled()?;
+        self.progress
+            .report(ImportProgress::at(ImportPhase::Tables, 0, None));
         self.read_layers()?;
         self.read_styles()?;
         self.read_layouts()?;
         self.read_blocks()?;
+        self.check_cancelled()?;
+        self.progress.report(ImportProgress::at(
+            ImportPhase::Entities,
+            0,
+            Some(self.entity_total_expected()),
+        ));
         self.read_entities()?;
+        self.check_cancelled()?;
+        self.progress.report(ImportProgress::at(
+            ImportPhase::Resolving,
+            self.entity_total,
+            Some(self.entity_total_expected()),
+        ));
+        self.resolve_block_status();
+        self.check_cancelled()?;
+        self.progress.report(ImportProgress::at(
+            ImportPhase::Finishing,
+            self.entity_total,
+            Some(self.entity_total_expected()),
+        ));
 
         // Capture everything we need before the builder is consumed.
         let units = self.read_units();
@@ -273,6 +334,13 @@ impl<'a> ImporterBuilder<'a> {
     }
 
     pub(crate) fn read_entities(&mut self) -> CadResult<()> {
+        let total = self.entity_total_expected();
+        // Report in bounded batches so a large drawing streams progress without
+        // one tick per entity (and without pretending the count is finer than it
+        // is). Cancellation is polled at each batch boundary.
+        let batch = ENTITY_PROGRESS_BATCH;
+        let mut since_report = 0usize;
+
         // Block definitions first, so model-space INSERTs can resolve the
         // display status of the block they reference (audit B15/B20).
         for block in self.acad.block_records.iter() {
@@ -287,24 +355,48 @@ impl<'a> ImporterBuilder<'a> {
                 if let Some(e) = self.push_entity(entity, SpaceId::Block(id), self.model_layout) {
                     entity_ids.push(e);
                 }
+                since_report += 1;
+                if since_report >= batch {
+                    since_report = 0;
+                    self.check_cancelled()?;
+                    self.report_entities(total);
+                }
             }
+            self.check_cancelled()?;
             self.builder.insert_block(BlockDefinition {
                 id,
                 entities: entity_ids,
             })?;
         }
-        self.resolve_block_status();
 
         // Model space: the primary drawable set.
         let model_space = self.model_space_id();
         for entity in self.acad.model_space_entities() {
             self.push_entity(entity, SpaceId::Model, model_space);
+            since_report += 1;
+            if since_report >= batch {
+                since_report = 0;
+                self.check_cancelled()?;
+                self.report_entities(total);
+            }
         }
         // Paper space.
         for (name, layout) in self.layout_ids.clone() {
             for entity in self.acad.entities_in_block(&name) {
                 self.push_entity(entity, SpaceId::Paper(layout), layout);
+                since_report += 1;
+                if since_report >= batch {
+                    since_report = 0;
+                    self.check_cancelled()?;
+                    self.report_entities(total);
+                }
             }
+        }
+        // Final tick for the tail of the last batch (never a zero-work tick when
+        // the drawing was empty: that boundary was already reported by `run`).
+        if since_report > 0 {
+            self.check_cancelled()?;
+            self.report_entities(total);
         }
         Ok(())
     }
@@ -354,5 +446,28 @@ impl<'a> ImporterBuilder<'a> {
             .get("*Model_Space")
             .copied()
             .unwrap_or(self.model_layout)
+    }
+
+    /// Entities the builder is expected to walk, from the parsed document.
+    ///
+    /// Matches the walk in [`ImporterBuilder::read_entities`] (user blocks, then
+    /// model space, then paper space). This is a *real* count from the parsed
+    /// document, never a fabricated total; it excludes block/end markers only
+    /// indirectly because they are skipped during the walk itself.
+    pub(crate) fn entity_total_expected(&self) -> usize {
+        let mut total = 0usize;
+        for block in self.acad.block_records.iter() {
+            if is_space_block_name(&block.name) {
+                continue;
+            }
+            total += self.acad.entities_in_block(&block.name).count();
+        }
+        total += self.acad.model_space_entities().count();
+        for block in self.acad.block_records.iter() {
+            if is_paper_space_name(&block.name) {
+                total += self.acad.entities_in_block(&block.name).count();
+            }
+        }
+        total
     }
 }

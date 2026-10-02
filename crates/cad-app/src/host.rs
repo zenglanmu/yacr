@@ -16,7 +16,9 @@ use cad_db::{
 };
 use cad_domain::*;
 use cad_history::{patch, UndoRecord};
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportReport, ImportRequest, Importer};
+use cad_import_acadrust::{
+    AcadrustImporter, ImportLimits, ImportReport, ImportRequest, ImportedDrawing, Importer,
+};
 
 use crate::recovery::{RecoverySnapshot, UnsavedOutcome};
 use crate::{
@@ -174,6 +176,11 @@ pub struct HostController {
     pub document_name_hint: String,
     /// Report of the most recent successful open, for diagnostics/CLI.
     pub last_import_report: Option<ImportReport>,
+    /// The single current background import (spec F01). Empty until a host
+    /// starts an asynchronous open; the synchronous path never uses it.
+    pub(crate) import_manager: crate::tasks::ImportManager,
+    /// Label for the running asynchronous open, applied on publish.
+    pub(crate) pending_open_label: Option<String>,
 }
 
 impl HostController {
@@ -206,6 +213,8 @@ impl HostController {
             last_status: "就绪（内置演示几何，非兼容性声明）".to_string(),
             document_name_hint: "yacr-demo".to_string(),
             last_import_report: None,
+            import_manager: crate::tasks::ImportManager::new(document_id),
+            pending_open_label: None,
         })
     }
 
@@ -316,11 +325,34 @@ impl HostController {
         };
         let importer = AcadrustImporter::new();
         let imported = importer.import(&request, &|| false)?;
+        self.pending_open_label = Some(label.to_string());
+        self.publish_imported(
+            imported,
+            &TaskStamp::new(self.document_id, self.session.generation),
+        )
+    }
+
+    /// Publish an imported drawing into the current document slot.
+    ///
+    /// The whole imported database is built before this point, so publication is
+    /// atomic: a cancelled or failed import never reaches here and can never
+    /// partially mutate the session. `stamp` is the identity the caller asserts;
+    /// this method does not re-derive it, so a superseded job that somehow
+    /// called it would still be rejected by the stamp guard at the call site.
+    pub(crate) fn publish_imported(
+        &mut self,
+        imported: ImportedDrawing,
+        _stamp: &TaskStamp,
+    ) -> CadResult<OpenedDrawing> {
         let opened = OpenedDrawing {
             entities: imported.database.entity_count(),
             completeness_label: imported.report.completeness_label(),
             diagnostics: imported.report.diagnostics.clone(),
         };
+        let label = self
+            .pending_open_label
+            .take()
+            .unwrap_or_else(|| self.document_name_hint.clone());
         let document = Document {
             id: self.document_id,
             drawing: Arc::new(imported.database),
@@ -336,7 +368,7 @@ impl HostController {
 
         // Rebuild everything bound to the previous content identity.
         self.reset_for_new_content();
-        self.document_name_hint = label.to_string();
+        self.document_name_hint = label.clone();
         self.last_import_report = Some(imported.report.clone());
         self.last_status = format!("已打开 {label}: {}", opened.completeness_label);
         Ok(opened)

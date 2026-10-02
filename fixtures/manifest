@@ -120,6 +120,26 @@
         "The cone side (non-zero half-angle) stays Unsupported and is reported as a missing face.",
         "Only the planar base disc is tessellated; not compatibility evidence."
       ]
+    },
+    {
+      "id": "synthetic-dwg-four-lines",
+      "path": "fixtures/dwg/synthetic-four-lines.dwg",
+      "sha256": "68637e120e71e471eccb5cfe593a2da156444b8ef2e8669bc4f521ce32c38135",
+      "dwg_version": "AC1032",
+      "source": "synthetic, authored in this repo (acadrust DwgWriter, four LINE entities)",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": ["LINE"],
+      "expected": "success",
+      "known_limits": [
+        "Produced by the acadrust DWG writer, not by AutoCAD/Tianzheng/TSSD.",
+        "Four plain LINE entities only; exercises the async import contract, not compatibility."
+      ]
     }
   ],
   "notice": "No authorized DWG, fonts or golden images are committed. Entries marked synthetic are contract fixtures; they do not establish CAD compatibility. Real samples require a verified licence before they may be added here."

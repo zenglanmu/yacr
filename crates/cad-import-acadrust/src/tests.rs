@@ -40,6 +40,133 @@ fn cancellation_is_honoured() {
     assert!(matches!(result, Err(CadError::Cancelled)));
 }
 
+/// A synthetic, writer-produced DWG with `count` model-space lines.
+///
+/// Uses acadrust's own writer, so the bytes are a real AC10xx DWG rather than a
+/// vendored sample (no authorized fixture is required for these contract tests).
+fn synthetic_dwg(count: usize) -> Vec<u8> {
+    let mut doc = acadrust::CadDocument::new();
+    for i in 0..count {
+        let mut line = acadrust::entities::Line::new();
+        line.start = acadrust::types::Vector3::new(i as f64, 0.0, 0.0);
+        line.end = acadrust::types::Vector3::new(i as f64, 1.0, 0.0);
+        doc.add_entity(EntityType::Line(line)).expect("add line");
+    }
+    acadrust::DwgWriter::write_to_vec(&doc).expect("write synthetic DWG")
+}
+
+#[test]
+fn progress_reports_real_phases_in_order() {
+    use std::sync::Mutex;
+    let importer = AcadrustImporter::new();
+    let ticks = Mutex::new(Vec::new());
+    let drawing = importer
+        .import_with_progress(
+            &request(synthetic_dwg(3)),
+            &|| false,
+            &|p: ImportProgress| ticks.lock().unwrap().push(p),
+        )
+        .expect("synthetic drawing imports");
+    assert_eq!(drawing.database.entity_count(), 3);
+
+    let ticks = ticks.into_inner().unwrap();
+    let phases: Vec<ImportPhase> = ticks.iter().map(|p| p.phase).collect();
+    // Read start/end, table build, entity batches, resolve, finish — in order.
+    assert_eq!(
+        phases.first(),
+        Some(&ImportPhase::Reading),
+        "read start is the first reported boundary"
+    );
+    assert!(phases.contains(&ImportPhase::Parsing));
+    assert!(phases.contains(&ImportPhase::Tables));
+    assert!(phases.contains(&ImportPhase::Entities));
+    assert!(phases.contains(&ImportPhase::Resolving));
+    assert_eq!(
+        phases.last(),
+        Some(&ImportPhase::Finishing),
+        "finish is the last boundary"
+    );
+    let first_index = |phase: ImportPhase| phases.iter().position(|p| *p == phase).unwrap();
+    assert!(first_index(ImportPhase::Reading) < first_index(ImportPhase::Parsing));
+    assert!(first_index(ImportPhase::Parsing) < first_index(ImportPhase::Tables));
+    assert!(first_index(ImportPhase::Tables) < first_index(ImportPhase::Entities));
+    assert!(first_index(ImportPhase::Entities) < first_index(ImportPhase::Resolving));
+    assert!(first_index(ImportPhase::Resolving) < first_index(ImportPhase::Finishing));
+
+    // Entity counts only rise, and end at the real total.
+    let mut last = 0usize;
+    for p in ticks.iter().filter(|p| p.phase == ImportPhase::Entities) {
+        assert!(p.entities_done >= last, "counts never go backwards");
+        last = p.entities_done;
+        if let Some(total) = p.entities_total {
+            assert!(
+                p.entities_done <= total,
+                "done never exceeds the real total"
+            );
+        }
+    }
+    assert_eq!(last, 3);
+    // The read-start byte count is the real request length, not a guess.
+    let reading = ticks.first().unwrap();
+    assert!(reading.bytes.unwrap_or(0) > 0);
+    assert!(
+        reading.entities_total.is_none(),
+        "total unknown before parse"
+    );
+}
+
+#[test]
+fn cancellation_during_import_returns_cancelled_without_a_database() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // Cancel as soon as the first entity batch is reported. The importer polls
+    // cancellation at every batch boundary and must abort with `Cancelled`.
+    let seen = AtomicUsize::new(0);
+    let importer = AcadrustImporter::new();
+    let cancelled = || seen.load(Ordering::SeqCst) > 0;
+    let result = importer.import_with_progress(
+        &request(synthetic_dwg(2000)),
+        &cancelled,
+        &|p: ImportProgress| {
+            if p.phase == ImportPhase::Entities {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }
+        },
+    );
+    assert!(
+        matches!(result, Err(CadError::Cancelled)),
+        "a cancelled import must not return a partial drawing"
+    );
+}
+
+#[test]
+fn malformed_dwg_is_corrupt_not_cancelled() {
+    let importer = AcadrustImporter::new();
+    // A valid signature followed by garbage is a truncated/corrupt stream: the
+    // failsafe reader recovers an empty document, which must be surfaced as
+    // corrupt data rather than published as an empty success.
+    let mut bytes = b"AC1032".to_vec();
+    bytes.extend_from_slice(&[0xAB; 512]);
+    let result = importer.import_with_progress(&request(bytes), &|| false, &NoopProgress);
+    match result {
+        Err(CadError::CorruptData(_)) => {}
+        Err(other) => panic!("expected CorruptData, got {other:?}"),
+        Ok(_) => panic!("malformed DWG must not import successfully"),
+    }
+}
+
+#[test]
+fn truncated_synthetic_dwg_is_corrupt() {
+    let importer = AcadrustImporter::new();
+    let full = synthetic_dwg(2);
+    // Cut the stream before its end so `stream_completed` is false.
+    let truncated = full[..full.len() / 3].to_vec();
+    let result = importer.import_with_progress(&request(truncated), &|| false, &NoopProgress);
+    assert!(
+        matches!(result, Err(CadError::CorruptData(_))),
+        "a truncated DWG must not be published as an empty success"
+    );
+}
+
 #[test]
 fn space_block_names_are_case_insensitive() {
     for name in ["*Model_Space", "*MODEL_SPACE", "*model_space"] {
