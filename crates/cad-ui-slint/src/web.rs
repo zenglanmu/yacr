@@ -17,6 +17,12 @@ pub const BACKEND_STORAGE_KEY: &str = "yacr.cad.backend";
 /// Storage key for the one-slot recovery snapshot of unsaved annotations.
 pub const RECOVERY_STORAGE_KEY: &str = "yacr.cad.recovery";
 
+/// Storage key for the user's UI locale preference (N01 host sync).
+///
+/// Shared with `web/main.js`, which reads the same key before the wasm module
+/// loads so host strings show the persisted language immediately.
+pub const LOCALE_STORAGE_KEY: &str = "yacr.cad.locale";
+
 fn parse_preference(value: &str) -> Option<BackendPreference> {
     match value.to_ascii_lowercase().as_str() {
         "auto" => Some(BackendPreference::Auto),
@@ -68,6 +74,34 @@ pub fn store_preference_and_reload(preference: BackendPreference) -> CadResult<(
         .reload()
         .map_err(|_| CadError::Invariant("reload failed".into()))?;
     Ok(())
+}
+
+/// Read the persisted UI locale preference, if one was stored.
+///
+/// The tag is returned verbatim; callers pass it through `MessageSource` so
+/// unsupported or malformed values fall back to the default locale with a
+/// recorded reason instead of failing. `None` means "no preference stored".
+pub fn stored_locale() -> Option<String> {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(LOCALE_STORAGE_KEY).ok().flatten())
+        .filter(|value| !value.is_empty())
+}
+
+/// Persist the resolved UI locale tag (N01 host sync).
+///
+/// A failed write is an error so a caller never claims the preference was
+/// saved when `localStorage` is unavailable.
+pub fn store_locale(tag: &str) -> CadResult<()> {
+    let window = web_sys::window().ok_or_else(|| CadError::Invariant("no window".into()))?;
+    let storage = window
+        .local_storage()
+        .ok()
+        .flatten()
+        .ok_or_else(|| CadError::Invariant("localStorage unavailable".into()))?;
+    storage
+        .set_item(LOCALE_STORAGE_KEY, tag)
+        .map_err(|_| CadError::Invariant("cannot persist locale preference".into()))
 }
 
 /// Persist the unsaved-annotation recovery snapshot before a destructive reload.

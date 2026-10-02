@@ -84,5 +84,22 @@
   "shell.drawer": "Panels",
   "shell.nav": "Navigation",
   "shell.mode_view": "View",
-  "shell.mode_work": "Work"
+  "shell.mode_work": "Work",
+  "host.language_label": "Language",
+  "host.noscript": "JavaScript is required to run yacr CAD.",
+  "host.loading_wasm": "Loading wasm…",
+  "host.wasm_loaded": "wasm loaded, initialising renderer…",
+  "host.renderer_ready": "Renderer ready: {backend}",
+  "host.poll_not_ready": "Host not ready",
+  "host.cancelled_open": "Open cancelled: current document and unsaved annotations kept",
+  "host.open_failed": "Open failed: {error}",
+  "host.export_failed": "Export failed: {error}",
+  "host.export_confirm_failed": "Export confirmation failed: {error}",
+  "host.exported_bytes": "Exported {bytes} bytes of annotation JSON",
+  "host.import_failed": "Annotation import failed: {error}",
+  "host.imported_count": "Imported {count} annotations",
+  "host.startup_failed": "Startup failed: {error}",
+  "host.locale_failed": "Language switch failed: {error}",
+  "host.open_needs_decision": "This drawing has unsaved annotations. Enter: save / recovery / discard / cancel",
+  "host.recovery_pending": "An unsaved-annotation recovery snapshot was found: call window.yacr.restore_recovery_snapshot() to restore or discard_recovery_snapshot() to discard"
 }

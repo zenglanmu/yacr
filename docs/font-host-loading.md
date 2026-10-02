@@ -51,8 +51,14 @@
   - 目录获取失败向上传播（`ResourceMissing`）。
 - 编译：`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
   `cargo check --target aarch64-linux-android -p app-android --locked`。
-- 未做：浏览器内真实 `fetch` 与 Android 真机资产读取的运行验证（本环境无对应 harness /
-  打包字体）。因此**不宣称** F10 已验收，只宣称代码路径已实现并编译、纯逻辑有测试。
+- **浏览器内编排运行**（web 工作流，2026-10-02，SwiftShader WebGL2）：在真实 headless
+  Chromium 中调用 `window.yacr.load_fonts()` → `load_web_fonts()`；演示图未引用 CAD
+  文本字体，返回 `catalog=0 requested=0 planned=0 registered=0 failed=0`，宿主路径可
+  解析。明细见 `docs/validation-web.md`。
+- 未做：浏览器内**真实** `fetch` 与 Android 真机资产读取的运行验证。上面的浏览器运行
+  走的是“图纸未引用字体”分支，因此未真正下载 jsDelivr 目录/字体字节，也不构成 Android
+  或 CDN 的验证。因此**不宣称** F10 已验收，只宣称代码路径已实现并编译、纯逻辑有测试、
+  宿主编排在浏览器中可运行。
 
 ## 已知限制
 

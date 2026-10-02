@@ -32,6 +32,12 @@ cp apps/app-web/web/index.html "$DIST/index.html"
 cp apps/app-web/web/main.js "$DIST/main.js"
 cp apps/app-web/web/style.css "$DIST/style.css"
 
+# Copy the single-source-of-truth catalogs so the JS host localizes its own
+# chrome from the same JSON the Rust `MessageSource` embeds (N01 host sync).
+mkdir -p "$DIST/i18n"
+cp crates/cad-ui-slint/i18n/zh-CN.json "$DIST/i18n/zh-CN.json"
+cp crates/cad-ui-slint/i18n/en.json "$DIST/i18n/en.json"
+
 # Report the module size so regressions are visible in CI logs.
 WASM_SIZE=$(stat -c %s "$DIST/pkg/yacr_bg.wasm")
 echo "web build: $DIST (wasm ${WASM_SIZE} bytes, profile ${PROFILE})"

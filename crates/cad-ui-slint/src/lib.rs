@@ -28,8 +28,8 @@ pub mod status;
 pub mod web;
 pub use bridge::{
     build_scene, build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
-    fit_camera, install as install_cad_bridge, layout_descriptors, BridgeCamera, CadView,
-    IncomingDocument,
+    fit_camera, install as install_cad_bridge, install_with_preference, layout_descriptors,
+    BridgeCamera, CadView, IncomingDocument,
 };
 pub use i18n::{Locale, LocaleResolution, Message, MessageCatalog, MessageSource};
 pub use responsive::{Breakpoint, ResponsiveMetrics, MIN_POINTER_TARGET, MIN_TOUCH_TARGET};

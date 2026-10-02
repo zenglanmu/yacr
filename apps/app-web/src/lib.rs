@@ -31,8 +31,8 @@ mod browser {
     use cad_platform::FontLoader;
     use cad_resources::DEFAULT_FONT_BASE_URL;
     use cad_ui_slint::{
-        install_cad_bridge, CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration,
-        UiHandle, ViewInput,
+        install_with_preference, CadView, IncomingDocument, UiAdapter, UiCommandSink,
+        UiConfiguration, UiHandle, ViewInput,
     };
     use wasm_bindgen_futures::JsFuture;
 
@@ -196,6 +196,14 @@ mod browser {
 
     fn with_runtime<T>(f: impl FnOnce(&HostRuntime) -> T) -> Option<T> {
         HOST.with(|slot| slot.borrow().as_ref().map(f))
+    }
+
+    /// The UI handle for the running host, if it has started.
+    ///
+    /// Exposed so wasm exports (locale switch) can reach the Slint shell
+    /// without duplicating the thread-local lookup.
+    pub fn current_handle() -> Option<UiHandle> {
+        with_runtime(|rt| rt.handle.clone())
     }
 
     // Last font-loading report, surfaced for diagnostics and headless tests.
@@ -607,7 +615,7 @@ mod browser {
 
         let configuration = UiConfiguration {
             compact: false,
-            locale: "zh-CN".into(),
+            locale: cad_ui_slint::web::stored_locale().unwrap_or_else(|| "zh-CN".to_string()),
             safe_insets: [0.0; 4],
             application_title: "yacr CAD (Web)".into(),
             document: document_id,
@@ -626,7 +634,8 @@ mod browser {
         *shared_handle.borrow_mut() = Some(handle.clone());
         let _ = handle.set_backend_index(backend_index(preference));
 
-        let view = install_cad_bridge(handle.clone(), adapter.window(), incoming.clone())?;
+        let view =
+            install_with_preference(handle.clone(), adapter.window(), incoming.clone(), chosen)?;
         {
             let c = controller.borrow();
             if let Some(vp) = c.application.workspace.viewports.get(&viewport_id) {
@@ -1084,6 +1093,25 @@ pub fn restore_recovery_snapshot() -> Result<usize, JsValue> {
 #[wasm_bindgen]
 pub fn discard_recovery_snapshot() {
     browser::drop_pending_recovery_snapshot()
+}
+
+/// Switch the UI language at runtime and persist the choice (N01 host sync).
+///
+/// Returns the resolved stable tag (`zh-CN` or `en`). The switch only re-applies
+/// catalog-driven chrome; it never rebuilds the document, camera, annotations or
+/// undo history. The choice is stored under the shared
+/// `cad_ui_slint::web::LOCALE_STORAGE_KEY` so `start()` restores it next load.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn web_set_locale(tag: &str) -> Result<String, JsValue> {
+    let handle =
+        browser::current_handle().ok_or_else(|| JsValue::from_str("browser host not started"))?;
+    let resolution = handle
+        .set_locale(tag)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    cad_ui_slint::web::store_locale(resolution.locale.tag())
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(resolution.locale.tag().to_string())
 }
 
 /// Native builds cannot run the browser host; this is a platform constraint,

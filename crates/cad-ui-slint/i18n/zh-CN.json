@@ -84,5 +84,22 @@
   "shell.drawer": "面板",
   "shell.nav": "导航",
   "shell.mode_view": "查看",
-  "shell.mode_work": "工作"
+  "shell.mode_work": "工作",
+  "host.language_label": "语言",
+  "host.noscript": "需要启用 JavaScript 才能运行 yacr CAD。",
+  "host.loading_wasm": "正在加载 wasm…",
+  "host.wasm_loaded": "wasm 已加载，正在初始化渲染器…",
+  "host.renderer_ready": "渲染器就绪：{backend}",
+  "host.poll_not_ready": "宿主尚未就绪",
+  "host.cancelled_open": "已取消打开：当前文档与未保存批注保留",
+  "host.open_failed": "打开失败：{error}",
+  "host.export_failed": "导出失败：{error}",
+  "host.export_confirm_failed": "导出确认失败：{error}",
+  "host.exported_bytes": "已导出 {bytes} 字节批注 JSON",
+  "host.import_failed": "批注导入失败：{error}",
+  "host.imported_count": "已导入 {count} 条批注",
+  "host.startup_failed": "启动失败：{error}",
+  "host.locale_failed": "切换语言失败：{error}",
+  "host.open_needs_decision": "当前图纸有未保存的批注。请输入：save（保存）/ recovery（保留恢复副本）/ discard（丢弃）/ cancel（取消打开）",
+  "host.recovery_pending": "检测到未保存批注恢复快照：调用 window.yacr.restore_recovery_snapshot() 恢复或 discard_recovery_snapshot() 丢弃"
 }
