@@ -245,7 +245,7 @@ try {
   const startupError = await page.evaluate(() => window.yacrStartupError || null);
   if (startupError) throw new Error(`startup failed: ${startupError}`);
   report.hostModules = Object.fromEntries(hostModules);
-  for (const module of ["files.js", "i18n.js", "renderer.js", "runtime.js"]) {
+  for (const module of ["files.js", "i18n.js", "renderer.js", "runtime.js", "a11y.js"]) {
     if (hostModules.get(module) !== 200) throw new Error(`host module not served: ${module}`);
   }
 
