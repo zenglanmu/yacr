@@ -380,6 +380,7 @@ fn builder_accepts_nested_blocks_and_rejects_dangling_block_entity() {
     ok.insert_block(BlockDefinition {
         id: BlockId(0),
         entities: vec![EntityId(1)],
+        dynamic_visibility: None,
     })
     .unwrap();
     ok.insert_entity(line_entity(1, LayerId(0))).unwrap();
@@ -390,6 +391,7 @@ fn builder_accepts_nested_blocks_and_rejects_dangling_block_entity() {
     bad.insert_block(BlockDefinition {
         id: BlockId(0),
         entities: vec![EntityId(99)],
+        dynamic_visibility: None,
     })
     .unwrap();
     assert!(matches!(bad.finish(), Err(CadError::Invariant(_))));

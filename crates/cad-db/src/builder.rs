@@ -6,7 +6,9 @@ use cad_domain::*;
 
 use crate::drawing::DrawingDatabase;
 use crate::entity::{DbEntity, EntityRenderAttributes};
-use crate::tables::{BlockDefinition, Layer, Layout, LineType, PlotSettingsRecord, Style};
+use crate::tables::{
+    BlockDefinition, DynamicBlockVisibility, Layer, Layout, LineType, PlotSettingsRecord, Style,
+};
 
 /// The only sanctioned way to construct a [`DrawingDatabase`].
 ///
@@ -73,6 +75,26 @@ impl DrawingDatabaseBuilder {
 
     pub fn insert_block(&mut self, block: BlockDefinition) -> CadResult<()> {
         self.database.blocks.insert(block.id, block);
+        Ok(())
+    }
+
+    /// Attach (or replace) a block's dynamic-block visibility descriptor.
+    ///
+    /// The descriptor is validated against the block's own member set at
+    /// [`Self::finish`] time, because block entities are filled in after the
+    /// definition is created. Attaching a descriptor to an unknown block is a
+    /// caller bug and is rejected immediately.
+    pub fn set_block_dynamic_visibility(
+        &mut self,
+        id: BlockId,
+        visibility: DynamicBlockVisibility,
+    ) -> CadResult<()> {
+        let Some(block) = self.database.blocks.get_mut(&id) else {
+            return Err(CadError::Invariant(format!(
+                "dynamic visibility for unknown block {id:?}"
+            )));
+        };
+        block.dynamic_visibility = Some(visibility);
         Ok(())
     }
 
@@ -147,6 +169,51 @@ impl DrawingDatabaseBuilder {
                         "block {:?} references missing entity {:?}",
                         block.id, e
                     ));
+                }
+            }
+            // A dynamic visibility descriptor must describe this block exactly:
+            // state names are unique and non-empty, every governed/visible
+            // entity is a member of the block, and a resolved active state is
+            // one of the defined states. A dangling state or entity would
+            // otherwise silently hide or expose the wrong geometry.
+            if let Some(vis) = &block.dynamic_visibility {
+                let mut seen = std::collections::BTreeSet::new();
+                for state in &vis.states {
+                    if state.name.trim().is_empty() {
+                        self.errors.push(format!(
+                            "block {:?} has a dynamic visibility state with no name",
+                            block.id
+                        ));
+                    } else if !seen.insert(state.name.as_str()) {
+                        self.errors.push(format!(
+                            "block {:?} defines visibility state '{}' twice",
+                            block.id, state.name
+                        ));
+                    }
+                    for e in &state.entities {
+                        if !block.entities.contains(e) {
+                            self.errors.push(format!(
+                                "block {:?} visibility state '{}' references non-member entity {:?}",
+                                block.id, state.name, e
+                            ));
+                        }
+                    }
+                }
+                for e in &vis.member_entities {
+                    if !block.entities.contains(e) {
+                        self.errors.push(format!(
+                            "block {:?} visibility parameter governs non-member entity {:?}",
+                            block.id, e
+                        ));
+                    }
+                }
+                if let Some(active) = &vis.active_state {
+                    if !vis.has_state(active) {
+                        self.errors.push(format!(
+                            "block {:?} active visibility state '{}' is not defined",
+                            block.id, active
+                        ));
+                    }
                 }
             }
         }

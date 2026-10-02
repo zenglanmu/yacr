@@ -196,6 +196,7 @@ fn insert_instances_expand_with_transform_and_instance_path() {
     b.insert_block(BlockDefinition {
         id: BlockId(2),
         entities: vec![EntityId(12)],
+        dynamic_visibility: None,
     })
     .unwrap();
     b.insert_entity(line_entity(
@@ -209,6 +210,7 @@ fn insert_instances_expand_with_transform_and_instance_path() {
     b.insert_block(BlockDefinition {
         id: BlockId(1),
         entities: vec![EntityId(11), EntityId(13)],
+        dynamic_visibility: None,
     })
     .unwrap();
     b.insert_entity(line_entity(
@@ -281,6 +283,7 @@ fn self_referencing_block_is_cut_with_partial_report() {
     b.insert_block(BlockDefinition {
         id: BlockId(0),
         entities: vec![EntityId(2)],
+        dynamic_visibility: None,
     })
     .unwrap();
     b.insert_entity(insert_entity(2, SpaceId::Block(BlockId(0)), 0, 1.0))
@@ -346,6 +349,7 @@ fn build_expanded_resolves_byblock_from_the_containing_insert() {
     b.insert_block(BlockDefinition {
         id: BlockId(2),
         entities: vec![EntityId(12)],
+        dynamic_visibility: None,
     })
     .unwrap();
     b.insert_entity(line_entity(
@@ -442,6 +446,7 @@ fn build_expanded_resolves_byblock_color_and_lineweight_from_the_insert() {
     b.insert_block(BlockDefinition {
         id: BlockId(2),
         entities: vec![EntityId(12)],
+        dynamic_visibility: None,
     })
     .unwrap();
     b.insert_entity(line_entity(
@@ -813,6 +818,7 @@ fn byblock_linetype_inherits_the_insert_pattern() {
     b.insert_block(BlockDefinition {
         id: BlockId(2),
         entities: vec![EntityId(12)],
+        dynamic_visibility: None,
     })
     .unwrap();
     b.insert_entity(line_entity(
@@ -965,4 +971,129 @@ fn curve_dashes_by_arc_length_not_chord_count() {
             "run of {len} units longer than the 1-unit dash"
         );
     }
+}
+
+// ---- Dynamic-block visibility (spec §3.2) ----
+
+/// A model INSERT that references a two-state dynamic block.
+///
+/// Block 5 owns three lines (entities 50, 51, 52) and defines:
+///   state "A" -> 50 + 51
+///   state "B" -> 51 + 52
+fn dynamic_block_db(active: &str) -> DrawingDatabase {
+    use cad_db::{DynamicBlockState, DynamicBlockVisibility};
+    let mut b = empty_db();
+    b.insert_block(BlockDefinition {
+        id: BlockId(5),
+        entities: vec![EntityId(50), EntityId(51), EntityId(52)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    for (i, id) in [50u128, 51, 52].into_iter().enumerate() {
+        b.insert_entity(line_entity(
+            id,
+            SpaceId::Block(BlockId(5)),
+            p(i as f64, 0.0),
+            p(i as f64, 1.0),
+        ))
+        .unwrap();
+    }
+    b.set_block_dynamic_visibility(
+        BlockId(5),
+        DynamicBlockVisibility {
+            member_entities: vec![EntityId(50), EntityId(51), EntityId(52)],
+            states: vec![
+                DynamicBlockState {
+                    name: "A".into(),
+                    entities: vec![EntityId(50), EntityId(51)],
+                },
+                DynamicBlockState {
+                    name: "B".into(),
+                    entities: vec![EntityId(51), EntityId(52)],
+                },
+            ],
+            active_state: Some(active.into()),
+        },
+    )
+    .unwrap();
+    b.insert_entity(insert_entity(1, SpaceId::Model, 5, 0.0))
+        .unwrap();
+    b.finish().unwrap()
+}
+
+fn emitted_member_xs(db: &DrawingDatabase) -> Vec<f64> {
+    let registry = ProviderRegistry::with_default_provider();
+    let rep = registry
+        .build_expanded(db, db.entity(EntityId(1)).unwrap(), &context())
+        .unwrap();
+    let mut xs: Vec<f64> = rep
+        .fragments
+        .iter()
+        .map(|f| match &f.primitive {
+            DisplayPrimitive::Lines(pts) => pts[0].x,
+            _ => panic!("expected lines"),
+        })
+        .collect();
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    xs
+}
+
+#[test]
+fn only_the_active_state_members_are_expanded() {
+    // Active state A: only the state-A lines are emitted (member 52 absent).
+    let db = dynamic_block_db("A");
+    assert_eq!(emitted_member_xs(&db), vec![0.0, 1.0]);
+
+    // Active state B: only state-B lines (member 50 absent).
+    let db = dynamic_block_db("B");
+    assert_eq!(emitted_member_xs(&db), vec![1.0, 2.0]);
+}
+
+#[test]
+fn switching_state_rederives_from_the_same_database() {
+    // Switching the authoritative active state must change the derived
+    // geometry without any re-import of the base drawing.
+    let mut db = dynamic_block_db("A");
+    assert_eq!(emitted_member_xs(&db), vec![0.0, 1.0]);
+    db.set_block_visibility_state(BlockId(5), "B", TransactionId(1), "switch")
+        .unwrap();
+    assert_eq!(emitted_member_xs(&db), vec![1.0, 2.0]);
+}
+
+#[test]
+fn an_unresolved_active_state_expands_every_member() {
+    use cad_db::{DynamicBlockState, DynamicBlockVisibility};
+    let mut b = empty_db();
+    b.insert_block(BlockDefinition {
+        id: BlockId(5),
+        entities: vec![EntityId(50), EntityId(51)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    for (i, id) in [50u128, 51].into_iter().enumerate() {
+        b.insert_entity(line_entity(
+            id,
+            SpaceId::Block(BlockId(5)),
+            p(i as f64, 0.0),
+            p(i as f64, 1.0),
+        ))
+        .unwrap();
+    }
+    b.set_block_dynamic_visibility(
+        BlockId(5),
+        DynamicBlockVisibility {
+            member_entities: vec![EntityId(50), EntityId(51)],
+            states: vec![DynamicBlockState {
+                name: "A".into(),
+                entities: vec![EntityId(50)],
+            }],
+            active_state: None,
+        },
+    )
+    .unwrap();
+    b.insert_entity(insert_entity(1, SpaceId::Model, 5, 0.0))
+        .unwrap();
+    let db = b.finish().unwrap();
+    // No resolved state: both members are emitted (never hide on a guess).
+    assert_eq!(emitted_member_xs(&db), vec![0.0, 1.0]);
 }
