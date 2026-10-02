@@ -128,9 +128,11 @@ jobs:
           test -s web-dist/style.css
           test -s web-dist/pkg/yacr.js
           test -s web-dist/pkg/yacr_bg.wasm
-          for module in files i18n renderer runtime; do
+          for module in files i18n renderer runtime startup; do
             test -s "web-dist/host/$module.js"
           done
+          test -s web-dist/ui-font/YacrUI-Regular.otf
+          test -s web-dist/ui-font/OFL.txt
           # wasm-bindgen emits a wasm import name that must match the JS glue's
           # expected module; mismatch is the classic silent break. Check the JS
           # names the same basename the glue file uses.

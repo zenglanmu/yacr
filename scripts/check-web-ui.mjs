@@ -102,7 +102,7 @@ function decodePng(buffer) {
 /// top bar, tool panels and status bar outside this band; the demo geometry
 /// (room outline + circle) is centred by `image-fit: contain` in the canvas
 /// rectangle above the tool panels.
-const CAD_REGION = { x0: 0.32, y0: 0.10, x1: 0.68, y1: 0.42 };
+const CAD_REGION = { x0: 0.32, y0: 0.35, x1: 0.68, y1: 0.70 };
 
 function pixelRect(image, region) {
   return {
@@ -287,7 +287,7 @@ try {
   // region to actually change. UI chrome is outside the crop and the point is
   // inside the canvas touch area (above the tool panels).
   const cx = first.width * 0.5;
-  const cy = first.height * 0.18;
+  const cy = first.height * 0.50;
   await page.mouse.move(cx, cy);
   await page.mouse.wheel(0, 240);
   await page.waitForTimeout(800);

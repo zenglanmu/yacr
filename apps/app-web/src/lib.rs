@@ -30,6 +30,26 @@ pub async fn start_web() -> Result<(), JsValue> {
     start().await.map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// The JS host performs a bounded device probe before choosing this backend.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub async fn start_web_with_backend(backend: &str) -> Result<(), JsValue> {
+    let preference = match backend {
+        "webgpu" => cad_ui_slint::web::BackendPreference::WebGpu,
+        "webgl2" => cad_ui_slint::web::BackendPreference::WebGl2,
+        _ => return Err(JsValue::from_str("unknown renderer backend")),
+    };
+    browser::start_with_preference(preference)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn web_resize(width: f64, height: f64, scale: f64) -> Result<(), JsValue> {
+    browser::resize(width, height, scale).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 /// Open a drawing from bytes read by the JS File API host.
 ///
 /// Refuses to replace a document with unsaved annotations; the JS host must

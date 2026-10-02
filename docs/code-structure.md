@@ -34,10 +34,12 @@
 
 ## Slint 渲染桥
 
-`crates/cad-ui-slint/src/bridge.rs` 保留共享 GPU 状态、`CadView` 与 Slint 生命周期；
-`bridge/scene.rs` 负责从权威数据库派生场景与批注叠加，`bridge/camera.rs` 负责相机
-适应与应用/渲染参数映射，`bridge/tests.rs` 保留原有契约测试。
-公共函数仍由 `bridge` re-export，宿主和已有集成测试不需要迁移调用路径。
+`crates/cad-ui-slint/src/bridge.rs` 仅装配 Slint 回调；`bridge/view.rs` 接收完整视图
+快照并合并准备请求，`bridge/runtime.rs` 管理 GPU 生命周期、成功发布和按需绘制，
+`bridge/presenter.rs` 管理纹理导入，`bridge/camera.rs` 负责相机适应与参数映射。
+CPU 场景构建与版本控制位于 `cad-app/src/render_scene/`，不依赖 Slint 或 wgpu；
+原场景辅助函数仍由 `bridge` re-export。分散相机/空间 setter 收敛为
+`apply_view_snapshot` / `sync_session`。契约与剩余限制见 `bridge-runtime.md`。
 
 ## 回归入口
 

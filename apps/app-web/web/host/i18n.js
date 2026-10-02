@@ -81,6 +81,10 @@ export function createI18n(getWasmModule) {
     if (label) label.textContent = t("host.language_label");
     const select = element("language");
     if (select) select.value = currentLocale;
+    const open = element("open-drawing");
+    if (open) open.textContent = t("host.open_drawing");
+    const retry = element("retry-renderer");
+    if (retry) retry.textContent = t("host.retry_renderer");
   }
 
   function setStateText(text) {

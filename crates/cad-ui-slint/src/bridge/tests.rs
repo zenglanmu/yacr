@@ -1,10 +1,142 @@
 use super::*;
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer, Layout, PaperViewport};
+use cad_domain::TaskStamp;
 use cad_domain::{Completeness, EntityId, LayerId, LayoutId, ObjectId, Point3, Revision};
 use cad_domain::{SemanticGeometry, SpaceId};
 
 fn p(x: f64, y: f64) -> Point3 {
     Point3 { x, y, z: 0.0 }
+}
+
+#[test]
+fn scene_controller_reuses_base_for_overlay_and_rebuilds_for_font_replacement() {
+    let db = db_with_layout();
+    let mut controller = controller::CadSceneController::default();
+    let layers = LayerOverrideSet::new();
+    let visibility = AnnotationVisibilitySet::new();
+    controller
+        .prepare(
+            Some(&db),
+            DocumentId(42),
+            None,
+            &layers,
+            SpaceSelection::Model,
+            None,
+            &visibility,
+        )
+        .unwrap();
+    let first = controller.ready.as_ref().unwrap();
+    assert_eq!(first.base.stamp.document, DocumentId(42));
+    assert_eq!(first.base.stamp.object_revision, db.revision());
+    let base = first.base.clone();
+    let base_revision = first.base_revision;
+    let revision = first.revision;
+    controller
+        .prepare(
+            Some(&db),
+            DocumentId(42),
+            None,
+            &layers,
+            SpaceSelection::Model,
+            None,
+            &visibility,
+        )
+        .unwrap();
+    assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
+    let annotations = AnnotationDatabase::new(cad_domain::DatabaseId(44));
+    controller
+        .prepare(
+            Some(&db),
+            DocumentId(42),
+            None,
+            &layers,
+            SpaceSelection::Model,
+            Some(&annotations),
+            &visibility,
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(&base, &controller.ready.as_ref().unwrap().base));
+    assert_eq!(
+        controller.ready.as_ref().unwrap().base_revision,
+        base_revision
+    );
+    controller.fonts_changed();
+    controller
+        .prepare(
+            Some(&db),
+            DocumentId(42),
+            None,
+            &layers,
+            SpaceSelection::Model,
+            Some(&annotations),
+            &visibility,
+        )
+        .unwrap();
+    assert!(controller.ready.as_ref().unwrap().base_revision > base_revision);
+    controller
+        .prepare(
+            None,
+            DocumentId(42),
+            None,
+            &layers,
+            SpaceSelection::Model,
+            None,
+            &visibility,
+        )
+        .unwrap();
+    let closed = controller.ready.as_ref().unwrap();
+    assert!(closed.base.added.is_empty() && closed.overlay.added.is_empty());
+}
+
+#[test]
+fn failed_preparation_keeps_last_ready_scene_retryable() {
+    let db = db_with_layout();
+    let mut controller = controller::CadSceneController::default();
+    controller
+        .prepare(
+            Some(&db),
+            DocumentId(1),
+            None,
+            &LayerOverrideSet::new(),
+            SpaceSelection::Model,
+            None,
+            &AnnotationVisibilitySet::new(),
+        )
+        .unwrap();
+    let revision = controller.ready.as_ref().unwrap().revision;
+    assert!(controller
+        .prepare(
+            Some(&db),
+            DocumentId(1),
+            None,
+            &LayerOverrideSet::new(),
+            SpaceSelection::Paper(LayoutId(999)),
+            None,
+            &AnnotationVisibilitySet::new()
+        )
+        .is_err());
+    assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
+    assert!(controller.diagnostic.is_some());
+}
+
+#[test]
+fn dirty_frames_and_device_lifecycle_do_not_retry_lost_devices() {
+    let mut dirty = runtime::FrameInvalidation::default();
+    assert!(dirty.dirty());
+    dirty.complete();
+    assert!(!dirty.dirty(), "UI-only redraw reuses CAD frame");
+    dirty.invalidate();
+    assert!(dirty.dirty());
+    let mut runtime = runtime::CadRenderRuntime::default();
+    runtime.fail(BackendPreference::Auto, "lost".into(), true);
+    assert!(matches!(runtime.lifecycle, RenderLifecycle::Lost { .. }));
+    assert!(runtime
+        .render_if_dirty(&ViewSnapshot::default(), [100.0, 100.0], 1.0)
+        .unwrap()
+        .is_none());
+    runtime.detach();
+    assert_eq!(runtime.lifecycle, RenderLifecycle::Detached);
+    assert!(runtime.outcome.is_none());
 }
 
 fn p3(x: f64, y: f64, z: f64) -> Point3 {

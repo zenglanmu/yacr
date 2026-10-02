@@ -14,6 +14,7 @@
 // Panels bind only to real pushed models; an empty model shows its explicit
 // empty-state label and is never replaced with fabricated rows.
 import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit } from "std-widgets.slint";
+import "../fonts/YacrUI-Regular.otf";
 
 // One row of the layer panel, pushed from `cad_app::layers::LayerRow`.
 // `visible` is the effective visibility the scene honours; `overridden` marks a
@@ -67,6 +68,12 @@ export struct LayoutRow {
 }
 
 export component YacrWindow inherits Window {
+    default-font-family: "Yacr UI";
+    default-font-size: 14px;
+    min-width: 0px;
+    min-height: 0px;
+    out property <length> cad-width: canvas-area.width;
+    out property <length> cad-height: canvas-area.height;
     in property <string> application-title;
     in property <string> open-label;
     in property <string> measure-label;
@@ -263,6 +270,8 @@ export component YacrWindow inherits Window {
     background: #20242b;
 
     VerticalBox {
+        padding: 0px;
+        spacing: 0px;
         // --- Top bar: grouped tools + the drawer/side-panel toggles ---------
         // The stretch desktop keeps the stride; the compact configuration and a
         // phone shrink the padding (never the touch target, which only grows).
@@ -337,7 +346,7 @@ export component YacrWindow inherits Window {
                     min-height: root.touch-target;
                     clicked => { root.side-panel-open = !root.side-panel-open; }
                 }
-                Button {
+                if !root.phone-shell : Button {
                     text: root.diagnostics-label;
                     min-height: root.touch-target;
                     clicked => {
@@ -442,6 +451,7 @@ export component YacrWindow inherits Window {
                     text: root.view-panel-label;
                     color: #c8d0dc;
                     vertical-alignment: center;
+                    visible: !root.compact-shell;
                 }
                 Button {
                     text: root.view-2d-label;
@@ -455,7 +465,7 @@ export component YacrWindow inherits Window {
                     enabled: !root.view-3d;
                     clicked => { if !root.view-3d { root.toggle-view-mode-requested(); } }
                 }
-                Button {
+                if !root.phone-shell : Button {
                     text: root.view-projection-label;
                     min-height: root.touch-target;
                     clicked => { root.toggle-projection-requested(); }
@@ -464,6 +474,7 @@ export component YacrWindow inherits Window {
                     // The current projection, pushed from the real viewport, so
                     // the toggle has visible, honest state.
                     text: root.view-perspective ? root.view-perspective-label : root.view-ortho-label;
+                    visible: !root.compact-shell;
                     color: #9aa7b8;
                     vertical-alignment: center;
                 }
@@ -490,6 +501,8 @@ export component YacrWindow inherits Window {
         // it below.
         Rectangle {
             background: #10131a;
+            vertical-stretch: 1;
+            min-height: 0px;
             HorizontalBox {
                 // Collapsible side panel: grouped tools + panels, wide screens
                 // only. It starts collapsed (audit U01 "collapsible side panel").
@@ -569,10 +582,15 @@ export component YacrWindow inherits Window {
                 // Canvas: the CAD frame plus its input surface. The nested
                 // rectangle takes the remaining width so the TouchArea covers
                 // only the canvas, never the side panel buttons.
-                Rectangle {
+                canvas-area := Rectangle {
+                    clip: true;
                     horizontal-stretch: 1;
+                    min-width: 0px;
+                    min-height: 0px;
                     background: transparent;
                     Image {
+                        width: parent.width;
+                        height: parent.height;
                         source: root.cad-frame;
                         image-fit: contain;
                     }
@@ -737,7 +755,7 @@ export component YacrWindow inherits Window {
         // The step text comes from the tool state machine; confirm/cancel are
         // gated by real state. It stays outside the drawer/collapsible panel so
         // the workflow is always visible.
-        Rectangle {
+        if root.measurement-active : Rectangle {
             height: root.control-height;
             background: #262b33;
             HorizontalBox {
@@ -786,7 +804,7 @@ export component YacrWindow inherits Window {
         }
 
         // --- Annotation creation tool strip (F07/U04) ----------------------
-        Rectangle {
+        if root.annotation-tool-active : Rectangle {
             height: root.control-height;
             background: #262b33;
             HorizontalBox {
@@ -840,7 +858,7 @@ export component YacrWindow inherits Window {
         // Bound to real application state; empty models show explicit
         // empty-state labels. The panel row height grows with the responsive
         // control height so it never squashes a phone.
-        Rectangle {
+        if root.side-panel-open && !root.phone-shell : Rectangle {
             height: 132px;
             background: #222831;
             HorizontalBox {
@@ -991,7 +1009,7 @@ export component YacrWindow inherits Window {
         }
 
         // --- Annotation management list (F09/U03) --------------------------
-        Rectangle {
+        if root.side-panel-open && !root.phone-shell : Rectangle {
             height: 120px;
             background: #222831;
             VerticalBox {

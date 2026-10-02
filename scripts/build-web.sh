@@ -40,6 +40,8 @@ wasm-bindgen --target web --no-typescript --out-name yacr --out-dir "$DIST/pkg" 
 cp apps/app-web/web/index.html "$DIST/index.html"
 cp apps/app-web/web/main.js "$DIST/main.js"
 cp -R apps/app-web/web/host "$DIST/host"
+mkdir -p "$DIST/ui-font"
+cp crates/cad-ui-slint/fonts/YacrUI-Regular.otf crates/cad-ui-slint/fonts/OFL.txt "$DIST/ui-font/"
 cp apps/app-web/web/style.css "$DIST/style.css"
 
 # Copy the single-source-of-truth catalogs so the JS host localizes its own

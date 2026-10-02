@@ -26,6 +26,7 @@ pub mod layers;
 pub mod measure_tool;
 pub mod picking;
 pub mod recovery;
+pub mod render_scene;
 pub mod selection;
 pub mod tasks;
 

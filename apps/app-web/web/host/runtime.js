@@ -12,6 +12,48 @@ export function forceSingleSampleCanvas() {
   };
 }
 
+// Some Chromium mobile/DPR emulation paths expose compositor pixels rather
+// than device pixels in devicePixelContentBoxSize. winit consumes that box
+// directly, so normalize only inconsistent canvas entries; native entries pass
+// through unchanged. Other elements and observers retain their native values.
+export function normalizeCanvasResizeObserver() {
+  const NativeObserver = window.ResizeObserver;
+  window.ResizeObserver = class extends NativeObserver {
+    constructor(callback) {
+      super((entries, observer) => {
+        callback(
+          entries.map((entry) => {
+            if (entry.target.id !== "canvas") return entry;
+            const box = entry.devicePixelContentBoxSize?.[0];
+            const css = entry.contentBoxSize?.[0];
+            const scale = window.devicePixelRatio || 1;
+            if (
+              !box ||
+              !css ||
+              scale === 1 ||
+              Math.abs(box.inlineSize - css.inlineSize * scale) <= 1
+            )
+              return entry;
+            return new Proxy(entry, {
+              get(target, key) {
+                if (key === "devicePixelContentBoxSize")
+                  return [
+                    {
+                      inlineSize: Math.round(css.inlineSize * scale),
+                      blockSize: Math.round(css.blockSize * scale),
+                    },
+                  ];
+                return Reflect.get(target, key, target);
+              },
+            });
+          }),
+          observer,
+        );
+      });
+    }
+  };
+}
+
 function isHandoffMessage(message) {
   return (
     typeof message === "string" &&

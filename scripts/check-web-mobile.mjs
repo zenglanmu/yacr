@@ -1,0 +1,134 @@
+// Real headless Chromium responsive/DWG/startup regression. Playwright is external.
+import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+const module = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
+const chromium = module.chromium || module.default.chromium;
+const url = process.argv[2] || "http://127.0.0.1:8098/";
+const output = process.argv[3] || "/tmp/opencode/yacr-mobile-validation";
+mkdirSync(output, { recursive: true });
+const browser = await chromium.launch({
+  headless: true,
+  args: [
+    "--no-sandbox",
+    "--enable-unsafe-swiftshader",
+    "--use-gl=angle",
+    "--use-angle=swiftshader",
+  ],
+});
+const results = [];
+try {
+  for (const [name, width, height, dpr] of [
+    ["phone", 390, 844, 3],
+    ["small-phone", 320, 740, 2],
+    ["desktop", 1280, 800, 1],
+  ]) {
+    const context = await browser.newContext({
+      viewport: { width, height },
+      deviceScaleFactor: dpr,
+      isMobile: dpr !== 1,
+      hasTouch: dpr !== 1,
+    });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    page.on("console", (m) => {
+      if (m.type() === "error") errors.push(m.text());
+    });
+    await page.goto(url);
+    await page
+      .locator("#open-drawing:not([disabled])")
+      .waitFor({ timeout: 60000 });
+    await page.waitForTimeout(1000);
+    const geometry = await page.evaluate(() => {
+      const canvas = document.getElementById("canvas");
+      const rect = canvas.getBoundingClientRect();
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        cssWidth: rect.width,
+        cssHeight: rect.height,
+        report: window.yacr.renderer_state_report(),
+        error: window.yacrStartupError,
+      };
+    });
+    assert.equal(geometry.error, undefined);
+    assert.equal(geometry.width, Math.round(geometry.cssWidth * dpr));
+    assert.equal(geometry.height, Math.round(geometry.cssHeight * dpr));
+    assert.match(geometry.report, /error=None/);
+    const surface = geometry.report.match(
+      /surface=Some\(\(\[([\d.]+), ([\d.]+)\]/,
+    );
+    assert.ok(
+      surface &&
+        Number(surface[1]) > width * 0.8 &&
+        Number(surface[2]) > height * 0.4,
+    );
+    await page.screenshot({ path: `${output}/${name}-zh.png` });
+    const framesBeforeUi = await page.evaluate(
+      () => window.yacr.renderer_state_report().match(/cad_frames=(\d+)/)?.[1],
+    );
+    await page.locator("#language").selectOption("en");
+    await page.waitForTimeout(300);
+    const framesAfterUi = await page.evaluate(
+      () => window.yacr.renderer_state_report().match(/cad_frames=(\d+)/)?.[1],
+    );
+    assert.ok(framesBeforeUi, "runtime exposes render count");
+    assert.equal(
+      framesAfterUi,
+      framesBeforeUi,
+      "language/UI-only redraw must reuse CAD pixels",
+    );
+    assert.equal(await page.locator("#open-drawing").textContent(), "Open DWG");
+    await page.screenshot({ path: `${output}/${name}-en.png` });
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#open-drawing").click();
+    await (await chooser).setFiles("fixtures/dwg/synthetic-four-lines.dwg");
+    await page.waitForFunction(() =>
+      window.yacr.renderer_state_report().includes("entities=4"),
+    );
+    await page.waitForTimeout(400);
+    assert.match(
+      await page.evaluate(() => window.yacr.renderer_state_report()),
+      /error=None/,
+    );
+    await page.screenshot({ path: `${output}/${name}-dwg.png` });
+    await page.setViewportSize({ width: height, height: width });
+    await page.waitForTimeout(500);
+    const resized = await page.evaluate(() => ({
+      width: canvas.width,
+      css: canvas.getBoundingClientRect().width,
+      report: window.yacr.renderer_state_report(),
+    }));
+    assert.equal(resized.width, Math.round(resized.css * dpr));
+    assert.match(resized.report, /entities=4/);
+    await page.screenshot({ path: `${output}/${name}-rotated.png` });
+    assert.deepEqual(errors, []);
+    results.push({ name, geometry, resized, errors });
+    await context.close();
+  }
+  const failure = await browser.newPage();
+  await failure.route("**/pkg/yacr.js", (route) => route.abort());
+  await failure.goto(url);
+  await failure
+    .locator("#retry-renderer")
+    .waitFor({ state: "visible", timeout: 60000 });
+  assert.match(
+    await failure.locator("#host-state").textContent(),
+    /失败|failed/i,
+  );
+  await failure.screenshot({ path: `${output}/startup-failed.png` });
+  await failure.close();
+  writeFileSync(
+    `${output}/report.json`,
+    JSON.stringify({ passed: true, results }, null, 2),
+  );
+  console.log(
+    JSON.stringify({
+      passed: true,
+      scenarios: results.map((r) => r.name),
+      output,
+    }),
+  );
+} finally {
+  await browser.close();
+}

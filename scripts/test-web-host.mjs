@@ -7,6 +7,11 @@ import { createFileHost } from "../apps/app-web/web/host/files.js";
 import { createI18n } from "../apps/app-web/web/host/i18n.js";
 import { startStatePolling } from "../apps/app-web/web/host/renderer.js";
 import { isHandoffError } from "../apps/app-web/web/host/runtime.js";
+import {
+  chooseBackend,
+  withDeadline,
+  wireRecoveryBackend,
+} from "../apps/app-web/web/host/startup.js";
 
 function replaceGlobal(t, key, value) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -225,4 +230,72 @@ test("only the documented winit handoff is a non-failure", () => {
   assert.equal(isHandoffError("Using exceptions for control flow"), true);
   assert.equal(isHandoffError(new Error("wasm initialization failed")), false);
   assert.equal(isHandoffError(null), false);
+});
+
+test("a stalled WebGPU device probe falls back to WebGL2 within a bounded time", async (t) => {
+  replaceGlobal(t, "location", {
+    href: "https://example.test/?backend=webgpu",
+  });
+  replaceGlobal(t, "window", {});
+  replaceGlobal(t, "navigator", {
+    gpu: { requestAdapter: () => new Promise(() => {}) },
+  });
+  assert.equal(await chooseBackend({ probeTimeout: 5 }), "webgl2");
+  assert.match(window.yacrBackendProbe.reason, /timeout/);
+  assert.equal(window.yacrBackendProbe.requested, "webgpu");
+});
+
+test("a WebGPU adapter without a usable device is not reported as ready", async (t) => {
+  replaceGlobal(t, "location", { href: "https://example.test/?backend=auto" });
+  replaceGlobal(t, "window", {});
+  replaceGlobal(t, "navigator", {
+    gpu: {
+      requestAdapter: async () => ({
+        requestDevice: async () => {
+          throw new Error("device rejected");
+        },
+      }),
+    },
+  });
+  assert.equal(await chooseBackend(), "webgl2");
+  assert.match(window.yacrBackendProbe.reason, /device rejected/);
+});
+
+test("startup deadlines reject instead of displaying an endless spinner", async () => {
+  await assert.rejects(
+    withDeadline(new Promise(() => {}), 5, "renderer"),
+    /renderer: timeout/,
+  );
+});
+
+test("the recovery-backend button cannot reload unsaved annotations", (t) => {
+  const document = documentStub();
+  const retry = {
+    listeners: {},
+    hidden: true,
+    addEventListener(name, callback) {
+      this.listeners[name] = callback;
+    },
+  };
+  document.nodes.set("retry-renderer", retry);
+  const destinations = [];
+  const messages = [];
+  let dirty = true;
+  replaceGlobal(t, "document", document);
+  replaceGlobal(t, "location", {
+    href: "https://example.test/?backend=webgpu",
+    assign: (url) => destinations.push(url),
+  });
+  const show = wireRecoveryBackend(
+    () => ({ open_requires_decision: () => dirty }),
+    (key) => messages.push(key),
+  );
+  show();
+  assert.equal(retry.hidden, false);
+  retry.listeners.click();
+  assert.equal(destinations.length, 0);
+  assert.deepEqual(messages, ["host.retry_unsaved"]);
+  dirty = false;
+  retry.listeners.click();
+  assert.equal(new URL(destinations[0]).searchParams.get("backend"), "webgl2");
 });

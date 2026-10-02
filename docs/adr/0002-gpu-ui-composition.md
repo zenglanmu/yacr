@@ -33,9 +33,14 @@ Device/Queue；`cad-render-wgpu` 仅创建派生资源（管线/buffer/离屏纹
 
 ## 影响
 
+2026-10-02 复核：继续采用此组合，不迁移到独立 DOM UI / CAD Surface。
+共享设备与回调合成不是场景控制耦合的理由；CPU scene controller、GPU runtime 和
+Slint presenter 现已分离，职责、契约与剩余限制见 `../bridge-runtime.md`。
+
 - 设备丢失：`Renderer::rebuild_device` 返回 GpuFailure，要求宿主提供新 Device；
   数据库 revision 不变（§18.1）。
-- 尺寸变化：目标纹理重建后重新生成 `Image`；登记尺寸以避免每帧重建。
+- 纹理变化：以设备 epoch + texture revision + 尺寸决定重新导入 `Image`，
+  不是只比较尺寸；内容更新不每帧创建 Image。
 - 纹理格式/预乘/sRGB 已固定为上述组合，WebGL2 基础档另需 CPU 侧路径（未实现）。
 - wgpu 30 描述符字段（`bind_group_layouts: &[Option<..>]`、`immediate_size`、
   `multiview_mask`、`buffers: &[Option<VertexBufferLayout>]`）与 wgpu 24 不同，

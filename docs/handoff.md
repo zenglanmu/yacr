@@ -16,6 +16,15 @@
 
 ## 本轮状态（compact，2026-10-02）
 
+**渲染桥职责重构**：继续采用 Slint/shared Device/Queue。CPU controller 移至
+`cad-app/render_scene`，GPU runtime 与 Slint presenter 分离；字体 revision、
+上传成功后发布、底图/批注组更新、画面脏标记、纹理身份和设备生命周期已接线。
+`IncomingDocument=None` 明确表示关闭文档。详见 `docs/bridge-runtime.md`。
+最终核心串行测试 875 passed / 0 failed / 1 ignored；新增 GPU 契约实际运行。
+桌面及 320/390px 高 DPI 无头 WebGL2 回归通过，UI-only 语言切换不增加 CAD 绘制数。
+原生 Slint 测试仍受环境阻塞；wasm 测试仅编译。后台 CPU 准备、分批上传预算和真实
+设备丢失恢复尚未验收。并行核心 GPU 测试一次驱动 SIGSEGV，串行重跑通过，不能隐去。
+
 **宿主结构拆分**：Web Rust 宿主拆为 documents/annotations/fonts/input/persistence，
 JS 宿主拆为 i18n/files/renderer/runtime；Slint 桥分离 scene/camera/tests，既有接口和
 13 项桥测试保留。核心 870 passed、新增 JS 契约 5 passed、Web release 与两次本地

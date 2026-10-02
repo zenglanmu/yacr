@@ -37,6 +37,7 @@ impl Renderer {
             target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
             batches: Vec::new(),
             device_generation: 0,
+            texture_revision: 0,
             uploaded_bytes: 0,
             last_upload_ms: None,
             draw_calls: 0,
@@ -160,6 +161,14 @@ impl Renderer {
             "cad-mesh-pipeline-mirrored-transparent",
         );
 
+        // A successful attachment establishes a new device generation. No
+        // batch/attachment from the previous generation may survive, even if
+        // the new target later has exactly the same dimensions.
+        self.batches.clear();
+        self.target = None;
+        self.target_view = None;
+        self.depth_view = None;
+        self.target_size = (0, 0);
         self.device = Some(device);
         self.queue = Some(queue);
         self.layout = Some(layout);
@@ -327,6 +336,7 @@ impl Renderer {
         self.target_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
         self.depth_view = Some(depth.create_view(&wgpu::TextureViewDescriptor::default()));
         self.target = Some(texture);
+        self.texture_revision += 1;
         self.target_size = (size.width, size.height);
         Ok(())
     }
@@ -357,6 +367,14 @@ impl Renderer {
     // Mesh batches get an index buffer and a repaired normal buffer; line
     // batches keep the position-only layout.
     pub fn upload(&mut self, delta: &SceneDelta) -> CadResult<()> {
+        let prepared = self.prepare_upload(delta)?;
+        self.commit_upload(prepared, self.batches.len())
+    }
+
+    /// Build resources without changing the active scene. Synchronous input and
+    /// device-limit validation precedes allocation; async driver failures remain
+    /// covered by the render error scope/device lifecycle, not this return value.
+    pub fn prepare_upload(&self, delta: &SceneDelta) -> CadResult<PreparedUpload> {
         let device = self
             .device
             .as_ref()
@@ -366,6 +384,25 @@ impl Renderer {
             .as_ref()
             .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
         let started = Instant::now();
+        let mut staged = Vec::with_capacity(delta.added.len());
+        let mut uploaded_bytes = 0;
+        for batch in &delta.added {
+            if batch.vertices.len() > u32::MAX as usize
+                || batch.indices.len() > u32::MAX as usize / 3
+                || batch.vertices.len().saturating_mul(12) as u64 > device.limits().max_buffer_size
+                || batch.indices.len().saturating_mul(24) as u64 > device.limits().max_buffer_size
+                || batch
+                    .indices
+                    .iter()
+                    .flatten()
+                    .any(|i| *i as usize >= batch.vertices.len())
+                || batch.vertices.iter().flatten().any(|v| !v.is_finite())
+            {
+                return Err(CadError::InvalidInput(
+                    "invalid or over-limit GPU batch".into(),
+                ));
+            }
+        }
         for batch in &delta.added {
             let (vertices, indices, edge_indices, normals, colors) = match batch.topology {
                 RenderTopology::Mesh => {
@@ -438,8 +475,8 @@ impl Renderer {
                 + colors.len()
                 + indices.len() * 4
                 + edge_indices.len() * 4;
-            self.uploaded_bytes += bytes as u64;
-            self.batches.push(GpuBatch {
+            uploaded_bytes += bytes as u64;
+            staged.push(GpuBatch {
                 vertices: vertex_buffer,
                 vertex_count: batch.vertices.len() as u32,
                 normals: normal_buffer,
@@ -465,8 +502,36 @@ impl Renderer {
                 upload_bytes: bytes,
             });
         }
-        self.last_upload_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+        Ok(PreparedUpload {
+            batches: staged,
+            device_generation: self.device_generation,
+            device: device.clone(),
+            bytes: uploaded_bytes,
+            elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        })
+    }
+
+    /// Atomically replace the suffix after `keep_prefix` (0 replaces the scene).
+    /// This supports independently updating an annotation overlay while keeping
+    /// base drawing buffers. A stale-device upload cannot be published.
+    pub fn commit_upload(&mut self, prepared: PreparedUpload, keep_prefix: usize) -> CadResult<()> {
+        if self.device.as_ref() != Some(&prepared.device)
+            || prepared.device_generation != self.device_generation
+            || self.device_lost
+            || keep_prefix > self.batches.len()
+        {
+            return Err(CadError::StaleResult);
+        }
+        self.batches.truncate(keep_prefix);
+        self.batches.extend(prepared.batches);
+        self.uploaded_bytes += prepared.bytes;
+        self.last_upload_ms = Some(prepared.elapsed_ms);
         Ok(())
+    }
+
+    /// Identity of the actual offscreen attachment, not just its dimensions.
+    pub fn texture_revision(&self) -> u64 {
+        self.texture_revision
     }
 
     /// Wall-clock milliseconds of the most recent [`Renderer::upload`] call.

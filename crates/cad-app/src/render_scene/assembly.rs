@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use cad_app::layers::LayerOverrideSet;
-use cad_app::AnnotationVisibilitySet;
+use crate::layers::LayerOverrideSet;
+use crate::AnnotationVisibilitySet;
 use cad_db::{AnnotationDatabase, DrawingDatabase};
 use cad_domain::{CadResult, DocumentId, TaskStamp, TolerancePolicy};
 use cad_representation::layout::{build_paper_space, enumerate_layouts};
@@ -49,7 +49,7 @@ pub fn build_scene_with_space(
 ) -> CadResult<SceneDelta> {
     let registry = ProviderRegistry::with_default_provider();
     let mut context =
-        RepresentationContext::new(DocumentId(0), TolerancePolicy::default(), stamp.clone());
+        RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone());
     if let Some(fonts) = fonts {
         context = context.with_fonts(fonts);
     }
@@ -61,7 +61,7 @@ pub fn build_scene_with_space(
     };
     match space {
         SpaceSelection::Model => {
-            for entity in cad_app::layers::visible_model_entities(database, overrides) {
+            for entity in crate::layers::visible_model_entities(database, overrides) {
                 let representation = registry.build_expanded(database, entity, &context)?;
                 let delta = cache.build(&representation, stamp.clone())?;
                 combined.added.extend(delta.added);

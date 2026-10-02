@@ -54,6 +54,67 @@ fn scene(batches: Vec<RenderBatch>) -> SceneDelta {
     }
 }
 
+#[test]
+fn staged_upload_failure_preserves_active_scene_and_overlay_prefix() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let base = lines_batch(rectangle_lines());
+    renderer.upload(&scene(vec![base.clone()])).unwrap();
+    let mut invalid = base.clone();
+    invalid.vertices[0][0] = f32::NAN;
+    assert!(renderer
+        .prepare_upload(&scene(vec![base.clone(), invalid]))
+        .is_err());
+    assert_eq!(renderer.batch_count(), 1, "failed staging must retain base");
+    let overlay = renderer.prepare_upload(&scene(vec![base])).unwrap();
+    assert_eq!(renderer.batch_count(), 1, "prepare is not publication");
+    renderer.commit_upload(overlay, 1).unwrap();
+    assert_eq!(renderer.batch_count(), 2);
+    let empty = renderer.prepare_upload(&scene(vec![])).unwrap();
+    renderer.commit_upload(empty, 1).unwrap();
+    assert_eq!(
+        renderer.batch_count(),
+        1,
+        "clearing overlay retains base buffers"
+    );
+    let stale = renderer.prepare_upload(&scene(vec![])).unwrap();
+    renderer.note_device_lost("test loss");
+    assert!(renderer.commit_upload(stale, 0).is_err());
+}
+
+#[test]
+fn texture_revision_changes_only_when_attachment_is_replaced() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let device = gpu.device.clone();
+    let queue = gpu.queue.clone();
+    let mut renderer = init(gpu);
+    renderer
+        .render(camera_2d(), &RenderTarget::new(64, 64))
+        .unwrap();
+    let first = renderer.texture_revision();
+    renderer
+        .render(camera_2d(), &RenderTarget::new(64, 64))
+        .unwrap();
+    assert_eq!(renderer.texture_revision(), first);
+    renderer.initialize_with_device(device, queue).unwrap();
+    renderer
+        .render(camera_2d(), &RenderTarget::new(64, 64))
+        .unwrap();
+    assert!(
+        renderer.texture_revision() > first,
+        "same-size reattachment changes texture identity"
+    );
+    let reattached = renderer.texture_revision();
+    renderer
+        .render(camera_2d(), &RenderTarget::new(128, 64))
+        .unwrap();
+    assert!(renderer.texture_revision() > reattached);
+}
+
 fn camera_2d() -> Camera2d {
     camera_2d_at(0.0, 0.0)
 }

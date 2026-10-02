@@ -283,6 +283,7 @@ pub struct Renderer {
     target_format: wgpu::TextureFormat,
     batches: Vec<GpuBatch>,
     device_generation: u64,
+    texture_revision: u64,
     uploaded_bytes: u64,
     /// Wall-clock ms of the last `upload`, or `None` before the first upload.
     /// Real measured upload time for `LoadTimings::upload_ms`.
@@ -299,6 +300,16 @@ pub struct Renderer {
     /// large frame, so a headless caller raises it explicitly instead of the
     /// renderer misreporting a slow CPU frame as a device loss.
     poll_timeout: std::time::Duration,
+}
+
+/// Staged GPU resources, owned by the renderer that prepared them. Publishing
+/// is separate so failed preparation leaves the active batches untouched.
+pub struct PreparedUpload {
+    batches: Vec<GpuBatch>,
+    device_generation: u64,
+    device: wgpu::Device,
+    bytes: u64,
+    elapsed_ms: f64,
 }
 
 impl Default for Renderer {

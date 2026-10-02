@@ -63,6 +63,15 @@ fn backend_index(preference: cad_ui_slint::web::BackendPreference) -> i32 {
 
 /// Logical viewport size from `window.innerWidth/innerHeight` (CSS pixels).
 fn web_viewport_size() -> [f64; 2] {
+    if let Some(host) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("canvas-host"))
+    {
+        return [
+            host.client_width().max(1) as f64,
+            host.client_height().max(1) as f64,
+        ];
+    }
     let window = web_sys::window();
     let width = window
         .as_ref()
@@ -132,6 +141,12 @@ fn sync_view_camera(controller: &HostController, view: &CadView, viewport: &View
 /// Start the browser host. Must be called after the DOM is ready.
 pub async fn start() -> CadResult<()> {
     let preference = cad_ui_slint::web::stored_preference();
+    start_with_preference(preference).await
+}
+
+pub async fn start_with_preference(
+    preference: cad_ui_slint::web::BackendPreference,
+) -> CadResult<()> {
     let chosen = match cad_ui_slint::web::select_backend(preference).await {
         Ok(chosen) => chosen,
         Err(e) => {
@@ -145,9 +160,9 @@ pub async fn start() -> CadResult<()> {
         }
     };
 
-    let controller = Rc::new(RefCell::new(HostController::with_demo_document([
-        1280.0, 720.0,
-    ])?));
+    let controller = Rc::new(RefCell::new(HostController::with_demo_document(
+        web_viewport_size(),
+    )?));
     let (drawing, document_id, viewport_id) = {
         let mut c = controller.borrow_mut();
         let _ = c.fit();
@@ -173,7 +188,11 @@ pub async fn start() -> CadResult<()> {
         view: view_slot.clone(),
         viewport: viewport_id,
     };
-    let adapter = UiAdapter::new(configuration, sink, true)?;
+    let mut adapter = UiAdapter::new(configuration, sink, true)?;
+    let scale = web_sys::window()
+        .map(|w| w.device_pixel_ratio())
+        .unwrap_or(1.0);
+    adapter.fit_window_to_logical(web_viewport_size(), scale as f32);
     let handle = adapter.handle();
     *shared_handle.borrow_mut() = Some(handle.clone());
     let _ = handle.set_backend_index(backend_index(preference));
@@ -221,16 +240,51 @@ pub async fn start() -> CadResult<()> {
     adapter.run()
 }
 
+/// Browser resize is presentation-only and never dirties or reparses the drawing.
+pub fn resize(width: f64, height: f64, scale: f64) -> CadResult<()> {
+    if !width.is_finite()
+        || !height.is_finite()
+        || !scale.is_finite()
+        || width <= 0.0
+        || height <= 0.0
+        || scale <= 0.0
+    {
+        return Err(cad_domain::CadError::InvalidInput(
+            "invalid browser viewport size".into(),
+        ));
+    }
+    with_runtime(|rt| {
+        rt.handle.resize_browser_surface([width, height], scale)?;
+        let mut controller = rt.controller.borrow_mut();
+        let (size, _) = rt
+            .handle
+            .cad_surface_size()
+            .unwrap_or(([width, height], 1.0));
+        if let Some(vp) = controller
+            .application
+            .workspace
+            .viewports
+            .get_mut(&rt.viewport)
+        {
+            vp.logical_size = size;
+        }
+        sync_view_camera(&controller, &rt.view, &rt.viewport);
+        rt.view.request_redraw();
+        Ok(())
+    })
+    .unwrap_or(Ok(()))
+}
+
 /// Report renderer state for diagnostics and headless tests.
 pub fn renderer_report() -> String {
     let report = with_runtime(|rt| {
         let controller = rt.controller.borrow();
         format!(
-            "chosen={:?} adapter={:?} caps={:?} error={:?} entities={} wpp={:.6} status={}",
+            "chosen={:?} adapter={:?} caps={:?} error={:?} entities={} wpp={:.6} status={} surface={:?} cad_frames={} lifecycle={:?}",
             rt.view.preference(),
             rt.view.active_backend(),
             rt.view.capabilities(),
-            rt.view.last_error(),
+            rt.view.last_error().or_else(|| rt.view.view_diagnostic()),
             rt.incoming
                 .borrow()
                 .as_ref()
@@ -238,6 +292,9 @@ pub fn renderer_report() -> String {
                 .unwrap_or(0),
             rt.view.camera().world_per_px,
             controller.status(),
+            rt.handle.cad_surface_size(),
+            rt.view.frames_rendered(),
+            rt.view.lifecycle(),
         )
     });
     report.unwrap_or_else(|| "host not started".to_string())

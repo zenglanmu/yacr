@@ -287,4 +287,25 @@ impl UiHandle {
     pub fn physical_size(&self) -> Option<slint::PhysicalSize> {
         Some(self.ui.upgrade()?.window().size())
     }
+
+    /// Logical CAD region (excluding chrome) and the window's actual scale.
+    pub fn cad_surface_size(&self) -> Option<([f64; 2], f64)> {
+        let ui = self.ui.upgrade()?;
+        Some((
+            [ui.get_cad_width() as f64, ui.get_cad_height() as f64],
+            ui.window().scale_factor() as f64,
+        ))
+    }
+
+    /// Fit the shared shell to the browser CSS viewport, not its preferred size.
+    pub fn resize_browser_surface(&self, size: [f64; 2], scale: f64) -> CadResult<()> {
+        self.with(|ui| {
+            crate::chrome::apply_responsive(ui, size, false);
+            ui.window().set_size(slint::PhysicalSize::new(
+                (size[0] * scale).round().max(1.0) as u32,
+                (size[1] * scale).round().max(1.0) as u32,
+            ));
+            ui.window().request_redraw();
+        })
+    }
 }

@@ -5,7 +5,7 @@ use cad_db::DrawingDatabase;
 use cad_domain::Point3;
 use cad_render_wgpu::{Camera2d, Camera3d};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BridgeCamera {
     pub center: Point3,
     pub world_per_px: f64,

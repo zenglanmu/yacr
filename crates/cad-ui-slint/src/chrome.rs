@@ -45,6 +45,8 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource) {
     // Toolbar + mode.
     ui.set_open_label(messages.text("file.open", &[]).into());
     ui.set_fit_label(messages.text("toolbar.fit", &[]).into());
+    ui.set_measure_label(messages.text("measure.panel", &[]).into());
+    ui.set_annotate_label(messages.text("annotation.panel", &[]).into());
     ui.set_undo_label(messages.text("toolbar.undo", &[]).into());
     ui.set_redo_label(messages.text("toolbar.redo", &[]).into());
     ui.set_export_label(messages.text("toolbar.export", &[]).into());

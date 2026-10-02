@@ -10,7 +10,7 @@
 </head>
 <body>
   <!-- Slint (winit backend) looks up this id and renders the shared shell. -->
-  <canvas id="canvas"></canvas>
+  <main id="canvas-host"><canvas id="canvas"></canvas></main>
 
   <!-- Hidden pickers driven by the Rust host; never styled to be visible. -->
   <input type="file" id="file-input" accept=".dwg" hidden>
@@ -20,6 +20,8 @@
        persists the choice in localStorage. Language names stay in their own
        script (autonyms); they are not translated. -->
   <div id="host-controls">
+    <button id="open-drawing" type="button" disabled>打开 DWG</button>
+    <button id="retry-renderer" type="button" hidden>使用 WebGL2 重试</button>
     <label id="language-label" for="language">语言</label>
     <select id="language" aria-label="Language">
       <option value="zh-CN">简体中文</option>
@@ -30,6 +32,13 @@
   <div id="host-state" role="status" aria-live="polite">正在加载 wasm…</div>
   <noscript>需要启用 JavaScript 才能运行 yacr CAD。</noscript>
 
-  <script type="module" src="main.js"></script>
+  <!-- Dynamic import also catches a missing host module instead of staying stuck. -->
+  <script type="module">
+    import("./main.js").catch(error => {
+      window.yacrStartupError = String(error);
+      document.getElementById("host-state").textContent = "启动失败 / Startup failed: " + error;
+      document.getElementById("retry-renderer").hidden = false;
+    });
+  </script>
 </body>
 </html>

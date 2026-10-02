@@ -58,6 +58,9 @@ export function createFileHost(wasmModule, { t, setStateKey, setStateText }) {
 
   function wireFilePickers() {
     const drawingInput = document.getElementById("file-input");
+    document
+      .getElementById("open-drawing")
+      ?.addEventListener("click", () => drawingInput.click());
     drawingInput.addEventListener("change", async () => {
       const file = drawingInput.files && drawingInput.files[0];
       if (!file) return;
