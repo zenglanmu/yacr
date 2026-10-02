@@ -140,19 +140,25 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   `import.progress.count`、`import.progress.indeterminate`、`import.progress.bytes`、
   `import.detail.separator`、`import.terminal.cancelled`、`import.terminal.failed`。
 
-### 宿主接线（`apps/app-web`，本轮）
+### 宿主接线（`apps/app-web` 与 `apps/app-android`，本轮）
 
-- `open_document_bytes*` / `OPEN` 经 `browser/async_open.rs::start_or_apply`：有线程的
-  宿主启动后台任务，浏览器（`wasm32` 无线程）走同步导入并把**真实**终态
+- **Web**：`open_document_bytes*` / `OPEN` 经 `browser/async_open.rs::start_or_apply`：
+  有线程的宿主启动后台任务，浏览器（`wasm32` 无线程）走同步导入并把**真实**终态
   (`ImportTerminal::Opened/Failed/Cancelled`) 经同一 `ImportProgressUiState` 映射推入
-  面板。无伪造进度。
-- 新 wasm 导出：`async_open_poll_json()`（轮询→至多发布一次→`install_opened`→
-  `set_import_state`→稳定 JSON）与 `async_open_worker_available()`（诚实暴露线程能力）。
-- 单一状态漏斗 `state_push::push_panel_state` 现在同时推 `set_import_state`，因此
-  命令、打开、取消都会刷新面板；`cancel-open-requested` → `CancelLoading` →
-  `cancel_async_open`，当前文档与未保存批注保留。
-- JS：`web/host/renderer.js` 心跳每轮调用 `async_open_poll_json`（`async-open.js`
-  纯解析），running 时收紧到 250ms；`window.yacrAsyncOpen` 暴露真实状态。
+  面板。无伪造进度。新 wasm 导出：`async_open_poll_json()`（轮询→至多发布一次→
+  `install_opened`→`set_import_state`→稳定 JSON）与 `async_open_worker_available()`
+  （诚实暴露线程能力）。JS：`web/host/renderer.js` 心跳每轮调用
+  `async_open_poll_json`（`async-open.js` 纯解析），running 时收紧到 250ms；
+  `window.yacrAsyncOpen` 暴露真实状态。
+- **Android**：`apps/app-android` 的 `open_drawing` 走
+  `resolve_open_leave` → `begin_async_open`，`apps/app-android/src/poll.rs` 用
+  `slint::Timer` 轮询 `poll_async_open` 并经 `push_import_state`（共享漏斗，见
+  `state_push::push_panel_state`）调用 `UiHandle::set_import_state`；取消走
+  `CancelLoading` 命令路径。发布由核心 stamp 守卫完成，宿主只镜像，不重复导入；无
+  worker 的编译目标保留同步回退。**未在设备复测**。
+- **取消**：两宿主均 `cancel-open-requested` → `CommandId::CancelLoading` →
+  `HostController::execute` 拦截转 `cancel_async_open`，只翻转 token，当前文档与未保存
+  批注保留。单一状态漏斗每次都会重推面板。
 
 ### 平台限制（精确）
 
@@ -160,14 +166,14 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   `wasm32-unknown-unknown` 无线程，调用 `begin_async_open` 会 panic。浏览器只推真实
   **终态**面板（`Failed`/`Cancelled` 显式可见，`Opened` 隐藏）。详见
   `docs/import-async.md` 的线程限制一节。
-- `apps/app-android` 未在本轮范围内接线。
-- 本轮未在浏览器/真机做视觉渲染验证（`docs/validation-web.md` 记录）。
+- 本轮未在浏览器/真机做视觉渲染验证（`docs/validation-web.md` 记录）；Android 仅在宿主
+  本机做 Android 目标类型检查与纯逻辑单测，未设备复测。
 
 ## 3. 宿主连接器（本轮范围外）
 
 `cad-ui-slint` 只负责把状态推入外壳、把回调翻成命令；「应用状态 → 外壳」的
-最后一段由宿主调用。本轮改动只限于 `cad-ui-slint`/`cad-app`，因此以下连接器
-**尚未在宿主中调用**（`apps/` 不在范围）：
+最后一段由宿主调用。**本轮两个宿主都已接线**（见 §3.1/§3.2 与 §2.5）；下列连接器
+均已由 `apps/app-web` 与 `apps/app-android` 调用：
 
 - `UiHandle::set_history_availability(HostController::history_availability())`：
   使撤销/重做两个按钮真正反映两个历史栈。
@@ -185,12 +191,13 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   `CadView::set_annotation_preview(controller.annotation_preview())`：把工具预览
   送入叠加层（`None` 即取消）。
 
-> 更新（见 §3.1）：Web 宿主 `apps/app-web` 现已调用上述**全部**连接器
-> （历史/测量面板、画布映射、选择高亮与工具预览）；Android 宿主仍未接线。
+> 更新（见 §3.1 / §3.2）：Web 宿主 `apps/app-web` 现已调用上述**全部**连接器
+> （历史/测量面板、画布映射、选择高亮与工具预览）；Android 宿主
+> `apps/app-android` 亦已接线（§3.2，另含 §2.5 的异步打开进度面板）。
 
 未调用时行为是**降级而非假装**：重做按钮保持禁用、面板显示空步骤并禁用确认/
-取消、测量点击提示「取点未接线」、选择/预览叠加层为空（不画假几何）。以上是本轮
-明确交接给宿主接线任务的开放项。
+取消、测量点击提示「取点未接线」、选择/预览叠加层为空（不画假几何）。Android 的
+真实打开与进度面板、U07 的 surface/旋转回调仍**未在设备复测**。
 
 ### 3.1 Web 宿主接线（已接线；无头/真机验收待补）
 
@@ -225,8 +232,8 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 state-push 漏斗；空闲/导航状态直接返回，不触碰底图。纯分类 `preview_cursor_for`
 可单测（`PreviewCursor::{Measurement,Annotation,None}`）。
 
-`apps/app-android` 仍未接线（不在本轮范围）。以上仅为源码接线与编译证据，
-浏览器/真机验收待补，不构成视觉验收。
+`apps/app-android` 亦已接线（§3.2），包括 §2.5 的异步打开进度面板。以上仅为源码
+接线与编译证据，浏览器/真机验收待补，不构成视觉验收。
 
 ### 3.2 Android 宿主接线（选择/预览/布局切换）
 
@@ -255,6 +262,24 @@ Android **刻意不安装** `LayoutSwitchSink`：一旦安装，适配器会改�
 断言该命令路径。
 
 以上仅为源码接线与 Android 目标类型检查证据；**未在设备上复测**，不构成视觉验收。
+
+**异步打开进度（F01，本 workstream 新增）**：`apps/app-android/src/host.rs`
+的 `open_drawing` 先 `resolve_open_leave`（未保存决策/宿主写），再
+`begin_async_open`；`apps/app-android/src/poll.rs` 用 `slint::Timer`（100 ms，UI 线程）
+轮询 `poll_async_open`，每次经共享漏斗 `push_import_state`
+（由 `push_panel_state` 与轮询共同调用）→ `UiHandle::set_import_state` 推送进度面板；
+发布由核心 `TaskStamp` 守卫完成，宿主只镜像一次（`apply_opened`），不重复导入。取消走
+`cancel-open-requested` → `CancelLoading` → `HostController::cancel_async_open`，只翻转
+token，不丢文档/批注。无 `std::thread` 的目标保留同步回退（`worker_available()`）。纯
+轮询/取消逻辑有单测（`android_async_open_*`、`android_cancel_command_*`、
+`android_import_panel_*`），本机仅 Android 目标类型检查，**未设备复测**。
+
+**表面尺寸/旋转入口（U07）**：新增导出 `pub fn set_surface_size(width, height, scale)`
+（`apps/app-android/src/lib.rs` 重导出 `poll::set_surface_size`），Activity 的
+`SurfaceHolder` 回调调用它即可经纯 `apply_surface_size` 更新权威视口（不动相机）并重推
+布局/叠加层。Activity 侧（本仓库外的 NativeActivity 胶水）**尚未**转发该回调，故此入口
+已在源码落地并有单测，真实旋转仍未生效，**不伪造**。见 `docs/validation-android.md` §8。
+
 
 ## 4. 工具面板（U03）
 

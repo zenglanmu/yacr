@@ -461,3 +461,254 @@ fn android_layout_switch_to_an_unknown_layout_is_refused() {
     .unwrap();
     assert_eq!(controller.borrow().session.active_space, SpaceId::Model);
 }
+
+// --- Async open (F01): poll → publish-once, cancel, progress panel -------------
+
+/// A synthetic, writer-produced AC1032 DWG with four LINE entities.
+///
+/// The same committed contract fixture `cad-app` uses (`fixtures/manifest`); a
+/// real byte stream through the single importer, not a mock.
+fn synthetic_dwg_bytes() -> Arc<[u8]> {
+    Arc::from(
+        include_bytes!("../../../fixtures/dwg/synthetic-four-lines.dwg")
+            .to_vec()
+            .into_boxed_slice(),
+    )
+}
+
+/// Poll the async open to a terminal, returning the final outcome.
+///
+/// Uses `poll_import_once` (the exact function the Slint timer calls), with no
+/// UI handle/view so it exercises the pure host path.
+fn poll_to_terminal(controller: &Rc<RefCell<HostController>>) -> ImportPollOutcome {
+    let handle: SharedHandle = Rc::new(RefCell::new(None));
+    let view: SharedView = Rc::new(RefCell::new(None));
+    let incoming: IncomingDocument = Rc::new(RefCell::new(controller.borrow().drawing()));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        match poll_import_once(controller, &handle, &view, &incoming) {
+            ImportPollOutcome::Running => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "import worker did not finish"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            other => return other,
+        }
+    }
+}
+
+#[test]
+fn android_async_open_publishes_once_and_leaves_no_running_job() {
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    controller
+        .borrow_mut()
+        .begin_async_open(synthetic_dwg_bytes(), "synthetic.dwg");
+
+    // A fresh running snapshot before any tick: no fabricated phase/total.
+    let running = controller.borrow().async_open_snapshot().unwrap();
+    assert!(running.running);
+    assert_eq!(running.phase, None);
+    assert_eq!(running.entities_total, None);
+    assert!(running.cancellable);
+
+    let outcome = poll_to_terminal(&controller);
+    assert_eq!(outcome, ImportPollOutcome::Opened { entities: 4 });
+    assert_eq!(controller.borrow().drawing().unwrap().entity_count(), 4);
+
+    // Publishing happened exactly once: polling again is an Idle no-op and the
+    // document is unchanged (the core's stamp guard owns publication).
+    let handle: SharedHandle = Rc::new(RefCell::new(None));
+    let view: SharedView = Rc::new(RefCell::new(None));
+    let incoming: IncomingDocument = Rc::new(RefCell::new(controller.borrow().drawing()));
+    assert_eq!(
+        poll_import_once(&controller, &handle, &view, &incoming),
+        ImportPollOutcome::Idle
+    );
+    assert_eq!(controller.borrow().drawing().unwrap().entity_count(), 4);
+
+    // The retained terminal hides the panel (`Opened`); the snapshot is explicit.
+    let terminal = controller.borrow().async_open_snapshot().unwrap();
+    assert!(!terminal.running);
+    assert_eq!(
+        terminal.terminal,
+        Some(cad_app::ImportTerminal::Opened { entities: 4 })
+    );
+    assert!(!terminal.cancellable);
+}
+
+#[test]
+fn android_cancel_command_keeps_the_document_and_reports_cancelled() {
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    let demo_id = controller.borrow().drawing().unwrap().id();
+    controller
+        .borrow_mut()
+        .begin_async_open(synthetic_dwg_bytes(), "cancelled.dwg");
+    assert!(
+        controller
+            .borrow()
+            .async_open_snapshot()
+            .unwrap()
+            .cancellable
+    );
+
+    // The shell's `cancel-open-requested` routes `CancelLoading` through the
+    // ordinary command path; the host must not touch the document.
+    controller
+        .borrow_mut()
+        .execute(Command {
+            schema_version: 1,
+            id: CommandId::CancelLoading,
+            document: DocumentId(1),
+            viewport: ViewportId(1),
+            payload: CommandPayload::None,
+        })
+        .unwrap();
+    let after_cancel = controller.borrow().async_open_snapshot().unwrap();
+    assert!(after_cancel.running);
+    assert!(
+        !after_cancel.cancellable,
+        "a second cancel cannot be issued while the first is pending"
+    );
+
+    assert_eq!(poll_to_terminal(&controller), ImportPollOutcome::Cancelled);
+    // Nothing was published: the demo document is still current and the retained
+    // terminal is explicit.
+    assert_eq!(controller.borrow().drawing().unwrap().id(), demo_id);
+    let terminal = controller.borrow().async_open_snapshot().unwrap();
+    assert_eq!(terminal.terminal, Some(cad_app::ImportTerminal::Cancelled));
+    assert!(!terminal.cancellable);
+}
+
+#[test]
+fn android_failed_async_open_keeps_the_demo_document() {
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    let demo_id = controller.borrow().drawing().unwrap().id();
+    let garbage: Arc<[u8]> = Arc::from(vec![0u8, 1, 2, 3].into_boxed_slice());
+    controller.borrow_mut().begin_async_open(garbage, "bad.dwg");
+
+    match poll_to_terminal(&controller) {
+        ImportPollOutcome::Failed(CadError::CorruptData(_)) => {}
+        other => panic!("expected a corrupt-data failure, got {other:?}"),
+    }
+    assert_eq!(controller.borrow().drawing().unwrap().id(), demo_id);
+    assert!(!controller.borrow().async_open_snapshot().unwrap().running);
+}
+
+#[test]
+fn android_import_panel_maps_running_and_terminal_snapshots() {
+    use cad_ui_slint::ImportProgressUiState;
+
+    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
+    // Idle: the panel is hidden and no label is fabricated.
+    let idle = ImportProgressUiState::from_snapshot(None, &messages);
+    assert!(!idle.visible);
+    assert!(idle.phase_label.is_empty());
+
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    controller
+        .borrow_mut()
+        .begin_async_open(synthetic_dwg_bytes(), "panel.dwg");
+    // Running without a tick: visible, cancellable, indeterminate (no fake %).
+    let running = ImportProgressUiState::from_snapshot(
+        controller.borrow().async_open_snapshot().as_ref(),
+        &messages,
+    );
+    assert!(running.visible);
+    assert!(running.percent.is_none());
+    assert!(running.cancellable);
+
+    assert_eq!(
+        poll_to_terminal(&controller),
+        ImportPollOutcome::Opened { entities: 4 }
+    );
+    // Opened clears the panel: the document itself is the feedback.
+    let opened = ImportProgressUiState::from_snapshot(
+        controller.borrow().async_open_snapshot().as_ref(),
+        &messages,
+    );
+    assert!(!opened.visible);
+    assert!(!opened.cancellable);
+}
+
+#[test]
+fn android_surface_resize_preserves_the_camera_target() {
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    let target = Point3 {
+        x: 321.0,
+        y: -77.0,
+        z: 0.0,
+    };
+    {
+        let mut controller = controller.borrow_mut();
+        controller
+            .application
+            .workspace
+            .viewports
+            .get_mut(&ViewportId(1))
+            .unwrap()
+            .camera
+            .target = target;
+    }
+    let handle: SharedHandle = Rc::new(RefCell::new(None));
+    let view: SharedView = Rc::new(RefCell::new(None));
+
+    apply_surface_resize(&controller, &handle, &view, [1440.0, 1080.0], 3.0).unwrap();
+
+    let controller_ref = controller.borrow();
+    let viewport = controller_ref
+        .application
+        .workspace
+        .viewports
+        .get(&ViewportId(1))
+        .unwrap();
+    assert_eq!(viewport.logical_size, [1440.0, 1080.0]);
+    assert_eq!(viewport.dpi_scale, 3.0);
+    // Rotation must not recentre: the camera target survives the resize (U07).
+    assert_eq!(viewport.camera.target, target);
+
+    // Degenerate metrics are refused through the same helper, not applied.
+    assert!(apply_surface_resize(&controller, &handle, &view, [0.0, 1080.0], 3.0).is_err());
+}
+
+#[test]
+fn android_surface_entry_point_applies_after_runtime_install() {
+    // The exported Activity entry point reaches the live host through the
+    // registered runtime and applies the same pure resize; before `start` (no
+    // runtime on this thread) it is an explicit error, never a silent no-op.
+    assert!(set_surface_size(800.0, 600.0, 2.0).is_err());
+
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    let handle: SharedHandle = Rc::new(RefCell::new(None));
+    let view: SharedView = Rc::new(RefCell::new(None));
+    let incoming: IncomingDocument = Rc::new(RefCell::new(controller.borrow().drawing()));
+    install_runtime(controller.clone(), handle, view, incoming);
+
+    set_surface_size(800.0, 600.0, 2.0).unwrap();
+    assert_eq!(
+        controller
+            .borrow()
+            .application
+            .workspace
+            .viewports
+            .get(&ViewportId(1))
+            .unwrap()
+            .logical_size,
+        [800.0, 600.0]
+    );
+    // Non-finite input is refused before touching the viewport.
+    assert!(set_surface_size(f64::NAN, 600.0, 2.0).is_err());
+}

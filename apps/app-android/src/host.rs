@@ -28,7 +28,11 @@ impl HostSink {
     /// this build; the search is explicitly reported so it is not mistaken for
     /// a file picker (spec §9.1).
     ///
-    /// A dirty document is only replaced after the host supplies an explicit
+    /// On a worker-capable target the import runs on the background worker
+    /// (`begin_async_open`) and this method returns as soon as the job starts;
+    /// the Slint poll timer publishes the result and drives the progress panel.
+    /// A target without `std::thread` (wasm) keeps the synchronous path. A dirty
+    /// document is only replaced after the host supplies an explicit
     /// [`UnsavedDecision`] and the required host write is confirmed; otherwise
     /// the current document (and its recovery data) is kept.
     fn open_drawing(&mut self) {
@@ -41,22 +45,38 @@ impl HostSink {
             match std::fs::read(candidate) {
                 Ok(bytes) => {
                     let bytes: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
-                    match self.open_through_leave_flow(path, bytes) {
-                        Ok(opened) => {
-                            let drawing = {
-                                let mut controller = self.controller.borrow_mut();
-                                let _ = controller.fit();
-                                controller.drawing()
-                            };
-                            *self.incoming.borrow_mut() = drawing;
-                            self.sync_camera();
-                            if let Some(view) = self.view.borrow().as_ref() {
-                                view.request_redraw();
+                    // Resolve the unsaved-work decision *before* starting the
+                    // import, so a cancelled prompt never even begins a job. The
+                    // decision's host writes (save/recovery) are confirmed here.
+                    let resolution = match self.resolve_open_leave() {
+                        Ok(resolution) => resolution,
+                        Err(CadError::Cancelled) => {
+                            self.status(format!("已取消打开 {path}：当前文档与未保存批注保留"));
+                            return;
+                        }
+                        Err(e) => {
+                            self.status(format!("打开 {path} 失败: {e}"));
+                            continue;
+                        }
+                    };
+                    // Worker-capable targets use the real asynchronous path; the
+                    // synchronous path stays as the documented fallback for
+                    // targets without `std::thread` (see `docs/import-async.md`).
+                    if worker_available() {
+                        match self.open_async(path, bytes.clone()) {
+                            Ok(()) => return,
+                            // Starting the worker failed (or is unavailable):
+                            // fall through to the synchronous path without
+                            // re-running the leave flow or double-importing.
+                            Err(e) => {
+                                log::warn!("async open unavailable, using sync path: {e}");
+                                self.status(format!("后台打开不可用，改用同步打开：{e}"));
                             }
-                            self.push_state();
-                            self.status(format!("已打开 {path}: {}", opened.completeness_label));
-                            #[cfg(target_os = "android")]
-                            self.load_fonts_for_current_document();
+                        }
+                    }
+                    match self.open_through_leave_flow(path, bytes, resolution) {
+                        Ok(opened) => {
+                            self.finish_open_success(path, &opened);
                             return;
                         }
                         Err(CadError::Cancelled) => {
@@ -71,6 +91,47 @@ impl HostSink {
         }
         // No DWG found: keep the synthetic demo visible and say so.
         self.status("未找到样本 DWG；显示内置演示几何（非兼容性声明）");
+    }
+
+    /// Start the background import and the poll timer for `bytes`.
+    ///
+    /// Returns an error only when no background worker is available; the core's
+    /// `begin_async_open` is otherwise infallible. The controller is not touched
+    /// until a poll publishes a result, and the job is guarded by the task stamp
+    /// so a superseded/cancelled open can never replace the document.
+    fn open_async(&mut self, path: &str, bytes: Arc<[u8]>) -> CadResult<()> {
+        if !worker_available() {
+            return Err(CadError::Unsupported(
+                "no background import worker on this target".into(),
+            ));
+        }
+        self.controller.borrow_mut().begin_async_open(bytes, path);
+        self.status(format!("正在后台打开 {path}…"));
+        // Show the panel immediately (before the first tick) and let the timer
+        // publish progress/terminal.
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            push_import_state(&self.controller, handle);
+        }
+        ensure_polling();
+        Ok(())
+    }
+
+    /// Mirror a synchronously published document into the bridge and panels.
+    fn finish_open_success(&mut self, path: &str, opened: &cad_app::host::OpenedDrawing) {
+        let drawing = {
+            let mut controller = self.controller.borrow_mut();
+            let _ = controller.fit();
+            controller.drawing()
+        };
+        *self.incoming.borrow_mut() = drawing;
+        self.sync_camera();
+        if let Some(view) = self.view.borrow().as_ref() {
+            view.request_redraw();
+        }
+        self.push_state();
+        self.status(format!("已打开 {path}: {}", opened.completeness_label));
+        #[cfg(target_os = "android")]
+        self.load_fonts_for_current_document();
     }
 
     /// The host's recovery store, if it has one configured.
@@ -100,12 +161,14 @@ impl HostSink {
         self.configuration.export_directory.clone()
     }
 
-    /// Apply the leave flow, then replace the document with `bytes`.
-    fn open_through_leave_flow(
-        &mut self,
-        label: &str,
-        bytes: Arc<[u8]>,
-    ) -> CadResult<cad_app::host::OpenedDrawing> {
+    /// Resolve the unsaved-work decision and perform its host writes.
+    ///
+    /// Returns the confirmed [`LeaveResolution`] to hand to the publish step, or
+    /// `Cancelled` when the host cannot obtain a decision (no dialog / cancelled
+    /// prompt) — the current document is then never touched. Split from the
+    /// publish so the asynchronous path can validate/confirm *before* starting a
+    /// worker and still apply the identical decision policy.
+    fn resolve_open_leave(&mut self) -> CadResult<cad_app::host_files::LeaveResolution> {
         let signal = self.controller.borrow().unsaved_signal();
         let decision = if signal.dirty {
             // The host must supply the decision; a missing source or a cancelled
@@ -127,7 +190,7 @@ impl HostSink {
         let persistence = store.as_ref().map(|s| s as &dyn Persistence);
         let (center, wpp) = self.camera_state();
         let export_directory = self.export_directory();
-        let resolution = cad_platform::block_on(resolve_leave(
+        cad_platform::block_on(resolve_leave(
             &mut self.controller.borrow_mut(),
             decision,
             center,
@@ -138,11 +201,28 @@ impl HostSink {
                     write_annotation_export(export_directory.as_deref(), json)
                 })
             },
-        ))?;
+        ))
+    }
+
+    /// Apply the leave flow, then replace the document with `bytes`.
+    ///
+    /// The synchronous fallback: `resolution` is the leave decision already
+    /// confirmed by [`HostSink::resolve_open_leave`], so this does not re-run the
+    /// decision (and cannot double-apply a save/recovery write). `Discard` is
+    /// passed because the write results are already in `resolution`: with a dirty
+    /// document `resolve_leave(Discard, ..)` proceeds unconditionally, and after a
+    /// confirmed `Save`/`PreserveRecovery` the document is clean and proceeds
+    /// too, so the original decision cannot change the outcome.
+    fn open_through_leave_flow(
+        &mut self,
+        label: &str,
+        bytes: Arc<[u8]>,
+        resolution: cad_app::host_files::LeaveResolution,
+    ) -> CadResult<cad_app::host::OpenedDrawing> {
         self.controller.borrow_mut().open_bytes_leaving(
             bytes,
             label,
-            decision,
+            UnsavedDecision::Discard,
             resolution.saved,
             resolution.recovery_persisted,
         )
@@ -203,6 +283,11 @@ impl UiCommandSink for HostSink {
             self.export_annotations();
             return Ok(());
         }
+        // `CancelLoading` (the shell's `cancel-open-requested`) falls through to
+        // `execute`, which routes it to `HostController::cancel_async_open`: the
+        // token is flipped and nothing is published, so the current document and
+        // unsaved annotations are kept. The `push_state` below then reflects the
+        // non-cancellable panel state from the retained snapshot.
         let outcome = self.controller.borrow_mut().execute(command);
         match outcome {
             Ok(outcome) => {
