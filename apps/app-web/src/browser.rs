@@ -6,17 +6,21 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cad_app::host::HostController;
-use cad_domain::{CadResult, ViewportId};
+use cad_domain::{CadError, CadResult, ViewportId};
 use cad_ui_slint::{
-    install_with_preference, CadView, IncomingDocument, UiAdapter, UiConfiguration, UiHandle,
+    install_with_preference, CadView, IncomingDocument, LocaleResolution, UiAdapter,
+    UiConfiguration, UiHandle,
 };
 
 mod annotations;
 mod documents;
 mod fonts;
 mod input;
+mod messages;
 mod persistence;
+mod pick;
 pub mod shell;
+mod state_push;
 
 pub use annotations::{
     confirm_annotation_export, drop_pending_recovery_snapshot, export_annotations_json,
@@ -182,6 +186,9 @@ pub async fn start_with_preference(
         viewport: viewport_id,
         logical_size: web_viewport_size(),
     };
+    // Mirror the catalog the handle will use so panel empty/mixed labels are
+    // derived from the same locale (the handle does not expose its catalog).
+    messages::set_locale(&configuration.locale);
 
     let sink = WebSink {
         controller: controller.clone(),
@@ -214,16 +221,26 @@ pub async fn start_with_preference(
         viewport: viewport_id,
         last: Cell::new([0.0, 0.0]),
         dragging: Cell::new(false),
+        down: Cell::new(None),
+    }));
+    // Measurement/annotation canvas picks only become real points when the host
+    // installs this mapper; without it the adapter reports "pick unwired".
+    adapter.set_canvas_pick_mapper(Rc::new(pick::WebCanvasPickMapper {
+        controller: controller.clone(),
+        handle: shared_handle.clone(),
+        viewport: viewport_id,
     }));
 
     let backend_label = backend_status(chosen);
     // Restore any persisted recovery snapshot for the starting document;
     // only a matching fingerprint is applied, otherwise it is reported and
     // left for an explicit restore/discard.
-    restore_startup_recovery(&controller, &handle);
+    restore_startup_recovery(&controller, &handle, &view_slot);
     if !cad_ui_slint::web::has_recovery_snapshot() {
         let _ = handle.set_status(format!("就绪（{backend_label}）"));
     }
+    // The first push derives every panel from the real application state.
+    state_push::push_panel_state(&controller, &handle, &view_slot);
 
     HOST.with(|slot| {
         *slot.borrow_mut() = Some(HostRuntime {
@@ -300,4 +317,43 @@ pub fn renderer_report() -> String {
         )
     });
     report.unwrap_or_else(|| "host not started".to_string())
+}
+
+/// Redacted diagnostics model JSON for the drawer and headless inspection.
+///
+/// Encodes the current document's import report through the shared
+/// `cad_diagnostics` model (every reason kept) with the redacted encoder. Before
+/// any import report this is an explicit empty model, never fabricated rows.
+pub fn diagnostics_report() -> String {
+    with_runtime(|rt| {
+        let controller = rt.controller.borrow();
+        let model = controller
+            .last_import_report
+            .as_ref()
+            .map(|report| state_push::diagnostics_model_from_import(&report.diagnostics))
+            .unwrap_or_default();
+        match cad_diagnostics::DiagnosticPackage::encode_model_redacted(
+            &model,
+            env!("CARGO_PKG_VERSION"),
+        ) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(error) => format!("{{\"error\":\"{error}\"}}"),
+        }
+    })
+    .unwrap_or_else(|| "{\"error\":\"host not started\"}".to_string())
+}
+
+/// Apply a locale to the shell and re-push catalog-derived panel state.
+///
+/// The handle rebuilds its own chrome; the host's catalog mirror and the panel
+/// empty/mixed labels must follow, so this wraps both in one call.
+pub fn apply_locale(tag: &str) -> CadResult<LocaleResolution> {
+    let handle = current_handle().ok_or(CadError::Cancelled)?;
+    let resolution = handle.set_locale(tag)?;
+    messages::set_locale(tag);
+    with_runtime(|rt| {
+        let slot = state_push::view_slot(&rt.view);
+        state_push::push_panel_state(&rt.controller, &rt.handle, &slot);
+    });
+    Ok(resolution)
 }

@@ -32,6 +32,7 @@
   "annotation.text_placeholder": "批注文字",
   "annotation.hidden_count": "已隐藏 {count}",
   "annotation.delete": "删除",
+  "annotation.empty": "无注解",
   "layers.panel": "图层",
   "layers.override_count": "临时覆盖 {count}",
   "layers.restore": "恢复",

@@ -1,5 +1,5 @@
 //! Browser touch adapter. The Slint shell and application remain authoritative.
-use super::{sync_view_camera, with_runtime};
+use super::{state_push, sync_view_camera, with_runtime};
 use cad_app::{Command, CommandId, CommandPayload};
 use cad_domain::{CadError, CadResult, Point3};
 
@@ -62,6 +62,9 @@ pub fn navigate(dx: f64, dy: f64, zoom: f64) -> CadResult<()> {
             })?;
         }
         sync_view_camera(&controller, &rt.view, &rt.viewport);
+        drop(controller);
+        let slot = state_push::view_slot(&rt.view);
+        state_push::push_panel_state(&rt.controller, &rt.handle, &slot);
         Ok(())
     })
     .ok_or(CadError::Cancelled)?

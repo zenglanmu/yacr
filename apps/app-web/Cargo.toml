@@ -16,6 +16,11 @@ cad-platform.workspace = true
 cad-domain.workspace = true
 cad-annotations.workspace = true
 cad-resources.workspace = true
+# Panel-state derivation reads the structured diagnostics model, the pick report
+# shape and the layout descriptors directly.
+cad-diagnostics.workspace = true
+cad-spatial.workspace = true
+cad-representation.workspace = true
 
 # Browser host stack. wasm-bindgen must match the wasm-bindgen-cli used to
 # post-process the module; Slint already pins these versions in Cargo.lock.

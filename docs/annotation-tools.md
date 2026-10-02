@@ -42,8 +42,10 @@
   测量几何叠加（属测量路径）。真机/GPU 运行未验证。
 - **Slint 渲染未运行**：本机缺 fontconfig，`cad-ui-slint` 不能原生构建；其测试为字符串/结构断言，
   仅由 wasm32 `cargo check` 保证可编译，无视觉/真机验收。
-- **宿主连接器（`apps/**`）尚未调用** `set_annotation_state`：未调用时降级为显式空面板 + 禁用按钮，
-  不显示假行。
+- **Web 宿主连接器已接线**：`apps/app-web` 的 `browser/state_push.rs` 已调用
+  `set_annotation_state`（含有序 `AnnotationId`）以及图层/布局/属性/诊断推送，并在导入/
+  导出/恢复后刷新；`apps/app-android` 仍未接线。空面板文案取自目录
+  `annotation.empty`。仅源码接线，浏览器/真机验收待补。
 
 ## 验证
 

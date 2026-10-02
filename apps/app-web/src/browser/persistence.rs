@@ -8,8 +8,10 @@ use cad_app::host::HostController;
 use cad_app::host_files::load_recovery;
 use cad_domain::{CadError, DocumentId};
 use cad_platform::{HostFuture, Persistence};
-use cad_ui_slint::UiHandle;
+use cad_ui_slint::{CadView, UiHandle};
 use wasm_bindgen::JsCast;
+
+use super::state_push;
 
 /// Only a successfully initiated download may confirm the exported revision.
 pub(super) fn download_text(filename: &str, text: &str) -> bool {
@@ -77,15 +79,20 @@ impl Persistence for WebPersistence {
 }
 
 /// Startup restores only a matching snapshot; mismatches remain recoverable.
+///
+/// Any applied restore is pushed to the panels through the single funnel so the
+/// annotation list and undo availability are correct before the first frame.
 pub(super) fn restore_startup_recovery(
     controller: &Rc<RefCell<HostController>>,
     handle: &UiHandle,
+    view: &Rc<RefCell<Option<CadView>>>,
 ) {
     let persistence = WebPersistence;
     let document = controller.borrow().document_id;
     match cad_platform::block_on(load_recovery(&persistence, document)) {
         Ok(Some(snapshot)) => match controller.borrow_mut().restore_recovery_snapshot(&snapshot) {
             Ok(count) => {
+                state_push::push_panel_state(controller, handle, view);
                 let _ = handle.set_status(format!("已从恢复快照恢复 {count} 条批注"));
             }
             Err(e) => {
