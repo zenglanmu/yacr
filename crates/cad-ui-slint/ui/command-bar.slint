@@ -9,11 +9,14 @@ export component CadCommandBar inherits Rectangle {
     in property <string> open-label;
     in property <string> tools-label;
     in property <string> fit-label;
+    in property <string> mode-label;
+    in property <bool> mode-work;
     in-out property <bool> expanded: false;
     property <string> input;
     callback open();
     callback tools();
     callback fit();
+    callback mode-toggled();
     callback submit(string);
     height: root.expanded ? 146px : (root.phone ? 64px : 58px);
     background: #202731;
@@ -24,6 +27,7 @@ export component CadCommandBar inherits Rectangle {
             padding: 0px;
             spacing: 4px;
             Button { text: root.open-label; min-height: root.phone ? 48px : 36px; clicked => { root.open(); } }
+            Button { text: root.mode-label; checked: root.mode-work; min-height: root.phone ? 48px : 36px; clicked => { root.mode-toggled(); } }
             if !root.phone : Text { text: root.title; color: #8dc9ff; vertical-alignment: center; }
             LineEdit {
                 min-width: 0px;

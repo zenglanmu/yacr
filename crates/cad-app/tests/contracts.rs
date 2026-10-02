@@ -12,6 +12,7 @@ fn viewer_rejects_every_mutating_annotation_entry() {
         CommandId::Redo,
         CommandId::ImportAnnotations,
         CommandId::Measure,
+        CommandId::SaveMeasurementAsAnnotation,
     ] {
         assert_eq!(session.authorize(command), Err(CadError::PermissionDenied));
     }
@@ -21,6 +22,7 @@ fn viewer_rejects_every_mutating_annotation_entry() {
         CommandId::ToggleLayer,
         CommandId::SwitchSpace,
         CommandId::ExportAnnotations,
+        CommandId::SetMode,
     ] {
         assert_eq!(session.authorize(command), Ok(()));
     }

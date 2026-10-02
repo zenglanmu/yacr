@@ -45,8 +45,14 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   因此「取消 = 零事务」由构造保证（`cad-app` 单测
   `cancelled_measurement_produces_zero_transactions`）。
 - 「一次确认一事务」在本 UI 路径中的落点是：**每次确认恰好派发一条
-  `ConfirmMeasurement` 命令**。测量本身不打开批注事务；把测量结果存为批注
-  （F07）是后续独立工作，未在本轮接线。
+  `ConfirmMeasurement` 命令**。测量本身不打开批注事务。
+- **测量结果存为批注（F07）已接线**：确认（或自动完成）测量后记录保存在
+  `SessionState::last_measurement`；`CommandId::SaveMeasurementAsAnnotation` +
+  `CommandPayload::None` 把它转成 `AnnotationGeometry::Measurement`，走与其它批注
+  **完全相同**的 `commit_annotation` 事务/历史路径（恰好一事务、一撤销步），并在
+  命令层强制 Work 权限。无已确认记录时返回 `CadError::InvalidInput`，**不是静默
+  成功**。`AnnotationGeometry::Measurement` 仍**刻意不画**在批注叠加层
+  （`annotation.unsupported` 诊断），本轮只保存如实记录。
 
 ### 画布取点（诚实开放项）
 
@@ -85,6 +91,26 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 - 快照里的 `kind` 也用于让「测量」按钮与下拉框选择保持一致，见
   `UiAdapter::selected_measurement_kind`。
 
+### 查看/工作模式切换（U02）
+
+- 会话模式是**权威**的 `cad_app::AppMode`（`SessionState::mode()`）。
+  `CommandId::SetMode` + `CommandPayload::Mode(AppMode)` 经
+  `SessionState::switch_mode` 切换：切换时取消未确认的工具（`ToolState::Idle`），
+  绝不静默提交，也不写库、不记历史。
+- `SetMode` 本身**不要求 Work 权限**（两种模式都能切回去）；但切到 Viewer 后
+  所有 Work-only 命令仍在命令层返回 `PermissionDenied`
+  （`CommandId::requires_work_mode()`）。
+- 外壳入口：命令栏的 `mode-label` 按钮（回调 `mode-toggled`）派发
+  `SetMode(相反模式)`，并立即把 `work-mode` 与 `mode-label` 更新到目标状态；
+  宿主的权威推送（`UiHandle::set_mode(HostController::mode())`）会覆盖任何偏差。
+- `mode-label` 文本来自目录：Work → `mode.enhanced`，Viewer → `mode.viewer`
+  （两语言均有）。`UiHandle::set_work_mode` 现在同时写标志与标签；`set_locale`
+  用最近一次模式重发正确的标签，不再回落到「增强」。
+- 单测：`cad-app` 的 `set_mode_cancels_an_unconfirmed_tool_and_gates_work_commands`
+  覆盖「切换取消工具 + Viewer 拒绝 Work-only + 切回恢复」；
+  `cad-ui-slint` 的 `mode_ui_state_reflects_the_authoritative_mode` 覆盖标签/标志
+  （该 crate 原生测试受本机 fontconfig 限制，见 §5）。
+
 ## 3. 宿主连接器（本轮范围外）
 
 `cad-ui-slint` 只负责把状态推入外壳、把回调翻成命令；「应用状态 → 外壳」的
@@ -95,6 +121,11 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   使撤销/重做两个按钮真正反映两个历史栈。
 - `UiHandle::set_measurement_state(MeasurementUiState::from_preview(
   controller.measurement_preview(), controller.unit_label()))`：驱动测量面板。
+  宿主还应调用 `state.set_can_save_annotation(controller.has_last_measurement())`
+  以启用「存为批注」按钮（`HostController::save_measurement_as_annotation()`）。
+- `UiHandle::set_mode(controller.mode())`：把 `work-mode` 与 `mode-label` 更新到
+  权威会话模式（U02）。未调用时外壳仍可由 `mode-toggled` 乐观切换，但宿主推送是
+  权威的。
 - `UiAdapter::set_canvas_pick_mapper(...)`：把画布点击映射为世界点。
 - `CadView::set_selection_highlight(controller.session.selection.clone())`：把选择集
   送入高亮叠加层。
@@ -134,8 +165,13 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 
 - 测量算法下拉框（工作模式可用）；
 - 确认/取消按钮（按 `measurement-active` / `measurement-can-confirm` 启用）；
+- 「存为批注」按钮（仅在存在已确认测量记录时显示，
+  `measurement-can-save-annotation`；无记录时命令层也会拒绝）；
 - 步骤文案（来自状态机）；
 - 单位标签（来自文档 `UnitContext`）。
+
+命令栏还有一个模式切换按钮（`mode-label`，常显），显示当前真实模式并派发
+`SetMode`（见 §2 后的「查看/工作模式切换」）。
 
 面板不创建每实体控件，不显示假数据。
 
@@ -158,6 +194,16 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   `CadSceneController::prepare_with_overlays` 的“选择变化只重建高亮叠加层”契约。
 - `crates/cad-scene/src/highlight.rs` 的 `HIGHLIGHT_DRAW_ORDER` 已从 `2_000_000` 调整为
   `900_000`（高于底图 0、低于批注 1_000_000），其单测同步更新；`cad-scene` 单测通过。
+- 本轮新增的 `cad-app` 单测：`save_measurement_as_annotation_uses_one_transaction`、
+  `save_measurement_without_a_record_is_refused_and_writes_nothing`、
+  `save_measurement_as_annotation_is_work_only`、
+  `set_mode_cancels_an_unconfirmed_tool_and_gates_work_commands`、
+  `set_mode_requires_a_mode_payload`，以及 `tests/contracts.rs` 的 Work-only /
+  允许列表更新。`cad-ui-slint` 新增
+  `measurement_save_affordance_requires_a_confirmed_record`、
+  `mode_ui_state_reflects_the_authoritative_mode`、
+  `shell_exposes_the_save_and_mode_switch_affordances`、
+  `mode_labels_resolve_in_both_catalogs`。
 - `cad-ui-slint` 中 `MeasurementUiState` 与外壳定义字符串的测试位于该 crate 的
   `#[cfg(test)]`，但**本机无法构建 `cad-ui-slint` 测试**（宿主缺 fontconfig），
   因此这些测试本轮未执行；`cargo check --workspace --lib --target

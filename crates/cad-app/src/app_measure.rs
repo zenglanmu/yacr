@@ -1,5 +1,6 @@
 //! Measurement commands for [`Application`].
 use super::*;
+use cad_db::{Annotation, AnnotationGeometry};
 
 impl Application {
     /// Dispatch the measurement tool (spec F06/U04).
@@ -58,6 +59,9 @@ impl Application {
                 kind.algorithm(),
                 captured,
             )?;
+            if let Some(record) = &outcome.measurement {
+                session.set_last_measurement(record.clone());
+            }
             // A one-shot tool returns to navigation after a result; open-ended
             // tools stay active until confirmed or cancelled.
             session.tool = ToolState::Idle;
@@ -84,7 +88,12 @@ impl Application {
                 ))
             }
         };
-        self.evaluate_measurement(&session.active_space, command, algorithm, points.to_vec())
+        let outcome =
+            self.evaluate_measurement(&session.active_space, command, algorithm, points.to_vec())?;
+        if let Some(record) = &outcome.measurement {
+            session.set_last_measurement(record.clone());
+        }
+        Ok(outcome)
     }
 
     /// Confirm an open-ended measurement tool (polyline/area) and evaluate it.
@@ -106,8 +115,43 @@ impl Application {
         let active_space = session.active_space.clone();
         let outcome =
             self.evaluate_measurement(&active_space, command, kind.algorithm(), points)?;
+        if let Some(record) = &outcome.measurement {
+            session.set_last_measurement(record.clone());
+        }
         session.tool = ToolState::Idle;
         Ok(outcome)
+    }
+
+    /// Persist the last confirmed measurement as a measurement annotation.
+    ///
+    /// Goes through the same one-transaction/one-undo-step annotation path as
+    /// every other annotation (`commit_annotation`). Refuses with
+    /// `InvalidInput` when no measurement has been confirmed — never a silent
+    /// success. The resulting `AnnotationGeometry::Measurement` is deliberately
+    /// not drawn by the annotation overlay (`annotation.unsupported`); this
+    /// command only stores the honest record.
+    pub(crate) fn save_measurement_as_annotation(
+        &mut self,
+        session: &SessionState,
+    ) -> CadResult<CommandOutcome> {
+        let record = session
+            .last_measurement()
+            .cloned()
+            .ok_or_else(|| CadError::InvalidInput("no confirmed measurement to save".into()))?;
+        let id = self.next_annotation_id(session.document);
+        let annotation = Annotation {
+            id,
+            space: session.active_space.clone(),
+            geometry: AnnotationGeometry::Measurement(record),
+            text: String::new(),
+            style: AnnotationStyle::default(),
+            created_unix_ms: 0,
+            modified_unix_ms: 0,
+            anchor: None,
+            precision: Precision::Analytic,
+        };
+        let command = AnnotationCommand::Create(annotation);
+        self.commit_annotation(session.document, &command)
     }
 
     pub(crate) fn measure_preview_outcome(&self, session: &SessionState) -> CommandOutcome {

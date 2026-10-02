@@ -56,7 +56,28 @@ impl UiHandle {
     }
 
     pub fn set_work_mode(&self, work: bool) -> CadResult<()> {
-        self.with(|ui| ui.set_work_mode(work))
+        self.work_mode.set(work);
+        let label = crate::status::mode_label(
+            &self.messages.borrow(),
+            if work {
+                cad_app::AppMode::Work
+            } else {
+                cad_app::AppMode::Viewer
+            },
+        );
+        self.with(|ui| {
+            ui.set_work_mode(work);
+            ui.set_mode_label(label.into());
+        })
+    }
+
+    /// Push the authoritative session mode into the shell (audit U02).
+    ///
+    /// Sets both the `work-mode` flag and the catalog `mode-label`, so the shell
+    /// always shows the mode the command layer actually enforces. Hosts call this
+    /// with `HostController::mode()` after every command.
+    pub fn set_mode(&self, mode: cad_app::AppMode) -> CadResult<()> {
+        self.set_work_mode(mode == cad_app::AppMode::Work)
     }
 
     pub fn set_can_undo(&self, can_undo: bool) -> CadResult<()> {
@@ -90,9 +111,11 @@ impl UiHandle {
         self.measurement_active.set(state.active);
         let step = state.step_label.clone();
         let unit = state.unit_label.clone();
+        let can_save = state.can_save_annotation;
         self.with(|ui| {
             ui.set_measurement_active(state.active);
             ui.set_measurement_can_confirm(state.can_confirm);
+            ui.set_measurement_can_save_annotation(can_save);
             ui.set_measurement_kind_index(state.kind_index());
             ui.set_measurement_step_label(step.into());
             ui.set_unit_label(unit.into());
@@ -257,8 +280,9 @@ impl UiHandle {
         let override_label = layer_override_label(&messages, override_count);
         let selected_label = selected_count_label(&messages, selection_count);
         let hidden_label = annotation_hidden_label(&messages, hidden_count);
+        let work = self.work_mode.get();
         self.with(|ui| {
-            apply_chrome(ui, &messages);
+            apply_chrome(ui, &messages, work);
             ui.set_layer_override_label(override_label.into());
             ui.set_property_selected_label(selected_label.into());
             ui.set_annotation_hidden_label(hidden_label.into());

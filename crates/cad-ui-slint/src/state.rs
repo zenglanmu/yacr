@@ -12,6 +12,12 @@ pub struct MeasurementUiState {
     pub active: bool,
     /// Whether the confirm affordance is valid right now.
     pub can_confirm: bool,
+    /// Whether a confirmed measurement exists to save as an annotation (F06/F07).
+    ///
+    /// Enabled by the host pushing `can_save_annotation` from
+    /// `HostController::has_last_measurement()`; it is never true without a real
+    /// confirmed record.
+    pub can_save_annotation: bool,
     pub kind: MeasurementToolKind,
     /// Human-facing "picked N, need M" step text; empty when idle.
     pub step_label: String,
@@ -23,6 +29,7 @@ impl Default for MeasurementUiState {
         MeasurementUiState {
             active: false,
             can_confirm: false,
+            can_save_annotation: false,
             kind: MeasurementToolKind::Distance,
             step_label: String::new(),
             unit_label: String::new(),
@@ -40,6 +47,7 @@ impl MeasurementUiState {
             Some(preview) => MeasurementUiState {
                 active: true,
                 can_confirm: preview.can_confirm(),
+                can_save_annotation: false,
                 kind: preview.kind,
                 step_label: preview.status_line(),
                 unit_label: unit_label.into(),
@@ -47,11 +55,21 @@ impl MeasurementUiState {
             None => MeasurementUiState {
                 active: false,
                 can_confirm: false,
+                can_save_annotation: false,
                 kind: MeasurementToolKind::Distance,
                 step_label: String::new(),
                 unit_label: unit_label.into(),
             },
         }
+    }
+
+    /// Record whether a confirmed measurement is available to save.
+    ///
+    /// Hosts call this with `HostController::has_last_measurement()` after
+    /// pushing the preview; the save affordance is enabled only when true.
+    pub fn set_can_save_annotation(&mut self, can_save: bool) -> &mut Self {
+        self.can_save_annotation = can_save;
+        self
     }
 
     /// Combobox index for [`MeasurementToolKind::ALL`].
@@ -69,6 +87,38 @@ impl MeasurementUiState {
 pub struct ViewStateUi {
     pub is_3d: bool,
     pub perspective: bool,
+}
+
+/// Mode switch state pushed into the shell (audit U02).
+///
+/// `work` drives the Work-only affordances (`enabled: work`) and `label` is the
+/// catalog text for the *current* mode. Both are derived from the authoritative
+/// `cad_app::AppMode`, so the shell can never show a mode the command layer does
+/// not enforce.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModeUiState {
+    pub work: bool,
+    /// Catalog label for the current mode (`mode.enhanced` / `mode.viewer`).
+    pub label: String,
+}
+
+impl ModeUiState {
+    /// Derive the mode state from the authoritative application mode.
+    pub fn from_mode(mode: cad_app::AppMode, messages: &MessageSource) -> Self {
+        ModeUiState {
+            work: mode == cad_app::AppMode::Work,
+            label: status::mode_label(messages, mode),
+        }
+    }
+}
+
+impl Default for ModeUiState {
+    fn default() -> Self {
+        ModeUiState {
+            work: true,
+            label: String::new(),
+        }
+    }
 }
 
 /// One layer row pushed into the shell (audit F03/U03).

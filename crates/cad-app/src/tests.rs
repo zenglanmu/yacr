@@ -435,6 +435,200 @@ fn measure_area_uses_the_viewport_work_plane() {
 }
 
 #[test]
+fn save_measurement_as_annotation_uses_one_transaction() {
+    let (mut app, mut session) = application_with_document();
+    // Confirm a distance measurement (auto-completes the tool).
+    let measured = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::Points(vec![point(0.0, 0.0), point(3.0, 4.0)]),
+            ),
+        )
+        .unwrap();
+    let record = measured.measurement.expect("record");
+    assert!(session.has_last_measurement());
+    assert!(session.last_measurement().is_some());
+
+    let revision_before = app.workspace.documents[&DocumentId(1)]
+        .annotations
+        .revision();
+    let outcome = app
+        .execute(
+            &mut session,
+            command(CommandId::SaveMeasurementAsAnnotation, CommandPayload::None),
+        )
+        .unwrap();
+    // Exactly one transaction/undo step through the shared annotation path.
+    assert_eq!(outcome.changes.as_ref().map(|c| c.changes.len()), Some(1));
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .annotations
+            .revision(),
+        Revision(revision_before.0 + 1)
+    );
+    assert!(app.can_undo(&DocumentId(1)));
+    assert!(!app.can_redo(&DocumentId(1)));
+
+    // The stored geometry is the exact measurement record, not a fabricated one.
+    let annotation_id = outcome.annotation.expect("annotation id");
+    let stored = app.workspace.documents[&DocumentId(1)]
+        .annotations
+        .get(annotation_id)
+        .expect("stored annotation");
+    match &stored.geometry {
+        AnnotationGeometry::Measurement(saved) => assert_eq!(saved, &record),
+        other => panic!("expected measurement geometry, got {other:?}"),
+    }
+    assert_eq!(stored.space, SpaceId::Model);
+
+    // Undo removes it as a single step.
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    assert_eq!(app.workspace.documents[&DocumentId(1)].annotations.len(), 0);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn save_measurement_without_a_record_is_refused_and_writes_nothing() {
+    let (mut app, mut session) = application_with_document();
+    let revision_before = app.workspace.documents[&DocumentId(1)]
+        .annotations
+        .revision();
+    let result = app.execute(
+        &mut session,
+        command(CommandId::SaveMeasurementAsAnnotation, CommandPayload::None),
+    );
+    assert!(
+        matches!(result, Err(CadError::InvalidInput(_))),
+        "no confirmed measurement must be InvalidInput, not a silent success"
+    );
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .annotations
+            .revision(),
+        revision_before
+    );
+    assert_eq!(app.workspace.documents[&DocumentId(1)].annotations.len(), 0);
+    assert!(!app.can_undo(&DocumentId(1)));
+
+    // Merely starting a tool captures no result, so saving is still refused.
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Measure,
+            CommandPayload::MeasureTool(MeasurementToolKind::Distance),
+        ),
+    )
+    .unwrap();
+    assert!(matches!(
+        app.execute(
+            &mut session,
+            command(CommandId::SaveMeasurementAsAnnotation, CommandPayload::None),
+        ),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn save_measurement_as_annotation_is_work_only() {
+    let (mut app, _) = application_with_document();
+    let mut viewer = SessionState::new(DocumentId(1), AppMode::Viewer);
+    // Viewer is denied at the command layer before inspecting any record.
+    assert_eq!(
+        app.execute(
+            &mut viewer,
+            command(CommandId::SaveMeasurementAsAnnotation, CommandPayload::None),
+        )
+        .unwrap_err(),
+        CadError::PermissionDenied
+    );
+}
+
+#[test]
+fn set_mode_cancels_an_unconfirmed_tool_and_gates_work_commands() {
+    let (mut app, mut session) = application_with_document();
+    // Start an (unconfirmed) measurement tool in Work mode.
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Measure,
+            CommandPayload::MeasureTool(MeasurementToolKind::Area),
+        ),
+    )
+    .unwrap();
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Measure,
+            CommandPayload::Points(vec![point(0.0, 0.0)]),
+        ),
+    )
+    .unwrap();
+    assert!(session.measurement_preview().is_some());
+
+    // Switch to Viewer: the unconfirmed tool is cancelled, never committed.
+    let outcome = app
+        .execute(
+            &mut session,
+            command(CommandId::SetMode, CommandPayload::Mode(AppMode::Viewer)),
+        )
+        .unwrap();
+    assert!(outcome.changes.is_none());
+    assert!(matches!(session.tool, ToolState::Idle));
+    assert!(session.measurement_preview().is_none());
+    assert_eq!(session.mode(), AppMode::Viewer);
+    assert_eq!(app.workspace.documents[&DocumentId(1)].annotations.len(), 0);
+    assert!(!app.can_undo(&DocumentId(1)));
+
+    // A Work-only command is now refused at the command layer.
+    assert_eq!(
+        app.execute(
+            &mut session,
+            command(CommandId::Measure, CommandPayload::None),
+        )
+        .unwrap_err(),
+        CadError::PermissionDenied
+    );
+    assert_eq!(
+        app.execute(
+            &mut session,
+            command(CommandId::CreateAnnotation, CommandPayload::None),
+        )
+        .unwrap_err(),
+        CadError::PermissionDenied
+    );
+
+    // Switching back restores Work and its commands.
+    app.execute(
+        &mut session,
+        command(CommandId::SetMode, CommandPayload::Mode(AppMode::Work)),
+    )
+    .unwrap();
+    assert_eq!(session.mode(), AppMode::Work);
+    app.execute(
+        &mut session,
+        command(CommandId::Measure, CommandPayload::None),
+    )
+    .unwrap();
+}
+
+#[test]
+fn set_mode_requires_a_mode_payload() {
+    let (mut app, mut session) = application_with_document();
+    assert!(matches!(
+        app.execute(
+            &mut session,
+            command(CommandId::SetMode, CommandPayload::None)
+        ),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert_eq!(session.mode(), AppMode::Work);
+}
+
+#[test]
 fn cancelled_measurement_produces_zero_transactions() {
     let (mut app, mut session) = application_with_document();
     app.execute(

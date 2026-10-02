@@ -62,12 +62,14 @@ impl UiAdapter {
                 reason
             );
         }
-        apply_chrome(&ui, &messages);
+        apply_chrome(&ui, &messages, work_mode);
         // Consume the compact config and the initial viewport: the responsive
         // geometry is derived once here and on every resize (audit U01).
         apply_responsive(&ui, configuration.logical_size, configuration.compact);
         ui.set_status_label(messages.text("status.scaffold", &[]).into());
         ui.set_work_mode(work_mode);
+
+        let work_mode: Rc<Cell<bool>> = Rc::new(Cell::new(work_mode));
 
         let document = configuration.document.clone();
         let viewport = configuration.viewport;
@@ -180,6 +182,50 @@ impl UiAdapter {
                     &doc,
                     viewport,
                     CommandPayload::None,
+                ));
+            });
+        }
+        {
+            // Persist the last confirmed measurement as an annotation (F06/F07).
+            // The command layer refuses with InvalidInput when no record exists;
+            // the shell only enables the button when the host pushed a record.
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_save_measurement_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::SaveMeasurementAsAnnotation,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+            });
+        }
+        {
+            // Viewer/Work switch (audit U02). Emits a real `SetMode` command; the
+            // shell reflects the target immediately and the host's authoritative
+            // push (`UiHandle::set_mode`) corrects any discrepancy.
+            let s = shared.clone();
+            let doc = document.clone();
+            let work = work_mode.clone();
+            let messages = messages_slot.clone();
+            let report = ui_weak.clone();
+            ui.on_mode_toggled(move || {
+                let target = if work.get() {
+                    cad_app::AppMode::Viewer
+                } else {
+                    cad_app::AppMode::Work
+                };
+                let is_work = target == cad_app::AppMode::Work;
+                work.set(is_work);
+                if let Some(ui) = report.upgrade() {
+                    ui.set_work_mode(is_work);
+                    ui.set_mode_label(crate::status::mode_label(&messages.borrow(), target).into());
+                }
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::SetMode,
+                    &doc,
+                    viewport,
+                    CommandPayload::Mode(target),
                 ));
             });
         }
@@ -670,6 +716,7 @@ impl UiAdapter {
             selection_count,
             annotation_hidden_count,
             view_3d,
+            work_mode,
         })
     }
 
@@ -712,6 +759,7 @@ impl UiAdapter {
             selection_count: self.selection_count.clone(),
             annotation_hidden_count: self.annotation_hidden_count.clone(),
             view_3d: self.view_3d.clone(),
+            work_mode: self.work_mode.clone(),
         }
     }
 
