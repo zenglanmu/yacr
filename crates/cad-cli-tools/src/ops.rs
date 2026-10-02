@@ -480,6 +480,9 @@ pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Valu
             color_unresolved: fragment.color_unresolved,
             lineweight: fragment.lineweight,
             lineweight_unresolved: fragment.lineweight_unresolved,
+            linetype: fragment.linetype.clone(),
+            linetype_scale: fragment.linetype_scale,
+            linetype_unresolved: fragment.linetype_unresolved,
             primitive: fragment.primitive.transformed(&paper_to_render),
         };
         let only = cad_representation::DisplayRepresentation {

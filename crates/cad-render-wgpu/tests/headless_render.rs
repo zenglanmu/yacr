@@ -252,6 +252,8 @@ fn gradient_quad(left: [f32; 3], right: [f32; 3]) -> RenderBatch {
         color_unresolved: true,
         lineweight: 0.0,
         lineweight_unresolved: true,
+        linetype: cad_scene::LinetypePattern::continuous(),
+        linetype_unresolved: false,
         sources: vec![source()],
         draw_order: 0,
     }
