@@ -265,7 +265,35 @@ Android **刻意不安装** `LayoutSwitchSink`：一旦安装，适配器会改�
   属性查询接线，因此没有属性面板。
 - **2D/3D、Orbit**：`Switch2d3d`/`Orbit` 仍是 `pending(...)`，本轮不涉及。
 
-## 5. 测试与证据边界
+## 5. 无障碍边界与键盘可达（U12 / U08）
+
+DOM 宿主对 Slint 画布**不宣称等价原生语义**。画布是一个不透明的
+`<canvas>`，没有可按实体建模的 ARIA 结构；本轮只提供**明确的替代入口**，不实现
+完整 ARIA canvas 模型（无逐实体 role、无网格导航）。
+
+- **声明为应用区域**：`apps/app-web/web/index.html` 的 `#canvas-host` 标记
+  `role="application"`、`aria-label`（目录键 `a11y.canvas_label`）与
+  `tabindex="0"`，因此键盘 Tab 可到达并有可见焦点环（`style.css`
+  `#canvas-host:focus-visible`）。这是“可达”，不是“语义完整”。
+- **单一播报通道**：`#a11y-status` 是视觉隐藏的 `role="status"`
+  `aria-live="polite"` `aria-atomic="true"` 区域（`.visually-hidden`，非
+  `display:none`），由 `web/host/a11y.js` 经 `web/host/i18n.js` 的
+  `setStateKey`/`setStateText` 漏斗更新。它与 `#host-state` **同一条节奏**
+  （`renderer.js` 轮询），但输出的是面向屏幕阅读器的短句，而不是原始
+  `renderer_state_report()` 文本。
+- **避免重复播报**：`#host-state` 改为 `aria-live="off"`，只保留 `role="status"`
+  语义；真正的播报只发生在 `#a11y-status`。失败时 live region 使用
+  `a11y.status_failed`（不含 `adapter=…`/`error=Some(…)` 技术转储）。
+- **U08 宿主状态条不再常驻压住 Slint 状态**：`#host-state` 是加载/失败专用行；
+  轮询判定就绪时给 `<body>` 加 `renderer-ready`，CSS 规则
+  `body.renderer-ready:not(:has(#retry-renderer:not([hidden]))) #host-state` 将其
+  隐藏。失败时重试按钮显示，`:has` 守卫重新显示该行，错误不会被静默吞掉。
+- **诚实边界（未做）**：未做真实屏幕阅读器测试（VoiceOver/NVDA），未做逐实体
+  可访问导航、对比度实测或缩放实测；选择/工具的完整语义仍在 Slint 侧，DOM 只镜像
+  **状态**（加载/就绪/失败与宿主人文状态），不镜像实体级选择或工具步骤。上述均为
+  源码/契约证据，不构成无障碍验收。
+
+## 6. 测试与证据边界
 
 - 可测试的纯逻辑都放在 `cad-app`，并由 `cargo test -p cad-app` 覆盖：
   `MeasurementToolKind::{key,from_key,from_label,index,from_index,ALL}`、
@@ -303,3 +331,8 @@ Android **刻意不安装** `LayoutSwitchSink`：一旦安装，适配器会改�
   wasm32-unknown-unknown` 是 `cad-ui-slint` 的编译门，且已通过。
 - Slint 渲染、窗口事件循环、真实指针映射、GPU 合成**本轮均未运行**；上述仅为
   源码接线与编译证据，不构成视觉/真机验收。
+- DOM 无障碍契约（U12/U08）由 `node --test scripts/test-web-a11y.mjs` 覆盖：
+  断言 `#a11y-status` 存在且 `aria-live="polite"`、`#host-state` 非 polite、画布
+  `role="application"`+`aria-label`+`tabindex`、`.visually-hidden` 使用 clip 而非
+  `display:none`、CSS 在就绪后隐藏 `#host-state`、播报漏斗去重且失败不夹带原始
+  report、轮询就绪时加 `renderer-ready`。该测试不需要 wasm/浏览器。

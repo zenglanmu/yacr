@@ -147,5 +147,7 @@
   "host.startup_failed": "启动失败：{error}",
   "host.locale_failed": "切换语言失败：{error}",
   "host.open_needs_decision": "当前图纸有未保存的批注。请输入：save（保存）/ recovery（保留恢复副本）/ discard（丢弃）/ cancel（取消打开）",
-  "host.recovery_pending": "检测到未保存批注恢复快照：调用 window.yacr.restore_recovery_snapshot() 恢复或 discard_recovery_snapshot() 丢弃"
+  "host.recovery_pending": "检测到未保存批注恢复快照：调用 window.yacr.restore_recovery_snapshot() 恢复或 discard_recovery_snapshot() 丢弃",
+  "a11y.canvas_label": "CAD 画布（应用区域）",
+  "a11y.status_failed": "渲染器不可用，请使用 WebGL2 重试"
 }

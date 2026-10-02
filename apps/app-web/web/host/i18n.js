@@ -9,6 +9,9 @@ export function createI18n(getWasmModule) {
   // Last host status as a catalog key + args, so a language switch can re-render
   // it. Raw strings pushed by the Rust host are shown verbatim.
   let lastState = null;
+  // Optional accessible live-region mirror (audit U12). Attached by `main.js`
+  // before `initialize()`; absent in unit tests, where announcements are no-ops.
+  let a11y = null;
 
   const element = (id) => document.getElementById(id);
 
@@ -85,18 +88,24 @@ export function createI18n(getWasmModule) {
     if (open) open.textContent = t("host.open_drawing");
     const retry = element("retry-renderer");
     if (retry) retry.textContent = t("host.retry_renderer");
+    // The Slint canvas is an opaque drawing surface; expose it as one labelled
+    // application region rather than pretending it has native semantics (U12).
+    const canvasHost = element("canvas-host");
+    if (canvasHost) canvasHost.setAttribute("aria-label", t("a11y.canvas_label"));
   }
 
   function setStateText(text) {
     lastState = null;
     const node = element("host-state");
     if (node) node.textContent = text;
+    if (a11y) a11y.announceStateText(text);
   }
 
   function setStateKey(key, args = {}) {
     lastState = { key, args };
     const node = element("host-state");
     if (node) node.textContent = t(key, args);
+    if (a11y) a11y.announceStateKey(key, args);
   }
 
   function rerenderState() {
@@ -157,6 +166,9 @@ export function createI18n(getWasmModule) {
     setStateKey,
     setStateText,
     setLocale,
+    attachA11y(announcer) {
+      a11y = announcer;
+    },
     currentLocale: () => currentLocale,
   };
 }

@@ -76,11 +76,11 @@
 | U05 | TouchArea 无多触点身份，Web 总是左键平移；Android 无 ViewInput 接线 | 统一共享输入策略：单指绘制、双指导航、拖动阈值、pointer cancel/capture；多指不得提交批注。Esc/Android 返回先取消工具，再处理退出 |
 | U06 | 没有键盘焦点/IME 接线；InputEvent 类型存在但未使用 | 文本框/弹窗获得焦点时暂停画布快捷键；中文组合输入、Esc、软键盘、浏览器缩放测试；不能把拼音组合串当命令 |
 | U07 | safe_insets/dpi 配置未接；frame 用全窗口尺寸而 Image 只占工具栏之间区域 | 统一真实画布矩形→逻辑像素→物理像素→世界坐标映射；横竖屏、DPR=1/2/3、安全区、键盘弹出、resize 后绘制与拾取一致 |
-| U08 | 单行状态栏只显示首条诊断；HTML host-state 覆盖底部且轮询原始 report | 状态栏只显示简要加载/工具/单位/未保存状态；诊断抽屉展示完整对象级原因、实际后端及恢复操作；技术报告不常驻压住提示 |
+| U08 | 单行状态栏只显示首条诊断；HTML host-state 覆盖底部且轮询原始 report。**已部分关闭**：Slint 状态栏改用 `cad-app` 的 `StatusModel`（固定摘要，不含诊断正文，`status_summary_never_embeds_a_diagnostic_message`），诊断抽屉保留全部对象/原因；Web `#host-state` 改为加载/失败专用，`renderer-ready` 后 CSS 隐藏，失败经 `:has(#retry-renderer...)` 重新显示。见 `docs/diagnostics-ui.md`、`docs/ui.md` §5 | 状态栏只显示简要加载/工具/单位/未保存状态；诊断抽屉展示完整对象级原因、实际后端及恢复操作；技术报告不常驻压住提示 |
 | U09 | 无加载进度/取消、指纹不匹配映射弹窗、未保存决策、后端强制失败恢复 UI | 建一致 Save/PreserveRecovery/Discard/Cancel 流程；取消不丢文档；失败保留原值并说明具体可恢复动作 |
 | U10 | Slint/Rust/JS/HTML 中文硬编码；locale 无效；英译会放大布局压力 | 按 N01 外置双语；英语长文、中文字体与工具提示覆盖测试；固定 96px 后端框、28px 状态栏不要作为所有控件默认尺寸 |
 | U11 | Undo/Redo 都绑定 can-undo（`app.slint:38–46`） | 独立 can_undo/can_redo 派生状态，撤销到空后仍能 redo；UI 刷新不能触发重复命令 |
-| U12 | Canvas 无原生 HTML 语义，未展示替代可访问入口 | 标注无障碍边界，测试焦点顺序/键盘可达/对比度/缩放；DOM aria-live 与 Slint 状态避免重复播报，不宣称 Canvas 等价原生语义 |
+| U12 | Canvas 无原生 HTML 语义，未展示替代可访问入口。**已部分关闭**：`#canvas-host` 标 `role="application"`+目录 `aria-label`+`tabindex="0"`，`#a11y-status` 视觉隐藏 `role="status" aria-live="polite"` 承接播报，`#host-state` 改 `aria-live="off"` 避免重复；`scripts/test-web-a11y.mjs` 断言 DOM/CSS 契约。见 `docs/ui.md` §5 | 标注无障碍边界，测试焦点顺序/键盘可达/对比度/缩放；DOM aria-live 与 Slint 状态避免重复播报，不宣称 Canvas 等价原生语义 |
 
 建议交互验收视口：360×800、横屏 800×360、平板 800×1280、桌面 1280×800；这是新增测试建议，不是已有通过结果。
 
