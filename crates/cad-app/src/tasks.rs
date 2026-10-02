@@ -34,7 +34,8 @@ use std::thread::JoinHandle;
 
 use cad_domain::{CadError, CadResult, DocumentId, TaskStamp};
 use cad_import_acadrust::{
-    AcadrustImporter, ImportProgress, ImportProgressSink, ImportRequest, ImportedDrawing, Importer,
+    AcadrustImporter, ImportPhase, ImportProgress, ImportProgressSink, ImportRequest,
+    ImportedDrawing, Importer,
 };
 use cad_platform::CancellationToken;
 
@@ -293,6 +294,164 @@ impl ImportManager {
     }
 }
 
+/// How a background import reached its terminal state, for a UI.
+///
+/// This is a projection of [`AsyncOpenPoll`]'s terminal variants with the
+/// payload a progress panel needs; it never invents a state the worker did not
+/// report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportTerminal {
+    /// The import finished, was current, and its document was published.
+    /// `entities` is the real entity count of the published database.
+    Opened { entities: usize },
+    /// The job was cancelled or superseded; nothing was published.
+    Cancelled,
+    /// The import failed with the real importer error.
+    Failed { error: CadError },
+}
+
+/// The stable machine key of an [`ImportPhase`] (e.g. `"entities"`).
+///
+/// This keeps phase labels in the UI catalog keyed by a locale-independent
+/// string, so `cad-ui-slint` never has to depend on the importer crate.
+pub fn import_phase_key(phase: ImportPhase) -> &'static str {
+    match phase {
+        ImportPhase::Reading => "reading",
+        ImportPhase::Parsing => "parsing",
+        ImportPhase::Tables => "tables",
+        ImportPhase::Entities => "entities",
+        ImportPhase::Resolving => "resolving",
+        ImportPhase::Finishing => "finishing",
+    }
+}
+
+/// A UI-facing, locale-independent snapshot of the asynchronous open (F01).
+///
+/// This is the pollable form the Slint shell binds to: it carries only real
+/// values, so a UI can render an indeterminate bar when `entities_total` is
+/// `None` and omit a byte count that was never measured. A host that does not
+/// use the snapshot path can keep driving [`AsyncOpenPoll`] directly.
+///
+/// Terminal states are retained (so a failure stays visible); a new
+/// [`HostController::begin_async_open`] supersedes them, and a genuinely idle
+/// controller reports `None` from [`HostController::async_open_snapshot`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportProgressSnapshot {
+    /// Whether an import is still running (false once terminal).
+    pub running: bool,
+    /// Latest real phase, or `None` before the first tick is observed.
+    ///
+    /// Never guessed: a job that has not emitted a tick yet reports no phase
+    /// rather than a fabricated `Reading`.
+    pub phase: Option<ImportPhase>,
+    /// Entities normalised/inserted so far (real; `0` before the first tick).
+    pub entities_done: usize,
+    /// Total entities expected, when the format exposes it. Stays `None`
+    /// otherwise, so a UI must render an indeterminate bar.
+    pub entities_total: Option<usize>,
+    /// Source bytes known so far, only when actually measurable.
+    pub bytes: Option<u64>,
+    /// Whether a cancel request can still be issued (false once requested or
+    /// once the job reached a terminal state).
+    pub cancellable: bool,
+    /// Terminal outcome, if the job has finished.
+    pub terminal: Option<ImportTerminal>,
+}
+
+impl ImportProgressSnapshot {
+    /// The stable machine key of the latest phase (e.g. `"entities"`), if any.
+    ///
+    /// Locale-independent, so a UI crate can map it to a catalog label without
+    /// depending on the importer crate.
+    pub fn phase_key(&self) -> Option<&'static str> {
+        self.phase.map(import_phase_key)
+    }
+
+    /// A running snapshot before any progress tick has arrived.
+    pub fn running() -> Self {
+        ImportProgressSnapshot {
+            running: true,
+            phase: None,
+            entities_done: 0,
+            entities_total: None,
+            bytes: None,
+            cancellable: true,
+            terminal: None,
+        }
+    }
+
+    /// A running snapshot reflecting one real progress tick.
+    pub fn from_progress(progress: &ImportProgress, cancellable: bool) -> Self {
+        ImportProgressSnapshot {
+            running: true,
+            phase: Some(progress.phase),
+            entities_done: progress.entities_done,
+            entities_total: progress.entities_total,
+            bytes: progress.bytes,
+            cancellable,
+            terminal: None,
+        }
+    }
+
+    /// A terminal snapshot. `cancellable` is always false once terminal.
+    pub fn terminal(terminal: ImportTerminal) -> Self {
+        ImportProgressSnapshot {
+            running: false,
+            phase: None,
+            entities_done: 0,
+            entities_total: None,
+            bytes: None,
+            cancellable: false,
+            terminal: Some(terminal),
+        }
+    }
+
+    /// Project one [`AsyncOpenPoll`] result into a snapshot.
+    ///
+    /// `previous` supplies the running fields when a poll carries no new tick
+    /// (so an observed phase/count is never lost or invented). `Idle` yields
+    /// `None`: there is genuinely nothing asynchronous to show.
+    ///
+    /// This is the single mapping from the manager's poll to the UI snapshot,
+    /// so the two cannot drift.
+    pub fn from_poll(
+        poll: &AsyncOpenPoll,
+        previous: Option<&ImportProgressSnapshot>,
+    ) -> Option<Self> {
+        match poll {
+            AsyncOpenPoll::Idle => None,
+            AsyncOpenPoll::Running { progress, .. } => {
+                let mut snapshot = previous
+                    .filter(|snapshot| snapshot.running)
+                    .cloned()
+                    .unwrap_or_else(ImportProgressSnapshot::running);
+                if let Some(last) = progress.last() {
+                    snapshot.phase = Some(last.phase);
+                    snapshot.entities_done = last.entities_done;
+                    snapshot.entities_total = last.entities_total;
+                    // A later tick without a byte count must not erase one that
+                    // was already measured.
+                    snapshot.bytes = last.bytes.or(snapshot.bytes);
+                }
+                Some(snapshot)
+            }
+            AsyncOpenPoll::Opened { opened, .. } => {
+                Some(ImportProgressSnapshot::terminal(ImportTerminal::Opened {
+                    entities: opened.entities,
+                }))
+            }
+            AsyncOpenPoll::Cancelled { .. } => {
+                Some(ImportProgressSnapshot::terminal(ImportTerminal::Cancelled))
+            }
+            AsyncOpenPoll::Failed { error, .. } => {
+                Some(ImportProgressSnapshot::terminal(ImportTerminal::Failed {
+                    error: error.clone(),
+                }))
+            }
+        }
+    }
+}
+
 /// The outcome of polling an asynchronous open on a [`HostController`].
 #[derive(Debug)]
 pub enum AsyncOpenPoll {
@@ -335,6 +494,9 @@ impl HostController {
             generation: self.session.generation,
         };
         self.pending_open_label = Some(label.to_string());
+        // Reset the UI snapshot to a fresh, tick-less running state so a stale
+        // terminal state can never be shown for the new job.
+        self.async_open = Some(crate::tasks::ImportProgressSnapshot::running());
         self.import_manager.start(request)
     }
 
@@ -345,6 +507,13 @@ impl HostController {
     pub fn cancel_async_open(&mut self) {
         self.import_manager.request_cancel();
         self.pending_open_label = None;
+        if let Some(snapshot) = self.async_open.as_mut() {
+            if snapshot.running {
+                // Cancellation was requested; the cancel affordance must not
+                // claim it can be issued again.
+                snapshot.cancellable = false;
+            }
+        }
     }
 
     /// Poll the running asynchronous open.
@@ -355,11 +524,14 @@ impl HostController {
     pub fn poll_async_open(&mut self) -> AsyncOpenPoll {
         let current = self.import_manager.current_stamp();
         let Some(job) = self.import_manager.current() else {
+            // Idle: keep any retained terminal snapshot (a failure stays
+            // visible) rather than clearing it to nothing.
             return AsyncOpenPoll::Idle;
         };
+        let requested_cancel = job.is_cancelled();
         let progress = job.drain_progress();
         let stamp = job.stamp().clone();
-        match job.try_take(&current) {
+        let poll = match job.try_take(&current) {
             Ok(None) => AsyncOpenPoll::Running { progress, stamp },
             Ok(Some(imported)) => match self.publish_imported(imported, &stamp) {
                 Ok(opened) => {
@@ -388,7 +560,22 @@ impl HostController {
                 self.import_manager.finish();
                 AsyncOpenPoll::Failed { error, progress }
             }
+        };
+        // Project the poll into the retained UI snapshot. `from_poll` reuses the
+        // previous running fields when this poll carried no new tick; a
+        // cancellation request is reflected so the panel cannot offer cancel
+        // twice. Idle never reaches here, so a terminal state is retained.
+        let previous = self.async_open.take();
+        let mut updated = crate::tasks::ImportProgressSnapshot::from_poll(&poll, previous.as_ref());
+        if requested_cancel {
+            if let Some(snapshot) = updated.as_mut() {
+                if snapshot.running {
+                    snapshot.cancellable = false;
+                }
+            }
         }
+        self.async_open = updated;
+        poll
     }
 }
 
@@ -590,5 +777,199 @@ mod tests {
         }
         assert_eq!(controller.drawing().unwrap().id(), demo_id);
         assert_eq!(controller.document_name_hint, "yacr-demo");
+    }
+
+    #[test]
+    fn snapshot_is_none_when_idle_and_never_fabricates_a_phase() {
+        let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        // Nothing started: genuinely idle, no fabricated snapshot.
+        assert_eq!(controller.async_open_snapshot(), None);
+
+        // Projecting an Idle poll yields nothing, and a running snapshot before
+        // any tick reports no phase rather than a guessed one.
+        assert_eq!(
+            ImportProgressSnapshot::from_poll(&AsyncOpenPoll::Idle, None),
+            None
+        );
+        let started = ImportProgressSnapshot::running();
+        assert!(started.running);
+        assert_eq!(started.phase, None);
+        assert_eq!(started.entities_done, 0);
+        assert_eq!(started.entities_total, None);
+        assert_eq!(started.bytes, None);
+        assert!(started.cancellable);
+        assert_eq!(started.terminal, None);
+    }
+
+    #[test]
+    fn snapshot_keeps_unknown_totals_unknown_and_real_totals_exact() {
+        // Indeterminate: total unknown stays None, bytes unknown stays None.
+        let indeterminate = ImportProgress::at(cad_import_acadrust::ImportPhase::Parsing, 0, None);
+        let snapshot = ImportProgressSnapshot::from_progress(&indeterminate, true);
+        assert_eq!(snapshot.entities_total, None);
+        assert_eq!(snapshot.bytes, None);
+        assert!(snapshot.running);
+
+        // Determinate: the real total is carried verbatim.
+        let determinate =
+            ImportProgress::at(cad_import_acadrust::ImportPhase::Entities, 2, Some(4));
+        let snapshot = ImportProgressSnapshot::from_progress(&determinate, true);
+        assert_eq!(snapshot.entities_done, 2);
+        assert_eq!(snapshot.entities_total, Some(4));
+    }
+
+    #[test]
+    fn snapshot_projection_retains_running_fields_and_maps_terminals() {
+        // A Running poll with no tick keeps the previous real phase/counts so a
+        // phase is never lost or invented.
+        let previous = ImportProgressSnapshot {
+            running: true,
+            phase: Some(cad_import_acadrust::ImportPhase::Entities),
+            entities_done: 3,
+            entities_total: Some(4),
+            bytes: Some(123),
+            cancellable: true,
+            terminal: None,
+        };
+        let running = AsyncOpenPoll::Running {
+            progress: Vec::new(),
+            stamp: TaskStamp::new(DocumentId(1), 1),
+        };
+        let projected = ImportProgressSnapshot::from_poll(&running, Some(&previous)).unwrap();
+        assert_eq!(
+            projected.phase,
+            Some(cad_import_acadrust::ImportPhase::Entities)
+        );
+        assert_eq!(projected.entities_done, 3);
+        assert_eq!(projected.entities_total, Some(4));
+        assert_eq!(projected.bytes, Some(123));
+        assert!(projected.running);
+
+        // A later tick without bytes must not erase an already-measured count.
+        let tick = ImportProgress::at(cad_import_acadrust::ImportPhase::Entities, 4, Some(4));
+        let projected = ImportProgressSnapshot::from_poll(
+            &AsyncOpenPoll::Running {
+                progress: vec![tick],
+                stamp: TaskStamp::new(DocumentId(1), 1),
+            },
+            Some(&projected),
+        )
+        .unwrap();
+        assert_eq!(projected.bytes, Some(123), "measured bytes are retained");
+
+        // Terminals map to explicit, non-running snapshots.
+        let opened = ImportProgressSnapshot::from_poll(
+            &AsyncOpenPoll::Opened {
+                opened: Box::new(crate::host::OpenedDrawing {
+                    entities: 4,
+                    completeness_label: "完整".into(),
+                    diagnostics: Vec::new(),
+                }),
+                progress: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+        assert!(!opened.running);
+        assert_eq!(
+            opened.terminal,
+            Some(ImportTerminal::Opened { entities: 4 })
+        );
+        assert!(!opened.cancellable);
+
+        let cancelled =
+            ImportProgressSnapshot::from_poll(&AsyncOpenPoll::Cancelled { progress: vec![] }, None)
+                .unwrap();
+        assert_eq!(cancelled.terminal, Some(ImportTerminal::Cancelled));
+
+        let failed = ImportProgressSnapshot::from_poll(
+            &AsyncOpenPoll::Failed {
+                error: CadError::CorruptData("bad".into()),
+                progress: vec![],
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            failed.terminal,
+            Some(ImportTerminal::Failed {
+                error: CadError::CorruptData("bad".into())
+            })
+        );
+        assert!(!failed.cancellable);
+    }
+
+    #[test]
+    fn controller_snapshot_tracks_a_real_async_open_to_its_terminal() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller.begin_async_open(dwg_bytes(), "synthetic.dwg");
+        // A fresh running snapshot with no fabricated phase/total.
+        let running = controller.async_open_snapshot().expect("running snapshot");
+        assert!(running.running);
+        assert_eq!(running.phase, None);
+        assert_eq!(running.entities_total, None);
+        assert!(running.cancellable);
+
+        match poll_until_terminal(&mut controller) {
+            AsyncOpenPoll::Opened { .. } => {}
+            other => panic!("expected an opened drawing, got {other:?}"),
+        }
+        let terminal = controller.async_open_snapshot().expect("retained terminal");
+        assert!(!terminal.running);
+        assert_eq!(
+            terminal.terminal,
+            Some(ImportTerminal::Opened { entities: 4 })
+        );
+        assert!(!terminal.cancellable);
+    }
+
+    #[test]
+    fn cancelling_via_the_command_path_flips_cancellable_and_reports_cancelled() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller.begin_async_open(dwg_bytes(), "cancelled.dwg");
+        assert!(controller.async_open_snapshot().unwrap().cancellable);
+
+        // `CancelLoading` routes to the host cancel, so the UI's cancel
+        // affordance works through the ordinary command path.
+        controller
+            .execute(crate::Command {
+                schema_version: 1,
+                id: crate::CommandId::CancelLoading,
+                document: controller.document_id,
+                viewport: controller.viewport_id,
+                payload: crate::CommandPayload::None,
+            })
+            .unwrap();
+        let snapshot = controller.async_open_snapshot().unwrap();
+        assert!(snapshot.running);
+        assert!(!snapshot.cancellable, "cancel cannot be issued twice");
+
+        match poll_until_terminal(&mut controller) {
+            AsyncOpenPoll::Cancelled { .. } => {}
+            other => panic!("expected Cancelled, got {other:?}"),
+        }
+        let terminal = controller.async_open_snapshot().unwrap();
+        assert_eq!(terminal.terminal, Some(ImportTerminal::Cancelled));
+    }
+
+    #[test]
+    fn failed_open_retains_an_explicit_terminal_snapshot() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let garbage: Arc<[u8]> = Arc::from(vec![0u8, 1, 2, 3].into_boxed_slice());
+        controller.begin_async_open(garbage, "bad.dwg");
+        match poll_until_terminal(&mut controller) {
+            AsyncOpenPoll::Failed { .. } => {}
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        // The failure must stay explicit after the job leaves the manager.
+        assert!(matches!(controller.poll_async_open(), AsyncOpenPoll::Idle));
+        let terminal = controller.async_open_snapshot().unwrap();
+        assert!(!terminal.running);
+        assert!(matches!(
+            terminal.terminal,
+            Some(ImportTerminal::Failed {
+                error: CadError::CorruptData(_)
+            })
+        ));
     }
 }

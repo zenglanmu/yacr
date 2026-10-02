@@ -55,7 +55,10 @@ pub use recovery::{
     UnsavedFlow, UnsavedOutcome,
 };
 pub use selection::{entity_property_rows, PropertyRow, SelectionProperties, SelectionSet};
-pub use tasks::{AsyncOpenPoll, ImportJob, ImportManager};
+pub use tasks::{
+    import_phase_key, AsyncOpenPoll, ImportJob, ImportManager, ImportProgressSnapshot,
+    ImportTerminal,
+};
 
 use layers::LayerOverrideSet;
 

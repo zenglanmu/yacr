@@ -438,3 +438,147 @@ fn mode_labels_resolve_in_both_catalogs() {
         }
     }
 }
+
+#[test]
+fn shell_exposes_the_async_open_progress_panel_and_cancel() {
+    // F01: a progress panel with a real/indeterminate bar and a cancel action.
+    for marker in [
+        "import-active",
+        "import-phase-label",
+        "import-progress-text",
+        "import-percent",
+        "import-indeterminate",
+        "import-cancellable",
+        "import-panel-label",
+        "import-cancel-label",
+        "cancel-open-requested",
+    ] {
+        assert!(
+            UI_DEFINITION.contains(marker),
+            "shell must expose async-open marker {marker}"
+        );
+    }
+}
+
+#[test]
+fn import_ui_state_is_hidden_when_idle_or_opened() {
+    let zh = MessageSource::for_locale(Locale::ZhCn);
+    // Idle: nothing pushed, panel hidden, no fabricated labels.
+    let idle = ImportProgressUiState::from_snapshot(None, &zh);
+    assert!(!idle.visible);
+    assert_eq!(idle.percent, None);
+    assert_eq!(idle.phase_label, "");
+    assert_eq!(idle.progress_text, "");
+    assert!(!idle.cancellable);
+    assert!(!idle.terminal);
+    assert_eq!(idle.source, None);
+
+    // A successful open is a terminal but the panel is hidden (the document is
+    // the feedback); it is not an error state.
+    let opened =
+        cad_app::ImportProgressSnapshot::terminal(cad_app::ImportTerminal::Opened { entities: 4 });
+    let state = ImportProgressUiState::from_snapshot(Some(&opened), &zh);
+    assert!(!state.visible);
+    assert!(!state.terminal);
+    assert_eq!(state.percent, None);
+}
+
+#[test]
+fn import_ui_state_never_fabricates_a_percent_or_a_byte_count() {
+    let zh = MessageSource::for_locale(Locale::ZhCn);
+
+    // A running job with no observed total: indeterminate, no percent, and the
+    // text must not claim a total.
+    let indeterminate = cad_app::ImportProgressSnapshot {
+        running: true,
+        phase: None,
+        entities_done: 3,
+        entities_total: None,
+        bytes: None,
+        cancellable: true,
+        terminal: None,
+    };
+    let state = ImportProgressUiState::from_snapshot(Some(&indeterminate), &zh);
+    assert!(state.visible);
+    assert_eq!(state.percent, None);
+    assert!(state.cancellable);
+    assert!(state.progress_text.contains('3'));
+    assert!(
+        !state.progress_text.contains("0 字节") && !state.progress_text.contains("bytes"),
+        "an unknown byte count must not render as bytes: {}",
+        state.progress_text
+    );
+
+    // A real total yields a real percent and an exact count.
+    let determinate = cad_app::ImportProgressSnapshot {
+        running: true,
+        phase: None,
+        entities_done: 2,
+        entities_total: Some(4),
+        bytes: Some(2048),
+        cancellable: true,
+        terminal: None,
+    };
+    let state = ImportProgressUiState::from_snapshot(Some(&determinate), &zh);
+    assert_eq!(state.percent, Some(0.5));
+    assert!(state.progress_text.contains('2'));
+    assert!(state.progress_text.contains('4'));
+    assert!(state.progress_text.contains("2048"));
+
+    // A known zero total is indeterminate rather than a division by zero.
+    let zero = cad_app::ImportProgressSnapshot {
+        entities_total: Some(0),
+        ..determinate
+    };
+    let state = ImportProgressUiState::from_snapshot(Some(&zero), &zh);
+    assert_eq!(state.percent, None);
+}
+
+#[test]
+fn import_ui_state_reports_cancelled_and_failed_terminals_explicitly() {
+    let zh = MessageSource::for_locale(Locale::ZhCn);
+    let en = MessageSource::for_locale(Locale::En);
+
+    let cancelled = cad_app::ImportProgressSnapshot::terminal(cad_app::ImportTerminal::Cancelled);
+    for messages in [&zh, &en] {
+        let state = ImportProgressUiState::from_snapshot(Some(&cancelled), messages);
+        assert!(state.visible && state.terminal);
+        assert!(!state.cancellable, "a terminal cannot be cancelled again");
+        assert_eq!(state.percent, None);
+        assert!(!state.phase_label.is_empty());
+    }
+
+    let failed = cad_app::ImportProgressSnapshot::terminal(cad_app::ImportTerminal::Failed {
+        error: cad_domain::CadError::CorruptData("bad".into()),
+    });
+    let state = ImportProgressUiState::from_snapshot(Some(&failed), &zh);
+    assert!(state.visible && state.terminal);
+    assert!(!state.cancellable);
+    assert!(state.phase_label.contains("bad"));
+}
+
+#[test]
+fn import_phase_keys_all_resolve_in_both_catalogs() {
+    // Every machine phase key cad-app can emit must have a label; the mapper
+    // itself is unit-tested in cad-app, so here we only assert coverage.
+    for messages in [
+        MessageSource::for_locale(Locale::ZhCn),
+        MessageSource::for_locale(Locale::En),
+    ] {
+        for key in [
+            "reading",
+            "parsing",
+            "tables",
+            "entities",
+            "resolving",
+            "finishing",
+            "unknown",
+        ] {
+            let label = messages.text(&format!("import.phase.{key}"), &[]);
+            assert!(
+                !label.contains("import.phase."),
+                "phase key {key} has no catalog label: {label}"
+            );
+        }
+    }
+}
