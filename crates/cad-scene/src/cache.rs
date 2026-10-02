@@ -224,18 +224,37 @@ impl SceneCache {
             self.used_bytes += batch.approx_bytes();
             self.chunks.insert(key, batch);
         }
-        self.evict(0)?;
+        let _ = self.evict(0)?;
         Ok(())
     }
 
     /// Drop oldest chunks until the cache is under budget.
-    pub fn evict(&mut self, required_bytes: usize) -> CadResult<()> {
+    ///
+    /// Returns the number of chunks evicted. `evict(0)` is the maintenance call
+    /// after publishing; a caller that needs room for a known batch passes its
+    /// byte size so the cache is made to fit first. Eviction is what makes
+    /// [`SceneBudget::cpu_bytes`] a hard ceiling: the live cache never holds
+    /// more than `used_bytes()` bytes counting toward the budget.
+    pub fn evict(&mut self, required_bytes: usize) -> CadResult<usize> {
+        let mut evicted = 0usize;
         while self.used_bytes + required_bytes > self.budget.cpu_bytes {
             let Some(oldest) = self.chunks.keys().next().copied() else {
                 break;
             };
             self.remove_chunk(oldest);
+            evicted += 1;
         }
-        Ok(())
+        Ok(evicted)
+    }
+
+    /// CPU bytes currently held by the live cache, counted toward
+    /// [`SceneBudget::cpu_bytes`].
+    ///
+    /// This is the cache's own accounting (sum of [`RenderBatch::approx_bytes`]
+    /// over live chunks). It is the CPU-cache slice of `MemoryBudget`, not the
+    /// whole-process geometry footprint: the per-chunk bytes are counted here
+    /// and the source representation/domain data lives elsewhere.
+    pub fn total_cpu_bytes(&self) -> usize {
+        self.used_bytes
     }
 }

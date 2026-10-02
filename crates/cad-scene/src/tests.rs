@@ -270,6 +270,7 @@ fn frame_budget_reports_over_vertex_limit() {
     let budget = FrameBudget {
         max_vertices: 10,
         max_triangles: 10,
+        max_bytes: usize::MAX,
     };
     let mut usage = FrameUsage::default();
     budget.charge(&mut usage, 6, 2).unwrap();
@@ -286,6 +287,7 @@ fn frame_budget_reports_over_triangle_limit() {
     let budget = FrameBudget {
         max_vertices: 1000,
         max_triangles: 3,
+        max_bytes: usize::MAX,
     };
     let mut usage = FrameUsage::default();
     budget.charge(&mut usage, 3, 2).unwrap();
@@ -294,6 +296,149 @@ fn frame_budget_reports_over_triangle_limit() {
     assert_eq!(exceeded.requested, 4);
     assert_eq!(exceeded.limit, 3);
     assert_eq!(usage.triangles, 2);
+}
+
+#[test]
+fn frame_budget_reports_over_byte_limit() {
+    let budget = FrameBudget {
+        max_vertices: usize::MAX,
+        max_triangles: usize::MAX,
+        max_bytes: 100,
+    };
+    let mut usage = FrameUsage::default();
+    budget.charge_bytes(&mut usage, 60).unwrap();
+    let exceeded = budget.charge_bytes(&mut usage, 60).unwrap_err();
+    assert_eq!(exceeded.category, "bytes");
+    assert_eq!(exceeded.requested, 120);
+    assert_eq!(exceeded.limit, 100);
+    // The rejected charge did not apply.
+    assert_eq!(usage.bytes, 60);
+}
+
+#[test]
+fn upload_bytes_of_counts_every_uploaded_buffer() {
+    // A mesh batch uploads positions, normals, `[u32; 3]` triangle indices and
+    // a `u32` edge index per de-duplicated edge.
+    let mut cache = SceneCache::default();
+    let delta = cache
+        .build(&mesh_representation(1, quad()), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    // 4 positions + 4 normals = 8 vertex vectors * 12 = 96.
+    // 2 triangles * 12 = 24 index bytes.
+    // A quad triangulated as [0,1,2],[0,2,3] has 5 distinct undirected edges
+    // (the diagonal is shared) => 10 `u32` edge indices = 40 bytes.
+    // `edges` (the position list the scene carries) is separate and counted too.
+    assert_eq!(batch.vertex_bytes(), (4 + 4 + 12) * 12);
+    assert_eq!(edge_index_count(&batch.indices), 10);
+    let expected = batch.vertex_bytes() + 2 * 12 + 10 * 4;
+    assert_eq!(batch.upload_size_bytes(), expected);
+}
+
+#[test]
+fn upload_bytes_of_line_batch_has_no_index_bytes() {
+    let mut cache = SceneCache::default();
+    let rep = line_representation(
+        1,
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        ],
+    );
+    let delta = cache.build(&rep, stamp()).unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(batch.upload_size_bytes(), 2 * 12);
+}
+
+#[test]
+fn task_queue_rejects_over_capacity_without_dropping() {
+    let mut queue = TaskQueue::new(2);
+    queue.submit().unwrap();
+    queue.submit().unwrap();
+    let exceeded = queue.submit().unwrap_err();
+    assert_eq!(exceeded.category, "queued_tasks");
+    assert_eq!(exceeded.requested, 3);
+    assert_eq!(exceeded.limit, 2);
+    // The rejected submission did not consume a slot.
+    assert_eq!(queue.in_flight(), 2);
+    // Completing a task frees exactly one slot.
+    queue.complete();
+    queue.submit().unwrap();
+    assert_eq!(queue.in_flight(), 2);
+}
+
+#[test]
+fn scene_cache_accounts_cpu_bytes_and_evicts_over_budget() {
+    // Each 3-point line batch is 36 vertex bytes. A 40-byte budget keeps one.
+    let mut cache = SceneCache::new(SceneBudget {
+        cpu_bytes: 40,
+        ..Default::default()
+    });
+    let rep = line_representation(
+        1,
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 2.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        ],
+    );
+    let delta = cache.build(&rep, stamp()).unwrap();
+    cache.publish(delta, &stamp()).unwrap();
+    assert_eq!(cache.total_cpu_bytes(), 36);
+    assert_eq!(cache.chunk_count(), 1);
+    // Publishing another 36-byte batch would exceed 40, so the oldest is evicted
+    // first: the cache is never above budget, and bytes are accounted for real.
+    let delta = cache.build(&rep, stamp()).unwrap();
+    cache.publish(delta, &stamp()).unwrap();
+    assert!(cache.total_cpu_bytes() <= 40);
+    assert_eq!(cache.chunk_count(), 1);
+}
+
+#[test]
+fn scene_cpu_bytes_is_charged_on_publish_not_faked() {
+    // Two small batches fit; the sum is exactly their counted bytes.
+    let mut cache = SceneCache::default();
+    let rep = line_representation(
+        1,
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        ],
+    );
+    let delta = cache.build(&rep, stamp()).unwrap();
+    cache.publish(delta, &stamp()).unwrap();
+    assert_eq!(cache.used_bytes(), 24);
+    let delta = cache.build(&rep, stamp()).unwrap();
+    cache.publish(delta, &stamp()).unwrap();
+    assert_eq!(cache.used_bytes(), 48);
 }
 
 #[test]

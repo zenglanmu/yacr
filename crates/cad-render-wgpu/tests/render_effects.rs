@@ -303,6 +303,7 @@ fn frame_budget_over_budget_is_reported_not_silent() {
     renderer.frame_budget = FrameBudget {
         max_vertices: 10,
         max_triangles: 1_000_000,
+        max_bytes: usize::MAX,
     };
     renderer
         .upload(&scene(vec![
@@ -334,6 +335,45 @@ fn frame_budget_over_budget_is_reported_not_silent() {
         stats.draw_calls, 1,
         "exactly the one batch that fit should be drawn"
     );
+}
+
+#[test]
+fn frame_byte_budget_is_reported_not_silent() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // Two line batches of eight vertices each = 96 bytes each. The first fits a
+    // 100-byte budget; the second crosses it on the byte category.
+    renderer.frame_budget = FrameBudget {
+        max_vertices: usize::MAX,
+        max_triangles: usize::MAX,
+        max_bytes: 100,
+    };
+    renderer
+        .upload(&scene(vec![
+            lines_batch(rectangle_lines()),
+            lines_batch(rectangle_lines()),
+        ]))
+        .expect("upload two batches");
+    // The upload phase records a real measured wall-clock time.
+    let upload_ms = renderer
+        .last_upload_ms()
+        .expect("upload must record a measured time");
+    assert!(upload_ms.is_finite() && upload_ms >= 0.0, "got {upload_ms}");
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("over-budget frame must still render the batches that fit");
+
+    let over = stats
+        .over_budget
+        .expect("crossing the byte budget must be reported, never silent");
+    assert_eq!(over.report.category, "bytes");
+    assert_eq!(over.report.limit, 100);
+    assert_eq!(over.report.requested, 192);
+    assert_eq!(stats.draw_calls, 1);
 }
 
 #[test]

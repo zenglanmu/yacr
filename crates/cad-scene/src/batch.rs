@@ -98,6 +98,37 @@ impl RenderBatch {
         (self.vertices.len() + self.normals.len() + self.edges.len()) * 12 + self.indices.len() * 12
     }
 
+    /// The exact packed GPU upload size of this batch, in bytes.
+    ///
+    /// This mirrors `cad-render-wgpu::Renderer::upload`: positions and edge
+    /// positions are 12 bytes per vertex; a mesh **always** uploads one normal
+    /// per vertex (repaired when the scene's normals are missing or wrong), so
+    /// that normal buffer is `vertices.len()` vectors even when
+    /// [`RenderBatch::normals`] is empty; triangle indices are `[u32; 3]`; and
+    /// for a mesh the wireframe index buffer is the de-duplicated edge list as
+    /// `u32`. [`SceneBudget::upload_bytes_per_frame`] is charged this amount.
+    pub fn upload_size_bytes(&self) -> usize {
+        let positions = self.vertices.len() * 12;
+        let edges = self.edges.len() * 12;
+        let normals = if self.topology == RenderTopology::Mesh {
+            self.vertices.len() * 12
+        } else {
+            self.normals.len() * 12
+        };
+        let triangle_index_bytes = self.indices.len() * 12;
+        let edge_index_bytes = if self.topology == RenderTopology::Mesh {
+            edge_index_count(&self.indices) * 4
+        } else {
+            0
+        };
+        positions + normals + edges + triangle_index_bytes + edge_index_bytes
+    }
+
+    /// Vertex-space bytes: positions, normals and edge positions (12 bytes each).
+    pub fn vertex_bytes(&self) -> usize {
+        (self.vertices.len() + self.normals.len() + self.edges.len()) * 12
+    }
+
     /// World-space centroid used as the transparent-pass depth-sort key.
     ///
     /// It is `local_origin + mean(vertices)`. The mean is taken in `f64` before
@@ -129,8 +160,28 @@ impl RenderBatch {
     }
 }
 
-/// Sanitise a raw alpha value from a display fragment into `[0, 1]`.
+/// Number of `u32` indices the wireframe edge buffer will contain for a mesh.
 ///
+/// The renderer builds the edge buffer from the triangle topology, not from the
+/// duplicated edge positions: `cad-render-wgpu::geometry::sorted_edge_indices`
+/// emits two indices per distinct undirected edge. This computes the exact same
+/// count from `indices` so [`SceneBudget::upload_bytes_per_frame`] matches what
+/// is uploaded. Only the *count* is needed, so this does not allocate.
+pub fn edge_index_count(indices: &[[u32; 3]]) -> usize {
+    let mut pairs: Vec<(u32, u32)> = Vec::new();
+    for tri in indices {
+        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
+            if a != b {
+                pairs.push((a.min(b), a.max(b)));
+            }
+        }
+    }
+    pairs.sort_unstable();
+    pairs.dedup();
+    pairs.len() * 2
+}
+
+/// Sanitise a raw alpha value from a display fragment into `[0, 1]`.///
 /// Policy (kept in lockstep with `cad-render-wgpu::geometry::clamp_alpha`, which
 /// re-clamps before upload): a non-finite value is treated as **opaque** so an
 /// unreadable opacity never deletes geometry; otherwise the value is clamped to
