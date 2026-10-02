@@ -36,4 +36,5 @@ Slint↔wgpu 合成（`cad-ui-slint/src/bridge.rs`）。仍返回 NotImplemented
 - 注册冲突须明确排序/拒绝；当前注册表并未实现扩展分发。
 
 `scripts/check-architecture.py` 校验当前依赖图、循环和核心隔离。
+Web 宿主与 Slint 渲染桥的文件职责划分见 `docs/code-structure.md`。
 traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代表已稳定公共 API。

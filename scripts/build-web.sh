@@ -17,7 +17,7 @@ DIST="${DIST:-$ROOT/web-dist}"
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 WASM="$TARGET_DIR/wasm32-unknown-unknown/$PROFILE/app_web.wasm"
 
-# Font source baked into the wasm at compile time (`apps/app-web/src/browser.rs`
+# Font source baked into the wasm at compile time (`apps/app-web/src/browser/fonts.rs`
 # reads `YACR_FONT_BASE_URL`). The default is a path relative to the page, so a
 # deployed build serves the third-party fonts from `$DIST/fonts/` (copied below)
 # instead of reaching out to jsDelivr. Build a CDN-backed bundle with
@@ -39,6 +39,7 @@ wasm-bindgen --target web --no-typescript --out-name yacr --out-dir "$DIST/pkg" 
 
 cp apps/app-web/web/index.html "$DIST/index.html"
 cp apps/app-web/web/main.js "$DIST/main.js"
+cp -R apps/app-web/web/host "$DIST/host"
 cp apps/app-web/web/style.css "$DIST/style.css"
 
 # Copy the single-source-of-truth catalogs so the JS host localizes its own

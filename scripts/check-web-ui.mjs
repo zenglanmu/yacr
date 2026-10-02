@@ -14,7 +14,7 @@
 // PLAYWRIGHT_MODULE (absolute path to an entry file) or a local installation.
 
 import zlib from "node:zlib";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const playwrightSpecifier = process.env.PLAYWRIGHT_MODULE || "playwright";
 const playwrightModule = await import(playwrightSpecifier);
@@ -190,6 +190,13 @@ await page.addInitScript(() => {
 const consoleMessages = [];
 const consoleErrors = [];
 const pageErrors = [];
+const hostModules = new Map();
+page.on("response", (response) => {
+  const path = new URL(response.url()).pathname;
+  if (path.includes("/host/") && path.endsWith(".js")) {
+    hostModules.set(path.split("/").at(-1), response.status());
+  }
+});
 const isHandoff = (text) =>
   typeof text === "string" && text.includes("Using exceptions for control flow");
 
@@ -237,6 +244,10 @@ try {
   );
   const startupError = await page.evaluate(() => window.yacrStartupError || null);
   if (startupError) throw new Error(`startup failed: ${startupError}`);
+  report.hostModules = Object.fromEntries(hostModules);
+  for (const module of ["files.js", "i18n.js", "renderer.js", "runtime.js"]) {
+    if (hostModules.get(module) !== 200) throw new Error(`host module not served: ${module}`);
+  }
 
   // Give the renderer a couple of frames plus the async adapter report.
   await page.waitForTimeout(2000);
@@ -335,6 +346,27 @@ try {
   if (beforeSwitch.entities !== afterSwitch.entities) {
     fail("language switch changed the document entity count");
   }
+
+  // Real download → confirmed revision → File API sidecar roundtrip.
+  const downloadPromise = page.waitForEvent("download");
+  await page.evaluate(() => window.yacr.export_annotations());
+  const download = await downloadPromise;
+  if (download.suggestedFilename() !== "annotations.cadnotes.json") {
+    throw new Error(`unexpected export filename: ${download.suggestedFilename()}`);
+  }
+  const sidecar = readFileSync(await download.path());
+  JSON.parse(sidecar.toString("utf8"));
+  await page.locator("#annotation-input").setInputFiles({
+    name: "annotations.cadnotes.json", mimeType: "application/json", buffer: sidecar,
+  });
+  await page.waitForFunction(() =>
+    document.getElementById("host-state").textContent.includes("Imported"));
+  const importState = await page.locator("#host-state").textContent();
+  await page.waitForTimeout(2200);
+  if (await page.locator("#host-state").textContent() !== importState) {
+    throw new Error("renderer heartbeat overwrote the sidecar import status");
+  }
+  report.sidecar = { bytes: sidecar.length, importState, statusPreserved: true };
 
   // Persisted preference restores on a fresh start (HTML chrome + host locale).
   await page.reload({ waitUntil: "load", timeout: 60000 });

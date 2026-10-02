@@ -57,6 +57,10 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "wasm-bindgen-cli",
         "actions/upload-artifact",
     ),
+    "web-host-contracts": (
+        "node --test scripts/test-web-host.mjs",
+        "actions/setup-node",
+    ),
     "android-check": (
         "cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked",
     ),

@@ -16,6 +16,13 @@
 
 ## 本轮状态（compact，2026-10-02）
 
+**宿主结构拆分**：Web Rust 宿主拆为 documents/annotations/fonts/input/persistence，
+JS 宿主拆为 i18n/files/renderer/runtime；Slint 桥分离 scene/camera/tests，既有接口和
+13 项桥测试保留。核心 870 passed、新增 JS 契约 5 passed、Web release 与两次本地
+Playwright 通过（含模块 HTTP 200、批注下载/空 sidecar 回导与状态保留）。CI 与部署
+检查包含所有 JS 模块。结构与环境阻塞见 `docs/code-structure.md`、
+`docs/validation-web.md` §6；原生 Slint 测试未执行完成，不能当作通过。
+
 四个并行 workstream 已合入 main 并验证：
 
 - **Android 运行闭环**：x86_64 release APK 在无头模拟器安装/启动/渲染；修复画布输入

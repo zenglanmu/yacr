@@ -46,6 +46,7 @@
 | `i18n-contracts` | core.yml | `ubuntu-latest` | 双语 catalog / 缺 key / 硬编码白名单校验 |
 | `shader-validation` | build.yml | `ubuntu-latest` | naga 离线 WGSL 解析/校验（无需 GPU），失败红灯 |
 | `web-build` | build.yml | `ubuntu-latest` | `scripts/build-web.sh` 产出 `web-dist` 并上传，校验 wasm/JS 配对 |
+| `web-host-contracts` | build.yml | `ubuntu-latest` | Node 内置测试：模块边界、未保存决策、导出确认、本地化及轮询（无需 wasm/GPU） |
 | `android-check` | core.yml | 能力相关（默认 SKIP） | aarch64 上 `cad-ui-slint` + `app-android` 的 `cargo check` |
 | `android-apk` | build.yml | 能力相关（默认 SKIP） | 产出/上传 APK，记录真实 manifest facts（不宣称安装运行） |
 | `web-smoke` | build.yml | 能力相关（默认 SKIP） | 软件 GPU 无头 Chromium 冒烟（非真机、非 WebGPU 验收） |
@@ -116,13 +117,20 @@
    （jsDelivr 优先；单文件失败按 `FONT_RETRIES` 退避重试，再回退到
    `raw.githubusercontent.com`——GitHub Actions 共享出口 IP 常被 jsDelivr 限流；
    两个源都失败才退出 1。字体不入库，见 `docs/fonts.md`）；
-4. 校验 `index.html`/`main.js`/`style.css`/`pkg/yacr.js`/`pkg/yacr_bg.wasm` 均非空，
+4. 校验 `index.html`/`main.js`/`style.css`/`pkg/yacr.js`/`pkg/yacr_bg.wasm` 及
+   `host/{files,i18n,renderer,runtime}.js` 均非空，
    且 JS glue 引用 `yacr_bg.wasm`（wasm/JS 配对）；
 5. 断言 `Cargo.lock` 未被改写（`git diff --exit-code`）；
 6. 上传 artifact `web-dist`（retention 14 天），并把 wasm 字节数与
    `wasm-bindgen-cli` 版本写入 job summary。
 
 `DIST` 固定为工作区内一次性生成目录（脚本 `rm -rf` 只作用于该目录，见审计 §8 提醒）。
+
+### `web-host-contracts`（必需，无需 wasm/GPU）
+
+`web-host-contracts` 独立使用 Node `22.22.1` 执行
+`node --test scripts/test-web-host.mjs`，不受 `WEB_SMOKE_ENABLED` 门控。
+它使用宿主 stub，不代替真实 wasm/Playwright 冒烟；模块划分见 `code-structure.md`。
 
 ### `android-check`（能力相关，默认 SKIP）
 
@@ -232,4 +240,3 @@ python3 scripts/check-workflows.py
 命令片段；且被门控的 job（`android-check`/`android-apk`/`web-smoke`）保留其
 `if:` 能力开关（缺开关即失败，防止门控被误当成静默通过）。有 PyYAML 时做真实解析，
 否则退化为结构化文本检查并如实说明（不假装 YAML 已解析）。失败退出码非零。
-

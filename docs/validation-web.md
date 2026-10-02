@@ -174,3 +174,64 @@ python3 scripts/check-i18n.py                                                   
   “未引用”分支；真实 `fetch` jsDelivr 与跨域注册仍未运行（见
   `docs/font-host-loading.md`）。
 - **wasm 体积优化**：无 `wasm-opt`，14.8 MB 为未优化产物。
+
+## 6. 宿主/渲染桥拆分复验（2026-10-02）
+
+职责划分见 `docs/code-structure.md`。Rust 宿主入口从 954 行降为约 245 行，JS
+入口从 405 行降为 70 行，渲染桥从 1269 行降为 754 行；功能实现移动到具名模块，
+不是改成占位或删除测试。渲染桥原有 13 项测试全部保留，另加场景 stamp/层显隐契约。
+
+### 构建与检查
+
+- 核心测试：**870 passed / 0 failed / 1 ignored**。
+- 新增 JS 宿主模块契约：**5 passed / 0 failed**，使用 Node `22.22.1` 内置测试。
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`：通过。
+- `cargo check -p cad-ui-slint --tests --target wasm32-unknown-unknown --locked`：通过，
+  只编译测试，**不表示执行测试**。
+- 核心 clippy `-D warnings`、`app-web --no-deps` wasm clippy `-D warnings`：通过。
+- fmt、架构（23 packages）、i18n（116 keys）、fixtures（9）、workflow 与 shell
+  语法检查：通过。CI 增加非门控 `web-host-contracts`，不把它当作 GPU 验收。
+- 初次 `scripts/build-web.sh` 在字体下载阶段耗时过长，终止该次抓取；两个缺失文件
+  `simhei.woff` / `simsun.woff` 复用现有 Android 缓存（目录相同，23 个共同文件的
+  SHA-256 全一致）。随后 `scripts/fetch-web-fonts.sh web-dist/fonts` 缓存复验通过，
+  **99 个字体文件完整**。未更改字体源、字体内容或第三方许可要求。
+- 最终源码另执行 release `cargo build -p app-web --target wasm32-unknown-unknown
+  --profile release --locked`（`YACR_FONT_BASE_URL=fonts/`）与 `wasm-bindgen --target web`：
+  均通过。发布 bundle 的字体同源，包含四个 `host/*.js` 模块。
+
+最终 `pkg/yacr_bg.wasm`：**15,182,933 bytes**，SHA-256：
+`ea5aca02ba8d09da811164fa85b945c56f90f226a2098ede4bb2e998a28b66a7`。
+
+### Playwright（两次本地通过）
+
+最终源码产物通过 `scripts/check-web-ui.mjs http://127.0.0.1:8096/`，Chromium
+`153.0.8010.12`，WebGL2 + SwiftShader：
+
+| 项目 | 结果 |
+|---|---|
+| 四个 JS 子模块加载 | 全部 HTTP 200 |
+| 实际后端 / 错误 | `adapter=Some(WebGl2)` / `error=None` |
+| 非空 CAD 画面 | 3 色，stddev 11.848 |
+| 滚轮导航像素变化 | `changedFraction=0.003280573593073593` |
+| 双语、文档保留、重载恢复 | 通过，`entities=6` 不变 |
+| 字体编排 | 通过；演示图仍走未引用字体分支 |
+| 批注导出/回导 | 实际下载 349-byte sidecar，经 File API 回导 0 条批注 |
+| 轮询不覆盖导入消息 | 等待 2.2 秒后消息保持不变 |
+| console / page errors | 0 / 0（仅预期 WebGPU 无适配器告警） |
+
+证据：`/tmp/opencode/yacr-refactor-final-web.json`、
+`/tmp/opencode/yacr-refactor-final-web.png`、
+`/tmp/opencode/yacr-refactor-final-web-navigation.png`；核心/构建/检查日志为
+`/tmp/opencode/yacr-refactor-*.log`。回导为空演示 sidecar，不能宣称验证了非空批注
+完整业务或真实 DWG 兼容性。
+
+### 环境阻塞与未验证项
+
+- Linux 原生 `cad-ui-slint` 测试因缺 `pkg-config`/fontconfig 构建依赖失败；尝试
+  `RUST_FONTCONFIG_DLOPEN=1` 后上游 `fontique` 符号导入不兼容，未绕过或修改上游。
+  因此迁移后的 Rust 桥契约仅完成 wasm 编译检查，原生运行未完成。
+- 额外尝试 UI wasm 严格 clippy 时，`adapter.rs` 的既有 `clone_on_copy` 与
+  `responsive.rs` 的既有文档 lint 共 32 项阻塞；没有以关掉警告宣称该检查通过。
+  本轮 app-web 和核心严格 clippy 已通过。
+- 本轮未验证 Android 运行、WebGPU、真实 GPU、真实字体绘制或真机性能；先前章节的
+  NOT RUN 限制继续有效。

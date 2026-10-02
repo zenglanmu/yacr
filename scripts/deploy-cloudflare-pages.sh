@@ -39,7 +39,8 @@ if [ "${SKIP_BUILD:-0}" != "1" ]; then
   "$ROOT/scripts/build-web.sh"
 fi
 
-for required in index.html main.js style.css pkg/yacr.js pkg/yacr_bg.wasm; do
+for required in index.html main.js style.css pkg/yacr.js pkg/yacr_bg.wasm \
+  host/files.js host/i18n.js host/renderer.js host/runtime.js; do
   [ -s "$DIST/$required" ] || { echo "missing $DIST/$required; run scripts/build-web.sh" >&2; exit 1; }
 done
 

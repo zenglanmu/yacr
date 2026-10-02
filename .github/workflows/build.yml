@@ -43,6 +43,18 @@ env:
   PLAYWRIGHT_VERSION: "1.55.1"        # pinned Playwright npm package
 
 jobs:
+  web-host-contracts:
+    name: web-host-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Browser host module contracts (no wasm/GPU)
+        run: node --test scripts/test-web-host.mjs
+
   web-build:
     name: web-build
     runs-on: ubuntu-latest
@@ -116,6 +128,9 @@ jobs:
           test -s web-dist/style.css
           test -s web-dist/pkg/yacr.js
           test -s web-dist/pkg/yacr_bg.wasm
+          for module in files i18n renderer runtime; do
+            test -s "web-dist/host/$module.js"
+          done
           # wasm-bindgen emits a wasm import name that must match the JS glue's
           # expected module; mismatch is the classic silent break. Check the JS
           # names the same basename the glue file uses.
