@@ -58,6 +58,50 @@ impl Default for EntityTransparency {
     }
 }
 
+/// How an entity's display colour is determined before batching.
+///
+/// Channels are sRGB `0..=255`, exactly the values acadrust exposes through
+/// `Color::Rgb` / its canonical ACI table, so nothing is invented on the way in.
+/// The importer resolves an explicit entity colour (`ByObject`) and `ByLayer`
+/// before storing, because the representation layer has no access to the layer
+/// table. `ByBlock` stays symbolic so INSERT expansion can substitute the
+/// containing block reference's colour (the same mechanism `EntityTransparency`
+/// uses; audit B21 / F14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EntityColor {
+    /// A resolved sRGB colour.
+    Explicit([u8; 3]),
+    /// Inherit the containing block reference's colour (`ByBlock`). At the
+    /// model root, or with no enclosing INSERT, this falls back to the
+    /// documented default render colour.
+    ByBlock,
+    /// No concrete colour was resolved (`ByLayer` with no reachable layer, or a
+    /// missing attribute). The representation applies the default render colour.
+    #[default]
+    ByLayer,
+}
+
+/// How an entity's display lineweight is determined before batching.
+///
+/// Values are millimetres, matching acadrust's `LineWeight::millimeters()`; the
+/// source stores 1/100 mm integers. As with [`EntityColor`], `ByObject` and
+/// `ByLayer` are resolved by the importer and `ByBlock` stays symbolic for
+/// INSERT expansion.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum EntityLineWeight {
+    /// A resolved lineweight in millimetres.
+    Explicit(f32),
+    /// acadrust's `LineWeight::Default`: the renderer's default weight.
+    Default,
+    /// Inherit the containing block reference's lineweight (`ByBlock`). At the
+    /// model root this falls back to the documented default.
+    ByBlock,
+    /// No concrete lineweight was resolved (`ByLayer` with no reachable layer,
+    /// or a missing attribute). The representation applies the default.
+    #[default]
+    ByLayer,
+}
+
 /// Import-time display attributes that are not part of the semantic geometry.
 ///
 /// These live beside the entity in the database rather than in `DbEntity` so
@@ -66,6 +110,10 @@ impl Default for EntityTransparency {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityRenderAttributes {
     pub transparency: EntityTransparency,
+    /// Resolved display colour (or a symbolic `ByBlock`).
+    pub color: EntityColor,
+    /// Resolved display lineweight (or a symbolic `ByBlock`).
+    pub lineweight: EntityLineWeight,
     /// Which producer supplied the display geometry (proxy cache vs analytic).
     pub geometry_source: GeometrySource,
 }
@@ -74,6 +122,8 @@ impl Default for EntityRenderAttributes {
     fn default() -> Self {
         EntityRenderAttributes {
             transparency: EntityTransparency::default(),
+            color: EntityColor::default(),
+            lineweight: EntityLineWeight::default(),
             geometry_source: GeometrySource::Analytic,
         }
     }
@@ -1408,5 +1458,95 @@ mod tests {
         assert_eq!(a.id(), b.id(), "same DatabaseId");
         assert_ne!(a.scene_identity(), b.scene_identity());
         assert_eq!(a.scene_identity(), a.scene_identity());
+    }
+
+    #[test]
+    fn render_attributes_default_to_by_layer_and_opaque() {
+        // A database with no recorded attributes (hand-built fixtures) must be
+        // fully opaque and use the documented ByLayer colour/lineweight, never a
+        // fabricated explicit value.
+        let attributes = EntityRenderAttributes::default();
+        assert_eq!(attributes.transparency, EntityTransparency::Explicit(1.0));
+        assert_eq!(attributes.color, EntityColor::ByLayer);
+        assert_eq!(attributes.lineweight, EntityLineWeight::ByLayer);
+        assert_eq!(attributes.geometry_source, GeometrySource::Analytic);
+    }
+
+    #[test]
+    fn render_attributes_round_trip_through_the_database() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(raw_entity(
+            1,
+            SpaceId::Model,
+            SemanticGeometry::Line {
+                start: point(0.0, 0.0),
+                end: point(1.0, 0.0),
+            },
+        ))
+        .unwrap();
+        // ByObject colour/lineweight survive verbatim; ByBlock stays symbolic.
+        b.set_entity_render_attributes(
+            EntityId(1),
+            EntityRenderAttributes {
+                transparency: EntityTransparency::Explicit(0.5),
+                color: EntityColor::Explicit([10, 20, 30]),
+                lineweight: EntityLineWeight::Explicit(0.35),
+                geometry_source: GeometrySource::Analytic,
+            },
+        )
+        .unwrap();
+        // An entity with unknown attributes falls back to the defaults.
+        b.insert_entity(raw_entity(
+            2,
+            SpaceId::Model,
+            SemanticGeometry::Point(point(2.0, 2.0)),
+        ))
+        .unwrap();
+        let db = b.finish().unwrap();
+
+        let one = db.entity_render_attributes(EntityId(1));
+        assert_eq!(one.color, EntityColor::Explicit([10, 20, 30]));
+        assert_eq!(one.lineweight, EntityLineWeight::Explicit(0.35));
+        assert_eq!(
+            db.entity_render_attributes(EntityId(2)).color,
+            EntityColor::ByLayer
+        );
+    }
+
+    #[test]
+    fn byblock_color_and_lineweight_stay_symbolic() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(raw_entity(
+            1,
+            SpaceId::Model,
+            SemanticGeometry::Point(point(0.0, 0.0)),
+        ))
+        .unwrap();
+        b.set_entity_render_attributes(
+            EntityId(1),
+            EntityRenderAttributes {
+                transparency: EntityTransparency::ByBlock,
+                color: EntityColor::ByBlock,
+                lineweight: EntityLineWeight::ByBlock,
+                geometry_source: GeometrySource::Analytic,
+            },
+        )
+        .unwrap();
+        let db = b.finish().unwrap();
+        let attributes = db.entity_render_attributes(EntityId(1));
+        assert_eq!(attributes.color, EntityColor::ByBlock);
+        assert_eq!(attributes.lineweight, EntityLineWeight::ByBlock);
     }
 }

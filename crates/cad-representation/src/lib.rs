@@ -4,12 +4,24 @@
 //! context into display primitives and a completeness report. They never touch
 //! Slint, GPU objects or the event loop, and they never mutate the database.
 
-use cad_db::{DbEntity, DrawingDatabase, EntityTransparency};
+use cad_db::{DbEntity, DrawingDatabase, EntityColor, EntityLineWeight, EntityTransparency};
 use cad_domain::*;
 use cad_geometry::{tessellate_geometry, TessellationParams};
 use cad_kernel_adapter::{TessellationMesh, TessellationOutcome, TessellationResult};
 use cad_resources::ResourceKey;
 use std::sync::Arc;
+
+/// Default display colour when a fragment carries no resolved source colour.
+///
+/// `[1, 1, 1]` is white, AutoCAD's nominal default entity colour (ACI 7), so the
+/// fallback is a documented convention rather than an invented value.
+pub const DEFAULT_RENDER_COLOR: [f32; 3] = [1.0, 1.0, 1.0];
+
+/// Default lineweight in millimetres for an unresolved value or acadrust's
+/// `LineWeight::Default`. AutoCAD's nominal default is 0.25 mm. The renderer
+/// does **not** draw this width yet; it is carried so the gap is reported
+/// (`docs/entity-style.md`).
+pub const DEFAULT_LINEWEIGHT_MM: f32 = 0.25;
 
 pub mod text;
 
@@ -103,7 +115,58 @@ pub struct DisplayFragment {
     /// inheritance through INSERT expansion. The scene carries this straight
     /// into `RenderBatch::alpha`.
     pub alpha: f32,
+    /// Resolved display colour as normalized sRGB in `[0, 1]` per channel.
+    ///
+    /// `build`/`from_tessellation` cannot reach the layer table, so they emit
+    /// [`DEFAULT_RENDER_COLOR`] and set [`Self::color_unresolved`];
+    /// [`ProviderRegistry::build_expanded`] replaces it with the importer's
+    /// resolved value, including `ByBlock` inheritance. Alpha stays in
+    /// [`Self::alpha`] so the two channels cannot diverge.
+    pub color: [f32; 3],
+    /// `true` when the source colour was symbolic (`ByLayer`/`ByBlock`) and no
+    /// concrete value was available at this layer, so `color` is a fallback.
+    pub color_unresolved: bool,
+    /// Resolved lineweight in millimetres (see [`DEFAULT_LINEWEIGHT_MM`]).
+    pub lineweight: f32,
+    /// `true` when the source lineweight was symbolic and unresolved.
+    pub lineweight_unresolved: bool,
     pub primitive: DisplayPrimitive,
+}
+
+/// Resolve an entity's stored colour against an enclosing INSERT's resolved
+/// colour.
+///
+/// An explicit sRGB value is concrete. `ByBlock` inherits the enclosing block
+/// reference's colour when one is threaded down, otherwise it is unresolved and
+/// the fallback default is used (never a fabricated source colour). `ByLayer`
+/// is unresolved here because this layer has no layer table; the importer has
+/// already substituted the layer colour for real imports.
+pub fn resolve_color(color: EntityColor, parent: Option<[f32; 3]>) -> ([f32; 3], bool) {
+    match color {
+        EntityColor::Explicit([r, g, b]) => (
+            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0],
+            false,
+        ),
+        EntityColor::ByBlock => match parent {
+            Some(parent) => (parent, false),
+            None => (DEFAULT_RENDER_COLOR, true),
+        },
+        EntityColor::ByLayer => (DEFAULT_RENDER_COLOR, true),
+    }
+}
+
+/// Resolve an entity's stored lineweight (millimetres) against an enclosing
+/// block reference's resolved value, mirroring [`resolve_color`].
+pub fn resolve_lineweight(weight: EntityLineWeight, parent: Option<f32>) -> (f32, bool) {
+    match weight {
+        EntityLineWeight::Explicit(mm) => (if mm.is_finite() { mm.max(0.0) } else { 0.0 }, false),
+        EntityLineWeight::Default => (DEFAULT_LINEWEIGHT_MM, false),
+        EntityLineWeight::ByBlock => match parent {
+            Some(parent) => (parent, false),
+            None => (DEFAULT_LINEWEIGHT_MM, true),
+        },
+        EntityLineWeight::ByLayer => (DEFAULT_LINEWEIGHT_MM, true),
+    }
 }
 
 /// Precision implied by how a fragment's geometry was produced.
@@ -161,6 +224,10 @@ impl DisplayRepresentation {
             geometry_source: GeometrySource::KernelMesh,
             precision: precision_for_kernel_mesh(geometry),
             alpha,
+            color: DEFAULT_RENDER_COLOR,
+            color_unresolved: true,
+            lineweight: DEFAULT_LINEWEIGHT_MM,
+            lineweight_unresolved: true,
             primitive: DisplayPrimitive::Mesh(Arc::new(geometry.mesh.clone())),
         };
         match &result.outcome {
@@ -351,6 +418,10 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                     geometry_source,
                     precision: Precision::Analytic,
                     alpha: 1.0,
+                    color: DEFAULT_RENDER_COLOR,
+                    color_unresolved: true,
+                    lineweight: DEFAULT_LINEWEIGHT_MM,
+                    lineweight_unresolved: true,
                     primitive: DisplayPrimitive::Mesh(Arc::new(mesh.clone())),
                 });
                 if mesh.triangles.is_empty() {
@@ -364,6 +435,10 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                     geometry_source,
                     precision: Precision::Analytic,
                     alpha: 1.0,
+                    color: DEFAULT_RENDER_COLOR,
+                    color_unresolved: true,
+                    lineweight: DEFAULT_LINEWEIGHT_MM,
+                    lineweight_unresolved: true,
                     primitive: DisplayPrimitive::Instance {
                         block: *block,
                         transform: *transform,
@@ -400,6 +475,10 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                                         geometry_source: geometry_source.clone(),
                                         precision: Precision::Analytic,
                                         alpha: 1.0,
+                                        color: DEFAULT_RENDER_COLOR,
+                                        color_unresolved: true,
+                                        lineweight: DEFAULT_LINEWEIGHT_MM,
+                                        lineweight_unresolved: true,
                                         primitive: DisplayPrimitive::Lines(Arc::from(
                                             polyline.into_boxed_slice(),
                                         )),
@@ -438,6 +517,10 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                         geometry_source,
                         precision: Precision::Analytic,
                         alpha: 1.0,
+                        color: DEFAULT_RENDER_COLOR,
+                        color_unresolved: true,
+                        lineweight: DEFAULT_LINEWEIGHT_MM,
+                        lineweight_unresolved: true,
                         primitive: DisplayPrimitive::Text {
                             text: text.clone(),
                             origin: *position,
@@ -468,6 +551,10 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                         geometry_source,
                         precision: Precision::Analytic,
                         alpha: 1.0,
+                        color: DEFAULT_RENDER_COLOR,
+                        color_unresolved: true,
+                        lineweight: DEFAULT_LINEWEIGHT_MM,
+                        lineweight_unresolved: true,
                         primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
                     });
                 } else {
@@ -616,6 +703,8 @@ impl ProviderRegistry {
             &InstancePath::default(),
             0,
             1.0,
+            None,
+            None,
             &mut stack,
             &mut out,
         )?;
@@ -632,19 +721,24 @@ impl ProviderRegistry {
         path: &InstancePath,
         depth: usize,
         parent_alpha: f32,
+        parent_color: Option<[f32; 3]>,
+        parent_lineweight: Option<f32>,
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
     ) -> CadResult<()> {
         let representation = self.build(entity, context)?;
-        // The importer resolved this entity's effective opacity and geometry
-        // source into the database. `ByBlock` inherits the containing INSERT's
-        // opacity, which is threaded down as `parent_alpha`; at the model root
-        // it falls back to opaque.
+        // The importer resolved this entity's effective opacity, colour and
+        // lineweight into the database. `ByBlock` inherits the containing
+        // INSERT's value, threaded down through the `parent_*` arguments; at the
+        // model root those fall back to the documented defaults.
         let attributes = database.entity_render_attributes(entity.id);
         let own_alpha = match attributes.transparency {
             EntityTransparency::Explicit(alpha) => alpha,
             EntityTransparency::ByBlock => parent_alpha,
         };
+        let (own_color, color_unresolved) = resolve_color(attributes.color, parent_color);
+        let (own_lineweight, lineweight_unresolved) =
+            resolve_lineweight(attributes.lineweight, parent_lineweight);
         out.completeness = weaker_completeness(&out.completeness, &representation.completeness);
         out.diagnostics.extend(representation.diagnostics);
         for fragment in representation.fragments {
@@ -693,6 +787,8 @@ impl ProviderRegistry {
                             &child_path,
                             depth + 1,
                             own_alpha,
+                            Some(own_color),
+                            Some(own_lineweight),
                             stack,
                             out,
                         )?;
@@ -707,6 +803,10 @@ impl ProviderRegistry {
                         geometry_source: attributes.geometry_source.clone(),
                         precision: precision_for_source(&attributes.geometry_source),
                         alpha: own_alpha,
+                        color: own_color,
+                        color_unresolved,
+                        lineweight: own_lineweight,
+                        lineweight_unresolved,
                         primitive: primitive.transformed(transform),
                     });
                 }
@@ -1091,6 +1191,8 @@ mod tests {
     fn attrs(transparency: EntityTransparency, source: GeometrySource) -> EntityRenderAttributes {
         EntityRenderAttributes {
             transparency,
+            color: cad_db::EntityColor::ByLayer,
+            lineweight: cad_db::EntityLineWeight::ByLayer,
             geometry_source: source,
         }
     }
@@ -1180,6 +1282,139 @@ mod tests {
             .build_expanded(&db, db.entity(EntityId(1)).unwrap(), &context())
             .unwrap();
         assert_eq!(rep.fragments[0].alpha, 1.0);
+    }
+
+    fn attrs_styled(
+        color: cad_db::EntityColor,
+        lineweight: cad_db::EntityLineWeight,
+    ) -> EntityRenderAttributes {
+        EntityRenderAttributes {
+            transparency: EntityTransparency::Explicit(1.0),
+            color,
+            lineweight,
+            geometry_source: GeometrySource::Analytic,
+        }
+    }
+
+    #[test]
+    fn build_expanded_carries_resolved_color_and_lineweight() {
+        let mut b = empty_db();
+        b.insert_entity(line_entity(1, SpaceId::Model, p(0.0, 0.0), p(1.0, 0.0)))
+            .unwrap();
+        b.set_entity_render_attributes(
+            EntityId(1),
+            attrs_styled(
+                cad_db::EntityColor::Explicit([10, 20, 30]),
+                cad_db::EntityLineWeight::Explicit(0.5),
+            ),
+        )
+        .unwrap();
+        let db = b.finish().unwrap();
+        let rep = ProviderRegistry::with_default_provider()
+            .build_expanded(&db, db.entity(EntityId(1)).unwrap(), &context())
+            .unwrap();
+        assert_eq!(rep.fragments.len(), 1);
+        let fragment = &rep.fragments[0];
+        assert!((fragment.color[0] - 10.0 / 255.0).abs() < 1e-6);
+        assert!((fragment.color[1] - 20.0 / 255.0).abs() < 1e-6);
+        assert!((fragment.color[2] - 30.0 / 255.0).abs() < 1e-6);
+        assert!(!fragment.color_unresolved, "explicit colour is resolved");
+        assert_eq!(fragment.lineweight, 0.5);
+        assert!(!fragment.lineweight_unresolved);
+    }
+
+    #[test]
+    fn build_expanded_resolves_byblock_color_and_lineweight_from_the_insert() {
+        let mut b = empty_db();
+        b.insert_block(BlockDefinition {
+            id: BlockId(2),
+            entities: vec![EntityId(12)],
+        })
+        .unwrap();
+        b.insert_entity(line_entity(
+            12,
+            SpaceId::Block(BlockId(2)),
+            p(0.0, 0.0),
+            p(0.0, 1.0),
+        ))
+        .unwrap();
+        b.set_entity_render_attributes(
+            EntityId(12),
+            attrs_styled(
+                cad_db::EntityColor::ByBlock,
+                cad_db::EntityLineWeight::ByBlock,
+            ),
+        )
+        .unwrap();
+        b.insert_entity(insert_entity(2, SpaceId::Model, 2, 10.0))
+            .unwrap();
+        b.set_entity_render_attributes(
+            EntityId(2),
+            attrs_styled(
+                cad_db::EntityColor::Explicit([200, 100, 50]),
+                cad_db::EntityLineWeight::Explicit(0.8),
+            ),
+        )
+        .unwrap();
+        let db = b.finish().unwrap();
+        let rep = ProviderRegistry::with_default_provider()
+            .build_expanded(&db, db.entity(EntityId(2)).unwrap(), &context())
+            .unwrap();
+        assert_eq!(rep.fragments.len(), 1);
+        let fragment = &rep.fragments[0];
+        // The child is fully ByBlock: it inherits the INSERT's colour and weight.
+        assert!((fragment.color[0] - 200.0 / 255.0).abs() < 1e-6);
+        assert!((fragment.color[1] - 100.0 / 255.0).abs() < 1e-6);
+        assert!((fragment.color[2] - 50.0 / 255.0).abs() < 1e-6);
+        assert!(!fragment.color_unresolved);
+        assert_eq!(fragment.lineweight, 0.8);
+        assert!(!fragment.lineweight_unresolved);
+    }
+
+    #[test]
+    fn byblock_color_at_the_model_root_is_marked_unresolved() {
+        let mut b = empty_db();
+        b.insert_entity(line_entity(1, SpaceId::Model, p(0.0, 0.0), p(1.0, 0.0)))
+            .unwrap();
+        b.set_entity_render_attributes(
+            EntityId(1),
+            attrs_styled(
+                cad_db::EntityColor::ByBlock,
+                cad_db::EntityLineWeight::ByBlock,
+            ),
+        )
+        .unwrap();
+        let db = b.finish().unwrap();
+        let rep = ProviderRegistry::with_default_provider()
+            .build_expanded(&db, db.entity(EntityId(1)).unwrap(), &context())
+            .unwrap();
+        let fragment = &rep.fragments[0];
+        // The fallback default is used, but the fragment is honest that it was
+        // never resolved from a concrete source value.
+        assert_eq!(fragment.color, DEFAULT_RENDER_COLOR);
+        assert!(fragment.color_unresolved);
+        assert_eq!(fragment.lineweight, DEFAULT_LINEWEIGHT_MM);
+        assert!(fragment.lineweight_unresolved);
+    }
+
+    #[test]
+    fn build_without_import_attributes_marks_style_unresolved() {
+        // A hand-built database (or the non-expanded `build`) has no import
+        // attributes, so the style falls back to the documented defaults and is
+        // explicitly marked unresolved rather than claiming a source value.
+        let registry = ProviderRegistry::with_default_provider();
+        let e = entity(
+            7,
+            SemanticGeometry::Line {
+                start: p(0.0, 0.0),
+                end: p(1.0, 0.0),
+            },
+        );
+        let rep = registry.build(&e, &context()).unwrap();
+        assert_eq!(rep.fragments.len(), 1);
+        assert_eq!(rep.fragments[0].color, DEFAULT_RENDER_COLOR);
+        assert!(rep.fragments[0].color_unresolved);
+        assert!(rep.fragments[0].lineweight_unresolved);
     }
 
     /// A hand-built database (or the non-expanded `build`) has no import

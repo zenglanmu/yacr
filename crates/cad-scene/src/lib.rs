@@ -72,6 +72,23 @@ pub struct RenderBatch {
     /// A channel. The renderer clamps and classifies it (see
     /// `cad-render-wgpu::geometry::classify_alpha`).
     pub alpha: f32,
+    /// Per-batch colour as normalized sRGB in `[0, 1]`. [`SceneCache::build`]
+    /// takes it from `DisplayFragment::color` and sanitises it with
+    /// [`sanitize_color`]; `[1, 1, 1]` is the documented default when the source
+    /// carried no resolved colour.
+    pub color: [f32; 3],
+    /// `true` when the source colour was symbolic (`ByLayer`/`ByBlock`) and no
+    /// concrete value was available, so `color` is the fallback default rather
+    /// than a source value.
+    pub color_unresolved: bool,
+    /// Per-batch lineweight in millimetres. The renderer carries this into its
+    /// uniform but **does not draw wide lines**; it reports
+    /// `render.lineweight_not_drawn` for every submitted batch with a non-zero
+    /// weight (see `docs/entity-style.md`).
+    pub lineweight: f32,
+    /// `true` when the source lineweight was symbolic and unresolved, so
+    /// `lineweight` is the fallback default.
+    pub lineweight_unresolved: bool,
     pub sources: Vec<SelectionRef>,
     /// Paint order relative to sibling batches: larger values are drawn later
     /// (on top). The renderer performs a stable sort on this key, so batches with
@@ -139,6 +156,46 @@ pub fn sanitize_alpha(alpha: f32) -> f32 {
         return 1.0;
     }
     alpha.clamp(0.0, 1.0)
+}
+
+/// Default batch colour when a fragment carries none: white, matching
+/// `cad_representation::DEFAULT_RENDER_COLOR`.
+pub const DEFAULT_BATCH_COLOR: [f32; 3] = cad_representation::DEFAULT_RENDER_COLOR;
+
+/// Default batch lineweight in millimetres, matching
+/// `cad_representation::DEFAULT_LINEWEIGHT_MM`.
+pub const DEFAULT_BATCH_LINEWEIGHT_MM: f32 = cad_representation::DEFAULT_LINEWEIGHT_MM;
+
+/// Sanitise one colour channel into `[0, 1]`.
+///
+/// Policy (kept in lockstep with `cad-render-wgpu`): a non-finite channel
+/// becomes `1.0`, the documented default, so an unreadable colour never blanks
+/// geometry; otherwise the channel is clamped.
+pub fn sanitize_color_channel(channel: f32) -> f32 {
+    if channel.is_finite() {
+        channel.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+/// Sanitise a fragment colour into finite `[0, 1]` channels.
+pub fn sanitize_color(color: [f32; 3]) -> [f32; 3] {
+    [
+        sanitize_color_channel(color[0]),
+        sanitize_color_channel(color[1]),
+        sanitize_color_channel(color[2]),
+    ]
+}
+
+/// Sanitise a fragment lineweight (millimetres) into a finite, non-negative
+/// value; a non-finite value becomes the documented default.
+pub fn sanitize_lineweight(mm: f32) -> f32 {
+    if mm.is_finite() {
+        mm.max(0.0)
+    } else {
+        DEFAULT_BATCH_LINEWEIGHT_MM
+    }
 }
 
 /// A publishable update to the scene cache.
@@ -442,6 +499,10 @@ impl SceneCache {
                 edges,
                 mirrored: false,
                 alpha: sanitize_alpha(fragment.alpha),
+                color: sanitize_color(fragment.color),
+                color_unresolved: fragment.color_unresolved,
+                lineweight: sanitize_lineweight(fragment.lineweight),
+                lineweight_unresolved: fragment.lineweight_unresolved,
                 sources: vec![fragment.source.clone()],
                 draw_order: 0,
             });
@@ -502,6 +563,10 @@ mod tests {
                 geometry_source: GeometrySource::Analytic,
                 precision: Precision::Analytic,
                 alpha: 1.0,
+                color: cad_representation::DEFAULT_RENDER_COLOR,
+                color_unresolved: true,
+                lineweight: cad_representation::DEFAULT_LINEWEIGHT_MM,
+                lineweight_unresolved: true,
                 primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
             }],
             completeness: Completeness::Complete,
@@ -641,6 +706,10 @@ mod tests {
                 geometry_source: GeometrySource::DirectMesh,
                 precision: Precision::Analytic,
                 alpha: 1.0,
+                color: cad_representation::DEFAULT_RENDER_COLOR,
+                color_unresolved: true,
+                lineweight: cad_representation::DEFAULT_LINEWEIGHT_MM,
+                lineweight_unresolved: true,
                 primitive: DisplayPrimitive::Mesh(std::sync::Arc::new(mesh)),
             }],
             completeness: Completeness::Complete,
@@ -823,6 +892,10 @@ mod tests {
             edges: Vec::new(),
             mirrored: false,
             alpha: 1.0,
+            color: DEFAULT_BATCH_COLOR,
+            color_unresolved: true,
+            lineweight: DEFAULT_BATCH_LINEWEIGHT_MM,
+            lineweight_unresolved: true,
             sources: Vec::new(),
             draw_order: 0,
         };
@@ -871,6 +944,105 @@ mod tests {
         assert_eq!(sanitize_alpha(0.0), 0.0);
         // An unreadable opacity must not delete geometry.
         assert_eq!(sanitize_alpha(f32::NAN), 1.0);
+    }
+
+    fn line_representation_styled(
+        entity: u128,
+        points: Vec<Point3>,
+        color: [f32; 3],
+        color_unresolved: bool,
+        lineweight: f32,
+        lineweight_unresolved: bool,
+    ) -> DisplayRepresentation {
+        let mut rep = line_representation(entity, points);
+        let fragment = &mut rep.fragments[0];
+        fragment.color = color;
+        fragment.color_unresolved = color_unresolved;
+        fragment.lineweight = lineweight;
+        fragment.lineweight_unresolved = lineweight_unresolved;
+        rep
+    }
+
+    fn unit_points() -> Vec<Point3> {
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        ]
+    }
+
+    #[test]
+    fn batch_color_and_lineweight_come_from_the_fragment() {
+        let mut cache = SceneCache::default();
+        let rep =
+            line_representation_styled(1, unit_points(), [0.25, 0.5, 0.75], false, 0.35, false);
+        let delta = cache.build(&rep, stamp()).unwrap();
+        assert_eq!(delta.added.len(), 1);
+        let batch = &delta.added[0];
+        assert_eq!(batch.color, [0.25, 0.5, 0.75]);
+        assert!(!batch.color_unresolved);
+        assert_eq!(batch.lineweight, 0.35);
+        assert!(!batch.lineweight_unresolved);
+    }
+
+    #[test]
+    fn unresolved_color_and_lineweight_are_carried_as_explicit_defaults() {
+        let mut cache = SceneCache::default();
+        // ByLayer/ByBlock with no reachable value: the fragment already carries
+        // the documented fallback and marks it unresolved.
+        let rep = line_representation_styled(
+            1,
+            unit_points(),
+            [1.0, 1.0, 1.0],
+            true,
+            cad_representation::DEFAULT_LINEWEIGHT_MM,
+            true,
+        );
+        let delta = cache.build(&rep, stamp()).unwrap();
+        let batch = &delta.added[0];
+        assert_eq!(batch.color, DEFAULT_BATCH_COLOR);
+        assert!(batch.color_unresolved);
+        assert_eq!(batch.lineweight, DEFAULT_BATCH_LINEWEIGHT_MM);
+        assert!(batch.lineweight_unresolved);
+    }
+
+    #[test]
+    fn non_finite_color_and_lineweight_are_replaced_by_defaults() {
+        // A hostile fragment must never inject NaN/inf into the GPU uniform.
+        assert_eq!(
+            sanitize_color([f32::NAN, f32::INFINITY, -1.0]),
+            [1.0, 1.0, 0.0]
+        );
+        assert_eq!(
+            sanitize_color([f32::NEG_INFINITY, 2.0, 0.5]),
+            [1.0, 1.0, 0.5]
+        );
+        assert_eq!(sanitize_lineweight(f32::NAN), DEFAULT_BATCH_LINEWEIGHT_MM);
+        assert_eq!(
+            sanitize_lineweight(f32::NEG_INFINITY),
+            DEFAULT_BATCH_LINEWEIGHT_MM
+        );
+        assert_eq!(sanitize_lineweight(-1.0), 0.0);
+
+        let mut cache = SceneCache::default();
+        let rep = line_representation_styled(
+            1,
+            unit_points(),
+            [f32::NAN, f32::NAN, f32::NAN],
+            false,
+            f32::NAN,
+            false,
+        );
+        let delta = cache.build(&rep, stamp()).unwrap();
+        assert_eq!(delta.added[0].color, DEFAULT_BATCH_COLOR);
+        assert_eq!(delta.added[0].lineweight, DEFAULT_BATCH_LINEWEIGHT_MM);
     }
 
     #[test]

@@ -11,7 +11,7 @@
 
 struct Camera {
     transform: mat4x4<f32>,
-    // x = constant per-batch alpha; y..w reserved.
+    // rgb = constant per-batch colour; a = constant per-batch alpha.
     tint: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -37,7 +37,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     let light_dir = vec3<f32>(0.0, 0.0, -1.0);
     let diffuse = max(dot(n, -light_dir), 0.0);
-    let base = vec3<f32>(0.72, 0.75, 0.80);
-    let lit = base * (0.25 + 0.75 * diffuse);
-    return vec4<f32>(lit, camera.tint.x);
+    // `tint.rgb` is the batch's own colour; the diffuse term scales it and the
+    // ambient floor keeps a back-facing facet visible instead of black.
+    let lit = camera.tint.rgb * (0.25 + 0.75 * diffuse);
+    return vec4<f32>(lit, camera.tint.a);
 }

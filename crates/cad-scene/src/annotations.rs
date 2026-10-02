@@ -25,9 +25,11 @@
 //!   measurement record and its rendering belongs to the measurement overlay
 //!   path (`docs/ui.md` §2 records the same gap). It is reported, never dropped
 //!   in silence.
-//! - **Per-annotation RGB is not carried by [`RenderBatch`]**: the batch only has
-//!   a constant `alpha`. The style's alpha channel is honoured; its RGB channels
-//!   are not, which is recorded as an `annotation.color` diagnostic.
+//! - **Per-annotation RGB is carried by [`RenderBatch`]**: the annotation
+//!   style's RGB channels become `RenderBatch::color` and its alpha channel
+//!   `RenderBatch::alpha`. `logical_width` is a world-space width, not a
+//!   millimetre lineweight, so it is not mapped onto `RenderBatch::lineweight`
+//!   (which is marked unresolved for annotations).
 //! - **Revision-cloud scallops** are not modelled: the stored geometry is a
 //!   point loop, and it is drawn as a plain closed polyline.
 //! - **Text requires a font engine.** Without one, a text annotation contributes
@@ -90,7 +92,7 @@ pub struct AnnotationScene {
     /// `Complete` when every visible annotation was fully drawn; otherwise
     /// `Partial`/`Missing` with one reason per affected annotation.
     pub completeness: Completeness,
-    /// Per-annotation diagnostics (`annotation.unsupported`, `annotation.color`,
+    /// Per-annotation diagnostics (`annotation.unsupported`,
     /// `annotation.empty`, `annotation.budget`, …).
     pub diagnostics: Vec<Diagnostic>,
     /// Budget usage consumed by the returned batches.
@@ -139,26 +141,6 @@ where
             continue;
         }
         let converted = convert_geometry(annotation, options);
-
-        // Report colour loss for anything that is actually drawn: the batch
-        // cannot carry RGB (see the module docs).
-        if converted.has_drawable_geometry() && annotation.style.rgba[..3] != [0, 0, 0] {
-            result.diagnostics.push(Diagnostic {
-                object: None,
-                code: "annotation.color".into(),
-                message: format!(
-                    "annotation {:?} uses rgba {:?}; the batch carries alpha only, RGB is not drawn",
-                    annotation.id, annotation.style.rgba
-                ),
-            });
-            result.completeness =
-                result
-                    .completeness
-                    .combine(Completeness::Partial(vec![format!(
-                        "annotation {:?}: colour RGB is not rendered",
-                        annotation.id
-                    )]));
-        }
 
         for issue in converted.reasons {
             result.diagnostics.push(Diagnostic {
@@ -505,8 +487,19 @@ fn make_batch(
         indices: Vec::new(),
         edges: Vec::new(),
         mirrored: false,
-        // The batch carries a constant alpha only; RGB is a documented gap.
         alpha: annotation.style.rgba[3] as f32 / 255.0,
+        // The annotation style carries RGB directly, so the colour is concrete.
+        color: [
+            annotation.style.rgba[0] as f32 / 255.0,
+            annotation.style.rgba[1] as f32 / 255.0,
+            annotation.style.rgba[2] as f32 / 255.0,
+        ],
+        color_unresolved: false,
+        // `annotation.style.logical_width` is a world-space width, not a
+        // lineweight in millimetres, so it is not mapped here. The batch asks
+        // for the default hairline and marks the lineweight unresolved.
+        lineweight: crate::DEFAULT_BATCH_LINEWEIGHT_MM,
+        lineweight_unresolved: true,
         sources: vec![SelectionRef {
             document,
             entity: EntityId(annotation.id.0),
@@ -831,11 +824,19 @@ mod tests {
         assert_eq!(batch.sources[0].document, DocumentId(0));
         assert!((batch.alpha - 128.0 / 255.0).abs() < 1e-6);
         assert_eq!(batch.draw_order, 1_000_000);
-        // RGB cannot be represented, so it is reported as Partial.
-        assert!(scene
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "annotation.color"));
+        // RGB now reaches the batch as a concrete colour.
+        assert!((batch.color[0] - 10.0 / 255.0).abs() < 1e-6);
+        assert!((batch.color[1] - 20.0 / 255.0).abs() < 1e-6);
+        assert!((batch.color[2] - 30.0 / 255.0).abs() < 1e-6);
+        assert!(!batch.color_unresolved);
+        assert!(batch.lineweight_unresolved);
+        assert!(
+            !scene
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "annotation.color"),
+            "RGB is drawn now; the old colour-loss diagnostic must be gone"
+        );
     }
 
     #[test]

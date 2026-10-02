@@ -42,6 +42,8 @@ pub mod codes {
     pub const RENDER_FRAME_OVER_BUDGET: &str = "render.frame_over_budget";
     /// The GPU device was lost or the backend failed; derived resources are gone.
     pub const RENDER_DEVICE_LOST: &str = "render.device_lost";
+    /// A submitted batch carries a lineweight the renderer does not draw.
+    pub const RENDER_LINEWEIGHT_NOT_DRAWN: &str = "render.lineweight_not_drawn";
 }
 
 /// How severe a single reason is.
