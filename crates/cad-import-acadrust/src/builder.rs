@@ -54,6 +54,7 @@ impl<'a> ImporterBuilder<'a> {
         self.read_linetypes()?;
         self.read_styles()?;
         self.read_layouts()?;
+        self.read_plot_settings()?;
         self.read_blocks()?;
         self.read_entities()?;
 
@@ -293,6 +294,19 @@ impl<'a> ImporterBuilder<'a> {
                 viewports: Vec::new(),
             })?;
             self.model_layout = id;
+        }
+        Ok(())
+    }
+
+    /// Read each layout's plot configuration into the database.
+    ///
+    /// A layout with no plot data simply gets no record; the database then
+    /// presents an explicit documented default page at query time. This never
+    /// fabricates a vendor configuration.
+    pub(crate) fn read_plot_settings(&mut self) -> CadResult<()> {
+        for imported in read_plot_settings(self.acad, &self.layout_ids)? {
+            debug_assert_eq!(imported.layout, imported.record.layout);
+            self.builder.set_plot_settings(imported.record)?;
         }
         Ok(())
     }

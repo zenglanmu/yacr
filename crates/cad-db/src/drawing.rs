@@ -6,7 +6,10 @@ use cad_domain::*;
 
 use crate::bounds::{BoundsAccumulator, MAX_INSTANCE_DEPTH};
 use crate::entity::{DbEntity, EntityRenderAttributes};
-use crate::tables::{BlockDefinition, Layer, Layout, LineType, Style};
+use crate::tables::{
+    BlockDefinition, Layer, Layout, LineType, PlotMargins, PlotPaperUnits, PlotProvenance,
+    PlotRotation, PlotSettingsRecord, PlotType, Style,
+};
 
 /// The authoritative, read-only-after-import drawing database.
 #[derive(Debug, Clone)]
@@ -24,6 +27,9 @@ pub struct DrawingDatabase {
     /// Drawing-global linetype scale (`$LTSCALE`). `1.0` is the DWG default and
     /// the value used when a database was not built by the importer.
     pub(crate) linetype_scale: f64,
+    /// Plot configuration per paper-space layout. Absent entries are resolved
+    /// to an explicit default page by [`DrawingDatabase::plot_settings_for`].
+    pub(crate) plot_settings: BTreeMap<LayoutId, PlotSettingsRecord>,
     /// Per-entity display attributes that the importer resolved from the source
     /// (transparency, geometry source). Absent entries are fully opaque
     /// analytic geometry, so older/hand-built databases stay valid.
@@ -100,6 +106,45 @@ impl DrawingDatabase {
 
     pub fn layouts(&self) -> impl Iterator<Item = &Layout> {
         self.layouts.values()
+    }
+
+    /// Plot settings stored for a layout, exactly as read.
+    ///
+    /// `None` means the drawing carried no PLOTSETTINGS data for that layout;
+    /// callers that need to render must use [`Self::plot_settings_for`], which
+    /// makes the fallback explicit instead of inventing values.
+    pub fn plot_settings(&self, id: LayoutId) -> Option<&PlotSettingsRecord> {
+        self.plot_settings.get(&id)
+    }
+
+    /// Plot settings for a layout, or an explicit documented default page.
+    ///
+    /// The default is the ISO A4 sheet (210 × 297 mm) with zero margins and no
+    /// rotation, marked [`PlotProvenance::DefaultPage`]. A4 is an ISO standard,
+    /// not a vendor value; it is chosen as a neutral canvas so a layout that
+    /// carries no plot data is still plottable, and the provenance makes clear
+    /// that nothing was read from the file.
+    pub fn plot_settings_for(&self, id: LayoutId) -> PlotSettingsRecord {
+        if let Some(record) = self.plot_settings.get(&id) {
+            return record.clone();
+        }
+        PlotSettingsRecord {
+            layout: id,
+            paper_size_name: "ISO_A4_(210.00_x_297.00_MM)".to_string(),
+            paper_width: 210.0,
+            paper_height: 297.0,
+            margins: PlotMargins::default(),
+            rotation: PlotRotation::None,
+            scale_numerator: 1.0,
+            scale_denominator: 1.0,
+            plot_type: PlotType::Layout,
+            paper_units: PlotPaperUnits::Millimeters,
+            provenance: PlotProvenance::DefaultPage {
+                reason: "layout has no PLOTSETTINGS object or embedded plot data; \
+                         using the ISO A4 (210x297 mm) default page"
+                    .to_string(),
+            },
+        }
     }
 
     pub fn style(&self, id: StyleId) -> Option<&Style> {

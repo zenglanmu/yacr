@@ -23,6 +23,7 @@ pub enum CliOperation {
     ExportNotes,
     BuildRepresentation,
     FixedViewportRender,
+    Plot,
     Benchmark,
 }
 
@@ -36,6 +37,7 @@ impl CliOperation {
             "export-notes" => Some(Self::ExportNotes),
             "build-representation" => Some(Self::BuildRepresentation),
             "render" => Some(Self::FixedViewportRender),
+            "plot" => Some(Self::Plot),
             "benchmark" => Some(Self::Benchmark),
             _ => None,
         }
@@ -51,6 +53,7 @@ impl CliOperation {
             Self::ExportNotes => "export-notes",
             Self::BuildRepresentation => "build-representation",
             Self::FixedViewportRender => "render",
+            Self::Plot => "plot",
             Self::Benchmark => "benchmark",
         }
     }
@@ -110,17 +113,22 @@ pub struct CliInvocation {
     pub out: Option<PathBuf>,
     /// Optional PNG that `render` writes the offscreen frame to.
     pub png: Option<PathBuf>,
-    /// Offscreen frame width in pixels for `render`.
+    /// Offscreen frame width in pixels for `render`/`plot`.
     pub render_width: u32,
-    /// Offscreen frame height in pixels for `render`.
+    /// Offscreen frame height in pixels for `render`/`plot`.
     pub render_height: u32,
+    /// Layout to plot by name (`plot`). `None` selects the first layout.
+    pub layout: Option<String>,
+    /// Plot resolution in dots per inch (`plot`). When set, the canvas is sized
+    /// from the sheet; when absent the `--width`/`--height` canvas is used.
+    pub plot_dpi: Option<f64>,
     /// Locale for human-facing stderr messages (never machine output).
     pub locale: Locale,
 }
 
-/// Default offscreen frame width for `render`.
+/// Default offscreen frame width for `render`/`plot`.
 pub const DEFAULT_RENDER_WIDTH: u32 = 1280;
-/// Default offscreen frame height for `render`.
+/// Default offscreen frame height for `render`/`plot`.
 pub const DEFAULT_RENDER_HEIGHT: u32 = 720;
 
 impl CliInvocation {
@@ -137,6 +145,8 @@ impl CliInvocation {
             png: None,
             render_width: DEFAULT_RENDER_WIDTH,
             render_height: DEFAULT_RENDER_HEIGHT,
+            layout: None,
+            plot_dpi: None,
             locale: Locale::default(),
         }
     }

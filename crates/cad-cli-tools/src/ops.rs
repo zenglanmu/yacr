@@ -416,6 +416,319 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
     }))
 }
 
+/// Native paper-space plot: render a named layout to a raster PNG.
+///
+/// The path is the honest paper-space chain: select the layout from the
+/// database, read its plot settings (or an explicit documented default page),
+/// plan the sheet onto a pixel canvas with `cad-representation::plot`, build the
+/// paper-space representation (viewport transforms already applied), map that
+/// paper geometry onto the canvas and render it through the same headless GPU
+/// renderer `render` uses, then read back and encode PNG.
+///
+/// A drawing with no paper layout still exercises the planner and encoder with
+/// a synthetic sheet, marked `"synthetic": true` in the report — never claimed
+/// as a real layout plot.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
+    use cad_render_wgpu::headless::{create_headless_gpu, encode_png, HeadlessGpu};
+    use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
+
+    let started = std::time::Instant::now();
+    let controller = load_document(invocation)?;
+    let context = representation_context(&controller, None);
+    let registry = cad_representation::ProviderRegistry::with_default_provider();
+
+    // Real layouts when present, otherwise a synthetic sheet so the planner and
+    // encoder are still exercised. The report marks which path was taken.
+    let (database, layout, synthetic) = match select_plot_layout(&controller, invocation)? {
+        Some((layout, id)) => (layout, id, false),
+        None => (synthetic_plot_database(), cad_domain::LayoutId(0), true),
+    };
+
+    let record = database.plot_settings_for(layout);
+    let target = match invocation.plot_dpi {
+        Some(dpi) => cad_representation::PlotTarget::Dpi(dpi),
+        None => cad_representation::PlotTarget::Pixels {
+            width: invocation.render_width,
+            height: invocation.render_height,
+        },
+    };
+    let plan_started = std::time::Instant::now();
+    let page = cad_representation::plan_plot_for_record(&record, target)?;
+    let plan_ms = plan_started.elapsed().as_secs_f64() * 1000.0;
+
+    // Paper-space representation, already mapped through every viewport.
+    let representation =
+        cad_representation::build_paper_space(&registry, &database, layout, &context, &|_| true)?;
+
+    // Map paper millimetres onto the renderer's y-up pixel space: the planner's
+    // affine is y-down (image convention), so flip y about the canvas height.
+    let paper_to_render = paper_to_render_transform(&page);
+    let mut plan = cad_scene::SceneCache::new(Default::default());
+    let mut delta = cad_scene::SceneDelta {
+        stamp: context.stamp.clone(),
+        added: Vec::new(),
+        removed_chunks: Vec::new(),
+    };
+    for fragment in &representation.fragments {
+        let transformed = cad_representation::DisplayFragment {
+            source: fragment.source.clone(),
+            geometry_source: fragment.geometry_source.clone(),
+            precision: fragment.precision.clone(),
+            alpha: fragment.alpha,
+            color: fragment.color,
+            color_unresolved: fragment.color_unresolved,
+            lineweight: fragment.lineweight,
+            lineweight_unresolved: fragment.lineweight_unresolved,
+            primitive: fragment.primitive.transformed(&paper_to_render),
+        };
+        let only = cad_representation::DisplayRepresentation {
+            fragments: vec![transformed],
+            completeness: representation.completeness.clone(),
+            diagnostics: representation.diagnostics.clone(),
+        };
+        delta
+            .added
+            .extend(plan.build(&only, context.stamp.clone())?.added);
+    }
+
+    let width = page.width;
+    let height = page.height;
+    let camera = Camera2d {
+        center: Point3 {
+            x: width as f64 / 2.0,
+            y: height as f64 / 2.0,
+            z: 0.0,
+        },
+        world_per_px: 1.0,
+        z_plane: 0.0,
+    };
+
+    let gpu_started = std::time::Instant::now();
+    let HeadlessGpu {
+        device,
+        queue,
+        adapter,
+    } = create_headless_gpu(BackendPreference::Auto)?;
+    let mut renderer = Renderer::new(BackendPreference::Auto);
+    renderer.set_poll_timeout(std::time::Duration::from_secs(600));
+    renderer.initialize_with_device(device, queue)?;
+    renderer.upload(&delta)?;
+    let render_target = RenderTarget::new(width, height);
+    let frame = renderer
+        .render(camera, &render_target)
+        .map_err(|error| CadError::GpuFailure(error.message().to_string()))?;
+    let image = renderer
+        .read_target_rgba()
+        .map_err(|error| CadError::GpuFailure(error.message().to_string()))?;
+    let gpu_ms = gpu_started.elapsed().as_secs_f64() * 1000.0;
+
+    let background = image.pixel(0, 0);
+    let non_background = image.count_differing_from(background, 8);
+    let coverage = non_background as f64 / (width as f64 * height as f64);
+
+    let png_bytes =
+        encode_png(&image).map_err(|e| CadError::Invariant(format!("PNG encode failed: {e}")))?;
+    let output = invocation
+        .png
+        .clone()
+        .unwrap_or_else(|| invocation.input.with_extension("plot.png"));
+    write_atomic(&output, &png_bytes).map_err(|e| {
+        CadError::InvalidInput(format!(
+            "PNG write failed: {}",
+            cad_diagnostics::redact_text(&e.to_string())
+        ))
+    })?;
+    let total_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    let (provenance, default_reason) = match &record.provenance {
+        cad_db::PlotProvenance::Imported => ("imported", serde_json::Value::Null),
+        cad_db::PlotProvenance::DefaultPage { reason } => {
+            ("default_page", serde_json::Value::String(reason.clone()))
+        }
+    };
+    let completeness = match &controller.last_import_report {
+        Some(report) => completeness_json(&report.completeness),
+        None => serde_json::json!({ "status": "unverified" }),
+    };
+
+    Ok(serde_json::json!({
+        "schema_version": CLI_SCHEMA_VERSION,
+        "operation": CliOperation::Plot.as_str(),
+        "layout": {
+            "id": layout.0,
+            "name": database.layout(layout).map(|l| l.name.clone()).unwrap_or_else(|| "synthetic".into()),
+            "synthetic": synthetic,
+        },
+        "width": width,
+        "height": height,
+        "dpi": page.dpi,
+        "paper": {
+            "size_name": record.paper_size_name,
+            "width": record.paper_width,
+            "height": record.paper_height,
+            "units": format!("{:?}", record.paper_units).to_ascii_lowercase(),
+            "rotation_degrees": page.rotation_degrees,
+            "printable_mm": [page.printable_mm.0, page.printable_mm.1],
+            "scale": {
+                "numerator": record.scale_numerator,
+                "denominator": record.scale_denominator,
+                // The same clamped factor `plan_plot_for_record` applied, so the
+                // report cannot disagree with the raster.
+                "factor": cad_representation::PlotScale {
+                    numerator: record.scale_numerator,
+                    denominator: record.scale_denominator,
+                }
+                .factor(),
+            },
+            "provenance": provenance,
+            "default_reason": default_reason,
+        },
+        "output": output.display().to_string(),
+        "bytes": png_bytes.len(),
+        "pixels": {
+            "non_background": non_background,
+            "coverage": coverage,
+            "distinct_colors": image.distinct_colors(),
+        },
+        "frame": {
+            "draw_calls": frame.draw_calls,
+            "vertices": frame.vertices,
+            "triangles": frame.triangles,
+            "opaque_batches": frame.opaque_batches,
+            "transparent_batches": frame.transparent_batches,
+            "invisible_batches": frame.invisible_batches,
+        },
+        "timings": { "plan_ms": plan_ms, "gpu_ms": gpu_ms, "total_ms": total_ms },
+        "adapter": {
+            "backend": adapter.backend,
+            "name": adapter.name,
+            "device_type": adapter.device_type,
+        },
+        "completeness": completeness,
+        "status": "ok",
+        "note": "raster paper-space plot; no vector PDF/HPGL export and no plot styles (see docs/plot.md)",
+    }))
+}
+
+/// Resolve the layout to plot, or `None` when the drawing has no paper layout.
+#[cfg(not(target_arch = "wasm32"))]
+fn select_plot_layout(
+    controller: &HostController,
+    invocation: &CliInvocation,
+) -> CadResult<Option<(cad_db::DrawingDatabase, cad_domain::LayoutId)>> {
+    let document = controller
+        .application
+        .workspace
+        .documents
+        .get(&controller.document_id)
+        .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+    let database = document.drawing.as_ref().clone();
+    // Plot targets paper-space layouts only. The importer synthesises a
+    // `LayoutId(0)` "Model" layout when a drawing has no paper space; that is
+    // model space, not a sheet, so it must not be selected as a plot layout.
+    let descriptors: Vec<_> = cad_representation::enumerate_layouts(&database)
+        .into_iter()
+        .filter(|d| !(d.id == cad_domain::LayoutId(0) && d.name == "Model"))
+        .collect();
+    if descriptors.is_empty() {
+        return Ok(None);
+    }
+    let id = match &invocation.layout {
+        Some(name) => descriptors
+            .iter()
+            .find(|d| d.name == *name || d.name.eq_ignore_ascii_case(name))
+            .map(|d| d.id)
+            .ok_or_else(|| {
+                let available: Vec<&str> = descriptors.iter().map(|d| d.name.as_str()).collect();
+                CadError::InvalidInput(format!(
+                    "layout '{name}' not found; available: {}",
+                    available.join(", ")
+                ))
+            })?,
+        None => descriptors[0].id,
+    };
+    Ok(Some((database, id)))
+}
+
+/// A minimal in-memory sheet used when a drawing has no paper layout.
+///
+/// It is deliberately marked synthetic in the report: it exercises the planner
+/// and the encoder, but it is not evidence about the imported drawing.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn synthetic_plot_database() -> cad_db::DrawingDatabase {
+    use cad_db::{DbEntity, DbObject, Layer, Layout};
+    use cad_domain::{EntityId, LayerId, ObjectId, Revision, SpaceId};
+
+    let mut builder = cad_db::DrawingDatabaseBuilder::new(cad_domain::DatabaseId(0));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_layout(Layout {
+            id: cad_domain::LayoutId(0),
+            name: "Synthetic".into(),
+            viewports: Vec::new(),
+        })
+        .unwrap();
+    // A rectangle frame plus a diagonal, in paper millimetres inside A4.
+    let corners = [
+        (20.0, 20.0, 190.0, 20.0),
+        (190.0, 20.0, 190.0, 277.0),
+        (190.0, 277.0, 20.0, 277.0),
+        (20.0, 277.0, 20.0, 20.0),
+        (20.0, 20.0, 190.0, 277.0),
+    ];
+    for (index, (x1, y1, x2, y2)) in corners.into_iter().enumerate() {
+        builder
+            .insert_entity(DbEntity {
+                object: DbObject {
+                    id: ObjectId(index as u128 + 1),
+                    type_key: "AcDbLine".into(),
+                    revision: Revision(0),
+                    source_handle: None,
+                },
+                id: EntityId(index as u128 + 1),
+                layer: LayerId(0),
+                space: SpaceId::Paper(cad_domain::LayoutId(0)),
+                geometry: SemanticGeometry::Line {
+                    start: Point3 {
+                        x: x1,
+                        y: y1,
+                        z: 0.0,
+                    },
+                    end: Point3 {
+                        x: x2,
+                        y: y2,
+                        z: 0.0,
+                    },
+                },
+                draw_order: index as i64,
+            })
+            .unwrap();
+    }
+    builder.finish().expect("synthetic plot database is valid")
+}
+
+/// Paper millimetres → renderer pixel space (y-up), as a [`Transform3`].
+#[cfg(not(target_arch = "wasm32"))]
+fn paper_to_render_transform(page: &cad_representation::PlotPage) -> Transform3 {
+    let m = page.paper_to_pixel;
+    let height = page.height as f64;
+    let mut out = Transform3::identity().matrix;
+    out[0][0] = m[0];
+    out[0][1] = m[2];
+    out[0][3] = m[4];
+    out[1][0] = -m[1];
+    out[1][1] = -m[3];
+    out[1][3] = height - m[5];
+    Transform3 { matrix: out }
+}
+
 pub(crate) fn run_benchmark(
     controller: &HostController,
     invocation: &CliInvocation,

@@ -33,9 +33,17 @@ pub mod shx;
 pub mod layout;
 
 pub use layout::{
-    clip_polyline_to_rect, enumerate_layouts, paper_per_model_from_view, viewport_reason,
-    viewport_transform, LayoutDescriptor, SpaceSelection, ViewportState, ViewportTransform,
-    ViewportUnsupported,
+    build_paper_space, clip_polyline_to_rect, enumerate_layouts, paper_per_model_from_view,
+    viewport_reason, viewport_transform, LayoutDescriptor, SpaceSelection, ViewportState,
+    ViewportTransform, ViewportUnsupported,
+};
+
+pub mod plot;
+
+pub use plot::{
+    describe as describe_plot, layout_plot_scale, map_model_through_stored_viewport,
+    map_model_through_viewport, normalize_degrees, plan_plot, plan_plot_for_record,
+    plan_plot_rotated, to_millimetres, PlotPage, PlotScale, PlotTarget, MM_PER_INCH,
 };
 pub use text::{
     parse_mtext, sanitize_text, text_issue, FontEngine, ParsedText, ShapedText, StackedFraction,
