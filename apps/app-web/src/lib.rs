@@ -109,6 +109,17 @@ pub fn renderer_state_report() -> String {
     renderer_report()
 }
 
+/// Redacted diagnostics model JSON for the diagnostics drawer and headless tests.
+///
+/// Encodes every import reason through the shared `cad_diagnostics` model; an
+/// empty model (no rows) is returned before any import report rather than
+/// fabricated entries.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn diagnostics_report_json() -> String {
+    browser::diagnostics_report()
+}
+
 /// Load the fonts the current drawing references; resolves to a summary.
 ///
 /// Exposed so the JS host (and headless verification) can await the real
@@ -191,11 +202,9 @@ pub fn discard_recovery_snapshot() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn web_set_locale(tag: &str) -> Result<String, JsValue> {
-    let handle =
-        browser::current_handle().ok_or_else(|| JsValue::from_str("browser host not started"))?;
-    let resolution = handle
-        .set_locale(tag)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    // The browser host applies the handle chrome switch and re-pushes the
+    // catalog-derived panel labels together; the source of truth is one call.
+    let resolution = browser::apply_locale(tag).map_err(|e| JsValue::from_str(&e.to_string()))?;
     cad_ui_slint::web::store_locale(resolution.locale.tag())
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(resolution.locale.tag().to_string())

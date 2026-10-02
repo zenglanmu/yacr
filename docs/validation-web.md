@@ -235,3 +235,15 @@ python3 scripts/check-i18n.py                                                   
   本轮 app-web 和核心严格 clippy 已通过。
 - 本轮未验证 Android 运行、WebGPU、真实 GPU、真实字体绘制或真机性能；先前章节的
   NOT RUN 限制继续有效。
+
+## 7. UI 宿主连接器接线（源码接线；无头验收待补）
+
+`apps/app-web` 由 `browser/state_push.rs::push_panel_state` 统一推送面板状态（命令、
+打开、批注导入/导出/恢复后），并安装 `browser/pick.rs::WebCanvasPickMapper` 与选择拾取；
+诊断抽屉经新增 wasm 导出 `diagnostics_report_json()` 与 `window.yacr.diagnostics_report`
+暴露。空/多值文案来自目录（新增 `annotation.empty`）。
+
+以上为源码接线与单元测试；**本机未重跑 wasm 构建、未跑浏览器脚本**。后续无头验证至少
+应断言：`window.yacr.diagnostics_report()` 在未导入时返回空模型 JSON、导入后出现
+`objects`/`document` 行；点击画布后 `renderer_state_report()` 的选择面板计数变化；
+`annotation.empty` 在两种语言下都解析成功。

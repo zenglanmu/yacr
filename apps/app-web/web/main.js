@@ -49,6 +49,7 @@ async function main() {
   // Preserve the public diagnostics/test surface across the module split.
   window.yacr = {
     renderer_state_report: wasmModule.renderer_state_report,
+    diagnostics_report: wasmModule.diagnostics_report_json,
     open_document_bytes: (name, bytes) =>
       wasmModule.open_document_bytes(name, bytes),
     open_requires_decision: wasmModule.open_requires_decision,

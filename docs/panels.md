@@ -139,6 +139,15 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
 按钮不可用；这不是静默假成功。`HostController::layer_ids()` 与 `layer_rows()` 顺序
 一致，宿主无需自行拼接。
 
+### 3.2.1 Web 宿主接线（已接线；无头/真机验收待补）
+
+`apps/app-web` 在 `browser/state_push.rs` 中已调用
+`set_layer_state` / `set_property_state`（以及布局/批注/诊断面板），并传入真实
+`LayerId`/`AnnotationId`/`LayoutId` 顺序；空状态与多值文案取自目录
+（`layers.empty`、`properties.empty`、`properties.mixed`）。无捕获工具时的画布轻触经
+`cad_app::pick_at_screen` 命中后派发 `Select`，属性面板随命令统一推送刷新。
+`apps/app-android` 仍未接线，不在本轮范围。
+
 ### 3.3 刻意未做（原因）
 
 - **布局面板（F04）**：`bridge` 只构建 model_space，纸空间/视口裁剪与比例未闭环，

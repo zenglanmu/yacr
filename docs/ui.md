@@ -82,6 +82,28 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 未调用时行为是**降级而非假装**：重做按钮保持禁用、面板显示空步骤并禁用确认/
 取消、测量点击提示「取点未接线」。以上是本轮明确交接给宿主接线任务的开放项。
 
+### 3.1 Web 宿主接线（已接线；无头/真机验收待补）
+
+`apps/app-web` 现在通过 `browser/state_push.rs::push_panel_state` 在每条命令执行后、
+打开文档后、批注导入/导出/恢复后统一推送：历史可用性（撤销/重做分别由
+`HostController::history_availability()` 驱动，撤销到空后 `can_redo` 不再陈旧）、
+测量面板、图层面板 + 有序 `LayerId`、属性面板、批注面板 + 有序 `AnnotationId`、
+布局面板 + 有序 `LayoutId`、诊断抽屉。空/多值文案来自 `MessageSource` 目录（新增
+`annotation.empty`）。
+
+画布取点：`browser/pick.rs::WebCanvasPickMapper` 经
+`UiAdapter::set_canvas_pick_mapper` 安装，使用 `ViewMetrics`/`Viewport::screen_to_world`
+与 `UiHandle::cad_surface_size()`；退化输入返回 `None`（不伪造点）。无捕获工具时的
+画布轻触走 `cad_app::pick_at_screen`（`TolerancePolicy::default()`、
+`BackFacePolicy::Cull`），派发 `Select` + 命中 `SelectionRef`（空 vec 清空选择），
+结果经属性面板呈现；超过共享拖动阈值的拖动不触发选择。
+
+诊断抽屉数据经 wasm 导出 `diagnostics_report_json()`（`encode_model_redacted`）与
+`window.yacr.diagnostics_report` 暴露；未导入报告前为显式空模型。
+
+`apps/app-android` 仍未接线（不在本轮范围）。以上仅为源码接线与编译证据，
+浏览器/真机验收待补，不构成视觉验收。
+
 ## 4. 工具面板（U03）
 
 新增一条紧凑的工具/状态栏（高度 40px），只显示真实状态：

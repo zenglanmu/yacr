@@ -12,6 +12,7 @@ use cad_ui_slint::{CadView, IncomingDocument, UiHandle};
 
 use super::fonts::spawn_font_load;
 use super::persistence::{download_text, WebPersistence};
+use super::state_push;
 use super::{sync_view_camera, viewport_camera, with_runtime};
 
 fn install_opened(
@@ -35,6 +36,9 @@ fn install_opened(
     }
     view.request_redraw();
     let _ = handle.set_status(format!("已打开 {name}: {}", opened.completeness_label));
+    // Panels (layout/annotations/properties/diagnostics) are derived from the
+    // new document; push them after the content swap so none shows stale data.
+    state_push::push_panel_state_for_view(controller, handle, view);
     spawn_font_load();
 }
 
