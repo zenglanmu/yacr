@@ -317,7 +317,14 @@ pub fn fill_rings(rings: &[Loop]) -> Result<FillMesh, FillError> {
             let l1 = x_at_y(la, lb, y1);
             let r0 = x_at_y(ra, rb, y0);
             let r1 = x_at_y(ra, rb, y1);
-            if r0 - l0 > ytol && r1 - l1 > ytol {
+            // A band may taper to an apex at one end (a triangle at the top or
+            // bottom of the boundary). Requiring both ends to have width would
+            // drop that band entirely and lose the apex triangle, which made
+            // every non-rectangular boundary fail the area cross-check below.
+            // Emitting both candidate triangles is safe: at a degenerate end
+            // the two corners intern to the same vertex, so `push_triangle`
+            // discards the collapsed one and keeps the real triangle.
+            if r0 - l0 > ytol || r1 - l1 > ytol {
                 let i0 = intern(&mut vertices, &mut cache, [l0, y0]);
                 let i1 = intern(&mut vertices, &mut cache, [r0, y0]);
                 let i2 = intern(&mut vertices, &mut cache, [r1, y1]);
@@ -607,6 +614,261 @@ fn point_in_triangle(p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> bool
     cross2(a, b, p) >= -EPS && cross2(b, c, p) >= -EPS && cross2(c, a, p) >= -EPS
 }
 
+// ---------------------------------------------------------------------------
+// Gradient fills (spec §3.2 gradient HATCH)
+// ---------------------------------------------------------------------------
+//
+// A gradient fill is baked into per-vertex sRGB so it reuses the existing mesh
+// pipeline (no texture, no new shader state). The model below is intentionally
+// a small, honest subset of the DXF gradient vocabulary:
+//
+//   * `Linear` — a 1D ramp along `angle` (DXF "LINEAR").
+//   * `Spherical` — a radial ramp from the centre of the boundary extent
+//     (DXF "SPHERICAL"/"CYLINDER" family, where the radius drives the value).
+//
+// Curved / multi-segment gradients (e.g. "HEMISPHERICAL", "CURVED") are not
+// approximated: the importer reports them explicitly as unsupported.
+
+/// One colour stop: `value` is the normalised position (`0.0..=1.0`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientStop {
+    pub value: f64,
+    pub rgb: [u8; 3],
+}
+
+/// Which parametric ramp a gradient uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GradientKind {
+    /// A 1D ramp along the gradient angle.
+    Linear,
+    /// A radial ramp from the centre of the boundary's extent.
+    Spherical,
+}
+
+/// A resolved gradient definition in hatch-plane coordinates.
+///
+/// `angle` is the gradient direction in radians (DXF group 452), `shift` the
+/// normalised start offset in `0.0..=1.0` (DXF group 453), and `stops` the
+/// colour entries (DXF group 463/421). `single_color` records the DXF
+/// single-colour flag; when set, `stops` is expected to hold one entry and the
+/// ramp blends that colour towards `tint` (positive → white, negative → black).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GradientDef {
+    pub kind: GradientKind,
+    pub angle: f64,
+    pub shift: f64,
+    pub single_color: bool,
+    /// Tint in `-1.0..=1.0`; only meaningful for `single_color`.
+    pub tint: f64,
+    pub stops: Vec<GradientStop>,
+}
+
+impl GradientDef {
+    /// Whether the definition carries the data needed to produce a ramp.
+    ///
+    /// A gradient with no usable stop cannot be rendered as a gradient and must
+    /// be reported rather than silently drawn solid.
+    pub fn is_usable(&self) -> bool {
+        !self.stops.is_empty()
+            && self.angle.is_finite()
+            && self.shift.is_finite()
+            && self
+                .stops
+                .iter()
+                .all(|s| s.value.is_finite() && s.value >= 0.0 && s.value <= 1.0)
+    }
+}
+
+/// Sample a gradient at normalised position `t` (clamped to `0.0..=1.0`).
+///
+/// Stops must be sorted by `value` via [`normalize_stops`]; a single stop is a
+/// constant colour. Between two stops the colour is linearly interpolated in
+/// sRGB byte space, which matches the no-colour-management path the renderer
+/// already uses.
+pub fn sample_gradient(def: &GradientDef, t: f64) -> [u8; 3] {
+    let stops = &def.stops;
+    if stops.is_empty() {
+        return [255, 255, 255];
+    }
+    let t = t.clamp(0.0, 1.0);
+    if stops.len() == 1 {
+        return stops[0].rgb;
+    }
+    if t <= stops[0].value {
+        return stops[0].rgb;
+    }
+    if t >= stops[stops.len() - 1].value {
+        return stops[stops.len() - 1].rgb;
+    }
+    for pair in stops.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        if t >= a.value && t <= b.value {
+            let span = b.value - a.value;
+            if span <= f64::EPSILON {
+                return b.rgb;
+            }
+            let f = (t - a.value) / span;
+            return lerp_rgb(a.rgb, b.rgb, f);
+        }
+    }
+    stops[stops.len() - 1].rgb
+}
+
+fn lerp_rgb(a: [u8; 3], b: [u8; 3], f: f64) -> [u8; 3] {
+    let f = f.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| {
+        (x as f64 + (y as f64 - x as f64) * f)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    [mix(a[0], b[0]), mix(a[1], b[1]), mix(a[2], b[2])]
+}
+
+/// Sort stops ascending and drop non-finite / out-of-range entries.
+///
+/// Keeps the gradient deterministic even when a file lists stops out of order,
+/// which is common. Duplicate values are retained; the sampler resolves a
+/// zero-width span to the later stop.
+pub fn normalize_stops(mut stops: Vec<GradientStop>) -> Vec<GradientStop> {
+    stops.retain(|s| s.value.is_finite() && (0.0..=1.0).contains(&s.value));
+    stops.sort_by(|a, b| {
+        a.value
+            .partial_cmp(&b.value)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    stops
+}
+
+/// The parameter each vertex feeds into the ramp, in `0.0..=1.0`.
+///
+/// * Linear: projection onto the gradient direction, normalised across the
+///   boundary extent, then shifted by `shift` (wrapping, as DXF does).
+/// * Spherical: normalised radial distance from the centre of the extent.
+fn gradient_parameter(points: &[[f64; 2]], def: &GradientDef) -> Vec<f64> {
+    let Some((min, max)) = bounds_of(points) else {
+        return Vec::new();
+    };
+    let center = [0.5 * (min[0] + max[0]), 0.5 * (min[1] + max[1])];
+    match def.kind {
+        GradientKind::Linear => {
+            let (dx, dy) = (def.angle.cos(), def.angle.sin());
+            let mut lo = f64::INFINITY;
+            let mut hi = f64::NEG_INFINITY;
+            for p in points {
+                let s = (p[0] - center[0]) * dx + (p[1] - center[1]) * dy;
+                lo = lo.min(s);
+                hi = hi.max(s);
+            }
+            let span = hi - lo;
+            points
+                .iter()
+                .map(|p| {
+                    let s = (p[0] - center[0]) * dx + (p[1] - center[1]) * dy;
+                    let t = if span <= f64::EPSILON {
+                        0.5
+                    } else {
+                        (s - lo) / span
+                    };
+                    // The shift is an offset along the ramp. This subset clamps
+                    // at the ends rather than wrapping, so the two boundary
+                    // endpoints keep their exact stop colours; wrapping is a
+                    // documented gap (see docs/hatch-gradient.md).
+                    (t + def.shift).clamp(0.0, 1.0)
+                })
+                .collect()
+        }
+        GradientKind::Spherical => {
+            let mut max_r = 0.0f64;
+            for p in points {
+                let dx = p[0] - center[0];
+                let dy = p[1] - center[1];
+                max_r = max_r.max((dx * dx + dy * dy).sqrt());
+            }
+            points
+                .iter()
+                .map(|p| {
+                    let dx = p[0] - center[0];
+                    let dy = p[1] - center[1];
+                    let r = (dx * dx + dy * dy).sqrt();
+                    let t = if max_r <= f64::EPSILON {
+                        0.0
+                    } else {
+                        r / max_r
+                    };
+                    (t + def.shift).clamp(0.0, 1.0)
+                })
+                .collect()
+        }
+    }
+}
+
+fn bounds_of(points: &[[f64; 2]]) -> Option<([f64; 2], [f64; 2])> {
+    let mut min = [f64::INFINITY; 2];
+    let mut max = [f64::NEG_INFINITY; 2];
+    let mut any = false;
+    for p in points {
+        any = true;
+        min[0] = min[0].min(p[0]);
+        min[1] = min[1].min(p[1]);
+        max[0] = max[0].max(p[0]);
+        max[1] = max[1].max(p[1]);
+    }
+    any.then_some((min, max))
+}
+
+/// Bake a gradient into per-vertex sRGB for a fill triangulation.
+///
+/// Each returned colour corresponds to `fill.vertices[i]`, so the existing
+/// fill indices apply unchanged and the ramp is clipped to the hatch boundary
+/// by construction (only interior vertices are coloured). Returns an empty
+/// vector when the definition is unusable, which the caller must report rather
+/// than draw solid.
+pub fn gradient_vertex_colors(fill: &FillMesh, def: &GradientDef) -> Vec<[u8; 3]> {
+    if !def.is_usable() {
+        return Vec::new();
+    }
+    let stops = normalize_stops(def.stops.clone());
+    if stops.is_empty() {
+        return Vec::new();
+    }
+    let effective = if def.single_color {
+        single_color_stops(&stops, def.tint)
+    } else {
+        stops
+    };
+    let def = GradientDef {
+        stops: effective,
+        ..def.clone()
+    };
+    let params = gradient_parameter(&fill.vertices, &def);
+    params.iter().map(|t| sample_gradient(&def, *t)).collect()
+}
+
+/// Expand a DXF single-colour gradient into a two-stop ramp.
+///
+/// The single listed colour stays at value 0; value 1 blends it towards white
+/// (`tint > 0`) or black (`tint < 0`), mirroring AutoCAD's tint/shade control.
+fn single_color_stops(stops: &[GradientStop], tint: f64) -> Vec<GradientStop> {
+    let base = stops[0];
+    let tint = tint.clamp(-1.0, 1.0);
+    let target = if tint >= 0.0 {
+        [255, 255, 255]
+    } else {
+        [0, 0, 0]
+    };
+    let end = lerp_rgb(base.rgb, target, tint.abs());
+    vec![
+        GradientStop {
+            value: 0.0,
+            rgb: base.rgb,
+        },
+        GradientStop {
+            value: 1.0,
+            rgb: end,
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -793,6 +1055,24 @@ mod tests {
     }
 
     #[test]
+    fn fill_rings_handles_a_polygon_with_apex_bands() {
+        // A triangle tapers to an apex at the top and bottom of its band
+        // decomposition; the fill must not drop those bands.
+        let mesh = fill_rings(&[vec![[0.0, 0.0], [2.0, 0.0], [1.0, 2.0]]]).expect("triangle fills");
+        assert!((mesh.area() - 2.0).abs() < 1e-9, "area {}", mesh.area());
+        // A general (non-axis-aligned) pentagon must also fill.
+        let pentagon = vec![
+            [1.0, 0.0],
+            [0.309, 0.951],
+            [-0.809, 0.588],
+            [-0.809, -0.588],
+            [0.309, -0.951],
+        ];
+        let pent = fill_rings(&[pentagon]).expect("pentagon fills");
+        assert!(pent.area() > 2.0, "pentagon area {}", pent.area());
+    }
+
+    #[test]
     fn fill_rings_over_budget_is_an_error_not_a_partial_fill() {
         let ring: Loop = (0..=MAX_FILL_POINTS)
             .map(|i| {
@@ -825,6 +1105,204 @@ mod tests {
             Err(FillError::Degenerate) | Err(FillError::Empty) => {}
             other => panic!("expected a refusal, got {other:?}"),
         }
+    }
+
+    // --- gradient fills ---
+
+    fn linear_def(angle: f64, stops: Vec<GradientStop>) -> GradientDef {
+        GradientDef {
+            kind: GradientKind::Linear,
+            angle,
+            shift: 0.0,
+            single_color: false,
+            tint: 0.0,
+            stops,
+        }
+    }
+
+    fn red_blue() -> Vec<GradientStop> {
+        vec![
+            GradientStop {
+                value: 0.0,
+                rgb: [255, 0, 0],
+            },
+            GradientStop {
+                value: 1.0,
+                rgb: [0, 0, 255],
+            },
+        ]
+    }
+
+    #[test]
+    fn sample_gradient_interpolates_and_clamps_between_stops() {
+        let def = linear_def(0.0, red_blue());
+        assert_eq!(sample_gradient(&def, 0.0), [255, 0, 0]);
+        assert_eq!(sample_gradient(&def, 1.0), [0, 0, 255]);
+        assert_eq!(sample_gradient(&def, 0.5), [128, 0, 128]);
+        // Out-of-range clamps to the end stops.
+        assert_eq!(sample_gradient(&def, -3.0), [255, 0, 0]);
+        assert_eq!(sample_gradient(&def, 9.0), [0, 0, 255]);
+    }
+
+    #[test]
+    fn sample_gradient_uses_a_single_stop_as_constant() {
+        let def = linear_def(
+            0.0,
+            vec![GradientStop {
+                value: 0.5,
+                rgb: [10, 20, 30],
+            }],
+        );
+        assert_eq!(sample_gradient(&def, 0.0), [10, 20, 30]);
+        assert_eq!(sample_gradient(&def, 1.0), [10, 20, 30]);
+    }
+
+    #[test]
+    fn normalize_stops_sorts_and_drops_out_of_range() {
+        let stops = normalize_stops(vec![
+            GradientStop {
+                value: 0.9,
+                rgb: [1, 2, 3],
+            },
+            GradientStop {
+                value: -0.5,
+                rgb: [9, 9, 9],
+            },
+            GradientStop {
+                value: 0.1,
+                rgb: [4, 5, 6],
+            },
+        ]);
+        assert_eq!(stops.len(), 2);
+        assert_eq!(stops[0].rgb, [4, 5, 6]);
+        assert_eq!(stops[1].rgb, [1, 2, 3]);
+    }
+
+    #[test]
+    fn linear_gradient_along_x_varies_left_to_right() {
+        // Unit square fill; LINEAR angle 0 => red at x=0, blue at x=1.
+        let mesh = fill_rings(&[rect(0.0, 0.0, 1.0, 1.0)]).expect("fills");
+        let colors = gradient_vertex_colors(&mesh, &linear_def(0.0, red_blue()));
+        assert_eq!(colors.len(), mesh.vertices.len());
+        for (i, p) in mesh.vertices.iter().enumerate() {
+            let expected_r = (255.0 * (1.0 - p[0])).round() as u8;
+            let expected_b = (255.0 * p[0]).round() as u8;
+            assert!(
+                (colors[i][0] as i16 - expected_r as i16).abs() <= 1,
+                "vertex {p:?} red {} vs {expected_r}",
+                colors[i][0]
+            );
+            assert!(
+                (colors[i][2] as i16 - expected_b as i16).abs() <= 1,
+                "vertex {p:?} blue {} vs {expected_b}",
+                colors[i][2]
+            );
+            assert_eq!(colors[i][1], 0, "green channel must stay 0");
+        }
+    }
+
+    #[test]
+    fn linear_gradient_angle_rotates_the_ramp() {
+        // Angle PI/2 => ramp along +Y: red at y=0, blue at y=1.
+        let mesh = fill_rings(&[rect(0.0, 0.0, 1.0, 1.0)]).expect("fills");
+        let colors =
+            gradient_vertex_colors(&mesh, &linear_def(std::f64::consts::FRAC_PI_2, red_blue()));
+        for (i, p) in mesh.vertices.iter().enumerate() {
+            let expected_b = (255.0 * p[1]).round() as u8;
+            assert!(
+                (colors[i][2] as i16 - expected_b as i16).abs() <= 1,
+                "vertex {p:?} blue {} vs {expected_b}",
+                colors[i][2]
+            );
+        }
+    }
+
+    #[test]
+    fn single_color_gradient_blends_toward_white_or_black() {
+        let mesh = fill_rings(&[rect(0.0, 0.0, 1.0, 1.0)]).expect("fills");
+        let white_tint = GradientDef {
+            kind: GradientKind::Linear,
+            angle: 0.0,
+            shift: 0.0,
+            single_color: true,
+            tint: 1.0,
+            stops: vec![GradientStop {
+                value: 0.0,
+                rgb: [255, 0, 0],
+            }],
+        };
+        let colors = gradient_vertex_colors(&mesh, &white_tint);
+        // Leftmost vertex (x=0) is pure red; rightmost (x=1) is white.
+        let left = mesh
+            .vertices
+            .iter()
+            .position(|p| p[0] == 0.0)
+            .expect("left vertex");
+        let right = mesh
+            .vertices
+            .iter()
+            .position(|p| p[0] == 1.0)
+            .expect("right vertex");
+        assert_eq!(colors[left], [255, 0, 0]);
+        assert_eq!(colors[right], [255, 255, 255]);
+    }
+
+    #[test]
+    fn spherical_gradient_ramps_by_radius_across_the_boundary() {
+        // A kite has boundary vertices at more than one radius once the y-band
+        // decomposition adds edge crossings, so the radial ramp is visible. A
+        // plain rectangle only yields its four corners and collapses to a
+        // constant (a documented tessellation gap).
+        let kite: Loop = vec![[1.0, 0.0], [0.0, 3.0], [-1.0, 0.0], [0.0, -1.0]];
+        let mesh = fill_rings(&[kite]).expect("fills");
+        let def = GradientDef {
+            kind: GradientKind::Spherical,
+            angle: 0.0,
+            shift: 0.0,
+            single_color: false,
+            tint: 0.0,
+            stops: red_blue(),
+        };
+        let colors = gradient_vertex_colors(&mesh, &def);
+        // The gradient centre is the bounds midpoint (0, 1). The farthest
+        // vertices from it (0, 3) and (0, -1) are at t = 1 (blue); the nearest,
+        // (±1, 0), are at t = 1/sqrt(2) and must be redder.
+        let color_at = |want: [f64; 2]| -> [u8; 3] {
+            let i = mesh
+                .vertices
+                .iter()
+                .position(|p| (p[0] - want[0]).abs() < 1e-9 && (p[1] - want[1]).abs() < 1e-9)
+                .unwrap_or_else(|| panic!("vertex {want:?} present"));
+            colors[i]
+        };
+        assert_eq!(color_at([0.0, 3.0]), [0, 0, 255]);
+        assert_eq!(color_at([0.0, -1.0]), [0, 0, 255]);
+        let near = color_at([1.0, 0.0]);
+        assert!(near[2] < 255 && near[0] > 0, "near vertex {near:?}");
+    }
+
+    #[test]
+    fn unusable_gradient_produces_no_colors() {
+        let mesh = fill_rings(&[rect(0.0, 0.0, 1.0, 1.0)]).expect("fills");
+        let empty = linear_def(0.0, Vec::new());
+        assert!(gradient_vertex_colors(&mesh, &empty).is_empty());
+        let nan_angle = linear_def(f64::NAN, red_blue());
+        assert!(gradient_vertex_colors(&mesh, &nan_angle).is_empty());
+    }
+
+    #[test]
+    fn shift_moves_the_ramp_start() {
+        let mesh = fill_rings(&[rect(0.0, 0.0, 1.0, 1.0)]).expect("fills");
+        let mut def = linear_def(0.0, red_blue());
+        def.shift = 0.5;
+        let colors = gradient_vertex_colors(&mesh, &def);
+        // At shift 0.5 the left edge (t=0) maps to 0.5 => mid purple.
+        let left = mesh
+            .vertices
+            .iter()
+            .position(|p| p[0] == 0.0)
+            .expect("left vertex");
+        assert_eq!(colors[left], [128, 0, 128]);
     }
 
     #[test]

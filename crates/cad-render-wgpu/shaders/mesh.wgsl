@@ -8,6 +8,11 @@
 //
 // Winding: the mirrored variant of this pipeline selects `front_face = Cw`;
 // the shader is identical for both.
+//
+// Colour: `camera.tint.rgb` is the per-batch colour and `in.color` is the
+// per-vertex colour. A non-gradient mesh supplies white vertices, so the
+// product reduces to the batch tint and existing geometry is unchanged; a
+// gradient HATCH bakes its ramp into `in.color`.
 
 struct Camera {
     transform: mat4x4<f32>,
@@ -19,16 +24,19 @@ struct Camera {
 struct VsOut {
     @builtin(position) position: vec4<f32>,
     @location(0) world_normal: vec3<f32>,
+    @location(1) color: vec3<f32>,
 };
 
 @vertex
 fn vs_main(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) color: vec3<f32>,
 ) -> VsOut {
     var out: VsOut;
     out.position = camera.transform * vec4<f32>(position, 1.0);
     out.world_normal = normal;
+    out.color = color;
     return out;
 }
 
@@ -37,8 +45,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     let light_dir = vec3<f32>(0.0, 0.0, -1.0);
     let diffuse = max(dot(n, -light_dir), 0.0);
-    // `tint.rgb` is the batch's own colour; the diffuse term scales it and the
-    // ambient floor keeps a back-facing facet visible instead of black.
-    let lit = camera.tint.rgb * (0.25 + 0.75 * diffuse);
+    // `tint.rgb` is the batch's own colour, modulated by the per-vertex colour
+    // (white when the batch has no gradient). The diffuse term scales the
+    // result and the ambient floor keeps a back-facing facet visible instead of
+    // black.
+    let base = camera.tint.rgb * in.color;
+    let lit = base * (0.25 + 0.75 * diffuse);
     return vec4<f32>(lit, camera.tint.a);
 }

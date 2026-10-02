@@ -28,7 +28,10 @@ use geometry::OverBudget;
 pub use geometry::{
     clamp_alpha, classify_alpha, plan_draw_order, AlphaClass, BatchOrderEntry, DrawOrderPlan,
 };
-pub use geometry::{front_face_ccw, normals_need_repair, repaired_normals, winding_is_flipped};
+pub use geometry::{
+    front_face_ccw, has_vertex_colors, normals_need_repair, repaired_colors, repaired_normals,
+    winding_is_flipped,
+};
 pub use geometry::{Camera2d, Camera3d};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,6 +205,10 @@ struct GpuBatch {
     vertex_count: u32,
     /// Per-vertex normals (mesh topology only); kept alive for binding.
     normals: Option<wgpu::Buffer>,
+    /// Per-vertex colours (mesh topology only); kept alive for binding. Always
+    /// bound for a mesh (white when the batch has no gradient), so the shader's
+    /// `@location(2)` attribute is always provided.
+    colors: Option<wgpu::Buffer>,
     topology: RenderTopology,
     /// Triangle index buffer (mesh topology only).
     indices: Option<wgpu::Buffer>,

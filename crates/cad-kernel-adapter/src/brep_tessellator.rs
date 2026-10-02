@@ -224,6 +224,7 @@ fn tessellate_brep(request: &TessellationRequest, brep: &BrepData) -> Tessellati
             triangles,
             normals,
             face_sources,
+            colors: Vec::new(),
         },
         edges,
         precision,

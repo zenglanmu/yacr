@@ -533,6 +533,7 @@ mod tests {
             triangles: vec![[0, 1, 2], [3, 4, 5]],
             normals: Vec::new(),
             face_sources: vec![Some(face("face-a")), Some(face("face-b"))],
+            colors: Vec::new(),
         }
     }
 

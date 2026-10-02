@@ -40,6 +40,7 @@ fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
         topology: RenderTopology::Lines,
         vertices,
         normals: Vec::new(),
+        colors: Vec::new(),
         indices: Vec::new(),
         edges: Vec::new(),
         mirrored: false,
@@ -83,6 +84,7 @@ fn triangle_mesh() -> RenderBatch {
         topology: RenderTopology::Mesh,
         vertices: vec![[-0.9, -0.9, 0.0], [0.0, 0.9, 0.0], [0.9, -0.9, 0.0]],
         normals: vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
+        colors: Vec::new(),
         indices: vec![[0, 1, 2]],
         edges: Vec::new(),
         mirrored: false,
@@ -216,6 +218,101 @@ fn mesh_render_uses_triangle_pipeline() {
         differing > 0,
         "mesh geometry rasterized nothing (background {background:?})"
     );
+}
+
+/// A quad mesh (world-clockwise so it survives back-face culling) with an
+/// explicit per-vertex colour ramp: `left` at the two x = -0.8 vertices and
+/// `right` at the two x = +0.8 vertices.
+fn gradient_quad(left: [f32; 3], right: [f32; 3]) -> RenderBatch {
+    RenderBatch {
+        local_origin: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        topology: RenderTopology::Mesh,
+        vertices: vec![
+            [-0.8, -0.8, 0.0],
+            [-0.8, 0.8, 0.0],
+            [0.8, 0.8, 0.0],
+            [0.8, -0.8, 0.0],
+        ],
+        normals: vec![
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+        ],
+        colors: vec![left, left, right, right],
+        indices: vec![[0, 1, 2], [0, 2, 3]],
+        edges: Vec::new(),
+        mirrored: false,
+        alpha: 1.0,
+        color: cad_scene::DEFAULT_BATCH_COLOR,
+        color_unresolved: true,
+        lineweight: 0.0,
+        lineweight_unresolved: true,
+        sources: vec![source()],
+        draw_order: 0,
+    }
+}
+
+/// Render one gradient quad and return `(left_probe, right_probe)` from the
+/// readback. The probes sit inside the quad at world x = -0.5 and +0.5, y = 0.
+fn render_gradient_probes(left: [f32; 3], right: [f32; 3]) -> ([u8; 4], [u8; 4]) {
+    let Some(gpu) = gpu() else {
+        return ([0, 0, 0, 0], [0, 0, 0, 0]);
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&scene(vec![gradient_quad(left, right)]))
+        .expect("upload gradient quad");
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render gradient frame");
+    assert_eq!(stats.triangles, 2, "gradient quad should be two triangles");
+    let image = renderer.read_target_rgba().expect("read gradient frame");
+    // x = -0.5 -> pixel 16; x = +0.5 -> pixel 48; y = 0 -> pixel 32.
+    (image.pixel(16, 32), image.pixel(48, 32))
+}
+
+/// A per-vertex gradient must reach the fragment shader: the two ends of a
+/// red→blue ramp rasterize as different, channel-dominant colours. This is a
+/// real software-Vulkan (lavapipe) frame.
+#[test]
+fn gradient_mesh_renders_a_visible_ramp() {
+    let Some(_gpu) = gpu() else {
+        return;
+    };
+    let (left, right) = render_gradient_probes([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    assert_ne!(left, right, "gradient endpoints rendered identically");
+    assert!(
+        left[0] > left[2],
+        "left end should be red-dominant, got {left:?}"
+    );
+    assert!(
+        right[2] > right[0],
+        "right end should be blue-dominant, got {right:?}"
+    );
+}
+
+/// Two gradients with the same stops but swapped directions must produce
+/// different frames, proving the vertex colours (not just a constant tint)
+/// drive the raster.
+#[test]
+fn gradient_direction_changes_the_frame() {
+    let Some(_gpu) = gpu() else {
+        return;
+    };
+    let forward = render_gradient_probes([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    let reversed = render_gradient_probes([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    assert_ne!(
+        forward, reversed,
+        "reversing the gradient must change the rendered frame"
+    );
+    // The first probe swaps dominance.
+    assert!(forward.0[0] > forward.0[2] && reversed.0[2] > reversed.0[0]);
 }
 
 /// A translucent mesh batch must composite over the background differently from

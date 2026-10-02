@@ -92,6 +92,7 @@ fn multi_ring_hatch_fill_flows_through_the_mesh_path() {
         triangles: fill.triangles,
         normals,
         face_sources: Vec::new(),
+        colors: Vec::new(),
     }));
     let e = entity(9, SemanticGeometry::Compound(children));
     let registry = ProviderRegistry::with_default_provider();

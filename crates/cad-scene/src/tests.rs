@@ -214,6 +214,7 @@ fn quad() -> Mesh {
             4
         ],
         face_sources: Vec::new(),
+        colors: Vec::new(),
     }
 }
 
@@ -351,6 +352,7 @@ fn empty_batch_centroid_falls_back_to_local_origin() {
         topology: RenderTopology::Lines,
         vertices: Vec::new(),
         normals: Vec::new(),
+        colors: Vec::new(),
         indices: Vec::new(),
         edges: Vec::new(),
         mirrored: false,

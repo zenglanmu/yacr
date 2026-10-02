@@ -139,6 +139,7 @@ fn budget_exceeded_is_reported_with_stable_code() {
             triangles: vec![[0, 1, 2]],
             normals: vec![],
             face_sources: vec![None],
+            colors: Vec::new(),
         },
         edges: vec![vec![
             Point3 {

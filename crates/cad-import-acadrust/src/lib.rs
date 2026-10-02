@@ -20,7 +20,10 @@ use cad_db::{
     LineType as DbLineType, LinetypePattern, PaperViewport, Style,
 };
 use cad_domain::*;
-use cad_geometry::{arbitrary_axis, tessellate_bspline, PatternLine, TessellationParams};
+use cad_geometry::{
+    arbitrary_axis, tessellate_bspline, GradientDef, GradientKind, GradientStop, PatternLine,
+    TessellationParams,
+};
 use cad_proxy::{DecodeLimits, ProxyPlayer, ProxySource};
 
 mod solid;

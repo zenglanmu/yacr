@@ -220,6 +220,7 @@ pub fn repaired_normals(batch: &RenderBatch) -> Vec<[f32; 3]> {
         triangles: batch.indices.clone(),
         normals: Vec::new(),
         face_sources: Vec::new(),
+        colors: Vec::new(),
     };
     let computed = cad_geometry::compute_vertex_normals(&mesh);
     computed
@@ -235,6 +236,34 @@ pub fn normals_need_repair(batch: &RenderBatch) -> bool {
             .normals
             .iter()
             .any(|v| !vector_is_usable([v[0] as f64, v[1] as f64, v[2] as f64]))
+}
+
+/// Per-vertex colours for the mesh pipeline, always one entry per vertex.
+///
+/// The returned value is the vertex-colour attribute the shader multiplies into
+/// the batch tint:
+/// * when the batch carries exactly one colour per vertex, each is sanitised and
+///   used as-is;
+/// * otherwise (the default, a non-gradient mesh) every vertex is white, so the
+///   tint is unchanged and existing geometry renders identically.
+///
+/// A non-finite or out-of-range channel is clamped rather than dropped, matching
+/// [`cad_scene::sanitize_color`].
+pub fn repaired_colors(batch: &RenderBatch) -> Vec<[f32; 3]> {
+    const WHITE: [f32; 3] = [1.0, 1.0, 1.0];
+    if batch.colors.len() == batch.vertices.len() {
+        return batch
+            .colors
+            .iter()
+            .map(|c| cad_scene::sanitize_color(*c))
+            .collect();
+    }
+    vec![WHITE; batch.vertices.len()]
+}
+
+/// Whether a batch carries usable per-vertex colours.
+pub fn has_vertex_colors(batch: &RenderBatch) -> bool {
+    batch.colors.len() == batch.vertices.len() && !batch.colors.is_empty()
 }
 
 /// Deterministic (first, second) vertex indices for every edge of a batch's
@@ -548,6 +577,7 @@ mod tests {
             topology: RenderTopology::Mesh,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             normals: Vec::new(),
+            colors: Vec::new(),
             indices: vec![[0, 1, 2]],
             edges: Vec::new(),
             mirrored,

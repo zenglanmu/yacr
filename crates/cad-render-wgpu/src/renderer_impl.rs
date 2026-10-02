@@ -180,7 +180,11 @@ impl Renderer {
                 module: shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(mesh_vertex_layout()), Some(mesh_normal_layout())],
+                buffers: &[
+                    Some(mesh_vertex_layout()),
+                    Some(mesh_normal_layout()),
+                    Some(mesh_color_layout()),
+                ],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -352,7 +356,7 @@ impl Renderer {
             .as_ref()
             .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
         for batch in &delta.added {
-            let (vertices, indices, edge_indices, normals) = match batch.topology {
+            let (vertices, indices, edge_indices, normals, colors) = match batch.topology {
                 RenderTopology::Mesh => {
                     let verts = pack_positions(&batch.vertices);
                     let idx: Vec<u32> = batch
@@ -362,15 +366,25 @@ impl Renderer {
                         .collect();
                     let edges = geometry::sorted_edge_indices(&batch.indices);
                     let normals = geometry::repaired_normals(batch);
-                    (verts, idx, edges, pack_positions(&normals))
+                    // Always bound (white when the batch has no per-vertex
+                    // colours), so the mesh pipeline's `@location(2)` is valid.
+                    let colors = geometry::repaired_colors(batch);
+                    (
+                        verts,
+                        idx,
+                        edges,
+                        pack_positions(&normals),
+                        pack_positions(&colors),
+                    )
                 }
                 RenderTopology::MeshEdges => {
                     let verts = pack_positions(&batch.vertices);
                     let idx: Vec<u32> = (0..batch.vertices.len() as u32).collect();
-                    (verts, Vec::new(), idx, Vec::new())
+                    (verts, Vec::new(), idx, Vec::new(), Vec::new())
                 }
                 RenderTopology::Lines => (
                     pack_positions(&batch.vertices),
+                    Vec::new(),
                     Vec::new(),
                     Vec::new(),
                     Vec::new(),
@@ -398,14 +412,24 @@ impl Renderer {
             } else {
                 None
             };
+            let color_buffer = if is_mesh {
+                Some(Self::vertex_buffer(device, self.queue.as_ref(), &colors))
+            } else {
+                None
+            };
 
             let (camera, bind_group) = Self::make_uniform(device, layout);
-            let bytes = vertices.len() + indices.len() * 4 + edge_indices.len() * 4 + normals.len();
+            let bytes = vertices.len()
+                + indices.len() * 4
+                + edge_indices.len() * 4
+                + normals.len()
+                + colors.len();
             self.uploaded_bytes += bytes as u64;
             self.batches.push(GpuBatch {
                 vertices: vertex_buffer,
                 vertex_count: batch.vertices.len() as u32,
                 normals: normal_buffer,
+                colors: color_buffer,
                 topology: batch.topology,
                 indices: index_buffer,
                 index_count: indices.len() as u32,

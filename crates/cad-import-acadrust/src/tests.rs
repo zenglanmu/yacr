@@ -216,6 +216,166 @@ fn solid_hatch_with_a_hole_fills_the_solid_band_only() {
     assert!((area - 84.0).abs() < 1e-6, "hole area not excluded: {area}");
 }
 
+fn mesh_of(geometry: &SemanticGeometry) -> Option<&Mesh> {
+    let SemanticGeometry::Compound(children) = geometry else {
+        return None;
+    };
+    children.iter().find_map(|child| match child {
+        SemanticGeometry::Mesh(m) => Some(m),
+        _ => None,
+    })
+}
+
+fn gradient_hatch(name: &str, stops: &[(f64, (u8, u8, u8))]) -> acadrust::entities::Hatch {
+    let mut hatch = acadrust::entities::Hatch::new();
+    // A real gradient HATCH is stored solid with gradient metadata, so the
+    // importer must prefer the gradient over the solid flag.
+    hatch.is_solid = true;
+    hatch.paths = vec![rect_path(0.0, 0.0, 10.0, 10.0)];
+    let g = &mut hatch.gradient_color;
+    g.enabled = true;
+    g.name = name.to_string();
+    g.angle = 0.0;
+    g.is_single_color = false;
+    g.color_tint = 0.0;
+    for (value, (r, gg, b)) in stops {
+        g.colors.push(acadrust::entities::GradientColorEntry {
+            value: *value,
+            color: acadrust::Color::from_rgb(*r, *gg, *b),
+        });
+    }
+    hatch
+}
+
+#[test]
+fn linear_gradient_hatch_is_complete_and_graded() {
+    let hatch = gradient_hatch("LINEAR", &[(0.0, (255, 0, 0)), (1.0, (0, 0, 255))]);
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    assert_eq!(completeness, Completeness::Complete, "{completeness:?}");
+    let mesh = mesh_of(&geometry).expect("gradient fill mesh");
+    assert_eq!(mesh.colors.len(), mesh.vertices.len());
+    let min_x = mesh
+        .vertices
+        .iter()
+        .map(|p| p.x)
+        .fold(f64::INFINITY, f64::min);
+    let max_x = mesh
+        .vertices
+        .iter()
+        .map(|p| p.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let left = mesh
+        .vertices
+        .iter()
+        .position(|p| (p.x - min_x).abs() < 1e-9)
+        .expect("left vertex");
+    let right = mesh
+        .vertices
+        .iter()
+        .position(|p| (p.x - max_x).abs() < 1e-9)
+        .expect("right vertex");
+    assert_eq!(mesh.colors[left], [255, 0, 0], "left stop");
+    assert_eq!(mesh.colors[right], [0, 0, 255], "right stop");
+}
+
+#[test]
+fn spherical_gradient_hatch_is_complete() {
+    // A triangle boundary has vertices at more than one radius from the bounds
+    // midpoint, so the radial ramp is visible (a rectangle would collapse to a
+    // constant, a documented tessellation gap).
+    let mut hatch = gradient_hatch("SPHERICAL", &[(0.0, (0, 255, 0)), (1.0, (0, 0, 0))]);
+    let corners = [(0.0f64, 0.0f64), (10.0, 0.0), (5.0, 10.0)];
+    let mut path = BoundaryPath::new();
+    for i in 0..3 {
+        let a = corners[i];
+        let b = corners[(i + 1) % 3];
+        path.add_edge(BoundaryEdge::Line(acadrust::entities::LineEdge {
+            start: acadrust::types::Vector2::new(a.0, a.1),
+            end: acadrust::types::Vector2::new(b.0, b.1),
+        }));
+    }
+    hatch.paths = vec![path];
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    assert_eq!(completeness, Completeness::Complete, "{completeness:?}");
+    let mesh = mesh_of(&geometry).expect("gradient fill mesh");
+    assert_eq!(mesh.colors.len(), mesh.vertices.len());
+    assert!(mesh.colors.iter().any(|c| c[1] > 0), "green ramp expected");
+}
+
+#[test]
+fn curved_gradient_kind_is_partial_with_a_stable_reason_code() {
+    let hatch = gradient_hatch("HEMISPHERICAL", &[(0.0, (255, 0, 0)), (1.0, (0, 0, 255))]);
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    match completeness {
+        Completeness::Partial(reasons) => {
+            assert!(
+                reasons
+                    .iter()
+                    .any(|r| r.contains("gradient_kind_not_supported")),
+                "{reasons:?}"
+            );
+            assert!(reasons
+                .iter()
+                .any(|r| r.contains("gradient hatch not rendered")));
+        }
+        other => panic!("expected Partial, got {other:?}"),
+    }
+    assert!(mesh_of(&geometry).is_none(), "no gradient mesh expected");
+}
+
+#[test]
+fn gradient_without_stops_is_partial_not_solid() {
+    let hatch = gradient_hatch("LINEAR", &[]);
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    match completeness {
+        Completeness::Partial(reasons) => {
+            assert!(
+                reasons
+                    .iter()
+                    .any(|r| r.contains("gradient_definition_unusable")),
+                "{reasons:?}"
+            );
+        }
+        other => panic!("expected Partial, got {other:?}"),
+    }
+    assert!(mesh_of(&geometry).is_none(), "no mesh expected");
+}
+
+#[test]
+fn single_color_gradient_hatch_is_complete_and_graded() {
+    let mut hatch = acadrust::entities::Hatch::new();
+    hatch.is_solid = true;
+    hatch.paths = vec![rect_path(0.0, 0.0, 10.0, 10.0)];
+    let g = &mut hatch.gradient_color;
+    g.enabled = true;
+    g.name = "LINEAR".to_string();
+    g.angle = 0.0;
+    g.is_single_color = true;
+    g.color_tint = 1.0;
+    g.colors.push(acadrust::entities::GradientColorEntry {
+        value: 0.0,
+        color: acadrust::Color::from_rgb(255, 0, 0),
+    });
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    assert_eq!(completeness, Completeness::Complete, "{completeness:?}");
+    let mesh = mesh_of(&geometry).expect("gradient fill mesh");
+    assert!(mesh.colors.iter().any(|c| c[0] == 255 && c[1] > 200));
+}
+
+#[test]
+fn solid_hatch_without_gradient_still_has_no_vertex_colors() {
+    let mut hatch = acadrust::entities::Hatch::new();
+    hatch.is_solid = true;
+    hatch.paths = vec![rect_path(0.0, 0.0, 4.0, 4.0)];
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    assert_eq!(completeness, Completeness::Complete);
+    let mesh = mesh_of(&geometry).expect("solid mesh");
+    assert!(
+        mesh.colors.is_empty(),
+        "solid fill has no per-vertex colours"
+    );
+}
+
 #[test]
 fn over_budget_multi_ring_hatch_stays_partial_boundary_only() {
     // A zig-zag star defeats Douglas-Peucker, so the loop stays over
