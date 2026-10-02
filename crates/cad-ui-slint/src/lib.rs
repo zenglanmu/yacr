@@ -8,7 +8,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cad_app::{AnnotationToolKind, Command, CommandId, CommandPayload, MeasurementToolKind};
-use cad_domain::{AnnotationId, CadError, CadResult, DocumentId, LayerId, Point3, ViewportId};
+use cad_domain::{
+    AnnotationId, CadError, CadResult, DocumentId, LayerId, Point3, SpaceId, ViewportId,
+};
 
 /// Source of the shared shell, kept for packaging/documentation tooling.
 pub const UI_DEFINITION: &str = include_str!("../ui/app.slint");
@@ -27,9 +29,10 @@ pub mod status;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 pub use bridge::{
-    build_scene, build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
-    fit_camera, install as install_cad_bridge, layout_descriptors, BridgeCamera, CadView,
-    IncomingDocument,
+    build_scene, build_scene_with_annotations, build_scene_with_annotations_in_space,
+    build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
+    camera2d_from_params, camera3d_from_params, fit_camera, install as install_cad_bridge,
+    layout_descriptors, BridgeCamera, CadView, IncomingDocument,
 };
 pub use i18n::{Locale, LocaleResolution, Message, MessageCatalog, MessageSource};
 pub use responsive::{Breakpoint, ResponsiveMetrics, MIN_POINTER_TARGET, MIN_TOUCH_TARGET};
@@ -123,6 +126,17 @@ impl MeasurementUiState {
     pub fn kind_index(&self) -> i32 {
         self.kind.index() as i32
     }
+}
+
+/// View/observation state pushed into the shell (F13/F14).
+///
+/// `is_3d` drives the 2D/3D affordance and the adapter's orbit-by-drag gate;
+/// `perspective` drives the projection toggle's pressed state. Both are
+/// derivations of the authoritative application viewport, never invented here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ViewStateUi {
+    pub is_3d: bool,
+    pub perspective: bool,
 }
 
 /// One layer row pushed into the shell (audit F03/U03).
@@ -448,6 +462,16 @@ fn apply_chrome(ui: &YacrWindow, messages: &MessageSource) {
     ui.set_layout_unsupported_marker(messages.text("layout.unsupported_marker", &[]).into());
     ui.set_layout_empty_label(messages.text("layout.empty", &[]).into());
 
+    // View / projection chrome (F13/F14). The standard-view model is built from
+    // the shared `StandardView::ALL` ordering so a row index is authoritative.
+    ui.set_view_panel_label(messages.text("view.panel", &[]).into());
+    ui.set_view_2d_label(messages.text("view.2d", &[]).into());
+    ui.set_view_3d_label(messages.text("view.3d", &[]).into());
+    ui.set_view_projection_label(messages.text("view.projection", &[]).into());
+    ui.set_view_ortho_label(messages.text("view.projection.ortho", &[]).into());
+    ui.set_view_perspective_label(messages.text("view.projection.perspective", &[]).into());
+    ui.set_standard_view_labels(string_model(&status::standard_view_labels(messages)));
+
     // Responsive chrome (U01): the grouped-bar and drawer entry labels.
     ui.set_tools_label(messages.text("shell.tools", &[]).into());
     ui.set_drawer_label(messages.text("shell.drawer", &[]).into());
@@ -536,6 +560,9 @@ pub struct UiHandle {
     selection_count: Rc<Cell<i32>>,
     /// Last pushed annotation hidden count, for locale reformatting.
     annotation_hidden_count: Rc<Cell<i32>>,
+    /// Mirrors the pushed 3D view mode; gates orbit-by-drag and the 2D/3D
+    /// affordance. Set through [`UiHandle::set_view_state`].
+    view_3d: Rc<Cell<bool>>,
 }
 
 impl UiHandle {
@@ -548,6 +575,20 @@ impl UiHandle {
     /// Replace the composited CAD frame with a new texture-backed image.
     pub fn set_cad_frame(&self, image: Image) -> CadResult<()> {
         self.with(|ui| ui.set_cad_frame(image))
+    }
+
+    /// Push the derived view/observation state into the shell (F13/F14).
+    ///
+    /// The values come from the authoritative application viewport (see
+    /// [`bridge::CadView::sync_from_viewport`]); this only mirrors them so the
+    /// 2D/3D and projection affordances show the real state. It also updates the
+    /// shared flag the adapter uses to route a 3D drag to `Orbit`.
+    pub fn set_view_state(&self, state: ViewStateUi) -> CadResult<()> {
+        self.view_3d.set(state.is_3d);
+        self.with(|ui| {
+            ui.set_view_3d(state.is_3d);
+            ui.set_view_perspective(state.perspective);
+        })
     }
 
     pub fn set_status(&self, status: impl Into<slint::SharedString>) -> CadResult<()> {
@@ -844,6 +885,9 @@ pub struct UiAdapter {
     layer_override_count: Rc<Cell<i32>>,
     selection_count: Rc<Cell<i32>>,
     annotation_hidden_count: Rc<Cell<i32>>,
+    /// Mirrors the pushed 3D view mode so a left drag in 3D emits `Orbit`
+    /// instead of being routed as a 2D navigation gesture.
+    view_3d: Rc<Cell<bool>>,
 }
 
 /// Build the command a shell callback emits for the configured document.
@@ -860,6 +904,23 @@ fn command_for(
         viewport,
         payload,
     }
+}
+
+/// Radians of orbit per logical pixel of drag (a UI navigation constant).
+pub const ORBIT_RADIANS_PER_PIXEL: f64 = 0.008;
+
+/// Convert a 3D orbit drag delta (logical pixels) into `(yaw, pitch)` radians.
+///
+/// Horizontal drag yaws about world `+Z`; vertical drag pitches about the view
+/// right axis. The sign is chosen so the scene follows the pointer. Non-finite
+/// input yields `(0, 0)` rather than poisoning a camera with NaNs.
+pub fn orbit_delta(from: [f64; 2], to: [f64; 2]) -> (f64, f64) {
+    let dx = to[0] - from[0];
+    let dy = to[1] - from[1];
+    if !dx.is_finite() || !dy.is_finite() {
+        return (0.0, 0.0);
+    }
+    (-dx * ORBIT_RADIANS_PER_PIXEL, dy * ORBIT_RADIANS_PER_PIXEL)
 }
 
 impl UiAdapter {
@@ -918,6 +979,8 @@ impl UiAdapter {
         let layer_override_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
         let selection_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
         let annotation_hidden_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
+        let view_3d: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+        let orbit_last: Rc<Cell<Option<[f64; 2]>>> = Rc::new(Cell::new(None));
 
         {
             let s = shared.clone();
@@ -1262,8 +1325,14 @@ impl UiAdapter {
         {
             // Layout switch (F04). The panel sends a row index (-1 = model
             // space); the adapter resolves it to the exact LayoutId from the
-            // pushed order. Until a host installs a switch sink, the click is
-            // reported as unwired in the status line, never silently dropped.
+            // pushed order. The switch is routed through the shared app command
+            // path (`SwitchSpace`), which validates the layout against the
+            // drawing and records the active space in the session. A host that
+            // installed the legacy `LayoutSwitchSink` is still notified directly
+            // (source compatibility); in that case the command is not also sent,
+            // so the two paths cannot fight.
+            let s = shared.clone();
+            let doc = document.clone();
             let order = layout_order.clone();
             let report = ui_weak.clone();
             let messages = messages_slot.clone();
@@ -1277,26 +1346,77 @@ impl UiAdapter {
                         .and_then(|i| order.borrow().get(i).copied())
                         .map(cad_representation::SpaceSelection::Paper)
                 };
-                match space {
-                    Some(space) => match layout_switch.borrow_mut().as_mut() {
-                        Some(sink) => sink.select(space),
-                        None => {
-                            if let Some(ui) = report.upgrade() {
-                                ui.set_status_label(
-                                    messages.borrow().text("layout.switch_unwired", &[]).into(),
-                                );
-                            }
-                        }
-                    },
-                    None => {
-                        // No such row in the pushed model: report, do not act.
-                        if let Some(ui) = report.upgrade() {
-                            ui.set_status_label(
-                                messages.borrow().text("layout.switch_unwired", &[]).into(),
-                            );
-                        }
+                let Some(space) = space else {
+                    // No such row in the pushed model: report, do not act.
+                    if let Some(ui) = report.upgrade() {
+                        ui.set_status_label(
+                            messages.borrow().text("layout.switch_unwired", &[]).into(),
+                        );
                     }
+                    return;
+                };
+                if let Some(sink) = layout_switch.borrow_mut().as_mut() {
+                    sink.select(space);
+                    return;
                 }
+                let space_id = match space {
+                    cad_representation::SpaceSelection::Model => SpaceId::Model,
+                    cad_representation::SpaceSelection::Paper(id) => SpaceId::Paper(id),
+                };
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::SwitchSpace,
+                    &doc,
+                    viewport,
+                    CommandPayload::Space(space_id),
+                ));
+            });
+        }
+        {
+            // 2D/3D toggle (F13/F14). A single command so the session keeps the
+            // saved camera for a lossless round trip; the shell reflects the
+            // result from the host-pushed `view-3d` property.
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_toggle_view_mode_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::Switch2d3d,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+            });
+        }
+        {
+            // Standard view (F13). The pushed model is built from
+            // `StandardView::ALL`, so the localized label maps back to the exact
+            // view without a second ordering list; an unknown label is ignored.
+            let s = shared.clone();
+            let doc = document.clone();
+            let messages = messages_slot.clone();
+            ui.on_standard_view_selected(move |name| {
+                let messages = messages.borrow().clone();
+                if let Some(view) = status::standard_view_from_label(&messages, name.as_str()) {
+                    let _ = s.borrow_mut().send(command_for(
+                        CommandId::StandardView,
+                        &doc,
+                        viewport,
+                        CommandPayload::StandardView(view),
+                    ));
+                }
+            });
+        }
+        {
+            // Explicit orthographic/perspective toggle (F13), distinct from the
+            // 2D/3D toggle: it keeps the target and adjusts the projection.
+            let s = shared.clone();
+            let doc = document.clone();
+            ui.on_toggle_projection_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::SwitchProjection,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
             });
         }
         {
@@ -1364,9 +1484,48 @@ impl UiAdapter {
         }
         {
             let input = view_input.clone();
+            let s = shared.clone();
+            let doc = document.clone();
+            let is_3d = view_3d.clone();
+            let orbit_last = orbit_last.clone();
             ui.on_pointer_input(move |kind, button, x, y| {
+                let x = x as f64;
+                let y = y as f64;
+                // In 3D mode a left-button drag orbits the view through the
+                // shared command path. Other buttons (middle/right) and scroll
+                // still route to the host's `ViewInput`, so a host can keep 3D
+                // pan on the middle button.
+                if is_3d.get() && button == 1 {
+                    match kind {
+                        0 => {
+                            orbit_last.set(Some([x, y]));
+                            return;
+                        }
+                        2 => {
+                            if let Some(from) = orbit_last.get() {
+                                let (yaw, pitch) = orbit_delta(from, [x, y]);
+                                orbit_last.set(Some([x, y]));
+                                if yaw != 0.0 || pitch != 0.0 {
+                                    let _ = s.borrow_mut().send(command_for(
+                                        CommandId::Orbit,
+                                        &doc,
+                                        viewport,
+                                        CommandPayload::Orbit { yaw, pitch },
+                                    ));
+                                }
+                                return;
+                            }
+                            // No drag started in 3D: fall through to the host.
+                        }
+                        1 | 3 => {
+                            orbit_last.set(None);
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
                 if let Some(input) = input.borrow().as_ref() {
-                    input.pointer(kind, button, x as f64, y as f64);
+                    input.pointer(kind, button, x, y);
                 }
             });
         }
@@ -1396,6 +1555,7 @@ impl UiAdapter {
             layer_override_count,
             selection_count,
             annotation_hidden_count,
+            view_3d,
         })
     }
 
@@ -1437,6 +1597,7 @@ impl UiAdapter {
             layer_override_count: self.layer_override_count.clone(),
             selection_count: self.selection_count.clone(),
             annotation_hidden_count: self.annotation_hidden_count.clone(),
+            view_3d: self.view_3d.clone(),
         }
     }
 
@@ -1808,6 +1969,13 @@ mod tests {
             "property-panel-label",
             "diagnostics-drawer-title",
             "layout-panel-label",
+            "view-panel-label",
+            "view-2d-label",
+            "view-3d-label",
+            "view-projection-label",
+            "view-ortho-label",
+            "view-perspective-label",
+            "standard-view-labels",
             "tools-label",
             "drawer-label",
             "nav-label",
@@ -1837,5 +2005,49 @@ mod tests {
         // The drawer needs an explicit empty label; the adapter supplies the
         // catalog one, never a fabricated row.
         assert!(state.rows.is_empty());
+    }
+
+    #[test]
+    fn shell_reaches_the_view_and_space_controls() {
+        // F04/F13/F14: the 2D/3D toggle, standard views and the layout selector
+        // are all reachable from the shell and bound to catalog-built models.
+        for marker in [
+            "view-3d",
+            "view-perspective",
+            "toggle-view-mode-requested",
+            "toggle-projection-requested",
+            "standard-view-selected",
+            "standard-view-labels",
+            "layout-selected",
+        ] {
+            assert!(
+                UI_DEFINITION.contains(marker),
+                "shell must expose view/space control {marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn orbit_delta_is_proportional_finite_and_signed() {
+        // A rightward drag yaws negative; a downward drag pitches positive. The
+        // exact sign is a UI choice; the magnitude and finiteness are the
+        // contract.
+        let (yaw, pitch) = orbit_delta([10.0, 10.0], [30.0, 40.0]);
+        assert!(yaw < 0.0);
+        assert!(pitch > 0.0);
+        assert_eq!(yaw, -20.0 * ORBIT_RADIANS_PER_PIXEL);
+        assert_eq!(pitch, 30.0 * ORBIT_RADIANS_PER_PIXEL);
+        // No movement is exactly zero, so no command is emitted.
+        assert_eq!(orbit_delta([5.0, 5.0], [5.0, 5.0]), (0.0, 0.0));
+        // Non-finite input is refused rather than poisoning the camera.
+        assert_eq!(orbit_delta([0.0, 0.0], [f64::NAN, 2.0]), (0.0, 0.0));
+        assert_eq!(orbit_delta([0.0, 0.0], [1.0, f64::INFINITY]), (0.0, 0.0));
+    }
+
+    #[test]
+    fn view_state_ui_defaults_are_2d_not_3d() {
+        let state = ViewStateUi::default();
+        assert!(!state.is_3d);
+        assert!(!state.perspective);
     }
 }
