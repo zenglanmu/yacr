@@ -21,7 +21,7 @@
 | 显示 | `adb shell wm size` = 1080x2400；density 420 |
 | APK 路径 | `target/release/apk/yacr.apk`（`CARGO_TARGET_DIR` 外部时由构建脚本打印的路径） |
 | APK 大小 | 12,816,804 字节（约 12.8 MB，release，压缩后） |
-| APK SHA-256 | `298b65b8b790e4555efaf81544aa69d43a3e05fd425af0f137c4ada365a3f01d` |
+| APK SHA-256 | `f10de4e2fcf90e9272375ac928f8bcd09b5cc7b3c3279a77c4b7c7f3afbeb44c`（提交源码重建；首轮验证 APK 为 `298b65b8…`，大小相同。APK 非字节可复现，zip/签名时间戳会改变哈希） |
 | native-code | `x86_64` |
 | package / activity | `dev.yacr.app` / `android.app.NativeActivity` |
 | 签名 | `CN=yacr dev, O=yacr`，SHA-256 `ae556b93ab916181980f09c45981331af65b2be5c0fc14aeb9fb5b921cae887f`（本地开发密钥，未入库） |
@@ -195,3 +195,7 @@ cargo check --target aarch64-linux-android -p app-android --tests --locked   # E
 宿主缺少 pkg-config/fontconfig 开发头，`app-android` 被主机测试排除，因此 §7 的两个
 回归测试在本环境无法运行（**NOT RUN**）；已用 Android target 类型检查确认可编译，
 并在设备上以像素 diff 做了端到端替代验证（§5）。
+
+提交源码重建（build5）后再次安装/启动/复测：`pid=4456` 存活，
+`CAD renderer initialized: preference=WebGpu actual=WebGpu ...` 日志一致，
+拖动像素 diff = 21,534/2,592,000（0.83%），与 build4 相同。
