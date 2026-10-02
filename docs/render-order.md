@@ -25,7 +25,9 @@
 `ProviderRegistry::build_expanded` 沿 INSERT 链把 `ByBlock` 解析为外层 alpha 并写入
 `DisplayFragment::alpha`。**限制**：`ProviderRegistry::build`（非展开入口，测试/无数据库
 调用）只看到实体，没有数据库访问，因此保守地输出 `alpha = 1.0`；真实 UI 走
-`build_expanded`，透明度已端到端接通。
+`build_expanded`，透明度已端到端接通。**另一显式未支持项**：绘图样式表（plot style）
+的 alpha 未应用——acadrust 0.5.5 只暴露逐实体与逐图层的 `Transparency`，`plot_style`
+是样式名字符串、没有解析后的 alpha，因此不猜测、不叠加。
 
 渲染器在上传时把 `RenderBatch::centroid()`（世界坐标，`local_origin + 顶点均值`）与
 `draw_order`、`alpha` 缓存到 `GpuBatch`，供每帧排序使用；相机变化只重算排序，不重传
