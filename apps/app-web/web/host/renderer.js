@@ -27,6 +27,10 @@ export function startStatePolling(
     if (document.hidden) return;
     try {
       const report = wasmModule.renderer_state_report();
+      if (wasmModule.shell_geometry) {
+        const geometry = wasmModule.shell_geometry();
+        document.body.classList.toggle("mobile-tools", !!geometry[4] && !!geometry[5]);
+      }
       window.yacrState = report;
       if (/error=Some\(/.test(report)) {
         setStateKey("host.renderer_failed", { error: report });

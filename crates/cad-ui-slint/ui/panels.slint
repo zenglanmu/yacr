@@ -1,0 +1,71 @@
+import { Button, VerticalBox, HorizontalBox, CheckBox, ScrollView } from "std-widgets.slint";
+export struct LayerRow { id: int, name: string, visible: bool, overridden: bool }
+export struct PropertyRow { key: string, value: string }
+export struct AnnotationRow { id: int, kind: string, text: string, visible: bool, overridden: bool, selected: bool }
+export struct DiagnosticRow { code: string, severity: string, description: string, object: string, details: string }
+export struct LayoutRow { id: int, name: string, supported: bool, reason: string, viewport_count: int }
+
+// Scrollable dock/bottom sheet. Models are real adapter data, not sample rows.
+export component CadPanels inherits Rectangle {
+    in property <bool> phone;
+    in property <bool> work;
+    in property <[string]> labels;
+    in property <[LayerRow]> layers;
+    in property <[PropertyRow]> properties;
+    in property <[LayoutRow]> layouts;
+    in property <[AnnotationRow]> annotations;
+    in property <[DiagnosticRow]> diagnostics;
+    in property <string> backend;
+    in property <bool> diagnostics-open;
+    callback close();
+    callback restore();
+    callback clear-selection();
+    callback layer(int, bool);
+    callback layout(int);
+    callback annotation-select(int);
+    callback annotation-delete(int);
+    callback annotation-visible(int, bool);
+    height: root.phone ? 240px : 210px;
+    background: #252c36;
+    ScrollView {
+        VerticalBox {
+            padding: 6px; spacing: 6px;
+            HorizontalBox {
+                Text { text: root.labels[0]; color: #c8d0dc; vertical-alignment: center; }
+                Button { text: root.labels[1]; min-height: 48px; enabled: root.work; clicked => { root.restore(); } }
+                Button { text: root.labels[2]; min-height: 48px; clicked => { root.close(); } }
+            }
+            if root.layers.length == 0 : Text { text: root.labels[3]; color: #9aa7b8; }
+            for row[index] in root.layers : CheckBox {
+                min-height: root.phone ? 48px : 36px;
+                text: row.name; checked: row.visible; enabled: root.work;
+                toggled => { root.layer(index, self.checked); }
+            }
+            Text { text: root.labels[4]; color: #8dc9ff; }
+            Button { text: root.labels[5]; min-height: 48px; clicked => { root.layout(-1); } }
+            for row[index] in root.layouts : Button {
+                text: row.name + (row.supported ? "" : " — " + row.reason);
+                min-height: 48px; enabled: row.supported; clicked => { root.layout(index); }
+            }
+            HorizontalBox {
+                Text { text: root.labels[6]; color: #8dc9ff; }
+                Button { text: root.labels[7]; min-height: 48px; clicked => { root.clear-selection(); } }
+            }
+            if root.properties.length == 0 : Text { text: root.labels[8]; color: #9aa7b8; }
+            for row in root.properties : Text { text: row.key + ": " + row.value; color: #c8d0dc; overflow: elide; }
+            Text { text: root.labels[9]; color: #8dc9ff; }
+            if root.annotations.length == 0 : Text { text: root.labels[10]; color: #9aa7b8; }
+            for row[index] in root.annotations : HorizontalBox {
+                Button { text: row.kind + (row.selected ? " *" : ""); min-height: 48px; clicked => { root.annotation-select(index); } }
+                Text { text: row.text; color: #c8d0dc; overflow: elide; horizontal-stretch: 1; }
+                CheckBox { checked: row.visible; enabled: root.work; toggled => { root.annotation-visible(index, self.checked); } }
+                Button { text: root.labels[11]; min-height: 48px; enabled: root.work; clicked => { root.annotation-delete(index); } }
+            }
+            if root.diagnostics-open : Text { text: root.backend; color: #e6b450; }
+            if root.diagnostics-open && root.diagnostics.length == 0 : Text { text: root.labels[12]; color: #9aa7b8; }
+            if root.diagnostics-open : VerticalBox {
+                for row in root.diagnostics : Text { text: row.code + " " + row.description + " " + row.details; color: #e6b450; wrap: word-wrap; }
+            }
+        }
+    }
+}

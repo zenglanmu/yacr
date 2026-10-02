@@ -122,3 +122,12 @@ body {
     gap: 4px;
   }
 }
+/* Phone starts with only the Slint command row. TOOLS reveals ribbon/settings;
+   no desktop ribbon squeezed into tiny touch targets. */
+@media (max-width: 599px) {
+  :root { --host-toolbar-height: 0px; --host-status-height: 0px; }
+  #host-controls, #host-state { display: none; }
+  body.mobile-tools #host-controls { display: flex; }
+  body:has(#retry-renderer:not([hidden])) #host-controls,
+  body:has(#retry-renderer:not([hidden])) #host-state { display: flex; }
+}

@@ -1,0 +1,63 @@
+# Ribbon 与命令栏布局（2026-10-02）
+
+继续使用 Slint UI + 同设备 wgpu 离屏合成，不迁移到 DOM 工具界面。
+Web 的 DOM 仅提供文件选择、语言/启动恢复与原生多点触控适配。
+
+## 文件边界
+
+- `ui/app.slint`：组合根、保持现有 adapter 属性/回调协议。
+- `ui/ribbon.slint`：常用 / 视图 / 管理分组与展开状态。
+- `ui/button.slint`：深色按钮，大触控目标，不压缩桌面工具来适应手机。
+- `ui/command-bar.slint`：持续可见的命令行、可展开状态/操作行。
+- `ui/canvas.slint`：Image 与 Slint 单指针/滚轮事件。
+- `ui/panels.slint`：真实图层、布局、属性、批注和诊断数据的滚动面板。
+- `src/command_line.rs`：小型命令词路由；不重复实现 CAD 业务逻辑。
+- `web/host/touch.js`：CAD 区域内双指/拖动识别，控件输入仍属于 Slint。
+- `browser/shell.rs`：CSS 像素手势转换成应用 Pan/Zoom 命令，不直接更改渲染相机。
+
+## 行为
+
+桌面上方显示 Ribbon，箭头可收起为标签行；底部始终保留命令行，箭头展开/收起
+状态和操作行。手机默认不显示 Ribbon、宿主设置或面板，仅保留底部命令行。
+输入 `TOOLS` 或展开底部操作行再点工具按钮，显示手机 Ribbon 与宿主语言设置。
+手机按钮至少 48 CSS px 高，320px 宽度单独验收；管理页文件操作纵向排列。
+
+`OPEN` 打开真实 DWG 文件选择器，`FIT` / `ZOOM EXTENTS` 适应图纸，`UNDO` / `REDO`
+使用真实可用性；`TOOLS` / `RIBBON` 切换 Ribbon，`PANELS` 切换数据面板，
+`DIAGNOSTICS` 打开诊断。不是 AutoCAD 完整命令解析器。
+绘制/编辑 Ribbon（直线、圆、移动、修剪）明确禁用并标注尚未接入；未知命令
+显示明确未接入诊断。交接点：`pending("ui.command.editing")`、
+`pending("ui.ribbon.draw_modify")` 是代码注释，不伪造后端空成功。
+
+Web 在 CAD 区域内单指拖动平移、双指捏合缩放并跟随中心平移；手指数变化重新
+建立基准，取消不选取，拖动/捏合不误发点击，轻触才进入既有 pick 通道。
+工具与命令控件的触屏事件不被 CAD 手势拦截。缩放围绕当前 CAD 相机中心，尚非
+任意触点锚定缩放；3D 专用多指轨道映射与真实 iOS/Android 手势仍待验收。
+
+## 独立 CAD 引擎：下一阶段，不冒充已完成
+
+领域/数据库/表示/场景/渲染仍独立于 Slint。CPU controller 已在 `cad-app/render_scene`，
+UI 只派生命令与视图；参见 `bridge-runtime.md`。当前 `app-web.wasm` 仍包含 Slint，
+**不是**对外独立 CAD 显示 wasm。下一阶段应增加无 Slint 依赖的 wasm facade，明确
+文档句柄、导入/释放、资源、设备提供、视图、错误与异步任务协议，并由 Slint 宿主
+复用它；不得把宿主导出改名当作核心提取完成。这一阶段由后续助手实施。
+
+## 验收
+
+`node --test scripts/test-web-touch.mjs` 覆盖手势计算、输入边界、取消、tap/drag/pinch
+冲突与手指数转换。`scripts/check-web-ribbon.mjs` 在真实无头 Chromium 的桌面、
+390px DPR3、320px DPR2 验证初始布局、两条栏展开/收起、Slint Open 文件选择器、
+4 实体 DWG 导入及 CDP 双指/拖动导致真实应用相机/帧变化。
+截图路径与报告：`/tmp/opencode/yacr-ribbon-validation/`。
+SwiftShader 在连续动态截图时出现 compositor capture 停滞；布局动作以状态契约
+验收，默认页面截图用独立 capture，并单独检查展开布局。不是硬件 GPU 性能证据。
+
+最终验收：核心串行 875 passed / 0 failed / 1 ignored；JS 契约 11 passed；
+app-web wasm 严格 clippy、UI wasm 测试编译、Android aarch64 编译、架构/i18n
+检查通过。真实无头 WebGL2 的 ribbon、mobile、desktop 三套脚本串行通过；
+桌面导航像素改变，语言偏好与空批注 sidecar 往返保留，移动端旋转保留 4 实体文档。
+报告另见 `/tmp/opencode/yacr-ribbon-mobile/report.json` 和
+`/tmp/opencode/yacr-ribbon-desktop.json`。同环境并发浏览器测试不稳定，须串行；
+本次未验收真机/WebGPU，未将这些结果作为生产性能声明。
+发布构建使用同源完整字体目录（99 个 CAD 字体 + catalog），不是 WITH_FONTS=0 的
+测试目录；源自此前自托管构建的缓存，许可证/再分发责任仍见 `docs/fonts.md`。

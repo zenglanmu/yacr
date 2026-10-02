@@ -50,6 +50,26 @@ pub fn web_resize(width: f64, height: f64, scale: f64) -> Result<(), JsValue> {
     browser::resize(width, height, scale).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// CSS-pixel CAD hit rectangle followed by phone/tools/ribbon/command state.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn shell_geometry() -> Result<Vec<f64>, JsValue> {
+    browser::shell::geometry().map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Native browser touch navigation, never mutates a GPU camera directly.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn touch_navigate(dx: f64, dy: f64, zoom: f64) -> Result<(), JsValue> {
+    browser::shell::navigate(dx, dy, zoom).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn touch_pick(x: f64, y: f64) -> Result<(), JsValue> {
+    browser::shell::pick(x, y).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 /// Open a drawing from bytes read by the JS File API host.
 ///
 /// Refuses to replace a document with unsaved annotations; the JS host must

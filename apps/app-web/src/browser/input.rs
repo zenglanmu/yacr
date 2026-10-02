@@ -12,7 +12,7 @@ use cad_ui_slint::{CadView, UiCommandSink, ViewInput};
 use super::persistence::{download_text, open_dialog, WebPersistence};
 use super::{preference_for, viewport_camera, SharedHandle};
 
-fn dispatch(
+pub(super) fn dispatch(
     controller: &Rc<RefCell<HostController>>,
     handle: &SharedHandle,
     view: &Rc<RefCell<Option<CadView>>>,

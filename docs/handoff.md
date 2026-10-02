@@ -16,6 +16,12 @@
 
 ## 本轮状态（compact，2026-10-02）
 
+**Ribbon UI 布局轮**：保留 Slint/shared-wgpu，界面拆成 app/ribbon/button/command-bar/
+canvas/panels，桌面 Ribbon 与命令栏可收展；手机默认仅底部命令栏，TOOLS 打开工具。
+手机 48px 按钮，真实 Slint 文件选择器导入 DWG、双指缩放与拖动已接应用命令。
+未接绘制/编辑菜单禁用且显式标注，交接详见 `docs/ribbon-ui.md`。独立无 Slint CAD
+显示 wasm 尚未提取，当前 app-web.wasm 不算独立引擎，由下一阶段实施。
+
 **渲染桥职责重构**：继续采用 Slint/shared Device/Queue。CPU controller 移至
 `cad-app/render_scene`，GPU runtime 与 Slint presenter 分离；字体 revision、
 上传成功后发布、底图/批注组更新、画面脏标记、纹理身份和设备生命周期已接线。

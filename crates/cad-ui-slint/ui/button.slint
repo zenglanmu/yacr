@@ -1,0 +1,24 @@
+// Compact dark ribbon button. Phone callers raise min-height to 48px.
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> checked: false;
+    callback clicked();
+    min-width: 64px;
+    preferred-width: max(72px, label.preferred-width + 24px);
+    min-height: 36px;
+    preferred-height: 36px;
+    horizontal-stretch: 0;
+    background: !root.enabled ? #242b35 : (root.checked ? #24577d : (touch.has-hover ? #3c526a : #303b4a));
+    border-color: root.enabled ? #506278 : #35404e;
+    border-width: 1px;
+    border-radius: 3px;
+    label := Text {
+        text: root.text;
+        color: root.enabled ? #e6edf7 : #7d8999;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}

@@ -42,6 +42,20 @@ pub trait UiCommandSink: 'static {
 /// a localized label maps back to a kind without relying on Chinese-only
 /// `from_label`.
 pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource) {
+    ui.set_ribbon_tabs(string_model(&[
+        messages.text("ribbon.home", &[]),
+        messages.text("ribbon.view", &[]),
+        messages.text("ribbon.manage", &[]),
+    ]));
+    ui.set_command_title(messages.text("command.title", &[]).into());
+    ui.set_command_prompt(messages.text("command.prompt", &[]).into());
+    ui.set_pending_label(messages.text("ribbon.pending", &[]).into());
+    ui.set_editing_labels(string_model(&[
+        messages.text("ribbon.line", &[]),
+        messages.text("ribbon.circle", &[]),
+        messages.text("ribbon.move", &[]),
+        messages.text("ribbon.trim", &[]),
+    ]));
     // Toolbar + mode.
     ui.set_open_label(messages.text("file.open", &[]).into());
     ui.set_fit_label(messages.text("toolbar.fit", &[]).into());

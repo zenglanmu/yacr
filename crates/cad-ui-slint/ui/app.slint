@@ -1,1091 +1,247 @@
-// Candidate shared shell, not platform-validated yet.
-//
-// Every user-facing string here is bound to a property pushed from
-// `cad_ui_slint::i18n::MessageSource` (N01). No chrome label is hardcoded:
-// `scripts/check-i18n.py` treats a CJK literal in this file as a failure.
-//
-// Responsive arrangement (audit U01/U10). The geometry below is chosen from
-// width-derived properties pushed by `cad_ui_slint::responsive` /
-// `apply_responsive`, never from hardcoded pixel sizes per control:
-//   - wide view     : large canvas + a floating navigation strip (bottom-left);
-//   - wide work     : a collapsible side panel grouped by tools/panels;
-//   - phone         : a bottom grouped bar + a drawer holding the panels, with
-//                     touch targets >= 48px (the desktop bar is not squashed).
-// Panels bind only to real pushed models; an empty model shows its explicit
-// empty-state label and is never replaced with fabricated rows.
+// Slint composition root. CAD business state is pushed from the Rust adapter.
 import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit } from "std-widgets.slint";
+import { CadRibbon } from "ribbon.slint";
+import { CadCommandBar } from "command-bar.slint";
+import { CadCanvas } from "canvas.slint";
+import { CadPanels, LayerRow, PropertyRow, AnnotationRow, DiagnosticRow, LayoutRow } from "panels.slint";
+export { LayerRow, PropertyRow, AnnotationRow, DiagnosticRow, LayoutRow } from "panels.slint";
 import "../fonts/YacrUI-Regular.otf";
 
-// One row of the layer panel, pushed from `cad_app::layers::LayerRow`.
-// `visible` is the effective visibility the scene honours; `overridden` marks a
-// temporary session override that does not touch the DWG layer table.
-export struct LayerRow {
-    id: int,
-    name: string,
-    visible: bool,
-    overridden: bool,
-}
-
-// One read-only property row pushed from `cad_app::selection::PropertyRow`.
-export struct PropertyRow {
-    key: string,
-    value: string,
-}
-
-// One annotation management row pushed from `cad_app::AnnotationRow`.
-// `visible` is the effective visibility (a session override; the sidecar has no
-// hidden field, so it is never persisted). `overridden` marks that override.
-export struct AnnotationRow {
-    id: int,
-    kind: string,
-    text: string,
-    visible: bool,
-    overridden: bool,
-    selected: bool,
-}
-
-// One localized diagnostics row pushed from
-// `cad_ui_slint::status::DiagnosticRowUi`. `code` is the stable machine code and
-// is shown verbatim; everything else is already localized by the adapter.
-export struct DiagnosticRow {
-    code: string,
-    severity: string,
-    description: string,
-    object: string,
-    details: string,
-}
-
-// One paper-space layout row pushed from `cad_ui_slint::LayoutPanelState`.
-// `supported` is false when this build cannot draw the layout's viewports;
-// `reason` then explains why. No synthetic rows: an empty model is an empty
-// state.
-export struct LayoutRow {
-    id: int,
-    name: string,
-    supported: bool,
-    reason: string,
-    viewport_count: int,
-}
 
 export component YacrWindow inherits Window {
     default-font-family: "Yacr UI";
     default-font-size: 14px;
-    min-width: 0px;
-    min-height: 0px;
+    min-width: 0px; min-height: 0px;
     out property <length> cad-width: canvas-area.width;
     out property <length> cad-height: canvas-area.height;
+    out property <length> cad-top: canvas-area.y;
     in property <string> application-title;
+    in property <image> cad-frame;
     in property <string> open-label;
     in property <string> measure-label;
     in property <string> annotate-label;
     in property <string> status-label;
-    in property <image> cad-frame;
-    // Whether the session is in work mode. The grouped tools are only enabled
-    // in work mode; view mode is canvas + navigation.
     in property <bool> work-mode;
     in property <string> mode-label;
-    // Undo and redo availability are independent so undoing to empty still
-    // permits redo (audit U11); never share the undo flag.
     in property <bool> can-undo;
     in property <bool> can-redo;
-    in property <int> backend-index: 0;
-    // Localized chrome labels (N01). Resolved from the active catalog by the
-    // adapter; the shell holds no second copy of any user-facing string.
+    in property <int> backend-index;
     in property <string> fit-label;
     in property <string> undo-label;
     in property <string> redo-label;
     in property <string> export-label;
     in property <string> import-label;
     in property <string> diagnostics-label;
-
-    // --- Responsive geometry (audit U01), pushed by `apply_responsive` -----
-    // `compact` is the consumed compact/stretch configuration (config compact
-    // OR a phone viewport); `phone` selects the bottom-bar + drawer
-    // arrangement; `control-height` / `touch-target` are the derived sizes so a
-    // phone never gets the squashed desktop bar.
-    in property <bool> compact-shell: false;
-    in property <bool> phone-shell: false;
+    in property <bool> compact-shell;
+    in property <bool> phone-shell;
     in property <length> control-height: 40px;
-    in property <length> touch-target: 32px;
-    in property <length> side-panel-width: 0px;
-    in property <bool> side-panel-collapsed: false;
-    in property <length> drawer-height: 0px;
-    in property <bool> show-floating-nav: false;
-    in-out property <bool> side-panel-open: false;
-    in-out property <bool> tools-open: false;
-    // Localized labels for the responsive chrome primitives.
+    in property <length> touch-target: 36px;
+    in property <length> side-panel-width;
+    in property <bool> side-panel-collapsed;
+    in property <length> drawer-height;
+    in property <bool> show-floating-nav;
+    in-out property <bool> side-panel-open;
+    in-out property <bool> tools-open;
     in property <string> tools-label;
     in property <string> drawer-label;
     in property <string> nav-label;
     in property <string> view-mode-label;
     in property <string> work-mode-label;
-
-    // --- Measurement tool panel (audit U03/U04) --------------------------
-    // All values are pushed from the application state; the shell invents
-    // nothing. `measurement-active` gates the confirm/cancel affordances.
-    in property <bool> measurement-active: false;
-    in property <bool> measurement-can-confirm: false;
-    in property <int> measurement-kind-index: 0;
-    in property <[string]> measurement-kind-labels: [];
+    in property <bool> measurement-active;
+    in property <bool> measurement-can-confirm;
+    in property <int> measurement-kind-index;
+    in property <[string]> measurement-kind-labels;
     in property <string> measurement-panel-label;
     in property <string> measure-confirm-label;
     in property <string> measure-cancel-label;
-    in property <string> measurement-step-label: "";
-    in property <string> unit-label: "";
-    // Backend choices are localized for `Auto`; `WebGPU`/`WebGL2` are product
-    // names and stay as-is.
-    in property <[string]> backend-labels: [];
-
-    // --- Layer panel (audit F03/U03) ------------------------------------
-    // Rows are the real drawing-database layer table plus the session's
-    // temporary overrides. No synthetic rows; an empty model is an empty state.
-    in property <[LayerRow]> layer-rows: [];
-    in property <int> layer-override-count: 0;
-    in property <string> layer-override-label: "";
+    in property <string> measurement-step-label;
+    in property <string> unit-label;
+    in property <[string]> backend-labels;
+    in property <[LayerRow]> layer-rows;
+    in property <int> layer-override-count;
+    in property <string> layer-override-label;
     in property <string> layer-panel-label;
     in property <string> layer-restore-label;
     in property <string> layer-overridden-marker;
-    in property <string> layer-empty-label: "";
-    // --- Properties panel (audit F05/U03) -------------------------------
-    in property <[PropertyRow]> property-rows: [];
-    in property <string> property-mixed-label: "";
-    in property <string> property-empty-label: "";
+    in property <string> layer-empty-label;
+    in property <[PropertyRow]> property-rows;
+    in property <string> property-mixed-label;
+    in property <string> property-empty-label;
     in property <string> property-panel-label;
-    in property <string> property-selected-label: "";
+    in property <string> property-selected-label;
     in property <string> property-clear-label;
-    in property <int> selection-count: 0;
-
-    // --- Annotation management + tool panel (audit F07/F09/U03) ----------
-    // Rows are the real annotation database plus the session visibility and
-    // selection. No synthetic rows; an empty model is an explicit empty state.
-    in property <[AnnotationRow]> annotation-rows: [];
-    in property <int> annotation-hidden-count: 0;
-    in property <string> annotation-hidden-label: "";
-    in property <string> annotation-empty-label: "";
-    in property <bool> annotation-tool-active: false;
-    in property <bool> annotation-tool-can-confirm: false;
-    in property <int> annotation-kind-index: 0;
-    in property <[string]> annotation-kind-labels: [];
+    in property <int> selection-count;
+    in property <[AnnotationRow]> annotation-rows;
+    in property <int> annotation-hidden-count;
+    in property <string> annotation-hidden-label;
+    in property <string> annotation-empty-label;
+    in property <bool> annotation-tool-active;
+    in property <bool> annotation-tool-can-confirm;
+    in property <int> annotation-kind-index;
+    in property <[string]> annotation-kind-labels;
     in property <string> annotation-panel-label;
     in property <string> annotation-text-placeholder;
     in property <string> annotation-delete-label;
     in property <string> annotate-confirm-label;
     in property <string> annotate-cancel-label;
-    in property <string> annotation-step-label: "";
-    // The text payload is only relevant for text/leader tools.
-    in property <bool> annotation-requires-text: false;
-    in property <bool> annotation-text-supplied: false;
-    // Two-way text payload edited in the shell and pushed back to the adapter,
-    // which copies it into the active tool (audit F07).
-    in-out property <string> annotation-text-input: "";
-
-    // --- Layout panel (audit F04/U03) -----------------------------------
-    // Rows are the database's real paper-layout table via
-    // `bridge::layout_descriptors`; `active-index` is -1 for model space. No
-    // synthetic rows: an empty model is an explicit empty state.
-    in property <[LayoutRow]> layout-rows: [];
+    in property <string> annotation-step-label;
+    in property <bool> annotation-requires-text;
+    in property <bool> annotation-text-supplied;
+    in-out property <string> annotation-text-input;
+    in property <[LayoutRow]> layout-rows;
     in property <int> layout-active-index: -1;
     in property <string> layout-panel-label;
     in property <string> layout-model-space-label;
     in property <string> layout-unsupported-marker;
-    in property <string> layout-empty-label: "";
-
-    // --- View / projection controls (F13/F14) ---------------------------
-    // `view-3d` and `view-perspective` are pushed from the authoritative
-    // application viewport via `UiHandle::set_view_state`. The standard-view
-    // model is built from `StandardView::ALL`, so a selected label maps back to
-    // the exact view without a second ordering list.
-    in property <bool> view-3d: false;
-    in property <bool> view-perspective: false;
+    in property <string> layout-empty-label;
+    in property <bool> view-3d;
+    in property <bool> view-perspective;
     in property <string> view-panel-label;
     in property <string> view-2d-label;
     in property <string> view-3d-label;
     in property <string> view-projection-label;
     in property <string> view-ortho-label;
     in property <string> view-perspective-label;
-    in property <[string]> standard-view-labels: [];
-
-    // --- Diagnostics drawer (audit U08) ---------------------------------
-    // The status bar stays a one-line summary; the drawer holds the full,
-    // object-level reasons and the real backend label. Rows are only what a host
-    // explicitly pushed from `cad_diagnostics::DiagnosticsModel`; before that the
-    // explicit empty state shows instead of fabricated rows.
-    in-out property <bool> diagnostics-open: false;
+    in property <[string]> standard-view-labels;
+    in-out property <bool> diagnostics-open;
     in property <string> diagnostics-drawer-title;
     in property <string> diagnostics-close-label;
-    in property <string> diagnostics-backend-label: "";
-    in property <string> diagnostics-summary-label: "";
-    in property <string> diagnostics-empty-label: "";
-    in property <[DiagnosticRow]> diagnostics-rows: [];
-
+    in property <string> diagnostics-backend-label;
+    in property <string> diagnostics-summary-label;
+    in property <string> diagnostics-empty-label;
+    in property <[DiagnosticRow]> diagnostics-rows;
+    in property <[string]> ribbon-tabs;
+    in property <[string]> editing-labels;
+    in property <string> command-title;
+    in property <string> command-prompt;
+    in property <string> pending-label;
+    in-out property <bool> ribbon-expanded: true;
+    in-out property <bool> command-expanded: false;
+    callback command-submitted(string);
     callback open-requested();
     callback measure-requested();
     callback annotate-requested();
     callback fit-requested();
     callback undo-requested();
     callback redo-requested();
-    // Label of the chosen model entry; the adapter maps it to the shared
-    // MeasurementToolKind::ALL labels so no second ordering list exists.
-    callback measure-kind-selected(name: string);
+    callback measure-kind-selected(string);
     callback confirm-measurement-requested();
     callback cancel-measurement-requested();
-    // Layer visibility toggle. `index` addresses the pushed `layer-rows` model
-    // so the adapter maps it back to the exact LayerId without a lossy cast.
-    callback layer-visibility-toggled(index: int, visible: bool);
+    callback layer-visibility-toggled(int, bool);
     callback restore-layers-requested();
     callback clear-selection-requested();
-    // Annotation tool + management callbacks (F07/F09). Row callbacks address
-    // the pushed `annotation-rows` model so the adapter maps back exactly.
-    callback annotation-kind-selected(name: string);
+    callback annotation-kind-selected(string);
     callback confirm-annotation-requested();
     callback cancel-annotation-requested();
-    callback annotation-text-edited(text: string);
-    callback annotation-selected(index: int);
-    callback annotation-delete-requested(index: int);
-    callback annotation-visibility-toggled(index: int, visible: bool);
-    // Layout switch (F04). `index` addresses `layout-rows`; -1 means model
-    // space. The adapter maps it back to the exact LayoutId. The callback is
-    // only emitted when a host has installed a switch sink; otherwise the
-    // adapter reports "layout switch not wired" (never a silent no-op).
-    callback layout-selected(index: int);
-    // View controls (F13/F14). `standard-view-selected` carries the localized
-    // label from the `standard-view-labels` model (built from
-    // `StandardView::ALL`); the adapter maps it back to the exact view.
+    callback annotation-text-edited(string);
+    callback annotation-selected(int);
+    callback annotation-delete-requested(int);
+    callback annotation-visibility-toggled(int, bool);
+    callback layout-selected(int);
     callback toggle-view-mode-requested();
     callback toggle-projection-requested();
-    callback standard-view-selected(name: string);
-    callback backend-selected(name: string);
+    callback standard-view-selected(string);
+    callback backend-selected(string);
     callback export-requested();
     callback import-requested();
     callback diagnostics-requested();
     callback diagnostics-closed();
-    callback pointer-input(kind: int, button: int, x: length, y: length);
-    callback scroll-input(dx: float, dy: float);
-    // A single left-button click on the canvas, in logical pixels relative to
-    // the image. The adapter turns it into a measurement point when a mapper is
-    // installed (see docs/ui.md).
-    callback canvas-pick(x: float, y: float);
-
+    callback pointer-input(int, int, length, length);
+    callback scroll-input(float, float);
+    callback canvas-pick(float, float);
     title: application-title;
     background: #20242b;
-
     VerticalBox {
-        padding: 0px;
-        spacing: 0px;
-        // --- Top bar: grouped tools + the drawer/side-panel toggles ---------
-        // The stretch desktop keeps the stride; the compact configuration and a
-        // phone shrink the padding (never the touch target, which only grows).
-        Rectangle {
-            height: root.control-height;
-            background: #1b2029;
-            HorizontalBox {
-                padding: root.compact-shell ? 4px : 8px;
-                spacing: 6px;
-                alignment: start;
-                Button {
-                    text: root.open-label;
-                    min-height: root.touch-target;
-                    clicked => { root.open-requested(); }
-                }
-                Button {
-                    text: root.fit-label;
-                    min-height: root.touch-target;
-                    clicked => { root.fit-requested(); }
-                }
-                if !root.compact-shell : Button {
-                    text: root.undo-label;
-                    min-height: root.touch-target;
-                    enabled: root.work-mode && root.can-undo;
-                    clicked => { root.undo-requested(); }
-                }
-                if !root.compact-shell : Button {
-                    text: root.redo-label;
-                    min-height: root.touch-target;
-                    enabled: root.work-mode && root.can-redo;
-                    clicked => { root.redo-requested(); }
-                }
-                if !root.compact-shell : Button {
-                    text: root.measure-label;
-                    min-height: root.touch-target;
-                    enabled: root.work-mode;
-                    clicked => { root.measure-requested(); }
-                }
-                if !root.compact-shell : Button {
-                    text: root.annotate-label;
-                    min-height: root.touch-target;
-                    enabled: root.work-mode;
-                    clicked => { root.annotate-requested(); }
-                }
-                if !root.compact-shell : ComboBox {
-                    width: 96px;
-                    min-height: root.touch-target;
-                    model: root.backend-labels;
-                    current-index: root.backend-index;
-                    selected(value) => { root.backend-selected(value); }
-                }
-                if !root.compact-shell : Button {
-                    text: root.export-label;
-                    min-height: root.touch-target;
-                    clicked => { root.export-requested(); }
-                }
-                if !root.compact-shell : Button {
-                    text: root.import-label;
-                    min-height: root.touch-target;
-                    clicked => { root.import-requested(); }
-                }
-                // Wide work screens toggle the collapsible side panel; a phone
-                // toggles the bottom drawer instead (same "grouped tools" verb,
-                // different arrangement).
-                if root.phone-shell : Button {
-                    text: root.drawer-label;
-                    min-height: root.touch-target;
-                    clicked => { root.tools-open = !root.tools-open; }
-                }
-                if !root.phone-shell && root.side-panel-width > 0px : Button {
-                    text: root.tools-label;
-                    min-height: root.touch-target;
-                    clicked => { root.side-panel-open = !root.side-panel-open; }
-                }
-                if !root.phone-shell : Button {
-                    text: root.diagnostics-label;
-                    min-height: root.touch-target;
-                    clicked => {
-                        root.diagnostics-open = !root.diagnostics-open;
-                        root.diagnostics-requested();
-                    }
-                }
+        padding: 0px; spacing: 0px;
+        if !root.phone-shell || root.tools-open : CadRibbon {
+            phone: root.phone-shell;
+            target: root.phone-shell ? 48px : 36px;
+            tabs: root.ribbon-tabs;
+            labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
+                root.measure-label, root.annotate-label, root.tools-label, root.view-2d-label,
+                root.view-3d-label, root.view-projection-label, root.export-label, root.import-label, root.diagnostics-label];
+            standard-views: root.standard-view-labels;
+            backends: root.backend-labels;
+            backend-index: root.backend-index;
+            can-undo: root.work-mode && root.can-undo;
+            can-redo: root.work-mode && root.can-redo;
+            view-3d: root.view-3d;
+            pending-label: root.pending-label;
+            editing-labels: root.editing-labels;
+            expanded <=> root.ribbon-expanded;
+            standard-view(value) => { root.standard-view-selected(value); }
+            backend(value) => { root.backend-selected(value); }
+            action(id) => {
+                if id == 0 { root.open-requested(); }
+                if id == 1 { root.fit-requested(); }
+                if id == 2 { root.undo-requested(); }
+                if id == 3 { root.redo-requested(); }
+                if id == 4 { root.measure-requested(); }
+                if id == 5 { root.annotate-requested(); }
+                if id == 6 { root.side-panel-open = !root.side-panel-open; }
+                if (id == 7 && root.view-3d) || (id == 8 && !root.view-3d) { root.toggle-view-mode-requested(); }
+                if id == 9 { root.toggle-projection-requested(); }
+                if id == 10 { root.export-requested(); }
+                if id == 11 { root.import-requested(); }
+                if id == 12 { root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
             }
         }
-
-        // --- Diagnostics drawer (audit U08) --------------------------------
-        // Shown above the canvas as an overlay strip; it lists every real reason
-        // a host pushed, not just the first.
-        if root.diagnostics-open : Rectangle {
-            height: root.phone-shell ? 200px : 160px;
-            background: #1b2029;
-            border-width: 1px;
-            border-color: #3a4351;
-            VerticalBox {
-                spacing: 4px;
-                padding: 6px;
-                HorizontalBox {
-                    spacing: 8px;
-                    Text {
-                        text: root.diagnostics-drawer-title;
-                        color: #e6edf7;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    Text {
-                        text: root.diagnostics-backend-label;
-                        color: #9aa7b8;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: root.diagnostics-summary-label;
-                        color: #e6b450;
-                        vertical-alignment: center;
-                    }
-                    Button {
-                        text: root.diagnostics-close-label;
-                        min-height: root.touch-target;
-                        clicked => { root.diagnostics-closed(); }
-                    }
-                }
-                Text {
-                    text: root.diagnostics-empty-label;
-                    color: #9aa7b8;
-                    visible: root.diagnostics-rows.length == 0;
-                }
-                ScrollView {
-                    vertical-scrollbar-policy: as-needed;
-                    for row[index] in root.diagnostics-rows : HorizontalBox {
-                        spacing: 6px;
-                        Text {
-                            text: row.severity;
-                            color: #e6b450;
-                            width: 72px;
-                            overflow: elide;
-                        }
-                        Text {
-                            text: row.object;
-                            color: #9aa7b8;
-                            width: 120px;
-                            overflow: elide;
-                        }
-                        Text {
-                            text: row.description;
-                            color: #e6edf7;
-                            horizontal-stretch: 1;
-                            overflow: elide;
-                        }
-                        Text {
-                            text: row.details;
-                            color: #9aa7b8;
-                            horizontal-stretch: 1;
-                            overflow: elide;
-                        }
-                        Text {
-                            text: row.code;
-                            color: #6b7688;
-                            overflow: elide;
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- View / projection bar (F13/F14) -------------------------------
-        // A 2D/3D toggle, an explicit projection toggle and the standard views
-        // (Top/Front/Right/...). The standard-view buttons are generated from a
-        // catalog-built model; on a narrow/compact shell a ComboBox keeps them
-        // reachable without overflowing the bar.
-        Rectangle {
-            height: root.control-height;
-            background: #232933;
-            HorizontalBox {
-                spacing: 6px;
-                padding: 4px;
-                alignment: start;
-                Text {
-                    text: root.view-panel-label;
-                    color: #c8d0dc;
-                    vertical-alignment: center;
-                    visible: !root.compact-shell;
-                }
-                Button {
-                    text: root.view-2d-label;
-                    min-height: root.touch-target;
-                    enabled: root.view-3d;
-                    clicked => { if root.view-3d { root.toggle-view-mode-requested(); } }
-                }
-                Button {
-                    text: root.view-3d-label;
-                    min-height: root.touch-target;
-                    enabled: !root.view-3d;
-                    clicked => { if !root.view-3d { root.toggle-view-mode-requested(); } }
-                }
-                if !root.phone-shell : Button {
-                    text: root.view-projection-label;
-                    min-height: root.touch-target;
-                    clicked => { root.toggle-projection-requested(); }
-                }
-                Text {
-                    // The current projection, pushed from the real viewport, so
-                    // the toggle has visible, honest state.
-                    text: root.view-perspective ? root.view-perspective-label : root.view-ortho-label;
-                    visible: !root.compact-shell;
-                    color: #9aa7b8;
-                    vertical-alignment: center;
-                }
-                if root.compact-shell : ComboBox {
-                    width: 120px;
-                    min-height: root.touch-target;
-                    model: root.standard-view-labels;
-                    selected(value) => { root.standard-view-selected(value); }
-                }
-                if !root.compact-shell : HorizontalBox {
-                    spacing: 6px;
-                    for label in root.standard-view-labels : Button {
-                        text: label;
-                        min-height: root.touch-target;
-                        clicked => { root.standard-view-selected(label); }
-                    }
-                }
-            }
-        }
-
-        // --- Main canvas area ----------------------------------------------
-        // A wide work screen splits it into the collapsible side panel + canvas.
-        // Everything else keeps the canvas full width; the phone drawer overlays
-        // it below.
-        Rectangle {
-            background: #10131a;
+        canvas-area := CadCanvas {
             vertical-stretch: 1;
-            min-height: 0px;
-            HorizontalBox {
-                // Collapsible side panel: grouped tools + panels, wide screens
-                // only. It starts collapsed (audit U01 "collapsible side panel").
-                if (!root.phone-shell && root.side-panel-width > 0px && !root.side-panel-collapsed) || root.side-panel-open : Rectangle {
-                    width: root.side-panel-width;
-                    background: #1c222b;
-                    border-width: 1px;
-                    border-color: #2c3542;
-                    VerticalBox {
-                        padding: 6px;
-                        spacing: 6px;
-                        Text {
-                            text: root.tools-label;
-                            color: #c8d0dc;
-                        }
-                        // Group 1: mode + history. These are real state, gated
-                        // by work-mode as before.
-                        HorizontalBox {
-                            spacing: 4px;
-                            Text {
-                                text: root.work-mode ? root.work-mode-label : root.view-mode-label;
-                                color: #e6b450;
-                                vertical-alignment: center;
-                            }
-                            Button {
-                                text: root.undo-label;
-                                min-height: root.touch-target;
-                                enabled: root.work-mode && root.can-undo;
-                                clicked => { root.undo-requested(); }
-                            }
-                            Button {
-                                text: root.redo-label;
-                                min-height: root.touch-target;
-                                enabled: root.work-mode && root.can-redo;
-                                clicked => { root.redo-requested(); }
-                            }
-                        }
-                        // Group 2: tools (measure / annotate).
-                        HorizontalBox {
-                            spacing: 4px;
-                            Button {
-                                text: root.measure-label;
-                                min-height: root.touch-target;
-                                enabled: root.work-mode;
-                                clicked => { root.measure-requested(); }
-                            }
-                            Button {
-                                text: root.annotate-label;
-                                min-height: root.touch-target;
-                                enabled: root.work-mode;
-                                clicked => { root.annotate-requested(); }
-                            }
-                        }
-                        // Group 3: import/export + backend.
-                        HorizontalBox {
-                            spacing: 4px;
-                            Button {
-                                text: root.export-label;
-                                min-height: root.touch-target;
-                                clicked => { root.export-requested(); }
-                            }
-                            Button {
-                                text: root.import-label;
-                                min-height: root.touch-target;
-                                clicked => { root.import-requested(); }
-                            }
-                            ComboBox {
-                                width: 96px;
-                                min-height: root.touch-target;
-                                model: root.backend-labels;
-                                current-index: root.backend-index;
-                                selected(value) => { root.backend-selected(value); }
-                            }
-                        }
-                    }
-                }
-                // Canvas: the CAD frame plus its input surface. The nested
-                // rectangle takes the remaining width so the TouchArea covers
-                // only the canvas, never the side panel buttons.
-                canvas-area := Rectangle {
-                    clip: true;
-                    horizontal-stretch: 1;
-                    min-width: 0px;
-                    min-height: 0px;
-                    background: transparent;
-                    Image {
-                        width: parent.width;
-                        height: parent.height;
-                        source: root.cad-frame;
-                        image-fit: contain;
-                    }
-                    TouchArea {
-                        // kind: 0=down 1=up 2=move 3=cancel; button: 0=none 1=left 2=right 3=middle
-                        pointer-event(e) => {
-                            root.pointer-input(
-                                e.kind == PointerEventKind.down ? 0 :
-                                (e.kind == PointerEventKind.up ? 1 :
-                                (e.kind == PointerEventKind.move ? 2 : 3)),
-                                e.button == PointerEventButton.left ? 1 :
-                                (e.button == PointerEventButton.right ? 2 :
-                                (e.button == PointerEventButton.middle ? 3 : 0)),
-                                self.mouse-x, self.mouse-y);
-                            // A completed left click is offered as a measurement pick.
-                            if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
-                                root.canvas-pick(self.mouse-x / 1px, self.mouse-y / 1px);
-                            }
-                        }
-                        scroll-event(e) => {
-                            root.scroll-input(e.delta-x / 1px, e.delta-y / 1px);
-                            return EventResult.accept;
-                        }
-                    }
-                }
-            }
-            // Floating navigation strip (wide *view* screens only). A phone has
-            // the bottom grouped bar instead, so it is never shown there.
-            if root.show-floating-nav : Rectangle {
-                x: 12px;
-                y: parent.height - root.control-height - 12px;
-                width: 240px;
-                height: root.control-height;
-                background: #20242bcc;
-                border-radius: 8px;
-                border-width: 1px;
-                border-color: #3a4351;
-                HorizontalBox {
-                    padding: 4px;
-                    spacing: 6px;
-                    alignment: start;
-                    Text {
-                        text: root.nav-label;
-                        color: #9aa7b8;
-                        vertical-alignment: center;
-                    }
-                    Button {
-                        text: root.fit-label;
-                        min-height: root.touch-target;
-                        clicked => { root.fit-requested(); }
-                    }
-                    Button {
-                        text: root.undo-label;
-                        min-height: root.touch-target;
-                        enabled: root.work-mode && root.can-undo;
-                        clicked => { root.undo-requested(); }
-                    }
-                    Button {
-                        text: root.redo-label;
-                        min-height: root.touch-target;
-                        enabled: root.work-mode && root.can-redo;
-                        clicked => { root.redo-requested(); }
-                    }
-                }
-            }
-
-            // --- Phone drawer (audit U01/U03) ------------------------------
-            // A bottom sheet holding the grouped tool/panel entries. Each entry
-            // is a real control bound to real state; the tool bars below stay
-            // the sole confirm/cancel affordances (no duplicated controls).
-            if root.phone-shell && root.tools-open : Rectangle {
-                y: parent.height - root.drawer-height;
-                height: root.drawer-height;
-                width: 100%;
-                background: #1b2029ee;
-                border-width: 1px;
-                border-color: #3a4351;
-                VerticalBox {
-                    padding: 8px;
-                    spacing: 8px;
-                    HorizontalBox {
-                        spacing: 8px;
-                        Text {
-                            text: root.drawer-label;
-                            color: #e6edf7;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        Text {
-                            text: root.work-mode ? root.work-mode-label : root.view-mode-label;
-                            color: #e6b450;
-                            vertical-alignment: center;
-                        }
-                        Button {
-                            text: root.diagnostics-close-label;
-                            min-height: root.touch-target;
-                            clicked => { root.tools-open = false; }
-                        }
-                    }
-                    // Grouped entries: history / tools / file+backend, each a
-                    // >= 48px touch target.
-                    ScrollView {
-                        vertical-scrollbar-policy: as-needed;
-                        VerticalBox {
-                            spacing: 8px;
-                            HorizontalBox {
-                                spacing: 8px;
-                                Button {
-                                    text: root.undo-label;
-                                    min-height: root.touch-target;
-                                    enabled: root.work-mode && root.can-undo;
-                                    clicked => { root.undo-requested(); }
-                                }
-                                Button {
-                                    text: root.redo-label;
-                                    min-height: root.touch-target;
-                                    enabled: root.work-mode && root.can-redo;
-                                    clicked => { root.redo-requested(); }
-                                }
-                            }
-                            HorizontalBox {
-                                spacing: 8px;
-                                Button {
-                                    text: root.measure-label;
-                                    min-height: root.touch-target;
-                                    enabled: root.work-mode;
-                                    clicked => { root.measure-requested(); }
-                                }
-                                Button {
-                                    text: root.annotate-label;
-                                    min-height: root.touch-target;
-                                    enabled: root.work-mode;
-                                    clicked => { root.annotate-requested(); }
-                                }
-                            }
-                            HorizontalBox {
-                                spacing: 8px;
-                                Button {
-                                    text: root.export-label;
-                                    min-height: root.touch-target;
-                                    clicked => { root.export-requested(); }
-                                }
-                                Button {
-                                    text: root.import-label;
-                                    min-height: root.touch-target;
-                                    clicked => { root.import-requested(); }
-                                }
-                                ComboBox {
-                                    min-height: root.touch-target;
-                                    model: root.backend-labels;
-                                    current-index: root.backend-index;
-                                    selected(value) => { root.backend-selected(value); }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            frame: root.cad-frame;
+            pointer(k, b, x, y) => { root.pointer-input(k, b, x, y); }
+            scroll(x, y) => { root.scroll-input(x, y); }
+            pick(x, y) => { root.canvas-pick(x, y); }
         }
-
-        // --- Measurement tool strip (F06/U04) ------------------------------
-        // The step text comes from the tool state machine; confirm/cancel are
-        // gated by real state. It stays outside the drawer/collapsible panel so
-        // the workflow is always visible.
-        if root.measurement-active : Rectangle {
-            height: root.control-height;
-            background: #262b33;
-            HorizontalBox {
-                spacing: 8px;
-                padding: 4px;
-                alignment: start;
-                Text {
-                    text: root.measurement-panel-label;
-                    color: #c8d0dc;
-                    vertical-alignment: center;
-                }
-                if root.work-mode : ComboBox {
-                    width: 120px;
-                    min-height: root.touch-target;
-                    // Mirrors MeasurementToolKind::ALL; the adapter owns the
-                    // mapping so the two lists cannot drift silently.
-                    model: root.measurement-kind-labels;
-                    current-index: root.measurement-kind-index;
-                    selected(value) => { root.measure-kind-selected(value); }
-                }
-                Button {
-                    text: root.measure-confirm-label;
-                    min-height: root.touch-target;
-                    enabled: root.work-mode && root.measurement-can-confirm;
-                    clicked => { root.confirm-measurement-requested(); }
-                }
-                Button {
-                    text: root.measure-cancel-label;
-                    min-height: root.touch-target;
-                    enabled: root.work-mode && root.measurement-active;
-                    clicked => { root.cancel-measurement-requested(); }
-                }
-                Text {
-                    text: root.measurement-step-label;
-                    color: #e6edf7;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                }
-                Text {
-                    text: root.unit-label;
-                    color: #9aa7b8;
-                    vertical-alignment: center;
-                }
-            }
+        if root.side-panel-open || root.diagnostics-open : CadPanels {
+            phone: root.phone-shell;
+            work: root.work-mode;
+            labels: [root.layer-panel-label, root.layer-restore-label, root.diagnostics-close-label,
+                root.layer-empty-label, root.layout-panel-label, root.layout-model-space-label,
+                root.property-panel-label, root.property-clear-label, root.property-empty-label,
+                root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
+                root.diagnostics-empty-label];
+            layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            annotations: root.annotation-rows; diagnostics: root.diagnostics-rows;
+            diagnostics-open: root.diagnostics-open; backend: root.diagnostics-backend-label;
+            close => { root.side-panel-open = false; root.diagnostics-open = false; root.diagnostics-closed(); }
+            restore => { root.restore-layers-requested(); }
+            clear-selection => { root.clear-selection-requested(); }
+            layer(i, v) => { root.layer-visibility-toggled(i, v); }
+            layout(i) => { root.layout-selected(i); }
+            annotation-select(i) => { root.annotation-selected(i); }
+            annotation-delete(i) => { root.annotation-delete-requested(i); }
+            annotation-visible(i, v) => { root.annotation-visibility-toggled(i, v); }
         }
-
-        // --- Annotation creation tool strip (F07/U04) ----------------------
-        if root.annotation-tool-active : Rectangle {
-            height: root.control-height;
-            background: #262b33;
-            HorizontalBox {
-                spacing: 8px;
-                padding: 4px;
-                alignment: start;
-                Text {
-                    text: root.annotation-panel-label;
-                    color: #c8d0dc;
-                    vertical-alignment: center;
-                }
-                if root.work-mode : ComboBox {
-                    width: 96px;
-                    min-height: root.touch-target;
-                    // Mirrors AnnotationToolKind::ALL; the adapter owns the
-                    // mapping so the lists cannot drift silently.
-                    model: root.annotation-kind-labels;
-                    current-index: root.annotation-kind-index;
-                    selected(value) => { root.annotation-kind-selected(value); }
-                }
-                if root.work-mode && root.annotation-requires-text : LineEdit {
-                    width: 180px;
-                    min-height: root.touch-target;
-                    placeholder-text: root.annotation-text-placeholder;
-                    text <=> root.annotation-text-input;
-                    edited(text) => { root.annotation-text-edited(text); }
-                }
-                Button {
-                    text: root.annotate-confirm-label;
-                    min-height: root.touch-target;
-                    enabled: root.work-mode && root.annotation-tool-can-confirm;
-                    clicked => { root.confirm-annotation-requested(); }
-                }
-                Button {
-                    text: root.annotate-cancel-label;
-                    min-height: root.touch-target;
-                    enabled: root.work-mode && root.annotation-tool-active;
-                    clicked => { root.cancel-annotation-requested(); }
-                }
-                Text {
-                    text: root.annotation-step-label;
-                    color: #e6edf7;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                }
-            }
+        if root.measurement-active : HorizontalBox {
+            height: root.phone-shell ? 56px : 44px;
+            ComboBox { model: root.measurement-kind-labels; current-index: root.measurement-kind-index; selected(v) => { root.measure-kind-selected(v); } }
+            Button { text: root.measure-confirm-label; enabled: root.measurement-can-confirm; clicked => { root.confirm-measurement-requested(); } }
+            Button { text: root.measure-cancel-label; clicked => { root.cancel-measurement-requested(); } }
         }
-
-        // --- Layer + layout + property panels ------------------------------
-        // Bound to real application state; empty models show explicit
-        // empty-state labels. The panel row height grows with the responsive
-        // control height so it never squashes a phone.
-        if root.side-panel-open && !root.phone-shell : Rectangle {
-            height: 132px;
-            background: #222831;
-            HorizontalBox {
-                spacing: 8px;
-                padding: 4px;
-                // Layer list (F03).
-                VerticalBox {
-                    width: 240px;
-                    spacing: 2px;
-                    HorizontalBox {
-                        spacing: 4px;
-                        Text {
-                            text: root.layer-panel-label;
-                            color: #c8d0dc;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        Text {
-                            text: root.layer-override-count > 0 ? root.layer-override-label : "";
-                            color: #e6b450;
-                            vertical-alignment: center;
-                        }
-                        Button {
-                            text: root.layer-restore-label;
-                            min-height: root.touch-target;
-                            enabled: root.work-mode && root.layer-override-count > 0;
-                            clicked => { root.restore-layers-requested(); }
-                        }
-                    }
-                    Text {
-                        text: root.layer-empty-label;
-                        color: #9aa7b8;
-                        vertical-alignment: center;
-                        visible: root.layer-rows.length == 0;
-                    }
-                    ScrollView {
-                        vertical-scrollbar-policy: as-needed;
-                        for row[index] in root.layer-rows : HorizontalBox {
-                            spacing: 4px;
-                            CheckBox {
-                                text: row.name;
-                                checked: row.visible;
-                                enabled: root.work-mode;
-                                toggled => {
-                                    root.layer-visibility-toggled(index, self.checked);
-                                }
-                            }
-                            Text {
-                                text: row.overridden ? root.layer-overridden-marker : "";
-                                color: #e6b450;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-                }
-                // Layout list (F04). Model space is always present as a real
-                // sentinel row (index -1), then every database layout.
-                VerticalBox {
-                    width: 200px;
-                    spacing: 2px;
-                    Text {
-                        text: root.layout-panel-label;
-                        color: #c8d0dc;
-                    }
-                    Text {
-                        text: root.layout-empty-label;
-                        color: #9aa7b8;
-                        vertical-alignment: center;
-                        visible: root.layout-rows.length == 0;
-                    }
-                    ScrollView {
-                        vertical-scrollbar-policy: as-needed;
-                        VerticalBox {
-                            spacing: 2px;
-                            Button {
-                                text: root.layout-model-space-label
-                                    + (root.layout-active-index == -1 ? " *" : "");
-                                min-height: root.touch-target;
-                                enabled: root.work-mode;
-                                clicked => { root.layout-selected(-1); }
-                            }
-                            for row[index] in root.layout-rows : Button {
-                                text: row.name
-                                    + (row.supported ? "" : " (" + root.layout-unsupported-marker + ")")
-                                    + (index == root.layout-active-index ? " *" : "");
-                                min-height: root.touch-target;
-                                enabled: root.work-mode && row.supported;
-                                clicked => { root.layout-selected(index); }
-                            }
-                        }
-                    }
-                }
-                // Properties of the current selection (F05).
-                VerticalBox {
-                    spacing: 2px;
-                    HorizontalBox {
-                        spacing: 4px;
-                        Text {
-                            text: root.property-panel-label;
-                            color: #c8d0dc;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        Text {
-                            text: root.selection-count > 0 ? root.property-selected-label : "";
-                            color: #9aa7b8;
-                            vertical-alignment: center;
-                        }
-                        Button {
-                            text: root.property-clear-label;
-                            min-height: root.touch-target;
-                            enabled: root.selection-count > 0;
-                            clicked => { root.clear-selection-requested(); }
-                        }
-                    }
-                    Text {
-                        text: root.property-empty-label;
-                        color: #9aa7b8;
-                        vertical-alignment: center;
-                        visible: root.property-rows.length == 0;
-                    }
-                    Text {
-                        text: root.property-mixed-label;
-                        color: #e6b450;
-                        vertical-alignment: center;
-                        visible: root.property-mixed-label != "";
-                    }
-                    ScrollView {
-                        vertical-scrollbar-policy: as-needed;
-                        for row[index] in root.property-rows : HorizontalBox {
-                            spacing: 6px;
-                            Text {
-                                text: row.key;
-                                color: #9aa7b8;
-                                width: 110px;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: row.value;
-                                color: #e6edf7;
-                                horizontal-stretch: 1;
-                                overflow: elide;
-                            }
-                        }
-                    }
-                }
-            }
+        if root.annotation-tool-active && root.annotation-requires-text : LineEdit {
+            min-height: 48px; placeholder-text: root.annotation-text-placeholder;
+            text <=> root.annotation-text-input; edited(v) => { root.annotation-text-edited(v); }
         }
-
-        // --- Annotation management list (F09/U03) --------------------------
-        if root.side-panel-open && !root.phone-shell : Rectangle {
-            height: 120px;
-            background: #222831;
-            VerticalBox {
-                spacing: 2px;
-                padding: 4px;
-                HorizontalBox {
-                    spacing: 6px;
-                    Text {
-                        text: root.annotation-panel-label;
-                        color: #c8d0dc;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    Text {
-                        text: root.annotation-hidden-count > 0 ? root.annotation-hidden-label : "";
-                        color: #e6b450;
-                        vertical-alignment: center;
-                    }
-                }
-                Text {
-                    text: root.annotation-empty-label;
-                    color: #9aa7b8;
-                    vertical-alignment: center;
-                    visible: root.annotation-rows.length == 0;
-                }
-                ScrollView {
-                    vertical-scrollbar-policy: as-needed;
-                    for row[index] in root.annotation-rows : HorizontalBox {
-                        spacing: 6px;
-                        Button {
-                            text: row.selected ? "*" : " ";
-                            min-height: root.touch-target;
-                            clicked => { root.annotation-selected(index); }
-                        }
-                        Text {
-                            text: row.kind;
-                            color: #9aa7b8;
-                            width: 72px;
-                            overflow: elide;
-                        }
-                        Text {
-                            text: row.text;
-                            color: #e6edf7;
-                            horizontal-stretch: 1;
-                            overflow: elide;
-                        }
-                        CheckBox {
-                            text: "";
-                            checked: row.visible;
-                            enabled: root.work-mode;
-                            toggled => {
-                                root.annotation-visibility-toggled(index, self.checked);
-                            }
-                        }
-                        Button {
-                            text: root.annotation-delete-label;
-                            min-height: root.touch-target;
-                            enabled: root.work-mode;
-                            clicked => { root.annotation-delete-requested(index); }
-                        }
-                    }
-                }
-            }
+        if root.annotation-tool-active : HorizontalBox {
+            height: root.phone-shell ? 56px : 44px;
+            ComboBox { model: root.annotation-kind-labels; current-index: root.annotation-kind-index; selected(v) => { root.annotation-kind-selected(v); } }
+            Button { text: root.annotate-confirm-label; enabled: root.annotation-tool-can-confirm; clicked => { root.confirm-annotation-requested(); } }
+            Button { text: root.annotate-cancel-label; clicked => { root.cancel-annotation-requested(); } }
         }
-
-        // --- Status bar (audit U08/U10) ------------------------------------
-        // A one-line summary only; the diagnostics drawer holds the details.
-        // Height follows the responsive control height instead of a fixed 28px.
-        Rectangle {
-            height: root.control-height;
-            background: #181c22;
-            HorizontalLayout {
-                padding-left: 8px;
-                alignment: center;
-                Text { text: root.status-label; color: white; }
-            }
+        CadCommandBar {
+            phone: root.phone-shell;
+            title: root.command-title;
+            prompt: root.command-prompt;
+            status: root.status-label;
+            open-label: root.open-label;
+            fit-label: root.fit-label;
+            tools-label: root.tools-label;
+            expanded <=> root.command-expanded;
+            open => { root.open-requested(); }
+            fit => { root.fit-requested(); }
+            tools => { if root.phone-shell { root.tools-open = !root.tools-open; } else { root.side-panel-open = !root.side-panel-open; } }
+            submit(value) => { root.command-submitted(value); }
         }
     }
 }

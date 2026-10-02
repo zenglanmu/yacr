@@ -1,0 +1,24 @@
+export component CadCanvas inherits Rectangle {
+    in property <image> frame;
+    callback pointer(int, int, length, length);
+    callback scroll(float, float);
+    callback pick(float, float);
+    clip: true;
+    min-width: 0px;
+    min-height: 0px;
+    background: #10131a;
+    Image { width: parent.width; height: parent.height; source: root.frame; image-fit: contain; }
+    TouchArea {
+        pointer-event(e) => {
+            root.pointer(e.kind == PointerEventKind.down ? 0 :
+                (e.kind == PointerEventKind.up ? 1 : (e.kind == PointerEventKind.move ? 2 : 3)),
+                e.button == PointerEventButton.left ? 1 :
+                (e.button == PointerEventButton.right ? 2 : (e.button == PointerEventButton.middle ? 3 : 0)),
+                self.mouse-x, self.mouse-y);
+            if e.kind == PointerEventKind.up && e.button == PointerEventButton.left {
+                root.pick(self.mouse-x / 1px, self.mouse-y / 1px);
+            }
+        }
+        scroll-event(e) => { root.scroll(e.delta-x / 1px, e.delta-y / 1px); return EventResult.accept; }
+    }
+}

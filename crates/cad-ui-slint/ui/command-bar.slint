@@ -1,0 +1,44 @@
+import { HorizontalBox, VerticalBox, LineEdit } from "std-widgets.slint";
+import { Button } from "button.slint";
+
+export component CadCommandBar inherits Rectangle {
+    in property <bool> phone;
+    in property <string> title;
+    in property <string> prompt;
+    in property <string> status;
+    in property <string> open-label;
+    in property <string> tools-label;
+    in property <string> fit-label;
+    in-out property <bool> expanded: false;
+    property <string> input;
+    callback open();
+    callback tools();
+    callback fit();
+    callback submit(string);
+    height: root.expanded ? 146px : (root.phone ? 64px : 58px);
+    background: #202731;
+    VerticalBox {
+        padding: 6px; spacing: 4px;
+        if root.expanded : Text { text: root.status; color: #b8c5d6; overflow: elide; height: 24px; }
+        HorizontalBox {
+            padding: 0px;
+            spacing: 4px;
+            Button { text: root.open-label; min-height: root.phone ? 48px : 36px; clicked => { root.open(); } }
+            if !root.phone : Text { text: root.title; color: #8dc9ff; vertical-alignment: center; }
+            LineEdit {
+                min-width: 0px;
+                horizontal-stretch: 1;
+                min-height: root.phone ? 48px : 36px;
+                placeholder-text: root.prompt;
+                text <=> root.input;
+                accepted => { root.submit(root.input); root.input = ""; }
+            }
+            Button { text: root.expanded ? "v" : "^"; min-width: 48px; preferred-width: 48px; min-height: root.phone ? 48px : 36px; clicked => { root.expanded = !root.expanded; } }
+        }
+        if root.expanded : HorizontalBox {
+            padding: 0px;
+            Button { text: root.tools-label; min-height: 48px; clicked => { root.tools(); } }
+            Button { text: root.fit-label; min-height: 48px; clicked => { root.fit(); } }
+        }
+    }
+}

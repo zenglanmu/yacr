@@ -3,6 +3,24 @@
 use super::*;
 
 impl UiHandle {
+    /// Logical CAD hit rectangle and shell expansion state for browser touch routing.
+    pub fn shell_geometry(&self) -> CadResult<([f64; 4], [bool; 4])> {
+        let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;
+        Ok((
+            [
+                0.0,
+                ui.get_cad_top() as f64,
+                ui.get_cad_width() as f64,
+                ui.get_cad_height() as f64,
+            ],
+            [
+                ui.get_phone_shell(),
+                ui.get_tools_open(),
+                ui.get_ribbon_expanded(),
+                ui.get_command_expanded(),
+            ],
+        ))
+    }
     fn with(&self, f: impl FnOnce(&YacrWindow)) -> CadResult<()> {
         let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;
         f(&ui);
@@ -12,6 +30,10 @@ impl UiHandle {
     /// Replace the composited CAD frame with a new texture-backed image.
     pub fn set_cad_frame(&self, image: Image) -> CadResult<()> {
         self.with(|ui| ui.set_cad_frame(image))
+    }
+
+    pub fn touch_pick(&self, x: f64, y: f64) -> CadResult<()> {
+        self.with(|ui| ui.invoke_canvas_pick(x as f32, y as f32))
     }
 
     /// Push the derived view/observation state into the shell (F13/F14).

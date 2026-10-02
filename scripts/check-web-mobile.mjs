@@ -6,7 +6,7 @@ const chromium = module.chromium || module.default.chromium;
 const url = process.argv[2] || "http://127.0.0.1:8098/";
 const output = process.argv[3] || "/tmp/opencode/yacr-mobile-validation";
 mkdirSync(output, { recursive: true });
-const browser = await chromium.launch({
+const server = await chromium.launchServer({
   headless: true,
   args: [
     "--no-sandbox",
@@ -15,6 +15,7 @@ const browser = await chromium.launch({
     "--use-angle=swiftshader",
   ],
 });
+const browser = await chromium.connect(server.wsEndpoint());
 const results = [];
 try {
   for (const [name, width, height, dpr] of [
@@ -35,9 +36,11 @@ try {
       if (m.type() === "error") errors.push(m.text());
     });
     await page.goto(url);
-    await page
-      .locator("#open-drawing:not([disabled])")
-      .waitFor({ timeout: 60000 });
+    await page.waitForFunction(
+      () => window.yacr?.renderer_state_report().includes("adapter=Some"),
+      null,
+      { timeout: 60000 },
+    );
     await page.waitForTimeout(1000);
     const geometry = await page.evaluate(() => {
       const canvas = document.getElementById("canvas");
@@ -63,7 +66,15 @@ try {
         Number(surface[1]) > width * 0.8 &&
         Number(surface[2]) > height * 0.4,
     );
-    await page.screenshot({ path: `${output}/${name}-zh.png` });
+    // Default-layout screenshots live in check-web-ribbon.mjs. Capture only
+    // the final rotated state here to avoid repeated SwiftShader readbacks.
+    if (dpr !== 1) {
+      const rect = await page.locator("#canvas").boundingBox();
+      await page.mouse.click(rect.x + width * 0.5, rect.y + rect.height - 30);
+      await page.keyboard.type("TOOLS");
+      await page.keyboard.press("Enter");
+      await page.locator("#language").waitFor({ state: "visible" });
+    }
     const framesBeforeUi = await page.evaluate(
       () => window.yacr.renderer_state_report().match(/cad_frames=(\d+)/)?.[1],
     );
@@ -79,7 +90,6 @@ try {
       "language/UI-only redraw must reuse CAD pixels",
     );
     assert.equal(await page.locator("#open-drawing").textContent(), "Open DWG");
-    await page.screenshot({ path: `${output}/${name}-en.png` });
     const chooser = page.waitForEvent("filechooser");
     await page.locator("#open-drawing").click();
     await (await chooser).setFiles("fixtures/dwg/synthetic-four-lines.dwg");
@@ -91,7 +101,6 @@ try {
       await page.evaluate(() => window.yacr.renderer_state_report()),
       /error=None/,
     );
-    await page.screenshot({ path: `${output}/${name}-dwg.png` });
     await page.setViewportSize({ width: height, height: width });
     await page.waitForTimeout(500);
     const resized = await page.evaluate(() => ({
@@ -101,7 +110,9 @@ try {
     }));
     assert.equal(resized.width, Math.round(resized.css * dpr));
     assert.match(resized.report, /entities=4/);
-    await page.screenshot({ path: `${output}/${name}-rotated.png` });
+    // Rotation is asserted from backing-store size and retained document above.
+    // Repeated dynamic high-DPI SwiftShader captures can stall Chromium 153;
+    // default/desktop pixel evidence is captured by the companion scripts.
     assert.deepEqual(errors, []);
     results.push({ name, geometry, resized, errors });
     await context.close();
@@ -130,5 +141,5 @@ try {
     }),
   );
 } finally {
-  await browser.close();
+  server.process().kill("SIGKILL");
 }

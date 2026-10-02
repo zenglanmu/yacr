@@ -1,5 +1,6 @@
 // Browser composition root. Keep wasm loading dynamic so failures are localized.
 import { createFileHost } from "./host/files.js";
+import { installTouchNavigation } from "./host/touch.js";
 import { createI18n } from "./host/i18n.js";
 import { startStatePolling } from "./host/renderer.js";
 import {
@@ -42,6 +43,7 @@ async function main() {
     i18n,
   );
   wireFilePickers();
+  installTouchNavigation(wasmModule);
   ignoreWinitHandoff();
 
   // Preserve the public diagnostics/test surface across the module split.
@@ -57,6 +59,7 @@ async function main() {
     export_annotations: exportAnnotations,
     set_locale: i18n.setLocale,
     current_locale: i18n.currentLocale,
+    shell_geometry: wasmModule.shell_geometry,
     has_recovery_snapshot: wasmModule.has_recovery_snapshot,
     restore_recovery_snapshot: wasmModule.restore_recovery_snapshot,
     discard_recovery_snapshot: wasmModule.discard_recovery_snapshot,

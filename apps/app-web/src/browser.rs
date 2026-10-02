@@ -16,6 +16,7 @@ mod documents;
 mod fonts;
 mod input;
 mod persistence;
+pub mod shell;
 
 pub use annotations::{
     confirm_annotation_export, drop_pending_recovery_snapshot, export_annotations_json,
@@ -280,7 +281,7 @@ pub fn renderer_report() -> String {
     let report = with_runtime(|rt| {
         let controller = rt.controller.borrow();
         format!(
-            "chosen={:?} adapter={:?} caps={:?} error={:?} entities={} wpp={:.6} status={} surface={:?} cad_frames={} lifecycle={:?}",
+            "chosen={:?} adapter={:?} caps={:?} error={:?} entities={} wpp={:.6} status={} surface={:?} cad_frames={} lifecycle={:?} center={:?}",
             rt.view.preference(),
             rt.view.active_backend(),
             rt.view.capabilities(),
@@ -295,6 +296,7 @@ pub fn renderer_report() -> String {
             rt.handle.cad_surface_size(),
             rt.view.frames_rendered(),
             rt.view.lifecycle(),
+            viewport_camera(&controller).0,
         )
     });
     report.unwrap_or_else(|| "host not started".to_string())

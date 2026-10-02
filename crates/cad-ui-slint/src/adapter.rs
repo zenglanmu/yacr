@@ -94,6 +94,8 @@ impl UiAdapter {
         let view_3d: Rc<Cell<bool>> = Rc::new(Cell::new(false));
         let orbit_last: Rc<Cell<Option<[f64; 2]>>> = Rc::new(Cell::new(None));
 
+        crate::command_line::connect(&ui, messages_slot.clone());
+
         {
             let s = shared.clone();
             let doc = document.clone();
