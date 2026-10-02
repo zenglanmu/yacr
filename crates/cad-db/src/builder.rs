@@ -37,6 +37,7 @@ impl DrawingDatabaseBuilder {
                 render_attributes: BTreeMap::new(),
                 scales: BTreeMap::new(),
                 active_annotation_scale: None,
+                next_entity_id: 1,
             },
             errors: Vec::new(),
         }
@@ -276,6 +277,23 @@ impl DrawingDatabaseBuilder {
                 "import validation failed: {joined}"
             )));
         }
+        // Initialise the id allocator from the largest id in the finished
+        // database (entities plus block member lists, defensively), so the first
+        // `allocate_entity_id` can never collide with an imported entity.
+        let max_entity = self
+            .database
+            .entities
+            .keys()
+            .map(|e| e.0)
+            .chain(
+                self.database
+                    .blocks
+                    .values()
+                    .flat_map(|b| b.entities.iter().map(|e| e.0)),
+            )
+            .max()
+            .unwrap_or(0);
+        self.database.next_entity_id = max_entity.saturating_add(1);
         Ok(self.database)
     }
 }

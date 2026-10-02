@@ -14,6 +14,8 @@ mod drawing;
 mod entity;
 mod math;
 mod tables;
+mod transform;
+mod validate;
 
 pub use annotation::*;
 pub use annotation_db::*;
@@ -23,6 +25,8 @@ pub use change::*;
 pub use drawing::*;
 pub use entity::*;
 pub use tables::*;
+pub use transform::*;
+pub use validate::*;
 
 #[cfg(test)]
 mod tests;
