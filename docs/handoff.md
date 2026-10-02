@@ -57,8 +57,17 @@ HATCH、动态块求值、注释性缩放、打印/出图、异步可取消导�
 （`docs/performance.md`）；渐变 HATCH 逐顶点颜色烘焙（`docs/hatch-gradient.md`）；
 异步可取消导入（进度 + 过期结果丢弃，F01）（`docs/import-async.md`）。集成测试
 **824 passed / 0 failed**（lavapipe），fmt/clippy/架构/i18n/fixtures/wasm `--lib` 全通过。
-仍开放：ACIS 真实授权样本与锥面/带环球面、动态块求值、注释性缩放、矢量出图
-（PDF/HPGL/CTB）、复杂/嵌入形状线型、宿主异步导入面板接线、手机内存/FPS 实测。
+仍开放：矢量出图（PDF/HPGL/CTB）、复杂/嵌入形状线型、宿主异步导入面板接线、
+手机内存/FPS 实测。
+
+**集成轮 5（核心 CAD，Linux 构建）**：动态块可见性状态读取与切换（GEOMETRY 增量，
+`docs/dynamic-blocks.md`）；ACIS 锥面（完整圆锥 + 截头圆锥）与环形圆环面离散，修复
+截头圆锥母线缝合在环长不等时夹紧末点导致的非流形开边（`docs/kernel-acis.md`）；
+注释性缩放：`Scale` 表 + `CANNOSCALE` 导入、TEXT/MTEXT 按活动比例缩放并支持
+按比例位置覆盖，非文本/非法比例显式 `Partial`（`docs/annotative-scaling.md`）。集成测试
+**870 passed / 0 failed**（lavapipe），fmt/clippy(0)/架构/i18n/fixtures/wasm `--lib` 全通过。
+仍开放：真实授权 ACIS 样本、带环球面、非圆椭圆/样条面、矢量出图、复杂线型形状、
+宿主比例切换与异步导入面板接线、真机内存/FPS 实测。
 
 仍开放（受环境/外部依赖限制）：**F15 真实 ACIS 离散**（需内核 + SAT/SAB 解析器 + 授权样本）；
 **真机**（模拟器 SwiftShader 不等同真机）；**WebGPU / 真实 GPU / 移动与桌面浏览器矩阵**；

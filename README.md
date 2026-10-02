@@ -32,8 +32,12 @@ acadrust 导入（含实体/图层透明度）、显示表示、空间索引、�
 - 透明：acadrust `Transparency` → 场景 → 透明管线，含软件 Vulkan（lavapipe）合成测试。
 - 曲线（B23）：真实 NURBS（源 knots/weights）、椭圆 OCS 法向、非均匀仿射真椭圆、
   bulge、解析交点（`docs/curve-geometry.md`）。
-- ACIS（F15）：acadrust SAT/SAB → 中性 B-rep → 平面（含孔）/球/柱/环面子集离散；
-  合成 SAT 夹具入 `fixtures/manifest`；其余显式 `Unsupported`（`docs/kernel-acis.md`）。
+- ACIS（F15）：acadrust SAT/SAB → 中性 B-rep → 平面（含孔）/球/柱/环面/锥面子集离散
+  （含截头圆锥）；合成 SAT 夹具入 `fixtures/manifest`；其余显式 `Unsupported`
+  （`docs/kernel-acis.md`）。
+- 动态块可见性（§3.2）：读取命名状态并在内存库中切换活动状态（GEOMETRY 增量，
+  `docs/dynamic-blocks.md`）；注释性缩放：TEXT/MTEXT 按活动比例缩放并应用按比例覆盖
+  （`docs/annotative-scaling.md`）。
 - 布局/测量（F04/F06）：4 角纸空间视口与修正比例，纸面/视口模型测量经已验证逆变换。
 - 捕捉/填充：端点/中点/圆心/象限/垂足/局部交点捕捉；HATCH 多环含孔洞实心填充。
 
@@ -43,7 +47,8 @@ acadrust 导入（含实体/图层透明度）、显示表示、空间索引、�
 - Android 未在真机运行；surface 尺寸/安全区、SAF、量测/批注拾取未接线。
 - Web 仅验证 WebGL2 软件路径；WebGPU、真实 GPU 与移动/桌面浏览器矩阵未验证。
 - 桌面/iOS 仅平台抽象，不提供宿主。
-- ACIS 仅有合成样本子集（平面/球/柱/环面），无授权真实 3DSOLID/BODY/REGION/SURFACE
-  样本；锥面/带环球面/非圆椭圆/样条面未实现。复杂文字整形、动态块、复杂视口裁剪、
-  代理无缓存几何均按样本标记为未支持或未验证。
+- ACIS 仅有合成样本子集（平面/球/柱/环面/锥面），无授权真实
+  3DSOLID/BODY/REGION/SURFACE 样本；带环球面/非圆椭圆/样条面未实现。
+  复杂文字整形、动态块参数/夹点求值、复杂视口裁剪、代理无缓存几何均按样本标记为
+  未支持或未验证；注释性缩放仅 TEXT/MTEXT，宿主比例切换 UI 未接线。
 - 未支持项在 `docs/compatibility.md` 中逐项标注；未验证即未验证，不冒充完成。

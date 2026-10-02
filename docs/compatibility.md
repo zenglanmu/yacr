@@ -20,7 +20,7 @@
 | HATCH | 实现 | 部分(椭圆/样条边界近似) | 边界环 + 多环实心填充(含孔洞，偶奇) / 图案线；超预算/自交降 Partial | 经边界(AABB) | 不支持 |
 | DIMENSION | 实现 | 经匿名块引用 | 展开匿名块几何(线/箭头/文字)；无块名时 Partial | 经展开几何(AABB) | 不支持 |
 | MESH / PolyfaceMesh | 部分 | 网格契约 | 网格 | 实现 | 不支持 |
-- 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust `entities::acis` 解析) | 部分(平面/球/柱/无环球面子集) | 子集离散：闭合 `Success`，否则 `Partial`；锥面/带环球面/非圆椭圆/样条面 `Unsupported` | 经网格 | 不支持(近似标记) |
+- 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust `entities::acis` 解析) | 部分(平面/球/柱/环面/锥面子集) | 子集离散：闭合 `Success`，否则 `Partial`；带环球面/非圆椭圆/样条面 `Unsupported` | 经网格 | 不支持(近似标记) |
 | TEXT/MTEXT 格式 | 实现(格式 run 解析) | 部分(堆叠分数/颜色/装饰/行对齐为显式 Partial) | 按 run 整形/换行 | — | — |
 | 实体颜色/线宽 | 实现(ByObject/ByLayer/ByBlock，ACI/RGB) | 实现(颜色)；线宽仅携带 | 颜色进入 shader；线宽**显式不绘制** | — | — |
 | LINETYPE 虚线 | 实现(名称/表/线型比例) | 实现(ByObject/ByLayer/ByBlock) | 按弧长细分 dash/gap；复杂线型仅 dash、显式 Partial | — | — |
@@ -60,6 +60,8 @@
 
 字体/图标等资源授权未核查；TTF/OTF/WOFF 与 SHX（shapes/unifont/bigfont）文本已整形为
 线段绘制，缺失字体按回退链替代（源码见 `docs/fonts.md`）；TEXT 对齐、复杂文字整形、
-动态块求值、注释性缩放、复杂视口裁剪、代理无缓存几何均按样本标记为未支持或未验证，
-不会报告为完整图纸。出图仅光栅 PNG（无矢量 PDF/HPGL/CTB）；线宽的复杂/嵌入形状段、
-注释性缩放与动态块可见性状态仍按显式 `Partial`/未实现报告，不计入完成。
+动态块参数/夹点求值、复杂视口裁剪、代理无缓存几何均按样本标记为未支持或未验证，
+不会报告为完整图纸。出图仅光栅 PNG（无矢量 PDF/HPGL/CTB）；线宽的复杂/嵌入形状段
+仍按显式 `Partial`/未实现报告，不计入完成。动态块**可见性状态**读取/切换与
+**注释性缩放（TEXT/MTEXT）**已实现，但动态块参数/夹点编辑、非文本注释性类型仍为
+显式 `Partial`，且宿主比例切换 UI 未接线。

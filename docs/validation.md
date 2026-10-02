@@ -415,14 +415,40 @@ wasm `--lib` 通过。默认 Vulkan loader（未强制 `VK_ICD_FILENAMES`）下
 `cad-render-wgpu::render_effects` 会因环境中存在损坏 ICD 而在并发创建设备时偶发
 SIGSEGV；强制 lavapipe 后稳定通过，与本轮 CPU 侧改动无关。
 
+## 集成轮 5：动态块 / ACIS 锥面与圆环 / 注释性缩放（2026-10-02，Linux 核心）
+
+三个 workstream 合入 `main`。整合期解决了 `cad-db`（`tables.rs`/`builder.rs`/
+`drawing.rs`/`tests.rs`）与 `cad-import-acadrust`/`cad-representation` 的语义冲突，
+以及 `read_scales` 的计数器写法（改 `enumerate`）与测试文件拼接。
+
+- **动态块可见性（§3.2）**：读 `BlockVisibilityParameter` 的命名状态与匿名/求值块成员
+  可见性，`BlockDefinition.dynamic_visibility` 建模状态；切换活动状态产出 GEOMETRY 增量
+  而非重解析底图；未知状态显式 `Partial`（`docs/dynamic-blocks.md`）。
+- **ACIS 锥面 + 环形圆环面（F15）**：完整圆锥（底面圆 + 顶点奇点）扇形到顶点；截头圆锥
+  （两个完整圆环）沿母线 zipper 缝合，修复环采样点数不等时**夹紧末点**造成的非流形/开边
+  缺陷（改为回绕到起点）。新增 `cone.sat`/`torus.sat`（`Success`）、
+  `cone-truncated.sat`（单元测试）；`cone-unsupported.sat` 改名为 `cone.sat`。
+  `brep_tessellator` 的能力字符串加入 `conical-faces`（`docs/kernel-acis.md`）。
+- **注释性缩放（§3.2）**：`Scale` 表 + `ActiveAnnotationScale`（`CANNOSCALE`/
+  `CANNOSCALEVALUE`）导入；`AnnotativeAttributes` 携带按比例位置/旋转/字高覆盖；
+  `RepresentationContext.annotation_scale` 与 `ProviderRegistry::rebuild_annotative`
+  对注释性 TEXT/MTEXT 按活动比例缩放字形并应用覆盖。非 TEXT/MTEXT 注释类型与非法 factor
+  为显式 `Partial`（`annotative.unsupported_entity`/`annotative.invalid_scale`）；导入期
+  未知/非法活动比例为 `import.annotation_scale_unknown`/`import.annotation_scale_invalid`
+  （`docs/annotative-scaling.md`）。宿主的比例切换 UI 尚未调用 `rebuild_annotative`。
+
+集成测试（lavapipe）**870 passed / 0 failed**；fmt、clippy(0)、架构、i18n、fixtures、
+wasm `--lib` 均通过。
+
 ## 未执行（明确标注）
 
 - **Android 真机**：未运行（仅模拟器 SwiftShader）。SAF、surface 尺寸/安全区、
   量测/批注拾取、面板状态推送未接线。异步导入的宿主进度面板/后台打开按钮未接线。
 - **WebGPU / 真实 GPU**：未运行；Web 仅无头 Chromium 的 WebGL2 软件路径。
-- **ACIS（F15）真实样本**：已用 acadrust 解析 + 中性 B-rep 离散平面/球/柱/环面子集，
-  但夹具均为**本仓库自制合成 SAT**；无授权 3DSOLID/BODY/REGION/SURFACE 真实样本，
-  锥面/带环球面/非圆椭圆/样条面仍 `Unsupported`。真实图纸上的 ACIS 端到端 **未运行**。
+- **ACIS（F15）真实样本**：已用 acadrust 解析 + 中性 B-rep 离散平面/球/柱/环面/锥面
+  子集（含截头圆锥），但夹具均为**本仓库自制合成 SAT**；无授权
+  3DSOLID/BODY/REGION/SURFACE 真实样本，带环球面/非圆椭圆/样条面仍 `Unsupported`。
+  真实图纸上的 ACIS 端到端 **未运行**。
 - **出图**：仅光栅 PNG；无矢量 PDF/HPGL/SVG、无 CTB/STB 打印样式、无打印设备配置、
   无黄金图。
 - 桌面/iOS/macOS/Windows 宿主：**未构建**；仅 `cad-platform` 抽象。
