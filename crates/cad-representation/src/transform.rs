@@ -71,5 +71,8 @@ pub(crate) fn transform_mesh(mesh: &Mesh, t: &Transform3) -> Mesh {
         triangles: mesh.triangles.clone(),
         normals,
         face_sources: mesh.face_sources.clone(),
+        // Colour is a vertex attribute, not a direction; it passes through a
+        // rigid/affine transform unchanged (no colour management here).
+        colors: mesh.colors.clone(),
     }
 }

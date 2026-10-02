@@ -39,6 +39,12 @@ pub struct RenderBatch {
     /// Per-vertex normals, present only for [`RenderTopology::Mesh`] and always
     /// the same length as `vertices`. Empty for line topologies.
     pub normals: Vec<[f32; 3]>,
+    /// Optional per-vertex sRGB colours in `[0, 1]`, one entry per `vertices`
+    /// entry. Empty (the default) means "use the batch `color`", so every
+    /// existing solid mesh is unchanged. Non-empty is the gradient HATCH path:
+    /// the shader modulates the batch colour by this value, and the scene
+    /// sanitises each channel with [`sanitize_color`].
+    pub colors: Vec<[f32; 3]>,
     /// Triangle topology indices (`[i0, i1, i2]` into `vertices`). Empty for
     /// line topologies; for meshes it lets the renderer index rather than repeat
     /// vertices.
@@ -95,7 +101,8 @@ impl RenderBatch {
     }
 
     pub fn approx_bytes(&self) -> usize {
-        (self.vertices.len() + self.normals.len() + self.edges.len()) * 12 + self.indices.len() * 12
+        (self.vertices.len() + self.normals.len() + self.edges.len() + self.colors.len()) * 12
+            + self.indices.len() * 12
     }
 
     /// World-space centroid used as the transparent-pass depth-sort key.

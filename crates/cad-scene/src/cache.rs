@@ -92,7 +92,7 @@ impl SceneCache {
             removed_chunks: Vec::new(),
         };
         for fragment in &representation.fragments {
-            let (topology, vertices, normals, indices, edges, origin, mirrored) =
+            let (topology, vertices, normals, colors, indices, edges, origin, mirrored) =
                 match &fragment.primitive {
                     DisplayPrimitive::Lines(points) => {
                         let origin = points.first().copied().unwrap_or(Point3 {
@@ -113,6 +113,7 @@ impl SceneCache {
                         (
                             RenderTopology::Lines,
                             verts,
+                            Vec::new(),
                             Vec::new(),
                             Vec::new(),
                             Vec::new(),
@@ -155,6 +156,17 @@ impl SceneCache {
                             .iter()
                             .map(|n| [n.x as f32, n.y as f32, n.z as f32])
                             .collect();
+                        // Per-vertex colours are optional and only meaningful
+                        // when exactly one entry per vertex exists; otherwise
+                        // the batch falls back to its uniform colour.
+                        let colors: Vec<[f32; 3]> = if mesh.colors.len() == mesh.vertices.len() {
+                            mesh.colors
+                                .iter()
+                                .map(|c| sanitize_color([c[0] as f32, c[1] as f32, c[2] as f32]))
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
                         // Edge line list built from the kept topology, one
                         // segment per triangle edge. Duplicated edges are not
                         // removed yet; that is a documented follow-up (edges are
@@ -170,6 +182,7 @@ impl SceneCache {
                             RenderTopology::Mesh,
                             verts,
                             normals,
+                            colors,
                             kept,
                             edge_positions,
                             origin,
@@ -194,6 +207,7 @@ impl SceneCache {
                 topology,
                 vertices,
                 normals,
+                colors,
                 indices,
                 edges,
                 mirrored: false,

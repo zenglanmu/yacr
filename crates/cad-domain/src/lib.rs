@@ -339,6 +339,15 @@ pub struct Mesh {
     pub triangles: Vec<[u32; 3]>,
     pub normals: Vec<Point3>,
     pub face_sources: Vec<Option<SubElementId>>,
+    /// Optional per-vertex sRGB colours, one byte per channel.
+    ///
+    /// Empty (the default) means "no vertex colour": the renderer falls back to
+    /// the batch's uniform colour. When non-empty it must be exactly
+    /// `vertices.len()` long; this is the channel a gradient HATCH uses to bake
+    /// its per-stop colours into geometry so no texture path is needed. Bytes
+    /// are used rather than floats so the domain stays independent of the
+    /// renderer's colour conventions.
+    pub colors: Vec<[u8; 3]>,
 }
 
 // ---------------------------------------------------------------------------

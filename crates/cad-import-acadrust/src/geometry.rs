@@ -291,12 +291,14 @@ pub(crate) fn quad_mesh(corners: [Point3; 4]) -> Mesh {
         triangles: triangles.clone(),
         normals: Vec::new(),
         face_sources: Vec::new(),
+        colors: Vec::new(),
     });
     Mesh {
         vertices: std::mem::take(&mut vertices),
         triangles,
         normals,
         face_sources: Vec::new(),
+        colors: Vec::new(),
     }
 }
 

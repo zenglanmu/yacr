@@ -286,6 +286,7 @@ fn line_batch(
         topology: RenderTopology::Lines,
         vertices,
         normals: Vec::new(),
+        colors: Vec::new(),
         indices: Vec::new(),
         edges: Vec::new(),
         mirrored: false,
@@ -372,6 +373,9 @@ fn mesh_batch(
         topology: RenderTopology::Mesh,
         vertices,
         normals,
+        // A highlight recolours the whole overlay uniformly, so any per-vertex
+        // gradient colour is intentionally dropped here.
+        colors: Vec::new(),
         indices,
         edges: Vec::new(),
         mirrored: false,
@@ -527,6 +531,7 @@ mod tests {
             triangles: vec![[0, 1, 2], [3, 4, 5]],
             normals: Vec::new(),
             face_sources: vec![Some(face("face-a")), Some(face("face-b"))],
+            colors: Vec::new(),
         }
     }
 

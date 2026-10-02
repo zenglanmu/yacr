@@ -68,6 +68,9 @@ pub(crate) fn draw_batch(
             if let Some(normals) = &batch.normals {
                 pass.set_vertex_buffer(1, normals.slice(..));
             }
+            if let Some(colors) = &batch.colors {
+                pass.set_vertex_buffer(2, colors.slice(..));
+            }
             let Some(indices) = batch.indices.as_ref() else {
                 return;
             };
@@ -231,6 +234,17 @@ pub(crate) fn mesh_normal_layout() -> wgpu::VertexBufferLayout<'static> {
         array_stride: 12,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &wgpu::vertex_attr_array![1 => Float32x3],
+    }
+}
+
+/// Per-vertex colours travel in their own vertex buffer (slot 2, see
+/// `draw_batch`). The buffer is always present for a mesh — white when the
+/// batch has no gradient — so `mesh.wgsl`'s `@location(2)` is always supplied.
+pub(crate) fn mesh_color_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: 12,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![2 => Float32x3],
     }
 }
 

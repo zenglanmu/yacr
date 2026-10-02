@@ -123,6 +123,7 @@ mod tests {
             triangles: vec![[0, 1, 2]],
             normals: Vec::<Point3>::new(),
             face_sources: vec![None::<SubElementId>],
+            colors: Vec::new(),
         };
         let n = compute_vertex_normals(&mesh);
         assert!((n[0].z - 1.0).abs() < 1e-9);

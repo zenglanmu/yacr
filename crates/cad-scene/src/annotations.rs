@@ -484,6 +484,7 @@ fn make_batch(
         topology: RenderTopology::Lines,
         vertices,
         normals: Vec::new(),
+        colors: Vec::new(),
         indices: Vec::new(),
         edges: Vec::new(),
         mirrored: false,

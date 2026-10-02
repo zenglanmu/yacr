@@ -160,6 +160,76 @@ pub(crate) fn arc_steps(sweep: f64) -> usize {
     ((sweep.abs() / 0.05).ceil() as usize).clamp(2, 4096)
 }
 
+/// The outcome of translating a HATCH's gradient pattern.
+///
+/// `Unsupported` carries a stable reason code so the importer can report an
+/// explicit `Partial` for a gradient it will not approximate, rather than
+/// silently drawing the boundary or a solid fill.
+pub(crate) enum GradientTranslation {
+    /// No gradient is enabled on the hatch.
+    Disabled,
+    /// A supported gradient, ready to bake into per-vertex colours.
+    Supported(GradientDef),
+    /// A gradient kind outside the implemented subset.
+    Unsupported(&'static str),
+}
+
+/// Translate acadrust's `HatchGradientPattern` into the geometry-level model.
+///
+/// Supported kinds are the parametric ones whose value is a function of a
+/// single projection/radius: `LINEAR` and `SPHERICAL` (and its `CYLINDER`
+/// alias, which is the same radial ramp in the hatch plane). Every other DXF
+/// gradient kind is curved or piecewise and is reported unsupported rather than
+/// approximated as a straight ramp.
+pub(crate) fn translate_gradient(h: &Hatch) -> GradientTranslation {
+    let g = &h.gradient_color;
+    if !g.is_enabled() {
+        return GradientTranslation::Disabled;
+    }
+    let name = g.name.trim().to_ascii_uppercase();
+    let kind = match name.as_str() {
+        "LINEAR" => GradientKind::Linear,
+        "SPHERICAL" | "CYLINDER" => GradientKind::Spherical,
+        // Curved / inversion gradients are not a single radial ramp; refuse
+        // them explicitly instead of substituting an approximation.
+        "HEMISPHERICAL" | "CURVED" | "INVSPHERICAL" | "INVCYLINDER" => {
+            return GradientTranslation::Unsupported("gradient_kind_not_supported");
+        }
+        "" => {
+            // A missing name is ambiguous; fall back to LINEAR only when the
+            // file actually carried stops, otherwise report it.
+            if g.colors.is_empty() {
+                return GradientTranslation::Unsupported("gradient_name_missing");
+            }
+            GradientKind::Linear
+        }
+        _ => return GradientTranslation::Unsupported("gradient_kind_not_supported"),
+    };
+    let stops: Vec<GradientStop> = g
+        .colors
+        .iter()
+        .map(|entry| GradientStop {
+            value: entry.value,
+            // A symbolic gradient stop has no concrete colour; white is the
+            // documented neutral rather than a fabricated hue.
+            rgb: concrete_rgb(entry.color).unwrap_or([255, 255, 255]),
+        })
+        .collect();
+    let def = GradientDef {
+        kind,
+        angle: g.angle,
+        shift: g.shift,
+        single_color: g.is_single_color,
+        tint: g.color_tint,
+        stops,
+    };
+    if def.is_usable() {
+        GradientTranslation::Supported(def)
+    } else {
+        GradientTranslation::Unsupported("gradient_definition_unusable")
+    }
+}
+
 /// Build the (possibly doubled) pattern line families, applying the hatch's
 /// pattern angle and scale.
 pub(crate) fn pattern_families(h: &Hatch) -> Vec<PatternLine> {

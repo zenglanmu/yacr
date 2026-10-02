@@ -706,6 +706,7 @@ mod tests {
             triangles: vec![[0, 1, 2], [3, 4, 5]],
             normals: Vec::new(),
             face_sources: Vec::new(),
+            colors: Vec::new(),
         };
         let r = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
         let options = PickOptions::new(1e-6).unwrap();
@@ -881,6 +882,7 @@ mod tests {
             triangles: vec![[0, 1, 2], [3, 4, 5]],
             normals: Vec::new(),
             face_sources: vec![Some(face("face-a")), Some(face("face-b"))],
+            colors: Vec::new(),
         }
     }
 
