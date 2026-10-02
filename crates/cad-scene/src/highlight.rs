@@ -22,9 +22,10 @@
 //!
 //! ## Explicit, non-silent limitations
 //!
-//! - **[`RenderBatch`] carries no RGB.** The overlay can only be ordered and
-//!   alpha-blended; a distinct highlight *tint* needs a per-batch colour channel
-//!   (a separate workstream). This is a documented gap, not a fabricated colour.
+//! - **Highlight tint.** Since `RenderBatch` gained a per-batch RGB channel the
+//!   overlay carries [`HighlightOptions::color`] (a selection tint); ordering and
+//!   alpha blending still apply. A host that installs no tint uses the documented
+//!   default.
 //! - **A sub-element only resolves where the geometry carries a stable id.** A
 //!   face is drawn iff `Mesh::face_sources[triangle]` equals the selected id;
 //!   otherwise nothing is drawn and `highlight.face-missing` is reported. An
@@ -54,6 +55,10 @@ pub const HIGHLIGHT_DRAW_ORDER: i64 = 2_000_000;
 /// Default overlay alpha: visible but not opaque.
 pub const DEFAULT_HIGHLIGHT_ALPHA: f32 = 0.55;
 
+/// Default overlay tint: a warm selection highlight, distinct from the drawing's
+/// normal per-entity colours.
+pub const DEFAULT_HIGHLIGHT_COLOR: [f32; 3] = [1.0, 0.62, 0.19];
+
 /// Overlay paint parameters.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HighlightOptions {
@@ -62,6 +67,9 @@ pub struct HighlightOptions {
     pub draw_order: i64,
     /// Constant per-batch alpha in `[0, 1]` (sanitised like every other batch).
     pub alpha: f32,
+    /// Overlay tint as normalized sRGB in `[0, 1]`, carried onto every emitted
+    /// batch's `color` (sanitised by [`crate::sanitize_color`]).
+    pub color: [f32; 3],
 }
 
 impl Default for HighlightOptions {
@@ -69,6 +77,7 @@ impl Default for HighlightOptions {
         HighlightOptions {
             draw_order: HIGHLIGHT_DRAW_ORDER,
             alpha: DEFAULT_HIGHLIGHT_ALPHA,
+            color: DEFAULT_HIGHLIGHT_COLOR,
         }
     }
 }
@@ -161,8 +170,8 @@ where
             }
             opaque += 1;
             let batch = match &reference.sub_element {
-                None => whole_fragment(reference, fragment, order, options.alpha),
-                Some(id) => face_only(reference, fragment, id, order, options.alpha),
+                None => whole_fragment(reference, fragment, order, options.alpha, options.color),
+                Some(id) => face_only(reference, fragment, id, order, options.alpha, options.color),
             };
             match batch {
                 Some(batch) => {
@@ -228,10 +237,11 @@ fn whole_fragment(
     fragment: &DisplayFragment,
     draw_order: i64,
     alpha: f32,
+    color: [f32; 3],
 ) -> Option<RenderBatch> {
     match &fragment.primitive {
-        DisplayPrimitive::Lines(points) => line_batch(reference, points, draw_order, alpha),
-        DisplayPrimitive::Mesh(mesh) => mesh_batch(reference, mesh, None, draw_order, alpha),
+        DisplayPrimitive::Lines(points) => line_batch(reference, points, draw_order, alpha, color),
+        DisplayPrimitive::Mesh(mesh) => mesh_batch(reference, mesh, None, draw_order, alpha, color),
         DisplayPrimitive::Text { .. }
         | DisplayPrimitive::Image { .. }
         | DisplayPrimitive::Instance { .. } => None,
@@ -246,9 +256,12 @@ fn face_only(
     id: &SubElementId,
     draw_order: i64,
     alpha: f32,
+    color: [f32; 3],
 ) -> Option<RenderBatch> {
     match &fragment.primitive {
-        DisplayPrimitive::Mesh(mesh) => mesh_batch(reference, mesh, Some(id), draw_order, alpha),
+        DisplayPrimitive::Mesh(mesh) => {
+            mesh_batch(reference, mesh, Some(id), draw_order, alpha, color)
+        }
         _ => None,
     }
 }
@@ -258,6 +271,7 @@ fn line_batch(
     points: &[Point3],
     draw_order: i64,
     alpha: f32,
+    color: [f32; 3],
 ) -> Option<RenderBatch> {
     if points.len() < 2 {
         return None;
@@ -276,6 +290,10 @@ fn line_batch(
         edges: Vec::new(),
         mirrored: false,
         alpha: sanitize_alpha(alpha),
+        color: crate::sanitize_color(color),
+        color_unresolved: false,
+        lineweight: 0.0,
+        lineweight_unresolved: false,
         sources: vec![reference.clone()],
         draw_order,
     })
@@ -294,6 +312,7 @@ fn mesh_batch(
     only: Option<&SubElementId>,
     draw_order: i64,
     alpha: f32,
+    color: [f32; 3],
 ) -> Option<RenderBatch> {
     let selected: Vec<[u32; 3]> = mesh
         .triangles
@@ -357,6 +376,10 @@ fn mesh_batch(
         edges: Vec::new(),
         mirrored: false,
         alpha: sanitize_alpha(alpha),
+        color: crate::sanitize_color(color),
+        color_unresolved: false,
+        lineweight: 0.0,
+        lineweight_unresolved: false,
         sources: vec![reference.clone()],
         draw_order,
     })
@@ -422,6 +445,7 @@ mod tests {
     use super::*;
     use cad_domain::{DocumentId, EntityId, GeometrySource, InstancePath, Precision, Revision};
     use cad_representation::DisplayFragment;
+    use cad_representation::{DEFAULT_LINEWEIGHT_MM, DEFAULT_RENDER_COLOR};
     use std::sync::Arc;
 
     fn p(x: f64, y: f64, z: f64) -> Point3 {
@@ -478,6 +502,10 @@ mod tests {
                 geometry_source: GeometrySource::Analytic,
                 precision: Precision::Analytic,
                 alpha,
+                color: DEFAULT_RENDER_COLOR,
+                color_unresolved: false,
+                lineweight: DEFAULT_LINEWEIGHT_MM,
+                lineweight_unresolved: false,
                 primitive,
             }],
             completeness: Completeness::Complete,
@@ -709,6 +737,7 @@ mod tests {
         let options = HighlightOptions {
             draw_order: HIGHLIGHT_DRAW_ORDER,
             alpha: 2.0,
+            color: DEFAULT_HIGHLIGHT_COLOR,
         };
         let scene = highlight_batches(
             &[reference(1, Vec::new(), None)],
