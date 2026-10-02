@@ -150,8 +150,15 @@ fn face_surface(document: &SatDocument, face: &SatFace<'_>) -> BrepSurface {
                 ref_dir: tuple(cone.major_axis()),
                 radius: cone.radius(),
             },
-            Some(_) => BrepSurface::Unsupported {
-                type_key: "cone-surface".into(),
+            // A genuine cone (or truncated cone): the lateral face is carried by
+            // the half-angle and the reference cross-section radius.
+            Some(cone) => BrepSurface::Cone {
+                origin: tuple(cone.center()),
+                axis: tuple(cone.axis()),
+                ref_dir: tuple(cone.major_axis()),
+                radius: cone.radius(),
+                sin_half_angle: cone.sin_half_angle(),
+                cos_half_angle: cone.cos_half_angle(),
             },
             None => unsupported(record),
         },

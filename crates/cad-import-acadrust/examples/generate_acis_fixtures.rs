@@ -10,7 +10,9 @@
 //! primitive builders (and, for the holed box, from the same record layout by
 //! hand). They are contract fixtures only: no vendor drawing is involved.
 
-use acadrust::entities::acis::primitives::{build_box, build_cone, build_cylinder, build_sphere};
+use acadrust::entities::acis::primitives::{
+    build_box, build_cone, build_cylinder, build_sphere, build_torus,
+};
 use acadrust::entities::acis::{SatDocument, SatPointer, SatToken, Sense, Sidedness};
 use std::collections::HashMap;
 use std::fs;
@@ -32,16 +34,154 @@ fn main() {
     write("cube.sat", &build_box([0.0, 0.0, 0.0], 2.0, 2.0, 2.0));
     write("cylinder.sat", &build_cylinder([0.0, 0.0, 0.0], 1.0, 3.0));
     write("sphere.sat", &build_sphere([0.0, 0.0, 0.0], 2.0));
-    write(
-        "cone-unsupported.sat",
-        &build_cone([0.0, 0.0, 0.0], 1.0, 2.0),
-    );
+    write("cone.sat", &build_cone([0.0, 0.0, 0.0], 1.0, 2.0));
+    write("cone-truncated.sat", &build_truncated_cone(1.0, 0.5, 1.0));
+    write("torus.sat", &build_torus([0.0, 0.0, 0.0], 3.0, 1.0));
     if let Some(doc) = box_with_square_hole() {
         write("box-with-square-hole.sat", &doc);
     } else {
         eprintln!("box-with-square-hole construction failed");
         std::process::exit(1);
     }
+}
+
+/// A truncated cone (frustum) with its axis along Z, base radius `r0` at
+/// `z = 0`, top radius `r1` at `z = height`.
+///
+/// This mirrors acadrust's `build_cylinder` record layout, but the side face is
+/// a genuine `cone-surface` (non-zero half-angle) and its two boundary circles
+/// have different radii, so it exercises the frustum stitch. It is not a
+/// vendored primitive: it is constructed here from the documented record
+/// layout, exactly like `box-with-square-hole`.
+fn build_truncated_cone(r0: f64, r1: f64, height: f64) -> SatDocument {
+    let mut sat = SatDocument::new_body();
+    let body_idx = SatPointer::new(0);
+    let tau = std::f64::consts::TAU;
+    // Slope = dr/dz; the cone half-angle tangent.
+    let slope = (r1 - r0) / height;
+    let hyp = (1.0 + slope * slope).sqrt();
+    let sin_half = slope / hyp;
+    let cos_half = 1.0 / hyp;
+
+    let p0 = sat.add_point(r0, 0.0, 0.0);
+    let p1 = sat.add_point(r1, 0.0, height);
+
+    let surf_bot = sat.add_plane_surface([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let surf_top = sat.add_plane_surface([0.0, 0.0, height], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    // Reference cross-section: radius r0 at the origin (z = 0).
+    let surf_cone = sat.add_cone_surface(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [r0, 0.0, 0.0],
+        1.0,
+        cos_half,
+        sin_half,
+    );
+
+    let crv_bot = sat.add_ellipse_curve([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [r0, 0.0, 0.0], 1.0);
+    let crv_top = sat.add_ellipse_curve([0.0, 0.0, height], [0.0, 0.0, 1.0], [r1, 0.0, 0.0], 1.0);
+
+    let v0 = sat.add_vertex(SatPointer::NULL, ptr(p0));
+    let v1 = sat.add_vertex(SatPointer::NULL, ptr(p1));
+
+    let e_bot = sat.add_edge(
+        ptr(v0),
+        0.0,
+        ptr(v0),
+        tau,
+        SatPointer::NULL,
+        ptr(crv_bot),
+        Sense::Forward,
+    );
+    let e_top = sat.add_edge(
+        ptr(v1),
+        0.0,
+        ptr(v1),
+        tau,
+        SatPointer::NULL,
+        ptr(crv_top),
+        Sense::Forward,
+    );
+
+    let base = sat.records.len() as i32;
+    let co = |i: i32| base + i;
+    let loop_base = base + 4;
+    let face_base = base + 8;
+    let shell_idx = base + 11;
+    let lump_idx = base + 12;
+
+    // Bottom cap, top cap, then the two boundary loops of the cone side.
+    sat.add_coedge(
+        ptr(co(0)),
+        ptr(co(0)),
+        ptr(co(2)),
+        ptr(e_bot),
+        Sense::Forward,
+        ptr(loop_base),
+    );
+    sat.add_coedge(
+        ptr(co(1)),
+        ptr(co(1)),
+        ptr(co(3)),
+        ptr(e_top),
+        Sense::Forward,
+        ptr(loop_base + 1),
+    );
+    sat.add_coedge(
+        ptr(co(2)),
+        ptr(co(2)),
+        ptr(co(0)),
+        ptr(e_bot),
+        Sense::Reversed,
+        ptr(loop_base + 2),
+    );
+    sat.add_coedge(
+        ptr(co(3)),
+        ptr(co(3)),
+        ptr(co(1)),
+        ptr(e_top),
+        Sense::Reversed,
+        ptr(loop_base + 3),
+    );
+
+    sat.add_loop(SatPointer::NULL, ptr(co(0)), ptr(face_base));
+    sat.add_loop(SatPointer::NULL, ptr(co(1)), ptr(face_base + 1));
+    sat.add_loop(ptr(loop_base + 3), ptr(co(2)), ptr(face_base + 2));
+    sat.add_loop(SatPointer::NULL, ptr(co(3)), ptr(face_base + 2));
+
+    sat.add_face(
+        ptr(face_base + 1),
+        ptr(loop_base),
+        ptr(shell_idx),
+        ptr(surf_bot),
+        Sense::Forward,
+        Sidedness::Single,
+    );
+    sat.add_face(
+        ptr(face_base + 2),
+        ptr(loop_base + 1),
+        ptr(shell_idx),
+        ptr(surf_top),
+        Sense::Forward,
+        Sidedness::Single,
+    );
+    sat.add_face(
+        SatPointer::NULL,
+        ptr(loop_base + 2),
+        ptr(shell_idx),
+        ptr(surf_cone),
+        Sense::Forward,
+        Sidedness::Single,
+    );
+
+    sat.add_shell(ptr(face_base), ptr(lump_idx));
+    sat.add_lump(ptr(shell_idx), body_idx);
+
+    if let Some(body_rec) = sat.record_mut(0) {
+        body_rec.tokens[1] = SatToken::Pointer(ptr(lump_idx));
+    }
+    sat.complete_brep_links();
+    sat
 }
 
 /// A 10x10x4 box with a 4x4 square through-hole, all faces planar.
