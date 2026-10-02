@@ -96,6 +96,97 @@ pub enum EntityLineWeight {
     ByLayer,
 }
 
+/// A resolved dash pattern in drawing units, mirroring the DWG/DXF element
+/// convention: positive = dash, negative = gap, zero = dot.
+///
+/// The importer builds this from acadrust's `LineType::elements`; nothing is
+/// fabricated. `cycle` is the sum of element magnitudes (one full repetition)
+/// and is stored so the representation layer does not have to recompute and so
+/// a degenerate pattern can be rejected during sanitising.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LinetypePattern {
+    /// Element lengths in drawing units. Empty means continuous.
+    pub elements: Vec<f64>,
+    /// Total repetition length; `0.0` when `elements` is empty.
+    pub cycle: f64,
+}
+
+impl LinetypePattern {
+    /// The continuous linetype: no elements, no dashes.
+    pub fn continuous() -> Self {
+        LinetypePattern {
+            elements: Vec::new(),
+            cycle: 0.0,
+        }
+    }
+
+    /// Build a pattern from raw element lengths, computing the cycle.
+    ///
+    /// Non-finite elements are dropped (a single bad entry must not make the
+    /// whole line undrawable) and a pattern that loses every element degrades
+    /// to continuous.
+    pub fn from_elements(elements: impl IntoIterator<Item = f64>) -> Self {
+        let elements: Vec<f64> = elements.into_iter().filter(|e| e.is_finite()).collect();
+        let cycle: f64 = elements.iter().map(|e| e.abs()).sum();
+        if elements.is_empty() || !cycle.is_finite() || cycle <= 0.0 {
+            return LinetypePattern::continuous();
+        }
+        LinetypePattern { elements, cycle }
+    }
+
+    /// Whether this pattern draws a solid line (no gaps at all).
+    pub fn is_continuous(&self) -> bool {
+        self.elements.is_empty()
+    }
+
+    /// Whether the pattern has at least one visible marker (dash or dot).
+    pub fn has_visible_element(&self) -> bool {
+        self.elements.iter().any(|e| *e >= 0.0)
+    }
+
+    /// Whether any element is a gap, i.e. the line is not solid.
+    pub fn has_gap(&self) -> bool {
+        self.elements.iter().any(|e| *e < 0.0)
+    }
+}
+
+/// How an entity's display linetype is determined before batching.
+///
+/// The importer resolves an explicit entity linetype and a reachable layer
+/// linetype before storing, because the representation layer has no access to
+/// the layer table. `ByBlock` stays symbolic so INSERT expansion can substitute
+/// the containing block reference's linetype, exactly like [`EntityColor`] and
+/// [`EntityLineWeight`]. An unresolvable or unknown linetype becomes
+/// `Continuous` rather than an invented pattern.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum EntityLineType {
+    /// A named linetype with a concrete dash pattern. `scale` is the entity's
+    /// own `linetype_scale` (LTSCALE/global scale is applied later).
+    Explicit {
+        /// Source linetype name, kept for diagnostics.
+        name: String,
+        /// Resolved dash pattern.
+        pattern: LinetypePattern,
+        /// Entity linetype scale factor (`EntityCommon::linetype_scale`).
+        scale: f64,
+    },
+    /// Inherit the containing block reference's linetype (`ByBlock`). At the
+    /// model root this falls back to continuous.
+    ByBlock,
+    /// The source linetype is non-continuous (or unknown) but no concrete
+    /// pattern could be resolved. The representation falls back to continuous
+    /// and reports it, never fabricating dashes.
+    #[default]
+    ByLayer,
+}
+
+impl EntityLineType {
+    /// A concrete named pattern is present.
+    pub fn is_explicit(&self) -> bool {
+        matches!(self, EntityLineType::Explicit { .. })
+    }
+}
+
 /// Import-time display attributes that are not part of the semantic geometry.
 ///
 /// These live beside the entity in the database rather than in `DbEntity` so
@@ -108,6 +199,8 @@ pub struct EntityRenderAttributes {
     pub color: EntityColor,
     /// Resolved display lineweight (or a symbolic `ByBlock`).
     pub lineweight: EntityLineWeight,
+    /// Resolved display linetype (or a symbolic `ByBlock`).
+    pub linetype: EntityLineType,
     /// Which producer supplied the display geometry (proxy cache vs analytic).
     pub geometry_source: GeometrySource,
 }
@@ -118,6 +211,7 @@ impl Default for EntityRenderAttributes {
             transparency: EntityTransparency::default(),
             color: EntityColor::default(),
             lineweight: EntityLineWeight::default(),
+            linetype: EntityLineType::default(),
             geometry_source: GeometrySource::Analytic,
         }
     }

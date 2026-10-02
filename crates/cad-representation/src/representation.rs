@@ -38,6 +38,9 @@ impl DisplayRepresentation {
             color_unresolved: true,
             lineweight: DEFAULT_LINEWEIGHT_MM,
             lineweight_unresolved: true,
+            linetype: LinetypePattern::continuous(),
+            linetype_unresolved: true,
+            linetype_scale: 1.0,
             primitive: DisplayPrimitive::Mesh(Arc::new(geometry.mesh.clone())),
         };
         match &result.outcome {

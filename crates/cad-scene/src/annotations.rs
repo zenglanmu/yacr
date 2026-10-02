@@ -500,6 +500,9 @@ fn make_batch(
         // for the default hairline and marks the lineweight unresolved.
         lineweight: crate::DEFAULT_BATCH_LINEWEIGHT_MM,
         lineweight_unresolved: true,
+        // Annotations have no source linetype; they are drawn continuous.
+        linetype: cad_db::LinetypePattern::continuous(),
+        linetype_unresolved: true,
         sources: vec![SelectionRef {
             document,
             entity: EntityId(annotation.id.0),

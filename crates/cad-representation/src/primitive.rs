@@ -96,6 +96,21 @@ pub struct DisplayFragment {
     pub lineweight: f32,
     /// `true` when the source lineweight was symbolic and unresolved.
     pub lineweight_unresolved: bool,
+    /// Resolved dash pattern. An empty `elements` list means continuous.
+    ///
+    /// The importer resolves an explicit entity linetype and a reachable layer
+    /// linetype into a concrete pattern; `build` has no database access so it
+    /// emits [`LinetypePattern::continuous`]. This field is carried onto the
+    /// scene batch for diagnostics and, for line geometry, drives the
+    /// arc-length dash subdivision performed by
+    /// [`ProviderRegistry::build_expanded`].
+    pub linetype: LinetypePattern,
+    /// `true` when the source linetype was symbolic (`ByLayer`/`ByBlock`) and
+    /// no concrete pattern was available, so the fragment is drawn continuous.
+    pub linetype_unresolved: bool,
+    /// Entity linetype scale factor, applied with the drawing's global LTSCALE
+    /// when subdividing. Sanitised to `>= 0`.
+    pub linetype_scale: f32,
     pub primitive: DisplayPrimitive,
 }
 
@@ -132,6 +147,69 @@ pub fn resolve_lineweight(weight: EntityLineWeight, parent: Option<f32>) -> (f32
             None => (DEFAULT_LINEWEIGHT_MM, true),
         },
         EntityLineWeight::ByLayer => (DEFAULT_LINEWEIGHT_MM, true),
+    }
+}
+
+/// Resolve an entity's stored linetype against an enclosing INSERT's resolved
+/// pattern, mirroring [`resolve_color`].
+///
+/// Returns the concrete pattern, whether it is unresolved (drawn continuous),
+/// and the entity's own linetype scale. An explicit pattern is concrete;
+/// `ByBlock` inherits the enclosing reference's pattern when one is threaded
+/// down, otherwise it is unresolved. `ByLayer` is unresolved here because this
+/// layer has no layer table; the importer already substituted the layer pattern
+/// for real imports, so this is only reached for hand-built databases.
+pub fn resolve_linetype(
+    linetype: EntityLineType,
+    parent: Option<&LinetypePattern>,
+) -> (LinetypePattern, bool, f32) {
+    match linetype {
+        EntityLineType::Explicit {
+            pattern,
+            scale,
+            name: _,
+        } => {
+            let scale = if scale.is_finite() && scale > 0.0 {
+                scale as f32
+            } else {
+                1.0
+            };
+            (pattern, false, scale)
+        }
+        EntityLineType::ByBlock => match parent {
+            Some(parent) => (parent.clone(), false, 1.0),
+            None => (LinetypePattern::continuous(), true, 1.0),
+        },
+        EntityLineType::ByLayer => (LinetypePattern::continuous(), true, 1.0),
+    }
+}
+
+/// Subdivide a world-space polyline into dash sub-polylines.
+///
+/// The pattern is scaled by `scale * global_scale`. When the pattern is
+/// continuous, degenerate, all-gap or the scale is invalid, the input is
+/// returned unchanged together with an optional reason string so the caller can
+/// report a `Partial` completeness. `None` means "continuous, nothing to
+/// report" (the exact/expected case); `Some(reason)` means the caller asked for
+/// dashes but they could not be produced exactly.
+///
+/// Runs shorter than two distinct points are dropped; a dot collapses to
+/// nothing (a hairline renderer has no length to draw).
+pub fn subdivide_dashes(
+    points: &[Point3],
+    pattern: &LinetypePattern,
+    scale: f64,
+    global_scale: f64,
+) -> (Vec<Vec<Point3>>, Option<String>) {
+    if pattern.is_continuous() {
+        return (vec![points.to_vec()], None);
+    }
+    let combined = scale * global_scale;
+    match cad_geometry::dash_polyline(points, &pattern.elements, combined) {
+        cad_geometry::DashOutcome::Dashed(runs) => (runs, None),
+        cad_geometry::DashOutcome::Continuous(issue) => {
+            (vec![points.to_vec()], Some(issue.reason().to_string()))
+        }
     }
 }
 

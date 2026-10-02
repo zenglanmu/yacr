@@ -556,6 +556,8 @@ mod tests {
             color_unresolved: true,
             lineweight: 0.0,
             lineweight_unresolved: true,
+            linetype: cad_scene::LinetypePattern::continuous(),
+            linetype_unresolved: true,
             sources: vec![SelectionRef {
                 document: cad_domain::DocumentId(1),
                 entity: EntityId(1),

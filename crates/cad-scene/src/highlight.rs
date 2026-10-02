@@ -294,6 +294,10 @@ fn line_batch(
         color_unresolved: false,
         lineweight: 0.0,
         lineweight_unresolved: false,
+        // The highlight overlay is solid: the fragment's dash pattern is not
+        // reapplied to the tint so the selection stays fully visible.
+        linetype: cad_db::LinetypePattern::continuous(),
+        linetype_unresolved: false,
         sources: vec![reference.clone()],
         draw_order,
     })
@@ -380,6 +384,10 @@ fn mesh_batch(
         color_unresolved: false,
         lineweight: 0.0,
         lineweight_unresolved: false,
+        // The highlight overlay is solid: the fragment's dash pattern is not
+        // reapplied to the tint so the selection stays fully visible.
+        linetype: cad_db::LinetypePattern::continuous(),
+        linetype_unresolved: false,
         sources: vec![reference.clone()],
         draw_order,
     })
@@ -506,6 +514,9 @@ mod tests {
                 color_unresolved: false,
                 lineweight: DEFAULT_LINEWEIGHT_MM,
                 lineweight_unresolved: false,
+                linetype: cad_db::LinetypePattern::continuous(),
+                linetype_unresolved: false,
+                linetype_scale: 1.0,
                 primitive,
             }],
             completeness: Completeness::Complete,

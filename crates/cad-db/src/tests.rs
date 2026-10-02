@@ -332,6 +332,7 @@ fn render_attributes_round_trip_through_the_database() {
             transparency: EntityTransparency::Explicit(0.5),
             color: EntityColor::Explicit([10, 20, 30]),
             lineweight: EntityLineWeight::Explicit(0.35),
+            linetype: EntityLineType::default(),
             geometry_source: GeometrySource::Analytic,
         },
     )
@@ -375,6 +376,7 @@ fn byblock_color_and_lineweight_stay_symbolic() {
             transparency: EntityTransparency::ByBlock,
             color: EntityColor::ByBlock,
             lineweight: EntityLineWeight::ByBlock,
+            linetype: EntityLineType::default(),
             geometry_source: GeometrySource::Analytic,
         },
     )

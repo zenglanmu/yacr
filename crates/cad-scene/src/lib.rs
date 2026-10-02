@@ -10,6 +10,10 @@ use cad_domain::*;
 use cad_representation::{DisplayPrimitive, DisplayRepresentation};
 use std::collections::BTreeMap;
 
+/// Re-exported so a host (and the renderer's tests) can construct a batch's
+/// linetype without depending on `cad-db` directly.
+pub use cad_db::LinetypePattern;
+
 pub mod annotations;
 pub mod highlight;
 

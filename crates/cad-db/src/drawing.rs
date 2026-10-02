@@ -6,7 +6,7 @@ use cad_domain::*;
 
 use crate::bounds::{BoundsAccumulator, MAX_INSTANCE_DEPTH};
 use crate::entity::{DbEntity, EntityRenderAttributes};
-use crate::tables::{BlockDefinition, Layer, Layout, Style};
+use crate::tables::{BlockDefinition, Layer, Layout, LineType, Style};
 
 /// The authoritative, read-only-after-import drawing database.
 #[derive(Debug, Clone)]
@@ -18,6 +18,12 @@ pub struct DrawingDatabase {
     pub(crate) blocks: BTreeMap<BlockId, BlockDefinition>,
     pub(crate) layouts: BTreeMap<LayoutId, Layout>,
     pub(crate) styles: BTreeMap<StyleId, Style>,
+    /// Named linetype table entries (spec §3.2). Empty for hand-built
+    /// databases; the importer fills it from the source drawing.
+    pub(crate) linetypes: BTreeMap<LinetypeId, LineType>,
+    /// Drawing-global linetype scale (`$LTSCALE`). `1.0` is the DWG default and
+    /// the value used when a database was not built by the importer.
+    pub(crate) linetype_scale: f64,
     /// Per-entity display attributes that the importer resolved from the source
     /// (transparency, geometry source). Absent entries are fully opaque
     /// analytic geometry, so older/hand-built databases stay valid.
@@ -98,6 +104,21 @@ impl DrawingDatabase {
 
     pub fn style(&self, id: StyleId) -> Option<&Style> {
         self.styles.get(&id)
+    }
+
+    /// Named linetype table entries.
+    pub fn linetypes(&self) -> impl Iterator<Item = &LineType> {
+        self.linetypes.values()
+    }
+
+    /// A linetype table entry by identity.
+    pub fn linetype(&self, id: LinetypeId) -> Option<&LineType> {
+        self.linetypes.get(&id)
+    }
+
+    /// Drawing-global linetype scale (`$LTSCALE`). Defaults to `1.0`.
+    pub fn linetype_scale(&self) -> f64 {
+        self.linetype_scale
     }
 
     /// Entities in model space, in draw order.

@@ -25,6 +25,11 @@ impl<'a> ImporterBuilder<'a> {
             layer_transparency: HashMap::new(),
             layer_colors: HashMap::new(),
             layer_lineweights: HashMap::new(),
+            layer_linetypes: HashMap::new(),
+            linetype_patterns: HashMap::new(),
+            linetype_ids: HashMap::new(),
+            linetype_names_by_handle: HashMap::new(),
+            complex_linetypes: BTreeSet::new(),
             style_ids: HashMap::new(),
             style_fonts: HashMap::new(),
             block_ids: HashMap::new(),
@@ -46,6 +51,7 @@ impl<'a> ImporterBuilder<'a> {
 
     pub(crate) fn run(mut self) -> CadResult<ImportedDrawing> {
         self.read_layers()?;
+        self.read_linetypes()?;
         self.read_styles()?;
         self.read_layouts()?;
         self.read_blocks()?;
@@ -157,11 +163,49 @@ impl<'a> ImporterBuilder<'a> {
             if let Some(mm) = lineweight_mm(layer.line_weight) {
                 self.layer_lineweights.insert(id, mm);
             }
+            self.layer_linetypes.insert(id, layer.line_type.clone());
             let visible = !layer.flags.off && !layer.flags.frozen;
             self.builder.insert_layer(Layer {
                 id,
                 name: layer.name.clone(),
                 visible,
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Read the drawing's linetype table into the database and a name -> pattern
+    /// lookup. Handles are recorded so a named linetype is preserved even when
+    /// it is not the layer's current one.
+    pub(crate) fn read_linetypes(&mut self) -> CadResult<()> {
+        // The global linetype scale scales every pattern; a corrupt value must
+        // not disable dashes, so it falls back to the DWG default of 1.0.
+        let scale = self.acad.header.linetype_scale;
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        let _ = self.builder.set_linetype_scale(scale);
+
+        for (index, linetype) in self.acad.line_types.iter().enumerate() {
+            let id = LinetypeId(index as u128);
+            let key = linetype.name.trim().to_ascii_lowercase();
+            let (pattern, complex) = linetype_pattern(linetype);
+            if complex {
+                self.complex_linetypes.insert(key.clone());
+            }
+            self.linetype_ids.insert(key.clone(), id);
+            // Continuous has an empty pattern by construction; store it too so
+            // a table lookup can tell "known solid" from "unknown name".
+            self.linetype_patterns.insert(key, pattern.clone());
+            self.linetype_names_by_handle
+                .insert(linetype.handle.value(), linetype.name.clone());
+            self.builder.insert_linetype(DbLineType {
+                id,
+                name: linetype.name.clone(),
+                pattern,
+                complex,
             })?;
         }
         Ok(())
