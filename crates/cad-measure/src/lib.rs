@@ -29,6 +29,12 @@ use cad_db::{MeasurementAlgorithm, MeasurementRecord};
 use cad_domain::*;
 use cad_geometry::measure_polygon_area;
 
+pub mod snap;
+pub use snap::{
+    best_candidate, collect_candidates, SnapCandidate, SnapKind, SnapProvenance, SnapTarget,
+    SnappedMeasurement, MAX_INTERSECTION_TARGETS,
+};
+
 /// The space a measurement is evaluated in.
 ///
 /// The variant chosen must agree with the algorithm's dimensionality, and every
@@ -147,22 +153,6 @@ impl MeasurementRequest {
             self.tapped.iter().map(|t| t.point).collect()
         }
     }
-}
-
-pub enum SnapKind {
-    Endpoint,
-    Midpoint,
-    Center,
-    LocalIntersection,
-}
-
-pub struct SnapCandidate {
-    pub kind: SnapKind,
-    pub point: Point3,
-    /// Space the candidate's geometry lives in, used for space filtering.
-    pub space: SpaceId,
-    pub source: SelectionRef,
-    pub logical_pixel_distance: f64,
 }
 
 #[derive(Default)]
@@ -349,16 +339,84 @@ impl MeasurementEngine {
                 best = Some((
                     d,
                     SnapCandidate {
-                        kind: clone_kind(&c.kind),
+                        kind: c.kind,
                         point: c.point,
                         space: c.space.clone(),
                         source: c.source.clone(),
+                        secondary: c.secondary.clone(),
+                        precision: c.precision.clone(),
                         logical_pixel_distance: d / world_per_px,
                     },
                 ));
             }
         }
         best.map(|(_, c)| c)
+    }
+
+    /// Compute snap candidates from a caller-supplied **local** target set.
+    ///
+    /// This is the real snapping entry: the database + spatial index decide
+    /// which entities are near the cursor, and this method resolves their snap
+    /// points (endpoint, midpoint, center, quadrant, perpendicular and local
+    /// intersection) with a logical-pixel tolerance converted to world units.
+    /// Input is rejected for a non-finite/degenerate ray or a non-positive
+    /// tolerance; geometry behind the pick-ray origin is never returned.
+    pub fn snap_targets(
+        &self,
+        targets: &[SnapTarget],
+        ray: &Ray3,
+        plane: Option<&WorkPlane>,
+        world_per_px: f64,
+        space_filter: Option<SpaceId>,
+    ) -> CadResult<Vec<SnapCandidate>> {
+        snap::collect_candidates(
+            targets,
+            ray,
+            plane,
+            world_per_px,
+            space_filter.as_ref(),
+            &self.tolerance,
+        )
+    }
+
+    /// Best local snap candidate by logical pixel distance.
+    pub fn snap_best(
+        &self,
+        targets: &[SnapTarget],
+        ray: &Ray3,
+        plane: Option<&WorkPlane>,
+        world_per_px: f64,
+        space_filter: Option<SpaceId>,
+    ) -> CadResult<Option<SnapCandidate>> {
+        snap::best_candidate(
+            targets,
+            ray,
+            plane,
+            world_per_px,
+            space_filter.as_ref(),
+            &self.tolerance,
+        )
+    }
+
+    /// Measure and attach the snap provenance of the input points (spec §3.3).
+    ///
+    /// The provenance must correspond one-to-one with the recorded inputs;
+    /// a mismatched count is an explicit error rather than a silently dropped
+    /// source.
+    pub fn measure_snapped(
+        &self,
+        request: &MeasurementRequest,
+        snaps: Vec<SnapProvenance>,
+    ) -> CadResult<SnappedMeasurement> {
+        let record = self.measure(request)?;
+        if snaps.len() != record.inputs.len() {
+            return Err(CadError::InvalidInput(format!(
+                "snap provenance has {} entries for {} measurement inputs",
+                snaps.len(),
+                record.inputs.len()
+            )));
+        }
+        Ok(SnappedMeasurement { record, snaps })
     }
 
     /// Contract entry: snapping needs candidate geometry from the database.
@@ -369,17 +427,8 @@ impl MeasurementEngine {
         _ray: Ray3,
     ) -> CadResult<Option<SnapCandidate>> {
         Err(CadError::Unsupported(
-            "snap needs candidate geometry; use snap_to_points with points resolved from the database".into(),
+            "snap needs candidate geometry; use snap_targets with geometry resolved from the database".into(),
         ))
-    }
-}
-
-fn clone_kind(kind: &SnapKind) -> SnapKind {
-    match kind {
-        SnapKind::Endpoint => SnapKind::Endpoint,
-        SnapKind::Midpoint => SnapKind::Midpoint,
-        SnapKind::Center => SnapKind::Center,
-        SnapKind::LocalIntersection => SnapKind::LocalIntersection,
     }
 }
 
@@ -731,6 +780,8 @@ mod tests {
             point,
             space,
             source: selection(),
+            secondary: None,
+            precision: Precision::Analytic,
             logical_pixel_distance: 0.0,
         }
     }

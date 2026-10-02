@@ -55,20 +55,47 @@ reported as an error rather than returning `inf`.
 A skewed plane is refused even though the area business rule would tolerate one:
 skew leaks a scale factor of `|u||v|sinθ` into the projected value.
 
-## Pick-ray snapping
+## Object snapping
 
-`MeasurementEngine::snap_to_points(candidates, ray, world_per_px, space_filter)`
-enforces a **pick-ray** contract:
+`crates/cad-measure/src/snap.rs` implements the object-snap engine (spec §3.3,
+F06). The database + spatial index pick the **local** target set near the cursor
+and pass it as `SnapTarget`s; the engine never scans the drawing.
 
-- `ray.origin` must be finite and `ray.direction` finite and non-zero; the
-  direction is normalised internally;
-- a candidate whose ray parameter `t = dot(p - origin, dir)` is negative is
-  behind the origin and is skipped (`point_ray_distance` returns `None`);
-- `world_per_px` must be finite and positive;
-- when `space_filter` is supplied, only candidates in that space are considered.
+Entry points on `MeasurementEngine`:
 
-The returned `logical_pixel_distance` is the perpendicular distance divided by
-`world_per_px`; the kind and space are carried through.
+- `snap_targets(targets, ray, plane, world_per_px, space_filter)` — all
+  candidates, nearest first;
+- `snap_best(...)` — the single nearest candidate;
+- `measure_snapped(request, snaps)` — a `MeasurementRecord` plus per-input
+  `SnapProvenance` (kind, source entity, sub-element, precision).
+
+Snap kinds: `Endpoint`, `Midpoint`, `Center` (circle/arc/ellipse/bulge arc),
+`Quadrant`, `Perpendicular` (foot on a segment or arc, never past an end) and
+`LocalIntersection` (pairs within the supplied local set; the quadratic pass is
+skipped above `MAX_INTERSECTION_TARGETS = 64`).
+
+Contracts:
+
+- `plane = Some(w)` maps the pick ray to the cursor point `ray ∩ w`; the
+  tolerance is `interaction_logical_pixels × world_per_px` in world units, so a
+  change of zoom or DPI scales the aperture exactly. `plane = None` falls back
+  to the perpendicular distance to the ray.
+- The ray origin is a **pick ray**: a candidate with `t = dot(p − origin, dir)
+  < 0` is behind the origin and is never returned.
+- Non-finite ray/`world_per_px`/tolerance and non-positive
+  `interaction_logical_pixels` are rejected (`InvalidInput`); a poisoned target
+  contributes no candidate.
+- Every candidate carries its `SnapKind`, world point, `SpaceId`,
+  `SelectionRef` (with a `SubElementId::source_key` such as `edge:3`,
+  `quadrant:2`), `Precision` and logical-pixel distance. Intersection
+  candidates also carry the second entity in `secondary`.
+- Curves are resolved analytically (bulge arcs from the bulge, ellipses from
+  their axes, splines from their source knots); the display LOD never enters a
+  snap, so changing `display_pixels` cannot move a snap or a measurement.
+
+`MeasurementEngine::snap` (the old `SelectionRef`-based contract entry) still
+returns `Unsupported`: candidate geometry must be resolved from the database,
+so `snap_targets` is the real entry.
 
 ## Open items
 
@@ -77,6 +104,9 @@ The returned `logical_pixel_distance` is the perpendicular distance divided by
   `Unsupported`; the field exists so the wiring is a single, localised change in
   `check_space_policy`. This is intentional (spec §3.3 forbids guessing a model
   distance) and is tracked under F04.
-- `MeasurementEngine::snap` (the `SelectionRef`-based contract entry) still
-  returns `Unsupported` because candidate geometry must be resolved from the
-  database + spatial index; `snap_to_points` is the real entry.
+- `MeasurementRecord` lives in `cad-db` and has no snap field; provenance is
+  returned beside the record as `SnappedMeasurement` rather than mutating the
+  database type.
+- Snaps are analytic and do not yet thread through the app command path
+  (`evaluate_measurement` still takes raw points); the engine and provenance are
+  ready for that wiring.
