@@ -261,3 +261,44 @@ python3 scripts/check-i18n.py                                                   
 导入后出现 `objects`/`document` 行；点击画布后 `renderer_state_report()` 的选择面板计数
 变化；启动测量工具后移动指针，`overlay_revision` 随预览变化递增而底图不重解析；
 `annotation.empty` 在两种语言下都解析成功。
+
+## 8. 异步可取消打开宿主接线（F01，源码接线；浏览器验收待补）
+
+### 线程能力判定（诚实结论）
+
+`cad-app::tasks::ImportManager` 用 `std::thread`；`wasm32-unknown-unknown` 无线程，
+`thread::Builder::spawn` 失败会使 `ImportManager::start` 的 `.expect(...)` panic。
+因此 **`HostController::begin_async_open` 在浏览器中不可调用**，`apps/app-web` 不调用
+它。`browser/async_open.rs::worker_available()` 是唯一能力门，浏览器返回 `false`。
+
+### 已接线（源码）
+
+- 新 wasm 导出：`async_open_poll_json()`、`async_open_worker_available()`（既有导出未
+  改名/signature 未变）。
+- `open_document_bytes*`/`OPEN` → `start_or_apply`：有线程宿主走 worker 并至多发布一次
+  （manager `TaskStamp` 门）经 `install_opened` 安装；浏览器走同步导入，把**真实**
+  终态推入同一 `set_import_state` 面板（无伪造进度）。
+- 取消：`cancel-open-requested` → `CommandId::CancelLoading` → `cancel_async_open`；
+  单一漏斗 `push_panel_state` 每次重推面板，取消保留当前文档/未保存批注。
+- JS：`web/host/renderer.js` 心跳调用 `async_open_poll_json`，running 时收紧到 250ms；
+  `web/host/async-open.js` 纯解析；`window.yacrAsyncOpen` 暴露真实状态。
+
+### 已执行 / 编译门
+
+| 项 | 结果 |
+|---|---|
+| `cargo check -p app-web --lib --target wasm32-unknown-unknown --locked` | 通过 |
+| `cargo check -p app-web --tests --target wasm32-unknown-unknown --locked` | 通过（含 `async_open` 纯 JSON 编码测试，**只编译不执行**） |
+| `node --test scripts/test-web-host.mjs` | 通过，新增 3 项（解析防御性、导出调用、心跳收紧），共 12 项 |
+| `cargo fmt --all` | 通过 |
+
+`browser::async_open` 仅在 `target_arch = "wasm32"` 编译，且本机缺原生
+`cad-ui-slint` 构建依赖，故其 Rust 单元测试本机无法执行；JS 侧由 Node 真实执行。
+
+### NOT RUN（明确未验证，勿当作通过）
+
+- **浏览器/GPU 运行**：本轮未重跑 `scripts/build-web.sh`、未启动 Playwright、未截图。
+  因此「面板在真实浏览器可见/可取消」未被运行证据确认，仅有源码接线与编译门。
+- **running/cancellable 面板**：浏览器平台无法提供（无线程），未、也不能伪造。
+- **Android 宿主接线**：本轮范围外。
+- 端到端真实 DWG 异步导入（worker 路径）未在浏览器运行，因该路径在浏览器不存在。

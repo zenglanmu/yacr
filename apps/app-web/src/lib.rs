@@ -87,6 +87,32 @@ pub fn open_requires_decision() -> bool {
     open_needs_decision()
 }
 
+/// Poll the asynchronous / cancellable open and push the progress panel.
+///
+/// The JS heartbeat calls this. On a worker-capable host it publishes a current
+/// background result exactly once (the manager's stamp guard discards
+/// superseded/cancelled results) and installs the document through the shared
+/// `install_opened` path; in the browser it re-reads the synchronous fallback's
+/// real terminal snapshot. Returns the stable panel JSON (see
+/// `browser::async_open::snapshot_json`). New export; existing exports are
+/// unchanged.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn async_open_poll_json() -> String {
+    browser::async_open_poll()
+}
+
+/// Whether this host can run the background import worker at all.
+///
+/// `false` in the browser: `cad_app::tasks` uses `std::thread` and
+/// `wasm32-unknown-unknown` has no threads. Exposed so the JS host can state the
+/// limitation honestly instead of implying a live progress bar.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn async_open_worker_available() -> bool {
+    browser::async_open_worker_available()
+}
+
 /// Open a drawing after the JS host supplied an explicit unsaved-work decision.
 ///
 /// `decision` is `save`, `recovery`, `discard` or `cancel`. Returns a status

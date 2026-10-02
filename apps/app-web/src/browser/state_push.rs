@@ -24,6 +24,7 @@ use cad_ui_slint::{
     MeasurementUiState, MessageSource, PropertyPanelState, UiHandle,
 };
 
+use super::async_open as async_open_state;
 use super::messages::current_messages;
 
 /// Layer panel state plus the ordered ids the adapter maps row indices through.
@@ -173,6 +174,14 @@ pub(super) fn push_panel_state(
 ) {
     let messages = current_messages();
     let backend = backend_display(view);
+
+    // Asynchronous open progress panel (F01): derived from the retained
+    // controller snapshot (worker host) or the synchronous fallback terminal.
+    // Pushed here, in the single funnel, so every command/open re-renders it —
+    // including a `CancelLoading` cancel. Uses the shared `Rc` before the
+    // long-lived borrow below shadows it.
+    async_open_state::push_state(controller, handle);
+
     let controller = controller.borrow();
 
     // Transient render overlay: selection highlight + tool previews. Kept in the

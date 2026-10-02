@@ -1,4 +1,6 @@
 // Visibility-aware renderer diagnostics with a bounded polling backoff (B29).
+import { pollAsyncOpen } from "./async-open.js";
+
 export function startStatePolling(
   wasmModule,
   setStateKey,
@@ -58,6 +60,19 @@ export function startStatePolling(
     } catch (error) {
       if (!rendererReady) setStateKey("host.poll_not_ready");
       pollDelay = Math.min(Math.round(pollDelay * 1.5), 2000);
+    }
+    // Asynchronous open (F01): poll, publish and push the Slint progress panel
+    // through one wasm export. Runs after the renderer branch so a running job
+    // tightens the heartbeat instead of being overwritten by the 2s backoff. A
+    // host without the worker reports `running:false` and this is a cheap
+    // no-op that still refreshes an explicit failed/cancelled terminal.
+    try {
+      const asyncState = pollAsyncOpen(wasmModule);
+      if (asyncState && asyncState.running) {
+        pollDelay = 250;
+      }
+    } catch (error) {
+      // A transient wasm borrow error must not stop renderer polling.
     }
     if (!rendererReady && performance.now() - started > 30000) {
       setStateKey("host.renderer_failed", { error: "initialization timeout" });

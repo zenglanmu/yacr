@@ -76,11 +76,44 @@
 - **显式未实现（不冒充）**：`Parsing` 阶段内 acadrust 读取是不可中断的粗窗口
   （只能在其前后取消）；`bytes` 仅在读取阶段已知；指纹（fingerprint）计算尚未
   分段/异步。
-- **核心+UI 已接线，宿主仍未接线**：`cad-app` 的快照与 `cad-ui-slint` 的面板/取消
-  已交付并通过编译门；但 `apps/app-web`、`apps/app-android` **尚未**调用
-  `begin_async_open`/`poll_async_open`/`set_import_state`，也**未**安装「后台打开」
-  按钮。因此用户目前看不到面板，本轮只交付可测试的契约、纯映射与外壳控件。宿主
-  接线见 `docs/ui.md`。
+
+## wasm32 线程限制（精确说明，不冒充）
+
+`cad-app` 的后台 worker 用 `std::thread` + `std::sync::mpsc` + `CancellationToken`。
+`wasm32-unknown-unknown` **没有线程**：std 的 `thread::Builder::spawn` 在该目标上失败，
+`ImportManager::start` 的 `.expect("spawn import worker thread")` 会 **panic**。因此
+`HostController::begin_async_open` 在浏览器中**不可调用**，`apps/app-web` 不调用它。
+
+这不是「尚未接线」，而是本平台**无法运行**该 worker：
+
+- `apps/app-web/src/browser/async_open.rs::worker_available()` 是唯一能力门；
+  浏览器返回 `false`（`!cfg!(target_arch = "wasm32")`）。
+- 有线程的宿主（如 Android/桌面）才走 `begin_async_open` + `poll_async_open` 的
+  真实 worker 路径；`poll_and_apply()` 是同一条心跳，会经 manager 的 `TaskStamp`
+  门**至多发布一次**，并通过既有 `install_opened` 更新文档（单一打开来源，不重复导入）。
+- 浏览器走**同步导入**，但把**真实**终态编码为 `ImportProgressSnapshot` 后经
+  `ImportProgressUiState` / `UiHandle::set_import_state` 推入同一面板：
+  `Opened` 隐藏面板、`Failed`/`Cancelled` 显式可见。**没有任何伪造进度**。
+- running/cancellable 面板只在真的能跑 worker 的宿主可见。在浏览器里放一个「开始导入」
+  的假进度条会在阻塞导入期间看起来活着却永不前进，故不做。
+
+### 宿主接线（本轮，`apps/app-web`）
+
+- 新增 wasm 导出（未改名既有导出）：
+  - `async_open_poll_json() -> String`：调用 `poll_async_open()`（无 worker 时为安全
+    的 `Idle`），发布至多一次、`install_opened`、`set_import_state`，返回稳定的面板
+    JSON（`{worker,running,visible,terminal,phase,done,total,bytes,cancellable,
+    opened_entities,error}`）。
+  - `async_open_worker_available() -> bool`：诚实暴露线程能力。
+- `open_document_bytes*` 与 `OPEN` 命令经 `start_or_apply()`：有 worker 时启动后台
+  任务并返回「正在后台打开…」，由心跳安装文档；无 worker 时同步导入并推真实终态。
+- 取消：外壳 `cancel-open-requested` → 适配器派发 `CommandId::CancelLoading` →
+  `HostController::execute` 拦截转 `cancel_async_open`；单一状态漏斗
+  `state_push::push_panel_state` 每次都会重新推面板，取消后 `cancellable=false` 且
+  当前文档/未保存批注保留（复用既有 `resolve_leave` 决策流）。
+- JS 心跳：`web/host/renderer.js` 每轮调用 `async_open_poll_json`（`async-open.js`
+  的纯解析），running 时把轮询收紧到 250ms；`window.yacrAsyncOpen` 暴露真实状态供
+  诊断/测试。面板文案仍由 Slint 目录渲染。
 
 ## 复现
 
@@ -88,12 +121,16 @@
 export CARGO_TARGET_DIR=/home/zenglanmu/.cache/yacr-async-target
 cargo test -p cad-app --locked               # 后台 worker / 过期丢弃 / 快照投影
 cargo check -p cad-ui-slint --lib --tests --target wasm32-unknown-unknown --locked
+cargo check -p app-web --tests --target wasm32-unknown-unknown --locked  # 宿主接线编译门
+node --test scripts/test-web-host.mjs        # JS 心跳/解析契约
 python3 scripts/check-i18n.py                 # 目录键/占位符/硬编码一致
 ```
 
 `cad-ui-slint` 的原生测试在本机无法构建（宿主缺 fontconfig），其进度映射逻辑保持
 纯函数并由 wasm 目标类型检查覆盖；`cargo check ... --target wasm32-unknown-unknown`
-是该 crate 的编译门。
+是该 crate 的编译门。`app-web` 的 `browser::async_open` 仅在 `target_arch = "wasm32"`
+编译（含其纯 JSON 编码测试），因此本机只能做 wasm **编译检查**，不能原生执行；JS
+侧纯解析/心跳由 `node --test` 真实执行。
 
 合成夹具 `fixtures/dwg/synthetic-four-lines.dwg`（acadrust `DwgWriter` 生成的四条
 LINE）用于端到端契约，**不代表真实兼容性**。

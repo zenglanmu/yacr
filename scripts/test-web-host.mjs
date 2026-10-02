@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createFileHost } from "../apps/app-web/web/host/files.js";
 import { createI18n } from "../apps/app-web/web/host/i18n.js";
+import { parseAsyncPoll, pollAsyncOpen } from "../apps/app-web/web/host/async-open.js";
 import { startStatePolling } from "../apps/app-web/web/host/renderer.js";
 import { isHandoffError } from "../apps/app-web/web/host/runtime.js";
 import {
@@ -298,4 +299,83 @@ test("the recovery-backend button cannot reload unsaved annotations", (t) => {
   dirty = false;
   retry.listeners.click();
   assert.equal(new URL(destinations[0]).searchParams.get("backend"), "webgl2");
+});
+
+test("async-open poll parsing is defensive and never invents a terminal", () => {
+  // Valid payloads round-trip; the terminal word is validated.
+  const parsed = parseAsyncPoll(
+    '{"worker":false,"running":true,"visible":true,"terminal":"none",' +
+      '"phase":null,"done":0,"total":null,"bytes":null,"cancellable":true}',
+  );
+  assert.equal(parsed.running, true);
+  assert.equal(parsed.terminal, "none");
+  assert.equal(parsed.total, null);
+  // Missing/invalid input is null, not a fabricated state.
+  assert.equal(parseAsyncPoll(undefined), null);
+  assert.equal(parseAsyncPoll(""), null);
+  assert.equal(parseAsyncPoll("not json"), null);
+  assert.equal(parseAsyncPoll("[1,2]"), null);
+  assert.equal(parseAsyncPoll('{"terminal":"surprise"}'), null);
+  assert.equal(parseAsyncPoll('{"terminal":"failed"}').terminal, "failed");
+});
+
+test("async-open polling calls the wasm export and records the real state", (t) => {
+  replaceGlobal(t, "window", {});
+  const calls = [];
+  const running = {
+    worker: false,
+    running: true,
+    visible: true,
+    terminal: "none",
+    phase: null,
+    done: 0,
+    total: null,
+    bytes: null,
+    cancellable: true,
+  };
+  const module = {
+    async_open_poll_json: () => {
+      calls.push("poll");
+      return JSON.stringify(running);
+    },
+  };
+  const state = pollAsyncOpen(module);
+  assert.equal(calls.length, 1);
+  assert.equal(state.running, true);
+  // The heartbeat mirrors the result for diagnostics/tests.
+  assert.equal(window.yacrAsyncOpen.running, true);
+  assert.equal(window.yacrAsyncOpen.terminal, "none");
+  // A build without the export is a clean no-op, never a throw.
+  assert.equal(pollAsyncOpen({}), null);
+});
+
+test("renderer heartbeat drives async-open polling and tightens while running", (t) => {
+  const document = documentStub();
+  const scheduled = [];
+  let asyncJson = '{"terminal":"none","running":true}';
+  replaceGlobal(t, "document", document);
+  replaceGlobal(t, "window", {});
+  replaceGlobal(t, "setTimeout", (callback, delay) => {
+    scheduled.push({ callback, delay });
+    return scheduled.length;
+  });
+  replaceGlobal(t, "clearTimeout", () => {});
+  startStatePolling(
+    {
+      // Keep the renderer un-ready so the async tightening is observable.
+      renderer_state_report: () => "adapter=None",
+      async_open_poll_json: () => asyncJson,
+    },
+    () => {},
+  );
+  // First tick polls the async export and pins the delay to the running cadence.
+  scheduled.shift().callback();
+  assert.equal(window.yacrAsyncOpen.running, true);
+  assert.equal(scheduled.at(-1).delay, 250);
+  // Once the job reaches a terminal, the heartbeat returns to the backoff.
+  asyncJson = '{"terminal":"failed","running":false}';
+  scheduled.shift().callback();
+  assert.equal(window.yacrAsyncOpen.terminal, "failed");
+  // Back to the renderer backoff cadence (250 * 1.5) rather than the running pin.
+  assert.equal(scheduled.at(-1).delay, 375);
 });
