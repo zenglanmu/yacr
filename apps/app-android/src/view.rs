@@ -57,11 +57,8 @@ impl AndroidViewInput {
         let outcome = self.controller.borrow_mut().execute(command);
         sync_view_camera(&self.view, &self.controller, self.viewport);
         if let Some(handle) = self.handle.borrow().as_ref() {
-            let can_undo = {
-                let controller = self.controller.borrow();
-                controller.application.can_undo(&controller.document_id)
-            };
-            let _ = handle.set_can_undo(can_undo);
+            // One snapshot refreshes undo/redo and every panel (audit U11).
+            push_panel_state(&self.controller, handle, &self.view);
         }
         match outcome {
             Ok(_) => {}
@@ -69,20 +66,107 @@ impl AndroidViewInput {
             Err(e) => self.status(format!("命令失败：{e}")),
         }
     }
+
+    /// Whether a capture tool (measure/annotate) owns canvas taps right now.
+    ///
+    /// With a capture tool active the Slint `canvas-pick` path (through the
+    /// installed `AndroidCanvasPickMapper`) feeds the tool; the host must not
+    /// also run a selection pick for the same tap.
+    fn capture_tool_active(&self) -> bool {
+        let controller = self.controller.borrow();
+        matches!(
+            controller.session.tool,
+            cad_app::ToolState::Measuring(_) | cad_app::ToolState::Annotating(_)
+        )
+    }
+
+    /// A real tap with no capture tool: pick the closest entity and select it.
+    ///
+    /// A miss clears the selection and says so explicitly; it never keeps or
+    /// invents a hit (F05). The world point comes from the authoritative
+    /// viewport via `pick_at_screen`, using the same canvas size the renderer
+    /// uses.
+    fn pick_selection(&self, logical: [f64; 2]) {
+        let (camera, logical_size, document) = {
+            let controller = self.controller.borrow();
+            let viewport = match controller
+                .application
+                .workspace
+                .viewports
+                .get(&self.viewport)
+            {
+                Some(viewport) => viewport,
+                None => {
+                    self.status("选择失败：视口不存在");
+                    return;
+                }
+            };
+            (
+                viewport.camera,
+                viewport.logical_size,
+                controller.document_id,
+            )
+        };
+        // Bind the borrow to its own statement: a `match` scrutinee temporary
+        // would stay alive across `self.send` below and panic on the mutable
+        // re-borrow inside it.
+        let drawing = self.controller.borrow().drawing();
+        let Some(drawing) = drawing else {
+            self.status("选择失败：未打开文档");
+            return;
+        };
+        let report = cad_app::picking::pick_at_screen(
+            drawing.as_ref(),
+            document,
+            &camera,
+            logical,
+            logical_size,
+            &TolerancePolicy::default(),
+            cad_app::BackFacePolicy::Cull,
+        );
+        match report {
+            Ok(report) => match report.hit {
+                Some(hit) => {
+                    let identity = cad_app::SelectionSet::identity_label(&hit.source);
+                    self.send(
+                        CommandId::Select,
+                        CommandPayload::Selection(vec![hit.source]),
+                    );
+                    self.status(format!("已选择 {identity}"));
+                }
+                None => {
+                    // Clear the selection explicitly on empty space; never a
+                    // stale or fabricated hit.
+                    self.send(CommandId::Select, CommandPayload::Selection(Vec::new()));
+                    self.status("未命中任何对象（已清除选择）");
+                }
+            },
+            Err(e) => self.status(format!("选择拾取失败：{e}")),
+        }
+    }
 }
 
 impl ViewInput for AndroidViewInput {
     fn pointer(&self, kind: i32, button: i32, x: f64, y: f64) {
+        let logical = [x, y];
         match kind {
             // down
             0 => {
                 if button == 1 || button == 0 {
                     self.dragging.set(true);
-                    self.last.set([x, y]);
+                    self.last.set(logical);
+                    self.policy.borrow_mut().handle(PointerUpdate {
+                        logical_position: logical,
+                        contacts: 1,
+                    });
                 }
             }
             // move
             2 => {
+                self.policy.borrow_mut().handle(PointerUpdate {
+                    logical_position: logical,
+                    contacts: 1,
+                });
                 if self.dragging.get() {
                     let last = self.last.get();
                     let world_per_px = self
@@ -103,12 +187,32 @@ impl ViewInput for AndroidViewInput {
                     };
                     self.send(CommandId::Pan, CommandPayload::Points(vec![delta]));
                 }
-                self.last.set([x, y]);
+                self.last.set(logical);
             }
             // up / cancel
             1 | 3 => {
                 self.dragging.set(false);
-                self.last.set([x, y]);
+                if kind == 3 {
+                    // OS stole the gesture: exit the policy to idle, cancel any
+                    // in-progress tool, never a pick.
+                    self.policy.borrow_mut().pointer_cancelled();
+                } else {
+                    // Read the phase before the policy consumes the up: a
+                    // `Pending` contact released in place is a tap; a
+                    // `Dragging` one is a pan and must not select.
+                    let was_tap =
+                        matches!(self.policy.borrow().phase(), PointerPhase::Pending { .. });
+                    let outcome = self.policy.borrow_mut().handle(PointerUpdate {
+                        logical_position: logical,
+                        contacts: 0,
+                    });
+                    if was_tap && !self.capture_tool_active() {
+                        if let InputOutcome::Commit { logical: tapped } = outcome {
+                            self.pick_selection(tapped);
+                        }
+                    }
+                }
+                self.last.set(logical);
             }
             _ => {}
         }

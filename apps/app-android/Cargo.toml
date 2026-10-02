@@ -16,6 +16,9 @@ cad-platform.workspace = true
 cad-import-acadrust.workspace = true
 cad-db.workspace = true
 cad-domain.workspace = true
+# The layout panel's `active` space is a `cad_representation::SpaceSelection`;
+# the host must name that type when pushing `LayoutPanelState`.
+cad-representation.workspace = true
 log.workspace = true
 
 # The android-activity stack is Android-only; keeping it target-scoped lets the

@@ -299,6 +299,7 @@ dependencies = [
  "cad-domain",
  "cad-import-acadrust",
  "cad-platform",
+ "cad-representation",
  "cad-ui-slint",
  "jni 0.21.1",
  "log",

@@ -14,6 +14,16 @@ impl HostSink {
         sync_view_camera(&self.view, &self.controller, viewport_id);
     }
 
+    /// Push every derived panel model into the shell (docs/ui.md §3).
+    ///
+    /// One connector for all panels, so opening a drawing, executing a command
+    /// and a canvas tap all refresh the same set of models from one snapshot.
+    fn push_state(&self) {
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            push_panel_state(&self.controller, handle, &self.view);
+        }
+    }
+
     /// Open a DWG from the candidate paths. Real SAF integration is not part of
     /// this build; the search is explicitly reported so it is not mistaken for
     /// a file picker (spec §9.1).
@@ -43,6 +53,7 @@ impl HostSink {
                             if let Some(view) = self.view.borrow().as_ref() {
                                 view.request_redraw();
                             }
+                            self.push_state();
                             self.status(format!("已打开 {path}: {}", opened.completeness_label));
                             #[cfg(target_os = "android")]
                             self.load_fonts_for_current_document();
@@ -196,13 +207,9 @@ impl UiCommandSink for HostSink {
         match outcome {
             Ok(outcome) => {
                 self.sync_camera();
-                let can_undo = {
-                    let controller = self.controller.borrow();
-                    controller.application.can_undo(&controller.document_id)
-                };
-                if let Some(handle) = self.handle.borrow().as_ref() {
-                    let _ = handle.set_can_undo(can_undo);
-                }
+                // Undo/redo and every panel are refreshed from one snapshot;
+                // `set_can_undo` alone would leave redo stale (audit U11).
+                self.push_state();
                 if let Some(diag) = outcome.diagnostics.first() {
                     self.status(diag.message.clone());
                 }

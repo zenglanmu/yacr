@@ -1,5 +1,10 @@
 // Native multi-touch only inside the CAD rectangle. Slint keeps control input.
-// Finger-count changes rebase the gesture: no jump on pinch -> one-finger drag.
+//
+// Finger-count changes re-establish the gesture baseline. A count change never
+// emits a navigation delta of its own: the first sample after the change becomes
+// the new baseline, and only the move *after* that is compared against it. This
+// is what stops a second finger landing (whose midpoint is far from the previous
+// one-finger sample) from jumping the pan/pinch by the centroid shift.
 export function sampleTouches(touches) {
   if (!touches.length) return null;
   const points = Array.from(touches).slice(0, 2);
@@ -18,10 +23,15 @@ export function sampleTouches(touches) {
 export function installTouchNavigation(wasm) {
   const canvas = document.getElementById("canvas");
   let active = false;
+  // Last baseline sample and the finger count it was taken at. The pair is
+  // updated together so a count change can never be compared to a sample of a
+  // different count.
   let previous = null;
+  let previousCount = 0;
   let origin = null;
   let moved = false;
   const cadPointers = new Set();
+
   function inside(x, y) {
     try {
       const [cx, cy, width, height] = wasm.shell_geometry();
@@ -36,10 +46,19 @@ export function installTouchNavigation(wasm) {
       return false;
     }
   }
+
+  // Re-establish the baseline from a fresh touch sample. Emits nothing: the
+  // caller decides whether the change may navigate.
+  const rebase = (touches) => {
+    previous = sampleTouches(touches);
+    previousCount = previous ? previous.count : 0;
+  };
+
   const consume = (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
   };
+
   // winit uses PointerEvents on some browsers. Stop only CAD touch events so
   // it cannot interpret the same pinch as two independent pan/selection inputs.
   for (const type of [
@@ -61,6 +80,7 @@ export function installTouchNavigation(wasm) {
       { capture: true, passive: false },
     );
   }
+
   canvas.addEventListener(
     "touchstart",
     (event) => {
@@ -75,11 +95,16 @@ export function installTouchNavigation(wasm) {
       }
       if (event.touches.length > 1) moved = true;
       active = true;
-      previous = sampleTouches(event.touches);
+      // Only a finger-count change re-establishes the baseline. A touchstart
+      // that does not change the (capped) count — a third finger, or a retouch
+      // of an existing one — must not move the baseline and jump the gesture.
+      const next = sampleTouches(event.touches);
+      if (!previous || !next || next.count !== previousCount) rebase(event.touches);
       consume(event);
     },
     { capture: true, passive: false },
   );
+
   canvas.addEventListener(
     "touchmove",
     (event) => {
@@ -92,7 +117,11 @@ export function installTouchNavigation(wasm) {
         Math.hypot(next.x - origin.x, next.y - origin.y) > 8
       )
         moved = true;
-      if (moved && next && previous && next.count === previous.count) {
+      // Navigate only between samples of the same finger count. When the count
+      // differs (a finger landed off-canvas, or a start/end was not delivered to
+      // this target), consume the sample as the new baseline without a delta so
+      // the centroid shift caused by the count change is never navigation.
+      if (moved && next && previous && next.count === previousCount) {
         const zoom =
           previous.distance > 0 && next.distance > 0
             ? next.distance / previous.distance
@@ -108,9 +137,11 @@ export function installTouchNavigation(wasm) {
         }
       }
       previous = next;
+      previousCount = next ? next.count : 0;
     },
     { capture: true, passive: false },
   );
+
   for (const type of ["touchend", "touchcancel"]) {
     canvas.addEventListener(
       type,
@@ -127,8 +158,13 @@ export function installTouchNavigation(wasm) {
           const [cx, cy] = wasm.shell_geometry();
           wasm.touch_pick(origin.x - rect.left - cx, origin.y - rect.top - cy);
         }
-        previous = type === "touchcancel" ? null : sampleTouches(event.touches);
-        active = !!previous;
+        if (type === "touchcancel") {
+          previous = null;
+          previousCount = 0;
+        } else {
+          rebase(event.touches);
+        }
+        active = previous !== null;
       },
       { capture: true, passive: false },
     );
@@ -136,5 +172,6 @@ export function installTouchNavigation(wasm) {
   return () => {
     active = false;
     previous = null;
+    previousCount = 0;
   };
 }

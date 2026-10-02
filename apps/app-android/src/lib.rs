@@ -10,6 +10,8 @@ use cad_app::host_files::{
     export_annotations_atomically, load_recovery, resolve_leave, UnsavedDecisionSource,
 };
 
+use cad_app::input::{InputOutcome, InputPolicy, PointerPhase, PointerUpdate};
+
 use cad_app::{Command, CommandId, CommandPayload, UnsavedDecision};
 
 use cad_domain::*;
@@ -80,6 +82,10 @@ struct AndroidViewInput {
     viewport: ViewportId,
     last: Cell<[f64; 2]>,
     dragging: Cell<bool>,
+    /// Shared pointer/gesture state machine (audit U05). Used to tell a tap from
+    /// a drag so a one-finger drag pans and only a real tap turns into a
+    /// selection pick.
+    policy: RefCell<InputPolicy>,
 }
 
 /// Commands from the UI are executed through the shared application layer.
@@ -169,9 +175,19 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     }
     let view = cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming)?;
     sync_view_camera(&shared_view, &controller, viewport_id);
+    // Establish the surface→viewport sizing seam (U07). The configured logical
+    // size is the initial surface; a later rotation/resize calls the same helper
+    // once the Activity forwards the size (see docs/validation-android.md §8).
+    apply_surface_size(&controller, DEMO_LOGICAL_SIZE, 1.0)?;
+    // Install the logical-pixel → world mapper so a canvas tap with a measure or
+    // annotation tool produces a real point instead of "取点未接线" (audit U04).
+    adapter.set_canvas_pick_mapper(Rc::new(AndroidCanvasPickMapper::new(
+        controller.clone(),
+        shared_handle.clone(),
+    )));
     // Wire real canvas interaction: drag pans and wheel/pinch zooms through the
-    // same `Pan`/`Zoom` commands the web host uses. Picking stays explicitly
-    // unwired until canvas metrics are plumbed (see docs/validation-android.md).
+    // same `Pan`/`Zoom` commands the web host uses. A tap with no capture tool
+    // active is routed to selection (`pick_at_screen`), not to a fake hit.
     adapter.set_view_input(Rc::new(AndroidViewInput {
         controller: controller.clone(),
         handle: shared_handle.clone(),
@@ -179,8 +195,12 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         viewport: viewport_id,
         last: Cell::new([0.0, 0.0]),
         dragging: Cell::new(false),
+        policy: RefCell::new(InputPolicy::new()),
     }));
     *shared_view.borrow_mut() = Some(view);
+    // Populate every panel from real application state now that both the shell
+    // and the render bridge exist (docs/ui.md §3, docs/panels.md §3.2).
+    push_panel_state(&controller, &handle, &shared_view);
     adapter.run()
 }
 
@@ -205,9 +225,11 @@ pub fn android_main(app: slint::android::AndroidApp) {
 
 mod host;
 mod recovery;
+mod state_push;
 mod view;
 
 pub(crate) use recovery::*;
+pub(crate) use state_push::*;
 pub(crate) use view::*;
 
 #[cfg(test)]
