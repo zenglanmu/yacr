@@ -173,7 +173,8 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
             let _ = handle.set_status(READY_STATUS);
         }
     }
-    let view = cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming)?;
+    let view =
+        cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming.clone())?;
     sync_view_camera(&shared_view, &controller, viewport_id);
     // Establish the surface→viewport sizing seam (U07). The configured logical
     // size is the initial surface; a later rotation/resize calls the same helper
@@ -205,6 +206,14 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     // that command, so it is deliberately not installed (see `docs/ui.md` §3.2
     // and the `android_layout_selection_routes_through_switch_space` test).
     *shared_view.borrow_mut() = Some(view);
+    // Register the live objects for the async poll timer and the Activity's
+    // surface-size entry point (`set_surface_size`). Both run on this UI thread.
+    install_runtime(
+        controller.clone(),
+        shared_handle.clone(),
+        shared_view.clone(),
+        incoming.clone(),
+    );
     // Populate every panel from real application state now that both the shell
     // and the render bridge exist (docs/ui.md §3, docs/panels.md §3.2).
     push_panel_state(&controller, &handle, &shared_view);
@@ -231,10 +240,19 @@ pub fn android_main(app: slint::android::AndroidApp) {
 }
 
 mod host;
+mod poll;
 mod recovery;
 mod state_push;
 mod view;
 
+// The Activity calls `set_surface_size` from outside the crate, so it is public
+// at the crate root; the rest of the host wiring stays crate-internal.
+pub use poll::set_surface_size;
+pub(crate) use poll::{ensure_polling, install_runtime, worker_available};
+// The poll-processing items are Android-only (their tests compile for the
+// Android target); `set_surface_size`/`apply_surface_resize` are target-agnostic.
+#[cfg(target_os = "android")]
+pub(crate) use poll::{apply_surface_resize, poll_import_once, ImportPollOutcome};
 pub(crate) use recovery::*;
 pub(crate) use state_push::*;
 pub(crate) use view::*;

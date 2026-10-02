@@ -76,11 +76,38 @@
 - **显式未实现（不冒充）**：`Parsing` 阶段内 acadrust 读取是不可中断的粗窗口
   （只能在其前后取消）；`bytes` 仅在读取阶段已知；指纹（fingerprint）计算尚未
   分段/异步。
-- **核心+UI 已接线，宿主仍未接线**：`cad-app` 的快照与 `cad-ui-slint` 的面板/取消
-  已交付并通过编译门；但 `apps/app-web`、`apps/app-android` **尚未**调用
-  `begin_async_open`/`poll_async_open`/`set_import_state`，也**未**安装「后台打开」
-  按钮。因此用户目前看不到面板，本轮只交付可测试的契约、纯映射与外壳控件。宿主
-  接线见 `docs/ui.md`。
+- **宿主接线状态**：`apps/app-android` 已接入（本 workstream）；`apps/app-web`
+  **仍未**调用 `begin_async_open`/`poll_async_open`/`set_import_state`。Android 的
+  接线见下节。
+
+## Android 宿主接线（已实现，未设备复测）
+
+`apps/app-android` 在 `OpenDrawing` / `open_drawing` 上走真实异步路径：
+
+- `apps/app-android/src/host.rs`：先 `resolve_open_leave` 完成未保存决策与宿主写入，
+  再 `HostController::begin_async_open(bytes, path)`；文档在 `poll_async_open` 发布
+  前**不被触碰**。
+- `apps/app-android/src/poll.rs`：`poll_import_once` 在每次轮询调用
+  `HostController::poll_async_open`，把控制器快照经共享漏斗
+  `state_push::push_import_state` → `UiHandle::set_import_state` 推入外壳；发布由核心的
+  `TaskStamp` 守卫完成，宿主只镜像结果（`apply_opened`），**不重复导入**。第二次轮询
+  为 `Idle`（已发布一次）。
+- **轮询定时器**：`ensure_polling` 在 UI 线程用 `slint::Timer`（100 ms，`Repeated`）
+  驱动 `poll_tick`；终态即 `stop_polling`，不空转。Android 目标有 `std::thread`，因此
+  这是真实 worker；无 worker 的目标（`wasm32`）保留同步 `open_bytes` 回退
+  （`worker_available()` 判断，回退不重复执行 leave 流程、不双重导入）。
+- **取消**：外壳 `cancel-open-requested` → `CancelLoading` → 适配器命令路径 →
+  `HostSink::send` → `HostController::execute` → `cancel_async_open`；只翻转
+  `CancellationToken`，**从不**丢弃当前文档或未保存批注。面板的 `cancellable` 立即变为
+  `false`，终态为 `Cancelled`。
+- **同步回退**：`open_through_leave_flow` 保留，仅在无 worker 目标时使用；`begin_async_open`
+  失败（当前核心在 spawn 失败时 panic，无 `Result`）不在可恢复范围内，故回退覆盖的是
+  “无后台 worker”的编译目标，而不是伪造一个失败分支。
+
+**诚实边界**：以上仅在宿主本机做 Android 目标类型检查（
+`cargo check --target aarch64-linux-android -p app-android --tests`）与纯逻辑单测，
+**未在模拟器/真机上打开 DWG 或观察进度面板**（审计 U07 的 surface 尺寸/旋转亦未设备
+复测）。模拟器上的 F01 仍为 **NOT RUN**（`docs/validation-android.md` §6）。
 
 ## 复现
 
@@ -89,6 +116,8 @@ export CARGO_TARGET_DIR=/home/zenglanmu/.cache/yacr-async-target
 cargo test -p cad-app --locked               # 后台 worker / 过期丢弃 / 快照投影
 cargo check -p cad-ui-slint --lib --tests --target wasm32-unknown-unknown --locked
 python3 scripts/check-i18n.py                 # 目录键/占位符/硬编码一致
+# Android 宿主的异步接线（编译门；宿主测试在本机因缺 fontconfig NOT RUN）
+cargo check --target aarch64-linux-android -p app-android --tests --locked
 ```
 
 `cad-ui-slint` 的原生测试在本机无法构建（宿主缺 fontconfig），其进度映射逻辑保持

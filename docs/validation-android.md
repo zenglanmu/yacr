@@ -141,6 +141,10 @@ I MESA    : exportSyncFdForQSRILocked: call for image ...
   （audit U07），顶部工具栏（Open 按钮所在）被系统状态栏遮挡/出屏。实测在顶部点按
   无任何变化（diff 0，焦点仍在本 Activity），无法到达 Open。故 F01 的“打开图纸”在
   模拟器上 **未执行**，不能宣称已验收。
+- **本 workstream 的异步接线未改变该结论**：`open_drawing` 现在在 Android（有
+  `std::thread`）走 `begin_async_open` + `poll_async_open` + 进度面板，并有宿主单测与
+  Android 目标类型检查；但**未在模拟器上点击 Open 或观察进度面板**，F01 仍为
+  **NOT RUN**。
 
 ## 7. 本次修复的代码缺陷
 
@@ -165,11 +169,17 @@ NOT RUN**；仅做了 Android target 的类型检查。
 
 - **真机**：未执行。本文件全部为模拟器 SwiftShader 结果。
 - **surface 尺寸与安全区（audit U07）**：`UiConfiguration::safe_insets` 仍未被任何代码
-  消费；当次改动新增纯函数 `apply_surface_size(controller, size_logical, dpi_scale)`
+  消费。纯函数 `apply_surface_size(controller, size_logical, dpi_scale)`
   （用 `apply_canvas_metrics` 更新 `Viewport.logical_size`/`dpi_scale` 且**不动相机**，
-  见 `apps/app-android/src/state_push.rs`），并在 `start()` 用配置逻辑尺寸调用一次。
-  **Activity 侧尚未把 `SurfaceHolder` 的尺寸/旋转回调转发到该函数**，因此真实 surface
-  变化仍未生效；未拍现场景不做假接线。剩余挂钩位置即此函数（见本节末“宿主侧待办”）。
+  见 `apps/app-android/src/state_push.rs`）在 `start()` 用配置逻辑尺寸调用一次。
+  本 workstream 新增导出入口 `pub fn set_surface_size(width, height, scale)`
+  （`apps/app-android/src/lib.rs` 重导出 `poll::set_surface_size`）：它经线程内注册的
+  `Runtime` 调用 `apply_surface_resize`（纯 `apply_surface_size` + 重同步相机 + 重推
+  布局/叠加层）。**Activity 侧尚未把 `SurfaceHolder` 的尺寸/旋转回调转发到该入口**
+  （NativeActivity 胶水在本仓库外），因此真实 surface 变化仍未生效；未拍现场景不做假
+  接线。剩余挂钩位置即 `set_surface_size`（见本节末“宿主侧待办”）。单测：
+  `android_surface_resize_preserves_the_camera_target`、
+  `android_surface_entry_point_applies_after_runtime_install`（**未设备复测**）。
 - **量测/批注拾取**：本次改动已在 Android 安装 `CanvasPickMapper`
   （`AndroidCanvasPickMapper`，逻辑像素→`Viewport::screen_to_world`），量测/批注工具
   激活时画布点按产生真实世界点，不再只报 `status.pick_unwired`。退化输入（无 surface、
@@ -184,10 +194,11 @@ NOT RUN**；仅做了 Android target 的类型检查。
   Vulkan 能力提示，未观察到渲染失败。
 - **helper 脚本**：见 §1 的 `find target` 退出码注意点。
 
-## 8b. 宿主接线状态（本次改动，未设备复测）
+## 8b. 宿主接线状态（未设备复测）
 
-本次新增 `apps/app-android/src/state_push.rs`（宿主→外壳连接器），并把它接入
-`start()`、打开图纸成功、命令执行与画布交互：
+`apps/app-android/src/state_push.rs`（宿主→外壳连接器）接入
+`start()`、打开图纸成功、命令执行与画布交互；本 workstream 再新增异步打开与 surface
+入口：
 
 | 连接器 | 位置 | 状态 |
 |---|---|---|
@@ -203,18 +214,28 @@ NOT RUN**；仅做了 Android target 的类型检查。
 | 布局切换 | 适配器默认路径 → `SwitchSpace` → `HostSink::send` → `execute` | 已接线；**刻意未安装 `LayoutSwitchSink`**（安装会取代命令路径）。相机与布局面板经 `sync_view_camera`/`push_panel_state` 重同步 |
 | 画布→世界映射 | `AndroidCanvasPickMapper` → `set_canvas_pick_mapper` | 已接线；退化输入返回 `None` |
 | 点按选择 | `AndroidViewInput`（`InputPolicy` 区分 tap/drag） | 无捕获工具时点按 `pick_at_screen`，命中派发 `Select`+`Selection`，未命中清空选择并显示显式状态；拖动仍平移且不选择 |
-| surface 尺寸 | `apply_surface_size`（`apply_canvas_metrics`） | 纯函数 + 启动调用；**Activity resize 回调未转发**（见上） |
+| 异步打开进度 | `host.rs::open_drawing` → `begin_async_open`；`poll.rs` 定时轮询 → `push_import_state` → `set_import_state` | 已接线（本 workstream）；发布由核心 stamp 守卫完成，宿主只镜像一次 |
+| 打开取消 | `cancel-open-requested` → `CancelLoading` → `cancel_async_open` | 已接线（命令路径，不丢文档/批注） |
+| surface 尺寸 | 导出 `set_surface_size` → `apply_surface_resize` → 纯 `apply_surface_size` | 纯函数 + 启动调用 + 导出入口；**Activity resize 回调未转发**（见上） |
 
 **宿主侧待办（Activity）**：`android-activity` 的 `SurfaceHolder` 尺寸/旋转变化时需要
-调用 `apply_surface_size(&controller, [logical_w, logical_h], dpi_scale)`，再
-`push_panel_state` + `request_redraw`。当前 `apps/app-android` 的 `start()` 拿不到该
-回调，因此只落地纯函数与其单测，**未伪造 resize 行为**。
+调用 `set_surface_size(logical_w, logical_h, dpi_scale)`（它内部完成
+`apply_surface_size` + `sync_view_camera` + `request_redraw` + `push_panel_state`）。
+当前 `apps/app-android` 的 `start()` 拿不到该回调，因此只落地导出入口与其单测，
+**未伪造 resize 行为**；入口在 UI 线程之外或 `start()` 之前调用会返回显式错误，不静默
+成功。
 
 **测试（本机 `#[cfg(test)]`，Android 目标 `cargo check --tests` 可编译；本机缺
 fontconfig 无法原生运行，标注 NOT RUN）**：`state_push` 派生（图层/布局/空面板/诊断
 行）、`apply_surface_size`（更新尺寸与 DPI 且保持相机 target 不变、退化输入报错）、
-选中点按/空白清除/拖动不选择、无 surface 时 pick mapper 返回 `None`、选择高亮
-（空选择 vs 真实选择，预览为 `None`）、布局切换命令路径
+`android_surface_resize_preserves_the_camera_target` 与
+`android_surface_entry_point_applies_after_runtime_install`（导出入口）、异步打开
+（`android_async_open_publishes_once_and_leaves_no_running_job`、
+`android_cancel_command_keeps_the_document_and_reports_cancelled`、
+`android_failed_async_open_keeps_the_demo_document`、
+`android_import_panel_maps_running_and_terminal_snapshots`）、选中点按/空白清除/拖动不
+选择、无 surface 时 pick mapper 返回 `None`、选择高亮（空选择 vs 真实选择，预览为
+`None`）、布局切换命令路径
 （`android_layout_selection_routes_through_switch_space`：模型→图纸→模型、
 未知布局被拒并保持原空间）。
 

@@ -29,8 +29,8 @@ use cad_app::render_scene::layout_descriptors;
 use cad_import_acadrust::ImportReport;
 use cad_representation::SpaceSelection;
 use cad_ui_slint::{
-    AnnotationPanelState, DiagnosticRowUi, DiagnosticsPanelState, LayerPanelState,
-    LayoutPanelState, MeasurementUiState, MessageSource, PropertyPanelState,
+    AnnotationPanelState, DiagnosticRowUi, DiagnosticsPanelState, ImportProgressUiState,
+    LayerPanelState, LayoutPanelState, MeasurementUiState, MessageSource, PropertyPanelState,
 };
 
 /// Literal host empty labels. Layer/property/annotation empty-state text has no
@@ -201,6 +201,13 @@ pub(crate) fn push_panel_state(
     let _ = handle.set_diagnostics_state(&snapshot.diagnostics);
     let _ = handle.set_mode(snapshot.mode);
 
+    // The asynchronous-open progress panel is part of the same funnel: any
+    // command, open or poll that refreshes the panels also refreshes the
+    // progress panel from the controller's retained snapshot. Idle/opened
+    // clear it (`ImportProgressUiState::from_snapshot(None)`), cancelled/failed
+    // stay visible with their explicit terminal text.
+    push_import_state(controller, handle);
+
     if let Some(view) = view.borrow().as_ref() {
         let overrides = controller.borrow().session.layer_overrides.clone();
         view.set_layer_overrides(overrides);
@@ -211,6 +218,18 @@ pub(crate) fn push_panel_state(
         view.set_measurement_preview(snapshot.measurement_preview);
         view.set_annotation_preview(snapshot.annotation_preview);
     }
+}
+
+/// Push the asynchronous-open progress panel (F01) from the controller snapshot.
+///
+/// The single connector both [`push_panel_state`] and the poll driver use, so the
+/// panel and the rest of the chrome cannot drift. Reading the snapshot is pure:
+/// it never drains progress or publishes a document.
+pub(crate) fn push_import_state(controller: &Rc<RefCell<HostController>>, handle: &UiHandle) {
+    let messages = MessageSource::from_request("zh-CN");
+    let snapshot = controller.borrow().async_open_snapshot();
+    let state = ImportProgressUiState::from_snapshot(snapshot.as_ref(), &messages);
+    let _ = handle.set_import_state(&state);
 }
 
 /// Build the diagnostics drawer from the last import report.
