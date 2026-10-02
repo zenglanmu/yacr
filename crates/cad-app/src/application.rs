@@ -80,6 +80,7 @@ impl Application {
                 )),
             },
             CommandId::ConfirmMeasurement => self.confirm_measurement(session, &command),
+            CommandId::SaveMeasurementAsAnnotation => self.save_measurement_as_annotation(session),
             CommandId::CancelMeasurement => {
                 // Cancelling is always allowed and never opens a transaction.
                 session.cancel_tool()?;
@@ -226,6 +227,27 @@ impl Application {
             }
             CommandId::Switch2d3d => self.switch_2d3d(session, &command),
             CommandId::Orbit => self.orbit(&command),
+            CommandId::SetMode => match command.payload {
+                CommandPayload::Mode(mode) => {
+                    // The session cancels an unconfirmed tool on switch; this is
+                    // the one catalogue of modes, never a UI-only flag (U02).
+                    session.switch_mode(mode)?;
+                    Ok(CommandOutcome {
+                        objects: Vec::new(),
+                        changes: None,
+                        diagnostics: vec![Diagnostic {
+                            object: None,
+                            code: "session.mode".into(),
+                            message: format!("模式：{mode:?}"),
+                        }],
+                        measurement: None,
+                        annotation: None,
+                    })
+                }
+                _ => Err(CadError::InvalidInput(
+                    "SetMode needs a Mode(AppMode) payload".into(),
+                )),
+            },
         }
     }
 

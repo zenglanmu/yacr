@@ -111,6 +111,9 @@ pub struct UiHandle {
     /// Mirrors the pushed 3D view mode; gates orbit-by-drag and the 2D/3D
     /// affordance. Set through [`UiHandle::set_view_state`].
     view_3d: Rc<Cell<bool>>,
+    /// Last authoritative mode, so a locale switch re-emits the correct mode
+    /// label instead of resetting it to a default (audit U02).
+    work_mode: Rc<Cell<bool>>,
 }
 
 /// Owns the Slint component and routes UI callbacks into commands.
@@ -149,6 +152,9 @@ pub struct UiAdapter {
     /// Mirrors the pushed 3D view mode so a left drag in 3D emits `Orbit`
     /// instead of being routed as a 2D navigation gesture.
     view_3d: Rc<Cell<bool>>,
+    /// Last authoritative mode, shared with handles so a locale switch can
+    /// re-emit the correct mode label (audit U02).
+    work_mode: Rc<Cell<bool>>,
 }
 
 mod adapter;

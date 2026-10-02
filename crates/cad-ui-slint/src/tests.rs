@@ -375,3 +375,66 @@ fn view_state_ui_defaults_are_2d_not_3d() {
     assert!(!state.is_3d);
     assert!(!state.perspective);
 }
+
+#[test]
+fn measurement_save_affordance_requires_a_confirmed_record() {
+    // A running preview is not a confirmed result: save stays disabled.
+    let tool = cad_app::MeasurementTool::new(MeasurementToolKind::Distance);
+    let mut state = MeasurementUiState::from_preview(Some(&tool.preview()), "m");
+    assert!(!state.can_save_annotation);
+    // A confirmed record enables it explicitly.
+    state.set_can_save_annotation(true);
+    assert!(state.can_save_annotation);
+    // Idle with a retained record still offers the save.
+    let mut idle = MeasurementUiState::from_preview(None, "m");
+    assert!(!idle.can_save_annotation);
+    idle.set_can_save_annotation(true);
+    assert!(idle.can_save_annotation);
+    // Default is off.
+    assert!(!MeasurementUiState::default().can_save_annotation);
+}
+
+#[test]
+fn mode_ui_state_reflects_the_authoritative_mode() {
+    let zh = MessageSource::for_locale(Locale::ZhCn);
+    let work = ModeUiState::from_mode(cad_app::AppMode::Work, &zh);
+    assert!(work.work);
+    assert_eq!(work.label, "增强");
+    let viewer = ModeUiState::from_mode(cad_app::AppMode::Viewer, &zh);
+    assert!(!viewer.work);
+    assert_eq!(viewer.label, "查看");
+
+    let en = MessageSource::for_locale(Locale::En);
+    assert_eq!(
+        ModeUiState::from_mode(cad_app::AppMode::Viewer, &en).label,
+        "Viewer"
+    );
+    assert_eq!(
+        ModeUiState::from_mode(cad_app::AppMode::Work, &en).label,
+        "Enhanced"
+    );
+}
+
+#[test]
+fn shell_exposes_the_save_and_mode_switch_affordances() {
+    // F06/F07: save-as-annotation button + callback, gated by the record flag.
+    assert!(UI_DEFINITION.contains("measurement-can-save-annotation"));
+    assert!(UI_DEFINITION.contains("save-measurement-requested"));
+    assert!(UI_DEFINITION.contains("measure-save-label"));
+    // U02: a real mode switch entry showing the catalog mode label.
+    assert!(UI_DEFINITION.contains("mode-toggled"));
+    assert!(UI_DEFINITION.contains("mode-label"));
+    assert!(UI_DEFINITION.contains("work-mode"));
+}
+
+#[test]
+fn mode_labels_resolve_in_both_catalogs() {
+    for messages in [
+        MessageSource::for_locale(Locale::ZhCn),
+        MessageSource::for_locale(Locale::En),
+    ] {
+        for mode in [cad_app::AppMode::Work, cad_app::AppMode::Viewer] {
+            assert!(!status::mode_label(&messages, mode).is_empty());
+        }
+    }
+}

@@ -235,11 +235,22 @@ impl DiagnosticsPanelState {
     }
 }
 
+/// Localized label for the authoritative session mode (audit U02).
+///
+/// Work maps to the existing `mode.enhanced` key; Viewer maps to `mode.viewer`.
+/// A UI label is only ever built from the real `cad_app::AppMode`, never from a
+/// UI-only flag.
+pub fn mode_label(messages: &MessageSource, mode: cad_app::AppMode) -> String {
+    match mode {
+        cad_app::AppMode::Work => messages.text("mode.enhanced", &[]),
+        cad_app::AppMode::Viewer => messages.text("mode.viewer", &[]),
+    }
+}
+
 /// The catalog key for a stable measurement kind key (e.g. `distance`).
 pub fn measurement_kind_key(kind_key: &str) -> String {
     format!("measure.kind.{kind_key}")
 }
-
 /// The catalog key for a stable annotation kind key (e.g. `freehand`).
 pub fn annotation_kind_key(kind_key: &str) -> String {
     format!("annotation.kind.{kind_key}")

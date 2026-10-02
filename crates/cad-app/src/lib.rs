@@ -80,6 +80,10 @@ pub enum CommandId {
     Measure,
     /// Confirm the points captured by the active open-ended measurement tool.
     ConfirmMeasurement,
+    /// Persist the last confirmed measurement as a measurement annotation
+    /// (F06/F07). Exactly one transaction and one undo step through the shared
+    /// annotation path; refused when no measurement has been confirmed.
+    SaveMeasurementAsAnnotation,
     /// Cancel the active tool without committing anything.
     CancelMeasurement,
     CreateAnnotation,
@@ -118,6 +122,12 @@ pub enum CommandId {
     StandardView,
     Orbit,
     SwitchProjection,
+    /// Switch the session between Viewer and Work mode (audit U02).
+    ///
+    /// Allowed in both directions and in both modes: the mode change itself is
+    /// not a Work-only operation, but it cancels any unconfirmed tool. The
+    /// command layer still refuses every Work-only command while in Viewer mode.
+    SetMode,
 }
 
 impl CommandId {
@@ -126,6 +136,7 @@ impl CommandId {
             self,
             Self::Measure
                 | Self::ConfirmMeasurement
+                | Self::SaveMeasurementAsAnnotation
                 | Self::CreateAnnotation
                 | Self::UpdateAnnotation
                 | Self::DeleteAnnotation
@@ -182,6 +193,13 @@ pub struct SessionState {
     pub generation: u64,
     /// Recorded CAD backend preference; the host rebuilds the render session.
     pub backend: BackendChoice,
+    /// The last structured measurement result produced in this session (F06).
+    ///
+    /// Set when a measurement is evaluated (auto-completed or explicitly
+    /// confirmed). It is what [`CommandId::SaveMeasurementAsAnnotation`] turns
+    /// into an annotation; it is never a fabricated placeholder. Cleared when the
+    /// session is rebuilt for new content.
+    last_measurement: Option<MeasurementRecord>,
 }
 
 /// CAD backend preference shared by UI, app state and hosts (spec §6).
@@ -205,6 +223,7 @@ impl SessionState {
             selected_annotation: None,
             generation: 0,
             backend: BackendChoice::Auto,
+            last_measurement: None,
         }
     }
 
@@ -236,6 +255,23 @@ impl SessionState {
     pub fn cancel_tool(&mut self) -> CadResult<()> {
         self.tool = ToolState::Idle;
         Ok(())
+    }
+
+    /// The last structured measurement result, if one has been confirmed.
+    ///
+    /// Pure getter: reading it never advances a tool or writes a database.
+    pub fn last_measurement(&self) -> Option<&MeasurementRecord> {
+        self.last_measurement.as_ref()
+    }
+
+    /// Whether a confirmed measurement is available to persist as an annotation.
+    pub fn has_last_measurement(&self) -> bool {
+        self.last_measurement.is_some()
+    }
+
+    /// Record the structured result of a completed measurement (F06).
+    pub fn set_last_measurement(&mut self, record: MeasurementRecord) {
+        self.last_measurement = Some(record);
     }
 
     /// Snapshot of the active measurement for preview rendering, if any.
@@ -502,6 +538,8 @@ pub enum CommandPayload {
         factor: f64,
         cursor: [f64; 2],
     },
+    /// Target mode for [`CommandId::SetMode`] (audit U02).
+    Mode(AppMode),
     /// Replace the current selection with these refs (read-only; never writes
     /// the DWG). An empty list clears the selection.
     Selection(Vec<SelectionRef>),

@@ -41,7 +41,7 @@ pub trait UiCommandSink: 'static {
 /// built from the application's authoritative `ALL` orderings, which is also how
 /// a localized label maps back to a kind without relying on Chinese-only
 /// `from_label`.
-pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource) {
+pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode: bool) {
     ui.set_ribbon_tabs(string_model(&[
         messages.text("ribbon.home", &[]),
         messages.text("ribbon.view", &[]),
@@ -56,7 +56,8 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource) {
         messages.text("ribbon.move", &[]),
         messages.text("ribbon.trim", &[]),
     ]));
-    // Toolbar + mode.
+    // Toolbar + mode. The mode label reflects the real session mode, not a
+    // hardcoded "enhanced" (audit U02).
     ui.set_open_label(messages.text("file.open", &[]).into());
     ui.set_fit_label(messages.text("toolbar.fit", &[]).into());
     ui.set_measure_label(messages.text("measure.panel", &[]).into());
@@ -66,12 +67,13 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource) {
     ui.set_export_label(messages.text("toolbar.export", &[]).into());
     ui.set_import_label(messages.text("toolbar.import", &[]).into());
     ui.set_diagnostics_label(messages.text("toolbar.diagnostics", &[]).into());
-    ui.set_mode_label(messages.text("mode.enhanced", &[]).into());
+    ui.set_mode_label(messages.text(mode_key(work_mode), &[]).into());
 
     // Measurement panel.
     ui.set_measurement_panel_label(messages.text("measure.panel", &[]).into());
     ui.set_measure_confirm_label(messages.text("tool.confirm", &[]).into());
     ui.set_measure_cancel_label(messages.text("tool.cancel", &[]).into());
+    ui.set_measure_save_label(messages.text("measure.save_annotation", &[]).into());
     ui.set_measurement_kind_labels(string_model(&status::measurement_kind_labels(messages)));
 
     // Annotation panel.
@@ -136,6 +138,16 @@ pub fn apply_responsive(ui: &YacrWindow, logical_size: [f64; 2], compact_config:
     ui.set_side_panel_collapsed(metrics.side_panel_collapsed);
     ui.set_drawer_height(metrics.drawer_height);
     ui.set_show_floating_nav(metrics.breakpoint.shows_floating_nav());
+}
+
+/// Catalog key for the current mode label (audit U02). Work keeps the existing
+/// `mode.enhanced` key; Viewer uses `mode.viewer`.
+pub(crate) fn mode_key(work: bool) -> &'static str {
+    if work {
+        "mode.enhanced"
+    } else {
+        "mode.viewer"
+    }
 }
 
 /// Build a Slint string model from owned labels.

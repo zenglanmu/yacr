@@ -615,6 +615,50 @@ impl HostController {
             .unwrap_or("drawing units")
     }
 
+    /// Whether a confirmed measurement is available to save as an annotation.
+    ///
+    /// Pure getter (audit U04); hosts use it to enable the save affordance
+    /// without re-running the measurement tool.
+    pub fn has_last_measurement(&self) -> bool {
+        self.session.has_last_measurement()
+    }
+
+    /// Persist the last confirmed measurement as an annotation through the
+    /// shared annotation transaction/history path (F06/F07).
+    ///
+    /// Refuses with `InvalidInput` when no measurement has been confirmed and
+    /// enforces the Work-mode permission at the command layer.
+    pub fn save_measurement_as_annotation(&mut self) -> CadResult<CommandOutcome> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::SaveMeasurementAsAnnotation,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::None,
+        })
+    }
+
+    /// The authoritative session mode (Viewer/Work) — the single source the UI
+    /// label and affordances must reflect (audit U02).
+    pub fn mode(&self) -> AppMode {
+        self.session.mode()
+    }
+
+    /// Switch the session mode through the command path (audit U02).
+    ///
+    /// An unconfirmed tool is cancelled, never silently committed, and no
+    /// Viewer-incompatible write is performed by the switch itself.
+    pub fn set_mode(&mut self, mode: AppMode) -> CadResult<()> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::SetMode,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::Mode(mode),
+        })?;
+        Ok(())
+    }
+
     /// The open document's immutable drawing, or an error when none is loaded.
     fn drawing_required(&self) -> CadResult<&DrawingDatabase> {
         self.application
