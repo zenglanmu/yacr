@@ -43,6 +43,12 @@ export function startStatePolling(
         if (!rendererReady) {
           rendererReady = true;
           setStateKey("host.renderer_ready", { backend: ready[1] });
+          // Hide the technical `#host-state` line so it cannot permanently cover
+          // the Slint status once the session is usable (audit U08/U12). A later
+          // failure re-shows it through the retry affordance.
+          if (document.body && document.body.classList) {
+            document.body.classList.add("renderer-ready");
+          }
           onReady();
         }
         pollDelay = 2000;

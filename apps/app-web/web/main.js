@@ -1,6 +1,7 @@
 // Browser composition root. Keep wasm loading dynamic so failures are localized.
 import { createFileHost } from "./host/files.js";
 import { installTouchNavigation } from "./host/touch.js";
+import { createA11y } from "./host/a11y.js";
 import { createI18n } from "./host/i18n.js";
 import { startStatePolling } from "./host/renderer.js";
 import {
@@ -18,6 +19,11 @@ import {
 
 let wasmModule = null;
 const i18n = createI18n(() => wasmModule);
+// Single announcement funnel (audit U12): every localized host status is
+// mirrored into the visually-hidden live region, so `#host-state` can stay
+// `aria-live="off"` without losing screen-reader feedback.
+const a11y = createA11y(i18n);
+i18n.attachA11y(a11y);
 const { setStateKey } = i18n;
 const showRecoveryBackend = wireRecoveryBackend(() => wasmModule, setStateKey);
 let resizeViewport;

@@ -9,8 +9,15 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Slint (winit backend) looks up this id and renders the shared shell. -->
-  <main id="canvas-host"><canvas id="canvas"></canvas></main>
+  <!-- Accessibility boundary (audit U12): Slint draws into a single opaque
+       <canvas>, which has no native HTML semantics and cannot be exposed as a
+       per-entity ARIA model. #canvas-host is therefore declared as one labelled
+       application region and is keyboard-focusable, while #a11y-status (below)
+       is the explicit, non-visual alternative entry for status updates. This is
+       not a claim that the canvas is equivalent to native semantics. -->
+  <main id="canvas-host" role="application" aria-label="CAD canvas" tabindex="0">
+    <canvas id="canvas"></canvas>
+  </main>
 
   <!-- Hidden pickers driven by the Rust host; never styled to be visible. -->
   <input type="file" id="file-input" accept=".dwg" hidden>
@@ -29,14 +36,27 @@
     </select>
   </div>
 
-  <div id="host-state" role="status" aria-live="polite">正在加载 wasm…</div>
+  <!-- Technical renderer line: loading/failure chrome only, hidden once the
+       renderer is ready (see style.css). aria-live is OFF so it never competes
+       with #a11y-status (the single announcement funnel, audit U12). -->
+  <div id="host-state" role="status" aria-live="off">正在加载 wasm…</div>
+
+  <!-- Accessible non-visual mirror of the Slint status/tool summary (audit U12).
+       Visually hidden; updated by web/host/a11y.js through web/host/i18n.js on
+       the same cadence as #host-state. -->
+  <div id="a11y-status" class="visually-hidden" role="status"
+       aria-live="polite" aria-atomic="true"></div>
   <noscript>需要启用 JavaScript 才能运行 yacr CAD。</noscript>
 
-  <!-- Dynamic import also catches a missing host module instead of staying stuck. -->
+  <!-- Dynamic import also catches a missing host module instead of staying stuck.
+       The live region is updated directly because the i18n funnel (main.js) is
+       exactly what failed to load; the message is bilingual on purpose then. -->
   <script type="module">
     import("./main.js").catch(error => {
       window.yacrStartupError = String(error);
-      document.getElementById("host-state").textContent = "启动失败 / Startup failed: " + error;
+      const message = "启动失败 / Startup failed: " + error;
+      document.getElementById("host-state").textContent = message;
+      document.getElementById("a11y-status").textContent = message;
       document.getElementById("retry-renderer").hidden = false;
     });
   </script>
