@@ -288,3 +288,176 @@ fn android_pick_mapper_is_absent_without_a_surface() {
     assert!(mapper.to_world([10.0, 10.0]).is_none());
     assert!(mapper.to_world([f64::NAN, 10.0]).is_none());
 }
+
+/// A controller whose document carries one supported paper layout (`LayoutId(7)`).
+///
+/// The demo drawing has none, so the layout-switch routing test needs a real
+/// layout the importer/representation layer accepts as drawable.
+fn controller_with_one_layout() -> Rc<RefCell<HostController>> {
+    use cad_db::{DrawingDatabaseBuilder, Layer, Layout, PaperViewport};
+
+    let mut controller = HostController::with_demo_document([1080.0, 1920.0]).unwrap();
+    let document_id = controller.document_id;
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_layout(Layout {
+            id: LayoutId(7),
+            name: "Sheet1".into(),
+            viewports: vec![PaperViewport {
+                clip: vec![
+                    Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 100.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 100.0,
+                        y: 50.0,
+                        z: 0.0,
+                    },
+                ],
+                model_to_paper: Transform3::scale(100.0),
+                completeness: Completeness::Complete,
+            }],
+        })
+        .unwrap();
+    controller
+        .application
+        .workspace
+        .documents
+        .get_mut(&document_id)
+        .unwrap()
+        .drawing = Arc::new(builder.finish().unwrap());
+    Rc::new(RefCell::new(controller))
+}
+
+/// A `HostSink` with no UI handle/view: enough to exercise the command path.
+fn host_sink(controller: &Rc<RefCell<HostController>>) -> HostSink {
+    HostSink {
+        controller: controller.clone(),
+        handle: Rc::new(RefCell::new(None)),
+        view: Rc::new(RefCell::new(None)),
+        incoming: Rc::new(RefCell::new(controller.borrow().drawing())),
+        configuration: AndroidHostConfiguration::default(),
+    }
+}
+
+#[test]
+fn android_snapshot_carries_an_empty_highlight_for_an_empty_selection() {
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
+    let snapshot = snapshot(&controller, &messages);
+    // No selection => explicit empty highlight; no tool => no preview overlay.
+    assert!(snapshot.selection.is_empty());
+    assert!(snapshot.measurement_preview.is_none());
+    assert!(snapshot.annotation_preview.is_none());
+}
+
+#[test]
+fn android_snapshot_carries_the_real_selection_as_a_highlight() {
+    let (controller, _input) = input_harness();
+    // Select a real demo entity through the documented command path.
+    let entity = controller
+        .borrow()
+        .drawing()
+        .unwrap()
+        .entities()
+        .next()
+        .expect("demo drawing has entities")
+        .id;
+    let document = controller.borrow().document_id;
+    controller
+        .borrow_mut()
+        .set_selection(vec![SelectionRef {
+            document,
+            entity,
+            instance: InstancePath::default(),
+            sub_element: None,
+        }])
+        .unwrap();
+
+    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
+    let snapshot = snapshot(&controller, &messages);
+    // The highlight mirrors `HostController::selection()` exactly, and reflects
+    // the non-empty selection (not the empty default).
+    assert_eq!(snapshot.selection, *controller.borrow().selection());
+    assert_eq!(snapshot.selection.len(), 1);
+    assert_eq!(snapshot.selection.refs()[0].entity, entity);
+    // A selection is not a tool: no preview appears just because something is
+    // selected.
+    assert!(snapshot.measurement_preview.is_none());
+    assert!(snapshot.annotation_preview.is_none());
+}
+
+#[test]
+fn android_layout_selection_routes_through_switch_space() {
+    // The adapter has no `LayoutSwitchSink` installed, so `on_layout_selected`
+    // emits `CommandId::SwitchSpace`. This asserts the host's command path
+    // executes it and re-syncs the space-derived state.
+    let controller = controller_with_one_layout();
+    let mut sink = host_sink(&controller);
+
+    let command = Command {
+        schema_version: 1,
+        id: CommandId::SwitchSpace,
+        document: DocumentId(1),
+        viewport: ViewportId(1),
+        payload: CommandPayload::Space(SpaceId::Paper(LayoutId(7))),
+    };
+    sink.send(command).unwrap();
+
+    // The authoritative session records the switch...
+    assert_eq!(
+        controller.borrow().session.active_space,
+        SpaceId::Paper(LayoutId(7))
+    );
+    // ...and the layout panel derivation now reports it active (not model space,
+    // not a fabricated row).
+    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
+    let paper = snapshot(&controller, &messages);
+    assert_eq!(paper.layout_ids, vec![LayoutId(7)]);
+    assert_eq!(paper.layouts.active_index, Some(0));
+
+    // Switching back to model space goes through the same path.
+    sink.send(Command {
+        schema_version: 1,
+        id: CommandId::SwitchSpace,
+        document: DocumentId(1),
+        viewport: ViewportId(1),
+        payload: CommandPayload::Space(SpaceId::Model),
+    })
+    .unwrap();
+    assert_eq!(controller.borrow().session.active_space, SpaceId::Model);
+    assert_eq!(snapshot(&controller, &messages).layouts.active_index, None);
+}
+
+#[test]
+fn android_layout_switch_to_an_unknown_layout_is_refused() {
+    // The command path validates against the real layout table: a bogus layout is
+    // an explicit failure that keeps the current space, not a silent success.
+    let controller = controller_with_one_layout();
+    let mut sink = host_sink(&controller);
+    sink.send(Command {
+        schema_version: 1,
+        id: CommandId::SwitchSpace,
+        document: DocumentId(1),
+        viewport: ViewportId(1),
+        payload: CommandPayload::Space(SpaceId::Paper(LayoutId(99))),
+    })
+    .unwrap();
+    assert_eq!(controller.borrow().session.active_space, SpaceId::Model);
+}

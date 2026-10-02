@@ -198,6 +198,9 @@ NOT RUN**；仅做了 Android target 的类型检查。
 | 批注面板 + 有序 `AnnotationId` | `AnnotationPanelState::from_rows` | 已接线 |
 | 布局面板 + 有序 `LayoutId` | `layout_descriptors` + `from_descriptors` | 已接线（真实布局表；无布局为显式空态） |
 | 诊断抽屉 | `last_import_report.diagnostics` | 已接线；无报告时为空且摘要为“未验证”，不显示为完整 |
+| 选择高亮 | `push_panel_state` → `CadView::set_selection_highlight` | 已接线；选择来自 `HostController::selection()`，空选择为显式空高亮 |
+| 测量/批注预览 | `push_panel_state` → `CadView::set_measurement_preview` / `set_annotation_preview` | 已接线；无工具时传 `None`（取消叠加层） |
+| 布局切换 | 适配器默认路径 → `SwitchSpace` → `HostSink::send` → `execute` | 已接线；**刻意未安装 `LayoutSwitchSink`**（安装会取代命令路径）。相机与布局面板经 `sync_view_camera`/`push_panel_state` 重同步 |
 | 画布→世界映射 | `AndroidCanvasPickMapper` → `set_canvas_pick_mapper` | 已接线；退化输入返回 `None` |
 | 点按选择 | `AndroidViewInput`（`InputPolicy` 区分 tap/drag） | 无捕获工具时点按 `pick_at_screen`，命中派发 `Select`+`Selection`，未命中清空选择并显示显式状态；拖动仍平移且不选择 |
 | surface 尺寸 | `apply_surface_size`（`apply_canvas_metrics`） | 纯函数 + 启动调用；**Activity resize 回调未转发**（见上） |
@@ -210,7 +213,10 @@ NOT RUN**；仅做了 Android target 的类型检查。
 **测试（本机 `#[cfg(test)]`，Android 目标 `cargo check --tests` 可编译；本机缺
 fontconfig 无法原生运行，标注 NOT RUN）**：`state_push` 派生（图层/布局/空面板/诊断
 行）、`apply_surface_size`（更新尺寸与 DPI 且保持相机 target 不变、退化输入报错）、
-选中点按/空白清除/拖动不选择、无 surface 时 pick mapper 返回 `None`。
+选中点按/空白清除/拖动不选择、无 surface 时 pick mapper 返回 `None`、选择高亮
+（空选择 vs 真实选择，预览为 `None`）、布局切换命令路径
+（`android_layout_selection_routes_through_switch_space`：模型→图纸→模型、
+未知布局被拒并保持原空间）。
 
 ## 9. 必跑检查结果（全部通过）
 
