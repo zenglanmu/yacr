@@ -65,8 +65,11 @@
   全部不可用才报告错误。`resolve_face` 可查询实际使用的字体。
 - 键匹配：注册键 + 文件主名。图纸引用 `arial.ttf`、库只有 `arial.woff` 时按主名 `arial` 命中。
 - 排版：按字形 advance 前进（SHX 用 ink-width + cell 边距策略；TTF 应用 `kern` 字距），
-  `\n`/`\P` 换行；`sanitize_text` 处理 `%%d/%%p/%%c`、`\P`、`\~`、花括号与 `\X...;`
-  格式码（近似）。
+  `\n`/`\P` 换行。`cad-representation::text` 现在把 MTEXT/TEXT 控制内容解析为结构化 run
+  列表（`parse_mtext`）并逐 run 排版（`FontEngine::shape`）：字体 `\f`/`\F`、绝对/相对字高
+  `\H`、宽度因子 `\W`、倾斜 `\Q`、颜色 `\C`/`\c`、堆叠分数 `\S`、分组 `{}`、`\~`、`%%`
+  特殊字符与 `\U+XXXX` 均被保留；无法忠实渲染的项（颜色/装饰/堆叠/`\A`/`\T` 等）会以
+  `TextFormatIssue` 显式报告并计入 `Partial`，不静默忽略。详见 `docs/mtext.md`。
 - **对齐**：TEXT 的 `horizontal_alignment`/`vertical_alignment`（含 `alignment_point`）与
   MTEXT 的 `attachment_point` 映射为 `TextAlignH/TextAlignV`，在排版时按行宽/行高偏移；
   `Aligned/Fit` 按左对齐处理（不拉伸）。
@@ -131,8 +134,10 @@ Android 若未把字体目录放进 `assets/fonts/`（含 `fonts.json`），打�
 
 ## 未完成
 
-1. **排版完备性**：复杂文字整形（bidi/上下文 shaping）、MTEXT 全格式码（堆叠、列、
-   制表）与精确行距/垂直对齐；当前逐字、TTF `kern` 已应用、行距固定 1.2×、垂直对齐近似。
+1. **排版完备性**：复杂文字整形（bidi/上下文 shaping）与列/真正制表位仍缺；MTEXT 全格式码
+   现由 `parse_mtext` 解析为 run 列表（见 `docs/mtext.md`），但颜色、下划线/上划线/删除线、
+   堆叠分数、`\A`/`\T`/`\p` 等只能近似或仅解析，`shape` 以 `TextFormatIssue` 显式报告；
+   精确行距/垂直对齐仍为近似（行距 = 1.2×该行最高 run 字高）。
 2. **平台验证**：`FontLoader`/`plan_fonts`/`set_fonts` 契约与 Web/Android 取字节代码均已
    实现并编译（见上表），但**浏览器与真机上的实际下载/整形/重绘尚未在本仓库验证**；
    Android 也未随 APK 打包任何字体资产。
