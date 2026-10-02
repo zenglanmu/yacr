@@ -75,7 +75,8 @@ if data.get("success"):
 else:
     print("  attach failed:", data.get("errors"), file=sys.stderr)
     for error in data.get("errors") or []:
-        if "already exists" in str(error.get("message", "")).lower():
+        message = str(error.get("message", "")).lower()
+        if "already added" in message or "already exists" in message:
             sys.exit(0)
     sys.exit(1)
 PY

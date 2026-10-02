@@ -111,7 +111,11 @@
 2. `cargo install wasm-bindgen-cli --version 0.2.129 --locked` 并核对
    `wasm-bindgen --version`；版本不可得即失败；
 3. `DIST=$GITHUB_WORKSPACE/web-dist PROFILE=release scripts/build-web.sh`
-   （脚本内部 `cargo build ... --locked`，不会改锁文件）；
+   （脚本内部 `cargo build ... --locked`，不会改锁文件）。脚本默认
+   `WITH_FONTS=1`，经 `fetch-web-fonts.sh` 把第三方字体下载进 `web-dist/fonts/`
+   （jsDelivr 优先；单文件失败按 `FONT_RETRIES` 退避重试，再回退到
+   `raw.githubusercontent.com`——GitHub Actions 共享出口 IP 常被 jsDelivr 限流；
+   两个源都失败才退出 1。字体不入库，见 `docs/fonts.md`）；
 4. 校验 `index.html`/`main.js`/`style.css`/`pkg/yacr.js`/`pkg/yacr_bg.wasm` 均非空，
    且 JS glue 引用 `yacr_bg.wasm`（wasm/JS 配对）；
 5. 断言 `Cargo.lock` 未被改写（`git diff --exit-code`）；

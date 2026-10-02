@@ -113,7 +113,13 @@
 未设置时回退到 `DEFAULT_FONT_BASE_URL`（jsDelivr）。`scripts/build-web.sh` 默认
 `YACR_FONT_BASE_URL=fonts/`（相对页面），并在打包时调用 `scripts/fetch-web-fonts.sh`
 把 `mlightcad/cad-data` 的 `fonts.json` 与全部字体下载进 `web-dist/fonts/`，所以
-**发布包自包含、不跨域**。需要回到 CDN 时：
+**发布包自包含、不跨域**。
+
+`fetch-web-fonts.sh` 默认先用 jsDelivr（`FONT_BASE_URL`）；单个文件失败时按
+`FONT_RETRIES`（默认 3）退避重试，仍失败再回退到 `FONT_FALLBACK_BASE_URL`
+（默认 `https://raw.githubusercontent.com/mlightcad/cad-data/main/fonts`，GitHub
+Actions 的共享出口 IP 常被 jsDelivr 限流，但可访问 raw 源）。每个文件记录实际来源；
+两个源都失败才整体退出 1（不把缺字体折成成功）。需要回到 CDN 时：
 
 ```bash
 YACR_FONT_BASE_URL=https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts/ \
