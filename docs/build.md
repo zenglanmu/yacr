@@ -13,6 +13,19 @@ python3 scripts/check-architecture.py
 `cad-ui-slint` 需要 Linux 宿主的 fontconfig/freetype 开发头与 pkg-config 才能为本机
 编译；本环境无 sudo，故主机测试排除它，其编译由 Android target 覆盖。
 
+## Linux release 包（含无头 render）
+
+```bash
+# 构建 + 打包（可选：对真实 DWG 出图并校验 PNG 非空）
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+  YACR_TEST_DWG=/path/input.dwg scripts/package-linux-release.sh
+```
+
+产出 `target/release/dist/yacr-<version>-linux-<arch>.tar.gz`（及 `.sha256`），内含
+release `bin/cad-cli-tools`、文档与 `scripts/{fetch-test-dwg,render-smoke}.sh`。
+运行时的无头渲染用软件 Vulkan（Mesa lavapipe）时，先按发行版把 `VK_ICD_FILENAMES`
+指向 `lvp_icd.json`；详见 `docs/headless-render.md` 与 `docs/validation.md`。
+
 ## Android APK（已验证可编译打包）
 
 依赖：JDK 17、Android SDK（build-tools 34.0.0、platform android-34/30）、

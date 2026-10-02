@@ -1,4 +1,4 @@
-# 渲染后端契约（未运行）
+# 渲染后端契约（无头软件路径已运行；宿主路径未运行）
 
 Auto/WebGPU/WebGL2 分开设置，UI 与 CAD 后端配置独立。Auto 必须实际尝试初始化并检查
 features/limits；强制失败给用户原因/回退选项，不能只检测 navigator.gpu。
@@ -8,9 +8,12 @@ WebGL2 基础路径不依赖 compute/storage buffer/indirect draw；增强路径
 Web 受阻可验证双 Canvas 分区；不得每帧 GPU→CPU→GPU 整幅回读。
 必须核查纹理 format/usage、MSAA resolve、alpha 预乘、sRGB、队列顺序、resize、device lost。
 
-当前没有 Slint/wgpu 实际版本对齐、纹理桥、shader 编译/运行或平台验证。
-Cargo 中未使用的候选版本不是兼容性证据；接入前用 ADR 锁定真实可编译组合。
-切换后重建所有 GPU 派生资源，保持文档、相机与批注；失败重试有界，先走未保存保护。
+当前没有 Slint 宿主、纹理桥或 Android/浏览器平台验证。渲染器本身的管线创建、shader
+编译与真实提交已在**原生无头软件适配器**（Mesa lavapipe，Vulkan）上执行，见
+`docs/headless-render.md` 与 `docs/validation.md`；这**不**等于 Slint 共享设备、WebGL2
+或真机 GPU 的验证。Cargo 中未使用的候选版本不是兼容性证据；接入前用 ADR 锁定真实
+可编译组合。切换后重建所有 GPU 派生资源，保持文档、相机与批注；失败重试有界，先走
+未保存保护。
 
 ## 管线与帧预算（F14，静态实现）
 
@@ -41,7 +44,10 @@ WGSL 以 `include_str!` 从 `crates/cad-render-wgpu/shaders/{line,mesh}.wgsl` �
 
 ## 仍缺失（未验证，禁止当作已完成）
 
-- 没有真实适配器上的管线创建、深度精度、透明排序或镜像剔除的图像验证；
+- 无头软件适配器上的管线创建/深度/透明排序/镜像剔除已有像素级测试（`docs/headless-render.md`）；
+  但这些**未**在真实 GPU、Android 或浏览器后端核对；
 - WebGL2 下 `Depth32Float` 的可用性未在真实浏览器核对；
 - 纹理桥、MSAA resolve、sRGB/预乘、resize 时序仍未实测；
-- Auto 初始化失败的真实回退与 `BackendCapabilities` 运行时核对仍待真实设备。
+- Auto 初始化失败的真实回退与 `BackendCapabilities` 运行时核对仍待真实设备及宿主接线；
+- 无头提交的 `poll` 等待默认 1 秒面向交互式宿主，软件大帧需显式
+  `Renderer::set_poll_timeout`（见 `docs/headless-render.md` §4.5）。

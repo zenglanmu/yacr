@@ -10,6 +10,10 @@
   platform android-34 / android-30，NDK 27.0.12077973。
 - cargo-apk 0.10.0。
 - 锁定依赖：acadrust 0.5.5、slint 1.18.1、wgpu 30.0.1（见 Cargo.lock）。
+- 软件 Vulkan：Mesa **lavapipe**（ICD `/usr/share/vulkan/icd.d/lvp_icd.json`，
+  adapter `llvmpipe`，`deviceType=CPU`，Mesa 26.0.8-1ubuntu0.3 / LLVM 21.1.8，
+  Vulkan instance 1.4.341）。无头渲染证据在 `VK_ICD_FILENAMES=.../lvp_icd.json`
+  下取得，见下文“软件 Vulkan 无头渲染”。
 
 ## 已执行的测试
 
@@ -141,7 +145,9 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
   `CorruptData(missing AC10xx signature)`。
 - 指纹不匹配的批注导入默认拒绝，`--allow-fingerprint-mismatch` 才放行（F09/B10 生效）。
 - `measure` 距离/角度/折线长度返回结构化 JSON 与单位；未知单位显示 `DrawingUnits`。
-- `render` 在无 GPU 环境显式返回 `Unsupported`，不空成功。
+- `render`：原生**有适配器**时驱动无头 wgpu 渲染器真实出帧（lavapipe，见下节）；
+  无适配器时以 `gpu_failure` 失败（结构性路径，本机未实际触发）；wasm 仍
+  `unsupported`。任何情况都不空成功。
 - 本轮同时复核：`cargo test`（核心，117 passed/0 failed）、完整 workspace Wasm `--lib`、
   `cargo fmt --check`、`clippy`（0 警告）、`scripts/check-architecture.py` 均通过。
 
@@ -196,6 +202,73 @@ Kitchens 的 model=21 就是 21 个 INSERT，757 条线段来自这些 INSERT �
   生成图案线（含 dash 与双线）；多环实心/渐变记 `Partial`（只画边界），超过
   `MAX_FILL_POINTS` 的复杂单环也记 `Partial` 而不做三次方裁剪。`baseline` 86→1021 线
   +5 网格、`map-of-uae` 87→173 线 +26 网格、`canteen` +1155 线 +119 网格。
+
+## 软件 Vulkan（lavapipe）无头渲染（本轮执行）
+
+运行前 `export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json` 强制 Mesa
+lavapipe（CPU）。适配器报告：`backend=vulkan`、`device_type=cpu`、`driver=llvmpipe`、
+`driver_info=Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)`。
+
+### 渲染器测试（lavapipe）
+
+`cargo test -p cad-render-wgpu`：
+
+| 套件 | 结果 |
+|---|---|
+| 单元（geometry / draw-order / renderer） | 31 passed |
+| `tests/headless_render.rs` | 6 passed |
+| `tests/render_effects.rs` | 6 passed |
+| `tests/wgsl_validation.rs` | 3 passed |
+
+覆盖：适配器报告；矩形线框出帧且内部保持背景；三角形网格 `triangles>0`；`render_3d`
+非空；PNG 签名/ IHDR；未渲染回读 `NotInitialized`；透明 `alpha=0.5` 合成且与 `alpha=1.0`
+像素不同、`alpha=0` 计 `invisible_batches`；超预算 `over_budget.skipped_batches>=1`；
+`note_device_lost` 后 `DeviceLost`；同场景两次渲染逐字节一致；大 `local_origin` 不丢精度；
+PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假装通过。
+
+### 真实 DWG 出图（样本未入库）
+
+`cad-cli-tools render <dwg> --png <file> --width 800 --height 600`：
+
+| 样本 | draw_calls | scene vertices | non_background | coverage | PNG bytes | 墙钟 |
+|---|---|---|---|---|---|---|
+| patient-chairs | 11855 | 26032 | 22381 | 0.0466 | 10109 | 2.9 s |
+| lockers | 1796 | 92052 | 12511 | 0.0261 | 6681 | 1.4 s |
+| baseline-sample | 1026 | 2377 | 9195 | 0.0192 | 4927 | 1.1 s |
+| map-of-uae | 199 | 112684 | 2031 | 0.0042 | 6532 | 1.2 s |
+| canteen | 42868 | 2760779 | 19981 | 0.0416 | 9353 | 8.9 s |
+
+- PNG 经人眼核对：`patient-chairs` 家具平面、`lockers` 柜体、`map-of-uae` 国家轮廓、
+  `canteen` 整层平面+立面，均正确居中铺满。
+- `baseline-sample` 可见线与表格但画面稀疏，因其 `completeness=partial`（大量
+  `AcDbText` 不绘制）——是已知文字缺口，不是渲染失败。
+- `anonymous-names` / `point_object_id` 无可绘制批次 → `invalid_input`
+  （`no drawable geometry to render`），退出 1，不伪造空帧；缺失文件 → `invalid_input`。
+- 相机按**实际绘制批次**拟合；`canteen` 4.3 万 draw call 在默认 1 秒提交界定下会被误报
+  `DeviceLost`，无头路径改用 `Renderer::set_poll_timeout(600s)` 后成功
+  （见 `docs/headless-render.md` §4.5）。
+
+**不是兼容性/性能验收**：样本仅存 `/tmp`、未入库、未授权；lavapipe 是 CPU 软件渲染，
+其耗时不能用于任何性能结论。
+
+## Linux release 打包（本轮执行）
+
+`scripts/package-linux-release.sh` 构建 release `cad-cli-tools`
+（`--release --locked --offline`），用 `--help` 验证二进制可运行，可选地用
+`scripts/render-smoke.sh` 真实出图，并把 `bin/` + `docs/` + `scripts/` +
+`README.md`/`LICENSE`/`THIRD_PARTY_NOTICES.md`/`PACKAGE.txt` 打包：
+
+- 产物：`target/release/dist/yacr-0.1.0-linux-x86_64.tar.gz`（在 gitignored
+  `target/` 下，**不入库**；脚本入库，可重复构建）。
+- 本轮大小 4241231 字节；sha256 `9ed0e1499ceb3a7b289b9a10a9b9ba721540a1ac52871d5b80435e048e7594f5`
+  （打包内含构建时间，重跑哈希会变，仅记录本轮）。
+- 打包内 smoke：`VK_ICD_FILENAMES=.../lvp_icd.json` 下
+  `render patient-chairs.dwg` 成功（draws=11855，non_background=22381，PNG 10109B）。
+- 解包后独立运行 `bin/cad-cli-tools render map-of-uae.dwg` 成功
+  （draws=199，non_background=2031，PNG 6532B）。
+
+该包不含真实 DWG/字体/黄金图（`fixtures/manifest` 为空），也不含 lavapipe；
+运行时的软件适配器由宿主发行版的 Mesa 提供。
 
 ## 未执行（明确标注）
 

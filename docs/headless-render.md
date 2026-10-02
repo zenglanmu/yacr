@@ -7,9 +7,11 @@
 RGBA、编码 PNG。渲染后端契约与管线细节见 `docs/render-backends.md`、`docs/render-3d.md`；
 CLI 接线见 `docs/cli.md`；实际执行证据由控制器汇总到 `docs/validation.md`，**本文不代填**。
 
-> 状态：`cad-render-wgpu/src/headless.rs` 与 CLI `render` 由并行工作流实现。本文固定
-> **接口契约与测试断言**，不把尚未实跑的路径写成“已验证”。在合并且真实跑通前，第 §6 节
-> 是设计契约而非通过证明。
+> 状态（2026-10-01，已执行）：`cad-render-wgpu/src/headless.rs` 与 CLI `render` 已
+> 合入并在 Mesa **lavapipe** 上真实跑通（`VK_ICD_FILENAMES=.../lvp_icd.json`）。
+> `cad-render-wgpu` 的 `tests/headless_render.rs`（6）与 `tests/render_effects.rs`（6）
+> 全部通过；CLI 对真实 DWG 出帧并写出 PNG。执行证据汇总见 `docs/validation.md`，
+> 本文只描述契约与已执行范围。
 
 ## 1. 目的与边界
 
@@ -29,9 +31,10 @@ CLI 接线见 `docs/cli.md`；实际执行证据由控制器汇总到 `docs/vali
 - **无头是明确的例外**：CI/agent 环境根本没有宿主，因此由 `cad-render-wgpu` 自己创建
   `Instance` → `Adapter` → `Device`/`Queue`。这仍然只发生在渲染器 crate 内部；创建完成后
   走的是同一条 `initialize_with_device` 路径，派生资源仍归 `Renderer` 所有。
-- `HeadlessGpu` 拥有该无头会话的 `Instance`/`Adapter`/`Device`/`Queue` 生命周期；这些
-  wgpu 对象**不**以裸类型逃逸到 `cad-render-wgpu` 之外供其它 crate 直接依赖（见 §1.3）。
-  宿主若要用无头设备，只能通过本模块暴露的 `HeadlessGpu` / `AdapterInfo` 名字空间。
+- `HeadlessGpu` 拥有该无头会话的 `Device`/`Queue`（并把适配器描述为 `AdapterInfo`）；
+  `Instance`/`Adapter` 在创建成功后即可释放。这些 wgpu 对象**不**以裸类型逃逸到
+  `cad-render-wgpu` 之外供其它 crate 直接依赖（见 §1.3）。宿主若要用无头设备，
+  只能通过本模块暴露的 `HeadlessGpu` / `AdapterInfo` 名字空间。
 - 回读是**离屏诊断路径**，不是生产合成路径。规范 §5.2 禁止把每帧 GPU→CPU→GPU 整幅回读
   当作正式 CAD 合成；无头路径只在“取一帧做证据”时回读一次。
 
@@ -51,25 +54,20 @@ CLI 接线见 `docs/cli.md`；实际执行证据由控制器汇总到 `docs/vali
 
 | 项 | 角色 |
 |---|---|
-| `AdapterInfo` | 适配器只读描述：backend / name / device_type / driver（见 §3.3） |
-| `HeadlessGpu` | 拥有无头 `Instance`/`Adapter`/`Device`/`Queue` 的会话对象 |
+| `AdapterInfo` | 适配器只读描述：backend / name / device_type / driver / driver_info |
+| `HeadlessGpu` | 无头会话：`device`、`queue` 与 `adapter: AdapterInfo` |
 | `enumerate_adapters(preference)` | 枚举适配器并返回 `AdapterInfo`（如实可为空） |
 | `create_headless_gpu(preference)` | 按偏好创建可用无头设备；失败返回显式错误（§3.4） |
 | `RgbaImage` | 紧凑 RGBA8 图像：`width`、`height`、`pixels`（`width*height*4` 字节） |
-| `RgbaImage::pixel(x, y)` | 取单个像素 `[u8; 4]` |
-| `RgbaImage::count_differing_from(...)` | 与另一图像逐像素比较，统计不同像素数 |
-| `RgbaImage::distinct_colors()` | 统计/返回图像中的不同颜色数 |
-| `encode_png(&RgbaImage)` | 编码为 PNG 字节 |
+| `RgbaImage::pixel(x, y)` | 取单个像素 `[u8; 4]`（越界返回透明黑，不 panic） |
+| `RgbaImage::count_differing_from(background, tolerance)` | 统计与给定背景色任一通道差异超过容差的像素数 |
+| `RgbaImage::distinct_colors()` | 统计图像中的不同 RGBA 颜色数 |
+| `encode_png(&RgbaImage)` | 编码为 PNG 字节（`Result<Vec<u8>, String>`，缓冲长度不符时报错） |
 | `Renderer::read_target_rgba(&self)` | 回读当前离屏 target，返回 `Result<RgbaImage, RenderError>` |
 
 `preference` 复用现有 `BackendPreference`（`Auto` / `WebGpu` / `WebGl2`）；原生无头下
-`Auto` 选择实际可用的原生后端（本环境为 Vulkan/lavapipe）。若 `Auto` 在原生被映射为
-`ActiveBackend::Native`，以 `headless.rs` 的实现为准（现有 `caps_for` 即如此，见
-`cad-render-wgpu/src/lib.rs`）。
-
-> 未确认：`pixel` 是否返回 `[u8; 4]` 还是 `Option<[u8; 4]>`；`count_differing_from` 是
-> “图像 vs 图像”还是“图像 vs 背景色”；`distinct_colors` 返回集合还是计数。这些参数形态
-> 以合入的 `headless.rs` 为准，本文只固定存在性与语义。
+`Auto`/`WebGpu` 接受 Vulkan 与 GL（Vulkan 优先），`WebGl2` 限定 GL。适配器选择按
+`backend_priority` 确定性进行。
 
 ## 3. 无头设备路径
 
@@ -80,7 +78,7 @@ wgpu::Instance::new(...)                     // 限定要求的 Backends（原�
   → instance.enumerate_adapters(backends)    // 只读枚举，构造 AdapterInfo 列表
   → instance.request_adapter(&RequestAdapterOptions { ... })
   → adapter.request_device(&DeviceDescriptor { ... })
-  → HeadlessGpu { instance, adapter, device, queue, info }
+  → HeadlessGpu { device, queue, adapter: AdapterInfo }
 ```
 
 `request_adapter` / `request_device` 是异步的。无头路径**不做**自建 runtime，使用
@@ -91,9 +89,9 @@ wgpu::Instance::new(...)                     // 限定要求的 Backends（原�
 ### 3.2 初始化接线
 
 创建出 `Device`/`Queue` 后，交给 `Renderer::initialize_with_device(device, queue)`，
-从而复用既有管线、帧预算、绘制顺序与设备丢失分类，不复制一份渲染器。`HeadlessGpu` 应
-暴露一个方式取得已初始化的 `Renderer` 并保持无头 `Device`/`Queue` 存活（spec：CAD 不
-自行创建第二套设备，这里是宿主缺席下的受控替代）。
+从而复用既有管线、帧预算、绘制顺序与设备丢失分类，不复制一份渲染器。`HeadlessGpu`
+本身不持有 `Renderer`：调用方解构 `HeadlessGpu { device, queue, adapter }`，把
+`device`/`queue` 交给自己的 `Renderer`，并用 `adapter` 做结构化报告（CLI 即如此）。
 
 ### 3.3 适配器报告
 
@@ -127,10 +125,10 @@ b=0.10, a=1.0`），硬件写入 sRGB 目标时完成线性→sRGB 编码。
 ### 4.2 回读需 `COPY_SRC`
 
 `Renderer::read_target_rgba` 对自持有的 target 纹理做 `copy_texture_to_buffer`
-→ `map_async` → 读取映射范围。这要求 target 纹理带 `TextureUsages::COPY_SRC`：
-当前 `ensure_target` 只声明 `RENDER_ATTACHMENT | TEXTURE_BINDING`，实现该接口时必须补上
-`COPY_SRC`，否则 `copy_texture_to_buffer` 会因 usage 校验失败。**这是冻结接口之外的
-必要代码改动**（在 `lib.rs` 的 `ensure_target`），已记入 §8 的未确认项。
+→ `map_async` → 读取映射范围。这要求 target 纹理带 `TextureUsages::COPY_SRC`；
+`ensure_target` 已在 `RENDER_ATTACHMENT | TEXTURE_BINDING` 之外声明 `COPY_SRC`，否则
+`copy_texture_to_buffer` 会因 usage 校验失败。生产合成路径不做整幅回读，只有无头
+证据路径使用该接口。
 
 ### 4.3 256 字节行对齐
 
@@ -151,6 +149,16 @@ width*height*4`）。
 `RgbaImage` 存的是 sRGB 编码后的 8 位字节；`encode_png` 只做无损 PNG 封装，**不**再做
 一次线性↔sRGB 转换。这样 PNG 与 GPU target 字节一致，回读→PNG→回读的往返可做精确比较
 （§6 的 round-trip 断言）。
+
+### 4.5 提交等待与帧拟合
+
+- `Renderer::render` 以有界 `poll(Wait{timeout})` 区分“完成 / 设备丢失”。默认 1 秒面向
+  交互式宿主；软件适配器的大图纸（数万 draw call）会超过 1 秒，因此无头调用方显式
+  `Renderer::set_poll_timeout(600s)`。否则慢的 CPU 帧会被误报为 `DeviceLost`（实测
+  `canteen.dwg` 42868 draw call 在默认 1 秒下误报，提高等待后 8.8 秒成功）。
+- CLI 相机按**实际绘制的批次**（`local_origin + vertex` 的世界坐标）拟合，而非
+  `drawing.bounds()`；后者包含未绘制内容（文字、块定义几何），会使出图偏小偏心。
+  无任何批次时以 `invalid_input` 失败，不伪造空帧。
 
 ## 5. 如何运行
 
@@ -177,37 +185,46 @@ cargo run -p cad-cli-tools --offline -- render <input.dwg> --png /tmp/opencode/y
 
 | 断言 | 判据 |
 |---|---|
-| 非背景覆盖 > 0 | 与清屏背景比较，`count_differing_from(...) > 0`（不代表该有几何的视图不会全背景） |
-| 网格三角形 > 0 | `render_3d` 的 `FrameStats.triangles > 0`（预算内真实提交了三角形） |
-| 3D 帧非空 | `distinct_colors()` / 非背景像素表明帧不是纯色 |
-| PNG 往返 | `encode_png` 后再解码，`count_differing_from` 为 0（逐像素相等） |
+| 适配器报告 | `AdapterInfo.backend == "vulkan"`、`device_type == "cpu"`、`driver == "llvmpipe"`（强制 lavapipe 时） |
+| 线几何非空 | 矩形 `LineList` 渲染后与左上角背景比较，非背景像素 > 0 且内部仍为背景 |
+| 网格三角形 > 0 | `FrameStats.triangles > 0` 且 `opaque_batches == 1`，非背景像素 > 0 |
+| 3D 帧非空 | `render_3d` 后非背景像素 > 0，无 `RenderError` |
+| PNG 往返 | `encode_png` 后校验 PNG 签名/ IHDR 宽高；`render_effects` 用 `png` 解码逐字节比对 |
 | 回读先于渲染 | 未渲染时 `read_target_rgba` 返回 `RenderError::NotInitialized`，不是 panic、不是空图 |
+| 透明合成 | `alpha=0.5` 的批次计入 `transparent_batches`，叠加像素与 `alpha=1.0` 不同；`alpha=0` 计入 `invisible_batches` |
+| 帧预算 | 超预算时 `FrameStats.over_budget.is_some()` 且 `skipped_batches >= 1`，不静默丢批 |
+| 设备丢失分类 | `note_device_lost(...)` 后 `render` 返回 `Err(DeviceLost)`，`is_device_lost()` 为真 |
+| 确定性 | 同一场景两次渲染的回读字节完全相同 |
+| 大坐标精度 | `local_origin` 很大而局部顶点很小时仍非背景（相对原点不丢精度） |
 
 这些都是**确定性**判据：lavapipe 上无异步时序抖动；测试不依赖具体驱动像素，只依赖
-“有没有几何 / 是不是纯背景 / 往返是否字节一致”。
+“有没有几何 / 是不是纯背景 / 往返是否字节一致”。测试在无适配器时**显式跳过并打印**，
+不会假装通过。
 
 ## 7. 已验证 / 未验证
 
 本节严格区分。**未实跑的东西不写成通过**。
 
-### 契约层已固定（本文职责）
+### 已执行（本轮，2026-10-01）
 
-- 无头接口签名与语义（§2）、设备路径（§3）、格式/对齐/sRGB 规则（§4）、运行命令（§5）、
-  测试判据（§6）已在本文冻结。
 - 依赖边界由 `scripts/check-architecture.py` 强制（wgpu 仅限 `cad-render-wgpu`），
-  `cad-cli-tools` 仅在非 wasm 目标依赖渲染器。
-- 既有渲染器的**离线**行为已有测试：未初始化 `render` 返回 `NotInitialized`
-  （`render_before_init_is_not_a_device_loss`）、设备丢失分类、WGSL 静态校验
-  （`tests/wgsl_validation.rs`）。
+  `cad-cli-tools` 仅在非 wasm 目标依赖渲染器；架构检查通过。
+- `cad-render-wgpu`：`tests/headless_render.rs` 6 通过、`tests/render_effects.rs` 6 通过、
+  单元 31 通过、`wgsl_validation` 3 通过（`VK_ICD_FILENAMES=.../lvp_icd.json`）。
+- 设备创建/回读/PNG 已在 lavapipe 上执行；`ensure_target` 的 `COPY_SRC` 已合入。
+- CLI `render` 对真实 DWG 出帧：`patient-chairs`（11855 draw call，`non_background=22381`）、
+  `lockers`、`baseline-sample`、`map-of-uae`、`canteen`（42868 draw call，2.76M 顶点，8.8s）
+  均成功并写出 PNG；无可绘制几何（`anonymous-names`/`point_object_id`）显式
+  `invalid_input`。逐项命令与数值见 `docs/validation.md`。
+- `cad-cli-tools`：单元 6 + 契约 12 通过；wasm `--lib` 仍编译（`render` 保持 `unsupported`）。
 
 ### 未验证 / 尚未执行
 
-- `headless.rs` 的实际设备创建、回读与 PNG 编码**未在本文件执行**；`render` CLI 的
-  接线由并行工作流完成。本环境禁止运行 `cargo`，无法给出通过证据。
-- `Renderer::read_target_rgba` 依赖 `ensure_target` 增加 `COPY_SRC` usage，该改动**尚未
-  在本文确认合入**。
-- §2 中参数的精确形态（`pixel` / `count_differing_from` / `distinct_colors`、
-  `encode_png` 的返回类型、`HeadlessGpu` 取得 `Renderer` 的访问器）以合入实现为准。
+- 无适配器分支（`gpu_failure`）在本机未能实际触发（强制 bogus ICD 仍回退到常驻 GL/llvmpipe
+  适配器）；该分支是结构性的（`create_headless_gpu → GpuFailure → gpu_failure → 退出 1`），
+  但**未在本机观测**。
+- 真实样张的**黄金图基线**与跨 GPU/驱动/后端的像素矩阵尚未建立。
+- 文字（Text/Instance/Image）不经本路径绘制（属各自子系统；CLI `render` 未接字体整形）。
 
 ## 8. 明确未证明
 
@@ -221,10 +238,8 @@ cargo run -p cad-cli-tools --offline -- render <input.dwg> --png /tmp/opencode/y
 - **性能**：lavapipe 是 CPU 软件渲染，其耗时**不能**用于任何性能预算或 FPS 结论
   （规范 §11.3 要求真实基准设备）。
 - **黄金图/跨后端对照**：`fixtures/manifest` 为空，任何实体兼容性与跨后端语义一致声明
-  都不成立。本轮的真实 DWG 行为证据见 `docs/validation.md`，但那是导入/表示层证据，
-  **不是**渲染黄金图。
-- **CLI `render` 的 PNG/JSON 契约闭环**：由 CLI 工作流与控制器在 `docs/cli.md`、
-  `docs/validation.md` 补齐；本文不预先宣称其通过。
+  都不成立。本轮真实 DWG 的渲染行为证据见 `docs/validation.md`，但样本未入库，且
+  **不是**授权黄金图或兼容性验收。
 
 ## 交叉引用
 
