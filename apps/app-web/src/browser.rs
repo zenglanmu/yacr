@@ -211,6 +211,19 @@ pub fn font_report() -> String {
         .unwrap_or_else(|| "字体：未加载".to_string())
 }
 
+/// Base URL the web host fetches `fonts.json` and the font faces from.
+///
+/// Defaults to the shared `mlightcad/cad-data` CDN ([`DEFAULT_FONT_BASE_URL`]).
+/// A self-contained deployment (for example Cloudflare Pages) bakes in a
+/// same-origin path at compile time with `YACR_FONT_BASE_URL=fonts/`, and
+/// `scripts/build-web.sh` copies the catalog into `web-dist/fonts/` so no
+/// cross-origin fetch is required. `scripts/build-web.sh` sets that default;
+/// a plain `cargo build` keeps the CDN.
+const WEB_FONT_BASE_URL: &str = match option_env!("YACR_FONT_BASE_URL") {
+    Some(base) => base,
+    None => DEFAULT_FONT_BASE_URL,
+};
+
 /// Fetches font bytes through the browser Fetch API (`fetch().arrayBuffer()`).
 ///
 /// Implements [`cad_platform::FontLoader`] so the catalog/plan/register
@@ -288,8 +301,7 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
         return Ok(report);
     }
 
-    let (engine, report) =
-        load_font_engine(&WebFontLoader, &requested, DEFAULT_FONT_BASE_URL).await?;
+    let (engine, report) = load_font_engine(&WebFontLoader, &requested, WEB_FONT_BASE_URL).await?;
 
     // Another drawing may have replaced this one while the fetch was in
     // flight; do not apply old fonts to the new content.

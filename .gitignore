@@ -12,6 +12,9 @@ dist/
 keystore.properties
 .local/
 
+# Cloudflare Pages/Wrangler local state (scripts/deploy-cloudflare-pages.sh)
+.wrangler/
+
 # Bundled CAD fonts for the Android APK are third-party and not committed;
 # fetch them with scripts/fetch-android-fonts.sh (see the README in that folder).
 apps/app-android/assets/fonts/*

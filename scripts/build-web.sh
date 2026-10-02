@@ -17,6 +17,15 @@ DIST="${DIST:-$ROOT/web-dist}"
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 WASM="$TARGET_DIR/wasm32-unknown-unknown/$PROFILE/app_web.wasm"
 
+# Font source baked into the wasm at compile time (`apps/app-web/src/browser.rs`
+# reads `YACR_FONT_BASE_URL`). The default is a path relative to the page, so a
+# deployed build serves the third-party fonts from `$DIST/fonts/` (copied below)
+# instead of reaching out to jsDelivr. Build a CDN-backed bundle with
+# `YACR_FONT_BASE_URL=https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts/`
+# and `WITH_FONTS=0`.
+export YACR_FONT_BASE_URL="${YACR_FONT_BASE_URL:-fonts/}"
+WITH_FONTS="${WITH_FONTS:-1}"
+
 cargo build -p app-web --target wasm32-unknown-unknown --profile "$PROFILE" --locked
 
 command -v wasm-bindgen >/dev/null || {
@@ -38,7 +47,16 @@ mkdir -p "$DIST/i18n"
 cp crates/cad-ui-slint/i18n/zh-CN.json "$DIST/i18n/zh-CN.json"
 cp crates/cad-ui-slint/i18n/en.json "$DIST/i18n/en.json"
 
+# Self-hosted third-party fonts. Downloaded (never committed: see
+# docs/fonts.md) so a deployed `web-dist/` is self-contained. `WITH_FONTS=0`
+# keeps the CDN base and leaves the directory out.
+if [ "$WITH_FONTS" = "1" ]; then
+  "$ROOT/scripts/fetch-web-fonts.sh" "$DIST/fonts"
+else
+  echo "web build: WITH_FONTS=0, using font base $YACR_FONT_BASE_URL (no local copy)"
+fi
+
 # Report the module size so regressions are visible in CI logs.
 WASM_SIZE=$(stat -c %s "$DIST/pkg/yacr_bg.wasm")
-echo "web build: $DIST (wasm ${WASM_SIZE} bytes, profile ${PROFILE})"
+echo "web build: $DIST (wasm ${WASM_SIZE} bytes, profile ${PROFILE}, font base ${YACR_FONT_BASE_URL})"
 echo "serve with: scripts/serve-web.py --directory $DIST"

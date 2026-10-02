@@ -107,6 +107,22 @@
     走同一个 `load_font_engine`。**不内置任何字体文件**（授权，见上），未打包时报告
     `ResourceMissing`（`font asset not packaged …`），不伪造空字体集。
 
+## Web 自托管（发布包）
+
+浏览器宿主在编译期读 `YACR_FONT_BASE_URL`（`apps/app-web/src/browser.rs`）决定目录/字体基址：
+未设置时回退到 `DEFAULT_FONT_BASE_URL`（jsDelivr）。`scripts/build-web.sh` 默认
+`YACR_FONT_BASE_URL=fonts/`（相对页面），并在打包时调用 `scripts/fetch-web-fonts.sh`
+把 `mlightcad/cad-data` 的 `fonts.json` 与全部字体下载进 `web-dist/fonts/`，所以
+**发布包自包含、不跨域**。需要回到 CDN 时：
+
+```bash
+YACR_FONT_BASE_URL=https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts/ \
+  WITH_FONTS=0 scripts/build-web.sh
+```
+
+字体文件仍不提交仓库（`/web-dist/` 已 ignore）；下载与再分发的授权由部署者负责。
+Cloudflare Pages 发布见 `scripts/deploy-cloudflare-pages.sh`。
+
 ## 主机取字节实现现状
 
 | 宿主 | 目录来源 | 字体字节来源 | 状态 |
