@@ -17,6 +17,9 @@
 
 use cad_domain::*;
 
+pub mod brep;
+pub use brep::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell, BrepSurface};
+
 /// Stable, locale-independent diagnostic codes emitted by this crate.
 ///
 /// These codes are part of the contract: the diagnostics layer aggregates them
@@ -27,6 +30,9 @@ pub mod codes {
     pub const KERNEL_NO_ACIS_KERNEL: &str = "kernel.no_acis_kernel";
     /// The exchange payload declares a type this adapter cannot even classify.
     pub const KERNEL_UNSUPPORTED_EXCHANGE: &str = "kernel.unsupported_exchange";
+    /// A neutral B-rep carried a face whose supporting surface (or boundary
+    /// curve) this build cannot evaluate. It is never replaced by a fake mesh.
+    pub const KERNEL_UNSUPPORTED_SURFACE: &str = "kernel.unsupported_surface";
     /// The exchange payload was present but carried no bytes.
     pub const KERNEL_EMPTY_GEOMETRY: &str = "kernel.empty_geometry";
     /// The request referenced a geometry handle that could not be resolved.
@@ -52,12 +58,16 @@ pub mod codes {
 /// The payload is kept opaque and byte-oriented on purpose: this adapter is the
 /// only place that may ever interpret it, and until an ACIS kernel is linked it
 /// stays an unresolved byte buffer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SolidExchange {
     /// ACIS SAT text.
     Sat(Vec<u8>),
     /// ACIS SAB binary.
     Sab(Vec<u8>),
+    /// Neutral B-rep lifted from a SAT/SAB payload by the importer, the only
+    /// acadrust consumer. This is what [`BrepTessellator`] evaluates; the raw
+    /// bytes are never handed to a kernel through this variant.
+    Brep(BrepData),
     /// Any other source-declared payload (for example an importer-internal
     /// opaque body). It is carried verbatim so a future decoder can be added
     /// without changing the request shape.
@@ -69,6 +79,7 @@ pub enum SolidExchange {
 pub enum ExchangeKind {
     Sat,
     Sab,
+    Brep,
     Unsupported,
 }
 
@@ -77,6 +88,7 @@ impl ExchangeKind {
         match self {
             ExchangeKind::Sat => "sat",
             ExchangeKind::Sab => "sab",
+            ExchangeKind::Brep => "brep",
             ExchangeKind::Unsupported => "unsupported",
         }
     }
@@ -87,6 +99,7 @@ impl SolidExchange {
         match self {
             SolidExchange::Sat(_) => ExchangeKind::Sat,
             SolidExchange::Sab(_) => ExchangeKind::Sab,
+            SolidExchange::Brep(_) => ExchangeKind::Brep,
             SolidExchange::Unsupported { .. } => ExchangeKind::Unsupported,
         }
     }
@@ -98,14 +111,19 @@ impl SolidExchange {
     pub fn is_empty(&self) -> bool {
         match self {
             SolidExchange::Sat(bytes) | SolidExchange::Sab(bytes) => bytes.is_empty(),
+            SolidExchange::Brep(brep) => brep.is_empty(),
             SolidExchange::Unsupported { data, .. } => data.is_empty(),
         }
     }
 
     /// Byte length of the payload, for budget and diagnostic reporting.
+    ///
+    /// A neutral B-rep has no byte payload of its own; its size is its face
+    /// count, so the byte-oriented callers still get a meaningful number.
     pub fn len(&self) -> usize {
         match self {
             SolidExchange::Sat(bytes) | SolidExchange::Sab(bytes) => bytes.len(),
+            SolidExchange::Brep(brep) => brep.face_count(),
             SolidExchange::Unsupported { data, .. } => data.len(),
         }
     }
@@ -115,6 +133,7 @@ impl SolidExchange {
         match self {
             SolidExchange::Sat(_) => "acis.sat",
             SolidExchange::Sab(_) => "acis.sab",
+            SolidExchange::Brep(_) => "acis.brep",
             SolidExchange::Unsupported { type_key, .. } => type_key,
         }
     }
@@ -598,17 +617,351 @@ impl SolidTessellator for NoKernelTessellator {
             ));
         }
 
-        // SAT/SAB with bytes: the honest reason is that no ACIS kernel exists.
+        // Any remaining non-empty payload (raw SAT/SAB bytes or a neutral
+        // B-rep): this conservative default evaluates none of them and never
+        // fabricates a mesh. Opting into the documented subset means using
+        // `BrepTessellator`.
         Ok(Self::unsupported(
             &request.stamp,
             request.exchange.kind(),
             codes::KERNEL_NO_ACIS_KERNEL,
             format!(
-                "this build links no ACIS kernel; {} payload cannot be tessellated",
+                "this build's default kernel evaluates no ACIS payload; {} payload left unsupported",
                 request.exchange.kind().as_str()
             ),
         ))
     }
+}
+
+/// The real, acadrust-free tessellator for a neutral [`BrepData`] payload.
+///
+/// It evaluates the documented subset (planar faces with holes, full spheres,
+/// full tori and full cylindrical strips) and reports everything else as a
+/// missing face. It deliberately does **not** parse SAT/SAB bytes: only the
+/// importer may do that. A raw `Sat`/`Sab` payload therefore stays
+/// `Unsupported(kernel.no_acis_kernel)` even here.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct BrepTessellator;
+
+impl BrepTessellator {
+    fn failed(stamp: &TaskStamp, code: &str, message: String) -> TessellationResult {
+        TessellationResult {
+            stamp: stamp.clone(),
+            outcome: TessellationOutcome::Failed {
+                diagnostics: vec![Diagnostic {
+                    code: code.to_string(),
+                    object: None,
+                    message,
+                }],
+            },
+        }
+    }
+
+    fn unsupported(
+        stamp: &TaskStamp,
+        exchange: ExchangeKind,
+        code: &str,
+        detail: String,
+    ) -> TessellationResult {
+        TessellationResult {
+            stamp: stamp.clone(),
+            outcome: TessellationOutcome::Unsupported {
+                reason: UnsupportedReason {
+                    code: code.to_string(),
+                    exchange,
+                    detail,
+                },
+            },
+        }
+    }
+}
+
+impl SolidTessellator for BrepTessellator {
+    fn registration(&self) -> Registration {
+        Registration {
+            type_key: "yacr.kernel.brep".into(),
+            version: 1,
+            priority: 1,
+            entity_types: vec![
+                "3DSOLID".into(),
+                "BODY".into(),
+                "REGION".into(),
+                "SURFACE".into(),
+            ],
+            capabilities: vec![
+                "planar-faces".into(),
+                "planar-faces-with-holes".into(),
+                "spherical-faces".into(),
+                "toroidal-faces".into(),
+                "cylindrical-faces".into(),
+            ],
+        }
+    }
+
+    fn tessellate(
+        &self,
+        request: &TessellationRequest,
+        cancelled: &dyn Fn() -> bool,
+    ) -> CadResult<TessellationResult> {
+        if cancelled() {
+            return Err(CadError::Cancelled);
+        }
+        request
+            .validate()
+            .map_err(|e| CadError::InvalidInput(e.to_string()))?;
+
+        if let GeometryHandle::Missing { key } = &request.geometry {
+            return Ok(Self::failed(
+                &request.stamp,
+                codes::KERNEL_MISSING_HANDLE,
+                format!("geometry handle '{key}' could not be resolved"),
+            ));
+        }
+        if request.exchange.is_empty() {
+            return Ok(Self::failed(
+                &request.stamp,
+                codes::KERNEL_EMPTY_GEOMETRY,
+                format!(
+                    "{} payload carried no geometry",
+                    request.exchange.type_key()
+                ),
+            ));
+        }
+
+        match &request.exchange {
+            SolidExchange::Brep(brep) => Ok(tessellate_brep(request, brep)),
+            SolidExchange::Sat(_) | SolidExchange::Sab(_) => Ok(Self::unsupported(
+                &request.stamp,
+                request.exchange.kind(),
+                codes::KERNEL_NO_ACIS_KERNEL,
+                "raw SAT/SAB bytes are lifted by the importer, not by this tessellator".into(),
+            )),
+            SolidExchange::Unsupported { .. } => Ok(Self::unsupported(
+                &request.stamp,
+                ExchangeKind::Unsupported,
+                codes::KERNEL_UNSUPPORTED_EXCHANGE,
+                format!(
+                    "no decoder registered for exchange type '{}'",
+                    request.exchange.type_key()
+                ),
+            )),
+        }
+    }
+}
+
+/// Tessellate a neutral B-rep, enforcing the request budget and reporting
+/// degradation exactly (missing faces, open edges, dropped shells).
+fn tessellate_brep(request: &TessellationRequest, brep: &BrepData) -> TessellationResult {
+    let tol = request.tolerance;
+    let placement = brep.placement.unwrap_or_else(BrepPlacement::identity);
+
+    let mut vertices: Vec<Point3> = Vec::new();
+    let mut normals: Vec<Point3> = Vec::new();
+    let mut triangles: Vec<[u32; 3]> = Vec::new();
+    let mut face_sources: Vec<Option<SubElementId>> = Vec::new();
+    let mut edges: Vec<Vec<Point3>> = Vec::new();
+    let mut missing_faces: Vec<FaceRef> = Vec::new();
+    let mut dropped_shells: Vec<ShellRef> = Vec::new();
+    let mut all_unsupported = true;
+    let mut all_planar = true;
+    let mut error_bound = 0.0f64;
+
+    for shell in &brep.shells {
+        let mut shell_triangles = 0usize;
+        for face in &shell.faces {
+            match brep::tessellate_face(face, tol.linear_deflection, tol.angular_deflection) {
+                Ok(fm) => {
+                    if fm.curved {
+                        all_planar = false;
+                        error_bound = error_bound.max(fm.error_bound.unwrap_or(0.0));
+                    }
+                    let base = vertices.len() as u32;
+                    let produced = fm.triangles.len();
+                    for t in &fm.triangles {
+                        triangles.push([base + t[0], base + t[1], base + t[2]]);
+                        face_sources.push(None);
+                    }
+                    vertices.extend(fm.vertices.iter().map(|p| placement.apply(*p)));
+                    normals.extend(fm.normals.iter().map(|n| placement.apply_direction(*n)));
+                    for edge in fm.edges {
+                        edges.push(edge.iter().map(|p| placement.apply(*p)).collect());
+                    }
+                    shell_triangles += produced;
+                }
+                Err(failure) => {
+                    if !failure.is_unsupported() {
+                        all_unsupported = false;
+                    }
+                    missing_faces.push(FaceRef {
+                        id: face.id,
+                        reason: failure.reason(),
+                    });
+                }
+            }
+        }
+        if shell_triangles == 0 {
+            dropped_shells.push(ShellRef {
+                id: shell.id,
+                reason: "no face in the shell could be tessellated".into(),
+            });
+        }
+    }
+
+    // No usable facet set is never a success.
+    if triangles.is_empty() {
+        if missing_faces.is_empty() {
+            return BrepTessellator::failed(
+                &request.stamp,
+                codes::KERNEL_EMPTY_GEOMETRY,
+                "neutral B-rep carried no tessellatable face".into(),
+            );
+        }
+        if all_unsupported {
+            let detail = missing_faces
+                .iter()
+                .map(|f| f.reason.as_str())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return BrepTessellator::unsupported(
+                &request.stamp,
+                ExchangeKind::Brep,
+                codes::KERNEL_UNSUPPORTED_SURFACE,
+                detail,
+            );
+        }
+        let diagnostics = TessellationDegradation {
+            missing_faces,
+            ..TessellationDegradation::default()
+        }
+        .diagnostics();
+        return TessellationResult {
+            stamp: request.stamp.clone(),
+            outcome: TessellationOutcome::Failed { diagnostics },
+        };
+    }
+
+    let open_edges = detect_open_edges(&vertices, &triangles);
+    let precision = if all_planar {
+        Precision::Analytic
+    } else {
+        Precision::Approximate {
+            error_bound: Some(error_bound),
+        }
+    };
+    let mesh = TessellationMesh {
+        mesh: Mesh {
+            vertices,
+            triangles,
+            normals,
+            face_sources,
+        },
+        edges,
+        precision,
+    };
+
+    if let Err(diagnostic) = request.budget.check(&mesh) {
+        return TessellationResult {
+            stamp: request.stamp.clone(),
+            outcome: TessellationOutcome::Failed {
+                diagnostics: vec![diagnostic],
+            },
+        };
+    }
+
+    let degradation = TessellationDegradation {
+        missing_faces,
+        open_edges,
+        dropped_shells,
+    };
+    if degradation.is_empty() {
+        TessellationResult {
+            stamp: request.stamp.clone(),
+            outcome: TessellationOutcome::Success {
+                geometry: mesh,
+                diagnostics: Vec::new(),
+            },
+        }
+    } else {
+        let diagnostics = degradation.diagnostics();
+        TessellationResult {
+            stamp: request.stamp.clone(),
+            outcome: TessellationOutcome::Partial {
+                geometry: mesh,
+                degradation,
+                diagnostics,
+            },
+        }
+    }
+}
+
+/// Detect positional edges not shared by exactly two facets (open or
+/// non-manifold) after welding coincident vertices within a relative epsilon.
+fn detect_open_edges(vertices: &[Point3], triangles: &[[u32; 3]]) -> Vec<EdgeRef> {
+    use std::collections::HashMap;
+    if vertices.is_empty() {
+        return Vec::new();
+    }
+    let (mut min, mut max) = (vertices[0], vertices[0]);
+    for p in vertices {
+        min = Point3 {
+            x: min.x.min(p.x),
+            y: min.y.min(p.y),
+            z: min.z.min(p.z),
+        };
+        max = Point3 {
+            x: max.x.max(p.x),
+            y: max.y.max(p.y),
+            z: max.z.max(p.z),
+        };
+    }
+    let diag = {
+        let d = brep::sub(max, min);
+        brep::length(d)
+    };
+    let eps = (1e-9 * diag.max(1.0)).max(1e-12);
+    let key = |p: Point3| -> (i64, i64, i64) {
+        (
+            (p.x / eps).round() as i64,
+            (p.y / eps).round() as i64,
+            (p.z / eps).round() as i64,
+        )
+    };
+    let mut weld: HashMap<(i64, i64, i64), u32> = HashMap::new();
+    let mut welded = Vec::with_capacity(vertices.len());
+    for p in vertices {
+        let k = key(*p);
+        let id = *weld.entry(k).or_insert_with(|| welded.len() as u32);
+        welded.push(id);
+    }
+    let mut counts: HashMap<(u32, u32), u32> = HashMap::new();
+    for t in triangles {
+        let w = [
+            welded[t[0] as usize],
+            welded[t[1] as usize],
+            welded[t[2] as usize],
+        ];
+        for e in [(w[0], w[1]), (w[1], w[2]), (w[2], w[0])] {
+            let k = if e.0 <= e.1 { (e.0, e.1) } else { (e.1, e.0) };
+            *counts.entry(k).or_insert(0) += 1;
+        }
+    }
+    let mut open: Vec<EdgeRef> = counts
+        .into_iter()
+        .filter(|(_, c)| *c != 2)
+        .map(|(_, c)| EdgeRef {
+            id: 0,
+            reason: if c == 1 {
+                "boundary edge used by a single facet".to_string()
+            } else {
+                format!("non-manifold edge shared by {c} facets")
+            },
+        })
+        .collect();
+    open.sort_by(|a, b| a.reason.cmp(&b.reason));
+    for (i, e) in open.iter_mut().enumerate() {
+        e.id = i as u32;
+    }
+    open
 }
 
 /// Entry point: tessellate `request` with `tessellator`, tagging the result with
@@ -862,5 +1215,302 @@ mod tests {
         let registration = NoKernelTessellator.registration();
         assert_eq!(registration.type_key, "yacr.kernel.unsupported");
         assert!(registration.capabilities.is_empty());
+    }
+
+    // ---- Neutral B-rep tessellation (real mesh subset) ----
+
+    fn pt(x: f64, y: f64, z: f64) -> Point3 {
+        Point3 { x, y, z }
+    }
+
+    fn line_loop(pts: &[[f64; 3]]) -> BrepLoop {
+        BrepLoop {
+            edges: (0..pts.len())
+                .map(|i| {
+                    let a = pts[i];
+                    let b = pts[(i + 1) % pts.len()];
+                    BrepCurve::Line {
+                        start: pt(a[0], a[1], a[2]),
+                        end: pt(b[0], b[1], b[2]),
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    fn plane_face(id: u32, origin: [f64; 3], normal: [f64; 3], loop_pts: &[[f64; 3]]) -> BrepFace {
+        BrepFace {
+            id,
+            surface: BrepSurface::Plane {
+                origin: pt(origin[0], origin[1], origin[2]),
+                normal: pt(normal[0], normal[1], normal[2]),
+                u_dir: pt(1.0, 0.0, 0.0),
+            },
+            reversed: false,
+            loops: vec![line_loop(loop_pts)],
+        }
+    }
+
+    fn cube_brep(size: f64) -> BrepData {
+        let s = size;
+        let faces = vec![
+            plane_face(
+                0,
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, -1.0],
+                &[[0.0, 0.0, 0.0], [0.0, s, 0.0], [s, s, 0.0], [s, 0.0, 0.0]],
+            ),
+            plane_face(
+                1,
+                [0.0, 0.0, s],
+                [0.0, 0.0, 1.0],
+                &[[0.0, 0.0, s], [s, 0.0, s], [s, s, s], [0.0, s, s]],
+            ),
+            plane_face(
+                2,
+                [0.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0],
+                &[[0.0, 0.0, 0.0], [0.0, 0.0, s], [0.0, s, s], [0.0, s, 0.0]],
+            ),
+            plane_face(
+                3,
+                [s, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                &[[s, 0.0, 0.0], [s, s, 0.0], [s, s, s], [s, 0.0, s]],
+            ),
+            plane_face(
+                4,
+                [0.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+                &[[0.0, 0.0, 0.0], [s, 0.0, 0.0], [s, 0.0, s], [0.0, 0.0, s]],
+            ),
+            plane_face(
+                5,
+                [0.0, s, 0.0],
+                [0.0, 1.0, 0.0],
+                &[[0.0, s, 0.0], [0.0, s, s], [s, s, s], [s, s, 0.0]],
+            ),
+        ];
+        BrepData {
+            shells: vec![BrepShell { id: 0, faces }],
+            placement: None,
+        }
+    }
+
+    fn brep_request(brep: BrepData) -> TessellationRequest {
+        request(SolidExchange::Brep(brep))
+    }
+
+    #[test]
+    fn brep_cube_is_a_closed_success() {
+        let req = brep_request(cube_brep(1.0));
+        let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+        let mesh = result.outcome.mesh().expect("cube must produce a mesh");
+        assert_eq!(mesh.triangle_count(), 12, "cube face count / triangles");
+        assert_eq!(mesh.precision, Precision::Analytic);
+        let area = brep::mesh_area(&mesh.mesh);
+        assert!((area - 6.0).abs() < 1e-9, "cube area {area}");
+        assert!(matches!(
+            result.outcome,
+            TessellationOutcome::Success { .. }
+        ));
+    }
+
+    #[test]
+    fn brep_cube_placement_is_applied() {
+        let mut brep = cube_brep(1.0);
+        brep.placement = Some(BrepPlacement {
+            matrix: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            translation: pt(10.0, 0.0, 0.0),
+            scale: 1.0,
+        });
+        let req = brep_request(brep);
+        let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+        let mesh = result.outcome.mesh().unwrap();
+        assert!(mesh.mesh.vertices.iter().all(|p| p.x >= 10.0 - 1e-9));
+    }
+
+    #[test]
+    fn brep_sphere_is_closed_and_monotone_in_tolerance() {
+        let sphere = |tolerance: f64| {
+            let brep = BrepData {
+                shells: vec![BrepShell {
+                    id: 0,
+                    faces: vec![BrepFace {
+                        id: 0,
+                        surface: BrepSurface::Sphere {
+                            center: pt(0.0, 0.0, 0.0),
+                            radius: 1.0,
+                            u_dir: pt(1.0, 0.0, 0.0),
+                            pole: pt(0.0, 0.0, 1.0),
+                        },
+                        reversed: false,
+                        loops: Vec::new(),
+                    }],
+                }],
+                placement: None,
+            };
+            let mut req = brep_request(brep);
+            req.tolerance.linear_deflection = tolerance;
+            let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+            assert!(
+                matches!(result.outcome, TessellationOutcome::Success { .. }),
+                "sphere must be a closed success: {:?}",
+                result.outcome
+            );
+            let mesh = result.outcome.mesh().unwrap();
+            assert!(mesh.triangle_count() > 0);
+            let err = match mesh.precision {
+                Precision::Approximate {
+                    error_bound: Some(e),
+                } => e,
+                ref other => panic!("sphere must report a chordal bound, got {other:?}"),
+            };
+            (mesh.triangle_count(), err)
+        };
+        let (coarse_tris, coarse_err) = sphere(0.5);
+        let (fine_tris, fine_err) = sphere(0.05);
+        assert!(
+            fine_tris >= coarse_tris,
+            "finer tolerance must not coarsen: {fine_tris} < {coarse_tris}"
+        );
+        assert!(
+            fine_err <= coarse_err + 1e-12,
+            "finer tolerance must not increase error: {fine_err} > {coarse_err}"
+        );
+    }
+
+    #[test]
+    fn brep_budget_exceeded_is_reported_not_truncated() {
+        let mut brep = BrepData::default();
+        brep.shells.push(BrepShell {
+            id: 0,
+            faces: vec![BrepFace {
+                id: 0,
+                surface: BrepSurface::Sphere {
+                    center: pt(0.0, 0.0, 0.0),
+                    radius: 1.0,
+                    u_dir: pt(1.0, 0.0, 0.0),
+                    pole: pt(0.0, 0.0, 1.0),
+                },
+                reversed: false,
+                loops: Vec::new(),
+            }],
+        });
+        let mut req = brep_request(brep);
+        req.budget.max_faces = 2;
+        let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+        let TessellationOutcome::Failed { diagnostics } = result.outcome else {
+            panic!("over-budget sphere must fail, not truncate");
+        };
+        assert_eq!(diagnostics[0].code, codes::KERNEL_BUDGET_EXCEEDED);
+    }
+
+    #[test]
+    fn brep_partial_reports_missing_face_and_open_edge() {
+        // A lone planar square plus one unsupported face: usable facets, with
+        // the unsupported face and the square's open boundary both explicit.
+        let brep = BrepData {
+            shells: vec![BrepShell {
+                id: 7,
+                faces: vec![
+                    plane_face(
+                        0,
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0],
+                        &[
+                            [0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0],
+                            [1.0, 1.0, 0.0],
+                            [0.0, 1.0, 0.0],
+                        ],
+                    ),
+                    BrepFace {
+                        id: 5,
+                        surface: BrepSurface::Unsupported {
+                            type_key: "nurbs-surface".into(),
+                        },
+                        reversed: false,
+                        loops: Vec::new(),
+                    },
+                ],
+            }],
+            placement: None,
+        };
+        let req = brep_request(brep);
+        let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+        let TessellationOutcome::Partial {
+            geometry,
+            degradation,
+            diagnostics,
+        } = result.outcome
+        else {
+            panic!("expected Partial, got a different outcome");
+        };
+        assert_eq!(geometry.triangle_count(), 2);
+        assert_eq!(degradation.missing_faces.len(), 1);
+        assert_eq!(degradation.missing_faces[0].id, 5);
+        assert!(!degradation.open_edges.is_empty());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.code == codes::KERNEL_MISSING_FACE));
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.code == codes::KERNEL_OPEN_EDGE));
+    }
+
+    #[test]
+    fn brep_all_unsupported_is_unsupported_not_empty_success() {
+        let brep = BrepData {
+            shells: vec![BrepShell {
+                id: 0,
+                faces: vec![BrepFace {
+                    id: 0,
+                    surface: BrepSurface::Unsupported {
+                        type_key: "spline-surface".into(),
+                    },
+                    reversed: false,
+                    loops: Vec::new(),
+                }],
+            }],
+            placement: None,
+        };
+        let req = brep_request(brep);
+        let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+        let TessellationOutcome::Unsupported { reason } = result.outcome else {
+            panic!("all-unsupported B-rep must be Unsupported");
+        };
+        assert_eq!(reason.code, codes::KERNEL_UNSUPPORTED_SURFACE);
+        assert!(!reason.detail.is_empty());
+    }
+
+    #[test]
+    fn empty_brep_is_failed_not_success() {
+        let req = brep_request(BrepData::default());
+        let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+        let TessellationOutcome::Failed { diagnostics } = result.outcome else {
+            panic!("empty B-rep must fail");
+        };
+        assert_eq!(diagnostics[0].code, codes::KERNEL_EMPTY_GEOMETRY);
+    }
+
+    #[test]
+    fn brep_tessellator_never_parses_raw_bytes() {
+        let req = request(SolidExchange::Sat(b"ACIS ...".to_vec()));
+        let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+        let TessellationOutcome::Unsupported { reason } = result.outcome else {
+            panic!("raw SAT must stay unsupported");
+        };
+        assert_eq!(reason.code, codes::KERNEL_NO_ACIS_KERNEL);
+        assert_eq!(reason.exchange, ExchangeKind::Sat);
+    }
+
+    #[test]
+    fn brep_tessellator_honours_cancellation() {
+        let req = brep_request(cube_brep(1.0));
+        assert_eq!(
+            BrepTessellator.tessellate(&req, &|| true).unwrap_err(),
+            CadError::Cancelled
+        );
     }
 }

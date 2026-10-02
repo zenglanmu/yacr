@@ -15,6 +15,7 @@ cad-proxy.workspace = true
 cad-resources.workspace = true
 cad-diagnostics.workspace = true
 cad-geometry.workspace = true
+cad-kernel-adapter.workspace = true
 acadrust.workspace = true
 serde.workspace = true
 thiserror.workspace = true

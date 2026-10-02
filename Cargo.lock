@@ -823,6 +823,7 @@ dependencies = [
  "cad-diagnostics",
  "cad-domain",
  "cad-geometry",
+ "cad-kernel-adapter",
  "cad-proxy",
  "cad-resources",
  "getrandom 0.3.4",
