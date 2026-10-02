@@ -66,8 +66,12 @@ pub struct BrepFace {
   洞边界可为直线或完整圆。
 * **完整圆**（`ellipse-curve` 且 `ratio == 1` 且首尾顶点相同）。
 * **球面**：无环（`first_loop == NULL`）、覆盖完整参数域的单面。
-* **圆环面（torus）**：同上，完整参数域单面。
+* **圆环面（torus）**：同上，完整参数域单面；外/内主方向的环带分别采样。
 * **圆柱侧面**：`cone-surface` 且 `sin(half_angle) == 0`，由两个完整圆环围成。
+* **圆锥侧面**（`cone-surface` 且 `sin(half_angle) != 0`）：
+  * **完整圆锥**：一个底面圆环 + 顶点奇点环，扇形三角化到顶点；
+  * **截头圆锥**（frustum）：两个完整圆环，沿母线 zipper 缝合；两环
+    采样点数不同时仍按角序合并，闭合处回绕到起点而非夹紧到末点。
 
 离散细节：
 
@@ -82,10 +86,12 @@ pub struct BrepFace {
 
 ## 5. 明确 Unsupported（返回缺面，不伪造）
 
-* `cone-surface` 且 `sin(half_angle) != 0`（圆锥侧面，含退化的顶点环）。
+* `cone-surface` 且 `cos(half_angle) == 0`（零锥角退化为平面），或
+  `sin(half_angle) == 0` 且无法按圆柱处理者。
 * 部分圆弧 / 椭圆（`ratio != 1` / 首尾顶点不同）。
 * NURBS / spline / mesh 等未建模曲面。
 * 带修剪环（trimming loops）的球面或环面。
+* 圆锥侧面不是由一个底面圆 + 顶点、或两个完整圆围成（例如带修剪）。
 * 无曲线记录的退化边（例如圆锥顶点奇点边）。
 * 当整个 B-rep 无任何可离散面且失败原因均为“不支持”时，整体返回
   `Unsupported(kernel.unsupported_surface)`，而不是空网格。
@@ -161,7 +167,10 @@ alpha)` 把 `TessellationResult` 转为显示图元：
 | `box-with-square-hole.sat` | `Success`，10 面（含内环洞），面积 392，闭合 |
 | `cylinder.sat` | `Success`（两圆盖 + 圆柱侧面），带弦高上界 |
 | `sphere.sat` | `Success`，单面无环 |
-| `cone-unsupported.sat` | `Partial` + `kernel.missing_face`（圆锥侧面不支持） |
+| `cone.sat` | `Success`（底面圆盖 + 圆锥侧面扇形到顶点），闭合 |
+| `torus.sat` | `Success`（完整环形圆环面），闭合 |
+
+截头圆锥（两个完整圆环的圆锥侧面）由单元测试覆盖，未单独提供夹具。
 
 覆盖：立方体三角形数/面积/闭合性、球面容差单调性、空载荷、未解析句柄、
 未知交换、取消、超预算、无法离散的面 → `Partial` + `kernel.missing_face`、

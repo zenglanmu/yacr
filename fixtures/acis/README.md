@@ -15,7 +15,8 @@ They pin the neutral B-rep lift and the documented tessellation subset in
 | `box-with-square-hole.sat` | planar faces with inner loops (holes) → closed mesh |
 | `cylinder.sat` | two planar circular caps + one full cylindrical side |
 | `sphere.sat` | one loop-less spherical face (full parameter domain) |
-| `cone-unsupported.sat` | planar base + unsupported cone side → `Partial`/missing face |
+| `cone.sat` | planar base + full conical side fanned to the apex → `Success` |
+| `torus.sat` | one loop-less annular torus (major/minor radii) |
 
 Regenerate with:
 

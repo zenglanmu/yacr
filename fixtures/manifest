@@ -102,8 +102,8 @@
       ]
     },
     {
-      "id": "synthetic-acis-cone-unsupported",
-      "path": "fixtures/acis/cone-unsupported.sat",
+      "id": "synthetic-acis-cone",
+      "path": "fixtures/acis/cone.sat",
       "sha256": "66295a748794e323549e0b2dd6117b80c6d0748c54eb7619ffd402aa5cc2bc7d",
       "dwg_version": "n/a",
       "source": "synthetic, authored in this repo (acadrust build_cone primitive)",
@@ -115,10 +115,30 @@
       "authorized": true,
       "synthetic": true,
       "entity_types": ["3DSOLID"],
-      "expected": "partial",
+      "expected": "success",
       "known_limits": [
-        "The cone side (non-zero half-angle) stays Unsupported and is reported as a missing face.",
-        "Only the planar base disc is tessellated; not compatibility evidence."
+        "Full cone (planar base + lateral surface fanned to the apex); truncated cones are covered by unit tests.",
+        "Tessellation is an approximation with a chordal error bound on the circular direction."
+      ]
+    },
+    {
+      "id": "synthetic-acis-torus",
+      "path": "fixtures/acis/torus.sat",
+      "sha256": "7cafe00cd5ad353ffdbe5f2e4b2c2c966c0b645d3ea4bac258c9a4b9384f9752",
+      "dwg_version": "n/a",
+      "source": "synthetic, authored in this repo (acadrust build_torus primitive)",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": ["3DSOLID"],
+      "expected": "success",
+      "known_limits": [
+        "Untrimmed annular torus only (major/minor radii, full parameter domain).",
+        "Tessellation samples both principal curvatures with a reported chordal error bound."
       ]
     },
     {

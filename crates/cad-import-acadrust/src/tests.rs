@@ -1623,23 +1623,114 @@ fn sphere_lifts_to_one_loopless_face_and_tessellates() {
 }
 
 #[test]
-fn cone_reports_the_unsupported_side_face_not_a_fake_mesh() {
+fn cone_lifts_to_a_base_cap_and_a_lateral_face_that_tessellates_closed() {
     use acadrust::entities::acis::primitives::build_cone;
     let doc = build_cone([0.0, 0.0, 0.0], 1.0, 2.0);
     let brep = sat_to_brep(&doc);
-    let result = tess_brep(SolidExchange::Brep(brep));
-    match result.outcome {
-        TessellationOutcome::Partial {
-            geometry,
-            degradation,
-            ..
-        } => {
-            assert!(geometry.triangle_count() > 0, "the base disc still draws");
-            assert!(!degradation.missing_faces.is_empty());
+    assert_eq!(brep.face_count(), 2, "base cap plus lateral face");
+    assert!(brep
+        .shells
+        .iter()
+        .flat_map(|s| &s.faces)
+        .any(|f| matches!(f.surface, BrepSurface::Cone { .. })));
+    match tess_brep(SolidExchange::Brep(brep)).outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert!(geometry.triangle_count() > 0, "the cone must tessellate");
+            // The curved lateral face makes it an approximation with a bound.
+            assert!(matches!(
+                geometry.precision,
+                Precision::Approximate {
+                    error_bound: Some(_)
+                }
+            ));
+            // The planar base plus the lateral fan weld into a closed shell.
+            let open = cad_kernel_adapter::brep::count_open_edges(&geometry.mesh);
+            assert_eq!(open, 0, "cone shell must be watertight");
         }
-        // A future build that learns cones may return Success; a fabricated
-        // mesh is the only wrong answer, and that cannot be represented.
-        other => panic!("cone must be Partial with a missing face, got {other:?}"),
+        other => panic!("cone must be a closed Success, got {other:?}"),
+    }
+}
+
+#[test]
+fn torus_lifts_to_one_loopless_face_and_tessellates_closed() {
+    use acadrust::entities::acis::primitives::build_torus;
+    let doc = build_torus([0.0, 0.0, 0.0], 3.0, 1.0);
+    let brep = sat_to_brep(&doc);
+    assert_eq!(brep.face_count(), 1);
+    assert!(matches!(
+        brep.shells[0].faces[0].surface,
+        BrepSurface::Torus { .. }
+    ));
+    match tess_brep(SolidExchange::Brep(brep)).outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert!(geometry.triangle_count() > 0);
+            assert!(matches!(
+                geometry.precision,
+                Precision::Approximate {
+                    error_bound: Some(_)
+                }
+            ));
+            let open = cad_kernel_adapter::brep::count_open_edges(&geometry.mesh);
+            assert_eq!(open, 0, "torus seam must close");
+        }
+        other => panic!("torus must be a closed Success, got {other:?}"),
+    }
+}
+
+#[test]
+fn fixture_cone_is_a_closed_success() {
+    let sat = include_str!("../../../fixtures/acis/cone.sat");
+    let doc = acadrust::entities::acis::SatDocument::parse(sat).expect("fixture parses");
+    let brep = sat_to_brep(&doc);
+    assert_eq!(brep.face_count(), 2);
+    match tess_brep(SolidExchange::Brep(brep)).outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert!(geometry.triangle_count() > 0);
+            let open = cad_kernel_adapter::brep::count_open_edges(&geometry.mesh);
+            assert_eq!(open, 0, "cone fixture must be watertight");
+        }
+        other => panic!("cone fixture must be a closed Success, got {other:?}"),
+    }
+}
+
+#[test]
+fn fixture_truncated_cone_is_a_closed_success() {
+    let sat = include_str!("../../../fixtures/acis/cone-truncated.sat");
+    let doc = acadrust::entities::acis::SatDocument::parse(sat).expect("fixture parses");
+    let brep = sat_to_brep(&doc);
+    assert_eq!(
+        brep.face_count(),
+        3,
+        "two circular caps plus the frustum side"
+    );
+    assert!(brep
+        .shells
+        .iter()
+        .flat_map(|s| &s.faces)
+        .any(|f| matches!(f.surface, BrepSurface::Cone { .. }) && f.loops.len() == 2));
+    match tess_brep(SolidExchange::Brep(brep)).outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert!(geometry.triangle_count() > 0);
+            let open = cad_kernel_adapter::brep::count_open_edges(&geometry.mesh);
+            assert_eq!(open, 0, "truncated cone fixture must be watertight");
+        }
+        other => panic!("truncated cone fixture must be a closed Success, got {other:?}"),
+    }
+}
+
+#[test]
+fn fixture_torus_is_a_closed_success() {
+    let sat = include_str!("../../../fixtures/acis/torus.sat");
+    let doc = acadrust::entities::acis::SatDocument::parse(sat).expect("fixture parses");
+    let brep = sat_to_brep(&doc);
+    assert_eq!(brep.face_count(), 1);
+    match tess_brep(SolidExchange::Brep(brep)).outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert!(geometry.triangle_count() > 0);
+            let open = cad_kernel_adapter::brep::count_open_edges(&geometry.mesh);
+            assert_eq!(open, 0, "torus fixture must be watertight");
+        }
+        other => panic!("torus fixture must be a closed Success, got {other:?}"),
     }
 }
 

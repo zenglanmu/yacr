@@ -64,6 +64,7 @@ impl SolidTessellator for BrepTessellator {
                 "spherical-faces".into(),
                 "toroidal-faces".into(),
                 "cylindrical-faces".into(),
+                "conical-faces".into(),
             ],
         }
     }
@@ -267,7 +268,7 @@ fn tessellate_brep(request: &TessellationRequest, brep: &BrepData) -> Tessellati
 
 /// Detect positional edges not shared by exactly two facets (open or
 /// non-manifold) after welding coincident vertices within a relative epsilon.
-fn detect_open_edges(vertices: &[Point3], triangles: &[[u32; 3]]) -> Vec<EdgeRef> {
+pub(crate) fn detect_open_edges(vertices: &[Point3], triangles: &[[u32; 3]]) -> Vec<EdgeRef> {
     use std::collections::HashMap;
     if vertices.is_empty() {
         return Vec::new();
