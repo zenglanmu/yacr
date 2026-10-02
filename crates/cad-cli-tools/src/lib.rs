@@ -130,9 +130,20 @@ pub struct CliInvocation {
     pub fonts: Vec<(String, PathBuf)>,
     /// Optional file that receives the JSON result atomically.
     pub out: Option<PathBuf>,
+    /// Optional PNG that `render` writes the offscreen frame to.
+    pub png: Option<PathBuf>,
+    /// Offscreen frame width in pixels for `render`.
+    pub render_width: u32,
+    /// Offscreen frame height in pixels for `render`.
+    pub render_height: u32,
     /// Locale for human-facing stderr messages (never machine output).
     pub locale: Locale,
 }
+
+/// Default offscreen frame width for `render`.
+pub const DEFAULT_RENDER_WIDTH: u32 = 1280;
+/// Default offscreen frame height for `render`.
+pub const DEFAULT_RENDER_HEIGHT: u32 = 720;
 
 impl CliInvocation {
     pub fn new(operation: CliOperation, input: impl Into<PathBuf>) -> Self {
@@ -145,6 +156,9 @@ impl CliInvocation {
             allow_fingerprint_mismatch: false,
             fonts: Vec::new(),
             out: None,
+            png: None,
+            render_width: DEFAULT_RENDER_WIDTH,
+            render_height: DEFAULT_RENDER_HEIGHT,
             locale: Locale::default(),
         }
     }
@@ -595,6 +609,26 @@ fn run_import_notes(
     }))
 }
 
+/// The representation context shared by `build-representation` and `render`.
+///
+/// Both must build from the same provider registry, document id, tolerance
+/// policy and task stamp; only this constructor is allowed to define that, so
+/// the two paths cannot silently drift apart.
+fn representation_context(
+    controller: &HostController,
+    fonts: Option<&Arc<cad_representation::FontEngine>>,
+) -> cad_representation::RepresentationContext {
+    let mut context = cad_representation::RepresentationContext::new(
+        controller.document_id,
+        TolerancePolicy::default(),
+        TaskStamp::new(controller.document_id, controller.session.generation),
+    );
+    if let Some(fonts) = fonts {
+        context = context.with_fonts(fonts.clone());
+    }
+    context
+}
+
 fn run_build_representation(
     controller: &HostController,
     fonts: Option<&Arc<cad_representation::FontEngine>>,
@@ -606,14 +640,7 @@ fn run_build_representation(
         .get(&controller.document_id)
         .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
     let registry = cad_representation::ProviderRegistry::with_default_provider();
-    let mut context = cad_representation::RepresentationContext::new(
-        controller.document_id,
-        TolerancePolicy::default(),
-        TaskStamp::new(controller.document_id, controller.session.generation),
-    );
-    if let Some(fonts) = fonts {
-        context = context.with_fonts(fonts.clone());
-    }
+    let context = representation_context(controller, fonts);
     let (mut lines, mut meshes, mut texts, mut instances, mut images) = (0usize, 0, 0, 0, 0);
     let mut vertices = 0usize;
     let mut failures: Vec<serde_json::Value> = Vec::new();
@@ -656,6 +683,174 @@ fn run_build_representation(
             "images": images,
         },
         "failures": failures,
+    }))
+}
+
+/// Native fixed-viewport render.
+///
+/// Imports the drawing through the shared app path, builds the same display
+/// representation as `build-representation`, batches it through `SceneCache`,
+/// uploads it to a real headless wgpu device, renders one frame, reads it back
+/// and optionally writes a PNG.
+///
+/// Never an empty success: a machine with no adapter fails with
+/// `CadError::GpuFailure`, a drawing with no drawable bounds fails with
+/// `CadError::InvalidInput`, and the PNG is written only after a frame exists.
+#[cfg(not(target_arch = "wasm32"))]
+fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
+    use cad_render_wgpu::headless::{create_headless_gpu, encode_png, HeadlessGpu};
+    use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
+
+    let controller = load_document(invocation)?;
+    let document = controller
+        .application
+        .workspace
+        .documents
+        .get(&controller.document_id)
+        .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+
+    let registry = cad_representation::ProviderRegistry::with_default_provider();
+    let context = representation_context(&controller, None);
+
+    // One delta over every model-space entity. `SceneCache::build` skips
+    // Text/Instance/Image (documented) and returns line/mesh batches only.
+    let mut cache = cad_scene::SceneCache::new(Default::default());
+    let mut delta = cad_scene::SceneDelta {
+        stamp: context.stamp.clone(),
+        added: Vec::new(),
+        removed_chunks: Vec::new(),
+    };
+    for entity in document.drawing.model_space() {
+        let representation = registry.build_expanded(&document.drawing, entity, &context)?;
+        let built = cache.build(&representation, context.stamp.clone())?;
+        delta.added.extend(built.added);
+    }
+
+    // Fit to what is actually drawn, not `drawing.bounds()`: the database
+    // bounds include material the renderer does not draw (text, unplaced or
+    // block-definition geometry), which leaves the framed image off-centre and
+    // small. The scene batches already carry world-space points
+    // (`local_origin + vertex`), so derive the fit from those.
+    let mut fit: Option<(f64, f64, f64, f64)> = None; // min_x, min_y, max_x, max_y
+    for batch in &delta.added {
+        let ox = batch.local_origin.x;
+        let oy = batch.local_origin.y;
+        for vertex in &batch.vertices {
+            let x = ox + vertex[0] as f64;
+            let y = oy + vertex[1] as f64;
+            if !x.is_finite() || !y.is_finite() {
+                continue;
+            }
+            fit = Some(match fit {
+                None => (x, y, x, y),
+                Some((min_x, min_y, max_x, max_y)) => {
+                    (min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y))
+                }
+            });
+        }
+    }
+    let (min_x, min_y, max_x, max_y) =
+        fit.ok_or_else(|| CadError::InvalidInput("no drawable geometry to render".into()))?;
+
+    let width = invocation.render_width;
+    let height = invocation.render_height;
+    let span_x = (max_x - min_x).abs();
+    let span_y = (max_y - min_y).abs();
+    let world_per_px = (span_x / (width as f64 * 0.9))
+        .max(span_y / (height as f64 * 0.9))
+        .max(1e-9);
+    let camera = Camera2d {
+        center: Point3 {
+            x: (min_x + max_x) / 2.0,
+            y: (min_y + max_y) / 2.0,
+            z: 0.0,
+        },
+        world_per_px,
+        z_plane: 0.0,
+    };
+
+    let HeadlessGpu {
+        device,
+        queue,
+        adapter,
+    } = create_headless_gpu(BackendPreference::Auto)?;
+    let mut renderer = Renderer::new(BackendPreference::Auto);
+    // A large drawing is tens of thousands of small draw calls; a CPU software
+    // adapter can legitimately exceed the interactive 1 s submission bound.
+    // Headless evidence waits longer instead of misreporting a device loss.
+    renderer.set_poll_timeout(std::time::Duration::from_secs(600));
+    renderer.initialize_with_device(device, queue)?;
+    renderer.upload(&delta)?;
+    let target = RenderTarget::new(width, height);
+    let frame = renderer
+        .render(camera, &target)
+        .map_err(|error| CadError::GpuFailure(error.message().to_string()))?;
+    let image = renderer
+        .read_target_rgba()
+        .map_err(|error| CadError::GpuFailure(error.message().to_string()))?;
+
+    let background = image.pixel(0, 0);
+    let non_background = image.count_differing_from(background, 8);
+    let coverage = non_background as f64 / (width as f64 * height as f64);
+
+    // Only after a successful frame: encode and atomically write, so a failure
+    // never leaves a partial PNG.
+    let png_json = match &invocation.png {
+        Some(path) => {
+            let bytes = encode_png(&image)
+                .map_err(|e| CadError::Invariant(format!("PNG encode failed: {e}")))?;
+            write_atomic(path, &bytes).map_err(|e| {
+                CadError::InvalidInput(format!(
+                    "PNG write failed: {}",
+                    cad_diagnostics::redact_text(&e.to_string())
+                ))
+            })?;
+            serde_json::json!({
+                "path": path.display().to_string(),
+                "bytes": bytes.len(),
+            })
+        }
+        None => serde_json::Value::Null,
+    };
+
+    let completeness = match &controller.last_import_report {
+        Some(report) => completeness_json(&report.completeness),
+        None => serde_json::json!({ "status": "unverified" }),
+    };
+    let scene_vertices: usize = delta.added.iter().map(|batch| batch.vertices.len()).sum();
+
+    Ok(serde_json::json!({
+        "schema_version": CLI_SCHEMA_VERSION,
+        "operation": CliOperation::FixedViewportRender.as_str(),
+        "adapter": {
+            "backend": adapter.backend,
+            "name": adapter.name,
+            "device_type": adapter.device_type,
+            "driver": adapter.driver,
+            "driver_info": adapter.driver_info,
+        },
+        "width": width,
+        "height": height,
+        "png": png_json,
+        "pixels": {
+            "non_background": non_background,
+            "coverage": coverage,
+            "distinct_colors": image.distinct_colors(),
+        },
+        "frame": {
+            "draw_calls": frame.draw_calls,
+            "vertices": frame.vertices,
+            "triangles": frame.triangles,
+            "opaque_batches": frame.opaque_batches,
+            "transparent_batches": frame.transparent_batches,
+            "invisible_batches": frame.invisible_batches,
+        },
+        "scene": {
+            "batches": delta.added.len(),
+            "vertices": scene_vertices,
+        },
+        "completeness": completeness,
+        "note": "software/headless frame; not a compatibility or performance claim",
     }))
 }
 
@@ -712,11 +907,18 @@ fn load_fonts(
 /// The returned error is structured and carries a stable machine `code`.
 pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
     if invocation.operation == CliOperation::FixedViewportRender {
-        // Explicitly not run: a fixed-viewport GPU frame needs a device the CLI
-        // does not own. Use the platform host or a future GPU runner.
+        // The browser has no headless device to own: it keeps the explicit
+        // "unsupported" answer (the host canvas supplies the device instead).
+        #[cfg(target_arch = "wasm32")]
         return Err(cli_error_from_domain(CadError::Unsupported(
-            "fixed-viewport rendering requires a GPU environment; not run".into(),
+            "fixed-viewport rendering requires a GPU device; wasm receives its device from the host canvas"
+                .into(),
         )));
+        // Native: drive the real headless renderer and report a structured
+        // frame, or fail explicitly (no adapter, no drawable geometry).
+        #[cfg(not(target_arch = "wasm32"))]
+        return serde_json::to_string_pretty(&domain(run_render(invocation))?)
+            .map_err(|e| CliError::new(error_code::INVARIANT, format!("cli encode failed: {e}")));
     }
     let fonts = domain(load_fonts(&invocation.fonts))?;
     let mut controller = domain(load_document(invocation))?;
@@ -776,8 +978,21 @@ mod tests {
         assert!(CliOperation::parse("nope").is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn render_operation_reports_not_run() {
+    fn render_of_missing_input_fails_before_any_gpu_work() {
+        // Import happens before device creation, so a missing file is an
+        // `invalid_input` failure on every machine — adapter or not.
+        let invocation = CliInvocation::new(CliOperation::FixedViewportRender, "missing.dwg");
+        let error = run(&invocation).unwrap_err();
+        assert_eq!(error.code, error_code::INVALID_INPUT);
+        assert_eq!(error.exit_code(), 1);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn render_on_wasm_is_explicitly_unsupported() {
+        // wasm has no headless device: the operation stays explicitly not run.
         let invocation = CliInvocation::new(CliOperation::FixedViewportRender, "missing.dwg");
         let error = run(&invocation).unwrap_err();
         assert_eq!(error.code, error_code::UNSUPPORTED);

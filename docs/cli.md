@@ -25,6 +25,9 @@ cad-cli-tools <operation> <input.dwg> [options]
 | `--notes <file>` | 批注 sidecar 路径（`import-notes` / `export-notes`） |
 | `--points "x,y;x,y;..."` | `measure` 的点，图纸单位；2 点为距离、3 点为角度、≥4 为长度 |
 | `--out <file>` | 将 JSON 结果**原子**写入 `<file>`；stdout 保持为空 |
+| `--png <file>` | `render`：将离屏帧**原子**写为 PNG（仅渲染成功后写入） |
+| `--width <u32>` | `render`：帧宽（像素，默认 `1280`）；非数字或 `0` 为用法错误 |
+| `--height <u32>` | `render`：帧高（像素，默认 `720`）；非数字或 `0` 为用法错误 |
 | `--locale <tag>` | **仅**人类 stderr 文字的语言，`zh-CN`（默认）或 `en`；机器输出不变 |
 | `--allow-fingerprint-mismatch` | 图纸指纹不匹配时仍导入批注 |
 | `--font <name=path>` | 注册 TTF/OTF/WOFF 字体用于文字成型（可重复；省略 `name=` 时取文件名） |
@@ -178,11 +181,57 @@ cad-cli-tools <operation> <input.dwg> [options]
 
 ### `render`
 
-固定视口 GPU 帧需要 CLI 不拥有的设备，因此**显式未运行**：
+**原生**路径驱动真实的无头 wgpu 渲染器：导入 DWG → 按 provider registry 构建
+显示表示 → `SceneCache` 分批 → 无头软件适配器上传并渲染一帧 → 回读 RGBA →
+可选写 PNG。wasm 没有可拥有的设备，仍显式 `unsupported`。
 
-- 始终以 `unsupported` 失败并退出 `1`；
-- stderr 错误文档的 `message` 说明需要 GPU 环境；
-- 绝不返回空成功（审计条目 F11/§11）。
+以下为一次真实运行（Mesa lavapipe，某授权样张）的字段形状，具体数值随文件与
+适配器变化，不是兼容性或性能结论：
+
+```json
+{
+  "schema_version": 1,
+  "operation": "render",
+  "adapter": {
+    "backend": "vulkan",
+    "name": "llvmpipe (LLVM 21.1.8, 128 bits)",
+    "device_type": "cpu",
+    "driver": "llvmpipe",
+    "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)"
+  },
+  "width": 800,
+  "height": 600,
+  "png": { "path": "/tmp/frame.png", "bytes": 8903 },
+  "pixels": { "non_background": 22381, "coverage": 0.0466, "distinct_colors": 2 },
+  "frame": {
+    "draw_calls": 11855, "vertices": 26032, "triangles": 0,
+    "opaque_batches": 11855, "transparent_batches": 0, "invisible_batches": 0
+  },
+  "scene": { "batches": 11855, "vertices": 26032 },
+  "completeness": { "status": "complete" },
+  "note": "software/headless frame; not a compatibility or performance claim"
+}
+```
+
+- `png` 仅在传入 `--png <file>` 时非 `null`；PNG 只在渲染成功后**原子**写入
+  （临时文件 + rename），渲染失败绝不留下半截图片。
+- `pixels.non_background` 统计与左上角背景色差异超过容差 8 的像素数；
+  `coverage = non_background / (width*height)`。纯背景帧是真实结果，不伪造像素。
+- `completeness` 与 `scan` 一致，来自本次导入报告；没有导入报告时为
+  `{"status":"unverified"}`。
+- 相机按**实际绘制的批次**（`local_origin + vertex`）拟合，而不是
+  `drawing.bounds()`；后者包含未绘制内容（文字、块定义几何），会使出图偏小偏心。
+- `SceneCache::build` 只产出线/网格批次；Text/Instance/Image 由各自子系统
+  负责，本帧不计入（文档化行为，不是静默丢弃）。
+- **无可用适配器**时以 `gpu_failure` 失败并退出 `1`，`message` 显式说明；绝不
+  返回空成功（审计条目 F11/§11）。
+- 没有任何可绘制批次时以 `invalid_input`（`no drawable geometry to render`）失败，
+  不伪造空帧。
+- 大图纸（数万 draw call）在软件适配器上可能超过交互式 1 秒提交界定；无头路径
+  使用更长的有界等待（`Renderer::set_poll_timeout`），避免把慢的 CPU 帧误报为
+  设备丢失（F12）。
+- wasm (`target_arch = "wasm32"`) 保持 `unsupported`：浏览器从宿主 canvas 取得
+  设备，CLI 在 wasm 下没有无头设备可拥有。
 
 ## 4. `--out` 与原子性
 
@@ -230,7 +279,13 @@ cad-cli-tools <operation> <input.dwg> [options]
 - `measure_success_reports_structured_numbers`：测量 `value`/`units` 为结构化数值。
 - `missing_input_exits_non_zero_with_structured_error`：退出 `1`，stdout 为空，
   stderr 含 `{schema_version, operation, error:{code,message,context}}`。
-- `render_is_explicitly_unsupported_and_exits_non_zero`：`unsupported` + 退出 `1`。
+- `render_on_empty_drawing_is_an_input_error_not_empty_success`：无可绘制边界时
+  退出 `1`、code `invalid_input`，不是空成功。
+- `render_zero_width_is_a_usage_error`：`--width 0` 退出 `2`、code `usage`。
+- `render_without_png_still_returns_structured_json`（需 `YACR_TEST_DWG` 指向真实
+  DWG，否则打印跳过并返回）：退出 `0`、stdout 纯 JSON、`adapter.backend` 非空、
+  `pixels.non_background > 0`；传 `--png <tmp>` 时 PNG 以 `\x89PNG\r\n\x1a\n`
+  开头且 `png.bytes > 0`。
 - `unknown_operation_exits_two_with_usage_code`：退出 `2`，code `usage`。
 - `missing_required_points_is_a_non_zero_failure_not_empty_success`：
   输入不足是非零失败，不是空成功。
@@ -258,11 +313,14 @@ cargo test -p cad-cli-tools --locked
 - `--out` 原子写（临时文件 + rename），失败无半截文件。
 - `export-notes` 原子导出并绑定导出 revision 后标记保存。
 - `proxy-report` 汇总全部代理/未知诊断，不静默吞故障。
+- `render` 原生无头路径：真实适配器出帧 + 回读统计 + 可选原子 PNG；无适配器
+  `gpu_failure`、无几何 `invalid_input`，绝不空成功。
 
 **仍开放（不在本轮范围，本文不声称完成）：**
 
-- `render` 仍无条件 `unsupported`：需要 GPU runner / 平台宿主接线，
-  位于 `cad-cli-tools` 之外的执行环境 → OPEN。
+- `render` 的原生路径已接线并可在软件适配器（如 lavapipe）上出帧；仍需真人核对
+  的真实样张黄金图与跨 GPU/后端（Vulkan/GL、不同驱动）矩阵 → OPEN。
+  wasm 仍为 `unsupported`（浏览器由宿主 canvas 提供设备）。
 - 能力表 importer 侧（`read` 恒 `Verified`、render/pick 复制 semantic、
   `model_render` 未按表示/scene/GPU/拾取分别判定）位于
   `crates/cad-import-acadrust` → OPEN，CLI 只如实转发。

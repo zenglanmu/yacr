@@ -24,7 +24,7 @@ Operations:
   import-notes         import a .cadnotes.json sidecar
   export-notes         export the sidecar (marks saved only after write)
   build-representation primitive/vertex counts through the provider registry
-  render               fixed-viewport GPU frame (requires a GPU environment)
+  render               fixed-viewport frame on a headless GPU adapter
   benchmark            representation build timing for the input
 
 Options:
@@ -32,6 +32,9 @@ Options:
   --points \"x,y;x,y;...\"  measurement points in drawing units
   --out <file>            write the JSON result to <file> atomically
                           (same-dir temp file + rename); stdout stays empty
+  --png <file>            render: write the frame as a PNG (atomic)
+  --width <u32>           render: frame width in pixels (default 1280)
+  --height <u32>          render: frame height in pixels (default 720)
   --locale <tag>          human-facing stderr language: zh-CN (default) or en.
                           Machine output keys/schema never change with locale.
   --allow-fingerprint-mismatch  import despite a mismatched drawing hash
@@ -90,6 +93,41 @@ fn main() -> ExitCode {
                     return fail(CliError::usage("--out needs a path"), operation, locale);
                 };
                 out = Some(value.into());
+            }
+            "--png" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(CliError::usage("--png needs a path"), operation, locale);
+                };
+                invocation.png = Some(value.into());
+            }
+            "--width" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--width needs a pixel count"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_positive_dimension(value) {
+                    Ok(width) => invocation.render_width = width,
+                    Err(message) => return fail(CliError::usage(message), operation, locale),
+                }
+            }
+            "--height" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--height needs a pixel count"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_positive_dimension(value) {
+                    Ok(height) => invocation.render_height = height,
+                    Err(message) => return fail(CliError::usage(message), operation, locale),
+                }
             }
             "--locale" => {
                 index += 1;
@@ -222,6 +260,17 @@ fn human_message(error: &CliError, operation: CliOperation) -> String {
 /// Unknown operations have no `CliOperation`; report under a stable placeholder.
 fn operation_for_unknown(_name: &str) -> CliOperation {
     CliOperation::Scan
+}
+
+/// Parse a render dimension; zero and non-numeric values are usage errors
+/// (never a silent `max(1)` clamp).
+fn parse_positive_dimension(value: &str) -> Result<u32, String> {
+    match value.trim().parse::<u32>() {
+        Ok(0) | Err(_) => Err(format!(
+            "dimension must be a positive integer (got '{value}')"
+        )),
+        Ok(dimension) => Ok(dimension),
+    }
 }
 
 fn parse_points(value: &str) -> Result<Vec<Point3>, String> {

@@ -131,16 +131,113 @@ fn missing_input_exits_non_zero_with_structured_error() {
     assert!(value["error"].get("context").is_some());
 }
 
+// The old contract asserted `render` always returned `unsupported`. On native
+// it now drives a real headless adapter; on wasm it still returns `unsupported`
+// (documented in docs/cli.md and unit-tested under `cfg(target_arch = "wasm32")`).
+// A drawing with no drawable bounds is an explicit `invalid_input` failure
+// before any GPU work, on every native machine (adapter or not).
 #[test]
-fn render_is_explicitly_unsupported_and_exits_non_zero() {
-    let dir = scratch("render");
+fn render_on_empty_drawing_is_an_input_error_not_empty_success() {
+    let dir = scratch("render-empty");
     let dwg = write_minimal_dwg(&dir);
     let output = run(&[s("render"), dwg.as_os_str()]);
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     let value = stderr_json(&output);
     assert_eq!(value["operation"], "render");
-    assert_eq!(value["error"]["code"], "unsupported");
+    assert_eq!(value["error"]["code"], "invalid_input");
+    clean(&dir);
+}
+
+#[test]
+fn render_zero_width_is_a_usage_error() {
+    let dir = scratch("render-bad-width");
+    let dwg = write_minimal_dwg(&dir);
+    let output = run(&[s("render"), dwg.as_os_str(), s("--width"), s("0")]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let value = stderr_json(&output);
+    assert_eq!(value["error"]["code"], "usage");
+    clean(&dir);
+}
+
+/// Real-frame contract, gated on an authorized sample checked by the operator.
+///
+/// Set `YACR_TEST_DWG` to a real DWG to exercise the full headless GPU path.
+/// Without it the test prints a clear skip line and returns (no fake evidence).
+#[test]
+fn render_without_png_still_returns_structured_json() {
+    let Some(sample) = std::env::var_os("YACR_TEST_DWG") else {
+        eprintln!(
+            "SKIP render_without_png_still_returns_structured_json: YACR_TEST_DWG is not set"
+        );
+        return;
+    };
+    let sample = PathBuf::from(sample);
+    if !sample.is_file() {
+        eprintln!(
+            "SKIP render_without_png_still_returns_structured_json: YACR_TEST_DWG does not exist: {}",
+            sample.display()
+        );
+        return;
+    }
+
+    // 1) No `--png`: a structured frame, stdout is pure JSON, no PNG claim.
+    let output = run(&[s("render"), sample.as_os_str()]);
+    assert!(
+        output.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "success must not write to stderr: {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value = stdout_json(&output);
+    assert_eq!(value["operation"], "render");
+    assert_eq!(value["schema_version"], 1);
+    assert!(
+        value["adapter"]["backend"]
+            .as_str()
+            .map(|b| !b.is_empty())
+            .unwrap_or(false),
+        "adapter.backend must be a non-empty string: {value}"
+    );
+    // The sample has drawable geometry; a background-only frame would be a bug.
+    assert!(
+        value["pixels"]["non_background"].as_u64().unwrap_or(0) > 0,
+        "expected drawn pixels: {value}"
+    );
+    assert!(value["png"].is_null(), "no --png means png is null");
+
+    // 2) With `--png`: the file is a real PNG written only on success.
+    let dir = scratch("render-png");
+    let png = dir.join("frame.png");
+    let output = run(&[
+        s("render"),
+        sample.as_os_str(),
+        s("--png"),
+        png.as_os_str(),
+        s("--width"),
+        s("800"),
+        s("--height"),
+        s("600"),
+    ]);
+    assert!(
+        output.status.success(),
+        "render --png failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value = stdout_json(&output);
+    assert_eq!(value["png"]["path"], png.display().to_string());
+    let bytes = std::fs::read(&png).expect("PNG written on success");
+    assert!(
+        bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]),
+        "PNG signature missing"
+    );
+    assert!(value["png"]["bytes"].as_u64().unwrap_or(0) > 0);
+    assert_eq!(value["png"]["bytes"].as_u64(), Some(bytes.len() as u64));
     clean(&dir);
 }
 
