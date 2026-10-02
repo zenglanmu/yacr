@@ -104,7 +104,7 @@
   - 相机移动改变透明顺序；
   - alpha 钳制与 NaN 规则（`geometry::clamp_alpha`）；`cad-scene::sanitize_alpha` 同规则；
   - `DisplayFragment::alpha` 进入 `RenderBatch::alpha`（含 `<1`、`0`、越界钳制）；
-  - `build_expanded` 的 `ByObject`/`ByLayer`/`ByBlock` 分辨率与 `geometry_source`；
+  - `build_expanded` 的 `ByObject`/`ByLayer`/`ByBlock` 分辨率与 `geometry_source`/`precision`；
   - `RenderBatch::centroid()` 的均值/大坐标精度/空批次回退。
   见 `crates/cad-render-wgpu/src/geometry.rs` 与 `crates/cad-scene/src/lib.rs`、
   `crates/cad-representation/src/lib.rs` 的单元测试。

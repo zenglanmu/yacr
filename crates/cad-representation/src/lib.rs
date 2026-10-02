@@ -89,6 +89,10 @@ impl DisplayPrimitive {
 pub struct DisplayFragment {
     pub source: SelectionRef,
     pub geometry_source: GeometrySource,
+    /// How exact the fragment's geometry is. Proxy-cache geometry is a
+    /// vendor-provided approximation with no exposed error bound; analytic
+    /// geometry is the source representation itself.
+    pub precision: Precision,
     /// Effective per-entity opacity in `[0, 1]` (1.0 opaque, 0.0 transparent).
     ///
     /// `build` cannot resolve transparency (it only sees the entity), so it
@@ -98,6 +102,17 @@ pub struct DisplayFragment {
     /// into `RenderBatch::alpha`.
     pub alpha: f32,
     pub primitive: DisplayPrimitive,
+}
+
+/// Precision implied by how a fragment's geometry was produced.
+pub fn precision_for_source(source: &GeometrySource) -> Precision {
+    match source {
+        GeometrySource::ProxyCache => Precision::Approximate { error_bound: None },
+        GeometrySource::Analytic
+        | GeometrySource::DirectMesh
+        | GeometrySource::KernelMesh
+        | GeometrySource::UserPoints => Precision::Analytic,
+    }
 }
 
 pub struct DisplayRepresentation {
@@ -232,6 +247,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 representation.fragments.push(DisplayFragment {
                     source,
                     geometry_source,
+                    precision: Precision::Analytic,
                     alpha: 1.0,
                     primitive: DisplayPrimitive::Mesh(Arc::new(mesh.clone())),
                 });
@@ -244,6 +260,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 representation.fragments.push(DisplayFragment {
                     source,
                     geometry_source,
+                    precision: Precision::Analytic,
                     alpha: 1.0,
                     primitive: DisplayPrimitive::Instance {
                         block: *block,
@@ -279,6 +296,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                                     representation.fragments.push(DisplayFragment {
                                         source: source.clone(),
                                         geometry_source: geometry_source.clone(),
+                                        precision: Precision::Analytic,
                                         alpha: 1.0,
                                         primitive: DisplayPrimitive::Lines(Arc::from(
                                             polyline.into_boxed_slice(),
@@ -316,6 +334,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                     representation.fragments.push(DisplayFragment {
                         source,
                         geometry_source,
+                        precision: Precision::Analytic,
                         alpha: 1.0,
                         primitive: DisplayPrimitive::Text {
                             text: text.clone(),
@@ -345,6 +364,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                     representation.fragments.push(DisplayFragment {
                         source,
                         geometry_source,
+                        precision: Precision::Analytic,
                         alpha: 1.0,
                         primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
                     });
@@ -583,6 +603,7 @@ impl ProviderRegistry {
                     out.fragments.push(DisplayFragment {
                         source,
                         geometry_source: attributes.geometry_source.clone(),
+                        precision: precision_for_source(&attributes.geometry_source),
                         alpha: own_alpha,
                         primitive: primitive.transformed(transform),
                     });
@@ -941,6 +962,11 @@ mod tests {
         assert_eq!(rep.fragments.len(), 1);
         assert_eq!(rep.fragments[0].alpha, 0.5);
         assert_eq!(rep.fragments[0].geometry_source, GeometrySource::ProxyCache);
+        assert_eq!(
+            rep.fragments[0].precision,
+            Precision::Approximate { error_bound: None },
+            "proxy-cache geometry is an approximation, not an exact source value"
+        );
     }
 
     #[test]
@@ -1023,5 +1049,6 @@ mod tests {
         let r = registry.build(&e, &context()).unwrap();
         assert_eq!(r.fragments[0].alpha, 1.0);
         assert_eq!(r.fragments[0].geometry_source, GeometrySource::Analytic);
+        assert_eq!(r.fragments[0].precision, Precision::Analytic);
     }
 }

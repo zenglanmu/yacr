@@ -87,9 +87,12 @@ u32 record_count
   产出的**全部** `SemanticGeometry` 都保留：单条保持自身，多条包成
   `SemanticGeometry::Compound`，由表示层逐条产出 primitive（例如一个实体里的多条
   UnicodeText）。此前只有第一条存活，其余被静默丢弃。
-- **来源标注**：代理实体的 `GeometrySource` 记为 `ProxyCache`（而非 `Analytic`），经
-  `cad-db::EntityRenderAttributes` → `DisplayFragment::geometry_source` 传递；普通语义
-  几何保持 `Analytic`。精度即由该来源区分：代理缓存是近似/不完整证据，不是解析解。
+- **来源与精度标注**：代理实体的 `GeometrySource` 记为 `ProxyCache`（而非
+  `Analytic`），经 `cad-db::EntityRenderAttributes` → `DisplayFragment::geometry_source`
+  传递；普通语义几何保持 `Analytic`。对应的 `DisplayFragment::precision` 为
+  `Precision::Approximate { error_bound: None }`（代理缓存是厂商近似、错误界未暴露），
+  语义几何为 `Precision::Analytic`。精度即由该来源区分：代理缓存是近似/不完整证据，
+  不是解析解。
 - 代理展开进入普通表示/索引/批处理，不为每条指令创建 draw call。
 
 ## 5. 测试与样本
