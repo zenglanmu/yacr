@@ -24,6 +24,9 @@ fn line_representation(entity: u128, points: Vec<Point3>) -> DisplayRepresentati
             color_unresolved: true,
             lineweight: cad_representation::DEFAULT_LINEWEIGHT_MM,
             lineweight_unresolved: true,
+            linetype: cad_db::LinetypePattern::continuous(),
+            linetype_unresolved: true,
+            linetype_scale: 1.0,
             primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
         }],
         completeness: Completeness::Complete,
@@ -167,6 +170,9 @@ fn mesh_representation(entity: u128, mesh: Mesh) -> DisplayRepresentation {
             color_unresolved: true,
             lineweight: cad_representation::DEFAULT_LINEWEIGHT_MM,
             lineweight_unresolved: true,
+            linetype: cad_db::LinetypePattern::continuous(),
+            linetype_unresolved: true,
+            linetype_scale: 1.0,
             primitive: DisplayPrimitive::Mesh(std::sync::Arc::new(mesh)),
         }],
         completeness: Completeness::Complete,
@@ -353,6 +359,8 @@ fn empty_batch_centroid_falls_back_to_local_origin() {
         color_unresolved: true,
         lineweight: DEFAULT_BATCH_LINEWEIGHT_MM,
         lineweight_unresolved: true,
+        linetype: cad_db::LinetypePattern::continuous(),
+        linetype_unresolved: true,
         sources: Vec::new(),
         draw_order: 0,
     };
@@ -433,6 +441,18 @@ fn unit_points() -> Vec<Point3> {
             z: 0.0,
         },
     ]
+}
+
+#[test]
+fn batch_carries_the_linetype_pattern_for_diagnostics() {
+    let mut cache = SceneCache::default();
+    let mut rep = line_representation(1, unit_points());
+    rep.fragments[0].linetype = cad_db::LinetypePattern::from_elements([0.5, -0.25]);
+    rep.fragments[0].linetype_unresolved = false;
+    let delta = cache.build(&rep, stamp()).unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(batch.linetype.elements, vec![0.5, -0.25]);
+    assert!(!batch.linetype_unresolved);
 }
 
 #[test]

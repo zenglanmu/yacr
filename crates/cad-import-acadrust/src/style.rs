@@ -116,6 +116,104 @@ pub(crate) fn resolve_entity_lineweight(
         },
     }
 }
+
+/// `true` when a linetype name is the symbolic `ByLayer` (or absent).
+///
+/// acadrust stores an empty string for an entity that did not set a linetype,
+/// and the literal `"ByLayer"` when it did; both mean "use the layer's".
+pub(crate) fn is_bylayer_linetype(name: &str) -> bool {
+    let name = name.trim();
+    name.is_empty() || name.eq_ignore_ascii_case("ByLayer")
+}
+
+/// `true` when a linetype name is the symbolic `ByBlock`.
+pub(crate) fn is_byblock_linetype(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case("ByBlock")
+}
+
+/// `true` when a named linetype is the standard solid one.
+pub(crate) fn is_continuous_linetype(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case("Continuous")
+}
+
+/// Resolve an entity's linetype into the effective display value.
+///
+/// Precedence mirrors colour/lineweight: an explicit named linetype wins, then
+/// `ByLayer` uses the layer's pre-resolved pattern, and `ByBlock` stays
+/// symbolic for INSERT expansion. `named_pattern` is the caller's lookup of a
+/// concrete pattern for an explicit name (`None` when unknown); `layer_pattern`
+/// is the layer's resolved pattern.
+///
+/// The result is never a fabricated pattern:
+/// * a concrete pattern is `Explicit` with the entity's own `scale`;
+/// * `ByLayer` with a reachable layer pattern is `Explicit` using that pattern;
+/// * `ByBlock` is symbolic;
+/// * an unknown named linetype falls back to an explicit **continuous** pattern
+///   carrying the source name, and the caller reports a `Partial` reason;
+/// * a `ByLayer` with no reachable pattern is symbolic `ByLayer`, which the
+///   representation treats as continuous and marks unresolved.
+pub(crate) fn resolve_entity_linetype(
+    name: &str,
+    scale: f64,
+    named_pattern: Option<LinetypePattern>,
+    layer_pattern: Option<LinetypePattern>,
+) -> EntityLineType {
+    // A non-finite/zero scale is treated as 1.0; the representation sanitises
+    // again, and this keeps a corrupt scale from disabling dashes entirely.
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    if is_byblock_linetype(name) {
+        return EntityLineType::ByBlock;
+    }
+    // The standard solid linetype is known and continuous; record it explicitly
+    // rather than marking it unresolved.
+    if is_continuous_linetype(name) {
+        return EntityLineType::Explicit {
+            name: name.trim().to_string(),
+            pattern: LinetypePattern::continuous(),
+            scale,
+        };
+    }
+    if is_bylayer_linetype(name) {
+        return match layer_pattern {
+            Some(pattern) => EntityLineType::Explicit {
+                name: "ByLayer".to_string(),
+                pattern,
+                scale,
+            },
+            None => EntityLineType::ByLayer,
+        };
+    }
+    match named_pattern {
+        Some(pattern) => EntityLineType::Explicit {
+            name: name.trim().to_string(),
+            pattern,
+            scale,
+        },
+        None => EntityLineType::Explicit {
+            name: name.trim().to_string(),
+            // Unknown name: an explicit continuous fallback, never invented
+            // dashes. The importer reports the missing definition.
+            pattern: LinetypePattern::continuous(),
+            scale,
+        },
+    }
+}
+
+/// Convert an acadrust linetype's elements into a [`LinetypePattern`].
+///
+/// Complex (shape/text) elements carry no dash length of their own; their
+/// element length is still meaningful as a gap/dash, so it is kept, and the
+/// `complex` flag tells the caller that glyphs were dropped.
+pub(crate) fn linetype_pattern(linetype: &acadrust::LineType) -> (LinetypePattern, bool) {
+    let elements = linetype.elements.iter().map(|e| e.length);
+    let pattern = LinetypePattern::from_elements(elements);
+    (pattern, linetype.is_complex())
+}
+
 /// Lower-cased extension of a font reference, without the dot.
 pub(crate) fn font_extension(name: &str) -> String {
     name.rsplit_once('.')

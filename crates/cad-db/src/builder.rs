@@ -6,7 +6,7 @@ use cad_domain::*;
 
 use crate::drawing::DrawingDatabase;
 use crate::entity::{DbEntity, EntityRenderAttributes};
-use crate::tables::{BlockDefinition, Layer, Layout, Style};
+use crate::tables::{BlockDefinition, Layer, Layout, LineType, Style};
 
 /// The only sanctioned way to construct a [`DrawingDatabase`].
 ///
@@ -28,6 +28,8 @@ impl DrawingDatabaseBuilder {
                 blocks: BTreeMap::new(),
                 layouts: BTreeMap::new(),
                 styles: BTreeMap::new(),
+                linetypes: BTreeMap::new(),
+                linetype_scale: 1.0,
                 render_attributes: BTreeMap::new(),
             },
             errors: Vec::new(),
@@ -80,6 +82,23 @@ impl DrawingDatabaseBuilder {
 
     pub fn insert_style(&mut self, style: Style) -> CadResult<()> {
         self.database.styles.insert(style.id, style);
+        Ok(())
+    }
+
+    pub fn insert_linetype(&mut self, linetype: LineType) -> CadResult<()> {
+        self.database.linetypes.insert(linetype.id, linetype);
+        Ok(())
+    }
+
+    /// Set the drawing-global linetype scale (`$LTSCALE`). A non-finite or
+    /// non-positive value is rejected rather than poisoning the render path.
+    pub fn set_linetype_scale(&mut self, scale: f64) -> CadResult<()> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(CadError::InvalidInput(format!(
+                "linetype scale must be a positive finite number, got {scale}"
+            )));
+        }
+        self.database.linetype_scale = scale;
         Ok(())
     }
 

@@ -1002,6 +1002,126 @@ fn lineweight_mm_only_reports_concrete_values() {
     assert_eq!(lineweight_mm(acadrust::LineWeight::Default), None);
 }
 
+// ---- §3.2/§7.1: linetype resolution ----
+
+fn dashed_pattern() -> LinetypePattern {
+    LinetypePattern::from_elements([0.5, -0.25])
+}
+
+#[test]
+fn linetype_resolution_prefers_explicit_then_layer_then_byblock() {
+    let dashed = dashed_pattern();
+    // An explicit named linetype wins over the layer.
+    assert_eq!(
+        resolve_entity_linetype("Dashed", 2.0, Some(dashed.clone()), Some(dashed_pattern())),
+        EntityLineType::Explicit {
+            name: "Dashed".into(),
+            pattern: dashed.clone(),
+            scale: 2.0,
+        }
+    );
+    // ByLayer uses the layer's pre-resolved pattern (and the entity's scale).
+    assert_eq!(
+        resolve_entity_linetype("ByLayer", 1.5, None, Some(dashed.clone())),
+        EntityLineType::Explicit {
+            name: "ByLayer".into(),
+            pattern: dashed.clone(),
+            scale: 1.5,
+        }
+    );
+    // An empty name is also ByLayer.
+    assert_eq!(
+        resolve_entity_linetype("", 1.0, None, Some(dashed.clone())),
+        EntityLineType::Explicit {
+            name: "ByLayer".into(),
+            pattern: dashed,
+            scale: 1.0,
+        }
+    );
+    // ByBlock stays symbolic so INSERT expansion can substitute the value.
+    assert_eq!(
+        resolve_entity_linetype("ByBlock", 1.0, None, Some(dashed_pattern())),
+        EntityLineType::ByBlock
+    );
+    // ByLayer with no reachable pattern is symbolic, not fabricated.
+    assert_eq!(
+        resolve_entity_linetype("ByLayer", 1.0, None, None),
+        EntityLineType::ByLayer
+    );
+}
+
+#[test]
+fn unknown_named_linetype_is_an_explicit_continuous_fallback() {
+    // The caller passes `None` for an unknown name; the entity gets an explicit
+    // continuous pattern carrying the source name, never invented dashes.
+    let resolved = resolve_entity_linetype("NoSuchLine", 1.0, None, None);
+    match resolved {
+        EntityLineType::Explicit {
+            name,
+            pattern,
+            scale,
+        } => {
+            assert_eq!(name, "NoSuchLine");
+            assert!(pattern.is_continuous());
+            assert_eq!(scale, 1.0);
+        }
+        other => panic!("expected explicit continuous fallback, got {other:?}"),
+    }
+}
+
+#[test]
+fn standard_continuous_linetype_is_explicit_and_solid() {
+    let resolved = resolve_entity_linetype("Continuous", 1.0, None, None);
+    match resolved {
+        EntityLineType::Explicit { pattern, .. } => assert!(pattern.is_continuous()),
+        other => panic!("expected explicit continuous, got {other:?}"),
+    }
+}
+
+#[test]
+fn non_finite_linetype_scale_falls_back_to_one() {
+    let resolved = resolve_entity_linetype("Dashed", f64::NAN, Some(dashed_pattern()), None);
+    match resolved {
+        EntityLineType::Explicit { scale, .. } => assert_eq!(scale, 1.0),
+        other => panic!("expected explicit, got {other:?}"),
+    }
+    let resolved = resolve_entity_linetype("Dashed", -2.0, Some(dashed_pattern()), None);
+    match resolved {
+        EntityLineType::Explicit { scale, .. } => assert_eq!(scale, 1.0),
+        other => panic!("expected explicit, got {other:?}"),
+    }
+}
+
+#[test]
+fn linetype_pattern_keeps_complex_flag_and_skips_non_finite() {
+    let mut lt = acadrust::LineType::new("Fenceline");
+    lt.add_element(acadrust::tables::LineTypeElement::dash(1.0));
+    lt.add_element(acadrust::tables::LineTypeElement::space(0.5));
+    let (pattern, complex) = linetype_pattern(&lt);
+    assert!(!complex);
+    assert_eq!(pattern.elements, vec![1.0, -0.5]);
+    assert!((pattern.cycle - 1.5).abs() < 1e-12);
+
+    let mut complex_lt = acadrust::LineType::new("Gasline");
+    let mut elem = acadrust::tables::LineTypeElement::dash(1.0);
+    elem.complex = Some(acadrust::tables::LineTypeComplexData::default());
+    complex_lt.add_element(elem);
+    complex_lt.add_element(acadrust::tables::LineTypeElement::space(0.5));
+    let (pattern, complex) = linetype_pattern(&complex_lt);
+    assert!(complex, "a shape/text element must be flagged");
+    assert_eq!(pattern.elements, vec![1.0, -0.5]);
+}
+
+#[test]
+fn pattern_builder_drops_non_finite_and_keeps_valid_elements() {
+    let pattern = LinetypePattern::from_elements([1.0, f64::NAN, -0.5, f64::INFINITY]);
+    assert_eq!(pattern.elements, vec![1.0, -0.5]);
+    assert!((pattern.cycle - 1.5).abs() < 1e-12);
+    // A pattern with only non-finite elements degrades to continuous.
+    assert!(LinetypePattern::from_elements([f64::NAN]).is_continuous());
+    assert!(LinetypePattern::from_elements([0.0, 0.0]).is_continuous());
+}
+
 #[test]
 fn all_proxy_fragments_survive_as_a_compound() {
     let fragment = |id: u128| SemanticGeometry::Line {

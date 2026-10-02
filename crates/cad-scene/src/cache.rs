@@ -202,6 +202,8 @@ impl SceneCache {
                 color_unresolved: fragment.color_unresolved,
                 lineweight: sanitize_lineweight(fragment.lineweight),
                 lineweight_unresolved: fragment.lineweight_unresolved,
+                linetype: fragment.linetype.clone(),
+                linetype_unresolved: fragment.linetype_unresolved,
                 sources: vec![fragment.source.clone()],
                 draw_order: 0,
             });

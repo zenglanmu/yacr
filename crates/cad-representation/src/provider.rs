@@ -98,6 +98,9 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                     color_unresolved: true,
                     lineweight: DEFAULT_LINEWEIGHT_MM,
                     lineweight_unresolved: true,
+                    linetype: LinetypePattern::continuous(),
+                    linetype_unresolved: true,
+                    linetype_scale: 1.0,
                     primitive: DisplayPrimitive::Mesh(Arc::new(mesh.clone())),
                 });
                 if mesh.triangles.is_empty() {
@@ -115,6 +118,9 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                     color_unresolved: true,
                     lineweight: DEFAULT_LINEWEIGHT_MM,
                     lineweight_unresolved: true,
+                    linetype: LinetypePattern::continuous(),
+                    linetype_unresolved: true,
+                    linetype_scale: 1.0,
                     primitive: DisplayPrimitive::Instance {
                         block: *block,
                         transform: *transform,
@@ -155,6 +161,9 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                                         color_unresolved: true,
                                         lineweight: DEFAULT_LINEWEIGHT_MM,
                                         lineweight_unresolved: true,
+                                        linetype: LinetypePattern::continuous(),
+                                        linetype_unresolved: true,
+                                        linetype_scale: 1.0,
                                         primitive: DisplayPrimitive::Lines(Arc::from(
                                             polyline.into_boxed_slice(),
                                         )),
@@ -218,6 +227,9 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                         color_unresolved: true,
                         lineweight: DEFAULT_LINEWEIGHT_MM,
                         lineweight_unresolved: true,
+                        linetype: LinetypePattern::continuous(),
+                        linetype_unresolved: true,
+                        linetype_scale: 1.0,
                         primitive: DisplayPrimitive::Text {
                             text: text.clone(),
                             origin: *position,
@@ -252,6 +264,9 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                         color_unresolved: true,
                         lineweight: DEFAULT_LINEWEIGHT_MM,
                         lineweight_unresolved: true,
+                        linetype: LinetypePattern::continuous(),
+                        linetype_unresolved: true,
+                        linetype_scale: 1.0,
                         primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
                     });
                 } else {
@@ -402,6 +417,8 @@ impl ProviderRegistry {
             1.0,
             None,
             None,
+            None,
+            database.linetype_scale(),
             &mut stack,
             &mut out,
         )?;
@@ -420,14 +437,17 @@ impl ProviderRegistry {
         parent_alpha: f32,
         parent_color: Option<[f32; 3]>,
         parent_lineweight: Option<f32>,
+        parent_linetype: Option<&LinetypePattern>,
+        global_lt_scale: f64,
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
     ) -> CadResult<()> {
         let representation = self.build(entity, context)?;
-        // The importer resolved this entity's effective opacity, colour and
-        // lineweight into the database. `ByBlock` inherits the containing
-        // INSERT's value, threaded down through the `parent_*` arguments; at the
-        // model root those fall back to the documented defaults.
+        // The importer resolved this entity's effective opacity, colour,
+        // lineweight and linetype into the database. `ByBlock` inherits the
+        // containing INSERT's value, threaded down through the `parent_*`
+        // arguments; at the model root those fall back to the documented
+        // defaults.
         let attributes = database.entity_render_attributes(entity.id);
         let own_alpha = match attributes.transparency {
             EntityTransparency::Explicit(alpha) => alpha,
@@ -436,6 +456,8 @@ impl ProviderRegistry {
         let (own_color, color_unresolved) = resolve_color(attributes.color, parent_color);
         let (own_lineweight, lineweight_unresolved) =
             resolve_lineweight(attributes.lineweight, parent_lineweight);
+        let (own_linetype, linetype_unresolved, linetype_scale) =
+            resolve_linetype(attributes.linetype.clone(), parent_linetype);
         out.completeness = weaker_completeness(&out.completeness, &representation.completeness);
         out.diagnostics.extend(representation.diagnostics);
         for fragment in representation.fragments {
@@ -486,11 +508,59 @@ impl ProviderRegistry {
                             own_alpha,
                             Some(own_color),
                             Some(own_lineweight),
+                            Some(&own_linetype),
+                            global_lt_scale,
                             stack,
                             out,
                         )?;
                     }
                     stack.pop();
+                }
+                DisplayPrimitive::Lines(points) => {
+                    // Dash subdivision happens on the transformed world-space
+                    // polyline so arc length is measured in final units.
+                    let world: Vec<Point3> =
+                        points.iter().map(|p| transform.apply_point(*p)).collect();
+                    let (runs, fallback_reason) = subdivide_dashes(
+                        &world,
+                        &own_linetype,
+                        linetype_scale as f64,
+                        global_lt_scale,
+                    );
+                    if let Some(reason) = fallback_reason {
+                        out.completeness = weaker_completeness(
+                            &out.completeness,
+                            &Completeness::Partial(vec![format!(
+                                "linetype dashes could not be generated: {reason}"
+                            )]),
+                        );
+                        out.diagnostics.push(Diagnostic {
+                            object: Some(ObjectId(entity.id.0)),
+                            code: "representation.linetype_fallback".into(),
+                            message: format!("linetype dashes fell back to continuous: {reason}"),
+                        });
+                    }
+                    for run in runs {
+                        if run.len() < 2 {
+                            continue;
+                        }
+                        let mut source = fragment.source.clone();
+                        source.instance = path.clone();
+                        out.fragments.push(DisplayFragment {
+                            source,
+                            geometry_source: attributes.geometry_source.clone(),
+                            precision: precision_for_source(&attributes.geometry_source),
+                            alpha: own_alpha,
+                            color: own_color,
+                            color_unresolved,
+                            lineweight: own_lineweight,
+                            lineweight_unresolved,
+                            linetype: own_linetype.clone(),
+                            linetype_unresolved,
+                            linetype_scale,
+                            primitive: DisplayPrimitive::Lines(Arc::from(run.into_boxed_slice())),
+                        });
+                    }
                 }
                 primitive => {
                     let mut source = fragment.source;
@@ -504,6 +574,9 @@ impl ProviderRegistry {
                         color_unresolved,
                         lineweight: own_lineweight,
                         lineweight_unresolved,
+                        linetype: own_linetype.clone(),
+                        linetype_unresolved,
+                        linetype_scale,
                         primitive: primitive.transformed(transform),
                     });
                 }

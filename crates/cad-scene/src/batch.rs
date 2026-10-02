@@ -74,6 +74,15 @@ pub struct RenderBatch {
     /// `true` when the source lineweight was symbolic and unresolved, so
     /// `lineweight` is the fallback default.
     pub lineweight_unresolved: bool,
+    /// Resolved linetype dash pattern carried for diagnostics. An empty
+    /// `elements` list means continuous. Line geometry is already subdivided
+    /// into dash sub-polylines in `cad-representation`, so the renderer does
+    /// not consume this field; it is recorded so a host can explain why a batch
+    /// is dashed (and so an unresolved `ByLayer`/`ByBlock` is visible).
+    pub linetype: cad_db::LinetypePattern,
+    /// `true` when the source linetype was symbolic and unresolved, so the
+    /// batch is drawn continuous.
+    pub linetype_unresolved: bool,
     pub sources: Vec<SelectionRef>,
     /// Paint order relative to sibling batches: larger values are drawn later
     /// (on top). The renderer performs a stable sort on this key, so batches with

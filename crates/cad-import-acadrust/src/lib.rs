@@ -16,8 +16,8 @@ use acadrust::entities::{
 use acadrust::{DwgReadOptions, DwgReader, EntityType, ReadStats};
 use cad_db::{
     BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, EntityColor,
-    EntityLineWeight, EntityRenderAttributes, EntityTransparency, Layer, Layout, PaperViewport,
-    Style,
+    EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency, Layer, Layout,
+    LineType as DbLineType, LinetypePattern, PaperViewport, Style,
 };
 use cad_domain::*;
 use cad_geometry::{arbitrary_axis, tessellate_bspline, PatternLine, TessellationParams};
@@ -174,6 +174,21 @@ struct ImporterBuilder<'a> {
     layer_colors: HashMap<LayerId, [u8; 3]>,
     /// Resolved lineweight of each layer in millimetres.
     layer_lineweights: HashMap<LayerId, f32>,
+    /// Root linetype name of each layer (`Layer.line_type`), looked up against
+    /// the drawing's linetype table when an entity is `ByLayer`.
+    layer_linetypes: HashMap<LayerId, String>,
+    /// Linetype name (lower-cased) -> resolved dash pattern, from the drawing's
+    /// `LineType` table. Nothing is fabricated; unknown names are reported.
+    linetype_patterns: HashMap<String, LinetypePattern>,
+    /// Linetype name -> table identity, so named entries are recorded in the
+    /// database even when no entity references them.
+    linetype_ids: HashMap<String, LinetypeId>,
+    /// Source linetype handle value -> name, so an entity that carries only a
+    /// handle (R13/R14 with no resolvable table name) can still be resolved.
+    linetype_names_by_handle: HashMap<u64, String>,
+    /// `true` when a source linetype carried shape/text glyphs that this build
+    /// cannot draw; surfaces as a `Partial` reason.
+    complex_linetypes: BTreeSet<String>,
     style_ids: HashMap<String, StyleId>,
     /// Lower-cased style name -> primary font file name.
     style_fonts: HashMap<String, String>,

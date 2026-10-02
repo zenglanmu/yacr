@@ -48,6 +48,8 @@ fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
         color_unresolved: true,
         lineweight: 0.0,
         lineweight_unresolved: true,
+        linetype: cad_scene::LinetypePattern::continuous(),
+        linetype_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
     }
@@ -89,6 +91,8 @@ fn triangle_mesh() -> RenderBatch {
         color_unresolved: true,
         lineweight: 0.0,
         lineweight_unresolved: true,
+        linetype: cad_scene::LinetypePattern::continuous(),
+        linetype_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
     }

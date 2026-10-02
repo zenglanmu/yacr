@@ -804,6 +804,9 @@ pub fn build_paper_space(
                                 color_unresolved: fragment.color_unresolved,
                                 lineweight: fragment.lineweight,
                                 lineweight_unresolved: fragment.lineweight_unresolved,
+                                linetype: fragment.linetype.clone(),
+                                linetype_unresolved: fragment.linetype_unresolved,
+                                linetype_scale: fragment.linetype_scale,
                                 primitive: DisplayPrimitive::Lines(std::sync::Arc::from(
                                     run.into_boxed_slice(),
                                 )),
@@ -828,6 +831,9 @@ pub fn build_paper_space(
                             color_unresolved: fragment.color_unresolved,
                             lineweight: fragment.lineweight,
                             lineweight_unresolved: fragment.lineweight_unresolved,
+                            linetype: fragment.linetype.clone(),
+                            linetype_unresolved: fragment.linetype_unresolved,
+                            linetype_scale: fragment.linetype_scale,
                             primitive: other,
                         });
                     }

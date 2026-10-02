@@ -4,7 +4,10 @@
 //! context into display primitives and a completeness report. They never touch
 //! Slint, GPU objects or the event loop, and they never mutate the database.
 
-use cad_db::{DbEntity, DrawingDatabase, EntityColor, EntityLineWeight, EntityTransparency};
+use cad_db::{
+    DbEntity, DrawingDatabase, EntityColor, EntityLineType, EntityLineWeight, EntityTransparency,
+    LinetypePattern,
+};
 use cad_domain::*;
 use cad_geometry::{tessellate_geometry, TessellationParams};
 use cad_kernel_adapter::{TessellationMesh, TessellationOutcome, TessellationResult};

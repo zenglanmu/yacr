@@ -90,6 +90,8 @@ fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
         color_unresolved: true,
         lineweight: 0.0,
         lineweight_unresolved: true,
+        linetype: cad_scene::LinetypePattern::continuous(),
+        linetype_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
     }
@@ -141,6 +143,8 @@ fn quad_mesh(
         color_unresolved: true,
         lineweight: 0.0,
         lineweight_unresolved: true,
+        linetype: cad_scene::LinetypePattern::continuous(),
+        linetype_unresolved: true,
         sources: vec![source()],
         draw_order,
     }
@@ -479,6 +483,64 @@ fn colored_line_batch(color: [f32; 3]) -> RenderBatch {
     batch.color = color;
     batch.color_unresolved = false;
     batch
+}
+
+/// A dashed horizontal line, exactly as `cad-representation` emits it: each
+/// dash is its own sub-polyline (and so its own batch), and the renderer only
+/// ever sees ordinary two-vertex `LineList` segments.
+fn dashed_horizontal_batches() -> Vec<RenderBatch> {
+    vec![
+        lines_batch(vec![[-0.9, 0.0, 0.0], [-0.3, 0.0, 0.0]]),
+        lines_batch(vec![[0.3, 0.0, 0.0], [0.9, 0.0, 0.0]]),
+    ]
+}
+
+/// A solid horizontal line over the same span.
+fn solid_horizontal_lines() -> Vec<[f32; 3]> {
+    vec![[-0.9, 0.0, 0.0], [0.9, 0.0, 0.0]]
+}
+
+/// Linetype dashes are visible: a pre-subdivided dashed line lights strictly
+/// fewer pixels than the solid line over the same span, and the midpoint (a
+/// gap) stays at the background colour.
+#[test]
+fn dashed_line_renders_a_visible_gap() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+    let camera = camera_2d();
+
+    renderer
+        .upload(&scene(vec![lines_batch(solid_horizontal_lines())]))
+        .expect("upload solid line");
+    renderer.render(camera, &target).expect("render solid line");
+    let solid = renderer.read_target_rgba().expect("read solid frame");
+    let background = solid.pixel(0, 0);
+    let solid_lit = solid.count_differing_from(background, 8);
+
+    renderer.clear_batches();
+    renderer
+        .upload(&scene(dashed_horizontal_batches()))
+        .expect("upload dashed line");
+    renderer
+        .render(camera, &target)
+        .expect("render dashed line");
+    let dashed = renderer.read_target_rgba().expect("read dashed frame");
+    // A pixel in the middle of the gap (world x = 0 -> pixel x = 32) must be
+    // background, while the solid frame is lit along its whole span.
+    assert_eq!(
+        dashed.pixel(32, 32),
+        background,
+        "the midpoint of a dashed line must be an unfilled gap"
+    );
+    let dashed_lit = dashed.count_differing_from(background, 8);
+    assert!(
+        dashed_lit < solid_lit,
+        "dashed line ({dashed_lit} px) must light fewer pixels than solid ({solid_lit} px)"
+    );
+    assert!(dashed_lit > 0, "the dashes themselves must still render");
 }
 
 /// Two entities with different colours must render differently. `RenderBatch`'s
