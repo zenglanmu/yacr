@@ -187,6 +187,53 @@ impl EntityLineType {
     }
 }
 
+/// Per-scale placement override for an annotative entity.
+///
+/// Mirrors the subset of `AcDb*ObjectContextData` this build understands: the
+/// anchor position and (for text) rotation that apply at one named scale. A
+/// missing override means "use the base placement, scaled".
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotativePlacement {
+    /// Anchor position for this scale, in world coordinates.
+    pub position: Point3,
+    /// Rotation in radians for this scale.
+    pub rotation: f64,
+    /// Explicit glyph height for this scale, when the source context carries
+    /// one. `None` means the base height is scaled by the factor.
+    pub height: Option<f64>,
+}
+
+/// The named scale an [`AnnotativePlacement`] override applies to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotativeScaleOverride {
+    /// Source scale name (for example `"1:100"`), matched case-sensitively
+    /// against the drawing's Scale table / active annotation scale.
+    pub scale: String,
+    pub placement: AnnotativePlacement,
+}
+
+/// Annotative scaling state resolved at import time for one entity.
+///
+/// Hand-built databases keep [`AnnotativeAttributes::default`] (not annotative,
+/// no overrides), so nothing here changes the rendering of non-imported data.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AnnotativeAttributes {
+    /// `true` when the source entity (or its style/block) is annotative.
+    pub annotative: bool,
+    /// Per-scale placement overrides, one per imported context leaf.
+    pub overrides: Vec<AnnotativeScaleOverride>,
+}
+
+impl AnnotativeAttributes {
+    /// A placement override for `scale`, if one was imported.
+    pub fn override_for(&self, scale: &str) -> Option<&AnnotativePlacement> {
+        self.overrides
+            .iter()
+            .find(|o| o.scale == scale)
+            .map(|o| &o.placement)
+    }
+}
+
 /// Import-time display attributes that are not part of the semantic geometry.
 ///
 /// These live beside the entity in the database rather than in `DbEntity` so
@@ -203,6 +250,8 @@ pub struct EntityRenderAttributes {
     pub linetype: EntityLineType,
     /// Which producer supplied the display geometry (proxy cache vs analytic).
     pub geometry_source: GeometrySource,
+    /// Annotative scaling state (§3.2). Defaults to non-annotative.
+    pub annotative: AnnotativeAttributes,
 }
 
 impl Default for EntityRenderAttributes {
@@ -213,6 +262,7 @@ impl Default for EntityRenderAttributes {
             lineweight: EntityLineWeight::default(),
             linetype: EntityLineType::default(),
             geometry_source: GeometrySource::Analytic,
+            annotative: AnnotativeAttributes::default(),
         }
     }
 }

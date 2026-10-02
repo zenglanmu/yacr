@@ -113,6 +113,7 @@ impl DisplayRepresentation {
     }
 }
 
+#[derive(Clone)]
 pub struct RepresentationContext {
     pub document: DocumentId,
     pub tolerance: TolerancePolicy,
@@ -120,6 +121,34 @@ pub struct RepresentationContext {
     /// Optional font set for shaping text into line geometry. Without it, text
     /// stays an unshaped `DisplayPrimitive::Text` (not drawn by the scene).
     pub fonts: Option<Arc<FontEngine>>,
+    /// Active annotation scale used to scale annotative entities.
+    ///
+    /// `None` means no annotation scaling is applied (the pre-annotative
+    /// behaviour), so existing callers are unaffected. When set, an entity the
+    /// importer marked annotative has its glyph geometry scaled about its
+    /// anchor by [`AnnotationScaleRef::factor`], and any imported per-scale
+    /// placement override is used as-is.
+    pub annotation_scale: Option<AnnotationScaleRef>,
+}
+
+/// The active annotation scale a host applies while building representations.
+///
+/// `name` matches against per-scale placement overrides; `factor` is the
+/// paper/drawing ratio from the drawing's Scale table
+/// ([`cad_db::Scale::factor`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotationScaleRef {
+    pub name: String,
+    pub factor: f64,
+}
+
+impl AnnotationScaleRef {
+    pub fn new(name: impl Into<String>, factor: f64) -> Self {
+        AnnotationScaleRef {
+            name: name.into(),
+            factor,
+        }
+    }
 }
 
 impl RepresentationContext {
@@ -129,12 +158,19 @@ impl RepresentationContext {
             tolerance,
             stamp,
             fonts: None,
+            annotation_scale: None,
         }
     }
 
     /// Attach a font set so text can be outlined into drawable polylines.
     pub fn with_fonts(mut self, fonts: Arc<FontEngine>) -> Self {
         self.fonts = Some(fonts);
+        self
+    }
+
+    /// Apply the drawing's active annotation scale while building.
+    pub fn with_annotation_scale(mut self, scale: AnnotationScaleRef) -> Self {
+        self.annotation_scale = Some(scale);
         self
     }
 }

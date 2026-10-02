@@ -163,6 +163,15 @@ impl<'a> ImporterBuilder<'a> {
                 });
             }
         }
+        let (annotative, annotative_reason) =
+            annotative_attributes(self.acad, entity, &self.scale_names);
+        if let Some(reason) = annotative_reason {
+            self.diagnostics.push(Diagnostic {
+                object: Some(object_id),
+                code: "annotative.context_unsupported".into(),
+                message: reason,
+            });
+        }
         let attributes = EntityRenderAttributes {
             transparency: resolve_entity_transparency(common.transparency, layer_alpha),
             color: resolve_entity_color(common.color, layer_color),
@@ -173,6 +182,7 @@ impl<'a> ImporterBuilder<'a> {
             } else {
                 GeometrySource::Analytic
             },
+            annotative,
         };
 
         let record = DbEntity {

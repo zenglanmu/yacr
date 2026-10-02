@@ -41,6 +41,7 @@ impl<'a> ImporterBuilder<'a> {
             complex_linetypes: BTreeSet::new(),
             style_ids: HashMap::new(),
             style_fonts: HashMap::new(),
+            scale_names: HashMap::new(),
             block_ids: HashMap::new(),
             block_base_points: HashMap::new(),
             block_member_ids: HashMap::new(),
@@ -99,6 +100,7 @@ impl<'a> ImporterBuilder<'a> {
         self.read_styles()?;
         self.read_layouts()?;
         self.read_plot_settings()?;
+        self.read_annotation_scales()?;
         self.read_blocks()?;
         self.check_cancelled()?;
         self.progress.report(ImportProgress::at(
@@ -372,6 +374,23 @@ impl<'a> ImporterBuilder<'a> {
             self.builder.set_plot_settings(imported.record)?;
         }
         Ok(())
+    }
+
+    /// Read the drawing's named annotation scales and active annotation scale.
+    ///
+    /// An unknown active scale is reported `Partial` (`import.annotation_scale_unknown`)
+    /// so it is never silently treated as 1:1.
+    pub(crate) fn read_annotation_scales(&mut self) -> CadResult<()> {
+        self.scale_names = read_scales(&mut self.builder, self.acad)?;
+        let mut diagnostics = std::mem::take(&mut self.diagnostics);
+        let result = read_active_annotation_scale(
+            &mut self.builder,
+            self.acad,
+            &self.scale_names,
+            &mut diagnostics,
+        );
+        self.diagnostics = diagnostics;
+        result
     }
 
     pub(crate) fn read_blocks(&mut self) -> CadResult<()> {

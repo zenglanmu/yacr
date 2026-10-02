@@ -16,6 +16,7 @@ ids!(
     LayoutId,
     StyleId,
     LinetypeId,
+    ScaleId,
     AnnotationId,
     ViewportId,
     TransactionId,
