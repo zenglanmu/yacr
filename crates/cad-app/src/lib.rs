@@ -13,6 +13,7 @@ use cad_domain::*;
 use cad_history::{patch, History, UndoRecord};
 use cad_measure::{MeasurementEngine, MeasurementRequest, MeasurementSpace};
 use cad_query::QueryService;
+use cad_representation::{enumerate_layouts, SpaceSelection};
 use std::{collections::BTreeMap, sync::Arc};
 
 pub mod annotation_list;
@@ -33,8 +34,8 @@ pub use cad_spatial::{
     BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
 };
 pub use camera::{
-    orthonormal_work_plane, xy_work_plane, Camera, Projection, ProjectionKind, StandardView,
-    ViewBasis,
+    orthonormal_work_plane, xy_work_plane, Camera, Camera2dParams, Camera3dParams, Projection,
+    ProjectionKind, StandardView, ViewBasis,
 };
 pub use host_files::{
     decision_name, parse_decision, plan_leave, LeavePlan, LeaveResolution, UnsavedDecisionSource,
@@ -534,6 +535,48 @@ impl CommandOutcome {
     }
 }
 
+/// Validate that model space or a named paper layout can be drawn.
+///
+/// `SpaceSelection::Model` is always valid. A paper selection must name a layout
+/// that exists in `database` **and** whose viewports this build can draw; an
+/// unknown layout is `InvalidInput` and a known-but-undrawable one is
+/// `Unsupported` with the representation layer's own reason. This is what keeps
+/// an unsupported layout an explicit diagnostic instead of a blank success
+/// (audit F04/B22).
+pub fn validate_space(database: &DrawingDatabase, space: SpaceSelection) -> CadResult<()> {
+    match space {
+        SpaceSelection::Model => Ok(()),
+        SpaceSelection::Paper(id) => match enumerate_layouts(database)
+            .into_iter()
+            .find(|descriptor| descriptor.id == id)
+        {
+            None => Err(CadError::InvalidInput(format!(
+                "unknown paper layout {}",
+                id.0
+            ))),
+            Some(descriptor) if !descriptor.supported => Err(CadError::Unsupported(format!(
+                "layout {:?} cannot be drawn: {}",
+                descriptor.name, descriptor.reason
+            ))),
+            Some(_) => Ok(()),
+        },
+    }
+}
+
+/// Validate the domain `SpaceId` payload form of a space switch.
+///
+/// `SpaceId::Block` is block-definition space, which is reached only through an
+/// `INSERT` and is never a selectable observation space, so it is refused.
+pub fn validate_space_id(database: &DrawingDatabase, space: &SpaceId) -> CadResult<()> {
+    match space {
+        SpaceId::Model => Ok(()),
+        SpaceId::Paper(id) => validate_space(database, SpaceSelection::Paper(*id)),
+        SpaceId::Block(_) => Err(CadError::InvalidInput(
+            "block space is not a selectable drawing space".into(),
+        )),
+    }
+}
+
 pub struct CommandDeclaration {
     pub id: CommandId,
     pub undoable: bool,
@@ -616,6 +659,17 @@ impl Application {
             }
             CommandId::SwitchSpace => {
                 if let CommandPayload::Space(space) = command.payload {
+                    // Validate against the *current* drawing before recording the
+                    // switch: an unknown or undrawable layout is an explicit
+                    // refusal, never an empty "success" that later renders a
+                    // blank sheet (audit F04/U03).
+                    let drawing = &self
+                        .workspace
+                        .documents
+                        .get(&command.document)
+                        .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+                        .drawing;
+                    validate_space_id(drawing, &space)?;
                     session.active_space = space;
                     Ok(CommandOutcome::none())
                 } else {
@@ -1654,6 +1708,7 @@ pub trait Tool {
 mod tests {
     use super::*;
     use cad_db::{Annotation, AnnotationGeometry, AnnotationStyle, DrawingDatabaseBuilder};
+    use cad_db::{Layer, Layout, PaperViewport};
 
     // Aliases kept local so the tests read without re-importing camera helpers.
     fn cam_xy_work_plane(z: f64) -> WorkPlane {
@@ -2787,5 +2842,145 @@ mod tests {
                 "{id:?} must be Work-only"
             );
         }
+    }
+
+    /// One document with a supported layout (id 1) and an unsupported one (id 2).
+    fn application_with_layouts() -> (Application, SessionState) {
+        let (mut app, session) = application_with_document();
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        let corners = || {
+            vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 100.0,
+                    y: 50.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 0.0,
+                },
+            ]
+        };
+        b.insert_layout(Layout {
+            id: LayoutId(1),
+            name: "Sheet1".into(),
+            viewports: vec![PaperViewport {
+                clip: corners(),
+                model_to_paper: Transform3::scale(100.0),
+                completeness: Completeness::Complete,
+            }],
+        })
+        .unwrap();
+        b.insert_layout(Layout {
+            id: LayoutId(2),
+            name: "Broken".into(),
+            viewports: vec![PaperViewport {
+                clip: corners(),
+                model_to_paper: Transform3::scale(100.0),
+                completeness: Completeness::Partial(vec!["importer dropped height".into()]),
+            }],
+        })
+        .unwrap();
+        let drawing = b.finish().unwrap();
+        app.workspace
+            .documents
+            .get_mut(&DocumentId(1))
+            .unwrap()
+            .drawing = Arc::new(drawing);
+        (app, session)
+    }
+
+    #[test]
+    fn validate_space_distinguishes_unknown_from_unsupported() {
+        let (app, _) = application_with_layouts();
+        let db = &app.workspace.documents[&DocumentId(1)].drawing;
+        assert!(validate_space(db, SpaceSelection::Model).is_ok());
+        assert!(validate_space(db, SpaceSelection::Paper(LayoutId(1))).is_ok());
+        assert!(matches!(
+            validate_space(db, SpaceSelection::Paper(LayoutId(99))),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            validate_space(db, SpaceSelection::Paper(LayoutId(2))),
+            Err(CadError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn switch_space_accepts_a_supported_layout_and_model_space() {
+        let (mut app, mut session) = application_with_layouts();
+        assert_eq!(session.active_space, SpaceId::Model);
+        app.execute(
+            &mut session,
+            command(
+                CommandId::SwitchSpace,
+                CommandPayload::Space(SpaceId::Paper(LayoutId(1))),
+            ),
+        )
+        .unwrap();
+        assert_eq!(session.active_space, SpaceId::Paper(LayoutId(1)));
+        app.execute(
+            &mut session,
+            command(
+                CommandId::SwitchSpace,
+                CommandPayload::Space(SpaceId::Model),
+            ),
+        )
+        .unwrap();
+        assert_eq!(session.active_space, SpaceId::Model);
+    }
+
+    #[test]
+    fn switch_space_to_unknown_layout_is_rejected_and_keeps_the_space() {
+        let (mut app, mut session) = application_with_layouts();
+        let result = app.execute(
+            &mut session,
+            command(
+                CommandId::SwitchSpace,
+                CommandPayload::Space(SpaceId::Paper(LayoutId(99))),
+            ),
+        );
+        assert!(matches!(result, Err(CadError::InvalidInput(_))));
+        assert_eq!(session.active_space, SpaceId::Model);
+    }
+
+    #[test]
+    fn switch_space_to_unsupported_layout_is_explicitly_unsupported() {
+        let (mut app, mut session) = application_with_layouts();
+        let result = app.execute(
+            &mut session,
+            command(
+                CommandId::SwitchSpace,
+                CommandPayload::Space(SpaceId::Paper(LayoutId(2))),
+            ),
+        );
+        assert!(matches!(result, Err(CadError::Unsupported(_))));
+        assert_eq!(session.active_space, SpaceId::Model);
+    }
+
+    #[test]
+    fn block_space_is_not_a_selectable_drawing_space() {
+        let (mut app, mut session) = application_with_layouts();
+        let result = app.execute(
+            &mut session,
+            command(
+                CommandId::SwitchSpace,
+                CommandPayload::Space(SpaceId::Block(BlockId(1))),
+            ),
+        );
+        assert!(matches!(result, Err(CadError::InvalidInput(_))));
+        assert_eq!(session.active_space, SpaceId::Model);
     }
 }

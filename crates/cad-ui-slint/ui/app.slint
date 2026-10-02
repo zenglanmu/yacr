@@ -183,6 +183,21 @@ export component YacrWindow inherits Window {
     in property <string> layout-unsupported-marker;
     in property <string> layout-empty-label: "";
 
+    // --- View / projection controls (F13/F14) ---------------------------
+    // `view-3d` and `view-perspective` are pushed from the authoritative
+    // application viewport via `UiHandle::set_view_state`. The standard-view
+    // model is built from `StandardView::ALL`, so a selected label maps back to
+    // the exact view without a second ordering list.
+    in property <bool> view-3d: false;
+    in property <bool> view-perspective: false;
+    in property <string> view-panel-label;
+    in property <string> view-2d-label;
+    in property <string> view-3d-label;
+    in property <string> view-projection-label;
+    in property <string> view-ortho-label;
+    in property <string> view-perspective-label;
+    in property <[string]> standard-view-labels: [];
+
     // --- Diagnostics drawer (audit U08) ---------------------------------
     // The status bar stays a one-line summary; the drawer holds the full,
     // object-level reasons and the real backend label. Rows are only what a host
@@ -226,6 +241,12 @@ export component YacrWindow inherits Window {
     // only emitted when a host has installed a switch sink; otherwise the
     // adapter reports "layout switch not wired" (never a silent no-op).
     callback layout-selected(index: int);
+    // View controls (F13/F14). `standard-view-selected` carries the localized
+    // label from the `standard-view-labels` model (built from
+    // `StandardView::ALL`); the adapter maps it back to the exact view.
+    callback toggle-view-mode-requested();
+    callback toggle-projection-requested();
+    callback standard-view-selected(name: string);
     callback backend-selected(name: string);
     callback export-requested();
     callback import-requested();
@@ -400,6 +421,64 @@ export component YacrWindow inherits Window {
                             color: #6b7688;
                             overflow: elide;
                         }
+                    }
+                }
+            }
+        }
+
+        // --- View / projection bar (F13/F14) -------------------------------
+        // A 2D/3D toggle, an explicit projection toggle and the standard views
+        // (Top/Front/Right/...). The standard-view buttons are generated from a
+        // catalog-built model; on a narrow/compact shell a ComboBox keeps them
+        // reachable without overflowing the bar.
+        Rectangle {
+            height: root.control-height;
+            background: #232933;
+            HorizontalBox {
+                spacing: 6px;
+                padding: 4px;
+                alignment: start;
+                Text {
+                    text: root.view-panel-label;
+                    color: #c8d0dc;
+                    vertical-alignment: center;
+                }
+                Button {
+                    text: root.view-2d-label;
+                    min-height: root.touch-target;
+                    enabled: root.view-3d;
+                    clicked => { if root.view-3d { root.toggle-view-mode-requested(); } }
+                }
+                Button {
+                    text: root.view-3d-label;
+                    min-height: root.touch-target;
+                    enabled: !root.view-3d;
+                    clicked => { if !root.view-3d { root.toggle-view-mode-requested(); } }
+                }
+                Button {
+                    text: root.view-projection-label;
+                    min-height: root.touch-target;
+                    clicked => { root.toggle-projection-requested(); }
+                }
+                Text {
+                    // The current projection, pushed from the real viewport, so
+                    // the toggle has visible, honest state.
+                    text: root.view-perspective ? root.view-perspective-label : root.view-ortho-label;
+                    color: #9aa7b8;
+                    vertical-alignment: center;
+                }
+                if root.compact-shell : ComboBox {
+                    width: 120px;
+                    min-height: root.touch-target;
+                    model: root.standard-view-labels;
+                    selected(value) => { root.standard-view-selected(value); }
+                }
+                if !root.compact-shell : HorizontalBox {
+                    spacing: 6px;
+                    for label in root.standard-view-labels : Button {
+                        text: label;
+                        min-height: root.touch-target;
+                        clicked => { root.standard-view-selected(label); }
                     }
                 }
             }

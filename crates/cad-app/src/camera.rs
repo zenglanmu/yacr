@@ -116,6 +116,49 @@ pub enum StandardView {
 }
 
 impl StandardView {
+    /// Every standard view in the order a UI selector presents them.
+    ///
+    /// A host builds its list and maps a chosen row index back through this
+    /// array, exactly like `MeasurementToolKind::ALL`, so the UI ordering and
+    /// the command payload cannot drift apart.
+    pub const ALL: [StandardView; 7] = [
+        StandardView::Top,
+        StandardView::Bottom,
+        StandardView::Front,
+        StandardView::Back,
+        StandardView::Left,
+        StandardView::Right,
+        StandardView::Isometric,
+    ];
+
+    /// Position of this view in [`StandardView::ALL`].
+    pub fn index(self) -> usize {
+        StandardView::ALL
+            .iter()
+            .position(|v| *v == self)
+            .expect("every StandardView variant is in ALL")
+    }
+
+    /// Recover a standard view from a UI row index.
+    pub fn from_index(index: i32) -> Option<StandardView> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| StandardView::ALL.get(i).copied())
+    }
+
+    /// Stable machine key for the i18n catalog (`view.standard.<key>`).
+    pub fn key(self) -> &'static str {
+        match self {
+            StandardView::Top => "top",
+            StandardView::Bottom => "bottom",
+            StandardView::Front => "front",
+            StandardView::Back => "back",
+            StandardView::Left => "left",
+            StandardView::Right => "right",
+            StandardView::Isometric => "isometric",
+        }
+    }
+
     /// Unit vector from the target toward the eye for this view.
     ///
     /// This is the direction the camera looks *from*, so the eye is
@@ -268,6 +311,40 @@ fn alternate_up(forward: Point3) -> Point3 {
     best
 }
 
+/// Render-ready 2D camera parameters: the target and world units per pixel.
+///
+/// This is the host-independent data a renderer needs for the orthogonal plan
+/// path (`cad_render_wgpu::Camera2d`). It carries no GPU type and is produced by
+/// [`Camera::camera2d_params`], so the projection/observation split is validated
+/// in `cad-app` before a host maps it to its renderer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Camera2dParams {
+    /// World point at the centre of the viewport.
+    pub center: Point3,
+    /// World units per logical pixel (strictly positive).
+    pub world_per_px: f64,
+}
+
+/// Render-ready perspective 3D camera parameters (a look-at + perspective block).
+///
+/// The near/far planes are derived here from the eye-target distance with the
+/// exact same rule as [`Camera::projection_matrix`], so a renderer gets a
+/// non-degenerate frustum rather than re-deriving (or guessing) it. Produced by
+/// [`Camera::camera3d_params`], which refuses an orthographic or degenerate
+/// camera; a host maps the fields straight onto its own 3D camera type.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Camera3dParams {
+    pub eye: Point3,
+    pub target: Point3,
+    pub up: Point3,
+    /// Full vertical field of view, in radians.
+    pub fov_y: f64,
+    /// Distance to the near plane (strictly positive).
+    pub near: f64,
+    /// Distance to the far plane (strictly greater than `near`).
+    pub far: f64,
+}
+
 /// The camera of one viewport.
 ///
 /// `eye` and `target` define the view ray; `up` is an up *hint* (it need not be
@@ -357,10 +434,78 @@ impl Camera {
                 let aspect = w / h;
                 // WebGPU depth range [0, 1]; near/far derived from the camera
                 // distance so the target always stays well inside the frustum.
-                let far = (self.distance() * 1e4).max(1.0);
-                let near = (self.distance() * 1e-4).max(1e-6);
+                let (near, far) = perspective_near_far(self.distance());
                 perspective_matrix(vertical_fov_radians, aspect, near, far)?
             }
+        })
+    }
+
+    /// Render-ready parameters for the orthographic 2D plan path.
+    ///
+    /// Rejects a non-orthographic camera or a degenerate scale, so a host never
+    /// renders the plan with a perspective projection (or a NaN scale) by
+    /// accident.
+    pub fn camera2d_params(&self) -> CadResult<Camera2dParams> {
+        self.validate()?;
+        let Projection::Orthographic { scale } = self.projection else {
+            return Err(CadError::InvalidInput(
+                "the 2D render path needs an orthographic projection".into(),
+            ));
+        };
+        if !scale.is_finite() || scale < MIN_ORTHO_SCALE {
+            return Err(CadError::InvalidInput(
+                "orthographic scale is not renderable".into(),
+            ));
+        }
+        Ok(Camera2dParams {
+            center: self.target,
+            world_per_px: scale,
+        })
+    }
+
+    /// Render-ready parameters for the perspective 3D path.
+    ///
+    /// Refuses an orthographic camera (the 3D renderer only implements a
+    /// perspective frustum here), a degenerate/coincident eye-target pair, a
+    /// non-orthonormalisable basis, and an invalid projection. The near/far
+    /// planes come from [`perspective_near_far`] — the same rule as
+    /// [`Camera::projection_matrix`] — so the two paths cannot diverge.
+    pub fn camera3d_params(&self) -> CadResult<Camera3dParams> {
+        self.validate()?;
+        let Projection::Perspective {
+            vertical_fov_radians,
+        } = self.projection
+        else {
+            return Err(CadError::InvalidInput(
+                "the 3D render path needs a perspective projection".into(),
+            ));
+        };
+        let distance = self.distance();
+        if !distance.is_finite() || distance < 1e-6 {
+            return Err(CadError::InvalidInput(
+                "camera eye and target are too close to render in 3D".into(),
+            ));
+        }
+        // A degenerate up hint (parallel to the view direction) must be refused
+        // here as well: the renderer's look-at would have no stable basis, and
+        // the app must not silently repair a camera the caller asked for.
+        let forward = normalize3(sub(self.target, self.eye))
+            .ok_or_else(|| CadError::InvalidInput("camera view direction is degenerate".into()))?;
+        let up = normalize3(self.up)
+            .ok_or_else(|| CadError::InvalidInput("camera up hint is degenerate".into()))?;
+        if length3(cross(forward, up)) < 1e-6 {
+            return Err(CadError::InvalidInput(
+                "camera up hint is parallel to the view direction".into(),
+            ));
+        }
+        let (near, far) = perspective_near_far(distance);
+        Ok(Camera3dParams {
+            eye: self.eye,
+            target: self.target,
+            up: self.up,
+            fov_y: vertical_fov_radians,
+            near,
+            far,
         })
     }
 
@@ -631,6 +776,18 @@ impl Camera {
         }
         Some(add(ray.origin, scale3(ray.direction, t)))
     }
+}
+
+/// The near/far planes for a perspective view at `distance`, in world units.
+///
+/// This is the single source of truth shared by [`Camera::projection_matrix`] and
+/// [`Camera::camera3d_params`]: a small fraction of the distance for `near` and a
+/// large multiple for `far`, with finite positive floors so the target always
+/// stays well inside `[near, far]`.
+fn perspective_near_far(distance: f64) -> (f64, f64) {
+    let near = (distance * 1e-4).max(1e-6);
+    let far = (distance * 1e4).max(1.0);
+    (near, far)
 }
 
 fn orthographic_matrix(half_w: f64, half_h: f64, near: f64, far: f64) -> [[f64; 4]; 4] {
@@ -1090,5 +1247,79 @@ mod tests {
             projection: Projection::orthographic(1.0).unwrap(),
         };
         assert!(camera.validate().is_err());
+    }
+
+    #[test]
+    fn camera2d_params_require_orthographic_and_carry_the_scale() {
+        let camera = Camera {
+            eye: p(10.0, 20.0, 1000.0),
+            target: p(10.0, 20.0, 0.0),
+            up: p(0.0, 1.0, 0.0),
+            projection: Projection::orthographic(2.5).unwrap(),
+        };
+        let params = camera.camera2d_params().unwrap();
+        assert_eq!(params.center, p(10.0, 20.0, 0.0));
+        assert_eq!(params.world_per_px, 2.5);
+
+        let perspective = Camera {
+            projection: Projection::perspective(std::f64::consts::FRAC_PI_4).unwrap(),
+            ..camera
+        };
+        assert!(perspective.camera2d_params().is_err());
+    }
+
+    #[test]
+    fn camera3d_params_require_perspective_and_derive_finite_near_far() {
+        let camera = Camera {
+            eye: p(0.0, -500.0, 200.0),
+            target: p(0.0, 0.0, 0.0),
+            up: p(0.0, 0.0, 1.0),
+            projection: Projection::perspective(std::f64::consts::FRAC_PI_4).unwrap(),
+        };
+        let params = camera.camera3d_params().unwrap();
+        assert_eq!(params.eye, p(0.0, -500.0, 200.0));
+        assert_eq!(params.target, p(0.0, 0.0, 0.0));
+        assert_eq!(params.up, p(0.0, 0.0, 1.0));
+        assert!((params.fov_y - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
+        assert!(params.near > 0.0 && params.near.is_finite());
+        assert!(params.far > params.near && params.far.is_finite());
+
+        // Orthographic cameras are refused on the 3D render path.
+        let ortho = Camera {
+            projection: Projection::orthographic(1.0).unwrap(),
+            ..camera
+        };
+        assert!(ortho.camera3d_params().is_err());
+    }
+
+    #[test]
+    fn camera3d_params_reject_a_degenerate_or_pole_locked_camera() {
+        let coincident = Camera {
+            eye: p(0.0, 0.0, 0.0),
+            target: p(0.0, 0.0, 0.0),
+            up: p(0.0, 1.0, 0.0),
+            projection: Projection::perspective(std::f64::consts::FRAC_PI_4).unwrap(),
+        };
+        assert!(coincident.camera3d_params().is_err());
+
+        // Up parallel to the view direction: no stable basis for the renderer.
+        let degenerate_up = Camera {
+            eye: p(0.0, 0.0, 10.0),
+            target: p(0.0, 0.0, 0.0),
+            up: p(0.0, 0.0, 1.0),
+            projection: Projection::perspective(std::f64::consts::FRAC_PI_4).unwrap(),
+        };
+        assert!(degenerate_up.camera3d_params().is_err());
+    }
+
+    #[test]
+    fn standard_view_all_index_round_trips() {
+        assert_eq!(StandardView::ALL.len(), 7);
+        for (index, view) in StandardView::ALL.iter().copied().enumerate() {
+            assert_eq!(view.index(), index);
+            assert_eq!(StandardView::from_index(index as i32), Some(view));
+        }
+        assert_eq!(StandardView::from_index(-1), None);
+        assert_eq!(StandardView::from_index(99), None);
     }
 }

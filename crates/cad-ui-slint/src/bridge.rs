@@ -14,7 +14,8 @@ use cad_domain::{
     CadError, CadResult, DocumentId, Point3, SceneIdentity, TaskStamp, TolerancePolicy,
 };
 use cad_render_wgpu::{
-    ActiveBackend, BackendCapabilities, BackendPreference, Camera2d, RenderTarget, Renderer,
+    ActiveBackend, BackendCapabilities, BackendPreference, Camera2d, Camera3d, RenderTarget,
+    Renderer,
 };
 use cad_representation::layout::{build_paper_space, enumerate_layouts};
 use cad_representation::{
@@ -27,8 +28,10 @@ use cad_scene::{
 
 use cad_app::layers::LayerOverrideSet;
 use cad_app::recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
-use cad_app::AnnotationVisibilitySet;
 use cad_app::BackendChoice;
+use cad_app::{
+    AnnotationVisibilitySet, Camera, Camera3dParams, Projection, ProjectionKind, Viewport,
+};
 
 use crate::{UiHandle, YacrWindow};
 
@@ -167,7 +170,37 @@ pub fn build_scene_with_annotations(
     visibility: &AnnotationVisibilitySet,
     annotation_document: DocumentId,
 ) -> CadResult<(SceneDelta, AnnotationScene)> {
-    let mut delta = build_scene_with_overrides(database, stamp.clone(), fonts.clone(), overrides)?;
+    build_scene_with_annotations_in_space(
+        database,
+        stamp,
+        fonts,
+        overrides,
+        SpaceSelection::Model,
+        annotations,
+        visibility,
+        annotation_document,
+    )
+}
+
+/// Build the drawing scene for an explicit space plus the annotation overlay.
+///
+/// Identical to [`build_scene_with_annotations`] except the drawing batches come
+/// from [`build_scene_with_space`], so the model/paper switch reaches the render
+/// path without a second scene builder. `SpaceSelection::Model` reproduces the
+/// model-space entry point exactly.
+#[allow(clippy::too_many_arguments)]
+pub fn build_scene_with_annotations_in_space(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    overrides: &LayerOverrideSet,
+    space: SpaceSelection,
+    annotations: Option<&AnnotationDatabase>,
+    visibility: &AnnotationVisibilitySet,
+    annotation_document: DocumentId,
+) -> CadResult<(SceneDelta, AnnotationScene)> {
+    let mut delta =
+        build_scene_with_space(database, stamp.clone(), fonts.clone(), overrides, space)?;
     let budget = FrameBudget::from_scene(&SceneBudget::default());
     let options = AnnotationSceneOptions {
         document: annotation_document,
@@ -231,9 +264,46 @@ pub fn fit_camera(database: &DrawingDatabase, logical_size: [f64; 2]) -> BridgeC
     }
 }
 
+/// Map validated application 2D camera parameters to the renderer's `Camera2d`.
+///
+/// The single point where the two crate types meet for the plan path; it is a
+/// field-for-field mapping with no repair, so the app keeps ownership of the
+/// projection validation.
+pub fn camera2d_from_params(params: cad_app::Camera2dParams) -> Camera2d {
+    Camera2d {
+        center: params.center,
+        world_per_px: params.world_per_px,
+        z_plane: 0.0,
+    }
+}
+
+/// Map validated application 3D camera parameters to the renderer's `Camera3d`.
+///
+/// The single point where the two crate types meet for the 3D path. `cad-app`
+/// derived the near/far planes and rejected a degenerate camera; here the fields
+/// are copied verbatim, never repaired.
+pub fn camera3d_from_params(params: Camera3dParams) -> Camera3d {
+    Camera3d {
+        eye: params.eye,
+        target: params.target,
+        up: params.up,
+        fov_y: params.fov_y,
+        near: params.near,
+        far: params.far,
+    }
+}
+
 struct BridgeState {
     renderer: Option<Renderer>,
     camera: BridgeCamera,
+    /// The authoritative application camera, in whatever projection the
+    /// viewport currently has. Drives the 3D render path and is the source of
+    /// the 2D mirror above.
+    camera3d: Camera,
+    /// Active space the scene is (or is being) built for (F04).
+    space: SpaceSelection,
+    /// Observation mode; selects `render` vs `render_3d`.
+    view_mode: ProjectionKind,
     document: Option<SceneIdentity>,
     image_size: Option<(u32, u32)>,
     /// Result of the last backend selection/init attempt.
@@ -249,9 +319,15 @@ struct BridgeState {
     /// Fingerprint of the annotation database revision plus session visibility;
     /// a change forces a rebuild (F07).
     annotations_fingerprint: u64,
+    /// The paper layout the current GPU batches were built for, so a space switch
+    /// forces a rebuild even when the document identity is unchanged.
+    built_space: Option<SpaceSelection>,
     /// Generation of the device the current `document` identity was built for.
     /// A device rebuild bumps this so the next frame re-uploads from the DB.
     built_generation: Option<u64>,
+    /// Explicit result of the last space selection; an unsupported/unknown
+    /// layout or a refused camera lands here instead of a blank frame.
+    view_diagnostic: Option<String>,
 }
 
 impl Default for BridgeState {
@@ -259,6 +335,9 @@ impl Default for BridgeState {
         BridgeState {
             renderer: None,
             camera: BridgeCamera::default(),
+            camera3d: Camera::top_view_2d(),
+            space: SpaceSelection::Model,
+            view_mode: ProjectionKind::TwoD,
             document: None,
             image_size: None,
             outcome: None,
@@ -266,7 +345,9 @@ impl Default for BridgeState {
             fonts_present: false,
             overrides_fingerprint: 0,
             annotations_fingerprint: 0,
+            built_space: None,
             built_generation: None,
+            view_diagnostic: None,
         }
     }
 }
@@ -283,6 +364,9 @@ pub struct CadView {
     overrides: Rc<RefCell<LayerOverrideSet>>,
     annotations: IncomingAnnotations,
     annotation_visibility: Rc<RefCell<AnnotationVisibilitySet>>,
+    /// The document slot, kept so `set_space` can validate a layout against the
+    /// real layout table before switching (never a fabricated space).
+    incoming: IncomingDocument,
     preference: BackendPreference,
     /// Shared catalog so backend failure text follows the active language.
     messages: Rc<RefCell<crate::i18n::MessageSource>>,
@@ -308,6 +392,119 @@ impl CadView {
     /// Snapshot of the render camera for diagnostics/tests.
     pub fn camera(&self) -> BridgeCamera {
         self.state.borrow().camera
+    }
+
+    /// The authoritative application 3D camera mirrored into the bridge.
+    pub fn camera3d(&self) -> Camera {
+        self.state.borrow().camera3d
+    }
+
+    /// The space the bridge will build the next frame for.
+    pub fn space(&self) -> SpaceSelection {
+        self.state.borrow().space
+    }
+
+    /// The current observation mode (2D plan or 3D orbit).
+    pub fn view_mode(&self) -> ProjectionKind {
+        self.state.borrow().view_mode
+    }
+
+    /// The last explicit view diagnostic: an unsupported/unknown layout, or a
+    /// refused degenerate camera. `None` means the last frame was not refused
+    /// for a view reason.
+    pub fn view_diagnostic(&self) -> Option<String> {
+        self.state.borrow().view_diagnostic.clone()
+    }
+
+    /// Select the drawing space the bridge builds and renders.
+    ///
+    /// A paper selection is validated against the *current* document's real
+    /// layout table, so an unknown layout is `InvalidInput` and a known-but-
+    /// undrawable layout is `Unsupported` with the representation reason. On
+    /// refusal the previous space is kept and the reason is recorded in
+    /// [`CadView::view_diagnostic`] — never a blank "success" (audit F04/B22).
+    pub fn set_space(&self, space: SpaceSelection) -> CadResult<()> {
+        if let Some(doc) = self.incoming.borrow().clone() {
+            if let Err(error) = cad_app::validate_space(&doc, space) {
+                {
+                    let mut s = self.state.borrow_mut();
+                    s.view_diagnostic = Some(error.to_string());
+                }
+                let _ = self.handle.request_redraw();
+                return Err(error);
+            }
+        }
+        {
+            let mut s = self.state.borrow_mut();
+            s.space = space;
+            s.view_diagnostic = None;
+        }
+        let _ = self.handle.request_redraw();
+        Ok(())
+    }
+
+    /// Set the observation mode; the next frame renders 2D or 3D accordingly.
+    ///
+    /// This is a presentation switch only: the authoritative camera lives in the
+    /// application viewport and is mirrored through [`CadView::sync_from_viewport`]
+    /// / [`CadView::set_camera3d`].
+    pub fn set_view_mode(&self, mode: ProjectionKind) {
+        {
+            let mut s = self.state.borrow_mut();
+            s.view_mode = mode;
+        }
+        let _ = self.handle.set_view_state(crate::ViewStateUi {
+            is_3d: mode == ProjectionKind::ThreeD,
+            perspective: !self.state.borrow().camera3d.projection.is_orthographic(),
+        });
+        let _ = self.handle.request_redraw();
+    }
+
+    /// Mirror an explicit application camera into the bridge.
+    ///
+    /// Validates first: a degenerate camera is refused and recorded rather than
+    /// rendered as garbage. The projection selects nothing by itself; the caller
+    /// still sets the mode via [`CadView::set_view_mode`] (or uses
+    /// [`CadView::sync_from_viewport`]).
+    pub fn set_camera3d(&self, camera: Camera) -> CadResult<()> {
+        camera.validate()?;
+        let mut s = self.state.borrow_mut();
+        s.camera3d = camera;
+        drop(s);
+        let _ = self.handle.request_redraw();
+        Ok(())
+    }
+
+    /// Mirror an authoritative application viewport in one call.
+    ///
+    /// Copies the full camera (so 3D orbit/standard views are preserved), the
+    /// observation mode and, for an orthographic camera, the 2D centre/scale.
+    /// Also pushes the derived view state to the shell so the 2D/3D affordances
+    /// reflect the real viewport. Hosts should call this after every command
+    /// that can change the view.
+    pub fn sync_from_viewport(&self, viewport: &Viewport) {
+        let mode = viewport.view_mode.kind();
+        let perspective = !viewport.camera.projection.is_orthographic();
+        {
+            let mut s = self.state.borrow_mut();
+            s.camera3d = viewport.camera;
+            s.view_mode = mode;
+            if let Projection::Orthographic { scale } = viewport.camera.projection {
+                if scale.is_finite() && scale > 0.0 {
+                    s.camera.center = Point3 {
+                        x: viewport.camera.target.x,
+                        y: viewport.camera.target.y,
+                        z: 0.0,
+                    };
+                    s.camera.world_per_px = scale.clamp(1e-12, 1e18);
+                }
+            }
+        }
+        let _ = self.handle.set_view_state(crate::ViewStateUi {
+            is_3d: mode == ProjectionKind::ThreeD,
+            perspective,
+        });
+        let _ = self.handle.request_redraw();
     }
 
     pub fn active_backend(&self) -> Option<ActiveBackend> {
@@ -452,6 +649,7 @@ impl CadView {
         s.image_size = None;
         s.caps = None;
         s.document = None;
+        s.built_space = None;
         s.built_generation = None;
     }
 
@@ -486,6 +684,7 @@ impl CadView {
         s.image_size = None;
         // Force a full rebuild from the database on the next frame.
         s.document = None;
+        s.built_space = None;
         s.built_generation = None;
         drop(s);
         let _ = self.handle.request_redraw();
@@ -508,6 +707,12 @@ fn preference_choice(preference: BackendPreference) -> BackendChoice {
         BackendPreference::WebGpu => BackendChoice::WebGpu,
         BackendPreference::WebGl2 => BackendChoice::WebGl2,
     }
+}
+
+/// The camera a frame is rendered with, selected by the observation mode.
+enum DrawCamera {
+    TwoD(Camera2d),
+    ThreeD(Camera3d),
 }
 
 /// Install the CAD rendering notifier on the Slint window.
@@ -562,6 +767,7 @@ pub fn install_with_preference(
                             s.caps = Some(caps);
                             s.renderer = Some(renderer);
                             s.document = None;
+                            s.built_space = None;
                             s.built_generation = None;
                         }
                         Err(e) => {
@@ -596,35 +802,55 @@ pub fn install_with_preference(
                         let visibility = scene_visibility.borrow().clone();
                         let annotations_fingerprint =
                             annotation_fingerprint(annotations.as_deref(), &visibility);
+                        let space = s.space;
+                        // A layout this build cannot draw (or does not know) is an
+                        // explicit refusal: record the reason and do not build or
+                        // render a blank sheet (audit F04/B22).
+                        if let Err(error) = cad_app::validate_space(&doc, space) {
+                            s.view_diagnostic = Some(error.to_string());
+                            drop(s);
+                            return;
+                        }
+                        s.view_diagnostic = None;
                         let generation = s.renderer.as_ref().map(|r| r.device_generation());
                         if s.document != Some(identity)
                             || s.fonts_present != has_fonts
                             || s.overrides_fingerprint != overrides_fingerprint
                             || s.annotations_fingerprint != annotations_fingerprint
+                            || s.built_space != Some(space)
                             || s.built_generation != generation
                         {
                             // The annotation overlay is concatenated into the
                             // same delta, so a hidden/created/edited annotation
-                            // rebuilds the GPU batches exactly once (F07).
-                            if let Ok((delta, _scene)) = build_scene_with_annotations(
+                            // rebuilds the GPU batches exactly once (F07). Paper
+                            // space reuses the same single upload path. A build
+                            // failure is explicit, not a silent stale frame.
+                            match build_scene_with_annotations_in_space(
                                 &doc,
                                 stamp.clone(),
                                 fonts,
                                 &overrides,
+                                space,
                                 annotations.as_deref(),
                                 &visibility,
                                 DocumentId(0),
                             ) {
-                                if let Some(renderer) = s.renderer.as_mut() {
-                                    renderer.clear_batches();
-                                    let _ = renderer.upload(&delta);
+                                Ok((delta, _scene)) => {
+                                    if let Some(renderer) = s.renderer.as_mut() {
+                                        renderer.clear_batches();
+                                        let _ = renderer.upload(&delta);
+                                    }
+                                    s.document = Some(identity);
+                                    s.fonts_present = has_fonts;
+                                    s.overrides_fingerprint = overrides_fingerprint;
+                                    s.annotations_fingerprint = annotations_fingerprint;
+                                    s.built_space = Some(space);
+                                    s.built_generation = generation;
+                                    s.image_size = None;
                                 }
-                                s.document = Some(identity);
-                                s.fonts_present = has_fonts;
-                                s.overrides_fingerprint = overrides_fingerprint;
-                                s.annotations_fingerprint = annotations_fingerprint;
-                                s.built_generation = generation;
-                                s.image_size = None;
+                                Err(error) => {
+                                    s.view_diagnostic = Some(error.to_string());
+                                }
                             }
                         }
                     }
@@ -632,33 +858,60 @@ pub fn install_with_preference(
                         .physical_size()
                         .unwrap_or(slint::PhysicalSize::new(1, 1));
                     let target = RenderTarget::new(size.width.max(1), size.height.max(1));
-                    let camera = Camera2d {
-                        center: s.camera.center,
-                        world_per_px: s.camera.world_per_px,
-                        z_plane: 0.0,
+                    // Pick the camera for the observation mode. A degenerate 3D
+                    // camera is refused here with an explicit diagnostic, never
+                    // rendered as a blank frame.
+                    let draw = match s.view_mode {
+                        ProjectionKind::ThreeD => match s.camera3d.camera3d_params() {
+                            Ok(params) => DrawCamera::ThreeD(camera3d_from_params(params)),
+                            Err(error) => {
+                                s.view_diagnostic = Some(error.to_string());
+                                drop(s);
+                                return;
+                            }
+                        },
+                        ProjectionKind::TwoD => DrawCamera::TwoD(Camera2d {
+                            center: s.camera.center,
+                            world_per_px: s.camera.world_per_px,
+                            z_plane: 0.0,
+                        }),
                     };
                     let rendered = match s.renderer.as_mut() {
-                        Some(renderer) => match renderer.render(camera, &target) {
-                            Ok(_) => true,
-                            Err(e) if e.is_device_loss() => {
-                                // Device loss is explicit: drop the derived GPU
-                                // state and force a rebuild from the database on
-                                // the next frame. The document slot still holds
-                                // the authoritative drawing and annotations.
-                                let reason = e.message().to_string();
-                                renderer.note_device_lost(reason.clone());
-                                s.outcome = Some(BackendOutcome::Failed {
-                                    preference: preference_choice(preference),
-                                    failure: BackendFailure::InitFailed { reason },
-                                });
-                                s.caps = None;
-                                s.document = None;
-                                s.built_generation = None;
-                                s.image_size = None;
-                                false
+                        Some(renderer) => {
+                            let result = match draw {
+                                DrawCamera::TwoD(camera) => renderer.render(camera, &target),
+                                DrawCamera::ThreeD(camera) => renderer.render_3d(camera, &target),
+                            };
+                            match result {
+                                Ok(_) => true,
+                                Err(e) if e.is_device_loss() => {
+                                    // Device loss is explicit: drop the derived GPU
+                                    // state and force a rebuild from the database on
+                                    // the next frame. The document slot still holds
+                                    // the authoritative drawing and annotations.
+                                    let reason = e.message().to_string();
+                                    renderer.note_device_lost(reason.clone());
+                                    s.outcome = Some(BackendOutcome::Failed {
+                                        preference: preference_choice(preference),
+                                        failure: BackendFailure::InitFailed { reason },
+                                    });
+                                    s.caps = None;
+                                    s.document = None;
+                                    s.built_space = None;
+                                    s.built_generation = None;
+                                    s.image_size = None;
+                                    false
+                                }
+                                Err(e) => {
+                                    // A rejected frame is explicit too: record the
+                                    // reason so "nothing drawn" is never a silent
+                                    // success (a degenerate camera, a missing
+                                    // resource, ...).
+                                    s.view_diagnostic = Some(e.message().to_string());
+                                    false
+                                }
                             }
-                            Err(_) => false,
-                        },
+                        }
                         None => return,
                     };
                     if rendered && s.image_size != Some((target.width, target.height)) {
@@ -678,6 +931,7 @@ pub fn install_with_preference(
                     s.image_size = None;
                     s.caps = None;
                     s.document = None;
+                    s.built_space = None;
                     s.built_generation = None;
                 }
                 // A rendering setup that is not WGPU30 cannot host the shared
@@ -701,6 +955,7 @@ pub fn install_with_preference(
         overrides: overrides_slot,
         annotations: annotations_slot,
         annotation_visibility: visibility_slot,
+        incoming,
         preference,
         messages,
     })
@@ -717,6 +972,10 @@ mod tests {
 
     fn p(x: f64, y: f64) -> Point3 {
         Point3 { x, y, z: 0.0 }
+    }
+
+    fn p3(x: f64, y: f64, z: f64) -> Point3 {
+        Point3 { x, y, z }
     }
 
     fn line_entity(id: u128, space: SpaceId, a: Point3, b: Point3) -> DbEntity {
@@ -876,5 +1135,78 @@ mod tests {
             preference_choice(BackendPreference::WebGl2),
             BackendChoice::WebGl2
         );
+    }
+
+    #[test]
+    fn camera3d_params_map_field_for_field_to_the_renderer_camera() {
+        let params = cad_app::Camera3dParams {
+            eye: p3(1.0, 2.0, 3.0),
+            target: p3(4.0, 5.0, 6.0),
+            up: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            fov_y: 0.7,
+            near: 0.01,
+            far: 1000.0,
+        };
+        let camera = camera3d_from_params(params);
+        assert_eq!(camera.eye, params.eye);
+        assert_eq!(camera.target, params.target);
+        assert_eq!(camera.up, params.up);
+        assert_eq!(camera.fov_y, params.fov_y);
+        assert_eq!(camera.near, params.near);
+        assert_eq!(camera.far, params.far);
+        // The mapped camera is usable by the renderer for a normal aspect.
+        assert!(camera.is_usable(16.0 / 9.0));
+    }
+
+    #[test]
+    fn camera2d_params_map_to_the_renderer_plan_camera() {
+        let params = cad_app::Camera2dParams {
+            center: p(7.0, -8.0),
+            world_per_px: 0.5,
+        };
+        let camera = camera2d_from_params(params);
+        assert_eq!(camera.center, p(7.0, -8.0));
+        assert_eq!(camera.world_per_px, 0.5);
+        assert_eq!(camera.z_plane, 0.0);
+    }
+
+    #[test]
+    fn paper_space_annotation_build_uses_the_layout() {
+        let db = db_with_layout();
+        let stamp = TaskStamp::new(DocumentId(0), 0);
+        let visibility = AnnotationVisibilitySet::new();
+        let (delta, scene) = build_scene_with_annotations_in_space(
+            &db,
+            stamp,
+            None,
+            &LayerOverrideSet::new(),
+            SpaceSelection::Paper(LayoutId(1)),
+            None,
+            &visibility,
+            DocumentId(0),
+        )
+        .unwrap();
+        // The single mapped+clipped model line is present, and the absent
+        // annotation sidecar contributes no overlay (not a silent drop).
+        assert_eq!(delta.added.len(), 1);
+        assert!(scene.batches.is_empty());
+
+        // Model space still reproduces the model entry point.
+        let (model, _) = build_scene_with_annotations_in_space(
+            &db,
+            TaskStamp::new(DocumentId(0), 0),
+            None,
+            &LayerOverrideSet::new(),
+            SpaceSelection::Model,
+            None,
+            &visibility,
+            DocumentId(0),
+        )
+        .unwrap();
+        assert_eq!(model.added.len(), 1);
     }
 }

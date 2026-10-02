@@ -273,6 +273,34 @@ pub fn backend_labels(messages: &MessageSource) -> Vec<String> {
     ]
 }
 
+/// The catalog key for a standard view (`view.standard.<key>`).
+pub fn standard_view_key(view: cad_app::StandardView) -> String {
+    format!("view.standard.{}", view.key())
+}
+
+/// Every standard-view label, in `StandardView::ALL` order.
+///
+/// Built from the shared ordering so a chosen row index maps back to the exact
+/// `StandardView` without a second list that could drift (same pattern as the
+/// measurement/annotation kind selectors).
+pub fn standard_view_labels(messages: &MessageSource) -> Vec<String> {
+    cad_app::StandardView::ALL
+        .iter()
+        .map(|view| messages.text(&standard_view_key(*view), &[]))
+        .collect()
+}
+
+/// Map a localized standard-view label back to the enum.
+pub fn standard_view_from_label(
+    messages: &MessageSource,
+    label: &str,
+) -> Option<cad_app::StandardView> {
+    standard_view_labels(messages)
+        .iter()
+        .position(|candidate| candidate == label)
+        .and_then(|index| cad_app::StandardView::from_index(index as i32))
+}
+
 /// Map a localized combobox label back to a measurement kind.
 ///
 /// This is why the shell never needed a second ordering list: the labels are
@@ -421,6 +449,23 @@ mod tests {
         assert_eq!(backend_labels(&en())[0], "Auto");
         assert_eq!(backend_labels(&zh())[1], "WebGPU");
         assert_eq!(backend_labels(&en())[2], "WebGL2");
+    }
+
+    #[test]
+    fn standard_view_labels_follow_the_shared_order() {
+        for messages in [zh(), en()] {
+            let labels = standard_view_labels(&messages);
+            assert_eq!(labels.len(), cad_app::StandardView::ALL.len());
+            for (index, view) in cad_app::StandardView::ALL.iter().copied().enumerate() {
+                assert!(!labels[index].is_empty());
+                assert_eq!(
+                    standard_view_from_label(&messages, &labels[index]),
+                    Some(view)
+                );
+            }
+            // A machine key is not a translated label.
+            assert_eq!(standard_view_from_label(&messages, "top"), None);
+        }
     }
 
     #[test]

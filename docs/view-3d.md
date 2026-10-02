@@ -5,9 +5,12 @@ Spec v2.0 §3.3 / audit **F13**. This note records what the *application* side o
 zoom-to-cursor and the work plane consumed by planar measurement — and what is
 still handled by the render/picking workstream.
 
-Scope: `crates/cad-app/src/camera.rs` and the camera commands in
-`crates/cad-app/src/lib.rs`. No GPU object, depth buffer, framebuffer or scene
-graph is touched here (constraint: business layers do not submit GPU work).
+Scope: `crates/cad-app/src/camera.rs`, the camera/space commands in
+`crates/cad-app/src/lib.rs`, and the host wire-up in
+`crates/cad-ui-slint/src/{bridge.rs,lib.rs}` + `ui/app.slint`. No GPU object,
+depth buffer, framebuffer or scene graph is touched by `cad-app` (constraint:
+business layers do not submit GPU work); the bridge only selects and passes
+cameras to `cad-render-wgpu`.
 
 ## Conventions
 
@@ -103,20 +106,52 @@ re-orthogonalised so it always satisfies the measure engine's checks
 error. `Viewport::new` and `ResetView` install the `z = 0` XY plane, so area and
 polyline measurements keep a valid explicit plane after any view transition.
 
-## What remains (render workstream)
+## Host UI wiring (F02/F04/F13/F14)
 
-Out of scope here and **not** claimed as done:
+The Slint host is now wired to the app-level camera and space state:
 
-- **GPU rendering**: there is still only a 2D `Camera2d` on the render side; the
-  projection matrices above are not yet uploaded, and there is no depth buffer,
-  MSAA, sRGB or transparent-pass handling for 3D.
-- **3D picking/depth test**: `Camera::screen_to_ray` produces a ray, but no ray
-  scene intersection, depth readback or `PickHit` selection exists in the app;
-  that lives with the renderer (F14).
-- **Perspective viewport fitting**: `fit_viewport` returns to the 2D plan; a
-  perspective-specific fit (framing a 3D bounds) is not implemented.
-- **Host UI wiring**: this is camera *state* only. The Slint/Android/Web shells
-  do not yet expose 3D buttons or feed `Orbit`/`ZoomAt` from gestures (F02/U01).
+- `cad-ui-slint/src/bridge.rs` keeps, per frame, the active space
+  (`SpaceSelection::Model | Paper(LayoutId)`), the observation mode (2D/3D), the
+  full application `Camera` and the 2D centre/scale mirror. `BeforeRendering`
+  builds the drawing with `build_scene_with_annotations_in_space` (the model or
+  paper path plus the annotation overlay in one delta) and dispatches to
+  `Renderer::render(Camera2d, ..)` or `Renderer::render_3d(Camera3d, ..)`.
+- The conversion `cad_app::camera::{Camera, Projection} → cad_render_wgpu::Camera3d`
+  lives only in the bridge (`camera3d_from_params`), mapping the app-derived
+  eye/target/up/fov/near/far field-for-field. `Camera::camera3d_params` derives
+  the near/far planes with the same rule as `Camera::projection_matrix`, and
+  refuses an orthographic, coincident or pole-locked camera.
+- `CadView` exposes `set_space`, `set_view_mode`, `set_camera3d` and
+  `sync_from_viewport(&Viewport)`. `set_space` validates the layout against the
+  real layout table (`cad_app::validate_space`) and records an explicit
+  diagnostic on refusal; `BeforeRendering` re-validates every frame.
+- The shell (`ui/app.slint` + `UiAdapter`) has a 2D/3D toggle, an explicit
+  projection toggle and standard-view controls generated from `StandardView::ALL`,
+  routed through `CommandId::{Switch2d3d, SwitchProjection, StandardView}`. The
+  layout selector routes through `CommandId::SwitchSpace` (validated in
+  `cad-app`). A left-button drag while the pushed view state is 3D emits
+  `CommandId::Orbit` from the canvas callback.
 
-These are explicit gaps, not empty successes: no command returns a fake
-completion for them.
+## What is not verified here
+
+- **GPU execution was not observed in this environment.** The native
+  `cad-ui-slint` build cannot be linked here (no `pkg-config`/fontconfig), so the
+  bridge was compiled only for `wasm32-unknown-unknown` and
+  `aarch64-linux-android`. No window was opened and no frame was rendered: the
+  `render` / `render_3d` dispatch, the depth buffer and perspective correctness
+  on a real adapter remain unverified. `cad-app`'s camera/space logic is the
+  part that is unit-tested on the host (`cargo test -p cad-app`).
+- **Host glue is not in this workstream.** `apps/app-web` and `apps/app-android`
+  still call `CadView::set_camera` only; the orchestrator must switch them to
+  `CadView::sync_from_viewport` (and handle `SwitchSpace`) for 3D and paper
+  space to be reachable at runtime. `LayoutSwitchSink` remains as a
+  source-compatible override; when installed it takes precedence over the
+  `SwitchSpace` command so the two paths cannot fight.
+- **3D picking/depth test** still lives with the render workstream
+  (`Camera::screen_to_ray` exists, but no ray/scene intersection or depth
+  readback and no `PickHit` selection).
+- **Perspective viewport fitting** is still not implemented: `fit_viewport`
+  returns to the 2D plan, and there is no bounds-framing 3D fit.
+
+These are explicit gaps, not empty successes: a refused space or a degenerate
+3D camera produces a diagnostic and no frame, never a blank "success".
