@@ -10,7 +10,7 @@
 
 | 字段 | 含义 | 当前生产者 |
 |---|---|---|
-| `draw_order: i64` | 与同级批次相对的绘制顺序，值越大越晚画（越在上层） | `SceneCache::build` 目前恒为 `0`；批注叠加层 `annotation_batches` 从 `AnnotationSceneOptions::draw_order_base`（默认 1_000_000）开始逐批递增 |
+| `draw_order: i64` | 与同级批次相对的绘制顺序，值越大越晚画（越在上层） | `SceneCache::build` 目前恒为 `0`；选择高亮层 `HighlightOptions::draw_order`（默认 `HIGHLIGHT_DRAW_ORDER = 900_000`）逐批递增；批注叠加层 `annotation_batches` 从 `AnnotationSceneOptions::draw_order_base`（默认 1_000_000）开始逐批递增；工具预览层 `cad_app::render_scene::overlay::PREVIEW_DRAW_ORDER = 2_000_000` |
 | `alpha: f32` | 逐对象常量透明度 | `SceneCache::build` 取 `DisplayFragment::alpha`（`cad-scene::sanitize_alpha` 钳制到 `[0,1]`）；importer 在 `EntityRenderAttributes` 里记录有效透明度，`build_expanded` 解析 `ByBlock` 后写入 fragment；批注叠加层取 `AnnotationStyle::rgba[3] / 255` |
 
 **透明度数据路径（已实现）**：acadrust 0.5.5 暴露 `EntityCommon.transparency: Transparency`

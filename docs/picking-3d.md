@@ -138,8 +138,9 @@ edge 源键，属于后续工作。
 - **整实体**：直线/曲线片段 → `Lines` 批次；mesh 片段 → 全部三角形；
 - **mesh 面**：只发射 `face_sources[i] == 选中 id` 的三角形，顶点按选中三角形压缩、
   以局部原点重建，`sources` 携带精确的 `entity + instance + sub_element`；
-- `draw_order` 从 `HighlightOptions::draw_order`（默认 `HIGHLIGHT_DRAW_ORDER = 2_000_000`）
-  起逐批 +1，**在绘图（0）与批注覆盖层（1_000_000）之后**；`alpha` 默认 `0.55`；
+- `draw_order` 从 `HighlightOptions::draw_order`（默认 `HIGHLIGHT_DRAW_ORDER = 900_000`）
+  起逐批 +1，**在绘图（0）之后、批注覆盖层（1_000_000）之前**；`alpha` 默认 `0.55`，
+  颜色默认 `DEFAULT_HIGHLIGHT_COLOR`（暖色）并置 `color_unresolved = false`；
 - **空选择 / 全隐藏选择**：产出**空覆盖层**（`batches` 为空），不是伪造批次；
 - **隐藏**由调用方的 `visible(&SelectionRef)` 判定，静默跳过（会话选择，不是缺口）；
 - **完全透明**（`alpha <= 0`，渲染器判为不可见）→ 不产生批次，记 `highlight.invisible`；
@@ -150,9 +151,9 @@ edge 源键，属于后续工作。
 进程确定性：选择按给定顺序、片段按迭代顺序、三角形按升序处理，相同输入必产出相同的
 批次序列。
 
-**未实现（明确）**：`RenderBatch` 只有常量 `alpha`，**没有逐批 RGB**，所以高亮目前只能
-靠 draw_order 与 alpha 区分，无法给选中面一个独立颜色/通道。逐批颜色是另一个工作流
-（cad-scene 的 per-batch color/lineweight）；在它落地前不宣称"高亮着色"。
+**已补齐（原为缺口）**：`RenderBatch` 现有逐批 RGB（`color` 字段），
+`highlight_batches` 把 `HighlightOptions::color` 写入每个覆盖批次并置
+`color_unresolved = false`，所以高亮既靠 draw_order/alpha 也靠颜色区分。
 
 ## 明确未实现（不是空成功）
 
@@ -164,8 +165,11 @@ edge 源键，属于后续工作。
 - **文字字形轮廓**：`Text` 使用占位框边，不是真实排版轮廓。
 - **edge 子元素**：域模型无稳定 edge 源键，edge 命中保持整实体 `sub_element = None`
   （见上）；只有 mesh **面**可寻址。
-- **高亮颜色**：`RenderBatch` 无逐批 RGB，覆盖层只能以 draw_order + alpha 区分；
-  逐批颜色由并行的 cad-scene 工作流提供，尚未落地。
+- **高亮颜色（已补齐）**：`RenderBatch` 现有逐批 `color`，`highlight_batches` 写入
+  `HighlightOptions::color`；不再只靠 draw_order + alpha。
+- **高亮接线**：`cad-app::render_scene::overlay::selection_highlight` 与
+  `CadView::set_selection_highlight` 已把选择集接到覆盖层（见 `docs/ui.md` §2、
+  `docs/panels.md` §3.3）；把画布点击接到 `pick_at_screen` 仍属宿主工作流。
 - **mesh 几何来源**：数据库不携带网格来源（Direct/Kernel/Proxy），`PickItem` 对 `Mesh`
   统一标 `GeometrySource::DirectMesh`，其余标 `Analytic`；这是**保守标签**而非实证来源。
 - **OBB / 变换后紧包围盒索引**：索引按世界坐标 AABB，未做实例级 OBB 剔除。

@@ -23,7 +23,8 @@ mod view;
 pub use cad_app::render_scene::{
     annotation_fingerprint, build_scene, build_scene_with_annotations,
     build_scene_with_annotations_in_space, build_scene_with_fonts, build_scene_with_overrides,
-    build_scene_with_space, layout_descriptors,
+    build_scene_with_space, layout_descriptors, overlay_fingerprint, preview_overlay,
+    selection_highlight, OverlayInputs, PreviewOptions, VisualOverlay,
 };
 pub use camera::{camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera};
 pub use runtime::{FrameBinding, RenderLifecycle};
@@ -41,6 +42,10 @@ struct BridgeState {
     view: ViewSnapshot,
     preparation_scheduled: bool,
     view_diagnostic: Option<String>,
+    /// Separate dirty marker for the transient selection/preview overlay. It
+    /// advances on a highlight/preview change and never on a drawing or
+    /// annotation revision change.
+    overlay_revision: u64,
 }
 
 fn backend_kind(actual: ActiveBackend) -> ActiveBackendKind {

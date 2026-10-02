@@ -1,5 +1,7 @@
 //! Host-facing snapshots and coalesced CPU preparation, outside render callbacks.
 use super::*;
+use cad_app::render_scene::OverlayInputs;
+use cad_app::{AnnotationPreview, MeasurementPreview, SelectionSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewSnapshot {
@@ -27,6 +29,11 @@ pub struct CadView {
     overrides: Rc<RefCell<LayerOverrideSet>>,
     annotations: IncomingAnnotations,
     visibility: Rc<RefCell<AnnotationVisibilitySet>>,
+    /// Selection highlight input, kept separate from annotations so selecting an
+    /// object never rebuilds the base drawing or the annotation overlay.
+    selection: Rc<RefCell<SelectionSet>>,
+    measurement_preview: Rc<RefCell<Option<MeasurementPreview>>>,
+    annotation_preview: Rc<RefCell<Option<AnnotationPreview>>>,
     incoming: IncomingDocument,
     preference: BackendPreference,
     messages: Rc<RefCell<crate::i18n::MessageSource>>,
@@ -47,6 +54,9 @@ impl CadView {
             overrides: Rc::new(RefCell::new(LayerOverrideSet::new())),
             annotations: Rc::new(RefCell::new(None)),
             visibility: Rc::new(RefCell::new(AnnotationVisibilitySet::new())),
+            selection: Rc::new(RefCell::new(SelectionSet::new())),
+            measurement_preview: Rc::new(RefCell::new(None)),
+            annotation_preview: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -148,6 +158,13 @@ impl CadView {
                     .as_ref()
                     .and_then(|s| s.annotation_diagnostics.first().map(|d| d.message.clone()))
             })
+            .or_else(|| {
+                state
+                    .controller
+                    .ready
+                    .as_ref()
+                    .and_then(|s| s.highlight_diagnostics.first().map(|d| d.message.clone()))
+            })
     }
     pub fn lifecycle(&self) -> RenderLifecycle {
         self.state.borrow().runtime.lifecycle.clone()
@@ -221,7 +238,12 @@ impl CadView {
             state.preparation_scheduled = false;
             let doc = view.incoming.borrow().clone();
             let snapshot = state.view.clone();
-            let result = state.controller.prepare_shared(
+            let overlays = OverlayInputs {
+                selection: view.selection.borrow().clone(),
+                measurement: view.measurement_preview.borrow().clone(),
+                annotation: view.annotation_preview.borrow().clone(),
+            };
+            let result = state.controller.prepare_shared_with_overlays(
                 doc,
                 snapshot.document,
                 view.fonts.borrow().clone(),
@@ -229,6 +251,7 @@ impl CadView {
                 snapshot.space,
                 view.annotations.borrow().as_deref(),
                 &view.visibility.borrow(),
+                &overlays,
             );
             if let Err(error) = result {
                 log::warn!("scene preparation refused: {error}");
@@ -281,6 +304,56 @@ impl CadView {
     }
     pub fn annotations(&self) -> Option<Arc<AnnotationDatabase>> {
         self.annotations.borrow().clone()
+    }
+
+    /// Store the current selection highlight and request a redraw.
+    ///
+    /// This touches **only** the transient visual overlay: the controller keeps
+    /// the base drawing `Arc` and the annotation overlay `Arc` unless their own
+    /// inputs changed, so changing the selection never re-parses the drawing or
+    /// rebuilds annotation batches. It also does not advance the annotation or
+    /// font revisions.
+    pub fn set_selection_highlight(&self, selection: SelectionSet) {
+        if *self.selection.borrow() == selection {
+            return;
+        }
+        *self.selection.borrow_mut() = selection;
+        self.state.borrow_mut().overlay_revision += 1;
+        self.request_redraw();
+    }
+
+    /// The selection currently drawn as a highlight.
+    pub fn selection_highlight(&self) -> SelectionSet {
+        self.selection.borrow().clone()
+    }
+
+    /// Store (or clear) the in-progress measurement preview and request a
+    /// redraw. `None` cancels the preview overlay.
+    pub fn set_measurement_preview(&self, preview: Option<MeasurementPreview>) {
+        if *self.measurement_preview.borrow() == preview {
+            return;
+        }
+        *self.measurement_preview.borrow_mut() = preview;
+        self.state.borrow_mut().overlay_revision += 1;
+        self.request_redraw();
+    }
+
+    /// Store (or clear) the in-progress annotation preview and request a redraw.
+    pub fn set_annotation_preview(&self, preview: Option<AnnotationPreview>) {
+        if *self.annotation_preview.borrow() == preview {
+            return;
+        }
+        *self.annotation_preview.borrow_mut() = preview;
+        self.state.borrow_mut().overlay_revision += 1;
+        self.request_redraw();
+    }
+
+    /// A monotonic counter of transient overlay (selection/preview) changes,
+    /// independent of `annotations_changed`/`fonts_changed`. A host or test can
+    /// observe that selecting an object bumps this without rebuilding the base
+    /// drawing.
+    pub fn overlay_revision(&self) -> u64 {
+        self.state.borrow().overlay_revision
     }
     pub fn teardown(&self) {
         let mut state = self.state.borrow_mut();

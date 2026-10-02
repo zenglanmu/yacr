@@ -147,10 +147,14 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
   UI 与映射策略尚未闭环（审计 F09）；属独立工作流。
 - **资源 / 3D / 诊断抽屉（F10/F13/U08）**：对应核心闭环未完成或 `pending(...)`，
   加面板会是假数据。见 `docs/ui.md` 第 4 节的同一判断。
-- **选择高亮（F05 高亮部分）**：面板展示选择属性，但把选择集画成高亮几何需要宿主
-  把 `SelectionRef` 经场景/GPU 管线提交（`bridge` 当前不消费选择高亮）；这是独立于
-  属性面板的渲染接线，未在本轮完成。`SelectionRef` 已带 `InstancePath`，渲染侧可直接
-  区分实例。
+- **选择高亮（F05 高亮部分）——已接线**：`cad_app::render_scene::overlay::selection_highlight`
+  按 `drawing_pick_items` 展开 INSERT 并把选中几何离散为高亮 `RenderBatch`；同一块的
+  两个放置因 `InstancePath` 不同而独立高亮，失效引用产出 `highlight.unresolved` 诊断。
+  `CadView::set_selection_highlight(SelectionSet)` 只推进独立的 overlay 版本，
+  **不重建底图或批注**；高亮 `draw_order = 900_000`（底图 0 与批注 1_000_000 之间），
+  颜色为 `cad_scene::DEFAULT_HIGHLIGHT_COLOR` 且 `color_unresolved = false`。
+  宿主仍需调用该 setter（见 `docs/ui.md` §3）；工具预览同路径，见
+  `overlay::preview_overlay`。真实 GPU 像素与浏览器行为**未在本轮验证**。
 - **精确拾取**：把画布点击变成 `SelectionRef` 需要宿主安装画布→世界映射并做命中
   测试（`cad-spatial::GridSpatialIndex`）；UI 侧只回传逻辑像素，宿主未接线时同样
   显式提示，不静默丢弃（与测量 `canvas-pick` 同一条路径）。
@@ -160,7 +164,10 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
 - 纯逻辑全部在 `cad-app`，由 `cargo test -p cad-app` 覆盖：
   `layers::{LayerOverrideSet,layer_rows,filter_layer_rows,visible_model_entities,query_layers}`、
   `selection::{SelectionSet,SelectionProperties,identity_label}`，以及命令层
-  `ToggleLayer`/`RestoreLayers`/`Select` 的"不改库、不记历史"断言。
+  `ToggleLayer`/`RestoreLayers`/`Select` 的"不改库、不记历史"断言。本轮新增选择高亮
+  与工具预览的纯测试：`render_scene::overlay::tests` 与
+  `render_scene::tests::selection_change_rebuilds_only_the_highlight_overlay` /
+  `preview_change_rebuilds_only_the_highlight_overlay_and_cancel_clears_it`。
 - `cad-ui-slint` 的新测试位于该 crate 的 `#[cfg(test)]`：`LayerPanelState`/
   `PropertyPanelState` 的映射，以及外壳定义字符串断言（`layer-rows`、
   `layer-visibility-toggled`、`restore-layers-requested`、`property-rows`、

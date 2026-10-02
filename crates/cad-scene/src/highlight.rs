@@ -16,9 +16,9 @@
 //! | mesh **face** sub-element | only the triangles whose `face_sources` match |
 //!
 //! The emitted batches use a distinct [`HighlightOptions::draw_order`] (default
-//! [`HIGHLIGHT_DRAW_ORDER`], above the drawing and the annotation overlay) and a
-//! configurable [`HighlightOptions::alpha`] so a host can composite them after
-//! the scene.
+//! [`HIGHLIGHT_DRAW_ORDER`], above the drawing but below the annotation overlay
+//! so committed markup stays on top) and a configurable
+//! [`HighlightOptions::alpha`] so a host can composite them after the scene.
 //!
 //! ## Explicit, non-silent limitations
 //!
@@ -47,10 +47,12 @@ use crate::{sanitize_alpha, RenderBatch, RenderTopology};
 
 /// Paint order of the first highlight batch.
 ///
-/// Above the drawing geometry (`0`) and above the annotation overlay
-/// (`AnnotationSceneOptions::draw_order_base`, `1_000_000`) so a host that
-/// concatenates the batches draws the highlight last.
-pub const HIGHLIGHT_DRAW_ORDER: i64 = 2_000_000;
+/// Above the drawing geometry (`0`) but **below** the annotation overlay
+/// (`AnnotationSceneOptions::draw_order_base`, `1_000_000`). A selection is a
+/// transient decoration of the base drawing; committed annotations are the
+/// authoritative markup and stay legible on top of it. Tool previews use a
+/// still-higher order (see `cad_app::render_scene::overlay::PREVIEW_DRAW_ORDER`).
+pub const HIGHLIGHT_DRAW_ORDER: i64 = 900_000;
 
 /// Default overlay alpha: visible but not opaque.
 pub const DEFAULT_HIGHLIGHT_ALPHA: f32 = 0.55;
@@ -583,7 +585,14 @@ mod tests {
         assert_eq!(batch.topology, RenderTopology::Lines);
         assert_eq!(batch.vertices.len(), 2);
         assert_eq!(batch.draw_order, HIGHLIGHT_DRAW_ORDER);
-        assert!(batch.draw_order > 1_000_000, "after the annotation overlay");
+        assert!(
+            batch.draw_order > 0,
+            "after the base drawing geometry at order 0"
+        );
+        assert!(
+            batch.draw_order < 1_000_000,
+            "below the annotation overlay so committed markup stays on top"
+        );
         assert!((batch.alpha - DEFAULT_HIGHLIGHT_ALPHA).abs() < 1e-6);
         assert_eq!(batch.sources, vec![reference(1, Vec::new(), None)]);
         assert_eq!(scene.completeness, Completeness::Complete);

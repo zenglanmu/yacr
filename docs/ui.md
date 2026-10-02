@@ -61,9 +61,27 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   「取点未接线：宿主未提供画布→世界映射」，**不是静默丢弃**。
 - 宿主应使用 `cad-app` 的纯函数 `Viewport::screen_to_world(logical, canvas_size)`
   求点（已有单测：中心映射到相机 target、角点对称、退化输入返回 `None`）。
-- 预览几何（把 `measurement_preview().points`/`cursor` 画到画布）**尚未接线**：
-  `bridge.rs` 没有消费 `measurement_preview()`，本轮只把预览作为面板状态展示。
-  绘制预览需要宿主把预览点经场景/GPU 管线提交，属后续工作。
+- 预览几何（把 `measurement_preview().points`/`cursor` 画到画布）**已接线到 CPU 场景
+  叠加层**：`cad_app::render_scene::overlay::preview_overlay` 把
+  `MeasurementPreview`/`AnnotationPreview` 转成 `RenderBatch`（折线 + 取点十字标记，
+  光标到末点的橡皮筋），`CadView::set_measurement_preview` /
+  `CadView::set_annotation_preview` 把它交给 `CadSceneController`。预览是**纯快照**：
+  取消（传 `None`）即从叠加层消失，不写库、不开事务。宿主仍负责把画布点击映射为世界
+  点（`set_canvas_pick_mapper`）；本轮只补齐“预览点 → 场景批次 → 桥接”这一段，
+  **未**在真实 GPU/浏览器上验证像素结果。
+- 预览叠加层 `draw_order` 为 `PREVIEW_DRAW_ORDER = 2_000_000`，高于批注
+  （`1_000_000`）与选择高亮（`900_000`），保证工具反馈始终可见。
+
+### 选择高亮（与预览同一条芯线）
+
+- `cad_app::render_scene::overlay::selection_highlight` 按
+  `drawing_pick_items` 展开 INSERT，把选中实体的几何离散成高亮批次；同一块的
+  两个放置因 `InstancePath` 不同而独立高亮。解析失败的引用产出
+  `highlight.unresolved` 诊断而不是伪造几何。
+- `CadView::set_selection_highlight(SelectionSet)` 只推进**独立的** overlay 版本，
+  不重建底图与批注（`cad-app` 单测 `selection_change_rebuilds_only_the_highlight_overlay`）。
+- 高亮色为 `cad_scene::DEFAULT_HIGHLIGHT_COLOR`（暖色），`color_unresolved = false`；
+  详见 `docs/panels.md` §3.3 与 `docs/picking-3d.md`。
 - 快照里的 `kind` 也用于让「测量」按钮与下拉框选择保持一致，见
   `UiAdapter::selected_measurement_kind`。
 
@@ -78,9 +96,15 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 - `UiHandle::set_measurement_state(MeasurementUiState::from_preview(
   controller.measurement_preview(), controller.unit_label()))`：驱动测量面板。
 - `UiAdapter::set_canvas_pick_mapper(...)`：把画布点击映射为世界点。
+- `CadView::set_selection_highlight(controller.session.selection.clone())`：把选择集
+  送入高亮叠加层。
+- `CadView::set_measurement_preview(controller.measurement_preview())` /
+  `CadView::set_annotation_preview(controller.annotation_preview())`：把工具预览
+  送入叠加层（`None` 即取消）。
 
 未调用时行为是**降级而非假装**：重做按钮保持禁用、面板显示空步骤并禁用确认/
-取消、测量点击提示「取点未接线」。以上是本轮明确交接给宿主接线任务的开放项。
+取消、测量点击提示「取点未接线」、选择/预览叠加层为空（不画假几何）。以上是本轮
+明确交接给宿主接线任务的开放项。
 
 ## 4. 工具面板（U03）
 
@@ -107,7 +131,11 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 - 可测试的纯逻辑都放在 `cad-app`，并由 `cargo test -p cad-app` 覆盖：
   `MeasurementToolKind::{key,from_key,from_label,index,from_index,ALL}`、
   `MeasurementPreview::{can_confirm,status_line}`、`Viewport::screen_to_world`、
-  `HostController::{measurement_preview,unit_label}`。
+  `HostController::{measurement_preview,unit_label}`，以及新增的
+  `render_scene::overlay::{selection_highlight,preview_overlay,overlay_fingerprint}` 与
+  `CadSceneController::prepare_with_overlays` 的“选择变化只重建高亮叠加层”契约。
+- `crates/cad-scene/src/highlight.rs` 的 `HIGHLIGHT_DRAW_ORDER` 已从 `2_000_000` 调整为
+  `900_000`（高于底图 0、低于批注 1_000_000），其单测同步更新；`cad-scene` 单测通过。
 - `cad-ui-slint` 中 `MeasurementUiState` 与外壳定义字符串的测试位于该 crate 的
   `#[cfg(test)]`，但**本机无法构建 `cad-ui-slint` 测试**（宿主缺 fontconfig），
   因此这些测试本轮未执行；`cargo check --workspace --lib --target

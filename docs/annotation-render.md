@@ -60,15 +60,20 @@
 命中后 `renderer.clear_batches()` 再 `upload(合并 delta)`，即一次重建同时刷新图纸与批注；
 隐藏/创建/编辑批注不需要宿主再次调用 `set_annotations`，指纹已包含 revision 与覆盖。
 
-## 3. 明确不画（不是完成）
+## 3. 明确不画 / 已补齐（不是完成）
 
-- **批注颜色 RGB 不绘制**：`RenderBatch` 只携带常量 `alpha`，管线 uniform 只写 alpha
-  （`cad-render-wgpu` 无逐批次颜色）。alpha 通道生效，RGB 记为 `annotation.color`
-  诊断，属已知缺口，需要批次/RenderBatch 增加颜色才能补全。
-- **绘制顺序**：批次按上传顺序绘制；`draw_order` 已填充但渲染器当前不排序，批注可能
-  与图纸批次穿插。要保证“批注置顶”需渲染器支持排序，属后续工作。
-- **测量叠加**：`Measurement` 几何不进批注叠加；测量预览/结果渲染属测量路径
-  （`docs/ui.md` §2 记录同一缺口）。
+- **批注颜色 RGB 已绘制（已补齐）**：`RenderBatch` 现携带逐批 `color`（归一化 sRGB），
+  `annotation_batches` 把 `AnnotationStyle::rgba[0..3]` 写入该字段并置
+  `color_unresolved = false`；渲染器上传到 `GpuBatch::color` 并在着色器里调制。
+  旧的 `annotation.color` 诊断已移除。详见 `docs/render-order.md`。
+- **绘制顺序（已补齐）**：渲染器上传后按 `draw_order` 排序（不透明升序、透明由远及近），
+  不再只按上传顺序。批注 `draw_order` 从 `1_000_000` 起，高于底图（0）与选择高亮
+  （`900_000`），低于工具预览（`2_000_000`）。
+- **测量叠加（已接线预览）**：`Measurement` 几何仍不进批注叠加（它是测量记录，不是
+  批注）；但**测量/批注工具预览**已由
+  `cad_app::render_scene::overlay::preview_overlay` 转成叠加批次，经
+  `CadView::set_measurement_preview` / `set_annotation_preview` 接线。预览是纯快照，
+  取消即消失，不写库。真实 GPU/浏览器像素未在本轮验证。
 - **修订云扇贝**：存储几何是点环，画成普通闭合折线。
 - **文字**：需要宿主提供 `FontEngine`；无字体时文字为 `Missing`，不是假框。批注无字体
   字段，使用约定 `DEFAULT_ANNOTATION_FONT = "arial.ttf"` 并走 fallback 链。
