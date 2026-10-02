@@ -624,7 +624,13 @@ fn select_plot_layout(
         .get(&controller.document_id)
         .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
     let database = document.drawing.as_ref().clone();
-    let descriptors = cad_representation::enumerate_layouts(&database);
+    // Plot targets paper-space layouts only. The importer synthesises a
+    // `LayoutId(0)` "Model" layout when a drawing has no paper space; that is
+    // model space, not a sheet, so it must not be selected as a plot layout.
+    let descriptors: Vec<_> = cad_representation::enumerate_layouts(&database)
+        .into_iter()
+        .filter(|d| !(d.id == cad_domain::LayoutId(0) && d.name == "Model"))
+        .collect();
     if descriptors.is_empty() {
         return Ok(None);
     }
@@ -650,7 +656,7 @@ fn select_plot_layout(
 /// It is deliberately marked synthetic in the report: it exercises the planner
 /// and the encoder, but it is not evidence about the imported drawing.
 #[cfg(not(target_arch = "wasm32"))]
-fn synthetic_plot_database() -> cad_db::DrawingDatabase {
+pub(crate) fn synthetic_plot_database() -> cad_db::DrawingDatabase {
     use cad_db::{DbEntity, DbObject, Layer, Layout};
     use cad_domain::{EntityId, LayerId, ObjectId, Revision, SpaceId};
 

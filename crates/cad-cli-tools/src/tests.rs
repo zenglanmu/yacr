@@ -105,6 +105,50 @@ fn plot_renders_a_layout_to_a_non_empty_png() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn synthetic_plot_scene_is_a_drawable_a4_sheet() {
+    // The fallback used when a drawing has no paper layout: it must be a real
+    // A4 sheet with drawable paper-space geometry, not an empty canvas.
+    let db = synthetic_plot_database();
+    let layout = db.layouts().next().expect("synthetic layout");
+    assert_eq!(layout.name, "Synthetic");
+    let record = db.plot_settings_for(layout.id);
+    assert_eq!((record.paper_width, record.paper_height), (210.0, 297.0));
+    assert!(matches!(
+        record.provenance,
+        cad_db::PlotProvenance::DefaultPage { .. }
+    ));
+    let page = cad_representation::plan_plot_for_record(
+        &record,
+        cad_representation::PlotTarget::Pixels {
+            width: 320,
+            height: 452,
+        },
+    )
+    .unwrap();
+    let registry = cad_representation::ProviderRegistry::with_default_provider();
+    let context = cad_representation::RepresentationContext::new(
+        DocumentId(1),
+        TolerancePolicy::default(),
+        TaskStamp::new(DocumentId(1), 0),
+    );
+    let representation =
+        cad_representation::build_paper_space(&registry, &db, layout.id, &context, &|_| true)
+            .unwrap();
+    assert!(!representation.fragments.is_empty());
+    // Every synthetic vertex maps inside the planned canvas.
+    for fragment in &representation.fragments {
+        if let cad_representation::DisplayPrimitive::Lines(points) = &fragment.primitive {
+            for point in points.iter() {
+                let (x, y) = page.map_paper_point(*point);
+                assert!((-1.0..=page.width as f64 + 1.0).contains(&x), "x={x}");
+                assert!((-1.0..=page.height as f64 + 1.0).contains(&y), "y={y}");
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn plot_unknown_layout_is_an_input_error() {
     // Layout selection happens before any GPU device is created, so this is an
     // input error regardless of adapter availability.
