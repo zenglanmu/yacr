@@ -1362,6 +1362,44 @@ mod tests {
     }
 
     #[test]
+    fn paper_build_reports_a_rotated_viewport_as_partial_not_a_squared_off_guess() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_layout(cad_db::Layout {
+            id: LayoutId(1),
+            name: "Rotated".into(),
+            viewports: vec![PaperViewport {
+                // A 45°-rotated paper rectangle: four corners, but not axis
+                // aligned, so it must be refused rather than squared off.
+                clip: vec![p(50.0, 0.0), p(100.0, 50.0), p(50.0, 100.0), p(0.0, 50.0)],
+                model_to_paper: Transform3::scale(100.0),
+                completeness: Completeness::Complete,
+            }],
+        })
+        .unwrap();
+        let db = b.finish().unwrap();
+        let registry = ProviderRegistry::with_default_provider();
+        let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+        assert!(matches!(rep.completeness, Completeness::Partial(_)));
+        assert!(rep.fragments.is_empty());
+        let diagnostic = rep
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "representation.viewport_unsupported")
+            .expect("rotated viewport must be reported");
+        assert!(
+            diagnostic.message.contains(viewport_reason::ROTATED_CLIP),
+            "got {}",
+            diagnostic.message
+        );
+    }
+
+    #[test]
     fn paper_build_for_a_missing_layout_is_missing_not_empty_success() {
         let db = db_with_layouts();
         let registry = ProviderRegistry::with_default_provider();
