@@ -1,0 +1,244 @@
+//! Batch planning, GPU packing and pipeline layout helpers.
+
+use super::*;
+
+pub(crate) struct GpuPlan {
+    pub(crate) accepted: Vec<usize>,
+    pub(crate) usage: cad_scene::FrameUsage,
+    pub(crate) over_budget: Option<OverBudgetReason>,
+}
+
+/// The ordered, budget-accepted batch indices split into the two draw passes.
+pub(crate) struct DrawPasses {
+    pub(crate) opaque: Vec<usize>,
+    pub(crate) transparent: Vec<usize>,
+    pub(crate) invisible: usize,
+}
+
+/// Turn the pure [`DrawOrderPlan`] over the accepted sub-set back into global
+/// batch indices, preserving the plan's order.
+///
+/// `accepted` are the global indices the budget kept (upload order); `entries`
+/// are their ordering keys in the same order. Splitting this out keeps the index
+/// remapping testable without a GPU.
+pub(crate) fn draw_passes(
+    accepted: &[usize],
+    entries: &[BatchOrderEntry],
+    camera_position: Option<[f32; 3]>,
+) -> DrawPasses {
+    debug_assert_eq!(accepted.len(), entries.len());
+    let order = plan_draw_order(entries, camera_position);
+    let remap = |positions: &[usize]| -> Vec<usize> {
+        positions.iter().map(|&pos| accepted[pos]).collect()
+    };
+    DrawPasses {
+        opaque: remap(&order.opaque),
+        transparent: remap(&order.transparent),
+        invisible: order.invisible.len(),
+    }
+}
+
+/// Submit one batch, dispatching on its topology.
+///
+/// The caller chooses the mesh pipeline (opaque vs transparent, mirrored vs
+/// normal); line and `MeshEdges` topologies always use the line pipeline. A mesh
+/// batch also draws its optional wireframe overlay.
+pub(crate) fn draw_batch(
+    pass: &mut wgpu::RenderPass<'_>,
+    batch: &GpuBatch,
+    line_pipeline: &wgpu::RenderPipeline,
+    mesh_pipeline: &wgpu::RenderPipeline,
+) {
+    match batch.topology {
+        RenderTopology::Lines => {
+            pass.set_pipeline(line_pipeline);
+            pass.set_bind_group(0, &batch.bind_group, &[]);
+            pass.set_vertex_buffer(0, batch.vertices.slice(..));
+            if let Some(indices) = &batch.indices {
+                pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..batch.index_count, 0, 0..1);
+            } else {
+                pass.draw(0..batch.vertex_count, 0..1);
+            }
+        }
+        RenderTopology::Mesh => {
+            pass.set_pipeline(mesh_pipeline);
+            pass.set_bind_group(0, &batch.bind_group, &[]);
+            pass.set_vertex_buffer(0, batch.vertices.slice(..));
+            if let Some(normals) = &batch.normals {
+                pass.set_vertex_buffer(1, normals.slice(..));
+            }
+            let Some(indices) = batch.indices.as_ref() else {
+                return;
+            };
+            pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..batch.index_count, 0, 0..1);
+            // Optional wireframe overlay over the shared mesh vertices.
+            if let Some(edges) = &batch.edge_indices {
+                pass.set_pipeline(line_pipeline);
+                pass.set_vertex_buffer(0, batch.vertices.slice(..));
+                pass.set_index_buffer(edges.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..batch.edge_index_count, 0, 0..1);
+            }
+        }
+        RenderTopology::MeshEdges => {
+            pass.set_pipeline(line_pipeline);
+            pass.set_bind_group(0, &batch.bind_group, &[]);
+            pass.set_vertex_buffer(0, batch.vertices.slice(..));
+            let Some(indices) = batch.indices.as_ref() else {
+                return;
+            };
+            pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..batch.index_count, 0, 0..1);
+        }
+    }
+}
+
+pub(crate) fn plan_from_gpu(batches: &[GpuBatch], budget: &FrameBudget) -> GpuPlan {
+    let mut usage = cad_scene::FrameUsage::default();
+    let mut accepted = Vec::with_capacity(batches.len());
+    for (i, batch) in batches.iter().enumerate() {
+        let vertices = batch.vertex_count as usize;
+        let triangles = if batch.topology == RenderTopology::Mesh {
+            batch.index_count as usize / 3
+        } else {
+            0
+        };
+        match budget.charge(&mut usage, vertices, triangles) {
+            Ok(()) => accepted.push(i),
+            Err(exceeded) => {
+                let report = OverBudget {
+                    category: exceeded.category,
+                    requested: exceeded.requested,
+                    limit: exceeded.limit,
+                    skipped_batches: batches.len() - accepted.len(),
+                };
+                return GpuPlan {
+                    accepted,
+                    usage,
+                    over_budget: Some(OverBudgetReason {
+                        reason: over_budget_reason(&report),
+                        report,
+                    }),
+                };
+            }
+        }
+    }
+    GpuPlan {
+        accepted,
+        usage,
+        over_budget: None,
+    }
+}
+
+pub(crate) fn over_budget_reason(report: &OverBudget) -> DiagnosticReason {
+    DiagnosticReason::partial(
+        codes::RENDER_FRAME_OVER_BUDGET,
+        vec![
+            DiagnosticParameter::Identifier(report.category.to_string()),
+            DiagnosticParameter::Count(report.requested as u64),
+            DiagnosticParameter::Limit(report.limit as u64),
+            DiagnosticParameter::Count(report.skipped_batches as u64),
+        ],
+    )
+}
+
+pub(crate) fn pack_positions(vectors: &[[f32; 3]]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(vectors.len() * 12);
+    for v in vectors {
+        bytes.extend_from_slice(&v[0].to_le_bytes());
+        bytes.extend_from_slice(&v[1].to_le_bytes());
+        bytes.extend_from_slice(&v[2].to_le_bytes());
+    }
+    bytes
+}
+
+/// Sanitise a batch colour for the uniform: finite `[0, 1]` channels.
+///
+/// Mirrors `cad_scene::sanitize_color` so a value that bypassed the scene cache
+/// still cannot put a NaN into the shader.
+pub(crate) fn renderer_color(color: [f32; 3]) -> [f32; 3] {
+    let channel = |c: f32| {
+        if c.is_finite() {
+            c.clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
+    };
+    [channel(color[0]), channel(color[1]), channel(color[2])]
+}
+
+/// Aggregate the "lineweight carried but not drawn" batches into one stable
+/// diagnostic reason. `None` when nothing asked for a non-zero weight.
+pub(crate) fn lineweight_reason(not_drawn: &[LineweightNotDrawn]) -> Option<DiagnosticReason> {
+    if not_drawn.is_empty() {
+        return None;
+    }
+    let max_mm = not_drawn
+        .iter()
+        .map(|l| l.millimeters)
+        .fold(0.0f32, f32::max);
+    Some(DiagnosticReason::partial(
+        codes::RENDER_LINEWEIGHT_NOT_DRAWN,
+        vec![
+            DiagnosticParameter::Count(not_drawn.len() as u64),
+            DiagnosticParameter::Identifier(format!("{max_mm:.2}mm")),
+        ],
+    ))
+}
+
+pub(crate) fn translate_left(vp: &[[f32; 4]; 4], origin: [f32; 3]) -> [f32; 16] {
+    // Column-major mat4x4 * translation(origin). Translation only affects the
+    // last column: out[.][3] = vp[.][0]*ox + vp[.][1]*oy + vp[.][2]*oz + vp[.][3].
+    let mut m = [0.0f32; 16];
+    for col in 0..4 {
+        for row in 0..4 {
+            m[col * 4 + row] = vp[col][row];
+        }
+    }
+    let ox = origin[0];
+    let oy = origin[1];
+    let oz = origin[2];
+    for row in 0..4 {
+        let base = vp[0][row] * ox + vp[1][row] * oy + vp[2][row] * oz + vp[3][row];
+        m[12 + row] = base;
+    }
+    m
+}
+
+pub(crate) fn position_only_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: 12,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+    }
+}
+
+pub(crate) fn mesh_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: 12,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+    }
+}
+
+/// Per-vertex normals travel in their own vertex buffer (slot 1, see
+/// `draw_batch`). `mesh.wgsl` reads them at `@location(1)`, so the pipeline must
+/// declare this layout too or `create_render_pipeline` fails validation with
+/// "Location[1] ... is not provided by the previous stage outputs".
+pub(crate) fn mesh_normal_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: 12,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![1 => Float32x3],
+    }
+}
+
+// Shaders are checked into `shaders/` so they can be validated as files and
+// stay reviewable; `include_str!` keeps a single source of truth.
+pub(crate) const LINE_SHADER: &str = include_str!("../shaders/line.wgsl");
+
+// Mesh shader. Shading is intentionally explicit: a single fixed headlight
+// direction, N·L diffuse plus a constant ambient term. There is no claim of
+// physically based rendering, environment lighting or specular response.
+pub(crate) const MESH_SHADER: &str = include_str!("../shaders/mesh.wgsl");

@@ -1,0 +1,290 @@
+//! handle module.
+
+use super::*;
+
+impl UiHandle {
+    fn with(&self, f: impl FnOnce(&YacrWindow)) -> CadResult<()> {
+        let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;
+        f(&ui);
+        Ok(())
+    }
+
+    /// Replace the composited CAD frame with a new texture-backed image.
+    pub fn set_cad_frame(&self, image: Image) -> CadResult<()> {
+        self.with(|ui| ui.set_cad_frame(image))
+    }
+
+    /// Push the derived view/observation state into the shell (F13/F14).
+    ///
+    /// The values come from the authoritative application viewport (see
+    /// [`bridge::CadView::sync_from_viewport`]); this only mirrors them so the
+    /// 2D/3D and projection affordances show the real state. It also updates the
+    /// shared flag the adapter uses to route a 3D drag to `Orbit`.
+    pub fn set_view_state(&self, state: ViewStateUi) -> CadResult<()> {
+        self.view_3d.set(state.is_3d);
+        self.with(|ui| {
+            ui.set_view_3d(state.is_3d);
+            ui.set_view_perspective(state.perspective);
+        })
+    }
+
+    pub fn set_status(&self, status: impl Into<slint::SharedString>) -> CadResult<()> {
+        let s = status.into();
+        self.with(|ui| ui.set_status_label(s))
+    }
+
+    pub fn set_work_mode(&self, work: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_work_mode(work))
+    }
+
+    pub fn set_can_undo(&self, can_undo: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_can_undo(can_undo))
+    }
+
+    /// Independent redo availability (audit U11). Never derived from
+    /// `set_can_undo`.
+    pub fn set_can_redo(&self, can_redo: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_can_redo(can_redo))
+    }
+
+    /// Push an application [`cad_app::HistoryAvailability`] snapshot verbatim.
+    ///
+    /// Hosts call this with `HostController::history_availability()` after every
+    /// command, so the two flags always reflect the two history stacks — undoing
+    /// to empty disables undo while keeping redo enabled.
+    pub fn set_history_availability(
+        &self,
+        availability: cad_app::HistoryAvailability,
+    ) -> CadResult<()> {
+        self.with(|ui| {
+            ui.set_can_undo(availability.can_undo);
+            ui.set_can_redo(availability.can_redo);
+        })
+    }
+
+    /// Push the whole measurement panel state in one call (audit U03/U04).
+    pub fn set_measurement_state(&self, state: &MeasurementUiState) -> CadResult<()> {
+        self.selected_kind.set(state.kind);
+        self.measurement_active.set(state.active);
+        let step = state.step_label.clone();
+        let unit = state.unit_label.clone();
+        self.with(|ui| {
+            ui.set_measurement_active(state.active);
+            ui.set_measurement_can_confirm(state.can_confirm);
+            ui.set_measurement_kind_index(state.kind_index());
+            ui.set_measurement_step_label(step.into());
+            ui.set_unit_label(unit.into());
+        })
+    }
+
+    /// Push the layer panel state (audit F03/U03).
+    ///
+    /// Also records the ordered `LayerId`s so a later toggle callback can map
+    /// its row index back to the real layer without a lossy cast.
+    pub fn set_layer_state(&self, state: &LayerPanelState, order: &[LayerId]) -> CadResult<()> {
+        *self.layer_order.borrow_mut() = order.to_vec();
+        let rows: Vec<LayerRow> = state
+            .rows
+            .iter()
+            .map(|row| LayerRow {
+                id: row.id,
+                name: row.name.clone().into(),
+                visible: row.visible,
+                overridden: row.overridden,
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let override_count = state.override_count as i32;
+        let empty = state.empty_label.clone();
+        self.layer_override_count.set(override_count);
+        let messages = self.messages.borrow().clone();
+        let override_label = layer_override_label(&messages, state.override_count);
+        self.with(|ui| {
+            ui.set_layer_rows(model);
+            ui.set_layer_override_count(override_count);
+            ui.set_layer_override_label(override_label.into());
+            ui.set_layer_empty_label(empty.into());
+        })
+    }
+
+    /// Push the layout (paper-space) list state (audit F04/U03).
+    ///
+    /// Rows come from the database's real layout table via
+    /// [`bridge::layout_descriptors`]; until a host pushes them the panel shows
+    /// its explicit empty state, never a fabricated layout. Also records the
+    /// ordered `LayoutId`s so a later switch callback can map a row index back to
+    /// the exact layout without a lossy cast.
+    pub fn set_layout_state(
+        &self,
+        state: &LayoutPanelState,
+        order: &[cad_domain::LayoutId],
+    ) -> CadResult<()> {
+        *self.layout_order.borrow_mut() = order.to_vec();
+        let rows: Vec<LayoutRow> = state
+            .rows
+            .iter()
+            .map(|row| LayoutRow {
+                id: row.id,
+                name: row.name.clone().into(),
+                supported: row.supported,
+                reason: row.reason.clone().into(),
+                viewport_count: row.viewport_count,
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let active = state.active_index.unwrap_or(-1);
+        let empty = state.empty_label.clone();
+        self.with(|ui| {
+            ui.set_layout_rows(model);
+            ui.set_layout_active_index(active);
+            ui.set_layout_empty_label(empty.into());
+        })
+    }
+
+    /// Push the read-only properties panel state (audit F05/U03).
+    pub fn set_property_state(&self, state: &PropertyPanelState) -> CadResult<()> {
+        let rows: Vec<PropertyRow> = state
+            .rows
+            .iter()
+            .map(|row| PropertyRow {
+                key: row.key.clone().into(),
+                value: row.value.clone().into(),
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let count = state.count as i32;
+        let empty = state.empty_label.clone();
+        let mixed = state.mixed_label.clone();
+        self.selection_count.set(count);
+        let messages = self.messages.borrow().clone();
+        let selected_label = selected_count_label(&messages, state.count);
+        self.with(|ui| {
+            ui.set_property_rows(model);
+            ui.set_selection_count(count);
+            ui.set_property_selected_label(selected_label.into());
+            ui.set_property_empty_label(empty.into());
+            ui.set_property_mixed_label(mixed.into());
+        })
+    }
+
+    /// Push the annotation management + tool panel state (audit F07/F09/U03).
+    ///
+    /// Also records the ordered `AnnotationId`s so a later visibility/delete
+    /// callback can map its row index back to the real annotation.
+    pub fn set_annotation_state(
+        &self,
+        state: &AnnotationPanelState,
+        order: &[AnnotationId],
+    ) -> CadResult<()> {
+        *self.annotation_order.borrow_mut() = order.to_vec();
+        if let Some(kind) = AnnotationToolKind::from_index(state.tool_kind_index) {
+            self.selected_annotation_kind.set(kind);
+        }
+        self.annotation_active.set(state.tool_active);
+        let rows: Vec<AnnotationRow> = state
+            .rows
+            .iter()
+            .map(|row| AnnotationRow {
+                id: row.id,
+                kind: row.kind.clone().into(),
+                text: row.text.clone().into(),
+                visible: row.visible,
+                overridden: row.overridden,
+                selected: row.selected,
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let hidden = state.hidden_count as i32;
+        self.annotation_hidden_count.set(hidden);
+        let empty = state.empty_label.clone();
+        let step = state.tool_step_label.clone();
+        let messages = self.messages.borrow().clone();
+        let hidden_label = annotation_hidden_label(&messages, state.hidden_count);
+        self.with(|ui| {
+            ui.set_annotation_rows(model);
+            ui.set_annotation_hidden_count(hidden);
+            ui.set_annotation_hidden_label(hidden_label.into());
+            ui.set_annotation_empty_label(empty.into());
+            ui.set_annotation_tool_active(state.tool_active);
+            ui.set_annotation_tool_can_confirm(state.tool_can_confirm);
+            ui.set_annotation_kind_index(state.tool_kind_index);
+            ui.set_annotation_step_label(step.into());
+            ui.set_annotation_requires_text(state.requires_text);
+            ui.set_annotation_text_supplied(state.text_supplied);
+        })
+    }
+
+    pub fn set_backend_index(&self, index: i32) -> CadResult<()> {
+        self.with(|ui| ui.set_backend_index(index))
+    }
+
+    /// Re-apply the catalog for `locale` and update **all** chrome labels.
+    ///
+    /// Returns the resolution actually applied; callers can log a fallback. The
+    /// adapter reformats the currently displayed override/selection counts too,
+    /// so a live locale switch does not leave a stale Chinese count label. Hosts
+    /// that supply their own `empty_label`/`mixed_label` strings should re-push
+    /// the panel state with catalog-derived text after switching.
+    pub fn set_locale(&self, locale: &str) -> CadResult<LocaleResolution> {
+        let messages = MessageSource::from_request(locale);
+        let resolution = messages.resolution().clone();
+        *self.messages.borrow_mut() = messages.clone();
+        let override_count = self.layer_override_count.get().max(0) as usize;
+        let selection_count = self.selection_count.get().max(0) as usize;
+        let hidden_count = self.annotation_hidden_count.get().max(0) as usize;
+        let override_label = layer_override_label(&messages, override_count);
+        let selected_label = selected_count_label(&messages, selection_count);
+        let hidden_label = annotation_hidden_label(&messages, hidden_count);
+        self.with(|ui| {
+            apply_chrome(ui, &messages);
+            ui.set_layer_override_label(override_label.into());
+            ui.set_property_selected_label(selected_label.into());
+            ui.set_annotation_hidden_label(hidden_label.into());
+        })?;
+        Ok(resolution)
+    }
+
+    /// Push the diagnostics drawer state (audit U08).
+    ///
+    /// The rows come from [`DiagnosticsPanelState`], which a host builds from the
+    /// real `cad_diagnostics::DiagnosticsModel`. Until a host pushes one, the
+    /// drawer shows its explicit empty state rather than fabricated rows.
+    pub fn set_diagnostics_state(&self, state: &DiagnosticsPanelState) -> CadResult<()> {
+        let rows: Vec<DiagnosticRow> = state
+            .rows
+            .iter()
+            .map(|row| DiagnosticRow {
+                code: row.code.clone().into(),
+                severity: row.severity.clone().into(),
+                description: row.description.clone().into(),
+                object: row.object.clone().into(),
+                details: row.details.clone().into(),
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let backend = backend_label(&self.messages.borrow().clone(), &state.backend);
+        let summary = state.summary.clone();
+        let empty = state.empty_label.clone();
+        self.with(|ui| {
+            ui.set_diagnostics_rows(model);
+            ui.set_diagnostics_backend_label(backend.into());
+            ui.set_diagnostics_summary_label(summary.into());
+            ui.set_diagnostics_empty_label(empty.into());
+        })
+    }
+
+    /// Open or close the diagnostics drawer without emitting a command.
+    pub fn set_diagnostics_open(&self, open: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_diagnostics_open(open))
+    }
+
+    /// Trigger a redraw without restarting the event loop.
+    pub fn request_redraw(&self) -> CadResult<()> {
+        self.with(|ui| ui.window().request_redraw())
+    }
+
+    /// Current physical size of the window, if it still exists.
+    pub fn physical_size(&self) -> Option<slint::PhysicalSize> {
+        Some(self.ui.upgrade()?.window().size())
+    }
+}

@@ -88,6 +88,17 @@ def strip_test_modules(text: str) -> str:
     return text if index == -1 else text[:index]
 
 
+def is_test_source(path: pathlib.Path) -> bool:
+    """Whether `path` is unit-test code rather than shipped chrome.
+
+    Unit tests live in dedicated `tests.rs` modules (or a `tests/` directory)
+    followed by the `#[cfg(test)] mod tests;` declaration in the crate root, so
+    their literals are fixtures, not user-facing chrome. This mirrors the
+    `strip_test_modules` contract for files that still keep tests inline.
+    """
+    return path.name == "tests.rs" or "tests" in path.parts
+
+
 def fail(problems: list[str], message: str) -> None:
     problems.append(message)
 
@@ -197,6 +208,8 @@ def check_hardcoded_literals(problems: list[str]) -> None:
                     )
     for source_root in RUST_SOURCES:
         for path in source_root.rglob("*.rs"):
+            if is_test_source(path):
+                continue
             text = strip_test_modules(strip_comments(path.read_text(encoding="utf-8")))
             for literal in STRING_RE.findall(text):
                 if literal in LITERAL_ALLOWLIST:

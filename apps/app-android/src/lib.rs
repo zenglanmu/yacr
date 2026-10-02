@@ -1,135 +1,32 @@
-//! Android host: Activity entry, lifecycle, file access and GPU composition.
-//!
-//! Spec v2.0 §9.1, §5.3. This host wires the shared Slint UI to the CAD core and
-//! the wgpu renderer through `cad_app::host::HostController`. It does not
-//! re-implement CAD logic or duplicate the web host's business path.
-
 use std::cell::{Cell, RefCell};
+
 use std::rc::Rc;
+
 use std::sync::Arc;
 
 use cad_app::host::HostController;
+
 use cad_app::host_files::{
     export_annotations_atomically, load_recovery, resolve_leave, UnsavedDecisionSource,
 };
+
 use cad_app::{Command, CommandId, CommandPayload, UnsavedDecision};
+
 use cad_domain::*;
+
 use cad_platform::{HostFuture, Persistence};
+
 use cad_ui_slint::{
     CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration, UiHandle, ViewInput,
 };
 
 type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
+
 type SharedView = Rc<RefCell<Option<CadView>>>;
 
 /// Android host font loading from APK assets (`assets/fonts/…`).
-///
-/// The mechanism is the same catalog → plan → register pipeline the web host
-/// uses, but bytes come from the activity's `AssetManager` instead of the
-/// network. **No font files are bundled** (licence, see `docs/fonts.md`), so an
-/// APK without the optional `assets/fonts/` package reports a missing asset
-/// rather than faking a font.
 #[cfg(target_os = "android")]
-mod android_fonts {
-    use std::cell::RefCell;
-    use std::ffi::CString;
-    use std::future::Future;
-    use std::io::Read;
-    use std::sync::Arc;
-    use std::task::{Context, Poll, Waker};
-
-    use android_activity::ndk::asset::AssetManager;
-    use cad_domain::{CadError, CadResult};
-    use cad_platform::fonts::{load_font_engine, FontLoadReport};
-    use cad_platform::{FontLoader, HostFuture};
-    use cad_ui_slint::CadView;
-
-    /// Logical base for fonts packaged under the APK's `assets/` directory.
-    pub const ASSET_BASE: &str = "asset://fonts/";
-
-    thread_local! {
-        static ASSETS: RefCell<Option<AssetManager>> = const { RefCell::new(None) };
-    }
-
-    /// Record the activity asset manager once, before the UI starts.
-    pub fn set_asset_manager(manager: AssetManager) {
-        ASSETS.with(|slot| *slot.borrow_mut() = Some(manager));
-    }
-
-    fn read_asset(url: &str) -> CadResult<Arc<[u8]>> {
-        let path = url.strip_prefix(ASSET_BASE).unwrap_or(url);
-        let name = CString::new(path)
-            .map_err(|_| CadError::InvalidInput(format!("font asset path has NUL: {path}")))?;
-        ASSETS.with(|slot| {
-            let borrow = slot.borrow();
-            let manager = borrow.as_ref().ok_or_else(|| {
-                CadError::Unsupported(
-                    "Android font loading needs the activity AssetManager".to_string(),
-                )
-            })?;
-            let mut asset = manager.open(&name).ok_or_else(|| {
-                CadError::ResourceMissing(format!(
-                    "font asset not packaged (assets/{path}); fonts are not bundled (licence)"
-                ))
-            })?;
-            let mut bytes = Vec::with_capacity(asset.length());
-            asset.read_to_end(&mut bytes).map_err(|e| {
-                CadError::ResourceMissing(format!("reading font asset assets/{path} failed: {e}"))
-            })?;
-            Ok(Arc::from(bytes.into_boxed_slice()))
-        })
-    }
-
-    struct AssetFontLoader;
-
-    impl FontLoader for AssetFontLoader {
-        fn load_font(&self, url: &str) -> HostFuture<'_, Arc<[u8]>> {
-            let url = url.to_string();
-            Box::pin(async move { read_asset(&url) })
-        }
-    }
-
-    /// Asset reads resolve immediately, so a no-op-waker executor is enough;
-    /// this is not a general-purpose runtime.
-    fn block_on<F: Future>(future: F) -> F::Output {
-        let mut future = Box::pin(future);
-        let mut cx = Context::from_waker(Waker::noop());
-        loop {
-            match future.as_mut().poll(&mut cx) {
-                Poll::Ready(value) => return value,
-                Poll::Pending => std::thread::yield_now(),
-            }
-        }
-    }
-
-    /// Load the referenced fonts into `view` from packaged assets.
-    pub fn install_fonts(
-        view: Option<&CadView>,
-        requested: &[String],
-    ) -> CadResult<FontLoadReport> {
-        let (engine, report) = block_on(load_font_engine(&AssetFontLoader, requested, ASSET_BASE))?;
-        if let Some(view) = view {
-            if report.registered.is_empty() {
-                view.clear_fonts();
-            } else {
-                view.set_fonts(engine);
-            }
-        }
-        Ok(report)
-    }
-
-    /// Human-facing summary of one loading pass.
-    pub fn summary(report: &FontLoadReport, requested: usize) -> String {
-        format!(
-            "字体：目录 {}，引用 {}，计划 {}，注册 {}，失败 {}",
-            report.catalog_entries,
-            requested,
-            report.planned.len(),
-            report.registered.len(),
-            report.failed.len(),
-        )
-    }
-}
+mod android_fonts;
 
 /// Initial logical size of the demo viewport. The UI configuration and the
 /// initial viewport must agree; real dimensions arrive from the surface later.
@@ -152,96 +49,6 @@ pub struct AndroidRecovery {
     directory: std::path::PathBuf,
 }
 
-impl AndroidRecovery {
-    pub fn new(directory: impl Into<std::path::PathBuf>) -> Self {
-        AndroidRecovery {
-            directory: directory.into(),
-        }
-    }
-
-    /// Deterministic per-document file path, so a bookmarked id maps to one file.
-    fn path_for(&self, document: DocumentId) -> std::path::PathBuf {
-        self.directory
-            .join(format!("yacr-recovery-{:032x}.json", document.0))
-    }
-}
-
-impl Persistence for AndroidRecovery {
-    fn save_recovery(&self, document: DocumentId, bytes: Arc<[u8]>) -> HostFuture<'_, ()> {
-        let path = self.path_for(document);
-        Box::pin(async move {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    CadError::ResourceMissing(format!(
-                        "cannot create recovery dir {}: {e}",
-                        parent.display()
-                    ))
-                })?;
-            }
-            std::fs::write(&path, &bytes).map_err(|e| {
-                CadError::ResourceMissing(format!(
-                    "cannot write recovery snapshot {}: {e}",
-                    path.display()
-                ))
-            })
-        })
-    }
-
-    fn load_recovery(&self, document: DocumentId) -> HostFuture<'_, Option<Arc<[u8]>>> {
-        let path = self.path_for(document);
-        Box::pin(async move {
-            match std::fs::read(&path) {
-                Ok(bytes) => Ok(Some(Arc::from(bytes.into_boxed_slice()))),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                Err(e) => Err(CadError::ResourceMissing(format!(
-                    "cannot read recovery snapshot {}: {e}",
-                    path.display()
-                ))),
-            }
-        })
-    }
-
-    fn discard_recovery_after_confirmation(&self, document: DocumentId) -> HostFuture<'_, ()> {
-        let path = self.path_for(document);
-        Box::pin(async move {
-            match std::fs::remove_file(&path) {
-                Ok(()) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(e) => Err(CadError::ResourceMissing(format!(
-                    "cannot remove recovery snapshot {}: {e}",
-                    path.display()
-                ))),
-            }
-        })
-    }
-}
-
-/// The host's recovery store, if one is configured and enabled.
-fn recovery_store(configuration: &AndroidHostConfiguration) -> Option<AndroidRecovery> {
-    if !configuration.recovery_enabled {
-        return None;
-    }
-    configuration
-        .recovery_directory
-        .as_ref()
-        .map(AndroidRecovery::new)
-}
-
-/// Write the annotation sidecar JSON into a host directory.
-///
-/// Returns whether the durable write succeeded. A missing directory or any I/O
-/// error returns `false`, so the caller never confirms an unsaved export.
-fn write_annotation_export(directory: Option<&str>, json: &str) -> bool {
-    let Some(directory) = directory else {
-        return false;
-    };
-    let directory = std::path::Path::new(directory);
-    if std::fs::create_dir_all(directory).is_err() {
-        return false;
-    }
-    std::fs::write(directory.join("annotations.cadnotes.json"), json.as_bytes()).is_ok()
-}
-
 pub struct AndroidHostConfiguration {
     pub recovery_enabled: bool,
     /// Candidate DWG locations to try on open (app-private/external dirs).
@@ -257,42 +64,6 @@ pub struct AndroidHostConfiguration {
     /// in this build, so the default is `None`, which means a dirty document is
     /// never replaced by an open (reported, not silently discarded).
     pub unsaved_decision: Option<Rc<dyn UnsavedDecisionSource>>,
-}
-
-impl Default for AndroidHostConfiguration {
-    fn default() -> Self {
-        AndroidHostConfiguration {
-            recovery_enabled: true,
-            sample_paths: vec![
-                "/sdcard/Download/yacr-sample.dwg".to_string(),
-                "/storage/emulated/0/Download/yacr-sample.dwg".to_string(),
-            ],
-            recovery_directory: None,
-            export_directory: None,
-            unsaved_decision: None,
-        }
-    }
-}
-
-/// Mirror the authoritative viewport camera into the composited CAD frame.
-///
-/// The camera lives in the application `Viewport`; the bridge's `CadView` only
-/// reflects it for rendering (spec §4.2, single camera truth).
-fn sync_view_camera(
-    view: &SharedView,
-    controller: &Rc<RefCell<HostController>>,
-    viewport: ViewportId,
-) {
-    let controller = controller.borrow();
-    if let (Some(view), Some(viewport)) = (
-        view.borrow().as_ref(),
-        controller.application.workspace.viewports.get(&viewport),
-    ) {
-        // One call keeps the active space, the observation mode and the full
-        // camera in sync (F04/F13); a bare `set_camera` would leave the bridge
-        // stuck in model-space 2D (workstream C's host glue).
-        view.sync_session(&controller.session.active_space, viewport);
-    }
 }
 
 /// Canvas navigation for Android: one-finger drag pans, wheel/pinch zooms.
@@ -311,97 +82,6 @@ struct AndroidViewInput {
     dragging: Cell<bool>,
 }
 
-impl AndroidViewInput {
-    fn status(&self, text: impl Into<String>) {
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            let _ = handle.set_status(text.into());
-        }
-    }
-
-    fn send(&self, id: CommandId, payload: CommandPayload) {
-        let document = self.controller.borrow().document_id;
-        let command = Command {
-            schema_version: 1,
-            id,
-            document,
-            viewport: self.viewport,
-            payload,
-        };
-        let outcome = self.controller.borrow_mut().execute(command);
-        sync_view_camera(&self.view, &self.controller, self.viewport);
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            let can_undo = {
-                let controller = self.controller.borrow();
-                controller.application.can_undo(&controller.document_id)
-            };
-            let _ = handle.set_can_undo(can_undo);
-        }
-        match outcome {
-            Ok(_) => {}
-            Err(CadError::NotImplemented(feature)) => self.status(format!("未实现：{feature}")),
-            Err(e) => self.status(format!("命令失败：{e}")),
-        }
-    }
-}
-
-impl ViewInput for AndroidViewInput {
-    fn pointer(&self, kind: i32, button: i32, x: f64, y: f64) {
-        match kind {
-            // down
-            0 => {
-                if button == 1 || button == 0 {
-                    self.dragging.set(true);
-                    self.last.set([x, y]);
-                }
-            }
-            // move
-            2 => {
-                if self.dragging.get() {
-                    let last = self.last.get();
-                    let world_per_px = self
-                        .controller
-                        .borrow()
-                        .application
-                        .workspace
-                        .viewports
-                        .get(&self.viewport)
-                        .map(|v| v.world_per_px())
-                        .unwrap_or(1.0);
-                    // Command delta is world units; screen y points down and
-                    // world y points up, so its sign flips.
-                    let delta = Point3 {
-                        x: (x - last[0]) * world_per_px,
-                        y: -(y - last[1]) * world_per_px,
-                        z: 0.0,
-                    };
-                    self.send(CommandId::Pan, CommandPayload::Points(vec![delta]));
-                }
-                self.last.set([x, y]);
-            }
-            // up / cancel
-            1 | 3 => {
-                self.dragging.set(false);
-                self.last.set([x, y]);
-            }
-            _ => {}
-        }
-    }
-
-    fn scroll(&self, _dx: f64, dy: f64) {
-        // Scroll down (positive dy) zooms in, matching the web host.
-        let factor = (1.0 - dy * 0.0015).clamp(0.2, 5.0);
-        self.last.set([0.0, 0.0]);
-        self.send(
-            CommandId::Zoom,
-            CommandPayload::Points(vec![Point3 {
-                x: factor,
-                y: 0.0,
-                z: 0.0,
-            }]),
-        );
-    }
-}
-
 /// Commands from the UI are executed through the shared application layer.
 struct HostSink {
     controller: Rc<RefCell<HostController>>,
@@ -409,224 +89,6 @@ struct HostSink {
     view: SharedView,
     incoming: IncomingDocument,
     configuration: AndroidHostConfiguration,
-}
-
-impl HostSink {
-    fn status(&self, text: impl Into<String>) {
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            let _ = handle.set_status(text.into());
-        }
-    }
-
-    fn sync_camera(&self) {
-        let viewport_id = self.controller.borrow().viewport_id;
-        sync_view_camera(&self.view, &self.controller, viewport_id);
-    }
-
-    /// Open a DWG from the candidate paths. Real SAF integration is not part of
-    /// this build; the search is explicitly reported so it is not mistaken for
-    /// a file picker (spec §9.1).
-    ///
-    /// A dirty document is only replaced after the host supplies an explicit
-    /// [`UnsavedDecision`] and the required host write is confirmed; otherwise
-    /// the current document (and its recovery data) is kept.
-    fn open_drawing(&mut self) {
-        let sample_paths = self.configuration.sample_paths.clone();
-        for path in &sample_paths {
-            let candidate = std::path::Path::new(path);
-            if !candidate.exists() {
-                continue;
-            }
-            match std::fs::read(candidate) {
-                Ok(bytes) => {
-                    let bytes: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
-                    match self.open_through_leave_flow(path, bytes) {
-                        Ok(opened) => {
-                            let drawing = {
-                                let mut controller = self.controller.borrow_mut();
-                                let _ = controller.fit();
-                                controller.drawing()
-                            };
-                            *self.incoming.borrow_mut() = drawing;
-                            self.sync_camera();
-                            if let Some(view) = self.view.borrow().as_ref() {
-                                view.request_redraw();
-                            }
-                            self.status(format!("已打开 {path}: {}", opened.completeness_label));
-                            #[cfg(target_os = "android")]
-                            self.load_fonts_for_current_document();
-                            return;
-                        }
-                        Err(CadError::Cancelled) => {
-                            self.status(format!("已取消打开 {path}：当前文档与未保存批注保留"));
-                            return;
-                        }
-                        Err(e) => self.status(format!("打开 {path} 失败: {e}")),
-                    }
-                }
-                Err(e) => self.status(format!("读取 {path} 失败: {e}")),
-            }
-        }
-        // No DWG found: keep the synthetic demo visible and say so.
-        self.status("未找到样本 DWG；显示内置演示几何（非兼容性声明）");
-    }
-
-    /// The host's recovery store, if it has one configured.
-    fn recovery_store(&self) -> Option<AndroidRecovery> {
-        recovery_store(&self.configuration)
-    }
-
-    /// Camera state for a recovery snapshot: the authoritative viewport.
-    fn camera_state(&self) -> ([f64; 3], f64) {
-        let controller = self.controller.borrow();
-        controller
-            .application
-            .workspace
-            .viewports
-            .get(&controller.viewport_id)
-            .map(|vp| {
-                (
-                    [vp.camera.target.x, vp.camera.target.y, vp.camera.target.z],
-                    vp.world_per_px(),
-                )
-            })
-            .unwrap_or(([0.0, 0.0, 0.0], 1.0))
-    }
-
-    /// Write the annotation sidecar to the configured export directory.
-    fn export_directory(&self) -> Option<String> {
-        self.configuration.export_directory.clone()
-    }
-
-    /// Apply the leave flow, then replace the document with `bytes`.
-    fn open_through_leave_flow(
-        &mut self,
-        label: &str,
-        bytes: Arc<[u8]>,
-    ) -> CadResult<cad_app::host::OpenedDrawing> {
-        let signal = self.controller.borrow().unsaved_signal();
-        let decision = if signal.dirty {
-            // The host must supply the decision; a missing source or a cancelled
-            // prompt keeps the current document (no silent Discard).
-            match self
-                .configuration
-                .unsaved_decision
-                .as_ref()
-                .and_then(|source| source.decide(&signal))
-            {
-                Some(decision) => decision,
-                None => return Err(CadError::Cancelled),
-            }
-        } else {
-            // Nothing unsaved: no write is required.
-            UnsavedDecision::Discard
-        };
-        let store = self.recovery_store();
-        let persistence = store.as_ref().map(|s| s as &dyn Persistence);
-        let (center, wpp) = self.camera_state();
-        let export_directory = self.export_directory();
-        let resolution = cad_platform::block_on(resolve_leave(
-            &mut self.controller.borrow_mut(),
-            decision,
-            center,
-            wpp,
-            persistence,
-            |controller| {
-                export_annotations_atomically(controller, |json| {
-                    write_annotation_export(export_directory.as_deref(), json)
-                })
-            },
-        ))?;
-        self.controller.borrow_mut().open_bytes_leaving(
-            bytes,
-            label,
-            decision,
-            resolution.saved,
-            resolution.recovery_persisted,
-        )
-    }
-
-    /// Run the atomic annotation export through the host file write (F09).
-    fn export_annotations(&mut self) {
-        let Some(directory) = self.export_directory() else {
-            self.status("导出失败：宿主未配置导出目录".to_string());
-            return;
-        };
-        let result = export_annotations_atomically(&mut self.controller.borrow_mut(), |json| {
-            write_annotation_export(Some(&directory), json)
-        });
-        match result {
-            Ok(()) => self.status(format!(
-                "已导出批注 JSON 到 {directory}/annotations.cadnotes.json"
-            )),
-            Err(e) => self.status(format!("导出失败：{e}")),
-        }
-    }
-
-    /// Load the fonts the current drawing references from packaged assets.
-    ///
-    /// Not compiled off Android (assets only exist inside the activity). A
-    /// missing catalogue/font asset is reported; it is never treated as a
-    /// successful empty font set.
-    #[cfg(target_os = "android")]
-    fn load_fonts_for_current_document(&self) {
-        let requested = {
-            let controller = self.controller.borrow();
-            match controller.drawing() {
-                Some(drawing) => cad_platform::fonts::requested_fonts(drawing.as_ref()),
-                None => Vec::new(),
-            }
-        };
-        let view = self.view.borrow();
-        if requested.is_empty() {
-            if let Some(view) = view.as_ref() {
-                view.clear_fonts();
-            }
-            return;
-        }
-        match android_fonts::install_fonts(view.as_ref(), &requested) {
-            Ok(report) => self.status(android_fonts::summary(&report, requested.len())),
-            Err(e) => self.status(format!("字体加载未完成：{e}")),
-        }
-    }
-}
-
-impl UiCommandSink for HostSink {
-    fn send(&mut self, command: Command) -> CadResult<()> {
-        if command.id == CommandId::OpenDrawing {
-            self.open_drawing();
-            return Ok(());
-        }
-        if command.id == CommandId::ExportAnnotations {
-            self.export_annotations();
-            return Ok(());
-        }
-        let outcome = self.controller.borrow_mut().execute(command);
-        match outcome {
-            Ok(outcome) => {
-                self.sync_camera();
-                let can_undo = {
-                    let controller = self.controller.borrow();
-                    controller.application.can_undo(&controller.document_id)
-                };
-                if let Some(handle) = self.handle.borrow().as_ref() {
-                    let _ = handle.set_can_undo(can_undo);
-                }
-                if let Some(diag) = outcome.diagnostics.first() {
-                    self.status(diag.message.clone());
-                }
-                Ok(())
-            }
-            Err(CadError::NotImplemented(feature)) => {
-                self.status(format!("未实现：{feature}"));
-                Ok(())
-            }
-            Err(e) => {
-                self.status(format!("命令失败：{e}"));
-                Ok(())
-            }
-        }
-    }
 }
 
 /// Restore a persisted recovery snapshot for the starting document, if any.
@@ -741,80 +203,12 @@ pub fn android_main(app: slint::android::AndroidApp) {
     }
 }
 
+mod host;
+mod recovery;
+mod view;
+
+pub(crate) use recovery::*;
+pub(crate) use view::*;
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn demo_database_has_geometry_and_bounds() {
-        let controller = HostController::with_demo_document([1080.0, 1920.0]).unwrap();
-        let db = controller.drawing().unwrap();
-        assert!(db.entity_count() >= 6);
-        let (min, max) = db.bounds().unwrap();
-        assert!(max.x - min.x > 0.0);
-    }
-
-    fn camera_target(controller: &Rc<RefCell<HostController>>) -> Point3 {
-        controller
-            .borrow()
-            .application
-            .workspace
-            .viewports
-            .get(&ViewportId(1))
-            .unwrap()
-            .camera
-            .target
-    }
-
-    fn world_per_px(controller: &Rc<RefCell<HostController>>) -> f64 {
-        controller
-            .borrow()
-            .application
-            .workspace
-            .viewports
-            .get(&ViewportId(1))
-            .unwrap()
-            .world_per_px()
-    }
-
-    fn input_harness() -> (Rc<RefCell<HostController>>, AndroidViewInput) {
-        let controller = Rc::new(RefCell::new(
-            HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-        ));
-        controller.borrow_mut().fit().unwrap();
-        let input = AndroidViewInput {
-            controller: controller.clone(),
-            handle: Rc::new(RefCell::new(None)),
-            view: Rc::new(RefCell::new(None)),
-            viewport: ViewportId(1),
-            last: Cell::new([0.0, 0.0]),
-            dragging: Cell::new(false),
-        };
-        (controller, input)
-    }
-
-    #[test]
-    fn android_view_input_drag_pans_the_authoritative_camera() {
-        let (controller, input) = input_harness();
-        let before = camera_target(&controller);
-        input.pointer(0, 1, 100.0, 100.0); // down
-        input.pointer(2, 1, 140.0, 100.0); // move 40 logical px right
-        input.pointer(1, 1, 140.0, 100.0); // up
-        let after = camera_target(&controller);
-        // Dragging right must move the camera left so the content follows the
-        // finger. This is the regression that made the Android canvas inert.
-        assert!(
-            after.x < before.x,
-            "camera did not pan: {before:?} -> {after:?}"
-        );
-    }
-
-    #[test]
-    fn android_view_input_scroll_zooms_the_camera() {
-        let (controller, input) = input_harness();
-        let before = world_per_px(&controller);
-        input.scroll(0.0, 200.0); // scroll down => factor 0.7 => zoom in
-        let after = world_per_px(&controller);
-        assert!(after < before, "camera did not zoom: {before} -> {after}");
-    }
-}
+mod tests;

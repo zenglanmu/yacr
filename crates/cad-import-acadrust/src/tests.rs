@@ -1,0 +1,1259 @@
+//! Import contract tests.
+
+use super::*;
+use acadrust::entities::BoundaryPath;
+
+fn request(bytes: Vec<u8>) -> ImportRequest {
+    ImportRequest {
+        document: DocumentId(1),
+        database: DatabaseId(1),
+        bytes: Arc::from(bytes.into_boxed_slice()),
+        limits: ImportLimits::default(),
+        generation: 0,
+    }
+}
+
+#[test]
+fn garbage_input_fails_without_panicking() {
+    let importer = AcadrustImporter::new();
+    let result = importer.import(&request(vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01]), &|| {
+        false
+    });
+    assert!(result.is_err(), "random bytes must not import as a drawing");
+}
+
+#[test]
+fn oversize_input_is_rejected_before_parsing() {
+    let importer = AcadrustImporter::new();
+    let mut req = request(vec![0u8; 64]);
+    req.limits.max_file_bytes = 8;
+    assert!(matches!(
+        importer.import(&req, &|| false),
+        Err(CadError::InvalidInput(_))
+    ));
+}
+
+#[test]
+fn cancellation_is_honoured() {
+    let importer = AcadrustImporter::new();
+    let result = importer.import(&request(vec![0u8; 64]), &|| true);
+    assert!(matches!(result, Err(CadError::Cancelled)));
+}
+
+#[test]
+fn space_block_names_are_case_insensitive() {
+    for name in ["*Model_Space", "*MODEL_SPACE", "*model_space"] {
+        assert!(is_space_block_name(name), "{name}");
+    }
+    for name in ["*Paper_Space", "*PAPER_SPACE", "*Paper_Space0"] {
+        assert!(is_space_block_name(name), "{name}");
+        assert!(is_paper_space_name(name), "{name}");
+    }
+    assert!(!is_space_block_name("MyBlock"));
+    assert!(!is_paper_space_name("*Model_Space"));
+}
+
+#[test]
+fn display_support_separates_drawn_from_unrendered() {
+    let line = SemanticGeometry::Line {
+        start: Point3::default(),
+        end: Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    };
+    assert_eq!(display_support(&line).0, SupportStatus::Verified);
+    let text = SemanticGeometry::Text {
+        text: "x".into(),
+        position: Point3::default(),
+        style: StyleId(0),
+        height: 1.0,
+        rotation: 0.0,
+        font: None,
+        h_align: TextAlignH::Left,
+        v_align: TextAlignV::Baseline,
+    };
+    assert_eq!(display_support(&text).0, SupportStatus::Unsupported);
+    let opaque = SemanticGeometry::Opaque {
+        type_key: "ACIS".into(),
+        version: 1,
+        payload: Vec::new(),
+    };
+    assert_eq!(display_support(&opaque).0, SupportStatus::Unsupported);
+    let insert = SemanticGeometry::Insert {
+        block: BlockId(0),
+        transform: Transform3::identity(),
+    };
+    assert_eq!(display_support(&insert).0, SupportStatus::Unverified);
+}
+
+#[test]
+fn completeness_never_reports_complete_for_unrendered_content() {
+    // Text-only drawing: parsed but not drawable -> Missing, never Complete.
+    let c = aggregate_completeness(
+        SupportStatus::Unsupported,
+        false,
+        vec!["AcDbText".into()],
+        vec![],
+    );
+    assert!(matches!(c, Completeness::Missing(_)), "{c:?}");
+    // Mixed drawable + unrendered -> Partial.
+    let c = aggregate_completeness(
+        SupportStatus::Unsupported,
+        true,
+        vec!["AcDbText".into()],
+        vec![],
+    );
+    assert!(matches!(c, Completeness::Partial(_)), "{c:?}");
+    // Fully drawable -> Complete.
+    assert_eq!(
+        aggregate_completeness(SupportStatus::Verified, true, vec![], vec![]),
+        Completeness::Complete
+    );
+    // Empty drawing with no fault -> Complete.
+    assert_eq!(
+        aggregate_completeness(SupportStatus::Verified, false, vec![], vec![]),
+        Completeness::Complete
+    );
+    // A separate import fault is still Partial, not Complete.
+    let c = aggregate_completeness(
+        SupportStatus::Verified,
+        false,
+        vec![],
+        vec!["stream".into()],
+    );
+    assert!(matches!(c, Completeness::Partial(_)), "{c:?}");
+}
+
+#[test]
+fn dimension_placement_scales_rotates_then_translates() {
+    // Scale (2,2,1), rotate +90 deg about Z, translate (1,2,3).
+    let t = placement_transform(
+        acadrust::types::Vector3::new(1.0, 2.0, 3.0),
+        std::f64::consts::FRAC_PI_2,
+        acadrust::types::Vector3::new(2.0, 2.0, 1.0),
+    );
+    // (1,0,0) -> scale (2,0,0) -> rotate (0,2,0) -> translate (1,4,3).
+    let p = t.apply_point(Point3 {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    assert!((p.x - 1.0).abs() < 1e-9, "{p:?}");
+    assert!((p.y - 4.0).abs() < 1e-9, "{p:?}");
+    assert!((p.z - 3.0).abs() < 1e-9, "{p:?}");
+}
+
+#[test]
+fn hatch_sweeps_follow_their_winding() {
+    let tau = std::f64::consts::TAU;
+    let half = std::f64::consts::PI / 2.0;
+    assert!((directed_sweep(half, 0.0, false) + half).abs() < 1e-9);
+    assert!((directed_sweep(0.0, half, true) - half).abs() < 1e-9);
+    // A full turn is kept, not collapsed to zero.
+    assert!((directed_sweep(0.0, 0.0, true) - tau).abs() < 1e-9);
+}
+
+fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> BoundaryPath {
+    let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+    let mut path = BoundaryPath::new();
+    for i in 0..4 {
+        let a = corners[i];
+        let b = corners[(i + 1) % 4];
+        path.add_edge(BoundaryEdge::Line(acadrust::entities::LineEdge {
+            start: acadrust::types::Vector2::new(a.0, a.1),
+            end: acadrust::types::Vector2::new(b.0, b.1),
+        }));
+    }
+    path
+}
+
+fn mesh_area(geometry: &SemanticGeometry) -> Option<f64> {
+    let SemanticGeometry::Compound(children) = geometry else {
+        return None;
+    };
+    children.iter().find_map(|child| match child {
+        SemanticGeometry::Mesh(m) => Some(
+            m.triangles
+                .iter()
+                .map(|t| {
+                    let a = m.vertices[t[0] as usize];
+                    let b = m.vertices[t[1] as usize];
+                    let c = m.vertices[t[2] as usize];
+                    let ab = Point3 {
+                        x: b.x - a.x,
+                        y: b.y - a.y,
+                        z: b.z - a.z,
+                    };
+                    let ac = Point3 {
+                        x: c.x - a.x,
+                        y: c.y - a.y,
+                        z: c.z - a.z,
+                    };
+                    let cx = ab.y * ac.z - ab.z * ac.y;
+                    let cy = ab.z * ac.x - ab.x * ac.z;
+                    let cz = ab.x * ac.y - ab.y * ac.x;
+                    (cx * cx + cy * cy + cz * cz).sqrt() / 2.0
+                })
+                .sum(),
+        ),
+        _ => None,
+    })
+}
+
+#[test]
+fn solid_hatch_with_a_hole_fills_the_solid_band_only() {
+    let mut hatch = acadrust::entities::Hatch::new();
+    hatch.is_solid = true;
+    hatch.paths = vec![
+        rect_path(0.0, 0.0, 10.0, 10.0),
+        rect_path(3.0, 3.0, 7.0, 7.0),
+    ];
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    assert_eq!(completeness, Completeness::Complete, "{completeness:?}");
+    let area = mesh_area(&geometry).expect("solid fill mesh");
+    assert!((area - 84.0).abs() < 1e-6, "hole area not excluded: {area}");
+}
+
+#[test]
+fn over_budget_multi_ring_hatch_stays_partial_boundary_only() {
+    // A zig-zag star defeats Douglas-Peucker, so the loop stays over
+    // MAX_FILL_POINTS and the fill must be refused, never approximated.
+    let points = 2200usize;
+    let mut path = BoundaryPath::new();
+    for i in 0..points {
+        let t = i as f64 / points as f64 * std::f64::consts::TAU;
+        let r = if i % 2 == 0 { 10.0 } else { 1.0 };
+        let a = (r * t.cos(), r * t.sin());
+        let t2 = (i + 1) as f64 / points as f64 * std::f64::consts::TAU;
+        let r2 = if (i + 1) % 2 == 0 { 10.0 } else { 1.0 };
+        let b = (r2 * t2.cos(), r2 * t2.sin());
+        path.add_edge(BoundaryEdge::Line(acadrust::entities::LineEdge {
+            start: acadrust::types::Vector2::new(a.0, a.1),
+            end: acadrust::types::Vector2::new(b.0, b.1),
+        }));
+    }
+    let mut hatch = acadrust::entities::Hatch::new();
+    hatch.is_solid = true;
+    hatch.paths = vec![path, rect_path(0.0, 0.0, 20.0, 20.0)];
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    match completeness {
+        Completeness::Partial(reasons) => {
+            assert!(reasons.iter().any(|r| r.contains("budget")), "{reasons:?}");
+        }
+        other => panic!("expected Partial, got {other:?}"),
+    }
+    // The boundary loops are still present; no fill mesh was fabricated.
+    assert!(mesh_area(&geometry).is_none(), "{geometry:?}");
+}
+
+#[test]
+fn degenerate_hatch_normal_reports_partial_boundary_only() {
+    let mut hatch = acadrust::entities::Hatch::new();
+    hatch.is_solid = true;
+    hatch.normal = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+    hatch.paths = vec![rect_path(0.0, 0.0, 4.0, 4.0)];
+    let (_geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    match completeness {
+        Completeness::Partial(reasons) => {
+            assert!(reasons.iter().any(|r| r.contains("normal")), "{reasons:?}");
+        }
+        other => panic!("expected Partial, got {other:?}"),
+    }
+}
+
+// ---- B23/B31: OCS normalisation of 2D polylines (importer side) ----
+
+fn x_axis() -> Point3 {
+    Point3 {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    }
+}
+
+#[test]
+fn world_z_extrusion_is_left_untouched() {
+    // The common case must stay exactly `(x, y, elevation)`.
+    let pts = polyline_ocs_points(world_z(), 7.0, [(1.0, 2.0), (3.0, 4.0)]);
+    assert_eq!(
+        pts,
+        vec![
+            Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 7.0
+            },
+            Point3 {
+                x: 3.0,
+                y: 4.0,
+                z: 7.0
+            },
+        ]
+    );
+}
+
+#[test]
+fn non_z_extrusion_is_transformed_to_wcs_not_treated_as_flat() {
+    // Extrusion +X: the AutoCAD arbitrary axis gives ax=+Y, ay=+Z, so an
+    // OCS point (x, y) at elevation e maps to (e, x, y). The old code
+    // returned (x, y, e) and treated the tilted entity as flat.
+    let p = ocs_to_wcs(x_axis(), 5.0, 2.0, 3.0);
+    assert!((p.x - 5.0).abs() < 1e-9, "{p:?}");
+    assert!((p.y - 2.0).abs() < 1e-9, "{p:?}");
+    assert!((p.z - 3.0).abs() < 1e-9, "{p:?}");
+    // The mapped point must lie on the extrusion plane through elevation.
+    assert!(!is_world_z(x_axis()));
+}
+
+#[test]
+fn tilted_lwpolyline_vertices_carry_the_ocs_plane() {
+    // A real acadrust entity, no DWG needed: a two-vertex LWPOLYLINE with
+    // an +X extrusion and elevation 4.
+    let mut pl = acadrust::entities::LwPolyline::from_points(vec![
+        acadrust::types::Vector2::new(1.0, 0.0),
+        acadrust::types::Vector2::new(0.0, 2.0),
+    ]);
+    pl.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+    pl.elevation = 4.0;
+
+    let points = polyline_ocs_points(
+        p3(pl.normal),
+        pl.elevation,
+        pl.vertices.iter().map(|v| (v.location.x, v.location.y)),
+    );
+    // (1,0) -> (4,1,0); (0,2) -> (4,0,2).
+    assert_eq!(
+        points,
+        vec![
+            Point3 {
+                x: 4.0,
+                y: 1.0,
+                z: 0.0
+            },
+            Point3 {
+                x: 4.0,
+                y: 0.0,
+                z: 2.0
+            },
+        ]
+    );
+    // Both vertices share the plane x = elevation; not flat on XY.
+    assert!(points.iter().all(|p| (p.x - 4.0).abs() < 1e-9));
+    assert!(points.iter().any(|p| p.z.abs() > 1e-9));
+}
+
+#[test]
+fn tilted_bulge_completeness_tracks_plane_representability() {
+    // A tilted polyline with >=3 vertices fixes its own plane, so a bulge
+    // is exact and the import is Complete. A two-vertex tilted bulge has no
+    // unique plane and must not claim Complete.
+    assert_eq!(
+        polyline_completeness(x_axis(), 4, &[0.0, 0.0, 0.0, 0.0]),
+        Completeness::Complete
+    );
+    assert_eq!(
+        polyline_completeness(x_axis(), 4, &[0.5, 0.0, 0.0, 0.0]),
+        Completeness::Complete
+    );
+    assert!(matches!(
+        polyline_completeness(x_axis(), 2, &[0.5, 0.0]),
+        Completeness::Partial(_)
+    ));
+    // A world-Z bulge polyline is always fully supported.
+    assert_eq!(
+        polyline_completeness(world_z(), 2, &[0.5, 0.0]),
+        Completeness::Complete
+    );
+}
+
+#[test]
+fn tilted_ellipse_keeps_its_normal_and_is_complete() {
+    // A +X extrusion is now carried exactly (the domain Ellipse has a
+    // normal), so the ellipse is no longer flattened onto world XY.
+    let mut e = acadrust::entities::Ellipse::new();
+    e.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+    e.center = acadrust::types::Vector3::new(2.0, 3.0, 4.0);
+    e.major_axis = acadrust::types::Vector3::new(0.0, 5.0, 0.0);
+    let (geom, completeness) = ellipse_semantics(&e);
+    match geom {
+        SemanticGeometry::Ellipse {
+            normal,
+            major_axis,
+            ratio,
+            ..
+        } => {
+            assert!((normal.x - 1.0).abs() < 1e-12, "normal {normal:?}");
+            assert!(
+                cad_geometry::length(major_axis) >= 4.0,
+                "major axis lost: {major_axis:?}"
+            );
+            assert!(ratio > 0.0);
+        }
+        other => panic!("expected ellipse, got {other:?}"),
+    }
+    assert_eq!(completeness, Completeness::Complete);
+
+    // A degenerate extrusion defaults to world Z rather than collapsing.
+    e.normal = acadrust::types::Vector3::ZERO;
+    match ellipse_semantics(&e).0 {
+        SemanticGeometry::Ellipse { normal, .. } => {
+            assert!((normal.z - 1.0).abs() < 1e-12, "normal {normal:?}");
+        }
+        other => panic!("expected ellipse, got {other:?}"),
+    }
+}
+
+#[test]
+fn tilted_circle_centre_is_mapped_from_ocs_to_wcs() {
+    // A CIRCLE stores its centre in OCS. With a +X extrusion the arbitrary
+    // axis frame maps OCS (x, y) at elevation z to WCS (z, x, y); reading
+    // the centre verbatim would put the circle in the wrong plane.
+    let mut c = acadrust::entities::Circle::new();
+    c.center = acadrust::types::Vector3::new(2.0, 3.0, 5.0);
+    c.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+    let wcs = c.center_wcs();
+    let expected = ocs_to_wcs(
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        5.0,
+        2.0,
+        3.0,
+    );
+    assert!((wcs.x - expected.x).abs() < 1e-9);
+    assert!((wcs.y - expected.y).abs() < 1e-9);
+    assert!((wcs.z - expected.z).abs() < 1e-9);
+}
+
+// ---- B22: paper-space viewport → four corners + full transform ----
+
+/// Build a top/plan VIEWPORT entity with the given paper rectangle, scale,
+/// and model view target.
+fn top_viewport(
+    center: (f64, f64),
+    w: f64,
+    h: f64,
+    view_height: f64,
+    view_target: (f64, f64),
+) -> acadrust::entities::Viewport {
+    let mut v = acadrust::entities::Viewport::new();
+    v.id = 2;
+    v.center = acadrust::types::Vector3::new(center.0, center.1, 0.0);
+    v.width = w;
+    v.height = h;
+    v.view_height = view_height;
+    v.view_direction = acadrust::types::Vector3::UNIT_Z;
+    v.view_target = acadrust::types::Vector3::new(view_target.0, view_target.1, 0.0);
+    v
+}
+
+#[test]
+fn one_to_one_hundred_viewport_has_four_corners_and_the_real_transform() {
+    // 1:100: a 10000×5000 model region fits the 100×50 paper window, view
+    // centre (10, 20).
+    let vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+    let pv = paper_viewport(&vp).expect("id 2 is a content viewport");
+    assert_eq!(pv.completeness, Completeness::Complete);
+    assert_eq!(
+        pv.clip,
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0
+            },
+            Point3 {
+                x: 100.0,
+                y: 0.0,
+                z: 0.0
+            },
+            Point3 {
+                x: 100.0,
+                y: 50.0,
+                z: 0.0
+            },
+            Point3 {
+                x: 0.0,
+                y: 50.0,
+                z: 0.0
+            },
+        ]
+    );
+    // The stored paper→model transform maps the paper centre to the view
+    // target; 100 model units per paper unit.
+    let m = &pv.model_to_paper.matrix;
+    assert!((m[0][0] - 100.0).abs() < 1e-9, "{m:?}");
+    assert!((m[1][1] - 100.0).abs() < 1e-9, "{m:?}");
+    let model_centre = pv.model_to_paper.apply_point(Point3 {
+        x: 50.0,
+        y: 25.0,
+        z: 0.0,
+    });
+    assert!((model_centre.x - 10.0).abs() < 1e-9, "{model_centre:?}");
+    assert!((model_centre.y - 20.0).abs() < 1e-9, "{model_centre:?}");
+    // One paper unit right of centre is 100 model units.
+    let right = pv.model_to_paper.apply_point(Point3 {
+        x: 51.0,
+        y: 25.0,
+        z: 0.0,
+    });
+    assert!((right.x - 110.0).abs() < 1e-9, "{right:?}");
+}
+
+#[test]
+fn sheet_viewport_and_off_viewport_are_not_content_viewports() {
+    let mut sheet = top_viewport((0.0, 0.0), 100.0, 100.0, 100.0, (0.0, 0.0));
+    sheet.id = 1;
+    assert!(paper_viewport(&sheet).is_none(), "id 1 is the sheet");
+    let mut off = top_viewport((0.0, 0.0), 100.0, 100.0, 100.0, (0.0, 0.0));
+    off.status.is_on = false;
+    assert!(
+        paper_viewport(&off).is_none(),
+        "an off viewport draws nothing"
+    );
+}
+
+#[test]
+fn rotated_viewport_is_partial_with_a_twist_reason() {
+    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+    vp.twist_angle = std::f64::consts::FRAC_PI_4;
+    let pv = paper_viewport(&vp).expect("still a content viewport");
+    match &pv.completeness {
+        Completeness::Partial(reasons) => {
+            assert!(reasons.iter().any(|r| r.contains("twist")), "{reasons:?}");
+        }
+        other => panic!("expected Partial, got {other:?}"),
+    }
+    // The four-corner rectangle is still present (the representation layer
+    // will refuse it with `viewport.twisted_transform`, never square it off).
+    assert_eq!(pv.clip.len(), 4);
+}
+
+#[test]
+fn non_perpendicular_view_is_partial_with_an_off_plane_reason() {
+    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+    vp.view_direction = acadrust::types::Vector3::new(1.0, 0.0, 1.0);
+    let pv = paper_viewport(&vp).unwrap();
+    match &pv.completeness {
+        Completeness::Partial(reasons) => {
+            assert!(
+                reasons.iter().any(|r| r.contains("perpendicular")),
+                "{reasons:?}"
+            );
+        }
+        other => panic!("expected Partial, got {other:?}"),
+    }
+}
+
+#[test]
+fn complex_clip_viewport_is_partial() {
+    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+    vp.clip_boundary_handle = acadrust::types::Handle::new(0x1A);
+    let pv = paper_viewport(&vp).unwrap();
+    match &pv.completeness {
+        Completeness::Partial(reasons) => {
+            assert!(reasons.iter().any(|r| r.contains("clip")), "{reasons:?}");
+        }
+        other => panic!("expected Partial, got {other:?}"),
+    }
+}
+
+// ---- B31: INSERT base point, OCS normal and array semantics ----
+
+#[test]
+fn insert_subtracts_the_block_base_point() {
+    // A block whose base point is (1, 1) and an INSERT at (10, 10): the
+    // block point (1, 1) must land on (10, 10), not (11, 11).
+    let mut i =
+        acadrust::entities::Insert::new("BLOCK", acadrust::types::Vector3::new(10.0, 10.0, 0.0));
+    i.rotation = 0.0;
+    let t = insert_array_transform(
+        &i,
+        Point3 {
+            x: 1.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        0.0,
+        0.0,
+    );
+    let placed = t.apply_point(Point3 {
+        x: 1.0,
+        y: 1.0,
+        z: 0.0,
+    });
+    assert!((placed.x - 10.0).abs() < 1e-9, "{placed:?}");
+    assert!((placed.y - 10.0).abs() < 1e-9, "{placed:?}");
+    // The origin with base (1,1) lands one block unit left/below the insert.
+    let origin = t.apply_point(Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    assert!((origin.x - 9.0).abs() < 1e-9, "{origin:?}");
+    assert!((origin.y - 9.0).abs() < 1e-9, "{origin:?}");
+}
+
+#[test]
+fn insert_positive_rotation_turns_counter_clockwise() {
+    let mut i = acadrust::entities::Insert::new("BLOCK", acadrust::types::Vector3::ZERO);
+    i.rotation = std::f64::consts::FRAC_PI_2;
+    // Base point (1,0). A block point (2,0) is (1,0) after base subtraction;
+    // +90° CCW turns it to (0,1).
+    let t = insert_array_transform(
+        &i,
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        0.0,
+        0.0,
+    );
+    let placed = t.apply_point(Point3 {
+        x: 2.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    assert!(placed.x.abs() < 1e-9, "{placed:?}");
+    assert!((placed.y - 1.0).abs() < 1e-9, "{placed:?}");
+    // The base point itself lands on the insert point (the origin).
+    let base = t.apply_point(Point3 {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    assert!(base.x.abs() < 1e-9 && base.y.abs() < 1e-9, "{base:?}");
+}
+
+#[test]
+fn insert_ocs_normal_lifts_the_block_off_the_xy_plane() {
+    // A +X extrusion maps the OCS X/Y axes into world Y/Z, so a block
+    // point on its local X lands off the world XY plane (audit B31).
+    let mut i = acadrust::entities::Insert::new("BLOCK", acadrust::types::Vector3::ZERO);
+    i.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+    let t = insert_array_transform(&i, Point3::default(), 0.0, 0.0);
+    let w = t.apply_point(Point3 {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    // arbitrary_axis(+X) = (ax=+Y, ay=+Z); OCS (1,0) -> world (0,1).
+    assert!(w.x.abs() < 1e-9, "{w:?}");
+    assert!((w.y - 1.0).abs() < 1e-9, "{w:?}");
+    assert!(w.z.abs() < 1e-9, "{w:?}");
+}
+
+#[test]
+fn insert_array_offsets_are_pre_scale_and_row_major() {
+    let mut i = acadrust::entities::Insert::new("BLOCK", acadrust::types::Vector3::ZERO);
+    // Non-uniform scale: the 10-unit column spacing must not be scaled by
+    // the 2× x-scale.
+    i.set_x_scale(2.0);
+    i.set_y_scale(3.0);
+    i.column_count = 2;
+    i.row_count = 2;
+    i.column_spacing = 10.0;
+    i.row_spacing = 20.0;
+
+    let cell = |col: usize, row: usize| {
+        insert_array_transform(
+            &i,
+            Point3::default(),
+            col as f64 * i.column_spacing,
+            row as f64 * i.row_spacing,
+        )
+        .apply_point(Point3::default())
+    };
+    // Row-major: cells are (col 0,row 0), (col 1,row 0), ...
+    assert_eq!(cell(0, 0).x, 0.0);
+    assert_eq!(cell(1, 0).x, 10.0);
+    assert_eq!(cell(0, 1).x, 0.0);
+    assert_eq!(cell(0, 1).y, 20.0);
+}
+
+#[test]
+fn array_insert_is_a_compound_of_cell_instances() {
+    // referenced_blocks must see every cell so status nesting resolves
+    // through MINSERTs; insert_semantics builds one Instance per cell.
+    let geometry = SemanticGeometry::Compound(vec![
+        SemanticGeometry::Insert {
+            block: BlockId(7),
+            transform: Transform3::identity(),
+        },
+        SemanticGeometry::Insert {
+            block: BlockId(7),
+            transform: Transform3::identity(),
+        },
+    ]);
+    assert_eq!(referenced_blocks(&geometry), vec![BlockId(7), BlockId(7)]);
+    assert!(referenced_blocks(&SemanticGeometry::Line {
+        start: Point3::default(),
+        end: Point3::default(),
+    })
+    .is_empty());
+}
+
+#[test]
+fn missing_block_is_reported_missing_not_an_empty_success() {
+    // A bare builder (no block table) resolves the insert block to the
+    // sentinel id; the record must be `Missing`, never a silent success.
+    let bytes = vec![0u8; 0];
+    let req = request(bytes);
+    let acad = acadrust::CadDocument::new();
+    let stats = ReadStats::default();
+    let builder = ImporterBuilder::new(&req, &acad, stats, compute_identity(&[]));
+    let mut i = acadrust::entities::Insert::new("NOPE", acadrust::types::Vector3::ZERO);
+    i.column_count = 1;
+    i.row_count = 1;
+    let (geometry, completeness) = builder.insert_semantics(&i);
+    assert!(matches!(geometry, SemanticGeometry::Insert { .. }));
+    match completeness {
+        Completeness::Missing(reasons) => {
+            assert!(reasons.iter().any(|r| r.contains("NOPE")), "{reasons:?}");
+        }
+        other => panic!("expected Missing, got {other:?}"),
+    }
+}
+
+// ---- B31: SOLID/TRACE boundary order and OCS lift ----
+
+#[test]
+fn solid_corners_use_the_visible_boundary_order() {
+    // Stored corners 1,2,3,4 with the visible quad 1,2,4,3. The extruded
+    // triangles must follow the boundary, not the stored order.
+    let mut s = acadrust::entities::Solid::new(
+        acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(2.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(0.0, 2.0, 0.0),
+        acadrust::types::Vector3::new(2.0, 2.0, 0.0),
+    );
+    s.normal = acadrust::types::Vector3::UNIT_Z;
+    let (geometry, completeness) = solid_mesh_semantics(&s);
+    assert_eq!(completeness, Completeness::Complete);
+    let SemanticGeometry::Mesh(mesh) = geometry else {
+        panic!("expected a mesh");
+    };
+    // Boundary order: (0,0), (2,0), (2,2), (0,2). Triangles (0,1,2) and
+    // (0,2,3) must be two triangles of a unit square (area 4 total).
+    let area: f64 = mesh
+        .triangles
+        .iter()
+        .map(|t| {
+            let a = mesh.vertices[t[0] as usize];
+            let b = mesh.vertices[t[1] as usize];
+            let c = mesh.vertices[t[2] as usize];
+            let ab = Point3 {
+                x: b.x - a.x,
+                y: b.y - a.y,
+                z: 0.0,
+            };
+            let ac = Point3 {
+                x: c.x - a.x,
+                y: c.y - a.y,
+                z: 0.0,
+            };
+            (ab.x * ac.y - ab.y * ac.x).abs() / 2.0
+        })
+        .sum();
+    assert!((area - 4.0).abs() < 1e-9, "crossed quad area {area}");
+}
+
+#[test]
+fn solid_with_a_non_z_extrusion_is_lifted_to_wcs() {
+    let mut s = acadrust::entities::Solid::new(
+        acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(0.0, 1.0, 0.0),
+        acadrust::types::Vector3::new(0.0, 0.0, 1.0),
+        acadrust::types::Vector3::new(1.0, 1.0, 1.0),
+    );
+    s.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+    let (geometry, completeness) = solid_mesh_semantics(&s);
+    assert_eq!(completeness, Completeness::Complete);
+    let SemanticGeometry::Mesh(mesh) = geometry else {
+        panic!("expected a mesh");
+    };
+    // With +X extrusion the arbitrary-axis frame maps OCS (x, y, z) to
+    // world (z, x, y). The old flat treatment would have left the first
+    // corner at (1,0,0); the lift must move it to (0,1,0).
+    assert!(mesh
+        .vertices
+        .iter()
+        .any(|p| { (p.x).abs() < 1e-9 && (p.y - 1.0).abs() < 1e-9 && p.z.abs() < 1e-9 }));
+    // The fourth OCS corner (1,1,1) -> world (1,1,1).
+    assert!(mesh.vertices.iter().any(|p| {
+        (p.x - 1.0).abs() < 1e-9 && (p.y - 1.0).abs() < 1e-9 && (p.z - 1.0).abs() < 1e-9
+    }));
+}
+
+#[test]
+fn solid_thickness_is_partial_flat_face_only() {
+    let mut s = acadrust::entities::Solid::new(
+        acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(0.0, 1.0, 0.0),
+        acadrust::types::Vector3::new(1.0, 1.0, 0.0),
+    );
+    s.thickness = 5.0;
+    let (_geometry, completeness) = solid_mesh_semantics(&s);
+    match completeness {
+        Completeness::Partial(reasons) => {
+            assert!(
+                reasons.iter().any(|r| r.contains("thickness")),
+                "{reasons:?}"
+            );
+        }
+        other => panic!("expected Partial, got {other:?}"),
+    }
+}
+
+// ---- B23/B31: tilted OCS polyline length ----
+
+#[test]
+fn tilted_ocs_polyline_preserves_its_segment_length() {
+    // A 3-4-5 triangle drawn flat on the OCS XY plane at an +X extrusion.
+    // Lifting it to WCS must preserve each segment's length exactly, while
+    // the old flat treatment would have collapsed it onto the XY plane.
+    let mut pl = acadrust::entities::LwPolyline::from_points(vec![
+        acadrust::types::Vector2::new(0.0, 0.0),
+        acadrust::types::Vector2::new(3.0, 0.0),
+        acadrust::types::Vector2::new(3.0, 4.0),
+    ]);
+    pl.normal = acadrust::types::Vector3::new(1.0, 0.0, 0.0);
+    pl.elevation = 7.0;
+    let points = polyline_ocs_points(
+        p3(pl.normal),
+        pl.elevation,
+        pl.vertices.iter().map(|v| (v.location.x, v.location.y)),
+    );
+    let seg = |a: Point3, b: Point3| {
+        let d = Point3 {
+            x: b.x - a.x,
+            y: b.y - a.y,
+            z: b.z - a.z,
+        };
+        (d.x * d.x + d.y * d.y + d.z * d.z).sqrt()
+    };
+    assert!((seg(points[0], points[1]) - 3.0).abs() < 1e-9, "{points:?}");
+    assert!((seg(points[1], points[2]) - 4.0).abs() < 1e-9, "{points:?}");
+    // Both vertices lie on the x = elevation plane.
+    assert!(points.iter().all(|p| (p.x - 7.0).abs() < 1e-9));
+}
+
+// ---- B23: source spline knots and weights survive the importer ----
+
+#[test]
+fn source_spline_knots_and_weights_survive_import() {
+    let mut s = acadrust::entities::Spline::new();
+    s.degree = 2;
+    // Explicit non-uniform clamped knots, not the uniform ones acadrust
+    // would fabricate.
+    s.knots = vec![0.0, 0.0, 0.0, 0.3, 0.7, 1.0, 1.0, 1.0];
+    s.control_points = vec![
+        acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(1.0, 2.0, 0.0),
+        acadrust::types::Vector3::new(2.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(3.0, 2.0, 0.0),
+        acadrust::types::Vector3::new(4.0, 0.0, 0.0),
+    ];
+    s.weights = vec![1.0, 3.0, 1.0, 3.0, 1.0];
+
+    let (geometry, completeness) = spline_semantics(&s);
+    match geometry {
+        SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } => {
+            assert_eq!(degree, 2);
+            assert_eq!(knots, s.knots, "source knots must not be uniformised");
+            assert_eq!(weights, s.weights, "source weights must survive");
+            assert_eq!(control_points.len(), 5);
+        }
+        other => panic!("expected spline, got {other:?}"),
+    }
+    // Rational splines are evaluated from the source knots and weights, so
+    // the record is complete rather than downgraded.
+    assert_eq!(completeness, Completeness::Complete);
+
+    // A mismatched weight vector is the honest Partial case.
+    s.weights = vec![1.0, 3.0];
+    assert!(matches!(spline_semantics(&s).1, Completeness::Partial(_)));
+}
+
+// ---- F14/B21: transparency resolution + proxy fragment preservation ----
+
+#[test]
+fn transparency_resolution_prefers_byobject_then_layer_then_byblock() {
+    // acadrust packs transparency as a byte: 0 opaque, 255 transparent.
+    assert_eq!(
+        resolve_entity_transparency(acadrust::Transparency::new(0), 0.5),
+        EntityTransparency::Explicit(1.0)
+    );
+    // ByObject (Explicit) overrides the layer value.
+    assert_eq!(
+        resolve_entity_transparency(acadrust::Transparency::new(128), 0.5),
+        EntityTransparency::Explicit(1.0 - 128.0 / 255.0)
+    );
+    // ByLayer uses the pre-resolved layer opacity.
+    assert_eq!(
+        resolve_entity_transparency(acadrust::Transparency::BY_LAYER, 0.25),
+        EntityTransparency::Explicit(0.25)
+    );
+    // ByBlock stays symbolic so INSERT expansion can supply the value.
+    assert_eq!(
+        resolve_entity_transparency(acadrust::Transparency::BY_BLOCK, 0.25),
+        EntityTransparency::ByBlock
+    );
+}
+
+#[test]
+fn layer_opacity_maps_dwg_bytes_to_opacity() {
+    assert_eq!(layer_opacity(acadrust::Transparency::OPAQUE), 1.0);
+    assert_eq!(layer_opacity(acadrust::Transparency::TRANSPARENT), 0.0);
+    // A degenerate ByLayer/ByBlock on a layer is opaque, not fabricated.
+    assert_eq!(layer_opacity(acadrust::Transparency::BY_LAYER), 1.0);
+}
+
+// ---- §3.2/§7.1: colour and lineweight resolution ----
+
+#[test]
+fn color_resolution_prefers_byobject_then_layer_then_byblock() {
+    // ByObject true colour wins over the layer.
+    assert_eq!(
+        resolve_entity_color(acadrust::Color::from_rgb(10, 20, 30), Some([1, 2, 3])),
+        EntityColor::Explicit([10, 20, 30])
+    );
+    // An ACI index resolves through acadrust's canonical table, not a guess.
+    assert_eq!(
+        resolve_entity_color(acadrust::Color::Index(1), Some([1, 2, 3])),
+        EntityColor::Explicit([255, 0, 0])
+    );
+    // ByLayer uses the layer's pre-resolved colour.
+    assert_eq!(
+        resolve_entity_color(acadrust::Color::ByLayer, Some([1, 2, 3])),
+        EntityColor::Explicit([1, 2, 3])
+    );
+    // A materialised `None` keeps the layer's colour rather than black.
+    assert_eq!(
+        resolve_entity_color(acadrust::Color::None, Some([4, 5, 6])),
+        EntityColor::Explicit([4, 5, 6])
+    );
+    // ByBlock stays symbolic so INSERT expansion can supply the value.
+    assert_eq!(
+        resolve_entity_color(acadrust::Color::ByBlock, Some([4, 5, 6])),
+        EntityColor::ByBlock
+    );
+    // ByLayer with no reachable layer stays unresolved, not fabricated.
+    assert_eq!(
+        resolve_entity_color(acadrust::Color::ByLayer, None),
+        EntityColor::ByLayer
+    );
+}
+
+#[test]
+fn layer_rgb_resolves_index_and_rgb_and_falls_back_to_white() {
+    assert_eq!(layer_rgb(acadrust::Color::from_rgb(9, 8, 7)), [9, 8, 7]);
+    assert_eq!(layer_rgb(acadrust::Color::Index(5)), [0, 0, 255]);
+    // A degenerate symbolic layer colour falls back to white.
+    assert_eq!(layer_rgb(acadrust::Color::ByLayer), [255, 255, 255]);
+}
+
+#[test]
+fn lineweight_resolution_prefers_byobject_then_layer_then_byblock() {
+    // A concrete weight is 1/100 mm; 35 -> 0.35 mm.
+    assert_eq!(
+        resolve_entity_lineweight(acadrust::LineWeight::Value(35), Some(0.5)),
+        EntityLineWeight::Explicit(0.35)
+    );
+    // ByLayer uses the layer's pre-resolved weight.
+    assert_eq!(
+        resolve_entity_lineweight(acadrust::LineWeight::ByLayer, Some(0.5)),
+        EntityLineWeight::Explicit(0.5)
+    );
+    // acadrust's Default keeps its explicit meaning.
+    assert_eq!(
+        resolve_entity_lineweight(acadrust::LineWeight::Default, Some(0.5)),
+        EntityLineWeight::Default
+    );
+    // ByBlock stays symbolic.
+    assert_eq!(
+        resolve_entity_lineweight(acadrust::LineWeight::ByBlock, Some(0.5)),
+        EntityLineWeight::ByBlock
+    );
+    // ByLayer with no reachable layer stays unresolved.
+    assert_eq!(
+        resolve_entity_lineweight(acadrust::LineWeight::ByLayer, None),
+        EntityLineWeight::ByLayer
+    );
+}
+
+#[test]
+fn lineweight_mm_only_reports_concrete_values() {
+    assert_eq!(lineweight_mm(acadrust::LineWeight::Value(100)), Some(1.0));
+    assert_eq!(lineweight_mm(acadrust::LineWeight::W0_25), Some(0.25));
+    assert_eq!(lineweight_mm(acadrust::LineWeight::ByLayer), None);
+    assert_eq!(lineweight_mm(acadrust::LineWeight::ByBlock), None);
+    assert_eq!(lineweight_mm(acadrust::LineWeight::Default), None);
+}
+
+#[test]
+fn all_proxy_fragments_survive_as_a_compound() {
+    let fragment = |id: u128| SemanticGeometry::Line {
+        start: Point3::default(),
+        end: Point3 {
+            x: id as f64,
+            y: 0.0,
+            z: 0.0,
+        },
+    };
+    match proxy_geometry_compound(vec![fragment(1), fragment(2), fragment(3)]) {
+        SemanticGeometry::Compound(children) => {
+            assert_eq!(children.len(), 3, "every proxy fragment must survive");
+        }
+        other => panic!("expected a compound, got {other:?}"),
+    }
+    // A single fragment stays itself: no needless wrapper.
+    assert!(matches!(
+        proxy_geometry_compound(vec![fragment(1)]),
+        SemanticGeometry::Line { .. }
+    ));
+}
+
+#[test]
+fn proxy_cache_is_only_used_for_entities_without_semantic_geometry() {
+    let line = EntityType::Line(acadrust::entities::Line::new());
+    assert!(
+        !proxy_geometry_allowed(&line),
+        "a LINE is drawn from semantics; its cache must not double-draw"
+    );
+    let unknown = EntityType::Unknown(acadrust::entities::UnknownEntity::new("ACAD_PROXY_ENTITY"));
+    assert!(proxy_geometry_allowed(&unknown));
+    let vendor = EntityType::Unknown(acadrust::entities::UnknownEntity::new("TCH_WALL"));
+    assert!(proxy_geometry_allowed(&vendor));
+}
+
+// ---- ACIS neutral lift and kernel tessellation (F15 reachable subset) ----
+
+use cad_kernel_adapter::{
+    BrepSurface, BrepTessellator, GeometryHandle, SolidExchange, SolidTessellator,
+    TessellationBudget, TessellationOutcome, TessellationRequest, TessellationResult,
+    TessellationTolerance,
+};
+
+fn tess_brep(exchange: SolidExchange) -> TessellationResult {
+    let request = TessellationRequest {
+        geometry: GeometryHandle::Resolved(ObjectId(1)),
+        exchange,
+        tolerance: TessellationTolerance::default(),
+        budget: TessellationBudget::default(),
+        stamp: TaskStamp::new(DocumentId(1), 0),
+    };
+    BrepTessellator.tessellate(&request, &|| false).unwrap()
+}
+
+#[test]
+fn acis_box_lifts_to_six_planar_faces_and_tessellates_closed() {
+    use acadrust::entities::acis::primitives::build_box;
+    let doc = build_box([0.0, 0.0, 0.0], 2.0, 2.0, 2.0);
+    let brep = sat_to_brep(&doc);
+    assert_eq!(brep.face_count(), 6, "a box has six faces");
+    assert!(brep
+        .shells
+        .iter()
+        .flat_map(|s| &s.faces)
+        .all(|f| matches!(f.surface, BrepSurface::Plane { .. })));
+
+    let result = tess_brep(SolidExchange::Brep(brep));
+    match result.outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert_eq!(geometry.triangle_count(), 12);
+            let area = cad_kernel_adapter::brep::mesh_area(&geometry.mesh);
+            assert!((area - 24.0).abs() < 1e-9, "box area {area}");
+        }
+        other => panic!("box must tessellate as Success, got {other:?}"),
+    }
+}
+
+#[test]
+fn solid3d_entity_round_trips_through_sat_text() {
+    use acadrust::entities::acis::primitives::build_box;
+    use acadrust::entities::Solid3D;
+    let sat = build_box([1.0, 2.0, 3.0], 2.0, 4.0, 6.0).to_sat_string();
+    let solid = Solid3D::from_sat(&sat);
+    let exchange = solid_exchange_from_entity(&EntityType::Solid3D(solid))
+        .expect("3DSOLID must expose an exchange");
+    let SolidExchange::Brep(brep) = exchange else {
+        panic!("a valid SAT payload must lift to a neutral B-rep");
+    };
+    assert_eq!(brep.face_count(), 6);
+    assert!(matches!(
+        tess_brep(SolidExchange::Brep(brep)).outcome,
+        TessellationOutcome::Success { .. }
+    ));
+}
+
+#[test]
+fn sab_payload_lifts_through_the_binary_reader() {
+    use acadrust::entities::acis::primitives::build_box;
+    use acadrust::entities::acis::SabWriter;
+    use acadrust::entities::Solid3D;
+    let doc = build_box([0.0, 0.0, 0.0], 2.0, 2.0, 2.0);
+    let sab = SabWriter::write(&doc);
+    let brep = sab_to_brep(&sab).expect("SAB must decode");
+    assert_eq!(brep.face_count(), 6);
+    let solid = Solid3D::from_sab(sab);
+    let exchange = solid_exchange_from_entity(&EntityType::Solid3D(solid)).unwrap();
+    assert!(matches!(exchange, SolidExchange::Brep(_)));
+}
+
+#[test]
+fn cylinder_caps_and_side_tessellate_closed() {
+    use acadrust::entities::acis::primitives::build_cylinder;
+    let doc = build_cylinder([0.0, 0.0, 0.0], 1.0, 3.0);
+    let brep = sat_to_brep(&doc);
+    assert_eq!(brep.face_count(), 3, "two caps plus the side");
+    assert!(brep.shells[0]
+        .faces
+        .iter()
+        .any(|f| matches!(f.surface, BrepSurface::Cylinder { .. })));
+    match tess_brep(SolidExchange::Brep(brep)).outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert!(geometry.triangle_count() > 0);
+            // The curved side makes it an approximation with a bound.
+            assert!(matches!(
+                geometry.precision,
+                Precision::Approximate {
+                    error_bound: Some(_)
+                }
+            ));
+        }
+        other => panic!("cylinder must be a closed Success, got {other:?}"),
+    }
+}
+
+#[test]
+fn sphere_lifts_to_one_loopless_face_and_tessellates() {
+    use acadrust::entities::acis::primitives::build_sphere;
+    let doc = build_sphere([0.0, 0.0, 0.0], 2.0);
+    let brep = sat_to_brep(&doc);
+    assert_eq!(brep.face_count(), 1);
+    match tess_brep(SolidExchange::Brep(brep)).outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert!(geometry.triangle_count() >= 8);
+        }
+        other => panic!("sphere must be a closed Success, got {other:?}"),
+    }
+}
+
+#[test]
+fn cone_reports_the_unsupported_side_face_not_a_fake_mesh() {
+    use acadrust::entities::acis::primitives::build_cone;
+    let doc = build_cone([0.0, 0.0, 0.0], 1.0, 2.0);
+    let brep = sat_to_brep(&doc);
+    let result = tess_brep(SolidExchange::Brep(brep));
+    match result.outcome {
+        TessellationOutcome::Partial {
+            geometry,
+            degradation,
+            ..
+        } => {
+            assert!(geometry.triangle_count() > 0, "the base disc still draws");
+            assert!(!degradation.missing_faces.is_empty());
+        }
+        // A future build that learns cones may return Success; a fabricated
+        // mesh is the only wrong answer, and that cannot be represented.
+        other => panic!("cone must be Partial with a missing face, got {other:?}"),
+    }
+}
+
+#[test]
+fn fixture_cube_parses_to_a_closed_six_face_solid() {
+    let sat = include_str!("../../../fixtures/acis/cube.sat");
+    let doc = acadrust::entities::acis::SatDocument::parse(sat).expect("fixture parses");
+    let brep = sat_to_brep(&doc);
+    assert_eq!(brep.face_count(), 6);
+    match tess_brep(SolidExchange::Brep(brep)).outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert_eq!(geometry.triangle_count(), 12);
+            let area = cad_kernel_adapter::brep::mesh_area(&geometry.mesh);
+            assert!((area - 24.0).abs() < 1e-9, "area {area}");
+        }
+        other => panic!("cube fixture must be a closed Success, got {other:?}"),
+    }
+}
+
+#[test]
+fn fixture_box_with_square_hole_tessellates_closed_with_holes() {
+    let sat = include_str!("../../../fixtures/acis/box-with-square-hole.sat");
+    let doc = acadrust::entities::acis::SatDocument::parse(sat).expect("fixture parses");
+    let brep = sat_to_brep(&doc);
+    assert_eq!(brep.face_count(), 10, "two annuli plus eight walls");
+    assert!(
+        brep.shells
+            .iter()
+            .flat_map(|s| &s.faces)
+            .any(|f| f.loops.len() == 2),
+        "the annulus faces must carry an inner loop"
+    );
+    match tess_brep(SolidExchange::Brep(brep)).outcome {
+        TessellationOutcome::Success { geometry, .. } => {
+            assert!(geometry.triangle_count() > 0);
+            // 2*(10*10) + 4*(10*4) - 2*(4*4) + 16*4 = 392.
+            let area = cad_kernel_adapter::brep::mesh_area(&geometry.mesh);
+            assert!((area - 392.0).abs() < 1e-9, "area {area}");
+        }
+        other => panic!("holed box must be a closed Success, got {other:?}"),
+    }
+}
+
+#[test]
+fn non_solid_entities_have_no_acis_exchange() {
+    let line = EntityType::Line(acadrust::entities::Line::new());
+    assert!(solid_exchange_from_entity(&line).is_none());
+}
+
+#[test]
+fn region_body_and_surface_entities_share_the_acis_lift() {
+    use acadrust::entities::acis::primitives::build_box;
+    use acadrust::entities::{AcisData, Body, Region, Surface};
+    let sat = build_box([0.0, 0.0, 0.0], 2.0, 2.0, 2.0).to_sat_string();
+    let surface = Surface {
+        acis_data: AcisData::from_sat(&sat),
+        ..Surface::default()
+    };
+    let entities = [
+        EntityType::Region(Region::from_sat(&sat)),
+        EntityType::Body(Body::from_sat(&sat)),
+        EntityType::Surface(surface),
+    ];
+    for entity in entities {
+        match solid_exchange_from_entity(&entity) {
+            Some(SolidExchange::Brep(brep)) => assert_eq!(brep.face_count(), 6),
+            other => panic!("{entity:?} must lift to a B-rep, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn empty_acis_data_stays_raw_and_empty() {
+    let empty = acadrust::entities::AcisData::new();
+    let exchange = acis_exchange(&empty);
+    assert!(exchange.is_empty());
+    let result = tess_brep(exchange);
+    assert!(matches!(result.outcome, TessellationOutcome::Failed { .. }));
+}
+
+#[test]
+fn opaque_payload_retains_the_raw_acis_bytes() {
+    let sat = "700 0 1 0\n@8 acadrust @8 ACIS 7.0 @24 Thu Jan 01 00:00:00 2023\n1e-06 1e-06\n-1 body $-1 $-1 $-1 $-1 #\n";
+    let acis = acadrust::entities::AcisData::from_sat(sat);
+    let (version, payload) = acis_raw_payload(&acis);
+    assert_eq!(version, 1);
+    assert!(!payload.is_empty());
+}
