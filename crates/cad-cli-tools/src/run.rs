@@ -6,19 +6,31 @@ use super::*;
 ///
 /// The returned error is structured and carries a stable machine `code`.
 pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
-    if invocation.operation == CliOperation::FixedViewportRender {
+    if matches!(
+        invocation.operation,
+        CliOperation::FixedViewportRender | CliOperation::Plot
+    ) {
         // The browser has no headless device to own: it keeps the explicit
         // "unsupported" answer (the host canvas supplies the device instead).
         #[cfg(target_arch = "wasm32")]
         return Err(cli_error_from_domain(CadError::Unsupported(
-            "fixed-viewport rendering requires a GPU device; wasm receives its device from the host canvas"
+            "fixed-viewport rendering and plotting require a GPU device; \
+             wasm receives its device from the host canvas"
                 .into(),
         )));
         // Native: drive the real headless renderer and report a structured
         // frame, or fail explicitly (no adapter, no drawable geometry).
         #[cfg(not(target_arch = "wasm32"))]
-        return serde_json::to_string_pretty(&domain(run_render(invocation))?)
-            .map_err(|e| CliError::new(error_code::INVARIANT, format!("cli encode failed: {e}")));
+        {
+            let value = match invocation.operation {
+                CliOperation::FixedViewportRender => domain(run_render(invocation))?,
+                CliOperation::Plot => domain(run_plot(invocation))?,
+                _ => unreachable!(),
+            };
+            return serde_json::to_string_pretty(&value).map_err(|e| {
+                CliError::new(error_code::INVARIANT, format!("cli encode failed: {e}"))
+            });
+        }
     }
     let fonts = domain(load_fonts(&invocation.fonts))?;
     let mut controller = domain(load_document(invocation))?;
@@ -32,7 +44,7 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
             domain(run_build_representation(&controller, fonts.as_ref()))?
         }
         CliOperation::Benchmark => domain(run_benchmark(&controller, invocation, fonts.as_ref()))?,
-        CliOperation::FixedViewportRender => unreachable!(),
+        CliOperation::FixedViewportRender | CliOperation::Plot => unreachable!(),
     };
     serde_json::to_string_pretty(&value)
         .map_err(|e| CliError::new(error_code::INVARIANT, format!("cli encode failed: {e}")))

@@ -14,6 +14,70 @@ fn request(bytes: Vec<u8>) -> ImportRequest {
 }
 
 #[test]
+#[ignore = "one-off fixture generator; run with YACR_PLOT_FIXTURE_OUT"]
+fn generate_plot_fixture() {
+    use acadrust::io::dwg::dwg_writer::DwgWriter;
+    let Some(out) = std::env::var_os("YACR_PLOT_FIXTURE_OUT") else {
+        return;
+    };
+    let mut doc = acadrust::CadDocument::new();
+    // A fresh document already has a "Layout1"; reuse it.
+    let layout_handle = doc
+        .objects
+        .iter()
+        .find_map(|(handle, object)| match object {
+            acadrust::objects::ObjectType::Layout(l) if l.name == "Layout1" => Some(*handle),
+            _ => None,
+        })
+        .expect("Layout1 exists in a new document");
+    doc.add_entity_to_layout(
+        acadrust::EntityType::Line(acadrust::entities::Line::from_coords(
+            20.0, 20.0, 0.0, 190.0, 277.0, 0.0,
+        )),
+        "Layout1",
+    )
+    .unwrap();
+    // Populate the layout's embedded plot data (A4 landscape-ish, 5mm margins).
+    if let Some(acadrust::objects::ObjectType::Layout(layout)) = doc.objects.get_mut(&layout_handle)
+    {
+        layout.paper_size = "ISO_A4_(210.00_x_297.00_MM)".into();
+        layout.paper_width = 210.0;
+        layout.paper_height = 297.0;
+        layout.plot_margin_left = 5.0;
+        layout.plot_margin_bottom = 5.0;
+        layout.plot_margin_right = 5.0;
+        layout.plot_margin_top = 5.0;
+        layout.plot_paper_units = 1;
+        layout.plot_type = 5;
+        layout.plot_rotation = 0;
+        layout.plot_scale_numerator = 1.0;
+        layout.plot_scale_denominator = 1.0;
+    }
+    // A standalone PLOTSETTINGS object too (the DXF-style path), with values
+    // that differ from the embedded ones so the preferred source is observable.
+    let settings_handle = doc.allocate_handle();
+    let mut settings = acadrust::objects::PlotSettings::new("Layout1");
+    settings.handle = settings_handle;
+    settings.owner = layout_handle;
+    settings.paper_size = "ISO_A3_(297.00_x_420.00_MM)".into();
+    settings.paper_width = 297.0;
+    settings.paper_height = 420.0;
+    settings.margins = acadrust::objects::PaperMargin::new(12.0, 12.0, 12.0, 12.0);
+    settings.rotation = acadrust::objects::PlotRotation::Degrees90;
+    settings.paper_units = acadrust::objects::PlotPaperUnits::Millimeters;
+    settings.plot_type = acadrust::objects::PlotType::Layout;
+    settings.scale_numerator = 1.0;
+    settings.scale_denominator = 1.0;
+    doc.objects.insert(
+        settings_handle,
+        acadrust::objects::ObjectType::PlotSettings(settings),
+    );
+    let bytes = DwgWriter::write_to_vec(&doc).unwrap();
+    std::fs::write(&out, &bytes).unwrap();
+    eprintln!("wrote {} bytes to {:?}", bytes.len(), out);
+}
+
+#[test]
 fn garbage_input_fails_without_panicking() {
     let importer = AcadrustImporter::new();
     let result = importer.import(&request(vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01]), &|| {
@@ -1256,4 +1320,62 @@ fn opaque_payload_retains_the_raw_acis_bytes() {
     let (version, payload) = acis_raw_payload(&acis);
     assert_eq!(version, 1);
     assert!(!payload.is_empty());
+}
+
+// ---- plot settings (docs/plot.md) ----------------------------------------
+
+/// Path to the committed synthetic plot fixture.
+fn plot_fixture_bytes() -> Vec<u8> {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/plot/a4-layout.dwg");
+    std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+}
+
+#[test]
+fn plot_fixture_imports_its_standalone_plot_settings() {
+    // The fixture carries both embedded layout plot data (A4) and a standalone
+    // PLOTSETTINGS object (A3, 90°). The object is the preferred source, so the
+    // imported values must be the A3 ones, proven by the margins and rotation.
+    let importer = AcadrustImporter::new();
+    let drawing = importer
+        .import(&request(plot_fixture_bytes()), &|| false)
+        .expect("fixture imports");
+    let layout = drawing
+        .database
+        .layouts()
+        .next()
+        .expect("fixture has a paper layout");
+    let record = drawing
+        .database
+        .plot_settings(layout.id)
+        .expect("standalone PLOTSETTINGS must be imported");
+    assert_eq!(record.paper_size_name, "ISO_A3_(297.00_x_420.00_MM)");
+    assert_eq!(record.paper_width, 297.0);
+    assert_eq!(record.paper_height, 420.0);
+    assert_eq!(record.rotation, cad_db::PlotRotation::Degrees90);
+    assert_eq!(record.margins.left, 12.0);
+    assert!(matches!(
+        record.provenance,
+        cad_db::PlotProvenance::Imported
+    ));
+    // The synthetic fixture has no model geometry; it must not claim Complete
+    // render support for content it does not have. The import itself is valid.
+    assert!(drawing.database.layout(layout.id).is_some());
+}
+
+#[test]
+fn plot_fixture_without_plot_data_resolves_to_an_explicit_default() {
+    // A layout id with no stored record must produce the documented A4 default,
+    // never zero/unknown dimensions.
+    let importer = AcadrustImporter::new();
+    let drawing = importer
+        .import(&request(plot_fixture_bytes()), &|| false)
+        .expect("fixture imports");
+    let fallback = drawing.database.plot_settings_for(LayoutId(999));
+    assert!(matches!(
+        fallback.provenance,
+        cad_db::PlotProvenance::DefaultPage { .. }
+    ));
+    assert_eq!(fallback.paper_width, 210.0);
+    assert_eq!(fallback.paper_height, 297.0);
 }

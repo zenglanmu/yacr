@@ -25,6 +25,7 @@ Operations:
   export-notes         export the sidecar (marks saved only after write)
   build-representation primitive/vertex counts through the provider registry
   render               fixed-viewport frame on a headless GPU adapter
+  plot                 paper-space layout -> raster PNG (headless GPU)
   benchmark            representation build timing for the input
 
 Options:
@@ -32,9 +33,12 @@ Options:
   --points \"x,y;x,y;...\"  measurement points in drawing units
   --out <file>            write the JSON result to <file> atomically
                           (same-dir temp file + rename); stdout stays empty
-  --png <file>            render: write the frame as a PNG (atomic)
-  --width <u32>           render: frame width in pixels (default 1280)
-  --height <u32>          render: frame height in pixels (default 720)
+  --png <file>            render/plot: write the raster as a PNG (atomic)
+  --width <u32>           render/plot: frame width in pixels (default 1280)
+  --height <u32>          render/plot: frame height in pixels (default 720)
+  --layout <name>         plot: layout to plot (default: the first layout)
+  --dpi <f64>             plot: raster resolution; sizes the canvas from the
+                          sheet instead of --width/--height
   --locale <tag>          human-facing stderr language: zh-CN (default) or en.
                           Machine output keys/schema never change with locale.
   --allow-fingerprint-mismatch  import despite a mismatched drawing hash
@@ -126,6 +130,27 @@ fn main() -> ExitCode {
                 };
                 match parse_positive_dimension(value) {
                     Ok(height) => invocation.render_height = height,
+                    Err(message) => return fail(CliError::usage(message), operation, locale),
+                }
+            }
+            "--layout" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(CliError::usage("--layout needs a name"), operation, locale);
+                };
+                invocation.layout = Some(value.clone());
+            }
+            "--dpi" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--dpi needs a positive number"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_positive_finite(value) {
+                    Ok(dpi) => invocation.plot_dpi = Some(dpi),
                     Err(message) => return fail(CliError::usage(message), operation, locale),
                 }
             }
@@ -270,6 +295,19 @@ fn parse_positive_dimension(value: &str) -> Result<u32, String> {
             "dimension must be a positive integer (got '{value}')"
         )),
         Ok(dimension) => Ok(dimension),
+    }
+}
+
+/// Parse a positive, finite floating-point option value.
+///
+/// `0`, negatives, `NaN` and `inf` are usage errors rather than silently
+/// clamped, so a bad resolution can never produce a misleading canvas.
+fn parse_positive_finite(value: &str) -> Result<f64, String> {
+    match value.trim().parse::<f64>() {
+        Ok(number) if number.is_finite() && number > 0.0 => Ok(number),
+        _ => Err(format!(
+            "value must be a positive finite number (got '{value}')"
+        )),
     }
 }
 

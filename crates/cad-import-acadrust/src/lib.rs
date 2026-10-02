@@ -213,11 +213,13 @@ mod builder;
 mod entity;
 mod geometry;
 mod hatch;
+mod plot;
 mod style;
 mod support;
 
 use geometry::*;
 use hatch::*;
+use plot::read_plot_settings;
 use style::*;
 use support::*;
 

@@ -6,7 +6,7 @@ use cad_domain::*;
 
 use crate::drawing::DrawingDatabase;
 use crate::entity::{DbEntity, EntityRenderAttributes};
-use crate::tables::{BlockDefinition, Layer, Layout, Style};
+use crate::tables::{BlockDefinition, Layer, Layout, PlotSettingsRecord, Style};
 
 /// The only sanctioned way to construct a [`DrawingDatabase`].
 ///
@@ -28,6 +28,7 @@ impl DrawingDatabaseBuilder {
                 blocks: BTreeMap::new(),
                 layouts: BTreeMap::new(),
                 styles: BTreeMap::new(),
+                plot_settings: BTreeMap::new(),
                 render_attributes: BTreeMap::new(),
             },
             errors: Vec::new(),
@@ -80,6 +81,23 @@ impl DrawingDatabaseBuilder {
 
     pub fn insert_style(&mut self, style: Style) -> CadResult<()> {
         self.database.styles.insert(style.id, style);
+        Ok(())
+    }
+
+    /// Record the plot configuration read for a layout.
+    ///
+    /// The layout must already exist; plot settings for an unknown layout would
+    /// be silently unreachable, so that is rejected as a caller bug.
+    pub fn set_plot_settings(&mut self, settings: PlotSettingsRecord) -> CadResult<()> {
+        if !self.database.layouts.contains_key(&settings.layout) {
+            return Err(CadError::Invariant(format!(
+                "plot settings for unknown layout {:?}",
+                settings.layout
+            )));
+        }
+        self.database
+            .plot_settings
+            .insert(settings.layout, settings);
         Ok(())
     }
 
