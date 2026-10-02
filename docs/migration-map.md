@@ -3,7 +3,11 @@
 来源：https://github.com/HakanSeven12/OpenCADStudio
 
 锁定 commit：`02c470aac7af1f912349ee7fd5ad612863e8b7da`（2026-10-02 由
-`git ls-remote` 取得；浅克隆存于本地 `/tmp/opencode/ocs`，**不入库**）。
+`git ls-remote` 取得）。**工作副本现位于 `/home/zenglanmu/sources/opencadstudio`**
+（经代理 `192.168.8.1:10809` 取的 tarball；**不入库**）。该副本是较新的上游主干
+（`2026.39.0`，`src/` + `crates/` 布局），与锁定的 `02c470aa` 布局不同；引用具体文件
+时必须核对实际存在的路径，文档路径不作为 API 证明。若需精确对齐锁定 commit，需另行
+按该 SHA 取归档。
 上游许可：**GPL-3.0**（`LICENSE`）。本项目 `LICENSE` 为 **AGPL-3.0**；GPL-3.0 代码可
 并入 AGPL-3.0 项目，但 `Cargo.toml` 的 `license = "Apache-2.0 OR MIT"` 字段与 LICENSE
 不一致，须在采用任何上游代码前修正（见文末“许可风险”）。

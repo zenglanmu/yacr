@@ -732,6 +732,7 @@ fn paper_to_render_transform(page: &cad_representation::PlotPage) -> Transform3 
     Transform3 { matrix: out }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn run_benchmark(
     controller: &HostController,
     invocation: &CliInvocation,
@@ -885,6 +886,7 @@ pub(crate) fn run_benchmark(
 ///
 /// `DocumentIdentity::Temporary` carries no content hash, so this returns `None`
 /// and the benchmark leaves the hash absent rather than inventing one.
+#[cfg(not(target_arch = "wasm32"))]
 fn sample_hash_of(report: &cad_import_acadrust::ImportReport) -> Option<[u8; 32]> {
     match &report.identity {
         DocumentIdentity::Sha256(hash) => Some(*hash),

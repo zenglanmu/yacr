@@ -8,14 +8,16 @@ use super::*;
 pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
     if matches!(
         invocation.operation,
-        CliOperation::FixedViewportRender | CliOperation::Plot
+        CliOperation::FixedViewportRender | CliOperation::Plot | CliOperation::Benchmark
     ) {
         // The browser has no headless device to own: it keeps the explicit
         // "unsupported" answer (the host canvas supplies the device instead).
+        // Benchmarking measures the native import/build/upload path, which the
+        // wasm CLI host does not own either.
         #[cfg(target_arch = "wasm32")]
         return Err(cli_error_from_domain(CadError::Unsupported(
-            "fixed-viewport rendering and plotting require a GPU device; \
-             wasm receives its device from the host canvas"
+            "fixed-viewport rendering, plotting and benchmarking require a native \
+             host; wasm receives its device from the host canvas"
                 .into(),
         )));
         // Native: drive the real headless renderer and report a structured
@@ -25,6 +27,11 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
             let value = match invocation.operation {
                 CliOperation::FixedViewportRender => domain(run_render(invocation))?,
                 CliOperation::Plot => domain(run_plot(invocation))?,
+                CliOperation::Benchmark => {
+                    let fonts = domain(load_fonts(&invocation.fonts))?;
+                    let controller = domain(load_document(invocation))?;
+                    domain(run_benchmark(&controller, invocation, fonts.as_ref()))?
+                }
                 _ => unreachable!(),
             };
             return serde_json::to_string_pretty(&value).map_err(|e| {
@@ -43,7 +50,7 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
         CliOperation::BuildRepresentation => {
             domain(run_build_representation(&controller, fonts.as_ref()))?
         }
-        CliOperation::Benchmark => domain(run_benchmark(&controller, invocation, fonts.as_ref()))?,
+        CliOperation::Benchmark => unreachable!(),
         CliOperation::FixedViewportRender | CliOperation::Plot => unreachable!(),
     };
     serde_json::to_string_pretty(&value)

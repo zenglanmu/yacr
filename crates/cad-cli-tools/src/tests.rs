@@ -208,6 +208,7 @@ fn error_document_has_stable_schema() {
     assert_eq!(error.exit_code(), 2);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn benchmark_json_has_reproducible_schema_and_real_measurements() {
     // The demo controller gives a real document (no DWG fixture exists), so the
@@ -264,6 +265,7 @@ fn benchmark_json_has_reproducible_schema_and_real_measurements() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn benchmark_json_is_deterministic_for_an_unchanged_document() {
     let controller = HostController::with_demo_document([1920.0, 1080.0]).unwrap();

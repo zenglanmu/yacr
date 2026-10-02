@@ -378,14 +378,54 @@ PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假�
   实例可独立区分；新增选择高亮叠加层（独立 `highlight.rs`，带可配置 tint/alpha，不修改
   权威场景；隐藏选择为空、不可解析来源显式报告）（`docs/picking-3d.md`）。
 
+## 集成轮 4：线型 / 出图 / 预算 / 渐变填充 / 异步导入（2026-10-02，Linux 核心）
+
+五个 workstream 合入 `main`。除各自的语义冲突外，整合期修复了两处跨 workstream 的
+构造点（`DisplayFragment`/`RenderBatch` 新增 linetype 字段；网格批次新增顶点色，
+故上传字节预算计入颜色缓冲）。
+
+- **LINETYPE 虚线（§3.2/§7.1）**：importer 读 `line_types` 表与实体
+  `linetype`/`linetype_handle`/`linetype_scale`（含 `$LTSCALE`），按
+  ByObject→ByLayer→ByBlock 解析；`cad-geometry::dash` 按弧长把折线细分 dash/gap
+  子折线再提交（渲染器仍是普通 `LineList`）；复杂线型的形状/文字段丢弃但保留 dash，
+  未知/退化模式显式 `Partial`（`import.linetype_*`/`representation.linetype_fallback`）。
+- **出图（打印）**：新增 `PlotSettings` 导入（独立 `PLOTSETTINGS` 优先，否则内嵌
+  `Layout` 字段）+ 纯几何排版规划器（纸张 mm/边距/比例/旋转）+ CLI `plot` op，
+  用既有 headless `read_target_rgba`+`encode_png` 输出 PNG；缺数据用显式 A4 默认页
+  （`DefaultPage{reason}`），不伪造厂商值。无矢量 PDF/HPGL，无 CTB/STB
+  （`docs/plot.md`）。
+- **性能与预算（§8）**：`SceneBudget` 的 `cpu_bytes`/`queued_tasks`/
+  `upload_bytes_per_frame`（含顶点色）全部真实计费且超限返回类别原因（不再静默丢弃）；
+  `MeasuredTimings/MeasuredMemory` 记录真实 parse/build/完整时间与内存类别，CLI
+  `benchmark` 输出可复现 JSON（`claim: "measurement, not compatibility"`）；无 GPU 设备
+  的阶段显式 `null`（`docs/performance.md` 重写）。
+- **渐变 HATCH**：读 `Hatch.gradient_color`，按既有偶奇填充三角化把渐变**烘焙为逐顶点
+  颜色**（新增 `Mesh::colors` → `RenderBatch::colors` → 第三顶点缓冲 `@location(2)`，
+  非渐变网格默认白色、字节不变）。`LINEAR`/`SPHERICAL`/`CYLINDER` 为 `Complete`，
+  其余渐变种类显式 `Partial`。附带修复 `fill_rings` 在锥形带（三角形边界）误判退化
+  的缺陷（也影响实心填充）（`docs/hatch-gradient.md`）。
+- **异步可取消导入（F01）**：`ImportPhase`/`ImportProgress`/`ImportProgressSink` 与
+  `Importer::import_with_progress`；`cad-app` 无 Tokio 的 `std::thread` worker
+  （`ImportManager`/`ImportJob`）以 `TaskStamp` 守卫发布；取消 → `Cancelled`，
+  被取代 → `StaleResult`，**过期结果绝不发布**；合成四线 DWG 契约夹具
+  （`docs/import-async.md`）。
+
+集成测试（lavapipe）**824 passed / 0 failed**；fmt、clippy(0)、架构、i18n、fixtures、
+wasm `--lib` 通过。默认 Vulkan loader（未强制 `VK_ICD_FILENAMES`）下
+`cad-render-wgpu::render_effects` 会因环境中存在损坏 ICD 而在并发创建设备时偶发
+SIGSEGV；强制 lavapipe 后稳定通过，与本轮 CPU 侧改动无关。
+
 ## 未执行（明确标注）
 
 - **Android 真机**：未运行（仅模拟器 SwiftShader）。SAF、surface 尺寸/安全区、
-  量测/批注拾取、面板状态推送未接线。
+  量测/批注拾取、面板状态推送未接线。异步导入的宿主进度面板/后台打开按钮未接线。
 - **WebGPU / 真实 GPU**：未运行；Web 仅无头 Chromium 的 WebGL2 软件路径。
 - **ACIS（F15）真实样本**：已用 acadrust 解析 + 中性 B-rep 离散平面/球/柱/环面子集，
   但夹具均为**本仓库自制合成 SAT**；无授权 3DSOLID/BODY/REGION/SURFACE 真实样本，
   锥面/带环球面/非圆椭圆/样条面仍 `Unsupported`。真实图纸上的 ACIS 端到端 **未运行**。
+- **出图**：仅光栅 PNG；无矢量 PDF/HPGL/SVG、无 CTB/STB 打印样式、无打印设备配置、
+  无黄金图。
 - 桌面/iOS/macOS/Windows 宿主：**未构建**；仅 `cad-platform` 抽象。
-- 授权真实 DWG/字体/黄金图入库、跨后端对照、性能基准：`fixtures/manifest` 为空，
-  **未完成**；任何实体兼容性声明都不成立。临时样本的行为证据不等于验收。
+- 授权真实 DWG/字体/黄金图入库、跨后端对照、**手机内存预算与 FPS 实测**：仍未有
+  授权样本与真机测量；`docs/performance.md` 只记录可复现的宿主测量方法，
+  无兼容性/性能声明。

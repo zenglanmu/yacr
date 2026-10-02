@@ -425,8 +425,11 @@ impl Renderer {
             // The exact bytes this batch packed: positions/normals/colours 12 B
             // per vertex, triangle and edge indices 4 B each. Kept in lockstep
             // with `GpuBatch::upload_size_bytes`, which the frame budget charges.
-            let bytes =
-                normals.len() + vertices.len() + colors.len() + indices.len() * 4 + edge_indices.len() * 4;
+            let bytes = normals.len()
+                + vertices.len()
+                + colors.len()
+                + indices.len() * 4
+                + edge_indices.len() * 4;
             self.uploaded_bytes += bytes as u64;
             self.batches.push(GpuBatch {
                 vertices: vertex_buffer,
