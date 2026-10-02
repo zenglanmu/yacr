@@ -11,10 +11,15 @@ use cad_representation::{DisplayPrimitive, DisplayRepresentation};
 use std::collections::BTreeMap;
 
 pub mod annotations;
+pub mod highlight;
 
 pub use annotations::{
     all_visible, annotation_batches, annotation_geometry_source, conversion_supported,
     tessellate_ellipse, AnnotationScene, AnnotationSceneOptions, DEFAULT_ANNOTATION_FONT,
+};
+pub use highlight::{
+    highlight_batches, HighlightOptions, HighlightScene, DEFAULT_HIGHLIGHT_ALPHA,
+    HIGHLIGHT_DRAW_ORDER,
 };
 
 /// Identity of a cached chunk; any component change invalidates it.

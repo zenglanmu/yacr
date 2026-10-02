@@ -108,6 +108,16 @@ pub struct PickItem {
     pub geometry_source: GeometrySource,
 }
 
+/// Machine key: a mesh carried no `face_sources` list at all, so a triangle
+/// index cannot be mapped to a stable sub-element.
+pub const REASON_FACE_SOURCES_ABSENT: &str = "mesh-face-sources-absent";
+/// Machine key: the mesh has a `face_sources` list but it is shorter than its
+/// triangle list, so the hit triangle has no corresponding entry.
+pub const REASON_FACE_SOURCE_OUT_OF_RANGE: &str = "mesh-face-source-index-out-of-range";
+/// Machine key: `face_sources[triangle]` is explicitly `None`: the producer did
+/// not attach a stable id to that face.
+pub const REASON_FACE_SOURCE_MISSING: &str = "mesh-face-source-missing";
+
 /// A precise hit with its depth along the ray.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeometryHit {
@@ -120,6 +130,15 @@ pub struct GeometryHit {
     pub offset: f64,
     pub precision: Precision,
     pub geometry_source: GeometrySource,
+    /// The stable sub-element of the hit geometry, when the geometry carries
+    /// one. Only meshes are sub-element-addressable here: the hit triangle is
+    /// mapped through [`Mesh::face_sources`]. Lines/curves/points always yield
+    /// `None` and are not sub-element-addressable.
+    pub sub_element: Option<SubElementId>,
+    /// Machine key explaining `sub_element == None` for a mesh face that has no
+    /// stable source (`face_sources` absent / short / entry `None`). `None`
+    /// when a sub-element was resolved or when the geometry has no faces.
+    pub sub_element_reason: Option<&'static str>,
 }
 
 /// The verdict of a precise test for one item.
@@ -327,27 +346,32 @@ pub fn hit_geometry(
             }
         }
         SemanticGeometry::Mesh(mesh) => match mesh_hit(ray, mesh, transform, options) {
-            Some((t, point)) => hit(
-                t,
-                0.0,
-                point,
-                Precision::Analytic,
-                GeometrySource::DirectMesh,
-            ),
+            Some((t, point, triangle)) => {
+                let (sub_element, sub_element_reason) = face_sub_element(mesh, triangle);
+                PickOutcome::Hit(GeometryHit {
+                    point,
+                    distance: t,
+                    offset: 0.0,
+                    precision: Precision::Analytic,
+                    geometry_source: GeometrySource::DirectMesh,
+                    sub_element,
+                    sub_element_reason,
+                })
+            }
             None => PickOutcome::Miss,
         },
         SemanticGeometry::Compound(children) => {
-            let mut best: Option<(f64, f64, Point3, Precision)> = None;
+            let mut best: Option<GeometryHit> = None;
             let mut unsupported: Option<&'static str> = None;
             for child in children {
                 match hit_geometry(ray, child, transform, options)? {
                     PickOutcome::Hit(hit) => {
                         let better = best
                             .as_ref()
-                            .map(|(t, o, _, _)| (hit.distance, hit.offset) < (*t, *o))
+                            .map(|b| (hit.distance, hit.offset) < (b.distance, b.offset))
                             .unwrap_or(true);
                         if better {
-                            best = Some((hit.distance, hit.offset, hit.point, hit.precision));
+                            best = Some(hit);
                         }
                     }
                     PickOutcome::Miss => {}
@@ -355,12 +379,11 @@ pub fn hit_geometry(
                 }
             }
             match best {
-                Some((distance, offset, point, precision)) => PickOutcome::Hit(GeometryHit {
-                    point,
-                    distance,
-                    offset,
-                    precision,
+                // A compound keeps the winning child's sub-element/reason so a
+                // mesh face inside a HATCH/compound selection stays addressable.
+                Some(hit) => PickOutcome::Hit(GeometryHit {
                     geometry_source: GeometrySource::Analytic,
+                    ..hit
                 }),
                 None if unsupported.is_some() => PickOutcome::Unsupported("compound-unsupported"),
                 None => PickOutcome::Miss,
@@ -388,13 +411,27 @@ pub fn pick_closest(
     for item in items {
         match hit_geometry(ray, &item.geometry, &item.transform, options)? {
             PickOutcome::Hit(hit) => {
+                // Identity is `entity + instance + sub-element`. The item names
+                // the entity/instance; the geometry resolves the sub-element. A
+                // caller that already narrowed the item to a sub-element keeps
+                // its exact identity (the geometry cannot silently re-target it).
+                let mut source = item.source.clone();
+                let mut sub_element_reason = hit.sub_element_reason;
+                if source.sub_element.is_none() {
+                    source.sub_element = hit.sub_element;
+                }
+                if source.sub_element.is_some() {
+                    // A resolved identity has no unresolved-sub-element reason.
+                    sub_element_reason = None;
+                }
                 let candidate = PickHit {
-                    source: item.source.clone(),
+                    source,
                     point: hit.point,
                     distance: hit.distance,
                     offset: hit.offset,
                     precision: hit.precision,
                     geometry_source: hit.geometry_source,
+                    sub_element_reason,
                 };
                 // Closest depth wins; at equal depth the smaller perpendicular
                 // offset wins, so two candidates on the same plane are ordered
@@ -431,7 +468,26 @@ fn hit(
         offset,
         precision,
         geometry_source,
+        // Sub-elements belong to meshes; every other primitive is whole-object.
+        sub_element: None,
+        sub_element_reason: None,
     })
+}
+
+/// Map a hit triangle to its stable sub-element.
+///
+/// The mapping is a pure read of [`Mesh::face_sources`], indexed by triangle.
+/// It never invents an id: a missing/short/`None` source yields `None` plus a
+/// machine reason.
+fn face_sub_element(mesh: &Mesh, triangle: usize) -> (Option<SubElementId>, Option<&'static str>) {
+    if mesh.face_sources.is_empty() {
+        return (None, Some(REASON_FACE_SOURCES_ABSENT));
+    }
+    match mesh.face_sources.get(triangle) {
+        Some(Some(id)) => (Some(id.clone()), None),
+        Some(None) => (None, Some(REASON_FACE_SOURCE_MISSING)),
+        None => (None, Some(REASON_FACE_SOURCE_OUT_OF_RANGE)),
+    }
 }
 
 fn tessellation_precision(options: &PickOptions) -> Precision {
@@ -477,20 +533,23 @@ fn segment_hit(ray: &Ray3, a: Point3, b: Point3, tolerance: f64) -> Option<(f64,
     Some((t, dist, point))
 }
 
-/// Hit test a mesh and return the closest `(t, world point)`.
+/// Hit test a mesh and return the closest `(t, world point, triangle index)`.
+///
+/// The triangle index is the index into [`Mesh::triangles`] (and therefore into
+/// [`Mesh::face_sources`]), so the caller can map it to a stable sub-element.
 fn mesh_hit(
     ray: &Ray3,
     mesh: &Mesh,
     transform: &Transform3,
     options: &PickOptions,
-) -> Option<(f64, Point3)> {
-    let mut best: Option<(f64, Point3)> = None;
+) -> Option<(f64, Point3, usize)> {
+    let mut best: Option<(f64, Point3, usize)> = None;
     let vertices: Vec<Point3> = mesh
         .vertices
         .iter()
         .map(|v| transform.apply_point(*v))
         .collect();
-    for tri in &mesh.triangles {
+    for (triangle, tri) in mesh.triangles.iter().enumerate() {
         let (ia, ib, ic) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
         if ia >= vertices.len() || ib >= vertices.len() || ic >= vertices.len() {
             // A malformed index is skipped, never treated as a hit.
@@ -503,9 +562,9 @@ fn mesh_hit(
             vertices[ic],
             options.back_faces,
         ) {
-            let better = best.as_ref().map(|(bt, _)| t < *bt).unwrap_or(true);
+            let better = best.as_ref().map(|(bt, _, _)| t < *bt).unwrap_or(true);
             if better {
-                best = Some((t, add(ray.origin, scale3(ray.direction, t))));
+                best = Some((t, add(ray.origin, scale3(ray.direction, t)), triangle));
             }
         }
     }
@@ -561,7 +620,7 @@ fn is_finite_point(p: Point3) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cad_domain::{DocumentId, EntityId, InstancePath};
+    use cad_domain::{DocumentId, EntityId, InstancePath, Revision, SubElementId};
 
     fn p(x: f64, y: f64, z: f64) -> Point3 {
         Point3 { x, y, z }
@@ -798,6 +857,194 @@ mod tests {
         let report = pick_closest(&r, &[item], &PickOptions::new(1e-6).unwrap()).unwrap();
         let hit = report.hit.expect("translated line is hit at x=5");
         assert!((hit.distance - 5.0).abs() < 1e-9);
+    }
+
+    fn face(key: &str) -> SubElementId {
+        SubElementId {
+            source_key: key.into(),
+            topology_revision: Revision(0),
+        }
+    }
+
+    /// Two coplanar triangles at z = 2, side by side along x, each carrying a
+    /// distinct stable face source.
+    fn two_face_mesh() -> Mesh {
+        Mesh {
+            vertices: vec![
+                p(-2.0, -1.0, 2.0),
+                p(-1.0, 1.0, 2.0),
+                p(0.0, -1.0, 2.0),
+                p(0.0, -1.0, 2.0),
+                p(1.0, 1.0, 2.0),
+                p(2.0, -1.0, 2.0),
+            ],
+            triangles: vec![[0, 1, 2], [3, 4, 5]],
+            normals: Vec::new(),
+            face_sources: vec![Some(face("face-a")), Some(face("face-b"))],
+        }
+    }
+
+    #[test]
+    fn mesh_face_hit_resolves_the_stable_sub_element() {
+        let options = PickOptions::new(1e-6).unwrap();
+        let mesh = SemanticGeometry::Mesh(two_face_mesh());
+        let transform = Transform3::identity();
+
+        let left = ray(p(-1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        match hit_geometry(&left, &mesh, &transform, &options).unwrap() {
+            PickOutcome::Hit(hit) => {
+                assert_eq!(
+                    hit.sub_element.as_ref().map(|s| s.source_key.as_str()),
+                    Some("face-a")
+                );
+                assert!(hit.sub_element_reason.is_none());
+                assert!((hit.point.z - 2.0).abs() < 1e-9);
+            }
+            other => panic!("expected a hit, got {other:?}"),
+        }
+
+        let right = ray(p(1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        match hit_geometry(&right, &mesh, &transform, &options).unwrap() {
+            PickOutcome::Hit(hit) => assert_eq!(
+                hit.sub_element.as_ref().map(|s| s.source_key.as_str()),
+                Some("face-b"),
+                "each triangle maps to its own face source"
+            ),
+            other => panic!("expected a hit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mesh_face_without_a_source_is_unresolved_with_a_reason() {
+        let options = PickOptions::new(1e-6).unwrap();
+        let transform = Transform3::identity();
+        let r = ray(p(-1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+
+        // No `face_sources` at all.
+        let mut absent = two_face_mesh();
+        absent.face_sources = Vec::new();
+        match hit_geometry(&r, &SemanticGeometry::Mesh(absent), &transform, &options).unwrap() {
+            PickOutcome::Hit(hit) => {
+                assert!(hit.sub_element.is_none());
+                assert_eq!(hit.sub_element_reason, Some(REASON_FACE_SOURCES_ABSENT));
+            }
+            other => panic!("expected a hit, got {other:?}"),
+        }
+
+        // The hit triangle's entry is explicitly `None`.
+        let mut missing = two_face_mesh();
+        missing.face_sources = vec![None, Some(face("face-b"))];
+        match hit_geometry(&r, &SemanticGeometry::Mesh(missing), &transform, &options).unwrap() {
+            PickOutcome::Hit(hit) => {
+                assert!(hit.sub_element.is_none());
+                assert_eq!(hit.sub_element_reason, Some(REASON_FACE_SOURCE_MISSING));
+            }
+            other => panic!("expected a hit, got {other:?}"),
+        }
+
+        // A short `face_sources` list puts the hit triangle out of range.
+        let short_right = ray(p(1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        let mut short = two_face_mesh();
+        short.face_sources = vec![Some(face("face-a"))];
+        match hit_geometry(
+            &short_right,
+            &SemanticGeometry::Mesh(short),
+            &transform,
+            &options,
+        )
+        .unwrap()
+        {
+            PickOutcome::Hit(hit) => {
+                assert!(hit.sub_element.is_none());
+                assert_eq!(
+                    hit.sub_element_reason,
+                    Some(REASON_FACE_SOURCE_OUT_OF_RANGE)
+                );
+            }
+            other => panic!("expected a hit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pick_closest_puts_the_resolved_sub_element_on_the_hit_source() {
+        let item = PickItem {
+            source: source(7, Vec::new()),
+            geometry: SemanticGeometry::Mesh(two_face_mesh()),
+            transform: Transform3::identity(),
+            geometry_source: GeometrySource::DirectMesh,
+        };
+        let r = ray(p(-1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        let report = pick_closest(&r, &[item], &PickOptions::new(1e-6).unwrap()).unwrap();
+        let hit = report.hit.expect("a hit");
+        assert_eq!(hit.source.entity, EntityId(7));
+        assert_eq!(
+            hit.source
+                .sub_element
+                .as_ref()
+                .map(|s| s.source_key.as_str()),
+            Some("face-a")
+        );
+        assert!(hit.sub_element_reason.is_none());
+    }
+
+    #[test]
+    fn two_faces_of_one_mesh_are_distinct_identities() {
+        let options = PickOptions::new(1e-6).unwrap();
+        let mesh = two_face_mesh();
+        let left = PickItem {
+            source: source(7, Vec::new()),
+            geometry: SemanticGeometry::Mesh(mesh.clone()),
+            transform: Transform3::identity(),
+            geometry_source: GeometrySource::DirectMesh,
+        };
+        let right = PickItem {
+            source: source(7, Vec::new()),
+            geometry: SemanticGeometry::Mesh(mesh),
+            transform: Transform3::identity(),
+            geometry_source: GeometrySource::DirectMesh,
+        };
+        let a = pick_closest(
+            &ray(p(-1.0, 0.0, 0.0), p(0.0, 0.0, 1.0)),
+            std::slice::from_ref(&left),
+            &options,
+        )
+        .unwrap()
+        .hit
+        .unwrap();
+        let b = pick_closest(
+            &ray(p(1.0, 0.0, 0.0), p(0.0, 0.0, 1.0)),
+            std::slice::from_ref(&right),
+            &options,
+        )
+        .unwrap()
+        .hit
+        .unwrap();
+        assert_ne!(
+            a.source.sub_element, b.source.sub_element,
+            "two faces of one mesh select differently"
+        );
+        assert_ne!(a.source, b.source);
+    }
+
+    #[test]
+    fn line_hits_have_no_sub_element_and_no_reason() {
+        let items = vec![item(
+            1,
+            SemanticGeometry::Line {
+                start: p(5.0, -1.0, 0.0),
+                end: p(5.0, 1.0, 0.0),
+            },
+        )];
+        let r = ray(p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0));
+        let hit = pick_closest(&r, &items, &PickOptions::new(1e-6).unwrap())
+            .unwrap()
+            .hit
+            .unwrap();
+        assert!(hit.source.sub_element.is_none());
+        assert!(
+            hit.sub_element_reason.is_none(),
+            "lines are not face-addressable"
+        );
     }
 
     #[test]

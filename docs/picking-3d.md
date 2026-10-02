@@ -78,7 +78,7 @@
 | `Polyline`（含 bulge） | 离散为折线后逐段测距 | `Approximate` |
 | `Circle`、`Arc`、`Ellipse`、`Spline` | `cad_geometry::tessellate_geometry` 离散后逐段测距 | `Approximate { error_bound = tolerance }` |
 | `Text` | 同上（占位框边，非真实字形轮廓） | `Approximate` |
-| `Mesh` | 逐三角形 Möller–Trumbore，取最近 | `Analytic` |
+| `Mesh` | 逐三角形 Möller–Trumbore，取最近；命中三角形经 `face_sources` 映射为子元素 | `Analytic` |
 | `Compound` | 递归取最近子命中；至少一个子几何可测即视为可测 | 取子命中精度 |
 | `Insert` | **本层不测**，由 `cad-app` 展开后逐子几何测试 | — |
 | `Opaque` | **跳过**，`skipped.reason = "opaque"` | — |
@@ -98,6 +98,62 @@
 把候选精确映射回 `PickItem`，不会用同块的另一个实例顶替；精确阶段随后在候选上运行。
 `sensor` 级精度由精确阶段保证，索引不改变结果。
 
+## 子元素（mesh 面）选择
+
+`PickItem` 标识**实体 + 实例**，命中几何决定**子元素**。对 `Mesh`，精确阶段用
+Möller–Trumbore 找到最近的三角形索引 `i`（`Mesh::triangles` 的下标），再读取
+`Mesh::face_sources[i]`：
+
+- `Some(Some(id))` → `PickHit.source.sub_element = Some(id)`，即
+  `SubElementId { source_key, topology_revision }`，来自**生产者的稳定键**；
+- `Some(None)` → `None` + `sub_element_reason = "mesh-face-source-missing"`；
+- 列表比三角形少（下标越界）→ `None` + `"mesh-face-source-index-out-of-range"`；
+- 根本没有 `face_sources`（空列表）→ `None` + `"mesh-face-sources-absent"`。
+
+`GeometryHit::sub_element` / `PickHit::sub_element_reason` 都携带该结果；
+`pick_closest` 把子元素合并进 `source`：若 `PickItem` 已经给出 `sub_element`（调用方
+已收窄到某个面），则**保留调用方身份**，几何不会静默改指另一个面。
+
+`sub_element_reason` 只在几何**可做子元素寻址**（mesh 面）而无法解析时出现；线段/曲线/
+点没有子元素概念，`sub_element` 与 `sub_element_reason` 都是 `None`，这不是缺口。
+
+**稳定性**：块内 mesh 的两个 INSERT 实例命中同一面时，`sub_element` 相同，仅
+`InstancePath` 不同；因此"同一块的两次放置"与"同一 mesh 的两个面"由
+`entity + instance + sub_element` 三元组精确区分（`cad-app::picking` 的
+`sub_element_is_stable_across_two_insert_instances`、`two_faces_of_one_mesh_are_distinct_identities`）。
+
+### edge 子元素（明确未实现）
+
+域模型只给 mesh **面**提供了 `face_sources`；`Mesh` 没有 `edge_sources`，
+`TessellationMesh::edges` 也没有稳定键。因此**边的子元素无法解析**：一次线段/edge 命中
+保持 `sub_element = None`（整实体），不伪造 edge id。要支持需先在域/导入层引入稳定的
+edge 源键，属于后续工作。
+
+## 选择高亮（`cad-scene::highlight`）
+
+高亮是**派生**的、只读的覆盖层：给定 `&[SelectionRef]` 与权威
+`DisplayRepresentation`（由调用方持有，`SceneCache` 不变），
+`cad_scene::highlight_batches` 生成复用 `RenderBatch` 的覆盖批次。
+
+- **整实体**：直线/曲线片段 → `Lines` 批次；mesh 片段 → 全部三角形；
+- **mesh 面**：只发射 `face_sources[i] == 选中 id` 的三角形，顶点按选中三角形压缩、
+  以局部原点重建，`sources` 携带精确的 `entity + instance + sub_element`；
+- `draw_order` 从 `HighlightOptions::draw_order`（默认 `HIGHLIGHT_DRAW_ORDER = 2_000_000`）
+  起逐批 +1，**在绘图（0）与批注覆盖层（1_000_000）之后**；`alpha` 默认 `0.55`；
+- **空选择 / 全隐藏选择**：产出**空覆盖层**（`batches` 为空），不是伪造批次；
+- **隐藏**由调用方的 `visible(&SelectionRef)` 判定，静默跳过（会话选择，不是缺口）；
+- **完全透明**（`alpha <= 0`，渲染器判为不可见）→ 不产生批次，记 `highlight.invisible`；
+- 选中项不在表示中 → `highlight.unresolved`（`Missing`）；面找不到稳定源 →
+  `highlight.face-missing`（`Missing`）；Text/Image/Instance 图元 →
+  `highlight.unsupported`（`Partial`）。
+
+进程确定性：选择按给定顺序、片段按迭代顺序、三角形按升序处理，相同输入必产出相同的
+批次序列。
+
+**未实现（明确）**：`RenderBatch` 只有常量 `alpha`，**没有逐批 RGB**，所以高亮目前只能
+靠 draw_order 与 alpha 区分，无法给选中面一个独立颜色/通道。逐批颜色是另一个工作流
+（cad-scene 的 per-batch color/lineweight）；在它落地前不宣称"高亮着色"。
+
 ## 明确未实现（不是空成功）
 
 - **GPU 深度测试对照**：拾取是 CPU 侧、基于语义几何的结果，**未**与 GPU 深度缓冲/
@@ -106,8 +162,10 @@
   报告 `Precision::Approximate`，并在 `error_bound` 中给出离散容差。真正的解析曲线
   求交未实现。
 - **文字字形轮廓**：`Text` 使用占位框边，不是真实排版轮廓。
-- **子元素（mesh 面/edge）选择**：命中始终 `sub_element = None`；`Mesh::face_sources`
-  已存在但尚未映射到 `SubElementId`。
+- **edge 子元素**：域模型无稳定 edge 源键，edge 命中保持整实体 `sub_element = None`
+  （见上）；只有 mesh **面**可寻址。
+- **高亮颜色**：`RenderBatch` 无逐批 RGB，覆盖层只能以 draw_order + alpha 区分；
+  逐批颜色由并行的 cad-scene 工作流提供，尚未落地。
 - **mesh 几何来源**：数据库不携带网格来源（Direct/Kernel/Proxy），`PickItem` 对 `Mesh`
   统一标 `GeometrySource::DirectMesh`，其余标 `Analytic`；这是**保守标签**而非实证来源。
 - **OBB / 变换后紧包围盒索引**：索引按世界坐标 AABB，未做实例级 OBB 剔除。
@@ -132,5 +190,29 @@
 `pick_tolerance_scales_inversely_with_perspective_height`、
 `pick_tolerance_never_drops_below_the_predicate_tolerance`、
 `degenerate_viewport_has_no_pick_tolerance`、`invalid_screen_pixel_is_rejected_not_empty`、
-`filter_by_index_keeps_identity_exact`；集成契约
+`filter_by_index_keeps_identity_exact`、
+`screen_pick_propagates_the_mesh_face_sub_element`、
+`mesh_without_a_face_source_is_unresolved_with_a_reason`、
+`sub_element_is_stable_across_two_insert_instances`、
+`a_face_selection_differs_from_its_entity_and_from_an_edge`；集成契约
 `screen_pick_produces_a_selection_ref_the_select_command_accepts`（`tests/contracts.rs`）。
+
+`cad-spatial` 子元素：
+`mesh_face_hit_resolves_the_stable_sub_element`、
+`mesh_face_without_a_source_is_unresolved_with_a_reason`、
+`pick_closest_puts_the_resolved_sub_element_on_the_hit_source`、
+`two_faces_of_one_mesh_are_distinct_identities`、
+`line_hits_have_no_sub_element_and_no_reason`。
+
+`cad-scene` 高亮（`crates/cad-scene/src/highlight.rs`）：
+`empty_selection_is_an_explicit_empty_overlay`、
+`entity_selection_emits_an_overlay_batch_with_a_distinct_draw_order`、
+`mesh_face_selection_emits_only_that_face`、
+`two_faces_of_one_mesh_highlight_independently`、
+`whole_mesh_selection_emits_both_triangles`、
+`face_without_a_stable_source_is_reported_not_drawn`、
+`hidden_selection_contributes_nothing_and_is_not_a_gap`、
+`fully_transparent_selection_is_reported_but_contributes_no_batch`、
+`selection_absent_from_the_representations_is_reported`、
+`insert_instances_highlight_independently`、
+`unsupported_primitive_is_reported_not_faked`、`overlay_alpha_is_sanitised`。
