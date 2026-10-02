@@ -22,7 +22,10 @@ pub use layout::{
     viewport_transform, LayoutDescriptor, SpaceSelection, ViewportState, ViewportTransform,
     ViewportUnsupported,
 };
-pub use text::{sanitize_text, FontEngine};
+pub use text::{
+    parse_mtext, sanitize_text, text_issue, FontEngine, ParsedText, ShapedText, StackedFraction,
+    TextColor, TextFormatIssue, TextLine, TextRun,
+};
 
 /// One drawable piece of an entity, in world coordinates.
 pub enum DisplayPrimitive {
@@ -383,17 +386,17 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 let font_key = font.as_deref();
                 let mut shaped = false;
                 if let (Some(engine), Some(key)) = (&context.fonts, font_key) {
-                    match engine.outline(
+                    match engine.shape(
                         key,
-                        &sanitize_text(text),
+                        text,
                         *position,
                         height.abs(),
                         *rotation,
                         *h_align,
                         *v_align,
                     ) {
-                        Ok(polylines) => {
-                            for polyline in polylines {
+                        Ok(shaped_text) => {
+                            for polyline in shaped_text.polylines {
                                 if polyline.len() >= 2 {
                                     representation.fragments.push(DisplayFragment {
                                         source: source.clone(),
@@ -418,6 +421,27 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                                         "font '{key}' produced no outline for the text"
                                     ),
                                 });
+                            }
+                            // MTEXT formatting that shaped only approximately
+                            // (color, decorations, stacked fractions, ...) is
+                            // reported in the completeness verdict and
+                            // diagnostics rather than silently ignored.
+                            if !shaped_text.issues.is_empty() {
+                                let reasons: Vec<String> = shaped_text
+                                    .issues
+                                    .iter()
+                                    .map(|issue| issue.message.clone())
+                                    .collect();
+                                representation.completeness = representation
+                                    .completeness
+                                    .combine(Completeness::Partial(reasons));
+                                for issue in &shaped_text.issues {
+                                    representation.diagnostics.push(Diagnostic {
+                                        object: Some(ObjectId(entity.id.0)),
+                                        code: issue.code.into(),
+                                        message: issue.message.clone(),
+                                    });
+                                }
                             }
                         }
                         Err(error) => {

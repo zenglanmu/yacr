@@ -5,28 +5,44 @@
 //! line geometry. A fallback chain is applied when a drawing's referenced font
 //! is not registered or cannot be parsed, so text is not silently dropped.
 //!
+//! ## MTEXT formatting
+//!
+//! [`parse_mtext`] parses MTEXT/TEXT control content into a structured run list
+//! ([`ParsedText`]) instead of stripping codes: paragraphs (`\P`, literal `\n`,
+//! `^J`), grouping (`{...}`), fonts (`\f`/`\F`), absolute and relative height
+//! (`\H`), width factor (`\W`), oblique (`\Q`), line alignment (`\A`), color
+//! (`\C` ACI / `\c` true color), stacked fractions (`\S`), non-breaking space
+//! (`\~`), special characters (`%%d`/`%%p`/`%%c`/`%%%%`), Unicode escapes
+//! (`\U+XXXX`) and literal escapes. [`FontEngine::shape`] lays the runs out
+//! honouring per-run font/height/width/oblique and returns the polylines, the
+//! run list and a list of honest [`TextFormatIssue`]s for anything that could
+//! only be approximated. [`FontEngine::outline`] stays a thin wrapper returning
+//! only the polylines.
+//!
 //! ## Known limitations (explicit, not silently approximated)
 //!
-//! This is a glyph-per-glyph outline renderer, not a text shaping engine. The
-//! following remain unsupported:
+//! This is a glyph-per-glyph outline renderer, not a full text shaping engine:
 //!
 //! - **Bidirectional text and complex-script reordering** are not performed; the
 //!   logical order is rendered as-is.
 //! - **Contextual shaping** (Arabic joining, Indic reordering, ligature
 //!   substitution) is not applied; the OpenType `kern` table is the only layout
 //!   feature consulted.
-//! - **MTEXT columns** are not laid out; column/justification codes are consumed
-//!   by [`sanitize_text`] but do not affect the result.
-//! - **Exact line spacing / vertical metrics** are not read from the font; line
-//!   spacing is the fixed `1.2 * height` used by [`finalize_lines`].
-//! - **MTEXT stacked fractions** (`\S`) are rendered as two stacked lines with
-//!   that normal line spacing and no fraction bar or vertical scaling.
-//! - **Tabs** are expanded to a fixed run of spaces (see `TAB_STEP`); true
-//!   tab-stop alignment against proportional advances is not implemented.
+//! - **MTEXT columns, paragraph indents and tab stops** are ignored. `\t`/`^I`
+//!   expand to a fixed run of spaces (see `TAB_STEP`).
+//! - **Exact vertical metrics** are not read from the font; line spacing is
+//!   [`LINE_SPACING`] times the tallest run on the line. Vertical alignment of a
+//!   multi-line block against its anchor remains an approximation.
+//! - **Stacked fractions** (`\S`) keep their structured numerator/denominator in
+//!   the run list, but the built-in layout draws them inline as `num<sep>den`
+//!   and reports [`text_issue::STACKED_FRACTION_FLAT`].
+//! - **Inline color and underline/overline/strikethrough** are parsed and kept
+//!   in the run list, but the polyline output is uncolored and undecorated;
+//!   [`FontEngine::shape`] reports that as a [`TextFormatIssue`].
 //! - **Per-glyph fallback only**: a missing glyph is substituted from the next
 //!   face in the chain. There is no per-style (bold/italic) or per-script fallback.
 //!
-//! See `docs/fonts.md` §未完成 for the tracked gaps.
+//! See `docs/mtext.md` and `docs/fonts.md` for the tracked gaps.
 
 use cad_domain::{CadError, CadResult, Point3, TextAlignH, TextAlignV};
 use std::collections::HashMap;
@@ -36,6 +52,167 @@ use std::sync::Arc;
 use ttf_parser::OutlineBuilder;
 
 use crate::shx::ShxFont;
+
+/// Stable, machine-readable codes for MTEXT parsing/layout [`TextFormatIssue`]s.
+///
+/// They are part of the contract: callers may branch on the code and the
+/// human-readable message may change without breaking them.
+pub mod text_issue {
+    /// An unrecognised `\X` control code was rendered literally.
+    pub const UNKNOWN_CODE: &str = "mtext.unknown_code";
+    /// A recognised code carried a missing or non-numeric value.
+    pub const MALFORMED_CODE: &str = "mtext.malformed_code";
+    /// `\S` stacked fractions are drawn inline (`num<sep>den`), not stacked.
+    pub const STACKED_FRACTION_FLAT: &str = "mtext.stacked_fraction_flat";
+    /// Inline color was parsed but the line output carries no color.
+    pub const COLOR_NOT_APPLIED: &str = "mtext.color_not_applied";
+    /// Underline/overline/strikethrough toggles were parsed but not drawn.
+    pub const DECORATION_NOT_APPLIED: &str = "mtext.decoration_not_applied";
+    /// `\T` character tracking was parsed but not applied.
+    pub const TRACKING_NOT_APPLIED: &str = "mtext.tracking_not_applied";
+    /// `\p...;` paragraph properties (indents/alignment/tabs) are ignored.
+    pub const PARAGRAPH_PROPERTIES: &str = "mtext.paragraph_properties";
+    /// `\N` column break was treated as a plain line break.
+    pub const COLUMN_BREAK: &str = "mtext.column_break";
+    /// `\A` run/line vertical alignment was parsed but not applied.
+    pub const LINE_ALIGNMENT: &str = "mtext.line_alignment_not_applied";
+    /// `\B` background mask was parsed but not drawn.
+    pub const BACKGROUND_MASK: &str = "mtext.background_mask_not_applied";
+    /// A run named a font that is neither registered nor covered by the fallback.
+    pub const FONT_UNAVAILABLE: &str = "mtext.font_unavailable";
+}
+
+/// An honest report that some MTEXT formatting could not be applied exactly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextFormatIssue {
+    /// Stable reason code (see [`text_issue`]).
+    pub code: &'static str,
+    /// Human-readable explanation; may change without notice.
+    pub message: String,
+}
+
+impl TextFormatIssue {
+    fn new(code: &'static str, message: impl Into<String>) -> Self {
+        TextFormatIssue {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+/// An MTEXT/TEXT color override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextColor {
+    /// AutoCAD Color Index (`\C`); 0 = ByBlock, 256 = ByLayer.
+    Aci(u16),
+    /// 24-bit sRGB from `\c`.
+    Rgb([u8; 3]),
+}
+
+/// A `\S` stacked fraction/limit.
+///
+/// The numerator and denominator are kept structured; the built-in layout
+/// renders them inline (see [`text_issue::STACKED_FRACTION_FLAT`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StackedFraction {
+    pub numerator: String,
+    pub denominator: String,
+    /// The separator as written: `/` (bar), `#` (diagonal) or `^` (limit).
+    pub separator: char,
+}
+
+/// One run of characters sharing an effective style, after parsing.
+///
+/// A run either carries literal [`text`](Self::text) or, for a `\S` code, a
+/// structured [`fraction`](Self::fraction); [`rendered_text`](Self::rendered_text)
+/// resolves both to the string the layout engine draws.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextRun {
+    /// Literal characters in this run (empty for a fraction run).
+    pub text: String,
+    /// Structured `\S` fraction, when this run is a stack.
+    pub fraction: Option<StackedFraction>,
+    /// Font override (`\f`/`\F`), `None` means the entity/paragraph font.
+    pub font: Option<String>,
+    /// Effective absolute height for this run, in world units.
+    pub height: f64,
+    /// Horizontal width factor (`\W`); `1.0` is normal.
+    pub width_factor: f64,
+    /// Oblique angle in degrees, positive leans right (`\Q`); `0.0` is upright.
+    pub oblique_deg: f64,
+    /// Inline color override (`\C`/`\c`); `None` means inherit.
+    pub color: Option<TextColor>,
+    /// `\A` line-alignment code (0 = bottom/2 = top); `None` means baseline.
+    pub line_align: Option<u8>,
+    /// `\L` underline toggle active for this run.
+    pub underline: bool,
+    /// `\O` overline toggle active for this run.
+    pub overline: bool,
+    /// `\K` strikethrough toggle active for this run.
+    pub strike: bool,
+}
+
+impl TextRun {
+    /// The text this run draws: its literal text, or `num<sep>den` for a stack.
+    pub fn rendered_text(&self) -> String {
+        match &self.fraction {
+            Some(fraction) => format!(
+                "{}{}{}",
+                fraction.numerator, fraction.separator, fraction.denominator
+            ),
+            None => self.text.clone(),
+        }
+    }
+
+    /// The run's height if it is a positive finite value, else `fallback`.
+    fn effective_height(&self, fallback: f64) -> f64 {
+        if self.height.is_finite() && self.height > 0.0 {
+            self.height
+        } else {
+            fallback
+        }
+    }
+
+    /// Whether two runs share the same style (ignoring their text/fraction).
+    fn same_style(&self, other: &TextRun) -> bool {
+        self.font == other.font
+            && self.height == other.height
+            && self.width_factor == other.width_factor
+            && self.oblique_deg == other.oblique_deg
+            && self.color == other.color
+            && self.line_align == other.line_align
+            && self.underline == other.underline
+            && self.overline == other.overline
+            && self.strike == other.strike
+    }
+}
+
+/// One paragraph (line) of parsed MTEXT, an ordered list of styled runs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TextLine {
+    pub runs: Vec<TextRun>,
+}
+
+/// The result of parsing MTEXT/TEXT control content.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedText {
+    /// Paragraphs in reading order; always at least one (possibly empty).
+    pub lines: Vec<TextLine>,
+    /// Formatting that could not be represented exactly.
+    pub issues: Vec<TextFormatIssue>,
+}
+
+/// The result of shaping a text run, including the style overrides that shaped
+/// it and an honest report of anything approximated.
+#[derive(Debug, Clone)]
+pub struct ShapedText {
+    /// World-space polylines, one per glyph contour.
+    pub polylines: Vec<Vec<Point3>>,
+    /// The flattened styled runs in reading order, for hosts that apply color.
+    pub runs: Vec<TextRun>,
+    /// Approximations/unsupported formatting encountered while parsing/shaping.
+    pub issues: Vec<TextFormatIssue>,
+}
 
 /// A parsed font face.
 enum FaceData {
@@ -151,18 +328,102 @@ impl FontEngine {
             .map(String::as_str)
     }
 
+    /// Parse MTEXT/TEXT formatting in `raw` and shape it into world polylines.
+    ///
+    /// This is the rich counterpart to [`outline`](Self::outline): it honours
+    /// the per-run font/height/width/oblique overrides carried by the MTEXT
+    /// control content (see [`parse_mtext`]) and returns the flattened styled
+    /// runs plus an honest list of [`TextFormatIssue`]s for formatting that
+    /// could only be approximated (inline color, decorations, stacked
+    /// fractions, ...).
+    ///
+    /// `origin` is the alignment/anchor point; `height` is the base em height in
+    /// world units; `rotation` is radians about `origin`. When the requested
+    /// font is missing the fallback chain is used, resolved per glyph.
+    #[allow(clippy::too_many_arguments)]
+    pub fn shape(
+        &self,
+        font_key: &str,
+        raw: &str,
+        origin: Point3,
+        height: f64,
+        rotation: f64,
+        h_align: TextAlignH,
+        v_align: TextAlignV,
+    ) -> CadResult<ShapedText> {
+        let size = height.abs();
+        if !size.is_finite() || size <= 0.0 {
+            return Err(CadError::InvalidInput(
+                "text height must be a positive finite value".into(),
+            ));
+        }
+        if !self.has_usable_face(font_key) {
+            return Err(self.chain_error(font_key));
+        }
+
+        let parsed = parse_mtext(raw, size);
+        let mut issues = parsed.issues.clone();
+
+        // Shape each paragraph. A run that names an unregistered font is
+        // reported, not silently dropped; the rest of the text still renders.
+        let mut missing_font: Option<String> = None;
+        let lines = layout_parsed(&parsed, size, |run, text| {
+            let key = run.font.as_deref().unwrap_or(font_key);
+            match self.measure_run(key, text, run.effective_height(size)) {
+                Some(shaped) => Some(shaped),
+                None => {
+                    missing_font.get_or_insert_with(|| key.to_string());
+                    None
+                }
+            }
+        });
+
+        if let Some(key) = missing_font {
+            issues.push(TextFormatIssue::new(
+                text_issue::FONT_UNAVAILABLE,
+                format!("run font '{key}' is not registered and no fallback is available"),
+            ));
+        }
+
+        let runs: Vec<TextRun> = parsed
+            .lines
+            .iter()
+            .flat_map(|line| line.runs.iter().cloned())
+            .collect();
+        if runs.iter().any(|run| run.color.is_some()) {
+            issues.push(TextFormatIssue::new(
+                text_issue::COLOR_NOT_APPLIED,
+                "inline MTEXT color is parsed but line geometry carries no color",
+            ));
+        }
+        if runs
+            .iter()
+            .any(|run| run.underline || run.overline || run.strike)
+        {
+            issues.push(TextFormatIssue::new(
+                text_issue::DECORATION_NOT_APPLIED,
+                "MTEXT underline/overline/strikethrough are parsed but not drawn",
+            ));
+        }
+
+        Ok(ShapedText {
+            polylines: finalize_lines(lines, size, origin, rotation, h_align, v_align),
+            runs,
+            issues: dedupe_issues(issues),
+        })
+    }
+
     /// Outline `text` into world-space polylines at `origin`.
     ///
-    /// One polyline per glyph contour; multiple lines are separated by `\n`.
-    /// `height` is the cap/em height in world units and `rotation` is radians
-    /// about the origin. When the requested font is missing, the fallback chain
-    /// is used.
-    ///
-    /// Fallback is resolved **per glyph**: each character is drawn with the
-    /// first face in the chain (primary, then fallbacks in order) that actually
-    /// contains it, and the pen advances by that face's advance. When the
-    /// primary face has every glyph, the result is byte-for-byte the same as
-    /// single-face rendering.
+    /// A thin wrapper over [`shape`](Self::shape) that drops the run list and
+    /// diagnostics. One polyline per glyph contour; paragraphs in `text` (via
+    /// `\P`, a literal `\n` or `^J`) become consecutive lines. `height` is the
+    /// base em height in world units and `rotation` is radians about `origin`.
+    /// When the requested font is missing, the fallback chain is used, resolved
+    /// **per glyph**: each character is drawn with the first face in the chain
+    /// (primary, then fallbacks in order) that actually contains it, and the pen
+    /// advances by that face's advance. When the primary face has every glyph,
+    /// the result is byte-for-byte the same as single-face rendering.
     #[allow(clippy::too_many_arguments)]
     pub fn outline(
         &self,
@@ -174,15 +435,19 @@ impl FontEngine {
         h_align: TextAlignH,
         v_align: TextAlignV,
     ) -> CadResult<Vec<Vec<Point3>>> {
-        let size = height.abs();
-        if !size.is_finite() || size <= 0.0 {
-            return Err(CadError::InvalidInput(
-                "text height must be a positive finite value".into(),
-            ));
-        }
+        Ok(self
+            .shape(font_key, text, origin, height, rotation, h_align, v_align)?
+            .polylines)
+    }
 
-        // Primary face, then the fallback chain. A face we recognised but
-        // cannot decode is skipped so a usable fallback still renders.
+    /// Whether `font_key` or the fallback chain holds any decodable face.
+    fn has_usable_face(&self, font_key: &str) -> bool {
+        self.chain(font_key)
+            .iter()
+            .any(|face| matches!(&**face, FaceData::Sfnt(_) | FaceData::Shx(_)))
+    }
+
+    fn chain(&self, font_key: &str) -> Vec<Arc<FaceData>> {
         let mut chain: Vec<Arc<FaceData>> = Vec::new();
         if let Some(face) = self.lookup(font_key) {
             chain.push(face);
@@ -192,15 +457,42 @@ impl FontEngine {
                 chain.push(face);
             }
         }
+        chain
+    }
+
+    /// The error to report when [`has_usable_face`](Self::has_usable_face) is
+    /// `false`: an explicit `Unsupported` reason if one was recognised, else
+    /// `ResourceMissing`. Preserves the pre-MTEXT behaviour.
+    fn chain_error(&self, font_key: &str) -> CadError {
+        for face in self.chain(font_key) {
+            if let FaceData::Unsupported(reason) = &*face {
+                return CadError::Unsupported(reason.clone());
+            }
+        }
+        CadError::ResourceMissing(format!(
+            "font '{font_key}' is not registered and no fallback is available"
+        ))
+    }
+
+    /// Shape one run's `text` at `size`, returning run-local glyph polylines
+    /// (baseline at y=0, pen starting at x=0) and the unscaled advance.
+    ///
+    /// Width factor and oblique are applied by [`layout_parsed`], not here, so
+    /// the per-glyph fallback/kerning logic stays independent of the MTEXT
+    /// style overrides. `None` means no usable face was available.
+    fn measure_run(
+        &self,
+        font_key: &str,
+        text: &str,
+        size: f64,
+    ) -> Option<(Vec<Vec<[f64; 2]>>, f64)> {
+        let chain = self.chain(font_key);
         if chain.is_empty() {
-            return Err(CadError::ResourceMissing(format!(
-                "font '{font_key}' is not registered and no fallback is available"
-            )));
+            return None;
         }
 
         // Keep every sfnt `Arc<[u8]>` alive for the whole call so the parsed
-        // faces (which borrow the bytes) stay valid. Each Sfnt candidate is
-        // parsed exactly once, regardless of how many glyphs come from it.
+        // faces (which borrow the bytes) stay valid.
         let keepalive: Vec<Arc<[u8]>> = chain
             .iter()
             .filter_map(|face| match &**face {
@@ -209,14 +501,11 @@ impl FontEngine {
             })
             .collect();
 
-        let mut unsupported = None;
         let mut resolved: Vec<ResolvedFace<'_>> = Vec::new();
         let mut sfnt_index = 0usize;
         for face in &chain {
             match &**face {
-                FaceData::Unsupported(reason) => {
-                    unsupported.get_or_insert_with(|| reason.clone());
-                }
+                FaceData::Unsupported(_) => {}
                 FaceData::Sfnt(_) => {
                     let data: &[u8] = &keepalive[sfnt_index];
                     sfnt_index += 1;
@@ -239,9 +528,7 @@ impl FontEngine {
             }
         }
         if resolved.is_empty() {
-            return Err(CadError::Unsupported(
-                unsupported.unwrap_or_else(|| "no usable font in the fallback chain".into()),
-            ));
+            return None;
         }
 
         // `previous` remembers which face supplied the preceding glyph so that
@@ -299,9 +586,14 @@ impl FontEngine {
             }
             None
         });
-        Ok(finalize_lines(
-            lines, size, origin, rotation, h_align, v_align,
-        ))
+
+        let mut polys = Vec::new();
+        let mut advance = 0.0;
+        for (line_polys, width) in lines {
+            polys.extend(line_polys);
+            advance += width;
+        }
+        Some((polys, advance))
     }
 }
 
@@ -564,16 +856,98 @@ where
     lines
 }
 
-/// Apply horizontal/vertical alignment, rotation and translation.
+/// Default baseline-to-baseline spacing as a multiple of the line's height.
+pub const LINE_SPACING: f64 = 1.2;
+
+/// One laid-out paragraph before alignment/rotation.
+#[derive(Clone)]
+struct ShapedLine {
+    /// Glyph-local polylines with the pen already applied, width factor and
+    /// oblique shear included, baseline at y=0.
+    polys: Vec<Vec<[f64; 2]>>,
+    /// Horizontal advance of the line in world units.
+    width: f64,
+    /// Height of the tallest run on the line (drives line spacing).
+    height: f64,
+}
+
+/// Lay out parsed paragraphs run by run, applying per-run width factor and
+/// oblique shear.
+///
+/// `measure(run, text)` returns the run's glyph polylines positioned with a
+/// run-local pen (baseline at y=0) and the *unscaled* advance; the width factor
+/// and oblique shear are applied here so the math is testable without a font.
+fn layout_parsed<F>(parsed: &ParsedText, fallback_height: f64, mut measure: F) -> Vec<ShapedLine>
+where
+    F: FnMut(&TextRun, &str) -> Option<(Vec<Vec<[f64; 2]>>, f64)>,
+{
+    let fallback = if fallback_height.is_finite() && fallback_height > 0.0 {
+        fallback_height
+    } else {
+        1.0
+    };
+    let mut out = Vec::new();
+    for line in &parsed.lines {
+        let mut pen = 0.0f64;
+        let mut polys: Vec<Vec<[f64; 2]>> = Vec::new();
+        let mut line_height = fallback;
+        for run in &line.runs {
+            let text = run.rendered_text();
+            if text.is_empty() {
+                continue;
+            }
+            let height = run.effective_height(fallback);
+            line_height = line_height.max(height);
+            // Guard against non-finite/negative style values rather than
+            // emitting NaN geometry.
+            let width_factor = if run.width_factor.is_finite() && run.width_factor > 0.0 {
+                run.width_factor
+            } else {
+                1.0
+            };
+            let oblique = if run.oblique_deg.is_finite() {
+                run.oblique_deg.to_radians().tan()
+            } else {
+                0.0
+            };
+            let Some((glyph_polys, advance)) = measure(run, &text) else {
+                continue;
+            };
+            for poly in glyph_polys {
+                let mapped: Vec<[f64; 2]> = poly
+                    .iter()
+                    .map(|[gx, gy]| [pen + gx * width_factor + gy * oblique, *gy])
+                    .collect();
+                polys.push(mapped);
+            }
+            if advance.is_finite() {
+                pen += advance * width_factor;
+            }
+        }
+        out.push(ShapedLine {
+            polys,
+            width: pen,
+            height: line_height,
+        });
+    }
+    out
+}
+
+/// Apply per-line horizontal alignment, vertical block placement, rotation and
+/// translation.
+///
+/// Horizontal alignment is applied per line (so a multi-line block stays
+/// flush against its anchor); vertical placement uses the accumulated line
+/// heights with [`LINE_SPACING`]. Vertical alignment of a multi-line block is a
+/// documented approximation (see the module docs).
 fn finalize_lines(
-    lines: Vec<(Vec<Vec<[f64; 2]>>, f64)>,
+    lines: Vec<ShapedLine>,
     size: f64,
     origin: Point3,
     rotation: f64,
     h_align: TextAlignH,
     v_align: TextAlignV,
 ) -> Vec<Vec<Point3>> {
-    let line_height = 1.2 * size;
     let vertical_shift = match v_align {
         TextAlignV::Baseline => 0.0,
         TextAlignV::Bottom => 0.2 * size,
@@ -582,14 +956,15 @@ fn finalize_lines(
     };
     let (sin, cos) = rotation.sin_cos();
     let mut out = Vec::new();
-    for (index, (polys, width)) in lines.into_iter().enumerate() {
+    let mut baseline = 0.0f64;
+    for line in lines {
         let dx = match h_align {
             TextAlignH::Left => 0.0,
-            TextAlignH::Center => -width / 2.0,
-            TextAlignH::Right => -width,
+            TextAlignH::Center => -line.width / 2.0,
+            TextAlignH::Right => -line.width,
         };
-        let line_y = -(index as f64) * line_height + vertical_shift;
-        for poly in polys {
+        let line_y = baseline + vertical_shift;
+        for poly in line.polys {
             if poly.len() < 2 {
                 continue;
             }
@@ -606,6 +981,18 @@ fn finalize_lines(
                 })
                 .collect();
             out.push(points);
+        }
+        baseline -= LINE_SPACING * line.height;
+    }
+    out
+}
+
+/// Drop repeated issue codes, keeping the first message for each.
+fn dedupe_issues(issues: Vec<TextFormatIssue>) -> Vec<TextFormatIssue> {
+    let mut out: Vec<TextFormatIssue> = Vec::new();
+    for issue in issues {
+        if !out.iter().any(|existing| existing.code == issue.code) {
+            out.push(issue);
         }
     }
     out
@@ -631,6 +1018,670 @@ fn skip_param_code(chars: &[char], start: usize) -> usize {
     } else {
         j
     }
+}
+
+/// Parse MTEXT/TEXT control content into a structured run list.
+///
+/// `base_height` is the entity's nominal em height in world units; `\H` values
+/// are resolved against it (absolute heights are used as-is, relative factors
+/// multiply the current height). The result always has at least one paragraph.
+///
+/// Malformed or unrecognised escapes never panic: an unrecognised `\X` is
+/// rendered literally and reported through [`TextFormatIssue`], while a
+/// recognised code with a bad value is consumed and reported.
+pub fn parse_mtext(raw: &str, base_height: f64) -> ParsedText {
+    MTextParser::new(raw, base_height).run()
+}
+
+/// Active span style while parsing; `{`/`}` push and pop a clone of this.
+#[derive(Clone)]
+struct ParseState {
+    font: Option<String>,
+    /// Absolute height override from a non-relative `\H`.
+    height_abs: Option<f64>,
+    /// Relative height multiplier (on the base height, or on `height_abs`).
+    height_mul: f64,
+    width_factor: f64,
+    oblique_deg: f64,
+    color: Option<TextColor>,
+    line_align: Option<u8>,
+    underline: bool,
+    overline: bool,
+    strike: bool,
+}
+
+impl ParseState {
+    fn new() -> Self {
+        ParseState {
+            font: None,
+            height_abs: None,
+            height_mul: 1.0,
+            width_factor: 1.0,
+            oblique_deg: 0.0,
+            color: None,
+            line_align: None,
+            underline: false,
+            overline: false,
+            strike: false,
+        }
+    }
+}
+
+struct MTextParser {
+    chars: Vec<char>,
+    pos: usize,
+    base_height: f64,
+    stack: Vec<ParseState>,
+    current: ParseState,
+    lines: Vec<TextLine>,
+    runs: Vec<TextRun>,
+    buf: String,
+    issues: Vec<TextFormatIssue>,
+}
+
+impl MTextParser {
+    fn new(raw: &str, base_height: f64) -> Self {
+        let base = if base_height.is_finite() && base_height > 0.0 {
+            base_height
+        } else {
+            1.0
+        };
+        MTextParser {
+            chars: raw.chars().collect(),
+            pos: 0,
+            base_height: base,
+            stack: Vec::new(),
+            current: ParseState::new(),
+            lines: Vec::new(),
+            runs: Vec::new(),
+            buf: String::new(),
+            issues: Vec::new(),
+        }
+    }
+
+    fn run(mut self) -> ParsedText {
+        self.parse_all();
+        ParsedText {
+            lines: self.lines,
+            issues: dedupe_issues(self.issues),
+        }
+    }
+
+    fn issue(&mut self, code: &'static str, message: impl Into<String>) {
+        self.issues.push(TextFormatIssue::new(code, message));
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.pos).copied()
+    }
+
+    fn parse_all(&mut self) {
+        while self.pos < self.chars.len() {
+            let ch = self.chars[self.pos];
+            match ch {
+                '\\' => {
+                    self.flush_run();
+                    self.parse_code();
+                }
+                '{' => {
+                    self.stack.push(self.current.clone());
+                    self.pos += 1;
+                }
+                '}' => {
+                    self.flush_run();
+                    if let Some(previous) = self.stack.pop() {
+                        self.current = previous;
+                    }
+                    self.pos += 1;
+                }
+                '\n' => {
+                    self.pos += 1;
+                    self.paragraph();
+                }
+                '%' => self.special_char(),
+                '^' => self.caret(),
+                c if (c as u32) < 0x20 => {
+                    // Any other control character renders as a space.
+                    self.buf.push(' ');
+                    self.pos += 1;
+                }
+                _ => {
+                    self.buf.push(ch);
+                    self.pos += 1;
+                }
+            }
+        }
+        self.flush_run();
+        // Always terminate the current paragraph, even when empty.
+        self.lines.push(TextLine {
+            runs: std::mem::take(&mut self.runs),
+        });
+    }
+
+    fn paragraph(&mut self) {
+        self.flush_run();
+        self.lines.push(TextLine {
+            runs: std::mem::take(&mut self.runs),
+        });
+    }
+
+    fn flush_run(&mut self) {
+        if self.buf.is_empty() {
+            return;
+        }
+        let text = std::mem::take(&mut self.buf);
+        let run = self.make_run(text, None);
+        self.push_run(run);
+    }
+
+    fn push_run(&mut self, run: TextRun) {
+        if run.fraction.is_none() {
+            if let Some(last) = self.runs.last_mut() {
+                if last.fraction.is_none() && last.same_style(&run) {
+                    last.text.push_str(&run.text);
+                    return;
+                }
+            }
+        }
+        self.runs.push(run);
+    }
+
+    fn make_run(&self, text: String, fraction: Option<StackedFraction>) -> TextRun {
+        let height = self
+            .current
+            .height_abs
+            .unwrap_or(self.base_height * self.current.height_mul);
+        TextRun {
+            text,
+            fraction,
+            font: self.current.font.clone(),
+            height: if height.is_finite() && height > 0.0 {
+                height
+            } else {
+                self.base_height
+            },
+            width_factor: self.current.width_factor,
+            oblique_deg: self.current.oblique_deg,
+            color: self.current.color,
+            line_align: self.current.line_align,
+            underline: self.current.underline,
+            overline: self.current.overline,
+            strike: self.current.strike,
+        }
+    }
+
+    /// Read a `;`-terminated value from the current position. Returns the raw
+    /// value and whether the terminating `;` was present.
+    fn read_value(&mut self) -> (String, bool) {
+        let start = self.pos;
+        let mut end = start;
+        while end < self.chars.len() && self.chars[end] != ';' {
+            end += 1;
+        }
+        let value: String = self.chars[start..end].iter().collect();
+        let terminated = end < self.chars.len();
+        self.pos = if terminated { end + 1 } else { end };
+        (value, terminated)
+    }
+
+    fn parse_code(&mut self) {
+        let next = self.pos + 1;
+        if next >= self.chars.len() {
+            self.buf.push('\\');
+            self.issue(text_issue::MALFORMED_CODE, "trailing '\\' with no code");
+            self.pos += 1;
+            return;
+        }
+        let code = self.chars[next];
+        self.pos = next + 1;
+        match code {
+            '\\' => self.buf.push('\\'),
+            '{' => self.buf.push('{'),
+            '}' => self.buf.push('}'),
+            ';' => self.buf.push(';'),
+            '~' => self.buf.push('\u{00A0}'),
+            'P' => self.paragraph(),
+            'p' => self.paragraph_code(),
+            'N' => {
+                self.issue(
+                    text_issue::COLUMN_BREAK,
+                    "column break '\\N' treated as a plain line break",
+                );
+                self.paragraph();
+            }
+            'X' => {}
+            'L' => self.current.underline = true,
+            'l' => self.current.underline = false,
+            'O' => self.current.overline = true,
+            'o' => self.current.overline = false,
+            'K' => self.current.strike = true,
+            'k' => self.current.strike = false,
+            'C' => {
+                let (value, terminated) = self.read_value();
+                self.apply_aci(&value, terminated);
+                self.consume_optional_aci_end();
+            }
+            'c' => {
+                let (value, terminated) = self.read_value();
+                self.apply_rgb(&value, terminated);
+            }
+            'f' => {
+                let (value, terminated) = self.read_value();
+                self.apply_font(&value, false, terminated);
+            }
+            'F' => {
+                let (value, terminated) = self.read_value();
+                self.apply_font(&value, true, terminated);
+            }
+            'H' => {
+                let (value, terminated) = self.read_value();
+                self.apply_height(&value, terminated);
+            }
+            'W' | 'w' => {
+                let (value, terminated) = self.read_value();
+                self.apply_width(&value, terminated);
+            }
+            'Q' => {
+                let (value, terminated) = self.read_value();
+                self.apply_oblique(&value, terminated);
+            }
+            'A' => {
+                let (value, terminated) = self.read_value();
+                self.apply_align(&value, terminated);
+            }
+            'S' | 's' => {
+                let (value, terminated) = self.read_value();
+                self.apply_fraction(&value, terminated);
+            }
+            'T' => {
+                let (_, terminated) = self.read_value();
+                self.issue(
+                    text_issue::TRACKING_NOT_APPLIED,
+                    "character tracking '\\T' parsed but not applied",
+                );
+                if !terminated {
+                    self.issue(
+                        text_issue::MALFORMED_CODE,
+                        "\\T code is missing its terminating ';'",
+                    );
+                }
+            }
+            'B' => {
+                let _ = self.read_value();
+                self.issue(
+                    text_issue::BACKGROUND_MASK,
+                    "background mask '\\B' parsed but not drawn",
+                );
+            }
+            'b' => {
+                let (value, terminated) = self.read_value();
+                match value.trim() {
+                    "1" => self.current.strike = true,
+                    "0" => self.current.strike = false,
+                    _ => self.issue(
+                        text_issue::MALFORMED_CODE,
+                        format!("\\b value '{value}' is not 0 or 1"),
+                    ),
+                }
+                if !terminated {
+                    self.issue(
+                        text_issue::MALFORMED_CODE,
+                        "\\b code is missing its terminating ';'",
+                    );
+                }
+            }
+            'U' if self.peek() == Some('+') => self.unicode_escape(),
+            _ => {
+                self.buf.push('\\');
+                self.buf.push(code);
+                self.issue(
+                    text_issue::UNKNOWN_CODE,
+                    format!("unrecognised MTEXT code '\\{code}' rendered literally"),
+                );
+            }
+        }
+    }
+
+    /// `\p`: a bare `\p`/`\p;` is a paragraph break; `\p...;` holds paragraph
+    /// properties this build does not lay out.
+    fn paragraph_code(&mut self) {
+        match self.peek() {
+            None | Some(';') => {
+                if self.peek() == Some(';') {
+                    self.pos += 1;
+                }
+                self.paragraph();
+            }
+            Some(_) => {
+                let (_, terminated) = self.read_value();
+                self.issue(
+                    text_issue::PARAGRAPH_PROPERTIES,
+                    "\\p paragraph properties (indent/alignment/tabs) ignored",
+                );
+                if !terminated {
+                    self.issue(
+                        text_issue::MALFORMED_CODE,
+                        "\\p code is missing its terminating ';'",
+                    );
+                }
+            }
+        }
+    }
+
+    fn special_char(&mut self) {
+        let first = self.pos;
+        if self.chars.get(first + 1) != Some(&'%') {
+            self.buf.push('%');
+            self.pos = first + 1;
+            return;
+        }
+        let code_index = first + 2;
+        if self.chars.get(code_index) == Some(&'%') && self.chars.get(code_index + 1) == Some(&'%')
+        {
+            self.buf.push('%');
+            self.pos = code_index + 2;
+            return;
+        }
+        if let Some(&code) = self.chars.get(code_index) {
+            match code.to_ascii_lowercase() {
+                'd' => {
+                    self.buf.push('°');
+                    self.pos = code_index + 1;
+                    return;
+                }
+                'p' => {
+                    self.buf.push('±');
+                    self.pos = code_index + 1;
+                    return;
+                }
+                'c' => {
+                    self.buf.push('⌀');
+                    self.pos = code_index + 1;
+                    return;
+                }
+                _ => {}
+            }
+            if code.is_ascii_digit() {
+                let mut end = code_index;
+                while end < self.chars.len() && self.chars[end].is_ascii_digit() {
+                    end += 1;
+                }
+                let digits: String = self.chars[code_index..end].iter().collect();
+                if let Ok(value) = digits.parse::<u32>() {
+                    if let Some(ch) = char::from_u32(value) {
+                        self.buf.push(ch);
+                        self.pos = end;
+                        return;
+                    }
+                }
+            }
+        }
+        // Unknown `%%x` — emit both percent signs literally and let the code
+        // character fall through as normal text.
+        self.buf.push('%');
+        self.buf.push('%');
+        self.pos = first + 2;
+    }
+
+    fn caret(&mut self) {
+        match self.chars.get(self.pos + 1).copied() {
+            Some('I') => {
+                for _ in 0..TAB_STEP {
+                    self.buf.push(' ');
+                }
+                self.pos += 2;
+            }
+            Some('J') => {
+                self.pos += 2;
+                self.paragraph();
+            }
+            Some('M') => self.pos += 2,
+            _ => {
+                self.buf.push('^');
+                self.pos += 1;
+            }
+        }
+    }
+
+    fn unicode_escape(&mut self) {
+        // `self.pos` is at the '+' following `\U`.
+        self.pos += 1;
+        let start = self.pos;
+        while self.pos < self.chars.len() && self.chars[self.pos].is_ascii_hexdigit() {
+            self.pos += 1;
+        }
+        let hex: String = self.chars[start..self.pos].iter().collect();
+        match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+            Some(ch) => self.buf.push(ch),
+            None => self.issue(
+                text_issue::MALFORMED_CODE,
+                format!("\\U+{hex} is not a valid code point"),
+            ),
+        }
+    }
+
+    fn apply_height(&mut self, value: &str, terminated: bool) {
+        let (number, relative) = split_relative(value);
+        match number.trim().parse::<f64>() {
+            Ok(factor) if factor.is_finite() => {
+                let factor = factor.abs();
+                if relative {
+                    if let Some(absolute) = self.current.height_abs {
+                        self.current.height_abs = Some(absolute * factor);
+                    } else {
+                        self.current.height_mul *= factor;
+                    }
+                } else {
+                    self.current.height_abs = Some(factor);
+                }
+            }
+            _ => self.issue(
+                text_issue::MALFORMED_CODE,
+                format!("\\H value '{value}' is not a number"),
+            ),
+        }
+        if !terminated {
+            self.issue(
+                text_issue::MALFORMED_CODE,
+                "\\H code is missing its terminating ';'",
+            );
+        }
+    }
+
+    fn apply_width(&mut self, value: &str, terminated: bool) {
+        let (number, relative) = split_relative(value);
+        match number.trim().parse::<f64>() {
+            Ok(factor) if factor.is_finite() => {
+                let factor = factor.abs();
+                if relative {
+                    self.current.width_factor *= factor;
+                } else {
+                    self.current.width_factor = factor;
+                }
+            }
+            _ => self.issue(
+                text_issue::MALFORMED_CODE,
+                format!("\\W value '{value}' is not a number"),
+            ),
+        }
+        if !terminated {
+            self.issue(
+                text_issue::MALFORMED_CODE,
+                "\\W code is missing its terminating ';'",
+            );
+        }
+    }
+
+    fn apply_oblique(&mut self, value: &str, terminated: bool) {
+        match value.trim().parse::<f64>() {
+            Ok(angle) if angle.is_finite() => self.current.oblique_deg = angle,
+            _ => self.issue(
+                text_issue::MALFORMED_CODE,
+                format!("\\Q value '{value}' is not an angle"),
+            ),
+        }
+        if !terminated {
+            self.issue(
+                text_issue::MALFORMED_CODE,
+                "\\Q code is missing its terminating ';'",
+            );
+        }
+    }
+
+    fn apply_align(&mut self, value: &str, terminated: bool) {
+        match value.trim().parse::<u8>() {
+            Ok(code) if code <= 2 => self.current.line_align = Some(code),
+            _ => self.issue(
+                text_issue::MALFORMED_CODE,
+                format!("\\A value '{value}' is not 0, 1 or 2"),
+            ),
+        }
+        self.issue(
+            text_issue::LINE_ALIGNMENT,
+            "\\A run alignment parsed but not applied",
+        );
+        if !terminated {
+            self.issue(
+                text_issue::MALFORMED_CODE,
+                "\\A code is missing its terminating ';'",
+            );
+        }
+    }
+
+    fn apply_font(&mut self, value: &str, is_f: bool, terminated: bool) {
+        let mut spec = value.trim();
+        if is_f {
+            // `\FN{name}.shx;` selects a compiled shape font.
+            if let Some(rest) = spec.strip_prefix('N') {
+                spec = rest;
+            }
+        }
+        let name = spec.split(['|', ',']).next().unwrap_or("").trim();
+        if !name.is_empty() {
+            self.current.font = Some(name.to_string());
+        }
+        if !terminated {
+            self.issue(
+                text_issue::MALFORMED_CODE,
+                "font code is missing its terminating ';'",
+            );
+        }
+    }
+
+    fn apply_aci(&mut self, value: &str, terminated: bool) {
+        match value.trim().parse::<i64>() {
+            Ok(index) if (0..=256).contains(&index) => {
+                self.current.color = Some(TextColor::Aci(index as u16));
+            }
+            Ok(index) => self.issue(
+                text_issue::MALFORMED_CODE,
+                format!("ACI color {index} is out of range 0..=256"),
+            ),
+            Err(_) => self.issue(
+                text_issue::MALFORMED_CODE,
+                format!("\\C value '{value}' is not an ACI index"),
+            ),
+        }
+        if !terminated {
+            self.issue(
+                text_issue::MALFORMED_CODE,
+                "\\C code is missing its terminating ';'",
+            );
+        }
+    }
+
+    /// Consume an optional second (`;`-terminated) ACI value from `\C1;2;`,
+    /// which this build does not use (no gradient rendering).
+    fn consume_optional_aci_end(&mut self) {
+        let start = self.pos;
+        let mut end = start;
+        while end < self.chars.len() && (self.chars[end].is_ascii_digit() || self.chars[end] == '-')
+        {
+            end += 1;
+        }
+        if end > start && self.chars.get(end) == Some(&';') {
+            self.pos = end + 1;
+        }
+    }
+
+    fn apply_rgb(&mut self, value: &str, terminated: bool) {
+        match value.trim().parse::<u32>() {
+            Ok(packed) => {
+                // MTEXT true color is byte-reversed: low byte is red.
+                let red = (packed & 0xFF) as u8;
+                let green = ((packed >> 8) & 0xFF) as u8;
+                let blue = ((packed >> 16) & 0xFF) as u8;
+                self.current.color = Some(TextColor::Rgb([red, green, blue]));
+            }
+            Err(_) => self.issue(
+                text_issue::MALFORMED_CODE,
+                format!("\\c value '{value}' is not packed RGB"),
+            ),
+        }
+        if !terminated {
+            self.issue(
+                text_issue::MALFORMED_CODE,
+                "\\c code is missing its terminating ';'",
+            );
+        }
+    }
+
+    fn apply_fraction(&mut self, value: &str, terminated: bool) {
+        match split_fraction(value) {
+            Some((numerator, denominator, separator)) => {
+                let run = self.make_run(
+                    String::new(),
+                    Some(StackedFraction {
+                        numerator,
+                        denominator,
+                        separator,
+                    }),
+                );
+                self.runs.push(run);
+                self.issue(
+                    text_issue::STACKED_FRACTION_FLAT,
+                    "stacked fraction drawn inline as 'num<sep>den' (no bar/stacking)",
+                );
+            }
+            None => {
+                self.issue(
+                    text_issue::MALFORMED_CODE,
+                    format!("\\S value '{value}' has no '/', '#' or '^' separator"),
+                );
+                self.buf.push_str(value);
+            }
+        }
+        if !terminated {
+            self.issue(
+                text_issue::MALFORMED_CODE,
+                "\\S code is missing its terminating ';'",
+            );
+        }
+    }
+}
+
+/// Split a `\H`/`\W` value into its number and whether it was relative (`x`).
+fn split_relative(value: &str) -> (&str, bool) {
+    if value.ends_with('x') || value.ends_with('X') {
+        (&value[..value.len() - 1], true)
+    } else {
+        (value, false)
+    }
+}
+
+/// Split a `\S` payload at its first `/`, `#` or `^` separator.
+fn split_fraction(value: &str) -> Option<(String, String, char)> {
+    for (index, ch) in value.char_indices() {
+        if matches!(ch, '/' | '#' | '^') {
+            let numerator = value[..index].to_string();
+            let mut denominator = &value[index + ch.len_utf8()..];
+            if ch == '^' {
+                denominator = denominator.strip_prefix(' ').unwrap_or(denominator);
+            }
+            return Some((numerator, denominator.to_string(), ch));
+        }
+    }
+    None
 }
 
 /// Strip MTEXT/TEXT formatting so the raw glyph text can be shaped.
@@ -1112,7 +2163,11 @@ mod tests {
 
     #[test]
     fn alignment_shifts_the_run_relative_to_its_anchor() {
-        let lines = vec![(vec![vec![[0.0, 0.0], [10.0, 0.0]]], 10.0)];
+        let lines = vec![ShapedLine {
+            polys: vec![vec![[0.0, 0.0], [10.0, 0.0]]],
+            width: 10.0,
+            height: 2.0,
+        }];
         let left = finalize_lines(
             lines.clone(),
             2.0,
@@ -1140,5 +2195,299 @@ mod tests {
         assert_eq!(left[0][0].x, 0.0);
         assert_eq!(center[0][0].x, -5.0);
         assert_eq!(right[0][0].x, -10.0);
+    }
+
+    // ---- MTEXT formatting ----
+
+    /// Deterministic font-independent glyph metrics: each non-space character
+    /// is a rectangle `0.5 * height` wide and `height` tall, advancing by its
+    /// width. Lets the layout tests assert advances/shear without a font.
+    fn mock_measure(run: &TextRun, text: &str) -> Option<(Vec<Vec<[f64; 2]>>, f64)> {
+        let height = run.effective_height(1.0);
+        let mut polys = Vec::new();
+        let mut x = 0.0f64;
+        for ch in text.chars() {
+            let width = if ch == ' ' {
+                0.4 * height
+            } else {
+                0.5 * height
+            };
+            polys.push(vec![
+                [x, 0.0],
+                [x + width, 0.0],
+                [x + width, height],
+                [x, height],
+            ]);
+            x += width;
+        }
+        Some((polys, x))
+    }
+
+    fn line_text(line: &TextLine) -> String {
+        line.runs.iter().map(TextRun::rendered_text).collect()
+    }
+
+    #[test]
+    fn parse_mtext_keeps_grouping_height_and_color() {
+        let parsed = parse_mtext("{\\fArial|b0;Hello}\\P{\\H2x;Big} \\C1;red", 10.0);
+        assert_eq!(parsed.lines.len(), 2);
+        assert_eq!(line_text(&parsed.lines[0]), "Hello");
+        assert!(parsed.lines[0]
+            .runs
+            .iter()
+            .any(|run| run.font.as_deref() == Some("Arial")));
+        assert_eq!(line_text(&parsed.lines[1]), "Big red");
+        // The grouped `\H2x;` sets 2x the base height for that run only.
+        let big = parsed.lines[1]
+            .runs
+            .iter()
+            .find(|run| run.text == "Big")
+            .expect("Big run");
+        assert!((big.height - 20.0).abs() < 1e-9, "height {}", big.height);
+        let red = parsed.lines[1]
+            .runs
+            .iter()
+            .find(|run| run.text == "red")
+            .expect("red run");
+        assert_eq!(red.color, Some(TextColor::Aci(1)));
+        assert!((red.height - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_mtext_combines_absolute_and_relative_height() {
+        let parsed = parse_mtext("\\H5;A\\H2x;B", 10.0);
+        let runs = &parsed.lines[0].runs;
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text, "A");
+        assert!((runs[0].height - 5.0).abs() < 1e-9);
+        // A relative factor compounds the active absolute height: 5 * 2.
+        assert_eq!(runs[1].text, "B");
+        assert!((runs[1].height - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_mtext_keeps_true_color_and_aci_range() {
+        let parsed = parse_mtext("\\c255;R\\C256;S", 10.0);
+        assert_eq!(
+            parsed.lines[0].runs[0].color,
+            Some(TextColor::Rgb([255, 0, 0]))
+        );
+        assert_eq!(parsed.lines[0].runs[1].color, Some(TextColor::Aci(256)));
+    }
+
+    #[test]
+    fn parse_mtext_handles_escapes_specials_and_cjk() {
+        // `%%%%` is a literal percent; `%%%` leaves one percent and the code
+        // char as literal text.
+        let parsed = parse_mtext("a\\~b\\{c\\}d%%d%%p%%c%%%%", 10.0);
+        assert_eq!(line_text(&parsed.lines[0]), "a\u{00A0}b{c}d°±⌀%");
+        // CJK code points are kept whole; run splitting is by style, not bytes.
+        let cjk = parse_mtext("中\\H20;文", 10.0);
+        let runs = &cjk.lines[0].runs;
+        assert_eq!(runs[0].text, "中");
+        assert_eq!(runs[1].text, "文");
+        assert!((runs[1].height - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_mtext_reports_malformed_and_unknown_codes() {
+        // Missing terminator/value: the code is consumed, not misframed.
+        let malformed = parse_mtext("a\\Hb", 10.0);
+        assert_eq!(line_text(&malformed.lines[0]), "a");
+        assert!(malformed
+            .issues
+            .iter()
+            .any(|issue| issue.code == text_issue::MALFORMED_CODE));
+        // Unknown codes degrade to literal text with a diagnostic.
+        let unknown = parse_mtext("a\\Zx", 10.0);
+        assert_eq!(line_text(&unknown.lines[0]), "a\\Zx");
+        assert!(unknown
+            .issues
+            .iter()
+            .any(|issue| issue.code == text_issue::UNKNOWN_CODE));
+        // A trailing backslash is literal, never a panic.
+        let dangling = parse_mtext("a\\", 10.0);
+        assert_eq!(line_text(&dangling.lines[0]), "a\\");
+        assert!(dangling
+            .issues
+            .iter()
+            .any(|issue| issue.code == text_issue::MALFORMED_CODE));
+    }
+
+    #[test]
+    fn parse_mtext_keeps_stacked_fractions_structured_but_flat() {
+        let parsed = parse_mtext("x\\S1/2;y", 10.0);
+        assert_eq!(line_text(&parsed.lines[0]), "x1/2y");
+        let fraction = parsed.lines[0]
+            .runs
+            .iter()
+            .find_map(|run| run.fraction.as_ref())
+            .expect("fraction run");
+        assert_eq!(fraction.numerator, "1");
+        assert_eq!(fraction.denominator, "2");
+        assert_eq!(fraction.separator, '/');
+        assert!(parsed
+            .issues
+            .iter()
+            .any(|issue| issue.code == text_issue::STACKED_FRACTION_FLAT));
+    }
+
+    #[test]
+    fn layout_applies_width_factor_and_oblique_to_advances_and_glyphs() {
+        // Width factor scales both the glyph x and the line advance.
+        let narrow = parse_mtext("\\W0.5;AB", 10.0);
+        let lines = layout_parsed(&narrow, 10.0, mock_measure);
+        assert!(
+            (lines[0].width - 5.0).abs() < 1e-9,
+            "width {}",
+            lines[0].width
+        );
+        let max_x = lines[0]
+            .polys
+            .iter()
+            .flatten()
+            .map(|p| p[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!((max_x - 5.0).abs() < 1e-9, "max_x {max_x}");
+
+        // Oblique shears glyph x by y*tan(angle); the baseline stays put.
+        let oblique = parse_mtext("\\Q45;A", 10.0);
+        let lines = layout_parsed(&oblique, 10.0, mock_measure);
+        let max_x = lines[0]
+            .polys
+            .iter()
+            .flatten()
+            .map(|p| p[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        // Glyph is 0.5*10 = 5 wide, 10 tall; top shears by 10 * tan(45) = 10.
+        assert!((max_x - 15.0).abs() < 1e-9, "max_x {max_x}");
+        let baseline_x = lines[0]
+            .polys
+            .iter()
+            .flatten()
+            .filter(|p| p[1].abs() < 1e-9)
+            .map(|p| p[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!((baseline_x - 5.0).abs() < 1e-9, "baseline_x {baseline_x}");
+    }
+
+    #[test]
+    fn layout_counts_lines_and_advances_them_by_line_spacing() {
+        let parsed = parse_mtext("AB\\PCDE", 10.0);
+        let lines = layout_parsed(&parsed, 10.0, mock_measure);
+        assert_eq!(lines.len(), 2);
+        assert!((lines[0].width - 10.0).abs() < 1e-9, "{}", lines[0].width);
+        assert!((lines[1].width - 15.0).abs() < 1e-9, "{}", lines[1].width);
+
+        let out = finalize_lines(
+            lines,
+            10.0,
+            Point3::default(),
+            0.0,
+            TextAlignH::Left,
+            TextAlignV::Baseline,
+        );
+        let (min_y, max_y) = out
+            .iter()
+            .flatten()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                (lo.min(p.y), hi.max(p.y))
+            });
+        // Line 0 sits in [0, 10]; line 1 is shifted down by 1.2 * 10.
+        assert!((max_y - 10.0).abs() < 1e-9, "max_y {max_y}");
+        assert!((min_y + 12.0).abs() < 1e-9, "min_y {min_y}");
+    }
+
+    #[test]
+    fn layout_applies_per_run_height_to_line_spacing() {
+        // A taller run on line 0 pushes line 1 down by the taller height.
+        let parsed = parse_mtext("{\\H2x;Big}\\Psmall", 10.0);
+        let lines = layout_parsed(&parsed, 10.0, mock_measure);
+        assert!((lines[0].height - 20.0).abs() < 1e-9);
+        assert!((lines[1].height - 10.0).abs() < 1e-9);
+        let out = finalize_lines(
+            lines,
+            10.0,
+            Point3::default(),
+            0.0,
+            TextAlignH::Left,
+            TextAlignV::Baseline,
+        );
+        let min_y = out
+            .iter()
+            .flatten()
+            .map(|p| p.y)
+            .fold(f64::INFINITY, f64::min);
+        assert!((min_y + 24.0).abs() < 1e-9, "min_y {min_y}");
+    }
+
+    /// Opt-in MTEXT integration: run with `YACR_TEST_FONT=/path/to/font.woff`.
+    #[test]
+    fn shapes_mtext_runs_and_reports_approximations_when_font_provided() {
+        let Ok(path) = std::env::var("YACR_TEST_FONT") else {
+            return;
+        };
+        let bytes = std::fs::read(path).unwrap();
+        let mut engine = FontEngine::new();
+        engine
+            .register("arial.woff", Arc::from(bytes.into_boxed_slice()))
+            .unwrap();
+
+        let shaped = engine
+            .shape(
+                "arial.ttf",
+                "AB\\P{\\H2x;CD}\\C1;E\\S1/2;",
+                Point3::default(),
+                10.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
+            .unwrap();
+        // Two paragraphs plus a stacked-fraction run.
+        assert!(shaped.runs.iter().any(|run| run.text == "CD"));
+        assert!(shaped.runs.iter().any(|run| run.fraction.is_some()));
+        assert_eq!(
+            shaped
+                .runs
+                .iter()
+                .find(|run| run.text == "CD")
+                .unwrap()
+                .height,
+            20.0
+        );
+        assert!(shaped
+            .issues
+            .iter()
+            .any(|issue| issue.code == text_issue::COLOR_NOT_APPLIED));
+        assert!(shaped
+            .issues
+            .iter()
+            .any(|issue| issue.code == text_issue::STACKED_FRACTION_FLAT));
+        assert!(!shaped.polylines.is_empty());
+        // The 2x run must be drawn taller than a 1x run.
+        let tall = shaped
+            .polylines
+            .iter()
+            .flatten()
+            .map(|p| p.y)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let plain = engine
+            .outline(
+                "arial.ttf",
+                "AB",
+                Point3::default(),
+                10.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
+            .unwrap();
+        let plain_top = plain
+            .iter()
+            .flatten()
+            .map(|p| p.y)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(tall > plain_top, "tall {tall} plain {plain_top}");
     }
 }
