@@ -16,6 +16,34 @@
 
 ## 本轮状态（compact，2026-10-02）
 
+**UI 宿主接线轮（最新）**：Ribbon 文档里"宿主连接器（本轮范围外）"与"预览几何尚未
+接线"两项已落地并端到端验证。三个并行 workstream 已合入 main：
+
+- **Web 宿主**：`browser/state_push.rs::push_panel_state` 成为唯一状态漏斗，在每次
+  命令/打开/批注变更/启动恢复后推送历史可用性（undo+redo 独立）、测量、图层+有序 id、
+  属性、批注+有序 id、布局、诊断抽屉（来自真实 `ImportReport`）；安装
+  `WebCanvasPickMapper`（逻辑像素→世界点，退化输入返回 None）；无工具时的轻触经
+  `pick_at_screen` 派发 `Select`（空命中＝清空选择），不再静默。新增
+  `diagnostics_report_json`。空态/多值文案全部来自目录。
+- **渲染叠加**：`cad-app::render_scene::overlay` 新增选择高亮（按 `drawing_pick_items`
+  展开 INSERT，未解析引用显式诊断不伪造）与工具预览（测量/批注 rubber-band + 捕捉点
+  + 矩形/椭圆）批次；`CadView::set_selection_highlight/set_measurement_preview/
+  set_annotation_preview` 独立 `overlay_revision`，选择变化复用底图与批注 Arc。
+  `prepare_shared_with_overlays` 为向后兼容的新入口。高亮 `draw_order` 900_000，
+  预览 2_000_000，位于底图与批注之间/之上。
+- **Android + Web 手势**：Android 接入同一状态漏斗 + `AndroidCanvasPickMapper` +
+  tap/drag 判定（`InputPolicy`）+ `apply_surface_size`（横竖屏不改相机中心；Activity
+  resize 回调仍为显式未接钩子）；修复 `web/host/touch.js` 手指数变化时重定基准会跳变
+  的缺陷，`node --test scripts/test-web-touch.mjs` 6 passed。
+
+证据：核心串行 **819 passed / 0 failed / 1 ignored**；wasm lib check、clippy、
+架构、i18n（132 keys）、fixture manifest、Android aarch64 check 全通过；无头 Chromium
+（SwiftShader/WebGL2）ribbon/UI/mobile 三套脚本在 1280×800、390×844 DPR3、320×740
+DPR2 通过，并直接对 **Cloudflare Pages 生产 URL 重跑通过**。截图
+`/tmp/opencode/yacr-ribbon-final/`、`/tmp/opencode/yacr-ui-final.png`。仍开放：真机、
+WebGPU/真实 GPU、Android Activity resize/SAF、INSERT 根选择高亮（仅叶子高亮）。
+详见 `docs/ribbon-ui.md`、`docs/ui.md`、`docs/panels.md`。
+
 **Ribbon UI 布局轮**：保留 Slint/shared-wgpu，界面拆成 app/ribbon/button/command-bar/
 canvas/panels，桌面 Ribbon 与命令栏可收展；手机默认仅底部命令栏，TOOLS 打开工具。
 手机 48px 按钮，真实 Slint 文件选择器导入 DWG、双指缩放与拖动已接应用命令。

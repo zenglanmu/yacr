@@ -63,6 +63,9 @@ pub(crate) struct PanelSnapshot {
     pub measurement_preview: Option<cad_app::MeasurementPreview>,
     /// In-progress annotation preview, or `None` when no annotation tool runs.
     pub annotation_preview: Option<cad_app::AnnotationPreview>,
+    /// Authoritative session mode (audit U02), so the shell shows the mode the
+    /// command layer enforces.
+    pub mode: cad_app::AppMode,
 }
 
 /// Build every panel model from the authoritative controller + view.
@@ -76,10 +79,13 @@ pub(crate) fn snapshot(
     let controller_ref = controller.borrow();
 
     let history = controller_ref.history_availability();
-    let measurement = MeasurementUiState::from_preview(
+    let mut measurement = MeasurementUiState::from_preview(
         controller_ref.measurement_preview().as_ref(),
         controller_ref.unit_label(),
     );
+    // Enable the save-as-annotation affordance only when a confirmed record
+    // exists (F06/F07); the command layer re-validates it.
+    measurement.set_can_save_annotation(controller_ref.has_last_measurement());
     // Transient overlay inputs (docs/ui.md §2): the selection highlight and the
     // active tool previews are pushed on the same snapshot as the panels, so a
     // command, a pick, an open or a tool confirm/cancel keeps them current.
@@ -151,6 +157,7 @@ pub(crate) fn snapshot(
     };
 
     let diagnostics = import_diagnostics(controller_ref.last_import_report.as_ref(), messages);
+    let mode = controller_ref.mode();
 
     PanelSnapshot {
         history,
@@ -166,6 +173,7 @@ pub(crate) fn snapshot(
         selection,
         measurement_preview,
         annotation_preview,
+        mode,
     }
 }
 
@@ -191,6 +199,7 @@ pub(crate) fn push_panel_state(
     let _ = handle.set_annotation_state(&snapshot.annotations, &snapshot.annotation_ids);
     let _ = handle.set_layout_state(&snapshot.layouts, &snapshot.layout_ids);
     let _ = handle.set_diagnostics_state(&snapshot.diagnostics);
+    let _ = handle.set_mode(snapshot.mode);
 
     if let Some(view) = view.borrow().as_ref() {
         let overrides = controller.borrow().session.layer_overrides.clone();

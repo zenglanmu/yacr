@@ -27,7 +27,10 @@ export component CadCommandBar inherits Rectangle {
             padding: 0px;
             spacing: 4px;
             Button { text: root.open-label; min-height: root.phone ? 48px : 36px; clicked => { root.open(); } }
-            Button { text: root.mode-label; checked: root.mode-work; min-height: root.phone ? 48px : 36px; clicked => { root.mode-toggled(); } }
+            // On phones the mode toggle lives in the expandable row so it cannot
+            // squeeze the command input on a 320px screen; on wide layouts it is
+            // a primary-row control.
+            if !root.phone : Button { text: root.mode-label; checked: root.mode-work; min-height: 36px; clicked => { root.mode-toggled(); } }
             if !root.phone : Text { text: root.title; color: #8dc9ff; vertical-alignment: center; }
             LineEdit {
                 min-width: 0px;
@@ -41,6 +44,7 @@ export component CadCommandBar inherits Rectangle {
         }
         if root.expanded : HorizontalBox {
             padding: 0px;
+            if root.phone : Button { text: root.mode-label; checked: root.mode-work; min-height: 48px; clicked => { root.mode-toggled(); } }
             Button { text: root.tools-label; min-height: 48px; clicked => { root.tools(); } }
             Button { text: root.fit-label; min-height: 48px; clicked => { root.fit(); } }
         }

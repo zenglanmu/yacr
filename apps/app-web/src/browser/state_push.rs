@@ -188,12 +188,19 @@ pub(super) fn push_panel_state(
     // Undo/redo: one snapshot drives both flags.
     let _ = handle.set_history_availability(controller.history_availability());
 
-    // Measurement panel: active preview + unit context.
+    // Measurement panel: active preview + unit context. The save-as-annotation
+    // affordance is enabled only when a confirmed record exists (F06/F07).
     let measurement = controller.measurement_preview();
-    let _ = handle.set_measurement_state(&MeasurementUiState::from_preview(
-        measurement.as_ref(),
-        controller.unit_label(),
-    ));
+    let has_record = controller.has_last_measurement();
+    let mut measurement_state =
+        MeasurementUiState::from_preview(measurement.as_ref(), controller.unit_label());
+    measurement_state.set_can_save_annotation(has_record);
+    let _ = handle.set_measurement_state(&measurement_state);
+
+    // Session mode (audit U02): one call writes both the work flag and the
+    // catalog label from the authoritative session, so the shell can never show
+    // a mode the command layer does not enforce.
+    let _ = handle.set_mode(controller.mode());
 
     // Layer panel: real database rows + session overrides.
     if let Ok(rows) = controller.layer_rows() {

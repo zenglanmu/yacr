@@ -336,17 +336,18 @@ impl ViewInput for WebViewInput {
             }
             1 => {
                 let down = self.down.take();
-                let was_dragging = self.dragging.replace(false);
+                self.dragging.set(false);
                 self.last.set([x, y]);
-                // A tap that did not become a pan or a capture-tool pick hit-
-                // tests the model. A drag (past the shared threshold) is
-                // navigation and must never select.
+                // A tap that did not become a pan hit-tests the model. The tap
+                // test compares the press anchor to the release point, so a real
+                // drag (past the shared threshold) is navigation and never
+                // selects; merely holding the button is not a drag.
                 let tap = is_selection_tap(down, [x, y]);
                 let allowed = {
                     let controller = self.controller.borrow();
                     selection_allowed(&controller.session.tool)
                 };
-                if tap && allowed && (button == 1 || button == 0) && !was_dragging {
+                if tap && allowed && (button == 1 || button == 0) {
                     self.select_at([x, y]);
                 }
             }
@@ -397,6 +398,23 @@ mod tests {
     fn a_missing_or_non_finite_press_is_not_a_tap() {
         assert!(!is_selection_tap(None, [0.0, 0.0]));
         assert!(!is_selection_tap(Some([0.0, 0.0]), [f64::NAN, 0.0]));
+    }
+
+    #[test]
+    fn a_press_released_in_place_is_a_tap_even_though_holding_sets_dragging() {
+        // Regression (headless verification): the pointer-down sets the
+        // "button held" flag, which is NOT a drag. Selection must key off the
+        // press/release distance alone, otherwise every click is rejected as a
+        // drag and nothing is ever selectable.
+        let press = [640.0, 242.0];
+        let release = [640.0, 242.0];
+        assert!(is_selection_tap(Some(press), release));
+        assert!(selection_allowed(&ToolState::Idle));
+        // A held button that moved past the threshold is a pan, not a tap.
+        assert!(!is_selection_tap(
+            Some(press),
+            [press[0] + cad_app::DRAG_THRESHOLD_LOGICAL_PX, press[1]]
+        ));
     }
 
     #[test]
