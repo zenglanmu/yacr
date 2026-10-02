@@ -13,14 +13,15 @@
 //!   [`MeasurementAlgorithm::PlanarPolygonArea`]); those require an explicit
 //!   [`MeasurementSpace::Plane`] (or a verified paper/viewport transform).
 //! * Area projects a closed ring onto the *measurement work plane* and checks
-//!   orthogonality, finiteness and (when u/v are unit-scaled) coplanarity before
+//!   orthogonality, finiteness and coplanarity with the normalised normal before
 //!   computing the signed area. A skewed or degenerate plane, a non-coplanar
 //!   ring or a non-finite projection is reported, never silently flattened to 0.
 //! * Snap candidates are constrained by a pick-ray parameter `t >= 0` and a
 //!   unit-direction contract, so geometry *behind* the camera is not snapped.
-//! * Every algorithm checks the space/paper policy up front: paper-space
-//!   measurement is refused without a verified inverse transform, and inputs
-//!   from different spaces may not be mixed in one measurement.
+//! * Every algorithm checks the space policy up front. Paper space measures the
+//!   sheet directly; a viewport model measurement needs a **valid inverse**
+//!   transform and is explicitly disabled without one (F04), never guessed from
+//!   paper pixels. Inputs from different spaces may not be mixed.
 //! * Sizes are checked against the measurement plane's unit scale so extremely
 //!   large finite coordinates fail with an explicit error instead of overflowing
 //!   to `inf`.
@@ -40,6 +41,7 @@ pub use snap::{
 /// The variant chosen must agree with the algorithm's dimensionality, and every
 /// point supplied for the measurement must originate from that slot (see
 /// [`MeasurementPoint`]); a mismatch is an explicit error.
+#[derive(Debug, Clone, PartialEq)]
 pub enum MeasurementSpace {
     /// Explicit 2D work plane (u/v/out-of-plane in world units).
     Plane(WorkPlane),
@@ -58,8 +60,16 @@ pub enum MeasurementSpace {
 
 impl MeasurementSpace {
     /// Whether planar (2D) algorithms are defined in this space.
+    ///
+    /// Paper space is a 2D sheet and a viewport maps paper onto a model plane,
+    /// so both have a well-defined measurement plane. `World3d` alone does not.
     pub fn is_planar(&self) -> bool {
-        matches!(self, MeasurementSpace::Plane(_))
+        matches!(
+            self,
+            MeasurementSpace::Plane(_)
+                | MeasurementSpace::Paper(_)
+                | MeasurementSpace::ViewportModel { .. }
+        )
     }
 
     /// The layout id for paper-space-located geometry, if any.
@@ -167,23 +177,38 @@ impl MeasurementEngine {
 
     /// Evaluate a measurement, rejecting non-finite, degenerate, non-coplanar,
     /// self-intersecting, mixed-space and unsupported-space inputs (spec §3.3,
-    /// §16.1; audit B24).
+    /// §16.1; audit B24, F04/F06).
+    ///
+    /// Points are brought into the *measurement space* first: paper picks inside
+    /// a viewport are mapped to model coordinates through the verified inverse
+    /// transform, so a viewport measurement reports a model distance rather than
+    /// the paper-pixel distance. Paper space measures the sheet directly.
     pub fn measure(&self, request: &MeasurementRequest) -> CadResult<MeasurementRecord> {
         self.check_space_policy(request)?;
-        let points = request.coordinates();
-        for p in &points {
+        let requested = request.coordinates();
+        for p in &requested {
             if !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite() {
                 return Err(CadError::InvalidInput(
                     "measurement point is not finite".to_string(),
                 ));
             }
         }
+        let points = measure_space_points(&request.space, &requested);
+        for p in &points {
+            if !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite() {
+                return Err(CadError::InvalidInput(
+                    "measurement point is not finite after the space transform".to_string(),
+                ));
+            }
+        }
+        let plane = effective_plane(&request.space);
         let tol = self.tolerance.computation_world.max(1e-12);
         let value = match request.algorithm {
             MeasurementAlgorithm::Distance2d => {
                 require_planar_space(&request.space)?;
+                let plane = require_plane(plane)?;
                 let [a, b] = two(&points)?;
-                distance_in_plane(a, b, &request.space, tol)?
+                distance_in_plane(a, b, &plane, tol)?
             }
             MeasurementAlgorithm::Distance3d => {
                 let [a, b] = two(&points)?;
@@ -191,6 +216,7 @@ impl MeasurementEngine {
             }
             MeasurementAlgorithm::PolylineLength => {
                 require_planar_space(&request.space)?;
+                let plane = require_plane(plane)?;
                 if points.len() < 2 {
                     return Err(CadError::InvalidInput(
                         "polyline needs at least two points".to_string(),
@@ -198,7 +224,7 @@ impl MeasurementEngine {
                 }
                 let mut total = 0.0;
                 for w in points.windows(2) {
-                    total += distance_in_plane(w[0], w[1], &request.space, tol)?;
+                    total += distance_in_plane(w[0], w[1], &plane, tol)?;
                     if !total.is_finite() {
                         return Err(CadError::InvalidInput(
                             "polyline length overflowed to a non-finite value".to_string(),
@@ -219,17 +245,17 @@ impl MeasurementEngine {
                     ));
                 }
                 let (a, v, b) = (points[0], points[1], points[2]);
-                angle_at_vertex(a, v, b, &request.space, tol)?
+                angle_at_vertex(a, v, b, &request.space, plane.as_ref(), tol)?
             }
             MeasurementAlgorithm::PlanarPolygonArea => {
                 require_planar_space(&request.space)?;
+                let plane = require_plane(plane)?;
                 if points.len() < 3 {
                     return Err(CadError::InvalidInput(
                         "area needs at least three points".to_string(),
                     ));
                 }
-                let flat =
-                    project_to_plane(&points, &request.space, self.tolerance.topology_world)?;
+                let flat = project_to_plane(&points, &plane, self.tolerance.topology_world)?;
                 measure_polygon_area(&flat, self.tolerance.topology_world)
                     .map_err(|e| CadError::InvalidInput(format!("area rejected: {e}")))?
             }
@@ -241,11 +267,11 @@ impl MeasurementEngine {
         }
         Ok(MeasurementRecord {
             algorithm: request.algorithm.clone(),
+            // Inputs are recorded in the measurement space (model for a viewport
+            // measurement, paper for a paper measurement) so the record is
+            // self-consistent with `plane` and `value`.
             inputs: points,
-            plane: match &request.space {
-                MeasurementSpace::Plane(p) => Some(*p),
-                _ => None,
-            },
+            plane,
             value,
             units: request.units.clone(),
             source: request.source.clone(),
@@ -253,28 +279,20 @@ impl MeasurementEngine {
         })
     }
 
-    /// Space policy: paper-space measurement needs a verified inverse transform
-    /// and a single layout; mixed-space inputs are refused.
+    /// Space policy.
+    ///
+    /// Paper-space measurement is defined directly on the sheet. A
+    /// `ViewportModel` measurement needs a **valid inverse transform** (finite
+    /// and invertible); without one model measurement is explicitly disabled
+    /// rather than guessed from paper pixels. Mixed-space inputs are refused.
     fn check_space_policy(&self, request: &MeasurementRequest) -> CadResult<()> {
-        match &request.space {
-            MeasurementSpace::Paper(layout) => {
+        if let MeasurementSpace::ViewportModel { layout, inverse } = &request.space {
+            if !valid_inverse(inverse) {
                 return Err(CadError::Unsupported(format!(
-                    "paper-space measurement needs a verified inverse viewport transform for layout {}",
+                    "viewport model measurement for layout {} has no valid inverse viewport transform",
                     layout.0
                 )));
             }
-            MeasurementSpace::ViewportModel { layout, inverse } => {
-                if !transform_finite(inverse) {
-                    return Err(CadError::InvalidInput(
-                        "viewport inverse transform is not finite".to_string(),
-                    ));
-                }
-                return Err(CadError::Unsupported(format!(
-                    "viewport model measurement for layout {} is not wired to a verified inverse transform yet",
-                    layout.0
-                )));
-            }
-            _ => {}
         }
         // Reject inputs gathered from different spaces in one measurement.
         let mut seen: Option<SpaceId> = None;
@@ -435,14 +453,106 @@ impl MeasurementEngine {
 fn require_planar_space(space: &MeasurementSpace) -> CadResult<()> {
     if !space.is_planar() {
         return Err(CadError::InvalidInput(
-            "planar measurement needs an explicit work plane, not 3D/paper space".to_string(),
+            "planar measurement needs an explicit work plane or paper space, not 3D space"
+                .to_string(),
         ));
     }
     Ok(())
 }
 
+fn require_plane(plane: Option<WorkPlane>) -> CadResult<WorkPlane> {
+    plane.ok_or_else(|| {
+        CadError::InvalidInput("planar measurement needs a defined measurement plane".to_string())
+    })
+}
+
 fn transform_finite(t: &Transform3) -> bool {
     t.matrix.iter().flatten().all(|c| c.is_finite())
+}
+
+/// Whether a viewport inverse (paper → model) is usable for measurement.
+///
+/// It must be finite and invertible: a singular map cannot recover a model
+/// point from a paper pick, so model measurement is disabled rather than
+/// guessed (spec §3.3, F04).
+fn valid_inverse(t: &Transform3) -> bool {
+    if !transform_finite(t) {
+        return false;
+    }
+    let s = t.max_scale();
+    if !s.is_finite() || s <= 0.0 {
+        return false;
+    }
+    let det = t.determinant().abs();
+    det.is_finite() && det > 1e-12 * s * s * s
+}
+
+/// The paper sheet as a 2D work plane (x/y in paper units).
+fn paper_plane() -> WorkPlane {
+    WorkPlane {
+        origin: Point3::default(),
+        u: Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        v: Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+    }
+}
+
+/// The model work plane that a viewport's paper plane maps onto.
+///
+/// A `ViewportModel.inverse` maps paper → model, so the paper x/y axes become
+/// the plane's u/v basis and the model origin is the image of the paper origin.
+fn model_plane_from_inverse(inverse: &Transform3) -> WorkPlane {
+    let origin = inverse.apply_point(Point3::default());
+    let u = sub(
+        inverse.apply_point(Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        }),
+        origin,
+    );
+    let v = sub(
+        inverse.apply_point(Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        }),
+        origin,
+    );
+    WorkPlane { origin, u, v }
+}
+
+/// The effective measurement plane of a space, when it has one.
+fn effective_plane(space: &MeasurementSpace) -> Option<WorkPlane> {
+    match space {
+        MeasurementSpace::Plane(plane) => Some(*plane),
+        MeasurementSpace::Paper(_) => Some(paper_plane()),
+        MeasurementSpace::ViewportModel { inverse, .. } => Some(model_plane_from_inverse(inverse)),
+        MeasurementSpace::World3d => None,
+    }
+}
+
+/// Bring picked points into the space the measurement is evaluated in.
+///
+/// For `ViewportModel` the picks are paper coordinates, so the verified
+/// paper→model inverse maps them into model space before any distance/area is
+/// computed. All other spaces already carry their own coordinates.
+fn measure_space_points(space: &MeasurementSpace, points: &[Point3]) -> Vec<Point3> {
+    match space {
+        MeasurementSpace::ViewportModel { inverse, .. } => {
+            points.iter().map(|p| inverse.apply_point(*p)).collect()
+        }
+        MeasurementSpace::Plane(_) | MeasurementSpace::World3d | MeasurementSpace::Paper(_) => {
+            points.to_vec()
+        }
+    }
 }
 
 /// Unit pick-ray direction, or `None` when the ray is unusable.
@@ -495,45 +605,35 @@ fn distance(a: Point3, b: Point3) -> f64 {
     length(sub(a, b))
 }
 
-/// 3D distance, but still governed by the space policy: a mean 3D distance is
-/// undefined without the true model transform for paper geometry.
+/// 3D distance, but still governed by the space policy: 3D distance is not
+/// defined on the 2D paper sheet. A viewport maps paper to model first, so its
+/// points are already model-space by the time they get here.
 fn distance_with_space(a: Point3, b: Point3, space: &MeasurementSpace) -> CadResult<f64> {
     match space {
-        MeasurementSpace::World3d | MeasurementSpace::Plane(_) => Ok(distance(a, b)),
-        MeasurementSpace::Paper(_) | MeasurementSpace::ViewportModel { .. } => Err(
-            CadError::Unsupported("3D distance is not defined in paper/viewport space".into()),
-        ),
+        MeasurementSpace::World3d
+        | MeasurementSpace::Plane(_)
+        | MeasurementSpace::ViewportModel { .. } => Ok(distance(a, b)),
+        MeasurementSpace::Paper(_) => Err(CadError::Unsupported(
+            "3D distance is not defined in paper space; use a planar paper distance".into(),
+        )),
     }
 }
 
-/// Distance projected onto the measurement plane.
-fn distance_in_plane(a: Point3, b: Point3, space: &MeasurementSpace, tol: f64) -> CadResult<f64> {
+/// Distance projected onto the effective measurement plane.
+fn distance_in_plane(a: Point3, b: Point3, plane: &WorkPlane, tol: f64) -> CadResult<f64> {
     let d = sub(b, a);
-    match space {
-        MeasurementSpace::Plane(plane) => {
-            let nx = cross(plane.u, plane.v);
-            let ln = length(nx);
-            if !ln.is_finite() || ln < tol {
-                return Err(CadError::InvalidInput(
-                    "measurement plane is degenerate".to_string(),
-                ));
-            }
-            // Remove the plane-normal component so this is a true in-plane distance.
-            let n = scale(nx, 1.0 / ln);
-            let dn = dot(d, n);
-            let planar = sub(d, scale(n, dn));
-            Ok(length(planar))
-        }
-        MeasurementSpace::World3d => Ok(length(d)),
-        MeasurementSpace::Paper(_) | MeasurementSpace::ViewportModel { .. } => {
-            // Paper/viewport measurement requires a correct inverse transform;
-            // without it we must not guess a model distance (spec §3.3).
-            Err(CadError::Unsupported(
-                "paper-space/viewport measurement needs a verified inverse viewport transform"
-                    .into(),
-            ))
-        }
+    let nx = cross(plane.u, plane.v);
+    let ln = length(nx);
+    if !ln.is_finite() || ln < tol {
+        return Err(CadError::InvalidInput(
+            "measurement plane is degenerate".to_string(),
+        ));
     }
+    // Remove the plane-normal component so this is a true in-plane distance.
+    let n = scale(nx, 1.0 / ln);
+    let dn = dot(d, n);
+    let planar = sub(d, scale(n, dn));
+    Ok(length(planar))
 }
 
 /// Angle at `vertex`, measured in the plane defined by the space.
@@ -542,6 +642,7 @@ fn angle_at_vertex(
     vertex: Point3,
     b: Point3,
     space: &MeasurementSpace,
+    plane: Option<&WorkPlane>,
     tol: f64,
 ) -> CadResult<f64> {
     let v1 = sub(a, vertex);
@@ -549,14 +650,17 @@ fn angle_at_vertex(
     // Project the arms into the measurement plane when one exists; otherwise
     // (3D) use the raw vectors.
     let (w1, w2) = match space {
-        MeasurementSpace::Plane(plane) => {
+        MeasurementSpace::Plane(_) | MeasurementSpace::ViewportModel { .. } => {
+            let plane = plane.ok_or_else(|| {
+                CadError::InvalidInput("angle needs a defined measurement plane".to_string())
+            })?;
             let n = normalized_normal(plane, tol)?;
             (sub(v1, scale(n, dot(v1, n))), sub(v2, scale(n, dot(v2, n))))
         }
         MeasurementSpace::World3d => (v1, v2),
-        MeasurementSpace::Paper(_) | MeasurementSpace::ViewportModel { .. } => {
+        MeasurementSpace::Paper(_) => {
             return Err(CadError::Unsupported(
-                "angle is not defined in paper/viewport space without a verified transform".into(),
+                "angle is not defined in paper space; use model space for angles".into(),
             ));
         }
     };
@@ -588,54 +692,48 @@ fn normalized_normal(plane: &WorkPlane, tol: f64) -> CadResult<Point3> {
 
 /// Project points onto the measurement work plane's 2D coordinates.
 ///
-/// Audit B24: the plane must be finite and orthogonal. When u and v are unit
-/// vectors (the normalised contract used by viewports), points that are not
-/// coplanar with the plane are rejected instead of being silently flattened. A
-/// plane whose basis is not unit-scaled cannot support a scale check, so the
-/// projection still succeeds but the returned coordinates are in u/v units.
-fn project_to_plane(
-    points: &[Point3],
-    space: &MeasurementSpace,
-    tol: f64,
-) -> CadResult<Vec<Point3>> {
-    match space {
-        MeasurementSpace::Plane(plane) => {
-            let u = check_plane_basis(plane, tol)?;
-            let v = normalized_normalized(plane.v, tol)?;
-            if unit_scaled(plane) {
-                for p in points {
-                    let d = sub(*p, plane.origin);
-                    let off = dot(d, cross(u, v));
-                    if off.abs() > self_epsilon(tol) {
-                        return Err(CadError::InvalidInput(
-                            "area ring is not coplanar with the measurement plane".to_string(),
-                        ));
-                    }
-                }
-            }
-            let coords = points
-                .iter()
-                .map(|p| {
-                    let d = sub(*p, plane.origin);
-                    Point3 {
-                        x: dot(d, u),
-                        y: dot(d, v),
-                        z: 0.0,
-                    }
-                })
-                .collect::<Vec<_>>();
-            if coords.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
-                return Err(CadError::InvalidInput(
-                    "area projection is not finite".to_string(),
-                ));
-            }
-            Ok(coords)
-        }
-        MeasurementSpace::World3d => Ok(points.to_vec()),
-        _ => Err(CadError::Unsupported(
-            "area requires a defined measurement plane".into(),
-        )),
+/// Audit B24: the plane must be finite and orthogonal. Coplanarity is always
+/// checked using the *normalised* normal, so the test is unit-correct whatever
+/// the plane basis scale (a viewport's model plane is scaled by the drawing
+/// ratio). Coordinates are projected onto the orthonormal basis, so the
+/// resulting area is in world/model units.
+fn project_to_plane(points: &[Point3], plane: &WorkPlane, tol: f64) -> CadResult<Vec<Point3>> {
+    let u = check_plane_basis(plane, tol)?;
+    let v = normalized_normalized(plane.v, tol)?;
+    let n = cross(u, v);
+    let ln = length(n);
+    if !ln.is_finite() || ln < self_epsilon(tol) {
+        return Err(CadError::InvalidInput(
+            "measurement plane is degenerate".to_string(),
+        ));
     }
+    let n = scale(n, 1.0 / ln);
+    for p in points {
+        let d = sub(*p, plane.origin);
+        let off = dot(d, n);
+        if off.abs() > self_epsilon(tol) {
+            return Err(CadError::InvalidInput(
+                "area ring is not coplanar with the measurement plane".to_string(),
+            ));
+        }
+    }
+    let coords = points
+        .iter()
+        .map(|p| {
+            let d = sub(*p, plane.origin);
+            Point3 {
+                x: dot(d, u),
+                y: dot(d, v),
+                z: 0.0,
+            }
+        })
+        .collect::<Vec<_>>();
+    if coords.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
+        return Err(CadError::InvalidInput(
+            "area projection is not finite".to_string(),
+        ));
+    }
+    Ok(coords)
 }
 
 /// Coplanarity epsilon derived from a topology tolerance; never below 1e-9.
@@ -678,14 +776,6 @@ fn check_plane_basis(plane: &WorkPlane, tol: f64) -> CadResult<Point3> {
         ));
     }
     Ok(scale(plane.u, 1.0 / lu))
-}
-
-/// Whether the plane basis looks unit-scaled, making u/v coordinates directly
-/// comparable to model-space distances for the coplanarity check.
-fn unit_scaled(plane: &WorkPlane) -> bool {
-    let lu = length(plane.u);
-    let lv = length(plane.v);
-    (lu - 1.0).abs() <= 1e-4 && (lv - 1.0).abs() <= 1e-4
 }
 
 /// Normalise a basis vector, requiring it to be finite and non-degenerate.
@@ -1130,16 +1220,178 @@ mod tests {
         assert!(r.is_err());
     }
 
+    // ---- paper vs viewport-model measurement (F04/F06) ---------------------
+
     #[test]
-    fn paper_measurement_is_refused_without_inverse_transform() {
+    fn paper_distance_is_measured_directly_on_the_sheet() {
+        let mut req = request(
+            MeasurementAlgorithm::Distance2d,
+            vec![p(0.0, 0.0, 0.0), p(3.0, 4.0, 0.0)],
+        );
+        req.space = MeasurementSpace::Paper(LayoutId(1));
+        let record = engine().measure(&req).unwrap();
+        assert!((record.value - 5.0).abs() < 1e-12);
+        assert!(record.plane.is_some());
+        // Paper inputs stay in paper coordinates.
+        assert_eq!(record.inputs[0], p(0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn paper_area_is_planar_on_the_sheet() {
+        let mut req = request(
+            MeasurementAlgorithm::PlanarPolygonArea,
+            vec![
+                p(0.0, 0.0, 0.0),
+                p(2.0, 0.0, 0.0),
+                p(2.0, 1.0, 0.0),
+                p(0.0, 1.0, 0.0),
+            ],
+        );
+        req.space = MeasurementSpace::Paper(LayoutId(1));
+        let record = engine().measure(&req).unwrap();
+        assert!((record.value - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn viewport_model_distance_uses_the_verified_inverse() {
+        // 1:100: one paper unit is 100 model units, so the paper→model inverse
+        // scales by 100.
+        let inverse = Transform3::scale(100.0);
         let mut req = request(
             MeasurementAlgorithm::Distance2d,
             vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)],
         );
-        req.space = MeasurementSpace::Paper(LayoutId(1));
+        req.space = MeasurementSpace::ViewportModel {
+            layout: LayoutId(1),
+            inverse,
+        };
+        let record = engine().measure(&req).unwrap();
+        assert!((record.value - 100.0).abs() < 1e-9, "got {}", record.value);
+        // The recorded input is a model point, not a paper pixel.
+        assert_eq!(record.inputs[1], p(100.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn paper_and_viewport_measurements_are_distinguishable() {
+        let paper = {
+            let mut req = request(
+                MeasurementAlgorithm::Distance2d,
+                vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)],
+            );
+            req.space = MeasurementSpace::Paper(LayoutId(1));
+            engine().measure(&req).unwrap()
+        };
+        let model = {
+            let mut req = request(
+                MeasurementAlgorithm::Distance2d,
+                vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)],
+            );
+            req.space = MeasurementSpace::ViewportModel {
+                layout: LayoutId(1),
+                inverse: Transform3::scale(100.0),
+            };
+            engine().measure(&req).unwrap()
+        };
+        assert!((paper.value - 1.0).abs() < 1e-12);
+        assert!((model.value - 100.0).abs() < 1e-9);
+        assert_ne!(paper.value, model.value);
+        // Paper records paper coordinates, model records model coordinates.
+        assert_eq!(paper.inputs[1], p(1.0, 0.0, 0.0));
+        assert_eq!(model.inputs[1], p(100.0, 0.0, 0.0));
+        assert!(paper.plane.is_some() && model.plane.is_some());
+    }
+
+    #[test]
+    fn viewport_model_without_a_valid_inverse_is_disabled() {
+        let mut singular = Transform3::scale(100.0).matrix;
+        singular[0][0] = 0.0;
+        for inverse in [Transform3::scale(0.0), Transform3 { matrix: singular }] {
+            let mut req = request(
+                MeasurementAlgorithm::Distance2d,
+                vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)],
+            );
+            req.space = MeasurementSpace::ViewportModel {
+                layout: LayoutId(1),
+                inverse,
+            };
+            assert!(
+                matches!(engine().measure(&req), Err(CadError::Unsupported(_))),
+                "singular inverse {inverse:?} must be refused, not guessed"
+            );
+        }
+        // A non-finite inverse is refused too.
+        let mut m = Transform3::scale(100.0).matrix;
+        m[0][0] = f64::NAN;
+        let mut req = request(
+            MeasurementAlgorithm::Distance2d,
+            vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)],
+        );
+        req.space = MeasurementSpace::ViewportModel {
+            layout: LayoutId(1),
+            inverse: Transform3 { matrix: m },
+        };
         assert!(matches!(
             engine().measure(&req),
             Err(CadError::Unsupported(_))
         ));
+    }
+
+    #[test]
+    fn viewport_model_area_rejects_a_non_coplanar_ring() {
+        let mut req = request(
+            MeasurementAlgorithm::PlanarPolygonArea,
+            vec![
+                p(0.0, 0.0, 0.0),
+                p(2.0, 0.0, 0.0),
+                p(2.0, 1.0, 0.0),
+                p(0.0, 1.0, 5.0),
+            ],
+        );
+        req.space = MeasurementSpace::ViewportModel {
+            layout: LayoutId(1),
+            inverse: Transform3::scale(100.0),
+        };
+        assert!(matches!(
+            engine().measure(&req),
+            Err(CadError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn viewport_model_angle_is_defined_in_model_space() {
+        let mut req = request(
+            MeasurementAlgorithm::Angle3Points,
+            vec![p(1.0, 0.0, 0.0), p(0.0, 0.0, 0.0), p(0.0, 1.0, 0.0)],
+        );
+        req.space = MeasurementSpace::ViewportModel {
+            layout: LayoutId(1),
+            inverse: Transform3::scale(100.0),
+        };
+        let record = engine().measure(&req).unwrap();
+        assert!((record.value - 90.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn unknown_units_display_drawing_units_and_record_the_source() {
+        let mut req = request(
+            MeasurementAlgorithm::Distance3d,
+            vec![p(0.0, 0.0, 0.0), p(3.0, 4.0, 0.0)],
+        );
+        req.units = UnitContext::drawing_units();
+        let record = engine().measure(&req).unwrap();
+        assert_eq!(record.units.label(), "drawing units");
+        assert_eq!(record.units.source, Unit::DrawingUnits);
+        assert_eq!(record.units.display, Unit::DrawingUnits);
+
+        // A known display unit keeps its source unit on the record.
+        req.units = UnitContext {
+            source: Unit::Millimeter,
+            display: Unit::Inch,
+            display_per_source: Some(0.039_370_078_7),
+            decimal_places: 3,
+        };
+        let record = engine().measure(&req).unwrap();
+        assert_eq!(record.units.source, Unit::Millimeter);
+        assert_eq!(record.units.label(), "in");
     }
 }
