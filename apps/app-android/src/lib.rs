@@ -4,7 +4,7 @@
 //! the wgpu renderer through `cad_app::host::HostController`. It does not
 //! re-implement CAD logic or duplicate the web host's business path.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -12,11 +12,11 @@ use cad_app::host::HostController;
 use cad_app::host_files::{
     export_annotations_atomically, load_recovery, resolve_leave, UnsavedDecisionSource,
 };
-use cad_app::{Command, CommandId, UnsavedDecision};
+use cad_app::{Command, CommandId, CommandPayload, UnsavedDecision};
 use cad_domain::*;
 use cad_platform::{HostFuture, Persistence};
 use cad_ui_slint::{
-    CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration, UiHandle,
+    CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration, UiHandle, ViewInput,
 };
 
 type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
@@ -134,6 +134,13 @@ mod android_fonts {
 /// Initial logical size of the demo viewport. The UI configuration and the
 /// initial viewport must agree; real dimensions arrive from the surface later.
 const DEMO_LOGICAL_SIZE: [f64; 2] = [1080.0, 1920.0];
+
+/// Status shown once the shell and its CAD canvas are actually connected.
+///
+/// The shell's built-in default (`status.scaffold`) claims the canvas is not
+/// wired yet; that is true only before `install_cad_bridge` runs, so the host
+/// replaces it instead of leaving the stale placeholder on screen.
+const READY_STATUS: &str = "就绪（内置演示几何，非兼容性声明）";
 
 /// Recovery cache stored as one JSON file per document under a host directory.
 ///
@@ -267,6 +274,131 @@ impl Default for AndroidHostConfiguration {
     }
 }
 
+/// Mirror the authoritative viewport camera into the composited CAD frame.
+///
+/// The camera lives in the application `Viewport`; the bridge's `CadView` only
+/// reflects it for rendering (spec §4.2, single camera truth).
+fn sync_view_camera(
+    view: &SharedView,
+    controller: &Rc<RefCell<HostController>>,
+    viewport: ViewportId,
+) {
+    let controller = controller.borrow();
+    if let (Some(view), Some(viewport)) = (
+        view.borrow().as_ref(),
+        controller.application.workspace.viewports.get(&viewport),
+    ) {
+        view.set_camera(viewport.camera.target, viewport.world_per_px());
+    }
+}
+
+/// Canvas navigation for Android: one-finger drag pans, wheel/pinch zooms.
+///
+/// The shell's `TouchArea` emits logical-pixel pointer events. This host turns
+/// them into the same `Pan`/`Zoom` commands the web host uses, so the
+/// authoritative viewport stays the single camera truth. Without this the
+/// `pointer-input`/`scroll-input` callbacks were dropped and the Android canvas
+/// could not be panned or zoomed at all (verified: a swipe changed 0 pixels).
+struct AndroidViewInput {
+    controller: Rc<RefCell<HostController>>,
+    handle: SharedHandle,
+    view: SharedView,
+    viewport: ViewportId,
+    last: Cell<[f64; 2]>,
+    dragging: Cell<bool>,
+}
+
+impl AndroidViewInput {
+    fn status(&self, text: impl Into<String>) {
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            let _ = handle.set_status(text.into());
+        }
+    }
+
+    fn send(&self, id: CommandId, payload: CommandPayload) {
+        let document = self.controller.borrow().document_id;
+        let command = Command {
+            schema_version: 1,
+            id,
+            document,
+            viewport: self.viewport,
+            payload,
+        };
+        let outcome = self.controller.borrow_mut().execute(command);
+        sync_view_camera(&self.view, &self.controller, self.viewport);
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            let can_undo = {
+                let controller = self.controller.borrow();
+                controller.application.can_undo(&controller.document_id)
+            };
+            let _ = handle.set_can_undo(can_undo);
+        }
+        match outcome {
+            Ok(_) => {}
+            Err(CadError::NotImplemented(feature)) => self.status(format!("未实现：{feature}")),
+            Err(e) => self.status(format!("命令失败：{e}")),
+        }
+    }
+}
+
+impl ViewInput for AndroidViewInput {
+    fn pointer(&self, kind: i32, button: i32, x: f64, y: f64) {
+        match kind {
+            // down
+            0 => {
+                if button == 1 || button == 0 {
+                    self.dragging.set(true);
+                    self.last.set([x, y]);
+                }
+            }
+            // move
+            2 => {
+                if self.dragging.get() {
+                    let last = self.last.get();
+                    let world_per_px = self
+                        .controller
+                        .borrow()
+                        .application
+                        .workspace
+                        .viewports
+                        .get(&self.viewport)
+                        .map(|v| v.world_per_px())
+                        .unwrap_or(1.0);
+                    // Command delta is world units; screen y points down and
+                    // world y points up, so its sign flips.
+                    let delta = Point3 {
+                        x: (x - last[0]) * world_per_px,
+                        y: -(y - last[1]) * world_per_px,
+                        z: 0.0,
+                    };
+                    self.send(CommandId::Pan, CommandPayload::Points(vec![delta]));
+                }
+                self.last.set([x, y]);
+            }
+            // up / cancel
+            1 | 3 => {
+                self.dragging.set(false);
+                self.last.set([x, y]);
+            }
+            _ => {}
+        }
+    }
+
+    fn scroll(&self, _dx: f64, dy: f64) {
+        // Scroll down (positive dy) zooms in, matching the web host.
+        let factor = (1.0 - dy * 0.0015).clamp(0.2, 5.0);
+        self.last.set([0.0, 0.0]);
+        self.send(
+            CommandId::Zoom,
+            CommandPayload::Points(vec![Point3 {
+                x: factor,
+                y: 0.0,
+                z: 0.0,
+            }]),
+        );
+    }
+}
+
 /// Commands from the UI are executed through the shared application layer.
 struct HostSink {
     controller: Rc<RefCell<HostController>>,
@@ -284,17 +416,8 @@ impl HostSink {
     }
 
     fn sync_camera(&self) {
-        let controller = self.controller.borrow();
-        if let (Some(view), Some(viewport)) = (
-            self.view.borrow().as_ref(),
-            controller
-                .application
-                .workspace
-                .viewports
-                .get(&controller.viewport_id),
-        ) {
-            view.set_camera(viewport.camera.target, viewport.world_per_px());
-        }
+        let viewport_id = self.controller.borrow().viewport_id;
+        sync_view_camera(&self.view, &self.controller, viewport_id);
     }
 
     /// Open a DWG from the candidate paths. Real SAF integration is not part of
@@ -527,6 +650,7 @@ fn restore_recovery_for_start(
 
 /// Build the shared UI + core + renderer stack and run it.
 pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
+    log::info!("yacr android host starting");
     cad_ui_slint::select_wgpu_backend()?;
 
     let controller = Rc::new(RefCell::new(HostController::with_demo_document(
@@ -568,21 +692,29 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     let adapter = UiAdapter::new(ui_config, sink, true)?;
     let handle = adapter.handle();
     *shared_handle.borrow_mut() = Some(handle.clone());
-    if let Some(message) = restore_message {
-        let _ = handle.set_status(message);
-    }
-    let view = cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming)?;
-    {
-        let controller = controller.borrow();
-        if let Some(viewport) = controller
-            .application
-            .workspace
-            .viewports
-            .get(&controller.viewport_id)
-        {
-            view.set_camera(viewport.camera.target, viewport.world_per_px());
+    match restore_message {
+        Some(message) => {
+            let _ = handle.set_status(message);
+        }
+        // No recovery snapshot: replace the shell's "canvas not connected"
+        // scaffold status with the host's real started state.
+        None => {
+            let _ = handle.set_status(READY_STATUS);
         }
     }
+    let view = cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming)?;
+    sync_view_camera(&shared_view, &controller, viewport_id);
+    // Wire real canvas interaction: drag pans and wheel/pinch zooms through the
+    // same `Pan`/`Zoom` commands the web host uses. Picking stays explicitly
+    // unwired until canvas metrics are plumbed (see docs/validation-android.md).
+    adapter.set_view_input(Rc::new(AndroidViewInput {
+        controller: controller.clone(),
+        handle: shared_handle.clone(),
+        view: shared_view.clone(),
+        viewport: viewport_id,
+        last: Cell::new([0.0, 0.0]),
+        dragging: Cell::new(false),
+    }));
     *shared_view.borrow_mut() = Some(view);
     adapter.run()
 }
@@ -617,5 +749,69 @@ mod tests {
         assert!(db.entity_count() >= 6);
         let (min, max) = db.bounds().unwrap();
         assert!(max.x - min.x > 0.0);
+    }
+
+    fn camera_target(controller: &Rc<RefCell<HostController>>) -> Point3 {
+        controller
+            .borrow()
+            .application
+            .workspace
+            .viewports
+            .get(&ViewportId(1))
+            .unwrap()
+            .camera
+            .target
+    }
+
+    fn world_per_px(controller: &Rc<RefCell<HostController>>) -> f64 {
+        controller
+            .borrow()
+            .application
+            .workspace
+            .viewports
+            .get(&ViewportId(1))
+            .unwrap()
+            .world_per_px()
+    }
+
+    fn input_harness() -> (Rc<RefCell<HostController>>, AndroidViewInput) {
+        let controller = Rc::new(RefCell::new(
+            HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+        ));
+        controller.borrow_mut().fit().unwrap();
+        let input = AndroidViewInput {
+            controller: controller.clone(),
+            handle: Rc::new(RefCell::new(None)),
+            view: Rc::new(RefCell::new(None)),
+            viewport: ViewportId(1),
+            last: Cell::new([0.0, 0.0]),
+            dragging: Cell::new(false),
+        };
+        (controller, input)
+    }
+
+    #[test]
+    fn android_view_input_drag_pans_the_authoritative_camera() {
+        let (controller, input) = input_harness();
+        let before = camera_target(&controller);
+        input.pointer(0, 1, 100.0, 100.0); // down
+        input.pointer(2, 1, 140.0, 100.0); // move 40 logical px right
+        input.pointer(1, 1, 140.0, 100.0); // up
+        let after = camera_target(&controller);
+        // Dragging right must move the camera left so the content follows the
+        // finger. This is the regression that made the Android canvas inert.
+        assert!(
+            after.x < before.x,
+            "camera did not pan: {before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
+    fn android_view_input_scroll_zooms_the_camera() {
+        let (controller, input) = input_harness();
+        let before = world_per_px(&controller);
+        input.scroll(0.0, 200.0); // scroll down => factor 0.7 => zoom in
+        let after = world_per_px(&controller);
+        assert!(after < before, "camera did not zoom: {before} -> {after}");
     }
 }
