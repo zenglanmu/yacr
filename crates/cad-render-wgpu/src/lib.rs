@@ -170,6 +170,9 @@ impl std::error::Error for RenderError {}
 enum ScopeOutcome {
     Clean,
     FrameError,
+    /// Only native backends classify a poll timeout as loss; on wasm the
+    /// non-blocking poll never produces it, but the outcome type is shared.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     DeviceLost,
 }
 
@@ -1044,17 +1047,38 @@ impl Renderer {
     /// is a frame-level mistake, not a loss. A clean poll means no error the
     /// renderer can observe synchronously; the host's device-lost callback still
     /// remains authoritative.
+    ///
+    /// On `wasm32` the browser backends (WebGL2/WebGPU) complete asynchronously
+    /// and must never block the main thread: `PollType::Wait` is unavailable, so
+    /// a non-blocking `Poll` is used and a timeout is **not** treated as device
+    /// loss (a lost browser device surfaces through wgpu's device-lost callback).
     fn device_scope_outcome(
         &self,
         device: &wgpu::Device,
         submission: wgpu::SubmissionIndex,
     ) -> ScopeOutcome {
-        match device.poll(wgpu::PollType::Wait {
+        #[cfg(target_arch = "wasm32")]
+        let poll_type = {
+            let _ = submission;
+            wgpu::PollType::Poll
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let poll_type = wgpu::PollType::Wait {
             submission_index: Some(submission),
             timeout: Some(self.poll_timeout),
-        }) {
+        };
+        match device.poll(poll_type) {
             Ok(_) => ScopeOutcome::Clean,
-            Err(wgpu::PollError::Timeout) => ScopeOutcome::DeviceLost,
+            Err(wgpu::PollError::Timeout) => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    ScopeOutcome::Clean
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    ScopeOutcome::DeviceLost
+                }
+            }
             Err(wgpu::PollError::WrongSubmissionIndex(..)) => ScopeOutcome::FrameError,
         }
     }

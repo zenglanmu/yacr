@@ -680,6 +680,16 @@ pub fn install_with_preference(
                     s.document = None;
                     s.built_generation = None;
                 }
+                // A rendering setup that is not WGPU30 cannot host the shared
+                // CAD texture bridge. Report it instead of leaving a blank
+                // canvas with no explanation (web diagnostic).
+                (slint::RenderingState::RenderingSetup, graphics_api) => {
+                    #[cfg(target_arch = "wasm32")]
+                    crate::web::console_error(&format!(
+                        "yacr bridge: rendering setup without WGPU30: {graphics_api:?}"
+                    ));
+                    let _ = graphics_api;
+                }
                 _ => {}
             }
         })

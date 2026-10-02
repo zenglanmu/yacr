@@ -1,41 +1,162 @@
-// Minimal browser host for the yacr wasm module (spec v2.0 §9.2).
+// Browser host for the yacr wasm module (spec v2.0 §9.2, N01 host sync).
 //
-// Responsibilities kept deliberately small: load wasm, wire the File API
-// pickers to the Rust exports, surface the renderer state, and swallow the
-// documented winit control-flow exception used to hand over the event loop.
+// Responsibilities kept deliberately small: localize the HTML/JS chrome from the
+// shared catalog, load wasm, wire the File API pickers to the Rust exports,
+// surface the renderer state, and catch the documented winit control-flow
+// exception used to hand the event loop to the browser.
+//
+// The wasm module is imported dynamically so a module/initialisation failure is
+// a real, localizable error instead of an uncatchable static-import abort.
 
-import init, {
-  start_web,
-  open_document_bytes,
-  open_requires_decision,
-  open_document_bytes_decided,
-  renderer_state_report,
-  load_web_fonts,
-  font_load_report,
-  annotation_import_json,
-  annotation_export_json,
-  annotation_confirm_export,
-  has_recovery_snapshot,
-  restore_recovery_snapshot,
-  discard_recovery_snapshot,
-} from "./pkg/yacr.js";
+const LOCALE_STORAGE_KEY = "yacr.cad.locale";
+const DEFAULT_LOCALE = "zh-CN";
+
+let wasmModule = null;
+let catalog = {};
+let currentLocale = DEFAULT_LOCALE;
+// Last host status as a catalog key + args, so a language switch can re-render
+// it. Raw strings pushed by the Rust host are shown verbatim.
+let lastState = null;
 
 const element = (id) => document.getElementById(id);
 
-function setState(text) {
+// wgpu's WebGL2 present path blits from its surface framebuffer to the canvas
+// default framebuffer. A canvas context created with the default
+// `antialias: true` has a multisampled default framebuffer, and that blit is an
+// `INVALID_OPERATION` in WebGL2 — the canvas stays blank. Force antialias off
+// before Slint creates the context; the CAD frame is a texture composite, so the
+// shell only loses canvas-level MSAA.
+function forceSingleSampleCanvas() {
+  const original = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function getContext(type, attrs) {
+    if (type === "webgl2" || type === "webgl") {
+      attrs = Object.assign({}, attrs, { antialias: false });
+    }
+    return original.call(this, type, attrs);
+  };
+}
+
+// --- i18n -------------------------------------------------------------------
+
+/// Map any accepted tag (`en-US`, `zh-Hans`) onto a shipped stable catalog.
+function normalizeLocale(tag) {
+  const primary = String(tag || "")
+    .trim()
+    .toLowerCase()
+    .split(/[-_]/)[0];
+  if (primary === "en") return "en";
+  if (primary === "zh") return DEFAULT_LOCALE;
+  return null;
+}
+
+function storedLocale() {
+  try {
+    return normalizeLocale(localStorage.getItem(LOCALE_STORAGE_KEY));
+  } catch (error) {
+    return null;
+  }
+}
+
+/// Look up a catalog key, substituting `{name}` placeholders. A missing key
+/// renders as `⟦key⟧` (never an empty or invented string), matching the Rust
+/// `Message::Missing` policy so omissions are visible.
+function t(key, args = {}) {
+  const template = catalog[key];
+  if (typeof template !== "string") return `\u27e6${key}\u27e7`;
+  return template.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, name) =>
+    Object.prototype.hasOwnProperty.call(args, name) ? String(args[name]) : match,
+  );
+}
+
+/// Fetch the canonical catalog that `build-web.sh` copied out of
+/// `crates/cad-ui-slint/i18n/`. This is the same JSON the Rust `MessageSource`
+/// embeds, so host and UI strings cannot drift.
+async function loadCatalog(tag) {
+  const normalized = normalizeLocale(tag) || DEFAULT_LOCALE;
+  if (normalized === currentLocale && Object.keys(catalog).length > 0) {
+    return normalized;
+  }
+  const response = await fetch(`i18n/${normalized}.json`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`catalog ${normalized}: HTTP ${response.status}`);
+  const parsed = await response.json();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`catalog ${normalized}: not a JSON object`);
+  }
+  catalog = parsed;
+  currentLocale = normalized;
+  return normalized;
+}
+
+/// Apply the active language to the HTML chrome (N01 §6): `lang`, `title`,
+/// `noscript` and the language selector.
+function applyDocumentLocale() {
+  document.documentElement.lang = currentLocale;
+  if (typeof catalog["app.title"] === "string") {
+    document.title = catalog["app.title"];
+  }
+  const noscript = document.querySelector("noscript");
+  if (noscript) noscript.textContent = t("host.noscript");
+  const label = element("language-label");
+  if (label) label.textContent = t("host.language_label");
+  const select = element("language");
+  if (select) select.value = currentLocale;
+}
+
+function setStateText(text) {
+  lastState = null;
   const node = element("host-state");
   if (node) node.textContent = text;
+}
+
+function setStateKey(key, args = {}) {
+  lastState = { key, args };
+  const node = element("host-state");
+  if (node) node.textContent = t(key, args);
+}
+
+function rerenderState() {
+  if (!lastState) return;
+  const node = element("host-state");
+  if (node) node.textContent = t(lastState.key, lastState.args);
+}
+
+// --- wasm host --------------------------------------------------------------
+
+/// winit's wasm event loop hands control to the browser by throwing; that is
+/// documented control flow, not a failure. Only this exact handoff is ignored;
+/// every other rejection is a real startup failure.
+function isHandoffMessage(message) {
+  return (
+    typeof message === "string" &&
+    message.includes("Using exceptions for control flow")
+  );
+}
+
+function isHandoffError(error) {
+  if (isHandoffMessage(error)) return true;
+  return isHandoffMessage(error && error.message ? error.message : String(error));
+}
+
+function ignoreWinitHandoff() {
+  window.addEventListener("error", (event) => {
+    if (isHandoffMessage(event.message)) {
+      event.preventDefault();
+      return false;
+    }
+    return undefined;
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    if (isHandoffError(event.reason)) {
+      event.preventDefault();
+    }
+  });
 }
 
 /// Ask the user what to do with unsaved annotations. Returns one of
 /// save/recovery/discard/cancel, or null when the host cannot ask. There is no
 /// silent default: a null result must keep the current document.
 function promptUnsavedDecision() {
-  const choice = window.prompt(
-    "当前图纸有未保存的批注。请输入：save（保存）/ recovery（保留恢复副本）" +
-      " / discard（丢弃）/ cancel（取消打开）",
-    "cancel",
-  );
+  const choice = window.prompt(t("host.open_needs_decision"), "cancel");
   if (choice === null) return null;
   const normalized = choice.trim().toLowerCase();
   return ["save", "recovery", "preserve", "discard", "cancel"].includes(normalized)
@@ -48,18 +169,18 @@ function openDrawing(file) {
   return file.arrayBuffer().then((buffer) => {
     const bytes = new Uint8Array(buffer);
     let decision = "discard";
-    if (open_requires_decision()) {
+    if (wasmModule.open_requires_decision()) {
       decision = promptUnsavedDecision();
       if (!decision) {
-        setState("已取消打开：当前文档与未保存批注保留");
+        setStateKey("host.cancelled_open");
         return;
       }
     }
     try {
-      setState(open_document_bytes_decided(file.name, bytes, decision));
+      setStateText(wasmModule.open_document_bytes_decided(file.name, bytes, decision));
     } catch (error) {
       console.error("yacr: open failed", error);
-      setState("打开失败：" + error);
+      setStateKey("host.open_failed", { error: String(error) });
     }
   });
 }
@@ -69,9 +190,9 @@ function openDrawing(file) {
 function exportAnnotations() {
   let bundle;
   try {
-    bundle = annotation_export_json();
+    bundle = wasmModule.annotation_export_json();
   } catch (error) {
-    setState("导出失败：" + error);
+    setStateKey("host.export_failed", { error: String(error) });
     return;
   }
   const blob = new Blob([bundle.json], { type: "application/json" });
@@ -82,10 +203,10 @@ function exportAnnotations() {
   anchor.click();
   URL.revokeObjectURL(url);
   try {
-    annotation_confirm_export(bundle.revision);
-    setState(`已导出 ${bundle.json.length} 字节批注 JSON`);
+    wasmModule.annotation_confirm_export(bundle.revision);
+    setStateKey("host.exported_bytes", { bytes: bundle.json.length });
   } catch (error) {
-    setState("导出确认失败：" + error);
+    setStateKey("host.export_confirm_failed", { error: String(error) });
   }
 }
 
@@ -98,7 +219,7 @@ function wireFilePickers() {
       await openDrawing(file);
     } catch (error) {
       console.error("yacr: open failed", error);
-      setState("打开失败：" + error);
+      setStateKey("host.open_failed", { error: String(error) });
     } finally {
       drawingInput.value = "";
     }
@@ -109,98 +230,176 @@ function wireFilePickers() {
     const file = annotationInput.files && annotationInput.files[0];
     if (!file) return;
     try {
-      const count = annotation_import_json(await file.text());
-      setState(`已导入 ${count} 条批注`);
+      const count = wasmModule.annotation_import_json(await file.text());
+      setStateKey("host.imported_count", { count });
     } catch (error) {
       console.error("yacr: annotation import failed", error);
-      setState("批注导入失败：" + error);
+      setStateKey("host.import_failed", { error: String(error) });
     } finally {
       annotationInput.value = "";
     }
   });
 }
 
-// winit's wasm event loop hands control to the browser by throwing; that is
-// documented control flow, not a failure. Suppress only that message.
-function ignoreWinitHandoff() {
-  const isHandoff = (message) =>
-    typeof message === "string" && message.includes("Using exceptions for control flow");
-  window.addEventListener("error", (event) => {
-    if (isHandoff(event.message)) {
-      event.preventDefault();
-      return false;
+// --- renderer state polling (audit B29) -------------------------------------
+
+let pollTimer = null;
+let pollDelay = 400;
+let rendererReady = false;
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function schedulePolling() {
+  stopPolling();
+  if (document.hidden) return;
+  pollTimer = setTimeout(poll, pollDelay);
+}
+
+/// One poll: report the adapter field (not `backend`), back off until ready,
+/// then keep a slow heartbeat for diagnostics. Stops entirely while hidden.
+function poll() {
+  pollTimer = null;
+  if (document.hidden) return;
+  try {
+    const report = wasmModule.renderer_state_report();
+    window.yacrState = report;
+    const ready = /adapter=Some\((\w+)\)/.exec(report);
+    if (ready) {
+      // Announce readiness once; later heartbeats must not overwrite a user
+      // message (open/export/import) with a repeated "ready" line.
+      if (!rendererReady) {
+        rendererReady = true;
+        setStateKey("host.renderer_ready", { backend: ready[1] });
+      }
+      pollDelay = 2000;
+    } else {
+      pollDelay = Math.min(Math.round(pollDelay * 1.5), 2000);
     }
-    return undefined;
-  });
-  window.addEventListener("unhandledrejection", (event) => {
-    if (isHandoff(event.reason && event.reason.message ? event.reason.message : String(event.reason))) {
-      event.preventDefault();
-    }
-  });
+  } catch (error) {
+    // The host is installed before the event loop runs; keep waiting without
+    // spamming a 250ms fixed interval.
+    if (!rendererReady) setStateKey("host.poll_not_ready");
+    pollDelay = Math.min(Math.round(pollDelay * 1.5), 2000);
+  }
+  schedulePolling();
 }
 
 function startStatePolling() {
-  let ticks = 0;
-  const timer = setInterval(() => {
-    ticks += 1;
-    try {
-      const report = renderer_state_report();
-      setState(report);
-      window.yacrState = report;
-      if (report.includes("backend=Some") && ticks > 2) {
-        clearInterval(timer);
-        // Keep updating on an interval for diagnostics without spinning.
-        setInterval(() => {
-          try {
-            const latest = renderer_state_report();
-            setState(latest);
-            window.yacrState = latest;
-          } catch (error) {
-            /* host torn down */
-          }
-        }, 2000);
-      }
-    } catch (error) {
-      setState("宿主尚未就绪");
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopPolling();
+    } else {
+      pollDelay = 400;
+      schedulePolling();
     }
-  }, 250);
+  });
+  schedulePolling();
 }
 
+// --- language switch (N01) --------------------------------------------------
+
+/// Persist the choice, localize the DOM, and re-apply the catalog to the Slint
+/// shell. Only chrome changes: the document, camera, annotations and undo
+/// history are untouched.
+async function setLocale(requested) {
+  const normalized = await loadCatalog(requested);
+  currentLocale = normalized;
+  try {
+    localStorage.setItem(LOCALE_STORAGE_KEY, normalized);
+  } catch (error) {
+    // A read-only storage does not prevent the in-memory switch.
+  }
+  if (wasmModule && typeof wasmModule.web_set_locale === "function") {
+    const resolved = await wasmModule.web_set_locale(normalized);
+    currentLocale = normalizeLocale(resolved) || normalized;
+  }
+  applyDocumentLocale();
+  rerenderState();
+  return currentLocale;
+}
+
+function wireLanguageSelector() {
+  const select = element("language");
+  if (!select) return;
+  select.addEventListener("change", async () => {
+    try {
+      await setLocale(select.value);
+    } catch (error) {
+      console.error("yacr: language switch failed", error);
+      setStateKey("host.locale_failed", { error: String(error) });
+    }
+  });
+}
+
+// --- startup ----------------------------------------------------------------
+
 async function main() {
-  await init();
-  setState("wasm 已加载，正在初始化渲染器…");
+  // Must run before the wasm module creates Slint's WebGL2 context.
+  forceSingleSampleCanvas();
+
+  // Localize the host chrome before wasm loads so startup failures are readable.
+  try {
+    currentLocale = await loadCatalog(storedLocale() || DEFAULT_LOCALE);
+  } catch (error) {
+    console.error("yacr: catalog load failed", error);
+  }
+  wireLanguageSelector();
+  applyDocumentLocale();
+  setStateKey("host.loading_wasm");
+
+  wasmModule = await import("./pkg/yacr.js");
+  await wasmModule.default();
+  setStateKey("host.wasm_loaded");
+
   wireFilePickers();
   ignoreWinitHandoff();
 
   // Expose for diagnostics and headless verification.
   window.yacr = {
-    renderer_state_report,
-    open_document_bytes: (name, bytes) => open_document_bytes(name, bytes),
-    open_requires_decision,
+    renderer_state_report: wasmModule.renderer_state_report,
+    open_document_bytes: (name, bytes) =>
+      wasmModule.open_document_bytes(name, bytes),
+    open_requires_decision: wasmModule.open_requires_decision,
     open_document_decided: (name, bytes, decision) =>
-      open_document_bytes_decided(name, bytes, decision),
-    load_fonts: () => load_web_fonts(),
-    font_load_report,
+      wasmModule.open_document_bytes_decided(name, bytes, decision),
+    load_fonts: () => wasmModule.load_web_fonts(),
+    font_load_report: wasmModule.font_load_report,
     export_annotations: exportAnnotations,
-    has_recovery_snapshot,
-    restore_recovery_snapshot,
-    discard_recovery_snapshot,
+    set_locale: (tag) => setLocale(tag),
+    current_locale: () => currentLocale,
+    has_recovery_snapshot: wasmModule.has_recovery_snapshot,
+    restore_recovery_snapshot: wasmModule.restore_recovery_snapshot,
+    discard_recovery_snapshot: wasmModule.discard_recovery_snapshot,
   };
 
   startStatePolling();
 
-  if (has_recovery_snapshot()) {
-    setState("检测到未保存批注恢复快照：调用 window.yacr.restore_recovery_snapshot() 恢复或 discard_recovery_snapshot() 丢弃");
+  if (wasmModule.has_recovery_snapshot()) {
+    setStateKey("host.recovery_pending");
   }
 
   try {
-    await start_web();
+    await wasmModule.start_web();
+    // A resolved promise means the event loop was handed off or ended cleanly.
+    window.yacrHandoff = true;
   } catch (error) {
-    console.warn("yacr: event loop handoff", error);
+    if (isHandoffError(error)) {
+      window.yacrHandoff = true;
+      return;
+    }
+    window.yacrStartupError = String(error);
+    console.error("yacr: startup failed", error);
+    setStateKey("host.startup_failed", { error: String(error) });
   }
 }
 
 main().catch((error) => {
   console.error("yacr: startup failed", error);
-  setState("启动失败：" + error);
+  window.yacrStartupError = String(error);
+  setStateKey("host.startup_failed", { error: String(error) });
 });
