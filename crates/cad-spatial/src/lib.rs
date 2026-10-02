@@ -10,7 +10,8 @@ pub mod pick;
 pub use pick::{
     hit_geometry, pick_closest, ray_segment_closest, ray_triangle, validate_ray, BackFacePolicy,
     GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
-    MAX_PICK_SEGMENTS, MIN_RAY_DIRECTION,
+    MAX_PICK_SEGMENTS, MIN_RAY_DIRECTION, REASON_FACE_SOURCES_ABSENT, REASON_FACE_SOURCE_MISSING,
+    REASON_FACE_SOURCE_OUT_OF_RANGE,
 };
 
 #[derive(Debug, Clone)]
@@ -22,6 +23,9 @@ pub struct SpatialEntry {
 /// A precise pick: the selected object, the world point, and the depth.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickHit {
+    /// Exact identity of the hit: `document + entity + instance + sub_element`.
+    /// The sub-element is resolved from the geometry (see
+    /// [`pick::GeometryHit::sub_element`]).
     pub source: SelectionRef,
     pub point: Point3,
     /// Distance along the unit pick ray; the primary hit ordering.
@@ -30,6 +34,11 @@ pub struct PickHit {
     pub offset: f64,
     pub precision: Precision,
     pub geometry_source: GeometrySource,
+    /// Machine key explaining why `source.sub_element` is `None` for geometry
+    /// that is *sub-element-addressable* (a mesh face). `None` when the
+    /// geometry has no sub-element concept at all (lines, curves, points) or
+    /// when a sub-element was resolved. Never translated prose.
+    pub sub_element_reason: Option<&'static str>,
 }
 
 pub trait SpatialIndex {

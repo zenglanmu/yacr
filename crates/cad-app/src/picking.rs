@@ -218,6 +218,7 @@ pub fn filter_by_index(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::selection::SelectionSet;
     use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
     use cad_spatial::{GridSpatialIndex, SpatialEntry};
 
@@ -508,6 +509,231 @@ mod tests {
             BackFacePolicy::Cull,
         );
         assert!(matches!(result, Err(CadError::InvalidInput(_))));
+    }
+
+    fn face(key: &str) -> SubElementId {
+        SubElementId {
+            source_key: key.into(),
+            topology_revision: Revision(0),
+        }
+    }
+
+    /// Two coplanar triangles at z = 2 (centres x = -1 and x = 1) with distinct
+    /// stable face sources.
+    fn two_face_mesh() -> Mesh {
+        Mesh {
+            vertices: vec![
+                p(-2.0, -1.0, 2.0),
+                p(-1.0, 1.0, 2.0),
+                p(0.0, -1.0, 2.0),
+                p(0.0, -1.0, 2.0),
+                p(1.0, 1.0, 2.0),
+                p(2.0, -1.0, 2.0),
+            ],
+            triangles: vec![[0, 1, 2], [3, 4, 5]],
+            normals: Vec::new(),
+            face_sources: vec![Some(face("face-a")), Some(face("face-b"))],
+        }
+    }
+
+    fn mesh_database() -> DrawingDatabase {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(9));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(entity(50, SemanticGeometry::Mesh(two_face_mesh()), 0))
+            .unwrap();
+        b.finish().unwrap()
+    }
+
+    #[test]
+    fn screen_pick_propagates_the_mesh_face_sub_element() {
+        let db = mesh_database();
+        let doc = DocumentId(9);
+        let options = PickOptions::new(1e-6).unwrap();
+        let a = pick_ray(
+            &db,
+            doc,
+            &Ray3 {
+                origin: p(-1.0, 0.0, 0.0),
+                direction: p(0.0, 0.0, 1.0),
+            },
+            &options,
+        )
+        .unwrap()
+        .hit
+        .expect("face a is hit");
+        let b = pick_ray(
+            &db,
+            doc,
+            &Ray3 {
+                origin: p(1.0, 0.0, 0.0),
+                direction: p(0.0, 0.0, 1.0),
+            },
+            &options,
+        )
+        .unwrap()
+        .hit
+        .expect("face b is hit");
+        assert_eq!(a.source.entity, EntityId(50));
+        assert_eq!(b.source.entity, EntityId(50));
+        assert_eq!(
+            a.source.sub_element.as_ref().map(|s| s.source_key.as_str()),
+            Some("face-a")
+        );
+        assert_eq!(
+            b.source.sub_element.as_ref().map(|s| s.source_key.as_str()),
+            Some("face-b")
+        );
+        assert_ne!(a.source, b.source, "two faces select differently");
+        assert!(a.sub_element_reason.is_none());
+    }
+
+    #[test]
+    fn mesh_without_a_face_source_is_unresolved_with_a_reason() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(10));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        let mut mesh = two_face_mesh();
+        mesh.face_sources = Vec::new();
+        b.insert_entity(entity(51, SemanticGeometry::Mesh(mesh), 0))
+            .unwrap();
+        let db = b.finish().unwrap();
+        let hit = pick_ray(
+            &db,
+            DocumentId(10),
+            &Ray3 {
+                origin: p(-1.0, 0.0, 0.0),
+                direction: p(0.0, 0.0, 1.0),
+            },
+            &PickOptions::new(1e-6).unwrap(),
+        )
+        .unwrap()
+        .hit
+        .expect("the mesh is still hit");
+        // The entity is resolved; only the sub-element is not, and it says why.
+        assert_eq!(hit.source.entity, EntityId(51));
+        assert!(hit.source.sub_element.is_none());
+        assert_eq!(
+            hit.sub_element_reason,
+            Some(cad_spatial::REASON_FACE_SOURCES_ABSENT)
+        );
+    }
+
+    /// A block whose only child is a two-face mesh; two INSERT placements of the
+    /// same block must still resolve the *same* face id on each instance.
+    fn mesh_insert_database() -> DrawingDatabase {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(11));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_block(BlockDefinition {
+            id: BlockId(0),
+            entities: vec![EntityId(200)],
+        })
+        .unwrap();
+        b.insert_entity(space_entity(
+            200,
+            SemanticGeometry::Mesh(two_face_mesh()),
+            0,
+            SpaceId::Block(BlockId(0)),
+        ))
+        .unwrap();
+        for (id, x) in [(10u128, 10.0), (20, 20.0)] {
+            b.insert_entity(entity(
+                id,
+                SemanticGeometry::Insert {
+                    block: BlockId(0),
+                    transform: Transform3::translation(p(x, 0.0, 0.0)),
+                },
+                id as i64,
+            ))
+            .unwrap();
+        }
+        b.finish().unwrap()
+    }
+
+    #[test]
+    fn sub_element_is_stable_across_two_insert_instances() {
+        let db = mesh_insert_database();
+        let doc = DocumentId(11);
+        let options = PickOptions::new(1e-6).unwrap();
+        // The block's face A centre is local x = -1; instance 1 places it at
+        // world x = 9, instance 2 at world x = 19.
+        let first = pick_ray(
+            &db,
+            doc,
+            &Ray3 {
+                origin: p(9.0, 0.0, 0.0),
+                direction: p(0.0, 0.0, 1.0),
+            },
+            &options,
+        )
+        .unwrap()
+        .hit
+        .expect("first instance face is hit");
+        let second = pick_ray(
+            &db,
+            doc,
+            &Ray3 {
+                origin: p(19.0, 0.0, 0.0),
+                direction: p(0.0, 0.0, 1.0),
+            },
+            &options,
+        )
+        .unwrap()
+        .hit
+        .expect("second instance face is hit");
+
+        assert_eq!(first.source.entity, EntityId(200));
+        assert_eq!(first.source.instance, InstancePath(vec![EntityId(10)]));
+        assert_eq!(second.source.entity, EntityId(200));
+        assert_eq!(second.source.instance, InstancePath(vec![EntityId(20)]));
+        // Same stable face id — the instance path is what separates them.
+        assert_eq!(first.source.sub_element, second.source.sub_element);
+        assert_eq!(
+            first
+                .source
+                .sub_element
+                .as_ref()
+                .map(|s| s.source_key.as_str()),
+            Some("face-a")
+        );
+        assert_ne!(first.source, second.source);
+    }
+
+    #[test]
+    fn a_face_selection_differs_from_its_entity_and_from_an_edge() {
+        let doc = DocumentId(9);
+        let base = SelectionRef {
+            document: doc,
+            entity: EntityId(50),
+            instance: InstancePath::default(),
+            sub_element: None,
+        };
+        let face_ref = SelectionRef {
+            sub_element: Some(face("face-a")),
+            ..base.clone()
+        };
+        // A line/edge pick is whole-entity (sub_element stays None).
+        let mut set = SelectionSet::new();
+        assert!(set.insert(base.clone()));
+        assert!(set.insert(face_ref.clone()));
+        assert_eq!(set.len(), 2, "entity and one of its faces are distinct");
+        assert_ne!(
+            SelectionSet::identity_label(&base),
+            SelectionSet::identity_label(&face_ref)
+        );
     }
 
     #[test]
