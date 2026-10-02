@@ -268,6 +268,7 @@ mod tests {
         b.insert_block(BlockDefinition {
             id: BlockId(0),
             entities: vec![EntityId(100)],
+            dynamic_visibility: None,
         })
         .unwrap();
         b.insert_entity(space_entity(
@@ -641,6 +642,7 @@ mod tests {
         b.insert_block(BlockDefinition {
             id: BlockId(0),
             entities: vec![EntityId(200)],
+            dynamic_visibility: None,
         })
         .unwrap();
         b.insert_entity(space_entity(

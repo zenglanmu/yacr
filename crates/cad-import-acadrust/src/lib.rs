@@ -4,7 +4,7 @@
 //! block definitions → proxy supplement → normalise into the database. The
 //! library is never modified and nothing here assumes internal hooks.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -354,6 +354,11 @@ struct ImporterBuilder<'a> {
     /// block's base point onto its insertion point, so expansion subtracts it
     /// (`world = insert * (local - base)`, audit B31).
     block_base_points: HashMap<String, Point3>,
+    /// Per block: source handle value -> imported entity id, and -> actual
+    /// visible flag. Used to map a visibility parameter's handles, including
+    /// the evaluated-anonymous-block path resolved per INSERT.
+    block_member_ids: HashMap<BlockId, BTreeMap<u64, EntityId>>,
+    block_member_visible: HashMap<BlockId, BTreeMap<u64, bool>>,
     layout_ids: HashMap<String, LayoutId>,
     next_entity: u128,
     next_object: u128,
@@ -382,6 +387,7 @@ struct BlockMember {
 }
 
 mod builder;
+mod dynamic;
 mod entity;
 mod geometry;
 mod hatch;
@@ -389,6 +395,7 @@ mod plot;
 mod style;
 mod support;
 
+use dynamic::*;
 use geometry::*;
 use hatch::*;
 use plot::read_plot_settings;

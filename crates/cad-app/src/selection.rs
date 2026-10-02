@@ -435,6 +435,7 @@ mod tests {
         b.insert_block(BlockDefinition {
             id: BlockId(0),
             entities: vec![EntityId(20)],
+            dynamic_visibility: None,
         })
         .unwrap();
         b.insert_entity(entity(

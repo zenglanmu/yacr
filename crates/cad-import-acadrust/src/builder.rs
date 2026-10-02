@@ -43,6 +43,8 @@ impl<'a> ImporterBuilder<'a> {
             style_fonts: HashMap::new(),
             block_ids: HashMap::new(),
             block_base_points: HashMap::new(),
+            block_member_ids: HashMap::new(),
+            block_member_visible: HashMap::new(),
             layout_ids: HashMap::new(),
             next_entity: 1,
             next_object: 1,
@@ -386,6 +388,7 @@ impl<'a> ImporterBuilder<'a> {
             self.builder.insert_block(BlockDefinition {
                 id,
                 entities: Vec::new(),
+                dynamic_visibility: None,
             })?;
         }
         Ok(())
@@ -409,9 +412,22 @@ impl<'a> ImporterBuilder<'a> {
                 continue;
             };
             let mut entity_ids = Vec::new();
+            // Source handle value -> entity id, and -> actual visible flag, for
+            // this block's members. Used to map the dynamic visibility
+            // parameter's handles onto imported entities and to resolve the
+            // active state from the members' `invisible` flags.
+            let mut member_ids: BTreeMap<u64, EntityId> = BTreeMap::new();
+            let mut member_visible: BTreeMap<u64, bool> = BTreeMap::new();
             for entity in self.acad.entities_in_block(&block.name) {
+                if let EntityType::Insert(insert) = entity {
+                    self.record_insert_dynamic_visibility(insert);
+                }
+                let handle_value = entity.common().handle.value();
+                let visible = !entity.common().invisible;
                 if let Some(e) = self.push_entity(entity, SpaceId::Block(id), self.model_layout) {
                     entity_ids.push(e);
+                    member_ids.insert(handle_value, e);
+                    member_visible.insert(handle_value, visible);
                 }
                 since_report += 1;
                 if since_report >= batch {
@@ -424,12 +440,21 @@ impl<'a> ImporterBuilder<'a> {
             self.builder.insert_block(BlockDefinition {
                 id,
                 entities: entity_ids,
+                dynamic_visibility: None,
             })?;
+            // A parameter owned directly by this definition (no evaluated
+            // representation object) resolves against this block's members.
+            self.record_dynamic_visibility(block.handle, id, &member_ids, &member_visible);
+            self.block_member_ids.insert(id, member_ids);
+            self.block_member_visible.insert(id, member_visible);
         }
 
         // Model space: the primary drawable set.
         let model_space = self.model_space_id();
         for entity in self.acad.model_space_entities() {
+            if let EntityType::Insert(insert) = entity {
+                self.record_insert_dynamic_visibility(insert);
+            }
             self.push_entity(entity, SpaceId::Model, model_space);
             since_report += 1;
             if since_report >= batch {
@@ -441,6 +466,9 @@ impl<'a> ImporterBuilder<'a> {
         // Paper space.
         for (name, layout) in self.layout_ids.clone() {
             for entity in self.acad.entities_in_block(&name) {
+                if let EntityType::Insert(insert) = entity {
+                    self.record_insert_dynamic_visibility(insert);
+                }
                 self.push_entity(entity, SpaceId::Paper(layout), layout);
                 since_report += 1;
                 if since_report >= batch {
@@ -457,6 +485,96 @@ impl<'a> ImporterBuilder<'a> {
             self.report_entities(total);
         }
         Ok(())
+    }
+
+    /// Attach a dynamic visibility descriptor to an imported block, when the
+    /// source carries an `AcDbBlockVisibilityParameter` for its definition.
+    ///
+    /// The descriptor is optional: a block with no visibility parameter is left
+    /// untouched. A parameter that cannot be mapped exactly (dangling member
+    /// handles, or an active state that cannot be resolved from the members'
+    /// visibility flags) is recorded with a stable `Partial` reason and an
+    /// explicit diagnostic; the active state is never guessed.
+    pub(crate) fn record_dynamic_visibility(
+        &mut self,
+        def_handle: acadrust::Handle,
+        id: BlockId,
+        member_ids: &BTreeMap<u64, EntityId>,
+        member_visible: &BTreeMap<u64, bool>,
+    ) {
+        let Some(param) = self.acad.block_visibility_param_for_def(def_handle) else {
+            return;
+        };
+        self.attach_dynamic_visibility(id, param, member_ids, member_visible);
+    }
+
+    /// Attach a dynamic visibility descriptor resolved through an INSERT.
+    ///
+    /// A real evaluated dynamic block stores the visibility parameter on the
+    /// dynamic *definition*, reachable from the INSERT through an
+    /// `AcDbBlockRepresentationData` object. The INSERT expands the block record
+    /// it references (the evaluated anonymous block), whose members the
+    /// parameter governs, so the descriptor is mapped against that block's
+    /// members. Blocks are always read before entity space, so the member maps
+    /// are available here.
+    pub(crate) fn record_insert_dynamic_visibility(&mut self, insert: &acadrust::entities::Insert) {
+        let insert_handle = insert.common.handle;
+        let Some((_def_block, param)) = self.acad.dynamic_visibility_for_insert(insert_handle)
+        else {
+            return;
+        };
+        let Some(id) = self.block_ids.get(&insert.block_name).copied() else {
+            return;
+        };
+        // Resolve with an immutable borrow of the stored member maps, then
+        // release it before recording (which needs `&mut self`).
+        let mapped = {
+            let (Some(member_ids), Some(member_visible)) = (
+                self.block_member_ids.get(&id),
+                self.block_member_visible.get(&id),
+            ) else {
+                return;
+            };
+            map_visibility(param, member_ids, member_visible)
+        };
+        self.attach_mapped(id, mapped);
+    }
+
+    /// Map a resolved parameter onto a block and record it, reporting any
+    /// partial mapping as an explicit diagnostic.
+    fn attach_dynamic_visibility(
+        &mut self,
+        id: BlockId,
+        param: &acadrust::objects::BlockVisibilityParameter,
+        member_ids: &BTreeMap<u64, EntityId>,
+        member_visible: &BTreeMap<u64, bool>,
+    ) {
+        let mapped = map_visibility(param, member_ids, member_visible);
+        self.attach_mapped(id, mapped);
+    }
+
+    fn attach_mapped(&mut self, id: BlockId, mapped: MappedVisibility) {
+        if let Completeness::Partial(reasons) = &mapped.completeness {
+            self.diagnostics.push(Diagnostic {
+                object: None,
+                code: "import.dynamic_block_visibility".into(),
+                message: format!(
+                    "block {:?} dynamic visibility is partial: {}",
+                    id,
+                    reasons.join(", ")
+                ),
+            });
+        }
+        if let Err(e) = self
+            .builder
+            .set_block_dynamic_visibility(id, mapped.descriptor)
+        {
+            self.diagnostics.push(Diagnostic {
+                object: None,
+                code: "import.dynamic_block_failed".into(),
+                message: e.to_string(),
+            });
+        }
     }
 
     /// Resolve each block's render status from its children, iterating to a

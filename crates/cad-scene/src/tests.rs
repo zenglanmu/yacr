@@ -715,3 +715,53 @@ fn out_of_range_fragment_alpha_is_clamped_for_the_batch() {
     let delta = cache.build(&rep, stamp()).unwrap();
     assert_eq!(delta.added[0].alpha, 1.0);
 }
+
+// ---- Dynamic-block visibility delta (spec §3.2 / incremental update) ----
+
+#[test]
+fn visibility_switch_invalidates_only_the_delta_members() {
+    // Three member chunks are on the CPU cache: 50, 51 and 52. A visibility
+    // switch A -> B removes member 50's geometry and adds member 52's; 51 is
+    // common to both states and must stay cached.
+    let mut cache = SceneCache::default();
+    for entity in [50u128, 51, 52] {
+        let rep = line_representation(
+            entity,
+            vec![
+                Point3 {
+                    x: entity as f64,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: entity as f64,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ],
+        );
+        let delta = cache.build(&rep, stamp()).unwrap();
+        cache.publish(delta, &stamp()).unwrap();
+    }
+    assert_eq!(cache.chunk_count(), 3);
+
+    // The exact ChangeSet the database publishes for switching A -> B:
+    // member 50 leaves, member 52 enters, member 51 is untouched.
+    let changes = ChangeSet {
+        database: DatabaseId(1),
+        before: Revision(0),
+        after: Revision(1),
+        transaction: TransactionId(9),
+        reason: "dynamic visibility A -> B".into(),
+        changes: vec![
+            ObjectChange::Update(ObjectId(50), cad_db::ChangeMask::GEOMETRY),
+            ObjectChange::Update(ObjectId(52), cad_db::ChangeMask::GEOMETRY),
+        ],
+    };
+    cache.apply_changes(&changes).unwrap();
+
+    // Only member 51's chunk survives; the changed members were invalidated.
+    assert_eq!(cache.chunk_count(), 1);
+    let survivor = cache.chunks().next().unwrap();
+    assert_eq!(survivor.sources[0].entity, EntityId(51));
+}

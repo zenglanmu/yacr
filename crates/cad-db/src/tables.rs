@@ -29,6 +29,82 @@ pub struct LineType {
 pub struct BlockDefinition {
     pub id: BlockId,
     pub entities: Vec<EntityId>,
+    /// Optional dynamic-block visibility descriptor (spec §3.2).
+    ///
+    /// `None` for an ordinary block, so non-dynamic definitions are unchanged.
+    /// When present, the active state selects which member entities are drawn.
+    pub dynamic_visibility: Option<DynamicBlockVisibility>,
+}
+
+/// One named visibility state of a dynamic block definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynamicBlockState {
+    /// State name exactly as stored in the drawing's lookup list.
+    pub name: String,
+    /// Member entities visible while this state is active.
+    pub entities: Vec<EntityId>,
+}
+
+/// The visibility descriptor of a dynamic block definition.
+///
+/// This mirrors acadrust's `BlockVisibilityParameter`: the drawing keeps the
+/// geometry for every state in one anonymous block and marks the other states'
+/// entities invisible. The descriptor records which member entities each state
+/// makes visible and which state is currently active, so switching never has to
+/// re-import or re-evaluate the base drawing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynamicBlockVisibility {
+    /// Member entities the parameter governs (the union of every state). These
+    /// are the only entities the active state may hide; entities outside this
+    /// set (structural markers, ungoverned geometry) always remain visible.
+    pub member_entities: Vec<EntityId>,
+    /// Selectable states, in list order.
+    pub states: Vec<DynamicBlockState>,
+    /// The currently active state, when it could be determined honestly.
+    ///
+    /// `None` means the importer could not resolve it (reported as `Partial`
+    /// with a stable reason code); the descriptor then exposes no restricted
+    /// set and every governed entity is drawn rather than guessing a state.
+    pub active_state: Option<String>,
+}
+
+impl DynamicBlockVisibility {
+    /// Names of every selectable state, in list order.
+    pub fn state_names(&self) -> Vec<&str> {
+        self.states.iter().map(|s| s.name.as_str()).collect()
+    }
+
+    /// A state by exact name.
+    pub fn state(&self, name: &str) -> Option<&DynamicBlockState> {
+        self.states.iter().find(|s| s.name == name)
+    }
+
+    /// Whether the block defines a state with this exact name.
+    pub fn has_state(&self, name: &str) -> bool {
+        self.state(name).is_some()
+    }
+
+    /// Entities the active state makes visible, or `None` when no active state
+    /// was resolved (the caller then draws every governed entity).
+    pub fn active_entities(&self) -> Option<&[EntityId]> {
+        let active = self.active_state.as_deref()?;
+        self.state(active).map(|s| s.entities.as_slice())
+    }
+
+    /// Whether a member entity is visible under the active state.
+    ///
+    /// An entity outside `member_entities` is ungoverned and always visible. If
+    /// no active state is known, every member stays visible: an unresolved
+    /// active state must not hide geometry on a guess.
+    pub fn is_visible(&self, entity: EntityId) -> bool {
+        if !self.member_entities.contains(&entity) {
+            return true;
+        }
+        match self.active_entities() {
+            Some(visible) => visible.contains(&entity),
+            None => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

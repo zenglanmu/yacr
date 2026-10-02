@@ -5,10 +5,11 @@ use std::collections::BTreeMap;
 use cad_domain::*;
 
 use crate::bounds::{BoundsAccumulator, MAX_INSTANCE_DEPTH};
+use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::tables::{
-    BlockDefinition, Layer, Layout, LineType, PlotMargins, PlotPaperUnits, PlotProvenance,
-    PlotRotation, PlotSettingsRecord, PlotType, Style,
+    BlockDefinition, DynamicBlockVisibility, Layer, Layout, LineType, PlotMargins, PlotPaperUnits,
+    PlotProvenance, PlotRotation, PlotSettingsRecord, PlotType, Style,
 };
 
 /// The authoritative, read-only-after-import drawing database.
@@ -96,6 +97,125 @@ impl DrawingDatabase {
         self.blocks.get(&id)
     }
 
+    /// The dynamic-block visibility descriptor of a block, if it has one.
+    pub fn block_dynamic_visibility(&self, id: BlockId) -> Option<&DynamicBlockVisibility> {
+        self.blocks.get(&id)?.dynamic_visibility.as_ref()
+    }
+
+    /// Member entities the block's active visibility state makes visible.
+    ///
+    /// `None` when the block carries no visibility descriptor. When a
+    /// descriptor exists but its active state is unknown, this returns the full
+    /// governed set so an unresolved state never silently hides geometry.
+    pub fn block_visible_entities(&self, id: BlockId) -> Option<Vec<EntityId>> {
+        let block = self.blocks.get(&id)?;
+        let visibility = block.dynamic_visibility.as_ref()?;
+        let visible: Vec<EntityId> = block
+            .entities
+            .iter()
+            .copied()
+            .filter(|e| visibility.is_visible(*e))
+            .collect();
+        Some(visible)
+    }
+
+    /// Switch a dynamic block's active visibility state.
+    ///
+    /// This is the controlled write path for a visibility grip switch: it
+    /// validates the state against the block's own descriptor (an unknown state
+    /// is rejected, never guessed), updates the authoritative active state,
+    /// raises the revision, and publishes a [`ChangeSet`] whose changes are the
+    /// entities that entered or left the visible set. The scene cache therefore
+    /// invalidates only this block's affected geometry (spec §4.6 / 增量更新),
+    /// and the representation re-derives from the database without re-importing
+    /// the base drawing.
+    ///
+    /// A block with no visibility descriptor cannot be toggled and is rejected
+    /// explicitly. A block whose active state was unresolved can be switched:
+    /// before the switch every governed member is considered visible, so the
+    /// emitted delta honestly reflects whatever the target state hides.
+    pub fn set_block_visibility_state(
+        &mut self,
+        block: BlockId,
+        state: &str,
+        transaction: TransactionId,
+        reason: &str,
+    ) -> CadResult<ChangeSet> {
+        let before = self.revision;
+        let current = self
+            .blocks
+            .get(&block)
+            .and_then(|b| b.dynamic_visibility.as_ref())
+            .ok_or_else(|| {
+                CadError::InvalidInput(format!("block {block:?} has no dynamic visibility states"))
+            })?;
+        if !current.has_state(state) {
+            return Err(CadError::InvalidInput(format!(
+                "block {block:?} does not define visibility state '{state}'"
+            )));
+        }
+        if current.active_state.as_deref() == Some(state) {
+            // Already active: no authoritative change, so no revision bump and
+            // no fabricated ChangeSet.
+            return Ok(ChangeSet {
+                database: self.id,
+                before,
+                after: before,
+                transaction,
+                reason: reason.to_string(),
+                changes: Vec::new(),
+            });
+        }
+
+        // Entities that enter or leave the visible set. Ungoverned entities are
+        // visible in both states and never appear here.
+        let visible_before = self.block_visible_entities(block).unwrap_or_default();
+        let members: Vec<EntityId> = current.member_entities.clone();
+        let target_visible: Vec<EntityId> = match current.state(state) {
+            Some(s) => members
+                .iter()
+                .copied()
+                .filter(|e| s.entities.contains(e))
+                .collect(),
+            None => Vec::new(),
+        };
+        let mut affected: Vec<EntityId> = visible_before
+            .iter()
+            .chain(target_visible.iter())
+            .copied()
+            .collect();
+        affected.sort();
+        affected.dedup();
+        let affected: Vec<EntityId> = affected
+            .into_iter()
+            .filter(|e| {
+                let before = visible_before.contains(e);
+                let after = target_visible.contains(e);
+                before != after
+            })
+            .collect();
+
+        if let Some(block_def) = self.blocks.get_mut(&block) {
+            if let Some(vis) = block_def.dynamic_visibility.as_mut() {
+                vis.active_state = Some(state.to_string());
+            }
+        }
+        let after = Revision(before.0 + 1);
+        self.revision = after;
+        let changes = affected
+            .into_iter()
+            .map(|e| ObjectChange::Update(ObjectId(e.0), ChangeMask::GEOMETRY))
+            .collect();
+        Ok(ChangeSet {
+            database: self.id,
+            before,
+            after,
+            transaction,
+            reason: reason.to_string(),
+            changes,
+        })
+    }
+
     pub fn blocks(&self) -> impl Iterator<Item = &BlockDefinition> {
         self.blocks.values()
     }
@@ -178,6 +298,12 @@ impl DrawingDatabase {
     }
 
     /// Entities of a block definition, in draw order.
+    ///
+    /// For a dynamic block with a resolved active visibility state, only the
+    /// entities that state makes visible are returned (spec §3.2); ungoverned
+    /// entities always remain. Without a descriptor (or with an unresolved
+    /// active state) every member is returned, so a guess can never hide
+    /// geometry.
     pub fn block_entities(&self, id: BlockId) -> Vec<&DbEntity> {
         let Some(block) = self.blocks.get(&id) else {
             return Vec::new();
@@ -185,6 +311,13 @@ impl DrawingDatabase {
         let mut v: Vec<&DbEntity> = block
             .entities
             .iter()
+            .filter(|e| {
+                block
+                    .dynamic_visibility
+                    .as_ref()
+                    .map(|vis| vis.is_visible(**e))
+                    .unwrap_or(true)
+            })
             .filter_map(|e| self.entities.get(e))
             .collect();
         v.sort_by_key(|e| e.draw_order);
