@@ -140,20 +140,7 @@ fn pz(x: f64, y: f64, z: f64) -> Point3 {
 }
 
 fn class_name(geometry: &SemanticGeometry) -> &'static str {
-    match geometry {
-        SemanticGeometry::Line { .. } => "AcDbLine",
-        SemanticGeometry::Circle { .. } => "AcDbCircle",
-        SemanticGeometry::Polyline { .. } => "AcDbPolyline",
-        SemanticGeometry::Arc { .. } => "AcDbArc",
-        SemanticGeometry::Ellipse { .. } => "AcDbEllipse",
-        SemanticGeometry::Spline { .. } => "AcDbSpline",
-        SemanticGeometry::Mesh(_) => "AcDbSubDMesh",
-        SemanticGeometry::Insert { .. } => "AcDbBlockReference",
-        SemanticGeometry::Text { .. } => "AcDbText",
-        SemanticGeometry::Point(_) => "AcDbPoint",
-        SemanticGeometry::Opaque { .. } => "AcDbUnknown",
-        SemanticGeometry::Compound(_) => "AcDbCompound",
-    }
+    crate::app_drawing::class_name(geometry)
 }
 
 /// Result of a successful drawing open, for status lines and diagnostics.
@@ -608,6 +595,78 @@ impl HostController {
             payload: crate::CommandPayload::Annotation(Box::new(command)),
         };
         self.execute(command)
+    }
+
+    /// Set the session's active drawing layer through the command path.
+    ///
+    /// Session state only: no transaction, no history. The create commands
+    /// validate the layer against the drawing before writing.
+    pub fn set_active_layer(&mut self, layer: LayerId) -> CadResult<()> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::SetActiveLayer,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::ActiveLayer(layer),
+        })?;
+        Ok(())
+    }
+
+    /// Draw a LINE through two world points in one transaction (spec F-EDIT).
+    pub fn create_line(&mut self, start: Point3, end: Point3) -> CadResult<CommandOutcome> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::CreateLine,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::Points(vec![start, end]),
+        })
+    }
+
+    /// Draw a CIRCLE from a centre and an edge point in one transaction.
+    pub fn create_circle(&mut self, center: Point3, edge: Point3) -> CadResult<CommandOutcome> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::CreateCircle,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::Points(vec![center, edge]),
+        })
+    }
+
+    /// Move a set of selected refs by a world delta in one transaction.
+    pub fn move_entities(
+        &mut self,
+        refs: Vec<SelectionRef>,
+        delta: Point3,
+    ) -> CadResult<CommandOutcome> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::MoveEntities,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::Move { refs, delta },
+        })
+    }
+
+    /// Trim one target against a boundary in one transaction (spec §3 subset).
+    pub fn trim_entity(
+        &mut self,
+        target: SelectionRef,
+        boundary: Vec<SelectionRef>,
+        pick_point: Point3,
+    ) -> CadResult<CommandOutcome> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::TrimEntity,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::Trim {
+                target,
+                boundary,
+                pick_point,
+            },
+        })
     }
 
     pub fn status(&self) -> &str {
@@ -1292,5 +1351,40 @@ mod tests {
             .unwrap();
         assert_eq!(annotation.id, AnnotationId(7));
         assert_eq!(annotation.text, "recovered");
+    }
+
+    #[test]
+    fn host_drawing_commands_round_trip_with_undo() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let before = controller.drawing().unwrap().entity_count();
+
+        // Create a line on layer 0 (the demo's default active layer).
+        let outcome = controller.create_line(p(0.0, 0.0), p(100.0, 0.0)).unwrap();
+        assert_eq!(outcome.objects.len(), 1);
+        assert_eq!(controller.drawing().unwrap().entity_count(), before + 1);
+        assert!(controller.application.can_undo(&controller.document_id));
+        assert!(controller.history_availability().can_undo);
+
+        // Undo removes it.
+        controller
+            .execute(Command {
+                schema_version: 1,
+                id: crate::CommandId::Undo,
+                document: controller.document_id,
+                viewport: controller.viewport_id,
+                payload: crate::CommandPayload::None,
+            })
+            .unwrap();
+        assert_eq!(controller.drawing().unwrap().entity_count(), before);
+    }
+
+    #[test]
+    fn host_drawing_commands_are_refused_in_viewer_mode() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller.set_mode(AppMode::Viewer).unwrap();
+        let before = controller.drawing().unwrap().entity_count();
+        let result = controller.create_circle(p(0.0, 0.0), p(10.0, 0.0));
+        assert!(matches!(result, Err(CadError::PermissionDenied)));
+        assert_eq!(controller.drawing().unwrap().entity_count(), before);
     }
 }

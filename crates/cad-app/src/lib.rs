@@ -131,6 +131,21 @@ pub enum CommandId {
     /// not a Work-only operation, but it cancels any unconfirmed tool. The
     /// command layer still refuses every Work-only command while in Viewer mode.
     SetMode,
+    /// Draw a LINE through two payload points into model space. Work-only.
+    CreateLine,
+    /// Draw a CIRCLE with a centre and an edge point. The radius is the exact
+    /// centre→edge distance and must be positive. Work-only.
+    CreateCircle,
+    /// Translate one or more selected entities by a world delta. Exactly one
+    /// transaction and one undo step for the whole selection. Work-only.
+    MoveEntities,
+    /// Trim one LINE against LINE/LWPOLYLINE segments (the honest subset of
+    /// §3 of `docs/drawing-edit.md`); anything else is an explicit refusal that
+    /// changes nothing. Work-only.
+    TrimEntity,
+    /// Set the session's active layer for new drawing entities. Session state
+    /// only; no database write. Work-only.
+    SetActiveLayer,
 }
 
 impl CommandId {
@@ -154,6 +169,11 @@ impl CommandId {
                 | Self::Undo
                 | Self::Redo
                 | Self::ImportAnnotations
+                | Self::CreateLine
+                | Self::CreateCircle
+                | Self::MoveEntities
+                | Self::TrimEntity
+                | Self::SetActiveLayer
         )
     }
 }
@@ -196,6 +216,14 @@ pub struct SessionState {
     pub generation: u64,
     /// Recorded CAD backend preference; the host rebuilds the render session.
     pub backend: BackendChoice,
+    /// The session's active layer for new drawing entities (spec F-EDIT).
+    ///
+    /// Purely session state: it selects where [`CommandId::CreateLine`] /
+    /// [`CommandId::CreateCircle`] place a new entity and never mutates the
+    /// drawing's layer table. The default is layer `0`, which every drawing is
+    /// required to have; a create naming a layer the database does not contain
+    /// is an explicit `InvalidInput` rather than a silent fallback.
+    pub active_layer: LayerId,
     /// The last structured measurement result produced in this session (F06).
     ///
     /// Set when a measurement is evaluated (auto-completed or explicitly
@@ -226,6 +254,7 @@ impl SessionState {
             selected_annotation: None,
             generation: 0,
             backend: BackendChoice::Auto,
+            active_layer: LayerId(0),
             last_measurement: None,
         }
     }
@@ -546,6 +575,24 @@ pub enum CommandPayload {
     /// Replace the current selection with these refs (read-only; never writes
     /// the DWG). An empty list clears the selection.
     Selection(Vec<SelectionRef>),
+    /// Translate a set of selected refs by a world delta (MOVE, spec F-EDIT).
+    Move {
+        refs: Vec<SelectionRef>,
+        delta: Point3,
+    },
+    /// Trim one target against a list of boundary refs, keeping the side that
+    /// contains `pick_point` (TRIM, spec F-EDIT). See `docs/drawing-edit.md` §3
+    /// for the supported subset.
+    Trim {
+        target: SelectionRef,
+        boundary: Vec<SelectionRef>,
+        pick_point: Point3,
+    },
+    /// Set the session's active layer for new entities. Session state only.
+    ActiveLayer(LayerId),
+    /// A fully formed semantic geometry, used by `CreateLine` as the
+    /// programmatic alternative to a point list.
+    Geometry(Box<SemanticGeometry>),
 }
 
 pub struct Command {
@@ -763,6 +810,7 @@ pub trait Tool {
 }
 
 mod app_annotation;
+mod app_drawing;
 mod app_history;
 mod app_measure;
 mod application;
