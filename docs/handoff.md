@@ -18,6 +18,23 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**verify-ui 无头 UI 循环（本轮）**：新增轻量入口 `scripts/verify-ui.sh` +
+`scripts/verify-ui-summary.py`，对应测试计划第二层：用 Slint 官方 offscreen 平台
+（`Platform`/`WindowAdapter` + FemtoVGWGPURenderer）+ Mesa lavapipe 软件 Vulkan，实际
+运行真实 `LinuxApp`、自动操作控件、逐层超时、截图、panic 扫描、结构化证据包
+（`verify-ui.json`/`environment.json`/`logs`/`screenshots`）。**不安装 X11/Wayland**，
+offscreen 平台即虚拟窗口运行时；`environment.json` 如实记录 `xvfbAvailable=false` 与
+`realDevice=not-run`。新增 `apps/app-linux/tests/verify_ui.rs` 固定场景：测量取消不写库、
+距离自动完成并存批注、撤销重做、LINE 提交、文字批注需文字、图层覆盖恢复、布局/标准视图、
+**2D→3D→2D 合成帧逐像素无损往返**、canvas-only、中英切换、侧车导出回导、四尺寸矩阵。
+首次运行发现脚本预创建证据目录导致 `--headless` 正确拒绝覆盖（exit 17），已修复为不预建；
+场景初版误把“距离可确认”当契约，实际距离两点自动完成、`can_confirm` 只服务开放型工具，
+已改为分别覆盖两条路径。`verify-ui.sh` 全层通过（6 层 + 可选真实图纸层），
+`YACR_TEST_DWG=fixtures/dxf/qcad-examples/entities.dxf` 时 app-dwg 通过；证据
+`/tmp/opencode/yacr-verify-ui-run2-*/`、`...-dwg-*/`、`...-iter-*/`。范围与限制见
+`docs/verify-ui.md`。仍未做：真实 GPU、窗口系统、真实 DWG、真机。
+
+
 **QCAD examples 语料与图元扩展（2026-10-03）**：下载并提交 QCAD `examples/` 其余 9 个
 DXF 与 `flange.svg`（`fixtures/dxf/qcad-examples/`，来源/SHA/许可见 `SOURCE.md` 与
 `fixtures/manifest`）。实现 LEADER（顶点折线+实心箭头）及通用 Polyline、ATTRIB/ATTDEF、

@@ -12,6 +12,7 @@ target/release/yacr-linux                         # 已有桌面环境运行，�
 target/release/yacr-linux --open /absolute/file.dwg --locale en
 target/release/yacr-linux --open /absolute/file.dxf --font times=/absolute/fonts/times.shx
 bash scripts/check-linux-app.sh                   # 无窗口，release App + lavapipe
+bash scripts/verify-ui.sh                         # 无头 UI 调试循环（第二层，见 docs/verify-ui.md）
 ```
 
 `--headless --output <新目录>` 运行同一个 LinuxApp/controller/Slint/共享设备 CAD 桥，只改变

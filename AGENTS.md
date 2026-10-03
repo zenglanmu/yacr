@@ -76,6 +76,9 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
   Vulkan 互相干扰：`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test -p cad-render-wgpu -p cad-cli-tools --locked -- --test-threads=1`。
 - 需要真实 DWG 的测试（如 `cli_contracts` 的 render）设 `YACR_TEST_DWG=<绝对路径>`，否则
   跳过；跳过不是已运行证据。
+- 无头 UI 调试循环（测试计划第二层，可选、非 CI 必需）：`bash scripts/verify-ui.sh`
+  用 Slint offscreen 平台 + lavapipe 实际运行应用、操作控件、截图、扫 panic/超时并产出
+  分层证据包；不安装 X11/Wayland，不等于真实 GPU/窗口/真机，见 `docs/verify-ui.md`。
 - Web 门禁：`scripts/build-web.sh`（需 wasm-bindgen-cli **0.2.129**，与 Cargo.lock 严格一致）
   产出 `web-dist/`；`node --test scripts/test-web-host.mjs scripts/test-web-touch.mjs ...`
   是无 wasm/GPU 的模块契约；浏览器脚本见 `docs/testing-dwg.md`、`docs/validation-web.md`。
