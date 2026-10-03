@@ -3,7 +3,10 @@ import test from "node:test";
 import {
   installTouchNavigation,
   sampleTouches,
+  interactionAllowsTouch,
+  readInteractionAllowsTouch,
 } from "../apps/app-web/web/host/touch.js";
+import { CONFIG_EVENT_NAME } from "../apps/app-web/web/host/config.js";
 
 test("pinch centroid and distance use CSS pixels", () => {
   assert.deepEqual(
@@ -228,4 +231,154 @@ test("second-finger landing and touchcancel abandon drawing capture without a pi
   fire("touchcancel", []);
   assert.equal(cancellations.length, 2);
   assert.deepEqual(picks, []);
+});
+
+test("the interaction predicate is enabled unless touch is explicitly false", () => {
+  assert.equal(
+    interactionAllowsTouch(
+      '{"pointer":true,"touch":false,"keyboardShortcuts":true}',
+    ),
+    false,
+  );
+  assert.equal(interactionAllowsTouch('{"touch":true}'), true);
+  assert.equal(interactionAllowsTouch('{"pointer":false}'), true);
+  // Absent/null/malformed input follows the Rust `touch_enabled()`
+  // `unwrap_or(true)` default: enabled, so the wasm backstop still decides.
+  assert.equal(interactionAllowsTouch(undefined), true);
+  assert.equal(interactionAllowsTouch(""), true);
+  assert.equal(interactionAllowsTouch("null"), true);
+  assert.equal(interactionAllowsTouch("not json"), true);
+  assert.equal(interactionAllowsTouch("[1,2]"), true);
+  // A host that has not started (or lacks the export) is not treated as off.
+  assert.equal(readInteractionAllowsTouch({}), true);
+  assert.equal(readInteractionAllowsTouch(undefined), true);
+  assert.equal(
+    readInteractionAllowsTouch({
+      viewer_interaction_json: () => '{"touch":false}',
+    }),
+    false,
+  );
+});
+
+/// Install the router under a fake canvas + window so the config-changed event
+/// can be emitted, and return helpers beside the captured wasm calls.
+function gatedHarness(interactionJson) {
+  const listeners = new Map();
+  const windowListeners = new Map();
+  const canvas = {
+    addEventListener: (kind, handler) => listeners.set(kind, handler),
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+  };
+  globalThis.document = { getElementById: () => canvas };
+  globalThis.window = {
+    addEventListener: (kind, handler) => windowListeners.set(kind, handler),
+    removeEventListener: (kind) => windowListeners.delete(kind),
+  };
+  const calls = [];
+  const picks = [];
+  let json = interactionJson;
+  installTouchNavigation({
+    canvas_hit_test: () => true,
+    shell_geometry: () => [0, 50, 300, 400],
+    viewer_interaction_json: () => json,
+    touch_navigate: (...args) => calls.push(args),
+    touch_pick: (...args) => picks.push(args),
+    touch_cancel_draw: () => {},
+  });
+  const fire = (kind, points) => {
+    let consumed = false;
+    listeners.get(kind)({
+      touches: points.map(([clientX, clientY]) => ({ clientX, clientY })),
+      preventDefault: () => {
+        consumed = true;
+      },
+      stopImmediatePropagation() {},
+    });
+    return consumed;
+  };
+  const firePointer = (kind, clientX, clientY) => {
+    let consumed = false;
+    listeners.get(kind)({
+      pointerType: "touch",
+      pointerId: 1,
+      clientX,
+      clientY,
+      preventDefault: () => {
+        consumed = true;
+      },
+      stopImmediatePropagation() {},
+    });
+    return consumed;
+  };
+  const configure = (next) => {
+    json = next;
+    windowListeners.get(CONFIG_EVENT_NAME)();
+  };
+  return { fire, firePointer, calls, picks, configure, windowListeners };
+}
+
+test("touch routing is gated by the interaction config and resumes on change", (t) => {
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  t.after(() => {
+    globalThis.document = oldDocument;
+    globalThis.window = oldWindow;
+  });
+  const { fire, firePointer, calls, picks, configure, windowListeners } =
+    gatedHarness('{"touch":false}');
+  assert.equal(
+    typeof windowListeners.get(CONFIG_EVENT_NAME),
+    "function",
+    "the router subscribes to config changes",
+  );
+  // Disabled: no pointer capture and no forwarded touch events.
+  assert.equal(fire("touchstart", [[100, 200]]), false);
+  assert.equal(fire("touchmove", [[110, 210]]), false);
+  assert.equal(fire("touchend", []), false);
+  assert.equal(firePointer("pointerdown", 100, 200), false);
+  assert.equal(calls.length, 0);
+  assert.equal(picks.length, 0);
+  // Re-enabling on the change event takes effect without a reload.
+  configure('{"touch":true}');
+  assert.equal(fire("touchstart", [[100, 200]]), true);
+  assert.equal(firePointer("pointerdown", 100, 200), true);
+  fire("touchend", []);
+  assert.deepEqual(picks, [[100, 150]]);
+});
+
+test("disabling touch abandons the in-flight baseline and restarts clean", (t) => {
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  t.after(() => {
+    globalThis.document = oldDocument;
+    globalThis.window = oldWindow;
+  });
+  const { fire, calls, picks, configure } = gatedHarness('{"touch":true}');
+  fire("touchstart", [[100, 200]]);
+  fire("touchmove", [[110, 210]]);
+  assert.deepEqual(calls.pop(), [10, 10, 1]);
+
+  // Turning touch off drops the stale origin/baseline: no pick on the end.
+  configure('{"touch":false}');
+  assert.equal(fire("touchmove", [[500, 500]]), false);
+  fire("touchend", []);
+  assert.equal(calls.length, 0);
+  assert.equal(picks.length, 0);
+
+  // Re-enabling starts a fresh gesture, not a jump from the abandoned point.
+  configure('{"touch":true}');
+  fire("touchstart", [[120, 240]]);
+  fire("touchend", []);
+  assert.deepEqual(picks, [[120, 190]]);
+});
+
+test("a malformed interaction payload keeps touch enabled through the router", (t) => {
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  t.after(() => {
+    globalThis.document = oldDocument;
+    globalThis.window = oldWindow;
+  });
+  const { fire } = gatedHarness("not json");
+  assert.equal(fire("touchstart", [[100, 200]]), true);
 });

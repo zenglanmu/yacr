@@ -94,6 +94,24 @@ pub fn effective_config_json() -> String {
         .unwrap_or_else(|_| "null".to_string())
 }
 
+/// The effective `interaction` object as compact JSON, or `"null"` before start.
+///
+/// The keys are spelled from the typed `InteractionConfig` fields rather than by
+/// re-slicing `effective_config_json`, so they cannot drift from the `camelCase`
+/// serde form. The JS touch router reads the `touch` leaf to skip capturing or
+/// forwarding while the authoritative `touch_*` exports stay the backstop.
+pub fn interaction_json() -> String {
+    handle()
+        .map(|h| {
+            let interaction = h.effective_config().interaction;
+            format!(
+                "{{\"pointer\":{},\"touch\":{},\"keyboardShortcuts\":{}}}",
+                interaction.pointer, interaction.touch, interaction.keyboard_shortcuts
+            )
+        })
+        .unwrap_or_else(|_| "null".to_string())
+}
+
 fn config_from_error(error: cad_app::viewer_config::ConfigError) -> CadError {
     config_error(&error.path, &error.reason)
 }
