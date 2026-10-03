@@ -45,7 +45,8 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
   不伪造）。内置默认 `axes=true`、`grid=false`，与 `ui-spec/ui-desc.md` 示例和 AutoCAD
   一致。宿主在每次状态漏斗读取有效配置推送，切换只重建瞬态叠加层、不动底图；桌面
   状态栏另有 axes/grid/snapHints 实时开关（经配置存储重推）。捕捉标记的宿主喂入
-  （`CadView::set_snap_hints`）已就绪但宿主适配仍待接线。
+  （`CadView::set_snap_hints`）已接线，并由 Linux/Web 状态漏斗从真实 `drawing_pick_items`
+  候选喂入（`snap_candidates_near`；无光标时清空，实例变换烘焙、不可精确变换者显式跳过）。
 - `interaction.pointer/touch/keyboardShortcuts` 已逐项门控输入：共享 Slint 适配器在
   事件时早退指针/滚轮/画布拾取与拾取映射；命令别名仅在 `keyboardShortcuts` 为真时
   展开（完整命令名仍可用）；Web 触控 wasm 入口在 `touch` 为假时空操作。门控在 Rust

@@ -134,7 +134,10 @@ fn concept_shell_renders_on_lavapipe_and_canvas_only_removes_hit_regions() {
             let frame = pump(&adapter);
             save("mobile-tools", &frame);
             assert!(adapter.component().get_tools_open());
-            click(&adapter, 52.0, 708.0);
+            // The phone drawer now also carries the 52px layout strip above the
+            // fixed bottom bar, so the ribbon content sits 52px higher; target
+            // the measure control accordingly.
+            click(&adapter, 52.0, 656.0);
             assert_eq!(&*commands.borrow(), &[CommandId::Measure]);
             commands.borrow_mut().clear();
             adapter.component().set_tools_open(false);

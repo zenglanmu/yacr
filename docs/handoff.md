@@ -18,6 +18,24 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**迭代 6：宿主捕捉接线 + minimal 命令集收窄 + 紧凑抽屉布局列表**：
+
+- **宿主捕捉接线（`ws-snap-host`）**：`cad_app::host::snap_candidates_near` 从
+  `drawing_pick_items` 构造 `SnapTarget`（烘焙实例变换，无法精确变换的 Text/Spline/Shape/
+  Opaque/Compound 显式跳过，不误捕），`HostController::snap_hints_near_cursor` 在活动工具
+  有世界光标时返回候选；Linux/Web 状态漏斗调用 `view.set_snap_hints`，捕捉提示层首次由
+  真实几何驱动。
+- **minimal 命令集收窄（`ws-minimal-cmds`）**：`preset_command_visible` 显式策略——minimal
+  保留查看/测量/批注/打开/图层/布局/诊断（32 个）并隐藏绘制/编辑/模式/后端（8 个）；新增
+  分区与单调性测试，CanvasOnly ⊆ Minimal ⊆ Full。
+- **紧凑抽屉布局列表（`ws-layout-panel`）**：手机抽屉（`tools-open`）新增 52px 布局条，
+  复用真实 `layout-rows` 切换模型/图纸空间；桌面标签不变。
+
+主控修复：紧凑布局条使手机抽屉上移 52px，更新 `concept_offscreen` 的 measure 点选坐标并
+注明原因。验证：fmt、严格 clippy（含 app-web）、架构/i18n/fixture/workflows、node 六套契约、
+`cargo test --workspace --exclude app-android`（含 app-web）、wasm 全 workspace lib check、
+Android aarch64 check、Linux release 离屏 smoke 全通过。仍为软件 Vulkan/合成。
+
 **迭代 5：浮动溢出弹层 + 状态栏覆盖开关 + 真实捕捉提示**：
 
 - **浮动 ribbon 溢出（`ws-floating-overflow`）**：配置 ribbon 分组超过 6 个命令时，▾ 现弹出
