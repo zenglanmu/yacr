@@ -1,8 +1,9 @@
 # QCAD `flange` DXF 离屏渲染验证（2026-10-03）
 
 本轮按用户要求把 QCAD 的 `flange.dxf` / `flange.png` / `flange.pdf` 作为渲染回归
-样本提交进仓库，记录来源，并补测试代码后跑 Linux 原生离屏渲染。通用步骤见
-[testing-dwg.md](testing-dwg.md)；本文只记录本轮实际执行的证据。
+样本提交进仓库，记录来源，补测试代码并跑 Linux 原生离屏渲染；随后实现无匿名块的
+`DIMENSION` 显示几何合成。通用步骤见 [testing-dwg.md](testing-dwg.md)；本文只记录
+本轮实际执行的证据。
 
 ## 1. 样本与来源
 
@@ -19,17 +20,33 @@
 2026-10-03 经代理 `http://192.168.8.1:10809` 下载，字节未改写。许可见 SOURCE.md
 （QCAD LICENSE.txt：源码 GPLv3 附加例外，图标/文档 CC BY 3.0；`examples/` 无逐文件声明）。
 
-## 2. 测试代码
+## 2. 实现：无匿名块的 DIMENSION 合成
 
-- `scripts/check-dxf-reference.py`（仅标准库）：依次运行 `scan` →
-  `build-representation` → `render`，断言导入/表示/帧 smoke 与适配器类型，解码渲染
-  PNG 与参考 PNG，输出 `summary.json` 及 `review-side-by-side.png` /
-  `review-overlay.png` 供人工对照。它**不**断言 SSIM/IoU 等保真分数。
-- `crates/cad-cli-tools/tests/dxf_fixture.rs`（无需 GPU，进入默认 `cargo test`）：固定
-  已提交样本仍可导入、报告毫米与 `Partial`、表示非空。
-- DXF 的实际渲染仍需 GPU，脚本保持独立、可重复运行，不把它塞进无 GPU 的 CI job。
+`flange.dxf` 的 6 个 `DIMENSION` 没有匿名块（group 2 为空），原先只落为 `Opaque`、
+报告 `Partial`。新增 `crates/cad-import-acadrust/src/dimension.rs`：
 
-## 3. 实际执行
+- 有匿名块仍沿用 `INSERT` 展开（`canteen` 等路径不变）；无块名且块不存在时才合成。
+- 线性/对齐/半径/直径：由定义点 + `DIMSTYLE`（DIMASZ/DIMEXO/DIMEXE/DIMTXT/DIMGAP/
+  DIMTAD/DIMLFAC/DIMDEC/DIMZIN）生成尺寸界线、尺寸线、实心三角箭头（`Mesh`）与测量
+  文字；`<>` 占位符与 `R`/`⌀` 前缀、`DIMZIN` 去尾零、`DIMSCALE` 缩放均处理。
+- 文字样式经 handle→TEXTSTYLE 解析，字体由宿主 `--font name=path` 提供。
+- 角度/坐标/圆弧长/大半径、以及非世界 XY 平面的标注仍显式 `Partial`，不猜测绘制。
+- 单元测试 `dimension.rs` 6 项：对齐尺寸的线/箭头数、文字落点 (0,-28.125)、竖直
+  文字旋转、半径/直径测量、去尾零与 `<>` 替换。
+
+完整性文案由“no display representation for:”改为“display representation not
+verified for:”，因为无块标注现在**有**显示几何，剩余未验证的是依赖宿主字体的文字。
+
+## 3. 测试代码
+
+- `scripts/check-dxf-reference.py`（仅标准库）：跑 `scan` → `build-representation`
+  → `render`，断言导入/表示/非空帧/适配器，解码渲染 PNG 与参考 PNG 输出
+  `summary.json` 及 `review-side-by-side.png` / `review-overlay.png`；支持重复
+  `--font name=path`。它**不**断言 SSIM/IoU 等保真分数。
+- `crates/cad-cli-tools/tests/dxf_fixture.rs`（无需 GPU，进默认 `cargo test`）：固定
+  导入、毫米、`Partial`；表示非空、`meshes >= 8`（合成箭头）、`texts >= 6`（标注文字）。
+
+## 4. 实际执行
 
 环境：`target/release/cad-cli-tools`；`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`；
 真实 wgpu/Vulkan，适配器 **CPU / llvmpipe**，Mesa `26.0.8-1ubuntu0.3`（LLVM `21.1.8`）。
@@ -37,41 +54,48 @@
 
 ```bash
 cargo build -p cad-cli-tools --release --locked
+# 无字体：几何 + 未整形文字占位（文字不绘制）
 python3 scripts/check-dxf-reference.py --out /tmp/opencode/yacr-dxf-reference
+# 带宿主回退字体：测量文字与 MTEXT 整形为线段
+python3 scripts/check-dxf-reference.py \
+  --font "Arial.ttf=/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf" \
+  --out /tmp/opencode/yacr-dxf-reference-font
 cargo test -p cad-cli-tools --test dxf_fixture --locked
 ```
 
-结果（`summary.json`）：
-
-| 阶段 | 实测 | 墙钟 |
+| 阶段 | 无字体 | 带 `Arial.ttf` 回退 |
 |---|---|---|
-| `scan` | 419 entities，223 model entities，13 layers，Millimeter，`status=partial`（`no display representation for: AcDbDimension, AcDbMText`） | 0.171 s |
-| `build-representation` | 298 primitives，1060 vertices，297 lines + 1 text，0 failures | 0.173 s |
-| `render` 1024×768 | 12226 非背景像素（1.55%），4 色，297 draws / 1060 vertices，PNG 18202 B | 0.478 s |
-| `cargo test dxf_fixture` | **2 passed / 0 failed** | 0.20 s |
+| `scan` | 419 entities，223 model，13 layers，Millimeter，`status=partial`（`display representation not verified for: AcDbDimension, AcDbMText`） | 同左 |
+| `build-representation` | 329 primitives：311 lines + 11 meshes + 7 texts，0 failures | 344 primitives：333 lines（文字整形）+ 11 meshes + 0 texts，0 failures |
+| `render` 1024×768 | 14413 非背景像素（1.83%），322 draws，11 triangles | 14730 非背景像素（1.87%），344 draws，2333 vertices |
+| 取消尾零后的标注文字 | `42`、`60`、`2`、`6`、`R5`、`⌀28` | 同左（整形为线段） |
 
-退出码 0、非空 PNG、`error=None` 只说明出图 smoke 通过，不单独证明视觉正确。
+`cargo test -p cad-cli-tools --test dxf_fixture` → **2 passed**。退出码 0、非空 PNG、
+`error=None` 只说明出图 smoke 通过，不单独证明视觉正确。
 
-## 4. 三层结论
+## 5. 三层结论
 
-1. **打开通过**：真实导入该 DXF，实体数/空间/单位合理；`Partial` 明确列出
-   `AcDbDimension`、`AcDbMText` 无显示表示。
-2. **出图 smoke 通过**：真实 lavapipe 适配器提交并回读出非空帧（1.55% 覆盖）。
-3. **视觉验收：部分通过（几何），文字/标注未通过**。渲染图（`flange.png`）与 QCAD
-   参考图对照：四个视图（主视图、剖视、俯视、轴测）、中心线、剖面线、尺寸界线轮廓的
-   位置与参考一致；但**尺寸、标注与标题栏文字缺失**，因为对应实体仍是 `Partial`。
-   参考图另有图框/标题栏，渲染图没有，且两者背景、视口边距与线宽不同，因此粗粒度
-   64×48 IoU 仅 0.155、渲染前景 37.9% 落在参考前景内——这些数字只作定位，
-   **不是保真度评分**。
+1. **打开通过**：真实导入该 DXF，实体数/空间/单位合理。`Partial` 现在只指文字依赖宿主
+   字体（`display representation not verified for: AcDbDimension, AcDbMText`），不再是
+   “标注完全没画”。
+2. **出图 smoke 通过**：真实 lavapipe 适配器提交并回读出非空帧。
+3. **视觉验收：模型空间几何+标注通过；纸空间图框未覆盖**。渲染图与 QCAD 参考图对照：
+   四个视图（主视/剖视/俯视/轴测）、中心线、剖面线一致；`42`/`60`/`2`/`6` 尺寸线、
+   实心箭头、`R5` 半径引线与 `⌀28` 直径文字现在绘出，与参考位置吻合。缺项：QCAD 参考
+   是整张纸空间图纸（图框、标题栏、`Flange`/`QCAD.org` 文字），而 CLI `render` 只画模型
+   空间，故这些不在本图；极小的 `2` 标注 QCAD 会把文字移到尺寸线外侧，本实现仍按默认
+   落点。字体是 `LiberationSans` 注册为 `Arial.ttf` 的**显式回退**，非原字体排版验收。
+   粗粒度 64×48 IoU 0.176，只作定位，**不是保真度评分**。
 
-人工对照图：`/tmp/opencode/yacr-dxf-reference/review-side-by-side.png`（左参考、右渲染）、
+人工对照图：`/tmp/opencode/yacr-dxf-reference-font/review-side-by-side.png`、
 `review-overlay.png`（参考=红、渲染=蓝、重合=黑）。
 
-## 5. 未完成 / 不宣称
+## 6. 未完成 / 不宣称
 
-- 未验证尺寸/标注/标题栏文字绘制：本图对应能力仍 `Unsupported`/`Partial`，本轮只
-  记录缺项，未改成空成功。
+- 未验证角度/坐标/圆弧长/大半径标注、倾斜平面的标注；这些仍 `Partial`。
+- 文字仍需宿主字体；未注册字体时不绘文字，且缺失原 `Arial` 时用回退字体。
+- 纸空间图框/标题栏不在模型空间 `render` 范围；`plot`（纸空间）本轮出帧为空白，
+  未定位，记为独立缺口，不当作通过。
 - 未验证跨 GPU/后端像素一致、真实 GPU、WebGPU、Android；100% 软件渲染。
-- 单样本 smoke 不等于 DXF 兼容性；`check-dxf-reference.py` 的参考对照是人工辅助，
-  不是授权黄金图矩阵。
+- 单样本 smoke 不等于 DXF 兼容性；参考对照是人工辅助，不是授权黄金图矩阵。
 - 仓库其它历史验证文档按当时事实保留（那时样本未入库），只更新了当前政策类文字。

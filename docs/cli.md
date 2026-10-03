@@ -311,6 +311,11 @@ wasm 下 `plot`（含矢量）仍为 `unsupported`：该 CLI 宿主没有自己�
 - `locale_does_not_change_machine_keys`：`zh-CN` 与 `en` 的成功 JSON 完全相等，
   错误文档机器键也完全相等。
 
+`crates/cad-cli-tools/tests/dxf_fixture.rs`（无需 GPU）固定已提交的 QCAD flange 样本：
+`committed_qcad_flange_scan_reports_millimetres_and_partial`（导入、毫米、`Partial` 原因）
+与 `committed_qcad_flange_builds_a_non_empty_representation`（无失败、line/arrow
+`meshes >= 8`/标注 `texts >= 6`），防止无匿名块 DIMENSION 合成回归。
+
 `src/lib.rs` 单元测试另覆盖 locale 规范化、错误文档 schema、原子写失败清理。
 
 运行：

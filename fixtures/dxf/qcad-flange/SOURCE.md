@@ -30,9 +30,12 @@ SHA-256 digests match, so the committed bytes are unmodified upstream bytes.
 ## What each file is
 
 - `flange.dxf` — AutoCAD 2013 (`AC1027`) ASCII DXF, the drawing under test.
-  Header extents are `0,0`–`297,210` mm (`$INSUNITS = 4`, millimetres); the file
-  contains model-space geometry plus `AcDbDimension` / `AcDbMText` that this
-  project currently imports as `Partial` (no display representation yet).
+  Header extents are `0,0`–`297,210` mm (`$INSUNITS = 4`, millimetres). It
+  contains model-space geometry, six `AcDbDimension` entities and one
+  `AcDbMText`. The dimensions have no persisted anonymous block, so the importer
+  synthesizes their lines/arrowheads/measurement text from the definition points
+  and the DIMSTYLE; the text still needs a host font, which is why the import
+  reports `Partial`.
 - `flange.png` — 1024×768 RGBA render produced upstream by QCAD. Used only as a
   **human reference** and for a coarse ink-coverage/layout sanity check; it is
   *not* a project-generated golden image and no pixel-fidelity metric is claimed.

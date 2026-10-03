@@ -406,6 +406,7 @@ struct BlockMember {
 }
 
 mod builder;
+mod dimension;
 mod dynamic;
 mod entity;
 mod geometry;

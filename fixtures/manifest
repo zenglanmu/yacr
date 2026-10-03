@@ -198,7 +198,7 @@
       "entity_types": ["AcDbLine", "AcDbArc", "AcDbCircle", "AcDbEllipse", "AcDbHatch", "AcDbPolyline", "AcDbPoint", "AcDbBlockReference", "AcDbDimension", "AcDbMText"],
       "expected": "partial",
       "known_limits": [
-        "AcDbDimension and AcDbMText have no display representation yet, so dimensions, annotations and title-block text do not render (import reports Partial).",
+        "The six DIMENSION entities have no persisted anonymous block and are synthesized from their definition points and DIMSTYLE, so dimension lines/arrowheads/measurement text render. Import still reports Partial because text drawing needs a host font (use scripts/check-dxf-reference.py --font).",
         "The examples/ files carry no per-file licence notice; the exact terms are inferred from QCAD LICENSE.txt and must be re-evaluated if upstream changes them.",
         "Importing this file is not evidence of general DXF compatibility."
       ]

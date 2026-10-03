@@ -231,6 +231,9 @@ def main() -> int:
     parser.add_argument("--icd", default=DEFAULT_ICD)
     parser.add_argument("--any-adapter", action="store_true",
                         help="accept any adapter instead of requiring CPU/llvmpipe")
+    parser.add_argument("--font", action="append", default=[],
+                        help="register a CAD text font for build/render as name=path "
+                             "(repeatable); without it text stays an unresolved placeholder")
     args = parser.parse_args()
 
     sample = args.input
@@ -243,8 +246,10 @@ def main() -> int:
         "input_sha256": hashlib.sha256(sample.read_bytes()).hexdigest(),
         "size": [args.width, args.height],
         "icd": args.icd,
+        "fonts": args.font,
         "reference": str(args.reference) if args.reference.is_file() else None,
     }
+    font_args = [item for font in args.font for item in ("--font", font)]
     env = dict(os.environ)
     if args.icd:
         env["VK_ICD_FILENAMES"] = args.icd
@@ -269,7 +274,7 @@ def main() -> int:
             "seconds": scan["_seconds"],
         }
 
-        build = run_cli(args.cli, "build-representation", sample, env, [])
+        build = run_cli(args.cli, "build-representation", sample, env, font_args)
         (args.out / "build-representation.json").write_text(json.dumps(build, indent=2))
         assert build["failures"] == [], f"representation failures: {build['failures']}"
         assert build["primitives"] > 0, "empty representation"
@@ -287,7 +292,7 @@ def main() -> int:
             "render",
             sample,
             env,
-            ["--png", str(png), "--width", str(args.width), "--height", str(args.height)],
+            ["--png", str(png), "--width", str(args.width), "--height", str(args.height), *font_args],
         )
         (args.out / "render.json").write_text(json.dumps(render, indent=2))
         adapter = render["adapter"]

@@ -378,19 +378,15 @@ impl<'a> ImporterBuilder<'a> {
             }
             EntityType::Hatch(h) => Self::hatch_geometry(h),
             EntityType::Dimension(d) => {
-                // A dimension's visible geometry lives in an anonymous block
-                // (`*D...`); expand it like an insert instead of dropping it.
+                // Prefer the pre-rendered anonymous block (`*D...`) when the
+                // drawing stores it; expand it like an insert. Many producers
+                // (including the QCAD flange sample) omit the block and keep
+                // only the definition points, so synthesize the display
+                // geometry from those points and the DIMSTYLE instead.
                 let base = d.base();
-                if base.block_name.is_empty() {
-                    (
-                        SemanticGeometry::Opaque {
-                            type_key: "AcDbDimension".into(),
-                            version: 1,
-                            payload: Vec::new(),
-                        },
-                        Completeness::Partial(vec!["dimension has no geometry block".into()]),
-                    )
-                } else {
+                let has_block =
+                    !base.block_name.is_empty() && self.block_ids.contains_key(&base.block_name);
+                if has_block {
                     (
                         SemanticGeometry::Insert {
                             block: self.block_id(&base.block_name),
@@ -398,6 +394,8 @@ impl<'a> ImporterBuilder<'a> {
                         },
                         Completeness::Complete,
                     )
+                } else {
+                    self.dimension_semantics(d)
                 }
             }
             EntityType::Solid3D(s) => acis_semantics(entity, &s.acis_data),

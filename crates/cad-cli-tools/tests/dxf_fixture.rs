@@ -96,4 +96,15 @@ fn committed_qcad_flange_builds_a_non_empty_representation() {
         value["vertices"].as_u64().unwrap_or(0) > 0,
         "expected vertices: {value}"
     );
+    // The six dimensions have no persisted anonymous block, so they must be
+    // synthesized: solid arrowheads (meshes) and measurement text. If this
+    // regresses, dimensions silently disappear from the render again.
+    assert!(
+        value["kind_counts"]["meshes"].as_u64().unwrap_or(0) >= 8,
+        "expected synthesized dimension arrowheads: {value}"
+    );
+    assert!(
+        value["kind_counts"]["texts"].as_u64().unwrap_or(0) >= 6,
+        "expected synthesized dimension measurement text: {value}"
+    );
 }

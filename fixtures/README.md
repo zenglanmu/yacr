@@ -10,9 +10,10 @@ Most entries are **synthetic** contract fixtures. In addition, one openly
 distributed third-party sample is committed: the QCAD `flange` DXF with its
 upstream PNG/PDF reference (`fixtures/dxf/qcad-flange/`, provenance in
 `SOURCE.md`). Its reference images are **human-review aids and coarse sanity
-checks, not project golden images**; the DXF imports as `Partial` because
-dimensions and MTEXT have no display representation yet. No user/vendor drawing
-or third-party font is committed; reference images are only committed when the
+checks, not project golden images**; the DXF still imports as `Partial` because
+text drawing needs a host font, but its block-less dimensions are synthesized
+and render (lines, arrowheads, measurement text). No user/vendor drawing or
+third-party font is committed; reference images are only committed when the
 upstream licence permits redistribution.
 
 Passing tests over synthetic bytes does **not** establish compatibility with

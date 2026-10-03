@@ -10,7 +10,9 @@
 
 2026-10-03 新增 DXF ASCII/二进制导入入口，共用 DWG 语义/数据库转换，只有合成 LINE
 与截断拒绝针对性契约，不宣称复杂 DXF 兼容。旧式 SHX 字号修复与网络 DWG 对比见
-`docs/ui-dxf-text-fixes.md`；原字体缺失的回退整形保留 Partial。
+`docs/ui-dxf-text-fixes.md`；原字体缺失的回退整形保留 Partial。DIMENSION 现对无匿名块的
+线性/对齐/半径/直径按定义点+DIMSTYLE 合成显示几何，文字仍需宿主字体，见
+`docs/validation-dxf-flange.md`。
 
 | 对象 | 读取 | 语义 | 绘制 | 拾取 | 测量 |
 |---|---|---|---|---|---|
@@ -23,7 +25,7 @@
 | INSERT / 块 | 实现(定义与实例分离) | 实现 | 实例展开块几何(嵌套有界，保留 InstancePath) | 实现 | 不支持 |
 | TEXT / MTEXT | 实现(保留字体名/字高/旋转) | 实现 | 整形为线段：outline(TTF/OTF/WOFF)+SHX(shapes/unifont/bigfont)，缺失字体走回退链 | 同上 | 不支持 |
 | HATCH | 实现 | 部分(椭圆/样条边界近似) | 边界环 + 多环实心填充(含孔洞，偶奇) / 图案线；超预算/自交降 Partial | 经边界(AABB) | 不支持 |
-| DIMENSION | 实现 | 经匿名块引用 | 展开匿名块几何(线/箭头/文字)；无块名时 Partial | 经展开几何(AABB) | 不支持 |
+| DIMENSION | 实现 | 合成 | 有匿名块时展开块；无块名时按定义点+DIMSTYLE 合成线/箭头/测量文字（线性/对齐/半径/直径；角度/坐标/圆弧长/大半径仍 Partial） | 经合成几何(AABB) | 不支持 |
 | MESH / PolyfaceMesh | 部分 | 网格契约 | 网格 | 实现 | 不支持 |
 - 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust `entities::acis` 解析) | 部分(平面/球/柱/环面/锥面子集) | 子集离散：闭合 `Success`，否则 `Partial`；带环球面/非圆椭圆/样条面 `Unsupported` | 经网格 | 不支持(近似标记) |
 | TEXT/MTEXT 格式 | 实现(格式 run 解析) | 部分(堆叠分数/颜色/装饰/行对齐为显式 Partial) | 按 run 整形/换行 | — | — |

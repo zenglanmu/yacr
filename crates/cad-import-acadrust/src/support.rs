@@ -91,8 +91,11 @@ pub(crate) fn aggregate_completeness(
     let has_import_item = !items.is_empty();
     if model_render != SupportStatus::Verified {
         model_render_types.sort();
+        // Covers both entities with no representation at all (Opaque/ACIS) and
+        // entities whose representation is only conditionally drawable (text
+        // needs a host font). Neither is a `Verified` claim.
         items.push(format!(
-            "no display representation for: {}",
+            "display representation not verified for: {}",
             model_render_types.join(", ")
         ));
     }

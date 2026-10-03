@@ -22,11 +22,13 @@
 及 PNG/PDF 参考（`fixtures/dxf/qcad-flange/`，来源/许可/SHA 见其 `SOURCE.md` 与
 `fixtures/manifest`），新增 `scripts/check-dxf-reference.py` 与无需 GPU 的
 `crates/cad-cli-tools/tests/dxf_fixture.rs`。原生 release + lavapipe 实际执行：
-419 entities / 223 model、表示 298 primitives、1024×768 非空帧 1.55%、0 build failure；
-`dxf_fixture` 2/2 通过。视觉结论：四视图几何/剖面线与参考一致，尺寸、标注与标题栏文字
-因 `AcDbDimension`/`AcDbMText` 仍 `Partial` 而缺失。证据 `docs/validation-dxf-flange.md`、
-`/tmp/opencode/yacr-dxf-reference/`。同时按用户要求把“外部图纸/参考图不得入库”改为
-“授权可再分发即可入库并记 provenance”。
+419 entities / 223 model、0 build failure；实现无匿名块 DIMENSION 合成（线性/对齐/半径/
+直径：线、实心箭头、按 DIMSTYLE 的测量文字）后表示 329 primitives（含 11 箭头 mesh + 6
+标注文字），`dxf_fixture` 2/2 通过并新增箭头/文字回归断言。带宿主字体时 1024×768 非空帧
+1.87%，四视图几何、剖面线、尺寸线与测量文字与参考一致；仍 `Partial`，因为文字绘制需要
+宿主字体，且纸空间图框/标题栏不在 `render`（模型空间）范围内。证据
+`docs/validation-dxf-flange.md`、`/tmp/opencode/yacr-dxf-reference-font/`。同时按用户要求
+把“外部图纸/参考图不得入库”改为“授权可再分发即可入库并记 provenance”。
 
 **Linux 文件选择/关闭崩溃/后端诊断修复（release 门禁进行中）**：桌面打开经 ashpd 调用系统
 `xdg-desktop-portal` 文件选择器（独立线程等待，取消/失败区分，脏状态选择前后检查）；
