@@ -71,9 +71,10 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
    像素断言使用不依赖字体的矩形批注，而不是把“文字没画”误判成显隐失效。
 4. `ui-drawing`：`apps/app-linux/tests/verify_ui_drawing.rs`。用已提交的开源 fixture
    DXF（`fixtures/dxf/qcad-examples/entities.dxf`）真实打开后操作：多图层显隐改变且恢复
-   合成像素、模型/图纸布局切换、真实指针点选几何并在清除后**再次点选**（回归：`Select`
-   进入 `Selecting` 后不得再被当成“工具有活动”而拒绝，见下）、真实 MOVE 一次事务且撤销
-   恢复、命令别名 `L`/`C`/`TR`。对比只取 CAD 画布区域，排除状态栏文案变化。
+   合成像素、模型/图纸布局切换（切到每个图纸布局再切回模型后**模型画面逐字节恢复**）、
+   真实指针点选几何并在清除后**再次点选**（回归：`Select` 进入 `Selecting` 后不得再被
+   当成“工具有活动”而拒绝，见下）、真实 MOVE 一次事务且撤销恢复、命令别名
+   `L`/`C`/`TR`。对比只取 CAD 画布区域，排除状态栏文案变化。
 5. `host-contracts`：`host_contracts`。命令/事务/文件选择器注入契约。
 6. `app-build` + `app-smoke`：构建并运行真实 `yacr-linux --headless`，产出
    `report.json` 与 PNG（导航像素变化断言）。

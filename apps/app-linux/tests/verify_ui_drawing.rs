@@ -169,9 +169,11 @@ fn verify_ui_real_drawing_operations() {
         &layer_baseline,
     );
 
-    // --- paper/model layout switching ---------------------------------------
+    // --- paper/model layout switching: the active layout must follow, and a
+    //     round trip back to model must restore the exact model scene ---------
     let layouts = ui.get_layout_rows().row_count();
     if layouts > 0 {
+        let model_scene = canvas_region(&app);
         for index in 0..layouts {
             ui.invoke_layout_selected(index as i32);
             assert_eq!(
@@ -179,14 +181,21 @@ fn verify_ui_real_drawing_operations() {
                 index as i32,
                 "selecting layout {index} must become active"
             );
+            if index == 0 {
+                shoot(&app, &dir, "21-real-drawing-paper");
+            }
+            ui.invoke_layout_selected(-1);
+            assert_eq!(
+                ui.get_layout_active_index(),
+                -1,
+                "model space must be active after switching back"
+            );
+            assert_same_scene(
+                "returning to model from a paper layout",
+                &canvas_region(&app),
+                &model_scene,
+            );
         }
-        shoot(&app, &dir, "21-real-drawing-paper");
-        ui.invoke_layout_selected(-1);
-        assert_eq!(
-            ui.get_layout_active_index(),
-            -1,
-            "model space must be active after switching back"
-        );
     }
 
     // --- pointer selection: clicking real geometry selects it, clearing
