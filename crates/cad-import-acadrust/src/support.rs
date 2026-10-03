@@ -158,6 +158,11 @@ pub(crate) fn entity_class_name(e: &EntityType) -> String {
         EntityType::Shape(_) => "AcDbShape",
         EntityType::Table(_) => "AcDbTable",
         EntityType::RasterImage(_) => "AcDbRasterImage",
+        EntityType::Ole2Frame(_) => "AcDbOle2Frame",
+        EntityType::ViewBorder(_) => "AcDbViewBorder",
+        EntityType::SectionSymbol(_) => "AcDbSectionSymbol",
+        EntityType::Underlay(_) => "AcDbUnderlayReference",
+        EntityType::Light(_) => "AcDbLight",
         EntityType::Unknown(u) => return u.dxf_name.clone(),
         EntityType::Extended(x) => return x.class_name().to_string(),
         other => {

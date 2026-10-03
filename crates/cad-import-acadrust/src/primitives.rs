@@ -323,21 +323,264 @@ pub(crate) fn ray_semantics(
     }
 }
 
-/// An MLINE as its vertex centerline. The per-element parallel offsets and
-/// joins need the MLINESTYLE table; until that is wired the centerline is drawn
-/// and the offsets are reported `Partial`.
+/// An MLINE as its parallel element polylines.
+///
+/// The per-vertex `segments[].parameters` carry the element offsets, so the
+/// parallel lines can be reconstructed without the MLINESTYLE table (joins and
+/// caps are still approximated, hence `Partial`). When the parameters are
+/// unavailable the vertex centerline is drawn as an explicit fallback.
 pub(crate) fn mline_semantics(m: &acadrust::entities::MLine) -> (SemanticGeometry, Completeness) {
-    let mut points: Vec<Point3> = m.vertices.iter().map(|v| p3(v.position)).collect();
-    if let Some(first) = points.first().copied() {
-        if cad_geometry::distance(p3(m.start_point), first) > 1e-9 {
-            points.insert(0, p3(m.start_point));
+    let count = m.vertices.len();
+    let scale = if m.scale_factor.is_finite() && m.scale_factor.abs() > 1e-9 {
+        m.scale_factor
+    } else {
+        1.0
+    };
+    // Direction per vertex: the stored direction, else the neighbour chord.
+    let directions: Vec<Point3> = (0..count)
+        .map(|i| {
+            let given = cad_geometry::normalize(p3(m.vertices[i].direction));
+            if cad_geometry::length(given) > 1e-9 {
+                return given;
+            }
+            let prev = if i > 0 {
+                p3(m.vertices[i - 1].position)
+            } else {
+                p3(m.vertices[i].position)
+            };
+            let next = if i + 1 < count {
+                p3(m.vertices[i + 1].position)
+            } else {
+                p3(m.vertices[i].position)
+            };
+            cad_geometry::normalize(cad_geometry::sub(next, prev))
+        })
+        .collect();
+    let element_count = m
+        .vertices
+        .iter()
+        .find_map(|v| v.segments.first().map(|s| s.parameters.len()))
+        .unwrap_or(0);
+    let mut children: Vec<SemanticGeometry> = Vec::new();
+    for element in 0..element_count {
+        let points: Vec<Point3> = m
+            .vertices
+            .iter()
+            .enumerate()
+            .filter_map(|(i, vertex)| {
+                let offset = vertex.segments.first()?.parameters.get(element).copied()?;
+                let perp = Point3 {
+                    x: -directions[i].y,
+                    y: directions[i].x,
+                    z: 0.0,
+                };
+                Some(cad_geometry::add(
+                    p3(vertex.position),
+                    cad_geometry::scale(perp, offset * scale),
+                ))
+            })
+            .collect();
+        if points.len() >= 2 {
+            children.push(polyline_semantics(points, false));
         }
     }
+    if children.is_empty() {
+        let mut points: Vec<Point3> = m.vertices.iter().map(|v| p3(v.position)).collect();
+        if let Some(first) = points.first().copied() {
+            if cad_geometry::distance(p3(m.start_point), first) > 1e-9 {
+                points.insert(0, p3(m.start_point));
+            }
+        }
+        return (
+            polyline_semantics(points, false),
+            Completeness::Partial(vec![
+                "mline drawn as its centerline; per-element offsets were unavailable".into(),
+            ]),
+        );
+    }
     (
-        polyline_semantics(points, false),
+        SemanticGeometry::Compound(children),
         Completeness::Partial(vec![
-            "mline drawn as its centerline; per-element offsets/joins are not applied".into(),
+            "mline element offsets drawn; joins and caps are approximated".into(),
         ]),
+    )
+}
+
+/// The frame rectangle of an OLE2FRAME. The embedded object is not decoded, so
+/// the frame is drawn and the content reported `Partial`.
+pub(crate) fn ole2frame_semantics(
+    f: &acadrust::entities::Ole2Frame,
+) -> (SemanticGeometry, Completeness) {
+    let a = p3(f.upper_left_corner);
+    let b = p3(f.lower_right_corner);
+    let points = vec![
+        Point3 {
+            x: a.x,
+            y: a.y,
+            z: a.z,
+        },
+        Point3 {
+            x: b.x,
+            y: a.y,
+            z: a.z,
+        },
+        Point3 {
+            x: b.x,
+            y: b.y,
+            z: b.z,
+        },
+        Point3 {
+            x: a.x,
+            y: b.y,
+            z: a.z,
+        },
+    ];
+    (
+        polyline_semantics(points, true),
+        Completeness::Partial(vec![
+            "OLE object frame drawn; embedded content is not decoded".into(),
+        ]),
+    )
+}
+
+/// A view border rectangle (paper coordinates), honouring its rotation/scale
+/// about its own centre.
+pub(crate) fn view_border_semantics(
+    v: &acadrust::entities::ViewBorder,
+) -> (SemanticGeometry, Completeness) {
+    let cx = (v.min[0] + v.max[0]) / 2.0;
+    let cy = (v.min[1] + v.max[1]) / 2.0;
+    let (sin, cos) = v.rotation_angle.sin_cos();
+    let corner = |x: f64, y: f64| {
+        let (dx, dy) = ((x - cx) * v.scale, (y - cy) * v.scale);
+        Point3 {
+            x: cx + dx * cos - dy * sin,
+            y: cy + dx * sin + dy * cos,
+            z: 0.0,
+        }
+    };
+    let points = vec![
+        corner(v.min[0], v.min[1]),
+        corner(v.max[0], v.min[1]),
+        corner(v.max[0], v.max[1]),
+        corner(v.min[0], v.max[1]),
+    ];
+    (
+        polyline_semantics(points, true),
+        Completeness::Partial(vec!["view border rectangle only".into()]),
+    )
+}
+
+/// A section symbol as the polyline through its points plus the end line.
+pub(crate) fn section_symbol_semantics(
+    s: &acadrust::entities::SectionSymbol,
+) -> (SemanticGeometry, Completeness) {
+    let mut children: Vec<SemanticGeometry> = Vec::new();
+    let points: Vec<Point3> = s.points.iter().map(|p| p3(p.point)).collect();
+    if points.len() >= 2 {
+        children.push(polyline_semantics(points, false));
+    }
+    let a = Point3 {
+        x: s.end_a[0],
+        y: s.end_a[1],
+        z: 0.0,
+    };
+    let b = Point3 {
+        x: s.end_b[0],
+        y: s.end_b[1],
+        z: 0.0,
+    };
+    if let Some(line) = line_between(a, b) {
+        children.push(line);
+    }
+    if children.is_empty() {
+        return (
+            SemanticGeometry::Opaque {
+                type_key: "AcDbSectionSymbol".into(),
+                version: 1,
+                payload: Vec::new(),
+            },
+            Completeness::Partial(vec!["section symbol has no drawable points".into()]),
+        );
+    }
+    (
+        SemanticGeometry::Compound(children),
+        Completeness::Partial(vec![
+            "section symbol geometry drawn; labels/arrows are approximated".into(),
+        ]),
+    )
+}
+
+/// An underlay reference: its clip boundary when present. The referenced PDF/
+/// DWF/DGN content is external and is not loaded, so this is `Partial`.
+pub(crate) fn underlay_semantics(
+    u: &acadrust::entities::Underlay,
+) -> (SemanticGeometry, Completeness) {
+    let boundary: Vec<Point3> = u.world_clip_boundary().iter().map(|p| p3(*p)).collect();
+    if boundary.len() >= 3 {
+        return (
+            polyline_semantics(boundary, true),
+            Completeness::Partial(vec![
+                "underlay clip boundary drawn; external content is not loaded".into(),
+            ]),
+        );
+    }
+    (
+        SemanticGeometry::Opaque {
+            type_key: "AcDbUnderlayReference".into(),
+            version: 1,
+            payload: Vec::new(),
+        },
+        Completeness::Partial(vec![
+            "underlay has no clip boundary; external content is not loaded".into(),
+        ]),
+    )
+}
+
+/// A light's optional plot glyph: a small cross at its position. Lights have no
+/// solid geometry; without the glyph this would have no representation.
+pub(crate) fn light_semantics(l: &acadrust::entities::Light) -> (SemanticGeometry, Completeness) {
+    if !l.plot_glyph || !cad_geometry::is_finite(p3(l.position)) {
+        return (
+            SemanticGeometry::Opaque {
+                type_key: "AcDbLight".into(),
+                version: 1,
+                payload: Vec::new(),
+            },
+            Completeness::Partial(vec!["light has no plotted geometry".into()]),
+        );
+    }
+    let p = p3(l.position);
+    let size = 0.5;
+    let children = vec![
+        SemanticGeometry::Line {
+            start: Point3 {
+                x: p.x - size,
+                y: p.y,
+                z: p.z,
+            },
+            end: Point3 {
+                x: p.x + size,
+                y: p.y,
+                z: p.z,
+            },
+        },
+        SemanticGeometry::Line {
+            start: Point3 {
+                x: p.x,
+                y: p.y - size,
+                z: p.z,
+            },
+            end: Point3 {
+                x: p.x,
+                y: p.y + size,
+                z: p.z,
+            },
+        },
+    ];
+    (
+        SemanticGeometry::Compound(children),
+        Completeness::Partial(vec!["light plot glyph only; no light model".into()]),
     )
 }
 

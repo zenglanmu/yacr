@@ -27,13 +27,14 @@ DXF 图元与 `../opencadstudio` 当前支持的图元，并要求“务必实�
 | HELIX | ✅ | `convert` 复用 `spline_semantics(&h.spline)` |
 | VIEWPORT | ✅ | `viewport_semantics`：纸空间视口边框矩形（模型内容由 plot 装配） |
 | TOLERANCE | ⚠️ Partial | `tolerance_frame`+文本：公差框（框宽按字符数估计）+ 文字，显式 `Partial` |
-| MLINE | ⚠️ Partial | `mline_semantics`：顶点中心线；**逐元素偏移/接合未实现**，显式 `Partial` |
+| MLINE | ⚠️ Partial | `mline_semantics`：按每顶点 `segments[].parameters` 画**逐元素平行线**；joins/caps 近似，显式 `Partial` |
 | MULTILEADER | ⚠️ Partial | `multileader_semantics`：leader-root 折线 + 注解文字；块内容未展开，显式 `Partial` |
 | RAY / XLINE | ✅ | `ray_semantics`：按运行中模型 bounds 裁剪到 XY 盒；无范围时默认盒并 `Partial` |
 | SHAPE | ✅ | SHX 字形：`FontEngine::shape_glyph` 经 SHX `glyph_by_code` 生成折线；缺字体/按名引用显式 `Partial` |
-| TABLE | ⚠️ Partial | 单元格网格 + 单元格文字；合并单元格/边框样式近似 |
+| TABLE | ⚠️ Partial | 单元格网格 + 单元格文字；**合并单元格按 merge_width/height 跨格居中**；边框样式近似 |
 | RASTERIMAGE | ⚠️ Partial | 图像边框（insertion/u/v/size）；像素纹理未解码 |
 | DIMENSION 角度/坐标/圆弧长/大半径 | ✅/⚠️ | 角度(2Ln/3Pt)/坐标/弧长已画；大半径折线 jog 近似 `Partial` |
+| OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | 外框/裁剪边界/符号折线/灯光字形；外部内容不加载，均 `Partial` |
 
 文本能力判定修正：Text（TEXT/MTEXT/ATTRIB/DIMENSION 文字）统一为 `Unverified`——
 实体类型**已支持**，能否出字形取决于宿主是否提供字体（`--font name=path`）；不再把
@@ -66,23 +67,20 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 | 图元 / 能力 | opencadstudio | 本项目 | 原因与状态 |
 |---|---|---|---|
 | MULTILEADER | ✅ | ⚠️ Partial | 引线折线+文字已画；样式/块内容/overrides 未完整 |
-| MLINE | ✅ | ⚠️ Partial | 中心线已画；逐元素偏移/接合未实现 |
+| MLINE | ✅ | ⚠️ Partial | 逐元素偏移已画；joins/caps 近似 |
 | TOLERANCE | ✅ | ⚠️ Partial | 框+文字已画；框宽按字符数估计，符号字形依赖字体 |
 | SHAPE | ✅ | ✅ | SHX 字形已接线；按名引用（无 shape code）仍 `Partial` |
-| TABLE | ✅ | ⚠️ Partial | 网格+文字已画；合并单元格/边框样式近似 |
+| TABLE | ✅ | ⚠️ Partial | 网格+文字+合并单元格已画；边框样式近似 |
 | RASTERIMAGE | ✅ | ⚠️ Partial | 图像边框已画；**像素纹理未解码**（需图像解码+纹理管线） |
 | RAY / XLINE | ✅ | ✅ | 裁剪到模型 bounds；无范围回退为默认盒 `Partial` |
 | DIMENSION 子类 | ✅ | ✅/⚠️ | 线性/对齐/半径/直径/角度/坐标/圆弧长已画；大半径 jog 近似 `Partial` |
-| UNDERLAY / OLE2FRAME | ✅ | ❌ | 外部参照/嵌入对象，无本地内容 |
-| LIGHT / SECTION / VIEWBORDER / SEQEND | ✅ | ❌ | 非绘制或注释对象；保持显式未实现 |
-| 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复两处：①纸张单位从标准纸名解析（锁定 acadrust 未把 `group 72` 应用到 LAYOUT，曾把 210mm 当 210in → 纹理超限/空白）；②默认选有 viewport 的纸空间布局（flange 的首个 `*Paper_Space` 为空）。纸张/边框/标题栏已出图；视口比例/位置仍为近似 |
+| OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | ✅/⚠️ | 外框/裁剪边界/符号/灯光字形已画；外部内容不加载，均 `Partial` |
+| 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复三处：①纸张单位从标准纸名解析（锁定 acadrust 未把 `group 72` 应用到 LAYOUT）；②默认选有 viewport 的纸空间布局；③`group 73` 旋转亦未暴露，按 viewport 范围推断 90°。纸张/边框/标题栏已出图；**视口比例/位置仍为近似**（未做视觉保真验收） |
 | DXF/X2D 字体提示 | — | ❌ | QCAD 把真实 TTF（如 `Arial`）放在 STYLE 的 XDATA `1000`；锁定的 acadrust `TextStyle` 不暴露该字段。**不可修改 acadrust/不加 patch** |
 
-`entity.rs` 的 `convert` **仍未覆盖**、会落 `Opaque`/`Unsupported` 的 `EntityType`
-分支仅剩：`Underlay`、`Ole2Frame`（外部参照/嵌入对象，无本地内容）与
-`Light`、`SectionSymbol`、`ViewBorder`、`Seqend`（非绘制/注释对象）。
-其余可绘制图元均已接线（见 §2），其中 `MultiLeader`/`MLine`/`Tolerance`/`Table`/
-`RasterImage`/大半径为 `Partial`。
+`entity.rs` 的 `convert` 现覆盖所有可绘制 `EntityType`；仅结构性 `Block`/`BlockEnd`/
+`Seqend` 不产生几何（本来就不应绘制）。`MultiLeader`/`MLine`/`Tolerance`/`Table`/
+`RasterImage`/外部对象/大半径为 `Partial`。
 
 ## 5. 图元支持验证（ezdxf 对比已放弃）
 
@@ -105,8 +103,8 @@ QCAD 字体：`osifont.ttf`（GPLv3）与 `Standard/ltypeshp/qcadshp.cxf`（publ
 
 - QCAD examples 语料：**解析/表示全部通过，`proxy-report` 零 `unsupported`**；`partial`
   只剩字体/subclass 等保真度问题。
-- 与 opencadstudio 图元清单相比：`LEADER/Polyline/ATTRIB/Mesh/Polyface/Polygon/Wipeout/
-  Helix/Viewport/Tolerance/MLine/MultiLeader/Ray/XLine/Shape/Table/RasterImage` 与全部
-  DIMENSION 子类均已接线，其中 6 类为 `Partial`（表/大半径/多线/多引线/公差/光栅纹理）。
-  仍**未覆盖** `Underlay/Ole2Frame/Light/SectionSymbol/ViewBorder/Seqend`（外部/非绘制）
-  与真实材质图像纹理，见 §4。**接近但尚未 100% 覆盖 opencadstudio 的可绘制图元。**
+- 与 opencadstudio 图元清单相比：**所有可绘制 `EntityType` 均已接线**（外部/非绘制
+  对象给出外框/符号/字形并标 `Partial`），仅结构性 `Block/BlockEnd/Seqend` 不产生几何。
+  仍有保真度缺口（`Partial`）：MLINE joins/caps、MULTILEADER 样式与块内容、TOLERANCE
+  框宽与字形、TABLE 边框样式、大半径 jog、RASTERIMAGE 像素纹理、外部内容加载、纸空间
+  视口比例/位置，以及 DXF XDATA 字体名，见 §4。

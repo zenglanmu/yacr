@@ -505,6 +505,11 @@ impl<'a> ImporterBuilder<'a> {
                     completeness,
                 )
             }
+            EntityType::Ole2Frame(f) => ole2frame_semantics(f),
+            EntityType::ViewBorder(v) => view_border_semantics(v),
+            EntityType::SectionSymbol(s) => section_symbol_semantics(s),
+            EntityType::Underlay(u) => underlay_semantics(u),
+            EntityType::Light(l) => light_semantics(l),
             EntityType::Solid3D(s) => acis_semantics(entity, &s.acis_data),
             EntityType::Region(r) => acis_semantics(entity, &r.acis_data),
             EntityType::Body(b) => acis_semantics(entity, &b.acis_data),
@@ -676,34 +681,64 @@ impl<'a> ImporterBuilder<'a> {
         {
             children.push(line);
         }
+        // Cells covered by a merge anchor (all but the top-left cell).
+        let mut covered: std::collections::HashSet<(usize, usize)> =
+            std::collections::HashSet::new();
+        for (row_index, row) in t.rows.iter().enumerate() {
+            for (column_index, cell) in row.cells.iter().enumerate() {
+                let span_w = cell.merge_width.max(1) as usize;
+                let span_h = cell.merge_height.max(1) as usize;
+                for dr in 0..span_h {
+                    for dc in 0..span_w {
+                        if dr != 0 || dc != 0 {
+                            covered.insert((row_index + dr, column_index + dc));
+                        }
+                    }
+                }
+            }
+        }
         let mut y = 0.0;
-        for row in &t.rows {
+        for (row_index, row) in t.rows.iter().enumerate() {
             let height = row.height.max(0.0);
             let mut x = 0.0;
-            for (index, cell) in row.cells.iter().enumerate() {
-                let width = widths.get(index).copied().unwrap_or(0.0);
-                if let Some(content) = cell.contents.first() {
-                    let text = if !content.value.formatted_value.is_empty() {
-                        content.value.formatted_value.clone()
-                    } else {
-                        content.value.text.clone()
-                    };
-                    if !text.is_empty() {
-                        let text_height = if content.text_height > 0.0 {
-                            content.text_height
+            for (column_index, cell) in row.cells.iter().enumerate() {
+                let width = widths.get(column_index).copied().unwrap_or(0.0);
+                if !covered.contains(&(row_index, column_index)) {
+                    if let Some(content) = cell.contents.first() {
+                        let text = if !content.value.formatted_value.is_empty() {
+                            content.value.formatted_value.clone()
                         } else {
-                            2.5
+                            content.value.text.clone()
                         };
-                        children.push(SemanticGeometry::Text {
-                            text,
-                            position: corner(x + width * 0.5, y + height * 0.5),
-                            style: self.style_id(&content.text_style_name),
-                            height: text_height,
-                            rotation: 0.0,
-                            font: self.style_font(&content.text_style_name),
-                            h_align: TextAlignH::Center,
-                            v_align: TextAlignV::Middle,
-                        });
+                        if !text.is_empty() {
+                            let text_height = if content.text_height > 0.0 {
+                                content.text_height
+                            } else {
+                                2.5
+                            };
+                            // A merge anchor spans its covered columns/rows.
+                            let span_w: f64 = (0..cell.merge_width.max(1) as usize)
+                                .map(|dc| widths.get(column_index + dc).copied().unwrap_or(0.0))
+                                .sum();
+                            let span_h: f64 = (0..cell.merge_height.max(1) as usize)
+                                .map(|dr| {
+                                    t.rows
+                                        .get(row_index + dr)
+                                        .map(|r| r.height.max(0.0))
+                                        .unwrap_or(0.0)
+                                })
+                                .sum();
+                            children.push(SemanticGeometry::Text {
+                                text,
+                                position: corner(x + span_w * 0.5, y + span_h * 0.5),
+                                style: self.style_id(&content.text_style_name),
+                                height: text_height,
+                                rotation: 0.0,
+                                font: self.style_font(&content.text_style_name),
+                                h_align: TextAlignH::Center,
+                                v_align: TextAlignV::Middle,
+                            });
+                        }
                     }
                 }
                 x += width;

@@ -104,6 +104,9 @@ fn flange_plot_defaults_to_the_populated_paper_layout() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("plot JSON");
     assert_eq!(value["layout"]["name"], "*Paper_Space1", "{value}");
     assert_eq!(value["paper"]["units"], "millimeters", "{value}");
+    // The locked reader drops LAYOUT `group 73`; the sheet is inferred rotated
+    // landscape from the viewport windows (A4 portrait declared).
+    assert_eq!(value["paper"]["rotation_degrees"], 90.0, "{value}");
     assert!(
         value["pixels"]["non_background"].as_u64().unwrap_or(0) > 0,
         "blank plot: {value}"

@@ -370,11 +370,56 @@ impl<'a> ImporterBuilder<'a> {
     /// presents an explicit documented default page at query time. This never
     /// fabricates a vendor configuration.
     pub(crate) fn read_plot_settings(&mut self) -> CadResult<()> {
-        for imported in read_plot_settings(self.acad, &self.layout_ids)? {
+        for mut imported in read_plot_settings(self.acad, &self.layout_ids)? {
             debug_assert_eq!(imported.layout, imported.record.layout);
+            // The locked acadrust DXF reader does not expose a LAYOUT's
+            // `group 73` plot rotation (same gap as `group 72`). Infer a missing
+            // 90° rotation from the paper windows: when the declared paper is
+            // portrait but the viewports extend past its width and fit its
+            // height, the sheet is plotted landscape (rotated 90°).
+            if imported.record.rotation == cad_db::PlotRotation::None {
+                if let Some((min, max)) = self.layout_viewport_bounds(imported.layout) {
+                    let width = imported.record.paper_width;
+                    let height = imported.record.paper_height;
+                    let span_x = (max[0] - min[0]).abs();
+                    if height > width && span_x > width + 1e-6 && span_x <= height + 1e-6 {
+                        imported.record.rotation = cad_db::PlotRotation::Degrees90;
+                    }
+                }
+            }
             self.builder.set_plot_settings(imported.record)?;
         }
         Ok(())
+    }
+
+    /// Paper-space bounds of every VIEWPORT in a layout's block (including the
+    /// sheet viewport), used only to infer a missing plot rotation.
+    fn layout_viewport_bounds(&self, layout: cad_domain::LayoutId) -> Option<([f64; 2], [f64; 2])> {
+        let name = self
+            .layout_ids
+            .iter()
+            .find(|(_, id)| **id == layout)
+            .map(|(name, _)| name.clone())?;
+        let mut min = [f64::INFINITY; 2];
+        let mut max = [f64::NEG_INFINITY; 2];
+        let mut found = false;
+        for entity in self.acad.entities_in_block(&name) {
+            if let EntityType::Viewport(v) = entity {
+                // The sheet viewport (id 1) frames the paper itself and is
+                // larger than the sheet; only content windows inform rotation.
+                if v.id == 1 || !(v.width.is_finite() && v.height.is_finite()) {
+                    continue;
+                }
+                let half_w = v.width.abs() / 2.0;
+                let half_h = v.height.abs() / 2.0;
+                min[0] = min[0].min(v.center.x - half_w);
+                min[1] = min[1].min(v.center.y - half_h);
+                max[0] = max[0].max(v.center.x + half_w);
+                max[1] = max[1].max(v.center.y + half_h);
+                found = true;
+            }
+        }
+        found.then_some((min, max))
     }
 
     /// Read the drawing's named annotation scales and active annotation scale.
