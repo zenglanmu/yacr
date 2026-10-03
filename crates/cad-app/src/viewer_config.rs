@@ -304,7 +304,9 @@ impl Default for ViewOverlays {
     fn default() -> Self {
         Self {
             axes: true,
-            grid: true,
+            // AutoCAD starts with the grid off and the ui-spec example uses
+            // `grid: false`; a host that wants it enables it explicitly.
+            grid: false,
             selection_highlight: true,
             snap_hints: true,
             annotations: true,

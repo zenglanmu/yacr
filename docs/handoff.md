@@ -18,6 +18,32 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**UI 配置门控三工作流集成（本轮）**：主控派发三个隔离 worktree 子代理，子代理只写代码与
+单元测试，主控统一合并、编译、门禁。三个工作流文件不相交，合并零冲突：
+
+- **overlay 门控（`ws/overlay-gating`）**：`view.overlays.*` 首次真正控制绘制。
+  `OverlayInputs` 增加 `visibility`（默认全开，保持既有调用行为），并进入
+  `overlay_fingerprint`；`prepare_inner` 据此门控选择高亮、已提交批注，并新增
+  `axes_overlay`/`grid_overlay`（按 `Drawing::bounds` 生成、`GRID_MAX_LINES=400` 上限、
+  无 bounds 时 `overlay.bounds-unavailable` 诊断）；预览十字受 `snapHints` 门控。
+  `CadView::set_overlay_visibility` 由 Linux/Web/Android 状态漏斗按有效配置推送，切换只
+  重建瞬态叠加层不动底图。
+- **interaction 门控（`ws/interaction-gating`）**：共享 `UiAdapter` 提升配置文件存储后，
+  在事件时按 `interaction.pointer` 早退指针/滚轮/画布拾取；命令别名仅在
+  `keyboardShortcuts` 为真时展开（完整命令名仍可用）；Web 触控 wasm 入口按
+  `interaction.touch` 空操作。新增 `crates/cad-ui-slint/tests/interaction_gating.rs`。
+- **原生偏好持久化（`ws/native-prefs`）**：`apps/app-linux/src/host/config_file.rs` 从
+  `$XDG_CONFIG_HOME/yacr/`（回退 `$HOME/.config/yacr/`）读取 `config.json`（完整
+  `ViewerConfig`）与 `preferences.json`（`allowedPaths` 投影），新增
+  `--config`/`--preferences`；`LinuxApp::apply_user_preference_json` 应用后原子持久化
+  投影。无 XDG/HOME 时显式不持久化；解析失败保留默认并报告。
+
+主控验证：`cargo fmt --check`、严格 clippy（工作区，排除 android/web）、架构/i18n/fixture/
+workflows 全通过；`cad-app` 275、`cad-ui-slint` 82+1 离屏+1 门控、`app-linux`
+`host_contracts` 4 + `host_config_disk` 1 + `verify_ui` 1 + `verify_ui_drawing` 1
+（lavapipe 离屏）通过。仍为软件 Vulkan/合成，未做真实 GPU/真机验收。详见
+`docs/ui-redesign.md`「仍未闭环」与 `docs/linux-app.md`。
+
 **verify-ui 循环轮 E：minimal 预设语义契约（本轮）**：`verify_ui.rs` 场景加入
 `minimal` 预设断言：保留应用框架/图层面板/导航工具栏/布局标签，隐藏 Ribbon、命令栏、
 状态栏（`UiPresentationModel` 的既有语义，此前只有 canvas-only 被验证）。截图

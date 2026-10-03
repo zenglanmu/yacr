@@ -40,8 +40,25 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
   sync/rename，成功后才确认数据库 revision。不能写入时不能标记已保存；导入严格拒绝指纹不匹配。
 - 未保存批注时打开/关闭被阻止，无隐式 discard。尚无保存/恢复/丢弃决策对话框及恢复缓存。
 - Trim 点选显式 Unsupported 且按钮禁用；第三方 CAD 字体可通过重复 `--font NAME=PATH`
-  显式加载，目录匹配/恢复、完整 ViewerConfig、原生多触控均未闭环。
+  显式加载，目录匹配/恢复、原生多触控均未闭环。
 - Linux 可执行文件不是静态独立发行包：运行仍需要系统库，当前 CI 上传二进制和证据，不宣称完整安装包。
+
+## 配置与用户偏好持久化（2026-10-03）
+
+宿主启动时若存在配置文件即读取，随后按有效配置渲染；三个 overlay/interaction 门控由
+状态漏斗在事件时读取有效配置执行（见 `docs/ui-redesign.md`）。
+
+- 目录：`$XDG_CONFIG_HOME/yacr/`，未设置时回退 `$HOME/.config/yacr/`；两者都没有时
+  完全不持久化（显式，不猜测路径）。
+- `config.json`：完整宿主 `ViewerConfig`（`schemaVersion:1`，camelCase，未知字段拒绝），经
+  `UiHandle::set_config_json` 应用；解析/校验失败保留默认并报告，不伪装成功。
+- `preferences.json`：仅 `allowedPaths` 投影的用户偏好补丁；应用后把投影原子重写
+  （与 Web `localStorage` 语义一致）。非法文件保留默认且不重写。
+- 覆盖：`--config PATH`、`--preferences PATH`（优先级高于 XDG 默认）。
+- `LinuxApp::apply_user_preference_json` 应用后原子持久化投影；原生 UI 尚无交互式偏好
+  改写入囗（`UiHandle` 层已有），因此本轮只闭环“启动读取 + API 应用持久化 + 往返测试”。
+  证据：`apps/app-linux/tests/host_config_disk.rs`（lavapipe 离屏，单测试进程）。
+
 
 ## 文件选择与关闭崩溃修复（2026-10-03）
 

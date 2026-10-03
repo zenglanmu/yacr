@@ -360,19 +360,35 @@ pub fn grid_overlay(bounds: (Point3, Point3), document: DocumentId) -> VisualOve
     out
 }
 
-/// Pick a power-of-ten grid step with roughly ten divisions across `extent`.
+/// Pick a "nice" 1/2/5 × 10ⁿ grid step targeting roughly ten divisions.
 ///
-/// A non-finite or degenerate extent falls back to `1.0`; the caller's count cap
+/// Rounding straight to a power of ten can jump from ~15 to ~40 divisions for a
+/// small change in extent; snapping to the 1/2/5 sequence keeps the grid between
+/// about 7 and 15 divisions so an explicitly enabled grid stays readable. A
+/// non-finite or degenerate extent falls back to `1.0`; the caller's count cap
 /// bounds the result regardless.
 fn grid_step(extent: f64) -> f64 {
     if !extent.is_finite() || extent <= 0.0 {
         return 1.0;
     }
-    // ~15 divisions keep a grid readable without crowding.
-    let raw = extent / 15.0;
-    let magnitude = 10f64.powf(raw.log10().round());
-    if magnitude.is_finite() && magnitude > 0.0 {
-        magnitude
+    let target = extent / 12.0;
+    let magnitude = 10f64.powf(target.log10().floor());
+    if !magnitude.is_finite() || magnitude <= 0.0 {
+        return 1.0;
+    }
+    let normalized = target / magnitude;
+    let nice = if normalized <= 1.0 {
+        1.0
+    } else if normalized <= 2.0 {
+        2.0
+    } else if normalized <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    let step = nice * magnitude;
+    if step.is_finite() && step > 0.0 {
+        step
     } else {
         1.0
     }

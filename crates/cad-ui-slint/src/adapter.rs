@@ -161,10 +161,9 @@ impl UiAdapter {
         // Hoisted above every input closure so each event reads the live
         // effective interaction config instead of a value captured at build
         // time. The command line and the pointer/scroll/pick gates share it.
-        let viewer_config: Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>> =
-            Rc::new(RefCell::new(
-                cad_app::viewer_config::ViewerConfigStore::default(),
-            ));
+        let viewer_config: Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>> = Rc::new(
+            RefCell::new(cad_app::viewer_config::ViewerConfigStore::default()),
+        );
 
         crate::command_line::connect(&ui, messages_slot.clone(), viewer_config.clone());
 

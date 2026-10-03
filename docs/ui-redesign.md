@@ -28,11 +28,21 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
 - `canvasOnly` 之外的精简预设对 ribbon 的实际重排仍是布局子集；`minimal` 语义待细化。
 - ribbon 的 `commands` 分组只用来过滤/校验 `commandVisibility`，尚未把自定义分组
   真正渲染成独立按钮分组（当前 ribbon 仍是固定 5 标签 + 内置面板）。
-- overlay 开关（`view.overlays.*`）已解析并推入只读属性，但尚未单独驱动 CAD 合成层
-  （例如网格/坐标轴的实际绘制由渲染器另行控制）。
-- `interaction.pointer/touch/keyboardShortcuts` 已解析并加入 presentation，但尚未逐项
-  门控输入路径。
-- 用户偏好仍只通过 `apply_user_preference`/`setConfig` API 合并；原生宿主未从磁盘读取。
+- `view.overlays.*` 已端到端门控绘制：`selectionHighlight`/`annotations`/`snapHints`
+  控制选择高亮、已提交批注、预览光标十字；`axes`/`grid` 首次产生真实世界坐标参考
+  几何（按图纸 bounds 生成、1/2/5 步长约 10 格、行数有上限、无 bounds 时显式诊断
+  不伪造）。内置默认 `axes=true`、`grid=false`，与 `ui-spec/ui-desc.md` 示例和 AutoCAD
+  一致。宿主在每次状态漏斗读取有效配置推送，切换只重建瞬态叠加层、不动底图。
+- `interaction.pointer/touch/keyboardShortcuts` 已逐项门控输入：共享 Slint 适配器在
+  事件时早退指针/滚轮/画布拾取与拾取映射；命令别名仅在 `keyboardShortcuts` 为真时
+  展开（完整命令名仍可用）；Web 触控 wasm 入口在 `touch` 为假时空操作。门控在 Rust
+  侧，尚未把三个标志作为 Slint 属性推送（UI 外观不因门控而变）。已知边界：画布拾取
+  回调为指针与触控共用，若 `pointer=false` 而 `touch=true`，触控拾取也会被关闭；分离
+  需要独立的触控拾取回调，尚未实现。
+- 原生宿主已从磁盘读取 `$XDG_CONFIG_HOME/yacr/config.json`（完整 `ViewerConfig`）与
+  `preferences.json`（`allowedPaths` 投影），并提供 `--config`/`--preferences` 覆盖；
+  无 XDG/HOME 时显式不持久化，解析失败保留默认并报告。用户偏好的交互式改写入
+  口仍未在原生 UI 中出现（当前仅通过宿主 API 应用后持久化）。
 - 既有命令层 Work/Viewer 授权继续有效，与配置 `features` 是两套独立门控。
 
 `UiHandle::set_config/set_config_json/update_config_json/apply_user_preference_json/effective_config_json`
