@@ -388,6 +388,7 @@ mod tests {
             annotations_json: "{}".into(),
             camera_center: [1.0, 2.0, 3.0],
             camera_world_per_px: 0.25,
+            ..Default::default()
         };
         let bytes = recovery_bytes(&snapshot);
         let decoded = parse_recovery(&bytes).unwrap();
@@ -411,6 +412,7 @@ mod tests {
             annotations_json: "{}".into(),
             camera_center: [0.0, 0.0, 0.0],
             camera_world_per_px: 1.0,
+            ..Default::default()
         };
         block_on(persist_recovery(&persistence, DocumentId(1), &snapshot)).unwrap();
         let loaded = block_on(load_recovery(&persistence, DocumentId(1)))

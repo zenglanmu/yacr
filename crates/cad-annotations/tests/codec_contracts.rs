@@ -48,6 +48,7 @@ fn empty_file(identity: DocumentIdentity) -> AnnotationFile {
         annotations: Vec::new(),
         view_bookmarks: Vec::new(),
         extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
     }
 }
 
@@ -196,6 +197,7 @@ fn parse_serialise_parse_is_lossless_for_every_field() {
             }),
         }],
         extensions_json: extensions,
+        nested_extensions: Default::default(),
     };
 
     // First parse.

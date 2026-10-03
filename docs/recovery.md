@@ -140,3 +140,9 @@ pub enum UnsavedOutcome { Proceed, SaveFailed, RecoveryFailed, Cancelled }
   `prepare_annotation_export` → 下载 → `confirm_annotation_export` 的分步路径；Android 的
   自动保存/文件 API 尚未接线）。UI 层尚未接入完整的 Save/PreserveRecovery/Discard/Cancel
   弹窗流程；本文只锁定其决策模型与主机 API。
+
+## 5.1 本轮闭环：恢复快照的未知字段与版本
+
+`RecoverySnapshot` 现在保留未知顶层字段（`extensions_json`，解码→编码逐字往返），
+更高 `version` 显式拒绝（`decode` 返回 `None`，不降级、不伪造空快照）；`Default`
+实现避免用假身份构造快照。嵌套注解负载仍由 `cad-annotations` 的 sidecar 保真保证。

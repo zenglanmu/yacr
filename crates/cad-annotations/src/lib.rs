@@ -17,6 +17,7 @@ use serde_json::{json, Map, Value};
 
 mod annotation;
 mod bookmark;
+mod extensions;
 mod geometry;
 mod identity;
 mod json;
@@ -32,6 +33,7 @@ pub use types::*;
 
 pub(crate) use annotation::*;
 pub(crate) use bookmark::*;
+pub(crate) use extensions::*;
 pub(crate) use geometry::*;
 pub(crate) use identity::*;
 pub(crate) use json::*;

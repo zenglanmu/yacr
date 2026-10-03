@@ -27,9 +27,20 @@ F07/F08/F09；审计：`docs/code-audit-and-agent-handoff.md` B09/B10/B11/B12、
 未知的顶层字段按原样保留在 `AnnotationFile::extensions_json`
 （parse→serialize→parse 结构一致），使新写入方的数据能被旧读取方存活。
 
-**未知字段策略**：未知顶层字段保留；未知/未知枚举值（几何 `kind`、算法、
-来源、精度、单位、空间、锚点状态、指纹类型）一律 `CorruptData`，不做近似
-或默认；未知注解内部子字段当前不保留（见 OPEN）。
+**未知字段策略**：未知顶层字段保留；注解对象、其嵌套 `geometry`/`style`/
+`precision` 对象内部的未知字段也保留（存于私有顶层边带
+`yacr.nested_extensions`，编码时展开回注解对象；`AnnotationFile::nested_extensions`
+是类型化视图）。边带命名了文件中不存在的注解、或与内联捕获不一致时拒绝编码
+（`InvalidInput`/`CorruptData`），不静默丢弃。未知/未知枚举值（几何 `kind`、算法、
+来源、精度、单位、空间、锚点状态、指纹类型）一律 `CorruptData`，不做近似或默认。
+
+**时间戳**：解码同时接受整数 Unix 毫秒与 RFC 3339 字符串（`Z`/`z`、`±hh:mm`
+偏移、可选小数秒）；编码规范化写整数毫秒；非法/越界的字符串、`modified < created`
+一律 `CorruptData`。
+
+**版本与迁移**：`SCHEMA_VERSION=1`，`MIN_SCHEMA_VERSION=1`。更高版本
+`Unsupported`；更低版本只有存在确定性迁移函数时才迁移（`migrate_file`），
+当前没有任何历史版本发布过，故一律 `CorruptData`，不猜测迁移。
 
 ### 1.1 丢弃/损毁防护（审计 B09/B11）
 
@@ -96,10 +107,10 @@ F09，见 OPEN。
 - **隐藏/可见状态**：需要 `cad-db::Annotation` 增加字段（本 worktree 禁止修改
   `cad-db`）或由宿主侧维护逐注解可见性映射；列表 UI 的显示/隐藏入口属
   `cad-app`/`cad-ui-slint`。
-- **注解内部未知子字段保留**：需要扩展 `cad-db::Annotation` 或其边带；当前只
-  保留顶层未知字段，未声称支持注解内未知字段。
 - **显式映射的标量测量换算**：需要对相似映射判定并换算，或由上层重新测量。
 - **迁移历史样本**：需要一个更早 `schema_version` 的真实样本才能验收迁移路径；
-  当前只有 v1。
+  当前只有 v1（未知/更低版本已被显式拒绝，绝不猜测迁移）。
+- **嵌套未知字段的旧读取方语义**：边带是私有顶层键，旧写入方不会产生它；当前
+  读取方把边带规范化重写，故未知的**边带之外**的顶层字段仍逐字保真。
 - **宿主文件导入/导出**（Android SAF、Web 下载确认、IndexedDB 恢复）：属
   `cad-app`/宿主，不在本层。

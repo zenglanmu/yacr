@@ -50,6 +50,7 @@ fn encode_decode_round_trip_preserves_annotation() {
         annotations: vec![ann(1, "hello")],
         view_bookmarks: Vec::new(),
         extensions_json: extensions,
+        nested_extensions: Default::default(),
     };
     let bytes = service.encode(&file).unwrap();
     let decoded = service
@@ -72,6 +73,7 @@ fn mismatched_fingerprint_is_refused_by_default() {
         annotations: Vec::new(),
         view_bookmarks: Vec::new(),
         extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
     };
     let bytes = service.encode(&file).unwrap();
     let other = DocumentIdentity::Sha256([2u8; 32]);
@@ -106,6 +108,7 @@ fn round_trip(annotation: Annotation) -> Annotation {
         annotations: vec![annotation],
         view_bookmarks: Vec::new(),
         extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
     };
     let bytes = service.encode(&file).unwrap();
     let decoded = service
@@ -318,6 +321,7 @@ fn explicit_mapping_moves_geometry_and_unresolves_anchors() {
         annotations: vec![a],
         view_bookmarks: Vec::new(),
         extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
     };
     let bytes = service.encode(&file).unwrap();
     let mapping = Transform3::translation(Point3 {
@@ -368,6 +372,7 @@ fn unanchored_import_clears_anchors() {
         annotations: vec![a],
         view_bookmarks: Vec::new(),
         extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
     };
     let bytes = service.encode(&file).unwrap();
     let decoded = service
@@ -389,6 +394,7 @@ fn singular_mapping_is_rejected() {
         annotations: vec![ann(1, "note")],
         view_bookmarks: Vec::new(),
         extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
     };
     let bytes = service.encode(&file).unwrap();
     let mut matrix = [[0.0f64; 4]; 4];
@@ -401,5 +407,202 @@ fn singular_mapping_is_rejected() {
             FingerprintPolicy::ExplicitCoordinateMapping(singular)
         ),
         Err(CadError::InvalidInput(_))
+    ));
+}
+
+#[test]
+fn nested_unknown_fields_round_trip_losslessly() {
+    // Unknown keys on the annotation object, its geometry and its style must
+    // survive a decode -> encode -> decode cycle instead of being dropped.
+    let service = AnnotationService;
+    let identity = DocumentIdentity::Sha256([3u8; 32]);
+    let json = br#"{
+        "schema_version": 1,
+        "document_fingerprint": [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
+        "unit_context": {"source":"Millimeter","display":"Millimeter","decimal_places":3},
+        "annotations": [{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "space": "Model",
+            "geometry": {"kind":"text","position":[0,0,0],"future_geom":{"z":1}},
+            "text": "note",
+            "style": {"rgba":[1,2,3,4],"logical_width":1.0,"text_height":1.0,"future_style":7},
+            "created_unix_ms": 10,
+            "modified_unix_ms": 20,
+            "anchor": null,
+            "precision": {"kind":"analytic","future_precision":"x"},
+            "future_annotation": {"nested": true}
+        }]
+    }"#;
+    let first = service
+        .decode(json, &identity, FingerprintPolicy::RejectMismatch)
+        .unwrap();
+    let ext = first
+        .nested_extensions
+        .annotations
+        .get(&AnnotationId(1))
+        .expect("nested extensions captured");
+    assert!(ext.annotation.contains_key("future_annotation"), "{ext:?}");
+    assert!(ext.geometry.contains_key("future_geom"), "{ext:?}");
+    assert!(ext.style.contains_key("future_style"), "{ext:?}");
+    assert!(ext.precision.contains_key("future_precision"), "{ext:?}");
+
+    // The side-band must not leak as an ordinary top-level extension.
+    assert!(!first.extensions_json.contains_key(NESTED_EXTENSIONS_KEY));
+
+    let bytes = service.encode(&first).unwrap();
+    let second = service
+        .decode(&bytes, &identity, FingerprintPolicy::RejectMismatch)
+        .unwrap();
+    assert_eq!(second.nested_extensions, first.nested_extensions);
+    assert_eq!(second.extensions_json, first.extensions_json);
+
+    // The unknown keys are physically present in the emitted JSON.
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(text.contains("future_annotation"), "{text}");
+    assert!(text.contains("future_geom"), "{text}");
+    assert!(text.contains("future_style"), "{text}");
+    assert!(text.contains("future_precision"), "{text}");
+}
+
+#[test]
+fn nested_sideband_naming_an_absent_annotation_is_refused() {
+    let service = AnnotationService;
+    let identity = DocumentIdentity::Sha256([4u8; 32]);
+    let mut file = AnnotationFile {
+        schema_version: SCHEMA_VERSION,
+        application_version: "t".into(),
+        document_fingerprint: identity.clone(),
+        document_name_hint: "a.dwg".into(),
+        unit_context: UnitContext::drawing_units(),
+        annotations: vec![ann(1, "note")],
+        view_bookmarks: Vec::new(),
+        extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
+    };
+    let mut extensions = AnnotationExtensions::default();
+    extensions.annotation.insert("ghost".into(), "1".into());
+    file.nested_extensions
+        .annotations
+        .insert(AnnotationId(99), extensions);
+    assert!(matches!(
+        service.encode(&file),
+        Err(CadError::InvalidInput(_))
+    ));
+}
+
+#[test]
+fn timestamps_accept_rfc3339_and_reject_out_of_range() {
+    let service = AnnotationService;
+    let identity = DocumentIdentity::Sha256([5u8; 32]);
+    let base = r#"{
+        "schema_version": 1,
+        "document_fingerprint": [5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5],
+        "unit_context": {"source":"Millimeter","display":"Millimeter","decimal_places":3},
+        "annotations": [{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "space": "Model",
+            "geometry": {"kind":"text","position":[0,0,0]},
+            "text": "note",
+            "style": {"rgba":[1,2,3,4],"logical_width":1.0,"text_height":1.0},
+            "created_unix_ms": "2021-01-01T00:00:00Z",
+            "modified_unix_ms": "2021-01-01T00:00:00.250Z",
+            "anchor": null,
+            "precision": {"kind":"analytic"}
+        }]
+    }"#;
+    let file = service
+        .decode(
+            base.as_bytes(),
+            &identity,
+            FingerprintPolicy::RejectMismatch,
+        )
+        .unwrap();
+    assert_eq!(file.annotations[0].created_unix_ms, 1_609_459_200_000);
+    assert_eq!(file.annotations[0].modified_unix_ms, 1_609_459_200_250);
+
+    let bad = base.replace("\"2021-01-01T00:00:00Z\"", "\"2021-13-40T99:99:99Z\"");
+    let error = service
+        .decode(bad.as_bytes(), &identity, FingerprintPolicy::RejectMismatch)
+        .unwrap_err();
+    assert!(matches!(error, CadError::CorruptData(_)), "got {error:?}");
+}
+
+#[test]
+fn modified_before_created_is_rejected() {
+    let service = AnnotationService;
+    let identity = DocumentIdentity::Sha256([6u8; 32]);
+    let json = br#"{
+        "schema_version": 1,
+        "document_fingerprint": [6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6],
+        "unit_context": {"source":"Millimeter","display":"Millimeter","decimal_places":3},
+        "annotations": [{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "space": "Model",
+            "geometry": {"kind":"text","position":[0,0,0]},
+            "text": "note",
+            "style": {"rgba":[1,2,3,4],"logical_width":1.0,"text_height":1.0},
+            "created_unix_ms": 20,
+            "modified_unix_ms": 10,
+            "anchor": null
+        }]
+    }"#;
+    let error = service
+        .decode(
+            json.as_slice(),
+            &identity,
+            FingerprintPolicy::RejectMismatch,
+        )
+        .unwrap_err();
+    assert!(matches!(error, CadError::CorruptData(_)), "got {error:?}");
+}
+
+#[test]
+fn schema_version_below_the_oldest_migratable_is_refused() {
+    let service = AnnotationService;
+    let identity = DocumentIdentity::Sha256([7u8; 32]);
+    let json = br#"{
+        "schema_version": 0,
+        "document_fingerprint": [7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7],
+        "unit_context": {"source":"Millimeter","display":"Millimeter","decimal_places":3},
+        "annotations": []
+    }"#;
+    let error = service
+        .decode(
+            json.as_slice(),
+            &identity,
+            FingerprintPolicy::RejectMismatch,
+        )
+        .unwrap_err();
+    assert!(matches!(error, CadError::CorruptData(_)), "got {error:?}");
+}
+
+#[test]
+fn migrate_file_passes_current_and_refuses_unknown_versions() {
+    let service = AnnotationService;
+    let identity = DocumentIdentity::Sha256([8u8; 32]);
+    let current = AnnotationFile {
+        schema_version: SCHEMA_VERSION,
+        application_version: "t".into(),
+        document_fingerprint: identity,
+        document_name_hint: "a.dwg".into(),
+        unit_context: UnitContext::drawing_units(),
+        annotations: Vec::new(),
+        view_bookmarks: Vec::new(),
+        extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
+    };
+    assert_eq!(service.migrate_file(current.clone()).unwrap(), current);
+
+    let mut newer = current.clone();
+    newer.schema_version = SCHEMA_VERSION + 1;
+    assert!(matches!(
+        service.migrate_file(newer),
+        Err(CadError::Unsupported(_))
+    ));
+    let mut older = current;
+    older.schema_version = 0;
+    assert!(matches!(
+        service.migrate_file(older),
+        Err(CadError::CorruptData(_))
     ));
 }
