@@ -29,8 +29,8 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
 - 自定义 ribbon 分组已落地：`ui.components.ribbon.tabs[].groups[].commands[]` 现真正渲染为
   选项卡/分组/命令按钮并按 `commandVisibility` 过滤，点击映射到真实命令（未支持的合法
   命令显式报 `ribbon.command_unsupported`，不静默成功）。**未声明自定义 tabs 时内置 5 标签
-  面板逐字节不变**。图标/文字模式、分组内图标-文字切换与溢出菜单仍未实现（当前统一
-  小按钮显示图标+文字）。
+  面板逐字节不变**。分组支持 `display`（`iconAndLabel`|`iconOnly`|`labelOnly`），每项按此
+  渲染；组内命令超过 6 个时以内联溢出列表保留全部命令（**浮动锚定弹层仍未做**）。
 - 可配置 ribbon 命令的派发缺口已收窄：`view.reset` 现派发真实 `ResetView`；其余 8 个
   `Unsupported`（`view.orbit`/`view.standard`/`backend.switch`/`annotation.delete|select|
   visibility`/`layer.toggle`/`layout.switch`）因缺少明确目标或手势而**显式分理由**

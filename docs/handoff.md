@@ -18,6 +18,25 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**迭代 4：ribbon 显示模式/溢出 + minimal 语义 + 宿主面板一致性契约**：
+
+- **Ribbon 显示模式与溢出（`ws-ribbon-modes`）**：`RibbonGroup.display`
+  (`iconAndLabel`|`iconOnly`|`labelOnly`，默认 iconAndLabel) 经 `ResolvedRibbonCommand.display`
+  进入 Slint 模型（int 0/1/2），按项图标/文字；组内命令超过 6 个时渲染真实内联溢出列表，
+  全部命令仍可派发（不静默丢弃）。**未做浮动锚定弹层**（诚实标注为内联）。
+- **minimal 预设显式语义（`ws-minimal-preset`）**：新增私有 `PresetComponents` 真值表，
+  `resolve` 改为查表；新增「minimal 组件语义」与「CanvasOnly ≤ Minimal ≤ Full 单调性」
+  测试，行为对既有预设逐位不变。
+- **宿主面板一致性契约（`ws-android-parity`）**：新增 wasm-free `scripts/test-host-panel-parity.mjs`
+  （8 项），断言 Linux/Web/Android 三宿主的 panel/overlay setter 集合与
+  `effective_config()` overlay 门控一致，并以 `handle.rs` 的 `set_*` 集合做子集守卫；已加入
+  CI `web-host-contracts`。
+
+主控修复合并后两处编译问题（`json_display` move、测试内 `ViewerConfig` 导入与 `RibbonGroup.display`
+初值）。验证：fmt、严格 clippy（含 app-web）、架构/i18n/fixture/workflows、node 六套契约、
+`cargo test --workspace --exclude app-android`（含 app-web）、wasm 全 workspace lib check、
+Android aarch64 check、Linux release 离屏 smoke 全通过。仍为软件 Vulkan/合成。
+
 **迭代 3：可配置 ribbon 命令派发 + 响应式视口契约 + 能力钳制修复**：
 
 - **剩余 ribbon 命令（`ws/ribbon-unwired`）**：`view.reset` 现派发真实 `ResetView`；其余 8 个

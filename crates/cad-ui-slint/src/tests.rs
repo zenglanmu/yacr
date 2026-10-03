@@ -846,6 +846,7 @@ fn configured_ribbon_model_is_localized_and_visibility_filtered() {
                 "measure.area".into(),
                 "annotation.text".into(),
             ],
+            display: cad_app::viewer_config::RibbonCommandDisplay::IconAndLabel,
         }],
     }];
     config
@@ -906,7 +907,10 @@ fn empty_ribbon_config_keeps_the_builtin_tabs() {
 
 /// Build a one-tab/one-group config whose commands are all visible, so the
 /// assertions are about display/overflow rather than visibility filtering.
-fn ribbon_config_with_commands(display: &str, commands: &[&str]) -> ViewerConfig {
+fn ribbon_config_with_commands(
+    display: &str,
+    commands: &[&str],
+) -> cad_app::viewer_config::ViewerConfig {
     use cad_app::viewer_config::{RibbonCommandDisplay, RibbonGroup, RibbonTab, ViewerConfig};
     let display = match display {
         "iconOnly" => RibbonCommandDisplay::IconOnly,

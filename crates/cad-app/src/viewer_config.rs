@@ -2016,7 +2016,7 @@ mod tests {
                 "commands": ["measure.distance", "measure.area"]
             });
             if !json_display.is_null() {
-                group["display"] = json_display;
+                group["display"] = json_display.clone();
             }
             let config: ViewerConfig = serde_json::from_value(json!({
                 "ui": { "components": { "ribbon": { "tabs": [
