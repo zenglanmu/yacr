@@ -12,6 +12,9 @@ name: CI build layers
 # provisions the runner / variable):
 #   android-apk  : scripts/build-android.sh -> APK artifact + real manifest facts
 #   web-smoke    : scripts/check-web-ui.mjs under Playwright (software GPU only)
+#   web-deploy   : publish the verified web-dist artifact to Cloudflare Pages,
+#                  only on a push to main and only when the maintainer enables
+#                  CF_PAGES_DEPLOY_ENABLED (secrets required)
 #
 # Anything that genuinely needs a real device / real GPU is modelled as a skipped
 # job with an explicit not-run summary and documented in docs/ci.md "NOT RUN".
@@ -206,6 +209,54 @@ jobs:
           name: web-dist
           path: web-dist/
           retention-days: 14
+
+  web-deploy:
+    name: web-deploy (Cloudflare Pages)
+    # Production publish of the verified web bundle. Gated twice so it can
+    # never silently pass or leak secrets:
+    #   * CF_PAGES_DEPLOY_ENABLED must be 'true' (unset -> SKIPPED, not green);
+    #   * only a push to main deploys, so PRs/forks never see the secrets.
+    # It reuses the web-build artifact (SKIP_BUILD=1): what is published is
+    # exactly what the web-build job verified, not a second unverified rebuild.
+    # See docs/ci.md ("web-deploy") for the deploy script and prerequisites.
+    if: ${{ vars.CF_PAGES_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: web-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download the verified web-dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web-dist
+
+      - name: Deploy web-dist to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PAGES_PROJECT: yacr-examples
+          CF_PAGES_BRANCH: main
+          DIST: ${{ github.workspace }}/web-dist
+          # Deploy the artifact as-is; do not rebuild an unverified bundle.
+          SKIP_BUILD: "1"
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?set the CLOUDFLARE_API_TOKEN repository secret}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?set the CLOUDFLARE_ACCOUNT_ID repository secret}"
+          scripts/deploy-cloudflare-pages.sh
+          {
+            echo "## web-deploy (Cloudflare Pages)"
+            echo ""
+            echo "- project: ${CF_PAGES_PROJECT} (branch ${CF_PAGES_BRANCH})"
+            echo "- source: web-build artifact, deployed with SKIP_BUILD=1 (no rebuild)"
+            echo "- URL: https://${CF_PAGES_PROJECT}.pages.dev/"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   shader-validation:
     name: shader-validation

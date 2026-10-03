@@ -6,9 +6,10 @@ Standard library only. What it checks:
   * at least one workflow file exists under ``.github/workflows`` and is non-empty;
   * every required job is declared as a job key in some workflow
     (``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
-     ``linux-app``, ``web-build``, ``android-check``, ``android-apk``, ``web-smoke``; the last
-    three are capability-gated but still must be *declared* so their absence is
-    visible rather than silent);
+     ``linux-app``, ``web-build``, ``web-host-contracts``, ``web-deploy``,
+     ``android-check``, ``android-apk``, ``web-smoke``; the last four are
+     capability-gated but still must be *declared* so their absence is
+     visible rather than silent);
   * no required job declares ``continue-on-error: true`` (job-level or step-level);
   * each required job still contains its expected command fragment, so the job
     keeps mirroring the real gate instead of drifting into an empty success.
@@ -29,11 +30,12 @@ WORKFLOW_SUFFIXES = (".yml", ".yaml")
 
 # Job key -> command fragments that must appear inside that job.
 #
-# `shader-validation`, `web-build`, `android-check`, `android-apk` and
-# `web-smoke` are all required to be *declared*. The gated jobs
-# (`android-check`, `android-apk`, `web-smoke`) must keep their explicit
-# `if:` capability guard, checked separately below, so a gate can never be
-# mistaken for a silent skip-to-green.
+# `shader-validation`, `web-build`, `web-host-contracts`, `web-deploy`,
+# `android-check`, `android-apk` and `web-smoke` are all required to be
+# *declared*. The gated jobs (`web-deploy`, `android-check`, `android-apk`,
+# `web-smoke`) must keep their explicit `if:` capability guard, checked
+# separately below, so a gate can never be mistaken for a silent
+# skip-to-green.
 REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     "linux-app": (
         "cargo test -p app-linux --locked -- --test-threads=1",
@@ -68,6 +70,11 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "node --test scripts/test-web-host.mjs",
         "actions/setup-node",
     ),
+    "web-deploy": (
+        "scripts/deploy-cloudflare-pages.sh",
+        "actions/download-artifact",
+        "secrets.CLOUDFLARE_API_TOKEN",
+    ),
     "android-check": (
         "cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked",
     ),
@@ -84,10 +91,11 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
 
 # Jobs that are capability-gated: they must carry an explicit `if:` guard so
 # that when the capability is absent GitHub reports SKIPPED, never a pass.
-GATED_JOBS: tuple[str, ...] = ("android-check", "android-apk", "web-smoke")
+GATED_JOBS: tuple[str, ...] = ("web-deploy", "android-check", "android-apk", "web-smoke")
 
 # `if:` fragment each gated job must retain (the capability switch).
 GATED_JOB_IF: dict[str, str] = {
+    "web-deploy": "vars.CF_PAGES_DEPLOY_ENABLED",
     "android-check": "vars.ANDROID_CI_ENABLED",
     "android-apk": "vars.ANDROID_CI_ENABLED",
     "web-smoke": "vars.WEB_SMOKE_ENABLED",

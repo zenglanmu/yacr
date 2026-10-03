@@ -26,8 +26,9 @@ Linux App 是第一验收标准，Web/Android 继续保持独立构建层；WASM
 ## 触发、权限与并发
 
 - 触发：`push`、`pull_request`、`workflow_dispatch`（可手动重跑单层）。
-- 权限：顶层 `permissions: contents: read`；本工作流无发布/上传步骤，不需要任何
-  write 权限或 secrets。
+- 权限：顶层 `permissions: contents: read`；唯一写外部系统的是 **能力门控**
+  的 `web-deploy`（Cloudflare Pages），它用仓库 secrets 而非 GitHub 写权限。
+  其余 job 无发布/上传存储步骤（artifact 上传只需只读权限）。
 - 并发：`concurrency.group = <workflow>-<ref>`，`cancel-in-progress: true`，
   同 ref 的旧运行被取消。
 - 超时：`core-quality` 45 分钟、`wasm-check` 45 分钟、`android-check` 60 分钟。
@@ -44,7 +45,8 @@ Linux App 是第一验收标准，Web/Android 继续保持独立构建层；WASM
 | `dtolnay/rust-toolchain` | `@1.98.1` | 与 `rust-toolchain.toml` 的 channel 一致，沿用仓库原有 pin |
 | `actions/cache` | `@v4` | 本层新增的唯一缓存 action；与 `actions/checkout@v4` 相同的 major tag 风格 |
 | `actions/upload-artifact` | `@v4` | `web-build` / `android-apk` / `web-smoke` 上传产物，只读权限即可 |
-| `actions/setup-node` | `@v4` | `web-smoke` 安装锁定 Node |
+| `actions/setup-node` | `@v4` | `web-host-contracts` / `web-smoke` / `web-deploy` 安装锁定 Node |
+| `actions/download-artifact` | `@v4` | `web-deploy` 取回 `web-build` 已验证的 `web-dist`，避免重新构建未验证产物 |
 
 这些 action 未固定完整 commit SHA：编写时无法联网核验 SHA，禁止凭空编造。
 仓库若采用 SHA 固定策略，应替换为已核验的完整 SHA（§6.3）。
@@ -58,6 +60,7 @@ Linux App 是第一验收标准，Web/Android 继续保持独立构建层；WASM
 | `i18n-contracts` | core.yml | `ubuntu-latest` | 双语 catalog / 缺 key / 硬编码白名单校验 |
 | `shader-validation` | build.yml | `ubuntu-latest` | naga 离线 WGSL 解析/校验（无需 GPU），失败红灯 |
 | `web-build` | build.yml | `ubuntu-latest` | `scripts/build-web.sh` 产出 `web-dist` 并上传，校验 wasm/JS 配对 |
+| `web-deploy` | build.yml | `ubuntu-latest`（能力相关，默认 SKIP） | 将已验证的 `web-dist` 发布到 Cloudflare Pages（仅 main push） |
 | `web-host-contracts` | build.yml | `ubuntu-latest` | Node 内置测试：模块边界、未保存决策、导出确认、本地化及轮询（无需 wasm/GPU） |
 | `android-check` | core.yml | 能力相关（默认 SKIP） | aarch64 上 `cad-ui-slint` + `app-android` 的 `cargo check` |
 | `android-apk` | build.yml | 能力相关（默认 SKIP） | 产出/上传 APK，记录真实 manifest facts（不宣称安装运行） |
@@ -78,8 +81,9 @@ Linux App 是第一验收标准，Web/Android 继续保持独立构建层；WASM
 | Android platform | `android-34` | `docs/build.md` |
 | JDK | `17` | `docs/build.md`（运行时校验 `java -version` 主版本） |
 | 预期 targetSdk / ABI / minSdk | `30` / `arm64-v8a` / `23` | 实测 manifest（`min_sdk_version` metadata 未生效，`docs/build.md` 已记录） |
-| Node | `22.22.1` | `web-smoke` |
+| Node | `22.22.1` | `web-smoke`、`web-deploy` |
 | Playwright | `1.55.1` | `web-smoke`（npm 锁定版本，不使用个人全局安装） |
+| Wrangler | `4`（npm dist-tag） | `scripts/deploy-cloudflare-pages.sh` 默认值；`web-deploy` 不覆盖 |
 
 
 ### `core-quality`（必需）
@@ -138,6 +142,28 @@ Linux App 是第一验收标准，Web/Android 继续保持独立构建层；WASM
 
 `DIST` 固定为工作区内一次性生成目录（脚本 `rm -rf` 只作用于该目录，见审计 §8 提醒）。
 
+### `web-deploy`（能力相关，默认 SKIP；真实发布）
+
+由仓库变量 `CF_PAGES_DEPLOY_ENABLED == 'true'` 门控，且**仅当** `push` 到 `main`
+（`github.event_name == 'push' && github.ref == 'refs/heads/main'`）才运行；PR/fork 永不接触
+Cloudflare secrets。未启用或非 main push 时 GitHub 显示 **skipped**，不是绿灯。
+
+`needs: web-build`，只有构建成功才发布（即“构建成功自动发布”）。步骤：
+
+1. `actions/download-artifact@v4` 取回 `web-build` 的 `web-dist` artifact；
+2. 读取 `CLOUDFLARE_API_TOKEN`（权限含 *Cloudflare Pages: Edit*）与
+   `CLOUDFLARE_ACCOUNT_ID` secrets，缺失则步骤**显式失败**（job 断言与
+   `scripts/deploy-cloudflare-pages.sh` 各查一次）；
+3. `DIST=$GITHUB_WORKSPACE/web-dist SKIP_BUILD=1 CF_PAGES_PROJECT=yacr-examples
+   CF_PAGES_BRANCH=main scripts/deploy-cloudflare-pages.sh`——**不重新构建**，
+   发布的就是 `web-build` 已校验的产物；
+4. 脚本按需创建/复用 Pages 项目，`npx wrangler@4 pages deploy` 直传并输出生产 URL。
+
+对接的现有生产项目为 `yacr-examples`、生产分支 `main`（`docs/validation-web.md` §11）。
+这是审计 §6.3 所说的“构建与发布分开、自动部署需另行确认”的后续，现在由**仓库变量
+显式启用**，符合“未支持能力显式建模、不静默成功”。本仓库**尚未在 GitHub Actions 实跑**
+该 job（见下 NOT RUN）。
+
 ### `web-host-contracts`（必需，无需 wasm/GPU）
 
 `web-host-contracts` 独立使用 Node `22.22.1` 执行
@@ -191,8 +217,14 @@ Node `22.22.1` 与 Playwright `1.55.1` Chromium，构建 `web-dist`，起
 
 ## 需要的 secrets / 权限
 
-- 本工作流：无 secrets、无写权限（artifact 上传用 `actions/upload-artifact`，
-  普通 `permissions: contents: read` 即可）。发布/部署均不在本层。
+- 除 `web-deploy` 外：无 secrets、无写权限（artifact 上传用 `actions/upload-artifact`，
+  普通 `permissions: contents: read` 即可）。
+- `web-deploy`（真实发布，需显式启用）：两个 **secret**
+  - `CLOUDFLARE_API_TOKEN`：至少含 *Cloudflare Pages: Edit*；如需自动挂自定义域名再含
+    *Zone: DNS: Edit*；
+  - `CLOUDFLARE_ACCOUNT_ID`：Cloudflare account id。
+  - 另需仓库 **variable** `CF_PAGES_DEPLOY_ENABLED=true` 才会运行；缺 secret 时 job
+    显式失败，绝不静默成功。
 - 如需启用 Android 层：只需仓库变量 `ANDROID_CI_ENABLED`（`true`）与
   `ANDROID_RUNNER_LABEL`；web 冒烟只需 `WEB_SMOKE_ENABLED`。这些是 **variable**，
   不是 secret。签名密钥一律不注入到普通构建 job（CI APK 用临时开发签名）。
@@ -206,17 +238,22 @@ runner、标签、secrets 与设备：
   启用后仍**只**产出 APK，**安装与真机运行未执行**。
 - `web-smoke`：默认关闭。即便启用，也只是软件 GPU 无头 Chromium，**非真机、非
   WebGPU 验收**；真机浏览器矩阵未运行。
+- `web-deploy`：默认关闭（`CF_PAGES_DEPLOY_ENABLED` 未设即 SKIP），**未在本仓库的
+  GitHub Actions 上跑过**；`docs/validation-web.md` §11 的记录是**本机手工**执行
+  `scripts/deploy-cloudflare-pages.sh`，不构成本 workflow 的通过证据。首次启用后须以真实
+  job URL / 部署 id 回填 `docs/validation.md`。
 - **真实 GPU / WebGPU 初始化与黄金图**：未运行（`shader-validation` 只是离线解析）。
 - **Android 真机 / 模拟器交互、移动性能报告**：未运行。
 - **自托管 GPU / Android 真机 runner**：本轮未注册、未购买、未验证标签与权限。
 - `core-quality` / `wasm-check` / `i18n-contracts` / `shader-validation` /
-  `web-build`：workflow 已定义；`shader-validation` 与 `web-build` 的命令已在本环境
-  本地实跑（见下），但**未在 GitHub Actions 上执行**，请以真实 job 结果为准并写入
-  `docs/validation.md`。
+  `web-build` / `web-host-contracts`：workflow 已定义；`shader-validation` 与
+  `web-build` 的命令已在本环境本地实跑（见下），但**未在 GitHub Actions 上执行**，
+  请以真实 job 结果为准并写入 `docs/validation.md`。
 
-维护者待确认项：是否启用 Android/web-smoke 层（`ANDROID_CI_ENABLED` /
-`ANDROID_RUNNER_LABEL` / `WEB_SMOKE_ENABLED`）、是否注册自托管 GPU/真机 runner
-（标签、镜像、费用、权限）、是否启用发布/部署、CI APK 的临时签名策略。
+维护者待确认项：是否启用 web 自动发布 `web-deploy`（设置 `CF_PAGES_DEPLOY_ENABLED`
+与 `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`）、是否启用 Android/web-smoke 层
+（`ANDROID_CI_ENABLED` / `ANDROID_RUNNER_LABEL` / `WEB_SMOKE_ENABLED`）、是否注册自托管
+GPU/真机 runner（标签、镜像、费用、权限）、CI APK 的临时签名策略。
 
 ## 本地复现
 
@@ -235,6 +272,10 @@ cargo test -p cad-render-wgpu --test wgsl_validation --locked
 # Web 静态产物（需 wasm-bindgen-cli 0.2.129）
 cargo install wasm-bindgen-cli --version 0.2.129 --locked
 DIST="$PWD/web-dist" PROFILE=release scripts/build-web.sh
+# Web 自动发布到 Cloudflare Pages（需 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID；
+# SKIP_BUILD=1 表示发布上面已构建/校验的产物，不重建）
+DIST="$PWD/web-dist" SKIP_BUILD=1 CF_PAGES_PROJECT=yacr-examples CF_PAGES_BRANCH=main \
+  scripts/deploy-cloudflare-pages.sh
 # Android（需 SDK/JDK/NDK，见 docs/build.md）
 cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked
 scripts/build-android.sh --release
@@ -244,11 +285,30 @@ scripts/build-android.sh --release
 
 ```bash
 python3 scripts/check-workflows.py
+python3 scripts/test-linux-workflow.py
+python3 scripts/test-web-deploy-workflow.py
 ```
 
-它校验：workflow 文件存在且非空；八个必需 job（`core-quality`、`wasm-check`、
-`i18n-contracts`、`shader-validation`、`web-build`、`android-check`、`android-apk`、
-`web-smoke`）均已声明；必需 job 内没有 `continue-on-error: true`；每个 job 保留其
-命令片段；且被门控的 job（`android-check`/`android-apk`/`web-smoke`）保留其
-`if:` 能力开关（缺开关即失败，防止门控被误当成静默通过）。有 PyYAML 时做真实解析，
+它校验：workflow 文件存在且非空；十一个必需 job（`core-quality`、`wasm-check`、
+`i18n-contracts`、`shader-validation`、`linux-app`、`web-build`、`web-host-contracts`、
+`web-deploy`、`android-check`、`android-apk`、`web-smoke`）均已声明；必需 job 内没有
+`continue-on-error: true`；每个 job 保留其命令片段；且被门控的 job
+（`web-deploy`/`android-check`/`android-apk`/`web-smoke`）保留其 `if:` 能力开关
+（缺开关即失败，防止门控被误当成静默通过）。有 PyYAML 时做真实解析，
 否则退化为结构化文本检查并如实说明（不假装 YAML 已解析）。失败退出码非零。
+
+`scripts/test-linux-workflow.py` 与 `scripts/test-web-deploy-workflow.py` 是**变异契约**
+（mutation contracts）：它们故意删除主 Linux job 的产物/失败策略、或删除 `web-deploy`
+的能力开关 / `download-artifact` / 真实部署命令，断言结构检查**必然报错**，从而证明
+上面的门禁不是摆设。两者都不触网、不部署。
+
+## 启用 web 自动发布（维护者操作）
+
+1. 仓库 Secrets 增加 `CLOUDFLARE_API_TOKEN`（Pages: Edit；需自动挂域名再加 DNS: Edit）
+   与 `CLOUDFLARE_ACCOUNT_ID`；
+2. 仓库 Variables 设 `CF_PAGES_DEPLOY_ENABLED = true`；
+3. 此后每次 push 到 `main` 且 `web-build` 成功，`web-deploy` 会把该次构建的
+   `web-dist` artifact 发布到 `yacr-examples`；Cloudflare 与 job summary 均给出
+   不可变部署 URL 与生产 URL。
+
+关闭自动发布只需把变量改回非 `true`（job 回到 SKIP，不删任何配置）。

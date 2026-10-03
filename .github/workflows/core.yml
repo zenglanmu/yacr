@@ -67,6 +67,7 @@ jobs:
         run: |
           python3 scripts/check-workflows.py
           python3 scripts/test-linux-workflow.py
+          python3 scripts/test-web-deploy-workflow.py
       - name: Core and Linux UI host contract tests (serial software Vulkan)
         run: |
           set -euo pipefail
