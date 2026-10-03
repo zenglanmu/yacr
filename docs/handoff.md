@@ -18,6 +18,37 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**并行三工作流（本轮新增，2026-10-03）**：主控派发三个隔离 worktree 子代理，分别闭环
+三处显式缺口，主控统一合并/构建/门禁；子代理只写代码与单元测试，所有构建与运行由主控执行。
+
+- **批注 sidecar 保真（`ws/annotation-fidelity`）**：`cad-annotations` 现在保留注解对象及
+  嵌套 `geometry`/`style`/`precision` 的未知字段（私有顶层边带
+  `yacr.nested_extensions`，`AnnotationFile::nested_extensions` 为类型化视图），编码时与
+  已知字段冲突或命名缺失注解则拒绝；时间戳解码同时接受整数 Unix 毫秒与 RFC 3339
+  （`Z`/偏移/小数秒），非法或 `modified < created` 拒绝；新增
+  `MIN_SCHEMA_VERSION`/`migrate_file` 显式版本策略（更高 `Unsupported`、更低且无确定性
+  迁移则 `CorruptData`）。`RecoverySnapshot` 保留未知顶层字段并拒绝更新版本（不降级）。
+  新增 6 项注解契约测试 + 3 项恢复快照测试。详见 `docs/annotations.md`、`docs/recovery.md`。
+- **矢量出图（`ws/vector-plot`）**：`cad-representation::plot_vector` 新增纯 CPU 路径文档 +
+  自包含 SVG/PDF writer（无第三方 crate、不建 GPU 设备）；PDF 透明度用真实
+  `ExtGState`（`/ca`/`CA`，页面 `/Resources` 引用、`gs` 选择后恢复不透明）。CLI 新增
+  `--plot-format png|svg|pdf`（默认 png）。无法表达为路径的图元逐项 `vector.*` 诊断并降级
+  `completeness`，不静默丢图。176 项相关单测通过（含 SVG/PDF 结构、透明度资源、诊断）。
+  详见 `docs/plot.md` §9、`docs/cli.md`。
+- **ViewerConfig 协议（`ws/viewer-config`）**：`cad-app::viewer_config` 补齐
+  `features`/`view.overlays`/`interaction`/`commandOverrides`/`userCustomization.allowedPaths`
+  /Ribbon tabs/groups/commands/panel placement/initiallyOpen；解析顺序
+  默认→预设→宿主→宿主允许的用户偏好，用户偏好 clamp（不得重新启用被禁止项），
+  数组整体替换、显式 false 生效、失败原子保留旧值与 revision；`ViewerConfigStore` 提供
+  revision + 数据驱动 observer + 有效配置查询。Web 暴露
+  `window.yacr.setConfig/updateConfig/applyUserPreference/clear/config` 与
+  `yacr-config-changed` 事件，localStorage 仅投影 allowedPaths；Slint 按新的
+  `UiPresentationModel` 分面板/overlays/features 门控。详见 `docs/ui-redesign.md`。
+
+主控集成：合并三支后修复 3 处子代理遗漏（app-web 格式、`web.rs` 构造 CustomEvent、
+`run.rs` wasm 下 `run_plot` 引用、`chrome.rs` 未用 import、app-web 未用 re-export）；
+门禁与运行证据见下方“三工作流集成轮”。
+
 **Linux App 主验收（本轮完成）**：`apps/app-linux` 提供桌面与无窗口共用 LinuxApp，
 真实 HostController 命令与数据库/共享 Slint/wgpu 桥，release smoke 入口
 `bash scripts/check-linux-app.sh`。规范 §11.0、AGENTS/build/ci 已改为 Linux 主验收，
@@ -218,6 +249,24 @@ HATCH、动态块求值、注释性缩放、打印/出图、异步可取消导�
 Android surface 尺寸/安全区（U07）、SAF、量测/批注拾取与面板状态推送；自托管 GPU/Android
 runner；**授权 DWG/字体/黄金图**（`fixtures/manifest` 仍无授权样本）；MultiLeader；
 复杂文字整形；自动保存/崩溃恢复保留策略。详见各功能 `docs/*.md` 的"未完成"。
+
+## 下一轮优先：UI 界面未实现功能（用户指定）
+
+用户明确要求本集成轮结束后优先补齐 UI 未实现功能。当前 `docs/ui-redesign.md`「仍未闭环」
+与 `docs/panels.md`/`docs/ribbon-ui.md`/`docs/responsive-ui.md` 列出的缺口：
+
+1. **Ribbon 自定义分组渲染**：`ui.components.ribbon.tabs[].groups[].commands[]` 已解析/校验
+   并驱动 `commandVisibility`，但仍渲染为固定 5 标签 + 内置面板；需真正按配置重排分组/顺序/
+   图标-文字模式与溢出菜单。
+2. **overlay 开关驱动合成层**：`view.overlays.{axes,grid,selectionHighlight,snapHints,annotations}`
+   已解析但未逐项控制坐标轴/网格/捕捉提示/批注覆盖层的实际绘制。
+3. **interaction 门控**：`interaction.{pointer,touch,keyboardShortcuts}` 已解析但未逐项门控
+   输入路径（快捷键暂停、触控切换）。
+4. **精简预设语义**：`minimal` 预设仍是布局子集，需明确其组件/命令集合。
+5. **面板细节**：`docs/panels.md` 的布局面板（纸空间/视口裁剪与比例）、资源/3D/诊断抽屉；
+   `docs/responsive-ui.md` §6 的诚实缺口；软键盘/安全区并入坐标映射。
+6. **原生宿主偏好持久化**：原生宿主尚未从磁盘读取用户偏好（Web 已 localStorage）。
+7. **真机/浏览器移动矩阵**：UI 门控的浏览器移动/真机运行验收。
 
 ## 已定义，但尚需设计审查
 

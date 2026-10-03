@@ -12,9 +12,6 @@ use cad_ui_slint::UiHandle;
 
 use super::current_handle;
 
-/// Browser storage key for the host-allowed user preference patch.
-pub const CONFIG_STORAGE_KEY: &str = cad_ui_slint::web::CONFIG_STORAGE_KEY;
-
 /// Browser CustomEvent name emitted after a successful config change.
 pub const CONFIG_EVENT_NAME: &str = cad_ui_slint::web::CONFIG_EVENT_NAME;
 
@@ -45,7 +42,10 @@ pub fn stored_user_preference() -> Option<String> {
 pub fn set_config_json(text: &str) -> CadResult<()> {
     let handle = handle()?;
     handle.set_config_json(text).map_err(config_from_error)?;
-    cad_ui_slint::web::emit_config_changed(handle.config_revision(), &handle.effective_config_json());
+    cad_ui_slint::web::emit_config_changed(
+        handle.config_revision(),
+        &handle.effective_config_json(),
+    );
     Ok(())
 }
 
@@ -53,7 +53,10 @@ pub fn set_config_json(text: &str) -> CadResult<()> {
 pub fn update_config_json(text: &str) -> CadResult<()> {
     let handle = handle()?;
     handle.update_config_json(text).map_err(config_from_error)?;
-    cad_ui_slint::web::emit_config_changed(handle.config_revision(), &handle.effective_config_json());
+    cad_ui_slint::web::emit_config_changed(
+        handle.config_revision(),
+        &handle.effective_config_json(),
+    );
     Ok(())
 }
 
@@ -65,18 +68,22 @@ pub fn apply_user_preference_json(text: &str) -> CadResult<()> {
         .apply_user_preference_json(text)
         .map_err(config_from_error)?;
     let _ = persist_user_preference(&handle);
-    cad_ui_slint::web::emit_config_changed(handle.config_revision(), &handle.effective_config_json());
+    cad_ui_slint::web::emit_config_changed(
+        handle.config_revision(),
+        &handle.effective_config_json(),
+    );
     Ok(())
 }
 
 /// Clear the stored user preference (in-memory and durable) and emit an event.
 pub fn clear_user_preference() -> CadResult<()> {
     let handle = handle()?;
-    handle
-        .clear_user_preference()
-        .map_err(config_from_error)?;
+    handle.clear_user_preference().map_err(config_from_error)?;
     cad_ui_slint::web::clear_config_preference();
-    cad_ui_slint::web::emit_config_changed(handle.config_revision(), &handle.effective_config_json());
+    cad_ui_slint::web::emit_config_changed(
+        handle.config_revision(),
+        &handle.effective_config_json(),
+    );
     Ok(())
 }
 

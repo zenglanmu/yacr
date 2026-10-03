@@ -240,7 +240,8 @@ cad-cli-tools <operation> <input.dwg> [options]
 （默认）走无头 GPU 回读 + PNG；`--plot-format svg|pdf` 走纯 CPU 矢量路径，不创建 GPU
 设备（可在无适配器机器与单元测试中运行）。两路共享同一布局选择、`plan_plot_for_record`
 与 `build_paper_space`（视口变换已应用、INSERT 已展开），确保报告与几何不漂移。
-wasm 下仅矢量路径可用，`png` 仍为 `unsupported`。
+wasm 下 `plot`（含矢量）仍为 `unsupported`：该 CLI 宿主没有自己的文档读取与输出写入路径，
+只有原生宿主具备；矢量路径虽不需要 GPU，但不代表 wasm CLI 宿主已接线。
 
 结果文档含 `format` 字段；矢量路径给出 `width_mm/height_mm/paths/diagnostics`，输出文件
 由 `--png` 指定，缺省在输入名后追加所选格式扩展名（`.plot.svg` / `.plot.pdf`），不会把

@@ -6,29 +6,24 @@ use super::*;
 ///
 /// The returned error is structured and carries a stable machine `code`.
 pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
-    // The CPU-only vector plot path never owns a device, so it runs on every
-    // target (including wasm); it is not part of the native-only GPU branch.
-    if invocation.operation == CliOperation::Plot && invocation.plot_format.is_vector() {
-        let value = domain(run_plot(invocation))?;
-        return serde_json::to_string_pretty(&value)
-            .map_err(|e| CliError::new(error_code::INVARIANT, format!("cli encode failed: {e}")));
-    }
     if matches!(
         invocation.operation,
         CliOperation::FixedViewportRender | CliOperation::Plot | CliOperation::Benchmark
     ) {
-        // The browser has no headless device to own: it keeps the explicit
+        // The browser has no headless device to own, and this CLI host does not
+        // own the file/IO path for plotting either: it keeps the explicit
         // "unsupported" answer (the host canvas supplies the device instead).
-        // Benchmarking measures the native import/build/upload path, which the
-        // wasm CLI host does not own either.
+        // The CPU-only vector plot is native-only too until the wasm CLI host
+        // gains its own document/write path; claiming otherwise here would be a
+        // fake success.
         #[cfg(target_arch = "wasm32")]
         return Err(cli_error_from_domain(CadError::Unsupported(
             "fixed-viewport rendering, plotting and benchmarking require a native \
              host; wasm receives its device from the host canvas"
                 .into(),
         )));
-        // Native: drive the real headless renderer and report a structured
-        // frame, or fail explicitly (no adapter, no drawable geometry).
+        // Native: the CPU-only vector plot never owns a device, so it runs here
+        // rather than in the GPU branch; `png` drives the real headless renderer.
         #[cfg(not(target_arch = "wasm32"))]
         {
             let value = match invocation.operation {

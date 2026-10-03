@@ -3,7 +3,7 @@
 use super::*;
 use slint::Model;
 
-use cad_app::viewer_config::{ViewerConfig, ViewerConfigStore};
+use cad_app::viewer_config::ViewerConfig;
 
 /// Layout/locale configuration for the shell.
 #[derive(Debug, Clone)]

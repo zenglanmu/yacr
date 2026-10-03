@@ -1054,8 +1054,16 @@ impl UiPresentationModel {
             ribbon: visible && full && c.ribbon.visible,
             layer_panel,
             properties_panel,
-            layer_panel_initially_open: layer_panel && c.layer_panel.initially_open,
-            properties_panel_initially_open: properties_panel && c.properties_panel.initially_open,
+            // `initiallyOpen` is the desktop dock default. The compact/mobile
+            // shell never auto-opens its drawer from a resize: there it is the
+            // user's explicit toggle that opens the panel, so a breakpoint
+            // change must not surprise the canvas with an overlay drawer.
+            layer_panel_initially_open: layer_panel
+                && c.layer_panel.initially_open
+                && layout == LayoutMode::Desktop,
+            properties_panel_initially_open: properties_panel
+                && c.properties_panel.initially_open
+                && layout == LayoutMode::Desktop,
             navigation: visible && c.navigation_toolbar.visible,
             command_bar: visible && full && c.command_bar.visible,
             layout_tabs: visible && c.layout_tabs.visible,
@@ -1370,7 +1378,8 @@ mod tests {
                     "ui.components.ribbon.visible",
                     "ui.components.layerPanel.initiallyOpen",
                     "view.overlays.grid"
-                ] } },
+                ] },
+                "components": { "ribbon": { "visible": false } } },
                 "features": { "measure": false }
             }))
             .unwrap();

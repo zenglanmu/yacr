@@ -88,7 +88,7 @@ pub fn emit_config_changed(revision: u64, effective_json: &str) {
     let init = js_sys::Object::new();
     let _ = js_sys::Reflect::set(&init, &"detail".into(), &detail);
     let args = js_sys::Array::of2(&wasm_bindgen::JsValue::from_str(CONFIG_EVENT_NAME), &init);
-    let Ok(event) = constructor.construct(&args) else {
+    let Ok(event) = js_sys::Reflect::construct(&constructor, &args) else {
         return;
     };
     let Ok(dispatch) = js_sys::Reflect::get(&global, &"dispatchEvent".into()) else {

@@ -125,7 +125,7 @@ cad-cli-tools::run_plot ──────────────────�
 
 ```
 cad-cli-tools plot <input.dwg> [--layout <name>] [--dpi <f64>|--width <u32> --height <u32>]
-                              [--png <file>] [--out <file>] [--locale <tag>]
+                              [--plot-format png|svg|pdf] [--png <file>] [--out <file>] [--locale <tag>]
 ```
 
 - `--layout <name>`：布局名（显示名或块记录名，大小写不敏感）；缺省取第一个布局。找不到
@@ -133,7 +133,9 @@ cad-cli-tools plot <input.dwg> [--layout <name>] [--dpi <f64>|--width <u32> --he
 - `--dpi <f64>`：由纸张尺寸推导画布；与 `--width/--height` 二选一（给了 DPI 用 DPI）。
   非正/非有限/非数字为用法错误（退出码 2）。
 - `--width/--height`：像素画布（缺省 1280 × 720），按纸张外接框等比适配并居中（letterbox）。
-- `--png <file>`：PNG 路径；缺省为输入同目录 `<stem>.plot.png`。仅在成功出帧后原子写入。
+- `--plot-format`：`png`（缺省，无头 GPU 光栅）| `svg` | `pdf`（纯 CPU 矢量，不需要 GPU）。
+- `--png <file>`：输出文件路径（对任意格式均适用）；缺省按格式取扩展名
+  `<stem>.plot.png` / `<stem>.plot.svg` / `<stem>.plot.pdf`。仅在成功后原子写入。
 
 结果 JSON（stdout，`--out` 时写文件）：
 
