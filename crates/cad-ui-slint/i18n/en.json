@@ -80,7 +80,7 @@
   "import.panel": "Open progress",
   "import.cancel": "Cancel open",
   "import.phase.reading": "Reading file",
-  "import.phase.parsing": "Parsing DWG",
+  "import.phase.parsing": "Parsing DWG / DXF",
   "import.phase.tables": "Reading tables",
   "import.phase.entities": "Importing entities",
   "import.phase.resolving": "Resolving block states",
@@ -136,7 +136,7 @@
   "command.prompt": "OPEN / FIT / LINE / CIRCLE / MOVE / TRIM",
   "command.unknown": "Unknown command: {command}",
   "host.language_label": "Language",
-  "host.open_drawing": "Open DWG",
+  "host.open_drawing": "Open DWG / DXF",
   "host.retry_renderer": "Retry with WebGL2",
   "host.retry_unsaved": "Export unsaved annotations before restarting the renderer.",
   "host.renderer_failed": "Renderer failed: {error}",
@@ -171,5 +171,12 @@
   "linux.dirty": "Unsaved annotations retained; export before opening or closing",
   "linux.trim": "Linux trim picking is not wired yet",
   "linux.opened": "Drawing opened; see diagnostics for completeness",
-  "linux.completed": "Operation completed"
+  "linux.completed": "Operation completed",
+  "toolbar.pan": "Pan",
+  "toolbar.zoom_in": "Zoom in",
+  "toolbar.zoom_out": "Zoom out",
+  "file.choose": "Choose a DWG or DXF drawing",
+  "fonts.loaded": "Fonts: {registered} registered, {failed} failed, {unresolved} missing names (fallback rendering)",
+  "fonts.failed": "Font loading incomplete: {error}",
+  "linux.backend_unavailable": "Linux backend switching is not wired yet"
 }

@@ -124,7 +124,7 @@ impl UiCommandSink for WebSink {
         match command.id {
             CommandId::OpenDrawing => {
                 open_dialog("file-input");
-                set_status("请选择 DWG 文件…".into());
+                set_status(super::messages::current_messages().text("file.choose", &[]));
                 return Ok(());
             }
             CommandId::ExportAnnotations => {
@@ -307,7 +307,7 @@ impl ViewInput for WebViewInput {
     fn pointer(&self, kind: i32, button: i32, x: f64, y: f64) {
         match kind {
             0 => {
-                if button == 1 || button == 0 {
+                if button == 1 || button == 0 || button == 3 {
                     self.dragging.set(true);
                     self.down.set(Some([x, y]));
                     self.last.set([x, y]);

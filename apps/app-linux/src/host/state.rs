@@ -33,6 +33,7 @@ impl Runtime {
         let c = self.controller.borrow();
         let handles = self.handle.borrow();
         let handle = handles.as_ref().ok_or(CadError::Cancelled)?;
+        handle.set_open_available(self.options.drawing.is_some() && !c.unsaved_signal().dirty)?;
         handle.set_document_name(&c.document_name_hint)?;
         handle.set_history_availability(c.history_availability())?;
         handle.set_mode(c.mode())?;

@@ -81,7 +81,7 @@ impl LinuxApp {
         let view = self.runtime.view.borrow();
         let view = view.as_ref().ok_or(CadError::Cancelled)?;
         let report = serde_json::json!({ "schemaVersion": 1, "host": "app-linux", "softwareGpu": true,
-            "source": if self.runtime.options.drawing.is_some() { "external-dwg" } else { "synthetic" },
+            "source": if self.runtime.options.drawing.is_some() { "external-drawing" } else { "synthetic" },
             "size": [before.width,before.height], "cadRect": rect, "cadFrames": view.frames_rendered(),
             "backend": view.backend_label(), "renderError": view.last_error(),
             "navigationCameraChanged": true, "navigationPixelsChanged": true, "changedCadPixels": changed_pixels,

@@ -113,13 +113,13 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
     } else {
         view.set_fonts(engine);
     }
-    let text = format!(
-        "字体：目录 {}，引用 {}，计划 {}，注册 {}，失败 {}",
-        report.catalog_entries,
-        requested.len(),
-        report.planned.len(),
-        report.registered.len(),
-        report.failed.len(),
+    let text = super::messages::current_messages().text(
+        "fonts.loaded",
+        &[
+            ("registered", &report.registered.len().to_string()),
+            ("failed", &report.failed.len().to_string()),
+            ("unresolved", &report.unresolved.len().to_string()),
+        ],
     );
     set_font_status(&handle, text);
     Ok(report)
@@ -130,7 +130,10 @@ pub(super) fn spawn_font_load() {
     wasm_bindgen_futures::spawn_local(async {
         if let Err(e) = load_current_fonts().await {
             if let Some(handle) = with_runtime(|rt| rt.handle.clone()) {
-                let _ = handle.set_status(format!("字体加载未完成：{e}"));
+                let _ = handle.set_status(
+                    super::messages::current_messages()
+                        .text("fonts.failed", &[("error", &e.to_string())]),
+                );
             }
         }
     });

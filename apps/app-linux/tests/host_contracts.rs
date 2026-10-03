@@ -51,6 +51,23 @@ fn real_linux_host_runs_commands_and_refuses_fake_file_success() {
     })
     .unwrap();
     app.adapter.component().show().unwrap();
+    cad_ui_slint::offscreen::snapshot(app.adapter.window()).unwrap();
+    let (rect, _) = app.adapter.handle().shell_geometry().unwrap();
+    for y in [44.0, 92.0, 140.0, 188.0] {
+        assert!(!app
+            .adapter
+            .handle()
+            .canvas_hit_test([rect[0] + rect[2] - 40.0, rect[1] + y])
+            .unwrap());
+    }
+    assert!(!app.adapter.component().get_can_open());
+    assert!(!app.adapter.component().get_can_trim());
+    assert!(!app.adapter.component().get_can_switch_backend());
+    assert!(app.adapter.component().get_can_export());
+    app.adapter.component().invoke_zoom_requested(1.25);
+    app.adapter.component().invoke_zoom_requested(0.8);
+    app.adapter.component().invoke_pan_requested();
+    assert!(app.adapter.component().get_pan_active());
     app.adapter.component().invoke_open_requested();
     assert!(app
         .adapter
@@ -61,6 +78,10 @@ fn real_linux_host_runs_commands_and_refuses_fake_file_success() {
         cad_ui_slint::MessageSource::from_request("zh-CN")
             .text("draw.kind.line", &[])
             .into(),
+    );
+    assert!(
+        !app.adapter.component().get_pan_active(),
+        "starting a capture exits pan mode"
     );
     app.adapter.component().invoke_canvas_pick(350.0, 210.0);
     app.adapter.component().invoke_canvas_pick(500.0, 260.0);

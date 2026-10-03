@@ -205,12 +205,12 @@ impl ShxFont {
         let Some(info) = self.data.get(&0).cloned() else {
             return;
         };
-        if let Some(idx) = info.iter().position(|b| [13u8, 10, 0].contains(b)) {
-            if idx + 2 < info.len() {
-                let base_up = info[idx + 1] as f64;
-                let base_down = info[idx + 2] as f64;
-                self.height = (base_up + base_down).max(1.0);
-            }
+        // parse_shapes already stripped the NUL-terminated name. The first two
+        // bytes are above/below-baseline metrics, not another string header.
+        // Searching for CR/LF/NUL here confused metrics with bytecode and left
+        // most legacy fonts at the arbitrary default height of ten units.
+        if info.len() >= 2 {
+            self.height = (info[0] as f64 + info[1] as f64).max(1.0);
         }
     }
 
@@ -860,6 +860,32 @@ mod tests {
     fn rejects_non_shx_bytes() {
         assert!(ShxFont::parse(b"not a font", None).is_err());
         assert!(ShxFont::parse(&[0u8; 64], None).is_err());
+    }
+
+    #[test]
+    fn legacy_named_font_metrics_normalize_text_instead_of_using_default_ten() {
+        // An original synthetic SHAPES font: no third-party bytes are embedded.
+        let info = b"Synthetic\0\x78\x14\x02\0";
+        let glyph = b"H\0\x01\x08\0\x78\0";
+        let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
+        for value in [0u16, 72, 2, 0, info.len() as u16, 72, glyph.len() as u16] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(info);
+        bytes.extend(glyph);
+        let font = ShxFont::parse(&bytes, None).unwrap();
+        assert_eq!(font.height, 140.0);
+        let h = font.glyph('H', 14.0).unwrap();
+        let ymax = h
+            .polylines
+            .iter()
+            .flatten()
+            .map(|p| p[1])
+            .fold(0.0, f64::max);
+        assert!(
+            (ymax - 12.0).abs() < 1e-9,
+            "legacy font must not render at 168 world units: {ymax}"
+        );
     }
 
     #[test]

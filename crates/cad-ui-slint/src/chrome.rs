@@ -64,6 +64,9 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     // hardcoded "enhanced" (audit U02).
     ui.set_open_label(messages.text("file.open", &[]).into());
     ui.set_fit_label(messages.text("toolbar.fit", &[]).into());
+    ui.set_pan_label(messages.text("toolbar.pan", &[]).into());
+    ui.set_zoom_in_label(messages.text("toolbar.zoom_in", &[]).into());
+    ui.set_zoom_out_label(messages.text("toolbar.zoom_out", &[]).into());
     ui.set_measure_label(messages.text("measure.panel", &[]).into());
     ui.set_annotate_label(messages.text("annotation.panel", &[]).into());
     ui.set_undo_label(messages.text("toolbar.undo", &[]).into());

@@ -80,7 +80,7 @@
   "import.panel": "打开进度",
   "import.cancel": "取消打开",
   "import.phase.reading": "读取文件",
-  "import.phase.parsing": "解析 DWG",
+  "import.phase.parsing": "解析 DWG / DXF",
   "import.phase.tables": "读取表",
   "import.phase.entities": "导入实体",
   "import.phase.resolving": "解析块状态",
@@ -136,7 +136,7 @@
   "command.prompt": "OPEN / FIT / LINE / CIRCLE / MOVE / TRIM",
   "command.unknown": "未知命令：{command}",
   "host.language_label": "语言",
-  "host.open_drawing": "打开 DWG",
+  "host.open_drawing": "打开 DWG / DXF",
   "host.retry_renderer": "使用 WebGL2 重试",
   "host.retry_unsaved": "请先导出未保存批注，再重启渲染器。",
   "host.renderer_failed": "渲染器初始化失败：{error}",
@@ -171,5 +171,12 @@
   "linux.dirty": "未保存批注已保留，请导出后再打开或关闭",
   "linux.trim": "Linux 修剪取点尚未接线",
   "linux.opened": "已打开图纸，完整性请查看诊断",
-  "linux.completed": "命令完成"
+  "linux.completed": "命令完成",
+  "toolbar.pan": "平移",
+  "toolbar.zoom_in": "放大",
+  "toolbar.zoom_out": "缩小",
+  "file.choose": "请选择 DWG 或 DXF 图纸",
+  "fonts.loaded": "字体：注册 {registered}，失败 {failed}，缺失名称 {unresolved}（回退显示）",
+  "fonts.failed": "字体加载未完成：{error}",
+  "linux.backend_unavailable": "Linux 后端切换尚未接线"
 }

@@ -10,6 +10,7 @@ sudo apt-get install -y pkgconf libfontconfig-dev libfreetype-dev mesa-vulkan-dr
 cargo build -p app-linux --bin yacr-linux --release --locked
 target/release/yacr-linux                         # 已有桌面环境运行，不在无窗口 LXC 安装桌面
 target/release/yacr-linux --open /absolute/file.dwg --locale en
+target/release/yacr-linux --open /absolute/file.dxf --font times=/absolute/fonts/times.shx
 bash scripts/check-linux-app.sh                   # 无窗口，release App + lavapipe
 ```
 
@@ -32,7 +33,8 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 - `--export-annotations PATH`、`--import-annotations PATH` 指定侧车；导出先写临时文件并
   sync/rename，成功后才确认数据库 revision。不能写入时不能标记已保存；导入严格拒绝指纹不匹配。
 - 未保存批注时打开/关闭被阻止，无隐式 discard。尚无保存/恢复/丢弃决策对话框及恢复缓存。
-- Trim 点选显式 Unsupported；第三方 CAD 字体加载、完整 ViewerConfig、原生多触控均未闭环。
+- Trim 点选显式 Unsupported 且按钮禁用；第三方 CAD 字体可通过重复 `--font NAME=PATH`
+  显式加载，目录匹配/恢复、完整 ViewerConfig、原生多触控均未闭环。
 - Linux 可执行文件不是静态独立发行包：运行仍需要系统库，当前 CI 上传二进制和证据，不宣称完整安装包。
 
 ## 执行证据

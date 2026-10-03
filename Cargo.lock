@@ -317,6 +317,7 @@ dependencies = [
  "cad-diagnostics",
  "cad-domain",
  "cad-render-wgpu",
+ "cad-representation",
  "cad-ui-slint",
  "serde_json",
  "slint",

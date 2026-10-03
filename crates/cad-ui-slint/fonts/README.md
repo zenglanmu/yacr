@@ -16,5 +16,8 @@ regeneration uses `scripts/subset-ui-font.py` with fonttools `4.61.1`.
 The shell explicitly imports this font and uses its family, independent of
 fonts installed on the browser device. The static browser chrome uses the
 same file; the build copies it and its license to `web-dist/ui-font/`.
+The navigation/DXF refresh on 2026-10-03 used a 113,644-byte Google Fonts TTF,
+SHA-256 `ebba346644f24d7224bf3f04de75b379c989a3fb2f17887ae7d5983c21d74b21`;
+the generated font is 112,400 bytes / 514 codepoints. Source remains outside the repository.
 CAD TEXT/MTEXT, arbitrary document names and external font fallback remain
 separate concerns. This small subset does not claim full CJK coverage.

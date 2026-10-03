@@ -2247,3 +2247,49 @@ fn importer_resolves_visibility_through_an_insert_reference() {
     // still finds it because the INSERT references that block record.
     assert!(doc.block_visibility_param_for_def(block_handle).is_some());
 }
+#[test]
+fn ascii_dxf_enters_shared_database_and_truncation_is_not_empty_success() {
+    let bytes = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLINE\n5\n10\n8\n0\n10\n1\n20\n2\n30\n0\n11\n4\n21\n6\n31\n0\n0\nENDSEC\n0\nEOF\n";
+    let request = ImportRequest {
+        document: DocumentId(1),
+        database: DatabaseId(1),
+        bytes: Arc::from(bytes.as_slice()),
+        limits: ImportLimits::default(),
+        generation: 0,
+    };
+    let drawing = AcadrustImporter::default()
+        .import(&request, &|| false)
+        .unwrap();
+    assert!(drawing
+        .database
+        .entities()
+        .any(|e| matches!(e.geometry, SemanticGeometry::Line { .. })));
+    let acad = acadrust::DxfReader::from_reader(std::io::Cursor::new(bytes.to_vec()))
+        .unwrap()
+        .read()
+        .unwrap();
+    let binary = acadrust::DxfWriter::new_binary(&acad)
+        .write_to_vec()
+        .unwrap();
+    let binary_request = ImportRequest {
+        bytes: Arc::from(binary),
+        document: request.document,
+        database: request.database,
+        limits: request.limits,
+        generation: 0,
+    };
+    let binary_drawing = AcadrustImporter::default()
+        .import(&binary_request, &|| false)
+        .unwrap();
+    assert!(binary_drawing
+        .database
+        .entities()
+        .any(|e| matches!(e.geometry, SemanticGeometry::Line { .. })));
+    let truncated = ImportRequest {
+        bytes: Arc::from(&bytes[..bytes.len() - 6]),
+        ..request
+    };
+    assert!(AcadrustImporter::default()
+        .import(&truncated, &|| false)
+        .is_err());
+}

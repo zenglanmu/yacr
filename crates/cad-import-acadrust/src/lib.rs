@@ -13,7 +13,7 @@ use acadrust::entities::{
     AttachmentPoint, BoundaryEdge, DimensionBase, Hatch, TextHorizontalAlignment,
     TextVerticalAlignment,
 };
-use acadrust::{DwgReadOptions, DwgReader, EntityType, ReadStats};
+use acadrust::{DwgReadOptions, DwgReader, DxfReader, EntityType, ReadStats};
 use cad_db::{
     BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, EntityColor,
     EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency, Layer, Layout,
@@ -247,12 +247,15 @@ impl Importer for AcadrustImporter {
                 request.limits.max_file_bytes
             )));
         }
-        // A DWG begins with an "AC10xx" version signature. Refuse anything else
-        // instead of handing arbitrary bytes to a failsafe parser that would
-        // return an empty document and look like success.
-        if !looks_like_dwg(&request.bytes) {
+        let dwg = looks_like_dwg(&request.bytes);
+        let dxf = request.bytes.starts_with(b"AutoCAD Binary DXF\r\n\x1a\0") || {
+            let prefix = String::from_utf8_lossy(&request.bytes[..request.bytes.len().min(4096)]);
+            let mut lines = prefix.lines().map(str::trim);
+            matches!((lines.next(), lines.next()), (Some("0"), Some("SECTION")))
+        };
+        if !dwg && !dxf {
             return Err(CadError::CorruptData(
-                "input is not a DWG (missing AC10xx signature); DXF is not handled by this importer".into(),
+                "input is neither a DWG signature nor an ASCII/binary DXF section stream".into(),
             ));
         }
         let started = Instant::now();
@@ -267,11 +270,16 @@ impl Importer for AcadrustImporter {
             message: None,
         });
 
-        let mut reader = DwgReader::from_stream(Cursor::new(request.bytes.to_vec()));
-        reader.options = DwgReadOptions { failsafe: true };
-        let outcome = reader
-            .read_with_stats()
-            .map_err(|e| CadError::CorruptData(format!("DWG read failed: {e}")))?;
+        let outcome = if dwg {
+            let mut reader = DwgReader::from_stream(Cursor::new(request.bytes.to_vec()));
+            reader.options = DwgReadOptions { failsafe: true };
+            reader.read_with_stats()
+        } else {
+            // DXF defaults to strict reading: malformed records must not become empty success.
+            DxfReader::from_reader(Cursor::new(request.bytes.to_vec()))
+                .and_then(|reader| reader.read_with_stats())
+        }
+        .map_err(|e| CadError::CorruptData(format!("drawing read failed: {e}")))?;
         if cancelled() {
             return Err(CadError::Cancelled);
         }
@@ -281,7 +289,7 @@ impl Importer for AcadrustImporter {
         // completeness report still carries the detail for direct builder use).
         if !outcome.stats.stream_completed {
             return Err(CadError::CorruptData(
-                "DWG stream did not complete; file is truncated or corrupt".into(),
+                "drawing stream did not complete; file is truncated or corrupt".into(),
             ));
         }
 

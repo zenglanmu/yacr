@@ -13,6 +13,7 @@
 * 架构：`docs/architecture.md`
 * 构建（Linux App 主验收，含 Android APK）：`docs/build.md`
 * Linux 宿主入口与限制：`docs/linux-app.md`
+* UI 导航/禁用、DXF 与旧式 SHX 字号修复：`docs/ui-dxf-text-fixes.md`
 * 验证与运行证据：`docs/validation.md`
 * DWG 测试流程（lavapipe 主测试 + 无头浏览器复验）：[docs/testing-dwg.md](docs/testing-dwg.md)
 * 真实图纸回归结果：[docs/validation-dwg.md](docs/validation-dwg.md)

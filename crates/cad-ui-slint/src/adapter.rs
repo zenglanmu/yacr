@@ -174,12 +174,58 @@ impl UiAdapter {
             });
         }
         {
+            let s = shared.clone();
+            let doc = document;
+            ui.on_zoom_requested(move |factor| {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::Zoom,
+                    &doc,
+                    viewport,
+                    CommandPayload::Points(vec![cad_domain::Point3 {
+                        x: factor as f64,
+                        y: 0.0,
+                        z: 0.0,
+                    }]),
+                ));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document;
+            let weak = ui_weak.clone();
+            let drawing = draw_tool.clone();
+            let preview = draw_preview_sink.clone();
+            ui.on_pan_requested(move || {
+                *drawing.borrow_mut() = None;
+                publish_draw(&weak, &drawing, &preview);
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::CancelMeasurement,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::CancelAnnotationTool,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_pan_active(!ui.get_pan_active());
+                }
+            });
+        }
+        {
             // The Measure button starts (or restarts) the selected algorithm
             // instead of sending a payload-free guess (audit U04/F06).
             let s = shared.clone();
             let doc = document;
             let kind = selected_kind.clone();
+            let weak = ui_weak.clone();
             ui.on_measure_requested(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_pan_active(false);
+                }
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::Measure,
                     &doc,
@@ -197,7 +243,11 @@ impl UiAdapter {
             let doc = document;
             let kind_slot = selected_kind.clone();
             let messages = messages_slot.clone();
+            let weak = ui_weak.clone();
             ui.on_measure_kind_selected(move |name| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_pan_active(false);
+                }
                 let messages = messages.borrow().clone();
                 let Some(kind) = status::measurement_kind_from_label(&messages, name.as_str())
                 else {
@@ -346,6 +396,9 @@ impl UiAdapter {
             let draw_preview = draw_preview_sink.clone();
             let messages = messages_slot.clone();
             ui.on_canvas_pick(move |x, y| {
+                if report.upgrade().is_some_and(|ui| ui.get_pan_active()) {
+                    return;
+                }
                 // Ordinary navigation clicks must stay silent; only an active
                 // capture tool turns a click into a pick.
                 let measure = active.get();
@@ -430,7 +483,11 @@ impl UiAdapter {
             let doc = document;
             let kind_slot = selected_annotation_kind.clone();
             let messages = messages_slot.clone();
+            let weak = ui_weak.clone();
             ui.on_annotation_kind_selected(move |name| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_pan_active(false);
+                }
                 let messages = messages.borrow().clone();
                 let Some(kind) = status::annotation_kind_from_label(&messages, name.as_str())
                 else {
@@ -553,6 +610,9 @@ impl UiAdapter {
             let report = ui_weak.clone();
             let report_state = ui_weak.clone();
             ui.on_begin_draw_tool(move |name| {
+                if let Some(ui) = report_state.upgrade() {
+                    ui.set_pan_active(false);
+                }
                 let Some(kind) = draw_kind_from_label(&messages.borrow(), name.as_str())
                     .or_else(|| cad_app::DrawToolKind::from_key(name.as_str()))
                 else {
@@ -860,6 +920,21 @@ impl UiAdapter {
             ui.on_pointer_input(move |kind, button, x, y| {
                 let x = x as f64;
                 let y = y as f64;
+                if report.upgrade().is_some_and(|ui| ui.get_pan_active()) {
+                    if let Some(input) = input.borrow().as_ref() {
+                        input.pointer(
+                            kind,
+                            if button == 1 || button == 0 {
+                                3
+                            } else {
+                                button
+                            },
+                            x,
+                            y,
+                        );
+                    }
+                    return;
+                }
                 // While a draw/edit capture is active a pointer move updates the
                 // rubber-band cursor (no capture, no command); the release picks
                 // through `canvas-pick`. Non-primary navigation stays with the host.

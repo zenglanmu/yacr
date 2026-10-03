@@ -8,6 +8,7 @@ export component CadCommandBar inherits Rectangle {
     in property <string> prompt;
     in property <string> status;
     in property <string> open-label;
+    in property <bool> can-open: true;
     in property <string> tools-label;
     in property <string> fit-label;
     in property <string> mode-label;
@@ -27,7 +28,7 @@ export component CadCommandBar inherits Rectangle {
         HorizontalBox {
             padding: 0px;
             spacing: 4px;
-            Button { text: root.open-label; min-height: root.phone ? 48px : 36px; clicked => { root.open(); } }
+            Button { text: root.open-label; symbol: "▱"; enabled: root.can-open; min-height: root.phone ? 48px : 36px; clicked => { root.open(); } }
             // On phones the mode toggle lives in the expandable row so it cannot
             // squeeze the command input on a 320px screen; on wide layouts it is
             // a primary-row control.

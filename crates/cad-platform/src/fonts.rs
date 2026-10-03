@@ -13,14 +13,14 @@
 //!
 //! Fetching is the only host-specific step; it is expressed as [`FontLoader`],
 //! whose future may resolve on a browser network stack or an Android asset
-//! read. Unknown names are skipped by `plan_fonts` (never faked).
+//! read. Unknown names are reported and may use explicit catalog fallbacks (never aliases).
 
 use std::sync::Arc;
 
 use cad_db::DrawingDatabase;
 use cad_domain::{CadError, SemanticGeometry};
 use cad_representation::FontEngine;
-use cad_resources::{plan_fonts, FontCatalog};
+use cad_resources::{plan_fonts, plan_fonts_report, FontCatalog};
 
 use super::{FontLoader, HostFuture};
 
@@ -40,6 +40,8 @@ pub struct FontLoadReport {
     pub registered: Vec<String>,
     /// `<file>: <reason>` for each planned font that could not be registered.
     pub failed: Vec<String>,
+    /// Original names missing from the catalog, even when fallback rendering succeeds.
+    pub unresolved: Vec<String>,
 }
 
 impl FontLoadReport {
@@ -51,12 +53,13 @@ impl FontLoadReport {
     /// One-line, platform-neutral summary for diagnostics.
     pub fn summary(&self) -> String {
         format!(
-            "catalog={} requested={} planned={} registered={} failed={}",
+            "catalog={} requested={} planned={} registered={} failed={} unresolved={}",
             self.catalog_entries,
             self.requested.len(),
             self.planned.len(),
             self.registered.len(),
             self.failed.len(),
+            self.unresolved.len(),
         )
     }
 }
@@ -74,7 +77,7 @@ pub fn catalog_url(base: &str) -> String {
 /// populates with the style's SHX/big-font/TTF names). It performs no catalog
 /// lookup, no network access and no path resolution: a hostile drawing can
 /// therefore only supply names, which `plan_fonts` later sanitises to catalog
-/// entries. Names that resolve to nothing are simply absent from the plan.
+/// entries. Names that resolve to nothing remain explicit in the loading report.
 pub fn requested_fonts(database: &DrawingDatabase) -> Vec<String> {
     let mut out = Vec::new();
     for entity in database.entities() {
@@ -118,11 +121,26 @@ pub fn load_font_engine<'a>(
             .map_err(|e| CadError::InvalidInput(format!("font catalog is not UTF-8: {e}")))?;
         let catalog = FontCatalog::from_json(catalog_json)?;
 
-        let plan = plan_fonts(&catalog, requested, base);
+        let resolution = plan_fonts_report(&catalog, requested, base);
+        let mut plan = resolution.planned;
+        if !resolution.unresolved.is_empty() || !resolution.unsupported.is_empty() {
+            // Explicit, bounded fallbacks, never aliases masquerading as the original font.
+            for fallback in plan_fonts(&catalog, &["arial".into(), "simplex".into()], base) {
+                if !plan.iter().any(|font| font.file == fallback.file) {
+                    plan.push(fallback);
+                }
+            }
+        }
         let mut engine = FontEngine::new();
         let mut report = FontLoadReport {
             catalog_entries: catalog.len(),
             requested: requested.to_vec(),
+            unresolved: resolution.unresolved,
+            failed: resolution
+                .unsupported
+                .iter()
+                .map(|key| format!("{key}: unsupported font technology"))
+                .collect(),
             ..FontLoadReport::default()
         };
         for font in &plan {
@@ -337,8 +355,40 @@ mod tests {
         assert!(report.planned.is_empty());
         assert!(report.registered.is_empty());
         assert!(report.failed.is_empty());
+        assert_eq!(report.unresolved, requested);
         // The catalog was fetched (one URL) but no font URL was requested.
         assert_eq!(loader.seen.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn missing_names_load_explicit_catalog_fallback_without_claiming_resolution() {
+        let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
+        let info = b"Synthetic\0\x15\x07\x02\0";
+        for value in [0u16, 0, 1, 0, info.len() as u16] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(info);
+        let loader = FakeLoader {
+            catalog: Arc::from(
+                br#"[{"file":"simplex.shx","name":["simplex"],"type":"shx"}]"#.as_slice(),
+            ),
+            files: Mutex::new(HashMap::from([(
+                "https://example/fonts/simplex.shx".into(),
+                Ok(Arc::from(bytes)),
+            )])),
+            seen: Mutex::new(Vec::new()),
+        };
+        let requested = vec!["missing-original.shx".into()];
+        let (engine, report) = block_on(load_font_engine(
+            &loader,
+            &requested,
+            "https://example/fonts",
+        ))
+        .unwrap();
+        assert_eq!(report.unresolved, requested);
+        assert_eq!(report.registered, vec!["simplex.shx"]);
+        assert!(!engine.contains("missing-original.shx"));
+        assert_eq!(engine.fallback_keys(), &["simplex.shx"]);
     }
 
     #[test]

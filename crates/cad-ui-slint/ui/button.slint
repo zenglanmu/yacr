@@ -8,14 +8,33 @@ export component Button inherits Rectangle {
     in property <bool> icon-only: false;
     in property <bool> stacked: false;
     in property <color> foreground: CadTheme.ink;
-    property <image> icon: root.symbol == "↔" ? @image-url("icons/distance.svg") :
+    property <image> icon: root.symbol == "▱" ? @image-url("icons/open.svg") :
+        root.symbol == "⇧" ? @image-url("icons/export.svg") :
+        root.symbol == "⇩" ? @image-url("icons/import.svg") :
+        root.symbol == "info" ? @image-url("icons/info.svg") :
+        root.symbol == "∿" ? @image-url("icons/polyline.svg") :
+        root.symbol == "◇" ? @image-url("icons/annotation.svg") :
+        root.symbol == "A" ? @image-url("icons/text.svg") :
+        root.symbol == "↗" ? @image-url("icons/leader.svg") :
+        root.symbol == "ellipse" ? @image-url("icons/ellipse.svg") :
+        root.symbol == "freehand" ? @image-url("icons/freehand.svg") :
+        root.symbol == "pan" ? @image-url("icons/pan.svg") :
+        root.symbol == "zoom-in" ? @image-url("icons/zoom-in.svg") :
+        root.symbol == "zoom-out" ? @image-url("icons/zoom-out.svg") :
+        root.symbol == "line" ? @image-url("icons/line.svg") :
+        root.symbol == "circle" ? @image-url("icons/circle.svg") :
+        root.symbol == "trim" ? @image-url("icons/trim.svg") :
+        root.symbol == "↔" ? @image-url("icons/distance.svg") :
         (root.symbol == "∠" ? @image-url("icons/angle.svg") :
         (root.symbol == "▨" ? @image-url("icons/area.svg") :
         (root.symbol == "layers" ? @image-url("icons/layers.svg") :
         (root.symbol == "□" ? @image-url("icons/annotation.svg") :
         (root.symbol == "⊡" ? @image-url("icons/fit.svg") :
         (root.symbol == "☁" ? @image-url("icons/cloud.svg") : @image-url("icons/annotation.svg")))))));
-    property <bool> vector-icon: root.symbol == "↔" || root.symbol == "∠" || root.symbol == "▨" ||
+    property <bool> vector-icon: root.symbol == "▱" || root.symbol == "⇧" || root.symbol == "⇩" || root.symbol == "info" ||
+        root.symbol == "∿" || root.symbol == "◇" || root.symbol == "A" || root.symbol == "↗" || root.symbol == "ellipse" || root.symbol == "freehand" ||
+        root.symbol == "pan" || root.symbol == "zoom-in" || root.symbol == "zoom-out" ||
+        root.symbol == "line" || root.symbol == "circle" || root.symbol == "trim" || root.symbol == "↔" || root.symbol == "∠" || root.symbol == "▨" ||
         root.symbol == "layers" || root.symbol == "□" || root.symbol == "⊡" || root.symbol == "☁";
     callback clicked();
     min-width: 64px;
@@ -30,9 +49,11 @@ export component Button inherits Rectangle {
     border-width: root.checked || touch.has-hover ? 1px : 0px;
     border-radius: 3px;
     label := Text {
+        x: root.vector-icon && !root.stacked && !root.icon-only ? 30px : 0px;
+        width: parent.width - self.x;
         y: root.stacked ? parent.height - 26px : 0px;
         height: root.stacked ? 26px : parent.height;
-        text: root.icon-only ? (root.vector-icon ? "" : root.symbol) : root.text;
+        text: root.icon-only ? (root.vector-icon ? "" : root.symbol) : (root.stacked || root.vector-icon || root.symbol == "" ? root.text : root.symbol + " " + root.text);
         font-size: root.icon-only ? 24px : 14px;
         color: !root.enabled ? #98a3b0 : (root.checked ? CadTheme.accent : root.foreground);
         horizontal-alignment: center;
@@ -45,7 +66,7 @@ export component Button inherits Rectangle {
         horizontal-alignment: center; vertical-alignment: center;
     }
     if root.vector-icon : Image {
-        x: (parent.width - self.width) / 2; y: root.stacked ? 8px : (parent.height - self.height) / 2;
+        x: root.stacked || root.icon-only ? (parent.width - self.width) / 2 : 4px; y: root.stacked ? 8px : (parent.height - self.height) / 2;
         width: root.stacked ? 32px : 24px; height: self.width; source: root.icon;
         colorize: !root.enabled ? #98a3b0 : (root.symbol == "☁" ? #f24e4e : (root.checked ? CadTheme.accent : root.foreground));
     }

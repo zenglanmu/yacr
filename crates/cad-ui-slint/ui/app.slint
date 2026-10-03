@@ -26,6 +26,17 @@ export component YacrWindow inherits Window {
     in property <bool> layer-panel-initially-open: true;
     in property <bool> properties-panel-initially-open: true;
     in property <bool> navigation-visible: true;
+    in property <string> pan-label;
+    in property <string> zoom-in-label;
+    in property <string> zoom-out-label;
+    in-out property <bool> pan-active: false;
+    in property <bool> can-open: true;
+    in property <bool> can-import: true;
+    in property <bool> can-export: true;
+    in property <bool> can-trim: true;
+    in property <bool> can-switch-backend: true;
+    callback pan-requested();
+    callback zoom-requested(float);
     in property <bool> command-visible: true;
     in property <bool> layouts-visible: true;
     in property <bool> status-visible: true;
@@ -220,7 +231,7 @@ export component YacrWindow inherits Window {
             background: CadTheme.chrome;
             HorizontalBox {
                 padding: 4px; spacing: 4px;
-                ConceptButton { text: root.open-label; symbol: "▱"; icon-only: true;
+                ConceptButton { text: root.open-label; symbol: "▱"; icon-only: true; enabled: root.can-open;
                     min-width: 48px; preferred-width: 48px; min-height: root.phone-shell ? 44px : 28px;
                     clicked => { root.open-requested(); } }
                 if !root.phone-shell : ConceptButton { text: root.undo-label; symbol: "↶"; icon-only: true;
@@ -231,10 +242,10 @@ export component YacrWindow inherits Window {
                     enabled: root.work-mode && root.can-redo; clicked => { root.redo-requested(); } }
                 Text { text: root.application-title; color: CadTheme.ink; font-size: root.phone-shell ? 18px : 15px;
                     horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
-                if root.cmd-export-visible : ConceptButton { text: root.export-label; symbol: "⇧"; icon-only: true;
+                if root.cmd-export-visible : ConceptButton { text: root.export-label; symbol: "⇧"; icon-only: true; enabled: root.can-export;
                     min-width: 36px; preferred-width: 36px; min-height: 28px;
                     clicked => { root.export-requested(); } }
-                if root.cmd-import-visible : ConceptButton { text: root.import-label; symbol: "⇩"; icon-only: true;
+                if root.cmd-import-visible : ConceptButton { text: root.import-label; symbol: "⇩"; icon-only: true; enabled: root.can-import && root.work-mode;
                     min-width: 36px; preferred-width: 36px; min-height: 28px;
                     clicked => { root.import-requested(); } }
                 ConceptButton { text: root.more-label; symbol: "···"; icon-only: true;
@@ -259,6 +270,8 @@ export component YacrWindow inherits Window {
             can-redo: root.work-mode && root.can-redo;
             view-3d: root.view-3d;
             work-mode: root.work-mode;
+            can-open: root.can-open; can-import: root.can-import; can-export: root.can-export;
+            can-trim: root.can-trim; can-switch-backend: root.can-switch-backend;
             draw-status: root.draw-status;
             editing-labels: root.editing-labels;
             expanded <=> root.ribbon-expanded;
@@ -317,10 +330,16 @@ export component YacrWindow inherits Window {
                 pick(x, y) => { root.canvas-pick(x, y); }
             }
             if root.application-ui && root.navigation-visible : Rectangle {
-                x: parent.width - 64px; y: 20px; width: 48px; height: 48px;
+                x: parent.width - 64px; y: 20px; width: 48px; height: 192px;
                 border-radius: 8px; border-width: 1px; border-color: #7b8793; background: #303a44dd;
-                ConceptButton { text: root.fit-label; symbol: "⊡"; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
+                ConceptButton { y: 0px; text: root.fit-label; symbol: "⊡"; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
                     clicked => { root.fit-requested(); } }
+                ConceptButton { y: 48px; text: root.pan-label; symbol: "pan"; checked: root.pan-active; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
+                    clicked => { root.pan-requested(); } }
+                ConceptButton { y: 96px; text: root.zoom-in-label; symbol: "zoom-in"; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
+                    clicked => { root.zoom-requested(1.25); } }
+                ConceptButton { y: 144px; text: root.zoom-out-label; symbol: "zoom-out"; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
+                    clicked => { root.zoom-requested(0.8); } }
             }
             if root.application-ui && root.layouts-visible && root.phone-shell : ComboBox {
                 x: 12px; y: 16px; width: 140px; height: 48px;
@@ -398,6 +417,7 @@ export component YacrWindow inherits Window {
             prompt: root.command-prompt;
             status: root.status-label;
             open-label: root.open-label;
+            can-open: root.can-open;
             fit-label: root.fit-label;
             tools-label: root.tools-label;
             mode-label: root.mode-label;
@@ -437,6 +457,8 @@ export component YacrWindow inherits Window {
             measurements: root.measurement-kind-labels; annotations: root.annotation-kind-labels;
             standard-views: root.standard-view-labels; backends: root.backend-labels;
             backend-index: root.backend-index; view-3d: root.view-3d; work-mode: root.work-mode;
+            can-open: root.can-open; can-import: root.can-import; can-export: root.can-export;
+            can-trim: root.can-trim; can-switch-backend: root.can-switch-backend;
             editing-labels: root.editing-labels; draw-status: root.draw-status;
             can-undo: root.work-mode && root.can-undo; can-redo: root.work-mode && root.can-redo;
             measure-kind(value) => { root.measure-kind-selected(value); }

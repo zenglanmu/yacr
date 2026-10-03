@@ -17,6 +17,7 @@ mod validation;
 
 #[derive(Debug, Clone)]
 pub struct LinuxOptions {
+    pub fonts: Vec<(String, PathBuf)>,
     pub headless: bool,
     pub output: Option<PathBuf>,
     pub drawing: Option<PathBuf>,
@@ -28,6 +29,7 @@ pub struct LinuxOptions {
 impl Default for LinuxOptions {
     fn default() -> Self {
         Self {
+            fonts: Vec::new(),
             headless: false,
             output: None,
             drawing: None,
@@ -51,6 +53,13 @@ impl LinuxOptions {
                 .next()
                 .ok_or_else(|| format!("missing value for {arg}"))?;
             match arg.as_str() {
+                "--font" => {
+                    let (name, path) = value.split_once('=').ok_or("font must be NAME=PATH")?;
+                    if name.is_empty() || path.is_empty() {
+                        return Err("font name/path must not be empty".into());
+                    }
+                    options.fonts.push((name.into(), path.into()));
+                }
                 "--output" => options.output = Some(value.into()),
                 "--open" => options.drawing = Some(value.into()),
                 "--export-annotations" => options.annotation_export = Some(value.into()),
@@ -127,6 +136,9 @@ impl Runtime {
             CommandId::OpenDrawing => self.open(),
             CommandId::ExportAnnotations => self.export_annotations(),
             CommandId::ImportAnnotations => self.import_annotations(),
+            CommandId::SwitchBackend => Err(CadError::Unsupported(
+                self.message("linux.backend_unavailable", &[]),
+            )),
             _ => self.controller.borrow_mut().execute(command).map(|_| ()),
         };
         self.push()?;
@@ -221,6 +233,15 @@ impl LinuxApp {
         };
         drop(c);
         let mut adapter = UiAdapter::new(config, runtime.clone(), true)?;
+        adapter.component().set_can_open(options.drawing.is_some());
+        adapter
+            .component()
+            .set_can_import(options.annotation_import.is_some());
+        adapter
+            .component()
+            .set_can_export(options.annotation_export.is_some());
+        adapter.component().set_can_trim(false);
+        adapter.component().set_can_switch_backend(false);
         adapter.fit_window_to_logical(options.size, 1.0);
         *runtime.handle.borrow_mut() = Some(adapter.handle());
         runtime.metrics()?;
@@ -231,6 +252,18 @@ impl LinuxApp {
         }
         let incoming = Rc::new(RefCell::new(controller.borrow().drawing()));
         let view = cad_ui_slint::install_cad_bridge(adapter.handle(), adapter.window(), incoming)?;
+        if !options.fonts.is_empty() {
+            let mut engine = cad_representation::text::FontEngine::new();
+            let mut fallback = Vec::new();
+            for (name, path) in &options.fonts {
+                let bytes =
+                    std::fs::read(path).map_err(|e| CadError::InvalidInput(e.to_string()))?;
+                engine.register(name, Arc::from(bytes))?;
+                fallback.push(name.clone());
+            }
+            engine.set_fallback(fallback);
+            view.set_fonts(Arc::new(engine));
+        }
         *runtime.view.borrow_mut() = Some(view);
         adapter.set_view_input(Rc::new(input::Navigation::new(runtime.clone())));
         adapter.set_canvas_pick_mapper(Rc::new(runtime.clone()));

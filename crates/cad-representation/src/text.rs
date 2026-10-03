@@ -363,6 +363,14 @@ impl FontEngine {
 
         let parsed = parse_mtext(raw, size);
         let mut issues = parsed.issues.clone();
+        if !self.contains(font_key) {
+            issues.push(TextFormatIssue::new(
+                "text.font_fallback",
+                format!(
+                    "font '{font_key}' unavailable; rendering with the registered fallback chain"
+                ),
+            ));
+        }
 
         // Shape each paragraph. A run that names an unregistered font is
         // reported, not silently dropped; the rest of the text still renders.

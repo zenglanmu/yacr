@@ -4,6 +4,10 @@ use super::*;
 use cad_app::viewer_config::ViewerConfigStore;
 
 impl UiHandle {
+    /// Host capability and unsaved-state gating, independent of entry visibility.
+    pub fn set_open_available(&self, available: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_can_open(available))
+    }
     /// Shell-local hit query: floating controls must not be consumed by host touch navigation.
     pub fn canvas_hit_test(&self, point: [f64; 2]) -> CadResult<bool> {
         let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;
@@ -17,7 +21,7 @@ impl UiHandle {
             if ui.get_navigation_visible()
                 && x >= rect[2] - 64.0
                 && x < rect[2] - 16.0
-                && (20.0..68.0).contains(&y)
+                && (20.0..212.0).contains(&y)
             {
                 return Ok(false);
             }
