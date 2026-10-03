@@ -412,6 +412,7 @@ mod entity;
 mod geometry;
 mod hatch;
 mod plot;
+mod primitives;
 mod style;
 mod support;
 
@@ -422,6 +423,7 @@ use dynamic::*;
 use geometry::*;
 use hatch::*;
 use plot::read_plot_settings;
+use primitives::*;
 use style::*;
 use support::*;
 

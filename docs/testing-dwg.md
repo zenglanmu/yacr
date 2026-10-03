@@ -43,6 +43,10 @@ cad-test-files/
 - 已提交的开源 QCAD `flange` DXF 及其参考图见 `fixtures/dxf/qcad-flange/`；DXF 离屏
   渲染与参考对照用 `scripts/check-dxf-reference.py`，本轮证据见
   [validation-dxf-flange.md](validation-dxf-flange.md)。
+- QCAD `examples/` 其余 DXF 语料见 `fixtures/dxf/qcad-examples/`；解析/表示回归用
+  `crates/cad-cli-tools/tests/dxf_samples.rs`，批量出图与覆盖报告用
+  `scripts/check-qcad-examples.py`。图元覆盖与未完成项见
+  [dxf-entity-coverage.md](dxf-entity-coverage.md)。
 
 以下命令均从仓库根目录运行。每轮使用新的专用输出目录，避免旧 PNG/JSON 冒充本轮结果：
 

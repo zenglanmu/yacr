@@ -214,13 +214,6 @@ pub(crate) fn linetype_pattern(linetype: &acadrust::LineType) -> (LinetypePatter
     (pattern, linetype.is_complex())
 }
 
-/// Lower-cased extension of a font reference, without the dot.
-pub(crate) fn font_extension(name: &str) -> String {
-    name.rsplit_once('.')
-        .map(|(_, ext)| ext.trim().to_ascii_lowercase())
-        .unwrap_or_default()
-}
-
 pub(crate) fn map_h_align(align: TextHorizontalAlignment) -> TextAlignH {
     match align {
         TextHorizontalAlignment::Center | TextHorizontalAlignment::Middle => TextAlignH::Center,

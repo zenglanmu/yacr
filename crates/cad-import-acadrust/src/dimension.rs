@@ -14,7 +14,7 @@
 //! a display representation for geometry that is already in the database.
 
 use super::*;
-use acadrust::entities::{Dimension, DimensionBase};
+use acadrust::entities::{Dimension, DimensionBase, Leader, LeaderPathType};
 use acadrust::tables::DimStyle;
 
 /// DIMSTYLE values needed to draw a synthesized dimension, already scaled by
@@ -426,6 +426,59 @@ impl ImporterBuilder<'_> {
         let mut children = geometry.children;
         children.push(text);
         (SemanticGeometry::Compound(children), Completeness::Complete)
+    }
+
+    /// Convert a LEADER into its polyline path plus the arrowhead at the first
+    /// vertex (the arrow point). A spline path is drawn as straight segments and
+    /// reported `Partial`; an enabled hookline is reported rather than guessed.
+    pub(crate) fn leader_semantics(&self, l: &Leader) -> (SemanticGeometry, Completeness) {
+        let points: Vec<Point3> = l.vertices.iter().map(|v| p3(*v)).collect();
+        if points.len() < 2 || !points.iter().all(|p| cad_geometry::is_finite(*p)) {
+            return (
+                SemanticGeometry::Opaque {
+                    type_key: "AcDbLeader".into(),
+                    version: 1,
+                    payload: Vec::new(),
+                },
+                Completeness::Partial(vec!["leader has fewer than two valid vertices".into()]),
+            );
+        }
+        let normal = p3(l.normal);
+        if !cad_geometry::is_finite(normal) || (normal.z.abs() - 1.0).abs() > 1e-6 {
+            return (
+                SemanticGeometry::Opaque {
+                    type_key: "AcDbLeader".into(),
+                    version: 1,
+                    payload: Vec::new(),
+                },
+                Completeness::Partial(vec![
+                    "leader lies off the world-XY plane; synthesis only handles XY".into(),
+                ]),
+            );
+        }
+        let mut completeness = Completeness::Complete;
+        if l.path_type == LeaderPathType::Spline {
+            completeness =
+                Completeness::Partial(vec!["leader spline path drawn as straight segments".into()]);
+        }
+        if l.hookline_enabled {
+            completeness = completeness.combine(Completeness::Partial(vec![
+                "leader hookline is not drawn".into(),
+            ]));
+        }
+        let mut children = vec![SemanticGeometry::Polyline {
+            points: points.clone(),
+            bulges: Vec::new(),
+            closed: false,
+        }];
+        if l.arrow_enabled {
+            let style = self.dim_style_values(&l.dimension_style);
+            let outward = cad_geometry::sub(points[0], points[1]);
+            if style.arrow_size > 1e-9 && cad_geometry::length(outward) > 1e-9 {
+                children.push(arrowhead(points[0], outward, style.arrow_size));
+            }
+        }
+        (SemanticGeometry::Compound(children), completeness)
     }
 }
 

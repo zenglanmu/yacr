@@ -18,6 +18,17 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**QCAD examples 语料与图元扩展（2026-10-03）**：下载并提交 QCAD `examples/` 其余 9 个
+DXF 与 `flange.svg`（`fixtures/dxf/qcad-examples/`，来源/SHA/许可见 `SOURCE.md` 与
+`fixtures/manifest`）。实现 LEADER（顶点折线+实心箭头）及通用 Polyline、ATTRIB/ATTDEF、
+MESH/PolyfaceMesh/PolygonMesh、WIPEOUT、HELIX；带字体名的 Text 由 `Unsupported` 改判
+`Unverified`。新增无需 GPU 的 `crates/cad-cli-tools/tests/dxf_samples.rs` 与
+`scripts/check-qcad-examples.py`（lavapipe 批量出图+覆盖报告，可选 ezdxf 参考导出）。
+实测 **9/9 通过、模型空间无 `Unsupported` 几何**。与 opencadstudio 的完整对照及未完成项
+见 `docs/dxf-entity-coverage.md`（MULTILEADER/MLINE/SHAPE/TABLE/TOLERANCE/RASTERIMAGE/
+UNDERLAY/RAY/XLINE、纸空间 VIEWPORT、角度等 DIMENSION 子类、QCAD XDATA 字体提示）。
+`ezdxf` 因代理网络未安装，参考导出记为 **NOT RUN**。
+
 **QCAD flange 渲染回归样本（2026-10-03）**：按用户要求提交 QCAD 开源 `flange.dxf`
 及 PNG/PDF 参考（`fixtures/dxf/qcad-flange/`，来源/许可/SHA 见其 `SOURCE.md` 与
 `fixtures/manifest`），新增 `scripts/check-dxf-reference.py` 与无需 GPU 的

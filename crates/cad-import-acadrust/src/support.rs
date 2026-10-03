@@ -30,10 +30,13 @@ pub(crate) fn acis_semantics(
 pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, SupportStatus) {
     match geometry {
         SemanticGeometry::Opaque { .. } => (SupportStatus::Unsupported, SupportStatus::Unsupported),
-        // Outline fonts (TTF/OTF/WOFF) and SHX shape fonts can be shaped once
-        // the host supplies them; an unknown/absent font has no decoder.
-        SemanticGeometry::Text { font, .. } => match font.as_deref().map(font_extension) {
-            Some(ext) if matches!(ext.as_str(), "ttf" | "otf" | "woff" | "shx") => {
+        // Any named font is host-resolvable: the host registers arbitrary
+        // `name=path` keys and legacy DXF names such as `txt` omit the `.shx`
+        // extension, so a name mismatch is a font-availability question, not a
+        // missing representation. Only a text with no font name at all is
+        // `Unsupported`.
+        SemanticGeometry::Text { font, .. } => match font.as_deref() {
+            Some(name) if !name.trim().is_empty() => {
                 (SupportStatus::Unverified, SupportStatus::Unverified)
             }
             _ => (SupportStatus::Unsupported, SupportStatus::Unsupported),
@@ -142,6 +145,18 @@ pub(crate) fn entity_class_name(e: &EntityType) -> String {
         EntityType::Surface(_) => "AcDbSurface",
         EntityType::Hatch(_) => "AcDbHatch",
         EntityType::Dimension(_) => "AcDbDimension",
+        EntityType::Leader(_) => "AcDbLeader",
+        EntityType::MultiLeader(_) => "AcDbMultiLeader",
+        EntityType::Polyline(_) => "AcDbPolyline",
+        EntityType::AttributeDefinition(_) => "AcDbAttributeDefinition",
+        EntityType::AttributeEntity(_) => "AcDbAttribute",
+        EntityType::Mesh(_) => "AcDbSubDMesh",
+        EntityType::PolyfaceMesh(_) => "AcDbPolyFaceMesh",
+        EntityType::PolygonMesh(_) => "AcDbPolygonMesh",
+        EntityType::Wipeout(_) => "AcDbWipeout",
+        EntityType::Helix(_) => "AcDbHelix",
+        EntityType::Ray(_) => "AcDbRay",
+        EntityType::XLine(_) => "AcDbXline",
         EntityType::Unknown(u) => return u.dxf_name.clone(),
         EntityType::Extended(x) => return x.class_name().to_string(),
         other => {

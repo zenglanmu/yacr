@@ -398,6 +398,46 @@ impl<'a> ImporterBuilder<'a> {
                     self.dimension_semantics(d)
                 }
             }
+            EntityType::Leader(l) => self.leader_semantics(l),
+            EntityType::Polyline(pl) => (
+                polyline_semantics(
+                    pl.vertices.iter().map(|v| p3(v.location)).collect(),
+                    pl.is_closed(),
+                ),
+                Completeness::Complete,
+            ),
+            EntityType::AttributeDefinition(a) => {
+                let text = if a.default_value.is_empty() {
+                    a.tag.clone()
+                } else {
+                    a.default_value.clone()
+                };
+                (
+                    self.attribute_text(
+                        &a.text_style,
+                        text,
+                        p3(a.insertion_point),
+                        a.height,
+                        a.rotation,
+                    ),
+                    Completeness::Complete,
+                )
+            }
+            EntityType::AttributeEntity(a) => (
+                self.attribute_text(
+                    &a.text_style,
+                    a.value.clone(),
+                    p3(a.insertion_point),
+                    a.height,
+                    a.rotation,
+                ),
+                Completeness::Complete,
+            ),
+            EntityType::Mesh(m) => (subd_mesh_semantics(m), Completeness::Complete),
+            EntityType::PolyfaceMesh(m) => (polyface_mesh_semantics(m), Completeness::Complete),
+            EntityType::PolygonMesh(m) => (polygon_mesh_semantics(m), Completeness::Complete),
+            EntityType::Wipeout(w) => wipeout_semantics(w),
+            EntityType::Helix(h) => spline_semantics(&h.spline),
             EntityType::Solid3D(s) => acis_semantics(entity, &s.acis_data),
             EntityType::Region(r) => acis_semantics(entity, &r.acis_data),
             EntityType::Body(b) => acis_semantics(entity, &b.acis_data),
@@ -506,6 +546,28 @@ impl<'a> ImporterBuilder<'a> {
     /// Primary font file declared by a named text style, if any.
     pub(crate) fn style_font(&self, name: &str) -> Option<String> {
         self.style_fonts.get(&name.to_ascii_lowercase()).cloned()
+    }
+
+    /// Text geometry for an ATTRIB/ATTDEF value, at its insertion point and
+    /// using its own text style.
+    pub(crate) fn attribute_text(
+        &self,
+        style: &str,
+        text: String,
+        position: Point3,
+        height: f64,
+        rotation: f64,
+    ) -> SemanticGeometry {
+        SemanticGeometry::Text {
+            text,
+            position,
+            style: self.style_id(style),
+            height,
+            rotation,
+            font: self.style_font(style),
+            h_align: TextAlignH::Left,
+            v_align: TextAlignV::Baseline,
+        }
     }
 
     pub(crate) fn block_id(&self, name: &str) -> BlockId {
