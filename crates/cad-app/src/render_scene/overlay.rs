@@ -31,15 +31,19 @@
 //! | base drawing (`SceneCache`) | `0` |
 //! | selection highlight (`HIGHLIGHT_DRAW_ORDER`) | `900_000` |
 //! | committed annotations (`AnnotationSceneOptions::draw_order_base`) | `1_000_000` |
+//! | object-snap hints ([`SNAP_HINT_DRAW_ORDER`]) | `1_500_000` |
 //! | tool preview ([`PREVIEW_DRAW_ORDER`]) | `2_000_000` |
 //!
 //! A selection is a transient decoration below committed markup; a tool preview
 //! is the live feedback the user is acting on, so it draws above everything.
+//! Object-snap hints sit above committed markup (a snapped point must stay
+//! visible) but below the live preview rubber band.
 
 use std::sync::Arc;
 
 use cad_db::DrawingDatabase;
 use cad_domain::{Completeness, Diagnostic, DocumentId, Point3, SelectionRef, TaskStamp};
+use cad_measure::{SnapCandidate, SnapKind};
 use cad_representation::{
     DisplayRepresentation, FontEngine, ProviderRegistry, RepresentationContext,
 };
@@ -84,6 +88,38 @@ pub const GRID_COLOR: [f32; 3] = [0.42, 0.45, 0.50];
 /// as two axis-aligned segments of length `2 * marker_size` per point.
 pub const DEFAULT_PREVIEW_MARKER_SIZE: f64 = 0.5;
 
+/// `draw_order` of the object-snap hint markers.
+///
+/// Above the committed annotation overlay (`1_000_000`) and the selection
+/// highlight (`900_000`), so a snapped point is never hidden by markup, but
+/// below the tool preview ([`PREVIEW_DRAW_ORDER`], `2_000_000`) because the
+/// live rubber-band feedback the user is acting on must stay on top.
+pub const SNAP_HINT_DRAW_ORDER: i64 = 1_500_000;
+
+/// Colour of the object-snap hint markers: a warm amber, distinct from the
+/// selection highlight tint and from both preview colours.
+pub const SNAP_HINT_COLOR: [f32; 3] = [1.0, 0.72, 0.16];
+
+/// Number of segments used to approximate the `Center` snap marker circle.
+const SNAP_HINT_CIRCLE_SEGMENTS: usize = 12;
+
+/// A resolved object-snap hint a host feeds into the transient overlay.
+///
+/// This is the real [`cad_measure::SnapCandidate`] the measurement snap engine
+/// already returns: `cad-app` depends on `cad-measure`, and no architecture rule
+/// forbids that edge (`scripts/check-architecture.py` only constrains the
+/// acadrust/wgpu/slint/platform boundaries and the `cad-domain`/`cad-db` bases).
+/// Reusing the engine type avoids a lossy mirror and means a host can hand the
+/// exact `snap_best`/`snap_targets` result straight to the renderer; a host that
+/// only knows a point and a kind builds the struct literal directly.
+pub type SnapHint = SnapCandidate;
+
+/// The kind of an object-snap hint, mirroring [`cad_measure::SnapKind`].
+///
+/// Re-exported under an overlay-facing name so a host that does not itself
+/// depend on `cad-measure` can still name the marker shapes.
+pub type SnapHintKind = SnapKind;
+
 /// Preview colour: a cool cyan, distinct from the warm highlight tint.
 pub const MEASUREMENT_PREVIEW_COLOR: [f32; 3] = [0.20, 0.85, 0.95];
 /// Preview colour for annotation tools: magenta, distinct from highlight and
@@ -118,6 +154,12 @@ pub struct OverlayInputs {
     pub selection: SelectionSet,
     pub measurement: Option<MeasurementPreview>,
     pub annotation: Option<AnnotationPreview>,
+    /// Resolved object-snap hints (the markers the measurement snap engine
+    /// reports), drawn as a distinct overlay. Empty by default, so a host that
+    /// never feeds snaps gets no snap-hint batch. Gated by
+    /// `visibility.snap_hints` separately from the pointer-cursor crosses in
+    /// [`preview_overlay`]; the two are different concepts.
+    pub snap_hints_input: Vec<SnapHint>,
     /// Which derived overlays the host wants drawn. Defaults to all-on
     /// ([`OverlayVisibility::default`]) so a caller that never manages overlay
     /// visibility still gets the historical behavior.
@@ -125,9 +167,13 @@ pub struct OverlayInputs {
 }
 
 impl OverlayInputs {
-    /// Whether every overlay input is empty (no highlight, no preview).
+    /// Whether every overlay input is empty (no highlight, no preview, no
+    /// resolved snap hints).
     pub fn is_empty(&self) -> bool {
-        self.selection.is_empty() && self.measurement.is_none() && self.annotation.is_none()
+        self.selection.is_empty()
+            && self.measurement.is_none()
+            && self.annotation.is_none()
+            && self.snap_hints_input.is_empty()
     }
 }
 
@@ -224,6 +270,15 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
             .as_ref()
             .map(|p| (p.points.as_slice(), p.cursor)),
     );
+    // Snap hints are pure session state; their point/kind changes the marker
+    // set and must invalidate the transient overlay.
+    2u8.hash(&mut hasher);
+    inputs.snap_hints_input.len().hash(&mut hasher);
+    for hint in &inputs.snap_hints_input {
+        // `SnapKind` has no `Hash`; its stable string is the fingerprint key.
+        hint.kind.as_str().hash(&mut hasher);
+        hash_point(&mut hasher, hint.point);
+    }
     // Visibility is part of the inputs: turning an overlay off must rebuild the
     // transient overlay even when the selection and previews are unchanged.
     inputs.visibility.axes.hash(&mut hasher);
@@ -575,6 +630,140 @@ pub fn preview_overlay(
     out
 }
 
+/// Build the object-snap hint overlay for `hints`.
+///
+/// Each hint is drawn as **one distinct marker whose shape encodes its
+/// [`SnapHintKind`]**, so a user can tell an endpoint snap from a midpoint or
+/// centre snap at a glance (the run-time distinction [`SnapKind::as_str`]
+/// exposes in diagnostics). The whole set is a single bounded `Lines` batch at
+/// [`SNAP_HINT_DRAW_ORDER`], below the live tool preview so the rubber band the
+/// user is acting on stays on top.
+///
+/// This is separate from the axis-aligned pointer-cursor crosses that
+/// [`preview_overlay`] gates on the same `view.overlays.snapHints` flag: those
+/// mark the *cursor* position while drawing, these mark *resolved snap targets*.
+/// An empty `hints` slice produces no batch (an explicit empty overlay, never a
+/// fabricated one).
+pub fn snap_hint_overlay(
+    hints: &[SnapHint],
+    document: DocumentId,
+    options: &PreviewOptions,
+) -> VisualOverlay {
+    let mut out = VisualOverlay::default();
+    if hints.is_empty() {
+        return out;
+    }
+    let size = options.marker_size;
+    if !size.is_finite() || size <= 0.0 {
+        return out;
+    }
+    let mut points: Vec<Point3> = Vec::with_capacity(hints.len() * snap_hint_segment_count() * 2);
+    for hint in hints {
+        push_snap_hint(&mut points, hint.kind, hint.point, size);
+    }
+    // One bounded batch; `line_batch` rejects fewer than two vertices.
+    if let Some(batch) = line_batch(
+        &points,
+        SNAP_HINT_COLOR,
+        document,
+        SNAP_HINT_DRAW_ORDER,
+        "overlay.snap-hint",
+    ) {
+        out.batches.push(batch);
+    }
+    out
+}
+
+/// The maximum number of line segments any single snap marker emits, used to
+/// pre-size the vertex buffer without a second pass.
+fn snap_hint_segment_count() -> usize {
+    // `Center` is the densest marker (a tessellated circle).
+    SNAP_HINT_CIRCLE_SEGMENTS.max(4)
+}
+
+/// Append one snap marker's segment endpoints to `points`.
+///
+/// `LineList` topology pairs consecutive vertices, so every shape is emitted as
+/// explicit, closed segment pairs and shapes are independent of each other.
+/// Shape by kind: endpoint → square, midpoint → diamond, center → circle,
+/// quadrant → triangle, perpendicular → plus, local intersection → diagonal X.
+fn push_snap_hint(points: &mut Vec<Point3>, kind: SnapHintKind, center: Point3, size: f64) {
+    let offset = |dx: f64, dy: f64| Point3 {
+        x: center.x + dx,
+        y: center.y + dy,
+        z: center.z,
+    };
+    match kind {
+        SnapKind::Endpoint => {
+            // Axis-aligned square.
+            let a = offset(-size, -size);
+            let b = offset(size, -size);
+            let c = offset(size, size);
+            let d = offset(-size, size);
+            push_segment(points, a, b);
+            push_segment(points, b, c);
+            push_segment(points, c, d);
+            push_segment(points, d, a);
+        }
+        SnapKind::Midpoint => {
+            // Diamond (square rotated 45°).
+            let top = offset(0.0, size);
+            let right = offset(size, 0.0);
+            let bottom = offset(0.0, -size);
+            let left = offset(-size, 0.0);
+            push_segment(points, top, right);
+            push_segment(points, right, bottom);
+            push_segment(points, bottom, left);
+            push_segment(points, left, top);
+        }
+        SnapKind::Center => {
+            // Approximated circle.
+            let segments = SNAP_HINT_CIRCLE_SEGMENTS.max(3);
+            let mut previous: Option<Point3> = None;
+            let mut first: Option<Point3> = None;
+            for i in 0..segments {
+                let theta = std::f64::consts::TAU * (i as f64) / (segments as f64);
+                let point = offset(theta.cos() * size, theta.sin() * size);
+                if first.is_none() {
+                    first = Some(point);
+                }
+                if let Some(previous) = previous {
+                    push_segment(points, previous, point);
+                }
+                previous = Some(point);
+            }
+            if let (Some(first), Some(last)) = (first, previous) {
+                push_segment(points, last, first);
+            }
+        }
+        SnapKind::Quadrant => {
+            // Upward triangle.
+            let top = offset(0.0, size);
+            let right = offset(size, -size * 0.8);
+            let left = offset(-size, -size * 0.8);
+            push_segment(points, top, right);
+            push_segment(points, right, left);
+            push_segment(points, left, top);
+        }
+        SnapKind::Perpendicular => {
+            // Axis-aligned plus.
+            push_segment(points, offset(-size, 0.0), offset(size, 0.0));
+            push_segment(points, offset(0.0, -size), offset(0.0, size));
+        }
+        SnapKind::LocalIntersection => {
+            // Diagonal cross (X), visually distinct from the plus.
+            push_segment(points, offset(-size, -size), offset(size, size));
+            push_segment(points, offset(-size, size), offset(size, -size));
+        }
+    }
+}
+
+/// Push one independent line segment as two consecutive vertices.
+fn push_segment(points: &mut Vec<Point3>, start: Point3, end: Point3) {
+    points.push(start);
+    points.push(end);
+}
+
 /// The rubber-band chain for a preview: captured points followed by the live
 /// cursor when one is present and there is at least one captured point.
 fn preview_chain(points: &[Point3], cursor: Option<Point3>) -> Vec<Point3> {
@@ -909,8 +1098,8 @@ mod tests {
     use super::*;
     use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
     use cad_domain::{
-        BlockId, DatabaseId, EntityId, InstancePath, LayerId, ObjectId, Revision, SemanticGeometry,
-        Transform3,
+        BlockId, DatabaseId, EntityId, InstancePath, LayerId, ObjectId, Precision, Revision,
+        SemanticGeometry, SpaceId, Transform3,
     };
 
     fn p(x: f64, y: f64) -> Point3 {
@@ -1279,6 +1468,160 @@ mod tests {
                 "flipping a visibility flag must invalidate the overlay"
             );
         }
+    }
+
+    fn hint(kind: SnapHintKind, point: Point3) -> SnapHint {
+        SnapCandidate {
+            kind,
+            point,
+            space: SpaceId::Model,
+            source: model_ref(1),
+            secondary: None,
+            precision: Precision::Analytic,
+            logical_pixel_distance: 0.0,
+        }
+    }
+
+    fn snap_hint_kinds() -> [SnapHintKind; 6] {
+        [
+            SnapKind::Endpoint,
+            SnapKind::Midpoint,
+            SnapKind::Center,
+            SnapKind::Quadrant,
+            SnapKind::Perpendicular,
+            SnapKind::LocalIntersection,
+        ]
+    }
+
+    /// Local (origin-relative) segment pairs of a `LineList` batch.
+    fn segment_pairs(batch: &RenderBatch) -> Vec<([f32; 3], [f32; 3])> {
+        batch
+            .vertices
+            .chunks_exact(2)
+            .map(|pair| (pair[0], pair[1]))
+            .collect()
+    }
+
+    #[test]
+    fn empty_snap_hints_yield_no_batch() {
+        let overlay = snap_hint_overlay(&[], DocumentId(1), &PreviewOptions::default());
+        assert!(overlay.is_empty());
+        assert_eq!(overlay.completeness, Completeness::Complete);
+        assert!(overlay.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn snap_hint_overlay_is_one_bounded_batch_below_the_preview() {
+        let hints = [
+            hint(SnapKind::Endpoint, p(0.0, 0.0)),
+            hint(SnapKind::Center, p(5.0, 0.0)),
+        ];
+        let overlay = snap_hint_overlay(&hints, DocumentId(1), &PreviewOptions::default());
+        assert_eq!(overlay.drawn(), 1, "all hints share one bounded batch");
+        let batch = &overlay.batches[0];
+        assert_eq!(batch.topology, RenderTopology::Lines);
+        assert_eq!(batch.color, SNAP_HINT_COLOR);
+        assert_eq!(batch.draw_order, SNAP_HINT_DRAW_ORDER);
+        assert!(batch.draw_order > 900_000 && batch.draw_order < PREVIEW_DRAW_ORDER);
+        // LineList: segment pairs are explicit; the count is even.
+        assert_eq!(batch.vertices.len() % 2, 0);
+        // Endpoint square (4) + center circle (12) segments.
+        assert_eq!(segment_pairs(batch).len(), 4 + SNAP_HINT_CIRCLE_SEGMENTS);
+        assert!(!batch.color_unresolved);
+    }
+
+    #[test]
+    fn each_snap_kind_produces_a_distinct_marker_shape() {
+        let kinds = snap_hint_kinds();
+        let mut shapes: Vec<Vec<[f32; 3]>> = Vec::new();
+        for kind in kinds {
+            let overlay = snap_hint_overlay(
+                &[hint(kind, p(1.0, 2.0))],
+                DocumentId(1),
+                &PreviewOptions::default(),
+            );
+            assert_eq!(overlay.drawn(), 1, "{kind:?} must draw exactly one batch");
+            let batch = &overlay.batches[0];
+            let segments = segment_pairs(batch);
+            assert!(!segments.is_empty(), "{kind:?} must emit segments");
+            // Every marker is drawn around the hint point, not at the origin.
+            for (a, b) in &segments {
+                for vertex in [a, b] {
+                    let x = batch.local_origin.x + vertex[0] as f64;
+                    let y = batch.local_origin.y + vertex[1] as f64;
+                    assert!(
+                        (x - 1.0).abs() <= 0.5 + 1e-9 && (y - 2.0).abs() <= 0.5 + 1e-9,
+                        "{kind:?} vertex {vertex:?} off the marker centre"
+                    );
+                }
+            }
+            // Local (origin-relative) vertices, directly comparable per kind.
+            shapes.push(batch.vertices.clone());
+        }
+        for i in 0..shapes.len() {
+            for j in (i + 1)..shapes.len() {
+                assert_ne!(
+                    shapes[i],
+                    shapes[j],
+                    "snap kinds {} and {} must not share a marker shape",
+                    kinds[i].as_str(),
+                    kinds[j].as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn snap_hint_markers_scale_with_the_marker_size() {
+        let small = snap_hint_overlay(
+            &[hint(SnapKind::Endpoint, p(0.0, 0.0))],
+            DocumentId(1),
+            &PreviewOptions {
+                marker_size: 0.25,
+                ..PreviewOptions::default()
+            },
+        );
+        let large = snap_hint_overlay(
+            &[hint(SnapKind::Endpoint, p(0.0, 0.0))],
+            DocumentId(1),
+            &PreviewOptions {
+                marker_size: 1.0,
+                ..PreviewOptions::default()
+            },
+        );
+        let extent = |overlay: &VisualOverlay| {
+            overlay.batches[0]
+                .vertices
+                .iter()
+                .map(|v| v[0].abs().max(v[1].abs()))
+                .fold(0.0f32, f32::max)
+        };
+        assert!(extent(&large) > extent(&small));
+    }
+
+    #[test]
+    fn overlay_fingerprint_tracks_snap_hints() {
+        let baseline = overlay_fingerprint(&OverlayInputs::default());
+        let with_hint = OverlayInputs {
+            snap_hints_input: vec![hint(SnapKind::Endpoint, p(0.0, 0.0))],
+            ..OverlayInputs::default()
+        };
+        let hashed = overlay_fingerprint(&with_hint);
+        assert_ne!(baseline, hashed);
+        // The kind is part of the fingerprint even at the same point.
+        let other_kind = OverlayInputs {
+            snap_hints_input: vec![hint(SnapKind::Midpoint, p(0.0, 0.0))],
+            ..OverlayInputs::default()
+        };
+        assert_ne!(hashed, overlay_fingerprint(&other_kind));
+        // The point is part of the fingerprint even at the same kind.
+        let other_point = OverlayInputs {
+            snap_hints_input: vec![hint(SnapKind::Endpoint, p(1.0, 0.0))],
+            ..OverlayInputs::default()
+        };
+        assert_ne!(hashed, overlay_fingerprint(&other_point));
+        // Rebuilding with identical hints is stable.
+        assert_eq!(hashed, overlay_fingerprint(&with_hint));
     }
 
     #[test]

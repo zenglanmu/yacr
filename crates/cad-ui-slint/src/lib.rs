@@ -43,7 +43,7 @@ pub use bridge::{
     build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
     camera2d_from_params, camera3d_from_params, fit_camera, install as install_cad_bridge,
     install_with_preference, layout_descriptors, BridgeCamera, CadView, IncomingDocument,
-    OverlayVisibility,
+    OverlayVisibility, SnapHint, SnapHintKind,
 };
 
 pub use draw::{

@@ -24,7 +24,8 @@ pub use cad_app::render_scene::{
     annotation_fingerprint, build_scene, build_scene_with_annotations,
     build_scene_with_annotations_in_space, build_scene_with_fonts, build_scene_with_overrides,
     build_scene_with_space, layout_descriptors, overlay_fingerprint, preview_overlay,
-    selection_highlight, OverlayInputs, PreviewOptions, VisualOverlay,
+    selection_highlight, snap_hint_overlay, OverlayInputs, PreviewOptions, SnapHint, SnapHintKind,
+    VisualOverlay,
 };
 pub use cad_app::viewer_config::OverlayVisibility;
 pub use camera::{camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera};

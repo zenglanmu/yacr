@@ -1,6 +1,6 @@
 //! Host-facing snapshots and coalesced CPU preparation, outside render callbacks.
 use super::*;
-use cad_app::render_scene::OverlayInputs;
+use cad_app::render_scene::{OverlayInputs, SnapHint};
 use cad_app::{AnnotationPreview, MeasurementPreview, SelectionSet};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -34,6 +34,10 @@ pub struct CadView {
     selection: Rc<RefCell<SelectionSet>>,
     measurement_preview: Rc<RefCell<Option<MeasurementPreview>>>,
     annotation_preview: Rc<RefCell<Option<AnnotationPreview>>>,
+    /// Resolved object-snap hints fed by the host (from the measurement snap
+    /// engine). Drawn as distinct snap-kind markers, gated by
+    /// `overlay_visibility.snap_hints` in the controller. Empty by default.
+    snap_hints: Rc<RefCell<Vec<SnapHint>>>,
     /// Which derived overlays the host wants drawn, mirrored from
     /// `ViewerConfig.view.overlays`. Defaults to all-on.
     overlay_visibility: Rc<RefCell<OverlayVisibility>>,
@@ -63,6 +67,7 @@ impl CadView {
             selection: Rc::new(RefCell::new(SelectionSet::new())),
             measurement_preview: Rc::new(RefCell::new(None)),
             annotation_preview: Rc::new(RefCell::new(None)),
+            snap_hints: Rc::new(RefCell::new(Vec::new())),
             overlay_visibility: Rc::new(RefCell::new(OverlayVisibility::default())),
             draw_preview: Rc::new(RefCell::new(None)),
         }
@@ -277,6 +282,7 @@ impl CadView {
                 selection: view.selection.borrow().clone(),
                 measurement: view.measurement_preview.borrow().clone(),
                 annotation: annotation_overlay,
+                snap_hints_input: view.snap_hints.borrow().clone(),
                 visibility: *view.overlay_visibility.borrow(),
             };
             let result = state.controller.prepare_shared_with_overlays(
@@ -401,6 +407,29 @@ impl CadView {
         *self.annotation_preview.borrow_mut() = preview;
         self.state.borrow_mut().overlay_revision += 1;
         self.request_redraw();
+    }
+
+    /// Store the resolved object-snap hints and request a redraw.
+    ///
+    /// These are the markers the measurement snap engine reports (endpoint,
+    /// midpoint, center, …), drawn as distinct shapes by the transient overlay.
+    /// An empty vector clears them. Like the selection and previews, this
+    /// touches **only** the transient visual overlay: the base drawing `Arc` and
+    /// the annotation overlay `Arc` are reused. Visibility is still gated by
+    /// `view.overlays.snapHints`, so a host can feed hints while the user has the
+    /// overlay off.
+    pub fn set_snap_hints(&self, hints: Vec<SnapHint>) {
+        if *self.snap_hints.borrow() == hints {
+            return;
+        }
+        *self.snap_hints.borrow_mut() = hints;
+        self.state.borrow_mut().overlay_revision += 1;
+        self.request_redraw();
+    }
+
+    /// The object-snap hints currently drawn as markers.
+    pub fn snap_hints(&self) -> Vec<SnapHint> {
+        self.snap_hints.borrow().clone()
     }
 
     /// Store (or clear) the in-progress drawing/editing preview (drawing-edit
