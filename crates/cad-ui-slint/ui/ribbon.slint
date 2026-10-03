@@ -14,13 +14,32 @@ export component CadRibbon inherits Rectangle {
     // Catalog label for the group overflow affordance ("more"). A host with
     // custom tabs plumbs it through; the fallback keeps the built-in catalog.
     in property <string> overflow-label;
-    // Index of the group whose overflow menu is open within the active tab,
+    // Index of the group whose overflow flyout is open within the active tab,
     // or -1 when none is open. A single property replaces per-group state,
     // which Slint cannot hold across a `for` loop.
     in-out property <int> overflow-open-group: -1;
     // Host-independent cap on the command buttons a group shows before it
-    // collapses the remainder into the overflow menu.
+    // collapses the remainder into the overflow flyout.
     property <int> max-commands: 6;
+    // Origin of the open overflow button, recorded relative to this ribbon's
+    // root. The floating flyout is anchored here (Slint positions a popup
+    // relative to the element that declares it, not to the window), so the
+    // ribbon row itself never grows.
+    in-out property <length> overflow-anchor-x: 0px;
+    in-out property <length> overflow-anchor-y: 0px;
+    // Width of the floating flyout list.
+    property <length> overflow-width: 200px;
+    // Mirrors the flyout's own open state. Read here (the enclosing component)
+    // because a PopupWindow's `is-open` is only observable from the component
+    // that declares it; the runtime keeps this in sync on every close path.
+    property <bool> overflow-flyout-open: overflow-flyout.is-open;
+    // An outside click / Escape closes the popup without touching our index, so
+    // reset the ribbon's open-group when the flyout reports it is gone.
+    changed overflow-flyout-open => {
+        if !root.overflow-flyout-open {
+            root.overflow-open-group = -1;
+        }
+    }
     in property <[string]> labels;
     in property <[string]> measurements;
     in property <[string]> annotations;
@@ -95,8 +114,8 @@ export component CadRibbon inherits Rectangle {
                                 alignment: start; spacing: 4px;
                                 for command[command-index] in group.commands : Button {
                                     // Cap the inline buttons; the remainder is
-                                    // reachable through the overflow menu below,
-                                    // never dropped.
+                                    // reachable through the floating overflow
+                                    // flyout, never dropped.
                                     visible: command.visible && command-index < root.max-commands;
                                     // `display`: 0 = icon + label, 1 = icon only,
                                     // 2 = label only. `icon-only` keeps the icon
@@ -115,25 +134,23 @@ export component CadRibbon inherits Rectangle {
                                     text: root.overflow-label; symbol: "▾";
                                     stacked: true; min-height: 76px;
                                     clicked => {
-                                        root.overflow-open-group =
-                                            root.overflow-open-group == group-index ? -1 : group-index;
+                                        if root.overflow-open-group == group-index {
+                                            root.overflow-open-group = -1;
+                                            overflow-flyout.close();
+                                        } else {
+                                            // Anchor the floating flyout under
+                                            // this button. `absolute-position`
+                                            // is window-relative, so subtract
+                                            // the ribbon root to get an origin
+                                            // relative to the declaring element.
+                                            root.overflow-anchor-x =
+                                                self.absolute-position.x - root.absolute-position.x;
+                                            root.overflow-anchor-y =
+                                                self.absolute-position.y - root.absolute-position.y + self.height;
+                                            root.overflow-open-group = group-index;
+                                            overflow-flyout.show();
+                                        }
                                     }
-                                }
-                            }
-                            // Expanded overflow list: every command past the cap,
-                            // each dispatching the real command id. Inline rather
-                            // than a floating popup so the open state stays a
-                            // single per-ribbon index.
-                            if group.commands.length > root.max-commands
-                                && root.overflow-open-group == group-index : HorizontalBox {
-                                alignment: start; spacing: 4px;
-                                for command[command-index] in group.commands : Button {
-                                    visible: command.visible && command-index >= root.max-commands;
-                                    text: command.display == 1 ? "" : command.label;
-                                    symbol: command.display == 2 ? "" : command.icon;
-                                    icon-only: command.display == 1;
-                                    stacked: true; min-height: 76px;
-                                    clicked => { root.ribbon-command(command.id); }
                                 }
                             }
                         }
@@ -186,6 +203,61 @@ export component CadRibbon inherits Rectangle {
                             text: label; symbol: index == 0 ? "line" : (index == 1 ? "circle" : (index == 2 ? "pan" : "trim"));
                             stacked: true; min-height: 76px; enabled: root.work-mode && (index != 3 || root.can-trim);
                             clicked => { root.draw-tool(label); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Floating overflow flyout. Declared as a direct child of the ribbon root
+    // so Slint anchors its x/y to the ribbon's origin (see `show_popup`: the
+    // popup offsets by the declaring element's origin). It renders in its own
+    // child window/top-level surface, so opening it never changes the ribbon
+    // row height and it floats over the canvas like an AutoCAD flyout.
+    overflow-flyout := PopupWindow {
+        x: root.overflow-anchor-x;
+        y: root.overflow-anchor-y;
+        width: root.overflow-width;
+        height: overflow-list-content.preferred-height;
+        close-policy: close-on-click-outside;
+        overflow-list := Rectangle {
+            background: CadTheme.chrome;
+            border-color: CadTheme.border;
+            border-width: 1px;
+            overflow-list-content := VerticalBox {
+                padding: 4px; spacing: 2px; alignment: start;
+                // The flyout reflects the active tab and the single open group.
+                for tab-model[tab-index] in root.config-tabs : VerticalBox {
+                    if tab-index == root.config-tab-index : VerticalBox {
+                        for group[group-index] in tab-model.groups : VerticalBox {
+                            if group-index == root.overflow-open-group : VerticalBox {
+                                // Header: localized group label + a glyph-only
+                                // close affordance (reuses the catalog label,
+                                // adds no literal).
+                                HorizontalBox {
+                                    alignment: start; spacing: 4px;
+                                    Text {
+                                        text: group.label; color: CadTheme.muted; font-size: 12px;
+                                        vertical-alignment: center; horizontal-stretch: 1;
+                                    }
+                                    Button {
+                                        text: ""; symbol: "×"; icon-only: true;
+                                        min-height: 24px; min-width: 24px; preferred-width: 24px;
+                                        clicked => { overflow-flyout.close(); }
+                                    }
+                                }
+                                for command[command-index] in group.commands : Button {
+                                    visible: command.visible && command-index >= root.max-commands;
+                                    text: command.display == 1 ? "" : command.label;
+                                    symbol: command.display == 2 ? "" : command.icon;
+                                    icon-only: command.display == 1;
+                                    stacked: true; min-height: 76px;
+                                    clicked => {
+                                        root.ribbon-command(command.id);
+                                        overflow-flyout.close();
+                                    }
+                                }
+                            }
                         }
                     }
                 }
