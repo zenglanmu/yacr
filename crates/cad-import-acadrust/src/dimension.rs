@@ -100,7 +100,7 @@ fn project_onto_line(origin: Point3, direction: Point3, point: Point3) -> Point3
     cad_geometry::add(origin, cad_geometry::scale(direction, t))
 }
 
-fn line_between(start: Point3, end: Point3) -> Option<SemanticGeometry> {
+pub(crate) fn line_between(start: Point3, end: Point3) -> Option<SemanticGeometry> {
     (cad_geometry::distance(start, end) > 1e-9).then_some(SemanticGeometry::Line { start, end })
 }
 

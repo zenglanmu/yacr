@@ -27,9 +27,11 @@ MESH/PolyfaceMesh/PolygonMesh、WIPEOUT、HELIX；带字体名的 Text 由 `Unsu
 实测 **9/9 通过**。随后补齐 `VIEWPORT`（边框）、`TOLERANCE`（框+文字）、`MLINE`（中心线）、
 `MULTILEADER`（引线+文字）接线，并把 `Text` 统一为 `Unverified`（类型已支持，字体依赖宿主）；
 新增 `dxf_samples` 的**零-`unsupported` 验证**（`proxy-report`），9 语料 + `flange` 全部通过。
-按用户要求**放弃 ezdxf 像素对比**。与 opencadstudio 的完整对照及仍未覆盖项见
-`docs/dxf-entity-coverage.md`（SHAPE/TABLE/RASTERIMAGE/RAY/XLINE/UNDERLAY/OLE2FRAME/
-LIGHT/SECTION/VIEWBORDER/SEQEND 与角度等 DIMENSION 子类）。
+按用户要求**放弃 ezdxf 像素对比**。随后按顺序补齐：`RAY/XLINE`（裁剪到模型范围）、
+`SHAPE`（SHX 字形，新增 `SemanticGeometry::Shape`）、全部 DIMENSION 子类（角度/坐标/
+圆弧长/大半径）、`TABLE`/`RASTERIMAGE`。仍剩 `UNDERLAY/OLE2FRAME/LIGHT/SECTIONSYMBOL/
+VIEWBORDER/SEQEND`（外部/非绘制）与光栅纹理、纸空间 plot 空白；详见
+`docs/dxf-entity-coverage.md`。
 
 **QCAD flange 渲染回归样本（2026-10-03）**：按用户要求提交 QCAD 开源 `flange.dxf`
 及 PNG/PDF 参考（`fixtures/dxf/qcad-flange/`，来源/许可/SHA 见其 `SOURCE.md` 与

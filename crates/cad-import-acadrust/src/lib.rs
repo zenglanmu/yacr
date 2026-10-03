@@ -422,6 +422,7 @@ mod support;
 mod annotative;
 
 use annotative::*;
+use dimension::*;
 use dynamic::*;
 use geometry::*;
 use hatch::*;

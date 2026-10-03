@@ -478,6 +478,8 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::XLine(x) => {
                 ray_semantics(p3(x.base_point), p3(x.direction), false, self.model_bounds)
             }
+            EntityType::Table(t) => self.table_semantics(t),
+            EntityType::RasterImage(img) => raster_image_semantics(img),
             EntityType::Shape(s) => {
                 let code = if s.shape_number > 0 {
                     s.shape_number as u32
@@ -611,6 +613,115 @@ impl<'a> ImporterBuilder<'a> {
     /// Primary font file declared by a named text style, if any.
     pub(crate) fn style_font(&self, name: &str) -> Option<String> {
         self.style_fonts.get(&name.to_ascii_lowercase()).cloned()
+    }
+
+    /// A TABLE as its cell grid plus cell text. Merged cells and cell
+    /// borders/styles are approximated and reported `Partial`.
+    pub(crate) fn table_semantics(
+        &self,
+        t: &acadrust::entities::Table,
+    ) -> (SemanticGeometry, Completeness) {
+        let opaque = || SemanticGeometry::Opaque {
+            type_key: "AcDbTable".into(),
+            version: 1,
+            payload: Vec::new(),
+        };
+        let origin = p3(t.insertion_point);
+        let ux = cad_geometry::normalize(p3(t.horizontal_direction));
+        let normal = cad_geometry::normalize(p3(t.normal));
+        if cad_geometry::length(ux) < 1e-9 || cad_geometry::length(normal) < 1e-9 {
+            return (
+                opaque(),
+                Completeness::Partial(vec!["table plane is degenerate".into()]),
+            );
+        }
+        let uy = cad_geometry::normalize(cad_geometry::cross(normal, ux));
+        let corner = |x: f64, y: f64| {
+            cad_geometry::add(
+                origin,
+                cad_geometry::add(cad_geometry::scale(ux, x), cad_geometry::scale(uy, y)),
+            )
+        };
+        let widths: Vec<f64> = t.columns.iter().map(|c| c.width.max(0.0)).collect();
+        let total_width: f64 = widths.iter().sum();
+        let total_height: f64 = t.rows.iter().map(|r| r.height.max(0.0)).sum();
+        if total_width <= 1e-9 || total_height <= 1e-9 {
+            return (
+                opaque(),
+                Completeness::Partial(vec!["table has no positive extent".into()]),
+            );
+        }
+        let mut children: Vec<SemanticGeometry> = Vec::new();
+        let mut x = 0.0;
+        for width in &widths {
+            if let Some(line) = line_between(corner(x, 0.0), corner(x, total_height)) {
+                children.push(line);
+            }
+            x += width;
+        }
+        if let Some(line) =
+            line_between(corner(total_width, 0.0), corner(total_width, total_height))
+        {
+            children.push(line);
+        }
+        let mut y = 0.0;
+        for row in &t.rows {
+            if let Some(line) = line_between(corner(0.0, y), corner(total_width, y)) {
+                children.push(line);
+            }
+            y += row.height.max(0.0);
+        }
+        if let Some(line) =
+            line_between(corner(0.0, total_height), corner(total_width, total_height))
+        {
+            children.push(line);
+        }
+        let mut y = 0.0;
+        for row in &t.rows {
+            let height = row.height.max(0.0);
+            let mut x = 0.0;
+            for (index, cell) in row.cells.iter().enumerate() {
+                let width = widths.get(index).copied().unwrap_or(0.0);
+                if let Some(content) = cell.contents.first() {
+                    let text = if !content.value.formatted_value.is_empty() {
+                        content.value.formatted_value.clone()
+                    } else {
+                        content.value.text.clone()
+                    };
+                    if !text.is_empty() {
+                        let text_height = if content.text_height > 0.0 {
+                            content.text_height
+                        } else {
+                            2.5
+                        };
+                        children.push(SemanticGeometry::Text {
+                            text,
+                            position: corner(x + width * 0.5, y + height * 0.5),
+                            style: self.style_id(&content.text_style_name),
+                            height: text_height,
+                            rotation: 0.0,
+                            font: self.style_font(&content.text_style_name),
+                            h_align: TextAlignH::Center,
+                            v_align: TextAlignV::Middle,
+                        });
+                    }
+                }
+                x += width;
+            }
+            y += height;
+        }
+        if children.is_empty() {
+            return (
+                opaque(),
+                Completeness::Partial(vec!["table has no drawable cells".into()]),
+            );
+        }
+        (
+            SemanticGeometry::Compound(children),
+            Completeness::Partial(vec![
+                "table grid and cell text drawn; merged cells and borders are approximated".into(),
+            ]),
+        )
     }
 
     /// Text geometry for an ATTRIB/ATTDEF value, at its insertion point and

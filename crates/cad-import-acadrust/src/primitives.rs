@@ -207,6 +207,36 @@ pub(crate) fn tolerance_frame(t: &acadrust::entities::Tolerance) -> (SemanticGeo
     (polyline_semantics(points, true), frame_width, frame_height)
 }
 
+/// A RASTERIMAGE frame. The pixel data needs a host image decoder and a texture
+/// pipeline, which this build does not have, so the frame (and clip boundary)
+/// is drawn and the texture is reported `Partial`.
+pub(crate) fn raster_image_semantics(
+    img: &acadrust::entities::RasterImage,
+) -> (SemanticGeometry, Completeness) {
+    let origin = p3(img.insertion_point);
+    let u = p3(img.u_vector);
+    let v = p3(img.v_vector);
+    let mut points = vec![
+        origin,
+        cad_geometry::add(origin, cad_geometry::scale(u, img.size.x)),
+        cad_geometry::add(
+            origin,
+            cad_geometry::add(
+                cad_geometry::scale(u, img.size.x),
+                cad_geometry::scale(v, img.size.y),
+            ),
+        ),
+        cad_geometry::add(origin, cad_geometry::scale(v, img.size.y)),
+    ];
+    points.dedup();
+    (
+        polyline_semantics(points, true),
+        Completeness::Partial(vec![
+            "raster image texture is not decoded; the image frame is drawn".into(),
+        ]),
+    )
+}
+
 /// An infinite construct line (RAY / XLINE) clipped to an XY box.
 ///
 /// A fixed-viewport render has no per-view clipping, so the line is clipped to

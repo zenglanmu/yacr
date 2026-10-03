@@ -156,6 +156,8 @@ pub(crate) fn entity_class_name(e: &EntityType) -> String {
         EntityType::Tolerance(_) => "AcDbFcf",
         EntityType::MLine(_) => "AcDbMline",
         EntityType::Shape(_) => "AcDbShape",
+        EntityType::Table(_) => "AcDbTable",
+        EntityType::RasterImage(_) => "AcDbRasterImage",
         EntityType::Unknown(u) => return u.dxf_name.clone(),
         EntityType::Extended(x) => return x.class_name().to_string(),
         other => {
