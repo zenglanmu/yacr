@@ -109,6 +109,9 @@ fn apply_opened(
         let _ = controller.fit();
         controller.drawing()
     };
+    if let Some(handle) = handle.borrow().as_ref() {
+        let _ = handle.cancel_draw_capture();
+    }
     *incoming.borrow_mut() = drawing;
     let viewport = controller.borrow().viewport_id;
     sync_view_camera(view, controller, viewport);

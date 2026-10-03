@@ -22,10 +22,6 @@ use super::*;
 
 /// A world pick tolerance in drawing units, floored so a small drawing still
 /// tolerates a few screen pixels (matches the web host).
-fn pick_tolerance() -> f64 {
-    TolerancePolicy::default().computation_world.max(0.5)
-}
-
 /// Map a world point on the work plane to the closest model-space entity.
 ///
 /// Trim is planar (`docs/drawing-edit.md` §3), so the hit test is a `-Z` ray
@@ -92,7 +88,7 @@ impl AndroidDrawSink {
 
     /// Send one drawing command through the shared funnel so the status line,
     /// panels and overlays refresh exactly once.
-    fn send(&self, id: CommandId, payload: CommandPayload) {
+    fn send(&self, id: CommandId, payload: CommandPayload) -> CadResult<()> {
         let document = self.controller.borrow().document_id;
         let command = Command {
             schema_version: 1,
@@ -106,29 +102,24 @@ impl AndroidDrawSink {
         if let Some(handle) = self.handle.borrow().as_ref() {
             push_panel_state(&self.controller, handle, &self.view);
         }
-        if let Err(e) = outcome {
+        if let Err(e) = &outcome {
             self.status(format!("命令失败：{e}"));
         }
+        outcome.map(|_| ())
     }
 }
 
 impl cad_ui_slint::DrawCommandSink for AndroidDrawSink {
     fn commit(&mut self, intent: cad_app::DrawIntent) -> CadResult<()> {
         match intent {
-            cad_app::DrawIntent::Line { start, end } => {
-                self.send(
-                    CommandId::CreateLine,
-                    CommandPayload::Points(vec![start, end]),
-                );
-                Ok(())
-            }
-            cad_app::DrawIntent::Circle { center, edge } => {
-                self.send(
-                    CommandId::CreateCircle,
-                    CommandPayload::Points(vec![center, edge]),
-                );
-                Ok(())
-            }
+            cad_app::DrawIntent::Line { start, end } => self.send(
+                CommandId::CreateLine,
+                CommandPayload::Points(vec![start, end]),
+            ),
+            cad_app::DrawIntent::Circle { center, edge } => self.send(
+                CommandId::CreateCircle,
+                CommandPayload::Points(vec![center, edge]),
+            ),
             cad_app::DrawIntent::Move { delta } => {
                 let refs: Vec<SelectionRef> = self.controller.borrow().selection().refs().to_vec();
                 if refs.is_empty() {
@@ -137,16 +128,25 @@ impl cad_ui_slint::DrawCommandSink for AndroidDrawSink {
                 self.send(
                     CommandId::MoveEntities,
                     CommandPayload::Move { refs, delta },
-                );
-                Ok(())
+                )
             }
             cad_app::DrawIntent::Trim {
                 target_pick,
                 boundary_pick,
             } => {
-                let tolerance = pick_tolerance();
                 let (target, boundary) = {
                     let c = self.controller.borrow();
+                    let viewport = c
+                        .application
+                        .workspace
+                        .viewports
+                        .get(&self.viewport)
+                        .ok_or(CadError::Cancelled)?;
+                    let tolerance = cad_app::picking::pick_tolerance(
+                        &TolerancePolicy::default(),
+                        &viewport.camera,
+                        viewport.logical_size,
+                    )?;
                     let target = world_pick_ref(&c, target_pick, tolerance)?;
                     let boundary = world_pick_ref(&c, boundary_pick, tolerance)?;
                     (target, boundary)
@@ -158,8 +158,7 @@ impl cad_ui_slint::DrawCommandSink for AndroidDrawSink {
                         boundary: vec![boundary],
                         pick_point: target_pick,
                     },
-                );
-                Ok(())
+                )
             }
         }
     }

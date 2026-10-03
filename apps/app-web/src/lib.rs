@@ -70,6 +70,13 @@ pub fn touch_pick(x: f64, y: f64) -> Result<(), JsValue> {
     browser::shell::pick(x, y).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// A second finger or cancelled touch abandons unconfirmed drawing capture.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn touch_cancel_draw() -> Result<(), JsValue> {
+    browser::shell::cancel_draw_capture().map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 /// Open a drawing from bytes read by the JS File API host.
 ///
 /// Refuses to replace a document with unsaved annotations; the JS host must

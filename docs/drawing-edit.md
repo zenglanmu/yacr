@@ -97,3 +97,41 @@ TRIM 的通用解析裁剪（任意曲线对任意边界）是大型计算几何
   撤销重做、TRIM 子集与显式 unsupported）。
 - `cargo check --workspace --lib --target wasm32-unknown-unknown` 通过（UI 编译门）。
 - 主控做无头浏览器端到端：创建一条线/圆后画布像素变化，撤销后回到基线。
+
+## 6. 合并后主控验收（2026-10-03）
+
+基于 `39077ec`，修复三个宿主/UI 集成缺口：
+
+1. 命令修改数据库后，桥的 `IncomingDocument` 仍指向旧 Arc。新增
+   `CadView::sync_drawing`，Web/Android 的状态漏斗发布权威快照，包含撤销重做；
+   同 Arc 推送不更新快照。桥新增快照替换/复用/关闭契约测试（本机仅 wasm/Android 编译）。
+2. 绘制取点仍进入宿主选择/导航，MOVE 会丢失选择、取消后可能残留选择高亮。
+   活动绘制工具独占主指针，保留滚轮及非主按钮的既有导航路径。
+3. 绘制 sink 吞掉执行错误并返回成功。两宿主现在向 shell 返回真实 `CadResult`，
+   错误不会结束捕获或伪造成功。
+
+`scripts/check-web-drawing.mjs` 在真实 Chromium 153、SwiftShader/WebGL2 下分别验收
+LINE、CIRCLE、MOVE、TRIM（直线交直线）。全部操作来自 Slint 命令输入与画布取点，
+不是直接调用测试 API。确认后工具行关闭，底图 CAD 区域像素改变；撤销后的解码像素
+SHA-256 与各场景基线完全相同。MOVE 锚点为空白区域，验证选择不丢失；LINE/CIRCLE
+确认前及取消保持实体计数，重做恢复计数；TRIM 圆目标拒绝后捕获保留、实体计数不变，
+取消恢复空闲。重做像素、多点触控绘制、复杂裁剪和 Android
+运行未在本轮新增验收。证据 `/tmp/opencode/yacr-drawing-final/{LINE,CIRCLE,MOVE,TRIM}/`。
+
+核心串行 963 passed / 0 failed / 1 ignored；JS 27 passed；workspace wasm lib、
+UI/Web wasm 测试编译、UI/Android aarch64 测试编译、严格核心/app-web clippy、fmt、
+架构/i18n/fixtures/workflows 通过。浏览器环境限制及复跑命令见 `validation-web.md` §9。
+
+范围仍为受控内存编辑：不写回 DWG、不提供圆弧/样条/多段线创建，也不把 TRIM 子集
+宣称为完整 CAD 编辑器。Android 本轮只有编译证据；真机/WebGPU/生产 URL 未重验。
+
+### 6.1 发布前输入安全修复
+
+Web 原生 TouchEvent 路径现在在第二触点落下及 touchcancel 时显式取消 shell 绘制，
+不是仅取消 `SessionState` 中另一个工具。成功换图纸时 Web/Android 取消旧捕获，失败/
+取消打开则仍保留原文档。TRIM 使用 `cad_app::picking::pick_tolerance` 的逻辑像素半径，
+随相机缩放派生世界容差；此前固定 0.5 单位只接受极其精确的屏幕点。
+
+新增 Node 触点取消契约与 `scripts/check-web-drawing-safety.mjs` 无头端到端，确认第二触点
+尚未移动即取消、touchcancel 清空、换图纸后旧确认不插入实体。四工具与安全脚本在完整
+99 字体发布候选中通过；JS 28 passed。发布与最终回归边界见 `validation-web.md` §10。

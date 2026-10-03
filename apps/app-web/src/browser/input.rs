@@ -63,12 +63,14 @@ pub(super) fn dispatch(
     view: &Rc<RefCell<Option<CadView>>>,
     viewport: &ViewportId,
     command: Command,
-) {
+) -> CadResult<()> {
     let status;
+    let result;
     {
         let mut c = controller.borrow_mut();
         match c.execute(command) {
             Ok(outcome) => {
+                result = Ok(());
                 status = outcome
                     .diagnostics
                     .first()
@@ -77,12 +79,15 @@ pub(super) fn dispatch(
             }
             Err(CadError::NotImplemented(feature)) => {
                 status = format!("未实现：{feature}");
+                result = Err(CadError::NotImplemented(feature));
             }
             Err(CadError::Unsupported(reason)) => {
                 status = format!("仅宿主执行：{reason}");
+                result = Err(CadError::Unsupported(reason));
             }
             Err(e) => {
                 status = format!("命令失败：{e}");
+                result = Err(e);
             }
         }
         if let (Some(view), Some(vp)) = (
@@ -99,6 +104,7 @@ pub(super) fn dispatch(
         state_push::push_panel_state(controller, handle, view);
         let _ = handle.set_status(status);
     }
+    result
 }
 
 pub(super) struct WebSink {
@@ -188,8 +194,7 @@ impl UiCommandSink for WebSink {
             &self.view,
             &self.viewport,
             command,
-        );
-        Ok(())
+        )
     }
 }
 
@@ -214,7 +219,7 @@ impl WebViewInput {
             viewport: self.viewport,
             payload,
         };
-        dispatch(
+        let _ = dispatch(
             &self.controller,
             &self.handle,
             &self.view,

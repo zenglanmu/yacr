@@ -21,6 +21,10 @@ pub fn pick(x: f64, y: f64) -> CadResult<()> {
     with_runtime(|rt| rt.handle.touch_pick(x, y)).ok_or(CadError::Cancelled)?
 }
 
+pub fn cancel_draw_capture() -> CadResult<()> {
+    with_runtime(|rt| rt.handle.cancel_draw_capture()).ok_or(CadError::Cancelled)?
+}
+
 pub fn navigate(dx: f64, dy: f64, zoom: f64) -> CadResult<()> {
     if !dx.is_finite() || !dy.is_finite() || !zoom.is_finite() || !(0.2..=5.0).contains(&zoom) {
         return Err(CadError::InvalidInput("invalid touch navigation".into()));

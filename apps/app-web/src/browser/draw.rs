@@ -66,12 +66,6 @@ fn world_pick_ref(
     })
 }
 
-/// A world pick tolerance in drawing units, floored so a small drawing still
-/// tolerates a few screen pixels.
-fn pick_tolerance() -> f64 {
-    TolerancePolicy::default().computation_world.max(0.5)
-}
-
 /// The web host's draw/edit sink: one command per confirmed intent.
 pub(super) struct WebDrawSink {
     controller: Rc<RefCell<HostController>>,
@@ -83,7 +77,7 @@ pub(super) struct WebDrawSink {
 impl WebDrawSink {
     /// Send one drawing command through the shared dispatch funnel so the
     /// status line, panels and overlays refresh exactly once.
-    fn send(&self, id: cad_app::CommandId, payload: cad_app::CommandPayload) {
+    fn send(&self, id: cad_app::CommandId, payload: cad_app::CommandPayload) -> CadResult<()> {
         let document = self.controller.borrow().document_id;
         let command = cad_app::Command {
             schema_version: 1,
@@ -98,7 +92,7 @@ impl WebDrawSink {
             &self.view,
             &self.viewport,
             command,
-        );
+        )
     }
 }
 
@@ -106,20 +100,14 @@ impl DrawCommandSink for WebDrawSink {
     fn commit(&mut self, intent: DrawIntent) -> CadResult<()> {
         use cad_app::{CommandId, CommandPayload};
         match intent {
-            DrawIntent::Line { start, end } => {
-                self.send(
-                    CommandId::CreateLine,
-                    CommandPayload::Points(vec![start, end]),
-                );
-                Ok(())
-            }
-            DrawIntent::Circle { center, edge } => {
-                self.send(
-                    CommandId::CreateCircle,
-                    CommandPayload::Points(vec![center, edge]),
-                );
-                Ok(())
-            }
+            DrawIntent::Line { start, end } => self.send(
+                CommandId::CreateLine,
+                CommandPayload::Points(vec![start, end]),
+            ),
+            DrawIntent::Circle { center, edge } => self.send(
+                CommandId::CreateCircle,
+                CommandPayload::Points(vec![center, edge]),
+            ),
             DrawIntent::Move { delta } => {
                 let refs: Vec<SelectionRef> = {
                     let c = self.controller.borrow();
@@ -131,16 +119,25 @@ impl DrawCommandSink for WebDrawSink {
                 self.send(
                     CommandId::MoveEntities,
                     CommandPayload::Move { refs, delta },
-                );
-                Ok(())
+                )
             }
             DrawIntent::Trim {
                 target_pick,
                 boundary_pick,
             } => {
-                let tolerance = pick_tolerance();
                 let (target, boundary) = {
                     let c = self.controller.borrow();
+                    let viewport = c
+                        .application
+                        .workspace
+                        .viewports
+                        .get(&self.viewport)
+                        .ok_or(CadError::Cancelled)?;
+                    let tolerance = cad_app::picking::pick_tolerance(
+                        &TolerancePolicy::default(),
+                        &viewport.camera,
+                        viewport.logical_size,
+                    )?;
                     let target = world_pick_ref(&c, target_pick, tolerance)?;
                     let boundary = world_pick_ref(&c, boundary_pick, tolerance)?;
                     (target, boundary)
@@ -152,8 +149,7 @@ impl DrawCommandSink for WebDrawSink {
                         boundary: vec![boundary],
                         pick_point: target_pick,
                     },
-                );
-                Ok(())
+                )
             }
         }
     }

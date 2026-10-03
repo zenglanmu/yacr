@@ -34,6 +34,7 @@ pub(super) fn install_opened(
         let _ = c.fit();
         c.drawing()
     };
+    let _ = handle.cancel_draw_capture();
     *incoming.borrow_mut() = drawing;
     {
         let c = controller.borrow();

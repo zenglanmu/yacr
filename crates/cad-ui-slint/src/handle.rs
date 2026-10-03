@@ -36,6 +36,16 @@ impl UiHandle {
         self.with(|ui| ui.invoke_canvas_pick(x as f32, y as f32))
     }
 
+    /// Abandon shell-owned drawing capture without submitting a transaction.
+    /// Hosts call this on touch cancellation and after replacing a document.
+    pub fn cancel_draw_capture(&self) -> CadResult<()> {
+        self.with(|ui| {
+            if ui.get_draw_tool_active() {
+                ui.invoke_cancel_draw_requested();
+            }
+        })
+    }
+
     /// Push the derived view/observation state into the shell (F13/F14).
     ///
     /// The values come from the authoritative application viewport (see

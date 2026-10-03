@@ -123,6 +123,9 @@ impl HostSink {
             let _ = controller.fit();
             controller.drawing()
         };
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            let _ = handle.cancel_draw_capture();
+        }
         *self.incoming.borrow_mut() = drawing;
         self.sync_camera();
         if let Some(view) = self.view.borrow().as_ref() {

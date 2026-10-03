@@ -28,10 +28,12 @@ function harness() {
   globalThis.document = { getElementById: () => canvas };
   const calls = [];
   const picks = [];
+  const cancellations = [];
   installTouchNavigation({
     shell_geometry: () => [0, 50, 300, 400],
     touch_navigate: (...args) => calls.push(args),
     touch_pick: (...args) => picks.push(args),
+    touch_cancel_draw: () => cancellations.push(true),
   });
   const fire = (kind, points) => {
     let consumed = false;
@@ -44,7 +46,7 @@ function harness() {
     });
     return consumed;
   };
-  return { fire, calls, picks };
+  return { fire, calls, picks, cancellations };
 }
 
 test("touch routing rebases finger transitions, cancels, and leaves shell controls alone", (t) => {
@@ -106,7 +108,11 @@ test("a second finger landing does not emit the centroid jump", (t) => {
     [120, 220],
     [510, 220],
   ]);
-  assert.deepEqual(calls.pop(), [10, 10, 1], "delta is relative to the new centroid");
+  assert.deepEqual(
+    calls.pop(),
+    [10, 10, 1],
+    "delta is relative to the new centroid",
+  );
 });
 
 test("finger-count change then move is relative to the new baseline", (t) => {
@@ -184,4 +190,30 @@ test("a single-finger tap picks, a drag does not", (t) => {
   fire("touchstart", [[120, 240]]);
   fire("touchend", []);
   assert.deepEqual(picks, [[120, 190]]);
+});
+
+test("second-finger landing and touchcancel abandon drawing capture without a pick", (t) => {
+  const old = globalThis.document;
+  t.after(() => {
+    globalThis.document = old;
+  });
+  const { fire, calls, picks, cancellations } = harness();
+  fire("touchstart", [[100, 200]]);
+  assert.equal(cancellations.length, 0);
+  fire("touchstart", [
+    [100, 200],
+    [200, 200],
+  ]);
+  assert.equal(
+    cancellations.length,
+    1,
+    "cancel immediately, even without movement",
+  );
+  assert.deepEqual(calls, []);
+  fire("touchend", []);
+  assert.deepEqual(picks, []);
+  fire("touchstart", [[100, 200]]);
+  fire("touchcancel", []);
+  assert.equal(cancellations.length, 2);
+  assert.deepEqual(picks, []);
 });

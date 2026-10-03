@@ -302,3 +302,87 @@ python3 scripts/check-i18n.py                                                   
 - **running/cancellable 面板**：浏览器平台无法提供（无线程），未、也不能伪造。
 - **Android 宿主接线**：本轮范围外。
 - 端到端真实 DWG 异步导入（worker 路径）未在浏览器运行，因该路径在浏览器不存在。
+
+## 9. 绘制/编辑合并后主控复验（2026-10-03）
+
+基于 `39077ec` 的合并结果修复快照发布、绘制/导航输入冲突及绘制错误返回，见
+`drawing-edit.md` §6。此前编译通过没有发现“命令成功、渲染仍看旧 Arc”的集成缺口。
+
+### 实际执行
+
+- 核心串行：**963 passed / 0 failed / 1 ignored**；日志
+  `/tmp/opencode/yacr-draw-core.log`。JS 契约 **27 passed**（含 PNG 像素解码契约），
+  `/tmp/opencode/yacr-draw-js.log`。新增 Slint Rust 快照测试仅跨平台编译，未原生执行。
+- fmt、核心/app-web 严格 clippy、架构、i18n（159 keys）、fixtures（9）与 workflows
+  通过；workspace wasm lib、UI/Web wasm tests、UI/Android aarch64 tests 编译通过。
+- 最终 release 测试 bundle：`/tmp/opencode/yacr-draw-web-dist/`，`WITH_FONTS=0`，
+  不含 CAD 字体；wasm SHA-256
+  `80e1c7b284719b23eed704a4ac399404448305c30b945180a68451b7ec50a987`。
+- Chromium **153.0.8010.12**、SwiftShader/**WebGL2**；四种绘制工具独立进程串行通过。
+  LINE/CIRCLE 创建、MOVE 与 LINE×LINE TRIM 改变解码后的 CAD 区域像素，撤销恢复
+  与基线完全相同的像素 SHA-256；确认后工具行消失，排除把预览误当正式绘制。
+  LINE/CIRCLE 确认前/取消不新增实体，重做恢复实体计数；曲线目标 TRIM 拒绝后工具
+  保持捕获、计数不变，随后取消恢复空闲。无 page errors。
+- 既有 `check-web-overlay.mjs` 通过（高亮变化 0.0012890625，清空差异 0）；
+  `check-web-ribbon.mjs` 桌面 1280×800、390×844 DPR3、320×740 DPR2 通过，含导入/双指/平移。
+  `check-web-ui.mjs` 独立进程通过（导航变化 0.004329004329004329、双语/持久化/空 sidecar
+  往返，console/page errors 为 0）。这些不是硬件 GPU 或真实 DWG 兼容性证据。
+
+复跑绘制（静态服务端口 8103）：
+
+```bash
+DIST=/tmp/opencode/yacr-draw-web-dist WITH_FONTS=0 CARGO_BUILD_JOBS=2 bash scripts/build-web.sh
+python3 scripts/serve-web.py --directory /tmp/opencode/yacr-draw-web-dist --port 8103
+# 另一个终端，使用本机已安装的 Playwright Chromium：
+export PLAYWRIGHT_BROWSERS_PATH=$HOME/.local/share/headless-browser/ms-playwright
+export LD_LIBRARY_PATH=$HOME/.local/share/headless-browser/lib
+export PLAYWRIGHT_MODULE=$HOME/.local/share/headless-browser/node_modules/playwright-core/index.js
+for kind in LINE CIRCLE MOVE TRIM; do
+  node scripts/check-web-drawing.mjs http://127.0.0.1:8103/ "/tmp/opencode/yacr-drawing-final/$kind" "$kind" || exit
+done
+```
+
+证据：`/tmp/opencode/yacr-drawing-final/{LINE,CIRCLE,MOVE,TRIM}/report.json` 与各阶段 PNG；
+`/tmp/opencode/yacr-draw-final-overlay/`、`yacr-draw-final-ribbon/`、`yacr-draw-final-ui.json`。
+截图需解码并仅比较 CAD 区域；`fromSurface:false` 的 CDP clip 在本环境可能被忽略，
+整张 PNG 的焦点/历史控件不同不能作为底图不同的判断。
+
+### 超时与未验收
+
+- 连续多截图曾使 SwiftShader/CDP 停滞；四工具分独立进程复跑通过。新脚本为 CDP 截图
+  设置 20 秒失败上限，不将超时当作通过。
+- `check-web-mobile.mjs` 顺序回归超时（240 秒整条回归链预算），单独重试也超时
+  （90 秒）。**本轮 mobile 脚本未通过**，没有以历史证据覆盖；Ribbon 的窄屏布局/
+  导航验证是不同脚本，不等于完整 mobile 回归通过。
+- 未运行 Android APK、真机/WebGPU/真实 GPU；未部署或验证生产 URL。未验证编辑 DWG
+  写回、真实字体、手机绘制多指取消、重做像素以及所有错误工具保留路径。
+
+## 10. 输入安全修复与 Pages 发布候选（2026-10-03）
+
+在 §9 的基础上修复第二触点/touchcancel 不取消 shell 捕获、成功换图纸残留旧取点及
+TRIM 固定世界容差；见 `drawing-edit.md` §6.1。
+
+- 核心重跑 **963 passed / 0 failed / 1 ignored**；JS **28 passed**，PNG 解码测试加入 CI。
+  日志 `/tmp/opencode/yacr-pages-core.log`、`yacr-pages-js.log`。fmt、严格核心/app-web clippy、
+  workspace wasm lib、UI/Web wasm tests、UI/Android aarch64 tests 编译及各静态检查通过。
+- 候选 `/tmp/opencode/yacr-pages-release/`，release wasm **15,505,725 bytes**，SHA-256
+  `dfaf4af1a51ea71e1a61e5066d27e055722edd46a7c0f9e9fc8b02e5a2c54d58`。
+  同源 `fonts/` 复用已有缓存，catalog 引用的 **99 个字体全部存在且非空**；不改字体内容/
+  源/许可声明。本轮 UI 演示仍不引用 CAD 文本，不能以文件存在宣称字体渲染验收。
+- 最终四工具独立进程通过，`/tmp/opencode/yacr-pages-drawing/`。新增输入安全脚本通过，
+  `/tmp/opencode/yacr-pages-safety/report.json`：第二触点未移动、touchcancel、成功打开新
+  DWG 后的旧确认均零提交。TRIM 圆目标错误保留捕获也通过。
+- 最终桌面 UI 通过，`/tmp/opencode/yacr-pages-ui.json`。mobile **phone/small-phone/desktop**
+  独立进程通过，`/tmp/opencode/yacr-pages-mobile/<scenario>/report.json`，包含高 DPI、语言
+  UI-only 不增 CAD 帧、真实合成 DWG 导入、旋转保留文档及启动失败显示。
+  测试新增 bringToFront、场景过滤与进度日志，未删断言。可复跑：
+
+  ```bash
+  node scripts/check-web-mobile.mjs http://127.0.0.1:8104/ /tmp/opencode/mobile-small small-phone
+  ```
+
+- §9 的超时仍保留。最终候选的 **Ribbon 触控回归仍出现超时**，包括独立 phone 场景；
+  排查未定位确定根因，不能把它归结为已解决的环境问题或宣称全量浏览器回归通过。
+  四工具批量运行也曾在 TRIM 截图处超时，独立重跑通过；记录真实限制，不隐去失败。
+- 未新增 Android APK、真机/WebGPU/真实 GPU 证据。发布目标为现有 Cloudflare Pages 项目
+  `yacr-examples`、生产分支 `main`；生产部署与线上复验结果将在下节追加。

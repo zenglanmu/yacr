@@ -22,7 +22,7 @@ try {
     ["phone", 390, 844, 3],
     ["small-phone", 320, 740, 2],
     ["desktop", 1280, 800, 1],
-  ]) {
+  ].filter(([name]) => !process.argv[4] || name === process.argv[4])) {
     const context = await browser.newContext({
       viewport: { width, height },
       deviceScaleFactor: dpr,
@@ -30,12 +30,15 @@ try {
       hasTouch: dpr !== 1,
     });
     const page = await context.newPage();
+    await page.bringToFront();
+    page.setDefaultTimeout(20000);
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     page.on("console", (m) => {
       if (m.type() === "error") errors.push(m.text());
     });
     await page.goto(url);
+    console.log(name, "startup");
     await page.waitForFunction(
       () => window.yacr?.renderer_state_report().includes("adapter=Some"),
       null,
@@ -54,6 +57,7 @@ try {
         error: window.yacrStartupError,
       };
     });
+    console.log(name, "ready", geometry.cssWidth, geometry.cssHeight);
     assert.equal(geometry.error, undefined);
     assert.equal(geometry.width, Math.round(geometry.cssWidth * dpr));
     assert.equal(geometry.height, Math.round(geometry.cssHeight * dpr));
@@ -73,12 +77,14 @@ try {
       await page.mouse.click(rect.x + width * 0.5, rect.y + rect.height - 30);
       await page.keyboard.type("TOOLS");
       await page.keyboard.press("Enter");
+      console.log(name, "TOOLS", await page.evaluate(() => Array.from(window.yacr.shell_geometry())));
       await page.locator("#language").waitFor({ state: "visible" });
     }
     const framesBeforeUi = await page.evaluate(
       () => window.yacr.renderer_state_report().match(/cad_frames=(\d+)/)?.[1],
     );
     await page.locator("#language").selectOption("en");
+    console.log(name, "locale");
     await page.waitForTimeout(300);
     const framesAfterUi = await page.evaluate(
       () => window.yacr.renderer_state_report().match(/cad_frames=(\d+)/)?.[1],
@@ -93,6 +99,7 @@ try {
     const chooser = page.waitForEvent("filechooser");
     await page.locator("#open-drawing").click();
     await (await chooser).setFiles("fixtures/dwg/synthetic-four-lines.dwg");
+    console.log(name, "import");
     await page.waitForFunction(() =>
       window.yacr.renderer_state_report().includes("entities=4"),
     );

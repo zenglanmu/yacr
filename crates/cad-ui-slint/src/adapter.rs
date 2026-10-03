@@ -855,7 +855,7 @@ impl UiAdapter {
                 let y = y as f64;
                 // While a draw/edit capture is active a pointer move updates the
                 // rubber-band cursor (no capture, no command); the release picks
-                // through `canvas-pick`. Navigation still works via the host.
+                // through `canvas-pick`. Non-primary navigation stays with the host.
                 if kind == 2 && button == 0 && drawing.borrow().is_some() {
                     if let Some(world) = mapper
                         .borrow()
@@ -867,6 +867,12 @@ impl UiAdapter {
                         }
                         publish_draw(&report, &drawing, &draw_preview);
                     }
+                }
+                // Primary capture belongs to the draw tool. Forwarding it to
+                // navigation would clear MOVE's selection on an empty anchor
+                // (and could pan/orbit while choosing drawing points).
+                if drawing.borrow().is_some() && (button == 0 || button == 1) {
+                    return;
                 }
                 // In 3D mode a left-button drag orbits the view through the
                 // shared command path. Other buttons (middle/right) and scroll

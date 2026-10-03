@@ -14,9 +14,42 @@
    不把这个依赖顺序当作排期，也不绕过优先 GPU/UI 验证。
 6. 每次移除占位同步补齐规范测试、能力表、构建说明、Git 提交。
 
-## 本轮状态（compact，2026-10-02）
+## 本轮状态（compact，2026-10-03）
 
-**UI 宿主接线轮 2（最新，iterations 2–4）**：Ribbon 文档的宿主接线与渲染叠加全部闭环，
+**修复与 Pages 发布轮（最新，2026-10-03）**：继续修复 Web 第二触点/touchcancel 不取消
+shell 绘制捕获、Web/Android 成功换图纸后残留旧取点、TRIM 使用固定世界拾取容差的问题。
+新增 `check-web-drawing-safety.mjs`，真实浏览器证明第二触点（未移动）、touchcancel、换图纸
+之后确认不写库；TRIM 复用共享屏幕像素拾取容差。核心 **963/0/1 ignored**、JS **28 passed**，
+跨平台编译/严格 clippy/架构/i18n/fixtures/workflows 通过。
+
+发布候选 `/tmp/opencode/yacr-pages-release/` 含完整 99 个同源 CAD 字体；四种工具、输入安全、
+桌面 UI 通过。mobile 三场景独立进程复跑通过（`/tmp/opencode/yacr-pages-mobile/`），
+此前超时记录不删除；最终 Ribbon 触控复验仍超时，**不宣称最终 Ribbon 回归通过**。
+Pages 目标为已有 `yacr-examples`、生产分支 `main`；部署结果见 `validation-web.md` §10。
+Android 本轮仍只有编译门，未新增 APK/真机/WebGPU 证据。
+
+**绘制/编辑合并后主控验收（历史）**：基于 `39077ec` 的数据库写事务、应用命令、
+UI 工具及 Web/Android sink 合并结果，完成核心与无头 Web 验证；没有另启 subagent。
+
+- 修复命令后渲染仍持有旧底图 Arc：两宿主状态漏斗通过 `CadView::sync_drawing`
+  发布当前数据库快照，创建/编辑/撤销/重做可见；导航与叠加保持原 Arc，不重导入。
+- 修复绘制主指针同时进入宿主导航/选择：MOVE 取空白锚点不再清空选择，取消不残留
+  意外选择高亮。绘制 sink 返回真实命令错误，失败保留捕获参数，不冒充提交成功。
+- 新增 `scripts/check-web-drawing.mjs`：真实 Slint 命令栏取点/确认，经宿主与事务到
+  WebGL2；LINE/CIRCLE/MOVE/TRIM 四场景均改变底图像素，撤销恢复相同 CAD 像素哈希；
+  LINE/CIRCLE 确认前与取消不新增实体，重做恢复实体计数。每种工具独立进程串行运行。
+- 核心串行 **963 passed / 0 failed / 1 ignored**；JS **27 passed**；fmt、核心与 app-web
+  严格 clippy、架构、i18n（159 keys）、fixture/workflow、wasm workspace lib、UI/Web wasm
+  测试编译、Android aarch64 测试编译通过。UI/宿主 Rust 测试为**编译而非执行**。
+- 本地无头 Chromium/SwiftShader：四工具、overlay、ribbon（1280/390/320px）、桌面 UI
+  通过；证据 `/tmp/opencode/yacr-drawing-final/`、`/tmp/opencode/yacr-draw-final-*`。
+  `check-web-mobile.mjs` 两次超时，本轮**未通过**；连续截图停滞记录在 validation-web §9。
+  本轮未部署生产、未运行 Android APK/真机/WebGPU，测试 bundle 不含 CAD 字体。
+
+详情：`docs/drawing-edit.md` §6、`docs/validation-web.md` §9。绘制/编辑是受控内存库
+子集，不支持保存修改后的 DWG；不能据此宣布规范的“未来底图编辑”完整产品验收。
+
+**UI 宿主接线轮 2（历史，iterations 2–4）**：Ribbon 文档的宿主接线与渲染叠加全部闭环，
 并继续补齐审计项。四个迭代的顺序合入均通过主控验证：
 
 - **叠加层宿主接线**：`CadView::set_selection_highlight/set_measurement_preview/
@@ -39,7 +72,7 @@
 Chromium（SwiftShader/WebGL2）ribbon/UI/mobile/overlay 四套脚本在 1280×800、390×844
 DPR3、320×740 DPR2 通过，并直接对 **Cloudflare Pages 生产 URL 重跑通过**。新增
 `scripts/check-web-overlay.mjs` 端到端证明选择高亮改变像素并清空回基线。仍开放：真机、
-WebGPU/真实 GPU、Android Activity resize/SAF、绘制/编辑（需可写数据库）。
+WebGPU/真实 GPU、Android Activity resize/SAF。（绘制/编辑后续进展见上方主控验收。）
 
 **UI 宿主接线轮（iteration 1）**：Ribbon 文档里"宿主连接器（本轮范围外）"与"预览几何尚未
 接线"两项已落地并端到端验证。三个并行 workstream 已合入 main：

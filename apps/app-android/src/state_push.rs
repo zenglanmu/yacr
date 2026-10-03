@@ -214,6 +214,7 @@ pub(crate) fn push_panel_state(
         // Selection → highlight overlay; empty selection clears it. The preview
         // setters take `None` when no tool is running, which cancels the overlay
         // instead of leaving a stale one (docs/ui.md §2).
+        view.sync_drawing(controller.borrow().drawing());
         view.set_selection_highlight(snapshot.selection);
         view.set_measurement_preview(snapshot.measurement_preview);
         view.set_annotation_preview(snapshot.annotation_preview);

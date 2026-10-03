@@ -47,15 +47,21 @@ CIRCLE 为整圆），提交几何由命令层负责，叠加层从不写库。
 不改库（`docs/drawing-edit.md` §3）；`CreateLine`/`CreateCircle` 仅创建直线与圆。
 圆弧/样条/多段线绘制尚未支持。
 
-**宿主接线（超出本轮 UI 范围，需文档化）**：`cad-ui-slint` 的 shell 回调已全部接线
-到 `UiAdapter`，但 `MoveEntities`/`TrimEntity` 需要会话的 `SelectionRef`，shell 只有
-选择计数而非 refs，因此宿主需实现并安装两个 sink：
+**宿主接线**：Web 与 Android 已安装绘制命令和预览 sink。`MoveEntities`/`TrimEntity`
+需要会话的 `SelectionRef`，shell 只有选择计数而非 refs，因此由宿主实现两个 sink：
 `UiAdapter::set_draw_command_sink(DrawCommandSink)`（确认时按 `docs/drawing-edit.md`
 §2 映射为 `CommandId::CreateLine/CreateCircle/MoveEntities/TrimEntity` 并走共享
 `UiCommandSink`/事务/历史路径；未安装时状态行显式提示 `draw.error.unwired`），
 以及 `UiAdapter::set_draw_preview_sink(DrawPreviewSink)`（把预览转发到
 `CadView::set_draw_preview`；未安装则仅无实时叠加，状态行仍跟踪捕获）。
 `DrawCommandSink` 的 `commit` 契约与逐条映射记录在 `draw.rs` 文档注释。
+绘制命令失败须向 shell 返回真实错误，保留捕获参数，不得清空工具冒充成功。
+两宿主的状态漏斗通过 `CadView::sync_drawing` 发布当前数据库 Arc，使创建/编辑及
+撤销重做进入显示表示重建；导航/叠加更新复用原 Arc，不重新导入。主指针捕获不再
+同时派发导航/选择，防止 MOVE 取空白锚点时丢失选择。
+Web 的原生触控适配在第二触点落下或 touchcancel 时调用 `touch_cancel_draw`，立即清空
+未确认捕获；成功换图纸时两宿主均调用 `UiHandle::cancel_draw_capture`，旧点不能进入
+新图纸。TRIM 的世界拾取容差由相机与逻辑像素策略派生，不再固定为 0.5 图纸单位。
 
 Web 在 CAD 区域内单指拖动平移、双指捏合缩放并跟随中心平移；**手指数变化只重新
 建立基准、不发出导航增量**（第二个手指落下或抬起时，基线在变化点重置，之后的移动

@@ -64,6 +64,15 @@ impl CadView {
         }
     }
 
+    /// Publish the authoritative drawing after commands (including undo/redo).
+    /// Navigation and overlay-only updates keep the existing Arc and caches.
+    pub fn sync_drawing(&self, drawing: Option<Arc<DrawingDatabase>>) {
+        let changed = replace_drawing_snapshot(&mut self.incoming.borrow_mut(), drawing);
+        if changed {
+            self.request_redraw();
+        }
+    }
+
     /// Validate the complete view before replacing any mirror; a refused space
     /// never installs the camera belonging to that space.
     pub fn apply_view_snapshot(&self, snapshot: ViewSnapshot) -> CadResult<()> {
@@ -404,5 +413,54 @@ impl CadView {
             state.runtime.diagnostic = Some(error.to_string());
         }
         Some(reason)
+    }
+}
+
+fn replace_drawing_snapshot(
+    incoming: &mut Option<Arc<DrawingDatabase>>,
+    drawing: Option<Arc<DrawingDatabase>>,
+) -> bool {
+    let same = match (incoming.as_ref(), drawing.as_ref()) {
+        (Some(current), Some(next)) => Arc::ptr_eq(current, next),
+        (None, None) => true,
+        _ => false,
+    };
+    if !same {
+        *incoming = drawing;
+    }
+    !same
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn drawing_commands_publish_new_snapshots_but_navigation_reuses_arc() {
+        let mut host = cad_app::host::HostController::with_demo_document([1280.0, 800.0]).unwrap();
+        let original = host.drawing().unwrap();
+        let mut incoming = Some(original.clone());
+        assert!(!replace_drawing_snapshot(&mut incoming, host.drawing()));
+        host.create_line(
+            cad_domain::Point3 {
+                x: 10.0,
+                y: 20.0,
+                z: 0.0,
+            },
+            cad_domain::Point3 {
+                x: 30.0,
+                y: 40.0,
+                z: 0.0,
+            },
+        )
+        .unwrap();
+        assert!(replace_drawing_snapshot(&mut incoming, host.drawing()));
+        assert_eq!(
+            incoming.as_ref().unwrap().entity_count(),
+            original.entity_count() + 1
+        );
+        assert!(!replace_drawing_snapshot(&mut incoming, host.drawing()));
+        assert!(replace_drawing_snapshot(&mut incoming, None));
+        assert!(!replace_drawing_snapshot(&mut incoming, None));
     }
 }

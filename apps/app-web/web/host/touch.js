@@ -93,7 +93,10 @@ export function installTouchNavigation(wasm) {
         origin = sampleTouches(event.touches);
         moved = false;
       }
-      if (event.touches.length > 1) moved = true;
+      if (event.touches.length > 1) {
+        moved = true;
+        wasm.touch_cancel_draw();
+      }
       active = true;
       // Only a finger-count change re-establishes the baseline. A touchstart
       // that does not change the (capped) count — a third finger, or a retouch
@@ -159,6 +162,7 @@ export function installTouchNavigation(wasm) {
           wasm.touch_pick(origin.x - rect.left - cx, origin.y - rect.top - cy);
         }
         if (type === "touchcancel") {
+          wasm.touch_cancel_draw();
           previous = null;
           previousCount = 0;
         } else {

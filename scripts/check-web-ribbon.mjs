@@ -23,7 +23,7 @@ try {
     ["desktop", 1280, 800, 1],
     ["phone", 390, 844, 3],
     ["small-phone", 320, 740, 2],
-  ]) {
+  ].filter(([name]) => !process.argv[4] || name === process.argv[4])) {
     const context = await browser.newContext({
       viewport: { width, height },
       deviceScaleFactor: dpr,
@@ -31,6 +31,8 @@ try {
       isMobile: dpr > 1,
     });
     const page = await context.newPage();
+    await page.bringToFront();
+    page.setDefaultTimeout(20000);
     const cdp = await context.newCDPSession(page);
     const screenshot = async (name) => {
       console.log("snapshot", name);
