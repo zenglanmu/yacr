@@ -207,6 +207,15 @@ pub async fn start_with_preference(
         .unwrap_or(1.0);
     adapter.fit_window_to_logical(web_viewport_size(), scale as f32);
     let handle = adapter.handle();
+    // Initial fit uses the actual CAD content rectangle, not the entire shell.
+    // Subsequent resize/layout changes preserve the user's camera.
+    if let Some((size, _)) = handle.cad_surface_size() {
+        let mut c = controller.borrow_mut();
+        if let Some(vp) = c.application.workspace.viewports.get_mut(&viewport_id) {
+            vp.logical_size = size;
+        }
+        c.fit()?;
+    }
     *shared_handle.borrow_mut() = Some(handle.clone());
     let _ = handle.set_backend_index(backend_index(preference));
 

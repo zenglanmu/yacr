@@ -1,5 +1,17 @@
 # Web 宿主验证（wasm 构建 + 浏览器冒烟 + i18n 宿主同步）
 
+## 2026-10-03 concept 重设计最终抽查
+
+`DIST=/tmp/opencode/yacr-concept-final-web WITH_FONTS=0 bash scripts/build-web.sh` 成功；
+Chromium 153.0.8010.12 / 无头 SwiftShader WebGL2 执行 `scripts/check-web-ui.mjs` 通过。
+截图 `integration.png` 人工抽查确认浅银 Ribbon/侧栏/布局栏及完整合成图边界；导航像素变化
+0.417%，双语切换/偏好恢复/349 字节空批注 JSON 往返通过，无 console/page 错误。
+首轮截图发现整壳 fit 裁切，修正为启动使用 CAD 实际区域后重新构建并测试，未复用旧证据。
+最终 wasm 15,985,060 bytes；SHA-256
+`2d60a7d5aa6e99af205d1e3ee063391f660debc49d58457435818e86c7f83dee`。
+这是桌面合成集成抽查，非真实 DWG、第三方字体、移动浏览器或真实 GPU 兼容验收。
+本轮主验证为原生 Slint/wgpu/lavapipe，详见 `docs/ui-redesign.md`。
+
 本文记录 web 工作流在 **本机 LXC（无 3D GPU，SwiftShader）** 上真实执行的构建与浏览器
 验证。它与 `docs/validation.md`（总表）分开，后者由协调者汇总。命令、产物、sha256、
 浏览器版本与 NOT RUN 项都在此，不得以“代码已实现”代替运行证据。

@@ -51,3 +51,21 @@ UI 单元合成测试 **76 passed**；离屏集成 **1 passed**。
 
 设计未伪造：系统窗口按钮、DWG 保存、罗盘/坐标、标尺数值和图层颜色色块。
 真实样本/真实 GPU/Android 真机及完整 ViewerConfig 仍不在本轮已验收范围。
+
+## 里程碑 3：浏览器集成
+
+首轮 `scripts/check-web-ui.mjs` 在 Chromium 153.0.8010.12 / SwiftShader WebGL2 通过：
+模块全部 HTTP 200、导航 CAD 像素变化 0.266%、双语与持久偏好、349 字节空批注 sidecar
+导出/回导，无控制台/page 错误。截图发现初始相机仍按整壳 fit 的裁切问题；随后修正 Web
+启动只按真实 CAD 内容矩形 fit 一次，运行时布局调整仍保留相机。首轮截图留存，不作为完整视觉通过。
+
+最终重跑：`/tmp/opencode/yacr-concept-final-web/integration.png` 已人工抽查，合成图边界
+完整位于 CAD 区域；导航变化 0.417%，语言/偏好/空批注往返与错误检查再次通过。
+release wasm 15,985,060 bytes，SHA-256
+`2d60a7d5aa6e99af205d1e3ee063391f660debc49d58457435818e86c7f83dee`。
+构建使用 `WITH_FONTS=0`：只带授权 UI 字体，未验证第三方 CAD 字体与真实 DWG。
+
+最终门禁再次执行通过：fmt、Linux 核心+UI 严格 clippy、Web wasm 严格 clippy、四项 Python
+门禁、全 workspace wasm lib check；Linux 合成串行 1045 passed / 0 failed / 1 ignored。
+原生最终目录 `/tmp/opencode/yacr-concept-final-native/`，离屏集成 11.63 秒。
+浏览器本轮为桌面抽查；移动在原生离屏验证，未宣称浏览器移动/真机完成。

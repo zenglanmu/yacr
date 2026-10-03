@@ -56,7 +56,13 @@ fn concept_shell_renders_on_lavapipe_and_canvas_only_removes_hit_regions() {
     let commands = Rc::new(RefCell::new(Vec::new()));
     let mut adapter =
         UiAdapter::new(UiConfiguration::default(), Sink(commands.clone()), true).unwrap();
-    let mut host = cad_app::host::HostController::with_demo_document([1040.0, 500.0]).unwrap();
+    let initial_size = adapter.handle().cad_surface_size().unwrap().0;
+    assert_eq!(
+        initial_size,
+        [1040.0, 500.0],
+        "initial camera fit must use CAD content, not shell size"
+    );
+    let mut host = cad_app::host::HostController::with_demo_document(initial_size).unwrap();
     host.fit().unwrap();
     let drawing = host.drawing().unwrap();
     let incoming = Rc::new(RefCell::new(Some(drawing.clone())));

@@ -25,6 +25,11 @@
 Slint 已改为浅银/蓝选中 concept：桌面左侧面板+布局/状态；手机标题+底部四组和工具/图层抽屉。
 新增 Linux 官方 FemtoVG/wgpu 离屏平台；原生 UI 合成单元 76 项、真实离屏集成 1 项通过。
 截图 `/tmp/opencode/yacr-concept-round4/`。浮动控件的浏览器触控排除命中已补契约。
+本轮三个里程碑已完成限定范围：配置布局子集、共享 Slint concept 重排、原生主回归及
+桌面 WASM 第二层抽查。最终 Linux 合成 1045 passed / 0 failed / 1 ignored，严格 clippy
+（含 UI 和 Web wasm）及全部门禁通过。原生截图 `/tmp/opencode/yacr-concept-final-native/`；
+浏览器 `/tmp/opencode/yacr-concept-final-web/integration.png` 人工抽查确认初始合成图不再裁切，
+导航/双语/偏好/空批注往返通过。完整配置协议、真实 DWG/真实 GPU/真机仍未验证。
 
 **真实 DWG 回归（最新）**：以用户外部 `anteen.dwg` 与去色参考图，优先 Linux
 原生 wgpu/lavapipe。修复 2D 投影重复 Y 翻转、CLI render/plot 忽略 `--font`；
