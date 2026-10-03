@@ -23,6 +23,83 @@ pub const RECOVERY_STORAGE_KEY: &str = "yacr.cad.recovery";
 /// loads so host strings show the persisted language immediately.
 pub const LOCALE_STORAGE_KEY: &str = "yacr.cad.locale";
 
+/// Storage key for the host-allowed ViewerConfig user preference patch.
+///
+/// The value is the projection of the preference onto
+/// `ui.userCustomization.allowedPaths`; a revoked path is never written.
+pub const CONFIG_STORAGE_KEY: &str = "yacr.cad.config";
+
+/// DOM event name emitted after a successful ViewerConfig change.
+pub const CONFIG_EVENT_NAME: &str = "yacr-config-changed";
+
+/// Persist the host-allowed config preference projection.
+///
+/// A failed write is an error so a caller never claims the preference was saved
+/// when `localStorage` is unavailable.
+pub fn store_config_preference(text: &str) -> CadResult<()> {
+    let window = web_sys::window().ok_or_else(|| CadError::Invariant("no window".into()))?;
+    let storage = window
+        .local_storage()
+        .ok()
+        .flatten()
+        .ok_or_else(|| CadError::Invariant("localStorage unavailable".into()))?;
+    storage
+        .set_item(CONFIG_STORAGE_KEY, text)
+        .map_err(|_| CadError::Invariant("cannot persist config preference".into()))
+}
+
+/// Read the persisted config preference projection, if one was stored.
+pub fn stored_config_preference() -> Option<String> {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(CONFIG_STORAGE_KEY).ok().flatten())
+        .filter(|text| !text.is_empty())
+}
+
+/// Drop the persisted config preference.
+pub fn clear_config_preference() {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.remove_item(CONFIG_STORAGE_KEY);
+    }
+}
+
+/// Emit a `CustomEvent` carrying the new revision and effective config JSON.
+///
+/// Built through `js_sys` reflection so no extra `web-sys` feature is needed and
+/// a headless environment simply dispatches nothing.
+pub fn emit_config_changed(revision: u64, effective_json: &str) {
+    let Ok(config) = js_sys::JSON::parse(effective_json) else {
+        return;
+    };
+    let global = js_sys::global();
+    let Ok(constructor) = js_sys::Reflect::get(&global, &"CustomEvent".into()) else {
+        return;
+    };
+    let Ok(constructor) = constructor.dyn_into::<js_sys::Function>() else {
+        return;
+    };
+    let detail = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &detail,
+        &"revision".into(),
+        &wasm_bindgen::JsValue::from_f64(revision as f64),
+    );
+    let _ = js_sys::Reflect::set(&detail, &"config".into(), &config);
+    let init = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&init, &"detail".into(), &detail);
+    let args = js_sys::Array::of2(&wasm_bindgen::JsValue::from_str(CONFIG_EVENT_NAME), &init);
+    let Ok(event) = constructor.construct(&args) else {
+        return;
+    };
+    let Ok(dispatch) = js_sys::Reflect::get(&global, &"dispatchEvent".into()) else {
+        return;
+    };
+    let Ok(dispatch) = dispatch.dyn_into::<js_sys::Function>() else {
+        return;
+    };
+    let _ = dispatch.call1(&global, &event);
+}
+
 fn parse_preference(value: &str) -> Option<BackendPreference> {
     match value.to_ascii_lowercase().as_str() {
         "auto" => Some(BackendPreference::Auto),

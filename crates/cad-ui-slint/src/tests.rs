@@ -743,3 +743,50 @@ fn draw_overlay_preview_uses_a_circle_for_circle_and_a_band_for_line() {
     assert_eq!(overlay.points, vec![p(0.0, 0.0)]);
     assert_eq!(overlay.cursor, Some(p(2.0, 2.0)));
 }
+
+#[test]
+fn viewer_presentation_maps_separate_panels_overlays_and_features() {
+    use cad_app::viewer_config::{Preset, UiPresentationModel, ViewerConfig};
+    let mut config = ViewerConfig::default();
+    config.ui.components.layer_panel.visible = false;
+    config.ui.components.properties_panel.initially_open = false;
+    config.view.overlays.grid = false;
+    config.features.annotations.delete = false;
+    config.interaction.touch = false;
+    let p = UiPresentationModel::resolve(&config, [1280.0, 800.0], [0.0; 4], false);
+    assert!(!p.layer_panel && p.properties_panel);
+    assert!(!p.layer_panel_initially_open);
+    assert!(!p.properties_panel_initially_open);
+    assert!(!p.overlays.grid && p.overlays.axes);
+    assert!(!p.features.annotation_delete && p.features.measure);
+    assert!(!p.touch && p.pointer);
+    assert!(!p.command_visibility["annotation.delete"]);
+    assert!(p.command_visibility["annotation.text"]);
+    // Canvas-only forces every application-UI entry off while overlays stay
+    // controlled by `view` independently.
+    config.ui.preset = Preset::CanvasOnly;
+    let p = UiPresentationModel::resolve(&config, [1280.0, 800.0], [0.0; 4], false);
+    assert!(!p.application_ui && !p.ribbon && !p.panels());
+    assert!(p.overlays.annotations);
+}
+
+#[test]
+fn config_chrome_properties_are_pushed_from_the_store() {
+    // The shell exposes data-only config readouts the host can query/persist.
+    for property in [
+        "config-revision",
+        "config-preset",
+        "config-effective-json",
+        "overlay-grid",
+        "feature-measure",
+        "cmd-measure-visible",
+        "layer-panel-visible",
+        "properties-panel-visible",
+        "layer-panel-initially-open",
+    ] {
+        assert!(
+            UI_DEFINITION.contains(property),
+            "shell must expose config property {property}"
+        );
+    }
+}

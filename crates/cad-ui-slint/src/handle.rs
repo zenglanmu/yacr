@@ -1,6 +1,7 @@
 //! handle module.
 
 use super::*;
+use cad_app::viewer_config::ViewerConfigStore;
 
 impl UiHandle {
     /// Shell-local hit query: floating controls must not be consumed by host touch navigation.
@@ -43,16 +44,149 @@ impl UiHandle {
                 reason: "window was dropped".into(),
             })?;
         self.viewer_config.borrow_mut().set_config(config)?;
+        apply_ribbon_config(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            &self.messages.borrow(),
+        );
         let size = ui.window().size().to_logical(ui.window().scale_factor());
-        apply_viewer_presentation(
+        apply_viewer_presentation_with(
             &ui,
             self.viewer_config.borrow().effective(),
             [size.width as f64, size.height as f64],
+            Some(&self.viewer_config.borrow()),
         );
         Ok(())
     }
+    /// Structured object merge into the host config from JSON (arrays replace,
+    /// explicit `false` survives). Atomic: a rejected patch leaves the old value
+    /// and revision.
+    pub fn update_config_json(
+        &self,
+        patch_json: &str,
+    ) -> Result<(), cad_app::viewer_config::ConfigError> {
+        let ui = self
+            .ui
+            .upgrade()
+            .ok_or_else(|| cad_app::viewer_config::ConfigError {
+                path: "window".into(),
+                reason: "window was dropped".into(),
+            })?;
+        self.viewer_config
+            .borrow_mut()
+            .update_config_json(patch_json)?;
+        apply_ribbon_config(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            &self.messages.borrow(),
+        );
+        let size = ui.window().size().to_logical(ui.window().scale_factor());
+        apply_viewer_presentation_with(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            [size.width as f64, size.height as f64],
+            Some(&self.viewer_config.borrow()),
+        );
+        Ok(())
+    }
+    /// Merge a host-allowed user preference JSON (localStorage for the web
+    /// host). Paths outside `ui.userCustomization.allowedPaths` are rejected;
+    /// capability and component visibility can only be turned off, never on.
+    pub fn apply_user_preference_json(
+        &self,
+        patch_json: &str,
+    ) -> Result<(), cad_app::viewer_config::ConfigError> {
+        let ui = self
+            .ui
+            .upgrade()
+            .ok_or_else(|| cad_app::viewer_config::ConfigError {
+                path: "window".into(),
+                reason: "window was dropped".into(),
+            })?;
+        self.viewer_config
+            .borrow_mut()
+            .apply_user_preference_json(patch_json)?;
+        let size = ui.window().size().to_logical(ui.window().scale_factor());
+        apply_viewer_presentation_with(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            [size.width as f64, size.height as f64],
+            Some(&self.viewer_config.borrow()),
+        );
+        Ok(())
+    }
+    /// Replace the whole host config from JSON.
+    pub fn set_config_json(
+        &self,
+        config_json: &str,
+    ) -> Result<(), cad_app::viewer_config::ConfigError> {
+        let ui = self
+            .ui
+            .upgrade()
+            .ok_or_else(|| cad_app::viewer_config::ConfigError {
+                path: "window".into(),
+                reason: "window was dropped".into(),
+            })?;
+        self.viewer_config
+            .borrow_mut()
+            .set_config_json(config_json)?;
+        apply_ribbon_config(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            &self.messages.borrow(),
+        );
+        let size = ui.window().size().to_logical(ui.window().scale_factor());
+        apply_viewer_presentation_with(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            [size.width as f64, size.height as f64],
+            Some(&self.viewer_config.borrow()),
+        );
+        Ok(())
+    }
+    /// Drop every stored user preference and recompute.
+    pub fn clear_user_preference(&self) -> Result<(), cad_app::viewer_config::ConfigError> {
+        let ui = self
+            .ui
+            .upgrade()
+            .ok_or_else(|| cad_app::viewer_config::ConfigError {
+                path: "window".into(),
+                reason: "window was dropped".into(),
+            })?;
+        self.viewer_config.borrow_mut().clear_user_preference();
+        let size = ui.window().size().to_logical(ui.window().scale_factor());
+        apply_viewer_presentation_with(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            [size.width as f64, size.height as f64],
+            Some(&self.viewer_config.borrow()),
+        );
+        Ok(())
+    }
+    /// Subscribe to effective-config changes. The observer is a plain Rust
+    /// callback; the configuration JSON itself never carries script.
+    pub fn on_config_changed(
+        &self,
+        observer: cad_app::viewer_config::ConfigObserver,
+    ) -> Result<(), cad_app::viewer_config::ConfigError> {
+        self.viewer_config.borrow_mut().subscribe(observer);
+        Ok(())
+    }
+    /// Current effective revision (bumped only on a real effective change).
+    pub fn config_revision(&self) -> u64 {
+        self.viewer_config.borrow().revision
+    }
     pub fn effective_config(&self) -> cad_app::viewer_config::ViewerConfig {
         self.viewer_config.borrow().effective().clone()
+    }
+    /// The effective config as JSON, for hosts that expose a query API.
+    pub fn effective_config_json(&self) -> String {
+        self.viewer_config.borrow().effective_json()
+    }
+    /// The persisted projection of the user preference as JSON: only leaves still
+    /// under the host's `allowedPaths`. Never includes a revoked path.
+    pub fn projected_user_preference_json(&self) -> String {
+        self.viewer_config.borrow().projected_user_preference_json()
     }
     /// Logical CAD hit rectangle and shell expansion state for browser touch routing.
     pub fn shell_geometry(&self) -> CadResult<([f64; 4], [bool; 4])> {
@@ -469,10 +603,11 @@ impl UiHandle {
     pub fn refresh_window_layout(&self) -> CadResult<()> {
         self.with(|ui| {
             let size = ui.window().size().to_logical(ui.window().scale_factor());
-            apply_viewer_presentation(
+            apply_viewer_presentation_with(
                 ui,
                 self.viewer_config.borrow().effective(),
                 [size.width as f64, size.height as f64],
+                Some(&self.viewer_config.borrow()),
             );
         })
     }
@@ -480,12 +615,53 @@ impl UiHandle {
     /// Fit the shared shell to the browser CSS viewport, not its preferred size.
     pub fn resize_browser_surface(&self, size: [f64; 2], scale: f64) -> CadResult<()> {
         self.with(|ui| {
-            apply_viewer_presentation(ui, self.viewer_config.borrow().effective(), size);
+            apply_viewer_presentation_with(
+                ui,
+                self.viewer_config.borrow().effective(),
+                size,
+                Some(&self.viewer_config.borrow()),
+            );
             ui.window().set_size(slint::PhysicalSize::new(
                 (size[0] * scale).round().max(1.0) as u32,
                 (size[1] * scale).round().max(1.0) as u32,
             ));
             ui.window().request_redraw();
         })
+    }
+}
+
+/// Mirror the resolved config into the shell's data-only readout properties.
+///
+/// These are the exact values the pure [`cad_app::viewer_config::UiPresentationModel`]
+/// derives (not a second interpretation) plus a JSON snapshot for hosts/tests.
+pub(crate) fn push_config_properties(ui: &YacrWindow, store: &ViewerConfigStore) {
+    let effective = store.effective();
+    let p = cad_app::viewer_config::UiPresentationModel::resolve(
+        effective,
+        [1280.0, 800.0],
+        [0.0; 4],
+        false,
+    );
+    ui.set_config_revision(store.revision as i32);
+    ui.set_config_preset(preset_key(effective.ui.preset).into());
+    ui.set_overlay_axes(p.overlays.axes);
+    ui.set_overlay_grid(p.overlays.grid);
+    ui.set_overlay_selection_highlight(p.overlays.selection_highlight);
+    ui.set_overlay_snap_hints(p.overlays.snap_hints);
+    ui.set_overlay_annotations(p.overlays.annotations);
+    ui.set_feature_measure(p.features.measure);
+    ui.set_feature_annotation_create(p.features.annotation_create);
+    ui.set_feature_annotation_update(p.features.annotation_update);
+    ui.set_feature_annotation_delete(p.features.annotation_delete);
+    ui.set_feature_annotation_import(p.features.annotation_import);
+    ui.set_feature_annotation_export(p.features.annotation_export);
+    ui.set_config_effective_json(store.effective_json().into());
+}
+
+fn preset_key(preset: cad_app::viewer_config::Preset) -> &'static str {
+    match preset {
+        cad_app::viewer_config::Preset::Full => "full",
+        cad_app::viewer_config::Preset::Minimal => "minimal",
+        cad_app::viewer_config::Preset::CanvasOnly => "canvasOnly",
     }
 }
