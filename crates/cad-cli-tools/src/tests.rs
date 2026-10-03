@@ -299,6 +299,120 @@ fn benchmark_json_is_deterministic_for_an_unchanged_document() {
     assert_eq!(a["memory_bytes"]["file"], b["memory_bytes"]["file"]);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn plot_format_parses_and_defaults_to_png() {
+    assert_eq!(PlotFormat::default(), PlotFormat::Png);
+    assert_eq!(PlotFormat::parse("png"), Some(PlotFormat::Png));
+    assert_eq!(PlotFormat::parse("SVG"), Some(PlotFormat::Svg));
+    assert_eq!(PlotFormat::parse(" pdf "), Some(PlotFormat::Pdf));
+    assert_eq!(PlotFormat::parse("hpgl"), None);
+    assert_eq!(PlotFormat::parse(""), None);
+    assert!(PlotFormat::Svg.is_vector());
+    assert!(PlotFormat::Pdf.is_vector());
+    assert!(!PlotFormat::Png.is_vector());
+    assert_eq!(PlotFormat::Pdf.as_str(), "pdf");
+}
+
+/// The vector plot fixtures: the committed synthetic A4 layout, and a scratch
+/// output directory on the target filesystem.
+#[cfg(not(target_arch = "wasm32"))]
+fn vector_fixture_output(extension: &str) -> std::path::PathBuf {
+    let dir = plot_scratch_dir(&format!("vector-{extension}"));
+    dir.join(format!("out.{extension}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn plot_svg_layout_to_a_structurally_valid_document() {
+    let png = vector_fixture_output("svg");
+    let mut invocation = CliInvocation::new(CliOperation::Plot, plot_fixture());
+    invocation.plot_format = PlotFormat::Svg;
+    invocation.render_width = 320;
+    invocation.render_height = 452;
+    invocation.png = Some(png.clone());
+
+    let json = run(&invocation).expect("SVG plot must succeed without a GPU");
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(value["operation"], "plot");
+    assert_eq!(value["format"], "svg");
+    assert_eq!(value["status"], "ok");
+    // The fixture's standalone PLOTSETTINGS object is A3 at 90°, so the vector
+    // report carries the same imported provenance and the rotated page.
+    assert_eq!(value["paper"]["provenance"], "imported");
+    assert_eq!(value["paper"]["rotation_degrees"], 90.0);
+    assert_eq!(value["paper"]["width"], 297.0);
+    // The physical vector page is positive and independent of the pixel target.
+    assert!(value["width_mm"].as_f64().unwrap() > 0.0);
+    assert!(value["height_mm"].as_f64().unwrap() > 0.0);
+
+    let bytes = std::fs::read(&png).expect("SVG written");
+    assert_eq!(bytes.len() as u64, value["bytes"].as_u64().unwrap());
+    assert!(!bytes.is_empty());
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(text.starts_with("<?xml version=\"1.0\""));
+    assert!(text.contains("<svg xmlns=\"http://www.w3.org/2000/svg\""));
+    assert!(text.trim_end().ends_with("</svg>"));
+    assert!(text.contains("<polyline") || text.contains("<polygon"));
+    std::fs::remove_dir_all(png.parent().unwrap()).ok();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn plot_pdf_layout_to_a_structurally_valid_document() {
+    let pdf = vector_fixture_output("pdf");
+    let mut invocation = CliInvocation::new(CliOperation::Plot, plot_fixture());
+    invocation.plot_format = PlotFormat::Pdf;
+    invocation.render_width = 320;
+    invocation.render_height = 452;
+    invocation.png = Some(pdf.clone());
+
+    let json = run(&invocation).expect("PDF plot must succeed without a GPU");
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(value["format"], "pdf");
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["paper"]["provenance"], "imported");
+
+    let bytes = std::fs::read(&pdf).expect("PDF written");
+    assert_eq!(bytes.len() as u64, value["bytes"].as_u64().unwrap());
+    assert!(bytes.starts_with(b"%PDF-1.4"));
+    // The PDF header carries a binary high-bit comment line, so scan the ASCII
+    // structure without requiring the whole file to be valid UTF-8.
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("/Type /Catalog"));
+    assert!(text.contains("/MediaBox"));
+    assert!(text.contains("xref"));
+    assert!(text.trim_end().ends_with("%%EOF"));
+    std::fs::remove_dir_all(pdf.parent().unwrap()).ok();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn vector_plot_of_a_missing_input_fails_before_any_output() {
+    let mut invocation = CliInvocation::new(CliOperation::Plot, "missing.dwg");
+    invocation.plot_format = PlotFormat::Svg;
+    let error = run(&invocation).unwrap_err();
+    assert_eq!(error.code, error_code::INVALID_INPUT);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn vector_plot_output_defaults_to_the_format_extension() {
+    // No `--png`: the default path must carry the chosen format's extension so a
+    // vector document never lands in a filename that claims to be PNG.
+    let dir = plot_scratch_dir("vector-default-ext");
+    let input = dir.join("sheet.dwg");
+    std::fs::copy(plot_fixture(), &input).unwrap();
+    let mut invocation = CliInvocation::new(CliOperation::Plot, &input);
+    invocation.plot_format = PlotFormat::Pdf;
+    let json = run(&invocation).expect("vector plot must succeed");
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let output = value["output"].as_str().unwrap();
+    assert!(output.ends_with(".plot.pdf"), "{output}");
+    assert!(std::path::Path::new(output).exists());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn atomic_write_leaves_no_temp_on_failure() {
     let dir = std::env::temp_dir().join(format!("yacr-atomic-{}", unique_counter()));

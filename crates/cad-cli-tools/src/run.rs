@@ -6,6 +6,13 @@ use super::*;
 ///
 /// The returned error is structured and carries a stable machine `code`.
 pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
+    // The CPU-only vector plot path never owns a device, so it runs on every
+    // target (including wasm); it is not part of the native-only GPU branch.
+    if invocation.operation == CliOperation::Plot && invocation.plot_format.is_vector() {
+        let value = domain(run_plot(invocation))?;
+        return serde_json::to_string_pretty(&value)
+            .map_err(|e| CliError::new(error_code::INVARIANT, format!("cli encode failed: {e}")));
+    }
     if matches!(
         invocation.operation,
         CliOperation::FixedViewportRender | CliOperation::Plot | CliOperation::Benchmark

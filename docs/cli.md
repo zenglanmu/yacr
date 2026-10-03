@@ -25,7 +25,8 @@ cad-cli-tools <operation> <input.dwg> [options]
 | `--notes <file>` | 批注 sidecar 路径（`import-notes` / `export-notes`） |
 | `--points "x,y;x,y;..."` | `measure` 的点，图纸单位；2 点为距离、3 点为角度、≥4 为长度 |
 | `--out <file>` | 将 JSON 结果**原子**写入 `<file>`；stdout 保持为空 |
-| `--png <file>` | `render`：将离屏帧**原子**写为 PNG（仅渲染成功后写入） |
+| `--png <file>` | `render`：将离屏帧**原子**写为 PNG（仅渲染成功后写入）；`plot`：输出文件路径（任意格式） |
+| `--plot-format <fmt>` | `plot`：输出格式 `png`（默认，无头 GPU 光栅）\| `svg` \| `pdf`；`svg`/`pdf` 为纯 CPU 矢量路径，不需要 GPU 适配器 |
 | `--width <u32>` | `render`：帧宽（像素，默认 `1280`）；非数字或 `0` 为用法错误 |
 | `--height <u32>` | `render`：帧高（像素，默认 `720`）；非数字或 `0` 为用法错误 |
 | `--locale <tag>` | **仅**人类 stderr 文字的语言，`zh-CN`（默认）或 `en`；机器输出不变 |
@@ -233,6 +234,19 @@ cad-cli-tools <operation> <input.dwg> [options]
 - wasm (`target_arch = "wasm32"`) 保持 `unsupported`：浏览器从宿主 canvas 取得
   设备，CLI 在 wasm 下没有无头设备可拥有。
 
+### `plot`
+
+**原生**路径把一个具名纸空间布局按纸张尺寸/边距/旋转/比例出图。`--plot-format png`
+（默认）走无头 GPU 回读 + PNG；`--plot-format svg|pdf` 走纯 CPU 矢量路径，不创建 GPU
+设备（可在无适配器机器与单元测试中运行）。两路共享同一布局选择、`plan_plot_for_record`
+与 `build_paper_space`（视口变换已应用、INSERT 已展开），确保报告与几何不漂移。
+wasm 下仅矢量路径可用，`png` 仍为 `unsupported`。
+
+结果文档含 `format` 字段；矢量路径给出 `width_mm/height_mm/paths/diagnostics`，输出文件
+由 `--png` 指定，缺省在输入名后追加所选格式扩展名（`.plot.svg` / `.plot.pdf`），不会把
+矢量写进 `.png` 名字。无法表达为路径的图元逐项 `vector.*` 诊断，不静默丢图。详见
+`docs/plot.md` §9。
+
 ## 4. `--out` 与原子性
 
 - 指定 `--out <file>` 时，结果 JSON 写入该文件，**stdout 保持为空**。
@@ -315,8 +329,13 @@ cargo test -p cad-cli-tools --locked
 - `proxy-report` 汇总全部代理/未知诊断，不静默吞故障。
 - `render` 原生无头路径：真实适配器出帧 + 回读统计 + 可选原子 PNG；无适配器
   `gpu_failure`、无几何 `invalid_input`，绝不空成功。
+- `plot` 原生路径：光栅 PNG，以及纯 CPU 矢量 SVG/PDF（`--plot-format`）；未整形文字与
+  不可表达图元逐项诊断，不空成功。
 
 **仍开放（不在本轮范围，本文不声称完成）：**
+
+- `plot` 的矢量路径仍是路径级：不按打印样式（CTB/STB）改色、无 HPGL、不嵌入字体；
+  真实图纸的矢量视觉验收未运行。
 
 - `render` 的原生路径已接线并可在软件适配器（如 lavapipe）上出帧；仍需真人核对
   的真实样张黄金图与跨 GPU/后端（Vulkan/GL、不同驱动）矩阵 → OPEN。

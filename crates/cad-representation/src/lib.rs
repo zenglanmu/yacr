@@ -45,6 +45,13 @@ pub use plot::{
     map_model_through_viewport, normalize_degrees, plan_plot, plan_plot_for_record,
     plan_plot_rotated, to_millimetres, PlotPage, PlotScale, PlotTarget, MM_PER_INCH,
 };
+
+pub mod plot_vector;
+
+pub use plot_vector::{
+    build_vector_document, render_pdf, render_plot_pdf, render_plot_svg, render_svg,
+    vector_diagnostic, VectorDocument, VectorPage, VectorPath,
+};
 pub use text::{
     parse_mtext, sanitize_text, text_issue, FontEngine, ParsedText, ShapedText, StackedFraction,
     TextColor, TextFormatIssue, TextLine, TextRun,
