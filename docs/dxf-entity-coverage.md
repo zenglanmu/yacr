@@ -70,12 +70,20 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID。没有 `Unsupported` �
 上面矩阵）：MultiLeader、MLine、Table、Tolerance、Shape、Ray、XLine、RasterImage、
 Underlay、Ole2Frame、Light、SectionSymbol、ViewBorder、Viewport、Seqend。
 
-## 5. ezdxf 参考导出
+## 5. ezdxf 参考导出与宿主字体
 
 `scripts/check-qcad-examples.py --export-references` 在本机安装 `ezdxf`+`matplotlib`
 时，用 `ezdxf.addons.drawing.matplotlib` 为每个 DXF 导出 `*-ezdxf.png` 供人工/粗粒度
-对照；缺包时该项记为 **NOT RUN**，不伪造参考图。`flange` 有上游 PNG/SVG/PDF，优先用
-上游参考（见 `docs/validation-dxf-flange.md`）。
+对照；缺包时该项记为 **NOT RUN**，不伪造参考图。本轮代理网络多次中断，`uv pip install
+ezdxf matplotlib` 未成功，故参考导出 **NOT RUN**；`flange` 有上游 PNG/SVG/PDF 可直接用
+（见 `docs/validation-dxf-flange.md`）。
+
+QCAD 字体：`osifont.ttf`（GPLv3，含 `osifont_license.txt`）与 `Standard/ltypeshp/
+qcadshp.cxf`（QCAD LICENSE.txt 声明为 public domain）已下载到本机字体缓存
+`~/sources/cad-test-fonts/qcad/`（**不入库**；CXF 当前字体引擎不支持，仅 osifont.ttf 可
+直接当 TTF 回退）。语料文本真正缺的是 §4 的 XDATA 字体提示：多数 QCAD STYLE 的 group 3
+为空、真实 TTF 名在 XDATA `1000`，锁定的 acadrust `TextStyle` 不暴露该字段，因此
+colors/linetypes/lineweights 的 MTEXT 无字体名可解析，仍 `Partial`。
 
 ## 6. 结论
 
