@@ -186,6 +186,16 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         controller.clone(),
         shared_handle.clone(),
     )));
+    // Draw/edit tools: the shell captures points and emits an intent; the host
+    // maps it to one drawing command (line/circle/move/trim). Without this the
+    // confirm path reports "not wired" instead of fabricating a command.
+    install_draw_sinks(
+        &adapter,
+        controller.clone(),
+        shared_handle.clone(),
+        shared_view.clone(),
+        viewport_id,
+    );
     // Wire real canvas interaction: drag pans and wheel/pinch zooms through the
     // same `Pan`/`Zoom` commands the web host uses. A tap with no capture tool
     // active is routed to selection (`pick_at_screen`), not to a fake hit.
@@ -239,6 +249,7 @@ pub fn android_main(app: slint::android::AndroidApp) {
     }
 }
 
+mod draw;
 mod host;
 mod poll;
 mod recovery;
@@ -251,6 +262,7 @@ pub use poll::set_surface_size;
 pub(crate) use poll::{ensure_polling, install_runtime, worker_available};
 // The poll-processing items are Android-only (their tests compile for the
 // Android target); `set_surface_size`/`apply_surface_resize` are target-agnostic.
+pub(crate) use draw::install_draw_sinks;
 #[cfg(target_os = "android")]
 pub(crate) use poll::{apply_surface_resize, poll_import_once, ImportPollOutcome};
 pub(crate) use recovery::*;

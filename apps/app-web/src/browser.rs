@@ -15,6 +15,7 @@ use cad_ui_slint::{
 mod annotations;
 mod async_open;
 mod documents;
+mod draw;
 mod fonts;
 mod input;
 mod messages;
@@ -234,6 +235,16 @@ pub async fn start_with_preference(
         handle: shared_handle.clone(),
         viewport: viewport_id,
     }));
+    // Draw/edit tools: the shell captures points and emits an intent; the host
+    // maps it to one drawing command (line/circle/move/trim). Without this the
+    // confirm path reports "not wired" instead of fabricating a command.
+    draw::install(
+        &adapter,
+        controller.clone(),
+        shared_handle.clone(),
+        view_slot.clone(),
+        viewport_id,
+    );
 
     let backend_label = backend_status(chosen);
     // Restore any persisted recovery snapshot for the starting document;
