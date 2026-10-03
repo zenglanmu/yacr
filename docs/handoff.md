@@ -18,7 +18,27 @@
 
 ## 本轮状态（compact，2026-10-03）
 
-**UI 配置门控 + 数据驱动 Ribbon（迭代 2）**：主控派发两个隔离 worktree 子代理（ribbon 分组、
+**迭代 3：可配置 ribbon 命令派发 + 响应式视口契约 + 能力钳制修复**：
+
+- **剩余 ribbon 命令（`ws/ribbon-unwired`）**：`view.reset` 现派发真实 `ResetView`；其余 8 个
+  白名单命令因缺目标/手势保持显式理由（`ribbon.command_needs_target`/
+  `ribbon.command_needs_gesture`），不伪造。新增“每个白名单命令都有分类动作/理由”的漂移
+  回归测试（覆盖全部 `COMMAND_IDS`）。
+- **响应式视口契约（`ws/panels-mobile`）**：新增 wasm-free `scripts/test-web-responsive.mjs`
+  （9 项）覆盖 360×800/800×360/800×1280/1280×800 × DPR1/2/3 × 安全区，并含对
+  `viewer_config.rs` 阈值（720/1200/540）的漂移守卫；已加入 CI `web-host-contracts`。
+  顺带澄清 `cad-ui-slint::responsive` 的 600/1024 为历史帮助函数、非 live 权威（live 为
+  `cad_app::viewer_config`）。
+- **能力钳制修复（主控）**：`ui.commandOverrides.<id>.visible` 加入 `is_clamped_path`，
+  用户偏好不得重新启用被预设/能力禁用的命令；修复 `apply_preference` 新建 override 键
+  时绕过钳制的漏洞，新增回归测试。
+
+主控验证：fmt、严格 clippy（含 app-web）、架构/i18n/fixture/workflows、node 触控/宿主/
+可访问性/像素/响应式契约通过；`cargo test --workspace --exclude app-android`（含 app-web）
+通过；wasm 全 workspace lib check、Android aarch64 check 通过；Linux release 离屏 smoke
+通过。仍为软件 Vulkan/合成，未做真实 GPU/真机验收。
+
+**迭代 2：数据驱动 Ribbon + Web 触控门控**：主控派发两个隔离 worktree 子代理（ribbon 分组、
 web 触控门控与契约），主控统一合并/编译/门禁。
 
 - **数据驱动 Ribbon（`ws/ribbon-groups`）**：`ui.components.ribbon.tabs[].groups[].commands[]`

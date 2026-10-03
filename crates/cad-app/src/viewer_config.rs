@@ -475,6 +475,11 @@ fn is_clamped_path(path: &str) -> bool {
     if path == "features" || path.starts_with("features.") {
         return true;
     }
+    // A command-override visibility leaf is capability-bearing too: a user may
+    // hide a command but must never re-enable one a preset/feature disabled.
+    if path == "ui.commandOverrides" || path.starts_with("ui.commandOverrides.") {
+        return true;
+    }
     // `ui.components.<name>.visible`
     let parts: Vec<&str> = path.split('.').collect();
     parts.len() == 4 && parts[0] == "ui" && parts[1] == "components" && parts[3] == "visible"
@@ -657,7 +662,18 @@ fn apply_preference(
                         if !value.is_object() {
                             return Err(type_error(&child));
                         }
-                        target.insert(key.clone(), value.clone());
+                        // A new command-override entry is capability-bearing: a
+                        // user preference may create it but must never set its
+                        // `visible` to true when the host has not enabled it.
+                        let value = if let Value::Object(mut entry) = value.clone() {
+                            if entry.contains_key("visible") {
+                                entry.insert("visible".into(), Value::Bool(false));
+                            }
+                            Value::Object(entry)
+                        } else {
+                            value.clone()
+                        };
+                        target.insert(key.clone(), value);
                     } else if strict {
                         return Err(ConfigError::new(
                             child,
@@ -1418,6 +1434,57 @@ mod tests {
         }))
         .unwrap();
         config.validate().unwrap();
+    }
+
+    /// A user preference may hide a command but must never re-enable one that a
+    /// preset or feature capability disabled (spec: user preference cannot turn
+    /// a forbidden capability back on). `ui.commandOverrides.<id>.visible` is a
+    /// clamped path exactly like `features.*` and `ui.components.*.visible`.
+    #[test]
+    fn user_preference_cannot_re_enable_a_disabled_command_override() {
+        let mut store = ViewerConfigStore::default();
+        store
+            .update_config(json!({
+                "ui": {
+                    "preset": "canvasOnly",
+                    "userCustomization": { "allowedPaths": [
+                        "ui.commandOverrides.view.fit.visible"
+                    ] }
+                }
+            }))
+            .unwrap();
+        // A preference asking to show the command is clamped to the host's
+        // disabled value, never switched on.
+        store
+            .apply_user_preference(json!({
+                "ui": { "commandOverrides": { "view.fit": { "visible": true } } }
+            }))
+            .unwrap();
+        assert!(
+            !store.effective().ui.command_overrides["view.fit"].visible,
+            "a user preference must not re-enable a preset-disabled command; got {:?}",
+            store.effective().ui.command_overrides
+        );
+        assert!(
+            !UiPresentationModel::resolve(store.effective(), [1280.0, 800.0], [0.0; 4], false)
+                .command_visibility["view.fit"],
+            "the resolved command visibility must stay disabled"
+        );
+        // Hiding is still honoured when the capability is otherwise on.
+        let mut store = ViewerConfigStore::default();
+        store
+            .update_config(json!({
+                "ui": { "userCustomization": { "allowedPaths": [
+                    "ui.commandOverrides.view.fit.visible"
+                ] } }
+            }))
+            .unwrap();
+        store
+            .apply_user_preference(json!({
+                "ui": { "commandOverrides": { "view.fit": { "visible": false } } }
+            }))
+            .unwrap();
+        assert!(!store.effective().ui.command_overrides["view.fit"].visible);
     }
 
     #[test]

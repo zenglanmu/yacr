@@ -31,6 +31,13 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
   命令显式报 `ribbon.command_unsupported`，不静默成功）。**未声明自定义 tabs 时内置 5 标签
   面板逐字节不变**。图标/文字模式、分组内图标-文字切换与溢出菜单仍未实现（当前统一
   小按钮显示图标+文字）。
+- 可配置 ribbon 命令的派发缺口已收窄：`view.reset` 现派发真实 `ResetView`；其余 8 个
+  `Unsupported`（`view.orbit`/`view.standard`/`backend.switch`/`annotation.delete|select|
+  visibility`/`layer.toggle`/`layout.switch`）因缺少明确目标或手势而**显式分理由**
+  （`ribbon.command_needs_target`/`ribbon.command_needs_gesture`），不伪造目标。
+- 用户偏好不得重新启用被预设/能力禁用的命令：`ui.commandOverrides.<id>.visible` 现与
+  `features.*`、`ui.components.*.visible` 一样按“只能关不能开”钳制（此前可越权打开
+  `canvasOnly` 隐藏的命令），新增回归测试。
 - `view.overlays.*` 已端到端门控绘制：`selectionHighlight`/`annotations`/`snapHints`
   控制选择高亮、已提交批注、预览光标十字；`axes`/`grid` 首次产生真实世界坐标参考
   几何（按图纸 bounds 生成、1/2/5 步长约 10 格、行数有上限、无 bounds 时显式诊断

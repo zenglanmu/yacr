@@ -1,18 +1,15 @@
 //! Responsive shell geometry and breakpoint classification (audit U01/U07/U10).
 //!
-//! The Slint shell must arrange the same real controls differently at phone,
-//! tablet and desktop widths, keep touch targets at least [`MIN_TOUCH_TARGET`]
-//! logical pixels on a phone, and actually consume the compact/stretch
-//! configuration instead of leaving it dead (`UiConfiguration::compact`).
+//! **The live breakpoint authority is `cad_app::viewer_config`.** The shell's
+//! [`crate::chrome::apply_responsive`] and every config application funnel push
+//! geometry from `cad_app::viewer_config::UiPresentationModel::resolve`, whose
+//! default breakpoints are `mobileBelow = 720` / `compactBelow = 1200` (plus a
+//! short-height rule at 540 px). This module keeps the legacy pure geometry
+//! helpers for documentation and its unit tests, but it is **not** the shell's
+//! classification path; do not treat its `Phone`/`Tablet`/`Desktop` widths as the
+//! product breakpoints.
 //!
-//! All of that is **geometry**, so it lives here as a pure function of the
-//! current logical viewport instead of being sprinkled as literals through the
-//! `.slint` file. The shell's width `state` reads the class this module decides;
-//! the unit tests pin the breakpoints, the target sizes and the compact
-//! consumption without needing a Slint host (this crate cannot build natively on
-//! the CI host — see `docs/responsive-ui.md`).
-//!
-//! Honest scope: this decides and documents the arrangement; it does **not**
+//! Honest scope: this decides and documents an arrangement model; it does **not**
 //! prove the rendered result. Slint rendering, DPR and safe-area composition are
 //! not exercised here (audit U07 remains open for the host).
 
@@ -33,12 +30,14 @@ pub enum Breakpoint {
 }
 
 impl Breakpoint {
-    /// Classify a logical viewport width.
+    /// Classify a logical viewport width with the **legacy** width thresholds.
     ///
-    /// <= 599 px is a phone (the 360x800 portrait reference and 800x360
-    /// landscape reference stay reachable), 600-1023 px is a tablet, and
-    /// At least 1024 px is a desktop. These legacy breakpoints are documented in
-    /// `docs/responsive-ui.md` and pinned by [`tests`].
+    /// This helper is not the shell's classification path: the live authority is
+    /// `cad_app::viewer_config::UiPresentationModel::resolve` (defaults
+    /// `mobileBelow = 720`, `compactBelow = 1200`, short height < 540). The
+    /// legacy widths here (< 600 phone, < 1024 tablet, else desktop) are kept so
+    /// the historical documentation and unit tests stay meaningful, and are not
+    /// wired into any production caller.
     pub fn from_width(width: f32) -> Breakpoint {
         if width < 600.0 {
             Breakpoint::Phone
