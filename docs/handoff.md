@@ -18,6 +18,19 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**verify-ui 循环轮 B：真实图纸操作 + 选择缺陷修复（本轮）**：新增
+`apps/app-linux/tests/verify_ui_drawing.rs`（`scripts/verify-ui.sh` 的 `ui-drawing`
+层），用已提交开源 fixture `fixtures/dxf/qcad-examples/entities.dxf` 真实打开后执行：
+多图层显隐改变并恢复合成像素、模型/图纸布局切换、真实指针点选几何、清除后再次点选、
+真实 MOVE 一次事务且撤销恢复、命令别名 `L`/`C`/`TR`。首次运行发现**真实缺陷**：
+`CommandId::Select` 会把会话置为 `ToolState::Selecting`，而 `apps/app-linux` 的
+`Navigation::select` 只在 `ToolState::Idle` 时拾取，因此第一次点选后无法再更改选择
+（清除后点选同样失效）。已改为允许 `Idle | Selecting`，测量/批注/平移仍阻止拾取；
+“清除后再次点选”保留为该场景的回归断言。对比只取 CAD 画布区域以排除状态栏文案；
+大图纸场景重建较慢，用“连续两帧相同”作为收敛条件，并保留确定性自检。证据见
+`docs/verify-ui.md`；仍为软件 Vulkan/合成/开源 fixture，不代表真实 GPU/真机。
+
+
 **verify-ui 循环轮 A：AutoCAD 深色外观 + 命令面操作（本轮）**：按用户要求把循环焦点从
 批注转到“UI 匹配 AutoCAD 风格 + 其它操作”。外观：`ui/theme.slint` 改为 AutoCAD 深色
 （深灰 chrome/panel、浅色文字、蓝色选中、近黑模型空间），`ribbon`/`button`/`canvas`/

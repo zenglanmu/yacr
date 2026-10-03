@@ -29,7 +29,14 @@ impl Navigation {
     fn select(&self, point: [f64; 2]) -> CadResult<()> {
         self.runtime.metrics()?;
         let c = self.runtime.controller.borrow();
-        if !matches!(c.session.tool, cad_app::ToolState::Idle) {
+        // `Select` itself moves the session to `ToolState::Selecting`, which is a
+        // normal, repeatable selection state: a later click must be able to
+        // replace the selection. Only a measurement/annotation/pan tool blocks a
+        // pick; treating `Selecting` as busy made the very first click permanent.
+        if !matches!(
+            c.session.tool,
+            cad_app::ToolState::Idle | cad_app::ToolState::Selecting
+        ) {
             return Ok(());
         }
         let viewport = &c.application.workspace.viewports[&c.viewport_id];

@@ -44,7 +44,7 @@ if [[ -e "$OUTPUT" ]]; then
 fi
 # Note: the app/host layers create their own evidence directories and refuse an
 # existing one, so the script must not pre-create them.
-mkdir -p "$OUTPUT/logs" "$OUTPUT/screenshots" "$OUTPUT/slint" "$OUTPUT/scenario"
+mkdir -p "$OUTPUT/logs" "$OUTPUT/screenshots" "$OUTPUT/slint" "$OUTPUT/scenario" "$OUTPUT/drawing"
 STATUS_FILE="$OUTPUT/.layers.tsv"
 : >"$STATUS_FILE"
 
@@ -90,15 +90,20 @@ run_layer ui-offscreen 1 YACR_UI_OUTPUT="$OUTPUT/slint" -- \
 #    draw/undo/layer/config/locale/resize) with screenshots.
 run_layer scenario 1 YACR_VERIFY_OUTPUT="$OUTPUT/scenario" -- \
   cargo test -p app-linux --test verify_ui --locked -- --test-threads=1
-# 4) Real host command/transaction/file-picker contracts.
+# 4) Real-drawing operations on a committed fixture DXF: multi-layer
+#    visibility, paper/model layout switching, pointer selection (including
+#    re-selection after clearing) and a real MOVE transaction that undo restores.
+run_layer ui-drawing 1 YACR_VERIFY_OUTPUT="$OUTPUT/drawing" -- \
+  cargo test -p app-linux --test verify_ui_drawing --locked -- --test-threads=1
+# 5) Real host command/transaction/file-picker contracts.
 run_layer host-contracts 1 -- \
   cargo test -p app-linux --test host_contracts --locked -- --test-threads=1
-# 5) The actual release/debug application binary in --headless acceptance mode.
+# 6) The actual release/debug application binary in --headless acceptance mode.
 run_layer app-build 1 -- cargo build -p app-linux --bin yacr-linux $PROFILE_FLAG --locked
 BIN="${CARGO_TARGET_DIR:-$ROOT/target}/$PROFILE/yacr-linux"
 if [[ -x "$BIN" ]]; then
   run_layer app-smoke 1 -- "$BIN" --headless --output "$OUTPUT/app"
-  # 6) Optional: a real, external drawing the caller explicitly points at.
+  # 7) Optional: a real, external drawing the caller explicitly points at.
   #    When requested it is required: a broken open must fail the run.
   if [[ -n "${YACR_TEST_DWG:-}" ]]; then
     run_layer app-dwg 1 -- "$BIN" --headless --output "$OUTPUT/app-dwg" --open "$YACR_TEST_DWG"
@@ -114,6 +119,7 @@ fi
 shopt -s nullglob
 for png in "$OUTPUT/slint"/*.png; do cp "$png" "$OUTPUT/screenshots/slint-$(basename "$png")"; done
 for png in "$OUTPUT/scenario"/*.png; do cp "$png" "$OUTPUT/screenshots/scenario-$(basename "$png")"; done
+for png in "$OUTPUT/drawing"/*.png; do cp "$png" "$OUTPUT/screenshots/drawing-$(basename "$png")"; done
 
 python3 "$ROOT/scripts/verify-ui-summary.py" "$OUTPUT" "$FAILED"
 exit $?

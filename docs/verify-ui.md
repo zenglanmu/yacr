@@ -66,10 +66,20 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
    注意：合成 demo 未加载宿主字体，`AnnotationGeometry::Text` 在无字体引擎时显式
    `annotation.text_unshaped` 且不绘制；`Measurement` 批注按设计不进叠加层。因此显隐
    像素断言使用不依赖字体的矩形批注，而不是把“文字没画”误判成显隐失效。
-4. `host-contracts`：`host_contracts`。命令/事务/文件选择器注入契约。
-5. `app-build` + `app-smoke`：构建并运行真实 `yacr-linux --headless`，产出
+4. `ui-drawing`：`apps/app-linux/tests/verify_ui_drawing.rs`。用已提交的开源 fixture
+   DXF（`fixtures/dxf/qcad-examples/entities.dxf`）真实打开后操作：多图层显隐改变且恢复
+   合成像素、模型/图纸布局切换、真实指针点选几何并在清除后**再次点选**（回归：`Select`
+   进入 `Selecting` 后不得再被当成“工具有活动”而拒绝，见下）、真实 MOVE 一次事务且撤销
+   恢复、命令别名 `L`/`C`/`TR`。对比只取 CAD 画布区域，排除状态栏文案变化。
+5. `host-contracts`：`host_contracts`。命令/事务/文件选择器注入契约。
+6. `app-build` + `app-smoke`：构建并运行真实 `yacr-linux --headless`，产出
    `report.json` 与 PNG（导航像素变化断言）。
-6. `app-dwg`（设置 `YACR_TEST_DWG` 时）：真实图纸打开 smoke。
+7. `app-dwg`（设置 `YACR_TEST_DWG` 时）：真实图纸打开 smoke。
+
+`ui-drawing` 首次运行发现真实缺陷：`CommandId::Select` 会把会话置为
+`ToolState::Selecting`，而 Linux 宿主 `Navigation::select` 只在 `Idle` 时拾取，导致
+第一次点选后无法再更改选择（清除后点选也失效）。已改为允许 `Idle | Selecting`，并保留
+测量/批注/平移工具仍然阻止拾取；该场景的“清除后再次点选”即回归断言。
 
 ## 证据包
 

@@ -15,7 +15,15 @@ import shutil
 import subprocess
 import sys
 
-REQUIRED = ["ui-unit", "ui-offscreen", "scenario", "host-contracts", "app-build", "app-smoke"]
+REQUIRED = [
+    "ui-unit",
+    "ui-offscreen",
+    "scenario",
+    "ui-drawing",
+    "host-contracts",
+    "app-build",
+    "app-smoke",
+]
 
 
 def versions() -> dict:
