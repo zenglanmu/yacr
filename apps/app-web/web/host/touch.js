@@ -36,6 +36,9 @@ export function installTouchNavigation(wasm) {
     try {
       const [cx, cy, width, height] = wasm.shell_geometry();
       const rect = canvas.getBoundingClientRect();
+      if (typeof wasm.canvas_hit_test === "function") {
+        return wasm.canvas_hit_test(x - rect.left, y - rect.top);
+      }
       return (
         x >= rect.left + cx &&
         x < rect.left + cx + width &&

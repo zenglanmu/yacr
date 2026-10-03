@@ -183,6 +183,7 @@ pub(super) fn push_panel_state(
     async_open_state::push_state(controller, handle);
 
     let controller = controller.borrow();
+    let _ = handle.set_document_name(&controller.document_name_hint);
 
     // Transient render overlay: selection highlight + tool previews. Kept in the
     // funnel (not at call sites) so no command path can forget it; an empty

@@ -3,12 +3,63 @@
 use super::*;
 
 impl UiHandle {
+    /// Shell-local hit query: floating controls must not be consumed by host touch navigation.
+    pub fn canvas_hit_test(&self, point: [f64; 2]) -> CadResult<bool> {
+        let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;
+        let (rect, _) = self.shell_geometry()?;
+        let x = point[0] - rect[0];
+        let y = point[1] - rect[1];
+        if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 || x >= rect[2] || y >= rect[3] {
+            return Ok(false);
+        }
+        if ui.get_application_ui() {
+            if ui.get_navigation_visible()
+                && x >= rect[2] - 64.0
+                && x < rect[2] - 16.0
+                && (20.0..68.0).contains(&y)
+            {
+                return Ok(false);
+            }
+            if ui.get_phone_shell()
+                && ui.get_layouts_visible()
+                && (12.0..152.0).contains(&x)
+                && (16.0..64.0).contains(&y)
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+    /// Atomic layout-only configuration. Unsupported protocol fields are refused in cad-app.
+    pub fn set_config(
+        &self,
+        config: cad_app::viewer_config::ViewerConfig,
+    ) -> Result<(), cad_app::viewer_config::ConfigError> {
+        let ui = self
+            .ui
+            .upgrade()
+            .ok_or_else(|| cad_app::viewer_config::ConfigError {
+                path: "window".into(),
+                reason: "window was dropped".into(),
+            })?;
+        self.viewer_config.borrow_mut().set_config(config)?;
+        let size = ui.window().size().to_logical(ui.window().scale_factor());
+        apply_viewer_presentation(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            [size.width as f64, size.height as f64],
+        );
+        Ok(())
+    }
+    pub fn effective_config(&self) -> cad_app::viewer_config::ViewerConfig {
+        self.viewer_config.borrow().effective().clone()
+    }
     /// Logical CAD hit rectangle and shell expansion state for browser touch routing.
     pub fn shell_geometry(&self) -> CadResult<([f64; 4], [bool; 4])> {
         let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;
         Ok((
             [
-                0.0,
+                ui.get_cad_left() as f64,
                 ui.get_cad_top() as f64,
                 ui.get_cad_width() as f64,
                 ui.get_cad_height() as f64,
@@ -63,6 +114,11 @@ impl UiHandle {
     pub fn set_status(&self, status: impl Into<slint::SharedString>) -> CadResult<()> {
         let s = status.into();
         self.with(|ui| ui.set_status_label(s))
+    }
+
+    /// Document title is host data, never the concept illustration's sample filename.
+    pub fn set_document_name(&self, name: &str) -> CadResult<()> {
+        self.with(|ui| ui.set_application_title(name.into()))
     }
 
     pub fn set_work_mode(&self, work: bool) -> CadResult<()> {
@@ -205,6 +261,15 @@ impl UiHandle {
         let empty = state.empty_label.clone();
         self.with(|ui| {
             ui.set_layout_rows(model);
+            let mut labels = vec![ui.get_layout_model_space_label().to_string()];
+            labels.extend(state.rows.iter().map(|row| {
+                if row.supported {
+                    row.name.clone()
+                } else {
+                    format!("{} — {}", row.name, row.reason)
+                }
+            }));
+            ui.set_layout_labels(string_model(&labels));
             ui.set_layout_active_index(active);
             ui.set_layout_empty_label(empty.into());
         })
@@ -403,7 +468,7 @@ impl UiHandle {
     /// Fit the shared shell to the browser CSS viewport, not its preferred size.
     pub fn resize_browser_surface(&self, size: [f64; 2], scale: f64) -> CadResult<()> {
         self.with(|ui| {
-            crate::chrome::apply_responsive(ui, size, false);
+            apply_viewer_presentation(ui, self.viewer_config.borrow().effective(), size);
             ui.window().set_size(slint::PhysicalSize::new(
                 (size[0] * scale).round().max(1.0) as u32,
                 (size[1] * scale).round().max(1.0) as u32,

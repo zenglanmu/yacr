@@ -37,7 +37,7 @@ impl Breakpoint {
     ///
     /// <= 599 px is a phone (the 360x800 portrait reference and 800x360
     /// landscape reference stay reachable), 600-1023 px is a tablet, and
-    /// >= 1024 px is a desktop. These are the breakpoints documented in
+    /// At least 1024 px is a desktop. These legacy breakpoints are documented in
     /// `docs/responsive-ui.md` and pinned by [`tests`].
     pub fn from_width(width: f32) -> Breakpoint {
         if width < 600.0 {
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn phone_touch_targets_are_at_least_48_logical_pixels() {
         for width in [320.0, 360.0, 480.0, 599.0] {
-            let metrics = ResponsiveMetrics::derive([width as f64, 800.0], false);
+            let metrics = ResponsiveMetrics::derive([width, 800.0], false);
             assert_eq!(metrics.breakpoint, Breakpoint::Phone);
             assert!(
                 metrics.touch_target >= MIN_TOUCH_TARGET,

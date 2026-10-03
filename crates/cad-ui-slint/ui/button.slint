@@ -1,24 +1,53 @@
-// Compact dark ribbon button. Phone callers raise min-height to 48px.
+import { CadTheme } from "theme.slint";
+// Shared concept button. Icon-only controls retain accessible catalog labels.
 export component Button inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
     in property <bool> checked: false;
+    in property <string> symbol;
+    in property <bool> icon-only: false;
+    in property <bool> stacked: false;
+    in property <color> foreground: CadTheme.ink;
+    property <image> icon: root.symbol == "↔" ? @image-url("icons/distance.svg") :
+        (root.symbol == "∠" ? @image-url("icons/angle.svg") :
+        (root.symbol == "▨" ? @image-url("icons/area.svg") :
+        (root.symbol == "layers" ? @image-url("icons/layers.svg") :
+        (root.symbol == "□" ? @image-url("icons/annotation.svg") :
+        (root.symbol == "⊡" ? @image-url("icons/fit.svg") :
+        (root.symbol == "☁" ? @image-url("icons/cloud.svg") : @image-url("icons/annotation.svg")))))));
+    property <bool> vector-icon: root.symbol == "↔" || root.symbol == "∠" || root.symbol == "▨" ||
+        root.symbol == "layers" || root.symbol == "□" || root.symbol == "⊡" || root.symbol == "☁";
     callback clicked();
     min-width: 64px;
     preferred-width: max(72px, label.preferred-width + 24px);
     min-height: 36px;
     preferred-height: 36px;
     horizontal-stretch: 0;
-    background: !root.enabled ? #242b35 : (root.checked ? #24577d : (touch.has-hover ? #3c526a : #303b4a));
-    border-color: root.enabled ? #506278 : #35404e;
-    border-width: 1px;
+    accessible-role: button;
+    accessible-label: root.text;
+    background: root.checked ? CadTheme.selected : (touch.has-hover && root.enabled ? #f7faff : #00000000);
+    border-color: root.checked ? #91c3ff : CadTheme.border;
+    border-width: root.checked || touch.has-hover ? 1px : 0px;
     border-radius: 3px;
     label := Text {
-        text: root.text;
-        color: root.enabled ? #e6edf7 : #7d8999;
+        y: root.stacked ? parent.height - 26px : 0px;
+        height: root.stacked ? 26px : parent.height;
+        text: root.icon-only ? (root.vector-icon ? "" : root.symbol) : root.text;
+        font-size: root.icon-only ? 24px : 14px;
+        color: !root.enabled ? #98a3b0 : (root.checked ? CadTheme.accent : root.foreground);
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
+    }
+    if root.stacked && !root.vector-icon : Text {
+        height: parent.height - 26px; text: root.symbol; font-size: 30px;
+        color: !root.enabled ? #98a3b0 : (root.checked ? CadTheme.accent : #164f90);
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+    if root.vector-icon : Image {
+        x: (parent.width - self.width) / 2; y: root.stacked ? 8px : (parent.height - self.height) / 2;
+        width: root.stacked ? 32px : 24px; height: self.width; source: root.icon;
+        colorize: !root.enabled ? #98a3b0 : (root.symbol == "☁" ? #f24e4e : (root.checked ? CadTheme.accent : root.foreground));
     }
     touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }

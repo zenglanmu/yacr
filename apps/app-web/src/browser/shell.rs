@@ -21,6 +21,10 @@ pub fn pick(x: f64, y: f64) -> CadResult<()> {
     with_runtime(|rt| rt.handle.touch_pick(x, y)).ok_or(CadError::Cancelled)?
 }
 
+pub fn canvas_hit_test(x: f64, y: f64) -> CadResult<bool> {
+    with_runtime(|rt| rt.handle.canvas_hit_test([x, y])).ok_or(CadError::Cancelled)?
+}
+
 pub fn cancel_draw_capture() -> CadResult<()> {
     with_runtime(|rt| rt.handle.cancel_draw_capture()).ok_or(CadError::Cancelled)?
 }

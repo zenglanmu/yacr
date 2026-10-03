@@ -1,7 +1,7 @@
 /* The Slint window covers the page; the small host-state line sits above it. */
 :root {
-  color-scheme: dark;
-  --shell-bg: #20242b;
+  color-scheme: light;
+  --shell-bg: #1b242b;
   --host-toolbar-height: 60px;
   --host-status-height: 32px;
 }
@@ -73,8 +73,8 @@ body {
   max-width: calc(100% - 16px);
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(10, 12, 16, 0.72);
-  color: #cfd6e2;
+  background: #e2e7ed;
+  color: #242e3b;
   font-size: 12px;
   line-height: 18px;
   white-space: nowrap;
@@ -105,16 +105,16 @@ body.renderer-ready:not(:has(#retry-renderer:not([hidden]))) #host-state {
   padding: 4px max(8px, env(safe-area-inset-right)) 4px
     max(8px, env(safe-area-inset-left));
   border-radius: 4px;
-  background: rgba(10, 12, 16, 0.72);
-  color: #cfd6e2;
+  background: linear-gradient(90deg, #edf1f5, #d8dfe7);
+  color: #242e3b;
   font-size: 14px;
   line-height: 18px;
 }
 
 #host-controls select {
-  background: #20242b;
-  color: #e6edf7;
-  border: 1px solid #3a4351;
+  background: #f4f7fa;
+  color: #242e3b;
+  border: 1px solid #b5c1ce;
   border-radius: 3px;
   font: inherit;
   min-height: 48px;
@@ -125,9 +125,9 @@ body.renderer-ready:not(:has(#retry-renderer:not([hidden]))) #host-state {
   font: inherit;
   min-height: 48px;
   padding: 6px 12px;
-  color: #e6edf7;
-  background: #28374c;
-  border: 1px solid #64748b;
+  color: #164f90;
+  background: #edf1f5;
+  border: 1px solid #b5c1ce;
   border-radius: 6px;
   cursor: pointer;
 }
@@ -153,9 +153,8 @@ body.renderer-ready:not(:has(#retry-renderer:not([hidden]))) #host-state {
     gap: 4px;
   }
 }
-/* Phone starts with only the Slint command row. TOOLS reveals ribbon/settings;
-   no desktop ribbon squeezed into tiny touch targets. */
-@media (max-width: 599px) {
+/* Mobile concept uses a document header and four bottom tool groups. */
+@media (max-width: 719px) {
   :root { --host-toolbar-height: 0px; --host-status-height: 0px; }
   #host-controls, #host-state { display: none; }
   body.mobile-tools #host-controls { display: flex; }

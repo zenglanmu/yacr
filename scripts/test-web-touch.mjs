@@ -19,7 +19,7 @@ test("pinch centroid and distance use CSS pixels", () => {
 /// Install the touch router over a fake canvas and return a `fire` helper plus
 /// the captured navigation/pick calls. Each `fire` returns whether the event was
 /// consumed by the CAD router.
-function harness() {
+function harness(canvasHitTest) {
   const listeners = new Map();
   const canvas = {
     addEventListener: (kind, handler) => listeners.set(kind, handler),
@@ -30,6 +30,7 @@ function harness() {
   const picks = [];
   const cancellations = [];
   installTouchNavigation({
+    canvas_hit_test: canvasHitTest,
     shell_geometry: () => [0, 50, 300, 400],
     touch_navigate: (...args) => calls.push(args),
     touch_pick: (...args) => picks.push(args),
@@ -48,6 +49,17 @@ function harness() {
   };
   return { fire, calls, picks, cancellations };
 }
+
+test("floating shell controls are excluded by the authoritative Slint hit query", (t) => {
+  const old = globalThis.document;
+  t.after(() => { globalThis.document = old; });
+  const { fire, calls, picks } = harness((x, y) => x < 220 && y >= 50 && y < 450);
+  assert.equal(fire("touchstart", [[250, 80]]), false, "floating fit remains Slint input");
+  assert.equal(fire("touchstart", [[120, 200]]), true);
+  fire("touchend", []);
+  assert.deepEqual(picks, [[120, 150]]);
+  assert.equal(calls.length, 0);
+});
 
 test("touch routing rebases finger transitions, cancels, and leaves shell controls alone", (t) => {
   const old = globalThis.document;

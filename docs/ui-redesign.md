@@ -16,6 +16,8 @@
 不支持的配置字段拒绝而非忽略；`features/view/interaction`、工具分组/排序/placement、
 宿主允许的用户偏好合并、配置事件与浏览器公开 setConfig 接口仍未闭环。
 这不是 ui-desc 完整配置协议验收；既有命令层 Work/Viewer 授权继续有效。
+`UiHandle::set_config/effective_config` 已消费布局子集；`initiallyOpen`、分开的图层/属性显隐
+仍需补齐逐组件呈现规则，当前共用一个面板容器，不宣称配置协议已全部接线。
 
 ## 验证原则
 
@@ -29,3 +31,23 @@
 随后系统依赖安装成功。里程碑 1 完整核心门禁：fmt、严格 clippy、架构/fixture/workflows/i18n、
 wasm 全 workspace lib 检查通过；核心串行 968 passed / 0 failed / 1 ignored（合成，lavapipe）。
 未设置真实 DWG 环境变量，按样本跳过的用例不计真实图纸执行证据。
+
+## 里程碑 2：真实 Slint 原生离屏
+
+新增 `cad-ui-slint::offscreen` 与 `scripts/check-ui-native.sh`：官方 FemtoVG/wgpu 自定义
+无窗口平台，官方 snapshot 纹理读回；不使用重画的 HTML/图片替代 Slint。
+共享 CAD 桥在相同设备提交，真实适应后的合成数据库进入画布。新图标为本项目绘制 SVG。
+
+截图已抽查：`/tmp/opencode/yacr-concept-round4/` 的 desktop、mobile、mobile-tools、
+mobile-layers；测试另产出 compact、narrow（320px）、canvas-only。
+软件 Vulkan：llvmpipe / Mesa 26.0.8 / LLVM 21.1.8；单次渲染测试 11.66 秒（不含编译）。
+真实指针事件证明打开与测量命令正确派发，布局/纯画布切换保留相机和底图 Arc。
+UI 单元合成测试 **76 passed**；离屏集成 **1 passed**。
+里程碑 2 最终门禁：扩大到 Linux UI 的严格 clippy、fmt、架构/fixture/workflows/i18n
+（164 keys）、全 workspace wasm lib 检查通过；Linux 核心+UI 串行 **1045 passed / 0 failed /
+1 ignored**。JS 模块契约 **28 passed**（不含 wasm/GPU）。最终本轮原生截图
+`/tmp/opencode/yacr-concept-m2/`，离屏集成 11.85 秒。
+首次包含编译的 120 秒命令超时保留；旧宽屏相机未 fit 的截图不算视觉通过。
+
+设计未伪造：系统窗口按钮、DWG 保存、罗盘/坐标、标尺数值和图层颜色色块。
+真实样本/真实 GPU/Android 真机及完整 ViewerConfig 仍不在本轮已验收范围。

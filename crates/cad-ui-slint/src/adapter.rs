@@ -12,7 +12,7 @@ fn command_for(
     Command {
         schema_version: 1,
         id,
-        document: document.clone(),
+        document: *document,
         viewport,
         payload,
     }
@@ -93,7 +93,7 @@ impl UiAdapter {
 
         let work_mode: Rc<Cell<bool>> = Rc::new(Cell::new(work_mode));
 
-        let document = configuration.document.clone();
+        let document = configuration.document;
         let viewport = configuration.viewport;
         let shared: Rc<RefCell<S>> = Rc::new(RefCell::new(sink));
         let view_input: Rc<RefCell<Option<Rc<dyn ViewInput>>>> = Rc::new(RefCell::new(None));
@@ -129,7 +129,7 @@ impl UiAdapter {
 
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_open_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::OpenDrawing,
@@ -144,7 +144,7 @@ impl UiAdapter {
             // by the host to `HostController::cancel_async_open`; the panel only
             // enables this while a cancellable job is running.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_cancel_open_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::CancelLoading,
@@ -156,7 +156,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_fit_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::FitDrawing,
@@ -170,7 +170,7 @@ impl UiAdapter {
             // The Measure button starts (or restarts) the selected algorithm
             // instead of sending a payload-free guess (audit U04/F06).
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let kind = selected_kind.clone();
             ui.on_measure_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
@@ -187,7 +187,7 @@ impl UiAdapter {
             // it is mapped back through the same catalog-built ordering rather
             // than the Chinese-only `from_label`.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let kind_slot = selected_kind.clone();
             let messages = messages_slot.clone();
             ui.on_measure_kind_selected(move |name| {
@@ -207,7 +207,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_confirm_measurement_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::ConfirmMeasurement,
@@ -219,7 +219,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_cancel_measurement_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::CancelMeasurement,
@@ -234,7 +234,7 @@ impl UiAdapter {
             // The command layer refuses with InvalidInput when no record exists;
             // the shell only enables the button when the host pushed a record.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_save_measurement_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::SaveMeasurementAsAnnotation,
@@ -249,7 +249,7 @@ impl UiAdapter {
             // shell reflects the target immediately and the host's authoritative
             // push (`UiHandle::set_mode`) corrects any discrepancy.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let work = work_mode.clone();
             let messages = messages_slot.clone();
             let report = ui_weak.clone();
@@ -283,7 +283,7 @@ impl UiAdapter {
             // Layer visibility toggle: the panel sends a row index; the adapter
             // resolves it to the exact LayerId from the pushed model order.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let order = layer_order.clone();
             ui.on_layer_visibility_toggled(move |index, visible| {
                 let layer = usize::try_from(index)
@@ -301,7 +301,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_restore_layers_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::RestoreLayers,
@@ -315,7 +315,7 @@ impl UiAdapter {
             // Clearing the selection is a real, read-only Select command with an
             // empty payload; the application records it and mutates nothing.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_clear_selection_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::Select,
@@ -330,7 +330,7 @@ impl UiAdapter {
             // installed a world mapper. Without one the click cannot be turned
             // into a real point, so it is reported (not silently swallowed).
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let mapper = pick_mapper.clone();
             let report = ui_weak.clone();
             let active = measurement_active.clone();
@@ -404,7 +404,7 @@ impl UiAdapter {
             // Annotate starts (or restarts) the selected annotation kind instead
             // of sending a payload-free command (audit U04/F07).
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let kind = selected_annotation_kind.clone();
             ui.on_annotate_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
@@ -420,7 +420,7 @@ impl UiAdapter {
             // user choice, not a default. Localized labels map back through the
             // catalog-built ordering.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let kind_slot = selected_annotation_kind.clone();
             let messages = messages_slot.clone();
             ui.on_annotation_kind_selected(move |name| {
@@ -440,7 +440,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_confirm_annotation_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::ConfirmAnnotationTool,
@@ -452,7 +452,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_cancel_annotation_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::CancelAnnotationTool,
@@ -467,7 +467,7 @@ impl UiAdapter {
             // it when the active kind requires text; the application validates
             // that again.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_annotation_text_edited(move |text| {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::AnnotationText,
@@ -481,7 +481,7 @@ impl UiAdapter {
             // Row click selects the annotation for edit/delete. The adapter
             // resolves the row index to the exact id from the pushed order.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let order = annotation_order.clone();
             ui.on_annotation_selected(move |index| {
                 let id = usize::try_from(index)
@@ -498,7 +498,7 @@ impl UiAdapter {
         {
             // Delete the selected annotation row (resolved through the order).
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let order = annotation_order.clone();
             ui.on_annotation_delete_requested(move |index| {
                 let id = usize::try_from(index)
@@ -517,7 +517,7 @@ impl UiAdapter {
         {
             // Annotation visibility toggle: session state only, no transaction.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let order = annotation_order.clone();
             ui.on_annotation_visibility_toggled(move |index, visible| {
                 let id = usize::try_from(index)
@@ -658,7 +658,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_undo_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::Undo,
@@ -670,7 +670,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_redo_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::Redo,
@@ -690,7 +690,7 @@ impl UiAdapter {
             // (source compatibility); in that case the command is not also sent,
             // so the two paths cannot fight.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let order = layout_order.clone();
             let report = ui_weak.clone();
             let messages = messages_slot.clone();
@@ -734,7 +734,7 @@ impl UiAdapter {
             // saved camera for a lossless round trip; the shell reflects the
             // result from the host-pushed `view-3d` property.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_toggle_view_mode_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::Switch2d3d,
@@ -749,7 +749,7 @@ impl UiAdapter {
             // `StandardView::ALL`, so the localized label maps back to the exact
             // view without a second ordering list; an unknown label is ignored.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let messages = messages_slot.clone();
             ui.on_standard_view_selected(move |name| {
                 let messages = messages.borrow().clone();
@@ -767,7 +767,7 @@ impl UiAdapter {
             // Explicit orthographic/perspective toggle (F13), distinct from the
             // 2D/3D toggle: it keeps the target and adjusts the projection.
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_toggle_projection_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::SwitchProjection,
@@ -779,7 +779,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_backend_selected(move |name| {
                 let choice = match name.as_str() {
                     "WebGPU" => cad_app::BackendChoice::WebGpu,
@@ -796,7 +796,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_export_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::ExportAnnotations,
@@ -808,7 +808,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_import_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::ImportAnnotations,
@@ -820,7 +820,7 @@ impl UiAdapter {
         }
         {
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             ui.on_diagnostics_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::Diagnostics,
@@ -843,7 +843,7 @@ impl UiAdapter {
         {
             let input = view_input.clone();
             let s = shared.clone();
-            let doc = document.clone();
+            let doc = document;
             let is_3d = view_3d.clone();
             let orbit_last = orbit_last.clone();
             let drawing = draw_tool.clone();
@@ -922,6 +922,9 @@ impl UiAdapter {
         }
 
         Ok(UiAdapter {
+            viewer_config: Rc::new(RefCell::new(
+                cad_app::viewer_config::ViewerConfigStore::default(),
+            )),
             configuration,
             ui,
             view_input,
@@ -999,6 +1002,7 @@ impl UiAdapter {
     /// A handle for pushing state from the host.
     pub fn handle(&self) -> UiHandle {
         UiHandle {
+            viewer_config: self.viewer_config.clone(),
             ui: self.ui.as_weak(),
             messages: self.messages.clone(),
             selected_kind: self.selected_kind.clone(),
@@ -1035,6 +1039,11 @@ impl UiAdapter {
         let physical = self.fitted_physical_size(logical_size, scale);
         self.ui.window().set_size(physical);
         self.configuration.logical_size = logical_size;
+        apply_viewer_presentation(
+            &self.ui,
+            self.viewer_config.borrow().effective(),
+            logical_size,
+        );
         physical
     }
 

@@ -191,6 +191,7 @@ pub(crate) fn push_panel_state(
 ) {
     let messages = MessageSource::from_request("zh-CN");
     let snapshot = snapshot(controller, &messages);
+    let _ = handle.set_document_name(&controller.borrow().document_name_hint);
 
     let _ = handle.set_history_availability(snapshot.history);
     let _ = handle.set_measurement_state(&snapshot.measurement);

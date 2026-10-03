@@ -1,6 +1,7 @@
 //! chrome module.
 
 use super::*;
+use slint::Model;
 
 /// Layout/locale configuration for the shell.
 #[derive(Debug, Clone)]
@@ -43,9 +44,11 @@ pub trait UiCommandSink: 'static {
 /// `from_label`.
 pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode: bool) {
     ui.set_ribbon_tabs(string_model(&[
-        messages.text("ribbon.home", &[]),
+        messages.text("ribbon.file", &[]),
         messages.text("ribbon.view", &[]),
-        messages.text("ribbon.manage", &[]),
+        messages.text("ribbon.measure", &[]),
+        messages.text("ribbon.annotate", &[]),
+        messages.text("shell.more", &[]),
     ]));
     ui.set_command_title(messages.text("command.title", &[]).into());
     ui.set_command_prompt(messages.text("command.prompt", &[]).into());
@@ -105,6 +108,9 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     // Layout panel chrome (F04/U03).
     ui.set_layout_panel_label(messages.text("layout.panel", &[]).into());
     ui.set_layout_model_space_label(messages.text("layout.model_space", &[]).into());
+    if ui.get_layout_rows().row_count() == 0 {
+        ui.set_layout_labels(string_model(&[messages.text("layout.model_space", &[])]));
+    }
     ui.set_layout_unsupported_marker(messages.text("layout.unsupported_marker", &[]).into());
     ui.set_layout_empty_label(messages.text("layout.empty", &[]).into());
 
@@ -120,6 +126,7 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
 
     // Responsive chrome (U01): the grouped-bar and drawer entry labels.
     ui.set_tools_label(messages.text("shell.tools", &[]).into());
+    ui.set_more_label(messages.text("shell.more", &[]).into());
     ui.set_drawer_label(messages.text("shell.drawer", &[]).into());
     ui.set_nav_label(messages.text("shell.nav", &[]).into());
     ui.set_view_mode_label(messages.text("shell.mode_view", &[]).into());
@@ -132,15 +139,48 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
 /// logical viewport instead of leaving compact dead. It writes only geometry
 /// properties, so pushing it never disturbs pushed panel data.
 pub fn apply_responsive(ui: &YacrWindow, logical_size: [f64; 2], compact_config: bool) {
-    let metrics = ResponsiveMetrics::derive(logical_size, compact_config);
-    ui.set_compact_shell(metrics.compact);
-    ui.set_phone_shell(metrics.breakpoint == Breakpoint::Phone);
-    ui.set_control_height(metrics.control_height);
-    ui.set_touch_target(metrics.touch_target);
-    ui.set_side_panel_width(metrics.side_panel_width);
-    ui.set_side_panel_collapsed(metrics.side_panel_collapsed);
-    ui.set_drawer_height(metrics.drawer_height);
-    ui.set_show_floating_nav(metrics.breakpoint.shows_floating_nav());
+    let mut config = cad_app::viewer_config::ViewerConfig::default();
+    if compact_config {
+        config.ui.layout.mode = cad_app::viewer_config::LayoutMode::Compact;
+    }
+    apply_viewer_presentation(ui, &config, logical_size);
+}
+
+pub(crate) fn apply_viewer_presentation(
+    ui: &YacrWindow,
+    config: &cad_app::viewer_config::ViewerConfig,
+    size: [f64; 2],
+) {
+    use cad_app::viewer_config::{LayoutMode, UiPresentationModel};
+    let p = UiPresentationModel::resolve(config, size, [0.0; 4], false);
+    let phone = p.layout == LayoutMode::Mobile;
+    let compact = p.layout == LayoutMode::Compact;
+    let changed_layout = ui.get_phone_shell() != phone || ui.get_compact_shell() != compact;
+    ui.set_phone_shell(phone);
+    ui.set_compact_shell(compact);
+    ui.set_control_height(if phone { 56.0 } else { 40.0 });
+    ui.set_touch_target(p.touch_target);
+    ui.set_side_panel_width(p.dock_width);
+    ui.set_drawer_height(if phone { 280.0 } else { 0.0 });
+    ui.set_application_ui(p.application_ui);
+    ui.set_ribbon_visible(p.ribbon);
+    ui.set_panels_visible(p.panels);
+    ui.set_navigation_visible(p.navigation);
+    ui.set_command_visible(p.command_bar);
+    ui.set_layouts_visible(p.layout_tabs);
+    ui.set_status_visible(p.status_bar);
+    ui.set_show_floating_nav(p.navigation);
+    if changed_layout {
+        ui.set_side_panel_open(p.dock_width > 0.0);
+        ui.set_tools_open(false);
+        ui.set_ribbon_expanded(!compact);
+    }
+    if !p.application_ui {
+        ui.set_side_panel_open(false);
+        ui.set_diagnostics_open(false);
+        ui.set_tools_open(false);
+        ui.set_command_expanded(false);
+    }
 }
 
 /// Catalog key for the current mode label (audit U02). Work keeps the existing

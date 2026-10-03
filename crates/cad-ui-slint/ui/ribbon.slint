@@ -1,12 +1,16 @@
-import { HorizontalBox, VerticalBox, ComboBox } from "std-widgets.slint";
+import { HorizontalBox, VerticalBox, ComboBox, ScrollView } from "std-widgets.slint";
 import { Button } from "button.slint";
+import { CadTheme } from "theme.slint";
 
-// Presentation only. IDs are mapped at the shell boundary, never CAD operations.
+// Stable action IDs are mapped to the shared command callbacks at the shell boundary.
 export component CadRibbon inherits Rectangle {
     in property <bool> phone;
+    in property <bool> compact;
     in property <length> target: 36px;
     in property <[string]> tabs;
     in property <[string]> labels;
+    in property <[string]> measurements;
+    in property <[string]> annotations;
     in property <[string]> standard-views;
     in property <[string]> backends;
     in property <int> backend-index;
@@ -17,110 +21,86 @@ export component CadRibbon inherits Rectangle {
     in property <string> draw-status;
     in property <[string]> editing-labels;
     in-out property <bool> expanded: true;
-    property <int> tab: 0;
+    in-out property <int> tab: 2;
     callback action(int);
     callback standard-view(string);
     callback backend(string);
     callback draw-tool(string);
-    height: root.expanded ? (root.phone ? 276px : 168px) : (root.phone ? 56px : 40px);
-    background: #262d38;
+    callback measure-kind(string);
+    callback annotation-kind(string);
+    height: root.phone ? (root.tab == 4 ? 148px : 112px) : (root.expanded ? 144px : 36px);
+    background: CadTheme.chrome;
+    border-color: CadTheme.border; border-width: 1px;
     VerticalBox {
-        padding: 4px; spacing: 4px;
-        HorizontalBox {
-            padding: 0px;
-            alignment: start;
-            height: root.phone ? 48px : 32px;
-            spacing: 4px;
-            for label[index] in root.tabs : Button {
-                text: label;
-                checked: root.tab == index;
-                min-height: root.phone ? 48px : 32px;
-                clicked => { root.tab = index; root.expanded = true; }
-            }
-            Button {
-                text: root.expanded ? "^" : "v";
-                min-width: root.phone ? 48px : 36px;
-                clicked => { root.expanded = !root.expanded; }
+        padding: 0px; spacing: 0px;
+        if !root.phone : ScrollView {
+            height: root.phone ? 52px : 36px;
+            HorizontalBox {
+                padding: 0px; spacing: 0px; alignment: start;
+                for label[index] in root.tabs : Rectangle {
+                    width: root.phone ? 70px : 96px;
+                    background: root.tab == index ? #f4f7fa : #00000000;
+                    Text { text: label; color: root.tab == index ? CadTheme.accent : CadTheme.ink;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                    if root.tab == index : Rectangle { y: parent.height - 3px; height: 3px; x: 10px; width: parent.width - 20px; background: CadTheme.accent; }
+                    TouchArea { clicked => { root.tab = index; root.expanded = true; } }
+                }
+                Button { text: root.labels[6]; symbol: root.expanded ? "⌃" : "⌄"; icon-only: true;
+                    min-width: 48px; preferred-width: 48px; clicked => { root.expanded = !root.expanded; } }
             }
         }
-        if root.expanded : VerticalBox {
-            padding: 0px;
-            spacing: 4px;
-            if root.tab == 0 : HorizontalBox {
-                padding: 0px;
-                alignment: start;
-                spacing: 8px;
-                VerticalBox {
-                    padding: 0px;
-                    HorizontalBox {
-                        padding: 0px;
-                        Button { text: root.labels[0]; min-height: root.target; clicked => { root.action(0); } }
-                        Button { text: root.labels[1]; min-height: root.target; clicked => { root.action(1); } }
-                    }
-                    HorizontalBox {
-                        padding: 0px;
-                        Button { text: root.labels[2]; min-height: root.target; enabled: root.can-undo; clicked => { root.action(2); } }
-                        Button { text: root.labels[3]; min-height: root.target; enabled: root.can-redo; clicked => { root.action(3); } }
+        if root.expanded : ScrollView {
+            VerticalBox {
+                padding: 8px; spacing: 6px; alignment: start;
+                if root.tab == 0 : HorizontalBox {
+                    alignment: start;
+                    Button { text: root.labels[0]; symbol: "▱"; stacked: true; min-height: 76px; clicked => { root.action(0); } }
+                    Button { text: root.labels[10]; symbol: "⇧"; stacked: true; min-height: 76px; clicked => { root.action(10); } }
+                    Button { text: root.labels[11]; symbol: "⇩"; stacked: true; min-height: 76px; clicked => { root.action(11); } }
+                }
+                if root.tab == 1 : HorizontalBox {
+                    alignment: start;
+                    Button { text: root.labels[1]; symbol: "⊡"; stacked: true; min-height: 76px; clicked => { root.action(1); } }
+                    Button { text: root.labels[7]; symbol: "▱"; stacked: true; checked: !root.view-3d; min-height: 76px; clicked => { root.action(7); } }
+                    Button { text: root.labels[8]; symbol: "◇"; stacked: true; checked: root.view-3d; min-height: 76px; clicked => { root.action(8); } }
+                    VerticalBox {
+                        ComboBox { model: root.standard-views; min-height: root.target; selected(value) => { root.standard-view(value); } }
+                        Button { text: root.labels[9]; min-height: root.target; clicked => { root.action(9); } }
                     }
                 }
-                if !root.phone : VerticalBox {
-                    padding: 0px;
+                if root.tab == 2 : HorizontalBox {
+                    alignment: start; spacing: 8px;
+                    for label[index] in root.measurements : Button {
+                        text: label; symbol: index == 0 ? "↔" : (index == 1 ? "∿" : (index == 2 ? "∠" : "▨"));
+                        stacked: true; min-height: 76px; enabled: root.work-mode;
+                        clicked => { root.measure-kind(label); }
+                    }
+                    if !root.phone : Rectangle { width: 1px; background: CadTheme.border; }
+                    if !root.phone : Button { text: root.labels[5]; symbol: "A"; stacked: true; min-height: 76px; enabled: root.work-mode; clicked => { root.tab = 3; } }
+                }
+                if root.tab == 3 : HorizontalBox {
+                    alignment: start; spacing: 8px;
+                    for label[index] in root.annotations : Button {
+                        text: label; symbol: index == 0 ? "A" : (index == 1 ? "↗" : (index == 5 ? "☁" : "□"));
+                        stacked: true; min-height: 76px; enabled: root.work-mode;
+                        clicked => { root.annotation-kind(label); }
+                    }
+                }
+                if root.tab == 4 : VerticalBox {
                     HorizontalBox {
-                        padding: 0px;
-                        Button { text: root.labels[4]; min-height: root.target; clicked => { root.action(4); } }
-                        Button { text: root.labels[5]; min-height: root.target; clicked => { root.action(5); } }
+                        alignment: start;
                         Button { text: root.labels[6]; min-height: root.target; clicked => { root.action(6); } }
+                        Button { text: root.labels[12]; min-height: root.target; clicked => { root.action(12); } }
+                        ComboBox { model: root.backends; current-index: root.backend-index; min-height: root.target; selected(value) => { root.backend(value); } }
                     }
-                    Text { text: root.tabs[0]; color: #aab5c5; horizontal-alignment: center; }
-                }
-                if !root.phone : VerticalBox {
-                    padding: 0px;
-                    // Real drawing/editing tools. Enabled only in Work mode; a
-                    // Viewer click is refused by the command layer too, so the
-                    // gate here is an affordance, not the enforcement.
                     HorizontalBox {
-                        padding: 0px;
+                        alignment: start;
                         for label in root.editing-labels : Button {
-                            text: label;
-                            enabled: root.work-mode;
-                            min-height: root.target;
+                            text: label; min-height: root.target; enabled: root.work-mode;
                             clicked => { root.draw-tool(label); }
                         }
                     }
-                    Text { text: root.draw-status; color: #aab5c5; horizontal-alignment: center; overflow: elide; }
                 }
-            }
-            if root.tab == 0 && root.phone : HorizontalBox {
-                padding: 0px;
-                Button { text: root.labels[4]; min-height: 48px; clicked => { root.action(4); } }
-                Button { text: root.labels[5]; min-height: 48px; clicked => { root.action(5); } }
-                Button { text: root.labels[6]; min-height: 48px; clicked => { root.action(6); } }
-            }
-            if root.tab == 1 : VerticalBox {
-                padding: 0px;
-                HorizontalBox {
-                    padding: 0px;
-                    Button { text: root.labels[7]; checked: !root.view-3d; min-height: root.target; clicked => { root.action(7); } }
-                    Button { text: root.labels[8]; checked: root.view-3d; min-height: root.target; clicked => { root.action(8); } }
-                    Button { text: root.labels[9]; min-height: root.target; clicked => { root.action(9); } }
-                }
-                ComboBox { model: root.standard-views; min-height: root.target; selected(value) => { root.standard-view(value); } }
-            }
-            if root.tab == 2 : VerticalBox {
-                padding: 0px;
-                if !root.phone : HorizontalBox {
-                    padding: 0px;
-                    Button { text: root.labels[10]; min-height: root.target; clicked => { root.action(10); } }
-                    Button { text: root.labels[11]; min-height: root.target; clicked => { root.action(11); } }
-                    Button { text: root.labels[12]; min-height: root.target; clicked => { root.action(12); } }
-                }
-                if root.phone : VerticalBox {
-                    padding: 0px; spacing: 4px;
-                    for label[index] in [root.labels[10], root.labels[11], root.labels[12]] : Button {
-                        text: label; min-height: 48px; clicked => { root.action(index + 10); }
-                    }
-                }
-                ComboBox { model: root.backends; current-index: root.backend-index; min-height: root.target; selected(value) => { root.backend(value); } }
             }
         }
     }

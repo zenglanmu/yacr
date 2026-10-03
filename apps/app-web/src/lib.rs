@@ -57,6 +57,12 @@ pub fn shell_geometry() -> Result<Vec<f64>, JsValue> {
     browser::shell::geometry().map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn canvas_hit_test(x: f64, y: f64) -> Result<bool, JsValue> {
+    browser::shell::canvas_hit_test(x, y).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 /// Native browser touch navigation, never mutates a GPU camera directly.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]

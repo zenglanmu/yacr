@@ -8,9 +8,9 @@ The original Google Fonts v41 text subset was retrieved on 2026-10-02 using
 `https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400&text=...`, where
 `text` is the sorted unique characters from both UI catalogs and Web Rust host
 source, `web/index.html`, `cad-app/src/host.rs` plus ASCII. The ribbon refresh
-uses a 107,408-byte TTF whose SHA-256 is
-`1cad1b5d140cf5ec5bdf56b78af293690b2a713962231b9376e439e26b0af603`.
-Only the generated 106,588-byte font is needed for normal/offline builds;
+was refreshed for the concept catalogs on 2026-10-03 using a 111,496-byte TTF whose SHA-256 is
+`0995608b81d0d1b843b04e27b7557fe2cac453cac29fcfec7e8afcf086a0bc04`.
+Only the generated 110,676-byte font (507 codepoints) is needed for normal/offline builds;
 regeneration uses `scripts/subset-ui-font.py` with fonttools `4.61.1`.
 
 The shell explicitly imports this font and uses its family, independent of

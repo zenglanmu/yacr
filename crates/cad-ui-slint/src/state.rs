@@ -129,7 +129,7 @@ impl Default for ModeUiState {
 /// produced when the byte count is unknown (so a UI never renders "0 bytes").
 /// The panel is hidden while idle and after a successful open; cancelled and
 /// failed terminals are explicit.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImportProgressUiState {
     /// Whether the progress panel should be shown.
     pub visible: bool,
@@ -146,20 +146,6 @@ pub struct ImportProgressUiState {
     /// The raw controller snapshot, kept so a live locale switch can re-derive
     /// the labels without the host re-polling. `None` when idle.
     pub source: Option<cad_app::ImportProgressSnapshot>,
-}
-
-impl Default for ImportProgressUiState {
-    fn default() -> Self {
-        ImportProgressUiState {
-            visible: false,
-            phase_label: String::new(),
-            percent: None,
-            progress_text: String::new(),
-            cancellable: false,
-            terminal: false,
-            source: None,
-        }
-    }
 }
 
 impl ImportProgressUiState {

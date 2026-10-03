@@ -3,6 +3,8 @@ import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, Lin
 import { CadRibbon } from "ribbon.slint";
 import { CadCommandBar } from "command-bar.slint";
 import { CadCanvas } from "canvas.slint";
+import { Button as ConceptButton } from "button.slint";
+import { CadTheme } from "theme.slint";
 import { CadPanels, LayerRow, PropertyRow, AnnotationRow, DiagnosticRow, LayoutRow } from "panels.slint";
 export { LayerRow, PropertyRow, AnnotationRow, DiagnosticRow, LayoutRow } from "panels.slint";
 import "../fonts/YacrUI-Regular.otf";
@@ -14,7 +16,16 @@ export component YacrWindow inherits Window {
     min-width: 0px; min-height: 0px;
     out property <length> cad-width: canvas-area.width;
     out property <length> cad-height: canvas-area.height;
-    out property <length> cad-top: canvas-area.y;
+    out property <length> cad-top: workspace-area.y + canvas-area.y;
+    out property <length> cad-left: workspace-area.x + canvas-area.x;
+    in property <bool> application-ui: true;
+    in property <bool> ribbon-visible: true;
+    in property <bool> panels-visible: true;
+    in property <bool> navigation-visible: true;
+    in property <bool> command-visible: true;
+    in property <bool> layouts-visible: true;
+    in property <bool> status-visible: true;
+    in property <string> more-label;
     in property <string> application-title;
     in property <image> cad-frame;
     in property <string> open-label;
@@ -40,7 +51,7 @@ export component YacrWindow inherits Window {
     in property <bool> side-panel-collapsed;
     in property <length> drawer-height;
     in property <bool> show-floating-nav;
-    in-out property <bool> side-panel-open;
+    in-out property <bool> side-panel-open: !root.phone-shell && !root.compact-shell;
     in-out property <bool> tools-open;
     in property <string> tools-label;
     in property <string> drawer-label;
@@ -91,6 +102,7 @@ export component YacrWindow inherits Window {
     in property <bool> annotation-text-supplied;
     in-out property <string> annotation-text-input;
     in property <[LayoutRow]> layout-rows;
+    in property <[string]> layout-labels;
     in property <int> layout-active-index: -1;
     in property <string> layout-panel-label;
     in property <string> layout-model-space-label;
@@ -131,6 +143,7 @@ export component YacrWindow inherits Window {
     in property <string> draw-confirm-label;
     in property <string> draw-cancel-label;
     in-out property <bool> ribbon-expanded: true;
+    in-out property <int> ribbon-tab: 2;
     in-out property <bool> command-expanded: false;
     callback command-submitted(string);
     callback open-requested();
@@ -171,13 +184,37 @@ export component YacrWindow inherits Window {
     callback scroll-input(float, float);
     callback canvas-pick(float, float);
     title: application-title;
-    background: #20242b;
+    background: CadTheme.canvas;
     VerticalBox {
         padding: 0px; spacing: 0px;
-        if !root.phone-shell || root.tools-open : CadRibbon {
+        if root.application-ui : Rectangle {
+            height: root.phone-shell ? 52px : 36px;
+            background: CadTheme.chrome;
+            HorizontalBox {
+                padding: 4px; spacing: 4px;
+                ConceptButton { text: root.open-label; symbol: "▱"; icon-only: true;
+                    min-width: 48px; preferred-width: 48px; min-height: root.phone-shell ? 44px : 28px;
+                    clicked => { root.open-requested(); } }
+                if !root.phone-shell : ConceptButton { text: root.undo-label; symbol: "↶"; icon-only: true;
+                    min-width: 36px; preferred-width: 36px; min-height: 28px;
+                    enabled: root.work-mode && root.can-undo; clicked => { root.undo-requested(); } }
+                if !root.phone-shell : ConceptButton { text: root.redo-label; symbol: "↷"; icon-only: true;
+                    min-width: 36px; preferred-width: 36px; min-height: 28px;
+                    enabled: root.work-mode && root.can-redo; clicked => { root.redo-requested(); } }
+                Text { text: root.application-title; color: CadTheme.ink; font-size: root.phone-shell ? 18px : 15px;
+                    horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
+                ConceptButton { text: root.more-label; symbol: "···"; icon-only: true;
+                    min-width: 48px; preferred-width: 48px; min-height: root.phone-shell ? 44px : 28px;
+                    clicked => { root.tools-open = !root.tools-open; root.ribbon-expanded = true; root.ribbon-tab = 4; } }
+            }
+        }
+        if root.application-ui && root.ribbon-visible && !root.phone-shell : CadRibbon {
             phone: root.phone-shell;
+            compact: root.compact-shell;
             target: root.phone-shell ? 48px : 36px;
             tabs: root.ribbon-tabs;
+            measurements: root.measurement-kind-labels;
+            annotations: root.annotation-kind-labels;
             labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
                 root.measure-label, root.annotate-label, root.tools-label, root.view-2d-label,
                 root.view-3d-label, root.view-projection-label, root.export-label, root.import-label, root.diagnostics-label];
@@ -191,6 +228,9 @@ export component YacrWindow inherits Window {
             draw-status: root.draw-status;
             editing-labels: root.editing-labels;
             expanded <=> root.ribbon-expanded;
+            tab <=> root.ribbon-tab;
+            measure-kind(value) => { root.measure-kind-selected(value); }
+            annotation-kind(value) => { root.annotation-kind-selected(value); }
             standard-view(value) => { root.standard-view-selected(value); }
             backend(value) => { root.backend-selected(value); }
             draw-tool(value) => { root.begin-draw-tool(value); }
@@ -209,14 +249,11 @@ export component YacrWindow inherits Window {
                 if id == 12 { root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
             }
         }
-        canvas-area := CadCanvas {
+        workspace-area := HorizontalBox {
+            padding: 0px; spacing: 0px;
             vertical-stretch: 1;
-            frame: root.cad-frame;
-            pointer(k, b, x, y) => { root.pointer-input(k, b, x, y); }
-            scroll(x, y) => { root.scroll-input(x, y); }
-            pick(x, y) => { root.canvas-pick(x, y); }
-        }
-        if root.side-panel-open || root.diagnostics-open : CadPanels {
+        if root.application-ui && root.panels-visible && !root.phone-shell && (root.side-panel-open || root.diagnostics-open) : CadPanels {
+            width: 240px; vertical-stretch: 1;
             phone: root.phone-shell;
             work: root.work-mode;
             labels: [root.layer-panel-label, root.layer-restore-label, root.diagnostics-close-label,
@@ -236,27 +273,68 @@ export component YacrWindow inherits Window {
             annotation-delete(i) => { root.annotation-delete-requested(i); }
             annotation-visible(i, v) => { root.annotation-visibility-toggled(i, v); }
         }
-        if root.measurement-active : HorizontalBox {
+        canvas-area := Rectangle {
+            horizontal-stretch: 1; min-width: 0px; min-height: 0px; clip: true;
+            CadCanvas {
+                width: parent.width; height: parent.height;
+                frame: root.cad-frame;
+                pointer(k, b, x, y) => { root.pointer-input(k, b, x, y); }
+                scroll(x, y) => { root.scroll-input(x, y); }
+                pick(x, y) => { root.canvas-pick(x, y); }
+            }
+            if root.application-ui && root.navigation-visible : Rectangle {
+                x: parent.width - 64px; y: 20px; width: 48px; height: 48px;
+                border-radius: 8px; border-width: 1px; border-color: #7b8793; background: #303a44dd;
+                ConceptButton { text: root.fit-label; symbol: "⊡"; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
+                    clicked => { root.fit-requested(); } }
+            }
+            if root.application-ui && root.layouts-visible && root.phone-shell : ComboBox {
+                x: 12px; y: 16px; width: 140px; height: 48px;
+                model: root.layout-labels; current-index: root.layout-active-index + 1;
+                selected(value) => { root.layout-selected(self.current-index - 1); }
+            }
+        }
+        }
+        if root.application-ui && root.panels-visible && root.phone-shell && (root.side-panel-open || root.diagnostics-open) : CadPanels {
+            height: 240px; phone: true; work: root.work-mode;
+            labels: [root.layer-panel-label, root.layer-restore-label, root.diagnostics-close-label,
+                root.layer-empty-label, root.layout-panel-label, root.layout-model-space-label,
+                root.property-panel-label, root.property-clear-label, root.property-empty-label,
+                root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
+                root.diagnostics-empty-label];
+            layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            annotations: root.annotation-rows; diagnostics: root.diagnostics-rows;
+            diagnostics-open: root.diagnostics-open; backend: root.diagnostics-backend-label;
+            close => { root.side-panel-open = false; root.diagnostics-open = false; root.diagnostics-closed(); }
+            restore => { root.restore-layers-requested(); }
+            clear-selection => { root.clear-selection-requested(); }
+            layer(i, v) => { root.layer-visibility-toggled(i, v); }
+            layout(i) => { root.layout-selected(i); }
+            annotation-select(i) => { root.annotation-selected(i); }
+            annotation-delete(i) => { root.annotation-delete-requested(i); }
+            annotation-visible(i, v) => { root.annotation-visibility-toggled(i, v); }
+        }
+        if root.application-ui && root.measurement-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
             ComboBox { model: root.measurement-kind-labels; current-index: root.measurement-kind-index; selected(v) => { root.measure-kind-selected(v); } }
             Button { text: root.measure-confirm-label; enabled: root.measurement-can-confirm; clicked => { root.confirm-measurement-requested(); } }
             Button { text: root.measure-cancel-label; clicked => { root.cancel-measurement-requested(); } }
         }
-        if root.measurement-can-save-annotation : HorizontalBox {
+        if root.application-ui && root.measurement-can-save-annotation : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
             Button { text: root.measure-save-label; min-height: root.phone-shell ? 48px : 36px; clicked => { root.save-measurement-requested(); } }
         }
-        if root.annotation-tool-active && root.annotation-requires-text : LineEdit {
+        if root.application-ui && root.annotation-tool-active && root.annotation-requires-text : LineEdit {
             min-height: 48px; placeholder-text: root.annotation-text-placeholder;
             text <=> root.annotation-text-input; edited(v) => { root.annotation-text-edited(v); }
         }
-        if root.annotation-tool-active : HorizontalBox {
+        if root.application-ui && root.annotation-tool-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
             ComboBox { model: root.annotation-kind-labels; current-index: root.annotation-kind-index; selected(v) => { root.annotation-kind-selected(v); } }
             Button { text: root.annotate-confirm-label; enabled: root.annotation-tool-can-confirm; clicked => { root.confirm-annotation-requested(); } }
             Button { text: root.annotate-cancel-label; clicked => { root.cancel-annotation-requested(); } }
         }
-        if root.draw-tool-active : HorizontalBox {
+        if root.application-ui && root.draw-tool-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
             Text { text: root.draw-step-label; color: #c8d0dc; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
             Button { text: root.draw-confirm-label; enabled: root.draw-can-confirm; min-height: root.phone-shell ? 48px : 36px; clicked => { root.confirm-draw-requested(); } }
@@ -265,7 +343,7 @@ export component YacrWindow inherits Window {
         // Asynchronous open progress (F01). Hidden while idle; shows a real
         // percent only when the importer reported a total, otherwise an
         // indeterminate bar.
-        if root.import-active : HorizontalBox {
+        if root.application-ui && root.import-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
             Text { text: root.import-phase-label; color: #c8d0dc; vertical-alignment: center; }
             ProgressIndicator {
@@ -280,7 +358,7 @@ export component YacrWindow inherits Window {
                 clicked => { root.cancel-open-requested(); }
             }
         }
-        CadCommandBar {
+        if root.application-ui && root.command-visible && (!root.phone-shell || root.command-expanded) : CadCommandBar {
             phone: root.phone-shell;
             title: root.command-title;
             prompt: root.command-prompt;
@@ -296,6 +374,71 @@ export component YacrWindow inherits Window {
             tools => { if root.phone-shell { root.tools-open = !root.tools-open; } else { root.side-panel-open = !root.side-panel-open; } }
             mode-toggled => { root.mode-toggled(); }
             submit(value) => { root.command-submitted(value); }
+        }
+        if root.application-ui && root.layouts-visible && !root.phone-shell : Rectangle {
+            height: 36px; background: CadTheme.chrome;
+            ScrollView {
+                HorizontalBox {
+                    padding: 0px; spacing: 0px; alignment: start;
+                    ConceptButton { text: root.layout-model-space-label; checked: root.layout-active-index < 0;
+                        min-height: 36px; clicked => { root.layout-selected(-1); } }
+                    for row[index] in root.layout-rows : ConceptButton {
+                        text: row.name; checked: root.layout-active-index == index; enabled: row.supported;
+                        min-height: 36px; clicked => { root.layout-selected(index); }
+                    }
+                }
+            }
+        }
+        if root.application-ui && root.status-visible && !root.phone-shell : Rectangle {
+            height: 26px; background: CadTheme.chrome;
+            Text { x: 12px; width: parent.width - 24px; text: root.status-label; color: CadTheme.muted;
+                font-size: 12px; vertical-alignment: center; overflow: elide; }
+        }
+        if root.application-ui && root.ribbon-visible && root.phone-shell && root.tools-open : CadRibbon {
+            phone: true; target: 48px; expanded: true; tab <=> root.ribbon-tab;
+            tabs: root.ribbon-tabs;
+            labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
+                root.measure-label, root.annotate-label, root.tools-label, root.view-2d-label,
+                root.view-3d-label, root.view-projection-label, root.export-label, root.import-label, root.diagnostics-label];
+            measurements: root.measurement-kind-labels; annotations: root.annotation-kind-labels;
+            standard-views: root.standard-view-labels; backends: root.backend-labels;
+            backend-index: root.backend-index; view-3d: root.view-3d; work-mode: root.work-mode;
+            editing-labels: root.editing-labels; draw-status: root.draw-status;
+            can-undo: root.work-mode && root.can-undo; can-redo: root.work-mode && root.can-redo;
+            measure-kind(value) => { root.measure-kind-selected(value); }
+            annotation-kind(value) => { root.annotation-kind-selected(value); }
+            standard-view(value) => { root.standard-view-selected(value); }
+            backend(value) => { root.backend-selected(value); }
+            draw-tool(value) => { root.begin-draw-tool(value); }
+            action(id) => {
+                if id == 0 { root.open-requested(); }
+                if id == 1 { root.fit-requested(); }
+                if id == 2 { root.undo-requested(); }
+                if id == 3 { root.redo-requested(); }
+                if id == 6 { root.side-panel-open = !root.side-panel-open; }
+                if (id == 7 && root.view-3d) || (id == 8 && !root.view-3d) { root.toggle-view-mode-requested(); }
+                if id == 9 { root.toggle-projection-requested(); }
+                if id == 10 { root.export-requested(); }
+                if id == 11 { root.import-requested(); }
+                if id == 12 { root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
+            }
+        }
+        if root.application-ui && root.phone-shell : Rectangle {
+            height: 76px; background: CadTheme.chrome;
+            HorizontalBox {
+                padding: 4px; spacing: 0px;
+                ConceptButton { text: root.layer-panel-label; symbol: "layers"; stacked: true; min-width: 0px; horizontal-stretch: 1;
+                    min-height: 64px; checked: root.side-panel-open;
+                    clicked => { root.side-panel-open = !root.side-panel-open; } }
+                ConceptButton { text: root.measure-label; symbol: "↔"; stacked: true; min-width: 0px; horizontal-stretch: 1;
+                    min-height: 64px; checked: root.tools-open && root.ribbon-tab == 2;
+                    clicked => { root.ribbon-tab = 2; root.ribbon-expanded = true; root.tools-open = !root.tools-open; } }
+                ConceptButton { text: root.annotate-label; symbol: "□"; stacked: true; min-width: 0px; horizontal-stretch: 1;
+                    min-height: 64px; checked: root.tools-open && root.ribbon-tab == 3;
+                    clicked => { root.ribbon-tab = 3; root.ribbon-expanded = true; root.tools-open = !root.tools-open; } }
+                ConceptButton { text: root.more-label; symbol: "···"; stacked: true; min-width: 0px; horizontal-stretch: 1;
+                    min-height: 64px; clicked => { root.command-expanded = !root.command-expanded; } }
+            }
         }
     }
 }

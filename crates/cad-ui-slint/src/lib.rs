@@ -27,6 +27,9 @@ pub mod i18n;
 
 pub mod responsive;
 
+#[cfg(all(target_os = "linux", not(target_arch = "wasm32")))]
+pub mod offscreen;
+
 pub mod status;
 
 #[cfg(target_arch = "wasm32")]
@@ -85,6 +88,7 @@ pub trait LayoutSwitchSink: 'static {
 /// Cloneable handle the host uses to push state into the UI.
 #[derive(Clone)]
 pub struct UiHandle {
+    viewer_config: Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>>,
     ui: Weak<YacrWindow>,
     /// The active catalog. Shared with the adapter so `set_locale` can rebuild
     /// every chrome label, not just the Open button.
@@ -128,6 +132,7 @@ pub struct UiHandle {
 
 /// Owns the Slint component and routes UI callbacks into commands.
 pub struct UiAdapter {
+    viewer_config: Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>>,
     pub configuration: UiConfiguration,
     ui: YacrWindow,
     view_input: Rc<RefCell<Option<Rc<dyn ViewInput>>>>,

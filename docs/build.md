@@ -11,7 +11,16 @@ python3 scripts/check-architecture.py
 ```
 
 `cad-ui-slint` 需要 Linux 宿主的 fontconfig/freetype 开发头与 pkg-config 才能为本机
-编译；本环境无 sudo，故主机测试排除它，其编译由 Android target 覆盖。
+编译；2026-10-03 用户授权通过 sudo 安装 `pkgconf libfontconfig-dev libfreetype-dev`，
+现在可以在 Linux 编译并执行 UI 契约与真实离屏 Slint 测试，无需窗口系统/Android 模拟器：
+
+```bash
+bash scripts/check-ui-native.sh
+cargo test -p cad-ui-slint --lib --locked -- --test-threads=1
+```
+
+`YACR_UI_OUTPUT` 可指定新的截图目录。官方 FemtoVG/wgpu 离屏渲染共享 Slint 组件与 CAD
+纹理，强制验证软件 Vulkan；这是合成内容/软件 GPU 证据，不等于桌面宿主产品或真机验收。
 
 ## Linux release 包（含无头 render）
 

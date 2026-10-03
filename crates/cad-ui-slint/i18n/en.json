@@ -157,5 +157,10 @@
   "host.open_needs_decision": "This drawing has unsaved annotations. Enter: save / recovery / discard / cancel",
   "host.recovery_pending": "An unsaved-annotation recovery snapshot was found: call window.yacr.restore_recovery_snapshot() to restore or discard_recovery_snapshot() to discard",
   "a11y.canvas_label": "CAD canvas (application region)",
-  "a11y.status_failed": "Renderer unavailable; retry with WebGL2"
+  "a11y.status_failed": "Renderer unavailable; retry with WebGL2",
+  "ribbon.file": "File",
+  "ribbon.measure": "Measure",
+  "ribbon.annotate": "Annotate",
+  "shell.more": "More",
+  "status.synthetic": "Ready · synthetic geometry (not a compatibility claim)"
 }

@@ -22,6 +22,9 @@
 `cad-app::viewer_config`（3 项合成测试已执行通过）。用户授权解除原生 Slint 编译限制，
 后续使用 Linux Slint/wgpu/lavapipe 离屏主测试，不跑 Android 模拟器，最后 WASM 浏览器抽查。
 完整范围与配置未闭环项见 `docs/ui-redesign.md`。
+Slint 已改为浅银/蓝选中 concept：桌面左侧面板+布局/状态；手机标题+底部四组和工具/图层抽屉。
+新增 Linux 官方 FemtoVG/wgpu 离屏平台；原生 UI 合成单元 76 项、真实离屏集成 1 项通过。
+截图 `/tmp/opencode/yacr-concept-round4/`。浮动控件的浏览器触控排除命中已补契约。
 
 **真实 DWG 回归（最新）**：以用户外部 `anteen.dwg` 与去色参考图，优先 Linux
 原生 wgpu/lavapipe。修复 2D 投影重复 Y 翻转、CLI render/plot 忽略 `--font`；

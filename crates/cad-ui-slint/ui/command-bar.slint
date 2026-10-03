@@ -1,5 +1,6 @@
 import { HorizontalBox, VerticalBox, LineEdit } from "std-widgets.slint";
 import { Button } from "button.slint";
+import { CadTheme } from "theme.slint";
 
 export component CadCommandBar inherits Rectangle {
     in property <bool> phone;
@@ -19,10 +20,10 @@ export component CadCommandBar inherits Rectangle {
     callback mode-toggled();
     callback submit(string);
     height: root.expanded ? 146px : (root.phone ? 64px : 58px);
-    background: #202731;
+    background: CadTheme.chrome;
     VerticalBox {
         padding: 6px; spacing: 4px;
-        if root.expanded : Text { text: root.status; color: #b8c5d6; overflow: elide; height: 24px; }
+        if root.expanded : Text { text: root.status; color: CadTheme.muted; overflow: elide; height: 24px; }
         HorizontalBox {
             padding: 0px;
             spacing: 4px;
@@ -31,7 +32,7 @@ export component CadCommandBar inherits Rectangle {
             // squeeze the command input on a 320px screen; on wide layouts it is
             // a primary-row control.
             if !root.phone : Button { text: root.mode-label; checked: root.mode-work; min-height: 36px; clicked => { root.mode-toggled(); } }
-            if !root.phone : Text { text: root.title; color: #8dc9ff; vertical-alignment: center; }
+            if !root.phone : Text { text: root.title; color: CadTheme.ink; vertical-alignment: center; }
             LineEdit {
                 min-width: 0px;
                 horizontal-stretch: 1;

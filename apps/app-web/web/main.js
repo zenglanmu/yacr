@@ -67,6 +67,7 @@ async function main() {
     set_locale: i18n.setLocale,
     current_locale: i18n.currentLocale,
     shell_geometry: wasmModule.shell_geometry,
+    canvas_hit_test: wasmModule.canvas_hit_test,
     has_recovery_snapshot: wasmModule.has_recovery_snapshot,
     restore_recovery_snapshot: wasmModule.restore_recovery_snapshot,
     discard_recovery_snapshot: wasmModule.discard_recovery_snapshot,

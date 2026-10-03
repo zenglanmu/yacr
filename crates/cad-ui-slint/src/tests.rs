@@ -43,7 +43,7 @@ fn shell_is_responsive_and_consumes_compact_config() {
     assert!(UI_DEFINITION.contains("tools-open"));
     // A phone drawer entry and a wide collapsible panel entry exist; the
     // desktop bar and phone bar are separate branches, not a squash.
-    assert!(UI_DEFINITION.contains("phone-shell && root.tools-open"));
+    assert!(UI_DEFINITION.contains("root.phone-shell && root.tools-open"));
     assert!(UI_DEFINITION.contains("show-floating-nav"));
 }
 
