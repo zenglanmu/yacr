@@ -97,8 +97,9 @@ cargo test -p cad-cli-tools --test dxf_fixture --locked
 - 纸空间 `plot` 已修复：纸张单位从标准纸名（`..._MM)`/`..._Inches)`）解析（锁定
   acadrust 未把 LAYOUT 的 `group 72` 应用，曾把 210mm 当 210in → 纹理超限/空白），
   且默认选择带 viewport 的纸空间布局（flange 首个 `*Paper_Space` 为空，真正的图纸是
-  `*Paper_Space1`）。`plot` 现可出纸张边框/标题栏（1191×842，非空像素 20075，9 色）；
-  视口比例/位置仍为近似，未做视觉保真验收。回归测试
+  `*Paper_Space1`）；`group 73` 旋转也未暴露，故按 viewport 范围把纸张轴交换为横向
+  （297×210，内容/标题栏保持正立）。`plot` 现可出纸张边框/标题栏（1191×842，非空像素
+  25070，8 色）；**模型视图仍有错位/多余图元，视口合成保真未通过**。回归测试
   `crates/cad-cli-tools/tests/dxf_fixture.rs::flange_plot_defaults_to_the_populated_paper_layout`
   固定“单位=毫米 + 选中 `*Paper_Space1` + 非空帧”。超大 `--dpi` 现返回结构化
   `gpu_failure` 而不是 `create_texture` panic。

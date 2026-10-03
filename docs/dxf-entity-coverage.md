@@ -75,7 +75,7 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 | RAY / XLINE | ✅ | ✅ | 裁剪到模型 bounds；无范围回退为默认盒 `Partial` |
 | DIMENSION 子类 | ✅ | ✅/⚠️ | 线性/对齐/半径/直径/角度/坐标/圆弧长已画；大半径 jog 近似 `Partial` |
 | OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | ✅/⚠️ | 外框/裁剪边界/符号/灯光字形已画；外部内容不加载，均 `Partial` |
-| 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复三处：①纸张单位从标准纸名解析（锁定 acadrust 未把 `group 72` 应用到 LAYOUT）；②默认选有 viewport 的纸空间布局；③`group 73` 旋转亦未暴露，按 viewport 范围推断 90°。纸张/边框/标题栏已出图；**视口比例/位置仍为近似**（未做视觉保真验收） |
+| 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复三处：①纸张单位从标准纸名解析（锁定 acadrust 未把 `group 72` 应用到 LAYOUT）；②默认选有 viewport 的纸空间布局；③`group 73` 旋转亦未暴露，按 viewport 范围把纸张轴交换为横向（标题栏保持正立）。纸张/边框/标题栏已出图；**模型视图仍有错位/多余图元**（视口合成保真未通过） |
 | DXF/X2D 字体提示 | — | ❌ | QCAD 把真实 TTF（如 `Arial`）放在 STYLE 的 XDATA `1000`；锁定的 acadrust `TextStyle` 不暴露该字段。**不可修改 acadrust/不加 patch** |
 
 `entity.rs` 的 `convert` 现覆盖所有可绘制 `EntityType`；仅结构性 `Block`/`BlockEnd`/

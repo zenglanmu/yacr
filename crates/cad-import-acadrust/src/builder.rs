@@ -373,17 +373,29 @@ impl<'a> ImporterBuilder<'a> {
         for mut imported in read_plot_settings(self.acad, &self.layout_ids)? {
             debug_assert_eq!(imported.layout, imported.record.layout);
             // The locked acadrust DXF reader does not expose a LAYOUT's
-            // `group 73` plot rotation (same gap as `group 72`). Infer a missing
-            // 90° rotation from the paper windows: when the declared paper is
-            // portrait but the viewports extend past its width and fit its
-            // height, the sheet is plotted landscape (rotated 90°).
+            // `group 73` plot rotation (same gap as `group 72`). When the
+            // declared paper is portrait but the paper-space windows extend past
+            // its width and fit its height, the real sheet is landscape: swap the
+            // paper axes. Swapping (rather than rotating the content) keeps the
+            // title block upright, which is how such sheets are plotted.
             if imported.record.rotation == cad_db::PlotRotation::None {
                 if let Some((min, max)) = self.layout_viewport_bounds(imported.layout) {
                     let width = imported.record.paper_width;
                     let height = imported.record.paper_height;
                     let span_x = (max[0] - min[0]).abs();
                     if height > width && span_x > width + 1e-6 && span_x <= height + 1e-6 {
-                        imported.record.rotation = cad_db::PlotRotation::Degrees90;
+                        std::mem::swap(
+                            &mut imported.record.paper_width,
+                            &mut imported.record.paper_height,
+                        );
+                        std::mem::swap(
+                            &mut imported.record.margins.left,
+                            &mut imported.record.margins.top,
+                        );
+                        std::mem::swap(
+                            &mut imported.record.margins.right,
+                            &mut imported.record.margins.bottom,
+                        );
                     }
                 }
             }
