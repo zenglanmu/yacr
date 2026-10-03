@@ -1,5 +1,11 @@
 // Native multi-touch only inside the CAD rectangle. Slint keeps control input.
 //
+// The router below is unconditional. The authoritative `interaction.touch` gate
+// lives on the Rust side: the `touch_navigate`, `touch_pick` and
+// `touch_cancel_draw` wasm exports read the live effective config and no-op when
+// touch is disabled, so the JS host deliberately does not keep a second copy of
+// the config (which could drift from the host-pushed value).
+//
 // Finger-count changes re-establish the gesture baseline. A count change never
 // emits a navigation delta of its own: the first sample after the change becomes
 // the new baseline, and only the move *after* that is compared against it. This

@@ -57,6 +57,32 @@ pub fn orbit_delta(from: [f64; 2], to: [f64; 2]) -> (f64, f64) {
     (-dx * ORBIT_RADIANS_PER_PIXEL, dy * ORBIT_RADIANS_PER_PIXEL)
 }
 
+/// Which shell event family an interaction flag gates.
+///
+/// `Pointer` covers mouse, trackpad and the pointer events Android synthesizes
+/// from touch, all of which reach Slint's `pointer-input` callback. `Touch`
+/// covers the browser host's native touch router, which enters through its own
+/// wasm exports rather than this adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputKind {
+    Pointer,
+    Touch,
+}
+
+/// Whether `kind` input is enabled by the effective interaction config.
+///
+/// The store is the single source of truth and is read at event time, so a host
+/// flip of `interaction.pointer` / `interaction.touch` takes effect on the very
+/// next event without reinstalling a callback. This is a pure function so the
+/// "disabled means no dispatch" rule is unit-testable without a live window.
+pub fn input_enabled(store: &cad_app::viewer_config::ViewerConfigStore, kind: InputKind) -> bool {
+    let interaction = &store.effective().interaction;
+    match kind {
+        InputKind::Pointer => interaction.pointer,
+        InputKind::Touch => interaction.touch,
+    }
+}
+
 impl UiAdapter {
     /// Build the shell and connect its callbacks to `sink`.
     pub fn new<S: UiCommandSink>(
@@ -132,7 +158,15 @@ impl UiAdapter {
         let import_snapshot: Rc<RefCell<Option<cad_app::ImportProgressSnapshot>>> =
             Rc::new(RefCell::new(None));
 
-        crate::command_line::connect(&ui, messages_slot.clone());
+        // Hoisted above every input closure so each event reads the live
+        // effective interaction config instead of a value captured at build
+        // time. The command line and the pointer/scroll/pick gates share it.
+        let viewer_config: Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>> =
+            Rc::new(RefCell::new(
+                cad_app::viewer_config::ViewerConfigStore::default(),
+            ));
+
+        crate::command_line::connect(&ui, messages_slot.clone(), viewer_config.clone());
 
         {
             let s = shared.clone();
@@ -395,7 +429,14 @@ impl UiAdapter {
             let drawing = draw_tool.clone();
             let draw_preview = draw_preview_sink.clone();
             let messages = messages_slot.clone();
+            let gate = viewer_config.clone();
             ui.on_canvas_pick(move |x, y| {
+                // A canvas pick is a pointer gesture; disabling pointer input
+                // must silence it even though it bypasses `pointer-input`.
+                let enabled = input_enabled(&gate.borrow(), InputKind::Pointer);
+                if !enabled {
+                    return;
+                }
                 if report.upgrade().is_some_and(|ui| ui.get_pan_active()) {
                     return;
                 }
@@ -917,7 +958,14 @@ impl UiAdapter {
             let draw_preview = draw_preview_sink.clone();
             let mapper = pick_mapper.clone();
             let report = ui_weak.clone();
+            let gate = viewer_config.clone();
             ui.on_pointer_input(move |kind, button, x, y| {
+                // Mouse, trackpad and Android-synthesized touch all enter here;
+                // `interaction.pointer` is their shared gate.
+                let enabled = input_enabled(&gate.borrow(), InputKind::Pointer);
+                if !enabled {
+                    return;
+                }
                 let x = x as f64;
                 let y = y as f64;
                 if report.upgrade().is_some_and(|ui| ui.get_pan_active()) {
@@ -996,7 +1044,13 @@ impl UiAdapter {
         }
         {
             let input = view_input.clone();
+            let gate = viewer_config.clone();
             ui.on_scroll_input(move |dx, dy| {
+                // Scroll is the wheel form of pointer input and shares its gate.
+                let enabled = input_enabled(&gate.borrow(), InputKind::Pointer);
+                if !enabled {
+                    return;
+                }
                 if let Some(input) = input.borrow().as_ref() {
                     input.scroll(dx as f64, dy as f64);
                 }
@@ -1004,9 +1058,7 @@ impl UiAdapter {
         }
 
         Ok(UiAdapter {
-            viewer_config: Rc::new(RefCell::new(
-                cad_app::viewer_config::ViewerConfigStore::default(),
-            )),
+            viewer_config,
             configuration,
             ui,
             view_input,

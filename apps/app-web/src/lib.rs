@@ -67,16 +67,35 @@ pub fn canvas_hit_test(x: f64, y: f64) -> Result<bool, JsValue> {
     browser::shell::canvas_hit_test(x, y).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// Whether the browser host's touch router may act, per the effective config.
+///
+/// The wasm boundary is the authoritative gate: the JS router has no cheap read
+/// of the live effective config, so it always forwards and these exports decide.
+/// A host that has not started (`None`) keeps the previous short-circuit/cancel
+/// behavior instead of silently succeeding as if touch were enabled.
+#[cfg(target_arch = "wasm32")]
+fn touch_enabled() -> bool {
+    browser::current_handle()
+        .map(|handle| handle.effective_config().interaction.touch)
+        .unwrap_or(true)
+}
+
 /// Native browser touch navigation, never mutates a GPU camera directly.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn touch_navigate(dx: f64, dy: f64, zoom: f64) -> Result<(), JsValue> {
+    if !touch_enabled() {
+        return Ok(());
+    }
     browser::shell::navigate(dx, dy, zoom).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn touch_pick(x: f64, y: f64) -> Result<(), JsValue> {
+    if !touch_enabled() {
+        return Ok(());
+    }
     browser::shell::pick(x, y).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
@@ -84,6 +103,9 @@ pub fn touch_pick(x: f64, y: f64) -> Result<(), JsValue> {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn touch_cancel_draw() -> Result<(), JsValue> {
+    if !touch_enabled() {
+        return Ok(());
+    }
     browser::shell::cancel_draw_capture().map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
