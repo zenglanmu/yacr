@@ -18,6 +18,13 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**verify-ui 循环轮 E：minimal 预设语义契约（本轮）**：`verify_ui.rs` 场景加入
+`minimal` 预设断言：保留应用框架/图层面板/导航工具栏/布局标签，隐藏 Ribbon、命令栏、
+状态栏（`UiPresentationModel` 的既有语义，此前只有 canvas-only 被验证）。截图
+`05b-minimal`。此前轮 D：`ui-drawing` 增加“切到每个图纸布局再切回模型后模型画面逐字节
+恢复”的断言。轮 A/B/C 见下。
+
+
 **verify-ui 循环轮 C：命令面 ESC/CONFIRM 作用于当前命令（本轮）**：按 AutoCAD 约定修复
 命令输入区：`CANCEL`/`ESC` 此前只取消绘制捕获，现在按活动状态依次取消测量/批注/绘制并
 退出平移；`CONFIRM` 也按活动状态作用于测量/批注/绘制，而不是只确认绘制。新增

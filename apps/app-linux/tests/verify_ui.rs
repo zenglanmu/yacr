@@ -362,6 +362,30 @@ fn verify_ui_fixed_scenario_replay() {
     ui.invoke_fit_requested();
     shoot(&app, &dir, "05-view-traversal");
 
+    // --- minimal preset: keep canvas/panels/navigation, drop ribbon, command
+    //     bar and status bar (defined minimal semantics, not a layout subset) --
+    let mut minimal = cad_app::viewer_config::ViewerConfig::default();
+    minimal.ui.preset = cad_app::viewer_config::Preset::Minimal;
+    app.adapter.handle().set_config(minimal).unwrap();
+    assert!(
+        ui.get_application_ui(),
+        "minimal keeps the application frame"
+    );
+    assert!(!ui.get_ribbon_visible(), "minimal hides the ribbon");
+    assert!(!ui.get_command_visible(), "minimal hides the command bar");
+    assert!(!ui.get_status_visible(), "minimal hides the status bar");
+    assert!(ui.get_layouts_visible(), "minimal keeps the layout tabs");
+    assert!(ui.get_navigation_visible(), "minimal keeps navigation");
+    assert!(
+        ui.get_layer_panel_visible(),
+        "minimal keeps the layer panel"
+    );
+    shoot(&app, &dir, "05b-minimal");
+    app.adapter
+        .handle()
+        .set_config(cad_app::viewer_config::ViewerConfig::default())
+        .unwrap();
+
     // --- config presets: canvas-only hides all application chrome -----------
     let mut canvas_only = cad_app::viewer_config::ViewerConfig::default();
     canvas_only.ui.preset = cad_app::viewer_config::Preset::CanvasOnly;
