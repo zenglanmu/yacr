@@ -248,6 +248,11 @@ impl Application {
                     "SetMode needs a Mode(AppMode) payload".into(),
                 )),
             },
+            CommandId::CreateLine
+            | CommandId::CreateCircle
+            | CommandId::MoveEntities
+            | CommandId::TrimEntity
+            | CommandId::SetActiveLayer => self.drawing_command(session, &command),
         }
     }
 

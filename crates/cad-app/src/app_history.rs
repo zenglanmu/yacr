@@ -3,12 +3,24 @@ use super::*;
 
 impl Application {
     pub(crate) fn undo(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        // A shared history interleaves annotation and drawing steps. The
+        // top-of-stack marker decides which database the record must be applied
+        // to, so a drawing patch can never reach the annotation store.
+        let document_id = command.document;
+        let is_drawing = self
+            .history
+            .get(&document_id)
+            .map(|h| h.pop_drawing_for_undo())
+            .unwrap_or(false);
+        if is_drawing {
+            return self.undo_drawing(document_id);
+        }
         let document = self
             .workspace
             .documents
-            .get_mut(&command.document)
+            .get_mut(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let history = self.history.entry(command.document).or_default();
+        let history = self.history.entry(document_id).or_default();
         let changes = history.undo(&mut document.annotations)?;
         Ok(CommandOutcome {
             objects: Vec::new(),
@@ -20,13 +32,112 @@ impl Application {
     }
 
     pub(crate) fn redo(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let document_id = command.document;
+        let is_drawing = self
+            .history
+            .get(&document_id)
+            .map(|h| h.next_redo_is_drawing())
+            .unwrap_or(false);
+        if is_drawing {
+            return self.redo_drawing(document_id);
+        }
         let document = self
             .workspace
             .documents
-            .get_mut(&command.document)
+            .get_mut(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let history = self.history.entry(command.document).or_default();
+        let history = self.history.entry(document_id).or_default();
         let changes = history.redo(&mut document.annotations)?;
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(changes),
+            diagnostics: Vec::new(),
+            measurement: None,
+            annotation: None,
+        })
+    }
+
+    /// Undo the top drawing record against the drawing database.
+    ///
+    /// The record is only committed to the redo stack after the database
+    /// accepted the `before` entities, so a failed apply leaves the step pending
+    /// and the database unchanged.
+    fn undo_drawing(&mut self, document_id: DocumentId) -> CadResult<CommandOutcome> {
+        let record = self
+            .history
+            .entry(document_id)
+            .or_default()
+            .begin_drawing_undo()?;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let drawing = Arc::make_mut(&mut document.drawing);
+        let changes = match crate::app_drawing::apply_drawing_patches(
+            drawing,
+            &format!("undo: {}", record.label),
+            record.transaction,
+            &record.patches,
+            false,
+        ) {
+            Ok(changes) => changes,
+            Err(error) => {
+                // The step was popped before the apply; put it back so a
+                // rejected patch can never silently drop an undo step.
+                self.history
+                    .entry(document_id)
+                    .or_default()
+                    .cancel_pending_drawing();
+                return Err(error);
+            }
+        };
+        self.history
+            .entry(document_id)
+            .or_default()
+            .finish_drawing()?;
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(changes),
+            diagnostics: Vec::new(),
+            measurement: None,
+            annotation: None,
+        })
+    }
+
+    /// Redo the next drawing record against the drawing database.
+    fn redo_drawing(&mut self, document_id: DocumentId) -> CadResult<CommandOutcome> {
+        let record = self
+            .history
+            .entry(document_id)
+            .or_default()
+            .begin_drawing_redo()?;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let drawing = Arc::make_mut(&mut document.drawing);
+        let changes = match crate::app_drawing::apply_drawing_patches(
+            drawing,
+            &format!("redo: {}", record.label),
+            record.transaction,
+            &record.patches,
+            true,
+        ) {
+            Ok(changes) => changes,
+            Err(error) => {
+                self.history
+                    .entry(document_id)
+                    .or_default()
+                    .cancel_pending_drawing();
+                return Err(error);
+            }
+        };
+        self.history
+            .entry(document_id)
+            .or_default()
+            .finish_drawing()?;
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: Some(changes),
