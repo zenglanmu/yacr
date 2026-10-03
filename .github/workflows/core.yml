@@ -3,7 +3,7 @@ name: CI
 # Layered CI mirroring the repository's real gate (AGENTS.md "构建", N02 §6).
 #
 # Jobs actually implemented here:
-#   core-quality  : tests + fmt + clippy + architecture boundaries (required)
+#   core-quality  : core + Linux UI/host tests, fmt, clippy, boundaries (required)
 #   wasm-check    : full-workspace wasm --lib check + a separate app-web check (required)
 #   i18n-contracts: bilingual catalog parity + no hardcoded chrome literals (required)
 #   android-check : aarch64 UI+host check, capability-dependent (gated, see below)
@@ -55,14 +55,26 @@ jobs:
             ${{ runner.os }}-cargo-core-quality-
       - name: Formatting
         run: cargo fmt --all -- --check
+      - name: Linux UI and software Vulkan dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkgconf libfontconfig1-dev libfreetype6-dev mesa-vulkan-drivers
       - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
       - name: Architecture boundaries
         run: python3 scripts/check-architecture.py
       - name: Fixture manifest
         run: python3 scripts/check-fixture-manifest.py
-      - name: Core contract tests
-        run: cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked --no-fail-fast
+      - name: Workflow contracts including primary Linux failure policy
+        run: |
+          python3 scripts/check-workflows.py
+          python3 scripts/test-linux-workflow.py
+      - name: Core and Linux UI host contract tests (serial software Vulkan)
+        run: |
+          set -euo pipefail
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name '*lvp*.json' -print -quit)"
+          test -s "$VK_ICD_FILENAMES"
+          mkdir -p /tmp/opencode
+          export XDG_RUNTIME_DIR="$(mktemp -d /tmp/opencode/yacr-runtime-XXXXXX)"
+          cargo test --workspace --exclude app-android --exclude app-web --locked --no-fail-fast -- --test-threads=1
 
   wasm-check:
     name: wasm-check
@@ -98,11 +110,8 @@ jobs:
     # hardcoded-chrome-literal scan (audit U10). This is a pure Python gate, so
     # it needs no Rust toolchain and no Slint host.
     #
-    # There is no catalog unit test that can run here: catalog parsing lives in
-    # `cad-ui-slint`, which cannot build on a Linux runner without the fontconfig
-    # dev headers (see docs/build.md). The script is therefore the whole gate; it
-    # is not a substitute for the Slint unit tests, which run on the Android
-    # target check.
+    # Catalog Rust unit tests also run in core-quality now that Linux installs
+    # the native Slint development dependencies. This remains the quick Python gate.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

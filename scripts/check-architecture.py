@@ -34,7 +34,7 @@ for name, manifest in packages.items():
     deps = dependencies(manifest)
     if name != "cad-import-acadrust":
         assert "acadrust" not in deps, f"parser escaped importer: {name}"
-    if name not in {"cad-ui-slint", "app-android", "app-web"}:
+    if name not in {"cad-ui-slint", "app-android", "app-web", "app-linux"}:
         assert not deps & {"slint", "slint-build", "iced"}, f"UI leaked into {name}"
     if name != "cad-render-wgpu":
         assert "wgpu" not in deps, f"GPU dependency escaped renderer: {name}"

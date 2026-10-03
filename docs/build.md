@@ -5,6 +5,17 @@
 
 ## 纯核心
 
+从 2026-10-03 起，以下纯核心命令仅用于定位问题，不是完整验收。**Linux App 是主验收**：
+
+```bash
+cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test --workspace --exclude app-android --exclude app-web --locked --no-fail-fast -- --test-threads=1
+bash scripts/check-linux-app.sh
+```
+
+release 可执行文件 `target/release/yacr-linux`，桌面/无窗口模式和当前限制见 `docs/linux-app.md`。
+WASM/Android 属于附加回归，不可用 Web 单独通过替代 Linux 宿主验收。
+
 ```bash
 cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked
 python3 scripts/check-architecture.py

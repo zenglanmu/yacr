@@ -162,5 +162,13 @@
   "ribbon.measure": "Measure",
   "ribbon.annotate": "Annotate",
   "shell.more": "More",
-  "status.synthetic": "Ready · synthetic geometry (not a compatibility claim)"
+  "status.synthetic": "Ready · synthetic geometry (not a compatibility claim)",
+  "linux.failed": "Linux operation failed: {error}",
+  "linux.open_path": "No file picker yet; provide --open PATH",
+  "linux.export_path": "Provide --export-annotations PATH to save annotations",
+  "linux.import_path": "Provide --import-annotations PATH to import annotations",
+  "linux.dirty": "Unsaved annotations retained; export before opening or closing",
+  "linux.trim": "Linux trim picking is not wired yet",
+  "linux.opened": "Drawing opened; see diagnostics for completeness",
+  "linux.completed": "Operation completed"
 }

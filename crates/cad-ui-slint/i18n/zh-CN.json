@@ -162,5 +162,13 @@
   "ribbon.measure": "测量",
   "ribbon.annotate": "批注",
   "shell.more": "更多",
-  "status.synthetic": "就绪 · 合成几何（非兼容性声明）"
+  "status.synthetic": "就绪 · 合成几何（非兼容性声明）",
+  "linux.failed": "Linux 命令失败：{error}",
+  "linux.open_path": "尚无文件选择器，请使用 --open PATH",
+  "linux.export_path": "请使用 --export-annotations PATH 保存批注",
+  "linux.import_path": "请使用 --import-annotations PATH 导入批注",
+  "linux.dirty": "未保存批注已保留，请导出后再打开或关闭",
+  "linux.trim": "Linux 修剪取点尚未接线",
+  "linux.opened": "已打开图纸，完整性请查看诊断",
+  "linux.completed": "命令完成"
 }

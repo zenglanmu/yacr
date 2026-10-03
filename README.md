@@ -11,7 +11,8 @@
 不代表功能已完备。
 
 * 架构：`docs/architecture.md`
-* 构建（含 Android APK）：`docs/build.md`
+* 构建（Linux App 主验收，含 Android APK）：`docs/build.md`
+* Linux 宿主入口与限制：`docs/linux-app.md`
 * 验证与运行证据：`docs/validation.md`
 * DWG 测试流程（lavapipe 主测试 + 无头浏览器复验）：[docs/testing-dwg.md](docs/testing-dwg.md)
 * 真实图纸回归结果：[docs/validation-dwg.md](docs/validation-dwg.md)
@@ -29,7 +30,11 @@
 成品：领域类型、数据库与事务、几何引擎、代理回放器、acadrust 导入（含实体/图层透明
 度）、显示表示、空间索引、场景批处理（拓扑/法向/深度/绘制顺序/透明）、测量、批注
 （含版本化 JSON）、依赖失效、撤销/重做、查询层、应用命令层、wgpu 2D/3D 渲染器、
-Slint UI 与 Android/Web 宿主骨架。
+Slint UI 与 Linux/Android/Web 宿主骨架。
+
+2026-10-03 起以 **Linux App 为第一验收标准**：`cargo build -p app-linux --release --locked`，
+`bash scripts/check-linux-app.sh` 无窗口运行实际 Linux 宿主/命令/Slint/CAD 桥并输出 PNG/report。
+GitHub Actions 默认运行 `linux-app` 主门禁，Web/Android 继续作为跨平台回归，不等于真机验证。
 
 本轮已实际运行（2026-10-02）：
 
@@ -55,7 +60,8 @@ Slint UI 与 Android/Web 宿主骨架。
 - 无授权真实 DWG 样本、黄金图、跨后端对照或性能基准（`fixtures/manifest` 为空）。
 - Android 未在真机运行；surface 尺寸/安全区、SAF、量测/批注拾取未接线。
 - Web 仅验证 WebGL2 软件路径；WebGPU、真实 GPU 与移动/桌面浏览器矩阵未验证。
-- 桌面/iOS 仅平台抽象，不提供宿主。
+- Linux 已有桌面/离屏共用宿主，但窗口系统与真实 GPU 未验收；文件选择器、恢复决策、后台
+  导入、Trim 点选等尚未闭环。iOS/macOS/Windows 仍仅平台抽象。
 - ACIS 仅有合成样本子集（平面/球/柱/环面/锥面），无授权真实
   3DSOLID/BODY/REGION/SURFACE 样本；带环球面/非圆椭圆/样条面未实现。
   复杂文字整形、动态块参数/夹点求值、复杂视口裁剪、代理无缓存几何均按样本标记为

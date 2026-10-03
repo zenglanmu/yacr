@@ -24,6 +24,7 @@ members = [
     "crates/cad-cli-tools",
     "apps/app-android",
     "apps/app-web",
+    "apps/app-linux",
 ]
 
 [workspace.package]

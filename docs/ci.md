@@ -7,6 +7,18 @@
 工作流文件：`.github/workflows/core.yml`（核心质量层）与
 `.github/workflows/build.yml`（N02 构建/校验层）。校验脚本：`scripts/check-workflows.py`。
 
+## Linux App 主门禁（2026-10-03 契约变更）
+
+默认启用 `build.yml/linux-app`（无 capability guard、无 continue-on-error）：安装 pkgconf、
+fontconfig/freetype 开发库和 Mesa，串行运行实际宿主契约，`scripts/check-linux-app.sh` 构建并
+执行 release `yacr-linux --headless`，上传二进制及新目录 PNG/report（失败时也尝试保留产物）。
+`core-quality` 同时包含 Linux App/Slint 的严格 clippy 和串行测试，不再排除 UI。
+`check-workflows.py` 强制声明命令、产物、软件 Vulkan 依赖且禁止给主 job 添加条件跳过。
+
+Linux App 是第一验收标准，Web/Android 继续保持独立构建层；WASM 检查 Linux 空库仅验证平台
+隔离。CI 无显示服务器的运行是软件 GPU 合成 smoke，不等于窗口/真实 GPU/真实图纸验收。
+本机执行与 GitHub Actions 实际 job URL/结果分开记录，本轮尚未取得远程 job 执行证据。
+
 > 本环境（无 GitHub runner、无 `gh` 权限）**没有实际执行**这些 job；本文件描述的
 > 是 workflow 内容与预期，不是通过证据。真实 job URL / commit / 结果应写入
 > `docs/validation.md`（由控制器汇总，本文件不代填）。

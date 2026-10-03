@@ -30,7 +30,7 @@ CATALOGS = {
 }
 
 # Rust files that call `messages.text("some.key", ..)` / `messages.message(..)`.
-RUST_SOURCES = [ROOT / "crates" / "cad-ui-slint" / "src"]
+RUST_SOURCES = [ROOT / "crates" / "cad-ui-slint" / "src", ROOT / "apps" / "app-linux" / "src"]
 # The Slint chrome; every user-facing literal here is a missing translation.
 SLINT_SOURCES = [ROOT / "crates" / "cad-ui-slint" / "ui"]
 

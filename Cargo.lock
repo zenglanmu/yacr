@@ -309,6 +309,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "app-linux"
+version = "0.1.0"
+dependencies = [
+ "cad-annotations",
+ "cad-app",
+ "cad-diagnostics",
+ "cad-domain",
+ "cad-render-wgpu",
+ "cad-ui-slint",
+ "serde_json",
+ "slint",
+]
+
+[[package]]
 name = "app-web"
 version = "0.1.0"
 dependencies = [

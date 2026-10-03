@@ -18,7 +18,7 @@
 1. 核心语言 Rust；DWG 解析使用 acadrust；CAD 绘制使用 wgpu。
 2. 不修改 acadrust 上游源码，不维护修改版 fork，不用 Cargo patch 偷换为修改版本。所有补充处理位于自有 crate；允许评估未修改的正式版本升级。
 3. UI 使用 Slint，复用 UI 定义、组件和应用状态；允许必要的平台宿主和浏览器 JS 接入。
-4. 首要交付 Android APK 和浏览器应用。架构保留 iOS、Linux、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。
+4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。Linux 验收必须运行 `apps/app-linux` 的实际宿主/命令/数据库/共享 Slint/wgpu 链路，不以仅 UI 编译或测试替身代替。无窗口环境优先使用软件 Vulkan/lavapipe；桌面窗口、真实 GPU、真实图纸分别记录验证范围。架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。
 5. Web 必须支持 WebGL2 与 WebGPU 两条 CAD 绘制路径，提供 Auto / WebGPU / WebGL2 选择。WebGL1 不属于要求。
 6. 项目准备开源。以 OpenCADStudio 为绘制、几何离散、相机和 3D 能力的主要源码抽取/参考对象；不再从 JS 项目迁移绘制核心。mlightcad/cad-viewer 仅保留为 UI 功能组织及交互对照参考。
 7. 保留 Slint，不随参考项目改用 Iced。以数据库对象、事务、变更集和显示表示为核心架构；业务层操作数据，不调用 GPU 绘制命令。
@@ -416,6 +416,20 @@ C. ACIS 实体/曲面：SAT/SAB 或可用结构到几何内核，再按曲面离
 mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主线。截图参考需与可信 CAD 输出和坐标断言结合，不能以参考项目已有错误为标准。
 
 ## 11. 测试、基准与验收
+
+### 11.0 Linux App 主验收与构建契约（2026-10-03 用户确认）
+
+- 主入口：`cargo build -p app-linux --bin yacr-linux --release --locked`，主机质量门禁必须包含
+  `cad-ui-slint` 和 `app-linux`；串行执行 GPU 测试。Android/Web 的平台专用门禁仍独立保留。
+- 主验收：`bash scripts/check-linux-app.sh` 执行 release Linux App，无窗口时使用官方 Slint
+  FemtoVG/wgpu 离屏平台与 lavapipe。命令改变权威相机、真实 CAD 帧产生、PNG 和结构化报告
+  均需检查，失败必须非零退出。每轮创建新证据目录，失败证据不覆盖。
+- GitHub Actions 必须有默认启用且不可忽略失败的 `linux-app` job，包含 release 构建、宿主契约
+  和离屏运行，上传可执行文件/报告/截图；工作流声明与本机运行证据分别记录。
+- Linux 优先不等于删减 Android/Web 需求。WASM 全 workspace lib 检查继续保留；非 Linux 目标
+  的 Linux 空库隔离检查仅验证依赖边界，不算 Linux 编译或运行验收。
+- 合成图软件 GPU smoke 不等于视觉正确、真实图纸兼容、桌面窗口交互或真实 GPU 验收；这些结论
+  必须分别记录。Linux 未接线能力显式 `Unsupported`，不能回退为假数据或空成功。
 
 ### 11.1 样本集
 

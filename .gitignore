@@ -7,6 +7,8 @@ build/
 node_modules/
 dist/
 /web-dist/
+/linux-app-evidence/
+/linux-app.log
 *.keystore
 *.jks
 keystore.properties

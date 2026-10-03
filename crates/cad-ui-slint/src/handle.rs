@@ -465,6 +465,18 @@ impl UiHandle {
         ))
     }
 
+    /// Reclassify native window layout without setting its size or changing the CAD camera.
+    pub fn refresh_window_layout(&self) -> CadResult<()> {
+        self.with(|ui| {
+            let size = ui.window().size().to_logical(ui.window().scale_factor());
+            apply_viewer_presentation(
+                ui,
+                self.viewer_config.borrow().effective(),
+                [size.width as f64, size.height as f64],
+            );
+        })
+    }
+
     /// Fit the shared shell to the browser CSS viewport, not its preferred size.
     pub fn resize_browser_surface(&self, size: [f64; 2], scale: f64) -> CadResult<()> {
         self.with(|ui| {

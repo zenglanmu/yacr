@@ -18,6 +18,15 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**Linux App 主验收（本轮完成）**：`apps/app-linux` 提供桌面与无窗口共用 LinuxApp，
+真实 HostController 命令与数据库/共享 Slint/wgpu 桥，release smoke 入口
+`bash scripts/check-linux-app.sh`。规范 §11.0、AGENTS/build/ci 已改为 Linux 主验收，
+GitHub `linux-app` 默认启用；原生质量层包含 Slint/Linux App 串行测试。执行证据与未接线
+范围见 `docs/linux-app.md`；未运行远程 workflow/桌面窗口不计通过。
+最终主机合成测试 1048 passed / 0 failed / 1 ignored，fmt/clippy/Python/WASM 门禁通过。
+release 实际运行证据 `/tmp/opencode/yacr-linux-app-final-retry/`：软件 Vulkan，2 CAD 帧、
+4553 画布像素导航变化；已抽查合成截图，无真实 DWG/桌面窗口/真实 GPU 验收结论。
+
 **Concept UI 重设计进行中**：设计依据 `docs/ui-spec/`，配置/布局纯契约已新增到
 `cad-app::viewer_config`（3 项合成测试已执行通过）。用户授权解除原生 Slint 编译限制，
 后续使用 Linux Slint/wgpu/lavapipe 离屏主测试，不跑 Android 模拟器，最后 WASM 浏览器抽查。

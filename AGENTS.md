@@ -23,7 +23,7 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 
 ## 仓库结构
 
-Cargo workspace（`crates/cad-*` + `apps/app-android`、`apps/app-web`）。分层示意，
+Cargo workspace（`crates/cad-*` + `apps/app-linux`、`apps/app-android`、`apps/app-web`）。分层示意，
 **不可反转**；实际依赖以 manifests 与 `scripts/check-architecture.py` 为准：
 
 ```
@@ -41,7 +41,7 @@ cad-measure ─ cad-annotations ─ cad-query ─ cad-app
   ↑
 cad-ui-slint ─ cad-platform ─ cad-diagnostics ─ cad-cli-tools
   ↑
-apps/app-android  apps/app-web
+apps/app-linux  apps/app-android  apps/app-web
 ```
 
 `check-architecture.py` 强制的边界：`cad-domain` 不依赖任何 CAD 包；`cad-db` 只依赖
@@ -57,16 +57,18 @@ apps/app-android  apps/app-web
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
+cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
 python3 scripts/check-architecture.py
 python3 scripts/check-fixture-manifest.py
 python3 scripts/check-workflows.py
 python3 scripts/check-i18n.py
-cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked --no-fail-fast
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test --workspace --exclude app-android --exclude app-web --locked --no-fail-fast -- --test-threads=1
+bash scripts/check-linux-app.sh   # release Linux App 是主验收，独立于 UI 单测
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 workspace，含 UI/宿主
 ```
 
-- 默认主机核心门禁仍排除 UI/宿主。本轮用户授权解除原生 Slint 编译限制：允许使用
+- 默认主机门禁必须包含 Linux App 和 Slint，Linux App 是第一验收标准；Web 是第二层，
+  Android 平台契约继续保留。用户授权解除原生 Slint 编译限制：允许使用
   开发依赖，在 Linux 无窗口环境以 Slint FemtoVG/wgpu + lavapipe 离屏验证（用户已授权
   sudo apt 安装 pkgconf/fontconfig/freetype 开发包）。
   不需要 Android 模拟器，不安装桌面/X11/Wayland，不改系统/LXC 配置；实际执行与编译证据分开记录。

@@ -6,7 +6,7 @@ Standard library only. What it checks:
   * at least one workflow file exists under ``.github/workflows`` and is non-empty;
   * every required job is declared as a job key in some workflow
     (``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
-    ``web-build``, ``android-check``, ``android-apk``, ``web-smoke``; the last
+     ``linux-app``, ``web-build``, ``android-check``, ``android-apk``, ``web-smoke``; the last
     three are capability-gated but still must be *declared* so their absence is
     visible rather than silent);
   * no required job declares ``continue-on-error: true`` (job-level or step-level);
@@ -35,6 +35,13 @@ WORKFLOW_SUFFIXES = (".yml", ".yaml")
 # `if:` capability guard, checked separately below, so a gate can never be
 # mistaken for a silent skip-to-green.
 REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
+    "linux-app": (
+        "cargo test -p app-linux --locked -- --test-threads=1",
+        "bash scripts/check-linux-app.sh",
+        "mesa-vulkan-drivers",
+        "actions/upload-artifact",
+        "target/release/yacr-linux",
+    ),
     "core-quality": (
         "cargo fmt --all -- --check",
         "cargo clippy",
@@ -144,6 +151,8 @@ def structural_pass(
                 errors.append(
                     f"{rel}: required job '{key}' contains 'continue-on-error: true'"
                 )
+            if key == "linux-app" and re.search(r"^    if:", block, re.MULTILINE):
+                errors.append(f"{rel}: primary linux-app must not be capability-gated")
             for fragment in fragments:
                 if fragment not in block:
                     errors.append(
@@ -205,6 +214,8 @@ def yaml_pass(
                         f"{GATED_JOB_IF[key]!r} (a gate must SKIP, never pass silently)"
                     )
             steps = job.get("steps") or []
+            if key == "linux-app" and "if" in job:
+                errors.append(f"{rel}: primary linux-app must not be capability-gated")
             if not isinstance(steps, list):
                 errors.append(f"{rel}: required job '{key}' has non-list 'steps'")
                 continue
