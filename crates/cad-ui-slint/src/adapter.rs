@@ -18,6 +18,28 @@ fn command_for(
     }
 }
 
+/// Push the active draw state into the shell and the host preview sink.
+///
+/// Called after every capture/cursor/start/cancel so the step panel, the
+/// confirm affordance and the CAD overlay always agree with the pure state
+/// machine. A `None` sink simply means no live overlay; it is never an error.
+fn publish_draw(
+    report: &Weak<YacrWindow>,
+    tool: &Rc<RefCell<Option<cad_app::DrawTool>>>,
+    preview_sink: &Rc<RefCell<Option<Rc<dyn DrawPreviewSink>>>>,
+) {
+    let preview = tool.borrow().as_ref().map(|tool| tool.preview());
+    let state = DrawUiState::from_preview(preview.as_ref());
+    if let Some(ui) = report.upgrade() {
+        ui.set_draw_tool_active(state.active);
+        ui.set_draw_can_confirm(state.can_confirm);
+        ui.set_draw_step_label(state.step_label.into());
+    }
+    if let Some(sink) = preview_sink.borrow().as_ref() {
+        sink.set_preview(preview);
+    }
+}
+
 /// Radians of orbit per logical pixel of drag (a UI navigation constant).
 pub const ORBIT_RADIANS_PER_PIXEL: f64 = 0.008;
 
@@ -79,6 +101,11 @@ impl UiAdapter {
             Rc::new(RefCell::new(None));
         let layout_switch: Rc<RefCell<Option<Box<dyn LayoutSwitchSink>>>> =
             Rc::new(RefCell::new(None));
+        let draw_command_sink: Rc<RefCell<Option<Box<dyn DrawCommandSink>>>> =
+            Rc::new(RefCell::new(None));
+        let draw_preview_sink: Rc<RefCell<Option<Rc<dyn DrawPreviewSink>>>> =
+            Rc::new(RefCell::new(None));
+        let draw_tool: Rc<RefCell<Option<cad_app::DrawTool>>> = Rc::new(RefCell::new(None));
         let selected_kind: Rc<Cell<MeasurementToolKind>> =
             Rc::new(Cell::new(MeasurementToolKind::Distance));
         let measurement_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
@@ -226,6 +253,8 @@ impl UiAdapter {
             let work = work_mode.clone();
             let messages = messages_slot.clone();
             let report = ui_weak.clone();
+            let draw = draw_tool.clone();
+            let draw_preview = draw_preview_sink.clone();
             ui.on_mode_toggled(move || {
                 let target = if work.get() {
                     cad_app::AppMode::Viewer
@@ -234,6 +263,10 @@ impl UiAdapter {
                 };
                 let is_work = target == cad_app::AppMode::Work;
                 work.set(is_work);
+                // A mode switch cancels an unconfirmed tool, never commits it
+                // (mirrors `SessionState::switch_mode`).
+                *draw.borrow_mut() = None;
+                publish_draw(&report, &draw, &draw_preview);
                 if let Some(ui) = report.upgrade() {
                     ui.set_work_mode(is_work);
                     ui.set_mode_label(crate::status::mode_label(&messages.borrow(), target).into());
@@ -302,13 +335,16 @@ impl UiAdapter {
             let report = ui_weak.clone();
             let active = measurement_active.clone();
             let annotating = annotation_active.clone();
+            let drawing = draw_tool.clone();
+            let draw_preview = draw_preview_sink.clone();
             let messages = messages_slot.clone();
             ui.on_canvas_pick(move |x, y| {
                 // Ordinary navigation clicks must stay silent; only an active
                 // capture tool turns a click into a pick.
                 let measure = active.get();
                 let annotate = annotating.get();
-                if !measure && !annotate {
+                let drafting = drawing.borrow().is_some();
+                if !measure && !annotate && !drafting {
                     return;
                 }
                 let world = mapper
@@ -317,6 +353,28 @@ impl UiAdapter {
                     .and_then(|mapper| mapper.to_world([x as f64, y as f64]));
                 match world {
                     Some(world) => {
+                        if drafting {
+                            // A drawing capture consumes the click as a point;
+                            // the commit is a later explicit confirm, so a
+                            // multi-touch gesture can never commit it.
+                            let error = {
+                                let mut guard = drawing.borrow_mut();
+                                match guard.as_mut() {
+                                    Some(tool) => tool.push_point(world).err(),
+                                    None => None,
+                                }
+                            };
+                            if let Some(error) = error {
+                                if let Some(ui) = report.upgrade() {
+                                    ui.set_status_label(
+                                        draw_error_text(&messages.borrow(), &error).into(),
+                                    );
+                                }
+                                return;
+                            }
+                            publish_draw(&report, &drawing, &draw_preview);
+                            return;
+                        }
                         let (id, payload) = if annotate {
                             (
                                 CommandId::AppendAnnotationPoints,
@@ -472,6 +530,129 @@ impl UiAdapter {
                         viewport,
                         CommandPayload::AnnotationVisibility(id, visible),
                     ));
+                }
+            });
+        }
+        {
+            // Start a draw/edit capture from the ribbon or a command word.
+            // Capture itself is session state; the mutation is the confirmed
+            // intent (exactly one command). A Viewer attempt is refused here and
+            // again by the command layer, never hidden behind a dead button.
+            let work = work_mode.clone();
+            let tool = draw_tool.clone();
+            let sink = draw_command_sink.clone();
+            let preview_sink = draw_preview_sink.clone();
+            let messages = messages_slot.clone();
+            let report = ui_weak.clone();
+            let report_state = ui_weak.clone();
+            ui.on_begin_draw_tool(move |name| {
+                let Some(kind) = draw_kind_from_label(&messages.borrow(), name.as_str())
+                    .or_else(|| cad_app::DrawToolKind::from_key(name.as_str()))
+                else {
+                    if let Some(ui) = report_state.upgrade() {
+                        ui.set_status_label(
+                            messages
+                                .borrow()
+                                .text("draw.error.unknown_geometry", &[])
+                                .into(),
+                        );
+                    }
+                    return;
+                };
+                if !work.get() {
+                    if let Some(ui) = report_state.upgrade() {
+                        ui.set_status_label(
+                            messages.borrow().text("draw.error.read_only", &[]).into(),
+                        );
+                    }
+                    return;
+                }
+                let selection = report_state
+                    .upgrade()
+                    .map(|ui| ui.get_selection_count().max(0) as usize)
+                    .unwrap_or(0);
+                if kind.requires_selection() && selection == 0 {
+                    if let Some(ui) = report_state.upgrade() {
+                        ui.set_status_label(
+                            messages
+                                .borrow()
+                                .text("draw.error.selection_required", &[])
+                                .into(),
+                        );
+                    }
+                    return;
+                }
+                *tool.borrow_mut() = Some(cad_app::DrawTool::new(kind, selection));
+                if let Some(sink) = sink.borrow_mut().as_mut() {
+                    sink.begin(kind);
+                }
+                publish_draw(&report, &tool, &preview_sink);
+            });
+        }
+        {
+            let tool = draw_tool.clone();
+            let sink = draw_command_sink.clone();
+            let preview_sink = draw_preview_sink.clone();
+            let messages = messages_slot.clone();
+            let report = ui_weak.clone();
+            ui.on_confirm_draw_requested(move || {
+                let intent = {
+                    let borrowed = tool.borrow();
+                    let Some(active) = borrowed.as_ref() else {
+                        return;
+                    };
+                    match active.intent() {
+                        Ok(intent) => intent,
+                        Err(error) => {
+                            if let Some(ui) = report.upgrade() {
+                                ui.set_status_label(
+                                    draw_error_text(&messages.borrow(), &error).into(),
+                                );
+                            }
+                            return;
+                        }
+                    }
+                };
+                let mut guard = sink.borrow_mut();
+                let Some(sink) = guard.as_mut() else {
+                    // Explicit, never a fake success: the host has not installed
+                    // the draw command sink yet, so there is nowhere real to
+                    // commit. The captured parameters are kept for the retry.
+                    if let Some(ui) = report.upgrade() {
+                        ui.set_status_label(
+                            messages.borrow().text("draw.error.unwired", &[]).into(),
+                        );
+                    }
+                    return;
+                };
+                match sink.commit(intent) {
+                    Ok(()) => {
+                        drop(guard);
+                        // Committed: the tool is done and the preview is cleared.
+                        *tool.borrow_mut() = None;
+                        publish_draw(&report, &tool, &preview_sink);
+                    }
+                    Err(error) => {
+                        // A refused commit keeps the captured parameters in place
+                        // so the user can fix the input; no transaction was made.
+                        if let Some(ui) = report.upgrade() {
+                            ui.set_status_label(draw_error_text(&messages.borrow(), &error).into());
+                        }
+                    }
+                }
+            });
+        }
+        {
+            // Cancel never commits; it clears the capture and the preview.
+            let tool = draw_tool.clone();
+            let preview_sink = draw_preview_sink.clone();
+            let messages = messages_slot.clone();
+            let report = ui_weak.clone();
+            ui.on_cancel_draw_requested(move || {
+                *tool.borrow_mut() = None;
+                publish_draw(&report, &tool, &preview_sink);
+                if let Some(ui) = report.upgrade() {
+                    ui.set_status_label(messages.borrow().text("draw.status.idle", &[]).into());
                 }
             });
         }
@@ -665,9 +846,28 @@ impl UiAdapter {
             let doc = document.clone();
             let is_3d = view_3d.clone();
             let orbit_last = orbit_last.clone();
+            let drawing = draw_tool.clone();
+            let draw_preview = draw_preview_sink.clone();
+            let mapper = pick_mapper.clone();
+            let report = ui_weak.clone();
             ui.on_pointer_input(move |kind, button, x, y| {
                 let x = x as f64;
                 let y = y as f64;
+                // While a draw/edit capture is active a pointer move updates the
+                // rubber-band cursor (no capture, no command); the release picks
+                // through `canvas-pick`. Navigation still works via the host.
+                if kind == 2 && button == 0 && drawing.borrow().is_some() {
+                    if let Some(world) = mapper
+                        .borrow()
+                        .as_ref()
+                        .and_then(|mapper| mapper.to_world([x, y]))
+                    {
+                        if let Some(tool) = drawing.borrow_mut().as_mut() {
+                            tool.set_cursor(Some(world));
+                        }
+                        publish_draw(&report, &drawing, &draw_preview);
+                    }
+                }
                 // In 3D mode a left-button drag orbits the view through the
                 // shared command path. Other buttons (middle/right) and scroll
                 // still route to the host's `ViewInput`, so a host can keep 3D
@@ -721,6 +921,9 @@ impl UiAdapter {
             view_input,
             pick_mapper,
             layout_switch,
+            draw_command_sink,
+            draw_preview_sink,
+            draw_tool,
             selected_kind,
             measurement_active,
             selected_annotation_kind,
@@ -759,6 +962,32 @@ impl UiAdapter {
     /// wired" in the status line instead of silently doing nothing.
     pub fn set_layout_switch_sink(&self, sink: Box<dyn LayoutSwitchSink>) {
         *self.layout_switch.borrow_mut() = Some(sink);
+    }
+
+    /// Install the sink that commits a confirmed draw/edit intent as exactly one
+    /// drawing command (drawing-edit §2/§4).
+    ///
+    /// Until this is installed, confirming a draw reports "draw command not
+    /// wired" in the status line instead of fabricating a payload-free success.
+    pub fn set_draw_command_sink(&self, sink: Box<dyn DrawCommandSink>) {
+        *self.draw_command_sink.borrow_mut() = Some(sink);
+    }
+
+    /// Install the sink that receives the in-progress draw preview so a host can
+    /// push it to `CadView::set_draw_preview` (drawing-edit §4).
+    ///
+    /// Until this is installed there is simply no live rubber-band overlay; the
+    /// step panel still tracks the capture.
+    pub fn set_draw_preview_sink(&self, sink: Rc<dyn DrawPreviewSink>) {
+        *self.draw_preview_sink.borrow_mut() = Some(sink);
+    }
+
+    /// The active draw/edit capture state, if one is running.
+    ///
+    /// A host that prefers polling over the preview sink can forward this to
+    /// [`CadView::set_draw_preview`].
+    pub fn draw_preview(&self) -> Option<cad_app::DrawPreview> {
+        self.draw_tool.borrow().as_ref().map(|tool| tool.preview())
     }
 
     /// A handle for pushing state from the host.

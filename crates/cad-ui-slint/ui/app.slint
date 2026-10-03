@@ -124,13 +124,21 @@ export component YacrWindow inherits Window {
     in property <[string]> editing-labels;
     in property <string> command-title;
     in property <string> command-prompt;
-    in property <string> pending-label;
+    in property <string> draw-status;
+    in property <bool> draw-tool-active;
+    in property <bool> draw-can-confirm;
+    in property <string> draw-step-label;
+    in property <string> draw-confirm-label;
+    in property <string> draw-cancel-label;
     in-out property <bool> ribbon-expanded: true;
     in-out property <bool> command-expanded: false;
     callback command-submitted(string);
     callback open-requested();
     callback measure-requested();
     callback annotate-requested();
+    callback begin-draw-tool(string);
+    callback confirm-draw-requested();
+    callback cancel-draw-requested();
     callback fit-requested();
     callback undo-requested();
     callback redo-requested();
@@ -179,11 +187,13 @@ export component YacrWindow inherits Window {
             can-undo: root.work-mode && root.can-undo;
             can-redo: root.work-mode && root.can-redo;
             view-3d: root.view-3d;
-            pending-label: root.pending-label;
+            work-mode: root.work-mode;
+            draw-status: root.draw-status;
             editing-labels: root.editing-labels;
             expanded <=> root.ribbon-expanded;
             standard-view(value) => { root.standard-view-selected(value); }
             backend(value) => { root.backend-selected(value); }
+            draw-tool(value) => { root.begin-draw-tool(value); }
             action(id) => {
                 if id == 0 { root.open-requested(); }
                 if id == 1 { root.fit-requested(); }
@@ -245,6 +255,12 @@ export component YacrWindow inherits Window {
             ComboBox { model: root.annotation-kind-labels; current-index: root.annotation-kind-index; selected(v) => { root.annotation-kind-selected(v); } }
             Button { text: root.annotate-confirm-label; enabled: root.annotation-tool-can-confirm; clicked => { root.confirm-annotation-requested(); } }
             Button { text: root.annotate-cancel-label; clicked => { root.cancel-annotation-requested(); } }
+        }
+        if root.draw-tool-active : HorizontalBox {
+            height: root.phone-shell ? 56px : 44px;
+            Text { text: root.draw-step-label; color: #c8d0dc; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+            Button { text: root.draw-confirm-label; enabled: root.draw-can-confirm; min-height: root.phone-shell ? 48px : 36px; clicked => { root.confirm-draw-requested(); } }
+            Button { text: root.draw-cancel-label; min-height: root.phone-shell ? 48px : 36px; clicked => { root.cancel-draw-requested(); } }
         }
         // Asynchronous open progress (F01). Hidden while idle; shows a real
         // percent only when the importer reported a total, otherwise an

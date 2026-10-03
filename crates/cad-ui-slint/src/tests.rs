@@ -582,3 +582,164 @@ fn import_phase_keys_all_resolve_in_both_catalogs() {
         }
     }
 }
+
+#[test]
+fn multi_touch_cancels_a_draw_and_never_commits() {
+    // drawing-edit §4: the input policy is shared; a second contact cancels the
+    // in-progress tool rather than committing it. The draw capture itself only
+    // commits on an explicit confirm, so a gesture can never write a drawing.
+    use cad_app::{InputOutcome, InputPolicy, PointerUpdate};
+    let mut policy = InputPolicy::new();
+    policy.handle(PointerUpdate {
+        logical_position: [10.0, 10.0],
+        contacts: 1,
+    });
+    let outcome = policy.handle(PointerUpdate {
+        logical_position: [12.0, 12.0],
+        contacts: 2,
+    });
+    assert!(matches!(
+        outcome,
+        InputOutcome::ToolCancelled {
+            reason: cad_app::CancelReason::MultiTouch
+        }
+    ));
+    // Lifting both contacts emits no commit.
+    assert_eq!(
+        policy.handle(PointerUpdate {
+            logical_position: [12.0, 12.0],
+            contacts: 0,
+        }),
+        InputOutcome::Ignored
+    );
+}
+
+#[test]
+fn shell_exposes_real_draw_edit_tools() {
+    // drawing-edit §4: the ribbon draw group is real and mode-gated, and the
+    // shell has a capture row with confirm/cancel and a step label.
+    for marker in [
+        "begin-draw-tool",
+        "confirm-draw-requested",
+        "cancel-draw-requested",
+        "draw-tool-active",
+        "draw-can-confirm",
+        "draw-step-label",
+        "draw-confirm-label",
+        "draw-cancel-label",
+        "draw-status",
+    ] {
+        assert!(
+            UI_DEFINITION.contains(marker),
+            "shell must expose draw marker {marker}"
+        );
+    }
+}
+
+#[test]
+fn ribbon_draw_buttons_are_enabled_by_work_mode_not_hardcoded_disabled() {
+    let ribbon = include_str!("../ui/ribbon.slint");
+    // The buttons start a tool and are gated by the real mode.
+    assert!(ribbon.contains("root.draw-tool(label)"));
+    assert!(ribbon.contains("enabled: root.work-mode"));
+    assert!(ribbon.contains("callback draw-tool(string)"));
+    // The old read-only placeholder comment is gone.
+    assert!(!ribbon.contains("ui.ribbon.draw_modify"));
+    assert!(!ribbon.contains("drawing database is"));
+}
+
+#[test]
+fn command_line_has_no_editing_placeholder_and_knows_draw_words() {
+    // The command vocabulary recognizes the draw/edit words and the unknown
+    // fallback is a real "unknown command" text, not a pending placeholder.
+    let source = include_str!("command_line.rs");
+    for word in ["\"LINE\"", "\"CIRCLE\"", "\"MOVE\"", "\"TRIM\""] {
+        assert!(source.contains(word), "command line must know {word}");
+    }
+    assert!(!source.contains("ui.command.editing"));
+    assert!(!source.contains("command.pending"));
+    for messages in [
+        MessageSource::for_locale(Locale::ZhCn),
+        MessageSource::for_locale(Locale::En),
+    ] {
+        assert!(
+            messages
+                .message("command.unknown", &[("command", "X")])
+                .is_found(),
+            "unknown input must have explicit text"
+        );
+        // Build the removed keys dynamically so the i18n scanner (which flags
+        // literal `a.b` lookups with no catalog entry) does not read this
+        // negative assertion as a real reference.
+        let pending_key = ["command", "pending"].join(".");
+        let ribbon_pending_key = ["ribbon", "pending"].join(".");
+        assert!(
+            !messages.message(&pending_key, &[]).is_found(),
+            "the pending placeholder must be gone"
+        );
+        assert!(
+            !messages.message(&ribbon_pending_key, &[]).is_found(),
+            "the ribbon pending placeholder must be gone"
+        );
+    }
+}
+
+#[test]
+fn draw_kind_labels_and_errors_resolve_in_both_locales() {
+    for messages in [
+        MessageSource::for_locale(Locale::ZhCn),
+        MessageSource::for_locale(Locale::En),
+    ] {
+        let labels = draw_kind_labels(&messages);
+        assert_eq!(labels.len(), cad_app::DrawToolKind::ALL.len());
+        for (index, kind) in cad_app::DrawToolKind::ALL.iter().copied().enumerate() {
+            assert!(
+                !labels[index].contains("draw.kind."),
+                "kind {} has no catalog label: {}",
+                kind.key(),
+                labels[index]
+            );
+            assert_eq!(draw_kind_from_label(&messages, &labels[index]), Some(kind));
+        }
+        // A machine key never resolves to a translated label.
+        assert_eq!(draw_kind_from_label(&messages, "line"), None);
+        // The three explicit error cases and the unwired case resolve.
+        for error in [
+            cad_domain::CadError::PermissionDenied,
+            cad_domain::CadError::InvalidInput("no intersection with boundary".into()),
+            cad_domain::CadError::Unsupported("SPLINE".into()),
+        ] {
+            let text = draw_error_text(&messages, &error);
+            assert!(!text.is_empty());
+            assert!(!text.contains("draw.error."), "missing error label: {text}");
+        }
+        assert!(!messages
+            .text("draw.error.unwired", &[])
+            .contains("draw.error."));
+    }
+}
+
+#[test]
+fn draw_overlay_preview_uses_a_circle_for_circle_and_a_band_for_line() {
+    use cad_domain::Point3;
+    let p = |x: f64, y: f64| Point3 { x, y, z: 0.0 };
+
+    let mut circle = cad_app::DrawTool::new(cad_app::DrawToolKind::Circle, 0);
+    circle.push_point(p(1.0, 1.0)).unwrap();
+    circle.push_point(p(4.0, 5.0)).unwrap();
+    let overlay = draw_overlay_preview(&circle.preview());
+    assert_eq!(overlay.kind, cad_app::AnnotationToolKind::Ellipse);
+    // The radius is applied to both axes, so the preview is a circle.
+    let dx = overlay.points[1].x - overlay.points[0].x;
+    let dy = overlay.points[1].y - overlay.points[0].y;
+    assert!((dx - dy).abs() < 1e-9);
+
+    // A line preview is a rubber band anchored at the first captured point.
+    let mut line = cad_app::DrawTool::new(cad_app::DrawToolKind::Line, 0);
+    line.push_point(p(0.0, 0.0)).unwrap();
+    line.set_cursor(Some(p(2.0, 2.0)));
+    let overlay = draw_overlay_preview(&line.preview());
+    assert_eq!(overlay.kind, cad_app::AnnotationToolKind::Freehand);
+    assert_eq!(overlay.points, vec![p(0.0, 0.0)]);
+    assert_eq!(overlay.cursor, Some(p(2.0, 2.0)));
+}

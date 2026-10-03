@@ -49,13 +49,12 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ]));
     ui.set_command_title(messages.text("command.title", &[]).into());
     ui.set_command_prompt(messages.text("command.prompt", &[]).into());
-    ui.set_pending_label(messages.text("ribbon.pending", &[]).into());
-    ui.set_editing_labels(string_model(&[
-        messages.text("ribbon.line", &[]),
-        messages.text("ribbon.circle", &[]),
-        messages.text("ribbon.move", &[]),
-        messages.text("ribbon.trim", &[]),
-    ]));
+    ui.set_draw_status(messages.text("draw.status.idle", &[]).into());
+    // The ribbon draw buttons present the shared `DrawToolKind::ALL` order; the
+    // adapter maps a clicked label straight back to the exact kind.
+    ui.set_editing_labels(string_model(&draw::draw_kind_labels(messages)));
+    ui.set_draw_confirm_label(messages.text("tool.confirm", &[]).into());
+    ui.set_draw_cancel_label(messages.text("tool.cancel", &[]).into());
     // Toolbar + mode. The mode label reflects the real session mode, not a
     // hardcoded "enhanced" (audit U02).
     ui.set_open_label(messages.text("file.open", &[]).into());
