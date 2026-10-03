@@ -265,7 +265,10 @@ fn display_support_separates_drawn_from_unrendered() {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
     };
-    assert_eq!(display_support(&text).0, SupportStatus::Unsupported);
+    // Text is a supported entity whose drawing depends on a host font, so it
+    // is Unverified rather than Unsupported (audit B20 still holds: no claim
+    // that the glyphs will be available).
+    assert_eq!(display_support(&text).0, SupportStatus::Unverified);
     let opaque = SemanticGeometry::Opaque {
         type_key: "ACIS".into(),
         version: 1,

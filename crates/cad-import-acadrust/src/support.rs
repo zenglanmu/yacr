@@ -30,17 +30,12 @@ pub(crate) fn acis_semantics(
 pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, SupportStatus) {
     match geometry {
         SemanticGeometry::Opaque { .. } => (SupportStatus::Unsupported, SupportStatus::Unsupported),
-        // Any named font is host-resolvable: the host registers arbitrary
-        // `name=path` keys and legacy DXF names such as `txt` omit the `.shx`
-        // extension, so a name mismatch is a font-availability question, not a
-        // missing representation. Only a text with no font name at all is
-        // `Unsupported`.
-        SemanticGeometry::Text { font, .. } => match font.as_deref() {
-            Some(name) if !name.trim().is_empty() => {
-                (SupportStatus::Unverified, SupportStatus::Unverified)
-            }
-            _ => (SupportStatus::Unsupported, SupportStatus::Unsupported),
-        },
+        // Text is a supported entity kind whose display is conditional on a
+        // host font: the host registers arbitrary `name=path` keys and legacy
+        // DXF names such as `txt` omit the `.shx` extension, so availability is
+        // a host-resource question, not a missing representation. Whether the
+        // font resolves is reported by the representation/text build, not here.
+        SemanticGeometry::Text { .. } => (SupportStatus::Unverified, SupportStatus::Unverified),
         SemanticGeometry::Insert { .. } => (SupportStatus::Unverified, SupportStatus::Unverified),
         SemanticGeometry::Compound(children) => {
             let mut render = SupportStatus::Verified;
@@ -157,6 +152,9 @@ pub(crate) fn entity_class_name(e: &EntityType) -> String {
         EntityType::Helix(_) => "AcDbHelix",
         EntityType::Ray(_) => "AcDbRay",
         EntityType::XLine(_) => "AcDbXline",
+        EntityType::Viewport(_) => "AcDbViewport",
+        EntityType::Tolerance(_) => "AcDbFcf",
+        EntityType::MLine(_) => "AcDbMline",
         EntityType::Unknown(u) => return u.dxf_name.clone(),
         EntityType::Extended(x) => return x.class_name().to_string(),
         other => {

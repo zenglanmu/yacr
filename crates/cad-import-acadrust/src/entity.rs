@@ -438,6 +438,26 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::PolygonMesh(m) => (polygon_mesh_semantics(m), Completeness::Complete),
             EntityType::Wipeout(w) => wipeout_semantics(w),
             EntityType::Helix(h) => spline_semantics(&h.spline),
+            EntityType::Viewport(v) => (viewport_semantics(v), Completeness::Complete),
+            EntityType::MLine(m) => mline_semantics(m),
+            EntityType::Tolerance(t) => {
+                let (frame, _width, _height) = tolerance_frame(t);
+                let style_name = self.dim_text_style(&t.dimension_style_name);
+                let text = self.attribute_text(
+                    &style_name,
+                    t.text.clone(),
+                    p3(t.insertion_point),
+                    t.text_height,
+                    0.0,
+                );
+                (
+                    SemanticGeometry::Compound(vec![frame, text]),
+                    Completeness::Partial(vec![
+                        "tolerance frame width is estimated from the text length".into(),
+                    ]),
+                )
+            }
+            EntityType::MultiLeader(ml) => self.multileader_semantics(ml),
             EntityType::Solid3D(s) => acis_semantics(entity, &s.acis_data),
             EntityType::Region(r) => acis_semantics(entity, &r.acis_data),
             EntityType::Body(b) => acis_semantics(entity, &b.acis_data),

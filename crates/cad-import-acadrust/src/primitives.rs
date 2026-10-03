@@ -134,6 +134,97 @@ pub(crate) fn wipeout_semantics(
     )
 }
 
+/// A paper-space VIEWPORT's border rectangle. The viewport's model content is
+/// assembled by the plot path, not here; the border is drawable geometry.
+pub(crate) fn viewport_semantics(v: &acadrust::entities::Viewport) -> SemanticGeometry {
+    let c = p3(v.center);
+    let hw = v.width.abs() / 2.0;
+    let hh = v.height.abs() / 2.0;
+    polyline_semantics(
+        vec![
+            Point3 {
+                x: c.x - hw,
+                y: c.y - hh,
+                z: c.z,
+            },
+            Point3 {
+                x: c.x + hw,
+                y: c.y - hh,
+                z: c.z,
+            },
+            Point3 {
+                x: c.x + hw,
+                y: c.y + hh,
+                z: c.z,
+            },
+            Point3 {
+                x: c.x - hw,
+                y: c.y + hh,
+                z: c.z,
+            },
+        ],
+        true,
+    )
+}
+
+/// A geometric TOLERANCE: a frame rectangle plus the (font-dependent) text.
+/// The frame width is estimated from the text length because the exact extent
+/// needs shaped glyph metrics; the estimate is reported `Partial`.
+pub(crate) fn tolerance_frame(t: &acadrust::entities::Tolerance) -> (SemanticGeometry, f64, f64) {
+    let origin = p3(t.insertion_point);
+    let height = if t.text_height.is_finite() && t.text_height > 0.0 {
+        t.text_height
+    } else {
+        2.5
+    };
+    let frame_height = height * 1.6;
+    let frame_width = (t.text.chars().count().max(1) as f64) * height * 0.62 + height;
+    let direction = cad_geometry::normalize(p3(t.direction));
+    let angle = direction.y.atan2(direction.x);
+    let ux = Point3 {
+        x: angle.cos(),
+        y: angle.sin(),
+        z: 0.0,
+    };
+    let uy = Point3 {
+        x: -angle.sin(),
+        y: angle.cos(),
+        z: 0.0,
+    };
+    let corner = |u: f64, w: f64| {
+        cad_geometry::add(
+            origin,
+            cad_geometry::add(cad_geometry::scale(ux, u), cad_geometry::scale(uy, w)),
+        )
+    };
+    let mut points = vec![
+        corner(0.0, 0.0),
+        corner(frame_width, 0.0),
+        corner(frame_width, frame_height),
+        corner(0.0, frame_height),
+    ];
+    points.dedup();
+    (polyline_semantics(points, true), frame_width, frame_height)
+}
+
+/// An MLINE as its vertex centerline. The per-element parallel offsets and
+/// joins need the MLINESTYLE table; until that is wired the centerline is drawn
+/// and the offsets are reported `Partial`.
+pub(crate) fn mline_semantics(m: &acadrust::entities::MLine) -> (SemanticGeometry, Completeness) {
+    let mut points: Vec<Point3> = m.vertices.iter().map(|v| p3(v.position)).collect();
+    if let Some(first) = points.first().copied() {
+        if cad_geometry::distance(p3(m.start_point), first) > 1e-9 {
+            points.insert(0, p3(m.start_point));
+        }
+    }
+    (
+        polyline_semantics(points, false),
+        Completeness::Partial(vec![
+            "mline drawn as its centerline; per-element offsets/joins are not applied".into(),
+        ]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

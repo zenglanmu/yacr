@@ -25,9 +25,14 @@ DXF 图元与 `../opencadstudio` 当前支持的图元，并要求“务必实�
 | POLYGON MESH | ✅ | `polygon_mesh_semantics`：M×N 网格→四边形→三角 |
 | WIPEOUT | ⚠️ Partial | `wipeout_semantics`：画裁剪边界闭合折线；**遮罩填充未实现**，显式 `Partial` |
 | HELIX | ✅ | `convert` 复用 `spline_semantics(&h.spline)` |
+| VIEWPORT | ✅ | `viewport_semantics`：纸空间视口边框矩形（模型内容由 plot 装配） |
+| TOLERANCE | ⚠️ Partial | `tolerance_frame`+文本：公差框（框宽按字符数估计）+ 文字，显式 `Partial` |
+| MLINE | ⚠️ Partial | `mline_semantics`：顶点中心线；**逐元素偏移/接合未实现**，显式 `Partial` |
+| MULTILEADER | ⚠️ Partial | `multileader_semantics`：leader-root 折线 + 注解文字；块内容未展开，显式 `Partial` |
 
-另外修正文本能力判定：带字体名的 Text 现在是 `Unverified`（宿主可用 `--font name=path`
-提供）而不是 `Unsupported`；只有完全没有字体名才是 `Unsupported`。
+文本能力判定修正：Text（TEXT/MTEXT/ATTRIB/DIMENSION 文字）统一为 `Unverified`——
+实体类型**已支持**，能否出字形取决于宿主是否提供字体（`--font name=path`）；不再把
+字体名缺失当成 `Unsupported`。
 
 ## 3. QCAD examples 语料覆盖
 
@@ -46,59 +51,55 @@ DXF 图元与 `../opencadstudio` 当前支持的图元，并要求“务必实�
 | projection.dxf | 通过 | complete |
 
 语料中出现且已实现的图元：LINE、LWPOLYLINE、MTEXT、INSERT、SPLINE、DIMENSION、
-ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID。没有 `Unsupported` 的模型空间
-几何（仅 calibration 的纸空间 `VIEWPORT` 仍 `Unsupported`，属布局/视口范围）。
+ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）。`proxy-report`
+对 9 个语料 + `flange` **零 `unsupported`**，由
+`crates/cad-cli-tools/tests/dxf_samples.rs::committed_qcad_examples_have_no_unsupported_entity_types`
+固定。remaining `partial` 只剩字体/子类等保真度问题，不再是“图元没实现”。
 
 ## 4. 已知缺口（未完成，不得当作通过）
 
 | 图元 / 能力 | opencadstudio | 本项目 | 原因与状态 |
 |---|---|---|---|
-| MULTILEADER | ✅ | ❌ `Partial`/Opaque | 需要 mleader 样式、内容块、多引线；未实现 |
-| MLINE | ✅ | ❌ | 多线偏移/接合未实现 |
-| SHAPE | ✅ | ❌ | 需要 SHX shape 引用与字体；未接线 |
-| TABLE | ✅ | ❌ | 表格栅格/文字未实现 |
-| TOLERANCE | ✅ | ❌ | 形位公差框/符号未实现 |
+| MULTILEADER | ✅ | ⚠️ Partial | 引线折线+文字已画；样式/块内容/overrides 未完整 |
+| MLINE | ✅ | ⚠️ Partial | 中心线已画；逐元素偏移/接合未实现 |
+| TOLERANCE | ✅ | ⚠️ Partial | 框+文字已画；框宽按字符数估计，符号字形依赖字体 |
+| SHAPE | ✅ | ❌ | 需要 SHX shape 字形与 `DisplayPrimitive` 支持；未接线 |
+| TABLE | ✅ | ❌ | 表格栅格/单元格文字未实现 |
 | RASTERIMAGE | ✅ | ❌ | 图像定义/贴图未接线（数据库有 `images` 通道） |
+| RAY / XLINE | ✅ | ❌ | 无限直线需要裁剪到图纸范围；需要新增范围遍历，未实现 |
 | UNDERLAY / OLE2FRAME | ✅ | ❌ | 外部参照/嵌入对象，无本地内容 |
-| RAY / XLINE | ✅ | ❌ | 无限直线需要视口裁剪；未实现 |
-| VIEWPORT（纸空间） | ✅ | ❌（`plot` 空白） | 纸空间出图本轮为空白，未定位，独立缺口 |
-| LIGHT / SECTION / VIEWBORDER / SEQEND | ✅ | ❌ | 非绘制或注释对象；未实现 |
+| LIGHT / SECTION / VIEWBORDER / SEQEND | ✅ | ❌ | 非绘制或注释对象；保持显式未实现 |
 | DIMENSION 子类 | ✅ | ⚠️ Partial | 仅线性/对齐/半径/直径；角度/坐标/圆弧长/大半径未实现 |
-| DXF/X2D 字体提示 | — | ❌ | QCAD 把真实 TTF（如 `Arial`）放在 STYLE 的 XDATA `1000`；锁定的 acadrust `TextStyle` 不暴露该字段。**不可修改 acadrust/不加 patch**，故 colors/linetypes/lineweights 等 MTEXT 无字体名可解析 |
+| 纸空间 `plot` | ✅ | ⚠️ Partial | `flange` 的 `plot` 本轮出帧空白，未定位（独立缺口） |
+| DXF/X2D 字体提示 | — | ❌ | QCAD 把真实 TTF（如 `Arial`）放在 STYLE 的 XDATA `1000`；锁定的 acadrust `TextStyle` 不暴露该字段。**不可修改 acadrust/不加 patch** |
 
-`entity.rs` 的 `convert` 未覆盖的 `EntityType` 分支（→ `Opaque`/`Unsupported`，按
-上面矩阵）：MultiLeader、MLine、Table、Tolerance、Shape、Ray、XLine、RasterImage、
-Underlay、Ole2Frame、Light、SectionSymbol、ViewBorder、Viewport、Seqend。
+`entity.rs` 的 `convert` **仍未覆盖**、会落 `Opaque`/`Unsupported` 的 `EntityType`
+分支：`Shape`、`Table`、`RasterImage`、`Ray`、`XLine`、`Underlay`、`Ole2Frame`、
+`Light`、`SectionSymbol`、`ViewBorder`、`Seqend`（后四类为外部/非绘制对象）。
+`MultiLeader`/`MLine`/`Tolerance`/`Viewport` 已接线（见 §2），其中前两者为 `Partial`。
 
-## 5. ezdxf 参考导出与宿主字体
+## 5. 图元支持验证（ezdxf 对比已放弃）
 
-`scripts/check-qcad-examples.py --export-references` 用 `ezdxf.addons.drawing.matplotlib`
-为每个 DXF 导出 `*-ezdxf.png` 供人工/粗粒度对照；缺包时该项记为 **NOT RUN**，不伪造
-参考图。安装（**国内镜像、不加代理**）：
+按用户要求**放弃 ezdxf 像素对比**。改为图元级支持验证：
 
-```bash
-uv pip install --python /tmp/opencode/ezdxf-venv/bin/python \
-  --index-url https://pypi.tuna.tsinghua.edu.cn/simple ezdxf matplotlib
-# -> ezdxf 1.4.4, matplotlib 3.11.2, numpy 2.5.3
-```
+- `crates/cad-cli-tools/tests/dxf_samples.rs::committed_qcad_examples_have_no_unsupported_entity_types`
+  对语料每个 DXF 跑 `proxy-report`，断言没有任何 `render: unsupported` 的图元类型；
+  `committed_qcad_examples_import_and_build_without_failures` 保证解析/表示不失败。
+- `scripts/check-qcad-examples.py` 批量跑同一套并打印 `unsupported entity types`，当前为
+  `none`；`--no-render` 时无需 GPU。
+- 运行：`cargo test -p cad-cli-tools --test dxf_samples --locked`。
 
-本轮 9 个 DXF 全部导出成功（`/tmp/opencode/yacr-qcad-corpus-ezdxf/*-ezdxf.png`）。但
-`ezdxf` matplotlib 后端与我们的 wgpu 渲染在视口/比例/背景上不同（例如 AutoCAD 7 号色在
-白底可能不可见），直接用 `check-dxf-reference.py` 计算得 example00 IoU 0.135、projection
-0.0，**不能当作保真分数**，只作人工对照。`flange` 有上游 PNG/SVG/PDF，优先用上游参考
-（见 `docs/validation-dxf-flange.md`）。
+（`--export-references` 的 ezdxf 导出保留为可选工具，但不再作为验收路径。）
 
-QCAD 字体：`osifont.ttf`（GPLv3，含 `osifont_license.txt`）与 `Standard/ltypeshp/
-qcadshp.cxf`（QCAD LICENSE.txt 声明为 public domain）已下载到本机字体缓存
-`~/sources/cad-test-fonts/qcad/`（**不入库**；CXF 当前字体引擎不支持，仅 osifont.ttf 可
-直接当 TTF 回退）。语料文本真正缺的是 §4 的 XDATA 字体提示：多数 QCAD STYLE 的 group 3
-为空、真实 TTF 名在 XDATA `1000`，锁定的 acadrust `TextStyle` 不暴露该字段，因此
-colors/linetypes/lineweights 的 MTEXT 无字体名可解析，仍 `Partial`。
+QCAD 字体：`osifont.ttf`（GPLv3）与 `Standard/ltypeshp/qcadshp.cxf`（public domain）已下载
+到本机缓存 `~/sources/cad-test-fonts/qcad/`（**不入库**；CXF 当前引擎不支持）。文本仍
+受 §4 的 XDATA 字体提示限制，因此 `Partial`，但图元类型本身**已支持**。
 
 ## 6. 结论
 
-- QCAD examples 语料：**解析与表示全部通过，模型空间无 `Unsupported` 几何**；文本受
-  §4 的 XDATA 字体限制，许多 MTEXT 仍 `Partial`。
-- 与 opencadstudio 的图元清单相比：本轮补齐了其中一批（LEADER/Polyline/ATTRIB/
-  Mesh/Polyface/Polygon/Wipeout/Helix），但**尚未达到“完全覆盖”**；剩余项见 §4，
-  不得声称已完整实现。
+- QCAD examples 语料：**解析/表示全部通过，`proxy-report` 零 `unsupported`**；`partial`
+  只剩字体/subclass 等保真度问题。
+- 与 opencadstudio 图元清单相比：`LEADER/Polyline/ATTRIB/Mesh/Polyface/Polygon/Wipeout/
+  Helix/Viewport/Tolerance/MLine/MultiLeader` 已接线（后三类为 `Partial`）；仍**未覆盖**
+  `Shape/Table/RasterImage/Ray/XLine/Underlay/Ole2Frame/Light/Section/ViewBorder/Seqend`
+  与部分 DIMENSION 子类，见 §4。**不得声称已完全覆盖 opencadstudio。**

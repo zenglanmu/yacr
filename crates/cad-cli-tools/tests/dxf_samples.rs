@@ -69,6 +69,34 @@ fn committed_qcad_examples_import_and_build_without_failures() {
     }
 }
 
+/// Every entity type exercised by the committed corpus (plus the flange sample)
+/// must have a display representation: no `render: unsupported`. This is the
+/// coverage gate the user asked for; `docs/dxf-entity-coverage.md` records the
+/// kinds that still have no representation and are therefore absent from the
+/// corpus.
+#[test]
+fn committed_qcad_examples_have_no_unsupported_entity_types() {
+    let mut files = corpus_files();
+    files.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/dxf/qcad-flange/flange.dxf"),
+    );
+    for file in files {
+        let report = run_json("proxy-report", &file);
+        let unsupported: Vec<String> = report["entity_types"]
+            .as_array()
+            .expect("entity_types is an array")
+            .iter()
+            .filter(|entry| entry["render"] == "unsupported")
+            .map(|entry| entry["type"].as_str().unwrap_or("?").to_string())
+            .collect();
+        assert!(
+            unsupported.is_empty(),
+            "{}: unsupported entity types {unsupported:?}",
+            file.display()
+        );
+    }
+}
+
 #[test]
 fn committed_qcad_leader_entities_have_a_display_representation() {
     // `entities.dxf` and `example01.dxf` contain LEADER entities. They must no

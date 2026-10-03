@@ -288,29 +288,93 @@ impl ImporterBuilder<'_> {
         }
     }
 
+    /// The TEXTSTYLE table name a handle points at, if any.
+    pub(crate) fn text_style_name_for_handle(&self, handle: acadrust::Handle) -> Option<String> {
+        if handle.is_null() {
+            return None;
+        }
+        self.acad
+            .text_styles
+            .iter()
+            .find(|style| style.handle.value() == handle.value())
+            .map(|style| style.name.clone())
+    }
+
     /// The text-style name a dimension style points at.
     ///
     /// The DXF reader fills `dimtxsty_handle` (group 340) but may leave the name
     /// at its default; resolve the handle against the TEXTSTYLE table so the
     /// measurement text uses the right font instead of the Standard SHX style.
-    fn dim_text_style(&self, name: &str) -> String {
+    pub(crate) fn dim_text_style(&self, name: &str) -> String {
         let Some(style) = self.acad.dim_styles.get(name) else {
             return "Standard".to_string();
         };
-        if !style.dimtxsty_handle.is_null() {
-            if let Some(text) = self
-                .acad
-                .text_styles
-                .iter()
-                .find(|text| text.handle.value() == style.dimtxsty_handle.value())
-            {
-                return text.name.clone();
-            }
+        if let Some(resolved) = self.text_style_name_for_handle(style.dimtxsty_handle) {
+            return resolved;
         }
         if !style.dimtxsty.is_empty() {
             return style.dimtxsty.clone();
         }
         "Standard".to_string()
+    }
+
+    /// Convert a MULTILEADER: its leader-root polylines plus the annotation
+    /// text. Block-content multileaders are reported `Partial` because the
+    /// content block is not expanded here.
+    pub(crate) fn multileader_semantics(
+        &self,
+        ml: &acadrust::entities::MultiLeader,
+    ) -> (SemanticGeometry, Completeness) {
+        let context = &ml.context;
+        let mut children: Vec<SemanticGeometry> = Vec::new();
+        for root in &context.leader_roots {
+            for line in &root.lines {
+                if line.points.len() >= 2 {
+                    children.push(polyline_semantics(
+                        line.points.iter().map(|p| p3(*p)).collect(),
+                        false,
+                    ));
+                }
+            }
+        }
+        let mut completeness = Completeness::Complete;
+        if context.has_text_contents && !context.text_string.is_empty() {
+            let style_name = context
+                .text_style_handle
+                .and_then(|handle| self.text_style_name_for_handle(handle))
+                .unwrap_or_else(|| "Standard".to_string());
+            let height = if context.text_height.is_finite() && context.text_height > 0.0 {
+                context.text_height
+            } else {
+                ml.text_height
+            };
+            children.push(SemanticGeometry::Text {
+                text: context.text_string.clone(),
+                position: p3(context.text_location),
+                style: self.style_id(&style_name),
+                height,
+                rotation: context.text_rotation,
+                font: self.style_font(&style_name),
+                h_align: TextAlignH::Left,
+                v_align: TextAlignV::Middle,
+            });
+        }
+        if context.has_block_contents {
+            completeness = completeness.combine(Completeness::Partial(vec![
+                "mleader block content is not expanded".into(),
+            ]));
+        }
+        if children.is_empty() {
+            return (
+                SemanticGeometry::Opaque {
+                    type_key: "AcDbMultiLeader".into(),
+                    version: 1,
+                    payload: Vec::new(),
+                },
+                Completeness::Partial(vec!["multileader has no leader lines or text".into()]),
+            );
+        }
+        (SemanticGeometry::Compound(children), completeness)
     }
 
     fn dimension_text(
