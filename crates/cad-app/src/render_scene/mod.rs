@@ -319,6 +319,18 @@ impl CadSceneController {
                         overlays.visibility.snap_hints,
                         &PreviewOptions::default(),
                     ));
+                    // Resolved object-snap hint markers are a separate concept
+                    // from the pointer-cursor crosses above: distinct shapes
+                    // encoding the snap kind, at their own draw order. Only
+                    // built when the host fed hints in *and* the overlay flag is
+                    // on; otherwise no batch, never an empty fabricated one.
+                    if overlays.visibility.snap_hints && !overlays.snap_hints_input.is_empty() {
+                        overlay.merge(snap_hint_overlay(
+                            &overlays.snap_hints_input,
+                            document,
+                            &PreviewOptions::default(),
+                        ));
+                    }
                 }
                 let delta = Arc::new(SceneDelta {
                     stamp: stamp.clone(),
@@ -777,6 +789,156 @@ mod tests {
             .highlight
             .added
             .is_empty());
+    }
+
+    fn snap_hint(kind: cad_measure::SnapKind, point: cad_domain::Point3) -> SnapHint {
+        cad_measure::SnapCandidate {
+            kind,
+            point,
+            space: cad_domain::SpaceId::Model,
+            source: cad_domain::SelectionRef {
+                document: DocumentId(73),
+                entity: cad_domain::EntityId(1),
+                instance: cad_domain::InstancePath::default(),
+                sub_element: None,
+            },
+            secondary: None,
+            precision: cad_domain::Precision::Analytic,
+            logical_pixel_distance: 0.0,
+        }
+    }
+
+    #[test]
+    fn snap_hints_draw_only_when_enabled_and_keep_the_base_and_annotations() {
+        let db = db_with_line();
+        let annotations = annotations_with_leader();
+        let mut controller = CadSceneController::default();
+        let layers = LayerOverrideSet::new();
+        let visibility = AnnotationVisibilitySet::new();
+
+        let off = OverlayInputs {
+            snap_hints_input: vec![snap_hint(
+                cad_measure::SnapKind::Endpoint,
+                cad_domain::Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )],
+            visibility: OverlayVisibility {
+                axes: false,
+                grid: false,
+                snap_hints: false,
+                selection_highlight: false,
+                ..OverlayVisibility::default()
+            },
+            ..OverlayInputs::default()
+        };
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                Some(&annotations),
+                &visibility,
+                &off,
+            )
+            .unwrap();
+        let base = controller.ready.as_ref().unwrap().base.clone();
+        let annotation_overlay = controller.ready.as_ref().unwrap().overlay.clone();
+        assert!(
+            controller
+                .ready
+                .as_ref()
+                .unwrap()
+                .highlight
+                .added
+                .is_empty(),
+            "snap_hints off must draw no snap-hint batch even when hints are fed"
+        );
+
+        let on = OverlayInputs {
+            snap_hints_input: vec![
+                snap_hint(
+                    cad_measure::SnapKind::Endpoint,
+                    cad_domain::Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                ),
+                snap_hint(
+                    cad_measure::SnapKind::Center,
+                    cad_domain::Point3 {
+                        x: 5.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                ),
+            ],
+            visibility: OverlayVisibility {
+                axes: false,
+                grid: false,
+                snap_hints: true,
+                selection_highlight: false,
+                ..OverlayVisibility::default()
+            },
+            ..OverlayInputs::default()
+        };
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                Some(&annotations),
+                &visibility,
+                &on,
+            )
+            .unwrap();
+        let after = controller.ready.as_ref().unwrap();
+        assert!(
+            Arc::ptr_eq(&base, &after.base),
+            "snap hints must not rebuild the base drawing"
+        );
+        assert!(
+            Arc::ptr_eq(&annotation_overlay, &after.overlay),
+            "snap hints must not rebuild the committed annotation overlay"
+        );
+        assert_eq!(
+            after.highlight.added.len(),
+            1,
+            "one bounded snap-hint batch"
+        );
+        assert_eq!(
+            after.highlight.added[0].draw_order,
+            crate::render_scene::SNAP_HINT_DRAW_ORDER
+        );
+        assert!(
+            after.highlight.added[0].draw_order > 900_000
+                && after.highlight.added[0].draw_order < crate::render_scene::PREVIEW_DRAW_ORDER
+        );
+
+        // Clearing the hints removes the batch but keeps the base/annotations.
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                Some(&annotations),
+                &visibility,
+                &overlays_without_reference(),
+            )
+            .unwrap();
+        let cleared = controller.ready.as_ref().unwrap();
+        assert!(cleared.highlight.added.is_empty());
+        assert!(Arc::ptr_eq(&base, &cleared.base));
+        assert!(Arc::ptr_eq(&annotation_overlay, &cleared.overlay));
     }
 
     /// An annotation database with one drawable leader (no fonts needed).
