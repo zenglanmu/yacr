@@ -44,8 +44,8 @@ export component Button inherits Rectangle {
     horizontal-stretch: 0;
     accessible-role: button;
     accessible-label: root.text;
-    background: root.checked ? CadTheme.selected : (touch.has-hover && root.enabled ? #f7faff : #00000000);
-    border-color: root.checked ? #91c3ff : CadTheme.border;
+    background: root.checked ? CadTheme.selected : (touch.has-hover && root.enabled ? #3f3f3f : #00000000);
+    border-color: root.checked ? #5aa0ff : CadTheme.border;
     border-width: root.checked || touch.has-hover ? 1px : 0px;
     border-radius: 3px;
     label := Text {
@@ -55,20 +55,20 @@ export component Button inherits Rectangle {
         height: root.stacked ? 26px : parent.height;
         text: root.icon-only ? (root.vector-icon ? "" : root.symbol) : (root.stacked || root.vector-icon || root.symbol == "" ? root.text : root.symbol + " " + root.text);
         font-size: root.icon-only ? 24px : 14px;
-        color: !root.enabled ? #98a3b0 : (root.checked ? CadTheme.accent : root.foreground);
+        color: !root.enabled ? #6f6f6f : (root.checked ? CadTheme.accent : root.foreground);
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
     }
     if root.stacked && !root.vector-icon : Text {
         height: parent.height - 26px; text: root.symbol; font-size: 30px;
-        color: !root.enabled ? #98a3b0 : (root.checked ? CadTheme.accent : #164f90);
+        color: !root.enabled ? #6f6f6f : (root.checked ? CadTheme.accent : CadTheme.ink);
         horizontal-alignment: center; vertical-alignment: center;
     }
     if root.vector-icon : Image {
         x: root.stacked || root.icon-only ? (parent.width - self.width) / 2 : 4px; y: root.stacked ? 8px : (parent.height - self.height) / 2;
         width: root.stacked ? 32px : 24px; height: self.width; source: root.icon;
-        colorize: !root.enabled ? #98a3b0 : (root.symbol == "☁" ? #f24e4e : (root.checked ? CadTheme.accent : root.foreground));
+        colorize: !root.enabled ? #6f6f6f : (root.symbol == "☁" ? #f24e4e : (root.checked ? CadTheme.accent : root.foreground));
     }
     touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }

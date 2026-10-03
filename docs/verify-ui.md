@@ -58,6 +58,11 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
    真实 `WindowEvent` 滚轮缩放与左键拖动平移、**2D→3D→2D 无损往返（合成帧逐像素
    相等）**、canvas-only 预设、中英切换、侧车导出/回导、桌面/紧凑/移动/窄屏尺寸矩阵。
 
+   外观与命令面（对应用户“UI 匹配 AutoCAD 风格 + 关注其它操作”）：
+   **AutoCAD 深色外观像素检查**（标题条/Ribbon 标签/侧栏/画布平均亮度必须为深色）、
+   命令输入区驱动真实操作（`TOOLS`/`PANELS` 开关、`LINE`+`ESC`、`CIRCLE` 未取点
+   `CONFIRM` 显式拒绝且保留捕获、`MOVE` 无选择显式拒绝、未知命令显式报错、`FIT`）。
+
    注意：合成 demo 未加载宿主字体，`AnnotationGeometry::Text` 在无字体引擎时显式
    `annotation.text_unshaped` 且不绘制；`Measurement` 批注按设计不进叠加层。因此显隐
    像素断言使用不依赖字体的矩形批注，而不是把“文字没画”误判成显隐失效。

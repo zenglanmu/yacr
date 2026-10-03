@@ -1,5 +1,12 @@
 # Concept 界面重设计（2026-10-03）
 
+> 后续轮（2026-10-03）：按用户要求把外观从“浅银色 concept”改为 **AutoCAD 风格深色**
+> （`ui/theme.slint`：深灰 chrome/panel、浅色文字、蓝色选中、近黑模型空间；并设
+> `Palette.color-scheme = dark` 让 std-widgets 的命令栏/下拉/按钮/进度条也变深）。
+> 布局结构与规格描述（Ribbon、图层/属性面板、浮动工具栏、命令输入区、模型/布局标签、
+> 状态栏）不变。`concept_offscreen` 的“chrome 是浅色”断言相应改为“chrome 为深色”。
+> 下面里程碑 2 的“浅银色 chrome”为历史描述，不再代表当前外观。
+
 设计依据为 `ui-spec/ui-desc.md` 和四张 concept 图；图中图纸/尺寸是参考内容，不作为产品假数据。
 
 ## 里程碑

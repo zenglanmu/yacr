@@ -34,16 +34,61 @@ fn shoot(app: &LinuxApp, dir: &Option<PathBuf>, name: &str) {
     std::fs::write(dir.join(format!("{name}.png")), encode_png(&frame).unwrap()).unwrap();
 }
 
-/// Pump the shared renderer and return the composited frame without writing it.
-fn frame(app: &LinuxApp) -> Vec<u8> {
-    let mut pixels = Vec::new();
-    for _ in 0..4 {
-        pixels = cad_ui_slint::offscreen::snapshot(app.adapter.window())
-            .unwrap()
-            .pixels;
+/// Pump the shared renderer and return the composited frame.
+fn frame_rgba(app: &LinuxApp) -> cad_render_wgpu::headless::RgbaImage {
+    let mut image = cad_ui_slint::offscreen::snapshot(app.adapter.window()).unwrap();
+    for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(3));
+        image = cad_ui_slint::offscreen::snapshot(app.adapter.window()).unwrap();
     }
-    pixels
+    image
+}
+
+/// Pump the shared renderer and return the composited pixels without writing.
+fn frame(app: &LinuxApp) -> Vec<u8> {
+    frame_rgba(app).pixels
+}
+
+/// Mean perceptual luminance of a logical-pixel region, sampled sparsely.
+fn region_luma(image: &cad_render_wgpu::headless::RgbaImage, rect: [f64; 4]) -> f64 {
+    let x0 = rect[0].max(0.0) as u32;
+    let y0 = rect[1].max(0.0) as u32;
+    let x1 = (rect[0] + rect[2]).min(image.width as f64) as u32;
+    let y1 = (rect[1] + rect[3]).min(image.height as f64) as u32;
+    let mut total = 0.0;
+    let mut count = 0.0;
+    let mut y = y0;
+    while y < y1 {
+        let mut x = x0;
+        while x < x1 {
+            let [r, g, b, _] = image.pixel(x, y);
+            total += 0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64;
+            count += 1.0;
+            x += 2;
+        }
+        y += 2;
+    }
+    if count == 0.0 {
+        0.0
+    } else {
+        total / count
+    }
+}
+
+/// AutoCAD-style dark frame: chrome, ribbon, panels and canvas are all dark.
+fn assert_autocad_dark(image: &cad_render_wgpu::headless::RgbaImage) {
+    for (region, rect) in [
+        ("title strip", [400.0, 4.0, 400.0, 26.0]),
+        ("ribbon tabs", [260.0, 44.0, 640.0, 30.0]),
+        ("side panel", [20.0, 300.0, 180.0, 260.0]),
+        ("canvas", [260.0, 200.0, 140.0, 300.0]),
+    ] {
+        let luma = region_luma(image, rect);
+        assert!(
+            luma < 120.0,
+            "{region} must be AutoCAD-dark, got mean luma {luma:.1}"
+        );
+    }
 }
 
 /// A pick pair inside the canvas, in canvas-local logical coordinates.
@@ -79,6 +124,9 @@ fn verify_ui_fixed_scenario_replay() {
     app.adapter.component().show().unwrap();
     let ui = app.adapter.component();
     shoot(&app, &dir, "00-desktop-initial");
+
+    // --- AutoCAD-style dark application frame (chrome/panels/canvas) --------
+    assert_autocad_dark(&frame_rgba(&app));
 
     // --- measurement: open-ended tool is explicitly confirmable, and cancel
     //     never writes an annotation -----------------------------------------
@@ -346,6 +394,68 @@ fn verify_ui_fixed_scenario_replay() {
         "importing the sidecar we just wrote must not fail: {}",
         ui.get_status_label()
     );
+
+    // --- command line drives the same real operations as the ribbon ---------
+    // AutoCAD convention: the command area is a first-class control surface.
+    let ribbon_before = ui.get_ribbon_expanded();
+    ui.invoke_command_submitted("TOOLS".into());
+    assert_ne!(
+        ribbon_before,
+        ui.get_ribbon_expanded(),
+        "TOOLS must toggle the ribbon"
+    );
+    ui.invoke_command_submitted("TOOLS".into());
+
+    let panel_before = ui.get_side_panel_open();
+    ui.invoke_command_submitted("PANELS".into());
+    assert_ne!(
+        panel_before,
+        ui.get_side_panel_open(),
+        "PANELS must toggle the side panel"
+    );
+    ui.invoke_command_submitted("PANELS".into());
+
+    ui.invoke_command_submitted("LINE".into());
+    assert!(
+        ui.get_draw_tool_active(),
+        "the LINE command must start a capture"
+    );
+    ui.invoke_command_submitted("ESC".into());
+    assert!(
+        !ui.get_draw_tool_active(),
+        "ESC must cancel the active capture"
+    );
+
+    ui.invoke_command_submitted("CIRCLE".into());
+    assert!(ui.get_draw_tool_active(), "CIRCLE must start a capture");
+    ui.invoke_command_submitted("CONFIRM".into());
+    assert!(
+        ui.get_draw_tool_active() && ui.get_status_label().contains("参数无效"),
+        "an incomplete CIRCLE must be refused explicitly and keep the capture: {}",
+        ui.get_status_label()
+    );
+    ui.invoke_command_submitted("ESC".into());
+    assert!(!ui.get_draw_tool_active());
+
+    ui.invoke_command_submitted("MOVE".into());
+    assert!(
+        !ui.get_draw_tool_active(),
+        "MOVE without a selection must not start"
+    );
+    assert!(
+        ui.get_status_label().contains("选择"),
+        "the MOVE refusal must be explicit: {}",
+        ui.get_status_label()
+    );
+
+    ui.invoke_command_submitted("NOPE".into());
+    assert!(
+        ui.get_status_label().contains("NOPE"),
+        "an unknown command must be reported, not silently ignored: {}",
+        ui.get_status_label()
+    );
+    ui.invoke_command_submitted("FIT".into());
+    assert!(!frame(&app).is_empty(), "FIT must leave a rendered frame");
 
     // --- resize matrix: canvas stays inside the window ----------------------
     for (name, size) in [

@@ -1,5 +1,5 @@
 // Slint composition root. CAD business state is pushed from the Rust adapter.
-import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit, ProgressIndicator } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit, ProgressIndicator, Palette } from "std-widgets.slint";
 import { CadRibbon } from "ribbon.slint";
 import { CadCommandBar } from "command-bar.slint";
 import { CadCanvas } from "canvas.slint";
@@ -14,6 +14,10 @@ export component YacrWindow inherits Window {
     default-font-family: "Yacr UI";
     default-font-size: 14px;
     min-width: 0px; min-height: 0px;
+    // AutoCAD-style dark frame: make the shared std-widgets (command line,
+    // combo boxes, confirm buttons, progress) use the dark Fluent palette
+    // instead of the default light one.
+    init => { Palette.color-scheme = ColorScheme.dark; }
     out property <length> cad-width: canvas-area.width;
     out property <length> cad-height: canvas-area.height;
     out property <length> cad-top: workspace-area.y + canvas-area.y;
@@ -331,14 +335,14 @@ export component YacrWindow inherits Window {
             }
             if root.application-ui && root.navigation-visible : Rectangle {
                 x: parent.width - 64px; y: 20px; width: 48px; height: 192px;
-                border-radius: 8px; border-width: 1px; border-color: #7b8793; background: #303a44dd;
-                ConceptButton { y: 0px; text: root.fit-label; symbol: "⊡"; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
+                border-radius: 8px; border-width: 1px; border-color: #5a5a5a; background: #2b2b2bdd;
+                ConceptButton { y: 0px; text: root.fit-label; symbol: "⊡"; foreground: #d9d9d9; icon-only: true; width: 48px; height: 48px;
                     clicked => { root.fit-requested(); } }
-                ConceptButton { y: 48px; text: root.pan-label; symbol: "pan"; checked: root.pan-active; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
+                ConceptButton { y: 48px; text: root.pan-label; symbol: "pan"; checked: root.pan-active; foreground: #d9d9d9; icon-only: true; width: 48px; height: 48px;
                     clicked => { root.pan-requested(); } }
-                ConceptButton { y: 96px; text: root.zoom-in-label; symbol: "zoom-in"; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
+                ConceptButton { y: 96px; text: root.zoom-in-label; symbol: "zoom-in"; foreground: #d9d9d9; icon-only: true; width: 48px; height: 48px;
                     clicked => { root.zoom-requested(1.25); } }
-                ConceptButton { y: 144px; text: root.zoom-out-label; symbol: "zoom-out"; foreground: #e0e8f0; icon-only: true; width: 48px; height: 48px;
+                ConceptButton { y: 144px; text: root.zoom-out-label; symbol: "zoom-out"; foreground: #d9d9d9; icon-only: true; width: 48px; height: 48px;
                     clicked => { root.zoom-requested(0.8); } }
             }
             if root.application-ui && root.layouts-visible && root.phone-shell : ComboBox {

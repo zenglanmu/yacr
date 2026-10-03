@@ -18,6 +18,20 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**verify-ui 循环轮 A：AutoCAD 深色外观 + 命令面操作（本轮）**：按用户要求把循环焦点从
+批注转到“UI 匹配 AutoCAD 风格 + 其它操作”。外观：`ui/theme.slint` 改为 AutoCAD 深色
+（深灰 chrome/panel、浅色文字、蓝色选中、近黑模型空间），`ribbon`/`button`/`canvas`/
+浮动工具栏的硬编码浅色同步；`YacrWindow` 设 `Palette.color-scheme = dark`，使
+std-widgets 的命令栏输入、下拉、确认按钮、进度条也变深（此前为浅色，与深色 chrome 冲突）。
+`concept_offscreen` 的“chrome 为浅色”像素断言改为“chrome 为深色”。场景新增：
+标题/Ribbon/侧栏/画布**平均亮度深色检查**，以及命令输入区真实操作（`TOOLS`/`PANELS`
+开关、`LINE`+`ESC`、`CIRCLE` 未取点 `CONFIRM` 显式报“参数无效”且保留捕获、`MOVE` 无选择
+显式报“移动需要先选择对象”、未知命令显式报错、`FIT`）。迭代修复：`ColorScheme` 是内建
+枚举不能从 `std-widgets.slint` 导入（首次编译失败已记录并改正）；场景初版把不完整
+`CIRCLE` 的拒绝文案猜成“点”，实际为 `draw.error.invalid`（“参数无效”），按真实目录修正。
+证据见 `docs/verify-ui.md`、`docs/ui-redesign.md` 顶部说明；仍为软件 Vulkan/合成图纸。
+
+
 **verify-ui 无头 UI 循环（本轮）**：新增轻量入口 `scripts/verify-ui.sh` +
 `scripts/verify-ui-summary.py`，对应测试计划第二层：用 Slint 官方 offscreen 平台
 （`Platform`/`WindowAdapter` + FemtoVGWGPURenderer）+ Mesa lavapipe 软件 Vulkan，实际

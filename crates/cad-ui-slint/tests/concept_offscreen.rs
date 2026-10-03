@@ -91,7 +91,13 @@ fn concept_shell_renders_on_lavapipe_and_canvas_only_removes_hit_regions() {
     let frame = pump(&adapter);
     save("desktop", &frame);
     assert_eq!((frame.width, frame.height), (1280, 800));
-    assert!(frame.pixel(1100, 10)[0] > 180, "concept chrome is light");
+    // AutoCAD-style dark application frame: the title strip is dark, not the
+    // light "concept" chrome it replaced.
+    assert!(
+        frame.pixel(1100, 10)[0] < 100,
+        "chrome must be AutoCAD-dark"
+    );
+    assert!(frame.pixel(700, 10)[0] < 100, "ribbon strip must be dark");
     let (desktop_rect, _) = adapter.handle().shell_geometry().unwrap();
     assert_eq!(desktop_rect[0], 240.0, "desktop dock is beside the canvas");
     assert!(desktop_rect[1] > 100.0);

@@ -44,7 +44,7 @@ export component CadRibbon inherits Rectangle {
                 padding: 0px; spacing: 0px; alignment: start;
                 for label[index] in root.tabs : Rectangle {
                     width: root.phone ? 70px : 96px;
-                    background: root.tab == index ? #f4f7fa : #00000000;
+                    background: root.tab == index ? #3f3f3f : #00000000;
                     Text { text: label; color: root.tab == index ? CadTheme.accent : CadTheme.ink;
                         horizontal-alignment: center; vertical-alignment: center; }
                     if root.tab == index : Rectangle { y: parent.height - 3px; height: 3px; x: 10px; width: parent.width - 20px; background: CadTheme.accent; }

@@ -1,10 +1,13 @@
 export global CadTheme {
-    out property <brush> chrome: @linear-gradient(90deg, #edf1f5, #d8dfe7);
-    out property <color> panel: #e2e7ed;
-    out property <color> border: #b5c1ce;
-    out property <color> ink: #242e3b;
-    out property <color> muted: #637285;
-    out property <color> accent: #087dff;
-    out property <color> selected: #d0e5ff;
-    out property <color> canvas: #1b242b;
+    // AutoCAD-style dark application frame: dark neutral chrome, light icons,
+    // a blue highlight for the active/selected control, and a near-black model
+    // space. Kept as one palette so every component restyles together.
+    out property <brush> chrome: @linear-gradient(90deg, #3a3a3a, #2e2e2e);
+    out property <color> panel: #2b2b2b;
+    out property <color> border: #4a4a4a;
+    out property <color> ink: #d9d9d9;
+    out property <color> muted: #9a9a9a;
+    out property <color> accent: #4f9bff;
+    out property <color> selected: #2a4d78;
+    out property <color> canvas: #1e1e1e;
 }
