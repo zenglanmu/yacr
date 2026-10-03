@@ -489,7 +489,7 @@ fn generate(geometry: &SemanticGeometry, probe: Option<Point3>, out: &mut Vec<Ra
                 generate(child, probe, out, &format!("{prefix}child:{i}:"));
             }
         }
-        G::Mesh(_) | G::Insert { .. } | G::Text { .. } | G::Opaque { .. } => {}
+        G::Mesh(_) | G::Insert { .. } | G::Text { .. } | G::Shape { .. } | G::Opaque { .. } => {}
     }
 }
 

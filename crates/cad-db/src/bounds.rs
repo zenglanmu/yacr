@@ -119,6 +119,10 @@ impl BoundsAccumulator {
                     z: p.z,
                 });
             }
+            SemanticGeometry::Shape { position, size, .. } => {
+                let r = size.abs().max(1e-9) * transform_scale(transform);
+                self.add_sphere_transformed(*position, r, transform);
+            }
             SemanticGeometry::Opaque { .. } => {}
             SemanticGeometry::Compound(children) => {
                 for child in children {

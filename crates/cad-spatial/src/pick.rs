@@ -302,6 +302,20 @@ pub fn hit_geometry(
             ),
             None => PickOutcome::Miss,
         },
+        SemanticGeometry::Shape { position, .. } => {
+            // The glyph outline needs the font; pick the anchor point.
+            let world = transform.apply_point(*position);
+            match segment_hit(ray, world, world, options.tolerance) {
+                Some((t, offset, point)) => hit(
+                    t,
+                    offset,
+                    point,
+                    Precision::Analytic,
+                    GeometrySource::Analytic,
+                ),
+                None => PickOutcome::Miss,
+            }
+        }
         SemanticGeometry::Point(p) => {
             let world = transform.apply_point(*p);
             match segment_hit(ray, world, world, options.tolerance) {

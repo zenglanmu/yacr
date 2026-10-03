@@ -129,6 +129,12 @@ pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
             rotation,
             ..
         } => finite(*position) && height.is_finite() && rotation.is_finite(),
+        G::Shape {
+            position,
+            size,
+            rotation,
+            ..
+        } => finite(*position) && size.is_finite() && rotation.is_finite(),
         G::Opaque { .. } => true,
         G::Compound(children) => children.iter().all(geometry_is_finite),
     }

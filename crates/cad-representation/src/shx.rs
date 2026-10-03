@@ -72,7 +72,7 @@ impl ShxFont {
         self.glyph_by_code(code, size)
     }
 
-    fn glyph_by_code(&self, code: u32, size: f64) -> Option<ShxGlyph> {
+    pub(crate) fn glyph_by_code(&self, code: u32, size: f64) -> Option<ShxGlyph> {
         if code == 0 {
             return None;
         }

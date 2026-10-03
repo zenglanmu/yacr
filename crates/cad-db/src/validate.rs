@@ -192,6 +192,22 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                 return Err(degenerate("text rotation is non-finite"));
             }
         }
+        SemanticGeometry::Shape {
+            position,
+            size,
+            rotation,
+            ..
+        } => {
+            if !finite(*position) {
+                return Err(degenerate("shape position is non-finite"));
+            }
+            if !size.is_finite() || *size <= 0.0 {
+                return Err(degenerate("shape size must be positive and finite"));
+            }
+            if !rotation.is_finite() {
+                return Err(degenerate("shape rotation is non-finite"));
+            }
+        }
         SemanticGeometry::Opaque { .. } => {
             // Opaque geometry has no numeric content to judge; a style-only edit
             // of an imported proxy must remain possible.

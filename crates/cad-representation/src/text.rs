@@ -328,6 +328,53 @@ impl FontEngine {
             .map(String::as_str)
     }
 
+    /// Outline one SHX shape glyph (by shape code) into world-space polylines.
+    ///
+    /// Returns `Unsupported` when `font_key` does not resolve to an SHX shape
+    /// font and `InvalidInput` when the code is absent, so a SHAPE entity is
+    /// never silently dropped or guessed.
+    pub fn shape_glyph(
+        &self,
+        font_key: &str,
+        code: u32,
+        origin: Point3,
+        size: f64,
+        rotation: f64,
+    ) -> CadResult<Vec<Vec<Point3>>> {
+        if !size.is_finite() || size <= 0.0 {
+            return Err(CadError::InvalidInput(
+                "shape size must be positive and finite".into(),
+            ));
+        }
+        let Some(face) = self.lookup(font_key) else {
+            return Err(self.chain_error(font_key));
+        };
+        let FaceData::Shx(font) = &*face else {
+            return Err(CadError::Unsupported(format!(
+                "font '{font_key}' is not an SHX shape font"
+            )));
+        };
+        let glyph = font.glyph_by_code(code, size).ok_or_else(|| {
+            CadError::InvalidInput(format!("shape code {code} is not in font '{font_key}'"))
+        })?;
+        let (sin, cos) = rotation.sin_cos();
+        Ok(glyph
+            .polylines
+            .iter()
+            .filter(|polyline| polyline.len() >= 2)
+            .map(|polyline| {
+                polyline
+                    .iter()
+                    .map(|p| Point3 {
+                        x: origin.x + p[0] * cos - p[1] * sin,
+                        y: origin.y + p[0] * sin + p[1] * cos,
+                        z: origin.z,
+                    })
+                    .collect()
+            })
+            .collect())
+    }
+
     /// Parse MTEXT/TEXT formatting in `raw` and shape it into world polylines.
     ///
     /// This is the rich counterpart to [`outline`](Self::outline): it honours
@@ -1833,6 +1880,53 @@ fn push_stacked_fraction(chars: &[char], backslash: usize, out: &mut String) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Synthetic SHAPES font (no third-party bytes embedded).
+    fn synthetic_shapes_font() -> Arc<[u8]> {
+        let info = b"Synthetic\0\x78\x14\x02\0";
+        let glyph = b"H\0\x01\x08\0\x78\0";
+        let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
+        for value in [0u16, 72, 2, 0, info.len() as u16, 72, glyph.len() as u16] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(info);
+        bytes.extend(glyph);
+        Arc::from(bytes.into_boxed_slice())
+    }
+
+    #[test]
+    fn shape_glyph_outlines_an_shx_shape_at_its_code() {
+        let mut engine = FontEngine::new();
+        engine
+            .register("ltypeshp.shx", synthetic_shapes_font())
+            .unwrap();
+        let polylines = engine
+            .shape_glyph(
+                "ltypeshp.shx",
+                72,
+                Point3 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 0.0,
+                },
+                14.0,
+                0.0,
+            )
+            .unwrap();
+        assert!(!polylines.is_empty());
+        assert!(polylines.iter().all(|p| p.len() >= 2));
+        // The glyph is translated to the entity position.
+        assert!(polylines
+            .iter()
+            .flatten()
+            .any(|p| (p.x - 1.0).abs() > 1e-9 || (p.y - 2.0).abs() > 1e-9));
+        assert!(engine
+            .shape_glyph("ltypeshp.shx", 999, Point3::default(), 14.0, 0.0)
+            .is_err());
+        assert!(engine
+            .shape_glyph("missing", 72, Point3::default(), 14.0, 0.0)
+            .is_err());
+    }
 
     #[test]
     fn sanitize_handles_mtext_and_text_codes() {

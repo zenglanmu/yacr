@@ -117,7 +117,7 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
                 },
             ]
         }
-        G::Mesh(_) | G::Insert { .. } | G::Opaque { .. } => Vec::new(),
+        G::Mesh(_) | G::Insert { .. } | G::Opaque { .. } | G::Shape { .. } => Vec::new(),
         G::Compound(children) => {
             let mut out = Vec::new();
             for child in children {

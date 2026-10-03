@@ -478,6 +478,31 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::XLine(x) => {
                 ray_semantics(p3(x.base_point), p3(x.direction), false, self.model_bounds)
             }
+            EntityType::Shape(s) => {
+                let code = if s.shape_number > 0 {
+                    s.shape_number as u32
+                } else {
+                    0
+                };
+                let completeness = if code == 0 && !s.shape_name.is_empty() {
+                    Completeness::Partial(vec![
+                        "shape is referenced by name; only shape codes are resolved".into(),
+                    ])
+                } else {
+                    Completeness::Complete
+                };
+                (
+                    SemanticGeometry::Shape {
+                        shape_name: s.shape_name.clone(),
+                        code,
+                        position: p3(s.insertion_point),
+                        size: s.size,
+                        rotation: s.rotation,
+                        font: self.style_font(&s.style_name),
+                    },
+                    completeness,
+                )
+            }
             EntityType::Solid3D(s) => acis_semantics(entity, &s.acis_data),
             EntityType::Region(r) => acis_semantics(entity, &r.acis_data),
             EntityType::Body(b) => acis_semantics(entity, &b.acis_data),

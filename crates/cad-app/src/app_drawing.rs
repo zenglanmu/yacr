@@ -521,6 +521,7 @@ pub(crate) fn class_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Mesh(_) => "AcDbSubDMesh",
         SemanticGeometry::Insert { .. } => "AcDbBlockReference",
         SemanticGeometry::Text { .. } => "AcDbText",
+        SemanticGeometry::Shape { .. } => "AcDbShape",
         SemanticGeometry::Point(_) => "AcDbPoint",
         SemanticGeometry::Opaque { .. } => "AcDbUnknown",
         SemanticGeometry::Compound(_) => "AcDbCompound",

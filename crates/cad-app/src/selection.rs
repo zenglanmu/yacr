@@ -358,6 +358,29 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
                 font.clone().unwrap_or_else(|| "unknown".to_string()),
             ),
         ],
+        SemanticGeometry::Shape {
+            shape_name,
+            code,
+            position,
+            size,
+            font,
+            ..
+        } => vec![
+            PropertyRow::new(
+                "shape",
+                if shape_name.is_empty() {
+                    code.to_string()
+                } else {
+                    shape_name.clone()
+                },
+            ),
+            PropertyRow::new("position", point_label(*position)),
+            PropertyRow::new("size", format!("{size:.6}")),
+            PropertyRow::new(
+                "font",
+                font.clone().unwrap_or_else(|| "unknown".to_string()),
+            ),
+        ],
         SemanticGeometry::Opaque {
             type_key,
             version,

@@ -246,6 +246,21 @@ impl GeometryEngine for DefaultGeometryEngine {
                 h_align: *h_align,
                 v_align: *v_align,
             },
+            G::Shape {
+                shape_name,
+                code,
+                position,
+                size,
+                rotation,
+                font,
+            } => G::Shape {
+                shape_name: shape_name.clone(),
+                code: *code,
+                position: tp(*position),
+                size: size * uniform_scale(t),
+                rotation: rotation + rotation_of(t),
+                font: font.clone(),
+            },
             G::Opaque {
                 type_key,
                 version,

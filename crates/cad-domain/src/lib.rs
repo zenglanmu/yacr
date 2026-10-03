@@ -324,6 +324,17 @@ pub enum SemanticGeometry {
         /// Vertical placement of the run relative to `position`.
         v_align: TextAlignV,
     },
+    /// A SHAPE entity: one glyph of a compiled SHX shape font, referenced by
+    /// shape code (or, when `code` is 0, by `shape_name`). `font` is the style's
+    /// font key; the representation layer resolves and outlines it.
+    Shape {
+        shape_name: String,
+        code: u32,
+        position: Point3,
+        size: f64,
+        rotation: f64,
+        font: Option<String>,
+    },
     Opaque {
         type_key: String,
         version: u32,

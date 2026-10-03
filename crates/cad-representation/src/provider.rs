@@ -367,6 +367,60 @@ impl DefaultRepresentationProvider {
                     });
                 }
             }
+            SemanticGeometry::Shape {
+                shape_name,
+                code,
+                position,
+                size,
+                rotation,
+                font,
+            } => {
+                if *code == 0 {
+                    representation.completeness = Completeness::Partial(vec![format!(
+                        "shape '{shape_name}' is referenced by name; only shape codes are resolved"
+                    )]);
+                } else if let (Some(engine), Some(key)) = (&context.fonts, font.as_deref()) {
+                    match engine.shape_glyph(key, *code, *position, size.abs(), *rotation) {
+                        Ok(polylines) => {
+                            for polyline in polylines {
+                                if polyline.len() >= 2 {
+                                    representation.fragments.push(DisplayFragment {
+                                        source: source.clone(),
+                                        geometry_source: geometry_source.clone(),
+                                        precision: Precision::Analytic,
+                                        alpha: 1.0,
+                                        color: DEFAULT_RENDER_COLOR,
+                                        color_unresolved: true,
+                                        lineweight: DEFAULT_LINEWEIGHT_MM,
+                                        lineweight_unresolved: true,
+                                        linetype: LinetypePattern::continuous(),
+                                        linetype_unresolved: true,
+                                        linetype_scale: 1.0,
+                                        primitive: DisplayPrimitive::Lines(Arc::from(
+                                            polyline.into_boxed_slice(),
+                                        )),
+                                    });
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            representation.completeness = Completeness::Partial(vec![format!(
+                                "shape font '{key}' unavailable: {error}"
+                            )]);
+                            representation.diagnostics.push(Diagnostic {
+                                object: Some(ObjectId(entity.id.0)),
+                                code: "shape.font_unavailable".into(),
+                                message: error.to_string(),
+                            });
+                        }
+                    }
+                } else {
+                    representation.completeness =
+                        Completeness::Partial(
+                            vec!["shape has no resolvable SHX shape font".into()],
+                        );
+                }
+            }
             SemanticGeometry::Opaque { type_key, .. } => {
                 representation.completeness =
                     Completeness::Missing(vec!["no display representation in this build".into()]);

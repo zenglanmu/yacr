@@ -204,6 +204,11 @@ pub fn transform_geometry(
                 "transform of Spline entities is not supported".to_string(),
             ));
         }
+        SemanticGeometry::Shape { .. } => {
+            return Err(CadError::Unsupported(
+                "transform of Shape entities is not supported".to_string(),
+            ));
+        }
         SemanticGeometry::Opaque { .. } => {
             return Err(CadError::Unsupported(
                 "transform of opaque/proxy entities is not supported".to_string(),
