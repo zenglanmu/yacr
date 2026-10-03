@@ -67,6 +67,49 @@ fn shell_reaches_every_merged_panel_and_layout_list() {
 }
 
 #[test]
+fn phone_drawer_reaches_the_layout_list() {
+    // The desktop tabs are hidden on a phone, so the drawer opened by the
+    // bottom "more" entry must carry the same real layout list. Locate that
+    // drawer block by its gate and assert the layout controls live inside it,
+    // not merely somewhere else in the component.
+    let gate = "root.phone-shell && root.tools-open && root.layouts-visible";
+    let start = UI_DEFINITION
+        .find(gate)
+        .expect("phone drawer must gate the layout strip on its open state");
+    // The drawer block ends at the next top-level branch; the phone bottom bar
+    // is the following `root.phone-shell : Rectangle` arm.
+    let tail = &UI_DEFINITION[start..];
+    let end = tail
+        .find("if root.application-ui && root.phone-shell : Rectangle")
+        .expect("phone bottom bar must follow the drawer layout strip");
+    let drawer = &tail[..end];
+
+    for marker in [
+        "layout-rows",
+        "layout-selected",
+        "layout-empty-label",
+        "layout-model-space-label",
+        "row.supported",
+        "root.layout-active-index == index",
+    ] {
+        assert!(
+            drawer.contains(marker),
+            "phone drawer layout strip must bind {marker}"
+        );
+    }
+    // Model space (index -1) is offered exactly like the desktop tabs.
+    assert!(
+        drawer.contains("root.layout-selected(-1)"),
+        "phone drawer must keep model space reachable"
+    );
+    // The desktop tabs are untouched and still not shown on a phone.
+    assert!(
+        UI_DEFINITION.contains("root.layouts-visible && !root.phone-shell"),
+        "desktop layout tabs must remain the wide/desktop branch"
+    );
+}
+
+#[test]
 fn layout_rows_and_active_index_are_pushed_faithfully() {
     let mut state = LayoutPanelState::default();
     state.rows.push(LayoutRowUi {
