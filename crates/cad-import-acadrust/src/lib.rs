@@ -394,6 +394,9 @@ struct ImporterBuilder<'a> {
     model_render: SupportStatus,
     model_drawable: bool,
     model_render_types: BTreeSet<String>,
+    /// Running model-space bounding box, used to clip RAY/XLINE construct lines
+    /// (a fixed viewport has no per-view clip).
+    model_bounds: Option<(Point3, Point3)>,
 }
 
 /// A block child classified for display, before nesting is resolved.

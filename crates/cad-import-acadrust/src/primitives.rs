@@ -207,6 +207,92 @@ pub(crate) fn tolerance_frame(t: &acadrust::entities::Tolerance) -> (SemanticGeo
     (polyline_semantics(points, true), frame_width, frame_height)
 }
 
+/// An infinite construct line (RAY / XLINE) clipped to an XY box.
+///
+/// A fixed-viewport render has no per-view clipping, so the line is clipped to
+/// the drawing's model bounds (tracked as entities are imported). When no other
+/// geometry has been seen yet a default 1000-unit box is used and the result is
+/// reported `Partial`, because the clip length is then a guess rather than the
+/// real drawing extent.
+pub(crate) fn ray_semantics(
+    base: Point3,
+    direction: Point3,
+    is_ray: bool,
+    bounds: Option<(Point3, Point3)>,
+) -> (SemanticGeometry, Completeness) {
+    let opaque = || SemanticGeometry::Opaque {
+        type_key: if is_ray {
+            "AcDbRay".into()
+        } else {
+            "AcDbXline".into()
+        },
+        version: 1,
+        payload: Vec::new(),
+    };
+    if !cad_geometry::is_finite(base)
+        || !cad_geometry::is_finite(direction)
+        || cad_geometry::length(direction) < 1e-12
+    {
+        return (
+            opaque(),
+            Completeness::Partial(vec!["ray/xline direction is degenerate".into()]),
+        );
+    }
+    let direction = cad_geometry::normalize(direction);
+    let (min, max, margin, note) = match bounds {
+        Some((lo, hi)) => {
+            let margin = (cad_geometry::distance(lo, hi) * 0.05).max(1.0);
+            (lo, hi, margin, None)
+        }
+        None => (
+            Point3 {
+                x: base.x - 1.0e3,
+                y: base.y - 1.0e3,
+                z: 0.0,
+            },
+            Point3 {
+                x: base.x + 1.0e3,
+                y: base.y + 1.0e3,
+                z: 0.0,
+            },
+            0.0,
+            Some("ray/xline clipped to a default 1000-unit box; no drawing bounds were available"),
+        ),
+    };
+    let min = Point3 {
+        x: min.x - margin,
+        y: min.y - margin,
+        z: 0.0,
+    };
+    let max = Point3 {
+        x: max.x + margin,
+        y: max.y + margin,
+        z: 0.0,
+    };
+    let span = ((max.x - min.x).abs().max((max.y - min.y).abs()) * 4.0).max(1.0);
+    let a = if is_ray {
+        base
+    } else {
+        cad_geometry::add(base, cad_geometry::scale(direction, -span))
+    };
+    let b = cad_geometry::add(base, cad_geometry::scale(direction, span));
+    let completeness = match note {
+        Some(reason) => Completeness::Partial(vec![reason.into()]),
+        None => Completeness::Complete,
+    };
+    match cad_geometry::clip_segment_to_xy_rect(a, b, (min.x, min.y), (max.x, max.y)) {
+        Some((start, end)) if cad_geometry::distance(start, end) > 1e-9 => {
+            (SemanticGeometry::Line { start, end }, completeness)
+        }
+        _ => (
+            opaque(),
+            Completeness::Partial(vec![
+                "ray/xline does not intersect the drawing bounds".into()
+            ]),
+        ),
+    }
+}
+
 /// An MLINE as its vertex centerline. The per-element parallel offsets and
 /// joins need the MLINESTYLE table; until that is wired the centerline is drawn
 /// and the offsets are reported `Partial`.
@@ -233,6 +319,10 @@ mod tests {
         Point3 { x, y, z: 0.0 }
     }
 
+    fn approx(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
     #[test]
     fn quad_face_fans_into_two_triangles_and_degenerate_faces_are_dropped() {
         let vertices = vec![
@@ -249,6 +339,31 @@ mod tests {
             panic!("expected a mesh");
         };
         assert_eq!(mesh.triangles.len(), 2, "{:?}", mesh.triangles);
+    }
+
+    #[test]
+    fn xline_clips_to_the_box_and_ray_keeps_only_the_positive_half() {
+        let bounds = Some((point(-10.0, -10.0), point(10.0, 10.0)));
+        let (xline, completeness) = ray_semantics(point(0.0, 0.0), point(1.0, 0.0), false, bounds);
+        assert_eq!(completeness, Completeness::Complete);
+        let SemanticGeometry::Line { start, end } = xline else {
+            panic!("expected a clipped line");
+        };
+        assert!(approx(start.x, -end.x), "{start:?} {end:?}");
+        assert!(approx(start.y, 0.0) && approx(end.y, 0.0));
+
+        let (ray, _) = ray_semantics(point(0.0, 0.0), point(1.0, 0.0), true, bounds);
+        let SemanticGeometry::Line { start, .. } = ray else {
+            panic!("expected a clipped ray");
+        };
+        assert!(approx(start.x, 0.0), "ray must not start behind its base");
+    }
+
+    #[test]
+    fn degenerate_infinite_line_direction_is_partial_not_a_fake_line() {
+        let (geometry, completeness) = ray_semantics(point(0.0, 0.0), point(0.0, 0.0), true, None);
+        assert!(matches!(geometry, SemanticGeometry::Opaque { .. }));
+        assert!(matches!(completeness, Completeness::Partial(_)));
     }
 
     #[test]

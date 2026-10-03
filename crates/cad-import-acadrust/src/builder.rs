@@ -58,6 +58,7 @@ impl<'a> ImporterBuilder<'a> {
             model_render: SupportStatus::Verified,
             model_drawable: false,
             model_render_types: BTreeSet::new(),
+            model_bounds: None,
         }
     }
 

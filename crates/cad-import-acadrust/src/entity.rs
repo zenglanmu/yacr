@@ -26,6 +26,20 @@ impl<'a> ImporterBuilder<'a> {
 
         let (geometry, completeness) = self.convert(entity, common);
 
+        // Track the model-space extent as entities are imported so RAY/XLINE
+        // construct lines can be clipped to it (a fixed viewport has no clip).
+        if matches!(space, SpaceId::Model) {
+            let mut accumulator = cad_geometry::BoundsAccumulator::new();
+            if let Some((min, max)) = self.model_bounds {
+                accumulator.union_point(min);
+                accumulator.union_point(max);
+            }
+            accumulator.add_geometry(&geometry);
+            if let Some(bounds) = accumulator.finish() {
+                self.model_bounds = Some((bounds.min, bounds.max));
+            }
+        }
+
         // Render/pick are judged from the drawn result, not from parse success
         // (audit B20). An INSERT inherits the resolved status of its block; an
         // array INSERT is a Compound of Instances that all reference one block.
@@ -458,6 +472,12 @@ impl<'a> ImporterBuilder<'a> {
                 )
             }
             EntityType::MultiLeader(ml) => self.multileader_semantics(ml),
+            EntityType::Ray(r) => {
+                ray_semantics(p3(r.base_point), p3(r.direction), true, self.model_bounds)
+            }
+            EntityType::XLine(x) => {
+                ray_semantics(p3(x.base_point), p3(x.direction), false, self.model_bounds)
+            }
             EntityType::Solid3D(s) => acis_semantics(entity, &s.acis_data),
             EntityType::Region(r) => acis_semantics(entity, &r.acis_data),
             EntityType::Body(b) => acis_semantics(entity, &b.acis_data),
