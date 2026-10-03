@@ -117,6 +117,7 @@ impl Runtime {
             view.set_measurement_preview(c.measurement_preview());
             view.set_annotation_preview(c.annotation_preview());
             view.set_annotation_visibility(c.annotation_visibility().clone());
+            view.set_snap_hints(c.snap_hints_near_cursor()?);
             if let Some(annotations) = c.workspace_annotations() {
                 view.set_annotations(Arc::new(annotations.clone()));
             } else {

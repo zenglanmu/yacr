@@ -12,13 +12,15 @@ use cad_annotations::{
     AnnotationCommand, AnnotationFile, AnnotationService, FingerprintPolicy, SCHEMA_VERSION,
 };
 use cad_db::{
-    AnnotationDatabase, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer,
+    transform_geometry, AnnotationDatabase, DbEntity, DbObject, DrawingDatabase,
+    DrawingDatabaseBuilder, Layer,
 };
 use cad_domain::*;
 use cad_history::{patch, UndoRecord};
 use cad_import_acadrust::{
     AcadrustImporter, ImportLimits, ImportReport, ImportRequest, ImportedDrawing, Importer,
 };
+use cad_measure::{MeasurementEngine, SnapCandidate, SnapTarget};
 
 use crate::recovery::{RecoverySnapshot, UnsavedOutcome};
 use crate::{
@@ -142,6 +144,125 @@ fn pz(x: f64, y: f64, z: f64) -> Point3 {
 
 fn class_name(geometry: &SemanticGeometry) -> &'static str {
     crate::app_drawing::class_name(geometry)
+}
+
+/// Build the local snap targets for a drawing's model-space geometry.
+///
+/// [`crate::drawing_pick_items`] expands `INSERT`s and returns each item's
+/// geometry in its **own local** coordinates plus the accumulated world
+/// transform; the snap engine has no transform parameter, so the transform is
+/// baked into the geometry with [`transform_geometry`]. An item whose kind this
+/// build cannot transform exactly (text, spline, shape, opaque, compound) is
+/// **skipped**, never snapped at a wrong location; a top-level entity carries
+/// the identity transform and is passed through unchanged (so a model-space
+/// spline still snaps to its sampled points).
+///
+/// Every expanded item is presented in **world model space** (block children
+/// are inlined by their composed transform), so all targets are tagged
+/// [`SpaceId::Model`]. The precision mirrors the source: a spline's snap points
+/// come from a fixed sample set ([`Precision::Approximate`]); analytic kinds are
+/// [`Precision::Analytic`].
+fn snap_targets_for(drawing: &DrawingDatabase, document: DocumentId) -> Vec<SnapTarget> {
+    let identity = Transform3::identity();
+    crate::drawing_pick_items(drawing, document)
+        .into_iter()
+        .filter_map(|item| {
+            let geometry = if item.transform == identity {
+                item.geometry
+            } else {
+                match transform_geometry(&item.geometry, &item.transform) {
+                    Ok(world) => world,
+                    // A kind this build cannot bake exactly contributes nothing
+                    // rather than a snap at an un-transformed location.
+                    Err(_) => return None,
+                }
+            };
+            let precision = match &geometry {
+                SemanticGeometry::Spline { .. } => Precision::Approximate { error_bound: None },
+                _ => Precision::Analytic,
+            };
+            Some(SnapTarget::new(
+                geometry,
+                item.source,
+                SpaceId::Model,
+                precision,
+            ))
+        })
+        .collect()
+}
+
+/// Snap candidates near a world cursor on the model work plane.
+///
+/// This is the pure bridge between the database and the object-snap overlay:
+/// the caller (a host) holds the live cursor and the viewport's
+/// `world_per_px`, and gets back the real [`SnapCandidate`]s the measurement
+/// snap engine resolves, ready to hand to `CadView::set_snap_hints`.
+///
+/// **Cursor/ray convention.** A measurement or draw cursor is a world point on
+/// the planar work plane, not a screen ray. The pick ray is therefore built as
+/// `origin = cursor`, `direction = +Z`, and the snap plane is the world-Z plane
+/// through the cursor (`origin = cursor`, `u = +X`, `v = +Y`). With a plane the
+/// engine uses the ray∩plane point as its proximity probe, so the probe is
+/// exactly `cursor`; candidate points on that plane have ray parameter `t = 0`
+/// and are accepted (`accept` only rejects `t < 0`). This mirrors the
+/// engine's own test convention (`snap.rs` builds a downward ray onto `z = 0`)
+/// but keeps the plane at the cursor's height so a non-zero-z planar drawing is
+/// not silently shifted.
+///
+/// Only geometry exactly on the cursor's plane is in front of the ray; that is
+/// the planar 2D contract, stated rather than faked. `space` is the session's
+/// active space and is passed as the engine's space filter; because
+/// [`crate::drawing_pick_items`] only walks **model** space, a non-model `space`
+/// honestly yields no candidates (paper-space snapping is not built here).
+///
+/// Returns [`CadError::InvalidInput`] for a non-finite cursor or a
+/// non-positive/non-finite `world_per_px`; it never fabricates a candidate.
+pub fn snap_candidates_near(
+    drawing: &DrawingDatabase,
+    document: DocumentId,
+    cursor: Point3,
+    world_per_px: f64,
+    space: SpaceId,
+) -> CadResult<Vec<SnapCandidate>> {
+    if !cursor.x.is_finite() || !cursor.y.is_finite() || !cursor.z.is_finite() {
+        return Err(CadError::InvalidInput(
+            "snap cursor must be finite".to_string(),
+        ));
+    }
+    if !world_per_px.is_finite() || world_per_px <= 0.0 {
+        return Err(CadError::InvalidInput(
+            "snap world_per_px must be finite and positive".to_string(),
+        ));
+    }
+    let plane = WorkPlane {
+        origin: cursor,
+        u: Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        v: Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+    };
+    let ray = Ray3 {
+        origin: cursor,
+        direction: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+    };
+    let targets = snap_targets_for(drawing, document);
+    MeasurementEngine::default().snap_targets(
+        &targets,
+        &ray,
+        Some(&plane),
+        world_per_px,
+        Some(space),
+    )
 }
 
 /// Result of a successful drawing open, for status lines and diagnostics.
@@ -690,6 +811,65 @@ impl HostController {
     /// dispatches a command or advances the tool (audit U04).
     pub fn measurement_preview(&self) -> Option<crate::MeasurementPreview> {
         self.session.measurement_preview()
+    }
+
+    /// The live world cursor of the active tool, if any tool is capturing.
+    ///
+    /// The cursor lives in the tool preview (`MeasurementPreview::cursor`).
+    /// The draw tool is not yet wired into [`SessionState`](crate::SessionState)
+    /// at this revision, so only the measurement cursor is available; the draw
+    /// cursor joins here once that state exists. Reading it dispatches no
+    /// command.
+    fn active_tool_cursor(&self) -> Option<Point3> {
+        self.session
+            .measurement_preview()
+            .and_then(|preview| preview.cursor)
+    }
+
+    /// The world units per logical pixel of the active viewport camera.
+    ///
+    /// Returns `None` when the viewport is missing or the value is not finite
+    /// and positive, so the caller skips snapping rather than feeding a
+    /// fabricated tolerance. `Viewport::world_per_px` already floors an
+    /// orthographic scale, so this only fails for a genuinely absent viewport.
+    fn viewport_world_per_px(&self) -> Option<f64> {
+        let world_per_px = self
+            .application
+            .workspace
+            .viewports
+            .get(&self.viewport_id)?
+            .world_per_px();
+        (world_per_px.is_finite() && world_per_px > 0.0).then_some(world_per_px)
+    }
+
+    /// Real object-snap candidates under the active tool's world cursor.
+    ///
+    /// Pure getter (audit U04): it reads the tool preview, the drawing and the
+    /// viewport, resolves the snap candidates through the shared
+    /// [`snap_candidates_near`] helper, and never dispatches a command or writes
+    /// a database. With no live cursor (idle, or a tool that has not moved yet)
+    /// it returns the explicit empty vector, so the host clears the snap-hint
+    /// overlay rather than leaving a stale marker. A missing viewport likewise
+    /// yields no hints — nothing is fabricated.
+    ///
+    /// The renderer independently gates the overlay on `view.overlays.snapHints`,
+    /// so a host may call this unconditionally; the early return only avoids
+    /// needless work when there is no cursor.
+    pub fn snap_hints_near_cursor(&self) -> CadResult<Vec<SnapCandidate>> {
+        let Some(cursor) = self.active_tool_cursor() else {
+            return Ok(Vec::new());
+        };
+        let Some(world_per_px) = self.viewport_world_per_px() else {
+            return Ok(Vec::new());
+        };
+        let drawing = self.drawing_required()?;
+        snap_candidates_near(
+            drawing,
+            self.document_id,
+            cursor,
+            world_per_px,
+            self.session.active_space.clone(),
+        )
     }
 
     /// Human-facing unit label of the open document, for the status area.
@@ -1389,5 +1569,117 @@ mod tests {
         let result = controller.create_circle(p(0.0, 0.0), p(10.0, 0.0));
         assert!(matches!(result, Err(CadError::PermissionDenied)));
         assert_eq!(controller.drawing().unwrap().entity_count(), before);
+    }
+
+    #[test]
+    fn snap_candidates_near_finds_endpoint_and_midpoint_of_the_demo_line() {
+        let drawing = demo_database();
+        let document = DocumentId(1);
+
+        // The demo's first entity is a line (0,0)-(4000,0); a cursor 5 world
+        // units from its end resolves an endpoint hint at (0,0).
+        let near_end =
+            snap_candidates_near(&drawing, document, p(0.0, 5.0), 1.0, SpaceId::Model).unwrap();
+        let endpoint = near_end
+            .iter()
+            .find(|c| c.kind == cad_measure::SnapKind::Endpoint && c.point == p(0.0, 0.0))
+            .expect("the line end is an endpoint hint");
+        assert!((endpoint.logical_pixel_distance - 5.0).abs() < 1e-9);
+        assert_eq!(endpoint.space, SpaceId::Model);
+
+        // Near the segment middle the midpoint wins.
+        let near_mid =
+            snap_candidates_near(&drawing, document, p(2000.0, 5.0), 1.0, SpaceId::Model).unwrap();
+        assert!(
+            near_mid.iter().any(|c| {
+                c.kind == cad_measure::SnapKind::Midpoint && c.point == p(2000.0, 0.0)
+            }),
+            "{near_mid:?}"
+        );
+    }
+
+    #[test]
+    fn snap_candidates_near_returns_nothing_far_from_geometry() {
+        let drawing = demo_database();
+        let far = snap_candidates_near(
+            &drawing,
+            DocumentId(1),
+            p(1_000_000.0, 1_000_000.0),
+            1.0,
+            SpaceId::Model,
+        )
+        .unwrap();
+        assert!(far.is_empty(), "{far:?}");
+    }
+
+    #[test]
+    fn snap_candidates_near_rejects_a_bad_cursor_or_tolerance() {
+        let drawing = demo_database();
+        let nan_cursor = Point3 {
+            x: f64::NAN,
+            y: 0.0,
+            z: 0.0,
+        };
+        assert!(matches!(
+            snap_candidates_near(&drawing, DocumentId(1), nan_cursor, 1.0, SpaceId::Model),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            snap_candidates_near(&drawing, DocumentId(1), p(0.0, 0.0), 0.0, SpaceId::Model),
+            Err(CadError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn snap_candidates_near_only_offers_model_space_targets() {
+        // Only model geometry is expanded, so a paper-space request honestly
+        // yields no hints rather than snapping model geometry into a layout.
+        let drawing = demo_database();
+        let paper = snap_candidates_near(
+            &drawing,
+            DocumentId(1),
+            p(0.0, 5.0),
+            1.0,
+            SpaceId::Paper(cad_domain::LayoutId(0)),
+        )
+        .unwrap();
+        assert!(paper.is_empty(), "{paper:?}");
+    }
+
+    #[test]
+    fn controller_snap_hints_are_empty_without_a_live_cursor() {
+        let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        // No tool, no cursor: the explicit empty overlay, never a stale hint.
+        assert!(controller.snap_hints_near_cursor().unwrap().is_empty());
+    }
+
+    #[test]
+    fn controller_snap_hints_follow_the_measurement_cursor() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller
+            .execute(Command {
+                schema_version: 1,
+                id: crate::CommandId::Measure,
+                document: controller.document_id,
+                viewport: controller.viewport_id,
+                payload: crate::CommandPayload::None,
+            })
+            .unwrap();
+        // A running tool with no cursor yet still yields nothing.
+        assert!(controller.snap_hints_near_cursor().unwrap().is_empty());
+
+        // The demo line starts at (0,0); a cursor just off that end resolves a
+        // real endpoint hint through the viewport's world_per_px.
+        controller
+            .session
+            .set_measurement_cursor(Some(p(0.0, 5.0)))
+            .unwrap();
+        let hints = controller.snap_hints_near_cursor().unwrap();
+        assert!(
+            hints
+                .iter()
+                .any(|c| { c.kind == cad_measure::SnapKind::Endpoint && c.point == p(0.0, 0.0) }),
+            "{hints:?}"
+        );
     }
 }
