@@ -25,7 +25,10 @@ shell 绘制捕获、Web/Android 成功换图纸后残留旧取点、TRIM 使用
 发布候选 `/tmp/opencode/yacr-pages-release/` 含完整 99 个同源 CAD 字体；四种工具、输入安全、
 桌面 UI 通过。mobile 三场景独立进程复跑通过（`/tmp/opencode/yacr-pages-mobile/`），
 此前超时记录不删除；最终 Ribbon 触控复验仍超时，**不宣称最终 Ribbon 回归通过**。
-Pages 目标为已有 `yacr-examples`、生产分支 `main`；部署结果见 `validation-web.md` §10。
+修复提交 `01f9f2b` 已推送 main 并部署至已有 `yacr-examples` 的生产分支。
+生产地址 `https://yacr-examples.pages.dev/`（自定义域名 `yacr-examples.snakeheartgo.top`）；
+两地址 wasm 哈希匹配验证包。线上桌面 UI、LINE/CIRCLE、输入取消安全通过；MOVE/TRIM
+线上截图超时，本地像素通过，**不能宣称所有线上绘制回归通过**。详情见 validation-web §11。
 Android 本轮仍只有编译门，未新增 APK/真机/WebGPU 证据。
 
 **绘制/编辑合并后主控验收（历史）**：基于 `39077ec` 的数据库写事务、应用命令、

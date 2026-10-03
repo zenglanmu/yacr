@@ -386,3 +386,35 @@ TRIM 固定世界容差；见 `drawing-edit.md` §6.1。
   四工具批量运行也曾在 TRIM 截图处超时，独立重跑通过；记录真实限制，不隐去失败。
 - 未新增 Android APK、真机/WebGPU/真实 GPU 证据。发布目标为现有 Cloudflare Pages 项目
   `yacr-examples`、生产分支 `main`；生产部署与线上复验结果将在下节追加。
+
+## 11. Cloudflare Pages 生产部署与线上复验（2026-10-03）
+
+- 修复代码提交 **`01f9f2b1892edbf70cb2d5fe42e09900e2d02f8c`** 已推送 `origin/main`。
+- `DIST=/tmp/opencode/yacr-pages-release SKIP_BUILD=1 CF_PAGES_PROJECT=yacr-examples
+  CF_PAGES_BRANCH=main bash scripts/deploy-cloudflare-pages.sh` 成功。Wrangler **4.147.0**，
+  117 个文件（5 新上传、112 已有），未改变现有 DNS/自定义域名配置。
+- Cloudflare API 确认部署 **`200b4aee-087f-4354-9285-5cbc59ec5507`**、
+  `environment=production`、`latest_stage.status=success`，提交元数据与上述代码一致。
+  部署完成时间 `2026-10-03T03:50:06.869629Z`。
+- 生产地址：<https://yacr-examples.pages.dev/>；现有自定义域名：
+  <https://yacr-examples.snakeheartgo.top/>。不可变部署 URL：
+  <https://200b4aee.yacr-examples.pages.dev/>。
+- 两生产域名的 wasm 实际下载 SHA-256 均为 §10 的
+  `dfaf4af1a51ea71e1a61e5066d27e055722edd46a7c0f9e9fc8b02e5a2c54d58`，
+  **15,505,725 bytes**；HTTP 200 / `application/wasm`，字体 catalog 均含 99 文件。
+  初次经代理下载出现 403/传输超时，直连 `curl --noproxy '*'` 完整下载并核验通过。
+
+线上真实无头 WebGL2/SwiftShader（Pages 生产 URL，不路由替换本地 wasm）：
+
+| 检查 | 结果 |
+|---|---|
+| `check-web-ui.mjs` | 通过；渲染、导航像素改变、双语/重载、空 sidecar 往返，console/page errors 0 |
+| `check-web-drawing-safety.mjs` | 通过；第二触点、touchcancel、成功换图纸后旧确认均不写库 |
+| LINE/CIRCLE | 通过；正式绘制改变 CAD 像素，撤销逐像素回到基线，重做恢复计数 |
+| MOVE | 两次截图阶段超时；本地发布候选通过，线上**未通过** |
+| TRIM | 撤销后截图阶段超时；本地发布候选通过，线上**未通过** |
+
+证据：`/tmp/opencode/yacr-pages-deploy.log`、`yacr-pages-production-assets.json`、
+`yacr-pages-production-ui.json`、`yacr-pages-production-safety/report.json`、
+`yacr-pages-production-drawing/{LINE,CIRCLE}/report.json`。不把资产一致或本地成功替代线上
+超时验收；Ribbon 触控根因仍未定位。真机/硬件 GPU/WebGPU、Android APK 未在本轮运行。
