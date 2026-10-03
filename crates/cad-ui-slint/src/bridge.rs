@@ -91,9 +91,7 @@ pub fn install_with_preference(
                     state
                         .runtime
                         .attach(device.clone(), queue.clone(), preference);
-                    if let Err(error) = state.presenter.reset(&frame_handle) {
-                        state.runtime.diagnostic = Some(error.to_string());
-                    }
+                    state.presenter.invalidate();
                 }
                 (slint::RenderingState::RenderingSetup, api) => {
                     state.runtime.fail(
@@ -127,18 +125,14 @@ pub fn install_with_preference(
                         Ok(None) => {}
                         Err(error) if error.is_device_loss() => {
                             runtime.fail(preference, error.message().into(), true);
-                            if let Err(error) = presenter.reset(&frame_handle) {
-                                runtime.diagnostic = Some(error.to_string());
-                            }
+                            presenter.invalidate();
                         }
                         Err(error) => runtime.diagnostic = Some(error.to_string()),
                     }
                 }
                 (slint::RenderingState::RenderingTeardown, _) => {
                     state.runtime.detach();
-                    if let Err(error) = state.presenter.reset(&frame_handle) {
-                        state.runtime.diagnostic = Some(error.to_string());
-                    }
+                    state.presenter.invalidate();
                 }
                 _ => {}
             }

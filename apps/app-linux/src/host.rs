@@ -11,9 +11,14 @@ use std::{
     sync::Arc,
 };
 
+mod file_picker;
 mod input;
 mod state;
 mod validation;
+
+/// A chooser run on a worker; cancellation must return `CadError::Cancelled`.
+pub type FilePicker = Arc<dyn Fn() -> CadResult<PathBuf> + Send + Sync>;
+type PendingOpen = Rc<RefCell<Option<std::sync::mpsc::Receiver<CadResult<PathBuf>>>>>;
 
 #[derive(Debug, Clone)]
 pub struct LinuxOptions {
@@ -95,6 +100,8 @@ struct Runtime {
     handle: Rc<RefCell<Option<UiHandle>>>,
     view: Rc<RefCell<Option<CadView>>>,
     options: LinuxOptions,
+    picker: FilePicker,
+    pending_open: PendingOpen,
 }
 impl Runtime {
     fn message(&self, key: &str, values: &[(&str, &str)]) -> String {
@@ -133,7 +140,7 @@ impl Runtime {
     fn execute(&self, command: Command) -> CadResult<()> {
         self.metrics()?;
         let result = match command.id {
-            CommandId::OpenDrawing => self.open(),
+            CommandId::OpenDrawing => self.request_open(),
             CommandId::ExportAnnotations => self.export_annotations(),
             CommandId::ImportAnnotations => self.import_annotations(),
             CommandId::SwitchBackend => Err(CadError::Unsupported(
@@ -148,20 +155,65 @@ impl Runtime {
                     .set_status(self.message("linux.failed", &[("error", &error.to_string())]))?;
             }
         }
-        if result.is_ok() {
+        if result.is_ok() && self.pending_open.borrow().is_none() {
             if let Some(handle) = self.handle.borrow().as_ref() {
                 handle.set_status(self.message("linux.completed", &[]))?;
             }
         }
         result
     }
-    fn open(&self) -> CadResult<()> {
-        let path = self
-            .options
-            .drawing
-            .as_ref()
-            .ok_or_else(|| CadError::Unsupported(self.message("linux.open_path", &[])))?;
-        // No implicit discard and no fake file dialog; dirty work requires a future explicit decision UI.
+    fn request_open(&self) -> CadResult<()> {
+        if self.controller.borrow().unsaved_signal().dirty {
+            return Err(CadError::Unsupported(self.message("linux.dirty", &[])));
+        }
+        if self.options.headless {
+            return self.open_path(
+                self.options
+                    .drawing
+                    .as_ref()
+                    .ok_or_else(|| CadError::Unsupported(self.message("linux.open_path", &[])))?,
+            );
+        }
+        if self.pending_open.borrow().is_some() {
+            return Ok(());
+        }
+        let picker = self.picker.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("linux-file-picker".into())
+            .spawn(move || {
+                let _ = sender.send(picker());
+            })
+            .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+        *self.pending_open.borrow_mut() = Some(receiver);
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            handle.set_status(self.message("linux.picker_waiting", &[]))?;
+        }
+        Ok(())
+    }
+    fn poll_open(&self) -> CadResult<()> {
+        use std::sync::mpsc::TryRecvError;
+        let result = match self.pending_open.borrow().as_ref().map(|rx| rx.try_recv()) {
+            None | Some(Err(TryRecvError::Empty)) => return Ok(()),
+            Some(Ok(result)) => result,
+            Some(Err(TryRecvError::Disconnected)) => Err(CadError::InvalidInput(
+                self.message("linux.picker_empty", &[]),
+            )),
+        };
+        *self.pending_open.borrow_mut() = None;
+        let result = result.and_then(|path| self.open_path(&path));
+        self.push()?;
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            handle.set_status(match result {
+                Ok(()) => self.message("linux.opened", &[]),
+                Err(CadError::Cancelled) => self.message("linux.picker_cancelled", &[]),
+                Err(error) => self.message("linux.failed", &[("error", &error.to_string())]),
+            })?;
+        }
+        Ok(())
+    }
+    fn open_path(&self, path: &Path) -> CadResult<()> {
+        // Recheck after selection: work may have become dirty while the portal was open.
         if self.controller.borrow().unsaved_signal().dirty {
             return Err(CadError::Unsupported(self.message("linux.dirty", &[])));
         }
@@ -214,6 +266,11 @@ pub struct LinuxApp {
 }
 impl LinuxApp {
     pub fn new(options: LinuxOptions) -> CadResult<Self> {
+        let locale = options.locale.clone();
+        Self::new_with_file_picker(options, Arc::new(move || file_picker::pick(&locale)))
+    }
+    /// Construct with a host-supplied chooser, including deterministic contract tests.
+    pub fn new_with_file_picker(options: LinuxOptions, picker: FilePicker) -> CadResult<Self> {
         let controller = Rc::new(RefCell::new(HostController::with_demo_document(
             options.size,
         )?));
@@ -222,6 +279,8 @@ impl LinuxApp {
             handle: Rc::new(RefCell::new(None)),
             view: Rc::new(RefCell::new(None)),
             options: options.clone(),
+            picker,
+            pending_open: Rc::new(RefCell::new(None)),
         };
         let c = controller.borrow();
         let config = UiConfiguration {
@@ -233,7 +292,9 @@ impl LinuxApp {
         };
         drop(c);
         let mut adapter = UiAdapter::new(config, runtime.clone(), true)?;
-        adapter.component().set_can_open(options.drawing.is_some());
+        adapter
+            .component()
+            .set_can_open(!options.headless || options.drawing.is_some());
         adapter
             .component()
             .set_can_import(options.annotation_import.is_some());
@@ -245,8 +306,8 @@ impl LinuxApp {
         adapter.fit_window_to_logical(options.size, 1.0);
         *runtime.handle.borrow_mut() = Some(adapter.handle());
         runtime.metrics()?;
-        if options.drawing.is_some() {
-            runtime.open()?;
+        if let Some(path) = &options.drawing {
+            runtime.open_path(path)?;
         } else {
             controller.borrow_mut().fit()?;
         }
@@ -285,7 +346,11 @@ impl LinuxApp {
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(50),
             move || {
-                if let Err(error) = rt.metrics().and_then(|_| rt.sync_view()) {
+                if let Err(error) = rt
+                    .poll_open()
+                    .and_then(|_| rt.metrics())
+                    .and_then(|_| rt.sync_view())
+                {
                     if let Some(handle) = rt.handle.borrow().as_ref() {
                         let _ = handle.set_status(
                             rt.message("linux.failed", &[("error", &error.to_string())]),

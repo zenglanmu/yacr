@@ -28,7 +28,12 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 显示派生；鼠标平移/滚轮缩放/选择/测量取点、直线/圆/移动、撤销重做使用真实应用路径。
 启动 fit 使用 CAD 内容区域；运行时 50ms 定时器更新尺寸/相机，不重新解析底图或自动 fit。
 
-- `--open PATH` 指定打开源；没有原生文件选择器，未指定路径的打开按钮显式 Unsupported。
+- 桌面打开按钮调用 `xdg-desktop-portal` 的系统文件选择器，筛选 DWG/DXF（含大小写扩展名）；
+  在独立线程等待选择，Slint 事件循环继续运行。需要桌面 session D-Bus、`xdg-desktop-portal`
+  及桌面对应的 portal backend（如 KDE/GNOME/GTK）；不在无窗口开发环境安装桌面。
+  取消保留当前图纸，服务失败显式提示并保留当前图纸，不伪装为取消或成功。
+  `--open PATH` 仍为启动入口；后续桌面打开重新选择文件，不反复打开启动路径。
+  无窗口模式不调用 portal，只接受 `--open PATH`。
 - 打开当前是同步读取/导入，未实现 Linux 后台进度/取消，不能宣称 F01 全闭环。
 - `--export-annotations PATH`、`--import-annotations PATH` 指定侧车；导出先写临时文件并
   sync/rename，成功后才确认数据库 revision。不能写入时不能标记已保存；导入严格拒绝指纹不匹配。
@@ -36,6 +41,28 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 - Trim 点选显式 Unsupported 且按钮禁用；第三方 CAD 字体可通过重复 `--font NAME=PATH`
   显式加载，目录匹配/恢复、完整 ViewerConfig、原生多触控均未闭环。
 - Linux 可执行文件不是静态独立发行包：运行仍需要系统库，当前 CI 上传二进制和证据，不宣称完整安装包。
+
+## 文件选择与关闭崩溃修复（2026-10-03）
+
+- 用户 Wayland 桌面回溯表明关闭窗口在 `RenderingTeardown` 内调用 `set_cad_frame`，
+  图片属性变更触发 `request_redraw`，与 winit 窗口的内部可变借用冲突。
+  setup/teardown 现在只更新渲染器和绑定标记，不修改 Slint 图片属性；旧纹理由 Slint
+  图片引用保活，下一次 `BeforeRendering` 按设备 epoch 重新绑定。未修改上游 Slint。
+- 后端能力与诊断从共享 `wgpu::Device::adapter_info().backend` 获取，不再从请求的
+  WebGPU 偏好推断。Linux Vulkan 实际显示 `vulkan`，原生 OpenGL 显示 `opengl`；
+  不强行把所有 Linux 设备称为 Vulkan。定时状态同步刷新初始化后的诊断标签。
+- 新增无需窗口的生命周期绑定失效契约，真实软件 Vulkan UI 断言，以及注入选择器的
+  Linux 宿主 DXF 选择/取消/文件失败契约。注入选择器不是实际桌面 portal 验收。
+- 本轮 Linux/Slint 针对性合成契约 **83 passed / 0 failed**（Linux 单元 1 + 宿主契约 2 +
+  UI 单元 79 + 软件 Vulkan UI 集成 1），日志 `/tmp/opencode/yacr-linux-picker-tests.log`；
+  fmt、严格 workspace clippy 与四项 Python 门禁通过（i18n 187 keys）。
+  主机全量合成回归 **1103 passed / 0 failed / 1 ignored**，日志
+  `/tmp/opencode/yacr-linux-picker-workspace-tests.log`；未设置 `YACR_TEST_DWG`，依赖该变量
+  的真实 DWG 分支未执行，不能用总数当真实图纸证据。release/WASM 门禁仍在执行。
+  首次编译发现旧 reset 调用与 portal title 参数不匹配，已修正；首次 clippy 发现测试模块
+  位置不符合规则，已移至文件末尾并重跑，失败日志保留。
+- 用户真实图纸路径在当前环境不存在。Wayland 关闭窗口、真实 GPU 与实际 portal
+  交互未在无窗口环境运行，不能用合成/offscreen 测试代替。
 
 ## 执行证据
 

@@ -100,6 +100,11 @@ fn concept_shell_renders_on_lavapipe_and_canvas_only_removes_hit_regions() {
         "the shared CAD renderer really ran"
     );
     assert_eq!(view.last_error(), None);
+    assert_eq!(
+        view.active_backend(),
+        Some(cad_render_wgpu::ActiveBackend::Native)
+    );
+    assert_eq!(view.backend_label().as_deref(), Some("vulkan"));
     click(&adapter, 28.0, 18.0);
     assert_eq!(&*commands.borrow(), &[CommandId::OpenDrawing]);
     commands.borrow_mut().clear();

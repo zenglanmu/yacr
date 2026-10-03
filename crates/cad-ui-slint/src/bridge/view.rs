@@ -203,6 +203,9 @@ impl CadView {
         matches!(self.lifecycle(), RenderLifecycle::Ready { .. })
     }
     pub fn backend_label(&self) -> Option<String> {
+        if let Some(caps) = self.state.borrow().runtime.caps.as_ref() {
+            return Some(caps.api.into());
+        }
         self.backend_outcome().map(|o| o.label())
     }
     pub fn last_error(&self) -> Option<String> {

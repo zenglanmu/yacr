@@ -134,6 +134,55 @@ fn real_linux_host_runs_commands_and_refuses_fake_file_success() {
         "native resize reclassifies the layout"
     );
     assert_eq!(app.adapter.handle().shell_geometry().unwrap().0[2], 390.0);
+    // Desktop selection runs on a worker. These are injected chooser contracts,
+    // not evidence of an actual desktop portal or Wayland session.
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let picked = directory.join("picked.dxf");
+    std::fs::write(&picked, b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLINE\n5\n10\n8\n0\n10\n1\n20\n2\n30\n0\n11\n4\n21\n6\n31\n0\n0\nENDSEC\n0\nEOF\n").unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let missing = directory.join("picker-missing.dwg");
+    let desktop = LinuxApp::new_with_file_picker(
+        LinuxOptions::default(),
+        Arc::new(move || match count.fetch_add(1, Ordering::SeqCst) {
+            0 => Ok(picked.clone()),
+            1 => Err(cad_domain::CadError::Cancelled),
+            _ => Ok(missing.clone()),
+        }),
+    )
+    .unwrap();
+    desktop.adapter.component().show().unwrap();
+    for expected in ["已打开", "已取消", "失败"] {
+        assert!(desktop.adapter.component().get_can_open());
+        desktop.adapter.component().invoke_open_requested();
+        assert!(!desktop.adapter.component().get_can_open());
+        for _ in 0..100 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            cad_ui_slint::offscreen::snapshot(desktop.adapter.window()).unwrap();
+            if desktop.adapter.component().get_can_open() {
+                break;
+            }
+        }
+        assert!(desktop
+            .adapter
+            .component()
+            .get_status_label()
+            .contains(expected));
+        assert!(desktop
+            .adapter
+            .component()
+            .get_application_title()
+            .contains("picked.dxf"));
+        assert!(desktop
+            .adapter
+            .component()
+            .get_diagnostics_backend_label()
+            .contains("vulkan"));
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
     let invalid = LinuxApp::new(LinuxOptions {
         drawing: Some(directory.join("missing.dwg")),
         ..LinuxOptions::default()

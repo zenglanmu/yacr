@@ -18,6 +18,15 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**Linux 文件选择/关闭崩溃/后端诊断修复（release 门禁进行中）**：桌面打开经 ashpd 调用系统
+`xdg-desktop-portal` 文件选择器（独立线程等待，取消/失败区分，脏状态选择前后检查）；
+`--open` 为启动路径，无窗口模式仍不调用选择器。Slint setup/teardown 不再写图片属性，
+避免用户 Wayland 关闭回溯中的 RefCell 重入。共享设备实际 API 决定能力/诊断，软件
+Vulkan/原生 Vulkan 不再误标 webgpu。契约与执行范围见 `docs/linux-app.md`；本轮未做
+真实桌面 portal/Wayland/真实 GPU 验收，不沿用历史门禁作本轮证据。主机本轮合成回归
+**1103/0/1 ignored**、针对性 Linux/UI 83 项、fmt/严格 clippy/四项 Python 门禁通过；
+release 主验收与 WASM 门禁仍在执行（后台串行，日志 `/tmp/opencode/yacr-linux-picker-*.log`）。
+
 **UI/DXF/文字修复（已提交推送及发布）**：用户指出图标/禁用/导航与规范不一致，要求支持 DXF、
 网络 DWG 文字对比，只跑 Linux/Web 构建、不跑完整测试，并发布 Pages。范围及真实文字
 14 倍放大缺陷证据见 `docs/ui-dxf-text-fixes.md`；缺原字体仍显式 Partial，不能宣称视觉全通过。

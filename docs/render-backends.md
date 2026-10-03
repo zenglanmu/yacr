@@ -1,4 +1,19 @@
-# 渲染后端契约（无头软件路径已运行；宿主路径未运行）
+# 渲染后端契约
+
+## 2026-10-03 共享设备诊断修正
+
+`BackendCapabilities.actual` 与新增 `api` 来自共享设备的 `adapter_info().backend`，不来自
+`BackendPreference`。原生 Vulkan/Metal/DX12/OpenGL 归入 `ActiveBackend::Native`，但诊断
+分别显示 `vulkan`/`metal`/`dx12`/`opengl`；浏览器分别为 `webgpu`/`webgl2`，未知为
+`unknown`。请求 WebGPU 不意味着原生 wgpu 实际使用浏览器 WebGPU。
+
+Slint setup/teardown 回调只更新内部 GPU 状态与绑定标记，不写 UI 图片属性，不在窗口内部
+借用期间触发重绘。`BeforeRendering` 按设备 epoch/纹理 revision 绑定当前图片。
+本轮软件 Vulkan Slint 集成已核对原生类别及 `vulkan` 标签；用户 Wayland 关闭窗口/真实 GPU
+未运行。最新宿主证据见 `docs/linux-app.md`、`docs/validation-web.md`；下文早期无宿主状态
+是历史设计记录，不能覆盖这些分平台限定证据。
+
+## 初期契约与历史状态
 
 Auto/WebGPU/WebGL2 分开设置，UI 与 CAD 后端配置独立。Auto 必须实际尝试初始化并检查
 features/limits；强制失败给用户原因/回退选项，不能只检测 navigator.gpu。

@@ -18,3 +18,5 @@ cad-annotations.workspace = true
 cad-representation.workspace = true
 serde_json.workspace = true
 slint.workspace = true
+ashpd = { version = "0.12.3", default-features = false, features = ["async-std"] }
+pollster = "0.4"

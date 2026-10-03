@@ -584,6 +584,11 @@ impl UiHandle {
         self.with(|ui| ui.set_diagnostics_open(open))
     }
 
+    pub fn set_diagnostics_backend(&self, backend: &str) -> CadResult<()> {
+        let label = backend_label(&self.messages.borrow(), backend);
+        self.with(|ui| ui.set_diagnostics_backend_label(label.into()))
+    }
+
     /// Trigger a redraw without restarting the event loop.
     pub fn request_redraw(&self) -> CadResult<()> {
         self.with(|ui| ui.window().request_redraw())

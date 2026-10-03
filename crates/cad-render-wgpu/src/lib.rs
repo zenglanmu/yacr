@@ -61,6 +61,8 @@ impl ActiveBackend {
 
 pub struct BackendCapabilities {
     pub actual: ActiveBackend,
+    /// Stable API name obtained from the shared device's adapter information.
+    pub api: &'static str,
     pub compute: bool,
     pub storage_buffers: bool,
     pub indirect_draw: bool,

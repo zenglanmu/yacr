@@ -2,4 +2,4 @@
 #[cfg(target_os = "linux")]
 mod host;
 #[cfg(target_os = "linux")]
-pub use host::{LinuxApp, LinuxOptions};
+pub use host::{FilePicker, LinuxApp, LinuxOptions};

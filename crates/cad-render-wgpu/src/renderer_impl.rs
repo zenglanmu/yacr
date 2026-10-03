@@ -56,7 +56,7 @@ impl Renderer {
         device: wgpu::Device,
         queue: wgpu::Queue,
     ) -> CadResult<BackendCapabilities> {
-        let caps = Self::caps_for(&device, self.preference);
+        let caps = Self::caps_for(&device);
         let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cad-lines"),
             source: wgpu::ShaderSource::Wgsl(LINE_SHADER.into()),
@@ -237,19 +237,22 @@ impl Renderer {
         })
     }
 
-    /// Capability snapshot derived from adapter limits and the host preference.
-    fn caps_for(device: &wgpu::Device, preference: BackendPreference) -> BackendCapabilities {
+    /// Capability snapshot derived from the actual shared device, not the request.
+    fn caps_for(device: &wgpu::Device) -> BackendCapabilities {
         let limits = device.limits();
-        let actual = match preference {
-            BackendPreference::WebGpu => ActiveBackend::WebGpu,
-            BackendPreference::WebGl2 => ActiveBackend::WebGl2,
-            // Auto: the host resolves Auto before creating the device, so this
-            // only happens for native or misconfigured hosts.
-            BackendPreference::Auto => ActiveBackend::Native,
+        let (actual, api) = match device.adapter_info().backend {
+            wgpu::Backend::BrowserWebGpu => (ActiveBackend::WebGpu, "webgpu"),
+            wgpu::Backend::Gl if cfg!(target_arch = "wasm32") => (ActiveBackend::WebGl2, "webgl2"),
+            wgpu::Backend::Vulkan => (ActiveBackend::Native, "vulkan"),
+            wgpu::Backend::Metal => (ActiveBackend::Native, "metal"),
+            wgpu::Backend::Dx12 => (ActiveBackend::Native, "dx12"),
+            wgpu::Backend::Gl => (ActiveBackend::Native, "opengl"),
+            _ => (ActiveBackend::Native, "unknown"),
         };
         match actual {
             ActiveBackend::WebGl2 => BackendCapabilities {
                 actual,
+                api,
                 compute: false,
                 storage_buffers: false,
                 indirect_draw: false,
@@ -259,6 +262,7 @@ impl Renderer {
             },
             _ => BackendCapabilities {
                 actual,
+                api,
                 compute: true,
                 storage_buffers: true,
                 indirect_draw: true,
@@ -276,7 +280,7 @@ impl Renderer {
 
     pub fn capabilities(&self) -> Option<(ActiveBackend, bool, u32)> {
         let device = self.device.as_ref()?;
-        let caps = Self::caps_for(device, self.preference);
+        let caps = Self::caps_for(device);
         Some((caps.actual, caps.compute, caps.max_texture_dimension))
     }
 

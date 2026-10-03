@@ -18,6 +18,14 @@ impl Runtime {
             view.sync_session(&c.session.active_space, viewport);
         }
         if let Some(handle) = self.handle.borrow().as_ref() {
+            handle.set_diagnostics_backend(
+                &self
+                    .view
+                    .borrow()
+                    .as_ref()
+                    .and_then(|view| view.backend_label())
+                    .unwrap_or_default(),
+            )?;
             handle.set_view_state(cad_ui_slint::ViewStateUi {
                 is_3d: matches!(viewport.view_mode, cad_app::ViewMode2d3d::ThreeD { .. }),
                 perspective: matches!(
@@ -33,7 +41,11 @@ impl Runtime {
         let c = self.controller.borrow();
         let handles = self.handle.borrow();
         let handle = handles.as_ref().ok_or(CadError::Cancelled)?;
-        handle.set_open_available(self.options.drawing.is_some() && !c.unsaved_signal().dirty)?;
+        handle.set_open_available(
+            (!self.options.headless || self.options.drawing.is_some())
+                && self.pending_open.borrow().is_none()
+                && !c.unsaved_signal().dirty,
+        )?;
         handle.set_document_name(&c.document_name_hint)?;
         handle.set_history_availability(c.history_availability())?;
         handle.set_mode(c.mode())?;
