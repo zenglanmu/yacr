@@ -66,9 +66,10 @@ cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude ap
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 workspace，含 UI/宿主
 ```
 
-- **主机构建排除 `cad-ui-slint`/`app-android`/`app-web`**：本机无 fontconfig/freetype 开发头
-  且无 sudo（见 `docs/build.md`）。Slint 编译与测试由 Android target 覆盖；`cad-ui-slint`
-  **仅在 Android target 上编译**，不要在宿主执行其测试或宣称其通过。
+- 默认主机核心门禁仍排除 UI/宿主。本轮用户授权解除原生 Slint 编译限制：允许使用
+  开发依赖，在 Linux 无窗口环境以 Slint FemtoVG/wgpu + lavapipe 离屏验证（用户已授权
+  sudo apt 安装 pkgconf/fontconfig/freetype 开发包）。
+  不需要 Android 模拟器，不安装桌面/X11/Wayland，不改系统/LXC 配置；实际执行与编译证据分开记录。
 - Rust 单测试：`cargo test -p <crate> <name> --locked`。GPU/CLI 用例串行跑，避免并发软件
   Vulkan 互相干扰：`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test -p cad-render-wgpu -p cad-cli-tools --locked -- --test-threads=1`。
 - 需要真实 DWG 的测试（如 `cli_contracts` 的 render）设 `YACR_TEST_DWG=<绝对路径>`，否则

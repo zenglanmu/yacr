@@ -30,6 +30,7 @@ pub mod recovery;
 pub mod render_scene;
 pub mod selection;
 pub mod tasks;
+pub mod viewer_config;
 
 pub use annotation_list::{annotation_rows, geometry_kind, AnnotationRow, AnnotationVisibilitySet};
 pub use annotation_tool::{AnnotationPreview, AnnotationTool, AnnotationToolKind};

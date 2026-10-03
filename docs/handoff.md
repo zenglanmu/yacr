@@ -18,6 +18,11 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**Concept UI 重设计进行中**：设计依据 `docs/ui-spec/`，配置/布局纯契约已新增到
+`cad-app::viewer_config`（3 项合成测试已执行通过）。用户授权解除原生 Slint 编译限制，
+后续使用 Linux Slint/wgpu/lavapipe 离屏主测试，不跑 Android 模拟器，最后 WASM 浏览器抽查。
+完整范围与配置未闭环项见 `docs/ui-redesign.md`。
+
 **真实 DWG 回归（最新）**：以用户外部 `anteen.dwg` 与去色参考图，优先 Linux
 原生 wgpu/lavapipe。修复 2D 投影重复 Y 翻转、CLI render/plot 忽略 `--font`；
 核心串行 **965/0/1 ignored**。原生导入/出图通过，但填充/字体保真未验收。
