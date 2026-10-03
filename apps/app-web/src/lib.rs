@@ -314,6 +314,21 @@ pub fn viewer_config_json() -> String {
     browser::config::effective_config_json()
 }
 
+/// The effective `interaction` object as compact JSON, or `"null"` before start.
+///
+/// Read-only companion to `viewer_config_json` for the JS touch router, which
+/// uses it to stop capturing/forwarding touch while `interaction.touch` is off.
+/// It never mutates config and mirrors `viewer_config_json`'s `"null"` when no
+/// host has started. Because absent/malformed input on the JS side must fall
+/// back to the same enabled default as `touch_enabled()`'s `unwrap_or(true)`,
+/// this export is an optimization only: the `touch_*` exports stay the
+/// authoritative gate.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_interaction_json() -> String {
+    browser::config::interaction_json()
+}
+
 /// Build the stable `{ ok, ... }` result object for a config wasm export.
 #[cfg(target_arch = "wasm32")]
 fn config_result(result: cad_domain::CadResult<()>) -> JsValue {
