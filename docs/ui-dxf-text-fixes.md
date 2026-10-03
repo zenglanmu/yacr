@@ -72,5 +72,12 @@ fmt、i18n、架构检查通过；OFL UI 子集覆盖全部当前中文目录字
 WASM 真实 File API DXF 抽查通过：`browser-dxf/browser.json`，Chromium 153 / SwiftShader WebGL2，
 1 LINE，CAD 帧 1→2，32 颜色，无 console/page error，诊断 Partial 保留；这只是合成 DXF
 浏览器 smoke，不是复杂 DXF/真 GPU 验收。
-Cloudflare 发布结果完成后补录。
+Cloudflare Pages 已发布生产部署 `a6ea4bfe-9c00-40ae-8133-76535a242983`，API 确认
+`production / deploy success`，关联实现提交 `d269140b86fab47ff458092172dd564de0a4d45c`。
+生产地址 <https://yacr-examples.pages.dev/>，不可变地址
+<https://a6ea4bfe.yacr-examples.pages.dev/>，现有域名 <https://yacr-examples.snakeheartgo.top/>。
+生产 URL 已重跑真实 File API 合成 DXF smoke 通过（`production-dxf/browser.json`），
+无 console/page error，1 LINE、2 CAD 帧、32 颜色，Partial 诊断保留。
+Python 直接下载生产 wasm 校验 hash 遇 HTTP 403，线上二进制 hash **未验证**；
+不能把本地 hash 当线上下载证据。线上浏览器为无头 SwiftShader，不是用户真机/真实 GPU。
 本轮 **完整 workspace 测试、完整 clippy 门禁 NOT RUN（用户明确要求）**。
