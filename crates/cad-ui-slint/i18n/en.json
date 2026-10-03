@@ -172,6 +172,8 @@
   "ribbon.command.backend_switch": "Switch backend",
   "ribbon.command.mode_toggle": "Toggle mode",
   "ribbon.command_unsupported": "Command not available: {command}",
+  "ribbon.command_needs_target": "Command needs a selection or target the ribbon cannot supply: {command}",
+  "ribbon.command_needs_gesture": "Command needs a drag gesture on the canvas: {command}",
   "shell.more": "More",
   "status.synthetic": "Ready · synthetic geometry (not a compatibility claim)",
   "linux.failed": "Linux operation failed: {error}",

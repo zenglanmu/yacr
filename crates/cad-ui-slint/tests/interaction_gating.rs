@@ -9,12 +9,33 @@ use cad_ui_slint::{
     offscreen, CanvasPickMapper, MeasurementUiState, UiAdapter, UiCommandSink, UiConfiguration,
     ViewInput,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
+/// Install the offscreen platform exactly once per process.
+///
+/// Both tests in this binary need the platform, but Slint accepts exactly one
+/// `set_platform` call. A process-wide `Once` makes the install idempotent and
+/// safe even if the harness runs the tests in parallel.
+fn ensure_offscreen() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        offscreen::install().unwrap();
+    });
+}
 
 struct Sink;
 impl UiCommandSink for Sink {
     fn send(&mut self, _command: cad_app::Command) -> CadResult<()> {
+        Ok(())
+    }
+}
+
+/// Records the command ids a shell dispatch produced, in order.
+struct RecordingSink(Rc<RefCell<Vec<cad_app::CommandId>>>);
+impl UiCommandSink for RecordingSink {
+    fn send(&mut self, command: cad_app::Command) -> CadResult<()> {
+        self.0.borrow_mut().push(command.id);
         Ok(())
     }
 }
@@ -50,7 +71,7 @@ impl CanvasPickMapper for CountingMapper {
 
 #[test]
 fn pointer_flag_gates_view_input_scroll_and_canvas_pick() {
-    offscreen::install().unwrap();
+    ensure_offscreen();
     let adapter = UiAdapter::new(UiConfiguration::default(), Sink, true).unwrap();
     let counts = Rc::new(Counts::default());
     adapter.set_view_input(Rc::new(CountingInput(counts.clone())));
@@ -108,4 +129,37 @@ fn pointer_flag_gates_view_input_scroll_and_canvas_pick() {
     assert_eq!(counts.pointer.get(), 2);
     assert_eq!(counts.scroll.get(), 2);
     assert_eq!(counts.pick.get(), 2);
+}
+
+#[test]
+fn configured_ribbon_command_dispatches_its_real_command() {
+    use cad_app::CommandId;
+
+    ensure_offscreen();
+    // `view.reset` is rendered as a plain configured-ribbon button but the
+    // shipped chrome has no reset control, so dispatch emits the payload-free
+    // `ResetView` straight through the shared command sink. No other command is
+    // produced by a single dispatch.
+    let recorded = Rc::new(RefCell::new(Vec::new()));
+    let adapter = UiAdapter::new(
+        UiConfiguration::default(),
+        RecordingSink(recorded.clone()),
+        true,
+    )
+    .unwrap();
+    adapter
+        .component()
+        .invoke_ribbon_command("view.reset".into());
+    assert_eq!(recorded.borrow().as_slice(), &[CommandId::ResetView]);
+
+    // A deliberately ambiguous id still produces no command and reports
+    // instead: `layer.toggle` needs a layer row the ribbon cannot supply.
+    recorded.borrow_mut().clear();
+    adapter
+        .component()
+        .invoke_ribbon_command("layer.toggle".into());
+    assert!(
+        recorded.borrow().is_empty(),
+        "an ambiguous id must not fabricate a command"
+    );
 }

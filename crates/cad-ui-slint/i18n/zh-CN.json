@@ -172,6 +172,8 @@
   "ribbon.command.backend_switch": "切换后端",
   "ribbon.command.mode_toggle": "切换模式",
   "ribbon.command_unsupported": "命令不可用：{command}",
+  "ribbon.command_needs_target": "命令需要选择或目标，功能区无法提供：{command}",
+  "ribbon.command_needs_gesture": "命令需要在画布上拖动：{command}",
   "shell.more": "更多",
   "status.synthetic": "就绪 · 合成几何（非兼容性声明）",
   "linux.failed": "Linux 命令失败：{error}",

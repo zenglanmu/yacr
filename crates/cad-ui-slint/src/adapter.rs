@@ -33,6 +33,8 @@ pub enum RibbonCommandAction {
     Redo,
     Fit,
     Pan,
+    /// Restore the view to the top-down 2D camera (payload-free `ResetView`).
+    ResetView,
     ToggleProjection,
     Switch2d3d,
     /// A measurement algorithm, identified by its machine key.
@@ -53,6 +55,27 @@ pub enum RibbonCommandAction {
     Unsupported,
 }
 
+/// Catalog key explaining why an id has no standalone ribbon action.
+///
+/// Every id in `COMMAND_IDS` must resolve: the `_` arm is the honest fallback
+/// for an id the build does not know at all. The targeted ids keep
+/// [`RibbonCommandAction::Unsupported`] because the ribbon button cannot supply
+/// the selection/target (or, for orbit, the drag gesture) the command needs;
+/// the message says which kind of input is missing rather than "unsupported".
+pub fn ribbon_command_unsupported_reason(id: &str) -> &'static str {
+    match id {
+        "view.orbit" => "ribbon.command_needs_gesture",
+        "view.standard"
+        | "backend.switch"
+        | "layer.toggle"
+        | "layout.switch"
+        | "annotation.delete"
+        | "annotation.select"
+        | "annotation.visibility" => "ribbon.command_needs_target",
+        _ => "ribbon.command_unsupported",
+    }
+}
+
 /// Map a configured command id to its shell action.
 ///
 /// Every id in [`cad_app::viewer_config::COMMAND_IDS`] is considered; ids whose
@@ -68,6 +91,7 @@ pub fn ribbon_command_action(id: &str) -> RibbonCommandAction {
         "edit.redo" => Redo,
         "view.fit" => Fit,
         "view.pan" => Pan,
+        "view.reset" => ResetView,
         "view.projection" => ToggleProjection,
         "view.switch2d3d" => Switch2d3d,
         "measure.distance" => MeasureKind("distance"),
@@ -92,8 +116,10 @@ pub fn ribbon_command_action(id: &str) -> RibbonCommandAction {
         "draw.trim" => BeginDraw("trim"),
         "mode.toggle" => ToggleMode,
         "diagnostics.open" => OpenDiagnostics,
-        // Needs a target the ribbon cannot provide: a standard view, an orbit
-        // gesture, a layer row, an annotation row or a backend choice.
+        // Genuinely ambiguous or unknown: a standard view, an orbit gesture, a
+        // layer row, an annotation row, a layout id or a backend choice. The
+        // shell reports the concrete missing input via
+        // [`ribbon_command_unsupported_reason`] rather than faking a target.
         _ => Unsupported,
     }
 }
@@ -250,8 +276,13 @@ impl UiAdapter {
         {
             // Configured ribbon buttons dispatch to the exact callbacks the
             // built-in chrome uses; the id mapping is pure and unit-tested.
+            // `ResetView` has no shipped button of its own, so it emits the
+            // payload-free command directly through the shared sink instead of
+            // routing through a redundant shell callback.
             let weak = ui_weak.clone();
             let messages = messages_slot.clone();
+            let s = shared.clone();
+            let doc = document;
             ui.on_ribbon_command(move |id| {
                 let Some(ui) = weak.upgrade() else {
                     return;
@@ -265,6 +296,14 @@ impl UiAdapter {
                     RibbonCommandAction::Redo => ui.invoke_redo_requested(),
                     RibbonCommandAction::Fit => ui.invoke_fit_requested(),
                     RibbonCommandAction::Pan => ui.invoke_pan_requested(),
+                    RibbonCommandAction::ResetView => {
+                        let _ = s.borrow_mut().send(command_for(
+                            CommandId::ResetView,
+                            &doc,
+                            viewport,
+                            CommandPayload::None,
+                        ));
+                    }
                     RibbonCommandAction::ToggleProjection => {
                         ui.invoke_toggle_projection_requested()
                     }
@@ -309,7 +348,7 @@ impl UiAdapter {
                         ui.set_status_label(
                             messages
                                 .borrow()
-                                .text("ribbon.command_unsupported", &[("command", id)])
+                                .text(ribbon_command_unsupported_reason(id), &[("command", id)])
                                 .into(),
                         );
                     }

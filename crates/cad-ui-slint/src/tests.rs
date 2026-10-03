@@ -911,6 +911,7 @@ fn ribbon_command_actions_dispatch_or_report_explicitly() {
     assert_eq!(ribbon_command_action("edit.redo"), Redo);
     assert_eq!(ribbon_command_action("view.fit"), Fit);
     assert_eq!(ribbon_command_action("view.pan"), Pan);
+    assert_eq!(ribbon_command_action("view.reset"), ResetView);
     assert_eq!(ribbon_command_action("view.projection"), ToggleProjection);
     assert_eq!(ribbon_command_action("view.switch2d3d"), Switch2d3d);
     assert_eq!(
@@ -934,7 +935,6 @@ fn ribbon_command_actions_dispatch_or_report_explicitly() {
     // Ids that need a target the ribbon cannot supply are explicit, not faked.
     for id in [
         "view.orbit",
-        "view.reset",
         "view.standard",
         "layer.toggle",
         "annotation.delete",
@@ -946,6 +946,131 @@ fn ribbon_command_actions_dispatch_or_report_explicitly() {
     ] {
         assert_eq!(ribbon_command_action(id), Unsupported, "id {id}");
     }
+}
+
+#[test]
+fn every_whitelisted_ribbon_command_has_a_classified_action_and_reason() {
+    use RibbonCommandAction::*;
+
+    // The regression net for the whole data-driven ribbon: every id must map to
+    // a concrete action or be an explicit `Unsupported`, and every `Unsupported`
+    // id must carry a concrete reason (never the generic "not available" for a
+    // command the build actually knows).
+    let expected: &[(&str, RibbonCommandAction)] = &[
+        ("file.open", Open),
+        ("file.exportAnnotations", Export),
+        ("file.importAnnotations", Import),
+        ("edit.undo", Undo),
+        ("edit.redo", Redo),
+        ("view.fit", Fit),
+        ("view.pan", Pan),
+        ("view.reset", ResetView),
+        ("view.projection", ToggleProjection),
+        ("view.switch2d3d", Switch2d3d),
+        ("measure.distance", MeasureKind("distance")),
+        ("measure.polyline", MeasureKind("polyline")),
+        ("measure.angle", MeasureKind("angle")),
+        ("measure.area", MeasureKind("area")),
+        ("measure.confirm", ConfirmMeasurement),
+        ("measure.cancel", CancelMeasurement),
+        ("measure.save", SaveMeasurement),
+        ("annotation.text", AnnotationKind("text")),
+        ("annotation.leader", AnnotationKind("leader")),
+        ("annotation.rectangle", AnnotationKind("rectangle")),
+        ("annotation.ellipse", AnnotationKind("ellipse")),
+        ("annotation.freehand", AnnotationKind("freehand")),
+        ("annotation.cloud", AnnotationKind("cloud")),
+        ("annotation.confirm", ConfirmAnnotation),
+        ("annotation.cancel", CancelAnnotation),
+        ("layer.restore", RestoreLayers),
+        ("draw.line", BeginDraw("line")),
+        ("draw.circle", BeginDraw("circle")),
+        ("draw.move", BeginDraw("move")),
+        ("draw.trim", BeginDraw("trim")),
+        ("mode.toggle", ToggleMode),
+        ("diagnostics.open", OpenDiagnostics),
+    ];
+    // Every id with a concrete action is asserted above.
+    for (id, action) in expected {
+        assert_eq!(ribbon_command_action(id), *action, "id {id}");
+    }
+    // The whitelist is exactly the wired ids plus the deliberately ambiguous
+    // ones, so adding an id to `COMMAND_IDS` without an action fails here.
+    let unsupported: &[&str] = &[
+        "view.orbit",
+        "view.standard",
+        "layer.toggle",
+        "layout.switch",
+        "backend.switch",
+        "annotation.delete",
+        "annotation.select",
+        "annotation.visibility",
+    ];
+    let mut classified: Vec<&str> = expected.iter().map(|(id, _)| *id).collect();
+    classified.extend_from_slice(unsupported);
+    classified.sort_unstable();
+    let mut whitelisted = cad_app::viewer_config::command_ids().to_vec();
+    whitelisted.sort_unstable();
+    assert_eq!(classified, whitelisted, "COMMAND_IDS coverage drifted");
+
+    // An ambiguous command explains which input is missing; orbit needs a
+    // gesture, the rest need a selection/target, unknown ids stay generic.
+    assert_eq!(
+        ribbon_command_unsupported_reason("view.orbit"),
+        "ribbon.command_needs_gesture"
+    );
+    for id in [
+        "view.standard",
+        "layer.toggle",
+        "layout.switch",
+        "backend.switch",
+        "annotation.delete",
+        "annotation.select",
+        "annotation.visibility",
+    ] {
+        assert_eq!(
+            ribbon_command_unsupported_reason(id),
+            "ribbon.command_needs_target",
+            "id {id}"
+        );
+    }
+    assert_eq!(
+        ribbon_command_unsupported_reason("totally.unknown"),
+        "ribbon.command_unsupported"
+    );
+    // The reasons resolve to real, localized text in both catalogs (never a
+    // bracketed missing-key fallback).
+    for messages in [
+        MessageSource::for_locale(Locale::ZhCn),
+        MessageSource::for_locale(Locale::En),
+    ] {
+        for reason in [
+            "ribbon.command_unsupported",
+            "ribbon.command_needs_target",
+            "ribbon.command_needs_gesture",
+        ] {
+            let text = messages.text(reason, &[("command", "view.orbit")]);
+            assert!(!text.contains(reason), "missing catalog text: {reason}");
+            assert!(text.contains("view.orbit"), "placeholder not substituted");
+        }
+    }
+}
+
+#[test]
+fn ribbon_reset_and_unsupported_actions_are_wired_in_the_adapter() {
+    // `src/tests.rs` is deliberately GPU-free (the offscreen platform installs
+    // once per test binary), so the live dispatch test lives in
+    // `tests/interaction_gating.rs` style. Here we guard the wiring the
+    // dispatch depends on: `ResetView` must emit the same payload-free
+    // `CommandId::ResetView` the command layer handles, and the unsupported arm
+    // must consult the reason helper instead of hardcoding one message.
+    let source = include_str!("adapter.rs");
+    assert!(source.contains("RibbonCommandAction::ResetView =>"));
+    assert!(source.contains("CommandId::ResetView,"));
+    assert!(source.contains("ribbon_command_unsupported_reason(id)"));
+    // The bare id must never fall back to a generic "unsupported" message: the
+    // reason helper is what selects the concrete text.
+    assert!(!source.contains(".text(\"ribbon.command_unsupported\", &[(\"command\", id)])"));
 }
 
 #[test]
