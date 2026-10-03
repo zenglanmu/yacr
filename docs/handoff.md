@@ -27,7 +27,8 @@ MESH/PolyfaceMesh/PolygonMesh、WIPEOUT、HELIX；带字体名的 Text 由 `Unsu
 实测 **9/9 通过、模型空间无 `Unsupported` 几何**。与 opencadstudio 的完整对照及未完成项
 见 `docs/dxf-entity-coverage.md`（MULTILEADER/MLINE/SHAPE/TABLE/TOLERANCE/RASTERIMAGE/
 UNDERLAY/RAY/XLINE、纸空间 VIEWPORT、角度等 DIMENSION 子类、QCAD XDATA 字体提示）。
-`ezdxf` 因代理网络未安装，参考导出记为 **NOT RUN**。
+`ezdxf 1.4.4`+`matplotlib` 经**国内镜像（不加代理）**安装成功，9 个 DXF 的 ezdxf 参考图
+已导出；但其后端视口/背景不同，自动对比只作人工对照、非保真分数（见覆盖文档 §5）。
 
 **QCAD flange 渲染回归样本（2026-10-03）**：按用户要求提交 QCAD 开源 `flange.dxf`
 及 PNG/PDF 参考（`fixtures/dxf/qcad-flange/`，来源/许可/SHA 见其 `SOURCE.md` 与

@@ -72,10 +72,20 @@ Underlay、Ole2Frame、Light、SectionSymbol、ViewBorder、Viewport、Seqend。
 
 ## 5. ezdxf 参考导出与宿主字体
 
-`scripts/check-qcad-examples.py --export-references` 在本机安装 `ezdxf`+`matplotlib`
-时，用 `ezdxf.addons.drawing.matplotlib` 为每个 DXF 导出 `*-ezdxf.png` 供人工/粗粒度
-对照；缺包时该项记为 **NOT RUN**，不伪造参考图。本轮代理网络多次中断，`uv pip install
-ezdxf matplotlib` 未成功，故参考导出 **NOT RUN**；`flange` 有上游 PNG/SVG/PDF 可直接用
+`scripts/check-qcad-examples.py --export-references` 用 `ezdxf.addons.drawing.matplotlib`
+为每个 DXF 导出 `*-ezdxf.png` 供人工/粗粒度对照；缺包时该项记为 **NOT RUN**，不伪造
+参考图。安装（**国内镜像、不加代理**）：
+
+```bash
+uv pip install --python /tmp/opencode/ezdxf-venv/bin/python \
+  --index-url https://pypi.tuna.tsinghua.edu.cn/simple ezdxf matplotlib
+# -> ezdxf 1.4.4, matplotlib 3.11.2, numpy 2.5.3
+```
+
+本轮 9 个 DXF 全部导出成功（`/tmp/opencode/yacr-qcad-corpus-ezdxf/*-ezdxf.png`）。但
+`ezdxf` matplotlib 后端与我们的 wgpu 渲染在视口/比例/背景上不同（例如 AutoCAD 7 号色在
+白底可能不可见），直接用 `check-dxf-reference.py` 计算得 example00 IoU 0.135、projection
+0.0，**不能当作保真分数**，只作人工对照。`flange` 有上游 PNG/SVG/PDF，优先用上游参考
 （见 `docs/validation-dxf-flange.md`）。
 
 QCAD 字体：`osifont.ttf`（GPLv3，含 `osifont_license.txt`）与 `Standard/ltypeshp/

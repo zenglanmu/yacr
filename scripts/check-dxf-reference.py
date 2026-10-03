@@ -234,6 +234,8 @@ def main() -> int:
     parser.add_argument("--font", action="append", default=[],
                         help="register a CAD text font for build/render as name=path "
                              "(repeatable); without it text stays an unresolved placeholder")
+    parser.add_argument("--any-units", action="store_true",
+                        help="accept any drawing unit instead of requiring Millimetre")
     args = parser.parse_args()
 
     sample = args.input
@@ -260,7 +262,8 @@ def main() -> int:
         assert scan["operation"] == "scan" and scan["schema_version"] == 1
         assert scan["entities"] > 0, "no entities imported"
         assert scan["model_entities"] > 0, "no model-space entities"
-        assert scan["units"] == "Millimeter", f"unexpected units {scan['units']!r}"
+        if not args.any_units:
+            assert scan["units"] == "Millimeter", f"unexpected units {scan['units']!r}"
         completeness = scan["completeness"]
         assert completeness["status"] in {"complete", "partial"}, completeness
         if completeness["status"] == "partial":
