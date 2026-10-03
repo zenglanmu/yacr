@@ -110,6 +110,11 @@ impl UiHandle {
         self.viewer_config
             .borrow_mut()
             .apply_user_preference_json(patch_json)?;
+        apply_ribbon_config(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            &self.messages.borrow(),
+        );
         let size = ui.window().size().to_logical(ui.window().scale_factor());
         apply_viewer_presentation_with(
             &ui,
@@ -158,6 +163,11 @@ impl UiHandle {
                 reason: "window was dropped".into(),
             })?;
         self.viewer_config.borrow_mut().clear_user_preference();
+        apply_ribbon_config(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            &self.messages.borrow(),
+        );
         let size = ui.window().size().to_logical(ui.window().scale_factor());
         apply_viewer_presentation_with(
             &ui,
@@ -542,6 +552,7 @@ impl UiHandle {
         let work = self.work_mode.get();
         self.with(|ui| {
             apply_chrome(ui, &messages, work);
+            apply_ribbon_config(ui, self.viewer_config.borrow().effective(), &messages);
             ui.set_layer_override_label(override_label.into());
             ui.set_property_selected_label(selected_label.into());
             ui.set_annotation_hidden_label(hidden_label.into());

@@ -1,6 +1,7 @@
 import { HorizontalBox, VerticalBox, ComboBox, ScrollView } from "std-widgets.slint";
 import { Button } from "button.slint";
 import { CadTheme } from "theme.slint";
+import { RibbonTabModel } from "ribbon-model.slint";
 
 // Stable action IDs are mapped to the shared command callbacks at the shell boundary.
 export component CadRibbon inherits Rectangle {
@@ -8,6 +9,8 @@ export component CadRibbon inherits Rectangle {
     in property <bool> compact;
     in property <length> target: 36px;
     in property <[string]> tabs;
+    in property <[RibbonTabModel]> config-tabs;
+    in property <bool> config-driven: false;
     in property <[string]> labels;
     in property <[string]> measurements;
     in property <[string]> annotations;
@@ -33,6 +36,12 @@ export component CadRibbon inherits Rectangle {
     callback draw-tool(string);
     callback measure-kind(string);
     callback annotation-kind(string);
+    callback ribbon-command(string);
+    // Clamp the active tab index for the configured list; the Rust side resets
+    // it to 0 when a config-driven model is pushed, but the phone shortcuts can
+    // still set an out-of-range index.
+    property <int> config-tab-index: root.config-tabs.length == 0 ? 0 :
+        (root.tab < 0 ? 0 : (root.tab >= root.config-tabs.length ? root.config-tabs.length - 1 : root.tab));
     height: root.phone ? (root.tab == 4 ? 148px : 112px) : (root.expanded ? 144px : 36px);
     background: CadTheme.chrome;
     border-color: CadTheme.border; border-width: 1px;
@@ -57,13 +66,40 @@ export component CadRibbon inherits Rectangle {
         if root.expanded : ScrollView {
             VerticalBox {
                 padding: 8px; spacing: 6px; alignment: start;
-                if root.tab == 0 : HorizontalBox {
+                // Host-configured tabs/groups/commands. Labels are already
+                // localized by the adapter; clicking dispatches the real id.
+                if root.config-driven : HorizontalBox {
+                    alignment: start; spacing: 12px;
+                    for tab-model[tab-index] in root.config-tabs : HorizontalBox {
+                        visible: tab-index == root.config-tab-index;
+                        alignment: start; spacing: 12px;
+                        for group in tab-model.groups : VerticalBox {
+                            alignment: start; spacing: 4px;
+                            Text {
+                                text: group.label; color: CadTheme.muted; font-size: 12px;
+                                horizontal-alignment: left; vertical-alignment: center;
+                            }
+                            // The model already filters hidden commands; the
+                            // `visible` flag is kept on the row for completeness.
+                            HorizontalBox {
+                                alignment: start; spacing: 4px;
+                                for command in group.commands : Button {
+                                    visible: command.visible;
+                                    text: command.label; symbol: command.icon; stacked: true;
+                                    min-height: 76px;
+                                    clicked => { root.ribbon-command(command.id); }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !root.config-driven && root.tab == 0 : HorizontalBox {
                     alignment: start;
                     Button { text: root.labels[0]; symbol: "▱"; enabled: root.can-open; stacked: true; min-height: 76px; clicked => { root.action(0); } }
                     Button { text: root.labels[10]; symbol: "⇧"; enabled: root.can-export; stacked: true; min-height: 76px; clicked => { root.action(10); } }
                     Button { text: root.labels[11]; symbol: "⇩"; enabled: root.can-import && root.work-mode; stacked: true; min-height: 76px; clicked => { root.action(11); } }
                 }
-                if root.tab == 1 : HorizontalBox {
+                if !root.config-driven && root.tab == 1 : HorizontalBox {
                     alignment: start;
                     Button { text: root.labels[1]; symbol: "⊡"; stacked: true; min-height: 76px; clicked => { root.action(1); } }
                     Button { text: root.labels[7]; symbol: "▱"; stacked: true; checked: !root.view-3d; min-height: 76px; clicked => { root.action(7); } }
@@ -73,7 +109,7 @@ export component CadRibbon inherits Rectangle {
                         Button { text: root.labels[9]; symbol: "◇"; enabled: root.view-3d; min-height: root.target; clicked => { root.action(9); } }
                     }
                 }
-                if root.tab == 2 : HorizontalBox {
+                if !root.config-driven && root.tab == 2 : HorizontalBox {
                     alignment: start; spacing: 8px;
                     for label[index] in root.measurements : Button {
                         text: label; symbol: index == 0 ? "↔" : (index == 1 ? "∿" : (index == 2 ? "∠" : "▨"));
@@ -83,7 +119,7 @@ export component CadRibbon inherits Rectangle {
                     if !root.phone : Rectangle { width: 1px; background: CadTheme.border; }
                     if !root.phone : Button { text: root.labels[5]; symbol: "A"; stacked: true; min-height: 76px; enabled: root.work-mode; clicked => { root.tab = 3; } }
                 }
-                if root.tab == 3 : HorizontalBox {
+                if !root.config-driven && root.tab == 3 : HorizontalBox {
                     alignment: start; spacing: 8px;
                     for label[index] in root.annotations : Button {
                         text: label; symbol: index == 0 ? "A" : (index == 1 ? "↗" : (index == 3 ? "ellipse" : (index == 4 ? "freehand" : (index == 5 ? "☁" : "□"))));
@@ -91,7 +127,7 @@ export component CadRibbon inherits Rectangle {
                         clicked => { root.annotation-kind(label); }
                     }
                 }
-                if root.tab == 4 : VerticalBox {
+                if !root.config-driven && root.tab == 4 : VerticalBox {
                     HorizontalBox {
                         alignment: start;
                         Button { text: root.labels[6]; symbol: "layers"; min-height: root.target; clicked => { root.action(6); } }

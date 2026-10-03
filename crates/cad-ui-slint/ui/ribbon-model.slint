@@ -1,0 +1,6 @@
+// Host-configured ribbon model. Labels are already localized by the Rust
+// adapter (catalog keys resolved through `MessageSource`); ids stay machine
+// readable so a click dispatches to the real command.
+export struct RibbonCommandModel { id: string, label: string, icon: string, visible: bool }
+export struct RibbonGroupModel { id: string, label: string, commands: [RibbonCommandModel] }
+export struct RibbonTabModel { id: string, label: string, groups: [RibbonGroupModel] }
