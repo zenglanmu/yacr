@@ -3,8 +3,9 @@
 
 The manifest is the repository's record of which CAD fixtures exist, where they
 came from, what authorizes their use, and what compatibility is *expected*.
-Real user drawings and vendor files must never be committed without a verified
-licence, so an empty ``fixtures`` list is a legitimate, honest state.
+Authorized, redistributable samples (drawings and their reference images) may be
+committed with recorded provenance; unverifiable vendor or private user data may
+not. An empty ``fixtures`` list is still a legitimate state.
 
 Standard library only. What it enforces:
 
@@ -135,10 +136,7 @@ def main() -> int:
             fail(f"duplicate fixture id '{entry['id']}'")
         ids.add(entry["id"])
 
-    print(
-        f"manifest OK: schema_version=1, {len(fixtures)} fixture(s) "
-        f"(an empty list is the honest state until samples are authorized)"
-    )
+    print(f"manifest OK: schema_version=1, {len(fixtures)} fixture(s)")
     return 0
 
 

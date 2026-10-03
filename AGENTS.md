@@ -105,10 +105,11 @@ ActivityManager attach 超时）。**模拟器 ≠ 真机**，真机能力一律
 流程见 `docs/testing-dwg.md`：**原生离屏 wgpu + Mesa lavapipe 为主**（`cargo build -p
 cad-cli-tools --release`，`scripts/check-dwg-native.py`），WASM + Playwright 为第二层。
 必须分别记录「打开 / 出图 smoke / 视觉验收」三个结论；退出码 0、非空截图、`error=None`
-都不能单独证明视觉正确。样本与参考图放在仓库外（默认 `~/sources/cad-test-files/`），
-可用 `scripts/fetch-test-dwg.sh` 拉取临时样本到 `/tmp/opencode`。**真实/用户图纸、第三方
-字体、黄金图不得提交仓库**；只有授权明确的夹具才能进 `fixtures/manifest`（现仅合成样本，
-空列表是合法诚实状态）。每轮用新输出目录，保留失败/超时记录，不用旧证据冒充本轮通过。
+都不能单独证明视觉正确。外部大样本默认放仓库外（默认 `~/sources/cad-test-files/`），
+也可用 `scripts/fetch-test-dwg.sh` 拉到 `/tmp/opencode`。**授权明确、可再分发的图纸与参考图
+可提交进 `fixtures/` 并记入 `fixtures/manifest`**，须在 `provenance` 记录来源 URL、下载
+日期、许可与 SHA-256；未授权或来源不明的用户/厂商数据仍不得提交。每轮用新输出目录，
+保留失败/超时记录，不用旧证据冒充本轮通过。
 
 ## 交接点
 

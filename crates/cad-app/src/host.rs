@@ -34,8 +34,9 @@ fn next_transaction() -> TransactionId {
 
 /// Synthetic drawing used before a real DWG is opened.
 ///
-/// This is **not** a compatibility claim (the fixture manifest is empty); it
-/// exercises the shared UI/render pipeline with known geometry.
+/// This is **not** a compatibility claim (the fixture manifest holds only
+/// synthetic fixtures and one openly-distributed sample); it exercises the
+/// shared UI/render pipeline with known geometry.
 pub fn demo_database() -> DrawingDatabase {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder

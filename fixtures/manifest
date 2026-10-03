@@ -181,7 +181,70 @@
         "Produced by the acadrust DWG writer, not by AutoCAD/Tianzheng/TSSD.",
         "Four plain LINE entities only; exercises the async import contract, not compatibility."
       ]
+    },
+    {
+      "id": "qcad-flange-dxf",
+      "path": "fixtures/dxf/qcad-flange/flange.dxf",
+      "sha256": "df469e7e91e38c901fced51c9621c8d2b6b6568678803e563b29c9ecf8dec84b",
+      "dwg_version": "AC1027 (ASCII DXF)",
+      "source": "QCAD upstream examples/flange.dxf (github.com/qcad/qcad, master dcf5754b0a19d8e57eddd467d18bf802ac12c2e2)",
+      "provenance": {
+        "origin": "https://github.com/qcad/qcad/blob/master/examples/flange.dxf",
+        "authorization": "upstream QCAD sample distributed by the QCAD project; downloaded 2026-10-03 via the operator-provided proxy; full record in fixtures/dxf/qcad-flange/SOURCE.md",
+        "licence": "QCAD LICENSE.txt: source GPLv3 with exceptions, icons/documentation CC BY 3.0; examples/ carry no per-file notice (see SOURCE.md)"
+      },
+      "authorized": true,
+      "synthetic": false,
+      "entity_types": ["AcDbLine", "AcDbArc", "AcDbCircle", "AcDbEllipse", "AcDbHatch", "AcDbPolyline", "AcDbPoint", "AcDbBlockReference", "AcDbDimension", "AcDbMText"],
+      "expected": "partial",
+      "known_limits": [
+        "AcDbDimension and AcDbMText have no display representation yet, so dimensions, annotations and title-block text do not render (import reports Partial).",
+        "The examples/ files carry no per-file licence notice; the exact terms are inferred from QCAD LICENSE.txt and must be re-evaluated if upstream changes them.",
+        "Importing this file is not evidence of general DXF compatibility."
+      ]
+    },
+    {
+      "id": "qcad-flange-reference-png",
+      "path": "fixtures/dxf/qcad-flange/flange.png",
+      "sha256": "26d730aa0a758adbe9cab8e2b05a17266a715649442c49452f53f5098e3cea36",
+      "dwg_version": "n/a",
+      "source": "QCAD upstream reference render examples/flange.png (1024x768 RGBA)",
+      "provenance": {
+        "origin": "https://github.com/qcad/qcad/blob/master/examples/flange.png",
+        "authorization": "upstream QCAD sample distributed by the QCAD project; downloaded 2026-10-03 via the operator-provided proxy; full record in fixtures/dxf/qcad-flange/SOURCE.md",
+        "licence": "QCAD LICENSE.txt: source GPLv3 with exceptions, icons/documentation CC BY 3.0; examples/ carry no per-file notice (see SOURCE.md)"
+      },
+      "authorized": true,
+      "synthetic": false,
+      "entity_types": [],
+      "expected": "partial",
+      "known_limits": [
+        "Upstream reference render, not a project-generated golden image.",
+        "Used only for human review and a coarse sanity check; no automated pixel-fidelity/SSIM/IoU acceptance is claimed.",
+        "Rendered by QCAD with its own viewport/layout; margins, borders, line widths and the dark-vs-light background differ from the project renderer's output."
+      ]
+    },
+    {
+      "id": "qcad-flange-reference-pdf",
+      "path": "fixtures/dxf/qcad-flange/flange.pdf",
+      "sha256": "b33726c83edf31710268b9b143574d91520770d2fe704ffbb00ced468c6f830b",
+      "dwg_version": "n/a",
+      "source": "QCAD upstream vector reference examples/flange.pdf (one page, MediaBox 0 0 1191 842)",
+      "provenance": {
+        "origin": "https://github.com/qcad/qcad/blob/master/examples/flange.pdf",
+        "authorization": "upstream QCAD sample distributed by the QCAD project; downloaded 2026-10-03 via the operator-provided proxy; full record in fixtures/dxf/qcad-flange/SOURCE.md",
+        "licence": "QCAD LICENSE.txt: source GPLv3 with exceptions, icons/documentation CC BY 3.0; examples/ carry no per-file notice (see SOURCE.md)"
+      },
+      "authorized": true,
+      "synthetic": false,
+      "entity_types": [],
+      "expected": "partial",
+      "known_limits": [
+        "Upstream vector reference, not a project-generated golden image.",
+        "Kept only so the reference can be inspected as vectors; the automated checker reads the PNG reference, not this PDF.",
+        "No automated PDF-to-render comparison is claimed."
+      ]
     }
   ],
-  "notice": "No authorized DWG, fonts or golden images are committed. Entries marked synthetic are contract fixtures; they do not establish CAD compatibility. Real samples require a verified licence before they may be added here."
+  "notice": "Synthetic entries are contract fixtures and do not establish CAD compatibility. Authorized, redistributable drawings and their reference images may be committed here with full provenance (the QCAD flange sample in fixtures/dxf/qcad-flange/ records its upstream terms in SOURCE.md); its reference images are human-review aids, not project-generated golden images. Unverified vendor or private user data is not committed, and a committed sample is not general CAD compatibility evidence."
 }

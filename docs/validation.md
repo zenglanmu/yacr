@@ -271,8 +271,9 @@ PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假�
 - 解包后独立运行 `bin/cad-cli-tools render map-of-uae.dwg` 成功
   （draws=199，non_background=2031，PNG 6532B）。
 
-该包不含真实 DWG/字体/黄金图（`fixtures/manifest` 为空），也不含 lavapipe；
-运行时的软件适配器由宿主发行版的 Mesa 提供。
+该包不含外部未授权 DWG、第三方字体或黄金图，也不含 lavapipe；运行时的软件适配器
+由宿主发行版的 Mesa 提供。后来提交的开源 QCAD flange 夹具（`fixtures/dxf/qcad-flange/`）
+不改变这一轮打包记录。
 
 ## 集成轮：Android/Web 运行与显示链（2026-10-02 执行）
 
@@ -452,6 +453,7 @@ wasm `--lib` 均通过。
 - **出图**：仅光栅 PNG；无矢量 PDF/HPGL/SVG、无 CTB/STB 打印样式、无打印设备配置、
   无黄金图。
 - 桌面/iOS/macOS/Windows 宿主：**未构建**；仅 `cad-platform` 抽象。
-- 授权真实 DWG/字体/黄金图入库、跨后端对照、**手机内存预算与 FPS 实测**：仍未有
-  授权样本与真机测量；`docs/performance.md` 只记录可复现的宿主测量方法，
+- 大型授权真实 DWG/字体、跨后端黄金图对照、**手机内存预算与 FPS 实测**：仍缺大型
+  授权样本与真机测量（现有开源 QCAD flange 样本仅 `Partial`，见
+  `docs/validation-dxf-flange.md`）；`docs/performance.md` 只记录可复现的宿主测量方法，
   无兼容性/性能声明。

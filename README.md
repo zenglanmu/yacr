@@ -58,7 +58,9 @@ GitHub Actions 默认运行 `linux-app` 主门禁，Web/Android 继续作为跨�
 
 **明确未完成**（不得视为已交付）：
 
-- 无授权真实 DWG 样本、黄金图、跨后端对照或性能基准（`fixtures/manifest` 为空）。
+- 跨后端对照与性能基准尚未建立；已提交 QCAD `flange` DXF 与上游参考图
+  （`fixtures/dxf/qcad-flange/`），但它作为 `Partial` 样本只覆盖模型空间几何，不构成
+  大型真实 DWG 兼容性或黄金图矩阵验收。
 - Android 未在真机运行；surface 尺寸/安全区、SAF、量测/批注拾取未接线。
 - Web 仅验证 WebGL2 软件路径；WebGPU、真实 GPU 与移动/桌面浏览器矩阵未验证。
 - Linux 已有桌面/离屏共用宿主，但窗口系统与真实 GPU 未验收；文件选择器、恢复决策、后台

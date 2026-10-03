@@ -18,6 +18,16 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**QCAD flange 渲染回归样本（2026-10-03）**：按用户要求提交 QCAD 开源 `flange.dxf`
+及 PNG/PDF 参考（`fixtures/dxf/qcad-flange/`，来源/许可/SHA 见其 `SOURCE.md` 与
+`fixtures/manifest`），新增 `scripts/check-dxf-reference.py` 与无需 GPU 的
+`crates/cad-cli-tools/tests/dxf_fixture.rs`。原生 release + lavapipe 实际执行：
+419 entities / 223 model、表示 298 primitives、1024×768 非空帧 1.55%、0 build failure；
+`dxf_fixture` 2/2 通过。视觉结论：四视图几何/剖面线与参考一致，尺寸、标注与标题栏文字
+因 `AcDbDimension`/`AcDbMText` 仍 `Partial` 而缺失。证据 `docs/validation-dxf-flange.md`、
+`/tmp/opencode/yacr-dxf-reference/`。同时按用户要求把“外部图纸/参考图不得入库”改为
+“授权可再分发即可入库并记 provenance”。
+
 **Linux 文件选择/关闭崩溃/后端诊断修复（release 门禁进行中）**：桌面打开经 ashpd 调用系统
 `xdg-desktop-portal` 文件选择器（独立线程等待，取消/失败区分，脏状态选择前后检查）；
 `--open` 为启动路径，无窗口模式仍不调用选择器。Slint setup/teardown 不再写图片属性，
@@ -265,7 +275,8 @@ HATCH、动态块求值、注释性缩放、打印/出图、异步可取消导�
 仍开放（受环境/外部依赖限制）：**F15 真实 ACIS 离散**（需内核 + SAT/SAB 解析器 + 授权样本）；
 **真机**（模拟器 SwiftShader 不等同真机）；**WebGPU / 真实 GPU / 移动与桌面浏览器矩阵**；
 Android surface 尺寸/安全区（U07）、SAF、量测/批注拾取与面板状态推送；自托管 GPU/Android
-runner；**授权 DWG/字体/黄金图**（`fixtures/manifest` 仍无授权样本）；MultiLeader；
+runner；**大型授权 DWG/字体与跨后端黄金图矩阵**（`fixtures/manifest` 现有开源 QCAD
+flange 样本，但仅 `Partial`，不构成兼容性或黄金图验收）；MultiLeader；
 复杂文字整形；自动保存/崩溃恢复保留策略。详见各功能 `docs/*.md` 的"未完成"。
 
 ## 下一轮优先：UI 界面未实现功能（用户指定）

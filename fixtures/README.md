@@ -6,11 +6,19 @@ types, expected support and known limits. This file is that record.
 
 ## Current state (honest)
 
-**No authorized DWG, font or golden image is committed.** The `fixtures` list is
-therefore the smallest honest form: one **synthetic** contract fixture, plus the
-notice explaining why the rest is absent. Passing tests over synthetic bytes does
-**not** establish compatibility with AutoCAD, Tianzheng (天正), TSSD (探索者) or
-any vendor format, and the manifest enforces that.
+Most entries are **synthetic** contract fixtures. In addition, one openly
+distributed third-party sample is committed: the QCAD `flange` DXF with its
+upstream PNG/PDF reference (`fixtures/dxf/qcad-flange/`, provenance in
+`SOURCE.md`). Its reference images are **human-review aids and coarse sanity
+checks, not project golden images**; the DXF imports as `Partial` because
+dimensions and MTEXT have no display representation yet. No user/vendor drawing
+or third-party font is committed; reference images are only committed when the
+upstream licence permits redistribution.
+
+Passing tests over synthetic bytes does **not** establish compatibility with
+AutoCAD, Tianzheng (天正), TSSD (探索者) or any vendor format, and the manifest
+enforces that; importing the one QCAD sample is likewise not general DXF
+compatibility evidence.
 
 ## Format
 
@@ -57,10 +65,13 @@ Required keys per entry: `id`, `path`, `sha256`, `dwg_version`, `source`,
   `expected` of `complete`/`verified`/`supported` — an unbacked compatibility
   claim.
 
-## Authorizing a real sample
+## Authorizing and committing a sample
 
-A real drawing or vendor file may only be added with a verified licence. Record
-it by filling `provenance` (origin, authorization, licence), setting
-`authorized: true`, `synthetic: false`, and an `expected` value you can defend
-with evidence. Do **not** commit user drawings, and never upload a user drawing
-to public CI. See also `docs/compatibility.md` and `docs/validation.md`.
+A drawing or reference image may be committed when its licence clearly permits
+redistribution. Record `provenance` (origin URL, authorization, licence), the
+download date and the SHA-256, set `authorized: true`, `synthetic: false`, and an
+`expected` value you can defend with evidence. Reference images produced by the
+upstream project may be committed alongside the drawing as human-review aids.
+Do **not** commit material whose redistribution you cannot justify, and never
+upload private user data. See also `docs/compatibility.md` and
+`docs/validation.md`.

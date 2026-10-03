@@ -344,5 +344,6 @@ cargo test -p cad-cli-tools --locked
 - 能力表 importer 侧（`read` 恒 `Verified`、render/pick 复制 semantic、
   `model_render` 未按表示/scene/GPU/拾取分别判定）位于
   `crates/cad-import-acadrust` → OPEN，CLI 只如实转发。
-- 结构化批注 CRUD 入口、真实授权 DWG/字体/黄金图与跨后端验收：
-  `fixtures/manifest` 为空，**未运行、无证据**。
+- 结构化批注 CRUD 入口、跨后端（Vulkan/GL、不同驱动）与不同 GPU 的对照验收：仍
+  **未运行、无证据**；`fixtures/manifest` 现有 QCAD flange 样本可作回归输入，但不等于
+  兼容性或黄金图验收。

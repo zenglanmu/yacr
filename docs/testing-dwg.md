@@ -34,10 +34,15 @@ cad-test-files/
 - 缺参考图只能做打开/出图 smoke，不算黄金图验收。
 - 需要扩充时可从 <https://dwgmodels.com/> 的**免费图纸**选择建筑、机械、块/文字等样本。
   记录下载页 URL、日期、文件 SHA-256、许可/使用限制；免费下载不意味着允许再分发。
-- 外部 DWG、参考图和第三方字体不提交仓库；只有授权明确的夹具才能加入
-  `fixtures/manifest`。不要为了测试修改 acadrust 或添加 Cargo patch。
+- **授权明确、可再分发的图纸与参考图可以提交进 `fixtures/` 并记入 `fixtures/manifest`**
+  （`provenance` 记录来源 URL、日期、许可与 SHA-256；仓库现有 QCAD flange 样本）。大批量
+  或授权不明的样本仍放仓库外（`~/sources/cad-test-files/` 或 `/tmp/opencode`）。不要为了
+  测试修改 acadrust 或添加 Cargo patch。
 - 字体目录与图纸目录分开。原字体缺失时显式注明使用了哪个回退字体；
   不能把回退排版说成原字体正确。字体来源/授权见 [fonts.md](fonts.md)。
+- 已提交的开源 QCAD `flange` DXF 及其参考图见 `fixtures/dxf/qcad-flange/`；DXF 离屏
+  渲染与参考对照用 `scripts/check-dxf-reference.py`，本轮证据见
+  [validation-dxf-flange.md](validation-dxf-flange.md)。
 
 以下命令均从仓库根目录运行。每轮使用新的专用输出目录，避免旧 PNG/JSON 冒充本轮结果：
 

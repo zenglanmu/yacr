@@ -3,7 +3,8 @@
 
 Usage: python3 scripts/check-dwg-native.py ~/sources/cad-test-files OUT
        [--cli target/release/cad-cli-tools] [--font name=path ...]
-Samples/reference images stay outside the repo (no redistribution implied).
+Corpus samples may live outside the repo or be committed fixtures; any committed
+sample records its redistribution terms in fixtures/manifest.
 """
 import argparse
 import hashlib

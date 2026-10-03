@@ -65,9 +65,10 @@ Quick start
   ./bin/cad-cli-tools render drawing.dwg --png frame.png --width 1280 --height 720
   ./scripts/render-smoke.sh drawing.dwg frame.png
 
-No real DWG samples, fonts, or golden images are bundled: fixtures/manifest is
-empty and no sample authorization exists. This package is not a compatibility or
-performance claim. See docs/validation.md and docs/headless-render.md.
+No unlicensed user DWG samples, fonts or golden images are bundled; the committed
+QCAD flange fixture (fixtures/dxf/qcad-flange/, upstream terms in SOURCE.md) may
+be included with the scripts. This package is not a compatibility or performance
+claim. See docs/validation.md and docs/headless-render.md.
 EOF
 
 if [ -n "${YACR_TEST_DWG:-}" ]; then

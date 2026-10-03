@@ -228,18 +228,19 @@ cargo run -p cad-cli-tools --offline -- render <input.dwg> --png /tmp/opencode/y
 
 ## 8. 明确未证明
 
-- **真实样本黄金图**：没有授权 DWG/字体的固定视口黄金图，`fixtures/manifest` 仍为空
-  （规范 §11.1、§11.2）。当前无头测试只用合成/程序化场景，**不构成**对真实图纸渲染正确性
-  或兼容性的验收。
+- **真实样本黄金图**：仍没有大型授权 DWG/字体与跨后端固定的视口黄金图矩阵（规范
+  §11.1、§11.2）。仓库已提交开源 QCAD flange 样本及其上游参考图，但它是 `Partial`
+  回归输入，**不构成**对真实图纸渲染正确性或兼容性的验收。
 - **GPU 与软件等价**：lavapipe 通过**不代表**真实 GPU、Android、各驱动或在 `wgpu`
   其他后端上的像素一致；抗锯齿、深度精度、镜像剔除、透明合成在真实设备上仍未验证。
 - **浏览器 / Android 宿主**：无头路径只在原生 CPU 上验证；Wasm/WebGPU/WebGL2 与 Android
   的 GPU 运行仍未执行（`docs/render-backends.md`、`docs/adr/0002`、`docs/adr/0003`）。
 - **性能**：lavapipe 是 CPU 软件渲染，其耗时**不能**用于任何性能预算或 FPS 结论
   （规范 §11.3 要求真实基准设备）。
-- **黄金图/跨后端对照**：`fixtures/manifest` 为空，任何实体兼容性与跨后端语义一致声明
-  都不成立。本轮真实 DWG 的渲染行为证据见 `docs/validation.md`，但样本未入库，且
-  **不是**授权黄金图或兼容性验收。
+- **黄金图/跨后端对照**：`fixtures/manifest` 只有合成夹具与一个开源 QCAD `Partial`
+  样本，任何实体兼容性与跨后端语义一致声明都不成立。真实 DWG/DXF 的渲染行为证据见
+  `docs/validation.md`、`docs/validation-dxf-flange.md`，但都**不是**跨后端黄金图或
+  兼容性验收。
 
 ## 交叉引用
 

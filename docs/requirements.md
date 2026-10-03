@@ -34,4 +34,5 @@
 | §16 | TolerancePolicy、AnnotationFile、anchors | 数值稳健性、未知字段迁移、稳定来源 |
 | §19 | CLI、diagnostics | 与 UI 同命令路径、非零错误、脱敏 |
 
-当前实际测试与运行证据见 `docs/validation.md`；尚不存在黄金图、真实兼容样本或性能验收。
+当前实际测试与运行证据见 `docs/validation.md`、`docs/validation-dxf-flange.md`；已有开源
+QCAD flange 参考样本，但仍无跨后端黄金图矩阵、大型真实兼容样本或性能验收。
