@@ -190,16 +190,16 @@ pub enum Preset {
 /// | `layout_tabs`       | yes    | yes       | no           |
 /// | `layer_panel`       | yes    | yes       | no           |
 /// | `properties_panel`  | yes    | yes       | no           |
-/// | `commands`          | yes    | yes       | no           |
 ///
 /// `Minimal` is therefore "application frame plus canvas navigation, layout
-/// tabs and dock panels, with only the ribbon/command/status *entry points*
-/// hidden". Hiding an entry point never disables the command itself, so
-/// `commands` stays `true`: minimal keeps command reachability (keyboard
-/// shortcuts, navigation toolbar, panels) while dropping the top/bottom chrome.
+/// tabs and dock panels, with the ribbon/command/status *entry points* hidden".
+/// Which commands remain reachable is a separate, explicit decision made by
+/// [`preset_command_visible`]: hiding an entry point never disables a command,
+/// so the command surface is narrowed by a documented whitelist rather than by
+/// the component table above.
 ///
 /// `CanvasOnly` is strictly stronger than `Minimal`: every component minimal
-/// keeps is also off, plus the application frame itself.
+/// keeps is also off, plus the application frame itself and every command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PresetComponents {
     ribbon: bool,
@@ -209,7 +209,6 @@ struct PresetComponents {
     layout_tabs: bool,
     layer_panel: bool,
     properties_panel: bool,
-    commands: bool,
 }
 
 /// The explicit component set each [`Preset`] selects. See [`PresetComponents`]
@@ -224,7 +223,6 @@ fn preset_components(preset: Preset) -> PresetComponents {
             layout_tabs: true,
             layer_panel: true,
             properties_panel: true,
-            commands: true,
         },
         Preset::Minimal => PresetComponents {
             ribbon: false,
@@ -234,7 +232,6 @@ fn preset_components(preset: Preset) -> PresetComponents {
             layout_tabs: true,
             layer_panel: true,
             properties_panel: true,
-            commands: true,
         },
         Preset::CanvasOnly => PresetComponents {
             ribbon: false,
@@ -244,8 +241,101 @@ fn preset_components(preset: Preset) -> PresetComponents {
             layout_tabs: false,
             layer_panel: false,
             properties_panel: false,
-            commands: false,
         },
+    }
+}
+
+/// The commands [`Preset::Minimal`] keeps reachable.
+///
+/// Minimal is a *review/measure* surface, not a stripped-down editing surface:
+/// it keeps reading and markup capabilities (measure, annotate, view, layers,
+/// layouts, open/export/import and diagnostics) and hides CAD authoring
+/// commands (undo/redo, draw and move/trim) plus host-mode switches. This is
+/// the Microsoft/AutoCAD-style "reviewer" reduction: a reviewer can open a
+/// drawing, measure it, annotate it, navigate and inspect layer/layout state,
+/// but cannot edit geometry.
+///
+/// The list is authoritative for the whitelisted surface: a `Minimal` command
+/// is shown only when it appears here and is not in [`MINIMAL_HIDDEN_COMMANDS`]
+/// (feature gates and `commandOverrides` still apply on top). `full` keeps
+/// every command and `canvasOnly` hides every command, so
+/// `canvasOnly ⊆ minimal ⊆ full`.
+const MINIMAL_VISIBLE_COMMANDS: &[&str] = &[
+    // Measurement tools and their confirm/cancel/save lifecycle.
+    "measure.distance",
+    "measure.polyline",
+    "measure.angle",
+    "measure.area",
+    "measure.confirm",
+    "measure.cancel",
+    "measure.save",
+    // Annotation tools and their lifecycle/management entries.
+    "annotation.text",
+    "annotation.leader",
+    "annotation.rectangle",
+    "annotation.ellipse",
+    "annotation.freehand",
+    "annotation.cloud",
+    "annotation.confirm",
+    "annotation.cancel",
+    "annotation.delete",
+    "annotation.select",
+    "annotation.visibility",
+    // Canvas view navigation and projection/standard-view controls.
+    "view.fit",
+    "view.pan",
+    "view.orbit",
+    "view.reset",
+    "view.standard",
+    "view.projection",
+    "view.switch2d3d",
+    // Document open and annotation sidecar transfer.
+    "file.open",
+    "file.exportAnnotations",
+    "file.importAnnotations",
+    // Layer and layout inspection.
+    "layer.toggle",
+    "layer.restore",
+    "layout.switch",
+    // Diagnostics remain available for troubleshooting the reduced surface.
+    "diagnostics.open",
+];
+
+/// The commands [`Preset::Minimal`] hides explicitly.
+///
+/// These are CAD authoring/editing commands (`edit.undo`, `edit.redo`,
+/// `draw.line`, `draw.circle`, `draw.move`, `draw.trim`) and host-mode switches
+/// (`mode.toggle`, `backend.switch`); none are part of a review-only surface.
+/// A command is reachable under `Minimal` only when it is whitelisted and not
+/// blacklisted; the test `minimal_preset_command_set_is_explicit` asserts the
+/// two lists are disjoint and partition `COMMAND_IDS` exactly, so adding a new
+/// command id without classifying it fails the suite.
+const MINIMAL_HIDDEN_COMMANDS: &[&str] = &[
+    "edit.undo",
+    "edit.redo",
+    "draw.line",
+    "draw.circle",
+    "draw.move",
+    "draw.trim",
+    "mode.toggle",
+    "backend.switch",
+];
+
+/// Whether command `id` is reachable under `preset`, before feature gates and
+/// `commandOverrides` are applied.
+///
+/// `Full` keeps every command, `CanvasOnly` hides every command and `Minimal`
+/// keeps exactly the commands in [`MINIMAL_VISIBLE_COMMANDS`] that are not also
+/// in [`MINIMAL_HIDDEN_COMMANDS`]. `id` is expected to be a known command id
+/// (the caller iterates `COMMAND_IDS`); an unknown id is hidden, which is the
+/// safe default.
+fn preset_command_visible(preset: Preset, id: &str) -> bool {
+    match preset {
+        Preset::Full => true,
+        Preset::CanvasOnly => false,
+        Preset::Minimal => {
+            MINIMAL_VISIBLE_COMMANDS.contains(&id) && !MINIMAL_HIDDEN_COMMANDS.contains(&id)
+        }
     }
 }
 
@@ -1258,7 +1348,7 @@ impl UiPresentationModel {
         };
         let mut command_visibility = BTreeMap::new();
         for id in COMMAND_IDS {
-            let mut entry_visible = preset.commands;
+            let mut entry_visible = preset_command_visible(config.ui.preset, id);
             if let Some(required) = required_feature(id) {
                 entry_visible &= required(&features);
             }
@@ -1760,8 +1850,11 @@ mod tests {
         assert!(p.command_visibility["file.exportAnnotations"]);
     }
 
-    /// The chrome component flags that every preset either permits or drops, in
-    /// the order the truth table in [`PresetComponents`] documents them.
+    /// The resolved component flags every preset either permits or drops, in the
+    /// order the truth table in [`PresetComponents`] documents them, followed by
+    /// one derived aggregate: whether *every* command is visible. The aggregate
+    /// is `true` only for `Full`; `Minimal` narrows the command surface (see
+    /// [`MINIMAL_VISIBLE_COMMANDS`]) even though it keeps the panels.
     fn component_flags(p: &UiPresentationModel) -> [bool; 8] {
         [
             p.ribbon,
@@ -1797,17 +1890,108 @@ mod tests {
         assert!(p.layout_tabs, "minimal keeps the layout tabs");
         assert!(p.layer_panel, "minimal keeps the layer panel");
         assert!(p.properties_panel, "minimal keeps the properties panel");
-        // Command reachability is untouched: hiding an entry point never
-        // disables the command, so every catalog command stays visible.
+        // Minimal narrows the command surface explicitly: review/measure stay,
+        // authoring/edit commands are hidden. See `MINIMAL_VISIBLE_COMMANDS`.
         assert!(
-            p.command_visibility.values().all(|visible| *visible),
-            "minimal keeps command reachability"
+            p.command_visibility["measure.distance"] && p.command_visibility["annotation.text"],
+            "minimal keeps the review/annotate surface"
+        );
+        assert!(
+            !p.command_visibility["draw.line"] && !p.command_visibility["edit.undo"],
+            "minimal hides authoring/edit commands"
         );
         // Minimal never auto-reserves a dock gutter; only full desktop docks.
         assert_eq!(
             p.dock_width, 0.0,
             "minimal never reserves a dock gutter; only full desktop docks"
         );
+    }
+
+    #[test]
+    fn minimal_preset_command_set_is_explicit() {
+        let p = resolve_preset(Preset::Minimal);
+        // Every known command is classified, and the classification matches the
+        // documented whitelist/blacklist exactly (no implicit "rest").
+        let visible: Vec<&str> = COMMAND_IDS
+            .iter()
+            .copied()
+            .filter(|id| p.command_visibility[*id])
+            .collect();
+        let hidden: Vec<&str> = COMMAND_IDS
+            .iter()
+            .copied()
+            .filter(|id| !p.command_visibility[*id])
+            .collect();
+        let mut expected_visible = MINIMAL_VISIBLE_COMMANDS.to_vec();
+        expected_visible.sort_unstable();
+        let mut actual_visible = visible.clone();
+        actual_visible.sort_unstable();
+        assert_eq!(
+            actual_visible, expected_visible,
+            "minimal-visible commands must equal the documented whitelist"
+        );
+        let mut expected_hidden = MINIMAL_HIDDEN_COMMANDS.to_vec();
+        expected_hidden.sort_unstable();
+        let mut actual_hidden = hidden.clone();
+        actual_hidden.sort_unstable();
+        assert_eq!(
+            actual_hidden, expected_hidden,
+            "minimal-hidden commands must equal the documented blacklist"
+        );
+        // The two lists partition COMMAND_IDS: no id is unclassified or double
+        // classified, so a newly added command forces a policy decision.
+        let mut partition: Vec<&str> = MINIMAL_VISIBLE_COMMANDS
+            .iter()
+            .chain(MINIMAL_HIDDEN_COMMANDS.iter())
+            .copied()
+            .collect();
+        partition.sort_unstable();
+        let mut catalog = COMMAND_IDS.to_vec();
+        catalog.sort_unstable();
+        assert_eq!(
+            partition, catalog,
+            "the minimal command policy must be total"
+        );
+        for id in MINIMAL_VISIBLE_COMMANDS {
+            assert!(
+                preset_command_visible(Preset::Minimal, id),
+                "{id} is whitelisted but `preset_command_visible` hides it"
+            );
+        }
+        for id in MINIMAL_HIDDEN_COMMANDS {
+            assert!(
+                !preset_command_visible(Preset::Minimal, id),
+                "{id} is blacklisted but `preset_command_visible` shows it"
+            );
+        }
+        // A feature gate still applies on top of the whitelist: a whitelisted
+        // command disappears when its feature is off.
+        let mut host = ViewerConfig::default();
+        host.ui.preset = Preset::Minimal;
+        host.features.measure = false;
+        let gated = UiPresentationModel::resolve(&host, [1280.0, 800.0], [0.0; 4], false);
+        assert!(
+            !gated.command_visibility["measure.distance"],
+            "features.measure=false must hide a whitelisted command under minimal"
+        );
+        assert!(
+            gated.command_visibility["annotation.text"],
+            "an unrelated whitelisted command stays visible under minimal"
+        );
+        // An override still hides a whitelisted command, and may never re-enable
+        // a blacklisted one.
+        let mut host = ViewerConfig::default();
+        host.ui.preset = Preset::Minimal;
+        host.ui
+            .command_overrides
+            .insert("view.fit".into(), CommandOverride { visible: false });
+        host.ui
+            .command_overrides
+            .insert("draw.line".into(), CommandOverride { visible: true });
+        host.validate().unwrap();
+        let overridden = UiPresentationModel::resolve(&host, [1280.0, 800.0], [0.0; 4], false);
+        assert!(!overridden.command_visibility["view.fit"]);
+        assert!(!overridden.command_visibility["draw.line"]);
     }
 
     #[test]
@@ -1830,6 +2014,25 @@ mod tests {
         // the next on at least one field.
         assert!(full.iter().any(|&v| v) && minimal.iter().any(|&v| !v));
         assert!(minimal.iter().any(|&v| v) && canvas_only.iter().all(|&v| !v));
+        // Command visibility is monotonic per id: canvasOnly ⊆ minimal ⊆ full.
+        // Full is not merely "some commands": it keeps every catalog command.
+        let full_vis = resolve_preset(Preset::Full).command_visibility;
+        let minimal_vis = resolve_preset(Preset::Minimal).command_visibility;
+        let canvas_only_vis = resolve_preset(Preset::CanvasOnly).command_visibility;
+        assert!(
+            full_vis.values().all(|visible| *visible),
+            "the full preset must keep every command visible"
+        );
+        for id in COMMAND_IDS {
+            assert!(
+                !canvas_only_vis[*id] || minimal_vis[*id],
+                "canvasOnly shows {id} that minimal hides"
+            );
+            assert!(
+                !minimal_vis[*id] || full_vis[*id],
+                "minimal shows {id} that full hides"
+            );
+        }
     }
 
     #[test]
