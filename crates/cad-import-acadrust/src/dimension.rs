@@ -561,9 +561,33 @@ impl ImporterBuilder<'_> {
             });
         }
         if context.has_block_contents {
-            completeness = completeness.combine(Completeness::Partial(vec![
-                "mleader block content is not expanded".into(),
-            ]));
+            // Expand the content block when its handle resolves to a known
+            // block; otherwise report it rather than silently dropping it.
+            let expanded = context.block_content_handle.and_then(|handle| {
+                let record = self
+                    .acad
+                    .block_records
+                    .iter()
+                    .find(|record| record.handle.value() == handle.value())?;
+                self.block_ids
+                    .contains_key(&record.name)
+                    .then(|| SemanticGeometry::Insert {
+                        block: self.block_id(&record.name),
+                        transform: placement_transform(
+                            context.block_content_location,
+                            context.block_rotation,
+                            context.block_content_scale,
+                        ),
+                    })
+            });
+            match expanded {
+                Some(insert) => children.push(insert),
+                None => {
+                    completeness = completeness.combine(Completeness::Partial(vec![
+                        "mleader block content handle did not resolve to a block".into(),
+                    ]));
+                }
+            }
         }
         if children.is_empty() {
             return (
