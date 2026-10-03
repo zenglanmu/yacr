@@ -1,12 +1,14 @@
 // Slint composition root. CAD business state is pushed from the Rust adapter.
 import { Button, VerticalBox, HorizontalBox, ComboBox, CheckBox, ScrollView, LineEdit, ProgressIndicator, Palette } from "std-widgets.slint";
 import { CadRibbon } from "ribbon.slint";
+import { RibbonCommandModel, RibbonGroupModel, RibbonTabModel } from "ribbon-model.slint";
 import { CadCommandBar } from "command-bar.slint";
 import { CadCanvas } from "canvas.slint";
 import { Button as ConceptButton } from "button.slint";
 import { CadTheme } from "theme.slint";
 import { CadPanels, LayerRow, PropertyRow, AnnotationRow, DiagnosticRow, LayoutRow } from "panels.slint";
 export { LayerRow, PropertyRow, AnnotationRow, DiagnosticRow, LayoutRow } from "panels.slint";
+export { RibbonCommandModel, RibbonGroupModel, RibbonTabModel } from "ribbon-model.slint";
 import "../fonts/YacrUI-Regular.otf";
 
 
@@ -176,6 +178,8 @@ export component YacrWindow inherits Window {
     in property <string> import-panel-label;
     in property <string> import-cancel-label;
     in property <[string]> ribbon-tabs;
+    in property <[RibbonTabModel]> ribbon-config-tabs;
+    in property <bool> ribbon-config-driven: false;
     in property <[string]> editing-labels;
     in property <string> command-title;
     in property <string> command-prompt;
@@ -193,6 +197,7 @@ export component YacrWindow inherits Window {
     callback measure-requested();
     callback annotate-requested();
     callback begin-draw-tool(string);
+    callback ribbon-command(string);
     callback confirm-draw-requested();
     callback cancel-draw-requested();
     callback fit-requested();
@@ -278,6 +283,8 @@ export component YacrWindow inherits Window {
             can-trim: root.can-trim; can-switch-backend: root.can-switch-backend;
             draw-status: root.draw-status;
             editing-labels: root.editing-labels;
+            config-tabs: root.ribbon-config-tabs;
+            config-driven: root.ribbon-config-driven;
             expanded <=> root.ribbon-expanded;
             tab <=> root.ribbon-tab;
             measure-kind(value) => { root.measure-kind-selected(value); }
@@ -285,6 +292,7 @@ export component YacrWindow inherits Window {
             standard-view(value) => { root.standard-view-selected(value); }
             backend(value) => { root.backend-selected(value); }
             draw-tool(value) => { root.begin-draw-tool(value); }
+            ribbon-command(id) => { root.ribbon-command(id); }
             action(id) => {
                 if id == 0 { root.open-requested(); }
                 if id == 1 { root.fit-requested(); }
@@ -464,12 +472,14 @@ export component YacrWindow inherits Window {
             can-open: root.can-open; can-import: root.can-import; can-export: root.can-export;
             can-trim: root.can-trim; can-switch-backend: root.can-switch-backend;
             editing-labels: root.editing-labels; draw-status: root.draw-status;
+            config-tabs: root.ribbon-config-tabs; config-driven: root.ribbon-config-driven;
             can-undo: root.work-mode && root.can-undo; can-redo: root.work-mode && root.can-redo;
             measure-kind(value) => { root.measure-kind-selected(value); }
             annotation-kind(value) => { root.annotation-kind-selected(value); }
             standard-view(value) => { root.standard-view-selected(value); }
             backend(value) => { root.backend-selected(value); }
             draw-tool(value) => { root.begin-draw-tool(value); }
+            ribbon-command(id) => { root.ribbon-command(id); }
             action(id) => {
                 if id == 0 { root.open-requested(); }
                 if id == 1 { root.fit-requested(); }

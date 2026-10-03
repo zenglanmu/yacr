@@ -2,6 +2,10 @@ use std::cell::{Cell, RefCell};
 
 use std::rc::Rc;
 
+pub use cad_app::viewer_config::{
+    ResolvedRibbon, ResolvedRibbonCommand, ResolvedRibbonGroup, ResolvedRibbonTab,
+};
+use cad_app::viewer_config::{RibbonCommandModel, RibbonGroupModel, RibbonTabModel};
 use cad_app::{AnnotationToolKind, Command, CommandId, CommandPayload, MeasurementToolKind};
 
 use cad_domain::{

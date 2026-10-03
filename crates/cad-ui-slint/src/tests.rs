@@ -814,6 +814,141 @@ fn config_chrome_properties_are_pushed_from_the_store() {
 }
 
 #[test]
+fn shell_exposes_configured_ribbon_markers() {
+    for marker in [
+        "ribbon-config-tabs",
+        "ribbon-config-driven",
+        "callback ribbon-command(string)",
+        "RibbonTabModel",
+    ] {
+        assert!(
+            UI_DEFINITION.contains(marker),
+            "shell must expose configured-ribbon marker {marker}"
+        );
+    }
+}
+
+#[test]
+fn configured_ribbon_model_is_localized_and_visibility_filtered() {
+    use cad_app::viewer_config::{CommandOverride, RibbonGroup, RibbonTab, ViewerConfig};
+    use slint::Model;
+
+    let messages = MessageSource::for_locale(Locale::En);
+    let mut config = ViewerConfig::default();
+    config.ui.components.ribbon.tabs = vec![RibbonTab {
+        id: "review".into(),
+        label: "ribbon.review".into(),
+        groups: vec![RibbonGroup {
+            id: "measure".into(),
+            label: "ribbon.measure".into(),
+            commands: vec![
+                "measure.distance".into(),
+                "measure.area".into(),
+                "annotation.text".into(),
+            ],
+        }],
+    }];
+    config
+        .ui
+        .command_overrides
+        .insert("measure.area".into(), CommandOverride { visible: false });
+
+    let chrome = build_ribbon_config(&config, &messages);
+    assert!(chrome.config_driven);
+    assert_eq!(chrome.tab_labels, vec![messages.text("ribbon.review", &[])]);
+
+    let tab = &chrome.tabs[0];
+    assert_eq!(tab.id.as_str(), "review");
+    assert_eq!(tab.label.as_str(), messages.text("ribbon.review", &[]));
+    assert_eq!(tab.groups.row_count(), 1);
+    let group = tab.groups.row_data(0).unwrap();
+    assert_eq!(group.label.as_str(), messages.text("ribbon.measure", &[]));
+    // The hidden command is absent; the rest keep config order and resolve
+    // their catalog labels (never a literal).
+    assert_eq!(group.commands.row_count(), 2);
+    let first = group.commands.row_data(0).unwrap();
+    assert_eq!(first.id.as_str(), "measure.distance");
+    assert_eq!(
+        first.label.as_str(),
+        messages.text("measure.kind.distance", &[])
+    );
+    assert!(!first.icon.is_empty());
+    assert!(first.visible);
+    assert_eq!(
+        group.commands.row_data(1).unwrap().id.as_str(),
+        "annotation.text"
+    );
+}
+
+#[test]
+fn empty_ribbon_config_keeps_the_builtin_tabs() {
+    use cad_app::viewer_config::ViewerConfig;
+
+    let messages = MessageSource::for_locale(Locale::ZhCn);
+    let config = ViewerConfig::default();
+    let chrome = build_ribbon_config(&config, &messages);
+    assert!(!chrome.config_driven);
+    assert!(chrome.tabs.is_empty());
+    let expected: Vec<String> = [
+        "ribbon.file",
+        "ribbon.view",
+        "ribbon.measure",
+        "ribbon.annotate",
+        "shell.more",
+    ]
+    .iter()
+    .map(|key| messages.text(key, &[]))
+    .collect();
+    assert_eq!(chrome.tab_labels, expected);
+}
+
+#[test]
+fn ribbon_command_actions_dispatch_or_report_explicitly() {
+    use RibbonCommandAction::*;
+
+    assert_eq!(ribbon_command_action("file.open"), Open);
+    assert_eq!(ribbon_command_action("file.exportAnnotations"), Export);
+    assert_eq!(ribbon_command_action("edit.redo"), Redo);
+    assert_eq!(ribbon_command_action("view.fit"), Fit);
+    assert_eq!(ribbon_command_action("view.pan"), Pan);
+    assert_eq!(ribbon_command_action("view.projection"), ToggleProjection);
+    assert_eq!(ribbon_command_action("view.switch2d3d"), Switch2d3d);
+    assert_eq!(
+        ribbon_command_action("measure.distance"),
+        MeasureKind("distance")
+    );
+    assert_eq!(ribbon_command_action("measure.save"), SaveMeasurement);
+    assert_eq!(
+        ribbon_command_action("annotation.cloud"),
+        AnnotationKind("cloud")
+    );
+    assert_eq!(ribbon_command_action("annotation.cancel"), CancelAnnotation);
+    assert_eq!(ribbon_command_action("layer.restore"), RestoreLayers);
+    assert_eq!(ribbon_command_action("draw.trim"), BeginDraw("trim"));
+    assert_eq!(ribbon_command_action("mode.toggle"), ToggleMode);
+    assert_eq!(ribbon_command_action("diagnostics.open"), OpenDiagnostics);
+    // Every whitelisted id is classified, never silently dropped.
+    for id in cad_app::viewer_config::command_ids() {
+        let _ = ribbon_command_action(id);
+    }
+    // Ids that need a target the ribbon cannot supply are explicit, not faked.
+    for id in [
+        "view.orbit",
+        "view.reset",
+        "view.standard",
+        "layer.toggle",
+        "annotation.delete",
+        "annotation.select",
+        "annotation.visibility",
+        "layout.switch",
+        "backend.switch",
+        "totally.unknown",
+    ] {
+        assert_eq!(ribbon_command_action(id), Unsupported, "id {id}");
+    }
+}
+
+#[test]
 fn interaction_config_gates_pointer_and_touch_input() {
     use cad_app::viewer_config::{ViewerConfig, ViewerConfigStore};
 

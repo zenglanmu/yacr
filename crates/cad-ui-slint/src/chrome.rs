@@ -45,13 +45,7 @@ pub trait UiCommandSink: 'static {
 /// a localized label maps back to a kind without relying on Chinese-only
 /// `from_label`.
 pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode: bool) {
-    ui.set_ribbon_tabs(string_model(&[
-        messages.text("ribbon.file", &[]),
-        messages.text("ribbon.view", &[]),
-        messages.text("ribbon.measure", &[]),
-        messages.text("ribbon.annotate", &[]),
-        messages.text("shell.more", &[]),
-    ]));
+    ui.set_ribbon_tabs(string_model(&builtin_ribbon_tab_labels(messages)));
     ui.set_command_title(messages.text("command.title", &[]).into());
     ui.set_command_prompt(messages.text("command.prompt", &[]).into());
     ui.set_draw_status(messages.text("draw.status.idle", &[]).into());
@@ -138,37 +132,240 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_work_mode_label(messages.text("shell.mode_work", &[]).into());
 }
 
-/// Catalog keys for a configured ribbon tab, if it declares one.
+/// The shipped catalog ribbon tab labels, in shell order.
 ///
-/// The shipped default is the catalog's own five tabs; a config tab carries a
-/// catalog key (`ribbon.review`) that the UI resolves through `MessageSource`.
-/// An empty/missing label falls back to the catalog default, never a literal.
-fn ribbon_tab_labels(tab: &cad_app::viewer_config::RibbonTab, messages: &MessageSource) -> String {
-    if tab.label.is_empty() {
+/// Shared by [`apply_chrome`] and [`apply_ribbon_config`] so a host that clears
+/// its configured tabs always falls back to the exact built-in model.
+pub(crate) fn builtin_ribbon_tab_labels(messages: &MessageSource) -> Vec<String> {
+    vec![
+        messages.text("ribbon.file", &[]),
+        messages.text("ribbon.view", &[]),
+        messages.text("ribbon.measure", &[]),
+        messages.text("ribbon.annotate", &[]),
+        messages.text("shell.more", &[]),
+    ]
+}
+
+/// Resolve a config label catalog key to display text.
+///
+/// An empty key falls back to the catalog's "more" label; a key the catalog
+/// lacks renders as its bracketed name (never a hardcoded literal).
+fn ribbon_text(key: &str, messages: &MessageSource) -> String {
+    if key.is_empty() {
         messages.text("shell.more", &[])
     } else {
-        messages.text(&tab.label, &[])
+        messages.text(key, &[])
     }
 }
 
-/// Push the configured ribbon tab model (if any) alongside the catalog chrome.
+/// Catalog key for a command's button label.
 ///
-/// Called after [`apply_chrome`] so a config-declared ribbon replaces the default
-/// tab model. An empty `tabs` list leaves the catalog model in place.
+/// Reuses the label a command already shows elsewhere in the shell and the
+/// `ribbon.command.*` family for ids that only appear here.
+pub(crate) fn ribbon_command_label_key(id: &str) -> &'static str {
+    match id {
+        "file.open" => "file.open",
+        "file.exportAnnotations" => "toolbar.export",
+        "file.importAnnotations" => "toolbar.import",
+        "edit.undo" => "toolbar.undo",
+        "edit.redo" => "toolbar.redo",
+        "view.fit" => "toolbar.fit",
+        "view.pan" => "toolbar.pan",
+        "view.orbit" => "ribbon.command.view_orbit",
+        "view.reset" => "ribbon.command.view_reset",
+        "view.standard" => "ribbon.command.view_standard",
+        "view.projection" => "view.projection",
+        "view.switch2d3d" => "ribbon.command.view_switch2d3d",
+        "measure.distance" => "measure.kind.distance",
+        "measure.polyline" => "measure.kind.polyline",
+        "measure.angle" => "measure.kind.angle",
+        "measure.area" => "measure.kind.area",
+        "measure.confirm" => "tool.confirm",
+        "measure.cancel" => "tool.cancel",
+        "measure.save" => "measure.save_annotation",
+        "annotation.text" => "annotation.kind.text",
+        "annotation.leader" => "annotation.kind.leader",
+        "annotation.rectangle" => "annotation.kind.rectangle",
+        "annotation.ellipse" => "annotation.kind.ellipse",
+        "annotation.freehand" => "annotation.kind.freehand",
+        "annotation.cloud" => "annotation.kind.cloud",
+        "annotation.confirm" => "tool.confirm",
+        "annotation.cancel" => "tool.cancel",
+        "annotation.delete" => "annotation.delete",
+        "annotation.select" => "ribbon.command.annotation_select",
+        "annotation.visibility" => "ribbon.command.annotation_visibility",
+        "layer.toggle" => "ribbon.command.layer_toggle",
+        "layer.restore" => "layers.restore",
+        "layout.switch" => "layout.panel",
+        "draw.line" => "draw.kind.line",
+        "draw.circle" => "draw.kind.circle",
+        "draw.move" => "draw.kind.move",
+        "draw.trim" => "draw.kind.trim",
+        "backend.switch" => "ribbon.command.backend_switch",
+        "diagnostics.open" => "toolbar.diagnostics",
+        "mode.toggle" => "ribbon.command.mode_toggle",
+        // Unknown ids resolve to the empty key and the "more" fallback; config
+        // validation rejects unknown ids before they reach the shell.
+        _ => "",
+    }
+}
+
+/// Short icon token for a command id, matched against the shared `Button`
+/// symbol table. Unknown ids have no icon.
+pub(crate) fn ribbon_command_icon(id: &str) -> &'static str {
+    match id {
+        "file.open" => "▱",
+        "file.exportAnnotations" => "⇧",
+        "file.importAnnotations" => "⇩",
+        "edit.undo" => "↶",
+        "edit.redo" => "↷",
+        "view.fit" => "⊡",
+        "view.pan" => "pan",
+        "view.orbit" => "orbit",
+        "view.reset" => "fit",
+        "view.standard" => "◇",
+        "view.projection" => "◇",
+        "view.switch2d3d" => "3d",
+        "measure.distance" => "↔",
+        "measure.polyline" => "∿",
+        "measure.angle" => "∠",
+        "measure.area" => "▨",
+        "measure.confirm" => "✓",
+        "measure.cancel" => "×",
+        "measure.save" => "▨",
+        "annotation.text" => "A",
+        "annotation.leader" => "↗",
+        "annotation.rectangle" => "□",
+        "annotation.ellipse" => "ellipse",
+        "annotation.freehand" => "freehand",
+        "annotation.cloud" => "☁",
+        "annotation.confirm" => "✓",
+        "annotation.cancel" => "×",
+        "annotation.delete" => "×",
+        "annotation.select" => "A",
+        "annotation.visibility" => "◉",
+        "layer.toggle" => "layers",
+        "layer.restore" => "layers",
+        "layout.switch" => "layout",
+        "draw.line" => "line",
+        "draw.circle" => "circle",
+        "draw.move" => "pan",
+        "draw.trim" => "trim",
+        "backend.switch" => "backend",
+        "diagnostics.open" => "info",
+        "mode.toggle" => "mode",
+        _ => "",
+    }
+}
+
+/// The config-driven ribbon chrome the shell renders.
+///
+/// Holds Slint row structs, so it lives in this crate while the pure
+/// tab/group/command resolution lives in `cad-app::viewer_config`.
+#[derive(Debug, Clone)]
+pub(crate) struct RibbonConfigChrome {
+    /// Whether the host declared custom tabs (the built-in layout is used otherwise).
+    pub config_driven: bool,
+    /// Tab-strip labels; also mirrored into the legacy `ribbon-tabs` property.
+    pub tab_labels: Vec<String>,
+    /// Resolved tab/group/command model.
+    pub tabs: Vec<RibbonTabModel>,
+}
+
+/// Build the localized, visibility-filtered ribbon chrome from a config.
+///
+/// Pure (no live window) so it is unit-testable; display text comes from
+/// `messages` while ids stay machine values for dispatch.
+pub(crate) fn build_ribbon_config(
+    config: &ViewerConfig,
+    messages: &MessageSource,
+) -> RibbonConfigChrome {
+    let tabs = &config.ui.components.ribbon.tabs;
+    if tabs.is_empty() {
+        return RibbonConfigChrome {
+            config_driven: false,
+            tab_labels: builtin_ribbon_tab_labels(messages),
+            tabs: Vec::new(),
+        };
+    }
+    // Resolve through the shared presentation model so a configured button
+    // disappears exactly when the corresponding command entry would.
+    let command_visibility = cad_app::viewer_config::UiPresentationModel::resolve(
+        config,
+        [1280.0, 800.0],
+        [0.0; 4],
+        false,
+    )
+    .command_visibility;
+    let resolved = cad_app::viewer_config::resolve_ribbon(config, &command_visibility);
+    let tab_labels = resolved
+        .tabs
+        .iter()
+        .map(|tab| ribbon_text(&tab.label, messages))
+        .collect();
+    let tabs = resolved
+        .tabs
+        .iter()
+        .map(|tab| {
+            let groups: Vec<RibbonGroupModel> = tab
+                .groups
+                .iter()
+                .map(|group| {
+                    let commands: Vec<RibbonCommandModel> = group
+                        .commands
+                        .iter()
+                        .map(|command| RibbonCommandModel {
+                            id: command.id.as_str().into(),
+                            label: messages
+                                .text(ribbon_command_label_key(&command.id), &[])
+                                .into(),
+                            icon: ribbon_command_icon(&command.id).into(),
+                            visible: command.visible,
+                        })
+                        .collect();
+                    RibbonGroupModel {
+                        id: group.id.as_str().into(),
+                        label: ribbon_text(&group.label, messages).into(),
+                        commands: slint::ModelRc::new(slint::VecModel::from(commands)),
+                    }
+                })
+                .collect();
+            RibbonTabModel {
+                id: tab.id.as_str().into(),
+                label: ribbon_text(&tab.label, messages).into(),
+                groups: slint::ModelRc::new(slint::VecModel::from(groups)),
+            }
+        })
+        .collect();
+    RibbonConfigChrome {
+        config_driven: true,
+        tab_labels,
+        tabs,
+    }
+}
+
+/// Push the configured ribbon chrome into the shell.
+///
+/// With no host tabs the built-in catalog model stays exactly as `apply_chrome`
+/// wrote it (any previously pushed model is cleared). With host tabs the tab
+/// strip, groups and command buttons all come from the config.
 pub(crate) fn apply_ribbon_config(
     ui: &YacrWindow,
     config: &ViewerConfig,
     messages: &MessageSource,
 ) {
-    let tabs = &config.ui.components.ribbon.tabs;
-    if tabs.is_empty() {
-        return;
+    let chrome = build_ribbon_config(config, messages);
+    ui.set_ribbon_tabs(string_model(&chrome.tab_labels));
+    ui.set_ribbon_config_driven(chrome.config_driven);
+    if chrome.config_driven {
+        ui.set_ribbon_config_tabs(slint::ModelRc::new(slint::VecModel::from(chrome.tabs)));
+        // The configured list replaces the five built-in tabs; select the first.
+        ui.set_ribbon_tab(0);
+    } else {
+        ui.set_ribbon_config_tabs(slint::ModelRc::new(slint::VecModel::from(Vec::<
+            RibbonTabModel,
+        >::new())));
     }
-    let labels: Vec<String> = tabs
-        .iter()
-        .map(|tab| ribbon_tab_labels(tab, messages))
-        .collect();
-    ui.set_ribbon_tabs(string_model(&labels));
 }
 
 /// Push the derived responsive geometry into the shell (audit U01/U07).

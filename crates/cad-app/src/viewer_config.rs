@@ -71,6 +71,82 @@ pub fn command_ids() -> &'static [&'static str] {
     COMMAND_IDS
 }
 
+/// A configured ribbon command after visibility resolution.
+///
+/// Only commands whose effective `command_visibility` is true are present:
+/// hiding an entry removes the button but never disables the command itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRibbonCommand {
+    pub id: String,
+    pub visible: bool,
+}
+
+/// A configured ribbon group after visibility resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRibbonGroup {
+    pub id: String,
+    /// Catalog key from the host config; the UI resolves the display text.
+    pub label: String,
+    pub commands: Vec<ResolvedRibbonCommand>,
+}
+
+/// A configured ribbon tab after visibility resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRibbonTab {
+    pub id: String,
+    /// Catalog key from the host config; the UI resolves the display text.
+    pub label: String,
+    pub groups: Vec<ResolvedRibbonGroup>,
+}
+
+/// The resolved configured ribbon. Empty `tabs` means "use the shipped catalog
+/// ribbon" (see [`RibbonComponent`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResolvedRibbon {
+    pub tabs: Vec<ResolvedRibbonTab>,
+}
+
+/// Resolve the host-configured ribbon against effective command visibility.
+///
+/// Tab, group and command order is preserved. A command is kept only when
+/// `command_visibility[id]` is true; hidden commands are absent, matching the
+/// rule that hiding an entry never disables the command. Labels stay catalog
+/// keys because `cad-app` owns no message catalog; the UI resolves them.
+pub fn resolve_ribbon(
+    config: &ViewerConfig,
+    command_visibility: &BTreeMap<String, bool>,
+) -> ResolvedRibbon {
+    let tabs = config
+        .ui
+        .components
+        .ribbon
+        .tabs
+        .iter()
+        .map(|tab| ResolvedRibbonTab {
+            id: tab.id.clone(),
+            label: tab.label.clone(),
+            groups: tab
+                .groups
+                .iter()
+                .map(|group| ResolvedRibbonGroup {
+                    id: group.id.clone(),
+                    label: group.label.clone(),
+                    commands: group
+                        .commands
+                        .iter()
+                        .filter(|id| command_visibility.get(*id).copied().unwrap_or(false))
+                        .map(|id| ResolvedRibbonCommand {
+                            id: id.clone(),
+                            visible: true,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        })
+        .collect();
+    ResolvedRibbon { tabs }
+}
+
 /// UI chrome preset. `canvasOnly` forces every application-UI entry hidden.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1586,5 +1662,96 @@ mod tests {
         let parsed: ViewerConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(&parsed, store.effective());
         assert_eq!(parsed.ui.preset, Preset::CanvasOnly);
+    }
+
+    fn ribbon_config_with_hidden_cloud() -> (ViewerConfig, BTreeMap<String, bool>) {
+        let config: ViewerConfig = serde_json::from_value(json!({
+            "ui": { "components": { "ribbon": { "tabs": [
+                { "id": "review", "label": "ribbon.review", "groups": [
+                    { "id": "measure", "label": "ribbon.measure",
+                      "commands": ["measure.distance", "measure.area"] },
+                    { "id": "annotate", "label": "ribbon.annotate",
+                      "commands": ["annotation.text", "annotation.cloud"] }
+                ] },
+                { "id": "manage", "label": "ribbon.manage", "groups": [] }
+            ] } } }
+        }))
+        .unwrap();
+        let visibility = UiPresentationModel::resolve(&config, [1280.0, 800.0], [0.0; 4], false)
+            .command_visibility;
+        (config, visibility)
+    }
+
+    #[test]
+    fn resolve_ribbon_preserves_order_and_label_keys() {
+        let (config, visibility) = ribbon_config_with_hidden_cloud();
+        let resolved = resolve_ribbon(&config, &visibility);
+        assert_eq!(resolved.tabs.len(), 2);
+        // Order is the config order; labels stay catalog keys, not literals.
+        assert_eq!(resolved.tabs[0].id, "review");
+        assert_eq!(resolved.tabs[0].label, "ribbon.review");
+        assert_eq!(resolved.tabs[1].id, "manage");
+        assert_eq!(
+            resolved.tabs[0]
+                .groups
+                .iter()
+                .map(|group| group.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["measure", "annotate"]
+        );
+        assert_eq!(resolved.tabs[0].groups[0].label, "ribbon.measure");
+        assert_eq!(
+            resolved.tabs[0].groups[0]
+                .commands
+                .iter()
+                .map(|command| command.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["measure.distance", "measure.area"]
+        );
+        assert!(resolved.tabs[0].groups[0]
+            .commands
+            .iter()
+            .all(|command| command.visible));
+        // A tab with no groups is kept, not dropped.
+        assert!(resolved.tabs[1].groups.is_empty());
+    }
+
+    #[test]
+    fn resolve_ribbon_filters_hidden_commands() {
+        let (mut config, _) = ribbon_config_with_hidden_cloud();
+        config.ui.command_overrides.insert(
+            "annotation.cloud".into(),
+            CommandOverride { visible: false },
+        );
+        let visibility = UiPresentationModel::resolve(&config, [1280.0, 800.0], [0.0; 4], false)
+            .command_visibility;
+        let resolved = resolve_ribbon(&config, &visibility);
+        let annotate = &resolved.tabs[0].groups[1];
+        assert_eq!(
+            annotate
+                .commands
+                .iter()
+                .map(|command| command.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["annotation.text"]
+        );
+    }
+
+    #[test]
+    fn resolve_ribbon_empty_config_and_unknown_visibility_default_to_hidden() {
+        let config = ViewerConfig::default();
+        let visibility = BTreeMap::new();
+        let resolved = resolve_ribbon(&config, &visibility);
+        assert!(resolved.tabs.is_empty());
+        assert_eq!(resolved, ResolvedRibbon::default());
+
+        // A command absent from the map is treated as hidden, never visible.
+        let (config, _) = ribbon_config_with_hidden_cloud();
+        let resolved = resolve_ribbon(&config, &BTreeMap::new());
+        assert!(resolved
+            .tabs
+            .iter()
+            .flat_map(|tab| &tab.groups)
+            .all(|group| group.commands.is_empty()));
     }
 }

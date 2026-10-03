@@ -18,6 +18,86 @@ fn command_for(
     }
 }
 
+/// The shell action a configured `ui.components.ribbon` command id maps to.
+///
+/// Kept as a pure value so the mapping is unit-testable without a live window.
+/// `Unsupported` is explicit: a command that needs a target the UI does not have
+/// (a standard view, a layer row, a backend choice) reports an error rather than
+/// silently doing nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RibbonCommandAction {
+    Open,
+    Export,
+    Import,
+    Undo,
+    Redo,
+    Fit,
+    Pan,
+    ToggleProjection,
+    Switch2d3d,
+    /// A measurement algorithm, identified by its machine key.
+    MeasureKind(&'static str),
+    ConfirmMeasurement,
+    CancelMeasurement,
+    SaveMeasurement,
+    /// An annotation kind, identified by its machine key.
+    AnnotationKind(&'static str),
+    ConfirmAnnotation,
+    CancelAnnotation,
+    RestoreLayers,
+    /// A draw/edit tool, identified by its machine key.
+    BeginDraw(&'static str),
+    ToggleMode,
+    OpenDiagnostics,
+    /// No standalone action exists for this id (still an explicit error).
+    Unsupported,
+}
+
+/// Map a configured command id to its shell action.
+///
+/// Every id in [`cad_app::viewer_config::COMMAND_IDS`] is considered; ids whose
+/// behaviour needs a selection/target the ribbon cannot supply resolve to
+/// [`RibbonCommandAction::Unsupported`] so the shell reports rather than fakes.
+pub fn ribbon_command_action(id: &str) -> RibbonCommandAction {
+    use RibbonCommandAction::*;
+    match id {
+        "file.open" => Open,
+        "file.exportAnnotations" => Export,
+        "file.importAnnotations" => Import,
+        "edit.undo" => Undo,
+        "edit.redo" => Redo,
+        "view.fit" => Fit,
+        "view.pan" => Pan,
+        "view.projection" => ToggleProjection,
+        "view.switch2d3d" => Switch2d3d,
+        "measure.distance" => MeasureKind("distance"),
+        "measure.polyline" => MeasureKind("polyline"),
+        "measure.angle" => MeasureKind("angle"),
+        "measure.area" => MeasureKind("area"),
+        "measure.confirm" => ConfirmMeasurement,
+        "measure.cancel" => CancelMeasurement,
+        "measure.save" => SaveMeasurement,
+        "annotation.text" => AnnotationKind("text"),
+        "annotation.leader" => AnnotationKind("leader"),
+        "annotation.rectangle" => AnnotationKind("rectangle"),
+        "annotation.ellipse" => AnnotationKind("ellipse"),
+        "annotation.freehand" => AnnotationKind("freehand"),
+        "annotation.cloud" => AnnotationKind("cloud"),
+        "annotation.confirm" => ConfirmAnnotation,
+        "annotation.cancel" => CancelAnnotation,
+        "layer.restore" => RestoreLayers,
+        "draw.line" => BeginDraw("line"),
+        "draw.circle" => BeginDraw("circle"),
+        "draw.move" => BeginDraw("move"),
+        "draw.trim" => BeginDraw("trim"),
+        "mode.toggle" => ToggleMode,
+        "diagnostics.open" => OpenDiagnostics,
+        // Needs a target the ribbon cannot provide: a standard view, an orbit
+        // gesture, a layer row, an annotation row or a backend choice.
+        _ => Unsupported,
+    }
+}
+
 /// Push the active draw state into the shell and the host preview sink.
 ///
 /// Called after every capture/cursor/start/cancel so the step panel, the
@@ -166,6 +246,76 @@ impl UiAdapter {
         );
 
         crate::command_line::connect(&ui, messages_slot.clone(), viewer_config.clone());
+
+        {
+            // Configured ribbon buttons dispatch to the exact callbacks the
+            // built-in chrome uses; the id mapping is pure and unit-tested.
+            let weak = ui_weak.clone();
+            let messages = messages_slot.clone();
+            ui.on_ribbon_command(move |id| {
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                let id = id.as_str();
+                match ribbon_command_action(id) {
+                    RibbonCommandAction::Open => ui.invoke_open_requested(),
+                    RibbonCommandAction::Export => ui.invoke_export_requested(),
+                    RibbonCommandAction::Import => ui.invoke_import_requested(),
+                    RibbonCommandAction::Undo => ui.invoke_undo_requested(),
+                    RibbonCommandAction::Redo => ui.invoke_redo_requested(),
+                    RibbonCommandAction::Fit => ui.invoke_fit_requested(),
+                    RibbonCommandAction::Pan => ui.invoke_pan_requested(),
+                    RibbonCommandAction::ToggleProjection => {
+                        ui.invoke_toggle_projection_requested()
+                    }
+                    RibbonCommandAction::Switch2d3d => ui.invoke_toggle_view_mode_requested(),
+                    RibbonCommandAction::MeasureKind(key) => {
+                        if let Some(kind) = cad_app::MeasurementToolKind::from_key(key) {
+                            let label = messages
+                                .borrow()
+                                .text(&status::measurement_kind_key(kind.key()), &[]);
+                            ui.invoke_measure_kind_selected(label.into());
+                        }
+                    }
+                    RibbonCommandAction::ConfirmMeasurement => {
+                        ui.invoke_confirm_measurement_requested()
+                    }
+                    RibbonCommandAction::CancelMeasurement => {
+                        ui.invoke_cancel_measurement_requested()
+                    }
+                    RibbonCommandAction::SaveMeasurement => ui.invoke_save_measurement_requested(),
+                    RibbonCommandAction::AnnotationKind(key) => {
+                        if let Some(kind) = cad_app::AnnotationToolKind::from_key(key) {
+                            let label = messages
+                                .borrow()
+                                .text(&status::annotation_kind_key(kind.key()), &[]);
+                            ui.invoke_annotation_kind_selected(label.into());
+                        }
+                    }
+                    RibbonCommandAction::ConfirmAnnotation => {
+                        ui.invoke_confirm_annotation_requested()
+                    }
+                    RibbonCommandAction::CancelAnnotation => {
+                        ui.invoke_cancel_annotation_requested()
+                    }
+                    RibbonCommandAction::RestoreLayers => ui.invoke_restore_layers_requested(),
+                    RibbonCommandAction::BeginDraw(key) => ui.invoke_begin_draw_tool(key.into()),
+                    RibbonCommandAction::ToggleMode => ui.invoke_mode_toggled(),
+                    RibbonCommandAction::OpenDiagnostics => {
+                        ui.set_diagnostics_open(true);
+                        ui.invoke_diagnostics_requested();
+                    }
+                    RibbonCommandAction::Unsupported => {
+                        ui.set_status_label(
+                            messages
+                                .borrow()
+                                .text("ribbon.command_unsupported", &[("command", id)])
+                                .into(),
+                        );
+                    }
+                }
+            });
+        }
 
         {
             let s = shared.clone();
