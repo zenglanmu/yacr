@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cad_cli_tools::{CliError, CliInvocation, CliOperation, Locale};
+use cad_cli_tools::{CliError, CliInvocation, CliOperation, Locale, PlotFormat};
 use cad_domain::Point3;
 
 const USAGE: &str = "\
@@ -39,6 +39,9 @@ Options:
   --layout <name>         plot: layout to plot (default: the first layout)
   --dpi <f64>             plot: raster resolution; sizes the canvas from the
                           sheet instead of --width/--height
+  --plot-format <fmt>     plot: png (default, headless GPU) | svg | pdf
+                          (svg/pdf are CPU-only and need no GPU adapter);
+                          --png names the output file for every format
   --locale <tag>          human-facing stderr language: zh-CN (default) or en.
                           Machine output keys/schema never change with locale.
   --allow-fingerprint-mismatch  import despite a mismatched drawing hash
@@ -152,6 +155,28 @@ fn main() -> ExitCode {
                 match parse_positive_finite(value) {
                     Ok(dpi) => invocation.plot_dpi = Some(dpi),
                     Err(message) => return fail(CliError::usage(message), operation, locale),
+                }
+            }
+            "--plot-format" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--plot-format needs png, svg or pdf"),
+                        operation,
+                        locale,
+                    );
+                };
+                match PlotFormat::parse(value) {
+                    Some(format) => invocation.plot_format = format,
+                    None => {
+                        return fail(
+                            CliError::usage(format!(
+                                "--plot-format must be png, svg or pdf (got '{value}')"
+                            )),
+                            operation,
+                            locale,
+                        );
+                    }
                 }
             }
             "--locale" => {

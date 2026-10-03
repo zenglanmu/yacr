@@ -93,6 +93,50 @@ impl Locale {
 }
 
 // ---------------------------------------------------------------------------
+// Plot output format
+// ---------------------------------------------------------------------------
+
+/// Output format for the `plot` operation.
+///
+/// `Png` is the raster path (headless GPU + PNG encode, the default). `Svg` and
+/// `Pdf` are the CPU-only vector path: they never create a GPU device, so they
+/// work on a machine with no Vulkan adapter at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlotFormat {
+    #[default]
+    Png,
+    Svg,
+    Pdf,
+}
+
+impl PlotFormat {
+    /// Parse a user-supplied `--plot-format` value. Unknown values stay `None`
+    /// so the caller can report a usage error instead of guessing.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "png" => Some(Self::Png),
+            "svg" => Some(Self::Svg),
+            "pdf" => Some(Self::Pdf),
+            _ => None,
+        }
+    }
+
+    /// The stable machine key (extension-friendly).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Svg => "svg",
+            Self::Pdf => "pdf",
+        }
+    }
+
+    /// True for the CPU-only vector formats, which must not touch a GPU.
+    pub fn is_vector(self) -> bool {
+        matches!(self, Self::Svg | Self::Pdf)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Invocation
 // ---------------------------------------------------------------------------
 
@@ -122,6 +166,10 @@ pub struct CliInvocation {
     /// Plot resolution in dots per inch (`plot`). When set, the canvas is sized
     /// from the sheet; when absent the `--width`/`--height` canvas is used.
     pub plot_dpi: Option<f64>,
+    /// Plot output format (`plot`). `Png` (default) runs the headless GPU
+    /// raster path; `Svg`/`Pdf` run the CPU-only vector path and never create a
+    /// GPU device.
+    pub plot_format: PlotFormat,
     /// Locale for human-facing stderr messages (never machine output).
     pub locale: Locale,
 }
@@ -147,6 +195,7 @@ impl CliInvocation {
             render_height: DEFAULT_RENDER_HEIGHT,
             layout: None,
             plot_dpi: None,
+            plot_format: PlotFormat::default(),
             locale: Locale::default(),
         }
     }

@@ -1,13 +1,13 @@
-# 打印/出图（plot：纸空间布局 → 光栅 PNG）
+# 打印/出图（plot：纸空间布局 → 光栅 PNG 或矢量 SVG/PDF）
 
 规范 §3.3（纸空间布局、视口矩形裁剪、视图变换与比例）、§5.2/§6/§8（离屏渲染）、
 §19（CLI 结构化输出）。相关文档：`docs/layouts.md`（视口几何与表示层）、
 `docs/headless-render.md`（无头 GPU 与回读纪律）、`docs/cli.md`（CLI 契约）。
 
 本文描述 `plot` 能力的契约与已实现范围：把一个具名纸空间布局按纸张尺寸、页边距、旋转
-与打印比例映射到给定像素画布，用现有无头 GPU 回读 + PNG 编码写出光栅文件；并说明导入
-的 PLOTSETTINGS 数据、**缺省页**的显式来源，以及明确未实现的部分（矢量 PDF/HPGL、
-打印样式表）。
+与打印比例映射到给定像素画布，用现有无头 GPU 回读 + PNG 编码写出光栅文件；或用纯 CPU
+矢量路径写出 SVG/PDF；并说明导入的 PLOTSETTINGS 数据、**缺省页**的显式来源，以及明确
+未实现的部分（HPGL、打印样式表）。
 
 ## 1. 能力与数据流
 
@@ -192,8 +192,6 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 
 ## 8. 明确未实现（gap）
 
-- **矢量导出（PDF/HPGL/SVG）未实现**：`plot` 只输出光栅 PNG，边界为 `encode_png`。
-  矢量导出需要新的后端与线宽/字体处理，属独立工作。
 - **打印样式表（CTB/STB）未实现**：`current_style_sheet` 未导入、未应用；颜色/线宽按既有
   实体样式渲染，不按打印样式映射。
 - **打印机/绘图仪配置未实现**：`printer_name` 未使用；输出尺寸由用户 DPI/像素决定，不查询
@@ -204,6 +202,32 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 - **打印偏差/居中标志**：`plot_centered`、`origin_x/y`、`paper_image_origin_*` 未应用；
   当前画布总是居中纸张可打印区。
 - **黄金图未入库**：合成 fixture 只固定链路，不构成兼容性或视觉黄金证据。
+- **HPGL 未实现**：矢量导出只提供 SVG/PDF，HPGL 属独立工作。
+- **SVG/PDF 中未整形的文字**：文字在表示层已按字体整形为线段时进入矢量输出；若某实体
+  仅剩 `DisplayPrimitive::Text`（无字体可用），矢量路径显式报告 `vector.text_unshaped`
+  而不丢图，不伪造文字。
+- **PDF 无字体/图像嵌入**：仅路径；不嵌入字体、不写图像 XObject。
 
 以上未实现项均**不伪造成功**：相关字段不读取即不声称支持；缺省页与合成场景都有显式
 provenance 标记。
+
+## 9. 矢量导出（SVG/PDF，CPU-only）
+
+`--plot-format svg|pdf` 走纯 CPU 矢量路径：复用相同的布局选择、`plan_plot_for_record`
+与 `build_paper_space`（视口变换已应用、INSERT 已展开），由
+`cad-representation::plot_vector` 收集 `DisplayRepresentation` 为路径文档，再序列化。
+该路径**不创建 GPU 设备**，因此不需要 Vulkan/lavapipe，也可在无适配器的机器与单元测试
+中运行。
+
+- SVG：自包含 XML，`width/height/viewBox` 用毫米，`stroke-width` 为毫米；y 轴在写出时
+  按页面高度翻转（文档坐标为 y-up 毫米）。
+- PDF：最小单页 PDF 1.4，`/MediaBox` 为毫米对应的点；路径描边/填充；每个不同透明度
+  生成一个 ExtGState `/ca`/`CA`，经页面 `/Resources /ExtGState` 引用并以 `gs` 选择，
+  写入后恢复不透明；全不透明文档不产生透明度对象。
+- 完整性：无法表达为路径的图元（未整形文字、图像、未展开实例、空网格、退化/非有限
+  折线）逐项产生稳定诊断码（`vector.*`）并降级 `completeness`，绝不静默丢图。
+- 报告 JSON 增加 `format`，矢量路径给 `width_mm/height_mm/paths`，输出文件由 `--png`
+  指定，缺省追加所选格式扩展名（不会把矢量写进 `.png` 名字）。
+
+矢量导出仍是**路径级**：不按打印样式改色、不做线宽复杂段、不嵌入字体。真实图纸的矢量
+视觉验收需按 `docs/testing-dwg.md` 单独记录，合成 fixture 只证明链路。

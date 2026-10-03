@@ -417,20 +417,153 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
     }))
 }
 
-/// Native paper-space plot: render a named layout to a raster PNG.
+/// Native paper-space plot: render a named layout to a raster PNG or a vector
+/// document (SVG/PDF).
 ///
-/// The path is the honest paper-space chain: select the layout from the
+/// The raster path is the honest paper-space chain: select the layout from the
 /// database, read its plot settings (or an explicit documented default page),
 /// plan the sheet onto a pixel canvas with `cad-representation::plot`, build the
 /// paper-space representation (viewport transforms already applied), map that
 /// paper geometry onto the canvas and render it through the same headless GPU
 /// renderer `render` uses, then read back and encode PNG.
 ///
-/// A drawing with no paper layout still exercises the planner and encoder with
-/// a synthetic sheet, marked `"synthetic": true` in the report — never claimed
-/// as a real layout plot.
+/// The vector path ([`PlotFormat::Svg`]/[`PlotFormat::Pdf`]) is entirely CPU: it
+/// reuses the same layout selection, planner and paper-space representation,
+/// then serialises the geometry as paths through
+/// `cad-representation::plot_vector`. It creates **no** GPU device, so it works
+/// on a machine with no adapter at all.
+///
+/// A drawing with no paper layout still exercises the planner and the writer
+/// with a synthetic sheet, marked `"synthetic": true` in the report — never
+/// claimed as a real layout plot.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
+    if invocation.plot_format.is_vector() {
+        return run_plot_vector(invocation);
+    }
+    run_plot_png(invocation)
+}
+
+/// CPU-only vector plot (SVG/PDF): no GPU device is created on this path.
+#[cfg(not(target_arch = "wasm32"))]
+fn run_plot_vector(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
+    let started = std::time::Instant::now();
+    let controller = load_document(invocation)?;
+    let fonts = load_fonts(&invocation.fonts)?;
+    let context = representation_context(&controller, fonts.as_ref());
+    let registry = cad_representation::ProviderRegistry::with_default_provider();
+
+    let (database, layout, synthetic) = match select_plot_layout(&controller, invocation)? {
+        Some((layout, id)) => (layout, id, false),
+        None => (synthetic_plot_database(), cad_domain::LayoutId(0), true),
+    };
+
+    let record = database.plot_settings_for(layout);
+    let target = plot_target(invocation, &record);
+    let plan_started = std::time::Instant::now();
+    let page = cad_representation::plan_plot_for_record(&record, target)?;
+    let plan_ms = plan_started.elapsed().as_secs_f64() * 1000.0;
+
+    let representation =
+        cad_representation::build_paper_space(&registry, &database, layout, &context, &|_| true)?;
+    let document = cad_representation::build_vector_document(&representation, &page)?;
+    let path_count = document.paths.len();
+
+    let bytes = match invocation.plot_format {
+        PlotFormat::Svg => cad_representation::render_svg(&document)?,
+        _ => cad_representation::render_pdf(&document)?,
+    };
+    let extension = invocation.plot_format.as_str();
+    let output = invocation
+        .png
+        .clone()
+        .unwrap_or_else(|| invocation.input.with_extension(format!("plot.{extension}")));
+    write_atomic(&output, &bytes).map_err(|e| {
+        CadError::InvalidInput(format!(
+            "{} write failed: {}",
+            extension.to_ascii_uppercase(),
+            cad_diagnostics::redact_text(&e.to_string())
+        ))
+    })?;
+    let total_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    Ok(serde_json::json!({
+        "schema_version": CLI_SCHEMA_VERSION,
+        "operation": CliOperation::Plot.as_str(),
+        "format": invocation.plot_format.as_str(),
+        "layout": {
+            "id": layout.0,
+            "name": database.layout(layout).map(|l| l.name.clone()).unwrap_or_else(|| "synthetic".into()),
+            "synthetic": synthetic,
+        },
+        "width_mm": document.width_mm,
+        "height_mm": document.height_mm,
+        "paths": path_count,
+        "paper": paper_json(&record, &page),
+        "output": output.display().to_string(),
+        "bytes": bytes.len(),
+        "completeness": completeness_json(&document.completeness),
+        "diagnostics": document.diagnostics.iter().map(|d| serde_json::json!({
+            "code": d.code,
+            "message": cad_diagnostics::redact_text(&d.message),
+        })).collect::<Vec<_>>(),
+        "timings": { "plan_ms": plan_ms, "total_ms": total_ms },
+        "status": "ok",
+        "note": "CPU-only vector plot: path-level geometry, no font embedding and no plot styles (see docs/plot.md)",
+    }))
+}
+
+/// The `plot` canvas target: an explicit DPI, else the `--width`/`--height`
+/// canvas. Shared by the raster and vector paths so they cannot drift.
+#[cfg(not(target_arch = "wasm32"))]
+fn plot_target(
+    invocation: &CliInvocation,
+    _record: &cad_db::PlotSettingsRecord,
+) -> cad_representation::PlotTarget {
+    match invocation.plot_dpi {
+        Some(dpi) => cad_representation::PlotTarget::Dpi(dpi),
+        None => cad_representation::PlotTarget::Pixels {
+            width: invocation.render_width,
+            height: invocation.render_height,
+        },
+    }
+}
+
+/// The stable `paper` object of the plot result JSON.
+#[cfg(not(target_arch = "wasm32"))]
+fn paper_json(
+    record: &cad_db::PlotSettingsRecord,
+    page: &cad_representation::PlotPage,
+) -> serde_json::Value {
+    let (provenance, default_reason) = match &record.provenance {
+        cad_db::PlotProvenance::Imported => ("imported", serde_json::Value::Null),
+        cad_db::PlotProvenance::DefaultPage { reason } => {
+            ("default_page", serde_json::Value::String(reason.clone()))
+        }
+    };
+    serde_json::json!({
+        "size_name": record.paper_size_name,
+        "width": record.paper_width,
+        "height": record.paper_height,
+        "units": format!("{:?}", record.paper_units).to_ascii_lowercase(),
+        "rotation_degrees": page.rotation_degrees,
+        "printable_mm": [page.printable_mm.0, page.printable_mm.1],
+        "scale": {
+            "numerator": record.scale_numerator,
+            "denominator": record.scale_denominator,
+            "factor": cad_representation::PlotScale {
+                numerator: record.scale_numerator,
+                denominator: record.scale_denominator,
+            }
+            .factor(),
+        },
+        "provenance": provenance,
+        "default_reason": default_reason,
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
     use cad_render_wgpu::headless::{create_headless_gpu, encode_png, HeadlessGpu};
     use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
 
@@ -448,13 +581,7 @@ pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Valu
     };
 
     let record = database.plot_settings_for(layout);
-    let target = match invocation.plot_dpi {
-        Some(dpi) => cad_representation::PlotTarget::Dpi(dpi),
-        None => cad_representation::PlotTarget::Pixels {
-            width: invocation.render_width,
-            height: invocation.render_height,
-        },
-    };
+    let target = plot_target(invocation, &record);
     let plan_started = std::time::Instant::now();
     let page = cad_representation::plan_plot_for_record(&record, target)?;
     let plan_ms = plan_started.elapsed().as_secs_f64() * 1000.0;
@@ -546,12 +673,6 @@ pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Valu
     })?;
     let total_ms = started.elapsed().as_secs_f64() * 1000.0;
 
-    let (provenance, default_reason) = match &record.provenance {
-        cad_db::PlotProvenance::Imported => ("imported", serde_json::Value::Null),
-        cad_db::PlotProvenance::DefaultPage { reason } => {
-            ("default_page", serde_json::Value::String(reason.clone()))
-        }
-    };
     let completeness = match &controller.last_import_report {
         Some(report) => completeness_json(&report.completeness),
         None => serde_json::json!({ "status": "unverified" }),
@@ -560,6 +681,7 @@ pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Valu
     Ok(serde_json::json!({
         "schema_version": CLI_SCHEMA_VERSION,
         "operation": CliOperation::Plot.as_str(),
+        "format": invocation.plot_format.as_str(),
         "layout": {
             "id": layout.0,
             "name": database.layout(layout).map(|l| l.name.clone()).unwrap_or_else(|| "synthetic".into()),
@@ -568,27 +690,7 @@ pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Valu
         "width": width,
         "height": height,
         "dpi": page.dpi,
-        "paper": {
-            "size_name": record.paper_size_name,
-            "width": record.paper_width,
-            "height": record.paper_height,
-            "units": format!("{:?}", record.paper_units).to_ascii_lowercase(),
-            "rotation_degrees": page.rotation_degrees,
-            "printable_mm": [page.printable_mm.0, page.printable_mm.1],
-            "scale": {
-                "numerator": record.scale_numerator,
-                "denominator": record.scale_denominator,
-                // The same clamped factor `plan_plot_for_record` applied, so the
-                // report cannot disagree with the raster.
-                "factor": cad_representation::PlotScale {
-                    numerator: record.scale_numerator,
-                    denominator: record.scale_denominator,
-                }
-                .factor(),
-            },
-            "provenance": provenance,
-            "default_reason": default_reason,
-        },
+        "paper": paper_json(&record, &page),
         "output": output.display().to_string(),
         "bytes": png_bytes.len(),
         "pixels": {
@@ -612,7 +714,7 @@ pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Valu
         },
         "completeness": completeness,
         "status": "ok",
-        "note": "raster paper-space plot; no vector PDF/HPGL export and no plot styles (see docs/plot.md)",
+        "note": "raster paper-space plot; use --plot-format svg|pdf for the CPU vector path; no plot styles (see docs/plot.md)",
     }))
 }
 
