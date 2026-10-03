@@ -161,6 +161,7 @@
   "ribbon.file": "文件",
   "ribbon.measure": "测量",
   "ribbon.annotate": "批注",
+  "ribbon.review": "审阅",
   "shell.more": "更多",
   "status.synthetic": "就绪 · 合成几何（非兼容性声明）",
   "linux.failed": "Linux 命令失败：{error}",

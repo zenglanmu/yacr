@@ -20,6 +20,10 @@ pub use browser::{
     pending_recovery_snapshot, renderer_report, start,
 };
 
+/// The stable dot-path used by the web host to persist user preferences.
+#[cfg(target_arch = "wasm32")]
+pub use browser::config::CONFIG_EVENT_NAME;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -247,6 +251,91 @@ pub fn web_set_locale(tag: &str) -> Result<String, JsValue> {
     cad_ui_slint::web::store_locale(resolution.locale.tag())
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(resolution.locale.tag().to_string())
+}
+
+/// Replace the whole host ViewerConfig from JSON. Full validation happens in
+/// `cad-app`; the result is `{ ok: true, config, revision }` or
+/// `{ ok: false, path, reason }` (never a false success).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_set_config_json(config_json: &str) -> JsValue {
+    config_result(browser::config::set_config_json(config_json))
+}
+
+/// Structured merge into the host ViewerConfig from JSON (arrays replace,
+/// explicit `false` survives). Same result shape as `viewer_set_config_json`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_update_config_json(patch_json: &str) -> JsValue {
+    config_result(browser::config::update_config_json(patch_json))
+}
+
+/// Merge a host-allowed user preference from JSON and persist the allowed
+/// projection to localStorage.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_apply_user_preference_json(patch_json: &str) -> JsValue {
+    config_result(browser::config::apply_user_preference_json(patch_json))
+}
+
+/// Clear the in-memory and persisted user preference.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_clear_user_preference() -> JsValue {
+    config_result(browser::config::clear_user_preference())
+}
+
+/// The current effective config JSON (for host queries/automation), or `null`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_config_json() -> String {
+    browser::config::effective_config_json()
+}
+
+/// Build the stable `{ ok, ... }` result object for a config wasm export.
+#[cfg(target_arch = "wasm32")]
+fn config_result(result: cad_domain::CadResult<()>) -> JsValue {
+    let out = js_sys::Object::new();
+    match result {
+        Ok(()) => {
+            let _ = js_sys::Reflect::set(&out, &"ok".into(), &JsValue::TRUE);
+            if let Some(handle) = browser::current_handle() {
+                if let Ok(config) = js_sys::JSON::parse(&handle.effective_config_json()) {
+                    let _ = js_sys::Reflect::set(&out, &"config".into(), &config);
+                }
+                let _ = js_sys::Reflect::set(
+                    &out,
+                    &"revision".into(),
+                    &JsValue::from_f64(handle.config_revision() as f64),
+                );
+            }
+        }
+        Err(cad_domain::CadError::InvalidInput(detail)) => {
+            let _ = js_sys::Reflect::set(&out, &"ok".into(), &JsValue::FALSE);
+            let (path, reason) = split_config_error(&detail);
+            let _ = js_sys::Reflect::set(&out, &"path".into(), &JsValue::from_str(&path));
+            let _ = js_sys::Reflect::set(&out, &"reason".into(), &JsValue::from_str(&reason));
+        }
+        Err(other) => {
+            let _ = js_sys::Reflect::set(&out, &"ok".into(), &JsValue::FALSE);
+            let _ = js_sys::Reflect::set(&out, &"path".into(), &JsValue::from_str("config"));
+            let _ = js_sys::Reflect::set(
+                &out,
+                &"reason".into(),
+                &JsValue::from_str(&other.to_string()),
+            );
+        }
+    }
+    out.into()
+}
+
+/// Split the `path\u{1}reason` encoding produced by `browser::config`.
+#[cfg(target_arch = "wasm32")]
+fn split_config_error(detail: &str) -> (String, String) {
+    match detail.split_once('\u{1}') {
+        Some((path, reason)) => (path.to_string(), reason.to_string()),
+        None => ("config".to_string(), detail.to_string()),
+    }
 }
 
 /// Native builds cannot run the browser host; this is a platform constraint,

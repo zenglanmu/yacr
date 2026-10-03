@@ -161,6 +161,7 @@
   "ribbon.file": "File",
   "ribbon.measure": "Measure",
   "ribbon.annotate": "Annotate",
+  "ribbon.review": "Review",
   "shell.more": "More",
   "status.synthetic": "Ready · synthetic geometry (not a compatibility claim)",
   "linux.failed": "Linux operation failed: {error}",

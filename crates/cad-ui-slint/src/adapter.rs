@@ -90,6 +90,13 @@ impl UiAdapter {
         apply_responsive(&ui, configuration.logical_size, configuration.compact);
         ui.set_status_label(messages.text("status.scaffold", &[]).into());
         ui.set_work_mode(work_mode);
+        ui.set_config_revision(0);
+        ui.set_config_preset("full".into());
+        ui.set_config_effective_json(
+            cad_app::viewer_config::ViewerConfigStore::default()
+                .effective_json()
+                .into(),
+        );
 
         let work_mode: Rc<Cell<bool>> = Rc::new(Cell::new(work_mode));
 
@@ -997,6 +1004,12 @@ impl UiAdapter {
     /// [`CadView::set_draw_preview`].
     pub fn draw_preview(&self) -> Option<cad_app::DrawPreview> {
         self.draw_tool.borrow().as_ref().map(|tool| tool.preview())
+    }
+
+    /// The current configuration store, cloned for hosts that persist user
+    /// preferences or query the effective/host split.
+    pub fn config_store(&self) -> Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>> {
+        self.viewer_config.clone()
     }
 
     /// A handle for pushing state from the host.

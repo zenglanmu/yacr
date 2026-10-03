@@ -3,6 +3,8 @@
 use super::*;
 use slint::Model;
 
+use cad_app::viewer_config::{ViewerConfig, ViewerConfigStore};
+
 /// Layout/locale configuration for the shell.
 #[derive(Debug, Clone)]
 pub struct UiConfiguration {
@@ -133,6 +135,39 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_work_mode_label(messages.text("shell.mode_work", &[]).into());
 }
 
+/// Catalog keys for a configured ribbon tab, if it declares one.
+///
+/// The shipped default is the catalog's own five tabs; a config tab carries a
+/// catalog key (`ribbon.review`) that the UI resolves through `MessageSource`.
+/// An empty/missing label falls back to the catalog default, never a literal.
+fn ribbon_tab_labels(tab: &cad_app::viewer_config::RibbonTab, messages: &MessageSource) -> String {
+    if tab.label.is_empty() {
+        messages.text("shell.more", &[])
+    } else {
+        messages.text(&tab.label, &[])
+    }
+}
+
+/// Push the configured ribbon tab model (if any) alongside the catalog chrome.
+///
+/// Called after [`apply_chrome`] so a config-declared ribbon replaces the default
+/// tab model. An empty `tabs` list leaves the catalog model in place.
+pub(crate) fn apply_ribbon_config(
+    ui: &YacrWindow,
+    config: &ViewerConfig,
+    messages: &MessageSource,
+) {
+    let tabs = &config.ui.components.ribbon.tabs;
+    if tabs.is_empty() {
+        return;
+    }
+    let labels: Vec<String> = tabs
+        .iter()
+        .map(|tab| ribbon_tab_labels(tab, messages))
+        .collect();
+    ui.set_ribbon_tabs(string_model(&labels));
+}
+
 /// Push the derived responsive geometry into the shell (audit U01/U07).
 ///
 /// This is the wire that consumes [`UiConfiguration::compact`] and the current
@@ -143,13 +178,26 @@ pub fn apply_responsive(ui: &YacrWindow, logical_size: [f64; 2], compact_config:
     if compact_config {
         config.ui.layout.mode = cad_app::viewer_config::LayoutMode::Compact;
     }
-    apply_viewer_presentation(ui, &config, logical_size);
+    apply_viewer_presentation_with(ui, &config, logical_size, None);
 }
 
+/// Derive the presentation from `config` and apply it to the shell.
+///
+/// When `store` is supplied the resolved config readout properties are pushed
+/// too, so a host always sees the exact effective config it was applied from.
 pub(crate) fn apply_viewer_presentation(
     ui: &YacrWindow,
     config: &cad_app::viewer_config::ViewerConfig,
     size: [f64; 2],
+) {
+    apply_viewer_presentation_with(ui, config, size, None);
+}
+
+pub(crate) fn apply_viewer_presentation_with(
+    ui: &YacrWindow,
+    config: &cad_app::viewer_config::ViewerConfig,
+    size: [f64; 2],
+    store: Option<&cad_app::viewer_config::ViewerConfigStore>,
 ) {
     use cad_app::viewer_config::{LayoutMode, UiPresentationModel};
     let p = UiPresentationModel::resolve(config, size, [0.0; 4], false);
@@ -164,14 +212,26 @@ pub(crate) fn apply_viewer_presentation(
     ui.set_drawer_height(if phone { 280.0 } else { 0.0 });
     ui.set_application_ui(p.application_ui);
     ui.set_ribbon_visible(p.ribbon);
-    ui.set_panels_visible(p.panels);
+    ui.set_panels_visible(p.panels());
+    ui.set_layer_panel_visible(p.layer_panel);
+    ui.set_properties_panel_visible(p.properties_panel);
+    ui.set_layer_panel_initially_open(p.layer_panel_initially_open);
+    ui.set_properties_panel_initially_open(p.properties_panel_initially_open);
     ui.set_navigation_visible(p.navigation);
     ui.set_command_visible(p.command_bar);
     ui.set_layouts_visible(p.layout_tabs);
     ui.set_status_visible(p.status_bar);
     ui.set_show_floating_nav(p.navigation);
+    let visible = |id: &str| p.command_visibility.get(id).copied().unwrap_or(false);
+    ui.set_cmd_measure_visible(visible("measure.distance"));
+    ui.set_cmd_annotate_visible(visible("annotation.text"));
+    ui.set_cmd_annotation_delete_visible(visible("annotation.delete"));
+    ui.set_cmd_export_visible(visible("file.exportAnnotations"));
+    ui.set_cmd_import_visible(visible("file.importAnnotations"));
     if changed_layout {
-        ui.set_side_panel_open(p.dock_width > 0.0);
+        // A user's later explicit open/close toggle must not be clobbered by a
+        // mere re-apply at the same breakpoint; only a real layout change resets it.
+        ui.set_side_panel_open(p.layer_panel_initially_open);
         ui.set_tools_open(false);
         ui.set_ribbon_expanded(!compact);
     }
@@ -180,6 +240,9 @@ pub(crate) fn apply_viewer_presentation(
         ui.set_diagnostics_open(false);
         ui.set_tools_open(false);
         ui.set_command_expanded(false);
+    }
+    if let Some(store) = store {
+        crate::handle::push_config_properties(ui, store);
     }
 }
 

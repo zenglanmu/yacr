@@ -14,6 +14,7 @@ use cad_ui_slint::{
 
 mod annotations;
 mod async_open;
+pub mod config;
 mod documents;
 mod draw;
 mod fonts;
@@ -265,6 +266,35 @@ pub async fn start_with_preference(
     }
     // The first push derives every panel from the real application state.
     state_push::push_panel_state(&controller, &handle, &view_slot);
+
+    // Host policy: allow users to customize only the two panel initial-open
+    // flags. Without this the default config allows nothing and the persisted
+    // preference path would be inert. A failure is logged, never fatal.
+    if let Err(error) = handle.update_config_json(
+        r#"{"ui":{"userCustomization":{"allowedPaths":[
+            "ui.components.layerPanel.initiallyOpen",
+            "ui.components.propertiesPanel.initiallyOpen"
+        ]}}}"#,
+    ) {
+        cad_ui_slint::web::console_error(&format!("host config defaults rejected: {error}"));
+    }
+
+    // Merge a persisted user preference, but only the leaves still allowed by
+    // this host config. A rejected/limited preference never fails startup; the
+    // store keeps the validated values that did pass.
+    if let Some(preference) = config::stored_user_preference() {
+        match handle.apply_user_preference_json(&preference) {
+            Ok(()) => {
+                let _ = config::persist_user_preference(&handle);
+            }
+            Err(error) => {
+                cad_ui_slint::web::console_error(&format!(
+                    "stored config preference rejected: {error}"
+                ));
+                let _ = config::persist_user_preference(&handle);
+            }
+        }
+    }
 
     HOST.with(|slot| {
         *slot.borrow_mut() = Some(HostRuntime {

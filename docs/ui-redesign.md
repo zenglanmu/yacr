@@ -12,12 +12,24 @@
 
 ## 配置边界（必须明确）
 
-当前协议只实现 `schemaVersion`、`ui.preset/layout/components` 的布局子集。
-不支持的配置字段拒绝而非忽略；`features/view/interaction`、工具分组/排序/placement、
-宿主允许的用户偏好合并、配置事件与浏览器公开 setConfig 接口仍未闭环。
-这不是 ui-desc 完整配置协议验收；既有命令层 Work/Viewer 授权继续有效。
-`UiHandle::set_config/effective_config` 已消费布局子集；`initiallyOpen`、分开的图层/属性显隐
-仍需补齐逐组件呈现规则，当前共用一个面板容器，不宣称配置协议已全部接线。
+本轮闭环：`ViewerConfig` 完整协议类型（`ui`/`features`/`view`/`interaction`）、
+稳定 `CommandId` 白名单、ribbon 分组/排序、placement、`initiallyOpen`、命令覆盖、
+宿主允许的用户偏好合并（clamp 而非报错）、配置变更事件与 revision、有效配置查询、
+Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不携带任何脚本/回调。
+
+仍未闭环（不宣称完整验收）：
+- `canvasOnly` 之外的精简预设对 ribbon 的实际重排仍是布局子集；`minimal` 语义待细化。
+- ribbon 的 `commands` 分组只用来过滤/校验 `commandVisibility`，尚未把自定义分组
+  真正渲染成独立按钮分组（当前 ribbon 仍是固定 5 标签 + 内置面板）。
+- overlay 开关（`view.overlays.*`）已解析并推入只读属性，但尚未单独驱动 CAD 合成层
+  （例如网格/坐标轴的实际绘制由渲染器另行控制）。
+- `interaction.pointer/touch/keyboardShortcuts` 已解析并加入 presentation，但尚未逐项
+  门控输入路径。
+- 用户偏好仍只通过 `apply_user_preference`/`setConfig` API 合并；原生宿主未从磁盘读取。
+- 既有命令层 Work/Viewer 授权继续有效，与配置 `features` 是两套独立门控。
+
+`UiHandle::set_config/set_config_json/update_config_json/apply_user_preference_json/effective_config_json`
+已消费完整协议；`initiallyOpen`、分开的图层/属性显隐已接线。
 
 ## 验证原则
 

@@ -7,6 +7,12 @@ import { createFileHost } from "../apps/app-web/web/host/files.js";
 import { createI18n } from "../apps/app-web/web/host/i18n.js";
 import { parseAsyncPoll, pollAsyncOpen } from "../apps/app-web/web/host/async-open.js";
 import { startStatePolling } from "../apps/app-web/web/host/renderer.js";
+import {
+  parseConfigResult,
+  createConfigHost,
+  emitConfigChanged,
+  CONFIG_EVENT_NAME,
+} from "../apps/app-web/web/host/config.js";
 import { isHandoffError } from "../apps/app-web/web/host/runtime.js";
 import {
   chooseBackend,
@@ -379,3 +385,144 @@ test("renderer heartbeat drives async-open polling and tightens while running", 
   // Back to the renderer backoff cadence (250 * 1.5) rather than the running pin.
   assert.equal(scheduled.at(-1).delay, 375);
 });
+
+test("config host routes set/update/query through the wasm exports and emits events", (t) => {
+  const events = [];
+  const calls = [];
+  replaceGlobal(t, "window", {
+    dispatchEvent: (event) => {
+      events.push(event);
+      return true;
+    },
+  });
+  replaceGlobal(
+    t,
+    "CustomEvent",
+    class {
+      constructor(type, init) {
+        this.type = type;
+        this.detail = init?.detail;
+      }
+    },
+  );
+  const effective = { ui: { preset: "canvasOnly" }, schemaVersion: 1 };
+  const module = {
+    viewer_set_config_json: (text) => {
+      calls.push(["set", text]);
+      return { ok: true, config: effective, revision: 2 };
+    },
+    viewer_update_config_json: (text) => {
+      calls.push(["update", text]);
+      return { ok: true, config: effective, revision: 3 };
+    },
+    viewer_apply_user_preference_json: (text) => {
+      calls.push(["preference", text]);
+      return { ok: true, config: effective, revision: 4 };
+    },
+    viewer_clear_user_preference: () => {
+      calls.push(["clear"]);
+      return { ok: true, config: effective, revision: 5 };
+    },
+    viewer_config_json: () => JSON.stringify(effective),
+  };
+  const host = createConfigHost(() => module);
+  const set = host.setConfig({ ui: { preset: "canvasOnly" } });
+  assert.equal(set.ok, true);
+  assert.deepEqual(calls[0], ["set", JSON.stringify({ ui: { preset: "canvasOnly" } })]);
+  assert.equal(events[0].type, CONFIG_EVENT_NAME);
+  assert.equal(events[0].detail.revision, 2);
+  assert.deepEqual(events[0].detail.config, effective);
+  host.updateConfig({ ui: { components: { ribbon: { visible: false } } } });
+  assert.equal(events.at(-1).detail.revision, 3);
+  const pref = host.applyUserPreference({
+    ui: { components: { layerPanel: { initiallyOpen: false } } },
+  });
+  assert.equal(pref.ok, true);
+  assert.equal(events.at(-1).detail.revision, 4);
+  host.clearUserPreference();
+  assert.equal(events.at(-1).detail.revision, 5);
+  // `config()` falls back to the wasm query before any change was applied.
+  assert.deepEqual(host.config(), effective);
+});
+
+test("config host never reports success on a rejected result and keeps the old query", (t) => {
+  const events = [];
+  replaceGlobal(t, "window", {
+    dispatchEvent: (event) => {
+      events.push(event);
+      return true;
+    },
+  });
+  replaceGlobal(
+    t,
+    "CustomEvent",
+    class {
+      constructor(type, init) {
+        this.type = type;
+        this.detail = init?.detail;
+      }
+    },
+  );
+  const module = {
+    viewer_set_config_json: () => ({
+      ok: false,
+      path: "ui.userCustomization.allowedPaths[0]",
+      reason: "unknown configuration path",
+    }),
+    viewer_update_config_json: () => ({
+      ok: false,
+      path: "ui.userCustomization.allowedPaths[0]",
+      reason: "unknown configuration path",
+    }),
+    viewer_apply_user_preference_json: () => ({
+      ok: false,
+      path: "features.measure",
+      reason: "user preference path is not allowed by host customization",
+    }),
+    viewer_clear_user_preference: () => ({ ok: true, config: {}, revision: 1 }),
+    viewer_config_json: () => "null",
+  };
+  const host = createConfigHost(() => module);
+  const rejected = host.updateConfig({ ui: { preset: "canvasOnly" } });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.path, "ui.userCustomization.allowedPaths[0]");
+  // A rejected change emits no event.
+  assert.equal(events.length, 0);
+  const denied = host.applyUserPreference({ features: { measure: true } });
+  assert.equal(denied.ok, false);
+  assert.match(denied.reason, /not allowed/);
+  assert.equal(events.length, 0);
+  assert.equal(host.config(), null);
+});
+
+test("config result parsing is defensive and change events require success", (t) => {
+  let dispatched = 0;
+  replaceGlobal(t, "window", {
+    dispatchEvent: () => {
+      dispatched += 1;
+      return true;
+    },
+  });
+  replaceGlobal(
+    t,
+    "CustomEvent",
+    class {
+      constructor(type, init) {
+        this.type = type;
+        this.detail = init?.detail;
+      }
+    },
+  );
+  assert.equal(parseConfigResult(null).ok, false);
+  assert.equal(parseConfigResult({}).ok, false);
+  assert.deepEqual(emitConfigChanged(null), {
+    ok: false,
+    path: "config",
+    reason: "no result from wasm",
+  });
+  assert.equal(dispatched, 0);
+  const ok = emitConfigChanged({ ok: true, config: {}, revision: 7 });
+  assert.equal(ok.ok, true);
+  assert.equal(dispatched, 1);
+});
+

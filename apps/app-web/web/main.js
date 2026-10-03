@@ -3,6 +3,7 @@ import { createFileHost } from "./host/files.js";
 import { installTouchNavigation } from "./host/touch.js";
 import { createA11y } from "./host/a11y.js";
 import { createI18n } from "./host/i18n.js";
+import { createConfigHost } from "./host/config.js";
 import { startStatePolling } from "./host/renderer.js";
 import {
   chooseBackend,
@@ -52,6 +53,8 @@ async function main() {
   installTouchNavigation(wasmModule);
   ignoreWinitHandoff();
 
+  const configHost = createConfigHost(() => wasmModule);
+
   // Preserve the public diagnostics/test surface across the module split.
   window.yacr = {
     renderer_state_report: wasmModule.renderer_state_report,
@@ -66,6 +69,12 @@ async function main() {
     export_annotations: exportAnnotations,
     set_locale: i18n.setLocale,
     current_locale: i18n.currentLocale,
+    // ViewerConfig host API: set/update/query and host-allowed user preferences.
+    setConfig: configHost.setConfig,
+    updateConfig: configHost.updateConfig,
+    applyUserPreference: configHost.applyUserPreference,
+    clearUserPreference: configHost.clearUserPreference,
+    config: configHost.config,
     shell_geometry: wasmModule.shell_geometry,
     canvas_hit_test: wasmModule.canvas_hit_test,
     has_recovery_snapshot: wasmModule.has_recovery_snapshot,
