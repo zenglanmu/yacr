@@ -189,6 +189,27 @@ pub fn input_enabled(store: &cad_app::viewer_config::ViewerConfigStore, kind: In
     }
 }
 
+/// JSON patch that flips exactly one `view.overlays.*` flag.
+///
+/// The shell status-bar toggle sends a short key; this maps it to the camelCase
+/// config key and builds `{"view":{"overlays":{"<key>":<bool>}}}`. An unknown
+/// key returns `None`, so a malformed callback can never write an invalid
+/// config or bypass the store with a raw Slint property write. Pure and
+/// unit-testable without a live window.
+pub fn overlay_toggle_patch(key: &str, value: bool) -> Option<String> {
+    let field = match key {
+        "axes" => "axes",
+        "grid" => "grid",
+        "selectionHighlight" => "selectionHighlight",
+        "snapHints" => "snapHints",
+        "annotations" => "annotations",
+        _ => return None,
+    };
+    Some(format!(
+        r#"{{"view":{{"overlays":{{"{field}":{value}}}}}}}"#
+    ))
+}
+
 impl UiAdapter {
     /// Build the shell and connect its callbacks to `sink`.
     pub fn new<S: UiCommandSink>(
@@ -272,6 +293,40 @@ impl UiAdapter {
         );
 
         crate::command_line::connect(&ui, messages_slot.clone(), viewer_config.clone());
+
+        {
+            // Desktop status-bar overlay toggles. The click must be a real config
+            // change: it merges one `view.overlays.*` flag into the store, then
+            // re-derives and re-pushes the presentation, so a host sees the new
+            // `effective_config().view.overlays` on its next state funnel and the
+            // canvas overlay is rebuilt rather than shadowed by a Slint write.
+            let weak = ui_weak.clone();
+            let config = viewer_config.clone();
+            let messages = messages_slot.clone();
+            ui.on_overlay_toggled(move |key, value| {
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                let Some(patch) = overlay_toggle_patch(key.as_str(), value) else {
+                    log::warn!("ignoring unknown overlay toggle key {:?}", key.as_str());
+                    return;
+                };
+                let applied = config.borrow_mut().update_config_json(&patch);
+                if applied.is_err() {
+                    // A refused patch leaves the store and revision untouched;
+                    // the toggle simply stays at the last effective value.
+                    return;
+                }
+                apply_ribbon_config(&ui, config.borrow().effective(), &messages.borrow());
+                let size = ui.window().size().to_logical(ui.window().scale_factor());
+                apply_viewer_presentation_with(
+                    &ui,
+                    config.borrow().effective(),
+                    [size.width as f64, size.height as f64],
+                    Some(&config.borrow()),
+                );
+            });
+        }
 
         {
             // Configured ribbon buttons dispatch to the exact callbacks the

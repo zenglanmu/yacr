@@ -59,11 +59,15 @@ export component YacrWindow inherits Window {
     in property <int> config-revision: 0;
     in property <string> config-preset: "full";
     in property <string> config-effective-json: "{}";
-    in property <bool> overlay-axes: true;
-    in property <bool> overlay-grid: true;
-    in property <bool> overlay-selection-highlight: true;
-    in property <bool> overlay-snap-hints: true;
-    in property <bool> overlay-annotations: true;
+    // Overlay flags are `in-out` so the desktop status-bar toggles reflect the
+    // effective config and can emit the flipped value back to the host through
+    // `overlay-toggled`. The adapter still re-pushes them from the config store
+    // as the single source of truth; the toggle is never a shadow copy.
+    in-out property <bool> overlay-axes: true;
+    in-out property <bool> overlay-grid: true;
+    in-out property <bool> overlay-selection-highlight: true;
+    in-out property <bool> overlay-snap-hints: true;
+    in-out property <bool> overlay-annotations: true;
     in property <bool> feature-measure: true;
     in property <bool> feature-annotation-create: true;
     in property <bool> feature-annotation-update: true;
@@ -219,6 +223,9 @@ export component YacrWindow inherits Window {
     callback annotation-delete-requested(int);
     callback annotation-visibility-toggled(int, bool);
     callback layout-selected(int);
+    // Desktop status-bar overlay toggles: the overlay key ("axes"/"grid"/
+    // "snapHints"/"selectionHighlight"/"annotations") plus the new value.
+    callback overlay-toggled(string, bool);
     callback toggle-view-mode-requested();
     callback toggle-projection-requested();
     callback standard-view-selected(string);
@@ -458,8 +465,23 @@ export component YacrWindow inherits Window {
         }
         if root.application-ui && root.status-visible && !root.phone-shell : Rectangle {
             height: 26px; background: CadTheme.chrome;
-            Text { x: 12px; width: parent.width - 24px; text: root.status-label; color: CadTheme.muted;
-                font-size: 12px; vertical-alignment: center; overflow: elide; }
+            HorizontalBox {
+                padding: 0px; padding-left: 12px; padding-right: 4px; spacing: 2px;
+                Text { text: root.status-label; color: CadTheme.muted; horizontal-stretch: 1;
+                    font-size: 12px; vertical-alignment: center; overflow: elide; }
+                // Desktop overlay toggles. No catalog key exists for these yet,
+                // so the controls carry only geometry glyphs (never a literal
+                // string); a future round adds accessible catalog labels.
+                ConceptButton { text: ""; symbol: "╋"; icon-only: true; checked: root.overlay-axes;
+                    min-width: 30px; preferred-width: 30px; min-height: 24px; preferred-height: 24px;
+                    clicked => { root.overlay-toggled("axes", !root.overlay-axes); } }
+                ConceptButton { text: ""; symbol: "▦"; icon-only: true; checked: root.overlay-grid;
+                    min-width: 30px; preferred-width: 30px; min-height: 24px; preferred-height: 24px;
+                    clicked => { root.overlay-toggled("grid", !root.overlay-grid); } }
+                ConceptButton { text: ""; symbol: "◎"; icon-only: true; checked: root.overlay-snap-hints;
+                    min-width: 30px; preferred-width: 30px; min-height: 24px; preferred-height: 24px;
+                    clicked => { root.overlay-toggled("snapHints", !root.overlay-snap-hints); } }
+            }
         }
         if root.application-ui && root.ribbon-visible && root.phone-shell && root.tools-open : CadRibbon {
             phone: true; target: 48px; expanded: true; tab <=> root.ribbon-tab;
