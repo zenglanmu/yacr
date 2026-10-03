@@ -285,6 +285,7 @@ export component YacrWindow inherits Window {
             editing-labels: root.editing-labels;
             config-tabs: root.ribbon-config-tabs;
             config-driven: root.ribbon-config-driven;
+            overflow-label: root.more-label;
             expanded <=> root.ribbon-expanded;
             tab <=> root.ribbon-tab;
             measure-kind(value) => { root.measure-kind-selected(value); }
@@ -473,6 +474,7 @@ export component YacrWindow inherits Window {
             can-trim: root.can-trim; can-switch-backend: root.can-switch-backend;
             editing-labels: root.editing-labels; draw-status: root.draw-status;
             config-tabs: root.ribbon-config-tabs; config-driven: root.ribbon-config-driven;
+            overflow-label: root.more-label;
             can-undo: root.work-mode && root.can-undo; can-redo: root.work-mode && root.can-redo;
             measure-kind(value) => { root.measure-kind-selected(value); }
             annotation-kind(value) => { root.annotation-kind-selected(value); }

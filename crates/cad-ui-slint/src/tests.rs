@@ -874,6 +874,8 @@ fn configured_ribbon_model_is_localized_and_visibility_filtered() {
     );
     assert!(!first.icon.is_empty());
     assert!(first.visible);
+    // The default display mode reaches the model as the icon+label code.
+    assert_eq!(first.display, 0);
     assert_eq!(
         group.commands.row_data(1).unwrap().id.as_str(),
         "annotation.text"
@@ -900,6 +902,114 @@ fn empty_ribbon_config_keeps_the_builtin_tabs() {
     .map(|key| messages.text(key, &[]))
     .collect();
     assert_eq!(chrome.tab_labels, expected);
+}
+
+/// Build a one-tab/one-group config whose commands are all visible, so the
+/// assertions are about display/overflow rather than visibility filtering.
+fn ribbon_config_with_commands(display: &str, commands: &[&str]) -> ViewerConfig {
+    use cad_app::viewer_config::{RibbonCommandDisplay, RibbonGroup, RibbonTab, ViewerConfig};
+    let display = match display {
+        "iconOnly" => RibbonCommandDisplay::IconOnly,
+        "labelOnly" => RibbonCommandDisplay::LabelOnly,
+        _ => RibbonCommandDisplay::IconAndLabel,
+    };
+    let mut config = ViewerConfig::default();
+    config.ui.components.ribbon.tabs = vec![RibbonTab {
+        id: "review".into(),
+        label: "ribbon.review".into(),
+        groups: vec![RibbonGroup {
+            id: "measure".into(),
+            label: "ribbon.measure".into(),
+            commands: commands.iter().map(|id| (*id).to_string()).collect(),
+            display,
+        }],
+    }];
+    config
+}
+
+#[test]
+fn configured_ribbon_command_display_reaches_the_model() {
+    use cad_app::viewer_config::RibbonCommandDisplay;
+    use slint::Model;
+
+    let messages = MessageSource::for_locale(Locale::En);
+    // The enum code mapping is explicit: 0 = icon+label, 1 = icon only,
+    // 2 = label only.
+    assert_eq!(
+        ribbon_command_display_code(RibbonCommandDisplay::IconAndLabel),
+        0
+    );
+    assert_eq!(
+        ribbon_command_display_code(RibbonCommandDisplay::IconOnly),
+        1
+    );
+    assert_eq!(
+        ribbon_command_display_code(RibbonCommandDisplay::LabelOnly),
+        2
+    );
+
+    for (display_json, expected_code) in [("iconAndLabel", 0), ("iconOnly", 1), ("labelOnly", 2)] {
+        let config = ribbon_config_with_commands(display_json, &["measure.distance"]);
+        let chrome = build_ribbon_config(&config, &messages);
+        let command = chrome.tabs[0].groups.row_data(0).unwrap().commands;
+        let first = command.row_data(0).unwrap();
+        assert_eq!(
+            first.display, expected_code,
+            "display {display_json} should map to {expected_code}"
+        );
+    }
+}
+
+#[test]
+fn configured_ribbon_groups_over_the_cap_keep_every_command() {
+    use slint::Model;
+
+    let messages = MessageSource::for_locale(Locale::En);
+    // 8 visible commands > the Slint overflow cap of 6: all must stay in the
+    // resolved model so the overflow path can reach them (nothing dropped).
+    let commands = [
+        "view.fit",
+        "view.pan",
+        "view.orbit",
+        "view.reset",
+        "view.standard",
+        "view.projection",
+        "view.switch2d3d",
+        "draw.line",
+    ];
+    let config = ribbon_config_with_commands("iconAndLabel", &commands);
+    let chrome = build_ribbon_config(&config, &messages);
+    let group = chrome.tabs[0].groups.row_data(0).unwrap();
+    assert_eq!(group.commands.row_count(), commands.len());
+    let ids: Vec<String> = (0..group.commands.row_count())
+        .map(|index| group.commands.row_data(index).unwrap().id.to_string())
+        .collect();
+    assert_eq!(
+        ids,
+        commands
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn ribbon_group_overflow_markers_are_present() {
+    let ribbon = include_str!("../ui/ribbon.slint");
+    for marker in [
+        "overflow-open-group",
+        "max-commands",
+        "root.overflow-label",
+        "group.commands.length > root.max-commands",
+    ] {
+        assert!(
+            ribbon.contains(marker),
+            "ribbon must expose overflow marker {marker}"
+        );
+    }
+    // The model carries the display code the renderer branches on.
+    let model = include_str!("../ui/ribbon-model.slint");
+    assert!(model.contains("display: int"));
 }
 
 #[test]

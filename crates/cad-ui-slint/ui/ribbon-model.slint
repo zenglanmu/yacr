@@ -1,6 +1,11 @@
 // Host-configured ribbon model. Labels are already localized by the Rust
 // adapter (catalog keys resolved through `MessageSource`); ids stay machine
 // readable so a click dispatches to the real command.
-export struct RibbonCommandModel { id: string, label: string, icon: string, visible: bool }
+//
+// `display` is the command's render mode as an int so the value crosses the
+// model boundary without a Slint enum: 0 = icon + label (default), 1 = icon
+// only (label suppressed), 2 = label only (no icon). `chrome.rs` maps the
+// host-facing `RibbonCommandDisplay` enum onto these constants.
+export struct RibbonCommandModel { id: string, label: string, icon: string, visible: bool, display: int }
 export struct RibbonGroupModel { id: string, label: string, commands: [RibbonCommandModel] }
 export struct RibbonTabModel { id: string, label: string, groups: [RibbonGroupModel] }
