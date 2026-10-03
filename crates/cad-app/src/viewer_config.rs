@@ -966,6 +966,33 @@ pub struct OverlayVisibility {
     pub annotations: bool,
 }
 
+impl Default for OverlayVisibility {
+    /// Every overlay is visible. `OverlayInputs::default()` therefore keeps the
+    /// historical "nothing is hidden" behavior; only an explicit host push
+    /// turns an overlay off.
+    fn default() -> Self {
+        Self {
+            axes: true,
+            grid: true,
+            selection_highlight: true,
+            snap_hints: true,
+            annotations: true,
+        }
+    }
+}
+
+impl From<ViewOverlays> for OverlayVisibility {
+    fn from(value: ViewOverlays) -> Self {
+        Self {
+            axes: value.axes,
+            grid: value.grid,
+            selection_highlight: value.selection_highlight,
+            snap_hints: value.snap_hints,
+            annotations: value.annotations,
+        }
+    }
+}
+
 /// Capability visibility resolved for the shell entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureVisibility {

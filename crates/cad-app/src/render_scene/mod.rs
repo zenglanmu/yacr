@@ -40,8 +40,9 @@ pub struct PreparedScene {
 #[derive(Default)]
 pub struct CadSceneController {
     version: Option<SceneVersion>,
-    /// `(base_revision, annotation_fingerprint, annotations_revision)`.
-    annotation_version: Option<(u64, u64, u64)>,
+    /// `(base_revision, annotation_fingerprint, annotations_revision,
+    /// annotations_visible)`.
+    annotation_version: Option<(u64, u64, u64, bool)>,
     /// `(base_revision, transient overlay fingerprint)`.
     visual_version: Option<(u64, u64)>,
     annotations_revision: u64,
@@ -217,6 +218,7 @@ impl CadSceneController {
             next_base,
             annotation_fingerprint(annotations, visibility),
             self.annotations_revision,
+            overlays.visibility.annotations,
         );
         let visual_version = (next_base, overlay_fingerprint(overlays));
         let annotation_changed =
@@ -255,9 +257,11 @@ impl CadSceneController {
         };
         let annotation_overlay = if annotation_changed || self.annotation_overlay.is_none() {
             let scene = match (doc, annotations) {
-                (Some(_), Some(db)) => {
-                    annotation_batches(db.annotations(), |id| visibility.effective(id), &options)
-                }
+                (Some(_), Some(db)) => annotation_batches(
+                    db.annotations(),
+                    |id| overlays.visibility.annotations && visibility.effective(id),
+                    &options,
+                ),
                 _ => annotation_batches(std::iter::empty(), |_| false, &options),
             };
             // Conversion gaps remain explicit; do not claim an empty successful
@@ -278,17 +282,41 @@ impl CadSceneController {
             if visual_changed || self.visual_overlay.is_none() {
                 let mut overlay = VisualOverlay::default();
                 if let Some(db) = doc {
-                    overlay.merge(selection_highlight(
-                        db,
-                        &overlays.selection,
-                        document,
-                        stamp.clone(),
-                        fonts.clone(),
-                    ));
+                    // Reference overlays first, so the selection and previews
+                    // draw above the axes/grid (they also carry a higher
+                    // draw order, but merge order keeps the batch list readable).
+                    if overlays.visibility.axes || overlays.visibility.grid {
+                        match db.bounds() {
+                            Some(bounds) => {
+                                if overlays.visibility.grid {
+                                    overlay.merge(grid_overlay(bounds, document));
+                                }
+                                if overlays.visibility.axes {
+                                    overlay.merge(axes_overlay(bounds, document));
+                                }
+                            }
+                            None => overlay.partial(
+                                "overlay.bounds-unavailable",
+                                "axes/grid requested but the drawing has no model-space bounds; \
+                                 omitted"
+                                    .into(),
+                            ),
+                        }
+                    }
+                    if overlays.visibility.selection_highlight {
+                        overlay.merge(selection_highlight(
+                            db,
+                            &overlays.selection,
+                            document,
+                            stamp.clone(),
+                            fonts.clone(),
+                        ));
+                    }
                     overlay.merge(preview_overlay(
                         overlays.measurement.as_ref(),
                         overlays.annotation.as_ref(),
                         document,
+                        overlays.visibility.snap_hints,
                         &PreviewOptions::default(),
                     ));
                 }
@@ -390,8 +418,22 @@ impl CadSceneController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::viewer_config::OverlayVisibility;
     use cad_db::DrawingDatabaseBuilder;
     use cad_domain::{DatabaseId, LayoutId};
+
+    /// Overlay inputs with the reference axes/grid off, so a test isolates the
+    /// selection/preview overlay from the world-space reference overlays.
+    fn overlays_without_reference() -> OverlayInputs {
+        OverlayInputs {
+            visibility: OverlayVisibility {
+                axes: false,
+                grid: false,
+                ..OverlayVisibility::default()
+            },
+            ..OverlayInputs::default()
+        }
+    }
 
     fn prepare(
         controller: &mut CadSceneController,
@@ -568,7 +610,7 @@ mod tests {
         let layers = LayerOverrideSet::new();
         let visibility = AnnotationVisibilitySet::new();
         let annotations = AnnotationDatabase::new(DatabaseId(3));
-        let empty = OverlayInputs::default();
+        let empty = overlays_without_reference();
         controller
             .prepare_with_overlays(
                 Some(&db),
@@ -594,6 +636,11 @@ mod tests {
                 DocumentId(73),
                 cad_domain::EntityId(1),
             )]),
+            visibility: OverlayVisibility {
+                axes: false,
+                grid: false,
+                ..OverlayVisibility::default()
+            },
             ..OverlayInputs::default()
         };
         controller
@@ -655,7 +702,7 @@ mod tests {
         let mut controller = CadSceneController::default();
         let layers = LayerOverrideSet::new();
         let visibility = AnnotationVisibilitySet::new();
-        let overlays = OverlayInputs::default();
+        let overlays = overlays_without_reference();
         controller
             .prepare_with_overlays(
                 Some(&db),
@@ -686,6 +733,11 @@ mod tests {
                 remaining: 1,
                 ready: false,
             }),
+            visibility: OverlayVisibility {
+                axes: false,
+                grid: false,
+                ..OverlayVisibility::default()
+            },
             ..OverlayInputs::default()
         };
         controller
@@ -715,7 +767,7 @@ mod tests {
                 SpaceSelection::Model,
                 None,
                 &visibility,
-                &OverlayInputs::default(),
+                &overlays_without_reference(),
             )
             .unwrap();
         assert!(controller
@@ -725,5 +777,247 @@ mod tests {
             .highlight
             .added
             .is_empty());
+    }
+
+    /// An annotation database with one drawable leader (no fonts needed).
+    fn annotations_with_leader() -> AnnotationDatabase {
+        use cad_db::{Annotation, AnnotationGeometry, AnnotationStyle};
+        use cad_domain::{AnnotationId, Point3, Precision, SpaceId, TransactionId};
+        let mut db = AnnotationDatabase::new(DatabaseId(3));
+        db.apply_annotation_changes(
+            "seed",
+            TransactionId(1),
+            vec![(
+                AnnotationId(1),
+                Some(Annotation {
+                    id: AnnotationId(1),
+                    space: SpaceId::Model,
+                    geometry: AnnotationGeometry::Leader(vec![
+                        Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                        Point3 {
+                            x: 5.0,
+                            y: 1.0,
+                            z: 0.0,
+                        },
+                    ]),
+                    text: String::new(),
+                    style: AnnotationStyle::default(),
+                    created_unix_ms: 0,
+                    modified_unix_ms: 0,
+                    anchor: None,
+                    precision: Precision::Analytic,
+                }),
+            )],
+        )
+        .unwrap();
+        db
+    }
+
+    #[test]
+    fn disabling_the_selection_highlight_omits_the_selection_batch() {
+        use crate::selection::{model_ref, SelectionSet};
+        let db = db_with_line();
+        let mut controller = CadSceneController::default();
+        let layers = LayerOverrideSet::new();
+        let visibility = AnnotationVisibilitySet::new();
+        let hidden = OverlayInputs {
+            selection: SelectionSet::from_refs([model_ref(
+                DocumentId(73),
+                cad_domain::EntityId(1),
+            )]),
+            visibility: OverlayVisibility {
+                axes: false,
+                grid: false,
+                selection_highlight: false,
+                ..OverlayVisibility::default()
+            },
+            ..OverlayInputs::default()
+        };
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                None,
+                &visibility,
+                &hidden,
+            )
+            .unwrap();
+        assert!(
+            controller
+                .ready
+                .as_ref()
+                .unwrap()
+                .highlight
+                .added
+                .is_empty(),
+            "a non-empty selection with selection_highlight off must draw nothing"
+        );
+    }
+
+    #[test]
+    fn disabling_annotations_omits_the_committed_overlay_but_keeps_the_base() {
+        let db = db_with_line();
+        let annotations = annotations_with_leader();
+        let mut controller = CadSceneController::default();
+        let layers = LayerOverrideSet::new();
+        let visibility = AnnotationVisibilitySet::new();
+        let on = overlays_without_reference();
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                Some(&annotations),
+                &visibility,
+                &on,
+            )
+            .unwrap();
+        let first = controller.ready.as_ref().unwrap();
+        assert!(!first.overlay.added.is_empty(), "leader must draw when on");
+        let base = first.base.clone();
+        let base_revision = first.base_revision;
+
+        let off = OverlayInputs {
+            visibility: OverlayVisibility {
+                axes: false,
+                grid: false,
+                annotations: false,
+                ..OverlayVisibility::default()
+            },
+            ..OverlayInputs::default()
+        };
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                Some(&annotations),
+                &visibility,
+                &off,
+            )
+            .unwrap();
+        let after = controller.ready.as_ref().unwrap();
+        assert!(
+            Arc::ptr_eq(&base, &after.base),
+            "toggling annotations must not rebuild the base drawing"
+        );
+        assert_eq!(after.base_revision, base_revision);
+        assert!(
+            after.overlay.added.is_empty(),
+            "annotations off must draw no committed overlay"
+        );
+    }
+
+    #[test]
+    fn axes_and_grid_appear_only_when_enabled_and_keep_the_base() {
+        let db = db_with_line();
+        let mut controller = CadSceneController::default();
+        let layers = LayerOverrideSet::new();
+        let visibility = AnnotationVisibilitySet::new();
+        let off = overlays_without_reference();
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                None,
+                &visibility,
+                &off,
+            )
+            .unwrap();
+        let base = controller.ready.as_ref().unwrap().base.clone();
+        assert!(controller
+            .ready
+            .as_ref()
+            .unwrap()
+            .highlight
+            .added
+            .is_empty());
+
+        let on = OverlayInputs {
+            visibility: OverlayVisibility {
+                selection_highlight: false,
+                ..OverlayVisibility::default()
+            },
+            ..OverlayInputs::default()
+        };
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                None,
+                &visibility,
+                &on,
+            )
+            .unwrap();
+        let after = controller.ready.as_ref().unwrap();
+        assert!(
+            Arc::ptr_eq(&base, &after.base),
+            "reference overlays must not rebuild the base drawing"
+        );
+        assert!(!after.highlight.added.is_empty());
+        assert!(after
+            .highlight
+            .added
+            .iter()
+            .all(|b| b.draw_order > 0 && b.draw_order < 900_000));
+        assert!(after
+            .highlight
+            .added
+            .iter()
+            .any(|b| b.draw_order == AXES_GRID_DRAW_ORDER));
+    }
+
+    #[test]
+    fn axes_without_bounds_report_a_diagnostic_instead_of_pretending() {
+        let db = DrawingDatabaseBuilder::new(DatabaseId(9)).finish().unwrap();
+        let mut controller = CadSceneController::default();
+        let layers = LayerOverrideSet::new();
+        let visibility = AnnotationVisibilitySet::new();
+        let on = OverlayInputs {
+            visibility: OverlayVisibility {
+                selection_highlight: false,
+                ..OverlayVisibility::default()
+            },
+            ..OverlayInputs::default()
+        };
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                None,
+                &visibility,
+                &on,
+            )
+            .unwrap();
+        let ready = controller.ready.as_ref().unwrap();
+        assert!(ready.highlight.added.is_empty());
+        assert!(ready
+            .highlight_diagnostics
+            .iter()
+            .any(|d| d.code == "overlay.bounds-unavailable"));
+        assert!(matches!(
+            ready.highlight_completeness,
+            cad_domain::Completeness::Partial(_)
+        ));
     }
 }

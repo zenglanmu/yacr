@@ -212,6 +212,7 @@ pub(crate) fn push_panel_state(
     if let Some(view) = view.borrow().as_ref() {
         let overrides = controller.borrow().session.layer_overrides.clone();
         view.set_layer_overrides(overrides);
+        view.set_overlay_visibility(handle.effective_config().view.overlays.into());
         // Selection → highlight overlay; empty selection clears it. The preview
         // setters take `None` when no tool is running, which cancels the overlay
         // instead of leaving a stale one (docs/ui.md §2).

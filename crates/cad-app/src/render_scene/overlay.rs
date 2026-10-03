@@ -48,6 +48,7 @@ use cad_scene::{HighlightOptions, HighlightScene, RenderBatch, RenderTopology};
 use crate::annotation_tool::{AnnotationPreview, AnnotationToolKind};
 use crate::measure_tool::MeasurementPreview;
 use crate::selection::SelectionSet;
+use crate::viewer_config::OverlayVisibility;
 
 /// `draw_order` of the first tool-preview batch.
 ///
@@ -55,6 +56,26 @@ use crate::selection::SelectionSet;
 /// highlight (`HIGHLIGHT_DRAW_ORDER`, `900_000`), so the live tool feedback is
 /// never hidden by markup while the user is drawing.
 pub const PREVIEW_DRAW_ORDER: i64 = 2_000_000;
+
+/// `draw_order` of the world-space axes and grid reference overlays.
+///
+/// Below the selection highlight (`HIGHLIGHT_DRAW_ORDER`, `900_000`) so a
+/// selection and committed markup always read above the reference grid, and
+/// above the base drawing (`0`).
+pub const AXES_GRID_DRAW_ORDER: i64 = 800_000;
+
+/// Safety cap on the total number of grid line segments in one batch.
+///
+/// The nice-step chooser targets roughly ten divisions per axis, but a
+/// pathological extent could still ask for far more. The generator samples the
+/// grid down to at most this many segments so the overlay batch stays bounded;
+/// this is a guard, not the normal spacing.
+pub const GRID_MAX_LINES: usize = 400;
+
+/// Colour of the world X/Y axes.
+pub const AXES_COLOR: [f32; 3] = [0.65, 0.67, 0.72];
+/// Colour of the reference grid, deliberately dimmer than the axes.
+pub const GRID_COLOR: [f32; 3] = [0.42, 0.45, 0.50];
 
 /// Default half-extent of a point marker cross, in world units.
 ///
@@ -97,6 +118,10 @@ pub struct OverlayInputs {
     pub selection: SelectionSet,
     pub measurement: Option<MeasurementPreview>,
     pub annotation: Option<AnnotationPreview>,
+    /// Which derived overlays the host wants drawn. Defaults to all-on
+    /// ([`OverlayVisibility::default`]) so a caller that never manages overlay
+    /// visibility still gets the historical behavior.
+    pub visibility: OverlayVisibility,
 }
 
 impl OverlayInputs {
@@ -144,7 +169,7 @@ impl VisualOverlay {
         self
     }
 
-    fn partial(&mut self, code: &'static str, message: String) {
+    pub(crate) fn partial(&mut self, code: &'static str, message: String) {
         self.diagnostics.push(Diagnostic {
             object: None,
             code: code.into(),
@@ -199,6 +224,13 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
             .as_ref()
             .map(|p| (p.points.as_slice(), p.cursor)),
     );
+    // Visibility is part of the inputs: turning an overlay off must rebuild the
+    // transient overlay even when the selection and previews are unchanged.
+    inputs.visibility.axes.hash(&mut hasher);
+    inputs.visibility.grid.hash(&mut hasher);
+    inputs.visibility.selection_highlight.hash(&mut hasher);
+    inputs.visibility.snap_hints.hash(&mut hasher);
+    inputs.visibility.annotations.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -232,6 +264,146 @@ fn hash_point<H: std::hash::Hasher>(hasher: &mut H, point: Point3) {
     point.x.to_bits().hash(hasher);
     point.y.to_bits().hash(hasher);
     point.z.to_bits().hash(hasher);
+}
+
+/// Build the world-space X/Y axes overlay for `bounds`.
+///
+/// `bounds` is the drawing's model-space `(min, max)` from
+/// [`cad_db::DrawingDatabase::bounds`]. Both axes are one `Lines` batch of two
+/// segments on the `z = 0` work plane: the X axis at `y = 0` spanning the
+/// bounds' x range and the Y axis at `x = 0` spanning the bounds' y range. The
+/// axes are reference geometry and draw below the selection highlight.
+pub fn axes_overlay(bounds: (Point3, Point3), document: DocumentId) -> VisualOverlay {
+    let (min, max) = bounds;
+    let points = vec![
+        Point3 {
+            x: min.x,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: max.x,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 0.0,
+            y: min.y,
+            z: 0.0,
+        },
+        Point3 {
+            x: 0.0,
+            y: max.y,
+            z: 0.0,
+        },
+    ];
+    let mut out = VisualOverlay::default();
+    if let Some(batch) = line_batch(
+        &points,
+        AXES_COLOR,
+        document,
+        AXES_GRID_DRAW_ORDER + 1,
+        "overlay.axes",
+    ) {
+        out.batches.push(batch);
+    }
+    out
+}
+
+/// Build the world-space reference grid overlay for `bounds`.
+///
+/// Grid lines are evenly spaced at a power-of-ten step chosen from each axis'
+/// extent ([`grid_step`]); the whole grid is one `Lines` batch whose consecutive
+/// vertex pairs are the individual segments. The per-axis line count is capped
+/// by [`GRID_MAX_LINES`] so a pathological extent cannot grow the batch without
+/// bound. Like the axes, the grid draws below the selection highlight.
+pub fn grid_overlay(bounds: (Point3, Point3), document: DocumentId) -> VisualOverlay {
+    let (min, max) = bounds;
+    let per_axis = GRID_MAX_LINES / 2;
+    let xs = grid_positions(min.x, max.x, grid_step(max.x - min.x), per_axis);
+    let ys = grid_positions(min.y, max.y, grid_step(max.y - min.y), per_axis);
+    let mut points: Vec<Point3> = Vec::with_capacity((xs.len() + ys.len()) * 2);
+    for x in xs {
+        points.push(Point3 {
+            x,
+            y: min.y,
+            z: 0.0,
+        });
+        points.push(Point3 {
+            x,
+            y: max.y,
+            z: 0.0,
+        });
+    }
+    for y in ys {
+        points.push(Point3 {
+            x: min.x,
+            y,
+            z: 0.0,
+        });
+        points.push(Point3 {
+            x: max.x,
+            y,
+            z: 0.0,
+        });
+    }
+    let mut out = VisualOverlay::default();
+    if let Some(batch) = line_batch(
+        &points,
+        GRID_COLOR,
+        document,
+        AXES_GRID_DRAW_ORDER,
+        "overlay.grid",
+    ) {
+        out.batches.push(batch);
+    }
+    out
+}
+
+/// Pick a power-of-ten grid step with roughly ten divisions across `extent`.
+///
+/// A non-finite or degenerate extent falls back to `1.0`; the caller's count cap
+/// bounds the result regardless.
+fn grid_step(extent: f64) -> f64 {
+    if !extent.is_finite() || extent <= 0.0 {
+        return 1.0;
+    }
+    // ~15 divisions keep a grid readable without crowding.
+    let raw = extent / 15.0;
+    let magnitude = 10f64.powf(raw.log10().round());
+    if magnitude.is_finite() && magnitude > 0.0 {
+        magnitude
+    } else {
+        1.0
+    }
+}
+
+/// The multiples of `step` inside `[min, max]`, capped at `cap` entries.
+///
+/// When the raw count exceeds `cap`, every `stride`-th multiple is kept so the
+/// grid still spans the whole range instead of shrinking into one corner.
+fn grid_positions(min: f64, max: f64, step: f64, cap: usize) -> Vec<f64> {
+    let mut out = Vec::new();
+    if cap == 0
+        || !(min.is_finite() && max.is_finite() && step.is_finite())
+        || step <= 0.0
+        || max <= min
+    {
+        return out;
+    }
+    let start = (min / step).ceil();
+    let end = (max / step).floor();
+    if !(start.is_finite() && end.is_finite()) || end < start {
+        return out;
+    }
+    let count = (end - start + 1.0) as usize;
+    let stride = count.div_ceil(cap).max(1);
+    let mut index = start;
+    while index <= end && out.len() < cap {
+        out.push(index * step);
+        index += stride as f64;
+    }
+    out
 }
 
 /// Build the selection highlight overlay for `selection`.
@@ -361,18 +533,28 @@ fn representation_for_item(
 /// The preview is pure: it only reads the captured points, the live cursor and
 /// (for rectangle/ellipse annotations) the kind. It never commits anything to
 /// the database.
+///
+/// `snap_hints` gates the axis-aligned point crosses only. They are the current
+/// cursor/snap markers, so a host that turned `view.overlays.snapHints` off
+/// still gets the rubber-band chains and dragged shapes, just without the
+/// crosses.
 pub fn preview_overlay(
     measurement: Option<&MeasurementPreview>,
     annotation: Option<&AnnotationPreview>,
     document: DocumentId,
+    snap_hints: bool,
     options: &PreviewOptions,
 ) -> VisualOverlay {
     let mut out = VisualOverlay::default();
     if let Some(preview) = measurement {
-        out.merge(measurement_preview_overlay(preview, document, options));
+        out.merge(measurement_preview_overlay(
+            preview, document, snap_hints, options,
+        ));
     }
     if let Some(preview) = annotation {
-        out.merge(annotation_preview_overlay(preview, document, options));
+        out.merge(annotation_preview_overlay(
+            preview, document, snap_hints, options,
+        ));
     }
     out
 }
@@ -392,6 +574,7 @@ fn preview_chain(points: &[Point3], cursor: Option<Point3>) -> Vec<Point3> {
 fn measurement_preview_overlay(
     preview: &MeasurementPreview,
     document: DocumentId,
+    snap_hints: bool,
     options: &PreviewOptions,
 ) -> VisualOverlay {
     let mut out = VisualOverlay::default();
@@ -411,16 +594,18 @@ fn measurement_preview_overlay(
             order += 1;
         }
     }
-    let markers = marker_batch(
-        &preview.points,
-        options.marker_size,
-        MEASUREMENT_PREVIEW_COLOR,
-        document,
-        order,
-        "measurement.preview",
-    );
-    if let Some(batch) = markers {
-        out.batches.push(batch);
+    if snap_hints {
+        let markers = marker_batch(
+            &preview.points,
+            options.marker_size,
+            MEASUREMENT_PREVIEW_COLOR,
+            document,
+            order,
+            "measurement.preview",
+        );
+        if let Some(batch) = markers {
+            out.batches.push(batch);
+        }
     }
     out
 }
@@ -428,6 +613,7 @@ fn measurement_preview_overlay(
 fn annotation_preview_overlay(
     preview: &AnnotationPreview,
     document: DocumentId,
+    snap_hints: bool,
     options: &PreviewOptions,
 ) -> VisualOverlay {
     let mut out = VisualOverlay::default();
@@ -469,24 +655,34 @@ fn annotation_preview_overlay(
         }
     }
 
-    if let Some(batch) = marker_batch(
-        &preview.points,
-        options.marker_size,
-        ANNOTATION_PREVIEW_COLOR,
-        document,
-        order,
-        "annotation.preview",
-    ) {
-        out.batches.push(batch);
+    if snap_hints {
+        if let Some(batch) = marker_batch(
+            &preview.points,
+            options.marker_size,
+            ANNOTATION_PREVIEW_COLOR,
+            document,
+            order,
+            "annotation.preview",
+        ) {
+            out.batches.push(batch);
+        }
     }
 
     // Text placement is the one kind with no line geometry: explain the marker
-    // so a host is not surprised by a points-only preview.
+    // so a host is not surprised by a points-only preview. When snap hints are
+    // off the marker is suppressed, so say that instead of claiming a draw.
     if preview.kind == AnnotationToolKind::Text && !preview.points.is_empty() {
-        out.partial(
-            "preview.text-marker-only",
-            "text preview is a point marker; glyphs are shaped on commit".into(),
-        );
+        if snap_hints {
+            out.partial(
+                "preview.text-marker-only",
+                "text preview is a point marker; glyphs are shaped on commit".into(),
+            );
+        } else {
+            out.partial(
+                "preview.text-marker-suppressed",
+                "text preview point marker hidden by view.overlays.snapHints".into(),
+            );
+        }
     }
     out
 }
@@ -871,7 +1067,7 @@ mod tests {
 
     #[test]
     fn empty_preview_yields_no_batches() {
-        let overlay = preview_overlay(None, None, DocumentId(1), &PreviewOptions::default());
+        let overlay = preview_overlay(None, None, DocumentId(1), true, &PreviewOptions::default());
         assert!(overlay.is_empty());
     }
 
@@ -888,6 +1084,7 @@ mod tests {
             Some(&preview),
             None,
             DocumentId(1),
+            true,
             &PreviewOptions::default(),
         );
         // One polyline batch (3 vertices -> 2 segments) + one marker batch.
@@ -913,6 +1110,7 @@ mod tests {
             Some(&preview),
             None,
             DocumentId(1),
+            true,
             &PreviewOptions::default(),
         );
         // Chain is [captured, cursor] -> 2 vertices; plus the captured marker.
@@ -934,10 +1132,12 @@ mod tests {
             Some(&preview),
             None,
             DocumentId(1),
+            true,
             &PreviewOptions::default(),
         );
         assert!(!active.is_empty());
-        let cancelled = preview_overlay(None, None, DocumentId(1), &PreviewOptions::default());
+        let cancelled =
+            preview_overlay(None, None, DocumentId(1), true, &PreviewOptions::default());
         assert!(cancelled.is_empty());
     }
 
@@ -955,6 +1155,7 @@ mod tests {
             None,
             Some(&preview),
             DocumentId(1),
+            true,
             &PreviewOptions::default(),
         );
         let loop_batch = &overlay.batches[0];
@@ -977,6 +1178,7 @@ mod tests {
             None,
             Some(&preview),
             DocumentId(1),
+            true,
             &PreviewOptions::default(),
         );
         let batch = &overlay.batches[0];
@@ -1007,6 +1209,7 @@ mod tests {
             None,
             Some(&preview),
             DocumentId(1),
+            true,
             &PreviewOptions::default(),
         );
         let loop_batch = &overlay.batches[0];
@@ -1039,5 +1242,125 @@ mod tests {
         assert_ne!(no_cursor, overlay_fingerprint(&b));
         // Rebuilding with identical inputs is stable.
         assert_eq!(overlay_fingerprint(&b), overlay_fingerprint(&b));
+    }
+
+    #[test]
+    fn overlay_fingerprint_tracks_each_visibility_flag() {
+        let baseline = overlay_fingerprint(&OverlayInputs::default());
+        let flips: [fn(&mut OverlayVisibility); 5] = [
+            |v| v.axes = false,
+            |v| v.grid = false,
+            |v| v.selection_highlight = false,
+            |v| v.snap_hints = false,
+            |v| v.annotations = false,
+        ];
+        for flip in flips {
+            let mut inputs = OverlayInputs::default();
+            flip(&mut inputs.visibility);
+            assert_ne!(
+                baseline,
+                overlay_fingerprint(&inputs),
+                "flipping a visibility flag must invalidate the overlay"
+            );
+        }
+    }
+
+    #[test]
+    fn axes_overlay_draws_two_origin_lines_below_the_highlight() {
+        let overlay = axes_overlay((p(-2.0, -3.0), p(4.0, 5.0)), DocumentId(1));
+        assert_eq!(overlay.drawn(), 1);
+        let batch = &overlay.batches[0];
+        assert_eq!(batch.topology, RenderTopology::Lines);
+        // Two segments: X axis (-2,0)->(4,0), then Y axis (0,-3)->(0,5).
+        assert_eq!(batch.vertices.len(), 4);
+        assert_eq!(batch.local_origin, p(-2.0, 0.0));
+        assert_eq!(batch.vertices[0], [0.0, 0.0, 0.0]);
+        assert_eq!(batch.vertices[1], [6.0, 0.0, 0.0]);
+        assert_eq!(batch.vertices[2], [2.0, -3.0, 0.0]);
+        assert_eq!(batch.vertices[3], [2.0, 5.0, 0.0]);
+        assert_eq!(batch.color, AXES_COLOR);
+        assert!(batch.draw_order < 900_000);
+        assert!(!batch.color_unresolved);
+    }
+
+    #[test]
+    fn grid_overlay_is_one_bounded_batch_spanning_the_bounds() {
+        let overlay = grid_overlay((p(-50.0, -50.0), p(50.0, 50.0)), DocumentId(1));
+        assert_eq!(overlay.drawn(), 1);
+        let batch = &overlay.batches[0];
+        assert!(!batch.vertices.is_empty());
+        assert_eq!(batch.vertices.len() % 2, 0);
+        assert!(batch.vertices.len() / 2 <= GRID_MAX_LINES);
+        assert_eq!(batch.color, GRID_COLOR);
+        assert!(batch.draw_order < 900_000);
+    }
+
+    #[test]
+    fn grid_positions_caps_a_dense_axis_without_shrinking_it() {
+        let positions = grid_positions(0.0, 1000.0, 0.001, 10);
+        assert_eq!(positions.len(), 10);
+        assert_eq!(positions[0], 0.0);
+        assert!(
+            positions.last().copied().unwrap() > 900.0,
+            "the cap samples across the whole range, not just the corner"
+        );
+    }
+
+    #[test]
+    fn snap_hints_false_suppresses_measurement_markers_but_keeps_the_chain() {
+        let preview = MeasurementPreview {
+            kind: crate::measure_tool::MeasurementToolKind::Distance,
+            points: vec![p(0.0, 0.0), p(1.0, 0.0)],
+            cursor: None,
+            remaining: 0,
+            ready: true,
+        };
+        let with = preview_overlay(
+            Some(&preview),
+            None,
+            DocumentId(1),
+            true,
+            &PreviewOptions::default(),
+        );
+        // Rubber-band chain + point-marker crosses.
+        assert_eq!(with.drawn(), 2);
+        let without = preview_overlay(
+            Some(&preview),
+            None,
+            DocumentId(1),
+            false,
+            &PreviewOptions::default(),
+        );
+        // The chain stays; only the cursor/snap crosses disappear.
+        assert_eq!(without.drawn(), 1);
+        assert_eq!(without.batches[0].topology, RenderTopology::Lines);
+    }
+
+    #[test]
+    fn snap_hints_false_suppresses_annotation_markers_but_keeps_the_stroke() {
+        let preview = AnnotationPreview {
+            kind: AnnotationToolKind::Leader,
+            points: vec![p(0.0, 0.0), p(1.0, 0.0)],
+            cursor: None,
+            remaining: 0,
+            requires_text: false,
+            text_supplied: false,
+        };
+        let with = preview_overlay(
+            None,
+            Some(&preview),
+            DocumentId(1),
+            true,
+            &PreviewOptions::default(),
+        );
+        assert_eq!(with.drawn(), 2);
+        let without = preview_overlay(
+            None,
+            Some(&preview),
+            DocumentId(1),
+            false,
+            &PreviewOptions::default(),
+        );
+        assert_eq!(without.drawn(), 1);
     }
 }

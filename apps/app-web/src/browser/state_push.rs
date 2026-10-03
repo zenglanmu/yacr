@@ -190,6 +190,7 @@ pub(super) fn push_panel_state(
     // selection or idle tool clears the overlay with the explicit empty value.
     if let Some(view) = view.borrow().as_ref() {
         view.sync_drawing(controller.drawing());
+        view.set_overlay_visibility(handle.effective_config().view.overlays.into());
         let overlay = derive_overlay_push(&controller);
         view.set_selection_highlight(overlay.selection);
         view.set_measurement_preview(overlay.measurement);
