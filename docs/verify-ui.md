@@ -61,7 +61,10 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
    外观与命令面（对应用户“UI 匹配 AutoCAD 风格 + 关注其它操作”）：
    **AutoCAD 深色外观像素检查**（标题条/Ribbon 标签/侧栏/画布平均亮度必须为深色）、
    命令输入区驱动真实操作（`TOOLS`/`PANELS` 开关、`LINE`+`ESC`、`CIRCLE` 未取点
-   `CONFIRM` 显式拒绝且保留捕获、`MOVE` 无选择显式拒绝、未知命令显式报错、`FIT`）。
+   `CONFIRM` 显式拒绝且保留捕获、`MOVE` 无选择显式拒绝、未知命令显式报错、`FIT`）；
+   **`ESC` 必须结束当前活动命令**（测量/批注/绘制/平移），`CONFIRM` 同理作用于
+   当前命令，而不仅限于绘制捕获（AutoCAD 约定，回归见
+   `command_line_confirms_or_cancels_whatever_tool_is_active`）。
 
    注意：合成 demo 未加载宿主字体，`AnnotationGeometry::Text` 在无字体引擎时显式
    `annotation.text_unshaped` 且不绘制；`Measurement` 批注按设计不进叠加层。因此显隐

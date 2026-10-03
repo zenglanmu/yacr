@@ -18,6 +18,14 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**verify-ui 循环轮 C：命令面 ESC/CONFIRM 作用于当前命令（本轮）**：按 AutoCAD 约定修复
+命令输入区：`CANCEL`/`ESC` 此前只取消绘制捕获，现在按活动状态依次取消测量/批注/绘制并
+退出平移；`CONFIRM` 也按活动状态作用于测量/批注/绘制，而不是只确认绘制。新增
+`command_line_confirms_or_cancels_whatever_tool_is_active` 源码接线契约，并在
+`verify_ui.rs` 场景加入“开启测量/批注/平移后 ESC 必须结束”的断言。`cad-ui-slint` 单元
+80 passed、`verify_ui` 场景通过。
+
+
 **verify-ui 循环轮 B：真实图纸操作 + 选择缺陷修复（本轮）**：新增
 `apps/app-linux/tests/verify_ui_drawing.rs`（`scripts/verify-ui.sh` 的 `ui-drawing`
 层），用已提交开源 fixture `fixtures/dxf/qcad-examples/entities.dxf` 真实打开后执行：

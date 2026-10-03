@@ -685,6 +685,28 @@ fn command_line_has_no_editing_placeholder_and_knows_draw_words() {
 }
 
 #[test]
+fn command_line_confirms_or_cancels_whatever_tool_is_active() {
+    // AutoCAD convention: ESC/CONFIRM must act on the current command, not only
+    // a draw/edit capture. Guard the wiring against a regression to draw-only.
+    let source = include_str!("command_line.rs");
+    for marker in [
+        "get_measurement_active",
+        "invoke_confirm_measurement_requested",
+        "invoke_cancel_measurement_requested",
+        "get_annotation_tool_active",
+        "invoke_confirm_annotation_requested",
+        "invoke_cancel_annotation_requested",
+        "get_draw_tool_active",
+        "set_pan_active",
+    ] {
+        assert!(
+            source.contains(marker),
+            "command line must handle {marker} for the active tool"
+        );
+    }
+}
+
+#[test]
 fn draw_kind_labels_and_errors_resolve_in_both_locales() {
     for messages in [
         MessageSource::for_locale(Locale::ZhCn),

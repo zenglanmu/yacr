@@ -457,6 +457,26 @@ fn verify_ui_fixed_scenario_replay() {
     ui.invoke_command_submitted("FIT".into());
     assert!(!frame(&app).is_empty(), "FIT must leave a rendered frame");
 
+    // --- AutoCAD convention: ESC ends whatever command is active -----------
+    ui.invoke_measure_kind_selected(text("measure.kind.polyline").into());
+    assert!(ui.get_measurement_active());
+    ui.invoke_command_submitted("ESC".into());
+    assert!(
+        !ui.get_measurement_active(),
+        "ESC must cancel an active measurement"
+    );
+    ui.invoke_annotation_kind_selected(text("annotation.kind.rectangle").into());
+    assert!(ui.get_annotation_tool_active());
+    ui.invoke_command_submitted("ESC".into());
+    assert!(
+        !ui.get_annotation_tool_active(),
+        "ESC must cancel an active annotation tool"
+    );
+    ui.invoke_pan_requested();
+    assert!(ui.get_pan_active());
+    ui.invoke_command_submitted("ESC".into());
+    assert!(!ui.get_pan_active(), "ESC must leave pan mode");
+
     // --- resize matrix: canvas stays inside the window ----------------------
     for (name, size) in [
         ("08-compact-1000x700", [1000.0, 700.0]),

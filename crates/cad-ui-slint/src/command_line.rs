@@ -22,8 +22,29 @@ pub(crate) fn connect(ui: &YacrWindow, messages: Rc<RefCell<MessageSource>>) {
             "CIRCLE" | "C" => ui.invoke_begin_draw_tool("circle".into()),
             "MOVE" | "M" => ui.invoke_begin_draw_tool("move".into()),
             "TRIM" | "TR" => ui.invoke_begin_draw_tool("trim".into()),
-            "CONFIRM" => ui.invoke_confirm_draw_requested(),
-            "CANCEL" | "ESC" => ui.invoke_cancel_draw_requested(),
+            // AutoCAD convention: CONFIRM/ENTER and ESC act on whatever command
+            // is currently active, not only a draw/edit capture.
+            "CONFIRM" => {
+                if ui.get_measurement_active() {
+                    ui.invoke_confirm_measurement_requested();
+                } else if ui.get_annotation_tool_active() {
+                    ui.invoke_confirm_annotation_requested();
+                } else {
+                    ui.invoke_confirm_draw_requested();
+                }
+            }
+            "CANCEL" | "ESC" => {
+                if ui.get_measurement_active() {
+                    ui.invoke_cancel_measurement_requested();
+                }
+                if ui.get_annotation_tool_active() {
+                    ui.invoke_cancel_annotation_requested();
+                }
+                if ui.get_draw_tool_active() {
+                    ui.invoke_cancel_draw_requested();
+                }
+                ui.set_pan_active(false);
+            }
             "TOOLS" | "RIBBON" => {
                 if ui.get_phone_shell() {
                     ui.set_tools_open(!ui.get_tools_open());
