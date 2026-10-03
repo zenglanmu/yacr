@@ -11,6 +11,7 @@ use std::{
     sync::Arc,
 };
 
+pub mod config_file;
 mod file_picker;
 mod input;
 mod state;
@@ -28,6 +29,10 @@ pub struct LinuxOptions {
     pub drawing: Option<PathBuf>,
     pub annotation_export: Option<PathBuf>,
     pub annotation_import: Option<PathBuf>,
+    /// Full host `ViewerConfig` file; `None` uses the XDG default.
+    pub config: Option<PathBuf>,
+    /// Projected user-preference file; `None` uses the XDG default.
+    pub preferences: Option<PathBuf>,
     pub size: [f64; 2],
     pub locale: String,
 }
@@ -40,6 +45,8 @@ impl Default for LinuxOptions {
             drawing: None,
             annotation_export: None,
             annotation_import: None,
+            config: None,
+            preferences: None,
             size: [1280.0, 800.0],
             locale: "zh-CN".into(),
         }
@@ -69,6 +76,8 @@ impl LinuxOptions {
                 "--open" => options.drawing = Some(value.into()),
                 "--export-annotations" => options.annotation_export = Some(value.into()),
                 "--import-annotations" => options.annotation_import = Some(value.into()),
+                "--config" => options.config = Some(value.into()),
+                "--preferences" => options.preferences = Some(value.into()),
                 "--locale" if matches!(value.as_str(), "zh-CN" | "en") => options.locale = value,
                 "--size" => {
                     let (w, h) = value.split_once('x').ok_or("size must be WIDTHxHEIGHT")?;
@@ -100,6 +109,8 @@ struct Runtime {
     handle: Rc<RefCell<Option<UiHandle>>>,
     view: Rc<RefCell<Option<CadView>>>,
     options: LinuxOptions,
+    /// Resolved user-preference path (`--preferences` or the XDG default).
+    preference_path: Option<PathBuf>,
     picker: FilePicker,
     pending_open: PendingOpen,
 }
@@ -263,6 +274,8 @@ pub struct LinuxApp {
     pub adapter: UiAdapter,
     runtime: Runtime,
     timer: slint::Timer,
+    /// Diagnostics from reading the config / preference files at startup.
+    startup_diagnostics: Vec<String>,
 }
 impl LinuxApp {
     pub fn new(options: LinuxOptions) -> CadResult<Self> {
@@ -271,6 +284,14 @@ impl LinuxApp {
     }
     /// Construct with a host-supplied chooser, including deterministic contract tests.
     pub fn new_with_file_picker(options: LinuxOptions, picker: FilePicker) -> CadResult<Self> {
+        let config_path = options
+            .config
+            .clone()
+            .or_else(config_file::default_config_path);
+        let preference_path = options
+            .preferences
+            .clone()
+            .or_else(config_file::default_preference_path);
         let controller = Rc::new(RefCell::new(HostController::with_demo_document(
             options.size,
         )?));
@@ -279,6 +300,7 @@ impl LinuxApp {
             handle: Rc::new(RefCell::new(None)),
             view: Rc::new(RefCell::new(None)),
             options: options.clone(),
+            preference_path: preference_path.clone(),
             picker,
             pending_open: Rc::new(RefCell::new(None)),
         };
@@ -305,6 +327,22 @@ impl LinuxApp {
         adapter.component().set_can_switch_backend(false);
         adapter.fit_window_to_logical(options.size, 1.0);
         *runtime.handle.borrow_mut() = Some(adapter.handle());
+        // Read the host config and user preference before the first state push;
+        // a malformed file is reported and never aborts startup.
+        let startup_diagnostics = {
+            let handles = runtime.handle.borrow();
+            match handles.as_ref() {
+                Some(handle) => config_file::load_startup(
+                    handle,
+                    config_path.as_deref(),
+                    preference_path.as_deref(),
+                ),
+                None => Vec::new(),
+            }
+        };
+        for diagnostic in &startup_diagnostics {
+            eprintln!("yacr-linux: {diagnostic}");
+        }
         runtime.metrics()?;
         if let Some(path) = &options.drawing {
             runtime.open_path(path)?;
@@ -339,6 +377,13 @@ impl LinuxApp {
             },
             &[],
         ))?;
+        // Surface the first startup problem on the status bar; the full list is
+        // logged above and retained for tests.
+        if let Some(diagnostic) = startup_diagnostics.first() {
+            adapter
+                .handle()
+                .set_status(runtime.message("linux.failed", &[("error", diagnostic)]))?;
+        }
         // Retain the timer: real desktop resize and drawer changes update content metrics without refitting.
         let timer = slint::Timer::default();
         let rt = runtime.clone();
@@ -363,7 +408,51 @@ impl LinuxApp {
             adapter,
             runtime,
             timer,
+            startup_diagnostics,
         })
+    }
+    /// Diagnostics from reading the host config / user preference at startup.
+    ///
+    /// Empty when both files were absent or applied cleanly. Retained so a host
+    /// (and its contract tests) can report exactly what was rejected.
+    pub fn startup_diagnostics(&self) -> &[String] {
+        &self.startup_diagnostics
+    }
+    /// Merge a host `ViewerConfig` patch through the shared store.
+    pub fn update_config_json(&self, text: &str) -> CadResult<()> {
+        let handle = self
+            .runtime
+            .handle
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(CadError::Cancelled)?;
+        handle
+            .update_config_json(text)
+            .map_err(|error| CadError::InvalidInput(error.to_string()))
+    }
+    /// Apply a host-allowed user preference, then persist the allowed projection.
+    ///
+    /// Mirrors the web host's call site: the projection is written after the
+    /// store accepts the patch (not from a `ConfigObserver`, which would re-borrow
+    /// the store while it is mutably borrowed).
+    pub fn apply_user_preference_json(&self, text: &str) -> CadResult<()> {
+        let handle = self
+            .runtime
+            .handle
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(CadError::Cancelled)?;
+        handle
+            .apply_user_preference_json(text)
+            .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+        match &self.runtime.preference_path {
+            Some(path) => config_file::persist_preference(&handle, path),
+            // No durable location was resolvable; the patch is still applied
+            // in memory and the caller can report the missing path.
+            None => Ok(()),
+        }
     }
     pub fn run(&self) -> CadResult<()> {
         let rt = self.runtime.clone();

@@ -1,7 +1,27 @@
 #![cfg(target_os = "linux")]
-use app_linux::{LinuxApp, LinuxOptions};
+use app_linux::{config_file, LinuxApp, LinuxOptions};
 use slint::ComponentHandle;
 use std::path::PathBuf;
+
+/// Install the process-global offscreen platform once; every test in this
+/// binary reuses it (`set_platform` rejects a second install).
+fn install_offscreen() {
+    use std::sync::OnceLock;
+    static PLATFORM: OnceLock<Result<(), String>> = OnceLock::new();
+    let result = PLATFORM
+        .get_or_init(|| cad_ui_slint::offscreen::install().map_err(|error| error.to_string()));
+    if let Err(error) = result {
+        panic!("offscreen platform install failed: {error}");
+    }
+}
+
+/// Unique scratch directory under the OS temp root, removed before use.
+fn temp_dir(name: &str) -> PathBuf {
+    let directory = std::env::temp_dir().join(format!("yacr-linux-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    directory
+}
 
 #[test]
 fn options_refuse_unknown_missing_and_invalid_values() {
@@ -36,7 +56,7 @@ fn options_refuse_unknown_missing_and_invalid_values() {
 
 #[test]
 fn real_linux_host_runs_commands_and_refuses_fake_file_success() {
-    cad_ui_slint::offscreen::install().unwrap();
+    install_offscreen();
     let directory = PathBuf::from(format!(
         "/tmp/opencode/yacr-linux-test-{}",
         std::process::id()
@@ -191,4 +211,172 @@ fn real_linux_host_runs_commands_and_refuses_fake_file_success() {
         invalid.is_err(),
         "missing DWG must not fall back to synthetic success"
     );
+}
+
+#[test]
+fn options_parse_config_and_preference_paths() {
+    let options = LinuxOptions::parse(
+        [
+            "--config",
+            "/tmp/config.json",
+            "--preferences",
+            "/tmp/preferences.json",
+        ]
+        .into_iter()
+        .map(String::from),
+    )
+    .unwrap();
+    assert_eq!(options.config, Some(PathBuf::from("/tmp/config.json")));
+    assert_eq!(
+        options.preferences,
+        Some(PathBuf::from("/tmp/preferences.json"))
+    );
+    for args in [vec!["--config"], vec!["--preferences"]] {
+        assert!(LinuxOptions::parse(args.into_iter().map(String::from)).is_err());
+    }
+    assert!(LinuxOptions::parse(["--invented", "value"].into_iter().map(String::from)).is_err());
+}
+
+#[test]
+fn config_dir_prefers_xdg_and_falls_back_to_home() {
+    let resolve = config_file::resolve_config_dir;
+    assert_eq!(
+        resolve(Some("/xdg"), Some("/home/user")),
+        Some(PathBuf::from("/xdg/yacr"))
+    );
+    assert_eq!(
+        resolve(None, Some("/home/user")),
+        Some(PathBuf::from("/home/user/.config/yacr"))
+    );
+    assert_eq!(
+        resolve(Some(""), Some("/home/user")),
+        Some(PathBuf::from("/home/user/.config/yacr"))
+    );
+    assert_eq!(
+        resolve(Some("/xdg"), None),
+        Some(PathBuf::from("/xdg/yacr"))
+    );
+    assert_eq!(resolve(Some(""), Some("")), None);
+    assert_eq!(resolve(None, None), None);
+}
+
+#[test]
+fn host_config_is_loaded_from_disk() {
+    install_offscreen();
+    let directory = temp_dir("config");
+    let config = directory.join("config.json");
+    std::fs::write(&config, r#"{"view":{"overlays":{"grid":false}}}"#).unwrap();
+    let app = LinuxApp::new(LinuxOptions {
+        config: Some(config),
+        preferences: Some(directory.join("preferences.json")),
+        ..LinuxOptions::default()
+    })
+    .unwrap();
+    assert!(
+        app.startup_diagnostics().is_empty(),
+        "{:?}",
+        app.startup_diagnostics()
+    );
+    assert!(
+        !app.adapter.handle().effective_config().view.overlays.grid,
+        "the host config file must be applied"
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn preferences_round_trip_through_disk() {
+    install_offscreen();
+    let directory = temp_dir("prefs");
+    let config = directory.join("config.json");
+    let preferences = directory.join("preferences.json");
+    let app = LinuxApp::new(LinuxOptions {
+        config: Some(config.clone()),
+        preferences: Some(preferences.clone()),
+        ..LinuxOptions::default()
+    })
+    .unwrap();
+    assert!(
+        app.startup_diagnostics().is_empty(),
+        "{:?}",
+        app.startup_diagnostics()
+    );
+    // The built-in host policy (mirroring the web host) allows this leaf;
+    // re-install it explicitly to exercise the host config patch path.
+    app.update_config_json(
+        r#"{"ui":{"userCustomization":{"allowedPaths":["ui.components.layerPanel.initiallyOpen"]}}}"#,
+    )
+    .unwrap();
+    app.apply_user_preference_json(
+        r#"{"ui":{"components":{"layerPanel":{"initiallyOpen":false}}}}"#,
+    )
+    .unwrap();
+    assert!(preferences.exists(), "allowed projection must be persisted");
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&preferences).unwrap()).unwrap();
+    assert_eq!(
+        stored["ui"]["components"]["layerPanel"]["initiallyOpen"],
+        serde_json::json!(false)
+    );
+
+    let reloaded = LinuxApp::new(LinuxOptions {
+        config,
+        preferences,
+        ..LinuxOptions::default()
+    })
+    .unwrap();
+    assert!(
+        reloaded.startup_diagnostics().is_empty(),
+        "{:?}",
+        reloaded.startup_diagnostics()
+    );
+    assert!(
+        !reloaded
+            .adapter
+            .handle()
+            .effective_config()
+            .ui
+            .components
+            .layer_panel
+            .initially_open,
+        "the reloaded host must reflect the stored preference"
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn malformed_preference_reports_and_keeps_defaults() {
+    install_offscreen();
+    let directory = temp_dir("malformed");
+    let preferences = directory.join("preferences.json");
+    std::fs::write(&preferences, "{not valid json").unwrap();
+    let app = LinuxApp::new(LinuxOptions {
+        config: Some(directory.join("config.json")),
+        preferences: Some(preferences.clone()),
+        ..LinuxOptions::default()
+    })
+    .unwrap();
+    assert!(
+        app.startup_diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.contains("preferences")),
+        "{:?}",
+        app.startup_diagnostics()
+    );
+    assert!(
+        app.adapter
+            .handle()
+            .effective_config()
+            .ui
+            .components
+            .layer_panel
+            .initially_open,
+        "a rejected preference must keep the built-in default"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&preferences).unwrap(),
+        "{not valid json",
+        "a rejected preference must not be rewritten"
+    );
+    let _ = std::fs::remove_dir_all(&directory);
 }
