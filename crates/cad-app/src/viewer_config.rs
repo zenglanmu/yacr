@@ -71,6 +71,20 @@ pub fn command_ids() -> &'static [&'static str] {
     COMMAND_IDS
 }
 
+/// How a configured ribbon command renders its icon and label.
+///
+/// `IconAndLabel` is the historical behavior and the default; a host opts into
+/// `IconOnly` or `LabelOnly` per ribbon group. The value is pure presentation
+/// data and never changes which command a click dispatches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RibbonCommandDisplay {
+    #[default]
+    IconAndLabel,
+    IconOnly,
+    LabelOnly,
+}
+
 /// A configured ribbon command after visibility resolution.
 ///
 /// Only commands whose effective `command_visibility` is true are present:
@@ -79,6 +93,8 @@ pub fn command_ids() -> &'static [&'static str] {
 pub struct ResolvedRibbonCommand {
     pub id: String,
     pub visible: bool,
+    /// Render mode inherited from the owning group.
+    pub display: RibbonCommandDisplay,
 }
 
 /// A configured ribbon group after visibility resolution.
@@ -138,6 +154,7 @@ pub fn resolve_ribbon(
                         .map(|id| ResolvedRibbonCommand {
                             id: id.clone(),
                             visible: true,
+                            display: group.display,
                         })
                         .collect(),
                 })
@@ -212,6 +229,9 @@ pub struct RibbonGroup {
     pub id: String,
     pub label: String,
     pub commands: Vec<String>,
+    /// How this group's commands render. Defaults to `iconAndLabel`, which is
+    /// exactly the pre-existing behavior.
+    pub display: RibbonCommandDisplay,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1820,5 +1840,58 @@ mod tests {
             .iter()
             .flat_map(|tab| &tab.groups)
             .all(|group| group.commands.is_empty()));
+    }
+
+    #[test]
+    fn ribbon_command_display_round_trips_and_reaches_the_resolved_model() {
+        // `/display` is camelCase in JSON; the default must be `iconAndLabel`.
+        for (json_display, expected) in [
+            (serde_json::Value::Null, RibbonCommandDisplay::IconAndLabel),
+            (json!("iconAndLabel"), RibbonCommandDisplay::IconAndLabel),
+            (json!("iconOnly"), RibbonCommandDisplay::IconOnly),
+            (json!("labelOnly"), RibbonCommandDisplay::LabelOnly),
+        ] {
+            let mut group = json!({
+                "id": "measure", "label": "ribbon.measure",
+                "commands": ["measure.distance", "measure.area"]
+            });
+            if !json_display.is_null() {
+                group["display"] = json_display;
+            }
+            let config: ViewerConfig = serde_json::from_value(json!({
+                "ui": { "components": { "ribbon": { "tabs": [
+                    { "id": "review", "label": "ribbon.review", "groups": [group] }
+                ] } } }
+            }))
+            .unwrap();
+            config.validate().unwrap();
+            // The value survives a serialize/deserialize round trip.
+            let roundtrip: ViewerConfig =
+                serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+            assert_eq!(roundtrip, config);
+            let resolved = resolve_ribbon(
+                &config,
+                &BTreeMap::from([
+                    ("measure.distance".to_string(), true),
+                    ("measure.area".to_string(), true),
+                ]),
+            );
+            let commands = &resolved.tabs[0].groups[0].commands;
+            assert_eq!(commands.len(), 2);
+            assert!(
+                commands.iter().all(|command| command.display == expected),
+                "display {json_display} should resolve to {expected:?}"
+            );
+        }
+        // An unknown display value is rejected by serde, never defaulted.
+        assert!(serde_json::from_value::<ViewerConfig>(json!({
+            "ui": { "components": { "ribbon": { "tabs": [
+                { "id": "review", "label": "ribbon.review", "groups": [
+                    { "id": "measure", "label": "ribbon.measure",
+                      "commands": ["measure.distance"], "display": "big" }
+                ] }
+            ] } } }
+        }))
+        .is_err());
     }
 }

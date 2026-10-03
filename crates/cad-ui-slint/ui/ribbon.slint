@@ -11,6 +11,16 @@ export component CadRibbon inherits Rectangle {
     in property <[string]> tabs;
     in property <[RibbonTabModel]> config-tabs;
     in property <bool> config-driven: false;
+    // Catalog label for the group overflow affordance ("more"). A host with
+    // custom tabs plumbs it through; the fallback keeps the built-in catalog.
+    in property <string> overflow-label;
+    // Index of the group whose overflow menu is open within the active tab,
+    // or -1 when none is open. A single property replaces per-group state,
+    // which Slint cannot hold across a `for` loop.
+    in-out property <int> overflow-open-group: -1;
+    // Host-independent cap on the command buttons a group shows before it
+    // collapses the remainder into the overflow menu.
+    property <int> max-commands: 6;
     in property <[string]> labels;
     in property <[string]> measurements;
     in property <[string]> annotations;
@@ -73,7 +83,7 @@ export component CadRibbon inherits Rectangle {
                     for tab-model[tab-index] in root.config-tabs : HorizontalBox {
                         visible: tab-index == root.config-tab-index;
                         alignment: start; spacing: 12px;
-                        for group in tab-model.groups : VerticalBox {
+                        for group[group-index] in tab-model.groups : VerticalBox {
                             alignment: start; spacing: 4px;
                             Text {
                                 text: group.label; color: CadTheme.muted; font-size: 12px;
@@ -83,10 +93,46 @@ export component CadRibbon inherits Rectangle {
                             // `visible` flag is kept on the row for completeness.
                             HorizontalBox {
                                 alignment: start; spacing: 4px;
-                                for command in group.commands : Button {
-                                    visible: command.visible;
-                                    text: command.label; symbol: command.icon; stacked: true;
+                                for command[command-index] in group.commands : Button {
+                                    // Cap the inline buttons; the remainder is
+                                    // reachable through the overflow menu below,
+                                    // never dropped.
+                                    visible: command.visible && command-index < root.max-commands;
+                                    // `display`: 0 = icon + label, 1 = icon only,
+                                    // 2 = label only. `icon-only` keeps the icon
+                                    // and suppresses text; an empty symbol with
+                                    // `stacked` keeps the text without an icon.
+                                    text: command.display == 1 ? "" : command.label;
+                                    symbol: command.display == 2 ? "" : command.icon;
+                                    icon-only: command.display == 1;
+                                    stacked: true;
                                     min-height: 76px;
+                                    clicked => { root.ribbon-command(command.id); }
+                                }
+                                // Overflow affordance only when the group really
+                                // has more commands than fit.
+                                if group.commands.length > root.max-commands : Button {
+                                    text: root.overflow-label; symbol: "▾";
+                                    stacked: true; min-height: 76px;
+                                    clicked => {
+                                        root.overflow-open-group =
+                                            root.overflow-open-group == group-index ? -1 : group-index;
+                                    }
+                                }
+                            }
+                            // Expanded overflow list: every command past the cap,
+                            // each dispatching the real command id. Inline rather
+                            // than a floating popup so the open state stays a
+                            // single per-ribbon index.
+                            if group.commands.length > root.max-commands
+                                && root.overflow-open-group == group-index : HorizontalBox {
+                                alignment: start; spacing: 4px;
+                                for command[command-index] in group.commands : Button {
+                                    visible: command.visible && command-index >= root.max-commands;
+                                    text: command.display == 1 ? "" : command.label;
+                                    symbol: command.display == 2 ? "" : command.icon;
+                                    icon-only: command.display == 1;
+                                    stacked: true; min-height: 76px;
                                     clicked => { root.ribbon-command(command.id); }
                                 }
                             }

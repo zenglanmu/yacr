@@ -210,6 +210,19 @@ pub(crate) fn ribbon_command_label_key(id: &str) -> &'static str {
     }
 }
 
+/// Map a resolved command display mode onto the documented Slint int constants:
+/// `0` = icon + label, `1` = icon only, `2` = label only.
+pub(crate) fn ribbon_command_display_code(
+    display: cad_app::viewer_config::RibbonCommandDisplay,
+) -> i32 {
+    use cad_app::viewer_config::RibbonCommandDisplay::*;
+    match display {
+        IconAndLabel => 0,
+        IconOnly => 1,
+        LabelOnly => 2,
+    }
+}
+
 /// Short icon token for a command id, matched against the shared `Button`
 /// symbol table. Unknown ids have no icon.
 pub(crate) fn ribbon_command_icon(id: &str) -> &'static str {
@@ -321,6 +334,7 @@ pub(crate) fn build_ribbon_config(
                                 .into(),
                             icon: ribbon_command_icon(&command.id).into(),
                             visible: command.visible,
+                            display: ribbon_command_display_code(command.display),
                         })
                         .collect();
                     RibbonGroupModel {
