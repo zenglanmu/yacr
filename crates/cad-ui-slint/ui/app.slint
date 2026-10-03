@@ -520,6 +520,30 @@ export component YacrWindow inherits Window {
                 if id == 12 { root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
             }
         }
+        // Phone/compact layout strip. The desktop tabs below are hidden on a
+        // phone, so the drawer (opened by the bottom "more" entry) must carry
+        // the same real `layout-rows` list: model space plus one button per
+        // pushed layout, with the active row checked. The list stays short to
+        // respect the drawer height budget; an explicit pushed empty label is
+        // shown when the host has no layouts yet.
+        if root.application-ui && root.phone-shell && root.tools-open && root.layouts-visible : Rectangle {
+            height: 52px; background: CadTheme.chrome;
+            ScrollView {
+                HorizontalBox {
+                    padding: 4px; spacing: 4px; alignment: start;
+                    ConceptButton { text: root.layout-model-space-label; checked: root.layout-active-index < 0;
+                        min-height: 44px; preferred-height: 44px; clicked => { root.layout-selected(-1); } }
+                    for row[index] in root.layout-rows : ConceptButton {
+                        text: row.name; checked: root.layout-active-index == index; enabled: row.supported;
+                        min-height: 44px; preferred-height: 44px; clicked => { root.layout-selected(index); }
+                    }
+                    if root.layout-rows.length == 0 : Text {
+                        vertical-alignment: center; color: CadTheme.muted;
+                        text: root.layout-empty-label; overflow: elide;
+                    }
+                }
+            }
+        }
         if root.application-ui && root.phone-shell : Rectangle {
             height: 76px; background: CadTheme.chrome;
             HorizontalBox {
