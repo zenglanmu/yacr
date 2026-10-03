@@ -25,8 +25,12 @@
 （`verify-ui.json`/`environment.json`/`logs`/`screenshots`）。**不安装 X11/Wayland**，
 offscreen 平台即虚拟窗口运行时；`environment.json` 如实记录 `xvfbAvailable=false` 与
 `realDevice=not-run`。新增 `apps/app-linux/tests/verify_ui.rs` 固定场景：测量取消不写库、
-距离自动完成并存批注、撤销重做、LINE 提交、文字批注需文字、图层覆盖恢复、布局/标准视图、
-**2D→3D→2D 合成帧逐像素无损往返**、canvas-only、中英切换、侧车导出回导、四尺寸矩阵。
+距离自动完成并存批注、撤销重做、LINE 提交、文字批注需文字、矩形批注两点自动提交、
+批注显隐/删除改变并恢复合成像素、**图层显隐改变且恢复合成像素**、布局/标准视图、
+真实 `WindowEvent` 滚轮缩放与左键拖动平移、**2D→3D→2D 合成帧逐像素无损往返**、
+canvas-only、中英切换、侧车导出回导、四尺寸矩阵。迭代中发现无字体时文字批注按设计
+不绘制、Measurement 批注不进叠加层，显隐断言改用不依赖字体的矩形批注，未把设计限制
+误判为缺陷。
 首次运行发现脚本预创建证据目录导致 `--headless` 正确拒绝覆盖（exit 17），已修复为不预建；
 场景初版误把“距离可确认”当契约，实际距离两点自动完成、`can_confirm` 只服务开放型工具，
 已改为分别覆盖两条路径。`verify-ui.sh` 全层通过（6 层 + 可选真实图纸层），

@@ -53,9 +53,14 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
    布局矩阵、canvas-only 预设、移动工具/图层面板、点击命中、`shell_geometry` 断言与截图。
 3. `scenario`：`apps/app-linux/tests/verify_ui.rs`。真实 `LinuxApp` 固定场景：
    测量（开放型可确认→取消不写库；距离两点自动完成→存为批注）、撤销/重做、
-   LINE 绘制提交、文字批注需先有文字、图层临时覆盖与恢复、布局与所有标准视图、
-   **2D→3D→2D 无损往返（合成帧逐像素相等）**、canvas-only 预设、中英切换、
-   侧车导出/回导、桌面/紧凑/移动/窄屏尺寸矩阵。
+   LINE 绘制提交、文字批注需先有文字、矩形批注两点自动提交、批注显隐改变且恢复
+   合成像素、按行删除、**图层显隐改变且恢复合成像素**、布局与所有标准视图、
+   真实 `WindowEvent` 滚轮缩放与左键拖动平移、**2D→3D→2D 无损往返（合成帧逐像素
+   相等）**、canvas-only 预设、中英切换、侧车导出/回导、桌面/紧凑/移动/窄屏尺寸矩阵。
+
+   注意：合成 demo 未加载宿主字体，`AnnotationGeometry::Text` 在无字体引擎时显式
+   `annotation.text_unshaped` 且不绘制；`Measurement` 批注按设计不进叠加层。因此显隐
+   像素断言使用不依赖字体的矩形批注，而不是把“文字没画”误判成显隐失效。
 4. `host-contracts`：`host_contracts`。命令/事务/文件选择器注入契约。
 5. `app-build` + `app-smoke`：构建并运行真实 `yacr-linux --headless`，产出
    `report.json` 与 PNG（导航像素变化断言）。

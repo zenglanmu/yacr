@@ -171,6 +171,47 @@ fn verify_ui_fixed_scenario_replay() {
     assert_eq!(ui.get_annotation_rows().row_count(), annotations_before + 2);
     shoot(&app, &dir, "04-text-annotation");
 
+    // Text needs a host font engine to draw, so add a font-independent
+    // drawable annotation (rectangle auto-commits after two picks) to prove the
+    // committed-annotation overlay really reacts to visibility.
+    ui.invoke_annotation_kind_selected(text("annotation.kind.rectangle").into());
+    assert!(ui.get_annotation_tool_active(), "RECTANGLE tool must start");
+    pick_pair(&app);
+    assert!(
+        !ui.get_annotation_tool_active(),
+        "a rectangle auto-commits once both corners are captured"
+    );
+    assert_eq!(ui.get_annotation_rows().row_count(), annotations_before + 3);
+    shoot(&app, &dir, "04b-rectangle-annotation");
+
+    // --- annotation visibility must change the overlay, and re-showing must
+    //     restore the exact pixels; delete must remove the row ---------------
+    let annotation_count = ui.get_annotation_rows().row_count();
+    let mut overlay_changed = false;
+    for index in 0..annotation_count {
+        let visible = frame(&app);
+        ui.invoke_annotation_visibility_toggled(index as i32, false);
+        if frame(&app) != visible {
+            overlay_changed = true;
+        }
+        ui.invoke_annotation_visibility_toggled(index as i32, true);
+        assert_eq!(
+            frame(&app),
+            visible,
+            "re-showing annotation {index} must restore the exact overlay"
+        );
+    }
+    assert!(
+        overlay_changed,
+        "hiding at least one drawn annotation must change the overlay pixels"
+    );
+    ui.invoke_annotation_delete_requested((annotation_count - 1) as i32);
+    assert_eq!(
+        ui.get_annotation_rows().row_count(),
+        annotation_count - 1,
+        "deleting a row must remove exactly one annotation"
+    );
+
     // --- layers: hiding a layer must change the composited scene, and
     //     restoring must bring the exact pixels back -------------------------
     let layer_count = ui.get_layer_rows().row_count();
@@ -210,6 +251,41 @@ fn verify_ui_fixed_scenario_replay() {
         ui.invoke_layout_selected(index as i32);
     }
     ui.invoke_layout_selected(-1);
+
+    // --- real pointer scroll and drag go through the host navigation path --
+    let (canvas, _) = app.adapter.handle().shell_geometry().unwrap();
+    let center = slint::LogicalPosition::new(
+        (canvas[0] + canvas[2] * 0.5) as f32,
+        (canvas[1] + canvas[3] * 0.5) as f32,
+    );
+    let before_zoom = frame(&app);
+    app.adapter
+        .window()
+        .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+            position: center,
+            delta_x: 0.0,
+            delta_y: -120.0,
+        });
+    let after_zoom = frame(&app);
+    assert_ne!(before_zoom, after_zoom, "scroll must zoom the CAD scene");
+    let to = slint::LogicalPosition::new(center.x + 40.0, center.y + 20.0);
+    {
+        let window = app.adapter.window();
+        window.dispatch_event(slint::platform::WindowEvent::PointerPressed {
+            position: center,
+            button: slint::platform::PointerEventButton::Left,
+        });
+        window.dispatch_event(slint::platform::WindowEvent::PointerMoved { position: to });
+        window.dispatch_event(slint::platform::WindowEvent::PointerReleased {
+            position: to,
+            button: slint::platform::PointerEventButton::Left,
+        });
+    }
+    assert_ne!(
+        after_zoom,
+        frame(&app),
+        "a left-button drag must pan the CAD scene"
+    );
 
     // --- view: a 2D -> 3D -> 2D toggle must round-trip losslessly ----------
     // (documented Switch2d3d invariant: the saved 2D camera is restored).
