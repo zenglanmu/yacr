@@ -814,6 +814,57 @@ fn config_chrome_properties_are_pushed_from_the_store() {
 }
 
 #[test]
+fn shell_exposes_status_bar_overlay_toggles() {
+    // The desktop status bar carries real interactive overlay toggles wired to
+    // the config funnel, not just the read-only `overlay-*` readouts.
+    assert!(
+        UI_DEFINITION.contains("callback overlay-toggled(string, bool)"),
+        "shell must expose the overlay-toggled callback"
+    );
+    for marker in [
+        "overlay-toggled(\"axes\"",
+        "overlay-toggled(\"grid\"",
+        "overlay-toggled(\"snapHints\"",
+        // The toggles bind their checked state to the effective overlay flags.
+        "checked: root.overlay-axes",
+        "checked: root.overlay-grid",
+        "checked: root.overlay-snap-hints",
+    ] {
+        assert!(
+            UI_DEFINITION.contains(marker),
+            "shell must expose status-bar overlay marker {marker}"
+        );
+    }
+}
+
+#[test]
+fn status_overlay_toggle_patch_updates_store_and_presentation() {
+    use cad_app::viewer_config::{UiPresentationModel, ViewerConfigStore};
+
+    // Grid starts off (AutoCAD convention); the toggle turns it on through the
+    // exact JSON patch the adapter merges into the store.
+    let mut store = ViewerConfigStore::default();
+    assert!(!store.effective().view.overlays.grid);
+
+    let patch = overlay_toggle_patch("grid", true).expect("grid is a known overlay");
+    store.update_config_json(&patch).unwrap();
+    assert!(store.effective().view.overlays.grid);
+    let p = UiPresentationModel::resolve(store.effective(), [1280.0, 800.0], [0.0; 4], false);
+    assert!(p.overlays.grid);
+
+    // Axes and snap hints flow through the same path and stay independent.
+    let patch = overlay_toggle_patch("axes", false).expect("axes is a known overlay");
+    store.update_config_json(&patch).unwrap();
+    let patch = overlay_toggle_patch("snapHints", false).expect("snapHints is a known overlay");
+    store.update_config_json(&patch).unwrap();
+    let p = UiPresentationModel::resolve(store.effective(), [1280.0, 800.0], [0.0; 4], false);
+    assert!(!p.overlays.axes && p.overlays.grid && !p.overlays.snap_hints);
+
+    // An unknown key is refused, never an invalid config write or a bypass.
+    assert!(overlay_toggle_patch("bogus", true).is_none());
+}
+
+#[test]
 fn shell_exposes_configured_ribbon_markers() {
     for marker in [
         "ribbon-config-tabs",
