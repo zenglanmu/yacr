@@ -1,8 +1,14 @@
-# yacr — Rust 工业 CAD 查看、测量与批注系统
+# yacr — Rust CAD 查看、测量与批注系统（开发中）
 
-依据 `CAD_IMPLEMENTATION_SPEC.md` v2.0 实现。架构为数据库驱动（`cad-db`：对象、
-事务、revision、ChangeSet），UI 使用 Slint，CAD 绘制使用 wgpu，DWG 解析使用未修改的
-acadrust 0.5.5。核心无平台依赖，可单独测试并用于 CLI。
+> **当前处于开发搭建阶段，尚不可用。** 本仓库是依据 `CAD_IMPLEMENTATION_SPEC.md` v2.0
+> 推进的契约框架：能力以合成测试覆盖为主，多数宿主与真实数据路径尚未接线或未验证，
+> 没有可交付的产品。请勿把它当作已完成或生产可用的 CAD 系统，具体边界见下文
+> 「当前状态 / 明确未完成」。
+
+依据 `CAD_IMPLEMENTATION_SPEC.md` v2.0 搭建。目标架构为数据库驱动（`cad-db`：对象、
+事务、revision、ChangeSet），UI 计划使用 Slint，CAD 绘制计划使用 wgpu，DWG 解析计划使用
+未修改的 acadrust 0.5.5。核心设计为无平台依赖，可单独测试并用于 CLI；这些是架构目标，
+不代表功能已完备。
 
 * 架构：`docs/architecture.md`
 * 构建（含 Android APK）：`docs/build.md`
@@ -17,12 +23,13 @@ acadrust 0.5.5。核心无平台依赖，可单独测试并用于 CLI。
 * OpenCADStudio 迁移映射：`docs/migration-map.md`
 * 决策记录：`docs/adr/`
 
-## 当前状态
+## 当前状态（开发搭建中）
 
-已实现并以合成契约测试覆盖：领域类型、数据库与事务、几何引擎、代理回放器、
-acadrust 导入（含实体/图层透明度）、显示表示、空间索引、场景批处理（拓扑/法向/
-深度/绘制顺序/透明）、测量、批注（含版本化 JSON）、依赖失效、撤销/重做、查询层、
-应用命令层、wgpu 2D/3D 渲染器、Slint UI 与 Android/Web 宿主。
+以下模块已有契约级实现，并以合成测试覆盖，但整体仍处搭建/验证阶段，不代表可用的
+成品：领域类型、数据库与事务、几何引擎、代理回放器、acadrust 导入（含实体/图层透明
+度）、显示表示、空间索引、场景批处理（拓扑/法向/深度/绘制顺序/透明）、测量、批注
+（含版本化 JSON）、依赖失效、撤销/重做、查询层、应用命令层、wgpu 2D/3D 渲染器、
+Slint UI 与 Android/Web 宿主骨架。
 
 本轮已实际运行（2026-10-02）：
 

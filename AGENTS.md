@@ -1,18 +1,36 @@
 # AGENTS.md
 
-Rust 工业 CAD 查看、测量与批注系统。规范：`CAD_IMPLEMENTATION_SPEC.md`（v2.0）。
-规范是需求的唯一权威；本文件只描述仓库结构与构建方式。
+Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + 合成测试，没有可交付产品。
+需求唯一权威是 `CAD_IMPLEMENTATION_SPEC.md`（v2.0）；`docs/handoff.md` 是逐轮交接入口。
+
+## 铁律（违反即返工）
+
+1. 不修改 acadrust 源码，不使用 Cargo patch（`check-architecture.py` 会拒绝）。
+2. 未支持/未验证能力必须显式建模（`Unsupported`/`Partial`/诊断），占位与假数据不计完成，
+   也**禁止**把失败改成空成功。
+3. 业务层只操作数据库/命令/事务；GPU 提交封装在渲染器内。
+4. 增量更新：ChangeSet → 依赖失效 → 显示表示重建，不重解析底图。
+5. 每项改动同步补契约测试与文档。
+6. 证据诚实：未运行就说未运行。README/handoff 中大量“已通过”注明仅为**合成测试**或
+   特定环境（模拟器/软件 GPU/无头浏览器），不得推广为真机、真实 GPU、vendor 兼容结论。
+7. 不覆盖/删除陌生变更（并发实现常见）；先读源码和最新构建证据。
+
+## 语言约定
+
+代码标识、注释、测试名用英文；`docs/`、`AGENTS.md`、commit message 用中文。
+用户可见文案只能来自 `crates/cad-ui-slint/i18n/{zh-CN,en}.json`（键集必须一致，见
+`scripts/check-i18n.py`），不得在 Slint/Rust UI 里硬编码中文。
 
 ## 仓库结构
 
-Cargo workspace，核心无平台依赖。下面是分层示意（不是逐 crate 依赖边）；
-实际依赖以 Cargo manifests 和 `scripts/check-architecture.py` 为准，**不可反转**：
+Cargo workspace（`crates/cad-*` + `apps/app-android`、`apps/app-web`）。分层示意，
+**不可反转**；实际依赖以 manifests 与 `scripts/check-architecture.py` 为准：
 
 ```
 cad-domain
   ↑
 cad-db ── cad-dependencies ── cad-history
-  ↑            ↑
+  ↑
 cad-geometry ─ cad-kernel-adapter ─ cad-representation
   ↑
 cad-spatial ─ cad-scene ─ cad-render-wgpu
@@ -26,86 +44,77 @@ cad-ui-slint ─ cad-platform ─ cad-diagnostics ─ cad-cli-tools
 apps/app-android  apps/app-web
 ```
 
-- `cad-domain` 不得依赖 Slint / wgpu / Android / `web-sys` / 文件系统。
-- `cad-import-acadrust` 是**唯一**依赖 acadrust 的 crate。
-- `cad-db` 是唯一权威数据源；UI 与渲染均为派生。
+`check-architecture.py` 强制的边界：`cad-domain` 不依赖任何 CAD 包；`cad-db` 只依赖
+`cad-domain`；`cad-import-acadrust` 是**唯一**依赖 acadrust 的 crate；`cad-render-wgpu`
+是唯一依赖 wgpu 的 crate；Slint 只允许出现在 `cad-ui-slint`/`app-*`；平台类型
+（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`。`cad-db` 是唯一权威数据
+源；UI 与渲染均为派生。
 
-## 构建
+## 构建与门禁
 
-工具链见 `rust-toolchain.toml`（1.98.1）。当前是契约框架，没有可运行 APK/Web UI。
-Android JDK/SDK/NDK/打包器组合尚待锁定并验证，不得凭 metadata 宣称兼容。
+工具链 1.98.1（`rust-toolchain.toml`）；若 `PATH` 无 cargo，加 `$HOME/.cargo/bin`。
+提交前跑完整门禁（CI 同款，见 `docs/ci.md`）：
 
 ```bash
-# 纯核心测试（宿主无 fontconfig 开发头，故排除 Slint/宿主 crate）
-cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked
-cargo check --workspace --lib --target wasm32-unknown-unknown --locked
+cargo fmt --all -- --check
+cargo clippy --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
 python3 scripts/check-architecture.py
-# Android 核心路径与 APK
-cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked
-scripts/build-android.sh   # 产出 target/<profile>/apk/yacr.apk
+python3 scripts/check-fixture-manifest.py
+python3 scripts/check-workflows.py
+python3 scripts/check-i18n.py
+cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked --no-fail-fast
+cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 workspace，含 UI/宿主
 ```
 
-## Android 模拟器（无头 KVM，供 agent 使用）
+- **主机构建排除 `cad-ui-slint`/`app-android`/`app-web`**：本机无 fontconfig/freetype 开发头
+  且无 sudo（见 `docs/build.md`）。Slint 编译与测试由 Android target 覆盖；`cad-ui-slint`
+  **仅在 Android target 上编译**，不要在宿主执行其测试或宣称其通过。
+- Rust 单测试：`cargo test -p <crate> <name> --locked`。GPU/CLI 用例串行跑，避免并发软件
+  Vulkan 互相干扰：`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test -p cad-render-wgpu -p cad-cli-tools --locked -- --test-threads=1`。
+- 需要真实 DWG 的测试（如 `cli_contracts` 的 render）设 `YACR_TEST_DWG=<绝对路径>`，否则
+  跳过；跳过不是已运行证据。
+- Web 门禁：`scripts/build-web.sh`（需 wasm-bindgen-cli **0.2.129**，与 Cargo.lock 严格一致）
+  产出 `web-dist/`；`node --test scripts/test-web-host.mjs scripts/test-web-touch.mjs ...`
+  是无 wasm/GPU 的模块契约；浏览器脚本见 `docs/testing-dwg.md`、`docs/validation-web.md`。
+- 离线 WGSL 校验（无需 GPU）：`cargo test -p cad-render-wgpu --test wgsl_validation --locked`。
 
-Android 宿主是 Rust `cargo-apk`（android-activity + Slint），**不是 Gradle 工程**，
-不要运行 `./gradlew`。LXC 103 无 3D GPU，模拟器只能用 KVM + SwiftShader 且必须无头。
+## Android（无头模拟器）
 
-环境已就绪，`~/.config/android-env.sh` 由 `.bashrc`/`.profile`/`BASH_ENV` 自动加载：
-`ANDROID_HOME=~/android-sdk`、`JAVA_HOME=~/jdk17`、NDK `27.0.12077973`、AVD `dev_api35`
-（API 35 / `google_apis` / x86_64）。helper 脚本在 `~/android-dev/`（不属于仓库）。
+宿主是 Rust `cargo-apk`（android-activity + Slint），**不是 Gradle 工程**，不要运行
+`./gradlew`。设备需 x86_64 ABI（本机模拟器镜像为 x86_64）。
 
 ```bash
-# 无头启动 dev_api35（KVM + SwiftShader，幂等）
-~/android-dev/emulator-start.sh
-# 等 adb 连接 + sys.boot_completed=1（并打印 API/ABI）
-~/android-dev/wait-boot.sh
-# 编译 APK（必须 x86_64；日常用 release）
-PROFILE=release ~/android-dev/build-apk.sh
-# 安装并启动 NativeActivity
+cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked  # 仅编译检查
+~/android-dev/emulator-start.sh    # 无头 KVM + SwiftShader（幂等）
+~/android-dev/wait-boot.sh         # adb 连接 + sys.boot_completed=1
+PROFILE=release ~/android-dev/build-apk.sh   # 模拟器用 x86_64
 ~/android-dev/install-run.sh
-# 日志（崩溃：~/android-dev/logcat.sh crash）
-~/android-dev/logcat.sh
-# 停止模拟器
+~/android-dev/logcat.sh            # 崩溃：~/android-dev/logcat.sh crash
 ~/android-dev/emulator-stop.sh
 ```
 
-等价裸命令：
+规则：模拟器只能 `-gpu swiftshader` 且无头（LXC 无 3D GPU），不要 `-gpu host`，不要装
+桌面/X11/Wayland，不要改 Proxmox/LXC 配置。安装用 release APK（debug `.so` ~510 MB 会超
+ActivityManager attach 超时）。**模拟器 ≠ 真机**，真机能力一律标注未验证。
 
-```bash
-emulator @dev_api35 -no-window -gpu swiftshader -no-audio -no-boot-anim -no-snapshot -no-metrics &
-adb wait-for-device
-until [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 2; done
-cargo apk build -p app-android --target x86_64-linux-android --lib --release
-adb install -r -t target/release/apk/yacr.apk
-adb shell am start -n dev.yacr.app/android.app.NativeActivity
-adb logcat --pid="$(adb shell pidof dev.yacr.app)"
-```
+## 真实 DWG 回归
 
-**停止模拟器**（任选其一）：
+流程见 `docs/testing-dwg.md`：**原生离屏 wgpu + Mesa lavapipe 为主**（`cargo build -p
+cad-cli-tools --release`，`scripts/check-dwg-native.py`），WASM + Playwright 为第二层。
+必须分别记录「打开 / 出图 smoke / 视觉验收」三个结论；退出码 0、非空截图、`error=None`
+都不能单独证明视觉正确。样本与参考图放在仓库外（默认 `~/sources/cad-test-files/`），
+可用 `scripts/fetch-test-dwg.sh` 拉取临时样本到 `/tmp/opencode`。**真实/用户图纸、第三方
+字体、黄金图不得提交仓库**；只有授权明确的夹具才能进 `fixtures/manifest`（现仅合成样本，
+空列表是合法诚实状态）。每轮用新输出目录，保留失败/超时记录，不用旧证据冒充本轮通过。
 
-```bash
-~/android-dev/emulator-stop.sh                       # 推荐：adb emu kill 所有 emulator
-adb emu kill                                         # 单个已连接设备
-pkill -f 'qemu-system-x86_64.*@dev_api35'            # 兜底：直接杀进程
-```
+## 交接点
 
-规则：APK 必须 `--target x86_64-linux-android`（aarch64 只能真机；在 x86_64 镜像上会经
-NDK translation 安装但运行 abort）。日常安装用 release（约 40 MB），debug 的 `.so` 约
-510 MB 会超过 ActivityManager attach 超时。不要用 `-gpu host`，不要装桌面/X11/Wayland，
-不要改 Proxmox 宿主或 LXC 配置。诊断：`emulator -accel-check` 应报 KVM 可用。
+用 `rg 'pending\(' crates apps` 查找显式占位（文件路径与标识对应实施单元）。替换 `pending`
+必须补验收测试，禁止改成空成功。已定义但仍需设计审查或未闭环的事项集中在
+`docs/handoff.md`「已定义，但尚需设计审查」与各 `docs/*.md` 的“未完成”小节。
 
-## 约束（来自规范）
+## 文档索引
 
-1. 不修改 acadrust 源码，不使用 Cargo patch。
-2. 未支持/待验证能力必须显式建模，占位与假数据不计入完成。
-3. 业务层只操作数据库/命令/事务，GPU 提交封装在渲染器内。
-4. 增量更新：ChangeSet → 依赖失效 → 显示表示重建，不重解析底图。
-5. 每项功能同步补充契约测试与文档。
-6. 先读 `docs/handoff.md` 和 `docs/requirements.md`；`pending("模块.操作")`
-   是可搜索交接点，替换时必须增加验收测试，禁止改成空成功。
-
-## 文档
-
-`docs/architecture.md`、`docs/compatibility.md`、`docs/render-backends.md`、
-`docs/proxy-support.md`、`docs/performance.md`、`docs/migration-map.md`、
-`docs/adr/`、`fixtures/manifest`。
+`docs/architecture.md`（边界与不变量）、`docs/build.md`（各平台构建）、`docs/ci.md`（CI
+分层与 NOT RUN）、`docs/validation*.md`（实际执行证据）、`docs/compatibility.md`（能力表）、
+`docs/handoff.md`（逐轮交接）、`docs/adr/`、`docs/testing-dwg.md`、`fixtures/manifest`。
