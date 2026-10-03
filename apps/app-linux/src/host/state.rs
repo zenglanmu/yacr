@@ -110,6 +110,7 @@ impl Runtime {
                 .unwrap_or_default(),
         ))?;
         if let Some(view) = self.view.borrow().as_ref() {
+            view.set_overlay_visibility(handle.effective_config().view.overlays.into());
             view.sync_drawing(Some(drawing));
             view.set_layer_overrides(c.session.layer_overrides.clone());
             view.set_selection_highlight(c.selection().clone());

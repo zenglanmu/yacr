@@ -26,6 +26,7 @@ pub use cad_app::render_scene::{
     build_scene_with_space, layout_descriptors, overlay_fingerprint, preview_overlay,
     selection_highlight, OverlayInputs, PreviewOptions, VisualOverlay,
 };
+pub use cad_app::viewer_config::OverlayVisibility;
 pub use camera::{camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera};
 pub use runtime::{FrameBinding, RenderLifecycle};
 pub use view::{CadView, ViewSnapshot};

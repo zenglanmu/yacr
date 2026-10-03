@@ -34,6 +34,9 @@ pub struct CadView {
     selection: Rc<RefCell<SelectionSet>>,
     measurement_preview: Rc<RefCell<Option<MeasurementPreview>>>,
     annotation_preview: Rc<RefCell<Option<AnnotationPreview>>>,
+    /// Which derived overlays the host wants drawn, mirrored from
+    /// `ViewerConfig.view.overlays`. Defaults to all-on.
+    overlay_visibility: Rc<RefCell<OverlayVisibility>>,
     /// In-progress drawing/editing preview (drawing-edit §4); drawn through the
     /// existing annotation preview overlay path.
     draw_preview: Rc<RefCell<Option<cad_app::DrawPreview>>>,
@@ -60,6 +63,7 @@ impl CadView {
             selection: Rc::new(RefCell::new(SelectionSet::new())),
             measurement_preview: Rc::new(RefCell::new(None)),
             annotation_preview: Rc::new(RefCell::new(None)),
+            overlay_visibility: Rc::new(RefCell::new(OverlayVisibility::default())),
             draw_preview: Rc::new(RefCell::new(None)),
         }
     }
@@ -273,6 +277,7 @@ impl CadView {
                 selection: view.selection.borrow().clone(),
                 measurement: view.measurement_preview.borrow().clone(),
                 annotation: annotation_overlay,
+                visibility: *view.overlay_visibility.borrow(),
             };
             let result = state.controller.prepare_shared_with_overlays(
                 doc,
@@ -332,6 +337,25 @@ impl CadView {
     }
     pub fn annotation_visibility(&self) -> AnnotationVisibilitySet {
         self.visibility.borrow().clone()
+    }
+    /// Store the overlay visibility mirrored from `ViewerConfig.view.overlays`
+    /// and request a redraw.
+    ///
+    /// Visibility is part of the transient overlay fingerprint, so a toggle
+    /// rebuilds only the highlight/preview delta and reuses the base drawing and
+    /// the committed annotation overlay unless `annotations` itself changed.
+    pub fn set_overlay_visibility(&self, visibility: OverlayVisibility) {
+        if *self.overlay_visibility.borrow() == visibility {
+            return;
+        }
+        *self.overlay_visibility.borrow_mut() = visibility;
+        self.state.borrow_mut().overlay_revision += 1;
+        self.request_redraw();
+    }
+
+    /// The overlay visibility currently applied to rendering.
+    pub fn overlay_visibility(&self) -> OverlayVisibility {
+        *self.overlay_visibility.borrow()
     }
     pub fn annotations(&self) -> Option<Arc<AnnotationDatabase>> {
         self.annotations.borrow().clone()
