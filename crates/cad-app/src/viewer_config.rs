@@ -174,6 +174,81 @@ pub enum Preset {
     CanvasOnly,
 }
 
+/// Which chrome components a [`Preset`] permits, *before* the per-component
+/// `visible` flags and the layout mode are applied.
+///
+/// This is the single, readable table of the preset policy; [`UiPresentationModel::resolve`]
+/// consumes it instead of scattering preset checks through the field
+/// assignments. The booleans are named after the resolved fields they gate:
+///
+/// | field               | `Full` | `Minimal` | `CanvasOnly` |
+/// |---------------------|--------|-----------|--------------|
+/// | `ribbon`            | yes    | no        | no           |
+/// | `command_bar`       | yes    | no        | no           |
+/// | `status_bar`        | yes    | no        | no           |
+/// | `navigation`        | yes    | yes       | no           |
+/// | `layout_tabs`       | yes    | yes       | no           |
+/// | `layer_panel`       | yes    | yes       | no           |
+/// | `properties_panel`  | yes    | yes       | no           |
+/// | `commands`          | yes    | yes       | no           |
+///
+/// `Minimal` is therefore "application frame plus canvas navigation, layout
+/// tabs and dock panels, with only the ribbon/command/status *entry points*
+/// hidden". Hiding an entry point never disables the command itself, so
+/// `commands` stays `true`: minimal keeps command reachability (keyboard
+/// shortcuts, navigation toolbar, panels) while dropping the top/bottom chrome.
+///
+/// `CanvasOnly` is strictly stronger than `Minimal`: every component minimal
+/// keeps is also off, plus the application frame itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PresetComponents {
+    ribbon: bool,
+    command_bar: bool,
+    status_bar: bool,
+    navigation: bool,
+    layout_tabs: bool,
+    layer_panel: bool,
+    properties_panel: bool,
+    commands: bool,
+}
+
+/// The explicit component set each [`Preset`] selects. See [`PresetComponents`]
+/// for the truth table and the rationale behind `Minimal`.
+fn preset_components(preset: Preset) -> PresetComponents {
+    match preset {
+        Preset::Full => PresetComponents {
+            ribbon: true,
+            command_bar: true,
+            status_bar: true,
+            navigation: true,
+            layout_tabs: true,
+            layer_panel: true,
+            properties_panel: true,
+            commands: true,
+        },
+        Preset::Minimal => PresetComponents {
+            ribbon: false,
+            command_bar: false,
+            status_bar: false,
+            navigation: true,
+            layout_tabs: true,
+            layer_panel: true,
+            properties_panel: true,
+            commands: true,
+        },
+        Preset::CanvasOnly => PresetComponents {
+            ribbon: false,
+            command_bar: false,
+            status_bar: false,
+            navigation: false,
+            layout_tabs: false,
+            layer_panel: false,
+            properties_panel: false,
+            commands: false,
+        },
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LayoutMode {
@@ -1165,11 +1240,14 @@ impl UiPresentationModel {
             LayoutMode::Auto => LayoutMode::Desktop,
             mode => mode,
         };
+        let preset = preset_components(config.ui.preset);
+        // The application frame is on for every preset except `CanvasOnly`,
+        // which `preset_components` marks by turning off all chrome.
         let visible = config.ui.preset != Preset::CanvasOnly;
         let full = config.ui.preset == Preset::Full;
         let c = &config.ui.components;
-        let layer_panel = visible && c.layer_panel.visible;
-        let properties_panel = visible && c.properties_panel.visible;
+        let layer_panel = preset.layer_panel && c.layer_panel.visible;
+        let properties_panel = preset.properties_panel && c.properties_panel.visible;
         let features = FeatureVisibility {
             measure: config.features.measure,
             annotation_create: config.features.annotations.create,
@@ -1180,7 +1258,7 @@ impl UiPresentationModel {
         };
         let mut command_visibility = BTreeMap::new();
         for id in COMMAND_IDS {
-            let mut entry_visible = visible;
+            let mut entry_visible = preset.commands;
             if let Some(required) = required_feature(id) {
                 entry_visible &= required(&features);
             }
@@ -1192,7 +1270,7 @@ impl UiPresentationModel {
         Self {
             layout,
             application_ui: visible,
-            ribbon: visible && full && c.ribbon.visible,
+            ribbon: preset.ribbon && c.ribbon.visible,
             layer_panel,
             properties_panel,
             // `initiallyOpen` is the desktop dock default. The compact/mobile
@@ -1205,10 +1283,10 @@ impl UiPresentationModel {
             properties_panel_initially_open: properties_panel
                 && c.properties_panel.initially_open
                 && layout == LayoutMode::Desktop,
-            navigation: visible && c.navigation_toolbar.visible,
-            command_bar: visible && full && c.command_bar.visible,
-            layout_tabs: visible && c.layout_tabs.visible,
-            status_bar: visible && full && c.status_bar.visible,
+            navigation: preset.navigation && c.navigation_toolbar.visible,
+            command_bar: preset.command_bar && c.command_bar.visible,
+            layout_tabs: preset.layout_tabs && c.layout_tabs.visible,
+            status_bar: preset.status_bar && c.status_bar.visible,
             pointer: config.interaction.pointer,
             touch: config.interaction.touch,
             keyboard_shortcuts: config.interaction.keyboard_shortcuts,
@@ -1226,6 +1304,9 @@ impl UiPresentationModel {
             } else {
                 36.0
             },
+            // Only the full desktop arrangement reserves a dock gutter. Minimal
+            // keeps its panels togglable but never auto-reserves width, so it
+            // reports `0.0` here.
             dock_width: if visible
                 && full
                 && layout == LayoutMode::Desktop
@@ -1679,6 +1760,78 @@ mod tests {
         assert!(p.command_visibility["file.exportAnnotations"]);
     }
 
+    /// The chrome component flags that every preset either permits or drops, in
+    /// the order the truth table in [`PresetComponents`] documents them.
+    fn component_flags(p: &UiPresentationModel) -> [bool; 8] {
+        [
+            p.ribbon,
+            p.command_bar,
+            p.status_bar,
+            p.navigation,
+            p.layout_tabs,
+            p.layer_panel,
+            p.properties_panel,
+            p.command_visibility.values().all(|visible| *visible),
+        ]
+    }
+
+    fn resolve_preset(preset: Preset) -> UiPresentationModel {
+        let mut host = ViewerConfig::default();
+        host.ui.preset = preset;
+        host.validate().unwrap();
+        // Full desktop surface so layout mode does not mask preset differences.
+        UiPresentationModel::resolve(&host, [1280.0, 800.0], [0.0; 4], false)
+    }
+
+    #[test]
+    fn minimal_preset_has_explicit_component_semantics() {
+        let p = resolve_preset(Preset::Minimal);
+        // Minimal keeps the application frame: it is not canvas-only.
+        assert!(p.application_ui);
+        // Entry points dropped by minimal.
+        assert!(!p.ribbon, "minimal hides the ribbon");
+        assert!(!p.command_bar, "minimal hides the command bar");
+        assert!(!p.status_bar, "minimal hides the status bar");
+        // Canvas navigation, layout tabs and both dock panels are kept.
+        assert!(p.navigation, "minimal keeps navigation");
+        assert!(p.layout_tabs, "minimal keeps the layout tabs");
+        assert!(p.layer_panel, "minimal keeps the layer panel");
+        assert!(p.properties_panel, "minimal keeps the properties panel");
+        // Command reachability is untouched: hiding an entry point never
+        // disables the command, so every catalog command stays visible.
+        assert!(
+            p.command_visibility.values().all(|visible| *visible),
+            "minimal keeps command reachability"
+        );
+        // Minimal never auto-reserves a dock gutter; only full desktop docks.
+        assert_eq!(
+            p.dock_width, 0.0,
+            "minimal never reserves a dock gutter; only full desktop docks"
+        );
+    }
+
+    #[test]
+    fn presets_are_monotonic_canvas_only_le_minimal_le_full() {
+        let full = component_flags(&resolve_preset(Preset::Full));
+        let minimal = component_flags(&resolve_preset(Preset::Minimal));
+        let canvas_only = component_flags(&resolve_preset(Preset::CanvasOnly));
+        for index in 0..full.len() {
+            let (f, m, co) = (full[index], minimal[index], canvas_only[index]);
+            assert!(
+                !co || m,
+                "canvasOnly shows component flag {index} that minimal hides"
+            );
+            assert!(
+                !m || f,
+                "minimal shows component flag {index} that full hides"
+            );
+        }
+        // The presets are distinct, not aliases: each is strictly stronger than
+        // the next on at least one field.
+        assert!(full.iter().any(|&v| v) && minimal.iter().any(|&v| !v));
+        assert!(minimal.iter().any(|&v| v) && canvas_only.iter().all(|&v| !v));
+    }
+
     #[test]
     fn preset_canvas_only_hides_every_command_and_overlay_state_is_reported() {
         let mut host = ViewerConfig::default();
@@ -1695,6 +1848,13 @@ mod tests {
         assert!(p.command_visibility.values().all(|visible| !visible));
         // Overlays are independent of the application UI (view controls the canvas).
         assert!(p.overlays.annotations);
+        // CanvasOnly is strictly stronger than Minimal: it hides every chrome
+        // component minimal keeps.
+        let minimal = resolve_preset(Preset::Minimal);
+        assert!(!p.ribbon && !p.command_bar && !p.status_bar && !p.navigation);
+        assert!(!p.layout_tabs && !p.layer_panel && !p.properties_panel);
+        assert!(minimal.navigation && minimal.layout_tabs && minimal.layer_panel);
+        assert_ne!(p.application_ui, minimal.application_ui);
     }
 
     #[test]
