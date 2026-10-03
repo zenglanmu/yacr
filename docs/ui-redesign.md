@@ -26,8 +26,11 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
 
 仍未闭环（不宣称完整验收）：
 - `canvasOnly` 之外的精简预设对 ribbon 的实际重排仍是布局子集；`minimal` 语义待细化。
-- ribbon 的 `commands` 分组只用来过滤/校验 `commandVisibility`，尚未把自定义分组
-  真正渲染成独立按钮分组（当前 ribbon 仍是固定 5 标签 + 内置面板）。
+- 自定义 ribbon 分组已落地：`ui.components.ribbon.tabs[].groups[].commands[]` 现真正渲染为
+  选项卡/分组/命令按钮并按 `commandVisibility` 过滤，点击映射到真实命令（未支持的合法
+  命令显式报 `ribbon.command_unsupported`，不静默成功）。**未声明自定义 tabs 时内置 5 标签
+  面板逐字节不变**。图标/文字模式、分组内图标-文字切换与溢出菜单仍未实现（当前统一
+  小按钮显示图标+文字）。
 - `view.overlays.*` 已端到端门控绘制：`selectionHighlight`/`annotations`/`snapHints`
   控制选择高亮、已提交批注、预览光标十字；`axes`/`grid` 首次产生真实世界坐标参考
   几何（按图纸 bounds 生成、1/2/5 步长约 10 格、行数有上限、无 bounds 时显式诊断

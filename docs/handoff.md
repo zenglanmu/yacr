@@ -18,7 +18,27 @@
 
 ## 本轮状态（compact，2026-10-03）
 
-**UI 配置门控三工作流集成（本轮）**：主控派发三个隔离 worktree 子代理，子代理只写代码与
+**UI 配置门控 + 数据驱动 Ribbon（迭代 2）**：主控派发两个隔离 worktree 子代理（ribbon 分组、
+web 触控门控与契约），主控统一合并/编译/门禁。
+
+- **数据驱动 Ribbon（`ws/ribbon-groups`）**：`ui.components.ribbon.tabs[].groups[].commands[]`
+  经 `cad_app::resolve_ribbon` 解析为纯模型并按 `commandVisibility` 过滤，`chrome.rs` 映射为
+  新 Slint `[RibbonTabModel]`（`ribbon-model.slint`），`ribbon.slint` 在
+  `ribbon-config-driven` 为真时渲染配置选项卡/分组/命令按钮，`on_ribbon_command` 映射到真实
+  命令（未支持的合法命令显式 `ribbon.command_unsupported`）。无自定义 tabs 时内置面板不变。
+  新增 10 个 i18n 键（中英同键集，197 keys）。
+- **Web 触控门控与契约（`ws/web-interaction`）**：新增 wasm 导出 `viewer_interaction_json`、
+  JS 谓词 `interactionAllowsTouch`/`readInteractionAllowsTouch`；`touch.js` 在 `touch=false`
+  时不再捕获指针或转发触摸，并在 `yacr-config-changed` 时重估。`scripts/test-web-touch.mjs`
+  扩展到 12 项契约（含畸形 JSON 默认放行的文档化行为）。
+
+主控修复合并后一处生成类型导入错误（`Ribbon*Model` 由 `include_modules!` 提供）。验证：
+fmt、严格 clippy（工作区，含 app-web）、架构/i18n/fixture/workflows、node 触控契约通过；
+`cargo test --workspace --exclude app-android`（**含 app-web**）**1151 passed / 0 failed /
+1 ignored**；wasm 全 workspace lib check、Android aarch64 check 通过；Linux release 离屏
+smoke 通过。仍为软件 Vulkan/合成，未做真实 GPU/真机验收。
+
+**UI 配置门控三工作流集成（迭代 1）**：主控派发三个隔离 worktree 子代理，子代理只写代码与
 单元测试，主控统一合并、编译、门禁。三个工作流文件不相交，合并零冲突：
 
 - **overlay 门控（`ws/overlay-gating`）**：`view.overlays.*` 首次真正控制绘制。
