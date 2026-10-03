@@ -62,12 +62,16 @@ export component YacrWindow inherits Window {
     // Overlay flags are `in-out` so the desktop status-bar toggles reflect the
     // effective config and can emit the flipped value back to the host through
     // `overlay-toggled`. The adapter still re-pushes them from the config store
-    // as the single source of truth; the toggle is never a shadow copy.
+    // after every config change (see `apply_viewer_presentation_with`), so the
+    // store stays the single source of truth; the toggle is never a shadow copy.
     in-out property <bool> overlay-axes: true;
     in-out property <bool> overlay-grid: true;
     in-out property <bool> overlay-selection-highlight: true;
     in-out property <bool> overlay-snap-hints: true;
     in-out property <bool> overlay-annotations: true;
+    in property <string> overlay-axes-label;
+    in property <string> overlay-grid-label;
+    in property <string> overlay-snap-hints-label;
     in property <bool> feature-measure: true;
     in property <bool> feature-annotation-create: true;
     in property <bool> feature-annotation-update: true;
@@ -469,16 +473,15 @@ export component YacrWindow inherits Window {
                 padding: 0px; padding-left: 12px; padding-right: 4px; spacing: 2px;
                 Text { text: root.status-label; color: CadTheme.muted; horizontal-stretch: 1;
                     font-size: 12px; vertical-alignment: center; overflow: elide; }
-                // Desktop overlay toggles. No catalog key exists for these yet,
-                // so the controls carry only geometry glyphs (never a literal
-                // string); a future round adds accessible catalog labels.
-                ConceptButton { text: ""; symbol: "╋"; icon-only: true; checked: root.overlay-axes;
+                // Desktop overlay toggles. Labels come from the catalog so the
+                // accessible text is localized and never a hardcoded literal.
+                ConceptButton { text: root.overlay-axes-label; symbol: "╋"; icon-only: true; checked: root.overlay-axes;
                     min-width: 30px; preferred-width: 30px; min-height: 24px; preferred-height: 24px;
                     clicked => { root.overlay-toggled("axes", !root.overlay-axes); } }
-                ConceptButton { text: ""; symbol: "▦"; icon-only: true; checked: root.overlay-grid;
+                ConceptButton { text: root.overlay-grid-label; symbol: "▦"; icon-only: true; checked: root.overlay-grid;
                     min-width: 30px; preferred-width: 30px; min-height: 24px; preferred-height: 24px;
                     clicked => { root.overlay-toggled("grid", !root.overlay-grid); } }
-                ConceptButton { text: ""; symbol: "◎"; icon-only: true; checked: root.overlay-snap-hints;
+                ConceptButton { text: root.overlay-snap-hints-label; symbol: "◎"; icon-only: true; checked: root.overlay-snap-hints;
                     min-width: 30px; preferred-width: 30px; min-height: 24px; preferred-height: 24px;
                     clicked => { root.overlay-toggled("snapHints", !root.overlay-snap-hints); } }
             }

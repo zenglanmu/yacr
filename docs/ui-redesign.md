@@ -39,10 +39,13 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
   `features.*`、`ui.components.*.visible` 一样按“只能关不能开”钳制（此前可越权打开
   `canvasOnly` 隐藏的命令），新增回归测试。
 - `view.overlays.*` 已端到端门控绘制：`selectionHighlight`/`annotations`/`snapHints`
-  控制选择高亮、已提交批注、预览光标十字；`axes`/`grid` 首次产生真实世界坐标参考
+  控制选择高亮、已提交批注、预览光标十字与**真实对象捕捉标记**（`cad_measure::SnapKind`
+  形状）；`axes`/`grid` 首次产生真实世界坐标参考
   几何（按图纸 bounds 生成、1/2/5 步长约 10 格、行数有上限、无 bounds 时显式诊断
   不伪造）。内置默认 `axes=true`、`grid=false`，与 `ui-spec/ui-desc.md` 示例和 AutoCAD
-  一致。宿主在每次状态漏斗读取有效配置推送，切换只重建瞬态叠加层、不动底图。
+  一致。宿主在每次状态漏斗读取有效配置推送，切换只重建瞬态叠加层、不动底图；桌面
+  状态栏另有 axes/grid/snapHints 实时开关（经配置存储重推）。捕捉标记的宿主喂入
+  （`CadView::set_snap_hints`）已就绪但宿主适配仍待接线。
 - `interaction.pointer/touch/keyboardShortcuts` 已逐项门控输入：共享 Slint 适配器在
   事件时早退指针/滚轮/画布拾取与拾取映射；命令别名仅在 `keyboardShortcuts` 为真时
   展开（完整命令名仍可用）；Web 触控 wasm 入口在 `touch` 为假时空操作。门控在 Rust

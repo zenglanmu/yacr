@@ -18,6 +18,25 @@
 
 ## 本轮状态（compact，2026-10-03）
 
+**迭代 5：浮动溢出弹层 + 状态栏覆盖开关 + 真实捕捉提示**：
+
+- **浮动 ribbon 溢出（`ws-floating-overflow`）**：配置 ribbon 分组超过 6 个命令时，▾ 现弹出
+  **真实锚定 `PopupWindow` 飞出层**（不再内联撑高行高），每项派发并关闭；`close-on-click-outside`
+  与显式 × 关闭。
+- **状态栏覆盖开关（`ws-statusbar-toggles`）**：桌面状态栏新增坐标轴/网格/捕捉提示三个可勾选
+  开关，经 `overlay-toggled` → `update_config_json({"view":{"overlays":{...}}})` → 单一漏斗
+  重推，`view.overlays.*` 首次可由用户直接切换；标签取自新目录键 `overlay.axes/grid/snap_hints`
+  （中英同键集，202 keys）。
+- **真实捕捉提示（`ws-snap-hints`）**：复用 `cad_measure::SnapCandidate/SnapKind`（`cad-app`
+  已依赖 `cad-measure`，架构允许），`snap_hint_overlay` 按捕捉类型绘制可区分标记
+  （draw order 1_500_000），`OverlayInputs.snap_hints_input` + `CadView::set_snap_hints`
+  接线，`view.overlays.snapHints` 门控；`snapHints` 关闭时该层不绘制。宿主适配留待后续轮。
+
+主控修复合并后一处 `app.slint` 注释/换行错位，并补齐 `overlay.*` 目录键与状态栏开关标签接线。
+验证：fmt、严格 clippy（含 app-web）、架构/i18n/fixture/workflows、node 六套契约、
+`cargo test --workspace --exclude app-android`（含 app-web）、wasm 全 workspace lib check、
+Android aarch64 check、Linux release 离屏 smoke 全通过。仍为软件 Vulkan/合成。
+
 **迭代 4：ribbon 显示模式/溢出 + minimal 语义 + 宿主面板一致性契约**：
 
 - **Ribbon 显示模式与溢出（`ws-ribbon-modes`）**：`RibbonGroup.display`

@@ -130,6 +130,9 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_nav_label(messages.text("shell.nav", &[]).into());
     ui.set_view_mode_label(messages.text("shell.mode_view", &[]).into());
     ui.set_work_mode_label(messages.text("shell.mode_work", &[]).into());
+    ui.set_overlay_axes_label(messages.text("overlay.axes", &[]).into());
+    ui.set_overlay_grid_label(messages.text("overlay.grid", &[]).into());
+    ui.set_overlay_snap_hints_label(messages.text("overlay.snap_hints", &[]).into());
 }
 
 /// The shipped catalog ribbon tab labels, in shell order.
