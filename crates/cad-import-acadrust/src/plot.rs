@@ -69,6 +69,29 @@ fn units_from_code(code: i16) -> PlotPaperUnits {
     }
 }
 
+/// Paper units implied by the standard AutoCAD paper-size name.
+///
+/// Names carry the unit as a suffix (`ISO_A4_(210.00_x_297.00_MM)`,
+/// `Letter_(8.50_x_11.00_Inches)`). The locked acadrust DXF reader leaves the
+/// `plot_paper_units` field at its default for LAYOUT records (`group 72` is
+/// not applied), so the name is the reliable source; the parsed code is only a
+/// fallback. Returns `None` when the name carries no unit token.
+fn units_from_paper_name(name: &str) -> Option<PlotPaperUnits> {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("_mm)") || lower.ends_with("_mm") {
+        Some(PlotPaperUnits::Millimeters)
+    } else if lower.contains("_inches)") || lower.ends_with("_inches") {
+        Some(PlotPaperUnits::Inches)
+    } else {
+        None
+    }
+}
+
+/// Resolve the paper units for a record from its name (preferred) or the code.
+fn resolve_paper_units(name: &str, code: i16) -> PlotPaperUnits {
+    units_from_paper_name(name).unwrap_or_else(|| units_from_code(code))
+}
+
 fn plot_type_from_code(code: i16) -> PlotType {
     use acadrust::objects::PlotType as Acad;
     match Acad::from_code(code) {
@@ -101,7 +124,7 @@ fn record_from_plot_settings(
         scale_numerator: settings.scale_numerator,
         scale_denominator: settings.scale_denominator,
         plot_type: plot_type_from_code(settings.plot_type.to_code()),
-        paper_units: units_from_code(settings.paper_units.to_code()),
+        paper_units: resolve_paper_units(&settings.paper_size, settings.paper_units.to_code()),
         provenance: PlotProvenance::Imported,
     }
 }
@@ -123,7 +146,7 @@ fn record_from_layout(layout: LayoutId, object: &acadrust::objects::Layout) -> P
         scale_numerator: object.plot_scale_numerator,
         scale_denominator: object.plot_scale_denominator,
         plot_type: plot_type_from_code(object.plot_type),
-        paper_units: units_from_code(object.plot_paper_units),
+        paper_units: resolve_paper_units(&object.paper_size, object.plot_paper_units),
         provenance: PlotProvenance::Imported,
     }
 }
@@ -237,6 +260,24 @@ mod tests {
         assert_eq!(units_from_code(1), PlotPaperUnits::Millimeters);
         assert_eq!(units_from_code(2), PlotPaperUnits::Pixels);
         assert_eq!(units_from_code(99), PlotPaperUnits::Inches);
+    }
+
+    #[test]
+    fn paper_name_units_override_the_default_code() {
+        // The locked reader leaves `group 72` unapplied, so the name must win.
+        assert_eq!(
+            resolve_paper_units("ISO_A4_(210.00_x_297.00_MM)", 0),
+            PlotPaperUnits::Millimeters
+        );
+        assert_eq!(
+            resolve_paper_units("Letter_(8.50_x_11.00_Inches)", 0),
+            PlotPaperUnits::Inches
+        );
+        // No unit token: keep the code.
+        assert_eq!(
+            resolve_paper_units("custom", 1),
+            PlotPaperUnits::Millimeters
+        );
     }
 
     #[test]

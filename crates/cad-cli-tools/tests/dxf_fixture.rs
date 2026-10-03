@@ -73,6 +73,43 @@ fn committed_qcad_flange_scan_reports_millimetres_and_partial() {
     );
 }
 
+/// The flange fixture has an **empty** first paper layout (`*Paper_Space`) and a
+/// **populated** second one (`*Paper_Space1`). `plot` must default to the
+/// populated sheet, render it, and report the paper in millimetres (the locked
+/// acadrust reader leaves `group 72` unapplied; the name carries the unit).
+#[test]
+fn flange_plot_defaults_to_the_populated_paper_layout() {
+    let icd = std::env::var_os("VK_ICD_FILENAMES")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/usr/share/vulkan/icd.d/lvp_icd.json"));
+    if !icd.exists() {
+        eprintln!(
+            "SKIP flange_plot_defaults_to_the_populated_paper_layout: no Vulkan ICD at {}",
+            icd.display()
+        );
+        return;
+    }
+    let output = Command::new(BIN)
+        .env("VK_ICD_FILENAMES", &icd)
+        .args(["plot"])
+        .arg(fixture())
+        .args(["--width", "400", "--height", "300"])
+        .output()
+        .expect("spawn cad-cli-tools");
+    assert!(
+        output.status.success(),
+        "plot failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("plot JSON");
+    assert_eq!(value["layout"]["name"], "*Paper_Space1", "{value}");
+    assert_eq!(value["paper"]["units"], "millimeters", "{value}");
+    assert!(
+        value["pixels"]["non_background"].as_u64().unwrap_or(0) > 0,
+        "blank plot: {value}"
+    );
+}
+
 #[test]
 fn committed_qcad_flange_builds_a_non_empty_representation() {
     let value = run_json("build-representation");

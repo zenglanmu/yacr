@@ -753,7 +753,14 @@ fn select_plot_layout(
                     available.join(", ")
                 ))
             })?,
-        None => descriptors[0].id,
+        // Prefer the populated sheet over an empty first paper layout.
+        // AutoCAD/QCAD files commonly contain an empty paper layout first; its
+        // populated sibling is the real sheet, and plotting the empty one would
+        // show a blank (or model-space fallback) frame.
+        None => match descriptors.iter().max_by_key(|d| d.viewport_count) {
+            Some(richest) if richest.viewport_count > 0 => richest.id,
+            _ => descriptors[0].id,
+        },
     };
     Ok(Some((database, id)))
 }

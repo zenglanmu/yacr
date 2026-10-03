@@ -75,7 +75,7 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 | DIMENSION 子类 | ✅ | ✅/⚠️ | 线性/对齐/半径/直径/角度/坐标/圆弧长已画；大半径 jog 近似 `Partial` |
 | UNDERLAY / OLE2FRAME | ✅ | ❌ | 外部参照/嵌入对象，无本地内容 |
 | LIGHT / SECTION / VIEWBORDER / SEQEND | ✅ | ❌ | 非绘制或注释对象；保持显式未实现 |
-| 纸空间 `plot` | ✅ | ⚠️ Partial | `flange` 的 `plot` 本轮出帧空白，未定位（独立缺口） |
+| 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复两处：①纸张单位从标准纸名解析（锁定 acadrust 未把 `group 72` 应用到 LAYOUT，曾把 210mm 当 210in → 纹理超限/空白）；②默认选有 viewport 的纸空间布局（flange 的首个 `*Paper_Space` 为空）。纸张/边框/标题栏已出图；视口比例/位置仍为近似 |
 | DXF/X2D 字体提示 | — | ❌ | QCAD 把真实 TTF（如 `Arial`）放在 STYLE 的 XDATA `1000`；锁定的 acadrust `TextStyle` 不暴露该字段。**不可修改 acadrust/不加 patch** |
 
 `entity.rs` 的 `convert` **仍未覆盖**、会落 `Opaque`/`Unsupported` 的 `EntityType`

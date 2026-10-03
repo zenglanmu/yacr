@@ -94,8 +94,14 @@ cargo test -p cad-cli-tools --test dxf_fixture --locked
 
 - 未验证角度/坐标/圆弧长/大半径标注、倾斜平面的标注；这些仍 `Partial`。
 - 文字仍需宿主字体；未注册字体时不绘文字，且缺失原 `Arial` 时用回退字体。
-- 纸空间图框/标题栏不在模型空间 `render` 范围；`plot`（纸空间）本轮出帧为空白，
-  未定位，记为独立缺口，不当作通过。
+- 纸空间 `plot` 已修复：纸张单位从标准纸名（`..._MM)`/`..._Inches)`）解析（锁定
+  acadrust 未把 LAYOUT 的 `group 72` 应用，曾把 210mm 当 210in → 纹理超限/空白），
+  且默认选择带 viewport 的纸空间布局（flange 首个 `*Paper_Space` 为空，真正的图纸是
+  `*Paper_Space1`）。`plot` 现可出纸张边框/标题栏（1191×842，非空像素 20075，9 色）；
+  视口比例/位置仍为近似，未做视觉保真验收。回归测试
+  `crates/cad-cli-tools/tests/dxf_fixture.rs::flange_plot_defaults_to_the_populated_paper_layout`
+  固定“单位=毫米 + 选中 `*Paper_Space1` + 非空帧”。超大 `--dpi` 现返回结构化
+  `gpu_failure` 而不是 `create_texture` panic。
 - 未验证跨 GPU/后端像素一致、真实 GPU、WebGPU、Android；100% 软件渲染。
 - 单样本 smoke 不等于 DXF 兼容性；参考对照是人工辅助，不是授权黄金图矩阵。
 - 仓库其它历史验证文档按当时事实保留（那时样本未入库），只更新了当前政策类文字。

@@ -312,6 +312,15 @@ impl Renderer {
             height: target.height.max(1),
             depth_or_array_layers: 1,
         };
+        // A frame larger than the adapter's texture limit must fail with a
+        // structured frame error, not a `create_texture` validation panic.
+        let limit = device.limits().max_texture_dimension_2d;
+        if size.width > limit || size.height > limit {
+            return Err(RenderError::Frame(format!(
+                "render target {}x{} exceeds the adapter's maximum texture dimension {limit}",
+                size.width, size.height
+            )));
+        }
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("cad-target"),
             size,
