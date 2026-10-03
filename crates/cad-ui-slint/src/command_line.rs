@@ -3,14 +3,38 @@ use crate::{i18n::MessageSource, YacrWindow};
 use slint::ComponentHandle;
 use std::{cell::RefCell, rc::Rc};
 
-pub(crate) fn connect(ui: &YacrWindow, messages: Rc<RefCell<MessageSource>>) {
+/// Resolve a typed token to its canonical command name.
+///
+/// Exact command names are always returned unchanged, so disabling keyboard
+/// shortcuts never removes a real command. A keyboard alias (`L`, `C`, `M`,
+/// `TR`, `ESC`) only expands when shortcuts are enabled; otherwise the token is
+/// returned as-is and the caller reports it as unknown rather than silently
+/// starting a drawing edit.
+pub(crate) fn canonical_command(command: &str, shortcuts: bool) -> &str {
+    match command {
+        "L" if shortcuts => "LINE",
+        "C" if shortcuts => "CIRCLE",
+        "M" if shortcuts => "MOVE",
+        "TR" if shortcuts => "TRIM",
+        "ESC" if shortcuts => "CANCEL",
+        other => other,
+    }
+}
+
+pub(crate) fn connect(
+    ui: &YacrWindow,
+    messages: Rc<RefCell<MessageSource>>,
+    config: Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>>,
+) {
     let weak = ui.as_weak();
     ui.on_command_submitted(move |text| {
         let Some(ui) = weak.upgrade() else {
             return;
         };
+        let shortcuts = config.borrow().effective().interaction.keyboard_shortcuts;
         let command = text.trim().to_ascii_uppercase();
-        match command.as_str() {
+        let command = canonical_command(&command, shortcuts);
+        match command {
             "OPEN" => ui.invoke_open_requested(),
             "FIT" | "ZOOM EXTENTS" => ui.invoke_fit_requested(),
             "UNDO" if ui.get_can_undo() => ui.invoke_undo_requested(),
@@ -18,10 +42,10 @@ pub(crate) fn connect(ui: &YacrWindow, messages: Rc<RefCell<MessageSource>>) {
             // Real draw/edit tools. The machine key is passed straight through;
             // the adapter resolves it (and refuses a Viewer or a MOVE without a
             // selection) rather than fabricating a payload-free command.
-            "LINE" | "L" => ui.invoke_begin_draw_tool("line".into()),
-            "CIRCLE" | "C" => ui.invoke_begin_draw_tool("circle".into()),
-            "MOVE" | "M" => ui.invoke_begin_draw_tool("move".into()),
-            "TRIM" | "TR" => ui.invoke_begin_draw_tool("trim".into()),
+            "LINE" => ui.invoke_begin_draw_tool("line".into()),
+            "CIRCLE" => ui.invoke_begin_draw_tool("circle".into()),
+            "MOVE" => ui.invoke_begin_draw_tool("move".into()),
+            "TRIM" => ui.invoke_begin_draw_tool("trim".into()),
             // AutoCAD convention: CONFIRM/ENTER and ESC act on whatever command
             // is currently active, not only a draw/edit capture.
             "CONFIRM" => {
@@ -33,7 +57,7 @@ pub(crate) fn connect(ui: &YacrWindow, messages: Rc<RefCell<MessageSource>>) {
                     ui.invoke_confirm_draw_requested();
                 }
             }
-            "CANCEL" | "ESC" => {
+            "CANCEL" => {
                 if ui.get_measurement_active() {
                     ui.invoke_cancel_measurement_requested();
                 }
@@ -63,7 +87,7 @@ pub(crate) fn connect(ui: &YacrWindow, messages: Rc<RefCell<MessageSource>>) {
                 ui.set_status_label(
                     messages
                         .borrow()
-                        .text("command.unknown", &[("command", &command)])
+                        .text("command.unknown", &[("command", command)])
                         .into(),
                 );
                 ui.set_command_expanded(true);

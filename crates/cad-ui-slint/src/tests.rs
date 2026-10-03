@@ -812,3 +812,61 @@ fn config_chrome_properties_are_pushed_from_the_store() {
         );
     }
 }
+
+#[test]
+fn interaction_config_gates_pointer_and_touch_input() {
+    use cad_app::viewer_config::{ViewerConfig, ViewerConfigStore};
+
+    // Defaults: both input families are enabled.
+    let mut store = ViewerConfigStore::default();
+    assert!(input_enabled(&store, InputKind::Pointer));
+    assert!(input_enabled(&store, InputKind::Touch));
+
+    // Pointer and touch are independent flags: disabling one never disables the
+    // other, so a keyboard/mouse host keeps working on a touchless surface and
+    // vice versa.
+    let mut config = ViewerConfig::default();
+    config.interaction.pointer = false;
+    store.set_config(config).unwrap();
+    assert!(!input_enabled(&store, InputKind::Pointer));
+    assert!(input_enabled(&store, InputKind::Touch));
+
+    let mut config = ViewerConfig::default();
+    config.interaction.touch = false;
+    store.set_config(config).unwrap();
+    assert!(input_enabled(&store, InputKind::Pointer));
+    assert!(!input_enabled(&store, InputKind::Touch));
+
+    // The reader observes the live store, so re-enabling is immediate.
+    store.set_config(ViewerConfig::default()).unwrap();
+    assert!(input_enabled(&store, InputKind::Pointer));
+    assert!(input_enabled(&store, InputKind::Touch));
+}
+
+#[test]
+fn keyboard_aliases_expand_only_when_shortcuts_are_enabled() {
+    use crate::command_line::canonical_command;
+
+    // Enabled: aliases expand to the exact command names.
+    for (alias, exact) in [
+        ("L", "LINE"),
+        ("C", "CIRCLE"),
+        ("M", "MOVE"),
+        ("TR", "TRIM"),
+        ("ESC", "CANCEL"),
+    ] {
+        assert_eq!(canonical_command(alias, true), exact);
+    }
+
+    // Disabled: a bare alias stays itself and is reported unknown, never a
+    // silent CAD edit.
+    for alias in ["L", "C", "M", "TR", "ESC"] {
+        assert_eq!(canonical_command(alias, false), alias);
+    }
+
+    // Exact names keep working regardless of the shortcut setting.
+    for exact in ["LINE", "CIRCLE", "MOVE", "TRIM", "CANCEL", "ZOOM EXTENTS"] {
+        assert_eq!(canonical_command(exact, false), exact);
+        assert_eq!(canonical_command(exact, true), exact);
+    }
+}
