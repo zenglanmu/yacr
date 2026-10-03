@@ -365,6 +365,9 @@ struct ImporterBuilder<'a> {
     style_ids: HashMap<String, StyleId>,
     /// Lower-cased style name -> primary font file name.
     style_fonts: HashMap<String, String>,
+    /// DXF STYLE-table XDATA font hints (`1000`), used only when acadrust
+    /// exposes no group 3/4 font. Empty for DWG/non-DXF inputs.
+    dxf_style_fonts: HashMap<String, String>,
     /// Source scale handle value -> name, for resolving an annotative entity's
     /// per-scale context leaves (`ACDB_ANNOTATIONSCALES` list).
     scale_names: ScaleNames,

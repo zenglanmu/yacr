@@ -76,7 +76,7 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 | DIMENSION 子类 | ✅ | ✅/⚠️ | 线性/对齐/半径/直径/角度/坐标/圆弧长已画；大半径 jog 近似 `Partial` |
 | OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | ✅/⚠️ | 外框/裁剪边界/符号/灯光字形已画；外部内容不加载，均 `Partial` |
 | 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复三处：①纸张单位从标准纸名解析（锁定 acadrust 未把 `group 72` 应用到 LAYOUT）；②默认选有 viewport 的纸空间布局；③`group 73` 旋转亦未暴露，按 viewport 范围把纸张轴交换为横向（标题栏保持正立）。纸张/边框/标题栏已出图；**模型视图仍有错位/多余图元**（视口合成保真未通过） |
-| DXF/X2D 字体提示 | — | ❌ | QCAD 把真实 TTF（如 `Arial`）放在 STYLE 的 XDATA `1000`；锁定的 acadrust `TextStyle` 不暴露该字段。**不可修改 acadrust/不加 patch** |
+| DXF STYLE XDATA 字体 | — | ✅（DXF） | 锁定的 acadrust `TextStyle` 不暴露 XDATA；新增 DXF-only 扫描把 STYLE 的 `1001 ACAD`/`1000` 字体名补入 `style_fonts`（组件 group 3/4 优先，不改 acadrust）。DXF 文本现可按宿主 `--font <face>=<path>` 解析；DWG 无此通道，需 acadrust 暴露 |
 
 `entity.rs` 的 `convert` 现覆盖所有可绘制 `EntityType`；仅结构性 `Block`/`BlockEnd`/
 `Seqend` 不产生几何（本来就不应绘制）。`MultiLeader`/`MLine`/`Tolerance`/`Table`/
@@ -107,4 +107,4 @@ QCAD 字体：`osifont.ttf`（GPLv3）与 `Standard/ltypeshp/qcadshp.cxf`（publ
   对象给出外框/符号/字形并标 `Partial`），仅结构性 `Block/BlockEnd/Seqend` 不产生几何。
   仍有保真度缺口（`Partial`）：MLINE joins/caps、MULTILEADER 样式与块内容、TOLERANCE
   框宽与字形、TABLE 边框样式、大半径 jog、RASTERIMAGE 像素纹理、外部内容加载、纸空间
-  视口比例/位置，以及 DXF XDATA 字体名，见 §4。
+  视口比例/位置，见 §4。DXF STYLE XDATA 字体名已补回（DWG 仍依赖 acadrust 暴露）。

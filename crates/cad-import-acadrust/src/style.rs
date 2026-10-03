@@ -214,6 +214,80 @@ pub(crate) fn linetype_pattern(linetype: &acadrust::LineType) -> (LinetypePatter
     (pattern, linetype.is_complex())
 }
 
+/// Best-effort `style name -> font file` from a DXF STYLE table's XDATA.
+///
+/// QCAD writes the real TrueType face under the STYLE record's `Acad` XDATA
+/// (`1001 ACAD` / `1000 Arial`) and leaves group 3 empty. The locked acadrust
+/// `TextStyle` does not expose XDATA, so for DXF inputs this small scan fills
+/// the gap. It never overrides a declared group 3/4 font and returns nothing for
+/// non-DXF bytes.
+pub(crate) fn dxf_style_xdata_fonts(bytes: &[u8]) -> HashMap<String, String> {
+    // Cheap DXF sniff: the first two non-empty ASCII pair lines are `0`/`SECTION`
+    // (allow the common leading spaces and CRLF). Binary DXF is skipped.
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(64)]);
+    let mut lines = head.lines();
+    let ascii = matches!(
+        (lines.next(), lines.next()),
+        (Some(code), Some(value)) if code.trim() == "0" && value.trim() == "SECTION"
+    );
+    if !ascii {
+        return HashMap::new();
+    }
+    let text = String::from_utf8_lossy(&bytes[..bytes.len().min(64 * 1024 * 1024)]);
+    let mut lines = text.lines();
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    while let (Some(code), Some(value)) = (lines.next(), lines.next()) {
+        pairs.push((code.trim().to_string(), value.trim().to_string()));
+    }
+    let mut fonts: HashMap<String, String> = HashMap::new();
+    let mut in_tables = false;
+    let mut in_style = false;
+    let mut name = String::new();
+    let mut declared = String::new();
+    let mut in_acad = false;
+    let mut xdata = String::new();
+    for (code, value) in &pairs {
+        if code == "0" {
+            if in_style {
+                let font = if declared.is_empty() {
+                    xdata.as_str()
+                } else {
+                    declared.as_str()
+                };
+                if !name.is_empty() && !font.is_empty() {
+                    fonts.insert(name.to_ascii_lowercase(), font.to_string());
+                }
+            }
+            if value == "SECTION" || value == "ENDSEC" {
+                in_tables = false;
+            }
+            in_style = in_tables && value == "STYLE";
+            name.clear();
+            declared.clear();
+            xdata.clear();
+            in_acad = false;
+            continue;
+        }
+        if !in_style {
+            if code == "2" && value == "TABLES" {
+                in_tables = true;
+            }
+            continue;
+        }
+        match code.as_str() {
+            "2" => name = value.clone(),
+            "3" if declared.is_empty() => declared = value.clone(),
+            "1001" => in_acad = value.eq_ignore_ascii_case("ACAD"),
+            "1000" if in_acad => {
+                xdata = value.clone();
+                in_acad = false;
+            }
+            _ => {}
+        }
+    }
+    fonts
+}
+
 pub(crate) fn map_h_align(align: TextHorizontalAlignment) -> TextAlignH {
     match align {
         TextHorizontalAlignment::Center | TextHorizontalAlignment::Middle => TextAlignH::Center,
@@ -247,4 +321,31 @@ pub(crate) fn attach_align(attachment: AttachmentPoint) -> (TextAlignH, TextAlig
         BottomLeft | BottomCenter | BottomRight => TextAlignV::Bottom,
     };
     (h, v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dxf(style_block: &str) -> Vec<u8> {
+        format!(
+            "0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nSTYLE\n{style_block}\n0\nENDTAB\n0\nENDSEC\n0\nEOF\n"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn dxf_style_xdata_font_is_recovered_when_group_3_is_empty() {
+        let bytes = dxf("0\nSTYLE\n2\ntextstyle0\n3\n\n1001\nACAD\n1000\nArial\n1071\n0");
+        let fonts = dxf_style_xdata_fonts(&bytes);
+        assert_eq!(fonts.get("textstyle0").map(String::as_str), Some("Arial"));
+    }
+
+    #[test]
+    fn declared_group_3_wins_over_xdata_and_non_dxf_is_empty() {
+        let bytes = dxf("0\nSTYLE\n2\ns\n3\ntxt.shx\n1001\nACAD\n1000\nArial");
+        let fonts = dxf_style_xdata_fonts(&bytes);
+        assert_eq!(fonts.get("s").map(String::as_str), Some("txt.shx"));
+        assert!(dxf_style_xdata_fonts(b"not a dxf").is_empty());
+    }
 }

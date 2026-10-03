@@ -41,6 +41,7 @@ impl<'a> ImporterBuilder<'a> {
             complex_linetypes: BTreeSet::new(),
             style_ids: HashMap::new(),
             style_fonts: HashMap::new(),
+            dxf_style_fonts: dxf_style_xdata_fonts(request.bytes.as_ref()),
             scale_names: HashMap::new(),
             block_ids: HashMap::new(),
             block_base_points: HashMap::new(),
@@ -299,7 +300,11 @@ impl<'a> ImporterBuilder<'a> {
             } else if !style.font_file.is_empty() {
                 Some(style.font_file.clone())
             } else {
-                None
+                // QCAD stores the face in STYLE XDATA, invisible to the locked
+                // acadrust `TextStyle`; the DXF scan recovers it.
+                self.dxf_style_fonts
+                    .get(&style.name.to_ascii_lowercase())
+                    .cloned()
             };
             if let Some(font) = primary {
                 self.style_fonts
