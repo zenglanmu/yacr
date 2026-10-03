@@ -195,6 +195,11 @@ pub(super) fn push_panel_state(
         view.set_selection_highlight(overlay.selection);
         view.set_measurement_preview(overlay.measurement);
         view.set_annotation_preview(overlay.annotation);
+        // Object-snap hints under the live tool cursor. The renderer gates them
+        // on `view.overlays.snapHints`, so feeding them unconditionally is safe;
+        // an idle tool or a snap error clears the overlay (explicit empty), the
+        // same recovery the rest of this funnel uses.
+        view.set_snap_hints(controller.snap_hints_near_cursor().unwrap_or_default());
     }
 
     // Undo/redo: one snapshot drives both flags.
