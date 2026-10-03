@@ -446,6 +446,7 @@ impl HostController {
             annotations: document.annotations.annotations().cloned().collect(),
             view_bookmarks: Vec::new(),
             extensions_json: Default::default(),
+            nested_extensions: Default::default(),
         };
         let bytes = AnnotationService.encode(&file)?;
         let json = String::from_utf8(bytes)
@@ -513,6 +514,7 @@ impl HostController {
             } else {
                 1.0
             },
+            extensions_json: Default::default(),
         })
     }
 

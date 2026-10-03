@@ -261,7 +261,33 @@ pub struct RecoverySnapshot {
     pub annotations_json: String,
     pub camera_center: [f64; 3],
     pub camera_world_per_px: f64,
+    /// Unknown top-level recovery fields, preserved verbatim so a newer writer's
+    /// data survives an older reader instead of being silently dropped.
+    pub extensions_json: std::collections::BTreeMap<String, String>,
 }
+
+impl Default for RecoverySnapshot {
+    fn default() -> Self {
+        Self {
+            identity: DocumentIdentity::Temporary(0),
+            name_hint: String::new(),
+            annotations_json: String::new(),
+            camera_center: [0.0; 3],
+            camera_world_per_px: 1.0,
+            extensions_json: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+/// Top-level recovery snapshot fields the current schema defines.
+const KNOWN_RECOVERY_FIELDS: [&str; 6] = [
+    "version",
+    "identity",
+    "name_hint",
+    "camera_center",
+    "camera_world_per_px",
+    "annotations",
+];
 
 impl RecoverySnapshot {
     /// Serialize to a single JSON object for storage.
@@ -283,30 +309,42 @@ impl RecoverySnapshot {
         // The annotation JSON is already a JSON object; embed the metadata
         // around it without re-escaping the payload by storing it as a nested
         // object under a dedicated key.
-        format!(
-            "{{\"version\":1,\"identity\":{},\"name_hint\":{},\"camera_center\":{},\"camera_world_per_px\":{},\"annotations\":{}}}",
+        let mut out = format!(
+            "{{\"version\":1,\"identity\":{},\"name_hint\":{},\"camera_center\":{},\"camera_world_per_px\":{},\"annotations\":{}",
             json_string(&identity),
             json_string(&self.name_hint),
             camera_center,
             json_number(self.camera_world_per_px),
             self.annotations_json,
-        )
+        );
+        // Preserved unknown top-level fields are appended verbatim as raw JSON.
+        for (key, raw) in &self.extensions_json {
+            out.push(',');
+            out.push_str(&json_string(key));
+            out.push(':');
+            out.push_str(raw);
+        }
+        out.push('}');
+        out
     }
 
     /// Parse a snapshot produced by [`RecoverySnapshot::encode`].
     ///
     /// Returns `None` for malformed input rather than fabricating an empty
     /// snapshot, so a corrupt recovery copy is never silently treated as "no
-    /// unsaved work".
+    /// unsaved work". A version *newer* than this build understands is also
+    /// refused (never silently downgraded); unknown top-level fields are
+    /// preserved verbatim.
     pub fn decode(text: &str) -> Option<RecoverySnapshot> {
         let value: serde_json::Value = serde_json::from_str(text).ok()?;
-        let version = value.get("version")?.as_u64()?;
+        let object = value.as_object()?;
+        let version = object.get("version")?.as_u64()?;
         if version != 1 {
             return None;
         }
-        let identity = parse_identity(value.get("identity")?.as_str()?)?;
-        let name_hint = value.get("name_hint")?.as_str()?.to_string();
-        let camera = value.get("camera_center")?.as_array()?;
+        let identity = parse_identity(object.get("identity")?.as_str()?)?;
+        let name_hint = object.get("name_hint")?.as_str()?.to_string();
+        let camera = object.get("camera_center")?.as_array()?;
         if camera.len() != 3 {
             return None;
         }
@@ -315,15 +353,22 @@ impl RecoverySnapshot {
             camera[1].as_f64()?,
             camera[2].as_f64()?,
         ];
-        let camera_world_per_px = value.get("camera_world_per_px")?.as_f64()?;
-        let annotations = value.get("annotations")?;
+        let camera_world_per_px = object.get("camera_world_per_px")?.as_f64()?;
+        let annotations = object.get("annotations")?;
         let annotations_json = serde_json::to_string(annotations).ok()?;
+        let mut extensions_json = std::collections::BTreeMap::new();
+        for (key, value) in object {
+            if !KNOWN_RECOVERY_FIELDS.contains(&key.as_str()) {
+                extensions_json.insert(key.clone(), value.to_string());
+            }
+        }
         Some(RecoverySnapshot {
             identity,
             name_hint,
             annotations_json,
             camera_center,
             camera_world_per_px,
+            extensions_json,
         })
     }
 }
@@ -494,6 +539,7 @@ mod tests {
             annotations_json: "{\"schema_version\":1,\"annotations\":[]}".into(),
             camera_center: [1.5, -2.0, 3.25],
             camera_world_per_px: 0.125,
+            ..Default::default()
         };
         let encoded = snapshot.encode();
         let decoded = RecoverySnapshot::decode(&encoded).expect("round trip");
@@ -517,6 +563,7 @@ mod tests {
             annotations_json: "{}".into(),
             camera_center: [0.0, 0.0, 0.0],
             camera_world_per_px: 1.0,
+            ..Default::default()
         };
         let decoded = RecoverySnapshot::decode(&snapshot.encode()).unwrap();
         assert_eq!(decoded.identity, DocumentIdentity::Temporary(42));
@@ -530,6 +577,34 @@ mod tests {
         // A truncated identity must not silently become "no unsaved work".
         assert!(RecoverySnapshot::decode(
             "{\"version\":1,\"identity\":\"sha256:ab\",\"name_hint\":\"x\",\"camera_center\":[0,0,0],\"camera_world_per_px\":1,\"annotations\":{}}"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn recovery_snapshot_preserves_unknown_top_level_fields() {
+        // A newer writer's extra metadata must survive a decode -> encode cycle
+        // instead of being silently dropped by this build.
+        let text = "{\"version\":1,\"identity\":\"tmp:7\",\"name_hint\":\"plan.dwg\",\
+            \"camera_center\":[0,0,0],\"camera_world_per_px\":1,\
+            \"annotations\":{\"schema_version\":1,\"annotations\":[]},\
+            \"future_meta\":{\"pinned\":true},\"future_flag\":3}";
+        let snapshot = RecoverySnapshot::decode(text).expect("decode");
+        assert!(snapshot.extensions_json.contains_key("future_meta"));
+        assert!(snapshot.extensions_json.contains_key("future_flag"));
+        let reencoded = snapshot.encode();
+        let again = RecoverySnapshot::decode(&reencoded).expect("re-decode");
+        assert_eq!(again.extensions_json, snapshot.extensions_json);
+        assert!(reencoded.contains("future_meta"));
+        assert!(reencoded.contains("future_flag"));
+    }
+
+    #[test]
+    fn recovery_snapshot_refuses_a_newer_version_instead_of_downgrading() {
+        // Version 2 is not fabricated into a v1 snapshot; callers must treat it
+        // as unreadable rather than "no unsaved work".
+        assert!(RecoverySnapshot::decode(
+            "{\"version\":2,\"identity\":\"tmp:1\",\"name_hint\":\"x\",\"camera_center\":[0,0,0],\"camera_world_per_px\":1,\"annotations\":{}}"
         )
         .is_none());
     }

@@ -5,6 +5,54 @@
 
 use super::*;
 
+/// Known keys of the annotation object.
+pub(crate) const KNOWN_ANNOTATION: [&str; 9] = [
+    "id",
+    "space",
+    "geometry",
+    "text",
+    "style",
+    "created_unix_ms",
+    "modified_unix_ms",
+    "anchor",
+    "precision",
+];
+
+/// Known keys shared by every geometry object plus its `kind`.
+pub(crate) const KNOWN_GEOMETRY: [&str; 10] = [
+    "kind",
+    "position",
+    "points",
+    "a",
+    "b",
+    "center",
+    "axis_u",
+    "axis_v",
+    "algorithm",
+    "value",
+];
+
+/// Known keys of a measurement geometry object (superset of [`KNOWN_GEOMETRY`]).
+pub(crate) const KNOWN_MEASUREMENT: [&str; 14] = [
+    "kind",
+    "position",
+    "points",
+    "a",
+    "b",
+    "center",
+    "axis_u",
+    "axis_v",
+    "algorithm",
+    "value",
+    "plane",
+    "units",
+    "source",
+    "precision",
+];
+
+/// Known keys of an annotation-level or measurement-level `precision` object.
+pub(crate) const KNOWN_PRECISION: [&str; 2] = ["kind", "error_bound"];
+
 pub(crate) fn encode_geometry(geometry: &AnnotationGeometry) -> Value {
     match geometry {
         AnnotationGeometry::Text(p) => json!({ "kind": "text", "position": encode_point(*p) }),
@@ -123,33 +171,28 @@ pub(crate) fn decode_precision(value: Option<&Value>) -> CadResult<Precision> {
     }
 }
 
-pub(crate) fn decode_geometry(value: &Value) -> CadResult<AnnotationGeometry> {
+/// Decode a geometry object, also reporting whether it carries a nested
+/// `precision` object (measurement geometries do; other kinds do not).
+pub(crate) fn decode_geometry_with_kind(value: &Value) -> CadResult<(AnnotationGeometry, bool)> {
     let object = value
         .as_object()
         .ok_or_else(|| corrupt("geometry must be an object"))?;
     let kind = require_str(object, "kind")?;
-    match kind {
-        "text" => Ok(AnnotationGeometry::Text(decode_point(require(
-            object, "position",
-        )?)?)),
-        "leader" => Ok(AnnotationGeometry::Leader(decode_points(require(
-            object, "points",
-        )?)?)),
-        "freehand" => Ok(AnnotationGeometry::Freehand(decode_points(require(
-            object, "points",
-        )?)?)),
-        "cloud" => Ok(AnnotationGeometry::Cloud(decode_points(require(
-            object, "points",
-        )?)?)),
-        "rectangle" => Ok(AnnotationGeometry::Rectangle([
+    let precision_is_measurement = kind == "measurement";
+    let geometry = match kind {
+        "text" => AnnotationGeometry::Text(decode_point(require(object, "position")?)?),
+        "leader" => AnnotationGeometry::Leader(decode_points(require(object, "points")?)?),
+        "freehand" => AnnotationGeometry::Freehand(decode_points(require(object, "points")?)?),
+        "cloud" => AnnotationGeometry::Cloud(decode_points(require(object, "points")?)?),
+        "rectangle" => AnnotationGeometry::Rectangle([
             decode_point(require(object, "a")?)?,
             decode_point(require(object, "b")?)?,
-        ])),
-        "ellipse" => Ok(AnnotationGeometry::Ellipse {
+        ]),
+        "ellipse" => AnnotationGeometry::Ellipse {
             center: decode_point(require(object, "center")?)?,
             axis_u: decode_point(require(object, "axis_u")?)?,
             axis_v: decode_point(require(object, "axis_v")?)?,
-        }),
+        },
         "measurement" => {
             // Missing/invalid algorithm, units, source or precision must not be
             // silently approximated as analytic/UserPoints (audit B09).
@@ -157,7 +200,7 @@ pub(crate) fn decode_geometry(value: &Value) -> CadResult<AnnotationGeometry> {
             let units = decode_units(object.get("units"))?;
             let source = decode_geometry_source(object.get("source"))?;
             let precision = decode_precision(object.get("precision"))?;
-            Ok(AnnotationGeometry::Measurement(MeasurementRecord {
+            AnnotationGeometry::Measurement(MeasurementRecord {
                 algorithm,
                 inputs: decode_points(require(object, "points")?)?,
                 plane: match object.get("plane") {
@@ -168,8 +211,9 @@ pub(crate) fn decode_geometry(value: &Value) -> CadResult<AnnotationGeometry> {
                 units,
                 source,
                 precision,
-            }))
+            })
         }
-        other => Err(corrupt(format!("unknown geometry kind '{other}'"))),
-    }
+        other => return Err(corrupt(format!("unknown geometry kind '{other}'"))),
+    };
+    Ok((geometry, precision_is_measurement))
 }
