@@ -998,6 +998,47 @@ fn configured_ribbon_groups_over_the_cap_keep_every_command() {
 }
 
 #[test]
+fn ribbon_overflow_is_a_floating_anchored_flyout_not_inline() {
+    let ribbon = include_str!("../ui/ribbon.slint");
+    // The overflow opens as a PopupWindow, i.e. its own surface anchored below
+    // the ▾ button, so the ribbon row height does not grow.
+    assert!(
+        ribbon.contains("PopupWindow"),
+        "overflow must use a floating PopupWindow"
+    );
+    for marker in [
+        "overflow-flyout := PopupWindow",
+        "overflow-flyout.show()",
+        "overflow-flyout.close()",
+        // Anchoring: x/y track the open button's recorded origin.
+        "x: root.overflow-anchor-x",
+        "y: root.overflow-anchor-y",
+        // Outside-click close resets the ribbon's open-group index.
+        "overflow-flyout-open",
+        "close-on-click-outside",
+    ] {
+        assert!(
+            ribbon.contains(marker),
+            "floating flyout must expose marker {marker}"
+        );
+    }
+    // The remainder must dispatch the real command id and close the flyout.
+    assert!(ribbon.contains("root.ribbon-command(command.id)"));
+    // No inline remainder list remains: the only occurrence of the past-cap
+    // bound is inside the popup, and no inline group ever grows with it.
+    let past_cap = "command-index >= root.max-commands";
+    assert_eq!(
+        ribbon.matches(past_cap).count(),
+        1,
+        "exactly one past-cap renderer (the flyout) should remain"
+    );
+    assert!(
+        !ribbon.contains("Expanded overflow list"),
+        "the inline overflow list must be gone"
+    );
+}
+
+#[test]
 fn ribbon_group_overflow_markers_are_present() {
     let ribbon = include_str!("../ui/ribbon.slint");
     for marker in [
