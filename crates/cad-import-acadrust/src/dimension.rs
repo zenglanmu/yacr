@@ -254,10 +254,11 @@ fn format_measurement(value: f64, style: &DimStyleValues) -> String {
 }
 
 /// Resolve the displayed text: a user override with `<>` substituted, or the
-/// subtype's default prefix plus the formatted measurement.
+/// subtype's default prefix/suffix plus the formatted measurement.
 fn resolve_measurement_text(
     base: &DimensionBase,
     prefix: &str,
+    suffix: &str,
     measurement: f64,
     style: &DimStyleValues,
 ) -> String {
@@ -270,8 +271,208 @@ fn resolve_measurement_text(
                 template.to_string()
             }
         }
-        None => format!("{prefix}{value}"),
+        None => format!("{prefix}{value}{suffix}"),
     }
+}
+
+/// Angular dimension: an arc between two rays from `vertex`, with extension
+/// lines, tangential arrows and the angle text.
+fn angular_geometry(
+    vertex: Point3,
+    point1: Point3,
+    point2: Point3,
+    radius: f64,
+    normal: Point3,
+    style: &DimStyleValues,
+) -> Option<DimensionGeometry> {
+    let d1 = cad_geometry::sub(point1, vertex);
+    let d2 = cad_geometry::sub(point2, vertex);
+    if cad_geometry::length(d1) < 1e-9 || cad_geometry::length(d2) < 1e-9 {
+        return None;
+    }
+    let u1 = cad_geometry::normalize(d1);
+    let u2 = cad_geometry::normalize(d2);
+    let a1 = u1.y.atan2(u1.x);
+    let a2 = u2.y.atan2(u2.x);
+    let mut sweep = a2 - a1;
+    use std::f64::consts::PI;
+    while sweep > PI {
+        sweep -= 2.0 * PI;
+    }
+    while sweep < -PI {
+        sweep += 2.0 * PI;
+    }
+    let r = if radius.is_finite() && radius > 1e-9 {
+        radius
+    } else {
+        1.0
+    };
+    let dir_at = |angle: f64| Point3 {
+        x: angle.cos(),
+        y: angle.sin(),
+        z: 0.0,
+    };
+    let end1 = cad_geometry::add(vertex, cad_geometry::scale(u1, r));
+    let end2 = cad_geometry::add(vertex, cad_geometry::scale(dir_at(a1 + sweep), r));
+    let mut children = vec![SemanticGeometry::Arc {
+        center: vertex,
+        normal,
+        radius: r,
+        start: a1,
+        sweep,
+    }];
+    if let Some(line) = line_between(point1, end1) {
+        children.push(line);
+    }
+    if let Some(line) = line_between(point2, end2) {
+        children.push(line);
+    }
+    if style.arrow_size > 1e-9 {
+        // Tangential arrowheads at both arc ends.
+        let sign = if sweep >= 0.0 { -1.0 } else { 1.0 };
+        let t1 = Point3 {
+            x: -u1.y,
+            y: u1.x,
+            z: 0.0,
+        };
+        let t2 = Point3 {
+            x: -dir_at(a1 + sweep).y,
+            y: dir_at(a1 + sweep).x,
+            z: 0.0,
+        };
+        children.push(arrowhead(
+            end1,
+            cad_geometry::scale(t1, sign),
+            style.arrow_size,
+        ));
+        children.push(arrowhead(
+            end2,
+            cad_geometry::scale(t2, -sign),
+            style.arrow_size,
+        ));
+    }
+    let mid = dir_at(a1 + sweep / 2.0);
+    let text_position = cad_geometry::add(
+        vertex,
+        cad_geometry::scale(mid, r + style.text_gap + style.text_height * 0.5),
+    );
+    Some(DimensionGeometry {
+        children,
+        measurement: sweep.abs().to_degrees(),
+        text_position,
+        text_rotation: readable_angle(a1 + sweep / 2.0),
+    })
+}
+
+/// Ordinate dimension: a leader from the feature point to the dimension line,
+/// with the feature coordinate as text.
+fn ordinate_geometry(feature: Point3, leader: Point3, is_x: bool) -> Option<DimensionGeometry> {
+    if !cad_geometry::is_finite(feature) || !cad_geometry::is_finite(leader) {
+        return None;
+    }
+    let mut children = Vec::new();
+    if let Some(line) = line_between(feature, leader) {
+        children.push(line);
+    }
+    Some(DimensionGeometry {
+        children,
+        measurement: if is_x { feature.x } else { feature.y },
+        text_position: leader,
+        text_rotation: 0.0,
+    })
+}
+
+/// Arc-length dimension: the measured arc plus extension lines and arrows.
+fn arc_length_geometry(
+    center: Point3,
+    first_extension: Point3,
+    second_extension: Point3,
+    start: f64,
+    end: f64,
+    normal: Point3,
+    style: &DimStyleValues,
+) -> Option<DimensionGeometry> {
+    let radius = cad_geometry::distance(center, first_extension);
+    if !cad_geometry::is_finite(center) || radius < 1e-9 {
+        return None;
+    }
+    let sweep = normalize_sweep(end - start);
+    let dir_at = |angle: f64| Point3 {
+        x: angle.cos(),
+        y: angle.sin(),
+        z: 0.0,
+    };
+    let mut children = vec![SemanticGeometry::Arc {
+        center,
+        normal,
+        radius,
+        start,
+        sweep,
+    }];
+    let end1 = cad_geometry::add(center, cad_geometry::scale(dir_at(start), radius));
+    let end2 = cad_geometry::add(center, cad_geometry::scale(dir_at(start + sweep), radius));
+    for (point, foot) in [(first_extension, end1), (second_extension, end2)] {
+        if let Some(line) = line_between(point, foot) {
+            children.push(line);
+        }
+    }
+    if style.arrow_size > 1e-9 {
+        let sign = if sweep >= 0.0 { -1.0 } else { 1.0 };
+        let t1 = Point3 {
+            x: -dir_at(start).y,
+            y: dir_at(start).x,
+            z: 0.0,
+        };
+        let t2 = Point3 {
+            x: -dir_at(start + sweep).y,
+            y: dir_at(start + sweep).x,
+            z: 0.0,
+        };
+        children.push(arrowhead(
+            end1,
+            cad_geometry::scale(t1, sign),
+            style.arrow_size,
+        ));
+        children.push(arrowhead(
+            end2,
+            cad_geometry::scale(t2, -sign),
+            style.arrow_size,
+        ));
+    }
+    let mid = dir_at(start + sweep / 2.0);
+    Some(DimensionGeometry {
+        children,
+        measurement: radius * sweep.abs(),
+        text_position: cad_geometry::add(
+            center,
+            cad_geometry::scale(mid, radius + style.text_gap + style.text_height * 0.5),
+        ),
+        text_rotation: readable_angle(start + sweep / 2.0),
+    })
+}
+
+/// Jogged / large-radius radial dimension: the leader with its jog, plus the
+/// chord arrow. The jog geometry is approximate and reported `Partial`.
+fn large_radial_geometry(center: Point3, chord: Point3, jog: Point3) -> Option<DimensionGeometry> {
+    if !cad_geometry::is_finite(center)
+        || !cad_geometry::is_finite(chord)
+        || !cad_geometry::is_finite(jog)
+    {
+        return None;
+    }
+    let mut children = Vec::new();
+    if let Some(line) = line_between(jog, chord) {
+        children.push(line);
+    }
+    if let Some(line) = line_between(center, jog) {
+        children.push(line);
+    }
+    Some(DimensionGeometry {
+        children,
+        measurement: cad_geometry::distance(center, chord),
+        text_position: jog,
+        text_rotation: 0.0,
+    })
 }
 
 impl ImporterBuilder<'_> {
@@ -404,6 +605,7 @@ impl ImporterBuilder<'_> {
         geometry: &DimensionGeometry,
         style: &DimStyleValues,
         prefix: &str,
+        suffix: &str,
     ) -> SemanticGeometry {
         let explicit = p3(base.text_middle_point);
         let position = if cad_geometry::length(explicit) > 1e-9 {
@@ -416,7 +618,7 @@ impl ImporterBuilder<'_> {
         } else {
             geometry.text_rotation
         };
-        let content = resolve_measurement_text(base, prefix, geometry.measurement, style);
+        let content = resolve_measurement_text(base, prefix, suffix, geometry.measurement, style);
         self.dimension_text(&content, position, rotation, style)
     }
 
@@ -471,25 +673,66 @@ impl ImporterBuilder<'_> {
             Dimension::Diameter(dd) => {
                 radial_geometry(p3(dd.angle_vertex), p3(dd.definition_point), true, &style)
             }
-            _ => {
-                return Self::unsupported_dimension(
-                    base,
-                    "dimension subtype is not synthesized".into(),
-                )
+            Dimension::Angular2Ln(a) => angular_geometry(
+                p3(a.angle_vertex),
+                p3(a.first_point),
+                p3(a.definition_point),
+                cad_geometry::distance(p3(a.angle_vertex), p3(a.dimension_arc)),
+                p3(a.base.normal),
+                &style,
+            ),
+            Dimension::Angular3Pt(a) => angular_geometry(
+                p3(a.angle_vertex),
+                p3(a.first_point),
+                p3(a.second_point),
+                cad_geometry::distance(p3(a.angle_vertex), p3(a.definition_point)),
+                p3(a.base.normal),
+                &style,
+            ),
+            Dimension::Ordinate(o) => ordinate_geometry(
+                p3(o.feature_location),
+                p3(o.leader_endpoint),
+                o.is_ordinate_type_x,
+            ),
+            Dimension::Arc(a) => arc_length_geometry(
+                p3(a.center_point),
+                p3(a.first_extension_point),
+                p3(a.second_extension_point),
+                a.arc_start_parameter,
+                a.arc_end_parameter,
+                p3(a.base.normal),
+                &style,
+            ),
+            Dimension::LargeRadial(lr) => {
+                let override_center = p3(lr.override_center);
+                let center = if cad_geometry::length(override_center) > 1e-9 {
+                    override_center
+                } else {
+                    p3(lr.definition_point)
+                };
+                large_radial_geometry(center, p3(lr.chord_point), p3(lr.jog_point))
             }
         };
         let Some(geometry) = geometry else {
             return Self::unsupported_dimension(base, "dimension points are degenerate".into());
         };
-        let prefix = match d {
-            Dimension::Radius(_) => "R",
-            Dimension::Diameter(_) => "\u{2300}",
-            _ => "",
+        let (prefix, suffix, completeness) = match d {
+            Dimension::Radius(_) => ("R", "", Completeness::Complete),
+            Dimension::Diameter(_) => ("\u{2300}", "", Completeness::Complete),
+            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => {
+                ("", "\u{00B0}", Completeness::Complete)
+            }
+            Dimension::LargeRadial(_) => (
+                "R",
+                "",
+                Completeness::Partial(vec!["large-radial jog is approximated".into()]),
+            ),
+            _ => ("", "", Completeness::Complete),
         };
-        let text = self.place_dimension_text(base, &geometry, &style, prefix);
+        let text = self.place_dimension_text(base, &geometry, &style, prefix, suffix);
         let mut children = geometry.children;
         children.push(text);
-        (SemanticGeometry::Compound(children), Completeness::Complete)
+        (SemanticGeometry::Compound(children), completeness)
     }
 
     /// Convert a LEADER into its polyline path plus the arrowhead at the first
@@ -720,13 +963,121 @@ mod tests {
         style.decimals = 2;
         style.suppress_trailing_zeros = true;
         let base = DimensionBase::new(acadrust::entities::DimensionType::Aligned);
-        assert_eq!(resolve_measurement_text(&base, "", 42.0, &style), "42");
-        assert_eq!(resolve_measurement_text(&base, "R", 5.0, &style), "R5");
+        assert_eq!(resolve_measurement_text(&base, "", "", 42.0, &style), "42");
+        assert_eq!(resolve_measurement_text(&base, "R", "", 5.0, &style), "R5");
+        assert_eq!(
+            resolve_measurement_text(&base, "", "\u{00B0}", 45.0, &style),
+            "45°"
+        );
         let mut overriding = base.clone();
         overriding.set_text_override(Some("R<>".to_string()));
         assert_eq!(
-            resolve_measurement_text(&overriding, "R", 5.0, &style),
+            resolve_measurement_text(&overriding, "R", "", 5.0, &style),
             "R5"
         );
+    }
+
+    #[test]
+    fn angular_dimension_measures_the_arc_and_draws_arrows() {
+        let vertex = Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let geometry = angular_geometry(
+            vertex,
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            5.0,
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            &style(),
+        )
+        .expect("angular geometry");
+        assert!(
+            approx(geometry.measurement, 90.0),
+            "{}",
+            geometry.measurement
+        );
+        assert_eq!(
+            geometry
+                .children
+                .iter()
+                .filter(|c| matches!(c, SemanticGeometry::Arc { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            geometry
+                .children
+                .iter()
+                .filter(|c| matches!(c, SemanticGeometry::Mesh(_)))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn ordinate_dimension_reports_the_feature_coordinate() {
+        let geometry = ordinate_geometry(
+            Point3 {
+                x: 10.0,
+                y: 3.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 10.0,
+                y: 8.0,
+                z: 0.0,
+            },
+            false,
+        )
+        .expect("ordinate geometry");
+        assert!(approx(geometry.measurement, 3.0));
+    }
+
+    #[test]
+    fn arc_length_dimension_measures_the_arc() {
+        let geometry = arc_length_geometry(
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 5.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 0.0,
+                y: 5.0,
+                z: 0.0,
+            },
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            &style(),
+        )
+        .expect("arc length geometry");
+        assert!(approx(
+            geometry.measurement,
+            5.0 * std::f64::consts::FRAC_PI_2
+        ));
     }
 }
