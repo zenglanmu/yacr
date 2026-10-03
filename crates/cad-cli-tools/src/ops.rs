@@ -272,7 +272,8 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
 
     let registry = cad_representation::ProviderRegistry::with_default_provider();
-    let context = representation_context(&controller, None);
+    let fonts = load_fonts(&invocation.fonts)?;
+    let context = representation_context(&controller, fonts.as_ref());
 
     // One delta over every model-space entity. `SceneCache::build` skips
     // Text/Instance/Image (documented) and returns line/mesh batches only.
@@ -435,7 +436,8 @@ pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Valu
 
     let started = std::time::Instant::now();
     let controller = load_document(invocation)?;
-    let context = representation_context(&controller, None);
+    let fonts = load_fonts(&invocation.fonts)?;
+    let context = representation_context(&controller, fonts.as_ref());
     let registry = cad_representation::ProviderRegistry::with_default_provider();
 
     // Real layouts when present, otherwise a synthetic sheet so the planner and

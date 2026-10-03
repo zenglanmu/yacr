@@ -168,3 +168,6 @@ Android 若未把字体目录放进 `assets/fonts/`（含 `fonts.json`），打�
 含文本的图纸在导入报告里不会被报告为 `Complete`（导入阶段不知道宿主是否有字体）；
 在 `build-representation` 注入字体后文本即可绘。
 
+2026-10-03 真实图纸回归修复：CLI `render` / `plot` 也将 `--font` 注入表示上下文，
+不再仅在 `build-representation` / `benchmark` 生效。无字体时仍保留不可绘 Text，
+不把文字缺失当作完整渲染。canteen 原生/浏览器的差异见 `validation-dwg.md`。

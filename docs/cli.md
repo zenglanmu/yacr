@@ -30,7 +30,7 @@ cad-cli-tools <operation> <input.dwg> [options]
 | `--height <u32>` | `render`：帧高（像素，默认 `720`）；非数字或 `0` 为用法错误 |
 | `--locale <tag>` | **仅**人类 stderr 文字的语言，`zh-CN`（默认）或 `en`；机器输出不变 |
 | `--allow-fingerprint-mismatch` | 图纸指纹不匹配时仍导入批注 |
-| `--font <name=path>` | 注册 TTF/OTF/WOFF 字体用于文字成型（可重复；省略 `name=` 时取文件名） |
+| `--font <name=path>` | 注册 TTF/OTF/WOFF/SHX 字体用于文字成型（可重复；省略 `name=` 时取文件名）；`render` / `plot` 也使用这些字体 |
 | `--help`, `-h` | 打印用法并退出 0 |
 
 ### 语言（`--locale`）

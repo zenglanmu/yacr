@@ -71,9 +71,7 @@ fn rectangle_lines() -> Vec<[f32; 3]> {
     ]
 }
 
-/// A triangle wound clockwise in world space. The 2D projection flips Y, so it
-/// becomes counter-clockwise in framebuffer space and survives the `Ccw`
-/// front-face / back-face culling used by the mesh pipeline.
+/// A triangle wound counter-clockwise in world/clip space, facing +Z.
 fn triangle_mesh() -> RenderBatch {
     RenderBatch {
         local_origin: Point3 {
@@ -85,7 +83,7 @@ fn triangle_mesh() -> RenderBatch {
         vertices: vec![[-0.9, -0.9, 0.0], [0.0, 0.9, 0.0], [0.9, -0.9, 0.0]],
         normals: vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
         colors: Vec::new(),
-        indices: vec![[0, 1, 2]],
+        indices: vec![[0, 2, 1]],
         edges: Vec::new(),
         mirrored: false,
         alpha: 1.0,
@@ -195,6 +193,48 @@ fn lines_render_onto_target() {
 }
 
 #[test]
+fn positive_world_y_renders_above_center_after_pan() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // Asymmetric geometry, nonzero camera and batch origins: symmetric smoke
+    // scenes cannot detect an upside-down projection or a translation sign bug.
+    let mut batch = lines_batch(vec![[-0.5, 0.5, 0.0], [0.5, 0.5, 0.0]]);
+    batch.local_origin = Point3 {
+        x: 10.0,
+        y: 20.0,
+        z: 0.0,
+    };
+    renderer.upload(&scene(vec![batch])).unwrap();
+    let mut camera = camera_2d();
+    camera.center = Point3 {
+        x: 10.0,
+        y: 20.0,
+        z: 0.0,
+    };
+    let target = RenderTarget::new(64, 64);
+    renderer.render(camera, &target).unwrap();
+    let image = renderer.read_target_rgba().unwrap();
+    let background = image.pixel(0, 0);
+    let mut rows = Vec::new();
+    for y in 0..64 {
+        for x in 0..64 {
+            if image.pixel(x, y) != background {
+                rows.push(y);
+            }
+        }
+    }
+    assert!(!rows.is_empty());
+    assert!(rows.iter().all(|y| (15..=16).contains(y)), "rows: {rows:?}");
+    // Pan upward by 0.5 world units: the same line now reaches screen center.
+    camera.center.y += 0.5;
+    renderer.render(camera, &target).unwrap();
+    let image = renderer.read_target_rgba().unwrap();
+    assert!((31..=32).any(|y| image.pixel(32, y) != background));
+}
+
+#[test]
 fn mesh_render_uses_triangle_pipeline() {
     let Some(gpu) = gpu() else {
         return;
@@ -220,7 +260,7 @@ fn mesh_render_uses_triangle_pipeline() {
     );
 }
 
-/// A quad mesh (world-clockwise so it survives back-face culling) with an
+/// A quad mesh (world-counter-clockwise so it survives back-face culling) with an
 /// explicit per-vertex colour ramp: `left` at the two x = -0.8 vertices and
 /// `right` at the two x = +0.8 vertices.
 fn gradient_quad(left: [f32; 3], right: [f32; 3]) -> RenderBatch {
@@ -244,7 +284,7 @@ fn gradient_quad(left: [f32; 3], right: [f32; 3]) -> RenderBatch {
             [0.0, 0.0, 1.0],
         ],
         colors: vec![left, left, right, right],
-        indices: vec![[0, 1, 2], [0, 2, 3]],
+        indices: vec![[0, 2, 1], [0, 3, 2]],
         edges: Vec::new(),
         mirrored: false,
         alpha: 1.0,

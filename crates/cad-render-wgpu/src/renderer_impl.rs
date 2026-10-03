@@ -649,7 +649,10 @@ impl Renderer {
         let w = target.width.max(1) as f64;
         let h = target.height.max(1) as f64;
         let sx = 2.0 / (w * camera.world_per_px);
-        let sy = -2.0 / (h * camera.world_per_px);
+        // CAD and clip space are both Y-up. wgpu's viewport maps positive
+        // clip Y to the top of the image; negating here mirrors the drawing
+        // and disagrees with the host's screen-to-world picking transform.
+        let sy = 2.0 / (h * camera.world_per_px);
         let mut transforms = Vec::with_capacity(self.batches.len());
         for batch in &self.batches {
             let ox = batch.origin[0] as f64;

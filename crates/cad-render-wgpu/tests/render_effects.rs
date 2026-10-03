@@ -176,9 +176,7 @@ fn rectangle_lines() -> Vec<[f32; 3]> {
 
 /// An axis-aligned square mesh, centred on `origin`, `half` world units wide.
 ///
-/// Wound clockwise in world space; the 2D projection flips Y, so the winding
-/// becomes counter-clockwise in framebuffer space and survives the `Ccw`
-/// front-face / back-face culling used by the mesh pipeline.
+/// Wound counter-clockwise in world/clip space, facing +Z.
 fn quad_mesh(
     half: f32,
     origin: Point3,
@@ -198,7 +196,7 @@ fn quad_mesh(
         vertices: v,
         normals: vec![normal; 4],
         colors: Vec::new(),
-        indices: vec![[0, 1, 2], [0, 2, 3]],
+        indices: vec![[0, 2, 1], [0, 3, 2]],
         edges: Vec::new(),
         mirrored: false,
         alpha,

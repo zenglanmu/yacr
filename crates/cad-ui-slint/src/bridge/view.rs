@@ -242,6 +242,13 @@ impl CadView {
         }
         // A single-shot UI timer can retain Rc snapshots without crossing threads.
         self.schedule_preparation();
+        // File API/font callbacks can arrive while winit is idle. Scheduling
+        // a Slint timer alone does not wake that browser event loop. Post an
+        // event (without moving the Rc snapshots across threads) so it services
+        // the timer; the timer requests a frame after publishing the CPU scene.
+        if let Err(error) = slint::invoke_from_event_loop(|| {}) {
+            log::warn!("CAD preparation wake failed: {error}");
+        }
     }
 
     fn schedule_preparation(&self) {

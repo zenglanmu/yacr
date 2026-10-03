@@ -161,6 +161,26 @@ fn plot_unknown_layout_is_an_input_error() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn render_and_plot_do_not_silently_ignore_invalid_fonts() {
+    let dir = plot_scratch_dir("invalid-font");
+    let font = dir.join("broken.ttf");
+    std::fs::write(&font, b"not a font").unwrap();
+    for operation in [CliOperation::FixedViewportRender, CliOperation::Plot] {
+        let mut invocation = CliInvocation::new(operation, plot_fixture());
+        invocation.fonts.push(("broken".into(), font.clone()));
+        let error = run(&invocation).expect_err("font validation must precede GPU work");
+        assert_eq!(error.code, error_code::CORRUPT_DATA);
+        assert!(
+            error.message.contains("font 'broken' cannot be parsed"),
+            "{}",
+            error.message
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn render_of_missing_input_fails_before_any_gpu_work() {
     // Import happens before device creation, so a missing file is an
     // `invalid_input` failure on every machine — adapter or not.

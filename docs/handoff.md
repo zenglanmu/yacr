@@ -13,8 +13,19 @@
 5. 逐项实现 Builder/事务/历史 → 导入/基础语义 → 显示/索引/场景 → 应用/工具 → 宿主闭环；
    不把这个依赖顺序当作排期，也不绕过优先 GPU/UI 验证。
 6. 每次移除占位同步补齐规范测试、能力表、构建说明、Git 提交。
+7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
+   Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
 ## 本轮状态（compact，2026-10-03）
+
+**真实 DWG 回归（最新）**：以用户外部 `anteen.dwg` 与去色参考图，优先 Linux
+原生 wgpu/lavapipe。修复 2D 投影重复 Y 翻转、CLI render/plot 忽略 `--font`；
+核心串行 **965/0/1 ignored**。原生导入/出图通过，但填充/字体保真未验收。
+WASM/Playwright 发现打开后旧演示纹理停滞，增加事件循环唤醒后真实文件
+CAD 帧 **1 → 4**，最终 WebGL2 打开/出图 smoke 通过。修复前 120 秒超时证据保留；
+目录 99 个字体但本图注册 0 个，Web 缺文字，**视觉保真仍未通过**。
+新增可复用 `check-dwg-native.py` / `check-web-dwg.mjs`；证据与命令见
+`docs/validation-dwg.md`，产物 `/tmp/opencode/yacr-canteen-validation/`。
 
 **修复与 Pages 发布轮（最新，2026-10-03）**：继续修复 Web 第二触点/touchcancel 不取消
 shell 绘制捕获、Web/Android 成功换图纸后残留旧取点、TRIM 使用固定世界拾取容差的问题。

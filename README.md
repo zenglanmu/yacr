@@ -7,6 +7,8 @@ acadrust 0.5.5。核心无平台依赖，可单独测试并用于 CLI。
 * 架构：`docs/architecture.md`
 * 构建（含 Android APK）：`docs/build.md`
 * 验证与运行证据：`docs/validation.md`
+* DWG 测试流程（lavapipe 主测试 + 无头浏览器复验）：[docs/testing-dwg.md](docs/testing-dwg.md)
+* 真实图纸回归结果：[docs/validation-dwg.md](docs/validation-dwg.md)
 * 兼容性/能力表：`docs/compatibility.md`
 * 字体来源：`docs/fonts.md`
 * 渲染后端：`docs/render-backends.md`
