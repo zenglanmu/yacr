@@ -28,8 +28,8 @@ pub mod measure_tool;
 pub mod picking;
 pub mod recovery;
 pub mod render_scene;
-pub mod selection;
 mod select_all;
+pub mod selection;
 pub mod tasks;
 pub mod viewer_config;
 

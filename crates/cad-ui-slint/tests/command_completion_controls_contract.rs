@@ -24,12 +24,17 @@ fn completion_capture_is_editor_local_gated_and_unmodified() {
         .next()
         .unwrap();
     assert!(capture.contains("!root.keyboard-shortcuts-enabled || event.modifiers.control"));
-    assert!(capture.contains("event.modifiers.alt || event.modifiers.meta || event.modifiers.shift"));
+    assert!(
+        capture.contains("event.modifiers.alt || event.modifiers.meta || event.modifiers.shift")
+    );
     assert!(capture.contains("return EventResult.reject;"));
     assert!(!capture.contains("root.submit("));
     assert_eq!(BAR.matches("capture-key-pressed(event)").count(), 1);
     assert_eq!(BAR.matches("FocusScope {").count(), 1);
-    let archive = BAR.split("for entry in root.history-entries : TextEdit").nth(1).unwrap();
+    let archive = BAR
+        .split("for entry in root.history-entries : TextEdit")
+        .nth(1)
+        .unwrap();
     assert!(!archive.contains("capture-key-pressed"));
 }
 
@@ -57,7 +62,8 @@ fn tab_fills_highlight_or_first_and_enter_consumes_highlight_without_submission(
         .unwrap();
     assert!(enter_capture.contains("root.selected-completion-index >= 0"));
     assert!(enter_capture.contains("root.selected-completion-index < root.completion-items.length"));
-    assert!(enter_capture.contains("root.input = root.completion-items[root.selected-completion-index];"));
+    assert!(enter_capture
+        .contains("root.input = root.completion-items[root.selected-completion-index];"));
     assert!(enter_capture.contains("root.selected-completion-index = -1;"));
     assert!(enter_capture.contains("return EventResult.accept;"));
     assert!(enter_capture.contains("return EventResult.reject;"));
@@ -67,7 +73,15 @@ fn tab_fills_highlight_or_first_and_enter_consumes_highlight_without_submission(
 #[test]
 fn suggestion_selection_resets_on_model_changes_and_arrows_stay_bounded() {
     assert!(BAR.contains("private property <int> selected-completion-index: -1;"));
-    assert!(BAR.contains("changed completion-items => { root.selected-completion-index = -1; }"));
+    let reset = BAR
+        .split("changed completion-items => {")
+        .nth(1)
+        .unwrap()
+        .split('}')
+        .next()
+        .unwrap();
+    assert!(reset.contains("root.selected-completion-index = -1;"));
+    assert!(reset.contains("root.completion-scroll-y = 0px;"));
     let arrows = BAR
         .split("if event.text == Key.UpArrow")
         .nth(1)
@@ -75,10 +89,18 @@ fn suggestion_selection_resets_on_model_changes_and_arrows_stay_bounded() {
         .split("// Tab fills")
         .next()
         .unwrap();
-    assert_eq!(arrows.matches("if root.completion-items.length > 0 {").count(), 2);
+    assert_eq!(
+        arrows
+            .matches("if root.completion-items.length > 0 {")
+            .count(),
+        2
+    );
     assert!(arrows.contains("? root.completion-items.length - 1"));
-    assert!(arrows.contains("max(0, min(root.selected-completion-index - 1, root.completion-items.length - 1))"));
-    assert!(arrows.contains("min(root.selected-completion-index + 1, root.completion-items.length - 1)"));
+    assert!(arrows.contains(
+        "max(0, min(root.selected-completion-index - 1, root.completion-items.length - 1))"
+    ));
+    assert!(arrows
+        .contains("min(root.selected-completion-index + 1, root.completion-items.length - 1)"));
     assert_eq!(arrows.matches("} else {").count(), 2);
     assert_eq!(arrows.matches("root.input =").count(), 2);
     assert!(!arrows.contains("root.input = root.completion-items"));
@@ -95,6 +117,8 @@ fn suggestions_are_bounded_scrollable_catalog_labeled_and_fill_only() {
     assert!(overlay.contains("width: root.width;"));
     assert!(overlay.contains("min(3, root.completion-items.length)"));
     assert!(overlay.contains("ScrollView {"));
+    assert!(overlay.contains("content-y <=> root.completion-scroll-y;"));
+    assert!(BAR.contains("root.completion-scroll-y = -max(0, root.selected-completion-index - 2)"));
     assert!(overlay.contains("for selector[index] in root.completion-items : Button"));
     assert!(overlay.contains("accessible-label: root.completion-label + \" \" + selector;"));
     assert!(overlay.contains("checked: index == root.selected-completion-index;"));

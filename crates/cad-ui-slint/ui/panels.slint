@@ -24,6 +24,7 @@ export component CadPanels inherits Rectangle {
     in property <string> layer-search-empty-label;
     in property <int> layer-matching-count: -1;
     in property <[PropertyRow]> properties;
+    in property <string> selection-all-label;
     in property <[LayoutRow]> layouts;
     in property <[AnnotationRow]> annotations;
     // Search only changes presentation; retain the authoritative annotation model.
@@ -41,6 +42,7 @@ export component CadPanels inherits Rectangle {
     callback close();
     callback restore();
     callback clear-selection();
+    callback select-all();
     callback layer(int, bool);
     callback all-layers(bool);
     callback layer-search-edited(string);
@@ -137,6 +139,8 @@ export component CadPanels inherits Rectangle {
             padding: 0px;
             HorizontalBox {
                 Text { text: root.labels[6]; color: CadTheme.accent; }
+                Button { text: root.selection-all-label; min-width: 0px; min-height: 48px;
+                    clicked => { root.select-all(); } }
                 Button { text: root.labels[7]; symbol: "×"; enabled: root.properties.length > 0; min-height: 48px; clicked => { root.clear-selection(); } }
             }
             if root.properties.length == 0 : Text { text: root.labels[8]; color: CadTheme.muted; wrap: word-wrap; }

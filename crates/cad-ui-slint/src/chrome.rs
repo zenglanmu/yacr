@@ -87,6 +87,11 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_annotate_cancel_label(messages.text("tool.cancel", &[]).into());
     ui.set_annotation_text_placeholder(messages.text("annotation.text_placeholder", &[]).into());
     ui.set_annotation_delete_label(messages.text("annotation.delete", &[]).into());
+    ui.set_annotation_search_placeholder(
+        messages.text("annotation.search_placeholder", &[]).into(),
+    );
+    ui.set_annotation_search_clear_label(messages.text("annotation.clear_search", &[]).into());
+    ui.set_annotation_search_empty_label(messages.text("annotation.no_matches", &[]).into());
     ui.set_annotation_kind_labels(string_model(&status::annotation_kind_labels(messages)));
 
     // Layer + property panels.
@@ -101,6 +106,7 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_layer_search_empty_label(messages.text("layers.no_matches", &[]).into());
     ui.set_property_panel_label(messages.text("properties.panel", &[]).into());
     ui.set_property_clear_label(messages.text("properties.clear_selection", &[]).into());
+    ui.set_selection_all_label(messages.text("selection.all", &[]).into());
     ui.set_property_empty_label(messages.text("properties.empty", &[]).into());
 
     // Backend choice model and diagnostics drawer chrome.

@@ -485,6 +485,7 @@ impl UiHandle {
         let hidden_label = annotation_hidden_label(&messages, state.hidden_count);
         self.with(|ui| {
             ui.set_annotation_rows(model);
+            crate::annotation_search::refresh(ui);
             ui.set_annotation_hidden_count(hidden);
             ui.set_annotation_hidden_label(hidden_label.into());
             ui.set_annotation_empty_label(empty.into());

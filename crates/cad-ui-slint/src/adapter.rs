@@ -295,6 +295,7 @@ impl UiAdapter {
         crate::command_line::connect(&ui, messages_slot.clone(), viewer_config.clone());
         crate::command_completion_ui::connect(&ui);
         crate::layer_search::connect(&ui);
+        crate::annotation_search::connect(&ui);
 
         {
             // Desktop status-bar overlay toggles. The click must be a real config
@@ -687,6 +688,33 @@ impl UiAdapter {
                     viewport,
                     CommandPayload::Selection(Vec::new()),
                 ));
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document;
+            let weak = ui.as_weak();
+            let messages = messages_slot.clone();
+            ui.on_select_all_requested(move || {
+                if let Err(error) = s.borrow_mut().send(command_for(
+                    CommandId::SelectAll,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                )) {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_status_label(
+                            messages
+                                .borrow()
+                                .text(
+                                    "selection.operation_failed",
+                                    &[("reason", &error.to_string())],
+                                )
+                                .into(),
+                        );
+                        ui.set_command_expanded(true);
+                    }
+                }
             });
         }
         {

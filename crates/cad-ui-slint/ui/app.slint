@@ -149,11 +149,20 @@ export component YacrWindow inherits Window {
     in property <string> property-panel-label;
     in property <string> property-selected-label;
     in property <string> property-clear-label;
+    in property <string> selection-all-label;
+    callback select-all-requested();
     in property <int> selection-count;
     in property <[AnnotationRow]> annotation-rows;
     in property <int> annotation-hidden-count;
     in property <string> annotation-hidden-label;
     in property <string> annotation-empty-label;
+    in property <string> annotation-search-placeholder;
+    in property <string> annotation-search-clear-label;
+    in property <string> annotation-search-empty-label;
+    in-out property <string> annotation-search-text;
+    in property <int> annotation-matching-count: 0;
+    callback annotation-search-edited(string);
+    changed annotation-search-text => { root.annotation-search-edited(root.annotation-search-text); }
     in property <bool> annotation-tool-active;
     in property <bool> annotation-tool-can-confirm;
     in property <int> annotation-kind-index;
@@ -331,6 +340,10 @@ export component YacrWindow inherits Window {
                 || event.modifiers.alt || event.modifiers.meta || !event.modifiers.control {
                 return EventResult.reject;
             }
+            if !event.modifiers.shift && (event.text == "a" || event.text == "A") {
+                // Text editors get first refusal for their own local select-all.
+                root.select-all-requested(); return EventResult.accept;
+            }
             if (event.text == "z" || event.text == "Z") && root.work-mode {
                 if event.modifiers.shift && root.can-redo {
                     root.redo-requested(); return EventResult.accept;
@@ -437,6 +450,13 @@ export component YacrWindow inherits Window {
                 root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
                 root.diagnostics-drawer-title];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            selection-all-label: root.selection-all-label;
+            select-all => { root.select-all-requested(); }
+            annotation-search-text <=> root.annotation-search-text;
+            annotation-search-placeholder: root.annotation-search-placeholder;
+            annotation-search-clear-label: root.annotation-search-clear-label;
+            annotation-search-empty-label: root.annotation-search-empty-label;
+            annotation-matching-count: root.annotation-matching-count;
             layers-show-all-label: root.layers-show-all-label;
             layers-hide-all-label: root.layers-hide-all-label;
             all-layers(visible) => { root.layers-visibility-requested(visible); }
@@ -496,6 +516,13 @@ export component YacrWindow inherits Window {
                 root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
                 root.diagnostics-drawer-title];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            selection-all-label: root.selection-all-label;
+            select-all => { root.select-all-requested(); }
+            annotation-search-text <=> root.annotation-search-text;
+            annotation-search-placeholder: root.annotation-search-placeholder;
+            annotation-search-clear-label: root.annotation-search-clear-label;
+            annotation-search-empty-label: root.annotation-search-empty-label;
+            annotation-matching-count: root.annotation-matching-count;
             layers-show-all-label: root.layers-show-all-label;
             layers-hide-all-label: root.layers-hide-all-label;
             all-layers(visible) => { root.layers-visibility-requested(visible); }

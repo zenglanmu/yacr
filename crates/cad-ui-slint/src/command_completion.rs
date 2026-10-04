@@ -40,6 +40,7 @@ const SELECTORS: &[(&str, bool)] = &[
     ("PROJECTION", false),
     ("REDO", true),
     ("SAVE MEASUREMENT", true),
+    ("SELECTALL", false),
     ("TOOLS", false),
     ("TRIM", true),
     ("UNDO", true),

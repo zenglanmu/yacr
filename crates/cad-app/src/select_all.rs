@@ -114,15 +114,15 @@ fn validate_branch(
 
 fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
     match geometry {
-        SemanticGeometry::Mesh(mesh) if mesh.triangles.is_empty() => {
-            Err(CadError::Unsupported("SelectAll cannot pick an empty mesh".into()))
-        }
-        SemanticGeometry::Polyline { points, .. } if points.len() < 2 => {
-            Err(CadError::Unsupported("SelectAll cannot pick an empty polyline".into()))
-        }
-        SemanticGeometry::Spline { control_points, .. } if control_points.len() < 2 => {
-            Err(CadError::Unsupported("SelectAll cannot pick an empty spline".into()))
-        }
+        SemanticGeometry::Mesh(mesh) if mesh.triangles.is_empty() => Err(CadError::Unsupported(
+            "SelectAll cannot pick an empty mesh".into(),
+        )),
+        SemanticGeometry::Polyline { points, .. } if points.len() < 2 => Err(
+            CadError::Unsupported("SelectAll cannot pick an empty polyline".into()),
+        ),
+        SemanticGeometry::Spline { control_points, .. } if control_points.len() < 2 => Err(
+            CadError::Unsupported("SelectAll cannot pick an empty spline".into()),
+        ),
         SemanticGeometry::Opaque { .. } | SemanticGeometry::Insert { .. } => {
             Err(CadError::Unsupported(
                 "SelectAll cannot enumerate opaque geometry or compound INSERTs".into(),

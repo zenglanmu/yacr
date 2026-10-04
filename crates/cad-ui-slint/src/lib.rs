@@ -33,6 +33,7 @@ pub mod responsive;
 #[cfg(all(target_os = "linux", not(target_arch = "wasm32")))]
 pub mod offscreen;
 
+mod annotation_search;
 mod layer_search;
 pub mod status;
 

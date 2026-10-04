@@ -25,7 +25,16 @@ export component CadCommandBar inherits Rectangle {
     in property <string> completion-label;
     // -1 means no keyboard highlight. A refreshed model never retains a stale row.
     private property <int> selected-completion-index: -1;
-    changed completion-items => { root.selected-completion-index = -1; }
+    private property <length> completion-scroll-y: 0px;
+    changed completion-items => {
+        root.selected-completion-index = -1;
+        root.completion-scroll-y = 0px;
+    }
+    changed selected-completion-index => {
+        // Three suggestion rows are visible; keep keyboard highlighting in view.
+        root.completion-scroll-y = -max(0, root.selected-completion-index - 2)
+            * (root.phone ? 48px : 36px);
+    }
     in-out property <bool> expanded: false;
     property <string> input;
     callback input-edited(string);
@@ -182,7 +191,8 @@ export component CadCommandBar inherits Rectangle {
                 min-width: 0px;
                 overflow: elide;
             }
-            ScrollView {
+            completion-scroll := ScrollView {
+                content-y <=> root.completion-scroll-y;
                 min-width: 0px;
                 height: min(3, root.completion-items.length) * (root.phone ? 48px : 36px);
                 VerticalBox {

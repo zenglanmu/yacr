@@ -144,6 +144,7 @@ pub(crate) fn connect(
             "ANNOTATE" => ui.invoke_annotate_requested(),
             "SAVE MEASUREMENT" => ui.invoke_save_measurement_requested(),
             "CLEAR SELECTION" | "DESELECT" => ui.invoke_clear_selection_requested(),
+            "SELECTALL" => ui.invoke_select_all_requested(),
             "PROJECTION" => ui.invoke_toggle_projection_requested(),
             "VIEW MODE" => ui.invoke_toggle_view_mode_requested(),
             "MODE" => ui.invoke_mode_toggled(),

@@ -30,7 +30,8 @@ fn annotation_search_exposes_host_query_count_and_catalog_interface() {
     assert!(section.contains("accessible-label: root.annotation-search-placeholder;"));
     assert!(section.contains("text: root.annotation-search-clear-label;"));
     assert!(section.contains("clicked => { root.annotation-search-text = \"\"; }"));
-    assert!(section.contains("enabled: root.annotations.length > 0 || root.annotation-search-text != \"\";"));
+    assert!(section
+        .contains("enabled: root.annotations.length > 0 || root.annotation-search-text != \"\";"));
     assert!(section.contains("enabled: root.annotation-search-text != \"\";"));
     assert!(!section.contains("min-height: root.phone ?"));
 }
@@ -57,9 +58,7 @@ fn annotation_search_matches_kind_or_full_text_case_insensitively() {
 #[test]
 fn annotation_filter_collapses_rows_and_preserves_original_action_indices() {
     let section = annotation_section();
-    assert!(section.contains(
-        "VerticalBox {\n                padding: 0px; spacing: 0px;"
-    ));
+    assert!(section.contains("VerticalBox {\n                padding: 0px; spacing: 0px;"));
     assert!(section.contains(
         "for row[index] in root.annotations : VerticalBox {\n                    padding: 0px; spacing: 0px;\n                    if root.annotation-matches(row.kind, row.text) : VerticalBox {"
     ));
@@ -82,9 +81,7 @@ fn annotation_filter_collapses_rows_and_preserves_original_action_indices() {
 #[test]
 fn annotation_search_distinguishes_empty_database_no_matches_and_unknown_count() {
     let section = annotation_section();
-    assert!(section.contains(
-        "if root.annotations.length == 0 : Text { text: root.labels[10];"
-    ));
+    assert!(section.contains("if root.annotations.length == 0 : Text { text: root.labels[10];"));
     assert!(section.contains(
         "if root.annotations.length > 0 && root.annotation-search-text != \"\" && root.annotation-matching-count == 0 && root.annotation-search-empty-label != \"\" : Text {"
     ));
