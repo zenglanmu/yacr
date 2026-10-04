@@ -48,6 +48,9 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_ribbon_tabs(string_model(&builtin_ribbon_tab_labels(messages)));
     ui.set_command_title(messages.text("command.title", &[]).into());
     ui.set_command_prompt(messages.text("command.prompt", &[]).into());
+    ui.set_command_history_label(messages.text("command.history", &[]).into());
+    ui.set_command_history_clear_label(messages.text("command.clear_history", &[]).into());
+    ui.set_command_history_limit_label(messages.text("command.history_limit", &[]).into());
     ui.set_draw_status(messages.text("draw.status.idle", &[]).into());
     // The ribbon draw buttons present the shared `DrawToolKind::ALL` order; the
     // adapter maps a clicked label straight back to the exact kind.

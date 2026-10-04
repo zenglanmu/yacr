@@ -1,6 +1,9 @@
 {
   "app.title": "yacr — CAD Viewer & Annotation",
   "file.open": "Open drawing",
+  "command.history": "Submitted commands",
+  "command.clear_history": "Clear command history",
+  "command.history_limit": "Input exceeds the 4096-byte history limit and was not archived.",
   "status.scaffold": "Scaffold placeholder: CAD canvas not wired yet",
   "status.pick_unwired": "Pick not wired: host provides no canvas→world mapping",
   "status.backend.no_device": "No usable WebGPU/WebGL2 device",

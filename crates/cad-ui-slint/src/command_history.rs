@@ -124,7 +124,10 @@ mod tests {
         assert_eq!(history.entries().count(), 0);
         assert_eq!(history.total_bytes, 0);
         for direction in [-1, 1, 0, i32::MIN, i32::MAX] {
-            assert_eq!(history.recall(direction, "Unfinished 草稿"), "Unfinished 草稿");
+            assert_eq!(
+                history.recall(direction, "Unfinished 草稿"),
+                "Unfinished 草稿"
+            );
             assert_eq!(history.cursor, None);
             assert!(history.draft.is_empty());
         }
@@ -243,13 +246,22 @@ mod tests {
     fn count_budget_evicts_oldest_entries_only() {
         let mut history = CommandHistory::default();
         for index in 0..MAX_ENTRIES + 7 {
-            assert_eq!(history.record(&format!("command {index}")), RecordOutcome::Stored);
+            assert_eq!(
+                history.record(&format!("command {index}")),
+                RecordOutcome::Stored
+            );
         }
         let expected: Vec<_> = (7..MAX_ENTRIES + 7)
             .map(|index| format!("command {index}"))
             .collect();
-        assert_eq!(history.entries().collect::<Vec<_>>(), expected.iter().map(String::as_str).collect::<Vec<_>>());
-        assert_eq!(history.total_bytes, expected.iter().map(String::len).sum::<usize>());
+        assert_eq!(
+            history.entries().collect::<Vec<_>>(),
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            history.total_bytes,
+            expected.iter().map(String::len).sum::<usize>()
+        );
     }
 
     #[test]
@@ -270,7 +282,10 @@ mod tests {
         let command = format!("{}é", "x".repeat(MAX_ENTRY_BYTES - 1));
         assert_eq!(command.len(), MAX_ENTRY_BYTES + 1);
         assert_eq!(history.record(&command), RecordOutcome::Oversized);
-        assert_eq!(history.entries().collect::<Vec<_>>(), before.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(
+            history.entries().collect::<Vec<_>>(),
+            before.iter().map(String::as_str).collect::<Vec<_>>()
+        );
         assert_eq!(history.total_bytes, before_bytes);
     }
 
@@ -299,7 +314,10 @@ mod tests {
             history.record(&command);
         }
         assert_eq!(history.total_bytes, MAX_TOTAL_BYTES);
-        assert_eq!(history.record(&"y".repeat(MAX_ENTRY_BYTES)), RecordOutcome::Stored);
+        assert_eq!(
+            history.record(&"y".repeat(MAX_ENTRY_BYTES)),
+            RecordOutcome::Stored
+        );
         assert_eq!(history.entries().count(), 31);
         assert!(history.entries().next().unwrap().starts_with("0002"));
         assert_eq!(history.total_bytes, MAX_TOTAL_BYTES);
@@ -346,8 +364,13 @@ mod tests {
             assert_eq!(history.record("\t"), RecordOutcome::Empty);
             assert!(history.commands.len() <= MAX_ENTRIES);
             assert!(history.total_bytes <= MAX_TOTAL_BYTES);
-            assert!(history.entries().all(|entry| entry.len() <= MAX_ENTRY_BYTES));
-            assert_eq!(history.total_bytes, history.entries().map(str::len).sum::<usize>());
+            assert!(history
+                .entries()
+                .all(|entry| entry.len() <= MAX_ENTRY_BYTES));
+            assert_eq!(
+                history.total_bytes,
+                history.entries().map(str::len).sum::<usize>()
+            );
         }
     }
 }

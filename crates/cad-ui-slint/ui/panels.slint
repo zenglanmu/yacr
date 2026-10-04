@@ -125,8 +125,8 @@ export component CadPanels inherits Rectangle {
                     text: row.value;
                     read-only: true; enabled: true; wrap: word-wrap;
                     accessible-label: row.key;
-                    // Also reject the standard widget's accessibility setter.
-                    accessible-action-set-value(value) => { self.text = row.value; }
+                    // Ignore writes without replacing the live model binding.
+                    accessible-action-set-value(value) => { }
                 }
             }
             }
@@ -156,9 +156,7 @@ export component CadPanels inherits Rectangle {
                     text: row.severity + "\n" + row.code + "\n" + row.description + "\n" + row.object + "\n" + row.details;
                     read-only: true; enabled: true; wrap: word-wrap;
                     accessible-label: row.code;
-                    accessible-action-set-value(value) => {
-                        self.text = row.severity + "\n" + row.code + "\n" + row.description + "\n" + row.object + "\n" + row.details;
-                    }
+                    accessible-action-set-value(value) => { }
                 }
             }
         }

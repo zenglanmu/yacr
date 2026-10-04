@@ -201,6 +201,13 @@ export component YacrWindow inherits Window {
     in property <[string]> editing-labels;
     in property <string> command-title;
     in property <string> command-prompt;
+    in property <[string]> command-history-entries;
+    in property <string> command-history-label;
+    in property <string> command-history-clear-label;
+    in property <bool> command-history-storage-limited: false;
+    in property <string> command-history-limit-label;
+    callback command-history-recalled(int, string) -> string;
+    callback command-history-cleared();
     in property <string> draw-status;
     in property <bool> draw-tool-active;
     in property <bool> draw-can-confirm;
@@ -413,8 +420,9 @@ export component YacrWindow inherits Window {
                 root.layer-empty-label, root.layout-panel-label, root.layout-model-space-label,
                 root.property-panel-label, root.property-clear-label, root.property-empty-label,
                 root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
-                root.diagnostics-empty-label];
+                root.diagnostics-drawer-title];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            diagnostics-empty-label: root.diagnostics-empty-label;
             layer-search-text <=> root.layer-search-text;
             layer-search-placeholder: root.layer-search-placeholder;
             layer-search-clear-label: root.layer-search-clear-label;
@@ -468,8 +476,9 @@ export component YacrWindow inherits Window {
                 root.layer-empty-label, root.layout-panel-label, root.layout-model-space-label,
                 root.property-panel-label, root.property-clear-label, root.property-empty-label,
                 root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
-                root.diagnostics-empty-label];
+                root.diagnostics-drawer-title];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            diagnostics-empty-label: root.diagnostics-empty-label;
             layer-search-text <=> root.layer-search-text;
             layer-search-placeholder: root.layer-search-placeholder;
             layer-search-clear-label: root.layer-search-clear-label;
@@ -534,6 +543,14 @@ export component YacrWindow inherits Window {
             phone: root.phone-shell;
             title: root.command-title;
             prompt: root.command-prompt;
+            history-entries: root.command-history-entries;
+            history-label: root.command-history-label;
+            clear-history-label: root.command-history-clear-label;
+            history-storage-limited: root.command-history-storage-limited;
+            history-limit-label: root.command-history-limit-label;
+            keyboard-shortcuts-enabled: root.keyboard-shortcuts-enabled;
+            recall(direction, draft) => { return root.command-history-recalled(direction, draft); }
+            clear-history => { root.command-history-cleared(); }
             status: root.status-label;
             open-label: root.open-label;
             can-open: root.can-open;

@@ -24,7 +24,9 @@ fn command_input_captures_only_gated_unmodified_history_arrows() {
         .next()
         .unwrap();
     assert!(capture.contains("!root.keyboard-shortcuts-enabled || event.modifiers.control"));
-    assert!(capture.contains("event.modifiers.alt || event.modifiers.meta || event.modifiers.shift"));
+    assert!(
+        capture.contains("event.modifiers.alt || event.modifiers.meta || event.modifiers.shift")
+    );
     assert!(capture.contains("event.text == Key.UpArrow"));
     assert!(capture.contains("root.input = root.recall(-1, root.input);"));
     assert!(capture.contains("event.text == Key.DownArrow"));
@@ -43,6 +45,9 @@ fn expanded_archive_is_bounded_read_only_and_clearable_when_nonempty() {
     assert!(BAR.contains("for entry in root.history-entries : TextEdit"));
     assert!(BAR.contains("text: entry;"));
     assert!(BAR.contains("read-only: true;"));
+    assert!(BAR.contains("if root.history-storage-limited : Text"));
+    assert!(BAR.contains("text: root.history-limit-label;"));
+    assert!(BAR.contains("accessible-action-set-value(value) => { }"));
     assert!(BAR.contains("wrap: word-wrap;"));
     assert!(BAR.contains("enabled: root.history-entries.length > 0;"));
     assert!(BAR.contains("clicked => { root.clear-history(); }"));

@@ -191,6 +191,7 @@ pub struct UiAdapter {
 
 mod adapter;
 mod chrome;
+mod command_history;
 mod command_line;
 mod handle;
 mod state;

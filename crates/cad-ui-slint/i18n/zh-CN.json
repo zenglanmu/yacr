@@ -1,6 +1,9 @@
 {
   "app.title": "yacr — CAD 查看与批注",
   "file.open": "打开图纸",
+  "command.history": "已提交命令",
+  "command.clear_history": "清空命令历史",
+  "command.history_limit": "输入超过命令历史的 4096 字节上限，未加入历史。",
   "status.scaffold": "框架占位：尚未接入 CAD 画布",
   "status.pick_unwired": "取点未接线：宿主未提供画布→世界映射",
   "status.backend.no_device": "无可用的 WebGPU/WebGL2 设备",

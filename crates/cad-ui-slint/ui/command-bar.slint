@@ -17,6 +17,8 @@ export component CadCommandBar inherits Rectangle {
     in property <[string]> history-entries;
     in property <string> history-label;
     in property <string> clear-history-label;
+    in property <bool> history-storage-limited;
+    in property <string> history-limit-label;
     in property <bool> keyboard-shortcuts-enabled: false;
     in-out property <bool> expanded: false;
     property <string> input;
@@ -67,7 +69,6 @@ export component CadCommandBar inherits Rectangle {
                 command-input := LineEdit {
                     width: parent.width;
                     height: parent.height;
-                    min-width: 0px;
                     placeholder-text: root.prompt;
                     accessible-label: root.prompt;
                     text <=> root.input;
@@ -106,12 +107,18 @@ export component CadCommandBar inherits Rectangle {
             min-width: 0px;
             VerticalBox {
                 padding: 0px; spacing: 4px; alignment: start;
+                if root.history-storage-limited : Text {
+                    text: root.history-limit-label;
+                    color: CadTheme.muted; wrap: word-wrap;
+                }
                 // Each submitted command is selectable/copyable independently.
                 // Long entries scroll within their editor; the archive scrolls
                 // across entries without growing the command bar.
                 for entry in root.history-entries : TextEdit {
                     text: entry;
                     read-only: true;
+                    // A read-only archive must also ignore accessibility writes.
+                    accessible-action-set-value(value) => { }
                     accessible-label: root.history-label;
                     min-width: 0px;
                     height: 48px;

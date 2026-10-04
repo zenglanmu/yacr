@@ -1,5 +1,6 @@
 // Source contracts only; runtime selection, clipboard and layout are not verified.
 const PANEL: &str = include_str!("../ui/panels.slint");
+const APP: &str = include_str!("../ui/app.slint");
 
 fn property_rows() -> &'static str {
     PANEL
@@ -19,7 +20,8 @@ fn property_values_are_complete_selectable_read_only_and_catalog_labelled() {
     assert!(rows.contains("text: row.key;"));
     assert!(rows.contains("accessible-label: row.key;"));
     assert!(rows.contains("read-only: true; enabled: true; wrap: word-wrap;"));
-    assert!(rows.contains("accessible-action-set-value(value) => { self.text = row.value; }"));
+    assert!(rows.contains("accessible-action-set-value(value) => { }"));
+    assert!(!rows.contains("self.text ="));
     assert!(!rows.contains("overflow: elide"));
     assert!(!rows.contains("text <=>"));
     assert!(!rows.contains("edited =>"));
@@ -42,6 +44,7 @@ fn diagnostics_render_every_real_field_without_title_as_empty_state() {
     assert!(rows.contains("read-only: true; enabled: true; wrap: word-wrap;"));
     assert!(rows.contains("accessible-label: row.code;"));
     assert!(rows.contains("accessible-action-set-value(value) =>"));
+    assert!(!rows.contains("self.text ="));
     assert!(!rows.contains("overflow: elide"));
     assert!(PANEL.contains("in property <string> diagnostics-empty-label;"));
     let empty = PANEL
@@ -72,4 +75,14 @@ fn diagnostics_are_exclusive_without_reindexing_layer_search() {
     assert!(normal.contains("root.layer(index, self.checked)"));
     assert!(normal.contains("text <=> root.layer-search-text"));
     assert!(PANEL.contains("ScrollView {"));
+}
+
+#[test]
+fn both_panel_hosts_distinguish_diagnostics_title_from_empty_label() {
+    assert_eq!(APP.matches("root.diagnostics-drawer-title];").count(), 2);
+    assert_eq!(
+        APP.matches("diagnostics-empty-label: root.diagnostics-empty-label;")
+            .count(),
+        2
+    );
 }

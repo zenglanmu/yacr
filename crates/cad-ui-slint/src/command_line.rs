@@ -3,7 +3,11 @@
 //! Only supported command selectors are interpreted here, not coordinates,
 //! paths, CAD scripts or guessed editing payloads. Errors retain the original
 //! input, and no callback dispatch is presented as proof of command success.
-use crate::{i18n::MessageSource, YacrWindow};
+use crate::{
+    command_history::{CommandHistory, RecordOutcome},
+    i18n::MessageSource,
+    YacrWindow,
+};
 use slint::ComponentHandle;
 use std::{cell::RefCell, rc::Rc};
 
@@ -81,11 +85,42 @@ pub(crate) fn connect(
     messages: Rc<RefCell<MessageSource>>,
     config: Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>>,
 ) {
+    let history = Rc::new(RefCell::new(CommandHistory::default()));
+    let recall_history = history.clone();
+    ui.on_command_history_recalled(move |direction, draft| {
+        recall_history
+            .borrow_mut()
+            .recall(direction, draft.as_str())
+            .into()
+    });
+    let clear_history = history.clone();
+    let weak = ui.as_weak();
+    ui.on_command_history_cleared(move || {
+        clear_history.borrow_mut().clear();
+        if let Some(ui) = weak.upgrade() {
+            ui.set_command_history_entries(crate::chrome::string_model(&[]));
+            ui.set_command_history_storage_limited(false);
+        }
+    });
     let weak = ui.as_weak();
     ui.on_command_submitted(move |text| {
         let Some(ui) = weak.upgrade() else {
             return;
         };
+        // This archive records submitted input, not command execution outcomes.
+        // Its storage budget is independent from the lifetime of the CAD document.
+        let outcome = history.borrow_mut().record(text.as_str());
+        let oversized = outcome == RecordOutcome::Oversized;
+        ui.set_command_history_storage_limited(oversized);
+        if oversized {
+            ui.set_command_expanded(true);
+        }
+        let entries = history
+            .borrow()
+            .entries()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        ui.set_command_history_entries(crate::chrome::string_model(&entries));
         let shortcuts = config.borrow().effective().interaction.keyboard_shortcuts;
         let command = command_key(text.as_str());
         let command = canonical_command(&command, shortcuts);
