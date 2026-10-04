@@ -123,6 +123,85 @@ fn malformed_font_catalog_is_rejected() {
 }
 
 #[test]
+fn font_catalog_rejects_paths_and_lossy_file_names() {
+    for file in [
+        "../outside.shx",
+        "fonts/inside.shx",
+        "fonts\\inside.shx",
+        "/outside.shx",
+        "C:\\outside.shx",
+        "https://example.com/font.shx",
+        ".",
+        "..",
+        "font.shx\u{0000}",
+        "font\n.shx",
+        " font.shx ",
+        "\"font.shx\"",
+    ] {
+        let json = serde_json::json!([
+            { "file": "safe.shx", "name": ["safe"], "type": "shx" },
+            { "file": file, "name": ["unsafe"], "type": "shx" }
+        ]);
+        assert!(
+            matches!(
+                FontCatalog::from_json(&json.to_string()),
+                Err(CadError::InvalidInput(_))
+            ),
+            "accepted invalid catalog file: {file:?}"
+        );
+    }
+}
+
+#[test]
+fn font_urls_encode_reserved_characters_and_utf8_as_a_single_segment() {
+    let json = serde_json::json!([
+        { "file": "A #?%2F宋.shx", "name": ["special"], "type": "shx" },
+        { "file": "%2e%2e%2foutside.shx", "name": ["percent"], "type": "shx" }
+    ]);
+    let catalog = FontCatalog::from_json(&json.to_string()).unwrap();
+    let expected = "https://example.com/fonts/A%20%23%3F%252F%E5%AE%8B.shx";
+    assert_eq!(
+        face_url(
+            "https://example.com/fonts/",
+            catalog.get("special").unwrap()
+        ),
+        expected
+    );
+    assert_eq!(
+        face_url("https://example.com/fonts", catalog.get("percent").unwrap()),
+        "https://example.com/fonts/%252e%252e%252foutside.shx"
+    );
+    let requests = vec!["special".to_string()];
+    let legacy = plan_fonts(&catalog, &requests, "https://example.com/fonts");
+    let report = plan_fonts_report(&catalog, &requests, "https://example.com/fonts");
+    assert_eq!(legacy[0].url, expected);
+    assert_eq!(report.planned[0].url, expected);
+    assert!(report.is_complete());
+}
+
+#[test]
+fn manually_constructed_font_faces_cannot_inject_url_path_segments() {
+    for (file, expected) in [
+        ("../outside.shx", "outside.shx"),
+        ("fonts\\outside.shx", "outside.shx"),
+        ("..", "unnamed"),
+        (".", "unnamed"),
+        ("%2e%2e", "%252e%252e"),
+    ] {
+        let face = FontFace {
+            file: file.to_string(),
+            names: Vec::new(),
+            kind: FontKind::Shx,
+            encoding: None,
+        };
+        assert_eq!(
+            face_url("https://example.com/fonts/", &face),
+            format!("https://example.com/fonts/{expected}")
+        );
+    }
+}
+
+#[test]
 fn font_plan_maps_requests_to_urls_and_dedups_files() {
     let catalog = FontCatalog::from_json(CATALOG).unwrap();
     let requested = vec![
