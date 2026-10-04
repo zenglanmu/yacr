@@ -312,6 +312,15 @@ impl AnnotationService {
                 file.schema_version
             )));
         }
+        let mut seen_ids = std::collections::BTreeSet::new();
+        for annotation in &file.annotations {
+            if !seen_ids.insert(annotation.id) {
+                return Err(CadError::InvalidInput(format!(
+                    "annotation id {:?} appears more than once",
+                    annotation.id
+                )));
+            }
+        }
         let mut root = Map::new();
         root.insert("schema_version".into(), json!(SCHEMA_VERSION));
         root.insert(
@@ -350,8 +359,9 @@ impl AnnotationService {
                 )));
             }
             if k == NESTED_EXTENSIONS_KEY {
-                // Rebuilt from `nested_extensions` below, never copied verbatim.
-                continue;
+                return Err(CadError::InvalidInput(format!(
+                    "extension field '{k}' is reserved; use nested_extensions instead"
+                )));
             }
             try_insert_extension(&mut root, k, v)?;
         }
@@ -396,7 +406,9 @@ impl AnnotationService {
     /// Atomically export `file` for the current database revision.
     ///
     /// The bytes are produced first; only if encoding fully succeeds is the
-    /// captured revision marked saved. A failed encode therefore returns an
+    /// captured revision marked saved. The file must contain exactly the current
+    /// database annotations (in any order), not a stale or partial snapshot.
+    /// A failed encode or snapshot mismatch therefore returns an
     /// error, leaves the database dirty and does not advance its revision
     /// (audit B07/F09). Hosts that must wait for a durable write should instead
     /// call [`AnnotationService::encode`] and confirm with
@@ -408,6 +420,16 @@ impl AnnotationService {
     ) -> CadResult<Vec<u8>> {
         let revision = database.revision();
         let bytes = self.encode(file)?;
+        if file.annotations.len() != database.len()
+            || file
+                .annotations
+                .iter()
+                .any(|annotation| database.get(annotation.id) != Some(annotation))
+        {
+            return Err(CadError::InvalidInput(
+                "annotation export does not match the current database snapshot".into(),
+            ));
+        }
         database.mark_exported(revision)?;
         Ok(bytes)
     }
