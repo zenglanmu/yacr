@@ -495,3 +495,119 @@ fn malformed_view_bookmark_is_rejected() {
         Err(CadError::CorruptData(_))
     ));
 }
+
+#[test]
+fn duplicate_ids_cannot_be_encoded_or_mark_export_saved() {
+    let service = AnnotationService;
+    let mut db = AnnotationDatabase::new(DatabaseId(1));
+    let note = text_note(1, "kept");
+    service
+        .apply(&mut db, AnnotationCommand::Create(note.clone()))
+        .unwrap();
+    let revision = db.revision();
+    let mut file = empty_file(DocumentIdentity::Sha256([0u8; 32]));
+    file.annotations = vec![note.clone(), note.clone()];
+    assert!(matches!(
+        service.encode(&file),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        service.export_sidecar(&mut db, &file),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(db.is_dirty());
+    assert_eq!(db.revision(), revision);
+    assert_eq!(db.get(note.id), Some(&note));
+}
+
+#[test]
+fn stale_or_incomplete_exports_preserve_dirty_revision_and_contents() {
+    let service = AnnotationService;
+    let mut db = AnnotationDatabase::new(DatabaseId(1));
+    let original = text_note(1, "original");
+    service
+        .apply(&mut db, AnnotationCommand::Create(original.clone()))
+        .unwrap();
+    let mut file = empty_file(DocumentIdentity::Sha256([0u8; 32]));
+    file.annotations = vec![original.clone()];
+    service.export_sidecar(&mut db, &file).unwrap();
+    let current = text_note(1, "current");
+    service
+        .apply(&mut db, AnnotationCommand::Update(current.clone()))
+        .unwrap();
+    let revision = db.revision();
+    let variants = [
+        vec![original],
+        Vec::new(),
+        vec![text_note(2, "foreign")],
+        vec![current.clone(), text_note(2, "extra")],
+    ];
+    for annotations in variants {
+        file.annotations = annotations;
+        // A standalone sidecar is valid; it just cannot confirm this revision.
+        assert!(service.encode(&file).is_ok());
+        assert!(matches!(
+            service.export_sidecar(&mut db, &file),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert!(db.is_dirty());
+        assert_eq!(db.revision(), revision);
+        assert_eq!(db.len(), 1);
+        assert_eq!(db.get(current.id), Some(&current));
+    }
+    file.annotations = vec![current];
+    service.export_sidecar(&mut db, &file).unwrap();
+    assert!(!db.is_dirty());
+    assert_eq!(db.revision(), revision);
+}
+
+#[test]
+fn matching_export_snapshot_does_not_require_database_order() {
+    let service = AnnotationService;
+    let mut db = AnnotationDatabase::new(DatabaseId(1));
+    let first = text_note(1, "first");
+    let second = text_note(2, "second");
+    for note in [&first, &second] {
+        service
+            .apply(&mut db, AnnotationCommand::Create(note.clone()))
+            .unwrap();
+    }
+    let revision = db.revision();
+    let mut file = empty_file(DocumentIdentity::Sha256([0u8; 32]));
+    file.annotations = vec![second, first];
+    service.export_sidecar(&mut db, &file).unwrap();
+    assert!(!db.is_dirty());
+    assert_eq!(db.revision(), revision);
+}
+
+#[test]
+fn raw_reserved_sideband_is_rejected_instead_of_silently_discarded() {
+    let service = AnnotationService;
+    let mut db = AnnotationDatabase::new(DatabaseId(1));
+    let note = text_note(1, "kept");
+    service
+        .apply(&mut db, AnnotationCommand::Create(note.clone()))
+        .unwrap();
+    let revision = db.revision();
+    let mut file = empty_file(DocumentIdentity::Sha256([0u8; 32]));
+    file.annotations = vec![note.clone()];
+    for raw in [r#"{"version":1,"annotations":[]}"#, "not JSON"] {
+        file.extensions_json
+            .insert(cad_annotations::NESTED_EXTENSIONS_KEY.into(), raw.into());
+        assert!(matches!(
+            service.encode(&file),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            service.export_sidecar(&mut db, &file),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert!(db.is_dirty());
+        assert_eq!(db.revision(), revision);
+        assert_eq!(db.get(note.id), Some(&note));
+        assert_eq!(
+            file.extensions_json[cad_annotations::NESTED_EXTENSIONS_KEY],
+            raw
+        );
+    }
+}
