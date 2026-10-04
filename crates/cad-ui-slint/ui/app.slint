@@ -25,6 +25,9 @@ export component YacrWindow inherits Window {
     out property <length> cad-top: workspace-area.y + canvas-area.y;
     out property <length> cad-left: workspace-area.x + canvas-area.x;
     in property <bool> application-ui: true;
+    // Fail closed until the adapter pushes interaction.keyboardShortcuts from
+    // the effective ViewerConfig on initial presentation and every config edit.
+    in property <bool> keyboard-shortcuts-enabled: false;
     in property <bool> ribbon-visible: true;
     in property <bool> panels-visible: true;
     in property <bool> layer-panel-visible: true;
@@ -244,6 +247,78 @@ export component YacrWindow inherits Window {
     callback canvas-pick(float, float);
     title: application-title;
     background: CadTheme.canvas;
+    forward-focus: shortcut-scope;
+    // Cancel only the highest-priority live interaction. State stays owned by
+    // the existing host callbacks; Escape never fabricates a successful edit.
+    function cancel-interaction() -> bool {
+        if root.import-active {
+            if root.import-cancellable { root.cancel-open-requested(); }
+            return true;
+        }
+        if root.draw-tool-active { root.cancel-draw-requested(); return true; }
+        if root.annotation-tool-active { root.cancel-annotation-requested(); return true; }
+        if root.measurement-active { root.cancel-measurement-requested(); return true; }
+        if root.pan-active { root.pan-requested(); return true; }
+        if root.diagnostics-open {
+            root.diagnostics-open = false;
+            root.diagnostics-closed();
+            return true;
+        }
+        if root.tools-open { root.tools-open = false; return true; }
+        if root.selection-count > 0 { root.clear-selection-requested(); return true; }
+        return false;
+    }
+    shortcut-scope := FocusScope {
+        width: parent.width; height: parent.height;
+        // Capture only non-editing global keys. Text widgets retain clipboard,
+        // caret movement, character input and their own undo/redo history.
+        capture-key-pressed(event) => {
+            if !root.application-ui || !root.keyboard-shortcuts-enabled {
+                return EventResult.reject;
+            }
+            if event.modifiers.alt || event.modifiers.meta { return EventResult.reject; }
+            if event.modifiers.control && !event.modifiers.shift
+                && (event.text == "o" || event.text == "O") && root.can-open {
+                root.open-requested();
+                return EventResult.accept;
+            }
+            if !event.modifiers.control && !event.modifiers.shift {
+                if event.text == Key.F2 && root.command-visible {
+                    // This expands the existing command/status row, not a
+                    // nonexistent full command-history browser.
+                    root.command-expanded = !root.command-expanded;
+                    return EventResult.accept;
+                }
+                if event.text == Key.Escape && root.cancel-interaction() {
+                    return EventResult.accept;
+                }
+            }
+            return EventResult.reject;
+        }
+        // Bubbled events only: a focused LineEdit gets first refusal for its
+        // local undo/redo and Ctrl+Home. Disabled/unimplemented actions reject.
+        key-pressed(event) => {
+            if !root.application-ui || !root.keyboard-shortcuts-enabled
+                || event.modifiers.alt || event.modifiers.meta || !event.modifiers.control {
+                return EventResult.reject;
+            }
+            if (event.text == "z" || event.text == "Z") && root.work-mode {
+                if event.modifiers.shift && root.can-redo {
+                    root.redo-requested(); return EventResult.accept;
+                }
+                if !event.modifiers.shift && root.can-undo {
+                    root.undo-requested(); return EventResult.accept;
+                }
+            }
+            if !event.modifiers.shift && (event.text == "y" || event.text == "Y")
+                && root.work-mode && root.can-redo {
+                root.redo-requested(); return EventResult.accept;
+            }
+            if !event.modifiers.shift && event.text == Key.Home {
+                root.fit-requested(); return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
     VerticalBox {
         padding: 0px; spacing: 0px;
         if root.application-ui : Rectangle {
@@ -349,7 +424,10 @@ export component YacrWindow inherits Window {
             CadCanvas {
                 width: parent.width; height: parent.height;
                 frame: root.cad-frame;
-                pointer(k, b, x, y) => { root.pointer-input(k, b, x, y); }
+                pointer(k, b, x, y) => {
+                    if k == 0 { shortcut-scope.focus(); }
+                    root.pointer-input(k, b, x, y);
+                }
                 scroll(x, y) => { root.scroll-input(x, y); }
                 pick(x, y) => { root.canvas-pick(x, y); }
             }
@@ -561,5 +639,6 @@ export component YacrWindow inherits Window {
                     min-height: 64px; clicked => { root.command-expanded = !root.command-expanded; } }
             }
         }
+    }
     }
 }
