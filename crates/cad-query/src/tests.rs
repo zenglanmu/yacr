@@ -154,3 +154,147 @@ fn annotation_query_works() {
     let page = service.annotations(&db, request(0, 10)).unwrap();
     assert_eq!(page.total, 0);
 }
+
+fn change(database: DatabaseId, before: u64, after: u64) -> ChangeSet {
+    ChangeSet {
+        database,
+        before: Revision(before),
+        after: Revision(after),
+        transaction: TransactionId(1),
+        reason: "query update regression".into(),
+        changes: Vec::new(),
+    }
+}
+
+#[test]
+fn update_preserves_document_and_accepts_consecutive_changes() {
+    let db = AnnotationDatabase::new(DatabaseId(42));
+    let mut service = QueryService::new();
+    service.annotations(&db, request(0, 10)).unwrap();
+    service.update(&change(db.id(), 0, 1)).unwrap();
+    service.update(&change(db.id(), 1, 2)).unwrap();
+    assert_eq!(service.last_revision(), Some(Revision(2)));
+
+    let mut other = request(0, 10);
+    other.document = DocumentId(0);
+    assert_eq!(
+        service.annotations(&db, other).unwrap_err(),
+        CadError::StaleResult
+    );
+    assert_eq!(service.last_revision(), Some(Revision(2)));
+    service.annotations(&db, request(0, 10)).unwrap();
+}
+
+#[test]
+fn update_without_snapshot_is_stale_without_binding_document() {
+    let mut service = QueryService::new();
+    assert_eq!(
+        service.update(&change(DatabaseId(42), 0, 1)),
+        Err(CadError::StaleResult)
+    );
+    assert_eq!(service.last_revision(), None);
+    let db = AnnotationDatabase::new(DatabaseId(42));
+    service.annotations(&db, request(0, 10)).unwrap();
+    service.update(&change(db.id(), 0, 1)).unwrap();
+}
+
+#[test]
+fn update_rejects_unknown_database_after_selection_query() {
+    let mut service = QueryService::new();
+    service.properties(&[], request(0, 10)).unwrap();
+    assert_eq!(
+        service.update(&change(DatabaseId(1), 0, 1)),
+        Err(CadError::StaleResult)
+    );
+    assert_eq!(service.last_revision(), Some(Revision(0)));
+    service.properties(&[], request(0, 10)).unwrap();
+}
+
+#[test]
+fn selection_query_does_not_carry_forward_database_binding() {
+    let db = AnnotationDatabase::new(DatabaseId(42));
+    let mut service = QueryService::new();
+    service.annotations(&db, request(0, 10)).unwrap();
+    let mut selection_request = request(0, 10);
+    selection_request.revision = Revision(7);
+    service.properties(&[], selection_request).unwrap();
+    assert_eq!(
+        service.update(&change(db.id(), 7, 8)),
+        Err(CadError::StaleResult)
+    );
+    assert_eq!(service.last_revision(), Some(Revision(7)));
+    service.annotations(&db, request(0, 10)).unwrap();
+    service.update(&change(db.id(), 0, 1)).unwrap();
+}
+
+#[test]
+fn update_rejects_foreign_database_without_mutating_binding() {
+    let db = AnnotationDatabase::new(DatabaseId(42));
+    let mut service = QueryService::new();
+    service.annotations(&db, request(0, 10)).unwrap();
+    assert_eq!(
+        service.update(&change(DatabaseId(1), 0, 1)),
+        Err(CadError::StaleResult)
+    );
+    assert_eq!(service.last_revision(), Some(Revision(0)));
+    service.update(&change(db.id(), 0, 1)).unwrap();
+}
+
+#[test]
+fn update_rejects_discontinuous_and_non_advancing_revisions() {
+    let db = AnnotationDatabase::new(DatabaseId(42));
+    for (before, after) in [(7, 1), (0, 2), (0, 0), (7, 0), (2, 1)] {
+        let mut service = QueryService::new();
+        service.annotations(&db, request(0, 10)).unwrap();
+        assert_eq!(
+            service.update(&change(db.id(), before, after)),
+            Err(CadError::StaleResult)
+        );
+        assert_eq!(service.last_revision(), Some(Revision(0)));
+        service.update(&change(db.id(), 0, 1)).unwrap();
+        service.annotations(&db, request(0, 10)).unwrap();
+    }
+}
+
+#[test]
+fn update_rejects_replay_without_silent_success() {
+    let db = AnnotationDatabase::new(DatabaseId(42));
+    let mut service = QueryService::new();
+    service.annotations(&db, request(0, 10)).unwrap();
+    let changes = change(db.id(), 0, 1);
+    service.update(&changes).unwrap();
+    assert_eq!(service.update(&changes), Err(CadError::StaleResult));
+    assert_eq!(service.last_revision(), Some(Revision(1)));
+    service.update(&change(db.id(), 1, 2)).unwrap();
+}
+
+#[test]
+fn update_at_max_revision_is_stale_without_overflow() {
+    let mut service = QueryService::new();
+    service.remember(&DocumentId(1), Revision(u64::MAX), Some(DatabaseId(42)));
+    for after in [0, u64::MAX] {
+        assert_eq!(
+            service.update(&change(DatabaseId(42), u64::MAX, after)),
+            Err(CadError::StaleResult)
+        );
+        assert_eq!(service.last_revision(), Some(Revision(u64::MAX)));
+    }
+}
+
+#[test]
+fn database_backed_query_replaces_observed_database_binding() {
+    let drawing = DrawingDatabaseBuilder::new(DatabaseId(41))
+        .finish()
+        .unwrap();
+    let annotations = AnnotationDatabase::new(DatabaseId(42));
+    let mut service = QueryService::new();
+    service.layers(&drawing, request(0, 10)).unwrap();
+    service.update(&change(drawing.id(), 0, 1)).unwrap();
+    service.annotations(&annotations, request(0, 10)).unwrap();
+    assert_eq!(
+        service.update(&change(drawing.id(), 0, 1)),
+        Err(CadError::StaleResult)
+    );
+    assert_eq!(service.last_revision(), Some(annotations.revision()));
+    service.update(&change(annotations.id(), 0, 1)).unwrap();
+}
