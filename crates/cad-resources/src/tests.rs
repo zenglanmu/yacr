@@ -288,6 +288,67 @@ fn per_resource_and_pixel_budgets_are_explicit() {
 }
 
 #[test]
+fn image_pixel_overflow_is_rejected_even_with_the_maximum_budget() {
+    for max_image_pixels in [100, u64::MAX] {
+        let limits = ResourceLimits {
+            max_image_pixels,
+            ..ResourceLimits::default()
+        };
+        for (width, height) in [(u64::MAX, 2), (2, u64::MAX), (u64::MAX, u64::MAX)] {
+            let issue = limits.check_image_pixels(width, height).unwrap_err();
+            assert_eq!(issue.code, codes::RESOURCE_SIZE_OVERFLOW);
+            assert_eq!(issue.kind, Some(ResourceKind::Image));
+            assert_eq!(issue.budget, Some(ResourceBudget::ImagePixels));
+            // The overflow code distinguishes this lower bound from an exact count.
+            assert_eq!(issue.actual, u64::MAX);
+            assert_eq!(issue.limit, max_image_pixels);
+            assert_eq!(issue.key, None);
+        }
+    }
+}
+
+#[test]
+fn image_pixel_budget_accepts_exact_representable_limits() {
+    let limits = ResourceLimits {
+        max_image_pixels: 100,
+        ..ResourceLimits::default()
+    };
+    assert_eq!(limits.check_image_pixels(10, 10), Ok(100));
+    let limits = ResourceLimits {
+        max_image_pixels: u64::MAX,
+        ..ResourceLimits::default()
+    };
+    assert_eq!(limits.check_image_pixels(u64::MAX, 1), Ok(u64::MAX));
+    assert_eq!(limits.check_image_pixels(3, u64::MAX / 3), Ok(u64::MAX));
+}
+
+#[test]
+fn image_pixel_budget_preserves_zero_dimension_behavior() {
+    let limits = ResourceLimits {
+        max_image_pixels: 0,
+        ..ResourceLimits::default()
+    };
+    for (width, height) in [(0, u64::MAX), (u64::MAX, 0), (0, 0)] {
+        assert_eq!(limits.check_image_pixels(width, height), Ok(0));
+    }
+}
+
+#[test]
+fn representable_image_pixel_over_budget_reports_the_exact_count() {
+    let limits = ResourceLimits {
+        max_image_pixels: 100,
+        ..ResourceLimits::default()
+    };
+    let issue = limits.check_image_pixels(11, 10).unwrap_err();
+    assert_eq!(issue.code, codes::RESOURCE_OVER_BUDGET);
+    assert_eq!(issue.kind, Some(ResourceKind::Image));
+    assert_eq!(issue.budget, Some(ResourceBudget::ImagePixels));
+    assert_eq!(issue.actual, 110);
+    assert_eq!(issue.limit, 100);
+    assert_eq!(issue.key, None);
+}
+
+#[test]
 fn xref_recursion_limit_is_enforced() {
     let limits = ResourceLimits {
         max_xref_depth: 2,

@@ -122,6 +122,8 @@ pub mod codes {
     pub const RESOURCE_MISSING: &str = "resource.missing";
     /// A resource exceeds a configured budget.
     pub const RESOURCE_OVER_BUDGET: &str = "resource.over_budget";
+    /// A resource's measured size cannot be represented as a `u64`.
+    pub const RESOURCE_SIZE_OVERFLOW: &str = "resource.size_overflow";
     /// A reference nested deeper than the configured recursion limit.
     pub const RESOURCE_RECURSION_LIMIT: &str = "resource.recursion_limit";
     /// A requested font name resolved to no catalog entry.
@@ -166,8 +168,10 @@ pub struct ResourceIssue {
     pub kind: Option<ResourceKind>,
     pub budget: Option<ResourceBudget>,
     /// The measured value (bytes, pixels or depth) that triggered the issue.
+    /// For `resource.size_overflow`, `u64::MAX` is a saturated lower bound,
+    /// not the exact measured value.
     pub actual: u64,
-    /// The configured limit that was exceeded.
+    /// The configured limit that was exceeded, including by an unrepresentable size.
     pub limit: u64,
     /// Logical key of the resource, when known (already sanitized).
     pub key: Option<String>,
@@ -263,8 +267,17 @@ impl Default for ResourceLimits {
 
 impl ResourceLimits {
     /// Enforce the image pixel cap for a declared decode size.
+    /// A zero dimension yields zero pixels; this checks the budget, not decode validity.
+    /// An unrepresentable pixel count is rejected even if the cap is `u64::MAX`.
     pub fn check_image_pixels(&self, width: u64, height: u64) -> Result<u64, ResourceIssue> {
-        let pixels = width.saturating_mul(height);
+        let pixels = width.checked_mul(height).ok_or_else(|| ResourceIssue {
+            code: codes::RESOURCE_SIZE_OVERFLOW.to_string(),
+            kind: Some(ResourceKind::Image),
+            budget: Some(ResourceBudget::ImagePixels),
+            actual: u64::MAX,
+            limit: self.max_image_pixels,
+            key: None,
+        })?;
         if pixels > self.max_image_pixels {
             return Err(ResourceIssue::over_budget(
                 None,
