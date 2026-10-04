@@ -1,4 +1,11 @@
-# OpenCADStudio 迁移映射
+# OpenCADStudio 历史调查记录（非源码迁移要求）
+
+## 当前契约边界（2026-10-04）
+
+用户已明确 OpenCADStudio 仅为功能规格参考，入口为 `ui-requirements/00-INDEX.md`。
+以下记录保留此前源码调查事实，不表示当前允许或要求源码参考、抽取、移植或依赖采用。
+下文“待办”与“采用”均为历史计划，已由 `CAD_IMPLEMENTATION_SPEC.md` §10 的独立实现与
+功能对照要求替代，不作为后续实现任务或交付门禁。历史许可证风险不因此被抹除。
 
 来源：https://github.com/HakanSeven12/OpenCADStudio
 

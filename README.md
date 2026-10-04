@@ -22,7 +22,7 @@
 * 渲染后端：`docs/render-backends.md`
 * 代理支持：`docs/proxy-support.md`
 * 性能与预算：`docs/performance.md`
-* OpenCADStudio 迁移映射：`docs/migration-map.md`
+* OpenCADStudio 功能规格参考：`docs/ui-requirements/00-INDEX.md`（非源码参考）；历史调查：`docs/migration-map.md`
 * 决策记录：`docs/adr/`
 
 ## 当前状态（开发搭建中）

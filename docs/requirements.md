@@ -30,7 +30,7 @@
 | §7 | proxy-support.md、ImportLimits/DecodeLimits | 有界解码、深层块、来源与资源权限 |
 | §8、§11 | performance.md、BenchmarkContext | 真实设备同样本/质量的分阶段基准 |
 | §9 | build.md、platform traits | SAF、IndexedDB/导出、生命周期/退出保护 |
-| §10、§17 | migration-map.md、THIRD_PARTY_NOTICES.md | 上游 commit/许可、最小输入输出测试 |
+| §10、§17 | ui-requirements/00-INDEX.md、THIRD_PARTY_NOTICES.md | 功能范围映射、独立实现行为契约、实际依赖/资源许可 |
 | §16 | TolerancePolicy、AnnotationFile、anchors | 数值稳健性、未知字段迁移、稳定来源 |
 | §19 | CLI、diagnostics | 与 UI 同命令路径、非零错误、脱敏 |
 
