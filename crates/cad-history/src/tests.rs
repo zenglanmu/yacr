@@ -286,6 +286,140 @@ fn journal_recovers_state() {
     assert_eq!(db.get(AnnotationId(7)).unwrap().text, "recovered");
 }
 
+#[test]
+fn journal_rejects_malformed_records_without_appending() {
+    let mut journal = MemoryJournal::new();
+    let valid = annotation_record(7, None);
+    journal.append(&valid).unwrap();
+    let mut empty = valid.clone();
+    empty.patches.clear();
+    let mut duplicate = valid.clone();
+    duplicate.patches.push(duplicate.patches[0].clone());
+    let mut wrong_before = valid.clone();
+    wrong_before.patches[0].before = Some(ann(99, "wrong"));
+    let mut wrong_after = valid.clone();
+    wrong_after.patches[0].after = Some(ann(99, "wrong"));
+    let mut absent = valid.clone();
+    absent.patches[0].after = None;
+    let marker = drawing_marker(TransactionId(8), "drawing".into());
+    for record in [empty, duplicate, wrong_before, wrong_after, absent, marker] {
+        assert!(matches!(
+            journal.append(&record),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert_eq!(journal.len(), 1);
+    }
+    let mut db = AnnotationDatabase::new(DatabaseId(1));
+    assert_eq!(journal.recover(&mut db).unwrap().len(), 1);
+    assert_eq!(db.get(AnnotationId(7)), valid.patches[0].after.as_ref());
+}
+
+#[test]
+fn failed_journal_recovery_preserves_exported_state_and_can_retry() {
+    let mut db = database_with();
+    db.mark_exported(db.revision()).unwrap();
+    let revision = db.revision();
+    let annotations: Vec<_> = db.annotations().cloned().collect();
+    let mut journal = MemoryJournal::new();
+    journal.append(&annotation_record(7, None)).unwrap();
+    journal
+        .append(&UndoRecord {
+            transaction: TransactionId(2),
+            label: "delete".into(),
+            patches: vec![patch(AnnotationId(8), Some(ann(8, "note")), None)],
+            merge_key: None,
+        })
+        .unwrap();
+    assert!(journal.recover(&mut db).is_err());
+    assert_eq!(db.id(), DatabaseId(1));
+    assert_eq!(db.revision(), revision);
+    assert!(!db.is_dirty());
+    assert_eq!(db.annotations().cloned().collect::<Vec<_>>(), annotations);
+    assert_eq!(journal.len(), 2);
+
+    db.apply_annotation_changes(
+        "restore missing annotation",
+        TransactionId(3),
+        vec![(AnnotationId(8), Some(ann(8, "note")))],
+    )
+    .unwrap();
+    let before = db.revision();
+    let sets = journal.recover(&mut db).unwrap();
+    assert_eq!(sets.len(), 2);
+    assert_eq!(sets[0].before, before);
+    assert_eq!(sets[0].after, sets[1].before);
+    assert_eq!(sets[1].after, db.revision());
+    assert_eq!(sets[0].transaction, TransactionId(1));
+    assert_eq!(sets[1].transaction, TransactionId(2));
+    assert_eq!(db.get(AnnotationId(7)), Some(&ann(7, "note")));
+    assert!(db.get(AnnotationId(8)).is_none());
+    assert!(db.is_dirty());
+}
+
+#[test]
+fn invalid_later_journal_geometry_does_not_publish_earlier_update() {
+    let mut db = database_with();
+    let revision = db.revision();
+    let mut journal = MemoryJournal::new();
+    journal
+        .append(&UndoRecord {
+            transaction: TransactionId(1),
+            label: "update".into(),
+            patches: vec![patch(
+                AnnotationId(1),
+                Some(ann(1, "a")),
+                Some(ann(1, "changed")),
+            )],
+            merge_key: None,
+        })
+        .unwrap();
+    let mut invalid = annotation_record(7, None);
+    invalid.patches[0].after.as_mut().unwrap().geometry = AnnotationGeometry::Text(Point3 {
+        x: f64::NAN,
+        y: 0.0,
+        z: 0.0,
+    });
+    journal.append(&invalid).unwrap();
+    assert!(journal.recover(&mut db).is_err());
+    assert_eq!(db.revision(), revision);
+    assert_eq!(db.get(AnnotationId(1)), Some(&ann(1, "a")));
+    assert_eq!(db.len(), 1);
+    assert!(db.is_dirty());
+    assert_eq!(journal.len(), 2);
+}
+
+#[test]
+fn journal_replays_sequential_states_and_empty_recovery_is_unchanged() {
+    let mut db = database_with();
+    db.mark_exported(db.revision()).unwrap();
+    let revision = db.revision();
+    let mut journal = MemoryJournal::new();
+    assert!(journal.recover(&mut db).unwrap().is_empty());
+    assert_eq!(db.revision(), revision);
+    assert!(!db.is_dirty());
+    journal.append(&annotation_record(7, None)).unwrap();
+    journal
+        .append(&UndoRecord {
+            transaction: TransactionId(2),
+            label: "delete recovered annotation".into(),
+            patches: vec![patch(AnnotationId(7), Some(ann(7, "note")), None)],
+            merge_key: None,
+        })
+        .unwrap();
+    let sets = journal.recover(&mut db).unwrap();
+    assert_eq!(sets.len(), 2);
+    assert_eq!(sets[0].database, db.id());
+    assert_eq!(sets[1].database, db.id());
+    assert_eq!(sets[0].before, revision);
+    assert_eq!(sets[0].after, Revision(revision.0 + 1));
+    assert_eq!(sets[1].before, sets[0].after);
+    assert_eq!(sets[1].after, Revision(revision.0 + 2));
+    assert_eq!(db.revision(), sets[1].after);
+    assert_eq!(db.get(AnnotationId(1)), Some(&ann(1, "a")));
+    assert!(db.get(AnnotationId(7)).is_none());
+    assert!(db.is_dirty());
+}
+
 fn entity(id: u128, x: f64) -> DbEntity {
     DbEntity {
         object: cad_db::DbObject {
