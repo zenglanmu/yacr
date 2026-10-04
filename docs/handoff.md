@@ -16,6 +16,16 @@
 7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
    Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
+## 功能参考契约修订（2026-10-04）
+
+用户明确 OpenCADStudio 仅为功能规格参考，不为源码参考。已同步规范 §2/§10/§13–15、
+UI 需求总目录与实施追踪：从 `docs/ui-requirements/` 对照用户可见功能，核心独立实现，
+不要求源码抽取、移植、上游依赖或算法采用；参考清单不扩大只读/测量/批注范围。
+`docs/migration-map.md` 保留历史调查事实，旧迁移待办不再有效；既有实现与历史证据不删除。
+本轮仅文档与 Rust 文档注释修订，不宣称新的产品运行或兼容性证据。
+已运行 `python3 scripts/test-feature-reference-contract.py`：3 项合成文档契约通过。
+未运行 Rust 编译/测试、Linux 离屏或其他平台验收。
+
 ## 独立分支并行审查第五轮（2026-10-04）
 
 3 个并行子代理分别在 `review/20261004-{query-updates,annotation-files,history-recovery}`

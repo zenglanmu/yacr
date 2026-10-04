@@ -4,7 +4,7 @@
 //! [`TolerancePolicy`] and never confuse display discretisation with the
 //! geometric predicates used for closure, area or snapping.
 //!
-//! The OpenCADStudio tessellation path (spec §10.2) is realised by
+//! Independent display tessellation (spec §10.2) is provided by
 //! [`GeometryEngine::tessellate_curve`] and [`mesh`]. Kernel and codec types
 //! stay outside this crate.
 

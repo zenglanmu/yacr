@@ -26,3 +26,5 @@ apps/app-android/assets/fonts/*
 *.plot.png
 *.plot.svg
 *.plot.pdf
+
+.opencode/

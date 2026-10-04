@@ -1,6 +1,6 @@
 # Rust 工业 CAD 查看、测量与批注系统：实现执行规范
 
-文档版本：2.0  
+文档版本：2.0（2026-10-04 功能参考边界修订）
 编制日期：2026-10-01  
 适用对象：AI coding agent、系统开发者、测试与验收人员  
 交付性质：需求、架构、实现约束与验收规范，不包含排期、工期或进度计划。
@@ -9,7 +9,7 @@
 
 本文中的“必须”是实现和验收约束；“建议”是可通过实验调整的默认设计；“待验证”表示尚不能作为事实依赖的技术假设。用户已确认的约束优先于建议。发现框架能力与本文假设不符时，应记录证据和替代设计，不得静默删减需求或换用另一套技术栈。
 
-本规范基于当前对话需求及官方文档核查编写，没有运行真实图纸或平台集成原型。已查阅 OpenCADStudio 的项目说明、Cargo.toml 和 tessellation 文档，尚未逐文件审计、编译或抽取其核心。文中的性能阈值属于建议验收预算，不是已有测试结果。源码与文档以最终锁定的依赖版本为准。
+本规范初稿基于当时对话需求及官方文档核查编写；实际实现与运行证据以最新交接和验证文档为准。OpenCADStudio 仅作为功能规格与交互对照参考，入口为 `docs/ui-requirements/00-INDEX.md`，不是源码、算法、渲染核心或依赖的采用来源。文中的性能阈值属于建议验收预算，不是已有测试结果。实际依赖以最终锁定的版本为准。
 
 ## 2. 产品目标与边界
 
@@ -20,7 +20,7 @@
 3. UI 使用 Slint，复用 UI 定义、组件和应用状态；允许必要的平台宿主和浏览器 JS 接入。
 4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。2026-10-04 用户调整默认提交门禁为 debug 编译与静态检查，不默认运行完整测试、Linux 离屏渲染或 release 编译。实际 Linux 运行验收仍须使用 `apps/app-linux` 的宿主/命令/数据库/共享 Slint/wgpu 链路，不以仅 UI 编译或测试替身代替；未运行须明确标注。无窗口可选验证使用软件 Vulkan/lavapipe；桌面窗口、真实 GPU、真实图纸分别记录验证范围。架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。
 5. Web 必须支持 WebGL2 与 WebGPU 两条 CAD 绘制路径，提供 Auto / WebGPU / WebGL2 选择。WebGL1 不属于要求。
-6. 项目准备开源。以 OpenCADStudio 为绘制、几何离散、相机和 3D 能力的主要源码抽取/参考对象；不再从 JS 项目迁移绘制核心。mlightcad/cad-viewer 仅保留为 UI 功能组织及交互对照参考。
+6. 项目准备开源。OpenCADStudio 仅作为功能规格与 UI 交互参考，通过 `docs/ui-requirements/` 对照功能；不作为源码抽取、移植或核心实现参考，不要求采用其算法、shader、类型或依赖树。绘制、几何离散、相机和 3D 能力在本项目契约下独立实现；不从 JS 项目迁移绘制核心。mlightcad/cad-viewer 仅保留为 UI 功能组织及交互对照参考。
 7. 保留 Slint，不随参考项目改用 Iced。以数据库对象、事务、变更集和显示表示为核心架构；业务层操作数据，不调用 GPU 绘制命令。
 8. 产品包含极简查看模式及增强工作模式。初期增强模式仅包含测量、批注及其管理，不修改 DWG 原始图元。
 9. 天正、探索者等自定义图元优先通过代理图形缓存显示；不能承诺无缓存或未知专有格式的完整兼容。
@@ -374,30 +374,28 @@ WebGPU 和 WebGL2 初始化、错误回退、刷新恢复均测试。Web 应用�
 
 抽象 FileAccess、ResourceResolver、TaskExecutor、Persistence、Clipboard、HostLifecycle、RenderHost。接口采用领域数据与自有句柄，平台对象不穿透到 cad-domain。保留 desktop 和 ios 宿主装配位置，不创建无法编译的假实现来表示支持。
 
-## 10. OpenCADStudio 核心抽取规范
+## 10. 功能规格参考与独立实现规范
 
 ### 10.1 依据与边界
 
-主要来源为 https://github.com/HakanSeven12/OpenCADStudio 。当前已查阅 main 的 Cargo.toml：UI 使用 Iced，文件/几何相关依赖使用 opencadcodec、opencadkernel 和 opencadgraph。不能假设其类型与 acadrust 兼容，也不能声称已经存在可直接给 Slint 使用的独立 renderer crate。
+OpenCADStudio（https://github.com/HakanSeven12/OpenCADStudio）仅提供功能规格与交互对照。参考清单见 `docs/ui-requirements/00-INDEX.md` 及分册；其中上游文件、符号、命令名仅用于说明条目的调查出处，不是本项目源码引用、API 契约或移植入口。
 
-项目准备开源。抽取代码时按实际文件及依赖许可证保留版权、许可和来源，项目许可方向需与所采用代码兼容；“开源”本身不是忽略许可证的理由。所有参考锁定 commit，不能生产依赖浮动 main。此文不替代逐依赖许可核查。
+本规范不授权抽取或移植 OpenCADStudio 源码，不要求依赖其 Iced、opencadcodec、opencadkernel 或 opencadgraph。实际采用的其他依赖和资源仍须独立核查版本、来源与许可；“功能参考”不构成代码或资源的复制授权。
 
-### 10.2 审计入口和抽取对象
+### 10.2 功能对照与本项目落点
 
-上游 tessellation 文档给出的入口包括 src/scene/convert/tess.rs、src/scene/convert/tessellate.rs、src/entities/curve.rs、src/scene/convert/curve_tol.rs。锁定 commit 后确认路径和实际调用链，禁止凭文档假设文件接口没有变化。
+从 UI 需求分册提取用户可见行为，按本规范确认范围后映射到本项目命令、数据库、显示表示和 Slint UI；不按上游源码结构划分模块。
 
-| 上游候选能力 | 本项目落点 | 适配要求 |
+| 功能类别 | 本项目落点 | 实现与验收要求 |
 |---|---|---|
-| 实体转换与曲线定义 | cad-geometry / cad-representation | 隔离 opencadcodec 与 acadrust 类型 |
-| ACIS 内核转换/曲面离散 | cad-kernel-adapter | 核实数据接口、许可、Wasm/Android 编译 |
-| 相机与投影 | Viewport / 场景数学 | 去除 Iced 输入事件依赖 |
-| shader 与 GPU 管线 | cad-render-wgpu | 对齐 wgpu 版本、资源所有权和基础档 |
-| 字体/标注显示 | cad-resources / 表示提供器 | 保留 CAD 样式、校验字体来源 |
-| 缓存和性能方法 | cad-scene | 采用前基准，不假定适合移动设备 |
-| Iced widget 与应用事件 | 不抽入核心 | Slint 和宿主重新集成 |
-| 完整建模/桌面插件 | 初期不抽取 | 不因依赖方便扩大产品范围 |
+| 查看与导航 | Viewport / cad-app / Slint UI | 独立实现相机与输入，验证鼠标/触控与 2D/3D 行为 |
+| 图层、布局、属性查询 | cad-db / cad-query / Slint UI | 数据库唯一权威，命令权限与不支持状态可测试 |
+| 测量与批注 | cad-measure / cad-annotations | 精度与来源可追踪，批注独立持久化 |
+| 几何与曲面显示 | cad-geometry / cad-kernel-adapter / cad-representation | 独立实现或另行评估依赖，验证离散误差和完整性 |
+| GPU 显示 | cad-render-wgpu | 自有管线，验证资源所有权和 WebGL2/WebGPU 能力 |
+| 完整编辑、建模与插件 | 不纳入初期范围 | 参考清单不自动扩大已确认交付范围 |
 
-抽取代码必须伴随最小输入输出用例与来源记录。禁止把整应用依赖树带入 renderer 后称为完成模块化。若某几何内核必须独立引入，明确它与 acadrust 的职责：前者生成可显示几何，后者读取 DWG；不得静默替换解析器。
+每项纳入范围的功能必须有行为契约与验收测试，不能以参考项目拥有该功能证明本项目已实现。若需独立引入几何内核，须另行评估接口、许可和平台能力，并明确它与 acadrust 的职责：前者生成可显示几何，后者读取 DWG；不得静默替换解析器。
 
 ### 10.3 3D 能力分层
 
@@ -409,9 +407,9 @@ C. ACIS 实体/曲面：SAT/SAB 或可用结构到几何内核，再按曲面离
 
 这些能力只服务查看、测量和批注，不引入建模命令。代理对象若只有二维缓存，三维旋转不会生成缺失的真实构件模型。
 
-### 10.4 迁移对照与验证
+### 10.4 需求对照与验证
 
-维护 migration-map：源 commit/文件/函数 → 目标模块 → 依赖适配 → 保留行为 → 差异 → 测试。检查源代码的 CPU/GPU 热点、全局状态、Iced/wgpu 耦合及平台条件编译后再决定复制或重构。
+维护功能对照：UI 需求分册/条目 → 本规范功能编号与范围决定 → 本项目模块/命令 → 行为差异 → 契约与验收证据。`docs/migration-map.md` 保留为历史调查记录，不再作为源码迁移任务或交付门禁。
 
 mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主线。截图参考需与可信 CAD 输出和坐标断言结合，不能以参考项目已有错误为标准。
 
@@ -504,7 +502,7 @@ mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主
 |---|---|---|
 | UI | Slint 共享组件与响应式布局 | Android/Web 合成原型 |
 | 架构 | 数据库、事务、显示表示与查询层 | 依赖方向、增量更新和恢复测试 |
-| 核心抽取 | OpenCADStudio，隔离 Iced/codec/kernel | 锁定 commit、来源许可、接口与平台验证 |
+| 功能规格参考 | OpenCADStudio UI 需求分册；核心独立实现 | 范围映射、行为契约与本项目验收证据 |
 | 三维 | 观察与直接网格必需，ACIS 按样本验收 | 数据适配、离散完整性、跨后端显示 |
 | DWG 修改 | 初期只读，批注独立持久化 | 无需等待 DWG 回写 |
 | 代理图元 | 外部解码缓存，不改 acadrust | 天正/探索者样本、正确截图、软件版本 |
@@ -526,7 +524,7 @@ mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主
 6. 单元/契约/图像/交互/生命周期测试及合法样本清单。
 7. 性能基准、缓存与内存预算、兼容性限制、已知缺失行为。
 8. 后续 iOS/桌面宿主扩展指南，不把指南等同于平台交付。
-9. OpenCADStudio 抽取来源清单、依赖许可证、迁移映射和 2D/3D 能力矩阵。
+9. UI 功能需求对照、实际依赖许可证和 2D/3D 能力矩阵；不要求 OpenCADStudio 源码抽取清单或迁移映射。
 10. 数据库事务、撤销、依赖失效、ViewModel 更新和序列化迁移测试。
 
 ## 15. 技术依据与查证入口
@@ -548,9 +546,9 @@ mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主
 - S13 wgpu limits： https://docs.rs/wgpu/latest/wgpu/struct.Limits.html
 - S14 wgpu downlevel capabilities： https://docs.rs/wgpu/latest/wgpu/struct.DownlevelCapabilities.html
 - S15 Autodesk 代理实体显示原理： https://help.autodesk.com/cloudhelp/2022/ENU/OARX-DevGuide/files/GUID-7DBB1CCB-6E54-46D9-A827-25C5A7379E6E.htm
-- S17 OpenCADStudio： https://github.com/HakanSeven12/OpenCADStudio
-- S18 OpenCADStudio 依赖： https://github.com/HakanSeven12/OpenCADStudio/blob/main/Cargo.toml
-- S19 OpenCADStudio 离散路径： https://github.com/HakanSeven12/OpenCADStudio/blob/main/docs/tessellation.md
+- S17 OpenCADStudio（仅功能规格参考）： https://github.com/HakanSeven12/OpenCADStudio
+- S18 本地 UI 功能参考目录： [docs/ui-requirements/00-INDEX.md](docs/ui-requirements/00-INDEX.md)
+- S19 历史调查记录（非源码采用要求）： [docs/migration-map.md](docs/migration-map.md)
 - S16 Autodesk 代理图形生成： https://help.autodesk.com/cloudhelp/2022/ENU/AutoCAD-Architecture/files/GUID-316EFE07-0D38-4E65-ABE3-A766F714700D.htm
 
 依赖及参考代码采用前记录实际版本许可证和第三方声明；代码移植保留适用署名与许可信息。字体、图纸、图标等资源独立核对，不能由主仓库许可推断其分发权利。
@@ -663,4 +661,4 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
 | 添加一个平台是否复制业务代码？ | 否，实现宿主服务和合成适配 |
 | 可扩展是否意味着提前实现全部 CAD？ | 否，先固定契约，按已确认范围交付 |
 
-本版替代 1.0：绘制核心来源调整为 OpenCADStudio，增加三维查看及独立曲面离散能力，确立数据库驱动架构。Android/Web、Slint、wgpu、acadrust 不改源码、极简/增强两模式、测量批注和多后端要求继续有效。所有章节必须一起执行，不能只完成新架构而忽略原有功能和性能验收。
+本版替代 1.0：增加三维查看及独立曲面离散能力，确立数据库驱动架构。2026-10-04 修订明确 OpenCADStudio 仅为 UI 功能规格参考，取消以其为绘制核心源码抽取/参考来源的要求。Android/Web、Slint、wgpu、acadrust 不改源码、极简/增强两模式、测量批注和多后端要求继续有效。所有章节必须一起执行，不能只完成新架构而忽略原有功能和性能验收。
