@@ -60,7 +60,7 @@ pub struct ToolStateModel {
 /// Tracks the last revision a query published, so gaps can trigger a rebuild.
 #[derive(Default)]
 pub struct QueryService {
-    last: std::cell::RefCell<Option<(DocumentId, Revision)>>,
+    last: std::cell::RefCell<Option<(DocumentId, Revision, Option<DatabaseId>)>>,
 }
 
 impl QueryService {
@@ -69,7 +69,7 @@ impl QueryService {
     }
 
     fn check_fresh(&self, request: &QueryRequest) -> CadResult<()> {
-        if let Some((doc, _)) = self.last.borrow().as_ref() {
+        if let Some((doc, _, _)) = self.last.borrow().as_ref() {
             if doc != &request.document {
                 // Document switched: the caller should rebuild, not reuse.
                 return Err(CadError::StaleResult);
@@ -78,8 +78,8 @@ impl QueryService {
         Ok(())
     }
 
-    fn remember(&self, document: &DocumentId, revision: Revision) {
-        *self.last.borrow_mut() = Some((*document, revision));
+    fn remember(&self, document: &DocumentId, revision: Revision, database: Option<DatabaseId>) {
+        *self.last.borrow_mut() = Some((*document, revision, database));
     }
 
     pub fn layers(
@@ -97,7 +97,7 @@ impl QueryService {
             })
             .collect();
         request.revision = database.revision();
-        self.remember(&request.document, request.revision);
+        self.remember(&request.document, request.revision, Some(database.id()));
         emit(request, all)
     }
 
@@ -120,7 +120,7 @@ impl QueryService {
             })
             .collect();
         request.revision = database.revision();
-        self.remember(&request.document, request.revision);
+        self.remember(&request.document, request.revision, Some(database.id()));
         emit(request, all)
     }
 
@@ -156,26 +156,32 @@ impl QueryService {
             key: "count".into(),
             value: PropertyValue::Value(selection.len().to_string()),
         });
-        self.remember(&request.document, request.revision);
+        // Selection properties do not establish a database revision or identity.
+        self.remember(&request.document, request.revision, None);
         emit(request, rows)
     }
 
-    /// Note a change set; a non-continuous revision forces a snapshot rebuild.
+    /// Note an exact successor of the last database-backed query.
+    ///
+    /// Missing database identity, foreign databases and revision gaps return
+    /// `StaleResult` without changing published state. The caller must rebuild
+    /// from a database-backed query before resuming updates. Selection-only
+    /// queries cannot establish this binding; no document/database ID mapping
+    /// is inferred. Replayed change sets are stale, not successful no-ops.
     pub fn update(&mut self, changes: &ChangeSet) -> CadResult<()> {
         let mut last = self.last.borrow_mut();
-        if let Some((_, revision)) = last.as_ref() {
-            if changes.after.0 != revision.0 && changes.after.0 != revision.0 + 1 {
-                // Subscribers must rebuild from the database (spec §4.6).
-                *last = Some((DocumentId(0), changes.after));
-                return Err(CadError::StaleResult);
-            }
+        let Some((document, revision, Some(database))) = *last else {
+            return Err(CadError::StaleResult);
+        };
+        if !changes.follows(database, revision) {
+            return Err(CadError::StaleResult);
         }
-        *last = Some((DocumentId(0), changes.after));
+        *last = Some((document, changes.after, Some(database)));
         Ok(())
     }
 
     pub fn last_revision(&self) -> Option<Revision> {
-        self.last.borrow().as_ref().map(|(_, r)| *r)
+        self.last.borrow().as_ref().map(|(_, r, _)| *r)
     }
 }
 
