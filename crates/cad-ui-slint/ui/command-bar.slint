@@ -20,8 +20,14 @@ export component CadCommandBar inherits Rectangle {
     in property <bool> history-storage-limited;
     in property <string> history-limit-label;
     in property <bool> keyboard-shortcuts-enabled: false;
+    // The host supplies ranked selectors and owns dismissal, including Escape.
+    in property <[string]> completion-items;
+    in property <string> completion-label;
     in-out property <bool> expanded: false;
     property <string> input;
+    callback input-edited(string);
+    // Observe all text changes, including history recall and completion fills.
+    changed input => { root.input-edited(root.input); }
     callback open();
     callback tools();
     callback fit();
@@ -66,13 +72,31 @@ export component CadCommandBar inherits Rectangle {
                     }
                     return EventResult.reject;
                 }
-                command-input := LineEdit {
+                FocusScope {
                     width: parent.width;
                     height: parent.height;
-                    placeholder-text: root.prompt;
-                    accessible-label: root.prompt;
-                    text <=> root.input;
-                    accepted => { root.submit(root.input); root.input = ""; }
+                    forward-focus: command-input;
+                    command-input := LineEdit {
+                        width: parent.width;
+                        height: parent.height;
+                        placeholder-text: root.prompt;
+                        accessible-label: root.prompt;
+                        text <=> root.input;
+                        accepted => { root.submit(root.input); root.input = ""; }
+                    }
+                    // Tab only fills a selector; Enter remains explicit submission.
+                    capture-key-pressed(event) => {
+                        if !root.keyboard-shortcuts-enabled || event.modifiers.control
+                            || event.modifiers.alt || event.modifiers.meta || event.modifiers.shift {
+                            return EventResult.reject;
+                        }
+                        if event.text == Key.Tab && root.completion-items.length > 0 {
+                            root.input = root.completion-items[0];
+                            command-input.focus();
+                            return EventResult.accept;
+                        }
+                        return EventResult.reject;
+                    }
                 }
             }
             Button { text: root.expanded ? "v" : "^"; min-width: 48px; preferred-width: 48px; min-height: root.phone ? 48px : 36px; clicked => { root.expanded = !root.expanded; } }
@@ -123,6 +147,46 @@ export component CadCommandBar inherits Rectangle {
                     min-width: 0px;
                     height: 48px;
                     wrap: word-wrap;
+                }
+            }
+        }
+    }
+    // Overlay above the bar without resizing or displacing the history archive.
+    // Full bar width keeps selectors usable on a 320px phone viewport.
+    if root.completion-items.length > 0 : Rectangle {
+        x: 0px;
+        y: -self.height;
+        width: root.width;
+        height: 40px + min(3, root.completion-items.length) * (root.phone ? 48px : 36px);
+        background: CadTheme.chrome;
+        border-color: CadTheme.border;
+        border-width: 1px;
+        VerticalBox {
+            padding: 6px; spacing: 4px;
+            Text {
+                text: root.completion-label;
+                color: CadTheme.muted;
+                height: 24px;
+                min-width: 0px;
+                overflow: elide;
+            }
+            ScrollView {
+                min-width: 0px;
+                height: min(3, root.completion-items.length) * (root.phone ? 48px : 36px);
+                VerticalBox {
+                    padding: 0px; spacing: 0px; alignment: start;
+                    for selector in root.completion-items : Button {
+                        text: selector;
+                        accessible-label: root.completion-label + " " + selector;
+                        min-width: 0px;
+                        horizontal-stretch: 1;
+                        min-height: root.phone ? 48px : 36px;
+                        preferred-height: root.phone ? 48px : 36px;
+                        clicked => {
+                            root.input = selector;
+                            command-input.focus();
+                        }
+                    }
                 }
             }
         }
