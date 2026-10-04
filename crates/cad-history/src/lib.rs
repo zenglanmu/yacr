@@ -589,6 +589,11 @@ pub trait RecoveryJournal {
 }
 
 /// In-memory journal used by tests and the CLI.
+///
+/// Records use the same structural validation as annotation history. Recovery
+/// stages the entire replay on a temporary database clone and publishes it only
+/// after every record succeeds, preserving the destination on failure. This
+/// transient clone is not durable storage or a retained history snapshot.
 #[derive(Default)]
 pub struct MemoryJournal {
     records: Vec<UndoRecord>,
@@ -610,11 +615,16 @@ impl MemoryJournal {
 
 impl RecoveryJournal for MemoryJournal {
     fn append(&mut self, record: &UndoRecord) -> CadResult<()> {
+        record.validate()?;
         self.records.push(record.clone());
         Ok(())
     }
 
     fn recover(&self, database: &mut AnnotationDatabase) -> CadResult<Vec<ChangeSet>> {
+        if self.records.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut staged = database.clone();
         let mut out = Vec::new();
         for record in &self.records {
             let changes: Vec<(AnnotationId, Option<Annotation>)> = record
@@ -622,12 +632,13 @@ impl RecoveryJournal for MemoryJournal {
                 .iter()
                 .map(|p| (p.id, p.after.clone()))
                 .collect();
-            out.push(database.apply_annotation_changes(
+            out.push(staged.apply_annotation_changes(
                 &format!("recover: {}", record.label),
                 record.transaction,
                 changes,
             )?);
         }
+        *database = staged;
         Ok(out)
     }
 }
