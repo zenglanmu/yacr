@@ -16,6 +16,32 @@
 7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
    Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
+## 独立分支并行审查第五轮（2026-10-04）
+
+3 个并行子代理分别在 `review/20261004-{query-updates,annotation-files,history-recovery}`
+独立分支/worktree 审查查询增量状态、批注文件校验、历史恢复日志，仅修改代码、合成契约
+及专属文档，不编译/执行测试/检查/格式化/提交/推送。主控另外修复诊断资源预算饱和计数。
+主控已格式化、提交并无冲突合并三个分支，统一执行 debug 编译与快速静态检查。
+完整 Rust 测试、Linux 离屏和 release 构建均不在本轮执行范围。
+
+- query：保留真实文档身份，以数据库查询建立绑定；增量通知严格遵循 `ChangeSet::follows`，
+  未知/外部数据库、重放、错误前后修订与溢出边界均拒绝且不污染已发布状态。
+- annotations：编码拒绝重复 ID 和原始保留边带；旧/不完整快照不能把当前数据库标为已保存。
+- history：日志追加校验结构，整批恢复成功才发布，失败不留下部分重放状态。
+- diagnostics（主控）：分类与总预算计数改为检查加法，最大上限仍拒绝溢出且保持计费原子性。
+
+新增 **19 项合成 Rust 契约**（query 9、annotations 4、history 4、diagnostics 2）。
+本轮最终统一代码树主机 debug 全目标编译（含 Linux App/Slint 与测试代码）、严格 clippy、
+wasm 全 workspace lib 检查、fmt、架构/fixture/workflow/i18n 和 diff 空白检查均实际通过。
+**NOT RUN**：Rust 契约未执行；完整测试、Linux 离屏、release 构建、真实 DWG/真实 GPU/
+桌面窗口/浏览器/真机与远程 CI 未运行。详见 `docs/review-query-updates.md`、
+`docs/review-annotation-files.md`、`docs/review-history-recovery.md`、`docs/review-diagnostic-budget.md`。
+单个查询服务仍只绑定最新数据库；恢复临时克隆增加内存开销，身份/冲突检测/幂等/持久化
+仍未闭环；导出编码成功不代表实际磁盘持久化，宿主须在成功写入后确认 revision。
+提交前发现其他会话的功能参考规范/文档与几何注释修改；不纳入本轮提交，不覆盖。
+这些修改后，全树 diff 空白检查因规范文档尾随空白失败；本轮文件的定向空白检查通过。
+上述编译/门禁证据不推广到后续并发修改；共享交接文档只暂存本轮新增小节。
+
 ## 独立分支并行审查第四轮（2026-10-04）
 
 主控启动 3 个并行子代理，分别在

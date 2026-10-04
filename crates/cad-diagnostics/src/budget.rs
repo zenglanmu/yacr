@@ -117,6 +117,8 @@ impl ResourceBudget {
     ///
     /// The charge is all-or-nothing: on rejection nothing is recorded, so the
     /// caller knows the exact shortfall instead of a partially applied budget.
+    /// Unrepresentable totals are rejected even at `u64::MAX` limits; the
+    /// requested count in the diagnostic saturates at `u64::MAX`.
     pub fn charge(
         &mut self,
         object: Option<ObjectId>,
@@ -124,21 +126,33 @@ impl ResourceBudget {
         amount: u64,
     ) -> Result<(), DiagnosticReason> {
         let used_in_category = self.used_in(category);
+        let Some(next_category) = used_in_category.checked_add(amount) else {
+            return Err(self.over_budget(
+                category,
+                object,
+                used_in_category,
+                amount,
+                self.cap_for(category).unwrap_or(self.total),
+            ));
+        };
         if let Some(cap) = self.cap_for(category) {
-            if used_in_category.saturating_add(amount) > cap {
+            if next_category > cap {
                 return Err(self.over_budget(category, object, used_in_category, amount, cap));
             }
         }
-        if self.used_total.saturating_add(amount) > self.total {
+        let Some(next_total) = self.used_total.checked_add(amount) else {
+            return Err(self.over_budget(category, object, self.used_total, amount, self.total));
+        };
+        if next_total > self.total {
             return Err(self.over_budget(category, object, self.used_total, amount, self.total));
         }
-        self.used_total = self.used_total.saturating_add(amount);
+        self.used_total = next_total;
         match self
             .used_by_category
             .iter_mut()
             .find(|(c, _)| *c == category)
         {
-            Some((_, used)) => *used = used.saturating_add(amount),
+            Some((_, used)) => *used = next_category,
             None => self.used_by_category.push((category, amount)),
         }
         Ok(())
@@ -236,5 +250,42 @@ mod tests {
         assert!(reason
             .parameters
             .contains(&DiagnosticParameter::Object(ObjectId(7))));
+    }
+
+    #[test]
+    fn maximum_category_limit_still_rejects_counter_overflow_atomically() {
+        let category = BudgetCategory::FontCacheBytes;
+        let mut budget = ResourceBudget::new(u64::MAX, 4).with_category(category, u64::MAX);
+        budget.charge(None, category, u64::MAX).unwrap();
+        let before = budget.clone();
+        let reason = budget.charge(Some(ObjectId(7)), category, 1).unwrap_err();
+        assert_eq!(reason.code, codes::RESOURCE_OVER_BUDGET);
+        assert!(reason
+            .parameters
+            .contains(&DiagnosticParameter::Count(u64::MAX)));
+        assert!(reason
+            .parameters
+            .contains(&DiagnosticParameter::Object(ObjectId(7))));
+        assert_eq!(budget, before);
+        budget.charge(None, category, 0).unwrap();
+        assert_eq!(budget, before);
+    }
+
+    #[test]
+    fn maximum_total_limit_rejects_overflow_across_categories() {
+        let mut budget = ResourceBudget::new(u64::MAX, 4);
+        budget
+            .charge(None, BudgetCategory::FileBytes, u64::MAX - 1)
+            .unwrap();
+        budget
+            .charge(None, BudgetCategory::FontCacheBytes, 1)
+            .unwrap();
+        let before = budget.clone();
+        let reason = budget
+            .charge(None, BudgetCategory::ImagePixels, 1)
+            .unwrap_err();
+        assert_eq!(reason.code, codes::RESOURCE_OVER_BUDGET);
+        assert_eq!(budget, before);
+        assert_eq!(budget.used_in(BudgetCategory::ImagePixels), 0);
     }
 }
