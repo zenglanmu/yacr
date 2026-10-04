@@ -979,6 +979,19 @@ impl HostController {
         Ok(())
     }
 
+    /// Atomically apply temporary layer visibility values through the command path.
+    /// Empty, duplicate, unknown or stale targets are refused without publication.
+    pub fn set_layer_visibilities(&mut self, changes: Vec<(LayerId, bool)>) -> CadResult<()> {
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::SetLayerVisibilities,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::LayerVisibilities(changes),
+        })?;
+        Ok(())
+    }
+
     /// Drop every temporary layer override through the command path.
     pub fn restore_layers(&mut self) -> CadResult<()> {
         self.execute(Command {

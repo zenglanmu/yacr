@@ -32,14 +32,21 @@ impl Application {
             }
             CommandId::ToggleLayer => {
                 if let CommandPayload::Layer(id, visible) = command.payload {
-                    session.layer_overrides.set(id, visible);
-                    Ok(CommandOutcome::none())
+                    self.set_layer_visibilities(session, command.document, &[(id, visible)])
                 } else {
                     Err(CadError::InvalidInput(
                         "ToggleLayer needs a layer payload".into(),
                     ))
                 }
             }
+            CommandId::SetLayerVisibilities => match &command.payload {
+                CommandPayload::LayerVisibilities(changes) => {
+                    self.set_layer_visibilities(session, command.document, changes)
+                }
+                _ => Err(CadError::InvalidInput(
+                    "SetLayerVisibilities needs a layer visibilities payload".into(),
+                )),
+            },
             CommandId::SwitchSpace => {
                 if let CommandPayload::Space(space) = command.payload {
                     // Validate against the *current* drawing before recording the
@@ -254,6 +261,45 @@ impl Application {
             | CommandId::TrimEntity
             | CommandId::SetActiveLayer => self.drawing_command(session, &command),
         }
+    }
+
+    /// Validate the complete batch before publishing a replacement override set.
+    /// Drawing data and history are untouched; unrelated overrides are retained.
+    fn set_layer_visibilities(
+        &self,
+        session: &mut SessionState,
+        document: DocumentId,
+        changes: &[(LayerId, bool)],
+    ) -> CadResult<CommandOutcome> {
+        let drawing = &self
+            .workspace
+            .documents
+            .get(&document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing;
+        if changes.is_empty() {
+            return Err(CadError::InvalidInput(
+                "layer visibility batch must not be empty".into(),
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for (id, _) in changes {
+            if !seen.insert(*id) {
+                return Err(CadError::InvalidInput(format!(
+                    "duplicate layer id {} in visibility batch",
+                    id.0
+                )));
+            }
+            if drawing.layer(*id).is_none() {
+                return Err(CadError::InvalidInput(format!("unknown layer {}", id.0)));
+            }
+        }
+        let mut updated = session.layer_overrides.clone();
+        for (id, visible) in changes {
+            updated.set(*id, *visible);
+        }
+        session.layer_overrides = updated;
+        Ok(CommandOutcome::none())
     }
 
     /// Toggle between the 2D plan view and a 3D perspective view.
