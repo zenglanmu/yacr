@@ -426,9 +426,15 @@ impl UnitContext {
         }
     }
 
-    /// Convert a source length to display units, when the ratio is known.
+    /// Convert a finite source length using a known, finite, positive ratio.
+    /// Unknown or invalid ratios and non-finite results return `None`.
     pub fn to_display(&self, source_value: f64) -> Option<f64> {
-        self.display_per_source.map(|r| source_value * r)
+        let ratio = self.display_per_source?;
+        if !source_value.is_finite() || !ratio.is_finite() || ratio <= 0.0 {
+            return None;
+        }
+        let value = source_value * ratio;
+        value.is_finite().then_some(value)
     }
 }
 
@@ -501,17 +507,19 @@ impl Transform3 {
     /// be mutually orthogonal. A non-uniform scale, shear or singular matrix is
     /// not uniform. This is the predicate a caller must use before assuming a
     /// `Circle`/`Arc` stays a circle (audit B23).
+    /// Invalid (negative or non-finite) relative tolerances are rejected.
     pub fn is_uniform_scale(&self, tolerance: f64) -> bool {
         let scale = self.max_scale();
-        if !scale.is_finite() || scale <= 0.0 {
+        if !scale.is_finite() || scale <= 0.0 || !tolerance.is_finite() || tolerance < 0.0 {
             return false;
         }
-        let tolerance = tolerance.max(0.0);
         let m = &self.matrix;
+        // Normalise before squaring to avoid overflow and underflow at extreme
+        // finite scales. Every normalised component has magnitude at most one.
         let col = |i: usize| Point3 {
-            x: m[0][i],
-            y: m[1][i],
-            z: m[2][i],
+            x: m[0][i] / scale,
+            y: m[1][i] / scale,
+            z: m[2][i] / scale,
         };
         let c0 = col(0);
         let c1 = col(1);
@@ -520,17 +528,26 @@ impl Transform3 {
         let l0 = dot3(c0, c0).sqrt();
         let l1 = dot3(c1, c1).sqrt();
         let l2 = dot3(c2, c2).sqrt();
-        let rel = |a: f64, b: f64| (a - b).abs() / scale;
+        if l0 == 0.0 || l1 == 0.0 || l2 == 0.0 {
+            return false;
+        }
+        let det = c0.x * (c1.y * c2.z - c1.z * c2.y) - c1.x * (c0.y * c2.z - c0.z * c2.y)
+            + c2.x * (c0.y * c1.z - c0.z * c1.y);
+        if det == 0.0 {
+            return false;
+        }
+        let rel = |a: f64, b: f64| (a - b).abs();
         if rel(l0, l1) > tolerance || rel(l1, l2) > tolerance {
             return false;
         }
-        // Orthogonality, again relative to the overall scale.
-        let ortho = |a: Point3, b: Point3| dot3(a, b).abs() / (scale * scale) <= tolerance;
+        // The columns are already relative to the overall scale.
+        let ortho = |a: Point3, b: Point3| dot3(a, b).abs() <= tolerance;
         ortho(c0, c1) && ortho(c1, c2) && ortho(c0, c2)
     }
 
-    /// Largest absolute linear scale factor, used to bound circular bounds and
-    /// to normalise scale comparisons (audit B23).
+    /// Largest absolute coefficient of the 3x3 linear part.
+    /// This normalises scale comparisons; it is not an operator-norm bound for
+    /// arbitrary rotations or shears. Non-finite coefficients are propagated.
     pub fn max_scale(&self) -> f64 {
         let m = &self.matrix;
         let mut max = 0.0f64;
@@ -545,6 +562,9 @@ impl Transform3 {
             (2, 1),
             (2, 2),
         ] {
+            if m[i][j].is_nan() {
+                return f64::NAN;
+            }
             max = max.max(m[i][j].abs());
         }
         max
