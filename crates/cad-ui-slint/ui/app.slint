@@ -131,6 +131,9 @@ export component YacrWindow inherits Window {
     in property <string> layer-override-label;
     in property <string> layer-panel-label;
     in property <string> layer-restore-label;
+    in property <string> layers-show-all-label;
+    in property <string> layers-hide-all-label;
+    callback layers-visibility-requested(bool);
     in property <string> layer-overridden-marker;
     in property <string> layer-empty-label;
     in property <string> layer-search-placeholder;
@@ -201,6 +204,12 @@ export component YacrWindow inherits Window {
     in property <[string]> editing-labels;
     in property <string> command-title;
     in property <string> command-prompt;
+    in property <[string]> command-completion-items;
+    in property <string> command-completion-label;
+    callback command-input-edited(string);
+    callback command-completion-dismissed();
+    callback command-completion-context-changed();
+    changed work-mode => { root.command-completion-context-changed(); }
     in property <[string]> command-history-entries;
     in property <string> command-history-label;
     in property <string> command-history-clear-label;
@@ -297,6 +306,12 @@ export component YacrWindow inherits Window {
                 return EventResult.accept;
             }
             if !event.modifiers.control && !event.modifiers.shift {
+                if event.text == Key.Escape && root.command-visible
+                    && (!root.phone-shell || root.command-expanded)
+                    && root.command-completion-items.length > 0 {
+                    root.command-completion-dismissed();
+                    return EventResult.accept;
+                }
                 if event.text == Key.F2 && root.command-visible {
                     // This expands the existing command/status row, not a
                     // nonexistent full command-history browser.
@@ -422,6 +437,9 @@ export component YacrWindow inherits Window {
                 root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
                 root.diagnostics-drawer-title];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            layers-show-all-label: root.layers-show-all-label;
+            layers-hide-all-label: root.layers-hide-all-label;
+            all-layers(visible) => { root.layers-visibility-requested(visible); }
             diagnostics-empty-label: root.diagnostics-empty-label;
             layer-search-text <=> root.layer-search-text;
             layer-search-placeholder: root.layer-search-placeholder;
@@ -478,6 +496,9 @@ export component YacrWindow inherits Window {
                 root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
                 root.diagnostics-drawer-title];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            layers-show-all-label: root.layers-show-all-label;
+            layers-hide-all-label: root.layers-hide-all-label;
+            all-layers(visible) => { root.layers-visibility-requested(visible); }
             diagnostics-empty-label: root.diagnostics-empty-label;
             layer-search-text <=> root.layer-search-text;
             layer-search-placeholder: root.layer-search-placeholder;
@@ -543,6 +564,9 @@ export component YacrWindow inherits Window {
             phone: root.phone-shell;
             title: root.command-title;
             prompt: root.command-prompt;
+            completion-items: root.command-completion-items;
+            completion-label: root.command-completion-label;
+            input-edited(value) => { root.command-input-edited(value); }
             history-entries: root.command-history-entries;
             history-label: root.command-history-label;
             clear-history-label: root.command-history-clear-label;

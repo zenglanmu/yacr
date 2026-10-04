@@ -88,7 +88,7 @@ pub(crate) fn suggestions(input: &str, work_mode: bool) -> Vec<&'static str> {
 
 #[cfg(test)]
 mod contracts {
-    use super::{INPUT_BYTE_LIMIT, SELECTORS, SUGGESTION_LIMIT, suggestions};
+    use super::{suggestions, INPUT_BYTE_LIMIT, SELECTORS, SUGGESTION_LIMIT};
     use std::collections::BTreeSet;
 
     #[test]
@@ -97,7 +97,7 @@ mod contracts {
             suggestions(" \tMeAsUrE\u{2003}\u{00a0}dIs\r\n", true),
             vec!["MEASURE DISTANCE"]
         );
-        assert_eq!(suggestions("zoom\t\tin", false), vec!["ZOOM IN"]);
+        assert_eq!(suggestions("zoom\t\ti", false), vec!["ZOOM IN"]);
         assert!(suggestions("distance", true).is_empty());
         assert!(suggestions("extents", true).is_empty());
         assert!(suggestions("vıew", true).is_empty());
@@ -222,7 +222,9 @@ mod contracts {
             .split("\n    });")
             .next()
             .expect("submission callback boundary");
-        let aliases = ["DISTANCE", "ANGLE", "AREA", "FIT", "DESELECT", "ENTER", "RIBBON"];
+        let aliases = [
+            "DISTANCE", "ANGLE", "AREA", "FIT", "DESELECT", "ENTER", "RIBBON",
+        ];
         let mut supported = BTreeSet::new();
         for section in [catalog, dispatch] {
             for line in section.lines() {

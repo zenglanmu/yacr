@@ -24,7 +24,8 @@ fn tab_completion_is_gated_unmodified_and_never_submits() {
         .next()
         .unwrap();
     assert!(tab_capture.contains("!root.keyboard-shortcuts-enabled || event.modifiers.control"));
-    assert!(tab_capture.contains("event.modifiers.alt || event.modifiers.meta || event.modifiers.shift"));
+    assert!(tab_capture
+        .contains("event.modifiers.alt || event.modifiers.meta || event.modifiers.shift"));
     assert!(tab_capture.contains("event.text == Key.Tab && root.completion-items.length > 0"));
     assert!(tab_capture.contains("root.input = root.completion-items[0];"));
     assert!(tab_capture.contains("command-input.focus();"));

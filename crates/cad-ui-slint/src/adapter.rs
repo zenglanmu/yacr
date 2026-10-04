@@ -293,6 +293,7 @@ impl UiAdapter {
         );
 
         crate::command_line::connect(&ui, messages_slot.clone(), viewer_config.clone());
+        crate::command_completion_ui::connect(&ui);
         crate::layer_search::connect(&ui);
 
         {
@@ -644,6 +645,34 @@ impl UiAdapter {
                     viewport,
                     CommandPayload::None,
                 ));
+            });
+        }
+        {
+            // One validated batch covers the full authoritative order, not just
+            // the visible search results. Application publishes it atomically.
+            let s = shared.clone();
+            let doc = document;
+            let order = layer_order.clone();
+            let weak = ui.as_weak();
+            let messages = messages_slot.clone();
+            ui.on_layers_visibility_requested(move |visible| {
+                let changes = order.borrow().iter().map(|id| (*id, visible)).collect();
+                if let Err(error) = s.borrow_mut().send(command_for(
+                    CommandId::SetLayerVisibilities,
+                    &doc,
+                    viewport,
+                    CommandPayload::LayerVisibilities(changes),
+                )) {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_status_label(
+                            messages
+                                .borrow()
+                                .text("layers.operation_failed", &[("reason", &error.to_string())])
+                                .into(),
+                        );
+                        ui.set_command_expanded(true);
+                    }
+                }
             });
         }
         {

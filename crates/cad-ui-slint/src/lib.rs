@@ -191,6 +191,8 @@ pub struct UiAdapter {
 
 mod adapter;
 mod chrome;
+mod command_completion;
+mod command_completion_ui;
 mod command_history;
 mod command_line;
 mod handle;

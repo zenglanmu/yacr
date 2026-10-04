@@ -48,6 +48,7 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_ribbon_tabs(string_model(&builtin_ribbon_tab_labels(messages)));
     ui.set_command_title(messages.text("command.title", &[]).into());
     ui.set_command_prompt(messages.text("command.prompt", &[]).into());
+    ui.set_command_completion_label(messages.text("command.completions", &[]).into());
     ui.set_command_history_label(messages.text("command.history", &[]).into());
     ui.set_command_history_clear_label(messages.text("command.clear_history", &[]).into());
     ui.set_command_history_limit_label(messages.text("command.history_limit", &[]).into());
@@ -91,6 +92,8 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     // Layer + property panels.
     ui.set_layer_panel_label(messages.text("layers.panel", &[]).into());
     ui.set_layer_restore_label(messages.text("layers.restore", &[]).into());
+    ui.set_layers_show_all_label(messages.text("layers.show_all", &[]).into());
+    ui.set_layers_hide_all_label(messages.text("layers.hide_all", &[]).into());
     ui.set_layer_overridden_marker(messages.text("layers.overridden_marker", &[]).into());
     ui.set_layer_empty_label(messages.text("layers.empty", &[]).into());
     ui.set_layer_search_placeholder(messages.text("layers.search_placeholder", &[]).into());
