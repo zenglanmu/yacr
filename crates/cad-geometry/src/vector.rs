@@ -39,7 +39,7 @@ pub fn cross(a: Point3, b: Point3) -> Point3 {
 }
 
 pub fn length(a: Point3) -> f64 {
-    dot(a, a).sqrt()
+    a.x.hypot(a.y).hypot(a.z)
 }
 
 pub fn distance(a: Point3, b: Point3) -> f64 {
@@ -50,8 +50,21 @@ pub fn normalize(a: Point3) -> Point3 {
     let l = length(a);
     if l < 1e-24 {
         a
+    } else if l.is_infinite() && is_finite(a) {
+        // A finite vector can have a norm beyond f64's range. Scale its
+        // components first so its direction remains representable.
+        let max_component = a.x.abs().max(a.y.abs()).max(a.z.abs());
+        normalize(Point3 {
+            x: a.x / max_component,
+            y: a.y / max_component,
+            z: a.z / max_component,
+        })
     } else {
-        scale(a, 1.0 / l)
+        Point3 {
+            x: a.x / l,
+            y: a.y / l,
+            z: a.z / l,
+        }
     }
 }
 

@@ -24,10 +24,13 @@ pub fn signed_area(pts: &[Point3]) -> f64 {
     if n < 3 {
         return 0.0;
     }
+    // Evaluate translation-invariant differences without modifying the source
+    // coordinates. Products of absolute coordinates lose small local areas.
+    let origin = pts[0];
     let mut acc = 0.0;
     for i in 0..n {
-        let a = pts[i];
-        let b = pts[(i + 1) % n];
+        let a = sub(pts[i], origin);
+        let b = sub(pts[(i + 1) % n], origin);
         acc += a.x * b.y - b.x * a.y;
     }
     acc * 0.5

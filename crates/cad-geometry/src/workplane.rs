@@ -21,8 +21,10 @@ pub fn validate_work_plane(plane: &WorkPlane, tolerance: f64) -> CadResult<()> {
             "work plane basis vectors are degenerate".to_string(),
         ));
     }
-    let ortho = dot(plane.u, plane.v).abs() / (lu * lv);
-    if ortho > tol.max(1e-9) {
+    // Normalise before taking the dot product: both the raw dot and the
+    // product of lengths can overflow for otherwise finite basis vectors.
+    let ortho = dot(normalize(plane.u), normalize(plane.v)).abs();
+    if !ortho.is_finite() || ortho > tol.max(1e-9) {
         return Err(CadError::InvalidInput(
             "work plane basis is not orthogonal".to_string(),
         ));
