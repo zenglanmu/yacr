@@ -24,7 +24,8 @@
 ## 执行证据：NOT RUN
 
 本子任务按要求仅阅读与编辑代码、测试、文档；**未运行**编译、测试、格式化、Clippy、静态检查或其他门禁。没有提交或推送。测试是新增的合成契约，不是已通过证据。
-由主代理合并后统一执行 debug 编译/检查；若执行本轮回归，可使用 `cargo test -p cad-domain --test numeric_transforms --locked`。
+主控已格式化、提交并合并分支，最终 debug 全目标编译、严格 clippy、wasm 与静态门禁通过。
+新增 Rust 合成契约仅编译、未执行，统一执行证据见 `docs/handoff.md`。
 
 ## 限制与未闭环
 

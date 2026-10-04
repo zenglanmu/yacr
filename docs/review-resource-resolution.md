@@ -34,6 +34,8 @@
 
 本子代理按任务约束仅写代码、测试和文档：**编译、测试、格式化、clippy、静态门禁
 全部 NOT RUN**；未提交或推送，交由主控合并后执行 debug 编译/检查。
+主控已格式化、提交并合并分支，最终 debug 全目标编译、严格 clippy、wasm 与静态门禁通过。
+新增 Rust 合成契约仅编译、未执行，统一执行证据见 `docs/handoff.md`。
 未添加依赖或新的用户可见诊断目录键，未修改其它 crate、共享 handoff 或 acadrust。
 
 主机仍需提供可信、无 query/fragment 的目录 base URL，并自行实施网络授权、重定向、

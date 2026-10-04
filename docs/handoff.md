@@ -16,6 +16,31 @@
 7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
    Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
+## 独立分支并行审查第四轮（2026-10-04）
+
+主控启动 3 个并行子代理，分别在
+`review/20261004-{db-transactions,domain-transforms,resource-resolution}` 独立分支/worktree
+审查数据库事务、领域变换与资源解析。子代理仅修改代码、合成契约与专属文档，
+不编译、不执行测试/检查/格式化、不提交或推送；主控审查后提交分支并统一合并验证。
+
+本轮沿用快速 debug 门禁与英文提交，不运行完整 Rust 测试、Linux 离屏或 release 构建。
+三个分支已由主控格式化、提交并无冲突合并：
+
+- 数据库：实体换空间时清理旧块及动态状态引用；可见性切换不再误报非受控成员。
+- 领域：极端尺度相似变换判定、NaN 尺度传播、非法容差/精确奇异矩阵拒绝、单位换算校验。
+- 资源：字体目录拒绝路径型文件名；URL 路径段完整编码，避免 query/fragment/百分号歧义。
+
+新增 **17 项合成 Rust 契约**（db 5、domain 9、resources 3）。主控在最终统一代码树
+实际完成：主机 debug `cargo check --workspace --exclude app-android --exclude app-web
+--all-targets --locked`（含 Linux App/Slint 与测试代码）、严格 clippy、wasm 全 workspace
+lib 检查、fmt、架构/fixture/workflow/i18n 及 diff 空白检查，均通过。
+
+**NOT RUN**：所有 Rust 契约仅编译、未执行；无完整测试、Linux 离屏、release 构建、
+真实字体/真实 DWG/真实 GPU/桌面窗口/浏览器/真机运行或远程 CI 证据。
+详见 `docs/review-db-transactions.md`、`docs/review-domain-transforms.md`、
+`docs/review-resource-resolution.md`。保留限制：极端原始行列式、变换算子范数上界、
+空间迁移后动态成员恢复/下游缓存、字体 base URL/重定向/重复解码仍须独立设计审查。
+
 ## 独立分支并行审查第三轮（2026-10-04）
 
 3 个子代理在 `review/20261004-{geometry-robustness,scene-consistency,query-contracts}`
