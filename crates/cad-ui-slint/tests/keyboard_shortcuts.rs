@@ -7,20 +7,30 @@ use std::{cell::RefCell, rc::Rc};
 
 fn press(ui: &YacrWindow, key: impl Into<SharedString>) {
     let text = key.into();
-    ui.window().dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
-    ui.window().dispatch_event(WindowEvent::KeyReleased { text });
+    ui.window()
+        .dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+    ui.window()
+        .dispatch_event(WindowEvent::KeyReleased { text });
 }
 
 fn control(ui: &YacrWindow, key: impl Into<SharedString>, shift: bool) {
-    ui.window().dispatch_event(WindowEvent::KeyPressed { text: Key::Control.into() });
+    ui.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Control.into(),
+    });
     if shift {
-        ui.window().dispatch_event(WindowEvent::KeyPressed { text: Key::Shift.into() });
+        ui.window().dispatch_event(WindowEvent::KeyPressed {
+            text: Key::Shift.into(),
+        });
     }
     press(ui, key);
     if shift {
-        ui.window().dispatch_event(WindowEvent::KeyReleased { text: Key::Shift.into() });
+        ui.window().dispatch_event(WindowEvent::KeyReleased {
+            text: Key::Shift.into(),
+        });
     }
-    ui.window().dispatch_event(WindowEvent::KeyReleased { text: Key::Control.into() });
+    ui.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Control.into(),
+    });
 }
 
 fn click(ui: &YacrWindow, x: f32, y: f32) {
@@ -108,7 +118,10 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     ui.set_diagnostics_open(true);
     ui.set_selection_count(1);
     press(&ui, Key::Escape);
-    assert!(calls.borrow().is_empty(), "noncancellable import blocks lower priorities");
+    assert!(
+        calls.borrow().is_empty(),
+        "noncancellable import blocks lower priorities"
+    );
     ui.set_import_cancellable(true);
     press(&ui, Key::Escape);
     ui.set_import_active(false);
@@ -122,10 +135,18 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     ui.set_pan_active(false);
     press(&ui, Key::Escape);
     press(&ui, Key::Escape);
-    assert_eq!(&*calls.borrow(), &[
-        "cancel-open", "cancel-draw", "cancel-annotation", "cancel-measurement",
-        "pan", "close-diagnostics", "clear-selection",
-    ]);
+    assert_eq!(
+        &*calls.borrow(),
+        &[
+            "cancel-open",
+            "cancel-draw",
+            "cancel-annotation",
+            "cancel-measurement",
+            "pan",
+            "close-diagnostics",
+            "clear-selection",
+        ]
+    );
     calls.borrow_mut().clear();
     ui.set_selection_count(0);
     ui.set_keyboard_shortcuts_enabled(false);
@@ -151,5 +172,8 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     press(&ui, "x");
     control(&ui, "z", false);
     control(&ui, Key::Home, false);
-    assert!(calls.borrow().is_empty(), "text editing must not mutate CAD history or fit");
+    assert!(
+        calls.borrow().is_empty(),
+        "text editing must not mutate CAD history or fit"
+    );
 }

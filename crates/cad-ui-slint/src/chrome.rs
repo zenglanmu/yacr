@@ -90,6 +90,9 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_layer_restore_label(messages.text("layers.restore", &[]).into());
     ui.set_layer_overridden_marker(messages.text("layers.overridden_marker", &[]).into());
     ui.set_layer_empty_label(messages.text("layers.empty", &[]).into());
+    ui.set_layer_search_placeholder(messages.text("layers.search_placeholder", &[]).into());
+    ui.set_layer_search_clear_label(messages.text("layers.clear_search", &[]).into());
+    ui.set_layer_search_empty_label(messages.text("layers.no_matches", &[]).into());
     ui.set_property_panel_label(messages.text("properties.panel", &[]).into());
     ui.set_property_clear_label(messages.text("properties.clear_selection", &[]).into());
     ui.set_property_empty_label(messages.text("properties.empty", &[]).into());
@@ -428,6 +431,7 @@ pub(crate) fn apply_viewer_presentation_with(
     ui.set_side_panel_width(p.dock_width);
     ui.set_drawer_height(if phone { 280.0 } else { 0.0 });
     ui.set_application_ui(p.application_ui);
+    ui.set_keyboard_shortcuts_enabled(config.interaction.keyboard_shortcuts);
     ui.set_ribbon_visible(p.ribbon);
     ui.set_panels_visible(p.panels());
     ui.set_layer_panel_visible(p.layer_panel);

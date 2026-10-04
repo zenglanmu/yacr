@@ -293,6 +293,7 @@ impl UiAdapter {
         );
 
         crate::command_line::connect(&ui, messages_slot.clone(), viewer_config.clone());
+        crate::layer_search::connect(&ui);
 
         {
             // Desktop status-bar overlay toggles. The click must be a real config

@@ -133,6 +133,13 @@ export component YacrWindow inherits Window {
     in property <string> layer-restore-label;
     in property <string> layer-overridden-marker;
     in property <string> layer-empty-label;
+    in property <string> layer-search-placeholder;
+    in property <string> layer-search-clear-label;
+    in property <string> layer-search-empty-label;
+    in-out property <string> layer-search-text;
+    in property <int> layer-matching-count: 0;
+    callback layer-search-edited(string);
+    changed layer-search-text => { root.layer-search-edited(root.layer-search-text); }
     in property <[PropertyRow]> property-rows;
     in property <string> property-mixed-label;
     in property <string> property-empty-label;
@@ -408,6 +415,11 @@ export component YacrWindow inherits Window {
                 root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
                 root.diagnostics-empty-label];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            layer-search-text <=> root.layer-search-text;
+            layer-search-placeholder: root.layer-search-placeholder;
+            layer-search-clear-label: root.layer-search-clear-label;
+            layer-search-empty-label: root.layer-search-empty-label;
+            layer-matching-count: root.layer-matching-count;
             annotations: root.annotation-rows; diagnostics: root.diagnostics-rows;
             diagnostics-open: root.diagnostics-open; backend: root.diagnostics-backend-label;
             close => { root.side-panel-open = false; root.diagnostics-open = false; root.diagnostics-closed(); }
@@ -458,6 +470,11 @@ export component YacrWindow inherits Window {
                 root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
                 root.diagnostics-empty-label];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
+            layer-search-text <=> root.layer-search-text;
+            layer-search-placeholder: root.layer-search-placeholder;
+            layer-search-clear-label: root.layer-search-clear-label;
+            layer-search-empty-label: root.layer-search-empty-label;
+            layer-matching-count: root.layer-matching-count;
             annotations: root.annotation-rows; diagnostics: root.diagnostics-rows;
             diagnostics-open: root.diagnostics-open; backend: root.diagnostics-backend-label;
             close => { root.side-panel-open = false; root.diagnostics-open = false; root.diagnostics-closed(); }

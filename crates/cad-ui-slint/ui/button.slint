@@ -44,9 +44,14 @@ export component Button inherits Rectangle {
     horizontal-stretch: 0;
     accessible-role: button;
     accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if root.enabled { root.clicked(); }
+    }
+    forward-focus: keyboard;
     background: root.checked ? CadTheme.selected : (touch.has-hover && root.enabled ? #3f3f3f : #00000000);
-    border-color: root.checked ? #5aa0ff : CadTheme.border;
-    border-width: root.checked || touch.has-hover ? 1px : 0px;
+    border-color: root.checked || keyboard.has-focus ? #5aa0ff : CadTheme.border;
+    border-width: root.checked || touch.has-hover || keyboard.has-focus ? 1px : 0px;
     border-radius: 3px;
     label := Text {
         x: root.vector-icon && !root.stacked && !root.icon-only ? 30px : 0px;
@@ -70,5 +75,19 @@ export component Button inherits Rectangle {
         width: root.stacked ? 32px : 24px; height: self.width; source: root.icon;
         colorize: !root.enabled ? #6f6f6f : (root.symbol == "☁" ? #f24e4e : (root.checked ? CadTheme.accent : root.foreground));
     }
-    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+    keyboard := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta &&
+                (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { keyboard.focus(); root.clicked(); }
+    }
 }

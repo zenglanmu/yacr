@@ -374,6 +374,7 @@ impl UiHandle {
         let override_label = layer_override_label(&messages, state.override_count);
         self.with(|ui| {
             ui.set_layer_rows(model);
+            crate::layer_search::refresh(ui);
             ui.set_layer_override_count(override_count);
             ui.set_layer_override_label(override_label.into());
             ui.set_layer_empty_label(empty.into());
