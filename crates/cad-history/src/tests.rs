@@ -85,6 +85,42 @@ fn update_restores_previous_value() {
 }
 
 #[test]
+fn returning_to_original_state_preserves_the_earlier_annotation_entry() {
+    let mut db = database_with();
+    let mut history = History::default();
+    for (transaction, before, after, merge_key) in [
+        (1, "a", "earlier", None),
+        (2, "earlier", "temporary", Some("drag")),
+        (3, "temporary", "earlier", Some("drag")),
+    ] {
+        db.apply_annotation_changes(
+            "edit",
+            TransactionId(transaction),
+            vec![(AnnotationId(1), Some(ann(1, after)))],
+        )
+        .unwrap();
+        history
+            .record(UndoRecord {
+                transaction: TransactionId(transaction),
+                label: "edit".into(),
+                patches: vec![patch(
+                    AnnotationId(1),
+                    Some(ann(1, before)),
+                    Some(ann(1, after)),
+                )],
+                merge_key: merge_key.map(str::to_owned),
+            })
+            .unwrap();
+    }
+    assert_eq!(history.undo_depth(), 1);
+    assert_eq!(history.used_bytes(), history.undo[0].approx_bytes());
+    history.undo(&mut db).unwrap();
+    assert_eq!(db.get(AnnotationId(1)).unwrap().text, "a");
+    history.redo(&mut db).unwrap();
+    assert_eq!(db.get(AnnotationId(1)).unwrap().text, "earlier");
+}
+
+#[test]
 fn merge_key_coalesces_records() {
     let mut history = History::default();
     let r = |t: &str| UndoRecord {
@@ -99,6 +135,35 @@ fn merge_key_coalesces_records() {
 }
 
 #[test]
+fn coalesced_creation_and_deletion_remove_the_entry() {
+    let mut db = AnnotationDatabase::new(DatabaseId(1));
+    let mut history = History::default();
+    db.apply_annotation_changes(
+        "create",
+        TransactionId(1),
+        vec![(AnnotationId(5), Some(ann(5, "note")))],
+    )
+    .unwrap();
+    history.record(annotation_record(5, Some("edit"))).unwrap();
+    db.apply_annotation_changes("delete", TransactionId(2), vec![(AnnotationId(5), None)])
+        .unwrap();
+    history
+        .record(UndoRecord {
+            transaction: TransactionId(2),
+            label: "delete".into(),
+            patches: vec![patch(AnnotationId(5), Some(ann(5, "note")), None)],
+            merge_key: Some("edit".into()),
+        })
+        .unwrap();
+    assert!(!history.can_undo());
+    assert!(!history.can_redo());
+    assert_eq!(history.used_bytes(), 0);
+    let revision = db.revision();
+    assert!(history.undo(&mut db).is_err());
+    assert_eq!(db.revision(), revision);
+}
+
+#[test]
 fn empty_record_is_rejected() {
     let mut history = History::default();
     let r = UndoRecord {
@@ -108,6 +173,38 @@ fn empty_record_is_rejected() {
         merge_key: None,
     };
     assert!(history.record(r).is_err());
+}
+
+#[test]
+fn canceled_merge_preserves_earlier_drawing_history_and_clears_redo() {
+    let mut history = History::default();
+    history.record_drawing(drawing_record(1)).unwrap();
+    let bytes = history.used_bytes();
+    history.record(annotation_record(5, Some("edit"))).unwrap();
+    history.record_drawing(drawing_record(2)).unwrap();
+    history.begin_drawing_undo().unwrap();
+    history.finish_drawing().unwrap();
+    assert!(history.next_redo_is_drawing());
+    history
+        .record(UndoRecord {
+            transaction: TransactionId(3),
+            label: "delete".into(),
+            patches: vec![patch(AnnotationId(5), Some(ann(5, "note")), None)],
+            merge_key: Some("edit".into()),
+        })
+        .unwrap();
+    assert_eq!(history.undo_depth(), 1);
+    assert_eq!(history.used_bytes(), bytes);
+    assert!(history.redo.is_empty());
+    assert!(history.redo_markers.is_empty());
+    assert!(history.drawing_redo.is_empty());
+    assert_eq!(history.drawing_undo.len(), 1);
+    assert_eq!(
+        history.begin_drawing_undo().unwrap().transaction,
+        TransactionId(1)
+    );
+    history.cancel_pending_drawing();
+    assert_eq!(history.used_bytes(), bytes);
 }
 
 #[test]
@@ -124,6 +221,52 @@ fn budget_evicts_oldest() {
             .unwrap();
     }
     assert_eq!(history.undo_depth(), 1);
+}
+
+#[test]
+fn partially_canceled_merge_retains_reversible_patches_and_accounting() {
+    let mut db = database_with();
+    let mut history = History::default();
+    db.apply_annotation_changes(
+        "edit",
+        TransactionId(1),
+        vec![
+            (AnnotationId(1), Some(ann(1, "edited"))),
+            (AnnotationId(5), Some(ann(5, "note"))),
+        ],
+    )
+    .unwrap();
+    history
+        .record(UndoRecord {
+            transaction: TransactionId(1),
+            label: "edit".into(),
+            patches: vec![
+                patch(AnnotationId(1), Some(ann(1, "a")), Some(ann(1, "edited"))),
+                patch(AnnotationId(5), None, Some(ann(5, "note"))),
+            ],
+            merge_key: Some("edit".into()),
+        })
+        .unwrap();
+    db.apply_annotation_changes("delete", TransactionId(2), vec![(AnnotationId(5), None)])
+        .unwrap();
+    history
+        .record(UndoRecord {
+            transaction: TransactionId(2),
+            label: "delete".into(),
+            patches: vec![patch(AnnotationId(5), Some(ann(5, "note")), None)],
+            merge_key: Some("edit".into()),
+        })
+        .unwrap();
+    assert_eq!(history.undo_depth(), 1);
+    assert_eq!(history.undo[0].patches.len(), 1);
+    assert_eq!(history.used_bytes(), history.undo[0].approx_bytes());
+    history.undo(&mut db).unwrap();
+    assert_eq!(db.get(AnnotationId(1)).unwrap().text, "a");
+    assert_eq!(history.used_bytes(), 0);
+    history.redo(&mut db).unwrap();
+    assert_eq!(db.get(AnnotationId(1)).unwrap().text, "edited");
+    assert!(db.get(AnnotationId(5)).is_none());
+    assert_eq!(history.used_bytes(), history.undo[0].approx_bytes());
 }
 
 #[test]
@@ -400,6 +543,34 @@ fn annotation_record_cannot_impersonate_drawing_marker() {
 }
 
 #[test]
+fn malformed_annotation_records_are_rejected_atomically() {
+    let mut history = History::default();
+    history.record(annotation_record(1, Some("edit"))).unwrap();
+    history.record_drawing(drawing_record(2)).unwrap();
+    history.begin_drawing_undo().unwrap();
+    history.finish_drawing().unwrap();
+    let bytes = history.used_bytes();
+    let mut duplicate = annotation_record(1, Some("edit"));
+    duplicate.patches.push(duplicate.patches[0].clone());
+    let mut wrong_before = annotation_record(1, Some("edit"));
+    wrong_before.patches[0].before = Some(ann(99, "wrong"));
+    let mut wrong_after = annotation_record(1, Some("edit"));
+    wrong_after.patches[0].after = Some(ann(99, "wrong"));
+    let mut absent = annotation_record(1, Some("edit"));
+    absent.patches[0].after = None;
+    for record in [duplicate, wrong_before, wrong_after, absent] {
+        assert!(matches!(
+            history.record(record),
+            Err(CadError::InvalidInput(_))
+        ));
+    }
+    assert_eq!(history.undo_depth(), 1);
+    assert_eq!(history.redo_depth(), 1);
+    assert_eq!(history.used_bytes(), bytes);
+    assert!(history.next_redo_is_drawing());
+}
+
+#[test]
 fn drawing_budget_eviction_keeps_payloads_in_step() {
     let record = drawing_record(1);
     let budget = record.approx_bytes()
@@ -414,4 +585,47 @@ fn drawing_budget_eviction_keeps_payloads_in_step() {
         history.begin_drawing_undo().unwrap().transaction,
         TransactionId(2)
     );
+}
+
+#[test]
+fn malformed_drawing_records_are_rejected_atomically() {
+    let mut history = History::default();
+    history.record_drawing(drawing_record(1)).unwrap();
+    history.record_drawing(drawing_record(2)).unwrap();
+    history.begin_drawing_undo().unwrap();
+    history.finish_drawing().unwrap();
+    let bytes = history.used_bytes();
+    let mut duplicate = drawing_record(3);
+    duplicate.patches.push(duplicate.patches[0].clone());
+    let mut wrong_before = drawing_record(3);
+    wrong_before.patches[0].before = Some(entity(99, 0.0));
+    let mut wrong_after = drawing_record(3);
+    wrong_after.patches[0].after = Some(entity(99, 0.0));
+    let mut wrong_object_before = drawing_record(3);
+    let mut wrong = entity(3, 0.0);
+    wrong.object.id = ObjectId(99);
+    wrong_object_before.patches[0].before = Some(wrong.clone());
+    let mut wrong_object_after = drawing_record(3);
+    wrong_object_after.patches[0].after = Some(wrong);
+    let mut absent = drawing_record(3);
+    absent.patches[0].after = None;
+    for record in [
+        duplicate,
+        wrong_before,
+        wrong_after,
+        wrong_object_before,
+        wrong_object_after,
+        absent,
+    ] {
+        assert!(matches!(
+            history.record_drawing(record),
+            Err(CadError::InvalidInput(_))
+        ));
+    }
+    assert_eq!(history.undo_depth(), 1);
+    assert_eq!(history.redo_depth(), 1);
+    assert_eq!(history.used_bytes(), bytes);
+    assert_eq!(history.drawing_undo.len(), 1);
+    assert_eq!(history.drawing_redo.len(), 1);
+    assert!(history.next_redo_is_drawing());
 }

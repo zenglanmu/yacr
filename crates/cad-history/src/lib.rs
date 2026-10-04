@@ -6,7 +6,7 @@
 
 use cad_db::{Annotation, AnnotationDatabase, ChangeSet, DbEntity};
 use cad_domain::*;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 /// A reversible change to one annotation.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,6 +61,40 @@ pub struct UndoRecord {
 }
 
 impl UndoRecord {
+    fn validate(&self) -> CadResult<()> {
+        if self.merge_key.as_deref() == Some(DRAWING_MARKER) {
+            return Err(CadError::InvalidInput(
+                "the drawing history marker is reserved".into(),
+            ));
+        }
+        if self.patches.is_empty() {
+            return Err(CadError::InvalidInput(
+                "an undo record needs at least one patch".into(),
+            ));
+        }
+        let mut ids = HashSet::new();
+        for patch in &self.patches {
+            if !ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "an undo record cannot contain duplicate annotation ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "an annotation patch needs a before or after state".into(),
+                ));
+            }
+            for annotation in patch.before.iter().chain(patch.after.iter()) {
+                if annotation.id != patch.id {
+                    return Err(CadError::InvalidInput(
+                        "annotation patch key does not match snapshot id".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn approx_bytes(&self) -> usize {
         let mut bytes = std::mem::size_of::<Self>() + self.label.len();
         for p in &self.patches {
@@ -142,18 +176,15 @@ impl History {
     }
 
     /// Record a committed change. Clears the redo stack.
+    ///
+    /// Coalescing keeps the earliest before state and the latest after state.
+    /// Patches that return to their original state are removed; if all patches
+    /// cancel out, the merged entry is removed without touching earlier entries.
+    /// Even a fully canceled merge clears redo, since new edits were committed.
+    /// Malformed records are rejected before changing either stack.
     pub fn record(&mut self, record: UndoRecord) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
-        if record.merge_key.as_deref() == Some(DRAWING_MARKER) {
-            return Err(CadError::InvalidInput(
-                "the drawing history marker is reserved".into(),
-            ));
-        }
-        if record.patches.is_empty() {
-            return Err(CadError::InvalidInput(
-                "an undo record needs at least one patch".to_string(),
-            ));
-        }
+        record.validate()?;
         // Coalesce with the previous record when the merge key matches.
         if let Some(key) = &record.merge_key {
             if let Some(last) = self.undo.back_mut() {
@@ -164,6 +195,10 @@ impl History {
                         } else {
                             last.patches.push(patch);
                         }
+                    }
+                    last.patches.retain(|patch| patch.before != patch.after);
+                    if last.patches.is_empty() {
+                        self.undo.pop_back();
                     }
                     self.used_bytes = self.undo.iter().map(|r| r.approx_bytes()).sum::<usize>()
                         + self
@@ -293,11 +328,7 @@ impl History {
     /// a command can never claim success while recording nothing.
     pub fn record_drawing(&mut self, record: DrawingUndoRecord) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
-        if record.patches.is_empty() {
-            return Err(CadError::InvalidInput(
-                "a drawing undo record needs at least one patch".to_string(),
-            ));
-        }
+        record.validate()?;
         if let Some(key) = &record.merge_key {
             if let Some(last) = self.undo.back_mut() {
                 if last.merge_key.as_deref() == Some(key.as_str()) {
@@ -506,6 +537,35 @@ pub struct DrawingUndoRecord {
 }
 
 impl DrawingUndoRecord {
+    fn validate(&self) -> CadResult<()> {
+        if self.patches.is_empty() {
+            return Err(CadError::InvalidInput(
+                "a drawing undo record needs at least one patch".into(),
+            ));
+        }
+        let mut ids = HashSet::new();
+        for patch in &self.patches {
+            if !ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record cannot contain duplicate entity ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a drawing patch needs a before or after state".into(),
+                ));
+            }
+            for entity in patch.before.iter().chain(patch.after.iter()) {
+                if entity.id != patch.id || entity.object.id.0 != patch.id.0 {
+                    return Err(CadError::InvalidInput(
+                        "drawing patch key does not match snapshot identity".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn approx_bytes(&self) -> usize {
         let mut bytes = std::mem::size_of::<Self>() + self.label.len();
         for p in &self.patches {
