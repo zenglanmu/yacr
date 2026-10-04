@@ -149,8 +149,7 @@ fn refused(app: &mut Application, session: &mut SessionState, command: Command) 
     let generation = session.generation;
     let error = app
         .execute(session, command)
-        .err()
-        .expect("command must be refused");
+        .expect_err("command must be refused");
     assert_eq!(session.selection, selection);
     assert!(matches!(session.tool, ToolState::Idle));
     assert_eq!(session.generation, generation);

@@ -30,6 +30,13 @@
   Cancelled{progress}, Failed{error,progress}}`。
 - worker 用 `std::thread` + `std::sync::mpsc` + `cad_platform::CancellationToken`，
   **无 Tokio、无平台 API**，可在裸 Linux 主机测试。
+- 后续 native 修复：放弃活 `ImportJob` 时请求取消并 detach，不在事件循环 join；终态才
+  join 完成的工作。`HostController` 保存开始时的底图 Arc/批注修订，期间内容变化则拒绝
+  发布。该 guard 不重新解释宿主已确认的未保存决策，不能以“原本 dirty”覆盖 Discard 授权。
+- Linux 桌面已接入后台文件读取和上述导入，读取/导入 slot 结束前不重复启动新 parser。
+  CPU 显示准备和 GPU 分片上传/分帧累积是独立阶段，只有当前场景全部可见批次实际提交
+  后才显示“已打开”；不把 import 的 `Opened` 终态冒充显示就绪。详情与桌面证据见
+  `docs/linux-dwg-ui-freeze.md` 最新一轮。
 
 ## UI 可轮询快照与 Slint 面板（本轮新增）
 

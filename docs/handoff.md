@@ -16,7 +16,25 @@
 7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
    Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
-## Linux 桌面真实 DWG 无响应修复（2026-10-04）
+## Linux 桌面加载响应与不完整出图（2026-10-04，最新一轮）
+
+- 桌面读取/导入及 native CPU 准备移出 UI 线程，采用单 worker + latest pending 的内容键
+  与过期拒绝，保留原数据库/命令与增量缓存；未保存决策不被重新解释。
+- renderer staged upload 不再复制整份 SceneDelta；桥接按每帧原预算累积绘制全部有序
+  场景，保留透明顺序与深度，修复 5025 万顶点样本只提交前 800 万顶点的问题。
+- 桌面 post-start debug/release 回归实际通过：当前可见批次 97,013/97,013，加载事件间隔
+  最大 391/309ms，完成约 27.99/19.97 秒；点击 1.92/1.49 秒，仍不是普遍流畅保证。
+- 本轮新截图能看到多组平面图和表格；不是参考 CAD 全图视觉验收。当前输入实际完成才
+  显示已打开，旧 demo 帧/预算前缀不算就绪。证据/限制见 `docs/linux-dwg-ui-freeze.md` 顶部。
+- 不提交原图/截图；WASM CPU 准备仍同步，Android/Web 运行、重复第二张大图、完整视觉
+  与长期稳定性未验证。保留之前 clippy 修复；本轮修改未提交。
+
+## Linux 桌面真实 DWG 无响应修复（2026-10-04，前轮历史）
+
+**后续 clippy 修复**：`cad-app/tests/select_all.rs` 的拒绝断言改为 `expect_err`，
+不改变拒绝路径和状态不变契约。`cargo test -p cad-app --test select_all --locked`
+实际执行 **17/17 合成契约通过**；全树严格 clippy（按主机门禁排除 Android/Web）与
+`cargo fmt --all -- --check` 通过。以下 clippy 失败是前轮历史证据，不代表当前状态。
 
 **后续纠正**：用户手工 release 仍卡死，窗口启动后打开新增回归复现长停顿；最新
 部分优化和未闭环项见本文「Linux release 后续排查」与 `docs/linux-dwg-ui-freeze.md` 顶部，

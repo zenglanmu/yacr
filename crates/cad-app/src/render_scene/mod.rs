@@ -21,6 +21,7 @@ struct SceneVersion {
     document_epoch: u64,
 }
 
+#[derive(Clone)]
 pub struct PreparedScene {
     pub revision: u64,
     pub base_revision: u64,
@@ -37,7 +38,7 @@ pub struct PreparedScene {
     pub highlight_completeness: cad_domain::Completeness,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CadSceneController {
     version: Option<SceneVersion>,
     /// `(base_revision, annotation_fingerprint, annotations_revision,

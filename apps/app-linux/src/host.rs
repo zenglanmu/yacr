@@ -21,6 +21,14 @@ mod validation;
 pub type FilePicker = Arc<dyn Fn() -> CadResult<PathBuf> + Send + Sync>;
 type PendingOpen = Rc<RefCell<Option<std::sync::mpsc::Receiver<CadResult<PathBuf>>>>>;
 
+struct PendingRead {
+    receiver: std::sync::mpsc::Receiver<CadResult<Arc<[u8]>>>,
+    label: String,
+    drawing: Arc<cad_db::DrawingDatabase>,
+    annotations: cad_domain::Revision,
+    cancelled: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct LinuxOptions {
     pub fonts: Vec<(String, PathBuf)>,
@@ -113,6 +121,8 @@ struct Runtime {
     preference_path: Option<PathBuf>,
     picker: FilePicker,
     pending_open: PendingOpen,
+    pending_read: Rc<RefCell<Option<PendingRead>>>,
+    presenting_open: Rc<std::cell::Cell<bool>>,
 }
 impl Runtime {
     fn message(&self, key: &str, values: &[(&str, &str)]) -> String {
@@ -151,6 +161,13 @@ impl Runtime {
     fn execute(&self, command: Command) -> CadResult<()> {
         self.metrics()?;
         let result = match command.id {
+            CommandId::CancelLoading => {
+                if let Some(read) = self.pending_read.borrow_mut().as_mut() {
+                    read.cancelled = true;
+                }
+                self.controller.borrow_mut().cancel_async_open();
+                Ok(())
+            }
             CommandId::OpenDrawing => self.request_open(),
             CommandId::ExportAnnotations => self.export_annotations(),
             CommandId::ImportAnnotations => self.import_annotations(),
@@ -166,7 +183,7 @@ impl Runtime {
                     .set_status(self.message("linux.failed", &[("error", &error.to_string())]))?;
             }
         }
-        if result.is_ok() && self.pending_open.borrow().is_none() {
+        if result.is_ok() && !self.loading() {
             if let Some(handle) = self.handle.borrow().as_ref() {
                 handle.set_status(self.message("linux.completed", &[]))?;
             }
@@ -185,7 +202,7 @@ impl Runtime {
                     .ok_or_else(|| CadError::Unsupported(self.message("linux.open_path", &[])))?,
             );
         }
-        if self.pending_open.borrow().is_some() {
+        if self.loading() {
             return Ok(());
         }
         let picker = self.picker.clone();
@@ -204,6 +221,7 @@ impl Runtime {
     }
     fn poll_open(&self) -> CadResult<()> {
         use std::sync::mpsc::TryRecvError;
+        self.poll_loading()?;
         let result = match self.pending_open.borrow().as_ref().map(|rx| rx.try_recv()) {
             None | Some(Err(TryRecvError::Empty)) => return Ok(()),
             Some(Ok(result)) => result,
@@ -216,7 +234,7 @@ impl Runtime {
         self.push()?;
         if let Some(handle) = self.handle.borrow().as_ref() {
             handle.set_status(match result {
-                Ok(()) => self.message("linux.opened", &[]),
+                Ok(()) => self.message("linux.picker_waiting", &[]),
                 Err(CadError::Cancelled) => self.message("linux.picker_cancelled", &[]),
                 Err(error) => self.message("linux.failed", &[("error", &error.to_string())]),
             })?;
@@ -228,6 +246,42 @@ impl Runtime {
         if self.controller.borrow().unsaved_signal().dirty {
             return Err(CadError::Unsupported(self.message("linux.dirty", &[])));
         }
+        if !self.options.headless {
+            if self.pending_read.borrow().is_some()
+                || self
+                    .controller
+                    .borrow()
+                    .async_open_snapshot()
+                    .is_some_and(|s| s.running)
+            {
+                return Err(CadError::Cancelled);
+            }
+            let path = path.to_owned();
+            let label = path.to_string_lossy().into_owned();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            std::thread::Builder::new()
+                .name("linux-drawing-read".into())
+                .spawn(move || {
+                    let result = std::fs::read(path)
+                        .map(Arc::from)
+                        .map_err(|e| CadError::InvalidInput(e.to_string()));
+                    let _ = sender.send(result);
+                })
+                .map_err(|e| CadError::InvalidInput(e.to_string()))?;
+            let c = self.controller.borrow();
+            *self.pending_read.borrow_mut() = Some(PendingRead {
+                receiver,
+                label,
+                drawing: c.drawing().ok_or(CadError::Cancelled)?,
+                annotations: c
+                    .workspace_annotations()
+                    .ok_or(CadError::Cancelled)?
+                    .revision(),
+                cancelled: false,
+            });
+            self.presenting_open.set(true);
+            return Ok(());
+        }
         let bytes = std::fs::read(path).map_err(|e| CadError::InvalidInput(e.to_string()))?;
         self.controller
             .borrow_mut()
@@ -235,6 +289,117 @@ impl Runtime {
         self.controller.borrow_mut().fit()?;
         if let Some(handle) = self.handle.borrow().as_ref() {
             handle.cancel_draw_capture()?;
+        }
+        Ok(())
+    }
+
+    fn loading(&self) -> bool {
+        self.pending_open.borrow().is_some()
+            || self.pending_read.borrow().is_some()
+            || self.presenting_open.get()
+            || self
+                .controller
+                .borrow()
+                .async_open_snapshot()
+                .is_some_and(|s| s.running)
+    }
+
+    fn poll_loading(&self) -> CadResult<()> {
+        use std::sync::mpsc::TryRecvError;
+        let bytes = self
+            .pending_read
+            .borrow()
+            .as_ref()
+            .map(|read| read.receiver.try_recv());
+        if let Some(result) = bytes {
+            if !matches!(result, Err(TryRecvError::Empty)) {
+                let read = self.pending_read.borrow_mut().take().unwrap();
+                let mut c = self.controller.borrow_mut();
+                let unchanged = !read.cancelled
+                    && !c.unsaved_signal().dirty
+                    && c.drawing()
+                        .is_some_and(|db| Arc::ptr_eq(&db, &read.drawing))
+                    && c.workspace_annotations()
+                        .ok_or(CadError::Cancelled)?
+                        .revision()
+                        == read.annotations;
+                if unchanged {
+                    let bytes = match result {
+                        Ok(Ok(bytes)) => bytes,
+                        other => {
+                            self.presenting_open.set(false);
+                            return Err(match other {
+                                Ok(Err(error)) => error,
+                                Err(error) => CadError::InvalidInput(error.to_string()),
+                                _ => unreachable!(),
+                            });
+                        }
+                    };
+                    c.begin_async_open(bytes, &read.label);
+                } else {
+                    self.presenting_open.set(false);
+                }
+            }
+        }
+        let poll = self.controller.borrow_mut().poll_async_open();
+        let opened = matches!(poll, cad_app::AsyncOpenPoll::Opened { .. });
+        if matches!(
+            poll,
+            cad_app::AsyncOpenPoll::Failed { .. } | cad_app::AsyncOpenPoll::Cancelled { .. }
+        ) {
+            self.presenting_open.set(false);
+        }
+        if opened {
+            self.controller.borrow_mut().fit()?;
+            if let Some(handle) = self.handle.borrow().as_ref() {
+                handle.cancel_draw_capture()?;
+            }
+            self.push()?;
+        }
+        let c = self.controller.borrow();
+        let snapshot = if let Some(read) = self.pending_read.borrow().as_ref() {
+            let mut snapshot = cad_app::ImportProgressSnapshot::running();
+            snapshot.cancellable = !read.cancelled;
+            Some(snapshot)
+        } else {
+            c.async_open_snapshot()
+        };
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            let messages = cad_ui_slint::MessageSource::from_request(&self.options.locale);
+            handle.set_open_available(!self.loading() && !c.unsaved_signal().dirty)?;
+            handle.set_import_state(&cad_ui_slint::ImportProgressUiState::from_snapshot(
+                snapshot.as_ref(),
+                &messages,
+            ))?;
+            if let cad_app::AsyncOpenPoll::Failed { error, .. } = poll {
+                handle
+                    .set_status(self.message("linux.failed", &[("error", &error.to_string())]))?;
+            } else if opened {
+                handle.set_status(self.message("linux.opened", &[]))?;
+            }
+            if self.presenting_open.get() && !snapshot.as_ref().is_some_and(|s| s.running) {
+                if let Some(view) = self.view.borrow().as_ref() {
+                    if let Some(error) = view.scene_error() {
+                        handle.set_status(self.message("linux.failed", &[("error", &error)]))?;
+                        self.presenting_open.set(false);
+                    } else if view.current_drawing_presented() {
+                        self.presenting_open.set(false);
+                        handle.set_status(self.message("linux.opened", &[]))?;
+                    } else {
+                        handle.set_status(match view.loading_phase() {
+                            Some("uploading") => self.message("linux.uploading", &[]),
+                            Some("drawing") => {
+                                let (done, total) = view.drawing_progress().unwrap_or((0, 0));
+                                self.message(
+                                    "linux.drawing",
+                                    &[("done", &done.to_string()), ("total", &total.to_string())],
+                                )
+                            }
+                            _ => self.message("linux.preparing", &[]),
+                        })?;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -303,6 +468,8 @@ impl LinuxApp {
             preference_path: preference_path.clone(),
             picker,
             pending_open: Rc::new(RefCell::new(None)),
+            pending_read: Rc::new(RefCell::new(None)),
+            presenting_open: Rc::new(std::cell::Cell::new(false)),
         };
         let c = controller.borrow();
         let config = UiConfiguration {
@@ -370,8 +537,10 @@ impl LinuxApp {
         adapter.set_draw_preview_sink(Rc::new(runtime.clone()));
         runtime.push()?;
         adapter.handle().set_status(runtime.message(
-            if options.drawing.is_some() {
+            if options.drawing.is_some() && options.headless {
                 "linux.opened"
+            } else if options.drawing.is_some() {
+                "linux.picker_waiting"
             } else {
                 "status.synthetic"
             },

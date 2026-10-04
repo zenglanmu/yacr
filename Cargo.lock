@@ -315,6 +315,7 @@ dependencies = [
  "ashpd",
  "cad-annotations",
  "cad-app",
+ "cad-db",
  "cad-diagnostics",
  "cad-domain",
  "cad-render-wgpu",

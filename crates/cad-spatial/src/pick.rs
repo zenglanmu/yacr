@@ -286,6 +286,16 @@ pub fn hit_geometry(
         max_segments: MAX_PICK_SEGMENTS,
         ..TessellationParams::default()
     };
+    hit_validated(ray, geometry, transform, options, params)
+}
+
+fn hit_validated(
+    ray: &Ray3,
+    geometry: &SemanticGeometry,
+    transform: &Transform3,
+    options: &PickOptions,
+    params: TessellationParams,
+) -> CadResult<PickOutcome> {
     Ok(match geometry {
         SemanticGeometry::Line { start, end } => match segment_hit(
             ray,
@@ -378,7 +388,7 @@ pub fn hit_geometry(
             let mut best: Option<GeometryHit> = None;
             let mut unsupported: Option<&'static str> = None;
             for child in children {
-                match hit_geometry(ray, child, transform, options)? {
+                match hit_validated(ray, child, transform, options, params)? {
                     PickOutcome::Hit(hit) => {
                         let better = best
                             .as_ref()
@@ -439,8 +449,13 @@ pub fn pick_closest_borrowed<'a>(
     options.validate()?;
     let mut report = PickReport::default();
     let mut best: Option<PickHit> = None;
+    let params = TessellationParams {
+        tolerance: options.tolerance,
+        max_segments: MAX_PICK_SEGMENTS,
+        ..TessellationParams::default()
+    };
     for (item_source, geometry, transform) in items {
-        match hit_geometry(ray, geometry, transform, options)? {
+        match hit_validated(ray, geometry, transform, options, params)? {
             PickOutcome::Hit(hit) => {
                 // Identity is `entity + instance + sub-element`. The item names
                 // the entity/instance; the geometry resolves the sub-element. A

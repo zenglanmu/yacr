@@ -290,6 +290,7 @@ pub struct HostController {
     pub(crate) import_manager: crate::tasks::ImportManager,
     /// Label for the running asynchronous open, applied on publish.
     pub(crate) pending_open_label: Option<String>,
+    pub(crate) pending_open_guard: Option<(Arc<DrawingDatabase>, Revision)>,
     /// Last UI-facing snapshot of the asynchronous open (F01).
     ///
     /// This is a *projection* of [`crate::tasks::AsyncOpenPoll`], updated only
@@ -331,6 +332,7 @@ impl HostController {
             last_import_report: None,
             import_manager: crate::tasks::ImportManager::new(document_id),
             pending_open_label: None,
+            pending_open_guard: None,
             async_open: None,
         })
     }

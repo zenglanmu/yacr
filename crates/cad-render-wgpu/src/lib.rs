@@ -291,6 +291,8 @@ pub struct Renderer {
     /// Real measured upload time for `LoadTimings::upload_ms`.
     last_upload_ms: Option<f64>,
     draw_calls: u64,
+    progressive: bool,
+    progressive_frame: Option<ProgressiveFrame>,
     /// Set once a device-loss is observed, until the host rebuilds.
     device_lost: bool,
     /// Detail string carried by the last device-loss observation.
@@ -312,6 +314,30 @@ pub struct PreparedUpload {
     device: wgpu::Device,
     bytes: u64,
     elapsed_ms: f64,
+}
+
+struct ProgressiveFrame {
+    transforms: Vec<[f32; 16]>,
+    camera_position: [f32; 3],
+    texture_revision: u64,
+    ordered: Vec<usize>,
+    opaque_count: usize,
+    invisible: usize,
+    cursor: usize,
+}
+
+impl PreparedUpload {
+    /// Append another staged slice from the same device generation. No active
+    /// scene is mutated, and stale-device pieces cannot be mixed.
+    pub fn append(&mut self, mut piece: Self) -> CadResult<()> {
+        if self.device != piece.device || self.device_generation != piece.device_generation {
+            return Err(CadError::StaleResult);
+        }
+        self.batches.append(&mut piece.batches);
+        self.bytes += piece.bytes;
+        self.elapsed_ms += piece.elapsed_ms;
+        Ok(())
+    }
 }
 
 impl Default for Renderer {

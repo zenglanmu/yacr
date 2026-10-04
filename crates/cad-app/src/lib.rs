@@ -828,5 +828,7 @@ mod app_history;
 mod app_measure;
 mod application;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod background;
 #[cfg(test)]
 mod tests;

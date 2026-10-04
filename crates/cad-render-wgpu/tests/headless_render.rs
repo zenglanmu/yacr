@@ -133,6 +133,87 @@ fn camera_2d() -> Camera2d {
 }
 
 #[test]
+fn progressive_pages_match_full_scene_without_raising_per_frame_budget() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    eprintln!("progressive contract adapter: {:?}", gpu.adapter);
+    let mut renderer = init(gpu);
+    let mut batches: Vec<_> = rectangle_lines()
+        .chunks_exact(2)
+        .map(|points| lines_batch(points.to_vec()))
+        .collect();
+    let mut transparent = triangle_mesh();
+    transparent.alpha = 0.5;
+    transparent.draw_order = -10;
+    batches.push(transparent);
+    batches.push(triangle_mesh());
+    let delta = scene(batches);
+    let mut staged = renderer.prepare_upload_batches(&delta.added[..2]).unwrap();
+    staged
+        .append(renderer.prepare_upload_batches(&delta.added[2..]).unwrap())
+        .unwrap();
+    assert_eq!(
+        renderer.batch_count(),
+        0,
+        "staging must not publish a prefix"
+    );
+    renderer.commit_upload(staged, 0).unwrap();
+    let target = RenderTarget::new(64, 64);
+    renderer.render(camera_2d(), &target).unwrap();
+    let reference = renderer.read_target_rgba().unwrap();
+    renderer.frame_budget.max_vertices = 3;
+    renderer.frame_budget.max_triangles = 1;
+    renderer.set_progressive_rendering(true);
+    let mut pages = 0;
+    loop {
+        let stats = renderer.render(camera_2d(), &target).unwrap();
+        assert!(stats.vertices <= 3);
+        assert!(stats.triangles <= 1);
+        pages += 1;
+        assert!(pages <= delta.added.len());
+        if !renderer.frame_pending() {
+            break;
+        }
+    }
+    assert!(pages > 1);
+    assert_eq!(
+        renderer.frame_progress(),
+        Some((delta.added.len(), delta.added.len()))
+    );
+    assert_eq!(
+        renderer.read_target_rgba().unwrap().pixels,
+        reference.pixels
+    );
+    let mut camera = camera_2d();
+    camera.center.x = 0.1;
+    renderer.render(camera, &target).unwrap();
+    assert!(
+        renderer.frame_pending(),
+        "navigation must restart accumulation, not retain stale pixels"
+    );
+    renderer.clear_batches();
+    assert!(!renderer.frame_pending());
+}
+
+#[test]
+fn progressive_oversized_batch_is_an_explicit_error_not_empty_completion() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&scene(vec![lines_batch(rectangle_lines())]))
+        .unwrap();
+    renderer.frame_budget.max_vertices = 1;
+    renderer.set_progressive_rendering(true);
+    assert!(renderer
+        .render(camera_2d(), &RenderTarget::new(64, 64))
+        .is_err());
+    assert_eq!(renderer.frame_progress(), Some((0, 1)));
+}
+
+#[test]
 fn headless_adapter_is_reported_as_software_vulkan() {
     let Some(gpu) = gpu() else {
         return;

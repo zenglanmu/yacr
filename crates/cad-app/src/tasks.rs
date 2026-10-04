@@ -62,10 +62,9 @@ fn next_generation() -> u64 {
 
 /// A running (or finished) background import.
 ///
-/// The progress receiver is drained by the host; the worker thread is joined
-/// once when the job is dropped or observed terminal. Dropping a still-running
-/// job cancels it, so a host that abandons a document does not leak a thread
-/// parsing for a document nobody wants.
+/// The progress receiver is drained by the host; completed work is joined once.
+/// Dropping live work requests cancellation and detaches, never joining a parser
+/// on the event loop. Native hosts keep one slot until terminal before reopening.
 pub struct ImportJob {
     stamp: TaskStamp,
     cancel: CancellationToken,
@@ -163,7 +162,11 @@ impl Drop for ImportJob {
         if !self.consumed {
             self.cancel();
         }
-        self.join();
+        if self.handle.as_ref().is_some_and(JoinHandle::is_finished) {
+            self.join();
+        }
+        // Abandoned work owns its immutable input and observes cancellation;
+        // dropping the handle detaches rather than blocking the event loop.
     }
 }
 
@@ -288,7 +291,7 @@ impl ImportManager {
     fn cancel_current(&mut self) {
         if let Some(job) = self.current.take() {
             job.cancel();
-            // Dropping joins the cancelled worker.
+            // Dropping live work detaches; cancellation prevents publication.
             drop(job);
         }
     }
@@ -486,6 +489,9 @@ impl HostController {
     /// second open supersedes and cancels the first, so only the latest document
     /// can be published.
     pub fn begin_async_open(&mut self, bytes: Arc<[u8]>, label: &str) -> TaskStamp {
+        self.pending_open_guard = self
+            .drawing()
+            .zip(self.workspace_annotations().map(|db| db.revision()));
         let request = ImportRequest {
             document: self.document_id,
             database: cad_domain::DatabaseId(1),
@@ -522,6 +528,17 @@ impl HostController {
     /// published; a cancelled or superseded job yields [`AsyncOpenPoll::Cancelled`]
     /// and the current document is left untouched (F01 "旧任务丢弃").
     pub fn poll_async_open(&mut self) -> AsyncOpenPoll {
+        if let Some((drawing, annotations)) = &self.pending_open_guard {
+            let unchanged = self
+                .drawing()
+                .is_some_and(|current| Arc::ptr_eq(&current, drawing))
+                && self
+                    .workspace_annotations()
+                    .is_some_and(|db| db.revision() == *annotations);
+            if !unchanged {
+                self.cancel_async_open();
+            }
+        }
         let current = self.import_manager.current_stamp();
         let Some(job) = self.import_manager.current() else {
             // Idle: keep any retained terminal snapshot (a failure stays
@@ -575,6 +592,9 @@ impl HostController {
             }
         }
         self.async_open = updated;
+        if !matches!(poll, AsyncOpenPoll::Running { .. }) {
+            self.pending_open_guard = None;
+        }
         poll
     }
 }
@@ -647,6 +667,53 @@ mod tests {
         assert_eq!(controller.drawing().unwrap().entity_count(), 4);
         assert_eq!(controller.document_name_hint, "synthetic.dwg");
         assert!(!controller.application.can_undo(&controller.document_id));
+    }
+
+    #[test]
+    fn async_result_cannot_replace_content_opened_while_worker_was_running() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller.begin_async_open(dwg_bytes(), "background.dwg");
+        controller.open_bytes(dwg_bytes(), "newer.dwg").unwrap();
+        let current = controller.drawing().unwrap();
+        assert!(matches!(
+            poll_until_terminal(&mut controller),
+            AsyncOpenPoll::Cancelled { .. }
+        ));
+        assert!(Arc::ptr_eq(&current, &controller.drawing().unwrap()));
+        assert_eq!(controller.document_name_hint, "newer.dwg");
+    }
+
+    #[test]
+    fn annotation_edits_while_importing_cancel_publication_and_preserve_edits() {
+        use cad_db::{Annotation, AnnotationGeometry, AnnotationStyle};
+        use cad_domain::*;
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let before = controller.drawing().unwrap();
+        controller.begin_async_open(dwg_bytes(), "background.dwg");
+        controller
+            .apply_annotation(cad_annotations::AnnotationCommand::Create(Annotation {
+                id: AnnotationId(1),
+                space: SpaceId::Model,
+                geometry: AnnotationGeometry::Text(Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }),
+                text: "preserve edit".into(),
+                style: AnnotationStyle::default(),
+                created_unix_ms: 0,
+                modified_unix_ms: 0,
+                anchor: None,
+                precision: Precision::Analytic,
+            }))
+            .unwrap();
+        assert!(matches!(
+            poll_until_terminal(&mut controller),
+            AsyncOpenPoll::Cancelled { .. }
+        ));
+        assert!(Arc::ptr_eq(&before, &controller.drawing().unwrap()));
+        assert_eq!(controller.workspace_annotations().unwrap().len(), 1);
+        assert!(controller.unsaved_signal().dirty);
     }
 
     #[test]

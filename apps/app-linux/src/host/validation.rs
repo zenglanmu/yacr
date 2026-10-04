@@ -4,16 +4,28 @@ use cad_render_wgpu::headless::{encode_png, RgbaImage};
 
 impl LinuxApp {
     fn snapshot(&self) -> CadResult<RgbaImage> {
-        let mut frame = None;
-        for _ in 0..4 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let frame = loop {
             self.runtime.metrics()?;
             self.runtime.sync_view()?;
-            frame = Some(
-                cad_ui_slint::offscreen::snapshot(self.adapter.window())
-                    .map_err(|e| CadError::Unsupported(e.to_string()))?,
-            );
+            let frame = cad_ui_slint::offscreen::snapshot(self.adapter.window())
+                .map_err(|e| CadError::Unsupported(e.to_string()))?;
+            if self
+                .runtime
+                .view
+                .borrow()
+                .as_ref()
+                .is_some_and(CadView::current_drawing_presented)
+            {
+                break frame;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(CadError::Unsupported(
+                    "CAD preparation/presentation timed out".into(),
+                ));
+            }
             std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        };
         let view = self.runtime.view.borrow();
         let view = view.as_ref().ok_or(CadError::Cancelled)?;
         if let Some(error) = view.last_error() {
@@ -22,7 +34,7 @@ impl LinuxApp {
         if view.frames_rendered() == 0 {
             return Err(CadError::Unsupported("CAD did not render".into()));
         }
-        frame.ok_or(CadError::Cancelled)
+        Ok(frame)
     }
     pub fn acceptance(&self, output: &Path) -> CadResult<()> {
         if !self.runtime.options.headless {
@@ -180,10 +192,13 @@ mod tests {
         let probe = app.clone();
         let mut before = None;
         let mut initial_camera = None;
-        let mut last_tick = None;
+        let mut last_tick = if open_after_start {
+            None
+        } else {
+            Some(started)
+        };
         let mut max_gap = Duration::ZERO;
         let mut open_requested = false;
-        let mut demo_frames = 0;
         timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
             let now = Instant::now();
             // Once opening begins, count every callback gap, including import
@@ -199,7 +214,6 @@ mod tests {
                 return;
             }
             if open_after_start && !open_requested {
-                demo_frames = probe.runtime.view.borrow().as_ref().unwrap().frames_rendered();
                 eprintln!("desktop DWG opening after startup: elapsed={:?}", started.elapsed());
                 last_tick = Some(now);
                 probe.adapter.component().invoke_open_requested();
@@ -216,8 +230,8 @@ mod tests {
                 }
                 last_tick = Some(now);
             }
-            if open_after_start && (probe.runtime.controller.borrow().last_import_report.is_none()
-                || probe.runtime.view.borrow().as_ref().unwrap().frames_rendered() <= demo_frames) {
+            if probe.runtime.controller.borrow().last_import_report.is_none()
+                || !probe.runtime.view.borrow().as_ref().unwrap().current_drawing_presented() {
                 assert!(started.elapsed() < Duration::from_secs(60), "new drawing never rendered");
                 return;
             }
@@ -225,8 +239,12 @@ mod tests {
             let tick = tick_count.get() + 1;
             tick_count.set(tick);
             if tick == 1 {
+                let progress = probe.runtime.view.borrow().as_ref().unwrap().drawing_progress().expect("progressive drawing progress is required");
+                assert_eq!(progress.0, progress.1, "a truncated prefix must not be marked presented");
+                eprintln!("desktop complete drawing batches={progress:?}");
+                eprintln!("desktop drawing bounds={:?}, camera={:?}, loading max_gap={max_gap:?}", probe.runtime.controller.borrow().drawing().unwrap().bounds(), probe.runtime.view.borrow().as_ref().unwrap().camera3d());
                 if open_after_start {
-                    eprintln!("desktop post-open probe began: elapsed={:?}; frame-count gate is not new-scene freshness evidence", started.elapsed());
+                    eprintln!("desktop current DWG presented: elapsed={:?}", started.elapsed());
                 } else {
                 if open_after_start {
                     eprintln!("desktop open heartbeat (not new-scene readiness): elapsed={:?}", started.elapsed());
@@ -247,6 +265,11 @@ mod tests {
                 before = Some(RgbaImage {
                     width: pixels.width(), height: pixels.height(), pixels: pixels.as_bytes().to_vec(),
                 });
+                if let Ok(directory) = std::env::var("YACR_DESKTOP_EVIDENCE") {
+                    let directory = PathBuf::from(directory);
+                    std::fs::create_dir(&directory).expect("evidence directory must be new");
+                    std::fs::write(directory.join("initial.png"), encode_png(before.as_ref().unwrap()).unwrap()).unwrap();
+                }
                 let (rect, _) = probe.adapter.handle().shell_geometry().unwrap();
                 // Exclude snapshot readback, but include synchronous input
                 // handling and the following CAD redraw in the next gap.

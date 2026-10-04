@@ -194,6 +194,48 @@ impl CadView {
     pub fn frames_rendered(&self) -> u64 {
         self.state.borrow().runtime.frames_rendered
     }
+
+    /// True only when the current immutable drawing input has been prepared,
+    /// atomically uploaded, and actually rendered. Old demo/redraw frames do
+    /// not count as completion of a new open.
+    pub fn current_drawing_presented(&self) -> bool {
+        let state = self.state.borrow();
+        #[cfg(not(target_arch = "wasm32"))]
+        if !state.preparation.current(&self.incoming.borrow()) {
+            return false;
+        }
+        state.controller.ready.as_ref().is_some_and(|scene| {
+            state.runtime.presented_revision == Some(scene.revision) && !state.runtime.uploading()
+        })
+    }
+
+    pub fn drawing_progress(&self) -> Option<(usize, usize)> {
+        self.state.borrow().runtime.drawing_progress()
+    }
+
+    pub fn scene_error(&self) -> Option<String> {
+        let state = self.state.borrow();
+        state
+            .controller
+            .diagnostic
+            .clone()
+            .or_else(|| state.runtime.diagnostic.clone())
+    }
+
+    pub fn loading_phase(&self) -> Option<&'static str> {
+        let state = self.state.borrow();
+        #[cfg(not(target_arch = "wasm32"))]
+        if !state.preparation.current(&self.incoming.borrow()) {
+            return Some("preparing");
+        }
+        if state.runtime.uploading() {
+            return Some("uploading");
+        }
+        if state.runtime.drawing_pages() {
+            return Some("drawing");
+        }
+        None
+    }
     pub fn active_backend(&self) -> Option<ActiveBackend> {
         self.state.borrow().runtime.caps.as_ref().map(|c| c.actual)
     }
@@ -243,10 +285,23 @@ impl CadView {
 
     /// Coalesce host changes into a CPU preparation task before presentation.
     /// This is outside `BeforeRendering`; no database walk occurs on a UI-only frame.
-    /// Currently runs on the event loop, not a worker: large builds may still block it.
+    /// Native preparation runs on a bounded worker; WASM retains the event-loop path.
     pub fn request_redraw(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let input = self.preparation_input();
         {
             let mut state = self.state.borrow_mut();
+            if state.preparation_stopped {
+                return;
+            }
+            // Register the newest input before the next render callback. A
+            // completed upload for replaced layers/fonts/overlays is not current.
+            #[cfg(not(target_arch = "wasm32"))]
+            match state.preparation.update(input) {
+                Ok(Some(controller)) => state.controller = controller,
+                Ok(None) => {}
+                Err(error) => state.controller.diagnostic = Some(error.to_string()),
+            }
             if state.preparation_scheduled {
                 return;
             }
@@ -263,10 +318,40 @@ impl CadView {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn preparation_input(&self) -> super::preparation::PreparationInput {
+        let snapshot = self.state.borrow().view.clone();
+        let annotation = self.annotation_preview.borrow().clone().or_else(|| {
+            self.draw_preview
+                .borrow()
+                .as_ref()
+                .map(crate::draw::draw_overlay_preview)
+        });
+        super::preparation::PreparationInput {
+            drawing: self.incoming.borrow().clone(),
+            document: snapshot.document,
+            space: snapshot.space,
+            fonts: self.fonts.borrow().clone(),
+            layers: self.overrides.borrow().clone(),
+            annotations: self.annotations.borrow().clone(),
+            visibility: self.visibility.borrow().clone(),
+            overlays: OverlayInputs {
+                selection: self.selection.borrow().clone(),
+                measurement: self.measurement_preview.borrow().clone(),
+                annotation,
+                snap_hints_input: self.snap_hints.borrow().clone(),
+                visibility: *self.overlay_visibility.borrow(),
+            },
+        }
+    }
+
     fn schedule_preparation(&self) {
         let view = self.clone();
-        slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
             let mut state = view.state.borrow_mut();
+            if state.preparation_stopped {
+                return;
+            }
             state.preparation_scheduled = false;
             let doc = view.incoming.borrow().clone();
             let snapshot = state.view.clone();
@@ -285,6 +370,7 @@ impl CadView {
                 snap_hints_input: view.snap_hints.borrow().clone(),
                 visibility: *view.overlay_visibility.borrow(),
             };
+            #[cfg(target_arch = "wasm32")]
             let result = state.controller.prepare_shared_with_overlays(
                 doc,
                 snapshot.document,
@@ -295,12 +381,39 @@ impl CadView {
                 &view.visibility.borrow(),
                 &overlays,
             );
+            #[cfg(not(target_arch = "wasm32"))]
+            let result = state
+                .preparation
+                .update(super::preparation::PreparationInput {
+                    drawing: doc,
+                    document: snapshot.document,
+                    space: snapshot.space,
+                    fonts: view.fonts.borrow().clone(),
+                    layers: view.overrides.borrow().clone(),
+                    annotations: view.annotations.borrow().clone(),
+                    visibility: view.visibility.borrow().clone(),
+                    overlays,
+                })
+                .map(|controller| {
+                    if let Some(controller) = controller {
+                        state.controller = controller;
+                    }
+                });
             if let Err(error) = result {
                 log::warn!("scene preparation refused: {error}");
+                state.controller.diagnostic = Some(error.to_string());
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            let busy = state.preparation.busy();
+            #[cfg(target_arch = "wasm32")]
+            let busy = false;
+            state.preparation_scheduled = busy;
             drop(state);
             if let Err(error) = view.handle.request_redraw() {
                 log::warn!("CAD redraw failed: {error}");
+            }
+            if busy {
+                view.schedule_preparation();
             }
         });
     }
@@ -460,6 +573,12 @@ impl CadView {
         self.state.borrow().overlay_revision
     }
     pub fn teardown(&self) {
+        {
+            let mut state = self.state.borrow_mut();
+            state.preparation_stopped = true;
+            #[cfg(not(target_arch = "wasm32"))]
+            state.preparation.stop();
+        }
         let mut state = self.state.borrow_mut();
         state.runtime.detach();
         if let Err(error) = state.presenter.reset(&self.handle) {

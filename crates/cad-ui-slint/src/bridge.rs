@@ -17,6 +17,8 @@ use std::sync::Arc;
 
 mod camera;
 use cad_app::render_scene as controller;
+#[cfg(not(target_arch = "wasm32"))]
+mod preparation;
 mod presenter;
 mod runtime;
 mod view;
@@ -43,6 +45,9 @@ struct BridgeState {
     presenter: presenter::SlintPresenter,
     view: ViewSnapshot,
     preparation_scheduled: bool,
+    preparation_stopped: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    preparation: preparation::NativePreparation,
     view_diagnostic: Option<String>,
     /// Separate dirty marker for the transient selection/preview overlay. It
     /// advances on a highlight/preview change and never on a drawing or
@@ -79,6 +84,8 @@ pub fn install_with_preference(
     incoming: IncomingDocument,
     preference: BackendPreference,
 ) -> CadResult<CadView> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let frame_incoming = incoming.clone();
     let view = CadView::new(handle, incoming, preference);
     let state = view.state.clone();
     let frame_handle = view.handle.clone();
@@ -104,6 +111,10 @@ pub fn install_with_preference(
                 }
                 (slint::RenderingState::BeforeRendering, _) => {
                     // Only GPU synchronization and presentation belong to this callback.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let current = state.preparation.current(&frame_incoming.borrow());
+                    #[cfg(target_arch = "wasm32")]
+                    let current = true;
                     let BridgeState {
                         controller,
                         runtime,
@@ -111,7 +122,11 @@ pub fn install_with_preference(
                         view,
                         ..
                     } = &mut *state;
-                    if let Err(error) = runtime.apply_ready_updates(controller.ready.as_ref()) {
+                    if let Err(error) = runtime.apply_ready_updates(if current {
+                        controller.ready.as_ref()
+                    } else {
+                        None
+                    }) {
                         runtime.diagnostic = Some(error.to_string());
                         return;
                     }
@@ -130,6 +145,9 @@ pub fn install_with_preference(
                             presenter.invalidate();
                         }
                         Err(error) => runtime.diagnostic = Some(error.to_string()),
+                    }
+                    if runtime.uploading() || runtime.drawing_pages() {
+                        let _ = frame_handle.request_redraw();
                     }
                 }
                 (slint::RenderingState::RenderingTeardown, _) => {

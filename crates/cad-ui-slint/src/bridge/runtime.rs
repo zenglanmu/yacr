@@ -2,7 +2,14 @@
 use super::controller::PreparedScene;
 use super::*;
 use cad_render_wgpu::{wgpu, RenderError};
-use cad_scene::SceneDelta;
+
+struct PendingUpload {
+    scene: PreparedScene,
+    group: usize,
+    offset: usize,
+    prepared: Option<cad_render_wgpu::PreparedUpload>,
+    base_changed: bool,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenderLifecycle {
@@ -56,6 +63,8 @@ pub(super) struct CadRenderRuntime {
     pub dirty: FrameInvalidation,
     pub diagnostic: Option<String>,
     pub frames_rendered: u64,
+    pending_upload: Option<PendingUpload>,
+    pub presented_revision: Option<u64>,
 }
 impl Default for CadRenderRuntime {
     fn default() -> Self {
@@ -72,6 +81,8 @@ impl Default for CadRenderRuntime {
             dirty: FrameInvalidation::default(),
             diagnostic: None,
             frames_rendered: 0,
+            pending_upload: None,
+            presented_revision: None,
         }
     }
 }
@@ -84,6 +95,7 @@ impl CadRenderRuntime {
     ) {
         self.detach();
         let mut renderer = Renderer::new(preference);
+        renderer.set_progressive_rendering(true);
         match renderer.initialize_with_device(device, queue) {
             Ok(caps) => {
                 self.epoch += 1;
@@ -107,6 +119,8 @@ impl CadRenderRuntime {
         self.caps = None;
         self.outcome = None;
         self.applied_revision = None;
+        self.pending_upload = None;
+        self.presented_revision = None;
         self.applied_base = None;
         self.target_size = None;
         self.base_batches = 0;
@@ -140,6 +154,7 @@ impl CadRenderRuntime {
             return Ok(());
         }
         let Some(ready) = ready else {
+            self.pending_upload = None;
             return Ok(());
         };
         if self.applied_revision == Some(ready.revision) {
@@ -151,37 +166,73 @@ impl CadRenderRuntime {
         // transient highlight/preview overlay are the replaceable suffix. A
         // highlight-only change still re-uploads the suffix (the annotation
         // batches are recomputed from their cached `Arc`), but never the base.
-        let combined;
-        let delta = if base_changed {
-            combined = SceneDelta {
-                stamp: ready.overlay.stamp.clone(),
-                added: ready
-                    .base
-                    .added
-                    .iter()
-                    .chain(ready.overlay.added.iter())
-                    .chain(ready.highlight.added.iter())
-                    .cloned()
-                    .collect(),
-                removed_chunks: vec![],
+        if self
+            .pending_upload
+            .as_ref()
+            .is_none_or(|pending| pending.scene.revision != ready.revision)
+        {
+            self.pending_upload = Some(PendingUpload {
+                scene: ready.clone(),
+                group: usize::from(!base_changed),
+                offset: 0,
+                prepared: None,
+                base_changed,
+            });
+        }
+        let pending = self.pending_upload.as_mut().unwrap();
+        #[cfg(not(target_arch = "wasm32"))]
+        let started = std::time::Instant::now();
+        let mut slices = 0;
+        while pending.group < 3 && slices < 4 {
+            #[cfg(not(target_arch = "wasm32"))]
+            if started.elapsed() >= std::time::Duration::from_millis(8) {
+                break;
+            }
+            let batches = match pending.group {
+                0 => &pending.scene.base.added,
+                1 => &pending.scene.overlay.added,
+                _ => &pending.scene.highlight.added,
             };
-            &combined
-        } else {
-            combined = SceneDelta {
-                stamp: ready.overlay.stamp.clone(),
-                added: ready
-                    .overlay
-                    .added
-                    .iter()
-                    .chain(ready.highlight.added.iter())
-                    .cloned()
-                    .collect(),
-                removed_chunks: vec![],
-            };
-            &combined
+            if pending.offset == batches.len() {
+                pending.group += 1;
+                pending.offset = 0;
+                continue;
+            }
+            let mut end = pending.offset;
+            let mut vertices = 0usize;
+            while end < batches.len() && end - pending.offset < 256 {
+                let next = vertices.saturating_add(batches[end].vertices.len());
+                if end > pending.offset && next > 262_144 {
+                    break;
+                }
+                vertices = next;
+                end += 1;
+            }
+            let piece = renderer.prepare_upload_batches(&batches[pending.offset..end])?;
+            if let Some(prepared) = &mut pending.prepared {
+                prepared.append(piece)?;
+            } else {
+                pending.prepared = Some(piece);
+            }
+            pending.offset = end;
+            slices += 1;
+        }
+        if pending.group < 3 {
+            return Ok(());
+        }
+        let pending = self.pending_upload.take().unwrap();
+        let prepared = match pending.prepared {
+            Some(prepared) => prepared,
+            None => renderer.prepare_upload_batches(&[])?,
         };
-        let prepared = renderer.prepare_upload(delta)?;
-        renderer.commit_upload(prepared, if base_changed { 0 } else { self.base_batches })?;
+        renderer.commit_upload(
+            prepared,
+            if pending.base_changed {
+                0
+            } else {
+                self.base_batches
+            },
+        )?;
         // Publication follows successful GPU preparation/commit, never precedes it.
         self.base_batches = ready.base.added.len();
         self.applied_base = Some(ready.base_revision);
@@ -189,6 +240,16 @@ impl CadRenderRuntime {
         self.dirty.invalidate();
         self.diagnostic = None;
         Ok(())
+    }
+
+    pub fn uploading(&self) -> bool {
+        self.pending_upload.is_some()
+    }
+    pub fn drawing_pages(&self) -> bool {
+        self.renderer.as_ref().is_some_and(Renderer::frame_pending)
+    }
+    pub fn drawing_progress(&self) -> Option<(usize, usize)> {
+        self.renderer.as_ref().and_then(Renderer::frame_progress)
     }
 
     pub fn render_if_dirty(
@@ -235,8 +296,15 @@ impl CadRenderRuntime {
                 }
             }
             self.target_size = Some(size);
-            self.dirty.complete();
+            if !renderer.frame_pending() {
+                self.dirty.complete();
+            }
             self.frames_rendered += 1;
+            self.presented_revision = if renderer.frame_pending() {
+                None
+            } else {
+                self.applied_revision
+            };
         }
         Ok(renderer.frame_texture().map(|texture| PresentedFrame {
             binding: FrameBinding {

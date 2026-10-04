@@ -43,7 +43,7 @@ impl Runtime {
         let handle = handles.as_ref().ok_or(CadError::Cancelled)?;
         handle.set_open_available(
             (!self.options.headless || self.options.drawing.is_some())
-                && self.pending_open.borrow().is_none()
+                && !self.loading()
                 && !c.unsaved_signal().dirty,
         )?;
         handle.set_document_name(&c.document_name_hint)?;

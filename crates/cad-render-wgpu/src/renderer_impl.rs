@@ -41,6 +41,8 @@ impl Renderer {
             uploaded_bytes: 0,
             last_upload_ms: None,
             draw_calls: 0,
+            progressive: false,
+            progressive_frame: None,
             device_lost: false,
             last_device_lost: None,
             poll_timeout: std::time::Duration::from_secs(1),
@@ -388,6 +390,15 @@ impl Renderer {
     /// device-limit validation precedes allocation; async driver failures remain
     /// covered by the render error scope/device lifecycle, not this return value.
     pub fn prepare_upload(&self, delta: &SceneDelta) -> CadResult<PreparedUpload> {
+        self.prepare_upload_batches(&delta.added)
+    }
+
+    /// Stage a bounded borrowed batch slice without cloning a full scene delta.
+    /// Active GPU batches are unchanged until explicit atomic commit.
+    pub fn prepare_upload_batches(
+        &self,
+        batches: &[cad_scene::RenderBatch],
+    ) -> CadResult<PreparedUpload> {
         let device = self
             .device
             .as_ref()
@@ -397,9 +408,9 @@ impl Renderer {
             .as_ref()
             .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?;
         let started = Instant::now();
-        let mut staged = Vec::with_capacity(delta.added.len());
+        let mut staged = Vec::with_capacity(batches.len());
         let mut uploaded_bytes = 0;
-        for batch in &delta.added {
+        for batch in batches {
             if batch.vertices.len() > u32::MAX as usize
                 || batch.indices.len() > u32::MAX as usize / 3
                 || batch.vertices.len().saturating_mul(12) as u64 > device.limits().max_buffer_size
@@ -416,7 +427,7 @@ impl Renderer {
                 ));
             }
         }
-        for batch in &delta.added {
+        for batch in batches {
             let (vertices, indices, edge_indices, normals, colors) = match batch.topology {
                 RenderTopology::Mesh => {
                     let verts = pack_positions(&batch.vertices);
@@ -537,9 +548,30 @@ impl Renderer {
         }
         self.batches.truncate(keep_prefix);
         self.batches.extend(prepared.batches);
+        self.progressive_frame = None;
         self.uploaded_bytes += prepared.bytes;
         self.last_upload_ms = Some(prepared.elapsed_ms);
         Ok(())
+    }
+
+    /// Opt-in bounded multipass accumulation. Opaque/transparent global order
+    /// is preserved across pages, with color/depth retained between submissions.
+    pub fn set_progressive_rendering(&mut self, enabled: bool) {
+        self.progressive = enabled;
+        self.progressive_frame = None;
+    }
+
+    pub fn frame_pending(&self) -> bool {
+        self.progressive_frame
+            .as_ref()
+            .is_some_and(|frame| frame.cursor < frame.ordered.len())
+    }
+
+    /// Submitted visible batches versus all ordered visible batches.
+    pub fn frame_progress(&self) -> Option<(usize, usize)> {
+        self.progressive_frame
+            .as_ref()
+            .map(|frame| (frame.cursor, frame.ordered.len()))
     }
 
     /// Identity of the actual offscreen attachment, not just its dimensions.
@@ -591,6 +623,7 @@ impl Renderer {
     }
 
     pub fn clear_batches(&mut self) {
+        self.progressive_frame = None;
         self.batches.clear();
     }
 
@@ -743,6 +776,39 @@ impl Renderer {
             ));
         }
         self.ensure_target(target)?;
+        if self.progressive
+            && self.progressive_frame.as_ref().is_none_or(|frame| {
+                frame.transforms != transforms
+                    || frame.camera_position != camera_position
+                    || frame.texture_revision != self.texture_revision
+            })
+        {
+            let indices: Vec<_> = (0..self.batches.len()).collect();
+            let entries: Vec<_> = self
+                .batches
+                .iter()
+                .map(|batch| BatchOrderEntry {
+                    draw_order: batch.draw_order,
+                    alpha: batch.alpha,
+                    centroid: batch.centroid,
+                })
+                .collect();
+            let passes = draw_passes(&indices, &entries, Some(camera_position));
+            let opaque_count = passes.opaque.len();
+            self.progressive_frame = Some(ProgressiveFrame {
+                transforms: transforms.clone(),
+                camera_position,
+                texture_revision: self.texture_revision,
+                ordered: passes
+                    .opaque
+                    .into_iter()
+                    .chain(passes.transparent)
+                    .collect(),
+                opaque_count,
+                invisible: passes.invisible,
+                cursor: 0,
+            });
+        }
         let Some(queue) = self.queue.as_ref() else {
             return Err(RenderError::NotInitialized(
                 "renderer not initialized".into(),
@@ -787,10 +853,61 @@ impl Renderer {
             ));
         };
 
+        let (budget_plan, opaque, transparent, invisible_batches, clear) =
+            if let Some(frame) = &self.progressive_frame {
+                let plan = plan::plan_ordered_page(
+                    &self.batches,
+                    &frame.ordered,
+                    frame.cursor,
+                    &self.frame_budget,
+                );
+                if plan.accepted.is_empty() && frame.cursor < frame.ordered.len() {
+                    return Err(RenderError::Frame(
+                        "one GPU batch exceeds the progressive frame budget".into(),
+                    ));
+                }
+                let split = frame
+                    .opaque_count
+                    .saturating_sub(frame.cursor)
+                    .min(plan.accepted.len());
+                let opaque = plan.accepted[..split].to_vec();
+                let transparent = plan.accepted[split..].to_vec();
+                (
+                    plan,
+                    opaque,
+                    transparent,
+                    frame.invisible,
+                    frame.cursor == 0,
+                )
+            } else {
+                let plan = plan_from_gpu(&self.batches, &self.frame_budget);
+                let entries: Vec<_> = plan
+                    .accepted
+                    .iter()
+                    .map(|&i| BatchOrderEntry {
+                        draw_order: self.batches[i].draw_order,
+                        alpha: self.batches[i].alpha,
+                        centroid: self.batches[i].centroid,
+                    })
+                    .collect();
+                let passes = draw_passes(&plan.accepted, &entries, Some(camera_position));
+                (
+                    plan,
+                    passes.opaque,
+                    passes.transparent,
+                    passes.invisible,
+                    true,
+                )
+            };
+
+        // Write only this page's uniforms. Rewriting every batch for every
+        // continuation would turn bounded accumulation into repeated full work.
         // Write the per-batch uniforms before encoding. The uniform is the
         // transform matrix followed by the constant per-batch colour (normalized
         // sRGB) and alpha (both clamped by the same policy used for drawing).
-        for (batch, m) in self.batches.iter().zip(transforms.iter()) {
+        for &index in &budget_plan.accepted {
+            let batch = &self.batches[index];
+            let m = &transforms[index];
             let mut uniform = [0.0f32; 20];
             uniform[..16].copy_from_slice(m);
             let [r, g, b] = renderer_color(batch.color);
@@ -800,27 +917,6 @@ impl Renderer {
             uniform[19] = clamp_alpha(batch.alpha);
             queue.write_buffer(&batch.camera, 0, bytemuck::cast_slice(&uniform));
         }
-
-        // Enforce the per-frame vertex/triangle budget explicitly (in upload
-        // order, unchanged).
-        let budget_plan = plan_from_gpu(&self.batches, &self.frame_budget);
-
-        // Order the *accepted* batches into an opaque pass and a back-to-front
-        // transparent pass. `alpha <= 0` batches are partitioned out and
-        // reported rather than drawn.
-        let entries: Vec<BatchOrderEntry> = budget_plan
-            .accepted
-            .iter()
-            .map(|&i| BatchOrderEntry {
-                draw_order: self.batches[i].draw_order,
-                alpha: self.batches[i].alpha,
-                centroid: self.batches[i].centroid,
-            })
-            .collect();
-        let passes = draw_passes(&budget_plan.accepted, &entries, Some(camera_position));
-        let opaque = passes.opaque;
-        let transparent = passes.transparent;
-        let invisible_batches = passes.invisible;
 
         // Lineweight is carried, never drawn: collect every submitted batch that
         // asks for a non-zero weight so the frame reports the gap explicitly
@@ -844,12 +940,16 @@ impl Renderer {
                     view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.06,
-                            g: 0.07,
-                            b: 0.10,
-                            a: 1.0,
-                        }),
+                        load: if clear {
+                            wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.06,
+                                g: 0.07,
+                                b: 0.10,
+                                a: 1.0,
+                            })
+                        } else {
+                            wgpu::LoadOp::Load
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -857,7 +957,11 @@ impl Renderer {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: depth_view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load: if clear {
+                            wgpu::LoadOp::Clear(1.0)
+                        } else {
+                            wgpu::LoadOp::Load
+                        },
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -914,6 +1018,9 @@ impl Renderer {
                 let report = self.note_device_lost("GPU device lost while rendering");
                 return Err(report);
             }
+        }
+        if let Some(frame) = &mut self.progressive_frame {
+            frame.cursor += budget_plan.accepted.len();
         }
         Ok(FrameStats {
             cpu_ms: 0.0,

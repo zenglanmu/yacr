@@ -141,6 +141,53 @@ pub(crate) fn plan_from_gpu(batches: &[GpuBatch], budget: &FrameBudget) -> GpuPl
     }
 }
 
+/// Budget one consecutive page of a globally ordered scene. Unlike the legacy
+/// one-frame planner, callers retain the cursor and never discard the suffix.
+pub(crate) fn plan_ordered_page(
+    batches: &[GpuBatch],
+    ordered: &[usize],
+    cursor: usize,
+    budget: &FrameBudget,
+) -> GpuPlan {
+    let mut usage = cad_scene::FrameUsage::default();
+    let mut accepted = Vec::new();
+    for &index in &ordered[cursor..] {
+        let batch = &batches[index];
+        let mut next = usage;
+        let triangles = if batch.topology == RenderTopology::Mesh {
+            batch.index_count as usize / 3
+        } else {
+            0
+        };
+        let result = budget
+            .charge_bytes(&mut next, batch.upload_size_bytes())
+            .and_then(|()| budget.charge(&mut next, batch.vertex_count as usize, triangles));
+        if let Err(exceeded) = result {
+            let report = OverBudget {
+                category: exceeded.category,
+                requested: exceeded.requested,
+                limit: exceeded.limit,
+                skipped_batches: ordered.len() - cursor - accepted.len(),
+            };
+            return GpuPlan {
+                accepted,
+                usage,
+                over_budget: Some(OverBudgetReason {
+                    reason: over_budget_reason(&report),
+                    report,
+                }),
+            };
+        }
+        usage = next;
+        accepted.push(index);
+    }
+    GpuPlan {
+        accepted,
+        usage,
+        over_budget: None,
+    }
+}
+
 pub(crate) fn over_budget_reason(report: &OverBudget) -> DiagnosticReason {
     DiagnosticReason::partial(
         codes::RENDER_FRAME_OVER_BUDGET,
