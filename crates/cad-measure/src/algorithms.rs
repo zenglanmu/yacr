@@ -127,18 +127,45 @@ pub(crate) fn angle_at_vertex(
             ));
         }
     };
-    let l1 = length(w1);
-    let l2 = length(w2);
-    if !l1.is_finite() || !l2.is_finite() || l1 < tol || l2 < tol {
-        return Err(CadError::InvalidInput(
-            "angle has a degenerate arm".to_string(),
-        ));
-    }
-    let c = dot(w1, w2) / (l1 * l2);
+    let u1 = normalized_angle_arm(w1, tol)?;
+    let u2 = normalized_angle_arm(w2, tol)?;
+    let c = dot(u1, u2);
     if !c.is_finite() {
         return Err(CadError::InvalidInput("angle is not finite".to_string()));
     }
     Ok(c.clamp(-1.0, 1.0).acos().to_degrees())
+}
+
+/// Normalize without squaring large coordinates or requiring the full arm
+/// length to fit in an f64. Keep the degeneracy threshold in world units.
+fn normalized_angle_arm(arm: Point3, tol: f64) -> CadResult<Point3> {
+    if !arm.x.is_finite() || !arm.y.is_finite() || !arm.z.is_finite() {
+        return Err(CadError::InvalidInput(
+            "angle arm is not finite".to_string(),
+        ));
+    }
+    let magnitude = arm.x.abs().max(arm.y.abs()).max(arm.z.abs());
+    if magnitude == 0.0 {
+        return Err(CadError::InvalidInput(
+            "angle has a degenerate arm".to_string(),
+        ));
+    }
+    let scaled = Point3 {
+        x: arm.x / magnitude,
+        y: arm.y / magnitude,
+        z: arm.z / magnitude,
+    };
+    let norm = scaled.x.hypot(scaled.y).hypot(scaled.z);
+    if !norm.is_finite() || magnitude < tol / norm {
+        return Err(CadError::InvalidInput(
+            "angle has a degenerate arm".to_string(),
+        ));
+    }
+    Ok(Point3 {
+        x: scaled.x / norm,
+        y: scaled.y / norm,
+        z: scaled.z / norm,
+    })
 }
 
 /// Normalized plane normal, rejecting a degenerate basis.

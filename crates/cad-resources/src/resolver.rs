@@ -96,23 +96,24 @@ impl MapResolver {
                 self.limits.max_bytes as u64,
             ));
         }
-        if self.used_bytes.saturating_add(bytes.len()) > self.limits.total_bytes {
+        let key = ResourceKey::sanitize(raw_key).0;
+        let previous_bytes = self
+            .entries
+            .get(&key)
+            .map_or(0, |(previous, _)| previous.len());
+        let resulting_bytes = self.used_bytes - previous_bytes;
+        let total = resulting_bytes.checked_add(bytes.len());
+        if total.is_none_or(|total| total > self.limits.total_bytes) {
             return Err(ResourceIssue::over_budget(
                 Some(&ResourceKey::sanitize(raw_key).0),
                 None,
                 ResourceBudget::TotalBytes,
-                self.used_bytes.saturating_add(bytes.len()) as u64,
+                resulting_bytes.saturating_add(bytes.len()) as u64,
                 self.limits.total_bytes as u64,
             ));
         }
-        let key = ResourceKey::sanitize(raw_key).0;
-        if let Some((previous, _)) = self
-            .entries
-            .insert(key, (bytes.clone(), license_hint.into()))
-        {
-            self.used_bytes = self.used_bytes.saturating_sub(previous.len());
-        }
-        self.used_bytes = self.used_bytes.saturating_add(bytes.len());
+        self.entries.insert(key, (bytes, license_hint.into()));
+        self.used_bytes = total.expect("total was checked against the budget");
         Ok(())
     }
 
@@ -152,6 +153,7 @@ impl ResourceResolver for MapResolver {
 
 /// The ordered resolver chain the spec requires: user pack, document map,
 /// bundled set. The first hit wins; a total miss is an explicit error.
+/// Only `ResourceMissing` permits fallback; other errors are propagated.
 pub struct ResolverChain<'a> {
     pub user_pack: Option<&'a dyn ResourceResolver>,
     pub document_map: Option<&'a dyn ResourceResolver>,
@@ -164,8 +166,10 @@ impl ResolverChain<'_> {
             .into_iter()
             .flatten()
         {
-            if let Ok(data) = resolver.resolve(request) {
-                return Ok(data);
+            match resolver.resolve(request) {
+                Ok(data) => return Ok(data),
+                Err(CadError::ResourceMissing(_)) => continue,
+                Err(error) => return Err(error),
             }
         }
         Err(CadError::ResourceMissing(format!(

@@ -49,6 +49,11 @@ pub trait SpatialIndex {
 }
 
 /// Grid-based spatial index.
+///
+/// Bounds must be finite and ordered on every axis; zero extent is allowed.
+/// Rays follow [`validate_ray`]. Invalid input returns [`CadError::InvalidInput`],
+/// including queries against an empty index, and rejected rebuilds or updates
+/// leave the previous index unchanged.
 pub struct GridSpatialIndex {
     entries: Vec<SpatialEntry>,
     min: Point3,
@@ -169,6 +174,9 @@ impl GridSpatialIndex {
 
 impl SpatialIndex for GridSpatialIndex {
     fn rebuild(&mut self, entries: &[SpatialEntry]) -> CadResult<()> {
+        for entry in entries {
+            validate_bounds(&entry.bounds)?;
+        }
         self.entries = entries.to_vec();
         let target = (entries.len() / 4).clamp(16, 65536);
         self.layout(target);
@@ -176,6 +184,10 @@ impl SpatialIndex for GridSpatialIndex {
     }
 
     fn update(&mut self, inserted: &[SpatialEntry], removed: &[SelectionRef]) -> CadResult<()> {
+        // Reject the entire change before removing any existing entries.
+        for entry in inserted {
+            validate_bounds(&entry.bounds)?;
+        }
         if !removed.is_empty() {
             let removed: std::collections::BTreeSet<_> = removed.iter().map(source_key).collect();
             self.entries
@@ -191,10 +203,12 @@ impl SpatialIndex for GridSpatialIndex {
     }
 
     fn query_bounds(&self, bounds: &Bounds3) -> CadResult<Vec<SelectionRef>> {
+        validate_bounds(bounds)?;
         Ok(self.query_cells(bounds))
     }
 
     fn ray_candidates(&self, ray: &Ray3) -> CadResult<Vec<SelectionRef>> {
+        validate_ray(ray)?;
         if !self.built || self.entries.is_empty() {
             return Ok(Vec::new());
         }
@@ -208,6 +222,25 @@ impl SpatialIndex for GridSpatialIndex {
         }
         Ok(out)
     }
+}
+
+/// Bounds may have zero extent, but every axis must be finite and ordered.
+fn validate_bounds(bounds: &Bounds3) -> CadResult<()> {
+    for (min, max) in [
+        (bounds.min.x, bounds.max.x),
+        (bounds.min.y, bounds.max.y),
+        (bounds.min.z, bounds.max.z),
+    ] {
+        if !min.is_finite() || !max.is_finite() {
+            return Err(CadError::InvalidInput(
+                "spatial bounds are not finite".into(),
+            ));
+        }
+        if min > max {
+            return Err(CadError::InvalidInput("spatial bounds are inverted".into()));
+        }
+    }
+    Ok(())
 }
 
 fn source_key(s: &SelectionRef) -> (DocumentId, EntityId, Vec<(EntityId, String)>) {
@@ -277,3 +310,217 @@ impl SpatialIndex for PendingSpatialIndex {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    fn entry(id: u128) -> SpatialEntry {
+        SpatialEntry {
+            source: SelectionRef {
+                document: DocumentId(1),
+                entity: EntityId(id),
+                instance: InstancePath::default(),
+                sub_element: None,
+            },
+            bounds: Bounds3 {
+                min: Point3 {
+                    x: -1.0,
+                    y: -1.0,
+                    z: -1.0,
+                },
+                max: Point3 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+            },
+        }
+    }
+
+    fn ray() -> Ray3 {
+        Ray3 {
+            origin: Point3 {
+                x: -2.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            direction: Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }
+    }
+
+    fn coordinate(point: &mut Point3, axis: usize) -> &mut f64 {
+        match axis {
+            0 => &mut point.x,
+            1 => &mut point.y,
+            _ => &mut point.z,
+        }
+    }
+
+    fn invalid_bounds() -> Vec<Bounds3> {
+        let valid = entry(1).bounds;
+        let mut cases = Vec::new();
+        for axis in 0..3 {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut bounds = valid;
+                *coordinate(&mut bounds.min, axis) = value;
+                cases.push(bounds);
+                let mut bounds = valid;
+                *coordinate(&mut bounds.max, axis) = value;
+                cases.push(bounds);
+            }
+            let mut bounds = valid;
+            *coordinate(&mut bounds.min, axis) = 2.0;
+            cases.push(bounds);
+        }
+        cases
+    }
+
+    #[test]
+    fn invalid_rebuild_preserves_existing_index() {
+        let original = entry(1);
+        let mut index = GridSpatialIndex::new();
+        index.rebuild(std::slice::from_ref(&original)).unwrap();
+        for bounds in invalid_bounds() {
+            let mut invalid = entry(3);
+            invalid.bounds = bounds;
+            assert!(matches!(
+                index.rebuild(&[entry(2), invalid]),
+                Err(CadError::InvalidInput(_))
+            ));
+            assert_eq!(index.entry_count(), 1);
+            assert_eq!(
+                index.query_bounds(&original.bounds).unwrap(),
+                vec![original.source.clone()]
+            );
+            assert_eq!(
+                index.ray_candidates(&ray()).unwrap(),
+                vec![original.source.clone()]
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_update_preserves_removals_and_rejects_all_insertions() {
+        let original = entry(1);
+        let mut index = GridSpatialIndex::new();
+        index.rebuild(std::slice::from_ref(&original)).unwrap();
+        for bounds in invalid_bounds() {
+            let mut invalid = entry(3);
+            invalid.bounds = bounds;
+            assert!(matches!(
+                index.update(&[entry(2), invalid], std::slice::from_ref(&original.source)),
+                Err(CadError::InvalidInput(_))
+            ));
+            assert_eq!(index.entry_count(), 1);
+            assert_eq!(
+                index.query_bounds(&original.bounds).unwrap(),
+                vec![original.source.clone()]
+            );
+            assert_eq!(
+                index.ray_candidates(&ray()).unwrap(),
+                vec![original.source.clone()]
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_bounds_queries_are_errors_even_without_entries() {
+        let mut index = GridSpatialIndex::new();
+        for state in 0..3 {
+            if state == 1 {
+                index.rebuild(&[]).unwrap();
+            } else if state == 2 {
+                index.rebuild(&[entry(1)]).unwrap();
+            }
+            for bounds in invalid_bounds() {
+                assert!(matches!(
+                    index.query_bounds(&bounds),
+                    Err(CadError::InvalidInput(_))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_ray_queries_are_errors_even_without_entries() {
+        let mut cases = Vec::new();
+        for axis in 0..3 {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut invalid = ray();
+                *coordinate(&mut invalid.origin, axis) = value;
+                cases.push(invalid);
+                let mut invalid = ray();
+                *coordinate(&mut invalid.direction, axis) = value;
+                cases.push(invalid);
+            }
+        }
+        for magnitude in [0.0, MIN_RAY_DIRECTION * 0.5] {
+            let mut invalid = ray();
+            invalid.direction.x = magnitude;
+            cases.push(invalid);
+        }
+        let mut index = GridSpatialIndex::new();
+        for state in 0..3 {
+            if state == 1 {
+                index.rebuild(&[]).unwrap();
+            } else if state == 2 {
+                index.rebuild(&[entry(1)]).unwrap();
+            }
+            for invalid in &cases {
+                assert!(matches!(
+                    index.ray_candidates(invalid),
+                    Err(CadError::InvalidInput(_))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn valid_empty_degenerate_bounds_and_threshold_ray_remain_supported() {
+        let mut index = GridSpatialIndex::new();
+        let mut point = entry(1);
+        point.bounds.max = point.bounds.min;
+        assert!(index.query_bounds(&point.bounds).unwrap().is_empty());
+        assert!(index.ray_candidates(&ray()).unwrap().is_empty());
+        index.rebuild(&[]).unwrap();
+        assert!(index.query_bounds(&point.bounds).unwrap().is_empty());
+        assert!(index.ray_candidates(&ray()).unwrap().is_empty());
+        index.rebuild(std::slice::from_ref(&point)).unwrap();
+        assert_eq!(
+            index.query_bounds(&point.bounds).unwrap(),
+            vec![point.source.clone()]
+        );
+        let threshold_ray = Ray3 {
+            origin: point.bounds.min,
+            direction: Point3 {
+                x: MIN_RAY_DIRECTION,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+        assert_eq!(
+            index.ray_candidates(&threshold_ray).unwrap(),
+            vec![point.source.clone()]
+        );
+        let replacement = entry(2);
+        index
+            .update(
+                std::slice::from_ref(&replacement),
+                std::slice::from_ref(&point.source),
+            )
+            .unwrap();
+        assert_eq!(index.entry_count(), 1);
+        assert_eq!(
+            index.query_bounds(&replacement.bounds).unwrap(),
+            vec![replacement.source]
+        );
+        index.rebuild(&[]).unwrap();
+        assert_eq!(index.entry_count(), 0);
+        assert!(index.query_bounds(&point.bounds).unwrap().is_empty());
+    }
+}

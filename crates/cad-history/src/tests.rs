@@ -237,3 +237,181 @@ fn a_drawing_record_needs_at_least_one_patch() {
     assert!(matches!(result, Err(CadError::InvalidInput(_))));
     assert!(!history.can_undo());
 }
+
+fn annotation_record(id: u128, merge_key: Option<&str>) -> UndoRecord {
+    UndoRecord {
+        transaction: TransactionId(1),
+        label: "create".into(),
+        patches: vec![patch(AnnotationId(id), None, Some(ann(id, "note")))],
+        merge_key: merge_key.map(str::to_owned),
+    }
+}
+
+fn drawing_record(id: u128) -> DrawingUndoRecord {
+    DrawingUndoRecord {
+        transaction: TransactionId(id),
+        label: "create line".into(),
+        patches: vec![drawing_patch(EntityId(id), None, Some(entity(id, 0.0)))],
+        merge_key: None,
+    }
+}
+
+#[test]
+fn rejected_annotation_undo_preserves_history_and_database() {
+    let mut db = database_with();
+    let mut history = History::default();
+    history.record(annotation_record(5, None)).unwrap();
+    let bytes = history.used_bytes();
+    let revision = db.revision();
+    assert!(history.undo(&mut db).is_err());
+    assert_eq!(history.undo_depth(), 1);
+    assert_eq!(history.redo_depth(), 0);
+    assert_eq!(history.used_bytes(), bytes);
+    assert_eq!(db.revision(), revision);
+    db.apply_annotation_changes(
+        "create",
+        TransactionId(1),
+        vec![(AnnotationId(5), Some(ann(5, "note")))],
+    )
+    .unwrap();
+    history.undo(&mut db).unwrap();
+}
+
+#[test]
+fn rejected_annotation_redo_preserves_history_and_database() {
+    let mut db = database_with();
+    let mut history = History::default();
+    history
+        .record(UndoRecord {
+            transaction: TransactionId(1),
+            label: "delete".into(),
+            patches: vec![patch(AnnotationId(5), Some(ann(5, "note")), None)],
+            merge_key: None,
+        })
+        .unwrap();
+    history.undo(&mut db).unwrap();
+    db.apply_annotation_changes(
+        "external delete",
+        TransactionId(2),
+        vec![(AnnotationId(5), None)],
+    )
+    .unwrap();
+    let revision = db.revision();
+    assert!(history.redo(&mut db).is_err());
+    assert_eq!(history.undo_depth(), 0);
+    assert_eq!(history.redo_depth(), 1);
+    assert_eq!(history.redo_markers.len(), 1);
+    assert_eq!(history.used_bytes(), 0);
+    assert_eq!(db.revision(), revision);
+    db.apply_annotation_changes(
+        "restore",
+        TransactionId(3),
+        vec![(AnnotationId(5), Some(ann(5, "note")))],
+    )
+    .unwrap();
+    history.redo(&mut db).unwrap();
+}
+
+#[test]
+fn record_size_is_independent_of_identifier_value() {
+    assert_eq!(
+        annotation_record(1, None).approx_bytes(),
+        annotation_record(u128::MAX, None).approx_bytes()
+    );
+    assert_eq!(
+        drawing_record(1).approx_bytes(),
+        drawing_record(u128::MAX).approx_bytes()
+    );
+}
+
+#[test]
+fn merged_record_enforces_budget() {
+    let first = annotation_record(1, None);
+    let second = annotation_record(2, Some("drag"));
+    let budget = first.approx_bytes() + second.approx_bytes();
+    let mut history = History::new(budget);
+    history.record(first).unwrap();
+    history.record(second).unwrap();
+    let mut larger = annotation_record(2, Some("drag"));
+    larger.patches[0].after.as_mut().unwrap().text = "x".repeat(budget);
+    history.record(larger).unwrap();
+    assert_eq!(history.undo_depth(), 1);
+}
+
+#[test]
+fn drawing_accounting_survives_undo_redo_and_cancel() {
+    let mut history = History::default();
+    history.record_drawing(drawing_record(42)).unwrap();
+    let bytes = history.used_bytes();
+    assert_eq!(
+        bytes,
+        history.undo[0].approx_bytes() + history.drawing_undo[0].approx_bytes()
+    );
+    history.begin_drawing_undo().unwrap();
+    assert_eq!(history.used_bytes(), 0);
+    history.cancel_pending_drawing();
+    assert_eq!(history.used_bytes(), bytes);
+    history.begin_drawing_undo().unwrap();
+    history.finish_drawing().unwrap();
+    history.begin_drawing_redo().unwrap();
+    history.cancel_pending_drawing();
+    history.begin_drawing_redo().unwrap();
+    history.finish_drawing().unwrap();
+    assert_eq!(history.used_bytes(), bytes);
+}
+
+#[test]
+fn pending_drawing_rejects_reentrant_history_mutations() {
+    let mut history = History::default();
+    history.record_drawing(drawing_record(1)).unwrap();
+    history.record_drawing(drawing_record(2)).unwrap();
+    history.begin_drawing_undo().unwrap();
+    let mut db = database_with();
+    assert!(history.begin_drawing_undo().is_err());
+    assert!(history.begin_drawing_redo().is_err());
+    assert!(history.record(annotation_record(3, None)).is_err());
+    assert!(history.record_drawing(drawing_record(3)).is_err());
+    assert!(history.undo(&mut db).is_err());
+    assert!(history.redo(&mut db).is_err());
+    history.cancel_pending_drawing();
+    assert_eq!(history.undo_depth(), 2);
+    assert_eq!(
+        history.begin_drawing_undo().unwrap().transaction,
+        TransactionId(2)
+    );
+    history.finish_drawing().unwrap();
+    history.begin_drawing_redo().unwrap();
+    assert!(history.record(annotation_record(3, None)).is_err());
+    assert!(history.begin_drawing_undo().is_err());
+    history.cancel_pending_drawing();
+    assert_eq!(
+        history.begin_drawing_redo().unwrap().transaction,
+        TransactionId(2)
+    );
+}
+
+#[test]
+fn annotation_record_cannot_impersonate_drawing_marker() {
+    let mut history = History::default();
+    assert!(history
+        .record(annotation_record(1, Some(DRAWING_MARKER)))
+        .is_err());
+    assert!(!history.can_undo());
+}
+
+#[test]
+fn drawing_budget_eviction_keeps_payloads_in_step() {
+    let record = drawing_record(1);
+    let budget = record.approx_bytes()
+        + drawing_marker(record.transaction, record.label.clone()).approx_bytes();
+    let mut history = History::new(budget);
+    history.record_drawing(record).unwrap();
+    history.record_drawing(drawing_record(2)).unwrap();
+    assert_eq!(history.undo_depth(), 1);
+    assert_eq!(history.drawing_undo.len(), 1);
+    assert_eq!(history.used_bytes(), budget);
+    assert_eq!(
+        history.begin_drawing_undo().unwrap().transaction,
+        TransactionId(2)
+    );
+}

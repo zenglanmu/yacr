@@ -390,6 +390,115 @@ fn non_finite_points_are_rejected() {
 }
 
 #[test]
+fn angle_is_scale_invariant_for_large_finite_arms() {
+    for magnitude in [1.0, 1e154, 1e200, 1e308] {
+        for (x, y, expected) in [
+            (1.0, 0.0, 0.0),
+            (1.0, 1.0, 45.0),
+            (0.0, 1.0, 90.0),
+            (-1.0, 1.0, 135.0),
+            (-1.0, 0.0, 180.0),
+        ] {
+            let result = engine()
+                .measure(&request(
+                    MeasurementAlgorithm::Angle3Points,
+                    vec![
+                        p(magnitude, 0.0, 0.0),
+                        p(0.0, 0.0, 0.0),
+                        p(x * magnitude, y * magnitude, 0.0),
+                    ],
+                ))
+                .unwrap();
+            assert!(
+                (result.value - expected).abs() < 1e-9,
+                "magnitude={magnitude}, expected={expected}, got {}",
+                result.value
+            );
+        }
+    }
+}
+
+#[test]
+fn angle_accepts_finite_arms_whose_lengths_exceed_f64_range() {
+    let magnitude = f64::MAX;
+    let result = engine()
+        .measure(&request(
+            MeasurementAlgorithm::Angle3Points,
+            vec![
+                p(magnitude, magnitude, magnitude),
+                p(0.0, 0.0, 0.0),
+                p(magnitude, magnitude, -magnitude),
+            ],
+        ))
+        .unwrap();
+    let expected = (1.0_f64 / 3.0).acos().to_degrees();
+    assert!((result.value - expected).abs() < 1e-9);
+}
+
+#[test]
+fn planar_angle_projects_large_finite_arms_before_normalization() {
+    let magnitude = 1e200;
+    let result = engine()
+        .measure(&plane_request(
+            MeasurementAlgorithm::Angle3Points,
+            vec![
+                p(magnitude, 0.0, magnitude),
+                p(0.0, 0.0, 0.0),
+                p(magnitude, magnitude, -magnitude),
+            ],
+        ))
+        .unwrap();
+    assert!((result.value - 45.0).abs() < 1e-9);
+}
+
+#[test]
+fn angle_rejects_zero_and_below_tolerance_arms() {
+    for arm in [p(0.0, 0.0, 0.0), p(1e-200, 1e-200, 0.0)] {
+        for points in [
+            vec![arm, p(0.0, 0.0, 0.0), p(0.0, 1.0, 0.0)],
+            vec![p(0.0, 1.0, 0.0), p(0.0, 0.0, 0.0), arm],
+        ] {
+            let result = engine().measure(&request(MeasurementAlgorithm::Angle3Points, points));
+            assert!(
+                matches!(result, Err(CadError::InvalidInput(_))),
+                "{result:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn angle_rejects_non_finite_points_in_every_position() {
+    for coordinate in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for index in 0..3 {
+            let mut points = vec![p(1.0, 0.0, 0.0), p(0.0, 0.0, 0.0), p(0.0, 1.0, 0.0)];
+            points[index].x = coordinate;
+            let result = engine().measure(&request(MeasurementAlgorithm::Angle3Points, points));
+            assert!(
+                matches!(result, Err(CadError::InvalidInput(_))),
+                "{result:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn angle_rejects_non_finite_arm_subtraction() {
+    let result = engine().measure(&request(
+        MeasurementAlgorithm::Angle3Points,
+        vec![
+            p(f64::MAX, 0.0, 0.0),
+            p(-f64::MAX, 0.0, 0.0),
+            p(-f64::MAX, 1.0, 0.0),
+        ],
+    ));
+    assert!(
+        matches!(result, Err(CadError::InvalidInput(_))),
+        "{result:?}"
+    );
+}
+
+#[test]
 fn polygon_area_rejects_self_intersection() {
     let bowtie = vec![
         p(0.0, 0.0, 0.0),

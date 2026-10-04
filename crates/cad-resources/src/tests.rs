@@ -172,6 +172,103 @@ fn grant_enforces_the_running_total_budget() {
 }
 
 #[test]
+fn replacing_a_resource_only_charges_the_resulting_total() {
+    let mut resolver = MapResolver::new(ResourceLimits {
+        max_bytes: 100,
+        total_bytes: 100,
+        ..ResourceLimits::default()
+    });
+    resolver
+        .grant("a.shx", Arc::from(vec![1u8; 60]), "original")
+        .unwrap();
+    resolver
+        .grant("b.shx", Arc::from(vec![2u8; 40]), "other")
+        .unwrap();
+    // Directory and case aliases resolve to the same granted entry.
+    resolver
+        .grant("fonts/A.SHX", Arc::from(vec![3u8; 60]), "replacement")
+        .unwrap();
+    assert_eq!(resolver.used_bytes(), 100);
+    assert_eq!(resolver.len(), 2);
+    let data = resolver.resolve(&request("a.shx")).unwrap();
+    assert_eq!(&*data.bytes, &[3u8; 60]);
+    assert_eq!(data.license_hint.as_deref(), Some("replacement"));
+    resolver
+        .grant("a.shx", Arc::from(vec![4u8; 20]), "smaller")
+        .unwrap();
+    assert_eq!(resolver.used_bytes(), 60);
+    resolver
+        .grant("a.shx", Arc::from(vec![5u8; 60]), "larger")
+        .unwrap();
+    assert_eq!(resolver.used_bytes(), 100);
+    let issue = resolver
+        .grant("a.shx", Arc::from(vec![6u8; 61]), "rejected")
+        .unwrap_err();
+    assert_eq!(issue.budget, Some(ResourceBudget::TotalBytes));
+    assert_eq!(issue.actual, 101);
+    assert_eq!(resolver.used_bytes(), 100);
+    assert_eq!(resolver.len(), 2);
+    let data = resolver.resolve(&request("a.shx")).unwrap();
+    assert_eq!(&*data.bytes, &[5u8; 60]);
+    assert_eq!(data.license_hint.as_deref(), Some("larger"));
+    assert_eq!(
+        &*resolver.resolve(&request("b.shx")).unwrap().bytes,
+        &[2u8; 40]
+    );
+}
+
+#[test]
+fn chain_falls_back_only_for_missing_resources() {
+    struct FailingResolver;
+    impl ResourceResolver for FailingResolver {
+        fn resolve(&self, _: &ResourceRequest) -> CadResult<ResourceData> {
+            Err(CadError::Cancelled)
+        }
+    }
+    let mut bundled = MapResolver::new(ResourceLimits::default());
+    bundled
+        .grant("romans.shx", Arc::from(b"bundled".to_vec()), "bundled")
+        .unwrap();
+    let missing = MapResolver::default();
+    let chain = ResolverChain {
+        user_pack: Some(&missing),
+        document_map: None,
+        bundled: Some(&bundled),
+    };
+    assert_eq!(
+        &*chain.resolve(&request("romans.shx")).unwrap().bytes,
+        b"bundled"
+    );
+    let failing = FailingResolver;
+    for chain in [
+        ResolverChain {
+            user_pack: Some(&failing),
+            document_map: None,
+            bundled: Some(&bundled),
+        },
+        ResolverChain {
+            user_pack: Some(&missing),
+            document_map: Some(&failing),
+            bundled: Some(&bundled),
+        },
+        ResolverChain {
+            user_pack: Some(&missing),
+            document_map: None,
+            bundled: Some(&failing),
+        },
+    ] {
+        assert!(matches!(
+            chain.resolve(&request("romans.shx")),
+            Err(CadError::Cancelled)
+        ));
+    }
+    assert!(matches!(
+        chain.resolve(&request("missing.shx")),
+        Err(CadError::ResourceMissing(_))
+    ));
+}
+
+#[test]
 fn per_resource_and_pixel_budgets_are_explicit() {
     let limits = ResourceLimits {
         max_bytes: 10,

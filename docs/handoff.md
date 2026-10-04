@@ -16,7 +16,39 @@
 7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
    Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
-## 本轮状态（compact，2026-10-03）
+## Rust 审查轮（2026-10-04）
+
+后续按用户要求开启两个并行子代理，分别只写空间索引输入校验和测量数值稳健性
+代码/回归测试，不运行编译、测试或格式化；已交付，主控审查并统一格式化/验证。
+空间索引拒绝非法 bounds/ray 且更新失败不改旧索引；角度归一化避免大有限臂的溢出。
+新增 5+6 项合成测试，主控执行 spatial **25**、measure **51**、history **17**、
+resources **17 passed / 0 failed**。详见 `docs/review-spatial-measure.md`。
+当前统一代码树严格主机 clippy、wasm 全 workspace lib 检查通过；完整主机测试
+**1198 passed / 0 failed / 1 ignored**（合成/软件 GPU，真实 DWG 条件用例未提供输入，
+不是其已执行证据）。新一轮 Linux release lavapipe 离屏 smoke 实际通过：
+`/tmp/opencode/yacr-linux-20261004-013052-436072`，输入为合成图纸，
+2 CAD frames、导航相机/像素均改变、无渲染错误；参考图视觉验收仍未执行。
+Node 六套无 wasm/GPU 模块契约 **53 passed / 0 failed**。
+
+集中修复 `cad-history`：批注撤销/重做数据库失败不再丢栈顶；UUID 数值不再
+参与字节估算；绘图标记/payload 计数对称并保留原事务标记；合并执行预算淘汰；
+待提交绘图步骤拒绝重入写历史；批注不能使用保留绘图合并键。新增 8 项合成回归，
+修复前全部失败、修复后历史 crate **17 passed / 0 failed**。
+详细审查范围与尚存预算/API 限制见 `docs/review-history.md`。
+
+本轮已通过 fmt、严格主机 clippy（排除 Android/Web）、架构/fixture/workflow/i18n、
+wasm 全 workspace lib 检查以及 Linux release 编译。
+完整主机测试首次在编译阶段超时（120 秒），取消时限重跑后通过；此运行包含历史
+修复，不包含后续资源/并行轮改动。原输出保存于
+`/home/zenglanmu/.local/share/opencode/shell/da739b3910d63162f4687d9e8c13d613a0959f68/sh_10471d8940017619qmCkjQzIQN.out`。
+
+资源轮补修 `MapResolver` 替换的预算重复计费和 `ResolverChain` 非缺失错误被吞；
+2 项回归修复前均失败，修复后 resources/history 各 **17 passed / 0 failed**。
+Linux release 已实际通过 lavapipe 合成离屏 smoke（含资源修复），证据
+`/tmp/opencode/yacr-linux-20261004-011217-419337`。详见 `docs/review-resources.md`。
+真实 DWG/真实 GPU/桌面窗口/真机未运行；不沿用历史证据作为本轮通过结论。
+
+## 上轮状态（compact，2026-10-03）
 
 **迭代 6：宿主捕捉接线 + minimal 命令集收窄 + 紧凑抽屉布局列表**：
 

@@ -64,7 +64,7 @@ impl UndoRecord {
     fn approx_bytes(&self) -> usize {
         let mut bytes = std::mem::size_of::<Self>() + self.label.len();
         for p in &self.patches {
-            bytes += std::mem::size_of::<AnnotationPatch>() + p.id.0 as usize;
+            bytes += std::mem::size_of::<AnnotationPatch>();
             if let Some(a) = &p.before {
                 bytes += a.text.len();
             }
@@ -76,7 +76,12 @@ impl UndoRecord {
     }
 }
 
-/// Bounded undo/redo stacks.
+/// Undo/redo stacks with an approximate budget on retained undo entries.
+///
+/// The newest undo entry is retained even if it exceeds the budget. The byte
+/// estimate is not a total heap measurement: nested geometry allocations,
+/// spare collection capacity, redo entries and a pending drawing step are not
+/// fully accounted for.
 ///
 /// Annotation and drawing records share one ordered history: `undo`/`redo`
 /// carry the user-visible ordering (annotation payloads plus placeholder
@@ -131,12 +136,19 @@ impl History {
         self.redo.len()
     }
 
+    /// Estimated bytes of retained undo entries, including drawing markers.
     pub fn used_bytes(&self) -> usize {
         self.used_bytes
     }
 
     /// Record a committed change. Clears the redo stack.
     pub fn record(&mut self, record: UndoRecord) -> CadResult<()> {
+        self.ensure_no_pending_drawing()?;
+        if record.merge_key.as_deref() == Some(DRAWING_MARKER) {
+            return Err(CadError::InvalidInput(
+                "the drawing history marker is reserved".into(),
+            ));
+        }
         if record.patches.is_empty() {
             return Err(CadError::InvalidInput(
                 "an undo record needs at least one patch".to_string(),
@@ -146,11 +158,6 @@ impl History {
         if let Some(key) = &record.merge_key {
             if let Some(last) = self.undo.back_mut() {
                 if last.merge_key.as_deref() == Some(key.as_str()) {
-                    if last.merge_key.as_deref() == Some(DRAWING_MARKER) {
-                        return Err(CadError::Unsupported(
-                            "annotation records cannot be coalesced with drawing records".into(),
-                        ));
-                    }
                     for patch in record.patches {
                         if let Some(existing) = last.patches.iter_mut().find(|p| p.id == patch.id) {
                             existing.after = patch.after;
@@ -167,6 +174,7 @@ impl History {
                     self.redo.clear();
                     self.redo_markers.clear();
                     self.drawing_redo.clear();
+                    self.enforce_budget();
                     return Ok(());
                 }
             }
@@ -203,6 +211,7 @@ impl History {
     /// be applied to the *drawing* database by the caller. This keeps a single
     /// ordering without ever routing an entity patch into the annotation store.
     pub fn undo(&mut self, database: &mut AnnotationDatabase) -> CadResult<ChangeSet> {
+        self.ensure_no_pending_drawing()?;
         let top_is_drawing = matches!(
             self.undo.back().and_then(|r| r.merge_key.as_deref()),
             Some(DRAWING_MARKER)
@@ -215,9 +224,8 @@ impl History {
         }
         let record = self
             .undo
-            .pop_back()
+            .back()
             .ok_or_else(|| CadError::InvalidInput("nothing to undo".to_string()))?;
-        self.used_bytes = self.used_bytes.saturating_sub(record.approx_bytes());
         let changes: Vec<(AnnotationId, Option<Annotation>)> = record
             .patches
             .iter()
@@ -228,6 +236,9 @@ impl History {
             record.transaction,
             changes,
         )?;
+        // Only move the record after the atomic database write succeeds.
+        let record = self.undo.pop_back().expect("record was checked above");
+        self.used_bytes = self.used_bytes.saturating_sub(record.approx_bytes());
         self.redo_markers.push(String::new());
         self.redo.push(record);
         Ok(change_set)
@@ -235,15 +246,15 @@ impl History {
 
     /// Redo the most recently undone record.
     pub fn redo(&mut self, database: &mut AnnotationDatabase) -> CadResult<ChangeSet> {
+        self.ensure_no_pending_drawing()?;
         if self.next_redo_is_drawing() {
             return Err(CadError::InvalidInput(
                 "the next redo step is a drawing edit; apply it to the drawing database".into(),
             ));
         }
-        self.redo_markers.pop();
         let record = self
             .redo
-            .pop()
+            .last()
             .ok_or_else(|| CadError::InvalidInput("nothing to redo".to_string()))?;
         let changes: Vec<(AnnotationId, Option<Annotation>)> = record
             .patches
@@ -255,12 +266,15 @@ impl History {
             record.transaction,
             changes,
         )?;
+        let record = self.redo.pop().expect("record was checked above");
+        self.redo_markers.pop();
         self.used_bytes += record.approx_bytes();
         self.undo.push_back(record);
         self.enforce_budget();
         Ok(change_set)
     }
 
+    /// Discard all history, including any pending drawing step.
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
@@ -278,6 +292,7 @@ impl History {
     /// exact order the user performed them. An empty patch list is rejected, so
     /// a command can never claim success while recording nothing.
     pub fn record_drawing(&mut self, record: DrawingUndoRecord) -> CadResult<()> {
+        self.ensure_no_pending_drawing()?;
         if record.patches.is_empty() {
             return Err(CadError::InvalidInput(
                 "a drawing undo record needs at least one patch".to_string(),
@@ -294,12 +309,13 @@ impl History {
         }
         let transaction = record.transaction;
         let label = record.label.clone();
+        let marker = drawing_marker(transaction, label);
         // Compute the byte cost of the drawing payload before moving the
         // patches into the drawing stack.
-        self.used_bytes += record.approx_bytes();
+        self.used_bytes += record.approx_bytes() + marker.approx_bytes();
         self.drawing_undo.push_back(record);
         self.drawing_redo.clear();
-        self.undo.push_back(drawing_marker(transaction, label));
+        self.undo.push_back(marker);
         self.redo.clear();
         self.redo_markers.clear();
         self.enforce_budget();
@@ -318,10 +334,12 @@ impl History {
     ///
     /// The caller applies the `before` entities through the drawing database's
     /// own validated write path; the record is only moved to the redo stack
-    /// after the caller reports success via [`History::finish_drawing_undo`].
+    /// after the caller reports success via [`History::finish_drawing`].
     /// This method pops the record and holds it until finished, so a failed
     /// apply cannot silently lose or duplicate the step.
+    /// Other history writes are rejected until this step is finished or canceled.
     pub fn begin_drawing_undo(&mut self) -> CadResult<DrawingUndoRecord> {
+        self.ensure_no_pending_drawing()?;
         let top_is_drawing = matches!(
             self.undo.back().and_then(|r| r.merge_key.as_deref()),
             Some(DRAWING_MARKER)
@@ -331,15 +349,17 @@ impl History {
                 "the most recent undo step is not a drawing edit".into(),
             ));
         }
-        let stamp = self.undo.pop_back().expect("checked above");
-        let _ = stamp;
         let record = self
             .drawing_undo
             .pop_back()
             .ok_or_else(|| CadError::Invariant("drawing undo stack desynchronised".into()))?;
-        self.used_bytes = self.used_bytes.saturating_sub(record.approx_bytes());
+        let stamp = self.undo.pop_back().expect("checked above");
+        self.used_bytes = self
+            .used_bytes
+            .saturating_sub(record.approx_bytes() + stamp.approx_bytes());
         self.pending = Some(PendingDrawing {
             record,
+            stamp,
             direction: UndoDirection::Undo,
         });
         Ok(self.pending.as_ref().expect("just set").record.clone())
@@ -356,21 +376,26 @@ impl History {
 
     /// Redo the most recent drawing delete/update, returning its patches.
     pub fn begin_drawing_redo(&mut self) -> CadResult<DrawingUndoRecord> {
+        self.ensure_no_pending_drawing()?;
         if !self.next_redo_is_drawing() {
             return Err(CadError::InvalidInput(
                 "the next redo step is not a drawing edit".into(),
             ));
         }
-        self.redo_markers.pop();
-        // Keep the annotation redo stack in step: it carries one marker per
-        // redo entry (annotation or drawing) so the ordering stays exact.
-        self.redo.pop();
+        if self.redo.is_empty() || self.drawing_redo.is_empty() {
+            return Err(CadError::Invariant(
+                "drawing redo stack desynchronised".into(),
+            ));
+        }
         let record = self
             .drawing_redo
             .pop()
             .ok_or_else(|| CadError::Invariant("drawing redo stack desynchronised".into()))?;
+        self.redo_markers.pop();
+        let stamp = self.redo.pop().expect("checked above");
         self.pending = Some(PendingDrawing {
             record,
+            stamp,
             direction: UndoDirection::Redo,
         });
         Ok(self.pending.as_ref().expect("just set").record.clone())
@@ -387,12 +412,12 @@ impl History {
                 self.redo_markers.push(DRAWING_MARKER.to_string());
                 self.drawing_redo.push(pending.record);
                 // The annotation redo stack mirrors the ordering with a marker.
-                self.redo.push(annotation_stamp());
+                self.redo.push(pending.stamp);
             }
             UndoDirection::Redo => {
-                self.used_bytes += pending.record.approx_bytes();
+                self.used_bytes += pending.record.approx_bytes() + pending.stamp.approx_bytes();
                 self.drawing_undo.push_back(pending.record);
-                self.undo.push_back(annotation_stamp());
+                self.undo.push_back(pending.stamp);
                 self.enforce_budget();
             }
         }
@@ -410,19 +435,25 @@ impl History {
         };
         match pending.direction {
             UndoDirection::Undo => {
-                self.undo.push_back(drawing_marker(
-                    pending.record.transaction,
-                    pending.record.label.clone(),
-                ));
-                self.used_bytes += pending.record.approx_bytes();
+                self.used_bytes += pending.record.approx_bytes() + pending.stamp.approx_bytes();
+                self.undo.push_back(pending.stamp);
                 self.drawing_undo.push_back(pending.record);
             }
             UndoDirection::Redo => {
                 self.redo_markers.push(DRAWING_MARKER.to_string());
-                self.redo.push(annotation_stamp());
+                self.redo.push(pending.stamp);
                 self.drawing_redo.push(pending.record);
             }
         }
+    }
+
+    fn ensure_no_pending_drawing(&self) -> CadResult<()> {
+        if self.pending.is_some() {
+            return Err(CadError::InvalidInput(
+                "finish or cancel the pending drawing history step first".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -445,10 +476,6 @@ fn drawing_marker(transaction: TransactionId, label: String) -> UndoRecord {
     }
 }
 
-fn annotation_stamp() -> UndoRecord {
-    drawing_marker(TransactionId(0), "drawing redo".into())
-}
-
 enum UndoDirection {
     Undo,
     Redo,
@@ -456,6 +483,7 @@ enum UndoDirection {
 
 struct PendingDrawing {
     record: DrawingUndoRecord,
+    stamp: UndoRecord,
     direction: UndoDirection,
 }
 
@@ -481,7 +509,7 @@ impl DrawingUndoRecord {
     pub fn approx_bytes(&self) -> usize {
         let mut bytes = std::mem::size_of::<Self>() + self.label.len();
         for p in &self.patches {
-            bytes += std::mem::size_of::<DrawingPatch>() + p.id.0 as usize;
+            bytes += std::mem::size_of::<DrawingPatch>();
             if let Some(e) = &p.before {
                 bytes += std::mem::size_of::<cad_db::DbEntity>() + e.object.type_key.len();
             }
