@@ -183,12 +183,12 @@ impl DrawingDatabase {
         // Entities that enter or leave the visible set. Ungoverned entities are
         // visible in both states and never appear here.
         let visible_before = self.block_visible_entities(block).unwrap_or_default();
-        let members: Vec<EntityId> = current.member_entities.clone();
+        let members = &self.blocks[&block].entities;
         let target_visible: Vec<EntityId> = match current.state(state) {
             Some(s) => members
                 .iter()
                 .copied()
-                .filter(|e| s.entities.contains(e))
+                .filter(|e| !current.member_entities.contains(e) || s.entities.contains(e))
                 .collect(),
             None => Vec::new(),
         };
@@ -338,6 +338,13 @@ impl DrawingDatabase {
                         None => ChangeMask::GEOMETRY.union(ChangeMask::STYLE),
                     };
                     let existed = self.entities.contains_key(&id);
+                    if self
+                        .entities
+                        .get(&id)
+                        .is_some_and(|previous| previous.space != entity.space)
+                    {
+                        self.detach_block_membership(id);
+                    }
                     self.entities.insert(id, entity);
                     // Keep the allocator ahead of any explicitly supplied id so
                     // a later allocation can never collide (history/undo replays
@@ -396,6 +403,12 @@ impl DrawingDatabase {
     fn remove_entity(&mut self, id: EntityId) {
         self.entities.remove(&id);
         self.render_attributes.remove(&id);
+        self.detach_block_membership(id);
+    }
+
+    /// Prune old block references on deletion or a change of owning space.
+    /// Render attributes are retained when the entity itself still exists.
+    fn detach_block_membership(&mut self, id: EntityId) {
         for definition in self.blocks.values_mut() {
             definition.entities.retain(|e| *e != id);
             if let Some(visibility) = definition.dynamic_visibility.as_mut() {
