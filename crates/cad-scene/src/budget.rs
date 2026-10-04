@@ -51,6 +51,7 @@ pub struct BudgetExceeded {
     /// `"vertices"`, `"triangles"` or `"bytes"`.
     pub category: &'static str,
     /// Amount the frame would have used, including the offending charge.
+    /// Saturates at `usize::MAX` when the total cannot be represented.
     pub requested: usize,
     pub limit: usize,
 }
@@ -73,16 +74,18 @@ impl FrameBudget {
         vertices: usize,
         triangles: usize,
     ) -> Result<(), BudgetExceeded> {
-        let next_vertices = usage.vertices.saturating_add(vertices);
-        if next_vertices > self.max_vertices {
+        let vertex_total = usage.vertices.checked_add(vertices);
+        let next_vertices = vertex_total.unwrap_or(usize::MAX);
+        if vertex_total.is_none() || next_vertices > self.max_vertices {
             return Err(BudgetExceeded {
                 category: "vertices",
                 requested: next_vertices,
                 limit: self.max_vertices,
             });
         }
-        let next_triangles = usage.triangles.saturating_add(triangles);
-        if next_triangles > self.max_triangles {
+        let triangle_total = usage.triangles.checked_add(triangles);
+        let next_triangles = triangle_total.unwrap_or(usize::MAX);
+        if triangle_total.is_none() || next_triangles > self.max_triangles {
             return Err(BudgetExceeded {
                 category: "triangles",
                 requested: next_triangles,
@@ -109,8 +112,9 @@ impl FrameBudget {
     /// left unchanged and a `"bytes"` [`BudgetExceeded`] is returned; nothing is
     /// dropped silently.
     pub fn charge_bytes(&self, usage: &mut FrameUsage, bytes: usize) -> Result<(), BudgetExceeded> {
-        let next = usage.bytes.saturating_add(bytes);
-        if next > self.max_bytes {
+        let total = usage.bytes.checked_add(bytes);
+        let next = total.unwrap_or(usize::MAX);
+        if total.is_none() || next > self.max_bytes {
             return Err(BudgetExceeded {
                 category: "bytes",
                 requested: next,
@@ -164,6 +168,7 @@ pub struct BudgetError {
     /// `"cpu_bytes"` or `"queued_tasks"`.
     pub category: &'static str,
     /// Amount that would have been used, including the offending charge.
+    /// Saturates at `usize::MAX` when the total cannot be represented.
     pub requested: usize,
     pub limit: usize,
 }
@@ -204,8 +209,9 @@ impl TaskQueue {
     ///
     /// All-or-nothing: a rejected submission does not consume a slot.
     pub fn submit(&mut self) -> Result<(), BudgetError> {
-        let requested = self.in_flight.saturating_add(1);
-        if requested > self.max_queued {
+        let total = self.in_flight.checked_add(1);
+        let requested = total.unwrap_or(usize::MAX);
+        if total.is_none() || requested > self.max_queued {
             return Err(BudgetError {
                 category: "queued_tasks",
                 requested,
@@ -221,5 +227,30 @@ impl TaskQueue {
     /// Saturating: a spurious `complete` cannot underflow the counter.
     pub fn complete(&mut self) {
         self.in_flight = self.in_flight.saturating_sub(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_queue_rejects_counter_overflow_without_consuming_a_slot() {
+        let mut queue = TaskQueue {
+            max_queued: usize::MAX,
+            in_flight: usize::MAX,
+        };
+        assert_eq!(
+            queue.submit(),
+            Err(BudgetError {
+                category: "queued_tasks",
+                requested: usize::MAX,
+                limit: usize::MAX,
+            })
+        );
+        assert_eq!(queue.in_flight(), usize::MAX);
+        queue.complete();
+        queue.submit().unwrap();
+        assert_eq!(queue.in_flight(), usize::MAX);
     }
 }
