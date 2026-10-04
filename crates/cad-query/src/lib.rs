@@ -20,6 +20,7 @@ pub struct QueryRequest {
     pub revision: Revision,
     pub request: RequestId,
     pub offset: usize,
+    /// Maximum number of rows; zero requests only the total.
     pub limit: usize,
 }
 
@@ -127,8 +128,14 @@ impl QueryService {
     pub fn properties(
         &self,
         selection: &[SelectionRef],
-        mut request: QueryRequest,
+        request: QueryRequest,
     ) -> CadResult<QueryPage<SelectionProperty>> {
+        self.check_fresh(&request)?;
+        if selection.iter().any(|s| s.document != request.document) {
+            return Err(CadError::InvalidInput(
+                "selection document does not match query document".into(),
+            ));
+        }
         let mut rows = Vec::new();
         let entities: Vec<String> = selection
             .iter()
@@ -136,23 +143,19 @@ impl QueryService {
             .collect();
         rows.push(SelectionProperty {
             key: "entity".into(),
-            value: match unify(&entities) {
-                Some(v) => PropertyValue::Value(v),
-                None => PropertyValue::Mixed,
+            value: if entities.is_empty() {
+                PropertyValue::Unset
+            } else {
+                match unify(&entities) {
+                    Some(v) => PropertyValue::Value(v),
+                    None => PropertyValue::Mixed,
+                }
             },
         });
         rows.push(SelectionProperty {
             key: "count".into(),
             value: PropertyValue::Value(selection.len().to_string()),
         });
-        if selection.is_empty() {
-            rows.push(SelectionProperty {
-                key: "entity".into(),
-                value: PropertyValue::Unset,
-            });
-            rows.dedup_by(|a, b| a.key == b.key && matches!(a.value, PropertyValue::Unset));
-        }
-        request.revision = Revision(request.revision.0);
         self.remember(&request.document, request.revision);
         emit(request, rows)
     }
@@ -190,7 +193,7 @@ fn emit<T>(request: QueryRequest, all: Vec<T>) -> CadResult<QueryPage<T>> {
     let rows = all
         .into_iter()
         .skip(request.offset)
-        .take(request.limit.max(1))
+        .take(request.limit)
         .collect();
     Ok(QueryPage {
         request,
