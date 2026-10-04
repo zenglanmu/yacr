@@ -26,6 +26,13 @@ export component CadPanels inherits Rectangle {
     in property <[PropertyRow]> properties;
     in property <[LayoutRow]> layouts;
     in property <[AnnotationRow]> annotations;
+    // Search only changes presentation; retain the authoritative annotation model.
+    // The host updates the count on query/model changes; -1 means unknown.
+    in-out property <string> annotation-search-text;
+    in property <string> annotation-search-placeholder;
+    in property <string> annotation-search-clear-label;
+    in property <string> annotation-search-empty-label;
+    in property <int> annotation-matching-count: -1;
     in property <[DiagnosticRow]> diagnostics;
     in property <string> backend;
     in property <bool> diagnostics-open;
@@ -41,12 +48,20 @@ export component CadPanels inherits Rectangle {
     callback annotation-select(int);
     callback annotation-delete(int);
     callback annotation-visible(int, bool);
+    callback annotation-search-edited(string);
     changed layer-search-text => { root.layer-search-edited(root.layer-search-text); }
+    changed annotation-search-text => { root.annotation-search-edited(root.annotation-search-text); }
     pure function layer-matches(name: string) -> bool {
         // Slint 1.18 has no string contains(); replacement provides substring
         // matching without experimental model APIs or a reindexed copy.
         root.layer-search-text == "" ||
             name.to-lowercase().replace-all(root.layer-search-text.to-lowercase(), "") != name.to-lowercase()
+    }
+    pure function annotation-matches(kind: string, text: string) -> bool {
+        // Match each field separately, not an invented concatenated value.
+        root.annotation-search-text == "" ||
+            kind.to-lowercase().replace-all(root.annotation-search-text.to-lowercase(), "") != kind.to-lowercase() ||
+            text.to-lowercase().replace-all(root.annotation-search-text.to-lowercase(), "") != text.to-lowercase()
     }
     min-height: 0px; min-width: 0px;
     preferred-height: 210px;
@@ -145,12 +160,50 @@ export component CadPanels inherits Rectangle {
             if root.section == 2 : VerticalBox {
             padding: 0px;
             Text { text: root.labels[9]; color: CadTheme.accent; }
-            if root.annotations.length == 0 : Text { text: root.labels[10]; color: CadTheme.muted; }
-            for row[index] in root.annotations : HorizontalBox {
-                Button { text: row.kind + (row.selected ? " *" : ""); min-height: 48px; clicked => { root.annotation-select(index); } }
-                Text { text: row.text; color: CadTheme.ink; overflow: elide; horizontal-stretch: 1; }
-                CheckBox { checked: row.visible; enabled: root.work; toggled => { root.annotation-visible(index, self.checked); } }
-                Button { text: root.labels[11]; symbol: "×"; min-height: 48px; enabled: root.work; clicked => { root.annotation-delete(index); } }
+            HorizontalBox {
+                padding: 0px; spacing: 4px;
+                LineEdit {
+                    min-width: 0px; horizontal-stretch: 1; min-height: 48px;
+                    enabled: root.annotations.length > 0 || root.annotation-search-text != "";
+                    placeholder-text: root.annotation-search-placeholder;
+                    accessible-label: root.annotation-search-placeholder;
+                    text <=> root.annotation-search-text;
+                }
+                if root.annotation-search-clear-label != "" : Button {
+                    text: root.annotation-search-clear-label; symbol: "×"; icon-only: true;
+                    min-width: 48px; preferred-width: 48px; min-height: 48px;
+                    enabled: root.annotation-search-text != "";
+                    clicked => { root.annotation-search-text = ""; }
+                }
+            }
+            if root.annotations.length == 0 : Text { text: root.labels[10]; color: CadTheme.muted; wrap: word-wrap; }
+            if root.annotations.length > 0 && root.annotation-search-text != "" && root.annotation-matching-count == 0 && root.annotation-search-empty-label != "" : Text {
+                text: root.annotation-search-empty-label; color: CadTheme.muted; wrap: word-wrap;
+            }
+            VerticalBox {
+                padding: 0px; spacing: 0px;
+                // Conditional children collapse nonmatches without reindexing callbacks.
+                for row[index] in root.annotations : VerticalBox {
+                    padding: 0px; spacing: 0px;
+                    if root.annotation-matches(row.kind, row.text) : VerticalBox {
+                        padding: 0px; spacing: 4px;
+                        HorizontalBox {
+                            Button { text: row.kind + (row.selected ? " *" : ""); min-height: 48px; clicked => { root.annotation-select(index); } }
+                            CheckBox { min-height: 48px; checked: row.visible; enabled: root.work; toggled => { root.annotation-visible(index, self.checked); } }
+                            Button { text: root.labels[11]; symbol: "×"; min-height: 48px; enabled: root.work; clicked => { root.annotation-delete(index); } }
+                        }
+                        // Full adapter text remains selectable/copyable, never editable.
+                        TextEdit {
+                            min-width: 0px; horizontal-stretch: 1; vertical-stretch: 0;
+                            min-height: 48px; preferred-height: root.phone ? 96px : 72px;
+                            text: row.text;
+                            read-only: true; enabled: true; wrap: word-wrap;
+                            accessible-label: row.kind;
+                            // Ignore accessibility writes without breaking the model binding.
+                            accessible-action-set-value(value) => { }
+                        }
+                    }
+                }
             }
             }
             }
