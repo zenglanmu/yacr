@@ -16,7 +16,8 @@ pub struct Invalidation {
     pub spatial: Vec<ObjectId>,
     pub query: Vec<ObjectId>,
     /// True when the subscriber must rebuild a full snapshot because the
-    /// revision stream was not continuous (spec §4.6).
+    /// revision stream was not continuous (spec §4.6) or propagation exceeded
+    /// the configured bounds. Partial affected sets are not returned.
     pub rebuild_snapshot: bool,
 }
 
@@ -100,6 +101,8 @@ impl DependencyIndex {
         self.register_masked(consumer, dependency, mask)
     }
 
+    /// Clear registered dependencies without resetting the revision stream.
+    /// Use a new index when subscribing to a different database.
     pub fn clear(&mut self) {
         self.dependents.clear();
         self.dependencies.clear();
@@ -109,15 +112,12 @@ impl DependencyIndex {
     pub fn invalidate(&mut self, changes: &ChangeSet) -> CadResult<Invalidation> {
         let mut out = Invalidation::default();
 
-        // Detect a revision gap: if we already saw a later revision, or the
-        // change set does not follow the last one we processed, we must rebuild.
-        if let Some(last) = self.last_revision {
-            let continuous = changes.follows(changes.database, last)
-                || changes.before == last
-                || changes.after == Revision(last.0 + 1);
-            if !continuous && changes.before != changes.after {
-                out.rebuild_snapshot = true;
-            }
+        // Empty commits keep the current revision. All other commits must be
+        // exact successors, including the first event observed by this index.
+        let no_op = changes.is_empty() && changes.before == changes.after;
+        let last = self.last_revision.unwrap_or(changes.before);
+        if !changes.follows(changes.database, last) && !(no_op && changes.before == last) {
+            out.rebuild_snapshot = true;
         }
         if let Some(db) = self.database {
             if db != changes.database {
@@ -131,7 +131,7 @@ impl DependencyIndex {
             return Ok(out);
         }
 
-        // Roots: the changed objects themselves plus their direct dependents.
+        // Roots are the changed objects; consumers are added by propagation.
         let mut queue: VecDeque<(ObjectId, usize)> = VecDeque::new();
         let mut seen: BTreeSet<ObjectId> = BTreeSet::new();
         let mut affected: BTreeSet<ObjectId> = BTreeSet::new();
@@ -150,29 +150,33 @@ impl DependencyIndex {
             if !mask.invalidates_representation() && !matches!(change, ObjectChange::Delete(_)) {
                 continue;
             }
+            if seen.contains(&id) {
+                continue;
+            }
+            if affected.len() >= self.max_affected {
+                out.rebuild_snapshot = true;
+                return Ok(out);
+            }
             queue.push_back((id, 0));
             seen.insert(id);
             affected.insert(id);
         }
 
         while let Some((node, depth)) = queue.pop_front() {
-            if depth >= self.max_depth {
-                out.rebuild_snapshot = true;
-                break;
-            }
             if let Some(edges) = self.dependents.get(&node) {
                 for edge in edges {
-                    if affected.len() >= self.max_affected {
-                        out.rebuild_snapshot = true;
-                        break;
-                    }
-                    if !edge.mask.invalidates_representation() {
+                    if !edge.mask.invalidates_representation() || seen.contains(&edge.consumer) {
                         continue;
                     }
-                    affected.insert(edge.consumer);
-                    if seen.insert(edge.consumer) {
-                        queue.push_back((edge.consumer, depth + 1));
+                    // A leaf or an already visited cycle at the boundary is
+                    // complete; only discovering another consumer exceeds it.
+                    if depth >= self.max_depth || affected.len() >= self.max_affected {
+                        out.rebuild_snapshot = true;
+                        return Ok(out);
                     }
+                    affected.insert(edge.consumer);
+                    seen.insert(edge.consumer);
+                    queue.push_back((edge.consumer, depth + 1));
                 }
             }
         }

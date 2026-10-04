@@ -377,6 +377,7 @@ mod tests {
             codes::REPRESENTATION_NOT_IMPLEMENTED,
             codes::RESOURCE_MISSING,
             codes::RESOURCE_OVER_BUDGET,
+            codes::RESOURCE_SIZE_OVERFLOW,
             codes::RESOURCE_RECURSION_LIMIT,
             codes::FONT_UNRESOLVED,
             codes::FONT_UNSUPPORTED,

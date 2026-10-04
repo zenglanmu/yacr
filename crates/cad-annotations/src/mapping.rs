@@ -8,7 +8,7 @@ pub(crate) struct CoordinateMapping {
 }
 
 impl CoordinateMapping {
-    /// Reject non-finite or singular (non-invertible) mappings (audit B10).
+    /// Reject non-affine, non-finite or singular mappings (audit B10).
     pub(crate) fn validate(transform: &Transform3) -> CadResult<Self> {
         for row in &transform.matrix {
             for v in row {
@@ -19,7 +19,20 @@ impl CoordinateMapping {
                 }
             }
         }
-        if transform.determinant().abs() < 1e-12 {
+        // Point application assumes this canonical affine homogeneous row;
+        // accepting a projective matrix would silently discard its perspective.
+        if transform.matrix[3] != [0.0, 0.0, 0.0, 1.0] {
+            return Err(CadError::InvalidInput(
+                "coordinate mapping must have an affine homogeneous row".into(),
+            ));
+        }
+        let determinant = transform.determinant();
+        if !determinant.is_finite() {
+            return Err(CadError::InvalidInput(
+                "coordinate mapping has a non-finite linear determinant".into(),
+            ));
+        }
+        if determinant.abs() < 1e-12 {
             return Err(CadError::InvalidInput(
                 "coordinate mapping is singular and cannot be applied".into(),
             ));
@@ -90,16 +103,13 @@ impl CoordinateMapping {
     }
 
     fn map_vector(&self, v: Point3) -> CadResult<Point3> {
-        let origin = self.map_point(Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        })?;
-        let tip = self.map_point(v)?;
+        // Subtracting two translated points loses small directions when the
+        // translation is large. Directions only use the linear matrix part.
+        let m = &self.transform.matrix;
         let out = Point3 {
-            x: tip.x - origin.x,
-            y: tip.y - origin.y,
-            z: tip.z - origin.z,
+            x: m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z,
+            y: m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
+            z: m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z,
         };
         if !out.x.is_finite() || !out.y.is_finite() || !out.z.is_finite() {
             return Err(CadError::InvalidInput(
@@ -123,5 +133,102 @@ impl CoordinateMapping {
             }
         }
         Ok(composed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mapping_vectors_use_rotation_shear_and_scale_without_translation() {
+        let transform = Transform3 {
+            matrix: [
+                [0.0, -2.0, 0.5, 10.0],
+                [3.0, 0.0, 0.0, -4.0],
+                [0.0, 0.0, -1.0, 7.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        };
+        let mapping = CoordinateMapping::validate(&transform).unwrap();
+        let vector = Point3 {
+            x: 1.0,
+            y: 2.0,
+            z: 4.0,
+        };
+        assert_eq!(
+            mapping.map_vector(vector).unwrap(),
+            Point3 {
+                x: -2.0,
+                y: 3.0,
+                z: -4.0,
+            }
+        );
+        assert_eq!(
+            mapping.map_point(vector).unwrap(),
+            Point3 {
+                x: 8.0,
+                y: -1.0,
+                z: 3.0,
+            }
+        );
+    }
+
+    #[test]
+    fn mapping_rejects_non_finite_inputs_and_vector_outputs() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut transform = Transform3::identity();
+            transform.matrix[0][3] = value;
+            assert!(matches!(
+                CoordinateMapping::validate(&transform),
+                Err(CadError::InvalidInput(_))
+            ));
+        }
+        let mapping = CoordinateMapping::validate(&Transform3::scale(2.0)).unwrap();
+        for value in [f64::MAX, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                mapping.map_vector(Point3 {
+                    x: value,
+                    y: 0.0,
+                    z: 0.0,
+                }),
+                Err(CadError::InvalidInput(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn mapping_rejects_non_affine_homogeneous_rows() {
+        for row in [
+            [0.25, 0.0, 0.0, 1.0],
+            [0.0, 0.25, 0.0, 1.0],
+            [0.0, 0.0, 0.25, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 2.0],
+        ] {
+            let mut transform = Transform3::identity();
+            transform.matrix[3] = row;
+            assert!(matches!(
+                CoordinateMapping::validate(&transform),
+                Err(CadError::InvalidInput(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn mapping_rejects_non_finite_determinants_of_finite_matrices() {
+        let infinite = Transform3::scale(1e200);
+        let mut nan = infinite;
+        nan.matrix[0][1] = 1e200;
+        nan.matrix[1][0] = 1e200;
+        nan.matrix[1][2] = 1e200;
+        nan.matrix[2][1] = 1e200;
+        for transform in [infinite, nan] {
+            assert!(!transform.determinant().is_finite());
+            assert!(matches!(
+                CoordinateMapping::validate(&transform),
+                Err(CadError::InvalidInput(_))
+            ));
+        }
     }
 }

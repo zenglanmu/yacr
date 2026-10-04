@@ -66,6 +66,7 @@
   "diagnostic.representation.not_implemented": "语义已读，输出尚未实现",
   "diagnostic.resource.missing": "依赖资源不可用",
   "diagnostic.resource.over_budget": "资源超出预算",
+  "diagnostic.resource.size_overflow": "资源大小超出安全表示范围",
   "diagnostic.resource.recursion_limit": "引用递归超限",
   "diagnostic.resource.font_unresolved": "字体名在目录中解析不到",
   "diagnostic.resource.font_unsupported": "字体技术不受支持",

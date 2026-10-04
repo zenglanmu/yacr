@@ -16,7 +16,25 @@
 7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
    Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
-## Rust 审查轮（2026-10-04）
+## 独立分支并行审查第二轮（2026-10-04）
+
+4 个子代理分别在 `review/20261004-{history,dependencies,mapping,resource-limits}`
+独立分支/worktree 只写代码与测试，无编译/检查/格式化/提交/推送；主控审查、
+格式化、单 crate 验证后整合开发分支，无冲突，主控执行完整门禁后提交/推送。
+修复：历史合并消去及 patch 身份/重复验证、依赖失效 revision 连续性和根/深度预算、
+仿射方向向量的大平移精度与矩阵校验、图片像素计数整数溢出。
+主控同步接入 `resource.size_overflow` 诊断双语文案（203 keys）。
+
+新增 31 项合成测试；主控 worktree 单 crate 测试通过：history 23、dependencies 20、
+annotations 24+15、resources 21；i18n、稳定代码双语描述、Node 六套契约 53/53 通过。
+统一代码树最终 fmt、严格主机 clippy、架构/fixture/workflow/i18n、wasm 全 workspace
+lib 检查均通过；完整主机测试（Linux App + Slint，lavapipe 串行）
+**1229 passed / 0 failed / 1 ignored**。Linux release 实际离屏 smoke 通过，证据
+`/tmp/opencode/yacr-linux-20261004-020914-462863`（合成图纸/软件 GPU，2 CAD frames，
+导航相机与像素变化，无渲染错误；不是参考图视觉验收）。
+详见 `docs/review-branches.md`。真实 GPU/桌面窗口/真实 DWG/真机未运行。
+
+## Rust 审查第一轮（2026-10-04）
 
 后续按用户要求开启两个并行子代理，分别只写空间索引输入校验和测量数值稳健性
 代码/回归测试，不运行编译、测试或格式化；已交付，主控审查并统一格式化/验证。

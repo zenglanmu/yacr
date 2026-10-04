@@ -66,6 +66,7 @@
   "diagnostic.representation.not_implemented": "Semantics read, output not implemented",
   "diagnostic.resource.missing": "A required resource is unavailable",
   "diagnostic.resource.over_budget": "Resource exceeds its budget",
+  "diagnostic.resource.size_overflow": "Resource size cannot be represented safely",
   "diagnostic.resource.recursion_limit": "Reference recursion limit exceeded",
   "diagnostic.resource.font_unresolved": "Font name resolved to no catalog entry",
   "diagnostic.resource.font_unsupported": "Font technology is not supported",

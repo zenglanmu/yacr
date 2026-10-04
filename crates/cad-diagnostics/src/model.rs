@@ -28,6 +28,8 @@ pub mod codes {
     pub const RESOURCE_MISSING: &str = "resource.missing";
     /// A resource exceeds the configured budget for its category.
     pub const RESOURCE_OVER_BUDGET: &str = "resource.over_budget";
+    /// A resource size overflowed its integer representation.
+    pub const RESOURCE_SIZE_OVERFLOW: &str = "resource.size_overflow";
     /// A resource reference nested deeper than the configured limit.
     pub const RESOURCE_RECURSION_LIMIT: &str = "resource.recursion_limit";
     /// A referenced font name resolved to no catalog entry.
