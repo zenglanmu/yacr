@@ -382,6 +382,84 @@ fn unanchored_import_clears_anchors() {
 }
 
 #[test]
+fn explicit_mapping_large_translation_preserves_ellipse_and_work_plane_axes() {
+    let service = AnnotationService;
+    let axis_u = Point3 {
+        x: 0.25,
+        y: 0.0,
+        z: 0.0,
+    };
+    let axis_v = Point3 {
+        x: 0.0,
+        y: 0.5,
+        z: 0.0,
+    };
+    let mut ellipse = ann(1, "ellipse");
+    ellipse.geometry = AnnotationGeometry::Ellipse {
+        center: Point3::default(),
+        axis_u,
+        axis_v,
+    };
+    let mut measurement = ann(2, "measurement");
+    measurement.geometry = AnnotationGeometry::Measurement(MeasurementRecord {
+        algorithm: MeasurementAlgorithm::Distance2d,
+        inputs: vec![Point3::default(), axis_u],
+        plane: Some(WorkPlane {
+            origin: Point3::default(),
+            u: axis_u,
+            v: axis_v,
+        }),
+        value: 0.25,
+        units: UnitContext::drawing_units(),
+        source: GeometrySource::UserPoints,
+        precision: Precision::Analytic,
+    });
+    let file = AnnotationFile {
+        schema_version: SCHEMA_VERSION,
+        application_version: "t".into(),
+        document_fingerprint: DocumentIdentity::Sha256([9u8; 32]),
+        document_name_hint: "a.dwg".into(),
+        unit_context: UnitContext::drawing_units(),
+        annotations: vec![ellipse, measurement],
+        view_bookmarks: Vec::new(),
+        extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
+    };
+    let translation = Point3 {
+        x: 1e20,
+        y: -1e20,
+        z: 1e20,
+    };
+    let bytes = service.encode(&file).unwrap();
+    let decoded = service
+        .decode(
+            &bytes,
+            &DocumentIdentity::Sha256([0u8; 32]),
+            FingerprintPolicy::ExplicitCoordinateMapping(Transform3::translation(translation)),
+        )
+        .unwrap();
+    assert_eq!(
+        decoded.annotations[0].geometry,
+        AnnotationGeometry::Ellipse {
+            center: translation,
+            axis_u,
+            axis_v,
+        }
+    );
+    let AnnotationGeometry::Measurement(mapped) = &decoded.annotations[1].geometry else {
+        panic!("expected measurement geometry");
+    };
+    assert_eq!(
+        mapped.plane,
+        Some(WorkPlane {
+            origin: translation,
+            u: axis_u,
+            v: axis_v,
+        })
+    );
+}
+
+#[test]
 fn singular_mapping_is_rejected() {
     let service = AnnotationService;
     let identity = DocumentIdentity::Sha256([0u8; 32]);
@@ -408,6 +486,35 @@ fn singular_mapping_is_rejected() {
         ),
         Err(CadError::InvalidInput(_))
     ));
+}
+
+#[test]
+fn explicit_mapping_rejects_projective_and_overflowing_linear_matrices() {
+    let service = AnnotationService;
+    let file = AnnotationFile {
+        schema_version: SCHEMA_VERSION,
+        application_version: "t".into(),
+        document_fingerprint: DocumentIdentity::Sha256([9u8; 32]),
+        document_name_hint: "a.dwg".into(),
+        unit_context: UnitContext::drawing_units(),
+        annotations: Vec::new(),
+        view_bookmarks: Vec::new(),
+        extensions_json: BTreeMap::new(),
+        nested_extensions: Default::default(),
+    };
+    let bytes = service.encode(&file).unwrap();
+    let mut projective = Transform3::identity();
+    projective.matrix[3][0] = 0.25;
+    for transform in [projective, Transform3::scale(1e200)] {
+        assert!(matches!(
+            service.decode(
+                &bytes,
+                &DocumentIdentity::Sha256([0u8; 32]),
+                FingerprintPolicy::ExplicitCoordinateMapping(transform),
+            ),
+            Err(CadError::InvalidInput(_))
+        ));
+    }
 }
 
 #[test]
