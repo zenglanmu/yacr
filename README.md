@@ -33,9 +33,9 @@
 （含版本化 JSON）、依赖失效、撤销/重做、查询层、应用命令层、wgpu 2D/3D 渲染器、
 Slint UI 与 Linux/Android/Web 宿主骨架。
 
-2026-10-03 起以 **Linux App 为第一验收标准**：`cargo build -p app-linux --release --locked`，
-`bash scripts/check-linux-app.sh` 无窗口运行实际 Linux 宿主/命令/Slint/CAD 桥并输出 PNG/report。
-GitHub Actions 默认运行 `linux-app` 主门禁，Web/Android 继续作为跨平台回归，不等于真机验证。
+Linux App 仍是优先宿主；2026-10-04 起默认提交门禁与 CI `linux-app` 改为 debug 编译，
+包含测试代码但不执行完整测试、Linux 离屏渲染或 release 验证。
+`bash scripts/check-linux-app.sh` 保留为可选运行验收工具；编译通过不代表渲染或真机验证。
 
 本轮已实际运行（2026-10-02）：
 

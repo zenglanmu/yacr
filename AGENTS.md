@@ -17,7 +17,7 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 
 ## 语言约定
 
-代码标识、注释、测试名用英文；`docs/`、`AGENTS.md`、commit message 用中文。
+代码标识、注释、测试名、commit message 用英文；`docs/`、`AGENTS.md` 用中文。
 用户可见文案只能来自 `crates/cad-ui-slint/i18n/{zh-CN,en}.json`（键集必须一致，见
 `scripts/check-i18n.py`），不得在 Slint/Rust UI 里硬编码中文。
 
@@ -53,7 +53,7 @@ apps/app-linux  apps/app-android  apps/app-web
 ## 构建与门禁
 
 工具链 1.98.1（`rust-toolchain.toml`）；若 `PATH` 无 cargo，加 `$HOME/.cargo/bin`。
-提交前跑完整门禁（CI 同款，见 `docs/ci.md`）：
+提交前跑快速 debug 编译与静态门禁（CI 同款，见 `docs/ci.md`）；完整测试、Linux 离屏渲染与 release 编译不再属于默认提交门禁：
 
 ```bash
 cargo fmt --all -- --check
@@ -62,12 +62,13 @@ python3 scripts/check-architecture.py
 python3 scripts/check-fixture-manifest.py
 python3 scripts/check-workflows.py
 python3 scripts/check-i18n.py
-VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test --workspace --exclude app-android --exclude app-web --locked --no-fail-fast -- --test-threads=1
-bash scripts/check-linux-app.sh   # release Linux App 是主验收，独立于 UI 单测
+cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 workspace，含 UI/宿主
 ```
 
-- 默认主机门禁必须包含 Linux App 和 Slint，Linux App 是第一验收标准；Web 是第二层，
+- 默认主机编译门禁必须包含 Linux App 和 Slint；编译通过不是运行或渲染验收。Linux 离屏
+  `bash scripts/check-linux-app.sh` 与完整测试仅在明确要求时执行；release 编译用于可选发布验证。
+  Web 是第二层，
   Android 平台契约继续保留。用户授权解除原生 Slint 编译限制：允许使用
   开发依赖，在 Linux 无窗口环境以 Slint FemtoVG/wgpu + lavapipe 离屏验证（用户已授权
   sudo apt 安装 pkgconf/fontconfig/freetype 开发包）。

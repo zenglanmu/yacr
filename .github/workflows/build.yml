@@ -3,7 +3,7 @@ name: CI build layers
 # N02 §6.2 build/validation layers that need extra toolchains beyond core.yml.
 #
 # Real jobs (run on GitHub-hosted ubuntu-latest):
-#   linux-app        : primary release host acceptance on software Vulkan + artifacts
+#   linux-app        : debug host compilation (no offscreen rendering)
 #   web-build        : scripts/build-web.sh -> web-dist artifact + wasm/js pairing
 #   shader-validation: offline naga WGSL test (no GPU needed; forced to fail on
 #                      a broken shader)
@@ -48,13 +48,13 @@ env:
 
 jobs:
   linux-app:
-    name: linux-app (primary acceptance, software Vulkan)
+    name: linux-app (debug compile only)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.1
-      - name: Cache Linux release build
+      - name: Cache Linux debug check
         uses: actions/cache@v4
         with:
           path: |
@@ -64,36 +64,27 @@ jobs:
           key: ${{ runner.os }}-cargo-linux-app-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-linux-app-
-      - name: Install native Slint and Mesa dependencies (no display server)
-        run: sudo apt-get update && sudo apt-get install -y pkgconf libfontconfig1-dev libfreetype6-dev mesa-vulkan-drivers
-      - name: Linux host contracts and release App acceptance
+      - name: Install native Slint dependencies (no display server)
+        run: sudo apt-get update && sudo apt-get install -y pkgconf libfontconfig1-dev libfreetype6-dev
+      - name: Linux host debug compilation
         env:
-          YACR_LINUX_OUTPUT: ${{ github.workspace }}/linux-app-evidence
           CARGO_BUILD_JOBS: "2"
         run: |
           set -euo pipefail
-          mkdir -p /tmp/opencode
-          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name '*lvp*.json' -print -quit)"
-          test -s "$VK_ICD_FILENAMES"
-          export XDG_RUNTIME_DIR="$(mktemp -d /tmp/opencode/yacr-runtime-XXXXXX)"
-          cargo test -p app-linux --locked -- --test-threads=1
-          bash scripts/check-linux-app.sh 2>&1 | tee linux-app.log
+          cargo check -p app-linux --all-targets --locked 2>&1 | tee linux-app.log
           git diff --exit-code -- Cargo.lock
           {
-            echo '## Linux App primary acceptance'
-            echo 'Release Linux host + Slint/CAD shared-device software Vulkan; synthetic content.'
-            echo 'PNG/report smoke is not automatic visual acceptance, a desktop-window run or real-GPU compatibility.'
-            cat linux-app-evidence/report.json
+            echo '## Linux App debug compilation'
+            echo 'Host and contract test code compiled; tests were not executed.'
+            echo 'Offscreen rendering and release compilation are not default gates.'
+            echo 'This is not runtime, visual, desktop-window or real-GPU acceptance.'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload Linux App and evidence (including failed runs)
+      - name: Upload Linux compilation log (including failed runs)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: linux-app
-          path: |
-            target/release/yacr-linux
-            linux-app-evidence/
-            linux-app.log
+          path: linux-app.log
           if-no-files-found: warn
           retention-days: 14
 

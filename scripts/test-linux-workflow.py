@@ -30,9 +30,24 @@ class LinuxWorkflowContracts(unittest.TestCase):
         for directive in ("    if: false\n", "    continue-on-error: true\n"):
             self.assertTrue(self.check_text(text.replace("  linux-app:\n", "  linux-app:\n" + directive)))
 
-    def test_host_execution_cannot_be_replaced_with_empty_success(self):
+    def test_host_compilation_cannot_be_replaced_with_empty_success(self):
         text = (ROOT / ".github/workflows/build.yml").read_text()
-        self.assertTrue(self.check_text(text.replace("bash scripts/check-linux-app.sh", "true")))
+        self.assertTrue(self.check_text(text.replace("cargo check -p app-linux --all-targets --locked", "true")))
+
+    def test_default_linux_gate_does_not_render_or_build_release(self):
+        text = (ROOT / ".github/workflows/build.yml").read_text()
+        block = workflow.job_block(text, "linux-app")
+        self.assertIsNotNone(block)
+        for forbidden in ("check-linux-app.sh", "--release", "target/release/", "cargo test", "--headless"):
+            self.assertNotIn(forbidden, block)
+
+    def test_core_gate_compiles_without_running_the_full_suite(self):
+        text = (ROOT / ".github/workflows/core.yml").read_text()
+        self.assertEqual(self.check_text(text), [])
+        block = workflow.job_block(text, "core-quality")
+        self.assertIsNotNone(block)
+        self.assertNotIn("cargo test", block)
+        self.assertNotIn("--release", block)
 
 
 if __name__ == "__main__":

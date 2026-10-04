@@ -16,6 +16,36 @@
 7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
    Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
+## 独立分支并行审查第三轮（2026-10-04）
+
+3 个子代理在 `review/20261004-{geometry-robustness,scene-consistency,query-contracts}`
+独立分支/worktree 仅修改代码、合成契约测试与专属文档，不执行编译、测试、格式化、
+提交或推送。主控审查后格式化、提交并合并三个分支，再统一编译与执行提交门禁。
+
+- geometry：向量长度溢出/下溢、大有限向量归一化、平移后面积消减、工作平面正交校验。
+- scene：线拓扑三角形误计、不可能缓存预留破坏状态、预留与预算/队列计数溢出。
+- query：空选择重复矛盾属性、属性查询文档身份校验、零上限分页越界。
+- 主控：SHAPE 实例包围盒重复应用缩放，补充放大/缩小/平移合成契约。
+- 用户要求已将 `AGENTS.md` 的 commit message 语言改为英文；默认门禁改为 debug
+  全目标编译与静态检查。Linux 离屏、release 编译及完整测试不再是默认提交要求。
+  已同步 core/build CI、workflow 校验器与变异契约、规范、README 和构建文档。
+  Web/Android 发布打包配置保留，不作为本地默认 debug 门禁。
+
+新增 13 项测试并加强 1 项既有测试；详细缺陷与限制见
+`docs/review-geometry-robustness.md`、`docs/review-scene-consistency.md`、
+`docs/review-query-contracts.md`、`docs/review-db-shape-bounds.md`。
+
+统一最终代码树 debug 主机全目标检查（含 Linux App/Slint 与测试代码）、严格 clippy、
+wasm 全 workspace lib 检查、fmt、架构/fixture/workflow/i18n 和 diff 空白检查已通过。
+Python workflow 合成契约 Linux **5/5**、Web deploy **4/4** 通过；无远程 CI 执行证据。
+
+**NOT RUN**：Rust 回归测试仅编译，未执行；完整 Rust 测试曾按旧门禁启动，随后在
+编译阶段收到用户门禁变更并由主控 SIGTERM 终止，不计通过也不计测试失败。
+后台链路因此未执行后续 Linux release 离屏和 wasm 检查；wasm 已由主控另行实际重跑通过。
+原中止输出：
+`/home/zenglanmu/.local/share/opencode/shell/da739b3910d63162f4687d9e8c13d613a0959f68/sh_104b620bd001up8HASB09SkXvs.out`。
+本轮没有执行 Linux 离屏、release 构建、真实 DWG/真实 GPU/桌面窗口/真机验证，不以旧证据代替本轮。
+
 ## 独立分支并行审查第二轮（2026-10-04）
 
 4 个子代理分别在 `review/20261004-{history,dependencies,mapping,resource-limits}`

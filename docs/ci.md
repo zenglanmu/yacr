@@ -7,16 +7,18 @@
 工作流文件：`.github/workflows/core.yml`（核心质量层）与
 `.github/workflows/build.yml`（N02 构建/校验层）。校验脚本：`scripts/check-workflows.py`。
 
-## Linux App 主门禁（2026-10-03 契约变更）
+## Linux App debug 主门禁（2026-10-04 契约变更）
 
 默认启用 `build.yml/linux-app`（无 capability guard、无 continue-on-error）：安装 pkgconf、
-fontconfig/freetype 开发库和 Mesa，串行运行实际宿主契约，`scripts/check-linux-app.sh` 构建并
-执行 release `yacr-linux --headless`，上传二进制及新目录 PNG/report（失败时也尝试保留产物）。
-`core-quality` 同时包含 Linux App/Slint 的严格 clippy 和串行测试，不再排除 UI。
-`check-workflows.py` 强制声明命令、产物、软件 Vulkan 依赖且禁止给主 job 添加条件跳过。
+fontconfig/freetype 开发库，执行 `cargo check -p app-linux --all-targets --locked`，
+上传编译日志（失败时也尝试保留）。`core-quality` 包含 Linux App/Slint 的严格 clippy
+和全目标 debug 编译，不再默认运行完整 Rust 测试。
+`check-workflows.py` 强制 debug 编译命令和日志产物，禁止给主 job 添加条件跳过；
+`test-linux-workflow.py` 防止空成功与默认 Linux 门禁恢复离屏/release 执行。
 
-Linux App 是第一验收标准，Web/Android 继续保持独立构建层；WASM 检查 Linux 空库仅验证平台
-隔离。CI 无显示服务器的运行是软件 GPU 合成 smoke，不等于窗口/真实 GPU/真实图纸验收。
+Linux App 仍是优先宿主，但默认门禁只证明编译；Web/Android 保持独立构建/发布层，
+其打包配置不代表默认本地提交要求。WASM 检查 Linux 空库仅验证平台隔离。
+Linux 离屏与 release 验证保留为明确请求时运行的可选工具，不作为本轮运行证据。
 本机执行与 GitHub Actions 实际 job URL/结果分开记录，本轮尚未取得远程 job 执行证据。
 
 > 本环境（无 GitHub runner、无 `gh` 权限）**没有实际执行**这些 job；本文件描述的
@@ -55,7 +57,8 @@ Linux App 是第一验收标准，Web/Android 继续保持独立构建层；WASM
 
 | Job | Workflow | Runner | 门禁 |
 |---|---|---|---|
-| `core-quality` | core.yml | `ubuntu-latest` | 核心测试 + fmt + clippy + 架构边界，失败即红灯 |
+| `linux-app` | build.yml | `ubuntu-latest` | Linux App debug 全目标编译与日志，不运行渲染 |
+| `core-quality` | core.yml | `ubuntu-latest` | debug 全目标编译 + fmt + clippy + 架构边界，失败即红灯 |
 | `wasm-check` | core.yml | `ubuntu-latest` | 完整 workspace wasm `--lib` 检查 + 单独 `app-web` 检查 |
 | `i18n-contracts` | core.yml | `ubuntu-latest` | 双语 catalog / 缺 key / 硬编码白名单校验 |
 | `shader-validation` | build.yml | `ubuntu-latest` | naga 离线 WGSL 解析/校验（无需 GPU），失败红灯 |
@@ -91,12 +94,12 @@ Linux App 是第一验收标准，Web/Android 继续保持独立构建层；WASM
 镜像 `AGENTS.md` 的纯核心门禁，步骤顺序：
 
 1. `cargo fmt --all -- --check`
-2. `cargo clippy --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`
-3. `python3 scripts/check-architecture.py`
-4. `cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked --no-fail-fast`
+2. `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`
+3. 架构、fixture、workflow 静态检查及 Python workflow 变异契约。
+4. `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`
 
-排除 `cad-ui-slint` 的原因见 `docs/build.md`：Linux 宿主缺 fontconfig/freetype
-开发头；其编译由 Android target 检查覆盖。该 job 不设 `continue-on-error`，
+Linux 宿主安装 fontconfig/freetype 开发头，编译包含 `cad-ui-slint` 与 app-linux。
+Rust 测试代码通过 `--all-targets` 编译，但不执行测试。该 job 不设 `continue-on-error`，
 失败必须红灯。
 
 ### `wasm-check`（必需）
@@ -260,13 +263,13 @@ GPU/真机 runner（标签、镜像、费用、权限）、CI APK 的临时签�
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo fmt --all -- --check
-cargo clippy --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web \
+cargo clippy --workspace --exclude app-android --exclude app-web \
   --all-targets --locked -- -D warnings
 python3 scripts/check-architecture.py
-cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web \
-  --locked --no-fail-fast
+cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 cargo check -p app-web --target wasm32-unknown-unknown --locked
+# 以下是附加 CI/发布层，不属于默认本地 debug 提交门禁。
 # 离线 WGSL 校验（无需 GPU）
 cargo test -p cad-render-wgpu --test wgsl_validation --locked
 # Web 静态产物（需 wasm-bindgen-cli 0.2.129）

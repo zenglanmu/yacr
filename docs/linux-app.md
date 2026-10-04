@@ -3,6 +3,9 @@
 2026-10-03 用户要求新增 Linux App，并将其设为优先验收标准，见规范 §1/§11.0。
 不是复用 Android 宿主，也不是用 mock sink 的 UI 测试冒充应用。
 
+2026-10-04 用户调整默认门禁为 `cargo check -p app-linux --all-targets --locked`。
+下列 release 构建、桌面/离屏运行仅为可选验证入口，不再是提交或 CI `linux-app` 必需步骤。
+
 ## 构建与运行
 
 ```bash
@@ -41,7 +44,7 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 - 未保存批注时打开/关闭被阻止，无隐式 discard。尚无保存/恢复/丢弃决策对话框及恢复缓存。
 - Trim 点选显式 Unsupported 且按钮禁用；第三方 CAD 字体可通过重复 `--font NAME=PATH`
   显式加载，目录匹配/恢复、原生多触控均未闭环。
-- Linux 可执行文件不是静态独立发行包：运行仍需要系统库，当前 CI 上传二进制和证据，不宣称完整安装包。
+- Linux 可执行文件不是静态独立发行包：运行仍需要系统库；默认 CI 仅上传 debug 编译日志，不产出安装包。
 
 ## 配置与用户偏好持久化（2026-10-03）
 

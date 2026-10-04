@@ -18,7 +18,7 @@
 1. 核心语言 Rust；DWG 解析使用 acadrust；CAD 绘制使用 wgpu。
 2. 不修改 acadrust 上游源码，不维护修改版 fork，不用 Cargo patch 偷换为修改版本。所有补充处理位于自有 crate；允许评估未修改的正式版本升级。
 3. UI 使用 Slint，复用 UI 定义、组件和应用状态；允许必要的平台宿主和浏览器 JS 接入。
-4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。Linux 验收必须运行 `apps/app-linux` 的实际宿主/命令/数据库/共享 Slint/wgpu 链路，不以仅 UI 编译或测试替身代替。无窗口环境优先使用软件 Vulkan/lavapipe；桌面窗口、真实 GPU、真实图纸分别记录验证范围。架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。
+4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。2026-10-04 用户调整默认提交门禁为 debug 编译与静态检查，不默认运行完整测试、Linux 离屏渲染或 release 编译。实际 Linux 运行验收仍须使用 `apps/app-linux` 的宿主/命令/数据库/共享 Slint/wgpu 链路，不以仅 UI 编译或测试替身代替；未运行须明确标注。无窗口可选验证使用软件 Vulkan/lavapipe；桌面窗口、真实 GPU、真实图纸分别记录验证范围。架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。
 5. Web 必须支持 WebGL2 与 WebGPU 两条 CAD 绘制路径，提供 Auto / WebGPU / WebGL2 选择。WebGL1 不属于要求。
 6. 项目准备开源。以 OpenCADStudio 为绘制、几何离散、相机和 3D 能力的主要源码抽取/参考对象；不再从 JS 项目迁移绘制核心。mlightcad/cad-viewer 仅保留为 UI 功能组织及交互对照参考。
 7. 保留 Slint，不随参考项目改用 Iced。以数据库对象、事务、变更集和显示表示为核心架构；业务层操作数据，不调用 GPU 绘制命令。

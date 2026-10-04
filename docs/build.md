@@ -5,16 +5,17 @@
 
 ## 纯核心
 
-从 2026-10-03 起，以下纯核心命令仅用于定位问题，不是完整验收。**Linux App 是主验收**：
+2026-10-04 起，默认提交门禁为 debug 编译与静态检查，包含 Linux App/Slint，
+但不运行完整测试、Linux 离屏渲染或 release 编译；**编译不等于运行验收**：
 
 ```bash
 cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
-VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test --workspace --exclude app-android --exclude app-web --locked --no-fail-fast -- --test-threads=1
-bash scripts/check-linux-app.sh
+cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked
+cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 ```
 
-release 可执行文件 `target/release/yacr-linux`，桌面/无窗口模式和当前限制见 `docs/linux-app.md`。
-WASM/Android 属于附加回归，不可用 Web 单独通过替代 Linux 宿主验收。
+静态门禁完整列表见 `AGENTS.md`。Linux 离屏/release 可选运行入口和限制见 `docs/linux-app.md`。
+完整测试在明确要求时单独执行，未运行必须标注 NOT RUN。
 
 ```bash
 cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked

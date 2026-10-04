@@ -120,7 +120,7 @@ impl BoundsAccumulator {
                 });
             }
             SemanticGeometry::Shape { position, size, .. } => {
-                let r = size.abs().max(1e-9) * transform_scale(transform);
+                let r = size.abs().max(1e-9);
                 self.add_sphere_transformed(*position, r, transform);
             }
             SemanticGeometry::Opaque { .. } => {}
@@ -152,6 +152,61 @@ impl BoundsAccumulator {
             Some((self.min, self.max))
         } else {
             None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shape_bounds_apply_instance_scale_once() {
+        let shape = SemanticGeometry::Shape {
+            shape_name: "synthetic".to_string(),
+            code: 1,
+            position: Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            size: 4.0,
+            rotation: 0.0,
+            font: None,
+        };
+        for scale in [0.25, 2.0] {
+            let mut transform = Transform3::identity();
+            for axis in 0..3 {
+                transform.matrix[axis][axis] = scale;
+            }
+            transform.matrix[0][3] = 10.0;
+            let mut bounds = BoundsAccumulator::new();
+            bounds.add_geometry_transformed(&shape, &transform);
+            let (min, max) = bounds.finish().unwrap();
+            let center = transform.apply_point(Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            });
+            // The shared sphere helper uses the conservative Frobenius norm,
+            // not the exact similarity scale.
+            let radius = 4.0 * (3.0_f64).sqrt() * scale;
+            assert_eq!(
+                min,
+                Point3 {
+                    x: center.x - radius,
+                    y: center.y - radius,
+                    z: center.z - radius
+                }
+            );
+            assert_eq!(
+                max,
+                Point3 {
+                    x: center.x + radius,
+                    y: center.y + radius,
+                    z: center.z + radius
+                }
+            );
         }
     }
 }
