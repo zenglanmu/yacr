@@ -211,7 +211,8 @@ pub(crate) fn run_build_representation(
             Ok(representation) => {
                 for fragment in &representation.fragments {
                     match &fragment.primitive {
-                        cad_representation::DisplayPrimitive::Lines(points) => {
+                        cad_representation::DisplayPrimitive::Lines(points)
+                        | cad_representation::DisplayPrimitive::LineSegments(points) => {
                             lines += 1;
                             vertices += points.len();
                         }

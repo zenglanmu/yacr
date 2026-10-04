@@ -234,6 +234,18 @@ pub fn build_vector_document(
             DisplayPrimitive::Lines(points) => {
                 collect_lines(&mut document, object, points, fragment, &vector_page);
             }
+            DisplayPrimitive::LineSegments(points) => {
+                if points.len() % 2 != 0 {
+                    document.report(
+                        object,
+                        vector_diagnostic::DEGENERATE_POLYLINE,
+                        "line segments require endpoint pairs".into(),
+                    );
+                }
+                for pair in points.chunks_exact(2) {
+                    collect_lines(&mut document, object, pair, fragment, &vector_page);
+                }
+            }
             DisplayPrimitive::Mesh(mesh) => {
                 collect_mesh(&mut document, object, mesh, fragment, &vector_page);
             }
@@ -897,6 +909,27 @@ mod tests {
         assert!(text.contains("points=\"0,100 10,100\""), "{text}");
         assert!(text.contains("stroke-width=\"0.25\""), "{text}");
         assert!(text.contains("fill=\"none\""), "{text}");
+    }
+
+    #[test]
+    fn packed_segment_export_keeps_gaps_and_reports_unmatched_endpoint() {
+        let mut fragment = lines(vec![paper(0.0, 0.0), paper(2.0, 0.0)]);
+        fragment.primitive = DisplayPrimitive::LineSegments(Arc::from(vec![
+            paper(0.0, 0.0),
+            paper(2.0, 0.0),
+            paper(5.0, 0.0),
+            paper(7.0, 0.0),
+        ]));
+        let document =
+            build_vector_document(&representation(vec![fragment]), &simple_page()).unwrap();
+        let text = String::from_utf8(render_svg(&document).unwrap()).unwrap();
+        assert!(text.contains("points=\"0,100 2,100\""), "{text}");
+        assert!(text.contains("points=\"5,100 7,100\""), "{text}");
+        assert!(!text.contains("2,100 5,100"), "invented connector");
+        let mut odd = lines(vec![]);
+        odd.primitive = DisplayPrimitive::LineSegments(Arc::from(vec![paper(0.0, 0.0)]));
+        let document = build_vector_document(&representation(vec![odd]), &simple_page()).unwrap();
+        assert!(matches!(document.completeness, Completeness::Partial(_)));
     }
 
     #[test]

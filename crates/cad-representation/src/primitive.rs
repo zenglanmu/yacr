@@ -5,6 +5,8 @@ use super::*;
 /// One drawable piece of an entity, in world coordinates.
 pub enum DisplayPrimitive {
     Lines(Arc<[Point3]>),
+    /// Independent endpoint pairs. Unlike `Lines`, adjacent pairs are not joined.
+    LineSegments(Arc<[Point3]>),
     Mesh(Arc<Mesh>),
     Text {
         text: String,
@@ -31,6 +33,13 @@ impl DisplayPrimitive {
                     .iter()
                     .map(|p| transform.apply_point(*p))
                     .collect::<Vec<Point3>>()
+                    .into_boxed_slice(),
+            )),
+            DisplayPrimitive::LineSegments(points) => DisplayPrimitive::LineSegments(Arc::from(
+                points
+                    .iter()
+                    .map(|p| transform.apply_point(*p))
+                    .collect::<Vec<_>>()
                     .into_boxed_slice(),
             )),
             DisplayPrimitive::Mesh(mesh) => {

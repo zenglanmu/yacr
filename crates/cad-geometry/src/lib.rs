@@ -15,7 +15,7 @@ pub mod nurbs;
 
 pub use area::{measure_polygon_area, signed_area, AreaError};
 pub use clip::{clip_polyline_to_xy_rect, clip_segment_to_xy_rect};
-pub use dash::{dash_polyline, polyline_length, DashIssue, DashOutcome};
+pub use dash::{dash_polyline, dash_polyline_segments, polyline_length, DashIssue, DashOutcome};
 pub use hatch::{
     fill_rings, gradient_vertex_colors, normalize_stops, pattern_polylines, sample_gradient,
     simplify, triangulate, FillError, FillMesh, GradientDef, GradientKind, GradientStop, Loop,

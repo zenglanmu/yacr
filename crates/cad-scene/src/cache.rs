@@ -86,30 +86,115 @@ impl SceneCache {
         representation: &DisplayRepresentation,
         stamp: TaskStamp,
     ) -> CadResult<SceneDelta> {
+        self.build_internal(representation, stamp, false)
+    }
+
+    /// Pack adjacent opaque polylines with identical style into line-list
+    /// batches, retaining their selection sources without introducing connectors.
+    /// Merges stop at 65,536 vertices and a local extent of 8,192 world units
+    /// (f32 rebasing roundoff below 0.0005). Transparent fragments stay separate
+    /// rather than sharing a combined centroid-based depth key.
+    pub fn build_compact(
+        &mut self,
+        representation: &DisplayRepresentation,
+        stamp: TaskStamp,
+    ) -> CadResult<SceneDelta> {
+        self.build_internal(representation, stamp, true)
+    }
+
+    fn build_internal(
+        &mut self,
+        representation: &DisplayRepresentation,
+        stamp: TaskStamp,
+        compact: bool,
+    ) -> CadResult<SceneDelta> {
         let mut delta = SceneDelta {
             stamp,
             added: Vec::new(),
             removed_chunks: Vec::new(),
         };
+        let mut previous_was_lines = false;
         for fragment in &representation.fragments {
+            let paired = matches!(fragment.primitive, DisplayPrimitive::LineSegments(_));
+            if let DisplayPrimitive::LineSegments(points) = &fragment.primitive {
+                if points.len() % 2 != 0 {
+                    return Err(CadError::InvalidInput(
+                        "line segments require endpoint pairs".into(),
+                    ));
+                }
+            }
+            let line_points = match &fragment.primitive {
+                DisplayPrimitive::Lines(p) | DisplayPrimitive::LineSegments(p) if p.len() >= 2 => {
+                    Some(p.as_ref())
+                }
+                _ => None,
+            };
+            if let Some(points) = line_points.filter(|_| compact && previous_was_lines) {
+                let batch = delta.added.last_mut().expect("previous line batch");
+                if batch.vertices.len().saturating_add(if paired {
+                    points.len()
+                } else {
+                    points.len().saturating_sub(1).saturating_mul(2)
+                }) <= 65_536
+                    && batch.alpha == 1.0
+                    && batch.alpha == sanitize_alpha(fragment.alpha)
+                    && batch.color == sanitize_color(fragment.color)
+                    && batch.color_unresolved == fragment.color_unresolved
+                    && batch.lineweight == sanitize_lineweight(fragment.lineweight)
+                    && batch.lineweight_unresolved == fragment.lineweight_unresolved
+                    && batch.linetype == fragment.linetype
+                    && batch.linetype_unresolved == fragment.linetype_unresolved
+                    && points.iter().all(|p| {
+                        [
+                            p.x - batch.local_origin.x,
+                            p.y - batch.local_origin.y,
+                            p.z - batch.local_origin.z,
+                        ]
+                        .iter()
+                        .all(|v| v.is_finite() && v.abs() <= 8192.0)
+                    })
+                {
+                    let relative = |p: &Point3| {
+                        [
+                            (p.x - batch.local_origin.x) as f32,
+                            (p.y - batch.local_origin.y) as f32,
+                            (p.z - batch.local_origin.z) as f32,
+                        ]
+                    };
+                    if paired {
+                        batch.vertices.extend(points.iter().map(relative));
+                    } else {
+                        batch
+                            .vertices
+                            .extend(points.windows(2).flatten().map(relative));
+                    }
+                    if batch.sources.last() != Some(&fragment.source) {
+                        batch.sources.push(fragment.source.clone());
+                    }
+                    continue;
+                }
+            }
+            previous_was_lines = line_points.is_some();
             let (topology, vertices, normals, colors, indices, edges, origin, mirrored) =
                 match &fragment.primitive {
-                    DisplayPrimitive::Lines(points) => {
+                    DisplayPrimitive::Lines(points) | DisplayPrimitive::LineSegments(points) => {
                         let origin = points.first().copied().unwrap_or(Point3 {
                             x: 0.0,
                             y: 0.0,
                             z: 0.0,
                         });
-                        let verts: Vec<[f32; 3]> = points
-                            .iter()
-                            .map(|p| {
-                                [
-                                    (p.x - origin.x) as f32,
-                                    (p.y - origin.y) as f32,
-                                    (p.z - origin.z) as f32,
-                                ]
-                            })
-                            .collect();
+                        let relative = |p: &Point3| {
+                            [
+                                (p.x - origin.x) as f32,
+                                (p.y - origin.y) as f32,
+                                (p.z - origin.z) as f32,
+                            ]
+                        };
+                        let verts: Vec<[f32; 3]> = if compact && !paired {
+                            points.windows(2).flatten().map(relative).collect()
+                        } else {
+                            points.iter().map(relative).collect()
+                        };
                         (
                             RenderTopology::Lines,
                             verts,

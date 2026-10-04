@@ -16,6 +16,29 @@
 7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
    Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
+## Linux 桌面真实 DWG 无响应修复（2026-10-04）
+
+**后续纠正**：用户手工 release 仍卡死，窗口启动后打开新增回归复现长停顿；最新
+部分优化和未闭环项见本文「Linux release 后续排查」与 `docs/linux-dwg-ui-freeze.md` 顶部，
+不能将下面前轮短测试作为加载响应已解决的证据。
+
+用户确认当前环境为有 GPU/显示的 Wayland 桌面，不是历史无头环境。本轮使用用户提供的
+仓库外 DWG 复现：主线程在复合几何子图元处理中反复深拷贝父实体；消除复制后仍生成
+20,842,742 个底图批次，GPU 资源分配造成严重阻塞。修复只读子几何遍历，宿主 model/paper
+场景采用不透明同样式折线的局部 line-list 合批，保留选择来源/样式/透明边界与局部坐标
+精度约束；不修改 acadrust、数据库/测量几何，不隐藏填充或虚线。
+
+新增 6 项合成契约和 1 项默认忽略的真实桌面回归；representation **139/139**、scene
+**66/66** 通过。最终 debug/release 桌面回归分别实际通过：20 事件回调、3 CAD frames、
+滚轮相机与 CAD 像素变化。首帧仍需约 **25–27 秒**，CPU 准备/GPU 上传仍同步，不能宣称
+加载期间持续响应、流畅交互或整图视觉正确；Slint 默认选中设备的 vendor 未单独记录。
+
+主机/wasm debug 编译、定向严格 clippy、fmt、架构/fixture/workflow/i18n 及最终 Linux
+debug/release 二进制构建通过。全树严格 clippy 在未修改的 `cad-app/tests/select_all.rs`
+失败（`err_expect`）；`cad-app --lib` **293 passed / 2 failed**（两项 unknown-layer 契约），
+不记为全树门禁/测试通过。未执行完整 workspace 测试、无头离屏、Android/Web 运行、
+参考图视觉验收或长期压力测试。详见 `docs/linux-dwg-ui-freeze.md`；外部图纸与截图未提交。
+
 ## 独立分支并行审查第五轮（2026-10-04）
 
 3 个并行子代理分别在 `review/20261004-{query-updates,annotation-files,history-recovery}`
@@ -654,3 +677,14 @@ flange 样本，但仅 `Partial`，不构成兼容性或黄金图验收）；Mul
 业务不调用 draw；批注确认一次事务，取消零事务；UI 回填不触发重复命令；
 revision 不连续重建；GPU 重建不改数据库；设备失败和退出保护未保存批注；
 局部失败保留对象级报告；未知源单位显示图纸单位。Android/Web 真机与浏览器分开记录。
+## 2026-10-04 Linux release 后续排查（部分优化，问题未闭环）
+
+- 用户手工 release 仍卡死；补窗口启动后打开和实际 pointer/click 探针，基线 release
+  重现 17 秒事件循环停顿。前轮 `--open` 回归不覆盖加载响应。
+- 增加不透明虚线 `LineSegments` packed 表示及弧长索引，所有 consuming boundary 识别
+  独立端点对；默认 provider 与透明 run 顺序不变。CPU 场景约 17.6→14.0 秒。
+- 拾取改为借用几何，约 72 万 items 的收集 1.85→0.20 秒；debug 点击仍约 2.05 秒超阈值。
+- release `--open` 加 pointer/click 短回归通过：17.68 秒首次帧，1.58 秒点击，max gap 1.60 秒；
+  **不是窗口启动后打开/加载响应通过，也不是手工或视觉验收**。
+- 尚未实现 native 异步准备、空间 broad phase、GPU 上传背压；详细证据/限制见
+  `docs/linux-dwg-ui-freeze.md` 最新小节。修改未提交；不覆盖前轮与并发工作。

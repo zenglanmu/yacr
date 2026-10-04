@@ -793,6 +793,37 @@ pub fn build_paper_space(
             for fragment in rep.fragments {
                 let transformed = fragment.primitive.transformed(&matrix);
                 match transformed {
+                    DisplayPrimitive::LineSegments(points) => {
+                        if points.len() % 2 != 0 {
+                            return Err(CadError::InvalidInput(
+                                "line segments require endpoint pairs".into(),
+                            ));
+                        }
+                        let mut clipped = Vec::new();
+                        for pair in points.chunks_exact(2) {
+                            for run in clip_polyline_to_rect(pair, center, half) {
+                                clipped.extend(run);
+                            }
+                        }
+                        if !clipped.is_empty() {
+                            out.fragments.push(DisplayFragment {
+                                source: fragment.source,
+                                geometry_source: fragment.geometry_source,
+                                precision: fragment.precision,
+                                alpha: fragment.alpha,
+                                color: fragment.color,
+                                color_unresolved: fragment.color_unresolved,
+                                lineweight: fragment.lineweight,
+                                lineweight_unresolved: fragment.lineweight_unresolved,
+                                linetype: fragment.linetype,
+                                linetype_unresolved: fragment.linetype_unresolved,
+                                linetype_scale: fragment.linetype_scale,
+                                primitive: DisplayPrimitive::LineSegments(std::sync::Arc::from(
+                                    clipped.into_boxed_slice(),
+                                )),
+                            });
+                        }
+                    }
                     DisplayPrimitive::Lines(points) => {
                         for run in clip_polyline_to_rect(&points, center, half) {
                             out.fragments.push(DisplayFragment {

@@ -243,6 +243,9 @@ fn whole_fragment(
 ) -> Option<RenderBatch> {
     match &fragment.primitive {
         DisplayPrimitive::Lines(points) => line_batch(reference, points, draw_order, alpha, color),
+        DisplayPrimitive::LineSegments(points) => {
+            line_batch(reference, points, draw_order, alpha, color)
+        }
         DisplayPrimitive::Mesh(mesh) => mesh_batch(reference, mesh, None, draw_order, alpha, color),
         DisplayPrimitive::Text { .. }
         | DisplayPrimitive::Image { .. }

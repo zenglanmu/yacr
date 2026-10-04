@@ -24,7 +24,7 @@
 use crate::camera::{Camera, Projection};
 use cad_db::{DrawingDatabase, MAX_INSTANCE_DEPTH};
 use cad_domain::*;
-use cad_spatial::{pick_closest, BackFacePolicy, PickItem, PickOptions, PickReport, SpatialIndex};
+use cad_spatial::{BackFacePolicy, PickItem, PickOptions, PickReport, SpatialIndex};
 
 /// Derive the world-space pick tolerance from the tolerance policy.
 ///
@@ -80,6 +80,24 @@ pub fn pick_tolerance(
 /// cycles, exactly like [`DrawingDatabase::bounds`]; a truncated or cyclic
 /// branch is skipped rather than producing a wrong hit.
 pub fn drawing_pick_items(database: &DrawingDatabase, document: DocumentId) -> Vec<PickItem> {
+    borrowed_pick_items(database, document)
+        .into_iter()
+        .map(|(source, geometry, transform)| PickItem {
+            source,
+            geometry: geometry.clone(),
+            transform,
+            geometry_source: match geometry {
+                SemanticGeometry::Mesh(_) => GeometrySource::DirectMesh,
+                _ => GeometrySource::Analytic,
+            },
+        })
+        .collect()
+}
+
+fn borrowed_pick_items(
+    database: &DrawingDatabase,
+    document: DocumentId,
+) -> Vec<(SelectionRef, &SemanticGeometry, Transform3)> {
     let mut items = Vec::new();
     let mut stack: Vec<BlockId> = Vec::new();
     for entity in database.model_space() {
@@ -99,16 +117,16 @@ pub fn drawing_pick_items(database: &DrawingDatabase, document: DocumentId) -> V
 }
 
 #[allow(clippy::too_many_arguments)]
-fn collect_items(
-    database: &DrawingDatabase,
+fn collect_items<'a>(
+    database: &'a DrawingDatabase,
     entity: EntityId,
-    geometry: &SemanticGeometry,
+    geometry: &'a SemanticGeometry,
     document: DocumentId,
     transform: &Transform3,
     path: &[EntityId],
     depth: usize,
     stack: &mut Vec<BlockId>,
-    out: &mut Vec<PickItem>,
+    out: &mut Vec<(SelectionRef, &'a SemanticGeometry, Transform3)>,
 ) {
     if let SemanticGeometry::Insert {
         block,
@@ -138,22 +156,16 @@ fn collect_items(
         stack.pop();
         return;
     }
-    out.push(PickItem {
-        source: SelectionRef {
+    out.push((
+        SelectionRef {
             document,
             entity,
             instance: InstancePath(path.to_vec()),
             sub_element: None,
         },
-        geometry: geometry.clone(),
-        transform: *transform,
-        // The database carries no mesh provenance, so meshes are reported as a
-        // direct mesh and everything else as analytic; the pick hit repeats it.
-        geometry_source: match geometry {
-            SemanticGeometry::Mesh(_) => GeometrySource::DirectMesh,
-            _ => GeometrySource::Analytic,
-        },
-    });
+        geometry,
+        *transform,
+    ));
 }
 
 /// Precise pick of the closest model-space geometry under a world ray.
@@ -167,8 +179,14 @@ pub fn pick_ray(
     ray: &Ray3,
     options: &PickOptions,
 ) -> CadResult<PickReport> {
-    let items = drawing_pick_items(database, document);
-    pick_closest(ray, &items, options)
+    let items = borrowed_pick_items(database, document);
+    cad_spatial::pick_closest_borrowed(
+        ray,
+        items
+            .iter()
+            .map(|(source, geometry, transform)| (source, *geometry, transform)),
+        options,
+    )
 }
 
 /// Precise pick of the closest model-space geometry under a logical screen pixel.

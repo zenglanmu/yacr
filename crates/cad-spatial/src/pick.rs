@@ -418,18 +418,35 @@ pub fn pick_closest(
     items: &[PickItem],
     options: &PickOptions,
 ) -> CadResult<PickReport> {
+    pick_closest_borrowed(
+        ray,
+        items
+            .iter()
+            .map(|item| (&item.source, &item.geometry, &item.transform)),
+        options,
+    )
+}
+
+/// Identical precise picking over borrowed geometry; callers need not deep-copy
+/// large compounds just to perform a read-only query. Iterator order defines
+/// the same stable tie handling as [`pick_closest`].
+pub fn pick_closest_borrowed<'a>(
+    ray: &Ray3,
+    items: impl IntoIterator<Item = (&'a SelectionRef, &'a SemanticGeometry, &'a Transform3)>,
+    options: &PickOptions,
+) -> CadResult<PickReport> {
     validate_ray(ray)?;
     options.validate()?;
     let mut report = PickReport::default();
     let mut best: Option<PickHit> = None;
-    for item in items {
-        match hit_geometry(ray, &item.geometry, &item.transform, options)? {
+    for (item_source, geometry, transform) in items {
+        match hit_geometry(ray, geometry, transform, options)? {
             PickOutcome::Hit(hit) => {
                 // Identity is `entity + instance + sub-element`. The item names
                 // the entity/instance; the geometry resolves the sub-element. A
                 // caller that already narrowed the item to a sub-element keeps
                 // its exact identity (the geometry cannot silently re-target it).
-                let mut source = item.source.clone();
+                let mut source = item_source.clone();
                 let mut sub_element_reason = hit.sub_element_reason;
                 if source.sub_element.is_none() {
                     source.sub_element = hit.sub_element;
@@ -460,7 +477,7 @@ pub fn pick_closest(
             }
             PickOutcome::Miss => {}
             PickOutcome::Unsupported(reason) => report.skipped.push(SkippedGeometry {
-                source: item.source.clone(),
+                source: item_source.clone(),
                 reason,
             }),
         }
@@ -634,7 +651,89 @@ fn is_finite_point(p: Point3) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn borrowed_picking_matches_owned_single_hit() {
+        let source = SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(1),
+            instance: InstancePath::default(),
+            sub_element: None,
+        };
+        let items = vec![PickItem {
+            source: source.clone(),
+            geometry: SemanticGeometry::Line {
+                start: p(-1.0, 0.0, 0.0),
+                end: p(1.0, 0.0, 0.0),
+            },
+            transform: Transform3::identity(),
+            geometry_source: GeometrySource::Analytic,
+        }];
+        let ray = Ray3 {
+            origin: p(0.0, 0.0, 1.0),
+            direction: p(0.0, 0.0, -1.0),
+        };
+        let options = PickOptions::new(0.1).unwrap();
+        let owned = pick_closest(&ray, &items, &options).unwrap();
+        let borrowed = pick_closest_borrowed(
+            &ray,
+            items
+                .iter()
+                .map(|item| (&item.source, &item.geometry, &item.transform)),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(borrowed, owned);
+        assert!(borrowed.hit.is_some());
+    }
     use cad_domain::{DocumentId, EntityId, InstancePath, Revision, SubElementId};
+
+    #[test]
+    fn borrowed_pick_matches_owning_hits_ties_and_unsupported_reports() {
+        let source = SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(1),
+            instance: InstancePath::default(),
+            sub_element: None,
+        };
+        let mut items = vec![PickItem {
+            source,
+            geometry: SemanticGeometry::Line {
+                start: p(-1.0, 0.0, 0.0),
+                end: p(1.0, 0.0, 0.0),
+            },
+            transform: Transform3::identity(),
+            geometry_source: GeometrySource::Analytic,
+        }];
+        let mut second = items[0].clone();
+        second.source.entity = EntityId(2);
+        items.push(second);
+        items.push(item(
+            3,
+            SemanticGeometry::Opaque {
+                type_key: "PROXY".into(),
+                version: 1,
+                payload: vec![1],
+            },
+        ));
+        let ray = Ray3 {
+            origin: p(0.0, 0.0, 1.0),
+            direction: p(0.0, 0.0, -1.0),
+        };
+        let options = PickOptions::new(0.1).unwrap();
+        let owned = pick_closest(&ray, &items, &options).unwrap();
+        let borrowed = pick_closest_borrowed(
+            &ray,
+            items
+                .iter()
+                .map(|item| (&item.source, &item.geometry, &item.transform)),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(owned, borrowed);
+        assert_eq!(borrowed.skipped.len(), 1);
+        assert_eq!(borrowed.hit.unwrap().source.entity, EntityId(1));
+    }
 
     fn p(x: f64, y: f64, z: f64) -> Point3 {
         Point3 { x, y, z }

@@ -49,7 +49,8 @@ pub fn build_scene_with_space(
 ) -> CadResult<SceneDelta> {
     let registry = ProviderRegistry::with_default_provider();
     let mut context =
-        RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone());
+        RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone())
+            .with_packed_line_segments();
     if let Some(fonts) = fonts {
         context = context.with_fonts(fonts);
     }
@@ -63,7 +64,7 @@ pub fn build_scene_with_space(
         SpaceSelection::Model => {
             for entity in crate::layers::visible_model_entities(database, overrides) {
                 let representation = registry.build_expanded(database, entity, &context)?;
-                let delta = cache.build(&representation, stamp.clone())?;
+                let delta = cache.build_compact(&representation, stamp.clone())?;
                 combined.added.extend(delta.added);
             }
         }
@@ -71,7 +72,7 @@ pub fn build_scene_with_space(
             let visible = |entity: &cad_db::DbEntity| overrides.is_entity_visible(database, entity);
             let representation =
                 build_paper_space(&registry, database, layout, &context, &visible)?;
-            let delta = cache.build(&representation, stamp.clone())?;
+            let delta = cache.build_compact(&representation, stamp.clone())?;
             combined.added.extend(delta.added);
         }
     }

@@ -25,6 +25,8 @@ pub enum DashIssue {
     AllGap,
     /// The scale factor is non-finite or not strictly positive.
     InvalidScale,
+    /// The bounded dash expansion cannot complete; partial truncation is forbidden.
+    ExpansionLimit,
 }
 
 impl DashIssue {
@@ -35,6 +37,9 @@ impl DashIssue {
             DashIssue::DegenerateCycle => "linetype pattern has a degenerate cycle length",
             DashIssue::AllGap => "linetype pattern contains only gaps",
             DashIssue::InvalidScale => "linetype scale is not a positive finite number",
+            DashIssue::ExpansionLimit => {
+                "linetype subdivision exceeded its work limit or made no numeric progress"
+            }
         }
     }
 }
@@ -48,6 +53,100 @@ pub enum DashOutcome {
     /// Subdivision was not possible; the caller must draw the input unchanged
     /// and report `issue` as a `Partial` reason.
     Continuous(DashIssue),
+}
+
+/// Independent endpoint pairs for opaque display batching. The same dash/gap
+/// placement is retained without allocating a vector for each visible run.
+pub fn dash_polyline_segments(
+    points: &[Point3],
+    pattern: &[f64],
+    scale: f64,
+) -> Result<Vec<Point3>, DashIssue> {
+    if pattern.is_empty() {
+        return Err(DashIssue::EmptyPattern);
+    }
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(DashIssue::InvalidScale);
+    }
+    let slots: Vec<f64> = pattern.iter().map(|e| e * scale).collect();
+    let cycle: f64 = slots.iter().map(|e| e.abs()).sum();
+    if !cycle.is_finite() || cycle <= 0.0 || points.len() < 2 {
+        return Err(DashIssue::DegenerateCycle);
+    }
+    if slots.iter().all(|e| *e < 0.0) {
+        return Err(DashIssue::AllGap);
+    }
+    let mut lengths = Vec::with_capacity(points.len());
+    lengths.push(0.0);
+    for pair in points.windows(2) {
+        let a = pair[0];
+        let b = pair[1];
+        let length = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2) + (b.z - a.z).powi(2)).sqrt();
+        if !length.is_finite() {
+            return Err(DashIssue::DegenerateCycle);
+        }
+        lengths.push(lengths.last().copied().unwrap() + length);
+    }
+    let total = *lengths.last().unwrap();
+    if !total.is_finite() || total <= 0.0 {
+        return Err(DashIssue::DegenerateCycle);
+    }
+    let at = |distance: f64| point_at(points, &lengths, distance).expect("validated arc index");
+    let mut out = Vec::new();
+    let mut emit_span = |start: f64, end: f64| {
+        let mut previous = at(start);
+        let first = lengths.partition_point(|d| *d <= start);
+        let last = lengths.partition_point(|d| *d < end);
+        for point in points[first..last]
+            .iter()
+            .copied()
+            .chain(std::iter::once(at(end)))
+        {
+            if !same_point(&previous, &point) {
+                out.extend_from_slice(&[previous, point]);
+                previous = point;
+            }
+        }
+    };
+    // Without a gap the entire polyline is visible, regardless of positive
+    // slot boundaries. Avoid inventing extra joins or iterating tiny slots.
+    if slots.iter().all(|e| *e >= 0.0) {
+        emit_span(0.0, total);
+        return Ok(out);
+    }
+    let mut slot = slots.iter().position(|e| *e >= 0.0).unwrap();
+    let mut distance = 0.0;
+    let mut visible_start = None;
+    let mut runs = 0usize;
+    while distance < total {
+        let len = slots[slot];
+        if len < 0.0 {
+            if let Some(start) = visible_start.take() {
+                emit_span(start, distance.min(total));
+                runs += 1;
+                if runs > 1_000_000 {
+                    return Err(DashIssue::ExpansionLimit);
+                }
+            }
+        } else if len > 0.0 {
+            visible_start.get_or_insert(distance);
+        }
+        if len != 0.0 {
+            let next = distance + len.abs();
+            if !next.is_finite() || next <= distance {
+                return Err(DashIssue::ExpansionLimit);
+            }
+            distance = next.min(total);
+        }
+        slot = (slot + 1) % slots.len();
+    }
+    if let Some(start) = visible_start {
+        if runs >= 1_000_000 {
+            return Err(DashIssue::ExpansionLimit);
+        }
+        emit_span(start, total);
+    }
+    Ok(out)
 }
 
 /// Total arc length of an open polyline (0 for fewer than two points, or any
@@ -68,55 +167,33 @@ pub fn polyline_length(points: &[Point3]) -> f64 {
 ///
 /// Distances before the start clamp to the first point, distances past the end
 /// to the last point. `None` only when a segment length is non-finite.
-fn point_at(points: &[Point3], distance: f64) -> Option<Point3> {
+fn point_at(points: &[Point3], arc: &[f64], distance: f64) -> Option<Point3> {
     if distance <= 0.0 {
         return points.first().copied();
     }
-    let mut travelled = 0.0f64;
-    for pair in points.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
-        let (dx, dy, dz) = (b.x - a.x, b.y - a.y, b.z - a.z);
-        let seg = (dx * dx + dy * dy + dz * dz).sqrt();
-        if !seg.is_finite() {
-            return None;
-        }
-        if travelled + seg >= distance {
-            let t = if seg > 0.0 {
-                ((distance - travelled) / seg).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            return Some(Point3 {
-                x: a.x + dx * t,
-                y: a.y + dy * t,
-                z: a.z + dz * t,
-            });
-        }
-        travelled += seg;
+    let end = arc.partition_point(|d| *d < distance);
+    if end >= points.len() {
+        return points.last().copied();
     }
-    points.last().copied()
+    let (a, b) = (points[end - 1], points[end]);
+    let seg = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2) + (b.z - a.z).powi(2)).sqrt();
+    let t = if seg > 0.0 {
+        ((distance - arc[end - 1]) / seg).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    Some(Point3 {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+        z: a.z + (b.z - a.z) * t,
+    })
 }
 
 /// Vertices strictly inside `(start, end]` of the polyline arc, in order.
-fn vertices_in_span(points: &[Point3], start: f64, end: f64) -> Vec<Point3> {
-    let mut out = Vec::new();
-    let mut travelled = 0.0f64;
-    for pair in points.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
-        let seg = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2) + (b.z - a.z).powi(2)).sqrt();
-        if !seg.is_finite() {
-            continue;
-        }
-        let vertex_distance = travelled + seg;
-        if vertex_distance > start && vertex_distance <= end {
-            out.push(b);
-        }
-        travelled = vertex_distance;
-        if travelled >= end {
-            break;
-        }
-    }
-    out
+fn vertices_in_span<'a>(points: &'a [Point3], arc: &[f64], start: f64, end: f64) -> &'a [Point3] {
+    let first = arc.partition_point(|d| *d <= start);
+    let last = arc.partition_point(|d| *d <= end);
+    &points[first..last]
 }
 
 fn dedup_run(run: &mut Vec<Point3>) {
@@ -171,6 +248,21 @@ pub fn dash_polyline(points: &[Point3], pattern: &[f64], scale: f64) -> DashOutc
     if !total.is_finite() || total <= 0.0 {
         return DashOutcome::Continuous(DashIssue::DegenerateCycle);
     }
+    // Index arc lengths once. Re-scanning from the first vertex for every
+    // microscopic dash made curved/polyline subdivision quadratic.
+    let mut arc = Vec::with_capacity(points.len());
+    arc.push(0.0);
+    for pair in points.windows(2) {
+        let distance = ((pair[1].x - pair[0].x).powi(2)
+            + (pair[1].y - pair[0].y).powi(2)
+            + (pair[1].z - pair[0].z).powi(2))
+        .sqrt();
+        let next = arc.last().copied().unwrap_or(0.0) + distance;
+        if !next.is_finite() {
+            return DashOutcome::Continuous(DashIssue::DegenerateCycle);
+        }
+        arc.push(next);
+    }
 
     // Pre-compute each cycle's slots, skipping gaps so the first slot is always
     // a dash/dot. `slots` holds the element lengths of one repetition in order.
@@ -203,7 +295,7 @@ pub fn dash_polyline(points: &[Point3], pattern: &[f64], scale: f64) -> DashOutc
         if len == 0.0 {
             // Dot: a zero-length run. Drawn as nothing by the line renderer but
             // counted so a dot-only pattern terminates.
-            if let Some(p) = point_at(points, distance) {
+            if let Some(p) = point_at(points, &arc, distance) {
                 append_run(&mut current, vec![p, p]);
             }
             slot += 1;
@@ -223,11 +315,11 @@ pub fn dash_polyline(points: &[Point3], pattern: &[f64], scale: f64) -> DashOutc
             let start = distance;
             let end = distance + len;
             let mut run: Vec<Point3> = Vec::new();
-            if let Some(p) = point_at(points, start) {
+            if let Some(p) = point_at(points, &arc, start) {
                 run.push(p);
             }
-            run.extend(vertices_in_span(points, start, end));
-            if let Some(p) = point_at(points, end) {
+            run.extend_from_slice(vertices_in_span(points, &arc, start, end));
+            if let Some(p) = point_at(points, &arc, end) {
                 run.push(p);
             }
             dedup_run(&mut run);
@@ -250,6 +342,72 @@ pub fn dash_polyline(points: &[Point3], pattern: &[f64], scale: f64) -> DashOutc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packed_dashes_match_run_segments_across_corners_and_duplicate_vertices() {
+        let points = vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 3.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 3.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 3.0,
+                y: 7.0,
+                z: 0.0,
+            },
+        ];
+        for pattern in [
+            vec![2.0, -1.0],
+            vec![-1.0, 2.0],
+            vec![0.0, -1.0],
+            vec![2.0, 0.0, -1.0],
+        ] {
+            let DashOutcome::Dashed(runs) = dash_polyline(&points, &pattern, 1.0) else {
+                panic!("valid pattern rejected")
+            };
+            // Zero-length dot residues have no line rasterization footprint.
+            let expected: Vec<Point3> = runs
+                .iter()
+                .flat_map(|run| {
+                    run.windows(2)
+                        .filter(|pair| !same_point(&pair[0], &pair[1]))
+                        .flatten()
+                        .copied()
+                })
+                .collect();
+            assert_eq!(
+                dash_polyline_segments(&points, &pattern, 1.0).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn packed_subdivision_reports_invalid_input_and_work_exhaustion() {
+        assert_eq!(
+            dash_polyline_segments(&line(10.0), &[f64::NAN], 1.0),
+            Err(DashIssue::DegenerateCycle)
+        );
+        assert_eq!(
+            dash_polyline_segments(&line(10.0), &[1.0, -1.0], 0.0),
+            Err(DashIssue::InvalidScale)
+        );
+        assert_eq!(
+            dash_polyline_segments(&line(10.0), &[0.000001, -0.000001], 1.0),
+            Err(DashIssue::ExpansionLimit)
+        );
+    }
 
     fn line(len: f64) -> Vec<Point3> {
         vec![
@@ -290,6 +448,63 @@ mod tests {
         assert!((lens[1] - 2.0).abs() < 1e-9);
         assert!((lens[2] - 2.0).abs() < 1e-9);
         assert!((lens[3] - 1.0).abs() < 1e-9, "last dash is clipped");
+    }
+
+    #[test]
+    fn packed_dashes_preserve_visible_segments_and_corners() {
+        let points = vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 3.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 3.0,
+                y: 4.0,
+                z: 0.0,
+            },
+        ];
+        for pattern in [vec![2.0, -1.0], vec![-1.0, 2.0], vec![0.0, -1.0, 2.0]] {
+            let DashOutcome::Dashed(runs) = dash_polyline(&points, &pattern, 1.0) else {
+                panic!("valid pattern");
+            };
+            let expected: Vec<_> = runs
+                .iter()
+                .flat_map(|run| {
+                    run.windows(2)
+                        .filter(|pair| !same_point(&pair[0], &pair[1]))
+                        .flatten()
+                        .copied()
+                })
+                .collect();
+            assert_eq!(
+                dash_polyline_segments(&points, &pattern, 1.0).unwrap(),
+                expected
+            );
+        }
+        let packed = dash_polyline_segments(&points, &[1.0, 1.0], 1.0).unwrap();
+        assert_eq!(packed, vec![points[0], points[1], points[1], points[2]]);
+    }
+
+    #[test]
+    fn packed_dashes_reject_invalid_and_over_budget_expansion() {
+        assert_eq!(
+            dash_polyline_segments(&line(10.0), &[1.0, f64::NAN], 1.0),
+            Err(DashIssue::DegenerateCycle)
+        );
+        assert_eq!(
+            dash_polyline_segments(&line(10.0), &[1.0, -1.0], 0.0),
+            Err(DashIssue::InvalidScale)
+        );
+        assert_eq!(
+            dash_polyline_segments(&line(2_000_003.0), &[1.0, -1.0], 1.0),
+            Err(DashIssue::ExpansionLimit)
+        );
     }
 
     #[test]

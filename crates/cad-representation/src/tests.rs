@@ -113,6 +113,80 @@ fn multi_ring_hatch_fill_flows_through_the_mesh_path() {
 }
 
 #[test]
+fn large_compound_preserves_every_child_and_parent_selection_identity() {
+    // Pattern hatches can contain tens of thousands of line segments. Keep a
+    // large fixture here to exercise borrowed traversal rather than repeated
+    // deep copies of the complete compound.
+    let count = 20_000;
+    let e = entity(
+        42,
+        SemanticGeometry::Compound(
+            (0..count)
+                .map(|i| SemanticGeometry::Line {
+                    start: p(i as f64, 0.0),
+                    end: p(i as f64, 1.0),
+                })
+                .collect(),
+        ),
+    );
+    let r = ProviderRegistry::with_default_provider()
+        .build(&e, &context())
+        .unwrap();
+    assert_eq!(r.fragments.len(), count);
+    assert_eq!(r.completeness, Completeness::Complete);
+    assert!(r.diagnostics.is_empty());
+    for (i, fragment) in r.fragments.iter().enumerate() {
+        assert_eq!(fragment.source.entity, e.id);
+        assert_eq!(fragment.source.document, DocumentId(1));
+        match &fragment.primitive {
+            DisplayPrimitive::Lines(points) => {
+                assert_eq!(points.as_ref(), &[p(i as f64, 0.0), p(i as f64, 1.0)]);
+            }
+            _ => panic!("expected compound line"),
+        }
+    }
+}
+
+#[test]
+fn nested_compound_preserves_child_order_and_unsupported_diagnostics() {
+    let e = entity(
+        43,
+        SemanticGeometry::Compound(vec![
+            SemanticGeometry::Line {
+                start: p(0.0, 0.0),
+                end: p(1.0, 0.0),
+            },
+            SemanticGeometry::Compound(vec![
+                SemanticGeometry::Opaque {
+                    type_key: "ACIS".into(),
+                    version: 1,
+                    payload: vec![1, 2, 3],
+                },
+                SemanticGeometry::Line {
+                    start: p(2.0, 0.0),
+                    end: p(3.0, 0.0),
+                },
+            ]),
+        ]),
+    );
+    let r = ProviderRegistry::with_default_provider()
+        .build(&e, &context())
+        .unwrap();
+    assert_eq!(r.fragments.len(), 2);
+    assert!(matches!(r.completeness, Completeness::Missing(_)));
+    assert_eq!(r.diagnostics.len(), 1);
+    assert_eq!(r.diagnostics[0].object, Some(ObjectId(e.id.0)));
+    assert_eq!(r.diagnostics[0].code, "representation.opaque");
+    for (fragment, start) in r.fragments.iter().zip([0.0, 2.0]) {
+        assert_eq!(fragment.source.entity, e.id);
+        match &fragment.primitive {
+            DisplayPrimitive::Lines(points) => assert_eq!(points[0], p(start, 0.0)),
+            _ => panic!("expected nested compound line"),
+        }
+    }
+}
+
+#[test]
 fn opaque_geometry_is_reported_unsupported_not_empty_success() {
     let registry = ProviderRegistry::with_default_provider();
     let e = entity(
@@ -768,6 +842,74 @@ fn continuous_linetype_keeps_a_single_fragment() {
         .unwrap();
     assert_eq!(line_primitives(&rep).len(), 1);
     assert_eq!(rep.completeness, Completeness::Complete);
+}
+
+#[test]
+fn packed_dash_fragments_preserve_geometry_style_and_source() {
+    let db = line_db(
+        line_entity(1, SpaceId::Model, p(0.0, 0.0), p(10.0, 0.0)),
+        EntityLineType::Explicit {
+            name: "Dashed".into(),
+            pattern: LinetypePattern::from_elements([2.0, -1.0]),
+            scale: 1.0,
+        },
+    );
+    let registry = ProviderRegistry::with_default_provider();
+    let entity = db.entity(EntityId(1)).unwrap();
+    let normal = registry.build_expanded(&db, entity, &context()).unwrap();
+    let packed = registry
+        .build_expanded(&db, entity, &context().with_packed_line_segments())
+        .unwrap();
+    assert_eq!(packed.completeness, normal.completeness);
+    assert_eq!(packed.diagnostics, normal.diagnostics);
+    assert_eq!(packed.fragments.len(), 1);
+    let expected: Vec<Point3> = line_primitives(&normal)
+        .iter()
+        .flat_map(|run| run.windows(2).flatten().copied())
+        .collect();
+    let fragment = &packed.fragments[0];
+    let DisplayPrimitive::LineSegments(points) = &fragment.primitive else {
+        panic!("expected independent segments")
+    };
+    assert_eq!(points.as_ref(), expected);
+    assert_eq!(fragment.source, normal.fragments[0].source);
+    assert_eq!(fragment.color, normal.fragments[0].color);
+    assert_eq!(fragment.linetype, normal.fragments[0].linetype);
+}
+
+#[test]
+fn packed_dashes_keep_style_provenance_and_independent_pairs() {
+    let db = line_db(
+        line_entity(1, SpaceId::Model, p(0.0, 0.0), p(10.0, 0.0)),
+        EntityLineType::Explicit {
+            name: "Dashed".into(),
+            pattern: LinetypePattern::from_elements([2.0, -1.0]),
+            scale: 1.0,
+        },
+    );
+    let registry = ProviderRegistry::with_default_provider();
+    let entity = db.entity(EntityId(1)).unwrap();
+    let normal = registry.build_expanded(&db, entity, &context()).unwrap();
+    let packed = registry
+        .build_expanded(&db, entity, &context().with_packed_line_segments())
+        .unwrap();
+    assert_eq!(packed.completeness, normal.completeness);
+    assert_eq!(packed.diagnostics, normal.diagnostics);
+    assert_eq!(packed.fragments.len(), 1);
+    let fragment = &packed.fragments[0];
+    assert_eq!(fragment.source, normal.fragments[0].source);
+    assert_eq!(fragment.color, normal.fragments[0].color);
+    assert_eq!(fragment.linetype, normal.fragments[0].linetype);
+    let DisplayPrimitive::LineSegments(points) = &fragment.primitive else {
+        panic!("expected packed pairs");
+    };
+    let expected: Vec<_> = line_primitives(&normal).into_iter().flatten().collect();
+    assert_eq!(points.as_ref(), expected);
+    let transformed = fragment.primitive.transformed(&Transform3::identity());
+    let DisplayPrimitive::LineSegments(transformed) = transformed else {
+        panic!("topology changed");
+    };
+    assert_eq!(transformed.as_ref(), points.as_ref());
 }
 
 #[test]

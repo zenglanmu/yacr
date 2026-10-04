@@ -161,18 +161,28 @@ impl DefaultRepresentationProvider {
         context: &RepresentationContext,
         annotative: Option<TextScale>,
     ) -> CadResult<DisplayRepresentation> {
+        self.build_geometry(entity, &entity.geometry, context, annotative)
+    }
+
+    fn build_geometry(
+        &self,
+        entity: &DbEntity,
+        geometry: &SemanticGeometry,
+        context: &RepresentationContext,
+        annotative: Option<TextScale>,
+    ) -> CadResult<DisplayRepresentation> {
         // A compound entity (for example a HATCH) renders as a group; recurse
-        // per child and merge the results in order.
-        if let SemanticGeometry::Compound(children) = &entity.geometry {
+        // over borrowed children. Cloning the parent for each child copies the
+        // entire compound repeatedly and makes large hatches quadratic.
+        if let SemanticGeometry::Compound(children) = geometry {
             let mut representation = DisplayRepresentation {
                 fragments: Vec::new(),
                 completeness: Completeness::Complete,
                 diagnostics: Vec::new(),
             };
             for child in children {
-                let mut child_entity = entity.clone();
-                child_entity.geometry = child.clone();
-                let child_representation = self.build_inner(&child_entity, context, annotative)?;
+                let child_representation =
+                    self.build_geometry(entity, child, context, annotative)?;
                 representation
                     .fragments
                     .extend(child_representation.fragments);
@@ -198,7 +208,7 @@ impl DefaultRepresentationProvider {
         };
         let geometry_source = GeometrySource::Analytic;
 
-        match &entity.geometry {
+        match geometry {
             SemanticGeometry::Mesh(mesh) => {
                 representation.fragments.push(DisplayFragment {
                     source,
@@ -691,7 +701,6 @@ impl ProviderRegistry {
         let attributes = database.entity_render_attributes(entity.id);
         // The provider sees the attributes too, so annotative text can be
         // scaled while it is shaped (the geometry is not post-processed).
-        let representation = self.build_with_attributes(entity, &attributes, context)?;
         let own_alpha = match attributes.transparency {
             EntityTransparency::Explicit(alpha) => alpha,
             EntityTransparency::ByBlock => parent_alpha,
@@ -701,6 +710,7 @@ impl ProviderRegistry {
             resolve_lineweight(attributes.lineweight, parent_lineweight);
         let (own_linetype, linetype_unresolved, linetype_scale) =
             resolve_linetype(attributes.linetype.clone(), parent_linetype);
+        let representation = self.build_with_attributes(entity, &attributes, context)?;
         out.completeness = weaker_completeness(&out.completeness, &representation.completeness);
         out.diagnostics.extend(representation.diagnostics);
         for fragment in representation.fragments {
@@ -764,12 +774,32 @@ impl ProviderRegistry {
                     // polyline so arc length is measured in final units.
                     let world: Vec<Point3> =
                         points.iter().map(|p| transform.apply_point(*p)).collect();
-                    let (runs, fallback_reason) = subdivide_dashes(
-                        &world,
-                        &own_linetype,
-                        linetype_scale as f64,
-                        global_lt_scale,
-                    );
+                    let packed = context.packed_line_segments && own_alpha == 1.0;
+                    let (runs, fallback_reason) = if packed {
+                        let (segments, reason) = if own_linetype.is_continuous() {
+                            (world.windows(2).flatten().copied().collect(), None)
+                        } else {
+                            match cad_geometry::dash_polyline_segments(
+                                &world,
+                                &own_linetype.elements,
+                                linetype_scale as f64 * global_lt_scale,
+                            ) {
+                                Ok(segments) => (segments, None),
+                                Err(issue) => (
+                                    world.windows(2).flatten().copied().collect(),
+                                    Some(issue.reason().to_string()),
+                                ),
+                            }
+                        };
+                        (vec![segments], reason)
+                    } else {
+                        subdivide_dashes(
+                            &world,
+                            &own_linetype,
+                            linetype_scale as f64,
+                            global_lt_scale,
+                        )
+                    };
                     if let Some(reason) = fallback_reason {
                         out.completeness = weaker_completeness(
                             &out.completeness,
@@ -783,6 +813,36 @@ impl ProviderRegistry {
                             message: format!("linetype dashes fell back to continuous: {reason}"),
                         });
                     }
+                    let runs = if packed {
+                        // Preserve all segments (including corners) but avoid
+                        // duplicating paths and styles once per dash. Bound each
+                        // packed fragment so downstream GPU buffers stay small.
+                        let mut packed = Vec::new();
+                        let mut chunk: Vec<Point3> = Vec::new();
+                        for run in runs {
+                            for pair in run.chunks_exact(2) {
+                                if let Some(origin) = chunk.first() {
+                                    if pair.iter().any(|p| {
+                                        [p.x - origin.x, p.y - origin.y, p.z - origin.z]
+                                            .iter()
+                                            .any(|v| !v.is_finite() || v.abs() > 8192.0)
+                                    }) {
+                                        packed.push(std::mem::take(&mut chunk));
+                                    }
+                                }
+                                chunk.extend_from_slice(pair);
+                                if chunk.len() == 65_536 {
+                                    packed.push(std::mem::take(&mut chunk));
+                                }
+                            }
+                        }
+                        if !chunk.is_empty() {
+                            packed.push(chunk);
+                        }
+                        packed
+                    } else {
+                        runs
+                    };
                     for run in runs {
                         if run.len() < 2 {
                             continue;
@@ -801,7 +861,11 @@ impl ProviderRegistry {
                             linetype: own_linetype.clone(),
                             linetype_unresolved,
                             linetype_scale,
-                            primitive: DisplayPrimitive::Lines(Arc::from(run.into_boxed_slice())),
+                            primitive: if packed {
+                                DisplayPrimitive::LineSegments(Arc::from(run.into_boxed_slice()))
+                            } else {
+                                DisplayPrimitive::Lines(Arc::from(run.into_boxed_slice()))
+                            },
                         });
                     }
                 }

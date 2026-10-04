@@ -129,6 +129,9 @@ pub struct RepresentationContext {
     /// anchor by [`AnnotationScaleRef::factor`], and any imported per-scale
     /// placement override is used as-is.
     pub annotation_scale: Option<AnnotationScaleRef>,
+    /// Pack opaque dash runs as independent endpoint pairs instead of allocating
+    /// a fragment and copying provenance/style for every microscopic dash.
+    pub packed_line_segments: bool,
 }
 
 /// The active annotation scale a host applies while building representations.
@@ -159,12 +162,18 @@ impl RepresentationContext {
             stamp,
             fonts: None,
             annotation_scale: None,
+            packed_line_segments: false,
         }
     }
 
     /// Attach a font set so text can be outlined into drawable polylines.
     pub fn with_fonts(mut self, fonts: Arc<FontEngine>) -> Self {
         self.fonts = Some(fonts);
+        self
+    }
+
+    pub fn with_packed_line_segments(mut self) -> Self {
+        self.packed_line_segments = true;
         self
     }
 

@@ -26,3 +26,6 @@ apps/app-android/assets/fonts/*
 *.plot.png
 *.plot.svg
 *.plot.pdf
+
+# Local deepwork progress (not project artifacts)
+.slim/deepwork/
