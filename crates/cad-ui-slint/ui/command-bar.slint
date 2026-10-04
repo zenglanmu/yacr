@@ -1,4 +1,4 @@
-import { HorizontalBox, VerticalBox, LineEdit } from "std-widgets.slint";
+import { HorizontalBox, VerticalBox, LineEdit, TextEdit, ScrollView } from "std-widgets.slint";
 import { Button } from "button.slint";
 import { CadTheme } from "theme.slint";
 
@@ -13,6 +13,11 @@ export component CadCommandBar inherits Rectangle {
     in property <string> fit-label;
     in property <string> mode-label;
     in property <bool> mode-work;
+    // Host-owned submitted command text, not command output or diagnostics.
+    in property <[string]> history-entries;
+    in property <string> history-label;
+    in property <string> clear-history-label;
+    in property <bool> keyboard-shortcuts-enabled: false;
     in-out property <bool> expanded: false;
     property <string> input;
     callback open();
@@ -20,7 +25,10 @@ export component CadCommandBar inherits Rectangle {
     callback fit();
     callback mode-toggled();
     callback submit(string);
-    height: root.expanded ? 146px : (root.phone ? 64px : 58px);
+    // The host owns the cursor and draft: -1 is older, +1 is newer.
+    callback recall(int, string) -> string;
+    callback clear-history();
+    height: root.expanded ? (root.phone ? 304px : 280px) : (root.phone ? 64px : 58px);
     background: CadTheme.chrome;
     VerticalBox {
         padding: 6px; spacing: 4px;
@@ -34,13 +42,37 @@ export component CadCommandBar inherits Rectangle {
             // a primary-row control.
             if !root.phone : Button { text: root.mode-label; checked: root.mode-work; min-height: 36px; clicked => { root.mode-toggled(); } }
             if !root.phone : Text { text: root.title; color: CadTheme.ink; vertical-alignment: center; }
-            LineEdit {
+            FocusScope {
                 min-width: 0px;
                 horizontal-stretch: 1;
                 min-height: root.phone ? 48px : 36px;
-                placeholder-text: root.prompt;
-                text <=> root.input;
-                accepted => { root.submit(root.input); root.input = ""; }
+                forward-focus: command-input;
+                // Capture only unmodified arrows within the command editor.
+                // Other keys reach LineEdit, including its local undo/redo.
+                capture-key-pressed(event) => {
+                    if !root.keyboard-shortcuts-enabled || event.modifiers.control
+                        || event.modifiers.alt || event.modifiers.meta || event.modifiers.shift {
+                        return EventResult.reject;
+                    }
+                    if event.text == Key.UpArrow {
+                        root.input = root.recall(-1, root.input);
+                        return EventResult.accept;
+                    }
+                    if event.text == Key.DownArrow {
+                        root.input = root.recall(1, root.input);
+                        return EventResult.accept;
+                    }
+                    return EventResult.reject;
+                }
+                command-input := LineEdit {
+                    width: parent.width;
+                    height: parent.height;
+                    min-width: 0px;
+                    placeholder-text: root.prompt;
+                    accessible-label: root.prompt;
+                    text <=> root.input;
+                    accepted => { root.submit(root.input); root.input = ""; }
+                }
             }
             Button { text: root.expanded ? "v" : "^"; min-width: 48px; preferred-width: 48px; min-height: root.phone ? 48px : 36px; clicked => { root.expanded = !root.expanded; } }
         }
@@ -49,6 +81,43 @@ export component CadCommandBar inherits Rectangle {
             if root.phone : Button { text: root.mode-label; checked: root.mode-work; min-height: 48px; clicked => { root.mode-toggled(); } }
             Button { text: root.tools-label; min-height: 48px; clicked => { root.tools(); } }
             Button { text: root.fit-label; min-height: 48px; clicked => { root.fit(); } }
+        }
+        if root.expanded : HorizontalBox {
+            padding: 0px; spacing: 4px;
+            Text {
+                text: root.history-label;
+                color: CadTheme.muted;
+                min-width: 0px;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Button {
+                text: root.clear-history-label;
+                symbol: "×"; icon-only: true;
+                min-width: 48px; preferred-width: 48px;
+                min-height: root.phone ? 48px : 36px;
+                enabled: root.history-entries.length > 0;
+                clicked => { root.clear-history(); }
+            }
+        }
+        if root.expanded : ScrollView {
+            height: 104px;
+            min-width: 0px;
+            VerticalBox {
+                padding: 0px; spacing: 4px; alignment: start;
+                // Each submitted command is selectable/copyable independently.
+                // Long entries scroll within their editor; the archive scrolls
+                // across entries without growing the command bar.
+                for entry in root.history-entries : TextEdit {
+                    text: entry;
+                    read-only: true;
+                    accessible-label: root.history-label;
+                    min-width: 0px;
+                    height: 48px;
+                    wrap: word-wrap;
+                }
+            }
         }
     }
 }
