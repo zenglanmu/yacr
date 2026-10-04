@@ -248,12 +248,20 @@ impl SceneCache {
     ///
     /// Returns the number of chunks evicted. `evict(0)` is the maintenance call
     /// after publishing; a caller that needs room for a known batch passes its
-    /// byte size so the cache is made to fit first. Eviction is what makes
+    /// byte size so the cache is made to fit first. A request larger than the
+    /// entire budget is rejected without evicting any chunks. Eviction is what makes
     /// [`SceneBudget::cpu_bytes`] a hard ceiling: the live cache never holds
     /// more than `used_bytes()` bytes counting toward the budget.
     pub fn evict(&mut self, required_bytes: usize) -> CadResult<usize> {
+        if required_bytes > self.budget.cpu_bytes {
+            return Err(CadError::InvalidInput(format!(
+                "scene cache reservation of {required_bytes} bytes exceeds CPU budget of {} bytes",
+                self.budget.cpu_bytes
+            )));
+        }
+        let available_bytes = self.budget.cpu_bytes - required_bytes;
         let mut evicted = 0usize;
-        while self.used_bytes + required_bytes > self.budget.cpu_bytes {
+        while self.used_bytes > available_bytes {
             let Some(oldest) = self.chunks.keys().next().copied() else {
                 break;
             };

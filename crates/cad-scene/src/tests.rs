@@ -263,6 +263,36 @@ fn lines_batch_has_no_triangles_or_normals() {
 }
 
 #[test]
+fn line_topologies_do_not_consume_the_triangle_budget() {
+    let mut cache = SceneCache::default();
+    let mut points = unit_points();
+    points.extend(unit_points());
+    points.extend(unit_points());
+    let delta = cache
+        .build(&line_representation(1, points), stamp())
+        .unwrap();
+    let mut batch = delta.added[0].clone();
+    let budget = FrameBudget {
+        max_vertices: 6,
+        max_triangles: 0,
+        max_bytes: usize::MAX,
+    };
+    for topology in [RenderTopology::Lines, RenderTopology::MeshEdges] {
+        batch.topology = topology;
+        assert_eq!(batch.triangle_count(), 0);
+        let mut usage = FrameUsage::default();
+        budget
+            .charge(&mut usage, batch.vertices.len(), batch.triangle_count())
+            .unwrap();
+        assert_eq!(usage.vertices, 6);
+        assert_eq!(usage.triangles, 0);
+    }
+    // Non-indexed mesh batches retain their triangle-list fallback.
+    batch.topology = RenderTopology::Mesh;
+    assert_eq!(batch.triangle_count(), 2);
+}
+
+#[test]
 fn out_of_range_triangle_indices_are_dropped_not_uploaded() {
     let mut mesh = quad();
     mesh.triangles.push([0, 1, 9]); // index 9 does not exist
@@ -320,6 +350,51 @@ fn frame_budget_reports_over_byte_limit() {
     assert_eq!(exceeded.limit, 100);
     // The rejected charge did not apply.
     assert_eq!(usage.bytes, 60);
+}
+
+#[test]
+fn frame_budget_rejects_counter_overflow_without_changing_usage() {
+    let budget = FrameBudget {
+        max_vertices: usize::MAX,
+        max_triangles: usize::MAX,
+        max_bytes: usize::MAX,
+    };
+    let mut usage = FrameUsage {
+        vertices: usize::MAX,
+        triangles: usize::MAX,
+        bytes: usize::MAX,
+    };
+    let before = usage;
+    assert_eq!(
+        budget.charge(&mut usage, 1, 0),
+        Err(BudgetExceeded {
+            category: "vertices",
+            requested: usize::MAX,
+            limit: usize::MAX,
+        })
+    );
+    assert_eq!(usage, before);
+    assert_eq!(
+        budget.charge(&mut usage, 0, 1),
+        Err(BudgetExceeded {
+            category: "triangles",
+            requested: usize::MAX,
+            limit: usize::MAX,
+        })
+    );
+    assert_eq!(usage, before);
+    assert_eq!(
+        budget.charge_bytes(&mut usage, 1),
+        Err(BudgetExceeded {
+            category: "bytes",
+            requested: usize::MAX,
+            limit: usize::MAX,
+        })
+    );
+    assert_eq!(usage, before);
+    budget.charge(&mut usage, 0, 0).unwrap();
+    budget.charge_bytes(&mut usage, 0).unwrap();
+    assert_eq!(usage, before);
 }
 
 #[test]
@@ -420,6 +495,48 @@ fn scene_cache_accounts_cpu_bytes_and_evicts_over_budget() {
     cache.publish(delta, &stamp()).unwrap();
     assert!(cache.total_cpu_bytes() <= 40);
     assert_eq!(cache.chunk_count(), 1);
+}
+
+#[test]
+fn impossible_cache_reservation_preserves_live_chunks_and_accounting() {
+    let mut cache = SceneCache::new(SceneBudget {
+        cpu_bytes: 48,
+        ..Default::default()
+    });
+    let delta = cache
+        .build(&line_representation(1, unit_points()), stamp())
+        .unwrap();
+    cache.publish(delta, &stamp()).unwrap();
+    let before: Vec<_> = cache.chunks().cloned().collect();
+    for required_bytes in [49, usize::MAX] {
+        assert!(matches!(
+            cache.evict(required_bytes),
+            Err(CadError::InvalidInput(_))
+        ));
+        assert_eq!(cache.chunks().cloned().collect::<Vec<_>>(), before);
+        assert_eq!(cache.used_bytes(), 24);
+    }
+    assert_eq!(cache.evict(24), Ok(0));
+    assert_eq!(cache.evict(48), Ok(1));
+    assert_eq!(cache.chunk_count(), 0);
+    assert_eq!(cache.used_bytes(), 0);
+}
+
+#[test]
+fn cache_reservation_near_usize_max_does_not_overflow() {
+    let mut cache = SceneCache::new(SceneBudget {
+        cpu_bytes: usize::MAX,
+        ..Default::default()
+    });
+    let delta = cache
+        .build(&line_representation(1, unit_points()), stamp())
+        .unwrap();
+    cache.publish(delta, &stamp()).unwrap();
+    assert_eq!(cache.evict(usize::MAX - 24), Ok(0));
+    assert_eq!(cache.used_bytes(), 24);
+    assert_eq!(cache.evict(usize::MAX), Ok(1));
+    assert_eq!(cache.chunk_count(), 0);
+    assert_eq!(cache.used_bytes(), 0);
 }
 
 #[test]

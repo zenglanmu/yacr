@@ -102,7 +102,9 @@ pub struct RenderBatch {
 
 impl RenderBatch {
     pub fn triangle_count(&self) -> usize {
-        if self.topology == RenderTopology::Mesh && !self.indices.is_empty() {
+        if self.topology != RenderTopology::Mesh {
+            0
+        } else if !self.indices.is_empty() {
             self.indices.len()
         } else {
             self.vertices.len() / 3
