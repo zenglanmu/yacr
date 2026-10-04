@@ -80,6 +80,9 @@ pub enum CommandId {
     FitDrawing,
     ResetView,
     ToggleLayer,
+    /// Atomically publish a nonempty batch of temporary layer overrides.
+    /// Allowed in Viewer and Work; no drawing write, reparse or undo entry.
+    SetLayerVisibilities,
     RestoreLayers,
     SwitchSpace,
     Select,
@@ -540,6 +543,9 @@ pub enum CommandPayload {
     Annotation(Box<AnnotationCommand>),
     Points(Vec<Point3>),
     Layer(LayerId, bool),
+    /// Distinct existing layer ids and their temporary visibility values.
+    /// Empty batches and duplicate ids (including equal values) are invalid.
+    LayerVisibilities(Vec<(LayerId, bool)>),
     Space(SpaceId),
     StandardView(StandardView),
     Backend(BackendChoice),
