@@ -76,6 +76,13 @@ impl FontCatalog {
             if file.trim().is_empty() {
                 continue;
             }
+            // Catalog files are names inside the granted font directory, not
+            // paths. Reject rather than silently sanitizing an invalid entry.
+            if !is_safe_reference(file) || bare_name(file) != file {
+                return Err(CadError::InvalidInput(
+                    "font catalog file must be a bare file name".to_string(),
+                ));
+            }
             let names: Vec<String> = entry
                 .get("name")
                 .and_then(Value::as_array)
@@ -133,11 +140,24 @@ impl FontCatalog {
 
 /// Build the fetch URL for a face under `base`.
 ///
-/// Spaces (present in some catalog file names) are percent-encoded so the URL
-/// stays valid; the core does not otherwise rewrite the base.
+/// Encode the UTF-8 file name as one URL path segment, including literal percent
+/// signs, query delimiters and fragments. Catalog parsing rejects paths; manually
+/// constructed faces are reduced to a bare name as a defense in depth.
+/// The host must supply a trusted directory URL; the base is not validated here.
 pub fn face_url(base: &str, face: &FontFace) -> String {
     let base = base.trim_end_matches('/');
-    let file = face.file.replace(' ', "%20");
+    let name = bare_name(&face.file);
+    let mut file = String::new();
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for byte in name.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            file.push(char::from(byte));
+        } else {
+            file.push('%');
+            file.push(char::from(HEX[usize::from(byte >> 4)]));
+            file.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
     format!("{base}/{file}")
 }
 
