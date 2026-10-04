@@ -23,6 +23,9 @@ export component CadCommandBar inherits Rectangle {
     // The host supplies ranked selectors and owns dismissal, including Escape.
     in property <[string]> completion-items;
     in property <string> completion-label;
+    // -1 means no keyboard highlight. A refreshed model never retains a stale row.
+    private property <int> selected-completion-index: -1;
+    changed completion-items => { root.selected-completion-index = -1; }
     in-out property <bool> expanded: false;
     property <string> input;
     callback input-edited(string);
@@ -55,48 +58,57 @@ export component CadCommandBar inherits Rectangle {
                 horizontal-stretch: 1;
                 min-height: root.phone ? 48px : 36px;
                 forward-focus: command-input;
-                // Capture only unmodified arrows within the command editor.
-                // Other keys reach LineEdit, including its local undo/redo.
+                // Only the command editor owns this capture, not archive TextEdits.
+                // Modified keys and local editing shortcuts still reach LineEdit.
                 capture-key-pressed(event) => {
                     if !root.keyboard-shortcuts-enabled || event.modifiers.control
                         || event.modifiers.alt || event.modifiers.meta || event.modifiers.shift {
                         return EventResult.reject;
                     }
                     if event.text == Key.UpArrow {
-                        root.input = root.recall(-1, root.input);
+                        if root.completion-items.length > 0 {
+                            root.selected-completion-index = root.selected-completion-index < 0
+                                ? root.completion-items.length - 1
+                                : max(0, min(root.selected-completion-index - 1, root.completion-items.length - 1));
+                        } else {
+                            root.input = root.recall(-1, root.input);
+                        }
                         return EventResult.accept;
                     }
                     if event.text == Key.DownArrow {
-                        root.input = root.recall(1, root.input);
+                        if root.completion-items.length > 0 {
+                            root.selected-completion-index = min(root.selected-completion-index + 1, root.completion-items.length - 1);
+                        } else {
+                            root.input = root.recall(1, root.input);
+                        }
+                        return EventResult.accept;
+                    }
+                    // Tab fills the highlight or first row, never submits.
+                    if event.text == Key.Tab && root.completion-items.length > 0 {
+                        root.input = root.completion-items[max(0, min(root.selected-completion-index, root.completion-items.length - 1))];
+                        root.selected-completion-index = -1;
+                        command-input.focus();
+                        return EventResult.accept;
+                    }
+                    // Consume the first Enter so LineEdit cannot also submit it.
+                    // Clear the highlight even if the host keeps the same model;
+                    // the next Enter then reaches LineEdit's single submit path.
+                    if event.text == Key.Return && root.selected-completion-index >= 0
+                        && root.selected-completion-index < root.completion-items.length {
+                        root.input = root.completion-items[root.selected-completion-index];
+                        root.selected-completion-index = -1;
+                        command-input.focus();
                         return EventResult.accept;
                     }
                     return EventResult.reject;
                 }
-                FocusScope {
+                command-input := LineEdit {
                     width: parent.width;
                     height: parent.height;
-                    forward-focus: command-input;
-                    command-input := LineEdit {
-                        width: parent.width;
-                        height: parent.height;
-                        placeholder-text: root.prompt;
-                        accessible-label: root.prompt;
-                        text <=> root.input;
-                        accepted => { root.submit(root.input); root.input = ""; }
-                    }
-                    // Tab only fills a selector; Enter remains explicit submission.
-                    capture-key-pressed(event) => {
-                        if !root.keyboard-shortcuts-enabled || event.modifiers.control
-                            || event.modifiers.alt || event.modifiers.meta || event.modifiers.shift {
-                            return EventResult.reject;
-                        }
-                        if event.text == Key.Tab && root.completion-items.length > 0 {
-                            root.input = root.completion-items[0];
-                            command-input.focus();
-                            return EventResult.accept;
-                        }
-                        return EventResult.reject;
-                    }
+                    placeholder-text: root.prompt;
+                    accessible-label: root.prompt;
+                    text <=> root.input;
+                    accepted => { root.submit(root.input); root.input = ""; }
                 }
             }
             Button { text: root.expanded ? "v" : "^"; min-width: 48px; preferred-width: 48px; min-height: root.phone ? 48px : 36px; clicked => { root.expanded = !root.expanded; } }
@@ -175,15 +187,19 @@ export component CadCommandBar inherits Rectangle {
                 height: min(3, root.completion-items.length) * (root.phone ? 48px : 36px);
                 VerticalBox {
                     padding: 0px; spacing: 0px; alignment: start;
-                    for selector in root.completion-items : Button {
+                    for selector[index] in root.completion-items : Button {
                         text: selector;
                         accessible-label: root.completion-label + " " + selector;
+                        checked: index == root.selected-completion-index;
+                        accessible-checkable: true;
+                        accessible-checked: self.checked;
                         min-width: 0px;
                         horizontal-stretch: 1;
                         min-height: root.phone ? 48px : 36px;
                         preferred-height: root.phone ? 48px : 36px;
                         clicked => {
                             root.input = selector;
+                            root.selected-completion-index = -1;
                             command-input.focus();
                         }
                     }

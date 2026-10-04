@@ -13,7 +13,7 @@ fn command_history_interface_is_host_owned_and_catalog_labeled() {
 }
 
 #[test]
-fn command_input_captures_only_gated_unmodified_history_arrows() {
+fn command_input_preserves_gated_unmodified_history_fallback_without_suggestions() {
     assert!(BAR.contains("in property <bool> keyboard-shortcuts-enabled: false;"));
     assert!(BAR.contains("forward-focus: command-input;"));
     let capture = BAR
@@ -31,9 +31,13 @@ fn command_input_captures_only_gated_unmodified_history_arrows() {
     assert!(capture.contains("root.input = root.recall(-1, root.input);"));
     assert!(capture.contains("event.text == Key.DownArrow"));
     assert!(capture.contains("root.input = root.recall(1, root.input);"));
-    assert_eq!(capture.matches("return EventResult.accept;").count(), 2);
+    let arrows = capture.split("// Tab fills").next().unwrap();
+    assert_eq!(arrows.matches("if root.completion-items.length > 0 {").count(), 2);
+    assert!(arrows.contains("} else {\n                            root.input = root.recall(-1, root.input);"));
+    assert!(arrows.contains("} else {\n                            root.input = root.recall(1, root.input);"));
+    assert_eq!(arrows.matches("return EventResult.accept;").count(), 2);
     assert!(capture.contains("return EventResult.reject;"));
-    assert!(!capture.contains("Key.Return"));
+    assert!(!arrows.contains("Key.Return"));
     assert!(!capture.contains("undo"));
     assert!(BAR.contains("accepted => { root.submit(root.input); root.input = \"\"; }"));
 }
