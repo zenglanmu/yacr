@@ -1,4 +1,4 @@
-import { VerticalBox, HorizontalBox, CheckBox, ScrollView } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, CheckBox, ScrollView, LineEdit } from "std-widgets.slint";
 import { Button } from "button.slint";
 import { CadTheme } from "theme.slint";
 export struct LayerRow { id: int, name: string, visible: bool, overridden: bool }
@@ -13,6 +13,14 @@ export component CadPanels inherits Rectangle {
     in property <bool> work;
     in property <[string]> labels;
     in property <[LayerRow]> layers;
+    // Search is presentation-only; never replace the authoritative layer model.
+    // Hosts supply catalog text and the matching count for the no-results state.
+    // -1 means the host has not supplied a count, not a successful empty search.
+    in-out property <string> layer-search-text;
+    in property <string> layer-search-placeholder: root.labels[0];
+    in property <string> layer-search-clear-label;
+    in property <string> layer-search-empty-label;
+    in property <int> layer-matching-count: -1;
     in property <[PropertyRow]> properties;
     in property <[LayoutRow]> layouts;
     in property <[AnnotationRow]> annotations;
@@ -24,10 +32,18 @@ export component CadPanels inherits Rectangle {
     callback restore();
     callback clear-selection();
     callback layer(int, bool);
+    callback layer-search-edited(string);
     callback layout(int);
     callback annotation-select(int);
     callback annotation-delete(int);
     callback annotation-visible(int, bool);
+    changed layer-search-text => { root.layer-search-edited(root.layer-search-text); }
+    pure function layer-matches(name: string) -> bool {
+        // Slint 1.18 has no string contains(); replacement provides substring
+        // matching without experimental model APIs or a reindexed copy.
+        root.layer-search-text == "" ||
+            name.to-lowercase().replace-all(root.layer-search-text.to-lowercase(), "") != name.to-lowercase()
+    }
     min-height: 0px; min-width: 0px;
     preferred-height: 210px;
     background: CadTheme.chrome;
@@ -51,13 +67,39 @@ export component CadPanels inherits Rectangle {
                     min-height: 48px; clicked => { root.section = 2; } }
             }
             if root.section == 0 : Button { text: root.labels[1]; symbol: "layers"; enabled: root.layers.length > 0; min-height: 48px; clicked => { root.restore(); } }
+            if root.section == 0 : HorizontalBox {
+                padding: 0px; spacing: 4px;
+                LineEdit {
+                    min-width: 0px; horizontal-stretch: 1;
+                    min-height: root.phone ? 48px : 36px;
+                    enabled: root.layers.length > 0 || root.layer-search-text != "";
+                    placeholder-text: root.layer-search-placeholder;
+                    accessible-label: root.layer-search-placeholder;
+                    text <=> root.layer-search-text;
+                }
+                if root.layer-search-clear-label != "" : Button {
+                    text: root.layer-search-clear-label; symbol: "×"; icon-only: true;
+                    min-width: 48px; preferred-width: 48px;
+                    min-height: root.phone ? 48px : 36px;
+                    enabled: root.layer-search-text != "";
+                    clicked => { root.layer-search-text = ""; }
+                }
+            }
             if root.section == 0 && root.layers.length == 0 : Text { text: root.labels[3]; color: CadTheme.muted; wrap: word-wrap; }
+            if root.section == 0 && root.layers.length > 0 && root.layer-search-text != "" && root.layer-matching-count == 0 && root.layer-search-empty-label != "" : Text {
+                text: root.layer-search-empty-label; color: CadTheme.muted; wrap: word-wrap;
+            }
             if root.section == 0 : VerticalBox {
             padding: 0px; spacing: 0px;
-            for row[index] in root.layers : CheckBox {
-                min-height: root.phone ? 48px : 36px;
-                text: row.name; checked: row.visible;
-                toggled => { root.layer(index, self.checked); }
+            // Keep the original model index even when earlier rows are hidden.
+            // A conditional child collapses nonmatches instead of leaving gaps.
+            for row[index] in root.layers : VerticalBox {
+                padding: 0px; spacing: 0px;
+                if root.layer-matches(row.name) : CheckBox {
+                    min-height: root.phone ? 48px : 36px;
+                    text: row.name; checked: row.visible;
+                    toggled => { root.layer(index, self.checked); }
+                }
             }
             }
             if root.section == 1 : VerticalBox {
