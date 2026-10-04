@@ -1,4 +1,4 @@
-import { VerticalBox, HorizontalBox, CheckBox, ScrollView, LineEdit } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, CheckBox, ScrollView, LineEdit, TextEdit } from "std-widgets.slint";
 import { Button } from "button.slint";
 import { CadTheme } from "theme.slint";
 export struct LayerRow { id: int, name: string, visible: bool, overridden: bool }
@@ -27,6 +27,7 @@ export component CadPanels inherits Rectangle {
     in property <[DiagnosticRow]> diagnostics;
     in property <string> backend;
     in property <bool> diagnostics-open;
+    in property <string> diagnostics-empty-label;
     in-out property <int> section: 0;
     callback close();
     callback restore();
@@ -57,6 +58,9 @@ export component CadPanels inherits Rectangle {
                 Button { text: root.labels[2]; symbol: "×"; icon-only: true; min-width: 48px; preferred-width: 48px;
                     min-height: 48px; clicked => { root.close(); } }
             }
+            // Diagnostics replace the normal sections, retaining their state.
+            if !root.diagnostics-open : VerticalBox {
+            padding: 0px; spacing: 6px; alignment: start;
             HorizontalBox {
                 alignment: start;
                 Button { text: root.labels[0]; symbol: "layers"; icon-only: true; checked: root.section == 0; min-width: 48px; preferred-width: 48px;
@@ -108,8 +112,23 @@ export component CadPanels inherits Rectangle {
                 Text { text: root.labels[6]; color: CadTheme.accent; }
                 Button { text: root.labels[7]; symbol: "×"; enabled: root.properties.length > 0; min-height: 48px; clicked => { root.clear-selection(); } }
             }
-            if root.properties.length == 0 : Text { text: root.labels[8]; color: CadTheme.muted; }
-            for row in root.properties : Text { text: row.key + ": " + row.value; color: CadTheme.ink; overflow: elide; }
+            if root.properties.length == 0 : Text { text: root.labels[8]; color: CadTheme.muted; wrap: word-wrap; }
+            for row in root.properties : VerticalBox {
+                padding: 0px; spacing: 4px;
+                Text { text: row.key; color: CadTheme.ink; wrap: word-wrap; }
+                // Keep the complete adapter value, including mixed-state text.
+                // The standard editor supports selection, Ctrl+C and scrolling
+                // while read-only prevents keyboard/paste changes to the value.
+                TextEdit {
+                    min-width: 0px; horizontal-stretch: 1; vertical-stretch: 0;
+                    min-height: 48px; preferred-height: root.phone ? 96px : 72px;
+                    text: row.value;
+                    read-only: true; enabled: true; wrap: word-wrap;
+                    accessible-label: row.key;
+                    // Also reject the standard widget's accessibility setter.
+                    accessible-action-set-value(value) => { self.text = row.value; }
+                }
+            }
             }
             if root.section == 2 : VerticalBox {
             padding: 0px;
@@ -122,10 +141,25 @@ export component CadPanels inherits Rectangle {
                 Button { text: root.labels[11]; symbol: "×"; min-height: 48px; enabled: root.work; clicked => { root.annotation-delete(index); } }
             }
             }
-            if root.diagnostics-open : Text { text: root.backend; color: #e6b450; }
-            if root.diagnostics-open && root.diagnostics.length == 0 : Text { text: root.labels[12]; color: #9aa7b8; }
+            }
+            if root.diagnostics-open : Text { text: root.backend; color: CadTheme.ink; wrap: word-wrap; }
+            if root.diagnostics-open && root.diagnostics.length == 0 : Text {
+                text: root.diagnostics-empty-label; color: CadTheme.muted; wrap: word-wrap;
+            }
             if root.diagnostics-open : VerticalBox {
-                for row in root.diagnostics : Text { text: row.code + " " + row.description + " " + row.details; color: #e6b450; wrap: word-wrap; }
+                padding: 0px; spacing: 6px;
+                // Preserve all semantic fields, including object attribution.
+                // Newlines separate supplied data without invented field prose.
+                for row in root.diagnostics : TextEdit {
+                    min-width: 0px; horizontal-stretch: 1; vertical-stretch: 0;
+                    min-height: 96px; preferred-height: root.phone ? 180px : 144px;
+                    text: row.severity + "\n" + row.code + "\n" + row.description + "\n" + row.object + "\n" + row.details;
+                    read-only: true; enabled: true; wrap: word-wrap;
+                    accessible-label: row.code;
+                    accessible-action-set-value(value) => {
+                        self.text = row.severity + "\n" + row.code + "\n" + row.description + "\n" + row.object + "\n" + row.details;
+                    }
+                }
             }
         }
     }
