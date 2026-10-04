@@ -29,6 +29,7 @@ pub mod picking;
 pub mod recovery;
 pub mod render_scene;
 pub mod selection;
+mod select_all;
 pub mod tasks;
 pub mod viewer_config;
 
@@ -86,6 +87,9 @@ pub enum CommandId {
     RestoreLayers,
     SwitchSpace,
     Select,
+    /// Select visible model-space pick items without editing the drawing.
+    /// Requires `CommandPayload::None`; incomplete picking is explicitly refused.
+    SelectAll,
     Measure,
     /// Confirm the points captured by the active open-ended measurement tool.
     ConfirmMeasurement,

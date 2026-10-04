@@ -23,6 +23,7 @@ impl Application {
             return Err(CadError::StaleResult);
         }
         match command.id {
+            CommandId::SelectAll => self.select_all(session, &command),
             CommandId::FitDrawing => self.fit_drawing(session, &command),
             CommandId::RestoreLayers => {
                 // Drop temporary overrides; the drawing's own layer flags remain
