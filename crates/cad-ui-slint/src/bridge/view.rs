@@ -1,7 +1,7 @@
 //! Host-facing snapshots and coalesced CPU preparation, outside render callbacks.
 use super::*;
 use cad_app::render_scene::{OverlayInputs, SnapHint};
-use cad_app::{AnnotationPreview, MeasurementPreview, SelectionSet};
+use cad_app::{MeasurementPreview, SelectionSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewSnapshot {
@@ -27,13 +27,10 @@ pub struct CadView {
     pub(super) handle: UiHandle,
     fonts: Rc<RefCell<Option<Arc<FontEngine>>>>,
     overrides: Rc<RefCell<LayerOverrideSet>>,
-    annotations: IncomingAnnotations,
-    visibility: Rc<RefCell<AnnotationVisibilitySet>>,
-    /// Selection highlight input, kept separate from annotations so selecting an
-    /// object never rebuilds the base drawing or the annotation overlay.
+    /// Selection highlight input, kept separate so selecting an object never
+    /// rebuilds the base drawing.
     selection: Rc<RefCell<SelectionSet>>,
     measurement_preview: Rc<RefCell<Option<MeasurementPreview>>>,
-    annotation_preview: Rc<RefCell<Option<AnnotationPreview>>>,
     /// Resolved object-snap hints fed by the host (from the measurement snap
     /// engine). Drawn as distinct snap-kind markers, gated by
     /// `overlay_visibility.snap_hints` in the controller. Empty by default.
@@ -41,8 +38,7 @@ pub struct CadView {
     /// Which derived overlays the host wants drawn, mirrored from
     /// `ViewerConfig.view.overlays`. Defaults to all-on.
     overlay_visibility: Rc<RefCell<OverlayVisibility>>,
-    /// In-progress drawing/editing preview (drawing-edit §4); drawn through the
-    /// existing annotation preview overlay path.
+    /// In-progress drawing/editing preview (drawing-edit §4).
     draw_preview: Rc<RefCell<Option<cad_app::DrawPreview>>>,
     incoming: IncomingDocument,
     preference: BackendPreference,
@@ -62,11 +58,8 @@ impl CadView {
             state: Rc::new(RefCell::new(BridgeState::default())),
             fonts: Rc::new(RefCell::new(None)),
             overrides: Rc::new(RefCell::new(LayerOverrideSet::new())),
-            annotations: Rc::new(RefCell::new(None)),
-            visibility: Rc::new(RefCell::new(AnnotationVisibilitySet::new())),
             selection: Rc::new(RefCell::new(SelectionSet::new())),
             measurement_preview: Rc::new(RefCell::new(None)),
-            annotation_preview: Rc::new(RefCell::new(None)),
             snap_hints: Rc::new(RefCell::new(Vec::new())),
             overlay_visibility: Rc::new(RefCell::new(OverlayVisibility::default())),
             draw_preview: Rc::new(RefCell::new(None)),
@@ -173,13 +166,6 @@ impl CadView {
             .clone()
             .or_else(|| state.controller.diagnostic.clone())
             .or_else(|| state.runtime.diagnostic.clone())
-            .or_else(|| {
-                state
-                    .controller
-                    .ready
-                    .as_ref()
-                    .and_then(|s| s.annotation_diagnostics.first().map(|d| d.message.clone()))
-            })
             .or_else(|| {
                 state
                     .controller
@@ -321,24 +307,16 @@ impl CadView {
     #[cfg(not(target_arch = "wasm32"))]
     fn preparation_input(&self) -> super::preparation::PreparationInput {
         let snapshot = self.state.borrow().view.clone();
-        let annotation = self.annotation_preview.borrow().clone().or_else(|| {
-            self.draw_preview
-                .borrow()
-                .as_ref()
-                .map(crate::draw::draw_overlay_preview)
-        });
         super::preparation::PreparationInput {
             drawing: self.incoming.borrow().clone(),
             document: snapshot.document,
             space: snapshot.space,
             fonts: self.fonts.borrow().clone(),
             layers: self.overrides.borrow().clone(),
-            annotations: self.annotations.borrow().clone(),
-            visibility: self.visibility.borrow().clone(),
             overlays: OverlayInputs {
                 selection: self.selection.borrow().clone(),
                 measurement: self.measurement_preview.borrow().clone(),
-                annotation,
+                draw_preview: self.draw_preview.borrow().clone(),
                 snap_hints_input: self.snap_hints.borrow().clone(),
                 visibility: *self.overlay_visibility.borrow(),
             },
@@ -355,18 +333,10 @@ impl CadView {
             state.preparation_scheduled = false;
             let doc = view.incoming.borrow().clone();
             let snapshot = state.view.clone();
-            // A real annotation tool preview wins; otherwise an in-progress
-            // drawing preview is drawn through the same overlay path.
-            let annotation_overlay = view.annotation_preview.borrow().clone().or_else(|| {
-                view.draw_preview
-                    .borrow()
-                    .as_ref()
-                    .map(crate::draw::draw_overlay_preview)
-            });
             let overlays = OverlayInputs {
                 selection: view.selection.borrow().clone(),
                 measurement: view.measurement_preview.borrow().clone(),
-                annotation: annotation_overlay,
+                draw_preview: view.draw_preview.borrow().clone(),
                 snap_hints_input: view.snap_hints.borrow().clone(),
                 visibility: *view.overlay_visibility.borrow(),
             };
@@ -377,8 +347,6 @@ impl CadView {
                 view.fonts.borrow().clone(),
                 &view.overrides.borrow(),
                 snapshot.space,
-                view.annotations.borrow().as_deref(),
-                &view.visibility.borrow(),
                 &overlays,
             );
             #[cfg(not(target_arch = "wasm32"))]
@@ -390,8 +358,6 @@ impl CadView {
                     space: snapshot.space,
                     fonts: view.fonts.borrow().clone(),
                     layers: view.overrides.borrow().clone(),
-                    annotations: view.annotations.borrow().clone(),
-                    visibility: view.visibility.borrow().clone(),
                     overlays,
                 })
                 .map(|controller| {
@@ -431,38 +397,11 @@ impl CadView {
         *self.overrides.borrow_mut() = overrides;
         self.request_redraw();
     }
-    pub fn set_annotations(&self, annotations: Arc<AnnotationDatabase>) {
-        if !self
-            .annotations
-            .borrow()
-            .as_ref()
-            .is_some_and(|old| Arc::ptr_eq(old, &annotations))
-        {
-            self.state.borrow_mut().controller.annotations_changed();
-        }
-        *self.annotations.borrow_mut() = Some(annotations);
-        self.request_redraw();
-    }
-    pub fn clear_annotations(&self) {
-        if self.annotations.borrow().is_some() {
-            self.state.borrow_mut().controller.annotations_changed();
-        }
-        *self.annotations.borrow_mut() = None;
-        self.request_redraw();
-    }
-    pub fn set_annotation_visibility(&self, visibility: AnnotationVisibilitySet) {
-        *self.visibility.borrow_mut() = visibility;
-        self.request_redraw();
-    }
-    pub fn annotation_visibility(&self) -> AnnotationVisibilitySet {
-        self.visibility.borrow().clone()
-    }
     /// Store the overlay visibility mirrored from `ViewerConfig.view.overlays`
     /// and request a redraw.
     ///
     /// Visibility is part of the transient overlay fingerprint, so a toggle
-    /// rebuilds only the highlight/preview delta and reuses the base drawing and
-    /// the committed annotation overlay unless `annotations` itself changed.
+    /// rebuilds only the highlight/preview delta and reuses the base drawing.
     pub fn set_overlay_visibility(&self, visibility: OverlayVisibility) {
         if *self.overlay_visibility.borrow() == visibility {
             return;
@@ -476,17 +415,13 @@ impl CadView {
     pub fn overlay_visibility(&self) -> OverlayVisibility {
         *self.overlay_visibility.borrow()
     }
-    pub fn annotations(&self) -> Option<Arc<AnnotationDatabase>> {
-        self.annotations.borrow().clone()
-    }
 
     /// Store the current selection highlight and request a redraw.
     ///
     /// This touches **only** the transient visual overlay: the controller keeps
-    /// the base drawing `Arc` and the annotation overlay `Arc` unless their own
-    /// inputs changed, so changing the selection never re-parses the drawing or
-    /// rebuilds annotation batches. It also does not advance the annotation or
-    /// font revisions.
+    /// the base drawing `Arc` unless its own inputs changed, so changing the
+    /// selection never re-parses the drawing or rebuilds base batches. It also
+    /// does not advance the font revision.
     pub fn set_selection_highlight(&self, selection: SelectionSet) {
         if *self.selection.borrow() == selection {
             return;
@@ -512,23 +447,14 @@ impl CadView {
         self.request_redraw();
     }
 
-    /// Store (or clear) the in-progress annotation preview and request a redraw.
-    pub fn set_annotation_preview(&self, preview: Option<AnnotationPreview>) {
-        if *self.annotation_preview.borrow() == preview {
-            return;
-        }
-        *self.annotation_preview.borrow_mut() = preview;
-        self.state.borrow_mut().overlay_revision += 1;
-        self.request_redraw();
-    }
-
     /// Store the resolved object-snap hints and request a redraw.
     ///
     /// These are the markers the measurement snap engine reports (endpoint,
     /// midpoint, center, …), drawn as distinct shapes by the transient overlay.
     /// An empty vector clears them. Like the selection and previews, this
     /// touches **only** the transient visual overlay: the base drawing `Arc` and
-    /// the annotation overlay `Arc` are reused. Visibility is still gated by
+    /// the base drawing `Arc` is reused unless its own inputs changed.
+    /// Visibility is still gated by
     /// `view.overlays.snapHints`, so a host can feed hints while the user has the
     /// overlay off.
     pub fn set_snap_hints(&self, hints: Vec<SnapHint>) {
@@ -548,9 +474,10 @@ impl CadView {
     /// Store (or clear) the in-progress drawing/editing preview (drawing-edit
     /// §4) and request a redraw. `None` cancels the preview overlay.
     ///
-    /// The preview is drawn through the existing annotation preview overlay (a
-    /// rubber band for line/move/trim, a full circle for circle); committing
-    /// the actual geometry is the command layer's job, never this overlay's.
+    /// The preview is drawn through the shared transient overlay (a
+    /// rubber-band chain for line/move/trim, a full circle for circle);
+    /// committing the actual geometry is the command layer's job, never this
+    /// overlay's.
     pub fn set_draw_preview(&self, preview: Option<cad_app::DrawPreview>) {
         if *self.draw_preview.borrow() == preview {
             return;
@@ -566,7 +493,7 @@ impl CadView {
     }
 
     /// A monotonic counter of transient overlay (selection/preview) changes,
-    /// independent of `annotations_changed`/`fonts_changed`. A host or test can
+    /// independent of `fonts_changed`. A host or test can
     /// observe that selecting an object bumps this without rebuilding the base
     /// drawing.
     pub fn overlay_revision(&self) -> u64 {

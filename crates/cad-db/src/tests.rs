@@ -3,24 +3,6 @@
 use super::*;
 use cad_domain::*;
 
-fn ann(id: u128) -> Annotation {
-    Annotation {
-        id: AnnotationId(id),
-        space: SpaceId::Model,
-        geometry: AnnotationGeometry::Text(Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        }),
-        text: "note".to_string(),
-        style: AnnotationStyle::default(),
-        created_unix_ms: 0,
-        modified_unix_ms: 0,
-        anchor: None,
-        precision: Precision::Analytic,
-    }
-}
-
 #[test]
 fn plot_settings_are_optional_and_default_to_an_explicit_page() {
     use crate::tables::{
@@ -115,70 +97,6 @@ fn plot_settings_for_an_unknown_layout_are_rejected() {
         provenance: PlotProvenance::Imported,
     });
     assert!(result.is_err());
-}
-
-#[test]
-fn transaction_commit_raises_revision_and_is_ordered() {
-    let mut db = AnnotationDatabase::new(DatabaseId(1));
-    let tx = db.begin("create text", TransactionId(7)).unwrap();
-    let mut tx = tx;
-    tx.insert_annotation(ann(10)).unwrap();
-    let changes = tx.commit().unwrap();
-    assert_eq!(changes.before, Revision(0));
-    assert_eq!(changes.after, Revision(1));
-    assert_eq!(changes.changes, vec![ObjectChange::Insert(ObjectId(10))]);
-    assert_eq!(db.revision(), Revision(1));
-    assert!(db.is_dirty());
-    assert!(changes.follows(DatabaseId(1), Revision(0)));
-}
-
-#[test]
-fn dropped_transaction_leaves_no_state() {
-    let mut db = AnnotationDatabase::new(DatabaseId(1));
-    {
-        let mut tx = db.begin("edit", TransactionId(1)).unwrap();
-        tx.insert_annotation(ann(10)).unwrap();
-        tx.rollback();
-    }
-    assert_eq!(db.len(), 0);
-    assert_eq!(db.revision(), Revision(0));
-}
-
-#[test]
-fn failed_transaction_does_not_change_revision() {
-    let mut db = AnnotationDatabase::new(DatabaseId(1));
-    let mut tx = db.begin("delete missing", TransactionId(1)).unwrap();
-    assert!(tx.delete_annotation(AnnotationId(99)).is_err());
-    // Nothing valid was staged, so commit is a no-op rather than a bump.
-    let changes = tx.commit().unwrap();
-    assert!(changes.is_empty());
-    assert_eq!(changes.before, changes.after);
-    assert_eq!(db.revision(), Revision(0));
-    assert_eq!(db.len(), 0);
-}
-
-#[test]
-fn double_modification_in_one_transaction_is_rejected() {
-    let mut db = AnnotationDatabase::new(DatabaseId(1));
-    let mut tx = db.begin("x", TransactionId(1)).unwrap();
-    tx.insert_annotation(ann(1)).unwrap();
-    // Second staged change for the same id is allowed at stage time but the
-    // commit rejects it as an invariant violation.
-    tx.staged.insert(AnnotationId(1), None);
-    assert!(tx.commit().is_err());
-    assert_eq!(db.len(), 0);
-    assert_eq!(db.revision(), Revision(0));
-}
-
-#[test]
-fn export_marking_requires_a_real_revision() {
-    let mut db = AnnotationDatabase::new(DatabaseId(1));
-    assert!(db.mark_exported(Revision(5)).is_err());
-    db.apply_annotation_changes("a", TransactionId(1), vec![(AnnotationId(1), Some(ann(1)))])
-        .unwrap();
-    assert!(db.is_dirty());
-    db.mark_exported(Revision(1)).unwrap();
-    assert!(!db.is_dirty());
 }
 
 #[test]

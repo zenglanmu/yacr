@@ -66,11 +66,8 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_zoom_in_label(messages.text("toolbar.zoom_in", &[]).into());
     ui.set_zoom_out_label(messages.text("toolbar.zoom_out", &[]).into());
     ui.set_measure_label(messages.text("measure.panel", &[]).into());
-    ui.set_annotate_label(messages.text("annotation.panel", &[]).into());
     ui.set_undo_label(messages.text("toolbar.undo", &[]).into());
     ui.set_redo_label(messages.text("toolbar.redo", &[]).into());
-    ui.set_export_label(messages.text("toolbar.export", &[]).into());
-    ui.set_import_label(messages.text("toolbar.import", &[]).into());
     ui.set_diagnostics_label(messages.text("toolbar.diagnostics", &[]).into());
     ui.set_mode_label(messages.text(mode_key(work_mode), &[]).into());
 
@@ -78,21 +75,7 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_measurement_panel_label(messages.text("measure.panel", &[]).into());
     ui.set_measure_confirm_label(messages.text("tool.confirm", &[]).into());
     ui.set_measure_cancel_label(messages.text("tool.cancel", &[]).into());
-    ui.set_measure_save_label(messages.text("measure.save_annotation", &[]).into());
     ui.set_measurement_kind_labels(string_model(&status::measurement_kind_labels(messages)));
-
-    // Annotation panel.
-    ui.set_annotation_panel_label(messages.text("annotation.panel", &[]).into());
-    ui.set_annotate_confirm_label(messages.text("tool.confirm", &[]).into());
-    ui.set_annotate_cancel_label(messages.text("tool.cancel", &[]).into());
-    ui.set_annotation_text_placeholder(messages.text("annotation.text_placeholder", &[]).into());
-    ui.set_annotation_delete_label(messages.text("annotation.delete", &[]).into());
-    ui.set_annotation_search_placeholder(
-        messages.text("annotation.search_placeholder", &[]).into(),
-    );
-    ui.set_annotation_search_clear_label(messages.text("annotation.clear_search", &[]).into());
-    ui.set_annotation_search_empty_label(messages.text("annotation.no_matches", &[]).into());
-    ui.set_annotation_kind_labels(string_model(&status::annotation_kind_labels(messages)));
 
     // Layer + property panels.
     ui.set_layer_panel_label(messages.text("layers.panel", &[]).into());
@@ -159,7 +142,6 @@ pub(crate) fn builtin_ribbon_tab_labels(messages: &MessageSource) -> Vec<String>
         messages.text("ribbon.file", &[]),
         messages.text("ribbon.view", &[]),
         messages.text("ribbon.measure", &[]),
-        messages.text("ribbon.annotate", &[]),
         messages.text("shell.more", &[]),
     ]
 }
@@ -183,8 +165,6 @@ fn ribbon_text(key: &str, messages: &MessageSource) -> String {
 pub(crate) fn ribbon_command_label_key(id: &str) -> &'static str {
     match id {
         "file.open" => "file.open",
-        "file.exportAnnotations" => "toolbar.export",
-        "file.importAnnotations" => "toolbar.import",
         "edit.undo" => "toolbar.undo",
         "edit.redo" => "toolbar.redo",
         "view.fit" => "toolbar.fit",
@@ -200,18 +180,6 @@ pub(crate) fn ribbon_command_label_key(id: &str) -> &'static str {
         "measure.area" => "measure.kind.area",
         "measure.confirm" => "tool.confirm",
         "measure.cancel" => "tool.cancel",
-        "measure.save" => "measure.save_annotation",
-        "annotation.text" => "annotation.kind.text",
-        "annotation.leader" => "annotation.kind.leader",
-        "annotation.rectangle" => "annotation.kind.rectangle",
-        "annotation.ellipse" => "annotation.kind.ellipse",
-        "annotation.freehand" => "annotation.kind.freehand",
-        "annotation.cloud" => "annotation.kind.cloud",
-        "annotation.confirm" => "tool.confirm",
-        "annotation.cancel" => "tool.cancel",
-        "annotation.delete" => "annotation.delete",
-        "annotation.select" => "ribbon.command.annotation_select",
-        "annotation.visibility" => "ribbon.command.annotation_visibility",
         "layer.toggle" => "ribbon.command.layer_toggle",
         "layer.restore" => "layers.restore",
         "layout.switch" => "layout.panel",
@@ -246,8 +214,6 @@ pub(crate) fn ribbon_command_display_code(
 pub(crate) fn ribbon_command_icon(id: &str) -> &'static str {
     match id {
         "file.open" => "▱",
-        "file.exportAnnotations" => "⇧",
-        "file.importAnnotations" => "⇩",
         "edit.undo" => "↶",
         "edit.redo" => "↷",
         "view.fit" => "⊡",
@@ -263,18 +229,6 @@ pub(crate) fn ribbon_command_icon(id: &str) -> &'static str {
         "measure.area" => "▨",
         "measure.confirm" => "✓",
         "measure.cancel" => "×",
-        "measure.save" => "▨",
-        "annotation.text" => "A",
-        "annotation.leader" => "↗",
-        "annotation.rectangle" => "□",
-        "annotation.ellipse" => "ellipse",
-        "annotation.freehand" => "freehand",
-        "annotation.cloud" => "☁",
-        "annotation.confirm" => "✓",
-        "annotation.cancel" => "×",
-        "annotation.delete" => "×",
-        "annotation.select" => "A",
-        "annotation.visibility" => "◉",
         "layer.toggle" => "layers",
         "layer.restore" => "layers",
         "layout.switch" => "layout",
@@ -457,10 +411,6 @@ pub(crate) fn apply_viewer_presentation_with(
     ui.set_show_floating_nav(p.navigation);
     let visible = |id: &str| p.command_visibility.get(id).copied().unwrap_or(false);
     ui.set_cmd_measure_visible(visible("measure.distance"));
-    ui.set_cmd_annotate_visible(visible("annotation.text"));
-    ui.set_cmd_annotation_delete_visible(visible("annotation.delete"));
-    ui.set_cmd_export_visible(visible("file.exportAnnotations"));
-    ui.set_cmd_import_visible(visible("file.importAnnotations"));
     if changed_layout {
         // A user's later explicit open/close toggle must not be clobbered by a
         // mere re-apply at the same breakpoint; only a real layout change resets it.
@@ -507,11 +457,6 @@ pub(crate) fn selected_count_label(messages: &MessageSource, count: usize) -> St
         "properties.selected_count",
         &[("count", &count.to_string())],
     )
-}
-
-/// Localized "N hidden" text for the annotation management panel.
-pub(crate) fn annotation_hidden_label(messages: &MessageSource, count: usize) -> String {
-    messages.text("annotation.hidden_count", &[("count", &count.to_string())])
 }
 
 /// Localized "Renderer backend: X" line for the diagnostics drawer.

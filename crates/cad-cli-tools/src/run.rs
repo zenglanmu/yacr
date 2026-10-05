@@ -47,8 +47,6 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
         CliOperation::Scan => domain(run_scan(&controller))?,
         CliOperation::ProxyReport => domain(run_proxy_report(&controller))?,
         CliOperation::Measure => domain(run_measure(&mut controller, invocation))?,
-        CliOperation::ImportNotes => domain(run_import_notes(&mut controller, invocation))?,
-        CliOperation::ExportNotes => domain(run_export_notes(&mut controller, invocation))?,
         CliOperation::BuildRepresentation => {
             domain(run_build_representation(&controller, fonts.as_ref()))?
         }

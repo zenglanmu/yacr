@@ -45,10 +45,7 @@ async function main() {
   wasmModule = loadedModule;
   setStateKey("host.wasm_loaded");
 
-  const { exportAnnotations, wireFilePickers } = createFileHost(
-    wasmModule,
-    i18n,
-  );
+  const { wireFilePickers } = createFileHost(wasmModule, i18n);
   wireFilePickers();
   installTouchNavigation(wasmModule);
   ignoreWinitHandoff();
@@ -61,12 +58,8 @@ async function main() {
     diagnostics_report: wasmModule.diagnostics_report_json,
     open_document_bytes: (name, bytes) =>
       wasmModule.open_document_bytes(name, bytes),
-    open_requires_decision: wasmModule.open_requires_decision,
-    open_document_decided: (name, bytes, decision) =>
-      wasmModule.open_document_bytes_decided(name, bytes, decision),
     load_fonts: () => wasmModule.load_web_fonts(),
     font_load_report: wasmModule.font_load_report,
-    export_annotations: exportAnnotations,
     set_locale: i18n.setLocale,
     current_locale: i18n.currentLocale,
     // ViewerConfig host API: set/update/query and host-allowed user preferences.
@@ -77,9 +70,6 @@ async function main() {
     config: configHost.config,
     shell_geometry: wasmModule.shell_geometry,
     canvas_hit_test: wasmModule.canvas_hit_test,
-    has_recovery_snapshot: wasmModule.has_recovery_snapshot,
-    restore_recovery_snapshot: wasmModule.restore_recovery_snapshot,
-    discard_recovery_snapshot: wasmModule.discard_recovery_snapshot,
     // Async open (F01): the heartbeat pushes the panel; these expose the raw
     // export and the honest worker capability for diagnostics/headless checks.
     async_open_poll: wasmModule.async_open_poll_json,
@@ -93,7 +83,6 @@ async function main() {
     },
     onFailure: showRecoveryBackend,
   });
-  if (wasmModule.has_recovery_snapshot()) setStateKey("host.recovery_pending");
 
   try {
     const backend = await chooseBackend();

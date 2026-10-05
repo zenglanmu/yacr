@@ -25,12 +25,10 @@ function readSource(relative) {
 const REQUIRED_PANEL_SYMBOLS = [
   "set_layer_state",
   "set_property_state",
-  "set_annotation_state",
   "set_layout_state",
   "set_diagnostics_state",
   "set_selection_highlight",
   "set_measurement_preview",
-  "set_annotation_preview",
   "set_overlay_visibility",
 ];
 
@@ -40,7 +38,6 @@ const REQUIRED_PANEL_SYMBOLS = [
 const REQUIRED_HANDLE_SETTERS = [
   "set_layer_state",
   "set_property_state",
-  "set_annotation_state",
   "set_layout_state",
   "set_diagnostics_state",
 ];

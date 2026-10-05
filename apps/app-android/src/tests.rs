@@ -220,11 +220,9 @@ fn android_panel_snapshot_is_derived_from_real_state() {
     assert_eq!(snapshot.layers.rows.len(), 2);
     assert_eq!(snapshot.layer_ids, vec![LayerId(0), LayerId(1)]);
 
-    // No selection and no annotations => explicit empty panels, no fake rows.
+    // No selection => explicit empty panels, no fake rows.
     assert!(snapshot.properties.rows.is_empty());
     assert_eq!(snapshot.properties.count, 0);
-    assert!(snapshot.annotations.rows.is_empty());
-    assert!(snapshot.annotation_ids.is_empty());
     // The demo has no paper layouts; the panel is explicitly empty.
     assert!(snapshot.layouts.rows.is_empty());
     assert!(snapshot.layout_ids.is_empty());
@@ -364,7 +362,6 @@ fn android_snapshot_carries_an_empty_highlight_for_an_empty_selection() {
     // No selection => explicit empty highlight; no tool => no preview overlay.
     assert!(snapshot.selection.is_empty());
     assert!(snapshot.measurement_preview.is_none());
-    assert!(snapshot.annotation_preview.is_none());
 }
 
 #[test]
@@ -400,7 +397,6 @@ fn android_snapshot_carries_the_real_selection_as_a_highlight() {
     // A selection is not a tool: no preview appears just because something is
     // selected.
     assert!(snapshot.measurement_preview.is_none());
-    assert!(snapshot.annotation_preview.is_none());
 }
 
 #[test]

@@ -58,10 +58,8 @@ pub struct RenderBatch {
     /// Constant per-object alpha in `[0, 1]`. This is the one transparency
     /// channel the batch carries; [`SceneCache::build`] takes it from
     /// `DisplayFragment::alpha`, which the importer resolved from the source
-    /// entity/layer/block (see `docs/render-order.md`). The annotation overlay
-    /// ([`annotations::annotation_batches`]) sets it from the annotation style's
-    /// A channel. The renderer clamps and classifies it (see
-    /// `cad-render-wgpu::geometry::classify_alpha`).
+    /// entity/layer/block (see `docs/render-order.md`). The renderer clamps and
+    /// classifies it (see `cad-render-wgpu::geometry::classify_alpha`).
     pub alpha: f32,
     /// Per-batch colour as normalized sRGB in `[0, 1]`. [`SceneCache::build`]
     /// takes it from `DisplayFragment::color` and sanitises it with
@@ -94,9 +92,7 @@ pub struct RenderBatch {
     /// (on top). The renderer performs a stable sort on this key, so batches with
     /// equal `draw_order` keep the upload order as the final tie-break. The scene
     /// builder currently emits `0` (the importer's `DbEntity::draw_order` is not
-    /// yet reachable through `DisplayFragment`), while the annotation overlay
-    /// uses `AnnotationSceneOptions::draw_order_base` (default 1_000_000) so
-    /// annotations sort after drawing geometry.
+    /// yet reachable through `DisplayFragment`).
     pub draw_order: i64,
 }
 

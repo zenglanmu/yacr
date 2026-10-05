@@ -42,7 +42,6 @@ export component CadRibbon inherits Rectangle {
     }
     in property <[string]> labels;
     in property <[string]> measurements;
-    in property <[string]> annotations;
     in property <[string]> standard-views;
     in property <[string]> backends;
     in property <int> backend-index;
@@ -64,14 +63,13 @@ export component CadRibbon inherits Rectangle {
     callback backend(string);
     callback draw-tool(string);
     callback measure-kind(string);
-    callback annotation-kind(string);
     callback ribbon-command(string);
     // Clamp the active tab index for the configured list; the Rust side resets
     // it to 0 when a config-driven model is pushed, but the phone shortcuts can
     // still set an out-of-range index.
     property <int> config-tab-index: root.config-tabs.length == 0 ? 0 :
         (root.tab < 0 ? 0 : (root.tab >= root.config-tabs.length ? root.config-tabs.length - 1 : root.tab));
-    height: root.phone ? (root.tab == 4 ? 148px : 112px) : (root.expanded ? 144px : 36px);
+    height: root.phone ? (root.tab == 3 ? 148px : 112px) : (root.expanded ? 144px : 36px);
     background: CadTheme.chrome;
     border-color: CadTheme.border; border-width: 1px;
     VerticalBox {
@@ -88,7 +86,7 @@ export component CadRibbon inherits Rectangle {
                     if root.tab == index : Rectangle { y: parent.height - 3px; height: 3px; x: 10px; width: parent.width - 20px; background: CadTheme.accent; }
                     TouchArea { clicked => { root.tab = index; root.expanded = true; } }
                 }
-                Button { text: root.labels[6]; symbol: root.expanded ? "⌃" : "⌄"; icon-only: true;
+                Button { text: root.labels[5]; symbol: root.expanded ? "⌃" : "⌄"; icon-only: true;
                     min-width: 48px; preferred-width: 48px; clicked => { root.expanded = !root.expanded; } }
             }
         }
@@ -159,17 +157,17 @@ export component CadRibbon inherits Rectangle {
                 if !root.config-driven && root.tab == 0 : HorizontalBox {
                     alignment: start;
                     Button { text: root.labels[0]; symbol: "▱"; enabled: root.can-open; stacked: true; min-height: 76px; clicked => { root.action(0); } }
-                    Button { text: root.labels[10]; symbol: "⇧"; enabled: root.can-export; stacked: true; min-height: 76px; clicked => { root.action(10); } }
-                    Button { text: root.labels[11]; symbol: "⇩"; enabled: root.can-import && root.work-mode; stacked: true; min-height: 76px; clicked => { root.action(11); } }
+                    Button { text: root.labels[9]; symbol: "⇧"; enabled: root.can-export; stacked: true; min-height: 76px; clicked => { root.action(10); } }
+                    Button { text: root.labels[10]; symbol: "⇩"; enabled: root.can-import && root.work-mode; stacked: true; min-height: 76px; clicked => { root.action(11); } }
                 }
                 if !root.config-driven && root.tab == 1 : HorizontalBox {
                     alignment: start;
                     Button { text: root.labels[1]; symbol: "⊡"; stacked: true; min-height: 76px; clicked => { root.action(1); } }
-                    Button { text: root.labels[7]; symbol: "▱"; stacked: true; checked: !root.view-3d; min-height: 76px; clicked => { root.action(7); } }
-                    Button { text: root.labels[8]; symbol: "◇"; stacked: true; checked: root.view-3d; min-height: 76px; clicked => { root.action(8); } }
+                    Button { text: root.labels[6]; symbol: "▱"; stacked: true; checked: !root.view-3d; min-height: 76px; clicked => { root.action(7); } }
+                    Button { text: root.labels[7]; symbol: "◇"; stacked: true; checked: root.view-3d; min-height: 76px; clicked => { root.action(8); } }
                     VerticalBox {
                         ComboBox { model: root.standard-views; enabled: root.view-3d; min-height: root.target; selected(value) => { root.standard-view(value); } }
-                        Button { text: root.labels[9]; symbol: "◇"; enabled: root.view-3d; min-height: root.target; clicked => { root.action(9); } }
+                        Button { text: root.labels[8]; symbol: "◇"; enabled: root.view-3d; min-height: root.target; clicked => { root.action(9); } }
                     }
                 }
                 if !root.config-driven && root.tab == 2 : HorizontalBox {
@@ -179,22 +177,12 @@ export component CadRibbon inherits Rectangle {
                         stacked: true; min-height: 76px; enabled: root.work-mode;
                         clicked => { root.measure-kind(label); }
                     }
-                    if !root.phone : Rectangle { width: 1px; background: CadTheme.border; }
-                    if !root.phone : Button { text: root.labels[5]; symbol: "A"; stacked: true; min-height: 76px; enabled: root.work-mode; clicked => { root.tab = 3; } }
                 }
-                if !root.config-driven && root.tab == 3 : HorizontalBox {
-                    alignment: start; spacing: 8px;
-                    for label[index] in root.annotations : Button {
-                        text: label; symbol: index == 0 ? "A" : (index == 1 ? "↗" : (index == 3 ? "ellipse" : (index == 4 ? "freehand" : (index == 5 ? "☁" : "□"))));
-                        stacked: true; min-height: 76px; enabled: root.work-mode;
-                        clicked => { root.annotation-kind(label); }
-                    }
-                }
-                if !root.config-driven && root.tab == 4 : VerticalBox {
+                if !root.config-driven && root.tab == 3 : VerticalBox {
                     HorizontalBox {
                         alignment: start;
-                        Button { text: root.labels[6]; symbol: "layers"; min-height: root.target; clicked => { root.action(6); } }
-                        Button { text: root.labels[12]; symbol: "info"; min-height: root.target; clicked => { root.action(12); } }
+                        Button { text: root.labels[5]; symbol: "layers"; min-height: root.target; clicked => { root.action(6); } }
+                        Button { text: root.labels[11]; symbol: "info"; min-height: root.target; clicked => { root.action(12); } }
                         ComboBox { model: root.backends; enabled: root.can-switch-backend; current-index: root.backend-index; min-height: root.target; selected(value) => { root.backend(value); } }
                     }
                     HorizontalBox {

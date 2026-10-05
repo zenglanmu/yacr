@@ -12,7 +12,7 @@
 use app_linux::{LinuxApp, LinuxOptions};
 use cad_render_wgpu::headless::encode_png;
 use slint::{ComponentHandle, Model as _};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn output_dir() -> Option<PathBuf> {
     let dir = PathBuf::from(std::env::var("YACR_VERIFY_OUTPUT").ok()?);
@@ -113,11 +113,8 @@ fn verify_ui_fixed_scenario_replay() {
         std::process::id()
     ));
     std::fs::create_dir_all(&workspace).unwrap();
-    let export = workspace.join("annotations.json");
     let app = LinuxApp::new(LinuxOptions {
         headless: true,
-        annotation_export: Some(export.clone()),
-        annotation_import: Some(export.clone()),
         ..LinuxOptions::default()
     })
     .unwrap();
@@ -129,8 +126,7 @@ fn verify_ui_fixed_scenario_replay() {
     assert_autocad_dark(&frame_rgba(&app));
 
     // --- measurement: open-ended tool is explicitly confirmable, and cancel
-    //     never writes an annotation -----------------------------------------
-    let annotations_before = ui.get_annotation_rows().row_count();
+    //     never commits -------------------------------------------------------
     ui.invoke_measure_kind_selected(text("measure.kind.polyline").into());
     assert!(ui.get_measurement_active(), "measure start must activate");
     pick_pair(&app);
@@ -140,14 +136,9 @@ fn verify_ui_fixed_scenario_replay() {
     );
     ui.invoke_cancel_measurement_requested();
     assert!(!ui.get_measurement_active(), "cancel must clear the tool");
-    assert_eq!(
-        ui.get_annotation_rows().row_count(),
-        annotations_before,
-        "a cancelled measurement must not write an annotation"
-    );
     shoot(&app, &dir, "01-measure-cancelled");
 
-    // --- measurement: distance auto-completes after two picks, then saves ---
+    // --- measurement: distance auto-completes after two picks ---------------
     ui.invoke_measure_kind_selected(text("measure.kind.distance").into());
     assert!(ui.get_measurement_active());
     pick_pair(&app);
@@ -155,17 +146,7 @@ fn verify_ui_fixed_scenario_replay() {
         !ui.get_measurement_active(),
         "distance auto-completes once both points are captured"
     );
-    assert!(
-        ui.get_measurement_can_save_annotation(),
-        "an evaluated measurement must enable save-as-annotation"
-    );
-    ui.invoke_save_measurement_requested();
-    assert_eq!(
-        ui.get_annotation_rows().row_count(),
-        annotations_before + 1,
-        "save-as-annotation must add one annotation"
-    );
-    shoot(&app, &dir, "02-measure-saved");
+    shoot(&app, &dir, "02-measure-done");
 
     // --- every measurement kind can start and be cancelled without a panic --
     for index in 0..ui.get_measurement_kind_labels().row_count() {
@@ -175,15 +156,7 @@ fn verify_ui_fixed_scenario_replay() {
         ui.invoke_cancel_measurement_requested();
     }
 
-    // --- undo / redo must move the annotation count both ways ---------------
-    assert!(ui.get_can_undo());
-    ui.invoke_undo_requested();
-    assert!(ui.get_can_redo());
-    assert_eq!(ui.get_annotation_rows().row_count(), annotations_before);
-    ui.invoke_redo_requested();
-    assert_eq!(ui.get_annotation_rows().row_count(), annotations_before + 1);
-
-    // --- draw: LINE start -> two picks -> confirm ---------------------------
+    // --- draw: LINE start -> two picks -> confirm, then undo/redo ----------
     assert!(ui.get_work_mode(), "the host starts in Work mode");
     ui.invoke_begin_draw_tool("line".into());
     assert!(ui.get_draw_tool_active(), "LINE capture must start");
@@ -194,71 +167,15 @@ fn verify_ui_fixed_scenario_replay() {
         !ui.get_draw_tool_active(),
         "a committed LINE must end capture"
     );
+    assert!(
+        ui.get_can_undo(),
+        "a committed drawing edit must create history"
+    );
     shoot(&app, &dir, "03-line-committed");
     ui.invoke_undo_requested();
-
-    // --- annotation: text kind, one point, text, confirm --------------------
-    ui.invoke_annotation_kind_selected(text("annotation.kind.text").into());
-    assert!(ui.get_annotation_tool_active(), "TEXT tool must start");
-    let (rect, _) = app.adapter.handle().shell_geometry().unwrap();
-    ui.invoke_canvas_pick((rect[2] * 0.5) as f32, (rect[3] * 0.5) as f32);
-    assert!(
-        !ui.get_annotation_tool_can_confirm(),
-        "TEXT must refuse to confirm before a text payload exists"
-    );
-    ui.invoke_annotation_text_edited("检查批注".into());
-    assert!(
-        ui.get_annotation_tool_can_confirm(),
-        "TEXT with text can confirm"
-    );
-    ui.invoke_confirm_annotation_requested();
-    assert!(
-        !ui.get_annotation_tool_active(),
-        "committed TEXT ends capture"
-    );
-    assert_eq!(ui.get_annotation_rows().row_count(), annotations_before + 2);
-    shoot(&app, &dir, "04-text-annotation");
-
-    // Text needs a host font engine to draw, so add a font-independent
-    // drawable annotation (rectangle auto-commits after two picks) to prove the
-    // committed-annotation overlay really reacts to visibility.
-    ui.invoke_annotation_kind_selected(text("annotation.kind.rectangle").into());
-    assert!(ui.get_annotation_tool_active(), "RECTANGLE tool must start");
-    pick_pair(&app);
-    assert!(
-        !ui.get_annotation_tool_active(),
-        "a rectangle auto-commits once both corners are captured"
-    );
-    assert_eq!(ui.get_annotation_rows().row_count(), annotations_before + 3);
-    shoot(&app, &dir, "04b-rectangle-annotation");
-
-    // --- annotation visibility must change the overlay, and re-showing must
-    //     restore the exact pixels; delete must remove the row ---------------
-    let annotation_count = ui.get_annotation_rows().row_count();
-    let mut overlay_changed = false;
-    for index in 0..annotation_count {
-        let visible = frame(&app);
-        ui.invoke_annotation_visibility_toggled(index as i32, false);
-        if frame(&app) != visible {
-            overlay_changed = true;
-        }
-        ui.invoke_annotation_visibility_toggled(index as i32, true);
-        assert_eq!(
-            frame(&app),
-            visible,
-            "re-showing annotation {index} must restore the exact overlay"
-        );
-    }
-    assert!(
-        overlay_changed,
-        "hiding at least one drawn annotation must change the overlay pixels"
-    );
-    ui.invoke_annotation_delete_requested((annotation_count - 1) as i32);
-    assert_eq!(
-        ui.get_annotation_rows().row_count(),
-        annotation_count - 1,
-        "deleting a row must remove exactly one annotation"
-    );
+    assert!(ui.get_can_redo(), "undoing the LINE must enable redo");
+    ui.invoke_redo_requested();
+    assert!(ui.get_can_undo(), "redoing the LINE must restore undo");
 
     // --- layers: hiding a layer must change the composited scene, and
     //     restoring must bring the exact pixels back -------------------------
@@ -405,20 +322,6 @@ fn verify_ui_fixed_scenario_replay() {
     app.adapter.handle().set_locale("zh-CN").unwrap();
     assert_eq!(ui.get_open_label().to_string(), "打开图纸");
 
-    // --- annotation sidecar round-trips through the host ---------------------
-    ui.invoke_export_requested();
-    let exported = std::fs::read_to_string(&export).expect("export writes a sidecar");
-    assert!(
-        serde_json::from_str::<serde_json::Value>(&exported).is_ok(),
-        "exported annotation sidecar must be valid JSON"
-    );
-    ui.invoke_import_requested();
-    assert!(
-        !ui.get_status_label().contains("失败"),
-        "importing the sidecar we just wrote must not fail: {}",
-        ui.get_status_label()
-    );
-
     // --- command line drives the same real operations as the ribbon ---------
     // AutoCAD convention: the command area is a first-class control surface.
     let ribbon_before = ui.get_ribbon_expanded();
@@ -489,13 +392,6 @@ fn verify_ui_fixed_scenario_replay() {
         !ui.get_measurement_active(),
         "ESC must cancel an active measurement"
     );
-    ui.invoke_annotation_kind_selected(text("annotation.kind.rectangle").into());
-    assert!(ui.get_annotation_tool_active());
-    ui.invoke_command_submitted("ESC".into());
-    assert!(
-        !ui.get_annotation_tool_active(),
-        "ESC must cancel an active annotation tool"
-    );
     ui.invoke_pan_requested();
     assert!(ui.get_pan_active());
     ui.invoke_command_submitted("ESC".into());
@@ -522,5 +418,4 @@ fn verify_ui_fixed_scenario_replay() {
             "canvas {rect:?} must stay inside {size:?}"
         );
     }
-    assert!(Path::new(&export).exists(), "sidecar evidence must exist");
 }

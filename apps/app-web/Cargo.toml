@@ -14,7 +14,6 @@ cad-ui-slint.workspace = true
 cad-app.workspace = true
 cad-platform.workspace = true
 cad-domain.workspace = true
-cad-annotations.workspace = true
 cad-resources.workspace = true
 # Panel-state derivation reads the structured diagnostics model, the pick report
 # shape and the layout descriptors directly.

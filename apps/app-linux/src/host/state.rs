@@ -1,8 +1,8 @@
 //! Fallible state funnel. A failed query is not replaced with an empty success.
 use super::*;
 use cad_ui_slint::{
-    AnnotationPanelState, DiagnosticsPanelState, LayerPanelState, LayoutPanelState,
-    MeasurementUiState, PropertyPanelState,
+    DiagnosticsPanelState, LayerPanelState, LayoutPanelState, MeasurementUiState,
+    PropertyPanelState,
 };
 
 impl Runtime {
@@ -42,16 +42,13 @@ impl Runtime {
         let handles = self.handle.borrow();
         let handle = handles.as_ref().ok_or(CadError::Cancelled)?;
         handle.set_open_available(
-            (!self.options.headless || self.options.drawing.is_some())
-                && !self.loading()
-                && !c.unsaved_signal().dirty,
+            (!self.options.headless || self.options.drawing.is_some()) && !self.loading(),
         )?;
         handle.set_document_name(&c.document_name_hint)?;
         handle.set_history_availability(c.history_availability())?;
         handle.set_mode(c.mode())?;
-        let mut measurement =
+        let measurement =
             MeasurementUiState::from_preview(c.measurement_preview().as_ref(), c.unit_label());
-        measurement.set_can_save_annotation(c.has_last_measurement());
         handle.set_measurement_state(&measurement)?;
         let layers = c.layer_rows()?;
         handle.set_layer_state(
@@ -64,15 +61,6 @@ impl Runtime {
             messages.text("properties.empty", &[]),
             |keys| messages.text("properties.mixed", &[("keys", &keys.join(","))]),
         ))?;
-        let annotations = c.annotation_rows()?;
-        handle.set_annotation_state(
-            &AnnotationPanelState::from_rows(
-                &annotations,
-                c.annotation_preview().as_ref(),
-                messages.text("annotation.empty", &[]),
-            ),
-            &annotations.iter().map(|r| r.id).collect::<Vec<_>>(),
-        )?;
         let drawing = c.drawing().ok_or(CadError::Cancelled)?;
         let layouts = cad_ui_slint::layout_descriptors(&drawing);
         let space = CadView::space_selection(&c.session.active_space).ok_or(CadError::Cancelled)?;
@@ -115,14 +103,7 @@ impl Runtime {
             view.set_layer_overrides(c.session.layer_overrides.clone());
             view.set_selection_highlight(c.selection().clone());
             view.set_measurement_preview(c.measurement_preview());
-            view.set_annotation_preview(c.annotation_preview());
-            view.set_annotation_visibility(c.annotation_visibility().clone());
             view.set_snap_hints(c.snap_hints_near_cursor()?);
-            if let Some(annotations) = c.workspace_annotations() {
-                view.set_annotations(Arc::new(annotations.clone()));
-            } else {
-                view.clear_annotations();
-            }
             view.request_redraw();
         }
         Ok(())

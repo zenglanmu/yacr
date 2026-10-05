@@ -27,8 +27,6 @@ fn command_for(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RibbonCommandAction {
     Open,
-    Export,
-    Import,
     Undo,
     Redo,
     Fit,
@@ -41,11 +39,6 @@ pub enum RibbonCommandAction {
     MeasureKind(&'static str),
     ConfirmMeasurement,
     CancelMeasurement,
-    SaveMeasurement,
-    /// An annotation kind, identified by its machine key.
-    AnnotationKind(&'static str),
-    ConfirmAnnotation,
-    CancelAnnotation,
     RestoreLayers,
     /// A draw/edit tool, identified by its machine key.
     BeginDraw(&'static str),
@@ -65,13 +58,9 @@ pub enum RibbonCommandAction {
 pub fn ribbon_command_unsupported_reason(id: &str) -> &'static str {
     match id {
         "view.orbit" => "ribbon.command_needs_gesture",
-        "view.standard"
-        | "backend.switch"
-        | "layer.toggle"
-        | "layout.switch"
-        | "annotation.delete"
-        | "annotation.select"
-        | "annotation.visibility" => "ribbon.command_needs_target",
+        "view.standard" | "backend.switch" | "layer.toggle" | "layout.switch" => {
+            "ribbon.command_needs_target"
+        }
         _ => "ribbon.command_unsupported",
     }
 }
@@ -85,8 +74,6 @@ pub fn ribbon_command_action(id: &str) -> RibbonCommandAction {
     use RibbonCommandAction::*;
     match id {
         "file.open" => Open,
-        "file.exportAnnotations" => Export,
-        "file.importAnnotations" => Import,
         "edit.undo" => Undo,
         "edit.redo" => Redo,
         "view.fit" => Fit,
@@ -100,15 +87,6 @@ pub fn ribbon_command_action(id: &str) -> RibbonCommandAction {
         "measure.area" => MeasureKind("area"),
         "measure.confirm" => ConfirmMeasurement,
         "measure.cancel" => CancelMeasurement,
-        "measure.save" => SaveMeasurement,
-        "annotation.text" => AnnotationKind("text"),
-        "annotation.leader" => AnnotationKind("leader"),
-        "annotation.rectangle" => AnnotationKind("rectangle"),
-        "annotation.ellipse" => AnnotationKind("ellipse"),
-        "annotation.freehand" => AnnotationKind("freehand"),
-        "annotation.cloud" => AnnotationKind("cloud"),
-        "annotation.confirm" => ConfirmAnnotation,
-        "annotation.cancel" => CancelAnnotation,
         "layer.restore" => RestoreLayers,
         "draw.line" => BeginDraw("line"),
         "draw.circle" => BeginDraw("circle"),
@@ -202,7 +180,6 @@ pub fn overlay_toggle_patch(key: &str, value: bool) -> Option<String> {
         "grid" => "grid",
         "selectionHighlight" => "selectionHighlight",
         "snapHints" => "snapHints",
-        "annotations" => "annotations",
         _ => return None,
     };
     Some(format!(
@@ -269,17 +246,12 @@ impl UiAdapter {
         let selected_kind: Rc<Cell<MeasurementToolKind>> =
             Rc::new(Cell::new(MeasurementToolKind::Distance));
         let measurement_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-        let selected_annotation_kind: Rc<Cell<AnnotationToolKind>> =
-            Rc::new(Cell::new(AnnotationToolKind::Text));
-        let annotation_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-        let annotation_order: Rc<RefCell<Vec<AnnotationId>>> = Rc::new(RefCell::new(Vec::new()));
         let layer_order: Rc<RefCell<Vec<LayerId>>> = Rc::new(RefCell::new(Vec::new()));
         let layout_order: Rc<RefCell<Vec<cad_domain::LayoutId>>> =
             Rc::new(RefCell::new(Vec::new()));
         let messages_slot: Rc<RefCell<MessageSource>> = Rc::new(RefCell::new(messages.clone()));
         let layer_override_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
         let selection_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
-        let annotation_hidden_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
         let view_3d: Rc<Cell<bool>> = Rc::new(Cell::new(false));
         let orbit_last: Rc<Cell<Option<[f64; 2]>>> = Rc::new(Cell::new(None));
         let import_snapshot: Rc<RefCell<Option<cad_app::ImportProgressSnapshot>>> =
@@ -295,7 +267,6 @@ impl UiAdapter {
         crate::command_line::connect(&ui, messages_slot.clone(), viewer_config.clone());
         crate::command_completion_ui::connect(&ui);
         crate::layer_search::connect(&ui);
-        crate::annotation_search::connect(&ui);
 
         {
             // Desktop status-bar overlay toggles. The click must be a real config
@@ -348,8 +319,6 @@ impl UiAdapter {
                 let id = id.as_str();
                 match ribbon_command_action(id) {
                     RibbonCommandAction::Open => ui.invoke_open_requested(),
-                    RibbonCommandAction::Export => ui.invoke_export_requested(),
-                    RibbonCommandAction::Import => ui.invoke_import_requested(),
                     RibbonCommandAction::Undo => ui.invoke_undo_requested(),
                     RibbonCommandAction::Redo => ui.invoke_redo_requested(),
                     RibbonCommandAction::Fit => ui.invoke_fit_requested(),
@@ -379,21 +348,6 @@ impl UiAdapter {
                     }
                     RibbonCommandAction::CancelMeasurement => {
                         ui.invoke_cancel_measurement_requested()
-                    }
-                    RibbonCommandAction::SaveMeasurement => ui.invoke_save_measurement_requested(),
-                    RibbonCommandAction::AnnotationKind(key) => {
-                        if let Some(kind) = cad_app::AnnotationToolKind::from_key(key) {
-                            let label = messages
-                                .borrow()
-                                .text(&status::annotation_kind_key(kind.key()), &[]);
-                            ui.invoke_annotation_kind_selected(label.into());
-                        }
-                    }
-                    RibbonCommandAction::ConfirmAnnotation => {
-                        ui.invoke_confirm_annotation_requested()
-                    }
-                    RibbonCommandAction::CancelAnnotation => {
-                        ui.invoke_cancel_annotation_requested()
                     }
                     RibbonCommandAction::RestoreLayers => ui.invoke_restore_layers_requested(),
                     RibbonCommandAction::BeginDraw(key) => ui.invoke_begin_draw_tool(key.into()),
@@ -484,12 +438,6 @@ impl UiAdapter {
                     viewport,
                     CommandPayload::None,
                 ));
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::CancelAnnotationTool,
-                    &doc,
-                    viewport,
-                    CommandPayload::None,
-                ));
                 if let Some(ui) = weak.upgrade() {
                     ui.set_pan_active(!ui.get_pan_active());
                 }
@@ -567,19 +515,8 @@ impl UiAdapter {
             });
         }
         {
-            // Persist the last confirmed measurement as an annotation (F06/F07).
-            // The command layer refuses with InvalidInput when no record exists;
-            // the shell only enables the button when the host pushed a record.
-            let s = shared.clone();
-            let doc = document;
-            ui.on_save_measurement_requested(move || {
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::SaveMeasurementAsAnnotation,
-                    &doc,
-                    viewport,
-                    CommandPayload::None,
-                ));
-            });
+            // Persisted measurements are transient; there is no annotation
+            // sidecar anymore, so no save affordance is wired.
         }
         {
             // Viewer/Work switch (audit U02). Emits a real `SetMode` command; the
@@ -726,7 +663,6 @@ impl UiAdapter {
             let mapper = pick_mapper.clone();
             let report = ui_weak.clone();
             let active = measurement_active.clone();
-            let annotating = annotation_active.clone();
             let drawing = draw_tool.clone();
             let draw_preview = draw_preview_sink.clone();
             let messages = messages_slot.clone();
@@ -744,9 +680,8 @@ impl UiAdapter {
                 // Ordinary navigation clicks must stay silent; only an active
                 // capture tool turns a click into a pick.
                 let measure = active.get();
-                let annotate = annotating.get();
                 let drafting = drawing.borrow().is_some();
-                if !measure && !annotate && !drafting {
+                if !measure && !drafting {
                     return;
                 }
                 let world = mapper
@@ -777,17 +712,12 @@ impl UiAdapter {
                             publish_draw(&report, &drawing, &draw_preview);
                             return;
                         }
-                        let (id, payload) = if annotate {
-                            (
-                                CommandId::AppendAnnotationPoints,
-                                CommandPayload::AppendAnnotationPoints(vec![world]),
-                            )
-                        } else {
-                            (CommandId::Measure, CommandPayload::Points(vec![world]))
-                        };
-                        let _ = s
-                            .borrow_mut()
-                            .send(command_for(id, &doc, viewport, payload));
+                        let _ = s.borrow_mut().send(command_for(
+                            CommandId::Measure,
+                            &doc,
+                            viewport,
+                            CommandPayload::Points(vec![world]),
+                        ));
                     }
                     None => {
                         // Explicit, never a silent no-op: no mapper (or an
@@ -799,143 +729,6 @@ impl UiAdapter {
                             );
                         }
                     }
-                }
-            });
-        }
-        {
-            // Annotate starts (or restarts) the selected annotation kind instead
-            // of sending a payload-free command (audit U04/F07).
-            let s = shared.clone();
-            let doc = document;
-            let kind = selected_annotation_kind.clone();
-            ui.on_annotate_requested(move || {
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::BeginAnnotationTool,
-                    &doc,
-                    viewport,
-                    CommandPayload::AnnotationTool(kind.get()),
-                ));
-            });
-        }
-        {
-            // Selecting a kind immediately starts that tool; this is the explicit
-            // user choice, not a default. Localized labels map back through the
-            // catalog-built ordering.
-            let s = shared.clone();
-            let doc = document;
-            let kind_slot = selected_annotation_kind.clone();
-            let messages = messages_slot.clone();
-            let weak = ui_weak.clone();
-            ui.on_annotation_kind_selected(move |name| {
-                if let Some(ui) = weak.upgrade() {
-                    ui.set_pan_active(false);
-                }
-                let messages = messages.borrow().clone();
-                let Some(kind) = status::annotation_kind_from_label(&messages, name.as_str())
-                else {
-                    return;
-                };
-                kind_slot.set(kind);
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::BeginAnnotationTool,
-                    &doc,
-                    viewport,
-                    CommandPayload::AnnotationTool(kind),
-                ));
-            });
-        }
-        {
-            let s = shared.clone();
-            let doc = document;
-            ui.on_confirm_annotation_requested(move || {
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::ConfirmAnnotationTool,
-                    &doc,
-                    viewport,
-                    CommandPayload::None,
-                ));
-            });
-        }
-        {
-            let s = shared.clone();
-            let doc = document;
-            ui.on_cancel_annotation_requested(move || {
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::CancelAnnotationTool,
-                    &doc,
-                    viewport,
-                    CommandPayload::None,
-                ));
-            });
-        }
-        {
-            // Text payload for text/leader annotate tools. The shell only sends
-            // it when the active kind requires text; the application validates
-            // that again.
-            let s = shared.clone();
-            let doc = document;
-            ui.on_annotation_text_edited(move |text| {
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::AnnotationText,
-                    &doc,
-                    viewport,
-                    CommandPayload::AnnotationText(text.to_string()),
-                ));
-            });
-        }
-        {
-            // Row click selects the annotation for edit/delete. The adapter
-            // resolves the row index to the exact id from the pushed order.
-            let s = shared.clone();
-            let doc = document;
-            let order = annotation_order.clone();
-            ui.on_annotation_selected(move |index| {
-                let id = usize::try_from(index)
-                    .ok()
-                    .and_then(|i| order.borrow().get(i).copied());
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::SelectAnnotation,
-                    &doc,
-                    viewport,
-                    CommandPayload::SelectAnnotation(id),
-                ));
-            });
-        }
-        {
-            // Delete the selected annotation row (resolved through the order).
-            let s = shared.clone();
-            let doc = document;
-            let order = annotation_order.clone();
-            ui.on_annotation_delete_requested(move |index| {
-                let id = usize::try_from(index)
-                    .ok()
-                    .and_then(|i| order.borrow().get(i).copied());
-                if let Some(id) = id {
-                    let _ = s.borrow_mut().send(command_for(
-                        CommandId::DeleteAnnotationById,
-                        &doc,
-                        viewport,
-                        CommandPayload::DeleteAnnotation(id),
-                    ));
-                }
-            });
-        }
-        {
-            // Annotation visibility toggle: session state only, no transaction.
-            let s = shared.clone();
-            let doc = document;
-            let order = annotation_order.clone();
-            ui.on_annotation_visibility_toggled(move |index, visible| {
-                let id = usize::try_from(index)
-                    .ok()
-                    .and_then(|i| order.borrow().get(i).copied());
-                if let Some(id) = id {
-                    let _ = s.borrow_mut().send(command_for(
-                        CommandId::SetAnnotationVisibility,
-                        &doc,
-                        viewport,
-                        CommandPayload::AnnotationVisibility(id, visible),
-                    ));
                 }
             });
         }
@@ -1206,30 +999,6 @@ impl UiAdapter {
         {
             let s = shared.clone();
             let doc = document;
-            ui.on_export_requested(move || {
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::ExportAnnotations,
-                    &doc,
-                    viewport,
-                    CommandPayload::None,
-                ));
-            });
-        }
-        {
-            let s = shared.clone();
-            let doc = document;
-            ui.on_import_requested(move || {
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::ImportAnnotations,
-                    &doc,
-                    viewport,
-                    CommandPayload::None,
-                ));
-            });
-        }
-        {
-            let s = shared.clone();
-            let doc = document;
             ui.on_diagnostics_requested(move || {
                 let _ = s.borrow_mut().send(command_for(
                     CommandId::Diagnostics,
@@ -1370,15 +1139,11 @@ impl UiAdapter {
             draw_tool,
             selected_kind,
             measurement_active,
-            selected_annotation_kind,
-            annotation_active,
-            annotation_order,
             layer_order,
             layout_order,
             messages: messages_slot,
             layer_override_count,
             selection_count,
-            annotation_hidden_count,
             view_3d,
             work_mode,
             import_snapshot,
@@ -1448,14 +1213,10 @@ impl UiAdapter {
             messages: self.messages.clone(),
             selected_kind: self.selected_kind.clone(),
             measurement_active: self.measurement_active.clone(),
-            selected_annotation_kind: self.selected_annotation_kind.clone(),
-            annotation_active: self.annotation_active.clone(),
-            annotation_order: self.annotation_order.clone(),
             layer_order: self.layer_order.clone(),
             layout_order: self.layout_order.clone(),
             layer_override_count: self.layer_override_count.clone(),
             selection_count: self.selection_count.clone(),
-            annotation_hidden_count: self.annotation_hidden_count.clone(),
             view_3d: self.view_3d.clone(),
             work_mode: self.work_mode.clone(),
             import_snapshot: self.import_snapshot.clone(),
@@ -1498,12 +1259,6 @@ impl UiAdapter {
     /// The measurement algorithm currently selected in the shell.
     pub fn selected_measurement_kind(&self) -> MeasurementToolKind {
         self.selected_kind.get()
-    }
-
-    /// The annotation kind currently selected in the shell (Annotate button and
-    /// canvas picks agree with the selector).
-    pub fn selected_annotation_kind(&self) -> AnnotationToolKind {
-        self.selected_annotation_kind.get()
     }
 
     /// Show the window and run the platform event loop.

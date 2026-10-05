@@ -325,11 +325,9 @@ impl UiHandle {
         self.measurement_active.set(state.active);
         let step = state.step_label.clone();
         let unit = state.unit_label.clone();
-        let can_save = state.can_save_annotation;
         self.with(|ui| {
             ui.set_measurement_active(state.active);
             ui.set_measurement_can_confirm(state.can_confirm);
-            ui.set_measurement_can_save_annotation(can_save);
             ui.set_measurement_kind_index(state.kind_index());
             ui.set_measurement_step_label(step.into());
             ui.set_unit_label(unit.into());
@@ -450,54 +448,6 @@ impl UiHandle {
         })
     }
 
-    /// Push the annotation management + tool panel state (audit F07/F09/U03).
-    ///
-    /// Also records the ordered `AnnotationId`s so a later visibility/delete
-    /// callback can map its row index back to the real annotation.
-    pub fn set_annotation_state(
-        &self,
-        state: &AnnotationPanelState,
-        order: &[AnnotationId],
-    ) -> CadResult<()> {
-        *self.annotation_order.borrow_mut() = order.to_vec();
-        if let Some(kind) = AnnotationToolKind::from_index(state.tool_kind_index) {
-            self.selected_annotation_kind.set(kind);
-        }
-        self.annotation_active.set(state.tool_active);
-        let rows: Vec<AnnotationRow> = state
-            .rows
-            .iter()
-            .map(|row| AnnotationRow {
-                id: row.id,
-                kind: row.kind.clone().into(),
-                text: row.text.clone().into(),
-                visible: row.visible,
-                overridden: row.overridden,
-                selected: row.selected,
-            })
-            .collect();
-        let model = slint::ModelRc::new(slint::VecModel::from(rows));
-        let hidden = state.hidden_count as i32;
-        self.annotation_hidden_count.set(hidden);
-        let empty = state.empty_label.clone();
-        let step = state.tool_step_label.clone();
-        let messages = self.messages.borrow().clone();
-        let hidden_label = annotation_hidden_label(&messages, state.hidden_count);
-        self.with(|ui| {
-            ui.set_annotation_rows(model);
-            crate::annotation_search::refresh(ui);
-            ui.set_annotation_hidden_count(hidden);
-            ui.set_annotation_hidden_label(hidden_label.into());
-            ui.set_annotation_empty_label(empty.into());
-            ui.set_annotation_tool_active(state.tool_active);
-            ui.set_annotation_tool_can_confirm(state.tool_can_confirm);
-            ui.set_annotation_kind_index(state.tool_kind_index);
-            ui.set_annotation_step_label(step.into());
-            ui.set_annotation_requires_text(state.requires_text);
-            ui.set_annotation_text_supplied(state.text_supplied);
-        })
-    }
-
     pub fn set_backend_index(&self, index: i32) -> CadResult<()> {
         self.with(|ui| ui.set_backend_index(index))
     }
@@ -547,17 +497,14 @@ impl UiHandle {
         *self.messages.borrow_mut() = messages.clone();
         let override_count = self.layer_override_count.get().max(0) as usize;
         let selection_count = self.selection_count.get().max(0) as usize;
-        let hidden_count = self.annotation_hidden_count.get().max(0) as usize;
         let override_label = layer_override_label(&messages, override_count);
         let selected_label = selected_count_label(&messages, selection_count);
-        let hidden_label = annotation_hidden_label(&messages, hidden_count);
         let work = self.work_mode.get();
         self.with(|ui| {
             apply_chrome(ui, &messages, work);
             apply_ribbon_config(ui, self.viewer_config.borrow().effective(), &messages);
             ui.set_layer_override_label(override_label.into());
             ui.set_property_selected_label(selected_label.into());
-            ui.set_annotation_hidden_label(hidden_label.into());
         })?;
         self.refresh_import_labels(&messages)?;
         Ok(resolution)
@@ -670,13 +617,7 @@ pub(crate) fn push_config_properties(ui: &YacrWindow, store: &ViewerConfigStore)
     ui.set_overlay_grid(p.overlays.grid);
     ui.set_overlay_selection_highlight(p.overlays.selection_highlight);
     ui.set_overlay_snap_hints(p.overlays.snap_hints);
-    ui.set_overlay_annotations(p.overlays.annotations);
     ui.set_feature_measure(p.features.measure);
-    ui.set_feature_annotation_create(p.features.annotation_create);
-    ui.set_feature_annotation_update(p.features.annotation_update);
-    ui.set_feature_annotation_delete(p.features.annotation_delete);
-    ui.set_feature_annotation_import(p.features.annotation_import);
-    ui.set_feature_annotation_export(p.features.annotation_export);
     ui.set_config_effective_json(store.effective_json().into());
 }
 

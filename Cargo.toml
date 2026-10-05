@@ -12,7 +12,6 @@ members = [
     "crates/cad-scene",
     "crates/cad-render-wgpu",
     "crates/cad-measure",
-    "crates/cad-annotations",
     "crates/cad-proxy",
     "crates/cad-import-acadrust",
     "crates/cad-resources",
@@ -47,7 +46,6 @@ cad-spatial = { path = "crates/cad-spatial" }
 cad-scene = { path = "crates/cad-scene" }
 cad-render-wgpu = { path = "crates/cad-render-wgpu" }
 cad-measure = { path = "crates/cad-measure" }
-cad-annotations = { path = "crates/cad-annotations" }
 cad-proxy = { path = "crates/cad-proxy" }
 cad-import-acadrust = { path = "crates/cad-import-acadrust" }
 cad-resources = { path = "crates/cad-resources" }

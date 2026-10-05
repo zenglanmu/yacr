@@ -251,24 +251,12 @@ pub fn mode_label(messages: &MessageSource, mode: cad_app::AppMode) -> String {
 pub fn measurement_kind_key(kind_key: &str) -> String {
     format!("measure.kind.{kind_key}")
 }
-/// The catalog key for a stable annotation kind key (e.g. `freehand`).
-pub fn annotation_kind_key(kind_key: &str) -> String {
-    format!("annotation.kind.{kind_key}")
-}
 
 /// Every measurement kind label, in `MeasurementToolKind::ALL` order.
 pub fn measurement_kind_labels(messages: &MessageSource) -> Vec<String> {
     cad_app::MeasurementToolKind::ALL
         .iter()
         .map(|kind| messages.text(&measurement_kind_key(kind.key()), &[]))
-        .collect()
-}
-
-/// Every annotation kind label, in `AnnotationToolKind::ALL` order.
-pub fn annotation_kind_labels(messages: &MessageSource) -> Vec<String> {
-    cad_app::AnnotationToolKind::ALL
-        .iter()
-        .map(|kind| messages.text(&annotation_kind_key(kind.key()), &[]))
         .collect()
 }
 
@@ -293,7 +281,7 @@ pub fn standard_view_key(view: cad_app::StandardView) -> String {
 ///
 /// Built from the shared ordering so a chosen row index maps back to the exact
 /// `StandardView` without a second list that could drift (same pattern as the
-/// measurement/annotation kind selectors).
+/// measurement kind selector).
 pub fn standard_view_labels(messages: &MessageSource) -> Vec<String> {
     cad_app::StandardView::ALL
         .iter()
@@ -325,17 +313,6 @@ pub fn measurement_kind_from_label(
         .iter()
         .position(|candidate| candidate == label)
         .and_then(|index| cad_app::MeasurementToolKind::from_index(index as i32))
-}
-
-/// Map a localized combobox label back to an annotation kind.
-pub fn annotation_kind_from_label(
-    messages: &MessageSource,
-    label: &str,
-) -> Option<cad_app::AnnotationToolKind> {
-    annotation_kind_labels(messages)
-        .iter()
-        .position(|candidate| candidate == label)
-        .and_then(|index| cad_app::AnnotationToolKind::from_index(index as i32))
 }
 
 #[cfg(test)]
@@ -445,10 +422,6 @@ mod tests {
             for (index, kind) in cad_app::MeasurementToolKind::ALL.iter().enumerate() {
                 let label = &measurement_kind_labels(&messages)[index];
                 assert_eq!(measurement_kind_from_label(&messages, label), Some(*kind));
-            }
-            for (index, kind) in cad_app::AnnotationToolKind::ALL.iter().enumerate() {
-                let label = &annotation_kind_labels(&messages)[index];
-                assert_eq!(annotation_kind_from_label(&messages, label), Some(*kind));
             }
             // Technical identifiers never resolve to a translated kind.
             assert_eq!(measurement_kind_from_label(&messages, "distance"), None);

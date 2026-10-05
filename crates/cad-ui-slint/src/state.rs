@@ -12,12 +12,6 @@ pub struct MeasurementUiState {
     pub active: bool,
     /// Whether the confirm affordance is valid right now.
     pub can_confirm: bool,
-    /// Whether a confirmed measurement exists to save as an annotation (F06/F07).
-    ///
-    /// Enabled by the host pushing `can_save_annotation` from
-    /// `HostController::has_last_measurement()`; it is never true without a real
-    /// confirmed record.
-    pub can_save_annotation: bool,
     pub kind: MeasurementToolKind,
     /// Human-facing "picked N, need M" step text; empty when idle.
     pub step_label: String,
@@ -29,7 +23,6 @@ impl Default for MeasurementUiState {
         MeasurementUiState {
             active: false,
             can_confirm: false,
-            can_save_annotation: false,
             kind: MeasurementToolKind::Distance,
             step_label: String::new(),
             unit_label: String::new(),
@@ -47,7 +40,6 @@ impl MeasurementUiState {
             Some(preview) => MeasurementUiState {
                 active: true,
                 can_confirm: preview.can_confirm(),
-                can_save_annotation: false,
                 kind: preview.kind,
                 step_label: preview.status_line(),
                 unit_label: unit_label.into(),
@@ -55,21 +47,11 @@ impl MeasurementUiState {
             None => MeasurementUiState {
                 active: false,
                 can_confirm: false,
-                can_save_annotation: false,
                 kind: MeasurementToolKind::Distance,
                 step_label: String::new(),
                 unit_label: unit_label.into(),
             },
         }
-    }
-
-    /// Record whether a confirmed measurement is available to save.
-    ///
-    /// Hosts call this with `HostController::has_last_measurement()` after
-    /// pushing the preview; the save affordance is enabled only when true.
-    pub fn set_can_save_annotation(&mut self, can_save: bool) -> &mut Self {
-        self.can_save_annotation = can_save;
-        self
     }
 
     /// Combobox index for [`MeasurementToolKind::ALL`].
@@ -343,88 +325,6 @@ impl LayoutPanelState {
 pub struct PropertyRowUi {
     pub key: String,
     pub value: String,
-}
-
-/// One annotation row pushed into the shell (audit F09/U03).
-///
-/// As with layers, the `int` id is display-only; the adapter keeps the ordered
-/// `AnnotationId` list so a visibility toggle / delete maps back exactly.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AnnotationRowUi {
-    pub id: i32,
-    pub kind: String,
-    pub text: String,
-    /// Effective visibility the scene should honour.
-    pub visible: bool,
-    /// Whether a temporary session override is active for this annotation.
-    pub overridden: bool,
-    /// Whether this annotation is the current management selection.
-    pub selected: bool,
-}
-
-/// Annotation management panel snapshot (F09) plus the active tool state (F07).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct AnnotationPanelState {
-    pub rows: Vec<AnnotationRowUi>,
-    /// Number of annotations currently hidden by a session override.
-    pub hidden_count: usize,
-    /// Explicit empty-state text shown when there are no annotations.
-    pub empty_label: String,
-    /// Whether an annotation creation tool is running (drives confirm/cancel).
-    pub tool_active: bool,
-    /// Whether the active tool has all its required parameters.
-    pub tool_can_confirm: bool,
-    /// Selected kind index for the tool selector.
-    pub tool_kind_index: i32,
-    /// Human-facing step text from the tool state machine; empty when idle.
-    pub tool_step_label: String,
-    /// Whether the tool's text payload has been supplied (text/leader kinds).
-    pub text_supplied: bool,
-    /// Whether the active kind needs a text payload at all.
-    pub requires_text: bool,
-}
-
-impl AnnotationPanelState {
-    /// Build the panel state from real management rows plus the tool preview.
-    pub fn from_rows(
-        rows: &[cad_app::AnnotationRow],
-        preview: Option<&cad_app::AnnotationPreview>,
-        empty_label: impl Into<String>,
-    ) -> Self {
-        let (active, can_confirm, kind_index, step, text_supplied, requires_text) = match preview {
-            Some(preview) => (
-                true,
-                preview.can_confirm(),
-                preview.kind.index() as i32,
-                preview.status_line(),
-                preview.text_supplied,
-                preview.requires_text,
-            ),
-            None => (false, false, 0, String::new(), false, false),
-        };
-        AnnotationPanelState {
-            rows: rows
-                .iter()
-                .map(|row| AnnotationRowUi {
-                    // Display-only; the adapter keeps the exact ids in order.
-                    id: (row.id.0 & 0xFFFF_FFFF) as i32,
-                    kind: row.kind_label.to_string(),
-                    text: row.text.clone(),
-                    visible: row.visible,
-                    overridden: row.overridden,
-                    selected: row.selected,
-                })
-                .collect(),
-            hidden_count: rows.iter().filter(|r| r.is_hidden()).count(),
-            empty_label: empty_label.into(),
-            tool_active: active,
-            tool_can_confirm: can_confirm,
-            tool_kind_index: kind_index,
-            tool_step_label: step,
-            text_supplied,
-            requires_text,
-        }
-    }
 }
 
 /// Properties-panel snapshot for the current selection.

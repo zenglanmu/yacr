@@ -5,7 +5,7 @@ use cad_app::{
     host::HostController, AppMode, Application, Command, CommandId, CommandPayload, Document,
     SessionState,
 };
-use cad_db::{AnnotationDatabase, DrawingDatabaseBuilder, Layer};
+use cad_db::{DrawingDatabaseBuilder, Layer};
 use cad_domain::{
     CadError, DatabaseId, DocumentId, DocumentIdentity, LayerId, UnitContext, ViewportId,
 };
@@ -36,7 +36,6 @@ fn fixture(mode: AppMode) -> (Application, SessionState) {
         Document {
             id: DocumentId(1),
             drawing: Arc::new(builder.finish().unwrap()),
-            annotations: AnnotationDatabase::new(DatabaseId(2)),
             identity: DocumentIdentity::Temporary(1),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),

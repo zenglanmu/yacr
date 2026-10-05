@@ -489,9 +489,7 @@ impl HostController {
     /// second open supersedes and cancels the first, so only the latest document
     /// can be published.
     pub fn begin_async_open(&mut self, bytes: Arc<[u8]>, label: &str) -> TaskStamp {
-        self.pending_open_guard = self
-            .drawing()
-            .zip(self.workspace_annotations().map(|db| db.revision()));
+        self.pending_open_guard = self.drawing();
         let request = ImportRequest {
             document: self.document_id,
             database: cad_domain::DatabaseId(1),
@@ -528,13 +526,10 @@ impl HostController {
     /// published; a cancelled or superseded job yields [`AsyncOpenPoll::Cancelled`]
     /// and the current document is left untouched (F01 "旧任务丢弃").
     pub fn poll_async_open(&mut self) -> AsyncOpenPoll {
-        if let Some((drawing, annotations)) = &self.pending_open_guard {
+        if let Some(drawing) = &self.pending_open_guard {
             let unchanged = self
                 .drawing()
-                .is_some_and(|current| Arc::ptr_eq(&current, drawing))
-                && self
-                    .workspace_annotations()
-                    .is_some_and(|db| db.revision() == *annotations);
+                .is_some_and(|current| Arc::ptr_eq(&current, drawing));
             if !unchanged {
                 self.cancel_async_open();
             }
@@ -684,36 +679,37 @@ mod tests {
     }
 
     #[test]
-    fn annotation_edits_while_importing_cancel_publication_and_preserve_edits() {
-        use cad_db::{Annotation, AnnotationGeometry, AnnotationStyle};
-        use cad_domain::*;
+    fn drawing_edits_while_importing_cancel_publication_and_preserve_edits() {
         let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
         let before = controller.drawing().unwrap();
+        let entities_before = before.entity_count();
         controller.begin_async_open(dwg_bytes(), "background.dwg");
         controller
-            .apply_annotation(cad_annotations::AnnotationCommand::Create(Annotation {
-                id: AnnotationId(1),
-                space: SpaceId::Model,
-                geometry: AnnotationGeometry::Text(Point3 {
+            .create_line(
+                cad_domain::Point3 {
                     x: 0.0,
                     y: 0.0,
                     z: 0.0,
-                }),
-                text: "preserve edit".into(),
-                style: AnnotationStyle::default(),
-                created_unix_ms: 0,
-                modified_unix_ms: 0,
-                anchor: None,
-                precision: Precision::Analytic,
-            }))
+                },
+                cad_domain::Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
             .unwrap();
         assert!(matches!(
             poll_until_terminal(&mut controller),
             AsyncOpenPoll::Cancelled { .. }
         ));
-        assert!(Arc::ptr_eq(&before, &controller.drawing().unwrap()));
-        assert_eq!(controller.workspace_annotations().unwrap().len(), 1);
-        assert!(controller.unsaved_signal().dirty);
+        // The imported background drawing (4 entities) was never published; the
+        // local drawing edit survives.
+        assert_eq!(
+            controller.drawing().unwrap().entity_count(),
+            entities_before + 1
+        );
+        // The cancelled import never replaced the document identity.
+        assert_eq!(controller.document_name_hint, "yacr-demo");
     }
 
     #[test]

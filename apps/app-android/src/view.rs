@@ -5,14 +5,10 @@ use super::*;
 impl Default for AndroidHostConfiguration {
     fn default() -> Self {
         AndroidHostConfiguration {
-            recovery_enabled: true,
             sample_paths: vec![
                 "/sdcard/Download/yacr-sample.dwg".to_string(),
                 "/storage/emulated/0/Download/yacr-sample.dwg".to_string(),
             ],
-            recovery_directory: None,
-            export_directory: None,
-            unsaved_decision: None,
         }
     }
 }
@@ -74,10 +70,7 @@ impl AndroidViewInput {
     /// also run a selection pick for the same tap.
     fn capture_tool_active(&self) -> bool {
         let controller = self.controller.borrow();
-        matches!(
-            controller.session.tool,
-            cad_app::ToolState::Measuring(_) | cad_app::ToolState::Annotating(_)
-        )
+        matches!(controller.session.tool, cad_app::ToolState::Measuring(_))
     }
 
     /// A real tap with no capture tool: pick the closest entity and select it.

@@ -19,8 +19,6 @@ pub enum CliOperation {
     Scan,
     ProxyReport,
     Measure,
-    ImportNotes,
-    ExportNotes,
     BuildRepresentation,
     FixedViewportRender,
     Plot,
@@ -33,8 +31,6 @@ impl CliOperation {
             "scan" => Some(Self::Scan),
             "proxy-report" => Some(Self::ProxyReport),
             "measure" => Some(Self::Measure),
-            "import-notes" => Some(Self::ImportNotes),
-            "export-notes" => Some(Self::ExportNotes),
             "build-representation" => Some(Self::BuildRepresentation),
             "render" => Some(Self::FixedViewportRender),
             "plot" => Some(Self::Plot),
@@ -49,8 +45,6 @@ impl CliOperation {
             Self::Scan => "scan",
             Self::ProxyReport => "proxy-report",
             Self::Measure => "measure",
-            Self::ImportNotes => "import-notes",
-            Self::ExportNotes => "export-notes",
             Self::BuildRepresentation => "build-representation",
             Self::FixedViewportRender => "render",
             Self::Plot => "plot",
@@ -146,11 +140,8 @@ pub struct CliInvocation {
     pub schema_version: u32,
     pub operation: CliOperation,
     pub input: PathBuf,
-    pub notes: Option<PathBuf>,
     /// Measure input in the input file's coordinate space.
     pub points: Vec<Point3>,
-    /// Annotation import: attach despite a fingerprint mismatch.
-    pub allow_fingerprint_mismatch: bool,
     /// Fonts to shape text with, as `(key, path)`.
     pub fonts: Vec<(String, PathBuf)>,
     /// Optional file that receives the JSON result atomically.
@@ -185,9 +176,7 @@ impl CliInvocation {
             schema_version: CLI_SCHEMA_VERSION,
             operation,
             input: input.into(),
-            notes: None,
             points: Vec::new(),
-            allow_fingerprint_mismatch: false,
             fonts: Vec::new(),
             out: None,
             png: None,

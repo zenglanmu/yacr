@@ -6,8 +6,8 @@ import { CadCommandBar } from "command-bar.slint";
 import { CadCanvas } from "canvas.slint";
 import { Button as ConceptButton } from "button.slint";
 import { CadTheme } from "theme.slint";
-import { CadPanels, LayerRow, PropertyRow, AnnotationRow, DiagnosticRow, LayoutRow } from "panels.slint";
-export { LayerRow, PropertyRow, AnnotationRow, DiagnosticRow, LayoutRow } from "panels.slint";
+import { CadPanels, LayerRow, PropertyRow, DiagnosticRow, LayoutRow } from "panels.slint";
+export { LayerRow, PropertyRow, DiagnosticRow, LayoutRow } from "panels.slint";
 export { RibbonCommandModel, RibbonGroupModel, RibbonTabModel } from "ribbon-model.slint";
 import "../fonts/YacrUI-Regular.otf";
 
@@ -52,8 +52,6 @@ export component YacrWindow inherits Window {
     // Effective per-command visibility (features × preset × commandOverrides).
     // Hidden entries are absent; hiding an entry never disables the command.
     in property <bool> cmd-measure-visible: true;
-    in property <bool> cmd-annotate-visible: true;
-    in property <bool> cmd-annotation-delete-visible: true;
     in property <bool> cmd-export-visible: true;
     in property <bool> cmd-import-visible: true;
     // Data-only readout of the resolved ViewerConfig. Hosts and tests query the
@@ -71,22 +69,15 @@ export component YacrWindow inherits Window {
     in-out property <bool> overlay-grid: true;
     in-out property <bool> overlay-selection-highlight: true;
     in-out property <bool> overlay-snap-hints: true;
-    in-out property <bool> overlay-annotations: true;
     in property <string> overlay-axes-label;
     in property <string> overlay-grid-label;
     in property <string> overlay-snap-hints-label;
     in property <bool> feature-measure: true;
-    in property <bool> feature-annotation-create: true;
-    in property <bool> feature-annotation-update: true;
-    in property <bool> feature-annotation-delete: true;
-    in property <bool> feature-annotation-import: true;
-    in property <bool> feature-annotation-export: true;
     in property <string> more-label;
     in property <string> application-title;
     in property <image> cad-frame;
     in property <string> open-label;
     in property <string> measure-label;
-    in property <string> annotate-label;
     in property <string> status-label;
     in property <bool> work-mode;
     in property <string> mode-label;
@@ -116,13 +107,11 @@ export component YacrWindow inherits Window {
     in property <string> work-mode-label;
     in property <bool> measurement-active;
     in property <bool> measurement-can-confirm;
-    in property <bool> measurement-can-save-annotation;
+    in property <string> measure-confirm-label;
+    in property <string> measure-cancel-label;
     in property <int> measurement-kind-index;
     in property <[string]> measurement-kind-labels;
     in property <string> measurement-panel-label;
-    in property <string> measure-confirm-label;
-    in property <string> measure-cancel-label;
-    in property <string> measure-save-label;
     in property <string> measurement-step-label;
     in property <string> unit-label;
     in property <[string]> backend-labels;
@@ -152,30 +141,6 @@ export component YacrWindow inherits Window {
     in property <string> selection-all-label;
     callback select-all-requested();
     in property <int> selection-count;
-    in property <[AnnotationRow]> annotation-rows;
-    in property <int> annotation-hidden-count;
-    in property <string> annotation-hidden-label;
-    in property <string> annotation-empty-label;
-    in property <string> annotation-search-placeholder;
-    in property <string> annotation-search-clear-label;
-    in property <string> annotation-search-empty-label;
-    in-out property <string> annotation-search-text;
-    in property <int> annotation-matching-count: 0;
-    callback annotation-search-edited(string);
-    changed annotation-search-text => { root.annotation-search-edited(root.annotation-search-text); }
-    in property <bool> annotation-tool-active;
-    in property <bool> annotation-tool-can-confirm;
-    in property <int> annotation-kind-index;
-    in property <[string]> annotation-kind-labels;
-    in property <string> annotation-panel-label;
-    in property <string> annotation-text-placeholder;
-    in property <string> annotation-delete-label;
-    in property <string> annotate-confirm-label;
-    in property <string> annotate-cancel-label;
-    in property <string> annotation-step-label;
-    in property <bool> annotation-requires-text;
-    in property <bool> annotation-text-supplied;
-    in-out property <string> annotation-text-input;
     in property <[LayoutRow]> layout-rows;
     in property <[string]> layout-labels;
     in property <int> layout-active-index: -1;
@@ -238,7 +203,6 @@ export component YacrWindow inherits Window {
     callback command-submitted(string);
     callback open-requested();
     callback measure-requested();
-    callback annotate-requested();
     callback begin-draw-tool(string);
     callback ribbon-command(string);
     callback confirm-draw-requested();
@@ -249,21 +213,13 @@ export component YacrWindow inherits Window {
     callback measure-kind-selected(string);
     callback confirm-measurement-requested();
     callback cancel-measurement-requested();
-    callback save-measurement-requested();
     callback mode-toggled();
     callback layer-visibility-toggled(int, bool);
     callback restore-layers-requested();
     callback clear-selection-requested();
-    callback annotation-kind-selected(string);
-    callback confirm-annotation-requested();
-    callback cancel-annotation-requested();
-    callback annotation-text-edited(string);
-    callback annotation-selected(int);
-    callback annotation-delete-requested(int);
-    callback annotation-visibility-toggled(int, bool);
     callback layout-selected(int);
     // Desktop status-bar overlay toggles: the overlay key ("axes"/"grid"/
-    // "snapHints"/"selectionHighlight"/"annotations") plus the new value.
+    // "snapHints"/"selectionHighlight") plus the new value.
     callback overlay-toggled(string, bool);
     callback toggle-view-mode-requested();
     callback toggle-projection-requested();
@@ -288,7 +244,6 @@ export component YacrWindow inherits Window {
             return true;
         }
         if root.draw-tool-active { root.cancel-draw-requested(); return true; }
-        if root.annotation-tool-active { root.cancel-annotation-requested(); return true; }
         if root.measurement-active { root.cancel-measurement-requested(); return true; }
         if root.pan-active { root.pan-requested(); return true; }
         if root.diagnostics-open {
@@ -387,7 +342,7 @@ export component YacrWindow inherits Window {
                     clicked => { root.import-requested(); } }
                 ConceptButton { text: root.more-label; symbol: "···"; icon-only: true;
                     min-width: 48px; preferred-width: 48px; min-height: root.phone-shell ? 44px : 28px;
-                    clicked => { root.tools-open = !root.tools-open; root.ribbon-expanded = true; root.ribbon-tab = 4; } }
+                    clicked => { root.tools-open = !root.tools-open; root.ribbon-expanded = true; root.ribbon-tab = 3; } }
             }
         }
         if root.application-ui && root.ribbon-visible && !root.phone-shell : CadRibbon {
@@ -396,9 +351,8 @@ export component YacrWindow inherits Window {
             target: root.phone-shell ? 48px : 36px;
             tabs: root.ribbon-tabs;
             measurements: root.measurement-kind-labels;
-            annotations: root.annotation-kind-labels;
             labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
-                root.measure-label, root.annotate-label, root.tools-label, root.view-2d-label,
+                root.measure-label, root.tools-label, root.view-2d-label,
                 root.view-3d-label, root.view-projection-label, root.export-label, root.import-label, root.diagnostics-label];
             standard-views: root.standard-view-labels;
             backends: root.backend-labels;
@@ -417,7 +371,6 @@ export component YacrWindow inherits Window {
             expanded <=> root.ribbon-expanded;
             tab <=> root.ribbon-tab;
             measure-kind(value) => { root.measure-kind-selected(value); }
-            annotation-kind(value) => { root.annotation-kind-selected(value); }
             standard-view(value) => { root.standard-view-selected(value); }
             backend(value) => { root.backend-selected(value); }
             draw-tool(value) => { root.begin-draw-tool(value); }
@@ -428,7 +381,6 @@ export component YacrWindow inherits Window {
                 if id == 2 { root.undo-requested(); }
                 if id == 3 { root.redo-requested(); }
                 if id == 4 { root.measure-requested(); }
-                if id == 5 { root.annotate-requested(); }
                 if id == 6 { root.side-panel-open = !root.side-panel-open; }
                 if (id == 7 && root.view-3d) || (id == 8 && !root.view-3d) { root.toggle-view-mode-requested(); }
                 if id == 9 { root.toggle-projection-requested(); }
@@ -447,16 +399,10 @@ export component YacrWindow inherits Window {
             labels: [root.layer-panel-label, root.layer-restore-label, root.diagnostics-close-label,
                 root.layer-empty-label, root.layout-panel-label, root.layout-model-space-label,
                 root.property-panel-label, root.property-clear-label, root.property-empty-label,
-                root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
                 root.diagnostics-drawer-title];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
             selection-all-label: root.selection-all-label;
             select-all => { root.select-all-requested(); }
-            annotation-search-text <=> root.annotation-search-text;
-            annotation-search-placeholder: root.annotation-search-placeholder;
-            annotation-search-clear-label: root.annotation-search-clear-label;
-            annotation-search-empty-label: root.annotation-search-empty-label;
-            annotation-matching-count: root.annotation-matching-count;
             layers-show-all-label: root.layers-show-all-label;
             layers-hide-all-label: root.layers-hide-all-label;
             all-layers(visible) => { root.layers-visibility-requested(visible); }
@@ -466,16 +412,13 @@ export component YacrWindow inherits Window {
             layer-search-clear-label: root.layer-search-clear-label;
             layer-search-empty-label: root.layer-search-empty-label;
             layer-matching-count: root.layer-matching-count;
-            annotations: root.annotation-rows; diagnostics: root.diagnostics-rows;
+            diagnostics: root.diagnostics-rows;
             diagnostics-open: root.diagnostics-open; backend: root.diagnostics-backend-label;
             close => { root.side-panel-open = false; root.diagnostics-open = false; root.diagnostics-closed(); }
             restore => { root.restore-layers-requested(); }
             clear-selection => { root.clear-selection-requested(); }
             layer(i, v) => { root.layer-visibility-toggled(i, v); }
             layout(i) => { root.layout-selected(i); }
-            annotation-select(i) => { root.annotation-selected(i); }
-            annotation-delete(i) => { root.annotation-delete-requested(i); }
-            annotation-visible(i, v) => { root.annotation-visibility-toggled(i, v); }
         }
         canvas-area := Rectangle {
             horizontal-stretch: 1; min-width: 0px; min-height: 0px; clip: true;
@@ -513,16 +456,10 @@ export component YacrWindow inherits Window {
             labels: [root.layer-panel-label, root.layer-restore-label, root.diagnostics-close-label,
                 root.layer-empty-label, root.layout-panel-label, root.layout-model-space-label,
                 root.property-panel-label, root.property-clear-label, root.property-empty-label,
-                root.annotation-panel-label, root.annotation-empty-label, root.annotation-delete-label,
                 root.diagnostics-drawer-title];
             layers: root.layer-rows; properties: root.property-rows; layouts: root.layout-rows;
             selection-all-label: root.selection-all-label;
             select-all => { root.select-all-requested(); }
-            annotation-search-text <=> root.annotation-search-text;
-            annotation-search-placeholder: root.annotation-search-placeholder;
-            annotation-search-clear-label: root.annotation-search-clear-label;
-            annotation-search-empty-label: root.annotation-search-empty-label;
-            annotation-matching-count: root.annotation-matching-count;
             layers-show-all-label: root.layers-show-all-label;
             layers-hide-all-label: root.layers-hide-all-label;
             all-layers(visible) => { root.layers-visibility-requested(visible); }
@@ -532,36 +469,19 @@ export component YacrWindow inherits Window {
             layer-search-clear-label: root.layer-search-clear-label;
             layer-search-empty-label: root.layer-search-empty-label;
             layer-matching-count: root.layer-matching-count;
-            annotations: root.annotation-rows; diagnostics: root.diagnostics-rows;
+            diagnostics: root.diagnostics-rows;
             diagnostics-open: root.diagnostics-open; backend: root.diagnostics-backend-label;
             close => { root.side-panel-open = false; root.diagnostics-open = false; root.diagnostics-closed(); }
             restore => { root.restore-layers-requested(); }
             clear-selection => { root.clear-selection-requested(); }
             layer(i, v) => { root.layer-visibility-toggled(i, v); }
             layout(i) => { root.layout-selected(i); }
-            annotation-select(i) => { root.annotation-selected(i); }
-            annotation-delete(i) => { root.annotation-delete-requested(i); }
-            annotation-visible(i, v) => { root.annotation-visibility-toggled(i, v); }
         }
         if root.application-ui && root.measurement-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
             ComboBox { model: root.measurement-kind-labels; current-index: root.measurement-kind-index; selected(v) => { root.measure-kind-selected(v); } }
             Button { text: root.measure-confirm-label; enabled: root.measurement-can-confirm; clicked => { root.confirm-measurement-requested(); } }
             Button { text: root.measure-cancel-label; clicked => { root.cancel-measurement-requested(); } }
-        }
-        if root.application-ui && root.measurement-can-save-annotation : HorizontalBox {
-            height: root.phone-shell ? 56px : 44px;
-            Button { text: root.measure-save-label; min-height: root.phone-shell ? 48px : 36px; clicked => { root.save-measurement-requested(); } }
-        }
-        if root.application-ui && root.annotation-tool-active && root.annotation-requires-text : LineEdit {
-            min-height: 48px; placeholder-text: root.annotation-text-placeholder;
-            text <=> root.annotation-text-input; edited(v) => { root.annotation-text-edited(v); }
-        }
-        if root.application-ui && root.annotation-tool-active : HorizontalBox {
-            height: root.phone-shell ? 56px : 44px;
-            ComboBox { model: root.annotation-kind-labels; current-index: root.annotation-kind-index; selected(v) => { root.annotation-kind-selected(v); } }
-            Button { text: root.annotate-confirm-label; enabled: root.annotation-tool-can-confirm; clicked => { root.confirm-annotation-requested(); } }
-            Button { text: root.annotate-cancel-label; clicked => { root.cancel-annotation-requested(); } }
         }
         if root.application-ui && root.draw-tool-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
@@ -653,9 +573,9 @@ export component YacrWindow inherits Window {
             phone: true; target: 48px; expanded: true; tab <=> root.ribbon-tab;
             tabs: root.ribbon-tabs;
             labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
-                root.measure-label, root.annotate-label, root.tools-label, root.view-2d-label,
+                root.measure-label, root.tools-label, root.view-2d-label,
                 root.view-3d-label, root.view-projection-label, root.export-label, root.import-label, root.diagnostics-label];
-            measurements: root.measurement-kind-labels; annotations: root.annotation-kind-labels;
+            measurements: root.measurement-kind-labels;
             standard-views: root.standard-view-labels; backends: root.backend-labels;
             backend-index: root.backend-index; view-3d: root.view-3d; work-mode: root.work-mode;
             can-open: root.can-open; can-import: root.can-import; can-export: root.can-export;
@@ -665,7 +585,6 @@ export component YacrWindow inherits Window {
             overflow-label: root.more-label;
             can-undo: root.work-mode && root.can-undo; can-redo: root.work-mode && root.can-redo;
             measure-kind(value) => { root.measure-kind-selected(value); }
-            annotation-kind(value) => { root.annotation-kind-selected(value); }
             standard-view(value) => { root.standard-view-selected(value); }
             backend(value) => { root.backend-selected(value); }
             draw-tool(value) => { root.begin-draw-tool(value); }
@@ -717,9 +636,6 @@ export component YacrWindow inherits Window {
                 if root.cmd-measure-visible : ConceptButton { text: root.measure-label; symbol: "↔"; stacked: true; min-width: 0px; horizontal-stretch: 1;
                     min-height: 64px; checked: root.tools-open && root.ribbon-tab == 2;
                     clicked => { root.ribbon-tab = 2; root.ribbon-expanded = true; root.tools-open = !root.tools-open; } }
-                if root.cmd-annotate-visible : ConceptButton { text: root.annotate-label; symbol: "□"; stacked: true; min-width: 0px; horizontal-stretch: 1;
-                    min-height: 64px; checked: root.tools-open && root.ribbon-tab == 3;
-                    clicked => { root.ribbon-tab = 3; root.ribbon-expanded = true; root.tools-open = !root.tools-open; } }
                 ConceptButton { text: root.more-label; symbol: "···"; stacked: true; min-width: 0px; horizontal-stretch: 1;
                     min-height: 64px; clicked => { root.command-expanded = !root.command-expanded; } }
             }

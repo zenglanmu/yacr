@@ -6,8 +6,8 @@ use cad_app::{
     SelectionSet, SessionState, ToolState,
 };
 use cad_db::{
-    AnnotationDatabase, BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder,
-    DynamicBlockState, DynamicBlockVisibility, Layer,
+    BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, DynamicBlockState,
+    DynamicBlockVisibility, Layer,
 };
 use cad_domain::*;
 
@@ -74,7 +74,6 @@ fn fixture(builder: DrawingDatabaseBuilder, mode: AppMode) -> (Application, Sess
         Document {
             id: DOC,
             drawing: Arc::new(builder.finish().unwrap()),
-            annotations: AnnotationDatabase::new(DatabaseId(2)),
             identity: DocumentIdentity::Temporary(1),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),

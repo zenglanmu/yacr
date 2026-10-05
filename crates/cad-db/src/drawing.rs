@@ -246,7 +246,6 @@ impl DrawingDatabase {
     //
     // The base drawing is read-only after import (spec §4.3); these methods are
     // the single sanctioned mutation path, mirroring
-    // `AnnotationDatabase::apply_annotation_changes` and
     // `set_block_visibility_state`: validate everything first, then mutate, then
     // raise the revision and publish an ordered ChangeSet. A failure at any point
     // leaves the database and its revision untouched.

@@ -20,8 +20,6 @@ use serde_json::{Map, Value};
 /// `CommandId::Measure`). Unknown ids are rejected, never silently ignored.
 pub const COMMAND_IDS: &[&str] = &[
     "file.open",
-    "file.exportAnnotations",
-    "file.importAnnotations",
     "edit.undo",
     "edit.redo",
     "view.fit",
@@ -37,18 +35,6 @@ pub const COMMAND_IDS: &[&str] = &[
     "measure.area",
     "measure.confirm",
     "measure.cancel",
-    "measure.save",
-    "annotation.text",
-    "annotation.leader",
-    "annotation.rectangle",
-    "annotation.ellipse",
-    "annotation.freehand",
-    "annotation.cloud",
-    "annotation.confirm",
-    "annotation.cancel",
-    "annotation.delete",
-    "annotation.select",
-    "annotation.visibility",
     "layer.toggle",
     "layer.restore",
     "layout.switch",
@@ -268,19 +254,6 @@ const MINIMAL_VISIBLE_COMMANDS: &[&str] = &[
     "measure.area",
     "measure.confirm",
     "measure.cancel",
-    "measure.save",
-    // Annotation tools and their lifecycle/management entries.
-    "annotation.text",
-    "annotation.leader",
-    "annotation.rectangle",
-    "annotation.ellipse",
-    "annotation.freehand",
-    "annotation.cloud",
-    "annotation.confirm",
-    "annotation.cancel",
-    "annotation.delete",
-    "annotation.select",
-    "annotation.visibility",
     // Canvas view navigation and projection/standard-view controls.
     "view.fit",
     "view.pan",
@@ -289,10 +262,8 @@ const MINIMAL_VISIBLE_COMMANDS: &[&str] = &[
     "view.standard",
     "view.projection",
     "view.switch2d3d",
-    // Document open and annotation sidecar transfer.
+    // Document open.
     "file.open",
-    "file.exportAnnotations",
-    "file.importAnnotations",
     // Layer and layout inspection.
     "layer.toggle",
     "layer.restore",
@@ -518,37 +489,12 @@ pub struct UiConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
-pub struct AnnotationFeatures {
-    pub create: bool,
-    pub update: bool,
-    pub delete: bool,
-    pub import: bool,
-    pub export: bool,
-}
-impl Default for AnnotationFeatures {
-    fn default() -> Self {
-        Self {
-            create: true,
-            update: true,
-            delete: true,
-            import: true,
-            export: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct FeaturesConfig {
     pub measure: bool,
-    pub annotations: AnnotationFeatures,
 }
 impl Default for FeaturesConfig {
     fn default() -> Self {
-        Self {
-            measure: true,
-            annotations: AnnotationFeatures::default(),
-        }
+        Self { measure: true }
     }
 }
 
@@ -559,7 +505,6 @@ pub struct ViewOverlays {
     pub grid: bool,
     pub selection_highlight: bool,
     pub snap_hints: bool,
-    pub annotations: bool,
 }
 impl Default for ViewOverlays {
     fn default() -> Self {
@@ -570,7 +515,6 @@ impl Default for ViewOverlays {
             grid: false,
             selection_highlight: true,
             snap_hints: true,
-            annotations: true,
         }
     }
 }
@@ -1242,7 +1186,6 @@ pub struct OverlayVisibility {
     pub grid: bool,
     pub selection_highlight: bool,
     pub snap_hints: bool,
-    pub annotations: bool,
 }
 
 impl Default for OverlayVisibility {
@@ -1255,7 +1198,6 @@ impl Default for OverlayVisibility {
             grid: true,
             selection_highlight: true,
             snap_hints: true,
-            annotations: true,
         }
     }
 }
@@ -1267,7 +1209,6 @@ impl From<ViewOverlays> for OverlayVisibility {
             grid: value.grid,
             selection_highlight: value.selection_highlight,
             snap_hints: value.snap_hints,
-            annotations: value.annotations,
         }
     }
 }
@@ -1276,11 +1217,6 @@ impl From<ViewOverlays> for OverlayVisibility {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureVisibility {
     pub measure: bool,
-    pub annotation_create: bool,
-    pub annotation_update: bool,
-    pub annotation_delete: bool,
-    pub annotation_import: bool,
-    pub annotation_export: bool,
 }
 
 /// The pure presentation model the shell renders. No CAD state is embedded.
@@ -1340,11 +1276,6 @@ impl UiPresentationModel {
         let properties_panel = preset.properties_panel && c.properties_panel.visible;
         let features = FeatureVisibility {
             measure: config.features.measure,
-            annotation_create: config.features.annotations.create,
-            annotation_update: config.features.annotations.update,
-            annotation_delete: config.features.annotations.delete,
-            annotation_import: config.features.annotations.import,
-            annotation_export: config.features.annotations.export,
         };
         let mut command_visibility = BTreeMap::new();
         for id in COMMAND_IDS {
@@ -1385,7 +1316,6 @@ impl UiPresentationModel {
                 grid: config.view.overlays.grid,
                 selection_highlight: config.view.overlays.selection_highlight,
                 snap_hints: config.view.overlays.snap_hints,
-                annotations: config.view.overlays.annotations,
             },
             features,
             command_visibility,
@@ -1415,13 +1345,7 @@ fn required_feature(id: &str) -> Option<fn(&FeatureVisibility) -> bool> {
     if id.starts_with("measure.") {
         return Some(|f: &FeatureVisibility| f.measure);
     }
-    match id {
-        "file.importAnnotations" => Some(|f: &FeatureVisibility| f.annotation_import),
-        "file.exportAnnotations" => Some(|f: &FeatureVisibility| f.annotation_export),
-        "annotation.delete" => Some(|f: &FeatureVisibility| f.annotation_delete),
-        id if id.starts_with("annotation.") => Some(|f: &FeatureVisibility| f.annotation_create),
-        _ => None,
-    }
+    None
 }
 
 #[cfg(test)]
@@ -1441,8 +1365,7 @@ mod tests {
             "visible": true,
             "tabs": [
               { "id": "review", "label": "ribbon.review", "groups": [
-                { "id": "measure", "label": "ribbon.measure", "commands": ["measure.distance", "measure.angle", "measure.area"] },
-                { "id": "annotate", "label": "ribbon.annotate", "commands": ["annotation.text", "annotation.leader", "annotation.cloud"] }
+                { "id": "measure", "label": "ribbon.measure", "commands": ["measure.distance", "measure.angle", "measure.area"] }
               ] }
             ]
           },
@@ -1453,17 +1376,16 @@ mod tests {
           "layoutTabs": { "visible": true },
           "statusBar": { "visible": true }
         },
-        "commandOverrides": { "annotation.cloud": { "visible": false } },
+        "commandOverrides": { "view.pan": { "visible": false } },
         "userCustomization": { "allowedPaths": [
           "ui.components.layerPanel.initiallyOpen",
           "ui.components.propertiesPanel.initiallyOpen"
         ] }
       },
       "features": {
-        "measure": true,
-        "annotations": { "create": true, "update": true, "delete": false, "import": true, "export": true }
+        "measure": true
       },
-      "view": { "overlays": { "axes": true, "grid": false, "selectionHighlight": true, "snapHints": true, "annotations": true } },
+      "view": { "overlays": { "axes": true, "grid": false, "selectionHighlight": true, "snapHints": true } },
       "interaction": { "pointer": true, "touch": true, "keyboardShortcuts": true }
     }"#;
 
@@ -1515,8 +1437,8 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert_eq!(roundtrip, config);
         assert_eq!(config.ui.components.ribbon.tabs.len(), 1);
-        assert_eq!(config.ui.components.ribbon.tabs[0].groups[1].id, "annotate");
-        assert!(!config.features.annotations.delete);
+        assert_eq!(config.ui.components.ribbon.tabs[0].groups[0].id, "measure");
+        assert!(config.features.measure);
         assert_eq!(
             config.ui.user_customization.allowed_paths[0],
             "ui.components.layerPanel.initiallyOpen"
@@ -1834,20 +1756,16 @@ mod tests {
     fn per_command_visibility_combines_features_and_overrides() {
         let mut host = ViewerConfig::default();
         host.features.measure = false;
-        host.features.annotations.delete = false;
-        host.ui.command_overrides.insert(
-            "annotation.cloud".into(),
-            CommandOverride { visible: false },
-        );
+        host.ui
+            .command_overrides
+            .insert("view.pan".into(), CommandOverride { visible: false });
         host.validate().unwrap();
         let p = UiPresentationModel::resolve(&host, [1280.0, 800.0], [0.0; 4], false);
         assert!(!p.command_visibility["measure.distance"]);
         assert!(!p.command_visibility["measure.confirm"]);
-        assert!(!p.command_visibility["annotation.delete"]);
-        assert!(!p.command_visibility["annotation.cloud"]);
-        assert!(p.command_visibility["annotation.text"]);
+        assert!(!p.command_visibility["view.pan"]);
         assert!(p.command_visibility["view.fit"]);
-        assert!(p.command_visibility["file.exportAnnotations"]);
+        assert!(p.command_visibility["file.open"]);
     }
 
     /// The resolved component flags every preset either permits or drops, in the
@@ -1893,8 +1811,8 @@ mod tests {
         // Minimal narrows the command surface explicitly: review/measure stay,
         // authoring/edit commands are hidden. See `MINIMAL_VISIBLE_COMMANDS`.
         assert!(
-            p.command_visibility["measure.distance"] && p.command_visibility["annotation.text"],
-            "minimal keeps the review/annotate surface"
+            p.command_visibility["measure.distance"] && p.command_visibility["view.fit"],
+            "minimal keeps the review/measure and navigation surface"
         );
         assert!(
             !p.command_visibility["draw.line"] && !p.command_visibility["edit.undo"],
@@ -1975,7 +1893,7 @@ mod tests {
             "features.measure=false must hide a whitelisted command under minimal"
         );
         assert!(
-            gated.command_visibility["annotation.text"],
+            gated.command_visibility["view.fit"],
             "an unrelated whitelisted command stays visible under minimal"
         );
         // An override still hides a whitelisted command, and may never re-enable
@@ -2049,8 +1967,6 @@ mod tests {
         assert!(!p.features.measure);
         assert!(!p.touch && p.pointer);
         assert!(p.command_visibility.values().all(|visible| !visible));
-        // Overlays are independent of the application UI (view controls the canvas).
-        assert!(p.overlays.annotations);
         // CanvasOnly is strictly stronger than Minimal: it hides every chrome
         // component minimal keeps.
         let minimal = resolve_preset(Preset::Minimal);
@@ -2114,14 +2030,14 @@ mod tests {
         assert_eq!(parsed.ui.preset, Preset::CanvasOnly);
     }
 
-    fn ribbon_config_with_hidden_cloud() -> (ViewerConfig, BTreeMap<String, bool>) {
+    fn ribbon_config_with_hidden_pan() -> (ViewerConfig, BTreeMap<String, bool>) {
         let config: ViewerConfig = serde_json::from_value(json!({
             "ui": { "components": { "ribbon": { "tabs": [
                 { "id": "review", "label": "ribbon.review", "groups": [
                     { "id": "measure", "label": "ribbon.measure",
                       "commands": ["measure.distance", "measure.area"] },
-                    { "id": "annotate", "label": "ribbon.annotate",
-                      "commands": ["annotation.text", "annotation.cloud"] }
+                    { "id": "view", "label": "ribbon.view",
+                      "commands": ["view.fit", "view.pan"] }
                 ] },
                 { "id": "manage", "label": "ribbon.manage", "groups": [] }
             ] } } }
@@ -2134,7 +2050,7 @@ mod tests {
 
     #[test]
     fn resolve_ribbon_preserves_order_and_label_keys() {
-        let (config, visibility) = ribbon_config_with_hidden_cloud();
+        let (config, visibility) = ribbon_config_with_hidden_pan();
         let resolved = resolve_ribbon(&config, &visibility);
         assert_eq!(resolved.tabs.len(), 2);
         // Order is the config order; labels stay catalog keys, not literals.
@@ -2147,7 +2063,7 @@ mod tests {
                 .iter()
                 .map(|group| group.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["measure", "annotate"]
+            vec!["measure", "view"]
         );
         assert_eq!(resolved.tabs[0].groups[0].label, "ribbon.measure");
         assert_eq!(
@@ -2168,22 +2084,22 @@ mod tests {
 
     #[test]
     fn resolve_ribbon_filters_hidden_commands() {
-        let (mut config, _) = ribbon_config_with_hidden_cloud();
-        config.ui.command_overrides.insert(
-            "annotation.cloud".into(),
-            CommandOverride { visible: false },
-        );
+        let (mut config, _) = ribbon_config_with_hidden_pan();
+        config
+            .ui
+            .command_overrides
+            .insert("view.pan".into(), CommandOverride { visible: false });
         let visibility = UiPresentationModel::resolve(&config, [1280.0, 800.0], [0.0; 4], false)
             .command_visibility;
         let resolved = resolve_ribbon(&config, &visibility);
-        let annotate = &resolved.tabs[0].groups[1];
+        let view_group = &resolved.tabs[0].groups[1];
         assert_eq!(
-            annotate
+            view_group
                 .commands
                 .iter()
                 .map(|command| command.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["annotation.text"]
+            vec!["view.fit"]
         );
     }
 
@@ -2196,7 +2112,7 @@ mod tests {
         assert_eq!(resolved, ResolvedRibbon::default());
 
         // A command absent from the map is treated as hidden, never visible.
-        let (config, _) = ribbon_config_with_hidden_cloud();
+        let (config, _) = ribbon_config_with_hidden_pan();
         let resolved = resolve_ribbon(&config, &BTreeMap::new());
         assert!(resolved
             .tabs

@@ -10,8 +10,6 @@ struct InputKey {
     space: SpaceSelection,
     fonts: usize,
     layers: u64,
-    annotations: usize,
-    annotation_visibility: u64,
     overlays: u64,
 }
 
@@ -21,8 +19,6 @@ pub(super) struct PreparationInput {
     pub space: SpaceSelection,
     pub fonts: Option<Arc<FontEngine>>,
     pub layers: LayerOverrideSet,
-    pub annotations: Option<Arc<AnnotationDatabase>>,
-    pub visibility: AnnotationVisibilitySet,
     pub overlays: OverlayInputs,
 }
 
@@ -40,11 +36,6 @@ impl PreparationInput {
             space: self.space,
             fonts: pointer(&self.fonts),
             layers: self.layers.fingerprint(),
-            annotations: pointer(&self.annotations),
-            annotation_visibility: controller::annotation_fingerprint(
-                self.annotations.as_deref(),
-                &self.visibility,
-            ),
             overlays: controller::overlay_fingerprint(&self.overlays),
         }
     }
@@ -65,25 +56,18 @@ impl NativePreparation {
         if self.worker.is_none() {
             let mut controller = CadSceneController::default();
             let mut fonts = None;
-            let mut annotations = None;
             self.worker = Some(
                 LatestTask::new("cad-scene-preparation", move |input: PreparationInput| {
                     if pointer(&fonts) != pointer(&input.fonts) {
                         controller.fonts_changed();
                     }
-                    if pointer(&annotations) != pointer(&input.annotations) {
-                        controller.annotations_changed();
-                    }
                     fonts = input.fonts.clone();
-                    annotations = input.annotations.clone();
                     controller.prepare_shared_with_overlays(
                         input.drawing,
                         input.document,
                         input.fonts,
                         &input.layers,
                         input.space,
-                        input.annotations.as_deref(),
-                        &input.visibility,
                         &input.overlays,
                     )?;
                     Ok(controller.clone())
@@ -142,8 +126,6 @@ mod tests {
             space: SpaceSelection::Model,
             fonts: None,
             layers: LayerOverrideSet::new(),
-            annotations: None,
-            visibility: AnnotationVisibilitySet::new(),
             overlays: OverlayInputs::default(),
         }
     }

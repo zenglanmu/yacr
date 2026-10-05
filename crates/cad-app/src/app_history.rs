@@ -1,60 +1,17 @@
-//! Undo/redo and leave-preparation commands for [`Application`].
+//! Undo/redo commands for [`Application`].
+//!
+//! Every retained history record is a drawing-entity edit, so undo and redo
+//! apply the patch to the drawing database through its validated write path.
+
 use super::*;
 
 impl Application {
     pub(crate) fn undo(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        // A shared history interleaves annotation and drawing steps. The
-        // top-of-stack marker decides which database the record must be applied
-        // to, so a drawing patch can never reach the annotation store.
-        let document_id = command.document;
-        let is_drawing = self
-            .history
-            .get(&document_id)
-            .map(|h| h.pop_drawing_for_undo())
-            .unwrap_or(false);
-        if is_drawing {
-            return self.undo_drawing(document_id);
-        }
-        let document = self
-            .workspace
-            .documents
-            .get_mut(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let history = self.history.entry(document_id).or_default();
-        let changes = history.undo(&mut document.annotations)?;
-        Ok(CommandOutcome {
-            objects: Vec::new(),
-            changes: Some(changes),
-            diagnostics: Vec::new(),
-            measurement: None,
-            annotation: None,
-        })
+        self.undo_drawing(command.document)
     }
 
     pub(crate) fn redo(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        let document_id = command.document;
-        let is_drawing = self
-            .history
-            .get(&document_id)
-            .map(|h| h.next_redo_is_drawing())
-            .unwrap_or(false);
-        if is_drawing {
-            return self.redo_drawing(document_id);
-        }
-        let document = self
-            .workspace
-            .documents
-            .get_mut(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let history = self.history.entry(document_id).or_default();
-        let changes = history.redo(&mut document.annotations)?;
-        Ok(CommandOutcome {
-            objects: Vec::new(),
-            changes: Some(changes),
-            diagnostics: Vec::new(),
-            measurement: None,
-            annotation: None,
-        })
+        self.redo_drawing(command.document)
     }
 
     /// Undo the top drawing record against the drawing database.
@@ -101,7 +58,6 @@ impl Application {
             changes: Some(changes),
             diagnostics: Vec::new(),
             measurement: None,
-            annotation: None,
         })
     }
 
@@ -143,7 +99,6 @@ impl Application {
             changes: Some(changes),
             diagnostics: Vec::new(),
             measurement: None,
-            annotation: None,
         })
     }
 
@@ -170,51 +125,5 @@ impl Application {
             can_undo: self.can_undo(document),
             can_redo: self.can_redo(document),
         }
-    }
-
-    /// Guard a document switch/exit; an unsaved annotation is never discarded
-    /// without an explicit user decision (spec §16.3).
-    ///
-    /// This is the decision-only half of the leave flow: the host owns the real
-    /// save/recovery writes, so `Save`/`PreserveRecovery` are treated as
-    /// "recorded intent" here and the host confirms the durable write through
-    /// [`Application::resolve_leave`] with the actual write results.
-    pub fn prepare_leave(
-        &mut self,
-        document: DocumentId,
-        decision: UnsavedDecision,
-    ) -> CadResult<()> {
-        match self.resolve_leave(document, decision, true, true) {
-            UnsavedOutcome::Proceed => Ok(()),
-            UnsavedOutcome::Cancelled => Err(CadError::Cancelled),
-            UnsavedOutcome::SaveFailed => Err(CadError::Unsupported(
-                "annotation save must be confirmed by the platform host".into(),
-            )),
-            UnsavedOutcome::RecoveryFailed => Err(CadError::Invariant(
-                "recovery snapshot could not be persisted".into(),
-            )),
-        }
-    }
-
-    /// Apply the unsaved-work decision model and return its structured outcome.
-    ///
-    /// `save_succeeded` / `recovery_succeeded` are the host's results for the
-    /// real atomic export and recovery write. A failed save never proceeds and
-    /// never clears dirty (audit B07); a `Cancel` keeps the current document and
-    /// any recovery data (audit U09). This method performs no writes itself.
-    pub fn resolve_leave(
-        &self,
-        document: DocumentId,
-        decision: UnsavedDecision,
-        save_succeeded: bool,
-        recovery_succeeded: bool,
-    ) -> UnsavedOutcome {
-        let dirty = self
-            .workspace
-            .documents
-            .get(&document)
-            .map(|d| d.annotations.is_dirty())
-            .unwrap_or(false);
-        UnsavedFlow::new(dirty).apply(decision, save_succeeded, recovery_succeeded)
     }
 }

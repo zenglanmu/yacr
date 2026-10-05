@@ -12,7 +12,6 @@ use cad_ui_slint::{
     UiConfiguration, UiHandle,
 };
 
-mod annotations;
 mod async_open;
 pub mod config;
 mod documents;
@@ -25,18 +24,12 @@ mod pick;
 pub mod shell;
 mod state_push;
 
-pub use annotations::{
-    confirm_annotation_export, drop_pending_recovery_snapshot, export_annotations_json,
-    import_annotations_json, pending_recovery_is_valid, pending_recovery_snapshot,
-    restore_pending_recovery_snapshot,
-};
 pub use async_open::{
     poll_and_apply as async_open_poll, worker_available as async_open_worker_available,
 };
-pub use documents::{open_document, open_document_decided, open_needs_decision};
+pub use documents::open_document;
 pub use fonts::{font_report, load_current_fonts};
 use input::{WebSink, WebViewInput};
-use persistence::restore_startup_recovery;
 
 type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
 
@@ -257,13 +250,7 @@ pub async fn start_with_preference(
     );
 
     let backend_label = backend_status(chosen);
-    // Restore any persisted recovery snapshot for the starting document;
-    // only a matching fingerprint is applied, otherwise it is reported and
-    // left for an explicit restore/discard.
-    restore_startup_recovery(&controller, &handle, &view_slot);
-    if !cad_ui_slint::web::has_recovery_snapshot() {
-        let _ = handle.set_status(format!("就绪（{backend_label}）"));
-    }
+    let _ = handle.set_status(format!("就绪（{backend_label}）"));
     // The first push derives every panel from the real application state.
     state_push::push_panel_state(&controller, &handle, &view_slot);
 

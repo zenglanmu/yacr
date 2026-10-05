@@ -47,11 +47,9 @@ use crate::{sanitize_alpha, RenderBatch, RenderTopology};
 
 /// Paint order of the first highlight batch.
 ///
-/// Above the drawing geometry (`0`) but **below** the annotation overlay
-/// (`AnnotationSceneOptions::draw_order_base`, `1_000_000`). A selection is a
-/// transient decoration of the base drawing; committed annotations are the
-/// authoritative markup and stay legible on top of it. Tool previews use a
-/// still-higher order (see `cad_app::render_scene::overlay::PREVIEW_DRAW_ORDER`).
+/// Above the drawing geometry (`0`). A selection is a transient decoration of
+/// the base drawing; tool previews use a still-higher order (see
+/// `cad_app::render_scene::overlay::PREVIEW_DRAW_ORDER`).
 pub const HIGHLIGHT_DRAW_ORDER: i64 = 900_000;
 
 /// Default overlay alpha: visible but not opaque.
@@ -594,7 +592,7 @@ mod tests {
         );
         assert!(
             batch.draw_order < 1_000_000,
-            "below the annotation overlay so committed markup stays on top"
+            "below the tool-preview order so transient markup stays on top"
         );
         assert!((batch.alpha - DEFAULT_HIGHLIGHT_ALPHA).abs() < 1e-6);
         assert_eq!(batch.sources, vec![reference(1, Vec::new(), None)]);

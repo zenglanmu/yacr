@@ -7,7 +7,7 @@ fn property_rows() -> &'static str {
         .split("for row in root.properties : VerticalBox {")
         .nth(1)
         .expect("real property rows")
-        .split("if root.section == 2")
+        .split("if root.diagnostics-open : Text")
         .next()
         .expect("property section")
 }
@@ -67,7 +67,7 @@ fn diagnostics_are_exclusive_without_reindexing_layer_search() {
         .split("if root.diagnostics-open : Text")
         .next()
         .expect("normal section body");
-    for section in 0..=2 {
+    for section in 0..=1 {
         assert!(normal.contains(&format!("if root.section == {section}")));
     }
     assert!(normal.contains("for row[index] in root.layers : VerticalBox"));

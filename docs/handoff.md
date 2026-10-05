@@ -1,5 +1,50 @@
 # 后续 agent 接手入口
 
+## 完全移除用户批注（annotation）模块（2026-10-05，本轮）
+
+按用户明确指示，整体移除用户批注（“批注/annotation”）功能，保留测量（F06）与 DXF
+注释性缩放（annotative scaling，图纸实体特性）。范围与执行证据：
+
+- **删除的 crate 与类型**：`crates/cad-annotations` 整包；`cad-db` 的 `Annotation`/
+  `AnnotationDatabase`/`AnnotationGeometry`/`AnnotationStyle`/`AnchorStatus`/
+  `EntityAnchor`/`validate_annotation`；`cad-domain::AnnotationId`。`MeasurementRecord`/
+  `MeasurementAlgorithm` 从原 `annotation.rs` 迁至新的 `cad-db/src/measurement.rs` 保留。
+- **历史/查询/场景**：`cad-history` 改为仅绘制实体撤销/重做（删除 `AnnotationPatch`/
+  `UndoRecord`/`patch`/标注撤销 API/`MemoryJournal`/`RecoveryJournal` 与共享标记机制）；
+  `cad-query` 删除 `AnnotationRow`/`annotations()`；`cad-scene` 删除 `annotations` 模块。
+- **应用层**：删除 `annotation_tool`/`annotation_list`/`app_annotation` 与全部
+  `CommandId`/`CommandPayload` 标注变体；`SessionState` 删除标注可见性/选择；`Document`
+  删除 `annotations` 字段；`host_files`/unsaved 决策/恢复快照整体移除；`host` 删除
+  标注导入/导出/恢复与 `save_measurement_as_annotation`；`recovery.rs` 仅保留后端结果模型。
+- **绘制预览保留**：绘制/编辑工具的实时预览原先复用标注预览覆盖层，现改为
+  `cad-app::render_scene::overlay::draw_preview_overlay`（`OverlayInputs.draw_preview`），
+  行为等价（LINE/MOVE/TRIM 橡皮筋、CIRCLE 圆），不依赖已删除类型。
+- **UI/宿主**：`cad-ui-slint` 删除标注面板/搜索/工具按钮/命令/预览桥接，`panels.slint`/
+  `app.slint`/`ribbon.slint` 移除标注控件（ribbon 页签重编号为 文件/视图/测量/工具）；
+  i18n 中英文各删除 19 个标注键（221→202，键集仍一致）；`app-linux`/`app-web`/`app-android`
+  删除标注状态推送、sidecar 导入导出、恢复快照与未保存决策；Web JS/HTML 删除
+  `annotation-input`、`export_annotations`、恢复快照入口；CLI 删除 `import-notes`/
+  `export-notes` 与 `--notes`/`--allow-fingerprint-mismatch`。
+- **测量**：`measure.save` 命令、`MeasurementUiState.can_save_annotation`、
+  `StatusModel.unsaved` 等“存为批注/未保存”接口一并移除；测量本身（距离/折线/角度/面积、
+  预览、确认/取消）保持。
+
+**实际执行并通过的门禁**（本机、离线、排除 Android/Web 宿主编译）：
+`cargo fmt --all -- --check`；`cargo clippy --workspace --exclude app-android
+--exclude app-web --all-targets --offline -- -D warnings`；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --offline`
+；`cargo check --workspace --lib --target wasm32-unknown-unknown --offline`（含 UI/Host）；
+`python3 scripts/check-architecture.py`、`check-fixture-manifest.py`、`check-workflows.py`、
+`check-i18n.py`；`node --test scripts/test-web-host.mjs scripts/test-host-panel-parity.mjs`。
+`cargo check -p app-web --target wasm32-unknown-unknown --all-targets --offline` 通过。
+
+**未运行/未闭环**：Android 目标（`aarch64-linux-android` 工具链与本机 target 不可用，
+`--offline` 亦无法获取 `android-activity`）未编译；“各项测试通过”不包含 Android/Web
+浏览器/真实 GPU/真机运行；文档 `CAD_IMPLEMENTATION_SPEC.md` §3.4/§16.3 与
+`docs/architecture.md`、`docs/core-invariants.md`、`docs/compatibility.md`、
+`docs/code-audit-and-agent-handoff.md` 中仍残留 F07/F08/F09 与 `cad-annotations` 引用，
+尚未按“产品已移除该能力”重写，属已知文档债。真实 DWG 端到端见下一节。
+
 1. 阅读规范、AGENTS.md、requirements.md、architecture.md 与最近 Git diff。
    此次恢复中发现并发实现与提交，结束时可能仍有其他实现工作；本文描述的是框架交接，
    请以当前源码和最新构建证据确认状态，不覆盖陌生变更。

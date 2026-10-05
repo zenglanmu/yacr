@@ -1,7 +1,7 @@
 //! Interactive drawing/editing tool: point capture, preview and commit intent.
 //!
 //! Spec v2.0 §4.3/§4.6/§4.7 and `docs/drawing-edit.md` §2/§4. This is the
-//! drawing counterpart of [`crate::measure_tool`] / [`crate::annotation_tool`]:
+//! drawing counterpart of [`crate::measure_tool`]:
 //! a pure, host-agnostic state machine that captures exactly the points a given
 //! edit needs, reports the remaining steps through a preview, and describes the
 //! commit as a [`DrawIntent`].

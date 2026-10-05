@@ -21,15 +21,12 @@ Operations:
   scan                 entity/layer/bounds/completeness summary
   proxy-report         entity capability table and proxy diagnostics
   measure              distance (2 points), angle (3), length (>=4)
-  import-notes         import a .cadnotes.json sidecar
-  export-notes         export the sidecar (marks saved only after write)
   build-representation primitive/vertex counts through the provider registry
   render               fixed-viewport frame on a headless GPU adapter
   plot                 paper-space layout -> raster PNG (headless GPU)
   benchmark            representation build timing for the input
 
 Options:
-  --notes <file>          annotation sidecar path (import/export)
   --points \"x,y;x,y;...\"  measurement points in drawing units
   --out <file>            write the JSON result to <file> atomically
                           (same-dir temp file + rename); stdout stays empty
@@ -77,13 +74,6 @@ fn main() -> ExitCode {
     let mut index = 1;
     while index < arguments.len() {
         match arguments[index].as_str() {
-            "--notes" => {
-                index += 1;
-                let Some(value) = arguments.get(index) else {
-                    return fail(CliError::usage("--notes needs a path"), operation, locale);
-                };
-                invocation.notes = Some(value.into());
-            }
             "--points" => {
                 index += 1;
                 let Some(value) = arguments.get(index) else {
@@ -186,7 +176,6 @@ fn main() -> ExitCode {
                 };
                 invocation.locale = Locale::parse(value);
             }
-            "--allow-fingerprint-mismatch" => invocation.allow_fingerprint_mismatch = true,
             "--font" => {
                 index += 1;
                 let Some(value) = arguments.get(index) else {

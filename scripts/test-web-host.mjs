@@ -35,13 +35,7 @@ function replaceGlobal(t, key, value) {
 
 function documentStub() {
   const nodes = new Map();
-  for (const id of [
-    "host-state",
-    "language",
-    "language-label",
-    "file-input",
-    "annotation-input",
-  ]) {
+  for (const id of ["host-state", "language", "language-label", "file-input"]) {
     nodes.set(id, {
       textContent: "",
       value: "",
@@ -94,11 +88,10 @@ test("i18n uses shared catalogs, preserves raw status and tolerates read-only st
   await host.initialize();
   assert.equal(host.currentLocale(), "zh-CN");
   assert.equal(host.t("missing.key"), "⟦missing.key⟧");
-  host.setStateKey("host.exported_bytes", { bytes: 42 });
+  host.setStateKey("host.wasm_loaded");
   const before = document.nodes.get("host-state").textContent;
   assert.equal(await host.setLocale("en-US"), "en");
   assert.notEqual(document.nodes.get("host-state").textContent, before);
-  assert.match(document.nodes.get("host-state").textContent, /42/);
   assert.equal(document.documentElement.lang, "en");
   assert.deepEqual(tags, ["en"]);
   host.setStateText("raw Rust diagnostic");
@@ -109,57 +102,17 @@ test("i18n uses shared catalogs, preserves raw status and tolerates read-only st
   );
 });
 
-test("annotation export confirms the exact revision after download, never after failure", (t) => {
-  const events = [];
-  let failClick = false;
-  replaceGlobal(t, "document", {
-    createElement: () => ({
-      click() {
-        events.push("download");
-        if (failClick) throw new Error("download failed");
-      },
-    }),
-  });
-  t.mock.method(URL, "createObjectURL", () => "blob:test");
-  t.mock.method(URL, "revokeObjectURL", () => events.push("revoke"));
-  const host = createFileHost(
-    {
-      annotation_export_json: () => ({ json: "{}", revision: 7 }),
-      annotation_confirm_export: (revision) =>
-        events.push(["confirm", revision]),
-    },
-    { setStateKey: (key) => events.push(key) },
-  );
-  host.exportAnnotations();
-  assert.deepEqual(events, [
-    "download",
-    "revoke",
-    ["confirm", 7],
-    "host.exported_bytes",
-  ]);
-  events.length = 0;
-  failClick = true;
-  assert.throws(() => host.exportAnnotations(), /download failed/);
-  assert.deepEqual(events, ["download"]);
-});
-
-test("file pickers cancel without replacing a drawing and reset after reads", async (t) => {
+test("file pickers open a drawing and reset after reads", async (t) => {
   const document = documentStub();
   const opened = [];
   const states = [];
-  let decision = null;
   replaceGlobal(t, "document", document);
-  replaceGlobal(t, "window", { prompt: () => decision });
+  replaceGlobal(t, "window", {});
   const host = createFileHost(
     {
-      open_requires_decision: () => true,
-      open_document_bytes_decided: (...args) => {
+      open_document_bytes: (...args) => {
         opened.push(args);
         return "opened";
-      },
-      annotation_import_json: (text) => {
-        assert.equal(text, "{}");
-        return 0;
       },
     },
     {
@@ -177,19 +130,9 @@ test("file pickers cancel without replacing a drawing and reset after reads", as
     },
   ];
   await picker.listeners.change();
-  assert.equal(opened.length, 0);
-  assert.equal(states.at(-1), "host.cancelled_open");
-  assert.equal(picker.value, "");
-  decision = "discard";
-  await picker.listeners.change();
   assert.equal(opened[0][0], "drawing.dwg");
   assert.deepEqual([...opened[0][1]], [1, 2]);
-  assert.equal(opened[0][2], "discard");
-  const annotations = document.nodes.get("annotation-input");
-  annotations.files = [{ text: async () => "{}" }];
-  await annotations.listeners.change();
-  assert.equal(states.at(-1), "host.imported_count");
-  assert.equal(annotations.value, "");
+  assert.equal(picker.value, "");
 });
 
 test("renderer polling backs off, pauses while hidden and announces readiness only once", (t) => {
@@ -275,7 +218,7 @@ test("startup deadlines reject instead of displaying an endless spinner", async 
   );
 });
 
-test("the recovery-backend button cannot reload unsaved annotations", (t) => {
+test("the recovery-backend button reloads with a forced backend", (t) => {
   const document = documentStub();
   const retry = {
     listeners: {},
@@ -286,23 +229,14 @@ test("the recovery-backend button cannot reload unsaved annotations", (t) => {
   };
   document.nodes.set("retry-renderer", retry);
   const destinations = [];
-  const messages = [];
-  let dirty = true;
   replaceGlobal(t, "document", document);
   replaceGlobal(t, "location", {
     href: "https://example.test/?backend=webgpu",
     assign: (url) => destinations.push(url),
   });
-  const show = wireRecoveryBackend(
-    () => ({ open_requires_decision: () => dirty }),
-    (key) => messages.push(key),
-  );
+  const show = wireRecoveryBackend(() => ({}), () => {});
   show();
   assert.equal(retry.hidden, false);
-  retry.listeners.click();
-  assert.equal(destinations.length, 0);
-  assert.deepEqual(messages, ["host.retry_unsaved"]);
-  dirty = false;
   retry.listeners.click();
   assert.equal(new URL(destinations[0]).searchParams.get("backend"), "webgl2");
 });

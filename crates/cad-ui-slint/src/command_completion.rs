@@ -12,20 +12,11 @@ const SUGGESTION_LIMIT: usize = 8;
 // runtime availability (selection, undo history, document state) remains the
 // responsibility of the existing application callbacks.
 const SELECTORS: &[(&str, bool)] = &[
-    ("ANNOTATE", true),
-    ("ANNOTATE CLOUD", true),
-    ("ANNOTATE ELLIPSE", true),
-    ("ANNOTATE FREEHAND", true),
-    ("ANNOTATE LEADER", true),
-    ("ANNOTATE RECTANGLE", true),
-    ("ANNOTATE TEXT", true),
     ("CANCEL", false),
     ("CIRCLE", true),
     ("CLEAR SELECTION", false),
     ("CONFIRM", true),
     ("DIAGNOSTICS", false),
-    ("EXPORT", false),
-    ("IMPORT", true),
     ("LINE", true),
     ("MEASURE", true),
     ("MEASURE ANGLE", true),
@@ -39,7 +30,6 @@ const SELECTORS: &[(&str, bool)] = &[
     ("PANELS", false),
     ("PROJECTION", false),
     ("REDO", true),
-    ("SAVE MEASUREMENT", true),
     ("SELECTALL", false),
     ("TOOLS", false),
     ("TRIM", true),
@@ -162,7 +152,6 @@ mod contracts {
             );
         }
         assert_eq!(suggestions("c", false), vec!["CANCEL", "CLEAR SELECTION"]);
-        assert_eq!(suggestions("e", false), vec!["EXPORT"]);
         assert_eq!(suggestions("o", false), vec!["OPEN"]);
         assert_eq!(suggestions("view", false).len(), SUGGESTION_LIMIT);
         assert!(suggestions("measure", false).is_empty());
@@ -199,7 +188,7 @@ mod contracts {
         assert!(suggestions("ESC", true).is_empty());
         // An alias-shaped prefix may still naturally match canonical names.
         assert_eq!(suggestions("L", true), vec!["LINE"]);
-        assert_eq!(suggestions("SAVE", true), vec!["SAVE MEASUREMENT"]);
+        assert!(suggestions("SAVE", true).is_empty());
     }
 
     #[test]

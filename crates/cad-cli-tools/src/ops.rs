@@ -111,65 +111,6 @@ pub(crate) fn run_measure(
         "units": units,
     }))
 }
-pub(crate) fn run_export_notes(
-    controller: &mut HostController,
-    invocation: &CliInvocation,
-) -> CadResult<serde_json::Value> {
-    let target = invocation
-        .notes
-        .clone()
-        .unwrap_or_else(|| invocation.input.with_extension("cadnotes.json"));
-    // Take the bundle and the revision atomically; the write and the
-    // saved-marking are bound to this exact revision (audit B07/B30).
-    let (json, revision) = controller.prepare_annotation_export()?;
-    let bytes = json.as_bytes();
-    write_atomic(&target, bytes).map_err(|e| {
-        CadError::InvalidInput(format!(
-            "annotation write failed: {}",
-            cad_diagnostics::redact_text(&e.to_string())
-        ))
-    })?;
-    // Only mark saved after the bytes are durably in place.
-    controller.confirm_annotation_export(revision)?;
-    Ok(serde_json::json!({
-        "schema_version": CLI_SCHEMA_VERSION,
-        "operation": CliOperation::ExportNotes.as_str(),
-        "annotations": controller
-            .application
-            .workspace
-            .documents
-            .get(&controller.document_id)
-            .map(|d| d.annotations.len())
-            .unwrap_or(0),
-        "bytes": bytes.len(),
-        "revision": revision.0,
-        "saved": true,
-    }))
-}
-
-pub(crate) fn run_import_notes(
-    controller: &mut HostController,
-    invocation: &CliInvocation,
-) -> CadResult<serde_json::Value> {
-    let source = invocation
-        .notes
-        .clone()
-        .ok_or_else(|| CadError::InvalidInput("import-notes needs --notes <file>".into()))?;
-    let text = std::fs::read_to_string(&source)
-        .map_err(|e| CadError::InvalidInput(format!("annotation read failed: {e}")))?;
-    let policy = if invocation.allow_fingerprint_mismatch {
-        cad_annotations::FingerprintPolicy::ImportUnanchored
-    } else {
-        cad_annotations::FingerprintPolicy::RejectMismatch
-    };
-    let count = controller.import_annotations_json(&text, policy)?;
-    Ok(serde_json::json!({
-        "schema_version": CLI_SCHEMA_VERSION,
-        "operation": CliOperation::ImportNotes.as_str(),
-        "imported": count,
-        "undo_recorded": controller.application.can_undo(&controller.document_id),
-    }))
-}
 
 /// The representation context shared by `build-representation` and `render`.
 ///

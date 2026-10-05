@@ -137,68 +137,6 @@ pub trait DrawPreviewSink: 'static {
     fn set_preview(&self, preview: Option<DrawPreview>);
 }
 
-/// Convert an in-progress draw into the existing annotation preview shape so it
-/// can be drawn by the **existing** preview overlay (`CadView` feeds
-/// `OverlayInputs.annotation`).
-///
-/// * LINE / MOVE / TRIM become a rubber-band chain (`Freehand`) from the first
-///   captured point to the live cursor.
-/// * CIRCLE becomes a full circle (`Ellipse`) through the centre and radius
-///   point: the radius is applied to both axes, so the preview is a circle, not
-///   an ellipse.
-///
-/// The committed operation is always the exact intent; this is presentation
-/// only and never a transaction.
-pub fn draw_overlay_preview(preview: &DrawPreview) -> cad_app::AnnotationPreview {
-    use cad_app::{AnnotationToolKind, DrawToolKind};
-    match preview.kind {
-        DrawToolKind::Circle => {
-            let center = preview
-                .points
-                .first()
-                .copied()
-                .unwrap_or(preview.cursor.unwrap_or(cad_domain::Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                }));
-            let edge = preview.points.get(1).copied().or(preview.cursor);
-            let corner = match edge {
-                Some(edge) => {
-                    let r = cad_app::circle_radius(center, edge).unwrap_or(0.0);
-                    cad_domain::Point3 {
-                        x: center.x + r,
-                        y: center.y + r,
-                        z: center.z,
-                    }
-                }
-                None => center,
-            };
-            cad_app::AnnotationPreview {
-                kind: AnnotationToolKind::Ellipse,
-                points: vec![center, corner],
-                cursor: None,
-                remaining: 0,
-                requires_text: false,
-                text_supplied: false,
-            }
-        }
-        // A rubber band: the captured anchor and the live cursor.
-        _ => {
-            let points: Vec<cad_domain::Point3> =
-                preview.points.first().copied().into_iter().collect();
-            cad_app::AnnotationPreview {
-                kind: AnnotationToolKind::Freehand,
-                points,
-                cursor: preview.cursor,
-                remaining: 0,
-                requires_text: false,
-                text_supplied: false,
-            }
-        }
-    }
-}
-
 /// Localize the error a [`DrawCommandSink`]/command layer returned.
 ///
 /// Permission is the Viewer refusal (`docs/drawing-edit.md` §2); a TRIM with no

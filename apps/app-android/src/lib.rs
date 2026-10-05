@@ -6,17 +6,11 @@ use std::sync::Arc;
 
 use cad_app::host::HostController;
 
-use cad_app::host_files::{
-    export_annotations_atomically, load_recovery, resolve_leave, UnsavedDecisionSource,
-};
-
 use cad_app::input::{InputOutcome, InputPolicy, PointerPhase, PointerUpdate};
 
-use cad_app::{Command, CommandId, CommandPayload, UnsavedDecision};
+use cad_app::{Command, CommandId, CommandPayload};
 
 use cad_domain::*;
-
-use cad_platform::{HostFuture, Persistence};
 
 use cad_ui_slint::{
     CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration, UiHandle, ViewInput,
@@ -41,31 +35,9 @@ const DEMO_LOGICAL_SIZE: [f64; 2] = [1080.0, 1920.0];
 /// replaces it instead of leaving the stale placeholder on screen.
 const READY_STATUS: &str = "就绪（内置演示几何，非兼容性声明）";
 
-/// Recovery cache stored as one JSON file per document under a host directory.
-///
-/// The directory is supplied by the embedding Activity (app-private files dir);
-/// no path is guessed. A host that leaves it `None` has no recovery cache and
-/// `PreserveRecovery` is refused explicitly (see `cad_app::host_files`).
-#[derive(Debug, Clone)]
-pub struct AndroidRecovery {
-    directory: std::path::PathBuf,
-}
-
 pub struct AndroidHostConfiguration {
-    pub recovery_enabled: bool,
     /// Candidate DWG locations to try on open (app-private/external dirs).
     pub sample_paths: Vec<String>,
-    /// Directory for the per-document recovery cache. `None` means the host has
-    /// no recovery storage and the decision model refuses `PreserveRecovery`
-    /// explicitly instead of pretending the work was preserved.
-    pub recovery_directory: Option<String>,
-    /// Directory for annotation sidecar export. `None` refuses `Save` with a
-    /// concrete error; it never reports the annotations as saved.
-    pub export_directory: Option<String>,
-    /// The host's explicit unsaved-work decision source. Android has no dialog
-    /// in this build, so the default is `None`, which means a dirty document is
-    /// never replaced by an open (reported, not silently discarded).
-    pub unsaved_decision: Option<Rc<dyn UnsavedDecisionSource>>,
 }
 
 /// Canvas navigation for Android: one-finger drag pans, wheel/pinch zooms.
@@ -95,28 +67,6 @@ struct HostSink {
     view: SharedView,
     incoming: IncomingDocument,
     configuration: AndroidHostConfiguration,
-}
-
-/// Restore a persisted recovery snapshot for the starting document, if any.
-///
-/// Returns a status message only when something was attempted or found, so a
-/// host with no recovery storage stays silent (not a fake "recovered"). A
-/// snapshot whose fingerprint does not match the current document is refused by
-/// the strict policy and nothing is applied.
-fn restore_recovery_for_start(
-    controller: &Rc<RefCell<HostController>>,
-    configuration: &AndroidHostConfiguration,
-) -> Option<String> {
-    let store = recovery_store(configuration)?;
-    let document = controller.borrow().document_id;
-    match cad_platform::block_on(load_recovery(&store, document)) {
-        Ok(Some(snapshot)) => match controller.borrow_mut().restore_recovery_snapshot(&snapshot) {
-            Ok(count) => Some(format!("已从恢复快照恢复 {count} 条批注")),
-            Err(e) => Some(format!("恢复快照未应用：{e}")),
-        },
-        Ok(None) => None,
-        Err(e) => Some(format!("恢复快照读取失败（未应用）：{e}")),
-    }
 }
 
 /// Build the shared UI + core + renderer stack and run it.
@@ -152,7 +102,6 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     // built, so it is shared through a slot filled immediately afterwards.
     let shared_handle: SharedHandle = Rc::new(RefCell::new(None));
     let shared_view: SharedView = Rc::new(RefCell::new(None));
-    let restore_message = restore_recovery_for_start(&controller, &configuration);
     let sink = HostSink {
         controller: controller.clone(),
         handle: shared_handle.clone(),
@@ -163,16 +112,9 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     let adapter = UiAdapter::new(ui_config, sink, true)?;
     let handle = adapter.handle();
     *shared_handle.borrow_mut() = Some(handle.clone());
-    match restore_message {
-        Some(message) => {
-            let _ = handle.set_status(message);
-        }
-        // No recovery snapshot: replace the shell's "canvas not connected"
-        // scaffold status with the host's real started state.
-        None => {
-            let _ = handle.set_status(READY_STATUS);
-        }
-    }
+    // Replace the shell's "canvas not connected" scaffold status with the
+    // host's real started state.
+    let _ = handle.set_status(READY_STATUS);
     let view =
         cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming.clone())?;
     sync_view_camera(&shared_view, &controller, viewport_id);
@@ -252,7 +194,6 @@ pub fn android_main(app: slint::android::AndroidApp) {
 mod draw;
 mod host;
 mod poll;
-mod recovery;
 mod state_push;
 mod view;
 
@@ -265,7 +206,6 @@ pub(crate) use poll::{ensure_polling, install_runtime, worker_available};
 pub(crate) use draw::install_draw_sinks;
 #[cfg(target_os = "android")]
 pub(crate) use poll::{apply_surface_resize, poll_import_once, ImportPollOutcome};
-pub(crate) use recovery::*;
 pub(crate) use state_push::*;
 pub(crate) use view::*;
 

@@ -64,7 +64,6 @@ impl Application {
                 message: format!("活动图层：{}", layer.0),
             }],
             measurement: None,
-            annotation: None,
         })
     }
 
@@ -266,7 +265,6 @@ impl Application {
             changes: Some(change_set),
             diagnostics,
             measurement: None,
-            annotation: None,
         })
     }
 
@@ -410,7 +408,6 @@ impl Application {
                 },
             }],
             measurement: None,
-            annotation: None,
         })
     }
 
@@ -481,7 +478,6 @@ impl Application {
             changes: Some(change_set),
             diagnostics: Vec::new(),
             measurement: None,
-            annotation: None,
         })
     }
 
@@ -500,7 +496,7 @@ impl Application {
 
 /// A monotonic transaction id for drawing commits.
 ///
-/// Mirrors the host's annotation counter style but lives in the app layer so a
+/// Mirrors the layer counter style but lives in the app layer so a
 /// command never depends on a host. The counter is process-global and only needs
 /// to be unique within a session's history.
 fn next_transaction_id() -> TransactionId {

@@ -78,9 +78,7 @@ impl SceneCache {
     /// Every fragment's `alpha` (effective entity opacity in `[0, 1]`) is
     /// sanitised and carried onto [`RenderBatch::alpha`]; the renderer then
     /// clamps/classifies it into the opaque, transparent or invisible pass
-    /// (`cad-render-wgpu::geometry::classify_alpha`). The annotation overlay
-    /// path ([`annotations::annotation_batches`]) supplies its own alpha from
-    /// the annotation style.
+    /// (`cad-render-wgpu::geometry::classify_alpha`).
     pub fn build(
         &mut self,
         representation: &DisplayRepresentation,

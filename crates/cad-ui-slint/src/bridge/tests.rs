@@ -13,7 +13,6 @@ fn scene_controller_reuses_base_for_overlay_and_rebuilds_for_font_replacement() 
     let db = db_with_layout();
     let mut controller = controller::CadSceneController::default();
     let layers = LayerOverrideSet::new();
-    let visibility = AnnotationVisibilitySet::new();
     controller
         .prepare(
             Some(&db),
@@ -21,8 +20,6 @@ fn scene_controller_reuses_base_for_overlay_and_rebuilds_for_font_replacement() 
             None,
             &layers,
             SpaceSelection::Model,
-            None,
-            &visibility,
         )
         .unwrap();
     let first = controller.ready.as_ref().unwrap();
@@ -38,23 +35,9 @@ fn scene_controller_reuses_base_for_overlay_and_rebuilds_for_font_replacement() 
             None,
             &layers,
             SpaceSelection::Model,
-            None,
-            &visibility,
         )
         .unwrap();
     assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
-    let annotations = AnnotationDatabase::new(cad_domain::DatabaseId(44));
-    controller
-        .prepare(
-            Some(&db),
-            DocumentId(42),
-            None,
-            &layers,
-            SpaceSelection::Model,
-            Some(&annotations),
-            &visibility,
-        )
-        .unwrap();
     assert!(Arc::ptr_eq(&base, &controller.ready.as_ref().unwrap().base));
     assert_eq!(
         controller.ready.as_ref().unwrap().base_revision,
@@ -68,24 +51,14 @@ fn scene_controller_reuses_base_for_overlay_and_rebuilds_for_font_replacement() 
             None,
             &layers,
             SpaceSelection::Model,
-            Some(&annotations),
-            &visibility,
         )
         .unwrap();
     assert!(controller.ready.as_ref().unwrap().base_revision > base_revision);
     controller
-        .prepare(
-            None,
-            DocumentId(42),
-            None,
-            &layers,
-            SpaceSelection::Model,
-            None,
-            &visibility,
-        )
+        .prepare(None, DocumentId(42), None, &layers, SpaceSelection::Model)
         .unwrap();
     let closed = controller.ready.as_ref().unwrap();
-    assert!(closed.base.added.is_empty() && closed.overlay.added.is_empty());
+    assert!(closed.base.added.is_empty() && closed.highlight.added.is_empty());
 }
 
 #[test]
@@ -99,8 +72,6 @@ fn failed_preparation_keeps_last_ready_scene_retryable() {
             None,
             &LayerOverrideSet::new(),
             SpaceSelection::Model,
-            None,
-            &AnnotationVisibilitySet::new(),
         )
         .unwrap();
     let revision = controller.ready.as_ref().unwrap().revision;
@@ -111,8 +82,6 @@ fn failed_preparation_keeps_last_ready_scene_retryable() {
             None,
             &LayerOverrideSet::new(),
             SpaceSelection::Paper(LayoutId(999)),
-            None,
-            &AnnotationVisibilitySet::new()
         )
         .is_err());
     assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
@@ -349,38 +318,6 @@ fn camera2d_params_map_to_the_renderer_plan_camera() {
     assert_eq!(camera.center, p(7.0, -8.0));
     assert_eq!(camera.world_per_px, 0.5);
     assert_eq!(camera.z_plane, 0.0);
-}
-
-#[test]
-fn paper_space_annotation_build_uses_the_layout() {
-    let db = db_with_layout();
-    let stamp = TaskStamp::new(DocumentId(0), 0);
-    let visibility = AnnotationVisibilitySet::new();
-    let (delta, scene) = build_scene_with_annotations_in_space(
-        &db,
-        stamp,
-        None,
-        &LayerOverrideSet::new(),
-        SpaceSelection::Paper(LayoutId(1)),
-        None,
-        &visibility,
-        DocumentId(0),
-    )
-    .unwrap();
-    assert_eq!(delta.added.len(), 1);
-    assert!(scene.batches.is_empty());
-    let (model, _) = build_scene_with_annotations_in_space(
-        &db,
-        TaskStamp::new(DocumentId(0), 0),
-        None,
-        &LayerOverrideSet::new(),
-        SpaceSelection::Model,
-        None,
-        &visibility,
-        DocumentId(0),
-    )
-    .unwrap();
-    assert_eq!(model.added.len(), 1);
 }
 
 #[test]

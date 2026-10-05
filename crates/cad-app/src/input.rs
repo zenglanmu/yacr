@@ -10,7 +10,7 @@
 //!
 //! Three rules are hard and are enforced by construction, not by convention:
 //!
-//! 1. A multi-touch gesture **never** commits an annotation or measurement. The
+//! 1. A multi-touch gesture **never** commits a measurement. The
 //!    moment a second contact appears the in-progress tool is cancelled
 //!    ([`InputPolicy::handle`]).
 //! 2. While a text field has focus or an IME is composing, canvas shortcuts are
@@ -502,8 +502,6 @@ pub struct StatusModel {
     pub tool: ToolStatus,
     /// Unit label of the open document, or `None` when unknown.
     pub units: Option<String>,
-    /// Whether the document has unsaved annotation changes.
-    pub unsaved: bool,
 }
 
 /// Coarse load state shown in the status bar.
@@ -521,7 +519,6 @@ pub enum ToolStatus {
     Select,
     Pan,
     Measure,
-    Annotate,
     /// A multi-touch/pointer gesture is navigating the view.
     Navigating,
 }
@@ -531,21 +528,18 @@ impl StatusModel {
     pub fn from_session(
         session: &SessionState,
         units: Option<String>,
-        unsaved: bool,
         loading: LoadingState,
     ) -> Self {
         let tool = match &session.tool {
             ToolState::Idle => ToolStatus::None,
             ToolState::Selecting => ToolStatus::Select,
             ToolState::Measuring(_) => ToolStatus::Measure,
-            ToolState::Annotating(_) => ToolStatus::Annotate,
             ToolState::Panning => ToolStatus::Pan,
         };
         StatusModel {
             loading,
             tool,
             units,
-            unsaved,
         }
     }
 
@@ -562,16 +556,10 @@ impl StatusModel {
             ToolStatus::Select => "选择",
             ToolStatus::Pan => "平移",
             ToolStatus::Measure => "测量",
-            ToolStatus::Annotate => "批注",
             ToolStatus::Navigating => "浏览",
         };
         let units = self.units.as_deref().unwrap_or("单位未知");
-        let dirty = if self.unsaved {
-            "未保存"
-        } else {
-            "已保存"
-        };
-        format!("{loading} · {tool} · {units} · {dirty}")
+        format!("{loading} · {tool} · {units}")
     }
 }
 
@@ -850,11 +838,11 @@ mod tests {
     fn escape_with_text_focus_never_cancels_the_canvas_tool() {
         let mut policy = InputPolicy::new();
         policy.set_text_focus(true);
-        let annotating = session_with_tool(ToolState::Annotating(crate::AnnotationTool::new(
-            crate::AnnotationToolKind::Text,
+        let measuring = session_with_tool(ToolState::Measuring(crate::MeasurementTool::new(
+            crate::MeasurementToolKind::Distance,
         )));
         assert_eq!(
-            escape_action(&policy, &annotating),
+            escape_action(&policy, &measuring),
             EscapeAction::DismissTextFocus
         );
     }
@@ -953,13 +941,12 @@ mod tests {
             crate::MeasurementToolKind::Distance,
         )));
         let status =
-            StatusModel::from_session(&session, Some("mm".to_string()), true, LoadingState::Idle);
+            StatusModel::from_session(&session, Some("mm".to_string()), LoadingState::Idle);
         let line = status.summary_line();
         assert!(line.contains("测量"));
         assert!(line.contains("mm"));
-        assert!(line.contains("未保存"));
         // A status line is fixed prose, not the first diagnostic text.
-        assert_eq!(line, "就绪 · 测量 · mm · 未保存");
+        assert_eq!(line, "就绪 · 测量 · mm");
     }
 
     #[test]

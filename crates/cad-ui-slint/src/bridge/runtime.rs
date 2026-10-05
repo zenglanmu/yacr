@@ -162,10 +162,9 @@ impl CadRenderRuntime {
         }
         let renderer = self.renderer.as_mut().expect("ready renderer");
         let base_changed = self.applied_base != Some(ready.base_revision);
-        // Base drawing batches are the prefix; the annotation overlay and the
-        // transient highlight/preview overlay are the replaceable suffix. A
-        // highlight-only change still re-uploads the suffix (the annotation
-        // batches are recomputed from their cached `Arc`), but never the base.
+        // Base drawing batches are the prefix; the transient highlight/preview
+        // overlay is the replaceable suffix. A highlight-only change still
+        // re-uploads the suffix, but never the base.
         if self
             .pending_upload
             .as_ref()
@@ -183,14 +182,13 @@ impl CadRenderRuntime {
         #[cfg(not(target_arch = "wasm32"))]
         let started = std::time::Instant::now();
         let mut slices = 0;
-        while pending.group < 3 && slices < 4 {
+        while pending.group < 2 && slices < 4 {
             #[cfg(not(target_arch = "wasm32"))]
             if started.elapsed() >= std::time::Duration::from_millis(8) {
                 break;
             }
             let batches = match pending.group {
                 0 => &pending.scene.base.added,
-                1 => &pending.scene.overlay.added,
                 _ => &pending.scene.highlight.added,
             };
             if pending.offset == batches.len() {
@@ -217,7 +215,7 @@ impl CadRenderRuntime {
             pending.offset = end;
             slices += 1;
         }
-        if pending.group < 3 {
+        if pending.group < 2 {
             return Ok(());
         }
         let pending = self.pending_upload.take().unwrap();

@@ -14,11 +14,7 @@
 mod browser;
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::{
-    confirm_annotation_export, export_annotations_json, font_report, import_annotations_json,
-    open_document, open_document_decided, open_needs_decision, pending_recovery_is_valid,
-    pending_recovery_snapshot, renderer_report, start,
-};
+pub use browser::{font_report, open_document, renderer_report, start};
 
 /// The stable dot-path used by the web host to persist user preferences.
 #[cfg(target_arch = "wasm32")]
@@ -110,20 +106,10 @@ pub fn touch_cancel_draw() -> Result<(), JsValue> {
 }
 
 /// Open a drawing from bytes read by the JS File API host.
-///
-/// Refuses to replace a document with unsaved annotations; the JS host must
-/// call `open_needs_decision`, prompt, then `open_document_bytes_decided`.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn open_document_bytes(name: String, bytes: Vec<u8>) -> Result<(), JsValue> {
     open_document(&name, bytes).map_err(|e| JsValue::from_str(&e))
-}
-
-/// Whether the current document has unsaved annotations that need a decision.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn open_requires_decision() -> bool {
-    open_needs_decision()
 }
 
 /// Poll the asynchronous / cancellable open and push the progress panel.
@@ -150,21 +136,6 @@ pub fn async_open_poll_json() -> String {
 #[wasm_bindgen]
 pub fn async_open_worker_available() -> bool {
     browser::async_open_worker_available()
-}
-
-/// Open a drawing after the JS host supplied an explicit unsaved-work decision.
-///
-/// `decision` is `save`, `recovery`, `discard` or `cancel`. Returns a status
-/// string; `cancel` and a failed write are errors and never replace the
-/// document.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn open_document_bytes_decided(
-    name: String,
-    bytes: Vec<u8>,
-    decision: String,
-) -> Result<String, JsValue> {
-    open_document_decided(&name, bytes, &decision).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Serializable renderer/state report for the diagnostics panel and tests.
@@ -203,59 +174,6 @@ pub async fn load_web_fonts() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn font_load_report() -> String {
     font_report()
-}
-
-/// Annotation JSON export (caller downloads the returned text). The revision
-/// must be passed back to `annotation_confirm_export` after a successful write.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn annotation_export_json() -> Result<JsValue, JsValue> {
-    let (json, revision) = export_annotations_json().map_err(|e| JsValue::from_str(&e))?;
-    let out = js_sys::Object::new();
-    js_sys::Reflect::set(&out, &"json".into(), &JsValue::from_str(&json))
-        .map_err(|_| JsValue::from_str("failed to build export object"))?;
-    js_sys::Reflect::set(
-        &out,
-        &"revision".into(),
-        &JsValue::from_f64(revision as f64),
-    )
-    .map_err(|_| JsValue::from_str("failed to build export object"))?;
-    Ok(out.into())
-}
-
-/// Confirm that the export at `revision` was durably written.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn annotation_confirm_export(revision: f64) -> Result<(), JsValue> {
-    confirm_annotation_export(revision as u64).map_err(|e| JsValue::from_str(&e))
-}
-
-/// Annotation JSON import from user-chosen text.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn annotation_import_json(text: &str) -> Result<usize, JsValue> {
-    import_annotations_json(text).map_err(|e| JsValue::from_str(&e))
-}
-
-/// Whether a backend-switch recovery snapshot is waiting (audit B06).
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn has_recovery_snapshot() -> bool {
-    cad_ui_slint::web::has_recovery_snapshot()
-}
-
-/// Restore the pending recovery snapshot (returns the annotation count).
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn restore_recovery_snapshot() -> Result<usize, JsValue> {
-    browser::restore_pending_recovery_snapshot().map_err(|e| JsValue::from_str(&e))
-}
-
-/// Discard the pending recovery snapshot explicitly.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn discard_recovery_snapshot() {
-    browser::drop_pending_recovery_snapshot()
 }
 
 /// Switch the UI language at runtime and persist the choice (N01 host sync).

@@ -1,8 +1,7 @@
 //! cad-app contract tests.
 
 use super::*;
-use cad_db::{Annotation, AnnotationGeometry, AnnotationStyle, DrawingDatabaseBuilder};
-use cad_db::{Layer, Layout, PaperViewport};
+use cad_db::{DrawingDatabaseBuilder, Layer, Layout, PaperViewport};
 
 // Aliases kept local so the tests read without re-importing camera helpers.
 fn cam_xy_work_plane(z: f64) -> WorkPlane {
@@ -18,13 +17,22 @@ fn cad_app_dot(a: Point3, b: Point3) -> f64 {
 fn application_with_document() -> (Application, SessionState) {
     let mut app = Application::new();
     let document_id = DocumentId(1);
-    let drawing = DrawingDatabaseBuilder::new(DatabaseId(1)).finish().unwrap();
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [(LayerId(0), "0"), (LayerId(3), "WALLS")] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible: true,
+            })
+            .unwrap();
+    }
+    let drawing = builder.finish().unwrap();
     app.workspace.documents.insert(
         document_id,
         Document {
             id: document_id,
             drawing: Arc::new(drawing),
-            annotations: AnnotationDatabase::new(DatabaseId(2)),
             identity: DocumentIdentity::Sha256([0u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
@@ -48,86 +56,65 @@ fn command(id: CommandId, payload: CommandPayload) -> Command {
     }
 }
 
-fn ann(id: u128) -> Annotation {
-    Annotation {
-        id: AnnotationId(id),
-        space: SpaceId::Model,
-        geometry: AnnotationGeometry::Text(Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        }),
-        text: "note".into(),
-        style: AnnotationStyle::default(),
-        created_unix_ms: 0,
-        modified_unix_ms: 0,
-        anchor: None,
-        precision: Precision::Analytic,
-    }
+fn point(x: f64, y: f64) -> Point3 {
+    Point3 { x, y, z: 0.0 }
 }
 
-#[test]
-fn viewer_mode_rejects_annotation_commands_at_the_command_layer() {
-    let (mut app, mut session) = application_with_document();
-    let mut viewer = SessionState::new(DocumentId(1), AppMode::Viewer);
-    let cmd = command(
-        CommandId::CreateAnnotation,
-        CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(1)))),
-    );
-    assert_eq!(
-        app.execute(&mut viewer, cmd).unwrap_err(),
-        CadError::PermissionDenied
-    );
-    // Work mode succeeds.
-    let cmd = command(
-        CommandId::CreateAnnotation,
-        CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(1)))),
-    );
-    app.execute(&mut session, cmd).unwrap();
-}
-
-#[test]
-fn create_then_undo_then_redo_through_the_application() {
-    let (mut app, mut session) = application_with_document();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::CreateAnnotation,
-            CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(5)))),
-        ),
-    )
+fn application_with_layouts() -> (Application, SessionState) {
+    let (mut app, session) = application_with_document();
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
     .unwrap();
-    assert_eq!(
-        app.workspace
-            .documents
-            .get(&DocumentId(1))
-            .unwrap()
-            .annotations
-            .len(),
-        1
-    );
-    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
-        .unwrap();
-    assert_eq!(
-        app.workspace
-            .documents
-            .get(&DocumentId(1))
-            .unwrap()
-            .annotations
-            .len(),
-        0
-    );
-    app.execute(&mut session, command(CommandId::Redo, CommandPayload::None))
-        .unwrap();
-    assert_eq!(
-        app.workspace
-            .documents
-            .get(&DocumentId(1))
-            .unwrap()
-            .annotations
-            .len(),
-        1
-    );
+    let corners = || {
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 100.0,
+                y: 50.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 10.0,
+                y: 20.0,
+                z: 0.0,
+            },
+        ]
+    };
+    b.insert_layout(Layout {
+        id: LayoutId(1),
+        name: "Sheet1".into(),
+        viewports: vec![PaperViewport {
+            clip: corners(),
+            model_to_paper: Transform3::scale(100.0),
+            completeness: Completeness::Complete,
+        }],
+    })
+    .unwrap();
+    b.insert_layout(Layout {
+        id: LayoutId(2),
+        name: "Broken".into(),
+        viewports: vec![PaperViewport {
+            clip: corners(),
+            model_to_paper: Transform3::scale(100.0),
+            completeness: Completeness::Partial(vec!["importer dropped height".into()]),
+        }],
+    })
+    .unwrap();
+    let drawing = b.finish().unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(drawing);
+    (app, session)
 }
 
 #[test]
@@ -278,30 +265,6 @@ fn select_with_empty_payload_clears_the_selection() {
 }
 
 #[test]
-fn leave_with_unsaved_annotations_requires_a_decision() {
-    let (mut app, mut session) = application_with_document();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::CreateAnnotation,
-            CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(1)))),
-        ),
-    )
-    .unwrap();
-    assert!(matches!(
-        app.prepare_leave(DocumentId(1), UnsavedDecision::Cancel),
-        Err(CadError::Cancelled)
-    ));
-    assert!(app
-        .prepare_leave(DocumentId(1), UnsavedDecision::Discard)
-        .is_ok());
-}
-
-fn point(x: f64, y: f64) -> Point3 {
-    Point3 { x, y, z: 0.0 }
-}
-
-#[test]
 fn measure_tool_selects_the_algorithm_from_the_active_kind() {
     let (mut app, mut session) = application_with_document();
     // Three points would be inferred as an angle by the stateless path, but
@@ -435,119 +398,6 @@ fn measure_area_uses_the_viewport_work_plane() {
 }
 
 #[test]
-fn save_measurement_as_annotation_uses_one_transaction() {
-    let (mut app, mut session) = application_with_document();
-    // Confirm a distance measurement (auto-completes the tool).
-    let measured = app
-        .execute(
-            &mut session,
-            command(
-                CommandId::Measure,
-                CommandPayload::Points(vec![point(0.0, 0.0), point(3.0, 4.0)]),
-            ),
-        )
-        .unwrap();
-    let record = measured.measurement.expect("record");
-    assert!(session.has_last_measurement());
-    assert!(session.last_measurement().is_some());
-
-    let revision_before = app.workspace.documents[&DocumentId(1)]
-        .annotations
-        .revision();
-    let outcome = app
-        .execute(
-            &mut session,
-            command(CommandId::SaveMeasurementAsAnnotation, CommandPayload::None),
-        )
-        .unwrap();
-    // Exactly one transaction/undo step through the shared annotation path.
-    assert_eq!(outcome.changes.as_ref().map(|c| c.changes.len()), Some(1));
-    assert_eq!(
-        app.workspace.documents[&DocumentId(1)]
-            .annotations
-            .revision(),
-        Revision(revision_before.0 + 1)
-    );
-    assert!(app.can_undo(&DocumentId(1)));
-    assert!(!app.can_redo(&DocumentId(1)));
-
-    // The stored geometry is the exact measurement record, not a fabricated one.
-    let annotation_id = outcome.annotation.expect("annotation id");
-    let stored = app.workspace.documents[&DocumentId(1)]
-        .annotations
-        .get(annotation_id)
-        .expect("stored annotation");
-    match &stored.geometry {
-        AnnotationGeometry::Measurement(saved) => assert_eq!(saved, &record),
-        other => panic!("expected measurement geometry, got {other:?}"),
-    }
-    assert_eq!(stored.space, SpaceId::Model);
-
-    // Undo removes it as a single step.
-    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
-        .unwrap();
-    assert_eq!(app.workspace.documents[&DocumentId(1)].annotations.len(), 0);
-    assert!(!app.can_undo(&DocumentId(1)));
-}
-
-#[test]
-fn save_measurement_without_a_record_is_refused_and_writes_nothing() {
-    let (mut app, mut session) = application_with_document();
-    let revision_before = app.workspace.documents[&DocumentId(1)]
-        .annotations
-        .revision();
-    let result = app.execute(
-        &mut session,
-        command(CommandId::SaveMeasurementAsAnnotation, CommandPayload::None),
-    );
-    assert!(
-        matches!(result, Err(CadError::InvalidInput(_))),
-        "no confirmed measurement must be InvalidInput, not a silent success"
-    );
-    assert_eq!(
-        app.workspace.documents[&DocumentId(1)]
-            .annotations
-            .revision(),
-        revision_before
-    );
-    assert_eq!(app.workspace.documents[&DocumentId(1)].annotations.len(), 0);
-    assert!(!app.can_undo(&DocumentId(1)));
-
-    // Merely starting a tool captures no result, so saving is still refused.
-    app.execute(
-        &mut session,
-        command(
-            CommandId::Measure,
-            CommandPayload::MeasureTool(MeasurementToolKind::Distance),
-        ),
-    )
-    .unwrap();
-    assert!(matches!(
-        app.execute(
-            &mut session,
-            command(CommandId::SaveMeasurementAsAnnotation, CommandPayload::None),
-        ),
-        Err(CadError::InvalidInput(_))
-    ));
-    assert!(!app.can_undo(&DocumentId(1)));
-}
-
-#[test]
-fn save_measurement_as_annotation_is_work_only() {
-    let (mut app, _) = application_with_document();
-    let mut viewer = SessionState::new(DocumentId(1), AppMode::Viewer);
-    // Viewer is denied at the command layer before inspecting any record.
-    assert_eq!(
-        app.execute(
-            &mut viewer,
-            command(CommandId::SaveMeasurementAsAnnotation, CommandPayload::None),
-        )
-        .unwrap_err(),
-        CadError::PermissionDenied
-    );
-}
-
-#[test]
 fn set_mode_cancels_an_unconfirmed_tool_and_gates_work_commands() {
     let (mut app, mut session) = application_with_document();
     // Start an (unconfirmed) measurement tool in Work mode.
@@ -580,7 +430,6 @@ fn set_mode_cancels_an_unconfirmed_tool_and_gates_work_commands() {
     assert!(matches!(session.tool, ToolState::Idle));
     assert!(session.measurement_preview().is_none());
     assert_eq!(session.mode(), AppMode::Viewer);
-    assert_eq!(app.workspace.documents[&DocumentId(1)].annotations.len(), 0);
     assert!(!app.can_undo(&DocumentId(1)));
 
     // A Work-only command is now refused at the command layer.
@@ -595,7 +444,10 @@ fn set_mode_cancels_an_unconfirmed_tool_and_gates_work_commands() {
     assert_eq!(
         app.execute(
             &mut session,
-            command(CommandId::CreateAnnotation, CommandPayload::None),
+            command(
+                CommandId::CreateLine,
+                CommandPayload::Points(vec![point(0.0, 0.0), point(1.0, 0.0)]),
+            ),
         )
         .unwrap_err(),
         CadError::PermissionDenied
@@ -647,9 +499,7 @@ fn cancelled_measurement_produces_zero_transactions() {
         ),
     )
     .unwrap();
-    let revision_before = app.workspace.documents[&DocumentId(1)]
-        .annotations
-        .revision();
+    let revision_before = app.workspace.documents[&DocumentId(1)].drawing.revision();
     let outcome = app
         .execute(
             &mut session,
@@ -660,9 +510,7 @@ fn cancelled_measurement_produces_zero_transactions() {
     assert!(matches!(session.tool, ToolState::Idle));
     assert!(session.measurement_preview().is_none());
     assert_eq!(
-        app.workspace.documents[&DocumentId(1)]
-            .annotations
-            .revision(),
+        app.workspace.documents[&DocumentId(1)].drawing.revision(),
         revision_before
     );
     assert!(!app.can_undo(&DocumentId(1)));
@@ -707,8 +555,8 @@ fn undo_to_empty_still_allows_redo_and_refresh_is_pure() {
     app.execute(
         &mut session,
         command(
-            CommandId::CreateAnnotation,
-            CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(7)))),
+            CommandId::CreateLine,
+            CommandPayload::Points(vec![point(0.0, 0.0), point(1.0, 0.0)]),
         ),
     )
     .unwrap();
@@ -730,14 +578,18 @@ fn undo_to_empty_still_allows_redo_and_refresh_is_pure() {
     assert!(app.can_redo(&DocumentId(1)));
 
     // A pure refresh repeats the same snapshot and changes nothing.
-    let annotation_count = app.workspace.documents[&DocumentId(1)].annotations.len();
+    let entity_count = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity_count();
     assert_eq!(
         app.history_availability(&DocumentId(1)),
         app.history_availability(&DocumentId(1))
     );
     assert_eq!(
-        app.workspace.documents[&DocumentId(1)].annotations.len(),
-        annotation_count
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity_count(),
+        entity_count
     );
 
     app.execute(&mut session, command(CommandId::Redo, CommandPayload::None))
@@ -930,464 +782,6 @@ fn work_plane_is_right_handed_and_orthonormal() {
     assert!(cad_app_dot(plane.u, plane.v).abs() < 1e-12);
     let n = camera::cross(plane.u, plane.v);
     assert!(n.z > 0.0, "normal points +Z in the plan view");
-}
-
-// --- F07/F08/F09 annotation tool + management ---------------
-
-fn annotation_count(app: &Application) -> usize {
-    app.workspace.documents[&DocumentId(1)].annotations.len()
-}
-
-#[test]
-fn begin_annotation_tool_previews_without_committing() {
-    let (mut app, mut session) = application_with_document();
-    let outcome = app
-        .execute(
-            &mut session,
-            command(
-                CommandId::BeginAnnotationTool,
-                CommandPayload::AnnotationTool(AnnotationToolKind::Rectangle),
-            ),
-        )
-        .unwrap();
-    assert!(outcome.changes.is_none());
-    assert!(outcome
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "annotation.preview"));
-    let preview = session.annotation_preview().expect("active preview");
-    assert_eq!(preview.kind, AnnotationToolKind::Rectangle);
-    assert_eq!(preview.remaining, 2);
-    assert_eq!(annotation_count(&app), 0);
-    assert!(!app.can_undo(&DocumentId(1)));
-}
-
-#[test]
-fn rectangle_tool_auto_commits_exactly_one_transaction() {
-    let (mut app, mut session) = application_with_document();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::BeginAnnotationTool,
-            CommandPayload::AnnotationTool(AnnotationToolKind::Rectangle),
-        ),
-    )
-    .unwrap();
-    let first = app
-        .execute(
-            &mut session,
-            command(
-                CommandId::AppendAnnotationPoints,
-                CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0)]),
-            ),
-        )
-        .unwrap();
-    assert!(first.changes.is_none(), "not committed until complete");
-    assert!(session.annotation_preview().is_some());
-
-    let second = app
-        .execute(
-            &mut session,
-            command(
-                CommandId::AppendAnnotationPoints,
-                CommandPayload::AppendAnnotationPoints(vec![point(4.0, 3.0)]),
-            ),
-        )
-        .unwrap();
-    // Completing the rectangle commits exactly one transaction.
-    assert_eq!(second.changes.as_ref().map(|c| c.changes.len()), Some(1));
-    assert_eq!(second.annotation, Some(AnnotationId(1)));
-    assert!(matches!(session.tool, ToolState::Idle));
-    assert_eq!(annotation_count(&app), 1);
-    assert!(app.can_undo(&DocumentId(1)));
-    assert!(!app.can_redo(&DocumentId(1)));
-}
-
-#[test]
-fn text_tool_requires_text_before_confirm() {
-    let (mut app, mut session) = application_with_document();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::BeginAnnotationTool,
-            CommandPayload::AnnotationTool(AnnotationToolKind::Text),
-        ),
-    )
-    .unwrap();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::AppendAnnotationPoints,
-            CommandPayload::AppendAnnotationPoints(vec![point(1.0, 2.0)]),
-        ),
-    )
-    .unwrap();
-    // Missing text: confirm is rejected and the tool survives.
-    assert!(matches!(
-        app.execute(
-            &mut session,
-            command(CommandId::ConfirmAnnotationTool, CommandPayload::None),
-        ),
-        Err(CadError::InvalidInput(_))
-    ));
-    assert!(session.annotation_preview().is_some());
-    assert_eq!(annotation_count(&app), 0);
-
-    app.execute(
-        &mut session,
-        command(
-            CommandId::AnnotationText,
-            CommandPayload::AnnotationText("检查批注".into()),
-        ),
-    )
-    .unwrap();
-    let outcome = app
-        .execute(
-            &mut session,
-            command(CommandId::ConfirmAnnotationTool, CommandPayload::None),
-        )
-        .unwrap();
-    assert_eq!(outcome.changes.as_ref().map(|c| c.changes.len()), Some(1));
-    assert_eq!(annotation_count(&app), 1);
-    let stored = app.workspace.documents[&DocumentId(1)]
-        .annotations
-        .get(AnnotationId(1))
-        .unwrap();
-    assert_eq!(stored.text, "检查批注");
-}
-
-#[test]
-fn cancelling_an_annotation_tool_produces_zero_transactions() {
-    let (mut app, mut session) = application_with_document();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::BeginAnnotationTool,
-            CommandPayload::AnnotationTool(AnnotationToolKind::Freehand),
-        ),
-    )
-    .unwrap();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::AppendAnnotationPoints,
-            CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0), point(1.0, 1.0)]),
-        ),
-    )
-    .unwrap();
-    let revision_before = app.workspace.documents[&DocumentId(1)]
-        .annotations
-        .revision();
-    let outcome = app
-        .execute(
-            &mut session,
-            command(CommandId::CancelAnnotationTool, CommandPayload::None),
-        )
-        .unwrap();
-    assert!(outcome.changes.is_none());
-    assert!(session.annotation_preview().is_none());
-    assert!(matches!(session.tool, ToolState::Idle));
-    assert_eq!(
-        app.workspace.documents[&DocumentId(1)]
-            .annotations
-            .revision(),
-        revision_before
-    );
-    assert!(!app.can_undo(&DocumentId(1)));
-    assert!(!app.can_redo(&DocumentId(1)));
-}
-
-#[test]
-fn freehand_needs_an_explicit_confirm_and_commits_once() {
-    let (mut app, mut session) = application_with_document();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::BeginAnnotationTool,
-            CommandPayload::AnnotationTool(AnnotationToolKind::Freehand),
-        ),
-    )
-    .unwrap();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::AppendAnnotationPoints,
-            CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0), point(1.0, 0.0)]),
-        ),
-    )
-    .unwrap();
-    // Open-ended: no auto-commit even when the minimum is met.
-    assert!(session.annotation_preview().is_some());
-    assert_eq!(annotation_count(&app), 0);
-    let outcome = app
-        .execute(
-            &mut session,
-            command(CommandId::ConfirmAnnotationTool, CommandPayload::None),
-        )
-        .unwrap();
-    assert_eq!(outcome.changes.as_ref().map(|c| c.changes.len()), Some(1));
-    assert_eq!(outcome.annotation, Some(AnnotationId(1)));
-    assert_eq!(annotation_count(&app), 1);
-}
-
-#[test]
-fn annotation_points_without_an_active_tool_are_refused() {
-    let (mut app, mut session) = application_with_document();
-    assert!(matches!(
-        app.execute(
-            &mut session,
-            command(
-                CommandId::AppendAnnotationPoints,
-                CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0)]),
-            ),
-        ),
-        Err(CadError::InvalidInput(_))
-    ));
-    assert_eq!(annotation_count(&app), 0);
-}
-
-#[test]
-fn confirm_without_an_active_tool_produces_no_transaction() {
-    let (mut app, mut session) = application_with_document();
-    assert!(matches!(
-        app.execute(
-            &mut session,
-            command(CommandId::ConfirmAnnotationTool, CommandPayload::None),
-        ),
-        Err(CadError::InvalidInput(_))
-    ));
-    assert_eq!(annotation_count(&app), 0);
-    assert!(!app.can_undo(&DocumentId(1)));
-}
-
-#[test]
-fn ellipse_tool_reads_center_and_axes_from_two_points() {
-    let (mut app, mut session) = application_with_document();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::BeginAnnotationTool,
-            CommandPayload::AnnotationTool(AnnotationToolKind::Ellipse),
-        ),
-    )
-    .unwrap();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::AppendAnnotationPoints,
-            CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0), point(2.0, 1.0)]),
-        ),
-    )
-    .unwrap();
-    let stored = app.workspace.documents[&DocumentId(1)]
-        .annotations
-        .get(AnnotationId(1))
-        .unwrap();
-    match &stored.geometry {
-        cad_db::AnnotationGeometry::Ellipse {
-            center,
-            axis_u,
-            axis_v,
-        } => {
-            assert_eq!(*center, point(0.0, 0.0));
-            assert_eq!(*axis_u, point(2.0, 0.0));
-            assert_eq!(*axis_v, point(0.0, 1.0));
-        }
-        other => panic!("expected ellipse, got {other:?}"),
-    }
-}
-
-#[test]
-fn annotation_visibility_round_trips_without_a_transaction() {
-    let (mut app, mut session) = application_with_document();
-    // Seed one annotation directly through the command path.
-    app.execute(
-        &mut session,
-        command(
-            CommandId::CreateAnnotation,
-            CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(9)))),
-        ),
-    )
-    .unwrap();
-    let revision_before = app.workspace.documents[&DocumentId(1)]
-        .annotations
-        .revision();
-
-    let outcome = app
-        .execute(
-            &mut session,
-            command(
-                CommandId::SetAnnotationVisibility,
-                CommandPayload::AnnotationVisibility(AnnotationId(9), false),
-            ),
-        )
-        .unwrap();
-    assert!(outcome.changes.is_none(), "visibility writes nothing");
-    assert!(session.annotation_hidden(AnnotationId(9)));
-    let rows = session.annotation_rows(&app.workspace.documents[&DocumentId(1)].annotations);
-    assert!(!rows[0].visible);
-    assert!(rows[0].is_overridden());
-    // The database revision and history are untouched.
-    assert_eq!(
-        app.workspace.documents[&DocumentId(1)]
-            .annotations
-            .revision(),
-        revision_before
-    );
-    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
-
-    // Show again: state round-trips back to visible.
-    app.execute(
-        &mut session,
-        command(
-            CommandId::SetAnnotationVisibility,
-            CommandPayload::AnnotationVisibility(AnnotationId(9), true),
-        ),
-    )
-    .unwrap();
-    assert!(session.annotation_visible(AnnotationId(9)));
-}
-
-#[test]
-fn selecting_an_annotation_is_read_only_state() {
-    let (mut app, mut session) = application_with_document();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::SelectAnnotation,
-            CommandPayload::SelectAnnotation(Some(AnnotationId(4))),
-        ),
-    )
-    .unwrap();
-    assert_eq!(session.selected_annotation, Some(AnnotationId(4)));
-    assert!(!app.can_undo(&DocumentId(1)));
-    app.execute(
-        &mut session,
-        command(
-            CommandId::SelectAnnotation,
-            CommandPayload::SelectAnnotation(None),
-        ),
-    )
-    .unwrap();
-    assert_eq!(session.selected_annotation, None);
-}
-
-#[test]
-fn annotation_transactions_drive_undo_and_redo_availability() {
-    let (mut app, mut session) = application_with_document();
-    // One confirmed annotation tool = one undoable transaction.
-    app.execute(
-        &mut session,
-        command(
-            CommandId::BeginAnnotationTool,
-            CommandPayload::AnnotationTool(AnnotationToolKind::Rectangle),
-        ),
-    )
-    .unwrap();
-    app.execute(
-        &mut session,
-        command(
-            CommandId::AppendAnnotationPoints,
-            CommandPayload::AppendAnnotationPoints(vec![point(0.0, 0.0), point(1.0, 1.0)]),
-        ),
-    )
-    .unwrap();
-    assert!(app.can_undo(&DocumentId(1)));
-    assert!(!app.can_redo(&DocumentId(1)));
-
-    // Undo removes it; redo stays available (U11).
-    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
-        .unwrap();
-    assert_eq!(annotation_count(&app), 0);
-    assert!(!app.can_undo(&DocumentId(1)));
-    assert!(app.can_redo(&DocumentId(1)));
-
-    // Redo restores it.
-    app.execute(&mut session, command(CommandId::Redo, CommandPayload::None))
-        .unwrap();
-    assert_eq!(annotation_count(&app), 1);
-    assert!(app.can_undo(&DocumentId(1)));
-    assert!(!app.can_redo(&DocumentId(1)));
-}
-
-#[test]
-fn viewer_mode_rejects_annotation_tool_commands() {
-    let (mut app, _) = application_with_document();
-    let mut viewer = SessionState::new(DocumentId(1), AppMode::Viewer);
-    for id in [
-        CommandId::BeginAnnotationTool,
-        CommandId::ConfirmAnnotationTool,
-        CommandId::CancelAnnotationTool,
-        CommandId::AppendAnnotationPoints,
-        CommandId::AnnotationText,
-        CommandId::SetAnnotationVisibility,
-        CommandId::SelectAnnotation,
-    ] {
-        assert_eq!(
-            app.execute(&mut viewer, command(id, CommandPayload::None))
-                .unwrap_err(),
-            CadError::PermissionDenied,
-            "{id:?} must be Work-only"
-        );
-    }
-}
-
-/// One document with a supported layout (id 1) and an unsupported one (id 2).
-fn application_with_layouts() -> (Application, SessionState) {
-    let (mut app, session) = application_with_document();
-    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
-    b.insert_layer(Layer {
-        id: LayerId(0),
-        name: "0".into(),
-        visible: true,
-    })
-    .unwrap();
-    let corners = || {
-        vec![
-            Point3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            Point3 {
-                x: 100.0,
-                y: 50.0,
-                z: 0.0,
-            },
-            Point3 {
-                x: 10.0,
-                y: 20.0,
-                z: 0.0,
-            },
-        ]
-    };
-    b.insert_layout(Layout {
-        id: LayoutId(1),
-        name: "Sheet1".into(),
-        viewports: vec![PaperViewport {
-            clip: corners(),
-            model_to_paper: Transform3::scale(100.0),
-            completeness: Completeness::Complete,
-        }],
-    })
-    .unwrap();
-    b.insert_layout(Layout {
-        id: LayoutId(2),
-        name: "Broken".into(),
-        viewports: vec![PaperViewport {
-            clip: corners(),
-            model_to_paper: Transform3::scale(100.0),
-            completeness: Completeness::Partial(vec!["importer dropped height".into()]),
-        }],
-    })
-    .unwrap();
-    let drawing = b.finish().unwrap();
-    app.workspace
-        .documents
-        .get_mut(&DocumentId(1))
-        .unwrap()
-        .drawing = Arc::new(drawing);
-    (app, session)
 }
 
 #[test]
@@ -1684,7 +1078,6 @@ mod drawing {
             Document {
                 id: DocumentId(1),
                 drawing: Arc::new(drawing),
-                annotations: AnnotationDatabase::new(DatabaseId(2)),
                 identity: DocumentIdentity::Sha256([1u8; 32]),
                 units: UnitContext::drawing_units(),
                 resource_keys: Vec::new(),
@@ -2193,9 +1586,12 @@ mod drawing {
     }
 
     #[test]
-    fn drawing_undo_redo_round_trips_across_mixed_history() {
+    fn drawing_undo_redo_round_trips() {
         let (mut app, mut session) = drawing_app();
-        // One drawing create, then one annotation create, then undo both.
+        let before = app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity_count();
+        // One drawing create, then a second, then undo both in reverse order.
         execute(
             &mut app,
             &mut session,
@@ -2213,12 +1609,18 @@ mod drawing {
         execute(
             &mut app,
             &mut session,
-            CommandId::CreateAnnotation,
-            CommandPayload::Annotation(Box::new(AnnotationCommand::Create(ann(1)))),
+            CommandId::CreateCircle,
+            CommandPayload::Points(vec![point(5.0, 5.0), point(6.0, 5.0)]),
         )
         .unwrap();
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)]
+                .drawing
+                .entity_count(),
+            before + 2
+        );
 
-        // Undo the annotation first, then the drawing create.
+        // Undo the circle first, then the line create.
         execute(
             &mut app,
             &mut session,
@@ -2226,7 +1628,12 @@ mod drawing {
             CommandPayload::None,
         )
         .unwrap();
-        assert_eq!(app.workspace.documents[&DocumentId(1)].annotations.len(), 0);
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)]
+                .drawing
+                .entity_count(),
+            before + 1
+        );
         execute(
             &mut app,
             &mut session,
@@ -2238,6 +1645,12 @@ mod drawing {
             .drawing
             .entity(oid)
             .is_none());
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)]
+                .drawing
+                .entity_count(),
+            before
+        );
 
         // Redo restores them in order.
         execute(
@@ -2258,7 +1671,12 @@ mod drawing {
             CommandPayload::None,
         )
         .unwrap();
-        assert_eq!(app.workspace.documents[&DocumentId(1)].annotations.len(), 1);
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)]
+                .drawing
+                .entity_count(),
+            before + 2
+        );
     }
 
     #[test]

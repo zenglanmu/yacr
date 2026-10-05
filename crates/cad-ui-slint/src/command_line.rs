@@ -53,12 +53,6 @@ fn catalog_command(command: &str) -> Option<(&'static str, &'static str)> {
         "ANGLE" | "MEASURE ANGLE" => Some(("measure", "measure.kind.angle")),
         "AREA" | "MEASURE AREA" => Some(("measure", "measure.kind.area")),
         "MEASURE POLYLINE" => Some(("measure", "measure.kind.polyline")),
-        "ANNOTATE TEXT" => Some(("annotation", "annotation.kind.text")),
-        "ANNOTATE LEADER" => Some(("annotation", "annotation.kind.leader")),
-        "ANNOTATE RECTANGLE" => Some(("annotation", "annotation.kind.rectangle")),
-        "ANNOTATE ELLIPSE" => Some(("annotation", "annotation.kind.ellipse")),
-        "ANNOTATE FREEHAND" => Some(("annotation", "annotation.kind.freehand")),
-        "ANNOTATE CLOUD" => Some(("annotation", "annotation.kind.cloud")),
         "VIEW TOP" => Some(("view", "view.standard.top")),
         "VIEW BOTTOM" => Some(("view", "view.standard.bottom")),
         "VIEW FRONT" => Some(("view", "view.standard.front")),
@@ -128,7 +122,6 @@ pub(crate) fn connect(
             let label = messages.borrow().text(key, &[]).into();
             match family {
                 "measure" => ui.invoke_measure_kind_selected(label),
-                "annotation" => ui.invoke_annotation_kind_selected(label),
                 "view" => ui.invoke_standard_view_selected(label),
                 _ => unreachable!("catalog command families are defined locally"),
             }
@@ -141,15 +134,11 @@ pub(crate) fn connect(
             "ZOOM IN" => ui.invoke_zoom_requested(1.25),
             "ZOOM OUT" => ui.invoke_zoom_requested(0.8),
             "MEASURE" => ui.invoke_measure_requested(),
-            "ANNOTATE" => ui.invoke_annotate_requested(),
-            "SAVE MEASUREMENT" => ui.invoke_save_measurement_requested(),
             "CLEAR SELECTION" | "DESELECT" => ui.invoke_clear_selection_requested(),
             "SELECTALL" => ui.invoke_select_all_requested(),
             "PROJECTION" => ui.invoke_toggle_projection_requested(),
             "VIEW MODE" => ui.invoke_toggle_view_mode_requested(),
             "MODE" => ui.invoke_mode_toggled(),
-            "EXPORT" => ui.invoke_export_requested(),
-            "IMPORT" => ui.invoke_import_requested(),
             "UNDO" | "REDO" => {
                 let available = if command == "UNDO" {
                     ui.get_can_undo()
@@ -179,8 +168,6 @@ pub(crate) fn connect(
             "CONFIRM" | "ENTER" | "" => {
                 if ui.get_measurement_active() {
                     ui.invoke_confirm_measurement_requested();
-                } else if ui.get_annotation_tool_active() {
-                    ui.invoke_confirm_annotation_requested();
                 } else if ui.get_draw_tool_active() {
                     ui.invoke_confirm_draw_requested();
                 }
@@ -188,9 +175,6 @@ pub(crate) fn connect(
             "CANCEL" => {
                 if ui.get_measurement_active() {
                     ui.invoke_cancel_measurement_requested();
-                }
-                if ui.get_annotation_tool_active() {
-                    ui.invoke_cancel_annotation_requested();
                 }
                 if ui.get_draw_tool_active() {
                     ui.invoke_cancel_draw_requested();
@@ -259,10 +243,6 @@ mod contracts {
             Some(("measure", "measure.kind.distance"))
         );
         assert_eq!(
-            catalog_command("ANNOTATE CLOUD"),
-            Some(("annotation", "annotation.kind.cloud"))
-        );
-        assert_eq!(
             catalog_command("VIEW ISOMETRIC"),
             Some(("view", "view.standard.isometric"))
         );
@@ -272,7 +252,6 @@ mod contracts {
     fn unsupported_payloads_are_not_silently_consumed() {
         for input in [
             "MEASURE DISTANCE 0,0 10,10",
-            "ANNOTATE TEXT MixedCase content",
             "VIEW TOP extra",
             "POLYLINE",
             "RECTANGLE",

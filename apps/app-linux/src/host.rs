@@ -25,7 +25,6 @@ struct PendingRead {
     receiver: std::sync::mpsc::Receiver<CadResult<Arc<[u8]>>>,
     label: String,
     drawing: Arc<cad_db::DrawingDatabase>,
-    annotations: cad_domain::Revision,
     cancelled: bool,
 }
 
@@ -35,8 +34,6 @@ pub struct LinuxOptions {
     pub headless: bool,
     pub output: Option<PathBuf>,
     pub drawing: Option<PathBuf>,
-    pub annotation_export: Option<PathBuf>,
-    pub annotation_import: Option<PathBuf>,
     /// Full host `ViewerConfig` file; `None` uses the XDG default.
     pub config: Option<PathBuf>,
     /// Projected user-preference file; `None` uses the XDG default.
@@ -51,8 +48,6 @@ impl Default for LinuxOptions {
             headless: false,
             output: None,
             drawing: None,
-            annotation_export: None,
-            annotation_import: None,
             config: None,
             preferences: None,
             size: [1280.0, 800.0],
@@ -82,8 +77,6 @@ impl LinuxOptions {
                 }
                 "--output" => options.output = Some(value.into()),
                 "--open" => options.drawing = Some(value.into()),
-                "--export-annotations" => options.annotation_export = Some(value.into()),
-                "--import-annotations" => options.annotation_import = Some(value.into()),
                 "--config" => options.config = Some(value.into()),
                 "--preferences" => options.preferences = Some(value.into()),
                 "--locale" if matches!(value.as_str(), "zh-CN" | "en") => options.locale = value,
@@ -169,8 +162,6 @@ impl Runtime {
                 Ok(())
             }
             CommandId::OpenDrawing => self.request_open(),
-            CommandId::ExportAnnotations => self.export_annotations(),
-            CommandId::ImportAnnotations => self.import_annotations(),
             CommandId::SwitchBackend => Err(CadError::Unsupported(
                 self.message("linux.backend_unavailable", &[]),
             )),
@@ -191,9 +182,6 @@ impl Runtime {
         result
     }
     fn request_open(&self) -> CadResult<()> {
-        if self.controller.borrow().unsaved_signal().dirty {
-            return Err(CadError::Unsupported(self.message("linux.dirty", &[])));
-        }
         if self.options.headless {
             return self.open_path(
                 self.options
@@ -242,9 +230,13 @@ impl Runtime {
         Ok(())
     }
     fn open_path(&self, path: &Path) -> CadResult<()> {
-        // Recheck after selection: work may have become dirty while the portal was open.
-        if self.controller.borrow().unsaved_signal().dirty {
-            return Err(CadError::Unsupported(self.message("linux.dirty", &[])));
+        // A missing path is refused up front rather than falling back to the
+        // synthetic demo (whether the read happens here or on the worker).
+        if !path.exists() {
+            return Err(CadError::InvalidInput(format!(
+                "drawing path does not exist: {}",
+                path.display()
+            )));
         }
         if !self.options.headless {
             if self.pending_read.borrow().is_some()
@@ -273,10 +265,6 @@ impl Runtime {
                 receiver,
                 label,
                 drawing: c.drawing().ok_or(CadError::Cancelled)?,
-                annotations: c
-                    .workspace_annotations()
-                    .ok_or(CadError::Cancelled)?
-                    .revision(),
                 cancelled: false,
             });
             self.presenting_open.set(true);
@@ -316,13 +304,8 @@ impl Runtime {
                 let read = self.pending_read.borrow_mut().take().unwrap();
                 let mut c = self.controller.borrow_mut();
                 let unchanged = !read.cancelled
-                    && !c.unsaved_signal().dirty
                     && c.drawing()
-                        .is_some_and(|db| Arc::ptr_eq(&db, &read.drawing))
-                    && c.workspace_annotations()
-                        .ok_or(CadError::Cancelled)?
-                        .revision()
-                        == read.annotations;
+                        .is_some_and(|db| Arc::ptr_eq(&db, &read.drawing));
                 if unchanged {
                     let bytes = match result {
                         Ok(Ok(bytes)) => bytes,
@@ -366,7 +349,7 @@ impl Runtime {
         };
         if let Some(handle) = self.handle.borrow().as_ref() {
             let messages = cad_ui_slint::MessageSource::from_request(&self.options.locale);
-            handle.set_open_available(!self.loading() && !c.unsaved_signal().dirty)?;
+            handle.set_open_available(!self.loading())?;
             handle.set_import_state(&cad_ui_slint::ImportProgressUiState::from_snapshot(
                 snapshot.as_ref(),
                 &messages,
@@ -402,31 +385,6 @@ impl Runtime {
             }
         }
         Ok(())
-    }
-    fn export_annotations(&self) -> CadResult<()> {
-        let path = self
-            .options
-            .annotation_export
-            .as_ref()
-            .ok_or_else(|| CadError::Unsupported(self.message("linux.export_path", &[])))?;
-        let (json, revision) = self.controller.borrow().prepare_annotation_export()?;
-        atomic_write(path, json.as_bytes())?;
-        self.controller
-            .borrow_mut()
-            .confirm_annotation_export(revision)
-    }
-    fn import_annotations(&self) -> CadResult<()> {
-        let path = self
-            .options
-            .annotation_import
-            .as_ref()
-            .ok_or_else(|| CadError::Unsupported(self.message("linux.import_path", &[])))?;
-        let text =
-            std::fs::read_to_string(path).map_err(|e| CadError::InvalidInput(e.to_string()))?;
-        self.controller
-            .borrow_mut()
-            .import_annotations_json(&text, cad_annotations::FingerprintPolicy::RejectMismatch)
-            .map(|_| ())
     }
 }
 impl UiCommandSink for Runtime {
@@ -484,12 +442,6 @@ impl LinuxApp {
         adapter
             .component()
             .set_can_open(!options.headless || options.drawing.is_some());
-        adapter
-            .component()
-            .set_can_import(options.annotation_import.is_some());
-        adapter
-            .component()
-            .set_can_export(options.annotation_export.is_some());
         adapter.component().set_can_trim(false);
         adapter.component().set_can_switch_backend(false);
         adapter.fit_window_to_logical(options.size, 1.0);
@@ -624,17 +576,6 @@ impl LinuxApp {
         }
     }
     pub fn run(&self) -> CadResult<()> {
-        let rt = self.runtime.clone();
-        self.adapter.window().on_close_requested(move || {
-            if rt.controller.borrow().unsaved_signal().dirty {
-                if let Some(handle) = rt.handle.borrow().as_ref() {
-                    let _ = handle.set_status(rt.message("linux.dirty", &[]));
-                }
-                slint::CloseRequestResponse::KeepWindowShown
-            } else {
-                slint::CloseRequestResponse::HideWindow
-            }
-        });
         let _ = &self.timer;
         self.adapter
             .component()

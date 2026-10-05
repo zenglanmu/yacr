@@ -15,7 +15,6 @@ cad-domain.workspace = true
 cad-ui-slint.workspace = true
 cad-render-wgpu.workspace = true
 cad-diagnostics.workspace = true
-cad-annotations.workspace = true
 cad-representation.workspace = true
 serde_json.workspace = true
 slint.workspace = true

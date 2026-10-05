@@ -12,11 +12,9 @@
 //! * the measurement tool panel,
 //! * the layer panel plus its ordered `LayerId`s,
 //! * the read-only property panel for the current selection,
-//! * the annotation management panel plus its ordered `AnnotationId`s,
 //! * the layout (paper-space) panel from the database's real layout table,
 //! * the diagnostics drawer from the last import report,
-//! * the transient render overlays: selection highlight, measurement preview and
-//!   annotation preview.
+//! * the transient render overlays: selection highlight and measurement preview.
 //!
 //! When a getter has nothing to report the panels show their **explicit empty
 //! state**; no row is ever fabricated. A missing import report is reported as
@@ -29,16 +27,15 @@ use cad_app::render_scene::layout_descriptors;
 use cad_import_acadrust::ImportReport;
 use cad_representation::SpaceSelection;
 use cad_ui_slint::{
-    AnnotationPanelState, DiagnosticRowUi, DiagnosticsPanelState, ImportProgressUiState,
-    LayerPanelState, LayoutPanelState, MeasurementUiState, MessageSource, PropertyPanelState,
+    DiagnosticRowUi, DiagnosticsPanelState, ImportProgressUiState, LayerPanelState,
+    LayoutPanelState, MeasurementUiState, MessageSource, PropertyPanelState,
 };
 
-/// Literal host empty labels. Layer/property/annotation empty-state text has no
+/// Literal host empty labels. Layer/property empty-state text has no
 /// catalog key: the host supplies it through the pushed panel state (see
 /// `docs/panels.md` §3.1/§3.2), so these strings are the documented contract.
 const LAYER_EMPTY: &str = "无图层";
 const PROPERTY_EMPTY: &str = "未选择";
-const ANNOTATION_EMPTY: &str = "无批注";
 
 /// The panel state derived from one controller snapshot, without the handle.
 ///
@@ -51,8 +48,6 @@ pub(crate) struct PanelSnapshot {
     pub layers: LayerPanelState,
     pub layer_ids: Vec<LayerId>,
     pub properties: PropertyPanelState,
-    pub annotations: AnnotationPanelState,
-    pub annotation_ids: Vec<AnnotationId>,
     pub layouts: LayoutPanelState,
     pub layout_ids: Vec<LayoutId>,
     pub diagnostics: DiagnosticsPanelState,
@@ -61,8 +56,6 @@ pub(crate) struct PanelSnapshot {
     pub selection: cad_app::SelectionSet,
     /// In-progress measurement preview, or `None` when no measurement tool runs.
     pub measurement_preview: Option<cad_app::MeasurementPreview>,
-    /// In-progress annotation preview, or `None` when no annotation tool runs.
-    pub annotation_preview: Option<cad_app::AnnotationPreview>,
     /// Authoritative session mode (audit U02), so the shell shows the mode the
     /// command layer enforces.
     pub mode: cad_app::AppMode,
@@ -79,13 +72,10 @@ pub(crate) fn snapshot(
     let controller_ref = controller.borrow();
 
     let history = controller_ref.history_availability();
-    let mut measurement = MeasurementUiState::from_preview(
+    let measurement = MeasurementUiState::from_preview(
         controller_ref.measurement_preview().as_ref(),
         controller_ref.unit_label(),
     );
-    // Enable the save-as-annotation affordance only when a confirmed record
-    // exists (F06/F07); the command layer re-validates it.
-    measurement.set_can_save_annotation(controller_ref.has_last_measurement());
     // Transient overlay inputs (docs/ui.md §2): the selection highlight and the
     // active tool previews are pushed on the same snapshot as the panels, so a
     // command, a pick, an open or a tool confirm/cancel keeps them current.
@@ -114,20 +104,6 @@ pub(crate) fn snapshot(
             |keys| format!("多值: {}", keys.join(",")),
         ),
     };
-
-    let (annotation_rows, annotation_ids, annotation_preview) =
-        match controller_ref.annotation_rows() {
-            Ok(rows) => {
-                let ids = rows.iter().map(|row| row.id).collect();
-                (rows, ids, controller_ref.annotation_preview())
-            }
-            Err(_) => (Vec::new(), Vec::new(), controller_ref.annotation_preview()),
-        };
-    let annotations = AnnotationPanelState::from_rows(
-        &annotation_rows,
-        annotation_preview.as_ref(),
-        ANNOTATION_EMPTY,
-    );
 
     let drawing = controller_ref.drawing();
     let active_space = controller_ref.session.active_space.clone();
@@ -165,14 +141,11 @@ pub(crate) fn snapshot(
         layers,
         layer_ids,
         properties,
-        annotations,
-        annotation_ids,
         layouts,
         layout_ids,
         diagnostics,
         selection,
         measurement_preview,
-        annotation_preview,
         mode,
     }
 }
@@ -197,7 +170,6 @@ pub(crate) fn push_panel_state(
     let _ = handle.set_measurement_state(&snapshot.measurement);
     let _ = handle.set_layer_state(&snapshot.layers, &snapshot.layer_ids);
     let _ = handle.set_property_state(&snapshot.properties);
-    let _ = handle.set_annotation_state(&snapshot.annotations, &snapshot.annotation_ids);
     let _ = handle.set_layout_state(&snapshot.layouts, &snapshot.layout_ids);
     let _ = handle.set_diagnostics_state(&snapshot.diagnostics);
     let _ = handle.set_mode(snapshot.mode);
@@ -219,7 +191,6 @@ pub(crate) fn push_panel_state(
         view.sync_drawing(controller.borrow().drawing());
         view.set_selection_highlight(snapshot.selection);
         view.set_measurement_preview(snapshot.measurement_preview);
-        view.set_annotation_preview(snapshot.annotation_preview);
     }
 }
 

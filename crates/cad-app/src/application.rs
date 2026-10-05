@@ -7,7 +7,6 @@ impl Application {
             workspace: Workspace::default(),
             history: BTreeMap::new(),
             measurement: MeasurementEngine::default(),
-            annotations: AnnotationService,
             query: QueryService::new(),
         }
     }
@@ -70,89 +69,12 @@ impl Application {
                 }
             }
             CommandId::Measure => self.measure(session, &command),
-            CommandId::AppendAnnotationPoints => match &command.payload {
-                CommandPayload::AppendAnnotationPoints(points) | CommandPayload::Points(points) => {
-                    self.capture_annotation_points(session, points)
-                }
-                _ => Err(CadError::InvalidInput(
-                    "AppendAnnotationPoints needs a points payload".into(),
-                )),
-            },
-            CommandId::AnnotationText => match &command.payload {
-                CommandPayload::AnnotationText(text) => {
-                    session.set_annotation_text(text.clone())?;
-                    Ok(self.annotation_preview_outcome(session))
-                }
-                _ => Err(CadError::InvalidInput(
-                    "AnnotationText needs a text payload".into(),
-                )),
-            },
             CommandId::ConfirmMeasurement => self.confirm_measurement(session, &command),
-            CommandId::SaveMeasurementAsAnnotation => self.save_measurement_as_annotation(session),
             CommandId::CancelMeasurement => {
                 // Cancelling is always allowed and never opens a transaction.
                 session.cancel_tool()?;
                 Ok(CommandOutcome::none())
             }
-            CommandId::CreateAnnotation
-            | CommandId::UpdateAnnotation
-            | CommandId::DeleteAnnotation => self.annotation_command(&command),
-            CommandId::DeleteAnnotationById => match &command.payload {
-                CommandPayload::DeleteAnnotation(id) => {
-                    let forwarded = Command {
-                        schema_version: command.schema_version,
-                        id: CommandId::DeleteAnnotation,
-                        document: command.document,
-                        viewport: command.viewport,
-                        payload: CommandPayload::Annotation(Box::new(AnnotationCommand::Delete(
-                            *id,
-                        ))),
-                    };
-                    self.annotation_command(&forwarded)
-                }
-                _ => Err(CadError::InvalidInput(
-                    "DeleteAnnotation needs an id payload".into(),
-                )),
-            },
-            CommandId::BeginAnnotationTool => self.begin_annotation_tool(session, &command),
-            CommandId::ConfirmAnnotationTool => self.confirm_annotation_tool(session),
-            CommandId::CancelAnnotationTool => {
-                // Cancelling is always allowed and never opens a transaction.
-                session.cancel_tool()?;
-                Ok(CommandOutcome::none())
-            }
-            CommandId::SetAnnotationVisibility => match &command.payload {
-                CommandPayload::AnnotationVisibility(id, visible) => {
-                    session.set_annotation_visibility(*id, *visible);
-                    Ok(CommandOutcome {
-                        objects: Vec::new(),
-                        changes: None,
-                        diagnostics: vec![Diagnostic {
-                            object: None,
-                            code: "annotation.visibility".into(),
-                            message: format!(
-                                "批注 {} 临时{}（不写库）",
-                                id.0,
-                                if *visible { "显示" } else { "隐藏" }
-                            ),
-                        }],
-                        measurement: None,
-                        annotation: None,
-                    })
-                }
-                _ => Err(CadError::InvalidInput(
-                    "SetAnnotationVisibility needs a visibility payload".into(),
-                )),
-            },
-            CommandId::SelectAnnotation => match &command.payload {
-                CommandPayload::SelectAnnotation(id) => {
-                    session.selected_annotation = *id;
-                    Ok(CommandOutcome::none())
-                }
-                _ => Err(CadError::InvalidInput(
-                    "SelectAnnotation needs a selection payload".into(),
-                )),
-            },
             CommandId::Undo => self.undo(&command),
             CommandId::Redo => self.redo(&command),
             CommandId::SwitchProjection => {
@@ -197,11 +119,6 @@ impl Application {
             CommandId::OpenDrawing | CommandId::CancelLoading => Err(CadError::Unsupported(
                 "file open/cancel is performed by the platform host, not the application".into(),
             )),
-            CommandId::ImportAnnotations | CommandId::ExportAnnotations => {
-                Err(CadError::Unsupported(
-                    "annotation file I/O is performed by the platform host".into(),
-                ))
-            }
             CommandId::Select => {
                 // Selection is read-only: it stores the picked refs and enters
                 // the Selecting tool state, but never writes the DWG (F05).
@@ -225,7 +142,6 @@ impl Application {
                             message: format!("后端偏好：{choice:?}（渲染会话由宿主重建）"),
                         }],
                         measurement: None,
-                        annotation: None,
                     })
                 } else {
                     Err(CadError::InvalidInput(
@@ -249,7 +165,6 @@ impl Application {
                             message: format!("模式：{mode:?}"),
                         }],
                         measurement: None,
-                        annotation: None,
                     })
                 }
                 _ => Err(CadError::InvalidInput(
@@ -336,7 +251,6 @@ impl Application {
                 message: message.into(),
             }],
             measurement: None,
-            annotation: None,
         })
     }
 
@@ -367,7 +281,6 @@ impl Application {
                 message: format!("轨道旋转 yaw={yaw:.4} pitch={pitch:.4}"),
             }],
             measurement: None,
-            annotation: None,
         })
     }
 
@@ -392,7 +305,6 @@ impl Application {
                 message: format!("资源引用 {}：{keys}", document.resource_keys.len()),
             }],
             measurement: None,
-            annotation: None,
         })
     }
 
@@ -416,14 +328,8 @@ impl Application {
                     object: None,
                     code: "diagnostics.summary".into(),
                     message: format!(
-                        "图元 {}，批注 {}（{}），单位 {:?}",
+                        "图元 {}，单位 {:?}",
                         document.drawing.entity_count(),
-                        document.annotations.len(),
-                        if document.annotations.is_dirty() {
-                            "未保存"
-                        } else {
-                            "已保存"
-                        },
                         document.units.source
                     ),
                 },
@@ -434,7 +340,6 @@ impl Application {
                 },
             ],
             measurement: None,
-            annotation: None,
         })
     }
 

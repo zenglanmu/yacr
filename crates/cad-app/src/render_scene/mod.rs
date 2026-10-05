@@ -1,14 +1,13 @@
 //! CPU scene preparation. No Slint handles, GPU resources or render callbacks.
 use crate::layers::LayerOverrideSet;
-use crate::AnnotationVisibilitySet;
-use cad_db::{AnnotationDatabase, DrawingDatabase};
+use cad_db::DrawingDatabase;
 use cad_domain::{CadResult, DocumentId, SceneIdentity, TaskStamp};
 use cad_representation::{FontEngine, SpaceSelection};
+use cad_scene::SceneDelta;
 use std::sync::Arc;
 mod assembly;
 pub use assembly::*;
 mod overlay;
-use cad_scene::{annotation_batches, AnnotationSceneOptions, FrameBudget, SceneBudget, SceneDelta};
 pub use overlay::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,14 +25,8 @@ pub struct PreparedScene {
     pub revision: u64,
     pub base_revision: u64,
     pub base: Arc<SceneDelta>,
-    /// Committed annotation batches (the "overlay" in the original split).
-    pub overlay: Arc<SceneDelta>,
-    /// Transient selection-highlight and tool-preview batches. Kept separate
-    /// from `overlay` so a selection/preview change reuses both the base
-    /// drawing `Arc` and the annotation overlay `Arc`.
+    /// Transient selection-highlight and tool-preview batches.
     pub highlight: Arc<SceneDelta>,
-    pub annotation_diagnostics: Vec<cad_domain::Diagnostic>,
-    pub annotation_completeness: cad_domain::Completeness,
     pub highlight_diagnostics: Vec<cad_domain::Diagnostic>,
     pub highlight_completeness: cad_domain::Completeness,
 }
@@ -41,17 +34,12 @@ pub struct PreparedScene {
 #[derive(Clone, Default)]
 pub struct CadSceneController {
     version: Option<SceneVersion>,
-    /// `(base_revision, annotation_fingerprint, annotations_revision,
-    /// annotations_visible)`.
-    annotation_version: Option<(u64, u64, u64, bool)>,
     /// `(base_revision, transient overlay fingerprint)`.
     visual_version: Option<(u64, u64)>,
-    annotations_revision: u64,
     pub fonts_revision: u64,
     revision: u64,
     base_revision: u64,
     base: Option<Arc<SceneDelta>>,
-    annotation_overlay: Option<Arc<SceneDelta>>,
     visual_overlay: Option<Arc<SceneDelta>>,
     shared_document: Option<(Arc<DrawingDatabase>, SceneIdentity)>,
     document_epoch: u64,
@@ -63,10 +51,6 @@ impl CadSceneController {
     /// Immutable database adoption avoids an O(n) bounds/identity walk on camera
     /// navigation. Retaining the Arc prevents pointer reuse from hiding a new
     /// open, even when database id/revision/bounds happen to match.
-    ///
-    /// This is the backward-compatible entry point: it carries no transient
-    /// highlight/preview overlay. Hosts that do have one call
-    /// [`Self::prepare_shared_with_overlays`].
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_shared(
         &mut self,
@@ -75,8 +59,6 @@ impl CadSceneController {
         fonts: Option<Arc<FontEngine>>,
         layers: &LayerOverrideSet,
         space: SpaceSelection,
-        annotations: Option<&AnnotationDatabase>,
-        visibility: &AnnotationVisibilitySet,
     ) -> CadResult<()> {
         self.prepare_shared_with_overlays(
             doc,
@@ -84,8 +66,6 @@ impl CadSceneController {
             fonts,
             layers,
             space,
-            annotations,
-            visibility,
             &OverlayInputs::default(),
         )
     }
@@ -93,9 +73,8 @@ impl CadSceneController {
     /// Like [`Self::prepare_shared`] but also rebuilds the transient selection
     /// highlight / tool-preview overlay.
     ///
-    /// The base drawing `Arc` and the annotation overlay `Arc` are reused unless
-    /// their own inputs changed, so a selection or preview-cursor change only
-    /// rebuilds the highlight batches.
+    /// The base drawing `Arc` is reused unless its own inputs changed, so a
+    /// selection or preview-cursor change only rebuilds the highlight batches.
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_shared_with_overlays(
         &mut self,
@@ -104,8 +83,6 @@ impl CadSceneController {
         fonts: Option<Arc<FontEngine>>,
         layers: &LayerOverrideSet,
         space: SpaceSelection,
-        annotations: Option<&AnnotationDatabase>,
-        visibility: &AnnotationVisibilitySet,
         overlays: &OverlayInputs,
     ) -> CadResult<()> {
         let same = match (&self.shared_document, &doc) {
@@ -117,22 +94,10 @@ impl CadSceneController {
             self.document_epoch += 1;
             self.shared_document = doc.as_ref().map(|db| (db.clone(), db.scene_identity()));
         }
-        self.prepare_with_overlays(
-            doc.as_deref(),
-            document,
-            fonts,
-            layers,
-            space,
-            annotations,
-            visibility,
-            overlays,
-        )
+        self.prepare_with_overlays_doc(doc.as_deref(), document, fonts, layers, space, overlays)
     }
     pub fn fonts_changed(&mut self) {
         self.fonts_revision += 1;
-    }
-    pub fn annotations_changed(&mut self) {
-        self.annotations_revision += 1;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -143,8 +108,6 @@ impl CadSceneController {
         fonts: Option<Arc<FontEngine>>,
         layers: &LayerOverrideSet,
         space: SpaceSelection,
-        annotations: Option<&AnnotationDatabase>,
-        visibility: &AnnotationVisibilitySet,
     ) -> CadResult<()> {
         self.prepare_with_overlays(
             doc,
@@ -152,8 +115,6 @@ impl CadSceneController {
             fonts,
             layers,
             space,
-            annotations,
-            visibility,
             &OverlayInputs::default(),
         )
     }
@@ -167,20 +128,22 @@ impl CadSceneController {
         fonts: Option<Arc<FontEngine>>,
         layers: &LayerOverrideSet,
         space: SpaceSelection,
-        annotations: Option<&AnnotationDatabase>,
-        visibility: &AnnotationVisibilitySet,
         overlays: &OverlayInputs,
     ) -> CadResult<()> {
-        let result = self.prepare_inner(
-            doc,
-            document,
-            fonts,
-            layers,
-            space,
-            annotations,
-            visibility,
-            overlays,
-        );
+        self.prepare_with_overlays_doc(doc, document, fonts, layers, space, overlays)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_with_overlays_doc(
+        &mut self,
+        doc: Option<&DrawingDatabase>,
+        document: DocumentId,
+        fonts: Option<Arc<FontEngine>>,
+        layers: &LayerOverrideSet,
+        space: SpaceSelection,
+        overlays: &OverlayInputs,
+    ) -> CadResult<()> {
+        let result = self.prepare_inner(doc, document, fonts, layers, space, overlays);
         self.diagnostic = result.as_ref().err().map(ToString::to_string);
         result
     }
@@ -193,8 +156,6 @@ impl CadSceneController {
         fonts: Option<Arc<FontEngine>>,
         layers: &LayerOverrideSet,
         space: SpaceSelection,
-        annotations: Option<&AnnotationDatabase>,
-        visibility: &AnnotationVisibilitySet,
         overlays: &OverlayInputs,
     ) -> CadResult<()> {
         let version = doc.map(|db| SceneVersion {
@@ -215,17 +176,9 @@ impl CadSceneController {
         }
         let base_changed = self.base.is_none() || self.version != version;
         let next_base = self.base_revision + u64::from(base_changed);
-        let annotation_version = (
-            next_base,
-            annotation_fingerprint(annotations, visibility),
-            self.annotations_revision,
-            overlays.visibility.annotations,
-        );
         let visual_version = (next_base, overlay_fingerprint(overlays));
-        let annotation_changed =
-            base_changed || self.annotation_version != Some(annotation_version);
         let visual_changed = base_changed || self.visual_version != Some(visual_version);
-        if !base_changed && !annotation_changed && !visual_changed {
+        if !base_changed && !visual_changed {
             return Ok(());
         }
         let mut stamp = TaskStamp::new(document, self.revision + 1);
@@ -234,8 +187,7 @@ impl CadSceneController {
             stamp.object_revision = db.revision();
         }
         // Stage every CPU result before publishing any version. A visual-overlay
-        // edit keeps the base and annotation `Arc`s (and their GPU revisions)
-        // unchanged.
+        // edit keeps the base `Arc` (and its GPU revisions) unchanged.
         let base = if base_changed {
             Arc::new(match doc {
                 Some(db) => {
@@ -250,34 +202,6 @@ impl CadSceneController {
         } else {
             self.base.as_ref().expect("base prepared").clone()
         };
-        let options = AnnotationSceneOptions {
-            document,
-            fonts: fonts.as_deref(),
-            budget: FrameBudget::from_scene(&SceneBudget::default()),
-            ..AnnotationSceneOptions::default()
-        };
-        let annotation_overlay = if annotation_changed || self.annotation_overlay.is_none() {
-            let scene = match (doc, annotations) {
-                (Some(_), Some(db)) => annotation_batches(
-                    db.annotations(),
-                    |id| overlays.visibility.annotations && visibility.effective(id),
-                    &options,
-                ),
-                _ => annotation_batches(std::iter::empty(), |_| false, &options),
-            };
-            // Conversion gaps remain explicit; do not claim an empty successful
-            // overlay.
-            let delta = Arc::new(SceneDelta {
-                stamp: stamp.clone(),
-                added: scene.batches,
-                removed_chunks: vec![],
-            });
-            (delta, scene.diagnostics, scene.completeness)
-        } else {
-            self.annotation_result()
-        };
-        let (annotation_delta, annotation_diagnostics, annotation_completeness) =
-            annotation_overlay;
 
         let (visual_delta, highlight_diagnostics, highlight_completeness) =
             if visual_changed || self.visual_overlay.is_none() {
@@ -315,11 +239,18 @@ impl CadSceneController {
                     }
                     overlay.merge(preview_overlay(
                         overlays.measurement.as_ref(),
-                        overlays.annotation.as_ref(),
                         document,
                         overlays.visibility.snap_hints,
                         &PreviewOptions::default(),
                     ));
+                    if let Some(preview) = overlays.draw_preview.as_ref() {
+                        overlay.merge(draw_preview_overlay(
+                            preview,
+                            document,
+                            overlays.visibility.snap_hints,
+                            &PreviewOptions::default(),
+                        ));
+                    }
                     // Resolved object-snap hint markers are a separate concept
                     // from the pointer-cursor crosses above: distinct shapes
                     // encoding the snap kind, at their own draw order. Only
@@ -346,54 +277,18 @@ impl CadSceneController {
         self.revision += 1;
         self.base_revision = next_base;
         self.version = version;
-        self.annotation_version = Some(annotation_version);
         self.visual_version = Some(visual_version);
         self.base = Some(base.clone());
-        self.annotation_overlay = Some(annotation_delta.clone());
         self.visual_overlay = Some(visual_delta.clone());
         self.ready = Some(PreparedScene {
             revision: self.revision,
             base_revision: next_base,
             base,
-            overlay: annotation_delta,
             highlight: visual_delta,
-            annotation_diagnostics,
-            annotation_completeness,
             highlight_diagnostics,
             highlight_completeness,
         });
         Ok(())
-    }
-
-    /// The cached annotation overlay plus its diagnostics/completeness.
-    fn annotation_result(
-        &self,
-    ) -> (
-        Arc<SceneDelta>,
-        Vec<cad_domain::Diagnostic>,
-        cad_domain::Completeness,
-    ) {
-        match (&self.annotation_overlay, &self.ready) {
-            (Some(delta), Some(ready)) => (
-                delta.clone(),
-                ready.annotation_diagnostics.clone(),
-                ready.annotation_completeness.clone(),
-            ),
-            (Some(delta), None) => (
-                delta.clone(),
-                Vec::new(),
-                cad_domain::Completeness::Complete,
-            ),
-            (None, _) => (
-                Arc::new(SceneDelta {
-                    stamp: TaskStamp::new(DocumentId(0), 0),
-                    added: Vec::new(),
-                    removed_chunks: Vec::new(),
-                }),
-                Vec::new(),
-                cad_domain::Completeness::Complete,
-            ),
-        }
     }
 
     /// The cached transient overlay plus its diagnostics/completeness.
@@ -452,7 +347,6 @@ mod tests {
         controller: &mut CadSceneController,
         db: Option<&DrawingDatabase>,
         fonts: Option<Arc<FontEngine>>,
-        annotations: Option<&AnnotationDatabase>,
     ) -> CadResult<()> {
         controller.prepare(
             db,
@@ -460,45 +354,30 @@ mod tests {
             fonts,
             &LayerOverrideSet::new(),
             SpaceSelection::Model,
-            annotations,
-            &AnnotationVisibilitySet::new(),
         )
     }
 
     #[test]
-    fn fonts_some_to_some_invalidates_and_overlay_does_not_rebuild_base() {
+    fn fonts_change_rebuilds_the_base_and_a_repeat_is_a_no_op() {
         let db = DrawingDatabaseBuilder::new(DatabaseId(9)).finish().unwrap();
         let mut controller = CadSceneController::default();
         let first_fonts = Arc::new(FontEngine::new());
         controller.fonts_changed();
-        prepare(&mut controller, Some(&db), Some(first_fonts.clone()), None).unwrap();
+        prepare(&mut controller, Some(&db), Some(first_fonts.clone())).unwrap();
         let first = controller.ready.as_ref().unwrap();
         assert_eq!(first.base.stamp.document, DocumentId(73));
         assert_eq!(first.base.stamp.object_revision, db.revision());
         let base = first.base.clone();
         let base_revision = first.base_revision;
         let revision = first.revision;
-        prepare(&mut controller, Some(&db), Some(first_fonts.clone()), None).unwrap();
+        prepare(&mut controller, Some(&db), Some(first_fonts)).unwrap();
         assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
-        let annotations = AnnotationDatabase::new(DatabaseId(3));
-        prepare(
-            &mut controller,
-            Some(&db),
-            Some(first_fonts),
-            Some(&annotations),
-        )
-        .unwrap();
         assert!(Arc::ptr_eq(&base, &controller.ready.as_ref().unwrap().base));
-        assert_eq!(
-            controller.ready.as_ref().unwrap().base_revision,
-            base_revision
-        );
         controller.fonts_changed();
         prepare(
             &mut controller,
             Some(&db),
             Some(Arc::new(FontEngine::new())),
-            Some(&annotations),
         )
         .unwrap();
         assert!(controller.ready.as_ref().unwrap().base_revision > base_revision);
@@ -508,7 +387,7 @@ mod tests {
     fn failed_build_keeps_previous_version_and_close_publishes_empty_scene() {
         let db = DrawingDatabaseBuilder::new(DatabaseId(9)).finish().unwrap();
         let mut controller = CadSceneController::default();
-        prepare(&mut controller, Some(&db), None, None).unwrap();
+        prepare(&mut controller, Some(&db), None).unwrap();
         let previous = controller.ready.as_ref().unwrap().revision;
         assert!(controller
             .prepare(
@@ -517,15 +396,13 @@ mod tests {
                 None,
                 &LayerOverrideSet::new(),
                 SpaceSelection::Paper(LayoutId(999)),
-                None,
-                &AnnotationVisibilitySet::new()
             )
             .is_err());
         assert_eq!(controller.ready.as_ref().unwrap().revision, previous);
         assert!(controller.diagnostic.is_some());
-        prepare(&mut controller, None, None, None).unwrap();
+        prepare(&mut controller, None, None).unwrap();
         let closed = controller.ready.as_ref().unwrap();
-        assert!(closed.base.added.is_empty() && closed.overlay.added.is_empty());
+        assert!(closed.base.added.is_empty() && closed.highlight.added.is_empty());
         assert!(closed.revision > previous);
         assert!(controller.diagnostic.is_none());
     }
@@ -536,7 +413,6 @@ mod tests {
         let second = Arc::new((*first).clone());
         let mut controller = CadSceneController::default();
         let layers = LayerOverrideSet::new();
-        let visibility = AnnotationVisibilitySet::new();
         controller
             .prepare_shared(
                 Some(first.clone()),
@@ -544,8 +420,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
             )
             .unwrap();
         let revision = controller.ready.as_ref().unwrap().base_revision;
@@ -556,8 +430,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
             )
             .unwrap();
         assert_eq!(controller.ready.as_ref().unwrap().base_revision, revision);
@@ -568,8 +440,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
             )
             .unwrap();
         assert!(controller.ready.as_ref().unwrap().base_revision > revision);
@@ -621,8 +491,6 @@ mod tests {
         let db = db_with_line();
         let mut controller = CadSceneController::default();
         let layers = LayerOverrideSet::new();
-        let visibility = AnnotationVisibilitySet::new();
-        let annotations = AnnotationDatabase::new(DatabaseId(3));
         let empty = overlays_without_reference();
         controller
             .prepare_with_overlays(
@@ -631,14 +499,11 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                Some(&annotations),
-                &visibility,
                 &empty,
             )
             .unwrap();
         let first = controller.ready.as_ref().unwrap();
         let base = first.base.clone();
-        let annotation_overlay = first.overlay.clone();
         let base_revision = first.base_revision;
         assert!(first.highlight.added.is_empty());
         assert_eq!(first.highlight_diagnostics.len(), 0);
@@ -663,8 +528,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                Some(&annotations),
-                &visibility,
                 &overlays,
             )
             .unwrap();
@@ -672,10 +535,6 @@ mod tests {
         assert!(
             Arc::ptr_eq(&base, &after.base),
             "the base drawing must be reused across a selection change"
-        );
-        assert!(
-            Arc::ptr_eq(&annotation_overlay, &after.overlay),
-            "the annotation overlay must be reused across a selection change"
         );
         assert_eq!(after.base_revision, base_revision);
         assert_eq!(after.highlight.added.len(), 1);
@@ -696,8 +555,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                Some(&annotations),
-                &visibility,
                 &overlays,
             )
             .unwrap();
@@ -714,7 +571,6 @@ mod tests {
         let db = db_with_line();
         let mut controller = CadSceneController::default();
         let layers = LayerOverrideSet::new();
-        let visibility = AnnotationVisibilitySet::new();
         let overlays = overlays_without_reference();
         controller
             .prepare_with_overlays(
@@ -723,8 +579,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
                 &overlays,
             )
             .unwrap();
@@ -760,8 +614,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
                 &active,
             )
             .unwrap();
@@ -778,8 +630,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
                 &overlays_without_reference(),
             )
             .unwrap();
@@ -810,12 +660,10 @@ mod tests {
     }
 
     #[test]
-    fn snap_hints_draw_only_when_enabled_and_keep_the_base_and_annotations() {
+    fn snap_hints_draw_only_when_enabled_and_keep_the_base() {
         let db = db_with_line();
-        let annotations = annotations_with_leader();
         let mut controller = CadSceneController::default();
         let layers = LayerOverrideSet::new();
-        let visibility = AnnotationVisibilitySet::new();
 
         let off = OverlayInputs {
             snap_hints_input: vec![snap_hint(
@@ -831,7 +679,6 @@ mod tests {
                 grid: false,
                 snap_hints: false,
                 selection_highlight: false,
-                ..OverlayVisibility::default()
             },
             ..OverlayInputs::default()
         };
@@ -842,13 +689,10 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                Some(&annotations),
-                &visibility,
                 &off,
             )
             .unwrap();
         let base = controller.ready.as_ref().unwrap().base.clone();
-        let annotation_overlay = controller.ready.as_ref().unwrap().overlay.clone();
         assert!(
             controller
                 .ready
@@ -884,7 +728,6 @@ mod tests {
                 grid: false,
                 snap_hints: true,
                 selection_highlight: false,
-                ..OverlayVisibility::default()
             },
             ..OverlayInputs::default()
         };
@@ -895,8 +738,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                Some(&annotations),
-                &visibility,
                 &on,
             )
             .unwrap();
@@ -904,10 +745,6 @@ mod tests {
         assert!(
             Arc::ptr_eq(&base, &after.base),
             "snap hints must not rebuild the base drawing"
-        );
-        assert!(
-            Arc::ptr_eq(&annotation_overlay, &after.overlay),
-            "snap hints must not rebuild the committed annotation overlay"
         );
         assert_eq!(
             after.highlight.added.len(),
@@ -923,7 +760,7 @@ mod tests {
                 && after.highlight.added[0].draw_order < crate::render_scene::PREVIEW_DRAW_ORDER
         );
 
-        // Clearing the hints removes the batch but keeps the base/annotations.
+        // Clearing the hints removes the batch but keeps the base.
         controller
             .prepare_with_overlays(
                 Some(&db),
@@ -931,53 +768,12 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                Some(&annotations),
-                &visibility,
                 &overlays_without_reference(),
             )
             .unwrap();
         let cleared = controller.ready.as_ref().unwrap();
         assert!(cleared.highlight.added.is_empty());
         assert!(Arc::ptr_eq(&base, &cleared.base));
-        assert!(Arc::ptr_eq(&annotation_overlay, &cleared.overlay));
-    }
-
-    /// An annotation database with one drawable leader (no fonts needed).
-    fn annotations_with_leader() -> AnnotationDatabase {
-        use cad_db::{Annotation, AnnotationGeometry, AnnotationStyle};
-        use cad_domain::{AnnotationId, Point3, Precision, SpaceId, TransactionId};
-        let mut db = AnnotationDatabase::new(DatabaseId(3));
-        db.apply_annotation_changes(
-            "seed",
-            TransactionId(1),
-            vec![(
-                AnnotationId(1),
-                Some(Annotation {
-                    id: AnnotationId(1),
-                    space: SpaceId::Model,
-                    geometry: AnnotationGeometry::Leader(vec![
-                        Point3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        },
-                        Point3 {
-                            x: 5.0,
-                            y: 1.0,
-                            z: 0.0,
-                        },
-                    ]),
-                    text: String::new(),
-                    style: AnnotationStyle::default(),
-                    created_unix_ms: 0,
-                    modified_unix_ms: 0,
-                    anchor: None,
-                    precision: Precision::Analytic,
-                }),
-            )],
-        )
-        .unwrap();
-        db
     }
 
     #[test]
@@ -986,7 +782,6 @@ mod tests {
         let db = db_with_line();
         let mut controller = CadSceneController::default();
         let layers = LayerOverrideSet::new();
-        let visibility = AnnotationVisibilitySet::new();
         let hidden = OverlayInputs {
             selection: SelectionSet::from_refs([model_ref(
                 DocumentId(73),
@@ -1007,8 +802,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
                 &hidden,
             )
             .unwrap();
@@ -1025,69 +818,10 @@ mod tests {
     }
 
     #[test]
-    fn disabling_annotations_omits_the_committed_overlay_but_keeps_the_base() {
-        let db = db_with_line();
-        let annotations = annotations_with_leader();
-        let mut controller = CadSceneController::default();
-        let layers = LayerOverrideSet::new();
-        let visibility = AnnotationVisibilitySet::new();
-        let on = overlays_without_reference();
-        controller
-            .prepare_with_overlays(
-                Some(&db),
-                DocumentId(73),
-                None,
-                &layers,
-                SpaceSelection::Model,
-                Some(&annotations),
-                &visibility,
-                &on,
-            )
-            .unwrap();
-        let first = controller.ready.as_ref().unwrap();
-        assert!(!first.overlay.added.is_empty(), "leader must draw when on");
-        let base = first.base.clone();
-        let base_revision = first.base_revision;
-
-        let off = OverlayInputs {
-            visibility: OverlayVisibility {
-                axes: false,
-                grid: false,
-                annotations: false,
-                ..OverlayVisibility::default()
-            },
-            ..OverlayInputs::default()
-        };
-        controller
-            .prepare_with_overlays(
-                Some(&db),
-                DocumentId(73),
-                None,
-                &layers,
-                SpaceSelection::Model,
-                Some(&annotations),
-                &visibility,
-                &off,
-            )
-            .unwrap();
-        let after = controller.ready.as_ref().unwrap();
-        assert!(
-            Arc::ptr_eq(&base, &after.base),
-            "toggling annotations must not rebuild the base drawing"
-        );
-        assert_eq!(after.base_revision, base_revision);
-        assert!(
-            after.overlay.added.is_empty(),
-            "annotations off must draw no committed overlay"
-        );
-    }
-
-    #[test]
     fn axes_and_grid_appear_only_when_enabled_and_keep_the_base() {
         let db = db_with_line();
         let mut controller = CadSceneController::default();
         let layers = LayerOverrideSet::new();
-        let visibility = AnnotationVisibilitySet::new();
         let off = overlays_without_reference();
         controller
             .prepare_with_overlays(
@@ -1096,8 +830,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
                 &off,
             )
             .unwrap();
@@ -1124,8 +856,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
                 &on,
             )
             .unwrap();
@@ -1152,7 +882,6 @@ mod tests {
         let db = DrawingDatabaseBuilder::new(DatabaseId(9)).finish().unwrap();
         let mut controller = CadSceneController::default();
         let layers = LayerOverrideSet::new();
-        let visibility = AnnotationVisibilitySet::new();
         let on = OverlayInputs {
             visibility: OverlayVisibility {
                 selection_highlight: false,
@@ -1167,8 +896,6 @@ mod tests {
                 None,
                 &layers,
                 SpaceSelection::Model,
-                None,
-                &visibility,
                 &on,
             )
             .unwrap();

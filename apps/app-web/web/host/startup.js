@@ -88,10 +88,6 @@ export function installViewportSizing(getWasmModule) {
 export function wireRecoveryBackend(getWasmModule, setStateKey) {
   const button = document.getElementById("retry-renderer");
   button.addEventListener("click", () => {
-    if (getWasmModule()?.open_requires_decision?.()) {
-      setStateKey("host.retry_unsaved");
-      return;
-    }
     const url = new URL(location.href);
     url.searchParams.set("backend", "webgl2");
     location.assign(url.href);

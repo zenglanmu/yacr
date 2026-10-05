@@ -2,17 +2,13 @@ use cad_app::*;
 use cad_domain::*;
 
 #[test]
-fn viewer_rejects_every_mutating_annotation_entry() {
+fn viewer_rejects_every_mutating_work_entry() {
     let session = SessionState::new(DocumentId(1), AppMode::Viewer);
     for command in [
-        CommandId::CreateAnnotation,
-        CommandId::UpdateAnnotation,
-        CommandId::DeleteAnnotation,
         CommandId::Undo,
         CommandId::Redo,
-        CommandId::ImportAnnotations,
         CommandId::Measure,
-        CommandId::SaveMeasurementAsAnnotation,
+        CommandId::CreateLine,
     ] {
         assert_eq!(session.authorize(command), Err(CadError::PermissionDenied));
     }
@@ -21,7 +17,6 @@ fn viewer_rejects_every_mutating_annotation_entry() {
         CommandId::Zoom,
         CommandId::ToggleLayer,
         CommandId::SwitchSpace,
-        CommandId::ExportAnnotations,
         CommandId::SetMode,
     ] {
         assert_eq!(session.authorize(command), Ok(()));
@@ -43,9 +38,13 @@ fn command_path_checks_mode_and_document_before_dispatch() {
         app.execute(
             &mut session,
             command(
-                CommandId::DeleteAnnotation,
+                CommandId::CreateLine,
                 DocumentId(1),
-                CommandPayload::None
+                CommandPayload::Points(vec![Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }])
             )
         ),
         Err(CadError::PermissionDenied)

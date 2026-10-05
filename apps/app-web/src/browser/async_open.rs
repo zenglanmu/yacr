@@ -30,8 +30,7 @@ use std::sync::Arc;
 
 use cad_app::host::{HostController, OpenedDrawing};
 use cad_app::tasks::{AsyncOpenPoll, ImportProgressSnapshot, ImportTerminal};
-use cad_app::UnsavedDecision;
-use cad_domain::{CadError, CadResult};
+use cad_domain::CadResult;
 use cad_ui_slint::{ImportProgressUiState, UiHandle};
 
 use super::documents::install_opened;
@@ -74,15 +73,6 @@ fn set_terminal(terminal: ImportTerminal) {
     FALLBACK.with(|slot| *slot.borrow_mut() = Some(ImportProgressSnapshot::terminal(terminal)));
 }
 
-/// Record an explicit cancelled terminal for a refused leave decision.
-///
-/// The synchronous fallback never started an import, but the user-facing
-/// outcome is a real cancellation: the current document and unsaved annotations
-/// are kept. The panel shows exactly that.
-pub(super) fn record_cancelled() {
-    set_terminal(ImportTerminal::Cancelled);
-}
-
 /// Derive and write the progress panel from the current snapshot.
 ///
 /// Called by the single state-push funnel after every command and by the poll
@@ -104,20 +94,15 @@ pub(super) enum OpenStart {
 
 /// Begin an open, choosing the async worker where it can run.
 ///
-/// The unsaved-work decision has already been resolved by the caller. On a
-/// worker-capable host this starts a cancellable background job and returns
-/// [`OpenStart::Started`] (the document is installed later by
+/// On a worker-capable host this starts a cancellable background job and
+/// returns [`OpenStart::Started`] (the document is installed later by
 /// [`poll_and_apply`]). On the browser it runs the synchronous import and
 /// records the real terminal snapshot, returning [`OpenStart::Opened`] or the
-/// real error. A cancelled leave decision maps to an explicit `Cancelled`
-/// terminal, never a fabricated `Failed`.
+/// real error.
 pub(super) fn start_or_apply(
     controller: &Rc<RefCell<HostController>>,
     bytes: Arc<[u8]>,
     name: &str,
-    decision: UnsavedDecision,
-    saved: bool,
-    recovery: bool,
 ) -> CadResult<OpenStart> {
     if worker_available() {
         // New shortest open: drop any retained terminal so a stale failure can
@@ -128,20 +113,13 @@ pub(super) fn start_or_apply(
         return Ok(OpenStart::Started);
     }
 
-    let result = controller
-        .borrow_mut()
-        .open_bytes_leaving(bytes, name, decision, saved, recovery);
+    let result = controller.borrow_mut().open_bytes(bytes, name);
     match result {
         Ok(opened) => {
             set_terminal(ImportTerminal::Opened {
                 entities: opened.entities,
             });
             Ok(OpenStart::Opened(Box::new(opened)))
-        }
-        Err(CadError::Cancelled) => {
-            // The leave decision cancelled the open: nothing was imported.
-            set_terminal(ImportTerminal::Cancelled);
-            Err(CadError::Cancelled)
         }
         Err(error) => {
             set_terminal(ImportTerminal::Failed {

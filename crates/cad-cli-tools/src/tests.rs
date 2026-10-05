@@ -8,8 +8,6 @@ fn cli_operation_names_parse() {
         "scan",
         "proxy-report",
         "measure",
-        "import-notes",
-        "export-notes",
         "build-representation",
         "render",
         "plot",

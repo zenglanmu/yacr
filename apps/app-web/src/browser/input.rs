@@ -4,14 +4,13 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cad_app::host::HostController;
-use cad_app::host_files::{export_annotations_atomically, persist_recovery};
 use cad_app::{Command, CommandId, CommandPayload, ToolState};
 use cad_domain::{CadError, CadResult, Point3, ViewportId};
 use cad_ui_slint::{CadView, UiCommandSink, ViewInput};
 
-use super::persistence::{download_text, open_dialog, WebPersistence};
+use super::persistence::open_dialog;
 use super::{pick, state_push};
-use super::{preference_for, viewport_camera, SharedHandle};
+use super::{preference_for, SharedHandle};
 
 /// Whether a down→up sequence is a tap (a selection candidate) rather than a
 /// navigation drag.
@@ -33,7 +32,7 @@ pub(super) fn is_selection_tap(down: Option<[f64; 2]>, up: [f64; 2]) -> bool {
 
 /// Selection is only a tap action while no capture tool is running.
 pub(super) fn selection_allowed(tool: &ToolState) -> bool {
-    !matches!(tool, ToolState::Measuring(_) | ToolState::Annotating(_))
+    !matches!(tool, ToolState::Measuring(_))
 }
 
 /// Which capture tool a pointer move should feed its live preview cursor.
@@ -44,7 +43,6 @@ pub(super) fn selection_allowed(tool: &ToolState) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PreviewCursor {
     Measurement,
-    Annotation,
     None,
 }
 
@@ -52,7 +50,6 @@ pub(super) enum PreviewCursor {
 pub(super) fn preview_cursor_for(tool: &ToolState) -> PreviewCursor {
     match tool {
         ToolState::Measuring(_) => PreviewCursor::Measurement,
-        ToolState::Annotating(_) => PreviewCursor::Annotation,
         _ => PreviewCursor::None,
     }
 }
@@ -99,8 +96,8 @@ pub(super) fn dispatch(
     }
     if let Some(handle) = handle.borrow().as_ref() {
         // One funnel for every command: history, measurement, layers, layout,
-        // properties, annotations and diagnostics are pushed together so no
-        // panel can lag the command that changed it (audit U03/U04/U11).
+        // properties and diagnostics are pushed together so no panel can lag
+        // the command that changed it (audit U03/U04/U11).
         state_push::push_panel_state(controller, handle, view);
         let _ = handle.set_status(status);
     }
@@ -127,59 +124,12 @@ impl UiCommandSink for WebSink {
                 set_status(super::messages::current_messages().text("file.choose", &[]));
                 return Ok(());
             }
-            CommandId::ExportAnnotations => {
-                // Prepare → host write → confirm the exact revision (B07).
-                let result =
-                    export_annotations_atomically(&mut self.controller.borrow_mut(), |json| {
-                        download_text("annotations.cadnotes.json", json)
-                    });
-                // Confirming the export clears dirty: re-push so the annotation
-                // panel and history availability follow.
-                if let Some(handle) = self.handle.borrow().as_ref() {
-                    state_push::push_panel_state(&self.controller, handle, &self.view);
-                }
-                match result {
-                    Ok(()) => set_status("批注已确认保存到下载文件".into()),
-                    Err(e) => set_status(format!("导出失败：{e}（批注仍为未保存）")),
-                }
-                return Ok(());
-            }
-            CommandId::ImportAnnotations => {
-                open_dialog("annotation-input");
-                set_status("请选择批注 JSON 文件…".into());
-                return Ok(());
-            }
             CommandId::SwitchBackend => {
                 if let CommandPayload::Backend(choice) = command.payload {
                     let preference = preference_for(choice);
-                    // Persist unsaved annotations before reloading (B06).
-                    {
-                        let c = self.controller.borrow();
-                        let signal = c.unsaved_signal();
-                        if signal.dirty {
-                            let (center, wpp) = viewport_camera(&c);
-                            let snapshot = match c.capture_recovery_snapshot(center, wpp) {
-                                Ok(snapshot) => snapshot,
-                                Err(e) => {
-                                    set_status(format!(
-                                        "切换失败：无法生成恢复快照（{e}），未重载"
-                                    ));
-                                    return Ok(());
-                                }
-                            };
-                            if let Err(e) = cad_platform::block_on(persist_recovery(
-                                &WebPersistence,
-                                c.document_id,
-                                &snapshot,
-                            )) {
-                                set_status(format!("切换失败：恢复快照未能持久化（{e}），未重载"));
-                                return Ok(());
-                            }
-                        }
-                    }
                     set_status(format!("切换后端为 {preference:?}，重建渲染会话…"));
                     if let Err(e) = cad_ui_slint::web::store_preference_and_reload(preference) {
-                        set_status(format!("切换失败：{e}（未保存批注未丢失）"));
+                        set_status(format!("切换失败：{e}"));
                     }
                 } else {
                     set_status("SwitchBackend 需要后端参数".into());
@@ -269,7 +219,7 @@ impl WebViewInput {
             let controller = self.controller.borrow();
             match preview_cursor_for(&controller.session.tool) {
                 PreviewCursor::None => return,
-                PreviewCursor::Measurement | PreviewCursor::Annotation => {
+                PreviewCursor::Measurement => {
                     match controller
                         .application
                         .workspace
@@ -289,7 +239,6 @@ impl WebViewInput {
             let mut controller = self.controller.borrow_mut();
             let result = match preview_cursor_for(&controller.session.tool) {
                 PreviewCursor::Measurement => controller.session.set_measurement_cursor(mapped),
-                PreviewCursor::Annotation => controller.session.set_annotation_cursor(mapped),
                 // The tool stopped between the two borrows: nothing to preview.
                 PreviewCursor::None => return,
             };
@@ -430,9 +379,6 @@ mod tests {
         assert!(!selection_allowed(&ToolState::Measuring(
             MeasurementTool::new(MeasurementToolKind::Distance)
         )));
-        assert!(!selection_allowed(&ToolState::Annotating(
-            cad_app::AnnotationTool::new(cad_app::AnnotationToolKind::Text)
-        )));
     }
 
     #[test]
@@ -450,12 +396,6 @@ mod tests {
                 MeasurementToolKind::Distance
             ))),
             PreviewCursor::Measurement
-        );
-        assert_eq!(
-            preview_cursor_for(&ToolState::Annotating(cad_app::AnnotationTool::new(
-                cad_app::AnnotationToolKind::Text
-            ))),
-            PreviewCursor::Annotation
         );
     }
 }

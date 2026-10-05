@@ -5,11 +5,9 @@ use std::rc::Rc;
 pub use cad_app::viewer_config::{
     ResolvedRibbon, ResolvedRibbonCommand, ResolvedRibbonGroup, ResolvedRibbonTab,
 };
-use cad_app::{AnnotationToolKind, Command, CommandId, CommandPayload, MeasurementToolKind};
+use cad_app::{Command, CommandId, CommandPayload, MeasurementToolKind};
 
-use cad_domain::{
-    AnnotationId, CadError, CadResult, DocumentId, LayerId, Point3, SpaceId, ViewportId,
-};
+use cad_domain::{CadError, CadResult, DocumentId, LayerId, Point3, SpaceId, ViewportId};
 
 /// Source of the shared shell, kept for packaging/documentation tooling.
 pub const UI_DEFINITION: &str = include_str!("../ui/app.slint");
@@ -33,7 +31,6 @@ pub mod responsive;
 #[cfg(all(target_os = "linux", not(target_arch = "wasm32")))]
 pub mod offscreen;
 
-mod annotation_search;
 mod layer_search;
 pub mod status;
 
@@ -41,16 +38,15 @@ pub mod status;
 pub mod web;
 
 pub use bridge::{
-    build_scene, build_scene_with_annotations, build_scene_with_annotations_in_space,
-    build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
+    build_scene, build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
     camera2d_from_params, camera3d_from_params, fit_camera, install as install_cad_bridge,
     install_with_preference, layout_descriptors, BridgeCamera, CadView, IncomingDocument,
     OverlayVisibility, SnapHint, SnapHintKind,
 };
 
 pub use draw::{
-    draw_error_text, draw_kind_from_label, draw_kind_labels, draw_overlay_preview, DrawCommandSink,
-    DrawPreviewSink, DrawUiState,
+    draw_error_text, draw_kind_from_label, draw_kind_labels, DrawCommandSink, DrawPreviewSink,
+    DrawUiState,
 };
 
 pub use i18n::{Locale, LocaleResolution, Message, MessageCatalog, MessageSource};
@@ -105,15 +101,6 @@ pub struct UiHandle {
     /// Shared with the adapter; canvas clicks only act as picks while a
     /// measurement tool is running, so navigation clicks stay silent.
     measurement_active: Rc<Cell<bool>>,
-    /// Shared with the adapter; the annotation tool selector and the Annotate
-    /// button use the same kind so they cannot disagree.
-    selected_annotation_kind: Rc<Cell<AnnotationToolKind>>,
-    /// Shared with the adapter; canvas picks while an annotation tool is active
-    /// become annotation points rather than measurement points.
-    annotation_active: Rc<Cell<bool>>,
-    /// Ordered `AnnotationId`s matching the pushed `annotation-rows` model, so a
-    /// visibility toggle / delete callback index maps back to the exact id.
-    annotation_order: Rc<RefCell<Vec<AnnotationId>>>,
     /// Ordered `LayerId`s matching the pushed `layer-rows` model, so a toggle
     /// callback index maps back to the exact id.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
@@ -123,8 +110,6 @@ pub struct UiHandle {
     /// their labels without the host re-pushing the whole panel.
     layer_override_count: Rc<Cell<i32>>,
     selection_count: Rc<Cell<i32>>,
-    /// Last pushed annotation hidden count, for locale reformatting.
-    annotation_hidden_count: Rc<Cell<i32>>,
     /// Mirrors the pushed 3D view mode; gates orbit-by-drag and the 2D/3D
     /// affordance. Set through [`UiHandle::set_view_state`].
     view_3d: Rc<Cell<bool>>,
@@ -161,14 +146,6 @@ pub struct UiAdapter {
     /// Mirrors `MeasurementUiState::active` so canvas clicks are only picks
     /// while a tool runs.
     measurement_active: Rc<Cell<bool>>,
-    /// Kind currently selected for annotation creation (Annotate button +
-    /// canvas picks agree with the selector).
-    selected_annotation_kind: Rc<Cell<AnnotationToolKind>>,
-    /// Mirrors whether an annotation tool is active, so canvas picks route to
-    /// the annotation tool rather than the measurement tool.
-    annotation_active: Rc<Cell<bool>>,
-    /// Ordered `AnnotationId`s matching the pushed `annotation-rows` model.
-    annotation_order: Rc<RefCell<Vec<AnnotationId>>>,
     /// Ordered `LayerId`s matching the pushed `layer-rows` model.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
     /// Ordered `LayoutId`s matching the pushed `layout-rows` model.
@@ -178,7 +155,6 @@ pub struct UiAdapter {
     /// Last pushed counts, mirrored into handles for locale reformatting.
     layer_override_count: Rc<Cell<i32>>,
     selection_count: Rc<Cell<i32>>,
-    annotation_hidden_count: Rc<Cell<i32>>,
     /// Mirrors the pushed 3D view mode so a left drag in 3D emits `Orbit`
     /// instead of being routed as a 2D navigation gesture.
     view_3d: Rc<Cell<bool>>,

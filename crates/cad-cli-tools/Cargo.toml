@@ -13,7 +13,6 @@ cad-db.workspace = true
 cad-import-acadrust.workspace = true
 cad-proxy.workspace = true
 cad-representation.workspace = true
-cad-annotations.workspace = true
 cad-measure.workspace = true
 cad-diagnostics.workspace = true
 cad-resources.workspace = true

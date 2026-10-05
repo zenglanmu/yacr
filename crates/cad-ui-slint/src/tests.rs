@@ -53,7 +53,6 @@ fn shell_reaches_every_merged_panel_and_layout_list() {
     for marker in [
         "layer-rows",
         "property-rows",
-        "annotation-rows",
         "diagnostics-rows",
         "layout-rows",
         "layout-selected",
@@ -328,11 +327,8 @@ fn chrome_is_catalog_driven_not_hardcoded() {
         "fit-label",
         "undo-label",
         "redo-label",
-        "export-label",
-        "import-label",
         "diagnostics-label",
         "measurement-panel-label",
-        "annotation-panel-label",
         "layer-panel-label",
         "property-panel-label",
         "diagnostics-drawer-title",
@@ -420,24 +416,6 @@ fn view_state_ui_defaults_are_2d_not_3d() {
 }
 
 #[test]
-fn measurement_save_affordance_requires_a_confirmed_record() {
-    // A running preview is not a confirmed result: save stays disabled.
-    let tool = cad_app::MeasurementTool::new(MeasurementToolKind::Distance);
-    let mut state = MeasurementUiState::from_preview(Some(&tool.preview()), "m");
-    assert!(!state.can_save_annotation);
-    // A confirmed record enables it explicitly.
-    state.set_can_save_annotation(true);
-    assert!(state.can_save_annotation);
-    // Idle with a retained record still offers the save.
-    let mut idle = MeasurementUiState::from_preview(None, "m");
-    assert!(!idle.can_save_annotation);
-    idle.set_can_save_annotation(true);
-    assert!(idle.can_save_annotation);
-    // Default is off.
-    assert!(!MeasurementUiState::default().can_save_annotation);
-}
-
-#[test]
 fn mode_ui_state_reflects_the_authoritative_mode() {
     let zh = MessageSource::for_locale(Locale::ZhCn);
     let work = ModeUiState::from_mode(cad_app::AppMode::Work, &zh);
@@ -456,18 +434,6 @@ fn mode_ui_state_reflects_the_authoritative_mode() {
         ModeUiState::from_mode(cad_app::AppMode::Work, &en).label,
         "Enhanced"
     );
-}
-
-#[test]
-fn shell_exposes_the_save_and_mode_switch_affordances() {
-    // F06/F07: save-as-annotation button + callback, gated by the record flag.
-    assert!(UI_DEFINITION.contains("measurement-can-save-annotation"));
-    assert!(UI_DEFINITION.contains("save-measurement-requested"));
-    assert!(UI_DEFINITION.contains("measure-save-label"));
-    // U02: a real mode switch entry showing the catalog mode label.
-    assert!(UI_DEFINITION.contains("mode-toggled"));
-    assert!(UI_DEFINITION.contains("mode-label"));
-    assert!(UI_DEFINITION.contains("work-mode"));
 }
 
 #[test]
@@ -736,9 +702,6 @@ fn command_line_confirms_or_cancels_whatever_tool_is_active() {
         "get_measurement_active",
         "invoke_confirm_measurement_requested",
         "invoke_cancel_measurement_requested",
-        "get_annotation_tool_active",
-        "invoke_confirm_annotation_requested",
-        "invoke_cancel_annotation_requested",
         "get_draw_tool_active",
         "set_pan_active",
     ] {
@@ -785,54 +748,29 @@ fn draw_kind_labels_and_errors_resolve_in_both_locales() {
 }
 
 #[test]
-fn draw_overlay_preview_uses_a_circle_for_circle_and_a_band_for_line() {
-    use cad_domain::Point3;
-    let p = |x: f64, y: f64| Point3 { x, y, z: 0.0 };
-
-    let mut circle = cad_app::DrawTool::new(cad_app::DrawToolKind::Circle, 0);
-    circle.push_point(p(1.0, 1.0)).unwrap();
-    circle.push_point(p(4.0, 5.0)).unwrap();
-    let overlay = draw_overlay_preview(&circle.preview());
-    assert_eq!(overlay.kind, cad_app::AnnotationToolKind::Ellipse);
-    // The radius is applied to both axes, so the preview is a circle.
-    let dx = overlay.points[1].x - overlay.points[0].x;
-    let dy = overlay.points[1].y - overlay.points[0].y;
-    assert!((dx - dy).abs() < 1e-9);
-
-    // A line preview is a rubber band anchored at the first captured point.
-    let mut line = cad_app::DrawTool::new(cad_app::DrawToolKind::Line, 0);
-    line.push_point(p(0.0, 0.0)).unwrap();
-    line.set_cursor(Some(p(2.0, 2.0)));
-    let overlay = draw_overlay_preview(&line.preview());
-    assert_eq!(overlay.kind, cad_app::AnnotationToolKind::Freehand);
-    assert_eq!(overlay.points, vec![p(0.0, 0.0)]);
-    assert_eq!(overlay.cursor, Some(p(2.0, 2.0)));
-}
-
-#[test]
 fn viewer_presentation_maps_separate_panels_overlays_and_features() {
     use cad_app::viewer_config::{Preset, UiPresentationModel, ViewerConfig};
     let mut config = ViewerConfig::default();
     config.ui.components.layer_panel.visible = false;
     config.ui.components.properties_panel.initially_open = false;
     config.view.overlays.grid = false;
-    config.features.annotations.delete = false;
+    config.features.measure = false;
     config.interaction.touch = false;
     let p = UiPresentationModel::resolve(&config, [1280.0, 800.0], [0.0; 4], false);
     assert!(!p.layer_panel && p.properties_panel);
     assert!(!p.layer_panel_initially_open);
     assert!(!p.properties_panel_initially_open);
     assert!(!p.overlays.grid && p.overlays.axes);
-    assert!(!p.features.annotation_delete && p.features.measure);
+    assert!(!p.features.measure);
     assert!(!p.touch && p.pointer);
-    assert!(!p.command_visibility["annotation.delete"]);
-    assert!(p.command_visibility["annotation.text"]);
+    assert!(!p.command_visibility["measure.distance"]);
+    assert!(p.command_visibility["view.fit"]);
     // Canvas-only forces every application-UI entry off while overlays stay
     // controlled by `view` independently.
     config.ui.preset = Preset::CanvasOnly;
     let p = UiPresentationModel::resolve(&config, [1280.0, 800.0], [0.0; 4], false);
     assert!(!p.application_ui && !p.ribbon && !p.panels());
-    assert!(p.overlays.annotations);
+    assert!(p.overlays.axes);
 }
 
 #[test]
@@ -938,7 +876,7 @@ fn configured_ribbon_model_is_localized_and_visibility_filtered() {
             commands: vec![
                 "measure.distance".into(),
                 "measure.area".into(),
-                "annotation.text".into(),
+                "view.fit".into(),
             ],
             display: cad_app::viewer_config::RibbonCommandDisplay::IconAndLabel,
         }],
@@ -971,10 +909,7 @@ fn configured_ribbon_model_is_localized_and_visibility_filtered() {
     assert!(first.visible);
     // The default display mode reaches the model as the icon+label code.
     assert_eq!(first.display, 0);
-    assert_eq!(
-        group.commands.row_data(1).unwrap().id.as_str(),
-        "annotation.text"
-    );
+    assert_eq!(group.commands.row_data(1).unwrap().id.as_str(), "view.fit");
 }
 
 #[test]
@@ -986,16 +921,10 @@ fn empty_ribbon_config_keeps_the_builtin_tabs() {
     let chrome = build_ribbon_config(&config, &messages);
     assert!(!chrome.config_driven);
     assert!(chrome.tabs.is_empty());
-    let expected: Vec<String> = [
-        "ribbon.file",
-        "ribbon.view",
-        "ribbon.measure",
-        "ribbon.annotate",
-        "shell.more",
-    ]
-    .iter()
-    .map(|key| messages.text(key, &[]))
-    .collect();
+    let expected: Vec<String> = ["ribbon.file", "ribbon.view", "ribbon.measure", "shell.more"]
+        .iter()
+        .map(|key| messages.text(key, &[]))
+        .collect();
     assert_eq!(chrome.tab_labels, expected);
 }
 
@@ -1156,7 +1085,6 @@ fn ribbon_command_actions_dispatch_or_report_explicitly() {
     use RibbonCommandAction::*;
 
     assert_eq!(ribbon_command_action("file.open"), Open);
-    assert_eq!(ribbon_command_action("file.exportAnnotations"), Export);
     assert_eq!(ribbon_command_action("edit.redo"), Redo);
     assert_eq!(ribbon_command_action("view.fit"), Fit);
     assert_eq!(ribbon_command_action("view.pan"), Pan);
@@ -1167,12 +1095,6 @@ fn ribbon_command_actions_dispatch_or_report_explicitly() {
         ribbon_command_action("measure.distance"),
         MeasureKind("distance")
     );
-    assert_eq!(ribbon_command_action("measure.save"), SaveMeasurement);
-    assert_eq!(
-        ribbon_command_action("annotation.cloud"),
-        AnnotationKind("cloud")
-    );
-    assert_eq!(ribbon_command_action("annotation.cancel"), CancelAnnotation);
     assert_eq!(ribbon_command_action("layer.restore"), RestoreLayers);
     assert_eq!(ribbon_command_action("draw.trim"), BeginDraw("trim"));
     assert_eq!(ribbon_command_action("mode.toggle"), ToggleMode);
@@ -1186,9 +1108,6 @@ fn ribbon_command_actions_dispatch_or_report_explicitly() {
         "view.orbit",
         "view.standard",
         "layer.toggle",
-        "annotation.delete",
-        "annotation.select",
-        "annotation.visibility",
         "layout.switch",
         "backend.switch",
         "totally.unknown",
@@ -1207,8 +1126,6 @@ fn every_whitelisted_ribbon_command_has_a_classified_action_and_reason() {
     // command the build actually knows).
     let expected: &[(&str, RibbonCommandAction)] = &[
         ("file.open", Open),
-        ("file.exportAnnotations", Export),
-        ("file.importAnnotations", Import),
         ("edit.undo", Undo),
         ("edit.redo", Redo),
         ("view.fit", Fit),
@@ -1222,15 +1139,6 @@ fn every_whitelisted_ribbon_command_has_a_classified_action_and_reason() {
         ("measure.area", MeasureKind("area")),
         ("measure.confirm", ConfirmMeasurement),
         ("measure.cancel", CancelMeasurement),
-        ("measure.save", SaveMeasurement),
-        ("annotation.text", AnnotationKind("text")),
-        ("annotation.leader", AnnotationKind("leader")),
-        ("annotation.rectangle", AnnotationKind("rectangle")),
-        ("annotation.ellipse", AnnotationKind("ellipse")),
-        ("annotation.freehand", AnnotationKind("freehand")),
-        ("annotation.cloud", AnnotationKind("cloud")),
-        ("annotation.confirm", ConfirmAnnotation),
-        ("annotation.cancel", CancelAnnotation),
         ("layer.restore", RestoreLayers),
         ("draw.line", BeginDraw("line")),
         ("draw.circle", BeginDraw("circle")),
@@ -1251,9 +1159,6 @@ fn every_whitelisted_ribbon_command_has_a_classified_action_and_reason() {
         "layer.toggle",
         "layout.switch",
         "backend.switch",
-        "annotation.delete",
-        "annotation.select",
-        "annotation.visibility",
     ];
     let mut classified: Vec<&str> = expected.iter().map(|(id, _)| *id).collect();
     classified.extend_from_slice(unsupported);
@@ -1273,9 +1178,6 @@ fn every_whitelisted_ribbon_command_has_a_classified_action_and_reason() {
         "layer.toggle",
         "layout.switch",
         "backend.switch",
-        "annotation.delete",
-        "annotation.select",
-        "annotation.visibility",
     ] {
         assert_eq!(
             ribbon_command_unsupported_reason(id),

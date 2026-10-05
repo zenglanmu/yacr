@@ -14,9 +14,6 @@ pub use cad_render_wgpu::{ActiveBackend, BackendPreference};
 /// Storage key for the user's CAD backend preference.
 pub const BACKEND_STORAGE_KEY: &str = "yacr.cad.backend";
 
-/// Storage key for the one-slot recovery snapshot of unsaved annotations.
-pub const RECOVERY_STORAGE_KEY: &str = "yacr.cad.recovery";
-
 /// Storage key for the user's UI locale preference (N01 host sync).
 ///
 /// Shared with `web/main.js`, which reads the same key before the wasm module
@@ -179,60 +176,6 @@ pub fn store_locale(tag: &str) -> CadResult<()> {
     storage
         .set_item(LOCALE_STORAGE_KEY, tag)
         .map_err(|_| CadError::Invariant("cannot persist locale preference".into()))
-}
-
-/// Persist the unsaved-annotation recovery snapshot before a destructive reload.
-///
-/// If the snapshot cannot be written the caller must not reload, so unsaved
-/// work is never lost to a backend change (audit B06).
-pub fn store_recovery_snapshot(snapshot: &str) -> CadResult<()> {
-    let window = web_sys::window().ok_or_else(|| CadError::Invariant("no window".into()))?;
-    let storage = window
-        .local_storage()
-        .ok()
-        .flatten()
-        .ok_or_else(|| CadError::Invariant("localStorage unavailable".into()))?;
-    storage
-        .set_item(RECOVERY_STORAGE_KEY, snapshot)
-        .map_err(|_| CadError::Invariant("cannot persist recovery snapshot".into()))
-}
-
-/// Whether a recovery snapshot is waiting to be restored/discarded.
-pub fn has_recovery_snapshot() -> bool {
-    web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|s| s.get_item(RECOVERY_STORAGE_KEY).ok().flatten())
-        .map(|v| !v.is_empty())
-        .unwrap_or(false)
-}
-
-/// Read the pending recovery snapshot without clearing it.
-pub fn peek_recovery_snapshot() -> Option<String> {
-    web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|s| s.get_item(RECOVERY_STORAGE_KEY).ok().flatten())
-        .filter(|v| !v.is_empty())
-}
-
-/// Drop the recovery snapshot once it has been restored or explicitly discarded.
-pub fn clear_recovery_snapshot() {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.remove_item(RECOVERY_STORAGE_KEY);
-    }
-}
-
-/// Persist a preference plus a recovery snapshot, then reload (audit B06).
-///
-/// The snapshot is written first; only a durable write allows the reload. An
-/// empty snapshot still reloads (nothing unsaved to protect).
-pub fn store_preference_and_reload_protected(
-    preference: BackendPreference,
-    snapshot: Option<&str>,
-) -> CadResult<()> {
-    if let Some(snapshot) = snapshot {
-        store_recovery_snapshot(snapshot)?;
-    }
-    store_preference_and_reload(preference)
 }
 
 fn percent_decoded(value: &str) -> String {

@@ -7,22 +7,19 @@
 //!   sub-element)` refs in a [`SelectionSet`] against the database, expanding
 //!   `INSERT`s exactly like [`crate::picking::drawing_pick_items`], so two
 //!   placements of the same block highlight independently;
-//! * a **tool preview** that turns an in-progress [`MeasurementPreview`] /
-//!   [`AnnotationPreview`] into line geometry (a rubber-band chain, point
-//!   crosses and, for rectangle/ellipse annotations, the shape being dragged).
+//! * a **tool preview** that turns an in-progress [`MeasurementPreview`] into
+//!   line geometry (a rubber-band chain and point crosses).
 //!
 //! Nothing here mutates the database, the scene cache or history. Previews are
 //! pure snapshots: a cancelled preview simply stops being passed in, and no
-//! transaction is ever opened (see `cad-app::measure_tool` /
-//! `cad-app::annotation_tool`).
+//! transaction is ever opened (see `cad-app::measure_tool`).
 //!
 //! ## Reuse, not a second renderer
 //!
 //! Highlight batches are built by [`cad_scene::highlight_batches`], the one
 //! existing highlight→[`RenderBatch`] converter, from `DisplayRepresentation`s
 //! the default provider tessellates (the same discretisation the base scene
-//! uses). The preview path reuses `cad_scene::tessellate_ellipse` for ellipse
-//! previews. There is no second tessellator and no new renderer.
+//! uses). There is no second tessellator and no new renderer.
 //!
 //! ## Paint order
 //!
@@ -30,14 +27,12 @@
 //! |---|---|
 //! | base drawing (`SceneCache`) | `0` |
 //! | selection highlight (`HIGHLIGHT_DRAW_ORDER`) | `900_000` |
-//! | committed annotations (`AnnotationSceneOptions::draw_order_base`) | `1_000_000` |
 //! | object-snap hints ([`SNAP_HINT_DRAW_ORDER`]) | `1_500_000` |
 //! | tool preview ([`PREVIEW_DRAW_ORDER`]) | `2_000_000` |
 //!
-//! A selection is a transient decoration below committed markup; a tool preview
-//! is the live feedback the user is acting on, so it draws above everything.
-//! Object-snap hints sit above committed markup (a snapped point must stay
-//! visible) but below the live preview rubber band.
+//! A selection is a transient decoration; a tool preview is the live feedback
+//! the user is acting on, so it draws above everything. Object-snap hints sit
+//! below the live preview rubber band.
 
 use std::sync::Arc;
 
@@ -49,23 +44,22 @@ use cad_representation::{
 };
 use cad_scene::{HighlightOptions, HighlightScene, RenderBatch, RenderTopology};
 
-use crate::annotation_tool::{AnnotationPreview, AnnotationToolKind};
+use crate::draw_tool::{DrawPreview, DrawToolKind};
 use crate::measure_tool::MeasurementPreview;
 use crate::selection::SelectionSet;
 use crate::viewer_config::OverlayVisibility;
 
 /// `draw_order` of the first tool-preview batch.
 ///
-/// Above the committed annotation overlay (`1_000_000`) and above the selection
-/// highlight (`HIGHLIGHT_DRAW_ORDER`, `900_000`), so the live tool feedback is
-/// never hidden by markup while the user is drawing.
+/// Above the selection highlight (`HIGHLIGHT_DRAW_ORDER`, `900_000`), so the
+/// live tool feedback is never hidden by markup while the user is drawing.
 pub const PREVIEW_DRAW_ORDER: i64 = 2_000_000;
 
 /// `draw_order` of the world-space axes and grid reference overlays.
 ///
 /// Below the selection highlight (`HIGHLIGHT_DRAW_ORDER`, `900_000`) so a
-/// selection and committed markup always read above the reference grid, and
-/// above the base drawing (`0`).
+/// selection always reads above the reference grid, and above the base drawing
+/// (`0`).
 pub const AXES_GRID_DRAW_ORDER: i64 = 800_000;
 
 /// Safety cap on the total number of grid line segments in one batch.
@@ -90,10 +84,9 @@ pub const DEFAULT_PREVIEW_MARKER_SIZE: f64 = 0.5;
 
 /// `draw_order` of the object-snap hint markers.
 ///
-/// Above the committed annotation overlay (`1_000_000`) and the selection
-/// highlight (`900_000`), so a snapped point is never hidden by markup, but
-/// below the tool preview ([`PREVIEW_DRAW_ORDER`], `2_000_000`) because the
-/// live rubber-band feedback the user is acting on must stay on top.
+/// Above the selection highlight (`900_000`), so a snapped point is never
+/// hidden, but below the tool preview ([`PREVIEW_DRAW_ORDER`], `2_000_000`)
+/// because the live rubber-band feedback the user is acting on must stay on top.
 pub const SNAP_HINT_DRAW_ORDER: i64 = 1_500_000;
 
 /// Colour of the object-snap hint markers: a warm amber, distinct from the
@@ -122,9 +115,9 @@ pub type SnapHintKind = SnapKind;
 
 /// Preview colour: a cool cyan, distinct from the warm highlight tint.
 pub const MEASUREMENT_PREVIEW_COLOR: [f32; 3] = [0.20, 0.85, 0.95];
-/// Preview colour for annotation tools: magenta, distinct from highlight and
-/// measurement.
-pub const ANNOTATION_PREVIEW_COLOR: [f32; 3] = [0.95, 0.35, 0.85];
+/// Preview colour for drawing/editing tools: magenta, distinct from highlight
+/// and measurement.
+pub const DRAW_PREVIEW_COLOR: [f32; 3] = [0.95, 0.35, 0.85];
 
 /// Paint parameters for the tool preview overlay.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -147,13 +140,15 @@ impl Default for PreviewOptions {
 /// The transient highlight / preview overlay inputs a host supplies.
 ///
 /// All fields are pure session state; none of them writes the database. An
-/// empty selection and two `None` previews produce no overlay batches, which is
+/// empty selection and a `None` preview produce no overlay batches, which is
 /// an explicit empty overlay rather than an error.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct OverlayInputs {
     pub selection: SelectionSet,
     pub measurement: Option<MeasurementPreview>,
-    pub annotation: Option<AnnotationPreview>,
+    /// In-progress draw/edit preview (drawing-edit §4), drawn through the same
+    /// transient overlay so a draw gesture gets live rubber-band feedback.
+    pub draw_preview: Option<DrawPreview>,
     /// Resolved object-snap hints (the markers the measurement snap engine
     /// reports), drawn as a distinct overlay. Empty by default, so a host that
     /// never feeds snaps gets no snap-hint batch. Gated by
@@ -172,7 +167,7 @@ impl OverlayInputs {
     pub fn is_empty(&self) -> bool {
         self.selection.is_empty()
             && self.measurement.is_none()
-            && self.annotation.is_none()
+            && self.draw_preview.is_none()
             && self.snap_hints_input.is_empty()
     }
 }
@@ -231,10 +226,9 @@ impl VisualOverlay {
 /// A stable change fingerprint of the transient overlay inputs.
 ///
 /// The controller uses it to rebuild **only** the highlight/preview overlay when
-/// the selection or a preview point/cursor changes, leaving the base drawing and
-/// the annotation batches' `Arc`s untouched. Selecting a different object or
-/// moving a preview cursor changes this value; rebuilding the scene with the
-/// same inputs does not.
+/// the selection or a preview point/cursor changes, leaving the base drawing
+/// `Arc` untouched. Selecting a different object or moving a preview cursor
+/// changes this value; rebuilding the scene with the same inputs does not.
 pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -266,7 +260,7 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
         &mut hasher,
         1u8,
         inputs
-            .annotation
+            .draw_preview
             .as_ref()
             .map(|p| (p.points.as_slice(), p.cursor)),
     );
@@ -285,7 +279,6 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
     inputs.visibility.grid.hash(&mut hasher);
     inputs.visibility.selection_highlight.hash(&mut hasher);
     inputs.visibility.snap_hints.hash(&mut hasher);
-    inputs.visibility.annotations.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -598,20 +591,16 @@ fn representation_for_item(
     Some(representation)
 }
 
-/// Build the tool-preview overlay for an in-progress measurement and/or
-/// annotation.
+/// Build the tool-preview overlay for an in-progress measurement.
 ///
-/// The preview is pure: it only reads the captured points, the live cursor and
-/// (for rectangle/ellipse annotations) the kind. It never commits anything to
-/// the database.
+/// The preview is pure: it only reads the captured points and the live cursor.
+/// It never commits anything to the database.
 ///
 /// `snap_hints` gates the axis-aligned point crosses only. They are the current
 /// cursor/snap markers, so a host that turned `view.overlays.snapHints` off
-/// still gets the rubber-band chains and dragged shapes, just without the
-/// crosses.
+/// still gets the rubber-band chain, just without the crosses.
 pub fn preview_overlay(
     measurement: Option<&MeasurementPreview>,
-    annotation: Option<&AnnotationPreview>,
     document: DocumentId,
     snap_hints: bool,
     options: &PreviewOptions,
@@ -622,12 +611,73 @@ pub fn preview_overlay(
             preview, document, snap_hints, options,
         ));
     }
-    if let Some(preview) = annotation {
-        out.merge(annotation_preview_overlay(
-            preview, document, snap_hints, options,
-        ));
+    out
+}
+
+/// Build the live draw/edit preview: a rubber-band chain for line/move/trim and
+/// a circle for the circle tool.
+///
+/// Presentation only; the committed operation is the exact intent from the draw
+/// tool's own state machine and never this overlay.
+pub fn draw_preview_overlay(
+    preview: &DrawPreview,
+    document: DocumentId,
+    snap_hints: bool,
+    options: &PreviewOptions,
+) -> VisualOverlay {
+    let mut out = VisualOverlay::default();
+    let mut order = options.draw_order;
+    let geometry: Option<Vec<Point3>> = match preview.kind {
+        DrawToolKind::Circle => circle_points(&preview.points, preview.cursor),
+        DrawToolKind::Line | DrawToolKind::Move | DrawToolKind::Trim => {
+            let chain = preview_chain(&preview.points, preview.cursor);
+            (chain.len() >= 2).then_some(chain)
+        }
+    };
+    if let Some(points) = geometry {
+        if let Some(batch) =
+            line_batch(&points, DRAW_PREVIEW_COLOR, document, order, "draw.preview")
+        {
+            out.batches.push(batch);
+            order += 1;
+        }
+    }
+    if snap_hints {
+        if let Some(batch) = marker_batch(
+            &preview.points,
+            options.marker_size,
+            DRAW_PREVIEW_COLOR,
+            document,
+            order,
+            "draw.preview",
+        ) {
+            out.batches.push(batch);
+        }
     }
     out
+}
+
+/// The circle for a circle-tool preview: centre + edge point (the live cursor
+/// fills the edge while only the centre is captured).
+fn circle_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
+    let center = *points.first()?;
+    let edge = points.get(1).copied().or(cursor)?;
+    let radius = (edge.x - center.x).hypot(edge.y - center.y);
+    if !radius.is_finite() || radius < 1e-12 {
+        return None;
+    }
+    let segments = 64usize;
+    let mut out = Vec::with_capacity(segments + 1);
+    for i in 0..=segments {
+        let t = std::f64::consts::TAU * (i as f64) / (segments as f64);
+        let (sin, cos) = t.sin_cos();
+        out.push(Point3 {
+            x: center.x + radius * cos,
+            y: center.y + radius * sin,
+            z: center.z,
+        });
+    }
+    Some(out)
 }
 
 /// Build the object-snap hint overlay for `hints`.
@@ -813,139 +863,6 @@ fn measurement_preview_overlay(
         }
     }
     out
-}
-
-fn annotation_preview_overlay(
-    preview: &AnnotationPreview,
-    document: DocumentId,
-    snap_hints: bool,
-    options: &PreviewOptions,
-) -> VisualOverlay {
-    let mut out = VisualOverlay::default();
-    let mut order = options.draw_order;
-    let mut geometry: Vec<Vec<Point3>> = Vec::new();
-
-    match preview.kind {
-        AnnotationToolKind::Rectangle => {
-            if let Some(corners) = rectangle_corners(&preview.points, preview.cursor) {
-                geometry.push(corners);
-            }
-        }
-        AnnotationToolKind::Ellipse => {
-            if let Some(points) = ellipse_points(&preview.points, preview.cursor) {
-                geometry.push(points);
-            }
-        }
-        // Text is placed at a point (a marker, no chain); leader/freehand/cloud
-        // are open strokes. A cursor extends an open stroke as a rubber band.
-        AnnotationToolKind::Text => {}
-        AnnotationToolKind::Leader | AnnotationToolKind::Freehand | AnnotationToolKind::Cloud => {
-            let chain = preview_chain(&preview.points, preview.cursor);
-            if chain.len() >= 2 {
-                geometry.push(chain);
-            }
-        }
-    }
-
-    for points in geometry {
-        if let Some(batch) = line_batch(
-            &points,
-            ANNOTATION_PREVIEW_COLOR,
-            document,
-            order,
-            "annotation.preview",
-        ) {
-            out.batches.push(batch);
-            order += 1;
-        }
-    }
-
-    if snap_hints {
-        if let Some(batch) = marker_batch(
-            &preview.points,
-            options.marker_size,
-            ANNOTATION_PREVIEW_COLOR,
-            document,
-            order,
-            "annotation.preview",
-        ) {
-            out.batches.push(batch);
-        }
-    }
-
-    // Text placement is the one kind with no line geometry: explain the marker
-    // so a host is not surprised by a points-only preview. When snap hints are
-    // off the marker is suppressed, so say that instead of claiming a draw.
-    if preview.kind == AnnotationToolKind::Text && !preview.points.is_empty() {
-        if snap_hints {
-            out.partial(
-                "preview.text-marker-only",
-                "text preview is a point marker; glyphs are shaped on commit".into(),
-            );
-        } else {
-            out.partial(
-                "preview.text-marker-suppressed",
-                "text preview point marker hidden by view.overlays.snapHints".into(),
-            );
-        }
-    }
-    out
-}
-
-/// The closed rectangle loop for a rectangle preview, using the live cursor as
-/// the second corner while only one point is captured.
-fn rectangle_corners(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
-    let corners = preview_pair(points, cursor)?;
-    let [a, b] = corners;
-    Some(vec![
-        a,
-        Point3 {
-            x: b.x,
-            y: a.y,
-            z: a.z,
-        },
-        b,
-        Point3 {
-            x: a.x,
-            y: b.y,
-            z: a.z,
-        },
-        a,
-    ])
-}
-
-/// The parametric ellipse for an ellipse preview.
-///
-/// Uses the same centre + orthogonal axes convention as
-/// `AnnotationTool::build` and reuses [`cad_scene::tessellate_ellipse`] for the
-/// discretisation, so the preview and the committed annotation agree.
-fn ellipse_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
-    let [center, corner] = preview_pair(points, cursor)?;
-    let axis_u = Point3 {
-        x: corner.x - center.x,
-        y: 0.0,
-        z: 0.0,
-    };
-    let axis_v = Point3 {
-        x: 0.0,
-        y: corner.y - center.y,
-        z: 0.0,
-    };
-    if (axis_u.x * axis_u.x + axis_v.y * axis_v.y).sqrt() < 1e-12 {
-        return None;
-    }
-    let points = cad_scene::tessellate_ellipse(center, axis_u, axis_v, 0.01);
-    (points.len() >= 3).then_some(points)
-}
-
-/// The two defining points of a rectangle/ellipse preview: captured points
-/// first, the live cursor filling the missing second point.
-fn preview_pair(points: &[Point3], cursor: Option<Point3>) -> Option<[Point3; 2]> {
-    match (points.first(), points.get(1)) {
-        (Some(a), Some(b)) => Some([*a, *b]),
-        (Some(a), None) => cursor.map(|c| [*a, c]),
-        _ => None,
-    }
 }
 
 /// Build one `Lines` batch through `points` (a polyline; consecutive duplicates
@@ -1221,7 +1138,7 @@ mod tests {
         assert_eq!(batch.local_origin, p(30.0, -1.0));
         assert_eq!(batch.vertices[1], [0.0, 2.0, 0.0]);
         // Highlight tint is concrete and the draw order sits between the base
-        // drawing (0) and the annotation overlay (1_000_000).
+        // drawing (0) and the selection highlight (900_000).
         assert!(!batch.color_unresolved);
         assert_eq!(batch.color, cad_scene::DEFAULT_HIGHLIGHT_COLOR);
         assert!(batch.draw_order > 0 && batch.draw_order < 1_000_000);
@@ -1272,7 +1189,7 @@ mod tests {
 
     #[test]
     fn empty_preview_yields_no_batches() {
-        let overlay = preview_overlay(None, None, DocumentId(1), true, &PreviewOptions::default());
+        let overlay = preview_overlay(None, DocumentId(1), true, &PreviewOptions::default());
         assert!(overlay.is_empty());
     }
 
@@ -1287,7 +1204,6 @@ mod tests {
         };
         let overlay = preview_overlay(
             Some(&preview),
-            None,
             DocumentId(1),
             true,
             &PreviewOptions::default(),
@@ -1313,7 +1229,6 @@ mod tests {
         };
         let overlay = preview_overlay(
             Some(&preview),
-            None,
             DocumentId(1),
             true,
             &PreviewOptions::default(),
@@ -1335,91 +1250,13 @@ mod tests {
         };
         let active = preview_overlay(
             Some(&preview),
-            None,
             DocumentId(1),
             true,
             &PreviewOptions::default(),
         );
         assert!(!active.is_empty());
-        let cancelled =
-            preview_overlay(None, None, DocumentId(1), true, &PreviewOptions::default());
+        let cancelled = preview_overlay(None, DocumentId(1), true, &PreviewOptions::default());
         assert!(cancelled.is_empty());
-    }
-
-    #[test]
-    fn rectangle_annotation_preview_is_a_closed_loop() {
-        let preview = AnnotationPreview {
-            kind: AnnotationToolKind::Rectangle,
-            points: vec![p(0.0, 0.0), p(4.0, 2.0)],
-            cursor: None,
-            remaining: 0,
-            requires_text: false,
-            text_supplied: false,
-        };
-        let overlay = preview_overlay(
-            None,
-            Some(&preview),
-            DocumentId(1),
-            true,
-            &PreviewOptions::default(),
-        );
-        let loop_batch = &overlay.batches[0];
-        assert_eq!(loop_batch.vertices.len(), 5);
-        assert_eq!(loop_batch.vertices[0], loop_batch.vertices[4]);
-        assert_eq!(loop_batch.color, ANNOTATION_PREVIEW_COLOR);
-    }
-
-    #[test]
-    fn ellipse_annotation_preview_tessellates_onto_the_curve() {
-        let preview = AnnotationPreview {
-            kind: AnnotationToolKind::Ellipse,
-            points: vec![p(0.0, 0.0), p(4.0, 2.0)],
-            cursor: None,
-            remaining: 0,
-            requires_text: false,
-            text_supplied: false,
-        };
-        let overlay = preview_overlay(
-            None,
-            Some(&preview),
-            DocumentId(1),
-            true,
-            &PreviewOptions::default(),
-        );
-        let batch = &overlay.batches[0];
-        assert!(batch.vertices.len() >= 8);
-        assert_eq!(batch.color, ANNOTATION_PREVIEW_COLOR);
-        // Vertices are local to `local_origin`; reconstruct world points and
-        // check the ellipse equation ((x)/4)^2 + ((y)/2)^2 = 1.
-        for v in &batch.vertices {
-            let x = batch.local_origin.x + v[0] as f64;
-            let y = batch.local_origin.y + v[1] as f64;
-            let u = x / 4.0;
-            let w = y / 2.0;
-            assert!((u * u + w * w - 1.0).abs() < 1e-6, "off curve: {x},{y}");
-        }
-    }
-
-    #[test]
-    fn annotation_cursor_previews_the_dragged_rectangle() {
-        let preview = AnnotationPreview {
-            kind: AnnotationToolKind::Rectangle,
-            points: vec![p(0.0, 0.0)],
-            cursor: Some(p(3.0, 3.0)),
-            remaining: 1,
-            requires_text: false,
-            text_supplied: false,
-        };
-        let overlay = preview_overlay(
-            None,
-            Some(&preview),
-            DocumentId(1),
-            true,
-            &PreviewOptions::default(),
-        );
-        let loop_batch = &overlay.batches[0];
-        assert_eq!(loop_batch.vertices.len(), 5);
-        assert_eq!(loop_batch.vertices[2], [3.0, 3.0, 0.0]);
     }
 
     #[test]
@@ -1452,12 +1289,11 @@ mod tests {
     #[test]
     fn overlay_fingerprint_tracks_each_visibility_flag() {
         let baseline = overlay_fingerprint(&OverlayInputs::default());
-        let flips: [fn(&mut OverlayVisibility); 5] = [
+        let flips: [fn(&mut OverlayVisibility); 4] = [
             |v| v.axes = false,
             |v| v.grid = false,
             |v| v.selection_highlight = false,
             |v| v.snap_hints = false,
-            |v| v.annotations = false,
         ];
         for flip in flips {
             let mut inputs = OverlayInputs::default();
@@ -1676,7 +1512,6 @@ mod tests {
         };
         let with = preview_overlay(
             Some(&preview),
-            None,
             DocumentId(1),
             true,
             &PreviewOptions::default(),
@@ -1685,7 +1520,6 @@ mod tests {
         assert_eq!(with.drawn(), 2);
         let without = preview_overlay(
             Some(&preview),
-            None,
             DocumentId(1),
             false,
             &PreviewOptions::default(),
@@ -1693,33 +1527,5 @@ mod tests {
         // The chain stays; only the cursor/snap crosses disappear.
         assert_eq!(without.drawn(), 1);
         assert_eq!(without.batches[0].topology, RenderTopology::Lines);
-    }
-
-    #[test]
-    fn snap_hints_false_suppresses_annotation_markers_but_keeps_the_stroke() {
-        let preview = AnnotationPreview {
-            kind: AnnotationToolKind::Leader,
-            points: vec![p(0.0, 0.0), p(1.0, 0.0)],
-            cursor: None,
-            remaining: 0,
-            requires_text: false,
-            text_supplied: false,
-        };
-        let with = preview_overlay(
-            None,
-            Some(&preview),
-            DocumentId(1),
-            true,
-            &PreviewOptions::default(),
-        );
-        assert_eq!(with.drawn(), 2);
-        let without = preview_overlay(
-            None,
-            Some(&preview),
-            DocumentId(1),
-            false,
-            &PreviewOptions::default(),
-        );
-        assert_eq!(without.drawn(), 1);
     }
 }

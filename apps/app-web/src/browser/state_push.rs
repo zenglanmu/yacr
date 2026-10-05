@@ -1,7 +1,7 @@
 //! Single funnel that pushes derived application state into the Slint shell.
 //!
-//! Every command, document open, annotation import/export and startup restore
-//! calls [`push_panel_state`] so no host path can leave a panel stale. The
+//! Every command, document open and startup call [`push_panel_state`] so no
+//! host path can leave a panel stale. The
 //! projection from the authoritative `cad-app` getters into `cad-ui-slint` panel
 //! snapshots is factored into pure functions ([`derive_layer_state`], …) so the
 //! mapping is unit-tested without a Slint host.
@@ -16,12 +16,12 @@ use std::rc::Rc;
 
 use cad_app::host::HostController;
 use cad_app::layers::LayerRow;
-use cad_app::{AnnotationPreview, AnnotationRow, MeasurementPreview, SelectionProperties};
+use cad_app::{MeasurementPreview, SelectionProperties};
 use cad_diagnostics::model::{DiagnosticReason, DiagnosticsModel, Severity};
-use cad_domain::{AnnotationId, Completeness, Diagnostic, LayerId, LayoutId};
+use cad_domain::{Completeness, Diagnostic, LayerId, LayoutId};
 use cad_ui_slint::{
-    AnnotationPanelState, CadView, DiagnosticsPanelState, LayerPanelState, LayoutPanelState,
-    MeasurementUiState, MessageSource, PropertyPanelState, UiHandle,
+    CadView, DiagnosticsPanelState, LayerPanelState, LayoutPanelState, MeasurementUiState,
+    MessageSource, PropertyPanelState, UiHandle,
 };
 
 use super::async_open as async_open_state;
@@ -48,20 +48,6 @@ pub(super) fn derive_property_state(
         properties,
         messages.text("properties.empty", &[]),
         |keys| messages.text("properties.mixed", &[("keys", &keys.join(","))]),
-    )
-}
-
-/// Annotation panel state plus the ordered ids the adapter maps row indices
-/// through. The `preview` drives the active-tool step text, if any.
-pub(super) fn derive_annotation_state(
-    rows: &[AnnotationRow],
-    preview: Option<&AnnotationPreview>,
-    messages: &MessageSource,
-) -> (AnnotationPanelState, Vec<AnnotationId>) {
-    let order = rows.iter().map(|row| row.id).collect();
-    (
-        AnnotationPanelState::from_rows(rows, preview, messages.text("annotation.empty", &[])),
-        order,
     )
 }
 
@@ -143,7 +129,6 @@ pub(super) fn view_slot(view: &CadView) -> Rc<RefCell<Option<CadView>>> {
 pub(super) struct OverlayPush {
     pub selection: cad_app::SelectionSet,
     pub measurement: Option<MeasurementPreview>,
-    pub annotation: Option<AnnotationPreview>,
 }
 
 /// Read the authoritative overlay inputs from the controller.
@@ -151,13 +136,12 @@ pub(super) fn derive_overlay_push(controller: &HostController) -> OverlayPush {
     OverlayPush {
         selection: controller.selection().clone(),
         measurement: controller.measurement_preview(),
-        annotation: controller.annotation_preview(),
     }
 }
 
 /// Push every derived panel state into the shell in one place.
 ///
-/// Called after every command execute, document open and annotation mutation.
+/// Called after every command execute and document open.
 /// The history push replaces the old `set_can_undo`-only calls: it writes both
 /// undo and redo so undoing to empty leaves `can_redo` stale-free (audit U11).
 ///
@@ -194,7 +178,6 @@ pub(super) fn push_panel_state(
         let overlay = derive_overlay_push(&controller);
         view.set_selection_highlight(overlay.selection);
         view.set_measurement_preview(overlay.measurement);
-        view.set_annotation_preview(overlay.annotation);
         // Object-snap hints under the live tool cursor. The renderer gates them
         // on `view.overlays.snapHints`, so feeding them unconditionally is safe;
         // an idle tool or a snap error clears the overlay (explicit empty), the
@@ -205,13 +188,10 @@ pub(super) fn push_panel_state(
     // Undo/redo: one snapshot drives both flags.
     let _ = handle.set_history_availability(controller.history_availability());
 
-    // Measurement panel: active preview + unit context. The save-as-annotation
-    // affordance is enabled only when a confirmed record exists (F06/F07).
+    // Measurement panel: active preview + unit context.
     let measurement = controller.measurement_preview();
-    let has_record = controller.has_last_measurement();
-    let mut measurement_state =
+    let measurement_state =
         MeasurementUiState::from_preview(measurement.as_ref(), controller.unit_label());
-    measurement_state.set_can_save_annotation(has_record);
     let _ = handle.set_measurement_state(&measurement_state);
 
     // Session mode (audit U02): one call writes both the work flag and the
@@ -228,13 +208,6 @@ pub(super) fn push_panel_state(
     // Properties panel: read-only projection of the current selection.
     if let Ok(properties) = controller.selection_properties() {
         let _ = handle.set_property_state(&derive_property_state(&properties, &messages));
-    }
-
-    // Annotation management + active tool.
-    if let Ok(rows) = controller.annotation_rows() {
-        let preview = controller.annotation_preview();
-        let (state, order) = derive_annotation_state(&rows, preview.as_ref(), &messages);
-        let _ = handle.set_annotation_state(&state, &order);
     }
 
     // Layout panel: the database's real layout table, with the active space.
@@ -290,7 +263,7 @@ fn backend_display(view: &Rc<RefCell<Option<CadView>>>) -> String {
 mod tests {
     use super::*;
     use cad_app::layers::LayerRow;
-    use cad_app::{AnnotationRow, PropertyRow, SelectionProperties};
+    use cad_app::{PropertyRow, SelectionProperties};
     use cad_diagnostics::model::codes;
     use cad_domain::{EntityId, InstancePath, LayerId, ObjectId};
     use cad_ui_slint::Locale;
@@ -356,36 +329,6 @@ mod tests {
         assert_eq!(state.count, 2);
         assert_eq!(state.mixed_label, "多值: layer,length");
         assert_eq!(state.empty_label, "未选择");
-    }
-
-    #[test]
-    fn annotation_state_keeps_ids_and_hidden_count() {
-        let rows = [
-            AnnotationRow {
-                id: AnnotationId(5),
-                kind: "text",
-                kind_label: "文字",
-                text: "note".to_string(),
-                visible: false,
-                overridden: true,
-                selected: true,
-            },
-            AnnotationRow {
-                id: AnnotationId(6),
-                kind: "text",
-                kind_label: "文字",
-                text: "keep".to_string(),
-                visible: true,
-                overridden: false,
-                selected: false,
-            },
-        ];
-        let (state, order) = derive_annotation_state(&rows, None, &zh());
-        assert_eq!(order, vec![AnnotationId(5), AnnotationId(6)]);
-        assert_eq!(state.rows.len(), 2);
-        assert_eq!(state.hidden_count, 1);
-        assert!(!state.tool_active);
-        assert_eq!(state.empty_label, "无注解");
     }
 
     #[test]
@@ -464,7 +407,6 @@ mod tests {
         assert!(overlay.selection.is_empty());
         assert_eq!(overlay.selection, cad_app::SelectionSet::new());
         assert!(overlay.measurement.is_none());
-        assert!(overlay.annotation.is_none());
     }
 
     #[test]
@@ -506,6 +448,5 @@ mod tests {
             .unwrap();
         let overlay = derive_overlay_push(&controller.borrow());
         assert!(overlay.measurement.is_some());
-        assert!(overlay.annotation.is_none());
     }
 }

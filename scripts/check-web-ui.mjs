@@ -347,27 +347,6 @@ try {
     fail("language switch changed the document entity count");
   }
 
-  // Real download → confirmed revision → File API sidecar roundtrip.
-  const downloadPromise = page.waitForEvent("download");
-  await page.evaluate(() => window.yacr.export_annotations());
-  const download = await downloadPromise;
-  if (download.suggestedFilename() !== "annotations.cadnotes.json") {
-    throw new Error(`unexpected export filename: ${download.suggestedFilename()}`);
-  }
-  const sidecar = readFileSync(await download.path());
-  JSON.parse(sidecar.toString("utf8"));
-  await page.locator("#annotation-input").setInputFiles({
-    name: "annotations.cadnotes.json", mimeType: "application/json", buffer: sidecar,
-  });
-  await page.waitForFunction(() =>
-    document.getElementById("host-state").textContent.includes("Imported"));
-  const importState = await page.locator("#host-state").textContent();
-  await page.waitForTimeout(2200);
-  if (await page.locator("#host-state").textContent() !== importState) {
-    throw new Error("renderer heartbeat overwrote the sidecar import status");
-  }
-  report.sidecar = { bytes: sidecar.length, importState, statusPreserved: true };
-
   // Persisted preference restores on a fresh start (HTML chrome + host locale).
   await page.reload({ waitUntil: "load", timeout: 60000 });
   await page.waitForFunction(

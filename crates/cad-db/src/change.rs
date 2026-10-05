@@ -2,7 +2,6 @@
 
 use cad_domain::*;
 
-use crate::annotation::Annotation;
 use crate::entity::DbEntity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,52 +30,8 @@ impl ChangeMask {
             || self.contains(ChangeMask::REFERENCES)
     }
 
-    /// The precise mask describing how one annotation changed.
-    ///
-    /// A pure metadata/identity edit (anchor, text payload, timestamps,
-    /// precision) must not force a full geometry rebuild; only the geometry,
-    /// style, anchor transform and reference fields do (audit B12).
-    pub fn for_annotation_update(before: &Annotation, after: &Annotation) -> Self {
-        let mut mask = Self(0);
-        if before.geometry != after.geometry {
-            mask = mask.union(Self::GEOMETRY);
-        }
-        if before.style != after.style || before.space != after.space || before.text != after.text {
-            mask = mask.union(Self::STYLE);
-        }
-        match (&before.anchor, &after.anchor) {
-            (None, None) => {}
-            (Some(a), Some(b)) if a == b => {}
-            (Some(a), Some(b)) => {
-                if a.fallback != b.fallback || a.instance != b.instance {
-                    mask = mask.union(Self::TRANSFORM);
-                }
-                if a.source_handle != b.source_handle
-                    || a.sub_element != b.sub_element
-                    || a.status != b.status
-                {
-                    mask = mask.union(Self::REFERENCES);
-                }
-            }
-            // An anchor appearing or disappearing changes both what the
-            // annotation references and where it resolves.
-            _ => mask = mask.union(Self::TRANSFORM).union(Self::REFERENCES),
-        }
-        if before.precision != after.precision
-            || before.created_unix_ms != after.created_unix_ms
-            || before.modified_unix_ms != after.modified_unix_ms
-        {
-            mask = mask.union(Self::METADATA);
-        }
-        if mask.0 == 0 {
-            mask = Self::METADATA;
-        }
-        mask
-    }
-
     /// The precise mask describing how one drawing entity changed.
     ///
-    /// Mirrors [`Self::for_annotation_update`] for [`DbEntity`]:
     /// - geometry differs → [`Self::GEOMETRY`];
     /// - layer, space or draw order differ → [`Self::STYLE`] (the entity's
     ///   placement/display style, not its shape);

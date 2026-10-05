@@ -4,7 +4,7 @@
 //! bound to a revision so stale results can be discarded after a document
 //! switch. Programmatic model refreshes must not re-enter the command path.
 
-use cad_db::{AnnotationDatabase, ChangeSet, DrawingDatabase};
+use cad_db::{ChangeSet, DrawingDatabase};
 use cad_domain::*;
 
 #[derive(Debug)]
@@ -36,13 +36,6 @@ pub struct LayerRow {
     pub id: LayerId,
     pub name: String,
     pub visible: bool,
-}
-
-#[derive(Debug)]
-pub struct AnnotationRow {
-    pub id: AnnotationId,
-    pub label: String,
-    pub hidden: bool,
 }
 
 #[derive(Debug)]
@@ -94,29 +87,6 @@ impl QueryService {
                 id: l.id,
                 name: l.name.clone(),
                 visible: l.visible,
-            })
-            .collect();
-        request.revision = database.revision();
-        self.remember(&request.document, request.revision, Some(database.id()));
-        emit(request, all)
-    }
-
-    pub fn annotations(
-        &self,
-        database: &AnnotationDatabase,
-        mut request: QueryRequest,
-    ) -> CadResult<QueryPage<AnnotationRow>> {
-        self.check_fresh(&request)?;
-        let all: Vec<AnnotationRow> = database
-            .annotations()
-            .map(|a| AnnotationRow {
-                id: a.id,
-                label: if a.text.is_empty() {
-                    format!("{:?}", a.geometry)
-                } else {
-                    a.text.clone()
-                },
-                hidden: false,
             })
             .collect();
         request.revision = database.revision();

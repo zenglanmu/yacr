@@ -2,10 +2,8 @@
 use crate::{UiHandle, YacrWindow};
 use cad_app::layers::LayerOverrideSet;
 use cad_app::recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
-use cad_app::{
-    AnnotationVisibilitySet, BackendChoice, Camera, Projection, ProjectionKind, Viewport,
-};
-use cad_db::{AnnotationDatabase, DrawingDatabase};
+use cad_app::{BackendChoice, Camera, Projection, ProjectionKind, Viewport};
+use cad_db::DrawingDatabase;
 use cad_domain::{CadError, CadResult, DocumentId, Point3, SpaceId};
 use cad_render_wgpu::{
     ActiveBackend, BackendCapabilities, BackendPreference, RenderTarget, Renderer,
@@ -23,11 +21,9 @@ mod presenter;
 mod runtime;
 mod view;
 pub use cad_app::render_scene::{
-    annotation_fingerprint, build_scene, build_scene_with_annotations,
-    build_scene_with_annotations_in_space, build_scene_with_fonts, build_scene_with_overrides,
-    build_scene_with_space, layout_descriptors, overlay_fingerprint, preview_overlay,
-    selection_highlight, snap_hint_overlay, OverlayInputs, PreviewOptions, SnapHint, SnapHintKind,
-    VisualOverlay,
+    build_scene, build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
+    layout_descriptors, overlay_fingerprint, preview_overlay, selection_highlight,
+    snap_hint_overlay, OverlayInputs, PreviewOptions, SnapHint, SnapHintKind, VisualOverlay,
 };
 pub use cad_app::viewer_config::OverlayVisibility;
 pub use camera::{camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera};
@@ -36,7 +32,6 @@ pub use view::{CadView, ViewSnapshot};
 
 /// Current document, not a one-shot mailbox. `None` means no open document.
 pub type IncomingDocument = Rc<RefCell<Option<Arc<DrawingDatabase>>>>;
-pub type IncomingAnnotations = Rc<RefCell<Option<Arc<AnnotationDatabase>>>>;
 
 #[derive(Default)]
 struct BridgeState {
@@ -50,8 +45,8 @@ struct BridgeState {
     preparation: preparation::NativePreparation,
     view_diagnostic: Option<String>,
     /// Separate dirty marker for the transient selection/preview overlay. It
-    /// advances on a highlight/preview change and never on a drawing or
-    /// annotation revision change.
+    /// advances on a highlight/preview change and never on a drawing revision
+    /// change.
     overlay_revision: u64,
 }
 

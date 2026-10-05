@@ -72,7 +72,6 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     record!(on_fit_requested, "fit");
     record!(on_cancel_open_requested, "cancel-open");
     record!(on_cancel_draw_requested, "cancel-draw");
-    record!(on_cancel_annotation_requested, "cancel-annotation");
     record!(on_cancel_measurement_requested, "cancel-measurement");
     record!(on_pan_requested, "pan");
     record!(on_diagnostics_closed, "close-diagnostics");
@@ -112,7 +111,6 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
 
     ui.set_import_active(true);
     ui.set_draw_tool_active(true);
-    ui.set_annotation_tool_active(true);
     ui.set_measurement_active(true);
     ui.set_pan_active(true);
     ui.set_diagnostics_open(true);
@@ -128,8 +126,6 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     press(&ui, Key::Escape);
     ui.set_draw_tool_active(false);
     press(&ui, Key::Escape);
-    ui.set_annotation_tool_active(false);
-    press(&ui, Key::Escape);
     ui.set_measurement_active(false);
     press(&ui, Key::Escape);
     ui.set_pan_active(false);
@@ -140,7 +136,6 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
         &[
             "cancel-open",
             "cancel-draw",
-            "cancel-annotation",
             "cancel-measurement",
             "pan",
             "close-diagnostics",

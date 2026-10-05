@@ -1,6 +1,5 @@
 //! Measurement commands for [`Application`].
 use super::*;
-use cad_db::{Annotation, AnnotationGeometry};
 
 impl Application {
     /// Dispatch the measurement tool (spec F06/U04).
@@ -70,11 +69,6 @@ impl Application {
         if matches!(session.tool, ToolState::Measuring(_)) {
             return Ok(self.measure_preview_outcome(session));
         }
-        // An annotation tool captures through the same point channel so a host
-        // only has to map a click once, regardless of which tool is active.
-        if matches!(session.tool, ToolState::Annotating(_)) {
-            return self.capture_annotation_points(session, points);
-        }
 
         // No active tool: stateless inference retained for direct callers/CLI.
         let algorithm = match points.len() {
@@ -122,38 +116,6 @@ impl Application {
         Ok(outcome)
     }
 
-    /// Persist the last confirmed measurement as a measurement annotation.
-    ///
-    /// Goes through the same one-transaction/one-undo-step annotation path as
-    /// every other annotation (`commit_annotation`). Refuses with
-    /// `InvalidInput` when no measurement has been confirmed — never a silent
-    /// success. The resulting `AnnotationGeometry::Measurement` is deliberately
-    /// not drawn by the annotation overlay (`annotation.unsupported`); this
-    /// command only stores the honest record.
-    pub(crate) fn save_measurement_as_annotation(
-        &mut self,
-        session: &SessionState,
-    ) -> CadResult<CommandOutcome> {
-        let record = session
-            .last_measurement()
-            .cloned()
-            .ok_or_else(|| CadError::InvalidInput("no confirmed measurement to save".into()))?;
-        let id = self.next_annotation_id(session.document);
-        let annotation = Annotation {
-            id,
-            space: session.active_space.clone(),
-            geometry: AnnotationGeometry::Measurement(record),
-            text: String::new(),
-            style: AnnotationStyle::default(),
-            created_unix_ms: 0,
-            modified_unix_ms: 0,
-            anchor: None,
-            precision: Precision::Analytic,
-        };
-        let command = AnnotationCommand::Create(annotation);
-        self.commit_annotation(session.document, &command)
-    }
-
     pub(crate) fn measure_preview_outcome(&self, session: &SessionState) -> CommandOutcome {
         let Some(preview) = session.measurement_preview() else {
             return CommandOutcome::none();
@@ -168,7 +130,6 @@ impl Application {
                 message,
             }],
             measurement: None,
-            annotation: None,
         }
     }
 
@@ -214,7 +175,6 @@ impl Application {
                 message: format!("{:?}: {:.6}", record.algorithm, record.value),
             }],
             measurement: Some(record),
-            annotation: None,
         })
     }
 }

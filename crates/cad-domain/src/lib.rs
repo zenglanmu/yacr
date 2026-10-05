@@ -17,7 +17,6 @@ ids!(
     StyleId,
     LinetypeId,
     ScaleId,
-    AnnotationId,
     ViewportId,
     TransactionId,
     RequestId,

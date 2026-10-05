@@ -4,24 +4,17 @@
 //! history restores it; the change set notifies downstream. Mode permissions are
 //! enforced here at the command layer, not by hiding UI buttons.
 
-use cad_annotations::{AnnotationCommand, AnnotationService};
-use cad_db::{
-    AnnotationDatabase, AnnotationStyle, ChangeSet, DrawingDatabase, MeasurementAlgorithm,
-    MeasurementRecord,
-};
+use cad_db::{ChangeSet, DrawingDatabase, MeasurementAlgorithm, MeasurementRecord};
 use cad_domain::*;
-use cad_history::{patch, History, UndoRecord};
+use cad_history::History;
 use cad_measure::{MeasurementEngine, MeasurementRequest, MeasurementSpace};
 use cad_query::QueryService;
 use cad_representation::{enumerate_layouts, viewport_transform, SpaceSelection, ViewportState};
 use std::{collections::BTreeMap, sync::Arc};
 
-pub mod annotation_list;
-pub mod annotation_tool;
 pub mod camera;
 pub mod draw_tool;
 pub mod host;
-pub mod host_files;
 pub mod input;
 pub mod layers;
 pub mod measure_tool;
@@ -33,8 +26,6 @@ pub mod selection;
 pub mod tasks;
 pub mod viewer_config;
 
-pub use annotation_list::{annotation_rows, geometry_kind, AnnotationRow, AnnotationVisibilitySet};
-pub use annotation_tool::{AnnotationPreview, AnnotationTool, AnnotationToolKind};
 pub use cad_spatial::{
     BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
 };
@@ -43,10 +34,6 @@ pub use camera::{
     ProjectionKind, StandardView, ViewBasis,
 };
 pub use draw_tool::{circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind};
-pub use host_files::{
-    decision_name, parse_decision, plan_leave, LeavePlan, LeaveResolution, UnsavedDecisionSource,
-    UnsavedSignal,
-};
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
     DiagnosticsDrawer, EscapeAction, InputOutcome, InputPolicy, KeyAction, LoadingState,
@@ -54,10 +41,7 @@ pub use input::{
 };
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 pub use picking::{drawing_pick_items, filter_by_index, pick_at_screen, pick_ray, pick_tolerance};
-pub use recovery::{
-    ActiveBackendKind, BackendFailure, BackendOutcome, RecoverySnapshot, UnsavedDecision,
-    UnsavedFlow, UnsavedOutcome,
-};
+pub use recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
 pub use selection::{entity_property_rows, PropertyRow, SelectionProperties, SelectionSet};
 pub use tasks::{
     import_phase_key, AsyncOpenPoll, ImportJob, ImportManager, ImportProgressSnapshot,
@@ -93,41 +77,10 @@ pub enum CommandId {
     Measure,
     /// Confirm the points captured by the active open-ended measurement tool.
     ConfirmMeasurement,
-    /// Persist the last confirmed measurement as a measurement annotation
-    /// (F06/F07). Exactly one transaction and one undo step through the shared
-    /// annotation path; refused when no measurement has been confirmed.
-    SaveMeasurementAsAnnotation,
     /// Cancel the active tool without committing anything.
     CancelMeasurement,
-    CreateAnnotation,
-    UpdateAnnotation,
-    DeleteAnnotation,
-    /// Delete one annotation addressed by payload id (UI-friendly form of
-    /// `DeleteAnnotation`, which needs the raw annotation command payload).
-    DeleteAnnotationById,
-    /// Start (or restart) an annotation creation tool for an explicit kind.
-    ///
-    /// This is *not* the same as `CreateAnnotation`, which commits a fully
-    /// specified `AnnotationCommand`. `BeginAnnotationTool` only opens the
-    /// capture state machine and commits nothing by itself.
-    BeginAnnotationTool,
-    /// Confirm the annotation captured by the active tool: exactly one
-    /// transaction through the shared history path.
-    ConfirmAnnotationTool,
-    /// Cancel the active annotation tool; never opens a transaction.
-    CancelAnnotationTool,
-    /// Append world points to the active annotation tool.
-    AppendAnnotationPoints,
-    /// Supply the text payload for the active annotation tool (text/leader).
-    AnnotationText,
-    /// Temporarily hide or show one existing annotation (session state only).
-    SetAnnotationVisibility,
-    /// Select one annotation for edit/delete, or clear the selection (None).
-    SelectAnnotation,
     Undo,
     Redo,
-    ImportAnnotations,
-    ExportAnnotations,
     Resources,
     Diagnostics,
     SwitchBackend,
@@ -164,21 +117,8 @@ impl CommandId {
             self,
             Self::Measure
                 | Self::ConfirmMeasurement
-                | Self::SaveMeasurementAsAnnotation
-                | Self::CreateAnnotation
-                | Self::UpdateAnnotation
-                | Self::DeleteAnnotation
-                | Self::DeleteAnnotationById
-                | Self::BeginAnnotationTool
-                | Self::ConfirmAnnotationTool
-                | Self::CancelAnnotationTool
-                | Self::AppendAnnotationPoints
-                | Self::AnnotationText
-                | Self::SetAnnotationVisibility
-                | Self::SelectAnnotation
                 | Self::Undo
                 | Self::Redo
-                | Self::ImportAnnotations
                 | Self::CreateLine
                 | Self::CreateCircle
                 | Self::MoveEntities
@@ -191,7 +131,6 @@ impl CommandId {
 pub struct Document {
     pub id: DocumentId,
     pub drawing: Arc<DrawingDatabase>,
-    pub annotations: AnnotationDatabase,
     pub identity: DocumentIdentity,
     pub units: UnitContext,
     pub resource_keys: Vec<String>,
@@ -202,7 +141,6 @@ pub enum ToolState {
     Idle,
     Selecting,
     Measuring(MeasurementTool),
-    Annotating(AnnotationTool),
     Panning,
 }
 
@@ -214,15 +152,6 @@ pub struct SessionState {
     /// Temporary layer visibility. Never the drawing's layer table (F03).
     pub layer_overrides: LayerOverrideSet,
     pub tool: ToolState,
-    /// Session-scoped temporary annotation visibility, keyed by annotation id.
-    ///
-    /// `AnnotationDatabase` has no hidden field and the sidecar format does not
-    /// carry one, so visibility is a *session override* exactly like the layer
-    /// overrides (F03/F09). It never mutates an annotation, never raises the
-    /// annotation revision and therefore never creates a history entry.
-    pub annotation_visibility: AnnotationVisibilitySet,
-    /// The annotation currently selected for edit/delete in the management UI.
-    pub selected_annotation: Option<AnnotationId>,
     pub generation: u64,
     /// Recorded CAD backend preference; the host rebuilds the render session.
     pub backend: BackendChoice,
@@ -237,9 +166,7 @@ pub struct SessionState {
     /// The last structured measurement result produced in this session (F06).
     ///
     /// Set when a measurement is evaluated (auto-completed or explicitly
-    /// confirmed). It is what [`CommandId::SaveMeasurementAsAnnotation`] turns
-    /// into an annotation; it is never a fabricated placeholder. Cleared when the
-    /// session is rebuilt for new content.
+    /// confirmed). Cleared when the session is rebuilt for new content.
     last_measurement: Option<MeasurementRecord>,
 }
 
@@ -260,8 +187,6 @@ impl SessionState {
             selection: SelectionSet::new(),
             layer_overrides: LayerOverrideSet::new(),
             tool: ToolState::Idle,
-            annotation_visibility: AnnotationVisibilitySet::new(),
-            selected_annotation: None,
             generation: 0,
             backend: BackendChoice::Auto,
             active_layer: LayerId(0),
@@ -293,7 +218,7 @@ impl SessionState {
     /// Cancel the current tool and any preview, returning to navigation.
     ///
     /// Cancelling never opens a transaction, so a cancelled measurement always
-    /// leaves the annotation database and history untouched.
+    /// leaves the drawing database and history untouched.
     pub fn cancel_tool(&mut self) -> CadResult<()> {
         self.tool = ToolState::Idle;
         Ok(())
@@ -306,7 +231,7 @@ impl SessionState {
         self.last_measurement.as_ref()
     }
 
-    /// Whether a confirmed measurement is available to persist as an annotation.
+    /// Whether a confirmed measurement result is currently retained.
     pub fn has_last_measurement(&self) -> bool {
         self.last_measurement.is_some()
     }
@@ -337,74 +262,6 @@ impl SessionState {
                 "no measurement tool is active".into(),
             )),
         }
-    }
-
-    /// Snapshot of the active annotation tool for preview, if any.
-    pub fn annotation_preview(&self) -> Option<AnnotationPreview> {
-        match &self.tool {
-            ToolState::Annotating(tool) => Some(tool.preview()),
-            _ => None,
-        }
-    }
-
-    /// Move the annotation preview cursor without capturing a point.
-    ///
-    /// Pure state update: no command, no database write.
-    pub fn set_annotation_cursor(&mut self, cursor: Option<Point3>) -> CadResult<()> {
-        match &mut self.tool {
-            ToolState::Annotating(tool) => {
-                tool.set_cursor(cursor);
-                Ok(())
-            }
-            _ => Err(CadError::InvalidInput(
-                "no annotation tool is active".into(),
-            )),
-        }
-    }
-
-    /// Set the text payload of the active annotation tool.
-    pub fn set_annotation_text(&mut self, text: impl Into<String>) -> CadResult<()> {
-        match &mut self.tool {
-            ToolState::Annotating(tool) => tool.set_text(text),
-            _ => Err(CadError::InvalidInput(
-                "no annotation tool is active".into(),
-            )),
-        }
-    }
-
-    /// Effective visibility of one annotation id under the session overrides.
-    ///
-    /// Absent overrides mean visible: the sidecar format has no hidden flag, so
-    /// "visible" is the honest default and a hide is an explicit session action.
-    pub fn annotation_visible(&self, id: AnnotationId) -> bool {
-        self.annotation_visibility.effective(id)
-    }
-
-    /// Whether the session has hidden this annotation.
-    pub fn annotation_hidden(&self, id: AnnotationId) -> bool {
-        self.annotation_visibility.is_hidden(id)
-    }
-
-    /// Apply a temporary visibility override for one annotation.
-    pub fn set_annotation_visibility(&mut self, id: AnnotationId, visible: bool) {
-        self.annotation_visibility.set(id, visible);
-    }
-
-    /// Drop every annotation visibility override.
-    pub fn clear_annotation_visibility(&mut self) {
-        self.annotation_visibility.clear();
-    }
-
-    /// Read-only management rows for the annotation list panel.
-    ///
-    /// Pure projection of the document database plus the session visibility and
-    /// selection; it never dispatches a command.
-    pub fn annotation_rows(&self, database: &AnnotationDatabase) -> Vec<AnnotationRow> {
-        annotation_list::annotation_rows(
-            database,
-            &self.annotation_visibility,
-            self.selected_annotation,
-        )
     }
 }
 
@@ -544,7 +401,6 @@ pub struct Workspace {
 
 pub enum CommandPayload {
     None,
-    Annotation(Box<AnnotationCommand>),
     Points(Vec<Point3>),
     Layer(LayerId, bool),
     /// Distinct existing layer ids and their temporary visibility values.
@@ -555,21 +411,6 @@ pub enum CommandPayload {
     Backend(BackendChoice),
     /// Start (or restart) a measurement tool with an explicit algorithm.
     MeasureTool(MeasurementToolKind),
-    /// Start (or restart) an annotation creation tool with an explicit kind.
-    AnnotationTool(AnnotationToolKind),
-    /// Append world points to the active capture tool (measure or annotation).
-    ///
-    /// Reuses `Points`; the active tool decides what the points mean. Kept as a
-    /// named variant so a caller can be explicit.
-    AppendAnnotationPoints(Vec<Point3>),
-    /// Text payload for the active annotation tool (text/leader kinds).
-    AnnotationText(String),
-    /// Hide/show one existing annotation. Session state only, no transaction.
-    AnnotationVisibility(AnnotationId, bool),
-    /// Select one annotation for edit/delete in the management panel.
-    SelectAnnotation(Option<AnnotationId>),
-    /// Delete one annotation by id. Opens exactly one transaction.
-    DeleteAnnotation(AnnotationId),
     /// Orbit the current view: yaw about world +Z, pitch about the view right
     /// axis, both in radians. Preserves the eye-target distance (audit F13).
     Orbit {
@@ -623,8 +464,6 @@ pub struct CommandOutcome {
     pub diagnostics: Vec<Diagnostic>,
     /// Structured measurement result, when the command produced one (spec F06).
     pub measurement: Option<MeasurementRecord>,
-    /// The annotation created/updated by a command, when it produced one.
-    pub annotation: Option<AnnotationId>,
 }
 
 impl CommandOutcome {
@@ -634,7 +473,6 @@ impl CommandOutcome {
             changes: None,
             diagnostics: Vec::new(),
             measurement: None,
-            annotation: None,
         }
     }
 }
@@ -754,23 +592,6 @@ pub fn viewport_measurement_space(
     }
 }
 
-pub struct CommandDeclaration {
-    pub id: CommandId,
-    pub undoable: bool,
-    pub annotation_database: bool,
-    pub merge_key: Option<String>,
-}
-
-pub trait CommandHandler {
-    fn declaration(&self) -> CommandDeclaration;
-    fn execute(
-        &self,
-        session: &mut SessionState,
-        document: &mut Document,
-        command: &Command,
-    ) -> CadResult<CommandOutcome>;
-}
-
 /// Independent undo/redo availability for one document.
 ///
 /// UI layers must bind undo and redo to their own flags (audit U11); reading
@@ -785,7 +606,6 @@ pub struct Application {
     pub workspace: Workspace,
     pub history: BTreeMap<DocumentId, History>,
     pub measurement: MeasurementEngine,
-    pub annotations: AnnotationService,
     pub query: QueryService,
 }
 
@@ -822,7 +642,6 @@ pub trait Tool {
     ) -> CadResult<Option<Command>>;
 }
 
-mod app_annotation;
 mod app_drawing;
 mod app_history;
 mod app_measure;

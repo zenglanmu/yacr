@@ -11,4 +11,3 @@ description = "Panel queries, ViewModel and incremental updates."
 cad-domain.workspace = true
 cad-db.workspace = true
 cad-dependencies.workspace = true
-cad-annotations.workspace = true

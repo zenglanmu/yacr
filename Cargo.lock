@@ -313,7 +313,6 @@ name = "app-linux"
 version = "0.1.0"
 dependencies = [
  "ashpd",
- "cad-annotations",
  "cad-app",
  "cad-db",
  "cad-diagnostics",
@@ -330,7 +329,6 @@ dependencies = [
 name = "app-web"
 version = "0.1.0"
 dependencies = [
- "cad-annotations",
  "cad-app",
  "cad-diagnostics",
  "cad-domain",
@@ -777,21 +775,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
-name = "cad-annotations"
-version = "0.1.0"
-dependencies = [
- "cad-db",
- "cad-domain",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
 name = "cad-app"
 version = "0.1.0"
 dependencies = [
- "cad-annotations",
  "cad-db",
  "cad-dependencies",
  "cad-diagnostics",
@@ -813,7 +799,6 @@ dependencies = [
 name = "cad-cli-tools"
 version = "0.1.0"
 dependencies = [
- "cad-annotations",
  "cad-app",
  "cad-db",
  "cad-diagnostics",
@@ -937,7 +922,6 @@ dependencies = [
 name = "cad-query"
 version = "0.1.0"
 dependencies = [
- "cad-annotations",
  "cad-db",
  "cad-dependencies",
  "cad-domain",
@@ -5395,7 +5379,6 @@ version = "1.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce"
 dependencies = [
- "getrandom 0.4.3",
  "js-sys",
  "serde_core",
  "wasm-bindgen",
