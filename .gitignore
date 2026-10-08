@@ -30,3 +30,5 @@ apps/app-android/assets/fonts/*
 # Local deepwork progress (not project artifacts)
 .slim/deepwork/
 .opencode/
+
+fixtures/complex-test.dwg
