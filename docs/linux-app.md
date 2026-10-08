@@ -19,8 +19,16 @@ bash scripts/verify-ui.sh                         # 无头 UI 调试循环（第
 ```
 
 `--headless --output <新目录>` 运行同一个 LinuxApp/controller/Slint/共享设备 CAD 桥，只改变
-平台适配器。`--size WIDTHxHEIGHT` 限制 320–4096；`--locale zh-CN|en`。脚本自动寻找 Mesa
-lavapipe ICD，支持 `VK_ICD_FILENAMES`/`YACR_LINUX_OUTPUT` 覆盖；`YACR_TEST_DWG` 可输入仓库外图纸。
+平台适配器。`--size WIDTHxHEIGHT` 限制 320–4096；`--locale zh-CN|en`；`--gpu auto|high|low`
+设置桌面 wgpu 适配器偏好（`auto`/`high` 优先独显、`low` 优先核显，等价 wgpu
+`PowerPreference`；还可直接用 `WGPU_ADAPTER_NAME`/`WGPU_POWER_PREF`）。
+脚本自动寻找 Mesa lavapipe ICD，支持 `VK_ICD_FILENAMES`/`YACR_LINUX_OUTPUT` 覆盖；
+`YACR_TEST_DWG` 可输入仓库外图纸。
+
+混合显卡说明：桌面**默认（`--gpu auto`）即优先独显**（双显卡默认选独立 GPU），
+此时 `nvidia-smi` 应能看到本应用进程；`--gpu low` 才切到核显。偏好只是尽力而为：
+无可达独显时回退到所选后端的首个适配器。Slint 会拒绝纯 CPU 适配器（llvmpipe 需
+`SLINT_WGPU_CPU=1` 才会启用），所以能启动就意味着在用真实 GPU 适配器。
 
 PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须新建，失败保留，禁止覆盖。
 报告中出图 smoke、导航命令+像素变化是自动检查，`visualAcceptance` 始终等待独立人工审查，
@@ -30,7 +38,12 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 
 宿主通过 HostController 的命令/事务更新图纸，统一推送层、属性、布局、测量、批注、诊断与
 显示派生；鼠标平移/滚轮缩放/选择/测量取点、直线/圆/移动、撤销重做使用真实应用路径。
-启动 fit 使用 CAD 内容区域；运行时 50ms 定时器更新尺寸/相机，不重新解析底图或自动 fit。
+启动 fit 使用 CAD 内容区域；运行时 50ms 定时器只在**窗口尺寸/配置 revision/相机
+快照真正变化**时才刷新布局与请求重绘（2026-10-08 修复：此前定时器每帧无条件写
+Slint 属性并触发 `request_redraw`，空闲视图以 ~20fps 重绘、单核 CPU 占用 ~40%）。
+`CadView::apply_view_snapshot` 对相同快照直接跳过 `set_view_state`/`request_redraw`；
+`Runtime::metrics` 缓存 `(物理尺寸, config revision)`，未变化不重新应用布局或序列化配置。
+异步打开仍由 `poll_open` 每 tick 检查，不会被跳过。
 
 - 桌面打开按钮调用 `xdg-desktop-portal` 的系统文件选择器，筛选 DWG/DXF（含大小写扩展名）；
   在独立线程等待选择，Slint 事件循环继续运行。需要桌面 session D-Bus、`xdg-desktop-portal`

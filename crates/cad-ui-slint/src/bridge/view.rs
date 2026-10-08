@@ -86,14 +86,22 @@ impl CadView {
         }
         let perspective = !snapshot.camera.projection.is_orthographic();
         let is_3d = snapshot.mode == ProjectionKind::ThreeD;
-        {
+        let changed = {
             let mut state = self.state.borrow_mut();
-            if state.view != snapshot {
-                state.runtime.dirty.invalidate();
-            }
+            let changed = state.view != snapshot;
             state.view = snapshot;
             state.view_diagnostic = None;
+            changed
+        };
+        // An identical snapshot (same camera/space/mode) must not schedule a
+        // preparation pass or force a window repaint. The Linux host re-pushes
+        // the session on a 50 ms timer, so without this guard an idle view
+        // keeps redrawing at ~20 fps even when nothing changed (measured ~40%
+        // CPU). Camera/space changes still invalidate the CAD frame below.
+        if !changed {
+            return Ok(());
         }
+        self.state.borrow_mut().runtime.dirty.invalidate();
         self.handle
             .set_view_state(crate::ViewStateUi { is_3d, perspective })?;
         self.request_redraw();
@@ -273,6 +281,7 @@ impl CadView {
     /// This is outside `BeforeRendering`; no database walk occurs on a UI-only frame.
     /// Native preparation runs on a bounded worker; WASM retains the event-loop path.
     pub fn request_redraw(&self) {
+        self.state.borrow_mut().redraw_requests += 1;
         #[cfg(not(target_arch = "wasm32"))]
         let input = self.preparation_input();
         {
@@ -498,6 +507,11 @@ impl CadView {
     /// drawing.
     pub fn overlay_revision(&self) -> u64 {
         self.state.borrow().overlay_revision
+    }
+    /// Total `request_redraw` calls. An idle view (identical snapshots, no
+    /// drawing/overlay changes) must not grow this counter.
+    pub fn redraw_requests(&self) -> u64 {
+        self.state.borrow().redraw_requests
     }
     pub fn teardown(&self) {
         {

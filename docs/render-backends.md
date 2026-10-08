@@ -19,6 +19,25 @@ Auto/WebGPU/WebGL2 分开设置，UI 与 CAD 后端配置独立。Auto 必须实
 features/limits；强制失败给用户原因/回退选项，不能只检测 navigator.gpu。
 WebGL2 基础路径不依赖 compute/storage buffer/indirect draw；增强路径保持相同测量语义。
 
+### 显式适配器偏好（2026-10-08 新增）
+
+混合显卡主机（如 Intel 核显 + NVIDIA 独显）**默认（`auto`，与 `high` 同义）即优先
+独显**，因此 `nvidia-smi` 应当能看到本应用进程；`--gpu low` 才切到核显。
+共用同一稳定名 `GpuSelection`（`auto`/`high`/`low`，`crates/cad-render-wgpu`）：
+
+- **Linux App**：`yacr-linux --gpu auto|high|low`（`LinuxOptions.gpu` →
+  `select_wgpu_backend_with`，`auto`/`high` 映射为 wgpu
+  `PowerPreference::HighPerformance`，`low` 为 `LowPower`）。
+- **CLI render/plot**：`cad-cli-tools render x.dwg --gpu auto|high|low`（无头路径
+  `create_headless_gpu_with`，在所选后端内按 `device_type` 优选，缺类型时回退首个适配器）。
+- **环境变量**：Slint 自动路径原生支持 `WGPU_ADAPTER_NAME`（按名字子串匹配，
+  wgpu `initialize_adapter_from_env`）与 `WGPU_POWER_PREF=low|high|none`；
+  无头 CLI 路径不读取 `WGPU_ADAPTER_NAME`（见 `docs/headless-render.md` §2）。
+
+`auto`/`high`/`low` 都是**偏好不是保证**：没有独显（或核显）时回退到所选后端的首个
+适配器；表面不兼容（如虚拟化/无显示输出的独显）时 wgpu 仍可能选到可呈现的适配器。
+能力诊断仍来自共享设备的真实 `adapter_info().backend`，不来自偏好。
+
 共享设备候选：Slint 作为唯一呈现协调者，CAD 同 Device/Queue 离屏纹理合成。
 Web 受阻可验证双 Canvas 分区；不得每帧 GPU→CPU→GPU 整幅回读。
 必须核查纹理 format/usage、MSAA resolve、alpha 预乘、sRGB、队列顺序、resize、device lost。

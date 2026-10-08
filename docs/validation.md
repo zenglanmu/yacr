@@ -21,6 +21,33 @@
 - Web：`wasm-bindgen-cli 0.2.129`、Node 22；无头 Chromium
   `Google Chrome for Testing 153.0.8010.12`（Playwright core 1.63，SwiftShader）。
 
+## 2026-10-08：资源占用/显卡加速排查证据（本机真实桌面，非无头）
+
+环境：真实 Wayland 桌面（GNOME），**Intel UHD Graphics (CometLake-H GT2, i915)** +
+**NVIDIA Quadro P620** 混合显卡；本机 ~30 GiB RAM。以下数字均为本机实跑。
+
+- **默认适配器=Intel 核显（Vulkan/ANV）——修复前**：GUI `yacr-linux` DRM fdinfo 显示渲染在
+  `renderD129`（Intel `0000:00:02.0`，`drm-engine-render` 有累计时间），NVIDIA
+  `renderD128` 为 0；`nvidia-smi` 依赖此解释。**修复后默认（`--gpu auto`）优先独显**：
+  GUI 与 CLI 均实测选中 Quadro P620，`nvidia-smi` 显示 40–56 MiB、1–4%。
+  Slint 拒绝纯 CPU 适配器（报 `no GPU-backed WGPU adapter ... set SLINT_WGPU_CPU=1`）。
+- **空闲重绘修复前后**（release、demo 与 `entities.dxf` 都是）：单核 CPU
+  **~40%（恒定）→ ~0–2%**；同快照不再触发 `request_redraw`。
+- **显式 GPU 选择**：CLI `render --gpu high` → adapter `Quadro P620 / discrete_gpu`；
+  GUI `yacr-linux --gpu high` → `nvidia-smi` 显示 40–56 MiB、1–4%。
+- **大图内存保护**（`fixtures/complex-test.dwg`，4.2 MB，gitignored）：修复前
+  `render` 峰值 RSS **~20 GB（dmesg OOM-kill：`anon-rss:20118504kB`）**；改为
+  打包虚线 + `SceneCache::build_compact` 后 `render`（默认预算）
+  **峰值 RSS 3.85 GB、24 s、exit 0**，`scene.batches=97012` / `vertices=50251439`
+  （与桌面合批一致；帧按帧预算绘制部分批次）。`build-representation` 仍报告
+  20,856,815 primitives / 46,064,001 vertices（未打包计数语义不变）。
+
+新增/更新契约测试：`cad-ui-slint/tests/idle_redraw.rs`（相同快照不新增重绘、
+相机变化重绘）、`cad-render-wgpu` `adapter_selection_tests`（6 项：
+auto/high/low 选择与回退）、`cad-cli-tools` `scene_budget_fails_explicitly_instead_of_oom`
+与 `gpu_selection_stable_names...`、`cli_contracts` `--gpu`/`--max-batches` 用法契约、
+`app-linux` options `--gpu` 契约。相关 crate 全量测试通过（见 `docs/handoff.md` 顶部）。
+
 ## 已执行的测试
 
 纯核心 crate 单元/契约测试（`cargo test -p ...`）全部通过，含：

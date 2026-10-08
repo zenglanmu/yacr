@@ -40,6 +40,8 @@ pub struct LinuxOptions {
     pub preferences: Option<PathBuf>,
     pub size: [f64; 2],
     pub locale: String,
+    /// Adapter preference for the desktop wgpu backend (`auto`/`high`/`low`).
+    pub gpu: cad_render_wgpu::GpuSelection,
 }
 impl Default for LinuxOptions {
     fn default() -> Self {
@@ -52,6 +54,7 @@ impl Default for LinuxOptions {
             preferences: None,
             size: [1280.0, 800.0],
             locale: "zh-CN".into(),
+            gpu: cad_render_wgpu::GpuSelection::Auto,
         }
     }
 }
@@ -80,6 +83,9 @@ impl LinuxOptions {
                 "--config" => options.config = Some(value.into()),
                 "--preferences" => options.preferences = Some(value.into()),
                 "--locale" if matches!(value.as_str(), "zh-CN" | "en") => options.locale = value,
+                "--gpu" if cad_render_wgpu::GpuSelection::parse(&value).is_some() => {
+                    options.gpu = cad_render_wgpu::GpuSelection::parse(&value).unwrap();
+                }
                 "--size" => {
                     let (w, h) = value.split_once('x').ok_or("size must be WIDTHxHEIGHT")?;
                     options.size = [
@@ -116,6 +122,13 @@ struct Runtime {
     pending_open: PendingOpen,
     pending_read: Rc<RefCell<Option<PendingRead>>>,
     presenting_open: Rc<std::cell::Cell<bool>>,
+    /// Last `(physical width, physical height, config revision)` that was pushed
+    /// through `refresh_window_layout`. `None` forces the first refresh.
+    ///
+    /// The 50 ms timer calls `metrics` every tick; re-applying presentation and
+    /// re-serialising the effective config each tick is pure waste when neither
+    /// the window nor the config changed.
+    last_layout_key: Rc<RefCell<Option<(u32, u32, u64)>>>,
 }
 impl Runtime {
     fn message(&self, key: &str, values: &[(&str, &str)]) -> String {
@@ -124,7 +137,23 @@ impl Runtime {
     fn metrics(&self) -> CadResult<()> {
         let handle = self.handle.borrow();
         let handle = handle.as_ref().ok_or(CadError::Cancelled)?;
-        handle.refresh_window_layout()?;
+        // Reclassify the window layout only when the physical size or the
+        // resolved config changed, not every 50 ms tick.
+        let layout_key = handle
+            .physical_size()
+            .map(|size| (size.width, size.height, handle.config_revision()));
+        let layout_changed = {
+            let mut last = self.last_layout_key.borrow_mut();
+            if *last == layout_key {
+                false
+            } else {
+                *last = layout_key;
+                true
+            }
+        };
+        if layout_changed {
+            handle.refresh_window_layout()?;
+        }
         let (size, scale) = handle.cad_surface_size().ok_or(CadError::Cancelled)?;
         let mut c = self.controller.borrow_mut();
         let id = c.viewport_id;
@@ -428,6 +457,7 @@ impl LinuxApp {
             pending_open: Rc::new(RefCell::new(None)),
             pending_read: Rc::new(RefCell::new(None)),
             presenting_open: Rc::new(std::cell::Cell::new(false)),
+            last_layout_key: Rc::new(RefCell::new(None)),
         };
         let c = controller.borrow();
         let config = UiConfiguration {

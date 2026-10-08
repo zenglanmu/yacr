@@ -31,6 +31,9 @@ cad-cli-tools <operation> <input.dwg> [options]
 | `--height <u32>` | `render`：帧高（像素，默认 `720`）；非数字或 `0` 为用法错误 |
 | `--locale <tag>` | **仅**人类 stderr 文字的语言，`zh-CN`（默认）或 `en`；机器输出不变 |
 | `--allow-fingerprint-mismatch` | 图纸指纹不匹配时仍导入批注 |
+| `--gpu <auto\|high\|low>` | `render`/`plot` 适配器偏好：`auto`/`high`（默认）优先独显（discrete），`low` 优先核显（integrated）；没有所偏好类型时回退到所选后端的首个适配器；也可用 `WGPU_ADAPTER_NAME`/`WGPU_POWER_PREF` |
+| `--max-batches <n>` | `render`/`plot`：累计场景批次硬上限（默认 `4000000`，`0` = 关闭）；超限显式失败而非撑爆内存 |
+| `--max-vertices <n>` | `render`/`plot`：累计场景顶点硬上限（默认 `128000000`，`0` = 关闭）；超限显式失败而非撑爆内存 |
 | `--font <name=path>` | 注册 TTF/OTF/WOFF/SHX 字体用于文字成型（可重复；省略 `name=` 时取文件名）；`render` / `plot` 也使用这些字体 |
 | `--help`, `-h` | 打印用法并退出 0 |
 
@@ -222,12 +225,26 @@ cad-cli-tools <operation> <input.dwg> [options]
   `{"status":"unverified"}`。
 - 相机按**实际绘制的批次**（`local_origin + vertex`）拟合，而不是
   `drawing.bounds()`；后者包含未绘制内容（文字、块定义几何），会使出图偏小偏心。
-- `SceneCache::build` 只产出线/网格批次；Text/Instance/Image 由各自子系统
+- 渲染路径使用**打包虚线 + 紧凑合批**（`SceneCache::build_compact`，与桌面场景
+  一致）：相邻同样式不透明线片段合并为 line-list 批次，上限 65,536 顶点 /
+  8,192 世界单位。块引用爆炸（如 `complex-test.dwg`：4.2 MB、44,591 实体 →
+  2,085 万 primitive）因此从**数百万批次降到 ~9.7 万批次**、峰值内存从
+  **~20 GB（OOM 被杀）降到 ~3.8 GB（24 s 正常出图）**。`build-representation`
+  仍保留未打包计数语义，两者不漂移。
+- **内存保护**：即使合批，累计批次/顶点仍可能失控。`--max-batches` /
+  `--max-vertices` 提供硬上限（默认 `4_000_000`/`128_000_000`，`0` 或
+  `None`= 无上限）；超限时以 `invalid_input` **显式失败**（错误信息给出当前值与
+  上限），绝不走到 OOM-kill。
+- `SceneCache` 只产出线/网格批次；Text/Instance/Image 由各自子系统
   负责，本帧不计入（文档化行为，不是静默丢弃）。
 - **无可用适配器**时以 `gpu_failure` 失败并退出 `1`，`message` 显式说明；绝不
   返回空成功（审计条目 F11/§11）。
 - 没有任何可绘制批次时以 `invalid_input`（`no drawable geometry to render`）失败，
   不伪造空帧。
+- `--gpu auto`（默认）/`high` 优先独显、`--gpu low` 优先核显：`create_headless_gpu_with`
+  在所选后端内按 `device_type`（`discrete_gpu`/`integrated_gpu`）优选，没有该类型时
+  回退到该后端的首个适配器。混合显卡机器（如 Intel 核显 + NVIDIA 独显）**默认
+  （`--gpu auto`）即选独显**，`nvidia-smi` 应能看到本进程；只有 `--gpu low` 才选核显。
 - 大图纸（数万 draw call）在软件适配器上可能超过交互式 1 秒提交界定；无头路径
   使用更长的有界等待（`Renderer::set_poll_timeout`），避免把慢的 CPU 帧误报为
   设备丢失（F12）。

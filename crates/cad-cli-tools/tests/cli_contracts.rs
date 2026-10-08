@@ -250,6 +250,49 @@ fn unknown_operation_exits_two_with_usage_code() {
 }
 
 #[test]
+fn gpu_and_budget_options_reject_bad_values_as_usage() {
+    let dir = scratch("gpu-usage");
+    let dwg = write_minimal_dwg(&dir);
+    for args in [
+        vec!["render", dwg.to_str().unwrap(), "--gpu", "discrete"],
+        vec!["render", dwg.to_str().unwrap(), "--gpu"],
+        vec!["render", dwg.to_str().unwrap(), "--max-batches", "abc"],
+        vec!["render", dwg.to_str().unwrap(), "--max-vertices", "-1"],
+        vec!["render", dwg.to_str().unwrap(), "--max-batches"],
+    ] {
+        let output = run(&args.iter().map(|a| s(a)).collect::<Vec<_>>());
+        assert_eq!(output.status.code(), Some(2), "args {args:?}");
+        assert!(output.stdout.is_empty(), "args {args:?}");
+        let value = stderr_json(&output);
+        assert_eq!(value["error"]["code"], "usage", "args {args:?}");
+    }
+    clean(&dir);
+}
+
+#[test]
+fn gpu_and_budget_options_accept_valid_values() {
+    let dir = scratch("gpu-ok");
+    let dwg = write_minimal_dwg(&dir);
+    // render of an empty drawing still parses the options first and fails with
+    // `invalid_input` (no drawable geometry) — proving `--gpu`/`--max-batches`
+    // are accepted, not usage errors.
+    let output = run(&[
+        s("render"),
+        dwg.as_os_str(),
+        s("--gpu"),
+        s("high"),
+        s("--max-batches"),
+        s("0"),
+        s("--max-vertices"),
+        s("1000000"),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let value = stderr_json(&output);
+    assert_eq!(value["error"]["code"], "invalid_input");
+    clean(&dir);
+}
+
+#[test]
 fn missing_required_points_is_a_non_zero_failure_not_empty_success() {
     let dir = scratch("short-points");
     let dwg = write_minimal_dwg(&dir);

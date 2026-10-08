@@ -131,6 +131,49 @@ impl PlotFormat {
 }
 
 // ---------------------------------------------------------------------------
+// GPU adapter preference (CLI-local so wasm stays free of `cad-render-wgpu`)
+// ---------------------------------------------------------------------------
+
+/// Adapter preference for `render`/`plot` (`--gpu auto|high|low`).
+///
+/// Mirrors `cad_render_wgpu::GpuSelection` semantics; the conversion to the
+/// renderer type exists only on native (see `ops.rs::render_gpu`), because
+/// `cad-cli-tools` depends on the renderer only natively. `render`/`plot` are
+/// themselves native operations, so the field is absent on wasm.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpuPreference {
+    /// First adapter of the highest-priority backend.
+    #[default]
+    Auto,
+    /// Prefer a discrete GPU; fall back to the backend default when absent.
+    HighPerformance,
+    /// Prefer an integrated GPU; fall back to the backend default when absent.
+    LowPower,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl GpuPreference {
+    /// Stable CLI/UI name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GpuPreference::Auto => "auto",
+            GpuPreference::HighPerformance => "high",
+            GpuPreference::LowPower => "low",
+        }
+    }
+    /// Parse the stable name; unknown values are `None`.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "auto" => Some(GpuPreference::Auto),
+            "high" => Some(GpuPreference::HighPerformance),
+            "low" => Some(GpuPreference::LowPower),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Invocation
 // ---------------------------------------------------------------------------
 
@@ -161,6 +204,16 @@ pub struct CliInvocation {
     /// raster path; `Svg`/`Pdf` run the CPU-only vector path and never create a
     /// GPU device.
     pub plot_format: PlotFormat,
+    /// Adapter preference for `render`/`plot` (`--gpu auto|high|low`); native only.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub gpu: GpuPreference,
+    /// Hard cap on accumulated render batches (`--max-batches N`, `0` = no
+    /// cap). Protects the host against a block-reference explosion expanding
+    /// into tens of millions of batches (memory protection, never an OOM kill).
+    pub max_batches: Option<u64>,
+    /// Hard cap on accumulated render vertices (`--max-vertices N`, `0` = no
+    /// cap). Same protection as `max_batches`.
+    pub max_vertices: Option<u64>,
     /// Locale for human-facing stderr messages (never machine output).
     pub locale: Locale,
 }
@@ -169,6 +222,11 @@ pub struct CliInvocation {
 pub const DEFAULT_RENDER_WIDTH: u32 = 1280;
 /// Default offscreen frame height for `render`/`plot`.
 pub const DEFAULT_RENDER_HEIGHT: u32 = 720;
+/// Default hard cap on accumulated render batches (0 in `CliInvocation` =
+/// unlimited only when the user passes `--max-batches 0`).
+pub const DEFAULT_MAX_RENDER_BATCHES: u64 = 4_000_000;
+/// Default hard cap on accumulated render vertices.
+pub const DEFAULT_MAX_RENDER_VERTICES: u64 = 128_000_000;
 
 impl CliInvocation {
     pub fn new(operation: CliOperation, input: impl Into<PathBuf>) -> Self {
@@ -185,6 +243,10 @@ impl CliInvocation {
             layout: None,
             plot_dpi: None,
             plot_format: PlotFormat::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            gpu: GpuPreference::Auto,
+            max_batches: Some(DEFAULT_MAX_RENDER_BATCHES),
+            max_vertices: Some(DEFAULT_MAX_RENDER_VERTICES),
             locale: Locale::default(),
         }
     }

@@ -41,6 +41,47 @@ pub enum BackendPreference {
     WebGl2,
 }
 
+/// Adapter preference within the active backend, for native/headless use.
+///
+/// This is an explicit *preference*, never a guarantee: a machine without a
+/// discrete (or integrated) adapter falls back to the default adapter order.
+/// On hybrid machines (iGPU + discrete) the default `Auto` prefers the discrete
+/// GPU, so `nvidia-smi` shows the process without any flag. Strings are stable
+/// for CLI/UI/diagnostics: `auto`, `high`, `low`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpuSelection {
+    /// Prefer a discrete GPU (`device_type == discrete_gpu`); fall back to the
+    /// first adapter of the highest-priority backend when none exists. This is
+    /// the dual-GPU default: discrete-first.
+    #[default]
+    Auto,
+    /// Same discrete-first preference as `Auto`, kept as an explicit spelling.
+    HighPerformance,
+    /// Prefer an integrated GPU (`device_type == integrated_gpu`); fall back to
+    /// the first adapter of the highest-priority backend when none exists.
+    LowPower,
+}
+
+impl GpuSelection {
+    /// Stable lowercase name for CLI/UI/diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GpuSelection::Auto => "auto",
+            GpuSelection::HighPerformance => "high",
+            GpuSelection::LowPower => "low",
+        }
+    }
+    /// Parse the stable CLI/UI name; unknown values are `None`.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "auto" => Some(GpuSelection::Auto),
+            "high" => Some(GpuSelection::HighPerformance),
+            "low" => Some(GpuSelection::LowPower),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveBackend {
     WebGpu,

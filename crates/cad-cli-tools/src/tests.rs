@@ -18,6 +18,58 @@ fn cli_operation_names_parse() {
     assert!(CliOperation::parse("nope").is_none());
 }
 
+#[test]
+fn scene_budget_fails_explicitly_instead_of_oom() {
+    let base = CliInvocation::new(CliOperation::FixedViewportRender, "x.dwg");
+    // Default caps are generous; an ordinary small scene fits.
+    assert!(enforce_scene_budget(10, 1000, &base).is_ok());
+    // Tiny caps turn a scene that exceeds them into an explicit error.
+    let tiny = CliInvocation {
+        max_batches: Some(5),
+        max_vertices: Some(100),
+        ..base.clone()
+    };
+    match enforce_scene_budget(6, 10, &tiny) {
+        Err(CadError::InvalidInput(message)) => assert!(message.contains("--max-batches")),
+        other => panic!("expected batch-budget rejection, got {other:?}"),
+    }
+    match enforce_scene_budget(1, 101, &tiny) {
+        Err(CadError::InvalidInput(message)) => assert!(message.contains("--max-vertices")),
+        other => panic!("expected vertex-budget rejection, got {other:?}"),
+    }
+    // `0` disables each cap for trusted large drawings.
+    let disabled = CliInvocation {
+        max_batches: Some(0),
+        max_vertices: Some(0),
+        ..tiny.clone()
+    };
+    assert!(enforce_scene_budget(100_000_000, 1_000_000_000, &disabled).is_ok());
+    // `None` also means unlimited.
+    let unlimited = CliInvocation {
+        max_batches: None,
+        max_vertices: None,
+        ..tiny
+    };
+    assert!(enforce_scene_budget(1_000_000, 1_000_000, &unlimited).is_ok());
+}
+
+#[test]
+fn gpu_selection_stable_names_parse_for_ui_and_cli() {
+    for (name, expected) in [
+        ("auto", GpuPreference::Auto),
+        ("high", GpuPreference::HighPerformance),
+        ("low", GpuPreference::LowPower),
+    ] {
+        assert_eq!(GpuPreference::parse(name), Some(expected));
+    }
+    assert_eq!(GpuPreference::parse("discrete"), None);
+    assert_eq!(GpuPreference::default(), GpuPreference::Auto);
+    assert_eq!(
+        CliInvocation::new(CliOperation::FixedViewportRender, "x.dwg").gpu,
+        GpuPreference::Auto
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn plot_of_missing_input_fails_before_any_gpu_work() {

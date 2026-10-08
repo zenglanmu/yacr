@@ -17,7 +17,7 @@
 //! the existing public API, and CLI integration goes through
 //! `cad-render-wgpu` (see `docs/headless-render.md` §1.3).
 
-use crate::{BackendPreference, RenderError, Renderer};
+use crate::{BackendPreference, GpuSelection, RenderError, Renderer};
 use cad_domain::{CadError, CadResult};
 use std::collections::HashSet;
 
@@ -108,12 +108,22 @@ pub fn enumerate_adapters(preference: BackendPreference) -> Vec<AdapterInfo> {
         .collect()
 }
 
-/// Create a headless device.
+/// Create a headless device with `Auto` adapter selection.
 ///
 /// `Auto`/`WebGpu` prefer Vulkan, then GL; `WebGl2` restricts to GL. Returns
 /// [`CadError::GpuFailure`] when no adapter matches or the device request fails;
 /// it never returns a device-less success and never panics on this path.
 pub fn create_headless_gpu(preference: BackendPreference) -> CadResult<HeadlessGpu> {
+    create_headless_gpu_with(preference, GpuSelection::Auto)
+}
+
+/// Create a headless device, preferring a GPU kind through [`GpuSelection`]
+/// within the active backend. `GpuSelection::Auto` keeps the historical
+/// deterministic first-adapter order.
+pub fn create_headless_gpu_with(
+    preference: BackendPreference,
+    gpu: GpuSelection,
+) -> CadResult<HeadlessGpu> {
     let instance = make_instance(preference);
     let adapters =
         futures_lite::future::block_on(instance.enumerate_adapters(backends_for(preference)));
@@ -123,28 +133,24 @@ pub fn create_headless_gpu(preference: BackendPreference) -> CadResult<HeadlessG
         )));
     }
 
-    // Pick the highest-priority backend that has an adapter. Adapter is cheap to
-    // clone (it wraps an Arc), so this keeps the priority ordering explicit.
-    let adapter = backend_priority(preference)
+    let infos: Vec<AdapterInfo> = adapters
         .iter()
-        .find_map(|backend| {
-            adapters
-                .iter()
-                .find(|candidate| candidate.get_info().backend == *backend)
-                .cloned()
-        })
-        .ok_or_else(|| {
+        .map(|a| adapter_info(&a.get_info()))
+        .collect();
+    let index =
+        choose_adapter_index(&infos, backend_priority(preference), gpu).ok_or_else(|| {
             CadError::GpuFailure(format!(
                 "no adapter matched preference {preference:?} (found {})",
-                adapters
+                infos
                     .iter()
-                    .map(|a| a.get_info().backend.to_str())
+                    .map(|i| i.backend.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
             ))
         })?;
+    let adapter = adapters[index].clone();
 
-    let info = adapter_info(&adapter.get_info());
+    let info = infos[index].clone();
     let (device, queue) =
         futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("cad-headless-device"),
@@ -157,6 +163,48 @@ pub fn create_headless_gpu(preference: BackendPreference) -> CadResult<HeadlessG
         queue,
         adapter: info,
     })
+}
+
+/// Deterministic adapter choice shared by the headless device path and its
+/// unit tests.
+///
+/// Restricts to the highest-priority backend that has at least one adapter
+/// (`backend_priority`), then applies the [`GpuSelection`] preference inside
+/// that backend. `Auto` and `HighPerformance` both prefer a discrete GPU
+/// (dual-GPU default); `LowPower` prefers an integrated one. A requested kind
+/// that does not exist falls back to the first adapter of that backend, never
+/// to a different backend.
+pub(crate) fn choose_adapter_index(
+    infos: &[AdapterInfo],
+    backend_priority: &[wgpu::Backend],
+    gpu: GpuSelection,
+) -> Option<usize> {
+    for backend in backend_priority {
+        let backend_name = backend.to_str();
+        let indices: Vec<usize> = infos
+            .iter()
+            .enumerate()
+            .filter(|(_, info)| info.backend == backend_name)
+            .map(|(index, _)| index)
+            .collect();
+        if indices.is_empty() {
+            continue;
+        }
+        let first = indices[0];
+        return Some(match gpu {
+            GpuSelection::Auto | GpuSelection::HighPerformance => indices
+                .iter()
+                .copied()
+                .find(|&i| infos[i].device_type == "discrete_gpu")
+                .unwrap_or(first),
+            GpuSelection::LowPower => indices
+                .iter()
+                .copied()
+                .find(|&i| infos[i].device_type == "integrated_gpu")
+                .unwrap_or(first),
+        });
+    }
+    None
 }
 
 /// A tightly packed RGBA8 image (`pixels.len() == width * height * 4`).
@@ -334,5 +382,113 @@ impl Renderer {
             height,
             pixels,
         })
+    }
+}
+
+#[cfg(test)]
+mod adapter_selection_tests {
+    use super::*;
+
+    fn info(backend: &str, device_type: &str) -> AdapterInfo {
+        AdapterInfo {
+            backend: backend.into(),
+            name: format!("{backend}-{device_type}"),
+            device_type: device_type.into(),
+            driver: "test".into(),
+            driver_info: String::new(),
+        }
+    }
+
+    const VULKAN: wgpu::Backend = wgpu::Backend::Vulkan;
+    const GL: wgpu::Backend = wgpu::Backend::Gl;
+
+    #[test]
+    fn auto_prefers_discrete_on_hybrid_machines() {
+        let list = vec![
+            info("vulkan", "integrated_gpu"),
+            info("vulkan", "discrete_gpu"),
+        ];
+        assert_eq!(
+            choose_adapter_index(&list, &[VULKAN, GL], GpuSelection::Auto),
+            Some(1),
+            "dual-GPU default must prefer the discrete GPU"
+        );
+        // `high` is the explicit spelling of the same discrete-first default.
+        assert_eq!(
+            choose_adapter_index(&list, &[VULKAN, GL], GpuSelection::HighPerformance),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn high_prefers_discrete_and_low_prefers_integrated() {
+        let list = vec![
+            info("vulkan", "integrated_gpu"),
+            info("vulkan", "discrete_gpu"),
+            info("vulkan", "cpu"),
+        ];
+        for selection in [GpuSelection::Auto, GpuSelection::HighPerformance] {
+            assert_eq!(
+                choose_adapter_index(&list, &[VULKAN], selection),
+                Some(1),
+                "{selection:?} must prefer the discrete GPU"
+            );
+        }
+        assert_eq!(
+            choose_adapter_index(&list, &[VULKAN], GpuSelection::LowPower),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn missing_preferred_kind_falls_back_within_backend() {
+        let list = vec![info("vulkan", "integrated_gpu"), info("vulkan", "cpu")];
+        for selection in [GpuSelection::Auto, GpuSelection::HighPerformance] {
+            assert_eq!(
+                choose_adapter_index(&list, &[VULKAN], selection),
+                Some(0),
+                "no discrete adapter: fall back to the first Vulkan adapter"
+            );
+        }
+        assert_eq!(
+            choose_adapter_index(&list, &[VULKAN], GpuSelection::LowPower),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn preference_never_promotes_a_lower_priority_backend() {
+        // Only GL is present; the Vulkan slot is empty, so GL is chosen whole.
+        let list = vec![info("gl", "cpu"), info("gl", "discrete_gpu")];
+        for selection in [GpuSelection::Auto, GpuSelection::HighPerformance] {
+            assert_eq!(
+                choose_adapter_index(&list, &[VULKAN, GL], selection),
+                Some(1),
+                "{selection:?} still prefers the discrete adapter inside the available backend"
+            );
+        }
+        assert_eq!(
+            choose_adapter_index(&list, &[VULKAN, GL], GpuSelection::LowPower),
+            Some(0),
+            "no integrated adapter inside the available backend: fall back to its first adapter"
+        );
+    }
+
+    #[test]
+    fn empty_list_is_none() {
+        assert_eq!(
+            choose_adapter_index(&[], &[VULKAN, GL], GpuSelection::Auto),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_and_as_str_round_trip() {
+        for value in ["auto", "high", "low"] {
+            let parsed = GpuSelection::parse(value).unwrap();
+            assert_eq!(parsed.as_str(), value);
+        }
+        assert_eq!(GpuSelection::parse("discrete"), None);
+        assert_eq!(GpuSelection::default(), GpuSelection::Auto);
     }
 }

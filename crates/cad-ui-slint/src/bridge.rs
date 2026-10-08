@@ -41,6 +41,9 @@ struct BridgeState {
     view: ViewSnapshot,
     preparation_scheduled: bool,
     preparation_stopped: bool,
+    /// Monotonic count of `CadView::request_redraw` calls. Hosts and tests use
+    /// it to prove an idle view does not keep scheduling repaints.
+    redraw_requests: u64,
     #[cfg(not(target_arch = "wasm32"))]
     preparation: preparation::NativePreparation,
     view_diagnostic: Option<String>,

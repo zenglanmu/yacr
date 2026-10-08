@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cad_cli_tools::{CliError, CliInvocation, CliOperation, Locale, PlotFormat};
+use cad_cli_tools::{CliError, CliInvocation, CliOperation, GpuPreference, Locale, PlotFormat};
 use cad_domain::Point3;
 
 const USAGE: &str = "\
@@ -44,6 +44,13 @@ Options:
   --allow-fingerprint-mismatch  import despite a mismatched drawing hash
   --font <name=path>      register a TTF/OTF/WOFF font for text shaping
                           (repeatable; name defaults to the file name)
+  --gpu <auto|high|low>   render/plot adapter preference: high prefers a
+                          discrete GPU, low an integrated one (default auto)
+  --max-batches <n>       render/plot: hard cap on accumulated scene batches;
+                          exceeding it fails explicitly instead of exhausting
+                          memory (default 4000000; 0 disables the cap)
+  --max-vertices <n>      render/plot: hard cap on accumulated scene vertices
+                          (default 128000000; 0 disables the cap)
 ";
 
 fn main() -> ExitCode {
@@ -198,6 +205,72 @@ fn main() -> ExitCode {
                 };
                 invocation.fonts.push((name, path.into()));
             }
+            "--gpu" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--gpu needs auto, high or low"),
+                        operation,
+                        locale,
+                    );
+                };
+                match GpuPreference::parse(value) {
+                    Some(gpu) => invocation.gpu = gpu,
+                    None => {
+                        return fail(
+                            CliError::usage(format!(
+                                "--gpu must be auto, high or low (got '{value}')"
+                            )),
+                            operation,
+                            locale,
+                        );
+                    }
+                }
+            }
+            "--max-batches" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--max-batches needs a non-negative integer"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_u64_or_zero(value) {
+                    Some(limit) => invocation.max_batches = Some(limit),
+                    None => {
+                        return fail(
+                            CliError::usage(format!(
+                                "--max-batches needs an integer >= 0 (got '{value}')"
+                            )),
+                            operation,
+                            locale,
+                        );
+                    }
+                }
+            }
+            "--max-vertices" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--max-vertices needs a non-negative integer"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_u64_or_zero(value) {
+                    Some(limit) => invocation.max_vertices = Some(limit),
+                    None => {
+                        return fail(
+                            CliError::usage(format!(
+                                "--max-vertices needs an integer >= 0 (got '{value}')"
+                            )),
+                            operation,
+                            locale,
+                        );
+                    }
+                }
+            }
             other if other.starts_with("--") => {
                 return fail(
                     CliError::usage(format!("unknown option: {other}")),
@@ -323,6 +396,13 @@ fn parse_positive_finite(value: &str) -> Result<f64, String> {
             "value must be a positive finite number (got '{value}')"
         )),
     }
+}
+
+/// Parse an integer budget limit for `--max-batches`/`--max-vertices`.
+/// `0` is valid and means "no cap" (the memory-protection guard is disabled);
+/// anything else must be a positive `u64`.
+fn parse_u64_or_zero(value: &str) -> Option<u64> {
+    value.trim().parse::<u64>().ok()
 }
 
 fn parse_points(value: &str) -> Result<Vec<Point3>, String> {

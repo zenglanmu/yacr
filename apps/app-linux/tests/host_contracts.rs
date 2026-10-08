@@ -23,6 +23,7 @@ fn options_refuse_unknown_missing_and_invalid_values() {
         vec!["--size", "NaNx800"],
         vec!["--size", "0x800"],
         vec!["--locale", "fr"],
+        vec!["--gpu", "discrete"],
         vec!["--invented", "true"],
     ] {
         assert!(LinuxOptions::parse(args.into_iter().map(String::from)).is_err());
@@ -36,6 +37,8 @@ fn options_refuse_unknown_missing_and_invalid_values() {
             "390x844",
             "--locale",
             "en",
+            "--gpu",
+            "high",
         ]
         .into_iter()
         .map(String::from),
@@ -44,6 +47,11 @@ fn options_refuse_unknown_missing_and_invalid_values() {
     assert!(options.headless);
     assert_eq!(options.size, [390.0, 844.0]);
     assert_eq!(options.locale, "en");
+    assert_eq!(options.gpu, cad_render_wgpu::GpuSelection::HighPerformance);
+    assert_eq!(
+        LinuxOptions::default().gpu,
+        cad_render_wgpu::GpuSelection::Auto
+    );
 }
 
 #[test]

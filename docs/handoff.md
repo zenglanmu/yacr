@@ -1,5 +1,62 @@
 # 后续 agent 接手入口
 
+## 资源占用/显卡加速排查与三项修复（2026-10-08，本轮）
+
+用户在真实 Wayland 桌面（Intel UHD 核显 + NVIDIA Quadro P620 混合显卡）上排查
+`fixtures/complex-test.dwg`（4.2 MB，已在 `.gitignore`）的资源占用与「是否使用显卡加速」。
+实测结论与修复如下；**本机为 ~30 GiB RAM 的桌面，非无头 LXC**。
+
+**排查结论（均已实测）**
+
+- **用了 GPU 加速，但排查时默认走 Intel 核显**：GUI（`yacr-linux`）与 CLI 在修复前
+  默认都选中第一个 Vulkan 适配器 = Intel UHD Graphics（ANV）。DRM fdinfo 证据：进程在
+  `renderD129`（Intel）上有 `drm-engine-render` 时间，`renderD128`（NVIDIA）为 0；
+  `nvidia-smi` 看不到本应用。Slint 强制要求 GPU-backed 适配器
+  （llvmpipe 需 `SLINT_WGPU_CPU=1`），能启动就意味着真在用 GPU。
+- **空闲 CPU ~40%（单核）且与图纸无关**：启动无图纸（demo）也恒定 ~40%，
+  原因是有 50 ms `Timer` 每 tick 无条件写 Slint 属性 + `CadView::request_redraw`，
+  等价以 ~20fps 重绘。
+- **大图 OOM 根因**：`complex-test.dwg` 只有 44,591 实体，但 1,081 个块定义嵌套
+  展开成 **20,856,815 个 primitive / 46,064,001 顶点**；CLI `render` 之前
+  `SceneCache::build`（不合批），`delta.added` 累积到 **~20 GB RSS（41 GB VM）被
+  OOM-kill**（dmesg 已留证据）。
+
+**改动**
+
+1. **空闲重绘（`crates/cad-ui-slint/src/bridge/view.rs`、`apps/app-linux/src/host.rs`）**：
+   `apply_view_snapshot` 对相同快照直接返回（不再 `set_view_state`+`request_redraw`）；
+   `Runtime::metrics` 缓存 `(物理尺寸, config revision)`，未变化不调
+   `refresh_window_layout`（不再每 tick 序列化有效配置 JSON）；`BridgeState` 新增
+   `redraw_requests` 计数供测试/宿主观测。实测 release 空闲 CPU **~40% → ~0–2%**。
+2. **显式 GPU 选择 + 双显卡默认独显（`cad-render-wgpu`/`cad-ui-slint`/`app-linux`/`cad-cli-tools`）**：
+   新增稳定枚举 `GpuSelection`（`auto`/`high`/`low`）与
+   `create_headless_gpu_with(preference, gpu)`（后端内按 `device_type` 优选，
+   缺类型回退首个适配器，不跨后端）；`select_wgpu_backend_with` 映射到 wgpu
+   `PowerPreference`；Linux App `--gpu`、CLI `render/plot --gpu`。**`auto` 与 `high`
+   同义、在双显卡上默认优先独显**（用户要求），`low` 优先核显。实测修复后默认
+   （`--gpu auto`）即选中 Quadro P620，`nvidia-smi` 显示进程 40–56 MiB / 1–4%。
+   Slint 自动路径原生支持 `WGPU_ADAPTER_NAME`/`WGPU_POWER_PREF`（CLI 无头路径不读
+   前者，文档已注明）。
+3. **大图内存保护（`cad-cli-tools`）**：`render` 改用与桌面一致的打包虚线 +
+   `SceneCache::build_compact`（97k 批次级合批），并新增 CLI 硬上限
+   `--max-batches`/`--max-vertices`（默认 `4_000_000`/`128_000_000`，`0`=关闭），
+   超限以 `invalid_input` **显式失败**（信息给出当前值与上限），绝不 OOM。
+   `complex-test.dwg` 实测：**OOM ~20 GB → 峰值 RSS 3.85 GB、24 s、exit 0**
+   （`scene.batches=97012`、`vertices=50251439`，帧按预算绘制部分批次——与桌面一致）。
+   `plot` 路径同样套用预算守卫。
+
+**测试与门禁（实际执行通过）**：`cargo test -p cad-render-wgpu`（40+12+13+3）、
+`cad-ui-slint`（148，含新增 `tests/idle_redraw.rs`）、`app-linux`（8 passed /
+3 ignored）、`cad-cli-tools` lib（20，含 `scene_budget_fails_explicitly_instead_of_oom`、
+`gpu_selection_stable_names...`）与 `cli_contracts`（14，含 `--gpu`/`--max-batches`
+解析契约）；fmt、严格 clippy（`-D warnings`）、architecture/fixture/workflow/i18n、
+host 全 workspace 检查、wasm 全 workspace lib 检查均通过。
+
+**未运行/限制**：Android/Web 未重编译运行（调用方签名未变）；无真实 GPU 像素矩阵、
+真机、浏览器验收；`complex-test.dwg` 的数字是**本机软件 Vulkan（lavapipe）/Intel
+核显**证据，不是性能或兼容性结论；NVIDIA 独显只验证到能出帧与占用（无视觉验收）；
+GUI 空闲 CPU 数字来自本机 Wayland 桌面单次采样。
+
 ## Rust 工具链升级 1.98.1 → 1.99.0（2026-10-08，本轮）
 
 用户要求把项目 Rust 工具链升级到最新 stable。以下为实际改动与**实际执行并通过**的门禁。

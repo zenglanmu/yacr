@@ -12,7 +12,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if options.headless {
         cad_ui_slint::offscreen::install()?;
     } else {
-        cad_ui_slint::select_wgpu_backend()?;
+        cad_ui_slint::select_wgpu_backend_with(options.gpu)?;
     }
     let app = app_linux::LinuxApp::new(options.clone())?;
     if options.headless {

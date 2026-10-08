@@ -57,7 +57,9 @@ CLI 接线见 `docs/cli.md`；实际执行证据由控制器汇总到 `docs/vali
 | `AdapterInfo` | 适配器只读描述：backend / name / device_type / driver / driver_info |
 | `HeadlessGpu` | 无头会话：`device`、`queue` 与 `adapter: AdapterInfo` |
 | `enumerate_adapters(preference)` | 枚举适配器并返回 `AdapterInfo`（如实可为空） |
-| `create_headless_gpu(preference)` | 按偏好创建可用无头设备；失败返回显式错误（§3.4） |
+| `create_headless_gpu(preference)` | 按偏好创建可用无头设备（等价 `create_headless_gpu_with(preference, Auto)`）；失败返回显式错误（§3.4） |
+| `create_headless_gpu_with(preference, gpu)` | 按 `GpuSelection` 偏好设备类型：`auto`/`high` = 优先独显、`low` = 优先核显；该类型缺失时回退到所选后端的**首个适配器**，绝不跨后端 |
+| `GpuSelection` | 稳定名 `auto` \| `high` \| `low`；`auto`/`high` 为离散优先（双显卡默认），`low` 为核显优先；`parse` / `as_str` 稳定往返（CLI `--gpu`、UI `--gpu`、Slint power preference 共用） |
 | `RgbaImage` | 紧凑 RGBA8 图像：`width`、`height`、`pixels`（`width*height*4` 字节） |
 | `RgbaImage::pixel(x, y)` | 取单个像素 `[u8; 4]`（越界返回透明黑，不 panic） |
 | `RgbaImage::count_differing_from(background, tolerance)` | 统计与给定背景色任一通道差异超过容差的像素数 |
@@ -67,7 +69,10 @@ CLI 接线见 `docs/cli.md`；实际执行证据由控制器汇总到 `docs/vali
 
 `preference` 复用现有 `BackendPreference`（`Auto` / `WebGpu` / `WebGl2`）；原生无头下
 `Auto`/`WebGpu` 接受 Vulkan 与 GL（Vulkan 优先），`WebGl2` 限定 GL。适配器选择按
-`backend_priority` 确定性进行。
+`backend_priority` 确定性进行，`GpuSelection` 只在所选后端**内部**调整偏好（不换后端）。
+混合显卡机器（Intel 核显 + NVIDIA 独显）**默认（`auto`/`high`）即优先独显**；
+`--gpu low`（CLI）或 `--gpu low`（Linux App）才切到核显。偏好只是尽力而为：无可出图
+/可达的独显（如表面不兼容）时回退到所选后端的首个适配器。
 
 ## 3. 无头设备路径
 

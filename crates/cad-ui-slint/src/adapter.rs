@@ -1,6 +1,7 @@
 //! adapter module.
 
 use super::*;
+use cad_render_wgpu::{wgpu, GpuSelection};
 
 /// Build the command a shell callback emits for the configured document.
 fn command_for(
@@ -1285,10 +1286,26 @@ impl UiAdapter {
 /// Must be called before creating any window. On Android the backend is Skia
 /// behind wgpu (`unstable-wgpu-30`), which is what makes a shared texture
 /// possible at all; on the web `web::select_backend` chooses WebGPU or WebGL2.
-/// See `docs/render-backends.md`.
+/// Uses the discrete-first default selection. See `docs/render-backends.md`.
 pub fn select_wgpu_backend() -> CadResult<()> {
+    select_wgpu_backend_with(GpuSelection::Auto)
+}
+
+/// Like [`select_wgpu_backend`], with an explicit adapter preference.
+///
+/// `auto`/`high` prefer a discrete GPU (the dual-GPU default), `low` prefers an
+/// integrated one, mapped to wgpu's `PowerPreference`. Can also be overridden
+/// with `WGPU_ADAPTER_NAME` / `WGPU_POWER_PREF`. See `docs/render-backends.md`.
+pub fn select_wgpu_backend_with(preference: GpuSelection) -> CadResult<()> {
+    let mut settings = slint::wgpu_30::WGPUSettings::default();
+    settings.power_preference = match preference {
+        GpuSelection::Auto | GpuSelection::HighPerformance => {
+            wgpu::PowerPreference::HighPerformance
+        }
+        GpuSelection::LowPower => wgpu::PowerPreference::LowPower,
+    };
     slint::BackendSelector::new()
-        .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::default())
+        .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::Automatic(settings))
         .select()
         .map_err(|e| CadError::GpuFailure(format!("slint wgpu backend: {e}")))
 }

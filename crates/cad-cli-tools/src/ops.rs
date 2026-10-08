@@ -132,6 +132,49 @@ pub(crate) fn representation_context(
     context
 }
 
+/// Memory-protection guard for headless scene accumulation.
+///
+/// A block-reference explosion can expand a small DWG into tens of millions of
+/// render batches/vertices. Rather than exhausting host memory and being
+/// OOM-killed, the CLI fails explicitly once the accumulated scene exceeds
+/// `--max-batches` / `--max-vertices`. A limit of `0` (or `None`) disables the
+/// cap for trusted large drawings.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn enforce_scene_budget(
+    batches: u64,
+    vertices: u64,
+    invocation: &CliInvocation,
+) -> CadResult<()> {
+    if let Some(limit) = invocation.max_batches {
+        if limit > 0 && batches > limit {
+            return Err(CadError::InvalidInput(format!(
+                "render scene exceeds the batch budget: {batches} > {limit} (raise with --max-batches, or 0 to disable)"
+            )));
+        }
+    }
+    if let Some(limit) = invocation.max_vertices {
+        if limit > 0 && vertices > limit {
+            return Err(CadError::InvalidInput(format!(
+                "render scene exceeds the vertex budget: {vertices} > {limit} (raise with --max-vertices, or 0 to disable)"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Map the CLI-local [`GpuPreference`] onto the renderer's `GpuSelection`.
+///
+/// Native only: `cad-cli-tools` depends on `cad-render-wgpu` solely on this
+/// target (wasm keeps the renderer out of the dependency graph).
+#[cfg(not(target_arch = "wasm32"))]
+fn render_gpu(invocation: &CliInvocation) -> cad_render_wgpu::GpuSelection {
+    match invocation.gpu {
+        GpuPreference::Auto => cad_render_wgpu::GpuSelection::Auto,
+        GpuPreference::HighPerformance => cad_render_wgpu::GpuSelection::HighPerformance,
+        GpuPreference::LowPower => cad_render_wgpu::GpuSelection::LowPower,
+    }
+}
+
 pub(crate) fn run_build_representation(
     controller: &HostController,
     fonts: Option<&Arc<cad_representation::FontEngine>>,
@@ -202,7 +245,7 @@ pub(crate) fn run_build_representation(
 /// `CadError::InvalidInput`, and the PNG is written only after a frame exists.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
-    use cad_render_wgpu::headless::{create_headless_gpu, encode_png, HeadlessGpu};
+    use cad_render_wgpu::headless::{create_headless_gpu_with, encode_png, HeadlessGpu};
     use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
 
     let controller = load_document(invocation)?;
@@ -215,19 +258,39 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
 
     let registry = cad_representation::ProviderRegistry::with_default_provider();
     let fonts = load_fonts(&invocation.fonts)?;
-    let context = representation_context(&controller, fonts.as_ref());
+    let mut context = representation_context(&controller, fonts.as_ref());
+    // The render feeds the GPU directly: packed dash output + compact line
+    // batches, identical to the desktop scene path. `build-representation`
+    // intentionally keeps the unpacked form so its primitive counts describe
+    // fragments, not render batches.
+    context = context.with_packed_line_segments();
 
-    // One delta over every model-space entity. `SceneCache::build` skips
-    // Text/Instance/Image (documented) and returns line/mesh batches only.
+    // One delta over every model-space entity.
     let mut cache = cad_scene::SceneCache::new(Default::default());
     let mut delta = cad_scene::SceneDelta {
         stamp: context.stamp.clone(),
         added: Vec::new(),
         removed_chunks: Vec::new(),
     };
+    let mut batches: u64 = 0;
+    let mut vertices: u64 = 0;
     for entity in document.drawing.model_space() {
         let representation = registry.build_expanded(&document.drawing, entity, &context)?;
-        let built = cache.build(&representation, context.stamp.clone())?;
+        // `build_compact` merges adjacent same-style opaque line fragments
+        // (capped at 65,536 vertices / 8,192 world units), the fix that took a
+        // comparable desktop scene from 20.8M batches to ~97k. Without it a
+        // block-reference explosion turns a few-MB DWG into tens of millions of
+        // tiny batches that exhaust host memory (~20 GB RSS, OOM-killed).
+        let built = cache.build_compact(&representation, context.stamp.clone())?;
+        batches = batches.saturating_add(built.added.len() as u64);
+        vertices = vertices.saturating_add(
+            built
+                .added
+                .iter()
+                .map(|batch| batch.vertices.len() as u64)
+                .sum::<u64>(),
+        );
+        enforce_scene_budget(batches, vertices, invocation)?;
         delta.added.extend(built.added);
     }
 
@@ -278,7 +341,7 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         device,
         queue,
         adapter,
-    } = create_headless_gpu(BackendPreference::Auto)?;
+    } = create_headless_gpu_with(BackendPreference::Auto, render_gpu(invocation))?;
     let mut renderer = Renderer::new(BackendPreference::Auto);
     // A large drawing is tens of thousands of small draw calls; a CPU software
     // adapter can legitimately exceed the interactive 1 s submission bound.
@@ -506,7 +569,7 @@ fn paper_json(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
-    use cad_render_wgpu::headless::{create_headless_gpu, encode_png, HeadlessGpu};
+    use cad_render_wgpu::headless::{create_headless_gpu_with, encode_png, HeadlessGpu};
     use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
 
     let started = std::time::Instant::now();
@@ -541,6 +604,8 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
         added: Vec::new(),
         removed_chunks: Vec::new(),
     };
+    let mut batches: u64 = 0;
+    let mut vertices: u64 = 0;
     for fragment in &representation.fragments {
         let transformed = cad_representation::DisplayFragment {
             source: fragment.source.clone(),
@@ -561,9 +626,17 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
             completeness: representation.completeness.clone(),
             diagnostics: representation.diagnostics.clone(),
         };
-        delta
-            .added
-            .extend(plan.build(&only, context.stamp.clone())?.added);
+        let built = plan.build(&only, context.stamp.clone())?;
+        batches = batches.saturating_add(built.added.len() as u64);
+        vertices = vertices.saturating_add(
+            built
+                .added
+                .iter()
+                .map(|batch| batch.vertices.len() as u64)
+                .sum::<u64>(),
+        );
+        enforce_scene_budget(batches, vertices, invocation)?;
+        delta.added.extend(built.added);
     }
 
     let width = page.width;
@@ -583,7 +656,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
         device,
         queue,
         adapter,
-    } = create_headless_gpu(BackendPreference::Auto)?;
+    } = create_headless_gpu_with(BackendPreference::Auto, render_gpu(invocation))?;
     let mut renderer = Renderer::new(BackendPreference::Auto);
     renderer.set_poll_timeout(std::time::Duration::from_secs(600));
     renderer.initialize_with_device(device, queue)?;

@@ -36,6 +36,24 @@
 GPU 侧另有 `Renderer::last_upload_ms()`：最近一次 `upload` 的真实墙钟毫秒，
 `LoadTimings::upload_ms` 的来源。
 
+### CLI 渲染内存保护（2026-10-08 新增）
+
+- `cad-cli-tools render/plot` 的**累计场景**（`SceneDelta`）受 `--max-batches` /
+  `--max-vertices` 硬上限保护（默认 `4_000_000` / `128_000_000`，`0` = 关闭），
+  超限以 `invalid_input` **显式失败**，而不是耗尽内存被 OOM-kill。这是 CLI 层的
+  防护，替代不了 `SceneBudget` 的逐帧预算。
+- `render` 已切换到与桌面一致的**打包虚线 + `SceneCache::build_compact`**：块引用
+  爆炸时把 20.8M 批次合并到 ~97k 批次。同一张 4.2 MB 样张实测峰值 RSS 从
+  **~20 GB（OOM）降到 ~3.8 GB、24 s 出图**（软件 Vulkan/合成样张；不构成性能成绩）。
+
+### 桌面空闲重绘（2026-10-08 修复）
+
+Linux App 的 50 ms 定时器此前每 tick 无条件写 Slint 属性并 `request_redraw`，
+空闲视图以 ~20fps 重绘、单核 CPU 占用 ~40%（与图纸大小无关）。现在
+`CadView::apply_view_snapshot` 对相同快照跳过重绘，`Runtime::metrics` 只在
+窗口尺寸/配置 revision 变化时刷新布局。空闲 CPU 应随之显著下降；本机前后对比
+见 `docs/validation.md` 与 `docs/linux-app.md`。
+
 ## 3. CLI `benchmark`：可复现的测量 schema
 
 ```
