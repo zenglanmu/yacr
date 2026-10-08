@@ -44,7 +44,7 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 | Action | Pin | 说明 |
 |---|---|---|
 | `actions/checkout` | `@v4` | 沿用仓库原有 pin，未改动 |
-| `dtolnay/rust-toolchain` | `@1.98.1` | 与 `rust-toolchain.toml` 的 channel 一致，沿用仓库原有 pin |
+| `dtolnay/rust-toolchain` | `@1.99.0` | 与 `rust-toolchain.toml` 的 channel 一致，沿用仓库原有 pin |
 | `actions/cache` | `@v4` | 本层新增的唯一缓存 action；与 `actions/checkout@v4` 相同的 major tag 风格 |
 | `actions/upload-artifact` | `@v4` | `web-build` / `android-apk` / `web-smoke` 上传产物，只读权限即可 |
 | `actions/setup-node` | `@v4` | `web-host-contracts` / `web-smoke` / `web-deploy` 安装锁定 Node |
@@ -76,7 +76,7 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 
 | 工具 | 锁定值 | 对齐来源 |
 |---|---|---|
-| Rust | `1.98.1` | `rust-toolchain.toml` |
+| Rust | `1.99.0` | `rust-toolchain.toml` |
 | `wasm-bindgen-cli` | `0.2.129` | `Cargo.lock` 的 `wasm-bindgen`（`web-build` 用脚本读取 lock 并比对，不一致直接失败） |
 | `cargo-apk` | `0.10.0` | `docs/build.md` |
 | Android NDK | `27.0.12077973` | `docs/build.md` |

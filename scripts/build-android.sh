@@ -2,7 +2,7 @@
 # Reproducible Android APK build for yacr.
 #
 # Pinned toolchain (see docs/build.md, docs/validation.md):
-#   Rust 1.98.1, JDK 17, Android build-tools 34.0.0, platform android-34/30,
+#   Rust 1.99.0, JDK 17, Android build-tools 34.0.0, platform android-34/30,
 #   NDK 27.0.12077973, cargo-apk 0.10.0.
 set -euo pipefail
 

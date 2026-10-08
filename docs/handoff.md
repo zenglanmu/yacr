@@ -1,6 +1,43 @@
 # 后续 agent 接手入口
 
-## 完全移除用户批注（annotation）模块（2026-10-05，本轮）
+## Rust 工具链升级 1.98.1 → 1.99.0（2026-10-08，本轮）
+
+用户要求把项目 Rust 工具链升级到最新 stable。以下为实际改动与**实际执行并通过**的门禁。
+
+- **版本**：`rustup check` 报告最新 stable 为 **1.99.0**（`b940084d7`，2026-09-28）。
+  `rust-toolchain.toml` 的 `channel` 由 `1.98.1` 改为 `1.99.0`，`components` 仍为
+  `rustfmt`/`clippy`，target 仍为 `wasm32-unknown-unknown`。
+- **同步镜像**：`.github/workflows/core.yml`（3 处 `uses` + 顶部注释）、
+  `.github/workflows/build.yml`（5 处 `uses`）的 `dtolnay/rust-toolchain@1.98.1` →
+  `@1.99.0`；`AGENTS.md`、`docs/build.md`、`docs/ci.md`（Action 表 + 锁定工具表）、
+  `docs/validation.md`（环境小节）、`scripts/build-web.sh`、`scripts/build-android.sh`
+  的版本说明同步更新。
+- **未改动**：workspace `rust-version = "1.85"`（MSRV）保持不变——本次是工具链 channel
+  升级，不是提高最低支持版本。
+- **本机工具链**：`rustup toolchain install 1.99.0 --component rustfmt --component clippy
+  --target wasm32-unknown-unknown`。
+- **环境补装**：默认门禁包含 `cad-ui-slint`/`app-linux`，本机此前缺 fontconfig/freetype
+  开发头，`yeslogic-fontconfig-sys` 构建脚本失败。经用户授权
+  `sudo apt-get install pkgconf libfontconfig1-dev libfreetype6-dev` 后通过；此前
+  `docs/validation-web.md` 记录的原生 Slint 构建阻塞在本机解除（该文档为历史证据，
+  未回改）。
+
+**实际执行并通过**（本机 1.99.0）：
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets
+  --locked -- -D warnings`（含 `cad-ui-slint`、`app-linux`，0 警告）
+- `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（完整
+  workspace，含 UI/Host）
+- `cargo check -p app-web --target wasm32-unknown-unknown --locked`
+- `python3 scripts/check-architecture.py`、`check-fixture-manifest.py`、
+  `check-workflows.py`、`check-i18n.py`
+
+**未运行**：完整 `cargo test`、Linux 离屏/release、Android/Web 构建与真机（不属默认
+提交门禁）；本文件下方与 `docs/validation.md` 中的详细证据仍标注其收集时的 1.98.1 环境。
+
+## 完全移除用户批注（annotation）模块（2026-10-05）
 
 按用户明确指示，整体移除用户批注（“批注/annotation”）功能，保留测量（F06）与 DXF
 注释性缩放（annotative scaling，图纸实体特性）。范围与执行证据：

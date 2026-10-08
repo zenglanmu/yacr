@@ -4,7 +4,7 @@
 # Output: web-dist/ = static files (index.html, main.js, style.css, pkg/*),
 # deployable to any static host serving application/wasm over HTTPS.
 #
-# Pinned: Rust 1.98.1 (rust-toolchain.toml), wasm-bindgen-cli 0.2.129
+# Pinned: Rust 1.99.0 (rust-toolchain.toml), wasm-bindgen-cli 0.2.129
 # (must match the wasm-bindgen crate version in Cargo.lock).
 set -euo pipefail
 

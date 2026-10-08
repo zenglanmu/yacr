@@ -4,8 +4,10 @@
 
 ## 环境
 
-- Rust 1.98.1（`rust-toolchain.toml` 固定），`wasm32-unknown-unknown`、
-  `aarch64/armv7/i686/x86_64-linux-android` target 已安装。
+- Rust 1.99.0（`rust-toolchain.toml` 固定；2026-10-08 由 1.98.1 升级），
+  `wasm32-unknown-unknown` target 已安装。本文件下方详细证据若无另行说明，均在 1.98.1
+  上收集；`aarch64/armv7/i686/x86_64-linux-android` target 属 Android 证据轮次，
+  本轮未在 1.99.0 上重新安装或核验。
 - JDK 17（Temurin），Android SDK build-tools 34.0.0 与 30.0.3，
   platform android-34 / android-30，NDK 27.0.12077973。
 - cargo-apk 0.10.0。

@@ -52,7 +52,7 @@ apps/app-linux  apps/app-android  apps/app-web
 
 ## 构建与门禁
 
-工具链 1.98.1（`rust-toolchain.toml`）；若 `PATH` 无 cargo，加 `$HOME/.cargo/bin`。
+工具链 1.99.0（`rust-toolchain.toml`）；若 `PATH` 无 cargo，加 `$HOME/.cargo/bin`。
 提交前跑快速 debug 编译与静态门禁（CI 同款，见 `docs/ci.md`）；完整测试、Linux 离屏渲染与 release 编译不再属于默认提交门禁：
 
 ```bash
