@@ -365,6 +365,7 @@ python3 scripts/test-linux-workflow.py
 python3 scripts/test-web-deploy-workflow.py
 python3 scripts/test-package-linux-release.py
 python3 scripts/test-package-macos-release.py
+python3 scripts/test-fetch-fonts.py
 ```
 
 它校验：workflow 文件存在且非空；十七个必需 job（`core-quality`、`wasm-check`、
@@ -391,6 +392,10 @@ python3 scripts/test-package-macos-release.py
 在非 macOS 运行、构建 CLI 与 GUI 两个 Mach-O、用 `lipo` 合成 arm64+x86_64、拒绝非系统
 动态依赖、组装自包含 `Yacr.app` 与字体包并产出 tar.gz + sha256；它同样只检查脚本文本，
 **不**执行构建，也不构成已打包或在真实 Mac 上可运行的证据。
+
+`scripts/test-fetch-fonts.py` 是字体打包脚本的静态 + 变异契约：断言 `fetch-fonts.sh` 以 UTF-8
+读写 `fonts.json`（此前 Windows 文本模式默认 cp1252 会导致 `UnicodeDecodeError`）、字体下载
+失败仍 `sys.exit(1)`、保留回退源与已提交默认字体合并；只检查脚本文本，不联网、不下载。
 
 ## 启用 web 自动发布（维护者操作）
 

@@ -173,11 +173,13 @@ extra_catalog = extra / "fonts.json"
 if extra_catalog.exists():
     entries = []
     if catalog_path.exists():
-        entries = json.loads(catalog_path.read_text())
-    added = [e for e in json.loads(extra_catalog.read_text())
+        # The catalogue is UTF-8; `read_text()` would otherwise use the platform
+        # default (cp1252 on Windows) and fail on non-ASCII font names.
+        entries = json.loads(catalog_path.read_text(encoding="utf-8"))
+    added = [e for e in json.loads(extra_catalog.read_text(encoding="utf-8"))
              if all(str(e.get("file")) != str(x.get("file")) for x in entries)]
     entries.extend(added)
-    catalog_path.write_text(json.dumps(entries, indent=2) + "\n")
+    catalog_path.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
     for font in added:
         src = extra / str(font["file"])
         if src.exists():
