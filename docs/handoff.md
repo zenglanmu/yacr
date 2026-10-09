@@ -1,5 +1,53 @@
 # 后续 agent 接手入口
 
+## acadrust 0.5.5 → 0.6.3 升级（2026-10-09，本轮）
+
+用户要求把工作区 `acadrust` 从 `=0.5.5` 升到 `0.6.3`（features `serde` + `import`），
+修 API 破坏并跑绿门禁，随后同步文档与契约测试。
+
+**改动**
+
+- `Cargo.toml:61`：`acadrust = { version = "0.6.3", features = ["serde", "import"] }`；
+  `Cargo.lock` 由 `cargo update -p acadrust` 刷新（新增 `quick-xml 0.36.2`、`foldhash`、
+  `serde`；`thiserror 1→2`；去掉 `ahash`）。
+- 唯一编译破坏：`EntityType::Surface` 现为 `Box<Surface>`（0.6.0 同时 box 了
+  Helix/MultiLeader/Table/Extended），改 `crates/cad-import-acadrust/src/tests.rs`。
+- 未 patch/vendor acadrust；`cad-proxy` 不加依赖；Unsupported 建模未动。
+
+**门禁（本机，无 GPU）**：fmt、clippy(`-D warnings`)、architecture、fixture-manifest、
+workflows、i18n、workspace all-targets check、wasm32 lib check 全绿；
+`cargo test -p cad-import-acadrust -p cad-proxy -p cad-db -p cad-domain` 212 passed / 0 failed / 1 ignored。
+新增契约测试：LAYOUT `group 72/73` 被 acadrust 类型化（`acadrust_types_dxf_layout_group_72_and_73`、
+`plot::layout_embedded_plot_fields_are_read_verbatim`），STYLE xdata 字体面类型化与
+`read_styles` 优先级（`acadrust_types_the_style_xdata_face_and_the_scan_keeps_group_3`、
+`importer_resolves_the_typed_true_type_face_without_the_scan`、
+`importer_style_font_chain_is_typed_face_then_group_3_then_scan`）。
+
+**能力增量（源码核对，详见 `docs/compatibility.md`）**
+
+| 能力 | 0.6.3 | yacr |
+|---|---|---|
+| STYLE xdata 字体面 | 已类型化（`true_type_font`，DXF+DWG 经 `typeface_eed`） | 已接入；链=类型化 > group 3/4 > 字节扫描 |
+| LAYOUT group 72/73 | 已暴露（0.5.5 亦然，旧文档有误） | 直接读取；纸名带单位时优先纸名 |
+| plot-style 解析值 | 不支持 | 显式 Unsupported |
+| 代理 opcode | 不支持（`proxy_graphics.rs` 字节一致） | 显式 Unsupported |
+| DWG xdata | 部分（新增 crate-private `object_xdata`） | 显式 Partial |
+| DXF 未知码 | 不支持（DWG 新增 `raw_record`/`layer_handle`） | 未使用 |
+
+**已决策（2026-10-09）**
+
+- **Path A：类型化 `true_type_font` 优先。** 解析链固定为
+  `类型化 true_type_font > group 3/4 声明字体 > dxf_style_xdata_fonts 字节扫描`。
+  理由：类型化字段是 acadrust 权威解码出的字体面，字节扫描只是回退；QCAD 类文件
+  （group 3 为空）行为不变。DWG `true_type_font` 经 `read_styles` 统一消费（DWG 由
+  `io/dwg/typeface_eed.rs` 填充），无需新代码。契约注释与文档已按此对齐，测试已固定该行为。
+
+**未决项**
+
+- `dxf_style_xdata_fonts` 字节扫描现与类型化路径基本重复，是否简化（本轮**不删**，仅记录）。
+- `EntityCommon.raw_record`/`layer_handle` 未使用，保留为潜在能力。
+- plot-style 解析值、代理 opcode、DXF 已知实体未知码仍显式 Unsupported。
+
 ## Web 生产部署 LinkError：跨部署 glue/wasm 缓存错配修复（2026-10-09，本轮）
 
 用户报告线上 <https://yacr-examples.snakeheartgo.top/> 启动失败：

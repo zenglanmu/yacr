@@ -6,9 +6,9 @@
 区分已实现、显式未实现和只能在真实设备上验证的部分。透明度（alpha）见
 `docs/render-order.md`，本文不重复。
 
-## 数据来源（acadrust 0.5.5 真实 API）
+## 数据来源（acadrust 0.6.3 真实 API）
 
-只用 acadrust 已暴露的类型（`~/.cargo/registry/.../acadrust-0.5.5/src`）：
+只用 acadrust 已暴露的类型（`~/.cargo/registry/.../acadrust-0.6.3/src`）：
 
 | 来源 | 类型 | 关键取值 |
 |---|---|---|
@@ -205,5 +205,5 @@
   - 复杂线型内嵌 shape/text 字形——未实现，只画划/空段并记 `import.linetype_complex`；
   - 线型端部/拐角 `A` 对齐微调——未实现，每段折线独立从头生成；
   - 点线型的点本身——无长度可画，仅保证终止；
-  - plot style 的颜色/线宽——acadrust 0.5.5 只暴露样式名字符串，无解析值，不猜测；
+  - plot style 的颜色/线宽——acadrust 0.6.3 只暴露样式名字符串，无解析值，不猜测；
   - 颜色空间：颜色按 sRGB 归一传递，不做线性化/伽马转换，与既有渲染路径一致。

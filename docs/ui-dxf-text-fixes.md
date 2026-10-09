@@ -13,7 +13,7 @@
   图标与文字显式分配布局区域，禁用按钮图标/文字灰显。2D 时三维标准视图/透视入口禁用；
   属性空选择清除入口、空图层恢复入口禁用。Linux 无路径的打开/侧车入口、未实现 Trim、
   后端切换禁用；核心 Unsupported 防线不删除，不以隐藏按钮代替命令校验。
-- DXF 使用锁定的 acadrust 0.5.5 原版 `DxfReader`，按 ASCII SECTION/二进制签名分流，
+- DXF 使用锁定的 acadrust 0.6.3 原版 `DxfReader`，按 ASCII SECTION/二进制签名分流，
   仍使用同一个 ImporterBuilder、数据库、语义转换和进度链；严格解析与流完成检查，
   不允许截断文件变成空成功。浏览器 file-input 接受 `.dwg,.dxf`。二进制及 ASCII 合成契约
   覆盖 LINE；复杂 DXF/vender 兼容仍未验收，不增加 DXF 写回承诺。

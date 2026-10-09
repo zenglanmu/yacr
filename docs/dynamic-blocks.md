@@ -7,15 +7,15 @@
 > 能力限制（见 §6），因此本轮以“内存合成 acadrust 文档 + 纯映射函数”验证读取与
 > 映射；真实导出样本仍是待补证据。
 
-## 1. 数据来源（acadrust 0.5.5，只读）
+## 1. 数据来源（acadrust 0.6.3，只读）
 
 - `document.rs`
   - `block_visibility_params: HashMap<Handle, BlockVisibilityParameter>`
   - `block_visibility_param_for_def(def_block) -> Option<&BlockVisibilityParameter>`
-    （:3573，沿 `owner_chain_reaches` 找到该块定义可见性参数）
+    （:4065，沿 `owner_chain_reaches` 找到该块定义可见性参数）
   - `dynamic_visibility_for_insert(insert) -> Option<(Handle, &BlockVisibilityParameter)>`
-    （:3589，经 `dynamic_definition_for_insert` 解析匿名块）
-  - `dynamic_definition_for_insert(insert)`（:3604）
+    （:4081，经 `dynamic_definition_for_insert` 解析匿名块）
+  - `dynamic_definition_for_insert(insert)`（:4096）
   - `block_representations: HashMap<Handle, Handle>`（表示对象 → 动态定义块）
 - `objects/block_visibility.rs`
   - `BlockVisibilityParameter { handle, owner, all_blocks: Vec<Handle>,
@@ -26,7 +26,7 @@
   `VisibilityParameter(BlockVisibilityParameter)`）。
 
 匿名（求值后）块把“其他状态”的成员标为不可见
-（`EntityCommon::invisible`，`document.rs` / `entities/mod.rs:295`）。这是解析
+（`EntityCommon::invisible`，`document.rs` / `entities/mod.rs:311`）。这是解析
 “当前激活状态”的唯一公开证据。
 
 ## 2. 数据库模型（cad-db）

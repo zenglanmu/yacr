@@ -10,7 +10,7 @@
 
 ## 1. 记录布局（framing）——证据
 
-布局与 acadrust 0.5.5 `entities/proxy_graphics.rs` 的 `ProxyGraphics::decode`
+布局与 acadrust 0.6.3 `entities/proxy_graphics.rs` 的 `ProxyGraphics::decode`
 一致（同源 crate 公开实现）：
 
 ```text
@@ -22,7 +22,7 @@ u32 record_count
   [u8; record_size-8] payload
 ```
 
-来源：`acadrust-0.5.5/src/entities/proxy_graphics.rs`，
+来源：`acadrust-0.6.3/src/entities/proxy_graphics.rs`，
 `ProxyGraphics::decode` / `encode`（常量 `HEADER_SIZE=8`、
 `RECORD_HEADER_SIZE=8`、`UNICODE_TEXT_FIXED_SIZE=96`）。
 本仓库复刻该布局并加严校验（见 §3）。
@@ -36,7 +36,7 @@ u32 record_count
 | 其他 | 未类型化 | acadrust 归为 `ProxyRecord::Unknown { record_type, data }` | **Unsupported**，`ProxyOutput.unsupported` 保留原始 payload | 未支持，明确建模 |
 
 **当前已解码**：仅 type 21（`FillOff`，状态指令）与 type 36（`UnicodeText`，
-单行文字）。二者都是 acadrust 0.5.5 自身类型化的记录，因此是**证据支持**的。
+单行文字）。二者都是 acadrust 0.6.3 自身类型化的记录，因此是**证据支持**的。
 
 **仍是猜测/未支持，必须保持显式**：
 

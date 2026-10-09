@@ -7,7 +7,7 @@
 
 依据 `CAD_IMPLEMENTATION_SPEC.md` v2.0 搭建。目标架构为数据库驱动（`cad-db`：对象、
 事务、revision、ChangeSet），UI 计划使用 Slint，CAD 绘制计划使用 wgpu，DWG 解析计划使用
-未修改的 acadrust 0.5.5。核心设计为无平台依赖，可单独测试并用于 CLI；这些是架构目标，
+未修改的 acadrust 0.6.3。核心设计为无平台依赖，可单独测试并用于 CLI；这些是架构目标，
 不代表功能已完备。
 
 * 架构：`docs/architecture.md`

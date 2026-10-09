@@ -103,5 +103,5 @@ cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude ap
 - `src/entities/curve.rs`：`ocs_plane` / `ocs_axes` 的 OCS→WCS 约定、`ellipse_curve`
   的 `minor = cross(normal, major)` 与 center/major 的投影、`circle_curve`/`arc_curve`
   用 `center.z` 作为 elevation、`spline_curve` 的平面检查。
-- `acadrust 0.5.5`：`entities/circle.rs`、`entities/arc.rs` 的 `center_wcs`/`arbitrary_axis`
+- `acadrust 0.6.3`：`entities/circle.rs`、`entities/arc.rs` 的 `center_wcs`/`arbitrary_axis`
   框架，`entities/ellipse.rs` 的字段，`entities/transform.rs` 的镜像翻转 bulge 约定。

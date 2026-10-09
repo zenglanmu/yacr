@@ -13,7 +13,7 @@
 | `draw_order: i64` | 与同级批次相对的绘制顺序，值越大越晚画（越在上层） | `SceneCache::build` 目前恒为 `0`；选择高亮层 `HighlightOptions::draw_order`（默认 `HIGHLIGHT_DRAW_ORDER = 900_000`）逐批递增；批注叠加层 `annotation_batches` 从 `AnnotationSceneOptions::draw_order_base`（默认 1_000_000）开始逐批递增；工具预览层 `cad_app::render_scene::overlay::PREVIEW_DRAW_ORDER = 2_000_000` |
 | `alpha: f32` | 逐对象常量透明度 | `SceneCache::build` 取 `DisplayFragment::alpha`（`cad-scene::sanitize_alpha` 钳制到 `[0,1]`）；importer 在 `EntityRenderAttributes` 里记录有效透明度，`build_expanded` 解析 `ByBlock` 后写入 fragment；批注叠加层取 `AnnotationStyle::rgba[3] / 255` |
 
-**透明度数据路径（已实现）**：acadrust 0.5.5 暴露 `EntityCommon.transparency: Transparency`
+**透明度数据路径（已实现）**：acadrust 0.6.3 暴露 `EntityCommon.transparency: Transparency`
 （`types/transparency.rs`：`ByLayer` / `ByBlock` / `Explicit(u8)`，0 不透明、255 全透明）
 与 `tables::Layer.transparency`。importer 在 `cad-import-acadrust` 里解析：
 
@@ -26,7 +26,7 @@
 `DisplayFragment::alpha`。**限制**：`ProviderRegistry::build`（非展开入口，测试/无数据库
 调用）只看到实体，没有数据库访问，因此保守地输出 `alpha = 1.0`；真实 UI 走
 `build_expanded`，透明度已端到端接通。**另一显式未支持项**：绘图样式表（plot style）
-的 alpha 未应用——acadrust 0.5.5 只暴露逐实体与逐图层的 `Transparency`，`plot_style`
+的 alpha 未应用——acadrust 0.6.3 只暴露逐实体与逐图层的 `Transparency`，`plot_style`
 是样式名字符串、没有解析后的 alpha，因此不猜测、不叠加。
 
 渲染器在上传时把 `RenderBatch::centroid()`（世界坐标，`local_origin + 顶点均值`）与

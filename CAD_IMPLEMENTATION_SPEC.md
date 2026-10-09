@@ -286,7 +286,7 @@ CAD 后端配置与 Slint 渲染配置分开记录。Vello 需要 compute，不�
 
 ### 7.2 代理图形方案
 
-官方 0.5.5 文档暴露 EntityCommon.graphic_data、proxy_graphics()、ProxyGraphicRecord::Unknown { record_type, data } 和 UnknownEntity 原始 DWG 数据。当前类型化记录仅明确列出 FillOff、UnicodeText 和 Unknown，不可宣称代理几何已经完整解码（S7–S9）。
+官方 0.6.3 文档暴露 EntityCommon.graphic_data、proxy_graphics()、ProxyGraphicRecord::Unknown { record_type, data } 和 UnknownEntity 原始 DWG 数据。当前类型化记录仅明确列出 FillOff、UnicodeText 和 Unknown，不可宣称代理几何已经完整解码（S7–S9）。
 
 在 cad-proxy 中实现自有解码与回放器，消费公开数据：
 
@@ -537,9 +537,9 @@ mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主
 - S4 Slint Android： https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/android/
 - S5 Slint iOS： https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/ios/
 - S6 Slint renderer： https://docs.slint.dev/latest/docs/slint/guide/backends-and-renderers/backends_and_renderers/
-- S7 acadrust EntityCommon： https://docs.rs/acadrust/0.5.5/acadrust/entities/struct.EntityCommon.html
-- S8 acadrust ProxyGraphicRecord： https://docs.rs/acadrust/0.5.5/acadrust/entities/proxy_graphics/enum.ProxyGraphicRecord.html
-- S9 acadrust UnknownEntity： https://docs.rs/acadrust/0.5.5/acadrust/entities/unknown_entity/struct.UnknownEntity.html
+- S7 acadrust EntityCommon： https://docs.rs/acadrust/0.6.3/acadrust/entities/struct.EntityCommon.html
+- S8 acadrust ProxyGraphicRecord： https://docs.rs/acadrust/0.6.3/acadrust/entities/proxy_graphics/enum.ProxyGraphicRecord.html
+- S9 acadrust UnknownEntity： https://docs.rs/acadrust/0.6.3/acadrust/entities/unknown_entity/struct.UnknownEntity.html
 - S10 acadrust 项目： https://github.com/hakanaktt/acadrust
 - S11 mlightcad 参考项目： https://github.com/mlightcad/cad-viewer
 - S12 wgpu： https://github.com/gfx-rs/wgpu

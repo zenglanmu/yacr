@@ -21,6 +21,27 @@
 - Web：`wasm-bindgen-cli 0.2.129`、Node 22；无头 Chromium
   `Google Chrome for Testing 153.0.8010.12`（Playwright core 1.63，SwiftShader）。
 
+## 2026-10-09：acadrust 0.5.5 → 0.6.3 升级门禁（本机，无 GPU）
+
+环境：本机（非无头）Rust 1.99.0，**无 GPU 运行**；仅纯主机编译/测试与 wasm32 编译检查，
+未运行 GPU/lavapipe 套件，未运行 `scripts/check-linux-app.sh`。本轮 `Cargo.lock` 已把
+`acadrust` 锁到 0.6.3（features `serde` + `import`；新增 `quick-xml 0.36.2`）。以下为
+**本轮实跑**。
+
+- 静态门禁全绿：`cargo fmt --all -- --check`；`cargo clippy --workspace --exclude
+  app-android --exclude app-web --all-targets --locked -- -D warnings`；
+  `python3 scripts/check-architecture.py`（25 packages）；`check-fixture-manifest.py`
+  （22 fixtures）；`check-workflows.py`；`check-i18n.py`（202 keys）。
+- 编译门禁全绿：`cargo check --workspace --exclude app-android --exclude app-web
+  --all-targets --locked`；`cargo check --workspace --lib --target wasm32-unknown-unknown
+  --locked`（acadrust 0.6.3 + quick-xml 的 wasm32 路径通过）。
+- 测试：`cargo test -p cad-import-acadrust -p cad-proxy -p cad-db -p cad-domain --locked`
+  → **212 passed / 0 failed / 1 ignored**（ignored 为 `generate_plot_fixture` 一次性夹具生成器）。
+  其中 `cad-import-acadrust` 106 passed，含本轮新增的 5 个 0.6.3 契约测试（LAYOUT group 72/73
+  被类型化、STYLE xdata 字体面类型化与 `read_styles` 优先级）。
+- 未执行：GPU/软件 Vulkan 套件、Linux 离屏 App、release 编译、真机/浏览器矩阵；
+  本次不构成渲染或兼容性验收。能力增量与未决项见 `docs/handoff.md`、`docs/compatibility.md`。
+
 ## 2026-10-08：资源占用/显卡加速排查证据（本机真实桌面，非无头）
 
 环境：真实 Wayland 桌面（GNOME），**Intel UHD Graphics (CometLake-H GT2, i915)** +

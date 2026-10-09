@@ -15,7 +15,7 @@ contract at the framing and record level so the checks cannot silently regress.
 ## Format
 
 Each `.hex` file is one complete proxy metafile, lower-case hex, no separators
-(a trailing newline is fine). The layout matches acadrust 0.5.5
+(a trailing newline is fine). The layout matches acadrust 0.6.3
 `ProxyGraphics::decode`:
 
 ```text
