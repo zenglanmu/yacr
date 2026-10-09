@@ -19,9 +19,11 @@ name: CI build layers
 #                  CF_PAGES_DEPLOY_ENABLED (secrets required)
 #
 # On-demand release jobs (workflow_dispatch or a v* tag):
+#   linux-release   : Linux GUI+CLI tar.gz with fonts (ubuntu-latest)
 #   windows-release : native MSVC release zip (windows-latest)
 #   macos-release   : native macOS universal tar.gz with an Yacr.app bundle
 #                     (macos-latest)
+#   android-release : capability-gated APK with fonts (see ANDROID_CI_ENABLED)
 #
 # Anything that genuinely needs a real device / real GPU is modelled as a skipped
 # job with an explicit not-run summary and documented in docs/ci.md "NOT RUN".
@@ -264,6 +266,57 @@ jobs:
           path: |
             target/macos/universal/dist/*.tar.gz
             target/macos/universal/dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-release:
+    name: linux-release (tar.gz with fonts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # On-demand (or a version tag): builds the release package and uploads the
+    # tarball. Not run on every PR to keep the default gate cheap; the compile
+    # gate is `linux-app` and the core gate is `core-quality`.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - name: Cache Linux release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-linux-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-linux-release-
+      - name: Install native Slint build dependencies (no display server)
+        run: sudo apt-get update && sudo apt-get install -y pkgconf libfontconfig1-dev libfreetype6-dev
+      # package-linux-release.sh builds with `--offline` so the lock cannot be
+      # silently re-resolved; prefetch the crates first so a cache miss still
+      # succeeds instead of failing the release build.
+      - name: Prefetch crates for the offline release build
+        run: cargo fetch --locked
+      - name: Build and package the Linux release (full font catalogue)
+        env:
+          WITH_FONTS: "1"
+        run: scripts/package-linux-release.sh
+      - name: Record packaging summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Linux release package'
+            echo 'Built and packaged on ubuntu-latest with the full CAD font catalogue.'
+            echo 'The packaged CLI --help and GUI parse error are exercised; window/GPU rendering is not.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the Linux release tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: yacr-linux-release
+          path: |
+            target/release/dist/*.tar.gz
+            target/release/dist/*.tar.gz.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -563,6 +616,110 @@ jobs:
           name: android-apk
           path: target/*/apk/yacr.apk
           retention-days: 14
+
+  android-release:
+    name: android-release (APK with fonts)
+    # Capability-gated like android-apk: the pinned JDK 17 / Android SDK / NDK
+    # 27.0.12077973 are not guaranteed on GitHub-hosted runners. When the
+    # variable is unset the job is SKIPPED, never green. It additionally bundles
+    # the full CAD font catalogue into assets/fonts/ and only runs on demand or
+    # a version tag (the packaging counterpart of android-apk).
+    if: ${{ vars.ANDROID_CI_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ${{ vars.ANDROID_RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo (registry / git / target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-android-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-release-
+
+      - name: Require pinned Android toolchain (fail loudly when absent)
+        run: |
+          set -euo pipefail
+          : "${ANDROID_HOME:?ANDROID_HOME is not set: provision the runner per docs/build.md}"
+          : "${JAVA_HOME:?JAVA_HOME (JDK 17) is not set: provision the runner per docs/build.md}"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "JAVA_HOME=$JAVA_HOME"
+          JAVA_MAJOR="$("$JAVA_HOME/bin/java" -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1)"
+          echo "JDK major = $JAVA_MAJOR (required 17)"
+          [ "$JAVA_MAJOR" = "17" ] || { echo "::error::JDK $JAVA_MAJOR != required 17" >&2; exit 1; }
+          NDK="$ANDROID_NDK_HOME"
+          echo "ANDROID_NDK_HOME=$NDK"
+          [ -d "$NDK" ] || { echo "::error::NDK $NDK not found; required $ANDROID_NDK_VERSION (docs/build.md)" >&2; exit 1; }
+          BT="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
+          [ -x "$BT/aapt2" ] || { echo "::error::aapt2 not found at $BT; required build-tools $ANDROID_BUILD_TOOLS" >&2; exit 1; }
+
+      - name: Install pinned cargo-apk
+        run: |
+          set -euo pipefail
+          cargo install cargo-apk --version "$CARGO_APK_VERSION" --locked
+          command -v cargo-apk >/dev/null
+
+      - name: Generate the development release keystore (gitignored, CI-only signing)
+        run: |
+          set -euo pipefail
+          "$JAVA_HOME/bin/keytool" -genkeypair -keystore apps/app-android/dev-release.jks -alias yacr \
+            -keyalg RSA -keysize 2048 -validity 10000 -storepass yacrdev -keypass yacrdev \
+            -dname "CN=yacr dev, O=yacr"
+
+      - name: Bundle the full CAD font catalogue into assets/fonts
+        run: scripts/fetch-fonts.sh apps/app-android/assets/fonts
+
+      - name: Build signed release APK (scripts/build-android.sh)
+        run: scripts/build-android.sh --release
+
+      - name: Fail if Cargo.lock was rewritten
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- Cargo.lock; then
+            echo "::error::Cargo.lock changed during the build; builds must not rewrite the lock file" >&2
+            git diff -- Cargo.lock
+            exit 1
+          fi
+          echo "Cargo.lock unchanged"
+
+      - name: Record REAL manifest facts (packaging, not install-run)
+        run: |
+          set -euo pipefail
+          APK="$(ls target/*/apk/yacr.apk 2>/dev/null | tail -1)"
+          [ -n "$APK" ] || { echo "::error::no yacr.apk produced" >&2; exit 1; }
+          echo "APK = $APK ($(stat -c %s "$APK") bytes)"
+          AAPT2="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt2"
+          BADGING="$("$AAPT2" dump badging "$APK" | tr -d '\r')"
+          echo "$BADGING" | grep -E '^(package|sdkVersion|targetSdkVersion|native-code)'
+          PKG="$(echo "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          {
+            echo "## android-release (NOT install-run)"
+            echo ""
+            echo "| fact | value |"
+            echo "|---|---|"
+            echo "| package | ${PKG} |"
+            echo "| apk bytes | $(stat -c %s "$APK") |"
+            echo "| fonts | full CAD catalogue bundled under assets/fonts |"
+            echo ""
+            echo "This records the artifact only. It is **not** an install/run result:"
+            echo "no device or emulator was used. See docs/ci.md \"NOT RUN\"."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the Android release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: yacr-android-release
+          path: target/*/apk/yacr.apk
+          if-no-files-found: error
+          retention-days: 30
 
   web-smoke:
     name: web-smoke

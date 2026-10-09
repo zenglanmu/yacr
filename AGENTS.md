@@ -79,6 +79,12 @@ macOS：CI `macos-check`（`macos-latest` 原生 arm64 编译）与按需 `macos
 Linux 主机无法交叉产出 Mach-O**，故只能在 macOS runner/真机运行
 `scripts/package-macos-release.sh`，见 `docs/macos-app.md`。
 
+Linux/Android 发布层：按需 `linux-release`（`ubuntu-latest` 运行
+`scripts/package-linux-release.sh`，含全量字体 tar.gz）与能力门控的 `android-release`
+（`ANDROID_CI_ENABLED` + 按需/tag，`scripts/fetch-fonts.sh` 带全量字体后
+`scripts/build-android.sh --release`）。二者与 `windows-release`/`macos-release` 同在
+`workflow_dispatch`/`v*` tag 触发；Android **打包不等于安装运行**，见 `docs/ci.md`。
+
 - 默认主机编译门禁必须包含 Linux App 和 Slint；编译通过不是运行或渲染验收。Linux 离屏
   `bash scripts/check-linux-app.sh` 与完整测试仅在明确要求时执行；release 编译用于可选发布验证。
   Web 是第二层，

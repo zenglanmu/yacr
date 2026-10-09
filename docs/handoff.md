@@ -1,5 +1,37 @@
 # 后续 agent 接手入口
 
+## CI 发布层补全：Linux / Android release job（2026-10-09，本轮）
+
+用户要求：在 CI workflow 里也加上 Linux app、Android app（等）。经问询确认：新增
+`linux-release` 与 `android-release`，与 `windows-release`/`macos-release` 一样在
+`workflow_dispatch` 或 `v*` tag 触发并上传含字体产物；Android 因缺固定 SDK/NDK 保持
+`ANDROID_CI_ENABLED` 能力门控，且打包时带全量字体。
+
+**改动**
+
+1. `build.yml` 新增 `linux-release`（`ubuntu-latest`）：安装 Slint 依赖 →
+   `cargo fetch --locked` 预热（`package-linux-release.sh` 以 `--offline` 构建）→
+   `WITH_FONTS=1 scripts/package-linux-release.sh` → 上传 `yacr-linux-release`
+   （tar.gz + sha256）。脚本在打包内实际跑 CLI `--help` 与 GUI `--headless` 解析错误，
+   校验 RPATH/无缺失库；不跑窗口/GPU。
+2. `build.yml` 新增 `android-release`（能力门控 `ANDROID_CI_ENABLED` + 按需/tag）：
+   固定工具链前置校验 → `cargo-apk 0.10.0` → 生成 gitignored 开发 keystore →
+   `scripts/fetch-fonts.sh apps/app-android/assets/fonts` → `scripts/build-android.sh
+   --release` → 断言锁文件未改 → `aapt2 dump badging` 记录事实 → 上传
+   `yacr-android-release` APK。`android-apk`（每次 push/PR，启用时）保留为构建+事实 job。
+3. `scripts/check-workflows.py`：REQUIRED_JOBS 纳入两者，`android-release` 加入
+   `GATED_JOBS`/`GATED_JOB_IF`；`docs/ci.md`（job 表、十七个必需 job、gated 列表、两节说明、
+   NOT RUN）、`docs/build.md`、`docs/handoff.md` 同步。
+
+**实际执行并通过（本机 Linux）**
+
+- `python3 scripts/check-workflows.py`（PyYAML 解析 + 结构检查，含两个新 job）、
+  `scripts/test-linux-workflow.py`、`check-architecture.py`、`check-i18n.py` 通过。
+
+**未运行/限制**：两个新 job 本身**未在本环境运行**（无 GitHub runner）。`linux-release` 可在
+本机 Linux 运行同一脚本复现（未在本轮重跑）；`android-release` 需固定 SDK/NDK/JDK 17，
+本环境无，**未运行**；APK 打包**不等于安装/真机运行**。详见 `docs/ci.md`。
+
 ## macOS release 包：GitHub Actions（`macos-latest`）+ 含字体 `Yacr.app` tar.gz（2026-10-09，本轮）
 
 用户要求：构建 macOS 下应用，最终类似 Linux/Windows 版，输出含字体的压缩包。经问询确认：

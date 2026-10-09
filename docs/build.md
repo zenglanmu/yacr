@@ -36,6 +36,10 @@ cargo test -p cad-ui-slint --lib --locked -- --test-threads=1
 
 ## Linux release 包（GUI 主应用 + 无头 CLI）
 
+CI 发布层：`build.yml` 的 `linux-release`（`workflow_dispatch` / `v*` tag）在
+`ubuntu-latest` 安装 Slint 构建依赖、`cargo fetch --locked` 预热后运行同一脚本，上传
+`yacr-linux-release` artifact（tar.gz + sha256）。编译门禁仍是每次 push/PR 的 `linux-app`。
+
 ```bash
 # 构建 + 打包（可选：对真实 DWG 用打包内 CLI 出图并校验 PNG 非空）
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
@@ -62,6 +66,12 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 `docs/headless-render.md`、`docs/linux-app.md` 与 `docs/validation.md`。
 
 ## Android APK（已验证编译、打包、安装与运行）
+
+CI 发布层：`build.yml` 的 `android-release`（能力门控 `ANDROID_CI_ENABLED`，且仅
+`workflow_dispatch` / `v*` tag）生成开发签名 keystore、把全量 CAD 字体打进
+`apps/app-android/assets/fonts/` 后运行 `scripts/build-android.sh --release`，上传
+`yacr-android-release` APK artifact；`android-apk` 仍是每次 push/PR（启用时）的构建+事实
+记录 job。二者都**只产出 APK，不等于安装运行**。
 
 依赖：JDK 17、Android SDK（build-tools 34.0.0、platform android-34/30）、
 NDK 27.0.12077973、`cargo-apk 0.10.0`。

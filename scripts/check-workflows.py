@@ -6,11 +6,11 @@ Standard library only. What it checks:
   * at least one workflow file exists under ``.github/workflows`` and is non-empty;
   * every required job is declared as a job key in some workflow
     (``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
-     ``linux-app``, ``windows-check``, ``windows-release``, ``macos-check``,
-     ``macos-release``, ``web-build``, ``web-host-contracts``, ``web-deploy``,
-     ``android-check``, ``android-apk``, ``web-smoke``; the last four are
-     capability-gated but still must be *declared* so their absence is visible
-     rather than silent);
+     ``linux-app``, ``linux-release``, ``windows-check``, ``windows-release``,
+     ``macos-check``, ``macos-release``, ``android-release``, ``web-build``,
+     ``web-host-contracts``, ``web-deploy``, ``android-check``, ``android-apk``,
+     ``web-smoke``; the capability-gated ones must still be *declared* so
+     their absence is visible rather than silent);
   * no required job declares ``continue-on-error: true`` (job-level or step-level);
   * each required job still contains its expected command fragment, so the job
     keeps mirroring the real gate instead of drifting into an empty success.
@@ -42,6 +42,10 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "cargo check -p app-linux --all-targets --locked",
         "actions/upload-artifact",
         "linux-app.log",
+    ),
+    "linux-release": (
+        "scripts/package-linux-release.sh",
+        "actions/upload-artifact",
     ),
     "core-quality": (
         "cargo fmt --all -- --check",
@@ -99,6 +103,11 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "dump badging",
         "actions/upload-artifact",
     ),
+    "android-release": (
+        "scripts/build-android.sh",
+        "scripts/fetch-fonts.sh",
+        "actions/upload-artifact",
+    ),
     "web-smoke": (
         "scripts/check-web-ui.mjs",
         "scripts/serve-web.py",
@@ -107,13 +116,20 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
 
 # Jobs that are capability-gated: they must carry an explicit `if:` guard so
 # that when the capability is absent GitHub reports SKIPPED, never a pass.
-GATED_JOBS: tuple[str, ...] = ("web-deploy", "android-check", "android-apk", "web-smoke")
+GATED_JOBS: tuple[str, ...] = (
+    "web-deploy",
+    "android-check",
+    "android-apk",
+    "android-release",
+    "web-smoke",
+)
 
 # `if:` fragment each gated job must retain (the capability switch).
 GATED_JOB_IF: dict[str, str] = {
     "web-deploy": "vars.CF_PAGES_DEPLOY_ENABLED",
     "android-check": "vars.ANDROID_CI_ENABLED",
     "android-apk": "vars.ANDROID_CI_ENABLED",
+    "android-release": "vars.ANDROID_CI_ENABLED",
     "web-smoke": "vars.WEB_SMOKE_ENABLED",
 }
 
