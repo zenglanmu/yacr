@@ -68,6 +68,7 @@ jobs:
           python3 scripts/check-workflows.py
           python3 scripts/test-linux-workflow.py
           python3 scripts/test-web-deploy-workflow.py
+          python3 scripts/test-package-linux-release.py
       - name: Core and Linux UI host debug compilation (including test code)
         run: cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked
 

@@ -34,18 +34,32 @@ cargo test -p cad-ui-slint --lib --locked -- --test-threads=1
 `YACR_UI_OUTPUT` 可指定新的截图目录。官方 FemtoVG/wgpu 离屏渲染共享 Slint 组件与 CAD
 纹理，强制验证软件 Vulkan；这是合成内容/软件 GPU 证据，不等于桌面宿主产品或真机验收。
 
-## Linux release 包（含无头 render）
+## Linux release 包（GUI 主应用 + 无头 CLI）
 
 ```bash
-# 构建 + 打包（可选：对真实 DWG 出图并校验 PNG 非空）
+# 构建 + 打包（可选：对真实 DWG 用打包内 CLI 出图并校验 PNG 非空）
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
   YACR_TEST_DWG=/path/input.dwg scripts/package-linux-release.sh
+
+# 可选：用打包内的 GUI 做一次无头出图 smoke（需可达的软件/真实 Vulkan ICD）
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+  YACR_LINUX_SMOKE=1 scripts/package-linux-release.sh
 ```
 
-产出 `target/release/dist/yacr-<version>-linux-<arch>.tar.gz`（及 `.sha256`），内含
-release `bin/cad-cli-tools`、文档与 `scripts/{fetch-test-dwg,render-smoke}.sh`。
-运行时的无头渲染用软件 Vulkan（Mesa lavapipe）时，先按发行版把 `VK_ICD_FILENAMES`
-指向 `lvp_icd.json`；详见 `docs/headless-render.md` 与 `docs/validation.md`。
+产出 `target/release/dist/yacr-<version>-linux-<arch>.tar.gz`（及 `.sha256`），内含：
+
+- `bin/cad-cli-tools`：release 无头 CLI（含 `render`）；
+- `bin/yacr-linux`：release GUI 宿主（Slint + 共享 CAD wgpu 渲染器，桌面窗口/离屏两用）；
+- `lib/`：GUI 依赖的**非基础系统**共享库（fontconfig/freetype 及其依赖）；二进制带
+  `$ORIGIN/../lib` RPATH，故打包内库优先于宿主同名库。glibc/内核、窗口系统、Vulkan 驱动与
+  `xdg-desktop-portal` 仍由宿主提供，**不是**静态独立发行包，也不构成跨发行版兼容声明；
+- `fonts/`：CAD 字体包（默认 `WITH_FONTS=1` 组装 mlightcad 全量 + 已提交 osifont；
+  `WITH_FONTS=0` 仅带已提交字体），CLI 与 GUI 均从同级 `fonts/` 自动加载；
+- 文档与 `scripts/{fetch-test-dwg,render-smoke}.sh`。
+
+`BUNDLE_LIBS=0` 可只带裸 GUI 二进制（宿主自备全部依赖）。运行时的无头渲染用软件 Vulkan
+（Mesa lavapipe）时，先按发行版把 `VK_ICD_FILENAMES` 指向 `lvp_icd.json`；详见
+`docs/headless-render.md`、`docs/linux-app.md` 与 `docs/validation.md`。
 
 ## Android APK（已验证编译、打包、安装与运行）
 

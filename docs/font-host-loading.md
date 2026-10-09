@@ -60,7 +60,8 @@ Linux 桌面/CLI 宿主复用同一个 `load_font_engine`，只是 `FontLoader` 
      为第一回退）。
 - 空结果 → `clear_fonts()`；否则 `set_fonts`。没有可用字体时文本保持不可绘的 `Text`，
   绝不伪装成已渲染。
-- 打包：`scripts/package-linux-release.sh` 把 `fonts/` 复制到发布包二进制同级。
+- 打包：`scripts/package-linux-release.sh` 把 `fonts/` 放在发布包根（`bin/` 的父级），
+  CLI 与 GUI 都经 `font_dir_candidates` 命中同级/父级 `fonts/`。
 
 ## 验证
 

@@ -37,6 +37,24 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 报告中出图 smoke、导航命令+像素变化是自动检查，`visualAcceptance` 始终等待独立人工审查，
 软件 GPU 成功不能推广为窗口系统、真实 GPU 或 DWG vendor 兼容。
 
+## 发布包（GUI + CLI）
+
+`scripts/package-linux-release.sh` 产出 `target/release/dist/yacr-<version>-linux-<arch>.tar.gz`：
+
+- `bin/yacr-linux` 与 `bin/cad-cli-tools` 同级；GUI 的 RPATH 为 `$ORIGIN/../lib`，非基础
+  系统共享库（fontconfig/freetype 及其依赖）放在 `lib/`，`fonts/` 在包根，CLI 与 GUI 都
+  从同级目录自动加载。
+- 打包时脚本会：构建两个 release 二进制；`ldd` 解析无缺失；`readelf` 确认 RPATH；用
+  `bin/yacr-linux --headless`（缺 `--output` 的既定解析错误）确认动态加载成功；至少一个库
+  从包内 `lib/` 命中（证明 RPATH 生效）。任一项失败即中止，不产出包。
+- `YACR_LINUX_SMOKE=1` 追加：用包内 GUI `--headless --output <新目录>` 离屏出图，并断言
+  `report.json` 的 `cadFrames>0` / `renderError=null` 且两张 PNG 非空。该 smoke 是软件
+  GPU（如 lavapipe）证据，仍需人工视觉复核，不能推广为窗口/真实 GPU/真机验收。
+- 限制：glibc/内核、窗口系统、Vulkan 驱动、`xdg-desktop-portal`（桌面打开对话框）与
+  `fc-match`（系统默认回退）仍由宿主提供；包内库与构建发行版绑定，换发行版/libc 代际应
+  改用 `BUNDLE_LIBS=0` 或从源码重建。开发环境已实测打包 + GUI 离屏 smoke，见
+  `docs/validation.md`。
+
 ## 已接线范围与限制
 
 宿主通过 HostController 的命令/事务更新图纸，统一推送层、属性、布局、测量、批注、诊断与
@@ -60,7 +78,10 @@ Slint 属性并触发 `request_redraw`，空闲视图以 ~20fps 重绘、单核 
 - 未保存批注时打开/关闭被阻止，无隐式 discard。尚无保存/恢复/丢弃决策对话框及恢复缓存。
 - Trim 点选显式 Unsupported 且按钮禁用；CAD 字体由同级 `fonts/` 目录自动加载（缺字体时
   回退到系统默认轮廓面，`--font` 仍是最高优先级显式指定）；原生多触控仍未闭环。
-- Linux 可执行文件不是静态独立发行包：运行仍需要系统库；默认 CI 仅上传 debug 编译日志，不产出安装包。
+- `scripts/package-linux-release.sh` 现在把 `yacr-linux` 一并打进 release 包，并把其非基础
+  系统共享库（fontconfig/freetype 及其依赖）复制到包内 `lib/`，二进制带 `$ORIGIN/../lib`
+  RPATH；glibc/内核、窗口系统、Vulkan 驱动与 `xdg-desktop-portal` 仍由宿主提供，因此这
+  **不是**静态独立发行包，也不构成跨发行版兼容声明。默认 CI 仍只做 debug 编译，不产出安装包。
 
 ## 配置与用户偏好持久化（2026-10-03）
 

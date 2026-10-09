@@ -304,6 +304,38 @@ PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假�
 由宿主发行版的 Mesa 提供。后来提交的开源 QCAD flange 夹具（`fixtures/dxf/qcad-flange/`）
 不改变这一轮打包记录。
 
+## Linux release 打包：GUI 并入（2026-10-09 执行）
+
+用户指出上述 CLI-only 包缺少 GUI 主应用。经问询确认：**并入现有 tar.gz**，并**附带需打包
+的 `.so`**。`scripts/package-linux-release.sh` 现同时构建 `app-linux` 的 `yacr-linux`，
+并用 `cargo rustc ... -- -C link-arg=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib` 记录
+可重定位 RPATH；`ldd` 解析后把非基础系统库复制进包内 `lib/`（glibc/loader/libgcc 显式排除）。
+包内自带校验：`ldd` 无缺失、`readelf` 确认 `RPATH [$ORIGIN/../lib]`、至少一个库命中包内
+`lib/`、`bin/yacr-linux --headless`（缺 `--output`）按既定错误加载成功，否则中止不出包。
+
+本轮实际执行（本机，软件 Vulkan）：
+
+- `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json YACR_LINUX_SMOKE=1 bash scripts/package-linux-release.sh`。
+- release 构建命中缓存（`cad-cli-tools` 0.13 s、`yacr-linux` 0.24 s，均 `--release
+  --locked --offline`；不是冷编译耗时证据）。RPATH 标志首次引入时 `yacr-linux` 增量重编
+  1 m 26 s（已记录，非本轮 0.24 s）。
+- `lib/` 迁入 8 个非基础库：`libfontconfig.so.1`、`libfreetype.so.6`、`libexpat.so.1`、
+  `libz.so.1`、`libbz2.so.1.0`、`libpng16.so.16`、`libbrotlidec.so.1`、`libbrotlicommon.so.1`；
+  `ldd bin/yacr-linux` 中这些均解析到 `bin/../lib/`，glibc/`libgcc_s` 仍来自宿主。
+- 包内 GUI 离屏 smoke 通过：`Slint offscreen adapter ... llvmpipe ... Mesa 26.0.8`,
+  `backend=vulkan`，`cadFrames=2`，`cadRect=[240,180,1040,500]`，`changedCadPixels=5548`，
+  `navigationCameraChanged/navigationPixelsChanged=true`，`renderError=null`，
+  `source=synthetic`，`visualAcceptance=manual-review-required`；`initial.png`/`navigation.png`
+  非空。
+- 产物：`target/release/dist/yacr-0.1.0-linux-x86_64.tar.gz`，**61732836 字节**，
+  sha256 `1473725b284a41ebd2ae843e6b20b9d18fddb0ddc0423aefda0839f080af0094`
+  （包内含构建时间，重跑哈希会变，仅记录本轮）。产物在 gitignored `target/` 下，不入库。
+
+**边界**：本轮 smoke 用内置合成几何（无 `YACR_TEST_DWG`），`initial/navigation` 为软件 GPU
+离屏帧，仍需人工视觉复核；窗口系统、真实 GPU、真实 DWG、跨发行版/libc 兼容与
+`xdg-desktop-portal` 桌面打开均 **NOT RUN**。包内库与构建发行版绑定，换发行版应
+`BUNDLE_LIBS=0` 或从源码重建。
+
 ## 集成轮：Android/Web 运行与显示链（2026-10-02 执行）
 
 四个并行 workstream 已合入 `main` 并按下述命令验证。详细证据见

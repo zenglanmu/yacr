@@ -290,6 +290,7 @@ scripts/build-android.sh --release
 python3 scripts/check-workflows.py
 python3 scripts/test-linux-workflow.py
 python3 scripts/test-web-deploy-workflow.py
+python3 scripts/test-package-linux-release.py
 ```
 
 它校验：workflow 文件存在且非空；十一个必需 job（`core-quality`、`wasm-check`、
@@ -304,6 +305,12 @@ python3 scripts/test-web-deploy-workflow.py
 （mutation contracts）：它们故意删除主 Linux job 的产物/失败策略、或删除 `web-deploy`
 的能力开关 / `download-artifact` / 真实部署命令，断言结构检查**必然报错**，从而证明
 上面的门禁不是摆设。两者都不触网、不部署。
+
+`scripts/test-package-linux-release.py` 是发布打包脚本的静态 + 变异契约：断言
+`scripts/package-linux-release.sh` 仍构建并打包 CLI 与 GUI 两个二进制、把 GUI 非基础系统库
+复制进 `lib/` 并带 `$ORIGIN/../lib` RPATH、且保留「无缺失库 / RPATH 生效 / GUI 可加载」的
+打包内校验；逐条删除任一保证都会报错。它只检查脚本文本，**不**执行 release 构建，也不构成
+已打包或已渲染的证据。
 
 ## 启用 web 自动发布（维护者操作）
 

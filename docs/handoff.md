@@ -1,6 +1,34 @@
 # 后续 agent 接手入口
 
-## 字体文件设计（2026-10-09，本轮）
+## Linux release 包并入 GUI 主应用（2026-10-09，本轮）
+
+用户指出 `scripts/package-linux-release.sh` 只打包无头 CLI，缺少 GUI 主应用。经问询确认
+「并入现有 tar.gz」+「附带需打包的 `.so`」。
+
+**改动**
+
+1. **脚本**：同时 `cargo build -p cad-cli-tools` 与 `cargo rustc -p app-linux --bin
+   yacr-linux`（后者带 `-C link-arg=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib`）；staging
+   增加 `bin/yacr-linux` 与 `lib/`；`copy_gui_libs` 用 `ldd` 收集非基础系统库（显式排除
+   glibc/loader/libgcc/libstdc++）；打包内校验 `ldd` 无缺失、`readelf` 的 RPATH、库命中
+   包内 `lib/`、`bin/yacr-linux --headless` 缺 `--output` 的既定错误加载成功；缺失即中止。
+   新增 `BUNDLE_LIBS=0`（裸二进制）、`YACR_LINUX_SMOKE=1`（包内 GUI 离屏出图 + 报告断言）。
+   `docs/` 纳入 `linux-app.md`、`fonts.md`；`PACKAGE.txt` 重写运行前提与限制。
+2. **契约测试**：新增 `scripts/test-package-linux-release.py`（静态 + 变异），并接入
+   `core.yml` 的 workflow-contracts 步骤与 `docs/ci.md`。只检查脚本文本，不跑 release 构建。
+3. **文档**：`docs/build.md`、`docs/linux-app.md`、`docs/validation.md` 增补发布包布局、
+   RPATH/库迁入、运行前提与边界。
+
+**实际执行**：`VK_ICD_FILENAMES=.../lvp_icd.json YACR_LINUX_SMOKE=1 bash
+scripts/package-linux-release.sh` 通过；迁入 8 个非基础库，包内 GUI 用 llvmpipe 离屏出图
+`cadFrames=2`、`renderError=null`；产物 61732836 字节，sha256
+`1473725b...af0094`（含构建时间，重跑会变）。release 构建命中缓存，非冷编译耗时。
+
+**未运行/限制**：无真实 DWG（合成几何）、无窗口系统/真实 GPU/真机、无跨发行版/libc 兼容与
+`xdg-desktop-portal` 桌面打开验证；包内库与构建发行版绑定，换发行版应 `BUNDLE_LIBS=0`
+或从源码重建。
+
+## 字体文件设计（2026-10-09，上一轮）
 
 用户要求设计并**实现**字体文件方案（只做实现，不单独出设计文档），关键决策经问询确认：
 字体来源 = QCAD + mlightcad；浏览器走 CDN，缺字体回退默认轮廓面；客户端输出带字体文件
