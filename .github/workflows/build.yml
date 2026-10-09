@@ -804,6 +804,11 @@ jobs:
           PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.js
         run: |
           set -euo pipefail
+          # /tmp/opencode is a local-dev convention and does not exist on the
+          # runner; use the runner's temp dir so `tee` can create its output
+          # (a failed tee would fail the step via `pipefail` even on a pass).
+          OUT="${RUNNER_TEMP:-/tmp}/yacr-web-smoke"
+          mkdir -p "$OUT"
           python3 scripts/serve-web.py --directory web-dist --port 8090 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
@@ -812,7 +817,7 @@ jobs:
             curl -sf http://127.0.0.1:8090/ -o /dev/null && break
             sleep 1
           done
-          node scripts/check-web-ui.mjs http://127.0.0.1:8090/ /tmp/opencode/yacr-web.png 2>&1 | tee /tmp/opencode/web-smoke.log
+          node scripts/check-web-ui.mjs http://127.0.0.1:8090/ "$OUT/yacr-web.png" 2>&1 | tee "$OUT/web-smoke.log"
           {
             echo "## web-smoke (software GPU only, NOT a real device)"
             echo ""
@@ -827,8 +832,8 @@ jobs:
         with:
           name: web-smoke
           path: |
-            /tmp/opencode/yacr-web.png
-            /tmp/opencode/yacr-web.json
-            /tmp/opencode/web-smoke.log
+            ${{ runner.temp }}/yacr-web-smoke/yacr-web.png
+            ${{ runner.temp }}/yacr-web-smoke/yacr-web.json
+            ${{ runner.temp }}/yacr-web-smoke/web-smoke.log
           if-no-files-found: warn
           retention-days: 14
