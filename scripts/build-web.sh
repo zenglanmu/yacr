@@ -44,6 +44,25 @@ mkdir -p "$DIST/ui-font"
 cp crates/cad-ui-slint/fonts/YacrUI-Regular.otf crates/cad-ui-slint/fonts/OFL.txt "$DIST/ui-font/"
 cp apps/app-web/web/style.css "$DIST/style.css"
 
+# Build stamp = content hash of the wasm. main.js, index.html and the generated
+# pkg/yacr.js all request the wasm/glue under this stamp, so a redeploy can never
+# link a stale cached pkg/yacr.js against a newer pkg/yacr_bg.wasm (the classic
+# "import object field ... is not a Function" LinkError).
+BUILD_STAMP="$(python3 - "$DIST/pkg/yacr_bg.wasm" <<'PY'
+import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest()[:16])
+PY
+)"
+python3 - "$DIST/index.html" "$BUILD_STAMP" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+if "__YACR_BUILD__" not in text:
+    raise SystemExit("index.html is missing the __YACR_BUILD__ placeholder")
+path.write_text(text.replace("__YACR_BUILD__", sys.argv[2]), encoding="utf-8")
+PY
+echo "web build: build stamp $BUILD_STAMP"
+
 # Copy the single-source-of-truth catalogs so the JS host localizes its own
 # chrome from the same JSON the Rust `MessageSource` embeds (N01 host sync).
 mkdir -p "$DIST/i18n"

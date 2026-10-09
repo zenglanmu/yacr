@@ -1,5 +1,52 @@
 # 后续 agent 接手入口
 
+## Web 生产部署 LinkError：跨部署 glue/wasm 缓存错配修复（2026-10-09，本轮）
+
+用户报告线上 <https://yacr-examples.snakeheartgo.top/> 启动失败：
+`LinkError: import object field '__wbg_adapterInfo_f9744bfff61e772c' is not a Function`。
+
+- 实测**当前生产自洽**（干净 Playwright 浏览器 `chosen=WebGl2 cad_frames=1`，无错误）；
+  上一版不可变部署 `200b4aee` 的旧 `yacr.js` **不含** `adapterInfo` 胶水 →
+  定位为**旧 `pkg/yacr.js` + 新 `pkg/yacr_bg.wasm` 的跨部署缓存错配**（文件名无内容哈希、
+  无共同版本），不是构建内 wasm-bindgen 版本问题。
+- 修复：`scripts/build-web.sh` 以 `sha256(wasm)[:16]` 为 build stamp 注入 `index.html` 的
+  `<meta name="yacr-build">`；`index.html` 按 stamp 载入 `main.js?v=`；`main.js` 按同一 stamp
+  `import(\`./pkg/yacr.js?v=\`)` 并把 `yacr_bg.wasm?v=` URL 传给 `init()`，js/wasm 始终成对取用。
+- 新增 `scripts/test-web-cache-busting.py`（静态+变异）接入 `core.yml`；`build-web.sh` 缺
+  `__YACR_BUILD__` 占位符即中止。
+- 本机 Playwright：三个请求均带同一 stamp 且应用正常；`check-web-ui.mjs` 通过。
+- **未部署**：无 Cloudflare token，生产仍是旧 bundle，需下次 `web-deploy` 生效；已受影响客户端
+  需硬刷新/清站点数据一次。详见 `docs/validation-web.md` §14。
+
+## Web：真实 GPU Playwright 调试 + WebGPU 软适配器静默挂起修复（2026-10-09，本轮）
+
+用户要求「本机开启 web wasm 测试，真机调试」，随后「改用 playwright 调试」。本机是**真实桌面**
+（ThinkPad P15v，Wayland，Intel UHD + Quadro P620），非历史无头 LXC。
+
+**实际执行**
+
+- 安装 `wasm-bindgen-cli 0.2.129`（匹配 `Cargo.lock`），`DIST=/tmp/opencode/yacr-web-dev
+  WITH_FONTS=1 scripts/build-web.sh` 成功；`scripts/serve-web.py` 起静态服务。
+- 用已装的 flatpak Chrome 155（CDP 附加 + 仓库外 shim，**未改仓库脚本**）跑
+  `check-web-ui.mjs` 真实 GPU 通过，证据记入 `docs/validation-web.md` §12。
+- 改走 Playwright：`playwright-core 1.64.0` + 自带 Chromium 156.0.8078.4（headful 真实 GPU）。
+  调试脚本在仓库外 `/tmp/opencode/webtest/{debug-web,webgpu-probe,webgpu-pref}.mjs`。
+- **定位并修复**：`--enable-unsafe-webgpu` 下 `navigator.gpu` 给的是 SwiftShader 软适配器，
+  JS 预探测选 `webgpu`，但 Rust 侧 Slint/wgpu 渲染 setup 永不完成 →
+  `chosen=WebGpu adapter=None lifecycle=Detached cad_frames=0`，**无错误无回退的静默空白**。
+  修复：`cad-ui-slint::web::select_backend` 强制 `WebGpu` 经真实 `webgpu_available()` 门；
+  `webgpu_available()` 拒绝 `wgpu::DeviceType::Cpu` 软适配器并 `console_log` 探测结果，
+  失败由 `app-web::start_with_preference` 既有分支回退 `WebGL2`。
+- 重构建 + Playwright 复验：`--enable-unsafe-webgpu` 下显示探测 `device_type=Cpu`、
+  `GpuFailure(...)`、最终 `chosen=WebGl2 … cad_frames=1 lifecycle=Ready`；默认路径不变；
+  `check-web-ui.mjs` 通过。
+- 新增 `scripts/test-web-backend-fallback.py`（静态+变异）并接入 `core.yml`
+  workflow-contracts；本机通过 fmt、`cargo check -p cad-ui-slint -p app-web --target
+  wasm32-unknown-unknown --locked`、`check-workflows.py`。
+
+**未运行/限制**：真 WebGPU 硬件适配器仍未验证（本机只有 SwiftShader 软适配器，修复刻意不用它）；
+非真实 DWG、非手机真机；证据与命令见 `docs/validation-web.md` §12/§13。
+
 ## CI 发布 job 首次运行失败与修复（2026-10-09）
 
 `v0.1` tag 触发 `build.yml` 后，`windows-release` 与 `macos-release` 在打包步骤失败

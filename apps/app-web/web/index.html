@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
+  <!-- Build stamp injected by scripts/build-web.sh (content hash of the wasm).
+       main.js + pkg/yacr.js + pkg/yacr_bg.wasm are all requested under this
+       stamp so a redeploy can never link a stale cached glue against a newer
+       wasm (the "import object field ... is not a Function" LinkError). -->
+  <meta name="yacr-build" content="__YACR_BUILD__">
   <title>yacr CAD</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
@@ -51,7 +56,10 @@
        The live region is updated directly because the i18n funnel (main.js) is
        exactly what failed to load; the message is bilingual on purpose then. -->
   <script type="module">
-    import("./main.js").catch(error => {
+    // Same build stamp as main.js so the host JS and the wasm/glue are always
+    // fetched as one matched pair, never a stale-host/new-wasm mix.
+    const build = (document.querySelector('meta[name="yacr-build"]') || {}).content || "dev";
+    import(`./main.js?v=${build}`).catch(error => {
       window.yacrStartupError = String(error);
       const message = "启动失败 / Startup failed: " + error;
       document.getElementById("host-state").textContent = message;

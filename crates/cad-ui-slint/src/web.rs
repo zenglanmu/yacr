@@ -213,10 +213,26 @@ pub async fn webgpu_available() -> bool {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::BROWSER_WEBGPU;
     let instance = wgpu::Instance::new(descriptor);
-    instance
+    match instance
         .request_adapter(&wgpu::RequestAdapterOptions::default())
         .await
-        .is_ok()
+    {
+        Ok(adapter) => {
+            let info = adapter.get_info();
+            console_log(&format!(
+                "yacr webgpu probe: name={:?} backend={:?} device_type={:?}",
+                info.name, info.backend, info.device_type
+            ));
+            // A software (CPU) WebGPU adapter is reachable through the raw JS
+            // `navigator.gpu` probe — Chromium exposes SwiftShader this way behind
+            // `--enable-unsafe-webgpu` — but Slint's wgpu surface setup never
+            // completes on it (observed hang: `lifecycle=Detached`, `adapter=None`,
+            // no frame, no error). Treat a CPU adapter as unavailable so the host
+            // uses the working WebGL2 tier instead of a silent blank canvas.
+            !matches!(info.device_type, wgpu::DeviceType::Cpu)
+        }
+        Err(_) => false,
+    }
 }
 
 /// Whether `navigator.gpu` exists, without claiming an adapter is available.
@@ -268,9 +284,17 @@ pub async fn select_backend(preference: BackendPreference) -> CadResult<BackendP
         }
         forced => forced,
     };
-    if chosen == BackendPreference::WebGpu && !webgpu_api_present() {
+    // A forced WebGPU request must pass the *same* real wgpu probe that the
+    // renderer will use, not just the `navigator.gpu` presence test. Browsers
+    // can expose `navigator.gpu` and even satisfy the JS `requestAdapter()` used
+    // by the host pre-probe (e.g. a SwiftShader software adapter behind
+    // `--enable-unsafe-webgpu`) while wgpu's `BROWSER_WEBGPU` backend still gets
+    // no adapter. Without this check Slint's backend selection succeeds and the
+    // CAD bridge never attaches, leaving a silent blank canvas instead of the
+    // explicit WebGL2 fallback in `app-web::start_with_preference`.
+    if chosen == BackendPreference::WebGpu && !webgpu_available().await {
         return Err(CadError::GpuFailure(
-            "WebGPU was requested but navigator.gpu is missing".into(),
+            "WebGPU was requested but no usable BROWSER_WEBGPU adapter is available".into(),
         ));
     }
     if chosen == BackendPreference::WebGl2 && !webgl2_available() {

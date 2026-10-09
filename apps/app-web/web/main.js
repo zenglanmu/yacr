@@ -29,6 +29,13 @@ const { setStateKey } = i18n;
 const showRecoveryBackend = wireRecoveryBackend(() => wasmModule, setStateKey);
 let resizeViewport;
 
+// Redeploys change the wasm-bindgen glue/wasm import set. Pairing `pkg/yacr.js`
+// and `pkg/yacr_bg.wasm` under one build stamp keeps a stale cached glue from
+// being linked with a newer wasm (the "import object field ... is not a
+// Function" LinkError). `scripts/build-web.sh` injects the stamp into index.html.
+const buildStamp =
+  (document.querySelector('meta[name="yacr-build"]') || {}).content || "dev";
+
 async function main() {
   forceSingleSampleCanvas();
   normalizeCanvasResizeObserver();
@@ -37,11 +44,17 @@ async function main() {
   setStateKey("host.loading_wasm");
 
   const loadedModule = await withDeadline(
-    import("./pkg/yacr.js"),
+    import(`./pkg/yacr.js?v=${buildStamp}`),
     60000,
     "wasm module load",
   );
-  await withDeadline(loadedModule.default(), 60000, "wasm initialization");
+  await withDeadline(
+    loadedModule.default(
+      new URL(`./pkg/yacr_bg.wasm?v=${buildStamp}`, import.meta.url),
+    ),
+    60000,
+    "wasm initialization",
+  );
   wasmModule = loadedModule;
   setStateKey("host.wasm_loaded");
 

@@ -430,3 +430,195 @@ TRIM 固定世界容差；见 `drawing-edit.md` §6.1。
 `yacr-pages-production-ui.json`、`yacr-pages-production-safety/report.json`、
 `yacr-pages-production-drawing/{LINE,CIRCLE}/report.json`。不把资产一致或本地成功替代线上
 超时验收；Ribbon 触控根因仍未定位。真机/硬件 GPU/WebGPU、Android APK 未在本轮运行。
+
+## 12. 真实 GPU 桌面 Chrome 上的 `check-web-ui.mjs`（2026-10-09，本轮）
+
+本节与 §1–§11 的**无头 LXC + SwiftShader 软件渲染**证据是不同环境：本轮在用户本机的
+**有显示桌面上用真实 GPU 与真实 Chrome** 运行。单列记录，不覆盖或替代历史证据。
+
+### 环境（与历史不同）
+
+| 项 | 值 |
+|---|---|
+| 主机 | `zenglanmu-ThinkPad-P15v-Gen-1`（真实桌面，非无头 LXC），Wayland `:0` |
+| GPU | Intel UHD Graphics (CML GT2) 核显 + NVIDIA Quadro P620；`/dev/dri` 可用 |
+| 浏览器 | **Google Chrome 155.0.8059.39**（flatpak `com.google.Chrome`，真实窗口，非 Playwright 自带 Chromium） |
+| WebGL 实现 | `ANGLE (Intel, Mesa Intel(R) UHD Graphics (CML GT2), OpenGL ES 3.2)`，vendor `Google Inc. (Intel)` |
+| 代码版本 | `1e4a70d489b78400464eee9875fcda97bff1f2a9`（工作区干净） |
+| 产物 | `/tmp/opencode/yacr-web-dev/`，`WITH_FONTS=1`，wasm **17,878,018 B**，SHA-256 `78eb80a30f4e0aebe7a14425df3834fe3675389b1754e1e4056f90023592d57d`；字体目录 100（99 mlightcad + osifont） |
+| 工具 | `playwright-core 1.64.0`（仅库，不下载浏览器）；`scripts/build-web.sh`、`scripts/serve-web.py` |
+
+### 运行方式（脚本未改）
+
+`check-web-ui.mjs` 默认 `chromium.launch()` 启动自带 SwiftShader 浏览器。本轮**不修改仓库
+脚本**，而是用仓库外的一次性 shim（`PLAYWRIGHT_MODULE` 指向它）把 `chromium.launch()` 换成
+`playwright-core` 的 `connectOverCDP("http://127.0.0.1:9222")`，挂到已由
+`flatpak run com.google.Chrome --remote-debugging-port=9222 --user-data-dir=…` 启动的
+真实 Chrome 上，其余断言逻辑完全沿用。
+
+```bash
+DIST=/tmp/opencode/yacr-web-dev WITH_FONTS=1 bash scripts/build-web.sh
+python3 scripts/serve-web.py --directory /tmp/opencode/yacr-web-dev --port 8090 &
+flatpak run com.google.Chrome --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/yacr-chrome-debug --new-window 'http://127.0.0.1:8090/' &
+PLAYWRIGHT_MODULE=<shim>.mjs PLAYWRIGHT_CDP=http://127.0.0.1:9222 \
+  node scripts/check-web-ui.mjs http://127.0.0.1:8090/ /tmp/opencode/yacr-real-gpu/yacr-web.png
+```
+
+shim 是仓库外文件（不提交），复现需按同样思路重建；仓库脚本仍保持 launch 语义。
+
+### 结果：`web UI check passed`
+
+| 断言 | 本轮真实 GPU 观测值 | 历史 SwiftShader（§3/§9）对照 |
+|---|---|---|
+| 后端 / 错误 | `chosen=WebGl2 adapter=Some(WebGl2)`、`error=None` | 同 |
+| 能力 tier | `caps=Some((WebGl2, false, **16384**))` | `(WebGl2, false, **8192**)`（软件上限不同） |
+| 启动文案 | `渲染器就绪：WebGl2`，`cad_frames=1`，`entities=6` | 同 |
+| CAD 区域非空 | `distinctColors=2`、`stddev=16.202`、`max-min=230.2` | 通过（数值随分辨率不同） |
+| 导航后像素变化 | `changedFraction=0.008874458874458875` | 0.0033–0.0043 |
+| 双语 / 文档保留 / 重载恢复 | `zh-CN→en`，`entities=6` 不变，`marker=keep`，reload 后 `locale=en` | 同 |
+| 六个宿主子模块 | `files/i18n/renderer/runtime/a11y/async-open.js` 全 200 | 同 |
+| 字体编排 | `catalog=0 requested=0 planned=0 registered=0 failed=0`（演示图不引用 CAD 字体） | 同 |
+| console / page 错误 | `consoleErrors=0`、`pageErrors=0`；仅 2 条预期 `No available adapters.` 告警 | 同 |
+
+证据：`/tmp/opencode/yacr-real-gpu/yacr-web.png`、`yacr-web-navigation.png`、
+`yacr-web.json`（结构化报告）。
+
+### WebGPU（本轮单独复核）
+
+真实 Chrome 155 中 `navigator.gpu` 为 **真**，但
+`navigator.gpu.requestAdapter({powerPreference:'high-performance'})` 返回 **null**；
+`window.yacrBackendProbe = {requested:"auto", chosen:"webgl2", reason:"WebGPU returned no adapter"}`。
+即应用**探测到 WebGPU API 但无可用适配器，如实回退 WebGL2**——**WebGPU 路径仍未验证**，
+与 §5、§11 的 NOT RUN 结论一致。
+
+### NOT RUN / 限制（勿推广）
+
+- **非真实 DWG**：仅内置演示几何（`entities=6`），未导入 `~/sources/cad-test-files/`
+  中的外部图纸，无出图 smoke 或参考图视觉验收。
+- **非 WebGPU、非独显**：实际渲染在 Intel UHD 核显（ANGLE）；NVIDIA Quadro P620 与
+  WebGPU 均未参与，不能作为 GPU 兼容性或性能结论。
+- **非手机真机**：桌面 Chrome，非 Android/iOS 真机或模拟器；触摸/窄屏回归未跑。
+- **非用户日常会话**：使用了独立调试 profile（`--user-data-dir=/tmp/yacr-chrome-debug`）
+  与 `--remote-debugging-port`，不等同于普通用户启动路径。
+- 仅 `check-web-ui.mjs` 一个脚本、单次通过；`check-web-drawing*.mjs`、`check-web-mobile.mjs`
+  等未在本轮真实 GPU 上重跑；未做 Slint 画布内文案 OCR 级核对。
+- 未提交原图/截图；上述证据目录为一次性本机产物。
+
+## 13. WebGPU 软件适配器静默挂起：Playwright 定位与修复（2026-10-09，本轮）
+
+§12 记录的是默认（无标志）路径；本节是其中「WebGPU 未验证」的后续深挖。用
+Playwright 驱动真实 GPU 复现并修复了一个**静默空白**缺陷（违反仓库第 2 条铁律）。
+
+### 环境与复现
+
+- Playwright `playwright-core 1.64.0` 自带 **Chromium 156.0.8078.4**，headful 真实 GPU
+  （Intel UHD via ANGLE）；另用 flatpak **Chrome 155.0.8059.39** 复核默认路径。
+- 启动参数加 `--enable-unsafe-webgpu` 后：
+  - `navigator.gpu.requestAdapter()` 成功，但适配器是**软件 SwiftShader**
+    （`info.vendor="google"`, `info.architecture="swiftshader"`；任何
+    `powerPreference`/`forceFallbackAdapter` 都一样）。
+  - JS 宿主预探测 `window.yacrBackendProbe` 判定 `chosen:"webgpu"`，于是调用
+    `start_web_with_backend("webgpu")`。
+  - Rust 渲染器随后：`chosen=WebGpu adapter=None caps=None error=None … cad_frames=0
+    lifecycle=Detached`，宿主文案**永远停在**「wasm 已加载，正在初始化渲染器…」，
+    `window.yacrStartupError=null`，console/page 错误 **0/0**（静默挂起，无回退）。
+
+### 根因
+
+1. `apps/app-web/web/host/startup.js::chooseBackend` 用**原始** `navigator.gpu` 探测，软适配器
+   也算“可用”。
+2. `crates/cad-ui-slint/src/web.rs::select_backend` 对**强制** `WebGpu` 只检查
+   `webgpu_api_present()`（`navigator.gpu` 是否存在）。即便改为真实 `webgpu_available()`
+   探测，wgpu 的 `BROWSER_WEBGPU` 仍能拿到这个 **CPU 适配器**从而返回“可用”。
+3. Slint 的 wgpu 后端选择因此返回 `Ok`，但渲染 setup 从未完成，`install_with_preference`
+   的 `attach`/`fail` 都没触发 → 无 error、无回退、无画面。
+
+### 修复
+
+1. `select_backend`：强制 `WebGpu` 经过真实 `webgpu_available().await` 门，
+   失败即返回 `GpuFailure`，交给 `app-web::start_with_preference` 既有的非 Auto 分支
+   回退 `WebGL2`。
+2. `webgpu_available()`：取得适配器后用 `adapter.get_info()` 判断，**拒绝
+   `wgpu::DeviceType::Cpu`（软件）适配器**，并 `console_log` 探测结果，让“软适配器不可用”
+   显式可见，而不是被当成可用后挂起。
+
+### 修复后验证（Playwright，`--enable-unsafe-webgpu`，重构建 wasm）
+
+| 观测 | 修复后 |
+|---|---|
+| console | `yacr webgpu probe: name="" backend=BrowserWebGpu device_type=Cpu` → `GpuFailure("WebGPU was requested but no usable BROWSER_WEBGPU adapter is available")` |
+| 最终状态 | `chosen=WebGl2 adapter=Some(WebGl2) caps=Some((WebGl2,false,16384)) error=None cad_frames=1 lifecycle=Ready`，`渲染器就绪：WebGl2` |
+| 挂起 | 消失（修复前 `Detached`/`adapter=None`/`cad_frames=0`） |
+| 默认路径（无标志） | 不变：`chosen=WebGl2`、真实 GPU、`consoleErrors=0` |
+| `check-web-ui.mjs`（Playwright 自带浏览器） | `web UI check passed` |
+
+修复后 bundle：wasm **17,879,429 B**，SHA-256
+`41c5e10a64bf3602c002fce112af0394fa04244dae15c8645b5aaba4f2b3752f`。
+
+### 契约测试与门禁
+
+- 新增 `scripts/test-web-backend-fallback.py`（静态 + 变异）：守卫「强制 WebGPU 用真实
+  `webgpu_available()` 探测」「拒绝软件适配器」「非 Auto 失败回退 WebGL2」，并拒绝把预修复的
+  `webgpu_api_present()` 单一判据改回来。已接入 `core.yml` 的 workflow-contracts 步骤。
+- 本机实际通过：`cargo fmt --all -- --check`、`cargo check -p cad-ui-slint -p app-web
+  --target wasm32-unknown-unknown --locked`、`python3 scripts/check-workflows.py`、
+  `python3 scripts/test-web-backend-fallback.py`，以及上面 Playwright 复验。
+
+### NOT RUN / 限制（勿推广）
+
+- **真 WebGPU 仍未验证**：本机唯一可用的是 SwiftShader 软适配器（`device_type=Cpu`），
+  修复主动不采用它；因此从未在真实 WebGPU 硬件适配器上验证该渲染路径。
+- 修复只保证“软/不可用 WebGPU 显式回退 WebGL2”，不证明 WebGPU 路径本身正确。
+- 仍为演示几何（`entities=6`），非真实 DWG；非手机真机；`yacrBackendProbe.chosen` 仍是
+  JS 预探测结论（可能为 `webgpu`），实际后端以 `window.yacrState` 为准。
+
+## 14. 生产部署 LinkError：跨部署 glue/wasm 缓存错配与 build-stamp 修复（2026-10-09，本轮）
+
+用户报告线上 <https://yacr-examples.snakeheartgo.top/> 出现：
+
+```
+yacr: startup failed LinkError: import object field
+'__wbg_adapterInfo_f9744bfff61e772c' is not a Function   main.js:103:11
+```
+
+### 定位（均为实际执行）
+
+- 拉取**当前生产** `pkg/yacr.js`（190,835 B）与 `pkg/yacr_bg.wasm`（17,879,042 B）：
+  两者**都**含 `__wbg_adapterInfo_f9744bfff61e772c`，js 在第 413 行把它定义为 function。
+- 干净 Playwright 浏览器打开生产站：`chosen=WebGl2 adapter=Some(WebGl2) error=None
+  cad_frames=1`，无 console/page 错误 → **当前部署本身是自洽的**。
+- 拉取上一版不可变部署 `https://200b4aee.yacr-examples.pages.dev/`：`yacr.js` 191,053 B、
+  wasm 15,505,725 B，旧 js **完全没有** `adapterInfo` 胶水（`__wbg_adapterInfo_*` 计数 0）。
+
+结论：这是**旧的 `pkg/yacr.js` + 新的 `pkg/yacr_bg.wasm`** 的跨部署缓存错配。wasm-bindgen 的
+`__wbg_*` 导入名随构建变化；两个文件各自独立缓存（文件名无内容哈希、无共同版本），re转发布后
+浏览器拿到新 wasm 却复用旧 glue，就在实例化时 `LinkError`。**不是**构建内 wasm-bindgen 版本不一致
+（`build-web.sh` 用同一 CLI 同时产出 js/wasm），**也不是**当前 origin 内容不自洽。
+
+### 修复：一次构建一个 build-stamp，强制成对取用
+
+- `scripts/build-web.sh`：算 `sha256(pkg/yacr_bg.wasm)[:16]` 作为 build stamp，写入
+  `index.html` 的 `<meta name="yacr-build" content="...">`（占位符 `__YACR_BUILD__` 缺失即中止）。
+- `index.html`：内联入口按 stamp 载入 `./main.js?v=${build}`。
+- `main.js`：按同一 stamp `import(\`./pkg/yacr.js?v=${buildStamp}\`)`，并把
+  `new URL(\`./pkg/yacr_bg.wasm?v=${buildStamp}\`, import.meta.url)` 传给 wasm-bindgen 的
+  `init()`（该签名接受 URL）。
+
+于是每次发布 js/wasm 都落在新的 URL 键上，浏览器不会再把旧 glue 与新 wasm 拼在一起；重发布后
+受影响的客户端只要正常加载即自愈。
+
+### 修复后本地验证
+
+- Playwright：三个请求分别为 `main.js?v=41c5e10a64bf3602`、`pkg/yacr.js?v=41c5e10a64bf3602`、
+  `pkg/yacr_bg.wasm?v=41c5e10a64bf3602`，应用 `chosen=WebGl2 … cad_frames=1` 正常启动。
+- `scripts/check-web-ui.mjs` 通过；`scripts/test-web-cache-busting.py`（静态+变异，3 项）与
+  `scripts/test-web-backend-fallback.py` 通过，均已接入 `core.yml` workflow-contracts。
+
+### NOT RUN / 限制
+
+- **本轮未重新部署到 Cloudflare Pages**（无 token）；生产仍是旧的无版本 bundle，修复要在下次
+  `web-deploy` 后才生效。修复仅在本机静态服务 + Playwright 验证。
+- 已受影响的客户端需硬刷新/清站点数据一次；之后由 stamp 自愈。
+- CI `web-build` 的「wasm/js pairing」步骤目前只 `grep yacr_bg.wasm`，并不真正校验 wasm 的
+  `__wbg_*` 导入是否都被 glue 定义；本次缓存错配也不属于该检查范围（构建内成对）。
