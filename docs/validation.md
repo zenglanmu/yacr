@@ -380,6 +380,37 @@ PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假�
 组合）均未运行。Wine 是软件翻译，**不得**作为 Windows 兼容性或真机结论。详见
 `docs/windows-app.md`。
 
+## macOS 宿主接入与打包脚本（2026-10-09 执行；**无 macOS 产物**）
+
+用户要求：构建 macOS 下应用，最终类似 Linux/Windows 版，输出含字体的压缩包。经问询确认按
+CI 模式实现，产物为 tar.gz（含 `Yacr.app` + fonts/docs）。宿主实现为 `apps/app-macos`
+（`yacr-macos`），薄封装 `apps/app-linux` 共享入口；平台差异（`rfd`/`NSOpenPanel` 文件
+对话框、`~/Library/Application Support` 配置目录、`/System/Library/Fonts` 系统字体）按 cfg
+选择。打包脚本 `scripts/package-macos-release.sh` **只能在 macOS 上运行**（非 Darwin 直接
+退出），默认 universal（arm64 + x86_64 `lipo`），用 `otool -L` 断言动态依赖只来自系统库。
+
+**CI**（`.github/workflows/build.yml`）：`macos-check`（每次 push/PR，
+`cargo check -p app-macos --all-targets --locked`，原生 arm64，不运行）与 `macos-release`
+（`workflow_dispatch` / `v*` tag，universal 打包并上传 `yacr-macos-release` artifact）。
+**这两个 job 本身未在本环境运行**（无 macOS runner）。
+
+本轮本机实际执行（Linux 宿主，**无 Apple SDK，不产出 Mach-O**）：
+
+- 主机门禁：fmt、严格 clippy（`-D warnings`）、architecture/workflows/i18n、
+  `test-package-macos-release.py`、`cargo check --workspace --exclude app-android
+  --exclude app-web --all-targets --locked` 通过。
+- **macOS 门控代码的交叉类型检查**：`rustup target add aarch64-apple-darwin` 后，
+  `cargo check -p app-macos --all-targets --target aarch64-apple-darwin --locked` 与
+  `cargo clippy -p app-macos -p app-linux --all-targets --target aarch64-apple-darwin
+  --locked -- -D warnings` 均通过（期间修掉 `apps/app-linux/src/host/validation.rs` 与
+  `src/entry.rs` 对 `cad_ui_slint::offscreen` 的无条件引用）。这只做类型检查，**不链接、
+  不产出 Mach-O、不运行**。
+
+**边界（NOT RUN）**：`macos-check`/`macos-release` job、真实 Mac 的窗口/Retina-DPI、
+Metal GPU 渲染与像素/视觉验收、原生文件对话框、配置目录写入、`--headless`（macOS 显式不
+支持，无 Vulkan）、`lipo`/`otool` 校验与 tar.gz 产物、代码签名/notarization 均未运行；
+本环境**无 macOS 压缩包产物**。详见 `docs/macos-app.md`。
+
 ## 集成轮：Android/Web 运行与显示链（2026-10-02 执行）
 
 四个并行 workstream 已合入 `main` 并按下述命令验证。详细证据见
@@ -557,8 +588,10 @@ wasm `--lib` 均通过。
   真实图纸上的 ACIS 端到端 **未运行**。
 - **出图**：仅光栅 PNG；无矢量 PDF/HPGL/SVG、无 CTB/STB 打印样式、无打印设备配置、
   无黄金图。
-- iOS/macOS 宿主：**未构建**；仅 `cad-platform` 抽象。Windows 宿主已交叉编译并在 Wine
-  下实际运行 CLI/参数解析（本轮 Windows 小节）；真实 Windows/GPU/文件对话框仍 **NOT RUN**。
+- iOS 宿主：**未构建**；仅 `cad-platform` 抽象。macOS 宿主已按 cfg 接入并配 CI 打包
+  （见本轮 macOS 小节），但只能在 macOS 上构建，真实 Mac/Metal GPU/文件对话框仍
+  **NOT RUN**。Windows 宿主已交叉编译并在 Wine 下实际运行 CLI/参数解析（本轮 Windows
+  小节）；真实 Windows/GPU/文件对话框仍 **NOT RUN**。
 - 大型授权真实 DWG/字体、跨后端黄金图对照、**手机内存预算与 FPS 实测**：仍缺大型
   授权样本与真机测量（现有开源 QCAD flange 样本仅 `Partial`，见
   `docs/validation-dxf-flange.md`）；`docs/performance.md` 只记录可复现的宿主测量方法，

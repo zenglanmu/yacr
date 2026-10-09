@@ -303,14 +303,18 @@ pub mod local {
     }
 
     /// Candidate `fonts/` directories for an executable path, most specific
-    /// first: next to the binary, next to its `bin/` parent, then the working
-    /// directory.
+    /// first: next to the binary, next to its `bin/` parent, under a macOS
+    /// `.app` bundle's `Contents/Resources/`, then the working directory.
     pub fn font_dir_candidates(exe: &Path) -> Vec<PathBuf> {
         let mut out = Vec::new();
         if let Some(dir) = exe.parent() {
             out.push(dir.join("fonts"));
             if let Some(parent) = dir.parent() {
                 out.push(parent.join("fonts"));
+                // macOS `.app` layout: `Contents/MacOS/<exe>` with the font
+                // package at `Contents/Resources/fonts`. Harmless on other
+                // platforms (the path simply does not exist).
+                out.push(parent.join("Resources").join("fonts"));
             }
         }
         if let Ok(cwd) = std::env::current_dir() {
@@ -344,9 +348,9 @@ pub mod local {
     /// Ask fontconfig for the file backing `family`; `None` when fontconfig is
     /// absent or the family resolves to nothing.
     ///
-    /// Unix (and Android) only: Windows resolves its own system fonts from the
-    /// font directory instead of `fc-match`.
-    #[cfg(not(target_os = "windows"))]
+    /// Unix (and Android) only: Windows and macOS resolve their own system fonts
+    /// from the font directories instead of `fc-match`.
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     fn fc_match(family: &str) -> Option<String> {
         let output = std::process::Command::new("fc-match")
             .args(["-f", "%{file}", family])
@@ -364,7 +368,7 @@ pub mod local {
     ///
     /// Entries the shaping engine cannot parse (for example a `.ttc` collection)
     /// are skipped by the caller; this only collects candidate bytes.
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     pub fn system_default_candidates() -> Vec<Arc<[u8]>> {
         let mut out = Vec::new();
         let mut push = |path: &str| {
@@ -430,6 +434,36 @@ pub mod local {
             ] {
                 push(&dir.join(name));
             }
+        }
+        out
+    }
+
+    /// macOS: read the usual UI faces from the system font directories.
+    ///
+    /// There is no `fc-match`; the machine-wide faces live in
+    /// `/System/Library/Fonts` (with supplemental faces under
+    /// `Supplemental/`) and the administrator-installed faces in `/Library/Fonts`.
+    /// Only the byte candidates are collected here; the shaping engine skips
+    /// anything it cannot parse (for example the many `.ttc` collections and the
+    /// variable-axis `SFNS.ttf`). System Integrity Protection guarantees these
+    /// paths exist and are readable on a stock install.
+    #[cfg(target_os = "macos")]
+    pub fn system_default_candidates() -> Vec<Arc<[u8]>> {
+        let mut out = Vec::new();
+        let mut push = |path: &str| {
+            if let Ok(bytes) = std::fs::read(path) {
+                out.push(Arc::from(bytes.into_boxed_slice()));
+            }
+        };
+        for path in [
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/System/Library/Fonts/Helvetica.ttf",
+            "/System/Library/Fonts/Geneva.ttf",
+            "/System/Library/Fonts/Supplemental/Verdana.ttf",
+            "/Library/Fonts/Arial.ttf",
+        ] {
+            push(path);
         }
         out
     }
@@ -502,6 +536,21 @@ pub mod local {
             let candidates = font_dir_candidates(exe);
             assert_eq!(candidates[0], PathBuf::from("/opt/yacr/bin/fonts"));
             assert_eq!(candidates[1], PathBuf::from("/opt/yacr/fonts"));
+            // macOS `.app` layout: `Contents/MacOS/<exe>` -> `Contents/Resources/fonts`.
+            let app_exe = Path::new("/opt/Yacr.app/Contents/MacOS/yacr-macos");
+            let app_candidates = font_dir_candidates(app_exe);
+            assert_eq!(
+                app_candidates[0],
+                PathBuf::from("/opt/Yacr.app/Contents/MacOS/fonts")
+            );
+            assert_eq!(
+                app_candidates[1],
+                PathBuf::from("/opt/Yacr.app/Contents/fonts")
+            );
+            assert_eq!(
+                app_candidates[2],
+                PathBuf::from("/opt/Yacr.app/Contents/Resources/fonts")
+            );
         }
 
         #[test]

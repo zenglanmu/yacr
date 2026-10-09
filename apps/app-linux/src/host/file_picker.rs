@@ -1,8 +1,9 @@
 //! Native file selection.
 //!
-//! Linux uses the XDG desktop portal (ashpd); Windows uses the common file
-//! dialog through `rfd`. In both cases cancellation is distinct from a service
-//! failure so the UI can say which happened.
+//! Linux uses the XDG desktop portal (ashpd); Windows and macOS use the common
+//! native dialog through `rfd` (Win32 common dialog / `NSOpenPanel`). In every
+//! case cancellation is distinct from a service failure so the UI can say which
+//! happened.
 use super::*;
 
 #[cfg(target_os = "linux")]
@@ -43,7 +44,7 @@ pub(super) fn pick(locale: &str) -> CadResult<PathBuf> {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(super) fn pick(locale: &str) -> CadResult<PathBuf> {
     let messages = cad_ui_slint::MessageSource::from_request(locale);
     let selection = rfd::FileDialog::new()

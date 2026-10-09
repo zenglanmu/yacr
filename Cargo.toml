@@ -25,6 +25,7 @@ members = [
     "apps/app-web",
     "apps/app-linux",
     "apps/app-windows",
+    "apps/app-macos",
 ]
 
 [workspace.package]

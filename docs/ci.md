@@ -60,6 +60,8 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 | `linux-app` | build.yml | `ubuntu-latest` | Linux App debug 全目标编译与日志，不运行渲染 |
 | `windows-check` | build.yml | `windows-latest` | 原生 MSVC 目标 `cargo check -p app-windows`，不运行 PE |
 | `windows-release` | build.yml | `windows-latest`（按需/tag） | MSVC release 打包 + 全量字体 zip，上传 artifact |
+| `macos-check` | build.yml | `macos-latest` | 原生 arm64 macOS 目标 `cargo check -p app-macos`，不运行 app |
+| `macos-release` | build.yml | `macos-latest`（按需/tag） | universal `Yacr.app` tar.gz + 全量字体，上传 artifact |
 | `core-quality` | core.yml | `ubuntu-latest` | debug 全目标编译 + fmt + clippy + 架构边界，失败即红灯 |
 | `wasm-check` | core.yml | `ubuntu-latest` | 完整 workspace wasm `--lib` 检查 + 单独 `app-web` 检查 |
 | `i18n-contracts` | core.yml | `ubuntu-latest` | 双语 catalog / 缺 key / 硬编码白名单校验 |
@@ -122,6 +124,25 @@ Rust 测试代码通过 `--all-targets` 编译，但不执行测试。该 job �
 编译门禁是 `windows-check`。本环境未在 GitHub Actions 上实际执行该 job，属 NOT RUN；
 Linux 本机可分别以 `x86_64-pc-windows-gnu`（MinGW）或 `CARGO_XWIN=1` 的
 `x86_64-pc-windows-msvc`（cargo-xwin）本地复现脚本逻辑。
+
+### `macos-check`（原生 macOS 编译层，必需 job）
+
+`runs-on: macos-latest`，命令 `cargo check -p app-macos --all-targets --locked`
+（原生 arm64 macOS，不运行 app）。
+
+验证共享桌面宿主（`app-linux` + `app-macos`）在真实 macOS 目标上的编译。**只证明编译**：
+不验证窗口、Metal GPU、原生文件对话框或真机。本环境（Linux，无 macOS runner 与 Apple
+SDK）未执行该 job，属 NOT RUN。
+
+### `macos-release`（universal macOS 发布包，按需）
+
+`runs-on: macos-latest`，`if: github.event_name == 'workflow_dispatch' || tags/v*`。
+安装 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` target 后执行
+`MACOS_ARCH=universal WITH_FONTS=1 bash scripts/package-macos-release.sh`：用 `lipo`
+合成通用 Mach-O、组装自包含 `Yacr.app`（`Info.plist` + 字体包）、`otool -L` 断言依赖只来自
+系统库，上传 `yacr-macos-release` artifact（tar.gz + sha256）。默认不在每个 PR 上跑以保持
+门禁轻量；编译门禁是 `macos-check`。本环境未在 GitHub Actions 上执行该 job，属 NOT RUN；
+Linux 主机无法产出 Mach-O，不能本地复现。见 `docs/macos-app.md`。
 
 ### `wasm-check`（必需）
 
@@ -273,6 +294,9 @@ runner、标签、secrets 与设备：
   `web-build` / `web-host-contracts`：workflow 已定义；`shader-validation` 与
   `web-build` 的命令已在本环境本地实跑（见下），但**未在 GitHub Actions 上执行**，
   请以真实 job 结果为准并写入 `docs/validation.md`。
+- `windows-check` / `windows-release` / `macos-check` / `macos-release`：workflow 已
+  定义，但**未在本环境的 GitHub Actions 上执行**；Linux 主机无法产出 macOS Mach-O
+  （无 Apple SDK），故 `macos-*` 连本地复现都不可行，只能由 macOS runner/真机产出。
 
 维护者待确认项：是否启用 web 自动发布 `web-deploy`（设置 `CF_PAGES_DEPLOY_ENABLED`
 与 `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`）、是否启用 Android/web-smoke 层
@@ -312,11 +336,13 @@ python3 scripts/check-workflows.py
 python3 scripts/test-linux-workflow.py
 python3 scripts/test-web-deploy-workflow.py
 python3 scripts/test-package-linux-release.py
+python3 scripts/test-package-macos-release.py
 ```
 
-它校验：workflow 文件存在且非空；十一个必需 job（`core-quality`、`wasm-check`、
-`i18n-contracts`、`shader-validation`、`linux-app`、`web-build`、`web-host-contracts`、
-`web-deploy`、`android-check`、`android-apk`、`web-smoke`）均已声明；必需 job 内没有
+它校验：workflow 文件存在且非空；十五个必需 job（`core-quality`、`wasm-check`、
+`i18n-contracts`、`shader-validation`、`linux-app`、`windows-check`、`windows-release`、
+`macos-check`、`macos-release`、`web-build`、`web-host-contracts`、`web-deploy`、
+`android-check`、`android-apk`、`web-smoke`）均已声明；必需 job 内没有
 `continue-on-error: true`；每个 job 保留其命令片段；且被门控的 job
 （`web-deploy`/`android-check`/`android-apk`/`web-smoke`）保留其 `if:` 能力开关
 （缺开关即失败，防止门控被误当成静默通过）。有 PyYAML 时做真实解析，
@@ -332,6 +358,11 @@ python3 scripts/test-package-linux-release.py
 复制进 `lib/` 并带 `$ORIGIN/../lib` RPATH、且保留「无缺失库 / RPATH 生效 / GUI 可加载」的
 打包内校验；逐条删除任一保证都会报错。它只检查脚本文本，**不**执行 release 构建，也不构成
 已打包或已渲染的证据。
+
+`scripts/test-package-macos-release.py` 同理，断言 `scripts/package-macos-release.sh` 仍拒绝
+在非 macOS 运行、构建 CLI 与 GUI 两个 Mach-O、用 `lipo` 合成 arm64+x86_64、拒绝非系统
+动态依赖、组装自包含 `Yacr.app` 与字体包并产出 tar.gz + sha256；它同样只检查脚本文本，
+**不**执行构建，也不构成已打包或在真实 Mac 上可运行的证据。
 
 ## 启用 web 自动发布（维护者操作）
 

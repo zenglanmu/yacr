@@ -1,17 +1,17 @@
-//! Shared desktop host: the Slint/wgpu GUI for Linux (`yacr-linux`) and Windows
-//! (`yacr`, in `apps/app-windows`).
+//! Shared desktop host: the Slint/wgpu GUI for Linux (`yacr-linux`), Windows
+//! (`yacr`, in `apps/app-windows`) and macOS (`yacr-macos`, in `apps/app-macos`).
 //!
 //! On every other target this library is empty, so cross-platform `--lib`
 //! checks still validate workspace isolation rather than claiming support.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 mod host;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub use host::{config_file, FilePicker, LinuxApp, LinuxOptions};
 
 /// Platform-neutral aliases for the shared desktop host.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub use host::{LinuxApp as DesktopApp, LinuxOptions as DesktopOptions};
 
-/// Shared command-line entry point used by both desktop binaries.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+/// Shared command-line entry point used by all desktop binaries.
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub mod entry;

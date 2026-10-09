@@ -1,0 +1,14 @@
+[package]
+name = "app-macos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "yacr-macos"
+path = "src/main.rs"
+
+# The macOS GUI binary is a thin wrapper over the shared desktop host in
+# `app-linux`; all controller/Slint/host logic lives there.
+[target.'cfg(target_os = "macos")'.dependencies]
+app-linux = { path = "../app-linux" }

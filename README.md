@@ -13,6 +13,8 @@
 * 架构：`docs/architecture.md`
 * 构建（Linux App 主验收，含 Android APK）：`docs/build.md`
 * Linux 宿主入口与限制：`docs/linux-app.md`
+* Windows 宿主与打包：`docs/windows-app.md`
+* macOS 宿主与打包：`docs/macos-app.md`
 * UI 导航/禁用、DXF 与旧式 SHX 字号修复：`docs/ui-dxf-text-fixes.md`
 * 验证与运行证据：`docs/validation.md`
 * DWG 测试流程（lavapipe 主测试 + 无头浏览器复验）：[docs/testing-dwg.md](docs/testing-dwg.md)
@@ -65,7 +67,9 @@ Linux App 仍是优先宿主；2026-10-04 起默认提交门禁与 CI `linux-app
 - Web 仅验证 WebGL2 软件路径；WebGPU、真实 GPU 与移动/桌面浏览器矩阵未验证。
 - Linux 已有桌面/离屏共用宿主，但窗口系统与真实 GPU 未验收；文件选择器、恢复决策、后台
   导入、Trim 点选等尚未闭环。Windows 已有交叉编译宿主与含字体 zip（`docs/windows-app.md`），
-  但真实 Windows/GPU/文件对话框未验收。iOS/macOS 仍仅平台抽象。
+  但真实 Windows/GPU/文件对话框未验收。macOS 已接入同一共享宿主并配 CI 打包
+  （`docs/macos-app.md`），但只能在 macOS 上构建，真实 Mac/Metal GPU/文件对话框未验收；
+  iOS 仍仅平台抽象。
 - ACIS 仅有合成样本子集（平面/球/柱/环面/锥面），无授权真实
   3DSOLID/BODY/REGION/SURFACE 样本；带环球面/非圆椭圆/样条面未实现。
   复杂文字整形、动态块参数/夹点求值、复杂视口裁剪、代理无缓存几何均按样本标记为

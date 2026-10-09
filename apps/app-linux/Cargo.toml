@@ -8,12 +8,12 @@ license.workspace = true
 name = "yacr-linux"
 path = "src/main.rs"
 
-# Shared desktop implementation for both the Linux host (`yacr-linux`) and the
-# Windows host (`yacr`, in `apps/app-windows`). The two hosts differ only in the
-# file chooser, the per-user config directory and the system-font source, all of
-# which are cfg-selected inside `src/host/`; the controller/Slint bridge is
-# identical.
-[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+# Shared desktop implementation for the Linux host (`yacr-linux`), the Windows
+# host (`yacr`, in `apps/app-windows`) and the macOS host (`yacr-macos`, in
+# `apps/app-macos`). The hosts differ only in the file chooser, the per-user
+# config directory and the system-font source, all of which are cfg-selected
+# inside `src/host/`; the controller/Slint bridge is identical.
+[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
 cad-app.workspace = true
 cad-db.workspace = true
 cad-domain.workspace = true
@@ -29,7 +29,8 @@ slint.workspace = true
 ashpd = { version = "0.12.3", default-features = false, features = ["async-std"] }
 pollster = "0.4"
 
-# Native Windows file chooser. `default-features = false` drops the optional
-# XDG-portal (Linux) backend; the Windows backend needs no feature.
-[target.'cfg(target_os = "windows")'.dependencies]
+# Native Windows/macOS file chooser. `default-features = false` drops the
+# optional XDG-portal (Linux) backend; the Windows and macOS backends need no
+# feature (`rfd`'s macOS backend is compiled from the `objc2` stack).
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 rfd = { version = "0.15", default-features = false }

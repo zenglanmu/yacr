@@ -2,8 +2,10 @@ name: CI build layers
 
 # N02 §6.2 build/validation layers that need extra toolchains beyond core.yml.
 #
-# Real jobs (run on GitHub-hosted ubuntu-latest):
+# Real jobs (run on GitHub-hosted runners):
 #   linux-app        : debug host compilation (no offscreen rendering)
+#   windows-check    : native MSVC debug host compilation (windows-latest)
+#   macos-check      : native macOS debug host compilation (macos-latest)
 #   web-build        : scripts/build-web.sh -> web-dist artifact + wasm/js pairing
 #   shader-validation: offline naga WGSL test (no GPU needed; forced to fail on
 #                      a broken shader)
@@ -15,6 +17,11 @@ name: CI build layers
 #   web-deploy   : publish the verified web-dist artifact to Cloudflare Pages,
 #                  only on a push to main and only when the maintainer enables
 #                  CF_PAGES_DEPLOY_ENABLED (secrets required)
+#
+# On-demand release jobs (workflow_dispatch or a v* tag):
+#   windows-release : native MSVC release zip (windows-latest)
+#   macos-release   : native macOS universal tar.gz with an Yacr.app bundle
+#                     (macos-latest)
 #
 # Anything that genuinely needs a real device / real GPU is modelled as a skipped
 # job with an explicit not-run summary and documented in docs/ci.md "NOT RUN".
@@ -169,6 +176,94 @@ jobs:
           path: |
             target/x86_64-pc-windows-msvc/release/dist/*.zip
             target/x86_64-pc-windows-msvc/release/dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-check:
+    name: macos-check (native macOS debug compile)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - name: Cache macOS debug check
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-macos-check-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-macos-check-
+      - name: macOS host debug compilation (arm64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check -p app-macos --all-targets --locked 2>&1 | tee macos-check.log
+          {
+            echo '## macOS host debug compilation'
+            echo 'Host and contract test code compiled for the arm64 macOS host; nothing was executed.'
+            echo 'This is not a real-Mac window, Metal-GPU or native-dialog acceptance.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload macOS compilation log (including failed runs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-check
+          path: macos-check.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  macos-release:
+    name: macos-release (universal tar.gz with Yacr.app)
+    runs-on: macos-latest
+    timeout-minutes: 120
+    # On-demand (or a version tag): builds the release package on a real macOS
+    # runner and uploads the tarball. Not run on every PR to keep the default
+    # gate cheap; the compile gate is `macos-check`.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache macOS release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-macos-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-macos-release-
+      - name: Build and package the macOS release (universal, full font catalogue)
+        shell: bash
+        env:
+          WITH_FONTS: "1"
+          MACOS_ARCH: universal
+        run: bash scripts/package-macos-release.sh
+      - name: Record packaging summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## macOS release package (universal)'
+            echo 'Built and packaged on macos-latest; Mach-O dependencies are checked to be system-only.'
+            echo 'Window/Metal-GPU/native-dialog behaviour is not exercised by this job.'
+            echo 'The bundle is unsigned and not notarized (see docs/macos-app.md).'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the macOS release tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: yacr-macos-release
+          path: |
+            target/macos/universal/dist/*.tar.gz
+            target/macos/universal/dist/*.tar.gz.sha256
           if-no-files-found: error
           retention-days: 30
 

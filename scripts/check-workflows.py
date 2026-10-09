@@ -6,10 +6,11 @@ Standard library only. What it checks:
   * at least one workflow file exists under ``.github/workflows`` and is non-empty;
   * every required job is declared as a job key in some workflow
     (``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
-     ``linux-app``, ``windows-check``, ``windows-release``, ``web-build``,
-     ``web-host-contracts``, ``web-deploy``, ``android-check``, ``android-apk``,
-     ``web-smoke``; the last four are capability-gated but still must be
-     *declared* so their absence is visible rather than silent);
+     ``linux-app``, ``windows-check``, ``windows-release``, ``macos-check``,
+     ``macos-release``, ``web-build``, ``web-host-contracts``, ``web-deploy``,
+     ``android-check``, ``android-apk``, ``web-smoke``; the last four are
+     capability-gated but still must be *declared* so their absence is visible
+     rather than silent);
   * no required job declares ``continue-on-error: true`` (job-level or step-level);
   * each required job still contains its expected command fragment, so the job
     keeps mirroring the real gate instead of drifting into an empty success.
@@ -55,6 +56,15 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     ),
     "windows-release": (
         "scripts/package-windows-release.sh",
+        "actions/upload-artifact",
+    ),
+    "macos-check": (
+        "cargo check -p app-macos --all-targets --locked",
+        "actions/upload-artifact",
+        "macos-check.log",
+    ),
+    "macos-release": (
+        "scripts/package-macos-release.sh",
         "actions/upload-artifact",
     ),
     "wasm-check": (

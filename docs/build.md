@@ -210,6 +210,31 @@ YACR_WINDOWS_SMOKE=1 scripts/package-windows-release.sh    # Linux + wine 参数
 **边界**：CI 的 MSVC job 与真实 Windows 窗口/文件对话框/真实 GPU 与像素验收 **未运行**；
 Linux 上已用 cargo-xwin 复现 MSVC release 构建与 Wine 参数解析，但 Wine 不是真机。该包未签名。
 
+## macOS release 包（`macos-latest` 原生构建，`Yacr.app`）
+
+macOS 宿主是 `apps/app-macos`（二进制 `yacr-macos`），同样是共享桌面实现
+`apps/app-linux` 的薄封装；平台差异（`NSOpenPanel` 文件对话框、
+`~/Library/Application Support` 配置目录、`/System/Library/Fonts` 系统字体）按 cfg 选择。
+**主构建路径是 GitHub Actions 的 macOS runner 原生构建**（无法从 Linux 交叉链接）：
+
+- `.github/workflows/build.yml` `macos-check`（每次 push/PR）：
+  `cargo check -p app-macos --all-targets --locked`（编译门禁，不运行）。
+- `macos-release`（`workflow_dispatch` 或 `v*` tag）：
+  `MACOS_ARCH=universal WITH_FONTS=1 bash scripts/package-macos-release.sh`，上传
+  `yacr-macos-release` artifact。
+
+产出 `target/macos/universal/dist/yacr-<version>-macos-universal.tar.gz`（及 `.sha256`），
+内含自包含 `Yacr.app`（`Contents/MacOS/yacr-macos` + `Info.plist` +
+`Contents/Resources/fonts/`）、`bin/cad-cli-tools`、指向字体的 `fonts` 符号链接与文档
+（详见 `docs/macos-app.md`）。脚本用 `lipo` 合成 arm64 + x86_64 通用二进制，并用
+`otool -L` 断言依赖只来自系统库（否则中止）。
+
+**边界**：本机是 Linux，**无法**产出 Mach-O；CI 的 macOS job 与真实 Mac 窗口/Metal
+GPU/文件对话框/像素验收 **未运行**。`--headless` 离屏验证在 macOS 上显式不支持（无
+Vulkan）。该包未签名、未 notarize。
+
 ## 桌面 / iOS
 
-`cad-platform` 抽象与 ADR；未建不可编译的虚假宿主。macOS/iOS 仍为保留槽位。
+`cad-platform` 抽象与 ADR；未建不可编译的虚假宿主。macOS 桌面宿主已按上述 cfg 模式接入
+（`apps/app-macos` + 共享 `app-linux`），但真实 Mac 上的运行/渲染仍属 NOT RUN；iOS 仍为
+保留槽位。

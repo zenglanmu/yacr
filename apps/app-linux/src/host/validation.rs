@@ -1,4 +1,10 @@
 //! Acceptance runs the Linux host, not a test-only sink or an alternate UI.
+//!
+//! The acceptance path drives the offscreen software-Vulkan platform, which is a
+//! Linux/Windows capability only; on macOS the module is compiled out and
+//! `--headless` is rejected in `entry.rs`.
+#![cfg(any(target_os = "linux", target_os = "windows"))]
+
 use super::*;
 use cad_render_wgpu::headless::{encode_png, RgbaImage};
 

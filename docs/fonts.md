@@ -144,12 +144,14 @@ Android / Linux 发布包都只是传不同的 `DEST`，本身不含任何平台
     `ResourceMissing`（`font asset not packaged …`），不伪造空字体集；但
     `scripts/fetch-fonts.sh` 会把提交的 `fonts/`（osifont）合并进资产集，保证 APK
     自带默认轮廓面。
-  - **Linux / Windows 桌面与 CLI**（`app-linux`、`app-windows`、`cad-cli-tools`）：
-    共用 `cad-platform::fonts::local`。启动（或每次打开图纸）时扫描可执行文件同级的
-    `fonts/`（或 `--fonts-dir`）目录，用同一套 `load_font_engine` 从本地读字节；
+  - **Linux / Windows / macOS 桌面与 CLI**（`app-linux`、`app-windows`、`app-macos`、
+    `cad-cli-tools`）：共用 `cad-platform::fonts::local`。启动（或每次打开图纸）时扫描可
+    执行文件同级的 `fonts/`（或 `--fonts-dir`；macOS `.app` 还会扫描
+    `Contents/Resources/fonts`）目录，用同一套 `load_font_engine` 从本地读字节；
     之后注册 `--font` 显式字体；最后把系统默认字体注册为第一回退（Linux 用
-    `fc-match`，Windows 读 `%WINDIR%\Fonts` / `%LOCALAPPDATA%\Microsoft\Windows\Fonts`）。
-    没有 `fonts/` 也没有系统字体时文本保持不可绘，绝不伪装。
+    `fc-match`，Windows 读 `%WINDIR%\Fonts` / `%LOCALAPPDATA%\Microsoft\Windows\Fonts`，
+    macOS 读 `/System/Library/Fonts` / `/Library/Fonts`）。没有 `fonts/` 也没有系统字体时
+    文本保持不可绘，绝不伪装。
 
 ## Web 自托管（发布包）
 

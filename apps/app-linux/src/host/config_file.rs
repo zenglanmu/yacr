@@ -27,6 +27,9 @@ const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowedPat
 /// Per-user configuration directory, or `None` when it cannot be resolved.
 ///
 /// Windows: `%APPDATA%\yacr`, falling back to `%LOCALAPPDATA%\yacr`.
+/// macOS: `$HOME/Library/Application Support/yacr` (Apple's per-user data
+/// location; `$XDG_CONFIG_HOME` is deliberately not consulted so a stray shell
+/// variable cannot redirect the store).
 /// Everywhere else: `$XDG_CONFIG_HOME/yacr` when set and non-empty, otherwise
 /// `$HOME/.config/yacr`. This never guesses a path.
 pub fn config_dir() -> Option<PathBuf> {
@@ -37,7 +40,11 @@ pub fn config_dir() -> Option<PathBuf> {
             std::env::var("LOCALAPPDATA").ok().as_deref(),
         )
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        resolve_macos_config_dir(std::env::var("HOME").ok().as_deref())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         resolve_config_dir(
             std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
@@ -68,6 +75,19 @@ pub fn resolve_config_dir(xdg: Option<&str>, home: Option<&str>) -> Option<PathB
         return Some(Path::new(base).join(".config").join("yacr"));
     }
     None
+}
+
+/// macOS form of [`config_dir`]: `$HOME/Library/Application Support/yacr`.
+///
+/// Pure so the precedence is testable without environment mutation; an empty
+/// value is treated as unset.
+pub fn resolve_macos_config_dir(home: Option<&str>) -> Option<PathBuf> {
+    home.filter(|value| !value.is_empty()).map(|base| {
+        Path::new(base)
+            .join("Library")
+            .join("Application Support")
+            .join("yacr")
+    })
 }
 
 /// Default full-config path, if a configuration directory resolves.
@@ -152,4 +172,31 @@ pub fn persist_preference(handle: &UiHandle, path: &Path) -> CadResult<()> {
     }
     let text = handle.projected_user_preference_json();
     atomic_write(path, text.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macos_config_dir_uses_application_support() {
+        assert_eq!(
+            resolve_macos_config_dir(Some("/Users/alice")),
+            Some(PathBuf::from(
+                "/Users/alice/Library/Application Support/yacr"
+            ))
+        );
+        // Empty/absent HOME never guesses a path.
+        assert_eq!(resolve_macos_config_dir(Some("")), None);
+        assert_eq!(resolve_macos_config_dir(None), None);
+    }
+
+    #[test]
+    fn macos_config_path_does_not_consult_xdg() {
+        // Guard against a regression reusing the XDG resolver on macOS: the pure
+        // macOS resolver takes only HOME and always yields the Library location.
+        let dir = resolve_macos_config_dir(Some("/Users/alice")).unwrap();
+        assert!(dir.ends_with("Library/Application Support/yacr"));
+        assert!(!dir.to_string_lossy().contains(".config"));
+    }
 }

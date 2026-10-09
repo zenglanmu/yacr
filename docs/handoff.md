@@ -1,5 +1,59 @@
 # 后续 agent 接手入口
 
+## macOS release 包：GitHub Actions（`macos-latest`）+ 含字体 `Yacr.app` tar.gz（2026-10-09，本轮）
+
+用户要求：构建 macOS 下应用，最终类似 Linux/Windows 版，输出含字体的压缩包。经问询确认：
+按仓库既有的 CI 模式实现（代码 cfg 分支 + `app-macos` + `package-macos-release.sh` +
+CI `macos-latest` 出包 + 文档），产物形式为 **tar.gz：含 `Yacr.app` bundle + fonts/docs**。
+本机是 Linux，**没有 Apple SDK/链接器，无法产出 Mach-O**，故本机不伪造 macOS 产物。
+
+**改动**
+
+1. **共享桌面宿主**：`apps/app-linux` 的宿主实现由
+   `cfg(any(target_os = "linux", target_os = "windows"))` 放宽为
+   `cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))`；平台差异按
+   cfg 分派——文件选择（macOS 用 `rfd`/`NSOpenPanel`，`host/file_picker.rs`）、配置目录
+   （`$HOME/Library/Application Support/yacr`，新增纯函数 `resolve_macos_config_dir`，
+   `host/config_file.rs`）、系统默认字体（`/System/Library/Fonts` + `/Library/Fonts`，
+   `cad-platform::fonts::local`，macOS 无 `fc-match`）。
+2. **macOS 宿主**：新增 `apps/app-macos`（二进制 `yacr-macos`），薄封装共享入口
+   `app_linux::entry::run()`。`--headless` 离屏验证平台强制软件 Vulkan（Linux/Windows），
+   macOS 无 Vulkan，故 `entry.rs` 在 macOS 上把 `--headless` 显式报告为不支持，而非静默
+   降级或编译失败。
+3. **字体目录候选**：`cad_platform::fonts::local::font_dir_candidates` 增加
+   `.app/Contents/Resources/fonts` 候选，使 `Yacr.app` 内 GUI 与同级 CLI 都能自动发现字体
+   （含新增契约断言）。
+4. **打包**：新增 `scripts/package-macos-release.sh`（**只能在 macOS 运行**，非 Darwin 直接
+   退出）。默认 `MACOS_ARCH=universal`：构建 `aarch64-apple-darwin` + `x86_64-apple-darwin`
+   并用 `lipo -create` 合成通用二进制；产出 `Yacr.app`（`Info.plist` + GUI + 
+   `Contents/Resources/fonts/`）、`bin/cad-cli-tools`、`bin/yacr-macos` 与 `fonts` 符号链接、
+   文档与脚本，打成 `yacr-<version>-macos-universal.tar.gz`（+ sha256）。`otool -L` 断言动态
+   依赖只来自系统库，出现 `@rpath`/Homebrew 即中止；`WITH_FONTS=0` 离线仅 osifont；
+   `YACR_MACOS_SMOKE=1` 跑 CLI `--help` 与 GUI 参数解析错误。
+5. **CI**：`build.yml` 新增 `macos-check`（`macos-latest`，原生 arm64
+   `cargo check -p app-macos --all-targets --locked`，每次 push/PR，不运行）与
+   `macos-release`（`workflow_dispatch` / `v*` tag，universal 打包并上传 `yacr-macos-release`
+   artifact）；`check-workflows.py` 的 REQUIRED_JOBS 纳入两者；`docs/ci.md` 同步。
+6. **契约/文档**：新增 `scripts/test-package-macos-release.py`、`docs/macos-app.md`；更新
+   `docs/build.md`、`docs/ci.md`、`docs/fonts.md`、`README.md`、`AGENTS.md`。
+
+**实际执行并通过（本机 Linux，Rust 1.99.0）**
+
+- 主机门禁：fmt、严格 clippy（`-D warnings`）、architecture/workflows/i18n、
+  `test-package-macos-release.py`、`cargo check --workspace ... --all-targets` 通过；
+  `app-macos` 在 Linux 上走 `cfg(not(macos))` 分支编译通过（仅证明新增 workspace 成员不破坏
+  非 macOS 构建）。
+- **macOS 门控代码的交叉类型检查**（本机 Linux，`rustup target add aarch64-apple-darwin`）：
+  `cargo check -p app-macos --all-targets --target aarch64-apple-darwin --locked` 与
+  `cargo clippy -p app-macos -p app-linux --all-targets --target aarch64-apple-darwin
+  --locked -- -D warnings` 均通过（过程中修掉 `validation.rs`/`entry.rs` 对
+  `cad_ui_slint::offscreen` 的无条件引用）。只类型检查，**不**链接、不产出 Mach-O、不运行。
+
+**未运行/限制**：CI 的 `macos-check`/`macos-release` job **未在本环境运行**（无 macOS
+runner）；Linux 主机**无法**产出 Mach-O，也没有 Apple SDK，不能本地复现；真实 Mac 的窗口、
+Retina/DPI、Metal GPU 渲染与像素验收、原生文件对话框、配置目录写入、`--headless`（macOS 显式
+不支持）、代码签名/notarization 全部 **NOT RUN**。详见 `docs/macos-app.md`。
+
 ## Windows release 包：GitHub Actions（MSVC）+ 含字体 zip（2026-10-09，本轮）
 
 用户要求：构建 Windows 下 exe 应用，最终类似 Linux 版，输出含字体的压缩包；随后要求
