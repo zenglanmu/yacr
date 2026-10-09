@@ -1,6 +1,6 @@
 //! Public proxy cache decoding only; raw DWG records are not graphic_data.
 //!
-//! Spec v2.0 §7.2. The metafile framing is the same one acadrust 0.5.5 parses
+//! Spec v2.0 §7.2. The metafile framing is the same one acadrust 0.6.3 parses
 //! (`total_size: u32`, `record_count: u32`, then per record `size: u32`,
 //! `type: u32`, payload). Only opcodes we have real evidence for are decoded —
 //! today that is type 21 (`FillOff`) and type 36 (Unicode text), which the
@@ -130,7 +130,7 @@ pub trait ProxyRecordDecoder {
     ) -> CadResult<Vec<SemanticGeometry>>;
 }
 
-/// The opcodes acadrust 0.5.5 itself types, and therefore evidence-backed.
+/// The opcodes acadrust 0.6.3 itself types, and therefore evidence-backed.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KnownOpcodeDecoder;
 
@@ -165,7 +165,7 @@ impl ProxyRecordDecoder for KnownOpcodeDecoder {
         }
         match record.record_type {
             Self::FILL_OFF => {
-                // acadrust 0.5.5 only types type 21 as FillOff when the payload
+                // acadrust 0.6.3 only types type 21 as FillOff when the payload
                 // is empty; a non-empty payload is `Unknown` there, so we must
                 // not silently drop the bytes or treat it as a decoded fill-off.
                 if !record.data.is_empty() {
@@ -200,7 +200,7 @@ impl ProxyRecordDecoder for KnownOpcodeDecoder {
 
 /// Decode `(text, position, height, rotation)` from a type-36 record.
 ///
-/// The layout is exactly acadrust 0.5.5's: `position`/`normal`/`direction`
+/// The layout is exactly acadrust 0.6.3's: `position`/`normal`/`direction`
 /// vectors at 0/24/48, then `height`/`width_factor`/`oblique_angle` at
 /// 72/80/88, then little-endian UTF-16 units terminated by `0x0000` (and, in
 /// acadrust's encoder, 4-byte alignment padding). This decoder is deliberately

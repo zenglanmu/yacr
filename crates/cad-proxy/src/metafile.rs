@@ -1,6 +1,6 @@
 //! Proxy metafile framing.
 //!
-//! Layout (matching acadrust 0.5.5's parser):
+//! Layout (matching acadrust 0.6.3's parser):
 //!
 //! ```text
 //! u32 total_size

@@ -1,7 +1,7 @@
 //! SYNTHETIC byte-level corpus for the proxy decoder.
 //!
 //! Every `.hex` file under `fixtures/proxy/` was hand-authored from the
-//! documented record layout (acadrust 0.5.5 `ProxyGraphics`) by the committed
+//! documented record layout (acadrust 0.6.3 `ProxyGraphics`) by the committed
 //! generator notes in `fixtures/proxy/README.md`. This is **not** vendor
 //! evidence: these files were not produced by Tianzheng, TSSD, AutoCAD or any
 //! real drawing. They exist to pin the fail-closed contract (framing bounds,

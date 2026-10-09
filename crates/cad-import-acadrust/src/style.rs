@@ -217,9 +217,12 @@ pub(crate) fn linetype_pattern(linetype: &acadrust::LineType) -> (LinetypePatter
 /// Best-effort `style name -> font file` from a DXF STYLE table's XDATA.
 ///
 /// QCAD writes the real TrueType face under the STYLE record's `Acad` XDATA
-/// (`1001 ACAD` / `1000 Arial`) and leaves group 3 empty. The locked acadrust
-/// `TextStyle` does not expose XDATA, so for DXF inputs this small scan fills
-/// the gap. It never overrides a declared group 3/4 font and returns nothing for
+/// (`1001 ACAD` / `1000 Arial`) and leaves group 3 empty. acadrust 0.6.3 types
+/// that face into `TextStyle.true_type_font`, so this scan is only the last
+/// fallback in the resolution chain
+/// `typed true_type_font > font_file (group 3/4) > dxf_style_xdata_fonts byte scan`.
+/// The never-override rule below is scoped to this scan's own output: within it,
+/// a declared group 3 font wins over the XDATA face. It returns nothing for
 /// non-DXF bytes.
 pub(crate) fn dxf_style_xdata_fonts(bytes: &[u8]) -> HashMap<String, String> {
     // Cheap DXF sniff: the first two non-empty ASCII pair lines are `0`/`SECTION`
@@ -343,6 +346,10 @@ mod tests {
 
     #[test]
     fn declared_group_3_wins_over_xdata_and_non_dxf_is_empty() {
+        // Scoped to this scan's own output: the byte scan never overrides a
+        // declared group 3. The overall resolution chain is
+        // `typed true_type_font > font_file (group 3/4) > this scan`, so a typed
+        // face would still win in `read_styles` (see tests.rs).
         let bytes = dxf("0\nSTYLE\n2\ns\n3\ntxt.shx\n1001\nACAD\n1000\nArial");
         let fonts = dxf_style_xdata_fonts(&bytes);
         assert_eq!(fonts.get("s").map(String::as_str), Some("txt.shx"));

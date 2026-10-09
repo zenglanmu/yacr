@@ -72,10 +72,10 @@ fn units_from_code(code: i16) -> PlotPaperUnits {
 /// Paper units implied by the standard AutoCAD paper-size name.
 ///
 /// Names carry the unit as a suffix (`ISO_A4_(210.00_x_297.00_MM)`,
-/// `Letter_(8.50_x_11.00_Inches)`). The locked acadrust DXF reader leaves the
-/// `plot_paper_units` field at its default for LAYOUT records (`group 72` is
-/// not applied), so the name is the reliable source; the parsed code is only a
-/// fallback. Returns `None` when the name carries no unit token.
+/// `Letter_(8.50_x_11.00_Inches)`). acadrust does apply `group 72` to LAYOUT
+/// records, but the name is the more reliable source when it carries a unit
+/// token; the parsed code is only a fallback. Returns `None` when the name
+/// carries no unit token.
 fn units_from_paper_name(name: &str) -> Option<PlotPaperUnits> {
     let lower = name.to_ascii_lowercase();
     if lower.contains("_mm)") || lower.ends_with("_mm") {
@@ -263,8 +263,26 @@ mod tests {
     }
 
     #[test]
+    fn layout_embedded_plot_fields_are_read_verbatim() {
+        // The capability note claimed acadrust does not expose a LAYOUT's
+        // `group 72`/`group 73`. It does; this record is built straight from
+        // those typed fields. The paper name carries no unit token here, so the
+        // parsed unit code is what is used (the name still wins when it does).
+        let mut layout = acadrust::objects::Layout::new("Layout1");
+        layout.paper_size = "Custom_(210.00_x_297.00)".into();
+        layout.paper_width = 210.0;
+        layout.paper_height = 297.0;
+        layout.plot_paper_units = 1; // group 72
+        layout.plot_rotation = 1; // group 73
+        let record = record_from_layout(LayoutId(1), &layout);
+        assert_eq!(record.paper_units, PlotPaperUnits::Millimeters);
+        assert_eq!(record.rotation, PlotRotation::Degrees90);
+    }
+
+    #[test]
     fn paper_name_units_override_the_default_code() {
-        // The locked reader leaves `group 72` unapplied, so the name must win.
+        // A standard paper name carries its unit token, so the name wins over
+        // the (populated) group 72 code.
         assert_eq!(
             resolve_paper_units("ISO_A4_(210.00_x_297.00_MM)", 0),
             PlotPaperUnits::Millimeters

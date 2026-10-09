@@ -58,7 +58,7 @@ cad-platform = { path = "crates/cad-platform" }
 cad-diagnostics = { path = "crates/cad-diagnostics" }
 
 # Integration candidates only: not linked or validated by the scaffold.
-acadrust = "=0.5.5"
+acadrust = { version = "0.6.3", features = ["serde", "import"] }
 slint = "=1.18.1"
 slint-build = "=1.18.1"
 wgpu = "=30.0.1"

@@ -293,15 +293,19 @@ impl<'a> ImporterBuilder<'a> {
             if !style.true_type_font.is_empty() {
                 keys.push(style.true_type_font.clone());
             }
-            // Primary font for this style, used to shape text geometry. Prefer
-            // the TrueType face when the drawing names one explicitly.
+            // Primary font for this style, used to shape text geometry. The
+            // resolution chain is
+            // `typed true_type_font > font_file (group 3/4) > dxf_style_xdata_fonts
+            // byte scan`: the typed acadrust-decoded face is authoritative, the
+            // scan is only a fallback.
             let primary = if !style.true_type_font.is_empty() {
                 Some(style.true_type_font.clone())
             } else if !style.font_file.is_empty() {
                 Some(style.font_file.clone())
             } else {
-                // QCAD stores the face in STYLE XDATA, invisible to the locked
-                // acadrust `TextStyle`; the DXF scan recovers it.
+                // QCAD stores the face in STYLE XDATA. acadrust 0.6.3 types it
+                // into `true_type_font` (handled above); the DXF scan remains the
+                // last fallback for inputs where the typed field is empty.
                 self.dxf_style_fonts
                     .get(&style.name.to_ascii_lowercase())
                     .cloned()
@@ -377,8 +381,9 @@ impl<'a> ImporterBuilder<'a> {
     pub(crate) fn read_plot_settings(&mut self) -> CadResult<()> {
         for mut imported in read_plot_settings(self.acad, &self.layout_ids)? {
             debug_assert_eq!(imported.layout, imported.record.layout);
-            // The locked acadrust DXF reader does not expose a LAYOUT's
-            // `group 73` plot rotation (same gap as `group 72`). When the
+            // acadrust does expose a LAYOUT's `group 72`/`group 73` plot fields
+            // (both 0.5.5 and 0.6.3 apply them). This fallback only runs when
+            // the file declares no rotation (`group 73` = 0/absent): when the
             // declared paper is portrait but the paper-space windows extend past
             // its width and fit its height, the real sheet is landscape: swap the
             // paper axes. Swapping (rather than rotating the content) keeps the
