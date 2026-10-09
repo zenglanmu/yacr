@@ -15,10 +15,21 @@
    `path (architecture ARCH):` 头；脚本原来 `tail -n +2` 只跳过第一行，于是 `arm64:` 头被当作
    「非系统依赖」。修复：改为只取缩进行
    `otool -L "$binary" | awk '/^[[:space:]]/ {print $1}'`（thin/fat 均正确）。
+3. **Windows（第二处）**：`fetch-fonts.sh` 的合并步骤用
+   `pathlib.Path.read_text()/write_text()` 未指定编码，Windows 默认 `cp1252` 无法解码 UTF-8 的
+   `fonts.json`（含非 ASCII 字体名）→ `UnicodeDecodeError`。修复：读写显式 `encoding="utf-8"`。
 
 契约测试补了对应回归守卫（`test-package-windows-release.py` 要求 CR 剥离片段、
-`test-package-macos-release.py` 要求 `awk` 过滤片段）。本机门禁全部通过；修复后再触发
-`workflow_dispatch` 复验（见下）。
+`test-package-macos-release.py` 要求 `awk` 过滤片段、新增 `scripts/test-fetch-fonts.py` 守卫
+UTF-8 编码与「缺字体即失败」）；`test-package-macos-release.py` 与 `test-fetch-fonts.py` 一并
+接入 `core-quality`。
+
+**已验证（2026-10-09）**：`v0.1` tag 强制更新到修复提交后，run
+`https://github.com/zenglanmu/yacr/actions/runs/37916376185` **全部通过**：
+`windows-release`（11m39s，`yacr-windows-release` 57,385,763 B）、`macos-release`（6m14s，
+`yacr-macos-release` 72,217,415 B，universal）、`linux-release`（3m51s，`yacr-linux-release`
+61,648,871 B）均 success 并上传含字体产物；`android-apk`/`android-release`/`web-smoke`/
+`web-deploy` 按能力门控 SKIPPED。这是 CI 打包证据，**不是**真机/真实 GPU/安装运行证据。
 
 ## CI 发布层补全：Linux / Android release job（2026-10-09，本轮）
 

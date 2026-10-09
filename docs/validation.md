@@ -411,6 +411,25 @@ Metal GPU 渲染与像素/视觉验收、原生文件对话框、配置目录写
 支持，无 Vulkan）、`lipo`/`otool` 校验与 tar.gz 产物、代码签名/notarization 均未运行；
 本环境**无 macOS 压缩包产物**。详见 `docs/macos-app.md`。
 
+## CI 发布层实跑：Linux/Windows/macOS release 打包（2026-10-09 执行）
+
+`v0.1` tag 首次触发 `build.yml` 的 `windows-release`/`macos-release` 时失败，经配置 GitHub
+API 鉴权拉取真实日志，定位并修复三个确定性脚本 bug（PE 导入 CRLF、fat `otool` 头、字体目录
+Windows 编码；详见 `docs/handoff.md`「CI 发布 job 首次运行失败与修复」）。修复后把 `v0.1`
+强制更新到修复提交并重跑：
+
+- run `https://github.com/zenglanmu/yacr/actions/runs/37916376185`（sha `2b09fcf`，event push
+  tag `v0.1`）**conclusion=success**。
+- 通过并上传含字体产物：`windows-release`（11m39s，`yacr-windows-release` 57,385,763 B）、
+  `macos-release`（6m14s，`yacr-macos-release` 72,217,415 B，universal arm64+x86_64）、
+  `linux-release`（3m51s，`yacr-linux-release` 61,648,871 B）；`linux-app`/`windows-check`/
+  `macos-check`/`web-build`/`shader-validation`/`web-host-contracts` 亦通过。
+- `android-apk`/`android-release`/`web-smoke`/`web-deploy` 按 `ANDROID_CI_ENABLED`/
+  `WEB_SMOKE_ENABLED`/`CF_PAGES_DEPLOY_ENABLED` 门控 **SKIPPED**（未启用，非通过）。
+
+**边界**：以上是 **CI 打包证据**（在 GitHub 托管 runner 上构建并上传产物），**不是**真机、
+真实 GPU、窗口/文件对话框、安装运行或像素/视觉验收；Android 未产出 APK（门控未启用）。
+
 ## 集成轮：Android/Web 运行与显示链（2026-10-02 执行）
 
 四个并行 workstream 已合入 `main` 并按下述命令验证。详细证据见
