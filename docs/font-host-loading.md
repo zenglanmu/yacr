@@ -52,8 +52,9 @@ Linux 桌面/CLI 宿主复用同一个 `load_font_engine`，只是 `FontLoader` 
 ## Linux 桌面 / CLI（`cad-platform::fonts::local`）
 
 - 启动（桌面）或每次打开图纸后（两者都）重新收集 `requested_fonts`，按序组装引擎：
-  1. 可执行文件同级的 `fonts/` 目录（`fonts.json` + 文件；`--fonts-dir` 可显式指定，
-     显式目录不存在是错误，不静默回退）；
+  1. 可执行文件同级的 `fonts/` 目录（`fonts.json` + 文件；发布包由
+     `scripts/package-linux-release.sh` 经平台无关的 `fetch-fonts.sh` 组装 mlightcad
+     全量 + 提交的 osifont；`--fonts-dir` 可显式指定，显式目录不存在是错误，不静默回退）；
   2. `--font NAME=PATH` 显式注册；
   3. 系统默认字体（fontconfig `fc-match`，跳过 `.ttc` 等无法解析的候选，`__yacr_default__`
      为第一回退）。

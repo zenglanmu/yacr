@@ -37,6 +37,12 @@ wasm 全 workspace lib check 均通过。CLI 差分 smoke：`entities.dxf` 无�
 lines=1443，有 `fonts/`（仓库根）lines=1497——缺字体时默认轮廓面成形，texts 均 0。
 `fetch-fonts.sh` 合并 smoke：100 条目（99 mlightcad + osifont）成功。
 
+**同轮后续（评审意见）**：Linux 发布包只带提交的 osifont 太单薄——用户指出 mlightcad
+CDN 字库应随客户端输出内置（与 Web 一致）。`package-linux-release.sh` 已加 `WITH_FONTS=1`
+（默认）：用平台无关的 `fetch-fonts.sh "$STAGE/fonts"` 组装 mlightcad 全量 + osifont，
+`WITH_FONTS=0` 保留仅 osifont 的离线打包；PACKAGE.txt/文档已同步，mlightcad 再分发授权
+仍由打包方负责。
+
 **未运行/限制**：浏览器/真机下载与整形未验证；Android 未打包安装；无真实 GPU/窗口/
 视觉验收；系统默认面依赖 `fc-match`，本机 `sans-serif` 命中 `.ttc`（引擎跳过）后取
 `DejaVu Sans`，不同系统默认字形不同（预期）；Web 的「浏览器默认」是目录/CDN 轮廓面，

@@ -38,8 +38,11 @@
 仓库级 `fonts/` 是**唯一提交的 CAD 字体包**（`fonts.json` + `osifont.ttf` +
 `COPYING.GPL-3` + `SOURCE.md`），各宿主把它复制到自己的输出旁：
 
-- **Linux 桌面/CLI**：打包脚本把 `fonts/` 放在可执行文件同级（或 `bin/` 同级）；
-  宿主启动时自动扫描 `fonts/fonts.json` 并按需加载（见「主机接线」）。
+- **Linux 桌面/CLI（发布包）**：`scripts/package-linux-release.sh` 默认
+  `WITH_FONTS=1`，用同一个 `scripts/fetch-fonts.sh` 把 mlightcad 全量字库 + 提交的
+  `fonts/` 组装到发布包 `fonts/`（可执行文件 `bin/` 同级）；`WITH_FONTS=0` 只打包
+  提交的 `fonts/`（osifont）。宿主启动时自动扫描 `fonts/fonts.json` 并按需加载
+  （见「主机接线」）。
 - **Web**：`scripts/build-web.sh`/`scripts/fetch-fonts.sh` 把提交的 `fonts/` 合并进
   `web-dist/fonts/`（并与下载的 mlightcad 目录清单合并且去重），浏览器宿主优先用
   同源 `fonts/`，未发布本地包时回落到 CDN。
@@ -48,8 +51,9 @@
 
 `scripts/fetch-fonts.sh <DEST> [FONTS...]` 是**平台无关的唯一打包入口**：下载 mlightcad
 目录清单与指定面（无参数则为全部）、合并提交的 `fonts/`、写 `DEST/fonts.json`。Web /
-Android / 桌面发布都只是传不同的 `DEST`，本身不含任何平台逻辑（旧 `fetch-web-fonts.sh`、
-`fetch-android-fonts.sh` 已并入它并删除）。
+Android / Linux 发布包都只是传不同的 `DEST`，本身不含任何平台逻辑（旧
+`fetch-web-fonts.sh`、`fetch-android-fonts.sh` 已并入它并删除）。mlightcad 字体是第三方，
+随发布包内置于任何平台时都由打包方负责其再分发授权。
 
 ## 实现
 
@@ -175,7 +179,7 @@ Cloudflare Pages 发布见 `scripts/deploy-cloudflare-pages.sh`。
 |---|---|---|---|
 | Web (wasm) | `DEFAULT_FONT_BASE_URL/fonts.json`（jsDelivr，CORS）；自托管构建为同源 `fonts/` | `fetch().arrayBuffer()` | 代码完成；本环境**未跑浏览器验证** |
 | Android | `asset://fonts/fonts.json`（APK assets，含提交的 osifont） | `AssetManager` | 代码完成并编译；本环境**无真机/无打包字体资产** |
-| CLI | 可执行文件同级 `fonts/` + `--font name=path` | 本地文件 | 已实现（`cad-platform::fonts::local`；本机差分 smoke 见下） |
+| CLI | 发布包 `fonts/`（`fetch-fonts.sh` 组装 mlightcad 全量 + osifont）+ `--font name=path` | 本地文件 | 已实现（`cad-platform::fonts::local`；本机差分 smoke 见下） |
 | Linux 桌面 | 可执行文件同级 `fonts/`（或 `--fonts-dir`）+ `--font` | 本地文件 + 系统默认字体（`fc-match`） | 已实现并编译；离屏/桌面运行见 `docs/linux-app.md` |
 
 Web 的 `fetch` 依赖 CDN 的 CORS 头；非 2xx 响应记为 `ResourceMissing`，不当作空字节。
@@ -197,9 +201,11 @@ Android 若未把字体目录放进 `assets/fonts/`（含 `fonts.json`），打�
 
 2026-10-09 CLI 差分 smoke（本机，软件环境，非视觉验收）：`entities.dxf`（94 个
 TEXT/MTEXT）在可执行文件同级的 `fonts/` 不可见时 `build-representation` 为
-`lines=1443`；在仓库根（`./fonts` 命中）或发布包（`bin/../fonts` 命中）运行时为
-`lines=1497`、`texts=0`——缺字体时默认轮廓面（osifont + 系统 DejaVu）把文字整形成
-线段，而不是丢弃。
+`lines=1443`；在仓库根（`./fonts` 命中）或仅 osifont 的发布包（`bin/../fonts` 命中）
+运行时为 `lines=1497`、`texts=0`——缺字体时默认轮廓面（osifont + 系统 DejaVu）把
+文字整形成线段，而不是丢弃。加入 mlightcad 全量字库的发布包（`WITH_FONTS=1`，
+101 个文件）从无关 CWD 运行同样 `texts=0`、`lines=1395`——图纸引用的目录字体在本机
+解析成形，不再依赖回退或网络。
 
 ## 未完成
 

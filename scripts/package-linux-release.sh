@@ -12,6 +12,14 @@
 # Optional smoke test (renders a real DWG and checks the PNG is non-blank):
 #   YACR_TEST_DWG=/path/to/input.dwg scripts/package-linux-release.sh
 #
+# Env:
+#   WITH_FONTS  1 (default) to assemble the full CAD font package into
+#               `fonts/` beside the binary via scripts/fetch-fonts.sh
+#               (mlightcad catalogue + committed QCAD osifont; needs network);
+#               0 for an offline build that keeps only the committed fonts/.
+#   FONT_BASE_URL / FONT_FALLBACK_BASE_URL / FONT_RETRIES  passed through to
+#               fetch-fonts.sh.
+#
 # Artifacts (under target/, which is gitignored):
 #   target/release/dist/yacr-<version>-linux-<arch>.tar.gz
 #   target/release/dist/yacr-<version>-linux-<arch>.tar.gz.sha256
@@ -26,6 +34,7 @@ ARCH="$(uname -m)"
 NAME="yacr-${VERSION}-linux-${ARCH}"
 DIST="target/release/dist"
 STAGE="${DIST}/${NAME}"
+WITH_FONTS="${WITH_FONTS:-1}"
 
 echo "==> building cad-cli-tools (release, locked, offline)"
 cargo build --release --offline --locked -p cad-cli-tools
@@ -42,10 +51,17 @@ cp docs/cli.md docs/headless-render.md docs/render-backends.md docs/build.md \
    docs/validation.md docs/compatibility.md "$STAGE/docs/"
 cp scripts/fetch-test-dwg.sh scripts/render-smoke.sh "$STAGE/scripts/"
 
-# Committed CAD font package (QCAD osifont + its catalogue/provenance): the CLI
-# auto-loads it from the sibling `fonts/` directory and falls back to the system
-# default face for drawing fonts it does not contain. See docs/fonts.md.
-cp -R "$ROOT"/fonts/. "$STAGE/fonts/"
+# CAD fonts: with WITH_FONTS=1 (default) the platform-agnostic packer downloads
+# the mlightcad/cad-data catalogue and merges the committed fonts/ package
+# (QCAD osifont), so a packaged CLI shapes every catalogue font locally without
+# network. WITH_FONTS=0 keeps only the committed fonts/ for an offline build.
+if [ "$WITH_FONTS" = "1" ]; then
+  echo "==> assembling CAD fonts (fetch-fonts.sh) into $STAGE/fonts"
+  "$ROOT/scripts/fetch-fonts.sh" "$STAGE/fonts"
+else
+  echo "==> WITH_FONTS=0: staging committed fonts/ only"
+  cp -R "$ROOT"/fonts/. "$STAGE/fonts/"
+fi
 
 cat > "$STAGE/PACKAGE.txt" <<EOF
 yacr Linux release package
@@ -53,13 +69,15 @@ yacr Linux release package
 version : ${VERSION}
 arch    : ${ARCH}
 built   : $(date -u +%Y-%m-%dT%H:%M:%SZ)
+fonts   : ${WITH_FONTS}; 1 = full catalogue vendored (see below), 0 = osifont only
 
 Contents
 --------
 bin/cad-cli-tools     headless CLI (scan/measure/build-representation/render/...)
-fonts/                committed CAD font package (QCAD osifont.ttf, fonts.json,
-                      provenance in SOURCE.md); auto-loaded from this sibling dir
-                      and used as the default outline fallback
+fonts/                CAD font package in fonts.json format: the mlightcad/cad-data
+                      catalogue plus the committed QCAD osifont.ttf (provenance in
+                      fonts/SOURCE.md); auto-loaded from this sibling dir, missing
+                      drawing fonts fall back to the default outline face
 docs/                 CLI, headless render, backends, build, validation, compat
 scripts/fetch-test-dwg.sh   download a curated real-DWG corpus to /tmp
 scripts/render-smoke.sh     render a DWG and verify the PNG is non-blank
@@ -75,10 +93,12 @@ Quick start
 
 No unlicensed user DWG samples or golden images are bundled; the committed
 QCAD flange fixture (fixtures/dxf/qcad-flange/, upstream terms in SOURCE.md) may
-be included with the scripts. The fonts/ dir holds only the authorized QCAD
-osifont.ttf (GPL-3 with font exception); mlightcad/cad-data fonts are fetched at
-runtime, never vendored. This package is not a compatibility or performance
-claim. See docs/validation.md and docs/headless-render.md.
+be included with the scripts. The mlightcad/cad-data fonts in fonts/ are
+third-party and vendored by the deployer at packaging time (scripts/fetch-fonts.sh;
+redistribution terms are the deployer's responsibility, see docs/fonts.md); only
+the authorized QCAD osifont.ttf (GPL-3 with font exception) is committed to the
+repository. This package is not a compatibility or performance claim.
+See docs/validation.md and docs/headless-render.md.
 EOF
 
 if [ -n "${YACR_TEST_DWG:-}" ]; then

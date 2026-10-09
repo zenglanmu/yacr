@@ -34,7 +34,7 @@ cad-cli-tools <operation> <input.dwg> [options]
 | `--gpu <auto\|high\|low>` | `render`/`plot` 适配器偏好：`auto`/`high`（默认）优先独显（discrete），`low` 优先核显（integrated）；没有所偏好类型时回退到所选后端的首个适配器；也可用 `WGPU_ADAPTER_NAME`/`WGPU_POWER_PREF` |
 | `--max-batches <n>` | `render`/`plot`：累计场景批次硬上限（默认 `4000000`，`0` = 关闭）；超限显式失败而非撑爆内存 |
 | `--max-vertices <n>` | `render`/`plot`：累计场景顶点硬上限（默认 `128000000`，`0` = 关闭）；超限显式失败而非撑爆内存 |
-| `--font <name=path>` | 注册 TTF/OTF/WOFF/SHX 字体用于文字成型（可重复；省略 `name=` 时取文件名）；`render` / `plot` 也使用这些字体。此外原生 CLI 会自动加载可执行文件同级的 `fonts/` 目录并按图纸引用取面，缺字体回退到默认轮廓面（见 `docs/fonts.md`） |
+| `--font <name=path>` | 注册 TTF/OTF/WOFF/SHX 字体用于文字成型（可重复；省略 `name=` 时取文件名）；`render` / `plot` 也使用这些字体。此外原生 CLI 会自动加载可执行文件同级的 `fonts/` 目录（发布包由 `fetch-fonts.sh` 组装 mlightcad 全量 + 提交的 osifont）并按图纸引用取面，缺字体回退到默认轮廓面（见 `docs/fonts.md`） |
 | `--help`, `-h` | 打印用法并退出 0 |
 
 ### 语言（`--locale`）
