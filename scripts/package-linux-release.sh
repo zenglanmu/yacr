@@ -35,12 +35,17 @@ BIN="target/release/cad-cli-tools"
 
 echo "==> staging ${STAGE}"
 rm -rf "$STAGE"
-mkdir -p "$STAGE/bin" "$STAGE/docs" "$STAGE/scripts"
+mkdir -p "$STAGE/bin" "$STAGE/docs" "$STAGE/scripts" "$STAGE/fonts"
 cp "$BIN" "$STAGE/bin/cad-cli-tools"
 cp LICENSE THIRD_PARTY_NOTICES.md README.md "$STAGE/"
 cp docs/cli.md docs/headless-render.md docs/render-backends.md docs/build.md \
    docs/validation.md docs/compatibility.md "$STAGE/docs/"
 cp scripts/fetch-test-dwg.sh scripts/render-smoke.sh "$STAGE/scripts/"
+
+# Committed CAD font package (QCAD osifont + its catalogue/provenance): the CLI
+# auto-loads it from the sibling `fonts/` directory and falls back to the system
+# default face for drawing fonts it does not contain. See docs/fonts.md.
+cp -R "$ROOT"/fonts/. "$STAGE/fonts/"
 
 cat > "$STAGE/PACKAGE.txt" <<EOF
 yacr Linux release package
@@ -52,6 +57,9 @@ built   : $(date -u +%Y-%m-%dT%H:%M:%SZ)
 Contents
 --------
 bin/cad-cli-tools     headless CLI (scan/measure/build-representation/render/...)
+fonts/                committed CAD font package (QCAD osifont.ttf, fonts.json,
+                      provenance in SOURCE.md); auto-loaded from this sibling dir
+                      and used as the default outline fallback
 docs/                 CLI, headless render, backends, build, validation, compat
 scripts/fetch-test-dwg.sh   download a curated real-DWG corpus to /tmp
 scripts/render-smoke.sh     render a DWG and verify the PNG is non-blank
@@ -65,9 +73,11 @@ Quick start
   ./bin/cad-cli-tools render drawing.dwg --png frame.png --width 1280 --height 720
   ./scripts/render-smoke.sh drawing.dwg frame.png
 
-No unlicensed user DWG samples, fonts or golden images are bundled; the committed
+No unlicensed user DWG samples or golden images are bundled; the committed
 QCAD flange fixture (fixtures/dxf/qcad-flange/, upstream terms in SOURCE.md) may
-be included with the scripts. This package is not a compatibility or performance
+be included with the scripts. The fonts/ dir holds only the authorized QCAD
+osifont.ttf (GPL-3 with font exception); mlightcad/cad-data fonts are fetched at
+runtime, never vendored. This package is not a compatibility or performance
 claim. See docs/validation.md and docs/headless-render.md.
 EOF
 

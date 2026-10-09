@@ -47,4 +47,26 @@ else
   echo "  FAIL fonts.json" >&2
 fi
 
+# Merge the committed font package (`fonts/`, currently QCAD osifont.ttf) into
+# the asset set so a packaged APK always carries the default outline face.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -d "$ROOT/fonts" ]; then
+  python3 - "$DEST" "$ROOT/fonts" <<'PY'
+import json, pathlib, sys
+dest, extra = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+catalog_path = dest / "fonts.json"
+if (extra / "fonts.json").exists():
+    entries = json.loads(catalog_path.read_text()) if catalog_path.exists() else []
+    added = [e for e in json.loads((extra / "fonts.json").read_text())
+             if all(str(e.get("file")) != str(x.get("file")) for x in entries)]
+    entries.extend(added)
+    catalog_path.write_text(json.dumps(entries, indent=2) + "\n")
+    for font in added:
+        src = extra / str(font["file"])
+        if src.exists():
+            (dest / str(font["file"])).write_bytes(src.read_bytes())
+            print(f"  merged {font['file']}")
+PY
+fi
+
 echo "Done. Rebuild with: ANDROID_HOME=... JAVA_HOME=... bash scripts/build-android.sh --release"

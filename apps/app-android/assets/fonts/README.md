@@ -9,6 +9,10 @@ the activity `AssetManager` (`asset://fonts/…`; see
 The font binaries are **gitignored** (`assets/fonts/*`). They are third-party
 files from `mlightcad/cad-data`, and bundling them into this repository mixes
 their licence with ours, so the repository only records *how* to obtain them.
+**Exception**: the repository-level `fonts/` package (QCAD `osifont.ttf`,
+GPL-3 + font exception, see `fonts/SOURCE.md`) is committed; the fetch script
+below merges it into this asset directory so a packaged APK always carries the
+default outline fallback face.
 
 Only this README is tracked here; when the folder is otherwise empty, `cargo
 apk` simply packages no fonts and the app reports “font asset not packaged”.

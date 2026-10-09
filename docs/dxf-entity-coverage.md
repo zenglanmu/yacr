@@ -95,9 +95,9 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 
 （`--export-references` 的 ezdxf 导出保留为可选工具，但不再作为验收路径。）
 
-QCAD 字体：`osifont.ttf`（GPLv3）与 `Standard/ltypeshp/qcadshp.cxf`（public domain）已下载
-到本机缓存 `~/sources/cad-test-fonts/qcad/`（**不入库**；CXF 当前引擎不支持）。文本仍
-受 §4 的 XDATA 字体提示限制，因此 `Partial`，但图元类型本身**已支持**。
+QCAD 字体：`osifont.ttf`（GPL-3 + 字体例外）已提交到 `fonts/` 作为默认轮廓回退面；
+`Standard/ltypeshp/qcadshp.cxf`（public domain）留在本机缓存（**不入库；CXF 当前引擎不支持**）。
+文本仍受 §4 的 XDATA 字体提示限制，因此 `Partial`，但图元类型本身**已支持**。
 
 ## 6. 结论
 

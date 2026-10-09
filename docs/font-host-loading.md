@@ -15,7 +15,13 @@
 ```
 
 `cad-platform::fonts::load_font_engine` 是 Web 与 Android 共用的编排；两个宿主只提供
-`FontLoader` 实现，不复制计划/注册/回退逻辑（规范 §4.2 单一业务路径）。
+`FontLoader` 实现，不复制计划/注册/回退逻辑（规范 §4.2 单一业务路径）。当图纸字体缺失
+或拉取失败时它会注册一个**默认轮廓回退面**（`DEFAULT_FALLBACK_NAMES`：
+`osifont` → `arial` → `simplex`），`FontLoadReport.default_face` 记录实际注册项。
+
+Linux 桌面/CLI 宿主复用同一个 `load_font_engine`，只是 `FontLoader` 换成
+`cad-platform::fonts::local::DirFontLoader`（读取可执行文件同级 `fonts/` 目录）；
+随后把 `--font` 显式字体与系统默认字体（`register_default_face`）并入同一引擎。
 
 ## Web（`apps/app-web`）
 
@@ -38,8 +44,22 @@
   目录 `asset://fonts/fonts.json`，即 APK 的 `assets/fonts/`。
 - 触发：`open_drawing` 成功后同步加载（资产读取立即就绪，用 no-op waker 的执行器，
   不是通用 runtime）。
-- **不打包字体**：许可原因（`docs/fonts.md`「授权」），未放 `assets/fonts/` 时返回
-  `ResourceMissing`（`font asset not packaged …`），状态栏报告，绝不伪造。
+- **不打包 mlightcad 字体**：许可原因（`docs/fonts.md`「授权」），未放 `assets/fonts/` 时返回
+  `ResourceMissing`（`font asset not packaged …`），状态栏报告，绝不伪造。但
+  `scripts/fetch-android-fonts.sh` 会把提交的 `fonts/`（QCAD osifont，GPL-3+例外）合并进
+  `assets/fonts/`，保证 APK 至少自带给默认轮廓回退面。
+
+## Linux 桌面 / CLI（`cad-platform::fonts::local`）
+
+- 启动（桌面）或每次打开图纸后（两者都）重新收集 `requested_fonts`，按序组装引擎：
+  1. 可执行文件同级的 `fonts/` 目录（`fonts.json` + 文件；`--fonts-dir` 可显式指定，
+     显式目录不存在是错误，不静默回退）；
+  2. `--font NAME=PATH` 显式注册；
+  3. 系统默认字体（fontconfig `fc-match`，跳过 `.ttc` 等无法解析的候选，`__yacr_default__`
+     为第一回退）。
+- 空结果 → `clear_fonts()`；否则 `set_fonts`。没有可用字体时文本保持不可绘的 `Text`，
+  绝不伪装成已渲染。
+- 打包：`scripts/package-linux-release.sh` 把 `fonts/` 复制到发布包二进制同级。
 
 ## 验证
 

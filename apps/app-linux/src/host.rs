@@ -13,6 +13,7 @@ use std::{
 
 pub mod config_file;
 mod file_picker;
+mod fonts;
 mod input;
 mod state;
 mod validation;
@@ -31,6 +32,9 @@ struct PendingRead {
 #[derive(Debug, Clone)]
 pub struct LinuxOptions {
     pub fonts: Vec<(String, PathBuf)>,
+    /// Explicit CAD font directory (`--fonts-dir`); `None` auto-detects a
+    /// `fonts/` directory next to the executable (or `bin/`).
+    pub fonts_dir: Option<PathBuf>,
     pub headless: bool,
     pub output: Option<PathBuf>,
     pub drawing: Option<PathBuf>,
@@ -47,6 +51,7 @@ impl Default for LinuxOptions {
     fn default() -> Self {
         Self {
             fonts: Vec::new(),
+            fonts_dir: None,
             headless: false,
             output: None,
             drawing: None,
@@ -80,6 +85,7 @@ impl LinuxOptions {
                 }
                 "--output" => options.output = Some(value.into()),
                 "--open" => options.drawing = Some(value.into()),
+                "--fonts-dir" => options.fonts_dir = Some(value.into()),
                 "--config" => options.config = Some(value.into()),
                 "--preferences" => options.preferences = Some(value.into()),
                 "--locale" if matches!(value.as_str(), "zh-CN" | "en") => options.locale = value,
@@ -307,6 +313,37 @@ impl Runtime {
         if let Some(handle) = self.handle.borrow().as_ref() {
             handle.cancel_draw_capture()?;
         }
+        if let Some(view) = self.view.borrow().as_ref() {
+            self.install_fonts(view)?;
+        }
+        Ok(())
+    }
+
+    /// (Re)load shaping fonts for the current drawing.
+    ///
+    /// Reads the sibling `fonts/` package (or `--fonts-dir`), merges explicit
+    /// `--font` entries and installs a best-effort system default face as the
+    /// first fallback. Called at startup and after a document finishes opening,
+    /// so a drawing opened later still gets its fonts.
+    fn install_fonts(&self, view: &CadView) -> CadResult<()> {
+        let requested = self
+            .controller
+            .borrow()
+            .drawing()
+            .map(|drawing| cad_platform::fonts::requested_fonts(drawing.as_ref()))
+            .unwrap_or_default();
+        let exe = std::env::current_exe().unwrap_or_default();
+        let font_dir = fonts::resolve_font_dir(self.options.fonts_dir.as_deref(), &exe)?;
+        let system_default = fonts::cached_system_default_candidates();
+        match fonts::load_desktop_fonts(
+            font_dir.as_deref(),
+            &requested,
+            &self.options.fonts,
+            system_default,
+        )? {
+            Some(engine) => view.set_fonts(engine),
+            None => view.clear_fonts(),
+        }
         Ok(())
     }
 
@@ -365,6 +402,9 @@ impl Runtime {
             self.controller.borrow_mut().fit()?;
             if let Some(handle) = self.handle.borrow().as_ref() {
                 handle.cancel_draw_capture()?;
+            }
+            if let Some(view) = self.view.borrow().as_ref() {
+                self.install_fonts(view)?;
             }
             self.push()?;
         }
@@ -500,18 +540,10 @@ impl LinuxApp {
         }
         let incoming = Rc::new(RefCell::new(controller.borrow().drawing()));
         let view = cad_ui_slint::install_cad_bridge(adapter.handle(), adapter.window(), incoming)?;
-        if !options.fonts.is_empty() {
-            let mut engine = cad_representation::text::FontEngine::new();
-            let mut fallback = Vec::new();
-            for (name, path) in &options.fonts {
-                let bytes =
-                    std::fs::read(path).map_err(|e| CadError::InvalidInput(e.to_string()))?;
-                engine.register(name, Arc::from(bytes))?;
-                fallback.push(name.clone());
-            }
-            engine.set_fallback(fallback);
-            view.set_fonts(Arc::new(engine));
-        }
+        // Fonts: the sibling `fonts/` package, `--font` entries, then the system
+        // default fallback. A drawing font that is missing shapes with the
+        // default instead of being dropped.
+        runtime.install_fonts(&view)?;
         *runtime.view.borrow_mut() = Some(view);
         adapter.set_view_input(Rc::new(input::Navigation::new(runtime.clone())));
         adapter.set_canvas_pick_mapper(Rc::new(runtime.clone()));

@@ -1,5 +1,44 @@
 # 后续 agent 接手入口
 
+## 字体文件设计（2026-10-09，本轮）
+
+用户要求设计并**实现**字体文件方案（只做实现，不单独出设计文档），关键决策经问询确认：
+字体来源 = QCAD + mlightcad；浏览器走 CDN，缺字体回退默认轮廓面；客户端输出带字体文件
+（同级 `fonts/`）；客户端缺字体同样回退默认；QCAD `osifont.ttf` 提交进仓库，`.cxf` 不支持。
+
+**改动**
+
+1. **提交的字体包 `fonts/`**：`osifont.ttf`（QCAD 副本，GPL-3 + 字体例外；来源/哈希见
+   `fonts/SOURCE.md`，许可证 `fonts/COPYING.GPL-3`）+ `fonts/fonts.json`（目录条目）。
+   mlightcad 字体仍不入库。`THIRD_PARTY_NOTICES.md` 已记录。
+2. **默认轮廓回退面（`cad-platform::fonts`）**：`load_font_engine` 在图纸字体缺失/拉取失败时
+   保证注册一个默认面（`DEFAULT_FALLBACK_NAMES = ["osifont","arial","simplex"]`；
+   `FontLoadReport.default_face` 记录）。新增 `register_default_face`（保留键
+   `__yacr_default__`，置为第一回退）与 `fonts::local`（非 wasm）——可执行文件同级
+   `fonts/` 目录的本地 `DirFontLoader`、目录候选/解析、fontconfig 系统默认候选与缓存、
+   及组装引擎的 `load_engine`。
+3. **Linux 桌面（`app-linux`）**：启动与每次打开图纸后重载字体：同级 `fonts/`（或
+   `--fonts-dir`，显式目录必须存在）→ `--font` → 系统默认字体为第一回退。
+4. **CLI（`cad-cli-tools`）**：`load_fonts` 增加 `requested` 入参，原生宿主复用
+   `fonts::local`（同级 `fonts/` + 系统默认）；`run.rs` 先开图再取字体检清单。
+5. **输出打包**：`scripts/package-linux-release.sh` 把 `fonts/` 复制到发布包
+   `bin/` 同级；`scripts/fetch-web-fonts.sh`、`fetch-android-fonts.sh` 把提交的
+   `fonts/` 合并进目录清单与字节（web-dist/fonts、assets/fonts）。
+6. **文档**：`docs/fonts.md`（来源/布局/回退/授权/未完成重写）、`docs/font-host-loading.md`
+   （分层加桌面+默认面）、`docs/cli.md`、`docs/linux-app.md`、`docs/dxf-entity-coverage.md`。
+
+**实际执行并通过**：`cad-platform` 13 项（新增默认面/local 5 项）、`cad-cli-tools` lib 20、
+`cli_contracts` 14（lavapipe 串行）、`app-linux` lib 1+3 ignored；fmt、严格 clippy
+（`-D warnings`）、architecture/fixture/workflow/i18n、native 全 workspace check、
+wasm 全 workspace lib check 均通过。CLI 差分 smoke：`entities.dxf` 无字体目录
+lines=1443，有 `fonts/`（仓库根）lines=1497——缺字体时默认轮廓面成形，texts 均 0。
+`fetch-web-fonts.sh` 合并 smoke：100 条目（99 mlightcad + osifont）成功。
+
+**未运行/限制**：浏览器/真机下载与整形未验证；Android 未打包安装；无真实 GPU/窗口/
+视觉验收；系统默认面依赖 `fc-match`，本机 `sans-serif` 命中 `.ttc`（引擎跳过）后取
+`DejaVu Sans`，不同系统默认字形不同（预期）；Web 的「浏览器默认」是目录/CDN 轮廓面，
+不是浏览器内建字体字节（wasm 无该能力）。
+
 ## 资源占用/显卡加速排查与三项修复（2026-10-08，本轮）
 
 用户在真实 Wayland 桌面（Intel UHD 核显 + NVIDIA Quadro P620 混合显卡）上排查

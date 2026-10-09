@@ -22,6 +22,9 @@ bash scripts/verify-ui.sh                         # 无头 UI 调试循环（第
 平台适配器。`--size WIDTHxHEIGHT` 限制 320–4096；`--locale zh-CN|en`；`--gpu auto|high|low`
 设置桌面 wgpu 适配器偏好（`auto`/`high` 优先独显、`low` 优先核显，等价 wgpu
 `PowerPreference`；还可直接用 `WGPU_ADAPTER_NAME`/`WGPU_POWER_PREF`）。
+字体：启动（及每次打开图纸）自动加载可执行文件同级的 `fonts/` 目录
+（`--fonts-dir PATH` 可显式指定，必须存在），并按 `requested_fonts` 只取图纸引用的面，
+再并入 `--font NAME=PATH` 与系统默认字体（`fc-match`）作为第一回退，见 `docs/fonts.md`。
 脚本自动寻找 Mesa lavapipe ICD，支持 `VK_ICD_FILENAMES`/`YACR_LINUX_OUTPUT` 覆盖；
 `YACR_TEST_DWG` 可输入仓库外图纸。
 
@@ -55,8 +58,8 @@ Slint 属性并触发 `request_redraw`，空闲视图以 ~20fps 重绘、单核 
 - `--export-annotations PATH`、`--import-annotations PATH` 指定侧车；导出先写临时文件并
   sync/rename，成功后才确认数据库 revision。不能写入时不能标记已保存；导入严格拒绝指纹不匹配。
 - 未保存批注时打开/关闭被阻止，无隐式 discard。尚无保存/恢复/丢弃决策对话框及恢复缓存。
-- Trim 点选显式 Unsupported 且按钮禁用；第三方 CAD 字体可通过重复 `--font NAME=PATH`
-  显式加载，目录匹配/恢复、原生多触控均未闭环。
+- Trim 点选显式 Unsupported 且按钮禁用；CAD 字体由同级 `fonts/` 目录自动加载（缺字体时
+  回退到系统默认轮廓面，`--font` 仍是最高优先级显式指定）；原生多触控仍未闭环。
 - Linux 可执行文件不是静态独立发行包：运行仍需要系统库；默认 CI 仅上传 debug 编译日志，不产出安装包。
 
 ## 配置与用户偏好持久化（2026-10-03）

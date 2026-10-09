@@ -1,24 +1,29 @@
 # 字体来源与目录
 
-本文记录 CAD 文本/字体资源从哪里来、如何编目，以及当前的实现边界。
-规范依据：§7.3（逻辑键，非平台路径）、§10（资源）、§16.2。
+本文记录 CAD 文本/字体资源从哪里来、如何编目、如何随客户端输出打包，以及当前的
+实现边界。规范依据：§7.3（逻辑键，非平台路径）、§10（资源）、§16.2。
 
 ## 来源
 
-本仓库不内置字体。默认字体集与 `mlightcad/cad-viewer` 网页版一致，来自
-`mlightcad/cad-data` 仓库，经 jsDelivr CDN 提供：
+字体来源有两个项目：
 
-- 默认根：`https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts/`
-  （对应 cad-viewer 的 `DEFAULT_BASE_URL = 'https://cdn.jsdelivr.net/gh/mlightcad/cad-data'`
-  加 `fonts/`；见 `packages/cad-simple-viewer/src/app/AcApDocManager.ts`）。
-- 目录清单：`fonts/fonts.json`（截至 2026-10-01，
-  sha256 `cb2344fa2f91648f3cb44b7f5a1e75342da5fa578d640de8e0500b12697246a0`，
-  99 个字体：86 个 `.shx` + 13 个 outline/WOFF）。
-- outline 字体示例：`simsun.woff`、`simhei.woff`、`simkai.woff`、`msyh.woff`、
-  `msgothic.woff`、`noto-sans-kr.woff`、`arial.woff`、`tahoma.woff`、`verdana.woff`、
-  `gbgdt.woff`、`SJQY.woff`、`AIGDT.ttf`、`simsun.ttf`。
-- SHX 字体示例：`simplex.shx`、`txt.shx`、`romans.shx`、`isocp.shx`、`bigfont.shx`、
-  `hztxt.shx`、`gbcbig.shx` 等。
+- **`mlightcad/cad-data`**（运行时/构建时获取，**不入库**）：默认字体集与
+  `mlightcad/cad-viewer` 网页版一致，经 jsDelivr CDN 提供：
+  - 默认根：`https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts/`
+    （对应 cad-viewer 的 `DEFAULT_BASE_URL = 'https://cdn.jsdelivr.net/gh/mlightcad/cad-data'`
+    加 `fonts/`；见 `packages/cad-simple-viewer/src/app/AcApDocManager.ts`）。
+  - 目录清单：`fonts/fonts.json`（截至 2026-10-01，
+    sha256 `cb2344fa2f91648f3cb44b7f5a1e75342da5fa578d640de8e0500b12697246a0`，
+    99 个字体：86 个 `.shx` + 13 个 outline/WOFF）。
+  - outline 字体示例：`simsun.woff`、`simhei.woff`、`simkai.woff`、`msyh.woff`、
+    `msgothic.woff`、`noto-sans-kr.woff`、`arial.woff`、`tahoma.woff`、`verdana.woff`、
+    `gbgdt.woff`、`SJQY.woff`、`AIGDT.ttf`、`simsun.ttf`。
+  - SHX 字体示例：`simplex.shx`、`txt.shx`、`romans.shx`、`isocp.shx`、`bigfont.shx`、
+    `hztxt.shx`、`gbcbig.shx` 等。
+- **QCAD（`fonts/` 目录，授权入库）**：ISO 3098 技术制图字体
+  `osifont.ttf`（GPL-3 + 字体例外）已提交到仓库 `fonts/`（来源/哈希/授权见
+  `fonts/SOURCE.md`），作为**默认轮廓回退面**随客户端输出分发。QCAD 的 `.cxf`
+  编译字体当前引擎不支持，显式记为 Unsupported（见「字形渲染」）。
 
 `fonts.json` 条目结构：
 
@@ -27,6 +32,19 @@
 { "file": "@extfont2.shx", "name": ["@extfont2"], "type": "shx", "encoding": "shift-jis" }
 { "file": "simsun.woff", "name": ["SimSun", "宋体"], "type": "mesh" }
 ```
+
+## 字体包与输出布局
+
+仓库级 `fonts/` 是**唯一提交的 CAD 字体包**（`fonts.json` + `osifont.ttf` +
+`COPYING.GPL-3` + `SOURCE.md`），各宿主把它复制到自己的输出旁：
+
+- **Linux 桌面/CLI**：打包脚本把 `fonts/` 放在可执行文件同级（或 `bin/` 同级）；
+  宿主启动时自动扫描 `fonts/fonts.json` 并按需加载（见「主机接线」）。
+- **Web**：`scripts/build-web.sh`/`fetch-web-fonts.sh` 把提交的 `fonts/` 合并进
+  `web-dist/fonts/`（并与下载的 mlightcad 目录清单合并且去重），浏览器宿主优先用
+  同源 `fonts/`，未发布本地包时回落到 CDN。
+- **Android**：`scripts/fetch-android-fonts.sh` 把提交的 `fonts/` 合并进
+  `assets/fonts/`（该目录本身仍 gitignore，不入库）。
 
 ## 实现
 
@@ -48,8 +66,11 @@
 `mlightcad/cad-data` 未声明仓库级许可证，且其中的 `.shx`/`.ttf`/`.woff` 各自有字体
 授权（多为 Autodesk/微软/开源字体的再分发）。因此：
 
-- **不把任何字体文件提交进本仓库**；只在运行时/测试时按需下载。
+- **本仓库不内置 mlightcad 字体**；只在运行时/构建时按需下载，再分发的授权由部署者负责。
 - 使用前必须核实目标字体的授权，不能默认可再分发。
+- **例外（用户指定）**：QCAD 的 `osifont.ttf` 以 GPL-3 + 字体例外授权，已提交到
+  `fonts/`（`fonts/SOURCE.md` 记录来源、哈希与许可；本仓库为 AGPL-3，可与 GPL 组件
+  组合）。QCAD 的 `.cxf` 未提交也未支持。
 
 ## 字形渲染（已实现：sfnt + SHX）
 
@@ -63,6 +84,12 @@
 - **回退链**：`FontEngine::set_fallback(keys)`。图纸引用的字体未注册、或注册了但不可解码
   （如 WOFF2/不支持的 SHX 类型）时，按顺序改用可用的回退字体，**不会静默丢弃文本**；
   全部不可用才报告错误。`resolve_face` 可查询实际使用的字体。
+- **默认轮廓回退面**：`cad-platform::fonts::load_font_engine` 在图纸字体缺失/拉取失败时
+  保证注册一个默认轮廓面（`DEFAULT_FALLBACK_NAMES`，顺序 `osifont` → `arial` → `simplex`），
+  并写入 `FontLoadReport.default_face`。桌面/CLI 宿主还可把**系统默认字体**（fontconfig
+  `fc-match`）注册为第一回退（`register_default_face`，保留键 `__yacr_default__`）。
+  浏览器无法读取系统字体字节，故 Web 用目录里的默认面（CDN 构建为 `arial`，自托管构建为
+  已提交的 `osifont`）承担同一角色；QCAD `.cxf`、WOFF2 等不支持技术仍显式报告，不伪造。
 - 键匹配：注册键 + 文件主名。图纸引用 `arial.ttf`、库只有 `arial.woff` 时按主名 `arial` 命中。
 - 排版：按字形 advance 前进（SHX 用 ink-width + cell 边距策略；TTF 应用 `kern` 字距），
   `\n`/`\P` 换行。`cad-representation::text` 现在把 MTEXT/TEXT 控制内容解析为结构化 run
@@ -104,8 +131,15 @@
     供 JS 宿主与无头验证等待并读取 `FontLoadReport::summary()`。
   - **Android**（`apps/app-android`）：`AssetFontLoader` 从活动 `AssetManager` 读
     `assets/fonts/…`（基址 `asset://fonts/`），目录为 `asset://fonts/fonts.json`。
-    走同一个 `load_font_engine`。**不内置任何字体文件**（授权，见上），未打包时报告
-    `ResourceMissing`（`font asset not packaged …`），不伪造空字体集。
+    走同一个 `load_font_engine`。mlightcad 字体**不入库**（授权，见上），未打包时报告
+    `ResourceMissing`（`font asset not packaged …`），不伪造空字体集；但
+    `fetch-android-fonts.sh` 会把提交的 `fonts/`（osifont）合并进资产集，保证 APK
+    自带默认轮廓面。
+  - **Linux 桌面/CLI**（`app-linux`、`cad-cli-tools`）：共用
+    `cad-platform::fonts::local`。启动（或每次打开图纸）时扫描可执行文件同级的
+    `fonts/`（或 `--fonts-dir`）目录，用同一套 `load_font_engine` 从本地读字节；
+    之后注册 `--font` 显式字体；最后把系统默认字体（`fc-match`）注册为第一回退。
+    没有 `fonts/` 也没有系统字体时文本保持不可绘，绝不伪装。
 
 ## Web 自托管（发布包）
 
@@ -126,16 +160,18 @@ YACR_FONT_BASE_URL=https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts/ \
   WITH_FONTS=0 scripts/build-web.sh
 ```
 
-字体文件仍不提交仓库（`/web-dist/` 已 ignore）；下载与再分发的授权由部署者负责。
+mlightcad 字体文件仍不提交仓库（`/web-dist/` 已 ignore）；下载与再分发的授权由部署者负责。
+仓库提交的 `fonts/`（QCAD osifont）由 `fetch-web-fonts.sh` 在打包时合并进 `web-dist/fonts/`。
 Cloudflare Pages 发布见 `scripts/deploy-cloudflare-pages.sh`。
 
 ## 主机取字节实现现状
 
 | 宿主 | 目录来源 | 字体字节来源 | 状态 |
 |---|---|---|---|
-| Web (wasm) | `DEFAULT_FONT_BASE_URL/fonts.json`（jsDelivr，CORS） | `fetch().arrayBuffer()` | 代码完成；本环境**未跑浏览器验证** |
-| Android | `asset://fonts/fonts.json`（APK assets） | `AssetManager` | 代码完成并编译；本环境**无真机/无打包字体资产** |
-| CLI | `--font name=path` | 本地文件 | 已实现（见 `cad-cli-tools`） |
+| Web (wasm) | `DEFAULT_FONT_BASE_URL/fonts.json`（jsDelivr，CORS）；自托管构建为同源 `fonts/` | `fetch().arrayBuffer()` | 代码完成；本环境**未跑浏览器验证** |
+| Android | `asset://fonts/fonts.json`（APK assets，含提交的 osifont） | `AssetManager` | 代码完成并编译；本环境**无真机/无打包字体资产** |
+| CLI | 可执行文件同级 `fonts/` + `--font name=path` | 本地文件 | 已实现（`cad-platform::fonts::local`；本机差分 smoke 见下） |
+| Linux 桌面 | 可执行文件同级 `fonts/`（或 `--fonts-dir`）+ `--font` | 本地文件 + 系统默认字体（`fc-match`） | 已实现并编译；离屏/桌面运行见 `docs/linux-app.md` |
 
 Web 的 `fetch` 依赖 CDN 的 CORS 头；非 2xx 响应记为 `ResourceMissing`，不当作空字节。
 Android 若未把字体目录放进 `assets/fonts/`（含 `fonts.json`），打开带文本的图纸会以缺资源
@@ -154,6 +190,12 @@ Android 若未把字体目录放进 `assets/fonts/`（含 `fonts.json`），打�
 | korean-DBCS-hangul | 2 / 3 | 96 / 0 |
 | canteen（GOST，靠回退） | 42749 / 323 | 44964 / 0 |
 
+2026-10-09 CLI 差分 smoke（本机，软件环境，非视觉验收）：`entities.dxf`（94 个
+TEXT/MTEXT）在可执行文件同级的 `fonts/` 不可见时 `build-representation` 为
+`lines=1443`；在仓库根（`./fonts` 命中）或发布包（`bin/../fonts` 命中）运行时为
+`lines=1497`、`texts=0`——缺字体时默认轮廓面（osifont + 系统 DejaVu）把文字整形成
+线段，而不是丢弃。
+
 ## 未完成
 
 1. **排版完备性**：复杂文字整形（bidi/上下文 shaping）与列/真正制表位仍缺；MTEXT 全格式码
@@ -162,8 +204,12 @@ Android 若未把字体目录放进 `assets/fonts/`（含 `fonts.json`），打�
    精确行距/垂直对齐仍为近似（行距 = 1.2×该行最高 run 字高）。
 2. **平台验证**：`FontLoader`/`plan_fonts`/`set_fonts` 契约与 Web/Android 取字节代码均已
    实现并编译（见上表），但**浏览器与真机上的实际下载/整形/重绘尚未在本仓库验证**；
-   Android 也未随 APK 打包任何字体资产。
+   Android 也仍未真正随 APK 打包并安装验证。
 3. **Android 网络路径**：当前只实现 asset 路径；运行时 HTTP 下载（含授权与缓存策略）未实现。
+4. **桌面/CLI 的系统默认面**：`fc-match` 结果随系统而异（本机 `sans-serif` 返回 `.ttc`，
+   会被引擎跳过后再试 `DejaVu Sans`）；不同桌面得到不同的默认字形，属预期但不是确定值。
+   浏览器端无法读取系统字体字节，Web 的「默认」是目录/CDN 里的轮廓面，不等价于浏览器
+   内建字体。
 
 含文本的图纸在导入报告里不会被报告为 `Complete`（导入阶段不知道宿主是否有字体）；
 在 `build-representation` 注入字体后文本即可绘。

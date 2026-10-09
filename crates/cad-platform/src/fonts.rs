@@ -17,12 +17,28 @@
 
 use std::sync::Arc;
 
+use std::collections::HashSet;
+
 use cad_db::DrawingDatabase;
-use cad_domain::{CadError, SemanticGeometry};
+use cad_domain::{CadError, CadResult, SemanticGeometry};
 use cad_representation::FontEngine;
-use cad_resources::{plan_fonts, plan_fonts_report, FontCatalog};
+use cad_resources::{face_url, plan_fonts, plan_fonts_report, FontCatalog};
 
 use super::{FontLoader, HostFuture};
+
+/// Reserved engine key for a host-supplied default fallback face.
+///
+/// A desktop host registers its system default font under this key so a
+/// drawing font that is missing falls back to the platform default; see
+/// [`register_default_face`].
+pub const DEFAULT_FALLBACK_KEY: &str = "__yacr_default__";
+
+/// Catalogue names tried, in order, for the last-resort default outline face.
+///
+/// `osifont` is the committed QCAD ISO 3098 face (web bundles ship it);
+/// `arial`/`simplex` mirror the explicit catalog fallbacks below so a CDN-only
+/// build still has a usable default when the drawing's own font is missing.
+pub const DEFAULT_FALLBACK_NAMES: &[&str] = &["osifont", "arial", "simplex"];
 
 /// Outcome of one catalog-driven loading pass.
 ///
@@ -42,6 +58,10 @@ pub struct FontLoadReport {
     pub failed: Vec<String>,
     /// Original names missing from the catalog, even when fallback rendering succeeds.
     pub unresolved: Vec<String>,
+    /// The default outline face actually registered as the last-resort fallback
+    /// (catalog name file when available, or [`DEFAULT_FALLBACK_KEY`] for a
+    /// host-supplied system default), if any.
+    pub default_face: Option<String>,
 }
 
 impl FontLoadReport {
@@ -156,11 +176,347 @@ pub fn load_font_engine<'a>(
                 Err(e) => report.failed.push(format!("{}: {e}", font.file)),
             }
         }
+        // Guarantee a default outline face whenever a requested font could not
+        // be resolved or fetched: the first catalogue name that resolves is
+        // registered once (never re-fetching a file already attempted) and
+        // reported. This is what lets a missing drawing font shape with a
+        // default instead of being dropped.
+        let attempted: HashSet<&String> = plan.iter().map(|font| &font.file).collect();
+        let needs_default = !report.unresolved.is_empty() || !report.failed.is_empty();
+        if !requested.is_empty() && needs_default {
+            for name in DEFAULT_FALLBACK_NAMES {
+                let Some(face) = catalog.get(name) else {
+                    continue;
+                };
+                if report.registered.iter().any(|file| file == &face.file) {
+                    report.default_face = Some(face.file.clone());
+                    break;
+                }
+                if attempted.contains(&face.file) {
+                    // Already planned (and either registered above or reported as
+                    // failed); never fetch it a second time.
+                    continue;
+                }
+                match loader.load_font(&face_url(base, face)).await {
+                    Ok(bytes) => {
+                        match engine.register_with_encoding(
+                            &face.file,
+                            bytes,
+                            face.encoding.as_deref(),
+                        ) {
+                            Ok(()) => {
+                                report.registered.push(face.file.clone());
+                                report.default_face = Some(face.file.clone());
+                                break;
+                            }
+                            Err(e) => report.failed.push(format!("{}: {e}", face.file)),
+                        }
+                    }
+                    Err(e) => report.failed.push(format!("{}: {e}", face.file)),
+                }
+            }
+        }
         // A registered face stands in for any missing one so text is not
         // silently dropped; the order follows the plan.
         engine.set_fallback(report.registered.clone());
         Ok((Arc::new(engine), report))
     })
+}
+
+/// Register a host-supplied default face and make it the **first** fallback.
+///
+/// Desktop hosts use this to prefer a system font over the drawing/catalog
+/// fallbacks when a requested font is missing. The bytes must parse exactly as
+/// in [`FontEngine::register`]; a host that cannot obtain a system font simply
+/// does not call this and the catalog default is used instead.
+pub fn register_default_face(engine: &mut FontEngine, bytes: Arc<[u8]>) -> CadResult<()> {
+    engine.register(DEFAULT_FALLBACK_KEY, bytes)?;
+    let mut keys = vec![DEFAULT_FALLBACK_KEY.to_string()];
+    for key in engine.fallback_keys() {
+        if key != DEFAULT_FALLBACK_KEY {
+            keys.push(key.clone());
+        }
+    }
+    engine.set_fallback(keys);
+    Ok(())
+}
+
+/// Local (native) font-package loader shared by desktop hosts.
+///
+/// This is the "sibling `fonts/` package" half of the font design: a directory
+/// next to the executable holds `fonts.json` plus the committed faces, and the
+/// host loads exactly the faces a drawing requests (plus a default) from it, so
+/// a packaged client needs no network. Kept out of wasm builds, which use the
+/// browser network stack instead.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod local {
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use cad_domain::{CadError, CadResult};
+
+    use super::*;
+    use crate::block_on;
+
+    /// A [`FontLoader`] rooted at a font directory.
+    ///
+    /// The base handed to [`load_font_engine`] is the directory itself, so the
+    /// catalog and face URLs `cad-resources` builds are already paths under it.
+    pub struct DirFontLoader {
+        root: PathBuf,
+    }
+
+    impl DirFontLoader {
+        pub fn new(root: PathBuf) -> Self {
+            Self { root }
+        }
+
+        fn path_for(&self, url: &str) -> CadResult<PathBuf> {
+            let root = self.root.to_string_lossy();
+            // `face_url` percent-encodes, but catalog parsing guarantees a bare
+            // file name; the prefix check is defence in depth against a caller
+            // passing a URL that points outside the granted directory.
+            if !url.starts_with(root.as_ref()) {
+                return Err(CadError::InvalidInput(format!(
+                    "font path escapes the font directory: {url}"
+                )));
+            }
+            Ok(PathBuf::from(url))
+        }
+    }
+
+    impl FontLoader for DirFontLoader {
+        fn load_font(&self, url: &str) -> HostFuture<'_, Arc<[u8]>> {
+            let path = self.path_for(url);
+            Box::pin(async move {
+                let path = path?;
+                std::fs::read(&path)
+                    .map(|bytes| Arc::from(bytes.into_boxed_slice()))
+                    .map_err(|e| {
+                        CadError::ResourceMissing(format!(
+                            "font read failed for {}: {e}",
+                            path.display()
+                        ))
+                    })
+            })
+        }
+    }
+
+    /// Candidate `fonts/` directories for an executable path, most specific
+    /// first: next to the binary, next to its `bin/` parent, then the working
+    /// directory.
+    pub fn font_dir_candidates(exe: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        if let Some(dir) = exe.parent() {
+            out.push(dir.join("fonts"));
+            if let Some(parent) = dir.parent() {
+                out.push(parent.join("fonts"));
+            }
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            out.push(cwd.join("fonts"));
+        }
+        out
+    }
+
+    /// Resolve the font directory to use.
+    ///
+    /// An explicit path must exist (a typo is an error, not a silent fallback);
+    /// otherwise the first existing candidate for `exe` is used, or `None`.
+    pub fn resolve_font_dir(explicit: Option<&Path>, exe: &Path) -> CadResult<Option<PathBuf>> {
+        match explicit {
+            Some(dir) => {
+                if dir.is_dir() {
+                    Ok(Some(dir.to_path_buf()))
+                } else {
+                    Err(CadError::InvalidInput(format!(
+                        "font directory does not exist: {}",
+                        dir.display()
+                    )))
+                }
+            }
+            None => Ok(font_dir_candidates(exe)
+                .into_iter()
+                .find(|dir| dir.is_dir())),
+        }
+    }
+
+    /// Ask fontconfig for the file backing `family`; `None` when fontconfig is
+    /// absent or the family resolves to nothing.
+    fn fc_match(family: &str) -> Option<String> {
+        let output = std::process::Command::new("fc-match")
+            .args(["-f", "%{file}", family])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let path = String::from_utf8(output.stdout).ok()?;
+        let path = path.trim();
+        (!path.is_empty()).then(|| path.to_string())
+    }
+
+    /// Best-effort system default face bytes, most specific first.
+    ///
+    /// Entries the shaping engine cannot parse (for example a `.ttc` collection)
+    /// are skipped by the caller; this only collects candidate bytes.
+    pub fn system_default_candidates() -> Vec<Arc<[u8]>> {
+        let mut out = Vec::new();
+        let mut push = |path: &str| {
+            if let Ok(bytes) = std::fs::read(path) {
+                out.push(Arc::from(bytes.into_boxed_slice()));
+            }
+        };
+        for family in [
+            "sans-serif",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "Noto Sans",
+            "Arial",
+        ] {
+            if let Some(path) = fc_match(family) {
+                push(&path);
+            }
+        }
+        for path in [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        ] {
+            push(path);
+        }
+        out
+    }
+
+    /// Cached [`system_default_candidates`] for the process.
+    ///
+    /// Reading a large system collection (`NotoSansCJK.ttc` is ~19 MiB) on every
+    /// document open would be wasteful, so the candidates are materialised once.
+    pub fn cached_system_default_candidates() -> &'static Vec<Arc<[u8]>> {
+        static CACHE: std::sync::OnceLock<Vec<Arc<[u8]>>> = std::sync::OnceLock::new();
+        CACHE.get_or_init(system_default_candidates)
+    }
+
+    /// Build a shaping engine from the `fonts/` package, explicit entries and a
+    /// system default, or `None` when nothing is needed.
+    ///
+    /// `requested` are the drawing's font keys, `explicit` the `--font` entries
+    /// and `system_default` the ordered default-face candidates.
+    pub fn load_engine(
+        font_dir: Option<&Path>,
+        requested: &[String],
+        explicit: &[(String, PathBuf)],
+        system_default: &[Arc<[u8]>],
+    ) -> CadResult<Option<Arc<FontEngine>>> {
+        if requested.is_empty() && explicit.is_empty() {
+            return Ok(None);
+        }
+        let mut engine = match font_dir {
+            Some(dir) => {
+                let base = dir.to_string_lossy().to_string();
+                let loader = DirFontLoader::new(dir.to_path_buf());
+                let (loaded, _report) = block_on(load_font_engine(&loader, requested, &base))?;
+                // `load_font_engine` returns a uniquely owned engine; unwrapping it
+                // lets the explicit/system registrations below extend the same set.
+                Arc::try_unwrap(loaded)
+                    .map_err(|_| CadError::Invariant("font engine unexpectedly shared".into()))?
+            }
+            None => FontEngine::new(),
+        };
+        let mut fallback = engine.fallback_keys().to_vec();
+        for (name, path) in explicit {
+            let bytes = std::fs::read(path)
+                .map_err(|e| CadError::InvalidInput(format!("font '{}': {e}", path.display())))?;
+            engine.register(name, Arc::from(bytes.into_boxed_slice()))?;
+            if !fallback.iter().any(|key| key == name) {
+                fallback.push(name.clone());
+            }
+        }
+        engine.set_fallback(fallback);
+        // The first parseable system face becomes the preferred default; a `.ttc`
+        // that the engine rejects is simply skipped.
+        for bytes in system_default {
+            if register_default_face(&mut engine, bytes.clone()).is_ok() {
+                break;
+            }
+        }
+        if engine.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Arc::new(engine)))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn candidates_prefer_the_binary_side_fonts_dir() {
+            let exe = Path::new("/opt/yacr/bin/yacr-linux");
+            let candidates = font_dir_candidates(exe);
+            assert_eq!(candidates[0], PathBuf::from("/opt/yacr/bin/fonts"));
+            assert_eq!(candidates[1], PathBuf::from("/opt/yacr/fonts"));
+        }
+
+        #[test]
+        fn explicit_missing_font_dir_is_an_error_not_a_silent_fallback() {
+            let missing = Path::new("/definitely/not/a/font/dir");
+            let result = resolve_font_dir(Some(missing), Path::new("/opt/yacr/bin/yacr-linux"));
+            assert!(matches!(result, Err(CadError::InvalidInput(_))));
+        }
+
+        #[test]
+        fn nothing_requested_and_no_explicit_fonts_installs_nothing() {
+            let engine = load_engine(None, &[], &[], &[]).unwrap();
+            assert!(engine.is_none());
+        }
+
+        #[test]
+        fn explicit_font_is_registered_and_used_as_fallback() {
+            let dir = std::env::temp_dir().join(format!("yacr-font-test-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("explicit.shx");
+            std::fs::write(&path, synthetic_shx()).unwrap();
+            let engine = load_engine(
+                None,
+                &["missing.shx".to_string()],
+                &[("MyFont".to_string(), path.clone())],
+                &[],
+            )
+            .unwrap()
+            .expect("explicit font installs an engine");
+            assert!(engine.contains("MyFont"));
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn system_default_becomes_the_first_fallback() {
+            let engine = load_engine(
+                None,
+                &["missing.shx".to_string()],
+                &[],
+                &[Arc::from(synthetic_shx())],
+            )
+            .unwrap()
+            .expect("a system default installs an engine");
+            assert_eq!(
+                engine.fallback_keys().first().map(String::as_str),
+                Some(DEFAULT_FALLBACK_KEY)
+            );
+            assert!(engine.contains(DEFAULT_FALLBACK_KEY));
+        }
+
+        /// Minimal but parseable compiled SHX shape font bytes.
+        fn synthetic_shx() -> Vec<u8> {
+            let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
+            let info = b"Synthetic\0\x15\x07\x02\0";
+            for value in [0u16, 0, 1, 0, info.len() as u16] {
+                bytes.extend(value.to_le_bytes());
+            }
+            bytes.extend(info);
+            bytes
+        }
+    }
 }
 
 #[cfg(test)]
@@ -215,6 +571,17 @@ mod tests {
             },
             draw_order: 0,
         }
+    }
+
+    /// Minimal but parseable compiled SHX shape font bytes.
+    fn synthetic_shx() -> Arc<[u8]> {
+        let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
+        let info = b"Synthetic\0\x15\x07\x02\0";
+        for value in [0u16, 0, 1, 0, info.len() as u16] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(info);
+        Arc::from(bytes)
     }
 
     fn database_with_text() -> DrawingDatabase {
@@ -362,19 +729,13 @@ mod tests {
 
     #[test]
     fn missing_names_load_explicit_catalog_fallback_without_claiming_resolution() {
-        let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
-        let info = b"Synthetic\0\x15\x07\x02\0";
-        for value in [0u16, 0, 1, 0, info.len() as u16] {
-            bytes.extend(value.to_le_bytes());
-        }
-        bytes.extend(info);
         let loader = FakeLoader {
             catalog: Arc::from(
                 br#"[{"file":"simplex.shx","name":["simplex"],"type":"shx"}]"#.as_slice(),
             ),
             files: Mutex::new(HashMap::from([(
                 "https://example/fonts/simplex.shx".into(),
-                Ok(Arc::from(bytes)),
+                Ok(synthetic_shx()),
             )])),
             seen: Mutex::new(Vec::new()),
         };
@@ -389,6 +750,54 @@ mod tests {
         assert_eq!(report.registered, vec!["simplex.shx"]);
         assert!(!engine.contains("missing-original.shx"));
         assert_eq!(engine.fallback_keys(), &["simplex.shx"]);
+    }
+
+    #[test]
+    fn missing_font_registers_the_default_catalog_face() {
+        // The drawing's font is absent; `osifont` (the committed default) is in
+        // the catalog and must be registered and reported as the default face.
+        let loader = FakeLoader {
+            catalog: Arc::from(
+                br#"[{"file":"simplex.shx","name":["simplex"],"type":"shx"},
+                     {"file":"osifont.ttf","name":["osifont"],"type":"mesh"}]"#
+                    .as_slice(),
+            ),
+            files: Mutex::new(HashMap::from([
+                (
+                    "https://example/fonts/simplex.shx".into(),
+                    Ok(synthetic_shx()),
+                ),
+                (
+                    "https://example/fonts/osifont.ttf".into(),
+                    Ok(synthetic_shx()),
+                ),
+            ])),
+            seen: Mutex::new(Vec::new()),
+        };
+        let requested = vec!["missing.shx".into()];
+        let (engine, report) = block_on(load_font_engine(
+            &loader,
+            &requested,
+            "https://example/fonts",
+        ))
+        .unwrap();
+        assert_eq!(report.default_face.as_deref(), Some("osifont.ttf"));
+        assert!(report.registered.contains(&"osifont.ttf".to_string()));
+        assert!(engine.fallback_keys().iter().any(|k| k == "osifont.ttf"));
+    }
+
+    #[test]
+    fn host_default_face_is_prepended_to_the_fallback_chain() {
+        let mut engine = FontEngine::new();
+        engine.register("arial.woff", synthetic_shx()).unwrap();
+        engine.set_fallback(vec!["arial.woff".into()]);
+        register_default_face(&mut engine, synthetic_shx()).unwrap();
+        assert_eq!(
+            engine.fallback_keys().first().map(String::as_str),
+            Some(DEFAULT_FALLBACK_KEY)
+        );
+        assert!(engine.contains(DEFAULT_FALLBACK_KEY));
+        assert!(engine.fallback_keys().contains(&"arial.woff".to_string()));
     }
 
     #[test]

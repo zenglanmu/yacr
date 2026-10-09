@@ -12,3 +12,7 @@
   使用并保留本署名。仅作渲染回归输入与人工参考，不表示与 QCAD/RibbonSoft 存在关联或背书。
 - 未捆绑用户图纸、厂商插件或专有字体；已捆绑的开源 QCAD 样本来源与许可独立核对，
   不由主仓库许可推断。
+- `fonts/osifont.ttf`：QCAD（<https://github.com/qcad/qcad>）`fonts/osifont.ttf` 的副本，
+  原始字体项目 osifont（<https://github.com/hikikomori82/osifont>），GNU GPL v3 附字体例外。
+  下载日期 2026-10-09 经 jsDelivr；来源 URL、字节数与 SHA-256 见 `fonts/SOURCE.md`。
+  本仓库为 AGPL-3，可与 GPL 组件组合；仅作为 CAD 文字默认轮廓回退面随发布包分发。

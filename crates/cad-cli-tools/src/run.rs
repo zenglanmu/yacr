@@ -30,8 +30,9 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
                 CliOperation::FixedViewportRender => domain(run_render(invocation))?,
                 CliOperation::Plot => domain(run_plot(invocation))?,
                 CliOperation::Benchmark => {
-                    let fonts = domain(load_fonts(&invocation.fonts))?;
                     let controller = domain(load_document(invocation))?;
+                    let fonts =
+                        domain(load_fonts(&invocation.fonts, &fonts_requested(&controller)))?;
                     domain(run_benchmark(&controller, invocation, fonts.as_ref()))?
                 }
                 _ => unreachable!(),
@@ -41,8 +42,8 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
             });
         }
     }
-    let fonts = domain(load_fonts(&invocation.fonts))?;
     let mut controller = domain(load_document(invocation))?;
+    let fonts = domain(load_fonts(&invocation.fonts, &fonts_requested(&controller)))?;
     let value = match invocation.operation {
         CliOperation::Scan => domain(run_scan(&controller))?,
         CliOperation::ProxyReport => domain(run_proxy_report(&controller))?,

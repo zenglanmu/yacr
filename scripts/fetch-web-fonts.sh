@@ -133,3 +133,28 @@ if failures:
         print(f"  {failure}", file=sys.stderr)
     sys.exit(1)
 PY
+
+# Merge the committed font package (`fonts/`, currently QCAD osifont.ttf) into
+# the bundle: the deployed directory is then self-contained for the default
+# outline face even when the CDN catalogue does not carry it.
+if [ -d "$ROOT/fonts" ]; then
+  python3 - "$DEST" "$ROOT/fonts" <<'PY'
+import json, pathlib, sys
+dest, extra = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+catalog_path = dest / "fonts.json"
+extra_catalog = extra / "fonts.json"
+if extra_catalog.exists():
+    entries = []
+    if catalog_path.exists():
+        entries = json.loads(catalog_path.read_text())
+    added = [e for e in json.loads(extra_catalog.read_text())
+             if all(str(e.get("file")) != str(x.get("file")) for x in entries)]
+    entries.extend(added)
+    catalog_path.write_text(json.dumps(entries, indent=2) + "\n")
+    for font in added:
+        src = extra / str(font["file"])
+        if src.exists():
+            (dest / str(font["file"])).write_bytes(src.read_bytes())
+            print(f"  merged {'':<22} {font['file']} ({src.stat().st_size} bytes)")
+PY
+fi

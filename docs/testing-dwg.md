@@ -82,6 +82,8 @@ python3 scripts/check-dwg-native.py "$CORPUS" "$RUN/native" \
 
 这是 canteen 的显式回退组合，不是所有图纸通用的精确字体配置。按样本增减重复的
 `--font name=path`。不传 `--font` 可隔离几何问题，但不包含文字渲染验收。
+原生 CLI 还会自动加载可执行文件同级的 `fonts/` 目录（若无 `--font` 时图纸字体缺失，
+回退默认轮廓面；仓库根即含 `fonts/`），见 `docs/fonts.md`。
 
 脚本依次独立执行 `scan` → `build-representation` → `render`，每阶段重新导入；
 默认 2160×1520，可用 `--width 1080 --height 760` 降低调试分辨率。

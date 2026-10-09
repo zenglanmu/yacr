@@ -257,7 +257,7 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
 
     let registry = cad_representation::ProviderRegistry::with_default_provider();
-    let fonts = load_fonts(&invocation.fonts)?;
+    let fonts = load_fonts(&invocation.fonts, &fonts_requested(&controller))?;
     let mut context = representation_context(&controller, fonts.as_ref());
     // The render feeds the GPU directly: packed dash output + compact line
     // batches, identical to the desktop scene path. `build-representation`
@@ -454,7 +454,7 @@ pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Valu
 fn run_plot_vector(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
     let started = std::time::Instant::now();
     let controller = load_document(invocation)?;
-    let fonts = load_fonts(&invocation.fonts)?;
+    let fonts = load_fonts(&invocation.fonts, &fonts_requested(&controller))?;
     let context = representation_context(&controller, fonts.as_ref());
     let registry = cad_representation::ProviderRegistry::with_default_provider();
 
@@ -574,7 +574,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
 
     let started = std::time::Instant::now();
     let controller = load_document(invocation)?;
-    let fonts = load_fonts(&invocation.fonts)?;
+    let fonts = load_fonts(&invocation.fonts, &fonts_requested(&controller))?;
     let context = representation_context(&controller, fonts.as_ref());
     let registry = cad_representation::ProviderRegistry::with_default_provider();
 
@@ -1020,24 +1020,58 @@ fn sample_hash_of(report: &cad_import_acadrust::ImportReport) -> Option<[u8; 32]
     }
 }
 
-/// Load the `--font` entries into a shaping engine, if any were given.
+/// The font keys the open drawing references, for the sibling `fonts/` package
+/// loader when no explicit `--font` was given.
+pub(crate) fn fonts_requested(controller: &HostController) -> Vec<String> {
+    controller
+        .drawing()
+        .map(|drawing| cad_platform::fonts::requested_fonts(drawing.as_ref()))
+        .unwrap_or_default()
+}
+
+/// Load the `--font` entries plus the sibling `fonts/` package into a shaping
+/// engine, if any are needed.
+///
+/// Native hosts also auto-load the `fonts/` directory next to the executable
+/// (`cad_platform::fonts::local`) and a system default fallback face, so a
+/// packaged CLI shapes text whose font is missing. Wasm keeps the explicit
+/// `--font` registrations only.
 pub(crate) fn load_fonts(
     entries: &[(String, PathBuf)],
+    requested: &[String],
 ) -> CadResult<Option<Arc<cad_representation::FontEngine>>> {
-    if entries.is_empty() {
-        return Ok(None);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if entries.is_empty() && requested.is_empty() {
+            return Ok(None);
+        }
+        let exe = std::env::current_exe().unwrap_or_default();
+        let font_dir = cad_platform::fonts::local::resolve_font_dir(None, &exe)?;
+        cad_platform::fonts::local::load_engine(
+            font_dir.as_deref(),
+            requested,
+            entries,
+            cad_platform::fonts::local::cached_system_default_candidates(),
+        )
     }
-    let mut engine = cad_representation::FontEngine::new();
-    let mut keys = Vec::new();
-    for (key, path) in entries {
-        let bytes = std::fs::read(path)
-            .map_err(|e| CadError::InvalidInput(format!("font read failed: {e}")))?;
-        engine.register(key, Arc::from(bytes.into_boxed_slice()))?;
-        keys.push(key.clone());
+    #[cfg(target_arch = "wasm32")]
+    {
+        if entries.is_empty() {
+            return Ok(None);
+        }
+        let _ = requested;
+        let mut engine = cad_representation::FontEngine::new();
+        let mut keys = Vec::new();
+        for (key, path) in entries {
+            let bytes = std::fs::read(path)
+                .map_err(|e| CadError::InvalidInput(format!("font read failed: {e}")))?;
+            engine.register(key, Arc::from(bytes.into_boxed_slice()))?;
+            keys.push(key.clone());
+        }
+        // Any registered font can stand in for a missing one.
+        engine.set_fallback(keys);
+        Ok(Some(Arc::new(engine)))
     }
-    // Any registered font can stand in for a missing one.
-    engine.set_fallback(keys);
-    Ok(Some(Arc::new(engine)))
 }
 
 // ---------------------------------------------------------------------------
