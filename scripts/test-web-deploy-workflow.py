@@ -2,9 +2,9 @@
 """Mutation contracts for the Cloudflare Pages deploy job (no deploy claim).
 
 Mirrors scripts/test-linux-workflow.py: it proves that the `web-deploy` job
-keeps its capability guard and its real deploy command, so a future edit cannot
-turn it into a silent skip-to-green or an empty success. It never contacts
-Cloudflare.
+keeps its release trigger (workflow_dispatch / v* tag), its real deploy command
+and the verified-artifact download, so a future edit cannot turn it into an
+empty success. It never contacts Cloudflare.
 """
 import importlib.util
 import pathlib
@@ -26,15 +26,20 @@ class WebDeployWorkflowContracts(unittest.TestCase):
             path.write_text(text)
             return workflow.structural_pass([path])[1]
 
-    def test_deploy_job_is_required_and_gated(self):
+    def test_deploy_job_is_required_and_release_triggered(self):
         text = (ROOT / ".github/workflows/build.yml").read_text()
         self.assertIn("web-deploy", workflow.REQUIRED_JOBS)
-        self.assertIn("web-deploy", workflow.GATED_JOB_IF)
+        block = workflow.job_block(text, "web-deploy")
+        self.assertIsNotNone(block)
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", block)
         self.assertEqual(self.check_text(text), [])
 
-    def test_removing_capability_switch_fails(self):
+    def test_removing_release_trigger_fails(self):
         text = (ROOT / ".github/workflows/build.yml").read_text()
-        mutated = text.replace("vars.CF_PAGES_DEPLOY_ENABLED", "true")
+        mutated = text.replace(
+            "github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')",
+            "false",
+        )
         self.assertTrue(self.check_text(mutated))
 
     def test_deploy_cannot_be_replaced_with_empty_success(self):
@@ -53,3 +58,4 @@ class WebDeployWorkflowContracts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

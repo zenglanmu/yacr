@@ -94,6 +94,7 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "scripts/deploy-cloudflare-pages.sh",
         "actions/download-artifact",
         "secrets.CLOUDFLARE_API_TOKEN",
+        "startsWith(github.ref, 'refs/tags/v')",
     ),
     "android-check": (
         "cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked",
@@ -117,7 +118,6 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
 # Jobs that are capability-gated: they must carry an explicit `if:` guard so
 # that when the capability is absent GitHub reports SKIPPED, never a pass.
 GATED_JOBS: tuple[str, ...] = (
-    "web-deploy",
     "android-check",
     "android-apk",
     "web-smoke",
@@ -125,7 +125,6 @@ GATED_JOBS: tuple[str, ...] = (
 
 # `if:` fragment each gated job must retain (the capability switch).
 GATED_JOB_IF: dict[str, str] = {
-    "web-deploy": "vars.CF_PAGES_DEPLOY_ENABLED",
     "android-check": "vars.ANDROID_CI_ENABLED",
     "android-apk": "vars.ANDROID_CI_ENABLED",
     "web-smoke": "vars.WEB_SMOKE_ENABLED",

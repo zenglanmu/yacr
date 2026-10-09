@@ -14,9 +14,9 @@ name: CI build layers
 # provisions the runner / variable):
 #   android-apk  : scripts/build-android.sh -> APK artifact + real manifest facts
 #   web-smoke    : scripts/check-web-ui.mjs under Playwright (software GPU only)
-#   web-deploy   : publish the verified web-dist artifact to Cloudflare Pages,
-#                  only on a push to main and only when the maintainer enables
-#                  CF_PAGES_DEPLOY_ENABLED (secrets required)
+#   web-deploy   : publish the verified web-dist artifact to Cloudflare Pages
+#                  on release (workflow_dispatch or a v* tag); requires the
+#                  CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets
 #
 # On-demand release jobs (workflow_dispatch or a v* tag):
 #   linux-release   : Linux GUI+CLI tar.gz with fonts (ubuntu-latest)
@@ -435,14 +435,15 @@ jobs:
 
   web-deploy:
     name: web-deploy (Cloudflare Pages)
-    # Production publish of the verified web bundle. Gated twice so it can
-    # never silently pass or leak secrets:
-    #   * CF_PAGES_DEPLOY_ENABLED must be 'true' (unset -> SKIPPED, not green);
-    #   * only a push to main deploys, so PRs/forks never see the secrets.
-    # It reuses the web-build artifact (SKIP_BUILD=1): what is published is
-    # exactly what the web-build job verified, not a second unverified rebuild.
+    # Production publish of the verified web bundle, triggered on release like
+    # the other *-release jobs (workflow_dispatch or a v* tag). It reuses the
+    # web-build artifact (SKIP_BUILD=1): what is published is exactly what the
+    # web-build job verified, not a second unverified rebuild. The deploy step
+    # fails loudly if the CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets
+    # are missing, so it can never silently pass. PRs/forks cannot trigger a
+    # workflow_dispatch and do not create tags, so they never see the secrets.
     # See docs/ci.md ("web-deploy") for the deploy script and prerequisites.
-    if: ${{ vars.CF_PAGES_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     needs: web-build
     runs-on: ubuntu-latest
     timeout-minutes: 15

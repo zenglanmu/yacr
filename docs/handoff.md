@@ -65,9 +65,11 @@ UTF-8 编码与「缺字体即失败」）；`test-package-macos-release.py` 与
 
 **已实跑验证**：`linux-release` 在 run 37916376185 通过；`android-release`（自装 JDK 17 +
 固定 SDK/NDK）在 run 37920264484 通过（7m59s），产出 `yacr-android-release`（`dev.yacr.app` /
-arm64-v8a / targetSdk 30 / 53,017,904 B）。`web-smoke` 已用仓库变量 `WEB_SMOKE_ENABLED=true`
-启用。**限制**：APK 打包**不等于安装/真机运行**（无设备/模拟器）；`android-apk` 与
-`web-deploy`（需 Cloudflare secrets）仍未启用。详见 `docs/ci.md`、`docs/validation.md`。
+arm64-v8a / targetSdk 30 / 53,017,904 B）；`web-smoke`（`WEB_SMOKE_ENABLED=true`）在 run
+37922705082 通过（修复：runner 上不存在 `/tmp/opencode`，`tee` 因 `pipefail` 失败——改用
+`$RUNNER_TEMP`）。`web-deploy` 已改为与其它 `*-release` 一致在 `workflow_dispatch`/`v*` tag
+触发（需 Cloudflare secrets，已配置），尚未实跑。**限制**：APK 打包**不等于安装/真机运行**
+（无设备/模拟器）；`android-apk` 仍门控未启用。详见 `docs/ci.md`、`docs/validation.md`。
 
 ## macOS release 包：GitHub Actions（`macos-latest`）+ 含字体 `Yacr.app` tar.gz（2026-10-09，本轮）
 
