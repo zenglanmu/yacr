@@ -33,6 +33,7 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("stage GUI binary", 'cp "$GUI" "$STAGE/bin/yacr.exe"'),
     ("PE32+ machine check", "--machine"),
     ("relocate non-system DLLs", 'copy_runtime_dlls "$STAGE/bin/yacr.exe" "$STAGE/bin"'),
+    ("strip CR from PE import names", r'''name="${name%$'\r'}"'''),
     ("refuse unresolved import", "is neither crt-static nor available to bundle"),
     ("font catalogue assembly", '"$ROOT/scripts/fetch-fonts.sh" "$STAGE/fonts"'),
     ("optional Wine smoke gate", "YACR_WINDOWS_SMOKE"),

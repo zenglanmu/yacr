@@ -147,6 +147,14 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__, file=sys.stderr)
         return 1
+    # Emit LF-only even on Windows: the packaging shell reads one DLL name per
+    # line and matches it against an anchored `^name\.dll$` system-DLL regex, so
+    # a text-mode CRLF stream would leave a trailing `\r` and misclassify every
+    # import as non-system.
+    try:
+        sys.stdout.reconfigure(newline="\n")
+    except (AttributeError, ValueError):  # pragma: no cover - non-TextIOWrapper stdout
+        pass
     machine_only = argv[1] == "--machine"
     paths = argv[2:] if machine_only else argv[1:]
     if not paths:

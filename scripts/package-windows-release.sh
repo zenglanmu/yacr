@@ -153,6 +153,10 @@ find_bundled_or_mingw() {
 copy_runtime_dlls() {
   local exe="$1" dest="$2" name found count=0
   while IFS= read -r name; do
+    # `check-pe-imports.py` output is read on Windows too, where a text-mode
+    # Python stream would otherwise emit CRLF and leave a trailing `\r` that
+    # breaks the `^kernel32\.dll$`-style system-DLL match.
+    name="${name%$'\r'}"
     [ -n "$name" ] || continue
     if [[ "$name" =~ $SYSTEM_DLL_RE ]]; then
       continue

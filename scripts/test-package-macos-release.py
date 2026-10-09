@@ -41,6 +41,7 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("bundle executable metadata", "CFBundleExecutable"),
     ("font catalogue assembly", '"$ROOT/scripts/fetch-fonts.sh"'),
     ("reject non-system Mach-O dependency", "links non-system library"),
+    ("skip all otool architecture headers", "awk '/^[[:space:]]/ {print $1}'"),
     ("optional macOS smoke gate", "YACR_MACOS_SMOKE"),
     ("smoke asserts parse error", "--bogus"),
     ("tar.gz output", 'tar -czf "${NAME}.tar.gz"'),

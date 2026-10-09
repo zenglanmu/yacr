@@ -192,7 +192,11 @@ verify_macho() {
       otool -L "$binary" >&2
       exit 1
     fi
-  done < <(otool -L "$binary" | tail -n +2 | awk '{print $1}')
+  # `otool -L` prints a `path:` (or `path (architecture ARCH):`) header per
+  # architecture followed by indented dependency lines. Only the indented lines
+  # are dependencies; for a universal binary there is more than one header, so
+  # `tail -n +2` is not enough.
+  done < <(otool -L "$binary" | awk '/^[[:space:]]/ {print $1}')
 }
 
 echo "==> verifying the executables are Mach-O with only system dependencies"

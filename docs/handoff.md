@@ -1,5 +1,25 @@
 # 后续 agent 接手入口
 
+## CI 发布 job 首次运行失败与修复（2026-10-09）
+
+`v0.1` tag 触发 `build.yml` 后，`windows-release` 与 `macos-release` 在打包步骤失败
+（`linux-app`/`windows-check`/`macos-check`/`web-build` 等通过）。经配置 GitHub API 鉴权后拉取
+真实日志，确认是**两个确定性脚本 bug**（非环境问题）：
+
+1. **Windows**：`check-pe-imports.py` 在 Windows 文本模式下输出 CRLF，`package-windows-release.sh`
+   的 `while read` 读到 `kernel32.dll\r`，与锚定正则 `^kernel32\.dll$` 不匹配，于是把**所有**
+   导入误判为「非系统 DLL」并中止。修复：`check-pe-imports.py` 用
+   `sys.stdout.reconfigure(newline="\n")` 输出 LF；脚本读取时 `name="${name%$'\r'}"` 兜底。
+   本机已用真实 MSVC 产物验证：CR 剥离前 10 个导入全被误判，剥离后全部识别为系统库。
+2. **macOS**：`otool -L` 对 **universal（fat）** 二进制会为**每个架构**打印一行
+   `path (architecture ARCH):` 头；脚本原来 `tail -n +2` 只跳过第一行，于是 `arm64:` 头被当作
+   「非系统依赖」。修复：改为只取缩进行
+   `otool -L "$binary" | awk '/^[[:space:]]/ {print $1}'`（thin/fat 均正确）。
+
+契约测试补了对应回归守卫（`test-package-windows-release.py` 要求 CR 剥离片段、
+`test-package-macos-release.py` 要求 `awk` 过滤片段）。本机门禁全部通过；修复后再触发
+`workflow_dispatch` 复验（见下）。
+
 ## CI 发布层补全：Linux / Android release job（2026-10-09，本轮）
 
 用户要求：在 CI workflow 里也加上 Linux app、Android app（等）。经问询确认：新增
