@@ -430,10 +430,16 @@ Windows 编码；详见 `docs/handoff.md`「CI 发布 job 首次运行失败与�
   `sdkVersion=23`、`targetSdkVersion=30`、`native-code=arm64-v8a`，APK 53,017,904 B，
   `JDK major=17`，`ANDROID_NDK_HOME=.../ndk/27.0.12077973`，`Cargo.lock` 未改。
 - `web-smoke`：已通过仓库变量 `WEB_SMOKE_ENABLED=true` 启用并在 run 37922705082 **通过**
-  （仅软件 GPU，非真机/WebGPU 验收）。
-- `web-deploy`：已改为与其它 `*-release` 一致在 `workflow_dispatch`/`v*` tag 触发，需两个
-  Cloudflare secrets（已配置）；尚未实跑。`android-apk`（`ANDROID_CI_ENABLED` 门控）仍
-  **SKIPPED**（未启用）。
+  （仅软件 GPU，非真机/WebGPU 验收；修复：runner 上无 `/tmp/opencode`，`tee` 因 `pipefail`
+  失败——改用 `$RUNNER_TEMP`）。
+- run `https://github.com/zenglanmu/yacr/actions/runs/37924085023`（sha `cca7edc`，
+  `workflow_dispatch` on `main`）**全绿 success**：`linux-release`/`windows-release`/
+  `macos-release`/`android-release`/`web-build`/`web-smoke`/`web-deploy` 全部通过，
+  上传 `yacr-linux-release`(61,651,828 B)/`yacr-windows-release`(57,386,628 B)/
+  `yacr-macos-release`(72,219,630 B)/`yacr-android-release`(52,726,451 B)。
+  **`web-deploy` 真实发布**：`https://yacr-examples.pages.dev`（不可变部署
+  `https://630a6480.yacr-examples.pages.dev`）。
+- `android-apk`（`ANDROID_CI_ENABLED` 门控）仍 **SKIPPED**（未启用）。
 
 **边界**：以上是 **CI 打包证据**（GitHub 托管 runner 构建并上传产物），**不是**真机、真实
 GPU、窗口/文件对话框、安装运行或像素/视觉验收；Android APK 未在设备/模拟器安装运行。
