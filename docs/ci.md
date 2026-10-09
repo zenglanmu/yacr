@@ -58,6 +58,8 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 | Job | Workflow | Runner | 门禁 |
 |---|---|---|---|
 | `linux-app` | build.yml | `ubuntu-latest` | Linux App debug 全目标编译与日志，不运行渲染 |
+| `windows-check` | build.yml | `windows-latest` | 原生 MSVC 目标 `cargo check -p app-windows`，不运行 PE |
+| `windows-release` | build.yml | `windows-latest`（按需/tag） | MSVC release 打包 + 全量字体 zip，上传 artifact |
 | `core-quality` | core.yml | `ubuntu-latest` | debug 全目标编译 + fmt + clippy + 架构边界，失败即红灯 |
 | `wasm-check` | core.yml | `ubuntu-latest` | 完整 workspace wasm `--lib` 检查 + 单独 `app-web` 检查 |
 | `i18n-contracts` | core.yml | `ubuntu-latest` | 双语 catalog / 缺 key / 硬编码白名单校验 |
@@ -101,6 +103,25 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 Linux 宿主安装 fontconfig/freetype 开发头，编译包含 `cad-ui-slint` 与 app-linux。
 Rust 测试代码通过 `--all-targets` 编译，但不执行测试。该 job 不设 `continue-on-error`，
 失败必须红灯。
+
+### `windows-check`（MSVC 编译层，必需 job）
+
+`runs-on: windows-latest`，命令 `cargo check -p app-windows --all-targets --locked`
+（原生 `x86_64-pc-windows-msvc`，不需要 MinGW）。
+
+验证 Linux/Windows 共享桌面宿主（`app-linux` + `app-windows`）在真实 MSVC 目标上的
+编译。**只证明编译**：不运行 exe，不验证窗口、原生文件对话框、DX12/Vulkan 或真机。
+本环境未在 GitHub Actions 上实际执行该 job，属 NOT RUN。
+
+### `windows-release`（MSVC 发布包，按需）
+
+`runs-on: windows-latest`，`if: github.event_name == 'workflow_dispatch' || tags/v*`。
+`actions/setup-python` 提供 Python，随后 `bash scripts/package-windows-release.sh`
+（MSVC 目标、`+crt-static` 静态链接 CRT、`fetch-fonts.sh` 组装全量字体），上传
+`yacr-windows-release` artifact（zip + sha256）。默认不在每个 PR 上跑以保持门禁轻量；
+编译门禁是 `windows-check`。本环境未在 GitHub Actions 上实际执行该 job，属 NOT RUN；
+Linux 本机可分别以 `x86_64-pc-windows-gnu`（MinGW）或 `CARGO_XWIN=1` 的
+`x86_64-pc-windows-msvc`（cargo-xwin）本地复现脚本逻辑。
 
 ### `wasm-check`（必需）
 

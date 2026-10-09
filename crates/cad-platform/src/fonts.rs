@@ -343,6 +343,10 @@ pub mod local {
 
     /// Ask fontconfig for the file backing `family`; `None` when fontconfig is
     /// absent or the family resolves to nothing.
+    ///
+    /// Unix (and Android) only: Windows resolves its own system fonts from the
+    /// font directory instead of `fc-match`.
+    #[cfg(not(target_os = "windows"))]
     fn fc_match(family: &str) -> Option<String> {
         let output = std::process::Command::new("fc-match")
             .args(["-f", "%{file}", family])
@@ -360,6 +364,7 @@ pub mod local {
     ///
     /// Entries the shaping engine cannot parse (for example a `.ttc` collection)
     /// are skipped by the caller; this only collects candidate bytes.
+    #[cfg(not(target_os = "windows"))]
     pub fn system_default_candidates() -> Vec<Arc<[u8]>> {
         let mut out = Vec::new();
         let mut push = |path: &str| {
@@ -384,6 +389,47 @@ pub mod local {
             "/usr/share/fonts/TTF/DejaVuSans.ttf",
         ] {
             push(path);
+        }
+        out
+    }
+
+    /// Windows: read the usual UI faces from the system font directory.
+    ///
+    /// There is no `fc-match`; `%WINDIR%\Fonts` is the machine-wide directory and
+    /// `%LOCALAPPDATA%\Microsoft\Windows\Fonts` holds per-user installs. Only the
+    /// byte candidates are collected here; the shaping engine skips anything it
+    /// cannot parse (for example a `.ttc` collection).
+    #[cfg(target_os = "windows")]
+    pub fn system_default_candidates() -> Vec<Arc<[u8]>> {
+        let mut out = Vec::new();
+        let mut push = |path: &Path| {
+            if let Ok(bytes) = std::fs::read(path) {
+                out.push(Arc::from(bytes.into_boxed_slice()));
+            }
+        };
+        let mut dirs = Vec::new();
+        if let Some(windir) = std::env::var_os("WINDIR") {
+            dirs.push(PathBuf::from(windir).join("Fonts"));
+        }
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            dirs.push(
+                PathBuf::from(local)
+                    .join("Microsoft")
+                    .join("Windows")
+                    .join("Fonts"),
+            );
+        }
+        for dir in dirs {
+            for name in [
+                "segoeui.ttf",
+                "arial.ttf",
+                "calibri.ttf",
+                "tahoma.ttf",
+                "verdana.ttf",
+                "consola.ttf",
+            ] {
+                push(&dir.join(name));
+            }
         }
         out
     }

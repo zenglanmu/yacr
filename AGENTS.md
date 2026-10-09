@@ -41,8 +41,11 @@ cad-measure ─ cad-annotations ─ cad-query ─ cad-app
   ↑
 cad-ui-slint ─ cad-platform ─ cad-diagnostics ─ cad-cli-tools
   ↑
-apps/app-linux  apps/app-android  apps/app-web
+apps/app-linux  apps/app-windows  apps/app-android  apps/app-web
 ```
+
+`app-linux` 是 Linux/Windows 共享的桌面宿主实现（`cfg(any(target_os = "linux",
+target_os = "windows"))`）；`app-windows` 只是调用其入口的薄封装（`yacr.exe`）。
 
 `check-architecture.py` 强制的边界：`cad-domain` 不依赖任何 CAD 包；`cad-db` 只依赖
 `cad-domain`；`cad-import-acadrust` 是**唯一**依赖 acadrust 的 crate；`cad-render-wgpu`
@@ -65,6 +68,10 @@ python3 scripts/check-i18n.py
 cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 workspace，含 UI/宿主
 ```
+
+Windows：CI `windows-check`（`windows-latest` 原生 MSVC 编译）与按需 `windows-release`
+（MSVC release + 全量字体 zip）；本机可用 `scripts/package-windows-release.sh`
+（默认 GNU 交叉，`CARGO_XWIN=1` 走 MSVC/cargo-xwin），见 `docs/windows-app.md`。
 
 - 默认主机编译门禁必须包含 Linux App 和 Slint；编译通过不是运行或渲染验收。Linux 离屏
   `bash scripts/check-linux-app.sh` 与完整测试仅在明确要求时执行；release 编译用于可选发布验证。

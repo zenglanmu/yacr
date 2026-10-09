@@ -174,6 +174,42 @@ node scripts/check-web-ui.mjs http://127.0.0.1:8090/ /tmp/opencode/yacr-web.png
 
 仅 Rust 检查（不需要链接）：
 
+## Windows release 包（MSVC，GitHub Actions `windows-latest`）
+
+Windows 宿主是 `apps/app-windows`（二进制 `yacr.exe`），薄封装共享桌面实现
+`apps/app-linux`；平台差异（文件对话框、配置目录、系统字体）按 cfg 选择。**主构建路径
+是 GitHub Actions 的 Windows runner 原生 MSVC**（`x86_64-pc-windows-msvc`）：
+
+- `.github/workflows/build.yml` `windows-check`（每次 push/PR）：
+  `cargo check -p app-windows --all-targets --locked`（编译门禁，不运行）。
+- `windows-release`（`workflow_dispatch` 或 `v*` tag）：
+  `bash scripts/package-windows-release.sh`，上传 `yacr-windows-release` artifact。
+- MSVC 目标自动 `+crt-static` 静态链接 CRT，无需 VC++ redistributable；
+  `scripts/check-pe-imports.py` 断言无非系统导入（否则**中止**）。
+
+本机（Linux）复现同一脚本：
+
+```bash
+# GNU 交叉（MinGW-w64）
+rustup target add x86_64-pc-windows-gnu
+sudo apt-get install -y gcc-mingw-w64-x86-64
+scripts/package-windows-release.sh                         # TARGET 默认 x86_64-pc-windows-gnu
+
+# MSVC（cargo-xwin；需 clang/lld）
+cargo install cargo-xwin --locked
+CARGO_XWIN=1 scripts/package-windows-release.sh            # TARGET 默认 MSVC
+
+WITH_FONTS=0 scripts/package-windows-release.sh            # 离线：仅已提交 osifont
+YACR_WINDOWS_SMOKE=1 scripts/package-windows-release.sh    # Linux + wine 参数解析 smoke
+```
+
+产出 `target/<TARGET>/release/dist/yacr-<version>-windows-x86_64.zip`（及 `.sha256`），
+内含 `bin/yacr.exe`、`bin/cad-cli-tools.exe`、同级 `fonts/`、`docs/` 与脚本
+（详见 `docs/windows-app.md`）。
+
+**边界**：CI 的 MSVC job 与真实 Windows 窗口/文件对话框/真实 GPU 与像素验收 **未运行**；
+Linux 上已用 cargo-xwin 复现 MSVC release 构建与 Wine 参数解析，但 Wine 不是真机。该包未签名。
+
 ## 桌面 / iOS
 
-仅 `cad-platform` 抽象与 ADR；不建不可编译的虚假宿主。
+`cad-platform` 抽象与 ADR；未建不可编译的虚假宿主。macOS/iOS 仍为保留槽位。

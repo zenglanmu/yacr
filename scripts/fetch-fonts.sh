@@ -39,7 +39,15 @@ export FONT_BASE_URL="${FONT_BASE_URL:-https://cdn.jsdelivr.net/gh/mlightcad/cad
 export FONT_FALLBACK_BASE_URL="${FONT_FALLBACK_BASE_URL:-https://raw.githubusercontent.com/mlightcad/cad-data/main/fonts}"
 export FONT_RETRIES="${FONT_RETRIES:-3}"
 
-command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
+if [ -z "${PYTHON:-}" ]; then
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON="$candidate"
+      break
+    fi
+  done
+fi
+[ -n "$PYTHON" ] || { echo "python3 (or python) is required" >&2; exit 1; }
 [ -n "$FONT_BASE_URL" ] || { echo "FONT_BASE_URL is empty" >&2; exit 1; }
 
 # Face subset: positional arguments win, then the FONTS env var; otherwise the
@@ -50,7 +58,7 @@ fi
 
 mkdir -p "$DEST"
 
-python3 - "$FONT_BASE_URL" "$FONT_FALLBACK_BASE_URL" "$FONT_RETRIES" "$DEST" <<'PY'
+"$PYTHON" - "$FONT_BASE_URL" "$FONT_FALLBACK_BASE_URL" "$FONT_RETRIES" "$DEST" <<'PY'
 import concurrent.futures
 import json
 import os
@@ -157,7 +165,7 @@ PY
 # the target directory so it carries the default outline face even when the
 # catalogue does not.
 if [ -d "$ROOT/fonts" ]; then
-  python3 - "$DEST" "$ROOT/fonts" <<'PY'
+  "$PYTHON" - "$DEST" "$ROOT/fonts" <<'PY'
 import json, pathlib, sys
 dest, extra = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 catalog_path = dest / "fonts.json"

@@ -144,10 +144,11 @@ Android / Linux 发布包都只是传不同的 `DEST`，本身不含任何平台
     `ResourceMissing`（`font asset not packaged …`），不伪造空字体集；但
     `scripts/fetch-fonts.sh` 会把提交的 `fonts/`（osifont）合并进资产集，保证 APK
     自带默认轮廓面。
-  - **Linux 桌面/CLI**（`app-linux`、`cad-cli-tools`）：共用
-    `cad-platform::fonts::local`。启动（或每次打开图纸）时扫描可执行文件同级的
+  - **Linux / Windows 桌面与 CLI**（`app-linux`、`app-windows`、`cad-cli-tools`）：
+    共用 `cad-platform::fonts::local`。启动（或每次打开图纸）时扫描可执行文件同级的
     `fonts/`（或 `--fonts-dir`）目录，用同一套 `load_font_engine` 从本地读字节；
-    之后注册 `--font` 显式字体；最后把系统默认字体（`fc-match`）注册为第一回退。
+    之后注册 `--font` 显式字体；最后把系统默认字体注册为第一回退（Linux 用
+    `fc-match`，Windows 读 `%WINDIR%\Fonts` / `%LOCALAPPDATA%\Microsoft\Windows\Fonts`）。
     没有 `fonts/` 也没有系统字体时文本保持不可绘，绝不伪装。
 
 ## Web 自托管（发布包）
@@ -181,6 +182,7 @@ Cloudflare Pages 发布见 `scripts/deploy-cloudflare-pages.sh`。
 | Android | `asset://fonts/fonts.json`（APK assets，含提交的 osifont） | `AssetManager` | 代码完成并编译；本环境**无真机/无打包字体资产** |
 | CLI | 发布包 `fonts/`（`fetch-fonts.sh` 组装 mlightcad 全量 + osifont）+ `--font name=path` | 本地文件 | 已实现（`cad-platform::fonts::local`；本机差分 smoke 见下） |
 | Linux 桌面 | 可执行文件同级 `fonts/`（或 `--fonts-dir`）+ `--font` | 本地文件 + 系统默认字体（`fc-match`） | 已实现并编译；离屏/桌面运行见 `docs/linux-app.md` |
+| Windows 桌面 | 可执行文件同级 `fonts/`（或 `--fonts-dir`）+ `--font` | 本地文件 + 系统默认字体（`%WINDIR%\Fonts`） | 交叉编译并 Wine 参数解析 smoke；真实 Windows/GPU 未验证，见 `docs/windows-app.md` |
 
 Web 的 `fetch` 依赖 CDN 的 CORS 头；非 2xx 响应记为 `ResourceMissing`，不当作空字节。
 Android 若未把字体目录放进 `assets/fonts/`（含 `fonts.json`），打开带文本的图纸会以缺资源

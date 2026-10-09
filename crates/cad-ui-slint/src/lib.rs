@@ -28,7 +28,10 @@ pub mod i18n;
 
 pub mod responsive;
 
-#[cfg(all(target_os = "linux", not(target_arch = "wasm32")))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "windows"),
+    not(target_arch = "wasm32")
+))]
 pub mod offscreen;
 
 mod layer_search;

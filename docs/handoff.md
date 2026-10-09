@@ -1,5 +1,59 @@
 # 后续 agent 接手入口
 
+## Windows release 包：GitHub Actions（MSVC）+ 含字体 zip（2026-10-09，本轮）
+
+用户要求：构建 Windows 下 exe 应用，最终类似 Linux 版，输出含字体的压缩包；随后要求
+**改走 GitHub Actions 的 Windows runner（MSVC）构建**。
+
+**改动**
+
+1. **共享桌面宿主**：`apps/app-linux` 的宿主实现由 `cfg(target_os = "linux")` 放宽为
+   `cfg(any(target_os = "linux", target_os = "windows"))`，成为两个桌面宿主共享的实现
+   层；平台差异按 cfg 分派——文件选择（Linux `ashpd` / Windows `rfd`，`host/file_picker.rs`）、
+   配置目录（XDG / `%APPDATA%`，`host/config_file.rs`）、系统默认字体
+   （`fc-match` / `%WINDIR%\Fonts`，`cad-platform::fonts::local`）。新增
+   `app_linux::entry::run()` 供两个桌面二进制共用，避免解析/后端选择漂移。
+2. **Windows 宿主**：新增 `apps/app-windows`（二进制 `yacr.exe`），薄封装共享入口；
+   `cad-ui-slint::offscreen` 的 cfg 同步放宽到 Linux+Windows。
+3. **打包（工具链无关）**：`scripts/package-windows-release.sh` 自动识别宿主 target：
+   Windows 原生 MSVC 默认并自动 `+crt-static`（无需 VC++ redistributable）；Linux 可
+   MinGW GNU 交叉或 `CARGO_XWIN=1` 走 MSVC。字体走 `fetch-fonts.sh`（该脚本也改为
+   python3/python 自适应，便于 Git Bash）；非系统导入由新增 `scripts/check-pe-imports.py`
+   （纯 Python PE 解析，替代 `objdump`，同时支持 Linux 与 Windows runner）检测，缺失即
+   **中止**；zip + sha256 由 Python 生成（跨平台）。`WITH_FONTS=0` 离线仅 osifont。
+4. **CI**：`build.yml` 新增 `windows-check`（`windows-latest`，原生 MSVC
+   `cargo check -p app-windows --all-targets --locked`，每次 push/PR，不运行）与
+   `windows-release`（`workflow_dispatch` / `v*` tag，打包并上传 `yacr-windows-release`
+   artifact）；`check-workflows.py` 的 REQUIRED_JOBS 纳入两者；`docs/ci.md` 同步。
+5. **契约/文档**：新增 `scripts/test-package-windows-release.py`、`docs/windows-app.md`；
+   更新 `docs/build.md`、`docs/fonts.md`、`docs/validation.md`、`AGENTS.md`。
+
+**实际执行并通过（本机 Linux，Rust 1.99.0）**
+
+- 主机门禁：fmt、严格 clippy（`-D warnings`）0 警告、architecture/fixture/workflows/i18n、
+  `test-package-windows-release.py` 通过；`cargo check --workspace ... --all-targets` 通过。
+- GNU 交叉：`cargo check -p app-windows --target x86_64-pc-windows-gnu` 通过；MinGW
+  release `cad-cli-tools.exe` 13,945,778 / `yacr.exe` 34,123,856 字节；
+  `YACR_WINDOWS_SMOKE=1 scripts/package-windows-release.sh` exit 0。
+- MSVC（`cargo xwin`，与 CI 同目标）：release 构建通过；`+crt-static` 下**无非系统导入**；
+  `TARGET=x86_64-pc-windows-msvc CARGO_XWIN=1 WITH_FONTS=1 YACR_WINDOWS_SMOKE=1
+  scripts/package-windows-release.sh` exit 0。产物
+  `target/x86_64-pc-windows-msvc/release/dist/yacr-0.1.0-windows-x86_64.zip`，
+  **57,364,212 字节**，sha256
+  `deb9cc9ec3c31dddf1aeef9aa66bd7cd5a0d9184678c6b34e6929faa8c78abb7`（含构建时间，
+  重跑会变）。gitignored `target/` 下，不入库。
+- `check-pe-imports.py` 的 DLL 集合与 `x86_64-w64-mingw32-objdump -p` 一致。
+- Wine（软件翻译）实际运行 GNU/MSVC 产物：`yacr.exe --bogus`（参数解析，exit 1）、
+  `cad-cli-tools.exe --help`（exit 0）、`scan entities.dxf`（602 实体 / 75 块定义，exit 0）、
+  `build-representation` 字体差分（带包内 `fonts/` 1464 primitives vs 无 1553）——证明打包
+  字体被 Windows 二进制加载。
+
+**未运行/限制**：CI 的 `windows-check`/`windows-release` job **未在本环境运行**（无 runner）；
+真实 Windows 的窗口/DPI/原生文件对话框/配置写入、真实 GPU（DX12/Vulkan）与像素验收、
+`--headless` 离屏、代码签名/SmartScreen、Windows 上 DWG `render`（无 wine+Vulkan 证据）、
+完整 Linux `cargo test` 与离屏未在本轮重跑。Wine 只是软件翻译，不是 Windows 兼容性/真机
+结论；GNU 与 MSVC 目标行为可能存在差异。详见 `docs/windows-app.md`。
+
 ## Linux release 包并入 GUI 主应用（2026-10-09，本轮）
 
 用户指出 `scripts/package-linux-release.sh` 只打包无头 CLI，缺少 GUI 主应用。经问询确认

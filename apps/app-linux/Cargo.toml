@@ -8,7 +8,12 @@ license.workspace = true
 name = "yacr-linux"
 path = "src/main.rs"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+# Shared desktop implementation for both the Linux host (`yacr-linux`) and the
+# Windows host (`yacr`, in `apps/app-windows`). The two hosts differ only in the
+# file chooser, the per-user config directory and the system-font source, all of
+# which are cfg-selected inside `src/host/`; the controller/Slint bridge is
+# identical.
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 cad-app.workspace = true
 cad-db.workspace = true
 cad-domain.workspace = true
@@ -19,5 +24,12 @@ cad-diagnostics.workspace = true
 cad-representation.workspace = true
 serde_json.workspace = true
 slint.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.12.3", default-features = false, features = ["async-std"] }
 pollster = "0.4"
+
+# Native Windows file chooser. `default-features = false` drops the optional
+# XDG-portal (Linux) backend; the Windows backend needs no feature.
+[target.'cfg(target_os = "windows")'.dependencies]
+rfd = { version = "0.15", default-features = false }

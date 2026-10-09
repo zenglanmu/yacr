@@ -1,11 +1,16 @@
-//! Desktop portal selection, with cancellation distinct from service failure.
+//! Native file selection.
+//!
+//! Linux uses the XDG desktop portal (ashpd); Windows uses the common file
+//! dialog through `rfd`. In both cases cancellation is distinct from a service
+//! failure so the UI can say which happened.
 use super::*;
-use ashpd::desktop::{
-    file_chooser::{FileFilter, SelectedFiles},
-    ResponseError,
-};
 
+#[cfg(target_os = "linux")]
 pub(super) fn pick(locale: &str) -> CadResult<PathBuf> {
+    use ashpd::desktop::{
+        file_chooser::{FileFilter, SelectedFiles},
+        ResponseError,
+    };
     let messages = cad_ui_slint::MessageSource::from_request(locale);
     let title = messages.text("linux.picker_title", &[]);
     let result = pollster::block_on(async {
@@ -36,4 +41,17 @@ pub(super) fn pick(locale: &str) -> CadResult<PathBuf> {
             messages.text("linux.picker_failed", &[("error", &error.to_string())]),
         )),
     }
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn pick(locale: &str) -> CadResult<PathBuf> {
+    let messages = cad_ui_slint::MessageSource::from_request(locale);
+    let selection = rfd::FileDialog::new()
+        .set_title(messages.text("linux.picker_title", &[]))
+        .add_filter(messages.text("linux.picker_filter", &[]), &["dwg", "dxf"])
+        .pick_file();
+    // `rfd` returns `None` both for cancel and for a dialog that could not open;
+    // it exposes no distinct error, so a closed dialog is reported as a cancel
+    // rather than inventing a success or a specific failure.
+    selection.ok_or(CadError::Cancelled)
 }

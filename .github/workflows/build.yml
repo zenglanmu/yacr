@@ -88,6 +88,90 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  windows-check:
+    name: windows-check (native MSVC debug compile)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - name: Cache Windows debug check
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-windows-check-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-windows-check-
+      - name: Windows host debug compilation (MSVC)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check -p app-windows --all-targets --locked 2>&1 | tee windows-check.log
+          {
+            echo '## Windows host debug compilation (MSVC)'
+            echo 'Host and contract test code compiled for the MSVC host; nothing was executed.'
+            echo 'This is not a real-Windows, real-GPU or native-file-dialog acceptance.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Windows compilation log (including failed runs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-check
+          path: windows-check.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-release:
+    name: windows-release (MSVC release zip)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    # On-demand (or a version tag): builds the release package on a real Windows
+    # MSVC runner and uploads the zip. Not run on every PR to keep the default
+    # gate cheap; the compile gate is `windows-check`.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Windows release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-windows-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-windows-release-
+      - name: Build and package the Windows release (full font catalogue)
+        shell: bash
+        env:
+          WITH_FONTS: "1"
+        run: bash scripts/package-windows-release.sh
+      - name: Record packaging summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Windows release package (MSVC)'
+            echo 'Built and packaged on windows-latest; the MSVC CRT is linked statically.'
+            echo 'Window/GPU/native-dialog behaviour is not exercised by this job.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the Windows release zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: yacr-windows-release
+          path: |
+            target/x86_64-pc-windows-msvc/release/dist/*.zip
+            target/x86_64-pc-windows-msvc/release/dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
   web-host-contracts:
     name: web-host-contracts
     runs-on: ubuntu-latest

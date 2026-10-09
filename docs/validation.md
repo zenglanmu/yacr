@@ -336,6 +336,50 @@ PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假�
 `xdg-desktop-portal` 桌面打开均 **NOT RUN**。包内库与构建发行版绑定，换发行版应
 `BUNDLE_LIBS=0` 或从源码重建。
 
+## Windows release 打包：GNU 交叉 + MSVC（CI）与 Wine smoke（2026-10-09 执行）
+
+用户要求：构建 Windows 下 exe 应用，最终类似 Linux 版，输出含字体的压缩包；随后要求
+**改走 GitHub Actions 的 Windows runner（MSVC）构建**。宿主实现为 `apps/app-windows`
+（`yacr.exe`），薄封装 `apps/app-linux` 的共享桌面入口；平台差异（`rfd` 文件对话框、
+`%APPDATA%` 配置目录、`%WINDIR%\Fonts` 系统字体）按 cfg 选择。打包脚本
+`scripts/package-windows-release.sh` 与工具链解耦：CI 在 `windows-latest` 用原生 MSVC
+（默认 target、自动 `+crt-static`），本机可用 MinGW GNU 交叉或 `cargo xwin` 的 MSVC。
+
+**CI**（`.github/workflows/build.yml`）：`windows-check`（每次 push/PR，
+`cargo check -p app-windows --all-targets --locked`，MSVC，不运行）与 `windows-release`
+（`workflow_dispatch` / `v*` tag，`bash scripts/package-windows-release.sh` 并上传
+`yacr-windows-release` artifact）。**这两个 job 本身未在本环境运行**（无 runner）。
+
+本轮本机实际执行（Linux 宿主，无 Windows）：
+
+- GNU 交叉：`cargo check -p app-windows --target x86_64-pc-windows-gnu --locked` 通过；
+  MinGW release `cad-cli-tools.exe` 13945778 / `yacr.exe` 34123856 字节；
+  `YACR_WINDOWS_SMOKE=1 scripts/package-windows-release.sh` exit 0（全量字体 101 文件，
+  零随包 DLL）。
+- MSVC（`cargo xwin`，与 CI 同目标）：`RUSTFLAGS=-C target-feature=+crt-static cargo
+  xwin build --release --locked --target x86_64-pc-windows-msvc` 通过；未加 `+crt-static`
+  时导入 `vcruntime140.dll`，加上后**无任何非系统导入**（故该开关必要）。
+- `scripts/check-pe-imports.py` 的 DLL 集合与 `x86_64-w64-mingw32-objdump -p` 完全一致
+  （对 GNU 产物差分验证；该 Python 解析器替代 `objdump` 以同时支持 Windows runner）。
+- Wine 实际运行（软件翻译，**非真机**，同时覆盖 GNU 与 MSVC 产物）：
+  - `yacr.exe --bogus value` → `unknown option or invalid value: --bogus`，exit 1。
+  - `cad-cli-tools.exe --help` → exit 0，打印完整 operations。
+  - `cad-cli-tools.exe scan entities.dxf` → exit 0，解析 602 实体 / 75 块定义 / bounds。
+  - 字体差分：`build-representation entities.dxf`，包内带 `fonts/` primitives=1464 /
+    vertices=40820；把 exe 复制到无 `fonts/` 目录后 primitives=1553 / vertices=68101
+    ——证明打包字体被 Windows 二进制读取并参与成形。
+- MSVC 本机产物：`target/x86_64-pc-windows-msvc/release/dist/yacr-0.1.0-windows-x86_64.zip`，
+  **57364212 字节**，sha256
+  `deb9cc9ec3c31dddf1aeef9aa66bd7cd5a0d9184678c6b34e6929faa8c78abb7`
+  （含构建时间，重跑会变）。GNU 交叉同款脚本亦产出有效 zip。产物在 gitignored
+  `target/` 下，不入库。
+
+**边界（NOT RUN）**：CI 的 `windows-check`/`windows-release` job、真实 Windows 宿主的
+窗口/DPI/原生文件对话框/配置写入、真实 GPU（DX12/Vulkan）与像素/视觉验收、`--headless`
+离屏、代码签名与 SmartScreen、Windows 上 `cad-cli-tools` 的 DWG 渲染（缺 wine+Vulkan
+组合）均未运行。Wine 是软件翻译，**不得**作为 Windows 兼容性或真机结论。详见
+`docs/windows-app.md`。
+
 ## 集成轮：Android/Web 运行与显示链（2026-10-02 执行）
 
 四个并行 workstream 已合入 `main` 并按下述命令验证。详细证据见
@@ -513,7 +557,8 @@ wasm `--lib` 均通过。
   真实图纸上的 ACIS 端到端 **未运行**。
 - **出图**：仅光栅 PNG；无矢量 PDF/HPGL/SVG、无 CTB/STB 打印样式、无打印设备配置、
   无黄金图。
-- 桌面/iOS/macOS/Windows 宿主：**未构建**；仅 `cad-platform` 抽象。
+- iOS/macOS 宿主：**未构建**；仅 `cad-platform` 抽象。Windows 宿主已交叉编译并在 Wine
+  下实际运行 CLI/参数解析（本轮 Windows 小节）；真实 Windows/GPU/文件对话框仍 **NOT RUN**。
 - 大型授权真实 DWG/字体、跨后端黄金图对照、**手机内存预算与 FPS 实测**：仍缺大型
   授权样本与真机测量（现有开源 QCAD flange 样本仅 `Partial`，见
   `docs/validation-dxf-flange.md`）；`docs/performance.md` 只记录可复现的宿主测量方法，

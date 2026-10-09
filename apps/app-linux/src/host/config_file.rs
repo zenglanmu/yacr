@@ -26,17 +26,40 @@ const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowedPat
 
 /// Per-user configuration directory, or `None` when it cannot be resolved.
 ///
-/// `$XDG_CONFIG_HOME/yacr` when that variable is set and non-empty, otherwise
+/// Windows: `%APPDATA%\yacr`, falling back to `%LOCALAPPDATA%\yacr`.
+/// Everywhere else: `$XDG_CONFIG_HOME/yacr` when set and non-empty, otherwise
 /// `$HOME/.config/yacr`. This never guesses a path.
 pub fn config_dir() -> Option<PathBuf> {
-    resolve_config_dir(
-        std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
-        std::env::var("HOME").ok().as_deref(),
-    )
+    #[cfg(target_os = "windows")]
+    {
+        resolve_windows_config_dir(
+            std::env::var("APPDATA").ok().as_deref(),
+            std::env::var("LOCALAPPDATA").ok().as_deref(),
+        )
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        resolve_config_dir(
+            std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
+            std::env::var("HOME").ok().as_deref(),
+        )
+    }
 }
 
-/// Pure form of [`config_dir`] so the precedence is testable without env
-/// mutation. Empty values are treated as unset.
+/// Windows form of [`config_dir`]: `%APPDATA%\yacr` then `%LOCALAPPDATA%\yacr`.
+///
+/// Pure so the precedence is testable without environment mutation; empty
+/// values are treated as unset.
+pub fn resolve_windows_config_dir(appdata: Option<&str>, local: Option<&str>) -> Option<PathBuf> {
+    appdata
+        .filter(|value| !value.is_empty())
+        .or_else(|| local.filter(|value| !value.is_empty()))
+        .map(|base| Path::new(base).join("yacr"))
+}
+
+/// Unix form of [`config_dir`] (`$XDG_CONFIG_HOME/yacr` then `$HOME/.config/yacr`).
+/// Pure so the precedence is testable without env mutation. Empty values are
+/// treated as unset.
 pub fn resolve_config_dir(xdg: Option<&str>, home: Option<&str>) -> Option<PathBuf> {
     if let Some(base) = xdg.filter(|value| !value.is_empty()) {
         return Some(Path::new(base).join("yacr"));
