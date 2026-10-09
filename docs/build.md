@@ -67,11 +67,13 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 
 ## Android APK（已验证编译、打包、安装与运行）
 
-CI 发布层：`build.yml` 的 `android-release`（能力门控 `ANDROID_CI_ENABLED`，且仅
-`workflow_dispatch` / `v*` tag）生成开发签名 keystore、把全量 CAD 字体打进
-`apps/app-android/assets/fonts/` 后运行 `scripts/build-android.sh --release`，上传
-`yacr-android-release` APK artifact；`android-apk` 仍是每次 push/PR（启用时）的构建+事实
-记录 job。二者都**只产出 APK，不等于安装运行**。
+CI 发布层：`build.yml` 的 `android-release`（`workflow_dispatch` / `v*` tag）在
+`ubuntu-latest` 上自装 **JDK 17**（`actions/setup-java`）与固定 SDK/NDK
+（`build-tools;34.0.0`、`platforms;android-34/30`、`ndk;27.0.12077973`，经 `sdkmanager`），
+生成开发签名 keystore、把全量 CAD 字体打进 `apps/app-android/assets/fonts/` 后运行
+`scripts/build-android.sh --release`，上传 `yacr-android-release` APK artifact；`android-apk`
+仍是每次 push/PR（`ANDROID_CI_ENABLED` 门控）的构建+事实记录 job。二者都**只产出 APK，
+不等于安装运行**。
 
 依赖：JDK 17、Android SDK（build-tools 34.0.0、platform android-34/30）、
 NDK 27.0.12077973、`cargo-apk 0.10.0`。

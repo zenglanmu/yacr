@@ -120,7 +120,6 @@ GATED_JOBS: tuple[str, ...] = (
     "web-deploy",
     "android-check",
     "android-apk",
-    "android-release",
     "web-smoke",
 )
 
@@ -129,7 +128,6 @@ GATED_JOB_IF: dict[str, str] = {
     "web-deploy": "vars.CF_PAGES_DEPLOY_ENABLED",
     "android-check": "vars.ANDROID_CI_ENABLED",
     "android-apk": "vars.ANDROID_CI_ENABLED",
-    "android-release": "vars.ANDROID_CI_ENABLED",
     "web-smoke": "vars.WEB_SMOKE_ENABLED",
 }
 

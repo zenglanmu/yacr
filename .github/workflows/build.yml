@@ -619,16 +619,21 @@ jobs:
 
   android-release:
     name: android-release (APK with fonts)
-    # Capability-gated like android-apk: the pinned JDK 17 / Android SDK / NDK
-    # 27.0.12077973 are not guaranteed on GitHub-hosted runners. When the
-    # variable is unset the job is SKIPPED, never green. It additionally bundles
-    # the full CAD font catalogue into assets/fonts/ and only runs on demand or
-    # a version tag (the packaging counterpart of android-apk).
-    if: ${{ vars.ANDROID_CI_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')) }}
-    runs-on: ${{ vars.ANDROID_RUNNER_LABEL || 'ubuntu-latest' }}
-    timeout-minutes: 90
+    # Self-contained release packaging: provisions the pinned JDK 17 and the
+    # Android SDK/NDK from docs/build.md on a hosted runner, bundles the full CAD
+    # font catalogue into assets/fonts/ and uploads the APK. Runs on demand or a
+    # version tag, like the other *-release jobs.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install pinned JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -644,6 +649,31 @@ jobs:
           key: ${{ runner.os }}-cargo-android-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-android-release-
+
+      - name: Provision pinned Android SDK/NDK components
+        run: |
+          set -euo pipefail
+          ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_HOME
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          [ -n "$SDKMANAGER" ] && [ -x "$SDKMANAGER" ] || { echo "::error::sdkmanager not found under $ANDROID_HOME"; exit 1; }
+          echo "sdkmanager = $SDKMANAGER"
+          # `yes |` accepts the SDK licenses; pipefail is disabled around it so
+          # the SIGPIPE that ends `yes` does not mask sdkmanager's real status.
+          set +o pipefail
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+            "platform-tools" \
+            "platforms;$ANDROID_PLATFORM" \
+            "platforms;android-30" \
+            "build-tools;$ANDROID_BUILD_TOOLS" \
+            "ndk;$ANDROID_NDK_VERSION"
+          set -o pipefail
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Require pinned Android toolchain (fail loudly when absent)
         run: |

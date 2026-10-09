@@ -48,6 +48,7 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 | `actions/cache` | `@v4` | 本层新增的唯一缓存 action；与 `actions/checkout@v4` 相同的 major tag 风格 |
 | `actions/upload-artifact` | `@v4` | `web-build` / `linux-release` / `android-apk` / `android-release` / `web-smoke` 上传产物，只读权限即可 |
 | `actions/setup-node` | `@v4` | `web-host-contracts` / `web-smoke` / `web-deploy` 安装锁定 Node |
+| `actions/setup-java` | `@v4` | `android-release` 安装 temurin **JDK 17**（`sdkmanager`/`cargo-apk` 需要） |
 | `actions/download-artifact` | `@v4` | `web-deploy` 取回 `web-build` 已验证的 `web-dist`，避免重新构建未验证产物 |
 
 这些 action 未固定完整 commit SHA：编写时无法联网核验 SHA，禁止凭空编造。
@@ -63,7 +64,7 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 | `windows-release` | build.yml | `windows-latest`（按需/tag） | MSVC release 打包 + 全量字体 zip，上传 artifact |
 | `macos-check` | build.yml | `macos-latest` | 原生 arm64 macOS 目标 `cargo check -p app-macos`，不运行 app |
 | `macos-release` | build.yml | `macos-latest`（按需/tag） | universal `Yacr.app` tar.gz + 全量字体，上传 artifact |
-| `android-release` | build.yml | 能力相关（默认 SKIP，按需/tag） | 含全量字体的 release APK，上传 artifact |
+| `android-release` | build.yml | `ubuntu-latest`（按需/tag） | 自装 JDK 17 + 固定 SDK/NDK，含全量字体的 release APK，上传 artifact |
 | `core-quality` | core.yml | `ubuntu-latest` | debug 全目标编译 + fmt + clippy + 架构边界，失败即红灯 |
 | `wasm-check` | core.yml | `ubuntu-latest` | 完整 workspace wasm `--lib` 检查 + 单独 `app-web` 检查 |
 | `i18n-contracts` | core.yml | `ubuntu-latest` | 双语 catalog / 缺 key / 硬编码白名单校验 |
@@ -265,17 +266,23 @@ Android SDK / NDK 27.0.12077973。因此该 job 默认被门控：
 ABI `arm64-v8a`、v1 debug/dev 密钥 JAR 签名。**打包等于产出可安装 APK 文件，
 不等于安装运行**；无设备/模拟器，安装与启动一律未验证。
 
-### `android-release`（能力相关，默认 SKIP；按需/tag 含字体 APK）
+### `android-release`（按需/tag，自装工具链，含字体 APK）
 
-与 `android-apk` 同一 `ANDROID_CI_ENABLED` 开关，但仅在 `workflow_dispatch` 或 `v*` tag 触发
-（`android-apk` 是每次 push/PR 的构建+事实记录，`android-release` 是发布打包）。启用后：
-先执行与 `android-apk` 相同的固定工具链前置校验；`cargo install cargo-apk 0.10.0`；生成
-**gitignored** 的开发签名 keystore（CI 专用，与 `docs/build.md` 一致）；`scripts/fetch-fonts.sh
-apps/app-android/assets/fonts` 把 mlightcad 全量目录 + 已提交 osifont 打进 `assets/fonts/`；
-`scripts/build-android.sh --release`；断言 `Cargo.lock` 未被改写；用 `aapt2 dump badging`
-记录真实 manifest，上传 `yacr-android-release` artifact（APK）。**打包不等于安装运行**；默认
-未启用时 GitHub 显示 **skipped**，绝不显示为通过。本环境未在 GitHub Actions 上执行该 job，
-属 NOT RUN。
+`runs-on: ubuntu-latest`，`if: workflow_dispatch || tags/v*`（与其它 `*-release` 一致）。
+自包含地在托管 runner 上装好固定工具链，不依赖维护者预置 runner：
+
+1. `actions/setup-java@v4`（temurin，**JDK 17**）；
+2. `sdkmanager`（GitHub 镜像自带 cmdline-tools）安装 `platform-tools`、
+   `platforms;android-34`、`platforms;android-30`、`build-tools;34.0.0`、
+   `ndk;27.0.12077973`，并把 `ANDROID_HOME`/`ANDROID_NDK_HOME` 写入 `$GITHUB_ENV`；
+3. 前置校验 `JAVA_HOME`（主版本 17）、NDK 目录与 `aapt2`，缺任一即**失败**；
+4. `cargo install cargo-apk 0.10.0`；生成 **gitignored** 开发签名 keystore；
+5. `scripts/fetch-fonts.sh apps/app-android/assets/fonts` 把 mlightcad 全量目录 + 已提交
+   osifont 打进 `assets/fonts/`；`scripts/build-android.sh --release`；断言 `Cargo.lock`
+   未被改写；`aapt2 dump badging` 记录真实 manifest；上传 `yacr-android-release` APK。
+
+`android-apk`（每次 push/PR，`ANDROID_CI_ENABLED` 门控）仍是构建+事实 job，**不**自装工具链。
+**打包不等于安装运行**；两个 job 都未在本环境实跑（无 runner / 未验证），属 NOT RUN。
 
 ### `web-smoke`（能力相关，默认 SKIP；仅软件 GPU）
 
@@ -306,8 +313,10 @@ Node `22.22.1` 与 Playwright `1.55.1` Chromium，构建 `web-dist`，起
 以下内容**未实现或未运行**，不得据本工作流宣称通过；需要维护者先确认
 runner、标签、secrets 与设备：
 
-- `android-check` / `android-apk` / `android-release`：默认关闭，无 Android SDK/NDK 的
-  runner 上未运行；启用后仍**只**产出 APK，**安装与真机运行未执行**。
+- `android-check` / `android-apk`：默认关闭（`ANDROID_CI_ENABLED`），未运行；启用后仍
+  **只**产出 APK，**安装与真机运行未执行**。
+- `android-release`：已改为自装 JDK 17 + 固定 SDK/NDK、按需/tag 触发，但**尚未在本环境的
+  GitHub Actions 上实跑**；即便跑通也**只产出 APK，安装/真机运行未执行**。
 - `web-smoke`：默认关闭。即便启用，也只是软件 GPU 无头 Chromium，**非真机、非
   WebGPU 验收**；真机浏览器矩阵未运行。
 - `web-deploy`：默认关闭（`CF_PAGES_DEPLOY_ENABLED` 未设即 SKIP），**未在本仓库的
@@ -373,7 +382,7 @@ python3 scripts/test-fetch-fonts.py
 `windows-release`、`macos-check`、`macos-release`、`android-release`、`web-build`、
 `web-host-contracts`、`web-deploy`、`android-check`、`android-apk`、`web-smoke`）均已声明；
 必需 job 内没有 `continue-on-error: true`；每个 job 保留其命令片段；且被门控的 job
-（`web-deploy`/`android-check`/`android-apk`/`android-release`/`web-smoke`）保留其 `if:`
+（`web-deploy`/`android-check`/`android-apk`/`web-smoke`）保留其 `if:`
 能力开关（缺开关即失败，防止门控被误当成静默通过）。有 PyYAML 时做真实解析，
 否则退化为结构化文本检查并如实说明（不假装 YAML 已解析）。失败退出码非零。
 
