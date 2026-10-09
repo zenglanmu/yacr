@@ -282,7 +282,8 @@ ABI `arm64-v8a`、v1 debug/dev 密钥 JAR 签名。**打包等于产出可安装
    未被改写；`aapt2 dump badging` 记录真实 manifest；上传 `yacr-android-release` APK。
 
 `android-apk`（每次 push/PR，`ANDROID_CI_ENABLED` 门控）仍是构建+事实 job，**不**自装工具链。
-**打包不等于安装运行**；两个 job 都未在本环境实跑（无 runner / 未验证），属 NOT RUN。
+**打包不等于安装运行**。`android-release` 已在 run 37920264484 实跑通过（见 `docs/validation.md`）；
+`android-apk` 仍属未运行。
 
 ### `web-smoke`（能力相关，默认 SKIP；仅软件 GPU）
 
@@ -315,8 +316,8 @@ runner、标签、secrets 与设备：
 
 - `android-check` / `android-apk`：默认关闭（`ANDROID_CI_ENABLED`），未运行；启用后仍
   **只**产出 APK，**安装与真机运行未执行**。
-- `android-release`：已改为自装 JDK 17 + 固定 SDK/NDK、按需/tag 触发，但**尚未在本环境的
-  GitHub Actions 上实跑**；即便跑通也**只产出 APK，安装/真机运行未执行**。
+- `android-release`：已自装 JDK 17 + 固定 SDK/NDK，并在 run 37920264484 实跑通过，产出
+  `yacr-android-release` APK；但**打包不等于安装/真机运行**（无设备/模拟器）。
 - `web-smoke`：默认关闭。即便启用，也只是软件 GPU 无头 Chromium，**非真机、非
   WebGPU 验收**；真机浏览器矩阵未运行。
 - `web-deploy`：默认关闭（`CF_PAGES_DEPLOY_ENABLED` 未设即 SKIP），**未在本仓库的

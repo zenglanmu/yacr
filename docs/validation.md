@@ -411,24 +411,31 @@ Metal GPU 渲染与像素/视觉验收、原生文件对话框、配置目录写
 支持，无 Vulkan）、`lipo`/`otool` 校验与 tar.gz 产物、代码签名/notarization 均未运行；
 本环境**无 macOS 压缩包产物**。详见 `docs/macos-app.md`。
 
-## CI 发布层实跑：Linux/Windows/macOS release 打包（2026-10-09 执行）
+## CI 发布层实跑：Linux/Windows/macOS/Android release 打包（2026-10-09 执行）
 
 `v0.1` tag 首次触发 `build.yml` 的 `windows-release`/`macos-release` 时失败，经配置 GitHub
 API 鉴权拉取真实日志，定位并修复三个确定性脚本 bug（PE 导入 CRLF、fat `otool` 头、字体目录
 Windows 编码；详见 `docs/handoff.md`「CI 发布 job 首次运行失败与修复」）。修复后把 `v0.1`
-强制更新到修复提交并重跑：
+强制更新到修复提交并重跑，随后又让 `android-release` 自装工具链并再次验证：
 
-- run `https://github.com/zenglanmu/yacr/actions/runs/37916376185`（sha `2b09fcf`，event push
-  tag `v0.1`）**conclusion=success**。
-- 通过并上传含字体产物：`windows-release`（11m39s，`yacr-windows-release` 57,385,763 B）、
-  `macos-release`（6m14s，`yacr-macos-release` 72,217,415 B，universal arm64+x86_64）、
-  `linux-release`（3m51s，`yacr-linux-release` 61,648,871 B）；`linux-app`/`windows-check`/
-  `macos-check`/`web-build`/`shader-validation`/`web-host-contracts` 亦通过。
-- `android-apk`/`android-release`/`web-smoke`/`web-deploy` 按 `ANDROID_CI_ENABLED`/
-  `WEB_SMOKE_ENABLED`/`CF_PAGES_DEPLOY_ENABLED` 门控 **SKIPPED**（未启用，非通过）。
+- run `https://github.com/zenglanmu/yacr/actions/runs/37916376185`（sha `2b09fcf`，push tag
+  `v0.1`）**success**：`windows-release`（11m39s，57,385,763 B）、`macos-release`（6m14s，
+  72,217,415 B，universal arm64+x86_64）、`linux-release`（3m51s，61,648,871 B）均通过并上传
+  含字体产物。
+- run `https://github.com/zenglanmu/yacr/actions/runs/37920264484`（sha `00b8375`，
+  `workflow_dispatch` on `main`）**success**：除上述三个发布包外，**`android-release`（7m59s）
+  自装 JDK 17 + `sdkmanager` 安装 `build-tools;34.0.0`/`platforms;android-34/30`/
+  `ndk;27.0.12077973` 后构建 release APK 并上传 `yacr-android-release`（52,726,457 B）**。
+  实测事实（`aapt2 dump badging`）：`package=dev.yacr.app`、`versionName=0.1.0`、
+  `sdkVersion=23`、`targetSdkVersion=30`、`native-code=arm64-v8a`，APK 53,017,904 B，
+  `JDK major=17`，`ANDROID_NDK_HOME=.../ndk/27.0.12077973`，`Cargo.lock` 未改。
+- `web-smoke`：已通过仓库变量 `WEB_SMOKE_ENABLED=true` 启用（下一次 push/PR/dispatch 生效，
+  无需 secrets；仅软件 GPU，非真机/WebGPU 验收）。
+- `android-apk`（`ANDROID_CI_ENABLED` 门控）与 `web-deploy`（`CF_PAGES_DEPLOY_ENABLED` +
+  Cloudflare secrets）仍 **SKIPPED**（未启用）。
 
-**边界**：以上是 **CI 打包证据**（在 GitHub 托管 runner 上构建并上传产物），**不是**真机、
-真实 GPU、窗口/文件对话框、安装运行或像素/视觉验收；Android 未产出 APK（门控未启用）。
+**边界**：以上是 **CI 打包证据**（GitHub 托管 runner 构建并上传产物），**不是**真机、真实
+GPU、窗口/文件对话框、安装运行或像素/视觉验收；Android APK 未在设备/模拟器安装运行。
 
 ## 集成轮：Android/Web 运行与显示链（2026-10-02 执行）
 
