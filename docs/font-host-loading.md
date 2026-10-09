@@ -46,7 +46,7 @@ Linux 桌面/CLI 宿主复用同一个 `load_font_engine`，只是 `FontLoader` 
   不是通用 runtime）。
 - **不打包 mlightcad 字体**：许可原因（`docs/fonts.md`「授权」），未放 `assets/fonts/` 时返回
   `ResourceMissing`（`font asset not packaged …`），状态栏报告，绝不伪造。但
-  `scripts/fetch-android-fonts.sh` 会把提交的 `fonts/`（QCAD osifont，GPL-3+例外）合并进
+  `scripts/fetch-fonts.sh` 会把提交的 `fonts/`（QCAD osifont，GPL-3+例外）合并进
   `assets/fonts/`，保证 APK 至少自带给默认轮廓回退面。
 
 ## Linux 桌面 / CLI（`cad-platform::fonts::local`）

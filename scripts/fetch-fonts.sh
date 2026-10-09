@@ -1,35 +1,52 @@
 #!/usr/bin/env bash
-# Download the third-party CAD font catalogue into a web distribution.
+# Assemble the CAD font package into a target directory (platform-agnostic).
 #
-# The web host fetches `fonts.json` plus one file per font a drawing references
-# from the compile-time base `YACR_FONT_BASE_URL` (default `fonts/`, i.e. next
-# to the page). This script makes that directory self-contained so a deployed
-# `web-dist/` does not depend on the jsDelivr CDN.
+# This is the single implementation behind every host's bundled fonts. It
+# downloads the `mlightcad/cad-data` catalogue plus the requested faces into
+# `DEST`, merges the committed `fonts/` package (QCAD osifont) into the same
+# directory and leaves `DEST/fonts.json` as the host catalog. Web, Android and
+# desktop packaging are just consumers that pick a different DEST; there is no
+# platform-specific logic here.
 #
-# Usage: scripts/fetch-web-fonts.sh [DEST]
-#   DEST   target directory (default: <repo>/web-dist/fonts)
+# Usage:
+#   scripts/fetch-fonts.sh <DEST> [FILE|STEM|CATALOG-NAME ...]
+#
+# With no explicit faces the whole catalogue is fetched. A subset matches
+# catalogue files by file name, file stem or catalog name; the same subset can
+# be passed through the FONTS environment variable (space separated). The full
+# `fonts.json` is always written so each host can still resolve any drawing
+# font name.
+#
 # Env:
 #   FONT_BASE_URL           primary source (default: mlightcad/cad-data via jsDelivr)
 #   FONT_FALLBACK_BASE_URL  second source tried when the primary fails
 #                           (default: raw.githubusercontent.com; reachable from
 #                           GitHub Actions, where jsDelivr throttles shared IPs)
 #   FONT_RETRIES            attempts per source before falling back (default: 3)
-#   FONTS                   optional space-separated subset (file, stem or catalog name)
-#   FORCE                   set to 1 to re-download files that already exist
+#   FONTS                   optional space-separated subset (same as positional args)
+#   FORCE                   1 to re-download files that already exist
 #
-# Licensing: the fonts are third-party (Autodesk / Microsoft / open fonts) and
-# are NOT committed to this repository; downloading and redistributing them is
-# the deployer's responsibility. See docs/fonts.md.
+# Licensing: the mlightcad fonts are third-party and are NOT committed to this
+# repository; downloading and redistributing them is the deployer's
+# responsibility. The committed package merged here is `fonts/` (QCAD osifont,
+# GPL-3 with font exception; provenance in `fonts/SOURCE.md`). See docs/fonts.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEST="${1:-$ROOT/web-dist/fonts}"
+DEST="${1:?usage: scripts/fetch-fonts.sh <DEST> [FONTS...]}"
+shift || true
 export FONT_BASE_URL="${FONT_BASE_URL:-https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts}"
 export FONT_FALLBACK_BASE_URL="${FONT_FALLBACK_BASE_URL:-https://raw.githubusercontent.com/mlightcad/cad-data/main/fonts}"
 export FONT_RETRIES="${FONT_RETRIES:-3}"
 
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
 [ -n "$FONT_BASE_URL" ] || { echo "FONT_BASE_URL is empty" >&2; exit 1; }
+
+# Face subset: positional arguments win, then the FONTS env var; otherwise the
+# whole catalogue. The python downloader reads FONTS.
+if [ "$#" -gt 0 ]; then
+  export FONTS="$*"
+fi
 
 mkdir -p "$DEST"
 
@@ -87,6 +104,8 @@ if only:
 
     entries = [e for e in entries if wanted(e)]
 
+# The full catalogue is always written so each host can resolve every drawing
+# font name even when only a subset of faces was downloaded.
 with open(os.path.join(dest, "fonts.json"), "wb") as handle:
     handle.write(catalog_bytes)
 
@@ -135,8 +154,8 @@ if failures:
 PY
 
 # Merge the committed font package (`fonts/`, currently QCAD osifont.ttf) into
-# the bundle: the deployed directory is then self-contained for the default
-# outline face even when the CDN catalogue does not carry it.
+# the target directory so it carries the default outline face even when the
+# catalogue does not.
 if [ -d "$ROOT/fonts" ]; then
   python3 - "$DEST" "$ROOT/fonts" <<'PY'
 import json, pathlib, sys

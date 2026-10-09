@@ -22,17 +22,20 @@
 4. **CLI（`cad-cli-tools`）**：`load_fonts` 增加 `requested` 入参，原生宿主复用
    `fonts::local`（同级 `fonts/` + 系统默认）；`run.rs` 先开图再取字体检清单。
 5. **输出打包**：`scripts/package-linux-release.sh` 把 `fonts/` 复制到发布包
-   `bin/` 同级；`scripts/fetch-web-fonts.sh`、`fetch-android-fonts.sh` 把提交的
+   `bin/` 同级；`scripts/fetch-fonts.sh`（平台无关唯一打包入口）把提交的
    `fonts/` 合并进目录清单与字节（web-dist/fonts、assets/fonts）。
 6. **文档**：`docs/fonts.md`（来源/布局/回退/授权/未完成重写）、`docs/font-host-loading.md`
    （分层加桌面+默认面）、`docs/cli.md`、`docs/linux-app.md`、`docs/dxf-entity-coverage.md`。
+   同轮评审后续：`fetch-web-fonts.sh`/`fetch-android-fonts.sh` 已并入**平台无关**的
+   `scripts/fetch-fonts.sh <DEST> [FONTS...]` 并删除旧名——字体组装逻辑与目标平台解耦，
+   各宿主（web/android/桌面）只传不同 `DEST`。见 `docs/fonts.md` `fonts/README.md`。
 
 **实际执行并通过**：`cad-platform` 13 项（新增默认面/local 5 项）、`cad-cli-tools` lib 20、
 `cli_contracts` 14（lavapipe 串行）、`app-linux` lib 1+3 ignored；fmt、严格 clippy
 （`-D warnings`）、architecture/fixture/workflow/i18n、native 全 workspace check、
 wasm 全 workspace lib check 均通过。CLI 差分 smoke：`entities.dxf` 无字体目录
 lines=1443，有 `fonts/`（仓库根）lines=1497——缺字体时默认轮廓面成形，texts 均 0。
-`fetch-web-fonts.sh` 合并 smoke：100 条目（99 mlightcad + osifont）成功。
+`fetch-fonts.sh` 合并 smoke：100 条目（99 mlightcad + osifont）成功。
 
 **未运行/限制**：浏览器/真机下载与整形未验证；Android 未打包安装；无真实 GPU/窗口/
 视觉验收；系统默认面依赖 `fc-match`，本机 `sans-serif` 命中 `.ttc`（引擎跳过）后取

@@ -18,7 +18,7 @@ keystore.properties
 .wrangler/
 
 # Bundled CAD fonts for the Android APK are third-party and not committed;
-# fetch them with scripts/fetch-android-fonts.sh (see the README in that folder).
+# assemble them with scripts/fetch-fonts.sh (see the README in that folder).
 apps/app-android/assets/fonts/*
 !apps/app-android/assets/fonts/README.md
 

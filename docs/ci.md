@@ -132,7 +132,7 @@ Rust 测试代码通过 `--all-targets` 编译，但不执行测试。该 job �
    `wasm-bindgen --version`；版本不可得即失败；
 3. `DIST=$GITHUB_WORKSPACE/web-dist PROFILE=release scripts/build-web.sh`
    （脚本内部 `cargo build ... --locked`，不会改锁文件）。脚本默认
-   `WITH_FONTS=1`，经 `fetch-web-fonts.sh` 把第三方字体下载进 `web-dist/fonts/`
+   `WITH_FONTS=1`，经 `fetch-fonts.sh` 把第三方字体下载进 `web-dist/fonts/`
    （jsDelivr 优先；单文件失败按 `FONT_RETRIES` 退避重试，再回退到
    `raw.githubusercontent.com`——GitHub Actions 共享出口 IP 常被 jsDelivr 限流；
    两个源都失败才退出 1。字体不入库，见 `docs/fonts.md`）；

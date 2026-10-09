@@ -51,10 +51,11 @@ cp crates/cad-ui-slint/i18n/zh-CN.json "$DIST/i18n/zh-CN.json"
 cp crates/cad-ui-slint/i18n/en.json "$DIST/i18n/en.json"
 
 # Self-hosted third-party fonts. Downloaded (never committed: see
-# docs/fonts.md) so a deployed `web-dist/` is self-contained. `WITH_FONTS=0`
-# keeps the CDN base and leaves the directory out.
+# docs/fonts.md) so a deployed `web-dist/` is self-contained, and the committed
+# `fonts/` package (QCAD osifont) is merged in. `WITH_FONTS=0` keeps the CDN
+# base and leaves the directory out.
 if [ "$WITH_FONTS" = "1" ]; then
-  "$ROOT/scripts/fetch-web-fonts.sh" "$DIST/fonts"
+  "$ROOT/scripts/fetch-fonts.sh" "$DIST/fonts"
 else
   echo "web build: WITH_FONTS=0, using font base $YACR_FONT_BASE_URL (no local copy)"
 fi

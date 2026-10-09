@@ -63,7 +63,7 @@ git diff --stat > "$RUN/working-tree.txt"
 字体可复用本机已有资源。确认授权后，需获取项目 Web 字体集时运行：
 
 ```bash
-scripts/fetch-web-fonts.sh "$FONT_DIR"
+scripts/fetch-fonts.sh "$FONT_DIR"
 ```
 
 ## 3. 第一层：原生快速反馈

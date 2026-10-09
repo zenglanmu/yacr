@@ -19,16 +19,26 @@ apk` simply packages no fonts and the app reports “font asset not packaged”.
 
 ## Download them
 
+As with every host, the fonts are assembled by the platform-agnostic packer:
+
 ```bash
-scripts/fetch-android-fonts.sh
+# the common subset a typical drawing references (SHX + a few CJK/outline)
+scripts/fetch-fonts.sh apps/app-android/assets/fonts \
+  simplex.shx txt.shx romans.shx romand.shx romant.shx \
+  isocp.shx isocp2.shx isocp3.shx ltypeshp.shx \
+  gbcbig.shx hztxt.shx bigfont.shx \
+  arial.woff simsun.woff simhei.woff simkai.woff msyh.woff \
+  tahoma.woff verdana.woff msgothic.woff noto-sans-kr.woff \
+  gbgdt.woff SJQY.woff AIGDT.ttf
 # or a custom set:
-FONTS="simplex.shx arial.woff" scripts/fetch-android-fonts.sh
+FONTS="simplex.shx arial.woff" scripts/fetch-fonts.sh apps/app-android/assets/fonts
 ```
 
-The script pulls from the same catalogue the web host uses —
+`scripts/fetch-fonts.sh` downloads the catalogue the web host uses —
 `https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts` (override with
-`FONT_BASE_URL=`) — and also fetches `fonts.json`, which the host needs to
-resolve a drawing's font names.
+`FONT_BASE_URL=`) — writes `fonts.json`, and merges the committed `fonts/`
+package (QCAD osifont). A subset can be passed as positional arguments or via
+`FONTS`; with neither, the whole catalogue is fetched.
 
 ## How it is wired
 

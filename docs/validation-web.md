@@ -205,7 +205,7 @@ python3 scripts/check-i18n.py                                                   
   语法检查：通过。CI 增加非门控 `web-host-contracts`，不把它当作 GPU 验收。
 - 初次 `scripts/build-web.sh` 在字体下载阶段耗时过长，终止该次抓取；两个缺失文件
   `simhei.woff` / `simsun.woff` 复用现有 Android 缓存（目录相同，23 个共同文件的
-  SHA-256 全一致）。随后 `scripts/fetch-web-fonts.sh web-dist/fonts` 缓存复验通过，
+  SHA-256 全一致）。随后 `scripts/fetch-fonts.sh web-dist/fonts` 缓存复验通过，
   **99 个字体文件完整**。未更改字体源、字体内容或第三方许可要求。
 - 最终源码另执行 release `cargo build -p app-web --target wasm32-unknown-unknown
   --profile release --locked`（`YACR_FONT_BASE_URL=fonts/`）与 `wasm-bindgen --target web`：

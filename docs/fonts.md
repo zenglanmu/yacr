@@ -40,11 +40,16 @@
 
 - **Linux 桌面/CLI**：打包脚本把 `fonts/` 放在可执行文件同级（或 `bin/` 同级）；
   宿主启动时自动扫描 `fonts/fonts.json` 并按需加载（见「主机接线」）。
-- **Web**：`scripts/build-web.sh`/`fetch-web-fonts.sh` 把提交的 `fonts/` 合并进
+- **Web**：`scripts/build-web.sh`/`scripts/fetch-fonts.sh` 把提交的 `fonts/` 合并进
   `web-dist/fonts/`（并与下载的 mlightcad 目录清单合并且去重），浏览器宿主优先用
   同源 `fonts/`，未发布本地包时回落到 CDN。
-- **Android**：`scripts/fetch-android-fonts.sh` 把提交的 `fonts/` 合并进
+- **Android**：`scripts/fetch-fonts.sh` 把提交的 `fonts/` 合并进
   `assets/fonts/`（该目录本身仍 gitignore，不入库）。
+
+`scripts/fetch-fonts.sh <DEST> [FONTS...]` 是**平台无关的唯一打包入口**：下载 mlightcad
+目录清单与指定面（无参数则为全部）、合并提交的 `fonts/`、写 `DEST/fonts.json`。Web /
+Android / 桌面发布都只是传不同的 `DEST`，本身不含任何平台逻辑（旧 `fetch-web-fonts.sh`、
+`fetch-android-fonts.sh` 已并入它并删除）。
 
 ## 实现
 
@@ -133,7 +138,7 @@
     `assets/fonts/…`（基址 `asset://fonts/`），目录为 `asset://fonts/fonts.json`。
     走同一个 `load_font_engine`。mlightcad 字体**不入库**（授权，见上），未打包时报告
     `ResourceMissing`（`font asset not packaged …`），不伪造空字体集；但
-    `fetch-android-fonts.sh` 会把提交的 `fonts/`（osifont）合并进资产集，保证 APK
+    `scripts/fetch-fonts.sh` 会把提交的 `fonts/`（osifont）合并进资产集，保证 APK
     自带默认轮廓面。
   - **Linux 桌面/CLI**（`app-linux`、`cad-cli-tools`）：共用
     `cad-platform::fonts::local`。启动（或每次打开图纸）时扫描可执行文件同级的
@@ -145,11 +150,11 @@
 
 浏览器宿主在编译期读 `YACR_FONT_BASE_URL`（`apps/app-web/src/browser.rs`）决定目录/字体基址：
 未设置时回退到 `DEFAULT_FONT_BASE_URL`（jsDelivr）。`scripts/build-web.sh` 默认
-`YACR_FONT_BASE_URL=fonts/`（相对页面），并在打包时调用 `scripts/fetch-web-fonts.sh`
+`YACR_FONT_BASE_URL=fonts/`（相对页面），并在打包时调用 `scripts/fetch-fonts.sh`
 把 `mlightcad/cad-data` 的 `fonts.json` 与全部字体下载进 `web-dist/fonts/`，所以
 **发布包自包含、不跨域**。
 
-`fetch-web-fonts.sh` 默认先用 jsDelivr（`FONT_BASE_URL`）；单个文件失败时按
+`fetch-fonts.sh` 默认先用 jsDelivr（`FONT_BASE_URL`）；单个文件失败时按
 `FONT_RETRIES`（默认 3）退避重试，仍失败再回退到 `FONT_FALLBACK_BASE_URL`
 （默认 `https://raw.githubusercontent.com/mlightcad/cad-data/main/fonts`，GitHub
 Actions 的共享出口 IP 常被 jsDelivr 限流，但可访问 raw 源）。每个文件记录实际来源；
@@ -161,7 +166,7 @@ YACR_FONT_BASE_URL=https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts/ \
 ```
 
 mlightcad 字体文件仍不提交仓库（`/web-dist/` 已 ignore）；下载与再分发的授权由部署者负责。
-仓库提交的 `fonts/`（QCAD osifont）由 `fetch-web-fonts.sh` 在打包时合并进 `web-dist/fonts/`。
+仓库提交的 `fonts/`（QCAD osifont）由 `fetch-fonts.sh` 在打包时合并进 `web-dist/fonts/`。
 Cloudflare Pages 发布见 `scripts/deploy-cloudflare-pages.sh`。
 
 ## 主机取字节实现现状
