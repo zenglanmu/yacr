@@ -16,7 +16,7 @@ canonical 命令。命令行的解析、补全与分发集中在 `cad-ui-slint`�
   别名；否则做**前缀**匹配。
   - **唯一前缀** → Enter 执行该命令。
   - **歧义前缀**（匹配多个）→ 命令行**保持打开**并给出候选（不猜测、不执行）。
-  - **空 Enter** → 重复**上一条真正执行过的**命令（CONFIRM/ENTER/CANCEL 不成为重复目标）。
+  - **空 Enter** → 重复**上一条成功分发的**命令（CONFIRM/ENTER/CANCEL 不成为重复目标）。
   - **未知**输入 → 显式 `command.unknown` 反馈；**已识别但未实现**的 AutoCAD 命令 → 显式
     `command.unsupported` 反馈。二者都不会静默忽略。
 - **补全候选**（`command-bar.slint`）：
@@ -85,7 +85,8 @@ canonical 命令（`work-only` 表示仅在工作模式可用，Viewer 模式由
 - `COPYCLIP` 是**只读**捕获，Viewer 亦可用；`CUTCLIP`/`PASTECLIP` 为 work-only。
 - `OPEN`/`NEW`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
   （不会静默 no-op）。
-- 别名表见 `crates/cad-ui-slint/src/command_completion.rs::ALIASES`，同义词表见 `SYNONYMS`。
+- 别名表见 `crates/cad-ui-slint/src/command_completion.rs::ALIASES`，同义词表见 `SYNONYMS`；
+  已知但未实现的 AutoCAD 命令表见 `crates/cad-ui-slint/src/command_line.rs::UNSUPPORTED_COMMANDS`。
 
 ---
 
@@ -138,15 +139,20 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   - 绘图开关：`Ctrl+B`（捕捉）、`Ctrl+D`（动态 UCS/坐标）、`Ctrl+E`（等轴测平面）、
     `Ctrl+F`（对象捕捉）、`Ctrl+G`（栅格）、`Ctrl+H`（拾取样式）、`Ctrl+I`（坐标）、
     `Ctrl+J`/`Ctrl+M`（重复）、`Ctrl+L`（正交）、`Ctrl+R`（视口）、`Ctrl+T`（数字化仪）、
-    `Ctrl+W`（选择循环）。
-  - Shift 组合：`Ctrl+Shift+H`（选项板）、`Ctrl+Shift+A`（组）、`Ctrl+Shift+I`（推断约束）、
+    `Ctrl+W`（选择循环）、`Ctrl+U`（极轴）、`Ctrl+Q`（退出）。
+  - 对象/超链接：`Ctrl+K`（超链接）、`Ctrl+Shift+C`（复制为块 COPYBASE）、`Ctrl+Shift+V`
+    （粘贴为块）、`Ctrl+Shift+X`（剪切为块 CUTBASE）。
+  - 面板/组/约束：`Ctrl+Shift+H`（选项板）、`Ctrl+Shift+A`（组）、`Ctrl+Shift+I`（推断约束）、
     `Ctrl+Shift+L`（选择对象）、`Ctrl+Shift+P`（快速特性）、`Ctrl+Shift+W`（选择循环）。
-  - `Ctrl+N/S/Shift+S/P` 在宿主缺少对应能力时同样报告 `shortcut.unsupported`。
+  - `Ctrl+O`（打开）与 `Ctrl+N/S/Shift+S/P` 在宿主缺少对应能力时同样报告 `shortcut.unsupported`。
   - 未列出的 `Ctrl+<其他字母/数字>` 与所有 `Alt+` 组合**未映射**：`Alt`/`Meta` 一律放行给系统，
     其余未映射组合不拦截。
-- **未实现的 AutoCAD 命令**：如 `HATCH`、`POLYLINE`、`SPLINE`、`ELLIPSE`、`XLINE`、`DIM*`、
-  `BLOCK`、`WBLOCK`、`IMPORT`、`XREF`、`PUBLISH` 等在 `UNSUPPORTED_COMMANDS` 中，提交时报告
-  `command.unsupported`（用原始输入保真显示）。
+- **未实现的 AutoCAD 命令**：如 `HATCH`、`POLYLINE`、`SPLINE`、`ELLIPSE`、`XLINE`、`BLOCK`、
+  `WBLOCK`、`IMPORT`、`XREF`、`PUBLISH`，以及全部 `DIM` 族条目（`DIM`/`DIMALIGNED`/`DIMANGULAR`/
+  `DIMDIAMETER`/`DIMLINEAR`/`DIMRADIUS`/`DIMSTYLE`）在
+  `crates/cad-ui-slint/src/command_line.rs::UNSUPPORTED_COMMANDS` 中，提交时报告
+  `command.unsupported`（用原始输入保真显示）。不在该表中的其他 AutoCAD 名（如 `DIMORDINATE`/
+  `DIMCONTINUE`）落入 `command.unknown`，同样是显式反馈，不静默忽略。
 - **`OFFSET` 为有界子集**：仅支持 LINE 与 CIRCLE；其它几何（Polyline/Arc/Ellipse/Spline/Point/
   Mesh/Text/…）显式 `Unsupported("OFFSET supports LINE and CIRCLE only")`，不创建、不部分执行。
 - **`Ctrl+C/X/V` 是应用内剪贴板**，**不是**操作系统剪贴板：不与其他应用互通，也不跨文档

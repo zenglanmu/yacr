@@ -91,8 +91,9 @@
 - **导出**：`SAVE` 为**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；
   `PLOT` 为矢量 SVG/PDF。真实图纸上的导出兼容性**未验证**。
 - **证据范围**：以上均为合成/离屏（软件 Vulkan lavapipe）契约与场景证据，**不代表真实 GPU、真实
-  窗口或真机**；`EXTEND` 仅在 Web 宿主接线（Linux 取点未接线，显式 `Unsupported`）；Android 宿主
-  未编译验证。逐轮证据见 `docs/handoff.md`。
+  窗口或真机**；仅 Web 宿主接线 `TRIM`/`EXTEND` 的取点，桌面端（`app-linux`）两者取点尚未接线，
+  按下时显式 `Unsupported`（`linux.trim` / `linux.extend`）；Android 宿主未编译验证。逐轮证据见
+  `docs/handoff.md`。
 
 ## 三维
 

@@ -66,8 +66,10 @@ fn capture_handler_binds_only_the_global_modifier_and_function_keys() {
         // Gating + modifier hygiene.
         "if !root.application-ui || !root.keyboard-shortcuts-enabled {",
         "if event.modifiers.alt || event.modifiers.meta { return EventResult.reject; }",
-        // Ctrl+O gated by can-open, and the view/UI toggles.
-        "(event.text == \"o\" || event.text == \"O\") && root.can-open",
+        // Ctrl+O gated by can-open (unsupported otherwise), and the view/UI toggles.
+        "if !event.modifiers.shift && (event.text == \"o\" || event.text == \"O\") {",
+        "root.open-requested();",
+        "root.shortcut-unsupported(\"Ctrl+O\")",
         "if !event.modifiers.shift && event.text == \"1\" {",
         "root.side-panel-open = !root.side-panel-open;",
         "if !event.modifiers.shift && event.text == \"9\" && root.command-visible {",
@@ -141,12 +143,18 @@ fn capture_handler_binds_only_the_global_modifier_and_function_keys() {
         "Ctrl+R",
         "Ctrl+T",
         "Ctrl+W",
+        "Ctrl+K",
+        "Ctrl+U",
+        "Ctrl+Q",
         "Ctrl+Shift+H",
         "Ctrl+Shift+A",
         "Ctrl+Shift+I",
         "Ctrl+Shift+L",
         "Ctrl+Shift+P",
         "Ctrl+Shift+W",
+        "Ctrl+Shift+C",
+        "Ctrl+Shift+V",
+        "Ctrl+Shift+X",
     ] {
         let needle = format!("root.shortcut-unsupported(\"{chord}\")");
         assert!(

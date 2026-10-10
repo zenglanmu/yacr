@@ -335,8 +335,14 @@ export component YacrWindow inherits Window {
             }
             if event.modifiers.alt || event.modifiers.meta { return EventResult.reject; }
             if event.modifiers.control {
-                if !event.modifiers.shift && (event.text == "o" || event.text == "O") && root.can-open {
-                    root.open-requested();
+                // Ctrl+O opens when the host offers it; otherwise report
+                // unsupported (never a silent no-op), like N/S/P below.
+                if !event.modifiers.shift && (event.text == "o" || event.text == "O") {
+                    if root.can-open {
+                        root.open-requested();
+                    } else {
+                        root.shortcut-unsupported("Ctrl+O");
+                    }
                     return EventResult.accept;
                 }
                 // Fixed AutoCAD-default view/UI toggles.
@@ -411,6 +417,9 @@ export component YacrWindow inherits Window {
                 if !event.modifiers.shift && (event.text == "r" || event.text == "R") { root.shortcut-unsupported("Ctrl+R"); return EventResult.accept; }
                 if !event.modifiers.shift && (event.text == "t" || event.text == "T") { root.shortcut-unsupported("Ctrl+T"); return EventResult.accept; }
                 if !event.modifiers.shift && (event.text == "w" || event.text == "W") { root.shortcut-unsupported("Ctrl+W"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "k" || event.text == "K") { root.shortcut-unsupported("Ctrl+K"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "u" || event.text == "U") { root.shortcut-unsupported("Ctrl+U"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "q" || event.text == "Q") { root.shortcut-unsupported("Ctrl+Q"); return EventResult.accept; }
                 // Shift combinations (not implemented).
                 if event.modifiers.shift && (event.text == "h" || event.text == "H") { root.shortcut-unsupported("Ctrl+Shift+H"); return EventResult.accept; }
                 if event.modifiers.shift && (event.text == "a" || event.text == "A") { root.shortcut-unsupported("Ctrl+Shift+A"); return EventResult.accept; }
@@ -418,6 +427,9 @@ export component YacrWindow inherits Window {
                 if event.modifiers.shift && (event.text == "l" || event.text == "L") { root.shortcut-unsupported("Ctrl+Shift+L"); return EventResult.accept; }
                 if event.modifiers.shift && (event.text == "p" || event.text == "P") { root.shortcut-unsupported("Ctrl+Shift+P"); return EventResult.accept; }
                 if event.modifiers.shift && (event.text == "w" || event.text == "W") { root.shortcut-unsupported("Ctrl+Shift+W"); return EventResult.accept; }
+                if event.modifiers.shift && (event.text == "c" || event.text == "C") { root.shortcut-unsupported("Ctrl+Shift+C"); return EventResult.accept; }
+                if event.modifiers.shift && (event.text == "v" || event.text == "V") { root.shortcut-unsupported("Ctrl+Shift+V"); return EventResult.accept; }
+                if event.modifiers.shift && (event.text == "x" || event.text == "X") { root.shortcut-unsupported("Ctrl+Shift+X"); return EventResult.accept; }
             }
             if !event.modifiers.control && !event.modifiers.shift {
                 if event.text == Key.Escape && root.command-visible

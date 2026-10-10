@@ -273,12 +273,18 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
         ("r", false),
         ("t", false),
         ("w", false),
+        ("k", false),
+        ("u", false),
+        ("q", false),
         ("h", true),
         ("a", true),
         ("i", true),
         ("l", true),
         ("p", true),
         ("w", true),
+        ("c", true),
+        ("v", true),
+        ("x", true),
     ] {
         control(&ui, key, shift);
     }
@@ -317,18 +323,24 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
             "Ctrl+R",
             "Ctrl+T",
             "Ctrl+W",
+            "Ctrl+K",
+            "Ctrl+U",
+            "Ctrl+Q",
             "Ctrl+Shift+H",
             "Ctrl+Shift+A",
             "Ctrl+Shift+I",
             "Ctrl+Shift+L",
             "Ctrl+Shift+P",
             "Ctrl+Shift+W",
+            "Ctrl+Shift+C",
+            "Ctrl+Shift+V",
+            "Ctrl+Shift+X",
         ]
     );
     assert!(ui.get_command_expanded());
     assert_eq!(
         ui.get_status_label().to_string(),
-        "Shortcut Ctrl+Shift+W has no supported action yet."
+        "Shortcut Ctrl+Shift+X has no supported action yet."
     );
     assert_eq!(
         calls.borrow().len(),

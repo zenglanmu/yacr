@@ -28,14 +28,24 @@
 - 扩展 `apps/app-linux/tests/verify_ui.rs` 离屏场景：向命令行输入前缀 `CI` → 断言补全候选包含
   `CIRCLE` → `Enter`（`command-submitted`）解析并启动真实 CIRCLE 捕获 → `Esc` 结束 → 关闭补全后
   候选清空。纯 Slint 状态，不依赖 GPU 读取，稳健于 lavapipe 环境。
+- **产品行为变更**：`crates/cad-ui-slint/ui/app.slint` 的 CAPTURE 键处理器新增显式
+  `shortcut.unsupported` 分支，覆盖未实现的面板/绘图/对象类 Ctrl 组合键（`Ctrl+2/3/4/6/7/8`、
+  `Ctrl+B/D/E/F/G/H/I/J/K/L/M/Q/R/T/U/W`、`Ctrl+Shift+A/C/H/I/L/P/V/W/X`），并为能力门控的
+  `Ctrl+O` 增加 `can-open=false` 时的显式 unsupported 分支；这些组合键不再是静默 no-op。
+- 相应更新源码契约测试 `crates/cad-ui-slint/tests/shortcut_map_contract.rs`（切片断言新增
+  `root.shortcut-unsupported(...)` 分支存在、且 Ctrl+A 选中仍留在 bubbling 处理器）与
+  `crates/cad-ui-slint/tests/keyboard_shortcuts.rs`（实际按键，断言本地化
+  `shortcut.unsupported` 文案序列、状态栏与“无 CAD 回调”）。
 
 验证（本机，离屏软件 Vulkan lavapipe）：`cargo fmt --all` / `--check`；
 `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`cargo clippy -p cad-ui-slint --all-targets --locked -- -D warnings`；
 `check-i18n.py`（284 键）、`check-architecture.py`（25 包）、`check-workflows.py`；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略；
-新增断言在 `verify_ui_fixed_scenario_replay` 内，未新增测试函数）。
-新增场景为**合成/离屏**证据，不代表真实 GPU、窗口或真机。未改动任何产品代码。
+新增命令行补全断言在 `verify_ui_fixed_scenario_replay` 内，未新增测试函数）。
+新增场景为**合成/离屏**证据，不代表真实 GPU、窗口或真机。产品代码变更即上述 `app.slint` 键处理分支。
 
 ## 偏移命令：OFFSET（LINE / CIRCLE 子集）（2026-10-11）
 
