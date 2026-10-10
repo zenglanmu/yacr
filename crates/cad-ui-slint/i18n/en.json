@@ -140,6 +140,7 @@
   "command.title": "Command",
   "command.prompt": "OPEN / FIT / LINE / CIRCLE / MOVE / TRIM",
   "command.unknown": "Unknown command: {command}",
+  "command.unsupported": "Command {command} is not supported yet.",
   "host.language_label": "Language",
   "host.open_drawing": "Open DWG / DXF",
   "host.retry_renderer": "Retry with WebGL2",

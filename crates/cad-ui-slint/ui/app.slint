@@ -231,7 +231,7 @@ export component YacrWindow inherits Window {
     in-out property <bool> ribbon-expanded: true;
     in-out property <int> ribbon-tab: 2;
     in-out property <bool> command-expanded: false;
-    callback command-submitted(string);
+    callback command-submitted(string) -> bool;
     callback open-requested();
     callback measure-requested();
     callback begin-draw-tool(string);
@@ -659,7 +659,7 @@ export component YacrWindow inherits Window {
             fit => { root.fit-requested(); }
             tools => { if root.phone-shell { root.tools-open = !root.tools-open; } else { root.side-panel-open = !root.side-panel-open; } }
             mode-toggled => { root.mode-toggled(); }
-            submit(value) => { root.command-submitted(value); }
+            submit(value) => { return root.command-submitted(value); }
         }
         if root.application-ui && root.layouts-visible && !root.phone-shell : Rectangle {
             height: 36px; background: CadTheme.chrome;

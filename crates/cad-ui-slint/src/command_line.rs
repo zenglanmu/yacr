@@ -4,6 +4,7 @@
 //! paths, CAD scripts or guessed editing payloads. Errors retain the original
 //! input, and no callback dispatch is presented as proof of command success.
 use crate::{
+    command_completion::{is_keyboard_alias, resolve_exact, resolve_prefix, PrefixResolution},
     command_history::{CommandHistory, RecordOutcome},
     i18n::MessageSource,
     YacrWindow,
@@ -11,28 +12,84 @@ use crate::{
 use slint::ComponentHandle;
 use std::{cell::RefCell, rc::Rc};
 
-/// Resolve a typed token to its canonical command name.
+/// Canonical AutoCAD command names that the dispatcher recognizes but cannot
+/// execute yet. Submitting one is reported through `command.unsupported`, never
+/// as a silent no-op or a fake success.
 ///
-/// Exact command names are always returned unchanged, so disabling keyboard
-/// shortcuts never removes a real command. A keyboard alias (`L`, `C`, `M`,
-/// `TR`, `ESC`) only expands when shortcuts are enabled; otherwise the token is
-/// returned as-is and the caller reports it as unknown rather than silently
-/// starting a drawing edit.
-pub(crate) fn canonical_command(command: &str, shortcuts: bool) -> &str {
-    match command {
-        "L" if shortcuts => "LINE",
-        "C" if shortcuts => "CIRCLE",
-        "M" if shortcuts => "MOVE",
-        "TR" if shortcuts => "TRIM",
-        "ESC" if shortcuts => "CANCEL",
-        "DI" | "DIST" if shortcuts => "MEASURE DISTANCE",
-        "AA" if shortcuts => "MEASURE AREA",
-        "ZE" | "Z E" if shortcuts => "ZOOM EXTENTS",
-        "ZI" if shortcuts => "ZOOM IN",
-        "ZO" if shortcuts => "ZOOM OUT",
-        "U" if shortcuts => "UNDO",
-        other => other,
-    }
+/// Remove an entry (and add its executor/acceptance test) as a later phase
+/// lands the feature; never route one of these to an existing selector.
+const UNSUPPORTED_COMMANDS: &[&str] = &[
+    "ARC",
+    "ARRAY",
+    "BLOCK",
+    "BOUNDARY",
+    "BREAK",
+    "CHAMFER",
+    "COPY",
+    "DIM",
+    "DIMALIGNED",
+    "DIMANGULAR",
+    "DIMDIAMETER",
+    "DIMLINEAR",
+    "DIMRADIUS",
+    "DIMSTYLE",
+    "DIVIDE",
+    "ELLIPSE",
+    "ERASE",
+    "EXPLODE",
+    "EXTEND",
+    "FILLET",
+    "GRADIENT",
+    "HATCH",
+    "IMPORT",
+    "INSERT",
+    "JOIN",
+    "LAYER",
+    "LEADER",
+    "LENGTHEN",
+    "MEASUREGEOM",
+    "MIRROR",
+    "MTEXT",
+    "NEW",
+    "OFFSET",
+    "PLOT",
+    "PLINE",
+    "POINT",
+    "POLYGON",
+    "POLYLINE",
+    "PRINT",
+    "PUBLISH",
+    "PURGE",
+    "QSAVE",
+    "RECTANGLE",
+    "REGION",
+    "ROTATE",
+    "SAVE",
+    "SAVEAS",
+    "SCALE",
+    "SPLINE",
+    "STRETCH",
+    "STYLE",
+    "TEXT",
+    "WBLOCK",
+    "WIPEOUT",
+    "XLINE",
+    "XREF",
+];
+
+/// How a normalized submission key resolves against the command vocabulary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Submission {
+    /// Empty input retries the last command that actually executed.
+    RepeatLast,
+    /// A single canonical selector, exact or unique-prefix.
+    Dispatch(&'static str),
+    /// Several canonical selectors match; never guess, keep the line open.
+    Ambiguous,
+    /// A known AutoCAD command without an executor.
+    Unsupported,
+    /// Nothing in the vocabulary matches.
+    Unknown,
 }
 
 /// Normalize command selectors, including tabs and Unicode whitespace.
@@ -43,6 +100,31 @@ fn command_key(text: &str) -> String {
         .map(str::to_ascii_uppercase)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn classify_submission(key: &str, shortcuts: bool) -> Submission {
+    if key.is_empty() {
+        return Submission::RepeatLast;
+    }
+    if let Some(canonical) = resolve_exact(key, shortcuts) {
+        return Submission::Dispatch(canonical);
+    }
+    // A disabled keyboard alias must stay unknown: never let canonical prefix
+    // matching silently reroute it to a different command.
+    if !shortcuts && is_keyboard_alias(key) {
+        return Submission::Unknown;
+    }
+    match resolve_prefix(key, shortcuts) {
+        PrefixResolution::Unique(canonical) => Submission::Dispatch(canonical),
+        PrefixResolution::Multiple => Submission::Ambiguous,
+        PrefixResolution::None => {
+            if is_unsupported_command(key) {
+                Submission::Unsupported
+            } else {
+                Submission::Unknown
+            }
+        }
+    }
 }
 
 /// These callbacks take localized labels, not machine identifiers. Resolve
@@ -74,6 +156,165 @@ fn history_feedback_key(work_mode: bool, available: bool) -> Option<&'static str
     }
 }
 
+fn show_unknown(ui: &YacrWindow, messages: &Rc<RefCell<MessageSource>>, raw: &str) {
+    ui.set_status_label(
+        messages
+            .borrow()
+            .text("command.unknown", &[("command", raw.trim())])
+            .into(),
+    );
+    ui.set_command_expanded(true);
+}
+
+/// Dispatch a resolved canonical selector. Returns whether an executor consumed
+/// it; a name without an executor must never be reported as success.
+fn dispatch_command(
+    ui: &YacrWindow,
+    messages: &Rc<RefCell<MessageSource>>,
+    canonical: &str,
+) -> bool {
+    if let Some((family, key)) = catalog_command(canonical) {
+        let label = messages.borrow().text(key, &[]).into();
+        match family {
+            "measure" => ui.invoke_measure_kind_selected(label),
+            "view" => ui.invoke_standard_view_selected(label),
+            _ => unreachable!("catalog command families are defined locally"),
+        }
+        return true;
+    }
+    match canonical {
+        "OPEN" => {
+            ui.invoke_open_requested();
+            true
+        }
+        "FIT" | "ZOOM EXTENTS" => {
+            ui.invoke_fit_requested();
+            true
+        }
+        "PAN" => {
+            ui.invoke_pan_requested();
+            true
+        }
+        "ZOOM IN" => {
+            ui.invoke_zoom_requested(1.25);
+            true
+        }
+        "ZOOM OUT" => {
+            ui.invoke_zoom_requested(0.8);
+            true
+        }
+        "MEASURE" => {
+            ui.invoke_measure_requested();
+            true
+        }
+        "CLEAR SELECTION" | "DESELECT" => {
+            ui.invoke_clear_selection_requested();
+            true
+        }
+        "SELECTALL" => {
+            ui.invoke_select_all_requested();
+            true
+        }
+        "PROJECTION" => {
+            ui.invoke_toggle_projection_requested();
+            true
+        }
+        "VIEW MODE" => {
+            ui.invoke_toggle_view_mode_requested();
+            true
+        }
+        "MODE" => {
+            ui.invoke_mode_toggled();
+            true
+        }
+        "UNDO" | "REDO" => {
+            let available = if canonical == "UNDO" {
+                ui.get_can_undo()
+            } else {
+                ui.get_can_redo()
+            };
+            if let Some(key) = history_feedback_key(ui.get_work_mode(), available) {
+                ui.set_status_label(
+                    messages
+                        .borrow()
+                        .text(key, &[("command", canonical)])
+                        .into(),
+                );
+                ui.set_command_expanded(true);
+            } else if canonical == "UNDO" {
+                ui.invoke_undo_requested();
+            } else {
+                ui.invoke_redo_requested();
+            }
+            true
+        }
+        // Real draw/edit tools. The machine key is passed straight through;
+        // the adapter resolves it (and refuses a Viewer or a MOVE without a
+        // selection) rather than fabricating a payload-free command.
+        "LINE" => {
+            ui.invoke_begin_draw_tool("line".into());
+            true
+        }
+        "CIRCLE" => {
+            ui.invoke_begin_draw_tool("circle".into());
+            true
+        }
+        "MOVE" => {
+            ui.invoke_begin_draw_tool("move".into());
+            true
+        }
+        "TRIM" => {
+            ui.invoke_begin_draw_tool("trim".into());
+            true
+        }
+        // AutoCAD convention: CONFIRM/ENTER acts on whatever command is
+        // currently active, not only a draw/edit capture.
+        "CONFIRM" | "ENTER" => {
+            if ui.get_measurement_active() {
+                ui.invoke_confirm_measurement_requested();
+            } else if ui.get_draw_tool_active() {
+                ui.invoke_confirm_draw_requested();
+            }
+            true
+        }
+        "CANCEL" => {
+            if ui.get_measurement_active() {
+                ui.invoke_cancel_measurement_requested();
+            }
+            if ui.get_draw_tool_active() {
+                ui.invoke_cancel_draw_requested();
+            }
+            ui.set_pan_active(false);
+            true
+        }
+        "TOOLS" | "RIBBON" => {
+            if ui.get_phone_shell() {
+                ui.set_tools_open(!ui.get_tools_open());
+            } else {
+                ui.set_ribbon_expanded(!ui.get_ribbon_expanded());
+            }
+            true
+        }
+        "PANELS" => {
+            ui.set_side_panel_open(!ui.get_side_panel_open());
+            true
+        }
+        "DIAGNOSTICS" => {
+            ui.set_diagnostics_open(!ui.get_diagnostics_open());
+            ui.invoke_diagnostics_requested();
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Whether the normalized key names a known-but-unimplemented AutoCAD command.
+/// A trailing payload is tolerated so `ERASE 0,0` still reads as `ERASE`.
+fn is_unsupported_command(key: &str) -> bool {
+    let head = key.split(' ').next().unwrap_or(key);
+    UNSUPPORTED_COMMANDS.contains(&head)
+}
+
 pub(crate) fn connect(
     ui: &YacrWindow,
     messages: Rc<RefCell<MessageSource>>,
@@ -96,10 +337,13 @@ pub(crate) fn connect(
             ui.set_command_history_storage_limited(false);
         }
     });
+    // The last command that actually dispatched, so an empty submit can repeat
+    // it. Only canonical selectors are stored, and only after an executor ran.
+    let last_command: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let weak = ui.as_weak();
-    ui.on_command_submitted(move |text| {
+    ui.on_command_submitted(move |text| -> bool {
         let Some(ui) = weak.upgrade() else {
-            return;
+            return false;
         };
         // This archive records submitted input, not command execution outcomes.
         // Its storage budget is independent from the lifetime of the CAD document.
@@ -116,92 +360,69 @@ pub(crate) fn connect(
             .collect::<Vec<_>>();
         ui.set_command_history_entries(crate::chrome::string_model(&entries));
         let shortcuts = config.borrow().effective().interaction.keyboard_shortcuts;
-        let command = command_key(text.as_str());
-        let command = canonical_command(&command, shortcuts);
-        if let Some((family, key)) = catalog_command(command) {
-            let label = messages.borrow().text(key, &[]).into();
-            match family {
-                "measure" => ui.invoke_measure_kind_selected(label),
-                "view" => ui.invoke_standard_view_selected(label),
-                _ => unreachable!("catalog command families are defined locally"),
+        let key = command_key(text.as_str());
+        match classify_submission(&key, shortcuts) {
+            Submission::RepeatLast => {
+                if let Some(last) = last_command.borrow().as_deref() {
+                    dispatch_command(&ui, &messages, last);
+                }
+                // An empty Enter is consumed even when nothing has run yet.
+                true
             }
-            return;
-        }
-        match command {
-            "OPEN" => ui.invoke_open_requested(),
-            "FIT" | "ZOOM EXTENTS" => ui.invoke_fit_requested(),
-            "PAN" => ui.invoke_pan_requested(),
-            "ZOOM IN" => ui.invoke_zoom_requested(1.25),
-            "ZOOM OUT" => ui.invoke_zoom_requested(0.8),
-            "MEASURE" => ui.invoke_measure_requested(),
-            "CLEAR SELECTION" | "DESELECT" => ui.invoke_clear_selection_requested(),
-            "SELECTALL" => ui.invoke_select_all_requested(),
-            "PROJECTION" => ui.invoke_toggle_projection_requested(),
-            "VIEW MODE" => ui.invoke_toggle_view_mode_requested(),
-            "MODE" => ui.invoke_mode_toggled(),
-            "UNDO" | "REDO" => {
-                let available = if command == "UNDO" {
-                    ui.get_can_undo()
+            Submission::Dispatch(canonical) => {
+                if dispatch_command(&ui, &messages, canonical) {
+                    // CONFIRM/ENTER/CANCEL act on whatever is active; they are
+                    // permanent no-ops when nothing is, so they must never become
+                    // the empty-Enter replay target.
+                    if !matches!(canonical, "CONFIRM" | "ENTER" | "CANCEL") {
+                        *last_command.borrow_mut() = Some(canonical.to_owned());
+                    }
                 } else {
-                    ui.get_can_redo()
-                };
-                if let Some(key) = history_feedback_key(ui.get_work_mode(), available) {
-                    ui.set_status_label(
-                        messages.borrow().text(key, &[("command", command)]).into(),
-                    );
-                    ui.set_command_expanded(true);
-                } else if command == "UNDO" {
-                    ui.invoke_undo_requested();
+                    // A resolved selector without an executor is a bug; report it
+                    // explicitly instead of pretending a command ran.
+                    show_unknown(&ui, &messages, text.as_str());
+                }
+                true
+            }
+            Submission::Ambiguous => {
+                // Keep the line open and refresh the disambiguation snapshot; the
+                // Slint side resets its highlight when the model changes.
+                let items = crate::command_completion::suggestions(&key, ui.get_work_mode())
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                if items.is_empty() {
+                    // Ambiguity the current mode cannot offer is explicit, never a
+                    // silent swallow with an empty popup.
+                    if !ui.get_work_mode() {
+                        ui.set_status_label(
+                            messages.borrow().text("draw.error.read_only", &[]).into(),
+                        );
+                        ui.set_command_expanded(true);
+                    } else {
+                        show_unknown(&ui, &messages, text.as_str());
+                    }
+                    true
                 } else {
-                    ui.invoke_redo_requested();
+                    ui.set_command_completion_items(crate::chrome::string_model(&items));
+                    false
                 }
             }
-            // Real draw/edit tools. The machine key is passed straight through;
-            // the adapter resolves it (and refuses a Viewer or a MOVE without a
-            // selection) rather than fabricating a payload-free command.
-            "LINE" => ui.invoke_begin_draw_tool("line".into()),
-            "CIRCLE" => ui.invoke_begin_draw_tool("circle".into()),
-            "MOVE" => ui.invoke_begin_draw_tool("move".into()),
-            "TRIM" => ui.invoke_begin_draw_tool("trim".into()),
-            // AutoCAD convention: CONFIRM/ENTER and ESC act on whatever command
-            // is currently active, not only a draw/edit capture.
-            "CONFIRM" | "ENTER" | "" => {
-                if ui.get_measurement_active() {
-                    ui.invoke_confirm_measurement_requested();
-                } else if ui.get_draw_tool_active() {
-                    ui.invoke_confirm_draw_requested();
-                }
-            }
-            "CANCEL" => {
-                if ui.get_measurement_active() {
-                    ui.invoke_cancel_measurement_requested();
-                }
-                if ui.get_draw_tool_active() {
-                    ui.invoke_cancel_draw_requested();
-                }
-                ui.set_pan_active(false);
-            }
-            "TOOLS" | "RIBBON" => {
-                if ui.get_phone_shell() {
-                    ui.set_tools_open(!ui.get_tools_open());
-                } else {
-                    ui.set_ribbon_expanded(!ui.get_ribbon_expanded());
-                }
-            }
-            "PANELS" => ui.set_side_panel_open(!ui.get_side_panel_open()),
-            "DIAGNOSTICS" => {
-                ui.set_diagnostics_open(!ui.get_diagnostics_open());
-                ui.invoke_diagnostics_requested();
-            }
-            _ => {
-                // Unknown input is explicit, never an empty successful CAD edit.
+            Submission::Unsupported => {
+                // Use the input as typed (trimmed) so the placeholder preserves
+                // case and is not folded with the payload.
                 ui.set_status_label(
                     messages
                         .borrow()
-                        .text("command.unknown", &[("command", text.trim())])
+                        .text("command.unsupported", &[("command", text.trim())])
                         .into(),
                 );
                 ui.set_command_expanded(true);
+                true
+            }
+            Submission::Unknown => {
+                show_unknown(&ui, &messages, text.as_str());
+                true
             }
         }
     });
@@ -209,7 +430,11 @@ pub(crate) fn connect(
 
 #[cfg(test)]
 mod contracts {
-    use super::{canonical_command, catalog_command, command_key, history_feedback_key};
+    use super::{
+        catalog_command, classify_submission, command_key, history_feedback_key,
+        is_unsupported_command, Submission, UNSUPPORTED_COMMANDS,
+    };
+    use crate::command_completion::{resolve_exact, resolve_prefix, PrefixResolution};
 
     #[test]
     fn selectors_accept_mixed_case_and_repeated_unicode_whitespace() {
@@ -228,12 +453,63 @@ mod contracts {
             ("Z E", "ZOOM EXTENTS"),
             ("ZI", "ZOOM IN"),
             ("ZO", "ZOOM OUT"),
+            ("L", "LINE"),
+            ("C", "CIRCLE"),
+            ("M", "MOVE"),
+            ("TR", "TRIM"),
+            ("P", "PAN"),
             ("U", "UNDO"),
+            ("ESC", "CANCEL"),
         ] {
-            assert_eq!(canonical_command(alias, true), target);
-            assert_eq!(canonical_command(alias, false), alias);
-            assert_eq!(canonical_command(target, false), target);
+            assert_eq!(resolve_exact(alias, true), Some(target));
+            assert_eq!(resolve_exact(alias, false), None);
+            assert_eq!(resolve_exact(target, false), Some(target));
         }
+        // Full-word synonyms never depend on the shortcuts gate.
+        for (synonym, target) in [
+            ("FIT", "ZOOM EXTENTS"),
+            ("DISTANCE", "MEASURE DISTANCE"),
+            ("ANGLE", "MEASURE ANGLE"),
+            ("AREA", "MEASURE AREA"),
+            ("DESELECT", "CLEAR SELECTION"),
+            ("ENTER", "CONFIRM"),
+            ("RIBBON", "TOOLS"),
+        ] {
+            assert_eq!(resolve_exact(synonym, true), Some(target));
+            assert_eq!(resolve_exact(synonym, false), Some(target));
+        }
+    }
+
+    #[test]
+    fn submission_classifies_empty_exact_prefix_ambiguous_unsupported_and_unknown() {
+        assert_eq!(classify_submission("", true), Submission::RepeatLast);
+        assert_eq!(
+            classify_submission("LIN", true),
+            Submission::Dispatch("LINE")
+        );
+        assert_eq!(
+            classify_submission("LINE", true),
+            Submission::Dispatch("LINE")
+        );
+        assert_eq!(classify_submission("ZOOM", true), Submission::Ambiguous);
+        assert_eq!(
+            classify_submission("ZO", true),
+            Submission::Dispatch("ZOOM OUT")
+        );
+        // Disabled shortcuts leave a short alias unknown, never a CAD edit.
+        assert_eq!(classify_submission("L", false), Submission::Unknown);
+        assert_eq!(classify_submission("DI", false), Submission::Unknown);
+        // A full-word synonym still resolves when shortcuts are disabled.
+        assert_eq!(
+            classify_submission("FIT", false),
+            Submission::Dispatch("ZOOM EXTENTS")
+        );
+        assert_eq!(classify_submission("HATCH", true), Submission::Unsupported);
+        assert_eq!(
+            classify_submission("SAVE plan.dwg", true),
+            Submission::Unsupported
+        );
+        assert_eq!(classify_submission("NOPE", true), Submission::Unknown);
     }
 
     #[test]
@@ -258,6 +534,37 @@ mod contracts {
         ] {
             assert_eq!(catalog_command(&command_key(input)), None);
         }
+    }
+
+    #[test]
+    fn unsupported_vocabulary_stays_disjoint_from_supported_commands() {
+        for &name in UNSUPPORTED_COMMANDS {
+            assert!(
+                resolve_exact(name, true).is_none(),
+                "{name} must not resolve to a supported command"
+            );
+            // An unsupported head must not be a prefix of any supported
+            // selector/synonym/alias, or a later phase could silently execute a
+            // longer word while `{name}` stays listed unsupported.
+            assert_eq!(
+                resolve_prefix(name, true),
+                PrefixResolution::None,
+                "{name} prefixes a supported command"
+            );
+            assert_eq!(
+                resolve_prefix(name, false),
+                PrefixResolution::None,
+                "{name} prefixes a supported command"
+            );
+        }
+        for expected in ["HATCH", "OFFSET", "ARRAY", "ERASE", "ARC", "SAVE"] {
+            assert!(
+                UNSUPPORTED_COMMANDS.contains(&expected),
+                "missing unsupported command {expected}"
+            );
+        }
+        assert!(is_unsupported_command("ERASE 0,0"));
+        assert!(!is_unsupported_command("LINE"));
     }
 
     #[test]

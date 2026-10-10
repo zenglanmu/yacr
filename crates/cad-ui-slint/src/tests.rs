@@ -1279,9 +1279,9 @@ fn interaction_config_gates_pointer_and_touch_input() {
 
 #[test]
 fn keyboard_aliases_expand_only_when_shortcuts_are_enabled() {
-    use crate::command_line::canonical_command;
+    use crate::command_completion::resolve_exact;
 
-    // Enabled: aliases expand to the exact command names.
+    // Enabled: aliases expand to the canonical command names.
     for (alias, exact) in [
         ("L", "LINE"),
         ("C", "CIRCLE"),
@@ -1289,19 +1289,19 @@ fn keyboard_aliases_expand_only_when_shortcuts_are_enabled() {
         ("TR", "TRIM"),
         ("ESC", "CANCEL"),
     ] {
-        assert_eq!(canonical_command(alias, true), exact);
+        assert_eq!(resolve_exact(alias, true), Some(exact));
     }
 
-    // Disabled: a bare alias stays itself and is reported unknown, never a
-    // silent CAD edit.
+    // Disabled: a bare alias does not resolve, so it is reported unknown rather
+    // than silently starting a CAD edit.
     for alias in ["L", "C", "M", "TR", "ESC"] {
-        assert_eq!(canonical_command(alias, false), alias);
+        assert_eq!(resolve_exact(alias, false), None);
     }
 
     // Exact names keep working regardless of the shortcut setting.
     for exact in ["LINE", "CIRCLE", "MOVE", "TRIM", "CANCEL", "ZOOM EXTENTS"] {
-        assert_eq!(canonical_command(exact, false), exact);
-        assert_eq!(canonical_command(exact, true), exact);
+        assert_eq!(resolve_exact(exact, false), Some(exact));
+        assert_eq!(resolve_exact(exact, true), Some(exact));
     }
 }
 

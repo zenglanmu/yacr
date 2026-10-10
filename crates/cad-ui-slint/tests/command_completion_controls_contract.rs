@@ -9,8 +9,9 @@ fn completion_interface_is_host_owned_and_reports_every_input_change() {
     assert!(BAR.contains("changed input => { root.input-edited(root.input); }"));
     assert!(BAR.contains("root.input = root.recall(-1, root.input);"));
     assert!(BAR.contains("root.input = root.recall(1, root.input);"));
-    assert!(BAR.contains("accepted => { root.submit(root.input); root.input = \"\"; }"));
-    assert_eq!(BAR.matches("root.submit(").count(), 1);
+    assert!(BAR.contains("accepted => { if root.submit(root.input) { root.input = \"\"; } }"));
+    // The accepted path and the highlighted-Return path both submit.
+    assert_eq!(BAR.matches("root.submit(").count(), 2);
     assert!(!BAR.contains("Key.Escape"));
 }
 
@@ -28,7 +29,8 @@ fn completion_capture_is_editor_local_gated_and_unmodified() {
         capture.contains("event.modifiers.alt || event.modifiers.meta || event.modifiers.shift")
     );
     assert!(capture.contains("return EventResult.reject;"));
-    assert!(!capture.contains("root.submit("));
+    // Only the highlighted-Return branch executes; Tab/Space fill without submitting.
+    assert_eq!(capture.matches("root.submit(").count(), 1);
     assert_eq!(BAR.matches("capture-key-pressed(event)").count(), 1);
     assert_eq!(BAR.matches("FocusScope {").count(), 1);
     let archive = BAR
@@ -39,12 +41,12 @@ fn completion_capture_is_editor_local_gated_and_unmodified() {
 }
 
 #[test]
-fn tab_fills_highlight_or_first_and_enter_consumes_highlight_without_submission() {
+fn tab_fills_highlight_or_first_and_enter_executes_the_highlight() {
     let tab_capture = BAR
         .split("// Tab fills the highlight or first row, never submits.")
         .nth(1)
         .unwrap()
-        .split("// Consume the first Enter")
+        .split("// A highlighted completion plus Space")
         .next()
         .unwrap();
     assert!(tab_capture.contains("event.text == Key.Tab && root.completion-items.length > 0"));
@@ -53,21 +55,41 @@ fn tab_fills_highlight_or_first_and_enter_consumes_highlight_without_submission(
     assert!(tab_capture.contains("command-input.focus();"));
     assert!(tab_capture.contains("return EventResult.accept;"));
     assert!(!tab_capture.contains("root.submit("));
+
+    let space_capture = BAR
+        .split("// A highlighted completion plus Space")
+        .nth(1)
+        .unwrap()
+        .split("// Return with a highlighted completion")
+        .next()
+        .unwrap();
+    assert!(space_capture.contains("event.text == \" \" && root.selected-completion-index >= 0"));
+    assert!(space_capture.contains("root.selected-completion-index < root.completion-items.length"));
+    assert!(space_capture
+        .contains("root.input = root.completion-items[root.selected-completion-index];"));
+    assert!(space_capture.contains("root.selected-completion-index = -1;"));
+    assert!(space_capture.contains("command-input.focus();"));
+    assert!(space_capture.contains("return EventResult.accept;"));
+    assert!(!space_capture.contains("root.submit("));
+
     let enter_capture = BAR
-        .split("if event.text == Key.Return")
+        .split("// Return with a highlighted completion")
         .nth(1)
         .unwrap()
         .split("command-input := LineEdit")
         .next()
         .unwrap();
+    assert!(enter_capture.contains("event.text == Key.Return"));
     assert!(enter_capture.contains("root.selected-completion-index >= 0"));
     assert!(enter_capture.contains("root.selected-completion-index < root.completion-items.length"));
     assert!(enter_capture
         .contains("root.input = root.completion-items[root.selected-completion-index];"));
     assert!(enter_capture.contains("root.selected-completion-index = -1;"));
+    assert!(enter_capture.contains("if root.submit(root.input) {"));
+    assert!(enter_capture.contains("root.input = \"\";"));
+    assert!(enter_capture.contains("} else {"));
+    assert!(enter_capture.contains("command-input.focus();"));
     assert!(enter_capture.contains("return EventResult.accept;"));
-    assert!(enter_capture.contains("return EventResult.reject;"));
-    assert!(!enter_capture.contains("root.submit("));
 }
 
 #[test]

@@ -156,7 +156,10 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     ui.set_command_visible(true);
     let submitted = Rc::new(RefCell::new(Vec::new()));
     let observed = submitted.clone();
-    ui.on_command_submitted(move |text| observed.borrow_mut().push(text.to_string()));
+    ui.on_command_submitted(move |text| {
+        observed.borrow_mut().push(text.to_string());
+        true
+    });
     offscreen::snapshot(ui.window()).unwrap();
     click(&ui, 600.0, 775.0);
     for character in "hello world".chars() {

@@ -1,17 +1,21 @@
-//! Bounded selector-only completion for the existing typed command dispatcher.
+//! Bounded command/alias completion and resolution for the typed dispatcher.
 //!
-//! This is not a CAD payload parser or a command registry: suggestions neither
-//! execute commands nor promise that document-dependent operations will succeed.
-//! Keyboard shortcut configuration intentionally has no effect on canonical
-//! typed selectors. UI navigation and dispatch belong to the caller.
+//! This is not a CAD payload parser: it resolves a leading command token to a
+//! canonical selector owned by the dispatcher, and it never executes anything or
+//! promises that a document-dependent operation will succeed. Prefix matching
+//! spans canonical selectors, full-word synonyms, and AutoCAD-style keyboard
+//! aliases; the keyboard aliases only participate when the caller enables them.
+
+use std::collections::BTreeSet;
 
 const INPUT_BYTE_LIMIT: usize = 4096;
 const SUGGESTION_LIMIT: usize = 8;
 
-// Keep one lexically sorted vocabulary. The boolean marks Work-only selectors;
-// runtime availability (selection, undo history, document state) remains the
-// responsibility of the existing application callbacks.
-const SELECTORS: &[(&str, bool)] = &[
+// Keep one lexically sorted vocabulary of canonical selectors the dispatcher
+// supports today. The boolean marks Work-only selectors; runtime availability
+// (selection, undo history, document state) remains the responsibility of the
+// existing application callbacks.
+pub(crate) const SELECTORS: &[(&str, bool)] = &[
     ("CANCEL", false),
     ("CIRCLE", true),
     ("CLEAR SELECTION", false),
@@ -47,40 +51,185 @@ const SELECTORS: &[(&str, bool)] = &[
     ("ZOOM OUT", false),
 ];
 
-/// Return up to eight canonical selectors matching the entire normalized input.
+/// AutoCAD/acad.pgp-style keyboard aliases.
+///
+/// Every alias maps onto a canonical [`SELECTORS`] entry the dispatcher already
+/// executes. An alias for a command without an executor is forbidden: those
+/// names belong to `command_line::UNSUPPORTED_COMMANDS` and must stay explicit,
+/// never silently expand to the wrong operation. These aliases expand only when
+/// the keyboard-shortcuts setting is enabled.
+///
+/// Bare `Z`/`ZOOM` are intentionally absent so they remain an ambiguous prefix
+/// of the `ZOOM EXTENTS`/`ZOOM IN`/`ZOOM OUT` family instead of guessing one.
+pub(crate) const ALIASES: &[(&str, &str)] = &[
+    ("AA", "MEASURE AREA"),
+    ("C", "CIRCLE"),
+    ("DI", "MEASURE DISTANCE"),
+    ("DIST", "MEASURE DISTANCE"),
+    ("ESC", "CANCEL"),
+    ("L", "LINE"),
+    ("M", "MOVE"),
+    ("P", "PAN"),
+    ("TR", "TRIM"),
+    ("U", "UNDO"),
+    ("Z E", "ZOOM EXTENTS"),
+    ("ZE", "ZOOM EXTENTS"),
+    ("ZI", "ZOOM IN"),
+    ("ZO", "ZOOM OUT"),
+];
+
+/// Full-word synonyms that are always available, independent of the
+/// keyboard-shortcuts setting.
+///
+/// These are the dispatcher arms that exist as complete words rather than short
+/// keystrokes. They map onto a canonical [`SELECTORS`] entry so completion and
+/// dispatch agree on one name per operation.
+pub(crate) const SYNONYMS: &[(&str, &str)] = &[
+    ("ANGLE", "MEASURE ANGLE"),
+    ("AREA", "MEASURE AREA"),
+    ("DESELECT", "CLEAR SELECTION"),
+    ("DISTANCE", "MEASURE DISTANCE"),
+    ("ENTER", "CONFIRM"),
+    ("FIT", "ZOOM EXTENTS"),
+    ("RIBBON", "TOOLS"),
+];
+
+/// True when `selector` is a canonical selector restricted to Work mode.
+fn is_work_only(selector: &str) -> bool {
+    SELECTORS
+        .iter()
+        .find(|(name, _)| *name == selector)
+        .is_some_and(|(_, work_only)| *work_only)
+}
+
+/// Collapse Unicode whitespace and ASCII-uppercase, exactly like the dispatcher.
+fn normalize(input: &str) -> String {
+    input
+        .split_whitespace()
+        .map(str::to_ascii_uppercase)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The result of resolving a normalized key against the full vocabulary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PrefixResolution {
+    /// Exactly one canonical selector matches the key.
+    Unique(&'static str),
+    /// More than one canonical selector matches; the caller must not guess.
+    Multiple,
+    /// Nothing in the vocabulary matches the key.
+    None,
+}
+
+/// Return up to eight canonical selectors matching the normalized input.
 ///
 /// ASCII case is ignored; Unicode whitespace is trimmed and collapsed to one
-/// space, just as in `command_line.rs`. A completed selector is omitted, but
-/// longer selectors sharing that prefix remain available. Empty input, inputs
-/// exceeding 4096 UTF-8 bytes, and text outside the selector vocabulary produce
-/// no suggestions. No aliases, substring search, coordinates, paths, or free
-/// text payloads are interpreted. Viewer mode hides Work-only operations.
+/// space, just as in `command_line.rs`. A completed canonical selector is
+/// omitted, but longer selectors sharing that prefix remain available. A key
+/// that matches an alias/synonym name contributes that name's canonical target,
+/// so `DI` suggests `MEASURE DISTANCE`. Empty input, inputs exceeding 4096
+/// UTF-8 bytes, and text outside the vocabulary produce no suggestions. No
+/// coordinates, paths, or free text payloads are interpreted. Viewer mode hides
+/// Work-only operations.
 pub(crate) fn suggestions(input: &str, work_mode: bool) -> Vec<&'static str> {
     if input.len() > INPUT_BYTE_LIMIT {
         return Vec::new();
     }
-    let key = input
-        .split_whitespace()
-        .map(str::to_ascii_uppercase)
-        .collect::<Vec<_>>()
-        .join(" ");
+    let key = normalize(input);
     if key.is_empty() {
         return Vec::new();
     }
-    SELECTORS
+    let mut matches: BTreeSet<&'static str> = BTreeSet::new();
+    for &(selector, work_only) in SELECTORS {
+        if (work_mode || !work_only) && selector != key && selector.starts_with(&key) {
+            matches.insert(selector);
+        }
+    }
+    for &(name, target) in SYNONYMS.iter().chain(ALIASES.iter()) {
+        if name.starts_with(&key) && (work_mode || !is_work_only(target)) {
+            matches.insert(target);
+        }
+    }
+    matches.into_iter().take(SUGGESTION_LIMIT).collect()
+}
+
+/// Resolve an exact canonical selector, full-word synonym, or (when
+/// `include_aliases`) gated keyboard alias to its canonical selector.
+pub(crate) fn resolve_exact(key: &str, include_aliases: bool) -> Option<&'static str> {
+    if let Some(target) = SELECTORS
         .iter()
-        .filter(|(selector, work_only)| {
-            (work_mode || !work_only) && *selector != key && selector.starts_with(&key)
-        })
-        .take(SUGGESTION_LIMIT)
+        .find(|(selector, _)| *selector == key)
         .map(|(selector, _)| *selector)
-        .collect()
+    {
+        return Some(target);
+    }
+    if let Some(target) = SYNONYMS
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map(|(_, target)| *target)
+    {
+        return Some(target);
+    }
+    if include_aliases {
+        if let Some(target) = ALIASES
+            .iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, target)| *target)
+        {
+            return Some(target);
+        }
+    }
+    None
+}
+
+/// Whether `key` names a keyboard alias (and is therefore gated by the
+/// keyboard-shortcuts setting).
+pub(crate) fn is_keyboard_alias(key: &str) -> bool {
+    ALIASES.iter().any(|(name, _)| *name == key)
+}
+
+/// Resolve a normalized key by prefix against canonical selectors, full-word
+/// synonyms, and (when `include_aliases`) keyboard aliases. Targets are
+/// deduplicated, so two aliases that map to the same canonical selector stay a
+/// unique match.
+pub(crate) fn resolve_prefix(key: &str, include_aliases: bool) -> PrefixResolution {
+    let mut targets: BTreeSet<&'static str> = BTreeSet::new();
+    for &(selector, _) in SELECTORS {
+        if selector.starts_with(key) {
+            targets.insert(selector);
+        }
+    }
+    for &(name, target) in SYNONYMS.iter().chain(ALIASES.iter()) {
+        let gated = include_aliases || SYNONYMS.iter().any(|&(synonym, _)| synonym == name);
+        if gated && name.starts_with(key) {
+            targets.insert(target);
+        }
+    }
+    let mut targets = targets.into_iter();
+    let first = targets.next();
+    match (first, targets.next()) {
+        (None, _) => PrefixResolution::None,
+        (Some(target), None) => PrefixResolution::Unique(target),
+        _ => PrefixResolution::Multiple,
+    }
 }
 
 #[cfg(test)]
 mod contracts {
-    use super::{suggestions, INPUT_BYTE_LIMIT, SELECTORS, SUGGESTION_LIMIT};
+    use super::{
+        normalize, resolve_exact, resolve_prefix, suggestions, PrefixResolution, ALIASES,
+        INPUT_BYTE_LIMIT, SELECTORS, SUGGESTION_LIMIT, SYNONYMS,
+    };
     use std::collections::BTreeSet;
+
+    fn work_only(selector: &str) -> bool {
+        SELECTORS
+            .iter()
+            .find(|(name, _)| *name == selector)
+            .map(|(_, work_only)| *work_only)
+            .unwrap_or(false)
+    }
 
     #[test]
     fn ascii_case_and_unicode_whitespace_match_the_full_selector_prefix() {
@@ -89,7 +238,7 @@ mod contracts {
             vec!["MEASURE DISTANCE"]
         );
         assert_eq!(suggestions("zoom\t\ti", false), vec!["ZOOM IN"]);
-        assert!(suggestions("distance", true).is_empty());
+        assert_eq!(suggestions("distance", true), vec!["MEASURE DISTANCE"]);
         assert!(suggestions("extents", true).is_empty());
         assert!(suggestions("vıew", true).is_empty());
     }
@@ -159,36 +308,98 @@ mod contracts {
     }
 
     #[test]
-    fn results_are_sorted_unique_bounded_and_deterministic_for_every_prefix() {
-        assert!(SELECTORS.windows(2).all(|pair| pair[0].0 < pair[1].0));
-        for &(selector, _) in SELECTORS {
-            for end in 1..=selector.len() {
-                let prefix = &selector[..end];
-                for work_mode in [false, true] {
-                    let result = suggestions(prefix, work_mode);
-                    assert!(result.len() <= SUGGESTION_LIMIT);
-                    assert!(result.windows(2).all(|pair| pair[0] < pair[1]));
-                    assert_eq!(result, suggestions(prefix, work_mode));
-                    assert!(result.iter().all(|entry| entry.starts_with(prefix)));
-                }
-            }
+    fn aliases_resolve_to_supported_canonical_targets() {
+        for &(name, target) in ALIASES.iter().chain(SYNONYMS.iter()) {
+            assert!(
+                SELECTORS.iter().any(|&(selector, _)| selector == target),
+                "{name} -> {target} is not a canonical selector"
+            );
+            assert!(
+                !SELECTORS.iter().any(|&(selector, _)| selector == name),
+                "{name} shadows a canonical selector"
+            );
         }
+        // A prefix that matches an alias name contributes the canonical target.
+        assert_eq!(suggestions("AA", true), vec!["MEASURE AREA"]);
+        assert_eq!(suggestions("ZE", true), vec!["ZOOM EXTENTS"]);
+        assert_eq!(suggestions("ESC", true), vec!["CANCEL"]);
+        assert_eq!(suggestions("L", true), vec!["LINE"]);
+        // Overlapping alias/synonym names dedup to one target.
+        assert_eq!(suggestions("DIST", true), vec!["MEASURE DISTANCE"]);
+        assert!(suggestions("SAVE", true).is_empty());
     }
 
     #[test]
-    fn aliases_are_not_suggested_or_expanded() {
-        for alias in [
-            "L", "C", "M", "TR", "ESC", "DI", "DIST", "AA", "ZE", "Z E", "ZI", "ZO", "U",
-            "DISTANCE", "ANGLE", "AREA", "FIT", "DESELECT", "ENTER", "RIBBON",
-        ] {
-            assert!(!SELECTORS.iter().any(|&(selector, _)| selector == alias));
+    fn exact_resolution_prefers_canonical_then_synonyms_then_gated_aliases() {
+        assert_eq!(resolve_exact("LINE", true), Some("LINE"));
+        assert_eq!(resolve_exact("LINE", false), Some("LINE"));
+        // Full-word synonyms never depend on the keyboard-shortcuts gate.
+        assert_eq!(resolve_exact("FIT", false), Some("ZOOM EXTENTS"));
+        assert_eq!(resolve_exact("DISTANCE", false), Some("MEASURE DISTANCE"));
+        assert_eq!(resolve_exact("RIBBON", false), Some("TOOLS"));
+        // Short aliases are gated.
+        assert_eq!(resolve_exact("DI", true), Some("MEASURE DISTANCE"));
+        assert_eq!(resolve_exact("DI", false), None);
+        assert_eq!(resolve_exact("ZO", true), Some("ZOOM OUT"));
+        assert_eq!(resolve_exact("ZOOM OUT", true), Some("ZOOM OUT"));
+        assert_eq!(resolve_exact("NOPE", true), None);
+    }
+
+    #[test]
+    fn prefix_resolution_is_unique_ambiguous_or_none() {
+        assert_eq!(
+            resolve_prefix("LIN", true),
+            PrefixResolution::Unique("LINE")
+        );
+        assert_eq!(resolve_prefix("ZOOM", true), PrefixResolution::Multiple);
+        assert_eq!(resolve_prefix("Z", true), PrefixResolution::Multiple);
+        assert_eq!(resolve_prefix("NOPE", true), PrefixResolution::None);
+        // The exact alias wins over the longer ambiguous prefix.
+        assert_eq!(resolve_exact("ZO", true), Some("ZOOM OUT"));
+        // A keyboard alias prefix resolves when enabled and is unknown otherwise.
+        assert_eq!(
+            resolve_prefix("AA", true),
+            PrefixResolution::Unique("MEASURE AREA")
+        );
+        assert_eq!(resolve_prefix("AA", false), PrefixResolution::None);
+        // A full-word synonym prefix is available even with aliases disabled.
+        assert_eq!(
+            resolve_prefix("FI", false),
+            PrefixResolution::Unique("ZOOM EXTENTS")
+        );
+    }
+
+    #[test]
+    fn results_are_sorted_unique_bounded_and_deterministic_for_every_prefix() {
+        assert!(SELECTORS.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        let names = SELECTORS
+            .iter()
+            .map(|&(selector, _)| selector)
+            .chain(ALIASES.iter().map(|&(name, _)| name))
+            .chain(SYNONYMS.iter().map(|&(name, _)| name));
+        for name in names {
+            for end in 1..=name.len() {
+                let prefix = &name[..end];
+                let key = normalize(prefix);
+                for work_mode in [false, true] {
+                    let result = suggestions(prefix, work_mode);
+                    assert!(result.len() <= SUGGESTION_LIMIT);
+                    assert!(result.windows(2).all(|pair| pair[0] < pair[1]), "{prefix}");
+                    assert_eq!(result, suggestions(&key, work_mode), "{prefix}");
+                    for entry in &result {
+                        assert!(work_mode || !work_only(entry), "{prefix} -> {entry}");
+                        let canonical_prefix = SELECTORS
+                            .iter()
+                            .any(|&(selector, _)| selector == *entry && selector.starts_with(&key));
+                        let name_prefix = ALIASES
+                            .iter()
+                            .chain(SYNONYMS.iter())
+                            .any(|&(alias, target)| target == *entry && alias.starts_with(&key));
+                        assert!(canonical_prefix || name_prefix, "{prefix} -> {entry}");
+                    }
+                }
+            }
         }
-        assert!(suggestions("AA", true).is_empty());
-        assert!(suggestions("ZE", true).is_empty());
-        assert!(suggestions("ESC", true).is_empty());
-        // An alias-shaped prefix may still naturally match canonical names.
-        assert_eq!(suggestions("L", true), vec!["LINE"]);
-        assert!(suggestions("SAVE", true).is_empty());
     }
 
     #[test]
@@ -206,15 +417,13 @@ mod contracts {
             .next()
             .expect("catalog boundary");
         let dispatch = source
-            .split("        match command {")
+            .split("match canonical {")
             .nth(1)
             .expect("typed selector dispatcher")
-            .split("\n    });")
+            .split("fn is_unsupported_command(")
             .next()
-            .expect("submission callback boundary");
-        let aliases = [
-            "DISTANCE", "ANGLE", "AREA", "FIT", "DESELECT", "ENTER", "RIBBON",
-        ];
+            .expect("submission boundary");
+        let synonym_keys: Vec<&str> = SYNONYMS.iter().map(|&(name, _)| name).collect();
         let mut supported = BTreeSet::new();
         for section in [catalog, dispatch] {
             for line in section.lines() {
@@ -226,14 +435,22 @@ mod contracts {
                 }
                 for selector in pattern.split('|') {
                     let selector = selector.trim().trim_matches('"');
-                    if !selector.is_empty() && !aliases.contains(&selector) {
+                    if !selector.is_empty() && !synonym_keys.contains(&selector) {
                         supported.insert(selector);
                     }
                 }
             }
         }
         assert!(!supported.is_empty());
-        let vocabulary = SELECTORS.iter().map(|&(selector, _)| selector).collect();
+        let vocabulary: BTreeSet<&str> = SELECTORS.iter().map(|&(selector, _)| selector).collect();
         assert_eq!(supported, vocabulary);
+        // The dispatcher arms that are words rather than canonical selectors must
+        // all be covered by the synonyms table, so no supported word is lost.
+        for arm in [
+            "DISTANCE", "ANGLE", "AREA", "FIT", "DESELECT", "ENTER", "RIBBON",
+        ] {
+            assert!(synonym_keys.contains(&arm), "missing synonym {arm}");
+        }
+        assert_eq!(synonym_keys.len(), 7);
     }
 }

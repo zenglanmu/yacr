@@ -48,7 +48,7 @@ fn command_input_preserves_gated_unmodified_history_fallback_without_suggestions
     assert!(capture.contains("return EventResult.reject;"));
     assert!(!arrows.contains("Key.Return"));
     assert!(!capture.contains("undo"));
-    assert!(BAR.contains("accepted => { root.submit(root.input); root.input = \"\"; }"));
+    assert!(BAR.contains("accepted => { if root.submit(root.input) { root.input = \"\"; } }"));
 }
 
 #[test]

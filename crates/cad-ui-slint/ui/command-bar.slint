@@ -44,7 +44,9 @@ export component CadCommandBar inherits Rectangle {
     callback tools();
     callback fit();
     callback mode-toggled();
-    callback submit(string);
+    // Returns true when the host consumed/cleared the line, false when it kept
+    // the input open (for example an ambiguous prefix that needs disambiguation).
+    callback submit(string) -> bool;
     // The host owns the cursor and draft: -1 is older, +1 is newer.
     callback recall(int, string) -> string;
     callback clear-history();
@@ -99,14 +101,27 @@ export component CadCommandBar inherits Rectangle {
                         command-input.focus();
                         return EventResult.accept;
                     }
-                    // Consume the first Enter so LineEdit cannot also submit it.
-                    // Clear the highlight even if the host keeps the same model;
-                    // the next Enter then reaches LineEdit's single submit path.
-                    if event.text == Key.Return && root.selected-completion-index >= 0
+                    // A highlighted completion plus Space fills the selector
+                    // (never submits) so multi-word names like ZOOM EXTENTS can be
+                    // completed; without a highlight the space reaches LineEdit.
+                    if event.text == " " && root.selected-completion-index >= 0
                         && root.selected-completion-index < root.completion-items.length {
                         root.input = root.completion-items[root.selected-completion-index];
                         root.selected-completion-index = -1;
                         command-input.focus();
+                        return EventResult.accept;
+                    }
+                    // Return with a highlighted completion executes that selector;
+                    // the host decides whether the line is cleared.
+                    if event.text == Key.Return && root.selected-completion-index >= 0
+                        && root.selected-completion-index < root.completion-items.length {
+                        root.input = root.completion-items[root.selected-completion-index];
+                        root.selected-completion-index = -1;
+                        if root.submit(root.input) {
+                            root.input = "";
+                        } else {
+                            command-input.focus();
+                        }
                         return EventResult.accept;
                     }
                     return EventResult.reject;
@@ -117,7 +132,7 @@ export component CadCommandBar inherits Rectangle {
                     placeholder-text: root.prompt;
                     accessible-label: root.prompt;
                     text <=> root.input;
-                    accepted => { root.submit(root.input); root.input = ""; }
+                    accepted => { if root.submit(root.input) { root.input = ""; } }
                 }
             }
             Button { text: root.expanded ? "v" : "^"; min-width: 48px; preferred-width: 48px; min-height: root.phone ? 48px : 36px; clicked => { root.expanded = !root.expanded; } }
