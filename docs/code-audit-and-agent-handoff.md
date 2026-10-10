@@ -4,14 +4,20 @@
 需求权威：`CAD_IMPLEMENTATION_SPEC.md` v2.0；本报告是审计结果及用户新增需求，不取代原规范。
 本轮仅新增本文件，不修改业务实现。审计开始时工作区干净。
 
+> **2026-10-05 子系统移除说明**：用户批注能力已整体删除（提交 `0120d09`，
+> `cad-annotations` crate 不再存在），F07/F08/F09 退出产品范围。下文中所有 F07/F08/F09
+> 行、以及位置指向 `cad-annotations/**` 或描述批注子系统/`AnnotationDatabase` 的
+> B05/B08/B09/B10/B11/B12 条目均为**历史定位**，不再是待办；保留以维持审计记录。
+> 测量（F06）与 DXF 注释性缩放仍在范围内。
+
 ## 1. 结论与证据边界
 
 当前是有真实核心算法、事务和部分宿主接线的原型，不是全部空框架，也不是可验收产品。
 不能仅按 `pending()` 数量判断完成度：大量缺口表现为忽略字段、未消费输出、缺少宿主接线或错误的成功状态。
 
-- 已有：只读底图 Builder、批注事务、撤销重做、部分几何/测量算法、代理有界 framing、基础表示提供器、CPU 索引、查询、Slint/wgpu 同设备纹理桥、Web 文件入口和静态构建脚本、基础 CLI。
-- 未闭环：手机交互、真实文件打开与取消、图层/布局显示、拾取高亮、六类批注工具与显示、无损持久化、恢复保护、字体/外参、完整 3D、ACIS、跨后端初始化与恢复、大图性能。
-- 高风险：新图纸可能仍显示旧图；打开/重载会丢未保存批注；JSON 往返丢失语义；能力表与实际绘制不一致。
+- 已有：只读底图 Builder、绘图事务、撤销重做、部分几何/测量算法、代理有界 framing、基础表示提供器、CPU 索引、查询、Slint/wgpu 同设备纹理桥、Web 文件入口和静态构建脚本、基础 CLI。
+- 未闭环：手机交互、真实文件打开与取消、图层/布局显示、拾取高亮、恢复保护、字体/外参、完整 3D、ACIS、跨后端初始化与恢复、大图性能。（六类批注工具/显示/持久化随子系统移除，已不在范围。）
+- 高风险：新图纸可能仍显示旧图；打开/重载的状态保护；JSON 往返丢失语义；能力表与实际绘制不一致。
 - UI 审查基于 Slint/Rust/JS/CSS 源码，本轮未运行浏览器、模拟器或真机；布局溢出属于待截图验证风险，不能冒充视觉实测。
 - `fixtures/manifest` 的 fixtures 为空，不能声明真实 DWG、天正/探索者、字体或黄金图验收通过。
 
@@ -41,10 +47,10 @@
 | F03 图层 | Session 覆盖、Query layers 已定义/实现 | 无图层面板、搜索/恢复入口；渲染不消费覆盖或 Layer.visible；显隐需不重解析、不改底图、不重新生成全部几何 |
 | F04 布局 | importer 读取纸空间与 PaperViewport；app 修改 active_space | bridge 只构建 model_space；无布局切换 UI；矩形裁剪、视口变换比例不正确；纸空间测量策略未闭环 |
 | F05 选择/高亮/属性 | CPU GridSpatialIndex 与 SelectionRef、properties 查询已有 | Select 仅设 Selecting 状态；无精确拾取、选择集更新、高亮、实体只读属性面板；需区分 INSERT instance/sub-element |
-| F06 测量 | 引擎含距离、长度、角度、共面面积；有局部捕捉接口 | UI 发送 None，无法选点；命令按点数猜算法且无面积入口；无单位显示转换/校准、空间选择、捕捉候选接线、结果保存为批注；返回结构化 MeasurementRecord |
-| F07 六类批注 | DB 有文本、引线、矩形、椭圆、自由线、云线类型 | 无可执行工具、编辑器/样式、预览/确认/取消；UI 创建参数缺失；bridge 不读取批注库，既有批注也不可见；需一次确认一事务、多指零误提交 |
-| F08 批注编辑/历史 | app create/update/delete + history 路径可用 | 无批注选择/修改/删除 UI；redo 可用状态绑定错误；模式切换未接线；导入绕过权限；变更未分发到 UI/场景/索引 |
-| F09 列表/隐藏/交换 | JSON codec、host import/export、Web 下载入口 | 列表 UI/隐藏状态缺失；codec 无损性和 mapping 策略有缺陷；Android 文件导入/导出、原子保存、迁移历史样本、IndexedDB/应用恢复均缺 |
+| F06 测量 | 引擎含距离、长度、角度、共面面积；有局部捕捉接口 | UI 发送 None，无法选点；命令按点数猜算法且无面积入口；无单位显示转换/校准、空间选择、捕捉候选接线；返回结构化 MeasurementRecord（原“结果保存为批注”随批注子系统移除） |
+| F07 六类批注 | **已移除（2026-10-05，提交 `0120d09`）**：`cad-annotations` 及批注工具/显示/持久化整体删除，不在产品范围；本行为历史定位。 | — |
+| F08 批注编辑/历史 | **已移除（2026-10-05，提交 `0120d09`）**：批注选择/修改/删除与批注撤销随子系统删除；撤销/重做现只服务绘图/测量范围。 | — |
+| F09 列表/隐藏/交换 | **已移除（2026-10-05，提交 `0120d09`）**：批注 JSON codec、列表、导入/导出随子系统删除。 | — |
 | F10 资源 | MapResolver/ResolverChain/路径策略、样式 resource_keys | 宿主 document.resource_keys 永远空；缺资源包 UI、字体 shaping/图集、SHX/BigFont 支持、CAD TEXT/MTEXT 排版、外参/图片显示、总缓存预算/递归限制接线 |
 | F11 诊断/代理 | importer/proxy 输出报告；diagnostics/CLI 有摘要 | UI 只取首条诊断；表示缺失不汇总；能力表错误；代理仅已知 FillOff/UnicodeText，缺线面与状态栈实证支持；缺对象级可浏览缺图报告及真实厂商样本 |
 | F12 Web 后端/恢复 | Auto adapter probe、偏好存储重载、桥接纹理存在 | 实际 device 初始化失败回退未闭环；GL 桥仍标 WebGPU；强制失败缺交互决策；重载丢文档/批注；设备重建后场景不恢复；两后端须真实运行 |
@@ -60,7 +66,7 @@
 4. **大图（§8）**：每片段一个 GPU batch/uniform/draw；无视口剔除/实例共享/空间块/LOD 滞回/文字填充缓存；build_scene 绕过 publish/evict，upload 无预算；统计 cpu_ms 固定 0，不能算基准。
 5. **生命周期（§9/16.3）**：Persistence/FileAccess/HostLifecycle 只有接口；缺暂停/低内存/进程恢复/Surface 重建/浏览器隐藏暂停/退出保护；Android recovery_enabled 未落实。
 6. **扩展/来源（§10/17）**：Representation 注册部分实现；Importer/Tool/CommandHandler/PropertyProvider 等统一注册未完成；Proxy decoder 同优先级冲突与失败状态隔离需补。migration-map 未锁 OpenCADStudio commit/许可/函数与测试。
-7. **自动化（§11/19）**：CLI fixed render 无条件 Unsupported，即使有 GPU 也不能执行；缺结构化批注 CRUD 入口；measure 只输出格式化诊断；benchmark 仅表示构建耗时；无 fuzz/property、黄金图/跨后端/真实生命周期验收。
+7. **自动化（§11/19）**：CLI fixed render 无条件 Unsupported，即使有 GPU 也不能执行；measure 只输出格式化诊断；benchmark 仅表示构建耗时；无 fuzz/property、黄金图/跨后端/真实生命周期验收。（结构化批注 CRUD 入口随批注子系统移除，不在范围。）
 8. **文档一致性**：AGENTS/handoff/requirements/validation 与当前源码接线和构建状态不同步；应基于本轮失败更新，不删除既有实现或把全部模块重新标为空框架。
 
 ## 3. UI 设计与交互问题
@@ -71,9 +77,9 @@
 |---|---|---|
 | U01 | `ui/app.slint:32–67` 所有按钮+后端选择器单行排列；compact 配置未消费 | 宽屏查看：大画布+少量浮动导航；宽屏工作：分组工具+可折叠侧栏；手机：底部分组+抽屉。窄屏溢出需截图确认；建议触控目标 ≥48 逻辑像素，不直接压缩桌面栏 |
 | U02 | 两宿主 with_demo_document 默认 Work；work-mode 仅开关 enabled，无模式切换入口，mode-label 不显示 | 显式查看/工作切换，共用会话；切换取消未确认预览；UI 与命令权限一致；不把 set_work_mode 当业务授权 |
-| U03 | 无图层/属性/批注列表/布局/资源/3D 面板；只有开、适应、历史、测量、批注、导入导出、诊断 | 以 F01–F15 为准补入口，提供分页/搜索/空状态；设置页区分 CAD 后端与 UI renderer，不为每实体创建控件 |
-| U04 | 无当前工具提示/选点步骤/确认/取消/返回导航；Measure/CreateAnnotation 按钮发送 None | 建真正 Tool 状态机与 PreviewState；选择测量算法和批注类型；按钮启动工具而不是提交缺参命令 |
-| U05 | TouchArea 无多触点身份，Web 总是左键平移；Android 无 ViewInput 接线 | 统一共享输入策略：单指绘制、双指导航、拖动阈值、pointer cancel/capture；多指不得提交批注。Esc/Android 返回先取消工具，再处理退出 |
+| U03 | 无图层/属性/布局/资源/3D 面板；只有开、适应、历史、测量、导入导出、诊断 | 以 F01–F15 为准补入口，提供分页/搜索/空状态；设置页区分 CAD 后端与 UI renderer，不为每实体创建控件（批注列表入口随子系统移除） |
+| U04 | 无当前工具提示/选点步骤/确认/取消/返回导航；Measure 按钮发送 None | 建真正 Tool 状态机与 PreviewState；选择测量算法；按钮启动工具而不是提交缺参命令（CreateAnnotation 随批注子系统移除） |
+| U05 | TouchArea 无多触点身份，Web 总是左键平移；Android 无 ViewInput 接线 | 统一共享输入策略：单指绘制、双指导航、拖动阈值、pointer cancel/capture。Esc/Android 返回先取消工具，再处理退出 |
 | U06 | 没有键盘焦点/IME 接线；InputEvent 类型存在但未使用 | 文本框/弹窗获得焦点时暂停画布快捷键；中文组合输入、Esc、软键盘、浏览器缩放测试；不能把拼音组合串当命令 |
 | U07 | safe_insets/dpi 配置未接；frame 用全窗口尺寸而 Image 只占工具栏之间区域 | 统一真实画布矩形→逻辑像素→物理像素→世界坐标映射；横竖屏、DPR=1/2/3、安全区、键盘弹出、resize 后绘制与拾取一致 |
 | U08 | 单行状态栏只显示首条诊断；HTML host-state 覆盖底部且轮询原始 report。**已部分关闭**：Slint 状态栏改用 `cad-app` 的 `StatusModel`（固定摘要，不含诊断正文，`status_summary_never_embeds_a_diagnostic_message`），诊断抽屉保留全部对象/原因；Web `#host-state` 改为加载/失败专用，`renderer-ready` 后 CSS 隐藏，失败经 `:has(#retry-renderer...)` 重新显示。见 `docs/diagnostics-ui.md`、`docs/ui.md` §5 | 状态栏只显示简要加载/工具/单位/未保存状态；诊断抽屉展示完整对象级原因、实际后端及恢复操作；技术报告不常驻压住提示 |
@@ -116,7 +122,7 @@
 - 修复：场景身份包括 DocumentId/内容身份/generation/revision；每次成功 open 发布新快照，不靠裸 DatabaseId 判断。
 - 回归：不同范围的两份合成 DB 同 ID 连续打开，断言来源/顶点/像素均更新；旧任务不得覆盖新图。
 
-### B05 · P0 · 源码确认：打开图纸丢批注且保留旧历史/会话
+### B05 · P0 · 源码确认：打开图纸丢批注且保留旧历史/会话（批注子系统已移除，2026-10-05；下方为历史定位）
 
 - 位置：`cad-app/src/host.rs:158–186` 替换 document 为新空 annotations，不调用 prepare_leave，不清历史/selection/overrides/tool。
 - 影响：未保存批注直接丢失；旧 UndoRecord 可作用到新图纸，旧 LayerId/SelectionRef 可误指新对象。
@@ -136,34 +142,34 @@
 - 修复：导出准备与持久写入确认分离，携带 exported_revision；纯 getter 不改 dirty；可用文件 API await 成功后标保存，下载回退须明确其确认限制，保留恢复副本。
 - 回归：Blob/URL/DOM/写入失败和用户取消保持 dirty；导出 rev N 后新增 rev N+1，不能把 N+1 标已保存。
 
-### B08 · P1 · 源码确认：批注导入绕过查看模式权限与统一命令分发
+### B08 · P1 · 源码确认：批注导入绕过查看模式权限与统一命令分发（批注子系统已移除，2026-10-05；下方为历史定位）
 
 - 位置：`cad-app/src/host.rs:246–274` 直接 apply_annotation_changes；Web 直接调用它，未经过 Application::execute/authorize。
 - 修复：I/O 留宿主，但 decode 后业务导入使用声明为 Work-only 的统一命令/事务；发布 ChangeSet。
 - 回归：Viewer 下直接 host API/JS/CLI 导入均拒绝，revision/history/scene 不改变；Work 一次导入一事务。
 
-### B09 · P0 · 源码确认：JSON 往返丢样式、精度、测量与实例锚点
+### B09 · P0 · 源码确认：JSON 往返丢样式、精度、测量与实例锚点（批注 sidecar 已移除，2026-10-05；下方为历史定位）
 
 - 位置：`cad-annotations/src/lib.rs:217–231,264–305,331–385`。
 - source 单位被设为 display；logical_width/text_height 解码固定默认；precision 固定 Analytic；MeasurementRecord 的 plane/units/source/precision 未写入；anchor 仅 handle/fallback，instance/sub-element/status 丢失并变 Valid。
 - 修复：完整版本化编码及迁移；真实解析枚举，禁止将缓存近似升级成解析精度。时间值需校验，并明确规范要求的时间编码。
 - 回归：所有几何/单位转换/样式/ProxyCache 精度/MeasurementRecord/多 INSERT 锚点做全字段相等往返，不只测 text 相等。
 
-### B10 · P1 · 源码确认：指纹映射策略只是放行，未执行其语义
+### B10 · P1 · 源码确认：指纹映射策略只是放行，未执行其语义（批注 sidecar 已移除，2026-10-05；下方为历史定位）
 
 - 位置：`cad-annotations/src/lib.rs:110–120,148–161`。
 - ImportUnanchored 未清 anchor；ExplicitCoordinateMapping 未变换点/轴/工作平面/回退坐标，也未重定绑定身份。
 - 修复：显式策略作用于全部几何与锚点，必要时标 Unresolved，不能继续 Valid；奇异/非有限映射拒绝；单位/面积变换语义需说明。
 - 回归：不匹配文件 + 平移/旋转/比例映射，实际坐标符合预期；无锚策略所有锚解绑。
 
-### B11 · P1 · 源码确认：坏 JSON 被静默吞掉或强制转换
+### B11 · P1 · 源码确认：坏 JSON 被静默吞掉或强制转换（批注 codec 已移除，2026-10-05；下方为历史定位）
 
 - 位置：`cad-annotations/src/lib.rs:92–109,123–128,175–178,203–205,352–366`。
 - 错误批注 decode None 被跳过；UUID 非法变 0；指纹短数组补零/长数组截断/字节取模；schema u64→u32 可截断；未知子字段丢失；bookmark 读写为空；非法 extension JSON 被忽略且可覆盖保留字段。
 - 修复：强类型有界验证，拒绝或对象级 partial 明确报告；精确 UUID/hash 长度和字节范围；确定性 schema migration；保留未知字段或拒绝，而非静默丢失。
 - 回归：坏 UUID、重复 ID、缺必填、未来 schema 大整数、未知 kind/子字段、非空 bookmark、非法 extension、嵌套/体积超限均有明确结果，不报无损成功。
 
-### B12 · P1 · 源码确认：事务缺少几何/引用/ID 验证及精确 mask
+### B12 · P1 · 源码确认：事务缺少几何/引用/ID 验证及精确 mask（批注部分已移除，2026-10-05；绘图事务验证见 `docs/core-invariants.md`）
 
 - 位置：`cad-db/src/lib.rs:633–683,728–757`；Builder.finish:524–559。
 - annotation 仅检查重复 staged key/删除存在性；key 与 annotation.id 可不同，非有限点/无效样式/测量/空间/锚点无完整校验；所有 Update 都 GEOMETRY。Builder 未校验 INSERT block、Text style、循环/深度、网格索引或数值；同一 staged insert 可覆盖前值。
@@ -276,7 +282,7 @@
 
 ### B28 · P2 · 源码确认：history 失败丢记录、预算低估、交易 ID 重用
 
-- 位置：`cad-history/src/lib.rs:30–42,87–107,119–152`；host 与 AnnotationService 各有 TX_COUNTER 从 1 开始。
+- 位置：`cad-history/src/lib.rs:30–42,87–107,119–152`。（原 host 与 `AnnotationService` 各持 TX_COUNTER 的双计数器风险已随批注子系统移除，`cad-annotations` 不存在。）
 - undo/redo 提前 pop，DB 提交失败不恢复栈；预算只估 text 不含自由线/云线数组，merge 不 enforce_budget，redo 不纳入 used_bytes；undo/redo 复用原 transaction，双计数器也可冲突。
 - 修复：提交成功再移栈；预算覆盖 heap/redo/merge，超大单记录有明确策略；新事务 ID 与被撤销原记录分开。
 - 回归：无效 patch 的失败撤销保持两栈；大 freehand/merge/redo 内存有界；create/import/undo/redo transaction 标识可区分。
@@ -316,7 +322,7 @@
 ### 5.2 下游实施契约
 
 1. 支持稳定 locale：`zh-CN`、`en`（可接受 en-US 输入并规范化）；默认简体中文。未支持 locale 回退中文并有可诊断策略，不显示空 key。
-2. 设置页提供“简体中文 / English”，运行时切换可见 UI；偏好由宿主保存并在重启恢复。切换不得丢文档、相机、工具预览、选择、批注或撤销栈；不修改 DWG 文本/用户批注文本。
+2. 设置页提供“简体中文 / English”，运行时切换可见 UI；偏好由宿主保存并在重启恢复。切换不得丢文档、相机、工具预览、选择或撤销栈；不修改 DWG 文本。
 3. 文案全部外置：按钮、工具步骤、单位、对话框、错误、加载、缺资源/代理提示、后端状态、HTML 启动失败和 JS 文件提示。技术稳定标识 CommandId/diagnostic.code/schema 字段不翻译。
 4. 先确认 Slint 1.18.1 的真实翻译 API；选择 Slint 官方机制或统一资源 catalog 写 ADR。不得假造第三方接口。若继续 JSON，增加 `en.json`，两语言使用相同 keys 与占位符，不能只是新建文件却不接线。
 5. 领域/核心返回结构化诊断 code+参数，表现层本地化；不要在 cad-domain 引入 Slint 或平台 API。原始技术错误可附于详情，但主用户提示需双语。
@@ -329,8 +335,8 @@
 - catalog keys/占位符一致，缺失 key 和非法格式令 CI 失败；合法回退行为有单测。
 - 中文与英文覆盖全部面板、错误、对话框及 JS 启动/文件流程；开发测试禁止未登记用户文案，可对固定例外建立白名单。
 - 两语言在 U01–U12 的手机/宽屏/DPI/键盘弹出场景截图与交互通过；中文组合输入不触发快捷键。
-- dirty 批注+活跃工具时切语言，状态/DB revision/history 不改变；重启语言偏好恢复。
-- 往返文件里的 DWG 文本、用户批注、数值、ID、schema 不因语言变化；CLI 机器输出 keys 不变。CLI 人类提示可加 locale 参数，但不是完成 GUI 双语的替代品。
+- dirty 绘图/测量状态+活跃工具时切语言，状态/DB revision/history 不改变；重启语言偏好恢复。
+- 往返文件里的 DWG 文本、数值、ID、schema 不因语言变化；CLI 机器输出 keys 不变。CLI 人类提示可加 locale 参数，但不是完成 GUI 双语的替代品。
 
 ## 6. 新增需求 N02：GitHub Actions workflow / runner
 
@@ -398,7 +404,7 @@ Android emulator 与 GPU/WebGPU/真机黄金图可作为分开的集成 jobs。�
 
 ### C. 建产品交互闭环
 
-- [ ] U01–U12 及 F01–F12：SAF/Web 文件、模式、图层/布局/选择/属性、测量/批注六类工具/管理、资源/诊断。
+- [ ] U01–U12 及 F01–F06、F10–F12：SAF/Web 文件、模式、图层/布局/选择/属性、测量、资源/诊断。（F07–F09 随批注子系统移除，不在范围。）
 - [ ] N01 双语与上述 UI 同步完成，catalog 验证进入 CI；不是最后额外补两三个英文按钮。
 - [ ] 一次确认一事务，取消零事务，撤销/重做数据/UI/索引/显示一致；程序回填不重复发命令。
 

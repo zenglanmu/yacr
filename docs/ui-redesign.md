@@ -25,7 +25,8 @@
 Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不携带任何脚本/回调。
 
 仍未闭环（不宣称完整验收）：
-- `canvasOnly` 之外的精简预设对 ribbon 的实际重排仍是布局子集；`minimal` 语义待细化。
+- `minimal` 预设已具备显式组件真值表与命令白/黑名单（`canvasOnly ⊆ minimal ⊆ full`，
+  `viewer_config.rs:202–311`），不再是“布局子集/待细化”。
 - 自定义 ribbon 分组已落地：`ui.components.ribbon.tabs[].groups[].commands[]` 现真正渲染为
   选项卡/分组/命令按钮并按 `commandVisibility` 过滤，点击映射到真实命令（未支持的合法
   命令显式报 `ribbon.command_unsupported`，不静默成功）。**未声明自定义 tabs 时内置 5 标签
@@ -38,8 +39,8 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
 - 用户偏好不得重新启用被预设/能力禁用的命令：`ui.commandOverrides.<id>.visible` 现与
   `features.*`、`ui.components.*.visible` 一样按“只能关不能开”钳制（此前可越权打开
   `canvasOnly` 隐藏的命令），新增回归测试。
-- `view.overlays.*` 已端到端门控绘制：`selectionHighlight`/`annotations`/`snapHints`
-  控制选择高亮、已提交批注、预览光标十字与**真实对象捕捉标记**（`cad_measure::SnapKind`
+- `view.overlays.*` 已端到端门控绘制：`selectionHighlight`/`snapHints`
+  控制选择高亮、预览光标十字与**真实对象捕捉标记**（`cad_measure::SnapKind`
   形状）；`axes`/`grid` 首次产生真实世界坐标参考
   几何（按图纸 bounds 生成、1/2/5 步长约 10 格、行数有上限、无 bounds 时显式诊断
   不伪造）。内置默认 `axes=true`、`grid=false`，与 `ui-spec/ui-desc.md` 示例和 AutoCAD
@@ -98,12 +99,15 @@ UI 单元合成测试 **76 passed**；离屏集成 **1 passed**。
 ## 里程碑 3：浏览器集成
 
 首轮 `scripts/check-web-ui.mjs` 在 Chromium 153.0.8010.12 / SwiftShader WebGL2 通过：
-模块全部 HTTP 200、导航 CAD 像素变化 0.266%、双语与持久偏好、349 字节空批注 sidecar
-导出/回导，无控制台/page 错误。截图发现初始相机仍按整壳 fit 的裁切问题；随后修正 Web
-启动只按真实 CAD 内容矩形 fit 一次，运行时布局调整仍保留相机。首轮截图留存，不作为完整视觉通过。
+模块全部 HTTP 200、导航 CAD 像素变化 0.266%、双语与持久偏好在当时通过；同轮的
+“349 字节空批注 sidecar 导出/回导”属**历史证据**，该 sidecar 已随 2026-10-05 批注子系统
+移除而不再可复现。无控制台/page 错误。截图发现初始相机仍按整壳 fit 的裁切问题；随后修正
+Web 启动只按真实 CAD 内容矩形 fit 一次，运行时布局调整仍保留相机。首轮截图留存，不作为
+完整视觉通过。
 
 最终重跑：`/tmp/opencode/yacr-concept-final-web/integration.png` 已人工抽查，合成图边界
-完整位于 CAD 区域；导航变化 0.417%，语言/偏好/空批注往返与错误检查再次通过。
+完整位于 CAD 区域；导航变化 0.417%，语言/偏好与错误检查再次通过（同轮的“空批注往返”
+为历史证据，sidecar 已随批注子系统移除）。
 release wasm 15,985,060 bytes，SHA-256
 `2d60a7d5aa6e99af205d1e3ee063391f660debc49d58457435818e86c7f83dee`。
 构建使用 `WITH_FONTS=0`：只带授权 UI 字体，未验证第三方 CAD 字体与真实 DWG。

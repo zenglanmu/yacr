@@ -1,5 +1,67 @@
 # 后续 agent 接手入口
 
+## UI item 5 收尾轮（2026-10-09/10，本轮）
+
+用户要求继续 handoff 收尾；问询确认范围为「全量 UI item 5」：布局面板（纸空间/视口
+裁剪与比例）、资源/3D 抽屉、安全区/软键盘并入坐标映射，另含可收口小项（plot-style
+显式建模、批注移除文档债）。四条并行工作流 + 主控集成验证。
+
+**改动**
+
+1. **纸空间视口裁剪闭环**（`cad-representation`）：mesh 逐三角形 Sutherland–Hodgman
+   裁剪（z/法线/逐顶点 sRGB 颜色插值）、图像四边形 UV 插值裁剪
+   （`DisplayPrimitive::Image` 新增可选 `clip`）；未成形 Text/坏 mesh/退化图像等
+   不可裁剪情形**保留几何 + `Partial` + 稳定原因码**（`viewport.clip_*`）。
+   15 项新契约；`docs/layouts.md` §2.4/§4/§5 同步。
+2. **UI 抽屉与布局比例**（`cad-ui-slint`）：资源抽屉（字体/导入/代理/引用/图像真实
+   分区，无数据显式空态，图像未建模显式说明）、3D 观察抽屉（复用既有
+   `Switch2d3d`/`SwitchProjection`/`StandardView` 命令；环绕=手势说明；3D fit 显式
+   禁用）、布局比例**显示级**（`LAYOUT_SCALE_CONTROL_WIRED=false`，命令面不存在
+   不伪造）。i18n **202→248 keys**，含 `diagnostic.representation.viewport_clip_partial`、
+   `diagnostic.import.plot_style_unsupported`、`diagnostic.import.shade_plot_unsupported`。
+3. **plot-style 显式 Unsupported**（`cad-import-acadrust`，铁律 2 补齐）：
+   `PlotSettings.current_style_sheet`/`Layout.plot_style_sheet`/`shade_plot_mode` 首次
+   被读取并以 `import.plot_style_unsupported`/`import.shade_plot_unsupported` 显式
+   建模（此前**完全未读取、静默忽略**，与文档"显式 Unsupported"声称不符）。5 项契约。
+4. **批注移除文档债**：`CAD_IMPLEMENTATION_SPEC.md`、`docs/architecture.md`、
+   `docs/core-invariants.md`、`docs/compatibility.md`、`docs/code-audit-and-agent-handoff.md`、
+   `docs/panels.md`、`docs/ui-redesign.md`、本文 7 项清单的 F07/F08/F09 与
+   `cad-annotations` 引用按「产品已移除（2026-10-05）」重写；历史证据段保留并标注。
+5. **宿主接线**（`apps/app-linux|app-web|app-android`）：三宿主安装
+   `LayoutSwitchSink`（走 `CommandId::SwitchSpace` 校验路径，未知布局显式拒绝）；
+   `cad_app::input::inset_canvas_metrics` 把安全区折入 `CanvasMetrics`（退化输入
+   显式拒绝；Web 经 `env(safe-area-inset-*)`、Android 提供 `set_surface_insets` 入口、
+   Linux 显式零）；资源/3D 抽屉真实数据推送（桌面 `fonts: None`：加载器丢弃
+   `FontLoadReport`，显示显式空态而非臆造摘要）。`docs/input.md`/`docs/responsive-ui.md`
+   同步。
+6. **主控修复潜伏测试缺陷**：`app-android` 的
+   `android_view_input_scroll_zooms_the_camera` 断言方向与三宿主共享公式
+   （`factor=1-dy*0.0015`）及 `Camera::zoom_at`（factor>1 zooms in）契约**相反**——
+   该测试不在任何已记录门禁内、从未运行过，属潜伏缺陷非本轮回归。改为双向断言
+   （scroll down=zoom out、scroll up=zoom in）并修正 `view.rs` 错误注释，属对齐
+   契约而非弱化。
+
+**门禁（本机 ThinkPad 桌面；GPU 测试 lavapipe 串行）**：fmt、clippy(`-D warnings`)、
+architecture、fixture-manifest、workflows、i18n(248) 全绿；workspace all-targets
+check、wasm32 全 workspace lib check、app-web wasm check 全绿；node 六套契约全绿；
+`cargo test`：cad-app 263、cad-representation 157、cad-import-acadrust 111/0/1 ignored、
+cad-ui-slint 131+全部集成（含 offscreen 外壳渲染）、app-linux 全部（含 verify_ui/
+verify_ui_drawing）、app-web 全部、app-android **19/0**（修复后）。
+**Android 门（本轮补装 SDK 后实跑）**：本机原缺 Android SDK/NDK；已按 `docs/build.md`
+布局安装（`~/android-sdk`，build-tools 34.0.0 / platforms 34+30 / NDK 27.0.12077973，
+`~/jdk17`，env 写入 `~/.bashrc`），随后
+`cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --all-targets`
+与同目标严格 clippy（`-D warnings`）**通过**（顺带清掉两处 app-android 遗留问题：
+`poll_import_once`/`ImportPollOutcome` 再导出的 cfg 限定为 android+test，
+`lib.rs` 两处 `clone_on_copy`）。
+
+**未运行/限制**：真实 DWG/真实 GPU 像素验收/浏览器/真机 NOT RUN（lavapipe/合成为限）；
+Web 生产部署仍待 Cloudflare token；Android Activity 侧 OS inset 回调**未转发**到
+`set_surface_insets`（真机安全区未生效，显式未接线）；3D fit、视口比例命令面、
+图像实体建模仍显式缺失（见 `docs/panels.md` §3.4）；`cargo-apk`/APK 打包与模拟器
+不在本轮（SDK/NDK 已就绪，可按 `docs/build.md` 后续执行）。中途两次用户中断/恢复，
+被取消的工作流残留改动已由主控就地核对合并，无回滚。
+
 ## acadrust 0.5.5 → 0.6.3 升级（2026-10-09，本轮）
 
 用户要求把工作区 `acadrust` 从 `=0.5.5` 升到 `0.6.3`（features `serde` + `import`），
@@ -1157,21 +1219,22 @@ flange 样本，但仅 `Partial`，不构成兼容性或黄金图验收）；Mul
 
 ## 下一轮优先：UI 界面未实现功能（用户指定）
 
-用户明确要求本集成轮结束后优先补齐 UI 未实现功能。当前 `docs/ui-redesign.md`「仍未闭环」
-与 `docs/panels.md`/`docs/ribbon-ui.md`/`docs/responsive-ui.md` 列出的缺口：
+用户明确要求本集成轮结束后优先补齐 UI 未实现功能。下表按源码现状刷新为**真实状态**，
+不再保留过期待办。`docs/ui-redesign.md`「仍未闭环」与 `docs/panels.md` /
+`docs/responsive-ui.md` 的缺口同步更新。
 
-1. **Ribbon 自定义分组渲染**：`ui.components.ribbon.tabs[].groups[].commands[]` 已解析/校验
-   并驱动 `commandVisibility`，但仍渲染为固定 5 标签 + 内置面板；需真正按配置重排分组/顺序/
-   图标-文字模式与溢出菜单。
-2. **overlay 开关驱动合成层**：`view.overlays.{axes,grid,selectionHighlight,snapHints,annotations}`
-   已解析但未逐项控制坐标轴/网格/捕捉提示/批注覆盖层的实际绘制。
-3. **interaction 门控**：`interaction.{pointer,touch,keyboardShortcuts}` 已解析但未逐项门控
-   输入路径（快捷键暂停、触控切换）。
-4. **精简预设语义**：`minimal` 预设仍是布局子集，需明确其组件/命令集合。
-5. **面板细节**：`docs/panels.md` 的布局面板（纸空间/视口裁剪与比例）、资源/3D/诊断抽屉；
-   `docs/responsive-ui.md` §6 的诚实缺口；软键盘/安全区并入坐标映射。
-6. **原生宿主偏好持久化**：原生宿主尚未从磁盘读取用户偏好（Web 已 localStorage）。
-7. **真机/浏览器移动矩阵**：UI 门控的浏览器移动/真机运行验收。
+| # | 项目 | 状态 | 证据 / 位置 |
+|---|---|---|---|
+| 1 | Ribbon 自定义分组渲染 | **已实现** | `ui.components.ribbon.tabs[].groups[].commands[]` 真正渲染并按 `commandVisibility` 过滤、`display` 模式与内联溢出；未声明自定义 tabs 时内置面板不变。`crates/cad-ui-slint/ui/ribbon.slint:98–156,205` |
+| 2 | overlay 开关驱动合成层 | **已实现** | `view.overlays.{axes,grid,selectionHighlight,snapHints}` 端到端门控绘制（axes/grid 真实世界参考几何，捕捉标记按 `SnapKind`；`annotations` 开关随批注子系统移除）。`crates/cad-app/src/render_scene/mod.rs:213–265` |
+| 3 | interaction 门控 | **已实现** | `interaction.{pointer,touch,keyboardShortcuts}` 在共享 Slint 适配器逐项门控输入（指针/滚轮/拾取/别名展开）。`crates/cad-ui-slint/src/adapter.rs:160–167`、`tests/interaction_gating.rs` |
+| 4 | 精简预设语义 | **已实现** | `minimal` 有显式组件真值表与命令白/黑名单（`canvasOnly ⊆ minimal ⊆ full`）。`crates/cad-app/src/viewer_config.rs:202–311` |
+| 5 | 面板细节（布局面板；资源/3D/诊断抽屉；`responsive-ui.md` §6 缺口；软键盘/安全区） | **已完成（本轮，边界显式）** | 诊断抽屉 + 资源/3D 抽屉 + 布局比例（显示级）已接线（`docs/panels.md` §3.4）；纸空间 mesh/图像逐三角裁剪闭环（`docs/layouts.md` §4）；`safe_insets` 已折入 `CanvasMetrics`（`docs/input.md` §5）。显式缺失：3D fit、视口比例命令面、图像实体建模、Android OS inset 回调转发 |
+| 6 | 原生宿主偏好持久化 | **已实现** | 原生宿主读取 `$XDG_CONFIG_HOME/yacr/config.json` 与 `preferences.json`，支持 `--config`/`--preferences` 覆盖，无 XDG/HOME 时显式不持久化。`apps/app-linux/src/host/config_file.rs:103–175` |
+| 7 | 真机/浏览器移动矩阵 | **环境/证据缺口** | 需真机与移动浏览器矩阵实测；属验收环境缺口，不是代码待办。 |
+
+注：用户批注子系统已于 2026-10-05 整体移除（见 `CAD_IMPLEMENTATION_SPEC.md` 顶部变更
+记录），`docs/ui-redesign.md` 中涉及批注门控/批注面板的旧描述按“已移除”理解。
 
 ## 已定义，但尚需设计审查
 

@@ -142,35 +142,77 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
 ### 3.2.1 Web 宿主接线（已接线；无头/真机验收待补）
 
 `apps/app-web` 在 `browser/state_push.rs` 中已调用
-`set_layer_state` / `set_property_state`（以及布局/批注/诊断面板），并传入真实
-`LayerId`/`AnnotationId`/`LayoutId` 顺序；空状态与多值文案取自目录
+`set_layer_state` / `set_property_state`（以及布局/诊断面板），并传入真实
+`LayerId`/`LayoutId` 顺序；空状态与多值文案取自目录
 （`layers.empty`、`properties.empty`、`properties.mixed`）。无捕获工具时的画布轻触经
 `cad_app::pick_at_screen` 命中后派发 `Select`，属性面板随命令统一推送刷新。
 `apps/app-android` 仍未接线，不在本轮范围。
 
-### 3.3 刻意未做（原因）
+### 3.3 刻意未做 / 进行中 / 已移除（原因）
 
-- **布局面板（F04）**：`bridge` 只构建 model_space，纸空间/视口裁剪与比例未闭环，
-  现在加面板只能是空壳；属独立工作流。
-- **批注列表面板（F09）**：`QueryService.annotations` 有投影，但隐藏状态、列表
-  UI 与映射策略尚未闭环（审计 F09）；属独立工作流。
-- **资源 / 3D / 诊断抽屉（F10/F13/U08）**：对应核心闭环未完成或 `pending(...)`，
-  加面板会是假数据。见 `docs/ui.md` 第 4 节的同一判断。
+- **布局面板（F04）——UI 通道已接线**：纸空间视口裁剪已在表示层闭环（线精确、
+  mesh 逐三角形、图像四边形带 UV 插值，见 `docs/layouts.md` §2.4/§4），布局列表与
+  比例显示见 §3.4。比例修改命令在 `cad-app` 命令面仍不存在，控件显式禁用；
+  布局切换 sink 由宿主接线工作流安装（见 §3.4 宿主连接器）。
+- **批注列表面板（F09）——已移除**：用户批注子系统于 2026-10-05 整体移除
+  （`CAD_IMPLEMENTATION_SPEC.md` 顶部变更记录，提交 `0120d09`），F07/F08/F09 不再是
+  产品范围，该面板清单项随之作废。
+- **诊断抽屉（U08）——已接线**：`ui/app.slint` 用 `diagnostics-open` 门控 `CadPanels`
+  抽屉（`app.slint:160–166` 的属性、395–422 与 454–479 的宿主），展示对象级诊断行与
+  实际后端，`diagnostics-closed` 回推宿主；不再属于缺口。
+- **资源 / 3D 抽屉（F10/F13）——UI 通道已接线**：真实数据分区抽屉见 §3.4；
+  宿主数据推送（`set_resources_sections`/`set_view3d_state`）未到达时为**显式空态**，
+  不造假数据。旧 `pending(...)` 占位理由已失效（树中已无 `pending(...)` 占位）。
 - **选择高亮（F05 高亮部分）——已接线**：`cad_app::render_scene::overlay::selection_highlight`
   按 `drawing_pick_items` 展开 INSERT 并把选中几何离散为高亮 `RenderBatch`；同一块的
   两个放置因 `InstancePath` 不同而独立高亮，失效引用产出 `highlight.unresolved` 诊断。
   `CadView::set_selection_highlight(SelectionSet)` 只推进独立的 overlay 版本，
-  **不重建底图或批注**；高亮 `draw_order = 900_000`（底图 0 与批注 1_000_000 之间），
+  **不重建底图**；高亮 `draw_order = 900_000`（在底图 0 与保留的 1_000_000 覆盖层上界
+  之间；用户批注覆盖层已随子系统移除），
   颜色为 `cad_scene::DEFAULT_HIGHLIGHT_COLOR` 且 `color_unresolved = false`。
   宿主仍需调用该 setter（见 `docs/ui.md` §3）；工具预览同路径，见
   `overlay::preview_overlay`。**Web 宿主已接线**：`apps/app-web` 的
   `browser/state_push.rs::push_panel_state` 在每条命令/选择拾取/确认取消路径统一推送
-  `set_selection_highlight`/`set_measurement_preview`/`set_annotation_preview`，空选择
+  `set_selection_highlight`/`set_measurement_preview`，空选择
   与无工具分别推送空 `SelectionSet`/`None`（高亮与预览消失）；纯映射见
   `derive_overlay_push`。真实 GPU 像素与浏览器行为**未在本轮验证**（headless 验收待补）。
 - **精确拾取**：把画布点击变成 `SelectionRef` 需要宿主安装画布→世界映射并做命中
   测试（`cad-spatial::GridSpatialIndex`）；UI 侧只回传逻辑像素，宿主未接线时同样
   显式提示，不静默丢弃（与测量 `canvas-pick` 同一条路径）。
+
+### 3.4 资源 / 3D 抽屉与布局比例（UI 通道）
+
+2026-10-09/10 UI 抽屉轮新增，全部**真实数据驱动**，无数据即显式空态（沿用
+`diagnostics.empty` 的"未被宿主推送"语义），不显示假行。
+
+- **资源抽屉**（`ResourcesPanelState` / `ResourceSections`，`cad-ui-slint/src/state.rs`）：
+  分区为字体（目录条目/请求/计划/注册/失败/缺失名/回退面）、导入（文档/版本/
+  完整性/诊断数/解析耗时）、代理记录（已解码/未解码，类型+原因+字节）、外部引用、
+  图像。图像实体未建模时显示 `resources.images_unsupported`，不造空列表；
+  完整性分级（complete/partial/missing/unverified）按真实报告投影。
+- **3D 观察抽屉**（`View3dPanelState`）：模式（2D/3D）、投影、标准视图、环绕说明、
+  适应范围。2D/3D、投影、标准视图复用既有命令（`Switch2d3d`/`SwitchProjection`/
+  `StandardView`），未伪造新命令；环绕为画布拖动手势，抽屉如实说明
+  （`view.orbit.drag`，2D 下给出 `view.orbit.needs_3d` 原因）；三维缩放到范围未
+  实现，控件显式禁用（`view.fit3d_unavailable`）。
+- **布局比例**：`LayoutPanelState::set_viewport_scale(index, value)` 由宿主推送真实
+  比例后逐行显示；比例修改命令在 `cad-app` 命令面不存在，故修改控件为显示级
+  （`LAYOUT_SCALE_CONTROL_WIRED = false` + `layout.scale_control_unavailable`），
+  **不伪造命令**。
+- **状态入口**：`UiHandle::set_resources_sections`（原始分区入参，语言切换时由分区
+  重新派生行文案）/`set_resources_open`、`set_view3d_state`/`set_view3d_open`；
+  抽屉入口为外壳 `resources-requested` 回调 → `CommandId::Resources` →
+  `HostController::execute`。
+
+**宿主连接器（已接线，2026-10-09/10）**：三个宿主的状态漏斗均已把真实来源映射为
+`ResourceSections` 并调用 `set_resources_sections`（Android 另用真实的
+`last_font_report`；桌面字体加载器丢弃 `FontLoadReport`，故 `fonts: None` 显示显式
+空态而非臆造摘要；`Document::resource_keys` 为空实现时"无外部引用"一行与真实一致），
+并在 `UiAdapter::set_layout_switch_sink` 安装布局切换 sink（走 `CommandId::SwitchSpace`
+校验命令路径，未知布局显式拒绝）。`set_view3d_state` 由 `set_view_state` 统一派生，
+宿主无需单独调用；`set_viewport_scale` 无真实数据来源（布局描述子不含比例），
+**有意不推送**，面板显示显式"比例不可用"。未接线部分：Android Activity 侧 OS inset
+回调未转发到 `set_surface_insets`（见 `docs/input.md` §5）。
 
 ## 4. 测试与证据边界
 
@@ -184,8 +226,16 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
 - `cad-ui-slint` 的新测试位于该 crate 的 `#[cfg(test)]`：`LayerPanelState`/
   `PropertyPanelState` 的映射，以及外壳定义字符串断言（`layer-rows`、
   `layer-visibility-toggled`、`restore-layers-requested`、`property-rows`、
-  `clear-selection-requested`）。**这些只是字符串/结构断言，且本机缺 fontconfig
-  无法构建该 crate 的测试**，本轮未执行；`cargo check --workspace --lib --target
-  wasm32-unknown-unknown` 是 `cad-ui-slint` 的编译门，已通过。
+  `clear-selection-requested`）。**2026-10-08 起本机已具备 fontconfig/freetype 开发头，
+  该 crate 测试可执行**：2026-10-09/10 UI 抽屉轮实际运行
+  `cargo test -p cad-ui-slint --locked --lib` **131 passed / 0 failed**，并新增
+  `layout_panel_state_surfaces_scale_only_when_the_host_pushes_it`、
+  `resources_panel_state_is_empty_until_a_host_pushes_a_section`、
+  `resources_panel_state_projects_real_sources_and_names_the_image_limit`、
+  `view3d_panel_state_derives_mode_projection_standard_view_and_orbit`、
+  `shell_exposes_the_layout_scale_and_resource_and_3d_drawers`、
+  `new_drawer_keys_resolve_in_both_catalogs` 等契约；lavapipe 串行集成
+  （含外壳离屏渲染）通过。`cargo check --workspace --lib --target
+  wasm32-unknown-unknown` 是 `cad-ui-slint` 的 wasm 编译门，已通过。
 - Slint 渲染、窗口事件循环、真实指针→世界映射、GPU 合成与覆盖后的画面**本轮均未
   运行**；上述仅为源码接线与编译证据，不构成视觉/真机验收。
