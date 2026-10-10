@@ -16,6 +16,12 @@
 //!
 //! Whichever source has a non-empty paper size wins; the values are copied
 //! verbatim and their provenance is marked [`PlotProvenance::Imported`].
+//!
+//! Plot features this build reads but does not apply (a referenced CTB/STB plot
+//! style table, a non-default shade-plot request) are never silently ignored:
+//! they are modelled as [`UnsupportedPlotFeature`] and the caller turns each
+//! into an explicit `import.*` diagnostic on the import report, so a drawing
+//! carrying a plot style sheet reports `Unsupported` rather than success.
 
 use acadrust::objects::{ObjectType, PlotPaperUnits as AcadUnits, PlotRotation as AcadRotation};
 use acadrust::CadDocument;
@@ -31,6 +37,70 @@ pub(crate) struct ImportedPlotSettings {
     /// The layout handle; also carried inside `record` for the builder.
     pub(crate) layout: LayoutId,
     pub(crate) record: PlotSettingsRecord,
+    /// Plot features the winning source carries that this build reads but does
+    /// not apply. Empty when the source asks for nothing unsupported.
+    pub(crate) unsupported: Vec<UnsupportedPlotFeature>,
+}
+
+/// A plot feature read from the file that this build cannot honour.
+///
+/// Mirrors the crate's other explicit-unsupported modelling (for example
+/// `hatch::GradientTranslation::Unsupported`): a stable diagnostic code plus the
+/// offending value, carried out of the reader so the caller emits a real
+/// finding instead of reporting silent success.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UnsupportedPlotFeature {
+    /// Stable `import.*` diagnostic code.
+    pub(crate) code: &'static str,
+    /// Human-facing detail naming the layout and the ignored request.
+    pub(crate) detail: String,
+}
+
+/// Stable diagnostic code: the layout references a CTB/STB plot style table
+/// whose colours/lineweights/screening this build does not apply.
+pub(crate) const PLOT_STYLE_UNSUPPORTED_CODE: &str = "import.plot_style_unsupported";
+
+/// Stable diagnostic code: the layout requests a non-default shade plot whose
+/// shading this build does not produce (the plot path renders 2D linework).
+pub(crate) const SHADE_PLOT_UNSUPPORTED_CODE: &str = "import.shade_plot_unsupported";
+
+/// The plot-style fields of whichever source won a layout's priority.
+struct PlotSource {
+    /// CTB/STB plot style table reference (`""` = none/default).
+    plot_style_sheet: String,
+    /// Shade plot mode code (`0` = as displayed/default).
+    shade_plot_mode: i16,
+}
+
+/// Collect the explicit `Unsupported` findings a source's plot-style fields
+/// imply. A referenced plot style table or a non-default shade plot are both
+/// read but not applied, so neither may look like a silent success.
+fn unsupported_plot_features(
+    layout_name: &str,
+    source: &PlotSource,
+) -> Vec<UnsupportedPlotFeature> {
+    let mut out = Vec::new();
+    let style = source.plot_style_sheet.trim();
+    if !style.is_empty() {
+        out.push(UnsupportedPlotFeature {
+            code: PLOT_STYLE_UNSUPPORTED_CODE,
+            detail: format!(
+                "layout '{layout_name}' references plot style table '{style}'; \
+                 CTB/STB colours and lineweights are not applied"
+            ),
+        });
+    }
+    let shade = acadrust::objects::ShadePlotMode::from_code(source.shade_plot_mode);
+    if shade != acadrust::objects::ShadePlotMode::AsDisplayed {
+        out.push(UnsupportedPlotFeature {
+            code: SHADE_PLOT_UNSUPPORTED_CODE,
+            detail: format!(
+                "layout '{layout_name}' requests shade plot mode {shade:?}; \
+                 the plot path renders 2D linework only"
+            ),
+        });
+    }
+    out
 }
 
 /// Map the acadrust rotation code onto the database enum.
@@ -179,6 +249,7 @@ pub(crate) fn read_plot_settings(
     // Layout object handle → database LayoutId, and display name → LayoutId.
     let mut layout_id_by_object: HashMap<acadrust::Handle, LayoutId> = HashMap::new();
     let mut layout_id_by_display_name: HashMap<String, LayoutId> = HashMap::new();
+    let mut layout_name_by_id: HashMap<LayoutId, String> = HashMap::new();
     for (handle, object) in &acad.objects {
         if let ObjectType::Layout(layout) = object {
             let Some(name) = block_name_by_handle.get(&layout.block_record) else {
@@ -189,23 +260,25 @@ pub(crate) fn read_plot_settings(
             };
             layout_id_by_object.insert(*handle, *id);
             layout_id_by_display_name.insert(layout.name.clone(), *id);
+            layout_name_by_id.insert(*id, layout.name.clone());
         }
     }
 
     // One record per layout, preferring a standalone PLOTSETTINGS object over
     // embedded layout data. Deterministic by layout id.
-    let mut best: HashMap<LayoutId, (u8, PlotSettingsRecord)> = HashMap::new();
-    let mut consider = |layout: LayoutId, priority: u8, record: PlotSettingsRecord| {
-        if !has_paper(&record) {
-            return;
-        }
-        match best.get(&layout) {
-            Some((current, _)) if *current >= priority => {}
-            _ => {
-                best.insert(layout, (priority, record));
+    let mut best: HashMap<LayoutId, (u8, PlotSettingsRecord, PlotSource)> = HashMap::new();
+    let mut consider =
+        |layout: LayoutId, priority: u8, record: PlotSettingsRecord, source: PlotSource| {
+            if !has_paper(&record) {
+                return;
             }
-        }
-    };
+            match best.get(&layout) {
+                Some((current, _, _)) if *current >= priority => {}
+                _ => {
+                    best.insert(layout, (priority, record, source));
+                }
+            }
+        };
 
     for (handle, object) in &acad.objects {
         match object {
@@ -217,12 +290,25 @@ pub(crate) fn read_plot_settings(
                     .or_else(|| layout_id_by_display_name.get(&settings.page_name))
                     .copied();
                 if let Some(layout) = layout {
-                    consider(layout, 2, record_from_plot_settings(layout, settings));
+                    let source = PlotSource {
+                        plot_style_sheet: settings.current_style_sheet.clone(),
+                        shade_plot_mode: settings.shade_plot_mode.to_code(),
+                    };
+                    consider(
+                        layout,
+                        2,
+                        record_from_plot_settings(layout, settings),
+                        source,
+                    );
                 }
             }
             ObjectType::Layout(object) => {
                 if let Some(layout) = layout_id_by_object.get(handle).copied() {
-                    consider(layout, 1, record_from_layout(layout, object));
+                    let source = PlotSource {
+                        plot_style_sheet: object.plot_style_sheet.clone(),
+                        shade_plot_mode: object.shade_plot_mode,
+                    };
+                    consider(layout, 1, record_from_layout(layout, object), source);
                 }
             }
             _ => {}
@@ -234,8 +320,15 @@ pub(crate) fn read_plot_settings(
     Ok(ids
         .into_iter()
         .filter_map(|layout| {
-            best.remove(&layout)
-                .map(|(_, record)| ImportedPlotSettings { layout, record })
+            best.remove(&layout).map(|(_, record, source)| {
+                let layout_name = layout_name_by_id.get(&layout).cloned().unwrap_or_default();
+                let unsupported = unsupported_plot_features(&layout_name, &source);
+                ImportedPlotSettings {
+                    layout,
+                    record,
+                    unsupported,
+                }
+            })
         })
         .collect())
 }
@@ -277,6 +370,43 @@ mod tests {
         let record = record_from_layout(LayoutId(1), &layout);
         assert_eq!(record.paper_units, PlotPaperUnits::Millimeters);
         assert_eq!(record.rotation, PlotRotation::Degrees90);
+    }
+
+    #[test]
+    fn a_referenced_plot_style_sheet_is_an_explicit_unsupported() {
+        let source = PlotSource {
+            plot_style_sheet: "monochrome.ctb".into(),
+            shade_plot_mode: 0,
+        };
+        let features = unsupported_plot_features("Layout1", &source);
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0].code, PLOT_STYLE_UNSUPPORTED_CODE);
+        assert!(features[0].detail.contains("monochrome.ctb"));
+    }
+
+    #[test]
+    fn an_empty_or_whitespace_plot_style_sheet_is_not_unsupported() {
+        for style in ["", "   "] {
+            let source = PlotSource {
+                plot_style_sheet: style.into(),
+                shade_plot_mode: 0,
+            };
+            assert!(
+                unsupported_plot_features("Layout1", &source).is_empty(),
+                "style {style:?} is the default and must not be reported"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_default_shade_plot_is_an_explicit_unsupported() {
+        let source = PlotSource {
+            plot_style_sheet: String::new(),
+            shade_plot_mode: 3, // rendered
+        };
+        let features = unsupported_plot_features("Layout1", &source);
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0].code, SHADE_PLOT_UNSUPPORTED_CODE);
     }
 
     #[test]

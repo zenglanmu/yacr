@@ -1881,6 +1881,70 @@ fn plot_fixture_without_plot_data_resolves_to_an_explicit_default() {
     assert_eq!(fallback.paper_height, 297.0);
 }
 
+/// A writer-produced DWG whose default paper-space layout references the given
+/// plot style table. An empty `style_sheet` is the default (no table).
+fn synthetic_dwg_with_plot_style(style_sheet: &str) -> Vec<u8> {
+    let mut doc = acadrust::CadDocument::new();
+    let layout_handle = doc
+        .objects
+        .iter()
+        .find_map(|(handle, object)| match object {
+            acadrust::objects::ObjectType::Layout(l) if l.name == "Layout1" => Some(*handle),
+            _ => None,
+        })
+        .expect("Layout1 exists in a new document");
+    if let Some(acadrust::objects::ObjectType::Layout(layout)) = doc.objects.get_mut(&layout_handle)
+    {
+        layout.paper_size = "ISO_A4_(210.00_x_297.00_MM)".into();
+        layout.paper_width = 210.0;
+        layout.paper_height = 297.0;
+        layout.plot_paper_units = 1;
+        layout.plot_style_sheet = style_sheet.into();
+    }
+    acadrust::DwgWriter::write_to_vec(&doc).expect("write synthetic DWG")
+}
+
+#[test]
+fn a_referenced_plot_style_sheet_is_reported_unsupported() {
+    // Rule 2: a drawing carrying a plot style sheet must not look imported
+    // clean. The reader now surfaces the reference as an explicit finding.
+    let importer = AcadrustImporter::new();
+    let drawing = importer
+        .import(
+            &request(synthetic_dwg_with_plot_style("monochrome.ctb")),
+            &|| false,
+        )
+        .expect("synthetic drawing imports");
+    let finding = drawing
+        .report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "import.plot_style_unsupported")
+        .expect("plot style sheet must yield an explicit Unsupported finding");
+    assert!(finding.message.contains("monochrome.ctb"));
+    // The finding is a real import item, so completeness is not `Complete`.
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+#[test]
+fn a_layout_without_a_plot_style_sheet_is_not_reported_unsupported() {
+    let importer = AcadrustImporter::new();
+    let drawing = importer
+        .import(&request(synthetic_dwg_with_plot_style("")), &|| false)
+        .expect("synthetic drawing imports");
+    assert!(
+        !drawing
+            .report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "import.plot_style_unsupported"),
+        "an empty/default style sheet must not be reported unsupported"
+    );
+}
+
 // ---- Dynamic-block visibility mapping (spec §3.2) ----
 
 use acadrust::objects::{BlockVisibilityParameter, BlockVisibilityState};

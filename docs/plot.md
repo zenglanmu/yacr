@@ -92,6 +92,12 @@ cad-cli-tools::run_plot ──────────────────�
 `has_paper()` 要求宽高均为正；零尺寸记录视为“无数据”不落库——否则会伪装成已导入但不可用
 的配置。落库记录 `provenance = Imported`。
 
+除纸张字段外，导入还会检查源里的 **plot-style 引用**：赢得优先级的来源若带非空
+`current_style_sheet`/`plot_style_sheet`，或非缺省 shade plot 模式，`cad-import-acadrust`
+在导入报告里各产出一条显式诊断（`import.plot_style_unsupported` /
+`import.shade_plot_unsupported`）。这两个字段被读取但值本身无法在本系统内表达/应用，
+所以既不落库也不静默忽略（§8）。
+
 ## 4. 精确 vs 缺省/Partial
 
 - **Imported（精确）**：记录来自上述两处来源之一，字段原样保存，`provenance =
@@ -107,7 +113,8 @@ cad-cli-tools::run_plot ──────────────────�
 - **Partial（显式不完整）**：视口若非受支持状态（透视、扭转、倾斜、非矩形裁剪、缺失比例
   等），`build_paper_space` 按既有契约产出 `Partial` 诊断、不猜变换；该视口内容缺席，
   但图纸本身与其受支持内容仍会出图，`completeness` 如实反映。此逻辑与
-  `docs/layouts.md` 一致，`plot` 不改写它。
+  `docs/layouts.md` 一致，`plot` 不改写它。导入阶段读到但未应用的 plot-style 引用/
+  非缺省 shade plot 也计入 `Partial`（`import.*` 诊断），见 §3、§8。
 
 ## 5. 回读纪律
 
@@ -178,6 +185,9 @@ cad-cli-tools plot <input.dwg> [--layout <name>] [--dpi <f64>|--width <u32> --he
 - `cad-db`：plot 表可缺省 + 缺省页、记录往返（旋转/页边距）、未知布局写入被拒。
 - `cad-import-acadrust`：`fixtures/plot/a4-layout.dwg`（**合成**，acadrust `DwgWriter`
   产出）导入后取到独立 PLOTSETTINGS 的 A3/90°/12mm 值；无记录布局解析为显式缺省 A4。
+  另有纯逻辑与端到端契约：非空 plot style 表引用产出 `import.plot_style_unsupported`、
+  空/缺省引用不产出（`a_referenced_plot_style_sheet_is_reported_unsupported`、
+  `a_layout_without_a_plot_style_sheet_is_not_reported_unsupported`）。
 - `cad-representation`：规划器纯单测（§2）。
 - `cad-cli-tools`：`plot` 名称解析；缺文件在任何 GPU 工作前 `invalid_input`；未知布局
   `invalid_input`；在 lavapipe 上对合成 fixture 出图，断言 PNG 非空且 IHDR 尺寸与请求一致、
@@ -194,13 +204,19 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 
 ## 8. 明确未实现（gap）
 
-- **打印样式表（CTB/STB）未实现**：`current_style_sheet` 未导入、未应用；颜色/线宽按既有
-  实体样式渲染，不按打印样式映射。
+- **打印样式表（CTB/STB）不应用（引用已读、显式 Unsupported）**：
+  `PlotSettings.current_style_sheet` 与 `Layout.plot_style_sheet` 现**被读取**，但名称本身
+  无法表达颜色/线宽/淡显映射（acadrust 只暴露引用名，不暴露解析后的表值），因此不导入、
+  不应用；颜色/线宽仍按既有实体样式渲染。**带非空样式表引用的布局会产出显式
+  `import.plot_style_unsupported` 诊断**（`cad-import-acadrust::plot`），导入报告据此
+  把完整性降为 `Partial`，不再静默成功。
 - **打印机/绘图仪配置未实现**：`printer_name` 未使用；输出尺寸由用户 DPI/像素决定，不查询
   系统打印机能力。
 - **`Pixels` 纸张单位**：无物理尺寸，规划器显式 `Unsupported`，需用户给 DPI。
 - **渲染色 / 隐藏线 / 着色模式**：`shade_plot_mode`、`shade_plot_dpi`、
   `shade_plot_resolution`、`plot_hidden` 等未应用；`plot` 走统一的 2D 线/网格渲染。
+  非缺省 shade plot 模式（`ShadePlotMode != AsDisplayed`）现产出显式
+  `import.shade_plot_unsupported` 诊断，同样不静默。
 - **打印偏差/居中标志**：`plot_centered`、`origin_x/y`、`paper_image_origin_*` 未应用；
   当前画布总是居中纸张可打印区。
 - **黄金图未入库**：合成 fixture 只固定链路，不构成兼容性或视觉黄金证据。
@@ -210,7 +226,8 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
   而不丢图，不伪造文字。
 - **PDF 无字体/图像嵌入**：仅路径；不嵌入字体、不写图像 XObject。
 
-以上未实现项均**不伪造成功**：相关字段不读取即不声称支持；缺省页与合成场景都有显式
+以上未实现项均**不伪造成功**：相关字段未读取即不声称支持，读取后不能应用的（plot-style
+引用、非缺省 shade plot）以显式 `import.*` 诊断报告；缺省页与合成场景都有显式
 provenance 标记。
 
 ## 9. 矢量导出（SVG/PDF，CPU-only）

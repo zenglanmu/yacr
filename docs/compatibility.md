@@ -32,7 +32,7 @@
 | 实体颜色/线宽 | 实现(ByObject/ByLayer/ByBlock，ACI/RGB) | 实现(颜色)；线宽仅携带 | 颜色进入 shader；线宽**显式不绘制** | — | — |
 | LINETYPE 虚线 | 实现(名称/表/线型比例) | 实现(ByObject/ByLayer/ByBlock) | 按弧长细分 dash/gap；复杂线型仅 dash、显式 Partial | — | — |
 | 渐变 HATCH | 实现(gradient_color) | 部分(LINEAR/SPHERICAL/CYLINDER 精确；其余显式 Partial) | 逐顶点颜色烘焙，裁剪于边界 | 经边界 | 不支持 |
-| 出图(打印) | 实现(PLOTSETTINGS/内嵌 Layout) | 实现(纸张/边距/比例/旋转) | 光栅 PNG(host readback)；无矢量/CTB | — | — |
+| 出图(打印) | 实现(PLOTSETTINGS/内嵌 Layout；plot-style 引用读取并显式 Unsupported) | 实现(纸张/边距/比例/旋转) | 光栅 PNG(host readback)；无矢量/CTB | — | — |
 | 异步导入 | 实现(进度阶段/取消) | 实现(唯一任务、过期丢弃) | — | — | — |
 | 天正/探索者代理 | 实现(仅公开缓存记录) | 仅 FillOff/UnicodeText 有证据 | 依解码结果 | 实现 | 标记缓存几何 |
 | 布局 / 视口 | 实现(矩形裁剪/比例) | 复杂裁剪标记部分 | 未装配纸空间渲染 | 部分 | 纸空间测量显式禁用 |
@@ -47,7 +47,7 @@
 |---|---|---|
 | STYLE xdata 字体面 | **支持（已类型化）**：`TextStyle.true_type_font` / `true_type_font_flags`；DXF 读 `1001 ACAD`/`1000`，DWG 经 `io/dwg/typeface_eed.rs` 按 APPID 名解析 | 已接入字体解析，链为 `类型化 true_type_font > group 3/4 声明字体 > 字节扫描`（`read_styles` 对 DXF/DWG 统一，DWG 经此通道自动生效）；字节扫描自身仍不覆盖 group 3/4 |
 | LAYOUT `group 72`/`group 73` | **支持**：`read_layout`/`read_plot_settings` 映射到 `Layout.plot_paper_units`/`plot_rotation`（0.5.5 亦然，旧文档「未暴露」有误） | `record_from_layout` 直接读取这两个字段；标准纸名带单位记号时仍优先用纸名（不伪造），仅当文件未声明旋转时才按视口范围推断 |
-| plot-style 解析值 | **不支持**：`PlotSettings` 只有 `current_style_sheet` 与标志，无颜色/线宽/alpha | 显式 Unsupported：plot-style 颜色/线宽/alpha 不应用（`docs/render-order.md`） |
+| plot-style 解析值 | **不支持**：`PlotSettings` 只有 `current_style_sheet` 与标志，无颜色/线宽/alpha；引用名已类型化 | 显式 Unsupported：`cad-import-acadrust::plot` 读取 `current_style_sheet`/`Layout.plot_style_sheet` 与非缺省 shade plot，各产出 `import.plot_style_unsupported`/`import.shade_plot_unsupported` 诊断；颜色/线宽/alpha 仍不应用（`docs/render-order.md`、`docs/plot.md`） |
 | 代理记录 opcode | **不支持**：`proxy_graphics.rs` 与 0.5.5 字节一致，仅 FillOff(21, 空 payload)/UnicodeText(36)/Unknown | 显式 Unsupported：仅证据支持的记录被解码，其余保留原字节（`docs/proxy-support.md`） |
 | DWG xdata（实体/对象） | **部分**：实体 EED 仅在 APPID 句柄经 `document.app_ids` 解析时解码，否则保留 `raw_dwg_eed`；新增 `document.object_xdata`（对象 EED 解码，但为 crate-private，未向消费者暴露） | 显式 Partial：未解码 EED 保留原字节，不猜测 |
 | DXF 已知实体上的未知码 | **不支持（DXF）**：未知码不保留 | 显式 Unsupported；DWG 侧新增 `EntityCommon.raw_record`（仅 DWG、可变访问即失效）与 `layer_handle`，本项目暂未使用 |
@@ -58,7 +58,9 @@
 `apps/app-linux` 共用桌面与官方 Slint/wgpu 离屏宿主，Linux release App 成为第一验收标准。
 软件 Vulkan 合成 smoke、窗口系统、真实 GPU、真实 DWG 结论独立，当前窗口/真实 GPU 未验收。
 文件打开/侧车通过显式路径参数；无文件选择器/恢复决策/后台导入/Trim 取点时显式 Unsupported，
-不会默默 discard 未保存批注。实现及本轮运行证据见 `docs/linux-app.md`，不更改实体兼容结论。
+不会默默 discard 未保存修改。用户批注子系统已于 2026-10-05 整体移除（见
+`CAD_IMPLEMENTATION_SPEC.md` 顶部变更记录），本表不再包含批注能力。实现及本轮运行证据见
+`docs/linux-app.md`，不更改实体兼容结论。
 
 ## 三维
 
@@ -71,7 +73,9 @@
   软件 Vulkan（lavapipe）无头测试。真实 GPU 行为未验收。
 - 底图透明度：importer 读取 acadrust `Transparency`（`ByLayer`/`ByObject`/`ByBlock`）
   → `DisplayFragment.alpha` → `RenderBatch.alpha`，由渲染器分类为不透明/透明/不可见
-  （`docs/render-order.md`）；plot-style 表 alpha 未应用（acadrust 未暴露解析值）。
+  （`docs/render-order.md`）；plot-style 表 alpha 未应用（acadrust 只暴露样式表引用名，
+  不暴露解析后的颜色/线宽/alpha 值；引用名本身由 `cad-import-acadrust` 读取并显式报告
+  为 Unsupported）。
 - ACIS 曲面离散：`cad-kernel-adapter` 为契约（`SolidTessellator`），**未实现**，
   返回 `Unsupported`/`NotImplemented`（无内核、无 SAT/SAB 解析器、无授权样本）。
 
@@ -80,7 +84,7 @@
 - Android：aarch64 可编译并打包 APK；x86_64 release APK 已在无头模拟器（KVM +
   SwiftShader）**实际安装、启动、渲染并验证画布平移/缩放**（
   `docs/validation-android.md`）。真机仍 **未运行**；SAF、surface 尺寸/安全区、
-  量测/批注拾取、面板状态推送未接线。
+  量测拾取、面板状态推送未接线。
 - Web：wasm 静态产物可构建，`web-dist/` 在无头 Chromium（Chrome for Testing 153，
   SwiftShader）以 **WebGL2 实际运行**，加载、导航与语言切换通过
   （`docs/validation-web.md`）。WebGPU 路径、真实 GPU、移动/桌面浏览器矩阵 **未运行**。

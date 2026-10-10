@@ -378,9 +378,21 @@ impl<'a> ImporterBuilder<'a> {
     /// A layout with no plot data simply gets no record; the database then
     /// presents an explicit documented default page at query time. This never
     /// fabricates a vendor configuration.
+    ///
+    /// Plot-style fields the file carries but this build does not apply (a
+    /// CTB/STB style sheet, a non-default shade plot) become explicit
+    /// `import.*` diagnostics, so the report shows `Unsupported` instead of a
+    /// silent success (`docs/plot.md` §8, `docs/compatibility.md`).
     pub(crate) fn read_plot_settings(&mut self) -> CadResult<()> {
         for mut imported in read_plot_settings(self.acad, &self.layout_ids)? {
             debug_assert_eq!(imported.layout, imported.record.layout);
+            for feature in &imported.unsupported {
+                self.diagnostics.push(Diagnostic {
+                    object: None,
+                    code: feature.code.into(),
+                    message: feature.detail.clone(),
+                });
+            }
             // acadrust does expose a LAYOUT's `group 72`/`group 73` plot fields
             // (both 0.5.5 and 0.6.3 apply them). This fallback only runs when
             // the file declares no rotation (`group 73` = 0/absent): when the
