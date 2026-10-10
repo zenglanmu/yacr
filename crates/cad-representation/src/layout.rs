@@ -47,17 +47,20 @@
 //! paper = (model - view_center) * paper_per_model + paper_center
 //! ```
 //!
-//! and its four paper corners are clipped exactly with Liang–Barsky. A view
-//! transform that is twisted (rotation), sheared, mirrored, non-uniform, off
-//! the paper plane or singular is unsupported here and reported, never applied
-//! as an approximation.
+//! and its four paper corners are clipped exactly with Liang–Barsky. Line
+//! geometry clips per segment, mesh geometry clips per triangle
+//! (Sutherland–Hodgman, with colour/normal interpolation) and an image quad
+//! clips with its texture coordinates interpolated — see
+//! [`clip_mesh_to_rect`] and [`clip_image_quad_to_rect`]. A view transform that
+//! is twisted (rotation), sheared, mirrored, non-uniform, off the paper plane or
+//! singular is unsupported here and reported, never applied as an approximation.
 //!
 //! Paper-space measurement is wired in `cad-measure` through
 //! [`ViewportTransform::paper_to_model`]; this module only provides the single
 //! verified source for that inverse.
 
 use crate::{
-    DisplayFragment, DisplayPrimitive, DisplayRepresentation, ProviderRegistry,
+    DisplayFragment, DisplayPrimitive, DisplayRepresentation, ImageVertex, ProviderRegistry,
     RepresentationContext,
 };
 use cad_db::{DbEntity, DrawingDatabase, PaperViewport};
@@ -94,6 +97,43 @@ pub mod viewport_reason {
     pub const PERSPECTIVE: &str = "viewport.perspective";
     /// A legacy three-point clip also carried a non-zero transform translation.
     pub const TRANSLATION_MISMATCH: &str = "viewport.translation_mismatch";
+}
+
+/// Stable reason codes attached to a per-primitive viewport-clip degradation.
+///
+/// A code means the primitive could **not** be clipped exactly and the original
+/// (unclipped) geometry was kept and reported — never silently dropped, and
+/// never claimed as clipped.
+pub mod clip_reason {
+    /// Mesh geometry could not be clipped exactly (missing index or non-finite).
+    pub const MESH_UNCLIPPABLE: &str = "viewport.clip_mesh_unclippable";
+    /// Unshaped text has no glyph outline until a font shapes it.
+    pub const TEXT_FONT_DEPENDENT: &str = "viewport.clip_text_font_dependent";
+    /// The image quad maps to a non-finite position and cannot be clipped.
+    pub const IMAGE_DEGENERATE: &str = "viewport.clip_image_degenerate";
+    /// A primitive with no clip representation reached the viewport (instance).
+    pub const UNSUPPORTED_PRIMITIVE: &str = "viewport.clip_unsupported_primitive";
+}
+
+/// A precise, stable reason a primitive could not be clipped exactly.
+///
+/// The caller keeps the unclipped primitive and reports `Partial`; it must not
+/// drop it silently and must not claim it was clipped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClipRefusal {
+    /// Stable machine code, one of [`clip_reason`].
+    pub reason: &'static str,
+    /// Human-readable explanation. Never empty.
+    pub message: String,
+}
+
+impl ClipRefusal {
+    pub fn new(reason: &'static str, message: impl Into<String>) -> Self {
+        ClipRefusal {
+            reason,
+            message: message.into(),
+        }
+    }
 }
 
 /// A user-facing choice of drawing space: model space or one paper-space layout.
@@ -707,6 +747,557 @@ fn clip_segment(a: Point3, b: Point3, min: [f64; 2], max: [f64; 2]) -> Option<(P
     Some((lerp(t0), lerp(t1)))
 }
 
+/// Sutherland–Hodgman clip of a convex polygon against an axis-aligned paper
+/// rectangle `[center - half, center + half]`.
+///
+/// Returns the surviving convex polygon (empty when the input lies fully
+/// outside). Consecutive duplicate vertices are removed so the result can be
+/// fan-triangulated safely. The viewport windows this build accepts are exactly
+/// axis-aligned rectangles (a non-rectangular clip is refused upstream in
+/// [`viewport_transform`]), which is the convex window this routine handles.
+pub fn clip_polygon_to_rect(
+    polygon: &[[f64; 2]],
+    center: [f64; 2],
+    half: [f64; 2],
+) -> Vec<[f64; 2]> {
+    if polygon.is_empty() {
+        return Vec::new();
+    }
+    let min = [center[0] - half[0], center[1] - half[1]];
+    let max = [center[0] + half[0], center[1] + half[1]];
+    let mut out = polygon.to_vec();
+    out = clip_points_half_plane(out, 0, min[0], true);
+    out = clip_points_half_plane(out, 0, max[0], false);
+    out = clip_points_half_plane(out, 1, min[1], true);
+    out = clip_points_half_plane(out, 1, max[1], false);
+    dedupe_points(&mut out);
+    out
+}
+
+fn clip_points_half_plane(
+    input: Vec<[f64; 2]>,
+    axis: usize,
+    bound: f64,
+    keep_above: bool,
+) -> Vec<[f64; 2]> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+    let inside = |p: [f64; 2]| {
+        if keep_above {
+            p[axis] >= bound
+        } else {
+            p[axis] <= bound
+        }
+    };
+    let n = input.len();
+    let mut out = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let current = input[i];
+        let previous = input[(i + n - 1) % n];
+        let current_in = inside(current);
+        let previous_in = inside(previous);
+        if current_in {
+            if !previous_in {
+                out.push(intersect_axis(previous, current, axis, bound));
+            }
+            out.push(current);
+        } else if previous_in {
+            out.push(intersect_axis(previous, current, axis, bound));
+        }
+    }
+    out
+}
+
+fn intersect_axis(a: [f64; 2], b: [f64; 2], axis: usize, bound: f64) -> [f64; 2] {
+    let denom = b[axis] - a[axis];
+    let t = if denom.abs() > 1e-300 {
+        (bound - a[axis]) / denom
+    } else {
+        0.0
+    };
+    let other = 1 - axis;
+    let mut out = a;
+    out[axis] = bound;
+    out[other] = a[other] + (b[other] - a[other]) * t;
+    out
+}
+
+fn dedupe_points(points: &mut Vec<[f64; 2]>) {
+    points.dedup();
+    if points.len() >= 2 && points.first() == points.last() {
+        points.pop();
+    }
+}
+
+/// One triangle vertex carrying every attribute the mesh can interpolate.
+#[derive(Clone, Copy)]
+struct ClipVertex {
+    pos: [f64; 2],
+    z: f64,
+    normal: Option<Point3>,
+    color: Option<[u8; 3]>,
+}
+
+impl ClipVertex {
+    /// Whether two vertices are identical in every clipped attribute, so a
+    /// duplicate produced by clipping can be removed without losing data.
+    fn same(&self, other: &ClipVertex) -> bool {
+        self.pos == other.pos
+            && self.z == other.z
+            && self.normal == other.normal
+            && self.color == other.color
+    }
+
+    fn lerp(&self, other: &ClipVertex, t: f64) -> ClipVertex {
+        ClipVertex {
+            pos: [
+                self.pos[0] + (other.pos[0] - self.pos[0]) * t,
+                self.pos[1] + (other.pos[1] - self.pos[1]) * t,
+            ],
+            z: self.z + (other.z - self.z) * t,
+            normal: match (self.normal, other.normal) {
+                (Some(a), Some(b)) => Some(Point3 {
+                    x: a.x + (b.x - a.x) * t,
+                    y: a.y + (b.y - a.y) * t,
+                    z: a.z + (b.z - a.z) * t,
+                }),
+                _ => None,
+            },
+            color: match (self.color, other.color) {
+                (Some(a), Some(b)) => Some([
+                    lerp_channel(a[0], b[0], t),
+                    lerp_channel(a[1], b[1], t),
+                    lerp_channel(a[2], b[2], t),
+                ]),
+                _ => None,
+            },
+        }
+    }
+}
+
+fn lerp_channel(a: u8, b: u8, t: f64) -> u8 {
+    let value = a as f64 + (b as f64 - a as f64) * t;
+    value.round().clamp(0.0, 255.0) as u8
+}
+
+fn clip_clip_vertices(
+    input: Vec<ClipVertex>,
+    axis: usize,
+    bound: f64,
+    keep_above: bool,
+) -> Vec<ClipVertex> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+    let inside = |p: [f64; 2]| {
+        if keep_above {
+            p[axis] >= bound
+        } else {
+            p[axis] <= bound
+        }
+    };
+    let n = input.len();
+    let mut out = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let current = input[i];
+        let previous = input[(i + n - 1) % n];
+        let current_in = inside(current.pos);
+        let previous_in = inside(previous.pos);
+        if current_in {
+            if !previous_in {
+                out.push(intersect_clip_vertices(previous, current, axis, bound));
+            }
+            out.push(current);
+        } else if previous_in {
+            out.push(intersect_clip_vertices(previous, current, axis, bound));
+        }
+    }
+    out
+}
+
+fn intersect_clip_vertices(a: ClipVertex, b: ClipVertex, axis: usize, bound: f64) -> ClipVertex {
+    let denom = b.pos[axis] - a.pos[axis];
+    let t = if denom.abs() > 1e-300 {
+        (bound - a.pos[axis]) / denom
+    } else {
+        0.0
+    };
+    let mut out = a.lerp(&b, t);
+    // Snap exactly onto the clip plane so the boundary is exact, not rounded.
+    out.pos[axis] = bound;
+    out
+}
+
+fn push_clip_vertices(
+    vertices: &mut Vec<Point3>,
+    normals: &mut Vec<Point3>,
+    colors: &mut Vec<[u8; 3]>,
+    source: &[ClipVertex],
+    has_normals: bool,
+    has_colors: bool,
+) -> Result<u32, ClipRefusal> {
+    let base = u32::try_from(vertices.len()).map_err(|_| {
+        ClipRefusal::new(
+            clip_reason::MESH_UNCLIPPABLE,
+            "clipped mesh exceeds 32-bit vertex addressing",
+        )
+    })?;
+    if vertices.len().saturating_add(source.len()) > u32::MAX as usize {
+        return Err(ClipRefusal::new(
+            clip_reason::MESH_UNCLIPPABLE,
+            "clipped mesh exceeds 32-bit vertex addressing",
+        ));
+    }
+    for vertex in source {
+        vertices.push(Point3 {
+            x: vertex.pos[0],
+            y: vertex.pos[1],
+            z: vertex.z,
+        });
+        if has_normals {
+            normals.push(crate::transform::normalize(
+                vertex.normal.unwrap_or_default(),
+            ));
+        }
+        if has_colors {
+            colors.push(vertex.color.unwrap_or([0, 0, 0]));
+        }
+    }
+    Ok(base)
+}
+
+/// Clip every triangle of `mesh` against the paper rectangle `[center ± half]`.
+///
+/// Each triangle is clipped independently with Sutherland–Hodgman, then
+/// fan-triangulated; per-vertex z, normal and sRGB colour are interpolated at
+/// the new edge vertices, so a partially visible gradient facet keeps its
+/// correct colour ramp. A triangle wholly inside is reused verbatim; a triangle
+/// wholly outside disappears.
+///
+/// `Ok(None)` means the whole mesh lies outside the window (an exact omission).
+/// `Err` means the mesh cannot be clipped exactly (a missing index, a non-finite
+/// coordinate, or a 32-bit vertex overflow); the caller must keep the original
+/// geometry and report the refusal instead of dropping or faking it.
+pub fn clip_mesh_to_rect(
+    mesh: &Mesh,
+    center: [f64; 2],
+    half: [f64; 2],
+) -> Result<Option<Mesh>, ClipRefusal> {
+    let min = [center[0] - half[0], center[1] - half[1]];
+    let max = [center[0] + half[0], center[1] + half[1]];
+    let has_normals = mesh.normals.len() == mesh.vertices.len();
+    let has_colors = mesh.colors.len() == mesh.vertices.len();
+    let has_sources = mesh.face_sources.len() == mesh.triangles.len();
+
+    for vertex in &mesh.vertices {
+        if !finite_point(vertex) {
+            return Err(ClipRefusal::new(
+                clip_reason::MESH_UNCLIPPABLE,
+                "mesh has a non-finite vertex; it cannot be clipped exactly",
+            ));
+        }
+    }
+
+    let mut vertices: Vec<Point3> = Vec::new();
+    let mut normals: Vec<Point3> = Vec::new();
+    let mut colors: Vec<[u8; 3]> = Vec::new();
+    let mut triangles: Vec<[u32; 3]> = Vec::new();
+    let mut face_sources: Vec<Option<SubElementId>> = Vec::new();
+
+    for (triangle_index, triangle) in mesh.triangles.iter().enumerate() {
+        let indices = [
+            triangle[0] as usize,
+            triangle[1] as usize,
+            triangle[2] as usize,
+        ];
+        if indices.iter().any(|index| *index >= mesh.vertices.len()) {
+            return Err(ClipRefusal::new(
+                clip_reason::MESH_UNCLIPPABLE,
+                format!("mesh triangle {triangle_index} references a missing vertex"),
+            ));
+        }
+        let source = if has_sources {
+            mesh.face_sources[triangle_index].clone()
+        } else {
+            None
+        };
+        let originals = [0usize, 1, 2].map(|k| {
+            let vi = indices[k];
+            ClipVertex {
+                pos: [mesh.vertices[vi].x, mesh.vertices[vi].y],
+                z: mesh.vertices[vi].z,
+                normal: has_normals.then(|| mesh.normals[vi]),
+                color: has_colors.then(|| mesh.colors[vi]),
+            }
+        });
+
+        // A triangle wholly inside is reused without splitting or re-welding.
+        if originals.iter().all(|v| {
+            v.pos[0] >= min[0] && v.pos[0] <= max[0] && v.pos[1] >= min[1] && v.pos[1] <= max[1]
+        }) {
+            let base = push_clip_vertices(
+                &mut vertices,
+                &mut normals,
+                &mut colors,
+                &originals,
+                has_normals,
+                has_colors,
+            )?;
+            triangles.push([base, base + 1, base + 2]);
+            face_sources.push(source.clone());
+            continue;
+        }
+
+        let mut polygon = originals.to_vec();
+        polygon = clip_clip_vertices(polygon, 0, min[0], true);
+        polygon = clip_clip_vertices(polygon, 0, max[0], false);
+        polygon = clip_clip_vertices(polygon, 1, min[1], true);
+        polygon = clip_clip_vertices(polygon, 1, max[1], false);
+        polygon.dedup_by(|a, b| a.same(b));
+        if polygon.len() >= 2 {
+            let (first, last) = (polygon[0], polygon[polygon.len() - 1]);
+            if first.same(&last) {
+                polygon.pop();
+            }
+        }
+        if polygon.len() < 3 {
+            // A fully clipped (or degenerate) triangle contributes no area.
+            continue;
+        }
+        let base = push_clip_vertices(
+            &mut vertices,
+            &mut normals,
+            &mut colors,
+            &polygon,
+            has_normals,
+            has_colors,
+        )?;
+        for k in 1..polygon.len() - 1 {
+            triangles.push([base, base + k as u32, base + k as u32 + 1]);
+            face_sources.push(source.clone());
+        }
+    }
+
+    if triangles.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Mesh {
+        vertices,
+        triangles,
+        normals: if has_normals { normals } else { Vec::new() },
+        face_sources,
+        colors: if has_colors { colors } else { Vec::new() },
+    }))
+}
+
+/// Clip an image's unit-square quad, mapped through `transform`, to the paper
+/// rectangle and interpolate the texture coordinates at the new vertices.
+///
+/// `Ok(vertices)` is the surviving convex polygon (empty when the image lies
+/// fully outside the window, an exact omission). `Err` means the transform maps
+/// the quad to a non-finite position, so it cannot be clipped.
+pub fn clip_image_quad_to_rect(
+    transform: &Transform3,
+    center: [f64; 2],
+    half: [f64; 2],
+) -> Result<Vec<ImageVertex>, ClipRefusal> {
+    let corners = [
+        (Point3::default(), [0.0, 0.0]),
+        (
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            [1.0, 0.0],
+        ),
+        (
+            Point3 {
+                x: 1.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            [1.0, 1.0],
+        ),
+        (
+            Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            [0.0, 1.0],
+        ),
+    ];
+    let mut polygon: Vec<ImageVertex> = Vec::with_capacity(8);
+    for (corner, uv) in corners {
+        let position = transform.apply_point(corner);
+        if !finite_point(&position) {
+            return Err(ClipRefusal::new(
+                clip_reason::IMAGE_DEGENERATE,
+                "image transform maps the quad to a non-finite position; it cannot be clipped",
+            ));
+        }
+        polygon.push(ImageVertex { position, uv });
+    }
+    let min = [center[0] - half[0], center[1] - half[1]];
+    let max = [center[0] + half[0], center[1] + half[1]];
+    polygon = clip_image_vertices(polygon, 0, min[0], true);
+    polygon = clip_image_vertices(polygon, 0, max[0], false);
+    polygon = clip_image_vertices(polygon, 1, min[1], true);
+    polygon = clip_image_vertices(polygon, 1, max[1], false);
+    polygon.dedup_by(|a, b| a.position == b.position && a.uv == b.uv);
+    if polygon.len() >= 2 {
+        let (first, last) = (polygon[0], polygon[polygon.len() - 1]);
+        if first.position == last.position && first.uv == last.uv {
+            polygon.pop();
+        }
+    }
+    Ok(polygon)
+}
+
+fn clip_image_vertices(
+    input: Vec<ImageVertex>,
+    axis: usize,
+    bound: f64,
+    keep_above: bool,
+) -> Vec<ImageVertex> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+    let inside = |p: [f64; 2]| {
+        if keep_above {
+            p[axis] >= bound
+        } else {
+            p[axis] <= bound
+        }
+    };
+    let n = input.len();
+    let mut out = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let current = input[i];
+        let previous = input[(i + n - 1) % n];
+        let current_in = inside([current.position.x, current.position.y]);
+        let previous_in = inside([previous.position.x, previous.position.y]);
+        if current_in {
+            if !previous_in {
+                out.push(intersect_image_vertices(previous, current, axis, bound));
+            }
+            out.push(current);
+        } else if previous_in {
+            out.push(intersect_image_vertices(previous, current, axis, bound));
+        }
+    }
+    out
+}
+
+fn intersect_image_vertices(
+    a: ImageVertex,
+    b: ImageVertex,
+    axis: usize,
+    bound: f64,
+) -> ImageVertex {
+    let a_coord = [a.position.x, a.position.y][axis];
+    let b_coord = [b.position.x, b.position.y][axis];
+    let denom = b_coord - a_coord;
+    let t = if denom.abs() > 1e-300 {
+        (bound - a_coord) / denom
+    } else {
+        0.0
+    };
+    let mut position = a.position;
+    if axis == 0 {
+        position.x = bound;
+    } else {
+        position.y = bound;
+    }
+    let other = 1 - axis;
+    let a_other = [a.position.x, a.position.y][other];
+    let b_other = [b.position.x, b.position.y][other];
+    let other_value = a_other + (b_other - a_other) * t;
+    if other == 0 {
+        position.x = other_value;
+    } else {
+        position.y = other_value;
+    }
+    position.z = a.position.z + (b.position.z - a.position.z) * t;
+    ImageVertex {
+        position,
+        uv: [
+            a.uv[0] + (b.uv[0] - a.uv[0]) * t,
+            a.uv[1] + (b.uv[1] - a.uv[1]) * t,
+        ],
+    }
+}
+
+/// Whether every corner of an image's unit-square quad is inside the window, so
+/// the image needs no clip polygon at all.
+fn image_quad_inside(transform: &Transform3, center: [f64; 2], half: [f64; 2]) -> bool {
+    let min = [center[0] - half[0], center[1] - half[1]];
+    let max = [center[0] + half[0], center[1] + half[1]];
+    [
+        Point3::default(),
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+    ]
+    .iter()
+    .all(|corner| {
+        let p = transform.apply_point(*corner);
+        p.x >= min[0] && p.x <= max[0] && p.y >= min[1] && p.y <= max[1]
+    })
+}
+
+/// Rebuild a fragment with a new primitive, preserving all source/style fields.
+fn fragment_with(fragment: DisplayFragment, primitive: DisplayPrimitive) -> DisplayFragment {
+    DisplayFragment {
+        source: fragment.source,
+        geometry_source: fragment.geometry_source,
+        precision: fragment.precision,
+        alpha: fragment.alpha,
+        color: fragment.color,
+        color_unresolved: fragment.color_unresolved,
+        lineweight: fragment.lineweight,
+        lineweight_unresolved: fragment.lineweight_unresolved,
+        linetype: fragment.linetype,
+        linetype_unresolved: fragment.linetype_unresolved,
+        linetype_scale: fragment.linetype_scale,
+        primitive,
+    }
+}
+
+/// Record a clip degradation on the paper build: weaken completeness and attach
+/// a diagnostic naming the stable reason.
+fn report_clip_degradation(
+    out: &mut DisplayRepresentation,
+    refusal: &ClipRefusal,
+    layout_id: LayoutId,
+    viewport_index: usize,
+) {
+    let reason = format!("{}: {}", refusal.reason, refusal.message);
+    out.completeness = weaker(
+        &out.completeness,
+        &Completeness::Partial(vec![reason.clone()]),
+    );
+    out.diagnostics.push(Diagnostic {
+        object: None,
+        code: "representation.viewport_clip_partial".into(),
+        message: format!("layout {} viewport {viewport_index}: {reason}", layout_id.0),
+    });
+}
+
 /// Build the display representation for one paper-space layout (spec §3.3, F04).
 ///
 /// The result contains, in this order:
@@ -721,9 +1312,16 @@ fn clip_segment(a: Point3, b: Point3, min: [f64; 2], max: [f64; 2]) -> Option<(P
 /// exist is `Missing`. `visible` is the caller's layer-visibility predicate
 /// (kept as a closure so this crate stays independent of `cad-app`).
 ///
-/// Rectangular clipping is exact for line/fill geometry; meshes and text are
-/// transformed but only flagged `Partial` (their per-triangle clip is a
-/// documented remaining gap — see `docs/layouts.md`), never claimed as clipped.
+/// For **line/fill** geometry each segment is clipped exactly (Liang–Barsky);
+/// for a **mesh** each triangle is clipped exactly (Sutherland–Hodgman) with
+/// per-vertex position, z, normal and colour interpolated at the new vertices;
+/// for an **image** the unit-square quad is clipped and its texture coordinates
+/// interpolated. Geometry the layer window removes completely simply
+/// disappears. What cannot be clipped exactly without faking it is kept
+/// unclipped and reported `Partial` with a stable [`clip_reason`] code (an
+/// unshaped `Text` placeholder has no glyph geometry until a font shapes it; a
+/// mesh with a bad index or non-finite vertex; an unexpanded instance) — never
+/// dropped silently and never claimed as clipped.
 pub fn build_paper_space(
     registry: &ProviderRegistry,
     database: &DrawingDatabase,
@@ -844,29 +1442,94 @@ pub fn build_paper_space(
                             });
                         }
                     }
-                    other => {
-                        // Rectangular clipping is only exact for line geometry
-                        // here; report the limitation instead of pretending.
-                        out.completeness = weaker(
-                            &out.completeness,
-                            &Completeness::Partial(vec![
-                                "viewport clip applied to line geometry only".into(),
-                            ]),
+                    DisplayPrimitive::Mesh(mesh) => match clip_mesh_to_rect(&mesh, center, half) {
+                        Ok(Some(clipped)) => {
+                            out.fragments.push(fragment_with(
+                                fragment,
+                                DisplayPrimitive::Mesh(std::sync::Arc::new(clipped)),
+                            ));
+                        }
+                        // Every triangle lies outside the window: an exact
+                        // omission, not a degradation.
+                        Ok(None) => {}
+                        Err(refusal) => {
+                            report_clip_degradation(&mut out, &refusal, layout_id, index);
+                            out.fragments
+                                .push(fragment_with(fragment, DisplayPrimitive::Mesh(mesh)));
+                        }
+                    },
+                    DisplayPrimitive::Text {
+                        text,
+                        origin,
+                        font,
+                        height,
+                    } => {
+                        // Glyph geometry exists only once a font shapes the
+                        // text. An unshaped placeholder cannot be clipped here,
+                        // so it is kept and reported, never dropped or faked.
+                        let refusal = ClipRefusal::new(
+                            clip_reason::TEXT_FONT_DEPENDENT,
+                            "unshaped text glyph geometry depends on a font; the viewport cannot clip it exactly",
                         );
-                        out.fragments.push(DisplayFragment {
-                            source: fragment.source,
-                            geometry_source: fragment.geometry_source,
-                            precision: fragment.precision,
-                            alpha: fragment.alpha,
-                            color: fragment.color,
-                            color_unresolved: fragment.color_unresolved,
-                            lineweight: fragment.lineweight,
-                            lineweight_unresolved: fragment.lineweight_unresolved,
-                            linetype: fragment.linetype.clone(),
-                            linetype_unresolved: fragment.linetype_unresolved,
-                            linetype_scale: fragment.linetype_scale,
-                            primitive: other,
-                        });
+                        report_clip_degradation(&mut out, &refusal, layout_id, index);
+                        out.fragments.push(fragment_with(
+                            fragment,
+                            DisplayPrimitive::Text {
+                                text,
+                                origin,
+                                font,
+                                height,
+                            },
+                        ));
+                    }
+                    DisplayPrimitive::Image {
+                        resource,
+                        transform: local,
+                        clip,
+                    } => match clip_image_quad_to_rect(&local, center, half) {
+                        Ok(vertices) if vertices.is_empty() => {
+                            // Fully outside the window: exact omission.
+                        }
+                        Ok(vertices) => {
+                            // A clipped textured quad is represented exactly:
+                            // positions plus interpolated UVs, so it is not a
+                            // degradation. A wholly visible image keeps its
+                            // simple unit-square transform.
+                            let clip = if image_quad_inside(&local, center, half) {
+                                clip
+                            } else {
+                                Some(std::sync::Arc::from(vertices.into_boxed_slice()))
+                            };
+                            out.fragments.push(fragment_with(
+                                fragment,
+                                DisplayPrimitive::Image {
+                                    resource,
+                                    transform: local,
+                                    clip,
+                                },
+                            ));
+                        }
+                        Err(refusal) => {
+                            report_clip_degradation(&mut out, &refusal, layout_id, index);
+                            out.fragments.push(fragment_with(
+                                fragment,
+                                DisplayPrimitive::Image {
+                                    resource,
+                                    transform: local,
+                                    clip,
+                                },
+                            ));
+                        }
+                    },
+                    other => {
+                        // An unexpanded instance has no geometry to clip; keep
+                        // it and report rather than fake a windowed version.
+                        let refusal = ClipRefusal::new(
+                            clip_reason::UNSUPPORTED_PRIMITIVE,
+                            "this primitive cannot be clipped against the viewport window",
+                        );
+                        report_clip_degradation(&mut out, &refusal, layout_id, index);
+                        out.fragments.push(fragment_with(fragment, other));
                     }
                 }
             }
@@ -1567,5 +2230,492 @@ mod tests {
         let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| false).unwrap();
         assert!(rep.fragments.is_empty());
         assert_eq!(rep.completeness, Completeness::Complete);
+    }
+
+    // ---- per-triangle / per-quad viewport clipping -------------------------
+
+    fn triangle_mesh(corners: [Point3; 3]) -> Mesh {
+        Mesh {
+            vertices: corners.to_vec(),
+            triangles: vec![[0, 1, 2]],
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        }
+    }
+
+    fn mesh_area(mesh: &Mesh) -> f64 {
+        mesh.triangles
+            .iter()
+            .map(|t| {
+                let a = mesh.vertices[t[0] as usize];
+                let b = mesh.vertices[t[1] as usize];
+                let c = mesh.vertices[t[2] as usize];
+                ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)).abs() * 0.5
+            })
+            .sum()
+    }
+
+    #[test]
+    fn glyph_outline_quad_is_clipped_by_the_line_path() {
+        // Shaped text arrives as `Lines` glyph outlines, so a font-shaped glyph
+        // is clipped by the same Liang–Barsky path as any other polyline. A
+        // closed square contour straddling the window keeps only its inside runs.
+        let contour = [
+            p(-2.0, -1.0),
+            p(2.0, -1.0),
+            p(2.0, 1.0),
+            p(-2.0, 1.0),
+            p(-2.0, -1.0),
+        ];
+        let runs = clip_polyline_to_rect(&contour, [0.0, 0.0], [1.0, 1.0]);
+        assert!(!runs.is_empty());
+        for run in &runs {
+            assert!(run.len() >= 2);
+            for v in run {
+                assert!(v.x >= -1.0 - 1e-9 && v.x <= 1.0 + 1e-9);
+                assert!(v.y >= -1.0 - 1e-9 && v.y <= 1.0 + 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn clip_polygon_to_rect_keeps_inside_and_drops_outside() {
+        let inside = clip_polygon_to_rect(
+            &[[-0.5, -0.5], [0.5, -0.5], [0.0, 0.5]],
+            [0.0, 0.0],
+            [1.0, 1.0],
+        );
+        assert_eq!(inside.len(), 3);
+        let outside = clip_polygon_to_rect(
+            &[[2.0, 2.0], [3.0, 2.0], [2.5, 3.0]],
+            [0.0, 0.0],
+            [1.0, 1.0],
+        );
+        assert!(outside.is_empty());
+    }
+
+    #[test]
+    fn mesh_triangle_fully_inside_is_reused_verbatim() {
+        let mesh = triangle_mesh([p(-0.5, -0.5), p(0.5, -0.5), p(0.0, 0.5)]);
+        let clipped = clip_mesh_to_rect(&mesh, [0.0, 0.0], [1.0, 1.0])
+            .unwrap()
+            .expect("a triangle inside the window survives");
+        assert_eq!(clipped.triangles.len(), 1);
+        assert_eq!(clipped.vertices.len(), 3);
+        assert_eq!(clipped.vertices[0], p(-0.5, -0.5));
+        assert_eq!(clipped.vertices[2], p(0.0, 0.5));
+    }
+
+    #[test]
+    fn mesh_triangle_fully_outside_disappears() {
+        let mesh = triangle_mesh([p(2.0, 2.0), p(3.0, 2.0), p(2.5, 3.0)]);
+        assert!(clip_mesh_to_rect(&mesh, [0.0, 0.0], [1.0, 1.0])
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn mesh_triangle_partially_clipped_keeps_area_and_fan_triangles() {
+        // Triangle (-2,-2),(2,-2),(0,2) ∩ [-1,1]² is a hexagon of area 3.5.
+        let mesh = triangle_mesh([p(-2.0, -2.0), p(2.0, -2.0), p(0.0, 2.0)]);
+        let clipped = clip_mesh_to_rect(&mesh, [0.0, 0.0], [1.0, 1.0])
+            .unwrap()
+            .expect("the triangle overlaps the window");
+        assert_eq!(clipped.vertices.len(), 6);
+        // A fan over an n-gon yields n-2 triangles.
+        assert_eq!(clipped.triangles.len(), clipped.vertices.len() - 2);
+        let area = mesh_area(&clipped);
+        assert!((area - 3.5).abs() < 1e-9, "clipped area {area}");
+        // Every clipped vertex stays inside the window.
+        for v in &clipped.vertices {
+            assert!(v.x >= -1.0 - 1e-9 && v.x <= 1.0 + 1e-9);
+            assert!(v.y >= -1.0 - 1e-9 && v.y <= 1.0 + 1e-9);
+        }
+    }
+
+    #[test]
+    fn mesh_per_vertex_colors_interpolate_at_clip_vertices() {
+        // Red ramp along x: (-2,0)=0, (0,0)=100, (0,2)=200.
+        let mesh = Mesh {
+            vertices: vec![p(-2.0, 0.0), p(0.0, 0.0), p(0.0, 2.0)],
+            triangles: vec![[0, 1, 2]],
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: vec![[0, 0, 0], [100, 0, 0], [200, 0, 0]],
+        };
+        let clipped = clip_mesh_to_rect(&mesh, [0.0, 0.0], [1.0, 1.0])
+            .unwrap()
+            .expect("overlaps");
+        assert_eq!(clipped.colors.len(), clipped.vertices.len());
+        // (-1,0) is the x=-1 crossing of the (-2,0)->(0,0) edge: 50%.
+        let left = clipped
+            .vertices
+            .iter()
+            .position(|v| (v.x + 1.0).abs() < 1e-9 && v.y.abs() < 1e-9)
+            .expect("left crossing");
+        assert_eq!(clipped.colors[left][0], 50, "interpolated red channel");
+        // (0,1) is the y=1 crossing of the (0,0)->(0,2) edge: 150.
+        let top = clipped
+            .vertices
+            .iter()
+            .position(|v| v.x.abs() < 1e-9 && (v.y - 1.0).abs() < 1e-9)
+            .expect("top crossing");
+        assert_eq!(clipped.colors[top][0], 150, "interpolated red channel");
+    }
+
+    #[test]
+    fn mesh_with_a_missing_index_is_refused_not_dropped() {
+        let mesh = Mesh {
+            vertices: vec![p(0.0, 0.0)],
+            triangles: vec![[0, 1, 2]],
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        };
+        let refusal = clip_mesh_to_rect(&mesh, [0.0, 0.0], [1.0, 1.0])
+            .expect_err("a missing index cannot be clipped exactly");
+        assert_eq!(refusal.reason, clip_reason::MESH_UNCLIPPABLE);
+    }
+
+    #[test]
+    fn mesh_with_a_non_finite_vertex_is_refused_not_dropped() {
+        let mesh = triangle_mesh([p(f64::NAN, 0.0), p(0.0, 0.0), p(1.0, 1.0)]);
+        let refusal = clip_mesh_to_rect(&mesh, [0.0, 0.0], [1.0, 1.0])
+            .expect_err("a non-finite mesh cannot be clipped exactly");
+        assert_eq!(refusal.reason, clip_reason::MESH_UNCLIPPABLE);
+    }
+
+    #[test]
+    fn image_quad_clip_interpolates_uvs() {
+        // Identity image: unit square with UV = position. The window looks at
+        // x in [0,1], y in [-0.5,0.5], so the top edge is clipped at y=0.5 and
+        // its template coordinate v must interpolate to 0.5 (not stretch).
+        let vertices = clip_image_quad_to_rect(&Transform3::identity(), [0.5, 0.0], [0.5, 0.5])
+            .expect("finite quad");
+        assert_eq!(vertices.len(), 4);
+        for v in &vertices {
+            assert!((v.position.x - v.uv[0]).abs() < 1e-9);
+            if (v.position.y - 0.5).abs() < 1e-9 {
+                assert!((v.uv[1] - 0.5).abs() < 1e-9, "uv {:?}", v.uv);
+            }
+        }
+    }
+
+    #[test]
+    fn image_quad_fully_outside_clips_to_nothing() {
+        let vertices = clip_image_quad_to_rect(&Transform3::identity(), [3.0, 3.0], [1.0, 1.0])
+            .expect("finite quad");
+        assert!(vertices.is_empty());
+    }
+
+    #[test]
+    fn transformed_image_clip_maps_positions_but_keeps_uvs() {
+        let clip = std::sync::Arc::from(
+            vec![
+                ImageVertex {
+                    position: p(0.0, 0.0),
+                    uv: [0.0, 0.0],
+                },
+                ImageVertex {
+                    position: p(1.0, 0.0),
+                    uv: [1.0, 0.0],
+                },
+            ]
+            .into_boxed_slice(),
+        );
+        let primitive = DisplayPrimitive::Image {
+            resource: cad_resources::ResourceKey("img:0".into()),
+            transform: Transform3::identity(),
+            clip: Some(clip),
+        };
+        match primitive.transformed(&Transform3::translation(p(10.0, 5.0))) {
+            DisplayPrimitive::Image { clip: Some(v), .. } => {
+                assert_eq!(v[0].position, p(10.0, 5.0));
+                assert_eq!(v[1].position, p(11.0, 5.0));
+                assert_eq!(v[0].uv, [0.0, 0.0]);
+                assert_eq!(v[1].uv, [1.0, 0.0]);
+            }
+            _ => panic!("expected a clipped image primitive"),
+        }
+    }
+
+    // ---- paper build integration for the new clip paths --------------------
+
+    #[test]
+    fn paper_build_clips_a_model_mesh_per_triangle_and_stays_complete() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbFace".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Mesh(triangle_mesh([
+                p(0.0, 0.0),
+                p(20000.0, 0.0),
+                p(0.0, 20000.0),
+            ])),
+            draw_order: 0,
+        })
+        .unwrap();
+        b.insert_layout(cad_db::Layout {
+            id: LayoutId(1),
+            name: "L1".into(),
+            viewports: vec![simple_viewport()],
+        })
+        .unwrap();
+        let db = b.finish().unwrap();
+        let registry = ProviderRegistry::with_default_provider();
+        let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+        // Exact per-triangle clipping is not a degradation.
+        assert_eq!(rep.completeness, Completeness::Complete);
+        let mesh = rep
+            .fragments
+            .iter()
+            .find_map(|f| match &f.primitive {
+                DisplayPrimitive::Mesh(mesh) => Some(mesh.clone()),
+                _ => None,
+            })
+            .expect("clipped mesh fragment");
+        assert!(!mesh.triangles.is_empty());
+        for v in &mesh.vertices {
+            // Paper window is x in [0,100], y in [0,50].
+            assert!(v.x >= -1e-9 && v.x <= 100.0 + 1e-9);
+            assert!(v.y >= -1e-9 && v.y <= 50.0 + 1e-9);
+        }
+        assert!(!rep
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "representation.viewport_clip_partial"));
+    }
+
+    #[test]
+    fn paper_build_keeps_an_unclippable_mesh_partial_and_reported() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        // A triangle that references a missing vertex cannot be clipped exactly.
+        let broken = Mesh {
+            vertices: vec![p(0.0, 0.0), p(1.0, 0.0)],
+            triangles: vec![[0, 1, 2]],
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        };
+        b.insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbFace".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Mesh(broken),
+            draw_order: 0,
+        })
+        .unwrap();
+        b.insert_layout(cad_db::Layout {
+            id: LayoutId(1),
+            name: "L1".into(),
+            viewports: vec![simple_viewport()],
+        })
+        .unwrap();
+        let db = b.finish().unwrap();
+        let registry = ProviderRegistry::with_default_provider();
+        let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+        assert!(matches!(rep.completeness, Completeness::Partial(_)));
+        assert!(rep.diagnostics.iter().any(|d| {
+            d.code == "representation.viewport_clip_partial"
+                && d.message.contains(clip_reason::MESH_UNCLIPPABLE)
+        }));
+        // The unclipped geometry is kept, never dropped silently.
+        assert!(rep
+            .fragments
+            .iter()
+            .any(|f| matches!(f.primitive, DisplayPrimitive::Mesh(_))));
+    }
+
+    #[test]
+    fn paper_build_keeps_unshaped_text_partial_with_a_precise_reason() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbText".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Text {
+                text: "A".into(),
+                position: p(10.0, 20.0),
+                style: StyleId(0),
+                height: 2.5,
+                rotation: 0.0,
+                font: None,
+                h_align: TextAlignH::Left,
+                v_align: TextAlignV::Baseline,
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+        b.insert_layout(cad_db::Layout {
+            id: LayoutId(1),
+            name: "L1".into(),
+            viewports: vec![simple_viewport()],
+        })
+        .unwrap();
+        let db = b.finish().unwrap();
+        let registry = ProviderRegistry::with_default_provider();
+        let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+        assert!(matches!(rep.completeness, Completeness::Partial(_)));
+        assert!(rep.diagnostics.iter().any(|d| {
+            d.code == "representation.viewport_clip_partial"
+                && d.message.contains(clip_reason::TEXT_FONT_DEPENDENT)
+        }));
+        // The unshaped placeholder is kept, never dropped or faked as clipped.
+        assert!(rep
+            .fragments
+            .iter()
+            .any(|f| matches!(f.primitive, DisplayPrimitive::Text { .. })));
+    }
+
+    /// A provider that emits a single `Image` quad, so the paper-build image
+    /// clip path can be exercised without an importer.
+    struct ImageProvider;
+
+    impl crate::RepresentationProvider for ImageProvider {
+        fn registration(&self) -> crate::Registration {
+            crate::Registration {
+                type_key: "test.image".into(),
+                version: 1,
+                priority: 10,
+                entity_types: vec!["TestImage".into()],
+                capabilities: vec!["image".into()],
+            }
+        }
+
+        fn build(
+            &self,
+            entity: &DbEntity,
+            context: &RepresentationContext,
+        ) -> CadResult<DisplayRepresentation> {
+            let mut matrix = Transform3::identity().matrix;
+            matrix[0][0] = 20000.0;
+            matrix[1][1] = 20000.0;
+            matrix[0][3] = 10.0;
+            matrix[1][3] = 20.0;
+            Ok(DisplayRepresentation {
+                fragments: vec![DisplayFragment {
+                    source: SelectionRef {
+                        document: context.document,
+                        entity: entity.id,
+                        instance: InstancePath::default(),
+                        sub_element: None,
+                    },
+                    geometry_source: GeometrySource::Analytic,
+                    precision: Precision::Analytic,
+                    alpha: 1.0,
+                    color: crate::DEFAULT_RENDER_COLOR,
+                    color_unresolved: true,
+                    lineweight: crate::DEFAULT_LINEWEIGHT_MM,
+                    lineweight_unresolved: true,
+                    linetype: cad_db::LinetypePattern::continuous(),
+                    linetype_unresolved: true,
+                    linetype_scale: 1.0,
+                    primitive: DisplayPrimitive::Image {
+                        resource: cad_resources::ResourceKey("img:0".into()),
+                        transform: Transform3 { matrix },
+                        clip: None,
+                    },
+                }],
+                completeness: Completeness::Complete,
+                diagnostics: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn paper_build_clips_a_model_image_quad_with_interpolated_uvs() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "TestImage".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Opaque {
+                type_key: "TestImage".into(),
+                version: 1,
+                payload: Vec::new(),
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+        b.insert_layout(cad_db::Layout {
+            id: LayoutId(1),
+            name: "L1".into(),
+            viewports: vec![simple_viewport()],
+        })
+        .unwrap();
+        let db = b.finish().unwrap();
+        let mut registry = ProviderRegistry::with_default_provider();
+        registry.register(Box::new(ImageProvider)).unwrap();
+        let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+        // The clipped textured quad is representable, so this stays exact.
+        assert_eq!(rep.completeness, Completeness::Complete);
+        let clip = rep
+            .fragments
+            .iter()
+            .find_map(|f| match &f.primitive {
+                DisplayPrimitive::Image { clip, .. } => clip.clone(),
+                _ => None,
+            })
+            .expect("clipped image carries its polygon");
+        assert_eq!(clip.len(), 4);
+        // The image maps the unit square in model space to paper
+        // [50,250]x[25,225] through the 1:100 window; the window cuts it to
+        // [50,100]x[25,50]. The corner at (100,50) keeps texture UV (0.25,0.125).
+        let corner = clip
+            .iter()
+            .find(|v| (v.position.x - 100.0).abs() < 1e-9 && (v.position.y - 50.0).abs() < 1e-9)
+            .expect("clipped corner");
+        assert!((corner.uv[0] - 0.25).abs() < 1e-9, "uv {:?}", corner.uv);
+        assert!((corner.uv[1] - 0.125).abs() < 1e-9, "uv {:?}", corner.uv);
     }
 }

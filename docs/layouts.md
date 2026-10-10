@@ -109,7 +109,22 @@ paper = (model - view_center) * paper_per_model + paper_center
 
 `clip_polyline_to_rect(paper, center, half) -> Vec<Vec<Point3>>` 用 Liang–Barsky
 逐段裁剪：完全在外丢弃、完全在内原样保留、跨越边界的按交点截断，并把连续的幸存段
-合并成折线（离开再进入会拆成多段）。线/填充几何的裁剪是精确的。
+合并成折线（离开再进入会拆成多段）。**线/填充几何**的裁剪是精确的。
+
+`clip_polygon_to_rect` 用 Sutherland–Hodgman 把凸多边形裁剪到同一轴对齐纸面矩形
+（视口窗口在本构建中只接受轴对齐矩形，见 §2.1，因此窗口是凸的）。
+
+- **网格**：`clip_mesh_to_rect(mesh, center, half)` 逐三角裁剪，把幸存多边形扇形
+  三角化，并在新顶点上**线性插值 z、法线与逐顶点 sRGB 颜色**（渐变填充 HATCH 的
+  颜色带因此正确，不会被拉伸）；完全在内的三角形原样复用，完全在外的消失。
+  完全在窗口外的网格返回 `None`（精确省略）。
+- **图像**：`clip_image_quad_to_rect(transform, center, half)` 裁剪单位正方形经
+  `transform` 映射后的四边形，并在新顶点上**线性插值纹理坐标 UV**，返回
+  `ImageVertex { position, uv }`；`DisplayPrimitive::Image` 增加可选 `clip` 多边形
+  承载它，未裁剪时为 `None`。
+
+**无法精确裁剪**的情形绝不假装：保留未裁剪几何并降为 `Partial`，附稳定
+`clip_reason` 码与诊断（见 §4）。
 
 ## 3. 支持与不支持
 
@@ -201,9 +216,19 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
 
 ## 4. 明确未完成（不是已支持）
 
-- **视口内网格 / 文字的逐三角裁剪**：桥接层对线几何精确裁剪；`Mesh`/`Text`/`Image`
-  只做变换，并把 completeness 降为 `Partial`（`viewport clip applied to line geometry
-  only`），不声称已裁剪。
+- **视口裁剪的剩余边界**：线/填充几何按段精确裁剪；`Mesh` 逐三角精确裁剪（位置、
+  z、法线、逐顶点颜色插值）；`Image` 四边形精确裁剪（纹理 UV 插值）；带字体名、
+  被 `FontEngine` 成功 shape 的 Text 其轮廓就是 `Lines`，走线裁剪（精确）。仍
+  **无法精确裁剪**的情形保留未裁剪几何并降为 `Partial`，附稳定 `clip_reason`
+  码与 `representation.viewport_clip_partial` 诊断（绝不静默丢弃、绝不声称已裁剪）：
+  - `viewport.clip_text_font_dependent`：未 shape 的 `Text` 占位（无字体时 glyph
+    几何依赖字体，本层无从裁剪）；
+  - `viewport.clip_mesh_unclippable`：网格索引越界、顶点非有限或超出 32 位顶点寻址；
+  - `viewport.clip_image_degenerate`：图像变换把四边形映到非有限坐标；
+  - `viewport.clip_unsupported_primitive`：未展开的 `Instance` 等没有可裁剪几何的
+    原语。
+  非矩形/非凸视口裁剪在上游 `viewport_transform` 就已显式 `Unsupported`（§3），
+  不会到达逐三角裁剪。
 - **打印输出**：无 plot/打印路径。布局绘制是屏幕显示，不是可交付的图纸输出。
 - **倾斜/扭转/透视视口、非矩形裁剪、非均匀视口、注释性缩放、动态块**：导入时置
   `Partial` 并给出原因，本层以稳定原因码显式 `Unsupported`，按样本标记，不假装支持。
@@ -226,6 +251,12 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
 - 不支持拒绝（含稳定原因码）：复杂裁剪、旋转纸面矩形、扭转变换、镜像、非均匀、
   倾斜视线、透视、缺比例、相邻角、退化矩形、非有限、点数错误；
 - 矩形裁剪：跨越截断、完全在外丢弃、完全在内保留、连续合并、离开再进入拆分；
+- 逐三角 / 逐四边形裁剪：多边形在内外、三角形完全在内原样复用、完全在外丢弃、
+  部分裁剪的顶点数与面积（扇形三角化 `n-2`）、逐顶点颜色在裁剪顶点插值、索引越界
+  与非有限顶点显式拒绝（`viewport.clip_mesh_unclippable`）、图像四边形 UV 插值、
+  图像变换保留 UV、以及纸空间集成（模型网格逐三角裁剪后仍为 `Complete`；未 shape
+  的 Text 保留为 `Partial` 且带 `viewport.clip_text_font_dependent`；图像经视口
+  裁剪后 UV 正确）；
 - 布局枚举：真实布局表的 id/名称/支持/原因（原因以稳定码开头），空库为空；
 - 纸空间构建：模型几何映射并裁剪、不支持视口显式 `Partial` 且不绘制、纸面实体直接
   绘制、缺失布局为 `Missing`、可见性谓词生效。

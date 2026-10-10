@@ -33,9 +33,10 @@ pub mod shx;
 pub mod layout;
 
 pub use layout::{
-    build_paper_space, clip_polyline_to_rect, enumerate_layouts, paper_per_model_from_view,
-    viewport_reason, viewport_transform, LayoutDescriptor, SpaceSelection, ViewportState,
-    ViewportTransform, ViewportUnsupported,
+    build_paper_space, clip_image_quad_to_rect, clip_mesh_to_rect, clip_polygon_to_rect,
+    clip_polyline_to_rect, clip_reason, enumerate_layouts, paper_per_model_from_view,
+    viewport_reason, viewport_transform, ClipRefusal, LayoutDescriptor, SpaceSelection,
+    ViewportState, ViewportTransform, ViewportUnsupported,
 };
 
 pub mod plot;

@@ -2,6 +2,20 @@
 
 use super::*;
 
+/// One vertex of a viewport-clipped image: a paper-space position plus the
+/// texture coordinate that maps to it.
+///
+/// An unclipped [`DisplayPrimitive::Image`] maps the texture's unit square
+/// through its `transform`. When a viewport clip cuts that square, the surviving
+/// polygon is carried in [`DisplayPrimitive::Image::clip`] so the texture is
+/// interpolated correctly (not stretched) and the hidden part is discarded.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImageVertex {
+    pub position: Point3,
+    /// Normalized texture coordinate for this vertex.
+    pub uv: [f64; 2],
+}
+
 /// One drawable piece of an entity, in world coordinates.
 pub enum DisplayPrimitive {
     Lines(Arc<[Point3]>),
@@ -17,6 +31,11 @@ pub enum DisplayPrimitive {
     Image {
         resource: ResourceKey,
         transform: Transform3,
+        /// `None` while the whole image is inside the current window. `Some`
+        /// once a viewport clip cut the image: a convex paper-space polygon with
+        /// per-vertex texture coordinates, so only the visible texture region is
+        /// mapped and its UVs are interpolated at the new vertices.
+        clip: Option<Arc<[ImageVertex]>>,
     },
     Instance {
         block: BlockId,
@@ -59,9 +78,22 @@ impl DisplayPrimitive {
             DisplayPrimitive::Image {
                 resource,
                 transform: local,
+                clip,
             } => DisplayPrimitive::Image {
                 resource: resource.clone(),
                 transform: transform.matrix_mul(local),
+                clip: clip.as_ref().map(|vertices| {
+                    Arc::from(
+                        vertices
+                            .iter()
+                            .map(|vertex| ImageVertex {
+                                position: transform.apply_point(vertex.position),
+                                uv: vertex.uv,
+                            })
+                            .collect::<Vec<_>>()
+                            .into_boxed_slice(),
+                    )
+                }),
             },
             DisplayPrimitive::Instance {
                 block,
