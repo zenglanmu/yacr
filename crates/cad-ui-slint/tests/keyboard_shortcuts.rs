@@ -99,7 +99,7 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     control(&ui, "o", false);
     control(&ui, "z", false);
     control(&ui, "y", false);
-    control(&ui, "s", false); // No unsupported save action.
+    control(&ui, "s", false); // Ctrl+S is an explicit unsupported shortcut now.
     assert!(calls.borrow().is_empty());
     press(&ui, Key::F2);
     assert!(ui.get_command_expanded());
@@ -160,6 +160,132 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
         observed.borrow_mut().push(text.to_string());
         true
     });
+
+    // --- Phase 2: fixed AutoCAD-default key map ----------------------------
+    // The shell owns the key strings; the host only records the emitted
+    // callbacks. Overlay flags live in the config store, so the shell emits the
+    // flipped value and the host applies it (asserted end-to-end in
+    // shortcut_map_wiring.rs).
+    let overlays = Rc::new(RefCell::new(Vec::<(String, bool)>::new()));
+    let observed_overlays = overlays.clone();
+    ui.on_overlay_toggled(move |key, value| {
+        observed_overlays
+            .borrow_mut()
+            .push((key.to_string(), value));
+    });
+    let unsupported = Rc::new(RefCell::new(Vec::<String>::new()));
+    let observed_unsupported = unsupported.clone();
+    let status_messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::En);
+    let weak = ui.as_weak();
+    ui.on_shortcut_unsupported(move |key| {
+        observed_unsupported.borrow_mut().push(key.to_string());
+        // Mirror the adapter so the localized catalog text is asserted here too;
+        // the real adapter wiring is covered by shortcut_map_wiring.rs.
+        if let Some(ui) = weak.upgrade() {
+            ui.set_status_label(
+                status_messages
+                    .text("shortcut.unsupported", &[("key", key.as_str())])
+                    .into(),
+            );
+            ui.set_command_expanded(true);
+        }
+    });
+
+    // F7 grid and F3 running-snap hints emit the flipped overlay value.
+    assert!(ui.get_overlay_grid());
+    press(&ui, Key::F7);
+    assert_eq!(&*overlays.borrow(), &[("grid".to_string(), false)]);
+    assert!(ui.get_overlay_snap_hints());
+    press(&ui, Key::F3);
+    assert_eq!(
+        overlays.borrow().last().unwrap(),
+        &("snapHints".to_string(), false)
+    );
+    overlays.borrow_mut().clear();
+
+    // F2 and Ctrl+9 both expand/collapse the command row.
+    assert!(!ui.get_command_expanded());
+    press(&ui, Key::F2);
+    assert!(ui.get_command_expanded());
+    control(&ui, "9", false);
+    assert!(!ui.get_command_expanded());
+
+    // Ctrl+1 toggles the properties/side panel.
+    let side_before = ui.get_side_panel_open();
+    control(&ui, "1", false);
+    assert_ne!(ui.get_side_panel_open(), side_before);
+    control(&ui, "1", false);
+    assert_eq!(ui.get_side_panel_open(), side_before);
+
+    // Ctrl+0 clean screen hides every chrome gate but keeps application-ui.
+    assert!(!ui.get_clean_screen());
+    assert!(ui.get_chrome_visible());
+    control(&ui, "0", false);
+    assert!(ui.get_clean_screen());
+    assert!(!ui.get_chrome_visible());
+    assert!(ui.get_application_ui());
+    control(&ui, "0", false);
+    assert!(!ui.get_clean_screen());
+    assert!(ui.get_chrome_visible());
+
+    // Every unsupported key reports its stable label and never fires a CAD
+    // callback; the status text is the localized catalog string.
+    let cad_calls_before = calls.borrow().len();
+    press(&ui, Key::F1);
+    control(&ui, "n", false);
+    control(&ui, "s", false);
+    control(&ui, "s", true);
+    control(&ui, "p", false);
+    for key in [
+        Key::F4,
+        Key::F5,
+        Key::F6,
+        Key::F8,
+        Key::F9,
+        Key::F10,
+        Key::F11,
+        Key::F12,
+    ] {
+        press(&ui, key);
+    }
+    control(&ui, "c", false);
+    control(&ui, "x", false);
+    control(&ui, "v", false);
+    assert_eq!(
+        &*unsupported.borrow(),
+        &[
+            "F1",
+            "Ctrl+N",
+            "Ctrl+S",
+            "Ctrl+Shift+S",
+            "Ctrl+P",
+            "F4",
+            "F5",
+            "F6",
+            "F8",
+            "F9",
+            "F10",
+            "F11",
+            "F12",
+            "Ctrl+C",
+            "Ctrl+X",
+            "Ctrl+V",
+        ]
+    );
+    assert_eq!(
+        ui.get_status_label().to_string(),
+        "Shortcut Ctrl+V has no supported action yet."
+    );
+    assert!(ui.get_command_expanded());
+    assert_eq!(
+        calls.borrow().len(),
+        cad_calls_before,
+        "unsupported keys must not fire CAD callbacks"
+    );
+    // Restore the collapsed command row so the geometry-based click below still
+    // lands on the LineEdit.
+    ui.set_command_expanded(false);
+
     offscreen::snapshot(ui.window()).unwrap();
     click(&ui, 600.0, 775.0);
     for character in "hello world".chars() {

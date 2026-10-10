@@ -1,5 +1,43 @@
 # UI 功能实现迭代（2026-10-04）
 
+## 第五轮：固定 AutoCAD 默认键位映射
+
+用户要求：把一套固定（不可重绑定）的 AutoCAD 默认键位接到**已存在**的命令/开关上；
+对尚无后端能力的按键给出显式“不支持”反馈，不得静默无操作；保留
+`interaction.keyboardShortcuts` 门控；不引入重绑定编辑器。
+
+键字符串为 Slint 私有，故键位表放在 `crates/cad-ui-slint/ui/app.slint` 现有捕获/冒泡
+处理器内，Rust 只把动作分发到既有回调。新增 `shortcut-unsupported(string)` 回调与双语键
+`shortcut.unsupported`，在 `adapter.rs` 把稳定标签（如 `F4`、`Ctrl+S`）渲染到状态栏并展开
+命令行。
+
+| 键 | 实际接入 | 限制 / 诚实替代 |
+| --- | --- | --- |
+| F7 | 网格叠加开关（复用 `overlay-toggled("grid", …)`） | 经配置存储生效，非本地影子状态 |
+| F3 | 捕捉提示**标记叠加**开关（`overlay-toggled("snapHints", …)`） | 只是标记叠加，**不是**运行对象捕捉 OSNAP 开关——该能力尚不存在 |
+| F2 / Ctrl+9 | 展开/收起命令行 | 只是既有命令/状态行的高度切换，**不是**完整命令历史浏览器，也不改变命令行可见性；两者均受 `command-visible` 门控 |
+| Ctrl+1 | 侧栏/面板开合 | 是侧栏，**不是**属性选项板本身 |
+| Ctrl+0 | 净屏：新增 `clean-screen`，布局统一改读 `chrome-visible = application-ui && !clean-screen` | 只隐藏 chrome，不隐藏画布；默认 `false` 时与 `application-ui` 等价，既有布局不变 |
+| F1、F4–F6、F8–F12、Ctrl+N/S/Shift+S/P/C/X/V | 显式 `shortcut-unsupported`（本地化文案） | 后端能力留待后续阶段；现在**显式报告**，绝不静默或伪造成功 |
+
+保留的既有键位：Ctrl+O（受 `can-open` 门控）、Ctrl+Z、Ctrl+Shift+Z、Ctrl+Y、Ctrl+A、
+Ctrl+Home、Escape 的优先级不变。文本编辑器仍优先处理本地撤销/重做/全选/剪贴板/光标移动：
+Ctrl+Z/Y/A/C/X/V 与 Ctrl+Home 留在冒泡处理器，其余（F 键、Ctrl+O、Ctrl+1/9/0、Ctrl+N/S/P）
+在捕获处理器。整表仍由 `application-ui && keyboardShortcuts` 门控，且不吞掉 Alt/Meta。
+
+已知限制（F2）：不支持反馈渲染在命令行/状态栏 chrome 中，而 Ctrl+0 净屏会隐藏 chrome，
+故净屏下按 Ctrl+S 会把文案写入 `status_label` 却**不可见**。这是已记录的限制，不宣称为
+可见反馈；本轮不新增画布内 toast。
+
+证据边界：本轮实际运行（本机 Wayland + Quadro P620；离屏用软件 Vulkan lavapipe）：
+`cargo fmt --all`、`cargo clippy -p cad-ui-slint --all-targets --locked -- -D warnings`、
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败，
+含 137 lib + 34 集成）、`python3 scripts/check-i18n.py`、`python3 scripts/check-workflows.py`。
+新增/强化合成契约：`shortcut_map_contract.rs`（源码结构契约：捕获/冒泡分别绑定、唯一缩进
+声明、chrome 门控计数）与 `shortcut_map_wiring.rs`（adapter 运行时：F7 翻转配置网格叠加、
+Ctrl+9/Ctrl+0、净屏下 Ctrl+S 的本地化文案与 chrome 隐藏）。这些均为合成/离屏证据，不代表
+真实窗口、真实 GPU、浏览器或真机；未做键位焦点、无障碍或跨平台键盘验收。
+
 ## 第四轮：补全导航、选择全部与批注搜索
 
 三个独立分支任务曾因额度限制中断，首次没有代码交付；恢复后分别完成补全导航、

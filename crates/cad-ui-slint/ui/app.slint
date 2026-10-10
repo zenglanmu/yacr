@@ -34,6 +34,16 @@ export component YacrWindow inherits Window {
     // Fail closed until the adapter pushes interaction.keyboardShortcuts from
     // the effective ViewerConfig on initial presentation and every config edit.
     in property <bool> keyboard-shortcuts-enabled: false;
+    // Clean screen (Ctrl+0) hides the whole chrome without touching the CAD
+    // canvas. `chrome-visible` is the single gate the layout uses; it equals
+    // `application-ui` whenever clean-screen is off, so the default layout is
+    // byte-for-byte unchanged. Key handlers keep reading `application-ui`.
+    in-out property <bool> clean-screen: false;
+    out property <bool> chrome-visible: root.application-ui && !root.clean-screen;
+    // A fixed AutoCAD-default key whose backing capability does not exist yet
+    // reports this stable label (e.g. "F4", "Ctrl+S") so the host can show an
+    // explicit message instead of a silent no-op.
+    callback shortcut-unsupported(string);
     in property <bool> ribbon-visible: true;
     in property <bool> panels-visible: true;
     in property <bool> layer-panel-visible: true;
@@ -303,10 +313,42 @@ export component YacrWindow inherits Window {
                 return EventResult.reject;
             }
             if event.modifiers.alt || event.modifiers.meta { return EventResult.reject; }
-            if event.modifiers.control && !event.modifiers.shift
-                && (event.text == "o" || event.text == "O") && root.can-open {
-                root.open-requested();
-                return EventResult.accept;
+            if event.modifiers.control {
+                if !event.modifiers.shift && (event.text == "o" || event.text == "O") && root.can-open {
+                    root.open-requested();
+                    return EventResult.accept;
+                }
+                // Fixed AutoCAD-default view/UI toggles.
+                if !event.modifiers.shift && event.text == "1" {
+                    root.side-panel-open = !root.side-panel-open;
+                    return EventResult.accept;
+                }
+                if !event.modifiers.shift && event.text == "9" && root.command-visible {
+                    root.command-expanded = !root.command-expanded;
+                    return EventResult.accept;
+                }
+                if !event.modifiers.shift && event.text == "0" {
+                    root.clean-screen = !root.clean-screen;
+                    return EventResult.accept;
+                }
+                // Fixed keys whose backing capability does not exist yet: never
+                // a silent no-op, report the stable label to the host.
+                if !event.modifiers.shift && (event.text == "n" || event.text == "N") {
+                    root.shortcut-unsupported("Ctrl+N");
+                    return EventResult.accept;
+                }
+                if event.modifiers.shift && (event.text == "s" || event.text == "S") {
+                    root.shortcut-unsupported("Ctrl+Shift+S");
+                    return EventResult.accept;
+                }
+                if !event.modifiers.shift && (event.text == "s" || event.text == "S") {
+                    root.shortcut-unsupported("Ctrl+S");
+                    return EventResult.accept;
+                }
+                if !event.modifiers.shift && (event.text == "p" || event.text == "P") {
+                    root.shortcut-unsupported("Ctrl+P");
+                    return EventResult.accept;
+                }
             }
             if !event.modifiers.control && !event.modifiers.shift {
                 if event.text == Key.Escape && root.command-visible
@@ -315,12 +357,33 @@ export component YacrWindow inherits Window {
                     root.command-completion-dismissed();
                     return EventResult.accept;
                 }
+                // AutoCAD defaults: F7 grid, F3 the snap-hint marker overlay.
+                // F3 toggles that marker overlay only; it is NOT a running-OSNAP
+                // enable (no such capability exists yet).
+                if event.text == Key.F7 {
+                    root.overlay-toggled("grid", !root.overlay-grid);
+                    return EventResult.accept;
+                }
+                if event.text == Key.F3 {
+                    root.overlay-toggled("snapHints", !root.overlay-snap-hints);
+                    return EventResult.accept;
+                }
                 if event.text == Key.F2 && root.command-visible {
                     // This expands the existing command/status row, not a
                     // nonexistent full command-history browser.
                     root.command-expanded = !root.command-expanded;
                     return EventResult.accept;
                 }
+                // Function keys without a backing capability yet.
+                if event.text == Key.F1 { root.shortcut-unsupported("F1"); return EventResult.accept; }
+                if event.text == Key.F4 { root.shortcut-unsupported("F4"); return EventResult.accept; }
+                if event.text == Key.F5 { root.shortcut-unsupported("F5"); return EventResult.accept; }
+                if event.text == Key.F6 { root.shortcut-unsupported("F6"); return EventResult.accept; }
+                if event.text == Key.F8 { root.shortcut-unsupported("F8"); return EventResult.accept; }
+                if event.text == Key.F9 { root.shortcut-unsupported("F9"); return EventResult.accept; }
+                if event.text == Key.F10 { root.shortcut-unsupported("F10"); return EventResult.accept; }
+                if event.text == Key.F11 { root.shortcut-unsupported("F11"); return EventResult.accept; }
+                if event.text == Key.F12 { root.shortcut-unsupported("F12"); return EventResult.accept; }
                 if event.text == Key.Escape && root.cancel-interaction() {
                     return EventResult.accept;
                 }
@@ -328,7 +391,8 @@ export component YacrWindow inherits Window {
             return EventResult.reject;
         }
         // Bubbled events only: a focused LineEdit gets first refusal for its
-        // local undo/redo and Ctrl+Home. Disabled/unimplemented actions reject.
+        // local undo/redo, select-all, clipboard and Ctrl+Home. Disabled or
+        // not-yet-existing actions reject or report explicitly.
         key-pressed(event) => {
             if !root.application-ui || !root.keyboard-shortcuts-enabled
                 || event.modifiers.alt || event.modifiers.meta || !event.modifiers.control {
@@ -337,6 +401,17 @@ export component YacrWindow inherits Window {
             if !event.modifiers.shift && (event.text == "a" || event.text == "A") {
                 // Text editors get first refusal for their own local select-all.
                 root.select-all-requested(); return EventResult.accept;
+            }
+            // Clipboard keys keep editor first refusal; with no editor the
+            // capability does not exist yet, so report it explicitly.
+            if !event.modifiers.shift && (event.text == "c" || event.text == "C") {
+                root.shortcut-unsupported("Ctrl+C"); return EventResult.accept;
+            }
+            if !event.modifiers.shift && (event.text == "x" || event.text == "X") {
+                root.shortcut-unsupported("Ctrl+X"); return EventResult.accept;
+            }
+            if !event.modifiers.shift && (event.text == "v" || event.text == "V") {
+                root.shortcut-unsupported("Ctrl+V"); return EventResult.accept;
             }
             if (event.text == "z" || event.text == "Z") && root.work-mode {
                 if event.modifiers.shift && root.can-redo {
@@ -357,7 +432,7 @@ export component YacrWindow inherits Window {
         }
     VerticalBox {
         padding: 0px; spacing: 0px;
-        if root.application-ui : Rectangle {
+        if root.chrome-visible : Rectangle {
             height: root.phone-shell ? 52px : 36px;
             background: CadTheme.chrome;
             HorizontalBox {
@@ -378,7 +453,7 @@ export component YacrWindow inherits Window {
                     clicked => { root.tools-open = !root.tools-open; root.ribbon-expanded = true; root.ribbon-tab = 3; } }
             }
         }
-        if root.application-ui && root.ribbon-visible && !root.phone-shell : CadRibbon {
+        if root.chrome-visible && root.ribbon-visible && !root.phone-shell : CadRibbon {
             phone: root.phone-shell;
             compact: root.compact-shell;
             target: root.phone-shell ? 48px : 36px;
@@ -439,7 +514,7 @@ export component YacrWindow inherits Window {
         workspace-area := HorizontalBox {
             padding: 0px; spacing: 0px;
             vertical-stretch: 1;
-        if root.application-ui && root.panels-visible && !root.phone-shell && !root.resources-open && !root.view3d-open && (root.side-panel-open || root.diagnostics-open) : CadPanels {
+        if root.chrome-visible && root.panels-visible && !root.phone-shell && !root.resources-open && !root.view3d-open && (root.side-panel-open || root.diagnostics-open) : CadPanels {
             width: 240px; vertical-stretch: 1;
             phone: root.phone-shell;
             work: root.work-mode;
@@ -473,7 +548,7 @@ export component YacrWindow inherits Window {
             layer(i, v) => { root.layer-visibility-toggled(i, v); }
             layout(i) => { root.layout-selected(i); }
         }
-        if root.application-ui && root.panels-visible && !root.phone-shell && root.resources-open : CadResourcesDrawer {
+        if root.chrome-visible && root.panels-visible && !root.phone-shell && root.resources-open : CadResourcesDrawer {
             width: 240px; vertical-stretch: 1;
             phone: root.phone-shell;
             title: root.resources-title;
@@ -482,7 +557,7 @@ export component YacrWindow inherits Window {
             rows: root.resources-rows;
             close => { root.resources-open = false; root.resources-closed(); }
         }
-        if root.application-ui && root.panels-visible && !root.phone-shell && root.view3d-open : CadView3dDrawer {
+        if root.chrome-visible && root.panels-visible && !root.phone-shell && root.view3d-open : CadView3dDrawer {
             width: 240px; vertical-stretch: 1;
             phone: root.phone-shell;
             title: root.view3d-title;
@@ -519,7 +594,7 @@ export component YacrWindow inherits Window {
                 scroll(x, y) => { root.scroll-input(x, y); }
                 pick(x, y) => { root.canvas-pick(x, y); }
             }
-            if root.application-ui && root.navigation-visible : Rectangle {
+            if root.chrome-visible && root.navigation-visible : Rectangle {
                 x: parent.width - 64px; y: 20px; width: 48px; height: 192px;
                 border-radius: 8px; border-width: 1px; border-color: #5a5a5a; background: #2b2b2bdd;
                 ConceptButton { y: 0px; text: root.fit-label; symbol: "⊡"; foreground: #d9d9d9; icon-only: true; width: 48px; height: 48px;
@@ -531,14 +606,14 @@ export component YacrWindow inherits Window {
                 ConceptButton { y: 144px; text: root.zoom-out-label; symbol: "zoom-out"; foreground: #d9d9d9; icon-only: true; width: 48px; height: 48px;
                     clicked => { root.zoom-requested(0.8); } }
             }
-            if root.application-ui && root.layouts-visible && root.phone-shell : ComboBox {
+            if root.chrome-visible && root.layouts-visible && root.phone-shell : ComboBox {
                 x: 12px; y: 16px; width: 140px; height: 48px;
                 model: root.layout-labels; current-index: root.layout-active-index + 1;
                 selected(value) => { root.layout-selected(self.current-index - 1); }
             }
         }
         }
-        if root.application-ui && root.panels-visible && root.phone-shell && !root.resources-open && !root.view3d-open && (root.side-panel-open || root.diagnostics-open) : CadPanels {
+        if root.chrome-visible && root.panels-visible && root.phone-shell && !root.resources-open && !root.view3d-open && (root.side-panel-open || root.diagnostics-open) : CadPanels {
             height: 240px; phone: true; work: root.work-mode;
             labels: [root.layer-panel-label, root.layer-restore-label, root.diagnostics-close-label,
                 root.layer-empty-label, root.layout-panel-label, root.layout-model-space-label,
@@ -570,7 +645,7 @@ export component YacrWindow inherits Window {
             layer(i, v) => { root.layer-visibility-toggled(i, v); }
             layout(i) => { root.layout-selected(i); }
         }
-        if root.application-ui && root.panels-visible && root.phone-shell && root.resources-open : CadResourcesDrawer {
+        if root.chrome-visible && root.panels-visible && root.phone-shell && root.resources-open : CadResourcesDrawer {
             height: 240px; phone: true;
             title: root.resources-title;
             close-label: root.resources-close-label;
@@ -578,7 +653,7 @@ export component YacrWindow inherits Window {
             rows: root.resources-rows;
             close => { root.resources-open = false; root.resources-closed(); }
         }
-        if root.application-ui && root.panels-visible && root.phone-shell && root.view3d-open : CadView3dDrawer {
+        if root.chrome-visible && root.panels-visible && root.phone-shell && root.view3d-open : CadView3dDrawer {
             height: 240px; phone: true;
             title: root.view3d-title;
             close-label: root.view3d-close-label;
@@ -602,13 +677,13 @@ export component YacrWindow inherits Window {
             toggle-projection => { root.toggle-projection-requested(); }
             standard-view(i) => { root.standard-view-selected(root.standard-view-labels[i]); }
         }
-        if root.application-ui && root.measurement-active : HorizontalBox {
+        if root.chrome-visible && root.measurement-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
             ComboBox { model: root.measurement-kind-labels; current-index: root.measurement-kind-index; selected(v) => { root.measure-kind-selected(v); } }
             Button { text: root.measure-confirm-label; enabled: root.measurement-can-confirm; clicked => { root.confirm-measurement-requested(); } }
             Button { text: root.measure-cancel-label; clicked => { root.cancel-measurement-requested(); } }
         }
-        if root.application-ui && root.draw-tool-active : HorizontalBox {
+        if root.chrome-visible && root.draw-tool-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
             Text { text: root.draw-step-label; color: #c8d0dc; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
             Button { text: root.draw-confirm-label; enabled: root.draw-can-confirm; min-height: root.phone-shell ? 48px : 36px; clicked => { root.confirm-draw-requested(); } }
@@ -617,7 +692,7 @@ export component YacrWindow inherits Window {
         // Asynchronous open progress (F01). Hidden while idle; shows a real
         // percent only when the importer reported a total, otherwise an
         // indeterminate bar.
-        if root.application-ui && root.import-active : HorizontalBox {
+        if root.chrome-visible && root.import-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
             Text { text: root.import-phase-label; color: #c8d0dc; vertical-alignment: center; }
             ProgressIndicator {
@@ -632,7 +707,7 @@ export component YacrWindow inherits Window {
                 clicked => { root.cancel-open-requested(); }
             }
         }
-        if root.application-ui && root.command-visible && (!root.phone-shell || root.command-expanded) : CadCommandBar {
+        if root.chrome-visible && root.command-visible && (!root.phone-shell || root.command-expanded) : CadCommandBar {
             phone: root.phone-shell;
             title: root.command-title;
             prompt: root.command-prompt;
@@ -661,7 +736,7 @@ export component YacrWindow inherits Window {
             mode-toggled => { root.mode-toggled(); }
             submit(value) => { return root.command-submitted(value); }
         }
-        if root.application-ui && root.layouts-visible && !root.phone-shell : Rectangle {
+        if root.chrome-visible && root.layouts-visible && !root.phone-shell : Rectangle {
             height: 36px; background: CadTheme.chrome;
             ScrollView {
                 HorizontalBox {
@@ -675,7 +750,7 @@ export component YacrWindow inherits Window {
                 }
             }
         }
-        if root.application-ui && root.status-visible && !root.phone-shell : Rectangle {
+        if root.chrome-visible && root.status-visible && !root.phone-shell : Rectangle {
             height: 26px; background: CadTheme.chrome;
             HorizontalBox {
                 padding: 0px; padding-left: 12px; padding-right: 4px; spacing: 2px;
@@ -694,7 +769,7 @@ export component YacrWindow inherits Window {
                     clicked => { root.overlay-toggled("snapHints", !root.overlay-snap-hints); } }
             }
         }
-        if root.application-ui && root.ribbon-visible && root.phone-shell && root.tools-open : CadRibbon {
+        if root.chrome-visible && root.ribbon-visible && root.phone-shell && root.tools-open : CadRibbon {
             phone: true; target: 48px; expanded: true; tab <=> root.ribbon-tab;
             tabs: root.ribbon-tabs;
             labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
@@ -747,7 +822,7 @@ export component YacrWindow inherits Window {
         // pushed layout, with the active row checked. The list stays short to
         // respect the drawer height budget; an explicit pushed empty label is
         // shown when the host has no layouts yet.
-        if root.application-ui && root.phone-shell && root.tools-open && root.layouts-visible : Rectangle {
+        if root.chrome-visible && root.phone-shell && root.tools-open && root.layouts-visible : Rectangle {
             height: 52px; background: CadTheme.chrome;
             ScrollView {
                 HorizontalBox {
@@ -765,7 +840,7 @@ export component YacrWindow inherits Window {
                 }
             }
         }
-        if root.application-ui && root.phone-shell : Rectangle {
+        if root.chrome-visible && root.phone-shell : Rectangle {
             height: 76px; background: CadTheme.chrome;
             HorizontalBox {
                 padding: 4px; spacing: 0px;

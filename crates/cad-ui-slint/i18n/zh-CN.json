@@ -141,6 +141,7 @@
   "command.prompt": "OPEN / FIT / LINE / CIRCLE / MOVE / TRIM",
   "command.unknown": "未知命令：{command}",
   "command.unsupported": "命令 {command} 暂不支持",
+  "shortcut.unsupported": "快捷键 {key} 暂无对应功能",
   "host.language_label": "语言",
   "host.open_drawing": "打开 DWG / DXF",
   "host.retry_renderer": "使用 WebGL2 重试",

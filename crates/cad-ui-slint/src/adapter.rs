@@ -272,6 +272,29 @@ impl UiAdapter {
         crate::layer_search::connect(&ui);
 
         {
+            // Fixed AutoCAD-default keymap: keys whose backing capability does
+            // not exist yet report an explicit localized "unsupported" message
+            // and expand the command row. Limitation: that feedback renders in
+            // the command/status chrome, which clean screen (Ctrl+0) hides, so
+            // under clean screen the message is set but not visible; this is
+            // documented, not presented as visible feedback.
+            let weak = ui_weak.clone();
+            let messages = messages_slot.clone();
+            ui.on_shortcut_unsupported(move |key| {
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                ui.set_status_label(
+                    messages
+                        .borrow()
+                        .text("shortcut.unsupported", &[("key", key.as_str())])
+                        .into(),
+                );
+                ui.set_command_expanded(true);
+            });
+        }
+
+        {
             // Desktop status-bar overlay toggles. The click must be a real config
             // change: it merges one `view.overlays.*` flag into the store, then
             // re-derives and re-pushes the presentation, so a host sees the new

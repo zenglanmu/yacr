@@ -1,6 +1,27 @@
 # 后续 agent 接手入口
 
-## 端到端巡检：清理失效的导出/导入控件（2026-10-10，本轮）
+## 固定 AutoCAD 默认键位映射（2026-10-10，本轮）
+
+用户要求：接入一套固定（不可重绑定）的 AutoCAD 默认键位到**已存在**命令/开关，并对尚无
+后端能力的按键显式“不支持”，不得静默。
+
+- 键位表放在 `crates/cad-ui-slint/ui/app.slint`（键字符串为 Slint 私有）；Rust 只负责分发。
+  新增 `shortcut-unsupported(string)` 回调 + 双语 `shortcut.unsupported`，在 `adapter.rs`
+  写入状态栏并展开命令行。
+- 视图/UI 开关：F7 网格、F3 捕捉提示标记叠加、F2/Ctrl+9 命令行展开、Ctrl+1 侧栏、Ctrl+0
+  净屏（新增 `clean-screen`；布局统一改读 `chrome-visible`，默认等价 `application-ui`）。
+- 显式不支持：F1、F4–F6、F8–F12、Ctrl+N/S/Shift+S/P/C/X/V（后续阶段落地）。
+- 诚实替代（不夸大）：F2/Ctrl+9 是命令行**展开**，非历史浏览器/命令可见性；Ctrl+1 是侧栏，
+  非属性选项板；F3 是捕捉**标记叠加**，非运行 OSNAP；均受 `command-visible`/配置约束。
+- 已知限制：净屏（Ctrl+0）会隐藏 chrome，故不支持文案虽写入 `status_label` 却不可见
+  （由 `shortcut_map_wiring.rs` 固定，不宣称可见反馈）。
+- 门控：整表仍受 `application-ui && keyboardShortcuts` 约束，不吞 Alt/Meta；文本编辑器保留
+  Ctrl+Z/Y/A/C/X/V 与 Ctrl+Home 的优先处理。
+- 验证（本机）：`cargo fmt --all`；`cargo clippy -p cad-ui-slint --all-targets --locked -- -D warnings`；
+  `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败）；
+  `check-i18n.py`、`check-workflows.py` 通过。均为合成/离屏证据，未做真实窗口/GPU/真机验收。
+
+## 端到端巡检：清理失效的导出/导入控件（2026-10-10）
 
 用户要求：对 Linux 客户端做端到端测试，找出可能的 bug、修复并提交。
 

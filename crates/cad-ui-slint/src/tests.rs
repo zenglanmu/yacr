@@ -79,7 +79,7 @@ fn phone_drawer_reaches_the_layout_list() {
     // is the following `root.phone-shell : Rectangle` arm.
     let tail = &UI_DEFINITION[start..];
     let end = tail
-        .find("if root.application-ui && root.phone-shell : Rectangle")
+        .find("if root.chrome-visible && root.phone-shell : Rectangle")
         .expect("phone bottom bar must follow the drawer layout strip");
     let drawer = &tail[..end];
 
