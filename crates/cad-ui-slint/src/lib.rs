@@ -37,6 +37,9 @@ pub mod offscreen;
 mod layer_search;
 pub mod status;
 
+mod resources;
+pub use resources::*;
+
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 
@@ -116,6 +119,12 @@ pub struct UiHandle {
     /// Mirrors the pushed 3D view mode; gates orbit-by-drag and the 2D/3D
     /// affordance. Set through [`UiHandle::set_view_state`].
     view_3d: Rc<Cell<bool>>,
+    /// Last pushed view state, so a locale switch re-derives the 3D observation
+    /// drawer's standard-view/orbit labels without a host re-push (F13).
+    view_state: Rc<Cell<ViewStateUi>>,
+    /// Last pushed resources sections (F10), so a locale switch re-derives the
+    /// localized rows from the raw source data.
+    resources_sections: Rc<RefCell<Option<ResourceSections>>>,
     /// Last authoritative mode, so a locale switch re-emits the correct mode
     /// label instead of resetting it to a default (audit U02).
     work_mode: Rc<Cell<bool>>,
@@ -161,6 +170,12 @@ pub struct UiAdapter {
     /// Mirrors the pushed 3D view mode so a left drag in 3D emits `Orbit`
     /// instead of being routed as a 2D navigation gesture.
     view_3d: Rc<Cell<bool>>,
+    /// Last pushed view state, shared with handles so a locale switch re-derives
+    /// the 3D observation drawer labels (F13).
+    view_state: Rc<Cell<ViewStateUi>>,
+    /// Last pushed resources sections, shared with handles so a locale switch
+    /// re-derives the localized drawer rows (F10).
+    resources_sections: Rc<RefCell<Option<ResourceSections>>>,
     /// Last authoritative mode, shared with handles so a locale switch can
     /// re-emit the correct mode label (audit U02).
     work_mode: Rc<Cell<bool>>,

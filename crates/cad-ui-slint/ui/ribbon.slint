@@ -42,6 +42,9 @@ export component CadRibbon inherits Rectangle {
     }
     in property <[string]> labels;
     in property <[string]> measurements;
+    // Drawer entry labels (F10/F13): resources and the 3D observation panel.
+    in property <string> resources-label;
+    in property <string> view3d-label;
     in property <[string]> standard-views;
     in property <[string]> backends;
     in property <int> backend-index;
@@ -183,6 +186,8 @@ export component CadRibbon inherits Rectangle {
                         alignment: start;
                         Button { text: root.labels[5]; symbol: "layers"; min-height: root.target; clicked => { root.action(6); } }
                         Button { text: root.labels[11]; symbol: "info"; min-height: root.target; clicked => { root.action(12); } }
+                        Button { text: root.resources-label; symbol: "▤"; min-height: root.target; clicked => { root.action(13); } }
+                        Button { text: root.view3d-label; symbol: "3d"; min-height: root.target; clicked => { root.action(14); } }
                         ComboBox { model: root.backends; enabled: root.can-switch-backend; current-index: root.backend-index; min-height: root.target; selected(value) => { root.backend(value); } }
                     }
                     HorizontalBox {

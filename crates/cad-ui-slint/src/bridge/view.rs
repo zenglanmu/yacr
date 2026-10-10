@@ -86,6 +86,7 @@ impl CadView {
         }
         let perspective = !snapshot.camera.projection.is_orthographic();
         let is_3d = snapshot.mode == ProjectionKind::ThreeD;
+        let standard_view = crate::state::standard_view_for_camera(&snapshot.camera);
         let changed = {
             let mut state = self.state.borrow_mut();
             let changed = state.view != snapshot;
@@ -102,8 +103,11 @@ impl CadView {
             return Ok(());
         }
         self.state.borrow_mut().runtime.dirty.invalidate();
-        self.handle
-            .set_view_state(crate::ViewStateUi { is_3d, perspective })?;
+        self.handle.set_view_state(crate::ViewStateUi {
+            is_3d,
+            perspective,
+            standard_view,
+        })?;
         self.request_redraw();
         Ok(())
     }

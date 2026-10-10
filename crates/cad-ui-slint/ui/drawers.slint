@@ -1,0 +1,148 @@
+// Application drawers that show real adapter state: resources (F10) and the
+// consolidated 3D observation panel (F13). Kept separate from `panels.slint`
+// so the layer/property/diagnostics contract stays byte-for-byte stable.
+import { VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Button } from "button.slint";
+import { CadTheme } from "theme.slint";
+
+// One resource line; `section` is set on the first row of a section only.
+export struct ResourceRow { section: string, label: string, value: string }
+
+// Resources drawer (F10). Rows are real host data; an empty model shows the
+// explicit catalog empty state, never a fabricated row.
+export component CadResourcesDrawer inherits Rectangle {
+    in property <bool> phone;
+    in property <string> title;
+    in property <string> close-label;
+    in property <string> empty-label;
+    in property <[ResourceRow]> rows;
+    callback close();
+    min-height: 0px; min-width: 0px;
+    preferred-height: 210px;
+    background: CadTheme.chrome;
+    border-color: CadTheme.border; border-width: 1px;
+    ScrollView {
+        VerticalBox {
+            padding: 6px; spacing: 6px; alignment: start;
+            HorizontalBox {
+                Text {
+                    text: root.title; color: CadTheme.ink;
+                    vertical-alignment: center; horizontal-stretch: 1; overflow: elide;
+                }
+                Button {
+                    text: root.close-label; symbol: "×"; icon-only: true;
+                    min-width: 48px; preferred-width: 48px; min-height: 48px;
+                    clicked => { root.close(); }
+                }
+            }
+            if root.rows.length == 0 : Text {
+                text: root.empty-label; color: CadTheme.muted; wrap: word-wrap;
+            }
+            for row in root.rows : VerticalBox {
+                padding: 0px; spacing: 2px;
+                if row.section != "" : Text {
+                    text: row.section; color: CadTheme.accent; font-size: 12px; wrap: word-wrap;
+                }
+                if row.label != "" : Text {
+                    text: row.label; color: CadTheme.muted; font-size: 12px; wrap: word-wrap;
+                }
+                Text { text: row.value; color: CadTheme.ink; wrap: word-wrap; }
+            }
+        }
+    }
+}
+
+// Consolidated 3D observation drawer (F13). Every control routes through an
+// existing shell callback or, when the build cannot dispatch it, shows an
+// explicit reason instead of pretending to be interactive.
+export component CadView3dDrawer inherits Rectangle {
+    in property <bool> phone;
+    in property <string> title;
+    in property <string> close-label;
+    in property <bool> view-3d;
+    in property <bool> view-perspective;
+    in property <string> mode-label;
+    in property <string> view-2d-label;
+    in property <string> view-3d-label;
+    in property <string> projection-label;
+    in property <string> ortho-label;
+    in property <string> perspective-label;
+    in property <string> standard-label;
+    in property <[string]> standard-views;
+    in property <int> standard-index: -1;
+    in property <string> orbit-label;
+    in property <string> orbit-status;
+    in property <string> fit-label;
+    in property <string> fit-reason;
+    callback close();
+    callback toggle-view-mode();
+    callback toggle-projection();
+    callback standard-view(int);
+    min-height: 0px; min-width: 0px;
+    preferred-height: 210px;
+    background: CadTheme.chrome;
+    border-color: CadTheme.border; border-width: 1px;
+    ScrollView {
+        VerticalBox {
+            padding: 6px; spacing: 6px; alignment: start;
+            HorizontalBox {
+                Text {
+                    text: root.title; color: CadTheme.ink;
+                    vertical-alignment: center; horizontal-stretch: 1; overflow: elide;
+                }
+                Button {
+                    text: root.close-label; symbol: "×"; icon-only: true;
+                    min-width: 48px; preferred-width: 48px; min-height: 48px;
+                    clicked => { root.close(); }
+                }
+            }
+            // Observation mode: the current mode is the checked segment.
+            Text { text: root.mode-label; color: CadTheme.muted; font-size: 12px; }
+            HorizontalBox {
+                padding: 0px; spacing: 4px;
+                Button {
+                    text: root.view-2d-label; checked: !root.view-3d;
+                    min-width: 0px; horizontal-stretch: 1; min-height: 48px;
+                    clicked => { if root.view-3d { root.toggle-view-mode(); } }
+                }
+                Button {
+                    text: root.view-3d-label; checked: root.view-3d;
+                    min-width: 0px; horizontal-stretch: 1; min-height: 48px;
+                    clicked => { if !root.view-3d { root.toggle-view-mode(); } }
+                }
+            }
+            // Projection: independent of the 2D/3D toggle, as in the app.
+            Text { text: root.projection-label; color: CadTheme.muted; font-size: 12px; }
+            HorizontalBox {
+                padding: 0px; spacing: 4px;
+                Button {
+                    text: root.ortho-label; checked: !root.view-perspective;
+                    min-width: 0px; horizontal-stretch: 1; min-height: 48px;
+                    clicked => { if root.view-perspective { root.toggle-projection(); } }
+                }
+                Button {
+                    text: root.perspective-label; checked: root.view-perspective;
+                    min-width: 0px; horizontal-stretch: 1; min-height: 48px;
+                    clicked => { if !root.view-perspective { root.toggle-projection(); } }
+                }
+            }
+            // Standard views: the active view is the checked row; selecting a row
+            // routes through the shared `standard-view-selected` callback.
+            Text { text: root.standard-label; color: CadTheme.muted; font-size: 12px; }
+            for label[index] in root.standard-views : Button {
+                text: label; checked: root.standard-index == index;
+                enabled: root.view-3d;
+                min-width: 0px; horizontal-stretch: 1; min-height: 40px;
+                clicked => { root.standard-view(index); }
+            }
+            // Orbit is the drag interaction on the canvas; the status line states
+            // the real model (and why it is unavailable in 2D).
+            Text { text: root.orbit-label; color: CadTheme.muted; font-size: 12px; }
+            Text { text: root.orbit-status; color: CadTheme.ink; font-size: 12px; wrap: word-wrap; }
+            // 3D zoom-to-fit is not implemented; the control is display-only with
+            // the concrete reason, matching the ribbon's needs-target pattern.
+            Button { text: root.fit-label; enabled: false; min-width: 0px; horizontal-stretch: 1; min-height: 40px; }
+            Text { text: root.fit-reason; color: CadTheme.muted; font-size: 12px; wrap: word-wrap; }
+        }
+    }
+}

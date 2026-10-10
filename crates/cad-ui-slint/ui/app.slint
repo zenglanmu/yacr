@@ -7,7 +7,9 @@ import { CadCanvas } from "canvas.slint";
 import { Button as ConceptButton } from "button.slint";
 import { CadTheme } from "theme.slint";
 import { CadPanels, LayerRow, PropertyRow, DiagnosticRow, LayoutRow } from "panels.slint";
+import { CadResourcesDrawer, CadView3dDrawer, ResourceRow } from "drawers.slint";
 export { LayerRow, PropertyRow, DiagnosticRow, LayoutRow } from "panels.slint";
+export { ResourceRow } from "drawers.slint";
 export { RibbonCommandModel, RibbonGroupModel, RibbonTabModel } from "ribbon-model.slint";
 import "../fonts/YacrUI-Regular.otf";
 
@@ -148,6 +150,13 @@ export component YacrWindow inherits Window {
     in property <string> layout-model-space-label;
     in property <string> layout-unsupported-marker;
     in property <string> layout-empty-label;
+    // Viewport-scale surface (F04): real per-layout scale or an explicit reason;
+    // the control is display-only while no scale command is wired.
+    in property <string> layout-scale-label;
+    in property <string> layout-scale-unavailable-label;
+    in property <string> layout-scale-control-label;
+    in property <string> layout-scale-control-reason;
+    in property <bool> layout-scale-control-available;
     in property <bool> view-3d;
     in property <bool> view-perspective;
     in property <string> view-panel-label;
@@ -164,6 +173,30 @@ export component YacrWindow inherits Window {
     in property <string> diagnostics-summary-label;
     in property <string> diagnostics-empty-label;
     in property <[DiagnosticRow]> diagnostics-rows;
+    // Resources drawer (F10). Real host-pushed state only; an empty model shows
+    // the explicit catalog empty state.
+    in-out property <bool> resources-open;
+    in property <string> resources-label;
+    in property <string> resources-title;
+    in property <string> resources-close-label;
+    in property <string> resources-empty-label;
+    in property <[ResourceRow]> resources-rows;
+    callback resources-requested();
+    callback resources-closed();
+    // 3D observation drawer (F13). Consolidates mode, projection, standard view
+    // and the orbit interaction model; unwired controls carry a reason.
+    in-out property <bool> view3d-open;
+    in property <string> view3d-label;
+    in property <string> view3d-title;
+    in property <string> view3d-close-label;
+    in property <string> view-standard-label;
+    in property <string> view-orbit-label;
+    in property <string> view-orbit-status;
+    in property <int> view-standard-index: -1;
+    in property <string> view-fit-label;
+    in property <string> view-fit-reason;
+    callback view3d-requested();
+    callback view3d-closed();
     in property <bool> import-active;
     in property <string> import-phase-label;
     in property <string> import-progress-text;
@@ -249,6 +282,16 @@ export component YacrWindow inherits Window {
         if root.diagnostics-open {
             root.diagnostics-open = false;
             root.diagnostics-closed();
+            return true;
+        }
+        if root.resources-open {
+            root.resources-open = false;
+            root.resources-closed();
+            return true;
+        }
+        if root.view3d-open {
+            root.view3d-open = false;
+            root.view3d-closed();
             return true;
         }
         if root.tools-open { root.tools-open = false; return true; }
@@ -354,6 +397,8 @@ export component YacrWindow inherits Window {
             labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
                 root.measure-label, root.tools-label, root.view-2d-label,
                 root.view-3d-label, root.view-projection-label, root.export-label, root.import-label, root.diagnostics-label];
+            resources-label: root.resources-label;
+            view3d-label: root.view3d-label;
             standard-views: root.standard-view-labels;
             backends: root.backend-labels;
             backend-index: root.backend-index;
@@ -386,13 +431,27 @@ export component YacrWindow inherits Window {
                 if id == 9 { root.toggle-projection-requested(); }
                 if id == 10 { root.export-requested(); }
                 if id == 11 { root.import-requested(); }
-                if id == 12 { root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
+                if id == 12 { root.resources-open = false; root.view3d-open = false; root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
+                if id == 13 {
+                    root.diagnostics-open = false;
+                    root.view3d-open = false;
+                    root.side-panel-open = true;
+                    root.resources-open = !root.resources-open;
+                    if root.resources-open { root.resources-requested(); }
+                }
+                if id == 14 {
+                    root.diagnostics-open = false;
+                    root.resources-open = false;
+                    root.side-panel-open = true;
+                    root.view3d-open = !root.view3d-open;
+                    if root.view3d-open { root.view3d-requested(); }
+                }
             }
         }
         workspace-area := HorizontalBox {
             padding: 0px; spacing: 0px;
             vertical-stretch: 1;
-        if root.application-ui && root.panels-visible && !root.phone-shell && (root.side-panel-open || root.diagnostics-open) : CadPanels {
+        if root.application-ui && root.panels-visible && !root.phone-shell && !root.resources-open && !root.view3d-open && (root.side-panel-open || root.diagnostics-open) : CadPanels {
             width: 240px; vertical-stretch: 1;
             phone: root.phone-shell;
             work: root.work-mode;
@@ -414,11 +473,51 @@ export component YacrWindow inherits Window {
             layer-matching-count: root.layer-matching-count;
             diagnostics: root.diagnostics-rows;
             diagnostics-open: root.diagnostics-open; backend: root.diagnostics-backend-label;
+            layout-empty-label: root.layout-empty-label;
+            layout-scale-label: root.layout-scale-label;
+            layout-scale-unavailable-label: root.layout-scale-unavailable-label;
+            layout-scale-control-label: root.layout-scale-control-label;
+            layout-scale-control-reason: root.layout-scale-control-reason;
+            layout-scale-control-available: root.layout-scale-control-available;
             close => { root.side-panel-open = false; root.diagnostics-open = false; root.diagnostics-closed(); }
             restore => { root.restore-layers-requested(); }
             clear-selection => { root.clear-selection-requested(); }
             layer(i, v) => { root.layer-visibility-toggled(i, v); }
             layout(i) => { root.layout-selected(i); }
+        }
+        if root.application-ui && root.panels-visible && !root.phone-shell && root.resources-open : CadResourcesDrawer {
+            width: 240px; vertical-stretch: 1;
+            phone: root.phone-shell;
+            title: root.resources-title;
+            close-label: root.resources-close-label;
+            empty-label: root.resources-empty-label;
+            rows: root.resources-rows;
+            close => { root.resources-open = false; root.resources-closed(); }
+        }
+        if root.application-ui && root.panels-visible && !root.phone-shell && root.view3d-open : CadView3dDrawer {
+            width: 240px; vertical-stretch: 1;
+            phone: root.phone-shell;
+            title: root.view3d-title;
+            close-label: root.view3d-close-label;
+            view-3d: root.view-3d;
+            view-perspective: root.view-perspective;
+            mode-label: root.view-mode-label;
+            view-2d-label: root.view-2d-label;
+            view-3d-label: root.view-3d-label;
+            projection-label: root.view-projection-label;
+            ortho-label: root.view-ortho-label;
+            perspective-label: root.view-perspective-label;
+            standard-label: root.view-standard-label;
+            standard-views: root.standard-view-labels;
+            standard-index: root.view-standard-index;
+            orbit-label: root.view-orbit-label;
+            orbit-status: root.view-orbit-status;
+            fit-label: root.view-fit-label;
+            fit-reason: root.view-fit-reason;
+            close => { root.view3d-open = false; root.view3d-closed(); }
+            toggle-view-mode => { root.toggle-view-mode-requested(); }
+            toggle-projection => { root.toggle-projection-requested(); }
+            standard-view(i) => { root.standard-view-selected(root.standard-view-labels[i]); }
         }
         canvas-area := Rectangle {
             horizontal-stretch: 1; min-width: 0px; min-height: 0px; clip: true;
@@ -451,7 +550,7 @@ export component YacrWindow inherits Window {
             }
         }
         }
-        if root.application-ui && root.panels-visible && root.phone-shell && (root.side-panel-open || root.diagnostics-open) : CadPanels {
+        if root.application-ui && root.panels-visible && root.phone-shell && !root.resources-open && !root.view3d-open && (root.side-panel-open || root.diagnostics-open) : CadPanels {
             height: 240px; phone: true; work: root.work-mode;
             labels: [root.layer-panel-label, root.layer-restore-label, root.diagnostics-close-label,
                 root.layer-empty-label, root.layout-panel-label, root.layout-model-space-label,
@@ -471,11 +570,49 @@ export component YacrWindow inherits Window {
             layer-matching-count: root.layer-matching-count;
             diagnostics: root.diagnostics-rows;
             diagnostics-open: root.diagnostics-open; backend: root.diagnostics-backend-label;
+            layout-empty-label: root.layout-empty-label;
+            layout-scale-label: root.layout-scale-label;
+            layout-scale-unavailable-label: root.layout-scale-unavailable-label;
+            layout-scale-control-label: root.layout-scale-control-label;
+            layout-scale-control-reason: root.layout-scale-control-reason;
+            layout-scale-control-available: root.layout-scale-control-available;
             close => { root.side-panel-open = false; root.diagnostics-open = false; root.diagnostics-closed(); }
             restore => { root.restore-layers-requested(); }
             clear-selection => { root.clear-selection-requested(); }
             layer(i, v) => { root.layer-visibility-toggled(i, v); }
             layout(i) => { root.layout-selected(i); }
+        }
+        if root.application-ui && root.panels-visible && root.phone-shell && root.resources-open : CadResourcesDrawer {
+            height: 240px; phone: true;
+            title: root.resources-title;
+            close-label: root.resources-close-label;
+            empty-label: root.resources-empty-label;
+            rows: root.resources-rows;
+            close => { root.resources-open = false; root.resources-closed(); }
+        }
+        if root.application-ui && root.panels-visible && root.phone-shell && root.view3d-open : CadView3dDrawer {
+            height: 240px; phone: true;
+            title: root.view3d-title;
+            close-label: root.view3d-close-label;
+            view-3d: root.view-3d;
+            view-perspective: root.view-perspective;
+            mode-label: root.view-mode-label;
+            view-2d-label: root.view-2d-label;
+            view-3d-label: root.view-3d-label;
+            projection-label: root.view-projection-label;
+            ortho-label: root.view-ortho-label;
+            perspective-label: root.view-perspective-label;
+            standard-label: root.view-standard-label;
+            standard-views: root.standard-view-labels;
+            standard-index: root.view-standard-index;
+            orbit-label: root.view-orbit-label;
+            orbit-status: root.view-orbit-status;
+            fit-label: root.view-fit-label;
+            fit-reason: root.view-fit-reason;
+            close => { root.view3d-open = false; root.view3d-closed(); }
+            toggle-view-mode => { root.toggle-view-mode-requested(); }
+            toggle-projection => { root.toggle-projection-requested(); }
+            standard-view(i) => { root.standard-view-selected(root.standard-view-labels[i]); }
         }
         if root.application-ui && root.measurement-active : HorizontalBox {
             height: root.phone-shell ? 56px : 44px;
@@ -575,6 +712,8 @@ export component YacrWindow inherits Window {
             labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
                 root.measure-label, root.tools-label, root.view-2d-label,
                 root.view-3d-label, root.view-projection-label, root.export-label, root.import-label, root.diagnostics-label];
+            resources-label: root.resources-label;
+            view3d-label: root.view3d-label;
             measurements: root.measurement-kind-labels;
             standard-views: root.standard-view-labels; backends: root.backend-labels;
             backend-index: root.backend-index; view-3d: root.view-3d; work-mode: root.work-mode;
@@ -599,7 +738,21 @@ export component YacrWindow inherits Window {
                 if id == 9 { root.toggle-projection-requested(); }
                 if id == 10 { root.export-requested(); }
                 if id == 11 { root.import-requested(); }
-                if id == 12 { root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
+                if id == 12 { root.resources-open = false; root.view3d-open = false; root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
+                if id == 13 {
+                    root.diagnostics-open = false;
+                    root.view3d-open = false;
+                    root.side-panel-open = true;
+                    root.resources-open = !root.resources-open;
+                    if root.resources-open { root.resources-requested(); }
+                }
+                if id == 14 {
+                    root.diagnostics-open = false;
+                    root.resources-open = false;
+                    root.side-panel-open = true;
+                    root.view3d-open = !root.view3d-open;
+                    if root.view3d-open { root.view3d-requested(); }
+                }
             }
         }
         // Phone/compact layout strip. The desktop tabs below are hidden on a

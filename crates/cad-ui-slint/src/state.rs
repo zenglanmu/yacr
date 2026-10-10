@@ -63,12 +63,96 @@ impl MeasurementUiState {
 /// View/observation state pushed into the shell (F13/F14).
 ///
 /// `is_3d` drives the 2D/3D affordance and the adapter's orbit-by-drag gate;
-/// `perspective` drives the projection toggle's pressed state. Both are
-/// derivations of the authoritative application viewport, never invented here.
+/// `perspective` drives the projection toggle's pressed state. `standard_view`
+/// is the named view the authoritative camera currently matches, if any, so the
+/// observation drawer can mark the active row without a second camera copy.
+/// Every field is a derivation of the application viewport, never invented here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ViewStateUi {
     pub is_3d: bool,
     pub perspective: bool,
+    /// The standard view matching the active camera, or `None` for a free orbit.
+    pub standard_view: Option<cad_app::StandardView>,
+}
+
+/// The standard view a camera currently matches, if any (F13).
+///
+/// Compares the camera's view direction, up axis and projection family against
+/// every [`cad_app::StandardView`] within a small tolerance. `None` means the
+/// view is a free orbit (or an orientation that is not a named standard view);
+/// it is never guessed. Pure, so the observation drawer's active row is tested
+/// without a window.
+pub fn standard_view_for_camera(camera: &cad_app::Camera) -> Option<cad_app::StandardView> {
+    use cad_app::camera::{dot3, normalize3, ViewBasis};
+    const TOL: f64 = 1e-3;
+    let actual = camera.view_basis().ok()?;
+    for view in cad_app::StandardView::ALL {
+        let offset = normalize3(view.eye_offset())?;
+        // The camera looks from `target + offset * distance`, so its forward
+        // direction is the negated, normalised offset.
+        let forward = cad_domain::Point3 {
+            x: -offset.x,
+            y: -offset.y,
+            z: -offset.z,
+        };
+        let Ok(expected) = ViewBasis::from_forward_up(forward, view.up_hint()) else {
+            continue;
+        };
+        if dot3(actual.forward, expected.forward) < 1.0 - TOL
+            || dot3(actual.up, expected.up) < 1.0 - TOL
+        {
+            continue;
+        }
+        // Projection family must agree: the plan view is orthographic, the rest
+        // are 3D perspective views.
+        if view.is_plan() != camera.projection.is_orthographic() {
+            continue;
+        }
+        return Some(view);
+    }
+    None
+}
+
+/// 3D observation drawer snapshot (F13), derived from [`ViewStateUi`].
+///
+/// Consolidates the observation mode, projection, active standard view and the
+/// orbit interaction model into one pushable state. `orbit_available` and the
+/// fit reason are explicit: a control the build cannot dispatch shows why rather
+/// than faking a command. All text comes from the active catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct View3dPanelState {
+    pub is_3d: bool,
+    pub perspective: bool,
+    /// Index into [`cad_app::StandardView::ALL`] the camera matches, or `None`.
+    pub standard_view_index: Option<i32>,
+    /// Catalog labels for the standard-view selector, in `StandardView::ALL` order.
+    pub standard_view_labels: Vec<String>,
+    /// Whether drag-to-orbit is available (only in 3D mode).
+    pub orbit_available: bool,
+    /// Human-facing orbit status: the drag hint in 3D, the explicit reason in 2D.
+    pub orbit_status: String,
+    /// Explicit reason the 3D zoom-to-fit control cannot dispatch.
+    pub fit_reason: String,
+}
+
+impl View3dPanelState {
+    /// Derive the drawer state from the pushed view state and the catalog.
+    pub fn from_view_state(state: &ViewStateUi, messages: &MessageSource) -> Self {
+        let standard_view_index = state.standard_view.map(|view| view.index() as i32);
+        View3dPanelState {
+            is_3d: state.is_3d,
+            perspective: state.perspective,
+            standard_view_index,
+            standard_view_labels: crate::status::standard_view_labels(messages),
+            orbit_available: state.is_3d,
+            orbit_status: if state.is_3d {
+                messages.text("view.orbit.drag", &[])
+            } else {
+                messages.text("view.orbit.needs_3d", &[])
+            },
+            fit_reason: messages.text("view.fit3d_unavailable", &[]),
+        }
+    }
 }
 
 /// Mode switch state pushed into the shell (audit U02).
@@ -275,7 +359,21 @@ pub struct LayoutRowUi {
     pub supported: bool,
     pub reason: String,
     pub viewport_count: i32,
+    /// Real viewport scale text (e.g. `1:100`) pushed by the host, if any.
+    ///
+    /// `None` means the host has not pushed a scale for this layout, so the
+    /// panel shows an explicit "scale unavailable" reason instead of inventing a
+    /// ratio. The representation descriptors do not carry a scale, so
+    /// [`LayoutPanelState::from_descriptors`] always starts `None`.
+    pub viewport_scale: Option<String>,
 }
+
+/// True while no application command changes a layout's viewport scale.
+///
+/// `cad-app::CommandId` has no viewport-scale variant, so the layout panel
+/// surfaces the scale read-only and explains why. Flipping this when such a
+/// command lands makes the panel interactive without a shell change.
+pub const LAYOUT_SCALE_CONTROL_WIRED: bool = false;
 
 /// Layout-panel snapshot derived from the database's real layout table.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -285,6 +383,12 @@ pub struct LayoutPanelState {
     pub active_index: Option<i32>,
     /// Explicit empty-state text shown when the drawing has no paper layouts.
     pub empty_label: String,
+    /// Whether the host can dispatch a viewport-scale change from the panel.
+    ///
+    /// There is no `CommandId` for viewport scale, so this stays false and the
+    /// control renders disabled with an explicit reason. Kept as a field so a
+    /// future command can enable it without touching the shell.
+    pub scale_control_available: bool,
 }
 
 impl LayoutPanelState {
@@ -304,6 +408,8 @@ impl LayoutPanelState {
                 supported: d.supported,
                 reason: d.reason.clone(),
                 viewport_count: d.viewport_count as i32,
+                // The descriptors carry no scale; a host pushes it explicitly.
+                viewport_scale: None,
             })
             .collect();
         let active_index = active.layout().and_then(|id| {
@@ -316,6 +422,22 @@ impl LayoutPanelState {
             rows,
             active_index,
             empty_label: empty_label.into(),
+            scale_control_available: LAYOUT_SCALE_CONTROL_WIRED,
+        }
+    }
+
+    /// Attach a real viewport scale to the layout row at `index`.
+    ///
+    /// Hosts map a layout's per-viewport transform to a display string (for
+    /// example `1:100`) and call this before pushing the state. Returns false
+    /// when `index` is out of range, so a bad index can never invent a row.
+    pub fn set_viewport_scale(&mut self, index: usize, scale: impl Into<String>) -> bool {
+        match self.rows.get_mut(index) {
+            Some(row) => {
+                row.viewport_scale = Some(scale.into());
+                true
+            }
+            None => false,
         }
     }
 }

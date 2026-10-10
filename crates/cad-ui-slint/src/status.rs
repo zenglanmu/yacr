@@ -247,6 +247,19 @@ pub fn mode_label(messages: &MessageSource, mode: cad_app::AppMode) -> String {
     }
 }
 
+/// Catalog label for a layout whose viewport scale the host has not pushed.
+pub fn layout_scale_unavailable_label(messages: &MessageSource) -> String {
+    messages.text("layout.scale_unavailable", &[])
+}
+
+/// Catalog reason shown on the (disabled) viewport-scale control.
+///
+/// There is no `cad-app` command to change a layout's viewport scale, so the
+/// control explains that rather than pretending to be interactive.
+pub fn layout_scale_control_reason(messages: &MessageSource) -> String {
+    messages.text("layout.scale_control_unavailable", &[])
+}
+
 /// The catalog key for a stable measurement kind key (e.g. `distance`).
 pub fn measurement_kind_key(kind_key: &str) -> String {
     format!("measure.kind.{kind_key}")

@@ -253,10 +253,14 @@ impl UiHandle {
     /// shared flag the adapter uses to route a 3D drag to `Orbit`.
     pub fn set_view_state(&self, state: ViewStateUi) -> CadResult<()> {
         self.view_3d.set(state.is_3d);
+        self.view_state.set(state);
+        let messages = self.messages.borrow().clone();
+        let panel = View3dPanelState::from_view_state(&state, &messages);
         self.with(|ui| {
             ui.set_view_3d(state.is_3d);
             ui.set_view_perspective(state.perspective);
-        })
+        })?;
+        self.set_view3d_state(&panel)
     }
 
     pub fn set_status(&self, status: impl Into<slint::SharedString>) -> CadResult<()> {
@@ -401,11 +405,16 @@ impl UiHandle {
                 supported: row.supported,
                 reason: row.reason.clone().into(),
                 viewport_count: row.viewport_count,
+                scale: row.viewport_scale.clone().unwrap_or_default().into(),
             })
             .collect();
         let model = slint::ModelRc::new(slint::VecModel::from(rows));
         let active = state.active_index.unwrap_or(-1);
         let empty = state.empty_label.clone();
+        let messages = self.messages.borrow().clone();
+        let scale_unavailable = crate::status::layout_scale_unavailable_label(&messages);
+        let scale_reason = crate::status::layout_scale_control_reason(&messages);
+        let scale_available = state.scale_control_available;
         self.with(|ui| {
             ui.set_layout_rows(model);
             let mut labels = vec![ui.get_layout_model_space_label().to_string()];
@@ -419,7 +428,79 @@ impl UiHandle {
             ui.set_layout_labels(string_model(&labels));
             ui.set_layout_active_index(active);
             ui.set_layout_empty_label(empty.into());
+            ui.set_layout_scale_unavailable_label(scale_unavailable.into());
+            ui.set_layout_scale_control_reason(scale_reason.into());
+            ui.set_layout_scale_control_available(scale_available);
         })
+    }
+
+    /// Push the resources drawer sections (F10) from the host's real reports.
+    ///
+    /// The raw sections are retained so a live locale switch can re-derive the
+    /// localized rows without the host re-collecting them.
+    pub fn set_resources_sections(&self, sections: &ResourceSections) -> CadResult<()> {
+        *self.resources_sections.borrow_mut() = Some(sections.clone());
+        self.push_resources_state()
+    }
+
+    /// Push a pre-built resources drawer state (F10).
+    pub fn set_resources_state(&self, state: &ResourcesPanelState) -> CadResult<()> {
+        let rows: Vec<ResourceRow> = state
+            .rows
+            .iter()
+            .map(|row| ResourceRow {
+                section: row.section.clone().into(),
+                label: row.label.clone().into(),
+                value: row.value.clone().into(),
+            })
+            .collect();
+        let model = slint::ModelRc::new(slint::VecModel::from(rows));
+        let empty = if state.empty_label.is_empty() {
+            self.messages.borrow().text("resources.empty", &[])
+        } else {
+            state.empty_label.clone()
+        };
+        self.with(|ui| {
+            ui.set_resources_rows(model);
+            ui.set_resources_empty_label(empty.into());
+        })
+    }
+
+    /// Re-derive and re-push the resources rows for the active catalog.
+    fn push_resources_state(&self) -> CadResult<()> {
+        let sections = self.resources_sections.borrow().clone();
+        let messages = self.messages.borrow().clone();
+        let state = match sections.as_ref() {
+            Some(sections) => ResourcesPanelState::from_sections(sections, &messages),
+            None => ResourcesPanelState::default(),
+        };
+        self.set_resources_state(&state)
+    }
+
+    /// Open or close the resources drawer without emitting a command.
+    pub fn set_resources_open(&self, open: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_resources_open(open))
+    }
+
+    /// Push the 3D observation drawer state (F13).
+    ///
+    /// Derived from [`ViewStateUi`] by [`View3dPanelState::from_view_state`]; the
+    /// drawer never invents a standard view or an orbit state the camera is not
+    /// actually in.
+    pub fn set_view3d_state(&self, state: &View3dPanelState) -> CadResult<()> {
+        let standard_index = state.standard_view_index.unwrap_or(-1);
+        let labels = string_model(&state.standard_view_labels);
+        let orbit = state.orbit_status.clone();
+        self.with(|ui| {
+            ui.set_view_standard_index(standard_index);
+            ui.set_standard_view_labels(labels);
+            ui.set_view_orbit_status(orbit.into());
+        })
+    }
+
+    /// Open or close the 3D observation drawer without emitting a command.
+    pub fn set_view3d_open(&self, open: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_view3d_open(open))
     }
 
     /// Push the read-only properties panel state (audit F05/U03).
@@ -507,6 +588,12 @@ impl UiHandle {
             ui.set_property_selected_label(selected_label.into());
         })?;
         self.refresh_import_labels(&messages)?;
+        // Re-derive the drawers whose rows are localized from the raw source
+        // snapshots, so a live locale switch never leaves stale-language rows.
+        self.push_resources_state()?;
+        let view_state = self.view_state.get();
+        let panel = View3dPanelState::from_view_state(&view_state, &messages);
+        self.set_view3d_state(&panel)?;
         Ok(resolution)
     }
 

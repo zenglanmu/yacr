@@ -110,6 +110,13 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     }
     ui.set_layout_unsupported_marker(messages.text("layout.unsupported_marker", &[]).into());
     ui.set_layout_empty_label(messages.text("layout.empty", &[]).into());
+    // Viewport-scale surface (F04). There is no scale command yet, so the
+    // control stays disabled and its reason is always shown.
+    ui.set_layout_scale_label(messages.text("layout.scale_label", &[]).into());
+    ui.set_layout_scale_unavailable_label(status::layout_scale_unavailable_label(messages).into());
+    ui.set_layout_scale_control_label(messages.text("layout.scale_control_label", &[]).into());
+    ui.set_layout_scale_control_reason(status::layout_scale_control_reason(messages).into());
+    ui.set_layout_scale_control_available(LAYOUT_SCALE_CONTROL_WIRED);
 
     // View / projection chrome (F13/F14). The standard-view model is built from
     // the shared `StandardView::ALL` ordering so a row index is authoritative.
@@ -120,6 +127,24 @@ pub(crate) fn apply_chrome(ui: &YacrWindow, messages: &MessageSource, work_mode:
     ui.set_view_ortho_label(messages.text("view.projection.ortho", &[]).into());
     ui.set_view_perspective_label(messages.text("view.projection.perspective", &[]).into());
     ui.set_standard_view_labels(string_model(&status::standard_view_labels(messages)));
+
+    // 3D observation drawer chrome (F13). The controls reuse the view labels
+    // above; these are the drawer-only labels. The initial orbit status matches
+    // the default 2D view; the authoritative push overrides it.
+    ui.set_view_standard_label(messages.text("view.standard_label", &[]).into());
+    ui.set_view_orbit_label(messages.text("view.orbit_label", &[]).into());
+    ui.set_view_orbit_status(messages.text("view.orbit.needs_3d", &[]).into());
+    ui.set_view_fit_label(messages.text("view.fit_label", &[]).into());
+    ui.set_view_fit_reason(messages.text("view.fit3d_unavailable", &[]).into());
+    ui.set_view3d_title(messages.text("view3d.title", &[]).into());
+    ui.set_view3d_label(messages.text("view3d.title", &[]).into());
+    ui.set_view3d_close_label(messages.text("diagnostics.close", &[]).into());
+
+    // Resources drawer chrome (F10).
+    ui.set_resources_label(messages.text("resources.title", &[]).into());
+    ui.set_resources_title(messages.text("resources.title", &[]).into());
+    ui.set_resources_close_label(messages.text("resources.close", &[]).into());
+    ui.set_resources_empty_label(messages.text("resources.empty", &[]).into());
 
     // Responsive chrome (U01): the grouped-bar and drawer entry labels.
     ui.set_tools_label(messages.text("shell.tools", &[]).into());

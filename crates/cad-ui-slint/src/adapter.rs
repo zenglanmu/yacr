@@ -254,6 +254,8 @@ impl UiAdapter {
         let layer_override_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
         let selection_count: Rc<Cell<i32>> = Rc::new(Cell::new(0));
         let view_3d: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+        let view_state: Rc<Cell<ViewStateUi>> = Rc::new(Cell::new(ViewStateUi::default()));
+        let resources_sections: Rc<RefCell<Option<ResourceSections>>> = Rc::new(RefCell::new(None));
         let orbit_last: Rc<Cell<Option<[f64; 2]>>> = Rc::new(Cell::new(None));
         let import_snapshot: Rc<RefCell<Option<cad_app::ImportProgressSnapshot>>> =
             Rc::new(RefCell::new(None));
@@ -1010,6 +1012,46 @@ impl UiAdapter {
             });
         }
         {
+            // Opening the resources drawer requests the real `Resources` command
+            // (the document's external resource summary); the host then pushes
+            // the font/import/proxy details through `set_resources_sections`.
+            let s = shared.clone();
+            let doc = document;
+            ui.on_resources_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::Resources,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+            });
+        }
+        {
+            // Closing a drawer is a pure presentation action; it emits no command.
+            let weak = ui.as_weak();
+            ui.on_resources_closed(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_resources_open(false);
+                }
+            });
+        }
+        {
+            // The 3D observation drawer is presentation-only: its controls reuse
+            // the existing view callbacks, so opening it emits no command.
+            let weak = ui.as_weak();
+            ui.on_view3d_requested(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_view3d_open(true);
+                }
+            });
+            let weak = ui.as_weak();
+            ui.on_view3d_closed(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_view3d_open(false);
+                }
+            });
+        }
+        {
             // Closing the drawer is a pure presentation action; it emits no
             // command (audit U08: the bar stays simple, the drawer is explicit).
             let ui_weak = ui.as_weak();
@@ -1146,6 +1188,8 @@ impl UiAdapter {
             layer_override_count,
             selection_count,
             view_3d,
+            view_state,
+            resources_sections,
             work_mode,
             import_snapshot,
         })
@@ -1219,6 +1263,8 @@ impl UiAdapter {
             layer_override_count: self.layer_override_count.clone(),
             selection_count: self.selection_count.clone(),
             view_3d: self.view_3d.clone(),
+            view_state: self.view_state.clone(),
+            resources_sections: self.resources_sections.clone(),
             work_mode: self.work_mode.clone(),
             import_snapshot: self.import_snapshot.clone(),
         }

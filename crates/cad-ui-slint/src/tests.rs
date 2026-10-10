@@ -117,6 +117,7 @@ fn layout_rows_and_active_index_are_pushed_faithfully() {
         supported: true,
         reason: String::new(),
         viewport_count: 2,
+        viewport_scale: None,
     });
     state.rows.push(LayoutRowUi {
         id: 8,
@@ -124,6 +125,7 @@ fn layout_rows_and_active_index_are_pushed_faithfully() {
         supported: false,
         reason: "unsupported viewport".into(),
         viewport_count: 1,
+        viewport_scale: None,
     });
     state.active_index = Some(1);
     assert_eq!(state.rows[1].name, "Sheet B");
@@ -1279,5 +1281,292 @@ fn keyboard_aliases_expand_only_when_shortcuts_are_enabled() {
     for exact in ["LINE", "CIRCLE", "MOVE", "TRIM", "CANCEL", "ZOOM EXTENTS"] {
         assert_eq!(canonical_command(exact, false), exact);
         assert_eq!(canonical_command(exact, true), exact);
+    }
+}
+
+#[test]
+fn layout_panel_state_surfaces_scale_only_when_the_host_pushes_it() {
+    use cad_domain::LayoutId;
+    use cad_representation::{LayoutDescriptor, SpaceSelection};
+
+    let descriptors = vec![LayoutDescriptor {
+        id: LayoutId(1),
+        name: "Sheet A".into(),
+        supported: true,
+        reason: String::new(),
+        viewport_count: 1,
+    }];
+    let mut state =
+        LayoutPanelState::from_descriptors(&descriptors, SpaceSelection::Model, "无布局");
+    // The descriptors carry no scale and no scale command exists, so the panel
+    // starts in an explicit read-only state.
+    assert_eq!(state.rows[0].viewport_scale, None);
+    assert!(!state.scale_control_available);
+
+    // A real scale is attached by index; an out-of-range index inserts nothing.
+    assert!(state.set_viewport_scale(0, "1:100"));
+    assert_eq!(state.rows[0].viewport_scale.as_deref(), Some("1:100"));
+    assert!(!state.set_viewport_scale(9, "1:50"));
+    assert_eq!(state.rows.len(), 1);
+}
+
+#[test]
+fn standard_view_for_camera_matches_named_views_and_refuses_free_orbit() {
+    fn camera_for(view: cad_app::StandardView) -> cad_app::Camera {
+        let offset = view.eye_offset();
+        let projection = if view.is_plan() {
+            cad_app::Projection::Orthographic { scale: 1.0 }
+        } else {
+            cad_app::Projection::Perspective {
+                vertical_fov_radians: std::f64::consts::FRAC_PI_4,
+            }
+        };
+        cad_app::Camera {
+            eye: Point3 {
+                x: offset.x * 10.0,
+                y: offset.y * 10.0,
+                z: offset.z * 10.0,
+            },
+            target: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            up: view.up_hint(),
+            projection,
+        }
+    }
+
+    // The default 2D plan is the Top standard view.
+    assert_eq!(
+        standard_view_for_camera(&cad_app::Camera::top_view_2d()),
+        Some(cad_app::StandardView::Top)
+    );
+    for view in cad_app::StandardView::ALL {
+        assert_eq!(
+            standard_view_for_camera(&camera_for(view)),
+            Some(view),
+            "view {view:?} must round-trip"
+        );
+    }
+
+    // An arbitrary orbit orientation is not a named standard view.
+    let orbit = cad_app::Camera {
+        eye: Point3 {
+            x: 3.0,
+            y: 4.0,
+            z: 5.0,
+        },
+        target: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        up: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+        projection: cad_app::Projection::Perspective {
+            vertical_fov_radians: std::f64::consts::FRAC_PI_4,
+        },
+    };
+    assert_eq!(standard_view_for_camera(&orbit), None);
+}
+
+#[test]
+fn view3d_panel_state_derives_mode_projection_standard_view_and_orbit() {
+    let zh = MessageSource::for_locale(Locale::ZhCn);
+
+    let three_d = ViewStateUi {
+        is_3d: true,
+        perspective: true,
+        standard_view: Some(cad_app::StandardView::Isometric),
+    };
+    let panel = View3dPanelState::from_view_state(&three_d, &zh);
+    assert!(panel.is_3d && panel.perspective);
+    assert_eq!(
+        panel.standard_view_index,
+        Some(cad_app::StandardView::Isometric.index() as i32)
+    );
+    assert!(panel.orbit_available);
+    assert_eq!(panel.orbit_status, zh.text("view.orbit.drag", &[]));
+    assert_eq!(
+        panel.standard_view_labels.len(),
+        cad_app::StandardView::ALL.len()
+    );
+
+    // The default 2D view has no standard-view row and states why orbit is off.
+    let two_d = ViewStateUi::default();
+    let panel = View3dPanelState::from_view_state(&two_d, &zh);
+    assert!(!panel.is_3d && !panel.orbit_available);
+    assert_eq!(panel.standard_view_index, None);
+    assert_eq!(panel.orbit_status, zh.text("view.orbit.needs_3d", &[]));
+    // 3D zoom-to-fit is not implemented; the reason is explicit, never blank.
+    assert_eq!(panel.fit_reason, zh.text("view.fit3d_unavailable", &[]));
+}
+
+#[test]
+fn resources_panel_state_is_empty_until_a_host_pushes_a_section() {
+    let zh = MessageSource::for_locale(Locale::ZhCn);
+    let empty = ResourcesPanelState::from_sections(&ResourceSections::default(), &zh);
+    assert!(empty.is_empty());
+    assert_eq!(empty.source_count, 0);
+    assert!(!empty.empty_label.is_empty());
+}
+
+#[test]
+fn resources_panel_state_projects_real_sources_and_names_the_image_limit() {
+    let zh = MessageSource::for_locale(Locale::ZhCn);
+    let sections = ResourceSections {
+        fonts: Some(FontResourceSummary {
+            catalog_entries: 12,
+            requested: 3,
+            planned: 2,
+            registered: 2,
+            failed: vec!["a.ttf: bad".into()],
+            unresolved: vec!["SHXNAME".into()],
+            default_face: Some("osifont".into()),
+        }),
+        import: Some(ImportResourceSummary {
+            identity: "plan.dwg".into(),
+            dwg_version: "AC1027".into(),
+            completeness: ResourceCompleteness::Partial(2),
+            diagnostics: Some(4),
+            parse_ms: Some(37),
+        }),
+        proxy: Some(ProxyResourceSummary {
+            decoded_records: 5,
+            unsupported: vec![ProxyUnsupportedRow {
+                record_type: 99,
+                reason: "unknown opcode".into(),
+                bytes: 8,
+            }],
+        }),
+        references: Some(ReferencesResourceSummary {
+            keys: vec!["xref-a".into()],
+        }),
+        images_modeled: false,
+    };
+    let state = ResourcesPanelState::from_sections(&sections, &zh);
+    assert_eq!(state.source_count, 4);
+    assert!(!state.is_empty());
+    // The first row carries the section header; later rows do not repeat it.
+    assert_eq!(state.rows[0].section, zh.text("resources.fonts", &[]));
+    // The real proxy record is listed with its own reason and byte size.
+    assert!(state.rows.iter().any(|row| {
+        row.label == zh.text("resources.proxy.record_type", &[("type", "99")])
+            && row.value.contains("unknown opcode")
+    }));
+    // Images are not modelled: stated explicitly, not left as silent absence.
+    assert!(state.rows.iter().any(|row| {
+        row.section == zh.text("resources.images", &[])
+            && row.value == zh.text("resources.images_unsupported", &[])
+    }));
+}
+
+#[test]
+fn resources_panel_state_reports_clean_sources_and_skips_the_image_note_when_modelled() {
+    let en = MessageSource::for_locale(Locale::En);
+    let clean = ResourceSections {
+        proxy: Some(ProxyResourceSummary {
+            decoded_records: 0,
+            unsupported: Vec::new(),
+        }),
+        references: Some(ReferencesResourceSummary { keys: Vec::new() }),
+        // Images modelled: no explicit limitation row is added.
+        images_modeled: true,
+        ..ResourceSections::default()
+    };
+    let state = ResourcesPanelState::from_sections(&clean, &en);
+    assert!(state
+        .rows
+        .iter()
+        .any(|row| row.value == en.text("resources.proxy.none", &[])));
+    assert!(state
+        .rows
+        .iter()
+        .any(|row| row.value == en.text("resources.references.none", &[])));
+    assert!(!state
+        .rows
+        .iter()
+        .any(|row| row.section == en.text("resources.images", &[])));
+}
+
+#[test]
+fn shell_exposes_the_layout_scale_and_resource_and_3d_drawers() {
+    for marker in [
+        "layout-scale-label",
+        "layout-scale-unavailable-label",
+        "layout-scale-control-reason",
+        "layout-scale-control-available",
+        "resources-open",
+        "resources-rows",
+        "resources-empty-label",
+        "view3d-open",
+        "view-standard-index",
+        "view-orbit-status",
+        "view-fit-reason",
+        "CadResourcesDrawer",
+        "CadView3dDrawer",
+    ] {
+        assert!(
+            UI_DEFINITION.contains(marker),
+            "shell must expose drawer marker {marker}"
+        );
+    }
+    let ribbon = include_str!("../ui/ribbon.slint");
+    assert!(ribbon.contains("root.action(13)"));
+    assert!(ribbon.contains("root.action(14)"));
+    assert!(ribbon.contains("resources-label"));
+    assert!(ribbon.contains("view3d-label"));
+}
+
+#[test]
+fn new_drawer_keys_resolve_in_both_catalogs() {
+    for messages in [
+        MessageSource::for_locale(Locale::ZhCn),
+        MessageSource::for_locale(Locale::En),
+    ] {
+        for key in [
+            "layout.scale_label",
+            "layout.scale_unavailable",
+            "layout.scale_control_label",
+            "layout.scale_control_unavailable",
+            "view.standard_label",
+            "view.orbit_label",
+            "view.orbit.drag",
+            "view.orbit.needs_3d",
+            "view.fit_label",
+            "view.fit3d_unavailable",
+            "view3d.title",
+            "resources.title",
+            "resources.close",
+            "resources.empty",
+            "resources.fonts",
+            "resources.fonts.default_face",
+            "resources.import",
+            "resources.completeness.partial",
+            "resources.proxy",
+            "resources.proxy.record",
+            "resources.proxy.none",
+            "resources.references",
+            "resources.images",
+            "resources.images_unsupported",
+        ] {
+            let text = messages.text(
+                key,
+                &[
+                    ("type", "99"),
+                    ("reason", "x"),
+                    ("bytes", "8"),
+                    ("count", "1"),
+                ],
+            );
+            assert!(
+                !text.contains(key),
+                "missing catalog text for {key}: {text}"
+            );
+        }
     }
 }

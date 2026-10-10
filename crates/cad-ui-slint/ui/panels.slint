@@ -4,7 +4,7 @@ import { CadTheme } from "theme.slint";
 export struct LayerRow { id: int, name: string, visible: bool, overridden: bool }
 export struct PropertyRow { key: string, value: string }
 export struct DiagnosticRow { code: string, severity: string, description: string, object: string, details: string }
-export struct LayoutRow { id: int, name: string, supported: bool, reason: string, viewport_count: int }
+export struct LayoutRow { id: int, name: string, supported: bool, reason: string, viewport_count: int, scale: string }
 
 // Scrollable dock/bottom sheet. Models are real adapter data, not sample rows.
 export component CadPanels inherits Rectangle {
@@ -25,6 +25,16 @@ export component CadPanels inherits Rectangle {
     in property <[PropertyRow]> properties;
     in property <string> selection-all-label;
     in property <[LayoutRow]> layouts;
+    // Viewport-scale surface (F04). The scale is real data pushed per row; when
+    // a row has no scale the panel shows the explicit unavailable label. The
+    // scale control is display-only while no scale command is wired, and its
+    // reason is shown rather than faking an interactive control.
+    in property <string> layout-empty-label;
+    in property <string> layout-scale-label;
+    in property <string> layout-scale-unavailable-label;
+    in property <string> layout-scale-control-label;
+    in property <string> layout-scale-control-reason;
+    in property <bool> layout-scale-control-available;
     in property <[DiagnosticRow]> diagnostics;
     in property <string> backend;
     in property <bool> diagnostics-open;
@@ -53,7 +63,7 @@ export component CadPanels inherits Rectangle {
         VerticalBox {
             padding: 6px; spacing: 6px; alignment: start;
             HorizontalBox {
-                Text { text: root.diagnostics-open ? root.labels[9] : (root.section == 0 ? root.labels[0] : root.labels[6]);
+                Text { text: root.diagnostics-open ? root.labels[9] : (root.section == 0 ? root.labels[0] : (root.section == 1 ? root.labels[6] : root.labels[4]));
                     color: CadTheme.ink; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
                 Button { text: root.labels[2]; symbol: "×"; icon-only: true; min-width: 48px; preferred-width: 48px;
                     min-height: 48px; clicked => { root.close(); } }
@@ -67,6 +77,8 @@ export component CadPanels inherits Rectangle {
                     min-height: 48px; clicked => { root.section = 0; } }
                 Button { text: root.labels[6]; symbol: "i"; icon-only: true; checked: root.section == 1; min-width: 48px; preferred-width: 48px;
                     min-height: 48px; clicked => { root.section = 1; } }
+                Button { text: root.labels[4]; symbol: "layout"; icon-only: true; checked: root.section == 2; min-width: 48px; preferred-width: 48px;
+                    min-height: 48px; clicked => { root.section = 2; } }
             }
             if root.section == 0 : Button { text: root.labels[1]; symbol: "layers"; enabled: root.layers.length > 0; min-height: 48px; clicked => { root.restore(); } }
             if root.section == 0 : HorizontalBox {
@@ -138,6 +150,25 @@ export component CadPanels inherits Rectangle {
                     accessible-action-set-value(value) => { }
                 }
             }
+            }
+            if root.section == 2 : VerticalBox {
+            padding: 0px; spacing: 6px;
+            if root.layouts.length == 0 : Text { text: root.layout-empty-label; color: CadTheme.muted; wrap: word-wrap; }
+            for row in root.layouts : VerticalBox {
+                padding: 0px; spacing: 2px;
+                Text { text: row.name; color: CadTheme.ink; wrap: word-wrap; }
+                // Real viewport scale, or the explicit "not pushed" reason.
+                Text {
+                    text: root.layout-scale-label + "  "
+                        + (row.scale == "" ? root.layout-scale-unavailable-label : row.scale);
+                    color: CadTheme.muted; font-size: 12px; wrap: word-wrap;
+                }
+                if !row.supported : Text { text: row.reason; color: CadTheme.muted; font-size: 12px; wrap: word-wrap; }
+            }
+            // Display-only while no viewport-scale command exists; the reason is
+            // shown so the control is honest, not a dead interactive widget.
+            Button { text: root.layout-scale-control-label; min-height: 48px; enabled: root.layout-scale-control-available; }
+            Text { text: root.layout-scale-control-reason; color: CadTheme.muted; font-size: 12px; wrap: word-wrap; }
             }
             }
             if root.diagnostics-open : Text { text: root.backend; color: CadTheme.ink; wrap: word-wrap; }
