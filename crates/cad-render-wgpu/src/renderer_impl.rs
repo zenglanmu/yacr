@@ -30,12 +30,17 @@ impl Renderer {
             mesh_pipeline_mirrored: None,
             mesh_pipeline_transparent: None,
             mesh_pipeline_mirrored_transparent: None,
+            image_pipeline: None,
+            image_texture_layout: None,
+            image_sampler: None,
             target: None,
             target_view: None,
             depth_view: None,
             target_size: (1, 1),
             target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
             batches: Vec::new(),
+            images: Vec::new(),
+            image_textures: HashMap::new(),
             device_generation: 0,
             texture_revision: 0,
             uploaded_bytes: 0,
@@ -162,11 +167,98 @@ impl Renderer {
             false,
             "cad-mesh-pipeline-mirrored-transparent",
         );
+        let image_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-image"),
+            source: wgpu::ShaderSource::Wgsl(IMAGE_SHADER.into()),
+        });
+        let image_texture_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cad-image-texture-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let image_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("cad-image-pipeline-layout"),
+                bind_group_layouts: &[Some(&layout), Some(&image_texture_layout)],
+                immediate_size: 0,
+            });
+        let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cad-image-pipeline"),
+            layout: Some(&image_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &image_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(image_vertex_layout())],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                // A transformed unit square may be mirrored; culling would drop
+                // legitimate images, so image quads are never culled.
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                // Same depth format as the mesh pipeline, `LessEqual` so a
+                // coplanar overlay is not rejected by the depth test.
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &image_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.target_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let image_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("cad-image-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
 
         // A successful attachment establishes a new device generation. No
         // batch/attachment from the previous generation may survive, even if
         // the new target later has exactly the same dimensions.
         self.batches.clear();
+        self.images.clear();
+        self.image_textures.clear();
         self.target = None;
         self.target_view = None;
         self.depth_view = None;
@@ -179,6 +271,9 @@ impl Renderer {
         self.mesh_pipeline_mirrored = Some(mesh_pipeline_mirrored);
         self.mesh_pipeline_transparent = Some(mesh_pipeline_transparent);
         self.mesh_pipeline_mirrored_transparent = Some(mesh_pipeline_mirrored_transparent);
+        self.image_pipeline = Some(image_pipeline);
+        self.image_texture_layout = Some(image_texture_layout);
+        self.image_sampler = Some(image_sampler);
         self.active_backend = Some(caps.actual);
         self.device_generation += 1;
         self.device_lost = false;
@@ -554,6 +649,224 @@ impl Renderer {
         Ok(())
     }
 
+    /// Upload raster image quads from `images`, resolving each `ResourceKey`
+    /// through `cache`.
+    ///
+    /// Every image that resolves to a decodable [`cad_resources::DecodedImage`]
+    /// becomes a textured quad: the RGBA8 bytes go to an `Rgba8UnormSrgb`
+    /// texture, a linear clamp-to-edge sampler view/bind group is created, and
+    /// `transform` maps the unit-square corners `(0,0),(1,0),(1,1),(0,1)` (UVs
+    /// `(0,0),(1,0),(1,1),(0,1)`, two triangles) into world space.
+    ///
+    /// An image whose resource is absent from the cache (or whose decoded buffer
+    /// is malformed) is **skipped**, never drawn as a placeholder, and listed in
+    /// [`ImageUploadReport::unresolved`] so the caller can surface
+    /// `image.unresolved`. This replaces the resident image set.
+    ///
+    /// One GPU texture (and bind group) is allocated per unique `ResourceKey`
+    /// and shared by every quad that references it, so `N` entities referencing
+    /// the same resource upload the texture once. The texture cache is pruned to
+    /// the keys of the resident set on each call.
+    ///
+    /// Reuse is identity-aware rather than key-only: a cached texture is only
+    /// reused while `cache.get(key)` yields the *same* [`DecodedImage`] it was
+    /// uploaded from. Because the `Renderer` outlives the per-document
+    /// [`DecodedImageCache`], a key that reappears with different bytes (for
+    /// example two drawings that both reference `logo.png`) rebuilds the texture
+    /// instead of sampling the previous drawing's image. Texture bytes are
+    /// charged only when a texture is created or rebuilt.
+    ///
+    /// When a batch carries a `clip` polygon, that surviving convex polygon
+    /// (world-space positions with per-vertex texture coordinates) is drawn and
+    /// fan-triangulated instead of the unit square; the whole unit square is
+    /// drawn only when `clip` is `None`.
+    ///
+    /// Not implemented, and therefore not claimed: WIPEOUT-style masking and
+    /// full draw-order interleaving with geometry batches are not performed —
+    /// images draw after opaque/transparent geometry, ordered among themselves
+    /// by ascending `draw_order`.
+    pub fn upload_images(
+        &mut self,
+        images: &[ImageBatch],
+        cache: &DecodedImageCache,
+    ) -> CadResult<ImageUploadReport> {
+        let device = self
+            .device
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+        let queue = self
+            .queue
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+        let layout = self
+            .layout
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+        let texture_layout = self
+            .image_texture_layout
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+        let sampler = self
+            .image_sampler
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+
+        let mut report = ImageUploadReport::default();
+        let mut staged = Vec::with_capacity(images.len());
+        // Resource keys still referenced after this call; textures for any other
+        // key are dropped so the cache tracks the resident set, not history.
+        let mut live: std::collections::HashSet<ResourceKey> = std::collections::HashSet::new();
+        for batch in images {
+            let Some(decoded) = cache.get(&batch.resource) else {
+                report.unresolved.push(batch.resource.clone());
+                continue;
+            };
+            let expected = decoded.width as usize * decoded.height as usize * 4;
+            if decoded.width == 0 || decoded.height == 0 || decoded.rgba.len() != expected {
+                // A malformed decoded buffer is neither drawn nor hidden.
+                report.unresolved.push(batch.resource.clone());
+                continue;
+            }
+            // One texture per key: reuse the cached texture when an earlier batch
+            // (or a previous call) already uploaded this resource, so N entities
+            // referencing the same key allocate a single texture/bind group.
+            //
+            // Reuse is identity-aware, not key-only: a `ResourceKey` can outlive
+            // the bytes it names (each document open builds a fresh
+            // `DecodedImageCache` while the `Renderer` persists). Rebuild whenever
+            // the cached texture was uploaded from a different decoded image, so
+            // two drawings that both reference e.g. `logo.png` with different
+            // bytes cannot silently share the first drawing's texture. Within one
+            // cache `get` clones the same `Arc`, so sibling batches still reuse.
+            let reusable = self
+                .image_textures
+                .get(&batch.resource)
+                .is_some_and(|existing| Arc::ptr_eq(&existing.decoded, &decoded));
+            if !reusable {
+                let created =
+                    Self::build_texture(&device, &queue, &texture_layout, &sampler, &decoded);
+                report.bytes += created.upload_bytes as u64;
+                self.image_textures.insert(batch.resource.clone(), created);
+            }
+            let texture = &self.image_textures[&batch.resource];
+            let (vertices, indices) = image_quad_vertices(batch);
+            let vertex_buffer = Self::vertex_buffer(&device, Some(&queue), &vertices);
+            let index_buffer = Self::index_buffer(&device, Some(&queue), &indices);
+            let (camera, camera_bind_group) = Self::make_uniform(&device, &layout);
+            let quad_bytes = vertices.len() + indices.len() * 4;
+            report.bytes += quad_bytes as u64;
+            report.uploaded += 1;
+            live.insert(batch.resource.clone());
+            staged.push(GpuImage {
+                resource: batch.resource.clone(),
+                vertex_buffer,
+                index_buffer,
+                index_count: indices.len() as u32,
+                vertex_count: (vertices.len() / 20) as u32,
+                camera,
+                camera_bind_group,
+                texture_bind_group: texture.bind_group.clone(),
+                _texture: texture.texture.clone(),
+                texture_bytes: texture.upload_bytes,
+                alpha: clamp_alpha(batch.alpha),
+                draw_order: batch.draw_order,
+                upload_bytes: quad_bytes,
+            });
+        }
+        self.image_textures.retain(|key, _| live.contains(key));
+        self.images = staged;
+        Ok(report)
+    }
+
+    /// Upload one decoded RGBA image into a device texture and bind it to the
+    /// shared sampler. The returned texture is cached per resource key and
+    /// shared by every quad that references it.
+    fn build_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture_layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+        decoded: &Arc<DecodedImage>,
+    ) -> GpuTexture {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("cad-image-texture"),
+            size: wgpu::Extent3d {
+                width: decoded.width,
+                height: decoded.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        // `write_texture` needs the row stride padded to the 256-byte copy
+        // alignment; the source rows are tightly packed, so copy through a
+        // padded scratch buffer only when the stride is not already aligned.
+        let row_bytes = decoded.width as usize * 4;
+        let aligned = row_bytes.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let padded;
+        let data: &[u8] = if aligned == row_bytes {
+            decoded.rgba.as_ref()
+        } else {
+            let mut buffer = vec![0u8; aligned * decoded.height as usize];
+            for row in 0..decoded.height as usize {
+                buffer[row * aligned..row * aligned + row_bytes]
+                    .copy_from_slice(&decoded.rgba[row * row_bytes..(row + 1) * row_bytes]);
+            }
+            padded = buffer;
+            &padded
+        };
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(aligned as u32),
+                rows_per_image: Some(decoded.height),
+            },
+            wgpu::Extent3d {
+                width: decoded.width,
+                height: decoded.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cad-image-texture-bind"),
+            layout: texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+        GpuTexture {
+            texture,
+            bind_group,
+            upload_bytes: aligned * decoded.height as usize,
+            decoded: Arc::clone(decoded),
+        }
+    }
+
     /// Opt-in bounded multipass accumulation. Opaque/transparent global order
     /// is preserved across pages, with color/depth retained between submissions.
     pub fn set_progressive_rendering(&mut self, enabled: bool) {
@@ -638,11 +951,16 @@ impl Renderer {
         self.mesh_pipeline_mirrored = None;
         self.mesh_pipeline_transparent = None;
         self.mesh_pipeline_mirrored_transparent = None;
+        self.image_pipeline = None;
+        self.image_texture_layout = None;
+        self.image_sampler = None;
         self.layout = None;
         self.target = None;
         self.target_view = None;
         self.depth_view = None;
         self.batches.clear();
+        self.images.clear();
+        self.image_textures.clear();
         self.device = None;
         self.queue = None;
         self.active_backend = None;
@@ -672,11 +990,16 @@ impl Renderer {
         self.mesh_pipeline_mirrored = None;
         self.mesh_pipeline_transparent = None;
         self.mesh_pipeline_mirrored_transparent = None;
+        self.image_pipeline = None;
+        self.image_texture_layout = None;
+        self.image_sampler = None;
         self.layout = None;
         self.target = None;
         self.target_view = None;
         self.depth_view = None;
         self.batches.clear();
+        self.images.clear();
+        self.image_textures.clear();
         self.active_backend = None;
         self.device_lost = true;
         self.last_device_lost = Some(detail.clone());
@@ -722,8 +1045,30 @@ impl Renderer {
                 1.0,
             ]);
         }
+        // Camera-only world→clip matrix, column-major (WGSL `mat4x4<f32>`). It
+        // is the per-batch transform with the batch origin removed, so image
+        // vertices (already in world space) can share the same camera uniform.
+        let camera_matrix = [
+            sx as f32,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            sy as f32,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            (sx * -camera.center.x) as f32,
+            (sy * -camera.center.y) as f32,
+            (camera.z_plane as f64 - camera.center.z) as f32,
+            1.0,
+        ];
         self.render_with_transforms(
             transforms,
+            camera_matrix,
             [
                 camera.center.x as f32,
                 camera.center.y as f32,
@@ -754,17 +1099,26 @@ impl Renderer {
             .iter()
             .map(|batch| translate_left(&vp, batch.origin))
             .collect();
+        // Camera-only VP, column-major flat, for image vertices that are already
+        // in world space.
+        let mut camera_matrix = [0.0f32; 16];
+        for col in 0..4 {
+            for row in 0..4 {
+                camera_matrix[col * 4 + row] = vp[col][row];
+            }
+        }
         let eye = [
             camera.eye.x as f32,
             camera.eye.y as f32,
             camera.eye.z as f32,
         ];
-        self.render_with_transforms(transforms, eye, target)
+        self.render_with_transforms(transforms, camera_matrix, eye, target)
     }
 
     fn render_with_transforms(
         &mut self,
         transforms: Vec<[f32; 16]>,
+        camera_matrix: [f32; 16],
         camera_position: [f32; 3],
         target: &RenderTarget,
     ) -> Result<FrameStats, RenderError> {
@@ -842,6 +1196,11 @@ impl Renderer {
                 "renderer resources missing".into(),
             ));
         };
+        let Some(image_pipeline) = self.image_pipeline.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer resources missing".into(),
+            ));
+        };
         let Some(view) = self.target_view.as_ref() else {
             return Err(RenderError::NotInitialized(
                 "renderer target missing".into(),
@@ -853,7 +1212,7 @@ impl Renderer {
             ));
         };
 
-        let (budget_plan, opaque, transparent, invisible_batches, clear) =
+        let (mut budget_plan, opaque, transparent, invisible_batches, clear) =
             if let Some(frame) = &self.progressive_frame {
                 let plan = plan::plan_ordered_page(
                     &self.batches,
@@ -916,6 +1275,38 @@ impl Renderer {
             uniform[18] = b;
             uniform[19] = clamp_alpha(batch.alpha);
             queue.write_buffer(&batch.camera, 0, bytemuck::cast_slice(&uniform));
+        }
+
+        // Charge the resident image quads against the same frame budget and
+        // write their camera uniforms. Images are drawn last (after opaque and
+        // transparent geometry); full draw-order interleaving and WIPEOUT
+        // masking are not implemented. The accepted images are ordered among
+        // themselves by ascending `draw_order`.
+        //
+        // Images are drawn only on the page that clears the target (the first
+        // page of a progressive frame, or every frame when not progressive).
+        // Continuation pages load the existing colour, so re-drawing an
+        // `alpha < 1` image every page would accumulate its opacity and charge
+        // it repeatedly; a continuation page must not composite images again.
+        let mut draw_images: Vec<usize> = Vec::new();
+        if clear {
+            let (accepted_images, image_over_budget) =
+                charge_images(&mut budget_plan.usage, &self.frame_budget, &self.images);
+            if budget_plan.over_budget.is_none() {
+                budget_plan.over_budget = image_over_budget;
+            }
+            draw_images = accepted_images;
+            draw_images.sort_by_key(|&i| self.images[i].draw_order);
+            for &i in &draw_images {
+                let image = &self.images[i];
+                let mut uniform = [0.0f32; 20];
+                uniform[..16].copy_from_slice(&camera_matrix);
+                uniform[16] = 1.0;
+                uniform[17] = 1.0;
+                uniform[18] = 1.0;
+                uniform[19] = image.alpha;
+                queue.write_buffer(&image.camera, 0, bytemuck::cast_slice(&uniform));
+            }
         }
 
         // Lineweight is carried, never drawn: collect every submitted batch that
@@ -998,6 +1389,12 @@ impl Renderer {
                     },
                 );
             }
+            // Pass 3 — raster images, after opaque/transparent geometry. Full
+            // draw-order interleaving with geometry batches is NOT implemented;
+            // images are ordered among themselves by ascending draw_order.
+            for &i in &draw_images {
+                draw_image(&mut pass, &self.images[i], image_pipeline);
+            }
         }
 
         let submission = queue.submit(Some(encoder.finish()));
@@ -1005,7 +1402,7 @@ impl Renderer {
         // the submission; the host's device-lost callback is the authoritative
         // loss signal (see `note_device_lost`).
         let outcome = self.device_scope_outcome(device, submission);
-        let draw_calls = (opaque.len() + transparent.len()) as u64;
+        let draw_calls = (opaque.len() + transparent.len() + draw_images.len()) as u64;
         self.draw_calls = draw_calls;
         match outcome {
             ScopeOutcome::Clean => {}
@@ -1033,6 +1430,7 @@ impl Renderer {
             opaque_batches: opaque.len(),
             transparent_batches: transparent.len(),
             invisible_batches,
+            image_batches: draw_images.len(),
             lineweight_not_drawn: lineweight_not_drawn.clone(),
             lineweight_reason: lineweight_reason(&lineweight_not_drawn),
         })
@@ -1092,6 +1490,14 @@ impl Renderer {
 
     pub fn batch_count(&self) -> usize {
         self.batches.len()
+    }
+
+    /// Number of distinct GPU textures resident for the current image set.
+    ///
+    /// Image quads that share a [`ResourceKey`] share one texture, so this is
+    /// the count of unique resources, not of quads.
+    pub fn image_texture_count(&self) -> usize {
+        self.image_textures.len()
     }
 
     /// Diagnostic for an over-budget frame, if any is pending.

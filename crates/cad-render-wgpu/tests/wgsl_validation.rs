@@ -1,6 +1,6 @@
 //! Offline WGSL validation (spec §5.2, audit F14).
 //!
-//! Both shader files are parsed and validated with the same `naga` version that
+//! Every shader file is parsed and validated with the same `naga` version that
 //! `wgpu 30.0.1` embeds, so a syntax or type error in a shader fails this test
 //! without needing a GPU. This is static validation only: it does not compile
 //! the pipelines or execute a draw.
@@ -42,6 +42,12 @@ fn line_shader_is_valid_wgsl() {
 fn mesh_shader_is_valid_wgsl() {
     validate_wgsl("mesh.wgsl", include_str!("../shaders/mesh.wgsl"))
         .expect("mesh shader must validate");
+}
+
+#[test]
+fn image_shader_is_valid_wgsl() {
+    validate_wgsl("image.wgsl", include_str!("../shaders/image.wgsl"))
+        .expect("image shader must validate");
 }
 
 #[test]

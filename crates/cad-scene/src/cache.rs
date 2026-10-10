@@ -8,6 +8,13 @@ pub struct SceneCache {
     chunks: BTreeMap<u64, RenderBatch>,
     next_chunk: u64,
     used_bytes: usize,
+    /// Image draw items, in insertion order (oldest first for eviction).
+    images: Vec<ImageBatch>,
+    images_used_bytes: usize,
+    /// Count of image draw items dropped by [`SceneCache::evict_images`] to stay
+    /// under [`SceneBudget::image_bytes`]. This makes the eviction observable
+    /// instead of a silent drop; it only ever increases.
+    image_evictions: u64,
 }
 
 impl Default for SceneCache {
@@ -23,6 +30,9 @@ impl SceneCache {
             chunks: BTreeMap::new(),
             next_chunk: 1,
             used_bytes: 0,
+            images: Vec::new(),
+            images_used_bytes: 0,
+            image_evictions: 0,
         }
     }
 
@@ -36,6 +46,33 @@ impl SceneCache {
 
     pub fn chunks(&self) -> impl Iterator<Item = &RenderBatch> {
         self.chunks.values()
+    }
+
+    /// The cached image draw items, in insertion order.
+    pub fn image_batches(&self) -> &[ImageBatch] {
+        &self.images
+    }
+
+    /// Number of cached image draw items.
+    pub fn image_count(&self) -> usize {
+        self.images.len()
+    }
+
+    /// CPU bytes the cached image draw items count toward
+    /// [`SceneBudget::image_bytes`].
+    pub fn image_used_bytes(&self) -> usize {
+        self.images_used_bytes
+    }
+
+    /// Total image draw items evicted from the cache since construction to stay
+    /// under [`SceneBudget::image_bytes`].
+    ///
+    /// Image batches dropped by [`SceneCache::evict_images`] (including the
+    /// maintenance call at the end of [`SceneCache::publish`]) are counted here
+    /// so a host can surface them instead of losing the draw silently. The
+    /// counter is monotonic; it is not reset by eviction.
+    pub fn image_evictions(&self) -> u64 {
+        self.image_evictions
     }
 
     /// Remove batches that reference objects touched by `changes`.
@@ -64,6 +101,16 @@ impl SceneCache {
         for key in to_remove {
             self.remove_chunk(key);
         }
+        // Image draw items are invalidated by the same dirty set as chunks.
+        let mut image_bytes_removed = 0usize;
+        self.images.retain(|image| {
+            let keep = !image.sources.iter().any(|s| dirty.contains(&s.entity));
+            if !keep {
+                image_bytes_removed += image.approx_bytes();
+            }
+            keep
+        });
+        self.images_used_bytes = self.images_used_bytes.saturating_sub(image_bytes_removed);
         Ok(())
     }
 
@@ -110,6 +157,7 @@ impl SceneCache {
             stamp,
             added: Vec::new(),
             removed_chunks: Vec::new(),
+            images: Vec::new(),
         };
         let mut previous_was_lines = false;
         for fragment in &representation.fragments {
@@ -171,6 +219,25 @@ impl SceneCache {
                     }
                     continue;
                 }
+            }
+            if let DisplayPrimitive::Image {
+                resource,
+                transform,
+                clip,
+            } = &fragment.primitive
+            {
+                // A real image fragment becomes its own draw item; the renderer
+                // binds the texture and maps `transform` (or `clip`) next lane.
+                // Text/instance fragments below still produce no batch.
+                delta.images.push(ImageBatch {
+                    resource: resource.clone(),
+                    transform: *transform,
+                    clip: clip.clone(),
+                    alpha: sanitize_alpha(fragment.alpha),
+                    draw_order: 0,
+                    sources: vec![fragment.source.clone()],
+                });
+                continue;
             }
             previous_was_lines = line_points.is_some();
             let (topology, vertices, normals, colors, indices, edges, origin, mirrored) =
@@ -272,9 +339,10 @@ impl SceneCache {
                             false,
                         )
                     }
-                    // Text/instance/image batching is handled by their own
-                    // subsystems; a scene batch that pretends to draw them would
-                    // be a fake success.
+                    // Text/instance batching is handled by their own subsystems;
+                    // a scene batch that pretends to draw them would be a fake
+                    // success. Images are carried as `ImageBatch` above, so this
+                    // arm is unreachable for them but keeps the match exhaustive.
                     DisplayPrimitive::Text { .. }
                     | DisplayPrimitive::Instance { .. }
                     | DisplayPrimitive::Image { .. } => {
@@ -323,7 +391,15 @@ impl SceneCache {
             self.used_bytes += batch.approx_bytes();
             self.chunks.insert(key, batch);
         }
+        for image in delta.images {
+            self.images_used_bytes += image.approx_bytes();
+            self.images.push(image);
+        }
+        // Maintenance eviction after publishing: keep the CPU/image caches under
+        // budget. Image evictions are recorded in `image_evictions()` so the
+        // drop is observable rather than silent.
         let _ = self.evict(0)?;
+        let _ = self.evict_images(0)?;
         Ok(())
     }
 
@@ -351,6 +427,35 @@ impl SceneCache {
             self.remove_chunk(oldest);
             evicted += 1;
         }
+        Ok(evicted)
+    }
+
+    /// Drop oldest image draw items until the image cache is under budget.
+    ///
+    /// Mirrors [`SceneCache::evict`] for the image list: it keeps
+    /// [`SceneBudget::image_bytes`] a hard ceiling so image batches never grow
+    /// unbounded. A reservation larger than the whole image budget is rejected
+    /// without evicting anything. Each evicted draw item is counted in
+    /// [`SceneCache::image_evictions`], so the drop is observable rather than
+    /// silent.
+    pub fn evict_images(&mut self, required_bytes: usize) -> CadResult<usize> {
+        if required_bytes > self.budget.image_bytes {
+            return Err(CadError::InvalidInput(format!(
+                "image cache reservation of {required_bytes} bytes exceeds image budget of {} bytes",
+                self.budget.image_bytes
+            )));
+        }
+        let available_bytes = self.budget.image_bytes - required_bytes;
+        let mut evicted = 0usize;
+        while self.images_used_bytes > available_bytes {
+            if self.images.is_empty() {
+                break;
+            }
+            let oldest = self.images.remove(0);
+            self.images_used_bytes = self.images_used_bytes.saturating_sub(oldest.approx_bytes());
+            evicted += 1;
+        }
+        self.image_evictions = self.image_evictions.saturating_add(evicted as u64);
         Ok(evicted)
     }
 

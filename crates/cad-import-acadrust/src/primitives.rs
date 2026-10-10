@@ -94,15 +94,22 @@ pub(crate) fn subd_mesh_semantics(m: &acadrust::entities::Mesh) -> SemanticGeome
     triangle_mesh(vertices, &faces)
 }
 
-/// A WIPEOUT's clip boundary is drawn as a closed polyline; the masking effect
-/// itself is reported `Partial` because it needs a draw-order/background path.
+/// A WIPEOUT's clip boundary as the modelled [`SemanticGeometry::Mask`].
+///
+/// `boundary` is the world-space closed loop (the same construction as before:
+/// `insertion + u*x + v*y` from the clip vertices, else the size corners) and
+/// `inverted` mirrors the DXF clip mode. Only the boundary is drawn: the fill is
+/// **not** rendered, because `cad-representation` has no `Mask` arm and the
+/// boundary falls through to its tessellate catch-all. `inverted` is carried on
+/// the semantic for a future mask primitive. The brightness/contrast/fade and
+/// clipping flags are not applied either, so this stays `Partial`.
 pub(crate) fn wipeout_semantics(
     w: &acadrust::entities::Wipeout,
 ) -> (SemanticGeometry, Completeness) {
     let origin = p3(w.insertion_point);
     let u = p3(w.u_vector);
     let v = p3(w.v_vector);
-    let mut points: Vec<Point3> = w
+    let mut boundary: Vec<Point3> = w
         .clip_boundary_vertices
         .iter()
         .map(|p| {
@@ -112,8 +119,8 @@ pub(crate) fn wipeout_semantics(
             )
         })
         .collect();
-    if points.len() < 3 {
-        points = vec![
+    if boundary.len() < 3 {
+        boundary = vec![
             origin,
             cad_geometry::add(origin, cad_geometry::scale(u, w.size.x)),
             cad_geometry::add(
@@ -126,10 +133,13 @@ pub(crate) fn wipeout_semantics(
             cad_geometry::add(origin, cad_geometry::scale(v, w.size.y)),
         ];
     }
+    let inverted = w.clip_mode == acadrust::entities::WipeoutClipMode::Inside;
     (
-        polyline_semantics(points, true),
+        SemanticGeometry::Mask { boundary, inverted },
         Completeness::Partial(vec![
-            "wipeout clip boundary drawn; the masking fill is not applied".into(),
+            "wipeout mask boundary only; the mask fill is not rendered and \
+             brightness/contrast/fade and clipping_enabled are ignored"
+                .into(),
         ]),
     )
 }
@@ -168,8 +178,12 @@ pub(crate) fn viewport_semantics(v: &acadrust::entities::Viewport) -> SemanticGe
 }
 
 /// A geometric TOLERANCE: a frame rectangle plus the (font-dependent) text.
-/// The frame width is estimated from the text length because the exact extent
-/// needs shaped glyph metrics; the estimate is reported `Partial`.
+///
+/// The frame is sized from the text: the width from the widest of the frame's
+/// `^J`-separated lines and the height from the line count, so a multi-line
+/// feature-control frame is not sized as a single line. The width is still an
+/// estimate (the exact extent needs shaped glyph metrics) and stays `Partial`
+/// at the call site; the signature is unchanged so the dispatch site compiles.
 pub(crate) fn tolerance_frame(t: &acadrust::entities::Tolerance) -> (SemanticGeometry, f64, f64) {
     let origin = p3(t.insertion_point);
     let height = if t.text_height.is_finite() && t.text_height > 0.0 {
@@ -177,8 +191,16 @@ pub(crate) fn tolerance_frame(t: &acadrust::entities::Tolerance) -> (SemanticGeo
     } else {
         2.5
     };
-    let frame_height = height * 1.6;
-    let frame_width = (t.text.chars().count().max(1) as f64) * height * 0.62 + height;
+    let lines = t.text_lines();
+    let line_count = lines.len().max(1);
+    let widest = lines
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let frame_height = height * 1.6 * line_count as f64;
+    let frame_width = (widest as f64) * height * 0.62 + height;
     let direction = cad_geometry::normalize(p3(t.direction));
     let angle = direction.y.atan2(direction.x);
     let ux = Point3 {
@@ -207,32 +229,58 @@ pub(crate) fn tolerance_frame(t: &acadrust::entities::Tolerance) -> (SemanticGeo
     (polyline_semantics(points, true), frame_width, frame_height)
 }
 
-/// A RASTERIMAGE frame. The pixel data needs a host image decoder and a texture
-/// pipeline, which this build does not have, so the frame (and clip boundary)
-/// is drawn and the texture is reported `Partial`.
+/// A RASTERIMAGE as a real [`SemanticGeometry::Image`].
+///
+/// The image is placed by `origin` and the per-pixel edge vectors `u`/`v`, with
+/// `pixels` its `(width, height)` in pixels. `file` is a *logical* resource key
+/// the host/representation resolves and sanitises; this importer never touches
+/// the filesystem. `clip` maps the clip boundary when clipping is enabled.
+///
+/// The texture is decoded by the host/representation, not here, so the result
+/// is `Partial`: the representation builds the fallback frame when the texture
+/// is unavailable. The four-corner frame is therefore *not* returned as the
+/// geometry.
 pub(crate) fn raster_image_semantics(
     img: &acadrust::entities::RasterImage,
 ) -> (SemanticGeometry, Completeness) {
     let origin = p3(img.insertion_point);
     let u = p3(img.u_vector);
     let v = p3(img.v_vector);
-    let mut points = vec![
-        origin,
-        cad_geometry::add(origin, cad_geometry::scale(u, img.size.x)),
-        cad_geometry::add(
-            origin,
-            cad_geometry::add(
-                cad_geometry::scale(u, img.size.x),
-                cad_geometry::scale(v, img.size.y),
-            ),
-        ),
-        cad_geometry::add(origin, cad_geometry::scale(v, img.size.y)),
-    ];
-    points.dedup();
+    let file = if img.file_path.trim().is_empty() {
+        None
+    } else {
+        Some(img.file_path.clone())
+    };
+    let clip = if img.clipping_enabled {
+        Some(ImageClip {
+            vertices: img
+                .clip_boundary
+                .vertices
+                .iter()
+                .map(|p| [p.x, p.y])
+                .collect(),
+            inside: img.clip_boundary.clip_mode == acadrust::entities::ClipMode::Inside,
+        })
+    } else {
+        None
+    };
+    let visible = img
+        .flags
+        .contains(acadrust::entities::ImageDisplayFlags::SHOW_IMAGE);
     (
-        polyline_semantics(points, true),
+        SemanticGeometry::Image {
+            origin,
+            u,
+            v,
+            pixels: [img.size.x, img.size.y],
+            file,
+            clip,
+            visible,
+        },
         Completeness::Partial(vec![
-            "raster image texture is not decoded; the image frame is drawn".into(),
+            "raster image texture is resolved by the host/representation; \
+             the frame is the fallback when the texture is unavailable"
+                .into(),
         ]),
     )
 }
@@ -323,21 +371,11 @@ pub(crate) fn ray_semantics(
     }
 }
 
-/// An MLINE as its parallel element polylines.
-///
-/// The per-vertex `segments[].parameters` carry the element offsets, so the
-/// parallel lines can be reconstructed without the MLINESTYLE table (joins and
-/// caps are still approximated, hence `Partial`). When the parameters are
-/// unavailable the vertex centerline is drawn as an explicit fallback.
-pub(crate) fn mline_semantics(m: &acadrust::entities::MLine) -> (SemanticGeometry, Completeness) {
+/// Per-vertex travel directions for an MLINE: the stored direction, else the
+/// neighbour chord (so a vertex with no direction still gets a usable normal).
+fn mline_directions(m: &acadrust::entities::MLine) -> Vec<Point3> {
     let count = m.vertices.len();
-    let scale = if m.scale_factor.is_finite() && m.scale_factor.abs() > 1e-9 {
-        m.scale_factor
-    } else {
-        1.0
-    };
-    // Direction per vertex: the stored direction, else the neighbour chord.
-    let directions: Vec<Point3> = (0..count)
+    (0..count)
         .map(|i| {
             let given = cad_geometry::normalize(p3(m.vertices[i].direction));
             if cad_geometry::length(given) > 1e-9 {
@@ -355,36 +393,104 @@ pub(crate) fn mline_semantics(m: &acadrust::entities::MLine) -> (SemanticGeometr
             };
             cad_geometry::normalize(cad_geometry::sub(next, prev))
         })
-        .collect();
-    let element_count = m
-        .vertices
-        .iter()
-        .find_map(|v| v.segments.first().map(|s| s.parameters.len()))
-        .unwrap_or(0);
-    let mut children: Vec<SemanticGeometry> = Vec::new();
-    for element in 0..element_count {
-        let points: Vec<Point3> = m
-            .vertices
-            .iter()
-            .enumerate()
-            .filter_map(|(i, vertex)| {
-                let offset = vertex.segments.first()?.parameters.get(element).copied()?;
-                let perp = Point3 {
-                    x: -directions[i].y,
-                    y: directions[i].x,
-                    z: 0.0,
-                };
-                Some(cad_geometry::add(
-                    p3(vertex.position),
-                    cad_geometry::scale(perp, offset * scale),
-                ))
-            })
-            .collect();
-        if points.len() >= 2 {
-            children.push(polyline_semantics(points, false));
+        .collect()
+}
+
+/// The two element points at `vertex` that span the profile along `perp`, so a
+/// cap/join is drawn across the whole multiline width.
+fn profile_extremes(
+    element_points: &[Vec<Point3>],
+    vertex: usize,
+    perp: Point3,
+) -> Option<(Point3, Point3)> {
+    let mut high: Option<(f64, Point3)> = None;
+    let mut low: Option<(f64, Point3)> = None;
+    for element in element_points {
+        let Some(p) = element.get(vertex).copied() else {
+            continue;
+        };
+        let s = p.x * perp.x + p.y * perp.y;
+        if high.map(|(best, _)| s > best).unwrap_or(true) {
+            high = Some((s, p));
+        }
+        if low.map(|(worst, _)| s < worst).unwrap_or(true) {
+            low = Some((s, p));
         }
     }
-    if children.is_empty() {
+    match (high, low) {
+        (Some((_, a)), Some((_, b))) if cad_geometry::distance(a, b) > 1e-9 => Some((a, b)),
+        _ => None,
+    }
+}
+
+/// An approximate (sampled) semicircular cap from `a` to `b`, bulging along
+/// `outward`. A degenerate direction collapses it to the straight profile line.
+fn mline_arc_cap(a: Point3, b: Point3, outward: Point3, perp: Point3) -> SemanticGeometry {
+    let center = Point3 {
+        x: (a.x + b.x) / 2.0,
+        y: (a.y + b.y) / 2.0,
+        z: (a.z + b.z) / 2.0,
+    };
+    let radius = cad_geometry::distance(a, b) / 2.0;
+    let dir = cad_geometry::normalize(outward);
+    let steps = 8usize;
+    let mut points = Vec::with_capacity(steps + 1);
+    for i in 0..=steps {
+        let t = std::f64::consts::PI * i as f64 / steps as f64;
+        points.push(cad_geometry::add(
+            center,
+            cad_geometry::add(
+                cad_geometry::scale(perp, radius * t.cos()),
+                cad_geometry::scale(dir, radius * t.sin()),
+            ),
+        ));
+    }
+    polyline_semantics(points, false)
+}
+
+/// Reconstruct an MLINE from an optional resolved `MLINESTYLE`.
+///
+/// Element offsets come from the style's elements when present, else from the
+/// first vertex's `segments[0].parameters`. `justification` selects the offset
+/// datum (the element that sits on the entity's vertex line) and `scale_factor`
+/// scales the offsets. Square caps are drawn as a profile-crossing segment,
+/// round/inner-arc caps as a sampled arc, and joins as cross-profile miters at
+/// interior vertices when `DISPLAY_JOINTS` is set. `FILL_ON` fills, element
+/// colours/linetypes, cap types with no matching flag, the `CLOSED` flag, the
+/// style cap angles and `start_point` are enumerated, so the result is honestly
+/// `Partial`.
+fn mline_geometry(
+    m: &acadrust::entities::MLine,
+    style: Option<&acadrust::objects::MLineStyle>,
+) -> (SemanticGeometry, Completeness) {
+    use acadrust::entities::{MLineFlags, MLineJustification};
+
+    let count = m.vertices.len();
+    let scale = if m.scale_factor.is_finite() && m.scale_factor.abs() > 1e-9 {
+        m.scale_factor
+    } else {
+        1.0
+    };
+    let directions = mline_directions(m);
+
+    let (offsets, from_style) = match style {
+        Some(style) if !style.elements.is_empty() => (
+            style
+                .elements
+                .iter()
+                .map(|e| e.offset)
+                .collect::<Vec<f64>>(),
+            true,
+        ),
+        _ => (
+            m.vertices
+                .iter()
+                .find_map(|v| v.segments.first().map(|s| s.parameters.clone()))
+                .unwrap_or_default(),
+            false,
+        ),
+    };
+    if offsets.is_empty() {
         let mut points: Vec<Point3> = m.vertices.iter().map(|v| p3(v.position)).collect();
         if let Some(first) = points.first().copied() {
             if cad_geometry::distance(p3(m.start_point), first) > 1e-9 {
@@ -398,12 +504,179 @@ pub(crate) fn mline_semantics(m: &acadrust::entities::MLine) -> (SemanticGeometr
             ]),
         );
     }
+
+    // Justification selects which element sits on the entity's vertex line.
+    let max_offset = offsets.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let min_offset = offsets.iter().copied().fold(f64::INFINITY, f64::min);
+    let datum = match m.justification {
+        MLineJustification::Top => max_offset,
+        MLineJustification::Bottom => min_offset,
+        MLineJustification::Zero => 0.0,
+    };
+
+    // World-space points per element (outer = element, inner = vertex).
+    let element_points: Vec<Vec<Point3>> = offsets
+        .iter()
+        .map(|offset| {
+            m.vertices
+                .iter()
+                .enumerate()
+                .map(|(i, vertex)| {
+                    let perp = Point3 {
+                        x: -directions[i].y,
+                        y: directions[i].x,
+                        z: 0.0,
+                    };
+                    cad_geometry::add(
+                        p3(vertex.position),
+                        cad_geometry::scale(perp, (offset - datum) * scale),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+
+    let mut children: Vec<SemanticGeometry> = Vec::new();
+    let mut reasons: Vec<String> = Vec::new();
+
+    for points in &element_points {
+        if points.len() >= 2 {
+            children.push(polyline_semantics(points.clone(), false));
+        }
+    }
+
+    if let Some(flags) = style.map(|s| s.flags) {
+        if count >= 2 {
+            let start_perp = Point3 {
+                x: -directions[0].y,
+                y: directions[0].x,
+                z: 0.0,
+            };
+            let last = count - 1;
+            let end_perp = Point3 {
+                x: -directions[last].y,
+                y: directions[last].x,
+                z: 0.0,
+            };
+            if !m.flags.contains(MLineFlags::NO_START_CAPS) {
+                if let Some((a, b)) = profile_extremes(&element_points, 0, start_perp) {
+                    if flags.start_square_cap {
+                        children.push(polyline_semantics(vec![a, b], false));
+                    } else if flags.start_round_cap {
+                        children.push(mline_arc_cap(
+                            a,
+                            b,
+                            cad_geometry::scale(directions[0], -1.0),
+                            start_perp,
+                        ));
+                        reasons.push("start round cap approximated as a sampled arc".into());
+                    } else if flags.start_inner_arcs_cap {
+                        children.push(mline_arc_cap(
+                            a,
+                            b,
+                            cad_geometry::scale(directions[0], -1.0),
+                            start_perp,
+                        ));
+                        reasons.push("start inner-arcs cap approximated as one arc".into());
+                    }
+                }
+            }
+            if !m.flags.contains(MLineFlags::NO_END_CAPS) {
+                if let Some((a, b)) = profile_extremes(&element_points, last, end_perp) {
+                    if flags.end_square_cap {
+                        children.push(polyline_semantics(vec![a, b], false));
+                    } else if flags.end_round_cap {
+                        children.push(mline_arc_cap(a, b, directions[last], end_perp));
+                        reasons.push("end round cap approximated as a sampled arc".into());
+                    } else if flags.end_inner_arcs_cap {
+                        children.push(mline_arc_cap(a, b, directions[last], end_perp));
+                        reasons.push("end inner-arcs cap approximated as one arc".into());
+                    }
+                }
+            }
+        }
+        if flags.display_joints && count >= 3 {
+            for (i, direction) in directions.iter().enumerate().take(count - 1).skip(1) {
+                let perp = Point3 {
+                    x: -direction.y,
+                    y: direction.x,
+                    z: 0.0,
+                };
+                if let Some((a, b)) = profile_extremes(&element_points, i, perp) {
+                    children.push(polyline_semantics(vec![a, b], false));
+                }
+            }
+            reasons.push(
+                "mline joins drawn as cross-profile miters; the exact miter is approximated".into(),
+            );
+        } else if !flags.display_joints {
+            reasons.push("mline joins are not drawn (MLINESTYLE DISPLAY_JOINTS not set)".into());
+        }
+        if flags.fill_on {
+            reasons.push("MLINESTYLE fill between elements is not applied".into());
+        }
+    } else {
+        reasons.push("mline caps and joins are not drawn (no MLINESTYLE object)".into());
+    }
+
+    if from_style {
+        reasons.push(
+            "mline element offsets taken from the MLINESTYLE object; caps and joins are approximated"
+                .into(),
+        );
+    } else {
+        reasons.push(
+            "mline element offsets taken from the first vertex's segment parameters; the \
+             MLINESTYLE object was unavailable"
+                .into(),
+        );
+    }
+    reasons.push("mline element colours and linetypes are not carried into geometry".into());
+    if m.flags.contains(MLineFlags::CLOSED) {
+        reasons.push("mline CLOSED flag is ignored; the mline is drawn open".into());
+    }
+    reasons.push("MLINESTYLE start_angle/end_angle cap angles are not applied".into());
+    reasons.push(
+        "MLine.start_point is not applied; the styled path starts at the first vertex".into(),
+    );
+
+    if children.is_empty() {
+        let mut points: Vec<Point3> = m.vertices.iter().map(|v| p3(v.position)).collect();
+        if let Some(first) = points.first().copied() {
+            if cad_geometry::distance(p3(m.start_point), first) > 1e-9 {
+                points.insert(0, p3(m.start_point));
+            }
+        }
+        return (
+            polyline_semantics(points, false),
+            Completeness::Partial(reasons),
+        );
+    }
+
     (
         SemanticGeometry::Compound(children),
-        Completeness::Partial(vec![
-            "mline element offsets drawn; joins and caps are approximated".into(),
-        ]),
+        Completeness::Partial(reasons),
     )
+}
+
+impl ImporterBuilder<'_> {
+    /// An MLINE reconstructed with its `MLINESTYLE` object, resolved on demand
+    /// from the document's objects section by `style_handle` (styles are not a
+    /// typed table). Falls back to the per-vertex parameters when no style is
+    /// found. Kept `Partial`: fills, element colours/linetypes and cap shapes
+    /// are approximated or enumerated.
+    pub(crate) fn mline_semantics(
+        &self,
+        m: &acadrust::entities::MLine,
+    ) -> (SemanticGeometry, Completeness) {
+        let style = m
+            .style_handle
+            .and_then(|handle| match self.acad.objects.get(&handle) {
+                Some(acadrust::objects::ObjectType::MLineStyle(style)) => Some(style),
+                _ => None,
+            });
+        mline_geometry(m, style)
+    }
 }
 
 /// The frame rectangle of an OLE2FRAME. The embedded object is not decoded, so

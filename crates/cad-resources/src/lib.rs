@@ -12,10 +12,12 @@ use std::sync::Arc;
 
 mod bundle;
 mod font;
+mod image;
 mod resolver;
 
 pub use bundle::*;
 pub use font::*;
+pub use image::*;
 pub use resolver::*;
 
 #[cfg(test)]

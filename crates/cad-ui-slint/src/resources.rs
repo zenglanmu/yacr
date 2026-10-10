@@ -99,9 +99,11 @@ pub struct ResourceSections {
     pub import: Option<ImportResourceSummary>,
     pub proxy: Option<ProxyResourceSummary>,
     pub references: Option<ReferencesResourceSummary>,
-    /// Whether this build models image entities. False today: the database has
-    /// no image type, so the drawer states the limitation explicitly instead of
-    /// rendering an empty list that would read as "no images".
+    /// Whether this build models image entities. True on the desktop host and
+    /// CLI (raster images resolve, decode and render); false on the web/android
+    /// hosts, which have no image loader wired, so the drawer states the
+    /// limitation explicitly instead of rendering an empty list that would read
+    /// as "no images".
     pub images_modeled: bool,
 }
 

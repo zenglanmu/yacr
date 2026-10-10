@@ -217,18 +217,23 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
 ## 4. 明确未完成（不是已支持）
 
 - **视口裁剪的剩余边界**：线/填充几何按段精确裁剪；`Mesh` 逐三角精确裁剪（位置、
-  z、法线、逐顶点颜色插值）；`Image` 四边形精确裁剪（纹理 UV 插值）；带字体名、
-  被 `FontEngine` 成功 shape 的 Text 其轮廓就是 `Lines`，走线裁剪（精确）。仍
-  **无法精确裁剪**的情形保留未裁剪几何并降为 `Partial`，附稳定 `clip_reason`
-  码与 `representation.viewport_clip_partial` 诊断（绝不静默丢弃、绝不声称已裁剪）：
+  z、法线、逐顶点颜色插值）；`Image` 四边形精确裁剪（纹理 UV 插值），且当图像**同时**
+  带实体级裁剪与视口裁剪时，两者**精确求交**（Sutherland–Hodgman，UV 插值；见
+  `docs/dxf-entity-coverage.md`）；带字体名、被 `FontEngine` 成功 shape 的 Text 其轮廓
+  就是 `Lines`，走线裁剪（精确）。仍 **无法精确裁剪** 的情形保留未裁剪几何并降为
+  `Partial`，附稳定 `clip_reason` 码与 `representation.viewport_clip_partial` 诊断
+  （绝不静默丢弃、绝不声称已裁剪）：
   - `viewport.clip_text_font_dependent`：未 shape 的 `Text` 占位（无字体时 glyph
     几何依赖字体，本层无从裁剪）；
   - `viewport.clip_mesh_unclippable`：网格索引越界、顶点非有限或超出 32 位顶点寻址；
   - `viewport.clip_image_degenerate`：图像变换把四边形映到非有限坐标；
+  - `viewport.clip_image_intersection_unsupported`：实体级裁剪为**非凸**多边形（provider
+    契约外的防御性输入），保留实体裁剪并显式报 `Partial`，绝不替换/加宽；
   - `viewport.clip_unsupported_primitive`：未展开的 `Instance` 等没有可裁剪几何的
     原语。
-  非矩形/非凸视口裁剪在上游 `viewport_transform` 就已显式 `Unsupported`（§3），
-  不会到达逐三角裁剪。
+  实体级**非凸**图像裁剪在 provider 侧即拒绝（frame+`Partial`+`image.clip_unsupported`），
+  不会到达此处。非矩形/非凸视口裁剪在上游 `viewport_transform` 就已显式 `Unsupported`
+  （§3），不会到达逐三角裁剪。
 - **打印输出**：无 plot/打印路径。布局绘制是屏幕显示，不是可交付的图纸输出。
 - **倾斜/扭转/透视视口、非矩形裁剪、非均匀视口、注释性缩放、动态块**：导入时置
   `Partial` 并给出原因，本层以稳定原因码显式 `Unsupported`，按样本标记，不假装支持。

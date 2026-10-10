@@ -76,6 +76,16 @@ pub struct Bounds3 {
     pub min: Point3,
     pub max: Point3,
 }
+/// Clip boundary of a raster `IMAGE`, in the image's own pixel coordinate space.
+///
+/// `vertices` is a closed polygon; `inside` mirrors DXF clip_mode: `true` keeps
+/// the region inside the boundary, `false` keeps the region outside it (which is
+/// what a WIPEOUT-style inverted mask expresses).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageClip {
+    pub vertices: Vec<[f64; 2]>,
+    pub inside: bool,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorkPlane {
     pub origin: Point3,
@@ -344,6 +354,34 @@ pub enum SemanticGeometry {
     /// Used where one imported entity yields several primitives (for example a
     /// HATCH's boundary loops plus its fill or pattern). Consumers recurse.
     Compound(Vec<SemanticGeometry>),
+    /// A raster image (DXF `IMAGE` / `AcDbRasterImage`).
+    ///
+    /// The image is placed by `origin` and two edge vectors: `u` and `v` span
+    /// the image's local axes, and their lengths are one pixel's world size, so
+    /// the full extent is `pixels.0 * |u|` by `pixels.1 * |v|`. `pixels` is
+    /// `(width, height)` in pixels. `file` is a *logical* resource key resolved
+    /// by the host, never a platform path (the same role as `Text::font`).
+    /// `visible` mirrors the SHOW_IMAGE flag.
+    Image {
+        origin: Point3,
+        u: Point3,
+        v: Point3,
+        pixels: [f64; 2],
+        file: Option<String>,
+        clip: Option<ImageClip>,
+        visible: bool,
+    },
+    /// An erasing mask (DXF `WIPEOUT`).
+    ///
+    /// `boundary` is a closed world-space polygon; `inverted` corresponds to
+    /// clip_mode Inside (mask the outside). The renderer floods it with the
+    /// viewport background colour, so it carries no colour of its own and the
+    /// representation layer maps it to a mask primitive rather than a coloured
+    /// mesh.
+    Mask {
+        boundary: Vec<Point3>,
+        inverted: bool,
+    },
 }
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mesh {
@@ -461,6 +499,55 @@ impl Transform3 {
         m[0][0] = s;
         m[1][1] = s;
         m[2][2] = s;
+        Transform3 { matrix: m }
+    }
+
+    /// Build a transform from two linear basis vectors and an origin.
+    ///
+    /// Column 0 is `x`, column 1 is `y`, the translation is `origin`, and column
+    /// 2 is `normalize(cross(x, y))` so the frame is right-handed with a unit
+    /// plane normal. The unit square `(s, t)` with `s, t` in `[0, 1]` therefore
+    /// maps to `origin + x*s + y*t`.
+    ///
+    /// A degenerate pair (zero-length or non-finite cross product) leaves the Z
+    /// column at zero rather than inventing an axis; callers that need a defined
+    /// plane normal must reject that case before using the result.
+    pub fn from_basis(x: Point3, y: Point3, origin: Point3) -> Self {
+        let normal = {
+            let c = Point3 {
+                x: x.y * y.z - x.z * y.y,
+                y: x.z * y.x - x.x * y.z,
+                z: x.x * y.y - x.y * y.x,
+            };
+            let len = c.x.hypot(c.y).hypot(c.z);
+            if len.is_finite() && len > 1e-24 {
+                Point3 {
+                    x: c.x / len,
+                    y: c.y / len,
+                    z: c.z / len,
+                }
+            } else {
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }
+            }
+        };
+        let mut m = [[0.0f64; 4]; 4];
+        m[0][0] = x.x;
+        m[1][0] = x.y;
+        m[2][0] = x.z;
+        m[0][1] = y.x;
+        m[1][1] = y.y;
+        m[2][1] = y.z;
+        m[0][2] = normal.x;
+        m[1][2] = normal.y;
+        m[2][2] = normal.z;
+        m[0][3] = origin.x;
+        m[1][3] = origin.y;
+        m[2][3] = origin.z;
+        m[3][3] = 1.0;
         Transform3 { matrix: m }
     }
 
@@ -629,5 +716,100 @@ impl Mesh {
 
     pub fn is_empty(&self) -> bool {
         self.triangles.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn point(x: f64, y: f64, z: f64) -> Point3 {
+        Point3 { x, y, z }
+    }
+
+    fn sample_image() -> SemanticGeometry {
+        SemanticGeometry::Image {
+            origin: point(1.0, 2.0, 0.0),
+            u: point(0.5, 0.0, 0.0),
+            v: point(0.0, 0.25, 0.0),
+            pixels: [640.0, 480.0],
+            file: Some("logo.png".to_string()),
+            clip: Some(ImageClip {
+                vertices: vec![[0.0, 0.0], [640.0, 0.0], [640.0, 480.0]],
+                inside: true,
+            }),
+            visible: true,
+        }
+    }
+
+    fn sample_mask() -> SemanticGeometry {
+        SemanticGeometry::Mask {
+            boundary: vec![
+                point(0.0, 0.0, 0.0),
+                point(10.0, 0.0, 0.0),
+                point(10.0, 10.0, 0.0),
+                point(0.0, 10.0, 0.0),
+            ],
+            inverted: false,
+        }
+    }
+
+    #[test]
+    fn image_variant_constructs_and_compares() {
+        let image = sample_image();
+        assert_eq!(image.clone(), image);
+        match &image {
+            SemanticGeometry::Image {
+                origin,
+                pixels,
+                file,
+                clip,
+                visible,
+                ..
+            } => {
+                assert_eq!(*origin, point(1.0, 2.0, 0.0));
+                assert_eq!(*pixels, [640.0, 480.0]);
+                assert_eq!(file.as_deref(), Some("logo.png"));
+                assert!(clip.as_ref().expect("clip").inside);
+                assert!(*visible);
+            }
+            other => panic!("expected Image, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_clip_constructs_and_compares() {
+        let clip = ImageClip {
+            vertices: vec![[1.0, 2.0], [3.0, 4.0]],
+            inside: false,
+        };
+        assert_eq!(clip.clone(), clip);
+        assert_eq!(
+            clip,
+            ImageClip {
+                vertices: vec![[1.0, 2.0], [3.0, 4.0]],
+                inside: false,
+            }
+        );
+        assert_ne!(
+            clip,
+            ImageClip {
+                vertices: vec![[1.0, 2.0], [3.0, 4.0]],
+                inside: true,
+            }
+        );
+    }
+
+    #[test]
+    fn mask_variant_constructs_and_compares() {
+        let mask = sample_mask();
+        assert_eq!(mask.clone(), mask);
+        match &mask {
+            SemanticGeometry::Mask { boundary, inverted } => {
+                assert_eq!(boundary.len(), 4);
+                assert!(!*inverted);
+            }
+            other => panic!("expected Mask, got {other:?}"),
+        }
     }
 }

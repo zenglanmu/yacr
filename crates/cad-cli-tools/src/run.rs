@@ -43,12 +43,17 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
         }
     }
     let mut controller = domain(load_document(invocation))?;
-    let fonts = domain(load_fonts(&invocation.fonts, &fonts_requested(&controller)))?;
     let value = match invocation.operation {
         CliOperation::Scan => domain(run_scan(&controller))?,
         CliOperation::ProxyReport => domain(run_proxy_report(&controller))?,
         CliOperation::Measure => domain(run_measure(&mut controller, invocation))?,
         CliOperation::BuildRepresentation => {
+            // A structural report must be host-font independent: shape text only
+            // when the caller passes explicit `--font` entries, never the auto
+            // system-default face. Otherwise every text run is shaped into line
+            // geometry and `kind_counts.texts` is always 0, making the report
+            // depend on the host's installed fonts.
+            let fonts = domain(load_fonts(&invocation.fonts, &[]))?;
             domain(run_build_representation(&controller, fonts.as_ref()))?
         }
         CliOperation::Benchmark => unreachable!(),

@@ -1490,6 +1490,19 @@ fn drawing_validate_geometry_covers_supported_kinds() {
             face_sources: Vec::new(),
             colors: Vec::new(),
         }),
+        SemanticGeometry::Image {
+            origin: point(0.0, 0.0),
+            u: point(0.5, 0.0),
+            v: point(0.0, 0.5),
+            pixels: [640.0, 480.0],
+            file: Some("logo.png".into()),
+            clip: None,
+            visible: true,
+        },
+        SemanticGeometry::Mask {
+            boundary: vec![point(0.0, 0.0), point(2.0, 0.0), point(2.0, 2.0)],
+            inverted: false,
+        },
     ];
     for geometry in valid {
         crate::validate_geometry(&geometry)
@@ -1525,4 +1538,60 @@ fn drawing_validate_geometry_covers_supported_kinds() {
         sweep: 1.0,
     })
     .is_err());
+}
+
+#[test]
+fn drawing_transform_bakes_image_placement_and_mask_boundary() {
+    let image = SemanticGeometry::Image {
+        origin: point(1.0, 2.0),
+        u: point(0.5, 0.0),
+        v: point(0.0, 0.25),
+        pixels: [640.0, 480.0],
+        file: Some("logo.png".into()),
+        clip: Some(ImageClip {
+            vertices: vec![[0.0, 0.0], [1.0, 1.0]],
+            inside: true,
+        }),
+        visible: true,
+    };
+    // Translate + uniform scale: `origin` moves as a point while `u`/`v` scale
+    // as direction vectors (no translation applied to them).
+    let mut t = Transform3::scale(2.0);
+    t.matrix[0][3] = 10.0;
+    t.matrix[1][3] = 20.0;
+    match crate::transform_geometry(&image, &t).unwrap() {
+        SemanticGeometry::Image {
+            origin,
+            u,
+            v,
+            pixels,
+            file,
+            clip,
+            visible,
+        } => {
+            assert_eq!(origin, point(12.0, 24.0));
+            assert_eq!(u, point(1.0, 0.0));
+            assert_eq!(v, point(0.0, 0.5));
+            assert_eq!(pixels, [640.0, 480.0]);
+            assert_eq!(file.as_deref(), Some("logo.png"));
+            assert!(clip.expect("clip").inside);
+            assert!(visible);
+        }
+        other => panic!("expected Image, got {other:?}"),
+    }
+
+    let mask = SemanticGeometry::Mask {
+        boundary: vec![point(0.0, 0.0), point(1.0, 0.0), point(1.0, 1.0)],
+        inverted: true,
+    };
+    match crate::transform_geometry(&mask, &t).unwrap() {
+        SemanticGeometry::Mask { boundary, inverted } => {
+            assert_eq!(
+                boundary,
+                vec![point(10.0, 20.0), point(12.0, 20.0), point(12.0, 22.0)]
+            );
+            assert!(inverted);
+        }
+        other => panic!("expected Mask, got {other:?}"),
+    }
 }

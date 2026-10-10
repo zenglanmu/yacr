@@ -31,10 +31,12 @@ pub enum DisplayPrimitive {
     Image {
         resource: ResourceKey,
         transform: Transform3,
-        /// `None` while the whole image is inside the current window. `Some`
-        /// once a viewport clip cut the image: a convex paper-space polygon with
-        /// per-vertex texture coordinates, so only the visible texture region is
-        /// mapped and its UVs are interpolated at the new vertices.
+        /// `None` while the whole image is drawn through its unit-square
+        /// `transform`. `Some` when the image is bounded by an entity clip
+        /// and/or a viewport cut: a convex polygon (paper-space positions for a
+        /// viewport cut, world space otherwise) with per-vertex texture
+        /// coordinates, so only the visible texture region is mapped and its
+        /// UVs are interpolated at the new vertices.
         clip: Option<Arc<[ImageVertex]>>,
     },
     Instance {

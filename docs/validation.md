@@ -21,6 +21,40 @@
 - Web：`wasm-bindgen-cli 0.2.129`、Node 22；无头 Chromium
   `Google Chrome for Testing 153.0.8010.12`（Playwright core 1.63，SwiftShader）。
 
+## 2026-10-10：DXF/DWG 图元显示补全轮（含光栅图像纹理管线）
+
+环境：本机 ThinkPad 桌面，Rust 1.99.0；GPU 证据使用 Mesa **lavapipe**（软件 Vulkan，
+`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`，`--test-threads=1`）。**非真实
+GPU、非真机、非浏览器。**
+
+**静态门禁（实跑，全绿）**：`cargo fmt --all -- --check`；严格
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets -D warnings`；
+`scripts/check-architecture.py`（25 包无环）、`check-fixture-manifest.py`、`check-workflows.py`、
+`check-i18n.py`（248 键）；`cargo check --workspace --exclude app-android --exclude app-web
+--all-targets`、`cargo check --workspace --lib --target wasm32-unknown-unknown`、
+`cargo check -p app-web --target wasm32-unknown-unknown`。
+
+**测试（实跑，lavapipe 串行）**：`cad-import-acadrust` 150、`cad-representation` 168、
+`cad-resources` 34、`cad-scene` 54、`cad-render-wgpu` 78、`cad-app` 265、`cad-ui-slint` 159、
+`cad-platform` 23、`cad-cli-tools`（lib 22、cli_contracts 14 等）。**唯二失败**为下述既有项。
+
+**光栅图像渲染证据（lavapipe 实测像素）**：`cad-render-wgpu`
+`tests/headless_render.rs` 的 `uploaded_image_is_not_vertically_flipped`（2×2 上红下蓝纹理，
+断言上=红/下=蓝，证明 UV 方向）、`clipped_image_renders_only_the_clip_polygon`（裁剪多边形外
+为清屏色）、`image_batches_sharing_a_key_allocate_one_texture`（同键两批仅 1 张纹理）、
+`progressive_images_draw_only_on_the_cleared_page`（渐进分页只在清屏帧画一次）、
+`new_cache_with_same_key_rebuilds_texture`（同键不同字节的两份 cache 必须重建纹理，先红后蓝）
+**实际通过**。此为软件 Vulkan 证据，**不是**真实 GPU/真实光栅文件验收。
+
+**既有失败（非本轮引入，已修复）**：`cad-cli-tools/tests/dxf_fixture.rs` 的
+`committed_qcad_flange_builds_a_non_empty_representation`（字体轮后 `texts` 恒 0）与
+`flange_plot_defaults_to_the_populated_paper_layout`（acadrust 0.6.3 应用 LAYOUT
+`group 73`）在干净 HEAD `37b494d` 即失败；本轮修复为 `build-representation` 字体无关 +
+测试期望对齐声明旋转，`dxf_fixture` 3/3 通过（lavapipe）。
+
+**未运行**：真实 GPU/真机/浏览器、真实光栅 DWG/DXF 视觉验收、`check-linux-app.sh`、
+release 构建、Web/Android 图像加载器接线。
+
 ## 2026-10-09：acadrust 0.5.5 → 0.6.3 升级门禁（本机，无 GPU）
 
 环境：本机（非无头）Rust 1.99.0，**无 GPU 运行**；仅纯主机编译/测试与 wasm32 编译检查，

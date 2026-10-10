@@ -489,7 +489,15 @@ fn generate(geometry: &SemanticGeometry, probe: Option<Point3>, out: &mut Vec<Ra
                 generate(child, probe, out, &format!("{prefix}child:{i}:"));
             }
         }
-        G::Mesh(_) | G::Insert { .. } | G::Text { .. } | G::Shape { .. } | G::Opaque { .. } => {}
+        G::Mesh(_)
+        | G::Insert { .. }
+        | G::Text { .. }
+        | G::Shape { .. }
+        | G::Opaque { .. }
+        // Images and masks carry no analytic snap vertices here; picking and
+        // bounds consumers still see them via their geometry.
+        | G::Image { .. }
+        | G::Mask { .. } => {}
     }
 }
 
@@ -1445,5 +1453,26 @@ mod tests {
                 }]
             )
             .is_err());
+    }
+
+    #[test]
+    fn image_and_mask_yield_no_snap_candidates() {
+        let image = SemanticGeometry::Image {
+            origin: flat(0.0, 0.0),
+            u: flat(1.0, 0.0),
+            v: flat(0.0, 1.0),
+            pixels: [4.0, 4.0],
+            file: None,
+            clip: None,
+            visible: true,
+        };
+        let mask = SemanticGeometry::Mask {
+            boundary: vec![flat(-5.0, -5.0), flat(5.0, -5.0), flat(5.0, 5.0)],
+            inverted: false,
+        };
+        // Even hovering exactly over the image origin / mask vertex, neither
+        // exposes a snap point.
+        assert!(snaps(&[target(image)], 0.0, 0.0, 1.0).is_empty());
+        assert!(snaps(&[target(mask)], 5.0, 5.0, 1.0).is_empty());
     }
 }

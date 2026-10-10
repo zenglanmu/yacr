@@ -12,6 +12,11 @@ cad-domain.workspace = true
 cad-scene.workspace = true
 cad-geometry.workspace = true
 cad-diagnostics.workspace = true
+# Raster image draw items (`ImageBatch`) carry a logical `ResourceKey`; the
+# decoded RGBA bytes live in `cad_resources::DecodedImageCache`. This is the
+# renderer's only edge to resource decoding (downward: resources never depend on
+# the renderer).
+cad-resources.workspace = true
 wgpu.workspace = true
 bytemuck.workspace = true
 glam.workspace = true
@@ -21,6 +26,11 @@ log.workspace = true
 # Used only by the offline WGSL validation test; pinned to the exact naga that
 # wgpu 30.0.1 embeds so validation matches the runtime parser.
 naga = { version = "=30.0.1", features = ["wgsl-in"] }
+# Tests construct `ImageBatch::clip` polygons, whose `ImageVertex` type is
+# defined by `cad-representation` and re-exported through `cad-scene`'s public
+# `ImageBatch` field. Test-only (downward) edge; the crate itself does not
+# depend on `cad-representation`.
+cad-representation.workspace = true
 
 # Headless software-Vulkan path (native only): blocking on wgpu's async
 # adapter/device requests and PNG-encoding the readback for golden inspection.

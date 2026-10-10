@@ -390,6 +390,22 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
             PropertyRow::new("opaque_version", version.to_string()),
             PropertyRow::new("payload_bytes", payload.len().to_string()),
         ],
+        // True, stored metadata only: no geometric length is invented for an
+        // image (its world extent lives in the placement vectors).
+        SemanticGeometry::Image {
+            pixels,
+            file,
+            visible,
+            ..
+        } => vec![
+            PropertyRow::new("pixels", format!("{} x {}", pixels[0], pixels[1])),
+            PropertyRow::new("file", file.clone().unwrap_or_else(|| "none".to_string())),
+            PropertyRow::new("visible", visible.to_string()),
+        ],
+        SemanticGeometry::Mask { boundary, inverted } => vec![
+            PropertyRow::new("boundary", boundary.len().to_string()),
+            PropertyRow::new("inverted", inverted.to_string()),
+        ],
         SemanticGeometry::Compound(children) => {
             vec![PropertyRow::new("children", children.len().to_string())]
         }
@@ -696,5 +712,36 @@ mod tests {
             .find(|r| r.key == "font")
             .map(|r| r.value.clone());
         assert_eq!(font.as_deref(), Some("unknown"));
+    }
+
+    #[test]
+    fn image_and_mask_report_only_stored_metadata() {
+        let rows = geometry_property_rows(&SemanticGeometry::Image {
+            origin: point(1.0, 2.0),
+            u: point(0.5, 0.0),
+            v: point(0.0, 0.25),
+            pixels: [640.0, 480.0],
+            file: Some("logo.png".into()),
+            clip: None,
+            visible: true,
+        });
+        let value = |key: &str| rows.iter().find(|r| r.key == key).map(|r| r.value.clone());
+        assert_eq!(value("pixels").as_deref(), Some("640 x 480"));
+        assert_eq!(value("file").as_deref(), Some("logo.png"));
+        assert_eq!(value("visible").as_deref(), Some("true"));
+        assert_eq!(value("length"), None);
+
+        let mask_rows = geometry_property_rows(&SemanticGeometry::Mask {
+            boundary: vec![point(0.0, 0.0), point(1.0, 0.0), point(1.0, 1.0)],
+            inverted: true,
+        });
+        let value = |key: &str| {
+            mask_rows
+                .iter()
+                .find(|r| r.key == key)
+                .map(|r| r.value.clone())
+        };
+        assert_eq!(value("boundary").as_deref(), Some("3"));
+        assert_eq!(value("inverted").as_deref(), Some("true"));
     }
 }

@@ -270,6 +270,31 @@ impl GeometryEngine for DefaultGeometryEngine {
                 version: *version,
                 payload: payload.clone(),
             },
+            // A raster image is a rigid placement: `origin` transforms as a
+            // point, `u`/`v` as direction vectors; the pixel size and resource
+            // key are not geometry and are preserved.
+            G::Image {
+                origin,
+                u,
+                v,
+                pixels,
+                file,
+                clip,
+                visible,
+            } => G::Image {
+                origin: tp(*origin),
+                u: td(*u),
+                v: td(*v),
+                pixels: *pixels,
+                file: file.clone(),
+                clip: clip.clone(),
+                visible: *visible,
+            },
+            // A mask is a world-space polygon: every boundary point moves.
+            G::Mask { boundary, inverted } => G::Mask {
+                boundary: boundary.iter().map(|p| tp(*p)).collect(),
+                inverted: *inverted,
+            },
             G::Compound(children) => {
                 let mut out = Vec::with_capacity(children.len());
                 for child in children {

@@ -169,6 +169,9 @@ cad-cli-tools <operation> <input.dwg> [options]
 ```
 
 - 单个实体构建失败会进入 `failures`（非空即真实故障），不会被静默忽略。
+- `build-representation` 是**与宿主字体无关**的结构报告：仅当显式传入 `--font` 时才把
+  文字成型为线几何；默认**不**自动加载系统默认轮廓面，因此 `kind_counts.texts` 在不同
+  机器上确定可复现（`render`/`plot` 仍按 `--font` + 同级 `fonts/` + 系统默认面成型）。
 
 ### `benchmark`
 

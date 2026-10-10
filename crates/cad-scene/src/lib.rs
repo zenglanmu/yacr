@@ -7,7 +7,8 @@
 
 use cad_db::{ChangeSet, ObjectChange};
 use cad_domain::*;
-use cad_representation::{DisplayPrimitive, DisplayRepresentation};
+use cad_representation::{DisplayPrimitive, DisplayRepresentation, ImageVertex};
+use cad_resources::ResourceKey;
 use std::collections::BTreeMap;
 
 /// Re-exported so a host (and the renderer's tests) can construct a batch's

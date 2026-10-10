@@ -321,6 +321,7 @@ dependencies = [
  "cad-platform",
  "cad-render-wgpu",
  "cad-representation",
+ "cad-resources",
  "cad-ui-slint",
  "pollster",
  "rfd",
@@ -927,6 +928,7 @@ dependencies = [
  "cad-domain",
  "cad-representation",
  "cad-resources",
+ "png",
 ]
 
 [[package]]
@@ -954,6 +956,8 @@ dependencies = [
  "cad-diagnostics",
  "cad-domain",
  "cad-geometry",
+ "cad-representation",
+ "cad-resources",
  "cad-scene",
  "futures-lite",
  "glam",
@@ -988,7 +992,9 @@ name = "cad-resources"
 version = "0.1.0"
 dependencies = [
  "cad-domain",
+ "png",
  "serde_json",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1000,6 +1006,7 @@ dependencies = [
  "cad-domain",
  "cad-geometry",
  "cad-representation",
+ "cad-resources",
  "cad-spatial",
 ]
 

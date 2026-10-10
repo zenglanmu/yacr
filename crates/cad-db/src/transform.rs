@@ -21,6 +21,9 @@
 //!   polylines accept any affine.
 //! - `Insert` composes the transform onto its stored instance transform; the
 //!   referenced block geometry is not cloned or modified.
+//! - `Image` transforms its placement (`origin` as a point, `u`/`v` as vectors)
+//!   and keeps the pixel size, resource key, clip and visibility unchanged.
+//! - `Mask` transforms every boundary point as a point and keeps `inverted`.
 //! - `Text`, `Spline`, `Opaque` and `Compound` are not baked: they return
 //!   `Unsupported` so a caller cannot believe a move happened when it did not.
 //!
@@ -193,6 +196,32 @@ pub fn transform_geometry(
             block: *block,
             // Apply the move first, then the instance placement.
             transform: transform.matrix_mul(insert),
+        },
+        // A raster image is a rigid placement: `origin` transforms as a point,
+        // while the edge vectors `u`/`v` transform through the linear part only
+        // (they are directions, one pixel wide/high). The pixel size and the
+        // logical resource key are not geometry and are preserved verbatim.
+        SemanticGeometry::Image {
+            origin,
+            u,
+            v,
+            pixels,
+            file,
+            clip,
+            visible,
+        } => SemanticGeometry::Image {
+            origin: transform.apply_point(*origin),
+            u: apply_vector(transform, *u),
+            v: apply_vector(transform, *v),
+            pixels: *pixels,
+            file: file.clone(),
+            clip: clip.clone(),
+            visible: *visible,
+        },
+        // A mask is a world-space polygon: every boundary point moves as a point.
+        SemanticGeometry::Mask { boundary, inverted } => SemanticGeometry::Mask {
+            boundary: boundary.iter().map(|p| transform.apply_point(*p)).collect(),
+            inverted: *inverted,
         },
         SemanticGeometry::Text { .. } => {
             return Err(CadError::Unsupported(

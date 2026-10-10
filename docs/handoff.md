@@ -1,5 +1,122 @@
 # 后续 agent 接手入口
 
+## DXF/DWG 图元显示补全轮（2026-10-10，本轮）
+
+用户要求：检查项目对 DXF 与 DWG 各 entity 的实现情况，**除 proxy 代理图元外实现所有 DXF
+entity 的显示**，并把进度与实在实现不了的项记入本文。经问询确认范围：**含光栅图像纹理
+管线**、**非标准 class-based（Extended）图元也要基础表示**。铁律不变（不改 acadrust、
+不用 Cargo patch、显式 `Unsupported`/`Partial`、不造假成功）。
+
+**结论**：`crates/cad-import-acadrust` 的 `convert` 已覆盖全部 acadrust `EntityType`
+变体；本轮把此前仅 `Opaque`/无显示或 `Partial` 的图元补齐/提升，并新增**光栅图像端到端
+显示**（domain→importer→representation→scene→renderer→resources→host）。DXF 与 DWG 共用
+同一导入路径，故两格式同步受益。
+
+### 改动
+
+1. **光栅图像（`IMAGE`/`AcDbRasterImage`）端到端显示（新增，跨 7 层）**
+   - `cad-domain`：`SemanticGeometry::Image{origin,u,v,pixels,file,clip,visible}`、
+     `ImageClip`、`SemanticGeometry::Mask{boundary,inverted}`、`Transform3::from_basis`。
+   - `cad-resources`：`decode_image`（PNG+JPEG→RGBA8，依赖 `png`+`zune-jpeg`；**不用**
+     `image` crate，其 MSRV 1.88 > 工程 1.85）、`DecodedImageCache`、
+     `image_resource_key`（小写化**相对路径**键，避免 `a/logo.png`/`b/logo.png` 同名碰撞）；
+     能力表 `Image` = resolve `Verified` / decode `Partial`；新增码
+     `resource.image_unsupported_format`、`resource.image_decode_failed`。
+   - `cad-import-acadrust`：`raster_image_semantics` 发 `Image`（`file` 为逻辑键、`clip`
+     像素空间、`visible`=SHOW_IMAGE）；`wipeout_semantics` 发 `Mask`（仅边界）。
+   - `cad-representation`：provider `Image` arm → `DisplayPrimitive::Image`，把 `ImageClip`
+     映射为世界坐标+UV 的裁剪多边形（2 角矩形展开为 4 角，**仅凸多边形**）；缺纹理→frame+
+     `Partial`+`image.unresolved`；不可表示裁剪（outside/退化/**非凸**）→frame+`Partial`+
+     `image.clip_unsupported`。纸空间视口裁剪与实体裁剪**精确求交**（Sutherland–Hodgman，
+     UV 插值）；防御性非凸实体裁剪保留原裁剪并报 `Partial`+`viewport.clip_image_intersection_unsupported`。
+   - `cad-scene`：独立 `ImageBatch` 列表（不混入 `RenderBatch`），按来源失效、独立预算、
+     `image_evictions()` 计数（记录驱逐数；当前仅 `cad-scene` 暴露，UI 尚未消费）。
+   - `cad-render-wgpu`：`shaders/image.wgsl` + texture/sampler bind group；每 `ResourceKey`
+     共享一张 GPU 纹理（`image_texture_count()`）；UV 方向修正（`uv.y=1-v`）；消费裁剪
+     多边形；纹理字节计入帧预算；**仅在清屏帧绘制**（渐进分页不重复合成）。
+   - `cad-platform`：`requested_images` + 安全图像加载器（相对图纸目录/`--images-dir`、
+     拒绝绝对路径与 `..` 逃逸、缺失/失败上报，不插入占位）；`cad-app` 新增
+     `build_scene_with_space_and_images`；CLI render/plot 上传并输出 `images` JSON；
+     桌面 `cad-ui-slint`（`CadView::set_images`→`PreparationInput`→controller→
+     `PreparedScene`→runtime→`upload_images`）与 `app-linux`（`install_images`）接线。
+2. **图元保真补全（`cad-import-acadrust`）**
+   - **TABLE**：按 `CellStyle`/`CellBorder` 逐边绘制（`invisible` 跳过、`double_spacing`
+     双线、合并抑制内边）；`Partial`（逐边颜色/线宽、`override_flags`、`border_type` 未应用）。
+   - **非 proxy `Extended`**：`RTEXT`→Text（flags/非 ±Z OCS 法向未处理则 `Partial`）、
+     `ArcAlignedText`→Text（`Partial`：按直线近似）、`GeoPositionMarker`→半径圆+注记+内嵌
+     MText（`Partial`）、`SectionObject`→折线（`Partial`）、`PointCloud/Ex`→范围盒
+     （`Partial`：无点数据）；`Camera`/动态块参数与夹点实体/`CoordinationModel`/`OleFrame`/
+     `LayoutPrintConfig`/`Format`/`Legacy`/`RegisteredClass` 保持 `Opaque`/`Unverified`（按设计
+     无显示或外部内容）。
+   - **MLINE**：从 `doc.objects` 的 `MLinestyle` 解析元素偏移/线型/`flags`，绘制
+     justification/scale 基准下的元素、caps（方/圆近似）与 joins；`Partial`。
+   - **DIMENSION**：`LargeRadial` 用 `jog_angle` 定向（`Partial`）；`Arc` 画引线且
+     `is_partial`→`Partial`；线性/对齐/半径/直径/角度/坐标/弧长为 `Complete`。
+   - **MULTILEADER**：`MLeaderStyle` 解析、箭头三角、`path_type`（Straight/Spline/Invisible）、
+     dogleg/landing、文本附着枚举；`Partial`。
+   - **HATCH 边界**：`SplineEdge` 改用 `tessellate_spline`（尊重 `knots`/`weights`，含回退）、
+     `PolylineEdge` 展开 `.z` bulge。
+   - **TOLERANCE**：按 `text_lines()` 行数定框高（宽度仍按字符估计，`Partial`）。
+3. **契约测试**：`crates/cad-import-acadrust/src/tests_display_{table_extended,mline_tolerance,
+   dimension_multileader,hatch_boundary}.rs`（约 40 项），及 resources/platform/representation/
+   scene/render-wgpu 各自新增测试。
+
+### 验证（实际执行，2026-10-10）
+
+- **静态门禁全绿**：`cargo fmt --all -- --check`、严格 `clippy -D warnings`、
+  `check-architecture.py`（25 包无环）、`check-fixture-manifest.py`、`check-workflows.py`、
+  `check-i18n.py`（248 键）；`cargo check --workspace --exclude app-android --exclude app-web
+  --all-targets`、`cargo check --workspace --lib --target wasm32-unknown-unknown`、
+  `cargo check -p app-web --target wasm32-unknown-unknown` 均通过。
+- **测试（lavapipe 串行）**：`cad-import-acadrust` **150**、`cad-representation` **164**、
+  `cad-resources` **34**、`cad-scene` **54**、`cad-render-wgpu` **72**（含 4 个新 GPU 用例：
+  两色朝向、裁剪多边形、同键纹理去重、渐进分页只画一次）、`cad-app` **265**、
+  `cad-ui-slint` **159**、`cad-platform` **23**、`cad-cli-tools` 等；除下述既有失败外全绿。
+- **光栅图像渲染证据为 lavapipe（软件 Vulkan）**，不是真实 GPU；见 `docs/validation.md`
+  本轮小节。
+
+### 既有失败修复（非本轮引入，已在干净 HEAD `37b494d` worktree 复现）
+
+`cad-cli-tools/tests/dxf_fixture.rs` 两项在 HEAD 即失败，本轮一并修复（根因是**既有测试
+相对后续行为变更过期**，非图元显示范围）：
+
+- `committed_qcad_flange_builds_a_non_empty_representation`（期望 `kind_counts.texts>=6`）：
+  字体轮（2026-10-09）后 CLI 自动加载默认轮廓面，`build-representation` 把文字成型为线
+  几何，`texts` 恒为 0。修复：`build-representation` 改为**与宿主字体无关**（仅显式
+  `--font` 才成型，`render`/`plot` 不变），flange 实测 `texts=7`，测试恢复通过。
+- `flange_plot_defaults_to_the_populated_paper_layout`（期望 297×210/旋转 0）：acadrust
+  0.6.3 升级后应用 LAYOUT `group 72`/`group 73`，该样本声明 `group 73=1`（旋转 90°），
+  按既定规则（仅当文件未声明旋转时才轴交换）应保留纵向 210×297 + 旋转 90。修复：测试
+  期望更新为该行为（`docs/cli.md`、`docs/dxf-entity-coverage.md` 同步）。
+
+修复后 `cargo test -p cad-cli-tools --test dxf_fixture`（lavapipe）**3/3 通过**。
+
+### 未运行 / 限制
+
+- 真实 GPU、真机、浏览器、**真实光栅 DWG/DXF 的视觉验收** NOT RUN；朝向与「u=每像素
+  向量」的放置约定仅内部自洽，未经真实文件核对。
+- Web/Android 宿主**未接图像加载器**（`cad_platform::images::local` 为
+  `cfg(not(wasm32))`）；桌面仅 `app-linux` 与 CLI 已接。
+- 图像裁剪在显示层仅支持 inside 多边形；outside/mask 裁剪、亮度/对比/淡出/透明未应用；
+  TIFF/CCITT/EPS 等编解码器→显式 `image_unsupported_format`。
+- **`draw_order` 未贯通**（`DbEntity→DisplayFragment→RenderBatch` 本轮正式推迟，见
+  `cad-scene` 注释）；故绘制顺序=上传顺序，WIPEOUT 无法按序覆盖。
+- **WIPEOUT 掩码填充未实现**：仅画边界并 `Partial`，`inverted` 未被渲染消费；透明实体
+  覆盖顺序洞仍在。
+- 桌面路径的 representation 级 `image.*` 诊断未上抛到 UI（仅 host loader 级上报）。
+- 多数图元仍为保真 `Partial`（详见 `docs/dxf-entity-coverage.md` §4）。
+
+### 实在实现不了（显式记录，不伪造）
+
+- 代理 opcode 厂商记录（本轮按用户要求**排除**，仍 `Unsupported`，见 `docs/proxy-support.md`）。
+- 外部内容：PDF/DWF/DGN underlay、OLE2 嵌入对象、`CoordinationModel`/Navisworks NWD。
+- ACIS 全内核（`3DSOLID`/`REGION`/`BODY`/`SURFACE` 仅子集离散，无几何内核）。
+- 点云点数据（acadrust 0.6.3 未暴露；仅范围盒 `Partial`）。
+- 完全顺序正确的 WIPEOUT 透明覆盖掩码（受渲染批 alpha 分类限制）。
+- 不支持的栅格编解码器（TIFF/CCITT/EPS 等）。
+
+图元逐项状态见 `docs/dxf-entity-coverage.md`；能力矩阵见 `docs/compatibility.md`。
+
 ## 应用图标接入轮（2026-10-10，本轮）
 
 用户要求「使用 assets 目录中的图标」：先从其 `dev.snakeheartgo.top:~/sources/yacr/assets/`

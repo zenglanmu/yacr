@@ -23,18 +23,20 @@ DXF 图元与 `../opencadstudio` 当前支持的图元，并要求“务必实�
 | MESH（subdivision） | ✅ | `primitives.rs::subd_mesh_semantics`：faces 扇形三角化 |
 | POLYFACE MESH | ✅ | `polyface_mesh_semantics`：1-based/负索引边、四边面扇形三角化 |
 | POLYGON MESH | ✅ | `polygon_mesh_semantics`：M×N 网格→四边形→三角 |
-| WIPEOUT | ⚠️ Partial | `wipeout_semantics`：画裁剪边界闭合折线；**遮罩填充未实现**，显式 `Partial` |
+| WIPEOUT | ⚠️ Partial | `wipeout_semantics` 发 `SemanticGeometry::Mask`（世界坐标边界 + `inverted`）；**掩码填充未渲染**（`inverted` 未被消费），显式 `Partial` |
 | HELIX | ✅ | `convert` 复用 `spline_semantics(&h.spline)` |
 | VIEWPORT | ✅ | `viewport_semantics`：纸空间视口边框矩形（模型内容由 plot 装配） |
-| TOLERANCE | ⚠️ Partial | `tolerance_frame`+文本：公差框（框宽按字符数估计）+ 文字，显式 `Partial` |
-| MLINE | ⚠️ Partial | `mline_semantics`：按每顶点 `segments[].parameters` 画**逐元素平行线**；joins/caps 近似，显式 `Partial` |
-| MULTILEADER | ⚠️ Partial | `multileader_semantics`：leader-root 折线 + 注解文字；块内容未展开，显式 `Partial` |
+| TOLERANCE | ⚠️ Partial | 公差框 + 文字；框高按 `text_lines()` 行数，**框宽仍按字符数估计**，显式 `Partial` |
+| MLINE | ⚠️ Partial | `ImporterBuilder::mline_semantics`：从 `doc.objects` 的 `MLinestyle` 解析元素偏移/线型/`flags`，画 justification/scale 基准下的逐元素平行线、方/圆 caps 与 joins；精确 miter、`CLOSED`、cap 角度、`start_point`、`FILL_ON`、元素颜色/线型未应用，显式 `Partial` |
+| MULTILEADER | ⚠️ Partial | `multileader_semantics`：`MLeaderStyle` 解析、箭头三角、`path_type`（Straight/Spline/Invisible）、dogleg/landing、文本附着枚举；颜色/线宽/背景填充/列/块属性/自定义箭头/transform 未应用，显式 `Partial` |
 | RAY / XLINE | ✅ | `ray_semantics`：按运行中模型 bounds 裁剪到 XY 盒；无范围时默认盒并 `Partial` |
 | SHAPE | ✅ | SHX 字形：`FontEngine::shape_glyph` 经 SHX `glyph_by_code` 生成折线；缺字体/按名引用显式 `Partial` |
-| TABLE | ⚠️ Partial | 单元格网格 + 单元格文字；**合并单元格按 merge_width/height 跨格居中**；边框样式近似 |
-| RASTERIMAGE | ⚠️ Partial | 图像边框（insertion/u/v/size）；像素纹理未解码 |
-| DIMENSION 角度/坐标/圆弧长/大半径 | ✅/⚠️ | 角度(2Ln/3Pt)/坐标/弧长已画；大半径折线 jog 近似 `Partial` |
-| OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | 外框/裁剪边界/符号折线/灯光字形；外部内容不加载，均 `Partial` |
+| TABLE | ⚠️ Partial | 单元格网格 + 文字 + 合并单元格跨格；**按 `CellStyle`/`CellBorder` 逐边绘制**（`invisible` 跳过、`double_spacing` 双线、合并抑制内边）；逐边颜色/线宽、`override_flags`、`border_type`、`additional_borders` 未应用 |
+| RASTERIMAGE | ✅/⚠️ | **新增端到端纹理显示**：importer 发 `SemanticGeometry::Image`；host 按相对路径解析 + PNG/JPEG 解码（`cad-resources`）；renderer 上传纹理（每键去重、UV 方向修正、裁剪多边形）；缺纹理→frame + `image.unresolved`；不支持编解码器、亮度/对比/淡出、outside 裁剪→`Partial` |
+| DIMENSION | ✅/⚠️ | 线性/对齐/半径/直径/角度(2Ln/3Pt)/坐标/弧长 `Complete`（弧长画引线）；`LargeRadial` 用 `jog_angle` 定向仍 `Partial`；`is_partial` 弧标注 `Partial` |
+| EXTENDED（RTEXT / ARCALIGNEDTEXT / GEOPOSITIONMARKER / SECTIONOBJECT / POINTCLOUD） | ⚠️ Partial | 基础表示：RTEXT→Text（flags/非 ±Z OCS 法向未处理则 `Partial`）、ARCALIGNEDTEXT→直线近似 Text、GEOPOSITIONMARKER→半径圆+注记+内嵌 MText、SECTIONOBJECT→折线、POINTCLOUD→范围盒（无点数据） |
+| CAMERA / 动态块参数与夹点 / COORDINATION_MODEL / OLEFRAME / LAYOUTPRINTCONFIG / FORMAT / LEGACY / REGISTEREDCLASS | ⛔ 无显示 | 按设计无几何或为外部内容，保持 `Opaque`/`Unverified`（见 §4） |
+| OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅/⚠️ | 外框/裁剪边界/符号折线/灯光字形；外部内容不加载，均 `Partial` |
 
 文本能力判定修正：Text（TEXT/MTEXT/ATTRIB/DIMENSION 文字）统一为 `Unverified`——
 实体类型**已支持**，能否出字形取决于宿主是否提供字体（`--font name=path`）；不再把
@@ -66,15 +68,18 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 
 | 图元 / 能力 | opencadstudio | 本项目 | 原因与状态 |
 |---|---|---|---|
-| MULTILEADER | ✅ | ⚠️ Partial | 引线折线+文字已画；样式/块内容/overrides 未完整 |
-| MLINE | ✅ | ⚠️ Partial | 逐元素偏移已画；joins/caps 近似 |
-| TOLERANCE | ✅ | ⚠️ Partial | 框+文字已画；框宽按字符数估计，符号字形依赖字体 |
+| MULTILEADER | ✅ | ⚠️ Partial | 引线折线+文字+箭头+样式/path type/dogleg/对齐已画；颜色/线宽/背景填充/列/块属性/自定义箭头未应用 |
+| MLINE | ✅ | ⚠️ Partial | 逐元素偏移+caps+joins+justification/scale 已画；精确 miter、CLOSED、cap 角度、start_point、FILL_ON、元素颜色/线型未应用 |
+| TOLERANCE | ✅ | ⚠️ Partial | 框+文字已画；框高按行数、框宽按字符数估计，符号字形依赖字体 |
 | SHAPE | ✅ | ✅ | SHX 字形已接线；按名引用（无 shape code）仍 `Partial` |
-| TABLE | ✅ | ⚠️ Partial | 网格+文字+合并单元格已画；边框样式近似 |
-| RASTERIMAGE | ✅ | ⚠️ Partial | 图像边框已画；**像素纹理未解码**（需图像解码+纹理管线） |
+| TABLE | ✅ | ⚠️ Partial | 网格+文字+合并+按 `CellStyle`/`CellBorder` 逐边已画；逐边颜色/线宽、override_flags、border_type、additional_borders 未应用 |
+| RASTERIMAGE | ✅ | ✅/⚠️ | **端到端纹理显示已接**（host 解码 PNG/JPEG + GPU 纹理，每键去重/UV 修正/裁剪多边形）；不支持编解码器（TIFF/CCITT/EPS）、亮度/对比/淡出、outside 裁剪为 `Partial`；真实光栅文件未验收 |
+| WIPEOUT 掩码 | ✅ | ⚠️ Partial | `Mask` 语义（边界+inverted）已发；**掩码填充未渲染**，透明覆盖顺序洞仍在 |
+| EXTENDED 基础表示 | ✅ | ⚠️ Partial | RTEXT/ARCALIGNEDTEXT/GEOPOSITIONMARKER/SECTIONOBJECT/POINTCLOUD 基础表示已画（多为 `Partial`）；CAMERA/动态块参数夹点无几何、外部内容不加载 |
 | RAY / XLINE | ✅ | ✅ | 裁剪到模型 bounds；无范围回退为默认盒 `Partial` |
-| DIMENSION 子类 | ✅ | ✅/⚠️ | 线性/对齐/半径/直径/角度/坐标/圆弧长已画；大半径 jog 近似 `Partial` |
+| DIMENSION 子类 | ✅ | ✅/⚠️ | 线性/对齐/半径/直径/角度/坐标/圆弧长已画（弧长含引线）；大半径 jog 定向但仍 `Partial`，`is_partial` 弧标注 `Partial` |
 | OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | ✅/⚠️ | 外框/裁剪边界/符号/灯光字形已画；外部内容不加载，均 `Partial` |
+| 绘制顺序 `draw_order` | ✅ | ⛔ 未贯通 | `DbEntity::draw_order` 未经 `DisplayFragment` 传到 `RenderBatch`（本轮正式推迟）；绘制顺序=上传顺序 |
 | 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复三处：①纸张单位优先从标准纸名解析（acadrust 实际会把 `group 72` 应用到 LAYOUT，但纸名带单位记号时更可靠）；②默认选有 viewport 的纸空间布局；③acadrust 亦应用 `group 73` 旋转，仅在文件未声明旋转时才按 viewport 范围把纸张轴交换为横向（标题栏保持正立）。纸张/边框/标题栏已出图；**模型视图仍有错位/多余图元**（视口合成保真未通过） |
 | DXF STYLE XDATA 字体 | — | ✅（DXF/DWG） | acadrust 0.6.3 已把 STYLE 的 `1001 ACAD`/`1000` 字体面类型化为 `TextStyle.true_type_font`（DXF 读取；DWG 经 `io/dwg/typeface_eed.rs`）。解析链为 `类型化 true_type_font > group 3/4 声明字体 > dxf_style_xdata_fonts 字节扫描`；字节扫描自身仍不覆盖组件 group 3/4（不改 acadrust）。DXF/DWG 文本现可按宿主 `--font <face>=<path>` 解析 |
 
@@ -106,6 +111,13 @@ QCAD 字体：`osifont.ttf`（GPL-3 + 字体例外）已提交到 `fonts/` 作�
   只剩字体/subclass 等保真度问题。
 - 与 opencadstudio 图元清单相比：**所有可绘制 `EntityType` 均已接线**（外部/非绘制
   对象给出外框/符号/字形并标 `Partial`），仅结构性 `Block/BlockEnd/Seqend` 不产生几何。
-  仍有保真度缺口（`Partial`）：MLINE joins/caps、MULTILEADER 样式与块内容、TOLERANCE
-  框宽与字形、TABLE 边框样式、大半径 jog、RASTERIMAGE 像素纹理、外部内容加载、纸空间
-  视口比例/位置，见 §4。STYLE xdata 字体名已由 acadrust 0.6.3 类型化（DXF+DWG）。
+- 2026-10-10 轮：**光栅图像（RASTERIMAGE）已端到端显示**（host 解码 PNG/JPEG + GPU 纹理
+  管线，含每键纹理去重、UV 方向、裁剪多边形、缺失显式 `Partial`）；非 proxy `Extended`
+  图元补齐基础表示；MLINE/TABLE/DIMENSION/MULTILEADER/HATCH 边界保真提升。
+- 仍有保真度缺口（`Partial`）：WIPEOUT 掩码填充、图像不支持编解码器/亮度对比淡出/outside
+  裁剪、TABLE 逐边样式、MLINE CLOSED/cap 角度、MULTILEADER 背景填充/列/块属性、大半径
+  jog、外部内容加载、纸空间视口合成，见 §4。
+- **显式不可实现**（记录、不伪造）：代理 opcode 厂商记录（本轮排除）、外部 PDF/DWF/DGN
+  underlay 与 OLE2 嵌入、CoordinationModel/Navisworks NWD、ACIS 全内核、点云点数据、
+  完全顺序正确的 WIPEOUT 透明覆盖掩码。STYLE xdata 字体名已由 acadrust 0.6.3 类型化
+  （DXF+DWG）。

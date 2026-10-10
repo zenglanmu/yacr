@@ -117,7 +117,20 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
                 },
             ]
         }
-        G::Mesh(_) | G::Insert { .. } | G::Opaque { .. } | G::Shape { .. } => Vec::new(),
+        G::Mesh(_) | G::Insert { .. } | G::Opaque { .. } | G::Shape { .. } | G::Image { .. } => {
+            Vec::new()
+        }
+        // A mask is not a curve, but its closed boundary is a real polyline the
+        // picker and bounds consumers should see.
+        G::Mask { boundary, .. } => {
+            let mut out = boundary.clone();
+            if let (Some(first), Some(last)) = (out.first().copied(), out.last().copied()) {
+                if distance(first, last) >= 1e-9 {
+                    out.push(first);
+                }
+            }
+            out
+        }
         G::Compound(children) => {
             let mut out = Vec::new();
             for child in children {

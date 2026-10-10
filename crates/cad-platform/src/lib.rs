@@ -41,6 +41,7 @@ pub trait FontLoader {
 }
 
 pub mod fonts;
+pub mod images;
 
 /// Drive a [`HostFuture`] to completion on a no-op waker.
 ///

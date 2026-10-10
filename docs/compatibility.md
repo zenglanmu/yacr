@@ -27,6 +27,10 @@
 | HATCH | 实现 | 部分(椭圆/样条边界近似) | 边界环 + 多环实心填充(含孔洞，偶奇) / 图案线；超预算/自交降 Partial | 经边界(AABB) | 不支持 |
 | DIMENSION | 实现 | 合成 | 有匿名块时展开块；无块名时按定义点+DIMSTYLE 合成线/箭头/测量文字（线性/对齐/半径/直径；角度/坐标/圆弧长/大半径仍 Partial） | 经合成几何(AABB) | 不支持 |
 | MESH / PolyfaceMesh | 部分 | 网格契约 | 网格 | 实现 | 不支持 |
+| RASTERIMAGE | 实现(相对路径解析 + PNG/JPEG 解码) | 实现(`SemanticGeometry::Image`) | 实现(GPU 纹理：每键去重/UV 方向/裁剪多边形；缺纹理 frame+`Partial`) | 经边框 | 不支持 |
+| WIPEOUT | 实现(`Mask` 边界 + `inverted`) | 部分(掩码填充未渲染) | 边界折线 | 经边界 | 不支持 |
+| EXTENDED(RTEXT/ARCALIGNEDTEXT/GEOPOSITIONMARKER/SECTIONOBJECT/POINTCLOUD) | 实现(基础字段) | 部分 | 基础表示(Text/圆/折线/范围盒) | 部分 | 不支持 |
+| CAMERA / 动态块参数与夹点 / OLEFRAME / LAYOUTPRINTCONFIG / FORMAT / LEGACY / REGISTEREDCLASS | 实现(仅 common 或无语义) | 显式无显示 | 不绘制(`Opaque`/`Unverified`) | — | — |
 - 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust `entities::acis` 解析) | 部分(平面/球/柱/环面/锥面子集) | 子集离散：闭合 `Success`，否则 `Partial`；带环球面/非圆椭圆/样条面 `Unsupported` | 经网格 | 不支持(近似标记) |
 | TEXT/MTEXT 格式 | 实现(格式 run 解析) | 部分(堆叠分数/颜色/装饰/行对齐为显式 Partial) | 按 run 整形/换行 | — | — |
 | 实体颜色/线宽 | 实现(ByObject/ByLayer/ByBlock，ACI/RGB) | 实现(颜色)；线宽仅携带 | 颜色进入 shader；线宽**显式不绘制** | — | — |
@@ -99,3 +103,12 @@
 仍按显式 `Partial`/未实现报告，不计入完成。动态块**可见性状态**读取/切换与
 **注释性缩放（TEXT/MTEXT）**已实现，但动态块参数/夹点编辑、非文本注释性类型仍为
 显式 `Partial`，且宿主比例切换 UI 未接线。
+
+2026-10-10 图元显示补全轮新增边界：**光栅图像** PNG/JPEG 已解码并出纹理，但
+TIFF/CCITT/EPS 等编解码器、亮度/对比/淡出/透明、outside/mask 裁剪显式未支持；
+Web/Android 宿主未接图像加载器；**`draw_order` 未贯通**（绘制顺序=上传顺序）；
+**WIPEOUT 掩码填充未渲染**（仅边界，`inverted` 未被消费）。**外部内容** PDF/DWF/DGN
+underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、ACIS 全内核（3DSOLID/REGION/
+BODY/SURFACE 仅子集离散）、点云点数据（acadrust 0.6.3 未暴露）均不加载/不实现，显式
+`Partial`/`Unsupported`，不计入完成。代理 opcode 厂商记录仍按用户要求排除（见
+`docs/proxy-support.md`）。图元逐项状态见 `docs/dxf-entity-coverage.md`。

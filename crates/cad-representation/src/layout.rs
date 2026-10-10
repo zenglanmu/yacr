@@ -111,6 +111,10 @@ pub mod clip_reason {
     pub const TEXT_FONT_DEPENDENT: &str = "viewport.clip_text_font_dependent";
     /// The image quad maps to a non-finite position and cannot be clipped.
     pub const IMAGE_DEGENERATE: &str = "viewport.clip_image_degenerate";
+    /// An entity clip and a viewport cut both apply, but the entity clip is not
+    /// convex so the two could not be intersected exactly. The entity clip is
+    /// kept and the viewport cut is not applied on top of it.
+    pub const IMAGE_INTERSECTION_UNSUPPORTED: &str = "viewport.clip_image_intersection_unsupported";
     /// A primitive with no clip representation reached the viewport (instance).
     pub const UNSUPPORTED_PRIMITIVE: &str = "viewport.clip_unsupported_primitive";
 }
@@ -1140,6 +1144,21 @@ pub fn clip_image_quad_to_rect(
         }
         polygon.push(ImageVertex { position, uv });
     }
+    Ok(clip_image_polygon_to_rect(polygon, center, half))
+}
+
+/// Clip an image polygon (already in paper coordinates, carrying UVs) to the
+/// paper rectangle, interpolating the texture coordinates at the new vertices.
+///
+/// The polygon must be convex (the renderer fan-triangulates it); Sutherland–
+/// Hodgman against the four axis-aligned half-planes then yields the exact
+/// intersection. An empty result means the polygon lies fully outside the
+/// window — an exact omission.
+fn clip_image_polygon_to_rect(
+    mut polygon: Vec<ImageVertex>,
+    center: [f64; 2],
+    half: [f64; 2],
+) -> Vec<ImageVertex> {
     let min = [center[0] - half[0], center[1] - half[1]];
     let max = [center[0] + half[0], center[1] + half[1]];
     polygon = clip_image_vertices(polygon, 0, min[0], true);
@@ -1153,7 +1172,7 @@ pub fn clip_image_quad_to_rect(
             polygon.pop();
         }
     }
-    Ok(polygon)
+    polygon
 }
 
 fn clip_image_vertices(
@@ -1260,6 +1279,45 @@ fn image_quad_inside(transform: &Transform3, center: [f64; 2], half: [f64; 2]) -
     })
 }
 
+/// Whether an image polygon (paper-space positions, at least three vertices) is
+/// convex.
+///
+/// Consecutive collinear edges are allowed; a sign change between consecutive
+/// edge cross products is a reflex vertex. The renderer fan-triangulates a clip
+/// polygon assuming convexity, so only a convex polygon may be intersected with
+/// the viewport rectangle by half-plane clipping.
+fn image_polygon_is_convex(polygon: &[ImageVertex]) -> bool {
+    let n = polygon.len();
+    if n < 3 {
+        return true;
+    }
+    let mut sign = 0i8;
+    for i in 0..n {
+        let a = polygon[i].position;
+        let b = polygon[(i + 1) % n].position;
+        let c = polygon[(i + 2) % n].position;
+        let e1 = (b.x - a.x, b.y - a.y);
+        let e2 = (c.x - b.x, c.y - b.y);
+        let len = e1.0.hypot(e1.1) * e2.0.hypot(e2.1);
+        if len <= 0.0 {
+            // A repeated vertex: no turn to classify.
+            continue;
+        }
+        let cross = e1.0 * e2.1 - e1.1 * e2.0;
+        if cross.abs() <= 1e-9 * len {
+            // Collinear: allowed, does not fix the winding sign.
+            continue;
+        }
+        let s = if cross > 0.0 { 1 } else { -1 };
+        if sign == 0 {
+            sign = s;
+        } else if sign != s {
+            return false;
+        }
+    }
+    true
+}
+
 /// Rebuild a fragment with a new primitive, preserving all source/style fields.
 fn fragment_with(fragment: DisplayFragment, primitive: DisplayPrimitive) -> DisplayFragment {
     DisplayFragment {
@@ -1316,12 +1374,15 @@ fn report_clip_degradation(
 /// for a **mesh** each triangle is clipped exactly (Sutherland–Hodgman) with
 /// per-vertex position, z, normal and colour interpolated at the new vertices;
 /// for an **image** the unit-square quad is clipped and its texture coordinates
-/// interpolated. Geometry the layer window removes completely simply
-/// disappears. What cannot be clipped exactly without faking it is kept
-/// unclipped and reported `Partial` with a stable [`clip_reason`] code (an
-/// unshaped `Text` placeholder has no glyph geometry until a font shapes it; a
-/// mesh with a bad index or non-finite vertex; an unexpanded instance) — never
-/// dropped silently and never claimed as clipped.
+/// interpolated. When an image also carries an entity clip, that convex polygon
+/// is intersected with the viewport rectangle (its UVs interpolated at the new
+/// vertices) so the entity clip is never dropped or widened. Geometry the layer
+/// window removes completely simply disappears. What cannot be clipped exactly
+/// without faking it is kept unclipped and reported `Partial` with a stable
+/// [`clip_reason`] code (an unshaped `Text` placeholder has no glyph geometry
+/// until a font shapes it; a mesh with a bad index or non-finite vertex; a
+/// non-convex entity image clip; an unexpanded instance) — never dropped
+/// silently and never claimed as clipped.
 pub fn build_paper_space(
     registry: &ProviderRegistry,
     database: &DrawingDatabase,
@@ -1494,20 +1555,59 @@ pub fn build_paper_space(
                             // A clipped textured quad is represented exactly:
                             // positions plus interpolated UVs, so it is not a
                             // degradation. A wholly visible image keeps its
-                            // simple unit-square transform.
-                            let clip = if image_quad_inside(&local, center, half) {
-                                clip
-                            } else {
-                                Some(std::sync::Arc::from(vertices.into_boxed_slice()))
-                            };
-                            out.fragments.push(fragment_with(
-                                fragment,
-                                DisplayPrimitive::Image {
-                                    resource,
-                                    transform: local,
-                                    clip,
-                                },
-                            ));
+                            // simple unit-square transform. When an entity clip
+                            // and a viewport cut both apply, the two convex
+                            // polygons are intersected so the entity clip is
+                            // never silently widened or dropped; `None` (outer)
+                            // means the intersection is empty — an exact
+                            // omission.
+                            let effective: Option<Option<std::sync::Arc<[ImageVertex]>>> =
+                                if image_quad_inside(&local, center, half) {
+                                    // The whole quad is visible; any entity clip
+                                    // still applies unchanged.
+                                    Some(clip)
+                                } else if let Some(entity_clip) = clip {
+                                    if image_polygon_is_convex(&entity_clip) {
+                                        let intersected = clip_image_polygon_to_rect(
+                                            entity_clip.to_vec(),
+                                            center,
+                                            half,
+                                        );
+                                        if intersected.is_empty() {
+                                            None
+                                        } else {
+                                            Some(Some(std::sync::Arc::from(
+                                                intersected.into_boxed_slice(),
+                                            )))
+                                        }
+                                    } else {
+                                        // A provider handed us a non-convex clip
+                                        // (its primitive contract says convex);
+                                        // half-plane intersection would be wrong,
+                                        // so keep the entity clip and report the
+                                        // limitation rather than widen or drop it.
+                                        let refusal = ClipRefusal::new(
+                                            clip_reason::IMAGE_INTERSECTION_UNSUPPORTED,
+                                            "a non-convex image clip cannot be intersected with the viewport window exactly; the entity clip is kept unclipped",
+                                        );
+                                        report_clip_degradation(
+                                            &mut out, &refusal, layout_id, index,
+                                        );
+                                        Some(Some(entity_clip))
+                                    }
+                                } else {
+                                    Some(Some(std::sync::Arc::from(vertices.into_boxed_slice())))
+                                };
+                            if let Some(clip) = effective {
+                                out.fragments.push(fragment_with(
+                                    fragment,
+                                    DisplayPrimitive::Image {
+                                        resource,
+                                        transform: local,
+                                        clip,
+                                    },
+                                ));
+                            }
                         }
                         Err(refusal) => {
                             report_clip_degradation(&mut out, &refusal, layout_id, index);
@@ -2717,5 +2817,212 @@ mod tests {
             .expect("clipped corner");
         assert!((corner.uv[0] - 0.25).abs() < 1e-9, "uv {:?}", corner.uv);
         assert!((corner.uv[1] - 0.125).abs() < 1e-9, "uv {:?}", corner.uv);
+    }
+
+    /// A provider that emits a single `Image` quad carrying the given entity
+    /// clip (in the primitive's model-space coordinates), so the entity-clip +
+    /// viewport-clip path can be exercised without an importer. The quad uses
+    /// the same model→paper mapping as [`ImageProvider`]: the unit square maps
+    /// to paper `[50,250]x[25,225]` inside the `1:100` window `[0,100]x[0,50]`.
+    struct ClippedImageProvider {
+        clip: std::sync::Arc<[ImageVertex]>,
+    }
+
+    impl crate::RepresentationProvider for ClippedImageProvider {
+        fn registration(&self) -> crate::Registration {
+            crate::Registration {
+                type_key: "test.clipped_image".into(),
+                version: 1,
+                priority: 10,
+                entity_types: vec!["TestClippedImage".into()],
+                capabilities: vec!["image".into()],
+            }
+        }
+
+        fn build(
+            &self,
+            entity: &DbEntity,
+            context: &RepresentationContext,
+        ) -> CadResult<DisplayRepresentation> {
+            let mut matrix = Transform3::identity().matrix;
+            matrix[0][0] = 20000.0;
+            matrix[1][1] = 20000.0;
+            matrix[0][3] = 10.0;
+            matrix[1][3] = 20.0;
+            Ok(DisplayRepresentation {
+                fragments: vec![DisplayFragment {
+                    source: SelectionRef {
+                        document: context.document,
+                        entity: entity.id,
+                        instance: InstancePath::default(),
+                        sub_element: None,
+                    },
+                    geometry_source: GeometrySource::Analytic,
+                    precision: Precision::Analytic,
+                    alpha: 1.0,
+                    color: crate::DEFAULT_RENDER_COLOR,
+                    color_unresolved: true,
+                    lineweight: crate::DEFAULT_LINEWEIGHT_MM,
+                    lineweight_unresolved: true,
+                    linetype: cad_db::LinetypePattern::continuous(),
+                    linetype_unresolved: true,
+                    linetype_scale: 1.0,
+                    primitive: DisplayPrimitive::Image {
+                        resource: cad_resources::ResourceKey("img:0".into()),
+                        transform: Transform3 { matrix },
+                        clip: Some(self.clip.clone()),
+                    },
+                }],
+                completeness: Completeness::Complete,
+                diagnostics: Vec::new(),
+            })
+        }
+    }
+
+    /// A database with one model-space `TestClippedImage` and the standard
+    /// `1:100` legacy viewport.
+    fn clipped_image_layout() -> DrawingDatabase {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "TestClippedImage".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Opaque {
+                type_key: "TestClippedImage".into(),
+                version: 1,
+                payload: Vec::new(),
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+        b.insert_layout(cad_db::Layout {
+            id: LayoutId(1),
+            name: "L1".into(),
+            viewports: vec![simple_viewport()],
+        })
+        .unwrap();
+        b.finish().unwrap()
+    }
+
+    #[test]
+    fn paper_build_intersects_an_entity_clip_with_a_viewport_cut() {
+        // Entity clip: the bottom strip of the image, model y in [20, 2020]
+        // (texture v in [0, 0.1]) across the full width. In paper space it is
+        // [50,250]x[25,45]; the viewport cuts it to [50,100]x[25,45], so the
+        // surviving v stays at most 0.1. Dropping the entity clip (the old
+        // behaviour) would have stretched to the full quad's v = 0.125.
+        let clip: std::sync::Arc<[ImageVertex]> = std::sync::Arc::from(
+            vec![
+                ImageVertex {
+                    position: p(10.0, 20.0),
+                    uv: [0.0, 0.0],
+                },
+                ImageVertex {
+                    position: p(20010.0, 20.0),
+                    uv: [1.0, 0.0],
+                },
+                ImageVertex {
+                    position: p(20010.0, 2020.0),
+                    uv: [1.0, 0.1],
+                },
+                ImageVertex {
+                    position: p(10.0, 2020.0),
+                    uv: [0.0, 0.1],
+                },
+            ]
+            .into_boxed_slice(),
+        );
+        let db = clipped_image_layout();
+        let mut registry = ProviderRegistry::with_default_provider();
+        registry
+            .register(Box::new(ClippedImageProvider { clip }))
+            .unwrap();
+        let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+        // The intersection of two convex polygons is exact, not a degradation.
+        assert_eq!(rep.completeness, Completeness::Complete);
+        let polygon = rep
+            .fragments
+            .iter()
+            .find_map(|f| match &f.primitive {
+                DisplayPrimitive::Image { clip, .. } => clip.clone(),
+                _ => None,
+            })
+            .expect("the intersected image carries its polygon");
+        assert_eq!(polygon.len(), 4);
+        let max_v = polygon.iter().map(|v| v.uv[1]).fold(f64::MIN, f64::max);
+        assert!(
+            (max_v - 0.1).abs() < 1e-9,
+            "the entity clip's v=0.1 edge must survive, not the full quad's 0.125: {max_v}"
+        );
+        // The viewport cut still applies: no vertex escapes the window.
+        for v in polygon.iter() {
+            assert!(v.position.x <= 100.0 + 1e-9, "{:?}", v.position);
+            assert!(v.position.y <= 50.0 + 1e-9, "{:?}", v.position);
+        }
+    }
+
+    #[test]
+    fn paper_build_keeps_a_non_convex_entity_clip_and_reports_it() {
+        // A concave "chevron" in model space; a provider contract violation, but
+        // the paper build must not silently widen or drop it.
+        let clip: std::sync::Arc<[ImageVertex]> = std::sync::Arc::from(
+            vec![
+                ImageVertex {
+                    position: p(10.0, 20.0),
+                    uv: [0.0, 0.0],
+                },
+                ImageVertex {
+                    position: p(20010.0, 20.0),
+                    uv: [1.0, 0.0],
+                },
+                ImageVertex {
+                    position: p(10010.0, 10020.0),
+                    uv: [0.5, 0.5],
+                },
+                ImageVertex {
+                    position: p(20010.0, 20020.0),
+                    uv: [1.0, 1.0],
+                },
+                ImageVertex {
+                    position: p(10.0, 20020.0),
+                    uv: [0.0, 1.0],
+                },
+            ]
+            .into_boxed_slice(),
+        );
+        let db = clipped_image_layout();
+        let mut registry = ProviderRegistry::with_default_provider();
+        registry
+            .register(Box::new(ClippedImageProvider { clip }))
+            .unwrap();
+        let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+        assert!(matches!(rep.completeness, Completeness::Partial(_)));
+        assert!(rep.diagnostics.iter().any(|d| {
+            d.code == "representation.viewport_clip_partial"
+                && d.message
+                    .contains(clip_reason::IMAGE_INTERSECTION_UNSUPPORTED)
+        }));
+        // The entity clip is preserved unchanged (never widened to the window).
+        let polygon = rep
+            .fragments
+            .iter()
+            .find_map(|f| match &f.primitive {
+                DisplayPrimitive::Image { clip, .. } => clip.clone(),
+                _ => None,
+            })
+            .expect("the entity clip is kept");
+        assert_eq!(polygon.len(), 5);
     }
 }

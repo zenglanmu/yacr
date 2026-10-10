@@ -98,27 +98,141 @@ pub(crate) fn append_boundary_edge(
                 );
             }
         }
-        BoundaryEdge::Spline(s) => {
-            if s.control_points.len() < 2 {
-                return;
-            }
-            let control: Vec<Point3> = s.control_points.iter().map(|p| p3(*p)).collect();
-            let degree = s.degree.max(1) as u32;
-            for p in tessellate_bspline(&control, degree, *params) {
+        BoundaryEdge::Spline(s) => append_spline_edge(s, out, params),
+        BoundaryEdge::Polyline(pl) => append_polyline_edge(pl, out),
+    }
+}
+
+/// Append a HATCH boundary spline edge, honouring its own degree, knots and
+/// (rational) weights.
+///
+/// The source knot vector and weights are authoritative when they are usable:
+/// `n + degree + 1` knots and a finite, positive weight per control point. When
+/// they are not, this falls back to the clamped-uniform B-spline convention
+/// ([`tessellate_bspline`]) rather than inventing geometry. A periodic spline
+/// keeps its knot vector too; when the vector cannot be represented as a
+/// closed curve the sampled points are kept as-is (no panic, no fabrication).
+/// A fit-point-only spline (no control polygon) falls back to its fit points as
+/// a polyline.
+fn append_spline_edge(
+    s: &acadrust::entities::SplineEdge,
+    out: &mut Vec<[f64; 2]>,
+    params: &TessellationParams,
+) {
+    let n = s.control_points.len();
+    if n < 2 {
+        // No control polygon: a fit-point spline still has the sampled points
+        // the file stored on the curve, so use them as a fallback polyline.
+        if s.fit_points.len() >= 2 {
+            for p in &s.fit_points {
                 push_hatch_point(out, [p.x, p.y]);
             }
         }
-        BoundaryEdge::Polyline(pl) => {
-            for v in &pl.vertices {
-                push_hatch_point(out, [v.x, v.y]);
+        return;
+    }
+    let control: Vec<Point3> = s.control_points.iter().map(|p| p3(*p)).collect();
+    let degree = s.degree.max(1) as u32;
+    if s.knots.len() != n + degree as usize + 1 {
+        // The knot vector cannot define this control polygon; fall back to the
+        // clamped-uniform convention (documented fallback, not fabricated).
+        for p in tessellate_bspline(&control, degree, *params) {
+            push_hatch_point(out, [p.x, p.y]);
+        }
+        return;
+    }
+    // A rational spline carries the per-control-point weight in `z`; a
+    // non-finite or non-positive weight is rejected by `NurbsCurve`, so treat
+    // it as 1.0 instead of dropping the whole curve.
+    let weights: Vec<f64> = if s.rational {
+        s.control_points
+            .iter()
+            .map(|p| {
+                if p.z.is_finite() && p.z > 0.0 {
+                    p.z
+                } else {
+                    1.0
+                }
+            })
+            .collect()
+    } else {
+        vec![1.0; n]
+    };
+    // `tessellate_spline` treats the source knots as authoritative (uniform,
+    // clamped or periodic) and internally falls back when they are malformed,
+    // so a periodic knot vector that cannot close simply keeps its samples.
+    for p in cad_geometry::tessellate_spline(&control, &s.knots, &weights, degree, *params) {
+        push_hatch_point(out, [p.x, p.y]);
+    }
+}
+
+/// Append a HATCH boundary polyline edge, expanding per-vertex bulges into
+/// circular arcs in the hatch plane.
+fn append_polyline_edge(pl: &acadrust::entities::PolylineEdge, out: &mut Vec<[f64; 2]>) {
+    let verts = &pl.vertices;
+    match verts.len() {
+        0 => {}
+        1 => push_hatch_point(out, [verts[0].x, verts[0].y]),
+        _ => {
+            for i in 0..verts.len() - 1 {
+                let a = verts[i];
+                let b = verts[i + 1];
+                push_bulge_segment(out, [a.x, a.y], [b.x, b.y], a.z);
             }
             if pl.is_closed {
-                if let Some(first) = pl.vertices.first() {
-                    push_hatch_point(out, [first.x, first.y]);
-                }
+                // The wrap segment p_last -> p_first carries the last vertex's
+                // bulge; the closing point is pushed and later deduplicated.
+                let a = verts[verts.len() - 1];
+                let b = verts[0];
+                push_bulge_segment(out, [a.x, a.y], [b.x, b.y], a.z);
             }
         }
     }
+}
+
+/// Sample one bulged polyline segment from `p0` to `p1` into `out`.
+///
+/// `bulge` is the DXF bulge (`tan(included_angle / 4)`); a zero, degenerate or
+/// non-finite bulge falls back to the straight chord. The arc is sampled
+/// adaptively with the same angular step as the other boundary arcs.
+fn push_bulge_segment(out: &mut Vec<[f64; 2]>, p0: [f64; 2], p1: [f64; 2], bulge: f64) {
+    push_hatch_point(out, p0);
+    let dx = p1[0] - p0[0];
+    let dy = p1[1] - p0[1];
+    let chord = (dx * dx + dy * dy).sqrt();
+    if !bulge.is_finite() || bulge.abs() <= HATCH_EPS || chord <= HATCH_EPS {
+        push_hatch_point(out, p1);
+        return;
+    }
+    let theta = 4.0 * bulge.atan();
+    let half = theta / 2.0;
+    let (sin_half, cos_half) = half.sin_cos();
+    // A full-turn bulge has no finite circular centre; keep the chord.
+    if sin_half.abs() <= HATCH_EPS {
+        push_hatch_point(out, p1);
+        return;
+    }
+    let radius = chord / (2.0 * sin_half);
+    let mid = [(p0[0] + p1[0]) / 2.0, (p0[1] + p1[1]) / 2.0];
+    // Left normal of p0 -> p1; the signed `radius * cos(half)` places the
+    // centre on the side selected by the bulge's sign.
+    let perp = [-dy / chord, dx / chord];
+    let center = [
+        mid[0] + perp[0] * radius * cos_half,
+        mid[1] + perp[1] * radius * cos_half,
+    ];
+    if !radius.is_finite() || !center[0].is_finite() || !center[1].is_finite() {
+        push_hatch_point(out, p1);
+        return;
+    }
+    let radius = radius.abs();
+    let start_angle = (p0[1] - center[1]).atan2(p0[0] - center[0]);
+    let n = arc_steps(theta);
+    for i in 1..n {
+        let t = start_angle + theta * (i as f64) / (n as f64);
+        let (sin, cos) = t.sin_cos();
+        push_hatch_point(out, [center[0] + radius * cos, center[1] + radius * sin]);
+    }
+    push_hatch_point(out, p1);
 }
 
 pub(crate) fn push_hatch_point(out: &mut Vec<[f64; 2]>, p: [f64; 2]) {

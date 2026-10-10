@@ -104,12 +104,14 @@ fn flange_plot_defaults_to_the_populated_paper_layout() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("plot JSON");
     assert_eq!(value["layout"]["name"], "*Paper_Space1", "{value}");
     assert_eq!(value["paper"]["units"], "millimeters", "{value}");
-    // The locked reader drops LAYOUT `group 73`; the sheet is inferred as
-    // landscape from the viewport windows (A4 portrait declared), so the paper
-    // axes are swapped and the content stays upright.
-    assert_eq!(value["paper"]["width"], 297.0, "{value}");
-    assert_eq!(value["paper"]["height"], 210.0, "{value}");
-    assert_eq!(value["paper"]["rotation_degrees"], 0.0, "{value}");
+    // acadrust 0.6.3 applies the LAYOUT `group 72`/`group 73` fields: this sample
+    // declares `group 73 = 1` (90° rotation) on an A4 portrait sheet, so the
+    // reader keeps the declared portrait axes and carries the rotation instead of
+    // inferring a landscape swap (that inference only applies when the file
+    // declares no rotation). See `docs/dxf-entity-coverage.md` §4.
+    assert_eq!(value["paper"]["width"], 210.0, "{value}");
+    assert_eq!(value["paper"]["height"], 297.0, "{value}");
+    assert_eq!(value["paper"]["rotation_degrees"], 90.0, "{value}");
     assert!(
         value["pixels"]["non_background"].as_u64().unwrap_or(0) > 0,
         "blank plot: {value}"

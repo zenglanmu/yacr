@@ -51,6 +51,7 @@ fn scene(batches: Vec<RenderBatch>) -> SceneDelta {
         stamp: TaskStamp::new(DocumentId(1), 0),
         added: batches,
         removed_chunks: Vec::new(),
+        images: Vec::new(),
     }
 }
 

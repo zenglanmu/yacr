@@ -11,7 +11,7 @@ use cad_db::{
 use cad_domain::*;
 use cad_geometry::{tessellate_geometry, TessellationParams};
 use cad_kernel_adapter::{TessellationMesh, TessellationOutcome, TessellationResult};
-use cad_resources::ResourceKey;
+use cad_resources::{image_resource_key, DecodedImage, DecodedImageCache, ResourceKey};
 use std::sync::Arc;
 
 /// Default display colour when a fragment carries no resolved source colour.

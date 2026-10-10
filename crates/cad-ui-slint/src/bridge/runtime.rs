@@ -231,12 +231,33 @@ impl CadRenderRuntime {
                 self.base_batches
             },
         )?;
+        // Raster images are a resident set separate from the geometry batches.
+        // A base change re-resolves every image quad from the cache the scene
+        // was built with; a fresh device resets `applied_base`, so this also
+        // re-uploads the textures after a backend rebuild/loss. An absent cache
+        // or an empty batch list leaves no resident images and reports nothing:
+        // a true no-op. Unresolved keys are surfaced, never silently dropped.
+        let mut image_diagnostic = None;
+        if pending.base_changed {
+            let empty = super::controller::DecodedImageCache::new();
+            let cache = ready.images.as_deref().unwrap_or(&empty);
+            let report = renderer.upload_images(&ready.base.images, cache)?;
+            if let Some(reason) = report.diagnostic() {
+                let keys = report
+                    .unresolved
+                    .iter()
+                    .map(|key| key.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                image_diagnostic = Some(format!("{}: {keys}", reason.code));
+            }
+        }
         // Publication follows successful GPU preparation/commit, never precedes it.
         self.base_batches = ready.base.added.len();
         self.applied_base = Some(ready.base_revision);
         self.applied_revision = Some(ready.revision);
         self.dirty.invalidate();
-        self.diagnostic = None;
+        self.diagnostic = image_diagnostic;
         Ok(())
     }
 

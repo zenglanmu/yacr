@@ -1735,4 +1735,23 @@ mod drawing {
         assert_eq!(revision(&app), rev);
         assert!(!app.can_undo(&DocumentId(1)));
     }
+
+    #[test]
+    fn image_and_mask_class_names_match_the_importer_keys() {
+        let image = SemanticGeometry::Image {
+            origin: point(0.0, 0.0),
+            u: p3(1.0, 0.0, 0.0),
+            v: p3(0.0, 1.0, 0.0),
+            pixels: [1.0, 1.0],
+            file: None,
+            clip: None,
+            visible: true,
+        };
+        let mask = SemanticGeometry::Mask {
+            boundary: vec![point(0.0, 0.0), point(1.0, 0.0), point(1.0, 1.0)],
+            inverted: false,
+        };
+        assert_eq!(crate::app_drawing::class_name(&image), "AcDbRasterImage");
+        assert_eq!(crate::app_drawing::class_name(&mask), "AcDbWipeout");
+    }
 }

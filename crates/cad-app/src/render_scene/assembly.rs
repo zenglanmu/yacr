@@ -9,6 +9,7 @@ use cad_representation::layout::{build_paper_space, enumerate_layouts};
 use cad_representation::{
     FontEngine, LayoutDescriptor, ProviderRegistry, RepresentationContext, SpaceSelection,
 };
+use cad_resources::DecodedImageCache;
 use cad_scene::{SceneBudget, SceneCache, SceneDelta};
 
 pub fn build_scene(database: &DrawingDatabase, stamp: TaskStamp) -> CadResult<SceneDelta> {
@@ -43,6 +44,25 @@ pub fn build_scene_with_space(
     overrides: &LayerOverrideSet,
     space: SpaceSelection,
 ) -> CadResult<SceneDelta> {
+    build_scene_with_space_and_images(database, stamp, fonts, None, overrides, space)
+}
+
+/// Like [`build_scene_with_space`] but also feeds decoded raster images.
+///
+/// When `images` is `Some`, an `Image` whose key is present in the cache becomes
+/// a texture primitive (`DisplayPrimitive::Image`) instead of an outline-only
+/// frame; a key absent from the cache still draws the frame plus the provider's
+/// honest `image.*` diagnostic. Passing `None` is exactly the previous
+/// behaviour, so existing callers are unaffected.
+#[allow(clippy::too_many_arguments)]
+pub fn build_scene_with_space_and_images(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    images: Option<Arc<DecodedImageCache>>,
+    overrides: &LayerOverrideSet,
+    space: SpaceSelection,
+) -> CadResult<SceneDelta> {
     let registry = ProviderRegistry::with_default_provider();
     let mut context =
         RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone())
@@ -50,11 +70,15 @@ pub fn build_scene_with_space(
     if let Some(fonts) = fonts {
         context = context.with_fonts(fonts);
     }
+    if let Some(images) = images {
+        context = context.with_images(images);
+    }
     let mut cache = SceneCache::new(SceneBudget::default());
     let mut combined = SceneDelta {
         stamp: stamp.clone(),
         added: Vec::new(),
         removed_chunks: Vec::new(),
+        images: Vec::new(),
     };
     match space {
         SpaceSelection::Model => {
@@ -62,6 +86,7 @@ pub fn build_scene_with_space(
                 let representation = registry.build_expanded(database, entity, &context)?;
                 let delta = cache.build_compact(&representation, stamp.clone())?;
                 combined.added.extend(delta.added);
+                combined.images.extend(delta.images);
             }
         }
         SpaceSelection::Paper(layout) => {
@@ -70,6 +95,7 @@ pub fn build_scene_with_space(
                 build_paper_space(&registry, database, layout, &context, &visible)?;
             let delta = cache.build_compact(&representation, stamp.clone())?;
             combined.added.extend(delta.added);
+            combined.images.extend(delta.images);
         }
     }
     Ok(combined)

@@ -12,3 +12,8 @@ cad-domain.workspace = true
 cad-db.workspace = true
 cad-resources.workspace = true
 cad-representation.workspace = true
+
+[dev-dependencies]
+# PNG encoder for the image-loader tests (a self-contained 2x2 fixture, no
+# committed binary). Decoding itself lives in `cad-resources`.
+png.workspace = true

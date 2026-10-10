@@ -35,6 +35,9 @@ pub struct LinuxOptions {
     /// Explicit CAD font directory (`--fonts-dir`); `None` auto-detects a
     /// `fonts/` directory next to the executable (or `bin/`).
     pub fonts_dir: Option<PathBuf>,
+    /// Explicit raster-image directory (`--images-dir`); `None` resolves image
+    /// keys against the drawing's own directory only.
+    pub images_dir: Option<PathBuf>,
     pub headless: bool,
     pub output: Option<PathBuf>,
     pub drawing: Option<PathBuf>,
@@ -52,6 +55,7 @@ impl Default for LinuxOptions {
         Self {
             fonts: Vec::new(),
             fonts_dir: None,
+            images_dir: None,
             headless: false,
             output: None,
             drawing: None,
@@ -86,6 +90,7 @@ impl LinuxOptions {
                 "--output" => options.output = Some(value.into()),
                 "--open" => options.drawing = Some(value.into()),
                 "--fonts-dir" => options.fonts_dir = Some(value.into()),
+                "--images-dir" => options.images_dir = Some(value.into()),
                 "--config" => options.config = Some(value.into()),
                 "--preferences" => options.preferences = Some(value.into()),
                 "--locale" if matches!(value.as_str(), "zh-CN" | "en") => options.locale = value,
@@ -127,6 +132,11 @@ struct Runtime {
     picker: FilePicker,
     pending_open: PendingOpen,
     pending_read: Rc<RefCell<Option<PendingRead>>>,
+    /// Path of the drawing being opened (or already open), used to resolve its
+    /// sibling raster images. `None` until a document is opened.
+    drawing_path: Rc<RefCell<Option<PathBuf>>>,
+    /// Last raster-image loading outcome, surfaced by the diagnostics drawer.
+    last_image_report: Rc<RefCell<Option<cad_platform::images::ImageLoadReport>>>,
     presenting_open: Rc<std::cell::Cell<bool>>,
     /// Last `(physical width, physical height, config revision)` that was pushed
     /// through `refresh_window_layout`. `None` forces the first refresh.
@@ -276,6 +286,9 @@ impl Runtime {
                 path.display()
             )));
         }
+        // Remember the drawing's directory so its sibling raster images can be
+        // resolved once the document finishes opening.
+        *self.drawing_path.borrow_mut() = Some(path.to_path_buf());
         if !self.options.headless {
             if self.pending_read.borrow().is_some()
                 || self
@@ -318,6 +331,7 @@ impl Runtime {
         }
         if let Some(view) = self.view.borrow().as_ref() {
             self.install_fonts(view)?;
+            self.install_images(view)?;
         }
         Ok(())
     }
@@ -347,6 +361,47 @@ impl Runtime {
             Some(engine) => view.set_fonts(engine),
             None => view.clear_fonts(),
         }
+        Ok(())
+    }
+
+    /// (Re)load the drawing's raster images for the current document.
+    ///
+    /// Resolves each logical key under the drawing's own directory (then an
+    /// explicit `--images-dir`), decodes it through the shared platform loader
+    /// and installs the cache on the view. An empty request clears the cache.
+    /// Unresolved/undecodable keys are retained in `last_image_report` and
+    /// surfaced by the diagnostics drawer, never silently dropped.
+    fn install_images(&self, view: &CadView) -> CadResult<()> {
+        let requested = self
+            .controller
+            .borrow()
+            .drawing()
+            .map(|drawing| cad_platform::images::requested_images(drawing.as_ref()))
+            .unwrap_or_default();
+        if requested.is_empty() {
+            view.clear_images();
+            *self.last_image_report.borrow_mut() = None;
+            return Ok(());
+        }
+        let drawing_dir = self
+            .drawing_path
+            .borrow()
+            .as_ref()
+            .and_then(|path| path.parent())
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map(Path::to_path_buf);
+        let (cache, report) = cad_platform::images::local::load_image_cache(
+            &requested,
+            drawing_dir.as_deref(),
+            self.options.images_dir.as_deref(),
+            &cad_resources::ResourceLimits::default(),
+        )?;
+        if cache.is_empty() {
+            view.clear_images();
+        } else {
+            view.set_images(cache);
+        }
+        *self.last_image_report.borrow_mut() = Some(report);
         Ok(())
     }
 
@@ -408,6 +463,7 @@ impl Runtime {
             }
             if let Some(view) = self.view.borrow().as_ref() {
                 self.install_fonts(view)?;
+                self.install_images(view)?;
             }
             self.push()?;
         }
@@ -515,6 +571,8 @@ impl LinuxApp {
             picker,
             pending_open: Rc::new(RefCell::new(None)),
             pending_read: Rc::new(RefCell::new(None)),
+            drawing_path: Rc::new(RefCell::new(None)),
+            last_image_report: Rc::new(RefCell::new(None)),
             presenting_open: Rc::new(std::cell::Cell::new(false)),
             last_layout_key: Rc::new(RefCell::new(None)),
         };
@@ -566,6 +624,7 @@ impl LinuxApp {
         // default fallback. A drawing font that is missing shapes with the
         // default instead of being dropped.
         runtime.install_fonts(&view)?;
+        runtime.install_images(&view)?;
         *runtime.view.borrow_mut() = Some(view);
         adapter.set_view_input(Rc::new(input::Navigation::new(runtime.clone())));
         adapter.set_canvas_pick_mapper(Rc::new(runtime.clone()));

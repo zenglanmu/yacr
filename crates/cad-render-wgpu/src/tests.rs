@@ -156,3 +156,108 @@ fn draw_passes_report_invisible_batches() {
     assert!(passes.transparent.is_empty());
     assert_eq!(passes.invisible, 1);
 }
+
+#[test]
+fn image_quad_maps_the_unit_square_through_the_transform() {
+    let batch = ImageBatch {
+        resource: ResourceKey("texture".into()),
+        transform: Transform3::translation(Point3 {
+            x: 2.0,
+            y: 3.0,
+            z: 0.0,
+        }),
+        clip: None,
+        alpha: 1.0,
+        draw_order: 0,
+        sources: Vec::new(),
+    };
+    let (vertices, indices) = image_quad_vertices(&batch);
+    // Four vertices of 20 bytes (position vec3 + uv vec2), two triangles.
+    assert_eq!(vertices.len(), 4 * 20);
+    assert_eq!(indices, vec![0, 1, 2, 0, 2, 3]);
+    let read = |i: usize| {
+        let mut out = [0.0f32; 5];
+        for (j, slot) in out.iter_mut().enumerate() {
+            let start = i * 20 + j * 4;
+            *slot = f32::from_le_bytes(vertices[start..start + 4].try_into().unwrap());
+        }
+        out
+    };
+    // The CAD origin is the lower-left with v pointing up, while decoded image
+    // rows are top-down, so `v` is flipped: corner (0,0) gets UV (0,1) and
+    // corner (1,1) gets UV (1,0).
+    assert_eq!(read(0), [2.0, 3.0, 0.0, 0.0, 1.0]);
+    assert_eq!(read(2), [3.0, 4.0, 0.0, 1.0, 0.0]);
+}
+
+#[test]
+fn image_quad_uses_the_clip_polygon_instead_of_the_unit_square() {
+    use cad_representation::ImageVertex;
+    use std::sync::Arc;
+    // A world-space left half of the unit square with matching UVs; the batch
+    // transform is a large translation that must NOT be applied to the clip.
+    let clip: Arc<[ImageVertex]> = Arc::from(
+        vec![
+            ImageVertex {
+                position: Point3 {
+                    x: -0.8,
+                    y: -0.8,
+                    z: 0.0,
+                },
+                uv: [0.0, 0.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: 0.0,
+                    y: -0.8,
+                    z: 0.0,
+                },
+                uv: [0.5, 0.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: 0.0,
+                    y: 0.8,
+                    z: 0.0,
+                },
+                uv: [0.5, 1.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: -0.8,
+                    y: 0.8,
+                    z: 0.0,
+                },
+                uv: [0.0, 1.0],
+            },
+        ]
+        .into_boxed_slice(),
+    );
+    let batch = ImageBatch {
+        resource: ResourceKey("texture".into()),
+        transform: Transform3::translation(Point3 {
+            x: 100.0,
+            y: 100.0,
+            z: 0.0,
+        }),
+        clip: Some(clip),
+        alpha: 1.0,
+        draw_order: 0,
+        sources: Vec::new(),
+    };
+    let (vertices, indices) = image_quad_vertices(&batch);
+    // Four clip vertices, fan-triangulated (0,1,2),(0,2,3).
+    assert_eq!(vertices.len(), 4 * 20);
+    assert_eq!(indices, vec![0, 1, 2, 0, 2, 3]);
+    let read = |i: usize| {
+        let mut out = [0.0f32; 5];
+        for (j, slot) in out.iter_mut().enumerate() {
+            let start = i * 20 + j * 4;
+            *slot = f32::from_le_bytes(vertices[start..start + 4].try_into().unwrap());
+        }
+        out
+    };
+    // Clip positions are used verbatim (no transform), and `v` is flipped.
+    assert_eq!(read(0), [-0.8, -0.8, 0.0, 0.0, 1.0]);
+    assert_eq!(read(3), [-0.8, 0.8, 0.0, 0.0, 0.0]);
+}

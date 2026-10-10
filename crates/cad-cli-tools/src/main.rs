@@ -44,6 +44,9 @@ Options:
   --allow-fingerprint-mismatch  import despite a mismatched drawing hash
   --font <name=path>      register a TTF/OTF/WOFF font for text shaping
                           (repeatable; name defaults to the file name)
+  --images-dir <dir>      render/plot: directory to resolve raster image
+                          references from (drawing-relative files still win);
+                          missing/undecodable images are reported, never faked
   --gpu <auto|high|low>   render/plot adapter preference: high prefers a
                           discrete GPU, low an integrated one (default auto)
   --max-batches <n>       render/plot: hard cap on accumulated scene batches;
@@ -204,6 +207,17 @@ fn main() -> ExitCode {
                     }
                 };
                 invocation.fonts.push((name, path.into()));
+            }
+            "--images-dir" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--images-dir needs a directory path"),
+                        operation,
+                        locale,
+                    );
+                };
+                invocation.images_dir = Some(PathBuf::from(value));
             }
             "--gpu" => {
                 index += 1;

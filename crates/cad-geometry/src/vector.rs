@@ -149,6 +149,14 @@ pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
             ..
         } => finite(*position) && size.is_finite() && rotation.is_finite(),
         G::Opaque { .. } => true,
+        G::Image {
+            origin,
+            u,
+            v,
+            pixels,
+            ..
+        } => finite(*origin) && finite(*u) && finite(*v) && pixels.iter().all(|p| p.is_finite()),
+        G::Mask { boundary, .. } => all_points(boundary),
         G::Compound(children) => children.iter().all(geometry_is_finite),
     }
 }

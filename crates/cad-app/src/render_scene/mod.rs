@@ -10,6 +10,10 @@ pub use assembly::*;
 mod overlay;
 pub use overlay::*;
 
+/// Decoded raster-image cache fed to the base scene build, re-exported so the UI
+/// bridge can name the type carried by [`PreparedScene::images`].
+pub use cad_resources::DecodedImageCache;
+
 #[derive(Clone, Debug, PartialEq)]
 struct SceneVersion {
     identity: SceneIdentity,
@@ -18,6 +22,10 @@ struct SceneVersion {
     layers: u64,
     space: SpaceSelection,
     document_epoch: u64,
+    /// Identity of the decoded-image cache fed to the base build. A change is a
+    /// new pointer, so an image cache installed after the base was built still
+    /// rebuilds the image batches.
+    images: usize,
 }
 
 #[derive(Clone)]
@@ -29,6 +37,9 @@ pub struct PreparedScene {
     pub highlight: Arc<SceneDelta>,
     pub highlight_diagnostics: Vec<cad_domain::Diagnostic>,
     pub highlight_completeness: cad_domain::Completeness,
+    /// Decoded-image cache the base was built with, carried to the renderer so
+    /// its image quads can be resolved. `None` is the previous behaviour.
+    pub images: Option<Arc<DecodedImageCache>>,
 }
 
 #[derive(Clone, Default)]
@@ -43,6 +54,9 @@ pub struct CadSceneController {
     visual_overlay: Option<Arc<SceneDelta>>,
     shared_document: Option<(Arc<DrawingDatabase>, SceneIdentity)>,
     document_epoch: u64,
+    /// Decoded raster-image cache fed to the base build, stored so a later
+    /// [`PreparedScene`] carries it to the renderer. `None` = no image context.
+    images: Option<Arc<DecodedImageCache>>,
     pub ready: Option<PreparedScene>,
     pub diagnostic: Option<String>,
 }
@@ -85,6 +99,30 @@ impl CadSceneController {
         space: SpaceSelection,
         overlays: &OverlayInputs,
     ) -> CadResult<()> {
+        self.prepare_shared_with_overlays_and_images(
+            doc, document, fonts, layers, space, overlays, None,
+        )
+    }
+
+    /// [`Self::prepare_shared_with_overlays`] plus the decoded raster-image
+    /// cache fed to the base scene build.
+    ///
+    /// The cache is stored on the controller so the published [`PreparedScene`]
+    /// carries it for the GPU image upload. `None` is exactly the previous
+    /// behaviour (outline-only image frames), so existing callers are
+    /// unaffected. A new cache pointer is part of the base version, so
+    /// installing one after the base was built rebuilds the image batches.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_shared_with_overlays_and_images(
+        &mut self,
+        doc: Option<Arc<DrawingDatabase>>,
+        document: DocumentId,
+        fonts: Option<Arc<FontEngine>>,
+        layers: &LayerOverrideSet,
+        space: SpaceSelection,
+        overlays: &OverlayInputs,
+        images: Option<Arc<DecodedImageCache>>,
+    ) -> CadResult<()> {
         let same = match (&self.shared_document, &doc) {
             (Some((old, _)), Some(new)) => Arc::ptr_eq(old, new),
             (None, None) => true,
@@ -94,6 +132,7 @@ impl CadSceneController {
             self.document_epoch += 1;
             self.shared_document = doc.as_ref().map(|db| (db.clone(), db.scene_identity()));
         }
+        self.images = images;
         self.prepare_with_overlays_doc(doc.as_deref(), document, fonts, layers, space, overlays)
     }
     pub fn fonts_changed(&mut self) {
@@ -170,6 +209,10 @@ impl CadSceneController {
             layers: layers.fingerprint(),
             space,
             document_epoch: self.document_epoch,
+            images: self
+                .images
+                .as_ref()
+                .map_or(0, |cache| Arc::as_ptr(cache) as usize),
         });
         if let Some(db) = doc {
             crate::validate_space(db, space)?;
@@ -190,13 +233,19 @@ impl CadSceneController {
         // edit keeps the base `Arc` (and its GPU revisions) unchanged.
         let base = if base_changed {
             Arc::new(match doc {
-                Some(db) => {
-                    build_scene_with_space(db, stamp.clone(), fonts.clone(), layers, space)?
-                }
+                Some(db) => build_scene_with_space_and_images(
+                    db,
+                    stamp.clone(),
+                    fonts.clone(),
+                    self.images.clone(),
+                    layers,
+                    space,
+                )?,
                 None => SceneDelta {
                     stamp: stamp.clone(),
                     added: vec![],
                     removed_chunks: vec![],
+                    images: vec![],
                 },
             })
         } else {
@@ -268,6 +317,7 @@ impl CadSceneController {
                     stamp: stamp.clone(),
                     added: overlay.batches,
                     removed_chunks: vec![],
+                    images: vec![],
                 });
                 (delta, overlay.diagnostics, overlay.completeness)
             } else {
@@ -287,6 +337,7 @@ impl CadSceneController {
             highlight: visual_delta,
             highlight_diagnostics,
             highlight_completeness,
+            images: self.images.clone(),
         });
         Ok(())
     }
@@ -315,6 +366,7 @@ impl CadSceneController {
                     stamp: TaskStamp::new(DocumentId(0), 0),
                     added: Vec::new(),
                     removed_chunks: Vec::new(),
+                    images: Vec::new(),
                 }),
                 Vec::new(),
                 cad_domain::Completeness::Complete,
@@ -381,6 +433,78 @@ mod tests {
         )
         .unwrap();
         assert!(controller.ready.as_ref().unwrap().base_revision > base_revision);
+    }
+
+    #[test]
+    fn image_cache_is_carried_into_the_prepared_scene_and_a_repeat_is_a_no_op() {
+        let db = Arc::new(db_with_line());
+        let mut controller = CadSceneController::default();
+        let layers = LayerOverrideSet::new();
+        let overlays = overlays_without_reference();
+        let cache = Arc::new(DecodedImageCache::new());
+        controller
+            .prepare_shared_with_overlays_and_images(
+                Some(db.clone()),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                &overlays,
+                Some(cache.clone()),
+            )
+            .unwrap();
+        let first = controller.ready.as_ref().unwrap();
+        let carried = first.images.as_ref().expect("cache is carried");
+        assert!(Arc::ptr_eq(carried, &cache));
+        let base = first.base.clone();
+        let base_revision = first.base_revision;
+        let revision = first.revision;
+
+        // The same cache pointer is a no-op: the base Arc is reused.
+        controller
+            .prepare_shared_with_overlays_and_images(
+                Some(db.clone()),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                &overlays,
+                Some(cache.clone()),
+            )
+            .unwrap();
+        assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
+        assert!(Arc::ptr_eq(&base, &controller.ready.as_ref().unwrap().base));
+
+        // A new cache pointer rebuilds the base and carries the new cache.
+        let replacement = Arc::new(DecodedImageCache::new());
+        controller
+            .prepare_shared_with_overlays_and_images(
+                Some(db.clone()),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                &overlays,
+                Some(replacement.clone()),
+            )
+            .unwrap();
+        let after = controller.ready.as_ref().unwrap();
+        assert!(after.base_revision > base_revision);
+        assert!(Arc::ptr_eq(after.images.as_ref().unwrap(), &replacement));
+
+        // `None` is the previous behaviour and clears the carried cache.
+        controller
+            .prepare_shared_with_overlays_and_images(
+                Some(db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                &overlays,
+                None,
+            )
+            .unwrap();
+        assert!(controller.ready.as_ref().unwrap().images.is_none());
     }
 
     #[test]

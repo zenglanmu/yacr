@@ -8,11 +8,14 @@ pub struct SceneDelta {
     pub stamp: TaskStamp,
     pub added: Vec<RenderBatch>,
     pub removed_chunks: Vec<u64>,
+    /// Image draw items added by this delta; published into their own cache list
+    /// with the same stale-stamp validation as `added`.
+    pub images: Vec<ImageBatch>,
 }
 
 impl SceneDelta {
     pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.removed_chunks.is_empty()
+        self.added.is_empty() && self.removed_chunks.is_empty() && self.images.is_empty()
     }
 }
 
@@ -129,6 +132,10 @@ impl FrameBudget {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SceneBudget {
     pub cpu_bytes: usize,
+    /// Maximum CPU bytes of cached image draw items (their textures are uploaded
+    /// separately). Kept modest because an image batch is a transform plus a
+    /// small clip polygon; the cache evicts the oldest images to stay under it.
+    pub image_bytes: usize,
     /// Maximum tasks that may be in flight at once.
     ///
     /// Enforced by [`TaskQueue`]: submitting past this limit is rejected with an
@@ -149,6 +156,7 @@ impl Default for SceneBudget {
     fn default() -> Self {
         SceneBudget {
             cpu_bytes: 128 * 1024 * 1024,
+            image_bytes: 16 * 1024 * 1024,
             queued_tasks: 8,
             upload_bytes_per_frame: 4 * 1024 * 1024,
             max_vertices_per_frame: 8_000_000,

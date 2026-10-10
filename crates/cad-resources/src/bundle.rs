@@ -3,7 +3,7 @@
 use super::*;
 
 /// A logical, platform-independent resource identifier.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ResourceKey(pub String);
 
 impl ResourceKey {
@@ -15,6 +15,32 @@ impl ResourceKey {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Normalise an image reference to a case-insensitive, path-preserving key.
+///
+/// [`ResourceKey::sanitize`] reduces a reference to its bare file name, so
+/// `a/logo.png` and `b/logo.png` collide and one entity silently gets the other
+/// texture. An image key instead keeps the normalised relative path: the
+/// reference is trimmed, rejected if it is empty or unsafe
+/// ([`is_safe_reference`] — absolute paths, drive letters, URL schemes and `..`
+/// escapes), its backslashes are folded to `/`, a leading `./` is stripped, and
+/// the result is lowercased. Returns `None` when no usable key remains, so a
+/// caller never looks a hostile reference up.
+///
+/// The host loader stores a decoded image under this key; a resolver may keep a
+/// bare-file-name fallback for a cache that was populated the old way.
+pub fn image_resource_key(reference: &str) -> Option<ResourceKey> {
+    let trimmed = reference.trim();
+    if !is_safe_reference(trimmed) {
+        return None;
+    }
+    let folded = trimmed.replace('\\', "/");
+    let normalised = folded.strip_prefix("./").unwrap_or(&folded);
+    if normalised.is_empty() || normalised == "." {
+        return None;
+    }
+    Some(ResourceKey(normalised.to_ascii_lowercase()))
 }
 
 /// Category of an external resource.
@@ -47,7 +73,8 @@ impl ResourceKind {
 ///
 /// The audit (F10/F11) found the old model implied every [`ResourceKind`] was
 /// supported because the enum existed. This table states the truth: planning a
-/// fetch URL is not decoding, and BigFont/image/xref are not implemented here.
+/// fetch URL is not decoding, and BigFont/xref remain unimplemented here while
+/// images resolve and decode only partially (PNG/JPEG; see the `image` module).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResourceCapability {
     pub kind: ResourceKind,
@@ -85,8 +112,14 @@ pub fn resource_capabilities() -> Vec<ResourceCapability> {
         },
         ResourceCapability {
             kind: ResourceKind::Image,
-            resolve: SupportStatus::NotImplemented,
-            decode: SupportStatus::NotImplemented,
+            // A logical fetch URL / resolver lookup for an image reference is
+            // available through the same sanitized key machinery as fonts.
+            resolve: SupportStatus::Verified,
+            // PNG and JPEG decode to RGBA8 (see the `image` module), but other
+            // codecs a DWG may reference (TIFF, CCITT/ITU-T group 4, EPS/PDF
+            // underlays, ...) are not decoded here, and fade/brightness/clip
+            // application is not done either. Partial, not verified.
+            decode: SupportStatus::Partial,
         },
         ResourceCapability {
             kind: ResourceKind::ExternalReference,
@@ -130,6 +163,10 @@ pub mod codes {
     pub const FONT_UNRESOLVED: &str = "resource.font_unresolved";
     /// A referenced font resolved but its technology is not supported.
     pub const FONT_UNSUPPORTED: &str = "resource.font_unsupported";
+    /// Raster image bytes whose container/encoding is not supported (not PNG/JPEG).
+    pub const IMAGE_UNSUPPORTED_FORMAT: &str = "resource.image_unsupported_format";
+    /// Raster image bytes that are malformed or truncated and cannot be decoded.
+    pub const IMAGE_DECODE_FAILED: &str = "resource.image_decode_failed";
 }
 
 /// Which budget a [`ResourceIssue`] exceeded.
@@ -232,6 +269,23 @@ impl ResourceIssue {
             FontKind::Other(_) => ResourceKind::FontTtf,
         });
         issue.key = Some(ResourceKey::sanitize(request).0);
+        issue
+    }
+
+    /// Raster image bytes that are not a container this crate decodes.
+    pub fn image_unsupported_format() -> Self {
+        let mut issue = Self::new(codes::IMAGE_UNSUPPORTED_FORMAT);
+        issue.kind = Some(ResourceKind::Image);
+        issue
+    }
+
+    /// Raster image bytes that are malformed, truncated or otherwise undecodable.
+    ///
+    /// This is a hard failure, never a silent empty image: `actual`/`limit` stay
+    /// zero because the failure is not a budget measurement.
+    pub fn image_decode_failed() -> Self {
+        let mut issue = Self::new(codes::IMAGE_DECODE_FAILED);
+        issue.kind = Some(ResourceKind::Image);
         issue
     }
 

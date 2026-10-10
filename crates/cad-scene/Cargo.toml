@@ -12,5 +12,6 @@ cad-domain.workspace = true
 cad-db.workspace = true
 cad-geometry.workspace = true
 cad-representation.workspace = true
+cad-resources.workspace = true
 cad-spatial.workspace = true
 cad-dependencies.workspace = true

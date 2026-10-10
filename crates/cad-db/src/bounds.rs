@@ -124,6 +124,33 @@ impl BoundsAccumulator {
                 self.add_sphere_transformed(*position, r, transform);
             }
             SemanticGeometry::Opaque { .. } => {}
+            // A raster image spans the rectangle from `origin` along `u` for
+            // `pixels.0` pixels and along `v` for `pixels.1` pixels; accumulate
+            // its four corners (transformed as points).
+            SemanticGeometry::Image {
+                origin,
+                u,
+                v,
+                pixels,
+                ..
+            } => {
+                let corner = |du: f64, dv: f64| Point3 {
+                    x: origin.x + u.x * du + v.x * dv,
+                    y: origin.y + u.y * du + v.y * dv,
+                    z: origin.z + u.z * du + v.z * dv,
+                };
+                self.add_point(transform.apply_point(corner(0.0, 0.0)));
+                self.add_point(transform.apply_point(corner(pixels[0], 0.0)));
+                self.add_point(transform.apply_point(corner(0.0, pixels[1])));
+                self.add_point(transform.apply_point(corner(pixels[0], pixels[1])));
+            }
+            // A mask is a closed world-space polygon: every boundary point is
+            // part of its extent.
+            SemanticGeometry::Mask { boundary, .. } => {
+                for p in boundary {
+                    self.add_point(transform.apply_point(*p));
+                }
+            }
             SemanticGeometry::Compound(children) => {
                 for child in children {
                     self.add_geometry_transformed(child, transform);
@@ -208,5 +235,70 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn image_bounds_include_all_four_corners() {
+        // origin = (1,2,0); u = (0.5,0,0) per pixel, v = (0,0.25,0) per pixel;
+        // 4x2 pixels -> corners (1,2), (3,2), (1,2.5), (3,2.5).
+        let image = SemanticGeometry::Image {
+            origin: Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 0.0,
+            },
+            u: Point3 {
+                x: 0.5,
+                y: 0.0,
+                z: 0.0,
+            },
+            v: Point3 {
+                x: 0.0,
+                y: 0.25,
+                z: 0.0,
+            },
+            pixels: [4.0, 2.0],
+            file: None,
+            clip: None,
+            visible: true,
+        };
+        let mut bounds = BoundsAccumulator::new();
+        bounds.add_geometry(&image);
+        let (min, max) = bounds.finish().unwrap();
+        assert_eq!(min.x, 1.0);
+        assert_eq!(min.y, 2.0);
+        assert_eq!(max.x, 3.0);
+        assert_eq!(max.y, 2.5);
+    }
+
+    #[test]
+    fn mask_bounds_include_every_boundary_point() {
+        let mask = SemanticGeometry::Mask {
+            boundary: vec![
+                Point3 {
+                    x: -1.0,
+                    y: 4.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 5.0,
+                    y: 4.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 5.0,
+                    y: -2.0,
+                    z: 0.0,
+                },
+            ],
+            inverted: false,
+        };
+        let mut bounds = BoundsAccumulator::new();
+        bounds.add_geometry(&mask);
+        let (min, max) = bounds.finish().unwrap();
+        assert_eq!(min.x, -1.0);
+        assert_eq!(min.y, -2.0);
+        assert_eq!(max.x, 5.0);
+        assert_eq!(max.y, 4.0);
     }
 }

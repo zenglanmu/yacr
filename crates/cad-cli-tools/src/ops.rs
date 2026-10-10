@@ -258,12 +258,19 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
 
     let registry = cad_representation::ProviderRegistry::with_default_provider();
     let fonts = load_fonts(&invocation.fonts, &fonts_requested(&controller))?;
+    let requested_images = images_requested(&controller);
+    let (image_cache, image_report) = load_images(invocation, &requested_images)?;
     let mut context = representation_context(&controller, fonts.as_ref());
     // The render feeds the GPU directly: packed dash output + compact line
     // batches, identical to the desktop scene path. `build-representation`
     // intentionally keeps the unpacked form so its primitive counts describe
     // fragments, not render batches.
     context = context.with_packed_line_segments();
+    // A drawing with no raster images keeps the previous context exactly (no
+    // texture path); a decoded cache lets an `Image` become a texture.
+    if !requested_images.is_empty() {
+        context = context.with_images(image_cache.clone());
+    }
 
     // One delta over every model-space entity.
     let mut cache = cad_scene::SceneCache::new(Default::default());
@@ -271,6 +278,7 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         stamp: context.stamp.clone(),
         added: Vec::new(),
         removed_chunks: Vec::new(),
+        images: Vec::new(),
     };
     let mut batches: u64 = 0;
     let mut vertices: u64 = 0;
@@ -292,6 +300,7 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         );
         enforce_scene_budget(batches, vertices, invocation)?;
         delta.added.extend(built.added);
+        delta.images.extend(built.images);
     }
 
     // Fit to what is actually drawn, not `drawing.bounds()`: the database
@@ -349,6 +358,9 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
     renderer.set_poll_timeout(std::time::Duration::from_secs(600));
     renderer.initialize_with_device(device, queue)?;
     renderer.upload(&delta)?;
+    // Decoded images are a separate resident set: upload them after the batch
+    // upload, and report any key the renderer could not resolve.
+    let image_upload = renderer.upload_images(&delta.images, &image_cache)?;
     let target = RenderTarget::new(width, height);
     let frame = renderer
         .render(camera, &target)
@@ -417,6 +429,7 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
             "batches": delta.added.len(),
             "vertices": scene_vertices,
         },
+        "images": images_json(&image_report, &image_upload),
         "completeness": completeness,
         "note": "software/headless frame; not a compatibility or performance claim",
     }))
@@ -575,7 +588,12 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
     let started = std::time::Instant::now();
     let controller = load_document(invocation)?;
     let fonts = load_fonts(&invocation.fonts, &fonts_requested(&controller))?;
-    let context = representation_context(&controller, fonts.as_ref());
+    let requested_images = images_requested(&controller);
+    let (image_cache, image_report) = load_images(invocation, &requested_images)?;
+    let mut context = representation_context(&controller, fonts.as_ref());
+    if !requested_images.is_empty() {
+        context = context.with_images(image_cache.clone());
+    }
     let registry = cad_representation::ProviderRegistry::with_default_provider();
 
     // Real layouts when present, otherwise a synthetic sheet so the planner and
@@ -603,6 +621,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
         stamp: context.stamp.clone(),
         added: Vec::new(),
         removed_chunks: Vec::new(),
+        images: Vec::new(),
     };
     let mut batches: u64 = 0;
     let mut vertices: u64 = 0;
@@ -637,6 +656,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
         );
         enforce_scene_budget(batches, vertices, invocation)?;
         delta.added.extend(built.added);
+        delta.images.extend(built.images);
     }
 
     let width = page.width;
@@ -661,6 +681,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
     renderer.set_poll_timeout(std::time::Duration::from_secs(600));
     renderer.initialize_with_device(device, queue)?;
     renderer.upload(&delta)?;
+    let image_upload = renderer.upload_images(&delta.images, &image_cache)?;
     let render_target = RenderTarget::new(width, height);
     let frame = renderer
         .render(camera, &render_target)
@@ -721,6 +742,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
             "transparent_batches": frame.transparent_batches,
             "invisible_batches": frame.invisible_batches,
         },
+        "images": images_json(&image_report, &image_upload),
         "timings": { "plan_ms": plan_ms, "gpu_ms": gpu_ms, "total_ms": total_ms },
         "adapter": {
             "backend": adapter.backend,
@@ -895,6 +917,7 @@ pub(crate) fn run_benchmark(
         stamp: context.stamp.clone(),
         added: Vec::new(),
         removed_chunks: Vec::new(),
+        images: Vec::new(),
     };
     let build_start = std::time::Instant::now();
     let mut primitives = 0usize;
@@ -905,6 +928,7 @@ pub(crate) fn run_benchmark(
                 primitives += representation.fragments.len();
                 let built = cache.build(&representation, context.stamp.clone())?;
                 delta.added.extend(built.added);
+                delta.images.extend(built.images);
             }
             Err(error) => failures.push(serde_json::json!({
                 "entity": entity.id.0.to_string(),
@@ -1021,7 +1045,9 @@ fn sample_hash_of(report: &cad_import_acadrust::ImportReport) -> Option<[u8; 32]
 }
 
 /// The font keys the open drawing references, for the sibling `fonts/` package
-/// loader when no explicit `--font` was given.
+/// loader when no explicit `--font` was given. Native-only: `build-representation`
+/// reports host-font-independent text and the wasm path never loads fonts.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn fonts_requested(controller: &HostController) -> Vec<String> {
     controller
         .drawing()
@@ -1072,6 +1098,68 @@ pub(crate) fn load_fonts(
         engine.set_fallback(keys);
         Ok(Some(Arc::new(engine)))
     }
+}
+
+/// The raster-image keys the open drawing references, for the image loader.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn images_requested(controller: &HostController) -> Vec<String> {
+    controller
+        .drawing()
+        .map(|drawing| cad_platform::images::requested_images(drawing.as_ref()))
+        .unwrap_or_default()
+}
+
+/// Resolve and decode the drawing's raster images for `render`/`plot`.
+///
+/// Native only. Roots are the drawing's own directory first, then an explicit
+/// `--images-dir`; a missing, unsafe or undecodable key is reported, never
+/// substituted. When the drawing references no images this is an empty cache
+/// and an empty report (a no-op).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn load_images(
+    invocation: &CliInvocation,
+    requested: &[String],
+) -> CadResult<(
+    Arc<cad_resources::DecodedImageCache>,
+    cad_platform::images::ImageLoadReport,
+)> {
+    let drawing_dir = invocation
+        .input
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty());
+    cad_platform::images::local::load_image_cache(
+        requested,
+        drawing_dir,
+        invocation.images_dir.as_deref(),
+        &cad_resources::ResourceLimits::default(),
+    )
+}
+
+/// The stable `images` object of the `render`/`plot` result JSON.
+///
+/// `unresolved` merges the loader's logical misses with the uploader's
+/// sanitized misses, so a key that never reached the GPU is visible exactly
+/// once and never read as a silent drop.
+#[cfg(not(target_arch = "wasm32"))]
+fn images_json(
+    report: &cad_platform::images::ImageLoadReport,
+    upload: &cad_render_wgpu::ImageUploadReport,
+) -> serde_json::Value {
+    let mut unresolved: Vec<String> = report.unresolved.clone();
+    for key in &upload.unresolved {
+        let key = key.as_str().to_string();
+        if !unresolved.iter().any(|existing| existing == &key) {
+            unresolved.push(key);
+        }
+    }
+    serde_json::json!({
+        "requested": report.requested,
+        "loaded": report.loaded,
+        "unresolved": unresolved,
+        "failed": report.failed,
+        "uploaded": upload.uploaded,
+        "bytes": report.bytes,
+    })
 }
 
 // ---------------------------------------------------------------------------

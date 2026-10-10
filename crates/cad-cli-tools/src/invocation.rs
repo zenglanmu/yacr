@@ -187,6 +187,10 @@ pub struct CliInvocation {
     pub points: Vec<Point3>,
     /// Fonts to shape text with, as `(key, path)`.
     pub fonts: Vec<(String, PathBuf)>,
+    /// Explicit directory to resolve drawing image references from
+    /// (`--images-dir`). `None` resolves images relative to the drawing's own
+    /// directory only. Native render/plot only.
+    pub images_dir: Option<PathBuf>,
     /// Optional file that receives the JSON result atomically.
     pub out: Option<PathBuf>,
     /// Optional PNG that `render` writes the offscreen frame to.
@@ -236,6 +240,7 @@ impl CliInvocation {
             input: input.into(),
             points: Vec::new(),
             fonts: Vec::new(),
+            images_dir: None,
             out: None,
             png: None,
             render_width: DEFAULT_RENDER_WIDTH,

@@ -212,6 +212,34 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             // Opaque geometry has no numeric content to judge; a style-only edit
             // of an imported proxy must remain possible.
         }
+        SemanticGeometry::Image {
+            origin,
+            u,
+            v,
+            pixels,
+            ..
+        } => {
+            if !finite(*origin) || !finite(*u) || !finite(*v) {
+                return Err(degenerate("image has a non-finite placement"));
+            }
+            if !pixels[0].is_finite()
+                || !pixels[1].is_finite()
+                || pixels[0] <= 0.0
+                || pixels[1] <= 0.0
+            {
+                return Err(degenerate(
+                    "image pixel dimensions must be positive and finite",
+                ));
+            }
+        }
+        SemanticGeometry::Mask { boundary, .. } => {
+            if boundary.len() < 3 {
+                return Err(degenerate("mask boundary has fewer than three points"));
+            }
+            if !boundary.iter().all(|p| finite(*p)) {
+                return Err(degenerate("mask boundary has a non-finite point"));
+            }
+        }
         SemanticGeometry::Compound(children) => {
             if children.is_empty() {
                 return Err(degenerate("compound geometry has no children"));
@@ -346,6 +374,58 @@ mod tests {
             points: vec![p(0.0, 0.0)],
             bulges: Vec::new(),
             closed: false
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn accepts_well_formed_image_and_mask() {
+        let image = SemanticGeometry::Image {
+            origin: p(1.0, 2.0),
+            u: p(0.5, 0.0),
+            v: p(0.0, 0.25),
+            pixels: [640.0, 480.0],
+            file: None,
+            clip: None,
+            visible: true,
+        };
+        assert!(validate_geometry(&image).is_ok());
+
+        let mask = SemanticGeometry::Mask {
+            boundary: vec![p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0)],
+            inverted: false,
+        };
+        assert!(validate_geometry(&mask).is_ok());
+    }
+
+    #[test]
+    fn rejects_malformed_image_and_mask() {
+        // An image with non-positive pixel dimensions cannot be placed.
+        assert!(validate_geometry(&SemanticGeometry::Image {
+            origin: p(0.0, 0.0),
+            u: p(1.0, 0.0),
+            v: p(0.0, 1.0),
+            pixels: [0.0, 10.0],
+            file: None,
+            clip: None,
+            visible: true,
+        })
+        .is_err());
+        // A non-finite edge vector is rejected.
+        assert!(validate_geometry(&SemanticGeometry::Image {
+            origin: p(0.0, 0.0),
+            u: p(f64::NAN, 0.0),
+            v: p(0.0, 1.0),
+            pixels: [10.0, 10.0],
+            file: None,
+            clip: None,
+            visible: true,
+        })
+        .is_err());
+        // A mask needs at least three points to bound an area.
+        assert!(validate_geometry(&SemanticGeometry::Mask {
+            boundary: vec![p(0.0, 0.0), p(1.0, 1.0)],
+            inverted: false,
         })
         .is_err());
     }

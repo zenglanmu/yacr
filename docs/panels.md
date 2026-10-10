@@ -188,8 +188,9 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
 - **资源抽屉**（`ResourcesPanelState` / `ResourceSections`，`cad-ui-slint/src/state.rs`）：
   分区为字体（目录条目/请求/计划/注册/失败/缺失名/回退面）、导入（文档/版本/
   完整性/诊断数/解析耗时）、代理记录（已解码/未解码，类型+原因+字节）、外部引用、
-  图像。图像实体未建模时显示 `resources.images_unsupported`，不造空列表；
-  完整性分级（complete/partial/missing/unverified）按真实报告投影。
+  图像。桌面/CLI 已建模图像实体（`images_modeled=true`，按相对路径解析+PNG/JPEG 解码
+  出纹理）；Web/Android 宿主未接图像加载器时显示 `resources.images_unsupported`，不造
+  空列表；完整性分级（complete/partial/missing/unverified）按真实报告投影。
 - **3D 观察抽屉**（`View3dPanelState`）：模式（2D/3D）、投影、标准视图、环绕说明、
   适应范围。2D/3D、投影、标准视图复用既有命令（`Switch2d3d`/`SwitchProjection`/
   `StandardView`），未伪造新命令；环绕为画布拖动手势，抽屉如实说明

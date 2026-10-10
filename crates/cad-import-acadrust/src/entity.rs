@@ -390,6 +390,7 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::Extended(x) if x.class_name() == "ACAD_PROXY_ENTITY" => {
                 self.proxy_geometry(x.class_name(), common, None)
             }
+            EntityType::Extended(x) => self.extended_semantics(x),
             EntityType::Hatch(h) => Self::hatch_geometry(h),
             EntityType::Dimension(d) => {
                 // Prefer the pre-rendered anonymous block (`*D...`) when the
@@ -453,7 +454,7 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::Wipeout(w) => wipeout_semantics(w),
             EntityType::Helix(h) => spline_semantics(&h.spline),
             EntityType::Viewport(v) => (viewport_semantics(v), Completeness::Complete),
-            EntityType::MLine(m) => mline_semantics(m),
+            EntityType::MLine(m) => self.mline_semantics(m),
             EntityType::Tolerance(t) => {
                 let (frame, _width, _height) = tolerance_frame(t);
                 let style_name = self.dim_text_style(&t.dimension_style_name);
@@ -620,8 +621,15 @@ impl<'a> ImporterBuilder<'a> {
         self.style_fonts.get(&name.to_ascii_lowercase()).cloned()
     }
 
-    /// A TABLE as its cell grid plus cell text. Merged cells and cell
-    /// borders/styles are approximated and reported `Partial`.
+    /// A TABLE as its cell grid plus cell text.
+    ///
+    /// Each cell's effective style (`cell.style` -> `row.style` -> `base_style`
+    /// -> the `TableStyle` object) decides which of its four edges are visible,
+    /// with double-line borders drawn as a second parallel line; merged interior
+    /// edges are suppressed. The representation carries one colour per entity,
+    /// so per-cell border colours/lineweights and background fills cannot be
+    /// applied: the result is always `Partial` and the reason states exactly
+    /// what is omitted.
     pub(crate) fn table_semantics(
         &self,
         t: &acadrust::entities::Table,
@@ -657,31 +665,24 @@ impl<'a> ImporterBuilder<'a> {
             );
         }
         let mut children: Vec<SemanticGeometry> = Vec::new();
-        let mut x = 0.0;
-        for width in &widths {
-            if let Some(line) = line_between(corner(x, 0.0), corner(x, total_height)) {
-                children.push(line);
-            }
-            x += width;
-        }
-        if let Some(line) =
-            line_between(corner(total_width, 0.0), corner(total_width, total_height))
-        {
-            children.push(line);
-        }
-        let mut y = 0.0;
-        for row in &t.rows {
-            if let Some(line) = line_between(corner(0.0, y), corner(total_width, y)) {
-                children.push(line);
-            }
-            y += row.height.max(0.0);
-        }
-        if let Some(line) =
-            line_between(corner(0.0, total_height), corner(total_width, total_height))
-        {
-            children.push(line);
-        }
-        // Cells covered by a merge anchor (all but the top-left cell).
+
+        // Base styling for cells without an override of their own: the table
+        // style object reached through `table_style_handle`. Table styles live in
+        // `self.acad.objects` (there is no typed table for them); its data-row
+        // style is used because the entity does not record title/header row
+        // counts here, an approximation reported in the reason below.
+        let table_style_borders: Option<CellBorderSet> = t
+            .table_style_handle
+            .and_then(|handle| self.acad.objects.get(&handle))
+            .and_then(|object| match object {
+                acadrust::objects::ObjectType::TableStyle(style) => {
+                    Some(CellBorderSet::from_row_style(&style.data_row_style))
+                }
+                _ => None,
+            });
+
+        // Cells covered by a merge anchor (all but the top-left cell). Their
+        // interior edges belong to the merged range and are not drawn.
         let mut covered: std::collections::HashSet<(usize, usize)> =
             std::collections::HashSet::new();
         for (row_index, row) in t.rows.iter().enumerate() {
@@ -697,48 +698,74 @@ impl<'a> ImporterBuilder<'a> {
                 }
             }
         }
+        // Whether any cell/row/base/table style was found; only then is the
+        // border-fidelity reason reported instead of the plain-grid one.
+        let mut styled = false;
         let mut y = 0.0;
         for (row_index, row) in t.rows.iter().enumerate() {
             let height = row.height.max(0.0);
             let mut x = 0.0;
             for (column_index, cell) in row.cells.iter().enumerate() {
                 let width = widths.get(column_index).copied().unwrap_or(0.0);
-                if !covered.contains(&(row_index, column_index)) {
-                    if let Some(content) = cell.contents.first() {
-                        let text = if !content.value.formatted_value.is_empty() {
-                            content.value.formatted_value.clone()
+                if covered.contains(&(row_index, column_index)) {
+                    x += width;
+                    continue;
+                }
+                // A merge anchor spans its covered columns/rows.
+                let span_w: f64 = (0..cell.merge_width.max(1) as usize)
+                    .map(|dc| widths.get(column_index + dc).copied().unwrap_or(0.0))
+                    .sum();
+                let span_h: f64 = (0..cell.merge_height.max(1) as usize)
+                    .map(|dr| {
+                        t.rows
+                            .get(row_index + dr)
+                            .map(|r| r.height.max(0.0))
+                            .unwrap_or(0.0)
+                    })
+                    .sum();
+
+                // Effective style precedence: cell -> row -> base -> table style.
+                let borders = if let Some(style) = cell.style.as_ref() {
+                    styled = true;
+                    CellBorderSet::from_cell_style(style)
+                } else if let Some(style) = row.style.as_ref() {
+                    styled = true;
+                    CellBorderSet::from_cell_style(style)
+                } else if let Some(style) = t.base_style.as_ref() {
+                    styled = true;
+                    CellBorderSet::from_cell_style(style)
+                } else if let Some(borders) = table_style_borders {
+                    styled = true;
+                    borders
+                } else {
+                    CellBorderSet::default()
+                };
+                // Each cell contributes the four edges its effective style
+                // leaves visible; a double border adds a second parallel line.
+                push_cell_borders(&mut children, &corner, x, y, span_w, span_h, &borders);
+
+                if let Some(content) = cell.contents.first() {
+                    let text = if !content.value.formatted_value.is_empty() {
+                        content.value.formatted_value.clone()
+                    } else {
+                        content.value.text.clone()
+                    };
+                    if !text.is_empty() {
+                        let text_height = if content.text_height > 0.0 {
+                            content.text_height
                         } else {
-                            content.value.text.clone()
+                            2.5
                         };
-                        if !text.is_empty() {
-                            let text_height = if content.text_height > 0.0 {
-                                content.text_height
-                            } else {
-                                2.5
-                            };
-                            // A merge anchor spans its covered columns/rows.
-                            let span_w: f64 = (0..cell.merge_width.max(1) as usize)
-                                .map(|dc| widths.get(column_index + dc).copied().unwrap_or(0.0))
-                                .sum();
-                            let span_h: f64 = (0..cell.merge_height.max(1) as usize)
-                                .map(|dr| {
-                                    t.rows
-                                        .get(row_index + dr)
-                                        .map(|r| r.height.max(0.0))
-                                        .unwrap_or(0.0)
-                                })
-                                .sum();
-                            children.push(SemanticGeometry::Text {
-                                text,
-                                position: corner(x + span_w * 0.5, y + span_h * 0.5),
-                                style: self.style_id(&content.text_style_name),
-                                height: text_height,
-                                rotation: 0.0,
-                                font: self.style_font(&content.text_style_name),
-                                h_align: TextAlignH::Center,
-                                v_align: TextAlignV::Middle,
-                            });
-                        }
+                        children.push(SemanticGeometry::Text {
+                            text,
+                            position: corner(x + span_w * 0.5, y + span_h * 0.5),
+                            style: self.style_id(&content.text_style_name),
+                            height: text_height,
+                            rotation: 0.0,
+                            font: self.style_font(&content.text_style_name),
+                            h_align: TextAlignH::Center,
+                            v_align: TextAlignV::Middle,
+                        });
                     }
                 }
                 x += width;
@@ -751,12 +778,205 @@ impl<'a> ImporterBuilder<'a> {
                 Completeness::Partial(vec!["table has no drawable cells".into()]),
             );
         }
+        let reason = if styled {
+            "table borders drawn from cell styles; per-cell border colours/lineweights and cell \
+             background fills are not applied (one colour per entity); merged ranges emit only \
+             their anchor text; table-style header/title row borders are approximated by the \
+             data-row style; double-line border offset direction is assumed inward; \
+             border_type/override_flags are not honoured; each cell takes its whole border set \
+             from the highest-priority style"
+                .to_string()
+        } else {
+            "table grid and cell text drawn; merged cells and borders are approximated".to_string()
+        };
         (
             SemanticGeometry::Compound(children),
-            Completeness::Partial(vec![
-                "table grid and cell text drawn; merged cells and borders are approximated".into(),
-            ]),
+            Completeness::Partial(vec![reason]),
         )
+    }
+
+    /// Convert a non-proxy `Extended` entity by its class-specific payload.
+    ///
+    /// The acadrust `ExtendedEntityData` variants carry real structured fields;
+    /// each is mapped to the semantic geometry this build can draw, with an
+    /// honest [`Completeness`] for what is not applied. Variants with no display
+    /// path at all stay [`SemanticGeometry::Opaque`]/[`Completeness::Unverified`].
+    pub(crate) fn extended_semantics(
+        &self,
+        x: &acadrust::entities::ExtendedEntity,
+    ) -> (SemanticGeometry, Completeness) {
+        use acadrust::entities::ExtendedEntityData;
+        match &x.data {
+            ExtendedEntityData::RemoteText(d) => {
+                let geometry = SemanticGeometry::Text {
+                    text: d.text.clone(),
+                    position: p3(d.position),
+                    style: self.style_id(&d.style_name),
+                    height: if d.height > 0.0 { d.height } else { 2.5 },
+                    rotation: d.rotation,
+                    font: self.style_font(&d.style_name),
+                    h_align: TextAlignH::Left,
+                    v_align: TextAlignV::Baseline,
+                };
+                let unhandled = rtext_unhandled_flags(d.flags);
+                let normal = p3(d.normal);
+                let off_plane = !cad_geometry::is_finite(normal)
+                    || normal.x.abs() > 1e-6
+                    || normal.y.abs() > 1e-6
+                    || (normal.z.abs() - 1.0).abs() > 1e-6;
+                let mut reasons: Vec<String> = Vec::new();
+                if !unhandled.is_empty() {
+                    reasons.push(format!(
+                        "remote text generation flags are not applied: {}",
+                        unhandled.join(", ")
+                    ));
+                }
+                if off_plane {
+                    reasons.push(
+                        "remote text OCS normal is not applied; text is placed in world XY".into(),
+                    );
+                }
+                if reasons.is_empty() {
+                    (geometry, Completeness::Complete)
+                } else {
+                    (geometry, Completeness::Partial(reasons))
+                }
+            }
+            ExtendedEntityData::ArcAlignedText(d) => (
+                SemanticGeometry::Text {
+                    text: d.text.clone(),
+                    position: p3(d.center),
+                    style: self.style_id(&d.style_name),
+                    height: if d.text_size > 0.0 { d.text_size } else { 2.5 },
+                    rotation: 0.0,
+                    font: self.style_font(&d.style_name),
+                    h_align: TextAlignH::Left,
+                    v_align: TextAlignV::Baseline,
+                },
+                Completeness::Partial(vec![
+                    "arc-aligned placement approximated as linear text".into()
+                ]),
+            ),
+            ExtendedEntityData::GeoPositionMarker(d) => {
+                let mut children: Vec<SemanticGeometry> = Vec::new();
+                if d.radius.is_finite() && d.radius > 0.0 {
+                    children.push(SemanticGeometry::Circle {
+                        center: p3(d.position),
+                        normal: Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 1.0,
+                        },
+                        radius: d.radius,
+                    });
+                }
+                if !d.notes.is_empty() {
+                    let height = if d.radius.is_finite() && d.radius > 0.0 {
+                        d.radius * 0.5
+                    } else {
+                        2.5
+                    };
+                    children.push(SemanticGeometry::Text {
+                        text: d.notes.clone(),
+                        position: p3(d.position),
+                        style: StyleId(0),
+                        height,
+                        rotation: 0.0,
+                        font: None,
+                        h_align: TextAlignH::Center,
+                        v_align: TextAlignV::Middle,
+                    });
+                }
+                if d.mtext_visible {
+                    if let Some(mtext) = &d.embedded_mtext {
+                        let (h_align, v_align) = attach_align(mtext.attachment_point);
+                        children.push(SemanticGeometry::Text {
+                            text: mtext.value.clone(),
+                            position: p3(mtext.insertion_point),
+                            style: self.style_id(&mtext.style),
+                            height: mtext.height,
+                            rotation: mtext.rotation,
+                            font: self.style_font(&mtext.style),
+                            h_align,
+                            v_align,
+                        });
+                    }
+                }
+                let geometry = if children.is_empty() {
+                    SemanticGeometry::Opaque {
+                        type_key: "POSITIONMARKER".into(),
+                        version: 1,
+                        payload: Vec::new(),
+                    }
+                } else {
+                    SemanticGeometry::Compound(children)
+                };
+                (
+                    geometry,
+                    Completeness::Partial(vec![
+                        "geo position marker drawn as a radius circle plus notes text; \
+                         text_alignment, enable_frame_text and landing_gap are not applied"
+                            .into(),
+                    ]),
+                )
+            }
+            ExtendedEntityData::SectionObject(d) => {
+                let mut children: Vec<SemanticGeometry> = Vec::new();
+                if d.vertices.len() >= 2 {
+                    children.push(polyline_semantics(
+                        d.vertices.iter().map(|v| p3(*v)).collect(),
+                        d.vertices.len() >= 3,
+                    ));
+                }
+                if d.back_line_vertices.len() >= 2 {
+                    children.push(polyline_semantics(
+                        d.back_line_vertices.iter().map(|v| p3(*v)).collect(),
+                        d.back_line_vertices.len() >= 3,
+                    ));
+                }
+                let geometry = if children.is_empty() {
+                    SemanticGeometry::Opaque {
+                        type_key: "SECTIONOBJECT".into(),
+                        version: 1,
+                        payload: Vec::new(),
+                    }
+                } else {
+                    SemanticGeometry::Compound(children)
+                };
+                (
+                    geometry,
+                    Completeness::Partial(vec![
+                        "section object outline drawn; top/bottom height extrusion, state/indicator \
+                         styling and the external settings handle are not applied"
+                            .into(),
+                    ]),
+                )
+            }
+            ExtendedEntityData::PointCloud(d) => {
+                point_cloud_box("ACDBPOINTCLOUD", d.extents_min, d.extents_max)
+            }
+            ExtendedEntityData::PointCloudEx(d) => {
+                point_cloud_box("ACDBPOINTCLOUDEX", d.extents_min, d.extents_max)
+            }
+            // No display path by design, or content that is not loaded from a
+            // drawing file: kept explicit Opaque/Unverified rather than faked.
+            ExtendedEntityData::Camera { .. }
+            | ExtendedEntityData::DynamicBlock(_)
+            | ExtendedEntityData::CoordinationModel(_)
+            | ExtendedEntityData::OleFrame(_)
+            | ExtendedEntityData::LayoutPrintConfig(_)
+            | ExtendedEntityData::Format(_)
+            | ExtendedEntityData::Legacy(_)
+            | ExtendedEntityData::RegisteredClass(_)
+            | ExtendedEntityData::Proxy(_) => (
+                SemanticGeometry::Opaque {
+                    type_key: x.class_name().to_string(),
+                    version: 1,
+                    payload: Vec::new(),
+                },
+                Completeness::Unverified,
+            ),
+        }
     }
 
     /// Text geometry for an ATTRIB/ATTDEF value, at its insertion point and
@@ -1060,4 +1280,216 @@ impl<'a> ImporterBuilder<'a> {
         entry.pick = weaker(entry.pick, pick);
         entry.measure = weaker(entry.measure, measure);
     }
+}
+
+/// Visibility/spacing of one table cell edge, as needed to draw it.
+#[derive(Debug, Clone, Copy)]
+struct BorderView {
+    invisible: bool,
+    double_spacing: f64,
+}
+
+impl BorderView {
+    /// A visible single border with no double-line spacing.
+    const VISIBLE: BorderView = BorderView {
+        invisible: false,
+        double_spacing: 0.0,
+    };
+
+    fn from_cell_border(border: &acadrust::entities::CellBorder) -> Self {
+        BorderView {
+            invisible: border.invisible,
+            double_spacing: border.double_spacing,
+        }
+    }
+
+    fn from_table_border(border: &acadrust::objects::TableCellBorder) -> Self {
+        BorderView {
+            invisible: border.is_invisible,
+            double_spacing: border.double_line_spacing,
+        }
+    }
+}
+
+/// The four resolved edges of one table cell's effective style.
+#[derive(Debug, Clone, Copy)]
+struct CellBorderSet {
+    top: BorderView,
+    right: BorderView,
+    bottom: BorderView,
+    left: BorderView,
+}
+
+impl Default for CellBorderSet {
+    fn default() -> Self {
+        CellBorderSet {
+            top: BorderView::VISIBLE,
+            right: BorderView::VISIBLE,
+            bottom: BorderView::VISIBLE,
+            left: BorderView::VISIBLE,
+        }
+    }
+}
+
+impl CellBorderSet {
+    fn from_cell_style(style: &acadrust::entities::CellStyle) -> Self {
+        CellBorderSet {
+            top: BorderView::from_cell_border(&style.top_border),
+            right: BorderView::from_cell_border(&style.right_border),
+            bottom: BorderView::from_cell_border(&style.bottom_border),
+            left: BorderView::from_cell_border(&style.left_border),
+        }
+    }
+
+    fn from_row_style(style: &acadrust::objects::RowCellStyle) -> Self {
+        CellBorderSet {
+            top: BorderView::from_table_border(&style.top_border),
+            right: BorderView::from_table_border(&style.right_border),
+            bottom: BorderView::from_table_border(&style.bottom_border),
+            left: BorderView::from_table_border(&style.left_border),
+        }
+    }
+}
+
+/// Emit the four edges of one cell rectangle for the resolved style.
+///
+/// An edge is drawn only when it is visible; a double border adds a second
+/// parallel line offset toward the cell interior by its spacing. `corner` maps
+/// the cell's local `(u, v)` plane onto world space.
+fn push_cell_borders(
+    children: &mut Vec<SemanticGeometry>,
+    corner: &impl Fn(f64, f64) -> Point3,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    borders: &CellBorderSet,
+) {
+    let bottom = borders.bottom;
+    if !bottom.invisible {
+        push_edge(children, corner(x, y), corner(x + width, y));
+        if bottom.double_spacing > 0.0 {
+            let s = bottom.double_spacing;
+            push_edge(children, corner(x, y + s), corner(x + width, y + s));
+        }
+    }
+    let top = borders.top;
+    if !top.invisible {
+        push_edge(
+            children,
+            corner(x, y + height),
+            corner(x + width, y + height),
+        );
+        if top.double_spacing > 0.0 {
+            let s = top.double_spacing;
+            push_edge(
+                children,
+                corner(x, y + height - s),
+                corner(x + width, y + height - s),
+            );
+        }
+    }
+    let left = borders.left;
+    if !left.invisible {
+        push_edge(children, corner(x, y), corner(x, y + height));
+        if left.double_spacing > 0.0 {
+            let s = left.double_spacing;
+            push_edge(children, corner(x + s, y), corner(x + s, y + height));
+        }
+    }
+    let right = borders.right;
+    if !right.invisible {
+        push_edge(
+            children,
+            corner(x + width, y),
+            corner(x + width, y + height),
+        );
+        if right.double_spacing > 0.0 {
+            let s = right.double_spacing;
+            push_edge(
+                children,
+                corner(x + width - s, y),
+                corner(x + width - s, y + height),
+            );
+        }
+    }
+}
+
+/// Push a non-degenerate line segment between two points.
+fn push_edge(children: &mut Vec<SemanticGeometry>, start: Point3, end: Point3) {
+    if let Some(line) = line_between(start, end) {
+        children.push(line);
+    }
+}
+
+/// The RTEXT generation-flag bits this build cannot apply, by name.
+///
+/// Bits `0x2` (backward) and `0x4` (upside-down) are the known TEXT generation
+/// flags; any other set bit is reported as an unknown mask. An empty result
+/// means every bit was interpreted.
+fn rtext_unhandled_flags(flags: i16) -> Vec<String> {
+    let mut out = Vec::new();
+    if flags & 0x2 != 0 {
+        out.push("backward".to_string());
+    }
+    if flags & 0x4 != 0 {
+        out.push("upside-down".to_string());
+    }
+    let rest = flags & !(0x2 | 0x4);
+    if rest != 0 {
+        out.push(format!("unknown bits 0x{:X}", rest as u16));
+    }
+    out
+}
+
+/// A point-cloud extents box as its twelve edges.
+///
+/// The scan points themselves are not carried by acadrust 0.6.3, so only the
+/// stored extents are drawn; the result is honestly `Partial`.
+fn point_cloud_box(
+    class_name: &str,
+    extents_min: acadrust::Vector3,
+    extents_max: acadrust::Vector3,
+) -> (SemanticGeometry, Completeness) {
+    let lo = Point3 {
+        x: extents_min.x.min(extents_max.x),
+        y: extents_min.y.min(extents_max.y),
+        z: extents_min.z.min(extents_max.z),
+    };
+    let hi = Point3 {
+        x: extents_min.x.max(extents_max.x),
+        y: extents_min.y.max(extents_max.y),
+        z: extents_min.z.max(extents_max.z),
+    };
+    let corner = |index: usize| Point3 {
+        x: if index & 1 == 0 { lo.x } else { hi.x },
+        y: if index & 2 == 0 { lo.y } else { hi.y },
+        z: if index & 4 == 0 { lo.z } else { hi.z },
+    };
+    let mut children: Vec<SemanticGeometry> = Vec::new();
+    for index in 0..8usize {
+        for bit in [1usize, 2, 4] {
+            if index & bit == 0 {
+                push_edge(&mut children, corner(index), corner(index | bit));
+            }
+        }
+    }
+    let (geometry, reason) = if children.is_empty() {
+        (
+            SemanticGeometry::Opaque {
+                type_key: class_name.to_string(),
+                version: 1,
+                payload: Vec::new(),
+            },
+            "point data is not available from acadrust 0.6.3; the stored extents are degenerate, \
+             so no box is drawn"
+                .to_string(),
+        )
+    } else {
+        (
+            SemanticGeometry::Compound(children),
+            "point data is not available from acadrust 0.6.3; extents box shown".to_string(),
+        )
+    };
+    (geometry, Completeness::Partial(vec![reason]))
 }

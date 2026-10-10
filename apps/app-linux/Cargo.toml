@@ -18,6 +18,7 @@ cad-app.workspace = true
 cad-db.workspace = true
 cad-domain.workspace = true
 cad-platform.workspace = true
+cad-resources.workspace = true
 cad-ui-slint.workspace = true
 cad-render-wgpu.workspace = true
 cad-diagnostics.workspace = true

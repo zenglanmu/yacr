@@ -121,6 +121,12 @@ pub struct RepresentationContext {
     /// Optional font set for shaping text into line geometry. Without it, text
     /// stays an unshaped `DisplayPrimitive::Text` (not drawn by the scene).
     pub fonts: Option<Arc<FontEngine>>,
+    /// Optional cache of decoded raster images, keyed by [`ResourceKey`].
+    ///
+    /// Without it (or without an entry for an image's key), a raster `Image`
+    /// stays a `DisplayPrimitive::Lines` frame plus an `image.*` diagnostic;
+    /// it never becomes a fabricated texture.
+    pub images: Option<Arc<DecodedImageCache>>,
     /// Active annotation scale used to scale annotative entities.
     ///
     /// `None` means no annotation scaling is applied (the pre-annotative
@@ -161,6 +167,7 @@ impl RepresentationContext {
             tolerance,
             stamp,
             fonts: None,
+            images: None,
             annotation_scale: None,
             packed_line_segments: false,
         }
@@ -169,6 +176,13 @@ impl RepresentationContext {
     /// Attach a font set so text can be outlined into drawable polylines.
     pub fn with_fonts(mut self, fonts: Arc<FontEngine>) -> Self {
         self.fonts = Some(fonts);
+        self
+    }
+
+    /// Attach decoded raster images so an `Image` can become a texture
+    /// primitive instead of an outline-only frame.
+    pub fn with_images(mut self, images: Arc<DecodedImageCache>) -> Self {
+        self.images = Some(images);
         self
     }
 

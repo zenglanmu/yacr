@@ -23,7 +23,8 @@ pub mod headless;
 use cad_diagnostics::codes;
 use cad_diagnostics::{DiagnosticParameter, DiagnosticReason};
 use cad_domain::*;
-use cad_scene::{FrameBudget, RenderTopology, SceneDelta};
+use cad_resources::{DecodedImage, DecodedImageCache, ResourceKey};
+use cad_scene::{FrameBudget, ImageBatch, RenderTopology, SceneDelta};
 use geometry::OverBudget;
 pub use geometry::{
     clamp_alpha, classify_alpha, plan_draw_order, AlphaClass, BatchOrderEntry, DrawOrderPlan,
@@ -33,6 +34,8 @@ pub use geometry::{
     winding_is_flipped,
 };
 pub use geometry::{Camera2d, Camera3d};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendPreference {
@@ -153,6 +156,12 @@ pub struct FrameStats {
     pub transparent_batches: usize,
     /// Batches skipped because `alpha <= 0`. Reported, never silently drawn.
     pub invisible_batches: usize,
+    /// Raster image quads submitted this frame, after opaque geometry.
+    ///
+    /// Full draw-order interleaving with geometry batches and WIPEOUT-style
+    /// masking are **not** implemented; images are drawn last, in ascending
+    /// `draw_order` among themselves (see [`Renderer::upload_images`]).
+    pub image_batches: usize,
     /// Lineweights that were carried but **not drawn** this frame.
     ///
     /// Wide lines are not portable across wgpu backends (and the browser
@@ -292,6 +301,112 @@ impl GpuBatch {
     }
 }
 
+/// A device-resident texture for one [`ResourceKey`], shared by every resident
+/// image quad that references it.
+///
+/// [`Renderer`] caches one per key (see [`Renderer::upload_images`]) so `N`
+/// entities referencing the same resource allocate a single texture and bind
+/// group rather than `N` copies.
+struct GpuTexture {
+    /// The uploaded texture. Kept alive both for the bind group and so a new
+    /// quad can clone a handle into its [`GpuImage`].
+    texture: wgpu::Texture,
+    /// Group 1 bind group (texture view + shared sampler), shared by every quad
+    /// that samples this key.
+    bind_group: wgpu::BindGroup,
+    /// Padded RGBA bytes actually uploaded: `height` rows of `width * 4` bytes
+    /// each rounded up to wgpu's 256-byte copy alignment. Charged once per key
+    /// against the frame byte budget.
+    upload_bytes: usize,
+    /// The decoded image this texture was uploaded from, held by identity so the
+    /// cache can tell whether a reused [`ResourceKey`] still refers to the same
+    /// bytes. A new [`DecodedImageCache`] produces a new `Arc`, so a different
+    /// document's `logo.png` is re-uploaded instead of sampling the previous
+    /// drawing's texture. Holding the `Arc` (rather than a raw pointer) keeps the
+    /// allocation alive, so `Arc::ptr_eq` cannot report a false match after the
+    /// old image is freed.
+    decoded: Arc<DecodedImage>,
+}
+
+/// One uploaded raster image: a textured quad plus the bind groups needed to
+/// draw it. Owned by [`Renderer`] and rebuilt by [`Renderer::upload_images`].
+struct GpuImage {
+    /// The resource key this quad samples; quads sharing a key share a texture.
+    resource: ResourceKey,
+    /// World-space quad vertices (position + uv), indexed by `index_buffer`.
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+    vertex_count: u32,
+    /// Group 0: the per-image camera uniform (world→clip matrix + tint).
+    camera: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    /// Group 1: the sampled texture and its sampler (shared per resource key).
+    texture_bind_group: wgpu::BindGroup,
+    /// A handle to the shared texture, kept alive for as long as the texture view
+    /// bound in `texture_bind_group` is used.
+    _texture: wgpu::Texture,
+    /// Padded texture bytes for this quad's resource key, charged to the frame
+    /// byte budget once per key (not once per quad).
+    texture_bytes: usize,
+    /// Constant per-image alpha, already sanitized at upload.
+    alpha: f32,
+    /// Paint order relative to sibling images (larger is later/on top). Full
+    /// interleaving with geometry batches is *not* implemented (see
+    /// [`Renderer::upload_images`]).
+    draw_order: i64,
+    /// Exact bytes this quad uploads (vertex + index buffers).
+    upload_bytes: usize,
+}
+
+/// Outcome of [`Renderer::upload_images`]: how many image quads became resident
+/// and which resources could not be resolved.
+///
+/// A resource that is absent from the [`DecodedImageCache`] (or whose decoded
+/// buffer is malformed) is **never** replaced by a placeholder: it is skipped
+/// and listed in [`ImageUploadReport::unresolved`] so the caller can surface
+/// `image.unresolved`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ImageUploadReport {
+    /// Image quads successfully uploaded and made resident this call.
+    pub uploaded: usize,
+    /// Resource keys that could not be resolved to a decodable image. Non-empty
+    /// means part of the scene was not drawn; the caller must surface it.
+    pub unresolved: Vec<ResourceKey>,
+    /// Bytes uploaded for the resident quads: every quad's vertex + index
+    /// buffers plus, once per unique resource, the padded RGBA texture bytes
+    /// (`height` rows of `width * 4`, rounded up to the 256-byte copy
+    /// alignment).
+    pub bytes: u64,
+}
+
+impl ImageUploadReport {
+    /// A structured diagnostic for the unresolved images, or `None` when every
+    /// requested image resolved.
+    ///
+    /// The code is [`codes::RESOURCE_MISSING`] (the image's resource is not
+    /// available); the caller maps it to its `image.unresolved` surface. This is
+    /// a report, not a fabricated draw.
+    pub fn diagnostic(&self) -> Option<DiagnosticReason> {
+        if self.unresolved.is_empty() {
+            return None;
+        }
+        let keys = self
+            .unresolved
+            .iter()
+            .map(|key| key.as_str())
+            .collect::<Vec<_>>()
+            .join(";");
+        Some(DiagnosticReason::missing(
+            codes::RESOURCE_MISSING,
+            vec![
+                DiagnosticParameter::Count(self.unresolved.len() as u64),
+                DiagnosticParameter::Key(keys),
+            ],
+        ))
+    }
+}
+
 /// The widest 2D texture dimension a host can rely on.
 pub const MIN_GUARANTEED_TEXTURE_DIMENSION: u32 = 2048;
 
@@ -319,12 +434,24 @@ pub struct Renderer {
     /// the geometry behind it with its own depth.
     mesh_pipeline_transparent: Option<wgpu::RenderPipeline>,
     mesh_pipeline_mirrored_transparent: Option<wgpu::RenderPipeline>,
+    /// Textured-quad pipeline for raster images (group 1 = texture + sampler).
+    image_pipeline: Option<wgpu::RenderPipeline>,
+    /// Bind-group layout for group 1 of the image pipeline.
+    image_texture_layout: Option<wgpu::BindGroupLayout>,
+    /// Shared linear, clamp-to-edge sampler for every uploaded image.
+    image_sampler: Option<wgpu::Sampler>,
     target: Option<wgpu::Texture>,
     target_view: Option<wgpu::TextureView>,
     depth_view: Option<wgpu::TextureView>,
     target_size: (u32, u32),
     target_format: wgpu::TextureFormat,
     batches: Vec<GpuBatch>,
+    /// Resident image quads uploaded by [`Renderer::upload_images`].
+    images: Vec<GpuImage>,
+    /// One GPU texture per resolved [`ResourceKey`], shared by every resident
+    /// image quad that references it. Bounded to the keys of the current image
+    /// set (unreferenced entries are pruned on upload).
+    image_textures: HashMap<ResourceKey, GpuTexture>,
     device_generation: u64,
     texture_revision: u64,
     uploaded_bytes: u64,

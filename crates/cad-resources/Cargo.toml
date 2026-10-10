@@ -10,3 +10,7 @@ description = "Font, image and xref resolution contracts and caches."
 [dependencies]
 cad-domain.workspace = true
 serde_json.workspace = true
+# Raster image decoding: PNG (decoder + encoder, the encoder is used in tests)
+# and JPEG. Both are pure-Rust and wasm-safe.
+png.workspace = true
+zune-jpeg.workspace = true

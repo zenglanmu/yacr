@@ -90,6 +90,27 @@ impl Runtime {
                 }
             }
         }
+        // Raster images that did not resolve or decode are document-level
+        // reasons, never a silent drop. `resource.missing` is localized in both
+        // catalogs, so the drawer shows the real missing key.
+        if let Some(report) = self.last_image_report.borrow().as_ref() {
+            for key in &report.unresolved {
+                diagnostics.add_document(cad_diagnostics::model::DiagnosticReason::missing(
+                    cad_diagnostics::model::codes::RESOURCE_MISSING,
+                    vec![cad_diagnostics::model::DiagnosticParameter::Key(
+                        key.clone(),
+                    )],
+                ));
+            }
+            for failure in &report.failed {
+                diagnostics.add_document(cad_diagnostics::model::DiagnosticReason::missing(
+                    cad_diagnostics::model::codes::RESOURCE_MISSING,
+                    vec![cad_diagnostics::model::DiagnosticParameter::Key(
+                        failure.clone(),
+                    )],
+                ));
+            }
+        }
         handle.set_diagnostics_state(&DiagnosticsPanelState::from_model(
             &diagnostics,
             &messages,
@@ -135,7 +156,7 @@ impl Runtime {
                     .map(|document| document.resource_keys.clone())
                     .unwrap_or_default(),
             }),
-            images_modeled: false,
+            images_modeled: true,
         })?;
         // The 3D observation drawer is pushed by `sync_view` through
         // `set_view_state` (it also re-derives `set_view3d_state`), so the drawer

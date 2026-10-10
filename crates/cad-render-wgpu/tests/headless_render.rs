@@ -6,10 +6,13 @@
 //! target back and assert that geometry actually rasterized. When no adapter is
 //! available they skip with a clear message rather than pretending to pass.
 
-use cad_domain::{DocumentId, EntityId, InstancePath, Point3, SelectionRef, TaskStamp};
+use cad_domain::{DocumentId, EntityId, InstancePath, Point3, SelectionRef, TaskStamp, Transform3};
 use cad_render_wgpu::headless::{create_headless_gpu, encode_png, HeadlessGpu, RgbaImage};
 use cad_render_wgpu::{BackendPreference, Camera2d, Camera3d, RenderError, RenderTarget, Renderer};
-use cad_scene::{RenderBatch, RenderTopology, SceneDelta};
+use cad_representation::ImageVertex;
+use cad_resources::{DecodedImage, DecodedImageCache, ResourceKey, ResourceLimits};
+use cad_scene::{ImageBatch, RenderBatch, RenderTopology, SceneDelta};
+use std::sync::Arc;
 
 fn source() -> SelectionRef {
     SelectionRef {
@@ -103,6 +106,7 @@ fn scene(batches: Vec<RenderBatch>) -> SceneDelta {
         stamp: TaskStamp::new(DocumentId(1), 0),
         added: batches,
         removed_chunks: Vec::new(),
+        images: Vec::new(),
     }
 }
 
@@ -573,4 +577,435 @@ fn readback_before_render_is_not_initialized() {
         renderer.read_target_rgba(),
         Err(RenderError::NotInitialized(_))
     ));
+}
+
+/// A solid-colour `width`x`height` RGBA8 image.
+fn solid_image(width: u32, height: u32, rgba: [u8; 4]) -> DecodedImage {
+    let pixels: Vec<u8> = rgba
+        .iter()
+        .copied()
+        .cycle()
+        .take((width * height * 4) as usize)
+        .collect();
+    DecodedImage {
+        width,
+        height,
+        rgba: pixels.into(),
+    }
+}
+
+/// A unit-square image batch mapping the texture to `[-0.8, 0.8]` in world
+/// space, centred on the camera.
+fn image_batch(resource: &str) -> ImageBatch {
+    ImageBatch {
+        resource: ResourceKey(resource.to_string()),
+        transform: Transform3::from_basis(
+            Point3 {
+                x: 1.6,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 0.0,
+                y: 1.6,
+                z: 0.0,
+            },
+            Point3 {
+                x: -0.8,
+                y: -0.8,
+                z: 0.0,
+            },
+        ),
+        clip: None,
+        alpha: 1.0,
+        draw_order: 0,
+        sources: vec![source()],
+    }
+}
+
+/// A resident image must actually rasterize its texture colour. This is a real
+/// software-Vulkan (lavapipe) frame, not a plan-level assertion.
+#[test]
+fn uploaded_image_renders_its_texture_colour() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("red".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert red image");
+
+    let report = renderer
+        .upload_images(&[image_batch("red")], &cache)
+        .expect("upload image");
+    assert_eq!(report.uploaded, 1);
+    assert!(report.unresolved.is_empty());
+    assert!(
+        report.diagnostic().is_none(),
+        "a resolved image must not report a gap"
+    );
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render image frame");
+    assert_eq!(stats.image_batches, 1, "the resident image must be drawn");
+    assert!(stats.draw_calls >= 1);
+
+    let image = renderer.read_target_rgba().expect("read image frame");
+    let center = image.pixel(32, 32);
+    // The source is opaque sRGB red and the target is `Rgba8UnormSrgb`, so the
+    // encoded channel value round-trips.
+    assert!(
+        center[0] > 240 && center[1] < 15 && center[2] < 15,
+        "centre pixel should be opaque red, got {center:?}"
+    );
+    // Outside the quad stays the clear colour (a bluish background), so the red
+    // channel is strictly dominated by the green/blue channels there.
+    let corner = image.pixel(0, 0);
+    assert!(
+        corner[0] < center[0].saturating_sub(100) && corner[2] >= corner[0],
+        "outside the quad must stay the bluish clear colour, got {corner:?}"
+    );
+}
+
+/// An image whose resource is absent from the cache is skipped and reported,
+/// never drawn as a placeholder. This is a real software-Vulkan (lavapipe) frame.
+#[test]
+fn missing_image_resource_draws_nothing_and_is_reported() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // Empty cache: "absent" cannot be resolved.
+    let cache = DecodedImageCache::new();
+    let report = renderer
+        .upload_images(&[image_batch("absent")], &cache)
+        .expect("a missing resource must not panic");
+    assert_eq!(report.uploaded, 0);
+    assert_eq!(report.unresolved, vec![ResourceKey("absent".into())]);
+    let reason = report
+        .diagnostic()
+        .expect("a missing image must be reported, never faked");
+    assert_eq!(reason.code, cad_diagnostics::codes::RESOURCE_MISSING);
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render after a skipped image");
+    assert_eq!(stats.image_batches, 0, "no image quad may be drawn");
+    assert_eq!(stats.draw_calls, 0, "nothing was submitted");
+    let image = renderer.read_target_rgba().expect("read frame");
+    let background = image.pixel(0, 0);
+    assert_eq!(
+        image.count_differing_from(background, 0),
+        0,
+        "a skipped image must leave the frame untouched"
+    );
+}
+
+/// A 2x2 image whose top row is red and bottom row is blue, used to prove the
+/// orientation of a rendered quad.
+fn two_tone_image() -> DecodedImage {
+    DecodedImage {
+        width: 2,
+        height: 2,
+        rgba: Arc::from(vec![
+            255, 0, 0, 255, 255, 0, 0, 255, // top row: red
+            0, 0, 255, 255, 0, 0, 255, 255, // bottom row: blue
+        ]),
+    }
+}
+
+/// The texture must not be drawn vertically mirrored: with decoded rows stored
+/// top-down and the CAD/DXF origin at the lower-left, the top of the quad shows
+/// the image's top row. This is a real software-Vulkan (lavapipe) frame; without
+/// the `uv.y = 1 - v` flip the halves swap and this test fails.
+#[test]
+fn uploaded_image_is_not_vertically_flipped() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("two-tone".into()),
+            two_tone_image(),
+            &ResourceLimits::default(),
+        )
+        .expect("insert two-tone image");
+    renderer
+        .upload_images(&[image_batch("two-tone")], &cache)
+        .expect("upload two-tone image");
+
+    let target = RenderTarget::new(64, 64);
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render two-tone frame");
+    let image = renderer.read_target_rgba().expect("read two-tone frame");
+    // The quad spans world y in [-0.8, 0.8]; the target's row 0 is the top, so
+    // row 8 samples near the top of the quad and row 56 near the bottom.
+    let top = image.pixel(32, 8);
+    let bottom = image.pixel(32, 56);
+    assert!(
+        top[0] > top[2].saturating_add(40) && top[1] < 60,
+        "the top of the quad must sample the image's top (red) row, got {top:?}"
+    );
+    assert!(
+        bottom[2] > bottom[0].saturating_add(40) && bottom[1] < 60,
+        "the bottom of the quad must sample the image's bottom (blue) row, got {bottom:?}"
+    );
+}
+
+/// A `clip` polygon must be consumed: the rendered footprint is the polygon, not
+/// the whole unit square. Only the left half is clipped in, so the right half of
+/// the quad must stay the clear colour. Real software-Vulkan (lavapipe) frame.
+#[test]
+fn clipped_image_renders_only_the_clip_polygon() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("red".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert red image");
+    // World-space left half of the [-0.8, 0.8] square with matching UVs.
+    let clip: Arc<[ImageVertex]> = Arc::from(
+        vec![
+            ImageVertex {
+                position: Point3 {
+                    x: -0.8,
+                    y: -0.8,
+                    z: 0.0,
+                },
+                uv: [0.0, 0.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: 0.0,
+                    y: -0.8,
+                    z: 0.0,
+                },
+                uv: [0.5, 0.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: 0.0,
+                    y: 0.8,
+                    z: 0.0,
+                },
+                uv: [0.5, 1.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: -0.8,
+                    y: 0.8,
+                    z: 0.0,
+                },
+                uv: [0.0, 1.0],
+            },
+        ]
+        .into_boxed_slice(),
+    );
+    let mut batch = image_batch("red");
+    batch.clip = Some(clip);
+    renderer
+        .upload_images(&[batch], &cache)
+        .expect("upload clipped image");
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render clipped frame");
+    assert_eq!(stats.image_batches, 1, "the clipped image must still draw");
+
+    let image = renderer.read_target_rgba().expect("read clipped frame");
+    let left = image.pixel(16, 32);
+    let right = image.pixel(48, 32);
+    let background = image.pixel(0, 0);
+    assert!(
+        left[0] > 240 && left[1] < 15 && left[2] < 15,
+        "the left (clipped-in) half must show the texture, got {left:?}"
+    );
+    assert_eq!(
+        right, background,
+        "the right (clipped-away) half must stay the clear colour, got {right:?}"
+    );
+}
+
+/// Two image batches referencing the same `ResourceKey` must allocate a single
+/// GPU texture (and bind group), not one per batch.
+#[test]
+fn image_batches_sharing_a_key_allocate_one_texture() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("shared".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert shared image");
+    let first = image_batch("shared");
+    let mut second = image_batch("shared");
+    second.draw_order = 1;
+    let report = renderer
+        .upload_images(&[first, second], &cache)
+        .expect("upload two batches sharing a key");
+
+    assert_eq!(report.uploaded, 2, "both quads are resident");
+    assert_eq!(
+        renderer.image_texture_count(),
+        1,
+        "two batches with the same key must share one texture"
+    );
+    // The padded 2x2 texture (256-byte row alignment) is charged once; each quad
+    // charges its own 4 vertices * 20 bytes + 6 indices * 4 bytes.
+    let padded_texture = 256u64 * 2;
+    let quad = (4 * 20 + 6 * 4) as u64;
+    assert_eq!(
+        report.bytes,
+        padded_texture + 2 * quad,
+        "texture bytes must be charged once, quad bytes per batch"
+    );
+}
+
+/// The renderer persists across document opens, but each open builds a fresh
+/// `DecodedImageCache`. A `ResourceKey` reused by a second drawing with different
+/// bytes must rebuild the texture instead of silently sampling the first
+/// drawing's image. Real software-Vulkan (lavapipe) frame; without the identity
+/// check the second readback would still be red.
+#[test]
+fn new_cache_with_same_key_rebuilds_texture() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+
+    // First document: "logo" names opaque red bytes.
+    let mut red_cache = DecodedImageCache::new();
+    red_cache
+        .insert(
+            ResourceKey("logo".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert red logo");
+    renderer
+        .upload_images(&[image_batch("logo")], &red_cache)
+        .expect("upload red logo");
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render red logo frame");
+    let red = renderer.read_target_rgba().expect("read red frame");
+    let red_center = red.pixel(32, 32);
+    assert!(
+        red_center[0] > 240 && red_center[1] < 15 && red_center[2] < 15,
+        "the first document's texture must render red, got {red_center:?}"
+    );
+
+    // Second document: the same key now names opaque blue bytes in a new cache.
+    let mut blue_cache = DecodedImageCache::new();
+    blue_cache
+        .insert(
+            ResourceKey("logo".into()),
+            solid_image(2, 2, [0, 0, 255, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert blue logo");
+    renderer
+        .upload_images(&[image_batch("logo")], &blue_cache)
+        .expect("upload blue logo");
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render blue logo frame");
+    let blue = renderer.read_target_rgba().expect("read blue frame");
+    let blue_center = blue.pixel(32, 32);
+    assert!(
+        blue_center[2] > 240 && blue_center[0] < 15 && blue_center[1] < 15,
+        "the second document's bytes must rebuild the texture and render blue, got {blue_center:?}"
+    );
+}
+
+/// Progressive rendering must composite images only on the page that clears the
+/// target. A tiny vertex budget splits the geometry across two pages; the image
+/// is charged and drawn on the first page only, never re-composited (which would
+/// accumulate an `alpha < 1` image's opacity).
+#[test]
+fn progressive_images_draw_only_on_the_cleared_page() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // Two 60-vertex line batches: a 100-vertex budget fits the first on page 0
+    // (60) and pushes the second to a continuation page, while leaving room on
+    // page 0 for the image's 4 vertices.
+    let big_line = || {
+        let mut vertices = Vec::new();
+        for i in 0..30 {
+            let x = -0.9 + i as f32 * 0.06;
+            vertices.push([x, -0.5, 0.0]);
+            vertices.push([x, 0.5, 0.0]);
+        }
+        lines_batch(vertices)
+    };
+    renderer
+        .upload(&scene(vec![big_line(), big_line()]))
+        .expect("upload two large line batches");
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("red".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert red image");
+    renderer
+        .upload_images(&[image_batch("red")], &cache)
+        .expect("upload image");
+
+    renderer.frame_budget.max_vertices = 100;
+    renderer.set_progressive_rendering(true);
+
+    let target = RenderTarget::new(64, 64);
+    let mut image_draws = Vec::new();
+    let mut pages = 0;
+    loop {
+        let stats = renderer.render(camera_2d(), &target).unwrap();
+        image_draws.push(stats.image_batches);
+        pages += 1;
+        assert!(pages <= 4, "progressive frame did not terminate");
+        if !renderer.frame_pending() {
+            break;
+        }
+    }
+    assert!(pages > 1, "the scene must span more than one page");
+    assert_eq!(
+        image_draws[0], 1,
+        "the image must be drawn on the cleared first page"
+    );
+    assert!(
+        image_draws[1..].iter().all(|&n| n == 0),
+        "images must not re-composite on continuation pages, got {image_draws:?}"
+    );
+    assert_eq!(
+        image_draws.iter().sum::<usize>(),
+        1,
+        "each image is drawn exactly once per frame"
+    );
 }

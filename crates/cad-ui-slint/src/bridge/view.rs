@@ -1,6 +1,6 @@
 //! Host-facing snapshots and coalesced CPU preparation, outside render callbacks.
 use super::*;
-use cad_app::render_scene::{OverlayInputs, SnapHint};
+use cad_app::render_scene::{DecodedImageCache, OverlayInputs, SnapHint};
 use cad_app::{MeasurementPreview, SelectionSet};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,6 +26,10 @@ pub struct CadView {
     pub(super) state: Rc<RefCell<BridgeState>>,
     pub(super) handle: UiHandle,
     fonts: Rc<RefCell<Option<Arc<FontEngine>>>>,
+    /// Decoded raster-image cache fed to the base scene build, mirrored into the
+    /// preparation input. `None` when the drawing references no images (or none
+    /// resolved); a change re-prepares the base.
+    images: Rc<RefCell<Option<Arc<DecodedImageCache>>>>,
     overrides: Rc<RefCell<LayerOverrideSet>>,
     /// Selection highlight input, kept separate so selecting an object never
     /// rebuilds the base drawing.
@@ -57,6 +61,7 @@ impl CadView {
             preference,
             state: Rc::new(RefCell::new(BridgeState::default())),
             fonts: Rc::new(RefCell::new(None)),
+            images: Rc::new(RefCell::new(None)),
             overrides: Rc::new(RefCell::new(LayerOverrideSet::new())),
             selection: Rc::new(RefCell::new(SelectionSet::new())),
             measurement_preview: Rc::new(RefCell::new(None)),
@@ -325,6 +330,7 @@ impl CadView {
             document: snapshot.document,
             space: snapshot.space,
             fonts: self.fonts.borrow().clone(),
+            images: self.images.borrow().clone(),
             layers: self.overrides.borrow().clone(),
             overlays: OverlayInputs {
                 selection: self.selection.borrow().clone(),
@@ -354,13 +360,14 @@ impl CadView {
                 visibility: *view.overlay_visibility.borrow(),
             };
             #[cfg(target_arch = "wasm32")]
-            let result = state.controller.prepare_shared_with_overlays(
+            let result = state.controller.prepare_shared_with_overlays_and_images(
                 doc,
                 snapshot.document,
                 view.fonts.borrow().clone(),
                 &view.overrides.borrow(),
                 snapshot.space,
                 &overlays,
+                view.images.borrow().clone(),
             );
             #[cfg(not(target_arch = "wasm32"))]
             let result = state
@@ -370,6 +377,7 @@ impl CadView {
                     document: snapshot.document,
                     space: snapshot.space,
                     fonts: view.fonts.borrow().clone(),
+                    images: view.images.borrow().clone(),
                     layers: view.overrides.borrow().clone(),
                     overlays,
                 })
@@ -404,6 +412,20 @@ impl CadView {
     pub fn clear_fonts(&self) {
         *self.fonts.borrow_mut() = None;
         self.state.borrow_mut().controller.fonts_changed();
+        self.request_redraw();
+    }
+    /// Store the decoded raster-image cache fed to the base scene build and
+    /// request a redraw. A new cache pointer is part of the preparation key, so
+    /// the base is re-prepared and its image batches resolve against it; an
+    /// unchanged pointer is a no-op.
+    pub fn set_images(&self, images: Arc<DecodedImageCache>) {
+        *self.images.borrow_mut() = Some(images);
+        self.request_redraw();
+    }
+    /// Clear the decoded raster-image cache (the drawing references no images,
+    /// or none resolved). The base falls back to outline-only image frames.
+    pub fn clear_images(&self) {
+        *self.images.borrow_mut() = None;
         self.request_redraw();
     }
     pub fn set_layer_overrides(&self, overrides: LayerOverrideSet) {

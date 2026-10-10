@@ -1,6 +1,7 @@
 //! batch module.
 
 use super::*;
+use std::sync::Arc;
 
 /// Identity of a cached chunk; any component change invalidates it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,9 +91,14 @@ pub struct RenderBatch {
     pub sources: Vec<SelectionRef>,
     /// Paint order relative to sibling batches: larger values are drawn later
     /// (on top). The renderer performs a stable sort on this key, so batches with
-    /// equal `draw_order` keep the upload order as the final tie-break. The scene
-    /// builder currently emits `0` (the importer's `DbEntity::draw_order` is not
-    /// yet reachable through `DisplayFragment`).
+    /// equal `draw_order` keep the upload order as the final tie-break.
+    ///
+    /// NOTE: `draw_order` is **not yet threaded** from the importer's
+    /// `DbEntity::draw_order` through `DisplayFragment` into `RenderBatch`; that
+    /// plumbing is formally deferred (see `docs/handoff.md`). The scene builder
+    /// therefore always emits `0`, so the current effective paint order is the
+    /// upload order. This field exists so the threading can land without an API
+    /// change, not as a signal that it is wired up.
     pub draw_order: i64,
 }
 
@@ -252,5 +258,46 @@ pub fn sanitize_lineweight(mm: f32) -> f32 {
         mm.max(0.0)
     } else {
         DEFAULT_BATCH_LINEWEIGHT_MM
+    }
+}
+
+/// A GPU-ready image draw item, carried separately from [`RenderBatch`].
+///
+/// Raster images are not triangle/line geometry: the renderer must bind a
+/// texture sampled from `resource` and draw `transform`'s unit square (or the
+/// `clip` polygon) rather than upload vertices. The scene therefore carries
+/// them in their own list so the renderer can upload textures in a later lane
+/// without a placeholder geometry batch faking a draw.
+///
+/// The fields mirror `DisplayPrimitive::Image`: `transform` maps the texture
+/// unit square `[0, 1]^2` to world space and `clip` is the surviving convex
+/// polygon (with per-vertex UVs) once a viewport clipped the image. `alpha` is
+/// the fragment's sanitised opacity and `sources` is the picking reference, so
+/// a change invalidates the image exactly like a chunk.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageBatch {
+    pub resource: ResourceKey,
+    pub transform: Transform3,
+    pub clip: Option<Arc<[ImageVertex]>>,
+    pub alpha: f32,
+    pub draw_order: i64,
+    pub sources: Vec<SelectionRef>,
+}
+
+impl ImageBatch {
+    /// CPU bytes this draw item holds in the scene cache.
+    ///
+    /// The transform is a fixed 16-`f64` matrix; the resource key and selection
+    /// sources are small strings/ids; the clip polygon is the only
+    /// size-dependent part (one [`ImageVertex`] per vertex).
+    pub fn approx_bytes(&self) -> usize {
+        let clip_bytes = self
+            .clip
+            .as_ref()
+            .map_or(0, |clip| clip.len() * std::mem::size_of::<ImageVertex>());
+        std::mem::size_of::<Transform3>()
+            + self.resource.as_str().len()
+            + clip_bytes
+            + self.sources.len() * std::mem::size_of::<SelectionRef>()
     }
 }

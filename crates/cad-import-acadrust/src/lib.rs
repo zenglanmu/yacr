@@ -437,3 +437,12 @@ use support::*;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests_display_dimension_multileader;
+#[cfg(test)]
+mod tests_display_hatch_boundary;
+#[cfg(test)]
+mod tests_display_mline_tolerance;
+#[cfg(test)]
+mod tests_display_table_extended;

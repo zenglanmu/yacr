@@ -30,6 +30,68 @@ fn sanitize_strips_directories_and_lowercases() {
 }
 
 #[test]
+fn image_key_preserves_the_relative_path_and_avoids_bare_name_collisions() {
+    // Two references that share a bare file name must not collide.
+    let a = image_resource_key("a/logo.png").unwrap();
+    let b = image_resource_key("b/logo.png").unwrap();
+    assert_eq!(a.as_str(), "a/logo.png");
+    assert_eq!(b.as_str(), "b/logo.png");
+    assert_ne!(a, b);
+    // The old bare-name key is exactly what collapsed them together.
+    assert_eq!(
+        ResourceKey::sanitize("a/logo.png"),
+        ResourceKey::sanitize("b/logo.png")
+    );
+
+    // Normalisation: trim, fold backslashes, strip a leading `./`, lowercase.
+    assert_eq!(
+        image_resource_key("  .\\Textures\\Logo.PNG  ")
+            .unwrap()
+            .as_str(),
+        "textures/logo.png"
+    );
+    assert_eq!(
+        image_resource_key("./nested/Logo.PNG").unwrap().as_str(),
+        "nested/logo.png"
+    );
+
+    // Empty and unsafe references produce no key at all.
+    for unsafe_reference in [
+        "",
+        "   ",
+        ".",
+        "../secret.png",
+        "a/../b.png",
+        "/etc/passwd",
+        "C:\\logo.png",
+        "http://example.com/logo.png",
+    ] {
+        assert_eq!(
+            image_resource_key(unsafe_reference),
+            None,
+            "accepted unsafe image reference: {unsafe_reference:?}"
+        );
+    }
+}
+
+#[test]
+fn decoded_image_cache_keeps_two_paths_with_the_same_file_name_separately() {
+    let mut cache = DecodedImageCache::new();
+    let image = decode_image(&encode_png(1, 1, &[1, 2, 3, 4]), &ResourceLimits::default()).unwrap();
+    let a = image_resource_key("a/logo.png").unwrap();
+    let b = image_resource_key("b/logo.png").unwrap();
+    cache
+        .insert(a.clone(), image.clone(), &ResourceLimits::default())
+        .unwrap();
+    cache
+        .insert(b.clone(), image.clone(), &ResourceLimits::default())
+        .unwrap();
+    assert_eq!(cache.len(), 2);
+    assert!(cache.get(&a).is_some());
+    assert!(cache.get(&b).is_some());
+}
+
+#[test]
 fn chain_follows_priority_order() {
     let mut user = MapResolver::new(ResourceLimits::default());
     user.grant("romans.shx", Arc::from(b"user".to_vec()), "user pack")
@@ -459,11 +521,17 @@ fn capability_table_does_not_claim_unsupported_categories() {
             kind.as_str()
         );
     }
-    // The old model implied every kind was supported. Image and xref are
-    // not implemented and must say so.
+    // The old model implied every kind was supported. Xref and BigFont are
+    // not implemented and must say so; image resolution exists and PNG/JPEG
+    // decode, but only partially (other codecs / fade-brightness-clip are not
+    // done), so it must not claim Verified.
+    assert_eq!(
+        resource_capability(ResourceKind::Image).resolve,
+        SupportStatus::Verified
+    );
     assert_eq!(
         resource_capability(ResourceKind::Image).decode,
-        SupportStatus::NotImplemented
+        SupportStatus::Partial
     );
     assert_eq!(
         resource_capability(ResourceKind::ExternalReference).resolve,
@@ -516,4 +584,190 @@ fn font_plan_report_accounts_for_unresolved_and_unsupported() {
         plan_fonts(&catalog, &requested, DEFAULT_FONT_BASE_URL).len(),
         1
     );
+}
+
+// --- Raster image decoding and cache (lane L13) ---
+
+/// A 1x1 red JPEG produced with Pillow 12.1.1:
+/// `Image.new('RGB', (1, 1), (255, 0, 0)).save(f, format='JPEG', quality=1,
+/// optimize=True)`. Embedded as bytes so the test is self-contained and needs no
+/// committed binary fixture (and hence no fixtures-manifest entry).
+const JPEG_1X1_RED: &[u8] = &[
+    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xDB, 0x00, 0x43, 0x01, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0,
+    0x00, 0x11, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11,
+    0x01, 0xFF, 0xC4, 0x00, 0x15, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xFF, 0xC4, 0x00, 0x14, 0x10, 0x01, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xC4,
+    0x00, 0x15, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x01, 0x03, 0xFF, 0xC4, 0x00, 0x14, 0x11, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x0C, 0x03,
+    0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3F, 0x00, 0x90, 0x02, 0x8F, 0xFF, 0xD9,
+];
+
+fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(rgba).unwrap();
+    }
+    out
+}
+
+#[test]
+fn image_format_detects_png_and_jpeg_magic_bytes() {
+    assert_eq!(
+        ImageFormat::detect(&encode_png(1, 1, &[0, 0, 0, 0])),
+        Some(ImageFormat::Png)
+    );
+    assert_eq!(ImageFormat::detect(JPEG_1X1_RED), Some(ImageFormat::Jpeg));
+    // A real but unsupported container, and empty input.
+    assert_eq!(ImageFormat::detect(b"GIF89a"), None);
+    assert_eq!(ImageFormat::detect(&[]), None);
+}
+
+#[test]
+fn png_round_trips_to_rgba8() {
+    let pixels: Vec<u8> = vec![
+        255, 0, 0, 255, // top-left red
+        0, 255, 0, 255, // top-right green
+        0, 0, 255, 255, // bottom-left blue
+        10, 20, 30, 255, // bottom-right arbitrary
+    ];
+    let png = encode_png(2, 2, &pixels);
+    let image = decode_image(&png, &ResourceLimits::default()).unwrap();
+    assert_eq!(image.width, 2);
+    assert_eq!(image.height, 2);
+    assert_eq!(image.rgba.len(), 16);
+    // PNG is lossless: exact known pixels come back.
+    assert_eq!(&image.rgba[0..4], &[255, 0, 0, 255]);
+    assert_eq!(&image.rgba[4..8], &[0, 255, 0, 255]);
+    assert_eq!(&image.rgba[8..12], &[0, 0, 255, 255]);
+    assert_eq!(&image.rgba[12..16], &[10, 20, 30, 255]);
+}
+
+#[test]
+fn png_grayscale_expands_to_rgba() {
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, 1, 1);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&[128]).unwrap();
+    }
+    let image = decode_image(&out, &ResourceLimits::default()).unwrap();
+    assert_eq!(&*image.rgba, &[128, 128, 128, 255]);
+}
+
+#[test]
+fn jpeg_fixture_decodes_to_rgba() {
+    let image = decode_image(JPEG_1X1_RED, &ResourceLimits::default()).unwrap();
+    assert_eq!((image.width, image.height), (1, 1));
+    assert_eq!(image.rgba.len(), 4);
+    // JPEG is lossy: red dominates but is not exact; alpha is fully opaque.
+    assert!(image.rgba[0] > 200, "red={}", image.rgba[0]);
+    assert!(image.rgba[1] < 32, "green={}", image.rgba[1]);
+    assert!(image.rgba[2] < 64, "blue={}", image.rgba[2]);
+    assert_eq!(image.rgba[3], 255);
+}
+
+#[test]
+fn decode_rejects_unsupported_and_malformed_bytes_without_panicking() {
+    // GIF is a real container this crate does not decode.
+    let issue = decode_image(b"GIF89a not an image", &ResourceLimits::default()).unwrap_err();
+    assert_eq!(issue.code, codes::IMAGE_UNSUPPORTED_FORMAT);
+    assert_eq!(issue.kind, Some(ResourceKind::Image));
+
+    // Truncated PNG: valid signature, no IHDR/IDAT.
+    let issue = decode_image(
+        &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
+        &ResourceLimits::default(),
+    )
+    .unwrap_err();
+    assert_eq!(issue.code, codes::IMAGE_DECODE_FAILED);
+    assert_eq!(issue.kind, Some(ResourceKind::Image));
+
+    // Truncated JPEG: SOI then junk.
+    let issue =
+        decode_image(&[0xFF, 0xD8, 0x00, 0x01, 0x02], &ResourceLimits::default()).unwrap_err();
+    assert_eq!(issue.code, codes::IMAGE_DECODE_FAILED);
+}
+
+#[test]
+fn decode_rejects_over_pixel_budget_from_the_header() {
+    let png = encode_png(2, 2, &[0u8; 16]);
+    let limits = ResourceLimits {
+        max_image_pixels: 3,
+        ..ResourceLimits::default()
+    };
+    let issue = decode_image(&png, &limits).unwrap_err();
+    assert_eq!(issue.budget, Some(ResourceBudget::ImagePixels));
+    assert_eq!(issue.kind, Some(ResourceKind::Image));
+    assert_eq!(issue.actual, 4);
+    assert_eq!(issue.limit, 3);
+}
+
+#[test]
+fn decode_rejects_decoded_payload_over_the_total_byte_budget() {
+    // 2x2 RGBA is 16 decoded bytes.
+    let png = encode_png(2, 2, &[0u8; 16]);
+    let limits = ResourceLimits {
+        total_bytes: 8,
+        ..ResourceLimits::default()
+    };
+    let issue = decode_image(&png, &limits).unwrap_err();
+    assert_eq!(issue.budget, Some(ResourceBudget::TotalBytes));
+    assert_eq!(issue.kind, Some(ResourceKind::Image));
+    assert_eq!(issue.actual, 16);
+    assert_eq!(issue.limit, 8);
+}
+
+#[test]
+fn decoded_image_cache_round_trips_and_enforces_total_bytes() {
+    let mut cache = DecodedImageCache::new();
+    let image = decode_image(&encode_png(1, 1, &[1, 2, 3, 4]), &ResourceLimits::default()).unwrap();
+    let key = ResourceKey::sanitize("textures/logo.png");
+    assert!(cache.get(&key).is_none());
+    cache
+        .insert(key.clone(), image.clone(), &ResourceLimits::default())
+        .unwrap();
+    assert_eq!(cache.len(), 1);
+    assert_eq!(cache.used_bytes(), 4);
+    let cached = cache.get(&key).unwrap();
+    assert_eq!(&*cached.rgba, &*image.rgba);
+    assert_eq!((cached.width, cached.height), (1, 1));
+
+    // Re-inserting the same key replaces rather than double-counting.
+    cache
+        .insert(key.clone(), image.clone(), &ResourceLimits::default())
+        .unwrap();
+    assert_eq!(cache.len(), 1);
+    assert_eq!(cache.used_bytes(), 4);
+
+    // A second image that would push the total over the cap is rejected and the
+    // cache is left untouched.
+    let limits = ResourceLimits {
+        total_bytes: 6,
+        ..ResourceLimits::default()
+    };
+    let other = ResourceKey::sanitize("textures/other.png");
+    let issue = cache.insert(other.clone(), image, &limits).unwrap_err();
+    assert_eq!(issue.budget, Some(ResourceBudget::TotalBytes));
+    assert_eq!(issue.kind, Some(ResourceKind::Image));
+    assert_eq!(issue.actual, 8);
+    assert_eq!(issue.limit, 6);
+    assert!(cache.get(&other).is_none());
+    assert_eq!(cache.used_bytes(), 4);
 }

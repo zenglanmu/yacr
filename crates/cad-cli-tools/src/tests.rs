@@ -240,6 +240,57 @@ fn render_of_missing_input_fails_before_any_gpu_work() {
     assert_eq!(error.exit_code(), 1);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_drawing_without_images_loads_an_empty_image_cache() {
+    // The demo document references no rasters: resolution must be a no-op, not
+    // an empty-but-present texture set.
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let requested = images_requested(&controller);
+    assert!(
+        requested.is_empty(),
+        "demo document must not request images: {requested:?}"
+    );
+    let invocation = CliInvocation::new(CliOperation::FixedViewportRender, "demo.dwg");
+    let (cache, report) = load_images(&invocation, &requested).unwrap();
+    assert!(cache.is_empty());
+    assert!(report.is_empty());
+    assert!(report.unresolved.is_empty());
+    assert!(report.failed.is_empty());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn build_scene_without_images_is_unchanged() {
+    use cad_app::render_scene::{build_scene_with_space, build_scene_with_space_and_images};
+    use cad_representation::SpaceSelection;
+    // Threading `None` images must reproduce the pre-image scene byte-for-byte
+    // in shape: same batch count, no image batches.
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let drawing = controller.drawing().unwrap();
+    let stamp = TaskStamp::new(controller.document_id, 0);
+    let overrides = controller.session.layer_overrides.clone();
+    let plain = build_scene_with_space(
+        &drawing,
+        stamp.clone(),
+        None,
+        &overrides,
+        SpaceSelection::Model,
+    )
+    .unwrap();
+    let with_none = build_scene_with_space_and_images(
+        &drawing,
+        stamp,
+        None,
+        None,
+        &overrides,
+        SpaceSelection::Model,
+    )
+    .unwrap();
+    assert_eq!(plain.added.len(), with_none.added.len());
+    assert!(plain.images.is_empty() && with_none.images.is_empty());
+}
+
 #[cfg(target_arch = "wasm32")]
 #[test]
 fn render_on_wasm_is_explicitly_unsupported() {

@@ -78,6 +78,9 @@ encoding_rs = "0.8"
 # Headless (native) software-Vulkan render path: blocking on wgpu's async
 # adapter/device requests, and encoding the offscreen frame to PNG.
 png = "0.18"
+# Decoding raster images referenced by a drawing (`cad-resources`). Pure-Rust
+# and wasm-safe; zune-core is already in the lock via the Slint/wgpu stack.
+zune-jpeg = "0.5"
 futures-lite = "2.6"
 
 # Portable wall clock. `std::time::Instant::now()` panics on

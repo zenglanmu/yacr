@@ -356,7 +356,13 @@ fn hit_validated(
         | SemanticGeometry::Arc { .. }
         | SemanticGeometry::Ellipse { .. }
         | SemanticGeometry::Spline { .. }
-        | SemanticGeometry::Text { .. } => {
+        | SemanticGeometry::Text { .. }
+        // A mask tessellates to its closed boundary polygon, so it picks like a
+        // polyline. A raster image has no analytic pick outline in this build
+        // (the representation layer draws it), so it tessellates to no points
+        // and honestly misses here rather than fabricating a hit.
+        | SemanticGeometry::Mask { .. }
+        | SemanticGeometry::Image { .. } => {
             let points = transform_polyline(tessellate_geometry(geometry, params), transform);
             match polyline_hit(ray, &points, options.tolerance) {
                 Some((t, offset, point)) => hit(

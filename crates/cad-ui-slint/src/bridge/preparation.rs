@@ -1,14 +1,15 @@
 //! Native CPU preparation over immutable inputs, with a bounded latest mailbox.
 use super::*;
 use cad_app::background::LatestTask;
-use cad_app::render_scene::{CadSceneController, OverlayInputs};
+use cad_app::render_scene::{CadSceneController, DecodedImageCache, OverlayInputs};
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct InputKey {
     drawing: usize,
     document: DocumentId,
     space: SpaceSelection,
     fonts: usize,
+    images: usize,
     layers: u64,
     overlays: u64,
 }
@@ -18,6 +19,7 @@ pub(super) struct PreparationInput {
     pub document: DocumentId,
     pub space: SpaceSelection,
     pub fonts: Option<Arc<FontEngine>>,
+    pub images: Option<Arc<DecodedImageCache>>,
     pub layers: LayerOverrideSet,
     pub overlays: OverlayInputs,
 }
@@ -35,6 +37,7 @@ impl PreparationInput {
             document: self.document,
             space: self.space,
             fonts: pointer(&self.fonts),
+            images: pointer(&self.images),
             layers: self.layers.fingerprint(),
             overlays: controller::overlay_fingerprint(&self.overlays),
         }
@@ -62,13 +65,14 @@ impl NativePreparation {
                         controller.fonts_changed();
                     }
                     fonts = input.fonts.clone();
-                    controller.prepare_shared_with_overlays(
+                    controller.prepare_shared_with_overlays_and_images(
                         input.drawing,
                         input.document,
                         input.fonts,
                         &input.layers,
                         input.space,
                         &input.overlays,
+                        input.images,
                     )?;
                     Ok(controller.clone())
                 })
@@ -125,9 +129,31 @@ mod tests {
             document: DocumentId(1),
             space: SpaceSelection::Model,
             fonts: None,
+            images: None,
             layers: LayerOverrideSet::new(),
             overlays: OverlayInputs::default(),
         }
+    }
+
+    #[test]
+    fn image_cache_pointer_changes_the_preparation_key_and_a_repeat_is_a_no_op() {
+        let drawing = cad_app::host::HostController::with_demo_document([800.0, 600.0])
+            .unwrap()
+            .drawing()
+            .unwrap();
+        let mut request = input(drawing);
+        let key = request.key();
+        // Identical inputs reuse the same key: no re-prepare.
+        assert_eq!(request.key(), key);
+        // Installing an image cache is a distinct input and re-prepares.
+        request.images = Some(Arc::new(DecodedImageCache::new()));
+        assert_ne!(request.key(), key);
+        // The same cache pointer does not force a second re-prepare.
+        let installed = request.key();
+        assert_eq!(request.key(), installed);
+        // Clearing it is distinct again.
+        request.images = None;
+        assert_ne!(request.key(), installed);
     }
 
     #[test]
