@@ -384,6 +384,45 @@ fn verify_ui_fixed_scenario_replay() {
     ui.invoke_command_submitted("FIT".into());
     assert!(!frame(&app).is_empty(), "FIT must leave a rendered frame");
 
+    // --- command line: a partial prefix populates completion, and Enter
+    //     resolves it to the real command (synthetic, offscreen) ------------
+    ui.invoke_command_input_edited("CI".into());
+    let items = ui.get_command_completion_items();
+    assert!(
+        items.row_count() >= 1,
+        "a partial prefix must offer completion suggestions"
+    );
+    let suggestions: Vec<String> = (0..items.row_count())
+        .filter_map(|index| items.row_data(index))
+        .map(|value| value.to_string())
+        .collect();
+    assert!(
+        suggestions.iter().any(|value| value == "CIRCLE"),
+        "the CI prefix must suggest CIRCLE: {suggestions:?}"
+    );
+    // Enter (command-submitted) resolves the unique prefix and runs the real tool.
+    assert!(
+        ui.invoke_command_submitted("CI".into()),
+        "CI must resolve and be consumed"
+    );
+    assert!(
+        ui.get_draw_tool_active(),
+        "CI must resolve to CIRCLE and start its capture"
+    );
+    ui.invoke_command_submitted("ESC".into());
+    assert!(
+        !ui.get_draw_tool_active(),
+        "ESC must end the CIRCLE capture"
+    );
+    // Dismissing completion clears the suggestion list.
+    ui.invoke_command_input_edited("CI".into());
+    ui.invoke_command_completion_dismissed();
+    assert_eq!(
+        ui.get_command_completion_items().row_count(),
+        0,
+        "dismissing completion must clear the suggestions"
+    );
+
     // --- AutoCAD convention: ESC ends whatever command is active -----------
     ui.invoke_measure_kind_selected(text("measure.kind.polyline").into());
     assert!(ui.get_measurement_active());

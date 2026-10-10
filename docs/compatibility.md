@@ -66,6 +66,34 @@
 `CAD_IMPLEMENTATION_SPEC.md` 顶部变更记录），本表不再包含批注能力。实现及本轮运行证据见
 `docs/linux-app.md`，不更改实体兼容结论。
 
+## 绘制/编辑命令（命令行程序，2026-10-10 / 2026-10-11）
+
+`cad-app` 现提供一组**真实、事务化**的绘制/编辑命令（均 work-only，Viewer 由命令层显式拒绝；
+每条命令一次事务、一步撤销，失败不改任何状态、也不记历史）：
+
+| 命令 | 能力 | 诚实边界 |
+|---|---|---|
+| LINE / CIRCLE / ARC | 创建（点捕获或几何直通） | 退化/共线/非有限输入显式拒绝 |
+| MOVE | 平移选择（折叠重复 ref） | 不可变换几何整条拒绝，不静默丢弃 |
+| COPY | 复制（新 id） | 同上；按对象样式覆盖无法复制时记 `drawing.copy.style`（副本继承图层样式） |
+| ERASE | 删除选择 | 空选择拒绝；撤销恢复渲染属性与动态可见性成员 |
+| TRIM | LINE 对 LINE / 全直线 LWPOLYLINE | 其余边界/目标 `Unsupported`；无交点/退化 `InvalidInput` |
+| EXTEND | 把 LINE 延伸到最近边界 | 同 TRIM 子集；已接触/已穿过/无交点显式拒绝 |
+| ROTATE / SCALE | 绕基点旋转/均匀缩放 | 相似变换（正行列式）；不支持几何 `Unsupported` |
+| MIRROR | 镜像（**保留原件**，新增副本） | 反射下 Arc/Ellipse 参数化会反向 → 显式 `Unsupported` |
+| OFFSET | LINE / CIRCLE 偏移 | 其余几何 `Unsupported`；点在线上/过圆心/在圆上显式拒绝 |
+| COPYCLIP/CUTCLIP/PASTECLIP | **应用内**剪贴板 | 非 OS 剪贴板；替换文档清空；空选择/空剪贴板拒绝 |
+
+- 变换/偏移的**不支持几何**（Text/Spline/Shape/Opaque/Compound；MIRROR 下的 Arc/Ellipse）返回显式
+  `Unsupported`；退化/无交点等 plan 级失败返回 `InvalidInput`。二者都不创建或部分修改实体。
+- 命令行、别名、固定键位与补全行为的完整参考见 **`docs/shortcuts.md`**；`Ctrl+C/X/V` 仅为应用内
+  剪贴板，不读写操作系统剪贴板。
+- **导出**：`SAVE` 为**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；
+  `PLOT` 为矢量 SVG/PDF。真实图纸上的导出兼容性**未验证**。
+- **证据范围**：以上均为合成/离屏（软件 Vulkan lavapipe）契约与场景证据，**不代表真实 GPU、真实
+  窗口或真机**；`EXTEND` 仅在 Web 宿主接线（Linux 取点未接线，显式 `Unsupported`）；Android 宿主
+  未编译验证。逐轮证据见 `docs/handoff.md`。
+
 ## 三维
 
 - 观察（轨道/标准视图/正交-透视）：`cad-app` 的相机/投影/标准视图/轨道命令与 Slint

@@ -388,6 +388,36 @@ export component YacrWindow inherits Window {
                     }
                     return EventResult.accept;
                 }
+                // Explicitly unsupported AutoCAD Ctrl chords: a recognized
+                // shortcut with no implementation must never be a silent no-op.
+                // Palette / dialog toggles.
+                if !event.modifiers.shift && event.text == "2" { root.shortcut-unsupported("Ctrl+2"); return EventResult.accept; }
+                if !event.modifiers.shift && event.text == "3" { root.shortcut-unsupported("Ctrl+3"); return EventResult.accept; }
+                if !event.modifiers.shift && event.text == "4" { root.shortcut-unsupported("Ctrl+4"); return EventResult.accept; }
+                if !event.modifiers.shift && event.text == "6" { root.shortcut-unsupported("Ctrl+6"); return EventResult.accept; }
+                if !event.modifiers.shift && event.text == "7" { root.shortcut-unsupported("Ctrl+7"); return EventResult.accept; }
+                if !event.modifiers.shift && event.text == "8" { root.shortcut-unsupported("Ctrl+8"); return EventResult.accept; }
+                // Drafting toggles (not implemented).
+                if !event.modifiers.shift && (event.text == "b" || event.text == "B") { root.shortcut-unsupported("Ctrl+B"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "d" || event.text == "D") { root.shortcut-unsupported("Ctrl+D"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "e" || event.text == "E") { root.shortcut-unsupported("Ctrl+E"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "f" || event.text == "F") { root.shortcut-unsupported("Ctrl+F"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "g" || event.text == "G") { root.shortcut-unsupported("Ctrl+G"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "h" || event.text == "H") { root.shortcut-unsupported("Ctrl+H"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "i" || event.text == "I") { root.shortcut-unsupported("Ctrl+I"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "j" || event.text == "J") { root.shortcut-unsupported("Ctrl+J"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "l" || event.text == "L") { root.shortcut-unsupported("Ctrl+L"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "m" || event.text == "M") { root.shortcut-unsupported("Ctrl+M"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "r" || event.text == "R") { root.shortcut-unsupported("Ctrl+R"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "t" || event.text == "T") { root.shortcut-unsupported("Ctrl+T"); return EventResult.accept; }
+                if !event.modifiers.shift && (event.text == "w" || event.text == "W") { root.shortcut-unsupported("Ctrl+W"); return EventResult.accept; }
+                // Shift combinations (not implemented).
+                if event.modifiers.shift && (event.text == "h" || event.text == "H") { root.shortcut-unsupported("Ctrl+Shift+H"); return EventResult.accept; }
+                if event.modifiers.shift && (event.text == "a" || event.text == "A") { root.shortcut-unsupported("Ctrl+Shift+A"); return EventResult.accept; }
+                if event.modifiers.shift && (event.text == "i" || event.text == "I") { root.shortcut-unsupported("Ctrl+Shift+I"); return EventResult.accept; }
+                if event.modifiers.shift && (event.text == "l" || event.text == "L") { root.shortcut-unsupported("Ctrl+Shift+L"); return EventResult.accept; }
+                if event.modifiers.shift && (event.text == "p" || event.text == "P") { root.shortcut-unsupported("Ctrl+Shift+P"); return EventResult.accept; }
+                if event.modifiers.shift && (event.text == "w" || event.text == "W") { root.shortcut-unsupported("Ctrl+Shift+W"); return EventResult.accept; }
             }
             if !event.modifiers.control && !event.modifiers.shift {
                 if event.text == Key.Escape && root.command-visible

@@ -1,6 +1,43 @@
 # 后续 agent 接手入口
 
-## 偏移命令：OFFSET（LINE / CIRCLE 子集）（2026-10-11，本轮）
+## 程序级汇总：命令行 / 快捷键 / 绘制编辑（2026-10-10 → 2026-10-11）
+
+本程序（多轮）交付**应用内命令行 + 固定键位 + 一组真实绘制/编辑命令 + 应用内剪贴板**。
+
+- 单一诚实参考：**`docs/shortcuts.md`**（命令行行为、命令/别名表、固定键位、显式未支持清单、
+  平台与证据范围）。能力表更新见 `docs/compatibility.md` 的「绘制/编辑命令」小节。
+- 命令（均 work-only，一次事务/一步撤销，失败不改状态）：LINE/CIRCLE/ARC、MOVE/COPY/ERASE、
+  TRIM/EXTEND（LINE 子集）、ROTATE/SCALE/MIRROR（MIRROR 保留原件）、OFFSET（仅 LINE/CIRCLE）、
+  应用内剪贴板 COPYCLIP/CUTCLIP/PASTECLIP（非 OS 剪贴板）。
+- **证据诚实**：全部为合成/离屏（软件 Vulkan lavapipe）；`EXTEND` 仅 Web 接线；Android 未编译；
+  未做真实 GPU/窗口/真机验收。逐轮明细见下方各轮条目。
+
+## 文档整合 + 命令行离屏场景（2026-10-11，本轮）
+
+用户要求（最后一轮整合）：整合命令行/快捷键程序文档，并加一个离屏 UI 集成场景（**仅文档与测试/
+证据**，不加产品功能）。
+
+- 新增 `docs/shortcuts.md`（中文）：命令行前缀匹配/补全/门控行为、完整命令与别名表、固定键位表、
+  **显式未支持清单**（F1/F4–F12 与 Ctrl+2/3/4/6/7/8、Ctrl+B/D/E/F/G/H/I/J/L/M/R/T/W、
+  Ctrl+Shift+H/A/I/L/P/W 等未实现组合键均报 `shortcut.unsupported`，不再是静默 no-op；OFFSET 仅
+  LINE/CIRCLE；Ctrl+C/X/V 仅应用内剪贴板；DWG 导出未验证）、平台与证据范围（桌面为主、EXTEND 仅
+  Web、导出/新建桌面专有、Android 未编译、全为合成/离屏）。
+- 更新 `docs/compatibility.md`：新增「绘制/编辑命令」小节，列出 LINE/CIRCLE/ARC/MOVE/COPY/ERASE/
+  TRIM/EXTEND/ROTATE/SCALE/MIRROR/OFFSET 与剪贴板及各自诚实边界；明确有损 DXF 导出为 `Partial`。
+- 更新 `README.md` 文档索引，加入 `docs/shortcuts.md`。
+- 扩展 `apps/app-linux/tests/verify_ui.rs` 离屏场景：向命令行输入前缀 `CI` → 断言补全候选包含
+  `CIRCLE` → `Enter`（`command-submitted`）解析并启动真实 CIRCLE 捕获 → `Esc` 结束 → 关闭补全后
+  候选清空。纯 Slint 状态，不依赖 GPU 读取，稳健于 lavapipe 环境。
+
+验证（本机，离屏软件 Vulkan lavapipe）：`cargo fmt --all` / `--check`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`check-i18n.py`（284 键）、`check-architecture.py`（25 包）、`check-workflows.py`；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略；
+新增断言在 `verify_ui_fixed_scenario_replay` 内，未新增测试函数）。
+新增场景为**合成/离屏**证据，不代表真实 GPU、窗口或真机。未改动任何产品代码。
+
+## 偏移命令：OFFSET（LINE / CIRCLE 子集）（2026-10-11）
 
 用户要求：实现 OFFSET 的**有界、诚实子集**——仅 LINE 与 CIRCLE；其它几何一律显式 `Unsupported`。
 

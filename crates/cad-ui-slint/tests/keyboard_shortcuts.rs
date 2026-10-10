@@ -251,6 +251,37 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     ] {
         press(&ui, key);
     }
+    // Explicitly unsupported AutoCAD Ctrl chords must each report a stable label
+    // (never a silent no-op). Pressed in the order asserted below.
+    for (key, shift) in [
+        ("2", false),
+        ("3", false),
+        ("4", false),
+        ("6", false),
+        ("7", false),
+        ("8", false),
+        ("b", false),
+        ("d", false),
+        ("e", false),
+        ("f", false),
+        ("g", false),
+        ("h", false),
+        ("i", false),
+        ("j", false),
+        ("l", false),
+        ("m", false),
+        ("r", false),
+        ("t", false),
+        ("w", false),
+        ("h", true),
+        ("a", true),
+        ("i", true),
+        ("l", true),
+        ("p", true),
+        ("w", true),
+    ] {
+        control(&ui, key, shift);
+    }
     assert_eq!(
         &*unsupported.borrow(),
         &[
@@ -267,9 +298,38 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
             "F10",
             "F11",
             "F12",
+            "Ctrl+2",
+            "Ctrl+3",
+            "Ctrl+4",
+            "Ctrl+6",
+            "Ctrl+7",
+            "Ctrl+8",
+            "Ctrl+B",
+            "Ctrl+D",
+            "Ctrl+E",
+            "Ctrl+F",
+            "Ctrl+G",
+            "Ctrl+H",
+            "Ctrl+I",
+            "Ctrl+J",
+            "Ctrl+L",
+            "Ctrl+M",
+            "Ctrl+R",
+            "Ctrl+T",
+            "Ctrl+W",
+            "Ctrl+Shift+H",
+            "Ctrl+Shift+A",
+            "Ctrl+Shift+I",
+            "Ctrl+Shift+L",
+            "Ctrl+Shift+P",
+            "Ctrl+Shift+W",
         ]
     );
     assert!(ui.get_command_expanded());
+    assert_eq!(
+        ui.get_status_label().to_string(),
+        "Shortcut Ctrl+Shift+W has no supported action yet."
+    );
     assert_eq!(
         calls.borrow().len(),
         cad_calls_before,

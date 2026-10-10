@@ -172,6 +172,7 @@ The outputs are CI artifacts; **no official distribution channel exists yet**.
 - 3D observation: `docs/view-3d.md`; draw order: `docs/render-order.md`; render backends: `docs/render-backends.md`
 - Measurement: `docs/measure.md`; layouts: `docs/layouts.md`; plot: `docs/plot.md`
 - Dynamic blocks: `docs/dynamic-blocks.md`; annotative scaling: `docs/annotative-scaling.md`
+- Command line & keymap reference: `docs/shortcuts.md`; drawing/editing subset: `docs/drawing-edit.md`
 - Performance and budgets: `docs/performance.md`
 - DWG test flow: `docs/testing-dwg.md`; headless UI debugging: `docs/verify-ui.md`
 

@@ -119,6 +119,41 @@ fn capture_handler_binds_only_the_global_modifier_and_function_keys() {
             "capture handler is missing: {clause}"
         );
     }
+    // Explicitly unsupported AutoCAD Ctrl chords must each report a stable label
+    // in the capture handler, so none of them is a silent no-op.
+    for chord in [
+        "Ctrl+2",
+        "Ctrl+3",
+        "Ctrl+4",
+        "Ctrl+6",
+        "Ctrl+7",
+        "Ctrl+8",
+        "Ctrl+B",
+        "Ctrl+D",
+        "Ctrl+E",
+        "Ctrl+F",
+        "Ctrl+G",
+        "Ctrl+H",
+        "Ctrl+I",
+        "Ctrl+J",
+        "Ctrl+L",
+        "Ctrl+M",
+        "Ctrl+R",
+        "Ctrl+T",
+        "Ctrl+W",
+        "Ctrl+Shift+H",
+        "Ctrl+Shift+A",
+        "Ctrl+Shift+I",
+        "Ctrl+Shift+L",
+        "Ctrl+Shift+P",
+        "Ctrl+Shift+W",
+    ] {
+        let needle = format!("root.shortcut-unsupported(\"{chord}\")");
+        assert!(
+            capture.contains(&needle),
+            "capture handler is missing: {needle}"
+        );
+    }
     // Editor-first-refusal / clipboard actions must live in the bubbling handler.
     for absent in [
         "Key.Home",
@@ -130,7 +165,6 @@ fn capture_handler_binds_only_the_global_modifier_and_function_keys() {
         "root.copy-requested()",
         "root.cut-requested()",
         "root.paste-requested()",
-        "event.text == \"a\"",
         "event.text == \"z\"",
         "event.text == \"y\"",
     ] {
@@ -139,6 +173,12 @@ fn capture_handler_binds_only_the_global_modifier_and_function_keys() {
             "capture handler must not bind the bubbling action: {absent}"
         );
     }
+    // Ctrl+Shift+A (groups) is a capture-safe unsupported chord, but the
+    // unshifted Ctrl+A select-all must remain bubble-only.
+    assert!(
+        !capture.contains("!event.modifiers.shift && (event.text == \"a\""),
+        "Ctrl+A select-all must stay in the bubbling handler"
+    );
 }
 
 #[test]
