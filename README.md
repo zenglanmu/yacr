@@ -1,77 +1,186 @@
-# yacr — Rust CAD 查看、测量与批注系统（开发中）
+# yacr — Rust CAD System (in development)
 
-> **当前处于开发搭建阶段，尚不可用。** 本仓库是依据 `CAD_IMPLEMENTATION_SPEC.md` v2.0
-> 推进的契约框架：能力以合成测试覆盖为主，多数宿主与真实数据路径尚未接线或未验证，
-> 没有可交付的产品。请勿把它当作已完成或生产可用的 CAD 系统，具体边界见下文
-> 「当前状态 / 明确未完成」。
+[English](README.md) | [中文](README.zh-CN.md)
 
-依据 `CAD_IMPLEMENTATION_SPEC.md` v2.0 搭建。目标架构为数据库驱动（`cad-db`：对象、
-事务、revision、ChangeSet），UI 计划使用 Slint，CAD 绘制计划使用 wgpu，DWG 解析计划使用
-未修改的 acadrust 0.6.3。核心设计为无平台依赖，可单独测试并用于 CLI；这些是架构目标，
-不代表功能已完备。
+> **The project is still in an early development stage and has no shippable product yet.**
+> yacr is a CAD system written from scratch in Rust, targeting DWG/DXF drawings on desktop,
+> Android and the browser. Current capabilities are backed by **contract tests, synthetic
+> samples and actual runs on some hosts**; there is no real-device, real-GPU or real-drawing
+> visual acceptance, and no validated DWG compatibility. Do not treat it as a usable or
+> production CAD application.
+>
+> **Scope change**: the user annotation feature was removed as a whole on 2026-10-05, and the
+> project now focuses on **viewing + measurement** (measurement F06 and DXF annotative scaling
+> are retained).
 
-* 架构：`docs/architecture.md`
-* 构建（Linux App 主验收，含 Android APK）：`docs/build.md`
-* Linux 宿主入口与限制：`docs/linux-app.md`
-* Windows 宿主与打包：`docs/windows-app.md`
-* macOS 宿主与打包：`docs/macos-app.md`
-* UI 导航/禁用、DXF 与旧式 SHX 字号修复：`docs/ui-dxf-text-fixes.md`
-* 验证与运行证据：`docs/validation.md`
-* DWG 测试流程（lavapipe 主测试 + 无头浏览器复验）：[docs/testing-dwg.md](docs/testing-dwg.md)
-* 真实图纸回归结果：[docs/validation-dwg.md](docs/validation-dwg.md)
-* 兼容性/能力表：`docs/compatibility.md`
-* 字体来源：`docs/fonts.md`
-* 渲染后端：`docs/render-backends.md`
-* 代理支持：`docs/proxy-support.md`
-* 性能与预算：`docs/performance.md`
-* OpenCADStudio 功能规格参考：`docs/ui-requirements/00-INDEX.md`（非源码参考）；历史调查：`docs/migration-map.md`
-* 决策记录：`docs/adr/`
+## What yacr is
 
-## 当前状态（开发搭建中）
+Drawing data and business logic only operate on the database, transactions and commands;
+rendering is a derived result of the database. One shared core (`cad-*` crates: domain model,
+database/transactions, geometry, semantic representation, scene, wgpu renderer, Slint UI) is
+reused by every platform host, so behavior stays consistent across platforms, can be tested in
+isolation, and is usable from a headless CLI and for plotting.
 
-以下模块已有契约级实现，并以合成测试覆盖，但整体仍处搭建/验证阶段，不代表可用的
-成品：领域类型、数据库与事务、几何引擎、代理回放器、acadrust 导入（含实体/图层透明
-度）、显示表示、空间索引、场景批处理（拓扑/法向/深度/绘制顺序/透明）、测量、批注
-（含版本化 JSON）、依赖失效、撤销/重做、查询层、应用命令层、wgpu 2D/3D 渲染器、
-Slint UI 与 Linux/Android/Web 宿主骨架。
+Foundation: DWG/DXF parsing uses **unmodified acadrust 0.6.3**, drawing uses **wgpu**, the UI
+uses **Slint**, and the core has no platform dependencies (it compiles to `wasm32`). The
+database (`cad-db`) is the single source of truth; UI and rendering are derived from it. See
+`docs/architecture.md` for the full boundaries.
 
-Linux App 仍是优先宿主；2026-10-04 起默认提交门禁与 CI `linux-app` 改为 debug 编译，
-包含测试代码但不执行完整测试、Linux 离屏渲染或 release 验证。
-`bash scripts/check-linux-app.sh` 保留为可选运行验收工具；编译通过不代表渲染或真机验证。
+## What it can do today
 
-本轮已实际运行（2026-10-02）：
+The capabilities below exist in code and are covered by contract/synthetic tests, with some
+hosts already run for real; **fidelity varies** — many entities are only approximate or still
+have gaps. Per-item status is in `docs/compatibility.md` and `docs/dxf-entity-coverage.md`.
 
-- Android：x86_64 release APK 在无头 **模拟器**（KVM + SwiftShader）安装、启动、
-  渲染，画布平移/“适应”经像素 diff 验证（`docs/validation-android.md`）。
-- Web：`web-dist/` wasm 产物在无头 **Chromium**（Chrome for Testing 153）以 WebGL2
-  运行，加载/导航/双语切换通过（`docs/validation-web.md`）。
-- 3D/纸空间：Slint 桥按空间与视图模式分派 `render`/`render_3d`（`docs/view-3d.md`）。
-- 透明：acadrust `Transparency` → 场景 → 透明管线，含软件 Vulkan（lavapipe）合成测试。
-- 曲线（B23）：真实 NURBS（源 knots/weights）、椭圆 OCS 法向、非均匀仿射真椭圆、
-  bulge、解析交点（`docs/curve-geometry.md`）。
-- ACIS（F15）：acadrust SAT/SAB → 中性 B-rep → 平面（含孔）/球/柱/环面/锥面子集离散
-  （含截头圆锥）；合成 SAT 夹具入 `fixtures/manifest`；其余显式 `Unsupported`
-  （`docs/kernel-acis.md`）。
-- 动态块可见性（§3.2）：读取命名状态并在内存库中切换活动状态（GEOMETRY 增量，
-  `docs/dynamic-blocks.md`）；注释性缩放：TEXT/MTEXT 按活动比例缩放并应用按比例覆盖
-  （`docs/annotative-scaling.md`）。
-- 布局/测量（F04/F06）：4 角纸空间视口与修正比例，纸面/视口模型测量经已验证逆变换。
-- 捕捉/填充：端点/中点/圆心/象限/垂足/局部交点捕捉；HATCH 多环含孔洞实心填充。
+- **Open & parse**: local DWG / DXF (ASCII and binary), sharing one semantic/database
+  conversion; asynchronous import with progress and cancellation.
+- **View**: model space and supported layout switching; layer hide/show, search and restore;
+  entity selection, highlight and basic properties.
+- **Navigate**: pan, zoom, fit drawing, reset view, with consistent mouse and touch behavior;
+  **2D and 3D observation** (orbit, standard views, orthographic/perspective).
+- **Measure**: distance, polyline length, angle and polygon area, with traceable
+  unit/precision/geometry source.
+- **Entity display**: every drawable DXF entity type (LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/SPLINE/
+  INSERT/TEXT/MTEXT/HATCH/DIMENSION/LEADER/MULTILEADER/MLINE/TABLE/…). TEXT/MTEXT is shaped
+  into line segments with real fonts (TTF/OTF/WOFF and SHX); HATCH supports multi-loop solid
+  fill and gradients; DIMENSION synthesizes display geometry for
+  linear/aligned/radius/diameter/angular/ordinate/arc-length (some subclasses are approximate).
+- **Raster images**: end-to-end texture display for RASTERIMAGE (relative-path resolution +
+  PNG/JPEG decoding + GPU texture, per-key dedup, UV orientation correction, clip polygons).
+- **ACIS solids (subset)**: 3DSOLID / BODY / REGION / SURFACE are parsed into a neutral B-rep
+  and tessellated only for planes (with holes) / spheres / cylinders / tori / cones; everything
+  else is explicitly marked unsupported.
+- **Fonts**: release packages ship a font directory; missing fonts fall back to a default
+  outline face.
+- **Plot**: model/layout raster PNG (the CLI also has a pure-CPU SVG/PDF vector path); no
+  vector print style tables (CTB).
+- **Large-drawing protection**: hard scene batch/vertex budgets; exceeding them **fails
+  explicitly** instead of OOM.
+- **Proxy entities**: custom entities from vendors such as Tianzheng and TSSD are shown only
+  from the public **proxy graphics cache records**; no cached geometry means no display.
+- **Cross-platform reuse**: one core + Slint UI, built for Linux/Windows/macOS desktop,
+  Android and Web.
 
-**明确未完成**（不得视为已交付）：
+## Platforms and run status
 
-- 跨后端对照与性能基准尚未建立；已提交 QCAD `flange` DXF 与上游参考图
-  （`fixtures/dxf/qcad-flange/`），但它作为 `Partial` 样本只覆盖模型空间几何，不构成
-  大型真实 DWG 兼容性或黄金图矩阵验收。
-- Android 未在真机运行；surface 尺寸/安全区、SAF、量测/批注拾取未接线。
-- Web 仅验证 WebGL2 软件路径；WebGPU、真实 GPU 与移动/桌面浏览器矩阵未验证。
-- Linux 已有桌面/离屏共用宿主，但窗口系统与真实 GPU 未验收；文件选择器、恢复决策、后台
-  导入、Trim 点选等尚未闭环。Windows 已有交叉编译宿主与含字体 zip（`docs/windows-app.md`），
-  但真实 Windows/GPU/文件对话框未验收。macOS 已接入同一共享宿主并配 CI 打包
-  （`docs/macos-app.md`），但只能在 macOS 上构建，真实 Mac/Metal GPU/文件对话框未验收；
-  iOS 仍仅平台抽象。
-- ACIS 仅有合成样本子集（平面/球/柱/环面/锥面），无授权真实
-  3DSOLID/BODY/REGION/SURFACE 样本；带环球面/非圆椭圆/样条面未实现。
-  复杂文字整形、动态块参数/夹点求值、复杂视口裁剪、代理无缓存几何均按样本标记为
-  未支持或未验证；注释性缩放仅 TEXT/MTEXT，宿主比例切换 UI 未接线。
-- 未支持项在 `docs/compatibility.md` 中逐项标注；未验证即未验证，不冒充完成。
+**Compiling is not run acceptance.** How far each target has actually run (evidence in
+`docs/validation*.md`):
+
+| Platform | Host | Actual status |
+|---|---|---|
+| **Linux desktop (primary)** | `apps/app-linux` (`yacr-linux`) | Default gate is debug compile + static checks; release GUI packaging and **offscreen rendering (software Vulkan / lavapipe)** have been run. Real window system and real-GPU pixel acceptance **NOT RUN**. |
+| **Windows desktop** | `apps/app-windows` (`yacr.exe`) | Reuses the shared desktop implementation; CI compiles natively with MSVC on `windows-latest` and packages a font-bundled zip; reproduced locally via GNU cross / MSVC plus a Wine argument-parsing smoke. Real Windows window/file-dialog/GPU **NOT RUN**. |
+| **macOS desktop** | `apps/app-macos` (`yacr-macos`) | Reuses the shared desktop implementation; CI builds on `macos-latest` and packages a universal (arm64+x86_64) `Yacr.app`. A Linux host cannot produce Mach-O, so real Mac / Metal GPU **NOT RUN**. |
+| **Android** | `apps/app-android` | The x86_64 release APK was installed, launched and rendered on a headless **emulator** (KVM + SwiftShader); canvas pan/fit verified by pixel diff. **Real device** and SAF file picking **NOT RUN**. |
+| **Web** | `apps/app-web` (`web-dist/`) | The wasm artifact runs in headless Chromium on WebGL2 and was re-verified on a real desktop browser locally (Playwright, real GPU); CI `web-deploy` has actually published to Cloudflare Pages (example <https://yacr-examples.pages.dev>). Real WebGPU hardware adapters and the browser matrix **NOT RUN**. |
+
+## Quick start
+
+Toolchain 1.99.0 (`rust-toolchain.toml`), with `Cargo.lock` pinned; if `cargo` is not on your
+`PATH`, add `$HOME/.cargo/bin`.
+
+### Linux desktop (primary host)
+
+```bash
+sudo apt-get install -y pkgconf libfontconfig-dev libfreetype-dev mesa-vulkan-drivers
+cargo build -p app-linux --bin yacr-linux --release --locked
+./target/release/yacr-linux                                  # launch (needs a desktop session)
+./target/release/yacr-linux --open /absolute/drawing.dwg      # open a drawing
+./target/release/yacr-linux --open /absolute/drawing.dxf --locale en
+bash scripts/check-linux-app.sh                              # windowless offscreen run check (lavapipe)
+```
+
+`--headless --output <new-dir>` plots offscreen through the same host/controller/Slint bridge;
+`--gpu auto|high|low` selects an adapter preference (dual-GPU defaults to the discrete GPU).
+Full options and limits are in `docs/linux-app.md`.
+
+### Headless CLI
+
+```bash
+cargo build -p cad-cli-tools --release --locked
+./target/release/cad-cli-tools render /absolute/drawing.dwg --png /tmp/opencode/out.png
+./target/release/cad-cli-tools --help
+```
+
+On success stdout contains only a JSON result document; on failure you get a non-zero exit code
+plus a structured error. Operations and options are in `docs/cli.md`.
+
+### Other platforms
+
+- Android (`cargo-apk`, not a Gradle project): `docs/build.md`, `docs/validation-android.md`.
+- Web (wasm + minimal JS host): `scripts/build-web.sh` produces `web-dist/`, served locally by
+  `scripts/serve-web.py`; see `docs/build.md`.
+- Windows / macOS packaging (CI `windows-release` / `macos-release`): `docs/windows-app.md`,
+  `docs/macos-app.md`.
+
+### Release packages
+
+CI (`.github/workflows/build.yml`), triggered by `workflow_dispatch` or a `v*` tag, produces
+font-bundled release packages for Linux, Windows, macOS and Android and uploads them as
+artifacts (per-platform packaging scripts are in `docs/build.md`). The outputs are CI
+artifacts; **no official distribution channel exists yet**.
+
+## Current status and boundaries (honest)
+
+- **There is no validated DWG compatibility, entity or platform.** `fixtures/manifest` holds
+  synthetic fixtures plus one open-source QCAD `flange` sample (`Partial`); build evidence is
+  not compatibility.
+- **Evidence boundaries**: static gates and contract/synthetic tests, software Vulkan
+  (lavapipe) offscreen rendering, a headless emulator, and headless/real browsers. Real-GPU
+  pixel matrices, real devices and real-drawing visual acceptance are **all NOT RUN** and must
+  not be generalized from the above.
+- **Explicitly unsupported / unimplemented** (no success is faked):
+  - Vendor opcode records of proxy entities (public cache records only); no cached geometry
+    means no display.
+  - External content: PDF/DWF/DGN underlays, OLE2 embedded objects, CoordinationModel /
+    Navisworks NWD are not loaded.
+  - Full ACIS geometry kernel (3DSOLID/REGION/BODY/SURFACE are only a subset tessellation);
+    point-cloud point data (bounding box only).
+  - Draw order (`draw_order`) is not plumbed through (= upload order); WIPEOUT mask fill is not
+    rendered; line width is explicitly not drawn.
+  - Images: unsupported codecs (TIFF/CCITT/EPS), brightness/contrast/fade, and outside/mask
+    clipping.
+  - Plot is raster PNG only (the CLI also has SVG/PDF); no CTB/HPGL; drawings are never written
+    back and original entities are never modified.
+  - User annotations were removed as a whole; the enhanced mode contains measurement only.
+- Unsupported items are listed per item in `docs/compatibility.md`, and per-entity status is in
+  `docs/dxf-entity-coverage.md`; **unverified is stated as unverified** and never reported as
+  complete.
+
+## Documentation index
+
+**Overview**
+
+- Authoritative requirements: `CAD_IMPLEMENTATION_SPEC.md` (v2.0)
+- Round-by-round handoff entry: `docs/handoff.md`
+- Architecture boundaries and invariants: `docs/architecture.md`, `docs/core-invariants.md`
+- Compatibility and capability matrix: `docs/compatibility.md`
+- Validation and run evidence: `docs/validation.md`, `docs/validation-dwg.md`
+
+**Build & platforms**
+
+- Per-platform build: `docs/build.md`
+- Linux host: `docs/linux-app.md`; Windows host: `docs/windows-app.md`; macOS host: `docs/macos-app.md`
+- Headless rendering: `docs/headless-render.md`; CI layers: `docs/ci.md`
+- CLI: `docs/cli.md`; fonts: `docs/fonts.md`; app icon: `docs/app-icon.md`
+
+**Capabilities & topics**
+
+- Entity coverage: `docs/dxf-entity-coverage.md`; proxy support: `docs/proxy-support.md`
+- Curve geometry: `docs/curve-geometry.md`; ACIS: `docs/kernel-acis.md`
+- 3D observation: `docs/view-3d.md`; draw order: `docs/render-order.md`; render backends: `docs/render-backends.md`
+- Measurement: `docs/measure.md`; layouts: `docs/layouts.md`; plot: `docs/plot.md`
+- Dynamic blocks: `docs/dynamic-blocks.md`; annotative scaling: `docs/annotative-scaling.md`
+- Performance and budgets: `docs/performance.md`
+- DWG test flow: `docs/testing-dwg.md`; headless UI debugging: `docs/verify-ui.md`
+
+**Reference & decisions**
+
+- OpenCADStudio functional-spec reference (not source): `docs/ui-requirements/00-INDEX.md`; historical survey: `docs/migration-map.md`
+- Decision records: `docs/adr/`
+
+## License and third parties
+
+This repository is released under **AGPL-3.0** (`LICENSE`). Sources and licenses of
+dependencies and bundled resources (acadrust, Slint/wgpu, QCAD samples, osifont, mlightcad
+fonts, etc.) are documented in `THIRD_PARTY_NOTICES.md` and `fonts/SOURCE.md`.
