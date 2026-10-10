@@ -37,6 +37,8 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("verify RPATH is honoured", 'grep -Fq "$STAGE"'),
     ("verify GUI loads", "--headless requires --output NEW_DIRECTORY"),
     ("optional GUI smoke gate", "YACR_LINUX_SMOKE"),
+    ("desktop icon theme entry", 'share/icons/hicolor/scalable/apps/yacr.svg'),
+    ("desktop launcher entry", "share/applications/yacr.desktop"),
     ("tarball output", 'tar -C "$DIST" -czf "$TARBALL" "$NAME"'),
 )
 

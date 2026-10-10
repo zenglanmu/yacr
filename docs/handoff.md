@@ -1,5 +1,42 @@
 # 后续 agent 接手入口
 
+## 应用图标接入轮（2026-10-10，本轮）
+
+用户要求「使用 assets 目录中的图标」：先从其 `dev.snakeheartgo.top:~/sources/yacr/assets/`
+把 `yacr-icon.svg`（SHA-256 `d380e3e3…`）拷入本仓库 `assets/`，再让五个 app 全部使用它。
+新增 `docs/app-icon.md` 作为图标单一来源与各端接入说明。
+
+**改动**
+
+1. **单一来源 + 派生资产**：`assets/yacr-icon.svg` 为唯一来源；`scripts/generate-icons.py`
+   用 `rsvg-convert`+Pillow 生成 `assets/yacr-icon.{ico,icns}`、`assets/icons/yacr-*.png`
+   与 `apps/app-android/res/`（传统 + 自适应启动图标），`--check` 逐字节防漂移（已通过）。
+2. **桌面**：`cad-ui-slint` 的 `YacrWindow` 设 `icon: @image-url("../../../assets/yacr-icon.svg")`
+   （编译期嵌入；winit 后端设置窗口/任务栏图标）。新增 `tests/app_icon_contract.rs`。
+3. **macOS 包**：`package-macos-release.sh` 复制 `Yacr.icns` 并写 `CFBundleIconFile`。
+4. **Linux 包**：staging `share/icons/hicolor/{scalable,256x256}/apps/yacr.{svg,png}` 与
+   `share/applications/yacr.desktop`（`Icon=yacr`）。
+5. **Windows 包**：`apps/app-windows/build.rs`（`winresource`）把 `assets/yacr-icon.ico`
+   编入 `yacr.exe` 的 PE 资源（MSVC `rc.exe` / GNU `windres`，非 Windows 目标 no-op）；
+   另附 `yacr.ico`。`package-windows-release.sh` 用 `check-pe-imports.py --has-icon`
+   断言资源存在。
+6. **Android**：`[package.metadata.android] resources="res"` +
+   `[package.metadata.android.application] icon/label`（配置 schema 依据 cargo-apk 0.10.0
+   与 `ndk-build` `AndroidManifest` 源码核对）。
+7. **Web**：SVG favicon + `manifest.webmanifest` + `apple-touch-icon`；`build-web.sh`
+   拷入 `assets/` 与 manifest。
+8. **门禁接线**：`scripts/test-web-icon.mjs`（接入 `build.yml`）、
+   `scripts/test-android-icon.py`（接入 `core.yml` workflow-contracts）；三个
+   `test-package-*-release.py` 增加图标保证。
+
+**验证**：已运行 `cargo check -p cad-ui-slint`、`app_icon_contract`（2 passed）、
+`node --test scripts/test-web-icon.mjs`、`test-android-icon.py`、三个包契约、
+`generate-icons.py --check`、`check-workflows.py`；Windows 图标另经
+`cargo build -p app-windows --target x86_64-pc-windows-gnu` +
+`check-pe-imports.py --has-icon` 验证（本机 GNU 交叉）。**未运行**：真实窗口/Wayland 图标、
+Android APK 构建与真机、macOS `.app`（MSVC `.exe` 由 CI windows-release 构建时验证）。
+详见 `docs/app-icon.md`。
+
 ## UI item 5 收尾轮（2026-10-09/10，本轮）
 
 用户要求继续 handoff 收尾；问询确认范围为「全量 UI item 5」：布局面板（纸空间/视口

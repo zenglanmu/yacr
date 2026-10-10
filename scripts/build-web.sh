@@ -44,6 +44,13 @@ mkdir -p "$DIST/ui-font"
 cp crates/cad-ui-slint/fonts/YacrUI-Regular.otf crates/cad-ui-slint/fonts/OFL.txt "$DIST/ui-font/"
 cp apps/app-web/web/style.css "$DIST/style.css"
 
+# App icon set and web app manifest, from the single source of truth in
+# `assets/` (never regenerated here), so a deployed build is self-contained.
+mkdir -p "$DIST/assets/icons"
+cp "$ROOT/assets/yacr-icon.svg" "$DIST/assets/yacr-icon.svg"
+cp "$ROOT/assets/icons/yacr-256.png" "$ROOT/assets/icons/yacr-512.png" "$DIST/assets/icons/"
+cp apps/app-web/web/manifest.webmanifest "$DIST/manifest.webmanifest"
+
 # Build stamp = content hash of the wasm. main.js, index.html and the generated
 # pkg/yacr.js all request the wasm/glue under this stamp, so a redeploy can never
 # link a stale cached pkg/yacr.js against a newer pkg/yacr_bg.wasm (the classic

@@ -18,6 +18,10 @@ export component YacrWindow inherits Window {
     default-font-family: "Yacr UI";
     default-font-size: 14px;
     min-width: 0px; min-height: 0px;
+    // Application icon (title bar / task bar / dock on supporting window
+    // managers). Single source of truth: the repo-root `assets/` directory,
+    // embedded at compile time so the running binary is self-contained.
+    icon: @image-url("../../../assets/yacr-icon.svg");
     // AutoCAD-style dark frame: make the shared std-widgets (command line,
     // combo boxes, confirm buttons, progress) use the dark Fluent palette
     // instead of the default light one.

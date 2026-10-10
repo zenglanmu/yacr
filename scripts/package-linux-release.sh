@@ -80,6 +80,27 @@ cp docs/cli.md docs/headless-render.md docs/render-backends.md docs/build.md \
    "$STAGE/docs/"
 cp scripts/fetch-test-dwg.sh scripts/render-smoke.sh "$STAGE/scripts/"
 
+# Desktop integration: the icon theme entry and a launcher so a window manager
+# can associate the running window with the packaged icon. The SVG is the
+# single source of truth (`assets/yacr-icon.svg`); a 256px PNG raster is kept
+# for icon themes that do not read scalable SVGs. `Icon=yacr` matches the
+# basename `yacr.svg`/`yacr.png` above.
+mkdir -p "$STAGE/share/icons/hicolor/scalable/apps" \
+         "$STAGE/share/icons/hicolor/256x256/apps" \
+         "$STAGE/share/applications"
+cp "$ROOT/assets/yacr-icon.svg" "$STAGE/share/icons/hicolor/scalable/apps/yacr.svg"
+cp "$ROOT/assets/icons/yacr-256.png" "$STAGE/share/icons/hicolor/256x256/apps/yacr.png"
+cat > "$STAGE/share/applications/yacr.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=yacr
+Exec=yacr-linux %F
+Icon=yacr
+Terminal=false
+Categories=Graphics;Engineering;
+MimeType=application/dwg;application/dxf;
+EOF
+
 # Libraries that must come from the host: glibc and the GCC/C++ runtime. They
 # are coupled to the kernel and loader, so shipping them in a tarball risks a
 # hard break on a different glibc; everything else in the GUI's dynamic closure
@@ -157,6 +178,14 @@ docs/                 CLI, headless render, backends, build, validation, compat,
                       Linux host and font notes
 scripts/fetch-test-dwg.sh   download a curated real-DWG corpus to /tmp
 scripts/render-smoke.sh     render a DWG and verify the PNG is non-blank
+share/icons/hicolor/scalable/apps/yacr.svg
+share/icons/hicolor/256x256/apps/yacr.png
+                      the app icon (from assets/yacr-icon.svg) in a standard icon
+                      theme location.
+share/applications/yacr.desktop
+                      launcher entry (Icon=yacr, Exec=yacr-linux); install it and
+                      the icon theme under \$HOME/.local/share or /usr/share for a
+                      window manager to associate the running window with the icon.
 README.md, LICENSE, THIRD_PARTY_NOTICES.md
 
 Quick start

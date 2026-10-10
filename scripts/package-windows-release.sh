@@ -113,6 +113,11 @@ mkdir -p "$STAGE/bin" "$STAGE/docs" "$STAGE/scripts" "$STAGE/fonts"
 cp "$CLI" "$STAGE/bin/cad-cli-tools.exe"
 cp "$GUI" "$STAGE/bin/yacr.exe"
 cp LICENSE THIRD_PARTY_NOTICES.md README.md "$STAGE/"
+# App icon (from assets/yacr-icon.svg). `yacr.exe` embeds this icon in its PE
+# resource section (apps/app-windows/build.rs), so Explorer/taskbar show it
+# automatically; this standalone copy is kept for installers or shortcuts that
+# want the raw asset.
+cp "$ROOT/assets/yacr-icon.ico" "$STAGE/yacr.ico"
 cp docs/cli.md docs/headless-render.md docs/render-backends.md docs/build.md \
    docs/validation.md docs/compatibility.md docs/windows-app.md docs/fonts.md \
    "$STAGE/docs/"
@@ -177,6 +182,12 @@ echo "==> verifying executables are PE32+ x86-64 and imports are resolvable"
 for exe in "$STAGE/bin/cad-cli-tools.exe" "$STAGE/bin/yacr.exe"; do
   "$PYTHON" "$ROOT/scripts/check-pe-imports.py" --machine "$exe" >/dev/null
 done
+# The GUI must carry the embedded app icon (apps/app-windows/build.rs); a
+# Windows build that silently dropped it is rejected here.
+if ! "$PYTHON" "$ROOT/scripts/check-pe-imports.py" --has-icon "$STAGE/bin/yacr.exe"; then
+  echo "ERROR: yacr.exe has no embedded app icon resource" >&2
+  exit 1
+fi
 if [ "$BUNDLE_DLLS" = "1" ]; then
   copy_runtime_dlls "$STAGE/bin/cad-cli-tools.exe" "$STAGE/bin"
   copy_runtime_dlls "$STAGE/bin/yacr.exe" "$STAGE/bin"
@@ -217,6 +228,9 @@ docs/                   CLI, headless render, backends, build, validation, compa
                         Windows host and font notes
 scripts/                fetch-test-dwg.sh (real-DWG corpus) and render-smoke.sh
                         (POSIX shell helpers; on Windows run them from Git Bash/WSL)
+yacr.ico                the app icon (from assets/yacr-icon.svg) for shortcuts and
+                        installers; yacr.exe also embeds it in its PE resources, so
+                        Explorer and the taskbar show it without any extra setup.
 README.md, LICENSE, THIRD_PARTY_NOTICES.md
 
 Quick start (Windows)

@@ -37,6 +37,8 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("refuse unresolved import", "is neither crt-static nor available to bundle"),
     ("font catalogue assembly", '"$ROOT/scripts/fetch-fonts.sh" "$STAGE/fonts"'),
     ("optional Wine smoke gate", "YACR_WINDOWS_SMOKE"),
+    ("stage app icon", 'cp "$ROOT/assets/yacr-icon.ico" "$STAGE/yacr.ico"'),
+    ("verify embedded app icon", "--has-icon"),
     ("wine smoke asserts parse error", "--bogus"),
     ("zip output", "zipfile.ZipFile"),
     ("sha256 output", "hashlib.sha256"),
@@ -80,6 +82,14 @@ class PackageWindowsReleaseContracts(unittest.TestCase):
             "",
         )
         self.assertNotEqual(check_script(mutated), [])
+
+    def test_window_binary_build_script_embeds_the_shared_icon(self) -> None:
+        build_rs = (ROOT / "apps" / "app-windows" / "build.rs").read_text(encoding="utf-8")
+        cargo = (ROOT / "apps" / "app-windows" / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn("assets/yacr-icon.ico", build_rs)
+        self.assertIn("winresource", build_rs)
+        self.assertIn("winresource", cargo)
+        self.assertIn("CARGO_CFG_TARGET_OS", build_rs)
 
 
 if __name__ == "__main__":

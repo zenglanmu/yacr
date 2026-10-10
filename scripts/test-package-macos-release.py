@@ -39,6 +39,8 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("stage CLI binary", 'lipo_thin "cad-cli-tools" "$CLI_BUILT"'),
     ("app bundle Info.plist", "Yacr.app/Contents/Info.plist"),
     ("bundle executable metadata", "CFBundleExecutable"),
+    ("bundle icon metadata", "CFBundleIconFile"),
+    ("bundle icon asset", "assets/yacr-icon.icns"),
     ("font catalogue assembly", '"$ROOT/scripts/fetch-fonts.sh"'),
     ("reject non-system Mach-O dependency", "links non-system library"),
     ("skip all otool architecture headers", "awk '/^[[:space:]]/ {print $1}'"),

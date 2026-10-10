@@ -74,6 +74,7 @@ jobs:
           python3 scripts/test-fetch-fonts.py
           python3 scripts/test-web-backend-fallback.py
           python3 scripts/test-web-cache-busting.py
+          python3 scripts/test-android-icon.py
       - name: Core and Linux UI host debug compilation (including test code)
         run: cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked
 

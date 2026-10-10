@@ -43,6 +43,16 @@ target_sdk_version = 34
 # see docs/fonts.md for provenance and licensing.
 assets = "assets"
 
+# Launcher icon resources. `res/` holds the PNG mipmaps plus the API 26+
+# adaptive-icon definition generated from `assets/yacr-icon.svg` by
+# `scripts/generate-icons.py`; cargo-apk compiles the folder and the manifest
+# reads the icon/label from `[package.metadata.android.application]`.
+resources = "res"
+
+[package.metadata.android.application]
+icon = "@mipmap/ic_launcher"
+label = "yacr"
+
 # Development-only release signing. The keystore is gitignored (*.jks) and must
 # be generated locally (see docs/build.md). Production keys never enter the repo.
 [package.metadata.android.signing.release]

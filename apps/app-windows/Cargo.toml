@@ -12,3 +12,9 @@ path = "src/main.rs"
 # `app-linux`; all controller/Slint/host logic lives there.
 [target.'cfg(windows)'.dependencies]
 app-linux = { path = "../app-linux" }
+
+# The build script embeds the shared app icon (`assets/yacr-icon.ico`) into the
+# PE resource section. `winresource` compiles on every host but is only invoked
+# for Windows targets (see build.rs), driving rc.exe (MSVC) or windres (GNU).
+[build-dependencies]
+winresource = "0.1"

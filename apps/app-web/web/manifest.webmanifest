@@ -1,0 +1,13 @@
+{
+  "name": "yacr CAD",
+  "short_name": "yacr",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#08151D",
+  "theme_color": "#08151D",
+  "icons": [
+    { "src": "assets/yacr-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/icons/yacr-256.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/yacr-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

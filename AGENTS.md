@@ -144,4 +144,5 @@ cad-cli-tools --release`，`scripts/check-dwg-native.py`），WASM + Playwright 
 
 `docs/architecture.md`（边界与不变量）、`docs/build.md`（各平台构建）、`docs/ci.md`（CI
 分层与 NOT RUN）、`docs/validation*.md`（实际执行证据）、`docs/compatibility.md`（能力表）、
-`docs/handoff.md`（逐轮交接）、`docs/adr/`、`docs/testing-dwg.md`、`fixtures/manifest`。
+`docs/handoff.md`（逐轮交接）、`docs/adr/`、`docs/testing-dwg.md`、`docs/app-icon.md`、
+`fixtures/manifest`。

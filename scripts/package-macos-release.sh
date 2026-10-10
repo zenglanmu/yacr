@@ -116,6 +116,11 @@ lipo_thin "yacr-macos" "$GUI_BUILT"
 lipo_thin "cad-cli-tools" "$CLI_BUILT"
 chmod +x "$GUI_BUILT" "$CLI_BUILT"
 
+# Bundle icon: the committed `.icns` derived from assets/yacr-icon.svg (see
+# scripts/generate-icons.py). macOS reads the Finder/Dock icon from the bundle,
+# so `CFBundleIconFile` (below) names this file without the extension.
+cp "$ROOT/assets/yacr-icon.icns" "${STAGE}/Yacr.app/Contents/Resources/Yacr.icns"
+
 cp LICENSE THIRD_PARTY_NOTICES.md README.md "$STAGE/"
 cp docs/cli.md docs/headless-render.md docs/render-backends.md docs/build.md \
    docs/validation.md docs/compatibility.md docs/macos-app.md docs/fonts.md \
@@ -140,6 +145,7 @@ cat > "${STAGE}/Yacr.app/Contents/Info.plist" <<EOF
   <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleExecutable</key><string>yacr-macos</string>
+  <key>CFBundleIconFile</key><string>Yacr</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleSignature</key><string>????</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
@@ -241,6 +247,8 @@ Yacr.app/Contents/Resources/fonts/
                                 osifont.ttf (provenance in fonts/SOURCE.md). Loaded
                                 automatically by the GUI; missing drawing fonts fall
                                 back to the macOS system font.
+Yacr.app/Contents/Resources/Yacr.icns
+                                the Finder/Dock app icon (from assets/yacr-icon.svg).
 fonts                           symlink to Yacr.app/Contents/Resources/fonts, so
                                 bin/cad-cli-tools finds the package next to itself.
 docs/                           CLI, headless render, backends, build, validation,
