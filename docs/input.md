@@ -70,6 +70,14 @@ Idle ──1 触点按下──▶ Pending ──移动 ≥ 阈值──▶ Drag
 - `apply_canvas_metrics(&mut viewport, &canvas)`：resize/旋转时只更新
   `logical_size` 与 `dpi_scale`，不动相机，使视图中心保持不动；退化度量返回
   `InvalidInput`。
+- `inset_canvas_metrics(surface_origin, surface_size, safe_insets, dpi)`：把安全区
+  `[top, right, bottom, left]`（逻辑像素）折入表面矩形，得到**扣减安全区后**的画布
+  原点与尺寸，DPI 原样透传。非有限/负 inset、非正表面尺寸、inset 大于表面（画布为
+  空）一律返回 `None`——**不裁剪、不臆造**。三个宿主据此给出画布矩形：Android 从
+  `set_surface_insets` 入口接收系统栏/软键盘 inset，Web 由 JS 读取 CSS
+  `env(safe-area-inset-*)` 后经 `web_safe_insets` 传入，Linux 无便携安全区来源，
+  显式传零（见 §5）。Web 的 CSS 已对 `#canvas-host` 施加安全区，桌面 `env()` 为 0，
+  宿主再按测得值折入度量；真机是否产生双重留白**未验证**。
 
 关键不变量：同一**逻辑**表面点在 DPR=1/2/3 下映射到**相同世界点**（物理像素
 不同）；画布原点被真正扣除，全窗口尺寸与画布尺寸不再混用。
@@ -91,9 +99,14 @@ Idle ──1 触点按下──▶ Pending ──移动 ≥ 阈值──▶ Drag
   尚未调用本策略；多触点身份、pointer capture、长按语义需各宿主接入并补集成
   测试。
 - **真实 IME/DPI 运行**：中文组合、软键盘高度变化、浏览器缩放、横竖屏切换、
-  DPR=1/2/3 真机验证尚未执行；当前只有纯逻辑单元测试。
-- **安全区**：`safe_insets`（`cad-ui-slint::UiConfiguration`）尚未并入
-  `CanvasMetrics`，宿主需给出扣减安全区后的画布矩形。
+  DPR=1/2/3 真机验证尚未执行；当前只有纯逻辑单元测试与 Linux 离屏（lavapipe）集成
+  测试。
+- **安全区**：共享助手 `inset_canvas_metrics` 已把 `safe_insets` 折入
+  `CanvasMetrics`（退化输入显式拒绝）。宿主接线：Web 由 JS 读取
+  `env(safe-area-inset-*)` 经 `web_safe_insets` 传入；Linux 无便携安全区来源，
+  显式传零并记录；Android 提供 `set_surface_insets` 入口（系统栏/软键盘），但
+  **Activity 侧尚未把 OS inset 回调转发到该入口**（未使用未验证的 OS inset API，
+  不臆造），故真机 inset 仍未生效。
 - **上下文菜单**：长按/右键菜单策略未在本模块建模。
 - **状态来源**：`StatusModel` 目前由调用方提供 `units`/`unsaved`/`loading`，
   尚未从 `host.rs` 的完整会话一次性派生。

@@ -212,7 +212,9 @@ impl ViewInput for AndroidViewInput {
     }
 
     fn scroll(&self, _dx: f64, dy: f64) {
-        // Scroll down (positive dy) zooms in, matching the web host.
+        // Same formula as the web and Linux hosts: scrolling down (positive dy)
+        // yields factor < 1 = zoom out; scrolling up zooms in (`Camera::zoom_at`
+        // contract: factor > 1 zooms in).
         let factor = (1.0 - dy * 0.0015).clamp(0.2, 5.0);
         self.last.set([0.0, 0.0]);
         self.send(

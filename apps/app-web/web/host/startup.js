@@ -68,6 +68,13 @@ export function installViewportSizing(getWasmModule) {
     const scale = window.devicePixelRatio || 1;
     const wasm = getWasmModule();
     if (wasm?.web_resize) wasm.web_resize(width, height, scale);
+    // The CSS `env(safe-area-inset-*)` values are reported separately so the
+    // authoritative canvas metrics are the surface minus the safe area. A build
+    // without the export keeps zero insets (never a guessed margin).
+    if (wasm?.web_safe_insets) {
+      const [top, right, bottom, left] = readSafeAreaInsets();
+      wasm.web_safe_insets(top, right, bottom, left);
+    }
   };
   const schedule = () => {
     if (frame !== null) cancelAnimationFrame(frame);
@@ -83,6 +90,43 @@ export function installViewportSizing(getWasmModule) {
   window.visualViewport?.addEventListener("resize", schedule);
   resize();
   return schedule;
+}
+
+/**
+ * Measure the CSS `env(safe-area-inset-*)` values in logical pixels.
+ *
+ * A hidden probe resolves the `env()` expressions to computed px. Missing or
+ * non-finite values become 0 — the host never invents a margin — and a DOM
+ * without the probe API (node contract tests) reports all-zero.
+ *
+ * @returns {[number, number, number, number]} `[top, right, bottom, left]`.
+ */
+export function readSafeAreaInsets() {
+  if (!document.body || typeof document.createElement !== "function") {
+    return [0, 0, 0, 0];
+  }
+  const probe = document.createElement("div");
+  probe.style.position = "fixed";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.paddingTop = "env(safe-area-inset-top)";
+  probe.style.paddingRight = "env(safe-area-inset-right)";
+  probe.style.paddingBottom = "env(safe-area-inset-bottom)";
+  probe.style.paddingLeft = "env(safe-area-inset-left)";
+  document.body.appendChild(probe);
+  const style = getComputedStyle(probe);
+  const px = (value) => {
+    const n = Number.parseFloat(value);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  };
+  const insets = [
+    px(style.paddingTop),
+    px(style.paddingRight),
+    px(style.paddingBottom),
+    px(style.paddingLeft),
+  ];
+  probe.remove();
+  return insets;
 }
 
 export function wireRecoveryBackend(getWasmModule, setStateKey) {

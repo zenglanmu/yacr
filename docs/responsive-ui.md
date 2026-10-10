@@ -106,8 +106,12 @@
 - **无设备/浏览器截图验收**：未在真机/浏览器渲染，未测 360×800 / 800×360 /
   800×1280 / 1280×800 的真实溢出、点击命中与视觉层级；窄屏溢出**未经截图确认**。
 - **英语长文案溢出未验证**：长标签在窄列的截断/换行未渲染验证。
-- **DPR / 安全区（U07）未接线**：`fit_window_to_logical` 提供了尺寸对齐点，但
-  `safe_insets`、DPR=1/2/3 下的画布矩形→世界映射未在本轮接线，宿主负责。
-- **布局切换 sink 未安装**：`apps/**` 未调用 `set_layout_switch_sink`，交换机点击
-  目前只给出显式未接线提示。
+- **DPR / 安全区（U07）**：`safe_insets` 已并入 `CanvasMetrics`
+  （`cad_app::input::inset_canvas_metrics`，退化输入显式拒绝）。宿主接线：Linux
+  无便携安全区来源，显式零；Web 由 JS 读 `env(safe-area-inset-*)` 后经
+  `web_safe_insets` 传入；Android 提供 `set_surface_insets` 入口但 OS 回调未转发
+  （见 `docs/input.md` §5）。真机/浏览器 DPR=1/2/3 与软键盘场景**未验证**。
+- **布局切换 sink 已安装**：三个宿主（app-linux / app-web / app-android）均安装
+  `LayoutSwitchSink`，经同一 `CommandId::SwitchSpace` 校验命令路径切换（未知布局
+  显式拒绝，不改数据库）。
 - **宿主未推送面板数据时**：图层/属性/批注/布局面板显示空态，属降级而非假装。

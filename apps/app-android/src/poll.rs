@@ -192,6 +192,13 @@ struct Runtime {
     /// entry point never needs it.
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     incoming: IncomingDocument,
+    /// Last logical surface size + DPI scale reported by the Activity, or `None`
+    /// before the first `set_surface_size`. Retained so a later inset update
+    /// re-applies the same surface with the new safe area.
+    surface: Cell<Option<([f64; 2], f64)>>,
+    /// Last safe-area insets `[top, right, bottom, left]` in logical pixels.
+    /// Zeros until a platform source provides them; never invented.
+    safe_insets: Cell<[f64; 4]>,
 }
 
 thread_local! {
@@ -213,6 +220,8 @@ pub(crate) fn install_runtime(
             handle,
             view,
             incoming,
+            surface: Cell::new(None),
+            safe_insets: Cell::new([0.0; 4]),
         });
     });
 }
@@ -242,8 +251,9 @@ pub(crate) fn apply_surface_resize(
     view: &SharedView,
     size_logical: [f64; 2],
     dpi_scale: f64,
+    safe_insets: [f64; 4],
 ) -> CadResult<()> {
-    apply_surface_size(controller, size_logical, dpi_scale)?;
+    apply_surface_size(controller, size_logical, dpi_scale, safe_insets)?;
     let viewport = controller.borrow().viewport_id;
     sync_view_camera(view, controller, viewport);
     if let Some(view) = view.borrow().as_ref() {
@@ -260,7 +270,8 @@ pub(crate) fn apply_surface_resize(
 /// The embedding Activity calls this from its `SurfaceHolder` size callback with
 /// the new logical size and DPI scale. It updates the authoritative viewport
 /// (`logical_size` / `dpi_scale`) without moving the camera, then re-syncs the
-/// render bridge and re-pushes the layout/overlay state.
+/// render bridge and re-pushes the layout/overlay state. The last reported safe
+/// insets are re-applied, so a rotation keeps the current system-bar margins.
 ///
 /// The `Runtime` is `!Send` (it holds `Rc` handles), so this must be called on
 /// the Slint UI thread — the same thread the Android `SurfaceHolder` callbacks
@@ -274,13 +285,59 @@ pub fn set_surface_size(width: f64, height: f64, scale: f64) -> CadResult<()> {
         ));
     }
     with_runtime(|runtime| {
+        runtime.surface.set(Some((size, scale)));
         apply_surface_resize(
             &runtime.controller,
             &runtime.handle,
             &runtime.view,
             size,
             scale,
+            runtime.safe_insets.get(),
         )
+    })
+    .unwrap_or_else(|| {
+        Err(CadError::InvalidInput(
+            "surface hook not installed on this thread (call after start() on the UI thread)"
+                .into(),
+        ))
+    })
+}
+
+/// Android entry point for safe-area insets (`[top, right, bottom, left]`, logical px).
+///
+/// The embedding Activity forwards the system-bar / soft-keyboard insets here
+/// when they change (the soft keyboard is the main dynamic case). The insets are
+/// applied to the last reported surface, so the canvas rect is the surface minus
+/// the safe area; degenerate input (non-finite or negative) is refused instead of
+/// being clamped.
+///
+/// **Not wired to the OS in this build**: no verified window-insets API is used
+/// here (and `android-activity` 0.6 exposes no safe-area method to this host), so
+/// the Activity glue (outside this repository) is expected to call this from its
+/// `WindowInsets`/`View.OnApplyWindowInsets` listener. Until it does, insets stay
+/// explicitly zero (see the report and `docs/validation-android.md`).
+pub fn set_surface_insets(top: f64, right: f64, bottom: f64, left: f64) -> CadResult<()> {
+    let insets = [top, right, bottom, left];
+    if insets.iter().any(|v| !v.is_finite() || *v < 0.0) {
+        return Err(CadError::InvalidInput(
+            "safe insets must be finite and non-negative".into(),
+        ));
+    }
+    with_runtime(|runtime| {
+        runtime.safe_insets.set(insets);
+        // Before any surface is known there is nothing to apply to; the insets
+        // are retained and used by the first `set_surface_size`.
+        match runtime.surface.get() {
+            Some((size, scale)) => apply_surface_resize(
+                &runtime.controller,
+                &runtime.handle,
+                &runtime.view,
+                size,
+                scale,
+                insets,
+            ),
+            None => Ok(()),
+        }
     })
     .unwrap_or_else(|| {
         Err(CadError::InvalidInput(

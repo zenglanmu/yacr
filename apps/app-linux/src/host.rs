@@ -169,10 +169,13 @@ impl Runtime {
             .viewports
             .get_mut(&id)
             .ok_or(CadError::Cancelled)?;
-        cad_app::input::apply_canvas_metrics(
-            viewport,
-            &cad_app::input::CanvasMetrics::new([0.0; 2], size, scale),
-        )
+        // Linux has no portable safe-area source (no notch/system-bar API on the
+        // desktop window), so the insets are explicit zeros — never a fabricated
+        // margin. The shared helper still validates the surface/DPI and keeps the
+        // one mapping in `cad-app` (docs/input.md §5, docs/responsive-ui.md §6).
+        let canvas = cad_app::input::inset_canvas_metrics([0.0; 2], size, [0.0; 4], scale)
+            .ok_or_else(|| CadError::InvalidInput("canvas metrics are degenerate".into()))?;
+        cad_app::input::apply_canvas_metrics(viewport, &canvas)
     }
     fn command(&self, id: CommandId, payload: CommandPayload) -> CadResult<()> {
         let c = self.controller.borrow();
@@ -462,6 +465,22 @@ impl UiCommandSink for Runtime {
     }
 }
 
+/// Layout panel switch (F04): dispatch the validated `SwitchSpace` command.
+///
+/// Installed on the adapter so a layout-row click runs through `Runtime::command`
+/// → `execute` (`HostController::execute` + state push) — the same path every
+/// other host command uses. The command layer validates the layout against the
+/// drawing and refuses an unknown one; the sink never mutates the database
+/// (`docs/layouts.md` §4).
+impl cad_ui_slint::LayoutSwitchSink for Runtime {
+    fn select(&mut self, space: cad_representation::SpaceSelection) {
+        let _ = self.command(
+            CommandId::SwitchSpace,
+            cad_app::input::space_switch_payload(space),
+        );
+    }
+}
+
 pub struct LinuxApp {
     pub adapter: UiAdapter,
     runtime: Runtime,
@@ -509,6 +528,9 @@ impl LinuxApp {
         };
         drop(c);
         let mut adapter = UiAdapter::new(config, runtime.clone(), true)?;
+        // The same command funnel serves as the layout-switch sink: a layout click
+        // dispatches the validated `SwitchSpace` command (docs/layouts.md §4).
+        adapter.set_layout_switch_sink(Box::new(runtime.clone()));
         adapter
             .component()
             .set_can_open(!options.headless || options.drawing.is_some());

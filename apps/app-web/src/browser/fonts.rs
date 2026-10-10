@@ -16,6 +16,17 @@ use super::with_runtime;
 // Last font-loading report, surfaced for diagnostics and headless tests.
 thread_local! {
     static FONT_REPORT: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The last real `FontLoadReport`, for the resources drawer (F10).
+    static LAST_FONT_REPORT: RefCell<Option<FontLoadReport>> = const { RefCell::new(None) };
+}
+
+/// The most recent real font-loading report, if any.
+pub(super) fn last_font_report() -> Option<FontLoadReport> {
+    LAST_FONT_REPORT.with(|slot| slot.borrow().clone())
+}
+
+fn set_last_font_report(report: FontLoadReport) {
+    LAST_FONT_REPORT.with(|slot| *slot.borrow_mut() = Some(report));
 }
 
 fn set_font_status(handle: &UiHandle, text: String) {
@@ -98,6 +109,7 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
     if requested.is_empty() {
         view.clear_fonts();
         let report = FontLoadReport::default();
+        set_last_font_report(report.clone());
         set_font_status(&handle, "字体：图纸未引用 CAD 文本字体".into());
         return Ok(report);
     }
@@ -113,6 +125,7 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
     } else {
         view.set_fonts(engine);
     }
+    set_last_font_report(report.clone());
     let text = super::messages::current_messages().text(
         "fonts.loaded",
         &[

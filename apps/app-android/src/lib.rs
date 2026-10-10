@@ -35,6 +35,8 @@ const DEMO_LOGICAL_SIZE: [f64; 2] = [1080.0, 1920.0];
 /// replaces it instead of leaving the stale placeholder on screen.
 const READY_STATUS: &str = "就绪（内置演示几何，非兼容性声明）";
 
+/// Host configuration (sample DWG locations to try on open).
+#[derive(Clone)]
 pub struct AndroidHostConfiguration {
     /// Candidate DWG locations to try on open (app-private/external dirs).
     pub sample_paths: Vec<String>,
@@ -61,6 +63,12 @@ struct AndroidViewInput {
 }
 
 /// Commands from the UI are executed through the shared application layer.
+///
+/// Cloneable so the same funnel can be installed as the adapter's
+/// `UiCommandSink` **and** as the layout-switch sink: a layout click must run the
+/// exact `SwitchSpace` command path (validate against the drawing, re-sync the
+/// camera and panels) rather than a parallel path.
+#[derive(Clone)]
 struct HostSink {
     controller: Rc<RefCell<HostController>>,
     handle: SharedHandle,
@@ -82,8 +90,8 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         let _ = controller.fit();
         (
             controller.drawing(),
-            controller.document_id.clone(),
-            controller.viewport_id.clone(),
+            controller.document_id,
+            controller.viewport_id,
         )
     };
     let incoming: IncomingDocument = Rc::new(RefCell::new(drawing));
@@ -109,7 +117,12 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         incoming: incoming.clone(),
         configuration,
     };
+    // The layout-switch sink is a clone of the same command funnel: a layout
+    // click dispatches the validated `SwitchSpace` command instead of a
+    // host-specific path (docs/layouts.md §4).
+    let layout_sink = sink.clone();
     let adapter = UiAdapter::new(ui_config, sink, true)?;
+    adapter.set_layout_switch_sink(Box::new(layout_sink));
     let handle = adapter.handle();
     *shared_handle.borrow_mut() = Some(handle.clone());
     // Replace the shell's "canvas not connected" scaffold status with the
@@ -121,7 +134,7 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     // Establish the surface→viewport sizing seam (U07). The configured logical
     // size is the initial surface; a later rotation/resize calls the same helper
     // once the Activity forwards the size (see docs/validation-android.md §8).
-    apply_surface_size(&controller, DEMO_LOGICAL_SIZE, 1.0)?;
+    apply_surface_size(&controller, DEMO_LOGICAL_SIZE, 1.0, [0.0; 4])?;
     // Install the logical-pixel → world mapper so a canvas tap with a measure or
     // annotation tool produces a real point instead of "取点未接线" (audit U04).
     adapter.set_canvas_pick_mapper(Rc::new(AndroidCanvasPickMapper::new(
@@ -150,13 +163,11 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         dragging: Cell::new(false),
         policy: RefCell::new(InputPolicy::new()),
     }));
-    // Layout (paper-space) switching intentionally uses the adapter's default
-    // command path: with no `LayoutSwitchSink` installed, `on_layout_selected`
-    // emits `CommandId::SwitchSpace` + `CommandPayload::Space(...)`, which
-    // `HostSink::send` runs through `HostController::execute` and then re-syncs
-    // the camera and the layout panel. Installing a sink here would *replace*
-    // that command, so it is deliberately not installed (see `docs/ui.md` §3.2
-    // and the `android_layout_selection_routes_through_switch_space` test).
+    // Layout (paper-space) switching: the sink installed above dispatches the
+    // validated `CommandId::SwitchSpace` + `CommandPayload::Space(...)` through
+    // `HostSink::send` → `HostController::execute`, then re-syncs the camera and
+    // the layout panel. An unknown layout is refused by the command layer; the
+    // sink never mutates the database itself (docs/layouts.md §4).
     *shared_view.borrow_mut() = Some(view);
     // Register the live objects for the async poll timer and the Activity's
     // surface-size entry point (`set_surface_size`). Both run on this UI thread.
@@ -199,13 +210,18 @@ mod view;
 
 // The Activity calls `set_surface_size` from outside the crate, so it is public
 // at the crate root; the rest of the host wiring stays crate-internal.
+pub use poll::set_surface_insets;
 pub use poll::set_surface_size;
 pub(crate) use poll::{ensure_polling, install_runtime, worker_available};
 // The poll-processing items are Android-only (their tests compile for the
 // Android target); `set_surface_size`/`apply_surface_resize` are target-agnostic.
 pub(crate) use draw::install_draw_sinks;
-#[cfg(target_os = "android")]
-pub(crate) use poll::{apply_surface_resize, poll_import_once, ImportPollOutcome};
+// Only the host tests call this directly on non-Android targets; production code
+// reaches it through `set_surface_size`/`set_surface_insets`.
+#[cfg(test)]
+pub(crate) use poll::apply_surface_resize;
+#[cfg(all(target_os = "android", test))]
+pub(crate) use poll::{poll_import_once, ImportPollOutcome};
 pub(crate) use state_push::*;
 pub(crate) use view::*;
 

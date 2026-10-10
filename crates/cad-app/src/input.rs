@@ -490,6 +490,76 @@ pub fn apply_canvas_metrics(viewport: &mut Viewport, canvas: &CanvasMetrics) -> 
     Ok(())
 }
 
+/// Fold safe-area insets into a surface rectangle, producing the canvas metrics.
+///
+/// `safe_insets` is ordered `[top, right, bottom, left]` in logical pixels
+/// (`cad-ui-slint::UiConfiguration::safe_insets`, matching CSS
+/// `env(safe-area-inset-*)`). The canvas origin shifts in by the left/top inset
+/// and the canvas size shrinks by the sum of the opposing insets, so the host
+/// supplies the canvas rect **minus** the safe area (audit U07,
+/// `docs/input.md` §3).
+///
+/// The insets are logical-pixel geometry: the DPI scale is carried through
+/// unchanged and `CanvasMetrics::size_physical` owns the logical→physical
+/// conversion, so DPR=1/2/3 map the same logical point to the same world point.
+///
+/// Degenerate input is rejected explicitly with `None` — a non-finite or
+/// negative inset, a non-finite/non-positive surface size or origin, or insets
+/// that leave no canvas. Insets are never clamped or invented, so a host that
+/// cannot measure them must pass explicit zeros (see the Linux host) rather than
+/// guess.
+pub fn inset_canvas_metrics(
+    surface_origin_logical: [f64; 2],
+    surface_size_logical: [f64; 2],
+    safe_insets: [f64; 4],
+    dpi_scale: f64,
+) -> Option<CanvasMetrics> {
+    if !finite2(surface_origin_logical) || !finite2(surface_size_logical) {
+        return None;
+    }
+    if surface_size_logical[0] <= 0.0 || surface_size_logical[1] <= 0.0 {
+        return None;
+    }
+    // A negative or non-finite inset is not a smaller margin to clamp away: it
+    // means the host could not measure the safe area, so it is refused.
+    if safe_insets
+        .iter()
+        .any(|inset| !inset.is_finite() || *inset < 0.0)
+    {
+        return None;
+    }
+    let [top, right, bottom, left] = safe_insets;
+    let canvas = CanvasMetrics::new(
+        [
+            surface_origin_logical[0] + left,
+            surface_origin_logical[1] + top,
+        ],
+        [
+            surface_size_logical[0] - left - right,
+            surface_size_logical[1] - top - bottom,
+        ],
+        dpi_scale,
+    );
+    // `is_valid` re-checks the reduced size and the DPI, so an over-large inset
+    // (no canvas left) or a non-positive DPI is an explicit `None`.
+    canvas.is_valid().then_some(canvas)
+}
+
+/// Map a layout-panel `SpaceSelection` to the validated `SwitchSpace` payload.
+///
+/// The three hosts install a [`cad_ui_slint::LayoutSwitchSink`] that dispatches
+/// the same command the layout rows use (`CommandId::SwitchSpace`); naming the
+/// payload here keeps them from drifting on the mapping. It does **not** validate
+/// the layout: the command layer refuses an unknown `LayoutId` against the real
+/// layout table, so an unknown space is an explicit failure, never a silent
+/// success or a database mutation (`docs/layouts.md` §4).
+pub fn space_switch_payload(space: cad_representation::SpaceSelection) -> crate::CommandPayload {
+    crate::CommandPayload::Space(match space {
+        cad_representation::SpaceSelection::Model => cad_domain::SpaceId::Model,
+        cad_representation::SpaceSelection::Paper(id) => cad_domain::SpaceId::Paper(id),
+    })
+}
+
 // --- U08 status -------------------------------------------------------------
 
 /// A brief status-bar model. Deliberately small: the full diagnostic detail
@@ -933,6 +1003,77 @@ mod tests {
         assert_eq!(metrics.pan_delta_world([20.0, 0.0]), Some([40.0, 0.0]));
     }
 
+    #[test]
+    fn safe_area_insets_shrink_the_canvas_origin_and_size() {
+        // [top, right, bottom, left] on a 800x600 surface at DPR 1.
+        let canvas = inset_canvas_metrics([0.0, 0.0], [800.0, 600.0], [24.0, 8.0, 16.0, 4.0], 1.0)
+            .expect("a real inset yields a canvas");
+        assert_eq!(canvas.origin_logical, [4.0, 24.0]);
+        assert_eq!(
+            canvas.size_logical,
+            [800.0 - 8.0 - 4.0, 600.0 - 24.0 - 16.0]
+        );
+        assert_eq!(canvas.size_physical(), Some([788.0, 560.0]));
+    }
+
+    #[test]
+    fn zero_insets_leave_the_surface_rect_untouched() {
+        // Linux has no portable safe area: explicit zeros must be a no-op, not a
+        // fabricated margin.
+        let canvas = inset_canvas_metrics([10.0, 20.0], [800.0, 600.0], [0.0; 4], 2.0)
+            .expect("zero insets are valid");
+        assert_eq!(
+            canvas,
+            CanvasMetrics::new([10.0, 20.0], [800.0, 600.0], 2.0)
+        );
+    }
+
+    #[test]
+    fn inset_canvas_metrics_keeps_the_dpi_scale_for_physical_pixels() {
+        // The inset is logical-pixel geometry; only `size_physical` applies DPR,
+        // and the same logical surface point maps to the same world point at
+        // DPR 1/2/3 (the U07 invariant).
+        let dpr1 =
+            inset_canvas_metrics([0.0, 0.0], [800.0, 600.0], [10.0, 0.0, 10.0, 0.0], 1.0).unwrap();
+        let dpr3 =
+            inset_canvas_metrics([0.0, 0.0], [800.0, 600.0], [10.0, 0.0, 10.0, 0.0], 3.0).unwrap();
+        assert_eq!(dpr1.size_logical, dpr3.size_logical);
+        assert_eq!(dpr1.origin_logical, dpr3.origin_logical);
+        assert_eq!(dpr1.size_physical(), Some([800.0, 580.0]));
+        assert_eq!(dpr3.size_physical(), Some([2400.0, 1740.0]));
+
+        let mut vp = viewport();
+        vp.camera.projection = crate::Projection::Orthographic { scale: 1.0 };
+        let a = ViewMetrics::new(dpr1, &vp)
+            .surface_to_world([200.0, 150.0])
+            .unwrap();
+        let b = ViewMetrics::new(dpr3, &vp)
+            .surface_to_world([200.0, 150.0])
+            .unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn degenerate_insets_are_rejected_explicitly() {
+        // Negative inset: refused, never clamped to zero.
+        assert!(
+            inset_canvas_metrics([0.0, 0.0], [800.0, 600.0], [-1.0, 0.0, 0.0, 0.0], 1.0).is_none()
+        );
+        // NaN inset: refused.
+        assert!(
+            inset_canvas_metrics([0.0, 0.0], [800.0, 600.0], [f64::NAN, 0.0, 0.0, 0.0], 1.0)
+                .is_none()
+        );
+        // Insets larger than the surface leave no canvas.
+        assert!(
+            inset_canvas_metrics([0.0, 0.0], [100.0, 100.0], [60.0, 60.0, 60.0, 60.0], 1.0)
+                .is_none()
+        );
+        // A degenerate surface or DPI is refused through the same check.
+        assert!(inset_canvas_metrics([0.0, 0.0], [0.0, 600.0], [0.0; 4], 1.0).is_none());
+        assert!(inset_canvas_metrics([0.0, 0.0], [800.0, 600.0], [0.0; 4], f64::NAN).is_none());
+    }
+
     // --- U08 status ---
 
     #[test]
@@ -1010,5 +1151,19 @@ mod tests {
         assert_eq!(vp.logical_size, [400.0, 300.0]);
         assert_eq!(vp.dpi_scale, 3.0);
         assert_eq!(vp.camera, before);
+    }
+
+    #[test]
+    fn space_switch_payload_maps_model_and_paper_to_the_command_payload() {
+        use cad_domain::{LayoutId, SpaceId};
+        // `CommandPayload` has no `PartialEq`; match the variant instead.
+        assert!(matches!(
+            space_switch_payload(cad_representation::SpaceSelection::Model),
+            crate::CommandPayload::Space(SpaceId::Model)
+        ));
+        assert!(matches!(
+            space_switch_payload(cad_representation::SpaceSelection::Paper(LayoutId(7))),
+            crate::CommandPayload::Space(SpaceId::Paper(LayoutId(7)))
+        ));
     }
 }

@@ -134,6 +134,85 @@ pub fn current_handle() -> Option<UiHandle> {
     with_runtime(|rt| rt.handle.clone())
 }
 
+thread_local! {
+    /// Last logical CAD surface size + DPI scale reported by the JS host, and the
+    /// measured CSS safe-area insets `[top, right, bottom, left]`. Retained so a
+    /// later inset update (or a rotation) re-applies the same surface.
+    static SURFACE: Cell<([f64; 2], f64)> = const { Cell::new(([0.0, 0.0], 1.0)) };
+    static SAFE_INSETS: Cell<[f64; 4]> = const { Cell::new([0.0; 4]) };
+}
+
+/// The CSS safe-area insets the JS host last reported.
+pub(super) fn safe_insets() -> [f64; 4] {
+    SAFE_INSETS.with(Cell::get)
+}
+
+/// The canvas logical size for a reported surface, after safe-area subtraction.
+///
+/// `None` for a degenerate surface/inset (never a clamped guess). The DPI scale
+/// does not affect the logical size; callers that need physical pixels use the
+/// authoritative viewport.
+pub(super) fn inset_canvas_size(surface: [f64; 2]) -> Option<[f64; 2]> {
+    cad_app::input::inset_canvas_metrics([0.0, 0.0], surface, safe_insets(), 1.0)
+        .map(|canvas| canvas.size_logical)
+}
+
+/// Apply a reported CAD surface + DPR to the authoritative viewport.
+///
+/// The viewport's logical size becomes the surface minus the safe area; the DPI
+/// scale is the browser's `devicePixelRatio`, so physical-pixel conversions and
+/// the logical→world mapping stay consistent (audit U07). Degenerate metrics are
+/// an explicit error, never a silent NaN.
+fn apply_surface_metrics(
+    controller: &Rc<RefCell<HostController>>,
+    viewport: ViewportId,
+    surface: [f64; 2],
+    dpi_scale: f64,
+) -> CadResult<()> {
+    let canvas =
+        cad_app::input::inset_canvas_metrics([0.0, 0.0], surface, safe_insets(), dpi_scale)
+            .ok_or_else(|| {
+                CadError::InvalidInput(
+                    "surface metrics or safe insets are degenerate (finite, non-negative insets)"
+                        .into(),
+                )
+            })?;
+    let mut controller = controller.borrow_mut();
+    let viewport = controller
+        .application
+        .workspace
+        .viewports
+        .get_mut(&viewport)
+        .ok_or(CadError::Cancelled)?;
+    cad_app::input::apply_canvas_metrics(viewport, &canvas)
+}
+
+/// Report the CSS `env(safe-area-inset-*)` values measured by the JS host.
+///
+/// The insets are logical CSS pixels ordered `[top, right, bottom, left]`.
+/// Degenerate input (non-finite or negative) is refused rather than clamped, and
+/// the retained surface is re-applied so a soft-keyboard/notch change updates the
+/// authoritative viewport without moving the camera.
+#[cfg(target_arch = "wasm32")]
+pub fn set_safe_insets(top: f64, right: f64, bottom: f64, left: f64) -> CadResult<()> {
+    let insets = [top, right, bottom, left];
+    if insets.iter().any(|v| !v.is_finite() || *v < 0.0) {
+        return Err(CadError::InvalidInput(
+            "safe insets must be finite and non-negative".into(),
+        ));
+    }
+    SAFE_INSETS.with(|cell| cell.set(insets));
+    with_runtime(|rt| {
+        let (surface, scale) = SURFACE.with(Cell::get);
+        if surface[0] > 0.0 && surface[1] > 0.0 {
+            apply_surface_metrics(&rt.controller, rt.viewport, surface, scale)?;
+            rt.view.request_redraw();
+        }
+        Ok(())
+    })
+    .unwrap_or(Ok(()))
+}
+
 /// Mirror the authoritative application viewport into the render camera.
 fn sync_view_camera(controller: &HostController, view: &CadView, viewport: &ViewportId) {
     if let Some(vp) = controller.application.workspace.viewports.get(viewport) {
@@ -195,20 +274,24 @@ pub async fn start_with_preference(
         view: view_slot.clone(),
         viewport: viewport_id,
     };
+    // A clone of the same command funnel serves as the layout-switch sink, so a
+    // layout click dispatches the validated `SwitchSpace` command (docs/layouts.md §4).
+    let layout_sink = sink.clone();
     let mut adapter = UiAdapter::new(configuration, sink, true)?;
+    adapter.set_layout_switch_sink(Box::new(layout_sink));
     let scale = web_sys::window()
         .map(|w| w.device_pixel_ratio())
         .unwrap_or(1.0);
     adapter.fit_window_to_logical(web_viewport_size(), scale as f32);
     let handle = adapter.handle();
     // Initial fit uses the actual CAD content rectangle, not the entire shell.
-    // Subsequent resize/layout changes preserve the user's camera.
+    // Subsequent resize/layout changes preserve the user's camera. The surface is
+    // the shell's CAD rect; the safe-area insets (CSS `env()`, reported by the JS
+    // host) are folded in by `apply_surface_metrics`.
     if let Some((size, _)) = handle.cad_surface_size() {
-        let mut c = controller.borrow_mut();
-        if let Some(vp) = c.application.workspace.viewports.get_mut(&viewport_id) {
-            vp.logical_size = size;
-        }
-        c.fit()?;
+        SURFACE.with(|cell| cell.set((size, scale)));
+        apply_surface_metrics(&controller, viewport_id, size, scale)?;
+        controller.borrow_mut().fit()?;
     }
     *shared_handle.borrow_mut() = Some(handle.clone());
     let _ = handle.set_backend_index(backend_index(preference));
@@ -314,19 +397,13 @@ pub fn resize(width: f64, height: f64, scale: f64) -> CadResult<()> {
     }
     with_runtime(|rt| {
         rt.handle.resize_browser_surface([width, height], scale)?;
-        let mut controller = rt.controller.borrow_mut();
-        let (size, _) = rt
+        let (surface, _) = rt
             .handle
             .cad_surface_size()
             .unwrap_or(([width, height], 1.0));
-        if let Some(vp) = controller
-            .application
-            .workspace
-            .viewports
-            .get_mut(&rt.viewport)
-        {
-            vp.logical_size = size;
-        }
+        SURFACE.with(|cell| cell.set((surface, scale)));
+        apply_surface_metrics(&rt.controller, rt.viewport, surface, scale)?;
+        let controller = rt.controller.borrow();
         sync_view_camera(&controller, &rt.view, &rt.viewport);
         rt.view.request_redraw();
         Ok(())

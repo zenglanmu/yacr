@@ -1,8 +1,9 @@
 //! Fallible state funnel. A failed query is not replaced with an empty success.
 use super::*;
 use cad_ui_slint::{
-    DiagnosticsPanelState, LayerPanelState, LayoutPanelState, MeasurementUiState,
-    PropertyPanelState,
+    DiagnosticsPanelState, ImportResourceSummary, LayerPanelState, LayoutPanelState,
+    MeasurementUiState, PropertyPanelState, ReferencesResourceSummary, ResourceCompleteness,
+    ResourceSections,
 };
 
 impl Runtime {
@@ -32,6 +33,7 @@ impl Runtime {
                     viewport.camera.projection,
                     cad_app::Projection::Perspective { .. }
                 ),
+                standard_view: cad_ui_slint::standard_view_for_camera(&viewport.camera),
             })?;
         }
         Ok(())
@@ -97,6 +99,49 @@ impl Runtime {
                 .and_then(|v| v.backend_label())
                 .unwrap_or_default(),
         ))?;
+        // Resources drawer (F10): real sections only. The desktop font loader
+        // (`cad_platform::fonts::local::load_engine`) discards its
+        // `FontLoadReport`, so `fonts` is not pushed here — the drawer shows its
+        // explicit empty state rather than a fabricated summary. Proxy records
+        // are not surfaced by the importer in this build either.
+        handle.set_resources_sections(&ResourceSections {
+            fonts: None,
+            import: c
+                .last_import_report
+                .as_ref()
+                .map(|report| ImportResourceSummary {
+                    identity: c.document_name_hint.clone(),
+                    dwg_version: String::new(),
+                    completeness: match &report.completeness {
+                        cad_domain::Completeness::Complete => ResourceCompleteness::Complete,
+                        cad_domain::Completeness::Partial(items) => {
+                            ResourceCompleteness::Partial(items.len())
+                        }
+                        cad_domain::Completeness::Missing(items) => {
+                            ResourceCompleteness::Missing(items.len())
+                        }
+                        cad_domain::Completeness::Unverified => ResourceCompleteness::Unverified,
+                    },
+                    diagnostics: Some(report.diagnostics.len()),
+                    parse_ms: report.parse_ms.map(|ms| ms.max(0.0) as u64),
+                }),
+            proxy: None,
+            references: Some(ReferencesResourceSummary {
+                keys: c
+                    .application
+                    .workspace
+                    .documents
+                    .get(&c.document_id)
+                    .map(|document| document.resource_keys.clone())
+                    .unwrap_or_default(),
+            }),
+            images_modeled: false,
+        })?;
+        // The 3D observation drawer is pushed by `sync_view` through
+        // `set_view_state` (it also re-derives `set_view3d_state`), so the drawer
+        // reflects the real viewport. `set_viewport_scale` is intentionally not
+        // called: the layout descriptors carry no scale, so there is no real
+        // value to push (the panel shows its explicit "scale unavailable" state).
         if let Some(view) = self.view.borrow().as_ref() {
             view.set_overlay_visibility(handle.effective_config().view.overlays.into());
             view.sync_drawing(Some(drawing));

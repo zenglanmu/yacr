@@ -104,6 +104,11 @@ pub(super) fn dispatch(
     result
 }
 
+/// UI command sink; also the adapter's layout-switch sink.
+///
+/// Cloneable so the layout switch runs through the exact same `send` funnel as
+/// every other host command (validate + execute + push panels).
+#[derive(Clone)]
 pub(super) struct WebSink {
     pub(super) controller: Rc<RefCell<HostController>>,
     pub(super) handle: SharedHandle,
@@ -145,6 +150,26 @@ impl UiCommandSink for WebSink {
             &self.viewport,
             command,
         )
+    }
+}
+
+/// Layout panel switch (F04): dispatch the validated `SwitchSpace` command.
+///
+/// Installed on the adapter so a layout-row click runs the same command funnel as
+/// every other host command (`WebSink::send` → `dispatch` →
+/// `HostController::execute` + panel push). The command layer validates the
+/// layout against the drawing; an unknown layout is refused, and the sink never
+/// mutates the database itself (`docs/layouts.md` §4).
+impl cad_ui_slint::LayoutSwitchSink for WebSink {
+    fn select(&mut self, space: cad_representation::SpaceSelection) {
+        let command = Command {
+            schema_version: 1,
+            id: CommandId::SwitchSpace,
+            document: self.controller.borrow().document_id,
+            viewport: self.viewport,
+            payload: cad_app::input::space_switch_payload(space),
+        };
+        let _ = self.send(command);
     }
 }
 

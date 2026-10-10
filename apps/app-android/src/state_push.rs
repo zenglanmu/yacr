@@ -22,13 +22,16 @@
 
 use super::*;
 
-use cad_app::input::{apply_canvas_metrics, CanvasMetrics};
+use cad_app::input::{apply_canvas_metrics, inset_canvas_metrics};
 use cad_app::render_scene::layout_descriptors;
 use cad_import_acadrust::ImportReport;
+use cad_platform::fonts::FontLoadReport;
 use cad_representation::SpaceSelection;
 use cad_ui_slint::{
-    DiagnosticRowUi, DiagnosticsPanelState, ImportProgressUiState, LayerPanelState,
-    LayoutPanelState, MeasurementUiState, MessageSource, PropertyPanelState,
+    DiagnosticRowUi, DiagnosticsPanelState, FontResourceSummary, ImportProgressUiState,
+    ImportResourceSummary, LayerPanelState, LayoutPanelState, MeasurementUiState, MessageSource,
+    PropertyPanelState, ReferencesResourceSummary, ResourceCompleteness, ResourceSections,
+    ViewStateUi,
 };
 
 /// Literal host empty labels. Layer/property empty-state text has no
@@ -59,6 +62,108 @@ pub(crate) struct PanelSnapshot {
     /// Authoritative session mode (audit U02), so the shell shows the mode the
     /// command layer enforces.
     pub mode: cad_app::AppMode,
+}
+
+// The last font-loading report, set by the platform font path. Target-agnostic:
+// the Android asset loader records it, and host tests can set it directly, so the
+// resources drawer maps a real `FontLoadReport` without pulling the Android-only
+// font module into host builds.
+thread_local! {
+    static LAST_FONT_REPORT: RefCell<Option<FontLoadReport>> = const { RefCell::new(None) };
+}
+
+/// Record the most recent font-loading report for the resources drawer.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub(crate) fn set_last_font_report(report: FontLoadReport) {
+    LAST_FONT_REPORT.with(|slot| *slot.borrow_mut() = Some(report));
+}
+
+fn last_font_report() -> Option<FontLoadReport> {
+    LAST_FONT_REPORT.with(|slot| slot.borrow().clone())
+}
+
+/// Build the resources drawer sections from the host's real reports (F10).
+///
+/// Every section is optional and only pushed when a real source exists: the font
+/// report the platform loader produced, the last import report, the open
+/// document's external `resource_keys`. Proxy records are **not** surfaced by the
+/// importer in this build, so `proxy` is left `None` rather than fabricated; the
+/// shell then shows its explicit "no resource data" state for that source.
+pub(crate) fn resource_sections(
+    controller: &HostController,
+    font_report: Option<&FontLoadReport>,
+) -> ResourceSections {
+    let references = controller
+        .application
+        .workspace
+        .documents
+        .get(&controller.document_id)
+        .map(|document| ReferencesResourceSummary {
+            keys: document.resource_keys.clone(),
+        });
+    let import = controller
+        .last_import_report
+        .as_ref()
+        .map(|report| import_resource_summary(report, &controller.document_name_hint));
+    ResourceSections {
+        fonts: font_report.map(font_resource_summary),
+        import,
+        proxy: None,
+        references,
+        images_modeled: false,
+    }
+}
+
+fn font_resource_summary(report: &FontLoadReport) -> FontResourceSummary {
+    FontResourceSummary {
+        catalog_entries: report.catalog_entries,
+        requested: report.requested.len(),
+        planned: report.planned.len(),
+        registered: report.registered.len(),
+        failed: report.failed.clone(),
+        unresolved: report.unresolved.clone(),
+        default_face: report.default_face.clone(),
+    }
+}
+
+fn import_resource_summary(report: &ImportReport, identity: &str) -> ImportResourceSummary {
+    ImportResourceSummary {
+        identity: identity.to_string(),
+        // The importer does not report a DWG version string; left empty rather
+        // than guessed.
+        dwg_version: String::new(),
+        completeness: match &report.completeness {
+            cad_domain::Completeness::Complete => ResourceCompleteness::Complete,
+            cad_domain::Completeness::Partial(items) => ResourceCompleteness::Partial(items.len()),
+            cad_domain::Completeness::Missing(items) => ResourceCompleteness::Missing(items.len()),
+            cad_domain::Completeness::Unverified => ResourceCompleteness::Unverified,
+        },
+        diagnostics: Some(report.diagnostics.len()),
+        parse_ms: report.parse_ms.map(|ms| ms.max(0.0) as u64),
+    }
+}
+
+/// Derive the view/observation drawer state from the authoritative viewport.
+///
+/// Never invents a mode: `is_3d`/`perspective` come from the real viewport and the
+/// active standard view is the camera's actual match (`None` for a free orbit).
+pub(crate) fn view_state(controller: &HostController) -> ViewStateUi {
+    match controller
+        .application
+        .workspace
+        .viewports
+        .get(&controller.viewport_id)
+    {
+        Some(viewport) => ViewStateUi {
+            is_3d: matches!(viewport.view_mode, cad_app::ViewMode2d3d::ThreeD { .. }),
+            perspective: matches!(
+                viewport.camera.projection,
+                cad_app::Projection::Perspective { .. }
+            ),
+            standard_view: cad_ui_slint::standard_view_for_camera(&viewport.camera),
+        },
+        None => ViewStateUi::default(),
+    }
 }
 
 /// Build every panel model from the authoritative controller + view.
@@ -174,6 +279,18 @@ pub(crate) fn push_panel_state(
     let _ = handle.set_diagnostics_state(&snapshot.diagnostics);
     let _ = handle.set_mode(snapshot.mode);
 
+    // Resources drawer (F10): real sections only. Pushed here so every command,
+    // open and poll refreshes it; a `Resources` command that changes nothing still
+    // re-derives from the same sources.
+    let controller_ref = controller.borrow();
+    let sections = resource_sections(&controller_ref, last_font_report().as_ref());
+    let _ = handle.set_resources_sections(&sections);
+    // 3D observation drawer (F13): the real viewport state; `set_view_state` also
+    // re-derives the drawer panel, so the shell cannot show a mode the camera is
+    // not in.
+    let _ = handle.set_view_state(view_state(&controller_ref));
+    drop(controller_ref);
+
     // The asynchronous-open progress panel is part of the same funnel: any
     // command, open or poll that refreshes the panels also refreshes the
     // progress panel from the controller's retained snapshot. Idle/opened
@@ -258,24 +375,34 @@ pub(crate) fn import_diagnostics(
     }
 }
 
-/// Apply a new logical surface size / DPI scale to the authoritative viewport.
+/// Apply a new logical surface size / DPI scale / safe-area insets to the
+/// authoritative viewport.
 ///
 /// Rotation and resize change the canvas rectangle but must not move the camera:
 /// `apply_canvas_metrics` only rewrites `logical_size`/`dpi_scale`, leaving the
 /// camera target untouched, so the view centre is preserved (audit U07,
-/// `docs/input.md` §3). Degenerate sizes are refused so no NaN reaches the
-/// screen→world mapping.
+/// `docs/input.md` §3). The surface is the full host surface; `safe_insets`
+/// (`[top, right, bottom, left]`, logical pixels) are the system-bar/soft-keyboard
+/// margins, so the canvas rect is the surface **minus** the safe area. Degenerate
+/// sizes, DPI or insets are refused so no NaN reaches the screen→world mapping.
 ///
 /// The Activity does not yet forward its `SurfaceHolder` size callback into this
 /// build (see `docs/validation-android.md` §8); this is the pure seam it will
-/// call. It is wired at start with the configured logical size.
+/// call. It is wired at start with the configured logical size and zero insets.
 pub(crate) fn apply_surface_size(
     controller: &Rc<RefCell<HostController>>,
     size_logical: [f64; 2],
     dpi_scale: f64,
+    safe_insets: [f64; 4],
 ) -> CadResult<()> {
     let viewport_id = controller.borrow().viewport_id;
-    let canvas = CanvasMetrics::new([0.0, 0.0], size_logical, dpi_scale);
+    let canvas = inset_canvas_metrics([0.0, 0.0], size_logical, safe_insets, dpi_scale)
+        .ok_or_else(|| {
+            CadError::InvalidInput(
+                "surface metrics or safe insets are degenerate (finite, non-negative insets)"
+                    .into(),
+            )
+        })?;
     let mut controller = controller.borrow_mut();
     let viewport = controller
         .application

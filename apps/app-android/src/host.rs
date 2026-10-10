@@ -150,12 +150,11 @@ impl UiCommandSink for HostSink {
         if command.id == CommandId::OpenDrawing {
             self.open_drawing();
             return Ok(());
-        }
-        // `CancelLoading` (the shell's `cancel-open-requested`) falls through to
-        // `execute`, which routes it to `HostController::cancel_async_open`: the
-        // token is flipped and nothing is published, so the current document and
-        // unsaved annotations are kept. The `push_state` below then reflects the
-        // non-cancellable panel state from the retained snapshot.
+        } // `CancelLoading` (the shell's `cancel-open-requested`) falls through to
+          // `execute`, which routes it to `HostController::cancel_async_open`: the
+          // token is flipped and nothing is published, so the current document and
+          // unsaved annotations are kept. The `push_state` below then reflects the
+          // non-cancellable panel state from the retained snapshot.
         let outcome = self.controller.borrow_mut().execute(command);
         match outcome {
             Ok(outcome) => {
@@ -177,5 +176,25 @@ impl UiCommandSink for HostSink {
                 Ok(())
             }
         }
+    }
+}
+
+/// Layout panel switch (F04): dispatch the validated `SwitchSpace` command.
+///
+/// The sink is installed on the adapter so a layout-row click runs through the
+/// same command funnel as every other host command (`HostSink::send` →
+/// `HostController::execute`), which validates the layout against the drawing and
+/// re-syncs the camera and panels. It never touches the database directly, and an
+/// unknown layout is refused by the command layer (`docs/layouts.md` §4).
+impl cad_ui_slint::LayoutSwitchSink for HostSink {
+    fn select(&mut self, space: cad_representation::SpaceSelection) {
+        let command = Command {
+            schema_version: 1,
+            id: CommandId::SwitchSpace,
+            document: self.controller.borrow().document_id,
+            viewport: self.controller.borrow().viewport_id,
+            payload: cad_app::input::space_switch_payload(space),
+        };
+        let _ = self.send(command);
     }
 }

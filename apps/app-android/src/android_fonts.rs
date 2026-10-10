@@ -81,6 +81,8 @@ pub fn install_fonts(view: Option<&CadView>, requested: &[String]) -> CadResult<
             view.set_fonts(engine);
         }
     }
+    // Retain the real report so the resources drawer can surface it (F10).
+    super::state_push::set_last_font_report(report.clone());
     Ok(report)
 }
 

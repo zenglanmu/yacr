@@ -20,8 +20,9 @@ use cad_app::{MeasurementPreview, SelectionProperties};
 use cad_diagnostics::model::{DiagnosticReason, DiagnosticsModel, Severity};
 use cad_domain::{Completeness, Diagnostic, LayerId, LayoutId};
 use cad_ui_slint::{
-    CadView, DiagnosticsPanelState, LayerPanelState, LayoutPanelState, MeasurementUiState,
-    MessageSource, PropertyPanelState, UiHandle,
+    CadView, DiagnosticsPanelState, FontResourceSummary, ImportResourceSummary, LayerPanelState,
+    LayoutPanelState, MeasurementUiState, MessageSource, PropertyPanelState,
+    ReferencesResourceSummary, ResourceCompleteness, ResourceSections, UiHandle, ViewStateUi,
 };
 
 use super::async_open as async_open_state;
@@ -139,6 +140,81 @@ pub(super) fn derive_overlay_push(controller: &HostController) -> OverlayPush {
     }
 }
 
+/// Build the resources drawer sections from the host's real reports (F10).
+///
+/// Only real sources are pushed: the last font-loading report, the last import
+/// report, and the open document's external `resource_keys`. Proxy records are
+/// not surfaced by the importer in this build, so `proxy` stays `None` rather
+/// than being fabricated; the drawer shows its explicit empty state for it.
+pub(super) fn derive_resource_sections(
+    controller: &HostController,
+    font_report: Option<&cad_platform::fonts::FontLoadReport>,
+) -> ResourceSections {
+    let references = controller
+        .application
+        .workspace
+        .documents
+        .get(&controller.document_id)
+        .map(|document| ReferencesResourceSummary {
+            keys: document.resource_keys.clone(),
+        });
+    let import = controller
+        .last_import_report
+        .as_ref()
+        .map(|report| ImportResourceSummary {
+            identity: controller.document_name_hint.clone(),
+            // The importer reports no DWG version string; left empty, not guessed.
+            dwg_version: String::new(),
+            completeness: match &report.completeness {
+                Completeness::Complete => ResourceCompleteness::Complete,
+                Completeness::Partial(items) => ResourceCompleteness::Partial(items.len()),
+                Completeness::Missing(items) => ResourceCompleteness::Missing(items.len()),
+                Completeness::Unverified => ResourceCompleteness::Unverified,
+            },
+            diagnostics: Some(report.diagnostics.len()),
+            parse_ms: report.parse_ms.map(|ms| ms.max(0.0) as u64),
+        });
+    ResourceSections {
+        fonts: font_report.map(|report| FontResourceSummary {
+            catalog_entries: report.catalog_entries,
+            requested: report.requested.len(),
+            planned: report.planned.len(),
+            registered: report.registered.len(),
+            failed: report.failed.clone(),
+            unresolved: report.unresolved.clone(),
+            default_face: report.default_face.clone(),
+        }),
+        import,
+        proxy: None,
+        references,
+        images_modeled: false,
+    }
+}
+
+/// Derive the 3D observation drawer state from the authoritative viewport.
+///
+/// `is_3d`/`perspective` are the real viewport mode/projection and the active
+/// standard view is the camera's actual match (`None` for a free orbit); nothing
+/// is invented.
+pub(super) fn derive_view_state(controller: &HostController) -> ViewStateUi {
+    match controller
+        .application
+        .workspace
+        .viewports
+        .get(&controller.viewport_id)
+    {
+        Some(viewport) => ViewStateUi {
+            is_3d: matches!(viewport.view_mode, cad_app::ViewMode2d3d::ThreeD { .. }),
+            perspective: matches!(
+                viewport.camera.projection,
+                cad_app::Projection::Perspective { .. }
+            ),
+            standard_view: cad_ui_slint::standard_view_for_camera(&viewport.camera),
+        },
+        None => ViewStateUi::default(),
+    }
+}
+
 /// Push every derived panel state into the shell in one place.
 ///
 /// Called after every command execute and document open.
@@ -228,6 +304,13 @@ pub(super) fn push_panel_state(
     let _ = handle.set_diagnostics_state(&DiagnosticsPanelState::from_model(
         &model, &messages, backend,
     ));
+
+    // Resources drawer (F10): real sections only, from the same funnel.
+    let sections = derive_resource_sections(&controller, super::fonts::last_font_report().as_ref());
+    let _ = handle.set_resources_sections(&sections);
+    // 3D observation drawer (F13): the real viewport state (also re-derives the
+    // drawer panel through `set_view_state`).
+    let _ = handle.set_view_state(derive_view_state(&controller));
 
     if let Some(view) = view.borrow().as_ref() {
         view.request_redraw();

@@ -67,13 +67,26 @@ fn android_view_input_drag_pans_the_authoritative_camera() {
     );
 }
 
+/// Scroll direction follows the shared host formula
+/// (`factor = (1 - dy * 0.0015).clamp(0.2, 5.0)`, identical on web/Linux) and
+/// `Camera::zoom_at`'s contract that `factor > 1` zooms in: scrolling down
+/// (positive dy) yields `factor < 1` = zoom out, scrolling up = zoom in.
 #[test]
 fn android_view_input_scroll_zooms_the_camera() {
     let (controller, input) = input_harness();
     let before = world_per_px(&controller);
-    input.scroll(0.0, 200.0); // scroll down => factor 0.7 => zoom in
-    let after = world_per_px(&controller);
-    assert!(after < before, "camera did not zoom: {before} -> {after}");
+    input.scroll(0.0, 200.0); // scroll down => factor 0.7 < 1 => zoom out
+    let after_down = world_per_px(&controller);
+    assert!(
+        after_down > before,
+        "scroll down must zoom out: {before} -> {after_down}"
+    );
+    input.scroll(0.0, -200.0); // scroll up => factor 1.3 > 1 => zoom in
+    let after_up = world_per_px(&controller);
+    assert!(
+        after_up < after_down,
+        "scroll up must zoom in: {after_down} -> {after_up}"
+    );
 }
 
 /// Screen pixel of a world point on the active viewport, for tap tests.
@@ -184,7 +197,7 @@ fn android_surface_size_updates_the_viewport_and_keeps_the_camera_target() {
         viewport.camera.target = target;
     }
 
-    apply_surface_size(&controller, [800.0, 600.0], 2.0).unwrap();
+    apply_surface_size(&controller, [800.0, 600.0], 2.0, [0.0; 4]).unwrap();
     let controller_ref = controller.borrow();
     let viewport = controller_ref
         .application
@@ -198,8 +211,8 @@ fn android_surface_size_updates_the_viewport_and_keeps_the_camera_target() {
     assert_eq!(viewport.camera.target, target);
 
     // Degenerate metrics are refused, not silently applied.
-    assert!(apply_surface_size(&controller, [0.0, 600.0], 1.0).is_err());
-    assert!(apply_surface_size(&controller, [800.0, 600.0], f64::NAN).is_err());
+    assert!(apply_surface_size(&controller, [0.0, 600.0], 1.0, [0.0; 4]).is_err());
+    assert!(apply_surface_size(&controller, [800.0, 600.0], f64::NAN, [0.0; 4]).is_err());
 }
 
 #[test]
@@ -315,14 +328,17 @@ fn controller_with_one_layout() -> Rc<RefCell<HostController>> {
                         y: 0.0,
                         z: 0.0,
                     },
-                    Point3 {
-                        x: 100.0,
-                        y: 0.0,
-                        z: 0.0,
-                    },
+                    // The legacy three-point clip is two *opposite* rectangle
+                    // corners plus the model view centre; adjacent corners leave
+                    // the paper height unrecoverable and the layout undrawable.
                     Point3 {
                         x: 100.0,
                         y: 50.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 50.0,
+                        y: 25.0,
                         z: 0.0,
                     },
                 ],
@@ -401,20 +417,17 @@ fn android_snapshot_carries_the_real_selection_as_a_highlight() {
 
 #[test]
 fn android_layout_selection_routes_through_switch_space() {
-    // The adapter has no `LayoutSwitchSink` installed, so `on_layout_selected`
-    // emits `CommandId::SwitchSpace`. This asserts the host's command path
-    // executes it and re-syncs the space-derived state.
+    // The host installs `HostSink` as the adapter's `LayoutSwitchSink`; a layout
+    // selection is dispatched as `CommandId::SwitchSpace` through the same
+    // command funnel. This asserts the sink executes it and re-syncs the
+    // space-derived state.
     let controller = controller_with_one_layout();
     let mut sink = host_sink(&controller);
 
-    let command = Command {
-        schema_version: 1,
-        id: CommandId::SwitchSpace,
-        document: DocumentId(1),
-        viewport: ViewportId(1),
-        payload: CommandPayload::Space(SpaceId::Paper(LayoutId(7))),
-    };
-    sink.send(command).unwrap();
+    cad_ui_slint::LayoutSwitchSink::select(
+        &mut sink,
+        cad_representation::SpaceSelection::Paper(LayoutId(7)),
+    );
 
     // The authoritative session records the switch...
     assert_eq!(
@@ -429,33 +442,70 @@ fn android_layout_selection_routes_through_switch_space() {
     assert_eq!(paper.layouts.active_index, Some(0));
 
     // Switching back to model space goes through the same path.
-    sink.send(Command {
-        schema_version: 1,
-        id: CommandId::SwitchSpace,
-        document: DocumentId(1),
-        viewport: ViewportId(1),
-        payload: CommandPayload::Space(SpaceId::Model),
-    })
-    .unwrap();
+    cad_ui_slint::LayoutSwitchSink::select(&mut sink, cad_representation::SpaceSelection::Model);
     assert_eq!(controller.borrow().session.active_space, SpaceId::Model);
     assert_eq!(snapshot(&controller, &messages).layouts.active_index, None);
 }
 
 #[test]
 fn android_layout_switch_to_an_unknown_layout_is_refused() {
-    // The command path validates against the real layout table: a bogus layout is
-    // an explicit failure that keeps the current space, not a silent success.
+    // The sink dispatches through the command path, which validates against the
+    // real layout table: a bogus layout is an explicit failure that keeps the
+    // current space, not a silent success.
     let controller = controller_with_one_layout();
     let mut sink = host_sink(&controller);
-    sink.send(Command {
-        schema_version: 1,
-        id: CommandId::SwitchSpace,
-        document: DocumentId(1),
-        viewport: ViewportId(1),
-        payload: CommandPayload::Space(SpaceId::Paper(LayoutId(99))),
-    })
-    .unwrap();
+    cad_ui_slint::LayoutSwitchSink::select(
+        &mut sink,
+        cad_representation::SpaceSelection::Paper(LayoutId(99)),
+    );
     assert_eq!(controller.borrow().session.active_space, SpaceId::Model);
+}
+
+#[test]
+fn android_resource_sections_map_real_sources_and_leave_proxy_unpushed() {
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    // No font or import report yet: the open document's references source is the
+    // only real one (empty keys -> the explicit "none" row). Proxy is not
+    // surfaced by the importer, so nothing is fabricated for it.
+    let sections = resource_sections(&controller.borrow(), None);
+    assert!(sections.fonts.is_none());
+    assert!(sections.import.is_none());
+    assert!(sections.proxy.is_none());
+    assert_eq!(
+        sections.references.as_ref().unwrap().keys,
+        Vec::<String>::new()
+    );
+    assert!(!sections.images_modeled);
+
+    let report = cad_platform::fonts::FontLoadReport {
+        catalog_entries: 3,
+        requested: vec!["simplex".into()],
+        planned: vec!["simplex.shx".into()],
+        registered: vec!["simplex".into()],
+        failed: Vec::new(),
+        unresolved: Vec::new(),
+        default_face: Some("osifont".into()),
+    };
+    let sections = resource_sections(&controller.borrow(), Some(&report));
+    let fonts = sections.fonts.expect("a real font report is pushed");
+    assert_eq!(fonts.catalog_entries, 3);
+    assert_eq!(fonts.requested, 1);
+    assert_eq!(fonts.registered, 1);
+    assert_eq!(fonts.default_face.as_deref(), Some("osifont"));
+}
+
+#[test]
+fn android_view_state_reflects_the_real_viewport() {
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    let state = view_state(&controller.borrow());
+    // The demo starts in 2D with an orthographic camera: the drawer must show
+    // exactly that, never a fabricated 3D/perspective state.
+    assert!(!state.is_3d);
+    assert!(!state.perspective);
 }
 
 // --- Async open (F01): poll → publish-once, cancel, progress panel -------------
@@ -464,6 +514,11 @@ fn android_layout_switch_to_an_unknown_layout_is_refused() {
 ///
 /// The same committed contract fixture `cad-app` uses (`fixtures/manifest`); a
 /// real byte stream through the single importer, not a mock.
+///
+/// Android-only: `poll_import_once`/`ImportPollOutcome` are compiled only for the
+/// Android target (the Slint poll timer exists there), so these tests are gated
+/// with them rather than breaking the host test build.
+#[cfg(target_os = "android")]
 fn synthetic_dwg_bytes() -> Arc<[u8]> {
     Arc::from(
         include_bytes!("../../../fixtures/dwg/synthetic-four-lines.dwg")
@@ -476,6 +531,7 @@ fn synthetic_dwg_bytes() -> Arc<[u8]> {
 ///
 /// Uses `poll_import_once` (the exact function the Slint timer calls), with no
 /// UI handle/view so it exercises the pure host path.
+#[cfg(target_os = "android")]
 fn poll_to_terminal(controller: &Rc<RefCell<HostController>>) -> ImportPollOutcome {
     let handle: SharedHandle = Rc::new(RefCell::new(None));
     let view: SharedView = Rc::new(RefCell::new(None));
@@ -495,6 +551,7 @@ fn poll_to_terminal(controller: &Rc<RefCell<HostController>>) -> ImportPollOutco
     }
 }
 
+#[cfg(target_os = "android")]
 #[test]
 fn android_async_open_publishes_once_and_leaves_no_running_job() {
     let controller = Rc::new(RefCell::new(
@@ -536,6 +593,7 @@ fn android_async_open_publishes_once_and_leaves_no_running_job() {
     assert!(!terminal.cancellable);
 }
 
+#[cfg(target_os = "android")]
 #[test]
 fn android_cancel_command_keeps_the_document_and_reports_cancelled() {
     let controller = Rc::new(RefCell::new(
@@ -581,6 +639,7 @@ fn android_cancel_command_keeps_the_document_and_reports_cancelled() {
     assert!(!terminal.cancellable);
 }
 
+#[cfg(target_os = "android")]
 #[test]
 fn android_failed_async_open_keeps_the_demo_document() {
     let controller = Rc::new(RefCell::new(
@@ -598,6 +657,7 @@ fn android_failed_async_open_keeps_the_demo_document() {
     assert!(!controller.borrow().async_open_snapshot().unwrap().running);
 }
 
+#[cfg(target_os = "android")]
 #[test]
 fn android_import_panel_maps_running_and_terminal_snapshots() {
     use cad_ui_slint::ImportProgressUiState;
@@ -660,7 +720,7 @@ fn android_surface_resize_preserves_the_camera_target() {
     let handle: SharedHandle = Rc::new(RefCell::new(None));
     let view: SharedView = Rc::new(RefCell::new(None));
 
-    apply_surface_resize(&controller, &handle, &view, [1440.0, 1080.0], 3.0).unwrap();
+    apply_surface_resize(&controller, &handle, &view, [1440.0, 1080.0], 3.0, [0.0; 4]).unwrap();
 
     let controller_ref = controller.borrow();
     let viewport = controller_ref
@@ -675,7 +735,9 @@ fn android_surface_resize_preserves_the_camera_target() {
     assert_eq!(viewport.camera.target, target);
 
     // Degenerate metrics are refused through the same helper, not applied.
-    assert!(apply_surface_resize(&controller, &handle, &view, [0.0, 1080.0], 3.0).is_err());
+    assert!(
+        apply_surface_resize(&controller, &handle, &view, [0.0, 1080.0], 3.0, [0.0; 4]).is_err()
+    );
 }
 
 #[test]
@@ -707,4 +769,44 @@ fn android_surface_entry_point_applies_after_runtime_install() {
     );
     // Non-finite input is refused before touching the viewport.
     assert!(set_surface_size(f64::NAN, 600.0, 2.0).is_err());
+}
+
+#[test]
+fn android_safe_insets_shrink_the_canvas_and_degenerate_input_is_refused() {
+    // Safe insets are the system-bar/soft-keyboard margins; the canvas rect is
+    // the surface minus the safe area (audit U07). Zeros are the honest default
+    // until a platform source provides them.
+    let controller = Rc::new(RefCell::new(
+        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
+    ));
+    let handle: SharedHandle = Rc::new(RefCell::new(None));
+    let view: SharedView = Rc::new(RefCell::new(None));
+    let incoming: IncomingDocument = Rc::new(RefCell::new(controller.borrow().drawing()));
+    install_runtime(controller.clone(), handle, view, incoming);
+
+    set_surface_size(800.0, 600.0, 2.0).unwrap();
+    // [top, right, bottom, left] = 24, 8, 16, 4 -> 788 x 560.
+    set_surface_insets(24.0, 8.0, 16.0, 4.0).unwrap();
+    let logical_size = controller
+        .borrow()
+        .application
+        .workspace
+        .viewports
+        .get(&ViewportId(1))
+        .unwrap()
+        .logical_size;
+    assert_eq!(logical_size, [800.0 - 8.0 - 4.0, 600.0 - 24.0 - 16.0]);
+
+    // Degenerate insets are refused and the applied size is left unchanged.
+    assert!(set_surface_insets(-1.0, 0.0, 0.0, 0.0).is_err());
+    assert!(set_surface_insets(f64::NAN, 0.0, 0.0, 0.0).is_err());
+    let unchanged = controller
+        .borrow()
+        .application
+        .workspace
+        .viewports
+        .get(&ViewportId(1))
+        .unwrap()
+        .logical_size;
+    assert_eq!(unchanged, logical_size);
 }

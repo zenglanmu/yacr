@@ -50,6 +50,18 @@ pub fn web_resize(width: f64, height: f64, scale: f64) -> Result<(), JsValue> {
     browser::resize(width, height, scale).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// Report the CSS `env(safe-area-inset-*)` values (logical px, top/right/bottom/left).
+///
+/// The JS host measures them from a probe element and calls this on resize. They
+/// are folded into the authoritative canvas metrics (surface minus safe area);
+/// degenerate input is refused, never clamped.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn web_safe_insets(top: f64, right: f64, bottom: f64, left: f64) -> Result<(), JsValue> {
+    browser::set_safe_insets(top, right, bottom, left)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 /// CSS-pixel CAD hit rectangle followed by phone/tools/ribbon/command state.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]

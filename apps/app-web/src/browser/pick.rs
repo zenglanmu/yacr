@@ -71,7 +71,10 @@ pub(super) fn canvas_size(handle: &SharedHandle, viewport: &Viewport) -> Option<
     if let Some(handle) = handle.borrow().as_ref() {
         if let Some((size, _scale)) = handle.cad_surface_size() {
             if size[0].is_finite() && size[1].is_finite() && size[0] > 0.0 && size[1] > 0.0 {
-                return Some(size);
+                // The shell reports the surface; the CSS safe area shrinks it to
+                // the canvas, matching the authoritative viewport metrics
+                // (`browser::apply_surface_metrics`).
+                return super::inset_canvas_size(size);
             }
         }
     }
