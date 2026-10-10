@@ -626,6 +626,24 @@ impl LinuxApp {
         runtime.install_fonts(&view)?;
         runtime.install_images(&view)?;
         *runtime.view.borrow_mut() = Some(view);
+        // A status-bar overlay toggle changes the shared config store but does not
+        // run the host `push()` funnel, so without mirroring the new visibility
+        // onto the view the toggle would update only the button (grid "enabled"
+        // but never drawn). Mirror it on every real config change. The observer
+        // receives the config directly, so it never re-borrows the store (which
+        // is mutably borrowed during `publish`).
+        {
+            let view_slot = runtime.view.clone();
+            if let Some(handle) = runtime.handle.borrow().as_ref() {
+                handle
+                    .on_config_changed(Rc::new(move |config, _revision| {
+                        if let Some(view) = view_slot.borrow().as_ref() {
+                            view.set_overlay_visibility(config.view.overlays.clone().into());
+                        }
+                    }))
+                    .map_err(|error| CadError::Invariant(error.to_string()))?;
+            }
+        }
         adapter.set_view_input(Rc::new(input::Navigation::new(runtime.clone())));
         adapter.set_canvas_pick_mapper(Rc::new(runtime.clone()));
         adapter.set_draw_command_sink(Box::new(runtime.clone()));

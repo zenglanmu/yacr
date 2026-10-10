@@ -96,10 +96,16 @@ impl ViewInput for Navigation {
         }
     }
     fn scroll(&self, _dx: f64, dy: f64) {
+        // The desktop wheel arrives through Slint's winit backend, where a
+        // positive `delta_y` is a wheel-up rotation (winit: positive means the
+        // content moves down, revealing content above). Wheel-up must zoom in
+        // (`Camera::zoom_at`: factor > 1 zooms in), so the sign is `+ dy`. This
+        // is deliberately not the shared web/Android `1 - dy * k` (those hosts
+        // deliver browser/gesture deltas whose positive axis points down).
         self.report(self.runtime.command(
             CommandId::Zoom,
             CommandPayload::Points(vec![Point3 {
-                x: (1.0 - dy * 0.0015).clamp(0.2, 5.0),
+                x: (1.0 + dy * 0.0015).clamp(0.2, 5.0),
                 y: 0.0,
                 z: 0.0,
             }]),
@@ -147,5 +153,62 @@ impl DrawCommandSink for Runtime {
                 Err(CadError::Unsupported(self.message("linux.trim", &[])))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use slint::ComponentHandle;
+
+    fn world_per_px(app: &crate::LinuxApp) -> f64 {
+        let c = app.runtime.controller.borrow();
+        c.application.workspace.viewports[&c.viewport_id].world_per_px()
+    }
+
+    /// The desktop wheel comes from Slint's winit backend, whose positive
+    /// `delta_y` is a wheel-up rotation (winit documents positive as content
+    /// moving down / revealing content above). Wheel-up must therefore zoom in
+    /// (a smaller world-per-pixel), matching every other host's "up = closer".
+    #[test]
+    fn desktop_wheel_up_zooms_in() {
+        cad_ui_slint::offscreen::install().unwrap();
+        let app = crate::LinuxApp::new(crate::LinuxOptions {
+            headless: true,
+            ..Default::default()
+        })
+        .unwrap();
+        app.adapter.component().show().unwrap();
+        let (rect, _) = app.adapter.handle().shell_geometry().unwrap();
+        let center = slint::LogicalPosition::new(
+            (rect[0] + rect[2] * 0.5) as f32,
+            (rect[1] + rect[3] * 0.5) as f32,
+        );
+
+        let before = world_per_px(&app);
+        app.adapter
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: center,
+                delta_x: 0.0,
+                delta_y: 120.0, // wheel up
+            });
+        let after_up = world_per_px(&app);
+        assert!(
+            after_up < before,
+            "wheel up must zoom in: {before} -> {after_up}"
+        );
+
+        app.adapter
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: center,
+                delta_x: 0.0,
+                delta_y: -120.0, // wheel down
+            });
+        let after_down = world_per_px(&app);
+        assert!(
+            after_down > after_up,
+            "wheel down must zoom out: {after_up} -> {after_down}"
+        );
     }
 }

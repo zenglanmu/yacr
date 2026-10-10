@@ -85,18 +85,24 @@ Linux/Android 发布层：按需 `linux-release`（`ubuntu-latest` 运行
 `scripts/build-android.sh --release`）。二者与 `windows-release`/`macos-release` 同在
 `workflow_dispatch`/`v*` tag 触发；Android **打包不等于安装运行**，见 `docs/ci.md`。
 
-- 默认主机编译门禁必须包含 Linux App 和 Slint；编译通过不是运行或渲染验收。Linux 离屏
-  `bash scripts/check-linux-app.sh` 与完整测试仅在明确要求时执行；release 编译用于可选发布验证。
-  Web 是第二层，
-  Android 平台契约继续保留。用户授权解除原生 Slint 编译限制：允许使用
-  开发依赖，在 Linux 无窗口环境以 Slint FemtoVG/wgpu + lavapipe 离屏验证（用户已授权
-  sudo apt 安装 pkgconf/fontconfig/freetype 开发包）。
+- 默认主机编译门禁必须包含 Linux App 和 Slint；编译通过不是运行或渲染验收。release 编译用于
+  可选发布验证；Web 是第二层，Android 平台契约继续保留。
+- **渲染/端到端验证优先真实硬件 GPU**：开发机存在真实显示与显卡时（本机为 Wayland 桌面 +
+  Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），验收**必须**走真实 winit 窗口 + 硬件
+  Vulkan，例如
+  `cargo test -p app-linux --lib real_gpu_grid_zoom_axes_acceptance --locked -- --ignored
+  --test-threads=1 --nocapture`（证据默认写 `/tmp/opencode/yacr-real-gpu/`）。**不得**用
+  lavapipe 等软件后端产出"真实 GPU"结论；软件后端产出的数字/截图必须显式标注为软件渲染。
+  只有**确无显示/GPU** 的环境才回退 Slint offscreen + lavapipe（`bash scripts/check-linux-app.sh`、
+  `bash scripts/verify-ui.sh`）——本机已具备硬件，故这些仅为回退路径。
+- 用户授权解除原生 Slint 编译限制：允许使用开发依赖，在无窗口环境以 Slint FemtoVG/wgpu +
+  lavapipe 离屏验证（已授权 `sudo apt` 安装 pkgconf/fontconfig/freetype 开发包）。
   不需要 Android 模拟器，不安装桌面/X11/Wayland，不改系统/LXC 配置；实际执行与编译证据分开记录。
 - Rust 单测试：`cargo test -p <crate> <name> --locked`。GPU/CLI 用例串行跑，避免并发软件
   Vulkan 互相干扰：`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test -p cad-render-wgpu -p cad-cli-tools --locked -- --test-threads=1`。
 - 需要真实 DWG 的测试（如 `cli_contracts` 的 render）设 `YACR_TEST_DWG=<绝对路径>`，否则
   跳过；跳过不是已运行证据。
-- 无头 UI 调试循环（测试计划第二层，可选、非 CI 必需）：`bash scripts/verify-ui.sh`
+- 无头 UI 调试循环（测试计划第二层，可选、非 CI 必需，**无显示环境的回退**）：`bash scripts/verify-ui.sh`
   用 Slint offscreen 平台 + lavapipe 实际运行应用、操作控件、截图、扫 panic/超时并产出
   分层证据包；不安装 X11/Wayland，不等于真实 GPU/窗口/真机，见 `docs/verify-ui.md`。
 - Web 门禁：`scripts/build-web.sh`（需 wasm-bindgen-cli **0.2.129**，与 Cargo.lock 严格一致）
@@ -125,8 +131,10 @@ ActivityManager attach 超时）。**模拟器 ≠ 真机**，真机能力一律
 
 ## 真实 DWG 回归
 
-流程见 `docs/testing-dwg.md`：**原生离屏 wgpu + Mesa lavapipe 为主**（`cargo build -p
-cad-cli-tools --release`，`scripts/check-dwg-native.py`），WASM + Playwright 为第二层。
+流程见 `docs/testing-dwg.md`：**有真实显示/GPU 时以真实硬件 GPU 为主**（真实 winit 窗口 +
+硬件 Vulkan，如 `real_gpu_grid_zoom_axes_acceptance`）；**无显示环境**才回退原生离屏 wgpu +
+Mesa lavapipe（`cargo build -p cad-cli-tools --release`，`scripts/check-dwg-native.py`），
+WASM + Playwright 为第二层。
 必须分别记录「打开 / 出图 smoke / 视觉验收」三个结论；退出码 0、非空截图、`error=None`
 都不能单独证明视觉正确。外部大样本默认放仓库外（默认 `~/sources/cad-test-files/`），
 也可用 `scripts/fetch-test-dwg.sh` 拉到 `/tmp/opencode`。**授权明确、可再分发的图纸与参考图

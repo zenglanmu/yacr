@@ -318,30 +318,37 @@ fn hash_point<H: std::hash::Hasher>(hasher: &mut H, point: Point3) {
 ///
 /// `bounds` is the drawing's model-space `(min, max)` from
 /// [`cad_db::DrawingDatabase::bounds`]. Both axes are one `Lines` batch of two
-/// segments on the `z = 0` work plane: the X axis at `y = 0` spanning the
-/// bounds' x range and the Y axis at `x = 0` spanning the bounds' y range. The
-/// axes are reference geometry and draw below the selection highlight.
+/// segments on the `z = 0` work plane: the X axis at `y = 0` and the Y axis at
+/// `x = 0`. Each axis is drawn **symmetrically about the origin**, spanning
+/// `[-extent, extent]` on that axis where `extent` is the larger absolute bound.
+/// Clipping each axis to the one-sided model range made the origin cross read as
+/// a lopsided "L"-ish shape whenever the drawing sat mostly on one side of the
+/// origin (the reported "crosshair left arm too short"); mirroring keeps both
+/// arms equal so it reads as a proper crosshair. The axes are reference geometry
+/// and draw below the selection highlight.
 pub fn axes_overlay(bounds: (Point3, Point3), document: DocumentId) -> VisualOverlay {
     let (min, max) = bounds;
+    let extent_x = min.x.abs().max(max.x.abs());
+    let extent_y = min.y.abs().max(max.y.abs());
     let points = vec![
         Point3 {
-            x: min.x,
+            x: -extent_x,
             y: 0.0,
             z: 0.0,
         },
         Point3 {
-            x: max.x,
+            x: extent_x,
             y: 0.0,
             z: 0.0,
         },
         Point3 {
             x: 0.0,
-            y: min.y,
+            y: -extent_y,
             z: 0.0,
         },
         Point3 {
             x: 0.0,
-            y: max.y,
+            y: extent_y,
             z: 0.0,
         },
     ];
@@ -1461,18 +1468,20 @@ mod tests {
     }
 
     #[test]
-    fn axes_overlay_draws_two_origin_lines_below_the_highlight() {
+    fn axes_overlay_draws_a_symmetric_origin_cross_below_the_highlight() {
         let overlay = axes_overlay((p(-2.0, -3.0), p(4.0, 5.0)), DocumentId(1));
         assert_eq!(overlay.drawn(), 1);
         let batch = &overlay.batches[0];
         assert_eq!(batch.topology, RenderTopology::Lines);
-        // Two segments: X axis (-2,0)->(4,0), then Y axis (0,-3)->(0,5).
+        // Each axis is symmetric about the origin: X spans |-4|..|4| (the larger
+        // absolute x bound), Y spans |-5|..|5|, so both arms of each axis are
+        // equal regardless of which side the drawing sits on.
         assert_eq!(batch.vertices.len(), 4);
-        assert_eq!(batch.local_origin, p(-2.0, 0.0));
+        assert_eq!(batch.local_origin, p(-4.0, 0.0));
         assert_eq!(batch.vertices[0], [0.0, 0.0, 0.0]);
-        assert_eq!(batch.vertices[1], [6.0, 0.0, 0.0]);
-        assert_eq!(batch.vertices[2], [2.0, -3.0, 0.0]);
-        assert_eq!(batch.vertices[3], [2.0, 5.0, 0.0]);
+        assert_eq!(batch.vertices[1], [8.0, 0.0, 0.0]);
+        assert_eq!(batch.vertices[2], [4.0, -5.0, 0.0]);
+        assert_eq!(batch.vertices[3], [4.0, 5.0, 0.0]);
         assert_eq!(batch.color, AXES_COLOR);
         assert!(batch.draw_order < 900_000);
         assert!(!batch.color_unresolved);

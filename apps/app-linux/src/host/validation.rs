@@ -343,4 +343,190 @@ mod tests {
             1
         );
     }
+
+    /// Copy the CAD-canvas pixels (RGBA bytes) inside the logical `rect`.
+    fn canvas_region(image: &RgbaImage, rect: [f64; 4], scale: f64) -> Vec<u8> {
+        let x0 = (rect[0] * scale).ceil().max(0.0) as u32;
+        let y0 = (rect[1] * scale).ceil().max(0.0) as u32;
+        let x1 = ((rect[0] + rect[2]) * scale)
+            .floor()
+            .min(image.width as f64) as u32;
+        let y1 = ((rect[1] + rect[3]) * scale)
+            .floor()
+            .min(image.height as f64) as u32;
+        let mut out = Vec::new();
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let index = ((y * image.width + x) * 4) as usize;
+                out.extend_from_slice(&image.pixels[index..index + 4]);
+            }
+        }
+        out
+    }
+
+    /// Number of RGBA pixels that differ between two equal-length regions.
+    fn changed_region(before: &[u8], after: &[u8]) -> usize {
+        let (before_chunks, _) = before.as_chunks::<4>();
+        let (after_chunks, _) = after.as_chunks::<4>();
+        before_chunks
+            .iter()
+            .zip(after_chunks)
+            .filter(|(a, b)| a != b)
+            .count()
+    }
+
+    /// Real-GPU end-to-end acceptance for the three reported desktop defects, on
+    /// the real winit window + hardware GPU (never the lavapipe/offscreen path):
+    ///
+    /// 1. the status-bar grid toggle must actually reach the renderer;
+    /// 2. wheel-up must zoom in (smaller world-per-pixel);
+    /// 3. the origin axes must render (checked visually via the PNG evidence).
+    ///
+    /// Evidence PNGs are written under `YACR_REAL_E2E_OUTPUT` (default
+    /// `/tmp/opencode/yacr-real-gpu`). Set `YACR_TEST_DWG` to open a specific
+    /// drawing; otherwise the committed flange DXF fixture is used.
+    #[test]
+    #[ignore = "requires a real display + GPU; run in a dedicated process"]
+    #[allow(unused_assignments)]
+    fn real_gpu_grid_zoom_axes_acceptance() {
+        use std::cell::Cell;
+        use std::time::Duration;
+
+        if std::env::var("WAYLAND_DISPLAY").is_err() && std::env::var("DISPLAY").is_err() {
+            panic!("no display available (WAYLAND_DISPLAY/DISPLAY unset)");
+        }
+        let path = std::env::var("YACR_TEST_DWG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("..")
+                    .join("..")
+                    .join("fixtures/dxf/qcad-flange/flange.dxf")
+            });
+        let out = std::env::var("YACR_REAL_E2E_OUTPUT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/tmp/opencode/yacr-real-gpu"));
+        std::fs::create_dir_all(&out).unwrap();
+
+        cad_ui_slint::select_wgpu_backend_with(cad_render_wgpu::GpuSelection::Auto).unwrap();
+        let app = Rc::new(
+            LinuxApp::new(
+                LinuxOptions::parse(["--open".into(), path.display().to_string()]).unwrap(),
+            )
+            .unwrap(),
+        );
+
+        let ticks = Rc::new(Cell::new(0u32));
+        let timer = slint::Timer::default();
+        let probe = app.clone();
+        let tick_counter = ticks.clone();
+        let mut before_grid: Option<Vec<u8>> = None;
+        let mut grid_changed = 0usize;
+        let mut zoom_before = 0.0;
+        let mut zoom_after = 0.0;
+
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(100),
+            move || {
+                {
+                    let view = probe.runtime.view.borrow();
+                    let Some(view) = view.as_ref() else { return };
+                    if view.frames_rendered() == 0 || !view.current_drawing_presented() {
+                        return;
+                    }
+                }
+                let tick = tick_counter.get() + 1;
+                tick_counter.set(tick);
+                let shot = || -> RgbaImage {
+                    let pixels = probe.adapter.window().take_snapshot().unwrap();
+                    RgbaImage {
+                        width: pixels.width(),
+                        height: pixels.height(),
+                        pixels: pixels.as_bytes().to_vec(),
+                    }
+                };
+                match tick {
+                    3 => {
+                        let image = shot();
+                        std::fs::write(
+                            out.join("01-axes-initial.png"),
+                            encode_png(&image).unwrap(),
+                        )
+                        .unwrap();
+                        let (rect, _) = probe.adapter.handle().shell_geometry().unwrap();
+                        let scale = probe.adapter.window().scale_factor() as f64;
+                        before_grid = Some(canvas_region(&image, rect, scale));
+                        probe
+                            .adapter
+                            .component()
+                            .invoke_overlay_toggled("grid".into(), true);
+                    }
+                    8 => {
+                        let image = shot();
+                        std::fs::write(out.join("02-grid-on.png"), encode_png(&image).unwrap())
+                            .unwrap();
+                        let (rect, _) = probe.adapter.handle().shell_geometry().unwrap();
+                        let scale = probe.adapter.window().scale_factor() as f64;
+                        grid_changed = changed_region(
+                            before_grid.as_ref().unwrap(),
+                            &canvas_region(&image, rect, scale),
+                        );
+                        {
+                            let c = probe.runtime.controller.borrow();
+                            zoom_before =
+                                c.application.workspace.viewports[&c.viewport_id].world_per_px();
+                        }
+                        let center = slint::LogicalPosition::new(
+                            (rect[0] + rect[2] * 0.5) as f32,
+                            (rect[1] + rect[3] * 0.5) as f32,
+                        );
+                        probe.adapter.window().dispatch_event(
+                            slint::platform::WindowEvent::PointerScrolled {
+                                position: center,
+                                delta_x: 0.0,
+                                delta_y: 120.0, // wheel up
+                            },
+                        );
+                    }
+                    12 => {
+                        {
+                            let c = probe.runtime.controller.borrow();
+                            zoom_after =
+                                c.application.workspace.viewports[&c.viewport_id].world_per_px();
+                        }
+                        let image = shot();
+                        std::fs::write(out.join("03-wheel-up.png"), encode_png(&image).unwrap())
+                            .unwrap();
+                        let backend = probe
+                            .runtime
+                            .view
+                            .borrow()
+                            .as_ref()
+                            .map(|v| v.backend_label())
+                            .unwrap_or_default();
+                        assert!(
+                            grid_changed > 0,
+                            "the grid toggle did not change the canvas on the real GPU"
+                        );
+                        assert!(
+                            zoom_after < zoom_before,
+                            "wheel-up must zoom in: world_per_px {zoom_before} -> {zoom_after}"
+                        );
+                        eprintln!(
+                            "real GPU E2E: backend={backend:?} grid_changed_pixels={grid_changed} \
+                             zoom world_per_px {zoom_before} -> {zoom_after}"
+                        );
+                        slint::quit_event_loop().unwrap();
+                    }
+                    _ => {}
+                }
+            },
+        );
+        app.run().unwrap();
+        assert!(
+            ticks.get() >= 12,
+            "the real-GPU acceptance probe did not run to completion"
+        );
+    }
 }

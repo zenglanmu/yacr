@@ -1,6 +1,60 @@
 # 后续 agent 接手入口
 
-## DXF/DWG 图元显示补全轮（2026-10-10，本轮）
+## Linux 客户端端到端验证三项修复 + 真实 GPU 验证（2026-10-10，本轮）
+
+用户要求：基于当前开发环境用 **Linux 客户端打开文件**做端到端验证；其手动运行发现三处缺陷
+（网格开启不显示、滚轮缩放方向相反、十字/坐标轴左边短）。用户随后要求**验证优先真实硬件 GPU**
+（本机为 Wayland 桌面 + Quadro P620，非无头 LXC），并同步更新 `AGENTS.md`。
+
+**根因与修复**
+
+1. **网格开关不生效**（`apps/app-linux/src/host.rs`）：桌面状态栏的 overlay 切换只改了共享配置
+   存储与按钮态，`CadView` 的 `overlay_visibility` 仅在 `Runtime::push()`（启动/开图）里被镜像；
+   配置变更后没有 `push()`，网格批次从未重建。修复：宿主安装 `on_config_changed` 观察者，在真实
+   配置变更时把 `config.view.overlays` 镜像到 `view.set_overlay_visibility`（观察者拿到配置本身，
+   不在 `publish` 期间回借存储）。Web/Android 本就在各自 state-push 漏斗里同步，桌面此处遗漏。
+2. **滚轮方向相反**（`apps/app-linux/src/host/input.rs`）：桌面滚轮经 Slint 的 winit 后端到达，
+   winit 文档「正值=内容下移/露出上方」即**正 `delta_y`=上滚**；原式 `1 - dy*0.0015` 使上滚=缩小。
+   改为 `1 + dy*0.0015`（上滚=放大）。Web（浏览器 `deltaY` 向下为正）与 Android 保留各自公式，未改。
+3. **坐标轴十字左边短**（`crates/cad-app/src/render_scene/overlay.rs`）：`axes_overlay` 原按单侧
+   模型 bounds 裁剪（X 跨 `[min.x,max.x]`、Y 跨 `[min.y,max.y]`），原点偏向一侧时一侧臂明显更短
+   （软件截图实测法兰：左 120px vs 右 387px，上 113 vs 下 362）。改为**关于原点对称**
+   `[-extent, extent]`（每轴取较大绝对边界），两臂等长，读作真正的十字。
+
+**契约测试**
+
+- 新增 `apps/app-linux/tests/overlay_grid_toggle.rs`：生产 `LinuxApp`（offscreen）里状态栏切网格，
+  断言**仅 CAD 画布矩形**像素变化、关闭后逐字节还原（避免状态栏按钮高亮造成假通过）。
+- 新增 in-crate `host::input::tests::desktop_wheel_up_zooms_in`：真实 Slint 组件派发
+  `PointerScrolled delta_y=+120`，断言 `world_per_px` 变小（上滚放大）。
+- 更新 `axes_overlay_draws_a_symmetric_origin_cross_below_the_highlight`。
+- 新增 in-crate `host::validation::tests::real_gpu_grid_zoom_axes_acceptance`（`#[ignore]`，
+  **真实 GPU**）：真实 winit 窗口 + 硬件 Vulkan，切网格、上滚并写 PNG 证据。
+
+**真实 GPU 端到端验证（本机，2026-10-10）**
+
+- `cargo test -p app-linux --lib real_gpu_grid_zoom_axes_acceptance --locked -- --ignored`
+  （不设 `VK_ICD_FILENAMES`；`GpuSelection::Auto`→`HighPerformance`）：**通过**，
+  `backend=vulkan`、`grid_changed_pixels=6325`、`world_per_px 0.3208 → 0.2718`（上滚放大）。
+- 直接运行客户端 `target/debug/yacr-linux --open fixtures/dxf/qcad-flange/flange.dxf`：
+  `nvidia-smi` 显示该进程占用 **53 MiB**（Quadro P620）——确认真实硬件，非软件渲染。
+- PNG 证据 `/tmp/opencode/yacr-real-gpu/{01-axes-initial,02-grid-on,03-wheel-up}.png`。
+  视觉分析确认（真实 GPU 像素测量）：切换网格后新增网格线（RGB 107,115,128，间距≈62.4px，
+  6325px）；坐标轴十字由修复前的**左 120px / 右 387px** 变为**左 386px ≈ 右 387px**（X 轴已对称，
+  左端被画布左缘裁剪）；上滚后几何放大约 **1.18×**。竖直臂上端仅 125px 是**画布顶缘裁剪**（视口
+  裁剪，非模型裁剪），下端自由端接近画布底——即对称的长轴被视口截断，而非"上短"。
+- 回归：`cargo test -p app-linux --test verify_ui`、`host_contracts`、`overlay_grid_toggle`、
+  `desktop_wheel_up_zooms_in` 均通过；`cargo test -p cad-app --lib render_scene` 29 项通过；
+  `cargo fmt --all -- --check`、`clippy -D warnings`（cad-app + app-linux）通过。
+
+**AGENTS.md**：新增「渲染/端到端验证优先真实硬件 GPU」规则；`真实 DWG 回归`与无头 UI 循环改为
+**无显示环境的回退**。
+
+**未运行/限制**：未用真实 DWG（用提交的 flange DXF fixture）；**web/Android 滚轮方向未验证**（只改
+桌面路径）；Windows/macOS 桌面共享同一 winit 后端公式但未真机验证；offscreen/lavapipe 契约测试保留
+为 CI/无显示环境回归，其证据已标注为软件渲染。
+
+## DXF/DWG 图元显示补全轮（2026-10-10）
 
 用户要求：检查项目对 DXF 与 DWG 各 entity 的实现情况，**除 proxy 代理图元外实现所有 DXF
 entity 的显示**，并把进度与实在实现不了的项记入本文。经问询确认范围：**含光栅图像纹理
