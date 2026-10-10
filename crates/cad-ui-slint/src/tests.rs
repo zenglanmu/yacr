@@ -821,6 +821,27 @@ fn shell_exposes_status_bar_overlay_toggles() {
 }
 
 #[test]
+fn shell_has_no_dead_export_import_controls() {
+    // Annotation export/import was removed from the product (docs/handoff.md),
+    // but its ribbon/top-bar buttons lingered as enabled, clickable no-ops. A
+    // host must never render a control whose callback has no handler, so the
+    // affordances are removed outright; this guards against their return.
+    for marker in [
+        "export-requested",
+        "import-requested",
+        "cmd-export-visible",
+        "cmd-import-visible",
+        "can-export",
+        "can-import",
+    ] {
+        assert!(
+            !UI_DEFINITION.contains(marker),
+            "removed export/import affordance `{marker}` must not return"
+        );
+    }
+}
+
+#[test]
 fn status_overlay_toggle_patch_updates_store_and_presentation() {
     use cad_app::viewer_config::{UiPresentationModel, ViewerConfigStore};
 

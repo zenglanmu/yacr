@@ -46,8 +46,6 @@ export component YacrWindow inherits Window {
     in property <string> zoom-out-label;
     in-out property <bool> pan-active: false;
     in property <bool> can-open: true;
-    in property <bool> can-import: true;
-    in property <bool> can-export: true;
     in property <bool> can-trim: true;
     in property <bool> can-switch-backend: true;
     callback pan-requested();
@@ -58,8 +56,6 @@ export component YacrWindow inherits Window {
     // Effective per-command visibility (features × preset × commandOverrides).
     // Hidden entries are absent; hiding an entry never disables the command.
     in property <bool> cmd-measure-visible: true;
-    in property <bool> cmd-export-visible: true;
-    in property <bool> cmd-import-visible: true;
     // Data-only readout of the resolved ViewerConfig. Hosts and tests query the
     // effective config without re-deriving it; the shell layout properties above
     // are what the UI renders.
@@ -93,8 +89,6 @@ export component YacrWindow inherits Window {
     in property <string> fit-label;
     in property <string> undo-label;
     in property <string> redo-label;
-    in property <string> export-label;
-    in property <string> import-label;
     in property <string> diagnostics-label;
     in property <bool> compact-shell;
     in property <bool> phone-shell;
@@ -262,8 +256,6 @@ export component YacrWindow inherits Window {
     callback toggle-projection-requested();
     callback standard-view-selected(string);
     callback backend-selected(string);
-    callback export-requested();
-    callback import-requested();
     callback diagnostics-requested();
     callback diagnostics-closed();
     callback cancel-open-requested();
@@ -381,12 +373,6 @@ export component YacrWindow inherits Window {
                     enabled: root.work-mode && root.can-redo; clicked => { root.redo-requested(); } }
                 Text { text: root.application-title; color: CadTheme.ink; font-size: root.phone-shell ? 18px : 15px;
                     horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
-                if root.cmd-export-visible : ConceptButton { text: root.export-label; symbol: "⇧"; icon-only: true; enabled: root.can-export;
-                    min-width: 36px; preferred-width: 36px; min-height: 28px;
-                    clicked => { root.export-requested(); } }
-                if root.cmd-import-visible : ConceptButton { text: root.import-label; symbol: "⇩"; icon-only: true; enabled: root.can-import && root.work-mode;
-                    min-width: 36px; preferred-width: 36px; min-height: 28px;
-                    clicked => { root.import-requested(); } }
                 ConceptButton { text: root.more-label; symbol: "···"; icon-only: true;
                     min-width: 48px; preferred-width: 48px; min-height: root.phone-shell ? 44px : 28px;
                     clicked => { root.tools-open = !root.tools-open; root.ribbon-expanded = true; root.ribbon-tab = 3; } }
@@ -400,7 +386,7 @@ export component YacrWindow inherits Window {
             measurements: root.measurement-kind-labels;
             labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
                 root.measure-label, root.tools-label, root.view-2d-label,
-                root.view-3d-label, root.view-projection-label, root.export-label, root.import-label, root.diagnostics-label];
+                root.view-3d-label, root.view-projection-label, root.diagnostics-label];
             resources-label: root.resources-label;
             view3d-label: root.view3d-label;
             standard-views: root.standard-view-labels;
@@ -410,7 +396,7 @@ export component YacrWindow inherits Window {
             can-redo: root.work-mode && root.can-redo;
             view-3d: root.view-3d;
             work-mode: root.work-mode;
-            can-open: root.can-open; can-import: root.can-import; can-export: root.can-export;
+            can-open: root.can-open;
             can-trim: root.can-trim; can-switch-backend: root.can-switch-backend;
             draw-status: root.draw-status;
             editing-labels: root.editing-labels;
@@ -433,8 +419,6 @@ export component YacrWindow inherits Window {
                 if id == 6 { root.side-panel-open = !root.side-panel-open; }
                 if (id == 7 && root.view-3d) || (id == 8 && !root.view-3d) { root.toggle-view-mode-requested(); }
                 if id == 9 { root.toggle-projection-requested(); }
-                if id == 10 { root.export-requested(); }
-                if id == 11 { root.import-requested(); }
                 if id == 12 { root.resources-open = false; root.view3d-open = false; root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
                 if id == 13 {
                     root.diagnostics-open = false;
@@ -715,13 +699,13 @@ export component YacrWindow inherits Window {
             tabs: root.ribbon-tabs;
             labels: [root.open-label, root.fit-label, root.undo-label, root.redo-label,
                 root.measure-label, root.tools-label, root.view-2d-label,
-                root.view-3d-label, root.view-projection-label, root.export-label, root.import-label, root.diagnostics-label];
+                root.view-3d-label, root.view-projection-label, root.diagnostics-label];
             resources-label: root.resources-label;
             view3d-label: root.view3d-label;
             measurements: root.measurement-kind-labels;
             standard-views: root.standard-view-labels; backends: root.backend-labels;
             backend-index: root.backend-index; view-3d: root.view-3d; work-mode: root.work-mode;
-            can-open: root.can-open; can-import: root.can-import; can-export: root.can-export;
+            can-open: root.can-open;
             can-trim: root.can-trim; can-switch-backend: root.can-switch-backend;
             editing-labels: root.editing-labels; draw-status: root.draw-status;
             config-tabs: root.ribbon-config-tabs; config-driven: root.ribbon-config-driven;
@@ -740,8 +724,6 @@ export component YacrWindow inherits Window {
                 if id == 6 { root.side-panel-open = !root.side-panel-open; }
                 if (id == 7 && root.view-3d) || (id == 8 && !root.view-3d) { root.toggle-view-mode-requested(); }
                 if id == 9 { root.toggle-projection-requested(); }
-                if id == 10 { root.export-requested(); }
-                if id == 11 { root.import-requested(); }
                 if id == 12 { root.resources-open = false; root.view3d-open = false; root.diagnostics-open = !root.diagnostics-open; root.diagnostics-requested(); }
                 if id == 13 {
                     root.diagnostics-open = false;

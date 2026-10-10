@@ -1,6 +1,58 @@
 # 后续 agent 接手入口
 
-## Linux 客户端端到端验证三项修复 + 真实 GPU 验证（2026-10-10，本轮）
+## 端到端巡检：清理失效的导出/导入控件（2026-10-10，本轮）
+
+用户要求：对 Linux 客户端做端到端测试，找出可能的 bug、修复并提交。
+
+**本轮验证（真实 GPU 优先 + 离屏契约）**
+
+- **真实硬件 GPU**（本机 Wayland + Quadro P620，运行时不设 `VK_ICD_FILENAMES`）：
+  `real_gpu_grid_zoom_axes_acceptance`、`desktop_dwg_event_loop_and_navigation_remain_responsive`、
+  `desktop_dwg_open_after_start_and_interaction_remain_responsive` 各自**独立进程**运行**通过**。
+  注意：这些 ignored 用例必须一个一个跑；同一进程内第二次创建 winit 事件循环会
+  `EventLoop can't be recreated`，属 winit 单例约束，**不是产品缺陷**。
+- **全 workspace 测试**（`--exclude app-android --exclude app-web`）**通过**；`app-linux` 全套
+  （offscreen）**通过**；`verify_ui`、`verify_ui_drawing`、`host_contracts`、`host_config_disk`、
+  `overlay_grid_toggle` **通过**。
+
+**发现的缺陷与修复**
+
+- **导出/导入是“启用但无处理函数”的死按钮**：`app.slint`（顶栏）与 `ribbon.slint`（“文件”页签）
+  仍保留导出（⇧）/导入（⇩）按钮，`can-export`/`can-import` 默认 `true`，但全仓库**没有任何**
+  `on_export_requested`/`on_import_requested` 处理函数——点击静默无响应；其标签属性
+  `export-label`/`import-label` 也从未被赋值（空文本）。批注导入/导出早已随标注能力从产品移除
+  （见下方“标注删除”轮），这里是清理遗漏，违反铁律 2（未支持能力须显式建模，禁止静默空操作）。
+  **修复**：删除 `export-requested`/`import-requested` 回调、顶栏与 ribbon 文件页签的按钮、
+  `cmd-export-visible`/`cmd-import-visible`/`can-export`/`can-import` 属性及其向 `CadRibbon`
+  的透传，以及不再可达的 `action(10)`/`action(11)` 分支；`labels` 数组删除两项，
+  ribbon 中诊断按钮由 `labels[11]` 改为 `labels[9]`。新增 `cad-ui-slint` 单元测试
+  `shell_has_no_dead_export_import_controls` 防回归。
+
+**覆盖补强（无缺陷，锁定行为）**
+
+- `apps/app-linux/tests/overlay_grid_toggle.rs` 由“仅网格”扩为在**单进程内**同时校验网格与
+  **坐标轴**两个状态栏叠加开关真正到达渲染器（开启/关闭双向、仅画布矩形的像素比对）。
+  离屏 Slint 平台的 rendering notifier 是进程级单例（同进程第二个 `LinuxApp::show()` 会
+  `set_rendering_notifier failed`），故两个开关合并为一个测试、共享一个 `LinuxApp`。
+  结果：坐标轴开关与网格同类，均可达渲染器。
+
+**未修复 / 已知项（本轮未处理，记录待评估）**
+
+- 配置字段 `ui.components.navigationToolbar.commands` 被解析却从未被读取（navigation 工具栏只
+  消费 `visible` 布尔）——属静默忽略配置数据的待设计项。
+- `apps/app-linux/src/host/input.rs` 的 MOVE 在提交时读取**当前**选择，而非工具启动时捕获的引用
+  集合；拖拽期间选择若变化会移动不同集合（当前 UI 难以触发）。
+- 50ms 定时器把 `metrics()` 的 `Cancelled`（窗口消失）当失败并写 `linux.failed` 状态，关机路径
+  可能出现短暂的伪造失败文案。
+
+**门禁**（本机）：`cargo fmt --all -- --check`；`cargo clippy --workspace --exclude app-android
+--exclude app-web --all-targets --locked -- -D warnings`；`check-architecture.py`、
+`check-fixture-manifest.py`、`check-workflows.py`、`check-i18n.py`；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 app-web/app-android
+lib）均通过。
+
+## Linux 客户端端到端验证三项修复 + 真实 GPU 验证（2026-10-10）
 
 用户要求：基于当前开发环境用 **Linux 客户端打开文件**做端到端验证；其手动运行发现三处缺陷
 （网格开启不显示、滚轮缩放方向相反、十字/坐标轴左边短）。用户随后要求**验证优先真实硬件 GPU**

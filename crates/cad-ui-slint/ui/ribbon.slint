@@ -53,8 +53,6 @@ export component CadRibbon inherits Rectangle {
     in property <bool> view-3d;
     in property <bool> work-mode;
     in property <bool> can-open: true;
-    in property <bool> can-import: true;
-    in property <bool> can-export: true;
     in property <bool> can-trim: true;
     in property <bool> can-switch-backend: true;
     in property <string> draw-status;
@@ -160,8 +158,6 @@ export component CadRibbon inherits Rectangle {
                 if !root.config-driven && root.tab == 0 : HorizontalBox {
                     alignment: start;
                     Button { text: root.labels[0]; symbol: "▱"; enabled: root.can-open; stacked: true; min-height: 76px; clicked => { root.action(0); } }
-                    Button { text: root.labels[9]; symbol: "⇧"; enabled: root.can-export; stacked: true; min-height: 76px; clicked => { root.action(10); } }
-                    Button { text: root.labels[10]; symbol: "⇩"; enabled: root.can-import && root.work-mode; stacked: true; min-height: 76px; clicked => { root.action(11); } }
                 }
                 if !root.config-driven && root.tab == 1 : HorizontalBox {
                     alignment: start;
@@ -185,7 +181,7 @@ export component CadRibbon inherits Rectangle {
                     HorizontalBox {
                         alignment: start;
                         Button { text: root.labels[5]; symbol: "layers"; min-height: root.target; clicked => { root.action(6); } }
-                        Button { text: root.labels[11]; symbol: "info"; min-height: root.target; clicked => { root.action(12); } }
+                        Button { text: root.labels[9]; symbol: "info"; min-height: root.target; clicked => { root.action(12); } }
                         Button { text: root.resources-label; symbol: "▤"; min-height: root.target; clicked => { root.action(13); } }
                         Button { text: root.view3d-label; symbol: "3d"; min-height: root.target; clicked => { root.action(14); } }
                         ComboBox { model: root.backends; enabled: root.can-switch-backend; current-index: root.backend-index; min-height: root.target; selected(value) => { root.backend(value); } }
