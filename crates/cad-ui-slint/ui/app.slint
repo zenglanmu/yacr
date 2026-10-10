@@ -61,6 +61,10 @@ export component YacrWindow inherits Window {
     // silent no-op (desktop sets it true; web/android leave it false).
     in property <bool> can-new: false;
     callback new-requested();
+    // Host capability for vector plot/export (SVG/PDF). Defaults to false, so a
+    // host without it reports an explicit "unsupported" instead of a no-op.
+    in property <bool> can-plot: false;
+    callback plot-requested();
     in property <bool> can-trim: true;
     in property <bool> can-switch-backend: true;
     callback pan-requested();
@@ -357,7 +361,11 @@ export component YacrWindow inherits Window {
                     return EventResult.accept;
                 }
                 if !event.modifiers.shift && (event.text == "p" || event.text == "P") {
-                    root.shortcut-unsupported("Ctrl+P");
+                    if root.can-plot {
+                        root.plot-requested();
+                    } else {
+                        root.shortcut-unsupported("Ctrl+P");
+                    }
                     return EventResult.accept;
                 }
             }

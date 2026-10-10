@@ -15,6 +15,13 @@ impl UiHandle {
     pub fn set_new_available(&self, available: bool) -> CadResult<()> {
         self.with(|ui| ui.set_can_new(available))
     }
+    /// Host capability for vector plot/export (desktop only).
+    ///
+    /// Hosts without a CPU vector export leave `can-plot` false, so the shell and
+    /// the command line report an explicit unsupported instead of a no-op.
+    pub fn set_plot_available(&self, available: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_can_plot(available))
+    }
     /// Shell-local hit query: floating controls must not be consumed by host touch navigation.
     pub fn canvas_hit_test(&self, point: [f64; 2]) -> CadResult<bool> {
         let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;

@@ -51,12 +51,10 @@ const UNSUPPORTED_COMMANDS: &[&str] = &[
     "MIRROR",
     "MTEXT",
     "OFFSET",
-    "PLOT",
     "PLINE",
     "POINT",
     "POLYGON",
     "POLYLINE",
-    "PRINT",
     "PUBLISH",
     "PURGE",
     "QSAVE",
@@ -191,6 +189,22 @@ fn dispatch_command(
             // explicit unsupported, never a silent no-op.
             if ui.get_can_new() {
                 ui.invoke_new_requested();
+            } else {
+                ui.set_status_label(
+                    messages
+                        .borrow()
+                        .text("command.unsupported", &[("command", canonical)])
+                        .into(),
+                );
+                ui.set_command_expanded(true);
+            }
+            true
+        }
+        "PLOT" => {
+            // Host-owned vector export (SVG/PDF). A host without `can-plot`
+            // reports an explicit unsupported, never a silent no-op.
+            if ui.get_can_plot() {
+                ui.invoke_plot_requested();
             } else {
                 ui.set_status_label(
                     messages

@@ -33,6 +33,7 @@ pub(crate) const SELECTORS: &[(&str, bool)] = &[
     ("OPEN", false),
     ("PAN", false),
     ("PANELS", false),
+    ("PLOT", false),
     ("PROJECTION", false),
     ("REDO", true),
     ("SELECTALL", false),
@@ -91,7 +92,9 @@ pub(crate) const SYNONYMS: &[(&str, &str)] = &[
     ("DESELECT", "CLEAR SELECTION"),
     ("DISTANCE", "MEASURE DISTANCE"),
     ("ENTER", "CONFIRM"),
+    ("EXPORT", "PLOT"),
     ("FIT", "ZOOM EXTENTS"),
+    ("PRINT", "PLOT"),
     ("RIBBON", "TOOLS"),
 ];
 
@@ -275,7 +278,7 @@ mod contracts {
             ">OPEN",
             "NEW",
             "SAVE Drawing.dwg",
-            "PRINT",
+            "PUBLISH",
             "POLYLINE",
             "RECTANGLE",
         ] {
@@ -448,10 +451,10 @@ mod contracts {
         // The dispatcher arms that are words rather than canonical selectors must
         // all be covered by the synonyms table, so no supported word is lost.
         for arm in [
-            "DISTANCE", "ANGLE", "AREA", "FIT", "DESELECT", "ENTER", "RIBBON",
+            "DISTANCE", "ANGLE", "AREA", "FIT", "DESELECT", "ENTER", "RIBBON", "EXPORT", "PRINT",
         ] {
             assert!(synonym_keys.contains(&arm), "missing synonym {arm}");
         }
-        assert_eq!(synonym_keys.len(), 7);
+        assert_eq!(synonym_keys.len(), 9);
     }
 }

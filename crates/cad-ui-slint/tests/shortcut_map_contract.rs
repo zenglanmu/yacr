@@ -42,6 +42,9 @@ fn the_fixed_key_map_declares_its_callback_and_clean_screen_gate() {
         // New blank drawing: host capability + request callback.
         "in property <bool> can-new: false;",
         "callback new-requested();",
+        // Vector plot/export: host capability + request callback.
+        "in property <bool> can-plot: false;",
+        "callback plot-requested();",
     ] {
         assert!(APP.contains(clause), "key map is missing: {clause}");
     }
@@ -74,6 +77,8 @@ fn capture_handler_binds_only_the_global_modifier_and_function_keys() {
         "if event.modifiers.shift && (event.text == \"s\" || event.text == \"S\") {",
         "if !event.modifiers.shift && (event.text == \"s\" || event.text == \"S\") {",
         "if !event.modifiers.shift && (event.text == \"p\" || event.text == \"P\") {",
+        "if root.can-plot {",
+        "root.plot-requested();",
         "root.shortcut-unsupported(\"Ctrl+N\")",
         "root.shortcut-unsupported(\"Ctrl+S\")",
         "root.shortcut-unsupported(\"Ctrl+Shift+S\")",
@@ -191,4 +196,7 @@ fn the_adapter_reports_unsupported_shortcuts_from_the_catalog() {
     // New blank drawing is host-owned: the shell request maps to the command.
     assert!(ADAPTER.contains("on_new_requested"));
     assert!(ADAPTER.contains("CommandId::NewDrawing"));
+    // Vector plot/export is host-owned: the shell request maps to the command.
+    assert!(ADAPTER.contains("on_plot_requested"));
+    assert!(ADAPTER.contains("CommandId::PlotDrawing"));
 }

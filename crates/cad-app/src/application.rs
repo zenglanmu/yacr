@@ -116,13 +116,14 @@ impl Application {
             }
             CommandId::Pan => self.pan(&command),
             CommandId::Zoom => self.zoom(&command),
-            CommandId::OpenDrawing | CommandId::NewDrawing | CommandId::CancelLoading => {
-                Err(CadError::Unsupported(
-                    "file open, new drawing and cancel are performed by the platform host, \
-                     not the application"
-                        .into(),
-                ))
-            }
+            CommandId::OpenDrawing
+            | CommandId::NewDrawing
+            | CommandId::PlotDrawing
+            | CommandId::CancelLoading => Err(CadError::Unsupported(
+                "file open, new drawing, plot export and cancel are performed by the platform \
+                 host, not the application"
+                    .into(),
+            )),
             CommandId::Select => {
                 // Selection is read-only: it stores the picked refs and enters
                 // the Selecting tool state, but never writes the DWG (F05).

@@ -63,6 +63,10 @@ pub enum CommandId {
     /// application layer has no document factory, so it returns `Unsupported`
     /// and a platform host performs the replacement.
     NewDrawing,
+    /// Export the active drawing to a vector file (SVG/PDF). Host-owned like
+    /// `OpenDrawing`: the application layer has no file chooser, so it returns
+    /// `Unsupported` and a platform host performs the export.
+    PlotDrawing,
     CancelLoading,
     Pan,
     Zoom,

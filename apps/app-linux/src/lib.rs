@@ -6,7 +6,7 @@
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 mod host;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-pub use host::{config_file, FilePicker, LinuxApp, LinuxOptions};
+pub use host::{config_file, FilePicker, LinuxApp, LinuxOptions, SavePathProvider};
 
 /// Platform-neutral aliases for the shared desktop host.
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]

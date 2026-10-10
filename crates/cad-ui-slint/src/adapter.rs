@@ -422,6 +422,20 @@ impl UiAdapter {
             });
         }
         {
+            // Vector plot/export is host-owned like open: the shell only emits
+            // the request; a host without `can-plot` reports unsupported first.
+            let s = shared.clone();
+            let doc = document;
+            ui.on_plot_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::PlotDrawing,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+            });
+        }
+        {
             // Cancel a running background open (F01). `CancelLoading` is routed
             // by the host to `HostController::cancel_async_open`; the panel only
             // enables this while a cancellable job is running.

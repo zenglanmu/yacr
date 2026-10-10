@@ -143,4 +143,29 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
     ui.set_can_new(true);
     assert!(ui.invoke_command_submitted("NEW".into()));
     assert_eq!(new_calls.get(), 1, "can-new true fires exactly one request");
+
+    // PLOT is host-owned vector export: `can-plot` false reports the explicit
+    // unsupported text and does not fire; true fires the request. EXPORT/PRINT
+    // are synonyms that resolve to PLOT.
+    let adapter = build_adapter();
+    let ui = adapter.component();
+    adapter.handle().set_locale("en").unwrap();
+    let plot_calls = Rc::new(Cell::new(0));
+    let observed = plot_calls.clone();
+    ui.on_plot_requested(move || observed.set(observed.get() + 1));
+    assert!(ui.invoke_command_submitted("PLOT".into()));
+    assert_eq!(
+        plot_calls.get(),
+        0,
+        "can-plot false must not fire the request"
+    );
+    assert_eq!(
+        ui.get_status_label().to_string(),
+        "Command PLOT is not supported yet."
+    );
+    ui.set_can_plot(true);
+    assert!(ui.invoke_command_submitted("EXPORT".into()));
+    assert_eq!(plot_calls.get(), 1, "EXPORT resolves to PLOT");
+    assert!(ui.invoke_command_submitted("PRINT".into()));
+    assert_eq!(plot_calls.get(), 2, "PRINT resolves to PLOT");
 }

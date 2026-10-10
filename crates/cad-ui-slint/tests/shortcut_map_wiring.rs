@@ -102,4 +102,25 @@ fn fixed_keymap_reaches_adapter_config_and_localized_feedback() {
         "Shortcut Ctrl+N has no supported action yet.",
         "a successful Ctrl+N must not also report unsupported"
     );
+
+    // Ctrl+P is gated by `can-plot`: false → explicit unsupported; true → the
+    // host plot request fires.
+    ui.set_can_plot(false);
+    control(ui, "p");
+    assert_eq!(
+        ui.get_status_label().to_string(),
+        "Shortcut Ctrl+P has no supported action yet."
+    );
+    let plot_calls = Rc::new(Cell::new(0));
+    let observed = plot_calls.clone();
+    ui.on_plot_requested(move || observed.set(observed.get() + 1));
+    ui.set_status_label("sentinel".into());
+    ui.set_can_plot(true);
+    control(ui, "p");
+    assert_eq!(plot_calls.get(), 1, "can-plot true fires one plot request");
+    assert_ne!(
+        ui.get_status_label().to_string(),
+        "Shortcut Ctrl+P has no supported action yet.",
+        "a successful Ctrl+P must not also report unsupported"
+    );
 }

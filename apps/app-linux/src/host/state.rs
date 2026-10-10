@@ -49,6 +49,8 @@ impl Runtime {
         // Desktop hosts a document factory, so New is available unless an open
         // is in flight; web/android never call this and keep `can-new` false.
         handle.set_new_available(!self.loading())?;
+        // Desktop renders CPU vector plots; web/android leave `can-plot` false.
+        handle.set_plot_available(!self.loading())?;
         handle.set_document_name(&c.document_name_hint)?;
         handle.set_history_availability(c.history_availability())?;
         handle.set_mode(c.mode())?;

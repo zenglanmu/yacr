@@ -20,6 +20,9 @@ mod validation;
 
 /// A chooser run on a worker; cancellation must return `CadError::Cancelled`.
 pub type FilePicker = Arc<dyn Fn() -> CadResult<PathBuf> + Send + Sync>;
+/// A save-path chooser; receives the suggested default file name and returns the
+/// target path. Cancellation must return `CadError::Cancelled`.
+pub type SavePathProvider = Arc<dyn Fn(&str) -> CadResult<PathBuf> + Send + Sync>;
 type PendingOpen = Rc<RefCell<Option<std::sync::mpsc::Receiver<CadResult<PathBuf>>>>>;
 
 struct PendingRead {
@@ -27,6 +30,13 @@ struct PendingRead {
     label: String,
     drawing: Arc<cad_db::DrawingDatabase>,
     cancelled: bool,
+}
+
+/// Outcome of a vector export: how many items the vector document could not
+/// represent (unshaped text, unsupported images, ...). A non-zero count means
+/// the export is partial and must not be reported as a clean success.
+struct PlotOutcome {
+    dropped: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -130,8 +140,13 @@ struct Runtime {
     /// Resolved user-preference path (`--preferences` or the XDG default).
     preference_path: Option<PathBuf>,
     picker: FilePicker,
+    /// Save-path chooser for the vector plot export (SVG/PDF).
+    saver: SavePathProvider,
     pending_open: PendingOpen,
     pending_read: Rc<RefCell<Option<PendingRead>>>,
+    /// Pending save-path chooser result for the vector plot export. The dialog
+    /// runs on a worker so it never freezes the UI thread; `poll_plot` drains it.
+    pending_save: Rc<RefCell<Option<std::sync::mpsc::Receiver<CadResult<PathBuf>>>>>,
     /// Path of the drawing being opened (or already open), used to resolve its
     /// sibling raster images. `None` until a document is opened.
     drawing_path: Rc<RefCell<Option<PathBuf>>>,
@@ -201,6 +216,10 @@ impl Runtime {
     }
     fn execute(&self, command: Command) -> CadResult<()> {
         self.metrics()?;
+        // Plot owns its own success/failure status (plot.exported /
+        // plot.export_failed); the generic completed/failed text must not
+        // overwrite it.
+        let plot_owns_status = command.id == CommandId::PlotDrawing;
         let result: CadResult<Option<CommandOutcome>> = match command.id {
             CommandId::CancelLoading => {
                 if let Some(read) = self.pending_read.borrow_mut().as_mut() {
@@ -211,6 +230,7 @@ impl Runtime {
             }
             CommandId::OpenDrawing => self.request_open().map(|_| None),
             CommandId::NewDrawing => self.request_new().map(|_| None),
+            CommandId::PlotDrawing => self.request_plot().map(|_| None),
             CommandId::SwitchBackend => Err(CadError::Unsupported(
                 self.message("linux.backend_unavailable", &[]),
             )),
@@ -218,12 +238,15 @@ impl Runtime {
         };
         self.push()?;
         if let Err(error) = &result {
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                handle
-                    .set_status(self.message("linux.failed", &[("error", &error.to_string())]))?;
+            if !plot_owns_status {
+                if let Some(handle) = self.handle.borrow().as_ref() {
+                    handle.set_status(
+                        self.message("linux.failed", &[("error", &error.to_string())]),
+                    )?;
+                }
             }
         }
-        if result.is_ok() && !self.loading() {
+        if result.is_ok() && !self.loading() && !plot_owns_status {
             if let Some(handle) = self.handle.borrow().as_ref() {
                 // A no-op fit (empty drawing) carries the `fit.empty` code; show
                 // that instead of the generic "completed", never a fake success.
@@ -285,6 +308,213 @@ impl Runtime {
             handle.cancel_draw_capture()?;
         }
         Ok(())
+    }
+
+    /// Export the active drawing to a vector file (SVG/PDF), host-owned.
+    ///
+    /// The save path comes from the injected `saver` (a native save dialog in
+    /// the real app). The dialog runs on a worker thread so it never freezes the
+    /// UI; [`Runtime::poll_plot`] drains the result on the timer. The format is
+    /// decided by the chosen extension: `.svg`/`.pdf` render on the CPU vector
+    /// path; `.png` is an explicit refusal (GUI PNG needs surface readback,
+    /// which the CLI does); anything else fails.
+    fn request_plot(&self) -> CadResult<()> {
+        if self.loading() || self.pending_save.borrow().is_some() {
+            let busy = self.message("linux.busy", &[]);
+            self.report_plot_failed(&busy)?;
+            return Err(CadError::Unsupported(busy));
+        }
+        let hint = self.controller.borrow().document_name_hint.clone();
+        let stem = Path::new(&hint)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("drawing");
+        let default_name = format!("{stem}.svg");
+        let saver = self.saver.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("linux-plot-save".into())
+            .spawn(move || {
+                let _ = sender.send(saver(&default_name));
+            });
+        if let Err(error) = spawned {
+            self.report_plot_failed(&error.to_string())?;
+            return Err(CadError::InvalidInput(error.to_string()));
+        }
+        *self.pending_save.borrow_mut() = Some(receiver);
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            handle.set_status(self.message("plot.picker_waiting", &[]))?;
+        }
+        Ok(())
+    }
+
+    /// Drain a finished save dialog and perform the export.
+    ///
+    /// Runs on the timer; it always sets an explicit status and never returns an
+    /// error the timer would turn into a generic failure. A cancel writes
+    /// nothing and reports the cancel, not a failure.
+    fn poll_plot(&self) -> CadResult<()> {
+        use std::sync::mpsc::TryRecvError;
+        let result = match self.pending_save.borrow().as_ref().map(|rx| rx.try_recv()) {
+            None | Some(Err(TryRecvError::Empty)) => return Ok(()),
+            Some(Ok(result)) => result,
+            Some(Err(TryRecvError::Disconnected)) => Err(CadError::InvalidInput(
+                self.message("plot.picker_empty", &[]),
+            )),
+        };
+        *self.pending_save.borrow_mut() = None;
+        let status = match result {
+            // A closed dialog is a cancel, not a failure.
+            Err(CadError::Cancelled) => self.message("plot.cancelled", &[]),
+            Err(error) => self.message("plot.export_failed", &[("reason", &error.to_string())]),
+            Ok(path) => match self.export_plot(&path) {
+                // Clean success only when nothing was dropped; a partial export
+                // is reported as such, never as a clean success.
+                Ok(outcome) if outcome.dropped == 0 => {
+                    self.message("plot.exported", &[("path", &path.display().to_string())])
+                }
+                Ok(outcome) => self.message(
+                    "plot.exported_partial",
+                    &[
+                        ("path", &path.display().to_string()),
+                        ("count", &outcome.dropped.to_string()),
+                    ],
+                ),
+                Err(error) => self.message("plot.export_failed", &[("reason", &error.to_string())]),
+            },
+        };
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            handle.set_status(status)?;
+        }
+        Ok(())
+    }
+
+    fn report_plot_failed(&self, reason: &str) -> CadResult<()> {
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            handle.set_status(self.message("plot.export_failed", &[("reason", reason)]))?;
+        }
+        Ok(())
+    }
+
+    /// Render and atomically write the vector export selected by `path`'s
+    /// extension. Never writes a vector document into a `.png` name.
+    ///
+    /// Builds the vector document explicitly (rather than through the
+    /// bytes-only `render_plot_*` entry points) so completeness/diagnostics are
+    /// not dropped: unshaped text and unsupported images are counted and
+    /// reported as a partial export by the caller.
+    fn export_plot(&self, path: &Path) -> CadResult<PlotOutcome> {
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if extension == "png" {
+            return Err(CadError::Unsupported(
+                self.message("plot.png_cli_only", &[]),
+            ));
+        }
+        if extension.is_empty() {
+            return Err(CadError::InvalidInput(
+                self.message("plot.no_extension", &[]),
+            ));
+        }
+        if extension != "svg" && extension != "pdf" {
+            return Err(CadError::InvalidInput(
+                self.message("plot.unknown_format", &[("ext", &extension)]),
+            ));
+        }
+        let (database, layout) = self.plot_layout()?;
+        let registry = cad_representation::ProviderRegistry::with_default_provider();
+        let context = self.plot_context()?;
+        let record = database.plot_settings_for(layout);
+        // 96 DPI is a nominal vector resolution; SVG/PDF carry the physical page
+        // size, not the raster size.
+        let page = cad_representation::plan_plot_for_record(
+            &record,
+            cad_representation::PlotTarget::Dpi(96.0),
+        )?;
+        let representation =
+            cad_representation::build_paper_space(&registry, &database, layout, &context, &|_| {
+                true
+            })?;
+        let document = cad_representation::build_vector_document(&representation, &page)?;
+        let dropped = document.diagnostics.len();
+        let bytes = if extension == "svg" {
+            cad_representation::render_svg(&document)?
+        } else {
+            cad_representation::render_pdf(&document)?
+        };
+        if bytes.is_empty() {
+            return Err(CadError::InvalidInput(
+                self.message("plot.empty_output", &[]),
+            ));
+        }
+        atomic_write(path, &bytes)?;
+        Ok(PlotOutcome { dropped })
+    }
+
+    /// The database clone and default layout to plot: the sheet with the most
+    /// viewports, else the first, excluding the synthesised model-space
+    /// `LayoutId(0)` "Model" (model space is not a sheet).
+    ///
+    /// Drift risk (P6): the CLI keeps an equivalent `select_plot_layout`
+    /// (`crates/cad-cli-tools/src/ops.rs`). The two must stay behaviourally
+    /// identical; a shared helper would need to live in `cad-representation`,
+    /// which is out of scope for this bounded change, so the duplication is
+    /// documented rather than silently diverging.
+    fn plot_layout(&self) -> CadResult<(cad_db::DrawingDatabase, cad_domain::LayoutId)> {
+        let drawing = self
+            .controller
+            .borrow()
+            .drawing()
+            .ok_or_else(|| CadError::InvalidInput(self.message("plot.no_document", &[])))?;
+        let descriptors: Vec<_> = cad_representation::enumerate_layouts(drawing.as_ref())
+            .into_iter()
+            .filter(|d| !(d.id == cad_domain::LayoutId(0) && d.name == "Model"))
+            .collect();
+        if descriptors.is_empty() {
+            return Err(CadError::InvalidInput(self.message("plot.no_layout", &[])));
+        }
+        let id = match descriptors.iter().max_by_key(|d| d.viewport_count) {
+            Some(richest) if richest.viewport_count > 0 => richest.id,
+            _ => descriptors[0].id,
+        };
+        Ok(((*drawing).clone(), id))
+    }
+
+    /// The representation context for plotting, with the desktop font engine so
+    /// text is shaped exactly as the render path shapes it.
+    fn plot_context(&self) -> CadResult<cad_representation::RepresentationContext> {
+        let (document, generation, requested) = {
+            let controller = self.controller.borrow();
+            (
+                controller.document_id,
+                controller.session.generation,
+                controller
+                    .drawing()
+                    .map(|drawing| cad_platform::fonts::requested_fonts(drawing.as_ref()))
+                    .unwrap_or_default(),
+            )
+        };
+        let mut context = cad_representation::RepresentationContext::new(
+            document,
+            cad_domain::TolerancePolicy::default(),
+            cad_domain::TaskStamp::new(document, generation),
+        );
+        let exe = std::env::current_exe().unwrap_or_default();
+        let font_dir = fonts::resolve_font_dir(self.options.fonts_dir.as_deref(), &exe)?;
+        let system_default = fonts::cached_system_default_candidates();
+        if let Some(engine) = fonts::load_desktop_fonts(
+            font_dir.as_deref(),
+            &requested,
+            &self.options.fonts,
+            system_default,
+        )? {
+            context = context.with_fonts(engine);
+        }
+        Ok(context)
     }
 
     fn poll_open(&self) -> CadResult<()> {
@@ -579,10 +809,32 @@ pub struct LinuxApp {
 impl LinuxApp {
     pub fn new(options: LinuxOptions) -> CadResult<Self> {
         let locale = options.locale.clone();
-        Self::new_with_file_picker(options, Arc::new(move || file_picker::pick(&locale)))
+        let save_locale = options.locale.clone();
+        Self::new_with_providers(
+            options,
+            Arc::new(move || file_picker::pick(&locale)),
+            Arc::new(move |default_name: &str| file_picker::pick_save(&save_locale, default_name)),
+        )
     }
-    /// Construct with a host-supplied chooser, including deterministic contract tests.
+    /// Construct with a host-supplied open chooser, including deterministic contract tests.
     pub fn new_with_file_picker(options: LinuxOptions, picker: FilePicker) -> CadResult<Self> {
+        let locale = options.locale.clone();
+        Self::new_with_providers(
+            options,
+            picker,
+            Arc::new(move |default_name: &str| file_picker::pick_save(&locale, default_name)),
+        )
+    }
+    /// Construct with host-supplied open **and** save choosers.
+    ///
+    /// The save chooser receives the suggested default file name and returns the
+    /// target path; contract tests inject a temp path here so the export never
+    /// opens a real dialog.
+    pub fn new_with_providers(
+        options: LinuxOptions,
+        picker: FilePicker,
+        saver: SavePathProvider,
+    ) -> CadResult<Self> {
         let config_path = options
             .config
             .clone()
@@ -601,8 +853,10 @@ impl LinuxApp {
             options: options.clone(),
             preference_path: preference_path.clone(),
             picker,
+            saver,
             pending_open: Rc::new(RefCell::new(None)),
             pending_read: Rc::new(RefCell::new(None)),
+            pending_save: Rc::new(RefCell::new(None)),
             drawing_path: Rc::new(RefCell::new(None)),
             last_image_report: Rc::new(RefCell::new(None)),
             presenting_open: Rc::new(std::cell::Cell::new(false)),
@@ -707,6 +961,7 @@ impl LinuxApp {
             move || {
                 if let Err(error) = rt
                     .poll_open()
+                    .and_then(|_| rt.poll_plot())
                     .and_then(|_| rt.metrics())
                     .and_then(|_| rt.sync_view())
                 {

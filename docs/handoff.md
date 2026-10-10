@@ -1,6 +1,56 @@
 # 后续 agent 接手入口
 
-## 新建空白图纸（New）——桌面端（2026-10-10，本轮）
+## 矢量打印/导出 SVG + PDF——桌面端（2026-10-10，本轮）
+
+用户要求：桌面宿主端到端实现 GUI 打印/导出 SVG 与 PDF（纯 CPU 矢量路径，不经 GPU），
+接到命令行与 Ctrl+P；仅 SVG/PDF，DXF 另轮。web/android 必须仍可编译且显式不支持。
+
+- 命令层：新增 `CommandId::PlotDrawing`（`requires_work_mode = false`）。与 `OpenDrawing`/
+  `NewDrawing` 一样属**宿主自有**：`Application::execute` 返回 `Unsupported`，由平台宿主接管。
+- UI/命令入口：`app.slint` 新增 `in property <bool> can-plot: false;` 与 `callback plot-requested();`；
+  Ctrl+P 在 `can-plot` 时发 `plot-requested()`，否则 `shortcut-unsupported("Ctrl+P")`。命令行
+  `PLOT` 加入 `SELECTORS`（work-mode false），`EXPORT`/`PRINT` 作为 `SYNONYMS` 解析到 `PLOT`；
+  三者从 `UNSUPPORTED_COMMANDS` 移除。分发时 `!can-plot` → 显式 `command.unsupported`，否则
+  `invoke_plot_requested()`；adapter 将 `plot-requested` 映射到 `CommandId::PlotDrawing`。
+  web/android 不设置 `can-plot`，保持默认 `false`。
+- 宿主导出（app-linux）：新增可注入的保存路径选择器 `SavePathProvider`
+  （`Arc<dyn Fn(&str)->CadResult<PathBuf>>`，`LinuxApp::new_with_providers`）。真实桌面保存对话框：
+  **Linux 用 ashpd 门户 `SaveFile`**（与打开选择器同一 XDG portal 风格，含 `current_name`/过滤），
+  **Windows/macOS 用 `rfd::FileDialog::save_file()`**；默认文件名为当前文档名 + `.svg`。测试注入
+  临时路径，不弹窗。保存对话框在**工作线程**上运行（复用 `pending_open`/`poll_open` 的 worker +
+  定时器轮询模式），不阻塞 UI 线程；取消安全：取消不写文件、不改失败状态。
+- 格式按所选扩展名：`.svg`/`.pdf` 显式构建矢量文档
+  （`ProviderRegistry::with_default_provider()` + `RepresentationContext`（带桌面字体引擎）+
+  `plan_plot_for_record` → `build_paper_space` → `build_vector_document` → `render_svg`/`render_pdf`，
+  `enumerate_layouts` 选默认布局：排除 Model、取视口最多者，否则第一个），随后 `atomic_write`；
+  **不再走只返回字节、会丢弃 completeness/diagnostics 的 `render_plot_svg`/`render_plot_pdf`**：
+  未成形文字、未支持图像等按 `document.diagnostics.len()` 计数，非零时状态为
+  `plot.exported_partial`（含“{count} 项未表达”），绝不把部分导出报成干净成功；仅当无丢弃项才
+  报 `plot.exported`。`.png` 显式拒绝（GUI PNG 需表面回读，请用 CLI `plot --png`），无扩展名
+  用 `plot.no_extension` 显式失败，其它扩展名用 `plot.unknown_format` 显式失败。无布局或空输出
+  显式失败，绝不写空成功，也绝不把矢量内容写进 `.png` 名。
+- 新增 i18n（两份 catalog 一致）：`plot.exported`、`plot.exported_partial`、`plot.export_failed`、
+  `plot.cancelled`、`plot.save_title`、`plot.save_filter`、`plot.picker_waiting`、`plot.picker_empty`、
+  `plot.png_cli_only`、`plot.unknown_format`、`plot.no_extension`、`plot.empty_output`、
+  `plot.no_layout`、`plot.no_document`。
+- 已知漂移风险（P6）：GUI 的 `plot_layout`/`plot_context` 与 CLI 的 `select_plot_layout`/
+  `representation_context` 行为等价但为两份实现；提取共享 helper 需落在 `cad-representation`，
+  超出本轮范围，故在源码注释中记录而非静默分叉。
+
+验证（本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web/android lib）；
+`check-i18n.py`（266 键）、`check-architecture.py`；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（14 通过 / 0 失败 / 4 忽略）。
+新增合成契约：app-linux `plot_export`（注入保存路径，打开合成 plot fixture `fixtures/plot/a4-layout.dwg`
+后导出 SVG/PDF，断言 SVG 含真实描边几何、PDF 含 `stream`/`xref`；`.txt` 未知扩展名显式拒绝且不落盘；
+取消返回 `Cancelled` 时无文件、状态为 `plot.cancelled` 而非失败）；cad-ui-slint 命令行
+`PLOT`/`EXPORT`/`PRINT` 的 `can-plot` 门控与 Ctrl+P 门控、源码契约更新。均为合成/离屏证据，
+未做真实窗口、真实 GPU、真实保存对话框、浏览器或真机验收。
+
+## 新建空白图纸（New）——桌面端（2026-10-10）
 
 用户要求：端到端实现“新建空白图纸”，接到命令行与 Ctrl+N；仅桌面（app-linux）为宿主，
 web/android 必须仍可编译且**显式不支持**，不得静默无操作。
