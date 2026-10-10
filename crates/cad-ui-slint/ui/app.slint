@@ -273,6 +273,12 @@ export component YacrWindow inherits Window {
     callback clear-selection-requested();
     // Delete the current selection (ERASE). Work-only at the command layer.
     callback erase-requested();
+    // In-app entity clipboard (Ctrl+C/X/V). This is an in-process clipboard, not
+    // the OS/system clipboard; the command layer refuses an empty selection or
+    // an empty paste explicitly.
+    callback copy-requested();
+    callback cut-requested();
+    callback paste-requested();
     callback layout-selected(int);
     // Desktop status-bar overlay toggles: the overlay key ("axes"/"grid"/
     // "snapHints"/"selectionHighlight") plus the new value.
@@ -435,16 +441,18 @@ export component YacrWindow inherits Window {
                 // Text editors get first refusal for their own local select-all.
                 root.select-all-requested(); return EventResult.accept;
             }
-            // Clipboard keys keep editor first refusal; with no editor the
-            // capability does not exist yet, so report it explicitly.
+            // In-app clipboard (never the OS clipboard). A focused text editor
+            // gets first refusal for its own clipboard; with no editor these run
+            // the real commands. An empty selection/clipboard is refused by the
+            // command layer, never a silent no-op.
             if !event.modifiers.shift && (event.text == "c" || event.text == "C") {
-                root.shortcut-unsupported("Ctrl+C"); return EventResult.accept;
+                root.copy-requested(); return EventResult.accept;
             }
             if !event.modifiers.shift && (event.text == "x" || event.text == "X") {
-                root.shortcut-unsupported("Ctrl+X"); return EventResult.accept;
+                root.cut-requested(); return EventResult.accept;
             }
             if !event.modifiers.shift && (event.text == "v" || event.text == "V") {
-                root.shortcut-unsupported("Ctrl+V"); return EventResult.accept;
+                root.paste-requested(); return EventResult.accept;
             }
             if (event.text == "z" || event.text == "Z") && root.work-mode {
                 if event.modifiers.shift && root.can-redo {

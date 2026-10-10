@@ -22,6 +22,8 @@ pub(crate) const SELECTORS: &[(&str, bool)] = &[
     ("CLEAR SELECTION", false),
     ("CONFIRM", true),
     ("COPY", true),
+    ("COPYCLIP", false),
+    ("CUTCLIP", true),
     ("DIAGNOSTICS", false),
     ("ERASE", true),
     ("EXTEND", true),
@@ -38,6 +40,7 @@ pub(crate) const SELECTORS: &[(&str, bool)] = &[
     ("OPEN", false),
     ("PAN", false),
     ("PANELS", false),
+    ("PASTECLIP", true),
     ("PLOT", false),
     ("PROJECTION", false),
     ("REDO", true),
@@ -325,7 +328,10 @@ mod contracts {
                 "{selector}"
             );
         }
-        assert_eq!(suggestions("c", false), vec!["CANCEL", "CLEAR SELECTION"]);
+        assert_eq!(
+            suggestions("c", false),
+            vec!["CANCEL", "CLEAR SELECTION", "COPYCLIP"]
+        );
         assert_eq!(suggestions("o", false), vec!["OPEN"]);
         assert_eq!(suggestions("view", false).len(), SUGGESTION_LIMIT);
         assert!(suggestions("measure", false).is_empty());

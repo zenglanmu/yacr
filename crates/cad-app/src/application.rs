@@ -188,6 +188,9 @@ impl Application {
             | CommandId::RotateEntities
             | CommandId::ScaleEntities
             | CommandId::MirrorEntities
+            | CommandId::CopyToClipboard
+            | CommandId::CutToClipboard
+            | CommandId::PasteFromClipboard
             | CommandId::SetActiveLayer => self.drawing_command(session, &command),
         }
     }

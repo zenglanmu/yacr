@@ -332,6 +332,21 @@ fn dispatch_command(
             ui.invoke_erase_requested();
             true
         }
+        // In-app clipboard word commands. COPYCLIP is a read-only capture
+        // (allowed in Viewer); CUTCLIP/PASTECLIP refuse in Viewer at the command
+        // layer. Ctrl+C/X/V are the primary shortcuts.
+        "COPYCLIP" => {
+            ui.invoke_copy_requested();
+            true
+        }
+        "CUTCLIP" => {
+            ui.invoke_cut_requested();
+            true
+        }
+        "PASTECLIP" => {
+            ui.invoke_paste_requested();
+            true
+        }
         // AutoCAD convention: CONFIRM/ENTER acts on whatever command is
         // currently active, not only a draw/edit capture.
         "CONFIRM" | "ENTER" => {

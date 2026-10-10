@@ -141,11 +141,12 @@ pub trait DrawPreviewSink: 'static {
 
 /// Localize the error a [`DrawCommandSink`]/command layer returned.
 ///
-/// Permission is the Viewer refusal (`docs/drawing-edit.md` §2); a TRIM with no
-/// intersection is reported as `InvalidInput("... no intersection ...")` by the
-/// command layer and gets the dedicated "no intersection" text; an unsupported
-/// geometry is `Unsupported`. Everything else keeps the real reason, never a
-/// fake success.
+/// Permission is the Viewer refusal (`docs/drawing-edit.md` §2); a TRIM/EXTEND
+/// with no intersection is reported as `InvalidInput("... no intersection ...")`
+/// by the command layer and gets the dedicated "no intersection" text; a
+/// clipboard capture with no selection and an empty-clipboard paste get their own
+/// explicit texts; an unsupported geometry is `Unsupported`. Everything else
+/// keeps the real reason, never a fake success.
 pub fn draw_error_text(messages: &MessageSource, error: &CadError) -> String {
     match error {
         CadError::PermissionDenied => messages.text("draw.error.read_only", &[]),
@@ -153,11 +154,16 @@ pub fn draw_error_text(messages: &MessageSource, error: &CadError) -> String {
             messages.text("draw.error.unsupported", &[("reason", reason)])
         }
         CadError::InvalidInput(reason) => {
-            // The command layer's no-intersection refusal is a distinct,
-            // user-facing case; detect it by its stable phrase so the shell does
-            // not genericise it away.
-            if reason.to_ascii_lowercase().contains("no intersection") {
+            // Stable phrases from the command layer select a dedicated,
+            // user-facing message; anything else keeps its real reason so the
+            // shell never genericises a specific refusal away.
+            let lower = reason.to_ascii_lowercase();
+            if lower.contains("no intersection") {
                 messages.text("draw.error.no_intersection", &[])
+            } else if lower.contains("clipboard is empty") {
+                messages.text("draw.error.clipboard_empty", &[])
+            } else if lower.contains("non-empty selection") {
+                messages.text("draw.error.selection_required", &[])
             } else {
                 messages.text("draw.error.invalid", &[("reason", reason)])
             }

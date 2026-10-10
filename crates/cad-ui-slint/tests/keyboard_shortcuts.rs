@@ -76,6 +76,9 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     record!(on_pan_requested, "pan");
     record!(on_diagnostics_closed, "close-diagnostics");
     record!(on_clear_selection_requested, "clear-selection");
+    record!(on_copy_requested, "copy");
+    record!(on_cut_requested, "cut");
+    record!(on_paste_requested, "paste");
     ui.show().unwrap();
     offscreen::snapshot(ui.window()).unwrap();
     click(&ui, ui.get_cad_left() + 100.0, ui.get_cad_top() + 100.0);
@@ -248,9 +251,6 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     ] {
         press(&ui, key);
     }
-    control(&ui, "c", false);
-    control(&ui, "x", false);
-    control(&ui, "v", false);
     assert_eq!(
         &*unsupported.borrow(),
         &[
@@ -267,14 +267,7 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
             "F10",
             "F11",
             "F12",
-            "Ctrl+C",
-            "Ctrl+X",
-            "Ctrl+V",
         ]
-    );
-    assert_eq!(
-        ui.get_status_label().to_string(),
-        "Shortcut Ctrl+V has no supported action yet."
     );
     assert!(ui.get_command_expanded());
     assert_eq!(
@@ -282,6 +275,14 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
         cad_calls_before,
         "unsupported keys must not fire CAD callbacks"
     );
+
+    // Ctrl+C/X/V now run the real in-app clipboard callbacks (recorded in
+    // `calls`); they are not unsupported shortcuts any more.
+    control(&ui, "c", false);
+    control(&ui, "x", false);
+    control(&ui, "v", false);
+    assert_eq!(&*calls.borrow(), &["copy", "cut", "paste"]);
+    calls.borrow_mut().clear();
     // Restore the collapsed command row so the geometry-based click below still
     // lands on the LineEdit.
     ui.set_command_expanded(false);
@@ -291,6 +292,15 @@ fn shortcuts_gate_real_callbacks_and_preserve_text_entry() {
     for character in "hello world".chars() {
         press(&ui, character.to_string());
     }
+    // With the command editor focused it owns Ctrl+C/X/V (its own local
+    // clipboard); the in-app entity clipboard must not fire while typing.
+    control(&ui, "c", false);
+    control(&ui, "x", false);
+    control(&ui, "v", false);
+    assert!(
+        calls.borrow().is_empty(),
+        "a focused editor must own clipboard keys, not the CAD clipboard"
+    );
     press(&ui, Key::Return);
     assert_eq!(&*submitted.borrow(), &["hello world"]);
     press(&ui, "x");

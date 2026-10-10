@@ -112,6 +112,7 @@
   "draw.error.unknown_geometry": "Unknown or unsupported geometry",
   "draw.error.unsupported": "Unsupported geometry: {reason}",
   "draw.error.no_intersection": "No intersection: cannot complete the operation",
+  "draw.error.clipboard_empty": "Clipboard is empty: nothing to paste",
   "draw.error.invalid": "Invalid input: {reason}",
   "draw.error.failed": "Draw failed: {reason}",
   "draw.error.unwired": "Draw command not wired: host provides no draw command sink",

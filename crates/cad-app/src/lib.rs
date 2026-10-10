@@ -142,6 +142,15 @@ pub enum CommandId {
     /// Mirror the current selection across the line through two points, keeping
     /// the originals and adding mirrored copies in one transaction. Work-only.
     MirrorEntities,
+    /// Capture the current selection into the in-process clipboard. Read-only
+    /// (the drawing and history are untouched), so it is allowed in Viewer too.
+    CopyToClipboard,
+    /// Capture the current selection into the clipboard, then delete it in one
+    /// transaction and one undo step. Work-only.
+    CutToClipboard,
+    /// Insert fresh-id clones of the clipboard entities at their original
+    /// coordinates in one transaction (PASTEORIG). Work-only.
+    PasteFromClipboard,
     /// Set the session's active layer for new drawing entities. Session state
     /// only; no database write. Work-only.
     SetActiveLayer,
@@ -166,6 +175,8 @@ impl CommandId {
                 | Self::RotateEntities
                 | Self::ScaleEntities
                 | Self::MirrorEntities
+                | Self::CutToClipboard
+                | Self::PasteFromClipboard
                 | Self::SetActiveLayer
         )
     }
@@ -177,6 +188,17 @@ pub struct Document {
     pub identity: DocumentIdentity,
     pub units: UnitContext,
     pub resource_keys: Vec<String>,
+}
+
+/// One entity captured into the in-process clipboard.
+///
+/// The [`DbEntity`] carries the row; [`cad_db::EntityDisplayState`] carries the
+/// per-entity render attributes and dynamic-visibility membership the row does
+/// **not**, so a paste preserves exactly what a cut's undo would restore.
+#[derive(Debug, Clone)]
+pub struct ClipboardEntry {
+    pub entity: cad_db::DbEntity,
+    pub display: cad_db::EntityDisplayState,
 }
 
 #[derive(Debug, Clone)]
@@ -211,6 +233,15 @@ pub struct SessionState {
     /// Set when a measurement is evaluated (auto-completed or explicitly
     /// confirmed). Cleared when the session is rebuilt for new content.
     last_measurement: Option<MeasurementRecord>,
+    /// In-process entity clipboard (Phase 8).
+    ///
+    /// Holds clones of the selected entities (with their display state); it is
+    /// **never** the OS/system clipboard. It is cleared whenever the document
+    /// content is replaced (`HostController::reset_for_new_content` rebuilds the
+    /// session), so a paste can never cross documents. Ctrl+C/X capture here;
+    /// Ctrl+V inserts fresh-id clones at their original coordinates (PASTEORIG
+    /// semantics).
+    clipboard: Vec<ClipboardEntry>,
 }
 
 /// CAD backend preference shared by UI, app state and hosts (spec §6).
@@ -234,6 +265,7 @@ impl SessionState {
             backend: BackendChoice::Auto,
             active_layer: LayerId(0),
             last_measurement: None,
+            clipboard: Vec::new(),
         }
     }
 
@@ -265,6 +297,13 @@ impl SessionState {
     pub fn cancel_tool(&mut self) -> CadResult<()> {
         self.tool = ToolState::Idle;
         Ok(())
+    }
+
+    /// Number of entities currently held in the in-process clipboard.
+    ///
+    /// Pure getter; reading it never captures or mutates anything.
+    pub fn clipboard_len(&self) -> usize {
+        self.clipboard.len()
     }
 
     /// The last structured measurement result, if one has been confirmed.

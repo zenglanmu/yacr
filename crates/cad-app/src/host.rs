@@ -911,6 +911,21 @@ mod tests {
     }
 
     #[test]
+    fn replacing_the_document_clears_the_in_process_clipboard() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let drawing = controller.drawing().unwrap();
+        let entity = drawing.model_space()[0].to_owned();
+        let display = drawing.entity_display_state(entity.id);
+        controller.session.clipboard = vec![crate::ClipboardEntry { entity, display }];
+        assert_eq!(controller.session.clipboard_len(), 1);
+
+        // New content rebuilds the session; the same reset path runs on a
+        // successful open, so a paste can never carry entities across documents.
+        controller.new_blank_document().unwrap();
+        assert_eq!(controller.session.clipboard_len(), 0);
+    }
+
+    #[test]
     fn new_blank_document_has_layer_zero_and_no_extent() {
         let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
         // Make the demo dirty so the content reset is observable.

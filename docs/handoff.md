@@ -1,6 +1,62 @@
 # 后续 agent 接手入口
 
-## 三个选择变换命令：ROTATE / SCALE / MIRROR（2026-10-11，本轮）
+## 应用内实体剪贴板：Ctrl+C / Ctrl+X / Ctrl+V（2026-10-11，本轮）
+
+用户要求：实现应用内（in-app）实体剪贴板——Ctrl+C 复制、Ctrl+X 剪切、Ctrl+V 粘贴；**仅进程内**，
+不使用操作系统/系统剪贴板；无跨进程粘贴。
+
+- 命令层：新增 `CommandId::CopyToClipboard`（Viewer 与 Work 均可，只读捕获）、
+  `CommandId::CutToClipboard`（work-only）、`CommandId::PasteFromClipboard`（work-only）；payload 均为
+  `None`。剪贴板内容存于 `SessionState.clipboard: Vec<DbEntity>`（进程内克隆）。
+- 语义：
+  - Ctrl+C / COPYCLIP：把当前选择克隆进剪贴板；**不**修改数据库、**不**开事务、**不**记撤销。
+    空选择 → 显式 `InvalidInput` 拒绝。
+  - Ctrl+X / CUTCLIP：先捕获进剪贴板，再在一次事务 + 一步撤销内删除选择（复用 Phase-5 的删除/patch
+    路径，撤销会连同渲染属性与动态可见性成员一起恢复）。空选择在捕获前即显式拒绝。
+  - Ctrl+V / PASTECLIP：以**新 id** 在**原坐标**插入剪贴板实体（PASTEORIG 语义，不发明插入点手势），
+    单事务 + 单撤销；保留来源 layer/space，并**携带并恢复**每个实体的显示状态（按对象颜色/线型/线宽
+    覆盖 + 动态可见性成员），因此粘贴与“剪切的撤销”对称；撤销记录写入 `after_state`，重做也会恢复。
+    空剪贴板 → 显式 `InvalidInput` 拒绝。整批粘贴经事务原子校验，任一非法内容则整批拒绝（绝不部分插入）。
+  - 剪贴板在文档被替换（New/成功 Open，`HostController::reset_for_new_content` 重建 session）时清空，
+    因此粘贴**不可能跨文档**。
+- 接线：`app.slint` 新增 `copy-requested`/`cut-requested`/`paste-requested` 回调；在 **bubbling**
+  `key-pressed` 处理器内把 Ctrl+C/X/V 从 `shortcut-unsupported` 换成真实回调（聚焦文本编辑器仍获得
+  首拒绝权），保留 `keyboard-shortcuts-enabled` 门控，capture 处理器不消费这些组合键。`adapter.rs`
+  将三个回调映射到三个 CommandId（错误经 `draw_error_text` 显式显示）。这些在 cad-ui-slint 集中接线，
+  全部宿主共享。
+- 命令行：`SELECTORS` += `COPYCLIP`（work-only=false）/`CUTCLIP`（true）/`PASTECLIP`（true），分发到
+  对应回调；Ctrl+C/X/V 是按键，不额外加键入别名。
+- i18n：新增 `draw.error.clipboard_empty`（en `Clipboard is empty: nothing to paste` / zh
+  `剪贴板为空：没有可粘贴的内容`）；`draw_error_text` 把稳定的 “clipboard is empty” / “non-empty
+  selection” 短语映射到专用键与既有 `draw.error.selection_required`。两份 catalog 键集一致（283 键）。
+
+验证（本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all` / `--check`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`check-i18n.py`（283 键）、`check-architecture.py`（25 包）；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web lib）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（**506 通过 / 0 失败**）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
+新增合成契约：COPY 只读填充剪贴板（revision/撤销不变）、空选择拒绝、Viewer 允许 COPY；CUT 一步撤销
+删除并填充、撤销恢复几何与渲染属性、空选择拒绝、Viewer 拒绝 CUT/PASTE；PASTE 新 id 原坐标克隆、一步
+撤销移除全部、空剪贴板拒绝、Viewer 拒绝；`new_blank_document` 清空剪贴板（同一 reset 路径用于 open）；
+app.slint/键盘 Ctrl+C/X/V 真实回调 + 文本编辑器首拒绝 + 门控源码契约；命令行 COPYCLIP/CUTCLIP/PASTECLIP
+分发与 work-only 目录、Viewer 拒绝 CUT/PASTE。均为合成/离屏证据，未做真实窗口、真实 GPU、真机或
+交互手势验收；Android 本机缺 Android 平台，app-android 编译未运行。**未使用 OS 剪贴板**。
+
+补强（评审后）：**F1** 粘贴此前只克隆 `DbEntity`，会静默丢失按对象颜色/线型/线宽覆盖。现剪贴板条目为
+`ClipboardEntry { entity, display }`：CAPTURE 时用 `entity_display_state(id)` 快照渲染属性 + 动态可见性
+成员，PASTE 后用 `restore_entity_display_state` 恢复，并把 `after_state` 写进撤销补丁，使“重做粘贴”也
+恢复（`apply_drawing_patches` 已处理）。**F2** 剪切此前把“已复制”作为首条诊断；现首条为
+`drawing.clipboard.cut`（“已剪切 N 个实体（已删除并移入剪贴板）”），删除动作不再被“复制”文案掩盖。
+**F3** 剪切改为先捕获到局部、`erase_entities` 成功后才写入 `session.clipboard`，失败的剪切不会破坏旧
+剪贴板。**F5** 只读捕获对实例 ref 使用“已按整实体捕获（只读，不影响实例）”，不再谎称“影响所有实例”
+（`resolve_selection` 增 `read_only_capture` 标志）。**F6** 删除无生产调用者的 `SessionState::clear_clipboard`
+（`reset_for_new_content` 经 `SessionState::new` 已清空）。**F4** 新增测试：命令编辑器聚焦时 Ctrl+C/X/V
+不触发 CAD 回调且文本保留（真实 Slint LineEdit 首拒绝）；N=2 粘贴为一步撤销且两 id 均被撤销移除；
+粘贴副本保留源渲染属性且 undo+redo 保持。补强后 cad-app+cad-ui-slint **506 通过 / 0 失败**。
+
+## 三个选择变换命令：ROTATE / SCALE / MIRROR（2026-10-11）
 
 用户要求：沿用 MOVE/COPY 的 draw-tool + 单事务/单撤销框架，新增 ROTATE、SCALE、MIRROR 三个选择
 变换命令；仅此三项（剪贴板/OFFSET 留待后续）。宿主编译门禁不因 web/android 而回退。

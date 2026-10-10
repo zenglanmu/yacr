@@ -246,4 +246,22 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
         assert!(ui.invoke_command_submitted(submitted.into()), "{submitted}");
         assert_eq!(started.borrow().last().unwrap(), expected, "{submitted}");
     }
+
+    // Clipboard word commands invoke the clipboard callbacks. COPYCLIP is
+    // read-only (Viewer-legal); CUTCLIP/PASTECLIP are work-only.
+    let adapter = build_adapter();
+    let ui = adapter.component();
+    let copy_calls = Rc::new(Cell::new(0));
+    let cut_calls = Rc::new(Cell::new(0));
+    let paste_calls = Rc::new(Cell::new(0));
+    let (o1, o2, o3) = (copy_calls.clone(), cut_calls.clone(), paste_calls.clone());
+    ui.on_copy_requested(move || o1.set(o1.get() + 1));
+    ui.on_cut_requested(move || o2.set(o2.get() + 1));
+    ui.on_paste_requested(move || o3.set(o3.get() + 1));
+    assert!(ui.invoke_command_submitted("COPYCLIP".into()));
+    assert!(ui.invoke_command_submitted("CUTCLIP".into()));
+    assert!(ui.invoke_command_submitted("PASTECLIP".into()));
+    assert_eq!(copy_calls.get(), 1, "COPYCLIP invokes copy");
+    assert_eq!(cut_calls.get(), 1, "CUTCLIP invokes cut");
+    assert_eq!(paste_calls.get(), 1, "PASTECLIP invokes paste");
 }

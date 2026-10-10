@@ -719,6 +719,67 @@ impl UiAdapter {
             });
         }
         {
+            // In-app clipboard (Ctrl+C/X/V). COPY is read-only and allowed in
+            // Viewer; CUT/PASTE are refused by the command layer in Viewer. An
+            // empty selection or empty clipboard is shown explicitly, never a
+            // silent no-op. This is not the OS/system clipboard.
+            let s = shared.clone();
+            let doc = document;
+            let weak = ui.as_weak();
+            let messages = messages_slot.clone();
+            ui.on_copy_requested(move || {
+                if let Err(error) = s.borrow_mut().send(command_for(
+                    CommandId::CopyToClipboard,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                )) {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_status_label(draw_error_text(&messages.borrow(), &error).into());
+                        ui.set_command_expanded(true);
+                    }
+                }
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document;
+            let weak = ui.as_weak();
+            let messages = messages_slot.clone();
+            ui.on_cut_requested(move || {
+                if let Err(error) = s.borrow_mut().send(command_for(
+                    CommandId::CutToClipboard,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                )) {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_status_label(draw_error_text(&messages.borrow(), &error).into());
+                        ui.set_command_expanded(true);
+                    }
+                }
+            });
+        }
+        {
+            let s = shared.clone();
+            let doc = document;
+            let weak = ui.as_weak();
+            let messages = messages_slot.clone();
+            ui.on_paste_requested(move || {
+                if let Err(error) = s.borrow_mut().send(command_for(
+                    CommandId::PasteFromClipboard,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                )) {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_status_label(draw_error_text(&messages.borrow(), &error).into());
+                        ui.set_command_expanded(true);
+                    }
+                }
+            });
+        }
+        {
             let s = shared.clone();
             let doc = document;
             let weak = ui.as_weak();

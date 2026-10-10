@@ -50,6 +50,10 @@ fn the_fixed_key_map_declares_its_callback_and_clean_screen_gate() {
         "callback save-requested();",
         // ERASE deletes the current selection.
         "callback erase-requested();",
+        // In-app clipboard (not the OS clipboard).
+        "callback copy-requested();",
+        "callback cut-requested();",
+        "callback paste-requested();",
     ] {
         assert!(APP.contains(clause), "key map is missing: {clause}");
     }
@@ -123,6 +127,9 @@ fn capture_handler_binds_only_the_global_modifier_and_function_keys() {
         "root.shortcut-unsupported(\"Ctrl+C\")",
         "root.shortcut-unsupported(\"Ctrl+X\")",
         "root.shortcut-unsupported(\"Ctrl+V\")",
+        "root.copy-requested()",
+        "root.cut-requested()",
+        "root.paste-requested()",
         "event.text == \"a\"",
         "event.text == \"z\"",
         "event.text == \"y\"",
@@ -143,13 +150,13 @@ fn bubble_handler_keeps_editor_first_refusal_and_preserved_shortcuts() {
         // Ctrl+A.
         "if !event.modifiers.shift && (event.text == \"a\" || event.text == \"A\") {",
         "root.select-all-requested();",
-        // Ctrl+C/X/V keep editor first refusal, then report explicitly.
+        // Ctrl+C/X/V keep editor first refusal, then run the in-app clipboard.
         "if !event.modifiers.shift && (event.text == \"c\" || event.text == \"C\") {",
         "if !event.modifiers.shift && (event.text == \"x\" || event.text == \"X\") {",
         "if !event.modifiers.shift && (event.text == \"v\" || event.text == \"V\") {",
-        "root.shortcut-unsupported(\"Ctrl+C\")",
-        "root.shortcut-unsupported(\"Ctrl+X\")",
-        "root.shortcut-unsupported(\"Ctrl+V\")",
+        "root.copy-requested(); return EventResult.accept;",
+        "root.cut-requested(); return EventResult.accept;",
+        "root.paste-requested(); return EventResult.accept;",
         // Ctrl+Z / Ctrl+Shift+Z.
         "if (event.text == \"z\" || event.text == \"Z\") && root.work-mode {",
         "if event.modifiers.shift && root.can-redo {",
@@ -212,4 +219,11 @@ fn the_adapter_reports_unsupported_shortcuts_from_the_catalog() {
     // ERASE is host-owned: the shell request maps to the command.
     assert!(ADAPTER.contains("on_erase_requested"));
     assert!(ADAPTER.contains("CommandId::EraseEntities"));
+    // In-app clipboard: the shell requests map to the three commands.
+    assert!(ADAPTER.contains("on_copy_requested"));
+    assert!(ADAPTER.contains("CommandId::CopyToClipboard"));
+    assert!(ADAPTER.contains("on_cut_requested"));
+    assert!(ADAPTER.contains("CommandId::CutToClipboard"));
+    assert!(ADAPTER.contains("on_paste_requested"));
+    assert!(ADAPTER.contains("CommandId::PasteFromClipboard"));
 }
