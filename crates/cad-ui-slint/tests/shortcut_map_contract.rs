@@ -39,6 +39,9 @@ fn the_fixed_key_map_declares_its_callback_and_clean_screen_gate() {
         "callback shortcut-unsupported(string);",
         "in-out property <bool> clean-screen: false;",
         "out property <bool> chrome-visible: root.application-ui && !root.clean-screen;",
+        // New blank drawing: host capability + request callback.
+        "in property <bool> can-new: false;",
+        "callback new-requested();",
     ] {
         assert!(APP.contains(clause), "key map is missing: {clause}");
     }
@@ -66,6 +69,8 @@ fn capture_handler_binds_only_the_global_modifier_and_function_keys() {
         "if event.text == Key.F2 && root.command-visible {",
         // Unsupported Ctrl combos.
         "if !event.modifiers.shift && (event.text == \"n\" || event.text == \"N\") {",
+        "if root.can-new {",
+        "root.new-requested();",
         "if event.modifiers.shift && (event.text == \"s\" || event.text == \"S\") {",
         "if !event.modifiers.shift && (event.text == \"s\" || event.text == \"S\") {",
         "if !event.modifiers.shift && (event.text == \"p\" || event.text == \"P\") {",
@@ -183,4 +188,7 @@ fn the_adapter_reports_unsupported_shortcuts_from_the_catalog() {
     assert!(ADAPTER.contains("on_shortcut_unsupported"));
     assert!(ADAPTER.contains(".text(\"shortcut.unsupported\", &[(\"key\", key.as_str())])"));
     assert!(ADAPTER.contains("ui.set_command_expanded(true);"));
+    // New blank drawing is host-owned: the shell request maps to the command.
+    assert!(ADAPTER.contains("on_new_requested"));
+    assert!(ADAPTER.contains("CommandId::NewDrawing"));
 }

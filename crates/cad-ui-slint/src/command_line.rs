@@ -50,7 +50,6 @@ const UNSUPPORTED_COMMANDS: &[&str] = &[
     "MEASUREGEOM",
     "MIRROR",
     "MTEXT",
-    "NEW",
     "OFFSET",
     "PLOT",
     "PLINE",
@@ -185,6 +184,22 @@ fn dispatch_command(
     match canonical {
         "OPEN" => {
             ui.invoke_open_requested();
+            true
+        }
+        "NEW" => {
+            // Host-owned like OPEN. A host that has not opted in reports an
+            // explicit unsupported, never a silent no-op.
+            if ui.get_can_new() {
+                ui.invoke_new_requested();
+            } else {
+                ui.set_status_label(
+                    messages
+                        .borrow()
+                        .text("command.unsupported", &[("command", canonical)])
+                        .into(),
+                );
+                ui.set_command_expanded(true);
+            }
             true
         }
         "FIT" | "ZOOM EXTENTS" => {

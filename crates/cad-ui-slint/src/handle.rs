@@ -8,6 +8,13 @@ impl UiHandle {
     pub fn set_open_available(&self, available: bool) -> CadResult<()> {
         self.with(|ui| ui.set_can_open(available))
     }
+    /// Host capability for starting a new blank drawing (desktop only).
+    ///
+    /// Hosts without a document factory leave `can-new` false, so the shell and
+    /// the command line report an explicit unsupported instead of a no-op.
+    pub fn set_new_available(&self, available: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_can_new(available))
+    }
     /// Shell-local hit query: floating controls must not be consumed by host touch navigation.
     pub fn canvas_hit_test(&self, point: [f64; 2]) -> CadResult<bool> {
         let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;

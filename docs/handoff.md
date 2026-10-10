@@ -1,6 +1,52 @@
 # 后续 agent 接手入口
 
-## 固定 AutoCAD 默认键位映射（2026-10-10，本轮）
+## 新建空白图纸（New）——桌面端（2026-10-10，本轮）
+
+用户要求：端到端实现“新建空白图纸”，接到命令行与 Ctrl+N；仅桌面（app-linux）为宿主，
+web/android 必须仍可编译且**显式不支持**，不得静默无操作。
+
+- 命令层：新增 `CommandId::NewDrawing`（`requires_work_mode = false`）。与 `OpenDrawing`
+  一样属**宿主自有**：`Application::execute` 对其返回 `Unsupported`，由平台宿主接管。
+- 控制器：`HostController::new_blank_document()` 构建仅含默认图层 `"0"` 的空库
+  （`blank_database()`），以**新的** `DocumentIdentity::Temporary(n)` 原子替换单文档槽，
+  并 `reset_for_new_content()` 重建历史/查询/会话（清空选择、图层覆盖、活动工具），
+  丢弃旧导入报告。返回显式 `NewDrawing { entities, has_extent }`（空图纸 `has_extent=false`）。
+- 空图纸 fit 安全：`Application::fit_viewport` 在无边界时改为**记录在案的空操作**（不改
+  相机、不增 generation），不再是错误；不会 panic，也不伪造取景。
+- 宿主接线：`app-linux` 在 `execute` 拦截 `NewDrawing` → `request_new()`（替换文档 + 取消
+  UI 绘制捕获），并随 `push()` 推 `set_new_available(!loading)`；web/android 不设置，
+  `can-new` 保持默认 `false`。
+- UI/命令入口：`app.slint` 新增 `in property <bool> can-new: false;` 与 `callback new-requested();`；
+  Ctrl+N 在 `can-new` 时发 `new-requested()`，否则 `shortcut-unsupported("Ctrl+N")`。
+  命令行 `NEW` 从 `UNSUPPORTED_COMMANDS` 移入 `SELECTORS`（work-mode false），分发时
+  `!can-new` → 显式 `command.unsupported`，否则 `invoke_new_requested()`；adapter 将
+  `new-requested` 映射到 `CommandId::NewDrawing`。
+- 未新增用户可见文案（复用 `command.unsupported` / `shortcut.unsupported`）；两份 catalog
+  键集仍一致。
+
+补强（评审后）：New 现在还会**重置活动视口相机**为确定性的新图纸默认平面视图（原点锚定、
+`MIN_ORTHO_SCALE`），不再残留旧图纸取景；并**取代进行中的打开**（`import_manager.cancel()`
++ 清空 `pending_open_label`/`pending_open_guard`/`async_open`），`request_new` 增加 `loading()`
+守卫，忙时返回显式错误（`linux.busy`）而非竞态。`fit_viewport` 改为返回 `CadResult<bool>`，
+空图纸 FIT 由 `fit_drawing` 返回带 `fit.empty` 诊断的 `CommandOutcome`，桌面宿主据此显示
+本地化“图形为空，无可缩放范围”而不是泛化的“命令完成”。新增两份 catalog 键 `fit.empty`、
+`linux.busy`。`NewDrawing.entities` 改为取自 `drawing.entity_count()`，并移除硬编码英文
+`last_status`。
+
+验证（本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web/android lib）；
+`check-i18n.py`（252 键）、`check-architecture.py`；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（444 通过 / 0 失败）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（13 通过 / 0 失败 / 4 忽略，
+忽略者为既有真实 GPU `--ignored` 用例）。
+新增合成契约：cad-app 空白文档/身份/相机重置/取代打开/fit 诊断/应用层拒绝；cad-ui-slint
+命令行 `NEW` 与 Ctrl+N 门控；app-linux `new_drawing`（打开真实合成 fixture、建立选择与绘制
+捕获后 New 为空且有效，并断言空图纸 FIT 的本地化提示）。均为合成/离屏证据，未做真实窗口、
+真实 GPU、浏览器或真机验收。
+
+## 固定 AutoCAD 默认键位映射（2026-10-10）
 
 用户要求：接入一套固定（不可重绑定）的 AutoCAD 默认键位到**已存在**命令/开关，并对尚无
 后端能力的按键显式“不支持”，不得静默。

@@ -116,9 +116,13 @@ impl Application {
             }
             CommandId::Pan => self.pan(&command),
             CommandId::Zoom => self.zoom(&command),
-            CommandId::OpenDrawing | CommandId::CancelLoading => Err(CadError::Unsupported(
-                "file open/cancel is performed by the platform host, not the application".into(),
-            )),
+            CommandId::OpenDrawing | CommandId::NewDrawing | CommandId::CancelLoading => {
+                Err(CadError::Unsupported(
+                    "file open, new drawing and cancel are performed by the platform host, \
+                     not the application"
+                        .into(),
+                ))
+            }
             CommandId::Select => {
                 // Selection is read-only: it stores the picked refs and enters
                 // the Selecting tool state, but never writes the DWG (F05).
@@ -355,8 +359,23 @@ impl Application {
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        self.fit_viewport(session, &command.viewport)?;
-        Ok(CommandOutcome::none())
+        if self.fit_viewport(session, &command.viewport)? {
+            return Ok(CommandOutcome::none());
+        }
+        // Nothing to frame: report an informational diagnostic instead of a
+        // generic success. `fit.empty` is the stable code the host resolves to
+        // its localized message; the CLI sees the same code, so the machine path
+        // is unchanged.
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "fit.empty".into(),
+                message: "fit.empty".into(),
+            }],
+            measurement: None,
+        })
     }
 
     /// Fit a viewport to the current document bounds. Hosts call this after an
@@ -364,11 +383,15 @@ impl Application {
     ///
     /// Fitting always returns the viewport to the 2D plan view (audit F13), so a
     /// fit is a deterministic reset-and-frame, not a 3D manipulation.
+    ///
+    /// Returns `false` when the drawing has no measurable extent: the camera is
+    /// left untouched and nothing is framed, so a caller can report that
+    /// explicitly instead of claiming success.
     pub fn fit_viewport(
         &mut self,
         session: &mut SessionState,
         viewport_id: &ViewportId,
-    ) -> CadResult<()> {
+    ) -> CadResult<bool> {
         let document = self
             .workspace
             .documents
@@ -381,9 +404,11 @@ impl Application {
             .get_mut(viewport_id)
             .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
         let Some((min, max)) = bounds else {
-            return Err(CadError::InvalidInput(
-                "drawing has no measurable extent".into(),
-            ));
+            // An empty drawing has nothing to frame. Fitting is a documented
+            // no-op (the camera and the session generation are left unchanged),
+            // never an error and never a fabricated view. The `false` return lets
+            // the caller report it explicitly.
+            return Ok(false);
         };
         let cx = (min.x + max.x) * 0.5;
         let cy = (min.y + max.y) * 0.5;
@@ -413,7 +438,7 @@ impl Application {
         viewport.camera = camera;
         viewport.view_mode = ViewMode2d3d::TwoD { saved: camera };
         session.generation += 1;
-        Ok(())
+        Ok(true)
     }
 
     /// Pan the view by a world-space delta.

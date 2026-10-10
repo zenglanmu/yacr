@@ -56,6 +56,11 @@ export component YacrWindow inherits Window {
     in property <string> zoom-out-label;
     in-out property <bool> pan-active: false;
     in property <bool> can-open: true;
+    // Host capability for starting a new blank drawing. Defaults to false, so a
+    // host that has not opted in reports an explicit "unsupported" instead of a
+    // silent no-op (desktop sets it true; web/android leave it false).
+    in property <bool> can-new: false;
+    callback new-requested();
     in property <bool> can-trim: true;
     in property <bool> can-switch-backend: true;
     callback pan-requested();
@@ -331,12 +336,18 @@ export component YacrWindow inherits Window {
                     root.clean-screen = !root.clean-screen;
                     return EventResult.accept;
                 }
-                // Fixed keys whose backing capability does not exist yet: never
-                // a silent no-op, report the stable label to the host.
+                // Ctrl+N starts a new drawing when the host offers it; a host
+                // without the capability reports unsupported (never a no-op).
                 if !event.modifiers.shift && (event.text == "n" || event.text == "N") {
-                    root.shortcut-unsupported("Ctrl+N");
+                    if root.can-new {
+                        root.new-requested();
+                    } else {
+                        root.shortcut-unsupported("Ctrl+N");
+                    }
                     return EventResult.accept;
                 }
+                // Fixed keys whose backing capability does not exist yet: never
+                // a silent no-op, report the stable label to the host.
                 if event.modifiers.shift && (event.text == "s" || event.text == "S") {
                     root.shortcut-unsupported("Ctrl+Shift+S");
                     return EventResult.accept;

@@ -1,6 +1,6 @@
 //! One application/controller/Slint bridge for both desktop and headless acceptance.
 use cad_app::host::HostController;
-use cad_app::{Command, CommandId, CommandPayload};
+use cad_app::{Command, CommandId, CommandOutcome, CommandPayload};
 use cad_domain::{CadError, CadResult, Point3};
 use cad_ui_slint::{CadView, UiAdapter, UiCommandSink, UiConfiguration, UiHandle};
 use slint::ComponentHandle;
@@ -201,19 +201,20 @@ impl Runtime {
     }
     fn execute(&self, command: Command) -> CadResult<()> {
         self.metrics()?;
-        let result = match command.id {
+        let result: CadResult<Option<CommandOutcome>> = match command.id {
             CommandId::CancelLoading => {
                 if let Some(read) = self.pending_read.borrow_mut().as_mut() {
                     read.cancelled = true;
                 }
                 self.controller.borrow_mut().cancel_async_open();
-                Ok(())
+                Ok(None)
             }
-            CommandId::OpenDrawing => self.request_open(),
+            CommandId::OpenDrawing => self.request_open().map(|_| None),
+            CommandId::NewDrawing => self.request_new().map(|_| None),
             CommandId::SwitchBackend => Err(CadError::Unsupported(
                 self.message("linux.backend_unavailable", &[]),
             )),
-            _ => self.controller.borrow_mut().execute(command).map(|_| ()),
+            _ => self.controller.borrow_mut().execute(command).map(Some),
         };
         self.push()?;
         if let Err(error) = &result {
@@ -224,10 +225,23 @@ impl Runtime {
         }
         if result.is_ok() && !self.loading() {
             if let Some(handle) = self.handle.borrow().as_ref() {
-                handle.set_status(self.message("linux.completed", &[]))?;
+                // A no-op fit (empty drawing) carries the `fit.empty` code; show
+                // that instead of the generic "completed", never a fake success.
+                let diagnostic = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|outcome| outcome.as_ref())
+                    .and_then(|outcome| outcome.diagnostics.first());
+                let status = match diagnostic {
+                    Some(diagnostic) if diagnostic.code == "fit.empty" => {
+                        self.message("fit.empty", &[])
+                    }
+                    _ => self.message("linux.completed", &[]),
+                };
+                handle.set_status(status)?;
             }
         }
-        result
+        result.map(|_| ())
     }
     fn request_open(&self) -> CadResult<()> {
         if self.options.headless {
@@ -255,6 +269,24 @@ impl Runtime {
         }
         Ok(())
     }
+
+    /// Replace the document with a new blank drawing (host-owned NewDrawing).
+    ///
+    /// The shared controller installs the blank database and rebuilds the
+    /// session; the caller's `execute` then pushes the empty state. UI-side draw
+    /// capture is cancelled so no stale preview survives the swap. Starting New
+    /// while an open is in flight is refused explicitly rather than raced.
+    fn request_new(&self) -> CadResult<()> {
+        if self.loading() {
+            return Err(CadError::Unsupported(self.message("linux.busy", &[])));
+        }
+        self.controller.borrow_mut().new_blank_document()?;
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            handle.cancel_draw_capture()?;
+        }
+        Ok(())
+    }
+
     fn poll_open(&self) -> CadResult<()> {
         use std::sync::mpsc::TryRecvError;
         self.poll_loading()?;

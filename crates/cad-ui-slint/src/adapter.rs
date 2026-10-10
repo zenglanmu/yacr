@@ -407,6 +407,21 @@ impl UiAdapter {
             });
         }
         {
+            // New blank drawing is host-owned exactly like open: the shell only
+            // emits the request; a host without the capability leaves `can-new`
+            // false and the shell reports unsupported before reaching here.
+            let s = shared.clone();
+            let doc = document;
+            ui.on_new_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::NewDrawing,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+            });
+        }
+        {
             // Cancel a running background open (F01). `CancelLoading` is routed
             // by the host to `HostController::cancel_async_open`; the panel only
             // enables this while a cancellable job is running.

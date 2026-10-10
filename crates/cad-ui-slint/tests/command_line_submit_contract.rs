@@ -7,6 +7,8 @@
 //! test owns the process-wide install and exercises every case in sequence.
 use cad_domain::CadResult;
 use cad_ui_slint::{offscreen, UiAdapter, UiCommandSink, UiConfiguration};
+use std::cell::Cell;
+use std::rc::Rc;
 
 struct Sink;
 impl UiCommandSink for Sink {
@@ -118,4 +120,27 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
         ui.get_status_label().to_string(),
         "Read-only (Viewer) mode does not allow drawing or editing"
     );
+
+    // NEW is host-owned: with `can-new` false the command line reports the
+    // explicit unsupported text and does not fire the callback; with it true the
+    // host request fires. `can-new` defaults false, so web/android stay explicit.
+    let adapter = build_adapter();
+    let ui = adapter.component();
+    adapter.handle().set_locale("en").unwrap();
+    let new_calls = Rc::new(Cell::new(0));
+    let observed = new_calls.clone();
+    ui.on_new_requested(move || observed.set(observed.get() + 1));
+    assert!(ui.invoke_command_submitted("NEW".into()));
+    assert_eq!(
+        new_calls.get(),
+        0,
+        "can-new false must not fire the request"
+    );
+    assert_eq!(
+        ui.get_status_label().to_string(),
+        "Command NEW is not supported yet."
+    );
+    ui.set_can_new(true);
+    assert!(ui.invoke_command_submitted("NEW".into()));
+    assert_eq!(new_calls.get(), 1, "can-new true fires exactly one request");
 }

@@ -46,6 +46,9 @@ impl Runtime {
         handle.set_open_available(
             (!self.options.headless || self.options.drawing.is_some()) && !self.loading(),
         )?;
+        // Desktop hosts a document factory, so New is available unless an open
+        // is in flight; web/android never call this and keep `can-new` false.
+        handle.set_new_available(!self.loading())?;
         handle.set_document_name(&c.document_name_hint)?;
         handle.set_history_availability(c.history_availability())?;
         handle.set_mode(c.mode())?;

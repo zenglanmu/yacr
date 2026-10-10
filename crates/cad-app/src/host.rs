@@ -118,6 +118,23 @@ pub fn demo_database() -> DrawingDatabase {
     builder.finish().unwrap()
 }
 
+/// Empty drawing with only the required layer `"0"`.
+///
+/// This is the document a host installs for "New": no entities, no bounds, and
+/// exactly the default layer every DWG must contain. It makes no compatibility
+/// or content claim.
+pub fn blank_database() -> DrawingDatabase {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder.finish().unwrap()
+}
+
 fn p(x: f64, y: f64) -> Point3 {
     Point3 { x, y, z: 0.0 }
 }
@@ -257,6 +274,17 @@ pub struct OpenedDrawing {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// Result of starting a new blank drawing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewDrawing {
+    /// Entity count of the fresh drawing (zero for the blank database).
+    pub entities: usize,
+    /// Whether the drawing has measurable bounds. Always `false` for a blank
+    /// drawing, so a caller knows a fit is a documented no-op rather than a
+    /// real framing.
+    pub has_extent: bool,
+}
+
 /// One document session shared by a host and its UI.
 pub struct HostController {
     pub application: Application,
@@ -282,6 +310,9 @@ pub struct HostController {
     /// getter [`HostController::async_open_snapshot`] just reads it, so reading
     /// the panel state never drains progress or publishes a document.
     pub(crate) async_open: Option<crate::tasks::ImportProgressSnapshot>,
+    /// Monotonic counter for a fresh `DocumentIdentity::Temporary` on each new
+    /// blank document, so two New operations never share an identity.
+    temporary_identity: u128,
 }
 
 impl HostController {
@@ -317,6 +348,7 @@ impl HostController {
             pending_open_label: None,
             pending_open_guard: None,
             async_open: None,
+            temporary_identity: 0,
         })
     }
 
@@ -407,6 +439,86 @@ impl HostController {
         self.session.generation = self.session.generation.saturating_add(1);
     }
 
+    /// Replace the active document with a new, empty drawing.
+    ///
+    /// Builds the blank database (only layer `"0"`) and installs it in the
+    /// single document slot with a fresh temporary identity, then rebuilds every
+    /// derived state through [`HostController::reset_for_new_content`] so no undo
+    /// record, selection, layer override or active tool can reference the
+    /// previous drawing. The previous diagnostics report is dropped too. Hosts
+    /// must cancel any UI-side draw capture themselves (the session reset clears
+    /// the session tool and selection here).
+    ///
+    /// **New supersedes an in-flight open**: any running/retained background
+    /// import is cancelled and its pending label, guard and UI snapshot are
+    /// cleared, so a later `poll_async_open` cannot clobber the fresh drawing.
+    ///
+    /// The active viewport camera is reset to the deterministic fresh-document
+    /// plan view (origin-anchored, minimum orthographic scale) — a default, not a
+    /// fabricated fit. The returned [`NewDrawing::has_extent`] is always `false`.
+    pub fn new_blank_document(&mut self) -> CadResult<NewDrawing> {
+        // Supersede any open before the slot changes.
+        self.import_manager.cancel();
+        self.pending_open_label = None;
+        self.pending_open_guard = None;
+        self.async_open = None;
+
+        let drawing = blank_database();
+        let entities = drawing.entity_count();
+        self.temporary_identity = self.temporary_identity.saturating_add(1);
+        let document = Document {
+            id: self.document_id,
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Temporary(self.temporary_identity),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        };
+        self.application
+            .workspace
+            .documents
+            .insert(self.document_id, document);
+        self.reset_for_new_content();
+        self.document_name_hint = "untitled".to_string();
+        self.last_import_report = None;
+        // Fresh-document default plan view anchored at the origin. This is NOT a
+        // fabricated fit: the blank drawing has no extent, so the previous
+        // drawing's framing must not linger.
+        if let Some(viewport) = self
+            .application
+            .workspace
+            .viewports
+            .get_mut(&self.viewport_id)
+        {
+            let camera = crate::Camera {
+                eye: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1000.0,
+                },
+                target: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                up: Point3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+                projection: crate::Projection::Orthographic {
+                    scale: crate::camera::MIN_ORTHO_SCALE,
+                },
+            };
+            viewport.camera = camera;
+            viewport.view_mode = crate::ViewMode2d3d::TwoD { saved: camera };
+            viewport.work_plane = crate::xy_work_plane(0.0);
+        }
+        Ok(NewDrawing {
+            entities,
+            has_extent: false,
+        })
+    }
+
     /// Run one command through the single application entry point.
     ///
     /// `CancelLoading` is intercepted here because file open/cancel is
@@ -437,9 +549,14 @@ impl HostController {
     }
 
     /// Fit the active viewport to the current drawing bounds.
+    ///
+    /// Discards the "framed" flag for open flows: a blank drawing's fit is a
+    /// documented no-op. Callers that need to report that use the command path
+    /// (`CommandId::FitDrawing`), which carries the `fit.empty` diagnostic.
     pub fn fit(&mut self) -> CadResult<()> {
         self.application
             .fit_viewport(&mut self.session, &self.viewport_id)
+            .map(|_| ())
     }
 
     /// Set the session's active drawing layer through the command path.
@@ -763,6 +880,167 @@ mod tests {
         assert!(matches!(controller.session.tool, crate::ToolState::Idle));
         assert!(controller.session.selection.is_empty());
         assert!(controller.session.layer_overrides.is_empty());
+    }
+
+    #[test]
+    fn new_blank_document_has_layer_zero_and_no_extent() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        // Make the demo dirty so the content reset is observable.
+        controller.create_line(p(0.0, 0.0), p(100.0, 0.0)).unwrap();
+        assert!(controller.application.can_undo(&controller.document_id));
+
+        let report = controller.new_blank_document().unwrap();
+        assert_eq!(report.entities, 0);
+        assert!(!report.has_extent);
+
+        let drawing = controller.drawing().unwrap();
+        assert_eq!(drawing.entity_count(), 0);
+        assert!(drawing.bounds().is_none());
+
+        let rows = controller.layer_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "0");
+        assert!(rows[0].database_visible);
+
+        // Derived state is rebuilt for the new content.
+        assert!(!controller.application.can_undo(&controller.document_id));
+        assert!(controller.session.selection.is_empty());
+        assert!(controller.session.layer_overrides.is_empty());
+        assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+        assert_eq!(controller.document_name_hint, "untitled");
+        assert!(controller.last_import_report.is_none());
+    }
+
+    #[test]
+    fn new_blank_document_identities_are_fresh() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let identity = |controller: &HostController| {
+            controller
+                .application
+                .workspace
+                .documents
+                .get(&controller.document_id)
+                .unwrap()
+                .identity
+                .clone()
+        };
+        controller.new_blank_document().unwrap();
+        let first = identity(&controller);
+        controller.new_blank_document().unwrap();
+        let second = identity(&controller);
+        assert_ne!(first, second);
+        assert!(matches!(second, DocumentIdentity::Temporary(id) if id >= 2));
+    }
+
+    #[test]
+    fn fit_on_a_blank_drawing_is_a_documented_no_op() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller.new_blank_document().unwrap();
+        let generation = controller.session.generation;
+        controller.fit().unwrap();
+        assert_eq!(
+            controller.session.generation, generation,
+            "an empty drawing has nothing to frame; fit must not pretend to"
+        );
+    }
+
+    #[test]
+    fn fit_command_reports_the_empty_diagnostic_only_when_nothing_is_framed() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let fit = |controller: &mut HostController| {
+            controller
+                .execute(Command {
+                    schema_version: 1,
+                    id: crate::CommandId::FitDrawing,
+                    document: controller.document_id,
+                    viewport: controller.viewport_id,
+                    payload: crate::CommandPayload::None,
+                })
+                .unwrap()
+        };
+        // Populated demo: a real fit, no empty diagnostic.
+        assert!(fit(&mut controller).diagnostics.is_empty());
+
+        controller.new_blank_document().unwrap();
+        let outcome = fit(&mut controller);
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].code, "fit.empty");
+        // The host status mirrors the code for the presentation layer.
+        assert_eq!(controller.status(), "fit.empty");
+    }
+
+    #[test]
+    fn new_blank_document_resets_the_viewport_camera_to_the_default() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        // Frame the demo, then move the camera so the reset is observable.
+        controller.fit().unwrap();
+        controller
+            .application
+            .workspace
+            .viewports
+            .get_mut(&controller.viewport_id)
+            .unwrap()
+            .camera
+            .projection = crate::Projection::Orthographic { scale: 250.0 };
+
+        controller.new_blank_document().unwrap();
+
+        let camera = controller
+            .application
+            .workspace
+            .viewports
+            .get(&controller.viewport_id)
+            .unwrap()
+            .camera;
+        assert_eq!(
+            camera.target,
+            p(0.0, 0.0),
+            "New anchors the camera at origin"
+        );
+        assert_eq!(
+            camera.projection,
+            crate::Projection::Orthographic {
+                scale: crate::camera::MIN_ORTHO_SCALE
+            },
+            "New uses the fresh-document default scale, not the old framing"
+        );
+    }
+
+    #[test]
+    fn new_blank_document_supersedes_a_pending_open() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let garbage: Arc<[u8]> = Arc::from(vec![0u8, 1, 2, 3].into_boxed_slice());
+        controller.begin_async_open(garbage, "pending.dwg");
+        assert!(controller.pending_open_label.is_some());
+        assert!(controller.async_open.is_some());
+        assert!(controller.import_manager.is_running());
+
+        controller.new_blank_document().unwrap();
+
+        assert!(controller.pending_open_label.is_none());
+        assert!(controller.pending_open_guard.is_none());
+        assert!(controller.async_open.is_none());
+        assert!(
+            !controller.import_manager.is_running(),
+            "New must release the superseded open job"
+        );
+    }
+
+    #[test]
+    fn application_refuses_new_drawing_as_host_owned() {
+        let mut app = Application::new();
+        let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+        let result = app.execute(
+            &mut session,
+            Command {
+                schema_version: 1,
+                id: crate::CommandId::NewDrawing,
+                document: DocumentId(1),
+                viewport: ViewportId(1),
+                payload: crate::CommandPayload::None,
+            },
+        );
+        assert!(matches!(result, Err(CadError::Unsupported(_))));
     }
 
     #[test]

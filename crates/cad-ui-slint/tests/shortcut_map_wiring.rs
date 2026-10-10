@@ -7,6 +7,8 @@ use cad_domain::CadResult;
 use cad_ui_slint::{offscreen, UiAdapter, UiCommandSink, UiConfiguration, YacrWindow};
 use slint::platform::{Key, WindowEvent};
 use slint::{ComponentHandle, SharedString};
+use std::cell::Cell;
+use std::rc::Rc;
 
 struct Sink;
 impl UiCommandSink for Sink {
@@ -79,4 +81,25 @@ fn fixed_keymap_reaches_adapter_config_and_localized_feedback() {
         "Shortcut Ctrl+S has no supported action yet."
     );
     assert!(ui.get_command_expanded());
+
+    // Ctrl+N is gated by `can-new`: false → explicit unsupported; true → the
+    // host request fires (and does not also report unsupported).
+    ui.set_can_new(false);
+    control(ui, "n");
+    assert_eq!(
+        ui.get_status_label().to_string(),
+        "Shortcut Ctrl+N has no supported action yet."
+    );
+    let new_calls = Rc::new(Cell::new(0));
+    let observed = new_calls.clone();
+    ui.on_new_requested(move || observed.set(observed.get() + 1));
+    ui.set_status_label("sentinel".into());
+    ui.set_can_new(true);
+    control(ui, "n");
+    assert_eq!(new_calls.get(), 1, "can-new true fires one new request");
+    assert_ne!(
+        ui.get_status_label().to_string(),
+        "Shortcut Ctrl+N has no supported action yet.",
+        "a successful Ctrl+N must not also report unsupported"
+    );
 }

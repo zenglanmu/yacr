@@ -29,6 +29,7 @@ pub(crate) const SELECTORS: &[(&str, bool)] = &[
     ("MEASURE POLYLINE", true),
     ("MODE", false),
     ("MOVE", true),
+    ("NEW", false),
     ("OPEN", false),
     ("PAN", false),
     ("PANELS", false),

@@ -59,6 +59,10 @@ pub enum AppMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandId {
     OpenDrawing,
+    /// Start a new, empty drawing. Host-owned like `OpenDrawing`: the
+    /// application layer has no document factory, so it returns `Unsupported`
+    /// and a platform host performs the replacement.
+    NewDrawing,
     CancelLoading,
     Pan,
     Zoom,
