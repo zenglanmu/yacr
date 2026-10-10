@@ -25,7 +25,6 @@ const UNSUPPORTED_COMMANDS: &[&str] = &[
     "BOUNDARY",
     "BREAK",
     "CHAMFER",
-    "COPY",
     "DIM",
     "DIMALIGNED",
     "DIMANGULAR",
@@ -35,7 +34,6 @@ const UNSUPPORTED_COMMANDS: &[&str] = &[
     "DIMSTYLE",
     "DIVIDE",
     "ELLIPSE",
-    "ERASE",
     "EXPLODE",
     "EXTEND",
     "FILLET",
@@ -307,6 +305,16 @@ fn dispatch_command(
         }
         "TRIM" => {
             ui.invoke_begin_draw_tool("trim".into());
+            true
+        }
+        "COPY" => {
+            ui.invoke_begin_draw_tool("copy".into());
+            true
+        }
+        // ERASE deletes the current selection through the host callback; the
+        // command layer refuses an empty selection and Viewer mode explicitly.
+        "ERASE" => {
+            ui.invoke_erase_requested();
             true
         }
         // AutoCAD convention: CONFIRM/ENTER acts on whatever command is
@@ -599,14 +607,17 @@ mod contracts {
                 "{name} prefixes a supported command"
             );
         }
-        for expected in ["HATCH", "OFFSET", "ARRAY", "ERASE", "ARC", "PUBLISH"] {
+        for expected in ["HATCH", "OFFSET", "ARRAY", "MIRROR", "ARC", "PUBLISH"] {
             assert!(
                 UNSUPPORTED_COMMANDS.contains(&expected),
                 "missing unsupported command {expected}"
             );
         }
-        assert!(is_unsupported_command("ERASE 0,0"));
+        assert!(is_unsupported_command("MIRROR 0,0"));
         assert!(!is_unsupported_command("LINE"));
+        // ERASE and COPY are now real commands, no longer unsupported.
+        assert!(!is_unsupported_command("ERASE"));
+        assert!(!is_unsupported_command("COPY"));
     }
 
     #[test]

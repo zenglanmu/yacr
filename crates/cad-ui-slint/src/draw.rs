@@ -46,6 +46,8 @@ pub trait DrawCommandSink: 'static {
     ///   `CommandPayload::Points([center, edge])`;
     /// * `Move { delta }` → `CommandId::MoveEntities` with the session
     ///   selection refs plus `delta`;
+    /// * `Copy { delta }` → `CommandId::CopyEntities` with the session
+    ///   selection refs plus `delta`;
     /// * `Trim { target_pick, boundary_pick }` → `CommandId::TrimEntity` after
     ///   resolving the two picks to `SelectionRef`s.
     fn commit(&mut self, intent: DrawIntent) -> CadResult<()>;

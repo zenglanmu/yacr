@@ -8,6 +8,7 @@
 //! * `Line { start, end }` → `CreateLine` + `Points([start, end])`
 //! * `Circle { center, edge }` → `CreateCircle` + `Points([center, edge])`
 //! * `Move { delta }` → `MoveEntities` with the session selection refs + delta
+//! * `Copy { delta }` → `CopyEntities` with the session selection refs + delta
 //! * `Trim { target_pick, boundary_pick }` → `TrimEntity` after resolving the
 //!   two world picks to `SelectionRef`s
 //!
@@ -128,6 +129,16 @@ impl cad_ui_slint::DrawCommandSink for AndroidDrawSink {
                 self.send(
                     CommandId::MoveEntities,
                     CommandPayload::Move { refs, delta },
+                )
+            }
+            cad_app::DrawIntent::Copy { delta } => {
+                let refs: Vec<SelectionRef> = self.controller.borrow().selection().refs().to_vec();
+                if refs.is_empty() {
+                    return Err(CadError::InvalidInput("copy needs a selection".into()));
+                }
+                self.send(
+                    CommandId::CopyEntities,
+                    CommandPayload::Copy { refs, delta },
                 )
             }
             cad_app::DrawIntent::Trim {

@@ -149,6 +149,13 @@ impl DrawCommandSink for Runtime {
                     CommandPayload::Move { refs, delta },
                 )
             }
+            cad_app::DrawIntent::Copy { delta } => {
+                let refs = self.controller.borrow().selection().refs().to_vec();
+                self.command(
+                    CommandId::CopyEntities,
+                    CommandPayload::Copy { refs, delta },
+                )
+            }
             cad_app::DrawIntent::Trim { .. } => {
                 Err(CadError::Unsupported(self.message("linux.trim", &[])))
             }

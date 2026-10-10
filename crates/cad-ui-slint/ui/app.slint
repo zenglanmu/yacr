@@ -271,6 +271,8 @@ export component YacrWindow inherits Window {
     callback layer-visibility-toggled(int, bool);
     callback restore-layers-requested();
     callback clear-selection-requested();
+    // Delete the current selection (ERASE). Work-only at the command layer.
+    callback erase-requested();
     callback layout-selected(int);
     // Desktop status-bar overlay toggles: the overlay key ("axes"/"grid"/
     // "snapHints"/"selectionHighlight") plus the new value.

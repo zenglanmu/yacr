@@ -1,6 +1,64 @@
 # 后续 agent 接手入口
 
-## 桌面端“另存为 / 导出图纸”（有损 DXF）（2026-10-10，本轮）
+## 两个真实编辑命令：ERASE 与 COPY（2026-10-10，本轮）
+
+用户要求：沿用 MOVE/LINE/CIRCLE/TRIM 框架，新增 ERASE 与 COPY 两个真实编辑命令；仅此两项
+（ARC/变换/剪贴板留待后续）。宿主编译门禁不因 web/android 而回退。
+
+- 命令层：新增 `CommandId::EraseEntities` 与 `CommandId::CopyEntities`（均 `requires_work_mode`），
+  Viewer 模式由命令层显式 `PermissionDenied` 拒绝。新增 `CommandPayload::Copy { refs, delta }`
+  （与 `Move` 同形）。
+- ERASE：读取**当前会话选择**（无 payload）；空选择 → 显式 `InvalidInput`，不改任何状态。否则
+  在一次 `DrawingTransaction` 内按唯一实体删除全部选中项，并记**一条**撤销补丁（整次删除为一步
+  撤销）。重复引用同一实体的 ref 折叠为一次删除。
+- COPY：复用 MOVE 的交互（`DrawToolKind::Copy`，同样两点 delta，`requires_selection`）。`copy_entities`
+  空选择 → 显式拒绝；先对每个选中实体预校验几何可变换（不可变换 → 整个命令 `Unsupported`，
+  绝不静默丢弃），随后为每个实体分配**新 id**、按 delta 平移几何、保留 layer/space 与类型，
+  在一次事务内插入全部副本并记**一条**撤销补丁。按对象颜色/线型/线宽覆盖无法经现有写入路径
+  复制时记显式诊断（副本继承图层样式），不静默改变。
+- UI/命令入口：`app.slint` 新增 `callback erase-requested();`；adapter 将 `erase-requested` 映射到
+  `CommandId::EraseEntities`（错误经 `draw_error_text` 显式显示）。命令行新增 canonical `ERASE`
+  （work-only）与 `COPY`（work-only）、别名 `E`/`CO`/`CP`；从 `UNSUPPORTED_COMMANDS` 移除
+  `ERASE`/`COPY`；`ERASE` 分发到 `erase-requested`，`COPY` 分发到 `begin_draw_tool("copy")`。
+- 宿主 draw sink（linux/web/android）：`DrawIntent::Copy { delta }` → `CopyEntities`（附会话选择 refs）。
+- i18n：新增 `draw.kind.copy`（zh `复制` / en `Copy`）；两份 catalog 键集一致（276 键）。
+
+验证（本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`check-i18n.py`（276 键）、`check-architecture.py`（25 包）；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web/android lib）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`
+（cad-app 247 通过；cad-ui-slint 171 通过 / 0 失败）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
+新增合成契约：cad-app ERASE（删除恰为选中项且一步撤销恢复；空选择显式拒绝）与 COPY（副本数量与
+平移几何正确、一步撤销移除全部；空选择拒绝；Viewer 拒绝；不可变换几何显式拒绝且不改）；cad-ui-slint
+命令行 `ERASE`/`E` 回调与 `COPY`/`CO`/`CP` 启动 copy 工具、源码契约。均为合成/离屏证据，未做真实
+窗口、真实 GPU、真机或交互手势验收。
+
+补强（评审后）：**B1** 删除会剪除按实体渲染属性与动态可见性成员关系，撤销记录此前只带 `DbEntity`，
+故 UNDO 静默丢样式。现 `DrawingPatch` 增加 `EntityDisplayState`（渲染属性 + `VisibilityMembership`），
+`cad-db` 新增 `entity_display_state`/`restore_entity_display_state`（capture/restore），`apply_drawing_patches`
+在重新插入时恢复；ERASE 与 TRIM 的整实体删除改用 `drawing_patch_deleted`。**B2** ERASE/COPY 现对
+子图元/实例路径 ref 记 `drawing.erase.sub_element`/`drawing.erase.instance`/
+`drawing.copy.sub_element`/`drawing.copy.instance`（与 MOVE 同契约），不再静默整实体化。**B3**
+`draw.error.selection_required` 改为通用“Select objects first / 请先选择对象”（覆盖 Move/Copy），
+`draw.status.idle` 加入 Copy。**B5** `EraseEntities` 现要求 `CommandPayload::None`，错误 payload 显式
+拒绝且不改；`chrome.rs` 记录 config ribbon 缺 `draw.copy`（编辑面板有）的漂移。测试补强：ERASE 带非
+默认渲染属性 → UNDO 后属性与几何/图层完全恢复；COPY 记 `drawing.copy.style` 且副本属性为默认；ERASE/
+COPY 子图元/实例 ref 诊断；ERASE Viewer 拒绝与错误 payload 拒绝；`viewer_mode_rejects_all_drawing_commands_without_change`
+与 `drawing_commands_are_work_only_in_the_catalogue` 纳入两命令。
+
+验证（补强后，本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`check-i18n.py`（276 键）、`check-architecture.py`（25 包）；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint -p cad-history -p cad-db --locked`
+（**536 通过 / 0 失败**）；`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`
+（16 通过 / 0 失败 / 4 忽略）。
+
+## 桌面端“另存为 / 导出图纸”（有损 DXF）（2026-10-10）
 
 用户要求：把桌面 GUI 的“另存为 / 导出图纸”接到 Phase 4a 的**有损** DXF 导出核心，接到命令行
 与 Ctrl+S/Ctrl+Shift+S。仅 GUI 保存；CLI `export` 子命令另轮。web/android 必须仍可编译且显式

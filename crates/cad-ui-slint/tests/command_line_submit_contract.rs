@@ -7,7 +7,7 @@
 //! test owns the process-wide install and exercises every case in sequence.
 use cad_domain::CadResult;
 use cad_ui_slint::{offscreen, UiAdapter, UiCommandSink, UiConfiguration};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 struct Sink;
@@ -193,4 +193,26 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
     assert_eq!(save_calls.get(), 1, "QSAVE resolves to SAVE");
     assert!(ui.invoke_command_submitted("SAVEAS".into()));
     assert_eq!(save_calls.get(), 2, "SAVEAS resolves to SAVE");
+
+    // ERASE invokes the host erase callback; the E alias resolves to it.
+    let adapter = build_adapter();
+    let ui = adapter.component();
+    let erase_calls = Rc::new(Cell::new(0));
+    let observed = erase_calls.clone();
+    ui.on_erase_requested(move || observed.set(observed.get() + 1));
+    assert!(ui.invoke_command_submitted("ERASE".into()));
+    assert_eq!(erase_calls.get(), 1, "ERASE invokes the erase callback");
+    assert!(ui.invoke_command_submitted("E".into()));
+    assert_eq!(erase_calls.get(), 2, "the E alias resolves to ERASE");
+
+    // COPY begins the copy draw tool; the CO/CP aliases resolve to it.
+    let adapter = build_adapter();
+    let ui = adapter.component();
+    let started = Rc::new(RefCell::new(Vec::<String>::new()));
+    let observed = started.clone();
+    ui.on_begin_draw_tool(move |name| observed.borrow_mut().push(name.to_string()));
+    assert!(ui.invoke_command_submitted("COPY".into()));
+    assert!(ui.invoke_command_submitted("CO".into()));
+    assert!(ui.invoke_command_submitted("CP".into()));
+    assert_eq!(&*started.borrow(), &["copy", "copy", "copy"]);
 }

@@ -48,6 +48,8 @@ fn the_fixed_key_map_declares_its_callback_and_clean_screen_gate() {
         // Lossy Save As: host capability + request callback.
         "in property <bool> can-save: false;",
         "callback save-requested();",
+        // ERASE deletes the current selection.
+        "callback erase-requested();",
     ] {
         assert!(APP.contains(clause), "key map is missing: {clause}");
     }
@@ -207,4 +209,7 @@ fn the_adapter_reports_unsupported_shortcuts_from_the_catalog() {
     // Lossy Save As is host-owned: the shell request maps to the command.
     assert!(ADAPTER.contains("on_save_requested"));
     assert!(ADAPTER.contains("CommandId::SaveDrawingAs"));
+    // ERASE is host-owned: the shell request maps to the command.
+    assert!(ADAPTER.contains("on_erase_requested"));
+    assert!(ADAPTER.contains("CommandId::EraseEntities"));
 }

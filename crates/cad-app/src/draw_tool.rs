@@ -31,17 +31,20 @@ pub enum DrawToolKind {
     Move,
     /// TRIM: a target pick plus a boundary pick.
     Trim,
+    /// COPY: requires a selection, then a two-point delta (duplicates).
+    Copy,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the Slint shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 4] = [
+    pub const ALL: [DrawToolKind; 5] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Move,
         DrawToolKind::Trim,
+        DrawToolKind::Copy,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -51,6 +54,7 @@ impl DrawToolKind {
             Self::Circle => "circle",
             Self::Move => "move",
             Self::Trim => "trim",
+            Self::Copy => "copy",
         }
     }
 
@@ -62,6 +66,7 @@ impl DrawToolKind {
             "circle" => Some(Self::Circle),
             "move" => Some(Self::Move),
             "trim" => Some(Self::Trim),
+            "copy" => Some(Self::Copy),
             _ => None,
         }
     }
@@ -94,23 +99,25 @@ impl DrawToolKind {
             Self::Circle => "圆",
             Self::Move => "移动",
             Self::Trim => "修剪",
+            Self::Copy => "复制",
         }
     }
 
     /// Exact number of points this operation needs to be defined.
     pub fn required_points(self) -> usize {
         match self {
-            // Two endpoints, centre+radius point, a move delta, or target+boundary.
-            Self::Line | Self::Circle | Self::Move | Self::Trim => 2,
+            // Two endpoints, centre+radius point, a move/copy delta, or
+            // target+boundary.
+            Self::Line | Self::Circle | Self::Move | Self::Trim | Self::Copy => 2,
         }
     }
 
     /// Whether this operation needs a non-empty selection before it can run.
     ///
-    /// Only MOVE transforms existing entities; the others create or edit from
-    /// picks. A MOVE with no selection is refused rather than moving nothing.
+    /// MOVE transforms existing entities and COPY duplicates them; both refuse to
+    /// run with no selection rather than moving/copying nothing.
     pub fn requires_selection(self) -> bool {
-        matches!(self, Self::Move)
+        matches!(self, Self::Move | Self::Copy)
     }
 }
 
@@ -184,6 +191,8 @@ pub enum DrawIntent {
     Circle { center: Point3, edge: Point3 },
     /// Translate the current selection by `delta`.
     Move { delta: Point3 },
+    /// Duplicate the current selection translated by `delta`.
+    Copy { delta: Point3 },
     /// Trim `target_pick` against `boundary_pick`.
     Trim {
         target_pick: Point3,
@@ -309,6 +318,13 @@ impl DrawTool {
                     z: b.z - a.z,
                 },
             },
+            DrawToolKind::Copy => DrawIntent::Copy {
+                delta: Point3 {
+                    x: b.x - a.x,
+                    y: b.y - a.y,
+                    z: b.z - a.z,
+                },
+            },
             DrawToolKind::Trim => DrawIntent::Trim {
                 target_pick: a,
                 boundary_pick: b,
@@ -369,6 +385,7 @@ mod tests {
         assert!(!DrawToolKind::Circle.requires_selection());
         assert!(DrawToolKind::Move.requires_selection());
         assert!(!DrawToolKind::Trim.requires_selection());
+        assert!(DrawToolKind::Copy.requires_selection());
     }
 
     #[test]

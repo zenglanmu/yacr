@@ -118,6 +118,13 @@ pub enum CommandId {
     /// §3 of `docs/drawing-edit.md`); anything else is an explicit refusal that
     /// changes nothing. Work-only.
     TrimEntity,
+    /// Delete every entity in the current selection in one transaction. An
+    /// empty selection is an explicit refusal. Work-only.
+    EraseEntities,
+    /// Clone every entity in the current selection with a fresh id, translating
+    /// its geometry by a world delta, in one transaction. An empty selection or
+    /// a geometry that cannot be transformed is an explicit refusal. Work-only.
+    CopyEntities,
     /// Set the session's active layer for new drawing entities. Session state
     /// only; no database write. Work-only.
     SetActiveLayer,
@@ -135,6 +142,8 @@ impl CommandId {
                 | Self::CreateCircle
                 | Self::MoveEntities
                 | Self::TrimEntity
+                | Self::EraseEntities
+                | Self::CopyEntities
                 | Self::SetActiveLayer
         )
     }
@@ -443,6 +452,12 @@ pub enum CommandPayload {
     Selection(Vec<SelectionRef>),
     /// Translate a set of selected refs by a world delta (MOVE, spec F-EDIT).
     Move {
+        refs: Vec<SelectionRef>,
+        delta: Point3,
+    },
+    /// Clone a set of selected refs with fresh ids, translating each copy by a
+    /// world delta (COPY, spec F-EDIT). Same interaction shape as `Move`.
+    Copy {
         refs: Vec<SelectionRef>,
         delta: Point3,
     },

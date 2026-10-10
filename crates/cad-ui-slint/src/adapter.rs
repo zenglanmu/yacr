@@ -697,6 +697,28 @@ impl UiAdapter {
             });
         }
         {
+            // ERASE deletes the current selection. The command layer refuses an
+            // empty selection and Viewer mode; a refusal is shown explicitly,
+            // never a fake success.
+            let s = shared.clone();
+            let doc = document;
+            let weak = ui.as_weak();
+            let messages = messages_slot.clone();
+            ui.on_erase_requested(move || {
+                if let Err(error) = s.borrow_mut().send(command_for(
+                    CommandId::EraseEntities,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                )) {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_status_label(draw_error_text(&messages.borrow(), &error).into());
+                        ui.set_command_expanded(true);
+                    }
+                }
+            });
+        }
+        {
             let s = shared.clone();
             let doc = document;
             let weak = ui.as_weak();

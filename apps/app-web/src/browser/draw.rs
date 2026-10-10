@@ -7,6 +7,7 @@
 //! * `Line { start, end }` → `CreateLine` + `Points([start, end])`
 //! * `Circle { center, edge }` → `CreateCircle` + `Points([center, edge])`
 //! * `Move { delta }` → `MoveEntities` with the session selection refs + delta
+//! * `Copy { delta }` → `CopyEntities` with the session selection refs + delta
 //! * `Trim { target_pick, boundary_pick }` → `TrimEntity` after resolving the
 //!   two world picks to `SelectionRef`s
 //!
@@ -119,6 +120,19 @@ impl DrawCommandSink for WebDrawSink {
                 self.send(
                     CommandId::MoveEntities,
                     CommandPayload::Move { refs, delta },
+                )
+            }
+            DrawIntent::Copy { delta } => {
+                let refs: Vec<SelectionRef> = {
+                    let c = self.controller.borrow();
+                    c.selection().refs().to_vec()
+                };
+                if refs.is_empty() {
+                    return Err(CadError::InvalidInput("copy needs a selection".into()));
+                }
+                self.send(
+                    CommandId::CopyEntities,
+                    CommandPayload::Copy { refs, delta },
                 )
             }
             DrawIntent::Trim {

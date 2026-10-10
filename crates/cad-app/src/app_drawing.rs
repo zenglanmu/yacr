@@ -16,8 +16,8 @@
 //! Nothing here builds UI strings or dispatches tools; that is workstream C.
 
 use super::*;
-use cad_db::DbEntity;
-use cad_history::{drawing_patch, DrawingPatch, DrawingUndoRecord};
+use cad_db::{transform_geometry, DbEntity};
+use cad_history::{drawing_patch, drawing_patch_deleted, DrawingPatch, DrawingUndoRecord};
 
 impl Application {
     /// Dispatch the four drawing/edit commands.
@@ -31,6 +31,8 @@ impl Application {
             CommandId::CreateCircle => self.create_circle(session, command),
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
+            CommandId::EraseEntities => self.erase_entities(session, command),
+            CommandId::CopyEntities => self.copy_entities(command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a drawing/edit command".to_string(),
@@ -268,6 +270,262 @@ impl Application {
         })
     }
 
+    /// Delete every entity in the current selection in one transaction.
+    ///
+    /// The selection is the session's; an empty selection is an explicit refusal
+    /// that changes nothing. Duplicate refs to one entity are collapsed (one
+    /// delete), every selected entity must exist before any write, and the whole
+    /// erase is one undo step.
+    pub(crate) fn erase_entities(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        if !matches!(command.payload, CommandPayload::None) {
+            return Err(CadError::InvalidInput(
+                "EraseEntities takes no payload".into(),
+            ));
+        }
+        let refs = session.selection.refs().to_vec();
+        if refs.is_empty() {
+            return Err(CadError::InvalidInput(
+                "ERASE needs a non-empty selection".into(),
+            ));
+        }
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let drawing = Arc::make_mut(&mut document.drawing);
+
+        let mut seen: Vec<EntityId> = Vec::new();
+        let mut before_states: Vec<DbEntity> = Vec::new();
+        let mut display_states: Vec<_> = Vec::new();
+        let mut diagnostics = Vec::new();
+        for reference in &refs {
+            if reference.document != document_id {
+                return Err(CadError::InvalidInput(
+                    "EraseEntities reference belongs to another document".into(),
+                ));
+            }
+            if seen.contains(&reference.entity) {
+                continue;
+            }
+            seen.push(reference.entity);
+            let before = drawing.entity(reference.entity).cloned().ok_or_else(|| {
+                CadError::InvalidInput(format!("entity {} does not exist", reference.entity.0))
+            })?;
+            // Mirror MOVE's contract: a sub-element/instance ref is accepted as a
+            // whole-entity erase, reported rather than silently over-applied.
+            if reference.sub_element.is_some() {
+                diagnostics.push(Diagnostic {
+                    object: Some(ObjectId(reference.entity.0)),
+                    code: "drawing.erase.sub_element".into(),
+                    message: format!(
+                        "子图元 {} 按整实体删除（子图元级编辑未支持）",
+                        reference.entity.0
+                    ),
+                });
+            }
+            if !reference.instance.0.is_empty() {
+                diagnostics.push(Diagnostic {
+                    object: Some(ObjectId(reference.entity.0)),
+                    code: "drawing.erase.instance".into(),
+                    message: format!(
+                        "实例路径引用的实体 {} 删除其块定义，影响所有实例",
+                        reference.entity.0
+                    ),
+                });
+            }
+            // Capture the display state the delete will prune, so undo restores it.
+            display_states.push(drawing.entity_display_state(reference.entity));
+            before_states.push(before);
+        }
+
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction("erase entities", transaction)?;
+            for before in &before_states {
+                staged.delete_entity(before.id)?;
+            }
+            staged.commit()?
+        };
+        let patches: Vec<DrawingPatch> = before_states
+            .into_iter()
+            .zip(display_states)
+            .map(|(before, state)| drawing_patch_deleted(before.id, before, state))
+            .collect();
+        self.record_drawing(
+            document_id,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "erase entities".into(),
+                patches,
+                merge_key: None,
+            },
+        )?;
+
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(change_set),
+            diagnostics,
+            measurement: None,
+        })
+    }
+
+    /// Clone every selected entity with a fresh id, translating its geometry.
+    ///
+    /// Mirrors [`Application::move_entities`] but inserts new entities instead of
+    /// transforming the originals: layer and space are preserved per source
+    /// entity, and any geometry that cannot be transformed refuses the whole
+    /// command before a write (never dropping a selected entity silently). One
+    /// transaction and one undo step cover every copy.
+    pub(crate) fn copy_entities(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::Copy { refs, delta } = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "CopyEntities needs a Copy { refs, delta } payload".into(),
+            ));
+        };
+        if refs.is_empty() {
+            return Err(CadError::InvalidInput(
+                "CopyEntities needs at least one selected reference".into(),
+            ));
+        }
+        if !is_finite_point(*delta) {
+            return Err(CadError::InvalidInput(
+                "CopyEntities delta must be finite".into(),
+            ));
+        }
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let drawing = Arc::make_mut(&mut document.drawing);
+
+        let translation = Transform3::translation(*delta);
+        let mut seen: Vec<EntityId> = Vec::new();
+        let mut sources: Vec<DbEntity> = Vec::new();
+        let mut diagnostics = Vec::new();
+        for reference in refs {
+            if reference.document != document_id {
+                return Err(CadError::InvalidInput(
+                    "CopyEntities reference belongs to another document".into(),
+                ));
+            }
+            if seen.contains(&reference.entity) {
+                continue;
+            }
+            seen.push(reference.entity);
+            let source = drawing.entity(reference.entity).cloned().ok_or_else(|| {
+                CadError::InvalidInput(format!("entity {} does not exist", reference.entity.0))
+            })?;
+            // Refuse the whole command if any selected geometry cannot be
+            // transformed, rather than dropping that entity from the copy.
+            transform_geometry(&source.geometry, &translation).map_err(|error| {
+                CadError::Unsupported(format!(
+                    "COPY cannot transform {}: {error}",
+                    geometry_kind(&source.geometry)
+                ))
+            })?;
+            // Mirror MOVE's contract: a sub-element/instance ref is accepted as a
+            // whole-entity copy, reported rather than silently over-applied.
+            if reference.sub_element.is_some() {
+                diagnostics.push(Diagnostic {
+                    object: Some(ObjectId(reference.entity.0)),
+                    code: "drawing.copy.sub_element".into(),
+                    message: format!(
+                        "子图元 {} 按整实体复制（子图元级编辑未支持）",
+                        reference.entity.0
+                    ),
+                });
+            }
+            if !reference.instance.0.is_empty() {
+                diagnostics.push(Diagnostic {
+                    object: Some(ObjectId(reference.entity.0)),
+                    code: "drawing.copy.instance".into(),
+                    message: format!(
+                        "实例路径引用的实体 {} 复制其块定义，影响所有实例",
+                        reference.entity.0
+                    ),
+                });
+            }
+            // A per-entity display override cannot be carried by the current
+            // write path; report the honest fallback instead of a silent change.
+            let attributes = drawing.entity_render_attributes(reference.entity);
+            if attributes != cad_db::EntityRenderAttributes::default() {
+                diagnostics.push(Diagnostic {
+                    object: Some(ObjectId(reference.entity.0)),
+                    code: "drawing.copy.style".into(),
+                    message: format!(
+                        "实体 {} 的按对象颜色/线型/线宽覆盖未复制，副本继承图层样式",
+                        reference.entity.0
+                    ),
+                });
+            }
+            sources.push(source);
+        }
+
+        let base_order = drawing
+            .model_space()
+            .iter()
+            .map(|e| e.draw_order)
+            .max()
+            .map(|m| m.saturating_add(1))
+            .unwrap_or(0);
+        let mut copies: Vec<(EntityId, DbEntity)> = Vec::with_capacity(sources.len());
+        for (index, source) in sources.iter().enumerate() {
+            let new_id = drawing.allocate_entity_id();
+            let geometry = transform_geometry(&source.geometry, &translation)?;
+            let copy = DbEntity {
+                object: cad_db::DbObject {
+                    id: ObjectId(new_id.0),
+                    type_key: source.object.type_key.clone(),
+                    revision: Revision(0),
+                    source_handle: None,
+                },
+                id: new_id,
+                layer: source.layer,
+                space: source.space.clone(),
+                geometry,
+                draw_order: base_order + index as i64,
+            };
+            copies.push((new_id, copy));
+        }
+
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction("copy entities", transaction)?;
+            for (_, copy) in &copies {
+                staged.insert_entity(copy.clone())?;
+            }
+            staged.commit()?
+        };
+        let patches: Vec<DrawingPatch> = copies
+            .iter()
+            .map(|(id, copy)| drawing_patch(*id, None, Some(copy.clone())))
+            .collect();
+        self.record_drawing(
+            document_id,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "copy entities".into(),
+                patches,
+                merge_key: None,
+            },
+        )?;
+
+        Ok(CommandOutcome {
+            objects: copies.iter().map(|(id, _)| ObjectId(id.0)).collect(),
+            changes: Some(change_set),
+            diagnostics,
+            measurement: None,
+        })
+    }
+
     /// Trim one LINE against LINE/LWPOLYLINE straight segments (spec §3).
     ///
     /// Supported subset only: the target must be a LINE and every boundary must
@@ -354,6 +612,8 @@ impl Application {
             Ok(plan) => plan,
             Err(reason) => return Err(CadError::Unsupported(reason)),
         };
+        // Capture the display state a full delete will prune, so undo restores it.
+        let target_state = document.drawing.entity_display_state(target_entity.id);
 
         let transaction = next_transaction_id();
         let drawing = Arc::make_mut(&mut document.drawing);
@@ -374,7 +634,7 @@ impl Application {
 
         let target_id = target_entity.id;
         let patch = match plan {
-            TrimPlan::Delete => drawing_patch(target_id, Some(target_entity), None),
+            TrimPlan::Delete => drawing_patch_deleted(target_id, target_entity, target_state),
             TrimPlan::Keep { .. } => {
                 // `after` was recomputed above; rebuild it from the committed
                 // geometry so the patch is the exact stored value.
@@ -760,7 +1020,9 @@ fn point_in_polygon(p: Point3, polygon: &[Point3]) -> bool {
 /// `forward` selects the `after` side (redo); otherwise the `before` side is
 /// applied (undo). This goes through the database's single validated write path
 /// so a patch that no longer matches the store is refused, never silently
-/// force-written.
+/// force-written. A re-inserted side also restores its captured display state
+/// (render attributes + dynamic-visibility membership), which the delete path
+/// prunes and the entity alone does not carry.
 pub(crate) fn apply_drawing_patches(
     drawing: &mut DrawingDatabase,
     reason: &str,
@@ -781,5 +1043,18 @@ pub(crate) fn apply_drawing_patches(
             )
         })
         .collect();
-    drawing.apply_drawing_changes(reason, transaction, changes)
+    let change_set = drawing.apply_drawing_changes(reason, transaction, changes)?;
+    for patch in patches {
+        let (entity, state) = if forward {
+            (&patch.after, &patch.after_state)
+        } else {
+            (&patch.before, &patch.before_state)
+        };
+        if entity.is_some() {
+            if let Some(state) = state {
+                drawing.restore_entity_display_state(patch.id, state);
+            }
+        }
+    }
+    Ok(change_set)
 }

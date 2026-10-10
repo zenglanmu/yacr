@@ -212,6 +212,9 @@ pub(crate) fn ribbon_command_label_key(id: &str) -> &'static str {
         "draw.circle" => "draw.kind.circle",
         "draw.move" => "draw.kind.move",
         "draw.trim" => "draw.kind.trim",
+        // Drift note: `viewer_config::COMMAND_IDS` has no `draw.copy`, so a
+        // config-driven ribbon cannot yet expose it; the DrawToolKind editing
+        // panel (editing-labels) does show Copy via `draw.kind.copy`.
         "backend.switch" => "ribbon.command.backend_switch",
         "diagnostics.open" => "toolbar.diagnostics",
         "mode.toggle" => "ribbon.command.mode_toggle",

@@ -4,7 +4,7 @@
 //! so a non-deterministic recomputation can never produce a different result.
 //! Undo and redo publish a [`ChangeSet`] like any other commit.
 
-use cad_db::DbEntity;
+use cad_db::{DbEntity, EntityDisplayState};
 use cad_domain::*;
 use std::collections::{HashSet, VecDeque};
 
@@ -15,6 +15,11 @@ use std::collections::{HashSet, VecDeque};
 /// re-executing the original command. `None` on either side means "did not
 /// exist" (a creation or a deletion). A record may apply several of these in one
 /// commit (for example a MOVE over a multi-selection).
+///
+/// A delete also prunes per-entity display state (render attributes and
+/// dynamic-visibility membership) that the [`DbEntity`] does not carry, so the
+/// patch keeps an optional [`EntityDisplayState`] for each side; the undo/redo
+/// applier restores it when that side is re-inserted.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawingPatch {
     pub id: EntityId,
@@ -22,15 +27,44 @@ pub struct DrawingPatch {
     pub before: Option<DbEntity>,
     /// `None` means the entity does not exist after (a deletion).
     pub after: Option<DbEntity>,
+    /// Display state to restore when the `before` side is (re-)inserted.
+    pub before_state: Option<EntityDisplayState>,
+    /// Display state to restore when the `after` side is (re-)inserted.
+    pub after_state: Option<EntityDisplayState>,
 }
 
 /// Build a drawing patch from the difference between two entity states.
+///
+/// Display state is not captured; use [`drawing_patch_deleted`] for a deletion
+/// that removed render attributes / dynamic-visibility membership.
 pub fn drawing_patch(
     id: EntityId,
     before: Option<DbEntity>,
     after: Option<DbEntity>,
 ) -> DrawingPatch {
-    DrawingPatch { id, before, after }
+    DrawingPatch {
+        id,
+        before,
+        after,
+        before_state: None,
+        after_state: None,
+    }
+}
+
+/// A deletion patch that also captures the pre-delete display state, so an undo
+/// restores the entity's render attributes and dynamic-visibility membership.
+pub fn drawing_patch_deleted(
+    id: EntityId,
+    before: DbEntity,
+    before_state: EntityDisplayState,
+) -> DrawingPatch {
+    DrawingPatch {
+        id,
+        before: Some(before),
+        after: None,
+        before_state: Some(before_state),
+        after_state: None,
+    }
 }
 
 /// A reversible batch of drawing-entity changes.

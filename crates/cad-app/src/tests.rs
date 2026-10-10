@@ -1574,6 +1574,14 @@ mod drawing {
                     pick_point: point(1.0, 0.0),
                 },
             ),
+            (CommandId::EraseEntities, CommandPayload::None),
+            (
+                CommandId::CopyEntities,
+                CommandPayload::Copy {
+                    refs: vec![ref_of(1)],
+                    delta: p3(1.0, 0.0, 0.0),
+                },
+            ),
         ];
         for (id, payload) in cases {
             let err = execute(&mut app, &mut viewer, id, payload).unwrap_err();
@@ -1686,6 +1694,8 @@ mod drawing {
             CommandId::CreateCircle,
             CommandId::MoveEntities,
             CommandId::TrimEntity,
+            CommandId::EraseEntities,
+            CommandId::CopyEntities,
             CommandId::SetActiveLayer,
         ] {
             assert!(id.requires_work_mode(), "{id:?} must be Work-only");
@@ -1734,6 +1744,451 @@ mod drawing {
         assert!(matches!(err, CadError::InvalidInput(_)));
         assert_eq!(revision(&app), rev);
         assert!(!app.can_undo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn erase_selection_deletes_exactly_those_entities_in_one_undo_step() {
+        let (mut app, mut session) = drawing_app();
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::Select,
+            CommandPayload::Selection(vec![ref_of(1), ref_of(2)]),
+        )
+        .unwrap();
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            CommandId::EraseEntities,
+            CommandPayload::None,
+        )
+        .unwrap();
+        assert_eq!(outcome.changes.as_ref().unwrap().changes.len(), 2);
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        assert!(drawing.entity(EntityId(1)).is_none());
+        assert!(drawing.entity(EntityId(2)).is_none());
+        assert!(
+            drawing.entity(EntityId(3)).is_some(),
+            "an unselected entity must stay"
+        );
+        assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
+
+        // One undo restores both erased entities.
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::Undo,
+            CommandPayload::None,
+        )
+        .unwrap();
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        assert!(drawing.entity(EntityId(1)).is_some());
+        assert!(drawing.entity(EntityId(2)).is_some());
+    }
+
+    #[test]
+    fn erase_empty_selection_is_refused_without_change() {
+        let (mut app, mut session) = drawing_app();
+        let rev = revision(&app);
+        let err = execute(
+            &mut app,
+            &mut session,
+            CommandId::EraseEntities,
+            CommandPayload::None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CadError::InvalidInput(_)));
+        assert_eq!(revision(&app), rev);
+        assert!(!app.can_undo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn copy_selection_duplicates_with_translation_in_one_undo_step() {
+        let (mut app, mut session) = drawing_app();
+        let before_count = app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .model_space()
+            .len();
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            CommandId::CopyEntities,
+            CommandPayload::Copy {
+                refs: vec![ref_of(1), ref_of(2)],
+                delta: p3(5.0, 1.0, 0.0),
+            },
+        )
+        .unwrap();
+        assert_eq!(outcome.objects.len(), 2, "one copy per selected entity");
+
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        assert_eq!(drawing.model_space().len(), before_count + 2);
+        // The originals are untouched.
+        match &drawing.entity(EntityId(1)).unwrap().geometry {
+            SemanticGeometry::Line { start, end } => {
+                assert_eq!(*start, point(0.0, 0.0));
+                assert_eq!(*end, point(10.0, 0.0));
+            }
+            other => panic!("expected a line, got {other:?}"),
+        }
+        // The copies are new ids with translated geometry, same layer/space.
+        let copy_line = drawing
+            .entity(EntityId(outcome.objects[0].0))
+            .expect("copy 1");
+        match &copy_line.geometry {
+            SemanticGeometry::Line { start, end } => {
+                assert_eq!(*start, point(5.0, 1.0));
+                assert_eq!(*end, point(15.0, 1.0));
+            }
+            other => panic!("expected a line, got {other:?}"),
+        }
+        assert_eq!(copy_line.layer, LayerId(0));
+        assert_eq!(copy_line.space, SpaceId::Model);
+        let copy_arc = drawing
+            .entity(EntityId(outcome.objects[1].0))
+            .expect("copy 2");
+        match &copy_arc.geometry {
+            SemanticGeometry::Arc { center, .. } => assert_eq!(*center, point(5.0, 1.0)),
+            other => panic!("expected an arc, got {other:?}"),
+        }
+        assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
+
+        // One undo removes every copy and keeps the originals.
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::Undo,
+            CommandPayload::None,
+        )
+        .unwrap();
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        assert_eq!(drawing.model_space().len(), before_count);
+        assert!(drawing.entity(EntityId(outcome.objects[0].0)).is_none());
+        assert!(drawing.entity(EntityId(outcome.objects[1].0)).is_none());
+        assert!(drawing.entity(EntityId(1)).is_some());
+    }
+
+    #[test]
+    fn copy_empty_selection_is_refused_without_change() {
+        let (mut app, mut session) = drawing_app();
+        let rev = revision(&app);
+        let err = execute(
+            &mut app,
+            &mut session,
+            CommandId::CopyEntities,
+            CommandPayload::Copy {
+                refs: Vec::new(),
+                delta: p3(1.0, 0.0, 0.0),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, CadError::InvalidInput(_)));
+        assert_eq!(revision(&app), rev);
+        assert!(!app.can_undo(&DocumentId(1)));
+    }
+
+    #[test]
+    fn copy_in_viewer_mode_is_refused() {
+        let (mut app, _work) = drawing_app();
+        let mut session = SessionState::new(DocumentId(1), AppMode::Viewer);
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::Select,
+            CommandPayload::Selection(vec![ref_of(1)]),
+        )
+        .unwrap();
+        let rev = revision(&app);
+        let err = execute(
+            &mut app,
+            &mut session,
+            CommandId::CopyEntities,
+            CommandPayload::Copy {
+                refs: vec![ref_of(1)],
+                delta: p3(1.0, 0.0, 0.0),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, CadError::PermissionDenied));
+        assert_eq!(revision(&app), rev);
+    }
+
+    #[test]
+    fn copy_untransformable_entity_is_refused_without_change() {
+        // An Opaque entity cannot be translated; the whole copy must refuse
+        // rather than silently dropping it.
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(ent(
+            1,
+            SemanticGeometry::Opaque {
+                type_key: "ACAD_PROXY_ENTITY".into(),
+                version: 1,
+                payload: Vec::new(),
+            },
+            0,
+        ))
+        .unwrap();
+        let drawing = b.finish().unwrap();
+        let mut app = Application::new();
+        app.workspace.documents.insert(
+            DocumentId(1),
+            Document {
+                id: DocumentId(1),
+                drawing: Arc::new(drawing),
+                identity: DocumentIdentity::Sha256([2u8; 32]),
+                units: UnitContext::drawing_units(),
+                resource_keys: Vec::new(),
+            },
+        );
+        app.workspace.viewports.insert(
+            ViewportId(1),
+            Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+        );
+        let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+        let rev = revision(&app);
+        let err = execute(
+            &mut app,
+            &mut session,
+            CommandId::CopyEntities,
+            CommandPayload::Copy {
+                refs: vec![ref_of(1)],
+                delta: p3(1.0, 0.0, 0.0),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, CadError::Unsupported(_)));
+        assert_eq!(revision(&app), rev);
+        assert!(!app.can_undo(&DocumentId(1)));
+    }
+
+    /// One model line on layer 0, optionally with non-default display attributes.
+    fn single_line_app(attributes: Option<cad_db::EntityRenderAttributes>) -> Application {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(ent(
+            1,
+            SemanticGeometry::Line {
+                start: point(0.0, 0.0),
+                end: point(10.0, 0.0),
+            },
+            0,
+        ))
+        .unwrap();
+        if let Some(attributes) = attributes {
+            b.set_entity_render_attributes(EntityId(1), attributes)
+                .unwrap();
+        }
+        let drawing = b.finish().unwrap();
+        let mut app = Application::new();
+        app.workspace.documents.insert(
+            DocumentId(1),
+            Document {
+                id: DocumentId(1),
+                drawing: Arc::new(drawing),
+                identity: DocumentIdentity::Sha256([3u8; 32]),
+                units: UnitContext::drawing_units(),
+                resource_keys: Vec::new(),
+            },
+        );
+        app.workspace.viewports.insert(
+            ViewportId(1),
+            Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+        );
+        app
+    }
+
+    fn non_default_attributes() -> cad_db::EntityRenderAttributes {
+        use cad_db::{
+            EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes,
+            EntityTransparency, LinetypePattern,
+        };
+        EntityRenderAttributes {
+            transparency: EntityTransparency::Explicit(0.5),
+            color: EntityColor::Explicit([10, 20, 30]),
+            lineweight: EntityLineWeight::Explicit(0.7),
+            linetype: EntityLineType::Explicit {
+                name: "DASHED".into(),
+                pattern: LinetypePattern::from_elements([0.5, -0.25]),
+                scale: 2.0,
+            },
+            geometry_source: cad_domain::GeometrySource::Analytic,
+            annotative: Default::default(),
+        }
+    }
+
+    #[test]
+    fn erase_then_undo_restores_geometry_and_display_state() {
+        let attributes = non_default_attributes();
+        let mut app = single_line_app(Some(attributes.clone()));
+        let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::Select,
+            CommandPayload::Selection(vec![ref_of(1)]),
+        )
+        .unwrap();
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::EraseEntities,
+            CommandPayload::None,
+        )
+        .unwrap();
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        assert!(drawing.entity(EntityId(1)).is_none());
+        // The delete pruned the side structures, so a naive undo would lose them.
+        assert_eq!(
+            drawing.entity_render_attributes(EntityId(1)),
+            cad_db::EntityRenderAttributes::default()
+        );
+
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::Undo,
+            CommandPayload::None,
+        )
+        .unwrap();
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        let restored = drawing.entity(EntityId(1)).expect("restored entity");
+        match &restored.geometry {
+            SemanticGeometry::Line { start, end } => {
+                assert_eq!(*start, point(0.0, 0.0));
+                assert_eq!(*end, point(10.0, 0.0));
+            }
+            other => panic!("expected a line, got {other:?}"),
+        }
+        assert_eq!(restored.layer, LayerId(0));
+        assert_eq!(
+            drawing.entity_render_attributes(EntityId(1)),
+            attributes,
+            "undo must restore the render attributes"
+        );
+    }
+
+    #[test]
+    fn copy_reports_the_uncarried_style_override() {
+        let mut app = single_line_app(Some(non_default_attributes()));
+        let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            CommandId::CopyEntities,
+            CommandPayload::Copy {
+                refs: vec![ref_of(1)],
+                delta: p3(5.0, 0.0, 0.0),
+            },
+        )
+        .unwrap();
+        assert_eq!(outcome.diagnostics.len(), 1, "{:?}", outcome.diagnostics);
+        assert_eq!(outcome.diagnostics[0].code, "drawing.copy.style");
+        let copy_id = EntityId(outcome.objects[0].0);
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        assert_eq!(
+            drawing.entity_render_attributes(copy_id),
+            cad_db::EntityRenderAttributes::default(),
+            "the copy inherits the layer style, and that is reported"
+        );
+    }
+
+    #[test]
+    fn erase_reports_sub_element_and_instance_refs() {
+        let (mut app, mut session) = drawing_app();
+        let mut sub = ref_of(1);
+        sub.sub_element = Some(cad_domain::SubElementId {
+            source_key: "edge:0".into(),
+            topology_revision: Revision(0),
+        });
+        let mut inst = ref_of(2);
+        inst.instance = cad_domain::InstancePath(vec![EntityId(3)]);
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::Select,
+            CommandPayload::Selection(vec![sub, inst]),
+        )
+        .unwrap();
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            CommandId::EraseEntities,
+            CommandPayload::None,
+        )
+        .unwrap();
+        let codes: Vec<&str> = outcome
+            .diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect();
+        assert!(codes.contains(&"drawing.erase.sub_element"), "{codes:?}");
+        assert!(codes.contains(&"drawing.erase.instance"), "{codes:?}");
+    }
+
+    #[test]
+    fn copy_reports_sub_element_and_instance_refs() {
+        let (mut app, mut session) = drawing_app();
+        let mut sub = ref_of(1);
+        sub.sub_element = Some(cad_domain::SubElementId {
+            source_key: "edge:0".into(),
+            topology_revision: Revision(0),
+        });
+        let mut inst = ref_of(2);
+        inst.instance = cad_domain::InstancePath(vec![EntityId(3)]);
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            CommandId::CopyEntities,
+            CommandPayload::Copy {
+                refs: vec![sub, inst],
+                delta: p3(1.0, 1.0, 0.0),
+            },
+        )
+        .unwrap();
+        let codes: Vec<&str> = outcome
+            .diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect();
+        assert!(codes.contains(&"drawing.copy.sub_element"), "{codes:?}");
+        assert!(codes.contains(&"drawing.copy.instance"), "{codes:?}");
+    }
+
+    #[test]
+    fn erase_with_a_payload_is_refused_without_change() {
+        let (mut app, mut session) = drawing_app();
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::Select,
+            CommandPayload::Selection(vec![ref_of(1)]),
+        )
+        .unwrap();
+        let rev = revision(&app);
+        let err = execute(
+            &mut app,
+            &mut session,
+            CommandId::EraseEntities,
+            CommandPayload::Points(vec![point(0.0, 0.0)]),
+        )
+        .unwrap_err();
+        assert!(matches!(err, CadError::InvalidInput(_)));
+        assert_eq!(revision(&app), rev);
+        assert!(app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(1))
+            .is_some());
     }
 
     #[test]

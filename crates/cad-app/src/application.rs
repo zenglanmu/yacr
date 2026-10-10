@@ -181,6 +181,8 @@ impl Application {
             | CommandId::CreateCircle
             | CommandId::MoveEntities
             | CommandId::TrimEntity
+            | CommandId::EraseEntities
+            | CommandId::CopyEntities
             | CommandId::SetActiveLayer => self.drawing_command(session, &command),
         }
     }

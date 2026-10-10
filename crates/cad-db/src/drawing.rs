@@ -50,6 +50,37 @@ pub struct DrawingDatabase {
     pub(crate) next_entity_id: u128,
 }
 
+/// Dynamic-visibility membership of one entity, snapshotted before a delete.
+///
+/// The delete path prunes these lists (see [`DrawingDatabase::remove_entity`]),
+/// so an undo must capture and restore them or a deleted block member would lose
+/// its visibility-state membership.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct VisibilityMembership {
+    /// Blocks whose plain `entities` member list contained the entity.
+    pub blocks: Vec<BlockId>,
+    /// Dynamic-visibility placements, one per block that governed the entity.
+    pub visibility: Vec<VisibilityStateMembership>,
+}
+
+/// One block's dynamic-visibility placement of an entity before a delete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibilityStateMembership {
+    pub block: BlockId,
+    /// Whether the entity was in the block's governed `member_entities`.
+    pub member: bool,
+    /// Names of the visibility states that contained the entity.
+    pub states: Vec<String>,
+}
+
+/// The full display state of an entity, snapshotted before a delete so an undo
+/// can restore it exactly (render attributes + dynamic-visibility membership).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EntityDisplayState {
+    pub attributes: EntityRenderAttributes,
+    pub visibility: VisibilityMembership,
+}
+
 impl DrawingDatabase {
     pub fn id(&self) -> DatabaseId {
         self.id
@@ -88,6 +119,78 @@ impl DrawingDatabase {
     /// built without an importer (tests, hand-built fixtures) keeps working.
     pub fn entity_render_attributes(&self, id: EntityId) -> EntityRenderAttributes {
         self.render_attributes.get(&id).cloned().unwrap_or_default()
+    }
+
+    /// Dynamic-visibility membership of `id`, captured before a delete so a
+    /// later undo can restore it.
+    pub fn entity_visibility_membership(&self, id: EntityId) -> VisibilityMembership {
+        let mut membership = VisibilityMembership::default();
+        for definition in self.blocks.values() {
+            if definition.entities.contains(&id) {
+                membership.blocks.push(definition.id);
+            }
+            if let Some(visibility) = definition.dynamic_visibility.as_ref() {
+                let member = visibility.member_entities.contains(&id);
+                let states: Vec<String> = visibility
+                    .states
+                    .iter()
+                    .filter(|state| state.entities.contains(&id))
+                    .map(|state| state.name.clone())
+                    .collect();
+                if member || !states.is_empty() {
+                    membership.visibility.push(VisibilityStateMembership {
+                        block: definition.id,
+                        member,
+                        states,
+                    });
+                }
+            }
+        }
+        membership
+    }
+
+    /// Capture the full display state (render attributes + dynamic-visibility
+    /// membership) of `id`.
+    ///
+    /// An undo of a delete re-inserts the [`DbEntity`] but the delete pruned
+    /// these side structures, so the caller must snapshot and restore them.
+    pub fn entity_display_state(&self, id: EntityId) -> EntityDisplayState {
+        EntityDisplayState {
+            attributes: self.entity_render_attributes(id),
+            visibility: self.entity_visibility_membership(id),
+        }
+    }
+
+    /// Restore a display state captured by [`Self::entity_display_state`].
+    ///
+    /// Infallible: it writes the same map/vector entries the delete removed, so
+    /// a re-inserted entity again carries its resolved colour/linetype/lineweight
+    /// and its dynamic-visibility membership.
+    pub fn restore_entity_display_state(&mut self, id: EntityId, state: &EntityDisplayState) {
+        self.render_attributes.insert(id, state.attributes.clone());
+        for block in &state.visibility.blocks {
+            if let Some(definition) = self.blocks.get_mut(block) {
+                if !definition.entities.contains(&id) {
+                    definition.entities.push(id);
+                }
+            }
+        }
+        for placement in &state.visibility.visibility {
+            if let Some(definition) = self.blocks.get_mut(&placement.block) {
+                if let Some(visibility) = definition.dynamic_visibility.as_mut() {
+                    if placement.member && !visibility.member_entities.contains(&id) {
+                        visibility.member_entities.push(id);
+                    }
+                    for state_entry in &mut visibility.states {
+                        if placement.states.contains(&state_entry.name)
+                            && !state_entry.entities.contains(&id)
+                        {
+                            state_entry.entities.push(id);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn entities(&self) -> impl Iterator<Item = &DbEntity> {

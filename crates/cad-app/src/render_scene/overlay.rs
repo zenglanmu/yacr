@@ -636,7 +636,7 @@ pub fn draw_preview_overlay(
     let mut order = options.draw_order;
     let geometry: Option<Vec<Point3>> = match preview.kind {
         DrawToolKind::Circle => circle_points(&preview.points, preview.cursor),
-        DrawToolKind::Line | DrawToolKind::Move | DrawToolKind::Trim => {
+        DrawToolKind::Line | DrawToolKind::Move | DrawToolKind::Trim | DrawToolKind::Copy => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }
