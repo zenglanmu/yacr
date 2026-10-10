@@ -215,4 +215,17 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
     assert!(ui.invoke_command_submitted("CO".into()));
     assert!(ui.invoke_command_submitted("CP".into()));
     assert_eq!(&*started.borrow(), &["copy", "copy", "copy"]);
+
+    // ARC begins the arc draw tool; the A alias resolves to it. EXTEND begins the
+    // extend draw tool; the EX alias resolves to it.
+    let adapter = build_adapter();
+    let ui = adapter.component();
+    let started = Rc::new(RefCell::new(Vec::<String>::new()));
+    let observed = started.clone();
+    ui.on_begin_draw_tool(move |name| observed.borrow_mut().push(name.to_string()));
+    assert!(ui.invoke_command_submitted("ARC".into()));
+    assert!(ui.invoke_command_submitted("A".into()));
+    assert!(ui.invoke_command_submitted("EXTEND".into()));
+    assert!(ui.invoke_command_submitted("EX".into()));
+    assert_eq!(&*started.borrow(), &["arc", "arc", "extend", "extend"]);
 }

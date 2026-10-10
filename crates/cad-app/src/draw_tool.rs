@@ -27,24 +27,30 @@ pub enum DrawToolKind {
     Line,
     /// CIRCLE: centre plus a point on the circumference (the radius point).
     Circle,
+    /// ARC: three points (start, a point on the arc, end).
+    Arc,
     /// MOVE: requires a selection, then a two-point delta.
     Move,
     /// TRIM: a target pick plus a boundary pick.
     Trim,
     /// COPY: requires a selection, then a two-point delta (duplicates).
     Copy,
+    /// EXTEND: a target pick plus a boundary pick (grows the target LINE).
+    Extend,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the Slint shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 5] = [
+    pub const ALL: [DrawToolKind; 7] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
+        DrawToolKind::Arc,
         DrawToolKind::Move,
         DrawToolKind::Trim,
         DrawToolKind::Copy,
+        DrawToolKind::Extend,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -52,9 +58,11 @@ impl DrawToolKind {
         match self {
             Self::Line => "line",
             Self::Circle => "circle",
+            Self::Arc => "arc",
             Self::Move => "move",
             Self::Trim => "trim",
             Self::Copy => "copy",
+            Self::Extend => "extend",
         }
     }
 
@@ -64,9 +72,11 @@ impl DrawToolKind {
         match key {
             "line" => Some(Self::Line),
             "circle" => Some(Self::Circle),
+            "arc" => Some(Self::Arc),
             "move" => Some(Self::Move),
             "trim" => Some(Self::Trim),
             "copy" => Some(Self::Copy),
+            "extend" => Some(Self::Extend),
             _ => None,
         }
     }
@@ -97,9 +107,11 @@ impl DrawToolKind {
         match self {
             Self::Line => "直线",
             Self::Circle => "圆",
+            Self::Arc => "圆弧",
             Self::Move => "移动",
             Self::Trim => "修剪",
             Self::Copy => "复制",
+            Self::Extend => "延伸",
         }
     }
 
@@ -108,7 +120,9 @@ impl DrawToolKind {
         match self {
             // Two endpoints, centre+radius point, a move/copy delta, or
             // target+boundary.
-            Self::Line | Self::Circle | Self::Move | Self::Trim | Self::Copy => 2,
+            Self::Line | Self::Circle | Self::Move | Self::Trim | Self::Copy | Self::Extend => 2,
+            // Start, a point on the arc, end.
+            Self::Arc => 3,
         }
     }
 
@@ -158,6 +172,13 @@ impl DrawPreview {
                 _ => "修剪：已选目标与边界，可确认".to_string(),
             };
         }
+        if self.kind == DrawToolKind::Extend {
+            return match self.points.len() {
+                0 => "延伸：请选择要延伸的目标".to_string(),
+                1 => "延伸：请选择边界".to_string(),
+                _ => "延伸：已选目标与边界，可确认".to_string(),
+            };
+        }
         if self.remaining > 0 {
             format!(
                 "{}：已选 {} 点，还需 {} 点",
@@ -189,12 +210,19 @@ pub enum DrawIntent {
     Line { start: Point3, end: Point3 },
     /// Insert a CIRCLE centred at `center` through `edge` (radius = |edge−center|).
     Circle { center: Point3, edge: Point3 },
+    /// Insert an ARC through three points (start, on-arc, end).
+    Arc { points: [Point3; 3] },
     /// Translate the current selection by `delta`.
     Move { delta: Point3 },
     /// Duplicate the current selection translated by `delta`.
     Copy { delta: Point3 },
     /// Trim `target_pick` against `boundary_pick`.
     Trim {
+        target_pick: Point3,
+        boundary_pick: Point3,
+    },
+    /// Extend `target_pick` to `boundary_pick`.
+    Extend {
         target_pick: Point3,
         boundary_pick: Point3,
     },
@@ -311,6 +339,9 @@ impl DrawTool {
         Ok(match self.kind {
             DrawToolKind::Line => DrawIntent::Line { start: a, end: b },
             DrawToolKind::Circle => DrawIntent::Circle { center: a, edge: b },
+            DrawToolKind::Arc => DrawIntent::Arc {
+                points: [a, b, self.points[2]],
+            },
             DrawToolKind::Move => DrawIntent::Move {
                 delta: Point3 {
                     x: b.x - a.x,
@@ -326,6 +357,10 @@ impl DrawTool {
                 },
             },
             DrawToolKind::Trim => DrawIntent::Trim {
+                target_pick: a,
+                boundary_pick: b,
+            },
+            DrawToolKind::Extend => DrawIntent::Extend {
                 target_pick: a,
                 boundary_pick: b,
             },
@@ -351,6 +386,115 @@ pub fn circle_radius(center: Point3, edge: Point3) -> CadResult<f64> {
     Ok(radius)
 }
 
+/// The centre, radius and signed angular span of the arc through three XY points.
+///
+/// The arc starts at `start`, passes through `through` and ends at `end`, on the
+/// work-plane `+Z` normal. `sweep` is signed (negative means clockwise) so a
+/// reflected capture is not silently re-drawn as its complement. Non-finite,
+/// non-coplanar (different z) or collinear/coincident points are an explicit
+/// refusal so no degenerate or silently-wrong 3D arc is ever created.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArcParameters {
+    pub center: Point3,
+    pub radius: f64,
+    /// Start angle in radians about `+Z`.
+    pub start: f64,
+    /// Signed sweep in radians; `|sweep| < 2π`.
+    pub sweep: f64,
+}
+
+/// Compute the arc (centre/radius/start/sweep) through three points.
+///
+/// The circumcircle is solved in a frame translated by `start`, which makes both
+/// the degeneracy test and the centre arithmetic translation- and
+/// scale-invariant: a valid arc at large world coordinates is neither refused
+/// nor computed with catastrophic cancellation. The operation is the documented
+/// flat XY subset: points whose `z` differs from `start.z` beyond tolerance are
+/// refused rather than projected into a silently-wrong arc. Collinear, coincident
+/// or non-finite points are refused; the caller must not fabricate a centre or a
+/// default sweep.
+pub fn arc_parameters(start: Point3, through: Point3, end: Point3) -> CadResult<ArcParameters> {
+    if !finite(start) || !finite(through) || !finite(end) {
+        return Err(CadError::InvalidInput("arc points must be finite".into()));
+    }
+    // XY-only subset: a 3-point arc is a planar construction. Refuse a
+    // non-coplanar pickup rather than silently projecting it.
+    let z_tol = 1e-9 * (1.0 + start.z.abs() + through.z.abs() + end.z.abs());
+    if (through.z - start.z).abs() > z_tol || (end.z - start.z).abs() > z_tol {
+        return Err(CadError::InvalidInput(
+            "arc points must lie in one XY plane".into(),
+        ));
+    }
+    // Translate to `start` so the circumcircle is computed in a local frame.
+    let a = (through.x - start.x, through.y - start.y);
+    let b = (end.x - start.x, end.y - start.y);
+    let a_len = a.0.hypot(a.1);
+    let b_len = b.0.hypot(b.1);
+    if a_len <= 1e-12 || b_len <= 1e-12 {
+        return Err(CadError::InvalidInput("arc points are coincident".into()));
+    }
+    // Translation- and scale-invariant collinearity test (relative cross product).
+    let cross = a.0 * b.1 - a.1 * b.0;
+    if !cross.is_finite() || cross.abs() <= 1e-12 * a_len * b_len {
+        return Err(CadError::InvalidInput("arc points are collinear".into()));
+    }
+    // Local circumcentre: `|C| = |a - C| = |b - C|` gives `a·C = |a|²/2`,
+    // `b·C = |b|²/2`; solving by Cramer's rule yields the offset from `start`.
+    let a_sq = a.0 * a.0 + a.1 * a.1;
+    let b_sq = b.0 * b.0 + b.1 * b.1;
+    let denom = 2.0 * cross;
+    let offset_x = (a_sq * b.1 - b_sq * a.1) / denom;
+    let offset_y = (a.0 * b_sq - b.0 * a_sq) / denom;
+    let center = Point3 {
+        x: start.x + offset_x,
+        y: start.y + offset_y,
+        z: start.z,
+    };
+    let radius = offset_x.hypot(offset_y);
+    if !radius.is_finite() || radius <= 0.0 {
+        return Err(CadError::InvalidInput(
+            "arc radius must be positive and finite".into(),
+        ));
+    }
+    let angle = |p: Point3| (p.y - center.y).atan2(p.x - center.x);
+    let start_angle = angle(start);
+    let through_angle = angle(through);
+    let end_angle = angle(end);
+    let norm = |x: f64| {
+        let tau = std::f64::consts::TAU;
+        let x = x % tau;
+        if x < 0.0 {
+            x + tau
+        } else {
+            x
+        }
+    };
+    let ccw = norm(end_angle - start_angle);
+    let to_through = norm(through_angle - start_angle);
+    // If the middle point is not on the counter-clockwise path, the arc runs
+    // clockwise: a negative sweep, never the complementary CCW arc.
+    let sweep = if to_through <= ccw {
+        ccw
+    } else {
+        ccw - std::f64::consts::TAU
+    };
+    if !sweep.is_finite() || sweep.abs() <= 1e-12 {
+        return Err(CadError::InvalidInput(
+            "arc points are collinear or coincident".into(),
+        ));
+    }
+    Ok(ArcParameters {
+        center,
+        radius,
+        start: start_angle,
+        sweep,
+    })
+}
+
+fn finite(p: Point3) -> bool {
+    p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,7 +511,8 @@ mod tests {
             assert_eq!(DrawToolKind::from_key(kind.key()), Some(kind));
             assert_eq!(DrawToolKind::from_label(kind.label()), Some(kind));
         }
-        assert_eq!(DrawToolKind::from_key("arc"), None);
+        assert_eq!(DrawToolKind::from_key("arc"), Some(DrawToolKind::Arc));
+        assert_eq!(DrawToolKind::from_key("elbow"), None);
         assert_eq!(DrawToolKind::from_index(-1), None);
         assert_eq!(
             DrawToolKind::from_index(DrawToolKind::ALL.len() as i32),
@@ -379,13 +524,169 @@ mod tests {
     #[test]
     fn required_points_and_selection_are_explicit_per_kind() {
         for kind in DrawToolKind::ALL {
-            assert_eq!(kind.required_points(), 2, "{kind:?}");
+            let expected = if kind == DrawToolKind::Arc { 3 } else { 2 };
+            assert_eq!(kind.required_points(), expected, "{kind:?}");
         }
         assert!(!DrawToolKind::Line.requires_selection());
         assert!(!DrawToolKind::Circle.requires_selection());
+        assert!(!DrawToolKind::Arc.requires_selection());
         assert!(DrawToolKind::Move.requires_selection());
         assert!(!DrawToolKind::Trim.requires_selection());
         assert!(DrawToolKind::Copy.requires_selection());
+        assert!(!DrawToolKind::Extend.requires_selection());
+    }
+
+    #[test]
+    fn arc_captures_three_points_and_confirms_an_arc_intent() {
+        let mut tool = DrawTool::new(DrawToolKind::Arc, 0);
+        assert_eq!(tool.remaining(), 3);
+        tool.push_point(p(0.0, 0.0)).unwrap();
+        tool.push_point(p(5.0, 5.0)).unwrap();
+        assert_eq!(tool.remaining(), 1);
+        assert!(!tool.is_ready());
+        tool.push_point(p(10.0, 0.0)).unwrap();
+        assert!(tool.is_ready());
+        assert_eq!(
+            tool.intent().unwrap(),
+            DrawIntent::Arc {
+                points: [p(0.0, 0.0), p(5.0, 5.0), p(10.0, 0.0)]
+            }
+        );
+    }
+
+    #[test]
+    fn extend_walks_target_then_boundary() {
+        let mut tool = DrawTool::new(DrawToolKind::Extend, 0);
+        assert_eq!(tool.preview().status_line(), "延伸：请选择要延伸的目标");
+        tool.push_point(p(9.0, 0.0)).unwrap();
+        assert_eq!(tool.preview().status_line(), "延伸：请选择边界");
+        tool.push_point(p(20.0, 0.0)).unwrap();
+        assert!(tool.is_ready());
+        assert_eq!(
+            tool.intent().unwrap(),
+            DrawIntent::Extend {
+                target_pick: p(9.0, 0.0),
+                boundary_pick: p(20.0, 0.0)
+            }
+        );
+    }
+
+    #[test]
+    fn arc_parameters_resolve_a_circumcircle_and_refuse_degenerate_input() {
+        // Semicircle through (0,0), (5,5), (10,0): centre (5,0), radius 5.
+        let parameters = arc_parameters(p(0.0, 0.0), p(5.0, 5.0), p(10.0, 0.0)).unwrap();
+        assert!((parameters.center.x - 5.0).abs() < 1e-9, "{parameters:?}");
+        assert!((parameters.center.y - 0.0).abs() < 1e-9, "{parameters:?}");
+        assert!((parameters.radius - 5.0).abs() < 1e-9, "{parameters:?}");
+        assert!((parameters.start - std::f64::consts::PI).abs() < 1e-9);
+        // Through the upper point, the arc is clockwise: a negative sweep.
+        assert!((parameters.sweep + std::f64::consts::PI).abs() < 1e-9);
+
+        // Collinear points have no circumcircle.
+        assert!(matches!(
+            arc_parameters(p(0.0, 0.0), p(1.0, 0.0), p(2.0, 0.0)),
+            Err(CadError::InvalidInput(_))
+        ));
+        // Coincident points are refused, never a degenerate arc.
+        assert!(matches!(
+            arc_parameters(p(0.0, 0.0), p(0.0, 0.0), p(1.0, 0.0)),
+            Err(CadError::InvalidInput(_))
+        ));
+        // Non-finite points are refused.
+        assert!(matches!(
+            arc_parameters(p(0.0, 0.0), p(f64::NAN, 1.0), p(2.0, 0.0)),
+            Err(CadError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn arc_parameters_are_translation_invariant_at_large_coordinates() {
+        // The semicircle fixture translated by (1e6, 1e6): centre (1e6+5, 1e6), r=5.
+        let base = 1.0e6;
+        let parameters = arc_parameters(
+            p(base, base),
+            p(base + 5.0, base + 5.0),
+            p(base + 10.0, base),
+        )
+        .unwrap();
+        assert!(
+            (parameters.center.x - (base + 5.0)).abs() < 1e-9,
+            "{parameters:?}"
+        );
+        assert!((parameters.center.y - base).abs() < 1e-9, "{parameters:?}");
+        assert!((parameters.radius - 5.0).abs() < 1e-9, "{parameters:?}");
+        assert!((parameters.start - std::f64::consts::PI).abs() < 1e-9);
+        assert!((parameters.sweep + std::f64::consts::PI).abs() < 1e-9);
+        // The arc passes through the picked points: each is exactly one radius out.
+        for point in [
+            p(base, base),
+            p(base + 5.0, base + 5.0),
+            p(base + 10.0, base),
+        ] {
+            let distance = (point.x - parameters.center.x).hypot(point.y - parameters.center.y);
+            assert!(
+                (distance - parameters.radius).abs() < 1e-9,
+                "{point:?} is not on the circumcircle"
+            );
+        }
+    }
+
+    #[test]
+    fn arc_parameters_accept_a_unit_arc_at_large_coordinates() {
+        // A unit-radius upper semicircle centred at (1e6, 1e6) must be accepted,
+        // not refused by a translation-dependent degeneracy test.
+        let base = 1.0e6;
+        let parameters = arc_parameters(
+            p(base + 1.0, base),
+            p(base, base + 1.0),
+            p(base - 1.0, base),
+        )
+        .unwrap();
+        assert!((parameters.center.x - base).abs() < 1e-9, "{parameters:?}");
+        assert!((parameters.center.y - base).abs() < 1e-9, "{parameters:?}");
+        assert!((parameters.radius - 1.0).abs() < 1e-9, "{parameters:?}");
+        // right -> top -> left is a counter-clockwise half turn (positive sweep).
+        assert!(
+            (parameters.sweep - std::f64::consts::PI).abs() < 1e-9,
+            "{parameters:?}"
+        );
+    }
+
+    #[test]
+    fn arc_parameters_supports_a_near_full_arc() {
+        let tau = std::f64::consts::TAU;
+        let end_angle = tau - 0.1;
+        let parameters = arc_parameters(
+            p(1.0, 0.0),
+            p(-1.0, 0.0),
+            Point3 {
+                x: end_angle.cos(),
+                y: end_angle.sin(),
+                z: 0.0,
+            },
+        )
+        .unwrap();
+        assert!((parameters.center.x).abs() < 1e-9, "{parameters:?}");
+        assert!((parameters.center.y).abs() < 1e-9, "{parameters:?}");
+        assert!((parameters.radius - 1.0).abs() < 1e-9, "{parameters:?}");
+        assert!(
+            (parameters.sweep - (tau - 0.1)).abs() < 1e-9,
+            "{parameters:?}"
+        );
+    }
+
+    #[test]
+    fn arc_parameters_refuse_non_coplanar_points() {
+        // A point off the start plane must be refused, never silently projected.
+        let through = Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 5.0,
+        };
+        assert!(matches!(
+            arc_parameters(p(0.0, 0.0), through, p(0.0, 1.0)),
+            Err(CadError::InvalidInput(_))
+        ));
     }
 
     #[test]

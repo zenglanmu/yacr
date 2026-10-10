@@ -19,7 +19,6 @@ use std::{cell::RefCell, rc::Rc};
 /// Remove an entry (and add its executor/acceptance test) as a later phase
 /// lands the feature; never route one of these to an existing selector.
 const UNSUPPORTED_COMMANDS: &[&str] = &[
-    "ARC",
     "ARRAY",
     "BLOCK",
     "BOUNDARY",
@@ -35,7 +34,6 @@ const UNSUPPORTED_COMMANDS: &[&str] = &[
     "DIVIDE",
     "ELLIPSE",
     "EXPLODE",
-    "EXTEND",
     "FILLET",
     "GRADIENT",
     "HATCH",
@@ -299,12 +297,20 @@ fn dispatch_command(
             ui.invoke_begin_draw_tool("circle".into());
             true
         }
+        "ARC" => {
+            ui.invoke_begin_draw_tool("arc".into());
+            true
+        }
         "MOVE" => {
             ui.invoke_begin_draw_tool("move".into());
             true
         }
         "TRIM" => {
             ui.invoke_begin_draw_tool("trim".into());
+            true
+        }
+        "EXTEND" => {
+            ui.invoke_begin_draw_tool("extend".into());
             true
         }
         "COPY" => {
@@ -607,7 +613,7 @@ mod contracts {
                 "{name} prefixes a supported command"
             );
         }
-        for expected in ["HATCH", "OFFSET", "ARRAY", "MIRROR", "ARC", "PUBLISH"] {
+        for expected in ["HATCH", "OFFSET", "ARRAY", "MIRROR", "PUBLISH"] {
             assert!(
                 UNSUPPORTED_COMMANDS.contains(&expected),
                 "missing unsupported command {expected}"
@@ -615,9 +621,11 @@ mod contracts {
         }
         assert!(is_unsupported_command("MIRROR 0,0"));
         assert!(!is_unsupported_command("LINE"));
-        // ERASE and COPY are now real commands, no longer unsupported.
+        // ERASE, COPY, ARC and EXTEND are now real commands, no longer unsupported.
         assert!(!is_unsupported_command("ERASE"));
         assert!(!is_unsupported_command("COPY"));
+        assert!(!is_unsupported_command("ARC"));
+        assert!(!is_unsupported_command("EXTEND"));
     }
 
     #[test]

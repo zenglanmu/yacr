@@ -1,6 +1,81 @@
 # 后续 agent 接手入口
 
-## 两个真实编辑命令：ERASE 与 COPY（2026-10-10，本轮）
+## 两个真实绘制/编辑命令：ARC 与 EXTEND（2026-10-11，本轮）
+
+用户要求：沿用 LINE/CIRCLE/TRIM/draw-tool 框架，新增 ARC（三点圆弧）与 EXTEND（把 LINE 延伸到边界）
+两个真实命令；仅此两项（变换/剪贴板/OFFSET 留待后续）。
+
+- 命令层：新增 `CommandId::CreateArc` 与 `CommandId::ExtendEntity`（均 `requires_work_mode`），
+  Viewer 模式由命令层显式 `PermissionDenied` 拒绝。新增 `CommandPayload::Extend { target, boundary,
+  pick_point }`（与 `Trim` 同形）。
+- ARC：`DrawToolKind::Arc`（键 `"arc"`，3 点），`DrawIntent::Arc { points: [Point3;3] }`，
+  payload 复用 `Points([start, through, end])`（也接受 `Geometry(Arc)` 直通）。`draw_tool::arc_parameters`
+  由三点求外接圆（中心/半径/起始角/带符号 sweep，工作平面 +Z）；共线、重合或非有限点 → 显式
+  `InvalidInput` 拒绝且不创建实体。经 `commit_new_entity` 一次事务 + 一步撤销。
+- EXTEND：`DrawToolKind::Extend`（键 `"extend"`，与 TRIM 同交互：先目标后边界），
+  `DrawIntent::Extend { target_pick, boundary_pick }`。`extend_entity` 复用
+  `collect_boundary_segments` + 新增 `line_segment_intersection_param`/`plan_extend`：把拾取端最近的
+  LINE 端点延伸到无限目标线与边界段的最近交点。诚实子集同 TRIM：仅 LINE 目标对 LINE/全直线
+  LWPOLYLINE 边界；非 LINE 目标、弧段边界、已接触/已穿过边界、无交点均为显式拒绝且不改。一次事务
+  + 一步撤销；沿用 TRIM/ERASE 的 patch/apply 路径（更新路径保留渲染属性）。
+- 预览：`draw_preview_overlay` 新增 Arc 分支（三点已知则画真实圆弧，否则回退橡皮筋链）；
+  Line/Move/Trim/Copy/Extend 共用链预览。
+- 宿主 draw sink：ARC 在 linux/web/android 三处转发 `DrawIntent::Arc → CreateArc`；EXTEND 在
+  web/android 复用 `world_pick_ref` 解析两点后发 `ExtendEntity`，linux 与 TRIM 一致地返回显式
+  `Unsupported`（`linux.extend`，取点未接线）。
+- 命令行：canonical `ARC`/`EXTEND`（均 work-only）与别名 `A`/`EX`；从 `UNSUPPORTED_COMMANDS` 移除
+  `ARC`/`EXTEND`；分发到 `begin_draw_tool("arc")`/`begin_draw_tool("extend")`。
+- i18n：新增 `draw.kind.arc`、`draw.kind.extend`、`linux.extend`；`draw.status.idle` 增列 Arc/Extend；
+  `draw.error.no_intersection` 从“无法修剪”改为通用“无法完成操作”（覆盖 TRIM/EXTEND）。两份 catalog
+  键集一致（279 键）。
+
+验证（本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`check-i18n.py`（279 键）、`check-architecture.py`（25 包）；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web lib）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（**465 通过 / 0 失败**）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
+新增合成契约：ARC（三点得到外接圆中心/半径/sweep；共线显式拒绝且无实体；一步撤销移除；Viewer
+拒绝）；EXTEND（目标延伸到最近边界、一步撤销恢复原线并保留渲染属性；已接触、非 LINE 目标、
+无交点均显式拒绝且不改；Viewer 拒绝）；命令行 `ARC`/`A` 与 `EXTEND`/`EX` 启动对应工具。均为合成/
+离屏证据，未做真实窗口、真实 GPU、真机或交互手势验收。Android 本机缺 Android 平台（`No Android
+platforms found`），app-android 编译未运行。
+
+验收范围（精确）：ARC 工具在**桌面宿主 + Web** 均接线（`DrawIntent::Arc → CreateArc`）；
+EXTEND 仅在 **Web** 接线（`world_pick_ref` 解析两点），**Linux 宿主未接线**（与 TRIM 的
+`linux.trim` 缺口一致，返回显式 `Unsupported`）；Android 宿主已改代码但**未编译**。全部证据为
+**合成/离屏**（软件 Vulkan lavapipe），不代表真实窗口、真实 GPU 或真机。
+
+补强（评审后）：**F1** `arc_parameters` 原实现的外接圆解与退化判据依赖世界坐标（平移相关），在
+大坐标处会误拒合法小弧或算出错误圆心。现改为在 `start` 平移后的局部坐标系求解，退化判据用
+平移/尺度不变的相对叉积 `|a×b| ≤ eps·|a|·|b|`（另加重合点守卫），并对 `|z−start.z|>tol` 的非共面
+取点显式拒绝（文档化 XY-only 子集，绝不静默投影成错误的 3D 弧）。新增测试：把既有三点夹具平移
+(1e6,1e6) 断言中心/半径 1e-9 且三点都在圆上；大坐标单位弧被接受；近满弧；非共面拒绝。**F2**
+DXF 导出对负 sweep 弧曾按 `end=(start+sweep)` 直写，等价于镜像到互补弧却记 `Exact`（假成功）。
+DXF ARC 是无向点集，现按 `sweep<0` 交换首末角（`start_angle=(start+sweep).rem_euclid(τ)`、
+`end_angle=start.rem_euclid(τ)`），同一 `Exact`；新增负 sweep 往返测试断言端点互换且 CCW 跨度为
+`|sweep|`。**（已核实）** acadrust 写入 group 50/51 时执行 `.to_degrees()`
+（`acadrust` `io/dxf/writer/section_writer.rs`），即其 `DxfArc.start_angle/end_angle` 为弧度；导出器
+存弧度**正确**，无需改动。**F3** TRIM 的 plan 级拒绝（退化/无交点/拾取点不在线上）原映射
+`Unsupported`，与 `draw_error_text` 文档（no-intersection 走 `InvalidInput`）及 EXTEND 不一致；
+现 TRIM/EXTEND 的 plan 级拒绝均为 `InvalidInput`（命中原生 `draw.error.no_intersection`），仅
+**不支持的几何**（非 LINE 目标、弧段/CIRCLE 边界）保持 `Unsupported`。**F4** `plan_extend` 的
+`crosses` 现与 `touches` 一样无条件拒绝，文档不再夸大。**杂项** `segment_intersection_param` 改为
+`line_segment_intersection_param` 的薄封装。新增 EXTEND 契约：grow-start、多交点取最近、
+已穿过拒绝、直线 LWPOLYLINE 边界成功、弧段折线/CIRCLE 边界 `Unsupported`；ARC：正 sweep、
+`Geometry(Arc)` 直通。
+
+补强后验证（本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all` / `--check`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`check-i18n.py`（279 键）、`check-architecture.py`（25 包）；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint -p cad-import-acadrust --locked`
+（**652 通过 / 0 失败 / 1 忽略**）；`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`
+（16 通过 / 0 失败 / 4 忽略）。
+
+## 两个真实编辑命令：ERASE 与 COPY（2026-10-10）
 
 用户要求：沿用 MOVE/LINE/CIRCLE/TRIM 框架，新增 ERASE 与 COPY 两个真实编辑命令；仅此两项
 （ARC/变换/剪贴板留待后续）。宿主编译门禁不因 web/android 而回退。

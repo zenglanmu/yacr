@@ -142,6 +142,10 @@ impl DrawCommandSink for Runtime {
                 CommandId::CreateCircle,
                 CommandPayload::Points(vec![center, edge]),
             ),
+            cad_app::DrawIntent::Arc { points } => self.command(
+                CommandId::CreateArc,
+                CommandPayload::Points(points.to_vec()),
+            ),
             cad_app::DrawIntent::Move { delta } => {
                 let refs = self.controller.borrow().selection().refs().to_vec();
                 self.command(
@@ -158,6 +162,9 @@ impl DrawCommandSink for Runtime {
             }
             cad_app::DrawIntent::Trim { .. } => {
                 Err(CadError::Unsupported(self.message("linux.trim", &[])))
+            }
+            cad_app::DrawIntent::Extend { .. } => {
+                Err(CadError::Unsupported(self.message("linux.extend", &[])))
             }
         }
     }

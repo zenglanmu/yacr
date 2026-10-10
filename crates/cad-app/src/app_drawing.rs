@@ -1,8 +1,9 @@
 //! Drawing creation and edit commands for [`Application`] (spec §4.7, F-EDIT).
 //!
 //! These are the real, transactional implementations behind
-//! [`CommandId::CreateLine`], [`CommandId::CreateCircle`],
-//! [`CommandId::MoveEntities`] and [`CommandId::TrimEntity`]. The contract is
+//! [`CommandId::CreateLine`], [`CommandId::CreateCircle`], [`CommandId::CreateArc`],
+//! [`CommandId::MoveEntities`], [`CommandId::TrimEntity`], [`CommandId::ExtendEntity`],
+//! [`CommandId::EraseEntities`] and [`CommandId::CopyEntities`]. The contract is
 //! pinned in `docs/drawing-edit.md` §2/§3; this module implements exactly that:
 //!
 //! * every command is Work-only (the command layer refuses Viewer mode);
@@ -10,8 +11,10 @@
 //!   and records exactly one undo step with full before/after entity patches;
 //! * a failure changes no state (the database transaction is all-or-nothing)
 //!   and records no history;
-//! * TRIM covers the documented LINE-vs-LINE subset only and reports anything
-//!   else as an explicit `Unsupported`/diagnostic without touching the drawing.
+//! * TRIM/EXTEND cover the documented LINE-vs-LINE/LWPOLYLINE subset only: an
+//!   unsupported *geometry* (non-LINE target, curved boundary) is an explicit
+//!   `Unsupported`, while a plan-level refusal (degenerate or no intersection) is
+//!   an explicit `InvalidInput`, and neither touches the drawing.
 //!
 //! Nothing here builds UI strings or dispatches tools; that is workstream C.
 
@@ -29,8 +32,10 @@ impl Application {
         match command.id {
             CommandId::CreateLine => self.create_line(session, command),
             CommandId::CreateCircle => self.create_circle(session, command),
+            CommandId::CreateArc => self.create_arc(session, command),
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
+            CommandId::ExtendEntity => self.extend_entity(command),
             CommandId::EraseEntities => self.erase_entities(session, command),
             CommandId::CopyEntities => self.copy_entities(command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
@@ -150,6 +155,73 @@ impl Application {
             radius,
         };
         self.commit_new_entity(session, command, geometry, "create circle")
+    }
+
+    /// Insert an ARC through three points into model space.
+    ///
+    /// Accepts `Points([start, through, end])` (the UI path) or a fully formed
+    /// `Geometry(SemanticGeometry::Arc { .. })` (the programmatic path). The
+    /// circumcircle is a work-plane `+Z` construction; collinear, coincident or
+    /// non-finite points are an explicit refusal that creates nothing.
+    pub(crate) fn create_arc(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let geometry = match &command.payload {
+            CommandPayload::Points(points) => {
+                let start = *points.first().ok_or_else(|| {
+                    CadError::InvalidInput("CreateArc needs a start point".into())
+                })?;
+                let through = *points.get(1).ok_or_else(|| {
+                    CadError::InvalidInput("CreateArc needs an on-arc point".into())
+                })?;
+                let end = *points
+                    .get(2)
+                    .ok_or_else(|| CadError::InvalidInput("CreateArc needs an end point".into()))?;
+                let parameters = crate::draw_tool::arc_parameters(start, through, end)?;
+                SemanticGeometry::Arc {
+                    center: parameters.center,
+                    // The circumcircle is a work-plane construction; a flat arc
+                    // uses +Z, never a fabricated tilt.
+                    normal: Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 1.0,
+                    },
+                    radius: parameters.radius,
+                    start: parameters.start,
+                    sweep: parameters.sweep,
+                }
+            }
+            CommandPayload::Geometry(geometry) => match geometry.as_ref() {
+                SemanticGeometry::Arc {
+                    center,
+                    normal,
+                    radius,
+                    start,
+                    sweep,
+                } => SemanticGeometry::Arc {
+                    center: *center,
+                    normal: *normal,
+                    radius: *radius,
+                    start: *start,
+                    sweep: *sweep,
+                },
+                other => {
+                    return Err(CadError::InvalidInput(format!(
+                        "CreateArc needs an Arc geometry, got {}",
+                        geometry_kind(other)
+                    )))
+                }
+            },
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "CreateArc needs a Points([start, through, end]) or Geometry payload".into(),
+                ))
+            }
+        };
+        self.commit_new_entity(session, command, geometry, "create arc")
     }
 
     /// Translate every selected entity by `delta` in one transaction.
@@ -600,7 +672,7 @@ impl Application {
                     reference.entity.0
                 ))
             })?;
-            collect_boundary_segments(&entity.geometry, &mut segments, &mut closed_loops)?;
+            collect_boundary_segments(&entity.geometry, &mut segments, &mut closed_loops, "TRIM")?;
         }
         if segments.is_empty() {
             return Err(CadError::Unsupported(
@@ -610,7 +682,10 @@ impl Application {
 
         let plan = match plan_trim(a, b, *pick_point, &segments, &closed_loops) {
             Ok(plan) => plan,
-            Err(reason) => return Err(CadError::Unsupported(reason)),
+            // A plan-level refusal (degenerate target, no intersection, pick off
+            // the target) is invalid *input*, not an unsupported geometry, so it
+            // maps to the same "no intersection" surface as EXTEND.
+            Err(reason) => return Err(CadError::InvalidInput(reason)),
         };
         // Capture the display state a full delete will prune, so undo restores it.
         let target_state = document.drawing.entity_display_state(target_entity.id);
@@ -671,7 +746,139 @@ impl Application {
         })
     }
 
-    /// Shared insert path for LINE/CIRCLE creation.
+    /// Extend one LINE to the nearest LINE/LWPOLYLINE boundary segment.
+    ///
+    /// The supported subset mirrors TRIM: the target must be a LINE and every
+    /// boundary must be a LINE or an all-straight-segment LWPOLYLINE. The
+    /// endpoint nearer `pick_point` is moved to the nearest boundary crossing
+    /// beyond it. A non-LINE target, a curved/unsupported boundary, a target that
+    /// already touches or crosses the boundary, and a boundary whose segment
+    /// never meets the target's line are all explicit refusals that change
+    /// nothing.
+    pub(crate) fn extend_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::Extend {
+            target,
+            boundary,
+            pick_point,
+        } = &command.payload
+        else {
+            return Err(CadError::InvalidInput(
+                "ExtendEntity needs an Extend { target, boundary, pick_point } payload".into(),
+            ));
+        };
+        if target.document != command.document {
+            return Err(CadError::InvalidInput(
+                "ExtendEntity target belongs to another document".into(),
+            ));
+        }
+        if boundary.is_empty() {
+            return Err(CadError::InvalidInput(
+                "ExtendEntity needs at least one boundary reference".into(),
+            ));
+        }
+        if !is_finite_point(*pick_point) {
+            return Err(CadError::InvalidInput(
+                "ExtendEntity pick point must be finite".into(),
+            ));
+        }
+
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+
+        // Resolve every input to plain data before mutating anything: an
+        // unsupported boundary or target is a refusal with zero database change.
+        let target_entity = document
+            .drawing
+            .entity(target.entity)
+            .cloned()
+            .ok_or_else(|| {
+                CadError::InvalidInput(format!("extend target {} does not exist", target.entity.0))
+            })?;
+        let (a, b) = match &target_entity.geometry {
+            SemanticGeometry::Line { start, end } => (*start, *end),
+            other => {
+                return Err(CadError::Unsupported(format!(
+                    "EXTEND target must be a LINE; {} is not supported",
+                    geometry_kind(other)
+                )))
+            }
+        };
+        let mut segments: Vec<(Point3, Point3)> = Vec::new();
+        let mut closed_loops: Vec<Vec<Point3>> = Vec::new();
+        for reference in boundary {
+            if reference.document != document_id {
+                return Err(CadError::InvalidInput(
+                    "ExtendEntity boundary belongs to another document".into(),
+                ));
+            }
+            let entity = document.drawing.entity(reference.entity).ok_or_else(|| {
+                CadError::InvalidInput(format!(
+                    "extend boundary {} does not exist",
+                    reference.entity.0
+                ))
+            })?;
+            collect_boundary_segments(
+                &entity.geometry,
+                &mut segments,
+                &mut closed_loops,
+                "EXTEND",
+            )?;
+        }
+        if segments.is_empty() {
+            return Err(CadError::Unsupported(
+                "EXTEND boundary has no straight segments to extend to".into(),
+            ));
+        }
+
+        let (start, end) = match plan_extend(a, b, *pick_point, &segments) {
+            Ok(range) => range,
+            Err(reason) => return Err(CadError::InvalidInput(reason)),
+        };
+
+        let transaction = next_transaction_id();
+        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut after = target_entity.clone();
+        after.geometry = SemanticGeometry::Line { start, end };
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction("extend entity", transaction)?;
+            staged.update_entity(after.clone())?;
+            staged.commit()?
+        };
+        let target_id = target_entity.id;
+        // Read the committed entity back so the undo patch's `after` is the exact
+        // stored value, never a re-derivation.
+        let stored =
+            document.drawing.entity(target_id).cloned().ok_or_else(|| {
+                CadError::Invariant("extended entity vanished after commit".into())
+            })?;
+        self.record_drawing(
+            document_id,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "extend entity".into(),
+                patches: vec![drawing_patch(target_id, Some(target_entity), Some(stored))],
+                merge_key: None,
+            },
+        )?;
+
+        Ok(CommandOutcome {
+            objects: vec![ObjectId(target_id.0)],
+            changes: Some(change_set),
+            diagnostics: vec![Diagnostic {
+                object: Some(ObjectId(target_id.0)),
+                code: "drawing.extend".into(),
+                message: "EXTEND：目标已延伸至最近的边界（LINE 对 LINE/LWPOLYLINE 子集）"
+                    .to_string(),
+            }],
+            measurement: None,
+        })
+    }
+
+    /// Shared insert path for LINE/CIRCLE/ARC creation.
     fn commit_new_entity(
         &mut self,
         session: &SessionState,
@@ -802,11 +1009,14 @@ fn is_finite_point(p: Point3) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
 }
 
-/// The resolved boundary input for a trim: straight segments plus closed loops.
+/// The resolved boundary input for a trim/extend: straight segments plus closed
+/// loops. `command` names the caller (TRIM/EXTEND) so an unsupported boundary is
+/// reported with the operation that actually refused it.
 fn collect_boundary_segments(
     geometry: &SemanticGeometry,
     segments: &mut Vec<(Point3, Point3)>,
     closed_loops: &mut Vec<Vec<Point3>>,
+    command: &str,
 ) -> CadResult<()> {
     match geometry {
         SemanticGeometry::Line { start, end } => {
@@ -824,22 +1034,20 @@ fn collect_boundary_segments(
             let straight = |i: usize| bulges.get(i).copied().unwrap_or(0.0).abs() <= 1e-12;
             for i in 0..points.len().saturating_sub(1) {
                 if !straight(i) {
-                    return Err(CadError::Unsupported(
-                        "TRIM boundary contains a polyline arc segment; only straight LWPOLYLINE \
-                         segments are supported"
-                            .into(),
-                    ));
+                    return Err(CadError::Unsupported(format!(
+                        "{command} boundary contains a polyline arc segment; only straight \
+                         LWPOLYLINE segments are supported"
+                    )));
                 }
                 segments.push((points[i], points[i + 1]));
             }
             if *closed {
                 let last = points[points.len() - 1];
                 if !straight(points.len() - 1) {
-                    return Err(CadError::Unsupported(
-                        "TRIM boundary contains a closing arc segment; only straight LWPOLYLINE \
-                         segments are supported"
-                            .into(),
-                    ));
+                    return Err(CadError::Unsupported(format!(
+                        "{command} boundary contains a closing arc segment; only straight \
+                         LWPOLYLINE segments are supported"
+                    )));
                 }
                 segments.push((last, points[0]));
                 closed_loops.push(points.clone());
@@ -847,7 +1055,7 @@ fn collect_boundary_segments(
             Ok(())
         }
         other => Err(CadError::Unsupported(format!(
-            "TRIM boundary {} is not supported; only LINE and straight LWPOLYLINE are",
+            "{command} boundary {} is not supported; only LINE and straight LWPOLYLINE are",
             geometry_kind(other)
         ))),
     }
@@ -964,24 +1172,18 @@ fn point_at(a: Point3, b: Point3, t: f64) -> Point3 {
     }
 }
 
-/// 2D parameter of the boundary segment `c→d` cut along `a→b`, or `None`.
+/// 2D parameter of the boundary segment `c→d` cut along the finite target
+/// segment `a→b`, or `None` when the crossing is outside `[0, 1]`.
 ///
-/// Parallel/collinear segments return `None` (they are reported as an explicit
-/// no-intersection by [`plan_trim`]) rather than fabricating an overlap cut.
+/// A thin wrapper over [`line_segment_intersection_param`]: parallel/collinear
+/// segments return `None` (reported as an explicit no-intersection by
+/// [`plan_trim`]) rather than fabricating an overlap cut, and a crossing beyond
+/// the target's own span is filtered out.
 fn segment_intersection_param(a: Point3, b: Point3, c: Point3, d: Point3, tol: f64) -> Option<f64> {
-    let r = (b.x - a.x, b.y - a.y);
-    let s = (d.x - c.x, d.y - c.y);
-    let denom = r.0 * s.1 - r.1 * s.0;
-    let scale = (len2(r).sqrt() * len2(s).sqrt()).max(f64::MIN_POSITIVE);
-    if denom.abs() / scale <= tol.max(1e-12) {
-        // Parallel or collinear: no unique crossing point.
-        return None;
-    }
-    let ca = (c.x - a.x, c.y - a.y);
-    let t = (ca.0 * s.1 - ca.1 * s.0) / denom;
-    let u = (ca.0 * r.1 - ca.1 * r.0) / denom;
-    let param_tol = (tol / len2(r).sqrt().max(f64::MIN_POSITIVE)).max(1e-12);
-    if t >= -param_tol && t <= 1.0 + param_tol && (-1e-9..=1.0 + 1e-9).contains(&u) {
+    let (t, _u) = line_segment_intersection_param(a, b, c, d, tol)?;
+    let len = len2((b.x - a.x, b.y - a.y)).sqrt().max(f64::MIN_POSITIVE);
+    let param_tol = (tol / len).max(1e-12);
+    if t >= -param_tol && t <= 1.0 + param_tol {
         Some(t.clamp(0.0, 1.0))
     } else {
         None
@@ -990,6 +1192,113 @@ fn segment_intersection_param(a: Point3, b: Point3, c: Point3, d: Point3, tol: f
 
 fn len2(v: (f64, f64)) -> f64 {
     v.0 * v.0 + v.1 * v.1
+}
+
+/// 2D intersection of the infinite line `a→b` with the boundary segment `c→d`.
+///
+/// Returns `(t, u)` where `a + t * (b - a)` is the crossing on the infinite
+/// target line and `u ∈ [0, 1]` places it on the boundary segment. Parallel or
+/// collinear segments, and crossings outside the boundary segment, return `None`
+/// so [`plan_extend`] never fabricates a reach.
+fn line_segment_intersection_param(
+    a: Point3,
+    b: Point3,
+    c: Point3,
+    d: Point3,
+    tol: f64,
+) -> Option<(f64, f64)> {
+    let r = (b.x - a.x, b.y - a.y);
+    let s = (d.x - c.x, d.y - c.y);
+    let denom = r.0 * s.1 - r.1 * s.0;
+    let scale = (len2(r).sqrt() * len2(s).sqrt()).max(f64::MIN_POSITIVE);
+    if denom.abs() / scale <= tol.max(1e-12) {
+        return None;
+    }
+    let ca = (c.x - a.x, c.y - a.y);
+    let t = (ca.0 * s.1 - ca.1 * s.0) / denom;
+    let u = (ca.0 * r.1 - ca.1 * r.0) / denom;
+    if (-1e-9..=1.0 + 1e-9).contains(&u) {
+        Some((t, u.clamp(0.0, 1.0)))
+    } else {
+        None
+    }
+}
+
+/// Resolve where to extend a LINE target to the nearest boundary crossing.
+///
+/// `pick` selects which endpoint grows (the nearer end). Returns the new
+/// `(start, end)`; `Err(reason)` for the documented degenerate, already-touching,
+/// already-crossing and no-intersection cases so the caller can refuse without
+/// touching the database.
+fn plan_extend(
+    a: Point3,
+    b: Point3,
+    pick: Point3,
+    segments: &[(Point3, Point3)],
+) -> Result<(Point3, Point3), String> {
+    let policy = TolerancePolicy::default();
+    let tol = policy
+        .computation_world
+        .max(1e-12)
+        .max(policy.topology_world);
+    let ab = Point3 {
+        x: b.x - a.x,
+        y: b.y - a.y,
+        z: 0.0,
+    };
+    let len2 = ab.x * ab.x + ab.y * ab.y;
+    let len = len2.sqrt();
+    if !len.is_finite() || len <= tol {
+        return Err("EXTEND target is degenerate (zero length)".into());
+    }
+    let param_tol = (tol / len).max(1e-12);
+    let t_pick = ((pick.x - a.x) * ab.x + (pick.y - a.y) * ab.y) / len2;
+    if !t_pick.is_finite() || t_pick < -param_tol || t_pick > 1.0 + param_tol {
+        return Err("EXTEND pick point does not lie on the target line".into());
+    }
+    // The endpoint nearer the pick grows: `t_pick <= 0.5` extends `start`.
+    let grow_start = t_pick <= 0.5;
+
+    let mut touches = false;
+    let mut crosses = false;
+    // Nearest crossing below `t = 0` (largest t) and above `t = 1` (smallest t).
+    let mut beyond_start: Option<f64> = None;
+    let mut beyond_end: Option<f64> = None;
+    for (c, d) in segments {
+        let Some((t, _u)) = line_segment_intersection_param(a, b, *c, *d, tol) else {
+            continue;
+        };
+        if t.abs() <= param_tol || (t - 1.0).abs() <= param_tol {
+            touches = true;
+        } else if t > param_tol && t < 1.0 - param_tol {
+            crosses = true;
+        } else if t < 0.0 {
+            if beyond_start.is_none_or(|current| t > current) {
+                beyond_start = Some(t);
+            }
+        } else if t > 1.0 && beyond_end.is_none_or(|current| t < current) {
+            beyond_end = Some(t);
+        }
+    }
+    // A target that already meets the boundary (at an endpoint or anywhere in
+    // its span) is not extendable: refuse rather than push it through an edge it
+    // already touches or crosses. Both refusals are unconditional.
+    if touches {
+        return Err("EXTEND target already touches the boundary".into());
+    }
+    if crosses {
+        return Err("EXTEND target already reaches the boundary".into());
+    }
+    let chosen = if grow_start { beyond_start } else { beyond_end };
+    if let Some(t) = chosen {
+        let extended = point_at(a, b, t);
+        return Ok(if grow_start {
+            (extended, b)
+        } else {
+            (a, extended)
+        });
+    }
+    Err("EXTEND found no intersection between the target and the boundary".into())
 }
 
 /// 2D point-in-polygon (ray casting) on the XY plane.

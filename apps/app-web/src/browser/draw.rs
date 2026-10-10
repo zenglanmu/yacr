@@ -109,6 +109,10 @@ impl DrawCommandSink for WebDrawSink {
                 CommandId::CreateCircle,
                 CommandPayload::Points(vec![center, edge]),
             ),
+            DrawIntent::Arc { points } => self.send(
+                CommandId::CreateArc,
+                CommandPayload::Points(points.to_vec()),
+            ),
             DrawIntent::Move { delta } => {
                 let refs: Vec<SelectionRef> = {
                     let c = self.controller.borrow();
@@ -159,6 +163,36 @@ impl DrawCommandSink for WebDrawSink {
                 self.send(
                     CommandId::TrimEntity,
                     CommandPayload::Trim {
+                        target,
+                        boundary: vec![boundary],
+                        pick_point: target_pick,
+                    },
+                )
+            }
+            DrawIntent::Extend {
+                target_pick,
+                boundary_pick,
+            } => {
+                let (target, boundary) = {
+                    let c = self.controller.borrow();
+                    let viewport = c
+                        .application
+                        .workspace
+                        .viewports
+                        .get(&self.viewport)
+                        .ok_or(CadError::Cancelled)?;
+                    let tolerance = cad_app::picking::pick_tolerance(
+                        &TolerancePolicy::default(),
+                        &viewport.camera,
+                        viewport.logical_size,
+                    )?;
+                    let target = world_pick_ref(&c, target_pick, tolerance)?;
+                    let boundary = world_pick_ref(&c, boundary_pick, tolerance)?;
+                    (target, boundary)
+                };
+                self.send(
+                    CommandId::ExtendEntity,
+                    CommandPayload::Extend {
                         target,
                         boundary: vec![boundary],
                         pick_point: target_pick,

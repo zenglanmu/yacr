@@ -309,8 +309,21 @@ fn emit_leaf(
             arc.center = ocs_from_wcs(*normal, *center);
             arc.normal = v3(*normal);
             arc.radius = *radius;
-            arc.start_angle = *start;
-            arc.end_angle = (*start + *sweep).rem_euclid(std::f64::consts::TAU);
+            // DXF ARC group 50/51 are radians here; acadrust's writer converts
+            // them to degrees (`section_writer.rs` writes `.to_degrees()`).
+            //
+            // A DXF ARC is an undirected point set swept CCW from 50 to 51. A
+            // negative (clockwise) sweep covers the same points as the CCW arc
+            // between the two endpoints, so emit the angles in the opposite order
+            // rather than mirroring the arc into its complement.
+            let tau = std::f64::consts::TAU;
+            if *sweep < 0.0 {
+                arc.start_angle = (*start + *sweep).rem_euclid(tau);
+                arc.end_angle = start.rem_euclid(tau);
+            } else {
+                arc.start_angle = *start;
+                arc.end_angle = (*start + *sweep).rem_euclid(tau);
+            }
             arc.common = common;
             acc.push(EntityType::Arc(arc), ctx)?;
             acc.record(object, "arc", with_reasons(MappingOutcome::Exact, reasons));

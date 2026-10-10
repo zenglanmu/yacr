@@ -179,8 +179,10 @@ impl Application {
             },
             CommandId::CreateLine
             | CommandId::CreateCircle
+            | CommandId::CreateArc
             | CommandId::MoveEntities
             | CommandId::TrimEntity
+            | CommandId::ExtendEntity
             | CommandId::EraseEntities
             | CommandId::CopyEntities
             | CommandId::SetActiveLayer => self.drawing_command(session, &command),

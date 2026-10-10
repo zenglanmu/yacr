@@ -636,7 +636,15 @@ pub fn draw_preview_overlay(
     let mut order = options.draw_order;
     let geometry: Option<Vec<Point3>> = match preview.kind {
         DrawToolKind::Circle => circle_points(&preview.points, preview.cursor),
-        DrawToolKind::Line | DrawToolKind::Move | DrawToolKind::Trim | DrawToolKind::Copy => {
+        DrawToolKind::Arc => arc_points(&preview.points, preview.cursor).or_else(|| {
+            let chain = preview_chain(&preview.points, preview.cursor);
+            (chain.len() >= 2).then_some(chain)
+        }),
+        DrawToolKind::Line
+        | DrawToolKind::Move
+        | DrawToolKind::Trim
+        | DrawToolKind::Copy
+        | DrawToolKind::Extend => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }
@@ -662,6 +670,33 @@ pub fn draw_preview_overlay(
         }
     }
     out
+}
+
+/// The arc for an arc-tool preview: once two points are captured the live cursor
+/// supplies the third (on-arc) point; a third captured point replaces it.
+///
+/// Returns `None` (so the caller falls back to the rubber-band chain) while fewer
+/// than three points are known or when the three are collinear.
+fn arc_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
+    let (start, through, end) = match points {
+        [a, b, c, ..] => (*a, *b, *c),
+        [a, b] => (*a, *b, cursor?),
+        _ => return None,
+    };
+    let parameters = crate::draw_tool::arc_parameters(start, through, end).ok()?;
+    let sweep = parameters.sweep.abs();
+    let segments = ((64.0 * sweep / std::f64::consts::TAU).ceil() as usize).clamp(8, 128);
+    let mut out = Vec::with_capacity(segments + 1);
+    for i in 0..=segments {
+        let angle = parameters.start + parameters.sweep * (i as f64) / (segments as f64);
+        let (sin, cos) = angle.sin_cos();
+        out.push(Point3 {
+            x: parameters.center.x + parameters.radius * cos,
+            y: parameters.center.y + parameters.radius * sin,
+            z: parameters.center.z,
+        });
+    }
+    Some(out)
 }
 
 /// The circle for a circle-tool preview: centre + edge point (the live cursor

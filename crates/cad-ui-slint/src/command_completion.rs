@@ -16,6 +16,7 @@ const SUGGESTION_LIMIT: usize = 8;
 // (selection, undo history, document state) remains the responsibility of the
 // existing application callbacks.
 pub(crate) const SELECTORS: &[(&str, bool)] = &[
+    ("ARC", true),
     ("CANCEL", false),
     ("CIRCLE", true),
     ("CLEAR SELECTION", false),
@@ -23,6 +24,7 @@ pub(crate) const SELECTORS: &[(&str, bool)] = &[
     ("COPY", true),
     ("DIAGNOSTICS", false),
     ("ERASE", true),
+    ("EXTEND", true),
     ("LINE", true),
     ("MEASURE", true),
     ("MEASURE ANGLE", true),
@@ -67,6 +69,7 @@ pub(crate) const SELECTORS: &[(&str, bool)] = &[
 /// Bare `Z`/`ZOOM` are intentionally absent so they remain an ambiguous prefix
 /// of the `ZOOM EXTENTS`/`ZOOM IN`/`ZOOM OUT` family instead of guessing one.
 pub(crate) const ALIASES: &[(&str, &str)] = &[
+    ("A", "ARC"),
     ("AA", "MEASURE AREA"),
     ("C", "CIRCLE"),
     ("CO", "COPY"),
@@ -75,6 +78,7 @@ pub(crate) const ALIASES: &[(&str, &str)] = &[
     ("DIST", "MEASURE DISTANCE"),
     ("E", "ERASE"),
     ("ESC", "CANCEL"),
+    ("EX", "EXTEND"),
     ("L", "LINE"),
     ("M", "MOVE"),
     ("P", "PAN"),

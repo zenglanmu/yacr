@@ -111,6 +111,10 @@ pub enum CommandId {
     /// Draw a CIRCLE with a centre and an edge point. The radius is the exact
     /// centre→edge distance and must be positive. Work-only.
     CreateCircle,
+    /// Draw an ARC through three points (start, a point on the arc, end) on the
+    /// work plane. The three points must be non-collinear and finite; a
+    /// degenerate input is an explicit refusal that changes nothing. Work-only.
+    CreateArc,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
@@ -118,6 +122,10 @@ pub enum CommandId {
     /// §3 of `docs/drawing-edit.md`); anything else is an explicit refusal that
     /// changes nothing. Work-only.
     TrimEntity,
+    /// Extend one LINE to the nearest LINE/LWPOLYLINE boundary segment beyond
+    /// the picked end (the honest subset of EXTEND); anything else is an
+    /// explicit refusal that changes nothing. Work-only.
+    ExtendEntity,
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
@@ -140,8 +148,10 @@ impl CommandId {
                 | Self::Redo
                 | Self::CreateLine
                 | Self::CreateCircle
+                | Self::CreateArc
                 | Self::MoveEntities
                 | Self::TrimEntity
+                | Self::ExtendEntity
                 | Self::EraseEntities
                 | Self::CopyEntities
                 | Self::SetActiveLayer
@@ -465,6 +475,14 @@ pub enum CommandPayload {
     /// contains `pick_point` (TRIM, spec F-EDIT). See `docs/drawing-edit.md` §3
     /// for the supported subset.
     Trim {
+        target: SelectionRef,
+        boundary: Vec<SelectionRef>,
+        pick_point: Point3,
+    },
+    /// Extend one target LINE to the nearest boundary segment beyond the picked
+    /// end (EXTEND, spec F-EDIT). Same interaction shape and supported subset as
+    /// [`CommandPayload::Trim`], but the target grows instead of shrinking.
+    Extend {
         target: SelectionRef,
         boundary: Vec<SelectionRef>,
         pick_point: Point3,

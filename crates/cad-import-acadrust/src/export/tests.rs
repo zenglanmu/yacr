@@ -206,6 +206,39 @@ fn arc_and_ellipse_and_point_map_exactly() {
 }
 
 #[test]
+fn negative_sweep_arc_round_trips_to_the_same_point_set() {
+    let start = 1.0_f64;
+    let sweep = -0.5_f64;
+    let (bytes, report) = export_one(SemanticGeometry::Arc {
+        center: p(2.0, 3.0, 0.0),
+        normal: p(0.0, 0.0, 1.0),
+        radius: 4.0,
+        start,
+        sweep,
+    });
+    let tau = std::f64::consts::TAU;
+    let entities = read_entities(&bytes);
+    let arc = match &entities[0] {
+        EntityType::Arc(arc) => arc,
+        other => panic!("expected ARC, got {other:?}"),
+    };
+    // Still an exact mapping, not a silently-mirrored complement.
+    assert_eq!(report.counts.exact, 1);
+    // A DXF ARC is a CCW point set, so a negative sweep exports with the angles
+    // swapped: from `start + sweep` CCW to `start`.
+    assert!((arc.start_angle - (start + sweep).rem_euclid(tau)).abs() < 1e-9);
+    assert!((arc.end_angle - start.rem_euclid(tau)).abs() < 1e-9);
+    let span = (arc.end_angle - arc.start_angle).rem_euclid(tau);
+    assert!((span - sweep.abs()).abs() < 1e-9, "span {span}");
+
+    // The exported arc's endpoints are the original arc's endpoints, swapped.
+    let point_at = |angle: f64| Vector3::new(2.0 + 4.0 * angle.cos(), 3.0 + 4.0 * angle.sin(), 0.0);
+    let approx = |a: Vector3, b: Vector3| (a - b).length() < 1e-9;
+    assert!(approx(point_at(arc.start_angle), point_at(start + sweep)));
+    assert!(approx(point_at(arc.end_angle), point_at(start)));
+}
+
+#[test]
 fn mesh_maps_to_a_polyface_mesh_and_reports_the_drop() {
     let mesh = Mesh {
         vertices: vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0)],

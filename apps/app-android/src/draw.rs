@@ -121,6 +121,10 @@ impl cad_ui_slint::DrawCommandSink for AndroidDrawSink {
                 CommandId::CreateCircle,
                 CommandPayload::Points(vec![center, edge]),
             ),
+            cad_app::DrawIntent::Arc { points } => self.send(
+                CommandId::CreateArc,
+                CommandPayload::Points(points.to_vec()),
+            ),
             cad_app::DrawIntent::Move { delta } => {
                 let refs: Vec<SelectionRef> = self.controller.borrow().selection().refs().to_vec();
                 if refs.is_empty() {
@@ -165,6 +169,36 @@ impl cad_ui_slint::DrawCommandSink for AndroidDrawSink {
                 self.send(
                     CommandId::TrimEntity,
                     CommandPayload::Trim {
+                        target,
+                        boundary: vec![boundary],
+                        pick_point: target_pick,
+                    },
+                )
+            }
+            cad_app::DrawIntent::Extend {
+                target_pick,
+                boundary_pick,
+            } => {
+                let (target, boundary) = {
+                    let c = self.controller.borrow();
+                    let viewport = c
+                        .application
+                        .workspace
+                        .viewports
+                        .get(&self.viewport)
+                        .ok_or(CadError::Cancelled)?;
+                    let tolerance = cad_app::picking::pick_tolerance(
+                        &TolerancePolicy::default(),
+                        &viewport.camera,
+                        viewport.logical_size,
+                    )?;
+                    let target = world_pick_ref(&c, target_pick, tolerance)?;
+                    let boundary = world_pick_ref(&c, boundary_pick, tolerance)?;
+                    (target, boundary)
+                };
+                self.send(
+                    CommandId::ExtendEntity,
+                    CommandPayload::Extend {
                         target,
                         boundary: vec![boundary],
                         pick_point: target_pick,
