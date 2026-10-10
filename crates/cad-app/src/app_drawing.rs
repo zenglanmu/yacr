@@ -38,6 +38,9 @@ impl Application {
             CommandId::ExtendEntity => self.extend_entity(command),
             CommandId::EraseEntities => self.erase_entities(session, command),
             CommandId::CopyEntities => self.copy_entities(command),
+            CommandId::RotateEntities => self.rotate_entities(command),
+            CommandId::ScaleEntities => self.scale_entities(command),
+            CommandId::MirrorEntities => self.mirror_entities(command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a drawing/edit command".to_string(),
@@ -596,6 +599,355 @@ impl Application {
             diagnostics,
             measurement: None,
         })
+    }
+
+    /// Rotate the current selection about `base` by `angle` radians (XY, +Z).
+    ///
+    /// The transform is a proper rotation (positive determinant), so circles,
+    /// arcs and ellipses keep their exact representation. A geometry that cannot
+    /// be transformed is refused for the whole command; one transaction and one
+    /// undo step cover the selection.
+    pub(crate) fn rotate_entities(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::Rotate { refs, base, angle } = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "RotateEntities needs a Rotate { refs, base, angle } payload".into(),
+            ));
+        };
+        if !is_finite_point(*base) || !angle.is_finite() {
+            return Err(CadError::InvalidInput(
+                "RotateEntities base and angle must be finite".into(),
+            ));
+        }
+        let transform = crate::draw_tool::rotation_transform(*base, *angle);
+        self.transform_selection(
+            command,
+            refs,
+            &transform,
+            "rotate entities",
+            "rotate",
+            "RotateEntities",
+            "ROTATE",
+            "旋转",
+        )
+    }
+
+    /// Scale the current selection uniformly about `base` by `factor`.
+    ///
+    /// A uniform scale is a positive-determinant similarity, so circles, arcs and
+    /// ellipses stay exact. A non-positive or non-finite factor, or any geometry
+    /// that cannot be transformed, refuses the whole command.
+    ///
+    /// Note: `transform_geometry` rejects a transform whose determinant is below
+    /// `1e-12`; since a uniform scale has `det = factor³`, a legitimate but tiny
+    /// factor (roughly below `1e-4`) is refused as a collapsing transform rather
+    /// than applied. That is a deliberate guard against degenerate scaling, not a
+    /// silent no-op.
+    pub(crate) fn scale_entities(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::Scale { refs, base, factor } = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "ScaleEntities needs a Scale { refs, base, factor } payload".into(),
+            ));
+        };
+        if !is_finite_point(*base) || !factor.is_finite() || *factor <= 0.0 {
+            return Err(CadError::InvalidInput(
+                "ScaleEntities factor must be positive and finite".into(),
+            ));
+        }
+        let transform = crate::draw_tool::scale_transform(*base, *factor);
+        self.transform_selection(
+            command,
+            refs,
+            &transform,
+            "scale entities",
+            "scale",
+            "ScaleEntities",
+            "SCALE",
+            "缩放",
+        )
+    }
+
+    /// Mirror the current selection across the axis `axis_start`→`axis_end`.
+    ///
+    /// Mirrors MOVE/COPY's contract but **keeps the originals** (AutoCAD default):
+    /// mirrored copies are inserted with fresh ids in one transaction and one undo
+    /// step, leaving the sources untouched. A reflection is orientation-reversing,
+    /// so an Arc/Ellipse (whose parameterisation would reverse) is an explicit
+    /// refusal for the whole command, never a silent drop.
+    pub(crate) fn mirror_entities(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::Mirror {
+            refs,
+            axis_start,
+            axis_end,
+        } = &command.payload
+        else {
+            return Err(CadError::InvalidInput(
+                "MirrorEntities needs a Mirror { refs, axis_start, axis_end } payload".into(),
+            ));
+        };
+        if !is_finite_point(*axis_start) || !is_finite_point(*axis_end) {
+            return Err(CadError::InvalidInput(
+                "MirrorEntities axis points must be finite".into(),
+            ));
+        }
+        let transform = crate::draw_tool::mirror_transform(*axis_start, *axis_end)?;
+        self.mirror_selection(command, refs, &transform)
+    }
+
+    /// Transform the selected entities in place (ROTATE/SCALE).
+    ///
+    /// `command_label` is the shell-style command name used in refusal messages
+    /// (matching COPY's "COPY cannot transform …" style); `operation` is the
+    /// PascalCase id used in reference-resolution errors.
+    #[allow(clippy::too_many_arguments)]
+    fn transform_selection(
+        &mut self,
+        command: &Command,
+        refs: &[SelectionRef],
+        transform: &Transform3,
+        label: &str,
+        code: &str,
+        operation: &str,
+        command_label: &str,
+        action: &str,
+    ) -> CadResult<CommandOutcome> {
+        if refs.is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "{operation} needs at least one selected reference"
+            )));
+        }
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let drawing = Arc::make_mut(&mut document.drawing);
+
+        let (before_states, diagnostics) =
+            Self::resolve_selection(drawing, document_id, refs, code, operation, action)?;
+        // Refuse the whole command if any selected geometry cannot be transformed
+        // exactly, rather than dropping it from the transform. An unsupported kind
+        // is relabelled with the operation context; a genuine `InvalidInput`
+        // (e.g. a collapsing transform) keeps its original kind.
+        for before in &before_states {
+            transform_geometry(&before.geometry, transform).map_err(|error| match error {
+                CadError::Unsupported(reason) => CadError::Unsupported(format!(
+                    "{command_label} cannot transform {}: {reason}",
+                    geometry_kind(&before.geometry)
+                )),
+                other => other,
+            })?;
+        }
+
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction(label, transaction)?;
+            for before in &before_states {
+                staged.transform_entity(before.id, transform)?;
+            }
+            staged.commit()?
+        };
+
+        // Read each committed entity back so the undo patch's `after` is the exact
+        // stored value for every geometry kind.
+        let patches: Vec<DrawingPatch> = before_states
+            .into_iter()
+            .map(|before| {
+                let after = drawing.entity(before.id).cloned().ok_or_else(|| {
+                    CadError::Invariant(format!(
+                        "transformed entity {} vanished after commit",
+                        before.id.0
+                    ))
+                })?;
+                Ok(drawing_patch(before.id, Some(before), Some(after)))
+            })
+            .collect::<CadResult<Vec<_>>>()?;
+        self.record_drawing(
+            document_id,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: label.into(),
+                patches,
+                merge_key: None,
+            },
+        )?;
+
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(change_set),
+            diagnostics,
+            measurement: None,
+        })
+    }
+
+    /// Mirror the selected entities into fresh copies, keeping the originals.
+    fn mirror_selection(
+        &mut self,
+        command: &Command,
+        refs: &[SelectionRef],
+        transform: &Transform3,
+    ) -> CadResult<CommandOutcome> {
+        if refs.is_empty() {
+            return Err(CadError::InvalidInput(
+                "MirrorEntities needs at least one selected reference".into(),
+            ));
+        }
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let drawing = Arc::make_mut(&mut document.drawing);
+
+        let (sources, mut diagnostics) = Self::resolve_selection(
+            drawing,
+            document_id,
+            refs,
+            "mirror",
+            "MirrorEntities",
+            "镜像",
+        )?;
+        // Refuse the whole command if any selected geometry cannot be mirrored
+        // (an Arc/Ellipse would reverse its parameterisation), never drop it.
+        for source in &sources {
+            transform_geometry(&source.geometry, transform).map_err(|error| match error {
+                CadError::Unsupported(reason) => CadError::Unsupported(format!(
+                    "MIRROR cannot mirror {}: {reason}",
+                    geometry_kind(&source.geometry)
+                )),
+                other => other,
+            })?;
+            // A per-entity display override cannot be carried by the current write
+            // path; report the honest fallback instead of a silent change.
+            if drawing.entity_render_attributes(source.id)
+                != cad_db::EntityRenderAttributes::default()
+            {
+                diagnostics.push(Diagnostic {
+                    object: Some(ObjectId(source.id.0)),
+                    code: "drawing.mirror.style".into(),
+                    message: format!(
+                        "实体 {} 的按对象颜色/线型/线宽覆盖未复制，副本继承图层样式",
+                        source.id.0
+                    ),
+                });
+            }
+        }
+
+        let base_order = drawing
+            .model_space()
+            .iter()
+            .map(|e| e.draw_order)
+            .max()
+            .map(|m| m.saturating_add(1))
+            .unwrap_or(0);
+        let mut copies: Vec<(EntityId, DbEntity)> = Vec::with_capacity(sources.len());
+        for (index, source) in sources.iter().enumerate() {
+            let new_id = drawing.allocate_entity_id();
+            let geometry = transform_geometry(&source.geometry, transform)?;
+            let copy = DbEntity {
+                object: cad_db::DbObject {
+                    id: ObjectId(new_id.0),
+                    type_key: source.object.type_key.clone(),
+                    revision: Revision(0),
+                    source_handle: None,
+                },
+                id: new_id,
+                layer: source.layer,
+                space: source.space.clone(),
+                geometry,
+                draw_order: base_order + index as i64,
+            };
+            copies.push((new_id, copy));
+        }
+
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction("mirror entities", transaction)?;
+            for (_, copy) in &copies {
+                staged.insert_entity(copy.clone())?;
+            }
+            staged.commit()?
+        };
+        let patches: Vec<DrawingPatch> = copies
+            .iter()
+            .map(|(id, copy)| drawing_patch(*id, None, Some(copy.clone())))
+            .collect();
+        self.record_drawing(
+            document_id,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "mirror entities".into(),
+                patches,
+                merge_key: None,
+            },
+        )?;
+
+        Ok(CommandOutcome {
+            objects: copies.iter().map(|(id, _)| ObjectId(id.0)).collect(),
+            changes: Some(change_set),
+            diagnostics,
+            measurement: None,
+        })
+    }
+
+    /// Resolve selection refs to the current entities, collapsing duplicates and
+    /// reporting sub-element/instance refs exactly like MOVE/COPY.
+    ///
+    /// `code` is the diagnostic code stem (e.g. `rotate`), `operation` the English
+    /// name used in errors, and `action` the verb used in the diagnostics.
+    fn resolve_selection(
+        drawing: &DrawingDatabase,
+        document_id: DocumentId,
+        refs: &[SelectionRef],
+        code: &str,
+        operation: &str,
+        action: &str,
+    ) -> CadResult<(Vec<DbEntity>, Vec<Diagnostic>)> {
+        let mut seen: Vec<EntityId> = Vec::new();
+        let mut before_states: Vec<DbEntity> = Vec::new();
+        let mut diagnostics = Vec::new();
+        for reference in refs {
+            if reference.document != document_id {
+                return Err(CadError::InvalidInput(format!(
+                    "{operation} reference belongs to another document"
+                )));
+            }
+            if seen.contains(&reference.entity) {
+                continue;
+            }
+            seen.push(reference.entity);
+            let before = drawing.entity(reference.entity).cloned().ok_or_else(|| {
+                CadError::InvalidInput(format!("entity {} does not exist", reference.entity.0))
+            })?;
+            if reference.sub_element.is_some() {
+                diagnostics.push(Diagnostic {
+                    object: Some(ObjectId(reference.entity.0)),
+                    code: format!("drawing.{code}.sub_element"),
+                    message: format!(
+                        "子图元 {} 按整实体{action}（子图元级编辑未支持）",
+                        reference.entity.0
+                    ),
+                });
+            }
+            if !reference.instance.0.is_empty() {
+                diagnostics.push(Diagnostic {
+                    object: Some(ObjectId(reference.entity.0)),
+                    code: format!("drawing.{code}.instance"),
+                    message: format!(
+                        "实例路径引用的实体 {} {action}其块定义，影响所有实例",
+                        reference.entity.0
+                    ),
+                });
+            }
+            before_states.push(before);
+        }
+        if before_states.is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "{operation} needs at least one selected reference"
+            )));
+        }
+        Ok((before_states, diagnostics))
     }
 
     /// Trim one LINE against LINE/LWPOLYLINE straight segments (spec §3).

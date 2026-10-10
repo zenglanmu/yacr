@@ -160,6 +160,31 @@ impl DrawCommandSink for Runtime {
                     CommandPayload::Copy { refs, delta },
                 )
             }
+            cad_app::DrawIntent::Rotate { base, angle } => {
+                let refs = self.controller.borrow().selection().refs().to_vec();
+                self.command(
+                    CommandId::RotateEntities,
+                    CommandPayload::Rotate { refs, base, angle },
+                )
+            }
+            cad_app::DrawIntent::Scale { base, factor } => {
+                let refs = self.controller.borrow().selection().refs().to_vec();
+                self.command(
+                    CommandId::ScaleEntities,
+                    CommandPayload::Scale { refs, base, factor },
+                )
+            }
+            cad_app::DrawIntent::Mirror { p1, p2 } => {
+                let refs = self.controller.borrow().selection().refs().to_vec();
+                self.command(
+                    CommandId::MirrorEntities,
+                    CommandPayload::Mirror {
+                        refs,
+                        axis_start: p1,
+                        axis_end: p2,
+                    },
+                )
+            }
             cad_app::DrawIntent::Trim { .. } => {
                 Err(CadError::Unsupported(self.message("linux.trim", &[])))
             }

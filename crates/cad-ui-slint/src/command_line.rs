@@ -44,7 +44,6 @@ const UNSUPPORTED_COMMANDS: &[&str] = &[
     "LEADER",
     "LENGTHEN",
     "MEASUREGEOM",
-    "MIRROR",
     "MTEXT",
     "OFFSET",
     "PLINE",
@@ -55,8 +54,6 @@ const UNSUPPORTED_COMMANDS: &[&str] = &[
     "PURGE",
     "RECTANGLE",
     "REGION",
-    "ROTATE",
-    "SCALE",
     "SPLINE",
     "STRETCH",
     "STYLE",
@@ -315,6 +312,18 @@ fn dispatch_command(
         }
         "COPY" => {
             ui.invoke_begin_draw_tool("copy".into());
+            true
+        }
+        "ROTATE" => {
+            ui.invoke_begin_draw_tool("rotate".into());
+            true
+        }
+        "SCALE" => {
+            ui.invoke_begin_draw_tool("scale".into());
+            true
+        }
+        "MIRROR" => {
+            ui.invoke_begin_draw_tool("mirror".into());
             true
         }
         // ERASE deletes the current selection through the host callback; the
@@ -613,19 +622,23 @@ mod contracts {
                 "{name} prefixes a supported command"
             );
         }
-        for expected in ["HATCH", "OFFSET", "ARRAY", "MIRROR", "PUBLISH"] {
+        for expected in ["HATCH", "OFFSET", "ARRAY", "PUBLISH"] {
             assert!(
                 UNSUPPORTED_COMMANDS.contains(&expected),
                 "missing unsupported command {expected}"
             );
         }
-        assert!(is_unsupported_command("MIRROR 0,0"));
+        assert!(is_unsupported_command("OFFSET 0,0"));
         assert!(!is_unsupported_command("LINE"));
-        // ERASE, COPY, ARC and EXTEND are now real commands, no longer unsupported.
+        // ERASE, COPY, ARC, EXTEND, ROTATE, SCALE and MIRROR are now real
+        // commands, no longer unsupported.
         assert!(!is_unsupported_command("ERASE"));
         assert!(!is_unsupported_command("COPY"));
         assert!(!is_unsupported_command("ARC"));
         assert!(!is_unsupported_command("EXTEND"));
+        assert!(!is_unsupported_command("ROTATE"));
+        assert!(!is_unsupported_command("SCALE"));
+        assert!(!is_unsupported_command("MIRROR"));
     }
 
     #[test]

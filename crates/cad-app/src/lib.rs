@@ -133,6 +133,15 @@ pub enum CommandId {
     /// its geometry by a world delta, in one transaction. An empty selection or
     /// a geometry that cannot be transformed is an explicit refusal. Work-only.
     CopyEntities,
+    /// Rotate the current selection about a base point in the XY plane by an
+    /// absolute angle (radians). One transaction and one undo step. Work-only.
+    RotateEntities,
+    /// Scale the current selection uniformly about a base point by a positive
+    /// factor. One transaction and one undo step. Work-only.
+    ScaleEntities,
+    /// Mirror the current selection across the line through two points, keeping
+    /// the originals and adding mirrored copies in one transaction. Work-only.
+    MirrorEntities,
     /// Set the session's active layer for new drawing entities. Session state
     /// only; no database write. Work-only.
     SetActiveLayer,
@@ -154,6 +163,9 @@ impl CommandId {
                 | Self::ExtendEntity
                 | Self::EraseEntities
                 | Self::CopyEntities
+                | Self::RotateEntities
+                | Self::ScaleEntities
+                | Self::MirrorEntities
                 | Self::SetActiveLayer
         )
     }
@@ -470,6 +482,28 @@ pub enum CommandPayload {
     Copy {
         refs: Vec<SelectionRef>,
         delta: Point3,
+    },
+    /// Rotate a set of selected refs about `base` by `angle` radians in the XY
+    /// plane (ROTATE, spec F-EDIT).
+    Rotate {
+        refs: Vec<SelectionRef>,
+        base: Point3,
+        angle: f64,
+    },
+    /// Scale a set of selected refs uniformly about `base` by `factor` (SCALE,
+    /// spec F-EDIT). `factor` must be positive and finite.
+    Scale {
+        refs: Vec<SelectionRef>,
+        base: Point3,
+        factor: f64,
+    },
+    /// Mirror a set of selected refs across the line through `axis_start` and
+    /// `axis_end`, keeping the originals and adding mirrored copies (MIRROR,
+    /// spec F-EDIT). Same interaction shape as `Copy`.
+    Mirror {
+        refs: Vec<SelectionRef>,
+        axis_start: Point3,
+        axis_end: Point3,
     },
     /// Trim one target against a list of boundary refs, keeping the side that
     /// contains `pick_point` (TRIM, spec F-EDIT). See `docs/drawing-edit.md` §3

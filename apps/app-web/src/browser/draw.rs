@@ -139,6 +139,49 @@ impl DrawCommandSink for WebDrawSink {
                     CommandPayload::Copy { refs, delta },
                 )
             }
+            DrawIntent::Rotate { base, angle } => {
+                let refs: Vec<SelectionRef> = {
+                    let c = self.controller.borrow();
+                    c.selection().refs().to_vec()
+                };
+                if refs.is_empty() {
+                    return Err(CadError::InvalidInput("rotate needs a selection".into()));
+                }
+                self.send(
+                    CommandId::RotateEntities,
+                    CommandPayload::Rotate { refs, base, angle },
+                )
+            }
+            DrawIntent::Scale { base, factor } => {
+                let refs: Vec<SelectionRef> = {
+                    let c = self.controller.borrow();
+                    c.selection().refs().to_vec()
+                };
+                if refs.is_empty() {
+                    return Err(CadError::InvalidInput("scale needs a selection".into()));
+                }
+                self.send(
+                    CommandId::ScaleEntities,
+                    CommandPayload::Scale { refs, base, factor },
+                )
+            }
+            DrawIntent::Mirror { p1, p2 } => {
+                let refs: Vec<SelectionRef> = {
+                    let c = self.controller.borrow();
+                    c.selection().refs().to_vec()
+                };
+                if refs.is_empty() {
+                    return Err(CadError::InvalidInput("mirror needs a selection".into()));
+                }
+                self.send(
+                    CommandId::MirrorEntities,
+                    CommandPayload::Mirror {
+                        refs,
+                        axis_start: p1,
+                        axis_end: p2,
+                    },
+                )
+            }
             DrawIntent::Trim {
                 target_pick,
                 boundary_pick,

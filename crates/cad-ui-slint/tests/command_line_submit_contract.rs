@@ -228,4 +228,22 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
     assert!(ui.invoke_command_submitted("EXTEND".into()));
     assert!(ui.invoke_command_submitted("EX".into()));
     assert_eq!(&*started.borrow(), &["arc", "arc", "extend", "extend"]);
+
+    // ROTATE/SCALE/MIRROR begin their draw tools; RO/SC/MI are the aliases.
+    let adapter = build_adapter();
+    let ui = adapter.component();
+    let started = Rc::new(RefCell::new(Vec::<String>::new()));
+    let observed = started.clone();
+    ui.on_begin_draw_tool(move |name| observed.borrow_mut().push(name.to_string()));
+    for (submitted, expected) in [
+        ("ROTATE", "rotate"),
+        ("RO", "rotate"),
+        ("SCALE", "scale"),
+        ("SC", "scale"),
+        ("MIRROR", "mirror"),
+        ("MI", "mirror"),
+    ] {
+        assert!(ui.invoke_command_submitted(submitted.into()), "{submitted}");
+        assert_eq!(started.borrow().last().unwrap(), expected, "{submitted}");
+    }
 }

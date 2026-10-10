@@ -644,7 +644,10 @@ pub fn draw_preview_overlay(
         | DrawToolKind::Move
         | DrawToolKind::Trim
         | DrawToolKind::Copy
-        | DrawToolKind::Extend => {
+        | DrawToolKind::Extend
+        | DrawToolKind::Rotate
+        | DrawToolKind::Scale
+        | DrawToolKind::Mirror => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

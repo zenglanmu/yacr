@@ -18,7 +18,7 @@
 //! a cancelled draw always leaves the drawing and history untouched. Confirming
 //! yields exactly one intent, which the caller commits through one transaction.
 
-use cad_domain::{CadError, CadResult, Point3};
+use cad_domain::{CadError, CadResult, Point3, Transform3};
 
 /// The drawing/editing operation a tool captures for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,13 +37,19 @@ pub enum DrawToolKind {
     Copy,
     /// EXTEND: a target pick plus a boundary pick (grows the target LINE).
     Extend,
+    /// ROTATE: requires a selection, then a base point and a direction point.
+    Rotate,
+    /// SCALE: requires a selection, then a base, reference and target point.
+    Scale,
+    /// MIRROR: requires a selection, then the two points of the mirror axis.
+    Mirror,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the Slint shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 7] = [
+    pub const ALL: [DrawToolKind; 10] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -51,6 +57,9 @@ impl DrawToolKind {
         DrawToolKind::Trim,
         DrawToolKind::Copy,
         DrawToolKind::Extend,
+        DrawToolKind::Rotate,
+        DrawToolKind::Scale,
+        DrawToolKind::Mirror,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -63,6 +72,9 @@ impl DrawToolKind {
             Self::Trim => "trim",
             Self::Copy => "copy",
             Self::Extend => "extend",
+            Self::Rotate => "rotate",
+            Self::Scale => "scale",
+            Self::Mirror => "mirror",
         }
     }
 
@@ -77,6 +89,9 @@ impl DrawToolKind {
             "trim" => Some(Self::Trim),
             "copy" => Some(Self::Copy),
             "extend" => Some(Self::Extend),
+            "rotate" => Some(Self::Rotate),
+            "scale" => Some(Self::Scale),
+            "mirror" => Some(Self::Mirror),
             _ => None,
         }
     }
@@ -112,26 +127,40 @@ impl DrawToolKind {
             Self::Trim => "修剪",
             Self::Copy => "复制",
             Self::Extend => "延伸",
+            Self::Rotate => "旋转",
+            Self::Scale => "缩放",
+            Self::Mirror => "镜像",
         }
     }
 
     /// Exact number of points this operation needs to be defined.
     pub fn required_points(self) -> usize {
         match self {
-            // Two endpoints, centre+radius point, a move/copy delta, or
-            // target+boundary.
-            Self::Line | Self::Circle | Self::Move | Self::Trim | Self::Copy | Self::Extend => 2,
-            // Start, a point on the arc, end.
-            Self::Arc => 3,
+            // Two endpoints, centre+radius point, a move/copy delta,
+            // target+boundary, or a rotate angle / mirror axis (two points).
+            Self::Line
+            | Self::Circle
+            | Self::Move
+            | Self::Trim
+            | Self::Copy
+            | Self::Extend
+            | Self::Rotate
+            | Self::Mirror => 2,
+            // Start, a point on the arc, end; or base, reference, target.
+            Self::Arc | Self::Scale => 3,
         }
     }
 
     /// Whether this operation needs a non-empty selection before it can run.
     ///
-    /// MOVE transforms existing entities and COPY duplicates them; both refuse to
-    /// run with no selection rather than moving/copying nothing.
+    /// MOVE transforms existing entities, COPY duplicates them, and
+    /// ROTATE/SCALE/MIRROR transform (or mirror) them; all refuse to run with no
+    /// selection rather than acting on nothing.
     pub fn requires_selection(self) -> bool {
-        matches!(self, Self::Move | Self::Copy)
+        matches!(
+            self,
+            Self::Move | Self::Copy | Self::Rotate | Self::Scale | Self::Mirror
+        )
     }
 }
 
@@ -226,6 +255,17 @@ pub enum DrawIntent {
         target_pick: Point3,
         boundary_pick: Point3,
     },
+    /// Rotate the current selection about `base` by `angle` radians (about +Z).
+    Rotate { base: Point3, angle: f64 },
+    /// Scale the current selection about `base` by the positive `factor`.
+    Scale { base: Point3, factor: f64 },
+    /// Reflect the current selection across the line through `p1` and `p2`,
+    /// keeping the originals and adding mirrored copies.
+    ///
+    /// The axis is the line in the XY plane; only `p1.x/p1.y` and `p2.x/p2.y`
+    /// define it, so a vertical-looking axis that differs only in Z is refused
+    /// (see `mirror_transform`). Z is carried through unchanged.
+    Mirror { p1: Point3, p2: Point3 },
 }
 
 /// Drawing/editing capture state machine.
@@ -364,8 +404,147 @@ impl DrawTool {
                 target_pick: a,
                 boundary_pick: b,
             },
+            // ROTATE: the absolute direction angle from `base` to the second
+            // point, measured about +Z from the +X axis. A zero-length direction
+            // (or one differing only in Z) has no defined angle, so it is refused
+            // rather than silently becoming a 0° no-op.
+            DrawToolKind::Rotate => {
+                if (b.x - a.x).hypot(b.y - a.y) <= MIN_DIRECTION_EXTENT {
+                    return Err(CadError::InvalidInput(
+                        "rotate direction point must differ from the base".into(),
+                    ));
+                }
+                let angle = (b.y - a.y).atan2(b.x - a.x);
+                if !angle.is_finite() {
+                    return Err(CadError::InvalidInput(
+                        "rotate direction must define a finite angle".into(),
+                    ));
+                }
+                DrawIntent::Rotate { base: a, angle }
+            }
+            // SCALE: factor = |target − base| / |reference − base|; a degenerate
+            // reference (== base) is an explicit refusal, never an infinite scale.
+            DrawToolKind::Scale => {
+                let reference = distance(a, b);
+                if !reference.is_finite() || reference <= 0.0 {
+                    return Err(CadError::InvalidInput(
+                        "scale reference point must differ from the base".into(),
+                    ));
+                }
+                let target = distance(a, self.points[2]);
+                let factor = target / reference;
+                if !factor.is_finite() || factor <= 0.0 {
+                    return Err(CadError::InvalidInput(
+                        "scale factor must be positive and finite".into(),
+                    ));
+                }
+                DrawIntent::Scale { base: a, factor }
+            }
+            // MIRROR: the axis is the line through the two points; an axis of zero
+            // length is refused rather than reflecting across a made-up line.
+            DrawToolKind::Mirror => {
+                if (b.x - a.x).hypot(b.y - a.y) <= MIN_DIRECTION_EXTENT {
+                    return Err(CadError::InvalidInput(
+                        "mirror axis needs two distinct points".into(),
+                    ));
+                }
+                DrawIntent::Mirror { p1: a, p2: b }
+            }
         })
     }
+}
+
+/// Minimum XY extent for a gesture that defines a direction (rotate) or an axis
+/// (mirror): a shorter span has no well-defined angle or line and is refused.
+const MIN_DIRECTION_EXTENT: f64 = 1e-12;
+
+/// Euclidean distance between two points.
+fn distance(a: Point3, b: Point3) -> f64 {
+    (a.x - b.x).hypot(a.y - b.y).hypot(a.z - b.z)
+}
+
+/// Rotation about `base` by `angle` radians in the XY plane (about the +Z axis).
+///
+/// Built as `T(base) ∘ R(angle) ∘ T(−base)` through `matrix_mul` (right-hand side
+/// applied first) and `from_basis` for the orthonormal rotation.
+pub(crate) fn rotation_transform(base: Point3, angle: f64) -> Transform3 {
+    let (sin, cos) = angle.sin_cos();
+    let to_origin = Transform3::translation(Point3 {
+        x: -base.x,
+        y: -base.y,
+        z: -base.z,
+    });
+    let back = Transform3::translation(base);
+    let rotation = Transform3::from_basis(
+        Point3 {
+            x: cos,
+            y: sin,
+            z: 0.0,
+        },
+        Point3 {
+            x: -sin,
+            y: cos,
+            z: 0.0,
+        },
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    );
+    back.matrix_mul(&rotation).matrix_mul(&to_origin)
+}
+
+/// Uniform scale about `base` by `factor`, built as
+/// `T(base) ∘ S(factor) ∘ T(−base)`.
+pub(crate) fn scale_transform(base: Point3, factor: f64) -> Transform3 {
+    let to_origin = Transform3::translation(Point3 {
+        x: -base.x,
+        y: -base.y,
+        z: -base.z,
+    });
+    let back = Transform3::translation(base);
+    back.matrix_mul(&Transform3::scale(factor))
+        .matrix_mul(&to_origin)
+}
+
+/// Reflection across the line through `p1` and `p2` (in the XY plane).
+///
+/// The reflection is a negative-determinant affine, so it cannot be expressed
+/// with `from_basis` (which is always right-handed); the 2×2 reflection is built
+/// directly and translated to pass through `p1`. A zero-length axis is refused.
+pub(crate) fn mirror_transform(p1: Point3, p2: Point3) -> CadResult<Transform3> {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    let len = dx.hypot(dy);
+    if !len.is_finite() || len <= 1e-12 {
+        return Err(CadError::InvalidInput(
+            "mirror axis needs two distinct points".into(),
+        ));
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    let linear = [
+        [ux * ux - uy * uy, 2.0 * ux * uy, 0.0],
+        [2.0 * ux * uy, uy * uy - ux * ux, 0.0],
+        [0.0, 0.0, 1.0],
+    ];
+    let mut matrix = [[0.0f64; 4]; 4];
+    for r in 0..3 {
+        for c in 0..3 {
+            matrix[r][c] = linear[r][c];
+        }
+    }
+    matrix[3][3] = 1.0;
+    // Translation column = p1 − M·p1, so the reflection passes through p1.
+    let mapped = [
+        linear[0][0] * p1.x + linear[0][1] * p1.y + linear[0][2] * p1.z,
+        linear[1][0] * p1.x + linear[1][1] * p1.y + linear[1][2] * p1.z,
+        linear[2][0] * p1.x + linear[2][1] * p1.y + linear[2][2] * p1.z,
+    ];
+    matrix[0][3] = p1.x - mapped[0];
+    matrix[1][3] = p1.y - mapped[1];
+    matrix[2][3] = p1.z - mapped[2];
+    Ok(Transform3 { matrix })
 }
 
 /// The centre and radius point of a CIRCLE intent, if the radius is positive.
@@ -524,7 +703,10 @@ mod tests {
     #[test]
     fn required_points_and_selection_are_explicit_per_kind() {
         for kind in DrawToolKind::ALL {
-            let expected = if kind == DrawToolKind::Arc { 3 } else { 2 };
+            let expected = match kind {
+                DrawToolKind::Arc | DrawToolKind::Scale => 3,
+                _ => 2,
+            };
             assert_eq!(kind.required_points(), expected, "{kind:?}");
         }
         assert!(!DrawToolKind::Line.requires_selection());
@@ -534,6 +716,119 @@ mod tests {
         assert!(!DrawToolKind::Trim.requires_selection());
         assert!(DrawToolKind::Copy.requires_selection());
         assert!(!DrawToolKind::Extend.requires_selection());
+        assert!(DrawToolKind::Rotate.requires_selection());
+        assert!(DrawToolKind::Scale.requires_selection());
+        assert!(DrawToolKind::Mirror.requires_selection());
+    }
+
+    #[test]
+    fn rotate_scale_mirror_capture_their_parameters() {
+        // ROTATE: angle is the absolute direction from base to the second point.
+        let mut rotate = DrawTool::new(DrawToolKind::Rotate, 2);
+        rotate.push_point(p(0.0, 0.0)).unwrap();
+        rotate.push_point(p(0.0, 1.0)).unwrap();
+        match rotate.intent().unwrap() {
+            DrawIntent::Rotate { base, angle } => {
+                assert_eq!(base, p(0.0, 0.0));
+                assert!(
+                    (angle - std::f64::consts::FRAC_PI_2).abs() < 1e-12,
+                    "{angle}"
+                );
+            }
+            other => panic!("expected Rotate, got {other:?}"),
+        }
+        // A zero-length direction (or one differing only in Z) has no defined
+        // angle: refuse it rather than silently committing a 0° no-op.
+        let mut degenerate_rotate = DrawTool::new(DrawToolKind::Rotate, 2);
+        degenerate_rotate.push_point(p(2.0, 2.0)).unwrap();
+        degenerate_rotate.push_point(p(2.0, 2.0)).unwrap();
+        assert!(matches!(
+            degenerate_rotate.intent(),
+            Err(CadError::InvalidInput(_))
+        ));
+        let mut z_only_rotate = DrawTool::new(DrawToolKind::Rotate, 2);
+        z_only_rotate.push_point(p(2.0, 2.0)).unwrap();
+        z_only_rotate
+            .push_point(Point3 {
+                x: 2.0,
+                y: 2.0,
+                z: 5.0,
+            })
+            .unwrap();
+        assert!(matches!(
+            z_only_rotate.intent(),
+            Err(CadError::InvalidInput(_))
+        ));
+
+        // SCALE: factor = |target − base| / |reference − base|.
+        let mut scale = DrawTool::new(DrawToolKind::Scale, 1);
+        scale.push_point(p(0.0, 0.0)).unwrap();
+        scale.push_point(p(1.0, 0.0)).unwrap();
+        scale.push_point(p(3.0, 0.0)).unwrap();
+        match scale.intent().unwrap() {
+            DrawIntent::Scale { base, factor } => {
+                assert_eq!(base, p(0.0, 0.0));
+                assert!((factor - 3.0).abs() < 1e-12, "{factor}");
+            }
+            other => panic!("expected Scale, got {other:?}"),
+        }
+        // A reference coincident with the base is refused, not an infinite factor.
+        let mut degenerate = DrawTool::new(DrawToolKind::Scale, 1);
+        degenerate.push_point(p(2.0, 2.0)).unwrap();
+        degenerate.push_point(p(2.0, 2.0)).unwrap();
+        degenerate.push_point(p(5.0, 2.0)).unwrap();
+        assert!(matches!(
+            degenerate.intent(),
+            Err(CadError::InvalidInput(_))
+        ));
+
+        // MIRROR: the axis is the two captured points; equal points are refused.
+        let mut mirror = DrawTool::new(DrawToolKind::Mirror, 1);
+        mirror.push_point(p(0.0, 0.0)).unwrap();
+        mirror.push_point(p(1.0, 1.0)).unwrap();
+        assert_eq!(
+            mirror.intent().unwrap(),
+            DrawIntent::Mirror {
+                p1: p(0.0, 0.0),
+                p2: p(1.0, 1.0)
+            }
+        );
+        let mut flat = DrawTool::new(DrawToolKind::Mirror, 1);
+        flat.push_point(p(3.0, 3.0)).unwrap();
+        flat.push_point(p(3.0, 3.0)).unwrap();
+        assert!(matches!(flat.intent(), Err(CadError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn rotate_scale_mirror_transforms_are_correct() {
+        // Rotation by 90° about the origin sends (1,0) to (0,1).
+        let r = rotation_transform(p(0.0, 0.0), std::f64::consts::FRAC_PI_2);
+        let rotated = r.apply_point(p(1.0, 0.0));
+        assert!(
+            rotated.x.abs() < 1e-12 && (rotated.y - 1.0).abs() < 1e-12,
+            "{rotated:?}"
+        );
+
+        // Scale by 2 about (1,1): (2,1) -> (3,1).
+        let s = scale_transform(p(1.0, 1.0), 2.0);
+        let scaled = s.apply_point(p(2.0, 1.0));
+        assert!(
+            (scaled.x - 3.0).abs() < 1e-12 && (scaled.y - 1.0).abs() < 1e-12,
+            "{scaled:?}"
+        );
+
+        // Mirror across the diagonal y = x swaps x and y.
+        let m = mirror_transform(p(0.0, 0.0), p(1.0, 1.0)).unwrap();
+        let mirrored = m.apply_point(p(2.0, 0.0));
+        assert!(
+            (mirrored.x - 0.0).abs() < 1e-12 && (mirrored.y - 2.0).abs() < 1e-12,
+            "{mirrored:?}"
+        );
+        // A degenerate axis is refused.
+        assert!(matches!(
+            mirror_transform(p(1.0, 1.0), p(1.0, 1.0)),
+            Err(CadError::InvalidInput(_))
+        ));
     }
 
     #[test]

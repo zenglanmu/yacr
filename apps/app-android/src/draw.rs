@@ -145,6 +145,40 @@ impl cad_ui_slint::DrawCommandSink for AndroidDrawSink {
                     CommandPayload::Copy { refs, delta },
                 )
             }
+            cad_app::DrawIntent::Rotate { base, angle } => {
+                let refs: Vec<SelectionRef> = self.controller.borrow().selection().refs().to_vec();
+                if refs.is_empty() {
+                    return Err(CadError::InvalidInput("rotate needs a selection".into()));
+                }
+                self.send(
+                    CommandId::RotateEntities,
+                    CommandPayload::Rotate { refs, base, angle },
+                )
+            }
+            cad_app::DrawIntent::Scale { base, factor } => {
+                let refs: Vec<SelectionRef> = self.controller.borrow().selection().refs().to_vec();
+                if refs.is_empty() {
+                    return Err(CadError::InvalidInput("scale needs a selection".into()));
+                }
+                self.send(
+                    CommandId::ScaleEntities,
+                    CommandPayload::Scale { refs, base, factor },
+                )
+            }
+            cad_app::DrawIntent::Mirror { p1, p2 } => {
+                let refs: Vec<SelectionRef> = self.controller.borrow().selection().refs().to_vec();
+                if refs.is_empty() {
+                    return Err(CadError::InvalidInput("mirror needs a selection".into()));
+                }
+                self.send(
+                    CommandId::MirrorEntities,
+                    CommandPayload::Mirror {
+                        refs,
+                        axis_start: p1,
+                        axis_end: p2,
+                    },
+                )
+            }
             cad_app::DrawIntent::Trim {
                 target_pick,
                 boundary_pick,

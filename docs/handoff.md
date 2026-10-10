@@ -1,6 +1,66 @@
 # 后续 agent 接手入口
 
-## 两个真实绘制/编辑命令：ARC 与 EXTEND（2026-10-11，本轮）
+## 三个选择变换命令：ROTATE / SCALE / MIRROR（2026-10-11，本轮）
+
+用户要求：沿用 MOVE/COPY 的 draw-tool + 单事务/单撤销框架，新增 ROTATE、SCALE、MIRROR 三个选择
+变换命令；仅此三项（剪贴板/OFFSET 留待后续）。宿主编译门禁不因 web/android 而回退。
+
+- 命令层：新增 `CommandId::RotateEntities`/`ScaleEntities`/`MirrorEntities`（均 `requires_work_mode`），
+  Viewer 由命令层显式 `PermissionDenied` 拒绝。新增 payload：`Rotate { refs, base, angle }`、
+  `Scale { refs, base, factor }`、`Mirror { refs, axis_start, axis_end }`（沿用 `Copy { refs, delta }` 形状）。
+- 手势语义（`draw_tool`，纯状态机）：
+  - ROTATE：工具键 `rotate`，2 点 `[base, direction]`；`angle = atan2(direction−base)`（相对 +X 的绝对角），
+    绕 base 在 XY 平面（+Z 轴）旋转。
+  - SCALE：工具键 `scale`，3 点 `[base, reference, target]`；`factor = |target−base| / |reference−base|`，
+    `reference==base`（零距离）→ 显式拒绝，绝不产生无穷缩放。绕 base 均匀缩放。
+  - MIRROR：工具键 `mirror`，2 点 `[p1, p2]`；轴为过 p1、p2 的直线（p1==p2 或零长 XY 轴 → 显式拒绝）。
+    **决策：镜像保留原件（AutoCAD 默认）** —— 新增镜像副本、源对象不动。
+  - 三者 `requires_selection` 为真（非空选择），均 work-only。
+- 变换构造（`draw_tool::rotation_transform`/`scale_transform`/`mirror_transform`）：旋转/缩放用
+  `T(base) ∘ M ∘ T(−base)`（`from_basis`+`matrix_mul`）；镜像为负行列式仿射，无法用 `from_basis`
+  构造，故用显式 2×2 反射矩阵（`[[ux²−uy², 2uxuy],[2uxuy, uy²−ux²]]`）再平移过 p1。
+- 行为：先用 `transform_geometry` 预校验**每个**选中几何；任一不支持（Text/Spline/Shape/Opaque/
+  Compound，或 MIRROR 下的 Arc/Ellipse——其参数化会反向）→ 整条命令显式 `Unsupported`，绝不静默丢弃。
+  - ROTATE/SCALE：就地更新选中几何，单事务 + 单撤销补丁；保留 layer/space/object/draw_order 与渲染
+    属性（`transform_entity` 仅改几何，更新路径不动渲染属性）。
+  - MIRROR：同一事务内以新 id 插入镜像副本（源不动），单撤销步骤；对子图元/实例 ref 记
+    `drawing.mirror.sub_element`/`drawing.mirror.instance` 诊断，并按对象样式覆盖记 `drawing.mirror.style`。
+- 预览：`draw_preview_overlay` 对 Rotate/Scale/Mirror 使用橡皮筋链（rotate 为 base→direction、scale 为
+  base→reference→target、mirror 为轴 p1→p2）；不伪造镜像幽灵（预览只有取点，无选择几何）。
+- 宿主 draw sink：三者在 linux/web/android 均转发（与 COPY 同为“选择 refs + 参数”，无需取点解析；
+  空选择由宿主或命令层显式拒绝）。
+- 命令行：`SELECTORS` += `ROTATE`/`SCALE`/`MIRROR`（work-only）；`ALIASES` += `RO`/`SC`/`MI`；
+  从 `UNSUPPORTED_COMMANDS` 移除三者；分发到 `begin_draw_tool("rotate"/"scale"/"mirror")`。
+- i18n：新增 `draw.kind.rotate`/`scale`/`mirror`；`draw.status.idle` 增列三者。两份 catalog 键集一致
+  （282 键）；选择/无交点等复用既有错误键。
+
+验证（本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all` / `--check`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`check-i18n.py`（282 键）、`check-architecture.py`（25 包）；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web lib）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（**494 通过 / 0 失败**；
+cad-app 292 + 集成 32；cad-ui-slint 137 + 集成 33）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
+新增合成契约：ROTATE（绕 base 90° 就地旋转端点正确、一步撤销恢复、空选择拒绝、Viewer 拒绝）；
+SCALE（factor 2 使距离翻倍、一步撤销恢复、非正/非有限 factor 拒绝、reference==base 在工具层拒绝、
+Viewer 拒绝）；MIRROR（对角轴镜像坐标正确、保留原件 + 一步撤销移除全部副本、Arc/Ellipse 选中整条
+`Unsupported` 且不改、一步撤销移除副本、Viewer 拒绝）；变换 ref 的子图元/实例诊断；命令行
+`ROTATE`/`RO`、`SCALE`/`SC`、`MIRROR`/`MI` 启动对应工具；`viewer_mode_rejects...` 与 work-only 目录
+纳入三命令。均为合成/离屏证据，未做真实窗口、真实 GPU、真机或交互手势验收；Android 本机缺 Android
+平台，app-android 编译未运行。
+
+补强（评审后）：**G1** ROTATE 的零长方向（方向点与 base 重合或仅在 Z 上不同）此前会静默退化为 0°；
+现按与 MIRROR 相同的阈值 `MIN_DIRECTION_EXTENT=1e-12` 先行拒绝（`InvalidInput`），不再产生假 0°。
+**G2** 补齐测试：ROTATE/MIRROR 混合选择 `[line, Opaque]` 整条 `Unsupported` 且支持对象逐字段不变、
+revision 不变、`can_undo==false`；ROTATE/SCALE 对不支持图元（Opaque）显式拒绝；多目标 MIRROR 一步
+撤销移除全部副本；非原点共轭（绕 (1,0) 旋转 90° 得 (1,−1)-(1,9)；以 x=1 为轴镜像 (0,0)-(10,0) 得副本
+(2,0)-(−8,0)）；SCALE/MIRROR 空选择拒绝；`drawing.mirror.style` 诊断。**G3** SCALE 文档注明
+`transform_geometry` 的 `det<1e-12` 守卫会拒绝 factor≲1e-4；变换预校验不再把真正的 `InvalidInput`
+（如塌缩变换）改标为 `Unsupported`；`DrawIntent::Mirror` 注明仅为 XY 平面轴、Z 原样保留；错误文案与
+COPY 的 “COPY cannot transform …” 风格对齐（`ROTATE/SCALE cannot transform …`）。
+
+## 两个真实绘制/编辑命令：ARC 与 EXTEND（2026-10-11）
 
 用户要求：沿用 LINE/CIRCLE/TRIM/draw-tool 框架，新增 ARC（三点圆弧）与 EXTEND（把 LINE 延伸到边界）
 两个真实命令；仅此两项（变换/剪贴板/OFFSET 留待后续）。
