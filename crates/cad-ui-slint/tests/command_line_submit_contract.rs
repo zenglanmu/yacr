@@ -242,6 +242,8 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
         ("SC", "scale"),
         ("MIRROR", "mirror"),
         ("MI", "mirror"),
+        ("OFFSET", "offset"),
+        ("O", "offset"),
     ] {
         assert!(ui.invoke_command_submitted(submitted.into()), "{submitted}");
         assert_eq!(started.borrow().last().unwrap(), expected, "{submitted}");

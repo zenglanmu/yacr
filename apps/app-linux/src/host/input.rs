@@ -185,6 +185,13 @@ impl DrawCommandSink for Runtime {
                     },
                 )
             }
+            cad_app::DrawIntent::Offset { side_point } => {
+                let refs = self.controller.borrow().selection().refs().to_vec();
+                self.command(
+                    CommandId::OffsetEntity,
+                    CommandPayload::Offset { refs, side_point },
+                )
+            }
             cad_app::DrawIntent::Trim { .. } => {
                 Err(CadError::Unsupported(self.message("linux.trim", &[])))
             }

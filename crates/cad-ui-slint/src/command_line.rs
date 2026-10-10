@@ -45,7 +45,6 @@ const UNSUPPORTED_COMMANDS: &[&str] = &[
     "LENGTHEN",
     "MEASUREGEOM",
     "MTEXT",
-    "OFFSET",
     "PLINE",
     "POINT",
     "POLYGON",
@@ -324,6 +323,10 @@ fn dispatch_command(
         }
         "MIRROR" => {
             ui.invoke_begin_draw_tool("mirror".into());
+            true
+        }
+        "OFFSET" => {
+            ui.invoke_begin_draw_tool("offset".into());
             true
         }
         // ERASE deletes the current selection through the host callback; the
@@ -637,15 +640,15 @@ mod contracts {
                 "{name} prefixes a supported command"
             );
         }
-        for expected in ["HATCH", "OFFSET", "ARRAY", "PUBLISH"] {
+        for expected in ["HATCH", "ARRAY", "PUBLISH"] {
             assert!(
                 UNSUPPORTED_COMMANDS.contains(&expected),
                 "missing unsupported command {expected}"
             );
         }
-        assert!(is_unsupported_command("OFFSET 0,0"));
+        assert!(is_unsupported_command("HATCH 0,0"));
         assert!(!is_unsupported_command("LINE"));
-        // ERASE, COPY, ARC, EXTEND, ROTATE, SCALE and MIRROR are now real
+        // ERASE, COPY, ARC, EXTEND, ROTATE, SCALE, MIRROR and OFFSET are now real
         // commands, no longer unsupported.
         assert!(!is_unsupported_command("ERASE"));
         assert!(!is_unsupported_command("COPY"));
@@ -654,6 +657,7 @@ mod contracts {
         assert!(!is_unsupported_command("ROTATE"));
         assert!(!is_unsupported_command("SCALE"));
         assert!(!is_unsupported_command("MIRROR"));
+        assert!(!is_unsupported_command("OFFSET"));
     }
 
     #[test]

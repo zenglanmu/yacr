@@ -179,6 +179,16 @@ impl cad_ui_slint::DrawCommandSink for AndroidDrawSink {
                     },
                 )
             }
+            cad_app::DrawIntent::Offset { side_point } => {
+                let refs: Vec<SelectionRef> = self.controller.borrow().selection().refs().to_vec();
+                if refs.is_empty() {
+                    return Err(CadError::InvalidInput("offset needs a selection".into()));
+                }
+                self.send(
+                    CommandId::OffsetEntity,
+                    CommandPayload::Offset { refs, side_point },
+                )
+            }
             cad_app::DrawIntent::Trim {
                 target_pick,
                 boundary_pick,

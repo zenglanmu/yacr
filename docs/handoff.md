@@ -1,6 +1,46 @@
 # 后续 agent 接手入口
 
-## 应用内实体剪贴板：Ctrl+C / Ctrl+X / Ctrl+V（2026-10-11，本轮）
+## 偏移命令：OFFSET（LINE / CIRCLE 子集）（2026-10-11，本轮）
+
+用户要求：实现 OFFSET 的**有界、诚实子集**——仅 LINE 与 CIRCLE；其它几何一律显式 `Unsupported`。
+
+- 命令层：新增 `CommandId::OffsetEntity`（work-only）与 `CommandPayload::Offset { refs, side_point }`
+  （沿用 MOVE/COPY 的 refs 约定；命令层强制**恰好一个**选中实体）。DrawTool 新增
+  `DrawToolKind::Offset`（键 `offset`，1 点，`requires_selection`）与
+  `DrawIntent::Offset { side_point }`。
+- 手势/语义：选中实体为源，单点 `side_point` 同时定义**侧**与**距离**：
+  - LINE：`d` = `side_point` 到无限直线的垂距；新直线 = 原直线沿 `d · 单位法向` 平移（法向指向拾取点
+    一侧）；`d <= tol` → 显式拒绝。3D 精确（垂足在直线与点所成平面内）。
+  - CIRCLE：新半径 = `|side_point − centre|`（点在外→增大，在内→缩小）；点过圆心或落在圆上
+    （零偏移）→ 显式拒绝。
+  - 其它几何（Polyline/Arc/Ellipse/Spline/Point/Mesh/Text/…）→ 显式
+    `Unsupported("OFFSET supports LINE and CIRCLE only, got …")`，不创建、不部分执行。
+  - 0 或多个选中 → 显式 `InvalidInput`；Viewer → 命令层 `PermissionDenied`。
+- 新实体：**新 id**，源实体的 layer/space 与显示状态（按对象颜色/线型/线宽 + 动态可见性成员，经
+  `entity_display_state`/`restore_entity_display_state` 携带，并写入补丁 `after_state` 使重做保持）；
+  单事务 + 单撤销。诊断 `drawing.offset`（含偏移量），绝不空成功。
+  - `commit_new_entity` 重构为薄封装，新增 `commit_new_entity_in(layer, space, display, label)` 复用。
+- 宿主 sink：linux/web/android 三处转发 `DrawIntent::Offset → OffsetEntity`（与 COPY/MOVE 相同的
+  选择 refs 解析）。
+- 预览：Offset 并入通用橡皮筋链分支（不伪造偏移幽灵）。
+- 命令行：`SELECTORS` += `OFFSET`（work-only）；`ALIASES` += `("O","OFFSET")`；从
+  `UNSUPPORTED_COMMANDS` 移除 `OFFSET`；分发到 `begin_draw_tool("offset")`。
+- i18n：新增 `draw.kind.offset`（zh `偏移` / en `Offset`）；`draw.status.idle` 增列 Offset。两份 catalog
+  键集一致（284 键）。
+
+验证（本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all` / `--check`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`check-i18n.py`（284 键）、`check-architecture.py`（25 包）；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web lib）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（**515 通过 / 0 失败**）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
+新增合成契约：LINE 偏移（上/下两侧垂距正确、源不变）、点在线上拒绝、空/多选拒绝、Viewer 拒绝、一步
+撤销移除 + 重做恢复；CIRCLE 外扩/内缩、过圆心/在圆上拒绝；不支持几何（Arc/Insert）显式 `Unsupported`
+且不创建；偏移副本携带源渲染属性；命令行 `OFFSET`/`O` 启动工具与 work-only 目录。均为合成/离屏证据，
+未做真实窗口、真实 GPU、真机或交互手势验收；Android 本机缺 Android 平台，app-android 编译未运行。
+
+## 应用内实体剪贴板：Ctrl+C / Ctrl+X / Ctrl+V（2026-10-11）
 
 用户要求：实现应用内（in-app）实体剪贴板——Ctrl+C 复制、Ctrl+X 剪切、Ctrl+V 粘贴；**仅进程内**，
 不使用操作系统/系统剪贴板；无跨进程粘贴。

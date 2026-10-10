@@ -191,6 +191,7 @@ impl Application {
             | CommandId::CopyToClipboard
             | CommandId::CutToClipboard
             | CommandId::PasteFromClipboard
+            | CommandId::OffsetEntity
             | CommandId::SetActiveLayer => self.drawing_command(session, &command),
         }
     }

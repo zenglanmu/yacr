@@ -43,13 +43,15 @@ pub enum DrawToolKind {
     Scale,
     /// MIRROR: requires a selection, then the two points of the mirror axis.
     Mirror,
+    /// OFFSET: requires a single-entity selection, then one side/distance point.
+    Offset,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the Slint shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 10] = [
+    pub const ALL: [DrawToolKind; 11] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -60,6 +62,7 @@ impl DrawToolKind {
         DrawToolKind::Rotate,
         DrawToolKind::Scale,
         DrawToolKind::Mirror,
+        DrawToolKind::Offset,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -75,6 +78,7 @@ impl DrawToolKind {
             Self::Rotate => "rotate",
             Self::Scale => "scale",
             Self::Mirror => "mirror",
+            Self::Offset => "offset",
         }
     }
 
@@ -92,6 +96,7 @@ impl DrawToolKind {
             "rotate" => Some(Self::Rotate),
             "scale" => Some(Self::Scale),
             "mirror" => Some(Self::Mirror),
+            "offset" => Some(Self::Offset),
             _ => None,
         }
     }
@@ -130,14 +135,19 @@ impl DrawToolKind {
             Self::Rotate => "旋转",
             Self::Scale => "缩放",
             Self::Mirror => "镜像",
+            Self::Offset => "偏移",
         }
     }
 
     /// Exact number of points this operation needs to be defined.
     pub fn required_points(self) -> usize {
         match self {
+            // Start, a point on the arc, end; or base, reference, target.
+            Self::Arc | Self::Scale => 3,
+            // One side/distance point.
+            Self::Offset => 1,
             // Two endpoints, centre+radius point, a move/copy delta,
-            // target+boundary, or a rotate angle / mirror axis (two points).
+            // target+boundary, or a rotate angle / mirror axis.
             Self::Line
             | Self::Circle
             | Self::Move
@@ -146,8 +156,6 @@ impl DrawToolKind {
             | Self::Extend
             | Self::Rotate
             | Self::Mirror => 2,
-            // Start, a point on the arc, end; or base, reference, target.
-            Self::Arc | Self::Scale => 3,
         }
     }
 
@@ -155,11 +163,12 @@ impl DrawToolKind {
     ///
     /// MOVE transforms existing entities, COPY duplicates them, and
     /// ROTATE/SCALE/MIRROR transform (or mirror) them; all refuse to run with no
-    /// selection rather than acting on nothing.
+    /// selection rather than acting on nothing. OFFSET needs exactly one selected
+    /// source (enforced by the command layer).
     pub fn requires_selection(self) -> bool {
         matches!(
             self,
-            Self::Move | Self::Copy | Self::Rotate | Self::Scale | Self::Mirror
+            Self::Move | Self::Copy | Self::Rotate | Self::Scale | Self::Mirror | Self::Offset
         )
     }
 }
@@ -266,6 +275,9 @@ pub enum DrawIntent {
     /// define it, so a vertical-looking axis that differs only in Z is refused
     /// (see `mirror_transform`). Z is carried through unchanged.
     Mirror { p1: Point3, p2: Point3 },
+    /// Offset the single selected LINE/CIRCLE; `side_point` gives both the side
+    /// and the distance.
+    Offset { side_point: Point3 },
 }
 
 /// Drawing/editing capture state machine.
@@ -375,7 +387,9 @@ impl DrawTool {
             )));
         }
         let a = self.points[0];
-        let b = self.points[1];
+        // One-point tools (OFFSET) never index a second point; `unwrap_or(a)` is a
+        // harmless placeholder only ever used when a kind's arm does not read `b`.
+        let b = self.points.get(1).copied().unwrap_or(a);
         Ok(match self.kind {
             DrawToolKind::Line => DrawIntent::Line { start: a, end: b },
             DrawToolKind::Circle => DrawIntent::Circle { center: a, edge: b },
@@ -450,6 +464,9 @@ impl DrawTool {
                 }
                 DrawIntent::Mirror { p1: a, p2: b }
             }
+            // OFFSET: the single captured point is the side/distance point; the
+            // source is the session selection, resolved by the command layer.
+            DrawToolKind::Offset => DrawIntent::Offset { side_point: a },
         })
     }
 }
@@ -705,6 +722,7 @@ mod tests {
         for kind in DrawToolKind::ALL {
             let expected = match kind {
                 DrawToolKind::Arc | DrawToolKind::Scale => 3,
+                DrawToolKind::Offset => 1,
                 _ => 2,
             };
             assert_eq!(kind.required_points(), expected, "{kind:?}");
@@ -719,6 +737,25 @@ mod tests {
         assert!(DrawToolKind::Rotate.requires_selection());
         assert!(DrawToolKind::Scale.requires_selection());
         assert!(DrawToolKind::Mirror.requires_selection());
+        assert!(DrawToolKind::Offset.requires_selection());
+    }
+
+    #[test]
+    fn offset_captures_one_side_point() {
+        let mut tool = DrawTool::new(DrawToolKind::Offset, 1);
+        assert_eq!(tool.remaining(), 1);
+        assert!(!tool.is_ready());
+        tool.push_point(p(3.0, 4.0)).unwrap();
+        assert!(tool.is_ready());
+        assert_eq!(
+            tool.intent().unwrap(),
+            DrawIntent::Offset {
+                side_point: p(3.0, 4.0)
+            }
+        );
+        // A selection-requiring tool with no selection is not confirmable.
+        let none = DrawTool::new(DrawToolKind::Offset, 0);
+        assert!(matches!(none.intent(), Err(CadError::InvalidInput(_))));
     }
 
     #[test]

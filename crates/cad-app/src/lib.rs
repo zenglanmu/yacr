@@ -151,6 +151,10 @@ pub enum CommandId {
     /// Insert fresh-id clones of the clipboard entities at their original
     /// coordinates in one transaction (PASTEORIG). Work-only.
     PasteFromClipboard,
+    /// Create an offset copy of a single LINE/CIRCLE source, at the distance and
+    /// side given by the picked point. Another geometry kind is an explicit
+    /// `Unsupported` refusal. Work-only.
+    OffsetEntity,
     /// Set the session's active layer for new drawing entities. Session state
     /// only; no database write. Work-only.
     SetActiveLayer,
@@ -177,6 +181,7 @@ impl CommandId {
                 | Self::MirrorEntities
                 | Self::CutToClipboard
                 | Self::PasteFromClipboard
+                | Self::OffsetEntity
                 | Self::SetActiveLayer
         )
     }
@@ -543,6 +548,13 @@ pub enum CommandPayload {
         refs: Vec<SelectionRef>,
         axis_start: Point3,
         axis_end: Point3,
+    },
+    /// Offset a single selected LINE/CIRCLE by the distance and side defined by
+    /// `side_point` (OFFSET, spec F-EDIT). Exactly one source entity is required;
+    /// any other geometry kind is an explicit refusal.
+    Offset {
+        refs: Vec<SelectionRef>,
+        side_point: Point3,
     },
     /// Trim one target against a list of boundary refs, keeping the side that
     /// contains `pick_point` (TRIM, spec F-EDIT). See `docs/drawing-edit.md` §3

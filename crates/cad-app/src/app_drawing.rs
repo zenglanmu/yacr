@@ -44,6 +44,7 @@ impl Application {
             CommandId::CopyToClipboard => self.copy_to_clipboard(session, command),
             CommandId::CutToClipboard => self.cut_to_clipboard(session, command),
             CommandId::PasteFromClipboard => self.paste_from_clipboard(session, command),
+            CommandId::OffsetEntity => self.offset_entity(command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a drawing/edit command".to_string(),
@@ -1184,6 +1185,100 @@ impl Application {
         Ok((entries, diagnostics))
     }
 
+    /// Create an offset copy of a single selected LINE or CIRCLE.
+    ///
+    /// The picked `side_point` defines both the side and the distance: for a LINE
+    /// it is the perpendicular distance to the infinite line (the new line lies
+    /// on the side the point is on); for a CIRCLE the new radius is
+    /// `|side_point − centre|` (a point outside the circle grows it, inside
+    /// shrinks it). Any other geometry kind is an explicit `Unsupported` refusal;
+    /// exactly one source entity is required. The new entity has a fresh id, the
+    /// source's layer/space, and the source's display state; one transaction and
+    /// one undo step.
+    pub(crate) fn offset_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::Offset { refs, side_point } = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "OffsetEntity needs an Offset { refs, side_point } payload".into(),
+            ));
+        };
+        if !is_finite_point(*side_point) {
+            return Err(CadError::InvalidInput(
+                "OffsetEntity side point must be finite".into(),
+            ));
+        }
+        let document_id = command.document;
+        let (geometry, layer, space, display, message, diagnostics) = {
+            let document = self
+                .workspace
+                .documents
+                .get(&document_id)
+                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+            let drawing = &document.drawing;
+            let (sources, diagnostics) = Self::resolve_selection(
+                drawing,
+                document_id,
+                refs,
+                "offset",
+                "OffsetEntity",
+                "偏移",
+                false,
+            )?;
+            if sources.len() != 1 {
+                return Err(CadError::InvalidInput(format!(
+                    "OffsetEntity requires exactly one selected entity, got {}",
+                    sources.len()
+                )));
+            }
+            let source = &sources[0];
+            let (geometry, message) = match &source.geometry {
+                SemanticGeometry::Line { start, end } => {
+                    let (geometry, distance) = offset_line(*start, *end, *side_point)?;
+                    (geometry, format!("OFFSET：直线沿拾取侧偏移 {distance:.4}"))
+                }
+                SemanticGeometry::Circle {
+                    center,
+                    normal,
+                    radius,
+                } => {
+                    let (geometry, distance) =
+                        offset_circle(*center, *normal, *radius, *side_point)?;
+                    (geometry, format!("OFFSET：圆偏移，新半径 {distance:.4}"))
+                }
+                other => {
+                    return Err(CadError::Unsupported(format!(
+                        "OFFSET supports LINE and CIRCLE only, got {}",
+                        geometry_kind(other)
+                    )));
+                }
+            };
+            let display = drawing.entity_display_state(source.id);
+            (
+                geometry,
+                source.layer,
+                source.space.clone(),
+                display,
+                message,
+                diagnostics,
+            )
+        };
+        let mut outcome = self.commit_new_entity_in(
+            command,
+            geometry,
+            layer,
+            space,
+            Some(display),
+            "offset entity",
+        )?;
+        let mut merged = vec![Diagnostic {
+            object: outcome.objects.first().copied(),
+            code: "drawing.offset".into(),
+            message,
+        }];
+        merged.extend(diagnostics);
+        outcome.diagnostics = merged;
+        Ok(outcome)
+    }
+
     /// Trim one LINE against LINE/LWPOLYLINE straight segments (spec §3).
     ///
     /// Supported subset only: the target must be a LINE and every boundary must
@@ -1464,12 +1559,37 @@ impl Application {
         })
     }
 
-    /// Shared insert path for LINE/CIRCLE/ARC creation.
+    /// Shared insert path for LINE/CIRCLE/ARC creation (active layer, model space).
     fn commit_new_entity(
         &mut self,
         session: &SessionState,
         command: &Command,
         geometry: SemanticGeometry,
+        label: &str,
+    ) -> CadResult<CommandOutcome> {
+        self.commit_new_entity_in(
+            command,
+            geometry,
+            session.active_layer,
+            SpaceId::Model,
+            None,
+            label,
+        )
+    }
+
+    /// Insert a new entity into `layer`/`space`, optionally carrying a captured
+    /// display state (render attributes + dynamic-visibility membership).
+    ///
+    /// The layer must exist: a missing layer is an explicit error, never a silent
+    /// fallback. A captured display state is restored after commit and recorded on
+    /// the patch's `after_state` so a redo re-applies it.
+    fn commit_new_entity_in(
+        &mut self,
+        command: &Command,
+        geometry: SemanticGeometry,
+        layer: LayerId,
+        space: SpaceId,
+        display: Option<cad_db::EntityDisplayState>,
         label: &str,
     ) -> CadResult<CommandOutcome> {
         let document_id = command.document;
@@ -1480,12 +1600,10 @@ impl Application {
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
         let drawing = Arc::make_mut(&mut document.drawing);
 
-        // The active layer must exist: a missing layer is an explicit error,
-        // never a silent fallback onto layer 0.
-        if drawing.layer(session.active_layer).is_none() {
+        if drawing.layer(layer).is_none() {
             return Err(CadError::InvalidInput(format!(
-                "active layer {} does not exist",
-                session.active_layer.0
+                "layer {} does not exist",
+                layer.0
             )));
         }
         let draw_order = drawing
@@ -1504,8 +1622,8 @@ impl Application {
                 source_handle: None,
             },
             id: entity_id,
-            layer: session.active_layer,
-            space: SpaceId::Model,
+            layer,
+            space,
             geometry,
             draw_order,
         };
@@ -1516,12 +1634,21 @@ impl Application {
             staged.insert_entity(entity.clone())?;
             staged.commit()?
         };
+        if let Some(display) = &display {
+            drawing.restore_entity_display_state(entity_id, display);
+        }
         self.record_drawing(
             document_id,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: label.to_string(),
-                patches: vec![drawing_patch(entity_id, None, Some(entity))],
+                patches: vec![DrawingPatch {
+                    id: entity_id,
+                    before: None,
+                    after: Some(entity),
+                    before_state: None,
+                    after_state: display,
+                }],
                 merge_key: None,
             },
         )?;
@@ -1778,6 +1905,101 @@ fn segment_intersection_param(a: Point3, b: Point3, c: Point3, d: Point3, tol: f
 
 fn len2(v: (f64, f64)) -> f64 {
     v.0 * v.0 + v.1 * v.1
+}
+
+/// Default world tolerance used by the OFFSET construction.
+fn offset_tolerance() -> f64 {
+    let policy = TolerancePolicy::default();
+    policy
+        .computation_world
+        .max(1e-12)
+        .max(policy.topology_world)
+}
+
+/// Offset a LINE by the perpendicular distance to `side_point` (3D-exact).
+///
+/// Returns the parallel line and the offset distance. A degenerate source or a
+/// point on the (infinite) line is an explicit refusal; the new line lies on the
+/// side the point is on.
+fn offset_line(
+    start: Point3,
+    end: Point3,
+    side_point: Point3,
+) -> CadResult<(SemanticGeometry, f64)> {
+    let tol = offset_tolerance();
+    let dir = (end.x - start.x, end.y - start.y, end.z - start.z);
+    let len = (dir.0 * dir.0 + dir.1 * dir.1 + dir.2 * dir.2).sqrt();
+    if !len.is_finite() || len <= tol {
+        return Err(CadError::InvalidInput(
+            "OFFSET source LINE is degenerate (zero length)".into(),
+        ));
+    }
+    let u = (dir.0 / len, dir.1 / len, dir.2 / len);
+    let v = (
+        side_point.x - start.x,
+        side_point.y - start.y,
+        side_point.z - start.z,
+    );
+    let along = v.0 * u.0 + v.1 * u.1 + v.2 * u.2;
+    let perp = (v.0 - along * u.0, v.1 - along * u.1, v.2 - along * u.2);
+    let distance = (perp.0 * perp.0 + perp.1 * perp.1 + perp.2 * perp.2).sqrt();
+    if !distance.is_finite() || distance <= tol {
+        return Err(CadError::InvalidInput(
+            "OFFSET distance must be positive; pick a point off the line".into(),
+        ));
+    }
+    let n = (perp.0 / distance, perp.1 / distance, perp.2 / distance);
+    Ok((
+        SemanticGeometry::Line {
+            start: Point3 {
+                x: start.x + distance * n.0,
+                y: start.y + distance * n.1,
+                z: start.z + distance * n.2,
+            },
+            end: Point3 {
+                x: end.x + distance * n.0,
+                y: end.y + distance * n.1,
+                z: end.z + distance * n.2,
+            },
+        },
+        distance,
+    ))
+}
+
+/// Offset a CIRCLE so its new radius is `|side_point − centre|`.
+///
+/// The side is implicit: a point outside the circle grows it, inside shrinks it.
+/// A point at the centre, or a point on the circle (a zero offset), is an
+/// explicit refusal rather than a silent no-op.
+fn offset_circle(
+    center: Point3,
+    normal: Point3,
+    radius: f64,
+    side_point: Point3,
+) -> CadResult<(SemanticGeometry, f64)> {
+    let tol = offset_tolerance();
+    let dx = side_point.x - center.x;
+    let dy = side_point.y - center.y;
+    let dz = side_point.z - center.z;
+    let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+    if !distance.is_finite() || distance <= tol {
+        return Err(CadError::InvalidInput(
+            "OFFSET distance must be positive; pick a point away from the centre".into(),
+        ));
+    }
+    if (distance - radius.abs()).abs() <= tol {
+        return Err(CadError::InvalidInput(
+            "OFFSET distance must be positive; pick a point off the circle".into(),
+        ));
+    }
+    Ok((
+        SemanticGeometry::Circle {
+            center,
+            normal,
+            radius: distance,
+        },
+        distance,
+    ))
 }
 
 /// 2D intersection of the infinite line `a→b` with the boundary segment `c→d`.
