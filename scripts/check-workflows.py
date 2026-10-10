@@ -45,6 +45,8 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     ),
     "linux-release": (
         "scripts/package-linux-release.sh",
+        "flatpak-builder",
+        "org.freedesktop.Sdk",
         "actions/upload-artifact",
     ),
     "core-quality": (

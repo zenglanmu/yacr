@@ -59,7 +59,7 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 | Job | Workflow | Runner | 门禁 |
 |---|---|---|---|
 | `linux-app` | build.yml | `ubuntu-latest` | Linux App debug 全目标编译与日志，不运行渲染 |
-| `linux-release` | build.yml | `ubuntu-latest`（按需/tag） | Linux GUI+CLI tar.gz + 全量字体，上传 artifact |
+| `linux-release` | build.yml | `ubuntu-latest`（按需/tag） | Linux GUI+CLI **Flatpak bundle**（`dev.yacr.app`）+ 全量字体，上传 artifact |
 | `windows-check` | build.yml | `windows-latest` | 原生 MSVC 目标 `cargo check -p app-windows`，不运行 PE |
 | `windows-release` | build.yml | `windows-latest`（按需/tag） | MSVC release 打包 + 全量字体 zip，上传 artifact |
 | `macos-check` | build.yml | `macos-latest` | 原生 arm64 macOS 目标 `cargo check -p app-macos`，不运行 app |
@@ -113,14 +113,16 @@ Rust 测试代码通过 `--all-targets` 编译，但不执行测试。该 job �
 
 `runs-on: ubuntu-latest`，`if: github.event_name == 'workflow_dispatch' ||
 startsWith(github.ref, 'refs/tags/v')`。安装 Slint 所需的 `pkgconf
-libfontconfig1-dev libfreetype6-dev`，`cargo fetch --locked` 预热依赖
-（`package-linux-release.sh` 以 `--offline` 构建，避免锁文件被静默重解析），随后
-`WITH_FONTS=1 scripts/package-linux-release.sh`，上传 `yacr-linux-release` artifact
-（tar.gz + sha256）。脚本在打包内实际运行 `bin/cad-cli-tools --help` 与
-`bin/yacr-linux --headless`（解析错误路径）验证可加载，并检查 RPATH 生效、无缺失库；
-**不**运行窗口/GPU 渲染（`YACR_LINUX_SMOKE` 需可达软件 Vulkan，默认关闭）。默认不在每个
-PR 上跑以保持门禁轻量；编译门禁是 `linux-app`。本环境未在 GitHub Actions 上执行该 job，
-属 NOT RUN；本机 Linux 可本地运行同一脚本复现。
+libfontconfig1-dev libfreetype6-dev` 与 `flatpak`/`flatpak-builder`，添加 flathub remote 并装
+`org.freedesktop.Platform//26.08` + `org.freedesktop.Sdk//26.08`，`cargo fetch --locked`
+预热依赖（`package-linux-release.sh` 以 `--offline` 构建，避免锁文件被静默重解析），随后
+`WITH_FONTS=1 YACR_FLATPAK_SMOKE=1 scripts/package-linux-release.sh`，上传
+`yacr-linux-release` artifact（`.flatpak` + sha256）。脚本先构建两个 release 二进制并
+`ldd` 确认无缺失，用 `bin/yacr-linux --headless`（解析错误路径）验证可加载，再
+`flatpak-builder` 构建并 `flatpak build-bundle` 出单文件；smoke 在构建沙箱内跑
+`cad-cli-tools --help`。**不**运行窗口/GPU 像素渲染。默认不在每个 PR 上跑以保持门禁轻量；
+编译门禁是 `linux-app`。本环境未在 GitHub Actions 上执行该 job，属 NOT RUN；本机 Linux 可
+本地运行同一脚本复现（见 `docs/flatpak.md` §4）。
 
 ### `windows-check`（MSVC 编译层，必需 job）
 
@@ -391,11 +393,13 @@ release 触发片段 `startsWith(github.ref, 'refs/tags/v')`。有 PyYAML 时做
 的 release 触发 / `download-artifact` / 真实部署命令，断言结构检查**必然报错**，从而证明
 上面的门禁不是摆设。两者都不触网、不部署。
 
-`scripts/test-package-linux-release.py` 是发布打包脚本的静态 + 变异契约：断言
-`scripts/package-linux-release.sh` 仍构建并打包 CLI 与 GUI 两个二进制、把 GUI 非基础系统库
-复制进 `lib/` 并带 `$ORIGIN/../lib` RPATH、且保留「无缺失库 / RPATH 生效 / GUI 可加载」的
-打包内校验；逐条删除任一保证都会报错。它只检查脚本文本，**不**执行 release 构建，也不构成
-已打包或已渲染的证据。
+`scripts/test-package-linux-release.py` 是 Linux Flatpak 打包的静态 + 变异契约：断言
+`scripts/package-linux-release.sh` 仍构建并暂存 CLI 与 GUI 两个二进制、用
+`packaging/flatpak/dev.yacr.app.yml` 经 `flatpak-builder` 构建并 `flatpak build-bundle` 出
+单文件 bundle，且保留「无缺失库 / GUI 可加载 / 不再产出 tar.gz」的保证；manifest 的
+app-id、运行时/SDK 版本、finish-args 与 `/app` 安装路径，以及桌面项/AppStream/图标与
+app-id 一致，也逐条断言。逐条删除任一保证都会报错。它只检查脚本文本，**不**执行 release
+构建或 `flatpak-builder`，也不构成已打包、已安装或已渲染的证据。
 
 `scripts/test-package-macos-release.py` 同理，断言 `scripts/package-macos-release.sh` 仍拒绝
 在非 macOS 运行、构建 CLI 与 GUI 两个 Mach-O、用 `lipo` 合成 arm64+x86_64、拒绝非系统

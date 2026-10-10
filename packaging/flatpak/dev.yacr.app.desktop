@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=yacr
+Name[zh_CN]=yacr
+Comment=View and measure DWG/DXF drawings
+Comment[zh_CN]=查看与测量 DWG/DXF 图纸
+Exec=yacr-linux %F
+Icon=dev.yacr.app
+Terminal=false
+Categories=Graphics;Engineering;
+MimeType=image/vnd.dwg;image/vnd.dxf;application/acad;application/dxf;

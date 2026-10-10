@@ -80,7 +80,8 @@ Linux 主机无法交叉产出 Mach-O**，故只能在 macOS runner/真机运行
 `scripts/package-macos-release.sh`，见 `docs/macos-app.md`。
 
 Linux/Android 发布层：按需 `linux-release`（`ubuntu-latest` 运行
-`scripts/package-linux-release.sh`，含全量字体 tar.gz）与 `android-release`（`ubuntu-latest`
+`scripts/package-linux-release.sh`，产出**含全量字体的 Flatpak bundle** `dev.yacr.app`）与
+`android-release`（`ubuntu-latest`
 自装 **JDK 17** + 固定 SDK/NDK，`scripts/fetch-fonts.sh` 带全量字体后
 `scripts/build-android.sh --release`）。二者与 `windows-release`/`macos-release` 同在
 `workflow_dispatch`/`v*` tag 触发；Android **打包不等于安装运行**，见 `docs/ci.md`。

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata for the yacr Flatpak. The app-id must match the manifest.
+  This is not a Flathub submission; it exists so desktop software centres show a
+  real name/summary/icon and so `flatpak-builder` has consistent metadata.
+-->
+<component type="desktop-application">
+  <id>dev.yacr.app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>yacr</name>
+  <summary>View and measure DWG/DXF drawings</summary>
+  <summary xml:lang="zh-CN">查看与测量 DWG/DXF 图纸</summary>
+  <description>
+    <p>
+      yacr is a CAD system written in Rust. It opens local DWG/DXF drawings,
+      shows model space and supported layouts, and provides distance, polyline
+      length, angle and polygon-area measurement.
+    </p>
+    <p xml:lang="zh-CN">
+      yacr 是一个用 Rust 编写的 CAD 系统，可打开本地 DWG/DXF 图纸，查看模型空间与受支持
+      布局，并提供距离、折线长度、角度与多边形面积测量。
+    </p>
+    <p>
+      This is an early development build with no validated DWG compatibility and
+      no real-GPU acceptance; see the project README before relying on it.
+    </p>
+  </description>
+  <launchable type="desktop-id">dev.yacr.app.desktop</launchable>
+  <provides>
+    <binary>yacr-linux</binary>
+    <binary>cad-cli-tools</binary>
+    <mediatype>image/vnd.dwg</mediatype>
+    <mediatype>image/vnd.dxf</mediatype>
+  </provides>
+  <categories>
+    <category>Graphics</category>
+    <category>Engineering</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.1" date="2026-10-10"/>
+  </releases>
+</component>

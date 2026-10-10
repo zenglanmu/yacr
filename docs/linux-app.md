@@ -37,23 +37,32 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 报告中出图 smoke、导航命令+像素变化是自动检查，`visualAcceptance` 始终等待独立人工审查，
 软件 GPU 成功不能推广为窗口系统、真实 GPU 或 DWG vendor 兼容。
 
-## 发布包（GUI + CLI）
+## 发布包（Flatpak：GUI + CLI）
 
-`scripts/package-linux-release.sh` 产出 `target/release/dist/yacr-<version>-linux-<arch>.tar.gz`：
+`scripts/package-linux-release.sh` 产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak`
+（单文件 Flatpak bundle，app-id `dev.yacr.app`；及 `.sha256`）。它只打包**预构建**的 release
+二进制，沙箱内不编译：脚本先 `cargo build --release --locked`，把 `bin/yacr-linux`、
+`bin/cad-cli-tools` 与 `fonts/` 落到 `target/flatpak/payload`，再用
+`packaging/flatpak/dev.yacr.app.yml` 运行 `flatpak-builder`。
 
-- `bin/yacr-linux` 与 `bin/cad-cli-tools` 同级；GUI 的 RPATH 为 `$ORIGIN/../lib`，非基础
-  系统共享库（fontconfig/freetype 及其依赖）放在 `lib/`，`fonts/` 在包根，CLI 与 GUI 都
-  从同级目录自动加载。
-- 打包时脚本会：构建两个 release 二进制；`ldd` 解析无缺失；`readelf` 确认 RPATH；用
-  `bin/yacr-linux --headless`（缺 `--output` 的既定解析错误）确认动态加载成功；至少一个库
-  从包内 `lib/` 命中（证明 RPATH 生效）。任一项失败即中止，不产出包。
-- `YACR_LINUX_SMOKE=1` 追加：用包内 GUI `--headless --output <新目录>` 离屏出图，并断言
-  `report.json` 的 `cadFrames>0` / `renderError=null` 且两张 PNG 非空。该 smoke 是软件
-  GPU（如 lavapipe）证据，仍需人工视觉复核，不能推广为窗口/真实 GPU/真机验收。
+- 应用安装在 `/app`：`bin/yacr-linux`、`bin/cad-cli-tools`、`fonts/`（二进制同级，CLI 与 GUI
+  都自动加载）、`share/{applications,metainfo,icons}` 下的桌面项/AppStream 元数据/图标。
+- 运行时库由 `org.freedesktop.Platform//26.08` 提供（glibc、fontconfig/freetype、GL/Vulkan
+  加载器、窗口库），**不**打包宿主共享库；`runtime-version 26.08` 的 glibc 2.44 高于受支持
+  构建主机的 glibc，故宿主构建的二进制可在沙箱内加载。
+- 打包时脚本会：构建两个 release 二进制；`ldd` 解析无缺失；用 `bin/yacr-linux --headless`
+  （缺 `--output` 的既定解析错误）确认动态加载成功；`flatpak-builder` 构建并导出；最终
+  `flatpak build-bundle` 产出单文件。任一项失败即中止，不产出包。
+- `YACR_FLATPAK_SMOKE=1` 追加：在构建沙箱内 `flatpak-builder --run … cad-cli-tools --help`，
+  证明 bundle 能真正启动。
+- `YACR_TEST_DWG=<dwg>` 追加：打包前用暂存 CLI 出图并校验 PNG 非空（宿主侧）。
+- `WITH_FONTS=1`（默认）组装全量字体（需网络）；`WITH_FONTS=0` 离线仅带已提交字体；
+  `FONTS_DIR=<目录>`（须含 `fonts.json`）直接用已备好的字体目录，跳过下载（宿主先下载、再交给
+  flatpak-builder，打包步骤不联网）。
 - 限制：glibc/内核、窗口系统、Vulkan 驱动、`xdg-desktop-portal`（桌面打开对话框）与
-  `fc-match`（系统默认回退）仍由宿主提供；包内库与构建发行版绑定，换发行版/libc 代际应
-  改用 `BUNDLE_LIBS=0` 或从源码重建。开发环境已实测打包 + GUI 离屏 smoke，见
-  `docs/validation.md`。
+  `fc-match`（系统默认回退）仍由运行时/宿主提供；bundle **未签名**；沙箱内 GPU 走
+  `--device=dri` + 运行时 GL 扩展。开发环境已实测构建、安装、运行与 CLI 沙箱渲染，见
+  `docs/flatpak.md`、`docs/validation.md`。
 
 ## 已接线范围与限制
 

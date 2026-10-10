@@ -21,6 +21,31 @@
 - Web：`wasm-bindgen-cli 0.2.129`、Node 22；无头 Chromium
   `Google Chrome for Testing 153.0.8010.12`（Playwright core 1.63，SwiftShader）。
 
+## 2026-10-10：Linux 发布包改 Flatpak（本机 Ubuntu 26.04）
+
+`scripts/package-linux-release.sh` 改为产出单文件 Flatpak（`dev.yacr.app`），取代 tar.gz；
+设计、manifest 与 CI 接线见 `docs/flatpak.md`。本机实际执行：
+
+- 工具：`flatpak 1.16.6` + `flatpak-builder 1.4.8`，`org.freedesktop.Platform/Sdk//26.08`
+  （运行时 glibc 2.44）；宿主 Ubuntu 26.04 / glibc 2.43 / Wayland / Quadro P620 + Intel UHD。
+- `WITH_FONTS=0 bash scripts/package-linux-release.sh` → **EXIT=0**，产出
+  `target/release/dist/yacr-0.1.1-linux-x86_64.flatpak`（15,368,080 B）+ sha256。
+- `flatpak install --user` 后：`flatpak run --command=cad-cli-tools dev.yacr.app --help`
+  输出用法；`flatpak run dev.yacr.app --headless`（缺 `--output`）打印既定解析错误；
+  沙箱内 `cad-cli-tools render fixtures/dxf/qcad-flange/flange.dxf --png …` 出 PNG 22,000 B。
+- `WITH_FONTS=0 YACR_FLATPAK_SMOKE=1` → **EXIT=0**，`flatpak-builder --run … cad-cli-tools
+  --help` 成功（沙箱启动）。
+- `FONTS_DIR=<准备目录>`（离线，跳过下载）→ **EXIT=0**，安装后 `/app/fonts` 内含
+  `dummy.ttf`/`fonts.json`，证明「宿主先下载、再交给 flatpak-builder」的路径可用。
+- 沙箱内 GUI `--headless` 检测到真实独显 `Quadro P620` 并按既定不变量拒绝（`--headless`
+  仅接受软件 Vulkan）——预期行为，亦证明沙箱拿到真实 GPU 适配器。
+- 门禁：`python3 scripts/test-package-linux-release.py`（7 passed）、
+  `python3 scripts/check-workflows.py` 通过。
+
+**NOT RUN / 限制**：`WITH_FONTS=1`（默认/CI）本机未跑通——字体 CDN 不可达，
+`fetch-fonts.sh` 非零退出（未伪造成功）；真实窗口/GPU 像素验收、真机、Flatpak CI job
+未运行；bundle 未签名、未发布 Flathub。
+
 ## 2026-10-10：DXF/DWG 图元显示补全轮（含光栅图像纹理管线）
 
 环境：本机 ThinkPad 桌面，Rust 1.99.0；GPU 证据使用 Mesa **lavapipe**（软件 Vulkan，

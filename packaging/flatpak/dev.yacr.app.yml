@@ -1,0 +1,58 @@
+# Flatpak manifest for yacr (dev.yacr.app).
+#
+# This manifest packages *prebuilt* release binaries: the payload under
+# target/flatpak/payload is assembled by scripts/package-linux-release.sh, which
+# first runs `cargo build --release --locked` on the host and (by default) the
+# full CAD font catalogue. Nothing is compiled inside the sandbox.
+#
+# Rationale: the freedesktop runtime already provides glibc and every shared
+# library the binaries need (fontconfig, freetype, libGL/Vulkan loader,
+# wayland/xkbcommon); bundling host libraries here would couple the Flatpak to
+# the build distribution and fight the runtime. `runtime-version: 26.08` ships
+# glibc 2.44, which is newer than the glibc of supported build hosts, so a host
+# build loads inside the sandbox.
+#
+# Build (see scripts/package-linux-release.sh):
+#   scripts/package-linux-release.sh
+# Output:
+#   target/release/dist/yacr-<version>-linux-<arch>.flatpak
+app-id: dev.yacr.app
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: yacr-linux
+
+# GPU + display + drawing access. The drawing under any path in $HOME is opened
+# either via --open or the xdg-desktop-portal file chooser; --filesystem=home
+# keeps the CLI (`flatpak run --command=cad-cli-tools …`) usable on user files.
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=home
+
+modules:
+  - name: yacr
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 bin/yacr-linux /app/bin/yacr-linux
+      - install -Dm755 bin/cad-cli-tools /app/bin/cad-cli-tools
+      - mkdir -p /app/fonts
+      - cp -a fonts/. /app/fonts/
+      - install -Dm644 dev.yacr.app.desktop /app/share/applications/dev.yacr.app.desktop
+      - install -Dm644 dev.yacr.app.metainfo.xml /app/share/metainfo/dev.yacr.app.metainfo.xml
+      - install -Dm644 yacr-icon.svg /app/share/icons/hicolor/scalable/apps/dev.yacr.app.svg
+      - install -Dm644 yacr-256.png /app/share/icons/hicolor/256x256/apps/dev.yacr.app.png
+    sources:
+      # Prebuilt release payload: bin/{yacr-linux,cad-cli-tools} + fonts/.
+      - type: dir
+        path: ../../target/flatpak/payload
+      - type: file
+        path: dev.yacr.app.desktop
+      - type: file
+        path: dev.yacr.app.metainfo.xml
+      - type: file
+        path: ../../assets/yacr-icon.svg
+      - type: file
+        path: ../../assets/icons/yacr-256.png

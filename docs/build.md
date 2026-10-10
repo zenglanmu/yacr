@@ -34,36 +34,55 @@ cargo test -p cad-ui-slint --lib --locked -- --test-threads=1
 `YACR_UI_OUTPUT` 可指定新的截图目录。官方 FemtoVG/wgpu 离屏渲染共享 Slint 组件与 CAD
 纹理，强制验证软件 Vulkan；这是合成内容/软件 GPU 证据，不等于桌面宿主产品或真机验收。
 
-## Linux release 包（GUI 主应用 + 无头 CLI）
+## Linux 发布包（Flatpak：GUI 主应用 + 无头 CLI）
 
 CI 发布层：`build.yml` 的 `linux-release`（`workflow_dispatch` / `v*` tag）在
-`ubuntu-latest` 安装 Slint 构建依赖、`cargo fetch --locked` 预热后运行同一脚本，上传
-`yacr-linux-release` artifact（tar.gz + sha256）。编译门禁仍是每次 push/PR 的 `linux-app`。
+`ubuntu-latest` 安装 Slint 构建依赖与 `flatpak`/`flatpak-builder`、装好
+`org.freedesktop.Platform//26.08` 运行时与 SDK、`cargo fetch --locked` 预热后运行同一脚本，
+上传 `yacr-linux-release` artifact（`.flatpak` + sha256）。编译门禁仍是每次 push/PR 的
+`linux-app`。
 
 ```bash
-# 构建 + 打包（可选：对真实 DWG 用打包内 CLI 出图并校验 PNG 非空）
-VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-  YACR_TEST_DWG=/path/input.dwg scripts/package-linux-release.sh
+# 一次性准备（本机或 CI）：flatpak-builder + freedesktop 运行时/SDK
+sudo apt-get install -y flatpak flatpak-builder
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+sudo flatpak install -y --noninteractive flathub \
+  org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
 
-# 可选：用打包内的 GUI 做一次无头出图 smoke（需可达的软件/真实 Vulkan ICD）
-VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-  YACR_LINUX_SMOKE=1 scripts/package-linux-release.sh
+# 构建 + 打包（可选：对真实 DWG 用打包前 CLI 出图并校验 PNG 非空）
+YACR_TEST_DWG=/path/input.dwg scripts/package-linux-release.sh
+# 可选：在构建沙箱内启动一次 CLI，证明 Flatpak 能真正运行
+YACR_FLATPAK_SMOKE=1 scripts/package-linux-release.sh
 ```
 
-产出 `target/release/dist/yacr-<version>-linux-<arch>.tar.gz`（及 `.sha256`），内含：
+产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak`（及 `.sha256`），应用安装在
+`/app`：`bin/yacr-linux`、`bin/cad-cli-tools`、`fonts/`（默认 `WITH_FONTS=1` 组装 mlightcad
+全量 + 已提交 osifont；`WITH_FONTS=0` 仅带已提交字体）与图标/桌面项/AppStream 元数据。CLI
+与 GUI 都从二进制同级 `fonts/` 自动加载。
 
-- `bin/cad-cli-tools`：release 无头 CLI（含 `render`）；
-- `bin/yacr-linux`：release GUI 宿主（Slint + 共享 CAD wgpu 渲染器，桌面窗口/离屏两用）；
-- `lib/`：GUI 依赖的**非基础系统**共享库（fontconfig/freetype 及其依赖）；二进制带
-  `$ORIGIN/../lib` RPATH，故打包内库优先于宿主同名库。glibc/内核、窗口系统、Vulkan 驱动与
-  `xdg-desktop-portal` 仍由宿主提供，**不是**静态独立发行包，也不构成跨发行版兼容声明；
-- `fonts/`：CAD 字体包（默认 `WITH_FONTS=1` 组装 mlightcad 全量 + 已提交 osifont；
-  `WITH_FONTS=0` 仅带已提交字体），CLI 与 GUI 均从同级 `fonts/` 自动加载；
-- 文档与 `scripts/{fetch-test-dwg,render-smoke}.sh`。
+Flatpak 由 `org.freedesktop.Platform` 运行时提供 glibc、fontconfig/freetype、GL/Vulkan 加载
+器与窗口库，**不**打包宿主共享库（避免与运行时的 libc 世代耦合）；`runtime-version 26.08`
+的 glibc 2.44 高于受支持构建主机的 glibc，故宿主构建的二进制可在沙箱内加载。manifest 在
+`packaging/flatpak/dev.yacr.app.yml`，仅打包**预构建**二进制，沙箱内不编译。
 
-`BUNDLE_LIBS=0` 可只带裸 GUI 二进制（宿主自备全部依赖）。运行时的无头渲染用软件 Vulkan
-（Mesa lavapipe）时，先按发行版把 `VK_ICD_FILENAMES` 指向 `lvp_icd.json`；详见
-`docs/headless-render.md`、`docs/linux-app.md` 与 `docs/validation.md`。
+字体在**宿主**上组装：`fetch-fonts.sh` 把目录写进 `target/flatpak/payload/fonts`，manifest 只
+把这份本地目录复制进 `/app/fonts`，`flatpak-builder` 沙箱内**不联网**。若已在别处准备好字体
+目录，用 `FONTS_DIR=<dir>`（须含 `fonts.json`）跳过下载直接打包，例如：
+
+```bash
+scripts/fetch-fonts.sh /tmp/yacr-fonts           # 一次性下载（可在有网的主机/CI cache）
+FONTS_DIR=/tmp/yacr-fonts scripts/package-linux-release.sh
+```
+
+```bash
+flatpak install --user target/release/dist/yacr-0.1.1-linux-x86_64.flatpak
+flatpak run dev.yacr.app                                  # GUI（Wayland/X11 + GPU）
+flatpak run --command=cad-cli-tools dev.yacr.app --help   # 无头 CLI
+```
+
+限制：glibc/内核、窗口系统、Vulkan 驱动与 `xdg-desktop-portal`（桌面打开对话框）由运行时/
+宿主提供；包未签名。细节与验证证据见 `docs/flatpak.md`、`docs/linux-app.md` 与
+`docs/validation.md`。
 
 ## Android APK（已验证编译、打包、安装与运行）
 

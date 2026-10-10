@@ -116,9 +116,9 @@ plus a structured error. Operations and options are in `docs/cli.md`.
 ### Release packages
 
 CI (`.github/workflows/build.yml`), triggered by `workflow_dispatch` or a `v*` tag, produces
-font-bundled release packages for Linux, Windows, macOS and Android and uploads them as
-artifacts (per-platform packaging scripts are in `docs/build.md`). The outputs are CI
-artifacts; **no official distribution channel exists yet**.
+font-bundled release packages for Linux (a `dev.yacr.app` Flatpak bundle), Windows, macOS and
+Android and uploads them as artifacts (per-platform packaging scripts are in `docs/build.md`).
+The outputs are CI artifacts; **no official distribution channel exists yet**.
 
 ## Current status and boundaries (honest)
 
@@ -161,6 +161,7 @@ artifacts; **no official distribution channel exists yet**.
 
 - Per-platform build: `docs/build.md`
 - Linux host: `docs/linux-app.md`; Windows host: `docs/windows-app.md`; macOS host: `docs/macos-app.md`
+- Linux Flatpak packaging: `docs/flatpak.md`
 - Headless rendering: `docs/headless-render.md`; CI layers: `docs/ci.md`
 - CLI: `docs/cli.md`; fonts: `docs/fonts.md`; app icon: `docs/app-icon.md`
 

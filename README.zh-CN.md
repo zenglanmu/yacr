@@ -100,8 +100,8 @@ cargo build -p cad-cli-tools --release --locked
 ### 发布包
 
 CI（`.github/workflows/build.yml`）在 `workflow_dispatch` 或 `v*` tag 触发生成 Linux、
-Windows、macOS、Android 四类含字体发布包并上传 artifact（各平台打包脚本见 `docs/build.md`）。
-产物为 CI artifact，**当前未建立正式的分发渠道**。
+Windows、macOS、Android 四类含字体发布包并上传 artifact（Linux 为 `dev.yacr.app` Flatpak
+bundle；各平台打包脚本见 `docs/build.md`）。产物为 CI artifact，**当前未建立正式的分发渠道**。
 
 ## 现状与边界（诚实说明）
 
@@ -135,6 +135,7 @@ Windows、macOS、Android 四类含字体发布包并上传 artifact（各平台
 
 - 各平台构建：`docs/build.md`
 - Linux 宿主：`docs/linux-app.md`　Windows 宿主：`docs/windows-app.md`　macOS 宿主：`docs/macos-app.md`
+- Linux Flatpak 打包：`docs/flatpak.md`
 - 无头渲染：`docs/headless-render.md`　CI 分层：`docs/ci.md`
 - CLI：`docs/cli.md`　字体：`docs/fonts.md`　应用图标：`docs/app-icon.md`
 

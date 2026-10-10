@@ -19,7 +19,7 @@ name: CI build layers
 #                  CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets
 #
 # On-demand release jobs (workflow_dispatch or a v* tag):
-#   linux-release   : Linux GUI+CLI tar.gz with fonts (ubuntu-latest)
+#   linux-release   : Linux GUI+CLI Flatpak bundle with fonts (ubuntu-latest)
 #   windows-release : native MSVC release zip (windows-latest)
 #   macos-release   : native macOS universal tar.gz with an Yacr.app bundle
 #                     (macos-latest)
@@ -270,12 +270,12 @@ jobs:
           retention-days: 30
 
   linux-release:
-    name: linux-release (tar.gz with fonts)
+    name: linux-release (Flatpak with fonts)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     # On-demand (or a version tag): builds the release package and uploads the
-    # tarball. Not run on every PR to keep the default gate cheap; the compile
-    # gate is `linux-app` and the core gate is `core-quality`.
+    # Flatpak bundle. Not run on every PR to keep the default gate cheap; the
+    # compile gate is `linux-app` and the core gate is `core-quality`.
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
@@ -290,33 +290,44 @@ jobs:
           key: ${{ runner.os }}-cargo-linux-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-linux-release-
-      - name: Install native Slint build dependencies (no display server)
-        run: sudo apt-get update && sudo apt-get install -y pkgconf libfontconfig1-dev libfreetype6-dev
+      - name: Install native Slint build deps and flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkgconf libfontconfig1-dev libfreetype6-dev flatpak flatpak-builder
+      # The manifest packages prebuilt binaries against org.freedesktop.Platform
+      # 26.08 (glibc 2.44, newer than the runner's, so the host build loads).
+      - name: Install the freedesktop runtime and SDK
+        run: |
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub \
+            org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
       # package-linux-release.sh builds with `--offline` so the lock cannot be
       # silently re-resolved; prefetch the crates first so a cache miss still
       # succeeds instead of failing the release build.
       - name: Prefetch crates for the offline release build
         run: cargo fetch --locked
-      - name: Build and package the Linux release (full font catalogue)
+      - name: Build and package the Linux Flatpak (full font catalogue)
         env:
           WITH_FONTS: "1"
+          YACR_FLATPAK_SMOKE: "1"
         run: scripts/package-linux-release.sh
       - name: Record packaging summary
         if: always()
         shell: bash
         run: |
           {
-            echo '## Linux release package'
-            echo 'Built and packaged on ubuntu-latest with the full CAD font catalogue.'
-            echo 'The packaged CLI --help and GUI parse error are exercised; window/GPU rendering is not.'
+            echo '## Linux release Flatpak'
+            echo 'Built dev.yacr.app on ubuntu-latest with the full CAD font catalogue.'
+            echo 'Sandbox launch of cad-cli-tools --help is exercised; window/GPU rendering is not.'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload the Linux release tarball
+      - name: Upload the Linux release Flatpak
         uses: actions/upload-artifact@v4
         with:
           name: yacr-linux-release
           path: |
-            target/release/dist/*.tar.gz
-            target/release/dist/*.tar.gz.sha256
+            target/release/dist/*.flatpak
+            target/release/dist/*.flatpak.sha256
           if-no-files-found: error
           retention-days: 30
 
