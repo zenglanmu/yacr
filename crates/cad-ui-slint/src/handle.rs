@@ -22,6 +22,15 @@ impl UiHandle {
     pub fn set_plot_available(&self, available: bool) -> CadResult<()> {
         self.with(|ui| ui.set_can_plot(available))
     }
+    /// Host capability for lossy Save As (desktop only).
+    ///
+    /// Hosts without a document writer leave `can-save` false, so the shell and
+    /// the command line report an explicit unsupported instead of a no-op. The
+    /// desktop host also passes `false` while a document is loading, so Save As
+    /// is unavailable during an open (the request itself would be refused busy).
+    pub fn set_save_available(&self, available: bool) -> CadResult<()> {
+        self.with(|ui| ui.set_can_save(available))
+    }
     /// Shell-local hit query: floating controls must not be consumed by host touch navigation.
     pub fn canvas_hit_test(&self, point: [f64; 2]) -> CadResult<bool> {
         let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;

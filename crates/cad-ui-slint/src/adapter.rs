@@ -436,6 +436,20 @@ impl UiAdapter {
             });
         }
         {
+            // Lossy Save As is host-owned like open: the shell only emits the
+            // request; a host without `can-save` reports unsupported first.
+            let s = shared.clone();
+            let doc = document;
+            ui.on_save_requested(move || {
+                let _ = s.borrow_mut().send(command_for(
+                    CommandId::SaveDrawingAs,
+                    &doc,
+                    viewport,
+                    CommandPayload::None,
+                ));
+            });
+        }
+        {
             // Cancel a running background open (F01). `CancelLoading` is routed
             // by the host to `HostController::cancel_async_open`; the panel only
             // enables this while a cancellable job is running.

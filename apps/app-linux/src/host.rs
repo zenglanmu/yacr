@@ -1,7 +1,7 @@
 //! One application/controller/Slint bridge for both desktop and headless acceptance.
 use cad_app::host::HostController;
 use cad_app::{Command, CommandId, CommandOutcome, CommandPayload};
-use cad_domain::{CadError, CadResult, Point3};
+use cad_domain::{CadError, CadResult, Completeness, Point3};
 use cad_ui_slint::{CadView, UiAdapter, UiCommandSink, UiConfiguration, UiHandle};
 use slint::ComponentHandle;
 use std::{
@@ -37,6 +37,31 @@ struct PendingRead {
 /// the export is partial and must not be reported as a clean success.
 struct PlotOutcome {
     dropped: usize,
+}
+
+/// Outcome of a lossy DXF save: the export report's conversion/drop counts and
+/// its completeness verdict (the single authority for the graded status).
+struct SaveOutcome {
+    converted: usize,
+    dropped: usize,
+    completeness: Completeness,
+}
+
+/// Why a lossy save could not be performed, for a graded status.
+enum SaveFailure {
+    /// The chosen target is the opened source file (data-corruption guard).
+    RefusedSourcePath,
+    /// `.dwg` output is not verified yet.
+    DwgDeferred,
+    /// Any other explicit failure, already localized.
+    Reason(String),
+}
+
+/// Which export the pending save dialog was opened for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PendingSaveKind {
+    Plot,
+    Save,
 }
 
 #[derive(Debug, Clone)]
@@ -144,9 +169,12 @@ struct Runtime {
     saver: SavePathProvider,
     pending_open: PendingOpen,
     pending_read: Rc<RefCell<Option<PendingRead>>>,
-    /// Pending save-path chooser result for the vector plot export. The dialog
-    /// runs on a worker so it never freezes the UI thread; `poll_plot` drains it.
+    /// Pending save-path chooser result for the vector plot export or the lossy
+    /// DXF save. The dialog runs on a worker so it never freezes the UI thread;
+    /// `poll_pending_save` drains it.
     pending_save: Rc<RefCell<Option<std::sync::mpsc::Receiver<CadResult<PathBuf>>>>>,
+    /// Which export the pending save dialog was opened for.
+    pending_save_kind: Rc<RefCell<Option<PendingSaveKind>>>,
     /// Path of the drawing being opened (or already open), used to resolve its
     /// sibling raster images. `None` until a document is opened.
     drawing_path: Rc<RefCell<Option<PathBuf>>>,
@@ -216,10 +244,13 @@ impl Runtime {
     }
     fn execute(&self, command: Command) -> CadResult<()> {
         self.metrics()?;
-        // Plot owns its own success/failure status (plot.exported /
-        // plot.export_failed); the generic completed/failed text must not
-        // overwrite it.
-        let plot_owns_status = command.id == CommandId::PlotDrawing;
+        // Plot and Save As own their own success/failure status
+        // (plot.exported / save.exported / ...); the generic completed/failed
+        // text must not overwrite it.
+        let owns_status = matches!(
+            command.id,
+            CommandId::PlotDrawing | CommandId::SaveDrawingAs
+        );
         let result: CadResult<Option<CommandOutcome>> = match command.id {
             CommandId::CancelLoading => {
                 if let Some(read) = self.pending_read.borrow_mut().as_mut() {
@@ -231,6 +262,7 @@ impl Runtime {
             CommandId::OpenDrawing => self.request_open().map(|_| None),
             CommandId::NewDrawing => self.request_new().map(|_| None),
             CommandId::PlotDrawing => self.request_plot().map(|_| None),
+            CommandId::SaveDrawingAs => self.request_save().map(|_| None),
             CommandId::SwitchBackend => Err(CadError::Unsupported(
                 self.message("linux.backend_unavailable", &[]),
             )),
@@ -238,7 +270,7 @@ impl Runtime {
         };
         self.push()?;
         if let Err(error) = &result {
-            if !plot_owns_status {
+            if !owns_status {
                 if let Some(handle) = self.handle.borrow().as_ref() {
                     handle.set_status(
                         self.message("linux.failed", &[("error", &error.to_string())]),
@@ -246,7 +278,7 @@ impl Runtime {
                 }
             }
         }
-        if result.is_ok() && !self.loading() && !plot_owns_status {
+        if result.is_ok() && !self.loading() && !owns_status {
             if let Some(handle) = self.handle.borrow().as_ref() {
                 // A no-op fit (empty drawing) carries the `fit.empty` code; show
                 // that instead of the generic "completed", never a fake success.
@@ -314,7 +346,7 @@ impl Runtime {
     ///
     /// The save path comes from the injected `saver` (a native save dialog in
     /// the real app). The dialog runs on a worker thread so it never freezes the
-    /// UI; [`Runtime::poll_plot`] drains the result on the timer. The format is
+    /// UI; [`Runtime::poll_pending_save`] drains the result on the timer. The format is
     /// decided by the chosen extension: `.svg`/`.pdf` render on the CPU vector
     /// path; `.png` is an explicit refusal (GUI PNG needs surface readback,
     /// which the CLI does); anything else fails.
@@ -343,18 +375,19 @@ impl Runtime {
             return Err(CadError::InvalidInput(error.to_string()));
         }
         *self.pending_save.borrow_mut() = Some(receiver);
+        *self.pending_save_kind.borrow_mut() = Some(PendingSaveKind::Plot);
         if let Some(handle) = self.handle.borrow().as_ref() {
             handle.set_status(self.message("plot.picker_waiting", &[]))?;
         }
         Ok(())
     }
 
-    /// Drain a finished save dialog and perform the export.
+    /// Drain a finished save dialog and perform the requested export.
     ///
     /// Runs on the timer; it always sets an explicit status and never returns an
     /// error the timer would turn into a generic failure. A cancel writes
     /// nothing and reports the cancel, not a failure.
-    fn poll_plot(&self) -> CadResult<()> {
+    fn poll_pending_save(&self) -> CadResult<()> {
         use std::sync::mpsc::TryRecvError;
         let result = match self.pending_save.borrow().as_ref().map(|rx| rx.try_recv()) {
             None | Some(Err(TryRecvError::Empty)) => return Ok(()),
@@ -364,11 +397,42 @@ impl Runtime {
             )),
         };
         *self.pending_save.borrow_mut() = None;
-        let status = match result {
+        let kind = self.pending_save_kind.borrow_mut().take();
+        let status = match (kind, result) {
             // A closed dialog is a cancel, not a failure.
-            Err(CadError::Cancelled) => self.message("plot.cancelled", &[]),
-            Err(error) => self.message("plot.export_failed", &[("reason", &error.to_string())]),
-            Ok(path) => match self.export_plot(&path) {
+            (kind, Err(CadError::Cancelled)) => match kind {
+                Some(PendingSaveKind::Save) => self.message("save.cancelled", &[]),
+                _ => self.message("plot.cancelled", &[]),
+            },
+            (Some(PendingSaveKind::Save), Err(error)) => {
+                self.message("save.export_failed", &[("reason", &error.to_string())])
+            }
+            (Some(PendingSaveKind::Save), Ok(path)) => match self.export_save(&path) {
+                // Clean success only when the export report is Complete; the UI
+                // never re-derives the verdict from the counts.
+                Ok(outcome) if outcome.completeness == Completeness::Complete => {
+                    self.message("save.exported", &[("path", &path.display().to_string())])
+                }
+                Ok(outcome) => self.message(
+                    "save.exported_partial",
+                    &[
+                        ("path", &path.display().to_string()),
+                        ("converted", &outcome.converted.to_string()),
+                        ("dropped", &outcome.dropped.to_string()),
+                    ],
+                ),
+                Err(SaveFailure::RefusedSourcePath) => {
+                    self.message("save.refused_source_path", &[])
+                }
+                Err(SaveFailure::DwgDeferred) => self.message("save.dwg_deferred", &[]),
+                Err(SaveFailure::Reason(reason)) => {
+                    self.message("save.export_failed", &[("reason", &reason)])
+                }
+            },
+            (_, Err(error)) => {
+                self.message("plot.export_failed", &[("reason", &error.to_string())])
+            }
+            (None | Some(PendingSaveKind::Plot), Ok(path)) => match self.export_plot(&path) {
                 // Clean success only when nothing was dropped; a partial export
                 // is reported as such, never as a clean success.
                 Ok(outcome) if outcome.dropped == 0 => {
@@ -388,6 +452,117 @@ impl Runtime {
             handle.set_status(status)?;
         }
         Ok(())
+    }
+
+    /// Save the active drawing as a lossy DXF file, host-owned.
+    ///
+    /// Mirrors `request_plot`: the native save dialog runs on a worker thread and
+    /// `poll_pending_save` drains the result. `.dxf` uses the lossy export core;
+    /// `.dwg` is an explicit refusal (DWG write is not verified yet).
+    fn request_save(&self) -> CadResult<()> {
+        if self.loading() || self.pending_save.borrow().is_some() {
+            let busy = self.message("linux.busy", &[]);
+            if let Some(handle) = self.handle.borrow().as_ref() {
+                handle.set_status(self.message("save.export_failed", &[("reason", &busy)]))?;
+            }
+            return Err(CadError::Unsupported(busy));
+        }
+        let hint = self.controller.borrow().document_name_hint.clone();
+        let stem = Path::new(&hint)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("drawing");
+        let default_name = format!("{stem}.dxf");
+        let saver = self.saver.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("linux-save-dialog".into())
+            .spawn(move || {
+                let _ = sender.send(saver(&default_name));
+            });
+        if let Err(error) = spawned {
+            if let Some(handle) = self.handle.borrow().as_ref() {
+                handle.set_status(
+                    self.message("save.export_failed", &[("reason", &error.to_string())]),
+                )?;
+            }
+            return Err(CadError::InvalidInput(error.to_string()));
+        }
+        *self.pending_save.borrow_mut() = Some(receiver);
+        *self.pending_save_kind.borrow_mut() = Some(PendingSaveKind::Save);
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            handle.set_status(self.message("save.picker_waiting", &[]))?;
+        }
+        Ok(())
+    }
+
+    /// Write the lossy DXF for `path`'s extension.
+    ///
+    /// `.dxf` → the export core; `.dwg` → explicit refusal (DWG write is not
+    /// verified yet); any other extension fails. Refuses to overwrite the opened
+    /// source file (data-corruption guard). Never writes DXF bytes into a
+    /// `.dwg`/other name.
+    fn export_save(&self, path: &Path) -> Result<SaveOutcome, SaveFailure> {
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if extension == "dwg" {
+            return Err(SaveFailure::DwgDeferred);
+        }
+        if extension.is_empty() {
+            return Err(SaveFailure::Reason(self.message("save.no_extension", &[])));
+        }
+        if extension != "dxf" {
+            return Err(SaveFailure::Reason(
+                self.message("save.unknown_format", &[("ext", &extension)]),
+            ));
+        }
+        if self.is_source_path(path) {
+            return Err(SaveFailure::RefusedSourcePath);
+        }
+        let (bytes, report) = self
+            .controller
+            .borrow()
+            .export_dxf()
+            .map_err(|error| SaveFailure::Reason(error.to_string()))?;
+        atomic_write(path, &bytes).map_err(|error| SaveFailure::Reason(error.to_string()))?;
+        Ok(SaveOutcome {
+            converted: report.counts.converted,
+            dropped: report.counts.dropped,
+            completeness: report.completeness,
+        })
+    }
+
+    /// Whether `path` is the opened source drawing, so the save refuses to
+    /// overwrite the file being read.
+    ///
+    /// On Unix the comparison uses filesystem identity (device + inode) when both
+    /// paths exist: a case-insensitive mount, a symlink or a bind mount that a
+    /// path-string comparison would miss is still caught. A not-yet-existing
+    /// target cannot be the existing source file, so the fallback path
+    /// comparison is only for the degenerate case.
+    fn is_source_path(&self, path: &Path) -> bool {
+        let Some(source) = self.drawing_path.borrow().clone() else {
+            return false;
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let (Ok(source_meta), Ok(target_meta)) =
+                (std::fs::metadata(&source), std::fs::metadata(path))
+            {
+                return source_meta.dev() == target_meta.dev()
+                    && source_meta.ino() == target_meta.ino();
+            }
+        }
+        let canonical = |candidate: &Path| std::fs::canonicalize(candidate).ok();
+        match (canonical(&source), canonical(path)) {
+            (Some(source), Some(target)) => source == target,
+            _ => source == path,
+        }
     }
 
     fn report_plot_failed(&self, reason: &str) -> CadResult<()> {
@@ -548,9 +723,9 @@ impl Runtime {
                 path.display()
             )));
         }
-        // Remember the drawing's directory so its sibling raster images can be
-        // resolved once the document finishes opening.
-        *self.drawing_path.borrow_mut() = Some(path.to_path_buf());
+        // NOTE: `drawing_path` is armed only on a *successful* open (below and in
+        // `poll_loading`), never at attempt time. Arming it here would leave the
+        // corruption guard pointing at a file whose open then failed.
         if !self.options.headless {
             if self.pending_read.borrow().is_some()
                 || self
@@ -587,6 +762,9 @@ impl Runtime {
         self.controller
             .borrow_mut()
             .open_bytes(Arc::from(bytes), &path.to_string_lossy())?;
+        // Arm the corruption guard only now that the open succeeded, before
+        // `install_images` reads the directory for sibling raster resources.
+        *self.drawing_path.borrow_mut() = Some(path.to_path_buf());
         self.controller.borrow_mut().fit()?;
         if let Some(handle) = self.handle.borrow().as_ref() {
             handle.cancel_draw_capture()?;
@@ -723,6 +901,12 @@ impl Runtime {
             if let Some(handle) = self.handle.borrow().as_ref() {
                 handle.cancel_draw_capture()?;
             }
+            // Arm the corruption guard only now that the open succeeded. The
+            // controller's name hint is the published source label (the path).
+            let source = self.controller.borrow().document_name_hint.clone();
+            if !source.is_empty() {
+                *self.drawing_path.borrow_mut() = Some(PathBuf::from(source));
+            }
             if let Some(view) = self.view.borrow().as_ref() {
                 self.install_fonts(view)?;
                 self.install_images(view)?;
@@ -740,6 +924,10 @@ impl Runtime {
         if let Some(handle) = self.handle.borrow().as_ref() {
             let messages = cad_ui_slint::MessageSource::from_request(&self.options.locale);
             handle.set_open_available(!self.loading())?;
+            // Save As availability tracks the same idle condition as open; it is
+            // refreshed every tick so it becomes available once a non-headless
+            // open finishes presenting (not only after the next command).
+            handle.set_save_available(!self.loading())?;
             handle.set_import_state(&cad_ui_slint::ImportProgressUiState::from_snapshot(
                 snapshot.as_ref(),
                 &messages,
@@ -857,6 +1045,7 @@ impl LinuxApp {
             pending_open: Rc::new(RefCell::new(None)),
             pending_read: Rc::new(RefCell::new(None)),
             pending_save: Rc::new(RefCell::new(None)),
+            pending_save_kind: Rc::new(RefCell::new(None)),
             drawing_path: Rc::new(RefCell::new(None)),
             last_image_report: Rc::new(RefCell::new(None)),
             presenting_open: Rc::new(std::cell::Cell::new(false)),
@@ -961,7 +1150,7 @@ impl LinuxApp {
             move || {
                 if let Err(error) = rt
                     .poll_open()
-                    .and_then(|_| rt.poll_plot())
+                    .and_then(|_| rt.poll_pending_save())
                     .and_then(|_| rt.metrics())
                     .and_then(|_| rt.sync_view())
                 {

@@ -36,6 +36,7 @@ pub(crate) const SELECTORS: &[(&str, bool)] = &[
     ("PLOT", false),
     ("PROJECTION", false),
     ("REDO", true),
+    ("SAVE", false),
     ("SELECTALL", false),
     ("TOOLS", false),
     ("TRIM", true),
@@ -95,7 +96,9 @@ pub(crate) const SYNONYMS: &[(&str, &str)] = &[
     ("EXPORT", "PLOT"),
     ("FIT", "ZOOM EXTENTS"),
     ("PRINT", "PLOT"),
+    ("QSAVE", "SAVE"),
     ("RIBBON", "TOOLS"),
+    ("SAVEAS", "SAVE"),
 ];
 
 /// True when `selector` is a canonical selector restricted to Work mode.
@@ -151,7 +154,10 @@ pub(crate) fn suggestions(input: &str, work_mode: bool) -> Vec<&'static str> {
         }
     }
     for &(name, target) in SYNONYMS.iter().chain(ALIASES.iter()) {
-        if name.starts_with(&key) && (work_mode || !is_work_only(target)) {
+        // Skip a target equal to the key: a completed canonical selector is
+        // never suggested, even when a longer synonym (e.g. SAVEAS -> SAVE)
+        // shares its prefix.
+        if name.starts_with(&key) && target != key && (work_mode || !is_work_only(target)) {
             matches.insert(target);
         }
     }
@@ -452,9 +458,10 @@ mod contracts {
         // all be covered by the synonyms table, so no supported word is lost.
         for arm in [
             "DISTANCE", "ANGLE", "AREA", "FIT", "DESELECT", "ENTER", "RIBBON", "EXPORT", "PRINT",
+            "QSAVE", "SAVEAS",
         ] {
             assert!(synonym_keys.contains(&arm), "missing synonym {arm}");
         }
-        assert_eq!(synonym_keys.len(), 9);
+        assert_eq!(synonym_keys.len(), 11);
     }
 }

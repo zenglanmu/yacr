@@ -57,12 +57,9 @@ const UNSUPPORTED_COMMANDS: &[&str] = &[
     "POLYLINE",
     "PUBLISH",
     "PURGE",
-    "QSAVE",
     "RECTANGLE",
     "REGION",
     "ROTATE",
-    "SAVE",
-    "SAVEAS",
     "SCALE",
     "SPLINE",
     "STRETCH",
@@ -205,6 +202,22 @@ fn dispatch_command(
             // reports an explicit unsupported, never a silent no-op.
             if ui.get_can_plot() {
                 ui.invoke_plot_requested();
+            } else {
+                ui.set_status_label(
+                    messages
+                        .borrow()
+                        .text("command.unsupported", &[("command", canonical)])
+                        .into(),
+                );
+                ui.set_command_expanded(true);
+            }
+            true
+        }
+        "SAVE" => {
+            // Host-owned lossy Save As (DXF). A host without `can-save` reports
+            // an explicit unsupported, never a silent no-op.
+            if ui.get_can_save() {
+                ui.invoke_save_requested();
             } else {
                 ui.set_status_label(
                     messages
@@ -535,7 +548,7 @@ mod contracts {
         );
         assert_eq!(classify_submission("HATCH", true), Submission::Unsupported);
         assert_eq!(
-            classify_submission("SAVE plan.dwg", true),
+            classify_submission("PUBLISH plan.dwg", true),
             Submission::Unsupported
         );
         assert_eq!(classify_submission("NOPE", true), Submission::Unknown);
@@ -586,7 +599,7 @@ mod contracts {
                 "{name} prefixes a supported command"
             );
         }
-        for expected in ["HATCH", "OFFSET", "ARRAY", "ERASE", "ARC", "SAVE"] {
+        for expected in ["HATCH", "OFFSET", "ARRAY", "ERASE", "ARC", "PUBLISH"] {
             assert!(
                 UNSUPPORTED_COMMANDS.contains(&expected),
                 "missing unsupported command {expected}"

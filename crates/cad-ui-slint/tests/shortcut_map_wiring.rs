@@ -35,6 +35,22 @@ fn control(ui: &YacrWindow, key: impl Into<SharedString>) {
     });
 }
 
+fn control_shift(ui: &YacrWindow, key: impl Into<SharedString>) {
+    ui.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Control.into(),
+    });
+    ui.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Shift.into(),
+    });
+    press(ui, key);
+    ui.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Shift.into(),
+    });
+    ui.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Control.into(),
+    });
+}
+
 #[test]
 fn fixed_keymap_reaches_adapter_config_and_localized_feedback() {
     offscreen::install().unwrap();
@@ -122,5 +138,32 @@ fn fixed_keymap_reaches_adapter_config_and_localized_feedback() {
         ui.get_status_label().to_string(),
         "Shortcut Ctrl+P has no supported action yet.",
         "a successful Ctrl+P must not also report unsupported"
+    );
+
+    // Ctrl+S and Ctrl+Shift+S are gated by `can-save`: false → explicit
+    // unsupported; true → the host save request fires.
+    ui.set_can_save(false);
+    control(ui, "s");
+    assert_eq!(
+        ui.get_status_label().to_string(),
+        "Shortcut Ctrl+S has no supported action yet."
+    );
+    control_shift(ui, "s");
+    assert_eq!(
+        ui.get_status_label().to_string(),
+        "Shortcut Ctrl+Shift+S has no supported action yet."
+    );
+    let save_calls = Rc::new(Cell::new(0));
+    let observed = save_calls.clone();
+    ui.on_save_requested(move || observed.set(observed.get() + 1));
+    ui.set_status_label("sentinel".into());
+    ui.set_can_save(true);
+    control(ui, "s");
+    control_shift(ui, "s");
+    assert_eq!(save_calls.get(), 2, "can-save true fires a save request");
+    assert_ne!(
+        ui.get_status_label().to_string(),
+        "Shortcut Ctrl+S has no supported action yet.",
+        "a successful Ctrl+S must not also report unsupported"
     );
 }

@@ -69,10 +69,10 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
 
     // The unsupported placeholder keeps the input as typed (case and payload),
     // never the uppercased, space-joined dispatch key.
-    assert!(ui.invoke_command_submitted("SAVE plan.dwg".into()));
+    assert!(ui.invoke_command_submitted("PUBLISH plan.dwg".into()));
     assert_eq!(
         ui.get_status_label().to_string(),
-        "Command SAVE plan.dwg is not supported yet."
+        "Command PUBLISH plan.dwg is not supported yet."
     );
 
     // CONFIRM with nothing active is a permanent no-op and must not become the
@@ -168,4 +168,29 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
     assert_eq!(plot_calls.get(), 1, "EXPORT resolves to PLOT");
     assert!(ui.invoke_command_submitted("PRINT".into()));
     assert_eq!(plot_calls.get(), 2, "PRINT resolves to PLOT");
+
+    // SAVE is host-owned lossy Save As: `can-save` false reports the explicit
+    // unsupported text and does not fire; true fires the request. QSAVE/SAVEAS
+    // are synonyms that resolve to SAVE.
+    let adapter = build_adapter();
+    let ui = adapter.component();
+    adapter.handle().set_locale("en").unwrap();
+    let save_calls = Rc::new(Cell::new(0));
+    let observed = save_calls.clone();
+    ui.on_save_requested(move || observed.set(observed.get() + 1));
+    assert!(ui.invoke_command_submitted("SAVE".into()));
+    assert_eq!(
+        save_calls.get(),
+        0,
+        "can-save false must not fire the request"
+    );
+    assert_eq!(
+        ui.get_status_label().to_string(),
+        "Command SAVE is not supported yet."
+    );
+    ui.set_can_save(true);
+    assert!(ui.invoke_command_submitted("QSAVE".into()));
+    assert_eq!(save_calls.get(), 1, "QSAVE resolves to SAVE");
+    assert!(ui.invoke_command_submitted("SAVEAS".into()));
+    assert_eq!(save_calls.get(), 2, "SAVEAS resolves to SAVE");
 }

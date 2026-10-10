@@ -1,6 +1,58 @@
 # 后续 agent 接手入口
 
-## 有损 DXF 导出核心模块（导出模块 + 报告 + 文本写入器）（2026-10-10，本轮）
+## 桌面端“另存为 / 导出图纸”（有损 DXF）（2026-10-10，本轮）
+
+用户要求：把桌面 GUI 的“另存为 / 导出图纸”接到 Phase 4a 的**有损** DXF 导出核心，接到命令行
+与 Ctrl+S/Ctrl+Shift+S。仅 GUI 保存；CLI `export` 子命令另轮。web/android 必须仍可编译且显式
+不支持。
+
+- 命令层：新增 `CommandId::SaveDrawingAs`（`requires_work_mode = false`），与 `OpenDrawing`/
+  `PlotDrawing` 一样属**宿主自有**（`Application::execute` 返回 `Unsupported`）。
+- UI/命令入口：`app.slint` 新增 `in property <bool> can-save: false;` 与 `callback save-requested();`；
+  Ctrl+S / Ctrl+Shift+S 在 `can-save` 时发 `save-requested()`，否则 `shortcut-unsupported`。命令行
+  `SAVE` 加入 `SELECTORS`（work-mode false），`QSAVE`/`SAVEAS` 作为 `SYNONYMS` 解析到 `SAVE`；三者
+  从 `UNSUPPORTED_COMMANDS` 移除；分发时 `!can-save` → 显式 `command.unsupported`。adapter 将
+  `save-requested` 映射到 `CommandId::SaveDrawingAs`。`EXPORT` 仍映射到 `PLOT`。
+- 业务路径：`HostController::export_dxf()`（cad-app）反向映射当前文档为有损 DXF 字节 + 报告
+  （`ExportFormat::DxfText`，模型空间，`ExportLimits::default()`，带 `UnitContext`）；app-linux 只做
+  路径选择与写盘（保持宿主薄层，不新增 crate 依赖）。
+- 宿主保存（app-linux）：复用离屏保存对话框 worker（`SavePathProvider`/`pending_save`/`poll_pending_save`，
+  对话框不阻塞 UI 线程），默认文件名 = 当前文档名 + `.dxf`。按扩展名：`.dxf` → 有损导出核心；
+  `.dwg` → 显式拒绝（`save.dwg_deferred`，DWG 写出尚未验证）；无扩展名/其它扩展名显式失败；绝不把
+  DXF 字节写进 `.dwg`/其它名字。**覆盖保护**：目标规范化后等于被打开的源文件路径 → 硬拒绝
+  （`save.refused_source_path`，防数据损坏）；其它已存在文件依赖系统对话框的覆盖确认。写盘复用
+  `atomic_write`。
+- 分级状态（按 `ExportReport`）：`save.exported`（converted==0 且 dropped==0）、
+  `save.exported_partial`（含 `{converted}`/`{dropped}`）、`save.export_failed`、
+  `save.refused_source_path`、`save.dwg_deferred`、`save.cancelled`、`save.picker_waiting`、
+  `save.no_extension`、`save.unknown_format`。两份 catalog 键集一致（275 键）。
+- 政策：这是**有损另存**，不是往返保存；不宣称 DWG 保存，不新增“已保存/未保存”文档状态，
+  不改 `DocumentIdentity`，不重导入输出。
+
+补强（评审后）：**源路径守卫只在打开成功后布防**（`open_path` 不再在尝试时写 `drawing_path`；成功分支与
+`poll_loading` 的 `opened` 处布防），失败打开的路径不再移动守卫；`is_source_path` 在 Unix 上优先用
+设备号+inode 比较文件身份（覆盖大小写不敏感挂载/符号链接/绑定挂载），否则回退路径比较；分级状态改为
+直接采用导出报告的 `completeness`（不再由计数重新推导）；`set_save_available` 每 tick 随打开空闲刷新，
+使非无头打开完成后 Save As 可用（不改 `can-plot`/`can-new` 行为）；`handle.rs` 文档说明 `can-save` 在
+加载期间也为 false。测试补强：`save_source_guard`（打开 A、尝试解析失败的 B、另存到 A → 拒绝且 A 字节
+不变）、`save_export` 增加 `save.no_extension`/`save.unknown_format` 显式失败且不落盘、取消改为
+目录清单前后比对并复检源文件字节、部分导出文案由 catalog 派生（不再硬编码“部分”）。
+
+验证（本机，离屏用软件 Vulkan lavapipe）：`cargo fmt --all`；
+`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
+`check-i18n.py`（275 键）、`check-architecture.py`（25 包）；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web/android lib）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
+新增合成契约：app-linux `save_export`（打开已提交 fixture 的副本后另存 `.dxf`，断言非空且含
+`SECTION`/`ENTITIES`、状态按报告为 exact 或 partial；`.dwg` 显式拒绝且不落盘；无扩展名/未知扩展名
+显式失败且不落盘；另存到源文件路径被拒绝且源文件字节不变；取消 → 目录清单不变且 `save.cancelled`
+非失败）、`save_source_guard`（失败打开不移动源路径守卫）；cad-ui-slint 命令行
+`SAVE`/`QSAVE`/`SAVEAS` 的 `can-save` 门控、Ctrl+S/Ctrl+Shift+S 门控与源码契约。均为合成/离屏
+证据，未做真实窗口、真实 GPU、真实保存对话框、浏览器或真机验收。
+
+## 有损 DXF 导出核心模块（导出模块 + 报告 + 文本写入器）（2026-10-10）
 
 用户要求：实现“另存为”式的**有损**导出核心模块：把域数据库反向映射回 acadrust 文档并写出
 ASCII DXF，同时给出显式的有损完整性报告。本轮仅核心模块 + 报告 + 测试；**不做 CLI/GUI 接线**

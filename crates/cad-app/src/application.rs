@@ -119,9 +119,10 @@ impl Application {
             CommandId::OpenDrawing
             | CommandId::NewDrawing
             | CommandId::PlotDrawing
+            | CommandId::SaveDrawingAs
             | CommandId::CancelLoading => Err(CadError::Unsupported(
-                "file open, new drawing, plot export and cancel are performed by the platform \
-                 host, not the application"
+                "file open, new drawing, plot export, save-as and cancel are performed by the \
+                 platform host, not the application"
                     .into(),
             )),
             CommandId::Select => {

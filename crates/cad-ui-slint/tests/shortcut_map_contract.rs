@@ -45,6 +45,9 @@ fn the_fixed_key_map_declares_its_callback_and_clean_screen_gate() {
         // Vector plot/export: host capability + request callback.
         "in property <bool> can-plot: false;",
         "callback plot-requested();",
+        // Lossy Save As: host capability + request callback.
+        "in property <bool> can-save: false;",
+        "callback save-requested();",
     ] {
         assert!(APP.contains(clause), "key map is missing: {clause}");
     }
@@ -76,6 +79,8 @@ fn capture_handler_binds_only_the_global_modifier_and_function_keys() {
         "root.new-requested();",
         "if event.modifiers.shift && (event.text == \"s\" || event.text == \"S\") {",
         "if !event.modifiers.shift && (event.text == \"s\" || event.text == \"S\") {",
+        "if root.can-save {",
+        "root.save-requested();",
         "if !event.modifiers.shift && (event.text == \"p\" || event.text == \"P\") {",
         "if root.can-plot {",
         "root.plot-requested();",
@@ -199,4 +204,7 @@ fn the_adapter_reports_unsupported_shortcuts_from_the_catalog() {
     // Vector plot/export is host-owned: the shell request maps to the command.
     assert!(ADAPTER.contains("on_plot_requested"));
     assert!(ADAPTER.contains("CommandId::PlotDrawing"));
+    // Lossy Save As is host-owned: the shell request maps to the command.
+    assert!(ADAPTER.contains("on_save_requested"));
+    assert!(ADAPTER.contains("CommandId::SaveDrawingAs"));
 }

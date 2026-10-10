@@ -67,6 +67,10 @@ pub enum CommandId {
     /// `OpenDrawing`: the application layer has no file chooser, so it returns
     /// `Unsupported` and a platform host performs the export.
     PlotDrawing,
+    /// Save the active drawing as a lossy DXF file. Host-owned like
+    /// `OpenDrawing`: the application layer has no file chooser, so it returns
+    /// `Unsupported` and a platform host performs the save.
+    SaveDrawingAs,
     CancelLoading,
     Pan,
     Zoom,

@@ -11,6 +11,9 @@ use cad_db::{
     transform_geometry, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer,
 };
 use cad_domain::*;
+use cad_import_acadrust::export::{
+    export, ExportFormat, ExportLimits, ExportReport, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{
     AcadrustImporter, ImportLimits, ImportReport, ImportRequest, ImportedDrawing, Importer,
 };
@@ -359,6 +362,31 @@ impl HostController {
             .documents
             .get(&self.document_id)
             .map(|d| d.drawing.clone())
+    }
+
+    /// Reverse-map the active document to lossy DXF bytes plus the export report.
+    ///
+    /// Host-owned like [`HostController::open_bytes`]: the platform host chooses
+    /// the path and writes the bytes. This is a **Save As**, never a round-trip
+    /// save — the report records every conversion and drop. The database has no
+    /// document in the slot only before the first open; that is an explicit
+    /// `InvalidInput`, never an empty success.
+    pub fn export_dxf(&self) -> CadResult<(Vec<u8>, ExportReport)> {
+        let document = self
+            .application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let request = ExportRequest {
+            database: document.drawing.as_ref(),
+            document_id: self.document_id,
+            space: ExportSpace::Model,
+            format: ExportFormat::DxfText,
+            limits: ExportLimits::default(),
+            units: Some(document.units.clone()),
+        };
+        export(&request)
     }
 
     /// Import a DWG byte stream through the single importer boundary.

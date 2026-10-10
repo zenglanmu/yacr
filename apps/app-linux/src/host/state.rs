@@ -51,6 +51,8 @@ impl Runtime {
         handle.set_new_available(!self.loading())?;
         // Desktop renders CPU vector plots; web/android leave `can-plot` false.
         handle.set_plot_available(!self.loading())?;
+        // Desktop performs a lossy DXF Save As; web/android leave `can-save` false.
+        handle.set_save_available(!self.loading())?;
         handle.set_document_name(&c.document_name_hint)?;
         handle.set_history_availability(c.history_availability())?;
         handle.set_mode(c.mode())?;

@@ -65,6 +65,10 @@ export component YacrWindow inherits Window {
     // host without it reports an explicit "unsupported" instead of a no-op.
     in property <bool> can-plot: false;
     callback plot-requested();
+    // Host capability for lossy Save As (DXF). Defaults to false, so a host
+    // without it reports an explicit "unsupported" instead of a no-op.
+    in property <bool> can-save: false;
+    callback save-requested();
     in property <bool> can-trim: true;
     in property <bool> can-switch-backend: true;
     callback pan-requested();
@@ -350,14 +354,22 @@ export component YacrWindow inherits Window {
                     }
                     return EventResult.accept;
                 }
-                // Fixed keys whose backing capability does not exist yet: never
-                // a silent no-op, report the stable label to the host.
+                // Ctrl+S / Ctrl+Shift+S save a lossy DXF when the host offers
+                // it; otherwise report unsupported (never a silent no-op).
                 if event.modifiers.shift && (event.text == "s" || event.text == "S") {
-                    root.shortcut-unsupported("Ctrl+Shift+S");
+                    if root.can-save {
+                        root.save-requested();
+                    } else {
+                        root.shortcut-unsupported("Ctrl+Shift+S");
+                    }
                     return EventResult.accept;
                 }
                 if !event.modifiers.shift && (event.text == "s" || event.text == "S") {
-                    root.shortcut-unsupported("Ctrl+S");
+                    if root.can-save {
+                        root.save-requested();
+                    } else {
+                        root.shortcut-unsupported("Ctrl+S");
+                    }
                     return EventResult.accept;
                 }
                 if !event.modifiers.shift && (event.text == "p" || event.text == "P") {
