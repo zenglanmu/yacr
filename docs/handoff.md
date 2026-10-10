@@ -1,6 +1,59 @@
 # 后续 agent 接手入口
 
-## 矢量打印/导出 SVG + PDF——桌面端（2026-10-10，本轮）
+## 有损 DXF 导出核心模块（导出模块 + 报告 + 文本写入器）（2026-10-10，本轮）
+
+用户要求：实现“另存为”式的**有损**导出核心模块：把域数据库反向映射回 acadrust 文档并写出
+ASCII DXF，同时给出显式的有损完整性报告。本轮仅核心模块 + 报告 + 测试；**不做 CLI/GUI 接线**
+（后续子阶段）。
+
+- 位置（架构约束：仅本 crate 可依赖 acadrust）：`crates/cad-import-acadrust/src/export/`
+  （`mod.rs`/`entity.rs`/`tables.rs`/`report.rs`）。
+- 公共 API：`ExportRequest { database, document_id, space: ExportSpace::Model, format:
+  ExportFormat::DxfText, limits: ExportLimits, units: Option<UnitContext> }`；
+  `export(&req) -> CadResult<(Vec<u8>, ExportReport)>` 只返回字节，文件 I/O 由调用方负责。
+  `ExportReport { format, counts{exact,converted,dropped,bytes}, entries, notes, completeness }`；
+  `MappingOutcome::{Exact, Converted(reasons), Dropped(reasons)}`；`ExportLimits
+  { max_output_entities, max_explode_depth }` 超限即显式 `CadError`。
+  `completeness` 仅在 `converted == 0 && dropped == 0` 时为 `Complete`（有 drop 记 `Missing`，
+  仅 conversion 记 `Partial`）。
+- 映射（穷尽、**无 catch-all**，新增 `SemanticGeometry` 变体会编译失败）：Line/Polyline
+  （z 常量→LWPOLYLINE 保 bulge；非平面无 bulge→POLYLINE3D；非平面有 bulge→线性化并记 Converted）/
+  Circle/Arc/Ellipse/Point/Spline/Text（单行 Exact；含换行→MTEXT Converted）/Mesh（→POLYFACE，
+  丢颜色/法线）/Insert（按放置变换展开块成员，深度受限、环检测，丢块身份）/Compound（展开）/
+  Shape/Image/Mask/Opaque（显式 Dropped 及稳定 code）。仅导出 `SpaceId::Model`；纸空间实体与
+  未被引用的块定义以显式原因计数 Dropped，绝不静默省略。
+- OCS 陷阱：Circle/Arc 的 `center` 在域中为 WCS，导出必须用 `arbitrary_axis(normal)^T · center`
+  反投影回 OCS，否则倾斜圆被静默位移（已加倾斜法线 + bulge 折线的往返测试）。
+- 表与样式：先建图层/线型/文本样式（`CadDocument::new()`、`add_or_replace`），实体经
+  `add_entity` 分配句柄（不伪造句柄）；ByLayer 颜色/线型/线宽在导入时已被展平，导出按解析值
+  回写（视觉一致、语义变化），并以一条全局 note 说明；缺文本样式名→写 `Standard` + 诊断，
+  不产生悬空引用。`UnitContext.source → $INSUNITS`（不可表示时记 note，坐标不缩放）。
+- 已知边界：这是**有损另存**，不是往返保存；DWG 写出、纸空间、块定义导出均延后。写出仅经
+  `acadrust::io::dxf::DxfWriter::new(&doc).write_to_vec()`（ASCII 文本）。
+
+补强（评审后）：多面网格顶点/面索引超 i16 范围时**显式 Dropped**（`export.dropped.polyface_index_range`），
+不再截断成负索引/0 索引而破坏文件；缺失块成员显式 `export.dropped.insert_member`；缺文本样式名的
+替换原因折进该实体的 `Converted`（不再同时计 Exact，也不再双重计数）；写出实体透明度（组 440）与
+线型比例（组 48）；非默认文本对齐写出对齐点（组 11，导入规则的逆）；MTEXT 写出 attachment_point；
+动态块按活动可见状态只导出可见成员并记原因；Spline 改为 `Converted`（域模型无 closed/periodic
+标志，"Exact" 仅指对域数据库忠实）；圆弧 end_angle 取模 2π；未引用块定义原因含 block id；空名线型
+的 dash pattern 丢弃记原因；`ensure_text_style` 字体首写优先，后续不同字体键记诊断；bylayer 说明
+措辞改为“已解析值显式写出，未解析 ByLayer/ByBlock 保持符号”。**M2（缺失块成员）经构建器与事务
+校验不可通过公开 API 构造，故该分支为防御性代码，未加直测**（已在源码注释说明）。
+
+验证（本机）：`cargo fmt --all`；`cargo clippy -p cad-import-acadrust --all-targets --locked -- -D
+warnings`；`cargo test -p cad-import-acadrust --locked`（**175 通过 / 0 失败 / 1 忽略**，忽略者为
+既有用例）；`check-architecture.py`（25 包，边界完整）；`check-fixture-manifest.py`（22 夹具）；
+`cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`。新增合成契约：逐类映射
+（写出的 DXF 由本仓读者读回 = **内部一致性**，非第三方兼容性结论）、倾斜圆/bulge 折线往返、
+三个已提交夹具（a4-layout.dwg、synthetic-four-lines.dwg、flange.dxf）的有损 code 集合硬编码断言
+与 `dropped>0 ⇒ completeness != Complete`、Dropped 负向契约、微小程序 DXF 文本确定性，以及本轮
+补强测试：多面索引范围、样式回退、透明度/线型比例、对齐文本往返、MTEXT attachment、动态可见性、
+插入环、插入深度上限、旋转/缩放插入矩阵顺序、`$INSUNITS`、绘制顺序。**不声称 AutoCAD/ODA 或任何
+第三方能打开输出**。
+
+## 矢量打印/导出 SVG + PDF——桌面端（2026-10-10）
 
 用户要求：桌面宿主端到端实现 GUI 打印/导出 SVG 与 PDF（纯 CPU 矢量路径，不经 GPU），
 接到命令行与 Ctrl+P；仅 SVG/PDF，DXF 另轮。web/android 必须仍可编译且显式不支持。

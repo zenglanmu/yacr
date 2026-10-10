@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "acadrust adapter: read plus database Builder, import report."
+description = "acadrust adapter: read plus database Builder, import report, lossy DXF export."
 
 [dependencies]
 cad-domain.workspace = true

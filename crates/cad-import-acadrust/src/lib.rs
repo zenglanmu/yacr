@@ -39,6 +39,8 @@ pub use solid::{
     acis_exchange, acis_raw_payload, sab_to_brep, sat_to_brep, solid_exchange_from_entity,
 };
 
+pub mod export;
+
 /// Bounds applied to an untrusted drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImportLimits {
