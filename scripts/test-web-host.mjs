@@ -460,3 +460,54 @@ test("config result parsing is defensive and change events require success", (t)
   assert.equal(dispatched, 1);
 });
 
+test("config host forwards the export.plotFormat patch and never invents success", (t) => {
+  // The web host sets the vector plot format through the existing config API
+  // (`window.yacr.updateConfig({"ui":{"export":{"plotFormat":"pdf"}}})`), so the
+  // JS bridge must forward it verbatim and surface a rejected value's path.
+  const events = [];
+  const calls = [];
+  replaceGlobal(t, "window", {
+    dispatchEvent: (event) => {
+      events.push(event);
+      return true;
+    },
+  });
+  replaceGlobal(
+    t,
+    "CustomEvent",
+    class {
+      constructor(type, init) {
+        this.type = type;
+        this.detail = init?.detail;
+      }
+    },
+  );
+  const accepted = { ui: { export: { plotFormat: "pdf" } }, schemaVersion: 1 };
+  const module = {
+    viewer_update_config_json: (text) => {
+      calls.push(text);
+      if (text.includes('"png"')) {
+        return {
+          ok: false,
+          path: "config",
+          reason: "configuration does not match schema: unknown variant `png`",
+        };
+      }
+      return { ok: true, config: accepted, revision: 2 };
+    },
+  };
+  const host = createConfigHost(() => module);
+  const ok = host.updateConfig({ ui: { export: { plotFormat: "pdf" } } });
+  assert.equal(ok.ok, true);
+  assert.equal(calls[0], JSON.stringify({ ui: { export: { plotFormat: "pdf" } } }));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].detail.config.ui.export.plotFormat, "pdf");
+  const rejected = host.updateConfig({ ui: { export: { plotFormat: "png" } } });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.path, "config");
+  assert.match(rejected.reason, /unknown variant/);
+  // A rejected change emits no event; the last good config is retained.
+  assert.equal(events.length, 1);
+  assert.equal(host.config().ui.export.plotFormat, "pdf");
+});
+

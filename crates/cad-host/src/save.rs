@@ -48,18 +48,52 @@ impl HostCore {
             return Err(CadError::Unsupported(busy));
         }
         let hint = self.controller.borrow().document_name_hint.clone();
-        let default_name = policy::default_save_name(&hint, "svg");
+        // The vector format comes from the validated host config
+        // (`ui.export.plotFormat`, default svg): on the desktop it only picks the
+        // dialog's suggested extension (the user still types the real one); on
+        // the web, which has no dialog, it is authoritative for the download.
+        let default_name = policy::default_save_name(&hint, self.plot_export_format().as_str());
         if let Err(error) = self.files.begin_save(SavePurpose::Plot, &default_name) {
-            self.report_plot_failed(&error.to_string())?;
+            self.report_plot_failed(&error_text(&error))?;
             return Err(error);
         }
         self.save_pending.set(true);
-        // A synchronous platform completes within the gesture.
         self.drain_files()?;
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            handle.set_status(self.message("plot.picker_waiting", &[]))?;
+        self.finish_or_wait_save(SavePurpose::Plot)
+    }
+
+    /// Finish a save inside the gesture when the platform is synchronous.
+    ///
+    /// A desktop picker leaves `save_pending` set (the timer drains the chosen
+    /// target later) and shows the picker-waiting status. A synchronous platform
+    /// (the browser synthesizes the download target in `begin_save`) clears the
+    /// flag during [`Self::drain_files`], so the export must run now to keep the
+    /// whole download in the same gesture as the click.
+    fn finish_or_wait_save(&self, purpose: SavePurpose) -> CadResult<()> {
+        if self.save_pending.get() {
+            let waiting = match purpose {
+                SavePurpose::Plot => "plot.picker_waiting",
+                SavePurpose::SaveDxf => "save.picker_waiting",
+            };
+            if let Some(handle) = self.handle.borrow().as_ref() {
+                handle.set_status(self.message(waiting, &[]))?;
+            }
+            return Ok(());
         }
-        Ok(())
+        self.poll_pending_save()
+    }
+
+    /// The host-configured default vector plot format (`ui.export.plotFormat`).
+    ///
+    /// Reads the effective config from the shell handle; a core without a handle
+    /// (headless/test) defaults to SVG. This never fabricates a format: the enum
+    /// is schema-validated, so only `svg`/`pdf` are representable.
+    fn plot_export_format(&self) -> cad_app::viewer_config::PlotExportFormat {
+        self.handle
+            .borrow()
+            .as_ref()
+            .map(|handle| handle.effective_config().ui.export.plot_format)
+            .unwrap_or_default()
     }
 
     /// Save the active drawing as a lossy DXF file, host-owned.
@@ -80,15 +114,14 @@ impl HostCore {
         let hint = self.controller.borrow().document_name_hint.clone();
         let default_name = policy::default_save_name(&hint, "dxf");
         if let Err(error) = self.files.begin_save(SavePurpose::SaveDxf, &default_name) {
-            self.set_status(self.message("save.export_failed", &[("reason", &error.to_string())]))?;
+            self.set_status(
+                self.message("save.export_failed", &[("reason", &error_text(&error))]),
+            )?;
             return Err(error);
         }
         self.save_pending.set(true);
         self.drain_files()?;
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            handle.set_status(self.message("save.picker_waiting", &[]))?;
-        }
-        Ok(())
+        self.finish_or_wait_save(SavePurpose::SaveDxf)
     }
 
     /// Drain a finished save interaction and perform the requested export.
@@ -148,7 +181,9 @@ impl HostCore {
                         ("count", &outcome.dropped.to_string()),
                     ],
                 ),
-                Err(error) => self.message("plot.export_failed", &[("reason", &error.to_string())]),
+                Err(error) => {
+                    self.message("plot.export_failed", &[("reason", &error_text(&error))])
+                }
             },
         };
         self.set_status(status)?;
@@ -179,10 +214,10 @@ impl HostCore {
             .controller
             .borrow()
             .export_dxf()
-            .map_err(|error| SaveFailure::Reason(error.to_string()))?;
+            .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
         self.files
             .write_atomic(target, &bytes)
-            .map_err(|error| SaveFailure::Reason(error.to_string()))?;
+            .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
         Ok(SaveOutcome {
             converted: report.counts.converted,
             dropped: report.counts.dropped,

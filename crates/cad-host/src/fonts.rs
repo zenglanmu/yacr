@@ -151,14 +151,25 @@ impl HostCore {
 
 #[cfg(target_arch = "wasm32")]
 impl HostCore {
-    /// Not wired for this host yet; the wasm host resolves fonts through the
-    /// browser stack in a later phase.
+    /// The browser shaping engine already installed on the view.
+    ///
+    /// The web host fetches and registers fonts asynchronously (`browser::fonts`
+    /// → `view.set_fonts`) after an open; plotting reuses that exact engine so
+    /// text is shaped the same way the canvas shapes it, rather than re-fetching.
+    /// A drawing that references text fonts before they are installed is an
+    /// explicit refusal, never a plot with missing glyphs.
     pub(crate) fn load_plot_fonts(
         &self,
-        _requested: &[String],
+        requested: &[String],
     ) -> CadResult<Option<Arc<cad_representation::FontEngine>>> {
-        Err(CadError::Unsupported(
-            "plot font loading is not wired for this host yet".into(),
-        ))
+        if requested.is_empty() {
+            return Ok(None);
+        }
+        match self.view.borrow().as_ref().and_then(|view| view.fonts()) {
+            Some(engine) => Ok(Some(engine)),
+            None => Err(CadError::Unsupported(
+                self.message("web.fonts_unavailable", &[]),
+            )),
+        }
     }
 }

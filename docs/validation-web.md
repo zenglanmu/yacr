@@ -626,3 +626,105 @@ yacr: startup failed LinkError: import object field
 - 已受影响的客户端需硬刷新/清站点数据一次；之后由 stamp 自愈。
 - CI `web-build` 的「wasm/js pairing」步骤目前只 `grep yacr_bg.wasm`，并不真正校验 wasm 的
   `__wbg_*` 导入是否都被 glue 定义；本次缓存错配也不属于该检查范围（构建内成对）。
+
+## 15. Web 文件功能：New / 另存 DXF / 出图 SVG·PDF 下载（P3，2026-10-11，本轮）
+
+用户要求：为 Web 宿主接线 **New（空白图纸）**、**另存 DXF 下载**、**出图 SVG/PDF 下载**，
+经共享 `HostCore` + `PlatformFiles` 统一漏斗，并把 Web 能力位翻到
+`{open:true, new:true, save:true, plot:true, import_worker:false}`。本轮为 **headful 真实 GPU**
+（非 SwiftShader）实测。
+
+### 构建（实际执行）
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+DIST=/tmp/opencode/yacr-web-p3 WITH_FONTS=0 scripts/build-web.sh
+```
+
+| 项 | 值 |
+|---|---|
+| 输出目录 | `/tmp/opencode/yacr-web-p3` |
+| `pkg/yacr_bg.wasm` 大小 | **20,698,521 bytes**（profile release，无 wasm-opt） |
+| build stamp | `a514afcf2bc687ce`（写入 index.html，js/wasm 成对取用） |
+| 字体 | `WITH_FONTS=0`（`YACR_FONT_BASE_URL=fonts/`，不含本地字体包） |
+
+### 真实浏览器端到端（实际执行）
+
+```bash
+PLAYWRIGHT_MODULE=/tmp/opencode/webtest/node_modules/playwright-core/index.js \
+  DIST=/tmp/opencode/yacr-web-p3 node scripts/check-web-files.mjs
+```
+
+`scripts/check-web-files.mjs` 自行用 `scripts/serve-web.py` 起静态服务，**headful** 启动
+Playwright chromium（`headless:false`，无 `--use-angle=swiftshader`、无
+`--enable-unsafe-swiftshader`），打开一个已提交 fixture（`fixtures/plot/a4-layout.dwg`），
+通过隐藏 `<input type=file>` 上传，并在真实命令栏依次执行 NEW / SAVE / PLOT。
+
+**结果：passed**（exit 0），证据目录 `/tmp/opencode/yacr-web-p3-e2e/`：
+
+| 步骤 | 断言 | 实测 |
+|---|---|---|
+| GL renderer（真实 GPU 证据） | 非 SwiftShader/llvmpipe | `ANGLE (Intel, Mesa Intel(R) UHD Graphics (CML GT2), OpenGL ES 3.2)`；`softwareRenderer=false` |
+| 上传 fixture | 实体数 > 0 且 ≠ 演示（6） | `entities=1` |
+| NEW | 空白文档 | `entities=0` |
+| 重新上传 | 恢复加载 | `entities=1` |
+| SAVE | `.dxf` 下载，含 SECTION/EOF | `a4-layout.dxf`，47,210 B，sha256 `19aa863c…69f4` |
+| PLOT（默认 svg） | `.svg` 下载，含 `<svg>` 与描边几何 | `a4-layout.svg`，277 B，含 `<polyline>`，sha256 `504da31d…0182` |
+| `updateConfig({"ui":{"export":{"plotFormat":"pdf"}}})` | 接受，effective 为 pdf | `{ok:true, config.ui.export.plotFormat:"pdf", revision:2}` |
+| PLOT（pdf） | `.pdf` 下载，`%PDF-` + stream/xref + 路径算子 | `a4-layout.pdf`，530 B，sha256 `fe2a9fd3…95b6` |
+
+- 无 page/console 错误：`page.on("pageerror")` 与 `page.on("console")`（error 级）收集后均断言为空；
+  截图 `02-new-blank.png`、`03-loaded.png`；报告 `report.json`。
+- 下载由 Rust `WebFiles::write_atomic` 触发：`Blob`（`application/octet-stream`）+
+  `createObjectURL` + `<a download=name>` 点击（anchor 先入 DOM 以兼容 Safari），
+  对象 URL 于 `setTimeout(0)` 后 revoke；整个导出在点击同一手势内同步完成
+  （设计使然：`HostCore` 在 `begin_save` 后立即 drain + poll，见下；`<a download>`+Blob 本身
+  并不要求用户激活，此处只是把导出收敛到一次手势内）。
+
+### 代码改动（实际执行）
+
+- `crates/cad-app/src/viewer_config.rs`：新增 schema 校验字段 `ui.export.plotFormat`
+  （枚举 `svg`/`pdf`，默认 `svg`；未知值被 serde 拒绝，不静默回退）。Web 用现有配置 API
+  `window.yacr.updateConfig({"ui":{"export":{"plotFormat":"pdf"}}})` 设置；桌面用 `config.json`。
+- `crates/cad-host/src/save.rs`：`request_plot` 的默认扩展名取自 `ui.export.plotFormat`；
+  新增 `finish_or_wait_save` —— 平台在 `begin_save` 内同步交付目标（浏览器）时，手势内立即
+  `poll_pending_save` 完成导出；异步对话框（桌面）仍留 `save_pending` 等定时器。
+- `crates/cad-host/src/fonts.rs`：wasm `load_plot_fonts` 复用视图上已安装的浏览器字体引擎
+  （新增 `CadView::fonts()` 只读 getter）；未安装且图纸引用文本字体时显式 `Unsupported`
+  （不产出缺字形的假图）；无文本引用时无需字体引擎。
+- `apps/app-web/src/browser.rs`：能力位 `new/save/plot=true`；`apps/app-web/src/browser/platform.rs`
+  `write_atomic` → 浏览器下载；`browser/persistence.rs` 新增 `download`。
+- `.png` 出图仍为显式 `plot.png_cli_only` 不支持（无表面回读）。
+
+### 契约与门禁（实际执行）
+
+- `cargo fmt --all -- --check`；`cargo clippy --workspace --exclude app-android --all-targets
+  --locked -- -D warnings`；`cargo clippy -p app-web --target wasm32-unknown-unknown --all-targets
+  --locked -- -D warnings`。
+- `python3 scripts/check-architecture.py`（26 包）；`check-i18n.py`（**303 键**，两份 catalog
+  键集一致：P3 复用既有 `save.*`/`plot.*`，评审补强后新增 6 个 `web.*` 键承载下载/字体错误文案）；
+  `check-fixture-manifest.py`（22）；`check-workflows.py`。
+- `cargo check --workspace --exclude app-android --all-targets --locked`；
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`。
+- `cargo test -p cad-host -p cad-app --locked`：cad-host **14 通过**、cad-app **349 通过**
+  （317 lib + 4 contracts + 11 layer_visibility + 17 select_all），0 失败。
+  新增 cad-host 用例：同步平台在手势内完成 Save/Plot、异步平台仍等定时器、同步出图写真实
+  SVG（`fixtures/plot/a4-layout.dwg`）；cad-app 用例：`plotFormat` 默认/解析/未知拒绝。
+- `node --test scripts/test-web-host.mjs …`：`test-web-host.mjs` **15 通过**（新增 plotFormat
+  转发/拒绝契约）；其余 web 契约见下方 NOT RUN 说明。
+- 回归：`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test -p app-linux
+  --test plot_export --test save_export --test new_drawing --test save_source_guard --locked
+  -- --test-threads=1`：**4 通过 / 0 失败**（共享保存漏斗改动未回归桌面；软件 Vulkan lavapipe）。
+
+### NOT RUN / 限制（勿推广）
+
+- **WebGPU 路径未验证**：本机 headful chromium 无 `navigator.gpu`，应用按预期回退 **WebGL2**；
+  本轮“真实 GPU”仅指 WebGL2 走 ANGLE/Mesa Intel UHD（非 SwiftShader），**不**证明 WebGPU。
+- **移动/桌面浏览器矩阵、真机未运行**；仅本机 headful Chromium（Wayland 桌面）。
+- **出图文本**：Web 上带 CAD 文本引用的图纸，若浏览器字体尚未异步装载完成即出图，为显式
+  `Unsupported`（“browser fonts are not installed yet”），不产出缺字形假图；本轮 fixture 无文本，
+  未覆盖“带文本出图成功”场景。
+- `check-web-files.mjs` 依赖外部 `playwright-core`（`PLAYWRIGHT_MODULE`），非仓库依赖。
+- 另：`scripts/test-host-panel-parity.mjs` 对 `apps/app-android/src/state_push.rs` 的两条断言
+  **在本轮之前即失败**（P2 已把 Android 面板推送委托给 `HostCore::push`，断言仍按旧结构查找
+  `set_layer_state`/`set_overlay_visibility`）；与 P3 无关，未在本轮修改。

@@ -93,6 +93,187 @@ fn core_with(files: Rc<FakeFiles>, import_worker: bool) -> HostCore {
     )
 }
 
+/// A fake platform that synthesizes the save target synchronously, the way the
+/// browser host does (no native dialog).
+#[derive(Default)]
+struct SyncSaveFiles {
+    events: RefCell<Vec<FileEvent>>,
+    written: RefCell<Vec<(String, Vec<u8>)>>,
+}
+
+impl PlatformFiles for SyncSaveFiles {
+    fn begin_open(&self) -> CadResult<()> {
+        Ok(())
+    }
+    fn begin_open_target(&self, _target: &FileTarget) -> CadResult<()> {
+        Ok(())
+    }
+    fn begin_save(&self, purpose: SavePurpose, default_name: &str) -> CadResult<()> {
+        self.events.borrow_mut().push(FileEvent::SaveTarget {
+            purpose,
+            target: FileTarget {
+                display_name: default_name.to_string(),
+                opaque: format!("download://{default_name}"),
+            },
+        });
+        Ok(())
+    }
+    fn write_atomic(&self, target: &FileTarget, bytes: &[u8]) -> CadResult<()> {
+        self.written
+            .borrow_mut()
+            .push((target.display_name.clone(), bytes.to_vec()));
+        Ok(())
+    }
+    fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
+        false
+    }
+    fn set_source(&self, _target: Option<&FileTarget>) {}
+    fn poll(&self) -> Vec<FileEvent> {
+        std::mem::take(&mut *self.events.borrow_mut())
+    }
+}
+
+fn core_with_sync_save(files: Rc<SyncSaveFiles>) -> HostCore {
+    let options = HostOptions {
+        fonts: Vec::new(),
+        fonts_dir: None,
+        images_dir: None,
+        headless: false,
+        drawing: None,
+        size: [800.0, 600.0],
+        locale: "zh-CN".into(),
+    };
+    let platform = HostPlatform {
+        files: files as Rc<dyn PlatformFiles>,
+        config_store: Rc::new(FakeConfig),
+        surface: Rc::new(FakeSurface),
+        resources: Rc::new(UnsupportedResources),
+        capabilities: HostCapabilities {
+            open: true,
+            new: true,
+            save: true,
+            plot: true,
+            import_worker: false,
+        },
+    };
+    HostCore::new(options, Rc::new(RefCell::new(None)), platform).unwrap()
+}
+
+#[test]
+fn a_synchronous_save_completes_inside_the_gesture() {
+    let files = Rc::new(SyncSaveFiles::default());
+    let core = core_with_sync_save(files.clone());
+    // Save As DXF: the browser synthesizes the target in `begin_save`, so the
+    // export must run in the gesture rather than wait for a timer tick.
+    core.request_save().unwrap();
+    assert!(
+        !core.save_pending.get(),
+        "the synchronous target is drained"
+    );
+    assert!(
+        core.pending_save.borrow().is_none(),
+        "a completed save leaves no pending interaction"
+    );
+    let written = files.written.borrow();
+    assert_eq!(written.len(), 1, "exactly one file is written");
+    assert!(
+        written[0].0.ends_with(".dxf"),
+        "save names a .dxf target: {}",
+        written[0].0
+    );
+    assert!(
+        written[0].1.windows(7).any(|w| w == b"SECTION"),
+        "the written save is an ASCII DXF document"
+    );
+    let status = core.last_status().expect("the save grades a status");
+    assert!(
+        status.contains(&written[0].0),
+        "the graded status names the exported target: {status}"
+    );
+    drop(written);
+
+    // Plot on a document with no paper layout: the funnel still completes in the
+    // gesture and grades the explicit no-layout failure — never the picker-waiting
+    // text that an async platform would show.
+    core.request_plot().unwrap();
+    assert!(!core.save_pending.get());
+    assert!(core.pending_save.borrow().is_none());
+    let status = core.last_status().expect("plot grades a status");
+    let waiting = core.message("plot.picker_waiting", &[]);
+    assert_ne!(
+        status, waiting,
+        "a synchronous plot must not report picker-waiting"
+    );
+    assert!(
+        status.starts_with(&core.message("plot.export_failed", &[("reason", "")]))
+            && status.contains(&core.message("plot.no_layout", &[])),
+        "a synchronous plot grades the real export failure: {status}"
+    );
+}
+
+#[test]
+fn a_synchronous_plot_writes_real_vector_content() {
+    // A committed fixture with one paper-space layout, so the vector plot has
+    // real stroke geometry. Opening is synchronous on this fake platform.
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/plot/a4-layout.dwg");
+    let bytes = std::fs::read(&fixture).expect("committed plot fixture");
+    let files = Rc::new(SyncSaveFiles::default());
+    let core = core_with_sync_save(files.clone());
+    core.controller
+        .borrow_mut()
+        .open_bytes(Arc::from(bytes), "a4-layout.dwg")
+        .unwrap();
+    core.request_plot().unwrap();
+    let written = files.written.borrow();
+    assert_eq!(written.len(), 1);
+    assert!(
+        written[0].0.ends_with(".svg"),
+        "the default plot format is svg: {}",
+        written[0].0
+    );
+    assert!(
+        written[0].1.windows(4).any(|w| w == b"<svg"),
+        "the written plot is a real SVG document, not an empty file"
+    );
+    // A real document with stroke geometry, not just an empty prolog.
+    let has = |needle: &[u8]| written[0].1.windows(needle.len()).any(|w| w == needle);
+    assert!(
+        has(b"<polyline") || has(b"<polygon") || has(b"<path"),
+        "the written plot contains real stroke geometry, not just a prolog"
+    );
+}
+
+#[test]
+fn an_async_save_waits_for_the_picker_then_exports_on_the_tick() {
+    // `FakeFiles::begin_save` is a no-op (a desktop dialog is asynchronous): the
+    // core must leave the interaction pending and only export once the platform
+    // delivers the chosen target on a later drain.
+    let files = Rc::new(FakeFiles::default());
+    let core = core_with(files.clone(), false);
+    core.request_save().unwrap();
+    assert!(
+        core.save_pending.get(),
+        "an async picker leaves the interaction pending"
+    );
+    assert!(core.pending_save.borrow().is_none());
+    // The platform delivers the chosen target; the core's own drain + save poll
+    // performs the export on the next tick.
+    files.events.borrow_mut().push(FileEvent::SaveTarget {
+        purpose: SavePurpose::SaveDxf,
+        target: FileTarget::from_path("/tmp/chosen.dxf"),
+    });
+    core.drain_files().unwrap();
+    core.poll_pending_save().unwrap();
+    assert!(!core.save_pending.get());
+    assert!(core.pending_save.borrow().is_none());
+    let status = core.last_status().expect("the export grades a status");
+    assert!(
+        status.contains("/tmp/chosen.dxf"),
+        "the graded status names the chosen target: {status}"
+    );
+}
+
 #[test]
 fn a_clone_locale_switch_reaches_other_clones_text() {
     let files = Rc::new(FakeFiles::default());

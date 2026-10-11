@@ -409,6 +409,14 @@ impl CadView {
         self.state.borrow_mut().controller.fonts_changed();
         self.request_redraw();
     }
+    /// The shaping font engine currently installed on the view, if any.
+    ///
+    /// Read-only: a host whose export path needs the same engine the canvas
+    /// shapes with (the browser, which loads fonts asynchronously) reuses it
+    /// instead of fetching again.
+    pub fn fonts(&self) -> Option<Arc<FontEngine>> {
+        self.fonts.borrow().clone()
+    }
     pub fn clear_fonts(&self) {
         *self.fonts.borrow_mut() = None;
         self.state.borrow_mut().controller.fonts_changed();

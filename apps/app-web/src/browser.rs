@@ -249,13 +249,14 @@ pub async fn start_with_preference(
         // core's installation strategy is an explicit refusal (never called by
         // the web open path, which uses `browser::documents`).
         resources: Rc::new(cad_host::UnsupportedResources),
-        // Browser capability gates: file open is wired; New/Save/Plot stay off
-        // this phase, and the open runs on the calling thread (no worker).
+        // Browser capability gates: open/New/Save/Plot are all wired (New builds
+        // a blank database, Save/Plot synthesize a download target in the
+        // gesture). The open runs on the calling thread (no worker).
         capabilities: HostCapabilities {
             open: true,
-            new: false,
-            save: false,
-            plot: false,
+            new: true,
+            save: true,
+            plot: true,
             import_worker: false,
         },
     };

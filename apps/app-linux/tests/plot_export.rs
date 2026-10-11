@@ -55,12 +55,16 @@ fn plot_exports_real_vector_content_and_reports_cancel_and_bad_extension() {
     // The injected save chooser reads the current action so the test can switch
     // target/cancel between invocations without a native dialog.
     let action = Arc::new(Mutex::new(Action::Save(svg.clone())));
+    let suggested = Arc::new(Mutex::new(Vec::<String>::new()));
     let injected = action.clone();
-    let saver: SavePathProvider =
-        Arc::new(move |_default: &str| match &*injected.lock().unwrap() {
+    let captured = suggested.clone();
+    let saver: SavePathProvider = Arc::new(move |default: &str| {
+        captured.lock().unwrap().push(default.to_string());
+        match &*injected.lock().unwrap() {
             Action::Save(path) => Ok(path.clone()),
             Action::Cancel => Err(cad_domain::CadError::Cancelled),
-        });
+        }
+    });
 
     let app = LinuxApp::new_with_providers(
         LinuxOptions {
@@ -106,16 +110,35 @@ fn plot_exports_real_vector_content_and_reports_cancel_and_bad_extension() {
             "a partial export must name the shortfall: {status}"
         );
     }
+    // The suggested download name follows the host-config plot format (default svg).
+    assert!(
+        suggested.lock().unwrap().last().unwrap().ends_with(".svg"),
+        "the default plot format must suggest a .svg name: {:?}",
+        suggested.lock().unwrap()
+    );
 
-    // PDF: real content markers.
+    // PDF: real content markers. The host config switches the suggested name.
+    app.adapter
+        .handle()
+        .update_config_json(r#"{"ui":{"export":{"plotFormat":"pdf"}}}"#)
+        .unwrap();
     *action.lock().unwrap() = Action::Save(pdf.clone());
     ui.invoke_plot_requested();
     assert!(pump_until(&app, || pdf.exists()), "PDF export timed out");
+    assert!(
+        suggested.lock().unwrap().last().unwrap().ends_with(".pdf"),
+        "plotFormat=pdf must suggest a .pdf name: {:?}",
+        suggested.lock().unwrap()
+    );
     let pdf_bytes = std::fs::read(&pdf).expect("PDF must be written");
     assert!(pdf_bytes.starts_with(b"%PDF"), "PDF must start with %PDF");
     assert!(
         contains_bytes(&pdf_bytes, b"stream") && contains_bytes(&pdf_bytes, b"xref"),
         "PDF must contain a content stream and an xref table"
+    );
+    assert!(
+        contains_bytes(&pdf_bytes, b" l\n") || contains_bytes(&pdf_bytes, b" re\n"),
+        "PDF must contain path operators (l/re), not just an empty page"
     );
 
     // Unknown extension: explicit failure, no file.

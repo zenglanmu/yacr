@@ -1,5 +1,77 @@
 # 后续 agent 接手入口
 
+## Web 文件功能：New / 另存 DXF / 出图 SVG·PDF 下载（P3，2026-10-11，本轮）
+
+用户要求：为 Web 宿主接线 **New（空白图纸）**、**另存 DXF 下载**、**出图 SVG/PDF 下载**，
+经共享 `HostCore` + `PlatformFiles` 统一漏斗，并把 Web 能力位翻到
+`{open:true, new:true, save:true, plot:true, import_worker:false}`；新增 Playwright
+**headful 真实 GPU**（非 SwiftShader）端到端。
+
+- 能力位：`apps/app-web/src/browser.rs` 的 `HostCapabilities` 四项全开、`import_worker=false`；
+  `can-new/can-save/can-plot` 由共享 `HostCore::push` 推送（桌面/Web 同一门）。Ctrl+N / `NEW`、
+  `SAVE`、`PLOT` 在 Web 变为可用。
+- 下载：`WebFiles::begin_save` 在点击同一手势内同步合成 `download://<name>` 目标，核心立即
+  drain + poll，整次导出在一次手势内完成（设计使然；`<a download>`+Blob 本身不要求用户激活）。
+  `WebFiles::write_atomic` 用 web-sys 触发下载：`Blob`（`application/octet-stream`）+
+  `createObjectURL` + `<a download=name>` 点击（anchor 先入 DOM 以兼容 Safari），对象 URL 于
+  `setTimeout(0)` 后 revoke（`Closure::once_into_js` 自销毁，不泄漏）；空字节显式拒绝。
+- 共享漏斗：`cad-host::save.rs` 新增 `finish_or_wait_save`——同步平台（浏览器）手势内完成导出，
+  异步对话框（桌面）仍留 `save_pending` 等定时器；`request_plot` 默认扩展名取自新增的
+  **schema 校验字段 `ui.export.plotFormat`**（`svg`/`pdf`，默认 `svg`，未知值 serde 拒绝）。
+- 出图字体：wasm `load_plot_fonts` 复用视图上已装载的浏览器字体引擎（新增只读
+  `CadView::fonts()`）；未装载且图纸引用文本字体时显式 `Unsupported`，无文本引用无需字体。
+- `.png` 出图仍为显式 `plot.png_cli_only` 不支持（无表面回读）。
+- i18n：复用既有 `save.*`/`plot.*`，**无新增键**（297 键，两份 catalog 一致）。
+
+验证（本机，**headful 真实 GPU WebGL2**，非 SwiftShader；详见 `docs/validation-web.md` §15）：
+
+- `cargo fmt --all -- --check`；`cargo clippy --workspace --exclude app-android --all-targets
+  --locked -- -D warnings`；`cargo clippy -p app-web --target wasm32-unknown-unknown
+  --all-targets --locked -- -D warnings`；`check-architecture.py`（26 包）；`check-i18n.py`（297 键）。
+- `cargo check --workspace --exclude app-android --all-targets --locked`；
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`。
+- `cargo test -p cad-host -p cad-app --locked`：cad-host **14 通过**、cad-app **349 通过**，0 失败。
+- `node --test scripts/test-web-host.mjs`：**15 通过**（新增 `ui.export.plotFormat` 转发/拒绝契约）。
+- `DIST=/tmp/opencode/yacr-web-p3 WITH_FONTS=0 scripts/build-web.sh`：release 链接成功，
+  wasm **20,698,521 bytes**，build stamp `a514afcf2bc687ce`。
+- `node scripts/check-web-files.mjs`（headful chromium，ANGLE/Mesa Intel UHD，**非**
+  SwiftShader）：**passed**；上传 fixture → New（`entities=0`）→ 另存 `a4-layout.dxf`（47,210 B）
+  → 出图 `a4-layout.svg`（含 `<polyline>`）→ `updateConfig({"ui":{"export":{"plotFormat":"pdf"}}})`
+  → 出图 `a4-layout.pdf`（`%PDF-`）；证据 `/tmp/opencode/yacr-web-p3-e2e/`。
+- 桌面回归：`cargo test -p app-linux --test plot_export --test save_export --test new_drawing
+  --test save_source_guard --locked`（lavapipe）：**4 通过 / 0 失败**。
+- 未运行：WebGPU（本机 headful 无 `navigator.gpu`，回退 WebGL2）、移动/桌面浏览器矩阵、真机、
+  带 CAD 文本的 Web 出图成功场景（字体未装载时为显式 Unsupported）。
+- 已修复（后续轮）：`scripts/test-host-panel-parity.mjs` 的 Android 断言曾按旧结构查找
+  `set_layer_state`/`set_overlay_visibility`；现 Android 条目断言共享面板来自
+  `crates/cad-host/src/state.rs`，并单独断言 `apps/app-android/src/state_push.rs` 的 overlay 符号
+  （`set_import_state`/`set_resources_sections`）。
+
+补强（P3 评审后，无范围扩张）：
+- **F1** `scripts/check-web-files.mjs` 新增 `page.on("console")` 收集并断言 error 级为空
+  （与 `check-web-ui.mjs` 一致），使“无 page/console 错误”的说法有证据；文档同步改为
+  “无 page/console 错误（两者均断言为空）”。
+- **F2** 强化内容断言：cad-host `a_synchronous_plot_writes_real_vector_content` 增断言 SVG 含
+  `<polyline>/<polygon>/<path>`（不再只查 `<svg`）；`check-web-files.mjs` 的 PDF 增断言含路径
+  算子（`l`/`re`），不会对空页 PDF 误判通过。
+- **F5** `apps/app-web/src/browser/persistence.rs`：`document.body()` 缺失时返回显式
+  `Unsupported`（不再点击游离 anchor 后谎报“已导出”）。
+- **F3** 新增 6 个 `web.*` i18n 键（两份 catalog）承载下载/字体错误文案；`persistence.rs`/
+  `platform.rs` 的 `Unsupported` 内层文案与 `fonts.rs` wasm 字体缺失文案经目录本地化；
+  `cad-host/save.rs` 的 `plot.export_failed`/`save.export_failed` 原因改用 `error_text`
+  解包，避免 `Unsupported("…")` 的 Debug 引号。
+- **F4** 更正“浏览器仅在用户手势内允许下载”的过度陈述（`platform.rs`/`save.rs`/文档）：改为
+  设计意图（把导出收敛到点击同一手势），并说明 `<a download>`+Blob 本身不要求用户激活。
+- **F6** `persistence.rs` 的对象 URL revoke 改用 `Closure::once_into_js`（自销毁，不再 `forget()`
+  泄漏）。
+- **F7** `apps/app-linux/tests/plot_export.rs` 捕获建议文件名：默认断言 `.svg`，经
+  `handle.update_config_json({"ui":{"export":{"plotFormat":"pdf"}}})` 后断言 `.pdf`（并加 PDF 路径
+  算子断言）。
+- 补强后证据：`cargo test -p cad-host`（14 通过）、`cargo test -p app-linux --test plot_export`
+  （1 通过，lavapipe）；`node --test …`（47 通过 / 0 失败）；`check-i18n.py`（303 键）；
+  Playwright e2e `check-web-files.mjs` 重建 web-dist 后 **passed**（headful Chromium/WebGL2，
+  `consoleErrors=[]`、`errors=[]`）。
+
 ## Android 宿主迁移到 cad-host（P2，2026-10-11，本轮）
 
 用户要求：把 `apps/app-android` 迁移到 P0/P1 抽取的 `cad_host::HostCore`，删除 Android 侧

@@ -118,9 +118,11 @@
   SwiftShader）**实际安装、启动、渲染并验证画布平移/缩放**（
   `docs/validation-android.md`）。真机仍 **未运行**；SAF、surface 尺寸/安全区、
   量测拾取、面板状态推送未接线。
-- Web：wasm 静态产物可构建，`web-dist/` 在无头 Chromium（Chrome for Testing 153，
-  SwiftShader）以 **WebGL2 实际运行**，加载、导航与语言切换通过
-  （`docs/validation-web.md`）。WebGPU 路径、真实 GPU、移动/桌面浏览器矩阵 **未运行**。
+- Web：wasm 静态产物可构建；`web-dist/` 在**headful Chromium 的真实 GPU**（ANGLE/Mesa
+  Intel UHD，**非** SwiftShader）以 **WebGL2 实际运行**：打开（上传）、New（空白）、
+  另存 DXF 下载、出图 SVG/PDF 下载均通过（`docs/validation-web.md` §15）。WebGPU 路径、
+  移动/桌面浏览器矩阵、真机 **未运行**；带 CAD 文本的 Web 出图在浏览器字体未装载时为
+  显式 Unsupported。
 - iOS/Linux/macOS/Windows：仅 `cad-platform` 抽象，**无宿主**。
 
 ## 已明确的不支持项

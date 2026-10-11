@@ -477,6 +477,39 @@ pub struct UserCustomization {
     pub allowed_paths: Vec<String>,
 }
 
+/// The vector format a host-owned `PLOT` export defaults to.
+///
+/// The desktop save dialog still lets the user type any supported extension; the
+/// web host has no dialog and uses this value directly as the download name's
+/// extension. Only the two vector formats the CPU path can actually produce are
+/// representable: `.png` needs surface readback and stays an explicit
+/// `plot.png_cli_only` refusal, so it is not a legal value here. Serde rejects an
+/// unknown value with a precise path, never a silent fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlotExportFormat {
+    #[default]
+    Svg,
+    Pdf,
+}
+
+impl PlotExportFormat {
+    /// The lowercased file extension for this format (`"svg"`/`"pdf"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PlotExportFormat::Svg => "svg",
+            PlotExportFormat::Pdf => "pdf",
+        }
+    }
+}
+
+/// Host-owned export defaults (no executable content).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExportConfig {
+    pub plot_format: PlotExportFormat,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct UiConfig {
@@ -485,6 +518,7 @@ pub struct UiConfig {
     pub components: Components,
     pub command_overrides: BTreeMap<String, CommandOverride>,
     pub user_customization: UserCustomization,
+    pub export: ExportConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1442,6 +1476,54 @@ mod tests {
         assert_eq!(
             config.ui.user_customization.allowed_paths[0],
             "ui.components.layerPanel.initiallyOpen"
+        );
+    }
+
+    #[test]
+    fn export_plot_format_defaults_to_svg_and_rejects_unknown_values() {
+        // Absent inherits the default; the protocol example never names it.
+        let config: ViewerConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            config.ui.export.plot_format,
+            PlotExportFormat::Svg,
+            "an absent plotFormat must inherit the svg default"
+        );
+        assert_eq!(PlotExportFormat::Svg.as_str(), "svg");
+        assert_eq!(PlotExportFormat::Pdf.as_str(), "pdf");
+        // A named value parses and round-trips.
+        let config: ViewerConfig =
+            serde_json::from_str(r#"{"ui":{"export":{"plotFormat":"pdf"}}}"#).unwrap();
+        assert_eq!(config.ui.export.plot_format, PlotExportFormat::Pdf);
+        config.validate().unwrap();
+        // An unknown value is rejected (no silent fallback to svg).
+        let error =
+            serde_json::from_str::<ViewerConfig>(r#"{"ui":{"export":{"plotFormat":"png"}}}"#)
+                .unwrap_err();
+        assert!(
+            error.to_string().contains("plotFormat") || error.to_string().contains("png"),
+            "unknown plotFormat must be rejected with a precise message: {error}"
+        );
+        // The merge API reaches the existing leaf and rejects an unknown value.
+        let mut store = ViewerConfigStore::default();
+        store
+            .update_config(json!({"ui":{"export":{"plotFormat":"pdf"}}}))
+            .unwrap();
+        assert_eq!(
+            store.effective().ui.export.plot_format,
+            PlotExportFormat::Pdf
+        );
+        // The merge reaches the existing leaf; an unknown value fails the
+        // schema deserialize (no silent fallback to the svg default).
+        let rejected = store
+            .update_config(json!({"ui":{"export":{"plotFormat":"png"}}}))
+            .unwrap_err();
+        assert!(
+            rejected.reason.contains("unknown variant") || rejected.reason.contains("png"),
+            "unknown plotFormat must be rejected: {rejected}"
+        );
+        assert_eq!(
+            store.effective().ui.export.plot_format,
+            PlotExportFormat::Pdf
         );
     }
 

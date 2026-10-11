@@ -17,11 +17,12 @@ function readSource(relative) {
   return readFileSync(new URL(relative, ROOT), "utf8");
 }
 
-// The authoritative panel-channel surface every host funnel must reference. All
-// three hosts use the exact same set: the Android doc comment says it "mirrors
-// the same getters the web host uses so the two hosts cannot drift", and the
-// Linux host pushes the same family. Any per-host difference must be a real,
-// code-backed difference and documented next to the host entry below.
+// The authoritative shared panel-channel surface every host funnel must
+// reference. All three hosts now push it through the shared `cad-host` core
+// (`HostCore::push` in `crates/cad-host/src/state.rs`); a per-host overlay file
+// owns only its genuinely host-specific channels and is asserted separately.
+// Any per-host difference must be a real, code-backed difference and documented
+// next to the host entry below.
 const REQUIRED_PANEL_SYMBOLS = [
   "set_layer_state",
   "set_property_state",
@@ -42,12 +43,24 @@ const REQUIRED_HANDLE_SETTERS = [
   "set_diagnostics_state",
 ];
 
+// The android-specific overlay channels `apps/app-android/src/state_push.rs`
+// owns after P2 (the shared panels come from the cad-host core).
+const ANDROID_OVERLAY_SYMBOLS = ["set_import_state", "set_resources_sections"];
+
+// Each host lists the file(s) that own its "application state → shell" leg and
+// the entry points each file must reference. `gate` marks the file that owns the
+// effective-config overlay gate.
 const HOSTS = [
   {
     name: "linux",
     // app-linux is a thin wrapper: its panel funnel is the shared cad-host core.
-    files: ["crates/cad-host/src/state.rs"],
-    required: REQUIRED_PANEL_SYMBOLS,
+    files: [
+      {
+        path: "crates/cad-host/src/state.rs",
+        required: REQUIRED_PANEL_SYMBOLS,
+        gate: true,
+      },
+    ],
   },
   {
     name: "web",
@@ -55,13 +68,31 @@ const HOSTS = [
     // core (`HostCore::push`). Its browser-specific overlay (import progress +
     // font summary) is asserted separately below so this contract is not
     // tautological with the linux entry.
-    files: ["crates/cad-host/src/state.rs"],
-    required: REQUIRED_PANEL_SYMBOLS,
+    files: [
+      {
+        path: "crates/cad-host/src/state.rs",
+        required: REQUIRED_PANEL_SYMBOLS,
+        gate: true,
+      },
+    ],
   },
   {
     name: "android",
-    files: ["apps/app-android/src/state_push.rs"],
-    required: REQUIRED_PANEL_SYMBOLS,
+    // app-android is a thin wrapper too (P2): the shared panels come from the
+    // cad-host core exactly like linux/web; `state_push.rs` now owns only the
+    // android-specific overlay (import progress + resources font summary).
+    files: [
+      {
+        path: "crates/cad-host/src/state.rs",
+        required: REQUIRED_PANEL_SYMBOLS,
+        gate: true,
+      },
+      {
+        path: "apps/app-android/src/state_push.rs",
+        required: ANDROID_OVERLAY_SYMBOLS,
+        gate: false,
+      },
+    ],
   },
 ];
 
@@ -73,27 +104,29 @@ const OVERLAY_GATE = /set_overlay_visibility\s*\(\s*handle\.effective_config\(\)
 
 for (const host of HOSTS) {
   for (const file of host.files) {
-    test(`${host.name} host (${file}) references every required panel/overlay channel`, () => {
-      const source = readSource(file);
-      for (const symbol of host.required) {
+    test(`${host.name} host (${file.path}) references every required panel/overlay channel`, () => {
+      const source = readSource(file.path);
+      for (const symbol of file.required) {
         assert.ok(
           source.includes(symbol),
-          `${file} is missing required panel/overlay entry point "${symbol}"; ` +
+          `${file.path} is missing required panel/overlay entry point "${symbol}"; ` +
             `the ${host.name} host funnel has drifted from the shared panel surface`,
         );
       }
     });
 
-    test(`${host.name} host (${file}) gates overlays on the effective config`, () => {
-      const source = readSource(file);
-      assert.match(
-        source,
-        OVERLAY_GATE,
-        `${file} must call ` +
-          `set_overlay_visibility(handle.effective_config().view.overlays.into()) ` +
-          `so overlay gating parity is pinned across hosts`,
-      );
-    });
+    if (file.gate) {
+      test(`${host.name} host (${file.path}) gates overlays on the effective config`, () => {
+        const source = readSource(file.path);
+        assert.match(
+          source,
+          OVERLAY_GATE,
+          `${file.path} must call ` +
+            `set_overlay_visibility(handle.effective_config().view.overlays.into()) ` +
+            `so overlay gating parity is pinned across hosts`,
+        );
+      });
+    }
   }
 }
 
@@ -132,6 +165,34 @@ test("web host overlay pushes the browser-specific import/font channels", () => 
   assert.ok(
     browser.includes("Box::new(layout_sink)"),
     "the web layout-switch sink must be the web sink (web funnel), not the raw HostCore",
+  );
+});
+
+// The android host's *android-specific* overlay (import progress + font summary)
+// is not in the shared core. Assert it directly so the android contract covers
+// both halves: the shared panels come from `crates/cad-host/src/state.rs` (above)
+// and the overlay file owns only its own channels.
+test("android host overlay pushes the android-specific import/font channels", () => {
+  const overlay = readSource("apps/app-android/src/state_push.rs");
+  for (const symbol of ANDROID_OVERLAY_SYMBOLS) {
+    assert.ok(
+      overlay.includes(symbol),
+      `apps/app-android/src/state_push.rs is missing "${symbol}"; ` +
+        `the android-specific panel overlay has drifted`,
+    );
+  }
+  assert.ok(
+    overlay.includes("images_modeled: false"),
+    "the android overlay must keep images_modeled: false (raster images are not modeled on android)",
+  );
+  assert.ok(
+    overlay.includes("core.push()"),
+    "the android overlay must run the shared HostCore::push before re-applying itself",
+  );
+  const lib = readSource("apps/app-android/src/lib.rs");
+  assert.ok(
+    lib.includes("push_android_state"),
+    "apps/app-android/src/lib.rs must run the android state push",
   );
 });
 

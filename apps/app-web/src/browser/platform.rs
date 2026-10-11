@@ -18,15 +18,20 @@ use cad_platform::{
     SurfaceSource,
 };
 
+use super::messages::current_messages;
+
 /// The `localStorage` display path shown in startup diagnostics.
 const CONFIG_PREFERENCE_PATH: &str = "localStorage:yacr.cad.config";
 
-/// Browser file selection, read and (P3) write.
+/// Browser file selection, read and write.
 ///
 /// The queue is drained by [`PlatformFiles::poll`]. On the open path the host
 /// drains it inside `open_document_bytes` (the browser read is synchronous, so
 /// the event is available immediately); a save target queued by `begin_save` is
-/// drained by the core's own `drain_files` after the gesture.
+/// drained by the core's own `drain_files` in the same gesture as the click, and
+/// the core then runs the export immediately (the design completes the whole
+/// download in one gesture; `<a download>`+Blob itself does not require user
+/// activation).
 pub struct WebFiles {
     events: RefCell<Vec<FileEvent>>,
     /// The successfully-opened source target (armed by the core only on success).
@@ -84,9 +89,10 @@ impl PlatformFiles for WebFiles {
 
     fn begin_save(&self, purpose: SavePurpose, default_name: &str) -> CadResult<()> {
         // The browser has no native save dialog; the download target is
-        // synthesized synchronously so a save can complete in the same gesture.
-        // Save/plot are gated off this phase (P3 wires the download), but the
-        // contract is implemented honestly rather than left as a no-op.
+        // synthesized synchronously so the core can complete the whole export in
+        // the same gesture as the click (the design intent — a Blob + `<a
+        // download>` click itself does not require user activation). The `opaque`
+        // handle is a download marker, never a path.
         let target = FileTarget {
             display_name: default_name.to_string(),
             opaque: format!("download://{default_name}"),
@@ -97,12 +103,17 @@ impl PlatformFiles for WebFiles {
         Ok(())
     }
 
-    fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> CadResult<()> {
-        // No browser download is wired yet: an explicit refusal, never a silent
-        // success. P3 replaces this with a Blob download.
-        Err(CadError::Unsupported(
-            "browser download is not wired for this host yet".into(),
-        ))
+    fn write_atomic(&self, target: &FileTarget, bytes: &[u8]) -> CadResult<()> {
+        // A browser "write" is a download: a Blob + object URL clicked through an
+        // `<a download>` element. An empty document is refused rather than
+        // downloading a zero-byte file (the caller already rejects an empty
+        // vector output; this is the last line of defence).
+        if bytes.is_empty() {
+            return Err(CadError::Unsupported(
+                current_messages().text("web.download_empty", &[]),
+            ));
+        }
+        super::persistence::download(&target.display_name, bytes)
     }
 
     fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
