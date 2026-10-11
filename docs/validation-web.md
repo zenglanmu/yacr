@@ -250,19 +250,23 @@ python3 scripts/check-i18n.py                                                   
 
 ## 7. UI 宿主连接器接线（源码接线；无头验收待补）
 
-`apps/app-web` 由 `browser/state_push.rs::push_panel_state` 统一推送面板状态（命令、
-打开、批注导入/导出/恢复后），并安装 `browser/pick.rs::WebCanvasPickMapper` 与选择拾取；
-诊断抽屉经新增 wasm 导出 `diagnostics_report_json()` 与 `window.yacr.diagnostics_report`
-暴露。空/多值文案来自目录（新增 `annotation.empty`）。
+> P1 迁移（2026-10-11）后，Web 面板漏斗与画布拾取映射移入共享 `cad_host::HostCore`
+> （`push`/`CanvasPickMapper`），`browser/state_push.rs` 仅保留浏览器特有的进度面板与字体
+> 摘要叠加；`browser/pick.rs::WebCanvasPickMapper` 已删除。下文保留当轮记录，模块名按 P1
+> 后的结构理解。
+
+`apps/app-web` 由共享 `cad_host::HostCore::push`（`browser::push_state` 调用）统一推送面板
+状态，并安装共享核心的 `CanvasPickMapper` 与选择拾取；
+诊断抽屉经 wasm 导出 `diagnostics_report_json()` 与 `window.yacr.diagnostics_report`
+暴露。空/多值文案来自目录。
 
 同一条漏斗现在也是 **overlay（选择高亮 + 工具预览）的唯一入口**：每次推送调用
 `CadView::set_selection_highlight(controller.selection().clone())`、
-`set_measurement_preview(controller.measurement_preview())`、
-`set_annotation_preview(controller.annotation_preview())`。空选择集 → 显式空
+`set_measurement_preview(controller.measurement_preview())`。空选择集 → 显式空
 `SelectionSet`（高亮消失），无活动工具 → `None`（预览消失），因此命令、拾取与
 确认/取消都经同一路径清理，不会残留旧 overlay。此外在捕获工具活动且指针移动
-（非导航拖动）时，`browser/input.rs` 用 `pick::map_canvas_point` 追出世界点，经
-`SessionState::set_measurement_cursor`/`set_annotation_cursor` 写入并复用漏斗推送；
+（非导航拖动）时，`browser/input.rs::WebViewInput` 用 `pick::map_canvas_point` 追出世界点，
+经 `SessionState::set_measurement_cursor` 写入并复用漏斗推送；
 空闲/导航状态不触发该路径。
 
 以上为源码接线与单元测试；**本机未重跑 wasm 构建、未跑浏览器脚本**。注意

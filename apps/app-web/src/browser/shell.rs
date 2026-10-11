@@ -1,11 +1,13 @@
 //! Browser touch adapter. The Slint shell and application remain authoritative.
-use super::{state_push, sync_view_camera, with_runtime};
+use super::{run_command, with_runtime};
 use cad_app::{Command, CommandId, CommandPayload};
 use cad_domain::{CadError, CadResult, Point3};
 
 pub fn geometry() -> CadResult<Vec<f64>> {
     with_runtime(|rt| {
-        let (rect, state) = rt.handle.shell_geometry()?;
+        let handle = rt.core.handle.borrow();
+        let handle = handle.as_ref().ok_or(CadError::Cancelled)?;
+        let (rect, state) = handle.shell_geometry()?;
         Ok(rect
             .into_iter()
             .chain(state.map(|v| f64::from(u8::from(v))))
@@ -18,15 +20,39 @@ pub fn pick(x: f64, y: f64) -> CadResult<()> {
     if !x.is_finite() || !y.is_finite() {
         return Err(CadError::InvalidInput("invalid touch pick".into()));
     }
-    with_runtime(|rt| rt.handle.touch_pick(x, y)).ok_or(CadError::Cancelled)?
+    with_runtime(|rt| {
+        rt.core
+            .handle
+            .borrow()
+            .as_ref()
+            .ok_or(CadError::Cancelled)?
+            .touch_pick(x, y)
+    })
+    .ok_or(CadError::Cancelled)?
 }
 
 pub fn canvas_hit_test(x: f64, y: f64) -> CadResult<bool> {
-    with_runtime(|rt| rt.handle.canvas_hit_test([x, y])).ok_or(CadError::Cancelled)?
+    with_runtime(|rt| {
+        rt.core
+            .handle
+            .borrow()
+            .as_ref()
+            .ok_or(CadError::Cancelled)?
+            .canvas_hit_test([x, y])
+    })
+    .ok_or(CadError::Cancelled)?
 }
 
 pub fn cancel_draw_capture() -> CadResult<()> {
-    with_runtime(|rt| rt.handle.cancel_draw_capture()).ok_or(CadError::Cancelled)?
+    with_runtime(|rt| {
+        rt.core
+            .handle
+            .borrow()
+            .as_ref()
+            .ok_or(CadError::Cancelled)?
+            .cancel_draw_capture()
+    })
+    .ok_or(CadError::Cancelled)?
 }
 
 pub fn navigate(dx: f64, dy: f64, zoom: f64) -> CadResult<()> {
@@ -34,15 +60,18 @@ pub fn navigate(dx: f64, dy: f64, zoom: f64) -> CadResult<()> {
         return Err(CadError::InvalidInput("invalid touch navigation".into()));
     }
     with_runtime(|rt| {
-        let mut controller = rt.controller.borrow_mut();
-        let wpp = controller
-            .application
-            .workspace
-            .viewports
-            .get(&rt.viewport)
-            .ok_or(CadError::Cancelled)?
-            .world_per_px();
-        let document = controller.document_id;
+        let viewport = rt.viewport();
+        let (wpp, document) = {
+            let controller = rt.core.controller.borrow();
+            let wpp = controller
+                .application
+                .workspace
+                .viewports
+                .get(&viewport)
+                .ok_or(CadError::Cancelled)?
+                .world_per_px();
+            (wpp, controller.document_id)
+        };
         for (id, payload) in [
             (
                 CommandId::Pan,
@@ -61,18 +90,17 @@ pub fn navigate(dx: f64, dy: f64, zoom: f64) -> CadResult<()> {
                 },
             ),
         ] {
-            controller.execute(Command {
-                schema_version: 1,
-                id,
-                document,
-                viewport: rt.viewport,
-                payload: CommandPayload::Points(vec![payload]),
-            })?;
+            run_command(
+                &rt.core,
+                Command {
+                    schema_version: 1,
+                    id,
+                    document,
+                    viewport,
+                    payload: CommandPayload::Points(vec![payload]),
+                },
+            )?;
         }
-        sync_view_camera(&controller, &rt.view, &rt.viewport);
-        drop(controller);
-        let slot = state_push::view_slot(&rt.view);
-        state_push::push_panel_state(&rt.controller, &rt.handle, &slot);
         Ok(())
     })
     .ok_or(CadError::Cancelled)?

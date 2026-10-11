@@ -11,7 +11,7 @@ impl HostCore {
         if let Err(error) = result {
             if let Some(handle) = self.handle.borrow().as_ref() {
                 let _ = handle
-                    .set_status(self.message("linux.failed", &[("error", &error.to_string())]));
+                    .set_status(self.message("command.failed", &[("error", &error_text(&error))]));
             }
         }
     }

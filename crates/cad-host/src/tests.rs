@@ -60,7 +60,7 @@ impl SurfaceSource for FakeSurface {
     }
 }
 
-fn core_with(files: Rc<FakeFiles>, import_worker: bool) -> HostCore {
+fn core_with_caps(files: Rc<FakeFiles>, capabilities: HostCapabilities) -> HostCore {
     let options = HostOptions {
         fonts: Vec::new(),
         fonts_dir: None,
@@ -74,15 +74,96 @@ fn core_with(files: Rc<FakeFiles>, import_worker: bool) -> HostCore {
         files: files as Rc<dyn PlatformFiles>,
         config_store: Rc::new(FakeConfig),
         surface: Rc::new(FakeSurface),
-        capabilities: HostCapabilities {
+        capabilities,
+    };
+    HostCore::new(options, Rc::new(RefCell::new(None)), platform).unwrap()
+}
+
+fn core_with(files: Rc<FakeFiles>, import_worker: bool) -> HostCore {
+    core_with_caps(
+        files,
+        HostCapabilities {
             open: true,
             new: true,
             save: true,
             plot: true,
             import_worker,
         },
-    };
-    HostCore::new(options, Rc::new(RefCell::new(None)), platform).unwrap()
+    )
+}
+
+#[test]
+fn a_clone_locale_switch_reaches_other_clones_text() {
+    let files = Rc::new(FakeFiles::default());
+    let core = core_with(files, false);
+    // WebSink / WebInput / the layout sink each hold a clone; a runtime locale
+    // switch must reach the shared-catalog text produced by every clone.
+    let other = core.clone();
+    assert_eq!(other.message("command.completed", &[]), "命令完成");
+    core.set_locale("en");
+    assert_eq!(
+        other.message("command.completed", &[]),
+        "Operation completed",
+        "set_locale on one clone must change another clone's text"
+    );
+}
+
+#[test]
+fn unbacked_new_plot_save_are_refused_without_side_effects() {
+    let files = Rc::new(FakeFiles::default());
+    let core = core_with_caps(
+        files,
+        HostCapabilities {
+            open: true,
+            new: false,
+            save: false,
+            plot: false,
+            import_worker: false,
+        },
+    );
+    // New must not replace the drawing.
+    let before = core.controller.borrow().drawing();
+    assert!(matches!(
+        core.request_new().unwrap_err(),
+        CadError::Unsupported(_)
+    ));
+    assert!(
+        Arc::ptr_eq(
+            &before.unwrap(),
+            &core.controller.borrow().drawing().unwrap()
+        ),
+        "an unbacked New must not replace the document"
+    );
+    // Plot/Save must not queue a target that will never be exported.
+    assert!(matches!(
+        core.request_plot().unwrap_err(),
+        CadError::Unsupported(_)
+    ));
+    assert!(matches!(
+        core.request_save().unwrap_err(),
+        CadError::Unsupported(_)
+    ));
+    assert!(core.pending_save.borrow().is_none());
+    assert!(!core.save_pending.get());
+}
+
+#[test]
+fn error_text_unwraps_unsupported_and_not_implemented() {
+    assert_eq!(
+        error_text(&CadError::Unsupported(
+            "OFFSET supports LINE and CIRCLE only".into()
+        )),
+        "OFFSET supports LINE and CIRCLE only"
+    );
+    assert_eq!(
+        error_text(&CadError::NotImplemented("web save")),
+        "web save"
+    );
+    // Other variants keep their Display (Debug) form.
+    assert_eq!(
+        error_text(&CadError::InvalidInput("bad".into())),
+        "InvalidInput(\"bad\")"
+    );
 }
 
 #[test]

@@ -37,6 +37,11 @@ impl HostCore {
     /// an explicit refusal (GUI PNG needs surface readback, which the CLI does);
     /// anything else fails.
     pub(crate) fn request_plot(&self) -> CadResult<()> {
+        if !self.capabilities.plot {
+            let reason = self.message("command.unsupported", &[("command", "PLOT")]);
+            self.report_plot_failed(&reason)?;
+            return Err(CadError::Unsupported(reason));
+        }
         if self.loading() || self.save_pending.get() || self.pending_save.borrow().is_some() {
             let busy = self.message("linux.busy", &[]);
             self.report_plot_failed(&busy)?;
@@ -62,6 +67,13 @@ impl HostCore {
     /// `.dxf` uses the lossy export core; `.dwg` is an explicit refusal (DWG
     /// write is not verified yet).
     pub(crate) fn request_save(&self) -> CadResult<()> {
+        if !self.capabilities.save {
+            let reason = self.message("command.unsupported", &[("command", "SAVE")]);
+            if let Some(handle) = self.handle.borrow().as_ref() {
+                handle.set_status(self.message("save.export_failed", &[("reason", &reason)]))?;
+            }
+            return Err(CadError::Unsupported(reason));
+        }
         if self.loading() || self.save_pending.get() || self.pending_save.borrow().is_some() {
             let busy = self.message("linux.busy", &[]);
             if let Some(handle) = self.handle.borrow().as_ref() {

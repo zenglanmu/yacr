@@ -149,6 +149,11 @@ impl HostCore {
     /// capture is cancelled so no stale preview survives the swap. Starting New
     /// while an open is in flight is refused explicitly rather than raced.
     pub(crate) fn request_new(&self) -> CadResult<()> {
+        if !self.capabilities.new {
+            return Err(CadError::Unsupported(
+                self.message("command.unsupported", &[("command", "NEW")]),
+            ));
+        }
         if self.loading() {
             return Err(CadError::Unsupported(self.message("linux.busy", &[])));
         }
@@ -210,19 +215,18 @@ impl HostCore {
         }
         let snapshot = self.import_snapshot();
         if let Some(handle) = self.handle.borrow().as_ref() {
-            let messages = cad_ui_slint::MessageSource::from_request(&self.options.locale);
+            let messages = self.messages();
             handle.set_open_available(!self.loading())?;
-            // Save As availability tracks the same idle condition as open; it is
-            // refreshed every tick so it becomes available once a non-headless
-            // open finishes presenting (not only after the next command).
-            handle.set_save_available(!self.loading())?;
+            // Save As availability tracks the same idle condition as open **and**
+            // the host capability, so a host without save never advertises it.
+            handle.set_save_available(self.capabilities.save && !self.loading())?;
             handle.set_import_state(&cad_ui_slint::ImportProgressUiState::from_snapshot(
                 snapshot.as_ref(),
                 &messages,
             ))?;
             if let AsyncOpenPoll::Failed { error, .. } = poll {
                 handle
-                    .set_status(self.message("linux.failed", &[("error", &error.to_string())]))?;
+                    .set_status(self.message("linux.failed", &[("error", &error_text(&error))]))?;
             } else if opened {
                 handle.set_status(self.message("linux.opened", &[]))?;
             }

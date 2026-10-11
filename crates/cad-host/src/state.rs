@@ -42,6 +42,11 @@ impl HostCore {
     }
 
     /// Push the full application state into the shell and the CAD view.
+    ///
+    /// Fail-fast: a panel getter that errors returns `Err` and aborts the push,
+    /// leaving later panels un-pushed. Callers treat this as best-effort — the
+    /// web host logs it (`push_state`) and `HostCore::execute` never lets a push
+    /// failure mask the command's own error.
     pub fn push(&self) -> CadResult<()> {
         self.sync_view()?;
         let c = self.controller.borrow();
@@ -70,7 +75,7 @@ impl HostCore {
             &LayerPanelState::from_rows(&layers, self.message("layers.empty", &[])),
             &layers.iter().map(|r| r.id).collect::<Vec<_>>(),
         )?;
-        let messages = cad_ui_slint::MessageSource::from_request(&self.options.locale);
+        let messages = self.messages();
         handle.set_property_state(&PropertyPanelState::from_properties(
             &c.selection_properties()?,
             messages.text("properties.empty", &[]),

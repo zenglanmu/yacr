@@ -201,36 +201,34 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 
 ### 3.1 Web 宿主接线（已接线；无头/真机验收待补）
 
-`apps/app-web` 现在通过 `browser/state_push.rs::push_panel_state` 在每条命令执行后、
-打开文档后、批注导入/导出/恢复后统一推送：历史可用性（撤销/重做分别由
-`HostController::history_availability()` 驱动，撤销到空后 `can_redo` 不再陈旧）、
-测量面板、图层面板 + 有序 `LayerId`、属性面板、批注面板 + 有序 `AnnotationId`、
-布局面板 + 有序 `LayoutId`、诊断抽屉。空/多值文案来自 `MessageSource` 目录（新增
-`annotation.empty`）。
+`apps/app-web` 现在把面板状态交给共享 `cad_host::HostCore::push`（`browser::push_state`
+在核心推送后再叠加浏览器特有通道）：每条命令执行后、打开文档后统一推送历史可用性
+（撤销/重做分别由 `HostController::history_availability()` 驱动，撤销到空后 `can_redo` 不再
+陈旧）、测量面板、图层面板 + 有序 `LayerId`、属性面板、布局面板 + 有序 `LayoutId`、诊断
+抽屉；`browser/state_push.rs` 只补异步打开进度面板与资源抽屉字体摘要。空/多值文案来自
+`MessageSource` 目录。
 
-画布取点：`browser/pick.rs::WebCanvasPickMapper` 经
+画布取点：共享核心 `HostCore` 作为 `CanvasPickMapper` 经
 `UiAdapter::set_canvas_pick_mapper` 安装，使用 `ViewMetrics`/`Viewport::screen_to_world`
-与 `UiHandle::cad_surface_size()`；退化输入返回 `None`（不伪造点）。无捕获工具时的
-画布轻触走 `cad_app::pick_at_screen`（`TolerancePolicy::default()`、
-`BackFacePolicy::Cull`），派发 `Select` + 命中 `SelectionRef`（空 vec 清空选择），
-结果经属性面板呈现；超过共享拖动阈值的拖动不触发选择。
+与权威视口逻辑尺寸；退化输入返回 `None`（不伪造点）。无捕获工具时的画布轻触走
+`cad_app::pick_at_screen`（`browser/pick.rs::pick_selection`，`TolerancePolicy::default()`、
+`BackFacePolicy::Cull`），派发 `Select` + 命中 `SelectionRef`（空 vec 清空选择），结果经
+属性面板呈现；超过共享拖动阈值的拖动不触发选择。
 
 诊断抽屉数据经 wasm 导出 `diagnostics_report_json()`（`encode_model_redacted`）与
 `window.yacr.diagnostics_report` 暴露；未导入报告前为显式空模型。
 
-**选择高亮与工具预览（已接线；无头验证待补）**：`push_panel_state` 现在是overlay
-的**唯一**入口，命令执行、选择拾取、确认/取消都经它把
-`CadView::set_selection_highlight(controller.selection().clone())`、
-`set_measurement_preview(controller.measurement_preview())`、
-`set_annotation_preview(controller.annotation_preview())` 送入渲染桥。空选择集推送
-显式空 `SelectionSet`（高亮消失），无工具推送 `None`（预览消失），因此每条命令路径
-都不会漏掉 overlay。纯映射抽为 `state_push::derive_overlay_push` 以便单测（见 §5）。
+**选择高亮与工具预览（已接线；无头验证待补）**：共享核心 `HostCore::push`（由
+`browser::push_state` 调用）现在是 overlay 的**唯一**入口，命令执行、选择拾取、确认/取消
+都经它把 `CadView::set_selection_highlight(controller.selection().clone())`、
+`set_measurement_preview(controller.measurement_preview())` 送入渲染桥。空选择集推送显式空
+`SelectionSet`（高亮消失），无工具推送 `None`（预览消失），因此每条命令路径都不会漏掉
+overlay（映射逻辑在 `crates/cad-host/src/state.rs`）。
 
-**预览光标（可选，已接线）**：`browser/input.rs` 的指针移动在**捕获工具活动**且非
-拖动导航时，用与渲染同一套的 `pick::map_canvas_point` 求世界点，经
-`SessionState::set_measurement_cursor`/`set_annotation_cursor` 写入并复用同一
-state-push 漏斗；空闲/导航状态直接返回，不触碰底图。纯分类 `preview_cursor_for`
-可单测（`PreviewCursor::{Measurement,Annotation,None}`）。
+**预览光标（可选，已接线）**：`browser/input.rs::WebViewInput` 的指针移动在**捕获工具活动**
+且非拖动导航时，用与渲染同一套的 `pick::map_canvas_point` 求世界点，经
+`SessionState::set_measurement_cursor` 写入并复用同一 state-push 漏斗；空闲/导航状态直接
+返回，不触碰底图。纯分类 `preview_cursor_for` 可单测（`PreviewCursor::{Measurement,None}`）。
 
 `apps/app-android` 亦已接线（§3.2），包括 §2.5 的异步打开进度面板。以上仅为源码
 接线与编译证据，浏览器/真机验收待补，不构成视觉验收。

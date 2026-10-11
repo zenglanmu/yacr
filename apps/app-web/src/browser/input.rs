@@ -1,16 +1,27 @@
-//! UI command dispatch and pointer navigation through the application layer.
+//! Browser command sink and pointer navigation.
+//!
+//! Command routing, state push and the generic navigation/pick/draw sinks live
+//! in `cad_host::HostCore`; this module keeps only what is genuinely
+//! browser-specific:
+//!
+//! * the `OpenDrawing` / `SwitchBackend` interception (a hidden file input click
+//!   and a backend preference store + reload), and
+//! * the browser pointer semantics — the drag threshold, the button set and the
+//!   wheel sign differ from the desktop winit backend, and a move feeds the
+//!   active capture tool's live preview cursor.
+//!
+//! Every command still runs through the shared `HostCore::execute` funnel, so
+//! panels, history and overlays are pushed exactly once.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::cell::Cell;
 
-use cad_app::host::HostController;
 use cad_app::{Command, CommandId, CommandPayload, ToolState};
-use cad_domain::{CadError, CadResult, Point3, ViewportId};
-use cad_ui_slint::{CadView, UiCommandSink, ViewInput};
+use cad_domain::{CadResult, Point3, ViewportId};
+use cad_host::HostCore;
+use cad_ui_slint::{LayoutSwitchSink, UiCommandSink, ViewInput};
 
 use super::persistence::open_dialog;
-use super::{pick, state_push};
-use super::{preference_for, SharedHandle};
+use super::pick;
 
 /// Whether a down→up sequence is a tap (a selection candidate) rather than a
 /// navigation drag.
@@ -54,129 +65,71 @@ pub(super) fn preview_cursor_for(tool: &ToolState) -> PreviewCursor {
     }
 }
 
-pub(super) fn dispatch(
-    controller: &Rc<RefCell<HostController>>,
-    handle: &SharedHandle,
-    view: &Rc<RefCell<Option<CadView>>>,
-    viewport: &ViewportId,
-    command: Command,
-) -> CadResult<()> {
-    let status;
-    let result;
-    {
-        let mut c = controller.borrow_mut();
-        match c.execute(command) {
-            Ok(outcome) => {
-                result = Ok(());
-                status = outcome
-                    .diagnostics
-                    .first()
-                    .map(|d| d.message.clone())
-                    .unwrap_or_else(|| c.status().to_string());
-            }
-            Err(CadError::NotImplemented(feature)) => {
-                status = format!("未实现：{feature}");
-                result = Err(CadError::NotImplemented(feature));
-            }
-            Err(CadError::Unsupported(reason)) => {
-                status = format!("仅宿主执行：{reason}");
-                result = Err(CadError::Unsupported(reason));
-            }
-            Err(e) => {
-                status = format!("命令失败：{e}");
-                result = Err(e);
-            }
-        }
-        if let (Some(view), Some(vp)) = (
-            view.borrow().as_ref(),
-            c.application.workspace.viewports.get(viewport),
-        ) {
-            view.sync_session(&c.session.active_space, vp);
-        }
-    }
-    if let Some(handle) = handle.borrow().as_ref() {
-        // One funnel for every command: history, measurement, layers, layout,
-        // properties and diagnostics are pushed together so no panel can lag
-        // the command that changed it (audit U03/U04/U11).
-        state_push::push_panel_state(controller, handle, view);
-        let _ = handle.set_status(status);
-    }
-    result
-}
-
-/// UI command sink; also the adapter's layout-switch sink.
+/// UI command sink; also the adapter's layout-switch sink is the shared core.
 ///
-/// Cloneable so the layout switch runs through the exact same `send` funnel as
-/// every other host command (validate + execute + push panels).
+/// The browser intercepts the two commands whose implementation is genuinely
+/// browser-specific and delegates every other command to `HostCore::execute`.
 #[derive(Clone)]
 pub(super) struct WebSink {
-    pub(super) controller: Rc<RefCell<HostController>>,
-    pub(super) handle: SharedHandle,
-    pub(super) view: Rc<RefCell<Option<CadView>>>,
-    pub(super) viewport: ViewportId,
+    pub(super) core: HostCore,
+}
+
+impl WebSink {
+    fn set_status(&self, text: String) {
+        if let Some(handle) = self.core.handle.borrow().as_ref() {
+            let _ = handle.set_status(text);
+        }
+    }
 }
 
 impl UiCommandSink for WebSink {
     fn send(&mut self, command: Command) -> CadResult<()> {
-        let set_status = |text: String| {
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                let _ = handle.set_status(text);
-            }
-        };
         match command.id {
             CommandId::OpenDrawing => {
                 open_dialog("file-input");
-                set_status(super::messages::current_messages().text("file.choose", &[]));
-                return Ok(());
+                self.set_status(super::messages::current_messages().text("file.choose", &[]));
+                Ok(())
             }
             CommandId::SwitchBackend => {
                 if let CommandPayload::Backend(choice) = command.payload {
-                    let preference = preference_for(choice);
-                    set_status(format!("切换后端为 {preference:?}，重建渲染会话…"));
+                    let preference = super::preference_for(choice);
+                    self.set_status(format!("切换后端为 {preference:?}，重建渲染会话…"));
                     if let Err(e) = cad_ui_slint::web::store_preference_and_reload(preference) {
-                        set_status(format!("切换失败：{e}"));
+                        self.set_status(format!("切换失败：{e}"));
                     }
                 } else {
-                    set_status("SwitchBackend 需要后端参数".into());
+                    self.set_status("SwitchBackend 需要后端参数".into());
                 }
-                return Ok(());
+                Ok(())
             }
-            _ => {}
+            _ => super::run_command(&self.core, command),
         }
-        dispatch(
-            &self.controller,
-            &self.handle,
-            &self.view,
-            &self.viewport,
-            command,
-        )
     }
 }
 
-/// Layout panel switch (F04): dispatch the validated `SwitchSpace` command.
-///
-/// Installed on the adapter so a layout-row click runs the same command funnel as
-/// every other host command (`WebSink::send` → `dispatch` →
-/// `HostController::execute` + panel push). The command layer validates the
-/// layout against the drawing; an unknown layout is refused, and the sink never
-/// mutates the database itself (`docs/layouts.md` §4).
-impl cad_ui_slint::LayoutSwitchSink for WebSink {
+/// Layout panel switch (F04): dispatch the validated `SwitchSpace` command
+/// through the **web** funnel (`run_command`), so the browser overlay is
+/// re-applied after the shared `HostCore::push` — a layout click must not
+/// clobber the browser font summary / import panel or claim images are modeled.
+impl LayoutSwitchSink for WebSink {
     fn select(&mut self, space: cad_representation::SpaceSelection) {
+        let (document, viewport) = {
+            let c = self.core.controller.borrow();
+            (c.document_id, c.viewport_id)
+        };
         let command = Command {
             schema_version: 1,
             id: CommandId::SwitchSpace,
-            document: self.controller.borrow().document_id,
-            viewport: self.viewport,
+            document,
+            viewport,
             payload: cad_app::input::space_switch_payload(space),
         };
-        let _ = self.send(command);
+        let _ = super::run_command(&self.core, command);
     }
 }
 
 pub(super) struct WebViewInput {
-    pub(super) controller: Rc<RefCell<HostController>>,
-    pub(super) handle: SharedHandle,
-    pub(super) view: Rc<RefCell<Option<CadView>>>,
+    pub(super) core: HostCore,
     pub(super) viewport: ViewportId,
     pub(super) last: Cell<[f64; 2]>,
     pub(super) dragging: Cell<bool>,
@@ -186,7 +139,7 @@ pub(super) struct WebViewInput {
 
 impl WebViewInput {
     fn send(&self, id: CommandId, payload: CommandPayload) {
-        let document = self.controller.borrow().document_id;
+        let document = self.core.controller.borrow().document_id;
         let command = Command {
             schema_version: 1,
             id,
@@ -194,20 +147,14 @@ impl WebViewInput {
             viewport: self.viewport,
             payload,
         };
-        let _ = dispatch(
-            &self.controller,
-            &self.handle,
-            &self.view,
-            &self.viewport,
-            command,
-        );
+        let _ = super::run_command(&self.core, command);
     }
 
     /// Hit-test a tap and dispatch `Select` with the hit (or an empty payload on
-    /// a miss). Runs through [`dispatch`] so the property panel is refreshed.
+    /// a miss). Runs through the shared funnel so the property panel is refreshed.
     fn select_at(&self, logical: [f64; 2]) {
         let outcome = {
-            let controller = self.controller.borrow();
+            let controller = self.core.controller.borrow();
             match controller
                 .application
                 .workspace
@@ -215,7 +162,7 @@ impl WebViewInput {
                 .get(&self.viewport)
             {
                 None => return,
-                Some(viewport) => match pick::canvas_size(&self.handle, viewport) {
+                Some(viewport) => match pick::canvas_size(&self.core.handle, viewport) {
                     None => return,
                     Some(size) => pick::pick_selection(&controller, size, logical),
                 },
@@ -224,7 +171,7 @@ impl WebViewInput {
         match outcome {
             Ok(refs) => self.send(CommandId::Select, CommandPayload::Selection(refs)),
             Err(error) => {
-                if let Some(handle) = self.handle.borrow().as_ref() {
+                if let Some(handle) = self.core.handle.borrow().as_ref() {
                     let _ = handle.set_status(format!("选择失败：{error}"));
                 }
             }
@@ -241,7 +188,7 @@ impl WebViewInput {
     /// stays free of preview work.
     fn preview_cursor_at(&self, logical: [f64; 2]) {
         let mapped = {
-            let controller = self.controller.borrow();
+            let controller = self.core.controller.borrow();
             match preview_cursor_for(&controller.session.tool) {
                 PreviewCursor::None => return,
                 PreviewCursor::Measurement => {
@@ -252,7 +199,7 @@ impl WebViewInput {
                         .get(&self.viewport)
                     {
                         None => return,
-                        Some(viewport) => match pick::canvas_size(&self.handle, viewport) {
+                        Some(viewport) => match pick::canvas_size(&self.core.handle, viewport) {
                             None => return,
                             Some(size) => pick::map_canvas_point(viewport, size, logical),
                         },
@@ -261,7 +208,7 @@ impl WebViewInput {
             }
         };
         {
-            let mut controller = self.controller.borrow_mut();
+            let mut controller = self.core.controller.borrow_mut();
             let result = match preview_cursor_for(&controller.session.tool) {
                 PreviewCursor::Measurement => controller.session.set_measurement_cursor(mapped),
                 // The tool stopped between the two borrows: nothing to preview.
@@ -271,9 +218,7 @@ impl WebViewInput {
                 return;
             }
         }
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            state_push::push_panel_state(&self.controller, handle, &self.view);
-        }
+        super::push_state(&self.core);
     }
 }
 
@@ -291,6 +236,7 @@ impl ViewInput for WebViewInput {
                 let last = self.last.get();
                 if self.dragging.get() {
                     let wpp = self
+                        .core
                         .controller
                         .borrow()
                         .application
@@ -323,7 +269,7 @@ impl ViewInput for WebViewInput {
                 // selects; merely holding the button is not a drag.
                 let tap = is_selection_tap(down, [x, y]);
                 let allowed = {
-                    let controller = self.controller.borrow();
+                    let controller = self.core.controller.borrow();
                     selection_allowed(&controller.session.tool)
                 };
                 if tap && allowed && (button == 1 || button == 0) {

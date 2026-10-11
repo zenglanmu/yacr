@@ -1,23 +1,33 @@
 # 宿主代码拆分
 
-本轮仅重组 Web 宿主与共享渲染桥，不改变领域模型、crate 依赖方向、命令协议或 wasm
-导出名称。核心 CAD 算法的大文件仍可按各自领域继续拆分，不把本轮描述为全仓库完成。
+本文件记录宿主层（桌面 / Web）的代码拆分。P1 轮（2026-10-11）把 `apps/app-web` 迁移到
+共享 `cad_host::HostCore`，删除 Web 侧重复编排；不改变领域模型、crate 依赖方向、命令协议
+或 wasm 导出名称。核心 CAD 算法的大文件仍可按各自领域继续拆分，不把本轮描述为全仓库完成。
 
 ## Web Rust 宿主
 
-`apps/app-web/src/browser.rs` 是组合根：选择后端、组装控制器/UI/视图，持有唯一运行时。
-`browser/` 下按职责拆分：
+`apps/app-web/src/browser.rs` 是组合根：选择后端、用 Web 平台实现组装
+`cad_host::HostCore`、安装 Slint 适配器与渲染桥，持有唯一运行时。命令路由、状态推送
+（`push`/`sync_view`）、打开/出图/另存管线、画布拾取映射与绘制预览 sink 都在 `cad-host`；
+`browser/` 只保留**浏览器特有**的适配与平台实现：
 
 | 文件 | 职责 |
 |---|---|
-| `documents.rs` | 打开图纸、未保存决策、安装新文档 |
-| `annotations.rs` | sidecar 导入/导出确认、显式恢复/丢弃 |
-| `fonts.rs` | Fetch 字体、注册、过期结果拒绝与诊断 |
-| `input.rs` | UI 命令分派、平移/缩放、后端切换前保护批注 |
-| `persistence.rs` | 浏览器下载/选择器、localStorage 恢复槽 |
+| `platform.rs` | `cad-platform` 契约的浏览器实现：`WebFiles`（`begin_open` 触发隐藏 `<input type=file>`；`open_document_bytes` 入队 `FileEvent::Opened`；`begin_save` 同步合成下载目标；`write_atomic` 本阶段显式 `Unsupported`）、`WebConfigStore`（localStorage）、`WebSurface`（CSS 表面 + 安全区） |
+| `documents.rs` | 排空 Web 文件事件队列并经同步导入安装新文档（`install_opened` 唯一安装点） |
+| `async_open.rs` | 同步回退心跳（`worker_available()==false`，不 spawn 线程）、真实终态快照与稳定 JSON 契约 |
+| `fonts.rs` | Fetch 字体、注册、过期结果拒绝与诊断（复用 `WebFontLoader`） |
+| `input.rs` | `WebSink`（拦截 `OpenDrawing`/`SwitchBackend`，其余委托 `HostCore::execute`）、`WebViewInput`（浏览器指针/轻触语义）与纯分类辅助 |
+| `draw.rs` | `WebDrawSink`：把 Trim/Extend 的世界点解析为 `SelectionRef`（桌面核心显式拒绝）；预览 sink 复用共享核心 |
+| `pick.rs` | 纯画布逻辑点 → 世界点映射与选择拾取辅助（拾取映射器为共享核心） |
+| `state_push.rs` | 共享 `push` 之上的浏览器叠加：异步打开进度面板 + 资源抽屉字体摘要 + 诊断模型编码 |
+| `persistence.rs` | 触发隐藏文件选择器 |
+| `shell.rs` | 触控适配（几何/拾取/导航），导航命令经共享漏斗 |
+| `config.rs` | wasm 配置导出（`viewer_*`），偏好读写经 localStorage |
+| `messages.rs` | 目录镜像（面板空/多值文案） |
 
 组合根通过 re-export 保留调用路径；子模块只在宿主内部共享运行时，不新增数据库副本。
-保存仍是准备 → 宿主写入 → 确认准确 revision，失败不标记保存。
+文件打开仍为「平台事件 → 同步导入 → 安装」，保存/出图能力位本阶段保持 `false`（P3 接下载）。
 
 ## Web JavaScript
 
@@ -55,6 +65,11 @@
 dev/inode 源保护；XDG/APPDATA/Application-Support 配置；窗口表面）。`app-windows`/
 `app-macos` 仍只调用 `app-linux::entry::run`，未改动。
 
+`apps/app-web` 同样退化为薄封装：`browser/platform.rs` 提供 `WebFiles`/`WebConfigStore`/
+`WebSurface`，组合根用它们构造 `HostCore`（能力位 `open=true`、`new/save/plot=false`、
+`import_worker=false`），命令路由 / 状态推送 / 拾取映射 / 绘制预览由共享核心承担。Web 无
+Rust 定时器：JS 心跳经 `async_open_poll_json` 驱动打开进度；核心的 `tick()` 不用于 Web。
+
 ## Slint 渲染桥
 
 `crates/cad-ui-slint/src/bridge.rs` 仅装配 Slint 回调；`bridge/view.rs` 接收完整视图
@@ -67,8 +82,8 @@ CPU 场景构建与版本控制位于 `cad-app/src/render_scene/`，不依赖 Sl
 ## 回归入口
 
 ```bash
-node --test scripts/test-web-host.mjs
-scripts/build-web.sh
+node --test scripts/test-web-host.mjs scripts/test-web-touch.mjs scripts/test-host-panel-parity.mjs scripts/test-web-responsive.mjs
+DIST=/tmp/opencode/yacr-web-p1 WITH_FONTS=0 scripts/build-web.sh
 node scripts/check-web-ui.mjs http://127.0.0.1:8090/ /tmp/opencode/yacr-refactor-web.png
 ```
 

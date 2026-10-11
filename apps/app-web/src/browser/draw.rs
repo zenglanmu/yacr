@@ -2,7 +2,11 @@
 //!
 //! The shell captures points and emits a confirmed [`cad_app::DrawIntent`]; the
 //! host maps it to exactly one application command through the shared
-//! transaction/history path (`docs/drawing-edit.md` §2):
+//! transaction/history path (`docs/drawing-edit.md` §2). The generic preview
+//! sink is the shared `HostCore`; only the command mapping is browser-specific
+//! here because the browser shell enables Trim/Extend, which the desktop host
+//! refuses — resolving the two world picks to `SelectionRef`s is a host job the
+//! shell does not do.
 //!
 //! * `Line { start, end }` → `CreateLine` + `Points([start, end])`
 //! * `Circle { center, edge }` → `CreateCircle` + `Points([center, edge])`
@@ -11,24 +15,15 @@
 //! * `Trim { target_pick, boundary_pick }` → `TrimEntity` after resolving the
 //!   two world picks to `SelectionRef`s
 //!
-//! `Move`/`Trim` need the session selection or a hit test, which the shell does
-//! not hold; this is why the host — and not the adapter — owns the mapping. An
-//! unresolved trim pick is an explicit error (never a payload-free success).
-//! The same install forwards the live preview so the canvas draws the rubber
-//! band through the existing overlay.
+//! An unresolved trim pick is an explicit error (never a payload-free success).
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use cad_app::host::HostController;
-use cad_app::{DrawIntent, DrawPreview, PickOptions};
+use cad_app::{Command, DrawIntent, PickOptions};
 use cad_domain::{CadError, CadResult, Point3, Ray3, SelectionRef, TolerancePolicy, ViewportId};
-use cad_ui_slint::{CadView, DrawCommandSink, DrawPreviewSink};
-
-use super::SharedHandle;
-
-/// The web host's single-slot CAD view holder (matches `browser.rs`).
-type SharedView = Rc<RefCell<Option<CadView>>>;
+use cad_host::HostCore;
+use cad_ui_slint::DrawCommandSink;
 
 /// Map a world point on the work plane to the closest model-space entity.
 ///
@@ -69,31 +64,23 @@ fn world_pick_ref(
 
 /// The web host's draw/edit sink: one command per confirmed intent.
 pub(super) struct WebDrawSink {
-    controller: Rc<RefCell<HostController>>,
-    handle: SharedHandle,
-    view: SharedView,
+    core: HostCore,
     viewport: ViewportId,
 }
 
 impl WebDrawSink {
-    /// Send one drawing command through the shared dispatch funnel so the
+    /// Send one drawing command through the shared command funnel so the
     /// status line, panels and overlays refresh exactly once.
     fn send(&self, id: cad_app::CommandId, payload: cad_app::CommandPayload) -> CadResult<()> {
-        let document = self.controller.borrow().document_id;
-        let command = cad_app::Command {
+        let document = self.core.controller.borrow().document_id;
+        let command = Command {
             schema_version: 1,
             id,
             document,
             viewport: self.viewport,
             payload,
         };
-        super::input::dispatch(
-            &self.controller,
-            &self.handle,
-            &self.view,
-            &self.viewport,
-            command,
-        )
+        super::run_command(&self.core, command)
     }
 }
 
@@ -115,7 +102,7 @@ impl DrawCommandSink for WebDrawSink {
             ),
             DrawIntent::Move { delta } => {
                 let refs: Vec<SelectionRef> = {
-                    let c = self.controller.borrow();
+                    let c = self.core.controller.borrow();
                     c.selection().refs().to_vec()
                 };
                 if refs.is_empty() {
@@ -128,7 +115,7 @@ impl DrawCommandSink for WebDrawSink {
             }
             DrawIntent::Copy { delta } => {
                 let refs: Vec<SelectionRef> = {
-                    let c = self.controller.borrow();
+                    let c = self.core.controller.borrow();
                     c.selection().refs().to_vec()
                 };
                 if refs.is_empty() {
@@ -141,7 +128,7 @@ impl DrawCommandSink for WebDrawSink {
             }
             DrawIntent::Rotate { base, angle } => {
                 let refs: Vec<SelectionRef> = {
-                    let c = self.controller.borrow();
+                    let c = self.core.controller.borrow();
                     c.selection().refs().to_vec()
                 };
                 if refs.is_empty() {
@@ -154,7 +141,7 @@ impl DrawCommandSink for WebDrawSink {
             }
             DrawIntent::Scale { base, factor } => {
                 let refs: Vec<SelectionRef> = {
-                    let c = self.controller.borrow();
+                    let c = self.core.controller.borrow();
                     c.selection().refs().to_vec()
                 };
                 if refs.is_empty() {
@@ -167,7 +154,7 @@ impl DrawCommandSink for WebDrawSink {
             }
             DrawIntent::Mirror { p1, p2 } => {
                 let refs: Vec<SelectionRef> = {
-                    let c = self.controller.borrow();
+                    let c = self.core.controller.borrow();
                     c.selection().refs().to_vec()
                 };
                 if refs.is_empty() {
@@ -184,7 +171,7 @@ impl DrawCommandSink for WebDrawSink {
             }
             DrawIntent::Offset { side_point } => {
                 let refs: Vec<SelectionRef> = {
-                    let c = self.controller.borrow();
+                    let c = self.core.controller.borrow();
                     c.selection().refs().to_vec()
                 };
                 if refs.is_empty() {
@@ -200,7 +187,7 @@ impl DrawCommandSink for WebDrawSink {
                 boundary_pick,
             } => {
                 let (target, boundary) = {
-                    let c = self.controller.borrow();
+                    let c = self.core.controller.borrow();
                     let viewport = c
                         .application
                         .workspace
@@ -230,7 +217,7 @@ impl DrawCommandSink for WebDrawSink {
                 boundary_pick,
             } => {
                 let (target, boundary) = {
-                    let c = self.controller.borrow();
+                    let c = self.core.controller.borrow();
                     let viewport = c
                         .application
                         .workspace
@@ -259,34 +246,16 @@ impl DrawCommandSink for WebDrawSink {
     }
 }
 
-/// Forwards the shell's live draw preview into the CAD overlay.
-pub(super) struct WebDrawPreviewSink {
-    view: SharedView,
-}
-
-impl DrawPreviewSink for WebDrawPreviewSink {
-    fn set_preview(&self, preview: Option<DrawPreview>) {
-        if let Some(view) = self.view.borrow().as_ref() {
-            view.set_draw_preview(preview);
-        }
-    }
-}
-
-/// Install the draw command and preview sinks on the adapter once the view
-/// exists. Until this runs, a confirm reports "not wired" rather than faking a
-/// success (see `crates/cad-ui-slint/src/draw.rs`).
-pub(super) fn install(
-    adapter: &cad_ui_slint::UiAdapter,
-    controller: Rc<RefCell<HostController>>,
-    handle: SharedHandle,
-    view: SharedView,
-    viewport: ViewportId,
-) {
+/// Install the draw command sink and the shared preview sink on the adapter.
+///
+/// Until this runs, a confirm reports "not wired" rather than faking a success
+/// (see `crates/cad-ui-slint/src/draw.rs`). The preview sink is the shared
+/// `HostCore`, so the live rubber band reaches the overlay through the same
+/// `set_draw_preview` call every host uses.
+pub(super) fn install(adapter: &cad_ui_slint::UiAdapter, core: HostCore, viewport: ViewportId) {
     adapter.set_draw_command_sink(Box::new(WebDrawSink {
-        controller,
-        handle,
-        view: view.clone(),
+        core: core.clone(),
         viewport,
     }));
-    adapter.set_draw_preview_sink(Rc::new(WebDrawPreviewSink { view }));
+    adapter.set_draw_preview_sink(Rc::new(core));
 }

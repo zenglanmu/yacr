@@ -1,12 +1,20 @@
 //! Browser host assembly (wasm32 only).
-//! Feature logic lives in `browser/`; this module owns the shared runtime and
-//! assembles the application, UI and render view without changing wasm exports.
+//!
+//! The platform-common orchestration (command routing, state push, the
+//! open/plot/save funnels and the navigation/draw/pick sinks) lives in
+//! `cad_host::HostCore`; this module is the browser composition root: it builds
+//! the core over the web platform impls, installs the Slint adapter and the
+//! CAD render bridge, and keeps only the genuinely browser-specific adapters
+//! (the Open/Switch-backend interception, the browser pointer semantics and the
+//! synchronous open heartbeat).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cad_app::host::HostController;
 use cad_domain::{CadError, CadResult, ViewportId};
+use cad_host::{HostCore, HostOptions, HostPlatform};
+use cad_platform::HostCapabilities;
 use cad_ui_slint::{
     install_with_preference, CadView, IncomingDocument, LocaleResolution, UiAdapter,
     UiConfiguration, UiHandle,
@@ -21,15 +29,18 @@ mod input;
 mod messages;
 mod persistence;
 mod pick;
+mod platform;
 pub mod shell;
 mod state_push;
+
+use input::{WebSink, WebViewInput};
+use platform::{WebConfigStore, WebFiles, WebSurface};
 
 pub use async_open::{
     poll_and_apply as async_open_poll, worker_available as async_open_worker_available,
 };
 pub use documents::open_document;
 pub use fonts::{font_report, load_current_fonts};
-use input::{WebSink, WebViewInput};
 
 type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
 
@@ -49,7 +60,9 @@ fn viewport_camera(controller: &HostController) -> ([f64; 3], f64) {
         .unwrap_or(([0.0, 0.0, 0.0], 1.0))
 }
 
-fn preference_for(choice: cad_app::BackendChoice) -> cad_ui_slint::web::BackendPreference {
+pub(super) fn preference_for(
+    choice: cad_app::BackendChoice,
+) -> cad_ui_slint::web::BackendPreference {
     match choice {
         cad_app::BackendChoice::Auto => cad_ui_slint::web::BackendPreference::Auto,
         cad_app::BackendChoice::WebGpu => cad_ui_slint::web::BackendPreference::WebGpu,
@@ -110,12 +123,20 @@ fn preference_name(preference: cad_ui_slint::web::BackendPreference) -> &'static
 }
 
 /// Runtime handed to the JS exports after `start_web` completes setup.
+///
+/// The `HostCore` is a clone handle over the shared orchestration state; the
+/// browser-specific open queue and the render bridge's incoming slot travel
+/// alongside it.
 struct HostRuntime {
-    controller: Rc<RefCell<HostController>>,
-    handle: UiHandle,
-    view: CadView,
+    core: HostCore,
+    files: Rc<WebFiles>,
     incoming: IncomingDocument,
-    viewport: ViewportId,
+}
+
+impl HostRuntime {
+    fn viewport(&self) -> ViewportId {
+        self.core.controller.borrow().viewport_id
+    }
 }
 
 thread_local! {
@@ -131,7 +152,7 @@ fn with_runtime<T>(f: impl FnOnce(&HostRuntime) -> T) -> Option<T> {
 /// Exposed so wasm exports (locale switch) can reach the Slint shell
 /// without duplicating the thread-local lookup.
 pub fn current_handle() -> Option<UiHandle> {
-    with_runtime(|rt| rt.handle.clone())
+    with_runtime(|rt| rt.core.handle.borrow().as_ref().cloned()).flatten()
 }
 
 thread_local! {
@@ -147,6 +168,11 @@ pub(super) fn safe_insets() -> [f64; 4] {
     SAFE_INSETS.with(Cell::get)
 }
 
+/// The last reported surface `(logical size, DPI scale)`.
+pub(super) fn surface_snapshot() -> ([f64; 2], f64) {
+    SURFACE.with(Cell::get)
+}
+
 /// The canvas logical size for a reported surface, after safe-area subtraction.
 ///
 /// `None` for a degenerate surface/inset (never a clamped guess). The DPI scale
@@ -157,60 +183,29 @@ pub(super) fn inset_canvas_size(surface: [f64; 2]) -> Option<[f64; 2]> {
         .map(|canvas| canvas.size_logical)
 }
 
-/// Apply a reported CAD surface + DPR to the authoritative viewport.
+/// Run one command through the shared funnel, then re-apply the web overlay.
 ///
-/// The viewport's logical size becomes the surface minus the safe area; the DPI
-/// scale is the browser's `devicePixelRatio`, so physical-pixel conversions and
-/// the logical→world mapping stay consistent (audit U07). Degenerate metrics are
-/// an explicit error, never a silent NaN.
-fn apply_surface_metrics(
-    controller: &Rc<RefCell<HostController>>,
-    viewport: ViewportId,
-    surface: [f64; 2],
-    dpi_scale: f64,
-) -> CadResult<()> {
-    let canvas =
-        cad_app::input::inset_canvas_metrics([0.0, 0.0], surface, safe_insets(), dpi_scale)
-            .ok_or_else(|| {
-                CadError::InvalidInput(
-                    "surface metrics or safe insets are degenerate (finite, non-negative insets)"
-                        .into(),
-                )
-            })?;
-    let mut controller = controller.borrow_mut();
-    let viewport = controller
-        .application
-        .workspace
-        .viewports
-        .get_mut(&viewport)
-        .ok_or(CadError::Cancelled)?;
-    cad_app::input::apply_canvas_metrics(viewport, &canvas)
+/// `HostCore::execute` already pushes every generic panel; the browser overlay
+/// (the synchronous-open progress panel and the resources font summary) is
+/// re-applied after it so a command cannot clobber them.
+pub(super) fn run_command(core: &HostCore, command: cad_app::Command) -> CadResult<()> {
+    let result = core.execute(command);
+    push_web_overlay(core);
+    result
 }
 
-/// Report the CSS `env(safe-area-inset-*)` values measured by the JS host.
-///
-/// The insets are logical CSS pixels ordered `[top, right, bottom, left]`.
-/// Degenerate input (non-finite or negative) is refused rather than clamped, and
-/// the retained surface is re-applied so a soft-keyboard/notch change updates the
-/// authoritative viewport without moving the camera.
-#[cfg(target_arch = "wasm32")]
-pub fn set_safe_insets(top: f64, right: f64, bottom: f64, left: f64) -> CadResult<()> {
-    let insets = [top, right, bottom, left];
-    if insets.iter().any(|v| !v.is_finite() || *v < 0.0) {
-        return Err(CadError::InvalidInput(
-            "safe insets must be finite and non-negative".into(),
-        ));
+/// Push every derived panel state and the browser overlay in one place.
+pub(super) fn push_state(core: &HostCore) {
+    if let Err(error) = core.push() {
+        cad_ui_slint::web::console_error(&format!("host state push failed: {error}"));
     }
-    SAFE_INSETS.with(|cell| cell.set(insets));
-    with_runtime(|rt| {
-        let (surface, scale) = SURFACE.with(Cell::get);
-        if surface[0] > 0.0 && surface[1] > 0.0 {
-            apply_surface_metrics(&rt.controller, rt.viewport, surface, scale)?;
-            rt.view.request_redraw();
-        }
-        Ok(())
-    })
-    .unwrap_or(Ok(()))
+    push_web_overlay(core);
+}
+
+/// The two channels the shared `HostCore::push` does not cover.
+fn push_web_overlay(core: &HostCore) {
+    state_push::push_import_state(core);
+    state_push::push_resource_sections(core);
 }
 
 /// Mirror the authoritative application viewport into the render camera.
@@ -243,21 +238,44 @@ pub async fn start_with_preference(
         }
     };
 
-    let controller = Rc::new(RefCell::new(HostController::with_demo_document(
-        web_viewport_size(),
-    )?));
+    let locale = cad_ui_slint::web::stored_locale().unwrap_or_else(|| "zh-CN".to_string());
+    let handle_slot: SharedHandle = Rc::new(RefCell::new(None));
+    let files = Rc::new(WebFiles::new());
+    let platform = HostPlatform {
+        files: files.clone(),
+        config_store: Rc::new(WebConfigStore),
+        surface: Rc::new(WebSurface),
+        // Browser capability gates: file open is wired; New/Save/Plot stay off
+        // this phase, and the open runs on the calling thread (no worker).
+        capabilities: HostCapabilities {
+            open: true,
+            new: false,
+            save: false,
+            plot: false,
+            import_worker: false,
+        },
+    };
+    let host_options = HostOptions {
+        fonts: Vec::new(),
+        fonts_dir: None,
+        images_dir: None,
+        headless: false,
+        drawing: None,
+        size: web_viewport_size(),
+        locale: locale.clone(),
+    };
+    let core = HostCore::new(host_options, handle_slot, platform)?;
+    let controller = core.controller.clone();
     let (drawing, document_id, viewport_id) = {
         let mut c = controller.borrow_mut();
         let _ = c.fit();
         (c.drawing(), c.document_id, c.viewport_id)
     };
     let incoming: IncomingDocument = Rc::new(RefCell::new(drawing));
-    let shared_handle: SharedHandle = Rc::new(RefCell::new(None));
-    let view_slot: Rc<RefCell<Option<CadView>>> = Rc::new(RefCell::new(None));
 
     let configuration = UiConfiguration {
         compact: false,
-        locale: cad_ui_slint::web::stored_locale().unwrap_or_else(|| "zh-CN".to_string()),
+        locale: locale.clone(),
         safe_insets: [0.0; 4],
         application_title: "yacr CAD (Web)".into(),
         document: document_id,
@@ -268,32 +286,28 @@ pub async fn start_with_preference(
     // derived from the same locale (the handle does not expose its catalog).
     messages::set_locale(&configuration.locale);
 
-    let sink = WebSink {
-        controller: controller.clone(),
-        handle: shared_handle.clone(),
-        view: view_slot.clone(),
-        viewport: viewport_id,
-    };
-    // A clone of the same command funnel serves as the layout-switch sink, so a
-    // layout click dispatches the validated `SwitchSpace` command (docs/layouts.md §4).
+    let sink = WebSink { core: core.clone() };
     let layout_sink = sink.clone();
     let mut adapter = UiAdapter::new(configuration, sink, true)?;
+    // The web sink is the layout-switch sink too: a layout click runs through the
+    // browser funnel (`run_command`), so the shared push cannot clobber the web
+    // overlay (font summary / import panel / `images_modeled: false`).
     adapter.set_layout_switch_sink(Box::new(layout_sink));
     let scale = web_sys::window()
         .map(|w| w.device_pixel_ratio())
         .unwrap_or(1.0);
     adapter.fit_window_to_logical(web_viewport_size(), scale as f32);
     let handle = adapter.handle();
+    core.set_handle(handle.clone());
     // Initial fit uses the actual CAD content rectangle, not the entire shell.
     // Subsequent resize/layout changes preserve the user's camera. The surface is
     // the shell's CAD rect; the safe-area insets (CSS `env()`, reported by the JS
-    // host) are folded in by `apply_surface_metrics`.
+    // host) are folded in by the core's `metrics()`.
     if let Some((size, _)) = handle.cad_surface_size() {
         SURFACE.with(|cell| cell.set((size, scale)));
-        apply_surface_metrics(&controller, viewport_id, size, scale)?;
+        core.metrics()?;
         controller.borrow_mut().fit()?;
     }
-    *shared_handle.borrow_mut() = Some(handle.clone());
     let _ = handle.set_backend_index(backend_index(preference));
 
     let view = install_with_preference(handle.clone(), adapter.window(), incoming.clone(), chosen)?;
@@ -304,75 +318,40 @@ pub async fn start_with_preference(
         }
     }
     view.request_redraw();
-    *view_slot.borrow_mut() = Some(view.clone());
+    core.set_view(view.clone());
     adapter.set_view_input(Rc::new(WebViewInput {
-        controller: controller.clone(),
-        handle: shared_handle.clone(),
-        view: view_slot.clone(),
+        core: core.clone(),
         viewport: viewport_id,
         last: Cell::new([0.0, 0.0]),
         dragging: Cell::new(false),
         down: Cell::new(None),
     }));
     // Measurement/annotation canvas picks only become real points when the host
-    // installs this mapper; without it the adapter reports "pick unwired".
-    adapter.set_canvas_pick_mapper(Rc::new(pick::WebCanvasPickMapper {
-        controller: controller.clone(),
-        handle: shared_handle.clone(),
-        viewport: viewport_id,
-    }));
-    // Draw/edit tools: the shell captures points and emits an intent; the host
-    // maps it to one drawing command (line/circle/move/trim). Without this the
-    // confirm path reports "not wired" instead of fabricating a command.
-    draw::install(
-        &adapter,
-        controller.clone(),
-        shared_handle.clone(),
-        view_slot.clone(),
-        viewport_id,
-    );
+    // installs this mapper; the shared core resolves a canvas-local logical point
+    // to a world point on the viewport work plane.
+    adapter.set_canvas_pick_mapper(Rc::new(core.clone()));
+    // Draw/edit tools: the shell captures points and emits an intent; the browser
+    // sink maps it to one drawing command (line/circle/move/trim). The preview
+    // sink is the shared core's.
+    draw::install(&adapter, core.clone(), viewport_id);
 
     let backend_label = backend_status(chosen);
     let _ = handle.set_status(format!("就绪（{backend_label}）"));
     // The first push derives every panel from the real application state.
-    state_push::push_panel_state(&controller, &handle, &view_slot);
+    push_state(&core);
 
-    // Host policy: allow users to customize only the two panel initial-open
-    // flags. Without this the default config allows nothing and the persisted
-    // preference path would be inert. A failure is logged, never fatal.
-    if let Err(error) = handle.update_config_json(
-        r#"{"ui":{"userCustomization":{"allowedPaths":[
-            "ui.components.layerPanel.initiallyOpen",
-            "ui.components.propertiesPanel.initiallyOpen"
-        ]}}}"#,
-    ) {
-        cad_ui_slint::web::console_error(&format!("host config defaults rejected: {error}"));
-    }
-
-    // Merge a persisted user preference, but only the leaves still allowed by
-    // this host config. A rejected/limited preference never fails startup; the
-    // store keeps the validated values that did pass.
-    if let Some(preference) = config::stored_user_preference() {
-        match handle.apply_user_preference_json(&preference) {
-            Ok(()) => {
-                let _ = config::persist_user_preference(&handle);
-            }
-            Err(error) => {
-                cad_ui_slint::web::console_error(&format!(
-                    "stored config preference rejected: {error}"
-                ));
-                let _ = config::persist_user_preference(&handle);
-            }
-        }
+    // Host policy and the persisted user preference: the shared core injects the
+    // allowed-paths defaults and merges the stored projection. A rejected/limited
+    // preference never fails startup; a failure is logged, never fatal.
+    for diagnostic in core.load_startup() {
+        cad_ui_slint::web::console_error(&format!("host startup: {diagnostic}"));
     }
 
     HOST.with(|slot| {
         *slot.borrow_mut() = Some(HostRuntime {
-            controller: controller.clone(),
-            handle: handle.clone(),
-            view: view.clone(),
+            core: core.clone(),
+            files: files.clone(),
             incoming,
-            viewport: viewport_id,
         });
     });
 
@@ -396,16 +375,49 @@ pub fn resize(width: f64, height: f64, scale: f64) -> CadResult<()> {
         ));
     }
     with_runtime(|rt| {
-        rt.handle.resize_browser_surface([width, height], scale)?;
-        let (surface, _) = rt
+        let handle = rt
+            .core
             .handle
-            .cad_surface_size()
-            .unwrap_or(([width, height], 1.0));
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(CadError::Cancelled)?;
+        handle.resize_browser_surface([width, height], scale)?;
+        let (surface, _) = handle.cad_surface_size().unwrap_or(([width, height], 1.0));
         SURFACE.with(|cell| cell.set((surface, scale)));
-        apply_surface_metrics(&rt.controller, rt.viewport, surface, scale)?;
-        let controller = rt.controller.borrow();
-        sync_view_camera(&controller, &rt.view, &rt.viewport);
-        rt.view.request_redraw();
+        rt.core.metrics()?;
+        rt.core.sync_view()?;
+        if let Some(view) = rt.core.view.borrow().as_ref() {
+            view.request_redraw();
+        }
+        Ok(())
+    })
+    .unwrap_or(Ok(()))
+}
+
+/// Report the CSS `env(safe-area-inset-*)` values measured by the JS host.
+///
+/// The insets are logical CSS pixels ordered `[top, right, bottom, left]`.
+/// Degenerate input (non-finite or negative) is refused rather than clamped, and
+/// the retained surface is re-applied so a soft-keyboard/notch change updates the
+/// authoritative viewport without moving the camera.
+#[cfg(target_arch = "wasm32")]
+pub fn set_safe_insets(top: f64, right: f64, bottom: f64, left: f64) -> CadResult<()> {
+    let insets = [top, right, bottom, left];
+    if insets.iter().any(|v| !v.is_finite() || *v < 0.0) {
+        return Err(CadError::InvalidInput(
+            "safe insets must be finite and non-negative".into(),
+        ));
+    }
+    SAFE_INSETS.with(|cell| cell.set(insets));
+    with_runtime(|rt| {
+        let (surface, _) = surface_snapshot();
+        if surface[0] > 0.0 && surface[1] > 0.0 {
+            rt.core.metrics()?;
+            if let Some(view) = rt.core.view.borrow().as_ref() {
+                view.request_redraw();
+            }
+        }
         Ok(())
     })
     .unwrap_or(Ok(()))
@@ -414,23 +426,29 @@ pub fn resize(width: f64, height: f64, scale: f64) -> CadResult<()> {
 /// Report renderer state for diagnostics and headless tests.
 pub fn renderer_report() -> String {
     let report = with_runtime(|rt| {
-        let controller = rt.controller.borrow();
+        let controller = rt.core.controller.borrow();
+        let view = rt.core.view.borrow();
+        let view = view.as_ref();
         format!(
             "chosen={:?} adapter={:?} caps={:?} error={:?} entities={} wpp={:.6} status={} surface={:?} cad_frames={} lifecycle={:?} center={:?}",
-            rt.view.preference(),
-            rt.view.active_backend(),
-            rt.view.capabilities(),
-            rt.view.last_error().or_else(|| rt.view.view_diagnostic()),
+            view.map(|v| v.preference()),
+            view.and_then(|v| v.active_backend()),
+            view.and_then(|v| v.capabilities()),
+            view.and_then(|v| v.last_error().or_else(|| v.view_diagnostic())),
             rt.incoming
                 .borrow()
                 .as_ref()
                 .map(|d| d.entity_count())
                 .unwrap_or(0),
-            rt.view.camera().world_per_px,
+            view.map(|v| v.camera().world_per_px).unwrap_or(0.0),
             controller.status(),
-            rt.handle.cad_surface_size(),
-            rt.view.frames_rendered(),
-            rt.view.lifecycle(),
+            rt.core
+                .handle
+                .borrow()
+                .as_ref()
+                .and_then(|h| h.cad_surface_size()),
+            view.map(|v| v.frames_rendered()).unwrap_or(0),
+            view.map(|v| v.lifecycle()),
             viewport_camera(&controller).0,
         )
     });
@@ -444,7 +462,7 @@ pub fn renderer_report() -> String {
 /// any import report this is an explicit empty model, never fabricated rows.
 pub fn diagnostics_report() -> String {
     with_runtime(|rt| {
-        let controller = rt.controller.borrow();
+        let controller = rt.core.controller.borrow();
         let model = controller
             .last_import_report
             .as_ref()
@@ -470,8 +488,11 @@ pub fn apply_locale(tag: &str) -> CadResult<LocaleResolution> {
     let resolution = handle.set_locale(tag)?;
     messages::set_locale(tag);
     with_runtime(|rt| {
-        let slot = state_push::view_slot(&rt.view);
-        state_push::push_panel_state(&rt.controller, &rt.handle, &slot);
+        // The shared catalog source is the core's, so a runtime switch must reach
+        // it too — otherwise shared-catalog text (completed/failed, fit.empty,
+        // panel empty/mixed labels) stays in the startup locale.
+        rt.core.set_locale(tag);
+        push_state(&rt.core);
     });
     Ok(resolution)
 }

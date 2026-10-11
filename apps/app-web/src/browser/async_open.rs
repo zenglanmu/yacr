@@ -31,10 +31,8 @@ use std::sync::Arc;
 use cad_app::host::{HostController, OpenedDrawing};
 use cad_app::tasks::{AsyncOpenPoll, ImportProgressSnapshot, ImportTerminal};
 use cad_domain::CadResult;
-use cad_ui_slint::{ImportProgressUiState, UiHandle};
 
 use super::documents::install_opened;
-use super::messages::current_messages;
 use super::with_runtime;
 
 thread_local! {
@@ -71,17 +69,6 @@ pub(super) fn current_snapshot(controller: &HostController) -> Option<ImportProg
 /// Record the real terminal outcome of a synchronous open.
 fn set_terminal(terminal: ImportTerminal) {
     FALLBACK.with(|slot| *slot.borrow_mut() = Some(ImportProgressSnapshot::terminal(terminal)));
-}
-
-/// Derive and write the progress panel from the current snapshot.
-///
-/// Called by the single state-push funnel after every command and by the poll
-/// heartbeat, so the panel can never lag the open it describes.
-pub(super) fn push_state(controller: &Rc<RefCell<HostController>>, handle: &UiHandle) {
-    let messages = current_messages();
-    let snapshot = current_snapshot(&controller.borrow());
-    let state = ImportProgressUiState::from_snapshot(snapshot.as_ref(), &messages);
-    let _ = handle.set_import_state(&state);
 }
 
 /// How an open started through [`start_or_apply`].
@@ -139,35 +126,19 @@ pub(super) fn start_or_apply(
 /// document is updated through the existing `install_opened` path — a single
 /// source of truth per open, no duplicate import.
 pub fn poll_and_apply() -> String {
-    let Some((controller, handle, view, incoming, viewport)) = with_runtime(|rt| {
-        (
-            rt.controller.clone(),
-            rt.handle.clone(),
-            rt.view.clone(),
-            rt.incoming.clone(),
-            rt.viewport,
-        )
-    }) else {
+    let Some((core, incoming)) = with_runtime(|rt| (rt.core.clone(), rt.incoming.clone())) else {
         return snapshot_json(None);
     };
 
-    let poll = controller.borrow_mut().poll_async_open();
+    let poll = core.controller.borrow_mut().poll_async_open();
     if let AsyncOpenPoll::Opened { opened, .. } = &poll {
         // Publish is already done by the core; `install_opened` is the single
         // host-side document swap, shared with the synchronous path.
-        let name = controller.borrow().document_name_hint.clone();
-        install_opened(
-            &name,
-            opened,
-            &controller,
-            &handle,
-            &view,
-            &incoming,
-            &viewport,
-        );
+        let name = core.controller.borrow().document_name_hint.clone();
+        install_opened(&name, opened, &core, &incoming);
     }
-    push_state(&controller, &handle);
-    let snapshot = current_snapshot(&controller.borrow());
+    super::state_push::push_import_state(&core);
+    let snapshot = current_snapshot(&core.controller.borrow());
     snapshot_json(snapshot.as_ref())
 }
 

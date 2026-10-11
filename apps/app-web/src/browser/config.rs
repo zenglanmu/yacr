@@ -33,11 +33,6 @@ pub fn persist_user_preference(handle: &UiHandle) -> CadResult<()> {
     cad_ui_slint::web::store_config_preference(&text)
 }
 
-/// Read the persisted user preference patch (a raw JSON string, unvalidated).
-pub fn stored_user_preference() -> Option<String> {
-    cad_ui_slint::web::stored_config_preference()
-}
-
 /// Install the host config (JSON) and emit a change event on success.
 pub fn set_config_json(text: &str) -> CadResult<()> {
     let handle = handle()?;

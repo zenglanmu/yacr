@@ -340,6 +340,7 @@ dependencies = [
  "cad-app",
  "cad-diagnostics",
  "cad-domain",
+ "cad-host",
  "cad-platform",
  "cad-representation",
  "cad-resources",

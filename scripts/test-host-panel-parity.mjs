@@ -45,50 +45,95 @@ const REQUIRED_HANDLE_SETTERS = [
 const HOSTS = [
   {
     name: "linux",
-    file: "apps/app-linux/src/host/state.rs",
+    // app-linux is a thin wrapper: its panel funnel is the shared cad-host core.
+    files: ["crates/cad-host/src/state.rs"],
     required: REQUIRED_PANEL_SYMBOLS,
   },
   {
     name: "web",
-    file: "apps/app-web/src/browser/state_push.rs",
+    // app-web is a thin wrapper too: its *shared* panel funnel is the cad-host
+    // core (`HostCore::push`). Its browser-specific overlay (import progress +
+    // font summary) is asserted separately below so this contract is not
+    // tautological with the linux entry.
+    files: ["crates/cad-host/src/state.rs"],
     required: REQUIRED_PANEL_SYMBOLS,
   },
   {
     name: "android",
-    file: "apps/app-android/src/state_push.rs",
+    files: ["apps/app-android/src/state_push.rs"],
     required: REQUIRED_PANEL_SYMBOLS,
   },
 ];
 
 // The overlay gate reads the *effective* configuration, so an overlay the
-// config disables is never drawn. All three hosts use this exact expression; if
-// a host adopts a variant (e.g. a cached accessor) update this list and the
-// message here, do not weaken the assertion silently.
+// config disables is never drawn. The shared core and Android use this exact
+// expression; if a host adopts a variant (e.g. a cached accessor) update this
+// list and the message here, do not weaken the assertion silently.
 const OVERLAY_GATE = /set_overlay_visibility\s*\(\s*handle\.effective_config\(\)\.view\.overlays\.into\(\)\s*\)/;
 
 for (const host of HOSTS) {
-  test(`${host.name} host references every required panel/overlay channel`, () => {
-    const source = readSource(host.file);
-    for (const symbol of host.required) {
-      assert.ok(
-        source.includes(symbol),
-        `${host.file} is missing required panel/overlay entry point "${symbol}"; ` +
-          `the ${host.name} host funnel has drifted from the shared panel surface`,
-      );
-    }
-  });
+  for (const file of host.files) {
+    test(`${host.name} host (${file}) references every required panel/overlay channel`, () => {
+      const source = readSource(file);
+      for (const symbol of host.required) {
+        assert.ok(
+          source.includes(symbol),
+          `${file} is missing required panel/overlay entry point "${symbol}"; ` +
+            `the ${host.name} host funnel has drifted from the shared panel surface`,
+        );
+      }
+    });
 
-  test(`${host.name} host gates overlays on the effective config`, () => {
-    const source = readSource(host.file);
-    assert.match(
-      source,
-      OVERLAY_GATE,
-      `${host.file} must call ` +
-        `set_overlay_visibility(handle.effective_config().view.overlays.into()) ` +
-        `so overlay gating parity is pinned across hosts`,
-    );
-  });
+    test(`${host.name} host (${file}) gates overlays on the effective config`, () => {
+      const source = readSource(file);
+      assert.match(
+        source,
+        OVERLAY_GATE,
+        `${file} must call ` +
+          `set_overlay_visibility(handle.effective_config().view.overlays.into()) ` +
+          `so overlay gating parity is pinned across hosts`,
+      );
+    });
+  }
 }
+
+// The web host's *browser-specific* overlay (import progress + font summary) is
+// not in the shared core. Assert it directly so the web parity contract is not
+// tautological with the linux entry (both would otherwise point at the same
+// cad-host file) and the web overlay cannot be silently dropped.
+const WEB_OVERLAY_SYMBOLS = ["set_import_state", "set_resources_sections"];
+
+test("web host overlay pushes the browser-specific import/font channels", () => {
+  const overlay = readSource("apps/app-web/src/browser/state_push.rs");
+  for (const symbol of WEB_OVERLAY_SYMBOLS) {
+    assert.ok(
+      overlay.includes(symbol),
+      `apps/app-web/src/browser/state_push.rs is missing "${symbol}"; ` +
+        `the browser-specific panel overlay has drifted`,
+    );
+  }
+  assert.ok(
+    overlay.includes("images_modeled: false"),
+    "the web overlay must keep images_modeled: false (raster images are not modeled on web)",
+  );
+  const browser = readSource("apps/app-web/src/browser.rs");
+  assert.ok(
+    browser.includes("core.push()"),
+    "apps/app-web/src/browser.rs must run the shared HostCore::push",
+  );
+  assert.ok(
+    browser.includes("push_web_overlay"),
+    "apps/app-web/src/browser.rs must re-apply the web overlay after the shared push",
+  );
+  assert.ok(
+    browser.includes("set_layout_switch_sink"),
+    "apps/app-web/src/browser.rs must install a layout-switch sink",
+  );
+  assert.ok(
+    browser.includes("Box::new(layout_sink)"),
+    "the web layout-switch sink must be the web sink (web funnel), not the raw HostCore",
+  );
+});
 
 test("required panel channels are real UiHandle public setters", () => {
   const handle = readSource("crates/cad-ui-slint/src/handle.rs");

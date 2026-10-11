@@ -85,18 +85,23 @@ impl FontLoader for WebFontLoader {
 /// Load and install the shaping fonts the current drawing references.
 /// Stale loads are discarded rather than applied to a replacement drawing.
 pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
-    let (controller, handle, view, incoming) = with_runtime(|rt| {
-        (
-            rt.controller.clone(),
-            rt.handle.clone(),
-            rt.view.clone(),
-            rt.incoming.clone(),
-        )
-    })
-    .ok_or_else(|| CadError::Invariant("浏览器宿主尚未启动".into()))?;
+    let (core, incoming) = with_runtime(|rt| (rt.core.clone(), rt.incoming.clone()))
+        .ok_or_else(|| CadError::Invariant("浏览器宿主尚未启动".into()))?;
+    let handle = core
+        .handle
+        .borrow()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| CadError::Invariant("浏览器宿主尚未启动".into()))?;
+    let view = core
+        .view
+        .borrow()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| CadError::Invariant("渲染视图尚未安装".into()))?;
 
     let (requested, identity) = {
-        let controller = controller.borrow();
+        let controller = core.controller.borrow();
         match controller.drawing() {
             Some(drawing) => (
                 requested_fonts(drawing.as_ref()),
@@ -110,6 +115,7 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
         view.clear_fonts();
         let report = FontLoadReport::default();
         set_last_font_report(report.clone());
+        super::state_push::push_resource_sections(&core);
         set_font_status(&handle, "字体：图纸未引用 CAD 文本字体".into());
         return Ok(report);
     }
@@ -126,6 +132,7 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
         view.set_fonts(engine);
     }
     set_last_font_report(report.clone());
+    super::state_push::push_resource_sections(&core);
     let text = super::messages::current_messages().text(
         "fonts.loaded",
         &[
@@ -142,7 +149,9 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
 pub(super) fn spawn_font_load() {
     wasm_bindgen_futures::spawn_local(async {
         if let Err(e) = load_current_fonts().await {
-            if let Some(handle) = with_runtime(|rt| rt.handle.clone()) {
+            if let Some(handle) =
+                with_runtime(|rt| rt.core.handle.borrow().as_ref().cloned()).flatten()
+            {
                 let _ = handle.set_status(
                     super::messages::current_messages()
                         .text("fonts.failed", &[("error", &e.to_string())]),

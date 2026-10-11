@@ -1,27 +1,16 @@
 //! Canvas-local picking for the web host: logical pixels → world.
 //!
-//! Two consumers share this module:
-//!
-//! * the measurement/annotation `CanvasPickMapper` installed on the adapter,
-//!   which must resolve a canvas-local logical point to a world point on the
-//!   viewport work plane; and
-//! * the selection gesture in [`super::input`], which hit-tests the same point
-//!   against model-space geometry through `cad_app::pick_at_screen`.
-//!
-//! Both read the *authoritative* `cad_app::Viewport` and the canvas logical size
-//! the shell reports, so a pick and a render of the same pixel agree (audit
+//! The shared `HostCore` owns the adapter's `CanvasPickMapper`; this module keeps
+//! the pure mapping helpers the browser selection gesture in [`super::input`]
+//! shares with it, so a pick and a render of the same pixel agree (audit
 //! U07/B17). Degenerate input returns `None`/an error rather than a fabricated
 //! world point.
-
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use cad_app::host::HostController;
 use cad_app::input::{CanvasMetrics, ViewMetrics};
 use cad_app::picking::pick_at_screen;
 use cad_app::{BackFacePolicy, PickReport, Viewport};
-use cad_domain::{CadError, CadResult, Point3, SelectionRef, TolerancePolicy, ViewportId};
-use cad_ui_slint::CanvasPickMapper;
+use cad_domain::{CadError, CadResult, Point3, SelectionRef, TolerancePolicy};
 
 use super::SharedHandle;
 
@@ -62,7 +51,7 @@ pub(super) fn selection_refs_from_report(report: &PickReport) -> Vec<SelectionRe
         .unwrap_or_default()
 }
 
-/// The canvas logical size the mapper and selection picker should use.
+/// The canvas logical size the selection picker should use.
 ///
 /// Prefers the shell's real CAD rectangle; falls back to the viewport's cached
 /// logical size when the handle is not available (for example before the shell
@@ -73,37 +62,13 @@ pub(super) fn canvas_size(handle: &SharedHandle, viewport: &Viewport) -> Option<
             if size[0].is_finite() && size[1].is_finite() && size[0] > 0.0 && size[1] > 0.0 {
                 // The shell reports the surface; the CSS safe area shrinks it to
                 // the canvas, matching the authoritative viewport metrics
-                // (`browser::apply_surface_metrics`).
+                // (`HostCore::metrics`).
                 return super::inset_canvas_size(size);
             }
         }
     }
     let size = viewport.logical_size;
     (size[0].is_finite() && size[1].is_finite() && size[0] > 0.0 && size[1] > 0.0).then_some(size)
-}
-
-/// The mapper installed on `UiAdapter::set_canvas_pick_mapper` for the web host.
-///
-/// It holds the controller and viewport rather than a snapshot so every pick
-/// sees the live camera/work plane; a stale snapshot would disagree with what is
-/// on screen after a pan or zoom.
-pub(super) struct WebCanvasPickMapper {
-    pub(super) controller: Rc<RefCell<HostController>>,
-    pub(super) handle: SharedHandle,
-    pub(super) viewport: ViewportId,
-}
-
-impl CanvasPickMapper for WebCanvasPickMapper {
-    fn to_world(&self, logical: [f64; 2]) -> Option<Point3> {
-        let controller = self.controller.borrow();
-        let viewport = controller
-            .application
-            .workspace
-            .viewports
-            .get(&self.viewport)?;
-        let size = canvas_size(&self.handle, viewport)?;
-        map_canvas_point(viewport, size, logical)
-    }
 }
 
 /// Hit-test a canvas-local point against the open drawing's model space.
@@ -142,7 +107,7 @@ pub(super) fn pick_selection(
 mod tests {
     use super::*;
     use cad_app::Viewport;
-    use cad_domain::{DocumentId, EntityId, GeometrySource, InstancePath, Precision};
+    use cad_domain::{DocumentId, EntityId, GeometrySource, InstancePath, Precision, ViewportId};
     use cad_spatial::PickHit;
 
     fn viewport() -> Viewport {

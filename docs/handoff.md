@@ -1,5 +1,90 @@
 # 后续 agent 接手入口
 
+## Web 宿主迁移到 cad-host（P1，2026-10-11，本轮）
+
+用户要求：把 `apps/app-web` 迁移到 P0 抽取的 `cad_host::HostCore`，删除 Web 侧重复编排，
+**行为保持**——wasm 导出面（`apps/app-web/src/lib.rs`）、JS 宿主（`apps/app-web/web/`）、
+能力门（new/save/plot 保持 `false`）不变；文件功能留待 P3。
+
+- 新增 `apps/app-web/src/browser/platform.rs`：`cad-platform` 契约的浏览器实现。
+  `WebFiles`：`begin_open` 触发隐藏 `<input type=file>` 点击；`open_document_bytes`
+  入队 `FileEvent::Opened`，`poll()` 排空（`documents::drain_open_events` 同步安装）；
+  `begin_save` 在手势内同步合成 `download://` 目标（正确实现，P3 用）；`write_atomic`
+  本阶段显式 `Unsupported`（尚无下载，不翻能力位）；`refuses_source_overwrite` 返回
+  `false`（浏览器无文件身份）。`WebConfigStore`：`load_config` 恒 `Absent`（有效配置在内存
+  构建），`load_preference`/`persist_preference` 走 `localStorage`。`WebSurface`：CSS 表面
+  尺寸 + 安全区（`SURFACE`/`SAFE_INSETS`）。
+- `browser.rs` 变为组合根：用上述实现构造 `HostCore`（能力位
+  `open=true`、`new/save/plot=false`、`import_worker=false`），以核心作为 `UiCommandSink` 的
+  委托目标、`LayoutSwitchSink`、`CanvasPickMapper`、绘制预览 sink；`core.set_handle`/
+  `set_view` 后 `core.push()` 承担通用面板推送。`HostRuntime` 改为持有
+  `core`/`files`/`incoming`；`current_handle`/`resize`/`set_safe_insets`/`renderer_report`/
+  `apply_locale` 全部改经核心（`metrics`/`sync_view`/`push`）。
+- 删除的重复编排：`browser/state_push.rs`（`push_panel_state` 与各 `derive_*` 面板映射、
+  `WebCanvasPickMapper`、`WebDrawPreviewSink` 全并入/复用 `cad-host`）。保留并缩减为薄适配：
+  `input.rs`（`WebSink` 仅拦截 `OpenDrawing`/`SwitchBackend`，其余委托
+  `HostCore::execute`；`WebViewInput` 保留浏览器指针/轻触语义与预览光标）、
+  `draw.rs`（`WebDrawSink` 保留 Trim/Extend 世界点解析——桌面核心显式拒绝；预览 sink 复用
+  核心）、`pick.rs`（仅纯映射/选择拾取辅助，供 `WebViewInput` 使用）、`state_push.rs`
+  （仅浏览器叠加：同步回退进度面板 + 资源抽屉字体摘要 + 诊断模型编码）。
+- 行为保持点：wasm 导出 23 个不变（`start_web`…`viewer_interaction_json`）；`async_open_poll_json`
+  JSON 契约与同步回退（`worker_available()==false`，不 spawn 线程）不变；
+  `install_with_preference` 渲染桥、`browser/fonts.rs` Fetch 与 `spawn_font_load` 不变；
+  `browser/persistence.rs` 选择器、`shell.rs` 触控、`config.rs` 的 `viewer_*` 导出不变；
+  能力位保持 `open=true, new/save/plot=false`。**命令状态文案改由共享目录给出**
+  （`linux.completed`/`linux.failed`/`fit.empty`），不再是 Web 内联中文——这是采纳共享漏斗的
+  必然结果，已在契约测试与本文档记录。
+- Web 无 Rust 定时器：JS 心跳经 `async_open_poll_json` 驱动打开进度；核心 `tick()` 不用于
+  Web。`HostCore` 的 wasm 字体/图像装载仍为显式 `Unsupported` 且**不被 Web 调用**（Web 打开
+  走自身同步导入 + 浏览器字体路径）。
+
+验证（本机；Web 无头/真实 GPU/真机**未验证**，下列仅为编译与契约证据）：
+
+- `cargo fmt --all -- --check`；`cargo clippy --workspace --exclude app-android --all-targets
+  --locked -- -D warnings`；`cargo clippy -p app-web --target wasm32-unknown-unknown
+  --all-targets --locked -- -D warnings`（Web 代码此前不在默认门禁，本轮单独跑）。
+- `python3 scripts/check-architecture.py`（26 包）；`check-i18n.py`（284 键）；
+  `check-fixture-manifest.py`（22 fixture）；`check-workflows.py`。
+- `cargo check --workspace --exclude app-android --all-targets --locked`；
+  `cargo check -p app-web --target wasm32-unknown-unknown --locked`；
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`。
+- `cargo test -p cad-host --locked`：7 通过 / 0 失败。
+- `node --test scripts/test-web-host.mjs scripts/test-web-touch.mjs
+  scripts/test-host-panel-parity.mjs scripts/test-web-responsive.mjs`：**43 通过 / 0 失败**
+  （`test-host-panel-parity.mjs` 已改指新结构：linux+web 共用 `crates/cad-host/src/state.rs`，
+  android 仍指 `apps/app-android/src/state_push.rs`，未削弱断言）。另
+  `node --test scripts/test-web-a11y.mjs scripts/test-web-icon.mjs`（12 通过）、
+  `node --test scripts/test-web-pixels.mjs`（1 通过）；`test-web-cache-busting.py`/
+  `test-web-backend-fallback.py`/`test-web-deploy-workflow.py` 各 3/4/4 通过。
+- `DIST=/tmp/opencode/yacr-web-p1 WITH_FONTS=0 scripts/build-web.sh`：release 链接成功，
+  `wasm-bindgen` 导出 23 个（与迁移前一致），wasm 19,171,091 字节。
+- 未运行：浏览器/Playwright 视觉、真实 GPU/WebGPU、真机、wasm 运行时执行。
+
+补强（P1 评审后，行为保持）：
+- **M1 共享状态文案去 Linux 品牌 + 错误去 Debug 包装**：新增 `command.completed`/`command.failed`
+  （两份 catalog 键集一致），`HostCore::execute`（lib.rs）与 `report_nav`（input.rs）改用之；
+  新增 `error_text()` 把 `Unsupported(reason)`/`NotImplemented(feature)` 解包为内层字符串（不再
+  `Debug` 引号）。删除仅剩未引用的 `linux.completed`（其余 `linux.*` 为桌面管线专用，保留）。
+- **M2 布局点击走 Web 漏斗**：`WebSink` 实现 `LayoutSwitchSink`，经 `run_command` 转发 `SwitchSpace`；
+  `browser.rs` 安装 `WebSink`（而非裸 `HostCore`），布局点击不再用共享 `push` 覆盖浏览器字体汇总 /
+  导入面板，也不再谎报 `images_modeled: true`。
+- **M3 运行期语言切换到达共享目录**：`HostCore` 增加**共享** `locale: Rc<RefCell<String>>` 槽 +
+  `set_locale`/`messages()`；`browser::apply_locale` 在 `push_state` 前调用 `core.set_locale(tag)`，
+  使 completed/failed、fit.empty、layers/properties/layout 空态文案随语言切换（跨 clone 生效）。
+- **E 面板 parity 去同义反复**：`test-host-panel-parity.mjs` 新增 Web 专属断言——覆盖
+  `apps/app-web/src/browser/state_push.rs` 的 `set_import_state`/`set_resources_sections`/
+  `images_modeled: false`，以及 `browser.rs` 调用 `core.push()` + `push_web_overlay` + 安装 Web
+  layout sink。
+- **F 能力门加固**：`request_new/request_plot/request_save` 在对应 capability 为 false 时显式
+  `Unsupported`（不再静默替换文档 / 排队永不导出的 `download://`）；`poll_loading` 的
+  `set_save_available` 现尊重 `capabilities.save`。
+- 杂项：`HostCore::execute` 不再让 `push()` 失败掩盖命令自身的错误（push 失败仅在命令成功时上浮），
+  并在 `push()` 文档注明其 fail-fast（web `push_state` 记日志后继续）。
+- 新增 cad-host 单测（fake `PlatformFiles`）：克隆间 `set_locale` 生效；无 capability 的
+  New/Plot/Save 被拒绝且无副作用；`error_text` 解包 Unsupported/NotImplemented。补强后
+  `cargo test -p cad-host`：**10 通过 / 0 失败**；`check-i18n.py`：**285 键**；
+  `node --test …`：**44 通过 / 0 失败**。
+
 ## 宿主编排抽取：cad-host（P0，2026-10-11，本轮）
 
 用户要求：把 `apps/app-linux` 的平台公共宿主编排抽到新 crate `cad-host`（`HostCore`），以
@@ -65,7 +150,8 @@
   --ignored --test-threads=1 --nocapture`（不设 `VK_ICD_FILENAMES`）→ `backend=Some("vulkan")`，
   `grid_changed_pixels=6325`，wheel-up 缩小 world_per_px。证据写 `/tmp/opencode/yacr-real-gpu`。
 - 说明：本轮只迁移桌面宿主；Web/Android 未迁移（`app-web`/`app-android` 行为未改），
-  `cad-host` 的 wasm 字体/图像装载为显式 `Unsupported`（尚无调用者）。
+  `cad-host` 的 wasm 字体/图像装载为显式 `Unsupported`（尚无调用者）。（**P1 已迁移 Web**，
+  见本文件顶部；wasm 字体/图像装载仍为 `Unsupported`，Web 走自身浏览器字体路径。）
 
 ## 程序级汇总：命令行 / 快捷键 / 绘制编辑（2026-10-10 → 2026-10-11）
 

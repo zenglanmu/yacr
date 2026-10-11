@@ -47,6 +47,20 @@ pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowe
     "ui.components.propertiesPanel.initiallyOpen"
 ]}}}"#;
 
+/// A user-facing rendering of a command error.
+///
+/// `CadError::Display` delegates to `Debug`, so `to_string()` would print
+/// `Unsupported("…")`/`NotImplemented("…")` with Debug quoting. This unwraps
+/// those two variants to their inner (already-localized) string and falls back
+/// to `Display` for the rest.
+pub(crate) fn error_text(error: &CadError) -> String {
+    match error {
+        CadError::Unsupported(reason) => reason.clone(),
+        CadError::NotImplemented(feature) => (*feature).to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// Platform-general host options.
 ///
 /// A host-specific options type (for example `LinuxOptions`, which also carries
@@ -122,6 +136,13 @@ pub struct HostCore {
     pub config_store: Rc<dyn ConfigStore>,
     pub surface: Rc<dyn SurfaceSource>,
     pub capabilities: HostCapabilities,
+    /// The active catalog locale, **shared** across every clone.
+    ///
+    /// A runtime locale switch must reach the shared-catalog text produced by
+    /// `message()`/`messages()` on *every* clone (the web host holds clones in
+    /// the sink, the input sink and the layout sink), so this is one `Rc` slot,
+    /// not a per-clone copy of `options.locale`.
+    pub(crate) locale: Rc<RefCell<String>>,
     /// A picker/read is in flight (analogous to the old `pending_open`).
     pub(crate) open_pending: Rc<Cell<bool>>,
     /// The drawing captured when an open attempt began, so a superseded result
@@ -167,6 +188,7 @@ impl HostCore {
         let controller = Rc::new(RefCell::new(HostController::with_demo_document(
             options.size,
         )?));
+        let locale = Rc::new(RefCell::new(options.locale.clone()));
         Ok(Self {
             controller,
             handle,
@@ -176,6 +198,7 @@ impl HostCore {
             config_store: platform.config_store,
             surface: platform.surface,
             capabilities: platform.capabilities,
+            locale,
             open_pending: Rc::new(Cell::new(false)),
             open_guard: Rc::new(RefCell::new(None)),
             open_abort: Rc::new(Cell::new(false)),
@@ -203,9 +226,25 @@ impl HostCore {
         *self.view.borrow_mut() = Some(view);
     }
 
-    /// The localized message for `key` in the host's locale.
+    /// The localized message for `key` in the host's **current** locale.
+    ///
+    /// Reads the shared locale slot, so a runtime `set_locale` on any clone
+    /// affects every clone's text.
     pub fn message(&self, key: &str, values: &[(&str, &str)]) -> String {
-        cad_ui_slint::MessageSource::from_request(&self.options.locale).text(key, values)
+        self.messages().text(key, values)
+    }
+
+    /// The catalog for the host's current locale (a clone of the shared source).
+    pub fn messages(&self) -> cad_ui_slint::MessageSource {
+        cad_ui_slint::MessageSource::from_request(self.locale.borrow().as_str())
+    }
+
+    /// Switch the host's catalog locale at runtime.
+    ///
+    /// The slot is shared, so this reaches the text produced by every clone
+    /// (the web host keeps clones in its sink, input sink and layout sink).
+    pub fn set_locale(&self, tag: &str) {
+        *self.locale.borrow_mut() = tag.to_string();
     }
 
     /// Diagnostics from reading the host config / user preference at startup.
@@ -294,12 +333,15 @@ impl HostCore {
             )),
             _ => self.controller.borrow_mut().execute(command).map(Some),
         };
-        self.push()?;
+        // The push is best-effort relative to the command result: a failed push
+        // must never mask the command's own error (it is surfaced only when the
+        // command itself succeeded).
+        let push_result = self.push();
         if let Err(error) = &result {
             if !owns_status {
                 if let Some(handle) = self.handle.borrow().as_ref() {
                     handle.set_status(
-                        self.message("linux.failed", &[("error", &error.to_string())]),
+                        self.message("command.failed", &[("error", &error_text(error))]),
                     )?;
                 }
             }
@@ -317,12 +359,15 @@ impl HostCore {
                     Some(diagnostic) if diagnostic.code == "fit.empty" => {
                         self.message("fit.empty", &[])
                     }
-                    _ => self.message("linux.completed", &[]),
+                    _ => self.message("command.completed", &[]),
                 };
                 handle.set_status(status)?;
             }
         }
-        result.map(|_| ())
+        match result {
+            Ok(_) => push_result,
+            Err(error) => Err(error),
+        }
     }
 
     /// Whether a document open is in flight (picker, read, import or presentation).

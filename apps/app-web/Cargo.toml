@@ -10,6 +10,10 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# The shared platform-common host orchestration (command routing, state push,
+# open/plot/save funnels, navigation/draw sinks); the browser host supplies only
+# the platform impls and its genuinely browser-specific adapters.
+cad-host.workspace = true
 cad-ui-slint.workspace = true
 cad-app.workspace = true
 cad-platform.workspace = true

@@ -141,7 +141,7 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
 
 ### 3.2.1 Web 宿主接线（已接线；无头/真机验收待补）
 
-`apps/app-web` 在 `browser/state_push.rs` 中已调用
+`apps/app-web` 通过共享 `cad_host::HostCore::push` 调用
 `set_layer_state` / `set_property_state`（以及布局/诊断面板），并传入真实
 `LayerId`/`LayoutId` 顺序；空状态与多值文案取自目录
 （`layers.empty`、`properties.empty`、`properties.mixed`）。无捕获工具时的画布轻触经
@@ -171,11 +171,11 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
   之间；用户批注覆盖层已随子系统移除），
   颜色为 `cad_scene::DEFAULT_HIGHLIGHT_COLOR` 且 `color_unresolved = false`。
   宿主仍需调用该 setter（见 `docs/ui.md` §3）；工具预览同路径，见
-  `overlay::preview_overlay`。**Web 宿主已接线**：`apps/app-web` 的
-  `browser/state_push.rs::push_panel_state` 在每条命令/选择拾取/确认取消路径统一推送
-  `set_selection_highlight`/`set_measurement_preview`，空选择
-  与无工具分别推送空 `SelectionSet`/`None`（高亮与预览消失）；纯映射见
-  `derive_overlay_push`。真实 GPU 像素与浏览器行为**未在本轮验证**（headless 验收待补）。
+  `overlay::preview_overlay`。**Web 宿主已接线**：共享 `cad_host::HostCore::push`
+  （由 `apps/app-web` 的 `browser::push_state` 调用）在每条命令/选择拾取/确认取消路径统一
+  推送 `set_selection_highlight`/`set_measurement_preview`，空选择与无工具分别推送空
+  `SelectionSet`/`None`（高亮与预览消失）；纯映射见 `crates/cad-host/src/state.rs`。
+  真实 GPU 像素与浏览器行为**未在本轮验证**（headless 验收待补）。
 - **精确拾取**：把画布点击变成 `SelectionRef` 需要宿主安装画布→世界映射并做命中
   测试（`cad-spatial::GridSpatialIndex`）；UI 侧只回传逻辑像素，宿主未接线时同样
   显式提示，不静默丢弃（与测量 `canvas-pick` 同一条路径）。
