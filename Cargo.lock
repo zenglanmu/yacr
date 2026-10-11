@@ -315,13 +315,10 @@ version = "0.1.1"
 dependencies = [
  "ashpd",
  "cad-app",
- "cad-db",
- "cad-diagnostics",
  "cad-domain",
+ "cad-host",
  "cad-platform",
  "cad-render-wgpu",
- "cad-representation",
- "cad-resources",
  "cad-ui-slint",
  "pollster",
  "rfd",
@@ -880,6 +877,20 @@ version = "0.1.1"
 dependencies = [
  "cad-db",
  "cad-domain",
+]
+
+[[package]]
+name = "cad-host"
+version = "0.1.1"
+dependencies = [
+ "cad-app",
+ "cad-db",
+ "cad-diagnostics",
+ "cad-domain",
+ "cad-platform",
+ "cad-representation",
+ "cad-resources",
+ "cad-ui-slint",
 ]
 
 [[package]]

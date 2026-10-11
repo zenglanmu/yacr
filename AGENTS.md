@@ -40,17 +40,22 @@ cad-proxy ─ cad-import-acadrust ─ cad-resources
 cad-measure ─ cad-annotations ─ cad-query ─ cad-app
   ↑
 cad-ui-slint ─ cad-platform ─ cad-diagnostics ─ cad-cli-tools
+  ↑（cad-host 仅依赖 cad-ui-slint/cad-platform/cad-diagnostics/cad-resources，不依赖 cad-cli-tools）
+cad-host
   ↑
 apps/app-linux  apps/app-windows  apps/app-macos  apps/app-android  apps/app-web
 ```
 
 `app-linux` 是 Linux/Windows/macOS 共享的桌面宿主实现（`cfg(any(target_os = "linux",
 target_os = "windows", target_os = "macos"))`）；`app-windows` 与 `app-macos` 只是调用其
-入口的薄封装（`yacr.exe` / `yacr-macos`）。
+入口的薄封装（`yacr.exe` / `yacr-macos`）。`cad-host` 是平台无关的宿主编排层（`HostCore`：
+命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink），实现 `cad-ui-slint` 的 sink
+trait，平台 I/O 一律走 `cad-platform` 契约；`app-linux` 只提供桌面平台实现与事件循环。
 
 `check-architecture.py` 强制的边界：`cad-domain` 不依赖任何 CAD 包；`cad-db` 只依赖
 `cad-domain`；`cad-import-acadrust` 是**唯一**依赖 acadrust 的 crate；`cad-render-wgpu`
-是唯一依赖 wgpu 的 crate；Slint 只允许出现在 `cad-ui-slint`/`app-*`；平台类型
+是唯一依赖 wgpu 的 crate；Slint 只允许出现在 `cad-ui-slint`/`app-*`（`cad-host` 只依赖
+`cad-ui-slint`，不直接依赖 slint）；平台类型
 （`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`。`cad-db` 是唯一权威数据
 源；UI 与渲染均为派生。
 

@@ -7,6 +7,7 @@
 
 use super::*;
 use cad_render_wgpu::headless::{encode_png, RgbaImage};
+use cad_ui_slint::CadView;
 
 impl LinuxApp {
     fn snapshot(&self) -> CadResult<RgbaImage> {
@@ -136,6 +137,7 @@ fn changed_cad_pixels(before: &RgbaImage, after: &RgbaImage, rect: [f64; 4], sca
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cad_app::host::HostController;
 
     #[test]
     #[ignore = "requires a desktop display/GPU and YACR_TEST_DWG; run in a dedicated process"]

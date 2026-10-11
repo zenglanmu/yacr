@@ -7,19 +7,17 @@ use std::sync::{
     Arc,
 };
 pub type HostFuture<'a, T> = Pin<Box<dyn Future<Output = CadResult<T>> + 'a>>;
-#[derive(Debug, Clone)]
-pub struct FileToken(pub String);
-pub struct FileGrant {
-    pub token: FileToken,
-    pub display_name: String,
-    pub writable: bool,
-    pub persistent: bool,
-}
-pub trait FileAccess {
-    fn pick_drawing(&self) -> HostFuture<'_, FileGrant>;
-    fn read(&self, token: &FileToken) -> HostFuture<'_, Arc<[u8]>>;
-    fn export_atomic(&self, name_hint: &str, bytes: Arc<[u8]>) -> HostFuture<'_, FileGrant>;
-}
+
+/// File/platform contracts the shared host core drives (see [`files`]).
+///
+/// This reshapes the earlier 0-implementation `FileAccess` draft: the host core
+/// is event-based and single-threaded, so the contracts are object-safe, use no
+/// futures and require no `Send`.
+pub mod files;
+pub use files::{
+    ConfigLoad, ConfigStore, FileEvent, FilePurpose, FileTarget, HostCapabilities, PlatformFiles,
+    SavePurpose, SurfaceMetrics, SurfaceSource,
+};
 
 /// Host-side font fetching.
 ///

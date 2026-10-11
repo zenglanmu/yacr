@@ -6,8 +6,10 @@ use cad_ui_slint::{
     ResourceSections,
 };
 
-impl Runtime {
-    pub(super) fn sync_view(&self) -> CadResult<()> {
+impl HostCore {
+    /// Push the derived view/observation state and, if the view exists, the
+    /// session camera/layers/selection/snap state.
+    pub fn sync_view(&self) -> CadResult<()> {
         let c = self.controller.borrow();
         let viewport = c
             .application
@@ -38,21 +40,25 @@ impl Runtime {
         }
         Ok(())
     }
-    pub(super) fn push(&self) -> CadResult<()> {
+
+    /// Push the full application state into the shell and the CAD view.
+    pub fn push(&self) -> CadResult<()> {
         self.sync_view()?;
         let c = self.controller.borrow();
         let handles = self.handle.borrow();
         let handle = handles.as_ref().ok_or(CadError::Cancelled)?;
         handle.set_open_available(
-            (!self.options.headless || self.options.drawing.is_some()) && !self.loading(),
+            self.capabilities.open
+                && (!self.options.headless || self.options.drawing.is_some())
+                && !self.loading(),
         )?;
         // Desktop hosts a document factory, so New is available unless an open
         // is in flight; web/android never call this and keep `can-new` false.
-        handle.set_new_available(!self.loading())?;
+        handle.set_new_available(self.capabilities.new && !self.loading())?;
         // Desktop renders CPU vector plots; web/android leave `can-plot` false.
-        handle.set_plot_available(!self.loading())?;
+        handle.set_plot_available(self.capabilities.plot && !self.loading())?;
         // Desktop performs a lossy DXF Save As; web/android leave `can-save` false.
-        handle.set_save_available(!self.loading())?;
+        handle.set_save_available(self.capabilities.save && !self.loading())?;
         handle.set_document_name(&c.document_name_hint)?;
         handle.set_history_availability(c.history_availability())?;
         handle.set_mode(c.mode())?;
@@ -128,10 +134,8 @@ impl Runtime {
                 .unwrap_or_default(),
         ))?;
         // Resources drawer (F10): real sections only. The desktop font loader
-        // (`cad_platform::fonts::local::load_engine`) discards its
-        // `FontLoadReport`, so `fonts` is not pushed here — the drawer shows its
-        // explicit empty state rather than a fabricated summary. Proxy records
-        // are not surfaced by the importer in this build either.
+        // discards its `FontLoadReport`, so `fonts` is not pushed here — the
+        // drawer shows its explicit empty state rather than a fabricated summary.
         handle.set_resources_sections(&ResourceSections {
             fonts: None,
             import: c
@@ -165,11 +169,6 @@ impl Runtime {
             }),
             images_modeled: true,
         })?;
-        // The 3D observation drawer is pushed by `sync_view` through
-        // `set_view_state` (it also re-derives `set_view3d_state`), so the drawer
-        // reflects the real viewport. `set_viewport_scale` is intentionally not
-        // called: the layout descriptors carry no scale, so there is no real
-        // value to push (the panel shows its explicit "scale unavailable" state).
         if let Some(view) = self.view.borrow().as_ref() {
             view.set_overlay_visibility(handle.effective_config().view.overlays.into());
             view.sync_drawing(Some(drawing));

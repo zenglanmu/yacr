@@ -17,6 +17,7 @@ members = [
     "crates/cad-resources",
     "crates/cad-query",
     "crates/cad-app",
+    "crates/cad-host",
     "crates/cad-ui-slint",
     "crates/cad-platform",
     "crates/cad-diagnostics",
@@ -53,6 +54,7 @@ cad-import-acadrust = { path = "crates/cad-import-acadrust" }
 cad-resources = { path = "crates/cad-resources" }
 cad-query = { path = "crates/cad-query" }
 cad-app = { path = "crates/cad-app" }
+cad-host = { path = "crates/cad-host" }
 cad-ui-slint = { path = "crates/cad-ui-slint" }
 cad-platform = { path = "crates/cad-platform" }
 cad-diagnostics = { path = "crates/cad-diagnostics" }

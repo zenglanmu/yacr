@@ -24,7 +24,8 @@ Slint↔wgpu 合成（`cad-ui-slint/src/bridge.rs`）。仍返回 NotImplemented
 | 工作能力 | cad-measure：MeasurementEngine/SnapCandidate |
 | 应用 | cad-app：Document/SessionState/Viewport/Workspace、CommandHandler/Tool |
 | 查询/UI | cad-query：分页查询/Mixed/Unset；cad-ui-slint：UiAdapter/UiCommandSink/Slint shell |
-| 宿主 | cad-platform：FileAccess/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost；apps：组合根 |
+| 宿主编排 | cad-host：HostCore（命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink）；只依赖 cad-ui-slint，不直接依赖 slint |
+| 宿主 | cad-platform：PlatformFiles/ConfigStore/SurfaceSource/FontLoader/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost；apps：组合根 |
 | 自动化 | cad-diagnostics：统计/脱敏报告；cad-cli-tools：共用 Application 命令路径 |
 
 ## 必须保持的边界
@@ -32,6 +33,10 @@ Slint↔wgpu 合成（`cad-ui-slint/src/bridge.rs`）。仍返回 NotImplemented
 - 底图只能由 Builder 导入；领域修改只能通过事务正式提交。会话导航不使文档变脏。
 - Document 共享不可变底图；Viewport 保存独立相机，不复制数据库。
 - GPU/内核/Slint/平台类型不得进入 domain/db；第三方类型不随意 re-export。
+- `cad-host` 不得直接依赖 `slint`/`wgpu`/`web-sys`/Android 类型；它只通过 `cad-ui-slint`
+  的固有 API 与 sink trait 推送状态，平台 I/O 一律经 `cad-platform` 的
+  `PlatformFiles`/`ConfigStore`/`SurfaceSource` 契约（事件式、无 futures、无 `Send`），
+  宿主特有的路径/对话框/表面度量只存在于 `app-*`。
 - ChangeSet revision 不连续时重建快照；元数据不默认引发曲线重新离散。
 - 测量结果锚点由原始 handle + instance path + subelement + 坐标回退构成；GPU 索引不是身份。
 - TaskStamp 不匹配拒绝发布；取消不可中断库调用时至少阻止结果进入当前会话。

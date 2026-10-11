@@ -15,14 +15,11 @@ path = "src/main.rs"
 # inside `src/host/`; the controller/Slint bridge is identical.
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
 cad-app.workspace = true
-cad-db.workspace = true
 cad-domain.workspace = true
+cad-host.workspace = true
 cad-platform.workspace = true
-cad-resources.workspace = true
 cad-ui-slint.workspace = true
 cad-render-wgpu.workspace = true
-cad-diagnostics.workspace = true
-cad-representation.workspace = true
 serde_json.workspace = true
 slint.workspace = true
 

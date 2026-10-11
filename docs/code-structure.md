@@ -32,6 +32,29 @@
 `window.yacr` 的既有诊断接口保留；`build-web.sh` 复制整个 `host/`，CI 与部署脚本
 检查所有模块存在，防止只发布入口导致 HTTP 404。
 
+## 桌面宿主与宿主编排层（cad-host）
+
+平台无关的宿主编排抽取为 `crates/cad-host`，一个 `HostCore`（`Clone` 句柄）实现
+`cad-ui-slint` 的 sink trait（`UiCommandSink`/`LayoutSwitchSink`/`ViewInput`/
+`CanvasPickMapper`/`DrawCommandSink`/`DrawPreviewSink`），并按职责拆分：
+
+| 文件 | 职责 |
+|---|---|
+| `lib.rs` | `HostCore`/`HostOptions`/`HostPlatform`、构造与访问器、`execute` 命令路由、`metrics`、配置装载、`tick` |
+| `open.rs` | 打开管线：平台事件 → `begin_async_open`（或同步）→ 轮询 → 安装（fit/取消绘制捕获/字体/图像/推送） |
+| `save.rs` | 出图（SVG/PDF）与有损 DXF 另存：扩展名策略、源文件覆盖保护、分级状态 |
+| `state.rs` | `push`/`sync_view` 状态漏斗 |
+| `input.rs` | 鼠标导航、画布拾取映射、绘制命令/预览 sink |
+| `fonts.rs` | 原生字体/图像装载与出图字体引擎（wasm 为显式 `Unsupported`） |
+| `policy.rs` | 纯策略：状态归属、扩展名分级、默认文件名（可无 Slint 单测） |
+
+平台 I/O 通过 `cad-platform` 契约表达（`PlatformFiles` 事件式、无 futures/`Send`；
+`ConfigStore`；`SurfaceSource`；`HostCapabilities`）。`apps/app-linux` 退化为薄封装：
+`src/host.rs` 保留 `LinuxApp`/`LinuxOptions` 公共 API 与事件循环 + 50ms 定时器（调用
+`core.tick()`），`src/host/platform.rs` 提供桌面实现（ashpd/rfd 选择器 + 读取 + 原子写 +
+dev/inode 源保护；XDG/APPDATA/Application-Support 配置；窗口表面）。`app-windows`/
+`app-macos` 仍只调用 `app-linux::entry::run`，未改动。
+
 ## Slint 渲染桥
 
 `crates/cad-ui-slint/src/bridge.rs` 仅装配 Slint 回调；`bridge/view.rs` 接收完整视图

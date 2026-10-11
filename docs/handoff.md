@@ -1,5 +1,72 @@
 # 后续 agent 接手入口
 
+## 宿主编排抽取：cad-host（P0，2026-10-11，本轮）
+
+用户要求：把 `apps/app-linux` 的平台公共宿主编排抽到新 crate `cad-host`（`HostCore`），以
+小型平台 trait 参数化，`app-linux` **行为保持不变**地迁移；Web/Android 迁移与文件功能为后续
+阶段（本轮不动 `app-web`/`app-android` 行为）。
+
+- 新增 `crates/cad-host`（依赖 cad-domain/cad-db/cad-app/cad-platform/cad-representation/
+  cad-diagnostics/cad-resources/cad-ui-slint，**不依赖 `slint`**）。`HostCore`（`Clone` 句柄）
+  实现 `UiCommandSink`/`LayoutSwitchSink`/`ViewInput`/`CanvasPickMapper`/`DrawCommandSink`/
+  `DrawPreviewSink`；文件布局：`lib.rs`/`open.rs`/`save.rs`/`state.rs`/`input.rs`/`fonts.rs`/
+  `policy.rs`。
+- `crates/cad-platform` 重塑 0 实现草案 `FileAccess` 为事件式、object-safe、无 futures、无
+  `Send` 的契约：`PlatformFiles`（`begin_open`/`begin_open_target`/`begin_save`/`write_atomic`/
+  `refuses_source_overwrite`/`set_source`/`poll` → `FileEvent`）、`ConfigStore`（`ConfigLoad`
+  区分缺失/可读/不可读，保留启动诊断）、`SurfaceSource`、`HostCapabilities`；`FilePurpose`
+  覆盖打开/保存的取消与失败（设计草案只列了保存 purpose，扩展以保留打开取消状态）。保留
+  `FontLoader` 原样。
+- `apps/app-linux/src/host.rs` 变为薄封装：保留 `LinuxApp`/`LinuxOptions`/`FilePicker`/
+  `SavePathProvider` 公共 API 与 `entry.rs`（Windows/macOS 薄封装未动）；新增
+  `host/platform.rs` 提供桌面 `PlatformFiles`/`ConfigStore`/`SurfaceSource`（ashpd/rfd 选择器 +
+  读取 + 原子写 + dev/inode 源保护；XDG/APPDATA/Application-Support；窗口表面零 insets）；
+  `host/state.rs`/`input.rs`/`fonts.rs` 移入 `cad-host`；`config_file.rs`/`file_picker.rs`/
+  `validation.rs` 保留。
+- 行为保持：`last_layout_key` 呈现短路；`tick` 顺序（poll_open → poll_pending_save → metrics →
+  sync_view）与单一 error→status 漏斗；每 tick 可用性刷新（`set_new/plot/save_available(!loading())`）；
+  `owns_status`（PlotDrawing|SaveDrawingAs）与 `fit.empty`；取消状态（`plot.cancelled`/
+  `save.cancelled` ≠ 失败）；`CancelLoading`；`drawing_path` 仅在**成功**打开后武装（源覆盖保护
+  随成功安装才 `set_source`）；`set_can_trim/set_can_switch_backend(false)`；`on_config_changed`
+  overlay 镜像；`push()` 会**持有 controller 借用**依次调用 `handle.set_*`/`view.*`（既有行为，非本轮
+  回归）；其余方法遵循“每方法一次 `borrow_mut`，不在持有 controller 借用时回调 sink/UI”的纪律）。
+
+补强（P0 抽取评审后，行为保持）：
+- **F1 打开读取取消 + 进度**：`CancelLoading` 现设置 `open_abort` 并取消异步导入；`deliver_open` 对
+  取消后到达的字节**丢弃**（清 `presenting_open`，不安装、不武装源保护）；`poll_loading` 经
+  `import_snapshot()` 在“读取中且无异步任务”时合成 `ImportProgressSnapshot::running()`，其
+  `cancellable = !open_abort`（取消前可取消、取消后置灰、完成/丢弃后回到 idle）。恢复旧 app-linux
+  的 `pending_read.cancelled` 行为。
+- **F2 `FileEvent::Opened` 携带 `FileTarget`**：源保护改用平台自身的 `target.opaque`（SAF URI/下载
+  句柄等），不再从 `display_name` 反推路径；异步路径经 `open_target` 暂存，导入发布时才 `set_source`。
+- **F3 保存忙守卫**：`request_plot`/`request_save` 的忙判断加上 `pending_save.borrow().is_some()`，
+  避免已选目标尚未导出时被第二次保存静默丢弃。
+- **F4 失败文案**：`on_file_failure` 改为携带 `Cancelled | Failed(String)`，`reason` 已本地化、按原样
+  展示（去掉一层 `InvalidInput` 包装）；桌面平台不再预包装，picker 读到缺失文件时恢复
+  “drawing path does not exist: …”。
+- **F5 死代码**：删除 `config_file.rs` 中重复且无引用的 `load_startup`/`persist_preference`/
+  `HOST_ALLOWED_PATHS_JSON`，仅保留路径解析器与文件名常量；allowed-paths 常量只保留 `cad-host` 一处。
+- 杂项：`HostPlatform`/`HostCore` 的三个平台契约统一为 `Rc`；`AGENTS.md` 图注明确 `cad-host` 不依赖
+  `cad-cli-tools`。新增 `crates/cad-host/src/tests.rs`（fake `PlatformFiles`）：取消后到达的字节不替换
+  文档且进度可取消→idle；异步路径暂存平台 target；同步路径以 `opaque` 武装源保护。
+
+验证（本机，Wayland + Quadro P620 真实 GPU；离屏测试用软件 Vulkan lavapipe）：
+
+- `cargo fmt --all --check`；`cargo clippy --workspace --exclude app-android --exclude app-web
+  --all-targets --locked -- -D warnings`；`check-architecture.py`（26 包）；`check-i18n.py`
+  （284 键）；`check-fixture-manifest.py`（22 fixture）；`check-workflows.py`。
+- `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`。
+- `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`：**16 通过 / 0 失败 / 4 忽略**
+  （host_contracts 4、host_config_disk 1、new_drawing 1、plot_export 1、save_export 1、
+  save_source_guard 1、verify_ui 1、verify_ui_drawing 1、overlay_grid_toggle 1、lib 单测 4；4 忽略
+  为桌面/真实 GPU 用例）。`cargo test -p cad-host --locked`：4 通过（policy 纯单测）。
+- 真实 GPU 验收：`cargo test -p app-linux --lib real_gpu_grid_zoom_axes_acceptance --locked --
+  --ignored --test-threads=1 --nocapture`（不设 `VK_ICD_FILENAMES`）→ `backend=Some("vulkan")`，
+  `grid_changed_pixels=6325`，wheel-up 缩小 world_per_px。证据写 `/tmp/opencode/yacr-real-gpu`。
+- 说明：本轮只迁移桌面宿主；Web/Android 未迁移（`app-web`/`app-android` 行为未改），
+  `cad-host` 的 wasm 字体/图像装载为显式 `Unsupported`（尚无调用者）。
+
 ## 程序级汇总：命令行 / 快捷键 / 绘制编辑（2026-10-10 → 2026-10-11）
 
 本程序（多轮）交付**应用内命令行 + 固定键位 + 一组真实绘制/编辑命令 + 应用内剪贴板**。

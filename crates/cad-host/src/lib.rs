@@ -1,0 +1,503 @@
+//! Platform-common host orchestration.
+//!
+//! [`HostCore`] owns the controller/Slint bridge and the open/save/plot funnels
+//! that were previously duplicated inside the desktop host. It is a `Clone`
+//! handle over shared `Rc`/`Arc` state and implements the shell's sink traits
+//! ([`cad_ui_slint::UiCommandSink`], `LayoutSwitchSink`, `ViewInput`,
+//! `CanvasPickMapper`, `DrawCommandSink`, `DrawPreviewSink`).
+//!
+//! All platform I/O is expressed through the `cad-platform` contracts
+//! ([`cad_platform::PlatformFiles`], [`cad_platform::ConfigStore`],
+//! [`cad_platform::SurfaceSource`]); this crate never imports `slint`, `wgpu`,
+//! `web-sys` or any Android type, and carries no `cfg` for a host platform.
+//!
+//! The business path is unchanged: `HostController::execute` still runs every
+//! command, the database stays the single authority, and the open/save/plot
+//! handlers keep their exact status grading and corruption guards.
+use std::{
+    cell::{Cell, RefCell},
+    path::PathBuf,
+    rc::Rc,
+    sync::Arc,
+};
+
+use cad_app::host::HostController;
+use cad_app::{Command, CommandId, CommandOutcome, CommandPayload, ImportProgressSnapshot};
+use cad_db::DrawingDatabase;
+use cad_domain::{CadError, CadResult};
+use cad_platform::{
+    ConfigLoad, ConfigStore, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
+    SurfaceSource,
+};
+use cad_ui_slint::{CadView, LayoutSwitchSink, UiCommandSink, UiHandle};
+
+mod fonts;
+mod input;
+mod open;
+pub mod policy;
+mod save;
+mod state;
+#[cfg(test)]
+mod tests;
+
+/// Host policy mirroring the web host: users may toggle the two dock panels'
+/// initial-open flags. A host `config.json` replaces this policy wholesale.
+pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowedPaths":[
+    "ui.components.layerPanel.initiallyOpen",
+    "ui.components.propertiesPanel.initiallyOpen"
+]}}}"#;
+
+/// Platform-general host options.
+///
+/// A host-specific options type (for example `LinuxOptions`, which also carries
+/// a GPU selection and an acceptance output directory) projects onto this.
+#[derive(Debug, Clone)]
+pub struct HostOptions {
+    /// Explicit `--font NAME=PATH` registrations.
+    pub fonts: Vec<(String, PathBuf)>,
+    /// Explicit CAD font directory (`--fonts-dir`).
+    pub fonts_dir: Option<PathBuf>,
+    /// Explicit raster-image directory (`--images-dir`).
+    pub images_dir: Option<PathBuf>,
+    pub headless: bool,
+    /// A drawing to open at startup (`--open`) or the headless input.
+    pub drawing: Option<PathBuf>,
+    pub size: [f64; 2],
+    pub locale: String,
+}
+
+/// The platform contracts a [`HostCore`] is built from.
+///
+/// All three are single-threaded (`Rc`): the host core runs on one thread and
+/// the traits carry no `Send`/`Sync` requirement.
+pub struct HostPlatform {
+    pub files: Rc<dyn PlatformFiles>,
+    pub config_store: Rc<dyn ConfigStore>,
+    pub surface: Rc<dyn SurfaceSource>,
+    pub capabilities: HostCapabilities,
+}
+
+/// A cancel or an already-localized failure from a platform file interaction.
+///
+/// The reason string is already localized by the platform; the core shows it
+/// verbatim rather than re-wrapping it in an error (which would double-format it).
+#[derive(Debug, Clone)]
+pub(crate) enum FileAbort {
+    Cancelled,
+    Failed(String),
+}
+
+/// A pending save result drained from the platform, with its purpose.
+pub(crate) struct PendingSave {
+    pub purpose: SavePurpose,
+    pub result: Result<FileTarget, FileAbort>,
+}
+
+/// Per-instance navigation state (drag/scroll), driven by [`ViewInput`].
+pub(crate) struct NavInner {
+    pub last: Cell<Option<[f64; 2]>>,
+    pub dragged: Cell<bool>,
+}
+
+impl Default for NavInner {
+    fn default() -> Self {
+        Self {
+            last: Cell::new(None),
+            dragged: Cell::new(false),
+        }
+    }
+}
+
+/// Clone handle over the shared host orchestration state.
+#[derive(Clone)]
+pub struct HostCore {
+    /// The single application/controller instance.
+    pub controller: Rc<RefCell<HostController>>,
+    /// The shell handle; `None` until the adapter is built.
+    pub handle: Rc<RefCell<Option<UiHandle>>>,
+    /// The CAD view; `None` until the bridge is installed.
+    pub view: Rc<RefCell<Option<CadView>>>,
+    pub options: HostOptions,
+    pub files: Rc<dyn PlatformFiles>,
+    pub config_store: Rc<dyn ConfigStore>,
+    pub surface: Rc<dyn SurfaceSource>,
+    pub capabilities: HostCapabilities,
+    /// A picker/read is in flight (analogous to the old `pending_open`).
+    pub(crate) open_pending: Rc<Cell<bool>>,
+    /// The drawing captured when an open attempt began, so a superseded result
+    /// is discarded.
+    pub(crate) open_guard: Rc<RefCell<Option<Arc<DrawingDatabase>>>>,
+    /// Set by `CancelLoading`; a delivery that arrives afterwards is discarded
+    /// rather than installed (mirrors the old `pending_read.cancelled`).
+    pub(crate) open_abort: Rc<Cell<bool>>,
+    /// The platform target of the open in flight, retained until the async import
+    /// publishes so the source-overwrite guard arms against the real handle.
+    pub(crate) open_target: Rc<RefCell<Option<FileTarget>>>,
+    /// A localized open failure delivered by the platform.
+    pub(crate) open_failure: Rc<RefCell<Option<String>>>,
+    /// Whether an open-cancel event was delivered this tick.
+    pub(crate) open_cancelled: Rc<Cell<bool>>,
+    /// A document open is presenting (bytes delivered, import/presentation).
+    pub(crate) presenting_open: Rc<Cell<bool>>,
+    /// A save dialog is in flight.
+    pub(crate) save_pending: Rc<Cell<bool>>,
+    /// A completed save interaction, awaiting export.
+    pub(crate) pending_save: Rc<RefCell<Option<PendingSave>>>,
+    /// Path of the drawing being opened (or already open), used to resolve its
+    /// sibling raster images. Armed only on a **successful** open.
+    pub(crate) drawing_path: Rc<RefCell<Option<PathBuf>>>,
+    /// Last raster-image loading outcome, surfaced by the diagnostics drawer.
+    pub(crate) last_image_report: Rc<RefCell<Option<cad_platform::images::ImageLoadReport>>>,
+    /// Last `(physical width, physical height, config revision)` pushed through
+    /// `refresh_window_layout`. `None` forces the first refresh.
+    pub(crate) last_layout_key: Rc<RefCell<Option<(u32, u32, u64)>>>,
+    /// Per-instance pointer navigation state.
+    pub(crate) navigation: Rc<NavInner>,
+    /// Diagnostics from reading the config / preference files at startup.
+    pub(crate) startup_diagnostics: Rc<RefCell<Vec<String>>>,
+}
+
+impl HostCore {
+    /// Build the core over a demo document and the platform contracts.
+    pub fn new(
+        options: HostOptions,
+        handle: Rc<RefCell<Option<UiHandle>>>,
+        platform: HostPlatform,
+    ) -> CadResult<Self> {
+        let controller = Rc::new(RefCell::new(HostController::with_demo_document(
+            options.size,
+        )?));
+        Ok(Self {
+            controller,
+            handle,
+            view: Rc::new(RefCell::new(None)),
+            options,
+            files: platform.files,
+            config_store: platform.config_store,
+            surface: platform.surface,
+            capabilities: platform.capabilities,
+            open_pending: Rc::new(Cell::new(false)),
+            open_guard: Rc::new(RefCell::new(None)),
+            open_abort: Rc::new(Cell::new(false)),
+            open_target: Rc::new(RefCell::new(None)),
+            open_failure: Rc::new(RefCell::new(None)),
+            open_cancelled: Rc::new(Cell::new(false)),
+            presenting_open: Rc::new(Cell::new(false)),
+            save_pending: Rc::new(Cell::new(false)),
+            pending_save: Rc::new(RefCell::new(None)),
+            drawing_path: Rc::new(RefCell::new(None)),
+            last_image_report: Rc::new(RefCell::new(None)),
+            last_layout_key: Rc::new(RefCell::new(None)),
+            navigation: Rc::new(NavInner::default()),
+            startup_diagnostics: Rc::new(RefCell::new(Vec::new())),
+        })
+    }
+
+    /// Install the shell handle (called once the adapter is built).
+    pub fn set_handle(&self, handle: UiHandle) {
+        *self.handle.borrow_mut() = Some(handle);
+    }
+
+    /// Install the CAD view (called once the bridge is installed).
+    pub fn set_view(&self, view: CadView) {
+        *self.view.borrow_mut() = Some(view);
+    }
+
+    /// The localized message for `key` in the host's locale.
+    pub fn message(&self, key: &str, values: &[(&str, &str)]) -> String {
+        cad_ui_slint::MessageSource::from_request(&self.options.locale).text(key, values)
+    }
+
+    /// Diagnostics from reading the host config / user preference at startup.
+    pub fn startup_diagnostics(&self) -> Vec<String> {
+        self.startup_diagnostics.borrow().clone()
+    }
+
+    /// Reclassify the window layout and map the surface onto the active viewport.
+    ///
+    /// The window layout is reclassified only when the physical size or the
+    /// resolved config changed, not every tick (the 50 ms timer calls this).
+    pub fn metrics(&self) -> CadResult<()> {
+        {
+            let handle = self.handle.borrow();
+            let handle = handle.as_ref().ok_or(CadError::Cancelled)?;
+            let layout_key = handle
+                .physical_size()
+                .map(|size| (size.width, size.height, handle.config_revision()));
+            let layout_changed = {
+                let mut last = self.last_layout_key.borrow_mut();
+                if *last == layout_key {
+                    false
+                } else {
+                    *last = layout_key;
+                    true
+                }
+            };
+            if layout_changed {
+                handle.refresh_window_layout()?;
+            }
+        }
+        let surface = self.surface.surface().ok_or(CadError::Cancelled)?;
+        let mut c = self.controller.borrow_mut();
+        let id = c.viewport_id;
+        let viewport = c
+            .application
+            .workspace
+            .viewports
+            .get_mut(&id)
+            .ok_or(CadError::Cancelled)?;
+        // A host with no portable safe-area source passes explicit zeros — never
+        // a fabricated margin. The shared helper still validates the surface/DPI
+        // and keeps the one mapping in `cad-app`.
+        let canvas = cad_app::input::inset_canvas_metrics(
+            [0.0; 2],
+            surface.logical,
+            surface.safe_insets,
+            surface.scale,
+        )
+        .ok_or_else(|| CadError::InvalidInput("canvas metrics are degenerate".into()))?;
+        cad_app::input::apply_canvas_metrics(viewport, &canvas)
+    }
+
+    /// Build and run one command through the single host funnel.
+    pub fn command(&self, id: CommandId, payload: CommandPayload) -> CadResult<()> {
+        let c = self.controller.borrow();
+        let command = Command {
+            schema_version: 1,
+            id,
+            payload,
+            document: c.document_id,
+            viewport: c.viewport_id,
+        };
+        drop(c);
+        self.execute(command)
+    }
+
+    /// Run one command, push state and grade the status line.
+    pub fn execute(&self, command: Command) -> CadResult<()> {
+        self.metrics()?;
+        // Plot and Save As own their own success/failure status
+        // (plot.exported / save.exported / ...); the generic completed/failed
+        // text must not overwrite it.
+        let owns_status = policy::owns_status(command.id);
+        let result: CadResult<Option<CommandOutcome>> = match command.id {
+            CommandId::CancelLoading => {
+                self.cancel_loading();
+                Ok(None)
+            }
+            CommandId::OpenDrawing => self.request_open().map(|_| None),
+            CommandId::NewDrawing => self.request_new().map(|_| None),
+            CommandId::PlotDrawing => self.request_plot().map(|_| None),
+            CommandId::SaveDrawingAs => self.request_save().map(|_| None),
+            CommandId::SwitchBackend => Err(CadError::Unsupported(
+                self.message("linux.backend_unavailable", &[]),
+            )),
+            _ => self.controller.borrow_mut().execute(command).map(Some),
+        };
+        self.push()?;
+        if let Err(error) = &result {
+            if !owns_status {
+                if let Some(handle) = self.handle.borrow().as_ref() {
+                    handle.set_status(
+                        self.message("linux.failed", &[("error", &error.to_string())]),
+                    )?;
+                }
+            }
+        }
+        if result.is_ok() && !self.loading() && !owns_status {
+            if let Some(handle) = self.handle.borrow().as_ref() {
+                // A no-op fit (empty drawing) carries the `fit.empty` code; show
+                // that instead of the generic "completed", never a fake success.
+                let diagnostic = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|outcome| outcome.as_ref())
+                    .and_then(|outcome| outcome.diagnostics.first());
+                let status = match diagnostic {
+                    Some(diagnostic) if diagnostic.code == "fit.empty" => {
+                        self.message("fit.empty", &[])
+                    }
+                    _ => self.message("linux.completed", &[]),
+                };
+                handle.set_status(status)?;
+            }
+        }
+        result.map(|_| ())
+    }
+
+    /// Whether a document open is in flight (picker, read, import or presentation).
+    pub fn loading(&self) -> bool {
+        self.open_pending.get()
+            || self.presenting_open.get()
+            || self
+                .controller
+                .borrow()
+                .async_open_snapshot()
+                .is_some_and(|s| s.running)
+    }
+
+    /// Cancel an in-flight open/read (`CancelLoading`).
+    ///
+    /// Sets the abort flag so a platform read that completes *after* the cancel
+    /// is discarded rather than installed, and asks the async import manager to
+    /// cancel a job that has already started.
+    pub(crate) fn cancel_loading(&self) {
+        self.open_abort.set(true);
+        self.controller.borrow_mut().cancel_async_open();
+    }
+
+    /// The import-drawer snapshot for the current open state.
+    ///
+    /// Prefers the controller's real async snapshot. While a platform read is in
+    /// flight (picker/read, no async job yet) it synthesizes a running snapshot
+    /// whose `cancellable` reflects the abort flag, so the drawer shows real
+    /// progress with a working cancel — and goes idle once nothing is pending.
+    pub(crate) fn import_snapshot(&self) -> Option<ImportProgressSnapshot> {
+        if let Some(snapshot) = self.controller.borrow().async_open_snapshot() {
+            return Some(snapshot);
+        }
+        if self.open_pending.get() {
+            let mut running = ImportProgressSnapshot::running();
+            running.cancellable = !self.open_abort.get();
+            return Some(running);
+        }
+        None
+    }
+
+    /// Read and apply the durable config and user preference at startup.
+    ///
+    /// An absent file is normal; a malformed or unreadable one keeps the
+    /// previous state and adds a human-readable diagnostic. Returns every
+    /// diagnostic.
+    pub fn load_startup(&self) -> Vec<String> {
+        let mut diagnostics = Vec::new();
+        let handle = match self.handle.borrow().as_ref().cloned() {
+            Some(handle) => handle,
+            None => return diagnostics,
+        };
+
+        if let Err(error) = handle.update_config_json(HOST_ALLOWED_PATHS_JSON) {
+            diagnostics.push(format!("host config defaults rejected: {error}"));
+        }
+
+        match self.config_store.load_config() {
+            ConfigLoad::Absent => {}
+            ConfigLoad::Text { path, text } => {
+                if let Err(error) = handle.set_config_json(&text) {
+                    diagnostics.push(format!("config file {path} rejected: {error}"));
+                }
+            }
+            ConfigLoad::Unreadable { path, reason } => {
+                diagnostics.push(format!("config file {path} unreadable: {reason}"));
+            }
+        }
+
+        match self.config_store.load_preference() {
+            ConfigLoad::Absent => {}
+            ConfigLoad::Text { path, text } => match handle.apply_user_preference_json(&text) {
+                Ok(()) => {
+                    if let Err(error) = self.persist_preference(&handle) {
+                        diagnostics.push(format!("preferences {path} not re-persisted: {error}"));
+                    }
+                }
+                Err(error) => diagnostics.push(format!("preferences {path} rejected: {error}")),
+            },
+            ConfigLoad::Unreadable { path, reason } => {
+                diagnostics.push(format!("preferences {path} unreadable: {reason}"));
+            }
+        }
+
+        *self.startup_diagnostics.borrow_mut() = diagnostics.clone();
+        diagnostics
+    }
+
+    /// Write the store's allowed projection of the user preference.
+    fn persist_preference(&self, handle: &UiHandle) -> CadResult<()> {
+        self.config_store
+            .persist_preference(&handle.projected_user_preference_json())
+    }
+
+    /// Merge a host `ViewerConfig` patch through the shared store.
+    pub fn update_config_json(&self, text: &str) -> CadResult<()> {
+        let handle = self
+            .handle
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(CadError::Cancelled)?;
+        handle
+            .update_config_json(text)
+            .map_err(|error| CadError::InvalidInput(error.to_string()))
+    }
+
+    /// Apply a host-allowed user preference, then persist the allowed projection.
+    ///
+    /// The projection is written after the store accepts the patch (not from a
+    /// `ConfigObserver`, which would re-borrow the store while it is mutably
+    /// borrowed).
+    pub fn apply_user_preference_json(&self, text: &str) -> CadResult<()> {
+        let handle = self
+            .handle
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(CadError::Cancelled)?;
+        handle
+            .apply_user_preference_json(text)
+            .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+        self.persist_preference(&handle)
+    }
+
+    /// One timer tick: file events → open/save funnels → metrics → view sync.
+    ///
+    /// The order is the desktop host's existing order and is load-bearing: the
+    /// open funnel refreshes availability/status, and `sync_view` runs last.
+    pub fn tick(&self) -> CadResult<()> {
+        self.poll_open()
+            .and_then(|_| self.poll_pending_save())
+            .and_then(|_| self.metrics())
+            .and_then(|_| self.sync_view())
+    }
+
+    /// Open the configured `--open` drawing at startup (or fit the demo).
+    ///
+    /// Runs before the CAD view exists, so the font/image installs are deferred
+    /// to the caller once the bridge is installed.
+    pub fn open_configured_drawing(&self) -> CadResult<()> {
+        self.metrics()?;
+        if let Some(path) = &self.options.drawing {
+            let target = FileTarget::from_path(&path.to_string_lossy());
+            self.begin_open_attempt();
+            self.open_pending.set(true);
+            if let Err(error) = self.files.begin_open_target(&target) {
+                self.open_pending.set(false);
+                return Err(error);
+            }
+            self.drain_files()?;
+        } else {
+            self.controller.borrow_mut().fit()?;
+        }
+        Ok(())
+    }
+}
+
+impl UiCommandSink for HostCore {
+    fn send(&mut self, command: Command) -> CadResult<()> {
+        self.execute(command)
+    }
+}
+
+/// Layout panel switch (F04): dispatch the validated `SwitchSpace` command.
+///
+/// Installed on the adapter so a layout-row click runs through the same command
+/// path every other host command uses. The command layer validates the layout
+/// against the drawing and refuses an unknown one; the sink never mutates the
+/// database.
+impl LayoutSwitchSink for HostCore {
+    fn select(&mut self, space: cad_representation::SpaceSelection) {
+        let _ = self.command(
+            CommandId::SwitchSpace,
+            cad_app::input::space_switch_payload(space),
+        );
+    }
+}
