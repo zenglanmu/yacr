@@ -151,13 +151,19 @@ manifest）；Rust 侧 `apps/app-android/src/saf.rs` 经 JNI 驱动它并用 `Co
 跳过开关。宿主目标（非 Android）仍回退到候选路径探测，`begin_save`/`write_atomic` 显式
 `Unsupported`。真机 SAF 仍未验证（见 `docs/validation-android.md`）。
 
-### x86_64 模拟器安装与运行（已验证；SwiftShader，**非真机**）
+### x86_64 模拟器安装与运行（**宿主有 GPU 时用 `-gpu host`**；非真机）
 
-评测对象：已启动的无头模拟器 `emulator-5554`（`dev_api35`，API 35，`google_apis`
-x86_64，`-gpu swiftshader`）。APK 必须针对 **x86_64-linux-android**；aarch64 在
-x86_64 镜像上经 NDK translation 安装但运行 abort。
+评测对象：无头模拟器（`yacr35`，API 35，`google_apis`，x86_64）。**宿主存在真实显示/显卡时
+必须用 `-gpu host`**（把宿主显卡透传给模拟器，其 GLES/Vulkan 走真实 GPU，见 AGENTS.md 契约）；
+只有**确无 GPU** 的环境才回退 `-gpu swiftshader`（软件渲染，证据须显式标注）。APK 必须针对
+**x86_64-linux-android**；aarch64 在 x86_64 镜像上经 NDK translation 安装但运行 abort。
 
 ```bash
+# 0) 宿主有 GPU/显示时启动（无头 + 真实显卡；-read-only 便于多开）
+emulator -avd yacr35 -no-window -gpu host -no-audio -no-boot-anim -no-snapshot -read-only &
+adb wait-for-device
+until [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 2; done
+
 # 1) 从当前 checkout 构建 x86_64 release APK（含 SAF 垫片后处理）
 TARGET=x86_64-linux-android bash scripts/build-android.sh --release
 #    等价直接命令（CARGO_TARGET_DIR 指向仓库外时更稳；不含 SAF 垫片后处理）：
@@ -169,21 +175,28 @@ adb install -r -t target/release/apk/yacr.apk
 adb shell am start -n dev.yacr.app/dev.yacr.app.YacrNativeActivity
 adb shell pidof dev.yacr.app          # 进程存活即启动成功
 
-# 3) 抓日志与截图
+# 3) 抓日志、截图与渲染器（确认是否走宿主 GPU）
+adb shell dumpsys SurfaceFlinger | grep -m1 'GLES:'
 adb logcat -d > /tmp/yacr-logcat.txt
 adb exec-out screencap -p > /tmp/yacr.png
 ```
 
 实测结果（完整证据见 `docs/validation-android.md`）：
 
-- 进程启动、Slint + wgpu 初始化，内置演示几何（虚线圆/弧）真实渲染；无崩溃/ANR。
-- 后端（设备日志原文）：`CAD renderer initialized: preference=WebGpu actual=WebGpu
-  ... max_texture_dimension=8192`；底层 wgpu 走 Android Vulkan（模拟器 SwiftShader），
-  Slint 合成器为 Skia。
-- 画布拖动平移、点按「适应」重定中心均已生效（像素 diff 非零；修复前为 0）。
-- **限制**：`safe_insets` 未被消费、surface 尺寸/旋转未回传（audit U07），顶部工具栏被
-  系统状态栏遮挡，Open/DWG 选择在本次运行中不可达（打开图纸 **NOT RUN**）；量测拾取未
-  接线；图层/布局/批注面板状态未推送。真机仍未验证。
+- **宿主 GPU 运行（2026-10-11，`-gpu host`，本轮）**：`dumpsys SurfaceFlinger` 报
+  `GLES: Google (Intel), Android Emulator OpenGL ES Translator (Mesa Intel(R) UHD Graphics
+  (CML GT2)), OpenGL ES 3.0 (4.6 (Core Profile) Mesa 26.0.8-1ubuntu0.3)`（**宿主显卡，非
+  SwiftShader**）；Slint + wgpu 初始化（Android Vulkan，guest 经 goldfish 转发到宿主 Mesa），
+  内置演示几何渲染；SAF 打开/另存/New 三项 e2e 通过。证据
+  `/tmp/opencode/yacr-android-host-gpu/`。
+- **早前 SwiftShader 运行（软件 GPU，保留为历史记录）**：`-gpu swiftshader`；进程启动、Slint
+  + wgpu 初始化，内置演示几何渲染；无崩溃/ANR。后端（设备日志原文）：
+  `CAD renderer initialized: preference=WebGpu actual=WebGpu ... max_texture_dimension=8192`；
+  底层 wgpu 走模拟器 SwiftShader；画布拖动平移、点按「适应」重定中心生效（像素 diff 非零）。
+  **该轮的软件渲染数字/截图仅代表 SwiftShader，不代表真实 GPU**。
+- **限制**：`safe_insets` 未被消费、surface 尺寸/旋转未回传（audit U07），顶部工具栏被系统
+  状态栏遮挡；量测拾取未接线；图层/布局/批注面板状态未推送。**模拟器 ≠ 真机**，真机仍未验证
+  （早前 SwiftShader 轮次中打开图纸为 NOT RUN；P4 后宿主 GPU 轮次已完成 SAF 打开/另存/New）。
 
 ## Web（Wasm 静态产物 + 最小 JS 宿主）
 

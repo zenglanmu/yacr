@@ -298,7 +298,11 @@ Node `22.22.1` 与 Playwright `1.55.1` Chromium，构建 `web-dist`，起
 
 - 走 SWIFTSHADER 软件 WebGL2 路径，**明确不代表**桌面/移动真机或 WebGPU 验收；
 - WebGPU 能力缺失时应如实报告未运行，不得记为通过；
-- 依赖审计 B29 的修复，未修复前其结论视为不完整。
+- 依赖审计 B29 的修复，未修复前其结论视为不完整；
+- **CI runner 无 GPU**，故 CI 上的 Web/模拟器一律为软件渲染；本地开发机**有 GPU/显示时**
+  必须用真实 GPU（Android 模拟器 `-gpu host`、headful 浏览器真实 GPU、桌面硬件 Vulkan），
+  见 `AGENTS.md` 的“渲染/端到端验证优先真实硬件 GPU”。CI 的软件结果不得与本地真实 GPU
+  结果混为一谈。
 
 ## 需要的 secrets / 权限
 
@@ -328,8 +332,12 @@ runner、标签、secrets 与设备：
   **尚未在本仓库的 GitHub Actions 上跑过**；`docs/validation-web.md` §11 的记录是**本机手工**
   执行 `scripts/deploy-cloudflare-pages.sh`，不构成本 workflow 的通过证据。首次跑通后须以真实
   job URL / 部署 id 回填 `docs/validation.md`。
-- **真实 GPU / WebGPU 初始化与黄金图**：未运行（`shader-validation` 只是离线解析）。
-- **Android 真机 / 模拟器交互、移动性能报告**：未运行。
+- **CI 上的真实 GPU / WebGPU 初始化与黄金图**：未运行（`shader-validation` 只是离线解析；
+  GitHub 托管 runner 无 GPU，软件渲染不能作为真实 GPU 证据）。
+- **Android 真机 / 模拟器交互、移动性能报告（CI 上）**：未运行。
+- **本地真实 GPU 验收（非 CI）**：本机为 Wayland 桌面 + 真实显卡，已执行 Android 模拟器
+  `-gpu host`（宿主 Intel UHD，非 SwiftShader）的 SAF e2e，见 `docs/validation-android.md` §11；
+  这属**本机手工**证据，不是 CI 结论。
 - **自托管 GPU / Android 真机 runner**：本轮未注册、未购买、未验证标签与权限。
 - `core-quality` / `wasm-check` / `i18n-contracts` / `shader-validation` /
   `web-build` / `web-host-contracts`：workflow 已定义；`shader-validation` 与

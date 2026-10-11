@@ -93,14 +93,20 @@ Linux/Android 发布层：按需 `linux-release`（`ubuntu-latest` 运行
 
 - 默认主机编译门禁必须包含 Linux App 和 Slint；编译通过不是运行或渲染验收。release 编译用于
   可选发布验证；Web 是第二层，Android 平台契约继续保留。
-- **渲染/端到端验证优先真实硬件 GPU**：开发机存在真实显示与显卡时（本机为 Wayland 桌面 +
-  Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），验收**必须**走真实 winit 窗口 + 硬件
-  Vulkan，例如
-  `cargo test -p app-linux --lib real_gpu_grid_zoom_axes_acceptance --locked -- --ignored
-  --test-threads=1 --nocapture`（证据默认写 `/tmp/opencode/yacr-real-gpu/`）。**不得**用
-  lavapipe 等软件后端产出"真实 GPU"结论；软件后端产出的数字/截图必须显式标注为软件渲染。
-  只有**确无显示/GPU** 的环境才回退 Slint offscreen + lavapipe（`bash scripts/check-linux-app.sh`、
-  `bash scripts/verify-ui.sh`）——本机已具备硬件，故这些仅为回退路径。
+- **渲染/端到端验证优先真实硬件 GPU（任何宿主 / 模拟器 / 浏览器）**：只要环境存在真实显示与
+  显卡（本机为 Wayland 桌面 + Intel UHD + Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），
+  验收**必须**走真实 GPU：
+  - 桌面 = 真实 winit 窗口 + 硬件 Vulkan，例如
+    `cargo test -p app-linux --lib real_gpu_grid_zoom_axes_acceptance --locked -- --ignored
+    --test-threads=1 --nocapture`（证据默认写 `/tmp/opencode/yacr-real-gpu/`）；
+  - **Android 模拟器 = `-gpu host`**（把宿主显卡透传给模拟器，其 GLES/Vulkan 走真实 GPU，
+    本机实测 `GLES: … Mesa Intel(R) UHD Graphics (CML GT2) …`，非 SwiftShader）；
+  - 浏览器 = headful + 真实 GPU（非 SwiftShader）。
+
+  **不得**用 SwiftShader/lavapipe 等软件后端产出"真实 GPU"结论；软件后端产出的数字/截图必须
+  显式标注为软件渲染。只有**确无显示/GPU** 的环境才回退软件渲染（桌面 Slint offscreen +
+  lavapipe：`bash scripts/check-linux-app.sh`、`bash scripts/verify-ui.sh`；Android
+  `-gpu swiftshader`；CI 无 GPU runner 的软件冒烟）——本机已具备硬件，故这些仅为回退路径。
 - 用户授权解除原生 Slint 编译限制：允许使用开发依赖，在无窗口环境以 Slint FemtoVG/wgpu +
   lavapipe 离屏验证（已授权 `sudo apt` 安装 pkgconf/fontconfig/freetype 开发包）。
   不需要 Android 模拟器，不安装桌面/X11/Wayland，不改系统/LXC 配置；实际执行与编译证据分开记录。
@@ -123,7 +129,7 @@ Linux/Android 发布层：按需 `linux-release`（`ubuntu-latest` 运行
 
 ```bash
 cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked  # 仅编译检查
-~/android-dev/emulator-start.sh    # 无头 KVM + SwiftShader（幂等）
+~/android-dev/emulator-start.sh    # 无头 KVM + `-gpu host`（宿主有 GPU 时；幂等）
 ~/android-dev/wait-boot.sh         # adb 连接 + sys.boot_completed=1
 PROFILE=release ~/android-dev/build-apk.sh   # 模拟器用 x86_64
 ~/android-dev/install-run.sh
@@ -131,16 +137,18 @@ PROFILE=release ~/android-dev/build-apk.sh   # 模拟器用 x86_64
 ~/android-dev/emulator-stop.sh
 ```
 
-规则：模拟器只能 `-gpu swiftshader` 且无头（LXC 无 3D GPU），不要 `-gpu host`，不要装
+规则：**宿主有 GPU/显示时用 `-gpu host`（真实显卡，仍无头）**，例如
+`emulator -avd yacr35 -no-window -gpu host -no-audio -no-boot-anim -no-snapshot -read-only &`；
+只有**确无 GPU** 的环境才回退 `-gpu swiftshader`（软件渲染，证据须显式标注）。不要装
 桌面/X11/Wayland，不要改 Proxmox/LXC 配置。安装用 release APK（debug `.so` ~510 MB 会超
 ActivityManager attach 超时）。**模拟器 ≠ 真机**，真机能力一律标注未验证。
 
 ## 真实 DWG 回归
 
 流程见 `docs/testing-dwg.md`：**有真实显示/GPU 时以真实硬件 GPU 为主**（真实 winit 窗口 +
-硬件 Vulkan，如 `real_gpu_grid_zoom_axes_acceptance`）；**无显示环境**才回退原生离屏 wgpu +
-Mesa lavapipe（`cargo build -p cad-cli-tools --release`，`scripts/check-dwg-native.py`），
-WASM + Playwright 为第二层。
+硬件 Vulkan，如 `real_gpu_grid_zoom_axes_acceptance`；Android 模拟器用 `-gpu host` 透传宿主
+显卡）；**无显示环境**才回退原生离屏 wgpu + Mesa lavapipe（`cargo build -p cad-cli-tools
+--release`，`scripts/check-dwg-native.py`），WASM + Playwright 为第二层。
 必须分别记录「打开 / 出图 smoke / 视觉验收」三个结论；退出码 0、非空截图、`error=None`
 都不能单独证明视觉正确。外部大样本默认放仓库外（默认 `~/sources/cad-test-files/`），
 也可用 `scripts/fetch-test-dwg.sh` 拉到 `/tmp/opencode`。**授权明确、可再分发的图纸与参考图

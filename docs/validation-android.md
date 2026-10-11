@@ -1,11 +1,13 @@
-# Android 模拟器安装与运行验证（x86_64，SwiftShader）
+# Android 模拟器安装与运行验证（x86_64）
 
 本文件记录 **实际执行过** 的 Android 构建、安装、启动与交互验证。所有结论均来自本机
-`emulator-5554` 的 logcat、截图与像素 diff；未观察到的能力一律标注 **NOT RUN** 或
+模拟器的 logcat、截图与像素 diff；未观察到的能力一律标注 **NOT RUN** 或
 **限制**，不作成功声明。
 
-> 平台：Android 模拟器（`dev_api35`，API 35，`google_apis`，x86_64），KVM +
-> **SwiftShader** 软件 GPU（无 3D GPU）。**这不是真机**，不能据此声明真机兼容性。
+> **环境标注**：§1–§10 为**早前的软件 GPU（SwiftShader）环境**记录（`dev_api35`，API 35，
+> `-gpu swiftshader`，KVM）；其中的数字/截图仅代表 SwiftShader，**不代表真实 GPU**。
+> §11（2026-10-11）为**宿主真实 GPU（`-gpu host`）**环境记录。两轮都是 Android 模拟器，
+> **不是真机**，不能据此声明真机兼容性。
 
 关联文档：`docs/build.md`（Android 小节）、`docs/validation.md`（总表）、
 `docs/render-backends.md`。
@@ -293,3 +295,39 @@ no-op）。API 35 镜像无此问题，故 P4 e2e 在 `yacr35` 上完成。API 3
 **NOT RUN**：真机；OEM provider（Google Drive / 厂商云盘）；多 API 矩阵；
 `ACTION_CREATE_DOCUMENT` 覆盖已打开源文件同 URI 的守卫场景（该选择器产生新 URI，无法稳定
 复现；守卫逻辑由 `cad-host` 单测 `save_source_guard` 覆盖）；Android 离屏渲染。
+
+## 11. 宿主真实 GPU 运行（`-gpu host`，2026-10-11，本轮）
+
+平台：无头 Android 模拟器 **`yacr35`（API 35，`google_apis`，x86_64，KVM）**，
+`-gpu host`（宿主显卡透传），`-no-window -no-snapshot -read-only`。宿主为 Wayland 桌面 +
+Intel UHD + Quadro P620（`nvidia-smi` 可见）。**这不是真机**，且 GPU 是宿主显卡而非设备
+SoC。证据目录：`/tmp/opencode/yacr-android-host-gpu/`。
+
+渲染器（`adb shell dumpsys SurfaceFlinger`，设备原文）：
+
+```
+GLES: Google (Intel), Android Emulator OpenGL ES Translator (Mesa Intel(R) UHD Graphics (CML GT2)), OpenGL ES 3.0 (4.6 (Core Profile) Mesa 26.0.8-1ubuntu0.3)
+```
+
+即模拟器的 GLES 渲染器是**宿主 Intel UHD（Mesa 26.0.8）**，**不是 SwiftShader**（对比 §1 的
+`Google SwiftShader`）。应用侧：`ro.hardware.vulkan=ranchu`，wgpu 走 Android Vulkan
+（guest goldfish 转发到宿主 Mesa；应用进程 logcat 有 `MESA: exportSyncFdForQSRILocked` 行）；
+`app_android` 启动、wgpu 初始化成功，无 `FATAL EXCEPTION`/`ANR`/panic。
+
+SAF e2e（与 P4 相同流程；证据 `h1-launch.png`/`h2-open-loaded.png`/`h3-new.png`/
+`flange-out.dxf`/`renderer-evidence.txt`/`logcat-host-gpu.txt`）：
+
+| 步骤 | 操作 | 证据 | 结论 |
+|---|---|---|---|
+| 打开 | Ctrl+O → DocumentsUI `ACTION_OPEN_DOCUMENT` → Downloads → `flange.dxf` | `h2-open-loaded.png`；`PickerActionHandler onFinished …raw%3A…%2FDownload%2Fflange.dxf` | 标题 `flange.dxf`，法兰几何渲染 |
+| 另存 | 打开后立即 Ctrl+S → `ACTION_CREATE_DOCUMENT` → 改名 `flange-out.dxf` → SAVE | `flange-out.dxf` | `/sdcard/Download/flange-out.dxf` = **145282 字节**，首 `0/SECTION/2/HEADER`、末 `EOF` |
+| New | Ctrl+N | `h3-new.png` | 标题 `untitled`，画布空白 |
+
+- 全程无 `FATAL EXCEPTION` / `ANR in dev.yacr` / panic（计数 0）。
+- 打开/另存走 SAF 内容 URI（`ContentResolver`），不使用全盘存储权限。
+- **wgpu 与宿主 Vulkan**：本机 API 35 镜像上 wgpu 设备创建成功并渲染；未见 §10 记录的
+  API 30 goldfish Vulkan `maxBufferSize=0` 问题（那是 API 30 镜像的驱动缺陷，与 `-gpu host`
+  无关）。
+
+**NOT RUN / 边界**：真机；真实设备 SoC GPU（本机 GPU 是宿主显卡）；OEM provider（Google
+Drive / 厂商云盘）；多 API 矩阵；软件渲染与宿主 GPU 的逐像素对比；Android 离屏渲染。
