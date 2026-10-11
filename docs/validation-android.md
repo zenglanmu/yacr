@@ -25,7 +25,7 @@
 | native-code | `x86_64` |
 | package / activity | `dev.yacr.app` / `android.app.NativeActivity` |
 | 签名 | `CN=yacr dev, O=yacr`，SHA-256 `ae556b93ab916181980f09c45981331af65b2be5c0fc14aeb9fb5b921cae887f`（本地开发密钥，未入库） |
-| 实测 manifest | `sdkVersion:'23'` / `targetSdkVersion:'30'`（metadata 里的 26/34 仍未生效，见 `docs/build.md`） |
+| 实测 manifest | `sdkVersion:'23'` / `targetSdkVersion:'30'`（顶层 metadata 不生效；Cargo.toml 已填实际值，见 `docs/build.md`） |
 
 构建（x86_64 必须，aarch64 在 x86_64 镜像上会运行 abort）：
 
@@ -261,3 +261,35 @@ cargo check --target aarch64-linux-android -p app-android --tests --locked   # E
 提交源码重建（build5）后再次安装/启动/复测：`pid=4456` 存活，
 `CAD renderer initialized: preference=WebGpu actual=WebGpu ...` 日志一致，
 拖动像素 diff = 21,534/2,592,000（0.83%），与 build4 相同。
+
+## 10. P4：SAF 打开 / 另存 / New（2026-10-11，本轮）
+
+平台：无头 x86_64 模拟器 **`yacr35`（API 35，`google_apis`，x86_64，KVM，
+`-gpu swiftshader`）**，`wm size 1080x1920` / `wm density 420`。**不是真机**。
+证据目录：`/tmp/opencode/yacr-android-p4/`（截图、logcat、写出的 DXF）。
+
+被测制品：`TARGET=x86_64-linux-android bash scripts/build-android.sh --release` 产出
+`target/release/apk/yacr.apk`，含注入的 `classes.dex`；`aapt2 dump xmltree` 实测
+`android:hasCode=true`、启动 Activity = `dev.yacr.app.YacrNativeActivity`
+（`extends android.app.NativeActivity` 的 SAF 垫片）。
+
+流程与结论（截图逐张）：
+
+| 步骤 | 操作 | 证据 | 结论 |
+|---|---|---|---|
+| 打开 | 点顶栏“打开”图标 → DocumentsUI `ACTION_OPEN_DOCUMENT` → Downloads → `flange.dxf` | `12-open-loaded.png`；`PickerActionHandler onFinished content://…raw%3A%2Fstorage%2Femulated%2F0%2FDownload%2Fflange.dxf` | 标题变 `flange.dxf`，画布渲染法兰几何（弧/尺寸线/红色中心线） |
+| 另存 | `input keycombination 113 47`（Ctrl+S）→ `ACTION_CREATE_DOCUMENT`（默认名 `yacr-demo.dxf`）→ SAVE | `14-save-attempt.png`、`15-save-done.png`、`yacr-demo.dxf` | `/sdcard/Download/yacr-demo.dxf` 写出 **48333 字节**，首 `0/SECTION/2/HEADER`、末 `EOF` |
+| New | `input keycombination 113 42`（Ctrl+N） | `16-new-done.png` | 标题变 `untitled`，画布空白 |
+
+- 全程 logcat 无 `FATAL EXCEPTION` / `ANR in dev.yacr` / panic（计数为 0）。
+- **打开/另存走 SAF 内容 URI**（`ContentResolver` 读写），不使用全盘存储权限。
+
+**环境阻塞（非本轮改动，诚实记录）**：任务指定的 AVD **`yacr`（API 30）无法渲染**：
+其 goldfish/SwiftShader Vulkan 驱动上报 `maxBufferSize=0`，wgpu `request_device` 失败
+（`Limit 'max_buffer_size' value 268435456 is better than allowed 0`）；此外适配器选择还需
+`WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER`（本机 `android_main` 已设置，对合规真机为
+no-op）。API 35 镜像无此问题，故 P4 e2e 在 `yacr35` 上完成。API 30 上的 SAF 本身未验证。
+
+**NOT RUN**：真机；OEM provider（Google Drive / 厂商云盘）；多 API 矩阵；
+`ACTION_CREATE_DOCUMENT` 覆盖已打开源文件同 URI 的守卫场景（该选择器产生新 URI，无法稳定
+复现；守卫逻辑由 `cad-host` 单测 `save_source_guard` 覆盖）；Android 离屏渲染。

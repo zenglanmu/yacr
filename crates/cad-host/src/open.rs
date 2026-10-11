@@ -124,6 +124,12 @@ impl HostCore {
 
     /// User-initiated open: run the chooser (or the headless configured drawing).
     pub(crate) fn request_open(&self) -> CadResult<()> {
+        // A save chooser is in flight: an open would cross-wire the platform's
+        // single file-interaction slot (a SAF save target would be read as an
+        // open). Explicit refusal, never a silent no-op.
+        if self.save_pending() {
+            return Err(CadError::Unsupported(self.message("linux.busy", &[])));
+        }
         if !self.options.headless && self.loading() {
             return Ok(());
         }
@@ -244,10 +250,6 @@ impl HostCore {
         let snapshot = self.import_snapshot();
         if let Some(handle) = self.handle.borrow().as_ref() {
             let messages = self.messages();
-            handle.set_open_available(!self.loading())?;
-            // Save As availability tracks the same idle condition as open **and**
-            // the host capability, so a host without save never advertises it.
-            handle.set_save_available(self.capabilities.save && !self.loading())?;
             handle.set_import_state(&cad_ui_slint::ImportProgressUiState::from_snapshot(
                 snapshot.as_ref(),
                 &messages,
@@ -282,6 +284,14 @@ impl HostCore {
                     }
                 }
             }
+            // Refresh open/save availability LAST, after the presentation state is
+            // settled: a tick that clears `presenting_open` must advertise the idle
+            // availability, or a host whose poll driver stops when idle (Android)
+            // would leave Save As disabled after a completed open.
+            handle.set_open_available(!self.loading())?;
+            // Save As availability tracks the same idle condition as open **and**
+            // the host capability, so a host without save never advertises it.
+            handle.set_save_available(self.capabilities.save && !self.loading())?;
             // The resource failure is the final status of this tick.
             if let Some(error) = &resource_error {
                 self.set_status(self.message("fonts.failed", &[("error", error)]))?;

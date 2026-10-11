@@ -35,6 +35,8 @@ mod android_fonts;
 mod draw;
 mod platform;
 mod poll;
+#[cfg(target_os = "android")]
+mod saf;
 mod state_push;
 mod view;
 
@@ -65,19 +67,24 @@ pub(crate) struct AndroidSink {
 impl UiCommandSink for AndroidSink {
     fn send(&mut self, command: Command) -> CadResult<()> {
         let is_open = matches!(command.id, CommandId::OpenDrawing);
+        let is_save = matches!(
+            command.id,
+            CommandId::SaveDrawingAs | CommandId::PlotDrawing
+        );
         let result = state_push::run_command(&self.core, command);
         if self.core.loading() {
-            // The sample probe resolved to an import in flight: there is no
-            // picker, so show the Android "opening in background" status and keep
-            // the poll timer running for the publish.
+            // A picker/read resolved to an import in flight: show the Android
+            // "opening in background" status and keep the poll timer running for
+            // the publish.
             let _ = self
                 .core
                 .set_status(self.core.message("android.opening", &[]));
             poll::ensure_polling();
-        } else if is_open {
-            // A synchronous open (or a synchronous failure already graded within
-            // the gesture) still gets one tick so a pending outcome settles and
-            // the overlay is refreshed; the tick stops itself when nothing pends.
+        } else if is_open || is_save {
+            // An open or a save picker is asynchronous: keep the poll timer so
+            // the SAF result is drained on a later tick. A synchronous outcome
+            // already graded within the gesture still gets one tick to settle and
+            // refresh the overlay; the tick stops itself when nothing pends.
             poll::ensure_polling();
         }
         result
@@ -118,13 +125,14 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         config_store: Rc::new(platform::AndroidConfigStore),
         surface: Rc::new(platform::AndroidSurface),
         resources: Rc::new(platform::AndroidResources),
-        // File open is wired (sample-path probe); New/Save/Plot stay off this
-        // phase (P4 adds SAF open/save). Android runs a real background import
-        // worker, so the open is asynchronous and driven by the Slint timer.
+        // Open/New/Save are wired (SAF open/save + a blank-document factory on
+        // the shared core); plot stays explicitly unsupported on Android (there
+        // is no vector-export surface here). Android runs a real background
+        // import worker, so an open is asynchronous and driven by the Slint timer.
         capabilities: cad_platform::HostCapabilities {
             open: true,
-            new: false,
-            save: false,
+            new: true,
+            save: true,
             plot: false,
             import_worker: poll::worker_available(),
         },
@@ -208,9 +216,20 @@ pub fn android_main(app: slint::android::AndroidApp) {
     android_logger::init_once(
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
     );
+    // The headless emulator's goldfish/SwiftShader Vulkan reports a
+    // non-Khronos-conformant driver, which wgpu hides by default; this documented
+    // escape hatch exposes it (a no-op on conformant real-device drivers). Set
+    // before the wgpu instance is created (`select_wgpu_backend` reads it).
+    if std::env::var_os("WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER").is_none() {
+        std::env::set_var("WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER", "1");
+    }
     // Capture the asset manager before Slint consumes the app handle; the
     // returned manager is documented to remain valid for the process.
     android_fonts::set_asset_manager(app.asset_manager());
+    // Capture the JavaVM + activity for the SAF bridge. `ndk_context` exposes the
+    // *Application* as its context, which cannot run `startActivityForResult`, so
+    // the activity is taken from the app handle instead.
+    saf::set_context(app.vm_as_ptr(), app.activity_as_ptr());
     if let Err(e) = slint::android::init(app) {
         log::error!("slint android init failed: {e}");
         return;

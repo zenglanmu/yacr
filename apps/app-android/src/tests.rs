@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use cad_app::host::HostController;
 use cad_host::{HostCore, HostOptions, HostPlatform};
-use cad_platform::{ConfigStore, HostCapabilities, PlatformFiles};
+use cad_platform::{ConfigStore, FilePurpose, HostCapabilities, PlatformFiles};
 use cad_ui_slint::{MessageSource, ViewInput};
 
 /// A core over the Android platform impls, with the demo surface applied.
@@ -27,8 +27,8 @@ fn test_core(files: Rc<AndroidFiles>) -> HostCore {
         resources: Rc::new(AndroidResources),
         capabilities: HostCapabilities {
             open: true,
-            new: false,
-            save: false,
+            new: true,
+            save: true,
             plot: false,
             import_worker: true,
         },
@@ -250,7 +250,8 @@ fn android_files_missing_sample_is_an_explicit_failure() {
 }
 
 #[test]
-fn android_save_is_an_explicit_unsupported() {
+fn host_fallback_save_is_explicit_unsupported() {
+    // Off the Android target there is no writer: save is an explicit refusal.
     let files = AndroidFiles::new(Vec::new());
     assert!(matches!(
         files.begin_save(cad_platform::SavePurpose::SaveDxf, "drawing.dxf"),
@@ -259,6 +260,96 @@ fn android_save_is_an_explicit_unsupported() {
     assert!(matches!(
         files.write_atomic(&cad_platform::FileTarget::from_path("/tmp/x.dxf"), b"x"),
         Err(CadError::Unsupported(_))
+    ));
+}
+
+/// The pure SAF outcome→event mapping (the part of `drain_saf` that does not
+/// need JNI) is unit-tested here on the host target.
+#[test]
+fn saf_event_maps_pending_cancel_fail_open_and_save() {
+    use crate::platform::{saf_event, SafResult};
+
+    assert!(saf_event(FilePurpose::Open, SafResult::Pending).is_none());
+
+    assert!(matches!(
+        saf_event(FilePurpose::Open, SafResult::Cancelled),
+        Some(cad_platform::FileEvent::Cancelled {
+            purpose: FilePurpose::Open
+        })
+    ));
+
+    assert!(matches!(
+        saf_event(FilePurpose::Open, SafResult::Failed("boom".into())),
+        Some(cad_platform::FileEvent::Failed {
+            purpose: FilePurpose::Open,
+            ..
+        })
+    ));
+
+    match saf_event(
+        FilePurpose::Open,
+        SafResult::Opened {
+            uri: "content://doc/1".into(),
+            name: "plan.dxf".into(),
+            bytes: vec![1, 2, 3],
+        },
+    ) {
+        Some(cad_platform::FileEvent::Opened { target, bytes }) => {
+            assert_eq!(target.display_name, "plan.dxf");
+            assert_eq!(target.opaque, "content://doc/1");
+            assert_eq!(&bytes[..], &[1, 2, 3]);
+        }
+        other => panic!("expected an opened event, got {other:?}"),
+    }
+
+    match saf_event(
+        FilePurpose::Save(cad_platform::SavePurpose::SaveDxf),
+        SafResult::SaveTarget {
+            uri: "content://doc/2".into(),
+            name: "out.dxf".into(),
+        },
+    ) {
+        Some(cad_platform::FileEvent::SaveTarget { purpose, target }) => {
+            assert_eq!(purpose, cad_platform::SavePurpose::SaveDxf);
+            assert_eq!(target.display_name, "out.dxf");
+            assert_eq!(target.opaque, "content://doc/2");
+        }
+        other => panic!("expected a save-target event, got {other:?}"),
+    }
+}
+
+/// A result whose kind contradicts the armed purpose is an explicit failure, not
+/// a fabricated open/save (an open-chosen URI must never be written as a DXF).
+#[test]
+fn saf_event_rejects_a_cross_wired_result() {
+    use crate::platform::{saf_event, SafResult};
+
+    assert!(matches!(
+        saf_event(
+            FilePurpose::Open,
+            SafResult::SaveTarget {
+                uri: "content://doc/3".into(),
+                name: "x.dxf".into()
+            }
+        ),
+        Some(cad_platform::FileEvent::Failed {
+            purpose: FilePurpose::Open,
+            ..
+        })
+    ));
+    assert!(matches!(
+        saf_event(
+            FilePurpose::Save(cad_platform::SavePurpose::SaveDxf),
+            SafResult::Opened {
+                uri: "content://doc/4".into(),
+                name: "y.dxf".into(),
+                bytes: vec![9]
+            }
+        ),
+        Some(cad_platform::FileEvent::Failed {
+            purpose: FilePurpose::Save(_),
+            ..
+        })
     ));
 }
 

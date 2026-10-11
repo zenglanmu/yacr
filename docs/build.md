@@ -122,8 +122,10 @@ keytool -genkeypair -keystore apps/app-android/dev-release.jks -alias yacr \
 ```
 
 生产密钥绝不进入仓库（规范 §9.1）。注意：`min_sdk_version`/`target_sdk_version`
-metadata 未生效，实测 manifest 为 minSdk 23 / targetSdk 30；最低支持范围尚未在真机
-验证，不得作为兼容性声明。
+（`[package.metadata.android]` 顶层键，cargo-apk 0.10 只认嵌套的
+`[package.metadata.android.sdk]` 表）**不生效**；Cargo.toml 已填实际生效值
+minSdk 23 / targetSdk 30，与 `scripts/build-android.sh` 的 `d8 --min-api 23` 一致。
+最低支持范围尚未在真机验证，不得作为兼容性声明。
 
 仅 Rust 检查（不需要链接）：
 
@@ -133,8 +135,21 @@ cargo check --target aarch64-linux-android -p app-android --locked
 ```
 
 `min/target SDK` 与 ABI 是预留值，未在真机实测最低支持范围。发布签名密钥不入库，
-不申请不必要的全盘权限。**当前 SAF 文件选择器未实现**：宿主按候选路径尝试打开
-DWG，找不到时显示内置演示几何并明确提示（见 `app-android`），不能宣称 F01 已验收。
+不申请不必要的全盘权限。
+
+**SAF 文件选择器（P4，2026-10-11）**：Android 打开/另存经 Storage Access Framework
+（`ACTION_OPEN_DOCUMENT`/`ACTION_CREATE_DOCUMENT`）实现。因 `android-activity` 的原生
+activity 栈收不到 `onActivityResult`，manifest 声明的启动 Activity 改为一个 Java
+`NativeActivity` 子类 `dev.yacr.app.YacrNativeActivity`
+（`apps/app-android/android/dev/yacr/app/YacrNativeActivity.java`，经
+`[package.metadata.android.application.activity]` 指定，故**无需**改写编译后的二进制
+manifest）；Rust 侧 `apps/app-android/src/saf.rs` 经 JNI 驱动它并用 `ContentResolver`
+读写文档 URI。`scripts/build-android.sh` 在 `cargo apk build` 之后把该 Java 编译成
+`classes.dex` 注入 APK 并重新对齐/签名（`javac`→`d8`→`zip`→`zipalign`→`apksigner`，
+任一步失败即中止）。该后处理**强制**执行：manifest 声明了 `hasCode=true` 与
+`YacrNativeActivity`，缺 `classes.dex` 的 APK 启动即 `ClassNotFoundException`，故没有
+跳过开关。宿主目标（非 Android）仍回退到候选路径探测，`begin_save`/`write_atomic` 显式
+`Unsupported`。真机 SAF 仍未验证（见 `docs/validation-android.md`）。
 
 ### x86_64 模拟器安装与运行（已验证；SwiftShader，**非真机**）
 
@@ -143,15 +158,15 @@ x86_64，`-gpu swiftshader`）。APK 必须针对 **x86_64-linux-android**；aar
 x86_64 镜像上经 NDK translation 安装但运行 abort。
 
 ```bash
-# 1) 从当前 checkout 构建 x86_64 release APK（约 12.8 MB，release 签名）
-YACR_REPO="$PWD" PROFILE=release ~/android-dev/build-apk.sh
-#    等价直接命令（CARGO_TARGET_DIR 指向仓库外时更稳）：
+# 1) 从当前 checkout 构建 x86_64 release APK（含 SAF 垫片后处理）
+TARGET=x86_64-linux-android bash scripts/build-android.sh --release
+#    等价直接命令（CARGO_TARGET_DIR 指向仓库外时更稳；不含 SAF 垫片后处理）：
 #    cargo apk build -p app-android --target x86_64-linux-android --lib --release
 #    产物：$CARGO_TARGET_DIR/release/apk/yacr.apk
 
-# 2) 安装并启动 NativeActivity
+# 2) 安装并启动（P4 起启动 Activity 是 SAF 垫片子类）
 adb install -r -t target/release/apk/yacr.apk
-adb shell am start -n dev.yacr.app/android.app.NativeActivity
+adb shell am start -n dev.yacr.app/dev.yacr.app.YacrNativeActivity
 adb shell pidof dev.yacr.app          # 进程存活即启动成功
 
 # 3) 抓日志与截图

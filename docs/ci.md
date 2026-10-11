@@ -90,7 +90,7 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 | Android build-tools | `34.0.0` | `docs/build.md` |
 | Android platform | `android-34` | `docs/build.md` |
 | JDK | `17` | `docs/build.md`（运行时校验 `java -version` 主版本） |
-| 预期 targetSdk / ABI / minSdk | `30` / `arm64-v8a` / `23` | 实测 manifest（`min_sdk_version` metadata 未生效，`docs/build.md` 已记录） |
+| 预期 targetSdk / ABI / minSdk | `30` / `arm64-v8a` / `23` | 实测 manifest（顶层 `min_sdk_version` metadata 不生效，Cargo.toml 已填实际值，`docs/build.md` 已记录） |
 | Node | `22.22.1` | `web-smoke`、`web-deploy` |
 | Playwright | `1.55.1` | `web-smoke`（npm 锁定版本，不使用个人全局安装） |
 | Wrangler | `4`（npm dist-tag） | `scripts/deploy-cloudflare-pages.sh` 默认值；`web-deploy` 不覆盖 |
@@ -257,14 +257,17 @@ Android SDK / NDK 27.0.12077973。因此该 job 默认被门控：
 2. `cargo install cargo-apk --version 0.10.0 --locked`；
 3. `scripts/build-android.sh --release`（脚本内两个 `cargo check` 已带 `--locked`；
    `cargo apk build` 无 `--locked` 参数，故随后单独断言 `git diff --exit-code Cargo.lock`
-   未变，锁文件被改写即失败）；
+   未变，锁文件被改写即失败）；脚本还会在 `cargo apk build` 之后做 SAF 垫片后处理
+   （`javac`→`d8`→注入 `classes.dex`→`zipalign`→`apksigner`，需 `platforms/android-34`
+   与 build-tools 的 `d8`/`zipalign`/`apksigner`，任一步失败即中止）；
 4. 用 `aapt2 dump badging` 读取**真实** manifest，记录 package / minSdk / targetSdk /
    ABI / 签名类型，写入 job summary；与锁定期望不符即失败；
 5. 上传 artifact `android-apk`。
 
-**实测事实**（与 `docs/build.md` 一致）：`package=dev.yacr.app`、`minSdk=23`
-（metadata 写的 26 **未生效**）、`targetSdk=30`（metadata 写的 34 **未生效**）、
-ABI `arm64-v8a`、v1 debug/dev 密钥 JAR 签名。**打包等于产出可安装 APK 文件，
+**实测事实**（与 `docs/build.md` 一致）：`package=dev.yacr.app`、`minSdk=23`、
+`targetSdk=30`（顶层 `min_sdk_version`/`target_sdk_version` metadata 不生效；
+Cargo.toml 已填实际生效值 23/30）、ABI `arm64-v8a`、v1 debug/dev 密钥 JAR 签名。
+**打包等于产出可安装 APK 文件，
 不等于安装运行**；无设备/模拟器，安装与启动一律未验证。
 
 ### `android-release`（按需/tag，自装工具链，含字体 APK）
@@ -279,8 +282,9 @@ ABI `arm64-v8a`、v1 debug/dev 密钥 JAR 签名。**打包等于产出可安装
 3. 前置校验 `JAVA_HOME`（主版本 17）、NDK 目录与 `aapt2`，缺任一即**失败**；
 4. `cargo install cargo-apk 0.10.0`；生成 **gitignored** 开发签名 keystore；
 5. `scripts/fetch-fonts.sh apps/app-android/assets/fonts` 把 mlightcad 全量目录 + 已提交
-   osifont 打进 `assets/fonts/`；`scripts/build-android.sh --release`；断言 `Cargo.lock`
-   未被改写；`aapt2 dump badging` 记录真实 manifest；上传 `yacr-android-release` APK。
+   osifont 打进 `assets/fonts/`；`scripts/build-android.sh --release`（含 P4 的 SAF 垫片
+   `javac`/`d8`/注入 dex/`zipalign`/重签后处理）；断言 `Cargo.lock` 未被改写；
+   `aapt2 dump badging` 记录真实 manifest；上传 `yacr-android-release` APK。
 
 `android-apk`（每次 push/PR，`ANDROID_CI_ENABLED` 门控）仍是构建+事实 job，**不**自装工具链。
 **打包不等于安装运行**。`android-release` 已在 run 37920264484 实跑通过（见 `docs/validation.md`）；

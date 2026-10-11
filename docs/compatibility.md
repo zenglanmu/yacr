@@ -116,7 +116,9 @@
 
 - Android：aarch64 可编译并打包 APK；x86_64 release APK 已在无头模拟器（KVM +
   SwiftShader）**实际安装、启动、渲染并验证画布平移/缩放**（
-  `docs/validation-android.md`）。真机仍 **未运行**；SAF、surface 尺寸/安全区、
+  `docs/validation-android.md`）。P4 起打开/另存经 SAF
+  （`ACTION_OPEN_DOCUMENT`/`ACTION_CREATE_DOCUMENT`）实现，New 为共享核心的空白新建；
+  能力位 `open/new/save=true`、`plot=false`。真机仍 **未运行**；surface 尺寸/安全区、
   量测拾取、面板状态推送未接线。
 - Web：wasm 静态产物可构建；`web-dist/` 在**headful Chromium 的真实 GPU**（ANGLE/Mesa
   Intel UHD，**非** SwiftShader）以 **WebGL2 实际运行**：打开（上传）、New（空白）、

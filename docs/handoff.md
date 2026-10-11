@@ -1,5 +1,118 @@
 # 后续 agent 接手入口
 
+## Android 文件功能：SAF 打开 / 另存 / New（P4，2026-10-11，本轮）
+
+用户要求：给 Android 宿主接线**真实文件打开（SAF `ACTION_OPEN_DOCUMENT`）**、**另存
+（SAF `ACTION_CREATE_DOCUMENT`）**与**New（空白图纸）**，经既有 `PlatformFiles` 缝，
+并在无头 x86_64 模拟器上以 adb 实测。
+
+- 能力位：`apps/app-android/src/lib.rs` 翻到 `{open:true, new:true, save:true, plot:false,
+  import_worker:true}`；`can-new/can-save` 由共享 `HostCore::push` 推送，Ctrl+N / `NEW`、
+  Ctrl+S / `SAVE` 变为可用。plot 在 Android 仍显式不支持（无矢量导出面）。
+- Java 垫片：`apps/app-android/android/dev/yacr/app/YacrNativeActivity.java`
+  （`extends android.app.NativeActivity`，是 manifest 声明的启动 Activity）。`onCreate`
+  无操作，`launch(Context,boolean,String)` 用 `startActivityForResult` 起 SAF 选择器，
+  `onActivityResult` 把结果写入静态槽（`sResult`/`sUri`/`sName`），并提供 `readUri`/
+  `writeUri`（`ContentResolver.openInputStream/openOutputStream`）与 `queryDisplayName`。
+- **偏离已批准设计（已记录）**：设计原为“再加一个 `SafProxyActivity` + 后处理改写二进制
+  `AndroidManifest.xml`”。cargo-apk 0.10 只支持**一个** activity（`ndk-build::manifest`
+  的 `Application.activity` 是单值），二进制 manifest 改写脆弱；故改为把**唯一**启动
+  Activity 换成 `NativeActivity` 子类（经 `[package.metadata.android.application.activity].name`
+  指定，`has_code=true`），子类同样能收 `onActivityResult`，且无需触碰编译后的 manifest。
+  JNI 侧与设计一致（见下）。
+- Rust JNI：`apps/app-android/src/saf.rs`（Android-only）。经 `JavaVM` + **activity 指针**
+  （`app.vm_as_ptr()`/`app.activity_as_ptr()`，在 `android_main` 里于 `slint::android::init`
+  之前捕获；注意 `ndk_context::android_context().context()` 是 **Application** 而非 Activity，
+  无法 `startActivityForResult`）驱动 Java 静态方法；类经 **activity 的 ClassLoader** 解析
+  （`FindClass` 在无 Java 帧的原生线程上取不到应用类），缓存为 `GlobalRef`。字节读写走
+  Java 的 `byte[]`（`readUri`/`writeUri`），JNI 面最小。错误以未翻译串返回，由
+  `platform.rs` 用目录键本地化。
+- `platform.rs`：Android 上 `begin_open`/`begin_save` 启动 SAF 并把 `armed` 置为对应
+  `FilePurpose`；`poll` 读结果（open 解析 URI 字节 → `FileEvent::Opened`，save →
+  `FileEvent::SaveTarget`，取消/失败 → 对应事件）；`write_atomic` 经 `ContentResolver`
+  写；`refuses_source_overwrite` 比较 opaque（SAF content URI）。宿主目标（非 Android）
+  仍回退到样本路径探测，`begin_save`/`write_atomic` 显式 `Unsupported`。
+- 异步轮询：`HostCore` 新增 `pub fn save_pending()`；`poll.rs` 的 `poll_tick` 保持轮询条件
+  改为 `loading() || save_pending()`；`AndroidSink::send` 对 Save/Plot 也 `ensure_polling()`，
+  使异步 SAF 另存选择器的结果被后续 tick 抽干并导出。
+- 构建后处理：`scripts/build-android.sh` 在 `cargo apk build` 后 `javac`（`--source/target 8`
+  + `android-34/android.jar`）→ `d8 --min-api 23` → `zip` 注入 `classes.dex` → `zipalign` →
+  `apksigner` 重签 → `aapt2 dump xmltree` 校验 manifest 声明了 `YacrNativeActivity` 且
+  `hasCode=true`，任一步失败即中止（无跳过开关：manifest 声明了 `hasCode=true` 与
+  `YacrNativeActivity`，缺 `classes.dex` 的 APK 启动即 `ClassNotFoundException`）。缺
+  `dev-release.jks` 时按文档口令自动生成。
+- i18n：新增 3 键（两份 catalog 一致）：`android.saf_unavailable` / `android.saf_failed` /
+  `android.saf_write_failed`。
+- 模拟器渲染门槛：为让无头模拟器的 Vulkan 适配器不被 wgpu 隐藏，`android_main` 设置
+  `WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER=1`（对合规真机驱动为 no-op）。
+
+验证（本机；**无头 x86_64 模拟器，非真机**；证据 `/tmp/opencode/yacr-android-p4/`）：
+
+- `cargo fmt --all -- --check`；`cargo clippy --workspace --exclude app-android --all-targets
+  --locked -- -D warnings`；`cargo clippy -p app-android --target x86_64-linux-android
+  --all-targets --locked -- -D warnings`；`check-architecture.py`（26 包）；`check-i18n.py`
+  （306 键）；`check-fixture-manifest.py`；`check-workflows.py`。
+- `cargo check --workspace --exclude app-android --all-targets --locked`；
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
+  `cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --all-targets --locked`；
+  `cargo check --target x86_64-linux-android -p cad-ui-slint -p app-android --all-targets --locked`。
+- `cargo test -p app-android -p cad-host --locked`：app-android **18 通过**、cad-host **14 通过**，0 失败。
+- 构建：`TARGET=x86_64-linux-android bash scripts/build-android.sh --release` 产出含
+  `classes.dex` 的 APK（`hasCode=true`，`launchable-activity=dev.yacr.app.YacrNativeActivity`）。
+- 模拟器 e2e（`yacr35`，API 35，`google_apis`，x86_64，`-gpu swiftshader`，KVM）：
+  - **打开**：点顶栏“打开” → DocumentsUI `ACTION_OPEN_DOCUMENT` → Downloads 选 `flange.dxf`
+    → 返回 content URI（`...raw%3A%2Fstorage%2Femulated%2F0%2FDownload%2Fflange.dxf`）→
+    应用标题变 `flange.dxf`、画布渲染法兰几何（截图 `12-open-loaded.png`）。
+  - **另存**：`Ctrl+S`（`input keycombination 113 47`）→ DocumentsUI
+    `ACTION_CREATE_DOCUMENT`（默认名 `yacr-demo.dxf`）→ SAVE →
+    `/sdcard/Download/yacr-demo.dxf` 写出 48333 字节，首行 `0 SECTION 2 HEADER`、末行 `EOF`
+    （拉回证据 `yacr-demo.dxf`）。
+  - **New**：`Ctrl+N`（`input keycombination 113 42`）→ 标题变 `untitled`、画布空白
+    （截图 `16-new-done.png`）。
+  - 全程无 `FATAL EXCEPTION` / `ANR in dev.yacr` / panic（logcat 扫描为 0）。
+- **模拟器（`yacr`，API 30）无法渲染（环境阻塞，非本轮改动）**：其 goldfish/SwiftShader
+  Vulkan 驱动报 `maxBufferSize=0`，wgpu `request_device` 失败（
+  `Limit 'max_buffer_size' value 268435456 is better than allowed 0`）；适配器选择还需
+  `WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER`。API 35 镜像（`yacr35`）无此问题，故 e2e
+  在其上完成。见 `docs/validation-android.md`。
+- 未运行：**真机**、OEM provider（Google Drive/厂商云盘）、多 API 矩阵、SAF 源文件覆盖
+  守卫的模拟器场景（`ACTION_CREATE_DOCUMENT` 产生新 URI，无法稳定复现同 URI；守卫逻辑由
+  cad-host 单测覆盖）、Android 离屏渲染。
+
+补强（P4 评审后，无范围扩张）：
+
+- **M1** 删除 Java 侧 `PURPOSE_*`/`sPurpose`（Java 不再镜像交互目的）；交互目的由 Rust 的
+  `armed: FilePurpose` 单独拥有并传入 `saf::poll(purpose)`，两侧不可能再对不上。`saf.rs`
+  注释更正为只镜像 `STATE_*`。
+- **M2** `onActivityResult` 的 `takePersistableUriPermission` 移入独立 try/catch（失败仅
+  忽略），不再把一次成功的选择降级为 `STATE_FAILED`。
+- **M3** 移除 `YACR_ANDROID_SAF=0` 跳过开关（会产出无法启动的 APK）；`docs/build.md`
+  更正为“后处理强制”。
+- **M4** `cad-host::open::request_open` 在 `save_pending()` 时显式拒绝（`linux.busy`，非静默
+  no-op）；`AndroidFiles::begin_open/begin_save` 在 `armed.is_some()` 时返回显式错误；目的/
+  结果不匹配改为 `FileEvent::Failed`（不再猜成 `SaveDxf`）。映射抽成 host 可测的
+  `platform::saf_event(purpose, SafResult)`，新增两个单测。
+- **JNI 加固**：`run` 用 `push_local_frame(32)`/`pop_local_frame` 包住一次交互（消除永久附加
+  线程的本地引用泄漏）；Java `snapshot()` 在 `LOCK` 下一次性返回
+  `{sResult,sUri,sName,sError}`，Rust 单次调用读取（消除 ARM 上的可见性竞态）；
+  `onActivityResult` 对未知 requestCode 提前返回，`RESULT_OK` 无 URI 映射为 `STATE_FAILED`
+  （非取消）；修正 `launch` javadoc（在 android_main 线程调用）。
+- **Minor**：`Cargo.toml` min/target SDK 对齐为实际生效的 23/30（顶层键本就不生效）；
+  `MIN_SDK` 注释对齐；`android_save_is_an_explicit_unsupported` 更名
+  `host_fallback_save_is_explicit_unsupported`。`write_atomic` 的 I/O 失败仍用
+  `CadError::InvalidInput`——与 `app-linux` 的 `atomic_write` 一致，且 `cad-domain` 无更贴切
+  变体（新增变体会破坏穷尽匹配，超范围）。
+- **e2e 复跑发现的连带修复（预存在 bug）**：`cad-host::open::poll_loading` 原先在清
+  `presenting_open` **之前**计算 `set_open_available`/`set_save_available`，于是“打开完成”
+  那一 tick 仍以 `loading()==true` 刷新，而 Android 的轮询在 idle 时自停，导致**打开之后
+  `can-save` 仍为 false**（Ctrl+S 被当成 unsupported）。改为在 presentation 状态结算**之后**
+  最后刷新可用性。复跑确认打开后 Ctrl+S 立即打开 `ACTION_CREATE_DOCUMENT`。
+- 复跑 e2e（`yacr35`，API 35，`-gpu swiftshader`；证据 `/tmp/opencode/yacr-android-p4/`
+  `r4-flange-loaded.png`/`r5-open.png`/`r10-new.png`/`flange-out.dxf`/`logcat-remediation.txt`）：
+  打开 `flange.dxf`（标题+几何）→ 打开后立即 Ctrl+S → 改名 `flange-out.dxf` 保存
+  （**145282 字节**，`0/SECTION/2/HEADER … EOF`）→ Ctrl+N 得 `untitled` 空白；无
+  `FATAL EXCEPTION`/`ANR`/panic。`cargo test -p app-android -p cad-host` = **20 / 14 通过**。
+
 ## Web 文件功能：New / 另存 DXF / 出图 SVG·PDF 下载（P3，2026-10-11，本轮）
 
 用户要求：为 Web 宿主接线 **New（空白图纸）**、**另存 DXF 下载**、**出图 SVG/PDF 下载**，

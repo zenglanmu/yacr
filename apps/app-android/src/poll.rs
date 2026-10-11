@@ -148,7 +148,9 @@ pub(crate) fn poll_tick() -> bool {
                 let _ = handle.set_status(status);
             }
         }
-        runtime.core.loading()
+        // Keep ticking while an open or an asynchronous SAF save picker is in
+        // flight; both stop themselves once terminal.
+        runtime.core.loading() || runtime.core.save_pending()
     })
     // No runtime on this thread: no live job to keep polling.
     .unwrap_or_default()

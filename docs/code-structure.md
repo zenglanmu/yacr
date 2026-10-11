@@ -52,15 +52,20 @@
 
 | 文件 | 职责 |
 |---|---|
-| `platform.rs` | `cad-platform` 契约的 Android 实现：`AndroidFiles`（`begin_open` 探测样本路径并入队 `FileEvent::Opened`，无样本/读取失败时显式 `FileEvent::Failed`；`begin_save`/`write_atomic` 本阶段显式 `Unsupported`；`refuses_source_overwrite` 比较 opaque 句柄，因无保存不会被调用）、`AndroidConfigStore`（无持久化存储：加载恒 `Absent`，写入显式 `Unsupported`）、`AndroidSurface`（Activity 经表面入口转发的尺寸/DPI/安全区）、`AndroidResources`（`HostResources`：字体经 APK assets 装载，图像不建模） |
+| `platform.rs` | `cad-platform` 契约的 Android 实现：`AndroidFiles`（Android 目标上 `begin_open`/`begin_save` 经 `saf` 启动 SAF 选择器，`poll` 读取结果并用 `ContentResolver` 读写文档 URI；宿主目标回退为样本路径探测，`begin_save`/`write_atomic` 显式 `Unsupported`；`refuses_source_overwrite` 比较 opaque 句柄=SAF content URI）、`AndroidConfigStore`（无持久化存储：加载恒 `Absent`，写入显式 `Unsupported`）、`AndroidSurface`（Activity 经表面入口转发的尺寸/DPI/安全区）、`AndroidResources`（`HostResources`：字体经 APK assets 装载，图像不建模） |
+| `saf.rs` | Android-only 的 SAF JNI 桥：经 `ndk_context` 取得 `JavaVM`/Activity，用 Activity 的类加载器解析 `dev.yacr.app.YacrNativeActivity`（`FindClass` 在无 Java 帧的原生线程上取不到应用类），调用其静态 `begin`/`launch`/`readUri`/`writeUri` 并轮询静态结果槽；错误以未翻译的原始串返回，由 `platform.rs` 用目录键本地化 |
 | `view.rs` | `AndroidViewInput`：保留共享 `InputPolicy` 轻触/拖拽状态机（一指点按选中、拖动平移），命令经共享 `HostCore::execute` 漏斗 |
 | `draw.rs` | `AndroidDrawSink`：把 Trim/Extend 的世界点解析为 `SelectionRef`（桌面核心显式拒绝），空选择显式报错；预览 sink 复用共享核心 |
 | `state_push.rs` | 共享 `push` 之上的 Android 叠加：异步打开进度面板 + 资源抽屉字体摘要（`images_modeled: false`）+ 目录文案 |
-| `poll.rs` | Slint 定时器驱动 `core.tick()`（`import_worker=true` 的真实后台导入）与公开的 `set_surface_size`/`set_surface_insets` 入口 |
+| `poll.rs` | Slint 定时器驱动 `core.tick()`（`import_worker=true` 的真实后台导入；打开与异步 SAF 另存选择器在途时保持轮询）与公开的 `set_surface_size`/`set_surface_insets` 入口 |
 | `android_fonts.rs` | APK `assets/fonts/` 的 `FontLoader` 实现（`AndroidResources` 复用） |
 
-能力位保持 `open=true`、`new/save/plot=false`（SAF 打开/另存为 P4）；打开仍是**硬编码样本路径
-探测**（无原生选择器）。`android_main`/`slint::android::init`/Slint 定时器/两个表面入口不变。
+能力位为 `open=true`、`new=true`、`save=true`、`plot=false`（P4 起 SAF 打开/另存 + 空白新建）。
+Android 上打开/另存由 Java 垫片（`android/dev/yacr/app/YacrNativeActivity.java`）中介 SAF
+`ACTION_OPEN_DOCUMENT`/`ACTION_CREATE_DOCUMENT`：该垫片是 `android.app.NativeActivity` 子类，
+同时是 manifest 声明的启动 Activity，因此无需改写编译后的二进制 manifest。`scripts/build-android.sh`
+在 `cargo apk build` 后 `javac`→`d8`→注入 `classes.dex`→`zipalign`→重签。
+`android_main`/`slint::android::init`/Slint 定时器/两个表面入口不变。
 
 `HostCore` 新增 `HostResources` 策略（`HostPlatform.resources`），使打开漏斗在不导入平台类型
 的前提下装载平台资源：桌面为 `DesktopResources`（原 `cad-host` 字体/图像逻辑原样迁移），Web 为

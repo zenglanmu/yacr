@@ -404,6 +404,16 @@ impl HostCore {
         }
     }
 
+    /// Whether a save-target chooser is in flight or a chosen target is awaiting
+    /// its export.
+    ///
+    /// A platform with an asynchronous save picker (Android SAF) needs its poll
+    /// driver to keep ticking until the chosen target has been drained and
+    /// exported; a synchronous platform clears this within the gesture.
+    pub fn save_pending(&self) -> bool {
+        self.save_pending.get() || self.pending_save.borrow().is_some()
+    }
+
     /// Whether a document open is in flight (picker, read, import or presentation).
     pub fn loading(&self) -> bool {
         self.open_pending.get()
