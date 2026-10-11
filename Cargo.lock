@@ -298,6 +298,7 @@ dependencies = [
  "cad-app",
  "cad-db",
  "cad-domain",
+ "cad-host",
  "cad-import-acadrust",
  "cad-platform",
  "cad-representation",

@@ -1,39 +1,46 @@
-use std::cell::{Cell, RefCell};
+//! Android host assembly (spec v2.0 §5.3, §9.1).
+//!
+//! The platform-common orchestration (command routing, state push, the
+//! open/plot/save funnels, the navigation/pick/draw sinks) lives in
+//! `cad_host::HostCore`. This crate is the Android composition root: it builds
+//! the core over the Android platform impls ([`platform`]), installs the Slint
+//! adapter and the CAD render bridge, keeps the genuinely Android-specific
+//! adapters (the [`view::AndroidViewInput`] `InputPolicy` state machine, the
+//! [`draw`] command sink, the [`android_fonts`] asset loader and the [`poll`]
+//! Slint timer) and owns the event loop.
+//!
+//! No CAD logic is duplicated here; the database stays the single authority and
+//! the shell is a derived presentation of it.
+
+use std::cell::RefCell;
 
 use std::rc::Rc;
 
-use std::sync::Arc;
-
-use cad_app::host::HostController;
-
-use cad_app::input::{InputOutcome, InputPolicy, PointerPhase, PointerUpdate};
-
-use cad_app::{Command, CommandId, CommandPayload};
+use cad_app::{Command, CommandId};
 
 use cad_domain::*;
 
+use cad_host::{HostCore, HostOptions, HostPlatform};
+
 use cad_ui_slint::{
-    CadView, IncomingDocument, UiAdapter, UiCommandSink, UiConfiguration, UiHandle, ViewInput,
+    IncomingDocument, LayoutSwitchSink, UiAdapter, UiCommandSink, UiConfiguration, UiHandle,
 };
 
 type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
-
-type SharedView = Rc<RefCell<Option<CadView>>>;
 
 /// Android host font loading from APK assets (`assets/fonts/…`).
 #[cfg(target_os = "android")]
 mod android_fonts;
 
+mod draw;
+mod platform;
+mod poll;
+mod state_push;
+mod view;
+
 /// Initial logical size of the demo viewport. The UI configuration and the
 /// initial viewport must agree; real dimensions arrive from the surface later.
 const DEMO_LOGICAL_SIZE: [f64; 2] = [1080.0, 1920.0];
-
-/// Status shown once the shell and its CAD canvas are actually connected.
-///
-/// The shell's built-in default (`status.scaffold`) claims the canvas is not
-/// wired yet; that is true only before `install_cad_bridge` runs, so the host
-/// replaces it instead of leaving the stale placeholder on screen.
-const READY_STATUS: &str = "就绪（内置演示几何，非兼容性声明）";
 
 /// Host configuration (sample DWG locations to try on open).
 #[derive(Clone)]
@@ -42,39 +49,62 @@ pub struct AndroidHostConfiguration {
     pub sample_paths: Vec<String>,
 }
 
-/// Canvas navigation for Android: one-finger drag pans, wheel/pinch zooms.
-///
-/// The shell's `TouchArea` emits logical-pixel pointer events. This host turns
-/// them into the same `Pan`/`Zoom` commands the web host uses, so the
-/// authoritative viewport stays the single camera truth. Without this the
-/// `pointer-input`/`scroll-input` callbacks were dropped and the Android canvas
-/// could not be panned or zoomed at all (verified: a swipe changed 0 pixels).
-struct AndroidViewInput {
-    controller: Rc<RefCell<HostController>>,
-    handle: SharedHandle,
-    view: SharedView,
-    viewport: ViewportId,
-    last: Cell<[f64; 2]>,
-    dragging: Cell<bool>,
-    /// Shared pointer/gesture state machine (audit U05). Used to tell a tap from
-    /// a drag so a one-finger drag pans and only a real tap turns into a
-    /// selection pick.
-    policy: RefCell<InputPolicy>,
-}
-
-/// Commands from the UI are executed through the shared application layer.
+/// The Android command funnel: run through the shared core, then re-apply the
+/// Android overlay (import progress + resources drawer) so a command cannot
+/// clobber them or claim images are modeled.
 ///
 /// Cloneable so the same funnel can be installed as the adapter's
 /// `UiCommandSink` **and** as the layout-switch sink: a layout click must run the
 /// exact `SwitchSpace` command path (validate against the drawing, re-sync the
 /// camera and panels) rather than a parallel path.
 #[derive(Clone)]
-struct HostSink {
-    controller: Rc<RefCell<HostController>>,
-    handle: SharedHandle,
-    view: SharedView,
-    incoming: IncomingDocument,
-    configuration: AndroidHostConfiguration,
+pub(crate) struct AndroidSink {
+    core: HostCore,
+}
+
+impl UiCommandSink for AndroidSink {
+    fn send(&mut self, command: Command) -> CadResult<()> {
+        let is_open = matches!(command.id, CommandId::OpenDrawing);
+        let result = state_push::run_command(&self.core, command);
+        if self.core.loading() {
+            // The sample probe resolved to an import in flight: there is no
+            // picker, so show the Android "opening in background" status and keep
+            // the poll timer running for the publish.
+            let _ = self
+                .core
+                .set_status(self.core.message("android.opening", &[]));
+            poll::ensure_polling();
+        } else if is_open {
+            // A synchronous open (or a synchronous failure already graded within
+            // the gesture) still gets one tick so a pending outcome settles and
+            // the overlay is refreshed; the tick stops itself when nothing pends.
+            poll::ensure_polling();
+        }
+        result
+    }
+}
+
+/// Layout panel switch (F04): dispatch the validated `SwitchSpace` command.
+///
+/// Installed on the adapter so a layout-row click runs through the same command
+/// path every other host command uses. The command layer validates the layout
+/// against the drawing and refuses an unknown one; the sink never mutates the
+/// database.
+impl LayoutSwitchSink for AndroidSink {
+    fn select(&mut self, space: cad_representation::SpaceSelection) {
+        let (document, viewport) = {
+            let c = self.core.controller.borrow();
+            (c.document_id, c.viewport_id)
+        };
+        let command = Command {
+            schema_version: 1,
+            id: CommandId::SwitchSpace,
+            document,
+            viewport,
+            payload: cad_app::input::space_switch_payload(space),
+        };
+        let _ = state_push::run_command(&self.core, command);
+    }
 }
 
 /// Build the shared UI + core + renderer stack and run it.
@@ -82,9 +112,34 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     log::info!("yacr android host starting");
     cad_ui_slint::select_wgpu_backend()?;
 
-    let controller = Rc::new(RefCell::new(HostController::with_demo_document(
-        DEMO_LOGICAL_SIZE,
-    )?));
+    let handle_slot: SharedHandle = Rc::new(RefCell::new(None));
+    let platform = HostPlatform {
+        files: Rc::new(platform::AndroidFiles::new(configuration.sample_paths)),
+        config_store: Rc::new(platform::AndroidConfigStore),
+        surface: Rc::new(platform::AndroidSurface),
+        resources: Rc::new(platform::AndroidResources),
+        // File open is wired (sample-path probe); New/Save/Plot stay off this
+        // phase (P4 adds SAF open/save). Android runs a real background import
+        // worker, so the open is asynchronous and driven by the Slint timer.
+        capabilities: cad_platform::HostCapabilities {
+            open: true,
+            new: false,
+            save: false,
+            plot: false,
+            import_worker: poll::worker_available(),
+        },
+    };
+    let host_options = HostOptions {
+        fonts: Vec::new(),
+        fonts_dir: None,
+        images_dir: None,
+        headless: false,
+        drawing: None,
+        size: DEMO_LOGICAL_SIZE,
+        locale: "zh-CN".into(),
+    };
+    let core = HostCore::new(host_options, handle_slot, platform)?;
+    let controller = core.controller.clone();
     let (drawing, document_id, viewport_id) = {
         let mut controller = controller.borrow_mut();
         let _ = controller.fit();
@@ -106,80 +161,43 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         viewport: viewport_id,
     };
 
-    // The sink needs the UI handle, which only exists after the adapter is
-    // built, so it is shared through a slot filled immediately afterwards.
-    let shared_handle: SharedHandle = Rc::new(RefCell::new(None));
-    let shared_view: SharedView = Rc::new(RefCell::new(None));
-    let sink = HostSink {
-        controller: controller.clone(),
-        handle: shared_handle.clone(),
-        view: shared_view.clone(),
-        incoming: incoming.clone(),
-        configuration,
-    };
-    // The layout-switch sink is a clone of the same command funnel: a layout
-    // click dispatches the validated `SwitchSpace` command instead of a
-    // host-specific path (docs/layouts.md §4).
+    let sink = AndroidSink { core: core.clone() };
     let layout_sink = sink.clone();
     let adapter = UiAdapter::new(ui_config, sink, true)?;
     adapter.set_layout_switch_sink(Box::new(layout_sink));
     let handle = adapter.handle();
-    *shared_handle.borrow_mut() = Some(handle.clone());
-    // Replace the shell's "canvas not connected" scaffold status with the
-    // host's real started state.
-    let _ = handle.set_status(READY_STATUS);
+    core.set_handle(handle.clone());
+    // Replace the shell's "canvas not connected" scaffold status with the host's
+    // real started state.
+    let _ = handle.set_status(core.message("android.ready", &[]));
+    // Seed the surface from the configured logical size; a later rotation/resize
+    // calls `set_surface_size` once the Activity forwards the size (audit U07).
+    platform::set_surface_slot(DEMO_LOGICAL_SIZE, 1.0);
     let view =
         cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming.clone())?;
-    sync_view_camera(&shared_view, &controller, viewport_id);
-    // Establish the surface→viewport sizing seam (U07). The configured logical
-    // size is the initial surface; a later rotation/resize calls the same helper
-    // once the Activity forwards the size (see docs/validation-android.md §8).
-    apply_surface_size(&controller, DEMO_LOGICAL_SIZE, 1.0, [0.0; 4])?;
-    // Install the logical-pixel → world mapper so a canvas tap with a measure or
-    // annotation tool produces a real point instead of "取点未接线" (audit U04).
-    adapter.set_canvas_pick_mapper(Rc::new(AndroidCanvasPickMapper::new(
-        controller.clone(),
-        shared_handle.clone(),
-    )));
+    core.set_view(view);
+    // Map the surface onto the authoritative viewport now that both the shell and
+    // the render bridge exist.
+    core.metrics()?;
+    // The shared core resolves a canvas-local logical point to a world point on
+    // the viewport work plane (the same mapper every host installs).
+    adapter.set_canvas_pick_mapper(Rc::new(core.clone()));
     // Draw/edit tools: the shell captures points and emits an intent; the host
     // maps it to one drawing command (line/circle/move/trim). Without this the
     // confirm path reports "not wired" instead of fabricating a command.
-    install_draw_sinks(
-        &adapter,
-        controller.clone(),
-        shared_handle.clone(),
-        shared_view.clone(),
+    draw::install_draw_sinks(&adapter, core.clone(), viewport_id);
+    // Wire real canvas interaction: drag pans, wheel/pinch zooms and a real tap
+    // selects, all through the shared command funnel.
+    adapter.set_view_input(Rc::new(view::AndroidViewInput::new(
+        core.clone(),
         viewport_id,
-    );
-    // Wire real canvas interaction: drag pans and wheel/pinch zooms through the
-    // same `Pan`/`Zoom` commands the web host uses. A tap with no capture tool
-    // active is routed to selection (`pick_at_screen`), not to a fake hit.
-    adapter.set_view_input(Rc::new(AndroidViewInput {
-        controller: controller.clone(),
-        handle: shared_handle.clone(),
-        view: shared_view.clone(),
-        viewport: viewport_id,
-        last: Cell::new([0.0, 0.0]),
-        dragging: Cell::new(false),
-        policy: RefCell::new(InputPolicy::new()),
-    }));
-    // Layout (paper-space) switching: the sink installed above dispatches the
-    // validated `CommandId::SwitchSpace` + `CommandPayload::Space(...)` through
-    // `HostSink::send` → `HostController::execute`, then re-syncs the camera and
-    // the layout panel. An unknown layout is refused by the command layer; the
-    // sink never mutates the database itself (docs/layouts.md §4).
-    *shared_view.borrow_mut() = Some(view);
-    // Register the live objects for the async poll timer and the Activity's
-    // surface-size entry point (`set_surface_size`). Both run on this UI thread.
-    install_runtime(
-        controller.clone(),
-        shared_handle.clone(),
-        shared_view.clone(),
-        incoming.clone(),
-    );
+    )));
+    // Register the live core for the async poll timer and the Activity's
+    // surface-size entry points. All run on this UI thread.
+    poll::install_runtime(core.clone());
     // Populate every panel from real application state now that both the shell
     // and the render bridge exist (docs/ui.md §3, docs/panels.md §3.2).
-    push_panel_state(&controller, &handle, &shared_view);
+    state_push::push_android_state(&core);
     adapter.run()
 }
 
@@ -202,28 +220,18 @@ pub fn android_main(app: slint::android::AndroidApp) {
     }
 }
 
-mod draw;
-mod host;
-mod poll;
-mod state_push;
-mod view;
-
 // The Activity calls `set_surface_size` from outside the crate, so it is public
 // at the crate root; the rest of the host wiring stays crate-internal.
-pub use poll::set_surface_insets;
-pub use poll::set_surface_size;
-pub(crate) use poll::{ensure_polling, install_runtime, worker_available};
-// The poll-processing items are Android-only (their tests compile for the
-// Android target); `set_surface_size`/`apply_surface_resize` are target-agnostic.
-pub(crate) use draw::install_draw_sinks;
-// Only the host tests call this directly on non-Android targets; production code
-// reaches it through `set_surface_size`/`set_surface_insets`.
+pub use poll::{set_surface_insets, set_surface_size};
+
 #[cfg(test)]
-pub(crate) use poll::apply_surface_resize;
-#[cfg(all(target_os = "android", test))]
-pub(crate) use poll::{poll_import_once, ImportPollOutcome};
+pub(crate) use platform::{AndroidConfigStore, AndroidFiles, AndroidResources, AndroidSurface};
+#[cfg(test)]
+pub(crate) use poll::install_runtime;
+#[cfg(test)]
 pub(crate) use state_push::*;
-pub(crate) use view::*;
+#[cfg(test)]
+pub(crate) use view::AndroidViewInput;
 
 #[cfg(test)]
 mod tests;

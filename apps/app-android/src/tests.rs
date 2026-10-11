@@ -1,14 +1,50 @@
 //! Unit tests.
+//!
+//! The host-specific adapters (the `InputPolicy` pointer state machine, the
+//! sample-path file probe, the surface slots) are exercised on the host target;
+//! the asynchronous-open funnel is Android-only (the Slint poll timer exists
+//! there) and is compiled but not run on the host.
 
 use super::*;
 
-#[test]
-fn demo_database_has_geometry_and_bounds() {
-    let controller = HostController::with_demo_document([1080.0, 1920.0]).unwrap();
-    let db = controller.drawing().unwrap();
-    assert!(db.entity_count() >= 6);
-    let (min, max) = db.bounds().unwrap();
-    assert!(max.x - min.x > 0.0);
+use std::sync::Arc;
+
+use cad_app::host::HostController;
+use cad_host::{HostCore, HostOptions, HostPlatform};
+use cad_platform::{ConfigStore, HostCapabilities, PlatformFiles};
+use cad_ui_slint::{MessageSource, ViewInput};
+
+/// A core over the Android platform impls, with the demo surface applied.
+///
+/// The handle slot stays empty (no Slint window in a unit test); `metrics` maps
+/// the surface without a handle, and a command's push failure is ignored, so the
+/// authoritative controller state is still observable.
+fn test_core(files: Rc<AndroidFiles>) -> HostCore {
+    let platform = HostPlatform {
+        files,
+        config_store: Rc::new(AndroidConfigStore),
+        surface: Rc::new(AndroidSurface),
+        resources: Rc::new(AndroidResources),
+        capabilities: HostCapabilities {
+            open: true,
+            new: false,
+            save: false,
+            plot: false,
+            import_worker: true,
+        },
+    };
+    let options = HostOptions {
+        fonts: Vec::new(),
+        fonts_dir: None,
+        images_dir: None,
+        headless: false,
+        drawing: None,
+        size: DEMO_LOGICAL_SIZE,
+        locale: "zh-CN".into(),
+    };
+    let core = HostCore::new(options, Rc::new(RefCell::new(None)), platform).unwrap();
+    crate::platform::set_surface_slot(DEMO_LOGICAL_SIZE, 1.0);
+    core
 }
 
 fn camera_target(controller: &Rc<RefCell<HostController>>) -> Point3 {
@@ -34,31 +70,30 @@ fn world_per_px(controller: &Rc<RefCell<HostController>>) -> f64 {
         .world_per_px()
 }
 
-fn input_harness() -> (Rc<RefCell<HostController>>, AndroidViewInput) {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    controller.borrow_mut().fit().unwrap();
-    let input = AndroidViewInput {
-        controller: controller.clone(),
-        handle: Rc::new(RefCell::new(None)),
-        view: Rc::new(RefCell::new(None)),
-        viewport: ViewportId(1),
-        last: Cell::new([0.0, 0.0]),
-        dragging: Cell::new(false),
-        policy: RefCell::new(InputPolicy::new()),
-    };
-    (controller, input)
+fn input_harness() -> (HostCore, AndroidViewInput) {
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
+    let viewport = core.controller.borrow().viewport_id;
+    let input = AndroidViewInput::new(core.clone(), viewport);
+    (core, input)
+}
+
+#[test]
+fn demo_database_has_geometry_and_bounds() {
+    let controller = HostController::with_demo_document([1080.0, 1920.0]).unwrap();
+    let db = controller.drawing().unwrap();
+    assert!(db.entity_count() >= 6);
+    let (min, max) = db.bounds().unwrap();
+    assert!(max.x - min.x > 0.0);
 }
 
 #[test]
 fn android_view_input_drag_pans_the_authoritative_camera() {
-    let (controller, input) = input_harness();
-    let before = camera_target(&controller);
+    let (core, input) = input_harness();
+    let before = camera_target(&core.controller);
     input.pointer(0, 1, 100.0, 100.0); // down
     input.pointer(2, 1, 140.0, 100.0); // move 40 logical px right
     input.pointer(1, 1, 140.0, 100.0); // up
-    let after = camera_target(&controller);
+    let after = camera_target(&core.controller);
     // Dragging right must move the camera left so the content follows the
     // finger. This is the regression that made the Android canvas inert.
     assert!(
@@ -73,16 +108,16 @@ fn android_view_input_drag_pans_the_authoritative_camera() {
 /// (positive dy) yields `factor < 1` = zoom out, scrolling up = zoom in.
 #[test]
 fn android_view_input_scroll_zooms_the_camera() {
-    let (controller, input) = input_harness();
-    let before = world_per_px(&controller);
+    let (core, input) = input_harness();
+    let before = world_per_px(&core.controller);
     input.scroll(0.0, 200.0); // scroll down => factor 0.7 < 1 => zoom out
-    let after_down = world_per_px(&controller);
+    let after_down = world_per_px(&core.controller);
     assert!(
         after_down > before,
         "scroll down must zoom out: {before} -> {after_down}"
     );
     input.scroll(0.0, -200.0); // scroll up => factor 1.3 > 1 => zoom in
-    let after_up = world_per_px(&controller);
+    let after_up = world_per_px(&core.controller);
     assert!(
         after_up < after_down,
         "scroll up must zoom in: {after_down} -> {after_up}"
@@ -106,10 +141,10 @@ fn pixel_of(controller: &Rc<RefCell<HostController>>, world: Point3) -> [f64; 2]
 
 #[test]
 fn android_tap_selects_the_entity_under_the_finger() {
-    let (controller, input) = input_harness();
+    let (core, input) = input_harness();
     // The bottom edge of the demo room runs along world y = 0, x = 0..4000.
     let pixel = pixel_of(
-        &controller,
+        &core.controller,
         Point3 {
             x: 2000.0,
             y: 0.0,
@@ -119,11 +154,12 @@ fn android_tap_selects_the_entity_under_the_finger() {
     input.pointer(0, 1, pixel[0], pixel[1]); // down
     input.pointer(1, 1, pixel[0], pixel[1]); // up in place => tap
 
-    let selection = controller.borrow().session.selection.clone();
+    let selection = core.controller.borrow().session.selection.clone();
     assert_eq!(selection.len(), 1, "a tap on geometry must select it");
     let selected = selection.refs()[0].entity;
     // The hit is a real entity of the demo drawing (never a fabricated ref).
-    assert!(controller
+    assert!(core
+        .controller
         .borrow()
         .drawing()
         .unwrap()
@@ -133,10 +169,10 @@ fn android_tap_selects_the_entity_under_the_finger() {
 
 #[test]
 fn android_tap_on_empty_space_clears_the_selection() {
-    let (controller, input) = input_harness();
+    let (core, input) = input_harness();
     // Put a real selection in place first.
     let pixel = pixel_of(
-        &controller,
+        &core.controller,
         Point3 {
             x: 2000.0,
             y: 0.0,
@@ -145,40 +181,145 @@ fn android_tap_on_empty_space_clears_the_selection() {
     );
     input.pointer(0, 1, pixel[0], pixel[1]);
     input.pointer(1, 1, pixel[0], pixel[1]);
-    assert_eq!(controller.borrow().session.selection.len(), 1);
+    assert_eq!(core.controller.borrow().session.selection.len(), 1);
 
     // A corner far away from every line: no hit, so the selection is cleared
     // explicitly rather than kept or faked.
     input.pointer(0, 1, 2.0, 2.0);
     input.pointer(1, 1, 2.0, 2.0);
-    assert!(controller.borrow().session.selection.is_empty());
+    assert!(core.controller.borrow().session.selection.is_empty());
 }
 
 #[test]
 fn android_drag_pans_without_selecting() {
-    let (controller, input) = input_harness();
+    let (core, input) = input_harness();
     let pixel = pixel_of(
-        &controller,
+        &core.controller,
         Point3 {
             x: 2000.0,
             y: 0.0,
             z: 0.0,
         },
     );
-    let target_before = camera_target(&controller);
+    let target_before = camera_target(&core.controller);
     input.pointer(0, 1, pixel[0], pixel[1]);
     input.pointer(2, 1, pixel[0] + 60.0, pixel[1]); // past the drag threshold
     input.pointer(1, 1, pixel[0] + 60.0, pixel[1]);
     // The camera moved (pan) and the drag did not become a selection.
-    assert_ne!(camera_target(&controller), target_before);
-    assert!(controller.borrow().session.selection.is_empty());
+    assert_ne!(camera_target(&core.controller), target_before);
+    assert!(core.controller.borrow().session.selection.is_empty());
+}
+
+#[test]
+fn android_files_probe_queues_opened_bytes() {
+    let dir = std::env::temp_dir().join(format!("yacr-android-probe-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("yacr-sample.dwg");
+    std::fs::write(&path, [1u8, 2, 3, 4]).unwrap();
+    let files = AndroidFiles::new(vec![path.to_string_lossy().to_string()]);
+
+    files.begin_open().unwrap();
+    let events = files.poll();
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        cad_platform::FileEvent::Opened { target, bytes } => {
+            assert_eq!(target.display_name, path.to_string_lossy().to_string());
+            assert_eq!(&bytes[..], &[1, 2, 3, 4]);
+        }
+        other => panic!("expected an opened event, got {other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn android_files_missing_sample_is_an_explicit_failure() {
+    let files = AndroidFiles::new(vec!["/definitely/not/a/drawing.dwg".to_string()]);
+    files.begin_open().unwrap();
+    let events = files.poll();
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        cad_platform::FileEvent::Failed { purpose, reason } => {
+            assert_eq!(purpose, &cad_platform::FilePurpose::Open);
+            assert_eq!(
+                reason,
+                &MessageSource::from_request("zh-CN").text("android.no_sample", &[])
+            );
+        }
+        other => panic!("expected an explicit failure, got {other:?}"),
+    }
+}
+
+#[test]
+fn android_save_is_an_explicit_unsupported() {
+    let files = AndroidFiles::new(Vec::new());
+    assert!(matches!(
+        files.begin_save(cad_platform::SavePurpose::SaveDxf, "drawing.dxf"),
+        Err(CadError::Unsupported(_))
+    ));
+    assert!(matches!(
+        files.write_atomic(&cad_platform::FileTarget::from_path("/tmp/x.dxf"), b"x"),
+        Err(CadError::Unsupported(_))
+    ));
+}
+
+#[test]
+fn android_config_store_has_no_durable_store() {
+    let store = AndroidConfigStore;
+    assert_eq!(store.load_config(), cad_platform::ConfigLoad::Absent);
+    assert_eq!(store.load_preference(), cad_platform::ConfigLoad::Absent);
+    assert!(matches!(
+        store.persist_preference("{}"),
+        Err(CadError::Unsupported(_))
+    ));
+}
+
+#[test]
+fn android_surface_reports_the_forwarded_metrics() {
+    use cad_platform::SurfaceSource;
+    crate::platform::set_surface_slot([800.0, 600.0], 2.0);
+    crate::platform::set_safe_insets([24.0, 8.0, 16.0, 4.0]);
+    let surface = AndroidSurface.surface().expect("a real surface");
+    assert_eq!(surface.logical, [800.0, 600.0]);
+    assert_eq!(surface.scale, 2.0);
+    assert_eq!(surface.safe_insets, [24.0, 8.0, 16.0, 4.0]);
+}
+
+#[test]
+fn android_resource_sections_leave_proxy_and_images_unpushed() {
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
+    // No font or import report yet: the open document's references source is the
+    // only real one (empty keys -> the explicit "none" row). Proxy is not
+    // surfaced by the importer, and Android does not model images.
+    let sections = resource_sections(&core.controller.borrow(), None);
+    assert!(sections.fonts.is_none());
+    assert!(sections.import.is_none());
+    assert!(sections.proxy.is_none());
+    assert_eq!(
+        sections.references.as_ref().unwrap().keys,
+        Vec::<String>::new()
+    );
+    assert!(!sections.images_modeled);
+
+    let report = cad_platform::fonts::FontLoadReport {
+        catalog_entries: 3,
+        requested: vec!["simplex".into()],
+        planned: vec!["simplex.shx".into()],
+        registered: vec!["simplex".into()],
+        failed: Vec::new(),
+        unresolved: Vec::new(),
+        default_face: Some("osifont".into()),
+    };
+    let sections = resource_sections(&core.controller.borrow(), Some(&report));
+    let fonts = sections.fonts.expect("a real font report is pushed");
+    assert_eq!(fonts.catalog_entries, 3);
+    assert_eq!(fonts.requested, 1);
+    assert_eq!(fonts.registered, 1);
+    assert_eq!(fonts.default_face.as_deref(), Some("osifont"));
 }
 
 #[test]
 fn android_surface_size_updates_the_viewport_and_keeps_the_camera_target() {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
     // Move the camera off the drawing centre so a resize that recentres would
     // be caught.
     let target = Point3 {
@@ -187,7 +328,7 @@ fn android_surface_size_updates_the_viewport_and_keeps_the_camera_target() {
         z: 0.0,
     };
     {
-        let mut controller = controller.borrow_mut();
+        let mut controller = core.controller.borrow_mut();
         let viewport = controller
             .application
             .workspace
@@ -196,9 +337,10 @@ fn android_surface_size_updates_the_viewport_and_keeps_the_camera_target() {
             .unwrap();
         viewport.camera.target = target;
     }
+    install_runtime(core.clone());
 
-    apply_surface_size(&controller, [800.0, 600.0], 2.0, [0.0; 4]).unwrap();
-    let controller_ref = controller.borrow();
+    set_surface_size(800.0, 600.0, 2.0).unwrap();
+    let controller_ref = core.controller.borrow();
     let viewport = controller_ref
         .application
         .workspace
@@ -211,100 +353,77 @@ fn android_surface_size_updates_the_viewport_and_keeps_the_camera_target() {
     assert_eq!(viewport.camera.target, target);
 
     // Degenerate metrics are refused, not silently applied.
-    assert!(apply_surface_size(&controller, [0.0, 600.0], 1.0, [0.0; 4]).is_err());
-    assert!(apply_surface_size(&controller, [800.0, 600.0], f64::NAN, [0.0; 4]).is_err());
+    assert!(set_surface_size(0.0, 600.0, 1.0).is_err());
+    assert!(set_surface_size(800.0, 600.0, f64::NAN).is_err());
 }
 
 #[test]
-fn android_panel_snapshot_is_derived_from_real_state() {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    controller.borrow_mut().fit().unwrap();
-    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
-    let snapshot = snapshot(&controller, &messages);
+fn android_safe_insets_shrink_the_canvas_and_degenerate_input_is_refused() {
+    // Safe insets are the system-bar/soft-keyboard margins; the canvas rect is
+    // the surface minus the safe area (audit U07). Zeros are the honest default
+    // until a platform source provides them.
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
+    install_runtime(core.clone());
 
-    // Fresh demo: no history yet, but both flags are explicit.
-    assert!(!snapshot.history.can_undo);
-    assert!(!snapshot.history.can_redo);
-    assert!(!snapshot.measurement.active);
+    set_surface_size(800.0, 600.0, 2.0).unwrap();
+    // [top, right, bottom, left] = 24, 8, 16, 4 -> 788 x 560.
+    set_surface_insets(24.0, 8.0, 16.0, 4.0).unwrap();
+    let logical_size = core
+        .controller
+        .borrow()
+        .application
+        .workspace
+        .viewports
+        .get(&ViewportId(1))
+        .unwrap()
+        .logical_size;
+    assert_eq!(logical_size, [800.0 - 8.0 - 4.0, 600.0 - 24.0 - 16.0]);
 
-    // The demo database has two real layers; the ordered ids match the rows.
-    assert_eq!(snapshot.layers.rows.len(), 2);
-    assert_eq!(snapshot.layer_ids, vec![LayerId(0), LayerId(1)]);
-
-    // No selection => explicit empty panels, no fake rows.
-    assert!(snapshot.properties.rows.is_empty());
-    assert_eq!(snapshot.properties.count, 0);
-    // The demo has no paper layouts; the panel is explicitly empty.
-    assert!(snapshot.layouts.rows.is_empty());
-    assert!(snapshot.layout_ids.is_empty());
-    assert_eq!(snapshot.layouts.empty_label, "无布局");
-
-    // No import report yet => the drawer is empty and unverified, never clean.
-    assert!(snapshot.diagnostics.rows.is_empty());
-    assert!(snapshot.diagnostics.summary.contains("未验证"));
+    // Degenerate insets are refused and the applied size is left unchanged.
+    assert!(set_surface_insets(-1.0, 0.0, 0.0, 0.0).is_err());
+    assert!(set_surface_insets(f64::NAN, 0.0, 0.0, 0.0).is_err());
+    let unchanged = core
+        .controller
+        .borrow()
+        .application
+        .workspace
+        .viewports
+        .get(&ViewportId(1))
+        .unwrap()
+        .logical_size;
+    assert_eq!(unchanged, logical_size);
 }
 
 #[test]
-fn android_import_diagnostics_surface_every_real_row() {
-    use cad_import_acadrust::ImportReport;
+fn android_surface_entry_point_applies_after_runtime_install() {
+    // The exported Activity entry point reaches the live host through the
+    // registered runtime and applies the same resize; before `start` (no
+    // runtime on this thread) it is an explicit error, never a silent no-op.
+    assert!(set_surface_size(800.0, 600.0, 2.0).is_err());
 
-    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
-
-    // No report is explicitly empty and unverified.
-    let empty = import_diagnostics(None, &messages);
-    assert!(empty.rows.is_empty());
-    assert!(empty.summary.contains("未验证"));
-
-    // A report with two diagnostics keeps both, with real code and object.
-    let report = ImportReport {
-        identity: DocumentIdentity::Temporary(0),
-        capabilities: Vec::new(),
-        completeness: Completeness::Partial(vec!["unknown".to_string()]),
-        diagnostics: vec![
-            cad_domain::Diagnostic {
-                object: Some(cad_domain::ObjectId(7)),
-                code: "import.linetype_unknown".into(),
-                message: "线型未知".into(),
-            },
-            cad_domain::Diagnostic {
-                object: None,
-                code: "import.incomplete_stream".into(),
-                message: "流不完整".into(),
-            },
-        ],
-        parse_ms: None,
-    };
-    let state = import_diagnostics(Some(&report), &messages);
-    assert_eq!(state.rows.len(), 2, "every diagnostic row is kept");
-    assert_eq!(state.rows[0].code, "import.linetype_unknown");
-    assert_eq!(state.rows[0].object, "7");
-    assert_eq!(state.rows[0].description, "线型未知");
-    assert_eq!(state.rows[1].object, "");
-    assert_eq!(state.summary, report.completeness_label());
-    assert!(state.summary.contains("部分"));
-}
-
-#[test]
-fn android_pick_mapper_is_absent_without_a_surface() {
-    use cad_ui_slint::CanvasPickMapper;
-
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    // No UI handle means no known surface: the mapper must report no point
-    // rather than fabricate one.
-    let mapper = AndroidCanvasPickMapper::new(controller, Rc::new(RefCell::new(None)));
-    assert!(mapper.to_world([10.0, 10.0]).is_none());
-    assert!(mapper.to_world([f64::NAN, 10.0]).is_none());
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
+    install_runtime(core.clone());
+    set_surface_size(800.0, 600.0, 2.0).unwrap();
+    assert_eq!(
+        core.controller
+            .borrow()
+            .application
+            .workspace
+            .viewports
+            .get(&ViewportId(1))
+            .unwrap()
+            .logical_size,
+        [800.0, 600.0]
+    );
+    // Non-finite input is refused before touching the viewport.
+    assert!(set_surface_size(f64::NAN, 600.0, 2.0).is_err());
 }
 
 /// A controller whose document carries one supported paper layout (`LayoutId(7)`).
 ///
 /// The demo drawing has none, so the layout-switch routing test needs a real
 /// layout the importer/representation layer accepts as drawable.
-fn controller_with_one_layout() -> Rc<RefCell<HostController>> {
+fn controller_with_one_layout() -> HostController {
     use cad_db::{DrawingDatabaseBuilder, Layer, Layout, PaperViewport};
 
     let mut controller = HostController::with_demo_document([1080.0, 1920.0]).unwrap();
@@ -354,97 +473,38 @@ fn controller_with_one_layout() -> Rc<RefCell<HostController>> {
         .get_mut(&document_id)
         .unwrap()
         .drawing = Arc::new(builder.finish().unwrap());
-    Rc::new(RefCell::new(controller))
-}
-
-/// A `HostSink` with no UI handle/view: enough to exercise the command path.
-fn host_sink(controller: &Rc<RefCell<HostController>>) -> HostSink {
-    HostSink {
-        controller: controller.clone(),
-        handle: Rc::new(RefCell::new(None)),
-        view: Rc::new(RefCell::new(None)),
-        incoming: Rc::new(RefCell::new(controller.borrow().drawing())),
-        configuration: AndroidHostConfiguration::default(),
-    }
-}
-
-#[test]
-fn android_snapshot_carries_an_empty_highlight_for_an_empty_selection() {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
-    let snapshot = snapshot(&controller, &messages);
-    // No selection => explicit empty highlight; no tool => no preview overlay.
-    assert!(snapshot.selection.is_empty());
-    assert!(snapshot.measurement_preview.is_none());
-}
-
-#[test]
-fn android_snapshot_carries_the_real_selection_as_a_highlight() {
-    let (controller, _input) = input_harness();
-    // Select a real demo entity through the documented command path.
-    let entity = controller
-        .borrow()
-        .drawing()
-        .unwrap()
-        .entities()
-        .next()
-        .expect("demo drawing has entities")
-        .id;
-    let document = controller.borrow().document_id;
     controller
-        .borrow_mut()
-        .set_selection(vec![SelectionRef {
-            document,
-            entity,
-            instance: InstancePath::default(),
-            sub_element: None,
-        }])
-        .unwrap();
+}
 
-    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
-    let snapshot = snapshot(&controller, &messages);
-    // The highlight mirrors `HostController::selection()` exactly, and reflects
-    // the non-empty selection (not the empty default).
-    assert_eq!(snapshot.selection, *controller.borrow().selection());
-    assert_eq!(snapshot.selection.len(), 1);
-    assert_eq!(snapshot.selection.refs()[0].entity, entity);
-    // A selection is not a tool: no preview appears just because something is
-    // selected.
-    assert!(snapshot.measurement_preview.is_none());
+fn core_with_one_layout() -> HostCore {
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
+    *core.controller.borrow_mut() = controller_with_one_layout();
+    core
 }
 
 #[test]
 fn android_layout_selection_routes_through_switch_space() {
-    // The host installs `HostSink` as the adapter's `LayoutSwitchSink`; a layout
-    // selection is dispatched as `CommandId::SwitchSpace` through the same
-    // command funnel. This asserts the sink executes it and re-syncs the
-    // space-derived state.
-    let controller = controller_with_one_layout();
-    let mut sink = host_sink(&controller);
+    // The host installs `AndroidSink` as the adapter's `LayoutSwitchSink`; a
+    // layout selection is dispatched as `CommandId::SwitchSpace` through the same
+    // command funnel. This asserts the sink executes it.
+    let core = core_with_one_layout();
+    let mut sink = AndroidSink { core: core.clone() };
 
     cad_ui_slint::LayoutSwitchSink::select(
         &mut sink,
         cad_representation::SpaceSelection::Paper(LayoutId(7)),
     );
-
-    // The authoritative session records the switch...
     assert_eq!(
-        controller.borrow().session.active_space,
+        core.controller.borrow().session.active_space,
         SpaceId::Paper(LayoutId(7))
     );
-    // ...and the layout panel derivation now reports it active (not model space,
-    // not a fabricated row).
-    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
-    let paper = snapshot(&controller, &messages);
-    assert_eq!(paper.layout_ids, vec![LayoutId(7)]);
-    assert_eq!(paper.layouts.active_index, Some(0));
 
     // Switching back to model space goes through the same path.
     cad_ui_slint::LayoutSwitchSink::select(&mut sink, cad_representation::SpaceSelection::Model);
-    assert_eq!(controller.borrow().session.active_space, SpaceId::Model);
-    assert_eq!(snapshot(&controller, &messages).layouts.active_index, None);
+    assert_eq!(
+        core.controller.borrow().session.active_space,
+        SpaceId::Model
+    );
 }
 
 #[test]
@@ -452,60 +512,16 @@ fn android_layout_switch_to_an_unknown_layout_is_refused() {
     // The sink dispatches through the command path, which validates against the
     // real layout table: a bogus layout is an explicit failure that keeps the
     // current space, not a silent success.
-    let controller = controller_with_one_layout();
-    let mut sink = host_sink(&controller);
+    let core = core_with_one_layout();
+    let mut sink = AndroidSink { core: core.clone() };
     cad_ui_slint::LayoutSwitchSink::select(
         &mut sink,
         cad_representation::SpaceSelection::Paper(LayoutId(99)),
     );
-    assert_eq!(controller.borrow().session.active_space, SpaceId::Model);
-}
-
-#[test]
-fn android_resource_sections_map_real_sources_and_leave_proxy_unpushed() {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    // No font or import report yet: the open document's references source is the
-    // only real one (empty keys -> the explicit "none" row). Proxy is not
-    // surfaced by the importer, so nothing is fabricated for it.
-    let sections = resource_sections(&controller.borrow(), None);
-    assert!(sections.fonts.is_none());
-    assert!(sections.import.is_none());
-    assert!(sections.proxy.is_none());
     assert_eq!(
-        sections.references.as_ref().unwrap().keys,
-        Vec::<String>::new()
+        core.controller.borrow().session.active_space,
+        SpaceId::Model
     );
-    assert!(!sections.images_modeled);
-
-    let report = cad_platform::fonts::FontLoadReport {
-        catalog_entries: 3,
-        requested: vec!["simplex".into()],
-        planned: vec!["simplex.shx".into()],
-        registered: vec!["simplex".into()],
-        failed: Vec::new(),
-        unresolved: Vec::new(),
-        default_face: Some("osifont".into()),
-    };
-    let sections = resource_sections(&controller.borrow(), Some(&report));
-    let fonts = sections.fonts.expect("a real font report is pushed");
-    assert_eq!(fonts.catalog_entries, 3);
-    assert_eq!(fonts.requested, 1);
-    assert_eq!(fonts.registered, 1);
-    assert_eq!(fonts.default_face.as_deref(), Some("osifont"));
-}
-
-#[test]
-fn android_view_state_reflects_the_real_viewport() {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    let state = view_state(&controller.borrow());
-    // The demo starts in 2D with an orthographic camera: the drawer must show
-    // exactly that, never a fabricated 3D/perspective state.
-    assert!(!state.is_3d);
-    assert!(!state.perspective);
 }
 
 // --- Async open (F01): poll → publish-once, cancel, progress panel -------------
@@ -515,298 +531,124 @@ fn android_view_state_reflects_the_real_viewport() {
 /// The same committed contract fixture `cad-app` uses (`fixtures/manifest`); a
 /// real byte stream through the single importer, not a mock.
 ///
-/// Android-only: `poll_import_once`/`ImportPollOutcome` are compiled only for the
-/// Android target (the Slint poll timer exists there), so these tests are gated
-/// with them rather than breaking the host test build.
+/// Android-only: the Slint poll timer exists only there, so these tests are
+/// gated with it rather than breaking the host test build.
 #[cfg(target_os = "android")]
-fn synthetic_dwg_bytes() -> Arc<[u8]> {
-    Arc::from(
-        include_bytes!("../../../fixtures/dwg/synthetic-four-lines.dwg")
-            .to_vec()
-            .into_boxed_slice(),
-    )
+fn synthetic_dwg_bytes() -> Vec<u8> {
+    include_bytes!("../../../fixtures/dwg/synthetic-four-lines.dwg").to_vec()
 }
 
-/// Poll the async open to a terminal, returning the final outcome.
-///
-/// Uses `poll_import_once` (the exact function the Slint timer calls), with no
-/// UI handle/view so it exercises the pure host path.
+/// A temp sample path holding `bytes`, for the Android sample-path probe.
 #[cfg(target_os = "android")]
-fn poll_to_terminal(controller: &Rc<RefCell<HostController>>) -> ImportPollOutcome {
-    let handle: SharedHandle = Rc::new(RefCell::new(None));
-    let view: SharedView = Rc::new(RefCell::new(None));
-    let incoming: IncomingDocument = Rc::new(RefCell::new(controller.borrow().drawing()));
+fn write_sample(name: &str, bytes: &[u8]) -> (std::path::PathBuf, String) {
+    let dir = std::env::temp_dir().join(format!("yacr-android-async-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, bytes).unwrap();
+    (path.clone(), path.to_string_lossy().to_string())
+}
+
+/// Open the sample through the shared funnel and poll to a terminal.
+#[cfg(target_os = "android")]
+fn open_and_poll(core: &HostCore) {
+    let _ = core.command(
+        cad_app::CommandId::OpenDrawing,
+        cad_app::CommandPayload::None,
+    );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    loop {
-        match poll_import_once(controller, &handle, &view, &incoming) {
-            ImportPollOutcome::Running => {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "import worker did not finish"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            other => return other,
-        }
+    while core.loading() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "import worker did not finish"
+        );
+        let _ = core.tick();
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
+}
+
+#[test]
+fn open_with_no_sample_surfaces_the_failure_not_completed() {
+    // Host-target: the Android probe resolves synchronously, so the failure must
+    // be graded within the gesture — never overwritten by the generic "completed"
+    // and never left as a silent success.
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
+    let demo_id = core.controller.borrow().drawing().unwrap().id();
+    let (document, viewport) = {
+        let c = core.controller.borrow();
+        (c.document_id, c.viewport_id)
+    };
+    let mut sink = AndroidSink { core: core.clone() };
+    // The headless test core has no shell handle, so the shared `push()` fails
+    // and `execute` returns that error even though the command succeeded; the
+    // graded status is what this test asserts.
+    let _ = sink.send(Command {
+        schema_version: 1,
+        id: CommandId::OpenDrawing,
+        document,
+        viewport,
+        payload: cad_app::CommandPayload::None,
+    });
+
+    let expected = core.message(
+        "command.failed",
+        &[("error", &core.message("android.no_sample", &[]))],
+    );
+    assert_eq!(
+        core.last_status().as_deref(),
+        Some(expected.as_str()),
+        "the open failure must be the surfaced status"
+    );
+    assert_ne!(
+        core.last_status().unwrap(),
+        core.message("command.completed", &[]),
+        "a failed open must not report completion"
+    );
+    assert_eq!(
+        core.controller.borrow().drawing().unwrap().id(),
+        demo_id,
+        "the demo document must be retained"
+    );
+    assert!(!core.loading(), "no open may be left pending");
 }
 
 #[cfg(target_os = "android")]
 #[test]
 fn android_async_open_publishes_once_and_leaves_no_running_job() {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    controller
-        .borrow_mut()
-        .begin_async_open(synthetic_dwg_bytes(), "synthetic.dwg");
-
-    // A fresh running snapshot before any tick: no fabricated phase/total.
-    let running = controller.borrow().async_open_snapshot().unwrap();
-    assert!(running.running);
-    assert_eq!(running.phase, None);
-    assert_eq!(running.entities_total, None);
-    assert!(running.cancellable);
-
-    let outcome = poll_to_terminal(&controller);
-    assert_eq!(outcome, ImportPollOutcome::Opened { entities: 4 });
-    assert_eq!(controller.borrow().drawing().unwrap().entity_count(), 4);
-
-    // Publishing happened exactly once: polling again is an Idle no-op and the
-    // document is unchanged (the core's stamp guard owns publication).
-    let handle: SharedHandle = Rc::new(RefCell::new(None));
-    let view: SharedView = Rc::new(RefCell::new(None));
-    let incoming: IncomingDocument = Rc::new(RefCell::new(controller.borrow().drawing()));
+    let (dir, sample) = write_sample("synthetic.dwg", &synthetic_dwg_bytes());
+    let core = test_core(Rc::new(AndroidFiles::new(vec![sample])));
+    open_and_poll(&core);
     assert_eq!(
-        poll_import_once(&controller, &handle, &view, &incoming),
-        ImportPollOutcome::Idle
+        core.controller.borrow().drawing().unwrap().entity_count(),
+        4
     );
-    assert_eq!(controller.borrow().drawing().unwrap().entity_count(), 4);
-
-    // The retained terminal hides the panel (`Opened`); the snapshot is explicit.
-    let terminal = controller.borrow().async_open_snapshot().unwrap();
+    // Publishing happened exactly once: the terminal snapshot is not running.
+    let terminal = core.controller.borrow().async_open_snapshot().unwrap();
     assert!(!terminal.running);
-    assert_eq!(
-        terminal.terminal,
-        Some(cad_app::ImportTerminal::Opened { entities: 4 })
-    );
-    assert!(!terminal.cancellable);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[cfg(target_os = "android")]
 #[test]
-fn android_cancel_command_keeps_the_document_and_reports_cancelled() {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    let demo_id = controller.borrow().drawing().unwrap().id();
-    controller
-        .borrow_mut()
-        .begin_async_open(synthetic_dwg_bytes(), "cancelled.dwg");
-    assert!(
-        controller
-            .borrow()
-            .async_open_snapshot()
-            .unwrap()
-            .cancellable
+fn android_cancel_command_keeps_the_document() {
+    let (dir, sample) = write_sample("cancelled.dwg", &synthetic_dwg_bytes());
+    let core = test_core(Rc::new(AndroidFiles::new(vec![sample])));
+    let demo_id = core.controller.borrow().drawing().unwrap().id();
+    // Start the background open, then cancel through the ordinary command path;
+    // the host must not touch the document.
+    let _ = core.command(
+        cad_app::CommandId::OpenDrawing,
+        cad_app::CommandPayload::None,
     );
-
-    // The shell's `cancel-open-requested` routes `CancelLoading` through the
-    // ordinary command path; the host must not touch the document.
-    controller
-        .borrow_mut()
-        .execute(Command {
-            schema_version: 1,
-            id: CommandId::CancelLoading,
-            document: DocumentId(1),
-            viewport: ViewportId(1),
-            payload: CommandPayload::None,
-        })
-        .unwrap();
-    let after_cancel = controller.borrow().async_open_snapshot().unwrap();
-    assert!(after_cancel.running);
-    assert!(
-        !after_cancel.cancellable,
-        "a second cancel cannot be issued while the first is pending"
+    let _ = core.command(
+        cad_app::CommandId::CancelLoading,
+        cad_app::CommandPayload::None,
     );
-
-    assert_eq!(poll_to_terminal(&controller), ImportPollOutcome::Cancelled);
-    // Nothing was published: the demo document is still current and the retained
-    // terminal is explicit.
-    assert_eq!(controller.borrow().drawing().unwrap().id(), demo_id);
-    let terminal = controller.borrow().async_open_snapshot().unwrap();
-    assert_eq!(terminal.terminal, Some(cad_app::ImportTerminal::Cancelled));
-    assert!(!terminal.cancellable);
-}
-
-#[cfg(target_os = "android")]
-#[test]
-fn android_failed_async_open_keeps_the_demo_document() {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    let demo_id = controller.borrow().drawing().unwrap().id();
-    let garbage: Arc<[u8]> = Arc::from(vec![0u8, 1, 2, 3].into_boxed_slice());
-    controller.borrow_mut().begin_async_open(garbage, "bad.dwg");
-
-    match poll_to_terminal(&controller) {
-        ImportPollOutcome::Failed(CadError::CorruptData(_)) => {}
-        other => panic!("expected a corrupt-data failure, got {other:?}"),
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while core.loading() {
+        assert!(std::time::Instant::now() < deadline);
+        let _ = core.tick();
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    assert_eq!(controller.borrow().drawing().unwrap().id(), demo_id);
-    assert!(!controller.borrow().async_open_snapshot().unwrap().running);
-}
-
-#[cfg(target_os = "android")]
-#[test]
-fn android_import_panel_maps_running_and_terminal_snapshots() {
-    use cad_ui_slint::ImportProgressUiState;
-
-    let messages = cad_ui_slint::MessageSource::for_locale(cad_ui_slint::Locale::ZhCn);
-    // Idle: the panel is hidden and no label is fabricated.
-    let idle = ImportProgressUiState::from_snapshot(None, &messages);
-    assert!(!idle.visible);
-    assert!(idle.phase_label.is_empty());
-
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    controller
-        .borrow_mut()
-        .begin_async_open(synthetic_dwg_bytes(), "panel.dwg");
-    // Running without a tick: visible, cancellable, indeterminate (no fake %).
-    let running = ImportProgressUiState::from_snapshot(
-        controller.borrow().async_open_snapshot().as_ref(),
-        &messages,
-    );
-    assert!(running.visible);
-    assert!(running.percent.is_none());
-    assert!(running.cancellable);
-
-    assert_eq!(
-        poll_to_terminal(&controller),
-        ImportPollOutcome::Opened { entities: 4 }
-    );
-    // Opened clears the panel: the document itself is the feedback.
-    let opened = ImportProgressUiState::from_snapshot(
-        controller.borrow().async_open_snapshot().as_ref(),
-        &messages,
-    );
-    assert!(!opened.visible);
-    assert!(!opened.cancellable);
-}
-
-#[test]
-fn android_surface_resize_preserves_the_camera_target() {
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    let target = Point3 {
-        x: 321.0,
-        y: -77.0,
-        z: 0.0,
-    };
-    {
-        let mut controller = controller.borrow_mut();
-        controller
-            .application
-            .workspace
-            .viewports
-            .get_mut(&ViewportId(1))
-            .unwrap()
-            .camera
-            .target = target;
-    }
-    let handle: SharedHandle = Rc::new(RefCell::new(None));
-    let view: SharedView = Rc::new(RefCell::new(None));
-
-    apply_surface_resize(&controller, &handle, &view, [1440.0, 1080.0], 3.0, [0.0; 4]).unwrap();
-
-    let controller_ref = controller.borrow();
-    let viewport = controller_ref
-        .application
-        .workspace
-        .viewports
-        .get(&ViewportId(1))
-        .unwrap();
-    assert_eq!(viewport.logical_size, [1440.0, 1080.0]);
-    assert_eq!(viewport.dpi_scale, 3.0);
-    // Rotation must not recentre: the camera target survives the resize (U07).
-    assert_eq!(viewport.camera.target, target);
-
-    // Degenerate metrics are refused through the same helper, not applied.
-    assert!(
-        apply_surface_resize(&controller, &handle, &view, [0.0, 1080.0], 3.0, [0.0; 4]).is_err()
-    );
-}
-
-#[test]
-fn android_surface_entry_point_applies_after_runtime_install() {
-    // The exported Activity entry point reaches the live host through the
-    // registered runtime and applies the same pure resize; before `start` (no
-    // runtime on this thread) it is an explicit error, never a silent no-op.
-    assert!(set_surface_size(800.0, 600.0, 2.0).is_err());
-
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    let handle: SharedHandle = Rc::new(RefCell::new(None));
-    let view: SharedView = Rc::new(RefCell::new(None));
-    let incoming: IncomingDocument = Rc::new(RefCell::new(controller.borrow().drawing()));
-    install_runtime(controller.clone(), handle, view, incoming);
-
-    set_surface_size(800.0, 600.0, 2.0).unwrap();
-    assert_eq!(
-        controller
-            .borrow()
-            .application
-            .workspace
-            .viewports
-            .get(&ViewportId(1))
-            .unwrap()
-            .logical_size,
-        [800.0, 600.0]
-    );
-    // Non-finite input is refused before touching the viewport.
-    assert!(set_surface_size(f64::NAN, 600.0, 2.0).is_err());
-}
-
-#[test]
-fn android_safe_insets_shrink_the_canvas_and_degenerate_input_is_refused() {
-    // Safe insets are the system-bar/soft-keyboard margins; the canvas rect is
-    // the surface minus the safe area (audit U07). Zeros are the honest default
-    // until a platform source provides them.
-    let controller = Rc::new(RefCell::new(
-        HostController::with_demo_document([1080.0, 1920.0]).unwrap(),
-    ));
-    let handle: SharedHandle = Rc::new(RefCell::new(None));
-    let view: SharedView = Rc::new(RefCell::new(None));
-    let incoming: IncomingDocument = Rc::new(RefCell::new(controller.borrow().drawing()));
-    install_runtime(controller.clone(), handle, view, incoming);
-
-    set_surface_size(800.0, 600.0, 2.0).unwrap();
-    // [top, right, bottom, left] = 24, 8, 16, 4 -> 788 x 560.
-    set_surface_insets(24.0, 8.0, 16.0, 4.0).unwrap();
-    let logical_size = controller
-        .borrow()
-        .application
-        .workspace
-        .viewports
-        .get(&ViewportId(1))
-        .unwrap()
-        .logical_size;
-    assert_eq!(logical_size, [800.0 - 8.0 - 4.0, 600.0 - 24.0 - 16.0]);
-
-    // Degenerate insets are refused and the applied size is left unchanged.
-    assert!(set_surface_insets(-1.0, 0.0, 0.0, 0.0).is_err());
-    assert!(set_surface_insets(f64::NAN, 0.0, 0.0, 0.0).is_err());
-    let unchanged = controller
-        .borrow()
-        .application
-        .workspace
-        .viewports
-        .get(&ViewportId(1))
-        .unwrap()
-        .logical_size;
-    assert_eq!(unchanged, logical_size);
+    assert_eq!(core.controller.borrow().drawing().unwrap().id(), demo_id);
+    let _ = std::fs::remove_dir_all(&dir);
 }

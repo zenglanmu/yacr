@@ -40,6 +40,10 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use fonts::DesktopResources;
+pub use fonts::{HostResources, UnsupportedResources};
+
 /// Host policy mirroring the web host: users may toggle the two dock panels'
 /// initial-open flags. A host `config.json` replaces this policy wholesale.
 pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowedPaths":[
@@ -82,12 +86,16 @@ pub struct HostOptions {
 
 /// The platform contracts a [`HostCore`] is built from.
 ///
-/// All three are single-threaded (`Rc`): the host core runs on one thread and
-/// the traits carry no `Send`/`Sync` requirement.
+/// All are single-threaded (`Rc`): the host core runs on one thread and the
+/// traits carry no `Send`/`Sync` requirement.
 pub struct HostPlatform {
     pub files: Rc<dyn PlatformFiles>,
     pub config_store: Rc<dyn ConfigStore>,
     pub surface: Rc<dyn SurfaceSource>,
+    /// How the host resolves the drawing's shaping fonts and raster images
+    /// (desktop sibling package, Android APK assets, browser fetch). The open
+    /// funnel is platform-general; resource *resolution* is not.
+    pub resources: Rc<dyn HostResources>,
     pub capabilities: HostCapabilities,
 }
 
@@ -135,6 +143,8 @@ pub struct HostCore {
     pub files: Rc<dyn PlatformFiles>,
     pub config_store: Rc<dyn ConfigStore>,
     pub surface: Rc<dyn SurfaceSource>,
+    /// The host's font/image installation strategy (see [`HostResources`]).
+    pub resources: Rc<dyn HostResources>,
     pub capabilities: HostCapabilities,
     /// The active catalog locale, **shared** across every clone.
     ///
@@ -158,6 +168,9 @@ pub struct HostCore {
     pub(crate) open_failure: Rc<RefCell<Option<String>>>,
     /// Whether an open-cancel event was delivered this tick.
     pub(crate) open_cancelled: Rc<Cell<bool>>,
+    /// Whether the open funnel graded a cancel/failure status this gesture/tick,
+    /// so the generic "completed" must not overwrite it.
+    pub(crate) open_status_graded: Rc<Cell<bool>>,
     /// A document open is presenting (bytes delivered, import/presentation).
     pub(crate) presenting_open: Rc<Cell<bool>>,
     /// A save dialog is in flight.
@@ -167,6 +180,10 @@ pub struct HostCore {
     /// Path of the drawing being opened (or already open), used to resolve its
     /// sibling raster images. Armed only on a **successful** open.
     pub(crate) drawing_path: Rc<RefCell<Option<PathBuf>>>,
+    /// Last status text the core graded. Delivered to the shell handle when one
+    /// exists; retained so a headless/test core (no window) can observe the exact
+    /// graded text and a host can mirror it.
+    pub(crate) last_status: Rc<RefCell<Option<String>>>,
     /// Last raster-image loading outcome, surfaced by the diagnostics drawer.
     pub(crate) last_image_report: Rc<RefCell<Option<cad_platform::images::ImageLoadReport>>>,
     /// Last `(physical width, physical height, config revision)` pushed through
@@ -197,6 +214,7 @@ impl HostCore {
             files: platform.files,
             config_store: platform.config_store,
             surface: platform.surface,
+            resources: platform.resources,
             capabilities: platform.capabilities,
             locale,
             open_pending: Rc::new(Cell::new(false)),
@@ -205,10 +223,12 @@ impl HostCore {
             open_target: Rc::new(RefCell::new(None)),
             open_failure: Rc::new(RefCell::new(None)),
             open_cancelled: Rc::new(Cell::new(false)),
+            open_status_graded: Rc::new(Cell::new(false)),
             presenting_open: Rc::new(Cell::new(false)),
             save_pending: Rc::new(Cell::new(false)),
             pending_save: Rc::new(RefCell::new(None)),
             drawing_path: Rc::new(RefCell::new(None)),
+            last_status: Rc::new(RefCell::new(None)),
             last_image_report: Rc::new(RefCell::new(None)),
             last_layout_key: Rc::new(RefCell::new(None)),
             navigation: Rc::new(NavInner::default()),
@@ -247,6 +267,23 @@ impl HostCore {
         *self.locale.borrow_mut() = tag.to_string();
     }
 
+    /// Set the host status line, recording it for host mirrors and tests.
+    ///
+    /// Delivered to the shell handle when one exists; the recorded copy lets a
+    /// headless/test core (no window) observe the exact graded text.
+    pub fn set_status(&self, text: String) -> CadResult<()> {
+        *self.last_status.borrow_mut() = Some(text.clone());
+        if let Some(handle) = self.handle.borrow().as_ref() {
+            handle.set_status(text)?;
+        }
+        Ok(())
+    }
+
+    /// The last status text the core graded, if any.
+    pub fn last_status(&self) -> Option<String> {
+        self.last_status.borrow().clone()
+    }
+
     /// Diagnostics from reading the host config / user preference at startup.
     pub fn startup_diagnostics(&self) -> Vec<String> {
         self.startup_diagnostics.borrow().clone()
@@ -255,11 +292,11 @@ impl HostCore {
     /// Reclassify the window layout and map the surface onto the active viewport.
     ///
     /// The window layout is reclassified only when the physical size or the
-    /// resolved config changed, not every tick (the 50 ms timer calls this).
+    /// resolved config changed, not every tick (the 50 ms timer calls this). A
+    /// host with no handle yet (a headless/test core) skips that presentation
+    /// step; the surface mapping below is still applied.
     pub fn metrics(&self) -> CadResult<()> {
-        {
-            let handle = self.handle.borrow();
-            let handle = handle.as_ref().ok_or(CadError::Cancelled)?;
+        if let Some(handle) = self.handle.borrow().as_ref() {
             let layout_key = handle
                 .physical_size()
                 .map(|size| (size.width, size.height, handle.config_revision()));
@@ -337,32 +374,29 @@ impl HostCore {
         // must never mask the command's own error (it is surfaced only when the
         // command itself succeeded).
         let push_result = self.push();
+        // An open cancel/failure graded within this gesture owns the status; the
+        // generic "completed" must not overwrite it.
+        let open_graded = self.open_status_graded.replace(false);
         if let Err(error) = &result {
             if !owns_status {
-                if let Some(handle) = self.handle.borrow().as_ref() {
-                    handle.set_status(
-                        self.message("command.failed", &[("error", &error_text(error))]),
-                    )?;
-                }
+                self.set_status(self.message("command.failed", &[("error", &error_text(error))]))?;
             }
         }
-        if result.is_ok() && !self.loading() && !owns_status {
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                // A no-op fit (empty drawing) carries the `fit.empty` code; show
-                // that instead of the generic "completed", never a fake success.
-                let diagnostic = result
-                    .as_ref()
-                    .ok()
-                    .and_then(|outcome| outcome.as_ref())
-                    .and_then(|outcome| outcome.diagnostics.first());
-                let status = match diagnostic {
-                    Some(diagnostic) if diagnostic.code == "fit.empty" => {
-                        self.message("fit.empty", &[])
-                    }
-                    _ => self.message("command.completed", &[]),
-                };
-                handle.set_status(status)?;
-            }
+        if result.is_ok() && !self.loading() && !owns_status && !open_graded {
+            // A no-op fit (empty drawing) carries the `fit.empty` code; show
+            // that instead of the generic "completed", never a fake success.
+            let diagnostic = result
+                .as_ref()
+                .ok()
+                .and_then(|outcome| outcome.as_ref())
+                .and_then(|outcome| outcome.diagnostics.first());
+            let status = match diagnostic {
+                Some(diagnostic) if diagnostic.code == "fit.empty" => {
+                    self.message("fit.empty", &[])
+                }
+                _ => self.message("command.completed", &[]),
+            };
+            self.set_status(status)?;
         }
         match result {
             Ok(_) => push_result,
@@ -397,7 +431,7 @@ impl HostCore {
     /// flight (picker/read, no async job yet) it synthesizes a running snapshot
     /// whose `cancellable` reflects the abort flag, so the drawer shows real
     /// progress with a working cancel — and goes idle once nothing is pending.
-    pub(crate) fn import_snapshot(&self) -> Option<ImportProgressSnapshot> {
+    pub fn import_snapshot(&self) -> Option<ImportProgressSnapshot> {
         if let Some(snapshot) = self.controller.borrow().async_open_snapshot() {
             return Some(snapshot);
         }

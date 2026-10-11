@@ -85,15 +85,3 @@ pub fn install_fonts(view: Option<&CadView>, requested: &[String]) -> CadResult<
     super::state_push::set_last_font_report(report.clone());
     Ok(report)
 }
-
-/// Human-facing summary of one loading pass.
-pub fn summary(report: &FontLoadReport, requested: usize) -> String {
-    format!(
-        "字体：目录 {}，引用 {}，计划 {}，注册 {}，失败 {}",
-        report.catalog_entries,
-        requested,
-        report.planned.len(),
-        report.registered.len(),
-        report.failed.len(),
-    )
-}

@@ -1,6 +1,20 @@
-//! view module.
+//! Android canvas pointer input.
+//!
+//! Command routing, state push and the generic sinks live in
+//! `cad_host::HostCore`; this module keeps only what is genuinely Android
+//! specific: the shared [`InputPolicy`] tap/drag state machine (a one-finger
+//! drag pans, a real tap selects) and the canvas-local selection pick with its
+//! explicit hit/miss status.
+//!
+//! Every command still runs through the shared `HostCore::execute` funnel, so
+//! panels, history and overlays are pushed exactly once.
 
 use super::*;
+use cad_app::input::{InputOutcome, InputPolicy, PointerPhase, PointerUpdate};
+use cad_app::{Command, CommandId, CommandPayload};
+use cad_host::HostCore;
+use cad_ui_slint::ViewInput;
+use std::cell::Cell;
 
 impl Default for AndroidHostConfiguration {
     fn default() -> Self {
@@ -13,36 +27,43 @@ impl Default for AndroidHostConfiguration {
     }
 }
 
-/// Mirror the authoritative viewport camera into the composited CAD frame.
+/// Canvas navigation for Android: one-finger drag pans, wheel/pinch zooms.
 ///
-/// The camera lives in the application `Viewport`; the bridge's `CadView` only
-/// reflects it for rendering (spec §4.2, single camera truth).
-pub(crate) fn sync_view_camera(
-    view: &SharedView,
-    controller: &Rc<RefCell<HostController>>,
+/// The shell's `TouchArea` emits logical-pixel pointer events. This host turns
+/// them into the same `Pan`/`Zoom` commands the web host uses, so the
+/// authoritative viewport stays the single camera truth. Without this the
+/// `pointer-input`/`scroll-input` callbacks were dropped and the Android canvas
+/// could not be panned or zoomed at all (verified: a swipe changed 0 pixels).
+pub(crate) struct AndroidViewInput {
+    core: HostCore,
     viewport: ViewportId,
-) {
-    let controller = controller.borrow();
-    if let (Some(view), Some(viewport)) = (
-        view.borrow().as_ref(),
-        controller.application.workspace.viewports.get(&viewport),
-    ) {
-        // One call keeps the active space, the observation mode and the full
-        // camera in sync (F04/F13); a bare `set_camera` would leave the bridge
-        // stuck in model-space 2D (workstream C's host glue).
-        view.sync_session(&controller.session.active_space, viewport);
-    }
+    last: Cell<[f64; 2]>,
+    dragging: Cell<bool>,
+    /// Shared pointer/gesture state machine (audit U05). Used to tell a tap from
+    /// a drag so a one-finger drag pans and only a real tap turns into a
+    /// selection pick.
+    policy: RefCell<InputPolicy>,
 }
 
 impl AndroidViewInput {
-    fn status(&self, text: impl Into<String>) {
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            let _ = handle.set_status(text.into());
+    pub(crate) fn new(core: HostCore, viewport: ViewportId) -> Self {
+        Self {
+            core,
+            viewport,
+            last: Cell::new([0.0, 0.0]),
+            dragging: Cell::new(false),
+            policy: RefCell::new(InputPolicy::new()),
+        }
+    }
+
+    fn status(&self, text: String) {
+        if let Some(handle) = self.core.handle.borrow().as_ref() {
+            let _ = handle.set_status(text);
         }
     }
 
     fn send(&self, id: CommandId, payload: CommandPayload) {
-        let document = self.controller.borrow().document_id;
+        let document = self.core.controller.borrow().document_id;
         let command = Command {
             schema_version: 1,
             id,
@@ -50,27 +71,19 @@ impl AndroidViewInput {
             viewport: self.viewport,
             payload,
         };
-        let outcome = self.controller.borrow_mut().execute(command);
-        sync_view_camera(&self.view, &self.controller, self.viewport);
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            // One snapshot refreshes undo/redo and every panel (audit U11).
-            push_panel_state(&self.controller, handle, &self.view);
-        }
-        match outcome {
-            Ok(_) => {}
-            Err(CadError::NotImplemented(feature)) => self.status(format!("未实现：{feature}")),
-            Err(e) => self.status(format!("命令失败：{e}")),
-        }
+        let _ = state_push::run_command(&self.core, command);
     }
 
     /// Whether a capture tool (measure/annotate) owns canvas taps right now.
     ///
     /// With a capture tool active the Slint `canvas-pick` path (through the
-    /// installed `AndroidCanvasPickMapper`) feeds the tool; the host must not
-    /// also run a selection pick for the same tap.
+    /// shared `CanvasPickMapper`) feeds the tool; the host must not also run a
+    /// selection pick for the same tap.
     fn capture_tool_active(&self) -> bool {
-        let controller = self.controller.borrow();
-        matches!(controller.session.tool, cad_app::ToolState::Measuring(_))
+        matches!(
+            self.core.controller.borrow().session.tool,
+            cad_app::ToolState::Measuring(_)
+        )
     }
 
     /// A real tap with no capture tool: pick the closest entity and select it.
@@ -80,8 +93,9 @@ impl AndroidViewInput {
     /// viewport via `pick_at_screen`, using the same canvas size the renderer
     /// uses.
     fn pick_selection(&self, logical: [f64; 2]) {
+        let messages = self.core.messages();
         let (camera, logical_size, document) = {
-            let controller = self.controller.borrow();
+            let controller = self.core.controller.borrow();
             let viewport = match controller
                 .application
                 .workspace
@@ -90,7 +104,7 @@ impl AndroidViewInput {
             {
                 Some(viewport) => viewport,
                 None => {
-                    self.status("选择失败：视口不存在");
+                    self.status(messages.text("android.pick_viewport_missing", &[]));
                     return;
                 }
             };
@@ -103,9 +117,9 @@ impl AndroidViewInput {
         // Bind the borrow to its own statement: a `match` scrutinee temporary
         // would stay alive across `self.send` below and panic on the mutable
         // re-borrow inside it.
-        let drawing = self.controller.borrow().drawing();
+        let drawing = self.core.controller.borrow().drawing();
         let Some(drawing) = drawing else {
-            self.status("选择失败：未打开文档");
+            self.status(messages.text("android.pick_no_document", &[]));
             return;
         };
         let report = cad_app::picking::pick_at_screen(
@@ -114,7 +128,7 @@ impl AndroidViewInput {
             &camera,
             logical,
             logical_size,
-            &TolerancePolicy::default(),
+            &cad_domain::TolerancePolicy::default(),
             cad_app::BackFacePolicy::Cull,
         );
         match report {
@@ -125,16 +139,18 @@ impl AndroidViewInput {
                         CommandId::Select,
                         CommandPayload::Selection(vec![hit.source]),
                     );
-                    self.status(format!("已选择 {identity}"));
+                    self.status(messages.text("android.selected", &[("identity", &identity)]));
                 }
                 None => {
                     // Clear the selection explicitly on empty space; never a
                     // stale or fabricated hit.
                     self.send(CommandId::Select, CommandPayload::Selection(Vec::new()));
-                    self.status("未命中任何对象（已清除选择）");
+                    self.status(messages.text("android.pick_miss", &[]));
                 }
             },
-            Err(e) => self.status(format!("选择拾取失败：{e}")),
+            Err(error) => {
+                self.status(messages.text("android.pick_failed", &[("error", &error.to_string())]))
+            }
         }
     }
 }
@@ -163,6 +179,7 @@ impl ViewInput for AndroidViewInput {
                 if self.dragging.get() {
                     let last = self.last.get();
                     let world_per_px = self
+                        .core
                         .controller
                         .borrow()
                         .application

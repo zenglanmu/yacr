@@ -12,6 +12,7 @@ impl HostCore {
     pub(crate) fn begin_open_attempt(&self) {
         *self.open_guard.borrow_mut() = self.controller.borrow().drawing();
         self.open_abort.set(false);
+        self.open_status_graded.set(false);
         *self.open_target.borrow_mut() = None;
     }
 
@@ -132,12 +133,36 @@ impl HostCore {
             self.open_pending.set(false);
             return Err(error);
         }
-        // A synchronous platform (headless) completes within the gesture.
+        // A synchronous platform (headless/CLI-style, or the Android sample-path
+        // probe) completes within the gesture; a picker/read still running leaves
+        // `open_pending` set.
         self.drain_files()?;
-        if !self.options.headless {
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                handle.set_status(self.message("linux.picker_waiting", &[]))?;
+        if self.open_pending.get() {
+            if !self.options.headless {
+                self.set_status(self.message("linux.picker_waiting", &[]))?;
             }
+        } else {
+            // Grade any cancel/failure now, so a synchronous platform's outcome is
+            // surfaced within the gesture rather than waiting for a poll tick that
+            // may never come.
+            self.grade_pending_open()?;
+        }
+        Ok(())
+    }
+
+    /// Grade a pending open cancel/failure into an explicit status.
+    ///
+    /// Called at the end of a synchronous open gesture ([`Self::request_open`])
+    /// and from [`Self::poll_open`], so a platform whose read completes within the
+    /// gesture still surfaces its failure/cancel (and marks the outcome graded so
+    /// the generic "completed" cannot overwrite it).
+    pub(crate) fn grade_pending_open(&self) -> CadResult<()> {
+        if self.open_cancelled.replace(false) {
+            self.open_status_graded.set(true);
+            self.set_status(self.message("linux.picker_cancelled", &[]))?;
+        } else if let Some(reason) = self.open_failure.borrow_mut().take() {
+            self.open_status_graded.set(true);
+            self.set_status(self.message("command.failed", &[("error", &reason)]))?;
         }
         Ok(())
     }
@@ -168,15 +193,7 @@ impl HostCore {
     pub(crate) fn poll_open(&self) -> CadResult<()> {
         self.drain_files()?;
         self.poll_loading()?;
-        if self.open_cancelled.replace(false) {
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                handle.set_status(self.message("linux.picker_cancelled", &[]))?;
-            }
-        } else if let Some(reason) = self.open_failure.borrow_mut().take() {
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                handle.set_status(self.message("linux.failed", &[("error", &reason)]))?;
-            }
-        }
+        self.grade_pending_open()?;
         Ok(())
     }
 
@@ -187,6 +204,7 @@ impl HostCore {
     pub(crate) fn poll_loading(&self) -> CadResult<()> {
         let poll = self.controller.borrow_mut().poll_async_open();
         let opened = matches!(poll, AsyncOpenPoll::Opened { .. });
+        let cancelled = matches!(poll, AsyncOpenPoll::Cancelled { .. });
         if matches!(
             poll,
             AsyncOpenPoll::Failed { .. } | AsyncOpenPoll::Cancelled { .. }
@@ -195,6 +213,10 @@ impl HostCore {
             // Drop a target that will never publish so it cannot arm a later guard.
             *self.open_target.borrow_mut() = None;
         }
+        // Resource installation is NON-FATAL for presentation: the drawing is
+        // still shown, and the failure is reported after the opened/presenting
+        // grading so it is not erased within this tick.
+        let mut resource_error: Option<String> = None;
         if opened {
             self.controller.borrow_mut().fit()?;
             if let Some(handle) = self.handle.borrow().as_ref() {
@@ -208,8 +230,14 @@ impl HostCore {
                 *self.drawing_path.borrow_mut() = Some(PathBuf::from(&target.opaque));
             }
             if let Some(view) = self.view.borrow().as_ref() {
-                self.install_fonts(view)?;
-                self.install_images(view)?;
+                if let Err(error) = self.install_fonts(view) {
+                    resource_error = Some(error_text(&error));
+                }
+                if let Err(error) = self.install_images(view) {
+                    if resource_error.is_none() {
+                        resource_error = Some(error_text(&error));
+                    }
+                }
             }
             self.push()?;
         }
@@ -225,21 +253,22 @@ impl HostCore {
                 &messages,
             ))?;
             if let AsyncOpenPoll::Failed { error, .. } = poll {
-                handle
-                    .set_status(self.message("linux.failed", &[("error", &error_text(&error))]))?;
+                self.set_status(self.message("linux.failed", &[("error", &error_text(&error))]))?;
+            } else if cancelled {
+                self.set_status(self.message("linux.picker_cancelled", &[]))?;
             } else if opened {
-                handle.set_status(self.message("linux.opened", &[]))?;
+                self.set_status(self.message("linux.opened", &[]))?;
             }
             if self.presenting_open.get() && !snapshot.as_ref().is_some_and(|s| s.running) {
                 if let Some(view) = self.view.borrow().as_ref() {
                     if let Some(error) = view.scene_error() {
-                        handle.set_status(self.message("linux.failed", &[("error", &error)]))?;
+                        self.set_status(self.message("linux.failed", &[("error", &error)]))?;
                         self.presenting_open.set(false);
                     } else if view.current_drawing_presented() {
                         self.presenting_open.set(false);
-                        handle.set_status(self.message("linux.opened", &[]))?;
+                        self.set_status(self.message("linux.opened", &[]))?;
                     } else {
-                        handle.set_status(match view.loading_phase() {
+                        self.set_status(match view.loading_phase() {
                             Some("uploading") => self.message("linux.uploading", &[]),
                             Some("drawing") => {
                                 let (done, total) = view.drawing_progress().unwrap_or((0, 0));
@@ -252,6 +281,10 @@ impl HostCore {
                         })?;
                     }
                 }
+            }
+            // The resource failure is the final status of this tick.
+            if let Some(error) = &resource_error {
+                self.set_status(self.message("fonts.failed", &[("error", error)]))?;
             }
         }
         Ok(())

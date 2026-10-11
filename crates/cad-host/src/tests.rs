@@ -74,6 +74,7 @@ fn core_with_caps(files: Rc<FakeFiles>, capabilities: HostCapabilities) -> HostC
         files: files as Rc<dyn PlatformFiles>,
         config_store: Rc::new(FakeConfig),
         surface: Rc::new(FakeSurface),
+        resources: Rc::new(UnsupportedResources),
         capabilities,
     };
     HostCore::new(options, Rc::new(RefCell::new(None)), platform).unwrap()
@@ -232,6 +233,36 @@ fn delivered_open_retains_the_platform_target_until_publish() {
     // a path re-derived from the display name, so the publish step arms the
     // source guard against the right handle.
     assert_eq!(core.open_target.borrow().as_ref(), Some(&target));
+}
+
+#[test]
+fn failed_async_publish_keeps_the_current_document() {
+    let files = Rc::new(FakeFiles::default());
+    let core = core_with(files.clone(), true);
+    let demo_id = core.controller.borrow().drawing().unwrap().id();
+    core.begin_open_attempt();
+    core.open_pending.set(true);
+    // Invalid bytes: the background import must fail and publish nothing.
+    files.events.borrow_mut().push(FileEvent::Opened {
+        target: FileTarget::from_path("/tmp/not-a-drawing.dwg"),
+        bytes: Arc::from(vec![0u8, 1, 2, 3]),
+    });
+    core.drain_files().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while core.loading() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "import worker did not finish"
+        );
+        core.poll_loading().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(
+        core.controller.borrow().drawing().unwrap().id(),
+        demo_id,
+        "a failed import must keep the current document"
+    );
+    assert!(!core.presenting_open.get(), "presentation must be cleared");
 }
 
 #[test]

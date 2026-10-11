@@ -9,10 +9,8 @@ impl HostCore {
     /// Report a navigation command's failure on the status line.
     fn report_nav(&self, result: CadResult<()>) {
         if let Err(error) = result {
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                let _ = handle
-                    .set_status(self.message("command.failed", &[("error", &error_text(&error))]));
-            }
+            let _ =
+                self.set_status(self.message("command.failed", &[("error", &error_text(&error))]));
         }
     }
 

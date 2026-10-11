@@ -184,6 +184,7 @@ impl LinuxApp {
                 preference_path,
             )),
             surface: Rc::new(platform::DesktopSurface::new(handle_slot.clone())),
+            resources: Rc::new(cad_host::DesktopResources),
             capabilities: HostCapabilities {
                 open: true,
                 new: true,

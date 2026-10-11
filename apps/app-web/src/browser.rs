@@ -245,6 +245,10 @@ pub async fn start_with_preference(
         files: files.clone(),
         config_store: Rc::new(WebConfigStore),
         surface: Rc::new(WebSurface),
+        // The browser resolves fonts/images through its own stack, so the shared
+        // core's installation strategy is an explicit refusal (never called by
+        // the web open path, which uses `browser::documents`).
+        resources: Rc::new(cad_host::UnsupportedResources),
         // Browser capability gates: file open is wired; New/Save/Plot stay off
         // this phase, and the open runs on the calling thread (no worker).
         capabilities: HostCapabilities {

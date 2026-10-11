@@ -69,26 +69,18 @@ impl HostCore {
     pub(crate) fn request_save(&self) -> CadResult<()> {
         if !self.capabilities.save {
             let reason = self.message("command.unsupported", &[("command", "SAVE")]);
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                handle.set_status(self.message("save.export_failed", &[("reason", &reason)]))?;
-            }
+            self.set_status(self.message("save.export_failed", &[("reason", &reason)]))?;
             return Err(CadError::Unsupported(reason));
         }
         if self.loading() || self.save_pending.get() || self.pending_save.borrow().is_some() {
             let busy = self.message("linux.busy", &[]);
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                handle.set_status(self.message("save.export_failed", &[("reason", &busy)]))?;
-            }
+            self.set_status(self.message("save.export_failed", &[("reason", &busy)]))?;
             return Err(CadError::Unsupported(busy));
         }
         let hint = self.controller.borrow().document_name_hint.clone();
         let default_name = policy::default_save_name(&hint, "dxf");
         if let Err(error) = self.files.begin_save(SavePurpose::SaveDxf, &default_name) {
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                handle.set_status(
-                    self.message("save.export_failed", &[("reason", &error.to_string())]),
-                )?;
-            }
+            self.set_status(self.message("save.export_failed", &[("reason", &error.to_string())]))?;
             return Err(error);
         }
         self.save_pending.set(true);
@@ -159,9 +151,7 @@ impl HostCore {
                 Err(error) => self.message("plot.export_failed", &[("reason", &error.to_string())]),
             },
         };
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            handle.set_status(status)?;
-        }
+        self.set_status(status)?;
         Ok(())
     }
 
@@ -201,9 +191,7 @@ impl HostCore {
     }
 
     fn report_plot_failed(&self, reason: &str) -> CadResult<()> {
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            handle.set_status(self.message("plot.export_failed", &[("reason", reason)]))?;
-        }
+        self.set_status(self.message("plot.export_failed", &[("reason", reason)]))?;
         Ok(())
     }
 

@@ -1,25 +1,77 @@
-//! Desktop font/image installation and the plot font engine.
+//! Host resource installation: shaping fonts and raster images.
 //!
-//! Native only: the wasm host resolves resources through the browser stack (a
-//! later phase) and never calls these, so the wasm stubs return an explicit
-//! `Unsupported` rather than a silent no-op.
+//! The shared open funnel is platform-general, but *how* a drawing's resources
+//! are resolved is not: the desktop reads a sibling `fonts/`/`images/` package
+//! plus a system default face, Android reads APK assets, the browser fetches over
+//! the network. [`HostResources`] is that platform strategy; the core never
+//! imports a platform type.
 use super::*;
 
-#[cfg(not(target_arch = "wasm32"))]
+/// How a host installs the shaping fonts and raster images a drawing references.
+///
+/// The core calls these from the open funnel ([`HostCore::deliver_open`] and the
+/// asynchronous publish in `poll_loading`); a host supplies its strategy when it
+/// builds the [`HostCore`]. A strategy that cannot resolve a resource must
+/// refuse explicitly (`Unsupported`) rather than silently no-op.
+pub trait HostResources {
+    /// (Re)load the shaping fonts the current drawing references onto `view`.
+    fn install_fonts(&self, core: &HostCore, view: &CadView) -> CadResult<()>;
+
+    /// (Re)load the drawing's raster images onto `view`.
+    fn install_images(&self, core: &HostCore, view: &CadView) -> CadResult<()>;
+}
+
+/// A strategy for a host that resolves resources through its own path (or does
+/// not model them yet). Installing is refused explicitly, never a silent no-op.
+pub struct UnsupportedResources;
+
+impl HostResources for UnsupportedResources {
+    fn install_fonts(&self, _core: &HostCore, _view: &CadView) -> CadResult<()> {
+        Err(CadError::Unsupported(
+            "font loading is not wired for this host yet".into(),
+        ))
+    }
+
+    fn install_images(&self, _core: &HostCore, _view: &CadView) -> CadResult<()> {
+        Err(CadError::Unsupported(
+            "image loading is not wired for this host yet".into(),
+        ))
+    }
+}
+
 impl HostCore {
+    /// (Re)load shaping fonts for the current drawing through the host strategy.
+    pub fn install_fonts(&self, view: &CadView) -> CadResult<()> {
+        self.resources.install_fonts(self, view)
+    }
+
+    /// (Re)load the drawing's raster images through the host strategy.
+    pub fn install_images(&self, view: &CadView) -> CadResult<()> {
+        self.resources.install_images(self, view)
+    }
+}
+
+/// Native desktop resource strategy: the sibling `fonts/`/`images/` package.
+///
+/// Not available on wasm (no filesystem); the browser resolves its own resources.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct DesktopResources;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl HostResources for DesktopResources {
     /// (Re)load shaping fonts for the current drawing.
     ///
     /// Reads the sibling `fonts/` package (or `--fonts-dir`), merges explicit
     /// `--font` entries and installs a best-effort system default face as the
     /// first fallback.
-    pub fn install_fonts(&self, view: &CadView) -> CadResult<()> {
-        let requested = self
+    fn install_fonts(&self, core: &HostCore, view: &CadView) -> CadResult<()> {
+        let requested = core
             .controller
             .borrow()
             .drawing()
             .map(|drawing| cad_platform::fonts::requested_fonts(drawing.as_ref()))
             .unwrap_or_default();
-        match self.load_font_engine(&requested)? {
+        match core.load_font_engine(&requested)? {
             Some(engine) => view.set_fonts(engine),
             None => view.clear_fonts(),
         }
@@ -33,8 +85,8 @@ impl HostCore {
     /// and installs the cache on the view. An empty request clears the cache.
     /// Unresolved/undecodable keys are retained in `last_image_report` and
     /// surfaced by the diagnostics drawer, never silently dropped.
-    pub fn install_images(&self, view: &CadView) -> CadResult<()> {
-        let requested = self
+    fn install_images(&self, core: &HostCore, view: &CadView) -> CadResult<()> {
+        let requested = core
             .controller
             .borrow()
             .drawing()
@@ -42,10 +94,10 @@ impl HostCore {
             .unwrap_or_default();
         if requested.is_empty() {
             view.clear_images();
-            *self.last_image_report.borrow_mut() = None;
+            *core.last_image_report.borrow_mut() = None;
             return Ok(());
         }
-        let drawing_dir = self
+        let drawing_dir = core
             .drawing_path
             .borrow()
             .as_ref()
@@ -55,7 +107,7 @@ impl HostCore {
         let (cache, report) = cad_platform::images::local::load_image_cache(
             &requested,
             drawing_dir.as_deref(),
-            self.options.images_dir.as_deref(),
+            core.options.images_dir.as_deref(),
             &cad_resources::ResourceLimits::default(),
         )?;
         if cache.is_empty() {
@@ -63,10 +115,13 @@ impl HostCore {
         } else {
             view.set_images(cache);
         }
-        *self.last_image_report.borrow_mut() = Some(report);
+        *core.last_image_report.borrow_mut() = Some(report);
         Ok(())
     }
+}
 
+#[cfg(not(target_arch = "wasm32"))]
+impl HostCore {
     /// The desktop font engine for the current drawing, or `None` when nothing
     /// is requested/registered.
     pub(crate) fn load_font_engine(
@@ -98,20 +153,6 @@ impl HostCore {
 impl HostCore {
     /// Not wired for this host yet; the wasm host resolves fonts through the
     /// browser stack in a later phase.
-    pub fn install_fonts(&self, _view: &CadView) -> CadResult<()> {
-        Err(CadError::Unsupported(
-            "font loading is not wired for this host yet".into(),
-        ))
-    }
-
-    /// Not wired for this host yet.
-    pub fn install_images(&self, _view: &CadView) -> CadResult<()> {
-        Err(CadError::Unsupported(
-            "image loading is not wired for this host yet".into(),
-        ))
-    }
-
-    /// Not wired for this host yet.
     pub(crate) fn load_plot_fonts(
         &self,
         _requested: &[String],

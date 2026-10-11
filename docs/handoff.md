@@ -1,5 +1,79 @@
 # 后续 agent 接手入口
 
+## Android 宿主迁移到 cad-host（P2，2026-10-11，本轮）
+
+用户要求：把 `apps/app-android` 迁移到 P0/P1 抽取的 `cad_host::HostCore`，删除 Android 侧
+重复编排（`state_push.rs`/`view.rs`/`draw.rs` → 薄/浏览器等价适配器），**行为保持**；并修复
+i18n-law 债务（Android 硬编码中文状态文案迁入 i18n 键，两份 catalog 键集一致）。Android 的 SAF
+打开/另存（P4）本轮**不做**：能力位保持 `open=true`、`new/save/plot=false`，打开仍为硬编码
+样本路径探测。
+
+- cad-host 扩展（行为保持）：新增 `HostResources` 策略（`HostPlatform.resources`），把桌面
+  `install_fonts`/`install_images` 逻辑原样迁入 `DesktopResources`；`UnsupportedResources` 供 Web
+  （不被调用）；`HostCore::install_fonts/install_images` 改为委托策略。`metrics` 允许 handle 未安装
+  （无窗口/测试核心仍应用表面映射，只跳过窗口布局重分类；真实宿主都在 handle 之后调用）。
+- 新增 `apps/app-android/src/platform.rs`：`AndroidFiles`（`begin_open` 探测样本路径同步读入并
+  入队 `FileEvent::Opened`；无样本/读取失败为显式 `FileEvent::Failed`；`begin_save`/`write_atomic`
+  显式 `Unsupported`；`refuses_source_overwrite` 比较 opaque 句柄——无保存故不被调用）、
+  `AndroidConfigStore`（无持久化存储：加载 `Absent`，写入显式 `Unsupported`）、`AndroidSurface`
+  （表面槽 + 安全区）、`AndroidResources`（`HostResources`：字体经 `android_fonts` APK assets 装载，
+  图像不建模 → `images_modeled:false`）。
+- `lib.rs` 变为组合根：以核心作为 `UiCommandSink` 委托目标（`AndroidSink` 仅 execute + 重放 Android
+  叠加；打开后 `ensure_polling` 启动定时器）、`LayoutSwitchSink`、`CanvasPickMapper`、绘制预览 sink；
+  `core.set_handle`/`set_view` 后 `core.metrics()` + `push_android_state` 承担通用面板推送。
+- 删除的重复编排：`src/host.rs`（`HostSink`）、`src/state_push.rs` 的 `push_panel_state`/`snapshot`/
+  `view_state`/`import_diagnostics`/`AndroidCanvasPickMapper`/`apply_surface_size`（并入/复用
+  `cad-host`）；`view.rs`/`draw.rs` 缩减为薄适配（保留 `InputPolicy` 状态机与 Trim/Extend 解析）。
+  保留 `android_fonts.rs`（asset 加载）、`poll.rs`（Slint 定时器 + 表面入口）、`set_surface_*`。
+- i18n：Android 自身状态文案迁入 11 个新键（两份 catalog 键集一致）：`android.ready`/
+  `android.no_sample`/`android.read_failed`/`android.save_unavailable`/`android.no_config_store`/
+  `android.pick_viewport_missing`/`android.pick_no_document`/`android.pick_failed`/`android.selected`/
+  `android.pick_miss`/`android.fonts.summary`；`fonts.failed` 等复用既有键。
+- 行为保持点：`android_main`/`slint::android::init`/`ensure_polling` Slint 定时器/公开
+  `set_surface_size`/`set_surface_insets` 不变；真实后台导入 worker（`import_worker=true`）与 100ms
+  轮询不变；能力位不变；打开仍探测 `/sdcard/Download/yacr-sample.dwg` 等。**命令与打开状态文案改由
+  共享目录给出**（`linux.opened`/`linux.failed`/`linux.picker_waiting`/`command.completed`/
+  `command.failed` 等）——这是采纳共享漏斗的必然结果（同 P1）；Android 自身的选择/字体/平台读取
+  文案仍走 Android 键，字体摘要经 pending 槽在打开状态之后显示。
+
+验证（本机；Android **真机/模拟器未运行**，下列为编译/契约证据）：
+
+- `cargo fmt --all`；`cargo clippy --workspace --exclude app-android --all-targets --locked
+  -- -D warnings`；`check-architecture.py`（26 包）；`check-i18n.py`（**296 键**）；
+  `check-fixture-manifest.py`（22 fixture）；`check-workflows.py`。
+- `cargo check --workspace --exclude app-android --all-targets --locked`；
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
+  `cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --all-targets --locked`；
+  `cargo check --target x86_64-linux-android -p cad-ui-slint -p app-android --all-targets --locked`。
+- `cargo test -p app-android --locked`：**17 通过 / 0 失败**（宿主目标；2 个
+  `cfg(target_os="android")` 异步打开用例仅为 Android 目标编译、本机不运行）。
+  `cargo test -p cad-host --locked`：**10 通过**；`cargo test -p app-linux --locked`（lavapipe）：
+  **16 通过 / 0 失败 / 4 忽略**（无回归）。
+- 未运行：Android 模拟器/真机安装运行、SAF、真实触摸手势、Android 离屏渲染。
+
+补强（P2 评审后，行为保持；无 P4/SAF）：
+- **B1 打开失败不得显示“命令完成”**：`poll_open` 的取消/失败评分抽成 `grade_pending_open()`，
+  `request_open` 在同步平台于手势内完成时也调用它（失败/取消立即显示）；`execute` 的成功分支新增
+  `open_status_graded` 守卫，已评分的失败不会被泛化的“完成”覆盖；`AndroidSink::send` 在
+  `OpenDrawing` 后即使尚未 `loading()` 也确保一次 poll tick。新增宿主目标测试：空 `sample_paths`
+  + `AndroidSink::send(OpenDrawing)` → 状态为显式失败（`command.failed` + `android.no_sample`），
+  非“完成”，且保留演示文档。
+- **B2 Android 不再显示 `linux.picker_waiting`**：`request_open` 仅在 `open_pending` 仍为真（确有
+  选择器/读取在进行）时才显示该文案；`AndroidSink::send` 在 `loading()` 时改显示新键
+  `android.opening`（两份 catalog）。
+- **B3 异步打开路径的字体安装失败不再被吞**：`AndroidResources::install_fonts` 的两条错误路径先
+  `set_pending_font_status(fonts.failed …)` 再返回 `Err`；`poll_loading` 的 opened 分支把字体/图像
+  安装视为**非致命**（仍 `push()`），并在 opened/presenting 评分之后把该错误作为本 tick 的**最终**
+  状态，避免 ~100ms 内被 presenting 恢复覆盖。
+- **M1（已知差异，记录）**：旧 `open_drawing` 在某候选解析失败时会继续尝试下一个 `sample_paths`
+  候选；现结构在 `AndroidFiles::begin_open` 选中第一个**可读**候选后即提交（解析失败发生在异步
+  导入阶段，平台无法重试）。旧文案“打开 {path} 失败”无替代；此为已知行为差异。
+- **M2**：`poll_loading` 现对 `AsyncOpenPoll::Cancelled` 评分（`linux.picker_cancelled`），不再留旧状态。
+- **M3**：`apps/app-android/src/state_push.rs` 改用 `core.import_snapshot()`（含读取中合成态），
+  不再直接读 `controller.async_open_snapshot()` 清空面板；cad-host 新增“异步发布失败保留当前文档”
+  测试。为可观测性新增 `HostCore::set_status`/`last_status`（宿主状态镜像与无窗口测试）。
+  补强后：`cargo test -p cad-host`（12 通过）、`cargo test -p app-android`（宿主目标，见验证）。
+
 ## Web 宿主迁移到 cad-host（P1，2026-10-11，本轮）
 
 用户要求：把 `apps/app-web` 迁移到 P0 抽取的 `cad_host::HostCore`，删除 Web 侧重复编排，

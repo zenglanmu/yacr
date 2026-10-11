@@ -10,6 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+cad-host.workspace = true
 cad-ui-slint.workspace = true
 cad-app.workspace = true
 cad-platform.workspace = true

@@ -1,8 +1,9 @@
 # 宿主代码拆分
 
-本文件记录宿主层（桌面 / Web）的代码拆分。P1 轮（2026-10-11）把 `apps/app-web` 迁移到
-共享 `cad_host::HostCore`，删除 Web 侧重复编排；不改变领域模型、crate 依赖方向、命令协议
-或 wasm 导出名称。核心 CAD 算法的大文件仍可按各自领域继续拆分，不把本轮描述为全仓库完成。
+本文件记录宿主层（桌面 / Web / Android）的代码拆分。P1 轮（2026-10-11）把 `apps/app-web`
+迁移到共享 `cad_host::HostCore`；P2 轮（2026-10-11）把 `apps/app-android` 迁移到同一核心。
+两轮都**不改变**领域模型、crate 依赖方向、命令协议或平台导出名称。核心 CAD 算法的大文件仍可按
+各自领域继续拆分，不把这两轮描述为全仓库完成。
 
 ## Web Rust 宿主
 
@@ -41,6 +42,30 @@
 文件/语言模块通过显式参数接收 wasm 与状态接口，不依赖入口的可变全局变量。
 `window.yacr` 的既有诊断接口保留；`build-web.sh` 复制整个 `host/`，CI 与部署脚本
 检查所有模块存在，防止只发布入口导致 HTTP 404。
+
+## Android 宿主
+
+`apps/app-android`（P2 轮，2026-10-11）与 Web 一样退化为薄封装：`src/lib.rs` 是组合根，用
+`src/platform.rs` 的 Android 平台实现构造 `cad_host::HostCore`，安装 Slint 适配器与渲染桥，
+持有唯一运行时。命令路由、状态推送（`push`/`sync_view`）、打开/出图/另存管线、画布拾取映射
+与绘制预览 sink 都在 `cad-host`；`src/` 只保留 **Android 特有**的适配与平台实现：
+
+| 文件 | 职责 |
+|---|---|
+| `platform.rs` | `cad-platform` 契约的 Android 实现：`AndroidFiles`（`begin_open` 探测样本路径并入队 `FileEvent::Opened`，无样本/读取失败时显式 `FileEvent::Failed`；`begin_save`/`write_atomic` 本阶段显式 `Unsupported`；`refuses_source_overwrite` 比较 opaque 句柄，因无保存不会被调用）、`AndroidConfigStore`（无持久化存储：加载恒 `Absent`，写入显式 `Unsupported`）、`AndroidSurface`（Activity 经表面入口转发的尺寸/DPI/安全区）、`AndroidResources`（`HostResources`：字体经 APK assets 装载，图像不建模） |
+| `view.rs` | `AndroidViewInput`：保留共享 `InputPolicy` 轻触/拖拽状态机（一指点按选中、拖动平移），命令经共享 `HostCore::execute` 漏斗 |
+| `draw.rs` | `AndroidDrawSink`：把 Trim/Extend 的世界点解析为 `SelectionRef`（桌面核心显式拒绝），空选择显式报错；预览 sink 复用共享核心 |
+| `state_push.rs` | 共享 `push` 之上的 Android 叠加：异步打开进度面板 + 资源抽屉字体摘要（`images_modeled: false`）+ 目录文案 |
+| `poll.rs` | Slint 定时器驱动 `core.tick()`（`import_worker=true` 的真实后台导入）与公开的 `set_surface_size`/`set_surface_insets` 入口 |
+| `android_fonts.rs` | APK `assets/fonts/` 的 `FontLoader` 实现（`AndroidResources` 复用） |
+
+能力位保持 `open=true`、`new/save/plot=false`（SAF 打开/另存为 P4）；打开仍是**硬编码样本路径
+探测**（无原生选择器）。`android_main`/`slint::android::init`/Slint 定时器/两个表面入口不变。
+
+`HostCore` 新增 `HostResources` 策略（`HostPlatform.resources`），使打开漏斗在不导入平台类型
+的前提下装载平台资源：桌面为 `DesktopResources`（原 `cad-host` 字体/图像逻辑原样迁移），Web 为
+`UnsupportedResources`（不被调用），Android 为 `AndroidResources`。`metrics` 现在允许 handle 尚未
+安装（无窗口/测试核心仍应用表面映射，仅跳过窗口布局重分类）。
 
 ## 桌面宿主与宿主编排层（cad-host）
 
