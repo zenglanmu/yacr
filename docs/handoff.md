@@ -1795,7 +1795,8 @@ GUI 空闲 CPU 数字来自本机 Wayland 桌面单次采样。
 5. 逐项实现 Builder/事务/历史 → 导入/基础语义 → 显示/索引/场景 → 应用/工具 → 宿主闭环；
    不把这个依赖顺序当作排期，也不绕过优先 GPU/UI 验证。
 6. 每次移除占位同步补齐规范测试、能力表、构建说明、Git 提交。
-7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：原生 lavapipe 为主、WASM +
+7. DWG 打开/渲染回归遵循 `docs/testing-dwg.md`：有真实显示/GPU 时以真实硬件 GPU 为主
+   （桌面 winit + 硬件 Vulkan、Android 模拟器 `-gpu host`），无 GPU 才回退 lavapipe；WASM +
    Playwright 为第二层；出图 smoke 与参考图视觉验收分开记录。
 
 ## Linux 桌面加载响应与不完整出图（2026-10-04，最新一轮）

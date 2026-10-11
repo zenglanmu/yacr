@@ -2,10 +2,12 @@
 
 ## 1. 测试顺序与结论
 
-**Linux 原生离屏 wgpu + Mesa lavapipe 为主测试**，定位导入、表示、字体、相机、
-几何与 GPU 问题；每轮修复先走这条路径，不依赖桌面显示服务、Slint 或浏览器。
-最后使用 **WASM + Playwright headless 做一次第二层集成测试**，验证浏览器 File API、
-宿主接线、字体加载和实际呈现。WebGL2 软件路径通过不等于 WebGPU/真实 GPU 通过。
+**有真实显示/GPU 时以真实硬件 GPU 为主测试**（桌面 = 真实 winit 窗口 + 硬件 Vulkan；
+Android 模拟器 = `-gpu host`；浏览器 = headful + 真实 GPU），定位导入、表示、字体、相机、
+几何与 GPU 问题。**只有确无显示/GPU 的环境**才回退 Linux 原生离屏 wgpu + Mesa lavapipe
+（不依赖桌面显示服务、Slint 或浏览器）。最后使用 **WASM + Playwright 做一次第二层集成
+测试**，验证浏览器 File API、宿主接线、字体加载和实际呈现；有真实 GPU 时用 headful 真实
+GPU，无 GPU 才用 SwiftShader 软件路径。软件渲染通过不等于 WebGPU/真实 GPU/真机通过。
 
 必须分别记录三个结论：
 
