@@ -159,6 +159,10 @@ pub struct OverlayInputs {
     /// ([`OverlayVisibility::default`]) so a caller that never manages overlay
     /// visibility still gets the historical behavior.
     pub visibility: OverlayVisibility,
+    /// Exact world-space view rectangle for viewport-sized reference geometry.
+    /// Updated on camera, canvas size, and zoom changes; the base scene remains
+    /// reusable while only this visual overlay is regenerated.
+    pub viewport_bounds: Option<(Point3, Point3)>,
 }
 
 impl OverlayInputs {
@@ -279,6 +283,14 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
     inputs.visibility.grid.hash(&mut hasher);
     inputs.visibility.selection_highlight.hash(&mut hasher);
     inputs.visibility.snap_hints.hash(&mut hasher);
+    match inputs.viewport_bounds {
+        Some((min, max)) => {
+            1u8.hash(&mut hasher);
+            hash_point(&mut hasher, min);
+            hash_point(&mut hasher, max);
+        }
+        None => 0u8.hash(&mut hasher),
+    }
     hasher.finish()
 }
 
@@ -375,8 +387,17 @@ pub fn axes_overlay(bounds: (Point3, Point3), document: DocumentId) -> VisualOve
 pub fn grid_overlay(bounds: (Point3, Point3), document: DocumentId) -> VisualOverlay {
     let (min, max) = bounds;
     let per_axis = GRID_MAX_LINES / 2;
-    let xs = grid_positions(min.x, max.x, grid_step(max.x - min.x), per_axis);
-    let ys = grid_positions(min.y, max.y, grid_step(max.y - min.y), per_axis);
+    let span = (max.x - min.x).abs().max((max.y - min.y).abs());
+    // At large pan offsets, a nominal zoom-in step can be smaller than one
+    // representable f64 increment at the coordinates. Keep adjacent ticks
+    // distinguishable instead of emitting duplicate lines.
+    let coordinate_scale = [min.x, min.y, max.x, max.y]
+        .into_iter()
+        .map(f64::abs)
+        .fold(1.0_f64, f64::max);
+    let step = grid_step(span).max(coordinate_scale * f64::EPSILON * 8.0);
+    let xs = grid_positions(min.x, max.x, step, per_axis);
+    let ys = grid_positions(min.y, max.y, step, per_axis);
     let mut points: Vec<Point3> = Vec::with_capacity((xs.len() + ys.len()) * 2);
     for x in xs {
         points.push(Point3 {
@@ -1527,7 +1548,7 @@ mod tests {
     }
 
     #[test]
-    fn grid_overlay_is_one_bounded_batch_spanning_the_bounds() {
+    fn grid_overlay_is_one_bounded_batch_spanning_the_supplied_view_bounds() {
         let overlay = grid_overlay((p(-50.0, -50.0), p(50.0, 50.0)), DocumentId(1));
         assert_eq!(overlay.drawn(), 1);
         let batch = &overlay.batches[0];
@@ -1536,6 +1557,27 @@ mod tests {
         assert!(batch.vertices.len() / 2 <= GRID_MAX_LINES);
         assert_eq!(batch.color, GRID_COLOR);
         assert!(batch.draw_order < 900_000);
+        // Geometry spans the supplied view rectangle; line batches are clipped
+        // to this exact extent by the renderer for every live camera/resize.
+        let world_points = batch.vertices.iter().map(|v| {
+            (
+                v[0] as f64 + batch.local_origin.x,
+                v[1] as f64 + batch.local_origin.y,
+            )
+        });
+        let (min_x, max_x, min_y, max_y) = world_points.fold(
+            (
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+            ),
+            |(min_x, max_x, min_y, max_y), (x, y)| {
+                (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y))
+            },
+        );
+        assert!((min_x + 50.0).abs() < 1e-4 && (max_x - 50.0).abs() < 1e-4);
+        assert!((min_y + 50.0).abs() < 1e-4 && (max_y - 50.0).abs() < 1e-4);
     }
 
     #[test]
@@ -1547,6 +1589,17 @@ mod tests {
             positions.last().copied().unwrap() > 900.0,
             "the cap samples across the whole range, not just the corner"
         );
+    }
+
+    #[test]
+    fn grid_overlay_remains_bounded_at_extreme_pan_and_zoom() {
+        let overlay = grid_overlay(
+            (p(1.0e12, -1.0e12), p(1.0e12 + 1.0e-2, -1.0e12 + 1.0e-2)),
+            DocumentId(1),
+        );
+        let batch = &overlay.batches[0];
+        assert!(!batch.vertices.is_empty());
+        assert!(batch.vertices.len() / 2 <= GRID_MAX_LINES);
     }
 
     #[test]

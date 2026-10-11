@@ -16,7 +16,17 @@ impl HostCore {
 
     /// Pick the entity under `point` and select it (repeatable).
     fn select_at(&self, point: [f64; 2]) -> CadResult<()> {
-        self.metrics()?;
+        let profile = super::pick_profile_enabled();
+        let started = profile.then(std::time::Instant::now);
+        let metrics_result = self.metrics();
+        if let Some(started) = started {
+            eprintln!(
+                "YACR_PROFILE_PICK select_metrics elapsed_ms={:.3}",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        metrics_result?;
+        let started = profile.then(std::time::Instant::now);
         let c = self.controller.borrow();
         // `Select` itself moves the session to `ToolState::Selecting`, which is a
         // normal, repeatable selection state: a later click must be able to
@@ -26,10 +36,22 @@ impl HostCore {
             c.session.tool,
             cad_app::ToolState::Idle | cad_app::ToolState::Selecting
         ) {
+            if let Some(started) = started {
+                eprintln!(
+                    "YACR_PROFILE_PICK select_context elapsed_ms={:.3}",
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+            }
             return Ok(());
         }
         let viewport = &c.application.workspace.viewports[&c.viewport_id];
         let drawing = c.drawing().ok_or(CadError::Cancelled)?;
+        if let Some(started) = started {
+            eprintln!(
+                "YACR_PROFILE_PICK select_context elapsed_ms={:.3}",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
         let report = cad_app::picking::pick_at_screen(
             &drawing,
             c.document_id,
@@ -41,7 +63,15 @@ impl HostCore {
         )?;
         let refs = report.hit.map(|h| vec![h.source]).unwrap_or_default();
         drop(c);
-        self.command(CommandId::Select, CommandPayload::Selection(refs))
+        let started = profile.then(std::time::Instant::now);
+        let result = self.command(CommandId::Select, CommandPayload::Selection(refs));
+        if let Some(started) = started {
+            eprintln!(
+                "YACR_PROFILE_PICK select_command elapsed_ms={:.3}",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        result
     }
 }
 
@@ -126,6 +156,19 @@ impl DrawPreviewSink for HostCore {
 }
 
 impl DrawCommandSink for HostCore {
+    fn begin(&mut self, kind: cad_app::DrawToolKind) {
+        let selection = if kind == cad_app::DrawToolKind::Move {
+            Some(self.controller.borrow().selection().refs().to_vec())
+        } else {
+            None
+        };
+        *self.move_selection.borrow_mut() = selection;
+    }
+
+    fn cancel(&mut self) {
+        self.move_selection.borrow_mut().take();
+    }
+
     fn commit(&mut self, intent: cad_app::DrawIntent) -> CadResult<()> {
         match intent {
             cad_app::DrawIntent::Line { start, end } => self.command(
@@ -141,11 +184,11 @@ impl DrawCommandSink for HostCore {
                 CommandPayload::Points(points.to_vec()),
             ),
             cad_app::DrawIntent::Move { delta } => {
-                let refs = self.controller.borrow().selection().refs().to_vec();
-                self.command(
-                    CommandId::MoveEntities,
-                    CommandPayload::Move { refs, delta },
-                )
+                let result = self.execute(self.move_command(delta)?);
+                if result.is_ok() {
+                    self.move_selection.borrow_mut().take();
+                }
+                result
             }
             cad_app::DrawIntent::Copy { delta } => {
                 let refs = self.controller.borrow().selection().refs().to_vec();
@@ -193,5 +236,26 @@ impl DrawCommandSink for HostCore {
                 Err(CadError::Unsupported(self.message("linux.extend", &[])))
             }
         }
+    }
+}
+
+impl HostCore {
+    /// Build the confirmed MOVE command from the active tool's captured refs.
+    /// Kept separate from execution so the payload contract can be tested
+    /// without constructing a window or renderer.
+    pub(crate) fn move_command(&self, delta: Point3) -> CadResult<Command> {
+        let refs = self
+            .move_selection
+            .borrow()
+            .clone()
+            .ok_or_else(|| CadError::InvalidInput("MOVE selection was not captured".into()))?;
+        let c = self.controller.borrow();
+        Ok(Command {
+            schema_version: 1,
+            id: CommandId::MoveEntities,
+            document: c.document_id,
+            viewport: c.viewport_id,
+            payload: CommandPayload::Move { refs, delta },
+        })
     }
 }

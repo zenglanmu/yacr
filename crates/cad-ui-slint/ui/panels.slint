@@ -75,17 +75,22 @@ export component CadPanels inherits Rectangle {
                 alignment: start;
                 Button { text: root.labels[0]; symbol: "layers"; icon-only: true; checked: root.section == 0; min-width: 48px; preferred-width: 48px;
                     min-height: 48px; clicked => { root.section = 0; } }
-                Button { text: root.labels[6]; symbol: "i"; icon-only: true; checked: root.section == 1; min-width: 48px; preferred-width: 48px;
+                Button { text: root.labels[6]; symbol: "info"; icon-only: true; checked: root.section == 1; min-width: 48px; preferred-width: 48px; max-width: 48px;
                     min-height: 48px; clicked => { root.section = 1; } }
-                Button { text: root.labels[4]; symbol: "layout"; icon-only: true; checked: root.section == 2; min-width: 48px; preferred-width: 48px;
+                Button { text: root.labels[4]; symbol: "layout"; icon-only: true; checked: root.section == 2; min-width: 48px; preferred-width: 48px; max-width: 48px;
                     min-height: 48px; clicked => { root.section = 2; } }
             }
             if root.section == 0 : Button { text: root.labels[1]; symbol: "layers"; enabled: root.layers.length > 0; min-height: 48px; clicked => { root.restore(); } }
             if root.section == 0 : HorizontalBox {
                 padding: 0px; spacing: 4px;
+                // Give each action a full-width row: the catalog labels remain
+                // readable even in a narrow dock instead of being elided.
                 Button { text: root.layers-show-all-label; min-width: 0px; horizontal-stretch: 1;
                     min-height: 48px; enabled: root.layers.length > 0;
                     clicked => { root.all-layers(true); } }
+            }
+            if root.section == 0 : HorizontalBox {
+                padding: 0px; spacing: 4px;
                 Button { text: root.layers-hide-all-label; min-width: 0px; horizontal-stretch: 1;
                     min-height: 48px; enabled: root.layers.length > 0;
                     clicked => { root.all-layers(false); } }

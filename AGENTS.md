@@ -98,7 +98,8 @@ Linux/Android 发布层：按需 `linux-release`（`ubuntu-latest` 运行
   验收**必须**走真实 GPU：
   - 桌面 = 真实 winit 窗口 + 硬件 Vulkan，例如
     `cargo test -p app-linux --lib real_gpu_grid_zoom_axes_acceptance --locked -- --ignored
-    --test-threads=1 --nocapture`（证据默认写 `/tmp/opencode/yacr-real-gpu/`）；
+    --test-threads=1 --nocapture`（证据默认写 `/tmp/opencode/yacr-real-gpu/`）；完整真机台面回归
+    （全部 6 个用例、每用例一个独立进程）以 `scripts/run-real-gpu-e2e.sh` 为入口；
   - **Android 模拟器 = `-gpu host`**（把宿主显卡透传给模拟器，其 GLES/Vulkan 走真实 GPU，
     本机实测 `GLES: … Mesa Intel(R) UHD Graphics (CML GT2) …`，非 SwiftShader）；
   - 浏览器 = headful + 真实 GPU（非 SwiftShader）。

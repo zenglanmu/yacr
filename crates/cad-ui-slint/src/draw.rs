@@ -28,13 +28,17 @@ use crate::i18n::MessageSource;
 /// A host implements this alongside the shared `UiCommandSink`: `commit` builds
 /// and sends the exact application command (`CreateLine`/`CreateCircle`/
 /// `MoveEntities`/`TrimEntity`) through the single transaction/history path.
-/// `begin` is an optional capture-start hook (a host may emit a begin command);
-/// it defaults to a no-op because capture itself is session state.
+/// `begin`/`cancel` are optional capture lifecycle hooks (a host may snapshot
+/// session data needed at commit); they default to no-ops because capture itself
+/// is UI state.
 pub trait DrawCommandSink: 'static {
     /// Start capture for `kind`. Defaults to a no-op.
     fn begin(&mut self, kind: DrawToolKind) {
         let _ = kind;
     }
+
+    /// Cancel the active capture. Defaults to a no-op.
+    fn cancel(&mut self) {}
 
     /// Commit exactly one transaction for `intent`.
     ///

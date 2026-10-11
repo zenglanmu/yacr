@@ -25,6 +25,12 @@ use crate::camera::{Camera, Projection};
 use cad_db::{DrawingDatabase, MAX_INSTANCE_DEPTH};
 use cad_domain::*;
 use cad_spatial::{BackFacePolicy, PickItem, PickOptions, PickReport, SpatialIndex};
+use std::time::Instant;
+
+fn pick_profile_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("YACR_PROFILE_PICK").is_some())
+}
 
 /// Derive the world-space pick tolerance from the tolerance policy.
 ///
@@ -179,14 +185,40 @@ pub fn pick_ray(
     ray: &Ray3,
     options: &PickOptions,
 ) -> CadResult<PickReport> {
+    let profile = pick_profile_enabled();
+    let started = profile.then(Instant::now);
     let items = borrowed_pick_items(database, document);
-    cad_spatial::pick_closest_borrowed(
+    let expansion_elapsed = started.map(|t| t.elapsed());
+    let item_count = items.len();
+    if let Some(elapsed) = expansion_elapsed {
+        eprintln!(
+            "YACR_PROFILE_PICK borrowed_pick_items count={item_count} elapsed_ms={:.3}",
+            elapsed.as_secs_f64() * 1000.0
+        );
+    }
+    let started = profile.then(Instant::now);
+    let result = cad_spatial::pick_closest_borrowed(
         ray,
         items
             .iter()
             .map(|(source, geometry, transform)| (source, *geometry, transform)),
         options,
-    )
+    );
+    if let Some(started) = started {
+        eprintln!(
+            "YACR_PROFILE_PICK pick_closest_borrowed elapsed_ms={:.3}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    let started = profile.then(Instant::now);
+    drop(items);
+    if let Some(started) = started {
+        eprintln!(
+            "YACR_PROFILE_PICK borrowed_pick_items_drop elapsed_ms={:.3}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    result
 }
 
 /// Precise pick of the closest model-space geometry under a logical screen pixel.
@@ -202,12 +234,28 @@ pub fn pick_at_screen(
     policy: &TolerancePolicy,
     back_faces: BackFacePolicy,
 ) -> CadResult<PickReport> {
+    let profile = pick_profile_enabled();
+    let total_started = profile.then(Instant::now);
+    let started = profile.then(Instant::now);
     let ray = camera
         .screen_to_ray(logical, logical_size)
         .ok_or_else(|| CadError::InvalidInput("screen pixel does not produce a pick ray".into()))?;
     let tolerance = pick_tolerance(policy, camera, logical_size)?;
     let options = PickOptions::new(tolerance)?.with_back_faces(back_faces);
-    pick_ray(database, document, &ray, &options)
+    if let Some(started) = started {
+        eprintln!(
+            "YACR_PROFILE_PICK pick_at_screen_setup elapsed_ms={:.3}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    let result = pick_ray(database, document, &ray, &options);
+    if let Some(started) = total_started {
+        eprintln!(
+            "YACR_PROFILE_PICK pick_at_screen_total elapsed_ms={:.3}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    result
 }
 
 /// Narrow a prepared item list to the candidates a broad-phase index reports.

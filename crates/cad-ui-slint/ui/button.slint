@@ -28,14 +28,15 @@ export component Button inherits Rectangle {
         (root.symbol == "∠" ? @image-url("icons/angle.svg") :
         (root.symbol == "▨" ? @image-url("icons/area.svg") :
         (root.symbol == "layers" ? @image-url("icons/layers.svg") :
+        (root.symbol == "layout" ? @image-url("icons/layout.svg") :
         (root.symbol == "□" ? @image-url("icons/annotation.svg") :
         (root.symbol == "⊡" ? @image-url("icons/fit.svg") :
-        (root.symbol == "☁" ? @image-url("icons/cloud.svg") : @image-url("icons/annotation.svg")))))));
+        (root.symbol == "☁" ? @image-url("icons/cloud.svg") : @image-url("icons/annotation.svg"))))))));
     property <bool> vector-icon: root.symbol == "▱" || root.symbol == "⇧" || root.symbol == "⇩" || root.symbol == "info" ||
         root.symbol == "∿" || root.symbol == "◇" || root.symbol == "A" || root.symbol == "↗" || root.symbol == "ellipse" || root.symbol == "freehand" ||
         root.symbol == "pan" || root.symbol == "zoom-in" || root.symbol == "zoom-out" ||
         root.symbol == "line" || root.symbol == "circle" || root.symbol == "trim" || root.symbol == "↔" || root.symbol == "∠" || root.symbol == "▨" ||
-        root.symbol == "layers" || root.symbol == "□" || root.symbol == "⊡" || root.symbol == "☁";
+        root.symbol == "layers" || root.symbol == "layout" || root.symbol == "□" || root.symbol == "⊡" || root.symbol == "☁";
     callback clicked();
     min-width: 64px;
     preferred-width: max(72px, label.preferred-width + 24px);

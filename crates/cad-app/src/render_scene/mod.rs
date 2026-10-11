@@ -263,7 +263,10 @@ impl CadSceneController {
                         match db.bounds() {
                             Some(bounds) => {
                                 if overlays.visibility.grid {
-                                    overlay.merge(grid_overlay(bounds, document));
+                                    overlay.merge(grid_overlay(
+                                        overlays.viewport_bounds.unwrap_or(bounds),
+                                        document,
+                                    ));
                                 }
                                 if overlays.visibility.axes {
                                     overlay.merge(axes_overlay(bounds, document));
@@ -433,6 +436,72 @@ mod tests {
         )
         .unwrap();
         assert!(controller.ready.as_ref().unwrap().base_revision > base_revision);
+    }
+
+    #[test]
+    fn viewport_grid_change_rebuilds_overlay_without_rebuilding_base() {
+        let db = Arc::new(db_with_line());
+        let layers = LayerOverrideSet::new();
+        let mut overlays = OverlayInputs {
+            viewport_bounds: Some((
+                cad_domain::Point3 {
+                    x: -10.0,
+                    y: -5.0,
+                    z: 0.0,
+                },
+                cad_domain::Point3 {
+                    x: 10.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+            )),
+            visibility: OverlayVisibility {
+                grid: true,
+                axes: false,
+                ..OverlayVisibility::default()
+            },
+            ..OverlayInputs::default()
+        };
+        let mut controller = CadSceneController::default();
+        controller
+            .prepare_shared_with_overlays(
+                Some(db.clone()),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                &overlays,
+            )
+            .unwrap();
+        let base = controller.ready.as_ref().unwrap().base.clone();
+        let base_revision = controller.ready.as_ref().unwrap().base_revision;
+        let revision = controller.ready.as_ref().unwrap().revision;
+        overlays.viewport_bounds = Some((
+            cad_domain::Point3 {
+                x: 1000.0,
+                y: -2.0,
+                z: 0.0,
+            },
+            cad_domain::Point3 {
+                x: 1400.0,
+                y: 2.0,
+                z: 0.0,
+            },
+        ));
+        controller
+            .prepare_shared_with_overlays(
+                Some(db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                &overlays,
+            )
+            .unwrap();
+        let current = controller.ready.as_ref().unwrap();
+        assert!(Arc::ptr_eq(&base, &current.base));
+        assert_eq!(current.base_revision, base_revision);
+        assert!(current.revision > revision);
     }
 
     #[test]

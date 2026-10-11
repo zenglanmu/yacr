@@ -32,14 +32,136 @@
 
 use cad_domain::*;
 use cad_geometry::{tessellate_geometry, TessellationParams};
+use std::collections::HashMap;
 
 use crate::PickHit;
+
+#[cfg(test)]
+thread_local! {
+    static CULLED_BY_PICK_BOUNDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static BYPASS_PICK_BOUNDS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PICK_BOUNDS_COMPUTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static PICK_NARROW_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+type PickBoundsCache = HashMap<*const SemanticGeometry, Option<(Point3, Point3)>>;
 
 /// Ray directions shorter than this are considered degenerate.
 pub const MIN_RAY_DIRECTION: f64 = 1e-12;
 /// Maximum number of tessellation segments for one curve during picking, so a
 /// pathological curve can never make a single pick unbounded.
 pub const MAX_PICK_SEGMENTS: usize = 8192;
+
+const FAMILY_LINE: usize = 0;
+const FAMILY_POLYLINE: usize = 1;
+const FAMILY_CIRCLE: usize = 2;
+const FAMILY_ARC: usize = 3;
+const FAMILY_ELLIPSE: usize = 4;
+const FAMILY_SPLINE: usize = 5;
+const FAMILY_POINT: usize = 6;
+const FAMILY_MESH: usize = 7;
+const FAMILY_INSERT: usize = 8;
+const FAMILY_OPAQUE: usize = 9;
+const FAMILY_COMPOUND: usize = 10;
+const FAMILY_TEXT: usize = 11;
+const FAMILY_SHAPE: usize = 12;
+const FAMILY_MASK: usize = 13;
+const FAMILY_IMAGE: usize = 14;
+const PICK_FAMILIES: [&str; 15] = [
+    "line", "polyline", "circle", "arc", "ellipse", "spline", "point", "mesh", "insert", "opaque",
+    "compound", "text", "shape", "mask", "image",
+];
+
+struct PickProfile {
+    visits: [usize; PICK_FAMILIES.len()],
+    culls: [usize; PICK_FAMILIES.len()],
+    narrow: [usize; PICK_FAMILIES.len()],
+    total_visits: usize,
+    bounds_samples: usize,
+    bounds_ns: u128,
+    precise_samples: usize,
+    precise_ns: u128,
+}
+
+impl Default for PickProfile {
+    fn default() -> Self {
+        Self {
+            visits: [0; PICK_FAMILIES.len()],
+            culls: [0; PICK_FAMILIES.len()],
+            narrow: [0; PICK_FAMILIES.len()],
+            total_visits: 0,
+            bounds_samples: 0,
+            bounds_ns: 0,
+            precise_samples: 0,
+            precise_ns: 0,
+        }
+    }
+}
+
+impl PickProfile {
+    fn visit(&mut self, family: usize) -> bool {
+        self.visits[family] += 1;
+        self.total_visits += 1;
+        self.total_visits % 64 == 1
+    }
+
+    fn bounds_sample(&mut self, elapsed: std::time::Duration) {
+        self.bounds_samples += 1;
+        self.bounds_ns += elapsed.as_nanos();
+    }
+
+    fn precise_sample(&mut self, elapsed: std::time::Duration) {
+        self.precise_samples += 1;
+        self.precise_ns += elapsed.as_nanos();
+    }
+
+    fn log(&self) {
+        let families = PICK_FAMILIES
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.visits[*index] != 0)
+            .map(|(index, name)| {
+                format!(
+                    "{name}={}/{}/{}",
+                    self.visits[index], self.culls[index], self.narrow[index]
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        eprintln!(
+            "YACR_PROFILE_PICK spatial families=visits/culls/narrow[{families}] sample_every=64 bounds_samples={} bounds_sample_ms={:.3} precise_samples={} precise_sample_ms={:.3}",
+            self.bounds_samples,
+            self.bounds_ns as f64 / 1_000_000.0,
+            self.precise_samples,
+            self.precise_ns as f64 / 1_000_000.0,
+        );
+    }
+}
+
+fn pick_profile_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("YACR_PROFILE_PICK").is_some())
+}
+
+fn geometry_family(geometry: &SemanticGeometry) -> usize {
+    match geometry {
+        SemanticGeometry::Line { .. } => FAMILY_LINE,
+        SemanticGeometry::Polyline { .. } => FAMILY_POLYLINE,
+        SemanticGeometry::Circle { .. } => FAMILY_CIRCLE,
+        SemanticGeometry::Arc { .. } => FAMILY_ARC,
+        SemanticGeometry::Ellipse { .. } => FAMILY_ELLIPSE,
+        SemanticGeometry::Spline { .. } => FAMILY_SPLINE,
+        SemanticGeometry::Point(_) => FAMILY_POINT,
+        SemanticGeometry::Mesh(_) => FAMILY_MESH,
+        SemanticGeometry::Insert { .. } => FAMILY_INSERT,
+        SemanticGeometry::Opaque { .. } => FAMILY_OPAQUE,
+        SemanticGeometry::Compound(_) => FAMILY_COMPOUND,
+        SemanticGeometry::Text { .. } => FAMILY_TEXT,
+        SemanticGeometry::Shape { .. } => FAMILY_SHAPE,
+        SemanticGeometry::Mask { .. } => FAMILY_MASK,
+        SemanticGeometry::Image { .. } => FAMILY_IMAGE,
+    }
+}
 
 /// How a ray treats the back face of a triangle.
 ///
@@ -286,7 +408,16 @@ pub fn hit_geometry(
         max_segments: MAX_PICK_SEGMENTS,
         ..TessellationParams::default()
     };
-    hit_validated(ray, geometry, transform, options, params)
+    let mut bounds_cache = PickBoundsCache::new();
+    hit_validated(
+        ray,
+        geometry,
+        transform,
+        options,
+        params,
+        None,
+        &mut bounds_cache,
+    )
 }
 
 fn hit_validated(
@@ -295,8 +426,49 @@ fn hit_validated(
     transform: &Transform3,
     options: &PickOptions,
     params: TessellationParams,
+    mut profile: Option<&mut PickProfile>,
+    bounds_cache: &mut PickBoundsCache,
 ) -> CadResult<PickOutcome> {
-    Ok(match geometry {
+    let (family, sample) = if let Some(profile) = profile.as_deref_mut() {
+        let family = geometry_family(geometry);
+        (Some(family), profile.visit(family))
+    } else {
+        (None, false)
+    };
+    let bounds_started = sample.then(std::time::Instant::now);
+    // Cheap conservative rejection before curve tessellation or mesh vertex
+    // transformation. Unknown/invalid bounds deliberately fall through.
+    if bounds_culling_enabled() {
+        if let Some((min, max)) =
+            conservative_world_bounds(cached_local_pick_bounds(geometry, bounds_cache), transform)
+        {
+            if !ray_intersects_expanded_bounds(ray, min, max, options.tolerance) {
+                if let Some(started) = bounds_started {
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.bounds_sample(started.elapsed());
+                    }
+                }
+                if let (Some(profile), Some(family)) = (profile.as_deref_mut(), family) {
+                    profile.culls[family] += 1;
+                }
+                #[cfg(test)]
+                CULLED_BY_PICK_BOUNDS.with(|count| count.set(count.get() + 1));
+                return Ok(PickOutcome::Miss);
+            }
+        }
+    }
+    if let Some(started) = bounds_started {
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.bounds_sample(started.elapsed());
+        }
+    }
+    if let (Some(profile), Some(family)) = (profile.as_deref_mut(), family) {
+        profile.narrow[family] += 1;
+    }
+    #[cfg(test)]
+    PICK_NARROW_CALLS.with(|count| count.set(count.get() + 1));
+    let narrow_started = (sample && family != Some(FAMILY_COMPOUND)).then(std::time::Instant::now);
+    let outcome = match geometry {
         SemanticGeometry::Line { start, end } => match segment_hit(
             ray,
             transform.apply_point(*start),
@@ -394,7 +566,15 @@ fn hit_validated(
             let mut best: Option<GeometryHit> = None;
             let mut unsupported: Option<&'static str> = None;
             for child in children {
-                match hit_validated(ray, child, transform, options, params)? {
+                match hit_validated(
+                    ray,
+                    child,
+                    transform,
+                    options,
+                    params,
+                    profile.as_deref_mut(),
+                    bounds_cache,
+                )? {
                     PickOutcome::Hit(hit) => {
                         let better = best
                             .as_ref()
@@ -421,7 +601,254 @@ fn hit_validated(
         }
         SemanticGeometry::Insert { .. } => PickOutcome::Unsupported("insert-not-expanded"),
         SemanticGeometry::Opaque { .. } => PickOutcome::Unsupported("opaque"),
-    })
+    };
+    if let Some(started) = narrow_started {
+        if let Some(profile) = profile {
+            profile.precise_sample(started.elapsed());
+        }
+    }
+    Ok(outcome)
+}
+
+#[cfg(not(test))]
+fn bounds_culling_enabled() -> bool {
+    true
+}
+
+#[cfg(test)]
+fn bounds_culling_enabled() -> bool {
+    !BYPASS_PICK_BOUNDS.with(std::cell::Cell::get)
+}
+
+/// A deliberately conservative, low-cost local bound for families whose
+/// geometry is known to remain within it. Returns `None` for uncertain data.
+fn local_pick_bounds(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
+    let mut bounds: Option<(Point3, Point3)> = None;
+    let mut radius = 0.0;
+    match geometry {
+        SemanticGeometry::Line { start, end } => {
+            if !include_bound_point(&mut bounds, *start) || !include_bound_point(&mut bounds, *end)
+            {
+                return None;
+            }
+        }
+        SemanticGeometry::Point(point) => {
+            if !include_bound_point(&mut bounds, *point) {
+                return None;
+            }
+        }
+        SemanticGeometry::Shape { position, .. } => {
+            if !include_bound_point(&mut bounds, *position) {
+                return None;
+            }
+        }
+        // The triangle predicate intentionally permits 1e-12 barycentric
+        // slack; for very large triangles that can accept points outside even
+        // a tolerance-expanded vertex bound. Preserve that established result.
+        SemanticGeometry::Mesh(_) => return None,
+        SemanticGeometry::Polyline {
+            points: vertices,
+            bulges,
+            ..
+        } if bulges.iter().all(|bulge| *bulge == 0.0) => {
+            for point in vertices {
+                if !include_bound_point(&mut bounds, *point) {
+                    return None;
+                }
+            }
+        }
+        SemanticGeometry::Mask { boundary, .. } => {
+            for point in boundary {
+                if !include_bound_point(&mut bounds, *point) {
+                    return None;
+                }
+            }
+        }
+        SemanticGeometry::Circle {
+            center, radius: r, ..
+        }
+        | SemanticGeometry::Arc {
+            center, radius: r, ..
+        } => {
+            if !include_bound_point(&mut bounds, *center) {
+                return None;
+            }
+            radius = r.abs();
+        }
+        SemanticGeometry::Ellipse {
+            center,
+            major_axis,
+            ratio,
+            ..
+        } => {
+            if !include_bound_point(&mut bounds, *center) {
+                return None;
+            }
+            radius = length3(*major_axis) * (1.0 + ratio.abs());
+        }
+        // Rational splines can leave the control-point hull for invalid or
+        // non-positive weights; text bounds depend on shaping/font metrics.
+        // Bulged polylines likewise need their true arc extrema.
+        _ => return None,
+    }
+    let (min, max) = bounds?;
+    if !radius.is_finite() {
+        return None;
+    }
+    Some((
+        Point3 {
+            x: min.x - radius,
+            y: min.y - radius,
+            z: min.z - radius,
+        },
+        Point3 {
+            x: max.x + radius,
+            y: max.y + radius,
+            z: max.z + radius,
+        },
+    ))
+}
+
+fn include_bound_point(bounds: &mut Option<(Point3, Point3)>, point: Point3) -> bool {
+    if !is_finite_point(point) {
+        return false;
+    }
+    match bounds {
+        Some((min, max)) => {
+            min.x = min.x.min(point.x);
+            min.y = min.y.min(point.y);
+            min.z = min.z.min(point.z);
+            max.x = max.x.max(point.x);
+            max.y = max.y.max(point.y);
+            max.z = max.z.max(point.z);
+        }
+        None => *bounds = Some((point, point)),
+    }
+    true
+}
+
+fn cached_local_pick_bounds(
+    geometry: &SemanticGeometry,
+    cache: &mut PickBoundsCache,
+) -> Option<(Point3, Point3)> {
+    let SemanticGeometry::Compound(children) = geometry else {
+        // Leaf bounds are cheap and common. Avoid hashing and inserting millions
+        // of one-shot leaf pointers; only reusable compound aggregates belong
+        // in the query cache.
+        return local_pick_bounds(geometry);
+    };
+    let key = geometry as *const SemanticGeometry;
+    if let Some(bounds) = cache.get(&key) {
+        return *bounds;
+    }
+    #[cfg(test)]
+    PICK_BOUNDS_COMPUTED.with(|count| count.set(count.get() + 1));
+
+    let mut union: Option<(Point3, Point3)> = None;
+    let mut all_bounded = !children.is_empty();
+    for child in children {
+        let Some((child_min, child_max)) = cached_local_pick_bounds(child, cache) else {
+            all_bounded = false;
+            break;
+        };
+        union = Some(match union {
+            Some((mut min, mut max)) => {
+                min.x = min.x.min(child_min.x);
+                min.y = min.y.min(child_min.y);
+                min.z = min.z.min(child_min.z);
+                max.x = max.x.max(child_max.x);
+                max.y = max.y.max(child_max.y);
+                max.z = max.z.max(child_max.z);
+                (min, max)
+            }
+            None => (child_min, child_max),
+        });
+    }
+    let bounds = if all_bounded { union } else { None };
+    cache.insert(key, bounds);
+    bounds
+}
+
+fn conservative_world_bounds(
+    local_bounds: Option<(Point3, Point3)>,
+    transform: &Transform3,
+) -> Option<(Point3, Point3)> {
+    let (min, max) = local_bounds?;
+    let mut world_min = Point3 {
+        x: f64::INFINITY,
+        y: f64::INFINITY,
+        z: f64::INFINITY,
+    };
+    let mut world_max = Point3 {
+        x: f64::NEG_INFINITY,
+        y: f64::NEG_INFINITY,
+        z: f64::NEG_INFINITY,
+    };
+    for x in [min.x, max.x] {
+        for y in [min.y, max.y] {
+            for z in [min.z, max.z] {
+                let point = transform.apply_point(Point3 { x, y, z });
+                if !is_finite_point(point) {
+                    return None;
+                }
+                world_min.x = world_min.x.min(point.x);
+                world_min.y = world_min.y.min(point.y);
+                world_min.z = world_min.z.min(point.z);
+                world_max.x = world_max.x.max(point.x);
+                world_max.y = world_max.y.max(point.y);
+                world_max.z = world_max.z.max(point.z);
+            }
+        }
+    }
+    Some((world_min, world_max))
+}
+
+/// Slab test against an AABB expanded by the precise pick tolerance. Invalid
+/// arithmetic returns `true` (exhaustive fallback), never a false miss.
+fn ray_intersects_expanded_bounds(ray: &Ray3, min: Point3, max: Point3, tolerance: f64) -> bool {
+    let mut near: f64 = 0.0;
+    let mut far = f64::INFINITY;
+    for (origin, direction, low, high) in [
+        (
+            ray.origin.x,
+            ray.direction.x,
+            min.x - tolerance,
+            max.x + tolerance,
+        ),
+        (
+            ray.origin.y,
+            ray.direction.y,
+            min.y - tolerance,
+            max.y + tolerance,
+        ),
+        (
+            ray.origin.z,
+            ray.direction.z,
+            min.z - tolerance,
+            max.z + tolerance,
+        ),
+    ] {
+        if ![origin, direction, low, high].iter().all(|v| v.is_finite()) {
+            return true;
+        }
+        if direction == 0.0 {
+            if origin < low || origin > high {
+                return false;
+            }
+        } else {
+            let a = (low - origin) / direction;
+            let b = (high - origin) / direction;
+            if !a.is_finite() || !b.is_finite() {
+                return true;
+            }
+            near = near.max(a.min(b));
+            far = far.min(a.max(b));
+            if near > far {
+                return false;
+            }
+        }
+    }
+    far >= 0.0
 }
 
 /// Precise closest-hit query over many items.
@@ -460,8 +887,18 @@ pub fn pick_closest_borrowed<'a>(
         max_segments: MAX_PICK_SEGMENTS,
         ..TessellationParams::default()
     };
+    let mut profile = pick_profile_enabled().then(PickProfile::default);
+    let mut bounds_cache = PickBoundsCache::new();
     for (item_source, geometry, transform) in items {
-        match hit_validated(ray, geometry, transform, options, params)? {
+        match hit_validated(
+            ray,
+            geometry,
+            transform,
+            options,
+            params,
+            profile.as_mut(),
+            &mut bounds_cache,
+        )? {
             PickOutcome::Hit(hit) => {
                 // Identity is `entity + instance + sub-element`. The item names
                 // the entity/instance; the geometry resolves the sub-element. A
@@ -504,6 +941,9 @@ pub fn pick_closest_borrowed<'a>(
         }
     }
     report.hit = best;
+    if let Some(profile) = profile {
+        profile.log();
+    }
     Ok(report)
 }
 
@@ -672,7 +1112,7 @@ fn is_finite_point(p: Point3) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    #[cfg(test)]
     #[test]
     fn borrowed_picking_matches_owned_single_hit() {
         let source = SelectionRef {
@@ -780,6 +1220,464 @@ mod tests {
             transform: Transform3::identity(),
             geometry_source: GeometrySource::Analytic,
         }
+    }
+
+    fn local_pick_bounds_reference(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
+        let mut points = Vec::new();
+        let mut radius = 0.0;
+        match geometry {
+            SemanticGeometry::Line { start, end } => points.extend([*start, *end]),
+            SemanticGeometry::Point(point) => points.push(*point),
+            SemanticGeometry::Shape { position, .. } => points.push(*position),
+            SemanticGeometry::Mesh(_) => return None,
+            SemanticGeometry::Polyline {
+                points: vertices,
+                bulges,
+                ..
+            } if bulges.iter().all(|bulge| *bulge == 0.0) => {
+                points.extend(vertices.iter().copied())
+            }
+            SemanticGeometry::Mask { boundary, .. } => points.extend(boundary.iter().copied()),
+            SemanticGeometry::Circle {
+                center, radius: r, ..
+            }
+            | SemanticGeometry::Arc {
+                center, radius: r, ..
+            } => {
+                points.push(*center);
+                radius = r.abs();
+            }
+            SemanticGeometry::Ellipse {
+                center,
+                major_axis,
+                ratio,
+                ..
+            } => {
+                points.push(*center);
+                radius = length3(*major_axis) * (1.0 + ratio.abs());
+            }
+            _ => return None,
+        }
+        if points.is_empty() || !radius.is_finite() || points.iter().any(|p| !is_finite_point(*p)) {
+            return None;
+        }
+        let mut min = points[0];
+        let mut max = points[0];
+        for point in points.iter().skip(1) {
+            min.x = min.x.min(point.x);
+            min.y = min.y.min(point.y);
+            min.z = min.z.min(point.z);
+            max.x = max.x.max(point.x);
+            max.y = max.y.max(point.y);
+            max.z = max.z.max(point.z);
+        }
+        Some((
+            p(min.x - radius, min.y - radius, min.z - radius),
+            p(max.x + radius, max.y + radius, max.z + radius),
+        ))
+    }
+
+    #[test]
+    fn allocation_free_pick_bounds_match_the_vec_reference() {
+        let cases = vec![
+            SemanticGeometry::Line {
+                start: p(-2.0, 1.0, 3.0),
+                end: p(4.0, -1.0, 2.0),
+            },
+            SemanticGeometry::Point(p(1.0, 2.0, 3.0)),
+            SemanticGeometry::Shape {
+                shape_name: "shape".into(),
+                code: 1,
+                position: p(3.0, 2.0, 1.0),
+                size: 1.0,
+                rotation: 0.0,
+                font: None,
+            },
+            SemanticGeometry::Polyline {
+                points: vec![p(1.0, 2.0, 3.0), p(-2.0, 4.0, 0.0)],
+                bulges: vec![0.0],
+                closed: false,
+            },
+            SemanticGeometry::Polyline {
+                points: vec![p(1.0, 2.0, 3.0), p(-2.0, 4.0, 0.0)],
+                bulges: vec![1.0],
+                closed: false,
+            },
+            SemanticGeometry::Mask {
+                boundary: vec![p(1.0, 2.0, 3.0), p(-2.0, 4.0, 0.0)],
+                inverted: false,
+            },
+            SemanticGeometry::Circle {
+                center: p(1.0, 2.0, 3.0),
+                normal: p(0.0, 0.0, 1.0),
+                radius: -4.0,
+            },
+            SemanticGeometry::Arc {
+                center: p(1.0, 2.0, 3.0),
+                normal: p(0.0, 0.0, 1.0),
+                radius: 4.0,
+                start: 0.0,
+                sweep: 1.0,
+            },
+            SemanticGeometry::Ellipse {
+                center: p(1.0, 2.0, 3.0),
+                normal: p(0.0, 0.0, 1.0),
+                major_axis: p(2.0, 0.0, 0.0),
+                ratio: 0.5,
+                start: 0.0,
+                sweep: 1.0,
+            },
+            SemanticGeometry::Polyline {
+                points: vec![p(f64::NAN, 0.0, 0.0)],
+                bulges: vec![],
+                closed: false,
+            },
+            SemanticGeometry::Mesh(Mesh {
+                vertices: vec![p(0.0, 0.0, 0.0)],
+                triangles: vec![],
+                normals: vec![],
+                face_sources: vec![],
+                colors: vec![],
+            }),
+            SemanticGeometry::Opaque {
+                type_key: "x".into(),
+                version: 1,
+                payload: vec![],
+            },
+        ];
+        for geometry in &cases {
+            assert_eq!(
+                local_pick_bounds(geometry),
+                local_pick_bounds_reference(geometry)
+            );
+        }
+    }
+
+    #[test]
+    fn bounded_and_unculled_pick_reports_are_identical() {
+        let mut first_tie = item(
+            10,
+            SemanticGeometry::Line {
+                start: p(-1.0, 0.0, 3.0),
+                end: p(1.0, 0.0, 3.0),
+            },
+        );
+        first_tie.source.instance = InstancePath(vec![EntityId(101)]);
+        let mut second_tie = first_tie.clone();
+        second_tie.source.instance = InstancePath(vec![EntityId(102)]);
+        let mut transformed = item(11, SemanticGeometry::Point(p(0.0, 0.0, 5.0)));
+        transformed.transform.matrix[0][3] = 0.05;
+        let items = vec![
+            item(
+                1,
+                SemanticGeometry::Circle {
+                    center: p(100.0, 0.0, 20.0),
+                    normal: p(0.0, 0.0, 1.0),
+                    radius: 2.0,
+                },
+            ),
+            first_tie,
+            second_tie,
+            transformed,
+            item(
+                12,
+                SemanticGeometry::Mask {
+                    boundary: vec![p(-1.0, 0.0, 7.0), p(1.0, 0.0, 7.0)],
+                    inverted: false,
+                },
+            ),
+            item(
+                13,
+                SemanticGeometry::Opaque {
+                    type_key: "UNKNOWN".into(),
+                    version: 1,
+                    payload: vec![],
+                },
+            ),
+            item(
+                14,
+                SemanticGeometry::Mesh(Mesh {
+                    vertices: vec![p(0.0, 0.0, 10.0), p(1e9, 0.0, 10.0), p(0.0, 1e9, 10.0)],
+                    triangles: vec![[0, 1, 2]],
+                    normals: vec![],
+                    face_sources: vec![],
+                    colors: vec![],
+                }),
+            ),
+        ];
+        let ray = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        let options = PickOptions::new(0.1)
+            .unwrap()
+            .with_back_faces(BackFacePolicy::DoubleSided);
+        BYPASS_PICK_BOUNDS.with(|bypass| bypass.set(false));
+        let bounded = pick_closest(&ray, &items, &options).unwrap();
+        BYPASS_PICK_BOUNDS.with(|bypass| bypass.set(true));
+        let exhaustive = pick_closest(&ray, &items, &options).unwrap();
+        BYPASS_PICK_BOUNDS.with(|bypass| bypass.set(false));
+        assert_eq!(bounded, exhaustive);
+        assert_eq!(
+            bounded.hit.unwrap().source.instance,
+            InstancePath(vec![EntityId(101)])
+        );
+    }
+
+    #[test]
+    fn bounded_compound_cull_skips_children_and_shared_placements_reuse_local_bounds() {
+        let ray = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        let options = PickOptions::new(0.01).unwrap();
+        let far = SemanticGeometry::Compound(vec![
+            SemanticGeometry::Polyline {
+                points: vec![p(100.0, -2.0, 5.0), p(100.0, 2.0, 5.0)],
+                bulges: vec![0.0],
+                closed: false,
+            },
+            SemanticGeometry::Circle {
+                center: p(100.0, 0.0, 10.0),
+                normal: p(0.0, 0.0, 1.0),
+                radius: 1.0,
+            },
+        ]);
+        let far_source = source(20, Vec::new());
+        let identity = Transform3::identity();
+        PICK_NARROW_CALLS.with(|count| count.set(0));
+        PICK_BOUNDS_COMPUTED.with(|count| count.set(0));
+        CULLED_BY_PICK_BOUNDS.with(|count| count.set(0));
+        assert!(
+            pick_closest_borrowed(&ray, [(&far_source, &far, &identity)], &options,)
+                .unwrap()
+                .hit
+                .is_none()
+        );
+        PICK_BOUNDS_COMPUTED.with(|count| assert_eq!(count.get(), 1));
+        PICK_NARROW_CALLS.with(|count| assert_eq!(count.get(), 0));
+        CULLED_BY_PICK_BOUNDS.with(|count| assert_eq!(count.get(), 1));
+
+        // The same immutable geometry is offered at two placements in one
+        // query. First placement culls the compound; the second hits and must
+        // reuse bounds for the root and both descendants.
+        let shared = SemanticGeometry::Compound(vec![
+            SemanticGeometry::Compound(vec![SemanticGeometry::Polyline {
+                points: vec![p(-1.0, 0.0, 2.0), p(1.0, 0.0, 2.0)],
+                bulges: vec![0.0],
+                closed: false,
+            }]),
+            SemanticGeometry::Circle {
+                center: p(0.0, 0.0, 4.0),
+                normal: p(0.0, 0.0, 1.0),
+                radius: 0.5,
+            },
+        ]);
+        let mut aggregate_cache = PickBoundsCache::new();
+        assert!(cached_local_pick_bounds(&shared, &mut aggregate_cache).is_some());
+        assert_eq!(
+            aggregate_cache.len(),
+            2,
+            "only the two compounds are cached"
+        );
+        assert!(cached_local_pick_bounds(&shared, &mut aggregate_cache).is_some());
+        assert_eq!(aggregate_cache.len(), 2, "a repeated aggregate is reused");
+        let mut displaced = Transform3::identity();
+        displaced.matrix[0][3] = 100.0;
+        let source_a = source(21, vec![1]);
+        let source_b = source(21, vec![2]);
+        PICK_NARROW_CALLS.with(|count| count.set(0));
+        PICK_BOUNDS_COMPUTED.with(|count| count.set(0));
+        CULLED_BY_PICK_BOUNDS.with(|count| count.set(0));
+        let report = pick_closest_borrowed(
+            &ray,
+            [
+                (&source_a, &shared, &displaced),
+                (&source_b, &shared, &identity),
+            ],
+            &options,
+        )
+        .unwrap();
+        assert!(report.hit.is_some());
+        PICK_BOUNDS_COMPUTED.with(|count| assert_eq!(count.get(), 2));
+        PICK_NARROW_CALLS.with(|count| assert_eq!(count.get(), 4));
+        CULLED_BY_PICK_BOUNDS.with(|count| assert_eq!(count.get(), 1));
+    }
+
+    #[test]
+    fn cached_compound_picks_match_unculled_shared_nested_and_mixed_reports() {
+        let ray = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        let options = PickOptions::new(0.1).unwrap();
+        let shared = SemanticGeometry::Compound(vec![SemanticGeometry::Compound(vec![
+            SemanticGeometry::Polyline {
+                points: vec![p(-1.0, 0.0, 2.0), p(1.0, 0.0, 2.0)],
+                bulges: vec![0.0],
+                closed: false,
+            },
+        ])]);
+        let mut displaced = Transform3::identity();
+        displaced.matrix[1][3] = 0.05;
+        let mut far = Transform3::identity();
+        far.matrix[0][3] = 100.0;
+        let source_far = source(30, vec![200]);
+        let source_offset = source(30, vec![201]);
+        let source_first_tie = source(30, vec![202]);
+        let source_second_tie = source(30, vec![203]);
+        let identity = Transform3::identity();
+        let opaque_mixed = SemanticGeometry::Compound(vec![
+            SemanticGeometry::Line {
+                start: p(100.0, -1.0, 4.0),
+                end: p(100.0, 1.0, 4.0),
+            },
+            SemanticGeometry::Opaque {
+                type_key: "UNKNOWN".into(),
+                version: 1,
+                payload: vec![],
+            },
+        ]);
+        let source_opaque = source(31, vec![]);
+        let items = [
+            (&source_far, &shared, &far),
+            (&source_offset, &shared, &displaced),
+            (&source_first_tie, &shared, &identity),
+            (&source_second_tie, &shared, &identity),
+            (&source_opaque, &opaque_mixed, &identity),
+        ];
+        BYPASS_PICK_BOUNDS.with(|bypass| bypass.set(false));
+        let bounded = pick_closest_borrowed(&ray, items, &options).unwrap();
+        BYPASS_PICK_BOUNDS.with(|bypass| bypass.set(true));
+        let exhaustive = pick_closest_borrowed(&ray, items, &options).unwrap();
+        BYPASS_PICK_BOUNDS.with(|bypass| bypass.set(false));
+        assert_eq!(bounded, exhaustive);
+        assert_eq!(
+            bounded.hit.as_ref().unwrap().source.instance,
+            InstancePath(vec![EntityId(202)])
+        );
+        assert_eq!(bounded.skipped.len(), 1);
+        assert_eq!(bounded.skipped[0].reason, "compound-unsupported");
+    }
+
+    #[test]
+    fn cached_mixed_mesh_compound_preserves_face_identity_vs_unculled_pick() {
+        let geometry = SemanticGeometry::Compound(vec![
+            SemanticGeometry::Mesh(two_face_mesh()),
+            SemanticGeometry::Opaque {
+                type_key: "UNKNOWN".into(),
+                version: 1,
+                payload: vec![],
+            },
+        ]);
+        let source = source(40, vec![401]);
+        let transform = Transform3::identity();
+        let ray = ray(p(-1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        let options = PickOptions::new(1e-6)
+            .unwrap()
+            .with_back_faces(BackFacePolicy::DoubleSided);
+        let items = [(&source, &geometry, &transform)];
+        BYPASS_PICK_BOUNDS.with(|bypass| bypass.set(false));
+        let bounded = pick_closest_borrowed(&ray, items, &options).unwrap();
+        BYPASS_PICK_BOUNDS.with(|bypass| bypass.set(true));
+        let exhaustive = pick_closest_borrowed(&ray, items, &options).unwrap();
+        BYPASS_PICK_BOUNDS.with(|bypass| bypass.set(false));
+        assert_eq!(bounded, exhaustive);
+        assert_eq!(
+            bounded.hit.as_ref().unwrap().source.sub_element,
+            Some(face("face-a"))
+        );
+    }
+
+    #[test]
+    fn conservative_bounds_cull_far_curves_but_preserve_nested_unsupported_children() {
+        CULLED_BY_PICK_BOUNDS.with(|count| count.set(0));
+        let ray = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        let options = PickOptions::new(0.01).unwrap();
+        let far_circle = SemanticGeometry::Circle {
+            center: p(100.0, 0.0, 10.0),
+            normal: p(0.0, 0.0, 1.0),
+            radius: 20.0,
+        };
+        let compound = SemanticGeometry::Compound(vec![
+            far_circle,
+            SemanticGeometry::Opaque {
+                type_key: "UNKNOWN".into(),
+                version: 1,
+                payload: Vec::new(),
+            },
+        ]);
+        assert_eq!(
+            hit_geometry(&ray, &compound, &Transform3::identity(), &options).unwrap(),
+            PickOutcome::Unsupported("compound-unsupported")
+        );
+        CULLED_BY_PICK_BOUNDS.with(|count| assert_eq!(count.get(), 1));
+    }
+
+    #[test]
+    fn conservative_bounds_keep_tolerance_hits_and_fall_back_for_bulged_polylines() {
+        let ray = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        let options = PickOptions::new(0.1).unwrap();
+        let near = SemanticGeometry::Circle {
+            center: p(0.15, 0.0, 3.0),
+            normal: p(0.0, 0.0, 1.0),
+            radius: 0.05,
+        };
+        assert!(matches!(
+            hit_geometry(&ray, &near, &Transform3::identity(), &options).unwrap(),
+            PickOutcome::Hit(_)
+        ));
+        let bulged = SemanticGeometry::Polyline {
+            points: vec![p(100.0, 0.0, 0.0), p(101.0, 0.0, 0.0)],
+            bulges: vec![1.0],
+            closed: false,
+        };
+        assert!(local_pick_bounds(&bulged).is_none());
+        assert!(local_pick_bounds(&SemanticGeometry::Opaque {
+            type_key: "UNKNOWN".into(),
+            version: 1,
+            payload: Vec::new()
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn conservative_bounds_account_for_transforms_and_mesh_vertices() {
+        let mut transform = Transform3::identity();
+        transform.matrix[0][3] = 20.0;
+        let point = SemanticGeometry::Point(p(0.0, 0.0, 2.0));
+        let ray = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+        let options = PickOptions::new(0.01).unwrap();
+        assert_eq!(
+            hit_geometry(&ray, &point, &transform, &options).unwrap(),
+            PickOutcome::Miss
+        );
+
+        let mesh = SemanticGeometry::Mesh(Mesh {
+            vertices: vec![p(30.0, 0.0, 1.0)],
+            triangles: Vec::new(),
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        });
+        assert_eq!(
+            hit_geometry(&ray, &mesh, &Transform3::identity(), &options).unwrap(),
+            PickOutcome::Miss
+        );
+    }
+
+    #[test]
+    fn huge_mesh_preserves_barycentric_slack_outside_tolerance_bounds() {
+        // The existing triangle test allows u down to -1e-12. Across an edge
+        // 1e9 units long, this accepts a point 5e-7 units outside the triangle,
+        // even though the pick tolerance is only 1e-9.
+        let mesh = SemanticGeometry::Mesh(Mesh {
+            vertices: vec![p(0.0, 0.0, 1.0), p(1e9, 0.0, 1.0), p(0.0, 1e9, 1.0)],
+            triangles: vec![[0, 1, 2]],
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        });
+        assert!(local_pick_bounds(&mesh).is_none());
+        let ray = ray(p(-5e-7, 1.0, 0.0), p(0.0, 0.0, 1.0));
+        let options = PickOptions::new(1e-9)
+            .unwrap()
+            .with_back_faces(BackFacePolicy::DoubleSided);
+        assert!(matches!(
+            hit_geometry(&ray, &mesh, &Transform3::identity(), &options).unwrap(),
+            PickOutcome::Hit(_)
+        ));
     }
 
     #[test]

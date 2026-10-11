@@ -1,5 +1,16 @@
 # 后续 agent 接手入口
 
+## 桌面 MOVE 选择快照与关闭取消（2026-10-11，本轮）
+
+- 桌面 `MOVE` 在工具开始时由 `HostCore` 快照所选 `SelectionRef`；确认沿用该快照，不再读取确认时的当前选择。新工具开始会替换快照，取消会清除；命令仍走既有事务/历史漏斗，失败不改为空成功。契约覆盖“选 A → 开始 MOVE → 选择变为 B → 确认只移动 A”、取消/重启重置及撤销/重做。
+- Linux 50 ms timer 现在忽略 `CadError::Cancelled`（例如窗口销毁时 surface 已不可用），其余错误仍进入 `linux.failed`。
+- 集成后 targeted 验证：`cargo test -p cad-host --locked`（16 passed）；`cargo test -p app-linux --lib timer_ignores_cancellation_but_reports_real_errors --locked`（1 passed）；workspace clippy/native/wasm 检查及 `cargo fmt --all -- --check` 通过。五用例真实硬件复验为 1 passed / 4 failed；更新后的详细门禁、GPU PID 证据、失败原因与截图路径见 [validation-real-gpu-2026-10-11.md](validation-real-gpu-2026-10-11.md)。不得用修改前 2/4 的基线覆盖本轮结果。
+- 随后按 `YACR_PROFILE_PICK=1` 的硬件剖析复跑为 **3 passed / 2 failed**：小 DXF 真实窗口选择/MOVE/Undo/Redo 与 grid/zoom 用例通过；complex-test 两项选择延迟仍约 2.9s。剖析将瓶颈定位于 `pick_closest_borrowed` 对 723,587 个候选的 CPU 遍历（约 2.66–2.68s），push 仅约 1.7ms；本轮未改性能代码。日志/PID/GPU/PNG 与限制见验证文档新增「带选取剖析的真实 GPU 复跑」节；更新后的 complex-test 应用 PID `3901294` 仍打开。
+- 最终六用例实机轮 **3 passed / 3 failed**：CPU load、grid/zoom/axes、小 DXF selection/MOVE/history 通过；complex-test 两项 pick 延迟约 2.79/2.82s，maximized/crosshair 用例停于 phase 2 的 `frames=5` readiness 条件（其余 view 状态 ready，诊断详见验证文档）。最终门禁 clippy 因 `cad-spatial/src/pick.rs:579 needless_option_as_deref` 失败，i18n scanner 因 `host/validation.rs` 末尾多个 `#[cfg(test)]` 失败；其它 fmt/native/wasm/architecture/fixture/workflow 通过。仅执行 `cargo fmt --all` 机械格式化，未作行为修复。全证据与逐项日志见 [validation-real-gpu-2026-10-11.md](validation-real-gpu-2026-10-11.md)；最终 app PID `4006015` 保持打开 complex-test，P620 PID/显存采样已记录。
+- compound-cache 与 hover 截图等待改动后的最新六用例轮仍 **3 passed / 3 failed**。两项大 DWG pick 为 3.729/3.624s，其中 closest scan 3.464/3.347s；未达到 2s，未观测到 next-heartbeat/最终像素成功。maximized 测试已通过 grid/crosshair/zoom/pan，失败在恢复尺寸：请求 1773×953，实际 1280×800。gate 当前为 fmt/native/wasm/4 Python PASS，clippy 因测试中的 `redundant_pattern_matching` FAIL。更新证据、PNG 与 GPU pid 见验证文档最新一节；app PID `4052352` 仍打开 complex-test，P620 863 MiB。
+- 仅 compound local-bounds cache（无 leaf HashMap）及 Wayland configure 稳定等待之后的最新实机轮 **5 PASS / 1 FAIL**：两项 complex DWG 选择 1.384/1.397s，通过 2s 阈值，并记录 30 ticks、最大事件间隔 1.447/1.461s、CAD 帧 24/26、变化像素 42,884；maximized 用例所有阶段、7 PNG、resize/re-maximize 均完成，但外层测试结束断言 `left: 0,right: 8` 失败。fmt/clippy/native/wasm/i18n 均 PASS；architecture/fixture/workflow 沿用最近有效通过结果。全日志、family visits/culls、GPU pid 与截图见验证文档最新节；最终应用 PID `4092870` 打开 complex-test，P620 863 MiB。
+- 父级修复 phase completion 共享计数后，定向 P620 maximized 用例 PASS：grid 四边、crosshair、zoom/pan、restore `1088×680`、re-maximize `1853×1013` 与最终阶段断言全部通过，7 PNG 已保存。结合前述同一 compound-cache 轮次的五项有效 PASS，六项 acceptance 证据均通过；并未重跑整个六用例脚本。fmt/clippy app-linux scoped/native app check/i18n 均通过；旧 PID `4092870` 已精确核验并终止。最终 app PID `4134293` 已打开 complex-test，P620 863 MiB。详见验证文档最后一节。
+
 ## Android 文件功能：SAF 打开 / 另存 / New（P4，2026-10-11，本轮）
 
 用户要求：给 Android 宿主接线**真实文件打开（SAF `ACTION_OPEN_DOCUMENT`）**、**另存

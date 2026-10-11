@@ -3,12 +3,49 @@ use super::*;
 use cad_app::render_scene::{DecodedImageCache, OverlayInputs, SnapHint};
 use cad_app::{MeasurementPreview, SelectionSet};
 
+fn viewport_world_bounds(
+    snapshot: &ViewSnapshot,
+) -> Option<(cad_domain::Point3, cad_domain::Point3)> {
+    if snapshot.mode != ProjectionKind::TwoD
+        || !snapshot
+            .canvas_size
+            .iter()
+            .all(|v| v.is_finite() && *v > 0.0)
+    {
+        return None;
+    }
+    let params = snapshot.camera.camera2d_params().ok()?;
+    if !params.world_per_px.is_finite() || params.world_per_px <= 0.0 {
+        return None;
+    }
+    let half_width = snapshot.canvas_size[0] * params.world_per_px * 0.5;
+    let half_height = snapshot.canvas_size[1] * params.world_per_px * 0.5;
+    let bounds = (
+        cad_domain::Point3 {
+            x: params.center.x - half_width,
+            y: params.center.y - half_height,
+            z: params.center.z,
+        },
+        cad_domain::Point3 {
+            x: params.center.x + half_width,
+            y: params.center.y + half_height,
+            z: params.center.z,
+        },
+    );
+    [bounds.0.x, bounds.0.y, bounds.1.x, bounds.1.y]
+        .iter()
+        .all(|v| v.is_finite())
+        .then_some(bounds)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewSnapshot {
     pub document: DocumentId,
     pub space: SpaceSelection,
     pub camera: Camera,
     pub mode: ProjectionKind,
+    /// Logical canvas dimensions used by the active viewport camera.
+    pub canvas_size: [f64; 2],
 }
 impl Default for ViewSnapshot {
     fn default() -> Self {
@@ -17,6 +54,7 @@ impl Default for ViewSnapshot {
             space: SpaceSelection::Model,
             camera: Camera::top_view_2d(),
             mode: ProjectionKind::TwoD,
+            canvas_size: [1280.0, 800.0],
         }
     }
 }
@@ -152,6 +190,7 @@ impl CadView {
             space,
             camera: viewport.camera,
             mode: viewport.view_mode.kind(),
+            canvas_size: viewport.logical_size,
         }
     }
     pub fn camera(&self) -> BridgeCamera {
@@ -338,6 +377,7 @@ impl CadView {
                 draw_preview: self.draw_preview.borrow().clone(),
                 snap_hints_input: self.snap_hints.borrow().clone(),
                 visibility: *self.overlay_visibility.borrow(),
+                viewport_bounds: viewport_world_bounds(&snapshot),
             },
         }
     }
@@ -358,6 +398,7 @@ impl CadView {
                 draw_preview: view.draw_preview.borrow().clone(),
                 snap_hints_input: view.snap_hints.borrow().clone(),
                 visibility: *view.overlay_visibility.borrow(),
+                viewport_bounds: viewport_world_bounds(&snapshot),
             };
             #[cfg(target_arch = "wasm32")]
             let result = state.controller.prepare_shared_with_overlays_and_images(
@@ -591,6 +632,28 @@ fn replace_drawing_snapshot(
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+
+    #[test]
+    fn grid_world_bounds_follow_zoom_pan_and_canvas_aspect() {
+        let camera = cad_app::Camera::top_view_2d();
+        let mut snapshot = ViewSnapshot {
+            camera,
+            canvas_size: [1600.0, 400.0],
+            ..ViewSnapshot::default()
+        };
+        let initial = viewport_world_bounds(&snapshot).unwrap();
+        assert!((initial.1.x - initial.0.x) > (initial.1.y - initial.0.y));
+        snapshot.canvas_size = [400.0, 1600.0];
+        let tall = viewport_world_bounds(&snapshot).unwrap();
+        assert!((tall.1.y - tall.0.y) > (tall.1.x - tall.0.x));
+        snapshot.canvas_size = [400.0, 1600.0];
+        snapshot.camera.target.x += 10_000.0;
+        let panned = viewport_world_bounds(&snapshot).unwrap();
+        assert!(panned.0.x > initial.0.x);
+        snapshot.camera.projection = cad_app::Projection::Orthographic { scale: 0.001 };
+        let zoomed = viewport_world_bounds(&snapshot).unwrap();
+        assert!((zoomed.1.x - zoomed.0.x) < (panned.1.x - panned.0.x));
+    }
 
     #[test]
     fn drawing_commands_publish_new_snapshots_but_navigation_reuses_arc() {

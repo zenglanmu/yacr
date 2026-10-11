@@ -93,6 +93,120 @@ fn core_with(files: Rc<FakeFiles>, import_worker: bool) -> HostCore {
     )
 }
 
+fn p(x: f64, y: f64) -> cad_domain::Point3 {
+    cad_domain::Point3 { x, y, z: 0.0 }
+}
+
+fn select_entity(core: &HostCore, entity: cad_domain::EntityId) {
+    let document = core.controller.borrow().document_id;
+    core.controller
+        .borrow_mut()
+        .session
+        .selection
+        .replace([cad_app::selection::model_ref(document, entity)]);
+}
+
+fn line_endpoints(
+    core: &HostCore,
+    entity: cad_domain::EntityId,
+) -> (cad_domain::Point3, cad_domain::Point3) {
+    let drawing = core.controller.borrow().drawing().unwrap();
+    match &drawing.entity(entity).unwrap().geometry {
+        cad_domain::SemanticGeometry::Line { start, end } => (*start, *end),
+        other => panic!("expected LINE geometry, got {other:?}"),
+    }
+}
+
+fn add_two_lines(core: &HostCore) -> (cad_domain::EntityId, cad_domain::EntityId) {
+    let mut controller = core.controller.borrow_mut();
+    let first = controller.create_line(p(0.0, 0.0), p(1.0, 0.0)).unwrap();
+    let second = controller.create_line(p(0.0, 10.0), p(1.0, 10.0)).unwrap();
+    (
+        cad_domain::EntityId(first.objects[0].0),
+        cad_domain::EntityId(second.objects[0].0),
+    )
+}
+
+fn run_controller_command(core: &HostCore, id: CommandId, payload: CommandPayload) {
+    let mut controller = core.controller.borrow_mut();
+    let document = controller.document_id;
+    let viewport = controller.viewport_id;
+    controller
+        .execute(Command {
+            schema_version: 1,
+            id,
+            document,
+            viewport,
+            payload,
+        })
+        .unwrap();
+}
+
+#[test]
+fn move_uses_tool_start_selection_and_history_round_trips() {
+    use cad_ui_slint::DrawCommandSink;
+
+    let core = core_with(Rc::new(FakeFiles::default()), false);
+    let (a, b) = add_two_lines(&core);
+    select_entity(&core, a);
+    let original_a = line_endpoints(&core, a);
+    let original_b = line_endpoints(&core, b);
+
+    let mut sink = core.clone();
+    sink.begin(cad_app::DrawToolKind::Move);
+    select_entity(&core, b);
+    let command = core.move_command(p(5.0, 2.0)).unwrap();
+    core.controller.borrow_mut().execute(command).unwrap();
+
+    assert_eq!(line_endpoints(&core, a), (p(5.0, 2.0), p(6.0, 2.0)));
+    assert_eq!(line_endpoints(&core, b), original_b);
+
+    run_controller_command(&core, CommandId::Undo, CommandPayload::None);
+    assert_eq!(line_endpoints(&core, a), original_a);
+    assert_eq!(line_endpoints(&core, b), original_b);
+    run_controller_command(&core, CommandId::Redo, CommandPayload::None);
+    assert_eq!(line_endpoints(&core, a), (p(5.0, 2.0), p(6.0, 2.0)));
+    assert_eq!(line_endpoints(&core, b), original_b);
+}
+
+#[test]
+fn move_selection_snapshot_resets_on_cancel_and_tool_restart() {
+    use cad_ui_slint::DrawCommandSink;
+
+    let core = core_with(Rc::new(FakeFiles::default()), false);
+    let (a, b) = add_two_lines(&core);
+    let original_a = line_endpoints(&core, a);
+    let original_b = line_endpoints(&core, b);
+    let mut sink = core.clone();
+
+    select_entity(&core, a);
+    sink.begin(cad_app::DrawToolKind::Move);
+    select_entity(&core, b);
+    sink.begin(cad_app::DrawToolKind::Move); // restarting captures the new selection
+    let command = core.move_command(p(0.0, 3.0)).unwrap();
+    core.controller.borrow_mut().execute(command).unwrap();
+    assert_eq!(line_endpoints(&core, a), original_a);
+    assert_eq!(line_endpoints(&core, b), (p(0.0, 13.0), p(1.0, 13.0)));
+
+    run_controller_command(&core, CommandId::Undo, CommandPayload::None);
+    assert_eq!(line_endpoints(&core, b), original_b);
+    select_entity(&core, a);
+    sink.begin(cad_app::DrawToolKind::Move);
+    sink.cancel();
+    assert!(matches!(
+        sink.commit(cad_app::DrawIntent::Move { delta: p(1.0, 0.0) }),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert_eq!(line_endpoints(&core, a), original_a);
+
+    select_entity(&core, b);
+    sink.begin(cad_app::DrawToolKind::Move);
+    let command = core.move_command(p(1.0, 0.0)).unwrap();
+    core.controller.borrow_mut().execute(command).unwrap();
+    assert_eq!(line_endpoints(&core, a), original_a);
+    assert_eq!(line_endpoints(&core, b), (p(1.0, 10.0), p(2.0, 10.0)));
+}
+
 /// A fake platform that synthesizes the save target synchronously, the way the
 /// browser host does (no native dialog).
 #[derive(Default)]

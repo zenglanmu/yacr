@@ -92,6 +92,8 @@ impl HostCore {
             ),
             &layouts.iter().map(|r| r.id).collect::<Vec<_>>(),
         )?;
+        let profile_pick = pick_profile_enabled();
+        let diagnostics_started = profile_pick.then(std::time::Instant::now);
         let mut diagnostics = cad_diagnostics::DiagnosticsModel::new();
         if let Some(report) = &c.last_import_report {
             for diagnostic in &report.diagnostics {
@@ -128,6 +130,12 @@ impl HostCore {
                     )],
                 ));
             }
+        }
+        if let Some(started) = diagnostics_started {
+            eprintln!(
+                "YACR_PROFILE_PICK push_diagnostics_model elapsed_ms={:.3}",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
         }
         handle.set_diagnostics_state(&DiagnosticsPanelState::from_model(
             &diagnostics,

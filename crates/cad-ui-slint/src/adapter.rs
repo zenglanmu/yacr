@@ -999,11 +999,15 @@ impl UiAdapter {
         {
             // Cancel never commits; it clears the capture and the preview.
             let tool = draw_tool.clone();
+            let sink = draw_command_sink.clone();
             let preview_sink = draw_preview_sink.clone();
             let messages = messages_slot.clone();
             let report = ui_weak.clone();
             ui.on_cancel_draw_requested(move || {
                 *tool.borrow_mut() = None;
+                if let Some(sink) = sink.borrow_mut().as_mut() {
+                    sink.cancel();
+                }
                 publish_draw(&report, &tool, &preview_sink);
                 if let Some(ui) = report.upgrade() {
                     ui.set_status_label(messages.borrow().text("draw.status.idle", &[]).into());

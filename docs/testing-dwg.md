@@ -19,6 +19,29 @@ GPU，无 GPU 才用 SwiftShader 软件路径。软件渲染通过不等于 WebG
 `Partial` 允许其他内容继续查看，但不能报告整图完整。记录缺项而不是改为空成功。
 已执行的 canteen 回归及缺陷证据见 [validation-dwg.md](validation-dwg.md)。
 
+### 真机回归批量入口（`scripts/run-real-gpu-e2e.sh`）
+
+真实机器桌面回归的**唯一入口**是 `scripts/run-real-gpu-e2e.sh`（真实 winit 窗口 + 硬件
+Vulkan，绝不设置 `VK_ICD_FILENAMES`，并清除继承的软件 ICD）。它把 `app-linux`
+`host::validation` 下 6 个 `#[ignore]` 用例各自放进**独立进程**串行执行：
+
+```bash
+YACR_TEST_DWG=/abs/sample.dwg bash scripts/run-real-gpu-e2e.sh
+bash scripts/run-real-gpu-e2e.sh --list   # 只列出用例与所需环境变量
+```
+
+- 必须为每个用例单独起一个 `cargo test ... --ignored --test-threads=1` 进程：其中两个用例
+  打开真实 winit 窗口，而 winit/Slint **每个进程只允许一个事件循环**；若在同一进程里批量
+  执行，第二个窗口用例会以 `Error initializing winit event loop: EventLoop can't be
+  recreated` 失败。该失败是运行方式问题，不是产品缺陷。
+- 每轮证据目录必须全新：脚本生成 UTC 时间戳根目录
+  `${YACR_REAL_E2E_ROOT:-/tmp/opencode/yacr-real-gpu-e2e}/<UTC-YYYYmmdd-HHMMSS>/`，并为每个
+  用例传入一个**尚未创建**的子目录（`YACR_DESKTOP_EVIDENCE` / `YACR_REAL_E2E_OUTPUT`）。
+  桌面用例以 `create_dir` 拒绝已存在的目录，复用旧目录会 panic。
+- 需要 `YACR_TEST_DWG`（真实 `.dwg` 绝对路径）；未设置时脚本明确报错并非零退出。
+- 某个用例失败**不会**跳过其余用例；脚本最后打印逐用例 PASS/FAIL 汇总表，任一项失败即非零
+  退出，并保留每个用例日志尾部。
+
 ## 2. 样本与资源管理
 
 默认外部语料目录：`~/sources/cad-test-files/`。当前批测脚本只扫描目录第一层的

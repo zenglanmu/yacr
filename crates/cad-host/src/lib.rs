@@ -31,6 +31,11 @@ use cad_platform::{
 };
 use cad_ui_slint::{CadView, LayoutSwitchSink, UiCommandSink, UiHandle};
 
+pub(crate) fn pick_profile_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("YACR_PROFILE_PICK").is_some())
+}
+
 mod fonts;
 mod input;
 mod open;
@@ -191,6 +196,9 @@ pub struct HostCore {
     pub(crate) last_layout_key: Rc<RefCell<Option<(u32, u32, u64)>>>,
     /// Per-instance pointer navigation state.
     pub(crate) navigation: Rc<NavInner>,
+    /// Entity refs captured when a MOVE tool starts; selection may change while
+    /// its points are being captured.
+    pub(crate) move_selection: Rc<RefCell<Option<Vec<cad_domain::SelectionRef>>>>,
     /// Diagnostics from reading the config / preference files at startup.
     pub(crate) startup_diagnostics: Rc<RefCell<Vec<String>>>,
 }
@@ -232,6 +240,7 @@ impl HostCore {
             last_image_report: Rc::new(RefCell::new(None)),
             last_layout_key: Rc::new(RefCell::new(None)),
             navigation: Rc::new(NavInner::default()),
+            move_selection: Rc::new(RefCell::new(None)),
             startup_diagnostics: Rc::new(RefCell::new(Vec::new())),
         })
     }
@@ -351,11 +360,21 @@ impl HostCore {
 
     /// Run one command, push state and grade the status line.
     pub fn execute(&self, command: Command) -> CadResult<()> {
-        self.metrics()?;
+        let profile = command.id == CommandId::Select && pick_profile_enabled();
+        let started = profile.then(std::time::Instant::now);
+        let metrics_result = self.metrics();
+        if let Some(started) = started {
+            eprintln!(
+                "YACR_PROFILE_PICK execute_metrics elapsed_ms={:.3}",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        metrics_result?;
         // Plot and Save As own their own success/failure status
         // (plot.exported / save.exported / ...); the generic completed/failed
         // text must not overwrite it.
         let owns_status = policy::owns_status(command.id);
+        let started = profile.then(std::time::Instant::now);
         let result: CadResult<Option<CommandOutcome>> = match command.id {
             CommandId::CancelLoading => {
                 self.cancel_loading();
@@ -370,10 +389,24 @@ impl HostCore {
             )),
             _ => self.controller.borrow_mut().execute(command).map(Some),
         };
+        if let Some(started) = started {
+            eprintln!(
+                "YACR_PROFILE_PICK execute_controller elapsed_ms={:.3}",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
         // The push is best-effort relative to the command result: a failed push
         // must never mask the command's own error (it is surfaced only when the
         // command itself succeeded).
+        let started = profile.then(std::time::Instant::now);
         let push_result = self.push();
+        if let Some(started) = started {
+            eprintln!(
+                "YACR_PROFILE_PICK execute_push elapsed_ms={:.3}",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        let started = profile.then(std::time::Instant::now);
         // An open cancel/failure graded within this gesture owns the status; the
         // generic "completed" must not overwrite it.
         let open_graded = self.open_status_graded.replace(false);
@@ -397,6 +430,12 @@ impl HostCore {
                 _ => self.message("command.completed", &[]),
             };
             self.set_status(status)?;
+        }
+        if let Some(started) = started {
+            eprintln!(
+                "YACR_PROFILE_PICK execute_status elapsed_ms={:.3}",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
         }
         match result {
             Ok(_) => push_result,

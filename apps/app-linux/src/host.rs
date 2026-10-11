@@ -214,6 +214,9 @@ impl LinuxApp {
         adapter.component().set_can_trim(false);
         adapter.component().set_can_switch_backend(false);
         adapter.fit_window_to_logical(options.size, 1.0);
+        if !options.headless {
+            adapter.window().set_maximized(true);
+        }
         runtime.set_handle(adapter.handle());
         // Read the host config and user preference before the first state push;
         // a malformed file is reported and never aborts startup.
@@ -278,10 +281,11 @@ impl LinuxApp {
             std::time::Duration::from_millis(50),
             move || {
                 if let Err(error) = rt.tick() {
-                    if let Some(handle) = rt.handle.borrow().as_ref() {
-                        let _ = handle.set_status(
-                            rt.message("linux.failed", &[("error", &error.to_string())]),
-                        );
+                    if let Some(diagnostic) = timer_error_diagnostic(&error) {
+                        if let Some(handle) = rt.handle.borrow().as_ref() {
+                            let _ = handle
+                                .set_status(rt.message("linux.failed", &[("error", &diagnostic)]));
+                        }
                     }
                 }
             },
@@ -321,6 +325,13 @@ impl LinuxApp {
     }
 }
 
+fn timer_error_diagnostic(error: &CadError) -> Option<String> {
+    match error {
+        CadError::Cancelled => None,
+        other => Some(other.to_string()),
+    }
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> CadResult<()> {
     use std::io::Write;
     let temporary = path.with_extension(format!("yacr-{}.tmp", std::process::id()));
@@ -343,6 +354,21 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> CadResult<()> {
 #[cfg(test)]
 mod tests {
     use slint::ComponentHandle;
+
+    #[test]
+    fn timer_ignores_cancellation_but_reports_real_errors() {
+        assert_eq!(
+            super::timer_error_diagnostic(&cad_domain::CadError::Cancelled),
+            None,
+            "teardown cancellation is not a user-facing failure"
+        );
+        let failure = cad_domain::CadError::InvalidInput("metrics failed".into());
+        assert_eq!(
+            super::timer_error_diagnostic(&failure),
+            Some("InvalidInput(\"metrics failed\")".into()),
+            "non-cancellation timer errors retain their diagnostic"
+        );
+    }
 
     fn world_per_px(app: &crate::LinuxApp) -> f64 {
         let c = app.runtime.controller.borrow();
