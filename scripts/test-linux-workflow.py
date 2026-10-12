@@ -49,6 +49,16 @@ class LinuxWorkflowContracts(unittest.TestCase):
         self.assertNotIn("cargo test", block)
         self.assertNotIn("--release", block)
 
+    def test_core_gate_must_check_all_host_workspace_members(self):
+        text = (ROOT / ".github/workflows/core.yml").read_text()
+        old_command = (
+            "cargo check --workspace --exclude app-android --exclude app-web "
+            "--all-targets --locked"
+        )
+        mutated = text.replace("cargo check --workspace --all-targets --locked", old_command)
+        self.assertNotEqual(mutated, text)
+        self.assertTrue(self.check_text(mutated))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -103,11 +103,12 @@ Linux 离屏与 release 验证保留为明确请求时运行的可选工具，�
 1. `cargo fmt --all -- --check`
 2. `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`
 3. 架构、fixture、workflow 静态检查及 Python workflow 变异契约。
-4. `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`
+4. `cargo check --workspace --all-targets --locked`
 
-Linux 宿主安装 fontconfig/freetype 开发头，编译包含 `cad-ui-slint` 与 app-linux。
-Rust 测试代码通过 `--all-targets` 编译，但不执行测试。该 job 不设 `continue-on-error`，
-失败必须红灯。
+Linux 宿主安装 fontconfig/freetype 开发头，默认 host workspace 检查覆盖所有 workspace
+成员，包括 `app-android` 与 `app-web` 的 host target。它不代表 Android/WASM 原生目标编译，
+相应能力由独立门禁验证；更不等于目标平台运行验收。Rust 测试代码通过 `--all-targets`
+编译，但不执行测试。该 job 不设 `continue-on-error`，失败必须红灯。
 
 ### `linux-release`（发布包，按需）
 

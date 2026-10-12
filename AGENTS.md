@@ -71,9 +71,13 @@ python3 scripts/check-architecture.py
 python3 scripts/check-fixture-manifest.py
 python3 scripts/check-workflows.py
 python3 scripts/check-i18n.py
-cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked
+cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 workspace，含 UI/宿主
 ```
+
+默认 Linux host workspace 编译包含 `app-android` 与 `app-web` 包的 host target；这不替代
+下方独立的 WASM 与 Android 原生目标编译门禁，也不代表这些平台的运行验收。clippy 仍按
+既有配置排除 `app-android` 与 `app-web`。
 
 Windows：CI `windows-check`（`windows-latest` 原生 MSVC 编译）与按需 `windows-release`
 （MSVC release + 全量字体 zip）；本机可用 `scripts/package-windows-release.sh`

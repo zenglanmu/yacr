@@ -54,7 +54,7 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "cargo clippy",
         "check-architecture.py",
         "check-fixture-manifest.py",
-        "cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked",
+        "cargo check --workspace --all-targets --locked",
     ),
     "windows-check": (
         "cargo check -p app-windows --all-targets --locked",

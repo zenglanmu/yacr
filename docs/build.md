@@ -10,9 +10,12 @@
 
 ```bash
 cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
-cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked
+cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 ```
+
+默认 Linux host 检查包含 `app-android` 与 `app-web` 的 host target，但不是 Android/WASM
+目标编译或运行验收；这些平台分别由下方独立目标门禁覆盖。clippy 继续使用现有排除项。
 
 静态门禁完整列表见 `AGENTS.md`。Linux 离屏/release 可选运行入口和限制见 `docs/linux-app.md`。
 完整测试在明确要求时单独执行，未运行必须标注 NOT RUN。

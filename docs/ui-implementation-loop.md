@@ -1,5 +1,11 @@
 # UI 功能实现迭代（2026-10-04）
 
+## 当前默认编译门禁
+
+后续实现按当前 workspace host 门禁执行 `cargo check --workspace --all-targets --locked`，
+包含 Android 与 Web 包的 host target；这不替代 Android/WASM 独立目标编译，也不证明平台运行。
+下文轮次中记录的命令和耗时属于当时实际执行证据，保留原样，不作为当前门禁命令。
+
 ## 第五轮：固定 AutoCAD 默认键位映射
 
 用户要求：把一套固定（不可重绑定）的 AutoCAD 默认键位接到**已存在**的命令/开关上；

@@ -1,5 +1,16 @@
 # 后续 agent 接手入口
 
+## 默认 workspace host 编译门禁（2026-10-12）
+
+- 默认 `cargo check` 现统一为 `cargo check --workspace --all-targets --locked`，覆盖所有
+  workspace 成员的 host target；clippy 排除项保持不变。
+- host 包含 `app-android` / `app-web` 不代表 Android/WASM 原生目标编译或平台运行验收；
+  独立目标门禁保持原样。此前 validation 与逐轮实现记录中的命令均为当时历史证据，不改写。
+- 本轮 `python3 scripts/check-workflows.py`、`python3 scripts/test-linux-workflow.py`（6 项）、
+  `python3 scripts/test-web-deploy-workflow.py`（4 项）、默认命令排除项变异契约（1 项）、
+  `git diff --check` 与 `cargo check --workspace --all-targets --locked` 均通过。Cargo check
+  仅为 host debug 编译，不是 Android/WASM 目标或运行验收。
+
 ## SFNT 填充安全与 mesh edge overlay 阻塞修订（2026-10-12）
 
 - 新增 `DisplayPrimitive::MeshWithoutEdgeOverlay` 契约。Scene 为其保留三角索引但不构造边 overlay
