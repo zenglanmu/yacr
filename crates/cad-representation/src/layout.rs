@@ -1503,22 +1503,38 @@ pub fn build_paper_space(
                             });
                         }
                     }
-                    DisplayPrimitive::Mesh(mesh) => match clip_mesh_to_rect(&mesh, center, half) {
-                        Ok(Some(clipped)) => {
-                            out.fragments.push(fragment_with(
-                                fragment,
-                                DisplayPrimitive::Mesh(std::sync::Arc::new(clipped)),
-                            ));
+                    DisplayPrimitive::Mesh(mesh)
+                    | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+                        let overlay = matches!(&fragment.primitive, DisplayPrimitive::Mesh(_));
+                        match clip_mesh_to_rect(&mesh, center, half) {
+                            Ok(Some(clipped)) => {
+                                out.fragments.push(fragment_with(
+                                    fragment,
+                                    if overlay {
+                                        DisplayPrimitive::Mesh(std::sync::Arc::new(clipped))
+                                    } else {
+                                        DisplayPrimitive::MeshWithoutEdgeOverlay(
+                                            std::sync::Arc::new(clipped),
+                                        )
+                                    },
+                                ));
+                            }
+                            // Every triangle lies outside the window: an exact
+                            // omission, not a degradation.
+                            Ok(None) => {}
+                            Err(refusal) => {
+                                report_clip_degradation(&mut out, &refusal, layout_id, index);
+                                out.fragments.push(fragment_with(
+                                    fragment,
+                                    if overlay {
+                                        DisplayPrimitive::Mesh(mesh)
+                                    } else {
+                                        DisplayPrimitive::MeshWithoutEdgeOverlay(mesh)
+                                    },
+                                ));
+                            }
                         }
-                        // Every triangle lies outside the window: an exact
-                        // omission, not a degradation.
-                        Ok(None) => {}
-                        Err(refusal) => {
-                            report_clip_degradation(&mut out, &refusal, layout_id, index);
-                            out.fragments
-                                .push(fragment_with(fragment, DisplayPrimitive::Mesh(mesh)));
-                        }
-                    },
+                    }
                     DisplayPrimitive::Text {
                         text,
                         origin,
@@ -2580,14 +2596,15 @@ mod tests {
         let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
         // Exact per-triangle clipping is not a degradation.
         assert_eq!(rep.completeness, Completeness::Complete);
-        let mesh = rep
-            .fragments
-            .iter()
-            .find_map(|f| match &f.primitive {
-                DisplayPrimitive::Mesh(mesh) => Some(mesh.clone()),
-                _ => None,
-            })
-            .expect("clipped mesh fragment");
+        let mesh =
+            rep.fragments
+                .iter()
+                .find_map(|f| match &f.primitive {
+                    DisplayPrimitive::Mesh(mesh)
+                    | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => Some(mesh.clone()),
+                    _ => None,
+                })
+                .expect("clipped mesh fragment");
         assert!(!mesh.triangles.is_empty());
         for v in &mesh.vertices {
             // Paper window is x in [0,100], y in [0,50].

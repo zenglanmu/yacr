@@ -200,7 +200,8 @@ pub(crate) fn run_build_representation(
                             lines += 1;
                             vertices += points.len();
                         }
-                        cad_representation::DisplayPrimitive::Mesh(mesh) => {
+                        cad_representation::DisplayPrimitive::Mesh(mesh)
+                        | cad_representation::DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
                             meshes += 1;
                             vertices += mesh.vertices.len();
                         }

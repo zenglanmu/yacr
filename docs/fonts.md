@@ -83,13 +83,22 @@ Android / Linux 发布包都只是传不同的 `DEST`，本身不含任何平台
 
 ## 字形渲染（已实现：sfnt + SHX）
 
-`cad-representation` 的 `FontEngine` 把文本转成世界坐标折线，`cad-scene` 按普通线段绘制：
+`cad-representation` 的 `FontEngine` 把文本转成世界坐标表示，`cad-scene` 按线/网格批绘：
 
 - **SFNT**：TTF/OTF 原始 sfnt，以及 **WOFF1**（`woff_to_sfnt` 用 flate2 解压重建 sfnt）；
-  拒收 **WOFF2**（记为 `Unsupported`，可被回退取代）。注册时校验可解析，坏字节报错。
+  字形轮廓按 glyph 整组处理。由于 SFNT 采用 nonzero winding，而现有
+  `cad-geometry::fill_rings` 是 even-odd，填充前会验证轮廓简单、互不相交/重叠，且严格嵌套时
+  绕向逐层交替；只有证明两种规则等价才调用填充器。成功时输出禁用边 overlay 的 mesh，字腔
+  保留且不暴露三角内部边。无法证明等价或填充器失败时保留边界线、返回 Partial 并附
+  `text.sfnt_fill_partial` 诊断，不静默错误填洞。纯 `outline()` API 仍返回 SFNT 全部轮廓；空白
+  glyph/MTEXT（包括 `\P`、`\~` 和只有空格的格式 run）合法且不产生伪缺图报告。实际缺字会附
+  `text.glyph_missing` 诊断。拒收
+  **WOFF2**（记为 `Unsupported`，可被回退取代）。注册时校验可解析，坏字节报错。
 - **SHX**：移植自 MIT 的 `@mlightcad/shx-parser`，支持编译 shape 字体的三种内容布局
   `shapes` / `unifont` / `bigfont`（含八分圆/分数/凸度圆弧、子形状、缩放与进退笔），
-  按 `encoding`（gbk/shift-jis/…）把 Unicode 映射回字体码。
+  按 `encoding`（gbk/shift-jis/…）把 Unicode 映射回字体码；继续输出 SHX 线稿，不尝试面填充。
+- **网格边 overlay**：一般网格继续使用现有边 overlay；SFNT glyph mesh 显式关闭 overlay，scene 不生成
+  边数据，renderer 不生成边索引 buffer/不提交 wireframe draw。该优化不改变 mesh 三角 fill draw。
 - **回退链**：`FontEngine::set_fallback(keys)`。图纸引用的字体未注册、或注册了但不可解码
   （如 WOFF2/不支持的 SHX 类型）时，按顺序改用可用的回退字体，**不会静默丢弃文本**；
   全部不可用才报告错误。`resolve_face` 可查询实际使用的字体。
@@ -225,6 +234,14 @@ TEXT/MTEXT）在可执行文件同级的 `fonts/` 不可见时 `build-representa
    会被引擎跳过后再试 `DejaVu Sans`）；不同桌面得到不同的默认字形，属预期但不是确定值。
    浏览器端无法读取系统字体字节，Web 的「默认」是目录/CDN 里的轮廓面，不等价于浏览器
    内建字体。
+5. **CJK 面字形验收**：SFNT 合成契约以仓库已授权 `fonts/osifont.ttf` 验证带洞拉丁字形；本地
+    Android 资源目录中的 CJK 字体未提交、未作为 fixture。Linux 专项真 GPU 测试要求显式提供
+    `YACR_CJK_FONT`，其截图/硬件证据必须单独执行记录；契约测试不等于 CJK 字体覆盖、真实 GPU
+    或真实图纸验收。当前保守判定会拒绝自交、相交/重叠 contour，或嵌套绕向不交替的合法/特殊
+    SFNT glyph；此时明确退化为边界线并报告 Partial，尚未实现完整 nonzero winding tessellator。
+    最终 Linux 真 GPU 专项已用 Quadro P620/Vulkan、Noto TTC 和合成 DXF 执行；observer 确认截图中
+    中文字形实心留洞且无可见三角边。证据目录：`/tmp/opencode/yacr-cjk-final-20261012-114326/`。
+    这是合成图纸的真 GPU 视觉证据，不代表真实 DWG 或更广泛的字体/vendor/平台兼容验收。
 
 含文本的图纸在导入报告里不会被报告为 `Complete`（导入阶段不知道宿主是否有字体）；
 在 `build-representation` 注入字体后文本即可绘。

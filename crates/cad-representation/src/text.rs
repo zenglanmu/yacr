@@ -1,8 +1,8 @@
 //! Text outlining: TrueType/OpenType and compiled SHX shape fonts (spec §3.2, §7.1).
 //!
 //! Hosts supply font bytes (raw sfnt, WOFF1, or SHX); this module turns a text
-//! run into world-space polylines so the scene can batch text like any other
-//! line geometry. A fallback chain is applied when a drawing's referenced font
+//! run into world-space contours and filled SFNT glyph meshes. SHX remains
+//! linework. A fallback chain is applied when a drawing's referenced font
 //! is not registered or cannot be parsed, so text is not silently dropped.
 //!
 //! ## MTEXT formatting
@@ -14,10 +14,10 @@
 //! (`\C` ACI / `\c` true color), stacked fractions (`\S`), non-breaking space
 //! (`\~`), special characters (`%%d`/`%%p`/`%%c`/`%%%%`), Unicode escapes
 //! (`\U+XXXX`) and literal escapes. [`FontEngine::shape`] lays the runs out
-//! honouring per-run font/height/width/oblique and returns the polylines, the
-//! run list and a list of honest [`TextFormatIssue`]s for anything that could
+//! honouring per-run font/height/width/oblique and returns filled faces, outline
+//! contours, the run list and honest [`TextFormatIssue`]s for anything that could
 //! only be approximated. [`FontEngine::outline`] stays a thin wrapper returning
-//! only the polylines.
+//! all transformed glyph contours, including the contours used for SFNT fills.
 //!
 //! ## Known limitations (explicit, not silently approximated)
 //!
@@ -206,8 +206,14 @@ pub struct ParsedText {
 /// it and an honest report of anything approximated.
 #[derive(Debug, Clone)]
 pub struct ShapedText {
-    /// World-space polylines, one per glyph contour.
+    /// World-space line geometry: SHX outlines and SFNT fill-failure fallback.
     pub polylines: Vec<Vec<Point3>>,
+    /// World-space SFNT glyph contours, retained for the public outline API.
+    pub outlines: Vec<Vec<Point3>>,
+    /// Filled SFNT glyph faces. SHX fonts remain outline-only.
+    pub meshes: Vec<cad_domain::Mesh>,
+    /// Whether parsed text has at least one non-whitespace drawable character.
+    pub has_renderable_content: bool,
     /// The flattened styled runs in reading order, for hosts that apply color.
     pub runs: Vec<TextRun>,
     /// Approximations/unsupported formatting encountered while parsing/shaping.
@@ -422,10 +428,14 @@ impl FontEngine {
         // Shape each paragraph. A run that names an unregistered font is
         // reported, not silently dropped; the rest of the text still renders.
         let mut missing_font: Option<String> = None;
+        let mut missing_glyphs = Vec::new();
         let lines = layout_parsed(&parsed, size, |run, text| {
             let key = run.font.as_deref().unwrap_or(font_key);
             match self.measure_run(key, text, run.effective_height(size)) {
-                Some(shaped) => Some(shaped),
+                Some(shaped) => {
+                    missing_glyphs.extend(shaped.missing_glyphs);
+                    Some(shaped.geometry)
+                }
                 None => {
                     missing_font.get_or_insert_with(|| key.to_string());
                     None
@@ -437,6 +447,17 @@ impl FontEngine {
             issues.push(TextFormatIssue::new(
                 text_issue::FONT_UNAVAILABLE,
                 format!("run font '{key}' is not registered and no fallback is available"),
+            ));
+        }
+        missing_glyphs.sort_unstable();
+        missing_glyphs.dedup();
+        if !missing_glyphs.is_empty() {
+            issues.push(TextFormatIssue::new(
+                "text.glyph_missing",
+                format!(
+                    "no registered font contains glyphs: {}",
+                    missing_glyphs.iter().collect::<String>()
+                ),
             ));
         }
 
@@ -461,8 +482,28 @@ impl FontEngine {
             ));
         }
 
+        let has_renderable_content = runs.iter().any(|run| {
+            run.rendered_text()
+                .chars()
+                .any(|character| !character.is_whitespace())
+        });
+        let FinalizedText {
+            polylines,
+            outlines,
+            meshes,
+            fill_failures,
+        } = finalize_text(lines, size, origin, rotation, h_align, v_align);
+        for failure in fill_failures {
+            issues.push(TextFormatIssue::new(
+                "text.sfnt_fill_partial",
+                format!("SFNT glyph face was not filled: {failure}"),
+            ));
+        }
         Ok(ShapedText {
-            polylines: finalize_lines(lines, size, origin, rotation, h_align, v_align),
+            polylines,
+            outlines,
+            meshes,
+            has_renderable_content,
             runs,
             issues: dedupe_issues(issues),
         })
@@ -470,7 +511,7 @@ impl FontEngine {
 
     /// Outline `text` into world-space polylines at `origin`.
     ///
-    /// A thin wrapper over [`shape`](Self::shape) that drops the run list and
+    /// A thin wrapper over [`shape`](Self::shape) that drops fills, runs and
     /// diagnostics. One polyline per glyph contour; paragraphs in `text` (via
     /// `\P`, a literal `\n` or `^J`) become consecutive lines. `height` is the
     /// base em height in world units and `rotation` is radians about `origin`.
@@ -492,7 +533,7 @@ impl FontEngine {
     ) -> CadResult<Vec<Vec<Point3>>> {
         Ok(self
             .shape(font_key, text, origin, height, rotation, h_align, v_align)?
-            .polylines)
+            .outlines)
     }
 
     /// Whether `font_key` or the fallback chain holds any decodable face.
@@ -535,12 +576,7 @@ impl FontEngine {
     /// Width factor and oblique are applied by [`layout_parsed`], not here, so
     /// the per-glyph fallback/kerning logic stays independent of the MTEXT
     /// style overrides. `None` means no usable face was available.
-    fn measure_run(
-        &self,
-        font_key: &str,
-        text: &str,
-        size: f64,
-    ) -> Option<(Vec<Vec<[f64; 2]>>, f64)> {
+    fn measure_run(&self, font_key: &str, text: &str, size: f64) -> Option<MeasuredRun> {
         let chain = self.chain(font_key);
         if chain.is_empty() {
             return None;
@@ -590,6 +626,7 @@ impl FontEngine {
         // kerning is only applied within a single face (cross-face pairs are
         // meaningless).
         let mut previous: Option<(usize, ttf_parser::GlyphId)> = None;
+        let mut missing_glyphs = Vec::new();
         let lines = layout_glyphs(text, |ch, pen, first| {
             if first {
                 previous = None;
@@ -620,7 +657,14 @@ impl FontEngine {
                         if face.outline_glyph(glyph, &mut builder).is_some() {
                             builder.flush();
                         }
-                        return Some((std::mem::take(&mut builder.polys), advance + shift));
+                        let polys = std::mem::take(&mut builder.polys);
+                        let mut marked = Vec::with_capacity(polys.len() + 2);
+                        if !polys.is_empty() {
+                            marked.push(Vec::new());
+                            marked.extend(polys);
+                            marked.push(Vec::new());
+                        }
+                        return Some((marked, advance + shift));
                     }
                     ResolvedFace::Shx(font) => {
                         if let Some(glyph) = font.glyph(ch, size) {
@@ -639,6 +683,7 @@ impl FontEngine {
                     }
                 }
             }
+            missing_glyphs.push(ch);
             None
         });
 
@@ -648,7 +693,10 @@ impl FontEngine {
             polys.extend(line_polys);
             advance += width;
         }
-        Some((polys, advance))
+        Some(MeasuredRun {
+            geometry: (polys, advance),
+            missing_glyphs,
+        })
     }
 }
 
@@ -926,6 +974,11 @@ struct ShapedLine {
     height: f64,
 }
 
+struct MeasuredRun {
+    geometry: (Vec<Vec<[f64; 2]>>, f64),
+    missing_glyphs: Vec<char>,
+}
+
 /// Lay out parsed paragraphs run by run, applying per-run width factor and
 /// oblique shear.
 ///
@@ -995,6 +1048,7 @@ where
 /// flush against its anchor); vertical placement uses the accumulated line
 /// heights with [`LINE_SPACING`]. Vertical alignment of a multi-line block is a
 /// documented approximation (see the module docs).
+#[cfg(test)]
 fn finalize_lines(
     lines: Vec<ShapedLine>,
     size: f64,
@@ -1003,6 +1057,36 @@ fn finalize_lines(
     h_align: TextAlignH,
     v_align: TextAlignV,
 ) -> Vec<Vec<Point3>> {
+    finalize_text(lines, size, origin, rotation, h_align, v_align).outlines
+}
+
+struct FinalizedText {
+    polylines: Vec<Vec<Point3>>,
+    outlines: Vec<Vec<Point3>>,
+    meshes: Vec<cad_domain::Mesh>,
+    fill_failures: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+struct GlyphFillTransform {
+    dx: f64,
+    line_y: f64,
+    origin: Point3,
+    sin: f64,
+    cos: f64,
+}
+
+/// Finalize text geometry while keeping each marked SFNT glyph's contours
+/// together for filling. Empty polylines are internal glyph markers; SHX
+/// contours are unmarked and stay as ordinary line geometry.
+fn finalize_text(
+    lines: Vec<ShapedLine>,
+    size: f64,
+    origin: Point3,
+    rotation: f64,
+    h_align: TextAlignH,
+    v_align: TextAlignV,
+) -> FinalizedText {
     let vertical_shift = match v_align {
         TextAlignV::Baseline => 0.0,
         TextAlignV::Bottom => 0.2 * size,
@@ -1010,8 +1094,11 @@ fn finalize_lines(
         TextAlignV::Top => size,
     };
     let (sin, cos) = rotation.sin_cos();
-    let mut out = Vec::new();
-    let mut baseline = 0.0f64;
+    let mut polylines = Vec::new();
+    let mut outlines = Vec::new();
+    let mut meshes = Vec::new();
+    let mut failures = Vec::new();
+    let mut baseline = 0.0;
     for line in lines {
         let dx = match h_align {
             TextAlignH::Left => 0.0,
@@ -1019,12 +1106,8 @@ fn finalize_lines(
             TextAlignH::Right => -line.width,
         };
         let line_y = baseline + vertical_shift;
-        for poly in line.polys {
-            if poly.len() < 2 {
-                continue;
-            }
-            let points: Vec<Point3> = poly
-                .iter()
+        let map = |poly: &[[f64; 2]]| -> Vec<Point3> {
+            poly.iter()
                 .map(|p| {
                     let lx = p[0] + dx;
                     let ly = p[1] + line_y;
@@ -1034,12 +1117,239 @@ fn finalize_lines(
                         z: origin.z,
                     }
                 })
-                .collect();
-            out.push(points);
+                .collect()
+        };
+        let fill_transform = GlyphFillTransform {
+            dx,
+            line_y,
+            origin,
+            sin,
+            cos,
+        };
+        let mut glyph_rings: Option<Vec<Vec<[f64; 2]>>> = None;
+        for poly in line.polys {
+            if poly.is_empty() {
+                if let Some(rings) = glyph_rings.take() {
+                    let old_failures = failures.len();
+                    fill_sfnt_glyph(&rings, fill_transform, &mut meshes, &mut failures);
+                    if failures.len() != old_failures {
+                        polylines.extend(rings.iter().map(|ring| map(ring)));
+                    }
+                } else {
+                    glyph_rings = Some(Vec::new());
+                }
+                continue;
+            }
+            let world = map(&poly);
+            outlines.push(world.clone());
+            if let Some(rings) = glyph_rings.as_mut() {
+                rings.push(poly);
+            } else {
+                polylines.push(world);
+            }
+        }
+        if let Some(rings) = glyph_rings {
+            if !rings.is_empty() {
+                let old_failures = failures.len();
+                fill_sfnt_glyph(&rings, fill_transform, &mut meshes, &mut failures);
+                if failures.len() != old_failures {
+                    polylines.extend(rings.iter().map(|ring| map(ring)));
+                }
+            }
         }
         baseline -= LINE_SPACING * line.height;
     }
-    out
+    FinalizedText {
+        polylines,
+        outlines,
+        meshes,
+        fill_failures: failures,
+    }
+}
+
+fn fill_sfnt_glyph(
+    rings: &[Vec<[f64; 2]>],
+    transform: GlyphFillTransform,
+    meshes: &mut Vec<cad_domain::Mesh>,
+    failures: &mut Vec<String>,
+) {
+    if let Err(reason) = validate_nonzero_fill_equivalence(rings) {
+        failures.push(format!("SFNT fill: {reason}"));
+        return;
+    }
+    let fill = match cad_geometry::fill_rings(rings) {
+        Ok(fill) => fill,
+        Err(error) => {
+            failures.push(format!("SFNT fill: {}", error.reason()));
+            return;
+        }
+    };
+    let vertices: Vec<Point3> = fill
+        .vertices
+        .iter()
+        .map(|p| {
+            let x = p[0] + transform.dx;
+            let y = p[1] + transform.line_y;
+            Point3 {
+                x: transform.origin.x + transform.cos * x - transform.sin * y,
+                y: transform.origin.y + transform.sin * x + transform.cos * y,
+                z: transform.origin.z,
+            }
+        })
+        .collect();
+    meshes.push(cad_domain::Mesh {
+        normals: vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0
+            };
+            vertices.len()
+        ],
+        vertices,
+        triangles: fill.triangles,
+        face_sources: Vec::new(),
+        colors: Vec::new(),
+    });
+}
+
+/// `fill_rings` uses even-odd semantics. SFNT uses nonzero winding, so accept
+/// it only when simple, disjoint contours with alternating nested winding make
+/// the two rules equivalent.
+fn validate_nonzero_fill_equivalence(rings: &[Vec<[f64; 2]>]) -> Result<(), &'static str> {
+    let rings: Vec<Vec<[f64; 2]>> = rings
+        .iter()
+        .map(|ring| {
+            let mut points = ring.clone();
+            if points.len() > 1 && points.first() == points.last() {
+                points.pop();
+            }
+            points
+        })
+        .collect();
+    if rings.is_empty() || rings.iter().any(|ring| ring.len() < 3) {
+        return Err("contour is degenerate");
+    }
+    for ring in &rings {
+        if ring.iter().flatten().any(|v| !v.is_finite()) || ring_area(ring).abs() <= 1e-12 {
+            return Err("contour is non-finite or zero-area");
+        }
+        if ring_self_intersects(ring) {
+            return Err("self-intersecting contour");
+        }
+    }
+    for i in 0..rings.len() {
+        for j in i + 1..rings.len() {
+            if rings_intersect(&rings[i], &rings[j]) {
+                return Err("intersecting or overlapping contours");
+            }
+        }
+    }
+    let depths: Vec<usize> = rings
+        .iter()
+        .enumerate()
+        .map(|(i, ring)| {
+            rings
+                .iter()
+                .enumerate()
+                .filter(|(j, other)| *j != i && point_in_ring(ring[0], other))
+                .count()
+        })
+        .collect();
+    let areas: Vec<f64> = rings.iter().map(|ring| ring_area(ring).abs()).collect();
+    for i in 0..rings.len() {
+        if depths[i] == 0 {
+            continue;
+        }
+        let parent = (0..rings.len())
+            .filter(|&j| {
+                j != i && depths[j] + 1 == depths[i] && point_in_ring(rings[i][0], &rings[j])
+            })
+            .min_by(|&a, &b| areas[a].total_cmp(&areas[b]));
+        let Some(parent) = parent else {
+            return Err("nested contour hierarchy is ambiguous");
+        };
+        if ring_area(&rings[i]).is_sign_positive() == ring_area(&rings[parent]).is_sign_positive() {
+            return Err("nested contour winding does not alternate");
+        }
+    }
+    Ok(())
+}
+
+fn ring_area(ring: &[[f64; 2]]) -> f64 {
+    (0..ring.len())
+        .map(|i| {
+            let a = ring[i];
+            let b = ring[(i + 1) % ring.len()];
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum::<f64>()
+        * 0.5
+}
+
+fn point_in_ring(point: [f64; 2], ring: &[[f64; 2]]) -> bool {
+    let mut inside = false;
+    for i in 0..ring.len() {
+        let a = ring[i];
+        let b = ring[(i + 1) % ring.len()];
+        if (a[1] > point[1]) != (b[1] > point[1])
+            && point[0] < a[0] + (point[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1])
+        {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+fn ring_self_intersects(ring: &[[f64; 2]]) -> bool {
+    let n = ring.len();
+    for i in 0..n {
+        for j in i + 1..n {
+            if j == i + 1 || (i == 0 && j == n - 1) {
+                continue;
+            }
+            if segments_intersect(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n]) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn rings_intersect(a: &[[f64; 2]], b: &[[f64; 2]]) -> bool {
+    (0..a.len()).any(|i| {
+        (0..b.len())
+            .any(|j| segments_intersect(a[i], a[(i + 1) % a.len()], b[j], b[(j + 1) % b.len()]))
+    })
+}
+
+fn segments_intersect(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
+    let orient = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
+        (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    };
+    let scale = [a, b, c, d]
+        .iter()
+        .flatten()
+        .fold(1.0_f64, |scale, value| scale.max(value.abs()));
+    let eps = scale * scale * 1e-12;
+    let (o1, o2, o3, o4) = (
+        orient(a, b, c),
+        orient(a, b, d),
+        orient(c, d, a),
+        orient(c, d, b),
+    );
+    let on_segment = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
+        r[0] >= p[0].min(q[0]) - eps
+            && r[0] <= p[0].max(q[0]) + eps
+            && r[1] >= p[1].min(q[1]) - eps
+            && r[1] <= p[1].max(q[1]) + eps
+    };
+    ((o1 > eps && o2 < -eps) || (o1 < -eps && o2 > eps))
+        && ((o3 > eps && o4 < -eps) || (o3 < -eps && o4 > eps))
+        || (o1.abs() <= eps && on_segment(a, b, c))
+        || (o2.abs() <= eps && on_segment(a, b, d))
+        || (o3.abs() <= eps && on_segment(c, d, a))
+        || (o4.abs() <= eps && on_segment(c, d, b))
 }
 
 /// Drop repeated issue codes, keeping the first message for each.
@@ -2113,6 +2423,180 @@ mod tests {
         assert!(min_x >= -1.0 && max_x <= 30.0, "span {min_x}..{max_x}");
     }
 
+    #[test]
+    fn bundled_osifont_sfnt_glyphs_fill_faces_and_preserve_even_odd_holes() {
+        let mut engine = FontEngine::new();
+        engine
+            .register(
+                "osifont.ttf",
+                Arc::from(include_bytes!("../../../fonts/osifont.ttf").as_slice()),
+            )
+            .unwrap();
+        engine.set_fallback(vec!["osifont.ttf".into()]);
+        let shaped = engine
+            .shape(
+                "osifont.ttf",
+                "O",
+                Point3::default(),
+                20.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
+            .unwrap();
+        assert!(
+            !shaped.meshes.is_empty(),
+            "SFNT O must produce a filled mesh"
+        );
+        assert!(
+            shaped.polylines.is_empty(),
+            "successful SFNT faces must not be emitted as wireframe"
+        );
+        assert!(
+            !shaped.outlines.is_empty(),
+            "outline data remains available to callers"
+        );
+        assert!(!engine
+            .outline(
+                "osifont.ttf",
+                "O",
+                Point3::default(),
+                20.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline
+            )
+            .unwrap()
+            .is_empty());
+        assert!(shaped
+            .issues
+            .iter()
+            .all(|issue| issue.code != "text.sfnt_fill_partial"));
+        let xs: Vec<f64> = shaped.meshes[0].vertices.iter().map(|p| p.x).collect();
+        let ys: Vec<f64> = shaped.meshes[0].vertices.iter().map(|p| p.y).collect();
+        let hole = [
+            (xs.iter().copied().fold(f64::INFINITY, f64::min)
+                + xs.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+                / 2.0,
+            (ys.iter().copied().fold(f64::INFINITY, f64::min)
+                + ys.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+                / 2.0,
+        ];
+        let contains = |point: [f64; 2], triangle: [u32; 3]| {
+            let [a, b, c] = triangle.map(|i| shaped.meshes[0].vertices[i as usize]);
+            let cross = |p: Point3, q: Point3, r: [f64; 2]| {
+                (q.x - p.x) * (r[1] - p.y) - (q.y - p.y) * (r[0] - p.x)
+            };
+            let values = [cross(a, b, point), cross(b, c, point), cross(c, a, point)];
+            values.iter().all(|v| *v >= -1e-9) || values.iter().all(|v| *v <= 1e-9)
+        };
+        // The glyph's central cavity is not covered by any triangle.
+        assert!(!shaped.meshes[0]
+            .triangles
+            .iter()
+            .copied()
+            .any(|t| contains(hole, t)));
+        let mixed = engine
+            .shape(
+                "osifont.ttf",
+                "{\\fmissing|b0|i0;A}O",
+                Point3::default(),
+                20.0,
+                0.0,
+                TextAlignH::Center,
+                TextAlignV::Middle,
+            )
+            .unwrap();
+        assert!(
+            mixed.meshes.len() >= 2,
+            "MTEXT run fallback must retain both glyphs"
+        );
+        assert!(mixed.polylines.is_empty());
+    }
+
+    #[test]
+    fn sfnt_fill_failure_is_retained_as_partial_diagnostic() {
+        let line = ShapedLine {
+            polys: vec![Vec::new(), vec![[0.0, 0.0], [1.0, 0.0]], Vec::new()],
+            width: 1.0,
+            height: 1.0,
+        };
+        let finalized = finalize_text(
+            vec![line],
+            1.0,
+            Point3::default(),
+            0.0,
+            TextAlignH::Left,
+            TextAlignV::Baseline,
+        );
+        assert!(finalized.meshes.is_empty());
+        assert_eq!(finalized.fill_failures.len(), 1);
+        assert_eq!(
+            finalized.polylines.len(),
+            1,
+            "failed glyph keeps its available contour fallback"
+        );
+    }
+
+    #[test]
+    fn even_odd_fill_is_refused_for_same_winding_nested_sfnt_contours() {
+        let outer = vec![
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+            [0.0, 0.0],
+        ];
+        let inner = vec![[3.0, 3.0], [7.0, 3.0], [7.0, 7.0], [3.0, 7.0], [3.0, 3.0]];
+        assert_eq!(
+            validate_nonzero_fill_equivalence(&[outer.clone(), inner.clone()]),
+            Err("nested contour winding does not alternate")
+        );
+        let line = ShapedLine {
+            polys: vec![Vec::new(), outer, inner, Vec::new()],
+            width: 10.0,
+            height: 10.0,
+        };
+        let finalized = finalize_text(
+            vec![line],
+            10.0,
+            Point3::default(),
+            0.0,
+            TextAlignH::Left,
+            TextAlignV::Baseline,
+        );
+        assert!(finalized.meshes.is_empty());
+        assert_eq!(
+            finalized.polylines.len(),
+            2,
+            "failed fill keeps boundary line fallback"
+        );
+        assert!(finalized.fill_failures[0].contains("winding does not alternate"));
+    }
+
+    #[test]
+    fn sfnt_contour_components_with_intersections_are_refused() {
+        let a = vec![[0.0, 0.0], [3.0, 0.0], [3.0, 3.0], [0.0, 3.0], [0.0, 0.0]];
+        let b = vec![[2.0, 2.0], [5.0, 2.0], [5.0, 5.0], [2.0, 5.0], [2.0, 2.0]];
+        assert_eq!(
+            validate_nonzero_fill_equivalence(&[a, b]),
+            Err("intersecting or overlapping contours")
+        );
+    }
+
+    #[test]
+    fn opposite_winding_nested_sfnt_contours_are_fill_equivalent() {
+        let outer = vec![
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+            [0.0, 0.0],
+        ];
+        let hole = vec![[3.0, 3.0], [3.0, 7.0], [7.0, 7.0], [7.0, 3.0], [3.0, 3.0]];
+        assert_eq!(validate_nonzero_fill_equivalence(&[outer, hole]), Ok(()));
+    }
+
     /// Opt-in SHX test: run with `YACR_TEST_SHX=/path/to/txt.shx`.
     #[test]
     fn outlines_a_real_shx_when_provided() {
@@ -2124,8 +2608,8 @@ mod tests {
         engine
             .register("txt.shx", Arc::from(bytes.into_boxed_slice()))
             .unwrap();
-        let polys = engine
-            .outline(
+        let shaped = engine
+            .shape(
                 "txt.shx",
                 "AB",
                 Point3::default(),
@@ -2135,6 +2619,8 @@ mod tests {
                 TextAlignV::Baseline,
             )
             .unwrap();
+        let polys = shaped.polylines;
+        assert!(shaped.meshes.is_empty(), "SHX remains linework");
         assert!(!polys.is_empty(), "no SHX glyph outlines");
         let max_x = polys
             .iter()
@@ -2566,18 +3052,13 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == text_issue::STACKED_FRACTION_FLAT));
-        assert!(!shaped.polylines.is_empty());
-        // The 2x run must be drawn taller than a 1x run.
-        let tall = shaped
-            .polylines
-            .iter()
-            .flatten()
-            .map(|p| p.y)
-            .fold(f64::NEG_INFINITY, f64::max);
-        let plain = engine
-            .outline(
+        assert!(!shaped.outlines.is_empty());
+        // Compare just the height-overridden run so paragraph baseline spacing
+        // cannot mask its larger glyph extent.
+        let tall_run = engine
+            .shape(
                 "arial.ttf",
-                "AB",
+                "{\\H2x;CD}",
                 Point3::default(),
                 10.0,
                 0.0,
@@ -2585,11 +3066,35 @@ mod tests {
                 TextAlignV::Baseline,
             )
             .unwrap();
-        let plain_top = plain
-            .iter()
-            .flatten()
-            .map(|p| p.y)
-            .fold(f64::NEG_INFINITY, f64::max);
-        assert!(tall > plain_top, "tall {tall} plain {plain_top}");
+        let plain = engine
+            .outline(
+                "arial.ttf",
+                "CD",
+                Point3::default(),
+                10.0,
+                0.0,
+                TextAlignH::Left,
+                TextAlignV::Baseline,
+            )
+            .unwrap();
+        let height = |polys: &[Vec<Point3>]| {
+            let min = polys
+                .iter()
+                .flatten()
+                .map(|p| p.y)
+                .fold(f64::INFINITY, f64::min);
+            let max = polys
+                .iter()
+                .flatten()
+                .map(|p| p.y)
+                .fold(f64::NEG_INFINITY, f64::max);
+            max - min
+        };
+        let tall_height = height(&tall_run.outlines);
+        let plain_height = height(&plain);
+        assert!(
+            tall_height > plain_height * 1.5,
+            "2x MTEXT run height {tall_height} should exceed plain glyph height {plain_height}"
+        );
     }
 }

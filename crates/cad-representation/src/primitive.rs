@@ -22,6 +22,10 @@ pub enum DisplayPrimitive {
     /// Independent endpoint pairs. Unlike `Lines`, adjacent pairs are not joined.
     LineSegments(Arc<[Point3]>),
     Mesh(Arc<Mesh>),
+    /// Filled mesh that deliberately omits the per-triangle-edge overlay.
+    /// Used for triangulated font glyphs, where the overlay would expose
+    /// internal tessellation edges.
+    MeshWithoutEdgeOverlay(Arc<Mesh>),
     Text {
         text: String,
         origin: Point3,
@@ -65,6 +69,9 @@ impl DisplayPrimitive {
             )),
             DisplayPrimitive::Mesh(mesh) => {
                 DisplayPrimitive::Mesh(Arc::new(transform_mesh(mesh, transform)))
+            }
+            DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+                DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(transform_mesh(mesh, transform)))
             }
             DisplayPrimitive::Text {
                 text,

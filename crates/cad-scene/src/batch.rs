@@ -125,8 +125,9 @@ impl RenderBatch {
     /// per vertex (repaired when the scene's normals are missing or wrong), so
     /// that normal buffer is `vertices.len()` vectors even when
     /// [`RenderBatch::normals`] is empty; triangle indices are `[u32; 3]`; and
-    /// for a mesh the wireframe index buffer is the de-duplicated edge list as
-    /// `u32`. [`SceneBudget::upload_bytes_per_frame`] is charged this amount.
+    /// for an enabled mesh edge overlay the wireframe index buffer is the
+    /// de-duplicated edge list as `u32`. [`SceneBudget::upload_bytes_per_frame`]
+    /// is charged this amount.
     pub fn upload_size_bytes(&self) -> usize {
         let positions = self.vertices.len() * 12;
         let edges = self.edges.len() * 12;
@@ -136,7 +137,7 @@ impl RenderBatch {
             self.normals.len() * 12
         };
         let triangle_index_bytes = self.indices.len() * 12;
-        let edge_index_bytes = if self.topology == RenderTopology::Mesh {
+        let edge_index_bytes = if self.topology == RenderTopology::Mesh && !self.edges.is_empty() {
             edge_index_count(&self.indices) * 4
         } else {
             0
@@ -189,11 +190,9 @@ impl RenderBatch {
 
 /// Number of `u32` indices the wireframe edge buffer will contain for a mesh.
 ///
-/// The renderer builds the edge buffer from the triangle topology, not from the
-/// duplicated edge positions: `cad-render-wgpu::geometry::sorted_edge_indices`
-/// emits two indices per distinct undirected edge. This computes the exact same
-/// count from `indices` so [`SceneBudget::upload_bytes_per_frame`] matches what
-/// is uploaded. Only the *count* is needed, so this does not allocate.
+/// When `RenderBatch::edges` is empty, the optional edge overlay is disabled and
+/// no edge indices are uploaded. Otherwise the renderer builds indices from the
+/// triangle topology; this computes that exact count without allocating.
 pub fn edge_index_count(indices: &[[u32; 3]]) -> usize {
     let mut pairs: Vec<(u32, u32)> = Vec::new();
     for tri in indices {

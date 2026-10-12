@@ -246,7 +246,7 @@ pub fn build_vector_document(
                     collect_lines(&mut document, object, pair, fragment, &vector_page);
                 }
             }
-            DisplayPrimitive::Mesh(mesh) => {
+            DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
                 collect_mesh(&mut document, object, mesh, fragment, &vector_page);
             }
             DisplayPrimitive::Text { .. } => {

@@ -271,7 +271,10 @@ impl SceneCache {
                             false,
                         )
                     }
-                    DisplayPrimitive::Mesh(mesh) => {
+                    DisplayPrimitive::Mesh(mesh)
+                    | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+                        let include_edge_overlay =
+                            matches!(&fragment.primitive, DisplayPrimitive::Mesh(_));
                         let origin = mesh.vertices.first().copied().unwrap_or(Point3 {
                             x: 0.0,
                             y: 0.0,
@@ -321,11 +324,16 @@ impl SceneCache {
                         // segment per triangle edge. Duplicated edges are not
                         // removed yet; that is a documented follow-up (edges are
                         // only uploaded when a caller asks for the wireframe).
-                        let mut edge_positions = Vec::with_capacity(kept.len() * 6);
-                        for tri in &kept {
-                            for &(i, j) in &[(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
-                                edge_positions.push(verts[i as usize]);
-                                edge_positions.push(verts[j as usize]);
+                        let mut edge_positions = Vec::new();
+                        if include_edge_overlay {
+                            edge_positions.reserve(kept.len() * 6);
+                            for tri in &kept {
+                                for &(i, j) in
+                                    &[(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])]
+                                {
+                                    edge_positions.push(verts[i as usize]);
+                                    edge_positions.push(verts[j as usize]);
+                                }
                             }
                         }
                         (

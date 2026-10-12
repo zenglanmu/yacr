@@ -16,6 +16,19 @@ pub(crate) struct DrawPasses {
     pub(crate) invisible: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MeshDrawPlan {
+    triangles: bool,
+    edge_overlay: bool,
+}
+
+fn mesh_draw_plan(has_triangles: bool, has_edge_indices: bool) -> MeshDrawPlan {
+    MeshDrawPlan {
+        triangles: has_triangles,
+        edge_overlay: has_triangles && has_edge_indices,
+    }
+}
+
 /// Turn the pure [`DrawOrderPlan`] over the accepted sub-set back into global
 /// batch indices, preserving the plan's order.
 ///
@@ -72,13 +85,22 @@ pub(crate) fn draw_batch(
             if let Some(colors) = &batch.colors {
                 pass.set_vertex_buffer(2, colors.slice(..));
             }
-            let Some(indices) = batch.indices.as_ref() else {
+            let draw_plan = mesh_draw_plan(batch.indices.is_some(), batch.edge_indices.is_some());
+            if !draw_plan.triangles {
                 return;
-            };
+            }
+            let indices = batch
+                .indices
+                .as_ref()
+                .expect("mesh draw plan requires triangle indices");
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..batch.index_count, 0, 0..1);
             // Optional wireframe overlay over the shared mesh vertices.
-            if let Some(edges) = &batch.edge_indices {
+            if draw_plan.edge_overlay {
+                let edges = batch
+                    .edge_indices
+                    .as_ref()
+                    .expect("draw plan requires edge indices");
                 pass.set_pipeline(line_pipeline);
                 pass.set_vertex_buffer(0, batch.vertices.slice(..));
                 pass.set_index_buffer(edges.slice(..), wgpu::IndexFormat::Uint32);
@@ -437,4 +459,34 @@ pub(crate) fn charge_images(
         }
     }
     (accepted, None)
+}
+
+#[cfg(test)]
+mod mesh_overlay_tests {
+    use super::*;
+
+    #[test]
+    fn mesh_draw_plan_makes_edge_overlay_optional() {
+        assert_eq!(
+            mesh_draw_plan(true, false),
+            MeshDrawPlan {
+                triangles: true,
+                edge_overlay: false
+            }
+        );
+        assert_eq!(
+            mesh_draw_plan(true, true),
+            MeshDrawPlan {
+                triangles: true,
+                edge_overlay: true
+            }
+        );
+        assert_eq!(
+            mesh_draw_plan(false, true),
+            MeshDrawPlan {
+                triangles: false,
+                edge_overlay: false
+            }
+        );
+    }
 }

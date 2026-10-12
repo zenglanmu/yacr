@@ -284,6 +284,25 @@ impl DefaultRepresentationProvider {
                         *v_align,
                     ) {
                         Ok(shaped_text) => {
+                            let has_renderable_content = shaped_text.has_renderable_content;
+                            for mesh in shaped_text.meshes {
+                                representation.fragments.push(DisplayFragment {
+                                    source: source.clone(),
+                                    geometry_source: geometry_source.clone(),
+                                    precision: Precision::Analytic,
+                                    alpha: 1.0,
+                                    color: DEFAULT_RENDER_COLOR,
+                                    color_unresolved: true,
+                                    lineweight: DEFAULT_LINEWEIGHT_MM,
+                                    lineweight_unresolved: true,
+                                    linetype: LinetypePattern::continuous(),
+                                    linetype_unresolved: true,
+                                    linetype_scale: 1.0,
+                                    primitive: DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(
+                                        mesh,
+                                    )),
+                                });
+                            }
                             for polyline in shaped_text.polylines {
                                 if polyline.len() >= 2 {
                                     representation.fragments.push(DisplayFragment {
@@ -305,7 +324,7 @@ impl DefaultRepresentationProvider {
                                 }
                             }
                             shaped = true;
-                            if representation.fragments.is_empty() {
+                            if representation.fragments.is_empty() && has_renderable_content {
                                 representation.completeness = Completeness::Missing(vec![
                                     "text produced no drawable outlines".into(),
                                 ]);

@@ -1613,4 +1613,92 @@ mod tests {
             "functional regression exited before redo assertions"
         );
     }
+
+    /// Render synthetic Chinese SFNT text through the real Linux window and
+    /// hardware Vulkan path. This is intentionally separate from the grid test.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires a real display, NVIDIA hardware Vulkan, and YACR_CJK_FONT"]
+    fn real_gpu_cjk_sfnt_text_fill_acceptance() {
+        use std::cell::Cell;
+        use std::time::{Duration, Instant};
+
+        assert!(
+            std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some()
+        );
+        for variable in [
+            "VK_ICD_FILENAMES",
+            "VK_DRIVER_FILES",
+            "VK_ADD_DRIVER_FILES",
+            "VK_LOADER_DRIVERS_SELECT",
+            "WGPU_ADAPTER_NAME",
+            "MESA_VK_DEVICE_SELECT",
+            "MESA_LOADER_DRIVER_OVERRIDE",
+        ] {
+            assert!(
+                std::env::var_os(variable).is_none(),
+                "refusing forced/software GPU selection from {variable}"
+            );
+        }
+        let font = PathBuf::from(
+            std::env::var("YACR_CJK_FONT")
+                .expect("set YACR_CJK_FONT to a locally licensed CJK SFNT font"),
+        );
+        assert!(
+            font.is_file(),
+            "CJK font does not exist: {}",
+            font.display()
+        );
+        let output = PathBuf::from(
+            std::env::var("YACR_CJK_OUTPUT")
+                .expect("set a fresh YACR_CJK_OUTPUT evidence directory"),
+        );
+        std::fs::create_dir(&output).expect("evidence directory must be new");
+        let drawing = output.join("synthetic-cjk.dxf");
+        std::fs::write(&drawing, "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nSTYLE\n0\nSTYLE\n2\nStandard\n70\n0\n40\n0\n41\n1\n50\n0\n71\n0\n42\n24\n3\ncjk.ttf\n4\n\n0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nTEXT\n8\n0\n10\n0\n20\n0\n30\n0\n40\n24\n1\n中文空心字\n7\nStandard\n0\nENDSEC\n0\nEOF\n").unwrap();
+        cad_ui_slint::select_wgpu_backend_with(cad_render_wgpu::GpuSelection::Auto).unwrap();
+        let app = Rc::new(
+            LinuxApp::new(
+                LinuxOptions::parse([
+                    "--open".into(),
+                    drawing.display().to_string(),
+                    "--font".into(),
+                    format!("cjk.ttf={}", font.display()),
+                ])
+                .unwrap(),
+            )
+            .unwrap(),
+        );
+        let done = Rc::new(Cell::new(false));
+        let completed = done.clone();
+        let probe = app.clone();
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let timer = slint::Timer::default();
+        timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
+            let ready = probe.runtime.view.borrow().as_ref().is_some_and(|view| {
+                view.frames_rendered() > 0 && view.current_drawing_presented() && view.last_error().is_none() && view.scene_error().is_none()
+            });
+            if !ready {
+                assert!(Instant::now() < deadline, "CJK drawing did not reach a clean presented frame: {}", real_window_readiness_diagnostic(&probe));
+                return;
+            }
+            let image = probe.adapter.window().take_snapshot().unwrap();
+            let (rect, _) = probe.adapter.handle().shell_geometry().unwrap();
+            let pixels = canvas_region(&RgbaImage { width: image.width(), height: image.height(), pixels: image.as_bytes().to_vec() }, rect, probe.adapter.window().scale_factor() as f64);
+            assert!(canvas_content_pixels(&pixels) > 20, "synthetic Chinese text produced no visible CAD pixels");
+            let view = probe.runtime.view.borrow();
+            let view = view.as_ref().unwrap();
+            assert_eq!(view.backend_label().as_deref(), Some("vulkan"));
+            let backend = format!("{:?}", view.active_backend());
+            assert!(backend.contains("Native"), "expected native Vulkan desktop renderer, got {backend}");
+            let fds = std::fs::read_dir("/proc/self/fd").unwrap().filter_map(Result::ok).filter_map(|entry| std::fs::read_link(entry.path()).ok()).collect::<Vec<_>>();
+            assert!(fds.iter().any(|path| path == Path::new("/dev/nvidia0")), "renderer has no NVIDIA device fd: {fds:?}");
+            std::fs::write(output.join("cjk-text.png"), encode_png(&RgbaImage { width: image.width(), height: image.height(), pixels: image.as_bytes().to_vec() }).unwrap()).unwrap();
+            std::fs::write(output.join("renderer.txt"), format!("backend={backend}\napi=vulkan\nfont={}\ntext=中文空心字\nframes={}\nvisible_cad_pixels={}\nnvidia_device_fd=true\n", font.display(), view.frames_rendered(), canvas_content_pixels(&pixels))).unwrap();
+            completed.set(true);
+            slint::quit_event_loop().unwrap();
+        });
+        app.run().unwrap();
+        assert!(done.get(), "CJK real-GPU acceptance exited before capture");
+    }
 }

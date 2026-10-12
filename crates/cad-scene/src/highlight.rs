@@ -244,7 +244,9 @@ fn whole_fragment(
         DisplayPrimitive::LineSegments(points) => {
             line_batch(reference, points, draw_order, alpha, color)
         }
-        DisplayPrimitive::Mesh(mesh) => mesh_batch(reference, mesh, None, draw_order, alpha, color),
+        DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+            mesh_batch(reference, mesh, None, draw_order, alpha, color)
+        }
         DisplayPrimitive::Text { .. }
         | DisplayPrimitive::Image { .. }
         | DisplayPrimitive::Instance { .. } => None,
@@ -262,7 +264,7 @@ fn face_only(
     color: [f32; 3],
 ) -> Option<RenderBatch> {
     match &fragment.primitive {
-        DisplayPrimitive::Mesh(mesh) => {
+        DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
             mesh_batch(reference, mesh, Some(id), draw_order, alpha, color)
         }
         _ => None,

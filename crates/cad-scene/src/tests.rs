@@ -486,6 +486,23 @@ fn mesh_batch_is_indexed_and_carries_normals_and_edges() {
 }
 
 #[test]
+fn filled_mesh_can_disable_its_edge_overlay_without_changing_triangle_topology() {
+    let mut representation = mesh_representation(2, quad());
+    representation.fragments[0].primitive =
+        DisplayPrimitive::MeshWithoutEdgeOverlay(std::sync::Arc::new(quad()));
+    let delta = SceneCache::default()
+        .build(&representation, stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(batch.indices, vec![[0, 1, 2], [0, 2, 3]]);
+    assert!(
+        batch.edges.is_empty(),
+        "disabled mesh overlay must not allocate edge geometry"
+    );
+    assert_eq!(batch.upload_size_bytes(), 4 * 12 * 3 + 2 * 12);
+}
+
+#[test]
 fn lines_batch_has_no_triangles_or_normals() {
     let mut cache = SceneCache::default();
     let rep = line_representation(

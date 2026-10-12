@@ -293,6 +293,16 @@ pub fn sorted_edge_indices(indices: &[[u32; 3]]) -> Vec<u32> {
     out
 }
 
+/// Build wireframe indices only when the scene batch explicitly carries edge
+/// overlay geometry. Empty `edges` is the opt-out signal for a filled mesh.
+pub(crate) fn mesh_edge_indices(batch: &RenderBatch) -> Vec<u32> {
+    if batch.topology == RenderTopology::Mesh && !batch.edges.is_empty() {
+        sorted_edge_indices(&batch.indices)
+    } else {
+        Vec::new()
+    }
+}
+
 /// Accumulate a frame's vertex/triangle/byte usage against a budget.
 ///
 /// Returns the list of batches that fit and a single explicit over-budget
@@ -672,6 +682,14 @@ mod tests {
     }
 
     #[test]
+    fn mesh_upload_edge_indices_follow_the_optional_overlay_contract() {
+        let mut batch = mesh_batch(false);
+        assert!(mesh_edge_indices(&batch).is_empty());
+        batch.edges = vec![[0.0; 3], [1.0, 0.0, 0.0]];
+        assert_eq!(mesh_edge_indices(&batch), vec![0, 1, 0, 2, 1, 2]);
+    }
+
+    #[test]
     fn plan_frame_accepts_within_budget() {
         let batches = vec![mesh_batch(false)];
         let budget = FrameBudget {
@@ -705,12 +723,10 @@ mod tests {
 
     #[test]
     fn plan_frame_reports_over_byte_budget() {
-        // One mesh batch is 3 positions + 3 normals + 3 colours + 1 triangle
-        // index = 12*3 + 12*3 + 12*3 + 12 = 120 bytes, plus 3 distinct edges =>
-        // 6 edge indices * 4 = 24, total 144. A budget of 100 rejects it on the
-        // byte category.
+        // One mesh batch without an edge overlay is 3 positions + 3 normals +
+        // 3 colours + 1 triangle index = 120 bytes. A budget of 100 rejects it.
         let batches = vec![mesh_batch(false)];
-        assert_eq!(batches[0].upload_size_bytes(), 144);
+        assert_eq!(batches[0].upload_size_bytes(), 120);
         let budget = FrameBudget {
             max_vertices: usize::MAX,
             max_triangles: usize::MAX,
@@ -721,7 +737,7 @@ mod tests {
         assert_eq!(usage.bytes, 0);
         let over = over.expect("expected an over-budget report");
         assert_eq!(over.category, "bytes");
-        assert_eq!(over.requested, 144);
+        assert_eq!(over.requested, 120);
         assert_eq!(over.limit, 100);
     }
 

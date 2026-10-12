@@ -531,7 +531,7 @@ impl Renderer {
                         .iter()
                         .flat_map(|t| [t[0], t[1], t[2]])
                         .collect();
-                    let edges = geometry::sorted_edge_indices(&batch.indices);
+                    let edges = geometry::mesh_edge_indices(batch);
                     let normals = geometry::repaired_normals(batch);
                     // Always bound (white when the batch has no per-vertex
                     // colours), so the mesh pipeline's `@location(2)` is valid.

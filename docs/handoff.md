@@ -1,5 +1,58 @@
 # 后续 agent 接手入口
 
+## SFNT 填充安全与 mesh edge overlay 阻塞修订（2026-10-12）
+
+- 新增 `DisplayPrimitive::MeshWithoutEdgeOverlay` 契约。Scene 为其保留三角索引但不构造边 overlay
+  几何；一般 `Mesh` 维持原有边 overlay。`Renderer::upload` 只在 batch 携带 edges 时生成排序/去重
+  edge indices，`draw_batch` 对无 edge index 的 mesh 只提交填充 draw；上传 budget 的 edge-index
+  字节也按 overlay 可选计算。新增 scene topology/upload-size、renderer 上传索引和无 GPU draw plan
+  测试。
+- `FontEngine::outline` 恢复纯轮廓输出：`ShapedText.outlines` 保留 SFNT 与 SHX 的变换后轮廓，
+  SFNT 成功填充的 `polylines` 仍为空，不产生常规 wireframe。排版/变换共用 finalize 路径。
+- `fill_rings` 本身仍是 HATCH 的 even-odd 契约，未修改。SFNT 调用前验证简单边界、组件间无边界
+  相交/重叠、嵌套层绕向交替；不满足时跳过 Mesh，保留边线，附 `text.sfnt_fill_partial` 并使结果
+  Partial。缺字输出 `text.glyph_missing`。空白判定按解析后 run 的可见字符，契约覆盖空格、`\P`、
+  `\~`、`{\H2; }`。
+- 本轮定向测试通过：`cargo test -p cad-representation --lib --locked`（177 passed）、
+  `cargo test -p cad-scene --lib --locked`（55 passed）、`cargo test -p cad-render-wgpu --lib --locked`
+  （44 passed）。`cargo check -p cad-app -p cad-cli-tools --locked`、
+  `cargo test -p app-linux --lib real_gpu_cjk_sfnt_text_fill_acceptance --locked --no-run`、
+  `YACR_TEST_SHX=$PWD/apps/app-android/assets/fonts/txt.shx cargo test -p cad-representation --lib shx_text_provider_keeps_outline_lines_when_font_is_available --locked`
+  （1 passed）、`cargo fmt --all -- --check`、`git diff --check` 均通过。
+  修正 MTEXT outline 契约后的可选字体测试通过：
+  `YACR_TEST_FONT=$PWD/fonts/osifont.ttf cargo test -p cad-representation --lib shapes_mtext_runs_and_reports_approximations_when_font_provided --locked`
+  （1 passed）。`cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`、
+  `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked` 与
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` 均通过。
+- 最终真 GPU 中文专项通过：证据目录 `/tmp/opencode/yacr-cjk-final-20261012-114326/`，Quadro P620 + Vulkan，
+  使用 Noto TTC 和合成 DXF；observer 检查截图确认中文字形实心并保留字腔、无可见三角边。此为合成 DXF
+  的 Linux 真 GPU 视觉证据，不代表真实 DWG、其他字体、vendor 或其他平台兼容性。
+- 最后执行 `cargo fmt --all -- --check` 与 `git diff --check` 均通过。
+
+## Linux CAD SFNT 中文空心填充实现（2026-10-12）
+
+- `cad-representation::FontEngine::shape` 现在把每个 SFNT glyph 的全部轮廓作为一组交给
+  `cad-geometry::fill_rings`，按 even-odd 生成 `Mesh`；成功的 SFNT glyph 不再作为闭合轮廓
+  `Lines` 绘制，因此不会重复描边或暴露三角内部边。SHX 仍然是线稿；变换、按 glyph fallback、
+  MTEXT run 排版、对齐/旋转与既有字体失效缓存语义不变。合法空白不伪造 Missing。填充失败
+  保留边界线、`Partial` 和 `text.sfnt_fill_partial` 诊断。
+- 合成契约：授权 fixture `fonts/osifont.ttf` 的 `O` 有 Mesh、中心孔不被三角覆盖、无常规轮廓
+  线；provider 输出与带 fallback 的 MTEXT 混合 run 均有覆盖；填充错误明确测试；本机
+  `apps/app-android/assets/fonts/txt.shx` 只作未提交测试输入，focused SHX provider 用例确认仍输出
+  Lines。**本轮合成测试通过不代表 CJK 字体/真实 DWG 兼容或视觉验收。**
+- 新增 ignored Linux 专项 `host::validation::tests::real_gpu_cjk_sfnt_text_fill_acceptance`：生成只含
+  “中文空心字”的临时 DXF，用指定字体走 Linux 真窗口、真实 Vulkan、CadView 并保存截图；断言
+  CAD canvas 有像素，且 renderer 是 Native/Vulkan 并持有 `/dev/nvidia0` fd。需要合法可用
+  的本地 CJK SFNT 字体、桌面 display 与 NVIDIA GPU。建议串行独立进程执行：
+  `YACR_CJK_FONT=/absolute/path/to/cjk.ttf YACR_CJK_OUTPUT=/tmp/opencode/yacr-cjk-font-<unique> \
+  cargo test -p app-linux --lib real_gpu_cjk_sfnt_text_fill_acceptance --locked -- --ignored --test-threads=1 --nocapture`
+  （环境需保留 Wayland/X11 与 `/run/user/1000`，不得设置 Vulkan/software adapter override；本地截图
+  和 renderer 证据写入指定新目录）。本轮实跑证据及边界见上方“最终真 GPU 中文专项通过”。
+- 初始实现轮已运行：`cargo test -p cad-representation --locked`（173 passed）及带真实本地 SHX 的 provider
+  focused test（1 passed）；
+  `cargo test -p app-linux --lib real_gpu_cjk_sfnt_text_fill_acceptance --locked --no-run` 编译通过；
+  `cargo fmt --all -- --check` 通过。后续修订后的测试与真 GPU 证据见本节之前的最新记录。
+
 ## Offscreen Android UI suite 已在真实 hardware Vulkan 上通过（2026-10-12）
 
 - 修正 `cad-ui-slint::offscreen` 的测试 adapter 策略：先 high-performance，再在非硬件 adapter 时探测 low-power，

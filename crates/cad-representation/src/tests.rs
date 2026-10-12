@@ -59,6 +59,129 @@ fn line_becomes_a_lines_primitive() {
 }
 
 #[test]
+fn sfnt_text_provider_emits_meshes_without_outline_lines() {
+    let mut fonts = FontEngine::new();
+    fonts
+        .register(
+            "osifont.ttf",
+            Arc::from(include_bytes!("../../../fonts/osifont.ttf").as_slice()),
+        )
+        .unwrap();
+    let mut e = text_entity(91, 20.0);
+    e.geometry = SemanticGeometry::Text {
+        text: "O".into(),
+        position: p(0.0, 0.0),
+        style: StyleId(0),
+        height: 20.0,
+        rotation: 0.0,
+        font: Some("osifont.ttf".into()),
+        h_align: TextAlignH::Left,
+        v_align: TextAlignV::Baseline,
+    };
+    let r = ProviderRegistry::with_default_provider()
+        .build(&e, &context().with_fonts(Arc::new(fonts)))
+        .unwrap();
+    assert_eq!(r.completeness, Completeness::Complete);
+    assert!(r.fragments.iter().any(|fragment| matches!(
+        fragment.primitive,
+        DisplayPrimitive::MeshWithoutEdgeOverlay(_)
+    )));
+    assert!(r
+        .fragments
+        .iter()
+        .all(|fragment| !matches!(fragment.primitive, DisplayPrimitive::Lines(_))));
+}
+
+#[test]
+fn shx_text_provider_keeps_outline_lines_when_font_is_available() {
+    let Ok(path) = std::env::var("YACR_TEST_SHX") else {
+        return;
+    };
+    let mut fonts = FontEngine::new();
+    fonts
+        .register(
+            "txt.shx",
+            Arc::from(std::fs::read(path).unwrap().into_boxed_slice()),
+        )
+        .unwrap();
+    let mut e = text_entity(92, 20.0);
+    e.geometry = SemanticGeometry::Text {
+        text: "AB".into(),
+        position: p(0.0, 0.0),
+        style: StyleId(0),
+        height: 20.0,
+        rotation: 0.0,
+        font: Some("txt.shx".into()),
+        h_align: TextAlignH::Left,
+        v_align: TextAlignV::Baseline,
+    };
+    let r = ProviderRegistry::with_default_provider()
+        .build(&e, &context().with_fonts(Arc::new(fonts)))
+        .unwrap();
+    assert!(!r.fragments.is_empty());
+    assert!(r
+        .fragments
+        .iter()
+        .all(|fragment| matches!(fragment.primitive, DisplayPrimitive::Lines(_))));
+}
+
+#[test]
+fn whitespace_sfnt_text_is_a_valid_empty_representation() {
+    let mut fonts = FontEngine::new();
+    fonts
+        .register(
+            "osifont.ttf",
+            Arc::from(include_bytes!("../../../fonts/osifont.ttf").as_slice()),
+        )
+        .unwrap();
+    let registry = ProviderRegistry::with_default_provider();
+    let fonts = Arc::new(fonts);
+    for raw in ["   ", "\\P", "\\~", "{\\H2; }"] {
+        let mut e = text_entity(93, 20.0);
+        if let SemanticGeometry::Text { text, font, .. } = &mut e.geometry {
+            *text = raw.into();
+            *font = Some("osifont.ttf".into());
+        }
+        let r = registry
+            .build(&e, &context().with_fonts(fonts.clone()))
+            .unwrap();
+        assert!(r.fragments.is_empty(), "{raw:?} unexpectedly drew geometry");
+        assert_eq!(r.completeness, Completeness::Complete, "{raw:?}");
+        assert!(r.diagnostics.is_empty(), "{raw:?}");
+    }
+}
+
+#[test]
+fn missing_sfnt_glyphs_are_explicitly_reported() {
+    let mut fonts = FontEngine::new();
+    fonts
+        .register(
+            "osifont.ttf",
+            Arc::from(include_bytes!("../../../fonts/osifont.ttf").as_slice()),
+        )
+        .unwrap();
+    let mut e = text_entity(94, 20.0);
+    if let SemanticGeometry::Text { text, font, .. } = &mut e.geometry {
+        *text = "\u{10FFFF}".into();
+        *font = Some("osifont.ttf".into());
+    }
+    let r = ProviderRegistry::with_default_provider()
+        .build(&e, &context().with_fonts(Arc::new(fonts)))
+        .unwrap();
+    assert!(matches!(
+        r.completeness,
+        Completeness::Partial(_) | Completeness::Missing(_)
+    ));
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "text.glyph_missing"),
+        "{:?}",
+        r.diagnostics
+    );
+}
+
+#[test]
 fn multi_ring_hatch_fill_flows_through_the_mesh_path() {
     // Donut: 10x10 outer with a 4x4 hole; the hole-aware fill from
     // cad-geometry is what the importer feeds into the compound.
