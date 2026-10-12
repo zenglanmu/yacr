@@ -2,28 +2,44 @@ export component CadCanvas inherits Rectangle {
     property <length> cursor-x: 0px;
     property <length> cursor-y: 0px;
     in property <image> frame;
-    callback pointer(int, int, length, length);
-    callback scroll(float, float);
+    callback pointer(int, int, length, length, int);
+    callback pointer-exited();
+    callback pinch(int, float, float, float);
+    callback scroll(float, float, float, float);
     callback pick(float, float);
     clip: true;
     min-width: 0px;
     min-height: 0px;
     background: #1e1e1e;
     Image { width: parent.width; height: parent.height; source: root.frame; image-fit: contain; }
-    cursor-area := TouchArea {
-        pointer-event(e) => {
-            root.cursor-x = self.mouse-x;
-            root.cursor-y = self.mouse-y;
-            root.pointer(e.kind == PointerEventKind.down ? 0 :
-                (e.kind == PointerEventKind.up ? 1 : (e.kind == PointerEventKind.move ? 2 : 3)),
-                e.button == PointerEventButton.left ? 1 :
-                (e.button == PointerEventButton.right ? 2 : (e.button == PointerEventButton.middle ? 3 : 0)),
-                self.mouse-x, self.mouse-y);
-            if e.kind == PointerEventKind.up && e.button == PointerEventButton.left {
-                root.pick(self.mouse-x / 1px, self.mouse-y / 1px);
+    ScaleRotateGestureHandler {
+        width: parent.width; height: parent.height;
+        started => { root.pinch(0, self.scale, self.center.x / 1px, self.center.y / 1px); }
+        updated => { root.pinch(1, self.scale, self.center.x / 1px, self.center.y / 1px); }
+        ended => { root.pinch(2, self.scale, self.center.x / 1px, self.center.y / 1px); }
+        cancelled => { root.pinch(3, self.scale, self.center.x / 1px, self.center.y / 1px); }
+        cursor-area := TouchArea {
+            pointer-event(e) => {
+                root.cursor-x = self.mouse-x;
+                root.cursor-y = self.mouse-y;
+                root.pointer(e.kind == PointerEventKind.down ? 0 :
+                    (e.kind == PointerEventKind.up ? 1 : (e.kind == PointerEventKind.move ? 2 : 3)),
+                    e.button == PointerEventButton.left ? 1 :
+                    (e.button == PointerEventButton.right ? 2 : (e.button == PointerEventButton.middle ? 3 : 0)),
+                    self.mouse-x, self.mouse-y, e.touch-finger-id);
+                if e.kind == PointerEventKind.up && e.button == PointerEventButton.left {
+                    root.pick(self.mouse-x / 1px, self.mouse-y / 1px);
+                }
+            }
+            changed has-hover => {
+                if !self.has-hover { root.pointer-exited(); }
+            }
+            scroll-event(e) => {
+                root.scroll(e.delta-x / 1px, e.delta-y / 1px,
+                    self.mouse-x / 1px, self.mouse-y / 1px);
+                return EventResult.accept;
             }
         }
-        scroll-event(e) => { root.scroll(e.delta-x / 1px, e.delta-y / 1px); return EventResult.accept; }
     }
     if cursor-area.has-hover : Rectangle {
         x: 0px; y: root.cursor-y; width: parent.width; height: 1px;

@@ -1,5 +1,152 @@
 # 后续 agent 接手入口
 
+## Offscreen Android UI suite 已在真实 hardware Vulkan 上通过（2026-10-12）
+
+- 修正 `cad-ui-slint::offscreen` 的测试 adapter 策略：先 high-performance，再在非硬件 adapter 时探测 low-power，
+  仅 hardware 类均不可用时才接受并明确标记 CPU software fallback；仍要求 Vulkan 并创建 FemtoVG wgpu renderer。
+  未改业务生产逻辑，未强制 ICD。主机 `nvidia-smi` 可见 Quadro P620，测试内真实 adapter 日志为
+  `name=Quadro P620, device_type=discrete_gpu, backend=vulkan`。
+- 上轮 app-android full suite 唯一失败的
+  `adapter_suppression_cancels_android_tail_and_restores_next_tap_and_tool_path` focused 复跑 1/1 passed；随后串行
+  `cargo test -p app-android --lib --locked -- --test-threads=1 --nocapture` **26/26 passed**。这是 headless adapter
+  与 UI interaction-contract 证据，不等于真实窗口/Android device/视觉或性能验收。
+- `cargo fmt --all -- --check` 和 workspace Clippy `-D warnings` 均通过。没有 adb、build、安装或设备操作。
+  证据目录：`/tmp/opencode/yacr-offscreen-hardware-20261012-084758/`。详情见
+  [validation-android.md §20](validation-android.md#20-offscreen-adapter-优先硬件并复验-android-ui-suite-2026-10-12)。
+
+## Linux HostCore navigation bridge 真窗口用例已取得终态（2026-10-12）
+
+- 对新增 ignored test `host::validation::tests::real_gpu_host_navigation_push_updates_bridge_and_preserves_full_push_semantics` 执行了独立真实窗口验收，1/1 passed（15.70 秒），使用 Wayland/X11 和 Quadro P620，无 GPU override；timer 有 90 秒 deadline，命令还有 150 秒外部 timeout。
+- 实际 renderer evidence：Native/Vulkan、1 frame、`/dev/nvidia0` fd 存在；同目录 `host-navigation.txt` 有导航/桥接语义证据。此结果只证明该 Linux 测试宿主路径，不推广为视觉或性能、Android 真机结论。详见 [validation-android.md §21](validation-android.md#21-linux-hostcore-轻量导航真实窗口-bridge-acceptance-2026-10-12)，证据目录 `/tmp/opencode/yacr-git-push-20261012-091936/`。
+
+## 统一门禁修复已完成；现有装机 APK 仍对应前一源码指纹（2026-10-12）
+
+- 仅格式化 writer 已修改且 fmt 报告的 Rust 文件，并把 `crates/cad-host/src/input.rs` 中
+  `wheel_anchor_tests` 模块移至文件末尾；没有改逻辑、添加 lint allow、触碰陌生 Rust 文件或格式化全仓写回。
+- 当前 `cargo fmt --all -- --check`、workspace Clippy `-D warnings`、`cargo test -p cad-host --locked`（22/22）
+  与四项 Python 静态门禁均通过。Android offscreen 全 suite 的既有限制仍是 25/26：单一用例要求软件 Vulkan，
+  却观察到真实 Quadro P620；本轮不将该结果写成通过、不软件模拟真机。native/wasm check 与 Android focused
+  pinch/pan/scroll 测试复用上一轮未受这些纯格式/test 位置调整影响的结果。细节见
+  [validation-android.md §19](validation-android.md#19-wheelmetrics-统一门禁修复-2026-10-12未重建未操作设备)。
+- dirty production fingerprint 已从旧版 `51b59eeb92d2057d06b96212f3d2bedf80e1f808cab9fe70d5686698e718bc65`
+  变为当前 `a0159bf87b4c92138bc6a1c1d9f05debfb58e835f65bfd12f8d9e257cc2f9922`。此任务按要求未重新构建/安装/操作设备；
+  已装 APK `8bedbf51399fafac0df7d80bb21388dcc699186b474b8e4a8cac56f8d3593e5f` 仍含完整 100 项字体，但对应旧 source
+  fingerprint，不能宣称由当前 source 构建。
+- 证据目录：`/tmp/opencode/yacr-gate-fix-20261012-083111/`。未提交。
+
+## wheel/metrics/font 版 Android release 已安装，待解锁验收与门禁修正（2026-10-12）
+
+- 本轮 dirty production fingerprint 为
+  `51b59eeb92d2057d06b96212f3d2bedf80e1f808cab9fe70d5686698e718bc65`，构建前后相同；untracked
+  `crates/cad-host/src/zoom_anchor_tests.rs` 是测试文件，已单独 fingerprint。最终 APK 含当次完整字体清单
+  100 项，SHA-256 `8bedbf51399fafac0df7d80bb21388dcc699186b474b8e4a8cac56f8d3593e5f`，并已在
+  `ebfb4268` 以 `install -r -t` 保留数据安装。全量证据见
+  [validation-android.md §18](validation-android.md#18-wheelmetricsfont-合并版验证与含全字体-apk-2026-10-12设备画面仍待解锁)。
+- **门禁阻塞待 writer 处理**：`cargo fmt --all -- --check` 有多处 Rustfmt diff；workspace Clippy 被
+  `crates/cad-host/src/input.rs:150` 的 `items_after_test_module` 阻塞（wheel test module 放在后续 impl 前）。
+  本验证 owner 未运行 fmt 写回、未修改源码。其他 architecture/fixture/workflow/i18n、native workspace check、
+  wasm lib check 通过。cad-host 22 tests 通过；Android 相关 pinch/pan/scroll focused tests 与 fonts 8 tests 通过。
+  app-android 全 suite 25/26，唯一失败为 offscreen 用例拒绝 NVIDIA hardware adapter、要求 software Vulkan；未切软件后端重跑。
+- 真机应用启动返回 OK/PID `24137`，但手机休眠：截图黑屏，logcat 明确为
+  `canvas metrics are degenerate`，没有可见 app frame 或 wgpu/Vulkan canvas 证据；设备唤醒后仍是锁屏，未绕锁。
+  **需用户手动解锁，再从 launcher 打开 Yacr 并留在前台**，否则不能继续点 UI。专用授权 fixture 已放入
+  `/sdcard/Download/YacrFinal-20261012-081219/synthetic-four-lines.dwg`，只包含仓库授权的四条 LINE。
+- 解锁后的步骤：在 app 用 SAF 只打开此 fixture，切到 Model/模型空间，先确认图形可见；单指拖动画布并点 zoom
+  in/out controls。双指 pinch in/out 请用户在真机屏幕上实际操作；若接有实体鼠标/触控板，再在画布上滚动 wheel。
+  不打开用户文件，不用 `adb input swipe` 冒充 pinch/wheel；反馈每个动作是否到达、方向/画面变化及主观响应。
+- `gfxinfo` 的 0 frame/Skia-HWUI 数据不覆盖 Slint wgpu canvas；性能流畅性未量化。用户卡顿目前只是减少重复 work，
+  不能报告已解决。没有有效图像帧时也不下字体运行时加载/可视性的结论。
+- 当前证据：`/tmp/opencode/yacr-android-final-20261012-081219/`。无提交。
+
+## pinch/navigation 修订版 Android 真机待现场验收（2026-10-12）
+
+- 本轮 production dirty-source fingerprint 构建前后相同，正式无代理 arm64 release 构建成功，APK
+  已通过 hash/ABI/SAF dex/签名/manifest 检查，并在唯一设备 `ebfb4268` 上用 `install -r -t`
+  保留数据安装、启动（PID `20719`）。详见
+  [validation-android.md §17](validation-android.md#17-pinchnavigation-修订版-arm64-release-部署2026-10-12等待解锁后交互验收)。
+- 设备当时休眠；启动截图黑屏，唤醒后显示系统锁屏。**当前用户需先解锁设备，再从 launcher 打开
+  Yacr 并保持 app 在前台**；不要用 adb 注入多指或绕过锁屏。本次只看到了 Qualcomm Vulkan/wgpu 初始化
+  日志，没有可见画布/渲染帧，也没做新版 UI、pan/zoom 或 pinch 的交互验收。
+- 唯一授权样本已准备在
+  `/sdcard/Download/YacrTest-20261012-025646/synthetic-four-lines.dwg`（4 条 LINE，SHA-256
+  `68637e120e71e471eccb5cfe593a2da156444b8ef2e8669bc4f521ce32c38135`）。解锁后在 app “文件→打开图纸”
+  中只选此样本；切至 Model/模型空间，先确认几何可见，再试单指拖动与缩放按钮。双指 pinch in/out
+  请直接在设备屏幕上进行并记录主观响应；若无法证明 raw 触点确实到达 app，不报告 pinch 通过。
+- `adb shell input swipe` 只能作单指输入，不是双指验收。当前 `gfxinfo` 0 帧且 Pipeline 为
+  Skia/OpenGL，不能覆盖 Vulkan canvas，也不能证明流畅。设备支持的 canvas 帧时间采集方式尚未确认；
+  无合适工具时诚实标记性能量化未测。证据目录：`/tmp/opencode/yacr-android-acceptance-20261012-025646/`。
+
+## Android 真机交互/性能待办（2026-10-12）
+
+- 真机 release 已在 `ebfb4268` 成功安装并启动；同一轮 SAF 打开 manifest 授权的
+  `synthetic-four-lines.dwg` 后标题成功更新，但当前 `*Paper_Space` 画布空白，诊断有
+  `import.annotation_scale_unknown`。内容/实体/视觉完整性没有验收通过。详见
+  [validation-android.md §16](validation-android.md#16-真机-arm64-release-启动saf-与手势初测2026-10-12交互性能仍待补测)。
+- 用户报告：Android 无双指缩放，拖图与缩放很卡。只读定位 lane 确认 Android
+  `view.rs` 移动 contacts=1、canvas `TouchArea` 未传第二指；该处需实现 owner 后续处理，本轮不改代码。
+- 本轮通过 ADB 单指 swipe 操作 demo，第二次平移使 canvas crop 变化 11,227 px；单击 zoom-in/out
+  工具按钮也改变视图。没有物理双指手势、连续帧/响应时间基准；`gfxinfo` 是 HWUI 而非 wgpu canvas，
+  不能据其 0 帧/0 jank 数声称流畅。设备现自动休眠并显示锁屏，本轮不绕过锁屏继续操作。
+- **后续验收待办（不代表已复现）**：用户解锁并保持测试页前台后，获取可靠的多触点输入方式，
+  在授权 DWG 与已确认实体可见的样本上记录 pinch in/out、平移与缩放时序、PID/前台、app logcat、
+  可覆盖 native Vulkan canvas 的帧/性能证据；主观卡顿与客观帧时间分开记录。`HostCore::push` 每次
+  Pan/Zoom 重复派生面板状态仅为待分析候选，尚未证实是瓶颈。
+- 新证据：`/tmp/opencode/yacr-android-device-20261012-010448/`；APK 安装成功/应用存活不等同于
+  手势/性能/视觉验收通过。
+
+## Android USB 真机 release 已构建，安装受设备限制（2026-10-12）
+
+- 当前 checkout `96d631fe8dcaf6658ebee850008ad2f55034d39f` 上本轮实际运行无代理 release 正式脚本成功，
+  arm64 APK 已含 SAF dex/manifest 并验签；详情与 SHA-256 见
+  [validation-android.md §15](validation-android.md#15-arm64-release-真机构建与安装尝试2026-10-12等待设备授权)。
+- `adb -s ebfb4268 install -r -t .../target/release/apk/yacr.apk` 被设备拒绝：
+  `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`。安装后设备无 app package/pid，未启动；
+  未卸载/清数据/读取用户文件。
+- 继续前需用户解锁真机，在系统/开发者选项允许 USB 安装；如果设备显示授权对话框，请允许/安装。
+  然后再对相同 serial 执行 `adb install -r`，保留应用数据，继续启动/交互/日志/截图验收。证据目录
+  `/tmp/opencode/yacr-android-device-20261012-005711/`。
+
+## Android USB 真机：用户报告构建成功后的制品核验（2026-10-12，等待 release APK）
+
+- 用户报告手动运行 `build-android.sh` 成功；本轮未重复构建。唯一设备 `ebfb4268` 在线，型号
+  Xiaomi `23046RP50C`，Android 15/API 35/arm64-v8a。当前设备未安装 `dev.yacr.app`。
+- `target/release/apk/yacr.apk` 仍是早前 `x86_64` artifact，不适用于设备；最新可见
+  `target/debug/apk/yacr.apk` 虽为 arm64、有 SAF dex/manifest 并可验签，但为约 742 MB debug APK，
+  本轮不违反既定 release 安装规则，故未安装。另一个旧外部 arm64 release artifact 缺 `classes.dex`
+  且 `hasCode=false`，不可启动。不能仅凭用户的成功报告断言已获得当前源码对应的 release APK。
+- 因无适用 arm64 release，本轮没有启动/交互/应用日志/截图/GPU 渲染结论，也没有卸载、清数据或读取用户文件。
+  产物及设备证据：`/tmp/opencode/yacr-android-device-20261012-005421/`，详见
+  [validation-android.md §14](validation-android.md#14-用户报告构建成功后的-apk-核验2026-10-12安装被-release-制品阻塞)。
+  需提供 `target/release/apk/yacr.apk`（或明确的 `$CARGO_TARGET_DIR/release/apk/yacr.apk`）后再继续。
+
+## Android USB 真机：指定代理重试（2026-10-11/12，仍阻塞）
+
+- `scripts/build-android.sh` 新增可选 `ANDROID_BUILD_HTTPS_PROXY`：先在隔离子 shell 中清除环境代理，
+  仅该变量非空时将其设置为小写 `https_proxy`；默认仍不使用代理，source 时调用者环境不变。
+  `scripts/test-android-build-proxy.py` 覆盖代理传入、其他代理清除和父 shell 原值保留。
+- 以 `http://192.168.8.1:10809` 做有界探测：Skia GitHub release 单字节 Range 返回 206；
+  `skia.googlesource.com` DEPS 在 5 秒连接超时。随后按正式脚本构建，两个 Android `cargo check`
+  通过，但 `skia-bindings` 链接 30 分钟无日志进展，达到上限后退出码 124；未留下构建进程。
+- 未得到 arm64 APK，未安装/启动应用。设备仍在线，但用户数据未触碰；原有旧 x86_64 APK 未用。
+  本轮设备/探测/构建证据在 `/tmp/opencode/yacr-android-device-20261011-235628/`；细节见
+  [validation-android.md §13](validation-android.md#13-usb-真机重试2026-10-1112指定-https-代理构建超时)。
+
+## Android USB 真机 smoke 尝试（2026-10-11，本轮阻塞）
+
+- 连接设备唯一：小米 `23046RP50C`，Android 15/API 35，`arm64-v8a`；adb serial
+  `ebfb4268`。设备声明 Adreno 730 / Vulkan 能力，但 app 未启动，不能据此声称应用 GPU 渲染通过。
+- 以当前源码 `96d631fe8dcaf6658ebee850008ad2f55034d39f` 运行 release 正式脚本，卡在
+  `skia-bindings` 下载：原代理连接下载中断；新增脚本隔离代理后直连 GitHub 下载超时，多个
+  googlesource 依赖 clone 也连接超时。构建失败，无 APK 可供本轮安装；未安装旧 x86_64 APK，
+  亦未对设备安装/清理/启动任何应用。
+- 本轮新增 `scripts/build-android.sh` 子 shell 作用域与代理清除（8 个大小写变量），并添加
+  `scripts/test-android-build-proxy.py`，测试构建子命令无代理且 `source` 不污染调用者环境；
+  `bash -n`、契约测试通过。`docs/build.md` 已说明此行为。
+- 本轮构建错误、设备属性、旧 APK 元数据与限制详见
+  [validation-android.md §12](validation-android.md#12-usb-真机验证尝试2026-10-11构建阻塞未安装)，证据目录
+  `/tmp/opencode/yacr-android-device-20261011-231245/`。后续需在 Skia 依赖可下载的环境重新构建
+  arm64 release，再执行安装更新、启动与交互验证。
+
 ## 桌面 MOVE 选择快照与关闭取消（2026-10-11，本轮）
 
 - 桌面 `MOVE` 在工具开始时由 `HostCore` 快照所选 `SelectionRef`；确认沿用该快照，不再读取确认时的当前选择。新工具开始会替换快照，取消会清除；命令仍走既有事务/历史漏斗，失败不改为空成功。契约覆盖“选 A → 开始 MOVE → 选择变为 B → 确认只移动 A”、取消/重启重置及撤销/重做。

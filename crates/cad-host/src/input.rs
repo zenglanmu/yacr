@@ -116,7 +116,7 @@ impl ViewInput for HostCore {
         }
     }
 
-    fn scroll(&self, _dx: f64, dy: f64) {
+    fn scroll(&self, _dx: f64, dy: f64, cursor: [f64; 2]) {
         // The desktop wheel arrives through Slint's winit backend, where a
         // positive `delta_y` is a wheel-up rotation (winit: positive means the
         // content moves down, revealing content above). Wheel-up must zoom in
@@ -125,11 +125,10 @@ impl ViewInput for HostCore {
         // deliver browser/gesture deltas whose positive axis points down).
         self.report_nav(self.command(
             CommandId::Zoom,
-            CommandPayload::Points(vec![Point3 {
-                x: (1.0 + dy * 0.0015).clamp(0.2, 5.0),
-                y: 0.0,
-                z: 0.0,
-            }]),
+            CommandPayload::ZoomAt {
+                factor: (1.0 + dy * 0.0015).clamp(0.2, 5.0),
+                cursor,
+            },
         ));
     }
 }
@@ -257,5 +256,117 @@ impl HostCore {
             viewport: c.viewport_id,
             payload: CommandPayload::Move { refs, delta },
         })
+    }
+}
+
+#[cfg(test)]
+mod wheel_anchor_tests {
+    use super::*;
+    use cad_platform::{
+        ConfigLoad, ConfigStore, FileEvent, FileTarget, HostCapabilities, PlatformFiles,
+        SavePurpose, SurfaceMetrics, SurfaceSource,
+    };
+
+    struct WheelFiles;
+    impl PlatformFiles for WheelFiles {
+        fn begin_open(&self) -> CadResult<()> {
+            Ok(())
+        }
+        fn begin_open_target(&self, _target: &FileTarget) -> CadResult<()> {
+            Ok(())
+        }
+        fn begin_save(&self, _purpose: SavePurpose, _default_name: &str) -> CadResult<()> {
+            Ok(())
+        }
+        fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> CadResult<()> {
+            Ok(())
+        }
+        fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
+            false
+        }
+        fn set_source(&self, _target: Option<&FileTarget>) {}
+        fn poll(&self) -> Vec<FileEvent> {
+            Vec::new()
+        }
+    }
+
+    struct WheelConfig;
+    impl ConfigStore for WheelConfig {
+        fn load_config(&self) -> ConfigLoad {
+            ConfigLoad::Absent
+        }
+        fn load_preference(&self) -> ConfigLoad {
+            ConfigLoad::Absent
+        }
+        fn persist_preference(&self, _text: &str) -> CadResult<()> {
+            Ok(())
+        }
+    }
+
+    struct WheelSurface;
+    impl SurfaceSource for WheelSurface {
+        fn surface(&self) -> Option<SurfaceMetrics> {
+            Some(SurfaceMetrics {
+                logical: [800.0, 600.0],
+                scale: 1.0,
+                safe_insets: [0.0; 4],
+            })
+        }
+    }
+
+    fn core() -> HostCore {
+        let options = HostOptions {
+            fonts: Vec::new(),
+            fonts_dir: None,
+            images_dir: None,
+            headless: false,
+            drawing: None,
+            size: [800.0, 600.0],
+            locale: "en".into(),
+        };
+        let platform = HostPlatform {
+            files: Rc::new(WheelFiles),
+            config_store: Rc::new(WheelConfig),
+            surface: Rc::new(WheelSurface),
+            resources: Rc::new(UnsupportedResources),
+            capabilities: HostCapabilities {
+                open: true,
+                new: true,
+                save: true,
+                plot: false,
+                import_worker: false,
+            },
+        };
+        HostCore::new(options, Rc::new(RefCell::new(None)), platform).unwrap()
+    }
+
+    #[test]
+    fn desktop_wheel_uses_off_center_canvas_cursor_and_preserves_legacy_sign() {
+        let core = core();
+        let cursor = [123.0, 177.0];
+        let (anchor_before, scale_before) = {
+            let controller = core.controller.borrow();
+            let viewport = &controller.application.workspace.viewports[&controller.viewport_id];
+            (
+                viewport
+                    .screen_to_world(cursor, viewport.logical_size)
+                    .unwrap(),
+                viewport.world_per_px(),
+            )
+        };
+        HostCore::scroll(&core, 0.0, 200.0, cursor);
+        let (anchor_after, scale_after) = {
+            let controller = core.controller.borrow();
+            let viewport = &controller.application.workspace.viewports[&controller.viewport_id];
+            (
+                viewport
+                    .screen_to_world(cursor, viewport.logical_size)
+                    .unwrap(),
+                viewport.world_per_px(),
+            )
+        };
+        assert!((scale_after / scale_before - 1.0 / 1.3).abs() < 1e-9);
+        assert!((anchor_after.x - anchor_before.x).abs() < 1e-9);
+        assert!((anchor_after.y - anchor_before.y).abs() < 1e-9);
     }
 }

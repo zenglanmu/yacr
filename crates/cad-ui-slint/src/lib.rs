@@ -67,7 +67,172 @@ use slint::{ComponentHandle, Image, Weak};
 pub trait ViewInput {
     /// kind: 0=down 1=up 2=move 3=cancel; button: 0=none 1=left 2=right 3=middle.
     fn pointer(&self, kind: i32, button: i32, x: f64, y: f64);
-    fn scroll(&self, dx: f64, dy: f64);
+    /// Pointer variant carrying Slint's platform-neutral contact id (zero is mouse).
+    fn pointer_with_id(&self, kind: i32, button: i32, x: f64, y: f64, _contact_id: i32) {
+        self.pointer(kind, button, x, y);
+    }
+    /// TouchArea lost hover/grab ownership; this is distinct from pointer cancel.
+    fn pointer_exited(&self) {
+        self.pointer(3, 0, 0.0, 0.0);
+    }
+    /// Pinch lifecycle: 0=start, 1=update, 2=end, 3=cancel. Scale is cumulative.
+    fn pinch(&self, _phase: i32, _scale: f64, _x: f64, _y: f64) {}
+    /// `cursor` is canvas-local logical pixels, not window coordinates.
+    fn scroll(&self, dx: f64, dy: f64, cursor: [f64; 2]);
+}
+
+/// Shared touch-sequence gate used by the real canvas adapter before dispatching
+/// picks. Touch IDs are Slint pointer IDs; zero denotes mouse input.
+#[derive(Debug, Default)]
+pub struct CanvasTouchGuard {
+    first: Option<i32>,
+    suppressed: bool,
+    awaiting_tail: bool,
+    tail_id: Option<i32>,
+    block_current_pick: bool,
+    exit_pending: bool,
+    gesture_owned: bool,
+    ignore_child_exit: bool,
+    ignore_mouse_up: bool,
+}
+
+impl CanvasTouchGuard {
+    pub fn pointer(&mut self, kind: i32, id: i32) {
+        self.block_current_pick = false;
+        if kind == 3 {
+            self.reset();
+            self.block_current_pick = true;
+            self.ignore_mouse_up = true;
+            return;
+        }
+        if id == 0 {
+            // A genuine mouse down starts a fresh sequence; residual Android
+            // contacts always carry their non-zero touch ID.
+            if kind == 0 {
+                self.ignore_mouse_up = false;
+                if self.awaiting_tail {
+                    self.reset();
+                }
+            } else if kind == 1 && std::mem::take(&mut self.ignore_mouse_up) {
+                self.block_current_pick = true;
+            }
+            return;
+        }
+        match kind {
+            0 => {
+                self.ignore_child_exit = false;
+                if self.awaiting_tail {
+                    self.tail_id = Some(id);
+                } else if let Some(first) = self.first {
+                    if id != first {
+                        self.suppressed = true;
+                        self.awaiting_tail = true;
+                        self.tail_id = None;
+                    }
+                } else {
+                    self.first = Some(id);
+                    self.exit_pending = false;
+                }
+                if self.suppressed {
+                    self.block_current_pick = true;
+                }
+            }
+            1 => {
+                if self.awaiting_tail {
+                    self.suppressed = true;
+                    self.block_current_pick = true;
+                    if self.tail_id == Some(id) {
+                        self.reset();
+                        self.ignore_child_exit = true;
+                    }
+                } else if self.first.is_some_and(|first| id != first) {
+                    // Slint emits this synthetic Up for contact B when B goes
+                    // down while A owns the TouchArea. There is no raw Down(B).
+                    self.first = None;
+                    self.suppressed = true;
+                    self.awaiting_tail = true;
+                    self.tail_id = None;
+                    self.block_current_pick = true;
+                } else if self.first == Some(id) {
+                    if self.exit_pending || self.suppressed {
+                        self.block_current_pick = true;
+                        self.reset();
+                    } else {
+                        self.first = None;
+                    }
+                } else {
+                    // An Up without a matching non-cancelled Down is never a tap.
+                    self.block_current_pick = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn gesture(&mut self, phase: i32) {
+        match phase {
+            0 => {
+                self.suppressed = true;
+                self.awaiting_tail = true;
+                self.tail_id = None;
+                self.first = None;
+                self.gesture_owned = true;
+                self.exit_pending = false;
+                self.ignore_child_exit = true;
+            }
+            1 => {}
+            2 => {
+                self.suppressed = true;
+                self.awaiting_tail = true;
+                self.tail_id = None;
+            }
+            3 => {
+                self.reset();
+                self.block_current_pick = true;
+                self.ignore_mouse_up = true;
+            }
+            _ => {}
+        }
+    }
+
+    pub fn allows_pick(&self) -> bool {
+        !self.suppressed && !self.block_current_pick
+    }
+
+    /// True when the current touch sequence must not reach platform navigation.
+    /// This is separate from mouse input (contact id zero).
+    pub fn suppresses_pointer(&self) -> bool {
+        self.suppressed || self.awaiting_tail || self.block_current_pick
+    }
+
+    /// TouchArea hover loss can mean child Exit during parent gesture grab.
+    /// Defer while a contact is owned; the later Up/lifecycle decides whether it
+    /// was a genuine exit or the nested handler taking the grab.
+    pub fn exit(&mut self) {
+        if self.ignore_child_exit {
+            self.ignore_child_exit = false;
+            return;
+        }
+        if self.awaiting_tail || self.gesture_owned {
+            self.ignore_child_exit = true;
+            return;
+        }
+        if self.first.is_some() {
+            self.exit_pending = true;
+            self.suppressed = true;
+        } else {
+            self.ignore_mouse_up = true;
+        }
+    }
+
+    fn reset(&mut self) {
+        self.first = None;
+        self.suppressed = false;
+        self.awaiting_tail = false;
+        self.tail_id = None;
+        self.exit_pending = false;
+        self.gesture_owned = false;
+    }
 }
 
 /// Maps a canvas click in logical pixels to a world-space point.

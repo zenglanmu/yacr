@@ -97,6 +97,12 @@ CI 发布层：`build.yml` 的 `android-release`（`workflow_dispatch` / `v*` ta
 依赖：JDK 17、Android SDK（build-tools 34.0.0、platform android-34/30）、
 NDK 27.0.12077973、`cargo-apk 0.10.0`。
 
+`scripts/build-android.sh` 在自身隔离的子 shell 中清除大小写两种 HTTP/HTTPS/ALL/NO
+proxy 变量，避免意外继承代理；需要指定 HTTPS 代理时可在调用前设置
+`ANDROID_BUILD_HTTPS_PROXY=http://host:port`，脚本仅在子进程中将其设为小写 `https_proxy`
+（`http_proxy` 等仍保持清除）。不论直接执行或 `source`，均不会改写调用者 shell 的代理环境；
+脚本其余 Android 环境变量也只在该子 shell 内生效。默认未设置时仍为无代理。
+
 ```bash
 export ANDROID_HOME="$HOME/android-sdk"
 export ANDROID_NDK="$ANDROID_HOME/ndk/27.0.12077973"      # skia-bindings 需要
@@ -111,6 +117,35 @@ cargo apk build -p app-android --target aarch64-linux-android --lib
 cargo apk build -p app-android --target aarch64-linux-android --lib --release
 # 产物：target/{debug,release}/apk/yacr.apk
 ```
+
+### 本地 release APK（与 CI 一样完整打包字体）
+
+`android-release` workflow 的顺序是先运行 `scripts/fetch-fonts.sh
+apps/app-android/assets/fonts`（**不传子集参数**，下载当次上游 `fonts.json` 列出的全部面并合并
+仓库 `fonts/osifont.ttf`），再运行 `scripts/build-android.sh --release`。本地发布也必须按同一顺序，
+否则 APK 可能没有 fonts 资源：
+
+```bash
+# 在网络可访问的主机运行；按需隔离网络代理，不改调用 shell 的代理配置
+scripts/fetch-fonts.sh apps/app-android/assets/fonts
+bash scripts/build-android.sh --release
+python3 scripts/check-android-apk-fonts.py target/release/apk/yacr.apk \
+  --fonts-dir apps/app-android/assets/fonts
+```
+
+校验器从本次准备的 `fonts.json` 动态读取所需文件（不固定远程字体数量/版本），核对 APK 内
+`assets/fonts/fonts.json` 字节一致、每项字体非空且与准备目录 SHA-256 一致，并验证合并项
+`osifont.ttf` 与仓库授权版本一致。契约测试：
+`python3 scripts/test-check-android-apk-fonts.py`。仅构建/签名成功不代表字体已进入 APK；发布前
+必须让上述包内验证通过。CI 流程与本地一致，但 CI artifact 也不等于安装/运行验收。
+
+`apps/app-android/assets/fonts/` 的下载字体被 `.gitignore` 忽略，不提交二进制字体；准备出的清单
+和每份字节应作为本轮构建的动态输入记录（例如 SHA-256、下载日志、校验输出），不要仅引用历史
+清单 hash 或旧字体数量。`mlightcad/cad-data` 是第三方且未声明仓库级许可证，字体逐项授权和 APK
+再分发许可由发布方负责核实；抓取成功或加入 CI artifact 不构成许可结论。仓库合并的 QCAD
+`osifont.ttf` 为 GPL-3 + font exception，来源、哈希与许可见 `fonts/SOURCE.md`。
+本轮已执行的无代理 release 构建、动态清单 hash、逐项 APK 字体验证与设备运行边界见
+`docs/validation-android.md` §18；该记录也注明了尚待处理的代码门禁告警。
 
 发布签名：`[package.metadata.android.signing.release]` 指向 `dev-release.jks`，
 该文件被 `.gitignore` 的 `*.jks` 排除，需本地生成：

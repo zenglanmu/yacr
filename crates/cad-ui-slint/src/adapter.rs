@@ -235,6 +235,7 @@ impl UiAdapter {
         let viewport = configuration.viewport;
         let shared: Rc<RefCell<S>> = Rc::new(RefCell::new(sink));
         let view_input: Rc<RefCell<Option<Rc<dyn ViewInput>>>> = Rc::new(RefCell::new(None));
+        let touch_guard = Rc::new(RefCell::new(CanvasTouchGuard::default()));
         let pick_mapper: Rc<RefCell<Option<Rc<dyn CanvasPickMapper>>>> =
             Rc::new(RefCell::new(None));
         let layout_switch: Rc<RefCell<Option<Box<dyn LayoutSwitchSink>>>> =
@@ -819,11 +820,15 @@ impl UiAdapter {
             let draw_preview = draw_preview_sink.clone();
             let messages = messages_slot.clone();
             let gate = viewer_config.clone();
+            let touch = touch_guard.clone();
             ui.on_canvas_pick(move |x, y| {
                 // A canvas pick is a pointer gesture; disabling pointer input
                 // must silence it even though it bypasses `pointer-input`.
                 let enabled = input_enabled(&gate.borrow(), InputKind::Pointer);
                 if !enabled {
+                    return;
+                }
+                if !touch.borrow().allows_pick() {
                     return;
                 }
                 if report.upgrade().is_some_and(|ui| ui.get_pan_active()) {
@@ -1225,18 +1230,35 @@ impl UiAdapter {
             let mapper = pick_mapper.clone();
             let report = ui_weak.clone();
             let gate = viewer_config.clone();
-            ui.on_pointer_input(move |kind, button, x, y| {
+            let touch = touch_guard.clone();
+            ui.on_pointer_input(move |kind, button, x, y, contact_id| {
+                let suppress_touch = {
+                    let mut guard = touch.borrow_mut();
+                    guard.pointer(kind, contact_id);
+                    contact_id != 0 && guard.suppresses_pointer()
+                };
                 // Mouse, trackpad and Android-synthesized touch all enter here;
                 // `interaction.pointer` is their shared gate.
                 let enabled = input_enabled(&gate.borrow(), InputKind::Pointer);
                 if !enabled {
+                    if suppress_touch {
+                        if let Some(input) = input.borrow().as_ref() {
+                            input.pointer_with_id(3, button, x as f64, y as f64, contact_id);
+                        }
+                    }
+                    return;
+                }
+                if suppress_touch {
+                    if let Some(input) = input.borrow().as_ref() {
+                        input.pointer_with_id(3, button, x as f64, y as f64, contact_id);
+                    }
                     return;
                 }
                 let x = x as f64;
                 let y = y as f64;
                 if report.upgrade().is_some_and(|ui| ui.get_pan_active()) {
                     if let Some(input) = input.borrow().as_ref() {
-                        input.pointer(
+                        input.pointer_with_id(
                             kind,
                             if button == 1 || button == 0 {
                                 3
@@ -1245,6 +1267,7 @@ impl UiAdapter {
                             },
                             x,
                             y,
+                            contact_id,
                         );
                     }
                     return;
@@ -1304,21 +1327,87 @@ impl UiAdapter {
                     }
                 }
                 if let Some(input) = input.borrow().as_ref() {
-                    input.pointer(kind, button, x, y);
+                    input.pointer_with_id(kind, button, x, y, contact_id);
+                }
+            });
+        }
+        {
+            let input = view_input.clone();
+            let touch = touch_guard.clone();
+            let gate = viewer_config.clone();
+            let pinch_forwarded = Rc::new(Cell::new(false));
+            let forwarded = pinch_forwarded.clone();
+            let pinch_revision = Rc::new(Cell::new(None));
+            let seen_revision = pinch_revision.clone();
+            ui.on_pinch_input(move |phase, scale, x, y| {
+                touch.borrow_mut().gesture(phase);
+                let enabled = input_enabled(&gate.borrow(), InputKind::Pointer);
+                let revision = gate.borrow().revision;
+                if let Some(input) = input.borrow().as_ref() {
+                    if phase == 0 {
+                        seen_revision.set(Some(revision));
+                        forwarded.set(enabled);
+                        if enabled {
+                            input.pinch(phase, scale as f64, x as f64, y as f64);
+                        }
+                        return;
+                    }
+                    if phase != 0
+                        && seen_revision
+                            .get()
+                            .is_some_and(|previous| previous != revision)
+                    {
+                        seen_revision.set(Some(revision));
+                        if forwarded.replace(false) {
+                            input.pinch(3, scale as f64, x as f64, y as f64);
+                        }
+                        return;
+                    }
+                    let was_forwarded = forwarded.get();
+                    match phase {
+                        1 if enabled && was_forwarded => {
+                            input.pinch(phase, scale as f64, x as f64, y as f64);
+                        }
+                        1 if !enabled && was_forwarded => {
+                            forwarded.set(false);
+                            input.pinch(3, scale as f64, x as f64, y as f64);
+                        }
+                        2 | 3 => {
+                            forwarded.set(false);
+                            if was_forwarded {
+                                if enabled && phase == 2 {
+                                    input.pinch(phase, scale as f64, x as f64, y as f64);
+                                } else {
+                                    input.pinch(3, scale as f64, x as f64, y as f64);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            });
+        }
+        {
+            let input = view_input.clone();
+            let touch = touch_guard.clone();
+            ui.on_pointer_exited(move || {
+                touch.borrow_mut().exit();
+                if let Some(input) = input.borrow().as_ref() {
+                    input.pointer_exited();
                 }
             });
         }
         {
             let input = view_input.clone();
             let gate = viewer_config.clone();
-            ui.on_scroll_input(move |dx, dy| {
+            ui.on_scroll_input(move |dx, dy, x, y| {
                 // Scroll is the wheel form of pointer input and shares its gate.
                 let enabled = input_enabled(&gate.borrow(), InputKind::Pointer);
                 if !enabled {
                     return;
                 }
                 if let Some(input) = input.borrow().as_ref() {
-                    input.scroll(dx as f64, dy as f64);
+                    input.scroll(dx as f64, dy as f64, [x as f64, y as f64]);
                 }
             });
         }

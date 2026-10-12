@@ -56,7 +56,11 @@ impl ConfigStore for FakeConfig {
 struct FakeSurface;
 impl SurfaceSource for FakeSurface {
     fn surface(&self) -> Option<SurfaceMetrics> {
-        None
+        Some(SurfaceMetrics {
+            logical: [800.0, 600.0],
+            scale: 1.0,
+            safe_insets: [0.0; 4],
+        })
     }
 }
 
@@ -583,4 +587,117 @@ fn synchronous_delivered_open_arms_the_guard_with_the_platform_target() {
         Some(&target),
         "the guard arms with the platform's opaque handle, not the display name"
     );
+}
+
+#[test]
+fn navigation_changes_only_camera_and_invalid_pan_stays_an_error() {
+    let core = core_with(Rc::new(FakeFiles::default()), false);
+    let (entity, _) = add_two_lines(&core);
+    select_entity(&core, entity);
+    run_controller_command(
+        &core,
+        CommandId::Measure,
+        CommandPayload::MeasureTool(cad_app::MeasurementToolKind::Distance),
+    );
+    core.controller
+        .borrow_mut()
+        .session
+        .set_measurement_cursor(Some(p(0.0, 0.0)))
+        .unwrap();
+    let snap_hints_before = core.controller.borrow().snap_hints_near_cursor().unwrap();
+    assert!(!snap_hints_before.is_empty());
+
+    let before_drawing = core.controller.borrow().drawing().unwrap();
+    let (
+        document,
+        viewport,
+        generation,
+        selection,
+        history,
+        measurement_preview,
+        has_measurement,
+        camera,
+        saved_camera,
+    ) = {
+        let c = core.controller.borrow();
+        let viewport = c
+            .application
+            .workspace
+            .viewports
+            .get(&c.viewport_id)
+            .unwrap();
+        (
+            c.document_id,
+            c.viewport_id,
+            c.session.generation,
+            c.session.selection.refs().to_vec(),
+            c.history_availability(),
+            c.session.measurement_preview(),
+            c.session.has_last_measurement(),
+            viewport.camera,
+            viewport.view_mode.saved_2d_camera(),
+        )
+    };
+    let pan = Command {
+        schema_version: 1,
+        id: CommandId::Pan,
+        document,
+        viewport,
+        payload: CommandPayload::Points(vec![p(15.0, -7.0)]),
+    };
+    core.controller.borrow_mut().execute(pan).unwrap();
+    let zoom = Command {
+        schema_version: 1,
+        id: CommandId::Zoom,
+        document,
+        viewport,
+        payload: CommandPayload::ZoomAt {
+            factor: 1.5,
+            cursor: [400.0, 300.0],
+        },
+    };
+    core.controller.borrow_mut().execute(zoom).unwrap();
+
+    let c = core.controller.borrow();
+    let current = c.application.workspace.viewports.get(&viewport).unwrap();
+    assert_ne!(current.camera, camera);
+    assert_eq!(
+        current.view_mode.saved_2d_camera(),
+        current.camera,
+        "2D saved camera tracks navigation"
+    );
+    assert_ne!(current.camera, saved_camera);
+    assert_eq!(c.session.generation, generation);
+    assert_eq!(c.session.selection.refs(), selection);
+    assert_eq!(c.history_availability(), history);
+    assert!(matches!(c.session.tool, cad_app::ToolState::Measuring(_)));
+    assert_eq!(c.session.measurement_preview(), measurement_preview);
+    assert_eq!(c.session.has_last_measurement(), has_measurement);
+    assert!(!c.snap_hints_near_cursor().unwrap().is_empty());
+    assert!(Arc::ptr_eq(&before_drawing, &c.drawing().unwrap()));
+    drop(c);
+
+    let invalid = core.command(CommandId::Pan, CommandPayload::None);
+    assert!(matches!(invalid, Err(CadError::InvalidInput(_))));
+}
+
+#[test]
+fn light_navigation_push_qualification_matrix() {
+    let eligible =
+        || use_light_navigation_push(CommandId::Pan, true, true, true, true, true, false);
+    assert!(eligible());
+    for (id, succeeded, viewport, drawing, handle, view, loading) in [
+        (CommandId::Zoom, false, true, true, true, true, false),
+        (CommandId::FitDrawing, true, true, true, true, true, false),
+        (CommandId::Pan, true, false, true, true, true, false),
+        (CommandId::Pan, true, true, false, true, true, false),
+        (CommandId::Pan, true, true, true, false, true, false),
+        (CommandId::Pan, true, true, true, true, false, false),
+        (CommandId::Pan, true, true, true, true, true, true),
+    ] {
+        assert!(
+            !use_light_navigation_push(id, succeeded, viewport, drawing, handle, view, loading),
+            "unexpected light push for {id:?}"
+        );
+    }
 }

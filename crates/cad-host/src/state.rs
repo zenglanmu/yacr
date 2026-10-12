@@ -7,6 +7,17 @@ use cad_ui_slint::{
 };
 
 impl HostCore {
+    /// Synchronize only the complete camera/session snapshot and cursor snaps.
+    /// Navigation does not change drawing geometry or the other session panels.
+    pub(crate) fn push_navigation(&self) -> CadResult<()> {
+        self.sync_view()?;
+        let c = self.controller.borrow();
+        let view = self.view.borrow();
+        let view = view.as_ref().ok_or(CadError::Cancelled)?;
+        view.set_snap_hints(c.snap_hints_near_cursor()?);
+        Ok(())
+    }
+
     /// Push the derived view/observation state and, if the view exists, the
     /// session camera/layers/selection/snap state.
     pub fn sync_view(&self) -> CadResult<()> {

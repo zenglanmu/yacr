@@ -109,7 +109,7 @@ pub fn resolve_locale(requested: &str) -> LocaleResolution {
                 requested: trimmed.to_string(),
                 locale: Locale::ZhCn,
                 fallback: Some(FallbackReason::Unsupported),
-            }
+            };
         }
     };
     // The canonical, stable tag resolves exactly; anything with a region or

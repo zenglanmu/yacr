@@ -46,6 +46,13 @@ pub(super) fn selection_allowed(tool: &ToolState) -> bool {
     !matches!(tool, ToolState::Measuring(_))
 }
 
+fn wheel_zoom_payload(dy: f64, cursor: [f64; 2]) -> CommandPayload {
+    CommandPayload::ZoomAt {
+        factor: (1.0 - dy * 0.0015).clamp(0.2, 5.0),
+        cursor,
+    }
+}
+
 /// Which capture tool a pointer move should feed its live preview cursor.
 ///
 /// Pure classification so the pointer glue stays trivial: an inactive/idle tool
@@ -286,17 +293,9 @@ impl ViewInput for WebViewInput {
         }
     }
 
-    fn scroll(&self, _dx: f64, dy: f64) {
-        let factor = (1.0 - dy * 0.0015).clamp(0.2, 5.0);
+    fn scroll(&self, _dx: f64, dy: f64, cursor: [f64; 2]) {
         self.last.set([0.0, 0.0]);
-        self.send(
-            CommandId::Zoom,
-            CommandPayload::Points(vec![Point3 {
-                x: factor,
-                y: 0.0,
-                z: 0.0,
-            }]),
-        );
+        self.send(CommandId::Zoom, wheel_zoom_payload(dy, cursor));
     }
 }
 
@@ -304,6 +303,16 @@ impl ViewInput for WebViewInput {
 mod tests {
     use super::*;
     use cad_app::{MeasurementTool, MeasurementToolKind};
+
+    #[test]
+    fn wheel_zoom_payload_keeps_cursor_and_browser_delta_sign() {
+        let CommandPayload::ZoomAt { factor, cursor } = wheel_zoom_payload(200.0, [123.0, 177.0])
+        else {
+            panic!("wheel must emit a cursor-anchored zoom payload");
+        };
+        assert!((factor - 0.7).abs() < 1e-12);
+        assert_eq!(cursor, [123.0, 177.0]);
+    }
 
     #[test]
     fn a_zero_length_press_and_release_is_a_selection_tap() {

@@ -1,6 +1,6 @@
 //! Native validation platform: the production Slint component rendered into a wgpu texture.
 //! No window server, emulator, or alternate UI implementation.
-use cad_render_wgpu::{headless, wgpu, BackendPreference};
+use cad_render_wgpu::{headless, wgpu, BackendPreference, GpuSelection};
 use slint::platform::{
     femtovg_renderer::FemtoVGWGPURenderer, Platform, PlatformError, WindowAdapter,
 };
@@ -31,18 +31,53 @@ impl WindowAdapter for OffscreenWindow {
     fn request_redraw(&self) {}
 }
 struct OffscreenPlatform;
+
+fn create_validation_gpu() -> Result<headless::HeadlessGpu, PlatformError> {
+    let high_performance =
+        headless::create_headless_gpu_with(BackendPreference::Auto, GpuSelection::HighPerformance)
+            .map_err(|error| error.to_string())?;
+    if matches!(
+        high_performance.adapter.device_type.as_str(),
+        "discrete_gpu" | "integrated_gpu"
+    ) {
+        return Ok(high_performance);
+    }
+
+    // Auto/high-performance may return its first adapter when no discrete GPU
+    // exists. Probe the low-power preference before accepting a CPU fallback so
+    // an integrated GPU is still preferred over software rendering.
+    match headless::create_headless_gpu_with(BackendPreference::Auto, GpuSelection::LowPower) {
+        Ok(low_power)
+            if matches!(
+                low_power.adapter.device_type.as_str(),
+                "discrete_gpu" | "integrated_gpu"
+            ) =>
+        {
+            Ok(low_power)
+        }
+        _ => Ok(high_performance),
+    }
+}
+
 impl Platform for OffscreenPlatform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
-        let gpu =
-            headless::create_headless_gpu(BackendPreference::Auto).map_err(|e| e.to_string())?;
-        if gpu.adapter.backend != "vulkan" || gpu.adapter.device_type != "cpu" {
+        let gpu = create_validation_gpu()?;
+        if gpu.adapter.backend != "vulkan" {
             return Err(format!(
-                "offscreen validation requires software Vulkan, got {:?}",
+                "offscreen validation requires Vulkan, got {:?}",
                 gpu.adapter
             )
             .into());
         }
-        eprintln!("Slint offscreen adapter: {:?}", gpu.adapter);
+        let render_class = match gpu.adapter.device_type.as_str() {
+            "discrete_gpu" | "integrated_gpu" => "hardware",
+            "cpu" => "software fallback (no usable hardware adapter selected)",
+            _ => "other adapter type",
+        };
+        eprintln!(
+            "Slint offscreen adapter: class={render_class}, name={}, device_type={}, backend={}",
+            gpu.adapter.name, gpu.adapter.device_type, gpu.adapter.backend
+        );
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         descriptor.backends = wgpu::Backends::VULKAN;
         let renderer =

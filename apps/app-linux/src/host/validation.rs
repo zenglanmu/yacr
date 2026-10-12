@@ -744,6 +744,289 @@ mod tests {
         );
     }
 
+    /// Run the HostCore navigation-to-Slint bridge assertions on the real
+    /// desktop renderer. Unlike the cad-host synthetic tests, this owns the
+    /// native event loop and quits from a bounded Slint timer callback.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires a real Wayland/X11 window and NVIDIA hardware Vulkan"]
+    fn real_gpu_host_navigation_push_updates_bridge_and_preserves_full_push_semantics() {
+        use std::cell::Cell;
+        use std::time::{Duration, Instant};
+
+        assert!(
+            std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some(),
+            "real-window acceptance requires WAYLAND_DISPLAY or DISPLAY"
+        );
+        for variable in [
+            "VK_ICD_FILENAMES",
+            "VK_DRIVER_FILES",
+            "VK_ADD_DRIVER_FILES",
+            "VK_LOADER_DRIVERS_SELECT",
+            "WGPU_ADAPTER_NAME",
+            "MESA_VK_DEVICE_SELECT",
+            "MESA_LOADER_DRIVER_OVERRIDE",
+        ] {
+            assert!(
+                std::env::var_os(variable).is_none(),
+                "refusing forced/software GPU selection from {variable}"
+            );
+        }
+        let output = PathBuf::from(
+            std::env::var_os("YACR_NAVIGATION_OUTPUT")
+                .expect("set a fresh YACR_NAVIGATION_OUTPUT evidence directory"),
+        );
+        std::fs::create_dir(&output).expect("evidence directory must be new");
+
+        cad_ui_slint::select_wgpu_backend_with(cad_render_wgpu::GpuSelection::Auto).unwrap();
+        let app = Rc::new(LinuxApp::new(LinuxOptions::parse([]).unwrap()).unwrap());
+        let core = &app.runtime;
+        let point = |x: f64, y: f64| cad_domain::Point3 { x, y, z: 0.0 };
+        let first = {
+            let mut controller = core.controller.borrow_mut();
+            let created = controller
+                .create_line(point(0.0, 0.0), point(1.0, 0.0))
+                .unwrap();
+            let second = controller
+                .create_line(point(0.0, 10.0), point(1.0, 10.0))
+                .unwrap();
+            let entity = cad_domain::EntityId(created.objects[0].0);
+            assert_ne!(entity, cad_domain::EntityId(second.objects[0].0));
+            let document = controller.document_id;
+            controller
+                .session
+                .selection
+                .replace([cad_app::selection::model_ref(document, entity)]);
+            entity
+        };
+        core.push().unwrap();
+        core.command(
+            cad_app::CommandId::Measure,
+            cad_app::CommandPayload::MeasureTool(cad_app::MeasurementToolKind::Distance),
+        )
+        .unwrap();
+
+        let (viewport, initial_world_per_px) = {
+            let controller = core.controller.borrow();
+            (
+                controller.viewport_id,
+                controller.application.workspace.viewports[&controller.viewport_id].world_per_px(),
+            )
+        };
+        assert!(initial_world_per_px.is_finite() && initial_world_per_px > 0.0);
+
+        // Find the real endpoint's candidate cutoff through HostCore's
+        // production snap getter, then keep the cursor inside before zoom and
+        // outside after its 4x world-per-pixel reduction.
+        let mut low = 0.0;
+        let mut high = initial_world_per_px;
+        let set_cursor_and_check = |distance: f64| {
+            core.controller
+                .borrow_mut()
+                .session
+                .set_measurement_cursor(Some(point(distance, 0.0)))
+                .unwrap();
+            core.controller
+                .borrow()
+                .snap_hints_near_cursor()
+                .unwrap()
+                .iter()
+                .any(|hint| hint.source.entity == first && hint.point == point(0.0, 0.0))
+        };
+        if !set_cursor_and_check(high) {
+            for _ in 0..48 {
+                let middle = (low + high) * 0.5;
+                if set_cursor_and_check(middle) {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+        } else {
+            for _ in 0..48 {
+                high *= 2.0;
+                assert!(high.is_finite(), "snap cutoff search overflowed");
+                if !set_cursor_and_check(high) {
+                    break;
+                }
+                low = high;
+            }
+            assert!(!set_cursor_and_check(high), "could not bound snap cutoff");
+            for _ in 0..48 {
+                let middle = (low + high) * 0.5;
+                if set_cursor_and_check(middle) {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+        }
+        let cursor_distance = low * 0.75;
+        assert!(cursor_distance > 0.0 && set_cursor_and_check(cursor_distance));
+        core.push().unwrap();
+
+        let drawing_before = core.controller.borrow().drawing().unwrap();
+        let (generation, selection, history, measurement, camera_before) = {
+            let controller = core.controller.borrow();
+            (
+                controller.session.generation,
+                controller.session.selection.refs().to_vec(),
+                controller.history_availability(),
+                controller.session.measurement_preview(),
+                controller.application.workspace.viewports[&viewport].camera,
+            )
+        };
+        let view = core
+            .view
+            .borrow()
+            .clone()
+            .expect("LinuxApp installs its CadView");
+        assert_eq!(view.camera3d(), camera_before);
+        let snap_before = view.snap_hints();
+        assert!(snap_before
+            .iter()
+            .any(|hint| hint.source.entity == first && hint.point == point(0.0, 0.0)));
+        assert_eq!(
+            snap_before,
+            core.controller.borrow().snap_hints_near_cursor().unwrap()
+        );
+        assert_eq!(app.adapter.component().get_selection_count(), 1);
+        assert!(app.adapter.component().get_measurement_active());
+
+        core.command(
+            cad_app::CommandId::Pan,
+            cad_app::CommandPayload::Points(vec![point(15.0, -7.0)]),
+        )
+        .expect("successful Pan must complete its light push");
+        {
+            let controller = core.controller.borrow();
+            let viewport_state = &controller.application.workspace.viewports[&viewport];
+            assert_eq!(view.camera3d(), viewport_state.camera);
+            assert_eq!(view.camera3d(), viewport_state.view_mode.saved_2d_camera());
+            assert_eq!(view.selection_highlight().refs(), selection.as_slice());
+            assert_eq!(controller.session.generation, generation);
+            assert_eq!(controller.session.selection.refs(), selection);
+            assert_eq!(controller.history_availability(), history);
+            assert_eq!(controller.session.measurement_preview(), measurement);
+            assert!(Arc::ptr_eq(&drawing_before, &controller.drawing().unwrap()));
+        }
+        let pan_hints = view.snap_hints();
+        assert!(pan_hints
+            .iter()
+            .any(|hint| hint.source.entity == first && hint.point == point(0.0, 0.0)));
+
+        core.command(
+            cad_app::CommandId::Zoom,
+            cad_app::CommandPayload::ZoomAt {
+                factor: 4.0,
+                cursor: [400.0, 300.0],
+            },
+        )
+        .expect("successful Zoom must complete its light push");
+        let camera_after_zoom =
+            core.controller.borrow().application.workspace.viewports[&viewport].camera;
+        let zoom_hints = view.snap_hints();
+        assert_eq!(view.camera3d(), camera_after_zoom);
+        assert!(!zoom_hints
+            .iter()
+            .any(|hint| hint.source.entity == first && hint.point == point(0.0, 0.0)));
+        assert!(app.adapter.component().get_measurement_active());
+        {
+            let controller = core.controller.borrow();
+            assert_eq!(controller.session.generation, generation);
+            assert_eq!(controller.session.selection.refs(), selection);
+            assert_eq!(controller.history_availability(), history);
+            assert_eq!(controller.session.measurement_preview(), measurement);
+            assert!(Arc::ptr_eq(&drawing_before, &controller.drawing().unwrap()));
+            assert_eq!(
+                controller.application.workspace.viewports[&viewport]
+                    .view_mode
+                    .saved_2d_camera(),
+                camera_after_zoom
+            );
+        }
+
+        core.command(
+            cad_app::CommandId::Select,
+            cad_app::CommandPayload::Selection(Vec::new()),
+        )
+        .unwrap();
+        assert_eq!(app.adapter.component().get_selection_count(), 0);
+        assert!(view.selection_highlight().is_empty());
+        let error = core
+            .command(cad_app::CommandId::Pan, cad_app::CommandPayload::None)
+            .unwrap_err();
+        assert!(matches!(error, CadError::InvalidInput(_)));
+        assert_eq!(
+            app.adapter.component().get_status_label().to_string(),
+            core.last_status().unwrap()
+        );
+        std::fs::write(
+            output.join("host-navigation.txt"),
+            format!(
+                "display={} wayland={:?}\ninitial_world_per_px={initial_world_per_px}\nsnap_cursor_distance={cursor_distance}\nsnap_before={} snap_after_pan={} snap_after_zoom={}\nfull_push_selection_count={} measurement_active={}\n",
+                std::env::var("DISPLAY").unwrap_or_default(),
+                std::env::var("WAYLAND_DISPLAY").ok(),
+                snap_before.len(),
+                pan_hints.len(),
+                zoom_hints.len(),
+                app.adapter.component().get_selection_count(),
+                app.adapter.component().get_measurement_active(),
+            ),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let completed = Rc::new(Cell::new(false));
+        let timer = slint::Timer::default();
+        let probe = app.clone();
+        let completed_probe = completed.clone();
+        timer.start(slint::TimerMode::Repeated, Duration::from_millis(50), move || {
+            let view = probe.runtime.view.borrow();
+            let Some(view) = view.as_ref() else {
+                assert!(Instant::now() < deadline, "CadView was not installed before deadline");
+                return;
+            };
+            if view.backend_is_live() && view.frames_rendered() >= 1 {
+                assert_eq!(view.backend_label().as_deref(), Some("vulkan"));
+                let backend = format!("{:?}", view.active_backend());
+                assert!(backend.contains("Native"), "unexpected renderer backend: {backend}");
+                let fds = std::fs::read_dir("/proc/self/fd")
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                    .collect::<Vec<_>>();
+                assert!(
+                    fds.iter().any(|path| path == Path::new("/dev/nvidia0")),
+                    "no NVIDIA device fd in the live renderer process: {fds:?}"
+                );
+                std::fs::write(
+                    output.join("renderer.txt"),
+                    format!(
+                        "backend={backend}\napi={:?}\nframes_rendered={}\nnvidia_device_fd=true\n",
+                        view.backend_label(),
+                        view.frames_rendered(),
+                    ),
+                )
+                .unwrap();
+                completed_probe.set(true);
+                slint::quit_event_loop().unwrap();
+            } else if Instant::now() >= deadline {
+                panic!(
+                    "real GPU renderer did not become live and render a frame within 90s: backend={:?}, frames={}, last_error={:?}, scene_error={:?}",
+                    view.backend_label(),
+                    view.frames_rendered(),
+                    view.last_error(),
+                    view.scene_error()
+                );
+            }
+        });
+        app.run().unwrap();
+        assert!(
+            completed.get(),
+            "Slint event loop quit without renderer acceptance"
+        );
+    }
+
     /// Real-window acceptance for maximization, full-canvas grid coverage,
     /// pointer crosshair, zoom-out, pan, and restore/resize/re-maximize.
     #[test]

@@ -43,6 +43,8 @@ pub(crate) struct AndroidViewInput {
     /// a drag so a one-finger drag pans and only a real tap turns into a
     /// selection pick.
     policy: RefCell<InputPolicy>,
+    touch_guard: RefCell<cad_ui_slint::CanvasTouchGuard>,
+    pinch_scale: Cell<Option<f64>>,
 }
 
 impl AndroidViewInput {
@@ -53,6 +55,8 @@ impl AndroidViewInput {
             last: Cell::new([0.0, 0.0]),
             dragging: Cell::new(false),
             policy: RefCell::new(InputPolicy::new()),
+            touch_guard: RefCell::new(cad_ui_slint::CanvasTouchGuard::default()),
+            pinch_scale: Cell::new(None),
         }
     }
 
@@ -62,7 +66,19 @@ impl AndroidViewInput {
         }
     }
 
-    fn send(&self, id: CommandId, payload: CommandPayload) {
+    fn send(&self, id: CommandId, payload: CommandPayload) -> bool {
+        let zoom_request = match (&id, &payload) {
+            (CommandId::Zoom, CommandPayload::ZoomAt { factor, cursor }) => self
+                .core
+                .controller
+                .borrow()
+                .application
+                .workspace
+                .viewports
+                .get(&self.viewport)
+                .map(|viewport| (viewport.camera, viewport.logical_size, *factor, *cursor)),
+            _ => None,
+        };
         let document = self.core.controller.borrow().document_id;
         let command = Command {
             schema_version: 1,
@@ -71,7 +87,32 @@ impl AndroidViewInput {
             viewport: self.viewport,
             payload,
         };
-        let _ = state_push::run_command(&self.core, command);
+        let result = state_push::run_command(&self.core, command);
+        if result.is_ok() {
+            return true;
+        }
+        // HostCore returns a post-command UI push error when the command itself
+        // already succeeded. For zoom, camera mutation is authoritative evidence
+        // that the command applied and the cumulative gesture baseline may move.
+        zoom_request.is_some_and(|(before, size, factor, cursor)| {
+            let changed = self
+                .core
+                .controller
+                .borrow()
+                .application
+                .workspace
+                .viewports
+                .get(&self.viewport)
+                .is_some_and(|viewport| viewport.camera != before);
+            if changed {
+                return true;
+            }
+            // A valid zoom can clamp at a limit and leave the camera unchanged.
+            // Validate the same transformation on a copy to distinguish that
+            // accepted no-op from a rejected command despite a later push error.
+            let mut probe = before;
+            probe.zoom_at(factor, cursor, size).is_ok() && probe == before
+        })
     }
 
     /// Whether a capture tool (measure/annotate) owns canvas taps right now.
@@ -155,13 +196,56 @@ impl AndroidViewInput {
     }
 }
 
+pub(super) fn pinch_factor(previous: f64, current: f64) -> Option<f64> {
+    if !valid_scale(previous) || !valid_scale(current) {
+        return None;
+    }
+    let factor = current / previous;
+    (factor.is_finite() && factor > 0.0 && factor != 1.0).then_some(factor)
+}
+
+fn valid_scale(scale: f64) -> bool {
+    scale.is_finite() && scale > 0.0
+}
+
+pub(super) fn update_pinch_scale(
+    previous: Option<f64>,
+    current: f64,
+    mut submit: impl FnMut(f64) -> bool,
+) -> Option<f64> {
+    let previous = previous.filter(|scale| valid_scale(*scale))?;
+    if !valid_scale(current) {
+        return Some(previous);
+    }
+    let Some(factor) = pinch_factor(previous, current) else {
+        return Some(previous);
+    };
+    Some(if submit(factor) { current } else { previous })
+}
+
 impl ViewInput for AndroidViewInput {
+    fn pointer_exited(&self) {
+        self.touch_guard.borrow_mut().exit();
+        self.dragging.set(false);
+        self.policy.borrow_mut().pointer_cancelled();
+    }
+
     fn pointer(&self, kind: i32, button: i32, x: f64, y: f64) {
+        self.pointer_with_id(kind, button, x, y, 0);
+    }
+
+    fn pointer_with_id(&self, kind: i32, button: i32, x: f64, y: f64, contact_id: i32) {
+        self.touch_guard.borrow_mut().pointer(kind, contact_id);
         let logical = [x, y];
         match kind {
             // down
             0 => {
                 if button == 1 || button == 0 {
+                    if !self.touch_guard.borrow().allows_pick() {
+                        self.dragging.set(false);
+                        self.policy.borrow_mut().pointer_cancelled();
+                        return;
+                    }
                     self.dragging.set(true);
                     self.last.set(logical);
                     self.policy.borrow_mut().handle(PointerUpdate {
@@ -216,7 +300,10 @@ impl ViewInput for AndroidViewInput {
                         logical_position: logical,
                         contacts: 0,
                     });
-                    if was_tap && !self.capture_tool_active() {
+                    if was_tap
+                        && self.touch_guard.borrow().allows_pick()
+                        && !self.capture_tool_active()
+                    {
                         if let InputOutcome::Commit { logical: tapped } = outcome {
                             self.pick_selection(tapped);
                         }
@@ -228,19 +315,42 @@ impl ViewInput for AndroidViewInput {
         }
     }
 
-    fn scroll(&self, _dx: f64, dy: f64) {
+    fn pinch(&self, phase: i32, scale: f64, x: f64, y: f64) {
+        match phase {
+            0 => {
+                self.touch_guard.borrow_mut().gesture(phase);
+                self.pinch_scale.set(valid_scale(scale).then_some(scale));
+                self.dragging.set(false);
+                self.policy.borrow_mut().pointer_cancelled();
+            }
+            1 => {
+                self.touch_guard.borrow_mut().gesture(phase);
+                let previous = self.pinch_scale.get();
+                let next = update_pinch_scale(previous, scale, |factor| {
+                    self.send(
+                        CommandId::Zoom,
+                        CommandPayload::ZoomAt {
+                            factor,
+                            cursor: [x, y],
+                        },
+                    )
+                });
+                self.pinch_scale.set(next);
+            }
+            2 | 3 => {
+                self.touch_guard.borrow_mut().gesture(phase);
+                self.pinch_scale.set(None);
+            }
+            _ => {}
+        }
+    }
+
+    fn scroll(&self, _dx: f64, dy: f64, cursor: [f64; 2]) {
         // Same formula as the web and Linux hosts: scrolling down (positive dy)
         // yields factor < 1 = zoom out; scrolling up zooms in (`Camera::zoom_at`
         // contract: factor > 1 zooms in).
         let factor = (1.0 - dy * 0.0015).clamp(0.2, 5.0);
         self.last.set([0.0, 0.0]);
-        self.send(
-            CommandId::Zoom,
-            CommandPayload::Points(vec![Point3 {
-                x: factor,
-                y: 0.0,
-                z: 0.0,
-            }]),
-        );
+        self.send(CommandId::Zoom, CommandPayload::ZoomAt { factor, cursor });
     }
 }

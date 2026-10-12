@@ -27,7 +27,7 @@ use cad_db::DrawingDatabase;
 use cad_domain::{CadError, CadResult};
 use cad_platform::{
     ConfigLoad, ConfigStore, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
-    SurfaceSource,
+    SurfaceMetrics, SurfaceSource,
 };
 use cad_ui_slint::{CadView, LayoutSwitchSink, UiCommandSink, UiHandle};
 
@@ -44,6 +44,8 @@ mod save;
 mod state;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod zoom_anchor_tests;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use fonts::DesktopResources;
@@ -67,6 +69,62 @@ pub(crate) fn error_text(error: &CadError) -> String {
         CadError::Unsupported(reason) => reason.clone(),
         CadError::NotImplemented(feature) => (*feature).to_string(),
         other => other.to_string(),
+    }
+}
+
+fn use_light_navigation_push(
+    id: CommandId,
+    succeeded: bool,
+    viewport_matches: bool,
+    has_drawing: bool,
+    has_handle: bool,
+    has_view: bool,
+    loading: bool,
+) -> bool {
+    succeeded
+        && matches!(id, CommandId::Pan | CommandId::Zoom)
+        && viewport_matches
+        && has_drawing
+        && has_handle
+        && has_view
+        && !loading
+}
+
+/// Select viewport metrics shared by rendering and canvas-local input.
+///
+/// A live UI handle supplies the actual CAD rectangle (excluding chrome) and
+/// window scale. With no handle, retain the platform surface + safe-inset path
+/// used by headless hosts and tests.
+fn select_canvas_metrics(
+    surface: SurfaceMetrics,
+    cad_surface: Option<([f64; 2], f64)>,
+) -> CadResult<cad_app::input::CanvasMetrics> {
+    // SurfaceSource implementations do not guarantee finite dimensions/scale
+    // or valid insets. Validate the platform contract even when a UI handle
+    // provides the authoritative CAD rectangle; do not use the inset-adjusted
+    // result to size that live canvas.
+    cad_app::input::inset_canvas_metrics(
+        [0.0; 2],
+        surface.logical,
+        surface.safe_insets,
+        surface.scale,
+    )
+    .ok_or_else(|| CadError::InvalidInput("canvas metrics are degenerate".into()))?;
+
+    if let Some((size, scale)) = cad_surface {
+        // Input commands already use canvas-local coordinates, so the origin
+        // must be zero. The renderer consumes this same CAD size and scale.
+        Ok(cad_app::input::CanvasMetrics::new([0.0; 2], size, scale))
+    } else {
+        // The platform metrics were validated above; recompute their inset
+        // rectangle as the headless fallback canvas.
+        cad_app::input::inset_canvas_metrics(
+            [0.0; 2],
+            surface.logical,
+            surface.safe_insets,
+            surface.scale,
+        )
+        .ok_or_else(|| CadError::InvalidInput("canvas metrics are degenerate".into()))
     }
 }
 
@@ -323,6 +381,10 @@ impl HostCore {
             }
         }
         let surface = self.surface.surface().ok_or(CadError::Cancelled)?;
+        let cad_surface = match self.handle.borrow().as_ref() {
+            Some(handle) => Some(handle.cad_surface_size().ok_or(CadError::Cancelled)?),
+            None => None,
+        };
         let mut c = self.controller.borrow_mut();
         let id = c.viewport_id;
         let viewport = c
@@ -331,16 +393,7 @@ impl HostCore {
             .viewports
             .get_mut(&id)
             .ok_or(CadError::Cancelled)?;
-        // A host with no portable safe-area source passes explicit zeros — never
-        // a fabricated margin. The shared helper still validates the surface/DPI
-        // and keeps the one mapping in `cad-app`.
-        let canvas = cad_app::input::inset_canvas_metrics(
-            [0.0; 2],
-            surface.logical,
-            surface.safe_insets,
-            surface.scale,
-        )
-        .ok_or_else(|| CadError::InvalidInput("canvas metrics are degenerate".into()))?;
+        let canvas = select_canvas_metrics(surface, cad_surface)?;
         cad_app::input::apply_canvas_metrics(viewport, &canvas)
     }
 
@@ -360,6 +413,8 @@ impl HostCore {
 
     /// Run one command, push state and grade the status line.
     pub fn execute(&self, command: Command) -> CadResult<()> {
+        let command_id = command.id;
+        let command_viewport = command.viewport;
         let profile = command.id == CommandId::Select && pick_profile_enabled();
         let started = profile.then(std::time::Instant::now);
         let metrics_result = self.metrics();
@@ -373,7 +428,7 @@ impl HostCore {
         // Plot and Save As own their own success/failure status
         // (plot.exported / save.exported / ...); the generic completed/failed
         // text must not overwrite it.
-        let owns_status = policy::owns_status(command.id);
+        let owns_status = policy::owns_status(command_id);
         let started = profile.then(std::time::Instant::now);
         let result: CadResult<Option<CommandOutcome>> = match command.id {
             CommandId::CancelLoading => {
@@ -398,8 +453,25 @@ impl HostCore {
         // The push is best-effort relative to the command result: a failed push
         // must never mask the command's own error (it is surfaced only when the
         // command itself succeeded).
+        let (viewport_matches, has_drawing) = {
+            let c = self.controller.borrow();
+            (c.viewport_id == command_viewport, c.drawing().is_some())
+        };
+        let light_navigation_push = use_light_navigation_push(
+            command_id,
+            result.is_ok(),
+            viewport_matches,
+            has_drawing,
+            self.handle.borrow().is_some(),
+            self.view.borrow().is_some(),
+            self.loading(),
+        );
         let started = profile.then(std::time::Instant::now);
-        let push_result = self.push();
+        let push_result = if light_navigation_push {
+            self.push_navigation()
+        } else {
+            self.push()
+        };
         if let Some(started) = started {
             eprintln!(
                 "YACR_PROFILE_PICK execute_push elapsed_ms={:.3}",

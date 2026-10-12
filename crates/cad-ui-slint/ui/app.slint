@@ -290,8 +290,10 @@ export component YacrWindow inherits Window {
     callback diagnostics-requested();
     callback diagnostics-closed();
     callback cancel-open-requested();
-    callback pointer-input(int, int, length, length);
-    callback scroll-input(float, float);
+    callback pointer-input(int, int, length, length, int);
+    callback pointer-exited();
+    callback pinch-input(int, float, float, float);
+    callback scroll-input(float, float, float, float);
     callback canvas-pick(float, float);
     title: application-title;
     background: CadTheme.canvas;
@@ -670,11 +672,13 @@ export component YacrWindow inherits Window {
             CadCanvas {
                 width: parent.width; height: parent.height;
                 frame: root.cad-frame;
-                pointer(k, b, x, y) => {
+                pointer(k, b, x, y, id) => {
                     if k == 0 { shortcut-scope.focus(); }
-                    root.pointer-input(k, b, x, y);
+                    root.pointer-input(k, b, x, y, id);
                 }
-                scroll(x, y) => { root.scroll-input(x, y); }
+                pointer-exited => { root.pointer-exited(); }
+                pinch(phase, scale, x, y) => { root.pinch-input(phase, scale, x, y); }
+                scroll(dx, dy, x, y) => { root.scroll-input(dx, dy, x, y); }
                 pick(x, y) => { root.canvas-pick(x, y); }
             }
             if root.chrome-visible && root.navigation-visible : Rectangle {

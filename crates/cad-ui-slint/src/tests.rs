@@ -3,6 +3,85 @@
 use super::*;
 
 #[test]
+fn canvas_guard_blocks_synthetic_second_release_and_drains_residual_contact() {
+    let mut guard = CanvasTouchGuard::default();
+    // Actual Slint ordering: only A goes down; competing B is represented by
+    // a synthetic Up(B), not a raw Down(B).
+    guard.pointer(0, 11);
+    guard.pointer(1, 22); // Slint's synthetic release for the second contact
+    assert!(!guard.allows_pick());
+    guard.exit(); // TouchArea child exits while parent handler takes the grab
+    guard.gesture(0);
+    guard.exit(); // a deferred hover transition after started
+    guard.gesture(2);
+    guard.exit(); // exit after ended cannot clear the residual tail
+    guard.pointer(0, 22); // remaining B's synthetic down/up tail
+    guard.pointer(1, 22);
+    guard.exit(); // property notification can be deferred beyond the tail
+    assert!(!guard.allows_pick(), "residual release itself is not a tap");
+    guard.pointer(0, 33);
+    guard.pointer(1, 33);
+    assert!(guard.allows_pick());
+}
+
+#[test]
+fn canvas_guard_rejects_light_multitouch_in_both_release_orders_and_recovers() {
+    // A lifts first: B is the residual synthetic contact. B lifts first: A is.
+    for (synthetic_release, tail) in [(22, 22), (22, 11)] {
+        let mut guard = CanvasTouchGuard::default();
+        guard.pointer(0, 1);
+        guard.pointer(1, synthetic_release); // no Down for B
+        assert!(!guard.allows_pick());
+        guard.pointer(0, tail);
+        guard.pointer(1, tail);
+        assert!(!guard.allows_pick(), "residual release itself is not a tap");
+        guard.pointer(0, 3);
+        guard.pointer(1, 3);
+        assert!(guard.allows_pick());
+    }
+    let mut cancelled = CanvasTouchGuard::default();
+    cancelled.pointer(0, 4);
+    cancelled.pointer(3, 5);
+    assert!(!cancelled.allows_pick());
+    cancelled.pointer(0, 6);
+    cancelled.pointer(1, 6);
+    assert!(cancelled.allows_pick());
+
+    let mut trackpad = CanvasTouchGuard::default();
+    trackpad.gesture(0);
+    trackpad.gesture(2);
+    trackpad.pointer(0, 0); // following mouse click starts a fresh sequence
+    trackpad.pointer(1, 0);
+    assert!(trackpad.allows_pick());
+}
+
+#[test]
+fn canvas_guard_exits_on_mouse_cancel_or_hover_exit() {
+    let mut guard = CanvasTouchGuard::default();
+    guard.pointer(0, 17);
+    guard.pointer(1, 18);
+    assert!(!guard.allows_pick());
+    guard.pointer(3, 0); // PointerEventKind::cancel commonly carries ID zero
+    assert!(!guard.allows_pick());
+    guard.pointer(1, 18); // orphan Up after cancel is never a tap
+    assert!(!guard.allows_pick());
+    guard.pointer(0, 19);
+    guard.pointer(1, 19);
+    assert!(guard.allows_pick());
+
+    guard.pointer(0, 20);
+    guard.pointer(1, 21);
+    guard.exit(); // real TouchArea hover loss/exit callback
+    guard.pointer(0, 22);
+    guard.pointer(1, 22);
+    assert!(!guard.allows_pick());
+    guard.exit(); // deferred property notification after tail completion
+    guard.pointer(0, 23);
+    guard.pointer(1, 23);
+    assert!(guard.allows_pick());
+}
+
+#[test]
 fn shell_definition_mentions_a_cad_frame_property() {
     assert!(UI_DEFINITION.contains("cad-frame"));
     assert!(ZH_CN_MESSAGES.contains('{'));

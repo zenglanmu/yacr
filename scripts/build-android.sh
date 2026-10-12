@@ -14,7 +14,17 @@
 # `android:hasCode="true"` and names `dev.yacr.app.YacrNativeActivity`, so an APK
 # without the injected `classes.dex` would fail at launch with a
 # `ClassNotFoundException`. There is no skip switch.
+(
 set -euo pipefail
+
+# Android dependency downloads are unreliable through the ambient proxy in some
+# build environments. Keep this change scoped to this script process, including
+# when the script is sourced by a caller.
+unset http_proxy https_proxy all_proxy no_proxy
+unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
+if [[ -n "${ANDROID_BUILD_HTTPS_PROXY:-}" ]]; then
+    export https_proxy="$ANDROID_BUILD_HTTPS_PROXY"
+fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -107,3 +117,4 @@ grep -q 'android:hasCode[^=]*=true' "$MANIFEST_DUMP" \
     || { echo "manifest does not set android:hasCode=true" >&2; exit 1; }
 
 echo "APK: $APK"
+)
