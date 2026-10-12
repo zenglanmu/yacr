@@ -75,7 +75,7 @@ FONTS_DIR=/tmp/yacr-fonts scripts/package-linux-release.sh
 ```
 
 ```bash
-flatpak install --user target/release/dist/yacr-0.1.1-linux-x86_64.flatpak
+flatpak install --user target/release/dist/yacr-0.1.2-linux-x86_64.flatpak
 flatpak run dev.yacr.app                                  # GUI（Wayland/X11 + GPU）
 flatpak run --command=cad-cli-tools dev.yacr.app --help   # 无头 CLI
 ```
