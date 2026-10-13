@@ -1,7 +1,7 @@
 //! Derived GPU state. Never builds representations or owns a window.
 use super::controller::PreparedScene;
 use super::*;
-use cad_render_wgpu::{wgpu, RenderError};
+use cad_render_wgpu::{wgpu, BackendCapabilities, RenderError, RenderTarget, Renderer};
 
 struct PendingUpload {
     scene: PreparedScene,
@@ -26,7 +26,7 @@ pub struct FrameBinding {
     pub size: (u32, u32),
 }
 
-pub(super) struct PresentedFrame {
+pub struct PresentedFrame {
     pub binding: FrameBinding,
     pub texture: wgpu::Texture,
 }
@@ -50,7 +50,7 @@ impl FrameInvalidation {
     }
 }
 
-pub(super) struct CadRenderRuntime {
+pub struct CadRenderRuntime {
     pub renderer: Option<Renderer>,
     pub lifecycle: RenderLifecycle,
     pub outcome: Option<BackendOutcome>,

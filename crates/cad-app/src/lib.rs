@@ -16,6 +16,7 @@ pub mod camera;
 pub mod draw_tool;
 pub mod host;
 pub mod input;
+pub mod interaction;
 pub mod layers;
 pub mod measure_tool;
 pub mod picking;

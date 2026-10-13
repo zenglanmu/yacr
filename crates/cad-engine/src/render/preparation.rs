@@ -2,24 +2,29 @@
 use super::*;
 use cad_app::background::LatestTask;
 use cad_app::render_scene::{CadSceneController, DecodedImageCache, OverlayInputs};
+use cad_domain::CadError;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct InputKey {
+    token: u64,
     drawing: usize,
     document: DocumentId,
     space: SpaceSelection,
-    fonts: usize,
-    images: usize,
+    fonts_generation: u64,
+    images_generation: u64,
     layers: u64,
     overlays: u64,
 }
 
 pub(super) struct PreparationInput {
+    pub token: u64,
     pub drawing: Option<Arc<DrawingDatabase>>,
     pub document: DocumentId,
     pub space: SpaceSelection,
     pub fonts: Option<Arc<FontEngine>>,
     pub images: Option<Arc<DecodedImageCache>>,
+    pub fonts_generation: u64,
+    pub images_generation: u64,
     pub layers: LayerOverrideSet,
     pub overlays: OverlayInputs,
 }
@@ -33,18 +38,24 @@ fn pointer<T>(value: &Option<Arc<T>>) -> usize {
 impl PreparationInput {
     fn key(&self) -> InputKey {
         InputKey {
+            token: self.token,
             drawing: pointer(&self.drawing),
             document: self.document,
             space: self.space,
-            fonts: pointer(&self.fonts),
-            images: pointer(&self.images),
+            fonts_generation: self.fonts_generation,
+            images_generation: self.images_generation,
             layers: self.layers.fingerprint(),
             overlays: controller::overlay_fingerprint(&self.overlays),
         }
     }
 }
 
-type Completion = CadResult<CadSceneController>;
+struct PreparedResult {
+    token: u64,
+    controller: CadSceneController,
+}
+
+type Completion = CadResult<PreparedResult>;
 
 #[derive(Default)]
 pub(super) struct NativePreparation {
@@ -55,16 +66,30 @@ pub(super) struct NativePreparation {
 }
 
 impl NativePreparation {
-    pub fn update(&mut self, input: PreparationInput) -> CadResult<Option<CadSceneController>> {
+    pub fn mark_synchronous(&mut self, input: &PreparationInput) {
+        if let Some(worker) = &self.worker {
+            worker.cancel();
+        }
+        let key = input.key();
+        self.requested = Some(key.clone());
+        self.published = Some(key);
+        self.busy = false;
+    }
+
+    pub fn update(
+        &mut self,
+        input: PreparationInput,
+    ) -> CadResult<Option<(u64, CadSceneController)>> {
         if self.worker.is_none() {
             let mut controller = CadSceneController::default();
-            let mut fonts = None;
+            let mut fonts_generation = 0;
             self.worker = Some(
                 LatestTask::new("cad-scene-preparation", move |input: PreparationInput| {
-                    if pointer(&fonts) != pointer(&input.fonts) {
+                    let token = input.token;
+                    if fonts_generation != input.fonts_generation {
                         controller.fonts_changed();
                     }
-                    fonts = input.fonts.clone();
+                    fonts_generation = input.fonts_generation;
                     controller.prepare_shared_with_overlays_and_images(
                         input.drawing,
                         input.document,
@@ -74,7 +99,10 @@ impl NativePreparation {
                         &input.overlays,
                         input.images,
                     )?;
-                    Ok(controller.clone())
+                    Ok(PreparedResult {
+                        token,
+                        controller: controller.clone(),
+                    })
                 })
                 .map_err(|e| CadError::InvalidInput(e.to_string()))?,
             );
@@ -82,15 +110,17 @@ impl NativePreparation {
         let key = input.key();
         let worker = self.worker.as_ref().unwrap();
         if self.requested.as_ref() != Some(&key) {
-            self.requested = Some(key);
+            self.requested = Some(key.clone());
             self.busy = true;
             worker.submit(input);
         }
         if let Some((_, result)) = worker.take_completed() {
             self.busy = false;
-            let controller = result?;
-            self.published = self.requested.clone();
-            return Ok(Some(controller));
+            let prepared = result?;
+            if prepared.token == key.token {
+                self.published = Some(key);
+                return Ok(Some((prepared.token, prepared.controller)));
+            }
         }
         if let Some((_, error)) = worker.take_failure() {
             self.busy = false;
@@ -108,6 +138,7 @@ impl NativePreparation {
         self.requested = None;
         self.published = None;
     }
+    #[cfg(test)]
     pub fn current(&self, drawing: &Option<Arc<DrawingDatabase>>) -> bool {
         !self.busy
             && self.published == self.requested
@@ -125,18 +156,21 @@ mod tests {
 
     fn input(drawing: Arc<DrawingDatabase>) -> PreparationInput {
         PreparationInput {
+            token: 0,
             drawing: Some(drawing),
             document: DocumentId(1),
             space: SpaceSelection::Model,
             fonts: None,
             images: None,
+            fonts_generation: 0,
+            images_generation: 0,
             layers: LayerOverrideSet::new(),
             overlays: OverlayInputs::default(),
         }
     }
 
     #[test]
-    fn image_cache_pointer_changes_the_preparation_key_and_a_repeat_is_a_no_op() {
+    fn resource_generations_change_the_preparation_key_and_repeats_are_no_ops() {
         let drawing = cad_app::host::HostController::with_demo_document([800.0, 600.0])
             .unwrap()
             .drawing()
@@ -147,12 +181,14 @@ mod tests {
         assert_eq!(request.key(), key);
         // Installing an image cache is a distinct input and re-prepares.
         request.images = Some(Arc::new(DecodedImageCache::new()));
+        request.images_generation += 1;
         assert_ne!(request.key(), key);
         // The same cache pointer does not force a second re-prepare.
         let installed = request.key();
         assert_eq!(request.key(), installed);
         // Clearing it is distinct again.
         request.images = None;
+        request.images_generation += 1;
         assert_ne!(request.key(), installed);
     }
 
@@ -171,7 +207,7 @@ mod tests {
         worker.update(input(second.clone())).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let ready = loop {
-            if let Some(ready) = worker.update(input(second.clone())).unwrap() {
+            if let Some((_, ready)) = worker.update(input(second.clone())).unwrap() {
                 break ready;
             }
             assert!(Instant::now() < deadline);
@@ -187,7 +223,7 @@ mod tests {
         let next = loop {
             let mut request = input(second.clone());
             request.overlays.visibility.axes = false;
-            if let Some(ready) = worker.update(request).unwrap() {
+            if let Some((_, ready)) = worker.update(request).unwrap() {
                 break ready;
             }
             assert!(Instant::now() < deadline);

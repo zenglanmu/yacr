@@ -1,24 +1,13 @@
-//! Shared-device CAD composition. Slint coordinates presentation, not scene building.
+//! Shared-device CAD composition. Slint owns only scheduling and presentation.
 use crate::{UiHandle, YacrWindow};
-use cad_app::layers::LayerOverrideSet;
-use cad_app::recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
-use cad_app::{BackendChoice, Camera, Projection, ProjectionKind, Viewport};
-use cad_db::DrawingDatabase;
-use cad_domain::{CadError, CadResult, DocumentId, Point3, SpaceId};
-use cad_render_wgpu::{
-    ActiveBackend, BackendCapabilities, BackendPreference, RenderTarget, Renderer,
-};
-use cad_representation::{FontEngine, SpaceSelection};
+use cad_app::BackendChoice;
+use cad_domain::{CadError, CadResult};
+use cad_engine::render;
+use cad_render_wgpu::BackendPreference;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
-mod camera;
-use cad_app::render_scene as controller;
-#[cfg(not(target_arch = "wasm32"))]
-mod preparation;
 mod presenter;
-mod runtime;
 mod view;
 pub use cad_app::render_scene::{
     build_scene, build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
@@ -26,40 +15,13 @@ pub use cad_app::render_scene::{
     snap_hint_overlay, OverlayInputs, PreviewOptions, SnapHint, SnapHintKind, VisualOverlay,
 };
 pub use cad_app::viewer_config::OverlayVisibility;
-pub use camera::{camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera};
-pub use runtime::{FrameBinding, RenderLifecycle};
-pub use view::{CadView, ViewSnapshot};
+pub use render::IncomingDocument;
+pub use render::{
+    camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera, FrameBinding,
+    RenderLifecycle, ViewSnapshot,
+};
+pub use view::CadView;
 
-/// Current document, not a one-shot mailbox. `None` means no open document.
-pub type IncomingDocument = Rc<RefCell<Option<Arc<DrawingDatabase>>>>;
-
-#[derive(Default)]
-struct BridgeState {
-    controller: controller::CadSceneController,
-    runtime: runtime::CadRenderRuntime,
-    presenter: presenter::SlintPresenter,
-    view: ViewSnapshot,
-    preparation_scheduled: bool,
-    preparation_stopped: bool,
-    /// Monotonic count of `CadView::request_redraw` calls. Hosts and tests use
-    /// it to prove an idle view does not keep scheduling repaints.
-    redraw_requests: u64,
-    #[cfg(not(target_arch = "wasm32"))]
-    preparation: preparation::NativePreparation,
-    view_diagnostic: Option<String>,
-    /// Separate dirty marker for the transient selection/preview overlay. It
-    /// advances on a highlight/preview change and never on a drawing revision
-    /// change.
-    overlay_revision: u64,
-}
-
-fn backend_kind(actual: ActiveBackend) -> ActiveBackendKind {
-    match actual {
-        ActiveBackend::WebGpu => ActiveBackendKind::WebGpu,
-        ActiveBackend::WebGl2 => ActiveBackendKind::WebGl2,
-        ActiveBackend::Native => ActiveBackendKind::Native,
-    }
-}
 fn preference_choice(preference: BackendPreference) -> BackendChoice {
     match preference {
         BackendPreference::Auto => BackendChoice::Auto,
@@ -82,78 +44,55 @@ pub fn install_with_preference(
     incoming: IncomingDocument,
     preference: BackendPreference,
 ) -> CadResult<CadView> {
-    #[cfg(not(target_arch = "wasm32"))]
-    let frame_incoming = incoming.clone();
     let view = CadView::new(handle, incoming, preference);
-    let state = view.state.clone();
+    let session = view.session.clone();
+    let presenter = Rc::new(RefCell::new(presenter::SlintPresenter::default()));
     let frame_handle = view.handle.clone();
+    let frame_presenter = presenter.clone();
     window
-        .set_rendering_notifier(move |phase, api| {
-            let mut state = state.borrow_mut();
-            match (phase, api) {
-                (
-                    slint::RenderingState::RenderingSetup,
-                    slint::GraphicsAPI::WGPU30 { device, queue, .. },
-                ) => {
-                    state
-                        .runtime
-                        .attach(device.clone(), queue.clone(), preference);
-                    state.presenter.invalidate();
+        .set_rendering_notifier(move |phase, api| match (phase, api) {
+            (
+                slint::RenderingState::RenderingSetup,
+                slint::GraphicsAPI::WGPU30 { device, queue, .. },
+            ) => {
+                if let Err(reason) = session.attach_device(device.clone(), queue.clone()) {
+                    log::warn!("CAD renderer attach failed: {reason}");
                 }
-                (slint::RenderingState::RenderingSetup, api) => {
-                    state.runtime.fail(
-                        preference,
-                        format!("unsupported Slint graphics API: {api:?}"),
-                        false,
-                    );
-                }
-                (slint::RenderingState::BeforeRendering, _) => {
-                    // Only GPU synchronization and presentation belong to this callback.
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let current = state.preparation.current(&frame_incoming.borrow());
-                    #[cfg(target_arch = "wasm32")]
-                    let current = true;
-                    let BridgeState {
-                        controller,
-                        runtime,
-                        presenter,
-                        view,
-                        ..
-                    } = &mut *state;
-                    if let Err(error) = runtime.apply_ready_updates(if current {
-                        controller.ready.as_ref()
-                    } else {
-                        None
-                    }) {
-                        runtime.diagnostic = Some(error.to_string());
-                        return;
-                    }
-                    let (logical, scale) =
-                        frame_handle.cad_surface_size().unwrap_or(([0.0, 0.0], 1.0));
-                    match runtime.render_if_dirty(view, logical, scale) {
-                        Ok(Some(frame)) => {
-                            match presenter.bind_frame_if_changed(&frame_handle, frame) {
-                                Ok(()) => runtime.diagnostic = None,
-                                Err(error) => runtime.diagnostic = Some(error.to_string()),
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(error) if error.is_device_loss() => {
-                            runtime.fail(preference, error.message().into(), true);
-                            presenter.invalidate();
-                        }
-                        Err(error) => runtime.diagnostic = Some(error.to_string()),
-                    }
-                    if runtime.uploading() || runtime.drawing_pages() {
-                        let _ = frame_handle.request_redraw();
-                    }
-                }
-                (slint::RenderingState::RenderingTeardown, _) => {
-                    state.runtime.detach();
-                    state.presenter.invalidate();
-                }
-                _ => {}
+                frame_presenter.borrow_mut().invalidate();
             }
+            (slint::RenderingState::RenderingSetup, api) => {
+                session.fail_device(format!("unsupported Slint graphics API: {api:?}"), false);
+            }
+            (slint::RenderingState::BeforeRendering, _) => {
+                if let Err(error) = session.apply_ready_updates() {
+                    session.set_runtime_diagnostic(Some(error.to_string()));
+                    return;
+                }
+                let (logical, scale) = frame_handle.cad_surface_size().unwrap_or(([0.0, 0.0], 1.0));
+                match session.render(logical, scale) {
+                    Ok(Some(frame)) => match frame_presenter
+                        .borrow_mut()
+                        .bind_frame_if_changed(&frame_handle, frame)
+                    {
+                        Ok(()) => session.set_runtime_diagnostic(None),
+                        Err(error) => session.set_runtime_diagnostic(Some(error.to_string())),
+                    },
+                    Ok(None) => {}
+                    Err(error) if error.is_device_loss() => {
+                        session.fail_device(error.message(), true);
+                        frame_presenter.borrow_mut().invalidate();
+                    }
+                    Err(error) => session.set_runtime_diagnostic(Some(error.to_string())),
+                }
+                if session.uploading() || session.drawing_pages() {
+                    let _ = frame_handle.request_redraw();
+                }
+            }
+            (slint::RenderingState::RenderingTeardown, _) => {
+                session.detach_device();
+                frame_presenter.borrow_mut().invalidate();
+            }
+            _ => {}
         })
         .map_err(|e| CadError::GpuFailure(format!("set_rendering_notifier failed: {e}")))?;
     view.request_redraw();
@@ -161,5 +100,3 @@ pub fn install_with_preference(
 }
 
 pub type UiWindow = YacrWindow;
-#[cfg(test)]
-mod tests;

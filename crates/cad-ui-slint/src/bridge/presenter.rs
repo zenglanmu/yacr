@@ -1,6 +1,6 @@
 //! Slint-only presentation adapter. No database access or geometry construction.
-use super::runtime::{FrameBinding, PresentedFrame};
 use super::*;
+use cad_engine::render::{FrameBinding, PresentedFrame};
 
 #[derive(Default)]
 pub(super) struct SlintPresenter {
@@ -8,13 +8,6 @@ pub(super) struct SlintPresenter {
 }
 
 impl SlintPresenter {
-    /// Explicit host reset, outside rendering lifecycle callbacks.
-    pub fn reset(&mut self, handle: &UiHandle) -> CadResult<()> {
-        handle.set_cad_frame(slint::Image::default())?;
-        self.invalidate();
-        Ok(())
-    }
-
     pub fn invalidate(&mut self) {
         // Lifecycle callbacks may run while the window is mutably borrowed.
         // Keep the old image alive until BeforeRendering replaces it.

@@ -182,6 +182,7 @@ Rust 中建议采用稳定 ID + 显式数据类型/枚举 + 外部协议提供�
 | cad-spatial | 空间索引、实例查询、射线候选 | 只靠 GPU 同步读回 |
 | cad-scene | 分块、批次、LOD、显示缓存和更新集 | 权威数据库修改 |
 | cad-render-wgpu | 2D/3D 管线、buffer/texture、统计 | 解析文件或执行业务命令 |
+| cad-engine | UI 无关的渲染会话、typed render/session API 与 protocol | 依赖 UI/宿主实现或直接提交 wgpu 命令 |
 | cad-resources | 字体、图片、外参解析契约及缓存 | 任意网络/路径访问 |
 | cad-measure | 捕捉、测量、单位与精度报告 | 用屏幕图片反推尺寸 |
 | cad-history | 撤销重做、命令合并、恢复日志接口 | 重放鼠标输入代替恢复数据 |
@@ -242,6 +243,34 @@ UI 发命令，查询层接收提交结果再更新模型。程序更新 ViewMod
 错误分类为输入错误、能力缺失、资源缺失、数据损坏、GPU 故障及内部不变量失败。使用结构化 Result，不在外部数据路径随意 unwrap。局部实体失败可继续，但报告对象与原因。
 
 后台结果带文档 generation、对象 revision、依赖版本和生成配置。只有仍匹配时发布；否则丢弃或重排任务。库调用不可中断时，取消至少阻止结果进入当前会话；不能谎称计算已立即停止。设备重建不改变数据库 revision。
+
+### 4.11 渲染会话、工具协议与分阶段宿主边界
+
+以下为已批准的目标架构，按 P1/P2/P3 分阶段实施；目标描述不得作为已完成实现或跨平台运行/性能验收证据。
+P1 实施期间 `cad-host` 仍保留对 `cad-ui-slint` 的过渡依赖；只有 P2 完成后，才可将 host 无 UI 依赖作为当前事实。
+
+- `cad-engine` 是 UI 无关的渲染会话协调库，当前 manifest 的直接依赖为 `cad-app`、`cad-db`、
+  `cad-domain`、`cad-render-wgpu`、`cad-representation`。它们分别提供应用会话/工具契约、权威数据库、
+  领域类型、renderer 和显示表示，都是 UI 无关的核心层，不意味着依赖 UI 或宿主实现。`cad-app`
+  不依赖 `cad-engine`；engine 不依赖 `cad-ui-slint`、`cad-host`、Slint，也不直接依赖 wgpu。
+- P1 的 `RenderSessionHandle` 由 owner-thread 独占持有，管理 CAD 快照、准备流程、dirty runtime、资源与
+  overlays；所有权不要求跨线程发送。对外采用 typed render/session API 与 protocol（如 `RenderWake`），
+  不承诺稳定的跨语言序列化协议。请求上下文关联 document/tool/viewport/metrics generations；输入类型区分
+  world 与 canvas-local 逻辑坐标及 metrics revision，工具开始与事务提交是不同操作。
+- wgpu Device/Queue 通过 `cad-render-wgpu` 的 renderer API/re-export 提供；runtime/render 提交仍由 renderer
+  封装。遵循 §5.2：每条合成路径只有一个 Surface/呈现协调者，Slint 继续拥有 surface/事件循环并作为
+  presenter；CAD 不建立第二套事件循环、不争抢 present，也不进行整幅 GPU→CPU 回读。
+- P2 将绘图工具状态归入 `SessionState` 的 `Drawing(DrawCapture)`，捕获 `DrawTool` 与开始时的
+  `SelectionRef` 快照。确认成功后清除 capture，失败时保留；取消不写事务；模式或文档切换清理状态。
+  测量沿用现有实现。P2 同时移除 host 对 `cad-ui-slint` 与 UI 专属 handle/view/message trait 的依赖；
+  apps 持有 UI/平台适配器，Slint 本地化留在 Slint。
+- P3 使用有界语义队列，默认容量 256，每次最多处理 64 个请求或约 4ms（非实时、不可抢占）。仅合并
+  相邻且 context 相同的 `MoveCursor`（latest-wins）；其他输入、命令及 context 变化均为顺序屏障。已接受
+  请求有完成结果；过期上下文明确取消，队列满显式报错并为终结输入预留空间。队列由空转非空时唤醒，
+  有待办时重置唤醒；不以永久 10ms tick 轮询 CAD dirty。平台 I/O polling 可保留，但不应无条件触发 CAD
+  dirty；UI-only frame 复用 CAD texture。
+- dirty 唤醒采用 event-driven 失效/调度，现有 ChangeSet → 依赖失效 → 显示表示重建语义不变。本轮不扩张
+  或重写增量算法；不引入 React 或其他未来 UI 框架承诺。
 
 ## 5. Slint 与 wgpu 集成规范
 

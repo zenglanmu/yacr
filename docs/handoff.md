@@ -1,5 +1,20 @@
 # 后续 agent 接手入口
 
+## cad-engine 解耦 P1 检查点（2026-10-13，P1 审查通过；整体实施中）
+
+- `cad-engine` 当前 manifest 直接依赖 `cad-app`、`cad-db`、`cad-domain`、`cad-render-wgpu`、
+  `cad-representation`；均为应用/数据/领域/renderer/显示表示核心契约，不是 UI 依赖。runtime/render
+  提交仍封装在 renderer；Slint 仍是单 surface 协调者与 presenter，P1 host 暂保留 UI 过渡依赖。
+- Oracle gate 1 attempt 3 接受，先前会话一致性阻塞已闭环。P1 focused engine + UI all-targets、engine
+  29 项 synthetic tests、app interaction 4 项 synthetic tests、post-fix workspace all-targets、WASM lib
+  check 与 4 项静态门禁已通过；均非 GPU/真机运行验收。整体仍实施中：P2 host/tool 与 P3 queue 尚未实现。
+- Clippy 初次发现 4 个机械错误，修补后 workspace Clippy（按既有排除项）通过；修补后 WASM
+  lib 编译与 29 项引擎合成测试也通过。fmt 全仓仍受基线未跟踪文件
+  `crates/cad-import-acadrust/examples/debug_fixture.rs` 格式问题阻塞；不要修改该文件。
+- 未运行真实 GPU 验收或 Android native check。
+- 规范、架构与阶段协议见 `CAD_IMPLEMENTATION_SPEC.md` §4.11、`docs/architecture.md` 与
+  `docs/adr/0005-cad-engine-decoupling.md`。依赖门禁当前只约束 engine/app/UI 方向；host 无 UI 断言待 P2。
+
 ## 默认 workspace host 编译门禁（2026-10-12）
 
 - 默认 `cargo check` 现统一为 `cargo check --workspace --all-targets --locked`，覆盖所有

@@ -52,9 +52,20 @@ target_os = "windows", target_os = "macos"))`）；`app-windows` 与 `app-macos`
 命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink），实现 `cad-ui-slint` 的 sink
 trait，平台 I/O 一律走 `cad-platform` 契约；`app-linux` 只提供桌面平台实现与事件循环。
 
+新增 `cad-engine` 是 UI 无关的渲染会话协调库，当前 manifest 的直接依赖为
+`cad-app`、`cad-db`、`cad-domain`、`cad-render-wgpu`、`cad-representation`：分别提供应用会话/工具契约、
+权威数据库、领域类型、renderer 与显示表示，均为 UI 无关的核心契约而非 UI 实现。`cad-app` 不依赖 `cad-engine`，`cad-engine`
+不依赖 `cad-ui-slint`/`cad-host`/Slint 或直接依赖 wgpu，`cad-ui-slint` 不依赖
+`cad-host`。wgpu 仍只由 `cad-render-wgpu` 依赖，并经 renderer API/re-export 提供所需类型。
+该拆分整体仍实施中，P1 会话边界审查已通过；当前仍保留 host→`cad-ui-slint` 过渡依赖与 Slint 单
+surface/presenter。P2 才移除 host 对具体 UI 的依赖并将工具状态归入 SessionState，P3 才实现有界语义队列及
+event-driven dirty 唤醒。不得据此宣称 host 已完成去 UI 化或跨平台性能已验证。详细决策见
+`docs/adr/0005-cad-engine-decoupling.md`。
+
 `check-architecture.py` 强制的边界：`cad-domain` 不依赖任何 CAD 包；`cad-db` 只依赖
 `cad-domain`；`cad-import-acadrust` 是**唯一**依赖 acadrust 的 crate；`cad-render-wgpu`
-是唯一依赖 wgpu 的 crate；Slint 只允许出现在 `cad-ui-slint`/`app-*`（`cad-host` 只依赖
+是唯一依赖 wgpu 的 crate；`cad-engine` 仅按上文方向依赖应用契约和 renderer，不放宽
+acadrust/wgpu 唯一依赖规则；Slint 只允许出现在 `cad-ui-slint`/`app-*`（`cad-host` 只依赖
 `cad-ui-slint`，不直接依赖 slint）；平台类型
 （`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`。`cad-db` 是唯一权威数据
 源；UI 与渲染均为派生。

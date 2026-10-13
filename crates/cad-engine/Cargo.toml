@@ -1,0 +1,16 @@
+[package]
+name = "cad-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "UI-independent CAD render session orchestration."
+
+[dependencies]
+cad-app.workspace = true
+cad-db.workspace = true
+cad-domain.workspace = true
+cad-render-wgpu.workspace = true
+cad-representation.workspace = true

@@ -866,6 +866,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cad-engine"
+version = "0.1.2"
+dependencies = [
+ "cad-app",
+ "cad-db",
+ "cad-domain",
+ "cad-render-wgpu",
+ "cad-representation",
+]
+
+[[package]]
 name = "cad-geometry"
 version = "0.1.2"
 dependencies = [
@@ -1039,6 +1050,7 @@ dependencies = [
  "cad-db",
  "cad-diagnostics",
  "cad-domain",
+ "cad-engine",
  "cad-geometry",
  "cad-measure",
  "cad-query",

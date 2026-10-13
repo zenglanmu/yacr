@@ -17,6 +17,31 @@ def dependencies(manifest):
     return result
 
 graph = {name: dependencies(manifest) & packages.keys() for name, manifest in packages.items()}
+
+def require_dependency(package, dependency):
+    assert package in packages, f"required package missing from workspace: {package}"
+    assert dependency in graph[package], (
+        f"{package} must depend on {dependency} (manifest dependency required)"
+    )
+
+def forbid_dependency(package, dependency):
+    assert package in packages, f"required package missing from workspace: {package}"
+    assert dependency not in dependencies(packages[package]), (
+        f"{package} must not depend on {dependency} (manifest dependency forbidden)"
+    )
+
+# Engine extraction boundaries: check declared package dependencies, not source
+# text, so violations have a stable, actionable manifest-level diagnostic.
+require_dependency("cad-engine", "cad-app")
+require_dependency("cad-engine", "cad-render-wgpu")
+forbidden_engine_dependencies = {
+    "cad-ui-slint", "cad-host", "slint", "slint-build", "wgpu",
+}
+for dependency in sorted(forbidden_engine_dependencies):
+    forbid_dependency("cad-engine", dependency)
+forbid_dependency("cad-app", "cad-engine")
+forbid_dependency("cad-ui-slint", "cad-host")
+
 visited, active = set(), set()
 
 def visit(name):

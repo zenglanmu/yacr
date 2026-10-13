@@ -1,4 +1,9 @@
 use super::*;
+use cad_app::render_scene as controller;
+use cad_app::render_scene::{
+    build_scene, build_scene_with_overrides, build_scene_with_space, layout_descriptors,
+};
+use cad_app::BackendChoice;
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer, Layout, PaperViewport};
 use cad_domain::TaskStamp;
 use cad_domain::{Completeness, EntityId, LayerId, LayoutId, ObjectId, Point3, Revision};
@@ -90,22 +95,13 @@ fn failed_preparation_keeps_last_ready_scene_retryable() {
 
 #[test]
 fn dirty_frames_and_device_lifecycle_do_not_retry_lost_devices() {
-    let mut dirty = runtime::FrameInvalidation::default();
-    assert!(dirty.dirty());
-    dirty.complete();
-    assert!(!dirty.dirty(), "UI-only redraw reuses CAD frame");
-    dirty.invalidate();
-    assert!(dirty.dirty());
-    let mut runtime = runtime::CadRenderRuntime::default();
-    runtime.fail(BackendPreference::Auto, "lost".into(), true);
-    assert!(matches!(runtime.lifecycle, RenderLifecycle::Lost { .. }));
-    assert!(runtime
-        .render_if_dirty(&ViewSnapshot::default(), [100.0, 100.0], 1.0)
-        .unwrap()
-        .is_none());
-    runtime.detach();
-    assert_eq!(runtime.lifecycle, RenderLifecycle::Detached);
-    assert!(runtime.outcome.is_none());
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    session.fail_device("lost", true);
+    assert!(matches!(session.lifecycle(), RenderLifecycle::Lost { .. }));
+    assert!(session.render([100.0, 100.0], 1.0).unwrap().is_none());
+    session.detach_device();
+    assert_eq!(session.lifecycle(), RenderLifecycle::Detached);
+    assert!(session.backend_outcome().is_none());
 }
 
 fn p3(x: f64, y: f64, z: f64) -> Point3 {
@@ -116,16 +112,16 @@ fn p3(x: f64, y: f64, z: f64) -> Point3 {
 fn space_selection_maps_session_spaces() {
     use cad_domain::BlockId;
     assert_eq!(
-        CadView::space_selection(&SpaceId::Model),
+        space_selection(&SpaceId::Model),
         Some(SpaceSelection::Model)
     );
     let layout = LayoutId(3);
     assert_eq!(
-        CadView::space_selection(&SpaceId::Paper(layout)),
+        space_selection(&SpaceId::Paper(layout)),
         Some(SpaceSelection::Paper(layout))
     );
     // Block-definition geometry is never a top-level space.
-    assert_eq!(CadView::space_selection(&SpaceId::Block(BlockId(1))), None);
+    assert_eq!(space_selection(&SpaceId::Block(BlockId(1))), None);
 }
 
 fn line_entity(id: u128, space: SpaceId, a: Point3, b: Point3) -> DbEntity {
@@ -210,17 +206,17 @@ fn paper_space_build_maps_model_geometry_through_the_viewport() {
 
 #[test]
 fn switching_to_a_missing_layout_is_reported_not_faked() {
-    let db = db_with_layout();
-    // Diagnostic is on the representation, not the scene delta.
-    let delta = build_scene_with_space(
-        &db,
-        TaskStamp::new(DocumentId(0), 0),
-        None,
-        &LayerOverrideSet::new(),
-        SpaceSelection::Paper(LayoutId(99)),
-    )
-    .unwrap();
-    assert!(delta.added.is_empty());
+    let db = Arc::new(db_with_layout());
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    session.sync_drawing(Some(db));
+    let before = session.view_snapshot();
+    let invalid = ViewSnapshot {
+        space: SpaceSelection::Paper(LayoutId(99)),
+        ..before.clone()
+    };
+    let error = session.apply_view_snapshot(invalid).unwrap_err();
+    assert!(error.to_string().contains("layout"));
+    assert_eq!(session.view_snapshot(), before);
 }
 
 #[test]
