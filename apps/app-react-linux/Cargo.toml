@@ -1,0 +1,52 @@
+[package]
+name = "app-react-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "yacr-react-probe"
+path = "src/main.rs"
+
+# React (Tauri 2) native Linux probe host for the UI-framework replacement
+# experiment (docs/adr/0006-react-native-linux-experiment.md). It is a probe, not
+# a CAD product: it drives `cad-render-wgpu::SurfaceProbePresenter` on a Tauri
+# window and exposes a small status/input protocol to the React frontend.
+#
+# **Linux/X11 only.** tauri/wry/tao and the renderer are Linux-target-only, so a
+# workspace wasm (or other-target) `--lib` check compiles an empty crate instead
+# of pulling unsupported windowing code. The binary exits with an explicit
+# unsupported message elsewhere (see `src/main.rs`).
+[target.'cfg(target_os = "linux")'.dependencies]
+tauri.workspace = true
+cad-render-wgpu.workspace = true
+raw-window-handle.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# CAD host/engine contracts for the React host platform layer (sub-lane A):
+# the `cad-platform` trait implementations in `src/platform.rs` and the
+# `HostCore`/`RenderSessionHandle` composition the app lane builds on.
+cad-app.workspace = true
+cad-engine.workspace = true
+cad-host.workspace = true
+cad-platform.workspace = true
+cad-resources.workspace = true
+cad-db.workspace = true
+cad-domain.workspace = true
+
+# GTK overlay bridge: the probe surface lives on a windowed GtkDrawingArea
+# inside a GtkOverlay, with the React webview reparented as a transparent sibling.
+gtk.workspace = true
+gdk.workspace = true
+gdkx11.workspace = true
+
+# Native open chooser (XDG desktop portal). Versions match `app-linux`.
+ashpd = { version = "0.12.3", default-features = false, features = ["async-std"] }
+pollster = "0.4"
+
+# `tauri-build` is a build-dependency (compiled for the host). It is gated to the
+# Linux target so non-Linux targets do not pull it; `build.rs` additionally checks
+# the *target* os at runtime before calling `tauri_build::build()`.
+[target.'cfg(target_os = "linux")'.build-dependencies]
+tauri-build.workspace = true

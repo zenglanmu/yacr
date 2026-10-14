@@ -9,6 +9,9 @@
 > 删除 `cad-annotations` crate 及其工具/持久化；F07/F08/F09 退出产品范围。本文中所有
 > F07/F08/F09 条目、`cad-annotations` 模块与“批注持久化/批注事务”要求随之作废（保留
 > 原文以维持需求历史，均已就地标注“已移除”）。**测量（F06）与 DXF 注释性缩放保留**。
+>
+> **2026-10-14 实验范围增补（用户授权）**：桌面 UI 目标允许以 **React + Tauri** 实验替代 Slint，
+> 见 §21；该增补仅覆盖桌面实验路线，不改变 Web/Android 交付与既有核心不变量。
 
 ## 1. 文档使用规则
 
@@ -22,7 +25,7 @@
 
 1. 核心语言 Rust；DWG 解析使用 acadrust；CAD 绘制使用 wgpu。
 2. 不修改 acadrust 上游源码，不维护修改版 fork，不用 Cargo patch 偷换为修改版本。所有补充处理位于自有 crate；允许评估未修改的正式版本升级。
-3. UI 使用 Slint，复用 UI 定义、组件和应用状态；允许必要的平台宿主和浏览器 JS 接入。
+3. UI 使用 Slint，复用 UI 定义、组件和应用状态；允许必要的平台宿主和浏览器 JS 接入。（2026-10-14 用户授权以 React/Tauri 作为桌面 UI 替代实验目标，见 §21；Slint 仍为 Web/Android 与现有实现基线。）
 4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。2026-10-04 用户调整默认提交门禁为 debug 编译与静态检查，不默认运行完整测试、Linux 离屏渲染或 release 编译。实际 Linux 运行验收仍须使用 `apps/app-linux` 的宿主/命令/数据库/共享 Slint/wgpu 链路，不以仅 UI 编译或测试替身代替；未运行须明确标注。无窗口可选验证使用软件 Vulkan/lavapipe；桌面窗口、真实 GPU、真实图纸分别记录验证范围。架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。
 5. Web 必须支持 WebGL2 与 WebGPU 两条 CAD 绘制路径，提供 Auto / WebGPU / WebGL2 选择。WebGL1 不属于要求。
 6. 项目准备开源。OpenCADStudio 仅作为功能规格与 UI 交互参考，通过 `docs/ui-requirements/` 对照功能；不作为源码抽取、移植或核心实现参考，不要求采用其算法、shader、类型或依赖树。绘制、几何离散、相机和 3D 能力在本项目契约下独立实现；不从 JS 项目迁移绘制核心。mlightcad/cad-viewer 仅保留为 UI 功能组织及交互对照参考。
@@ -269,7 +272,8 @@ UI 发命令，查询层接收提交结果再更新模型。程序更新 ViewMod
   有待办时重置唤醒；不以永久 10ms tick 轮询 CAD dirty。平台 I/O polling 可保留，但不应无条件触发 CAD
   dirty；UI-only frame 复用 CAD texture。
 - dirty 唤醒采用 event-driven 失效/调度，现有 ChangeSet → 依赖失效 → 显示表示重建语义不变。本轮不扩张
-  或重写增量算法；不引入 React 或其他未来 UI 框架承诺。
+  或重写增量算法；不引入 React 或其他未来 UI 框架承诺。（2026-10-14 用户授权桌面实验路线后，见 §21；
+  该历史限制对桌面 React 实验不再适用，Web/其他 UI 承诺不变。）
 - P4（仅设计，须在 P2/P3 完成后实施）：命令与受控 API 双入口共享事务路径和 P3 队列；预定 typed
   `EngineRequest::Api(ApiRequest)`，含 expected-revision `Commit`、`SelectByRefs` 与 `SelectByObjectIds`。
   写入口有 pending 时同步返回 `Busy`；只读查询返回 immutable snapshot/revision，不保证包含排队中的写。
@@ -282,7 +286,7 @@ UI 发命令，查询层接收提交结果再更新模型。程序更新 ViewMod
   不从 GEOMETRY/TRANSFORM 泛化推断。事件是权威数据库/会话变化通知，不是第二数据库。
 - 订阅使用有界 poll/ring 与独立 cursor；lag 明确报告并要求重取数据库/selection snapshot 和 watermark 后恢复。
   不做同步 callback；发布前释放 controller borrow/锁，锁内不运行用户业务。P4 不是 plugin loader；React、
-  loader 与 sandbox 不在本轮范围，当前仅记录设计。
+  loader 与 sandbox 不在本轮范围，当前仅记录设计。（React 桌面实验的授权增补见 §21；loader 与 sandbox 仍不在范围。）
 
 ## 5. Slint 与 wgpu 集成规范
 
@@ -708,3 +712,38 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
 | 可扩展是否意味着提前实现全部 CAD？ | 否，先固定契约，按已确认范围交付 |
 
 本版替代 1.0：增加三维查看及独立曲面离散能力，确立数据库驱动架构。2026-10-04 修订明确 OpenCADStudio 仅为 UI 功能规格参考，取消以其为绘制核心源码抽取/参考来源的要求。2026-10-05 移除用户批注子系统（F07/F08/F09）。Android/Web、Slint、wgpu、acadrust 不改源码、极简/增强两模式、测量、注释性缩放和多后端要求继续有效。所有章节必须一起执行，不能只完成新架构而忽略原有功能和性能验收。
+
+## 21. 实验范围增补：React/Tauri 原生桌面宿主（2026-10-14 用户授权）
+
+> 本节为用户授权的**实验范围增补**，只覆盖**桌面 React/Tauri 实验路线**；不修改 §1–§20 的既有
+> 需求、P1–P4 历史与验收条款，也不改变 Web/Android 交付要求。细节契约见
+> `docs/adr/0006-react-native-linux-experiment.md`。
+
+- **授权目标**：桌面 UI 以 **React + Tauri** 作为替代 Slint 的实验目标；CAD 核心保持 **native
+  Rust** 与 **renderer-only wgpu**（wgpu 仍仅由 `cad-render-wgpu` 依赖）；本实验路线**不允许
+  WASM**、**不允许逐帧整幅 GPU→CPU 回读**。
+- **覆盖历史限制**：§4.11 与 ADR 0005 中“不引入 React 或其他未来 UI 框架承诺 / React 不在本轮”
+  的历史限制，对**桌面 React 实验路线**不再适用；**Web 与其他平台仍以 Slint 为基线**，该历史限制
+  对非桌面实验范围继续有效。
+- **保留的核心不变量**（不因本节改变）：
+  - `cad-db` 仍是唯一权威数据源；业务层只操作数据库/命令/事务，不调用 GPU。
+  - renderer-only wgpu：仅 `cad-render-wgpu` 依赖 wgpu；acadrust 仍仅由 `cad-import-acadrust` 依赖。
+  - ChangeSet → 依赖失效 → 显示表示重建的增量语义不变；不无条件全帧重解析底图。
+  - **每条合成路径只有一个 CAD presenter**；不与 UI 争抢同一 drawable；不做整幅回读。
+  - 未支持/未验证能力必须显式 `Unsupported`/`Partial`/诊断；禁止空成功与假数据。
+- **窄 2D 导航合同（最少）**：导航复用同一权威底图（GPU-resident、同一 DB revision），Ready fastpath
+  取最新 camera、不展示旧 doc；overlay 后缀可**临时省略**并以显式
+  `FrameCompleteness::BaseOnlyPendingOverlays` 标记（非静默）；`PresentedFrame.view_revision` = 实际
+  camera，`CurrentScene` = **GPU 已提交当前场景**（非渐进全像素）；严格 CPU-ready/GPU-未提交返回
+  `None`、不回旧底图；restore 同底图 overlay 提交；device change 阻塞至新上传；**3D 严格路径不变**。
+  用户可见取舍：拖拽期间 transient 覆盖（grid/axes/highlights/snaps/previews）可能暂时隐藏
+  （<30ms 窗口测量，**非精确延迟**）。`input→visible` **未验**。
+- **授权边界与当前状态（2026-10-14 更新）**：本轮仅 **Linux X11/XWayland** 获批并实测，已在
+  **GTK 中央 native 分区（nativechild）** 方案下与 React UI **co-visible** 达到**有界原型**
+  验收（实际 CAD：native Rust + P620/Vulkan；**非完整 CAD 产品**）；旧「顶层透明 alpha 全屏叠加」
+  为历史 **FAIL**（保留，不抹掉）。**Windows 与 macOS 为未来实现参照，NOT IMPLEMENTED / NOT RUN**。
+  不得把本增补当作任一平台已实现或已验收的证据。
+- **明确 NOT RUN / NOT IMPLEMENTED**：跨平台同原生叠层结构未验；独立 GTK nativechild 桥已实现
+  （bounded），但跨平台一致性未验；Win/macOS 全部未实现；实际 CAD 不宣称 60fps / full visual
+  golden / vendor DWG；无 Android/Web 迁移。
+- 本节不扩张系统权限，不承诺跨语言稳定 IPC（仅 bounded 实验 adapter）。

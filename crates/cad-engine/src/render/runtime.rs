@@ -26,8 +26,37 @@ pub struct FrameBinding {
     pub size: (u32, u32),
 }
 
+/// How complete a presented frame is relative to the authoritative scene.
+///
+/// [`FrameCompleteness::CurrentScene`] means the *scene resources* are fully
+/// committed and resident on the GPU — the current published scene revision and
+/// its base revision have been uploaded. It is **not** a claim that every
+/// progressive page of those pixels has been drawn yet: a progressive frame can
+/// still be accumulating (and `current_drawing_presented` stays false until it
+/// completes, via `presented_revision`).
+///
+/// [`FrameCompleteness::BaseOnlyPendingOverlays`] is the explicit, non-silent
+/// marker for the narrow 2D navigation fallback: the base drawing is the latest
+/// authoritative base and is still fully uploaded, but its overlay suffix
+/// (grid/axes/highlight/snap/crosshair/measurement/draw preview) is deliberately
+/// withheld until preparation catches up. It is never a claim that the current
+/// scene is complete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameCompleteness {
+    CurrentScene,
+    BaseOnlyPendingOverlays,
+}
+
 pub struct PresentedFrame {
     pub binding: FrameBinding,
+    /// Monotonic revision of the view (camera/space) that was actually rendered
+    /// into this frame. Independent of the texture binding: a camera-only frame
+    /// reuses the same offscreen texture identity while advancing this, so a
+    /// host can tell a new camera was presented without a new texture.
+    pub view_revision: u64,
+    /// Whether this frame is the full current scene or the base-only navigation
+    /// fallback. Never reported as `CurrentScene` while overlays are withheld.
+    pub completeness: FrameCompleteness,
     pub texture: wgpu::Texture,
 }
 
@@ -65,6 +94,10 @@ pub struct CadRenderRuntime {
     pub frames_rendered: u64,
     pending_upload: Option<PendingUpload>,
     pub presented_revision: Option<u64>,
+    /// True while the 2D navigation fallback has dropped the transient overlay
+    /// suffix from the GPU and is drawing the base-only scene over the latest
+    /// authoritative camera. Cleared by a successful full-scene publication.
+    overlays_suppressed: bool,
 }
 impl Default for CadRenderRuntime {
     fn default() -> Self {
@@ -83,6 +116,7 @@ impl Default for CadRenderRuntime {
             frames_rendered: 0,
             pending_upload: None,
             presented_revision: None,
+            overlays_suppressed: false,
         }
     }
 }
@@ -126,6 +160,7 @@ impl CadRenderRuntime {
         self.base_batches = 0;
         self.lifecycle = RenderLifecycle::Detached;
         self.diagnostic = None;
+        self.overlays_suppressed = false;
         self.dirty.invalidate();
     }
 
@@ -256,6 +291,9 @@ impl CadRenderRuntime {
         self.base_batches = ready.base.added.len();
         self.applied_base = Some(ready.base_revision);
         self.applied_revision = Some(ready.revision);
+        // A committed full scene restores the transient overlay suffix, so the
+        // base-only fallback is no longer active.
+        self.overlays_suppressed = false;
         self.dirty.invalidate();
         self.diagnostic = image_diagnostic;
         Ok(())
@@ -271,11 +309,133 @@ impl CadRenderRuntime {
         self.renderer.as_ref().and_then(Renderer::frame_progress)
     }
 
+    /// Whether the 2D navigation fallback is currently withholding overlays.
+    pub fn overlays_suppressed(&self) -> bool {
+        self.overlays_suppressed
+    }
+
+    /// The GPU base revision the runtime considers resident. Test/diagnostic only.
+    #[cfg(test)]
+    pub(super) fn applied_base_for_test(&self) -> Option<u64> {
+        self.applied_base
+    }
+
+    /// The base batch prefix preserved across the overlay suffix. Test only.
+    #[cfg(test)]
+    pub(super) fn base_batches_for_test(&self) -> usize {
+        self.base_batches
+    }
+
+    /// Model a resident base without a GPU so the pure-state qualifier can be
+    /// exercised honestly (the GPU path is covered by the ignored hardware test).
+    #[cfg(test)]
+    pub(super) fn force_resident_base_for_test(&mut self, base_revision: u64, base_batches: usize) {
+        self.lifecycle = RenderLifecycle::Ready { device_epoch: 1 };
+        self.applied_base = Some(base_revision);
+        self.applied_revision = Some(base_revision);
+        self.base_batches = base_batches;
+        self.pending_upload = None;
+    }
+
+    /// Whether the GPU has committed exactly `scene_revision` and its base
+    /// revision. A frame may only be labeled [`FrameCompleteness::CurrentScene`]
+    /// when this holds: a CPU-ready scene whose chunked upload is still pending
+    /// must never be presented under that label (it would show the resident old
+    /// scene while claiming it is current).
+    pub fn scene_committed(&self, scene_revision: u64, base_revision: u64) -> bool {
+        self.applied_revision == Some(scene_revision) && self.applied_base == Some(base_revision)
+    }
+
+    /// The latest published base is fully resident on the GPU: the device is
+    /// ready, the applied base revision matches `base_publication_revision`, and
+    /// no pending upload is replacing the base. This is the narrow qualifier that
+    /// lets a base-only frame stand in for the full scene during 2D navigation
+    /// without ever re-uploading base geometry.
+    pub fn base_fully_resident(&self, base_publication_revision: u64) -> bool {
+        matches!(self.lifecycle, RenderLifecycle::Ready { .. })
+            && self.applied_base == Some(base_publication_revision)
+            && self
+                .pending_upload
+                .as_ref()
+                .is_none_or(|pending| !pending.base_changed)
+    }
+
+    /// Drop the stale transient overlay suffix while keeping the base drawing
+    /// buffers. Runs at most once per fallback entry; a later full-scene commit
+    /// restores the suffix from the same base prefix (`base_batches`).
+    ///
+    /// `prepare_upload_batches(&[])` stages zero bytes, so this re-upload of the
+    /// base is impossible by construction: only the replaceable suffix after
+    /// `base_batches` is truncated.
+    fn suppress_overlays(&mut self) -> Result<(), RenderError> {
+        let renderer = self
+            .renderer
+            .as_mut()
+            .ok_or_else(|| RenderError::NotInitialized("renderer not initialized".into()))?;
+        let empty = renderer
+            .prepare_upload_batches(&[])
+            .map_err(|error| RenderError::Frame(error.to_string()))?;
+        renderer
+            .commit_upload(empty, self.base_batches)
+            .map_err(|error| RenderError::Frame(error.to_string()))?;
+        self.overlays_suppressed = true;
+        // The discarded suffix upload (if any) is overlay-only by the
+        // `base_fully_resident` qualifier; the full scene re-commits it.
+        self.pending_upload = None;
+        // The presented frame is no longer the full current scene.
+        self.applied_revision = None;
+        self.presented_revision = None;
+        self.dirty.invalidate();
+        Ok(())
+    }
+
     pub fn render_if_dirty(
         &mut self,
         view: &ViewSnapshot,
         logical: [f64; 2],
         scale: f64,
+        view_revision: u64,
+    ) -> Result<Option<PresentedFrame>, RenderError> {
+        let completeness = if self.overlays_suppressed {
+            FrameCompleteness::BaseOnlyPendingOverlays
+        } else {
+            FrameCompleteness::CurrentScene
+        };
+        self.render_frame(view, logical, scale, view_revision, completeness)
+    }
+
+    /// Render the base-only navigation frame over the latest authoritative
+    /// camera. The caller has already verified that the published base is fully
+    /// resident and that only view/overlay inputs are pending.
+    pub fn render_base_only(
+        &mut self,
+        view: &ViewSnapshot,
+        logical: [f64; 2],
+        scale: f64,
+        view_revision: u64,
+    ) -> Result<Option<PresentedFrame>, RenderError> {
+        if !matches!(self.lifecycle, RenderLifecycle::Ready { .. }) {
+            return Ok(None);
+        }
+        if !self.overlays_suppressed {
+            self.suppress_overlays()?;
+        }
+        self.render_frame(
+            view,
+            logical,
+            scale,
+            view_revision,
+            FrameCompleteness::BaseOnlyPendingOverlays,
+        )
+    }
+
+    fn render_frame(
+        &mut self,
+        view: &ViewSnapshot,
+        logical: [f64; 2],
+        scale: f64,
+        view_revision: u64,
+        completeness: FrameCompleteness,
     ) -> Result<Option<PresentedFrame>, RenderError> {
         if !matches!(self.lifecycle, RenderLifecycle::Ready { .. }) {
             return Ok(None);
@@ -304,6 +464,9 @@ impl CadRenderRuntime {
                         .map_err(|e| RenderError::Frame(e.to_string()))?;
                     let mut camera = camera2d_from_params(params);
                     camera.world_per_px /= scale;
+                    // A changed camera makes `render` rebuild the progressive
+                    // frame (transforms/camera differ), so no earlier page
+                    // continues under the new camera.
                     renderer.render(camera, &target)?;
                 }
                 ProjectionKind::ThreeD => {
@@ -331,6 +494,8 @@ impl CadRenderRuntime {
                 texture_revision: renderer.texture_revision(),
                 size,
             },
+            view_revision,
+            completeness,
             texture: texture.clone(),
         }))
     }

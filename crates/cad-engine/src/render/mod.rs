@@ -23,7 +23,7 @@ mod camera;
 mod runtime;
 pub use camera::{camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera};
 use runtime::CadRenderRuntime;
-pub use runtime::{FrameBinding, PresentedFrame, RenderLifecycle};
+pub use runtime::{FrameBinding, FrameCompleteness, PresentedFrame, RenderLifecycle};
 
 fn backend_kind(actual: ActiveBackend) -> ActiveBackendKind {
     match actual {
@@ -116,6 +116,13 @@ fn viewport_world_bounds(snapshot: &ViewSnapshot) -> Option<(Point3, Point3)> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct BaseInputIdentity {
     drawing: usize,
+    /// Authoritative database revision at the moment the identity was taken.
+    ///
+    /// Mixed in as an O(1) discriminator on top of the pointer so a base built
+    /// from a different revision is a different base. Database edits go through
+    /// the transaction/copy-on-write path (revision-bumping); the pointer alone
+    /// is not treated as sufficient identity.
+    revision: Option<cad_domain::Revision>,
     document: DocumentId,
     space: SpaceSelection,
     fonts_generation: u64,
@@ -125,12 +132,11 @@ struct BaseInputIdentity {
 
 impl BaseInputIdentity {
     fn from_state(state: &State) -> Self {
+        let incoming = state.incoming.borrow();
+        let drawing = incoming.as_ref();
         Self {
-            drawing: state
-                .incoming
-                .borrow()
-                .as_ref()
-                .map_or(0, |drawing| Arc::as_ptr(drawing) as usize),
+            drawing: drawing.map_or(0, |drawing| Arc::as_ptr(drawing) as usize),
+            revision: drawing.map(|drawing| drawing.revision()),
             document: state.view.document,
             space: state.view.space,
             fonts_generation: state.fonts_generation,
@@ -152,6 +158,9 @@ struct State {
     overlays: OverlayInputs,
     overlay_revision: u64,
     input_revision: u64,
+    /// Monotonic revision of the authoritative view (camera/space). Advances only
+    /// when the view actually changes, and tags every presented frame.
+    view_revision: u64,
     prepared_token: Option<u64>,
     observed_drawing: usize,
     scene_publication_revision: u64,
@@ -179,6 +188,7 @@ impl Default for State {
             overlays: OverlayInputs::default(),
             overlay_revision: 0,
             input_revision: 0,
+            view_revision: 0,
             prepared_token: None,
             observed_drawing: 0,
             scene_publication_revision: 0,
@@ -248,6 +258,31 @@ fn current_ready_scene(state: &State) -> Option<&controller::PreparedScene> {
     (!state.stopped && state.prepared_token == Some(state.input_revision))
         .then_some(())
         .and(state.controller.ready.as_ref())
+}
+
+/// Narrow qualifier for the 2D navigation fallback.
+///
+/// It holds only when the *base* drawing is provably unchanged and fully
+/// resident while preparation lags: the view is a valid 2D camera, the latest
+/// base input identity equals the last published one (so no new database, space,
+/// layer, font, image or resource identity is pending), and the GPU holds the
+/// latest published base with no pending base replacement. Everything that could
+/// make the resident geometry stale (new/unuploaded base, device change) fails
+/// this predicate, so the fallback can only ever draw the authoritative base.
+fn base_only_navigation_eligible(state: &State) -> bool {
+    if state.stopped {
+        return false;
+    }
+    if state.view.mode != ProjectionKind::TwoD || state.view.camera.camera2d_params().is_err() {
+        return false;
+    }
+    let latest = BaseInputIdentity::from_state(state);
+    if state.published_base_identity.as_ref() != Some(&latest) {
+        return false;
+    }
+    state
+        .runtime
+        .base_fully_resident(state.base_publication_revision)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -366,6 +401,10 @@ impl RenderSessionHandle {
             return Ok(state.input_revision != previous_input_revision);
         }
         state.view = view;
+        state.view_revision = state
+            .view_revision
+            .checked_add(1)
+            .expect("view revision exhausted");
         state.advance_input();
         let bounds = viewport_world_bounds(&state.view);
         if state.overlays.viewport_bounds != bounds {
@@ -548,6 +587,10 @@ impl RenderSessionHandle {
         if !Self::preparation_current_state(&state) {
             return false;
         }
+        // A base-only navigation frame is never the presented current drawing.
+        if state.runtime.overlays_suppressed() {
+            return false;
+        }
         state.runtime.presented_revision.is_some_and(|revision| {
             state
                 .controller
@@ -566,6 +609,15 @@ impl RenderSessionHandle {
     }
     pub fn input_revision(&self) -> u64 {
         self.0.borrow().input_revision
+    }
+    /// Monotonic revision of the authoritative view (camera/space). Advances only
+    /// on an actual view change; presented frames are tagged with it.
+    pub fn view_revision(&self) -> u64 {
+        self.0.borrow().view_revision
+    }
+    /// Whether the 2D navigation fallback is currently withholding overlays.
+    pub fn overlays_suppressed(&self) -> bool {
+        self.0.borrow().runtime.overlays_suppressed()
     }
     pub fn current_prepared_scene(&self) -> Option<controller::PreparedScene> {
         let mut state = self.0.borrow_mut();
@@ -724,11 +776,36 @@ impl RenderSessionHandle {
     ) -> Result<Option<PresentedFrame>, RenderError> {
         let mut state = self.0.borrow_mut();
         state.observe_drawing();
-        if !Self::preparation_current_state(&state) {
-            return Ok(None);
-        }
         let view = state.view.clone();
-        state.runtime.render_if_dirty(&view, logical, scale)
+        let view_revision = state.view_revision;
+        if Self::preparation_current_state(&state) {
+            // The CPU scene is current. Only render it as `CurrentScene` once the
+            // GPU has actually committed that scene revision and its base; a
+            // chunked `apply_ready_updates` upload may still be pending, and
+            // rendering then would present the resident old scene (or a partially
+            // uploaded one) under a `CurrentScene` label.
+            let committed = match current_ready_scene(&state) {
+                Some(scene) => state
+                    .runtime
+                    .scene_committed(scene.revision, scene.base_revision),
+                None => false,
+            };
+            if committed {
+                return state
+                    .runtime
+                    .render_if_dirty(&view, logical, scale, view_revision);
+            }
+        }
+        // Strict gate is not met (or the ready scene is not yet GPU-committed).
+        // Enter the narrow 2D navigation fallback only when the authoritative base
+        // is unchanged and fully resident; render the latest camera over the base
+        // while overlays wait. Never a new/uncommitted base.
+        if base_only_navigation_eligible(&state) {
+            return state
+                .runtime
+                .render_base_only(&view, logical, scale, view_revision);
+        }
+        Ok(None)
     }
 
     pub fn lifecycle(&self) -> RenderLifecycle {

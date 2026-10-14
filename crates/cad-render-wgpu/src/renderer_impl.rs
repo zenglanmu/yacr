@@ -1332,12 +1332,7 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: if clear {
-                            wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.06,
-                                g: 0.07,
-                                b: 0.10,
-                                a: 1.0,
-                            })
+                            wgpu::LoadOp::Clear(crate::CAD_CLEAR_COLOR)
                         } else {
                             wgpu::LoadOp::Load
                         },

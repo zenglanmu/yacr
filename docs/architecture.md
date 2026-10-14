@@ -60,3 +60,15 @@ Slint↔wgpu 合成（`cad-ui-slint/src/bridge.rs`）。仍返回 NotImplemented
 `scripts/check-architecture.py` 校验当前依赖图、循环和核心隔离。
 Web 宿主与 Slint 渲染桥的文件职责划分见 `docs/code-structure.md`。
 traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代表已稳定公共 API。
+
+## 实验宿主（bounded prototype）
+
+React + Tauri 原生桌面宿主是**实验候选**桌面合成路线（2026-10-14 用户授权替代 Slint），
+契约见 ADR 0006 与规范 §21，使用说明见 `docs/react-linux-app.md`。当前 Linux X11/XWayland 上以
+**GTK 中央 native 分区（nativechild）** 与 React UI **co-visible** 达到**有界原型**验收
+（实际 CAD：native Rust + P620/Vulkan；**非完整 CAD 产品**）；顶层透明 alpha full overlay 为历史
+FAIL；Windows/macOS **NOT IMPLEMENTED / NOT RUN**（macOS 候选 Metal，非 Vulkan）。React 宿主
+**无 Slint presenter**，**旧 Slint 代码未删除**。窄 2D 导航复用**同一权威底图**（GPU-resident、
+同一 DB revision），overlay 可经显式 `FrameCompleteness::BaseOnlyPendingOverlays` **临时省略**后
+恢复，**3D 严格路径不变**。该实验**不改变**上文边界：单 presenter per
+drawable、renderer-only wgpu、db 唯一权威、无整幅回读；Slint 仍是现有实现与 Web/Android 基线。

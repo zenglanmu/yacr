@@ -33,6 +33,8 @@
   "tool.confirm": "Confirm",
   "tool.cancel": "Cancel",
   "toolbar.fit": "Fit",
+  "render.fps": "Frame rate (FPS)",
+  "render.fps.unavailable": "No data",
   "toolbar.undo": "Undo",
   "toolbar.redo": "Redo",
   "toolbar.diagnostics": "Diagnostics",

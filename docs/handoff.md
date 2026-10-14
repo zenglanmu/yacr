@@ -1790,7 +1790,7 @@ CI `macos-latest` 出包 + 文档），产物形式为 **tar.gz：含 `Yacr.app`
    （含新增契约断言）。
 4. **打包**：新增 `scripts/package-macos-release.sh`（**只能在 macOS 运行**，非 Darwin 直接
    退出）。默认 `MACOS_ARCH=universal`：构建 `aarch64-apple-darwin` + `x86_64-apple-darwin`
-   并用 `lipo -create` 合成通用二进制；产出 `Yacr.app`（`Info.plist` + GUI + 
+   并用 `lipo -create` 合成通用二进制；产出 `Yacr.app`（`Info.plist` + GUI +
    `Contents/Resources/fonts/`）、`bin/cad-cli-tools`、`bin/yacr-macos` 与 `fonts` 符号链接、
    文档与脚本，打成 `yacr-<version>-macos-universal.tar.gz`（+ sha256）。`otool -L` 断言动态
    依赖只来自系统库，出现 `@rpath`/Homebrew 即中止；`WITH_FONTS=0` 离线仅 osifont；
@@ -2820,3 +2820,227 @@ revision 不连续重建；GPU 重建不改数据库；设备失败和退出保�
   并加 negative-fixture 合同（丢 channel/换 order/抢 authority 必须失败）；未删/skip/放松断言、未改 workflow
   gate、未恢复旧 `core.push()`。exact Node 命令终态 60/60 pass，`git diff --check` 通过。详见
   `docs/validation-engine-decoupling.md` 末节。browser RAF/GC/WebGPU 等仍未验收。
+
+## 2026-10-14 React + Tauri 原生 Linux 探针实验（进行中，未验收）
+
+用户批准以 Tauri2 + React 替换 Linux 桌面 Slint UI，并新增 X11/XWayland-only GPU 合成探针；
+**不允许 WASM、不允许逐帧 readback**。决策见 `docs/adr/0006-react-native-linux-experiment.md`。
+
+本轮交付（scope：`apps/app-react-linux/**`（除 `ui/**` 归 designer）、根 `Cargo.toml`、
+`Cargo.lock`、ADR 0006、本段）：
+
+- 新增 workspace member `apps/app-react-linux`（bin `yacr-react-probe`，Tauri 2.11.6）。
+  强制 `GDK_BACKEND=x11`（未设置则置为 x11，设置为其它值报错退出）；透明顶层窗口 +
+  全窗透明子 Webview；单 Tauri 事件循环 `MainEventsCleared` 主线程驱动
+  `cad-render-wgpu::SurfaceProbePresenter`（顶层 XID 路径，打印 `[probe] top-level X11 XID ...`）。
+  生命周期：resize / 零尺寸暂停 / minimize 恢复 / destroy 先 `stop()` 再释放 / GPU 失败显式
+  写入状态。协议见 ADR 0006（`probe_status`、`probe_input`）。
+- 依赖：新增 `tauri ~2.11`、`tauri-build ~2.6`、`raw-window-handle`。Cargo.lock 将 tauri 内部族
+  固定为 `tauri-build/macros 2.6.3、tauri-runtime 2.11.3、tauri-runtime-wry 2.11.4、
+  tauri-utils 2.9.3、tauri-codegen 2.6.3`（镜像最新小版本与 2.11.6 破坏性不兼容；未用 Cargo patch）。
+- 未改渲染器：沿用上轮 `crates/cad-render-wgpu/src/native_presenter.rs`（本文件所在 crate 的
+  `lib.rs`/`native_presenter.rs` 改动来自上一轮，非本轮新增）。
+
+已运行证据（本机 debug）：
+
+- `cargo check -p app-react-linux --all-targets --locked` 通过；
+- `cargo test -p app-react-linux --lib --locked` → 10 passed / 0 failed（序列号/有限参数/终结事件契约）；
+- `cargo clippy -p app-react-linux --all-targets --locked -- -D warnings` 干净；
+- `python3 scripts/check-architecture.py` → 28 包 `Architecture OK`。
+- 系统 dev 依赖（`libwebkit2gtk-4.1-dev`、`libgtk-3-dev` 等）由主协调者后台 apt 安装，非本轮安装。
+
+NOT RUN（不得据此宣称验收）：
+
+- **真实窗口 60s 探针（XWayland + Quadro P620）未运行**：待 designer 完成 `ui/dist` 后由主协调者
+  统一验证（本机无 `ui/dist`；debug 因设 `devUrl` 才可编译，release 才嵌 `ui/dist`）。
+- **GTK child 桥未实现**：仅顶层 XID 对照；child drawing area 的 XID 复用方案待 librarian 核实后补充。
+- GTK/WebKit 叠加与 Vulkan surface 的平台合成、minimize/restore/drag 真实交互、真实 FPS 计时均未测。
+- 未跑 WASM（本实验不允许）。探针不是 CAD presenter，不绘制 CAD 几何、不代表 CAD 能力。
+
+### 真实窗口验收（2026-10-14，Gate 1 未通过）
+
+证据：`/tmp/opencode/yacr-react-probe-20261014T044550Z/`。真机 XWayland + Quadro P620：
+顶层 XID `0x1800003` viewable；`backend=vulkan adapter=Quadro P620 discrete_gpu`；真实 IPC
+输入可用（前端 `resize seq=1` + 合成 `pointer_down/move/up`+`wheel`，均 accepted、marker 变化、
+up 为 terminal；注入为合成、非真实鼠标）。
+
+阻塞项：`presenter.frame()` 每帧阻塞 **~998ms（~1fps）**——渲染器 ignored 用例在普通 Xlib
+窗口 0.37s 内完成 init+4 帧，而 GTK 顶层/`GtkDrawingArea` 均 ~1s/帧，说明停顿在
+**XWayland 合成 present 路径**而非 GTK 归属。一次有界修复（GTK 桥 B：`GtkOverlay`+windowed
+`GtkDrawingArea`+webview reparent）已实现测试，**未修复**（surface 有效但仍 ~1s/帧），按约束
+停止并默认关闭（`YACR_PROBE_GTK_BRIDGE=1` 才启用）。`set_size` 返回 Ok 但窗口不变
+（960x600）；minimize 可暂停、`unminimize` 未恢复。当轮截图工具缺口（rootless XWayland root grab
+近全黑、GNOME D-Bus 截图 AccessDenied、无 grim/scrot/import/xwd）→ 当轮无像素/视觉证据；
+**后续 composited 轮已取得 full compositor 像素且 composite FAIL，见下节**。
+NOT RUN：视觉验收、真实鼠标、GTK/WebKit 叠加合成、60fps 同步刷新。详见 ADR 0006。
+
+### 有界 debug + 安全修正（2026-10-14 第二轮，Gate 1 仍未通过）
+
+Stage 计时实测 root cause：`Queue::present`（Fifo）阻塞 **~1.000 s**（其余阶段 µs 级）；
+同一 surface 改 `Immediate` 后 present median **77 µs**、10 s **62,404 帧**。宿主改用
+`ProbePresentMode::MailboxElseImmediate`（supports 无 Mailbox→Immediate，显式日志）后，
+Tauri 全 React 连续 11 s 达 **~60 fps（651 帧）**，真实 IPC 输入（resize + 合成
+pointer_down/move/up + wheel）全部 accepted。安全修正：presenter 改 main-thread
+`thread_local`、共享状态去 GPU、`CloseRequested`/`Exit` 显式 `release_presenter()`
+（surface-before-window）、redraw single-pending、child 用真实 size、`scope.pop` 有界非阻塞、
+每阶段计时；GTK bridge 原型已删除（撤回，其慢同为 Fifo present）。窗口 **drawable 抓图成功**
+（`XGetImage(window)`，非 root；960x600 全非黑，颜色与 shader 一致，marker 质心 x 278→312）；
+root 抓图仍黑（rootless XWayland）≠ 窗口不可抓。仍阻塞：`set_size` 未观察到尺寸变化（原因未定）、
+`unminimize` 不恢复、合成正确性与真实鼠标未验。NOT RUN 同上；仍不接 CAD 核心。
+
+### WASM/跨目标隔离构建修复（2026-10-14，bounded 机械）
+
+`cargo check --workspace --lib --target wasm32-unknown-unknown --locked` 曾 exit 101
+（`app-react-linux` 无条件拉 `tauri/wry/tao`）。修复：`app-react-linux` 的
+`tauri/cad-render-wgpu/raw-window-handle/serde` 与 `tauri-build` 改为 Linux-target 依赖；
+`build.rs` 以 host cfg + `CARGO_CFG_TARGET_OS`（目标）双重判断，仅 Linux 目标调用
+`tauri_build::build()`；`lib.rs` 全模块 `cfg(target_os="linux")`（其它目标空 crate，不 pretend）；
+`main.rs` 其它目标显式 unsupported 退出。固定 `tauri =2.11.6`/`tauri-build =2.6.3`。
+未改 `ui/**`/native presenter/窗口行为。证据：workspace wasm lib check **exit 0**
+（`/tmp/opencode/yacr-react-wasm-check.log`）、workspace all-targets exit 0、app 10/10、
+renderer 59/2、workspace clippy exit 0；`cargo fmt --all -- --check` 仅既有陌生
+`debug_fixture.rs` 失败（未编辑，`/tmp/opencode/yacr-react-fmt-check.log`）。
+
+### Compositor 截图取证（2026-10-14 第三轮，**composite FAIL**）
+
+本轮**取得 full compositor 像素证据**（更新此前"无像素"结论），但合成仍失败。
+方法：`xdg-desktop-portal` `org.freedesktop.portal.Screenshot` v2（`interactive=false` +
+`handle_token`，先订阅 Response 再 invoke，20s 超时），6 张 1920x1080 全桌面截图
+`/tmp/opencode/yacr-react-composited-20261014T082703Z/shot1..6.png`。
+授权（用户明确授权，均已恢复）：临时 `loginctl unlock-session 1`（仅信号，未读密码）+
+临时 `PermissionStore.SetPermission screenshot true screenshot '' ['yes']`；finally
+`DeletePermission screenshot/screenshot ''`（原 `''` 不存在），`wechat: ['yes']` 保留未动
+（verify 回到 `{'wechat': ['yes']}`）；`lock-session` 并 verify `GetActive=true`。
+仅关闭本轮 probe（进程组），无残留；截图为私有桌面，**仅本地保存未上传**；未改
+unsafe-mode/gsettings/图形 config、未编辑源码。
+observer 结论（shot2..5.png）：960x600 **客户区仅网格 + orange marker + corner markers**；
+顶部白色 “yacr react probe” 条是 **WM decoration 非 React ribbon**；**React ribbon/命令框/
+DOM 浮层均不可见且未被外窗遮挡**；marker 逐帧向左移动 → **Gate composite FAIL**：
+**无法区分"被覆盖"与"未加载"**，IPC 仅证逻辑不证可见。
+native Wayland / DWG / 真实鼠标 / 正式 CAD 仍 **NOT RUN**；不继续代码实现；
+**不据此宣称 Tauri 整体不可行**。详见 ADR 0006。
+
+## 2026-10-14 React/Tauri 原生桌面路线文档契约增补（docs lane，未验收）
+
+本轮为**文档 lane**（不改代码/manifest/lock/UI），把用户已确认的 React/Tauri 原生桌面路线契约
+写入 spec 与 ADR，供未来 Windows/macOS 实现参照；Linux 探针代码修复由**另 lane** 进行，不在本 lane。
+
+- `CAD_IMPLEMENTATION_SPEC.md`：新增 §21「实验范围增补：React/Tauri 原生桌面宿主」——授权
+  React 替代 Slint（桌面实验）、Tauri 壳、native Rust CAD、renderer-only wgpu、no WASM、no 逐帧
+  readback；覆盖 §4.11/ADR 0005 的“React 不在本轮”历史限制（**仅限桌面实验路线**），保留 db 唯一
+  权威、单 presenter、增量语义、显式 Unsupported 等核心不变量。§2.1.3、§4.11 就地加最小指针，
+  未改 P1–P4 历史。
+- `docs/adr/0006-react-native-linux-experiment.md`：追加「React 原生桌面宿主跨平台路线契约」增补
+  （共同架构、平台差异、RapidRAW 参照、合成/坐标/输入/生命周期契约、明确不承诺、验收要求、
+  未来 implementation checklist、支持状态矩阵）。
+- `docs/architecture.md`：最小增补一条实验宿主指针。
+
+本轮状态（如实记录，不得外推）：
+
+- 用户授权：React 替代 Slint 目标、Tauri 桌面壳、native Rust CAD、renderer-only wgpu / noWASM /
+  no readback；本轮 **X11/XWayland 获批**。
+- Linux：顶层 Vulkan 覆盖 React **合成 FAIL**（full compositor 像素已取得，无法区分“被覆盖”与
+  “未加载”）；**独立 GTK nativechild 桥未验**。
+- Windows/macOS：**NOT IMPLEMENTED / NOT RUN**。**禁止 readback 兜底**（未授权）。
+- 不得把跨平台同原生叠层结构、synthetic/单平台结果承诺为已验。
+
+验证：`git diff --check` 见本轮报告。
+
+## 2026-10-14 React 原生 Linux 宿主 closeout（bounded prototype accepted，含限制）
+
+用户目标：React 替代 Slint + Tauri 桌面壳 + native Vulkan；基本 UI 已 implemented 并 validated 为
+**bounded prototype**（**非完整 CAD 产品**）。**旧「顶层透明 alpha 全屏叠加」FAIL 保留为历史**；
+本轮实际方案为 **Linux GTK 中央 native 分区（nativechild）在 React UI 上**，React DOM（ribbon、
+底部命令条）与中央 native CAD **co-visible**。契约见 ADR 0006 第四轮节与规范 §21；使用说明见
+`docs/react-linux-app.md`。
+
+最终证据目录：
+
+- 实际 CAD `/tmp/opencode/yacr-react-cad-acceptance-20261014T112301Z`；
+  输入/键盘终轮 `/tmp/opencode/yacr-react-cad-input-final-20261014T115552Z`。
+- 生命周期 `/tmp/opencode/yacr-react-lifecycle-20261014T101035Z`；
+  WM restore `/tmp/opencode/yacr-react-restore-20261014T102828Z`。
+- 门禁 `/tmp/opencode/yacr-react-final-gates-20261014T112155Z`。
+
+已验收（bounded，含限制）：
+
+- synthetic four-line DWG 打开 `entityCount=4`、`backend=vulkan`、`adapter=Quadro P620`；React
+  ribbon + 底部命令条与中央 native CAD **co-visible**；OS pan / wheel（上/下）/ Fit 按钮与 typed
+  命令生效；未知 `BOGUS` 走 **not supported**（不空成功）。
+- React **OPEN** native portal picker → licensed flange DXF：`entityCount=419`、**同进程**
+  `importCount=2`；非法坏 DWG 显式 `CorruptData(...)` **保留旧 DB**；Cancel 保留 DB、报清晰错误。
+- resize unrealize/remap → detach/attach **Drop 先于 native**；正常 close/Exit 同样先 Drop；
+  minimize→restore 仅 **WM pager 激活** PASS（Tauri `unminimize()` API 在 XWayland 上**未采纳**，
+  限制）。GPU 真实 P620/Vulkan/Immediate，**无软件后端**。
+- 错误策略 hardening：同 presenter generation bind 失败**最多重试一次**、错误保持可见、新
+  generation 可重试；**closing/failed 禁止 bind**。
+
+不夸大 / NOT RUN：
+
+- 60fps 仅上一轮 **PROBE** 10s 实测；**实际 CAD root 不宣称 60fps**（无稳定 CAD bench）；renderer
+  GPU frame present 统计**不外推**。`importCount` 为**成功文档观察**非 parser 调用；**无运行时重解析
+  的直接插桩 NOT RUN**，仅架构导航路径 + 600 synthetic 契约 counter 不变 proxy。
+- observer：four-line **basic smoke PASS** + pan/fit；flange **PARTIAL**（主几何可见、无明显翻转，
+  但布局与参考有差异：缺 paper frame/title block 右细节、大量文字），**不构成 full visual golden /
+  vendor DWG**；当前是否模型空间**原因 UNDETERMINED**。popup 跨 CAD **Unsupported**；诊断在
+  ribbon 内；**无 Android/Web 迁移**；不从 HostCore 资源完整兼容外推。
+
+测试/门禁（per logs）：app **71**（契约合成，含 2 条新增 bounded-bind contract）、UI 16、
+renderer 64、WGSL 4；check/clippy/fmt PASS。**71 为契约合成计数，与此前 GPU runtime 证据分开，
+不互相替代**。门禁 host/wasm/clippy + 4 static 均 0；`fmt` 仅既有陌生未跟踪 `debug_fixture.rs`
+失败（未编辑）。
+
+新增入口/文档：`scripts/run-react-linux.sh`（检查 DISPLAY + 始终 `GDK_BACKEND=x11`；`node_modules`
+缺失时 `npm ci`，再 `npm run build`；`cargo run --locked -p app-react-linux --bin yacr-react-probe
+--features tauri/custom-protocol -- "$@"`；**不**装系统依赖、**不**解锁、**不**截图）与
+`docs/react-linux-app.md`（构建依赖、用法、支持范围、坐标/DPR 契约、portal helper 授权、
+隐私/锁状态）。旧 `apps/app-react-linux/scripts/run-probe.sh` **未改**。
+
+Win/macOS 仍 **NOT IMPLEMENTED / NOT RUN**；macOS 候选 **Metal**（非 Vulkan）；GPU **无 CPU
+readback**；React 宿主**无 Slint presenter**，**旧 Slint 代码未删除**。清理：截图临时权限恢复
+baseline；**保留 unknown/desktop 原锁状态**（最近启动为 unlocked → 保持 unlocked，**不得声称
+always locked**）；全屏截图**仅本地未上传**；外部 `debug_fixture.rs`/`debug-block.dwg` **未索引/未用**。
+
+## 2026-10-14 React 原生 Linux 宿主 final closeout（窄 2D fastpath + 性能基线，latest accepted）
+
+在第四轮基础上，本轮实现并验收**窄 2D 导航 fastpath**与**实测性能基线**；**旧各轮 FAIL history 与
+标签全部保留**，本段为最新 summary。契约见 ADR 0006 第五轮节与规范 §21；使用说明见
+`docs/react-linux-app.md`。
+
+用户 4 项请求（已 implemented）：
+
+1. 可见 **FPS 真实计数**：`delta frameCount / performanceNow`、rolling **2s**、warmup **1s**，
+   `reset`/`stopped`/`error` 显示**不可用**；**非**占位 React 动画。
+2. UI chrome 中性灰 **`#dedede`**；CAD 由真实 GPU **clear 纯黑 `#000000`**（不透明，全空间默认，
+   **无**旧背景偏好覆盖）。
+3. 默认窗口**最大化**：helper 前验证 `_NET_WM_STATE MAXIMIZED_HORZ/VERT`，尺寸 **1853×1011**，
+   `fallback=false`。
+4. 入口脚本由**用户自改**为默认 `--release` 并**保留不变**（本 lane 未改该脚本）；`debug` 快速运行
+   可用直接 cargo 命令（可选）。
+
+窄 2D 导航合同：同一权威底图（GPU-resident、同一 DB revision、fonts/images/layers/space 一致），
+Ready fastpath 取最新 camera、不展示旧 doc；overlay 后缀**临时省略**并以显式
+`FrameCompleteness::BaseOnlyPendingOverlays` 标记；`PresentedFrame.view_revision` = 实际 camera；
+`CurrentScene` = **GPU 已提交当前场景**（非渐进全像素），当前 drawing `presented=false`+`baseOnly`；
+严格 CPU-ready/GPU-未提交返回 `None`、不回旧底图；restore 同底图 overlay 提交（静态 base prefix
+保留）；device change 阻塞至新上传；**3D 严格路径不变**。Root lag：严格 view prep token advancing，
+多数帧 `None`，实际输入 ~23µs / render ≤3ms。**取舍**：拖拽 transient grid/axes/highlights/snaps/
+previews 可能暂时隐藏，prepared 后恢复（<30ms 窗口测量，非精确延迟）。
+
+性能（source hash locked）：基线 `/tmp/opencode/yacr-react-baseline-perf-20261014T125447Z`、postfix
+`/tmp/opencode/yacr-react-postfix-perf-20261014T135021Z`；同 4s/494 events/~120Hz，fourline/flange
+drag waiting **65.3%/67.8%→0.0%/0.0%**、presented/s **21.0/19.5→60.7/59.9**；
+`view_current==view_rendered` **709/701 帧 0 mismatch**；post-release waiting **0**、无 history、
+位置稳定（148/146 帧）；`input_age_us`（Rust admission→drain）p95 **15.722/15.022ms**（**非
+input→visible**）；scope pop p50/max **1/3µs**；frame p95 **0.873/3.132ms**；UI FPS **60/61**；
+observer max black/gray/align PASS。**input→visible p95<50ms UNVERIFIED**（portal 静态截图非真实
+视频捕获）；**不宣称无性能回归 / full visual golden**（vendor 仍 `Partial`）。
+
+测试/门禁：engine **76** pure/synthetic + **5** ignored（real P620，显式运行全部 **PASS**）；
+App **73** contracts（latest host telemetry）、renderer **65**（lib）、UI **22**；WGSL shaders
+unchanged（新代码 Vulkan，无 CPU）。门禁 `/tmp/opencode/yacr-react-drag-gates-20261014T135430Z`
+host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `debug_fixture.rs` 失败
+（未编辑）。**Oracle 独立 accepted** post-GPU publication gate。**device fastpath 测试不等于平台/
+全产品验收**；不承诺未支持平台（Win/macOS 仍 future）字段；跨平台同契约、仍引用 RapidRAW 固定
+版本、**Linux 无 readback**。清理：会话本就 unlocked → **保持 unlocked**（保留原状态）；portal 权限
+恢复（保留 `wechat`）、虚拟 uinput 与自身 PID 已清理；全屏截图**仅本地私有，未远程上传**。

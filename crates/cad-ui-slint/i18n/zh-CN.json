@@ -33,6 +33,8 @@
   "tool.confirm": "确认",
   "tool.cancel": "取消",
   "toolbar.fit": "适应",
+  "render.fps": "帧率（FPS）",
+  "render.fps.unavailable": "暂无数据",
   "toolbar.undo": "撤销",
   "toolbar.redo": "重做",
   "toolbar.diagnostics": "诊断",

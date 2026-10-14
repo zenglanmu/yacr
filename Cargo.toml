@@ -26,6 +26,7 @@ members = [
     "apps/app-android",
     "apps/app-web",
     "apps/app-linux",
+    "apps/app-react-linux",
     "apps/app-windows",
     "apps/app-macos",
 ]
@@ -99,6 +100,21 @@ wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"
 js-sys = "=0.3.106"
 web-sys = "=0.3.106"
+
+# React + Tauri native Linux probe host (experiment; ADR 0006). Tauri2 and its
+# build helper are the only new runtime/build dependencies; the probe reuses the
+# existing `cad-render-wgpu::SurfaceProbePresenter` with no renderer changes.
+# `tauri-build` is versioned independently of `tauri` (2.7.x vs 2.11.x).
+tauri = { version = "=2.11.6", features = ["unstable"] }
+tauri-build = { version = "=2.6.3" }
+# GTK overlay bridge for the React probe (Linux only). Versions match the
+# gtk/gdk/gdkx11 already in the lock via Tauri.
+gtk = "0.18"
+gdk = "0.18"
+gdkx11 = "0.18"
+# Needed to read the X11 top-level XID of the Tauri window (tauri does not
+# re-export raw-window-handle). Matches the 0.6.2 already in the lock via wgpu.
+raw-window-handle = "0.6"
 
 [profile.release]
 opt-level = 3

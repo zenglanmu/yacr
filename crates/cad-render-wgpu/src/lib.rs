@@ -20,6 +20,24 @@ pub mod geometry;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;
 
+/// Native-only surface probe presenter (forced Vulkan, real GPU) for host
+/// bring-up. Deliberately **not** the production CAD presenter: it draws only a
+/// grid, a moving colour block and corner markers, performs no readback, and
+/// owns no event loop. See [`native_presenter`].
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native_presenter;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_presenter::{
+    NativeTextureKey, ProbeAdapterInfo, ProbeError, ProbeFrameStats, ProbePresentMode,
+    ProbeStageTimings, SurfaceProbePresenter,
+};
+
+/// Alias for hosts that think of this as a native surface presenter. The
+/// canonical name stays [`SurfaceProbePresenter`] so existing callers compile.
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_presenter::SurfaceProbePresenter as NativeSurfacePresenter;
+
 use cad_diagnostics::codes;
 use cad_diagnostics::{DiagnosticParameter, DiagnosticReason};
 use cad_domain::*;
@@ -36,6 +54,18 @@ pub use geometry::{
 pub use geometry::{Camera2d, Camera3d};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// The CAD render-target clear color: **pure black, fully opaque**.
+///
+/// This is the actual clear of the CAD render target (not a DOM/CSS overlay) and
+/// applies to every space (model and paper). It is the global default; a host
+/// that needs a different background must change it explicitly.
+pub(crate) const CAD_CLEAR_COLOR: wgpu::Color = wgpu::Color {
+    r: 0.0,
+    g: 0.0,
+    b: 0.0,
+    a: 1.0,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendPreference {

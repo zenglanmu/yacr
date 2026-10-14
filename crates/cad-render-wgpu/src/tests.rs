@@ -261,3 +261,15 @@ fn image_quad_uses_the_clip_polygon_instead_of_the_unit_square() {
     assert_eq!(read(0), [-0.8, -0.8, 0.0, 0.0, 1.0]);
     assert_eq!(read(3), [-0.8, 0.8, 0.0, 0.0, 0.0]);
 }
+
+#[test]
+fn cad_clear_color_is_pure_black_opaque() {
+    // The React host requires the CAD render target to clear to actual pure
+    // black (not a DOM overlay); this is the global default for every space.
+    let color = CAD_CLEAR_COLOR;
+    assert_eq!(
+        (color.r, color.g, color.b, color.a),
+        (0.0, 0.0, 0.0, 1.0),
+        "the CAD render target clears to pure opaque black"
+    );
+}
