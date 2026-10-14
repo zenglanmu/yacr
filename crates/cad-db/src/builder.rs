@@ -38,6 +38,7 @@ impl DrawingDatabaseBuilder {
                 scales: BTreeMap::new(),
                 active_annotation_scale: None,
                 next_entity_id: 1,
+                bounds_cache: Default::default(),
             },
             errors: Vec::new(),
         }
