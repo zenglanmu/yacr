@@ -1,4 +1,5 @@
-// Real headless Chromium responsive/DWG/startup regression. Playwright is external.
+// Real Chromium responsive/DWG/startup regression. Real-GPU by default (headful);
+// set YACR_SOFTWARE_GPU=1 to opt into a SOFTWARE SwiftShader run. Playwright is external.
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 const module = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
@@ -6,15 +7,27 @@ const chromium = module.chromium || module.default.chromium;
 const url = process.argv[2] || "http://127.0.0.1:8098/";
 const output = process.argv[3] || "/tmp/opencode/yacr-mobile-validation";
 mkdirSync(output, { recursive: true });
-const server = await chromium.launchServer({
-  headless: true,
-  args: [
-    "--no-sandbox",
-    "--enable-unsafe-swiftshader",
-    "--use-gl=angle",
-    "--use-angle=swiftshader",
-  ],
-});
+// Real-GPU by default (headful, like check-web-files.mjs). SwiftShader software
+// rendering is an explicit opt-in: set YACR_SOFTWARE_GPU=1, and the run is then
+// labelled SOFTWARE everywhere and must never be presented as real-GPU evidence.
+const softwareGpu = process.env.YACR_SOFTWARE_GPU === "1";
+const launchOptions = softwareGpu
+  ? {
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--enable-unsafe-swiftshader",
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+      ],
+    }
+  : { headless: false, args: ["--no-sandbox"] };
+if (softwareGpu) {
+  console.error(
+    "YACR_SOFTWARE_GPU=1: SOFTWARE SwiftShader run - not real-GPU evidence.",
+  );
+}
+const server = await chromium.launchServer(launchOptions);
 const browser = await chromium.connect(server.wsEndpoint());
 const results = [];
 try {
@@ -44,6 +57,30 @@ try {
       null,
       { timeout: 60000 },
     );
+    // Real-GPU evidence: the unmasked GL renderer must not be a software backend.
+    const glRenderer = await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+      if (!gl) return null;
+      const ext = gl.getExtension("WEBGL_debug_renderer_info");
+      return ext
+        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+        : gl.getParameter(gl.RENDERER);
+    });
+    const softwareRenderer = /swiftshader|llvmpipe|software|basic render/i.test(
+      glRenderer || "",
+    );
+    if (softwareRenderer && !softwareGpu) {
+      throw new Error(
+        `real GPU required, but the browser reported a software renderer: ${glRenderer}. ` +
+          "Set YACR_SOFTWARE_GPU=1 to opt into SwiftShader (the run is then labelled SOFTWARE).",
+      );
+    }
+    const rendererInfo = {
+      glRenderer,
+      software: softwareRenderer,
+      mode: softwareGpu ? "software" : "real-gpu",
+    };
     await page.waitForTimeout(1000);
     const geometry = await page.evaluate(() => {
       const canvas = document.getElementById("canvas");
@@ -71,7 +108,7 @@ try {
         Number(surface[2]) > height * 0.4,
     );
     // Default-layout screenshots live in check-web-ribbon.mjs. Capture only
-    // the final rotated state here to avoid repeated SwiftShader readbacks.
+    // the final rotated state here to avoid repeated screenshot readbacks.
     if (dpr !== 1) {
       const rect = await page.locator("#canvas").boundingBox();
       await page.mouse.click(rect.x + width * 0.5, rect.y + rect.height - 30);
@@ -118,10 +155,10 @@ try {
     assert.equal(resized.width, Math.round(resized.css * dpr));
     assert.match(resized.report, /entities=4/);
     // Rotation is asserted from backing-store size and retained document above.
-    // Repeated dynamic high-DPI SwiftShader captures can stall Chromium 153;
+    // Repeated dynamic high-DPI screenshot captures can stall Chromium 153;
     // default/desktop pixel evidence is captured by the companion scripts.
     assert.deepEqual(errors, []);
-    results.push({ name, geometry, resized, errors });
+    results.push({ name, geometry, resized, errors, renderer: rendererInfo });
     await context.close();
   }
   const failure = await browser.newPage();

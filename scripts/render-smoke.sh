@@ -2,14 +2,25 @@
 # render-smoke.sh -- headless render smoke test for the yacr CLI.
 #
 # Renders one DWG offscreen and verifies the produced PNG is a real, non-blank
-# frame. On a machine with Mesa lavapipe, force the software adapter first:
+# frame. It uses the real hardware GPU by default: no VK_ICD_FILENAMES is forced,
+# so the Vulkan loader picks the real device; the adapter actually used is printed
+# by the CLI check below. Software Vulkan (Mesa lavapipe) is opt-in only:
 #
-#   export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
-#   scripts/render-smoke.sh <input.dwg> <out.png> [width] [height]
+#   YACR_SOFTWARE_GPU=1 scripts/render-smoke.sh <input.dwg> <out.png> [w] [h]
 #
 # The CLI is taken from $YACR_CLI, or, when this script is inside a release
 # package, from ../bin/cad-cli-tools.
 set -euo pipefail
+
+if [[ "${YACR_SOFTWARE_GPU:-0}" == "1" && -z "${VK_ICD_FILENAMES:-}" ]]; then
+  VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name '*lvp*.json' -print -quit)"
+  if [[ -z "$VK_ICD_FILENAMES" || ! -s "$VK_ICD_FILENAMES" ]]; then
+    echo "render-smoke: YACR_SOFTWARE_GPU=1 but no Mesa lavapipe ICD found under /usr/share/vulkan/icd.d" >&2
+    exit 2
+  fi
+  export VK_ICD_FILENAMES
+  echo "render-smoke: SOFTWARE GPU mode (YACR_SOFTWARE_GPU=1): VK_ICD_FILENAMES=$VK_ICD_FILENAMES; frame below is software-rendered, not a real GPU" >&2
+fi
 
 DWG="${1:?usage: render-smoke.sh <input.dwg> <out.png> [width] [height]}"
 PNG="${2:?usage: render-smoke.sh <input.dwg> <out.png> [width] [height]}"

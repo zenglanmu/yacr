@@ -2,11 +2,14 @@
 """Offscreen DXF render check against a committed reference image.
 
 This drives the *real* release CLI through ``scan`` -> ``build-representation``
--> ``render`` (native wgpu/Vulkan, normally Mesa lavapipe) on a DXF fixture and
-checks that the pipeline still produces the expected structure and a non-empty
-frame. It then decodes the rendered PNG and the committed reference PNG and
-reports coarse ink-coverage / bounding-box statistics plus side-by-side and
-overlay images for *human* review.
+-> ``render`` (native wgpu/Vulkan) on a DXF fixture and checks that the pipeline
+still produces the expected structure and a non-empty frame. It uses the real
+hardware GPU by default (no VK_ICD_FILENAMES is forced; an inherited value is
+honored as explicit user intent); software Mesa lavapipe is opt-in via
+``--software`` (or an explicit ``--icd``) and labeled SOFTWARE. It then decodes
+the rendered PNG and the committed reference PNG and reports coarse ink-coverage
+/ bounding-box statistics plus side-by-side and overlay images for *human*
+review.
 
 It deliberately does **not** assert a pixel-fidelity score (no SSIM/IoU
 acceptance): the reference was rendered by a different program with a different
@@ -27,18 +30,32 @@ hard assertion; reference statistics are reported, never invented.
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import json
 import os
 import struct
 import subprocess
+import sys
 import time
 import zlib
 from collections import Counter
 from pathlib import Path
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-DEFAULT_ICD = "/usr/share/vulkan/icd.d/lvp_icd.json"
+SOFTWARE_ICD_TOKENS = ("lvp", "lavapipe", "llvmpipe", "swiftshader", "softpipe")
+
+
+def is_software_icd(path) -> bool:
+    return bool(path) and any(token in Path(path).name.lower() for token in SOFTWARE_ICD_TOKENS)
+
+
+def find_software_icd() -> str | None:
+    for pattern in ("*lvp*.json", "*lavapipe*.json"):
+        matches = sorted(glob.glob(f"/usr/share/vulkan/icd.d/{pattern}"))
+        if matches:
+            return matches[0]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -228,15 +245,34 @@ def main() -> int:
     parser.add_argument("--cli", default="target/release/cad-cli-tools")
     parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--height", type=int, default=768)
-    parser.add_argument("--icd", default=DEFAULT_ICD)
+    parser.add_argument("--icd", default=None,
+                        help="explicit Vulkan ICD path (default: none, real GPU). "
+                             "A lavapipe/llvmpipe path is treated as software and labeled.")
+    parser.add_argument("--software", action="store_true",
+                        help="force Mesa lavapipe software Vulkan (labeled SOFTWARE); "
+                             "the local software ICD is selected automatically")
     parser.add_argument("--any-adapter", action="store_true",
-                        help="accept any adapter instead of requiring CPU/llvmpipe")
+                        help="accept any adapter instead of requiring CPU/llvmpipe (software mode)")
     parser.add_argument("--font", action="append", default=[],
                         help="register a CAD text font for build/render as name=path "
                              "(repeatable); without it text stays an unresolved placeholder")
     parser.add_argument("--any-units", action="store_true",
                         help="accept any drawing unit instead of requiring Millimetre")
     args = parser.parse_args()
+
+    if args.software and not args.icd:
+        args.icd = find_software_icd()
+        if not args.icd:
+            parser.error("--software given but no Mesa lavapipe ICD found under "
+                         "/usr/share/vulkan/icd.d (install mesa-vulkan-drivers)")
+    software = args.software or is_software_icd(args.icd)
+    if (not software and not args.icd and not os.environ.get("VK_ICD_FILENAMES")
+            and not glob.glob("/dev/dri/renderD*")):
+        parser.error("no hardware GPU render node (/dev/dri/renderD*) and no VK_ICD_FILENAMES; "
+                     "run on a machine with a GPU or pass --software to force Mesa lavapipe explicitly")
+    if software:
+        print(f"check-dxf-reference: SOFTWARE GPU mode (lavapipe); VK_ICD_FILENAMES={args.icd}; "
+              f"frame is software-rendered, not a real GPU", file=sys.stderr)
 
     sample = args.input
     if not sample.is_file():
@@ -248,6 +284,7 @@ def main() -> int:
         "input_sha256": hashlib.sha256(sample.read_bytes()).hexdigest(),
         "size": [args.width, args.height],
         "icd": args.icd,
+        "graphics_mode": "software (lavapipe)" if software else "hardware",
         "fonts": args.font,
         "reference": str(args.reference) if args.reference.is_file() else None,
     }
@@ -300,7 +337,7 @@ def main() -> int:
         (args.out / "render.json").write_text(json.dumps(render, indent=2))
         adapter = render["adapter"]
         assert adapter["backend"], "adapter.backend must be non-empty"
-        if not args.any_adapter:
+        if software and not args.any_adapter:
             assert adapter["backend"] == "vulkan", f"expected Vulkan, got {adapter}"
             assert adapter["device_type"] == "cpu", f"expected CPU adapter, got {adapter}"
             assert adapter["driver"] == "llvmpipe", f"expected llvmpipe, got {adapter}"

@@ -2,14 +2,17 @@
 # verify-ui: run the layered headless UI debug loop on the real Linux host.
 #
 # Layer 2 of the test plan: a headless graphics environment (Slint's official
-# offscreen platform + Mesa lavapipe software Vulkan) actually runs the
-# production LinuxApp, drives fixed UI scenarios, screenshots the composited
-# GPU frame and collects failures.
+# offscreen platform) actually runs the production LinuxApp, drives fixed UI
+# scenarios, screenshots the composited GPU frame and collects failures.
 #
 # It does NOT create a coding harness and does NOT install X11/Wayland: Slint's
-# Platform/WindowAdapter is the virtual window runtime and lavapipe is the GPU.
-# Xvfb may be present, but the automation path does not depend on it. A real
-# GPU / real drawing / real device is never implied by this script.
+# Platform/WindowAdapter is the virtual window runtime. It uses the real
+# hardware GPU by default (no VK_ICD_FILENAMES is forced; an inherited value is
+# honored as explicit user intent). Software Vulkan (Mesa lavapipe) is opt-in:
+#
+#   YACR_SOFTWARE_GPU=1 bash scripts/verify-ui.sh   # software; labeled SOFTWARE
+#
+# A real window server / real device is never implied by this script.
 #
 # Usage:
 #   bash scripts/verify-ui.sh
@@ -19,7 +22,8 @@
 #   YACR_VERIFY_OUTPUT   evidence directory (must not exist; default below)
 #   YACR_VERIFY_TIMEOUT  per-layer wall-clock budget in seconds (default 900)
 #   YACR_VERIFY_PROFILE  debug|release cargo profile (default debug)
-#   VK_ICD_FILENAMES     override the software-Vulkan ICD
+#   YACR_SOFTWARE_GPU=1  use Mesa lavapipe software Vulkan (explicit opt-in)
+#   VK_ICD_FILENAMES     honored as explicit user intent (do not set for real GPU)
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,10 +32,20 @@ cd "$ROOT"
 PROFILE="${YACR_VERIFY_PROFILE:-debug}"
 if [[ "$PROFILE" == "release" ]]; then PROFILE_FLAG="--release"; else PROFILE_FLAG=""; fi
 TIMEOUT="${YACR_VERIFY_TIMEOUT:-900}"
-export VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-$(find /usr/share/vulkan/icd.d -name '*lvp*.json' -print -quit)}"
-if [[ -z "${VK_ICD_FILENAMES:-}" || ! -s "$VK_ICD_FILENAMES" ]]; then
-  echo "verify-ui: no software Vulkan ICD (set VK_ICD_FILENAMES); refusing to fake a GPU" >&2
+if [[ "${YACR_SOFTWARE_GPU:-0}" == "1" ]]; then
+  export VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-$(find /usr/share/vulkan/icd.d -name '*lvp*.json' -print -quit)}"
+  if [[ -z "${VK_ICD_FILENAMES:-}" || ! -s "$VK_ICD_FILENAMES" ]]; then
+    echo "verify-ui: YACR_SOFTWARE_GPU=1 but no Mesa lavapipe ICD found under /usr/share/vulkan/icd.d (install mesa-vulkan-drivers)" >&2
+    exit 2
+  fi
+  echo "verify-ui: SOFTWARE GPU mode (YACR_SOFTWARE_GPU=1): VK_ICD_FILENAMES=$VK_ICD_FILENAMES; this run is software-rendered, not a real GPU" >&2
+elif [[ -z "${VK_ICD_FILENAMES:-}" ]] && ! compgen -G "/dev/dri/renderD*" >/dev/null; then
+  echo "verify-ui: no hardware GPU render node (/dev/dri/renderD*) and no VK_ICD_FILENAMES." >&2
+  echo "  Run this on a machine with a GPU, or opt into software Vulkan explicitly:" >&2
+  echo "    YACR_SOFTWARE_GPU=1 bash scripts/verify-ui.sh   # Mesa lavapipe (software; labeled)" >&2
   exit 2
+else
+  echo "verify-ui: hardware-GPU mode (Vulkan loader picks the real device; software opt-in: YACR_SOFTWARE_GPU=1)" >&2
 fi
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/opencode/yacr-verify-runtime-$(id -u)}"
 mkdir -p "$XDG_RUNTIME_DIR"
@@ -82,8 +96,9 @@ FAILED=0
 
 # 1) Pure UI contracts: no GPU, fast, catches catalog/state-model regressions.
 run_layer ui-unit 1 -- cargo test -p cad-ui-slint --lib --locked
-# 2) Real Slint component on lavapipe: layout matrix, config presets, mobile
-#    panels, click hit-testing, screenshots.
+# 2) Real Slint component on the selected adapter (hardware GPU by default,
+#    software lavapipe only via YACR_SOFTWARE_GPU=1): layout matrix, config
+#    presets, mobile panels, click hit-testing, screenshots.
 run_layer ui-offscreen 1 YACR_UI_OUTPUT="$OUTPUT/slint" -- \
   cargo test -p cad-ui-slint --test concept_offscreen --locked -- --test-threads=1
 # 3) Fixed scenario replay on the production LinuxApp (measure/cancel/annotate/

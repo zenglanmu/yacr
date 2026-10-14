@@ -1,17 +1,29 @@
-// Slint ribbon/command layout plus real Chromium multi-touch (no display server).
+// Slint ribbon/command layout plus real Chromium multi-touch. Real-GPU by
+// default (headful); set YACR_SOFTWARE_GPU=1 to opt into a SOFTWARE SwiftShader run.
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 const playwright = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const chromium = playwright.chromium || playwright.default.chromium;
-const launchOptions = {
-  headless: true,
-  args: [
-    "--no-sandbox",
-    "--enable-unsafe-swiftshader",
-    "--use-gl=angle",
-    "--use-angle=swiftshader",
-  ],
-};
+// Real-GPU by default (headful, like check-web-files.mjs). SwiftShader software
+// rendering is an explicit opt-in: set YACR_SOFTWARE_GPU=1, and the run is then
+// labelled SOFTWARE everywhere and must never be presented as real-GPU evidence.
+const softwareGpu = process.env.YACR_SOFTWARE_GPU === "1";
+const launchOptions = softwareGpu
+  ? {
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--enable-unsafe-swiftshader",
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+      ],
+    }
+  : { headless: false, args: ["--no-sandbox"] };
+if (softwareGpu) {
+  console.error(
+    "YACR_SOFTWARE_GPU=1: SOFTWARE SwiftShader run - not real-GPU evidence.",
+  );
+}
 const server = await chromium.launchServer(launchOptions);
 const browser = await chromium.connect(server.wsEndpoint());
 const url = process.argv[2] || "http://127.0.0.1:8099/";
@@ -38,7 +50,7 @@ try {
       console.log("snapshot", name);
       await page.mouse.move(1, 1);
       // Force a browser compositor frame: Slint's on-demand canvas can otherwise
-      // leave Chromium/SwiftShader screenshot capture waiting indefinitely.
+      // leave Chromium screenshot capture waiting indefinitely.
       const { data } = await cdp.send("Page.captureScreenshot", {
         format: "png",
         fromSurface: false,
@@ -53,6 +65,30 @@ try {
       null,
       { timeout: 60000 },
     );
+    // Real-GPU evidence: the unmasked GL renderer must not be a software backend.
+    const glRenderer = await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+      if (!gl) return null;
+      const ext = gl.getExtension("WEBGL_debug_renderer_info");
+      return ext
+        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+        : gl.getParameter(gl.RENDERER);
+    });
+    const softwareRenderer = /swiftshader|llvmpipe|software|basic render/i.test(
+      glRenderer || "",
+    );
+    if (softwareRenderer && !softwareGpu) {
+      throw new Error(
+        `real GPU required, but the browser reported a software renderer: ${glRenderer}. ` +
+          "Set YACR_SOFTWARE_GPU=1 to opt into SwiftShader (the run is then labelled SOFTWARE).",
+      );
+    }
+    const rendererInfo = {
+      glRenderer,
+      software: softwareRenderer,
+      mode: softwareGpu ? "software" : "real-gpu",
+    };
     await page.waitForTimeout(500);
     const geometry = () =>
       page.evaluate(() => Array.from(window.yacr.shell_geometry()));
@@ -164,6 +200,7 @@ try {
       afterPinch,
       afterDrag,
       errors,
+      renderer: rendererInfo,
     });
     await context.close();
   }

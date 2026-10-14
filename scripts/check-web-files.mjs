@@ -10,8 +10,10 @@
 //
 // The browser is launched **headful with the real GPU** (no `--use-angle=swiftshader`,
 // no `--enable-unsafe-swiftshader`); the GL renderer string is captured as
-// evidence. A headful browser that cannot start is reported honestly as a
-// blocker (exit code 2), not silently downgraded to software.
+// evidence. SwiftShader software rendering is an explicit opt-in
+// (`YACR_SOFTWARE_GPU=1`), and such a run is labelled SOFTWARE. A headful browser
+// that cannot start is reported honestly as a blocker (exit code 2), not silently
+// downgraded to software.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -34,10 +36,17 @@ const output =
   process.argv[3] || process.env.WEB_OUTPUT || "/tmp/opencode/yacr-web-p3-e2e";
 mkdirSync(output, { recursive: true });
 
+const softwareGpu = process.env.YACR_SOFTWARE_GPU === "1";
+if (softwareGpu) {
+  console.error(
+    "YACR_SOFTWARE_GPU=1: SOFTWARE SwiftShader run - not real-GPU evidence.",
+  );
+}
 const report = {
   fixture: fixturePath,
-  headful: true,
+  headful: !softwareGpu,
   softwareRenderer: false,
+  mode: softwareGpu ? "software" : "real-gpu",
   errors: [],
   steps: [],
   status: "failed",
@@ -82,8 +91,18 @@ try {
 
   try {
     browser = await chromium.launch({
-      headless: false,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      headless: softwareGpu,
+      // Real-GPU by default; the SwiftShader args only appear when the caller
+      // explicitly opts into a labelled SOFTWARE run via YACR_SOFTWARE_GPU=1.
+      args: softwareGpu
+        ? [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--enable-unsafe-swiftshader",
+            "--use-gl=angle",
+            "--use-angle=swiftshader",
+          ]
+        : ["--no-sandbox", "--disable-dev-shm-usage"],
     });
   } catch (error) {
     report.blocker = `headful chromium could not start: ${error}`;
@@ -296,8 +315,11 @@ try {
   assert.match(report.finalState, /adapter=Some/);
   assert.deepEqual(report.errors, [], "no unexpected page errors");
   assert.deepEqual(report.consoleErrors, [], "no unexpected console errors");
-  if (report.softwareRenderer) {
-    throw new Error(`real GPU required, but renderer is software: ${report.glRenderer}`);
+  if (report.softwareRenderer && !softwareGpu) {
+    throw new Error(
+      `real GPU required, but renderer is software: ${report.glRenderer}. ` +
+        "Set YACR_SOFTWARE_GPU=1 to opt into SwiftShader (the run is then labelled SOFTWARE).",
+    );
   }
   report.status = "passed";
   await context.close();

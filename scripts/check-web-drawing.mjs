@@ -1,4 +1,5 @@
-// Real Slint capture -> host -> drawing transaction -> GPU, software WebGL2 only.
+// Real Slint capture -> host -> drawing transaction -> GPU (real-GPU by default;
+// set YACR_SOFTWARE_GPU=1 to opt into a SOFTWARE SwiftShader run).
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -9,19 +10,31 @@ const chromium = playwright.chromium || playwright.default.chromium;
 const url = process.argv[2] || "http://127.0.0.1:8099/";
 const output = process.argv[3] || "/tmp/opencode/yacr-drawing-validation";
 mkdirSync(output, { recursive: true });
+// Real-GPU by default (headful, like check-web-files.mjs). SwiftShader software
+// rendering is an explicit opt-in: set YACR_SOFTWARE_GPU=1, and the run is then
+// labelled SOFTWARE everywhere and must never be presented as real-GPU evidence.
+const softwareGpu = process.env.YACR_SOFTWARE_GPU === "1";
+const launchOptions = softwareGpu
+  ? {
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--enable-unsafe-swiftshader",
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+      ],
+    }
+  : { headless: false, args: ["--no-sandbox"] };
+if (softwareGpu) {
+  console.error(
+    "YACR_SOFTWARE_GPU=1: SOFTWARE SwiftShader run - not real-GPU evidence.",
+  );
+}
 const results = [];
 for (const kind of process.argv[4]
   ? [process.argv[4]]
   : ["LINE", "CIRCLE", "MOVE", "TRIM"]) {
-  const server = await chromium.launchServer({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--enable-unsafe-swiftshader",
-      "--use-gl=angle",
-      "--use-angle=swiftshader",
-    ],
-  });
+  const server = await chromium.launchServer(launchOptions);
   const browser = await chromium.connect(server.wsEndpoint());
   try {
     const context = await browser.newContext({
@@ -41,6 +54,30 @@ for (const kind of process.argv[4]
       null,
       { timeout: 60000 },
     );
+    // Real-GPU evidence: the unmasked GL renderer must not be a software backend.
+    const glRenderer = await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+      if (!gl) return null;
+      const ext = gl.getExtension("WEBGL_debug_renderer_info");
+      return ext
+        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+        : gl.getParameter(gl.RENDERER);
+    });
+    const softwareRenderer = /swiftshader|llvmpipe|software|basic render/i.test(
+      glRenderer || "",
+    );
+    if (softwareRenderer && !softwareGpu) {
+      throw new Error(
+        `real GPU required, but the browser reported a software renderer: ${glRenderer}. ` +
+          "Set YACR_SOFTWARE_GPU=1 to opt into SwiftShader (the run is then labelled SOFTWARE).",
+      );
+    }
+    const rendererInfo = {
+      glRenderer,
+      software: softwareRenderer,
+      mode: softwareGpu ? "software" : "real-gpu",
+    };
     const idleHeight = await page.evaluate(
       () => window.yacr.shell_geometry()[3],
     );
@@ -164,7 +201,7 @@ for (const kind of process.argv[4]
       await page.mouse.click(500, 350);
       await command("CANCEL");
       assert.equal(await count(), initialCount, "cancel must not write");
-      results.push({ kind, baseline, created, undone });
+      results.push({ kind, baseline, created, undone, renderer: rendererInfo });
     } else if (kind === "MOVE") {
       // MOVE must retain the selection while its two anchor points are captured.
       const bounds = await page.locator("#canvas").boundingBox();
@@ -192,7 +229,7 @@ for (const kind of process.argv[4]
       await command("UNDO");
       assert.equal(await capture("MOVE-undone"), baseline);
       await command("REDO");
-      results.push({ kind: "MOVE", baseline, created: moved });
+      results.push({ kind: "MOVE", baseline, created: moved, renderer: rendererInfo });
     } else {
       await command("TRIM");
       await page.mouse.click(500, 400);
@@ -223,7 +260,7 @@ for (const kind of process.argv[4]
         "refused TRIM must retain capture parameters",
       );
       await command("CANCEL");
-      results.push({ kind: "TRIM", baseline, created: trimmed });
+      results.push({ kind: "TRIM", baseline, created: trimmed, renderer: rendererInfo });
     }
     assert.deepEqual(errors, []);
     console.log(`${kind} passed`);

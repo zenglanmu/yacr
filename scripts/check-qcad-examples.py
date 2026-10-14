@@ -4,10 +4,13 @@
 For every `fixtures/dxf/qcad-examples/*.dxf` it runs the real CLI through
 `scan`, `proxy-report`, `build-representation` and (unless `--no-render`)
 `render`, then records the entity-type inventory, completeness reasons, adapter
-and non-empty frame. The corpus files have no upstream PNG except the flange
-sample; with `--export-references` and the optional Python `ezdxf` +
-`matplotlib` packages it exports a reference PNG per drawing into the output
-directory for human/coarse comparison.
+and non-empty frame. It uses the real hardware GPU by default (no
+VK_ICD_FILENAMES is forced; an inherited value is honored as explicit user
+intent); software Mesa lavapipe is opt-in via `--software` and labeled SOFTWARE.
+The corpus files have no upstream PNG except the flange sample; with
+`--export-references` and the optional Python `ezdxf` + `matplotlib` packages it
+exports a reference PNG per drawing into the output directory for human/coarse
+comparison.
 
 Stdlib only for its own work; ezdxf is an optional test-time tool and is
 reported NOT RUN when absent. Non-zero exit on any hard failure. This is a
@@ -16,17 +19,32 @@ parse/render smoke, not a compatibility or fidelity claim.
 Usage:
   python3 scripts/check-qcad-examples.py --out /tmp/opencode/yacr-qcad-corpus \
       --font txt=/home/me/fonts/txt.shx --no-render
+  python3 scripts/check-qcad-examples.py --software   # force Mesa lavapipe
 """
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
-DEFAULT_ICD = "/usr/share/vulkan/icd.d/lvp_icd.json"
+SOFTWARE_ICD_TOKENS = ("lvp", "lavapipe", "llvmpipe", "swiftshader", "softpipe")
+
+
+def is_software_icd(path) -> bool:
+    return bool(path) and any(token in Path(path).name.lower() for token in SOFTWARE_ICD_TOKENS)
+
+
+def find_software_icd() -> str | None:
+    for pattern in ("*lvp*.json", "*lavapipe*.json"):
+        matches = sorted(glob.glob(f"/usr/share/vulkan/icd.d/{pattern}"))
+        if matches:
+            return matches[0]
+    return None
 
 
 def run_json(cli: str, operation: str, sample: Path, env: dict, extra: list) -> dict:
@@ -73,16 +91,35 @@ def main() -> int:
     parser.add_argument("--font", action="append", default=[])
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=960)
-    parser.add_argument("--icd", default=DEFAULT_ICD)
+    parser.add_argument("--icd", default=None,
+                        help="explicit Vulkan ICD path (default: none, real GPU). "
+                             "A lavapipe/llvmpipe path is treated as software and labeled.")
+    parser.add_argument("--software", action="store_true",
+                        help="force Mesa lavapipe software Vulkan (labeled SOFTWARE); "
+                             "the local software ICD is selected automatically")
     parser.add_argument("--any-adapter", action="store_true")
     parser.add_argument("--no-render", action="store_true")
     parser.add_argument("--export-references", action="store_true")
     args = parser.parse_args()
 
+    if args.software and not args.icd:
+        args.icd = find_software_icd()
+        if not args.icd:
+            parser.error("--software given but no Mesa lavapipe ICD found under "
+                         "/usr/share/vulkan/icd.d (install mesa-vulkan-drivers)")
+    software = args.software or is_software_icd(args.icd)
+    if (not software and not args.icd and not os.environ.get("VK_ICD_FILENAMES")
+            and not glob.glob("/dev/dri/renderD*")):
+        parser.error("no hardware GPU render node (/dev/dri/renderD*) and no VK_ICD_FILENAMES; "
+                     "run on a machine with a GPU or pass --software to force Mesa lavapipe explicitly")
+
     samples = sorted(args.corpus.glob("*.dxf"))
     if not samples:
         parser.error(f"no DXF files in {args.corpus}")
     args.out.mkdir(parents=True, exist_ok=True)
+    if software:
+        print(f"check-qcad-examples: SOFTWARE GPU mode (lavapipe); VK_ICD_FILENAMES={args.icd}; "
+              f"frames are software-rendered, not a real GPU", file=sys.stderr)
     env = dict(os.environ)
     if args.icd:
         env["VK_ICD_FILENAMES"] = args.icd
@@ -121,12 +158,13 @@ def main() -> int:
                     ["--png", str(png), "--width", str(args.width), "--height", str(args.height), *font_args],
                 )
                 adapter = render["adapter"]
-                if not args.any_adapter:
+                if software and not args.any_adapter:
                     assert adapter["backend"] == "vulkan", adapter
                     assert adapter["device_type"] == "cpu", adapter
                 assert render["pixels"]["non_background"] > 0, "blank frame"
                 record["pixels"] = render["pixels"]
                 record["adapter"] = adapter
+                record["graphics"] = "software (lavapipe)" if software else "hardware"
 
             if args.export_references:
                 ref = args.out / f"{sample.stem}-ezdxf.png"

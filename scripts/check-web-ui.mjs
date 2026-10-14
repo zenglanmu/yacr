@@ -10,6 +10,9 @@
 // switch preserves the document and updates the HTML chrome, and no unexpected
 // console/page errors were raised.
 //
+// Real GPU by default (headful). SwiftShader software rendering is an explicit
+// opt-in: set YACR_SOFTWARE_GPU=1, which labels the run SOFTWARE.
+//
 // Playwright is a verification tool, not a repo dependency: resolve it from
 // PLAYWRIGHT_MODULE (absolute path to an entry file) or a local installation.
 
@@ -166,14 +169,28 @@ function changedFraction(before, after, tolerance = 8) {
 
 // --- run ---------------------------------------------------------------------
 
-const browser = await chromium.launch({
-  args: [
-    "--no-sandbox",
-    "--enable-unsafe-swiftshader",
-    "--use-gl=angle",
-    "--use-angle=swiftshader",
-  ],
-});
+// Real-GPU by default (headful, like check-web-files.mjs). SwiftShader software
+// rendering is an explicit opt-in: set YACR_SOFTWARE_GPU=1, and the run is then
+// labelled SOFTWARE everywhere and must never be presented as real-GPU evidence.
+const softwareGpu = process.env.YACR_SOFTWARE_GPU === "1";
+const browser = await chromium.launch(
+  softwareGpu
+    ? {
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--enable-unsafe-swiftshader",
+          "--use-gl=angle",
+          "--use-angle=swiftshader",
+        ],
+      }
+    : { headless: false, args: ["--no-sandbox"] },
+);
+if (softwareGpu) {
+  console.error(
+    "YACR_SOFTWARE_GPU=1: SOFTWARE SwiftShader run - not real-GPU evidence.",
+  );
+}
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
 
 await page.addInitScript(() => {
@@ -244,6 +261,30 @@ try {
   );
   const startupError = await page.evaluate(() => window.yacrStartupError || null);
   if (startupError) throw new Error(`startup failed: ${startupError}`);
+  // Real-GPU evidence: the unmasked GL renderer must not be a software backend.
+  const glRenderer = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    if (!gl) return null;
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    return ext
+      ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+      : gl.getParameter(gl.RENDERER);
+  });
+  const softwareRenderer = /swiftshader|llvmpipe|software|basic render/i.test(
+    glRenderer || "",
+  );
+  report.renderer = {
+    glRenderer,
+    software: softwareRenderer,
+    mode: softwareGpu ? "software" : "real-gpu",
+  };
+  if (softwareRenderer && !softwareGpu) {
+    throw new Error(
+      `real GPU required, but the browser reported a software renderer: ${glRenderer}. ` +
+        "Set YACR_SOFTWARE_GPU=1 to opt into SwiftShader (the run is then labelled SOFTWARE).",
+    );
+  }
   report.hostModules = Object.fromEntries(hostModules);
   for (const module of ["files.js", "i18n.js", "renderer.js", "runtime.js", "a11y.js", "async-open.js"]) {
     if (hostModules.get(module) !== 200) throw new Error(`host module not served: ${module}`);

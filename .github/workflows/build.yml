@@ -13,7 +13,8 @@ name: CI build layers
 # Capability-gated jobs (reported SKIPPED, never green, until a maintainer
 # provisions the runner / variable):
 #   android-apk  : scripts/build-android.sh -> APK artifact + real manifest facts
-#   web-smoke    : scripts/check-web-ui.mjs under Playwright (software GPU only)
+#   web-smoke    : scripts/check-web-ui.mjs under Playwright with an explicit
+#                  YACR_SOFTWARE_GPU=1 software-labelled smoke (no GPU runner)
 #   web-deploy   : publish the verified web-dist artifact to Cloudflare Pages
 #                  on release (workflow_dispatch or a v* tag); requires the
 #                  CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets
@@ -765,10 +766,12 @@ jobs:
 
   web-smoke:
     name: web-smoke
-    # Capability-gated. Builds the web-dist (software SWIFTSHADER WebGL2 path),
-    # then drives scripts/check-web-ui.mjs. This exercises a software GPU only;
-    # it is explicitly NOT a mobile/real-device or WebGPU acceptance. When the
-    # variable is unset the job is SKIPPED, never green.
+    # Capability-gated. Builds the web-dist, then drives
+    # scripts/check-web-ui.mjs with an explicit YACR_SOFTWARE_GPU=1 opt-in (the
+    # GitHub runner has no GPU, and the script fails loudly without it). This
+    # exercises a software-labelled SwiftShader path only; it is explicitly NOT a
+    # mobile/real-device or WebGPU acceptance. When the variable is unset the job
+    # is SKIPPED, never green.
     if: ${{ vars.WEB_SMOKE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -814,6 +817,9 @@ jobs:
       - name: Serve web-dist and run headless browser check
         env:
           PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.js
+          # No GPU on the runner: opt into the software (SwiftShader) path
+          # explicitly, which check-web-ui.mjs labels SOFTWARE.
+          YACR_SOFTWARE_GPU: "1"
         run: |
           set -euo pipefail
           # /tmp/opencode is a local-dev convention and does not exist on the
@@ -831,10 +837,10 @@ jobs:
           done
           node scripts/check-web-ui.mjs http://127.0.0.1:8090/ "$OUT/yacr-web.png" 2>&1 | tee "$OUT/web-smoke.log"
           {
-            echo "## web-smoke (software GPU only, NOT a real device)"
+            echo "## web-smoke (YACR_SOFTWARE_GPU=1 software, NOT a real device)"
             echo ""
             echo "- Playwright ${PLAYWRIGHT_VERSION} / Node ${NODE_VERSION}"
-            echo "- backend: see JSON report (software SWIFTSHADER)"
+            echo "- backend: see JSON report (explicit YACR_SOFTWARE_GPU=1, labelled SOFTWARE)"
             echo "- WebGPU: not asserted here; absence must not be reported as a pass."
           } >> "$GITHUB_STEP_SUMMARY"
 

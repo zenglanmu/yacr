@@ -1,6 +1,6 @@
 //! Acceptance runs the Linux host, not a test-only sink or an alternate UI.
 //!
-//! The acceptance path drives the offscreen software-Vulkan platform, which is a
+//! The acceptance path drives the offscreen Vulkan platform, which is a
 //! Linux/Windows capability only; on macOS the module is compiled out and
 //! `--headless` is rejected in `entry.rs`.
 #![cfg(any(target_os = "linux", target_os = "windows"))]
@@ -8,6 +8,38 @@
 use super::*;
 use cad_render_wgpu::headless::{encode_png, RgbaImage};
 use cad_ui_slint::CadView;
+
+/// Whether the offscreen acceptance run should be reported as SOFTWARE.
+///
+/// `cad_ui_slint::offscreen` renders with a hardware Vulkan adapter whenever one
+/// is available, so the report must not hardcode `softwareGpu: true`. Software is
+/// reported only when it was explicitly requested (`YACR_SOFTWARE_GPU=1`), a
+/// software Vulkan ICD is forced, or no hardware (discrete/integrated) adapter
+/// exists. This mirrors the label `scripts/verify-ui-summary.py` derives from the
+/// observed device type / ICD.
+fn offscreen_software_gpu(
+    software_requested: bool,
+    icd: Option<&str>,
+    adapters: &[cad_render_wgpu::headless::AdapterInfo],
+) -> bool {
+    const SOFTWARE_ICD_TOKENS: [&str; 5] =
+        ["lvp", "lavapipe", "llvmpipe", "swiftshader", "softpipe"];
+    if software_requested {
+        return true;
+    }
+    if let Some(icd) = icd {
+        let name = icd.to_ascii_lowercase();
+        if SOFTWARE_ICD_TOKENS.iter().any(|token| name.contains(token)) {
+            return true;
+        }
+    }
+    !adapters.iter().any(|adapter| {
+        matches!(
+            adapter.device_type.as_str(),
+            "discrete_gpu" | "integrated_gpu"
+        )
+    })
+}
 
 impl LinuxApp {
     fn snapshot(&self) -> CadResult<RgbaImage> {
@@ -45,7 +77,7 @@ impl LinuxApp {
     pub fn acceptance(&self, output: &Path) -> CadResult<()> {
         if !self.runtime.options.headless {
             return Err(CadError::Unsupported(
-                "acceptance requires headless software-Vulkan mode".into(),
+                "acceptance requires the headless offscreen platform".into(),
             ));
         }
         // Refuse existing evidence directories; failures are retained for diagnosis.
@@ -98,7 +130,15 @@ impl LinuxApp {
         .map_err(|e| CadError::InvalidInput(e.to_string()))?;
         let view = self.view.borrow();
         let view = view.as_ref().ok_or(CadError::Cancelled)?;
-        let report = serde_json::json!({ "schemaVersion": 1, "host": "app-linux", "softwareGpu": true,
+        // Report what actually rendered instead of a hardcoded software claim.
+        let software_gpu = offscreen_software_gpu(
+            std::env::var("YACR_SOFTWARE_GPU").as_deref() == Ok("1"),
+            std::env::var("VK_ICD_FILENAMES").ok().as_deref(),
+            &cad_render_wgpu::headless::enumerate_adapters(
+                cad_render_wgpu::BackendPreference::Auto,
+            ),
+        );
+        let report = serde_json::json!({ "schemaVersion": 1, "host": "app-linux", "softwareGpu": software_gpu,
             "source": if self.runtime.options.drawing.is_some() { "external-drawing" } else { "synthetic" },
             "size": [before.width,before.height], "cadRect": rect, "cadFrames": view.frames_rendered(),
             "backend": view.backend_label(), "renderError": view.last_error(),
@@ -152,6 +192,52 @@ mod tests {
                 cad_ui_slint::MessageSource::from_request(locale).text(key, &values)
             }
         }
+    }
+
+    fn test_adapter(device_type: &str) -> cad_render_wgpu::headless::AdapterInfo {
+        cad_render_wgpu::headless::AdapterInfo {
+            backend: "vulkan".into(),
+            name: "test-adapter".into(),
+            device_type: device_type.into(),
+            driver: String::new(),
+            driver_info: String::new(),
+        }
+    }
+
+    /// The report's `softwareGpu` must follow the adapter that actually rendered,
+    /// not a static `true`: a real hardware adapter must never be labelled software.
+    #[test]
+    fn software_gpu_label_follows_the_actual_adapter() {
+        assert!(!offscreen_software_gpu(
+            false,
+            None,
+            &[test_adapter("discrete_gpu")]
+        ));
+        assert!(!offscreen_software_gpu(
+            false,
+            None,
+            &[test_adapter("integrated_gpu")]
+        ));
+        // No hardware adapter: the offscreen platform falls back to software.
+        assert!(offscreen_software_gpu(false, None, &[test_adapter("cpu")]));
+        assert!(offscreen_software_gpu(false, None, &[]));
+        // Explicit opt-in and a forced software ICD are software even with a GPU.
+        assert!(offscreen_software_gpu(
+            true,
+            None,
+            &[test_adapter("discrete_gpu")]
+        ));
+        assert!(offscreen_software_gpu(
+            false,
+            Some("/usr/share/vulkan/icd.d/lvp_icd.json"),
+            &[test_adapter("discrete_gpu")]
+        ));
+        // A hardware ICD path is not mislabelled as software.
+        assert!(!offscreen_software_gpu(
+            false,
+            Some("/usr/share/vulkan/icd.d/nvidia_icd.json"),
+            &[test_adapter("discrete_gpu")]
+        ));
     }
 
     /// UI-free contract over the *actual* reference-grid overlay geometry.

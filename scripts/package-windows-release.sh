@@ -246,8 +246,9 @@ Runtime notes (not a compatibility claim)
     MSVC builds link the CRT statically; no VC++ redistributable is required.
   * The window, device selection and the native Open dialog depend on the host
     GPU/driver and are not a compatibility claim; see docs/windows-app.md.
-  * \`--headless\` offscreen rendering requires software Vulkan (Mesa lavapipe or
-    equivalent) installed on the Windows host; it is not bundled.
+  * \`--headless\` offscreen rendering requires a Vulkan-capable adapter (a real
+    GPU driver, or a software ICD such as Mesa lavapipe installed on the host);
+    the real GPU is used by default and no software ICD is bundled.
 
 No unlicensed user DWG samples or golden images are bundled. The mlightcad/cad-data
 fonts in fonts/ are third-party and vendored by the deployer at packaging time
