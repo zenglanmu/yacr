@@ -32,3 +32,4 @@ apps/app-android/assets/fonts/*
 .opencode/
 
 fixtures/complex-test.dwg
+fixtures/debug-default-fonts.dwg
