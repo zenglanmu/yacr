@@ -1,10 +1,21 @@
 // Mobile-shell panel wiring parity across the Linux, Web and Android hosts.
 //
-// This is a *source-text* contract, not a device or browser test: it reads the
-// three host modules that own the "application state → shell" leg and asserts
-// each one references the full set of derived panel/overlay entry points plus
-// the effective-config overlay gate. Drift between hosts then fails CI without a
-// device. Rendering correctness is out of scope; see docs/panels.md §3.2.
+// This is a *source-text* contract, not a device or browser test. After P2/P4 the
+// shared "application state → shell" leg is no longer a per-host `HostCore::push`:
+//
+//   cad-host `state.rs`  → typed `HostState` / `HostUpdates` projection
+//   cad-ui-slint         → `EngineAdapter::apply_updates` / `UiHandle::apply_host_state`
+//   platform wrappers    → re-apply only their host-specific overlay after the flush
+//
+// The contract pins every required panel/overlay channel to the *actual* owner
+// (shared projection, UI apply, or a named platform overlay), plus the ordering
+// rule that a platform overlay never overrides the shared authority channels.
+// Rendering correctness is out of scope; see docs/panels.md §3.2.
+//
+// The pure helpers (`missing`, `runsAfter`, `presentIn`, `compact`) are exported
+// so the negative-fixture tests can mutate a source and assert the check rejects
+// it, without ever widening the search to the whole repository or weakening an
+// assertion to "non-empty".
 //
 // Run: node --test scripts/test-host-panel-parity.mjs
 import assert from "node:assert/strict";
@@ -17,207 +28,281 @@ function readSource(relative) {
   return readFileSync(new URL(relative, ROOT), "utf8");
 }
 
-// The authoritative shared panel-channel surface every host funnel must
-// reference. All three hosts now push it through the shared `cad-host` core
-// (`HostCore::push` in `crates/cad-host/src/state.rs`); a per-host overlay file
-// owns only its genuinely host-specific channels and is asserted separately.
-// Any per-host difference must be a real, code-backed difference and documented
-// next to the host entry below.
-const REQUIRED_PANEL_SYMBOLS = [
-  "set_layer_state",
-  "set_property_state",
-  "set_layout_state",
-  "set_diagnostics_state",
-  "set_selection_highlight",
-  "set_measurement_preview",
-  "set_overlay_visibility",
-];
-
-// The `UiHandle` panel setters that are expected to exist in handle.rs. Kept as
-// a separate list so a rename fails the source contract independently of the
-// host-reference contract below.
-const REQUIRED_HANDLE_SETTERS = [
-  "set_layer_state",
-  "set_property_state",
-  "set_layout_state",
-  "set_diagnostics_state",
-];
-
-// The android-specific overlay channels `apps/app-android/src/state_push.rs`
-// owns after P2 (the shared panels come from the cad-host core).
-const ANDROID_OVERLAY_SYMBOLS = ["set_import_state", "set_resources_sections"];
-
-// Each host lists the file(s) that own its "application state → shell" leg and
-// the entry points each file must reference. `gate` marks the file that owns the
-// effective-config overlay gate.
-const HOSTS = [
-  {
-    name: "linux",
-    // app-linux is a thin wrapper: its panel funnel is the shared cad-host core.
-    files: [
-      {
-        path: "crates/cad-host/src/state.rs",
-        required: REQUIRED_PANEL_SYMBOLS,
-        gate: true,
-      },
-    ],
-  },
-  {
-    name: "web",
-    // app-web is a thin wrapper too: its *shared* panel funnel is the cad-host
-    // core (`HostCore::push`). Its browser-specific overlay (import progress +
-    // font summary) is asserted separately below so this contract is not
-    // tautological with the linux entry.
-    files: [
-      {
-        path: "crates/cad-host/src/state.rs",
-        required: REQUIRED_PANEL_SYMBOLS,
-        gate: true,
-      },
-    ],
-  },
-  {
-    name: "android",
-    // app-android is a thin wrapper too (P2): the shared panels come from the
-    // cad-host core exactly like linux/web; `state_push.rs` now owns only the
-    // android-specific overlay (import progress + resources font summary).
-    files: [
-      {
-        path: "crates/cad-host/src/state.rs",
-        required: REQUIRED_PANEL_SYMBOLS,
-        gate: true,
-      },
-      {
-        path: "apps/app-android/src/state_push.rs",
-        required: ANDROID_OVERLAY_SYMBOLS,
-        gate: false,
-      },
-    ],
-  },
-];
-
-// The overlay gate reads the *effective* configuration, so an overlay the
-// config disables is never drawn. The shared core and Android use this exact
-// expression; if a host adopts a variant (e.g. a cached accessor) update this
-// list and the message here, do not weaken the assertion silently.
-const OVERLAY_GATE = /set_overlay_visibility\s*\(\s*handle\.effective_config\(\)\.view\.overlays\.into\(\)\s*\)/;
-
-for (const host of HOSTS) {
-  for (const file of host.files) {
-    test(`${host.name} host (${file.path}) references every required panel/overlay channel`, () => {
-      const source = readSource(file.path);
-      for (const symbol of file.required) {
-        assert.ok(
-          source.includes(symbol),
-          `${file.path} is missing required panel/overlay entry point "${symbol}"; ` +
-            `the ${host.name} host funnel has drifted from the shared panel surface`,
-        );
-      }
-    });
-
-    if (file.gate) {
-      test(`${host.name} host (${file.path}) gates overlays on the effective config`, () => {
-        const source = readSource(file.path);
-        assert.match(
-          source,
-          OVERLAY_GATE,
-          `${file.path} must call ` +
-            `set_overlay_visibility(handle.effective_config().view.overlays.into()) ` +
-            `so overlay gating parity is pinned across hosts`,
-        );
-      });
-    }
-  }
+/** Whitespace-insensitive view so a multi-line Rust expression can be matched. */
+export function compact(source) {
+  return source.replace(/\s+/g, "");
 }
 
-// The web host's *browser-specific* overlay (import progress + font summary) is
-// not in the shared core. Assert it directly so the web parity contract is not
-// tautological with the linux entry (both would otherwise point at the same
-// cad-host file) and the web overlay cannot be silently dropped.
-const WEB_OVERLAY_SYMBOLS = ["set_import_state", "set_resources_sections"];
+/** Required substrings that a source is missing (empty means all present). */
+export function missing(source, required) {
+  return required.filter((symbol) => !source.includes(symbol));
+}
 
-test("web host overlay pushes the browser-specific import/font channels", () => {
-  const overlay = readSource("apps/app-web/src/browser/state_push.rs");
-  for (const symbol of WEB_OVERLAY_SYMBOLS) {
-    assert.ok(
-      overlay.includes(symbol),
-      `apps/app-web/src/browser/state_push.rs is missing "${symbol}"; ` +
-        `the browser-specific panel overlay has drifted`,
-    );
-  }
-  assert.ok(
-    overlay.includes("images_modeled: false"),
-    "the web overlay must keep images_modeled: false (raster images are not modeled on web)",
-  );
-  const browser = readSource("apps/app-web/src/browser.rs");
-  assert.ok(
-    browser.includes("core.push()"),
-    "apps/app-web/src/browser.rs must run the shared HostCore::push",
-  );
-  assert.ok(
-    browser.includes("push_web_overlay"),
-    "apps/app-web/src/browser.rs must re-apply the web overlay after the shared push",
-  );
-  assert.ok(
-    browser.includes("set_layout_switch_sink"),
-    "apps/app-web/src/browser.rs must install a layout-switch sink",
-  );
-  assert.ok(
-    browser.includes("Box::new(layout_sink)"),
-    "the web layout-switch sink must be the web sink (web funnel), not the raw HostCore",
+/** Whether `first` occurs before `then` (both present); the overlay order rule. */
+export function runsAfter(source, first, then) {
+  const a = source.indexOf(first);
+  const b = source.indexOf(then);
+  return a !== -1 && b !== -1 && a < b;
+}
+
+/** Forbidden substrings that a source wrongly contains (empty means clean). */
+export function presentIn(source, forbidden) {
+  return forbidden.filter((symbol) => source.includes(symbol));
+}
+
+// --- 1. Shared typed projection (UI-independent) ---------------------------
+
+const SHARED_PROJECTION = "crates/cad-host/src/state.rs";
+// `take_updates` (the dirty-markers → typed batch publication) lives with the
+// `EngineClient` implementation, not the derivation module.
+const SHARED_PUBLICATION = "crates/cad-host/src/input.rs";
+
+// Every channel the shared `HostState`/`NavigationState` projection must derive.
+// These replace the pre-P2 `set_*`/`set_overlay_*` panel entry points: the host is
+// UI-independent and publishes typed state; the UI adapter below owns the concrete
+// shell setters.
+const SHARED_PROJECTION_CHANNELS = [
+  "fn full_state",
+  "fn navigation_state",
+  // Panel rows / selections (counts derive from these raw rows).
+  "layer_rows",
+  "selection_properties",
+  "layouts",
+  "active_space",
+  // Tool + measurement + units previews.
+  "draw_preview",
+  "selected_draw_kind",
+  "measurement_preview",
+  "units",
+  // Diagnostics / import / resources summaries.
+  "diagnostics",
+  "import_progress",
+  "resources",
+  // Render overlays (selection highlight / measurement / snap hints / config gate).
+  "OverlayInputs",
+  "set_overlays",
+];
+
+// The effective-config overlay gate is the render-side `OverlayVisibility::from`
+// over the authoritative viewer config; an overlay the config disables is never
+// drawn. Whitespace-insensitive so the multi-line expression still matches.
+const OVERLAY_GATE_COMPACT =
+  "OverlayVisibility::from(self.viewer_config.borrow().effective().view.overlays";
+
+test("shared projection (crates/cad-host/src/state.rs) derives every panel/overlay channel", () => {
+  const source = readSource(SHARED_PROJECTION);
+  assert.deepEqual(
+    missing(source, SHARED_PROJECTION_CHANNELS),
+    [],
+    `${SHARED_PROJECTION} is missing required panel/overlay channels; ` +
+      `the shared typed projection has drifted from the panel surface`,
   );
 });
 
-// The android host's *android-specific* overlay (import progress + font summary)
-// is not in the shared core. Assert it directly so the android contract covers
-// both halves: the shared panels come from `crates/cad-host/src/state.rs` (above)
-// and the overlay file owns only its own channels.
-test("android host overlay pushes the android-specific import/font channels", () => {
-  const overlay = readSource("apps/app-android/src/state_push.rs");
-  for (const symbol of ANDROID_OVERLAY_SYMBOLS) {
-    assert.ok(
-      overlay.includes(symbol),
-      `apps/app-android/src/state_push.rs is missing "${symbol}"; ` +
-        `the android-specific panel overlay has drifted`,
-    );
-  }
-  assert.ok(
-    overlay.includes("images_modeled: false"),
-    "the android overlay must keep images_modeled: false (raster images are not modeled on android)",
+test("shared publication (crates/cad-host/src/input.rs) emits the typed HostUpdates batch", () => {
+  const source = readSource(SHARED_PUBLICATION);
+  assert.deepEqual(
+    missing(source, ["fn take_updates", "HostUpdates"]),
+    [],
+    `${SHARED_PUBLICATION} must publish the typed HostUpdates batch ` +
+      `(take_updates); the shared state feed has drifted`,
   );
+});
+
+test("shared projection gates render overlays on the effective config", () => {
+  const source = readSource(SHARED_PROJECTION);
   assert.ok(
-    overlay.includes("core.push()"),
-    "the android overlay must run the shared HostCore::push before re-applying itself",
+    compact(source).includes(OVERLAY_GATE_COMPACT),
+    `${SHARED_PROJECTION} must gate render overlays on the effective config ` +
+      `(OverlayVisibility::from(...effective().view.overlays...)) so an overlay ` +
+      `the config disables is never drawn`,
   );
-  const lib = readSource("apps/app-android/src/lib.rs");
-  assert.ok(
-    lib.includes("push_android_state"),
-    "apps/app-android/src/lib.rs must run the android state push",
+});
+
+// --- 2. UI apply pipeline (shared for every host) --------------------------
+
+const UI_APPLY = "crates/cad-ui-slint/src/engine_adapter.rs";
+const UI_HANDLE = "crates/cad-ui-slint/src/handle.rs";
+
+// The single shared application path. `apply_updates` is the only writer that
+// turns a `HostUpdates` batch into shell state.
+const UI_APPLY_CHANNELS = [
+  "fn apply_updates",
+  "HostUpdates",
+  "apply_backend_state",
+  "apply_config_snapshot",
+  "apply_host_state",
+  "set_snap_hints",
+  "set_view_state",
+  "set_status_message",
+];
+
+const UI_HANDLE_CHANNELS = [
+  "fn apply_host_state",
+  "fn apply_config_snapshot",
+  "fn apply_backend_state",
+  // Full-state panel setters.
+  "set_layer_state",
+  "set_property_state",
+  "set_layout_state",
+  "set_diagnostics_state",
+  "set_measurement_state",
+  "set_draw_state",
+  "set_import_state",
+  "set_resources_sections",
+];
+
+// Units must render their explicit label, never empty.
+const UI_HANDLE_UNIT_BEHAVIOR = ["UnitContext", "drawing_units"];
+
+test("UI adapter applies every HostUpdates channel", () => {
+  const source = readSource(UI_APPLY);
+  assert.deepEqual(
+    missing(source, UI_APPLY_CHANNELS),
+    [],
+    `${UI_APPLY} is missing a required HostUpdates application channel; ` +
+      `the shared UI apply path has drifted`,
+  );
+});
+
+test("UI handle applies every panel setter for the shared full state", () => {
+  const source = readSource(UI_HANDLE);
+  assert.deepEqual(
+    missing(source, UI_HANDLE_CHANNELS),
+    [],
+    `${UI_HANDLE} is missing a required panel setter for the shared full state`,
+  );
+  assert.deepEqual(
+    missing(source, UI_HANDLE_UNIT_BEHAVIOR),
+    [],
+    `${UI_HANDLE} must render the explicit unit label (drawing units fallback)`,
   );
 });
 
 test("required panel channels are real UiHandle public setters", () => {
-  const handle = readSource("crates/cad-ui-slint/src/handle.rs");
+  const handle = readSource(UI_HANDLE);
   // Parse `pub fn set_<name>` declarations. The handle also exposes non-panel
   // setters (config, locale, status, …); the required panel set must be a
   // subset, never the whole set.
   const declared = new Set(
     [...handle.matchAll(/pub\s+fn\s+(set_[A-Za-z0-9_]+)/g)].map((m) => m[1]),
   );
-  for (const setter of REQUIRED_HANDLE_SETTERS) {
+  const required = [
+    "set_layer_state",
+    "set_property_state",
+    "set_layout_state",
+    "set_diagnostics_state",
+  ];
+  for (const setter of required) {
     assert.ok(
       declared.has(setter),
-      `crates/cad-ui-slint/src/handle.rs no longer declares UiHandle::${setter}; ` +
+      `${UI_HANDLE} no longer declares UiHandle::${setter}; ` +
         `a renamed or removed panel setter breaks every host`,
     );
   }
   // A source-only sanity check: the handle really exposed a broader set, so the
   // subset assertion above is meaningful rather than accidentally total.
   assert.ok(
-    declared.size > REQUIRED_HANDLE_SETTERS.length,
+    declared.size > required.length,
     "expected UiHandle to expose more set_* methods than the required panel subset",
   );
 });
+
+// --- 3. Platform overlays (host-specific), ordered, authority-preserving ----
+
+// A platform overlays only the channels the shared host cannot own; it must run
+// *after* the shared flush and must never set the shared authority setters.
+const AUTHORITY_SETTERS = [
+  "set_layer_state",
+  "set_property_state",
+  "set_layout_state",
+  "set_diagnostics_state",
+  "apply_host_state",
+];
+
+const WEB_OVERLAY = "apps/app-web/src/browser/state_push.rs";
+const WEB_BROWSER = "apps/app-web/src/browser.rs";
+const ANDROID_OVERLAY = "apps/app-android/src/state_push.rs";
+const ANDROID_POLL = "apps/app-android/src/poll.rs";
+
+const PLATFORM_OVERLAY_CHANNELS = ["push_import_state", "push_resource_sections"];
+
+test("web host re-applies the browser-specific overlay after the shared flush", () => {
+  const overlay = readSource(WEB_OVERLAY);
+  assert.deepEqual(
+    missing(overlay, PLATFORM_OVERLAY_CHANNELS),
+    [],
+    `${WEB_OVERLAY} is missing a browser-specific overlay channel`,
+  );
+  assert.ok(
+    overlay.includes("images_modeled: false"),
+    "the web overlay must keep images_modeled: false (raster images are not modeled on web)",
+  );
+  const browser = readSource(WEB_BROWSER);
+  assert.deepEqual(
+    missing(browser, ["push_web_overlay"]),
+    [],
+    `${WEB_BROWSER} must re-apply the web overlay`,
+  );
+  assert.ok(
+    runsAfter(browser, "self.binding.flush_updates()", "self.push_web_overlay()"),
+    `${WEB_BROWSER} must run the shared flush before re-applying the web overlay`,
+  );
+});
+
+test("android host re-applies the android-specific overlay after the shared flush", () => {
+  const overlay = readSource(ANDROID_OVERLAY);
+  assert.deepEqual(
+    missing(overlay, ["push_android_overlay"].concat(PLATFORM_OVERLAY_CHANNELS)),
+    [],
+    `${ANDROID_OVERLAY} is missing the android overlay entry point or a channel`,
+  );
+  assert.ok(
+    overlay.includes("images_modeled: false"),
+    "the android overlay must keep images_modeled: false (raster images are not modeled on android)",
+  );
+  const poll = readSource(ANDROID_POLL);
+  assert.ok(
+    runsAfter(poll, "ui.binding.flush_updates()", "state_push::push_android_overlay("),
+    `${ANDROID_POLL} must run the shared flush before re-applying the android overlay`,
+  );
+});
+
+test("platform overlays never override the shared authority channels", () => {
+  for (const path of [WEB_OVERLAY, ANDROID_OVERLAY]) {
+    assert.deepEqual(
+      presentIn(readSource(path), AUTHORITY_SETTERS),
+      [],
+      `${path} must not set a shared authority channel; only the shared UI apply ` +
+        `path owns layer/property/layout/diagnostics`,
+    );
+  }
+});
+
+// --- 4. Negative fixtures: the helpers reject real mutations, not just pass ---
+
+test("negative fixtures: a dropped channel, a swapped order and an override are rejected", () => {
+  // Dropping one channel from an otherwise valid projection is detected.
+  const projection = readSource(SHARED_PROJECTION).replace(
+    "set_overlays",
+    "noop_overlays",
+  );
+  assert.deepEqual(missing(projection, ["set_overlays"]), ["set_overlays"]);
+
+  // Swapping flush/overlay order is detected.
+  const swapped =
+    "self.push_web_overlay(); self.binding.flush_updates();";
+  assert.equal(
+    runsAfter(swapped, "self.binding.flush_updates()", "self.push_web_overlay()"),
+    false,
+  );
+
+  // A platform overlay that grabs an authority setter is detected.
+  const override = readSource(WEB_OVERLAY) + "\nhandle.set_layer_state();\n";
+  assert.deepEqual(presentIn(override, AUTHORITY_SETTERS), ["set_layer_state"]);
+});
+
+// --- 5. Hermetic import guard ----------------------------------------------
 
 test("the parity contract file is syntactically loadable source", () => {
   // Loadability is verified in the orchestrator's node run; here we assert the

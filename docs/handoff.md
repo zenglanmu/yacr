@@ -2806,3 +2806,17 @@ revision 不连续重建；GPU 重建不改数据库；设备失败和退出保�
   **不是窗口启动后打开/加载响应通过，也不是手工或视觉验收**。
 - 尚未实现 native 异步准备、空间 broad phase、GPU 上传背压；详细证据/限制见
   `docs/linux-dwg-ui-freeze.md` 最新小节。修改未提交；不覆盖前轮与并发工作。
+
+## 2026-10-14 CI `web-host-contracts` 修复（旧源码契约迁移）
+
+- CI run `38495981291` 仅 `web-host-contracts` job 失败：`scripts/test-host-panel-parity.mjs`
+  8/60 fail（`not ok 1–6/8/9`），其余 job 成功/跳过。
+- 根因：该 source-text 契约仍锚定 P2 前结构（`HostCore::push` + `cad-host/state.rs` 直接 setter +
+  `set_overlay_visibility(handle.effective_config()...)` + 平台 overlay `core.push()`）。P2/P4 后共享腿
+  改为 typed `HostUpdates` → `EngineAdapter::apply_updates`/`UiHandle::apply_host_state`，render overlay
+  gate 在 `cad-host/state.rs::sync_render` 的 `OverlayInputs`/`OverlayVisibility::from(effective config)`，
+  平台 overlay 在 `binding.flush_updates()` 之后只补 host-specific 通道。逐通道核对无真实漏线。
+- 修复仅 `scripts/test-host-panel-parity.mjs`：重指真实 owner，断言 overlay 顺序与「不覆盖 authority」，
+  并加 negative-fixture 合同（丢 channel/换 order/抢 authority 必须失败）；未删/skip/放松断言、未改 workflow
+  gate、未恢复旧 `core.push()`。exact Node 命令终态 60/60 pass，`git diff --check` 通过。详见
+  `docs/validation-engine-decoupling.md` 末节。browser RAF/GC/WebGPU 等仍未验收。

@@ -120,3 +120,19 @@ P2/P3/P4 codegate 与 focused tests/clippy 不替代未覆盖的运行验收。P
 **最终真实硬件证据：** `.slim/deepwork/cad-engine-decoupling/p4-real-gpu.md` 的 artifact 时间标记为 `20261014-004223`，证据根 `/tmp/opencode/yacr-p4-final-20261014-004223/`。真实 Wayland/winit + NVIDIA Quadro P620/Vulkan，授权 `synthetic-four-lines.dwg`：新 `real_gpu_controlled_api_events_and_history_acceptance` 1/1、旧六用例脚本 6/6、async cursor 1/1，合计 8 terminal PASS；其中 `real_dwg_cpu_load_stages` 不创建 GPU context。新用例实际覆盖 controlled Commit、Select/highlight、request ID/origin/transaction/sequence、`Arc::ptr_eq` ChangeSet、Undo/Redo 与 idle。首次新测试编译的 `RequestResult::Api(Arc<ApiOutcome>)` 解构错误仅在测试内修正为保留 Arc 后通过；历史首错保留。
 
 **终态与限制：** P1–P4 本轮解耦/队列/受控 API-event foundation 的 codegate、指定编译/合同测试及硬件用例闭环；不是完整 CAD 产品交付。订阅为进程内 bounded foundation，不构成外部插件兼容结论。未验 browser runtime/GC/RAF/Reflect/WebGPU、Android device、vendor DWG、视觉 golden；无 loader/React/双 surface。P2 paper-only/grid 初轮失败、P4 Oracle reject 及修复/合同历史均保留。当前仅此 docs lane 与协调器确认的最终门禁收尾，无运行 writer 或 Cargo task。
+
+## CI build-layers `web-host-contracts` 失败修复（Node 合成合同）
+
+**失败范围：** CI run `38495981291` 的 build-layers job `38495981291`（`gh run view ... --json jobs` 仅此 job `failure`，其余 job success/skipped）。失败步为 `Browser host module contracts (no wasm/GPU)`：`node --test scripts/test-web-host.mjs scripts/test-web-touch.mjs scripts/test-web-a11y.mjs scripts/test-web-pixels.mjs scripts/test-web-responsive.mjs scripts/test-host-panel-parity.mjs scripts/test-web-icon.mjs`，60 tests / 52 pass / 8 fail，全部来自 `scripts/test-host-panel-parity.mjs`（`not ok 1–6/8/9`）。无其它 failed job。
+
+**根因判定：旧源码契约未迁移，不是真实 panel 漏线。** 该 test 固定的是 P2 之前的结构：`crates/cad-host/src/state.rs` 内直接调 `set_layer_state`/`set_property_state`/`set_layout_state`/`set_diagnostics_state`/`set_selection_highlight`/`set_measurement_preview`，用 `set_overlay_visibility(handle.effective_config()...)` 做 overlay gate，且各平台 overlay 必须含 `core.push()`。P2/P4 后共享腿已迁移为：
+
+- `cad-host/state.rs`：派生 typed `HostState`/`NavigationState`，render overlay 经 `OverlayInputs` + `OverlayVisibility::from(self.viewer_config...effective().view.overlays...)`（config gate 仍在，只是表达式/位置变了）；`take_updates`/`HostUpdates` 在 `cad-host/input.rs`。
+- `cad-ui-slint`：`EngineAdapter::apply_updates` → `UiHandle::apply_host_state`/`apply_config_snapshot`/`apply_backend_state` + `view.set_snap_hints`/`set_view_state`/`set_status_message` 才是 shell setter 的唯一写入点。
+- 平台 overlay：web `browser.rs`/`state_push.rs`、android `poll.rs`/`state_push.rs` 在 `binding.flush_updates()` **之后** 只重推 host-specific 的 `push_import_state`/`push_resource_sections`。
+
+逐通道核对（layer/property/layout/diagnostics/import/resources、selection/measurement/overlay-visibility、units/backend/diagnostics/counts）均在上述真实 owner 存在，未发现真实漏线。
+
+**修复（仅 `scripts/test-host-panel-parity.mjs`）：** 契约重指到真实 typed-updates 管线：`state.rs` 派生通道 + `input.rs` 的 `take_updates`/`HostUpdates` + `engine_adapter.rs` apply 通道 + `handle.rs` panel setters/unit label + render overlay 的 effective-config gate；web/android overlay 断言 `flush_updates` 先于 overlay、且 overlay 文件不得含共享 authority setters（不覆盖 authority）。新增 negative-fixture 合同（丢 channel / 换 order / overlay 抢 authority setter 必须被判失败）。**未** 删除/skip/放松断言、**未** 扩大为全仓库文本搜索、**未** 改 workflow gate、**未** 恢复旧 `core.push()`/重复派发。
+
+**终态证据：** 上述 exact workflow Node 命令 → `# tests 60 / # pass 60 / # fail 0 / # cancelled 0 / # skipped 0`；`scripts/test-host-panel-parity.mjs` focused 11/11 pass；`git diff --check` 通过。本 lane 仅改 test/docs，无 Cargo、无 product source、无 rootlock/workflow 改动。browser RAF/GC/WebGPU、Android device、vendor DWG、视觉 golden 仍未验收。
