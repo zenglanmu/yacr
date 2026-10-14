@@ -45,7 +45,8 @@ use cad_resources::{DecodedImage, DecodedImageCache, ResourceKey};
 use cad_scene::{FrameBudget, ImageBatch, RenderTopology, SceneDelta};
 use geometry::OverBudget;
 pub use geometry::{
-    clamp_alpha, classify_alpha, plan_draw_order, AlphaClass, BatchOrderEntry, DrawOrderPlan,
+    clamp_alpha, classify_alpha, plan_draw_order, AlphaClass, BatchOrderEntry, DrawOrderCache,
+    DrawOrderPlan,
 };
 pub use geometry::{
     front_face_ccw, has_vertex_colors, normals_need_repair, repaired_colors, repaired_normals,
@@ -168,9 +169,28 @@ impl RenderTarget {
 }
 
 pub struct FrameStats {
+    /// Wall-clock milliseconds of this frame's CPU path on the render thread:
+    /// scene plan/cache lookup, per-batch uniform writes, command encoding and
+    /// `queue.submit`. It deliberately **excludes** the blocking device poll, so
+    /// it does not fold GPU execution time into a CPU number.
     pub cpu_ms: f64,
     pub gpu_ms: Option<f64>,
+    /// Draw submissions this frame, derived from the plan's batch/run accounting
+    /// (non-converted opaque batches + coalesced instanced runs + coalesced
+    /// merged-mesh runs + transparent batches + drawn images) rather than by
+    /// intercepting every `draw`/`draw_indexed` call. It is a batch-collapse
+    /// metric: a converted batch is represented by the coalesced runs it joins,
+    /// and each run contributes one entry however many member batches it covers.
     pub draw_calls: u64,
+    /// Number of `Queue::write_buffer` calls issued for this frame's uniforms.
+    ///
+    /// Every accepted batch (and every drawn image) writes its 80-byte uniform
+    /// into a shared, dynamically-offset slot buffer, so a frame issues **one
+    /// write per uniform page** touched (a page holds
+    /// `max_uniform_buffer_binding_size / slot_size` slots) instead of one per
+    /// batch. Diagnostics only: it exists so a frame's per-call submission cost
+    /// is measurable and not guessed.
+    pub uniform_writes: u64,
     pub uploaded_bytes: u64,
     /// Vertices submitted this frame (post-budget).
     pub vertices: usize,
@@ -204,6 +224,58 @@ pub struct FrameStats {
     /// Set when at least one lineweight was not drawn; a single structured
     /// reason aggregating the count, for callers that surface one diagnostic.
     pub lineweight_reason: Option<DiagnosticReason>,
+    /// CPU milliseconds of the frame-plan block: draw-order cache build/scan,
+    /// transparent re-sort, the accepted/opaque/transparent split and the
+    /// lineweight scan. Part of [`FrameStats::cpu_ms`].
+    pub plan_ms: f64,
+    /// CPU milliseconds of the uniform path: matrix build, slot write into the
+    /// staging arena and `flush` (`Queue::write_buffer`, one per page). Part of
+    /// [`FrameStats::cpu_ms`].
+    pub uniform_ms: f64,
+    /// CPU milliseconds of command encoding: `begin_render_pass` and every
+    /// batch/image `set_*` + draw call. Part of [`FrameStats::cpu_ms`].
+    pub encode_ms: f64,
+    /// CPU milliseconds of `Queue::submit` (excluding the blocking poll). Part
+    /// of [`FrameStats::cpu_ms`].
+    pub submit_ms: f64,
+    /// Wall-clock milliseconds of the blocking device poll that classifies the
+    /// submission. Deliberately **excluded** from [`FrameStats::cpu_ms`]; it
+    /// measures the wait on the GPU, not the render thread's CPU work.
+    pub wait_ms: f64,
+    /// `RenderPass::set_pipeline` calls actually issued this frame (post-dedup).
+    pub set_pipeline_calls: u64,
+    /// `RenderPass::set_bind_group` calls actually issued this frame (post-dedup).
+    pub set_bind_group_calls: u64,
+    /// `RenderPass::set_vertex_buffer` calls actually issued this frame
+    /// (post-dedup).
+    pub set_vertex_buffer_calls: u64,
+    /// `RenderPass::set_index_buffer` calls actually issued this frame
+    /// (post-dedup).
+    pub set_index_buffer_calls: u64,
+    /// Uniform arena slots used this frame (accepted geometry batches + drawn
+    /// images).
+    pub uniform_slots: usize,
+    /// Times the progressive frame cursor was reset this frame because the
+    /// camera/attachment key changed (0 for a non-progressive renderer).
+    pub progressive_restarts: u64,
+    /// Instanced line draw calls issued this frame (coalesced runs). Each one
+    /// expands many segments of one [`InstanceRun`]-carrying stream.
+    pub instanced_draws: u64,
+    /// Batches this frame drew through the instanced line path (the sum of all
+    /// coalesced runs' member batches). `0` when nothing converted.
+    pub instanced_batches: usize,
+    /// Resident instanced line streams. Uploaded once per scene change; a pan or
+    /// zoom never changes it.
+    pub instance_streams: usize,
+    /// Merged mesh draw calls issued this frame (coalesced runs). Each one draws
+    /// the triangle range of many flat-merged mesh batches as a single draw.
+    pub mesh_draws: u64,
+    /// Batches this frame drew through the merged mesh path (the sum of all
+    /// coalesced runs' member batches). `0` when nothing converted.
+    pub merged_mesh_batches: usize,
+    /// Resident merged mesh chunks. Uploaded once per scene change; a pan or zoom
+    /// never changes it.
+    pub mesh_chunks: usize,
 }
 
 /// One batch whose lineweight was carried but not rasterized.
@@ -283,7 +355,9 @@ enum ScopeOutcome {
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 struct GpuBatch {
-    vertices: wgpu::Buffer,
+    /// Per-batch position vertex buffer (`None` when the batch was converted to
+    /// an instanced line stream, which owns the geometry instead).
+    vertices: Option<wgpu::Buffer>,
     vertex_count: u32,
     /// Per-vertex normals (mesh topology only); kept alive for binding.
     normals: Option<wgpu::Buffer>,
@@ -312,11 +386,70 @@ struct GpuBatch {
     /// World-space centroid, the transparent pass's back-to-front sort key.
     centroid: [f32; 3],
     origin: [f32; 3],
-    camera: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
+    /// Empty unless this batch's segments live in instanced line streams. The
+    /// frame path draws each `[offset, offset + count)` instance slice in order
+    /// (coalescing against adjacent slices in the same stream) instead of a
+    /// per-batch draw. Usually one run; a batch larger than a stream's instance
+    /// cap contributes one run per chunk it was split across.
+    instanced: Vec<InstanceRun>,
+    /// Empty unless this batch's triangles live in merged mesh chunks (see
+    /// [`MeshChunkData`]). The frame path draws each `[index_offset,
+    /// index_offset + index_count)` triangle range in order (coalescing against
+    /// adjacent ranges in the same chunk) instead of a per-batch draw. Usually
+    /// one run; a batch larger than the vertex cap contributes one run per piece.
+    mesh_runs: Vec<MeshRun>,
     /// Exact bytes this batch uploads, cached at upload time so the per-frame
     /// byte budget does not recompute the edge index list every frame.
     upload_bytes: usize,
+}
+
+/// One device-resident merged mesh chunk: an interleaved vertex buffer, a
+/// triangle index buffer rebased onto it, and the `f64` reference origin its
+/// stored positions are measured from.
+///
+/// Uploaded once (upload/commit) and never rewritten on pan/zoom: a camera move
+/// is a small uniform write only. Like [`InstanceStream`], each chunk is
+/// spatially bounded (see [`build_mesh_chunks`]), so a stored coordinate is
+/// within [`MAX_STREAM_RADIUS`] of `origin` and the f32 ulp stays under ~1 µm.
+pub(crate) struct GpuMeshChunk {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    vertex_count: u32,
+    index_count: u32,
+    origin: [f64; 3],
+    mirrored: bool,
+}
+
+/// Where a converted batch's segments live in the instanced line streams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InstanceRun {
+    /// Index into [`Renderer::instance_streams`].
+    stream: u32,
+    /// First instance of this batch within its stream.
+    offset: u32,
+    /// Number of instances (segments) this batch contributes.
+    count: u32,
+}
+
+/// One device-resident instanced line stream, plus the `f64` reference origin
+/// its positions are stored relative to.
+///
+/// Uploaded once (upload/commit) and never rewritten on pan/zoom: a camera move
+/// is a small uniform write only. On the **orthographic** path the per-frame
+/// matrix subtracts the camera centre from `origin` in `f64` on the CPU before
+/// narrowing, so stream positions stay small; the **perspective** path narrows
+/// the origin to `f32` before `translate_left` (see
+/// `FrameProjection::batch_matrix_f64`), so that `f64` subtraction guarantee is
+/// Ortho-only. Each stream covers a spatially bounded chunk of the converted
+/// geometry (see [`build_instance_chunks`]), so a stored coordinate is within
+/// [`MAX_STREAM_RADIUS`] of `origin` — the f32 ulp stays under ~1 µm and the
+/// deep-zoom-on-a-large-drawing precision floor holds. It is not byte-exact
+/// against the legacy per-batch path for arbitrary origins; see the deep-zoom
+/// parity fence.
+pub(crate) struct InstanceStream {
+    buffer: wgpu::Buffer,
+    instance_count: u32,
+    origin: [f64; 3],
 }
 
 impl GpuBatch {
@@ -368,9 +501,6 @@ struct GpuImage {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     vertex_count: u32,
-    /// Group 0: the per-image camera uniform (world→clip matrix + tint).
-    camera: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
     /// Group 1: the sampled texture and its sampler (shared per resource key).
     texture_bind_group: wgpu::BindGroup,
     /// A handle to the shared texture, kept alive for as long as the texture view
@@ -387,6 +517,129 @@ struct GpuImage {
     draw_order: i64,
     /// Exact bytes this quad uploads (vertex + index buffers).
     upload_bytes: usize,
+}
+
+/// One shared uniform buffer plus its bind group (group 0).
+///
+/// The bind group binds exactly one slot (`slot_size` bytes); the per-draw
+/// dynamic offset selects which slot, so a single bind group serves every batch
+/// resident in the page.
+struct UniformPage {
+    buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+/// Shared per-frame uniform storage.
+///
+/// Every accepted geometry batch (and drawn image) writes its 80-byte uniform
+/// into a slot of a shared uniform buffer and draws it with the slot's byte
+/// offset as a *dynamic* offset. This replaces one `queue.write_buffer` per
+/// batch with one per page: a page holds `slots_per_page` slots and its total
+/// bytes are kept within `max_uniform_buffer_binding_size`, so each page stays a
+/// legal uniform binding even on the WebGPU default 64 KiB limit.
+///
+/// Slots are assigned per frame in accepted order; the arena is reused across
+/// frames (it only grows).
+struct UniformArena {
+    /// Stride between slots: the uniform struct size rounded up to the device's
+    /// `min_uniform_buffer_offset_alignment` (dynamic offsets must be aligned).
+    slot_size: u32,
+    /// Slots per page: `max_uniform_buffer_binding_size / slot_size`, capped so
+    /// an adapter reporting a very large binding size cannot allocate an
+    /// unbounded buffer.
+    slots_per_page: usize,
+    pages: Vec<UniformPage>,
+    /// CPU staging laid out exactly like the GPU slots (`slot * slot_size`), so
+    /// each page uploads with one contiguous `write_buffer`.
+    staging: Vec<u8>,
+}
+
+impl UniformArena {
+    fn new(limits: &wgpu::Limits) -> Self {
+        let (slot_size, slots_per_page) = uniform_layout_params(limits);
+        UniformArena {
+            slot_size,
+            slots_per_page,
+            pages: Vec::new(),
+            staging: Vec::new(),
+        }
+    }
+
+    /// Drop every GPU page (device loss / re-init).
+    fn reset(&mut self) {
+        self.pages.clear();
+        self.staging.clear();
+    }
+
+    /// Grow to hold `needed` slots. Pages are created lazily and never shrink.
+    fn ensure_slots(
+        &mut self,
+        needed: usize,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+    ) {
+        let pages_needed = needed.div_ceil(self.slots_per_page);
+        while self.pages.len() < pages_needed {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("cad-uniform-page"),
+                size: (self.slots_per_page * self.slot_size as usize) as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cad-uniform-page-bind"),
+                layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffer,
+                        offset: 0,
+                        // One slot; the dynamic offset slides this window over
+                        // the page, which is why the binding itself stays tiny.
+                        size: wgpu::BufferSize::new(u64::from(self.slot_size)),
+                    }),
+                }],
+            });
+            self.pages.push(UniformPage { buffer, bind_group });
+        }
+        let needed_bytes = needed * self.slot_size as usize;
+        if self.staging.len() < needed_bytes {
+            self.staging.resize(needed_bytes, 0);
+        }
+    }
+
+    /// Copy one batch/image uniform into its staging slot.
+    fn write_slot(&mut self, slot: usize, uniform: &[u8]) {
+        let start = slot * self.slot_size as usize;
+        self.staging[start..start + uniform.len()].copy_from_slice(uniform);
+    }
+
+    /// The bind group and dynamic offset a draw must bind for `slot`.
+    fn binding(&self, slot: usize) -> (&wgpu::BindGroup, u32) {
+        let (page, offset) = slot_location(slot, self.slots_per_page, self.slot_size);
+        (&self.pages[page].bind_group, offset)
+    }
+
+    /// Upload the first `used_slots` slots, one `write_buffer` per page, and
+    /// return the number of calls issued (this frame's `uniform_writes`).
+    fn flush(&self, queue: &wgpu::Queue, used_slots: usize) -> u64 {
+        let mut writes = 0u64;
+        let mut start = 0usize;
+        while start < used_slots {
+            let in_page = (used_slots - start).min(self.slots_per_page);
+            let byte_offset = start * self.slot_size as usize;
+            let byte_len = in_page * self.slot_size as usize;
+            let page = start / self.slots_per_page;
+            queue.write_buffer(
+                &self.pages[page].buffer,
+                0,
+                &self.staging[byte_offset..byte_offset + byte_len],
+            );
+            writes += 1;
+            start += in_page;
+        }
+        writes
+    }
 }
 
 /// Outcome of [`Renderer::upload_images`]: how many image quads became resident
@@ -440,6 +693,11 @@ impl ImageUploadReport {
 /// The widest 2D texture dimension a host can rely on.
 pub const MIN_GUARANTEED_TEXTURE_DIMENSION: u32 = 2048;
 
+/// Byte size of one packed instanced line segment on the GPU (2-vertex
+/// `LineList` pair). Public so callers can reason about the exact instance-stream
+/// byte charge without duplicating the layout.
+pub const LINE_INSTANCE_BYTES: u32 = plan::LINE_INSTANCE_STRIDE;
+
 // Compile-time floor: mirrors `texture_dimension_floor_is_guaranteed`.
 const _: () = assert!(MIN_GUARANTEED_TEXTURE_DIMENSION >= 2048);
 
@@ -455,6 +713,12 @@ pub struct Renderer {
     queue: Option<wgpu::Queue>,
     layout: Option<wgpu::BindGroupLayout>,
     line_pipeline: Option<wgpu::RenderPipeline>,
+    /// Instanced line pipeline: one instance per 2-vertex `LineList` segment,
+    /// expanded against `unit_segment_buffer`.
+    line_instanced_pipeline: Option<wgpu::RenderPipeline>,
+    /// Shared `(0,0,0)-(1,0,0)` unit segment bound at slot 0 of the instanced
+    /// line pipeline.
+    unit_segment_buffer: Option<wgpu::Buffer>,
     mesh_pipeline: Option<wgpu::RenderPipeline>,
     /// Mirrored mesh pipeline: same shader but `front_face = Cw`, so mirrored
     /// batches cull the correct side instead of the visible one.
@@ -464,6 +728,11 @@ pub struct Renderer {
     /// the geometry behind it with its own depth.
     mesh_pipeline_transparent: Option<wgpu::RenderPipeline>,
     mesh_pipeline_mirrored_transparent: Option<wgpu::RenderPipeline>,
+    /// Merged-mesh pipelines: the flat-merge vertex layout (interleaved
+    /// position/normal/baked-colour/entity) and the same shading body as the
+    /// mesh pipelines. `_mirrored` uses `front_face = Cw`, like the legacy pair.
+    mesh_pipeline_merged: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_merged_mirrored: Option<wgpu::RenderPipeline>,
     /// Textured-quad pipeline for raster images (group 1 = texture + sampler).
     image_pipeline: Option<wgpu::RenderPipeline>,
     /// Bind-group layout for group 1 of the image pipeline.
@@ -476,12 +745,61 @@ pub struct Renderer {
     target_size: (u32, u32),
     target_format: wgpu::TextureFormat,
     batches: Vec<GpuBatch>,
+    /// Device-resident instanced line streams. Uploaded once per scene change;
+    /// never rewritten on pan/zoom. Garbage-collected (and re-based) on commit.
+    instance_streams: Vec<InstanceStream>,
+    /// Device-resident merged mesh chunks. Uploaded once per scene change; never
+    /// rewritten on pan/zoom. Garbage-collected (and re-based) on commit.
+    mesh_chunks: Vec<GpuMeshChunk>,
+    /// Whether eligible opaque line batches are converted to instanced streams.
+    /// Defaults to `true`; disabling forces the legacy per-batch path so the two
+    /// can be compared.
+    line_instancing: bool,
+    /// Whether eligible opaque mesh batches are flat-merged into chunks and their
+    /// edge overlays instanced. Defaults to `true`; disabling forces the legacy
+    /// per-batch mesh path so the two can be compared.
+    mesh_merging: bool,
+    /// Upper bound on instances per instanced stream buffer (default
+    /// [`plan::MAX_INSTANCES_PER_STREAM`]). A batch with more segments is split
+    /// across several streams. Injectable so the split path is testable without
+    /// allocating a million-segment batch.
+    max_instances_per_stream: usize,
+    /// Upper bound on vertices per merged mesh chunk (default
+    /// [`plan::MAX_VERTICES_PER_MESH_STREAM`]). A batch with more vertices is
+    /// split across several chunks. Injectable for the same reason.
+    max_vertices_per_mesh_stream: usize,
+    /// Monotonic count of instanced stream buffers uploaded since init. A pan or
+    /// zoom must never increase it (asserted by the zero-reupload test).
+    instance_stream_uploads: u64,
+    /// Monotonic count of merged mesh chunk buffers uploaded since init. A pan or
+    /// zoom must never increase it (asserted by the zero-reupload test).
+    mesh_chunk_uploads: u64,
     /// Resident image quads uploaded by [`Renderer::upload_images`].
     images: Vec<GpuImage>,
     /// One GPU texture per resolved [`ResourceKey`], shared by every resident
     /// image quad that references it. Bounded to the keys of the current image
     /// set (unreferenced entries are pruned on upload).
     image_textures: HashMap<ResourceKey, GpuTexture>,
+    /// Shared per-frame uniform arena (one slot per accepted batch/image).
+    uniforms: UniformArena,
+    /// Per-batch uniform slot assigned this frame, in accepted order.
+    /// `u32::MAX` marks a batch not drawn this frame; only drawn indices are
+    /// read. Reused across frames to avoid a per-frame allocation.
+    frame_slots: Vec<u32>,
+    /// Per-image uniform slot assigned this frame (images share the geometry
+    /// arena and draw only on the cleared page).
+    image_slots: Vec<u32>,
+    /// Scratch buffers for this frame's opaque/transparent accepted indices.
+    /// Taken by `render_with_projection` and returned before it finishes, so the
+    /// per-frame `to_vec`/`collect` allocations are avoided across frames.
+    scratch_opaque: Vec<usize>,
+    scratch_transparent: Vec<usize>,
+    /// Cached "lineweight carried but not drawn" report over `batches`.
+    ///
+    /// Rebuilt only when the batch set changes (`commit_upload`/`clear_batches`/
+    /// device loss), never per frame: the frame path clones it instead of
+    /// scanning every batch.
+    lineweight_not_drawn: Vec<LineweightNotDrawn>,
     device_generation: u64,
     texture_revision: u64,
     uploaded_bytes: u64,
@@ -491,6 +809,11 @@ pub struct Renderer {
     draw_calls: u64,
     progressive: bool,
     progressive_frame: Option<ProgressiveFrame>,
+    /// Camera-independent draw-order partition over `batches`. Rebuilt lazily
+    /// when the batch set changes (upload/clear/device-loss) and, per frame,
+    /// only its transparent slice is re-sorted for the camera. `None` means
+    /// "stale, rebuild from `batches`".
+    draw_plan: Option<DrawOrderCache>,
     /// Set once a device-loss is observed, until the host rebuilds.
     device_lost: bool,
     /// Detail string carried by the last device-loss observation.
@@ -508,6 +831,12 @@ pub struct Renderer {
 /// is separate so failed preparation leaves the active batches untouched.
 pub struct PreparedUpload {
     batches: Vec<GpuBatch>,
+    /// Instanced line streams created for the staged batches; their run indices
+    /// are re-based when the upload is published.
+    instances: Vec<InstanceStream>,
+    /// Merged mesh chunks created for the staged batches; their run indices are
+    /// re-based when the upload is published.
+    mesh_chunks: Vec<GpuMeshChunk>,
     device_generation: u64,
     device: wgpu::Device,
     bytes: u64,
@@ -515,13 +844,28 @@ pub struct PreparedUpload {
 }
 
 struct ProgressiveFrame {
-    transforms: Vec<[f32; 16]>,
-    camera_position: [f32; 3],
-    texture_revision: u64,
+    /// O(1) camera/attachment key the cached `ordered` plan is valid for.
+    key: FrameKey,
     ordered: Vec<usize>,
     opaque_count: usize,
     invisible: usize,
     cursor: usize,
+}
+
+/// O(1)-comparable identity of the camera + attachments a cached frame plan was
+/// built for.
+///
+/// The per-batch transform is a pure function of the camera and the batch
+/// origins, and batch origins only change on upload/clear/device-loss — all of
+/// which reset `progressive_frame`. So comparing this key is equivalent to the
+/// previous full-matrix `transforms` comparison, without materialising or
+/// comparing a per-batch matrix.
+#[derive(Clone, Copy, PartialEq)]
+struct FrameKey {
+    camera_matrix: [f32; 16],
+    camera_position: [f32; 3],
+    target_size: (u32, u32),
+    texture_revision: u64,
 }
 
 impl PreparedUpload {
@@ -531,7 +875,23 @@ impl PreparedUpload {
         if self.device != piece.device || self.device_generation != piece.device_generation {
             return Err(CadError::StaleResult);
         }
+        // Re-base the appended piece's stream indices onto this piece's streams.
+        let base = self.instances.len() as u32;
+        for batch in &mut piece.batches {
+            for run in &mut batch.instanced {
+                run.stream += base;
+            }
+        }
+        // Re-base the appended piece's merged chunk indices the same way.
+        let mesh_base = self.mesh_chunks.len() as u32;
+        for batch in &mut piece.batches {
+            for run in &mut batch.mesh_runs {
+                run.chunk += mesh_base;
+            }
+        }
         self.batches.append(&mut piece.batches);
+        self.instances.append(&mut piece.instances);
+        self.mesh_chunks.append(&mut piece.mesh_chunks);
         self.bytes += piece.bytes;
         self.elapsed_ms += piece.elapsed_ms;
         Ok(())

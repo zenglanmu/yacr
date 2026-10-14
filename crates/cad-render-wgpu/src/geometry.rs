@@ -497,6 +497,115 @@ pub fn plan_draw_order(entries: &[BatchOrderEntry], camera: Option<[f32; 3]>) ->
     }
 }
 
+/// Camera-independent prefix of a frame's draw-order plan.
+///
+/// The opaque order and the opaque/transparent/invisible partition depend only
+/// on the batch set (which changes on upload), while only the transparent order
+/// depends on the camera. Caching the partition lets a camera move skip the
+/// O(n log n) opaque sort and the partition scan, and re-sort only the (usually
+/// small) transparent slice.
+///
+/// Equivalence to [`plan_draw_order`] is the contract and is fuzzed by
+/// `cached_partition_matches_fresh_plan_across_cameras`: the transparent
+/// comparator is a total order (distance, then draw order, then upload index),
+/// so re-sorting a cached subset yields the same sequence as sorting the
+/// freshly partitioned subset.
+#[derive(Debug, Clone)]
+pub struct DrawOrderCache {
+    entries: Vec<BatchOrderEntry>,
+    opaque: Vec<usize>,
+    transparent: Vec<usize>,
+    invisible: Vec<usize>,
+}
+
+impl DrawOrderCache {
+    /// Build the camera-independent partition over `entries` in upload order.
+    ///
+    /// Both sorted groups start in ascending `draw_order` order (stable, upload
+    /// index breaks ties), which is exactly what [`plan_draw_order`] produces
+    /// with `camera = None`.
+    pub fn new(entries: Vec<BatchOrderEntry>) -> Self {
+        let mut cache = Self {
+            entries,
+            opaque: Vec::new(),
+            transparent: Vec::new(),
+            invisible: Vec::new(),
+        };
+        for (index, entry) in cache.entries.iter().enumerate() {
+            match classify_alpha(entry.alpha) {
+                AlphaClass::Opaque => cache.opaque.push(index),
+                AlphaClass::Transparent => cache.transparent.push(index),
+                AlphaClass::Invisible => cache.invisible.push(index),
+            }
+        }
+        let entries = &cache.entries;
+        cache.opaque.sort_by_key(|&index| entries[index].draw_order);
+        cache
+            .transparent
+            .sort_by_key(|&index| entries[index].draw_order);
+        cache
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Opaque batches in final order (ascending `draw_order`).
+    pub fn opaque(&self) -> &[usize] {
+        &self.opaque
+    }
+
+    /// Transparent batches in their current order. Call
+    /// [`DrawOrderCache::sort_transparent`] after a camera change.
+    pub fn transparent(&self) -> &[usize] {
+        &self.transparent
+    }
+
+    /// `alpha <= 0` batch indices, never drawn.
+    pub fn invisible(&self) -> &[usize] {
+        &self.invisible
+    }
+
+    /// Re-sort only the transparent slice for `camera`. Opaque and invisible are
+    /// already final; this is the only camera-dependent step of the plan.
+    pub fn sort_transparent(&mut self, camera: Option<[f32; 3]>) {
+        let entries = &self.entries;
+        match camera {
+            Some(eye) => self.transparent.sort_by(|&a, &b| {
+                let da = squared_distance(entries[a].centroid, eye);
+                let db = squared_distance(entries[b].centroid, eye);
+                db.partial_cmp(&da)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| entries[a].draw_order.cmp(&entries[b].draw_order))
+                    .then_with(|| a.cmp(&b))
+            }),
+            None => self.transparent.sort_by(|&a, &b| {
+                // Ascending `draw_order`, then upload index. The explicit index
+                // term makes this a total order, so re-sorting a slice that is
+                // no longer in upload order (for example after a camera sort)
+                // still matches `plan_draw_order(.., None)`.
+                entries[a]
+                    .draw_order
+                    .cmp(&entries[b].draw_order)
+                    .then_with(|| a.cmp(&b))
+            }),
+        }
+    }
+
+    /// Owned snapshot of the current plan.
+    pub fn to_plan(&self) -> DrawOrderPlan {
+        DrawOrderPlan {
+            opaque: self.opaque.clone(),
+            transparent: self.transparent.clone(),
+            invisible: self.invisible.clone(),
+        }
+    }
+}
+
 /// Squared Euclidean distance between two world-space points.
 ///
 /// Squared distance is monotonic in distance, so it orders identically while
@@ -915,5 +1024,78 @@ mod tests {
         // From the left, x=10 is farther; from the right, x=-10 is farther.
         assert_eq!(from_left.transparent, vec![1, 0]);
         assert_eq!(from_right.transparent, vec![0, 1]);
+    }
+
+    #[test]
+    fn cached_partition_matches_fresh_plan_across_cameras() {
+        use crate::plan::draw_passes;
+
+        // Deterministic LCG so the fuzz is reproducible without a `rand`
+        // dependency; the point is many random-ish alpha/draw_order/centroid
+        // combinations, including distance ties.
+        let mut state = 0x1234_5678u32;
+        let mut next = move || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            state
+        };
+        let n = 500usize;
+        let entries: Vec<BatchOrderEntry> = (0..n)
+            .map(|_| {
+                let alpha = match next() % 5 {
+                    0 => 0.0,
+                    1 => 0.5,
+                    2 => 0.25,
+                    _ => 1.0,
+                };
+                BatchOrderEntry {
+                    draw_order: (next() % 9) as i64 - 4,
+                    alpha,
+                    centroid: [
+                        (next() % 400) as f32 - 200.0,
+                        (next() % 400) as f32 - 200.0,
+                        (next() % 400) as f32 - 200.0,
+                    ],
+                }
+            })
+            .collect();
+
+        let mut cache = DrawOrderCache::new(entries.clone());
+        let accepted: Vec<usize> = (0..n).collect();
+
+        for k in 0..25 {
+            let eye = [
+                k as f32 * 13.0 - 150.0,
+                150.0 - k as f32 * 9.0,
+                k as f32 * 1.5 - 20.0,
+            ];
+            // The freshly computed plan the renderer used before the cache.
+            let fresh = draw_passes(&accepted, &entries, Some(eye));
+            cache.sort_transparent(Some(eye));
+            let plan = cache.to_plan();
+            assert_eq!(plan.opaque, fresh.opaque, "opaque at camera {eye:?}");
+            assert_eq!(
+                plan.transparent, fresh.transparent,
+                "transparent at camera {eye:?}"
+            );
+            assert_eq!(
+                plan.invisible.len(),
+                fresh.invisible,
+                "invisible at camera {eye:?}"
+            );
+            assert_eq!(
+                plan,
+                plan_draw_order(&entries, Some(eye)),
+                "cached plan must equal the fresh plan at camera {eye:?}"
+            );
+        }
+
+        // `camera = None` (transparent by draw order only) must also match.
+        let fresh = draw_passes(&accepted, &entries, None);
+        cache.sort_transparent(None);
+        let plan = cache.to_plan();
+        assert_eq!(plan.opaque, fresh.opaque);
+        assert_eq!(plan.transparent, fresh.transparent);
+        assert_eq!(plan.invisible.len(), fresh.invisible);
+        assert_eq!(plan, plan_draw_order(&entries, None));
     }
 }

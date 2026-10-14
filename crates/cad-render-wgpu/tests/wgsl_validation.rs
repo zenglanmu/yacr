@@ -39,9 +39,27 @@ fn line_shader_is_valid_wgsl() {
 }
 
 #[test]
+fn line_instanced_shader_is_valid_wgsl() {
+    validate_wgsl(
+        "line_instanced.wgsl",
+        include_str!("../shaders/line_instanced.wgsl"),
+    )
+    .expect("instanced line shader must validate");
+}
+
+#[test]
 fn mesh_shader_is_valid_wgsl() {
     validate_wgsl("mesh.wgsl", include_str!("../shaders/mesh.wgsl"))
         .expect("mesh shader must validate");
+}
+
+#[test]
+fn mesh_merged_shader_is_valid_wgsl() {
+    validate_wgsl(
+        "mesh_merged.wgsl",
+        include_str!("../shaders/mesh_merged.wgsl"),
+    )
+    .expect("merged mesh shader must validate");
 }
 
 #[test]

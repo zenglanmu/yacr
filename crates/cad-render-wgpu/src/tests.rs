@@ -273,3 +273,48 @@ fn cad_clear_color_is_pure_black_opaque() {
         "the CAD render target clears to pure opaque black"
     );
 }
+
+#[test]
+fn uniform_page_stays_within_the_default_binding_limit() {
+    // WebGPU defaults: 64 KiB uniform binding limit, 256-byte offset alignment.
+    let limits = wgpu::Limits::default();
+    let (slot_size, slots) = uniform_layout_params(&limits);
+    assert_eq!(
+        slot_size, 256,
+        "the struct is padded to the offset alignment"
+    );
+    assert_eq!(slots, 256, "64 KiB / 256 B = 256 slots per page");
+    assert!(
+        slots as u64 * u64::from(slot_size) <= limits.max_uniform_buffer_binding_size,
+        "a whole page must remain a legal uniform binding"
+    );
+}
+
+#[test]
+fn uniform_slot_size_follows_the_offset_alignment() {
+    // A backend with a larger offset alignment must still get aligned slots.
+    let limits = wgpu::Limits {
+        min_uniform_buffer_offset_alignment: 512,
+        ..Default::default()
+    };
+    let (slot_size, _) = uniform_layout_params(&limits);
+    assert_eq!(slot_size, 512);
+    assert_eq!(slot_size % limits.min_uniform_buffer_offset_alignment, 0);
+    // An adapter reporting a very large binding size is still capped.
+    let huge = wgpu::Limits {
+        max_uniform_buffer_binding_size: u64::MAX,
+        ..Default::default()
+    };
+    let (_, slots) = uniform_layout_params(&huge);
+    assert_eq!(slots, MAX_UNIFORM_SLOTS_PER_PAGE);
+}
+
+#[test]
+fn slot_location_picks_page_and_offset_across_buffers() {
+    // 3 slots per page at a 256-byte stride.
+    assert_eq!(slot_location(0, 3, 256), (0, 0));
+    assert_eq!(slot_location(2, 3, 256), (0, 512));
+    // Slot 3 is the first slot of the *second* shared buffer.
+    assert_eq!(slot_location(3, 3, 256), (1, 0));
+    assert_eq!(slot_location(259, 256, 256), (1, 3 * 256));
+}
