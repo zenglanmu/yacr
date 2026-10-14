@@ -1,6 +1,17 @@
 //! cache module.
 
 use super::*;
+use cad_representation::DisplayFragment;
+
+/// Paint order the scene emits for every fragment batch.
+///
+/// `draw_order` is **not yet threaded** from the importer's `DbEntity::draw_order`
+/// through `DisplayFragment` into `RenderBatch` (see [`RenderBatch::draw_order`]
+/// and `docs/handoff.md`), so the scene emits `0` and the effective paint order
+/// is the upload order. Both the batch constructor and the merge predicate read
+/// this constant, so the emitted order and the order the predicate compares
+/// cannot drift apart.
+pub(crate) const SCENE_DRAW_ORDER: i64 = 0;
 
 /// Bounds and caching for the CPU-side scene.
 pub struct SceneCache {
@@ -177,29 +188,7 @@ impl SceneCache {
             };
             if let Some(points) = line_points.filter(|_| compact && previous_was_lines) {
                 let batch = delta.added.last_mut().expect("previous line batch");
-                if batch.vertices.len().saturating_add(if paired {
-                    points.len()
-                } else {
-                    points.len().saturating_sub(1).saturating_mul(2)
-                }) <= 65_536
-                    && batch.alpha == 1.0
-                    && batch.alpha == sanitize_alpha(fragment.alpha)
-                    && batch.color == sanitize_color(fragment.color)
-                    && batch.color_unresolved == fragment.color_unresolved
-                    && batch.lineweight == sanitize_lineweight(fragment.lineweight)
-                    && batch.lineweight_unresolved == fragment.lineweight_unresolved
-                    && batch.linetype == fragment.linetype
-                    && batch.linetype_unresolved == fragment.linetype_unresolved
-                    && points.iter().all(|p| {
-                        [
-                            p.x - batch.local_origin.x,
-                            p.y - batch.local_origin.y,
-                            p.z - batch.local_origin.z,
-                        ]
-                        .iter()
-                        .all(|v| v.is_finite() && v.abs() <= 8192.0)
-                    })
-                {
+                if line_fragment_merges_into(batch, fragment, paired, points, SCENE_DRAW_ORDER) {
                     let relative = |p: &Point3| {
                         [
                             (p.x - batch.local_origin.x) as f32,
@@ -378,7 +367,7 @@ impl SceneCache {
                 linetype: fragment.linetype.clone(),
                 linetype_unresolved: fragment.linetype_unresolved,
                 sources: vec![fragment.source.clone()],
-                draw_order: 0,
+                draw_order: SCENE_DRAW_ORDER,
             });
         }
         Ok(delta)
@@ -477,4 +466,48 @@ impl SceneCache {
     pub fn total_cpu_bytes(&self) -> usize {
         self.used_bytes
     }
+}
+
+/// Whether a compactable line `fragment` may be absorbed into the adjacent
+/// `batch` (the predicate behind [`SceneCache::build_compact`]).
+///
+/// The merge is deliberately conservative: it only joins when every attribute
+/// the renderer reads matches, **including the paint order**.
+/// `incoming_draw_order` is the order the scene would emit for a freshly built
+/// fragment batch ([`SCENE_DRAW_ORDER`] today). Comparing it closes a hazard the
+/// earlier predicate missed: a batch carrying a distinct order — e.g. a
+/// selection-highlight batch ([`crate::HIGHLIGHT_DRAW_ORDER`]) — must never
+/// absorb a normal scene fragment, or the absorbed geometry would be drawn at
+/// the wrong paint order.
+pub(crate) fn line_fragment_merges_into(
+    batch: &RenderBatch,
+    fragment: &DisplayFragment,
+    paired: bool,
+    points: &[Point3],
+    incoming_draw_order: i64,
+) -> bool {
+    let vertex_cost = if paired {
+        points.len()
+    } else {
+        points.len().saturating_sub(1).saturating_mul(2)
+    };
+    batch.draw_order == incoming_draw_order
+        && batch.vertices.len().saturating_add(vertex_cost) <= 65_536
+        && batch.alpha == 1.0
+        && batch.alpha == sanitize_alpha(fragment.alpha)
+        && batch.color == sanitize_color(fragment.color)
+        && batch.color_unresolved == fragment.color_unresolved
+        && batch.lineweight == sanitize_lineweight(fragment.lineweight)
+        && batch.lineweight_unresolved == fragment.lineweight_unresolved
+        && batch.linetype == fragment.linetype
+        && batch.linetype_unresolved == fragment.linetype_unresolved
+        && points.iter().all(|p| {
+            [
+                p.x - batch.local_origin.x,
+                p.y - batch.local_origin.y,
+                p.z - batch.local_origin.z,
+            ]
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= 8192.0)
+        })
 }

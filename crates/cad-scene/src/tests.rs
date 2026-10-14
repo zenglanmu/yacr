@@ -285,6 +285,50 @@ fn compact_lines_keep_style_boundaries_and_transparent_depth_keys() {
 }
 
 #[test]
+fn compact_merge_requires_an_equal_draw_order() {
+    // Two adjacent same-style fragments merge at the scene's emitted order...
+    let rep = line_representation(1, unit_points());
+    let mut batch = SceneCache::default()
+        .build(&rep, stamp())
+        .unwrap()
+        .added
+        .remove(0);
+    let fragment = &rep.fragments[0];
+    let points = match &fragment.primitive {
+        DisplayPrimitive::Lines(points) => points.as_ref(),
+        _ => panic!("expected a line fragment"),
+    };
+    assert_eq!(batch.draw_order, crate::cache::SCENE_DRAW_ORDER);
+    assert!(crate::cache::line_fragment_merges_into(
+        &batch,
+        fragment,
+        false,
+        points,
+        crate::cache::SCENE_DRAW_ORDER,
+    ));
+    // ...but a fragment emitted at a different paint order (e.g. a selection
+    // highlight) must not be absorbed into the batch, so merging never draws
+    // geometry at the wrong order.
+    assert!(!crate::cache::line_fragment_merges_into(
+        &batch,
+        fragment,
+        false,
+        points,
+        HIGHLIGHT_DRAW_ORDER,
+    ));
+    // Symmetrically, a batch already carrying a distinct order must not absorb a
+    // normal scene fragment.
+    batch.draw_order = HIGHLIGHT_DRAW_ORDER;
+    assert!(!crate::cache::line_fragment_merges_into(
+        &batch,
+        fragment,
+        false,
+        points,
+        crate::cache::SCENE_DRAW_ORDER,
+    ));
+}
+
+#[test]
 fn compact_lines_do_not_rebase_distant_geometry_or_cross_primitive_boundaries() {
     let p = |x| Point3 { x, y: 0.0, z: 0.0 };
     let mut rep = line_representation(1, vec![p(0.0), p(1.0)]);
