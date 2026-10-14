@@ -16,8 +16,10 @@ fontconfig/freetype 开发库，执行 `cargo check -p app-linux --all-targets -
 `check-workflows.py` 强制 debug 编译命令和日志产物，禁止给主 job 添加条件跳过；
 `test-linux-workflow.py` 防止空成功与默认 Linux 门禁恢复离屏/release 执行。
 
-Linux App 仍是优先宿主，但默认门禁只证明编译；Web/Android 保持独立构建/发布层，
-其打包配置不代表默认本地提交要求。WASM 检查 Linux 空库仅验证平台隔离。
+Linux App 仍是优先宿主，但门禁只证明编译；Web/Android 保持独立构建/发布层，
+其打包配置不代表本地提交要求。WASM 检查 Linux 空库仅验证平台隔离。
+（2026-10-15 用户决定：本地开发按 AGENTS.md「验证范围」只测改动范围；本节的全量门禁
+命令仅在用户明确要求或发版前本地运行，CI job 仍按自身节奏执行。）
 Linux 离屏与 release 验证保留为明确请求时运行的可选工具，不作为本轮运行证据。
 本机执行与 GitHub Actions 实际 job URL/结果分开记录，本轮尚未取得远程 job 执行证据。
 
@@ -291,13 +293,16 @@ Cargo.toml 已填实际生效值 23/30）、ABI `arm64-v8a`、v1 debug/dev 密�
 **打包不等于安装运行**。`android-release` 已在 run 37920264484 实跑通过（见 `docs/validation.md`）；
 `android-apk` 仍属未运行。
 
-### `web-smoke`（能力相关，默认 SKIP；仅软件 GPU）
+### `web-smoke`（能力相关，默认 SKIP；CI 无 GPU，显式 `YACR_SOFTWARE_GPU=1` 软件）
 
 由仓库变量 `WEB_SMOKE_ENABLED == 'true'` 门控。启用后：安装锁定
 Node `22.22.1` 与 Playwright `1.55.1` Chromium，构建 `web-dist`，起
 `scripts/serve-web.py`，再跑 `scripts/check-web-ui.mjs`，上传截图/JSON/日志。
 
-- 走 SWIFTSHADER 软件 WebGL2 路径，**明确不代表**桌面/移动真机或 WebGPU 验收；
+- `scripts/check-web-ui.mjs` 默认 headful 真实 GPU；CI runner 无 GPU，故该步骤显式设置
+  `YACR_SOFTWARE_GPU=1` 才能运行（否则脚本明确失败，而非静默降级到软件后端）；
+- 因此在 CI 上走显式 `YACR_SOFTWARE_GPU=1` 的软件 SwiftShader WebGL2 路径，**明确不代表**
+  桌面/移动真机或 WebGPU 验收；
 - WebGPU 能力缺失时应如实报告未运行，不得记为通过；
 - 依赖审计 B29 的修复，未修复前其结论视为不完整；
 - **CI runner 无 GPU**，故 CI 上的 Web/模拟器一律为软件渲染；本地开发机**有 GPU/显示时**

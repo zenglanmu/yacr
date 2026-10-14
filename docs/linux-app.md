@@ -14,7 +14,7 @@ cargo build -p app-linux --bin yacr-linux --release --locked
 target/release/yacr-linux                         # 已有桌面环境运行，不在无窗口 LXC 安装桌面
 target/release/yacr-linux --open /absolute/file.dwg --locale en
 target/release/yacr-linux --open /absolute/file.dxf --font times=/absolute/fonts/times.shx
-bash scripts/check-linux-app.sh                   # 无窗口，release App + lavapipe
+bash scripts/check-linux-app.sh                   # 无窗口，release App（默认真实 GPU；YACR_SOFTWARE_GPU=1 软件）
 bash scripts/verify-ui.sh                         # 无头 UI 调试循环（第二层，见 docs/verify-ui.md）
 ```
 
@@ -25,8 +25,10 @@ bash scripts/verify-ui.sh                         # 无头 UI 调试循环（第
 字体：启动（及每次打开图纸）自动加载可执行文件同级的 `fonts/` 目录
 （`--fonts-dir PATH` 可显式指定，必须存在），并按 `requested_fonts` 只取图纸引用的面，
 再并入 `--font NAME=PATH` 与系统默认字体（`fc-match`）作为第一回退，见 `docs/fonts.md`。
-脚本自动寻找 Mesa lavapipe ICD，支持 `VK_ICD_FILENAMES`/`YACR_LINUX_OUTPUT` 覆盖；
-`YACR_TEST_DWG` 可输入仓库外图纸。
+脚本默认真实 GPU：不主动设置 `VK_ICD_FILENAMES`，由 Vulkan loader 选择真实设备（继承的
+`VK_ICD_FILENAMES` 视为显式用户意图）；软件渲染（Mesa lavapipe）须以 `YACR_SOFTWARE_GPU=1`
+显式开启（脚本自动寻找 lavapipe ICD，证据标注 SOFTWARE），无 GPU 且未开启时脚本明确报错而
+不静默降级；`YACR_LINUX_OUTPUT` 可覆盖输出目录；`YACR_TEST_DWG` 可输入仓库外图纸。
 
 混合显卡说明：桌面**默认（`--gpu auto`）即优先独显**（双显卡默认选独立 GPU），
 此时 `nvidia-smi` 应能看到本应用进程；`--gpu low` 才切到核显。偏好只是尽力而为：

@@ -193,7 +193,8 @@ cad-cli-tools plot <input.dwg> [--layout <name>] [--dpi <f64>|--width <u32> --he
   `invalid_input`；在 lavapipe 上对合成 fixture 出图，断言 PNG 非空且 IHDR 尺寸与请求一致、
   `non_background > 0`、`paper.provenance == "imported"`。
 
-复现（原生、软件 Vulkan）：
+复现（原生、软件 Vulkan；此处钉住软件 ICD 仅为无 GPU 环境复现与确定性，本机验证请去掉该
+变量改用真实 GPU）：
 
 ```bash
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \

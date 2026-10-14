@@ -26,12 +26,13 @@
 1. 核心语言 Rust；DWG 解析使用 acadrust；CAD 绘制使用 wgpu。
 2. 不修改 acadrust 上游源码，不维护修改版 fork，不用 Cargo patch 偷换为修改版本。所有补充处理位于自有 crate；允许评估未修改的正式版本升级。
 3. UI 使用 Slint，复用 UI 定义、组件和应用状态；允许必要的平台宿主和浏览器 JS 接入。（2026-10-14 用户授权以 React/Tauri 作为桌面 UI 替代实验目标，见 §21；Slint 仍为 Web/Android 与现有实现基线。）
-4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。2026-10-04 用户调整默认提交门禁为 debug 编译与静态检查，不默认运行完整测试、Linux 离屏渲染或 release 编译。实际 Linux 运行验收仍须使用 `apps/app-linux` 的宿主/命令/数据库/共享 Slint/wgpu 链路，不以仅 UI 编译或测试替身代替；未运行须明确标注。无窗口可选验证使用软件 Vulkan/lavapipe；桌面窗口、真实 GPU、真实图纸分别记录验证范围。架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。
+4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。2026-10-04 用户调整默认提交门禁为 debug 编译与静态检查，不默认运行完整测试、Linux 离屏渲染或 release 编译。实际 Linux 运行验收仍须使用 `apps/app-linux` 的宿主/命令/数据库/共享 Slint/wgpu 链路，不以仅 UI 编译或测试替身代替；未运行须明确标注。无窗口可选验证默认真实 GPU，软件 Vulkan/lavapipe 仅显式开启并标注；桌面窗口、真实 GPU、真实图纸分别记录验证范围。（2026-10-15 用户决定：日常功能开发只验证改动范围，全量测试与全量门禁仅在用户明确要求或发版时运行。）架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。
 5. Web 必须支持 WebGL2 与 WebGPU 两条 CAD 绘制路径，提供 Auto / WebGPU / WebGL2 选择。WebGL1 不属于要求。
 6. 项目准备开源。OpenCADStudio 仅作为功能规格与 UI 交互参考，通过 `docs/ui-requirements/` 对照功能；不作为源码抽取、移植或核心实现参考，不要求采用其算法、shader、类型或依赖树。绘制、几何离散、相机和 3D 能力在本项目契约下独立实现；不从 JS 项目迁移绘制核心。mlightcad/cad-viewer 仅保留为 UI 功能组织及交互对照参考。
 7. 保留 Slint，不随参考项目改用 Iced。以数据库对象、事务、变更集和显示表示为核心架构；业务层操作数据，不调用 GPU 绘制命令。
 8. 产品包含极简查看模式及增强工作模式。初期增强模式仅包含测量及其管理，不修改 DWG 原始图元。（2026-10-05：批注功能整体移除，增强模式不再包含批注。）
 9. 天正、探索者等自定义图元优先通过代理图形缓存显示；不能承诺无缓存或未知专有格式的完整兼容。
+10. 渲染器架构演进为 **“entity = data”**（2026-10-15 用户导向，授权相应契约变更）：几何以数据流承载、类实例化 + 平铺合并，取代“每图元一批”的逐批提交。P2 已把参考图 draw 数从 10,474 降到 797，并保持绘制顺序 tie 语义（merged-vs-legacy 逐字节一致 fence）。per-chunk f64 origin 精度契约仅限正交相机；解析弧、glyph outline-keyed instancing、id-readback picking、selection flags、加速档（vertex pulling / multi-draw，WebGL2 不支持，capability-gated future）与 `MeshEdges` 哨兵缺口为推迟项。P3 待用户决定。见 `docs/adr/0007-entity-as-data-renderer.md` 与 `docs/validation-render-perf-2026-10-15.md`。
 
 ### 2.2 初期完成后应达到的成果
 

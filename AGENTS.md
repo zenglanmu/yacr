@@ -74,7 +74,11 @@ acadrust/wgpu 唯一依赖规则；Slint 只允许出现在 `cad-ui-slint`/`app-
 ## 构建与门禁
 
 工具链 1.99.0（`rust-toolchain.toml`）；若 `PATH` 无 cargo，加 `$HOME/.cargo/bin`。
-提交前跑快速 debug 编译与静态门禁（CI 同款，见 `docs/ci.md`）；完整测试、Linux 离屏渲染与 release 编译不再属于默认提交门禁：
+**验证范围（2026-10-15 用户决定，提效）**：日常功能开发与修复**只验证自己的改动范围**
+（改动 crate 的编译、自己的契约测试、自己文件的 fmt/clippy）。不要为小改动跑全量测试、
+全量门禁或平台编译矩阵。全量测试与全量门禁（下方命令块，CI 同款，见 `docs/ci.md`）只在
+两种情形运行：① 用户明确要求；② 发版/发布验收前。证据诚实规则不变：未运行必须标注
+NOT RUN，不得以旧证据冒充。CI workflow 仍按自身节奏运行，不受此本地策略影响：
 
 ```bash
 cargo fmt --all -- --check
@@ -107,8 +111,8 @@ Linux/Android 发布层：按需 `linux-release`（`ubuntu-latest` 运行
 `scripts/build-android.sh --release`）。二者与 `windows-release`/`macos-release` 同在
 `workflow_dispatch`/`v*` tag 触发；Android **打包不等于安装运行**，见 `docs/ci.md`。
 
-- 默认主机编译门禁必须包含 Linux App 和 Slint；编译通过不是运行或渲染验收。release 编译用于
-  可选发布验证；Web 是第二层，Android 平台契约继续保留。
+- 全量门禁（用户要求/发版前）的主机编译必须包含 Linux App 和 Slint；编译通过不是运行或
+  渲染验收。release 编译用于可选发布验证；Web 是第二层，Android 平台契约继续保留。
 - **渲染/端到端验证优先真实硬件 GPU（任何宿主 / 模拟器 / 浏览器）**：只要环境存在真实显示与
   显卡（本机为 Wayland 桌面 + Intel UHD + Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），
   验收**必须**走真实 GPU：
@@ -122,18 +126,28 @@ Linux/Android 发布层：按需 `linux-release`（`ubuntu-latest` 运行
 
   **不得**用 SwiftShader/lavapipe 等软件后端产出"真实 GPU"结论；软件后端产出的数字/截图必须
   显式标注为软件渲染。只有**确无显示/GPU** 的环境才回退软件渲染（桌面 Slint offscreen +
-  lavapipe：`bash scripts/check-linux-app.sh`、`bash scripts/verify-ui.sh`；Android
+  lavapipe：`bash scripts/check-linux-app.sh`、`bash scripts/verify-ui.sh` **默认走真实 GPU**，
+  软件渲染须显式 `YACR_SOFTWARE_GPU=1` 开启（脚本会标注 SOFTWARE）；Android
   `-gpu swiftshader`；CI 无 GPU runner 的软件冒烟）——本机已具备硬件，故这些仅为回退路径。
-- 用户授权解除原生 Slint 编译限制：允许使用开发依赖，在无窗口环境以 Slint FemtoVG/wgpu +
-  lavapipe 离屏验证（已授权 `sudo apt` 安装 pkgconf/fontconfig/freetype 开发包）。
+  **性能/CPU 测量同样适用真实 GPU 优先**：软件后端的 `device.poll`/`queue.write_buffer`/
+  驱动时序不代表真实硬件，lavapipe/SwiftShader 耗时不得用作性能结论。文档/脚本中出现的
+  `VK_ICD_FILENAMES=…/lvp_icd.json` 仅属上述回退场景，或个别离线单测为确定性钉住软件后端的
+  **特例**；在本机做渲染验收/性能测量/e2e 一律不设置它（真实 GPU 路径：
+  `scripts/run-real-gpu-e2e.sh`，其自行清除该变量）。
+- 用户授权解除原生 Slint 编译限制：允许使用开发依赖，在无窗口环境以 Slint FemtoVG/wgpu 做
+  离屏验证（默认真实 GPU；软件 lavapipe 须显式开启，已授权 `sudo apt` 安装
+  pkgconf/fontconfig/freetype 开发包）。
   不需要 Android 模拟器，不安装桌面/X11/Wayland，不改系统/LXC 配置；实际执行与编译证据分开记录。
 - Rust 单测试：`cargo test -p <crate> <name> --locked`。GPU/CLI 用例串行跑，避免并发软件
-  Vulkan 互相干扰：`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test -p cad-render-wgpu -p cad-cli-tools --locked -- --test-threads=1`。
+  Vulkan 互相干扰。下面命令钉住软件 ICD 是**特例**（这两组离线单测求确定性、可在无 GPU
+  环境复现，不是默认姿势；渲染验收/性能测量**禁用**此变量，走真实 GPU）：
+  `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test -p cad-render-wgpu -p cad-cli-tools --locked -- --test-threads=1`。
 - 需要真实 DWG 的测试（如 `cli_contracts` 的 render）设 `YACR_TEST_DWG=<绝对路径>`，否则
   跳过；跳过不是已运行证据。
 - 无头 UI 调试循环（测试计划第二层，可选、非 CI 必需，**无显示环境的回退**）：`bash scripts/verify-ui.sh`
-  用 Slint offscreen 平台 + lavapipe 实际运行应用、操作控件、截图、扫 panic/超时并产出
-  分层证据包；不安装 X11/Wayland，不等于真实 GPU/窗口/真机，见 `docs/verify-ui.md`。
+  用 Slint offscreen 平台实际运行应用、操作控件、截图、扫 panic/超时并产出分层证据包（默认走真实
+  GPU；软件 lavapipe 须 `YACR_SOFTWARE_GPU=1` 显式开启并标注 SOFTWARE）；不安装 X11/Wayland，
+  不等于真实窗口/真机，见 `docs/verify-ui.md`。
 - Web 门禁：`scripts/build-web.sh`（需 wasm-bindgen-cli **0.2.129**，与 Cargo.lock 严格一致）
   产出 `web-dist/`；`node --test scripts/test-web-host.mjs scripts/test-web-touch.mjs ...`
   是无 wasm/GPU 的模块契约；浏览器脚本见 `docs/testing-dwg.md`、`docs/validation-web.md`。
@@ -165,7 +179,9 @@ ActivityManager attach 超时）。**模拟器 ≠ 真机**，真机能力一律
 流程见 `docs/testing-dwg.md`：**有真实显示/GPU 时以真实硬件 GPU 为主**（真实 winit 窗口 +
 硬件 Vulkan，如 `real_gpu_grid_zoom_axes_acceptance`；Android 模拟器用 `-gpu host` 透传宿主
 显卡）；**无显示环境**才回退原生离屏 wgpu + Mesa lavapipe（`cargo build -p cad-cli-tools
---release`，`scripts/check-dwg-native.py`），WASM + Playwright 为第二层。
+--release`，`scripts/check-dwg-native.py`，用 lavapipe 时须显式 `--software`），
+WASM + Playwright 为第二层（浏览器检查脚本默认真实 GPU headful，软件路径须
+`YACR_SOFTWARE_GPU=1` 显式开启并标注 SOFTWARE）。
 必须分别记录「打开 / 出图 smoke / 视觉验收」三个结论；退出码 0、非空截图、`error=None`
 都不能单独证明视觉正确。外部大样本默认放仓库外（默认 `~/sources/cad-test-files/`），
 也可用 `scripts/fetch-test-dwg.sh` 拉到 `/tmp/opencode`。**授权明确、可再分发的图纸与参考图

@@ -1,5 +1,40 @@
 # 后续 agent 接手入口
 
+## 渲染性能 “entity = data” 轮（2026-10-15）
+
+- 用户导向渲染架构 **“entity = data”** 并授权相应契约变更。本轮修三个独立问题：①
+  `DrawingDatabase::bounds()` 每次视口变化重算（overlay fingerprint 含 `viewport_bounds`，
+  allocate+sort+INSERT 再展开）导致 pan/zoom CPU 随实体数**超线性**（complex-test.dwg
+  44,591 实体 526 ms/步，其中 `bounds()` 单独 521 ms）；② 逐批 `queue.write_buffer` 约占
+  整帧 CPU **55%**；③ 相机-only 变化失效已发布场景 → base-only/全量交替 + overlay 抖动；
+  另修 React host resize 后 zoom 不以光标为锚（canvas metrics 创建时冻结）。
+- 修复：`crates/cad-db` revision-keyed bounds 缓存 + order-free 累加 + memoized block
+  bounds（每步 526 → 0.007 ms）；`crates/cad-render-wgpu` 共享 `UniformArena` dynamic offsets
+  （每帧 cpu 35.7→11.7 ms @10.7k、158.9→47.1 ms @44.5k，帧组成与 HEAD worktree 逐字节一致；
+  任务记录的 55,296/55,296 bytes 在证据目录中未找到 → NOT VERIFIED）；`crates/cad-engine`
+  `input_revision`（场景身份）/`content_revision`
+  （prep token）拆分（pan/zoom 保持 `current_ready_scene` Some、`overlay_suffix_commits`=0）；
+  `apps/app-react-linux` tick 内同步实时 metrics（相机数学本身正确，`camera.rs:609-664`）。
+- draw-call 折叠：line/segment instanced 流（`LineInstance` 56 B、per-chunk f64 origin
+  `MAX_STREAM_RADIUS` 8192 mm、`select()` 精确端点）+ mesh flat-merge（44 B 步长、逐顶点
+  `entity_flags`/colour、`mesh_merged.wgsl`）+ 边 overlay 作为 LineInstance。真实 DWG + 字体：
+  debug-default-fonts 10,474→**797** draws（663 line + 134 mesh）、每帧 cpu 17.96→**1.88 ms**；
+  complex-test 122,006→**7,627** draws、46.74→**5.91 ms**；pan/zoom 零流/chunk 重传。绘制顺序
+  语义经 fences（merged-vs-legacy 逐字节一致、overlapping-tie、3D perspective）保持。两轮独立
+  oracle review gate 的 7 项 must-fix 全部修复。
+- 脚本与浏览器检查改为**默认真实 GPU**（软件 = 显式 `YACR_SOFTWARE_GPU=1`/`--software` 并标注
+  SOFTWARE；CI web-smoke 显式 opt-in）。AGENTS.md「验证范围」记用户 2026-10-15 提效决定：日常
+  只验证改动范围，全量门禁/全量测试仅在用户要求或发版前。
+- 证据目录 `/tmp/opencode/yacr-perf/`：`1791991784`、`1791992830`、`1791993747-renderer`、
+  `1791997393-step2-phases`、`instanced-slice1`、`p2b-meshmerge-realscene`、`1792005717-realscene`、
+  `1791998671-merge-ratio`。汇总表与适配器证明见 `docs/validation-render-perf-2026-10-15.md`；
+  决策见 `docs/adr/0007-entity-as-data-renderer.md`；绘制顺序见 `docs/render-order.md`。
+- **NOT RUN / 左失败**：全量 workspace 门禁 NOT RUN（用户政策）；WebGL2/Android/浏览器视觉验收
+  NOT RUN。pre-existing 失败按用户指示保持失败（`/tmp/opencode/yacr-verify/REPORT.md` 分类为
+  HEAD 既有）：5 项浏览器检查（mobile label i18n staleness、ribbon viewport、drawing LINE、
+  drawing-safety capture、overlay selection flake）与 `app-linux` 的
+  `plot_export`/`save_export`/`verify_ui*`。本轮仅文档/证据，未 commit。
+
 ## cad-engine P4 codegate 与最终证据状态
 
 - Oracle P3、P4 App/engine/Host/Web codegate 均 accept。最终 sweep `sh_137d0698a001J14BRMEOwCRSk6` exit 0：workspace all-targets/tests，App343/engine73/Host83/Android30/Web23/UI132+37 integration/Linux12 passed + 9 ignored，workspace WASM lib、Android aarch64 UI/app local-Skia、Clippy（既有 exclusions）、7 packages fmt、architecture/fixture/workflow/i18n306 与 diff check。

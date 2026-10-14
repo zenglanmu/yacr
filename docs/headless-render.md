@@ -2,10 +2,18 @@
 
 规范 §5.2 / §6 / §8 / §11 / §19；审计 F11（离线 `render` 不空成功）与 F12（设备丢失分类）。
 
-本文固定 `cad-render-wgpu` **原生无头路径**的契约：在没有 Slint、没有窗口、没有宿主设备
-的 CI/agent 环境里，用软件 Vulkan 适配器（Mesa **lavapipe**）离屏渲染一帧、回读为紧凑
-RGBA、编码 PNG。渲染后端契约与管线细节见 `docs/render-backends.md`、`docs/render-3d.md`；
-CLI 接线见 `docs/cli.md`；实际执行证据由控制器汇总到 `docs/validation.md`，**本文不代填**。
+本文固定 `cad-render-wgpu` **原生无头路径**的契约：在**确无真实 GPU** 的 CI/agent 环境里，
+以显式 opt-in 的软件 Vulkan 适配器（Mesa **lavapipe**，`VK_ICD_FILENAMES=.../lvp_icd.json`）
+离屏渲染一帧、回读为紧凑 RGBA、编码 PNG。有真实 GPU 时**不设置** `VK_ICD_FILENAMES`，由
+Vulkan loader 选择真实设备（见上方适用边界）。渲染后端契约与管线细节见
+`docs/render-backends.md`、`docs/render-3d.md`；CLI 接线见 `docs/cli.md`；实际执行证据由
+控制器汇总到 `docs/validation.md`，**本文不代填**。
+
+> **适用边界（勿默认走本路径）**：本文仅覆盖**确无真实 GPU** 的 CI/agent 环境与确定性离屏
+> 验证。本机有真实显卡（Intel UHD / Quadro P620）时，渲染验收、性能测量、e2e 一律走真实
+> GPU——不要设置 `VK_ICD_FILENAMES`，见 `scripts/run-real-gpu-e2e.sh` 与 AGENTS.md
+> 「渲染/端到端验证优先真实硬件 GPU」。lavapipe 耗时不代表 GPU 性能或真实驱动时序
+> （另见文末「性能」条）。
 
 > 状态（2026-10-01，已执行）：`cad-render-wgpu/src/headless.rs` 与 CLI `render` 已
 > 合入并在 Mesa **lavapipe** 上真实跑通（`VK_ICD_FILENAMES=.../lvp_icd.json`）。
@@ -102,7 +110,7 @@ wgpu::Instance::new(...)                     // 限定要求的 Backends（原�
 
 `AdapterInfo` 至少包含（值来自 `wgpu::AdapterInfo` 与 backend）：
 
-| 字段 | 含义 | lavapipe 预期 |
+| 字段 | 含义 | lavapipe 预期（软件 opt-in 时） |
 |---|---|---|
 | backend | `Vulkan` / `Gl` / `Metal` / `Dx12` / `BrowserWebGpu` 等 | Vulkan |
 | name | 适配器名 | 含 “llvmpipe” / “lavapipe” 字样 |
@@ -168,15 +176,19 @@ width*height*4`）。
 ## 5. 如何运行
 
 ```bash
-export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json   # force Mesa lavapipe
+# Real GPU (default): do not set VK_ICD_FILENAMES; the Vulkan loader picks the device.
 cargo test -p cad-render-wgpu --offline
 cargo run -p cad-cli-tools --offline -- render <input.dwg> --png /tmp/opencode/yacr-render.png --width 1280 --height 720
+
+# Software fallback (no-GPU env, explicit opt-in; deterministic): force Mesa lavapipe.
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
+cargo test -p cad-render-wgpu --offline
 ```
 
 说明：
 
-- `VK_ICD_FILENAMES` 指向 lavapipe 的 Vulkan ICD，用于**强制**软件适配器，避免意外用上
-  真实 GPU。
+- `VK_ICD_FILENAMES` **默认不设置**：真实 GPU 环境下由 Vulkan loader 选择硬件设备；指向
+  lavapipe 的 Vulkan ICD 是**显式 opt-in**，用于无 GPU 环境强制软件适配器。
 - ICD 路径**因发行版而异**，常见 `lpv_icd.json` 或 `lpv_icd.x86_64.json`；请以本机
   `/usr/share/vulkan/icd.d/` 实际文件为准。
 - lavapipe 是 Mesa 的 **CPU 实现**：结果确定但慢，不代表任何 GPU 性能或真实驱动行为。

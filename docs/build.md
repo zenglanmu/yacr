@@ -5,8 +5,11 @@
 
 ## 纯核心
 
-2026-10-04 起，默认提交门禁为 debug 编译与静态检查，包含 Linux App/Slint，
-但不运行完整测试、Linux 离屏渲染或 release 编译；**编译不等于运行验收**：
+2026-10-04 起，提交门禁定为 debug 编译与静态检查，包含 Linux App/Slint，
+但不运行完整测试、Linux 离屏渲染或 release 编译；**编译不等于运行验收**。
+2026-10-15 起（用户决定，提效）：日常改动只验证自己的改动范围（改动 crate 的编译与
+契约测试、自己文件的 fmt/clippy）；下面的门禁命令块与完整测试只在用户明确要求或
+发版/发布验收前运行，未运行必须标注 NOT RUN：
 
 ```bash
 cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
@@ -18,7 +21,7 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 目标编译或运行验收；这些平台分别由下方独立目标门禁覆盖。clippy 继续使用现有排除项。
 
 静态门禁完整列表见 `AGENTS.md`。Linux 离屏/release 可选运行入口和限制见 `docs/linux-app.md`。
-完整测试在明确要求时单独执行，未运行必须标注 NOT RUN。
+完整测试与全量门禁仅在明确要求或发版前执行，未运行必须标注 NOT RUN。
 
 ```bash
 cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked
@@ -35,7 +38,9 @@ cargo test -p cad-ui-slint --lib --locked -- --test-threads=1
 ```
 
 `YACR_UI_OUTPUT` 可指定新的截图目录。官方 FemtoVG/wgpu 离屏渲染共享 Slint 组件与 CAD
-纹理，强制验证软件 Vulkan；这是合成内容/软件 GPU 证据，不等于桌面宿主产品或真机验收。
+纹理，默认真实 GPU（`scripts/check-ui-native.sh` 不再强制软件 Vulkan）；软件渲染须以
+`YACR_SOFTWARE_GPU=1` 显式开启并标注 SOFTWARE。无论硬件还是软件，这都是合成内容证据，
+不等于桌面宿主产品或真机验收。
 
 ## Linux 发布包（Flatpak：GUI 主应用 + 无头 CLI）
 
@@ -259,7 +264,8 @@ scripts/serve-web.py --directory web-dist --port 8090
 - 后端选择：UI 工具栏 “Auto / WebGPU / WebGL2”。Auto 会真实请求 WebGPU adapter，
   失败才回退 WebGL2；强制选择失败时记录原因并回退 WebGL2（写入 localStorage 后重建会话，
   规范 §6 允许重启渲染会话）。`?backend=webgl2` 可覆盖。
-- 无头浏览器验证：
+- 浏览器验证（`scripts/check-web-ui.mjs` 默认 headful 真实 GPU；CI/无 GPU 环境以
+  `YACR_SOFTWARE_GPU=1` 显式开启软件路径，见 `docs/ci.md`）：
 
 ```bash
 scripts/serve-web.py --directory web-dist &
@@ -267,7 +273,9 @@ node scripts/check-web-ui.mjs http://127.0.0.1:8090/ /tmp/opencode/yacr-web.png
 ```
 
 脚本检查 wasm 启动、渲染后端就绪、截图非空白（内置 PNG 解码统计）并收集控制台错误。
-它记录“浏览器（无头 Chromium）通过”，不等于桌面/移动浏览器矩阵或真机通过。
+默认在真实 GPU 的 headful 浏览器中运行；`YACR_SOFTWARE_GPU=1` 才切到 headless 软件
+（SwiftShader）路径并标注 SOFTWARE。它记录“浏览器通过”，不等于桌面/移动浏览器矩阵或
+真机通过。
 
 仅 Rust 检查（不需要链接）：
 

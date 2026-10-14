@@ -72,7 +72,7 @@ have gaps. Per-item status is in `docs/compatibility.md` and `docs/dxf-entity-co
 | **Windows desktop** | `apps/app-windows` (`yacr.exe`) | Reuses the shared desktop implementation; CI compiles natively with MSVC on `windows-latest` and packages a font-bundled zip; reproduced locally via GNU cross / MSVC plus a Wine argument-parsing smoke. Real Windows window/file-dialog/GPU **NOT RUN**. |
 | **macOS desktop** | `apps/app-macos` (`yacr-macos`) | Reuses the shared desktop implementation; CI builds on `macos-latest` and packages a universal (arm64+x86_64) `Yacr.app`. A Linux host cannot produce Mach-O, so real Mac / Metal GPU **NOT RUN**. |
 | **Android** | `apps/app-android` | The x86_64 release APK was installed, launched and rendered on a headless **emulator** (KVM + SwiftShader); canvas pan/fit verified by pixel diff. **Real device** and SAF file picking **NOT RUN**. |
-| **Web** | `apps/app-web` (`web-dist/`) | The wasm artifact runs in headless Chromium on WebGL2 and was re-verified on a real desktop browser locally (Playwright, real GPU); CI `web-deploy` has actually published to Cloudflare Pages (example <https://yacr-examples.pages.dev>). Real WebGPU hardware adapters and the browser matrix **NOT RUN**. |
+| **Web** | `apps/app-web` (`web-dist/`) | The wasm artifact runs in a real desktop browser on a real GPU (Playwright, headful by default) and was re-verified locally. Headless WebGL2/SwiftShader is an explicit `YACR_SOFTWARE_GPU=1` opt-in labeled SOFTWARE. CI `web-deploy` has actually published to Cloudflare Pages (example <https://yacr-examples.pages.dev>). Real WebGPU hardware adapters and the browser matrix **NOT RUN**. |
 
 ## Quick start
 
@@ -87,7 +87,8 @@ cargo build -p app-linux --bin yacr-linux --release --locked
 ./target/release/yacr-linux                                  # launch (needs a desktop session)
 ./target/release/yacr-linux --open /absolute/drawing.dwg      # open a drawing
 ./target/release/yacr-linux --open /absolute/drawing.dxf --locale en
-bash scripts/check-linux-app.sh                              # windowless offscreen run check (lavapipe)
+bash scripts/run-real-gpu-e2e.sh                               # real-GPU acceptance (hardware Vulkan; use this when a GPU exists)
+bash scripts/check-linux-app.sh                              # windowless offscreen run check (real GPU by default; YACR_SOFTWARE_GPU=1 only for no-GPU envs)
 ```
 
 `--headless --output <new-dir>` plots offscreen through the same host/controller/Slint bridge;

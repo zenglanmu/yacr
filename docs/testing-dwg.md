@@ -93,8 +93,10 @@ scripts/fetch-fonts.sh "$FONT_DIR"
 
 ## 3. 第一层：原生快速反馈
 
-前提：项目 Rust 工具链、Python 3、Mesa Vulkan lavapipe ICD。
-通常 ICD 位于 `/usr/share/vulkan/icd.d/lvp_icd.json`，其他发行版可用 `--icd` 指定。
+前提：项目 Rust 工具链、Python 3、可用的 Vulkan 真实 GPU。`scripts/check-dwg-native.py`
+默认真实 GPU（不强制 `VK_ICD_FILENAMES`，由 Vulkan loader 选真实设备）；软件 Mesa lavapipe
+须以 `--software`（或 `--icd /usr/share/vulkan/icd.d/lvp_icd.json`）显式开启并标注 SOFTWARE；
+无 GPU 且未开启时脚本明确报错而不静默降级。
 
 ```bash
 cargo build -p cad-cli-tools --release --locked
@@ -112,7 +114,8 @@ python3 scripts/check-dwg-native.py "$CORPUS" "$RUN/native" \
 
 脚本依次独立执行 `scan` → `build-representation` → `render`，每阶段重新导入；
 默认 2160×1520，可用 `--width 1080 --height 760` 降低调试分辨率。
-强制并核查 Vulkan / CPU / llvmpipe；不需要启动 X11/Wayland。
+默认走真实 GPU，并核查 Vulkan 后端与适配器（`--software` 软件模式则核查 lavapipe）；
+不需要启动 X11/Wayland。
 
 每图输出 `<name>-scan.json`、`<name>-build-representation.json`、
 `<name>-render.json`、各阶段 stderr、`<name>.png`；`summary.json` 汇总 SHA、
@@ -131,7 +134,8 @@ python3 scripts/check-dwg-native.py "$CORPUS" "$RUN/native" \
 **这种二值化会把全部填充变黑**，只能辅助定位布局/轮廓，不能据此验收填充灰度或线宽。
 没有对齐、掩码和容差约定，不输出或宣称 SSIM/IoU、图元完整率等自动保真分数。
 
-修复渲染问题后运行串行契约，避免并发软件 GPU 测试互相干扰：
+修复渲染问题后运行串行契约，避免并发软件 GPU 测试互相干扰。下列命令显式钉住 lavapipe
+软件 ICD 是该离线单测的确定性特例（可在无 GPU 环境复现），不是这些工具/脚本的默认：
 
 ```bash
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
@@ -141,7 +145,7 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 需要实际执行外部图纸的 CLI render 契约时，额外设置 `YACR_TEST_DWG` 为该 DWG 的绝对路径。
 不设置时此项会跳过，不能将其计作真实样本证据。完整核心门见 `AGENTS.md`。
 
-## 4. 第二层：WASM + Playwright headless
+## 4. 第二层：WASM + Playwright 浏览器
 
 只在原生调试收敛后执行；前提为 wasm target、匹配锁文件的 wasm-bindgen CLI、
 外部安装的 Playwright/Chromium。浏览器环境配置参考 [validation-web.md](validation-web.md)。
@@ -164,8 +168,10 @@ PLAYWRIGHT_MODULE="$HOME/.local/share/headless-browser/node_modules/playwright-c
 ```
 
 `PLAYWRIGHT_MODULE` 按本机安装路径替换；Playwright 不是项目运行依赖。
-脚本使用 headless Chromium/SwiftShader，经真实 `#file-input` 打开文件，等待字体加载、
-检查实体数/错误/**导入后 CAD 帧更新**，截取 CAD 区域并核查非空像素。
+脚本默认以真实 GPU（headful Chromium）运行，经真实 `#file-input` 打开文件，等待字体加载、
+检查实体数/错误/**导入后 CAD 帧更新**，截取 CAD 区域并核查非空像素；`browser.json` 记录
+实际 GL renderer 字符串。仅当显式设置 `YACR_SOFTWARE_GPU=1` 时才回退 SwiftShader 软件后端，
+该运行会被标注为 SOFTWARE，不能当作真实 GPU 证据。检测到软件后端却未显式开启时脚本会明显失败。
 输出 `browser.json`、`browser-cad.png`；错误/超时非零退出。
 默认操作超时 120 秒，可通过 `WEB_DWG_TIMEOUT`（毫秒）调整；不能靠无限等待隐藏失败。
 

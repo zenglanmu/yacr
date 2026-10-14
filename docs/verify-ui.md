@@ -14,14 +14,14 @@
 | 能力 | 本环境提供者 | 本入口结论 |
 |---|---|---|
 | 窗口运行环境 | Slint 官方 offscreen `Platform`/`WindowAdapter` | 已运行 |
-| GPU/绘制能力 | Mesa lavapipe（软件 Vulkan，`VK_ICD_FILENAMES=lvp_icd.json`） | 已运行，`device_type=cpu` |
+| GPU/绘制能力 | 真实硬件 GPU（默认，不设 `VK_ICD_FILENAMES`）；软件 Mesa lavapipe 须显式 `YACR_SOFTWARE_GPU=1` | 已运行；软件模式为 `device_type=cpu` |
 | 控件自动化与截图 | Slint 回调 + `WindowEvent` + `window().take_snapshot()` | 已运行 |
-| 真实 GPU / 窗口系统 / 真机 | 无 | **not-run** |
+| 真实窗口系统 / 真机设备 | 无 | **not-run** |
 
 **为什么这里不用 Xvfb**：本仓库既定约束是不安装桌面/X11/Wayland、不改系统配置。
 Slint 的 offscreen 平台已经同时提供“窗口运行环境 + 真实 Slint 组件 + 共享
 Device/Queue 的 CAD 纹理合成”，并且是 `--headless` 主验收同一条渲染路径；Xvfb 只
-增加窗口系统，并不会让 lavapipe 变成真实 GPU。环境探测会如实记录 `xvfbAvailable`，
+增加窗口系统，并不会让软件适配器变成真实 GPU。环境探测会如实记录 `xvfbAvailable`，
 但自动化路径不依赖它。若日后提供带真实 GPU 的 X11/Wayland，可在本入口之外再加一层
 真机/窗口验收，而不是把软件 Vulkan 结论改写成窗口结论。
 
@@ -39,7 +39,8 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
 #   YACR_VERIFY_OUTPUT   证据目录（必须不存在；默认 /tmp/opencode/yacr-verify-ui-<时间>-<pid>）
 #   YACR_VERIFY_TIMEOUT  单层墙钟预算秒数（默认 900）
 #   YACR_VERIFY_PROFILE  debug|release（默认 debug，迭代用）
-#   VK_ICD_FILENAMES     覆盖软件 Vulkan ICD
+#   YACR_SOFTWARE_GPU=1  使用 Mesa lavapipe 软件 Vulkan（显式 opt-in；输出标注 SOFTWARE）
+#   VK_ICD_FILENAMES     按用户显式意图使用（真实 GPU 时不要设置）
 ```
 
 脚本层（`run_layer`）对每一层做 `timeout`：退出码 124/137 记为 `timeout`（挂起），
@@ -49,7 +50,8 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
 ## 层与覆盖
 
 1. `ui-unit`：`cargo test -p cad-ui-slint --lib`。目录/状态模型纯契约，无 GPU。
-2. `ui-offscreen`：`concept_offscreen`。真实 Slint/lavapipe 组件，桌面/紧凑/移动/窄屏
+2. `ui-offscreen`：`concept_offscreen`。真实 Slint 组件（默认真实 GPU；软件 lavapipe 须
+   `YACR_SOFTWARE_GPU=1`），桌面/紧凑/移动/窄屏
    布局矩阵、canvas-only 预设、移动工具/图层面板、点击命中、`shell_geometry` 断言与截图。
 3. `scenario`：`apps/app-linux/tests/verify_ui.rs`。真实 `LinuxApp` 固定场景：
    测量（开放型可确认→取消不写库；距离两点自动完成→存为批注）、撤销/重做、
@@ -91,7 +93,7 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
 ```
 OUTPUT/
   verify-ui.json        每层状态、缺失/失败层、panic、截图计数、真实设备=not-run
-  environment.json      Slint offscreen、lavapipe、显示服务器探测、工具链版本、app report 摘要
+  environment.json      Slint offscreen、实际适配器与图形模式（software|hardware|unknown）、显示服务器探测、工具链版本、app report 摘要
   panic.txt             仅当检测到 panic 时生成
   .layers.tsv           机器可读的层状态（供汇总脚本）
   logs/<layer>.log      每层完整输出（含 `timeout` 判定依据）
@@ -114,7 +116,7 @@ OUTPUT/
 
 ## 已知限制 / 未完成
 
-- 软件 Vulkan（lavapipe）不等同真实 GPU 驱动、性能与设备丢失恢复。
+- 软件模式（`YACR_SOFTWARE_GPU=1`，lavapipe）不等同真实 GPU 驱动、性能与设备丢失恢复。
 - 合成 demo 图纸不等于真实 DWG；字体/代理/纸空间保真仍需 `docs/testing-dwg.md`。
 - 真实鼠标/键盘/触屏事件由 Slint `WindowEvent` 合成，不覆盖 X11/Wayland 输入栈与真机触摸。
 - 目前没有独立的真实窗口（Xvfb/Wayland）层；若提供带 GPU 的显示服务器，应新增一层而不是

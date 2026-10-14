@@ -118,6 +118,7 @@ node scripts/check-web-ui.mjs http://127.0.0.1:8090/ /tmp/opencode/yacr-refactor
 ```
 
 模块契约测试使用 DOM/wasm stub，只验证模块边界，不算真实浏览器或 GPU 验收。
-Playwright 使用真实 wasm、WebGL2/SwiftShader：检查模块加载、非空画面、缩放变化、
+Playwright 使用真实 wasm 与真实 GPU（默认 headful；软件 SwiftShader 须显式
+`YACR_SOFTWARE_GPU=1` 且运行被标注 SOFTWARE）：检查模块加载、非空画面、缩放变化、
 双语切换/重载持久化、真实批注下载与 sidecar 回导，以及轮询不覆盖操作状态。
 运行证据与明确未验证项见 `validation-web.md`。

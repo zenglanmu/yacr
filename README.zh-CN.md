@@ -57,7 +57,7 @@
 | **Windows 桌面** | `apps/app-windows`（`yacr.exe`） | 复用共享桌面实现；CI 用 `windows-latest` 原生 MSVC 编译并打含字体 zip，本机以 GNU 交叉/MSVC 复现并用 Wine 做参数解析 smoke。真实 Windows 窗口/文件对话框/GPU **未运行**。 |
 | **macOS 桌面** | `apps/app-macos`（`yacr-macos`） | 复用共享桌面实现；CI 在 `macos-latest` 编译并打 universal（arm64+x86_64）`Yacr.app`。Linux 主机无法产出 Mach-O，真实 Mac / Metal GPU **未运行**。 |
 | **Android** | `apps/app-android` | x86_64 release APK 已在无头**模拟器**（KVM + SwiftShader）安装、启动、渲染，画布平移/“适应”经像素 diff 验证。**真机**与 SAF 文件选择 **未运行**。 |
-| **Web** | `apps/app-web`（`web-dist/`） | wasm 产物在无头 Chromium 以 WebGL2 运行，并在本机真实桌面浏览器（Playwright，真实 GPU）复验；CI `web-deploy` 已实际发布到 Cloudflare Pages（示例 <https://yacr-examples.pages.dev>）。真 WebGPU 硬件适配器与浏览器矩阵 **未运行**。 |
+| **Web** | `apps/app-web`（`web-dist/`） | wasm 产物在本机真实桌面浏览器（Playwright，默认 headful 真实 GPU）运行并复验；无头 WebGL2/SwiftShader 为 `YACR_SOFTWARE_GPU=1` 显式开启、标注 SOFTWARE 的可选路径。CI `web-deploy` 已实际发布到 Cloudflare Pages（示例 <https://yacr-examples.pages.dev>）。真 WebGPU 硬件适配器与浏览器矩阵 **未运行**。 |
 
 ## 快速开始
 
@@ -72,7 +72,8 @@ cargo build -p app-linux --bin yacr-linux --release --locked
 ./target/release/yacr-linux                                  # 启动（需桌面环境）
 ./target/release/yacr-linux --open /absolute/drawing.dwg      # 打开图纸
 ./target/release/yacr-linux --open /absolute/drawing.dxf --locale en
-bash scripts/check-linux-app.sh                              # 无窗口离屏运行验收（lavapipe）
+bash scripts/run-real-gpu-e2e.sh                               # 真实 GPU 验收（硬件 Vulkan；有 GPU 时的默认验收路径）
+bash scripts/check-linux-app.sh                              # 无窗口离屏运行验收（默认真实 GPU；仅无 GPU 环境以 YACR_SOFTWARE_GPU=1 回退）
 ```
 
 `--headless --output <新目录>` 用同一套宿主/控制器/Slint 桥做无窗口出图；`--gpu auto|high|low`

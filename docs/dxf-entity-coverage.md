@@ -9,8 +9,9 @@ DXF 图元与 `../opencadstudio` 当前支持的图元，并要求“务必实�
 - 语料：`fixtures/dxf/qcad-examples/`（9 个 DXF）+ `fixtures/dxf/qcad-flange/`（flange）。
   来源/SHA/许可见 `fixtures/dxf/qcad-examples/SOURCE.md`、`fixtures/manifest`。
 - 解析/表示回归：`crates/cad-cli-tools/tests/dxf_samples.rs`（无需 GPU，进默认测试）。
-- 出图与覆盖报告：`scripts/check-qcad-examples.py`（原生 lavapipe；`--export-references`
-  时用可选 `ezdxf`+`matplotlib` 导出参考 PNG，见 §5）。
+- 出图与覆盖报告：`scripts/check-qcad-examples.py`（默认真实 GPU；软件 Mesa lavapipe 须
+  `--software` 显式开启并标注 SOFTWARE；`--export-references` 时用可选
+  `ezdxf`+`matplotlib` 导出参考 PNG，见 §5）。
 - 图元实现位置：`crates/cad-import-acadrust/src/{entity,dimension,primitives,geometry}.rs`。
 
 ## 2. 本轮新实现的图元

@@ -55,6 +55,36 @@
 升序（确定性但**非深度正确**）。当前 `Renderer::render`（2D）传相机中心、`render_3d`
 传 `Camera3d::eye`，因此两条渲染入口总是有排序位置。
 
+## 现行 draw 路径：instanced / merged / legacy 并存（2026-10-15 “entity = data”）
+
+自 2026-10-15 起，渲染器对**可合并的不透明**批次启用两条折叠路径；其余仍走 legacy 逐批
+路径。三者**同一帧内并存**，顺序语义由上一节规则与下列 fence 保证（决策见
+`docs/adr/0007-entity-as-data-renderer.md`）：
+
+- **instanced line runs**：可合并的 `Lines` 批次与合并 mesh 的**边 overlay**折叠为
+  instanced line 流（`LineInstance` 56 B、per-chunk f64 origin、`MAX_STREAM_RADIUS = 8192 mm`、
+  `select()` 精确端点），见 `line_instanced.wgsl`。
+- **merged mesh runs**：相邻同管线的不透明 `Mesh` 批次平铺合并为 interleaved 顶点缓冲
+  （44 B 步长，逐顶点 `entity_flags`/colour），`mesh_merged.wgsl`。
+- **legacy 逐批路径**：以下**仍为 legacy**，不折叠：
+  - **透明批次**（`0 < alpha < 1`）——仍逐批、由远及近；
+  - **图片**批次；
+  - **`MeshEdges` 拓扑**——当前是**既有 no-op 哨兵**（无实际 draw），缺口未闭合。
+
+**顺序 / tie 语义（与合并前一致）**：
+
+- 合并只发生在同管线、同不透明类别、**相邻绘制顺序**的批次之间；跨顺序/跨拓扑不合并。
+- 类内 tie 由同一 run 内图元的上传顺序确定（即原上传顺序）。
+- 类间 tie 由既有深度规则裁决：mesh 管线 `depth_compare = Less`、line 管线
+  `LessEqual`，**均 `depth_write = true`**；透明 pass 的 mesh 变体 `depth_write = false`、
+  比较仍 `Less`（见下节）。
+- **fences**：merged-vs-legacy **逐字节一致**（f32 可表示的共享 origin 下）、overlapping-tie、
+  3D perspective；两轮独立 oracle review 的 7 项 must-fix 修复后达成。per-chunk f64 origin
+  精度契约**仅限正交相机**；透视路径不沿用该精度保证。
+- 静态几何（instanced 流 / merged chunk）在 `upload()` 时常驻；**仅相机**变化不重传，
+  逐帧相机经共享 `UniformArena` dynamic offsets 写入。预算（`plan_from_gpu`）仍按上传顺序
+  累计；合并不改变被预算截断的批次集合。
+
 ## 透明合成（GPU 侧行为）
 
 - 渲染通道拆成两个逻辑 pass：**不透明 pass** 先画（深度写入开启），随后**透明 pass**
