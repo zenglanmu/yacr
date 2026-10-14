@@ -1,49 +1,23 @@
-//! Asynchronous / cancellable open wiring for the Web host (F01, §4.10).
+//! Import-progress panel heartbeat for the Web host (F01, §4.10).
 //!
-//! The core [`cad_app::tasks::ImportManager`] runs the importer on a
-//! [`std::thread`]. `wasm32-unknown-unknown` has **no threads**: the std shim's
-//! `thread::Builder::spawn` fails and the `.expect(...)` in `ImportManager::start`
-//! panics at runtime. The background worker path therefore **cannot run in the
-//! browser**, and this module says so instead of pretending:
+//! The owner-thread host pipeline is the single source of truth: an open is
+//! delivered with `HostCore::deliver_external_open` (see [`super::documents`]),
+//! and this heartbeat only drives the fixed P3 order
+//! `IO → metrics → binding.pump_requests (completion drain) → flush` through
+//! [`HostCore::tick`]. The panel snapshot is read straight from the host
+//! (`HostCore::import_snapshot`), never from a platform-authored fallback.
 //!
-//! * [`worker_available`] is the single capability gate. Only a host for which
-//!   it is `true` may call [`HostController::begin_async_open`].
-//! * The browser (this crate) always reports `false`, so an open runs through
-//!   the synchronous importer. The host still records the **real** terminal
-//!   outcome as an [`ImportProgressSnapshot`] so the *same* UI panel mapping is
-//!   exercised: a failed or cancelled open is shown explicitly and a successful
-//!   open hides the panel (`ImportProgressUiState`).
-//! * [`poll_and_apply`] is the shared heartbeat body. On a worker-capable host it
-//!   calls `poll_async_open`, which publishes an opened drawing **at most once**
-//!   through the manager's `TaskStamp` guard and updates the document via the
-//!   existing `install_opened` path. Everywhere it re-reads the retained
-//!   snapshot and re-pushes the panel.
-//!
-//! No progress is fabricated: the *running / cancellable* panel is only
-//! reachable on a host that actually has the worker. A frozen "starting" bar
-//! over a blocking import would look live while never advancing, so the browser
-//! documents the limitation (see `docs/import-async.md`) rather than faking it.
+//! `wasm32-unknown-unknown` has no threads, so [`worker_available`] is `false`
+//! and the browser cannot run the background importer. The module therefore does
+//! not fabricate a running/opened/worker-started state: with no worker the panel
+//! is idle (or shows the host's real terminal when one exists). Progress is only
+//! shown for a state the host actually reports.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
+use cad_app::tasks::{ImportProgressSnapshot, ImportTerminal};
+use cad_host::HostCore;
 
-use cad_app::host::{HostController, OpenedDrawing};
-use cad_app::tasks::{AsyncOpenPoll, ImportProgressSnapshot, ImportTerminal};
-use cad_domain::CadResult;
-
-use super::documents::install_opened;
+use super::fonts::spawn_font_load_if_identity_changed;
 use super::with_runtime;
-
-thread_local! {
-    /// Host-authored terminal snapshot for the synchronous fallback (wasm).
-    ///
-    /// The controller retains its own snapshot only when a worker job exists;
-    /// with no worker this slot carries the *real* terminal outcome of the
-    /// synchronous import so the panel mapping is still exercised. It is
-    /// cleared when a new open begins.
-    static FALLBACK: RefCell<Option<ImportProgressSnapshot>> = const { RefCell::new(None) };
-}
 
 /// Whether the core background import worker can run on this host.
 ///
@@ -55,90 +29,49 @@ pub fn worker_available() -> bool {
     !cfg!(target_arch = "wasm32")
 }
 
-/// The snapshot the progress panel should display.
+/// The snapshot the progress panel should display, read from the host.
 ///
-/// A real worker job (thread-capable host) takes precedence; otherwise the
-/// synchronous fallback terminal is used. Reading this never drains progress,
-/// publishes a document or dispatches a command — it is a pure getter.
-pub(super) fn current_snapshot(controller: &HostController) -> Option<ImportProgressSnapshot> {
-    controller
-        .async_open_snapshot()
-        .or_else(|| FALLBACK.with(|slot| slot.borrow().clone()))
+/// Reading this never drains progress, publishes a document or dispatches a
+/// command — it is a pure getter over the host's real import state.
+pub(super) fn current_snapshot(core: &HostCore) -> Option<ImportProgressSnapshot> {
+    core.import_snapshot()
 }
 
-/// Record the real terminal outcome of a synchronous open.
-fn set_terminal(terminal: ImportTerminal) {
-    FALLBACK.with(|slot| *slot.borrow_mut() = Some(ImportProgressSnapshot::terminal(terminal)));
-}
-
-/// How an open started through [`start_or_apply`].
-pub(super) enum OpenStart {
-    /// A background job is running; the poll heartbeat installs the document.
-    Started,
-    /// The document is already installed (synchronous fallback).
-    Opened(Box<OpenedDrawing>),
-}
-
-/// Begin an open, choosing the async worker where it can run.
+/// The heartbeat body: one host tick (real IO/import/render pipeline), the
+/// bounded queue pump, the state flush, then the real panel JSON.
 ///
-/// On a worker-capable host this starts a cancellable background job and
-/// returns [`OpenStart::Started`] (the document is installed later by
-/// [`poll_and_apply`]). On the browser it runs the synchronous import and
-/// records the real terminal snapshot, returning [`OpenStart::Opened`] or the
-/// real error.
-pub(super) fn start_or_apply(
-    controller: &Rc<RefCell<HostController>>,
-    bytes: Arc<[u8]>,
-    name: &str,
-) -> CadResult<OpenStart> {
-    if worker_available() {
-        // New shortest open: drop any retained terminal so a stale failure can
-        // never be shown for the new job (the core does the same for its own
-        // snapshot).
-        FALLBACK.with(|slot| *slot.borrow_mut() = None);
-        controller.borrow_mut().begin_async_open(bytes, name);
-        return Ok(OpenStart::Started);
-    }
-
-    let result = controller.borrow_mut().open_bytes(bytes, name);
-    match result {
-        Ok(opened) => {
-            set_terminal(ImportTerminal::Opened {
-                entities: opened.entities,
-            });
-            Ok(OpenStart::Opened(Box::new(opened)))
-        }
-        Err(error) => {
-            set_terminal(ImportTerminal::Failed {
-                error: error.clone(),
-            });
-            Err(error)
-        }
-    }
-}
-
-/// The heartbeat body: poll, publish at most once, push the panel, report JSON.
-///
-/// On a worker-capable host `poll_async_open` publishes a current result exactly
-/// once (the manager's stamp guard discards superseded/cancelled results, and a
-/// published job leaves the manager). On the browser the manager is idle, so
-/// this only re-reads the retained synchronous terminal. In both cases the
-/// document is updated through the existing `install_opened` path — a single
-/// source of truth per open, no duplicate import.
+/// The document swap itself happens in the host pipeline (via
+/// `deliver_external_open` / the async publish inside `tick`), never here; this
+/// only reports and starts the web font load once the published identity
+/// changed.
 pub fn poll_and_apply() -> String {
-    let Some((core, incoming)) = with_runtime(|rt| (rt.core.clone(), rt.incoming.clone())) else {
+    let Some(rt) = with_runtime(|rt| rt.clone()) else {
         return snapshot_json(None);
     };
 
-    let poll = core.controller.borrow_mut().poll_async_open();
-    if let AsyncOpenPoll::Opened { opened, .. } = &poll {
-        // Publish is already done by the core; `install_opened` is the single
-        // host-side document swap, shared with the synchronous path.
-        let name = core.controller.borrow().document_name_hint.clone();
-        install_opened(&name, opened, &core, &incoming);
+    // One host tick: drain platform file events, advance the import, refresh
+    // canvas metrics and sync the render view (including the synchronous WASM
+    // scene preparation). A teardown cancellation is not a user-facing failure.
+    if let Err(error) = rt.core.tick() {
+        if !matches!(error, cad_domain::CadError::Cancelled) {
+            cad_ui_slint::web::console_error(&format!("host tick failed: {error}"));
+        }
     }
-    super::state_push::push_import_state(&core);
-    let snapshot = current_snapshot(&core.controller.borrow());
+    // Fixed P3 order: IO (tick) → metrics (in tick) → bounded queue pump with
+    // completion drain → flush. The waker schedules additional pumps; the
+    // heartbeat stays the backstop and is never the only queue driver.
+    if let Err(error) = rt.binding.pump_requests() {
+        cad_ui_slint::web::console_error(&format!("queue pump failed: {error}"));
+    }
+    if let Err(error) = rt.binding.flush_updates() {
+        cad_ui_slint::web::console_error(&format!("host update flush failed: {error}"));
+    }
+
+    // Start the web font load only after the host published a new document
+    // identity (sync install or worker publish); never a fabricated open.
+    spawn_font_load_if_identity_changed(&rt);
+    rt.push_web_overlay();
+    let snapshot = current_snapshot(&rt.core);
     snapshot_json(snapshot.as_ref())
 }
 

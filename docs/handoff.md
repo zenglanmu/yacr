@@ -1,5 +1,74 @@
 # 后续 agent 接手入口
 
+## cad-engine P4 codegate 与最终证据状态
+
+- Oracle P3、P4 App/engine/Host/Web codegate 均 accept。最终 sweep `sh_137d0698a001J14BRMEOwCRSk6` exit 0：workspace all-targets/tests，App343/engine73/Host83/Android30/Web23/UI132+37 integration/Linux12 passed + 9 ignored，workspace WASM lib、Android aarch64 UI/app local-Skia、Clippy（既有 exclusions）、7 packages fmt、architecture/fixture/workflow/i18n306 与 diff check。
+- 后续 Host 专项新增 3 tests 到 86、Host clippy 通过；Linux 新 ignored test 的 Arc 解构机械修复后 clippy/fmt 通过。最终差异门禁 `sh_137df9c5b00120goh09biLHuUM` exit 0：workspace all-targets check、Linux lib 12 passed/10 ignored、7 packages fmt、architecture/fixture/workflow/i18n306、diff check。该末次 shell 复验了生产源码不变情况下的当前差异；不要把整个 dirty workspace 归属本轮。
+- P3 六用例+async cursor 与 P4 新 API 窗口用例的最终硬件报告为 `.slim/deepwork/cad-engine-decoupling/p4-real-gpu.md`，artifacts `/tmp/opencode/yacr-p4-final-20261014-004223/`（实际 report 时间标记 20261014-004223）：六用例脚本 6/6、async cursor 1/1、新 API/events 用例 1/1，共 8 terminal PASS；Wayland/winit + P620 Vulkan，CPU load stage 无 GPU context。新用例覆盖 controlled Commit、selection/highlight、sequence/origin/request ID/transaction/共享 `Arc<ChangeSet>`、Undo/Redo、idle；不覆盖 vendor/golden/browser/Android。
+- P4 App `cad-app` 原子 Commit/selection validation/traced command/shared `Arc<ChangeSet>` Oracle accept，343 tests/clippy；engine protocol/queue/events Oracle accept，focused 70 tests + clippy，最终 sweep engine73。UI shell `sh_137adcff0001KP0ImwLEq3shNv` UI132 lib +37 integration/clippy；Host post-commit render failure/Undo、external failure real completion ID、reentry Busy 的新增 3 tests 后 Host86/clippy。Host/Web codegate accepted；Android wrapper included in final sweep/tests. 无自动订阅或插件 UI，`.slint`/catalog 未改。P4 不宣称 plugin loader、React、双 surface、跨平台产品完整交付。
+- P4 最终差异门禁已 exit 0；实际范围见 shell 上述记录。仍未验收 browser RAF/Reflect/GC/WebGPU、Android device、vendor DWG、视觉 golden；queue pressure/lag/reserve/coalesce/32 subscribers 是合成合同，browser ring 不跨页面持久化。P2 paper-only/grid 初轮失败和 P4 reject 修复历史均保留。全仓陌生 `debug_fixture.rs`/`debug-block.dwg` 未碰；本任务仅文档，未 commit。
+
+## cad-engine P2 真实 GPU 分轮证据 / P3 接续（2026-10-14，已更新）
+
+- 首轮硬件六用例脚本在 NVIDIA Quadro P620 + Vulkan 真实 winit 窗口跑出 1 PASS / 5 FAIL；其中 1–4 是纸空间-only
+  `a4-layout.dwg` 与模型空间假设不匹配，改用授权 synthetic four-lines DWG 后单独复跑 4/4 PASS；case 5 的 MOVE PASS
+  来自 Host bounds 修复前。case 6 是真实 Host Y 倒置 bounds bug；修后只重跑 case 6，全流程 PASS、四边差分
+  `[781,2520,851,278]` 且 controller/render 尺寸一致。**不是同一轮六例全绿**，不得把先前失败或未导出
+  `YACR_TEST_DWG` 的操作者失误记录删改，也撤回“sampling fragile”归因。完整分轮及硬件 PID 证据见验证记录。
+- P2 最新 workspace check、host 34、grid 两合同、clippy 与 fmt 通过；WASM/Android compile 是 Host bounds 修复前证据，
+  修后未复跑。无 golden/vendor/Android/Web 运行验收；不得扩展成视觉或跨平台结论。
+- P3 queue contract 已冻结；后续 P3 实现已通过 Oracle 最终 codegate 和指定 compile/check/test sweep，详见本文件顶部新状态与验证记录。
+  P3 六用例及独立异步 `MoveCursor` 真实窗口用例均已通过，覆盖边界详见本文顶部与验证记录。P4 App/engine/Host/Web codegate 与指定 wrappers 验证已完成；最终 sweep 与末次差异门禁通过，详见顶部。当前章节不覆盖下方旧暂停/P1 历史。
+
+## cad-engine P2-B 当前状态与复核入口（2026-10-13）
+
+- Host/Slint/apps 的 P2 source remediations 已齐，核心已去 UI 依赖，维持单 session、单 dispatch、config authority。
+  Oracle attempt 4 接受 P2 架构/源码 codegate；最终串行 compile/check/test sweep 也全部 exit 0。attempt 1/2 findings
+  已闭环；attempt 3 的正交 3D primary-drag mode 与 UI summary 对象计数已修复。此结论不包含场景运行或 E2E。
+- 此处为 2026-10-13 历史快照：当时 P3 queue writer 尚未编译/集成；后续状态见本文顶部 2026-10-14 更新。源码 lane 未改依赖/catalog/fixture/
+  workflow，architecture/fixture/workflow/i18n 四门禁此前通过，仍由主协调器 final rescan。保留既有暂停与 P1 历史，
+  不覆盖失败记录。
+- Skia Android tarball 已在 `/tmp/opencode/yacr-skia-cache/` 完成 gzip/tar/key/tag/aarch64 与 SHA-256 校验；
+  未做签名验证。最终串行验证以该本地 tarball 完成 Android aarch64 UI/app compile check（18.46s），不代表设备运行。
+- 终态串行记录 `sh_135e64476001QjMcVRgdJvRBJB` exit 0：workspace all-targets、host 33、UI 129 lib + 36
+  integration、WASM lib、local-Skia Android aarch64 UI/app check（18.46s）及 Clippy（既有排除项）。详情与此前 shell
+  记录索引、command/NOT RUN 证据见 `docs/validation-engine-decoupling.md`。GPU/窗口/DWG/Android 设备/Web browser E2E
+  未运行；全仓 fmt baseline 不触碰。
+
+## cad-engine P2-B 恢复与 P4 设计续做入口（2026-10-13）
+
+- P2-B writers 当前活跃，HostCore/UI 尚未整合。清理 206.8 GiB `target` 后 workspace 全目标冷编译通过；
+  曾有 HostCore HTTP 403 partial，正由同会话恢复，不得写成已完整实现或验证通过。最小
+  `SetMeasurementKind`/`BeginPan`/`ClearCursor` 与 `same_session` 已落地并 focused 验证，细节见
+  `.slim/deepwork/cad-engine-decoupling/p2-interface-addendum.md`。
+- 单一命令 + 受控 API 双入口和事件基础的原始设计契约见
+  `.slim/deepwork/cad-engine-decoupling/api-events-plan.md`；P4 App/engine/UI/Host/Android/Web 源码接线与指定 workspace 集成门禁已完成，产品级 browser/device/vendor/plugin 验收范围仍有限，详见顶部当前状态。
+  写入与命令共享事务/队列，写 API 不能越序；完整契约见规范 §4.11。
+- P4 核心约束：expected-revision 原子 batch 限 Insert(Line/Circle/Arc)/Translate/Delete，由 engine 分配 ID，
+  校验权限与有效 layer/space，并走事务/history/权威 ChangeSet；禁止裸 DB mut。选择只解析当前文档顶层
+  ObjectId，块实例必须给明确有效 `SelectionRef` 路径。命令/API 共 queue，pending 时同步 `Busy`。
+- 生命周期事件反映真实请求/命令与 ChangeSet/selection/tool 状态；仅显式成功 Move 意图生成 Moved，失败/取消
+  零实体变化，noop 不伪造事务。有界 poll 订阅显式报告 lag 并要求重取 snapshot/watermark；无锁内 callback，
+  事件不是第二数据库。P4 是受控 API/events，不是 plugin loader；React/loader/sandbox 不在本轮。
+- 本轮没有完成 P2-B 集成或实现 P4；React、loader、sandbox 不在当前范围。保留单 presenter 与 renderer-only
+  wgpu 边界；真实 GPU 和 Android native check 本轮未运行，不得从冷编译推导运行/render 验收。
+
+## cad-engine P2 暂停检查点（2026-10-13）
+
+- P1 `df6df85` 已完整保存。P2-A 的 `Drawing` capture/selection snapshot/tool generation、Select/SelectAll
+  版本已落地，app all-targets check 与 331 项 synthetic tests 通过；`EngineClient`/`HostUpdates` schema
+   已落地，但尚无 HostCore 实现或 UI 接线。按用户要求本轮已暂停，P2 源码与文档改动保留在工作树、尚未 commit。
+- `Measure(None)` 已恢复为 `Distance`；新增 Area 后 `None` 仍为 `Distance` 的合同测试通过，
+  `confirm_draw` 经 `HostController::execute`。Engine 31 项 synthetic tests、4 项静态门禁、owned fmt 与
+   `git diff --check` 通过。最后兼容修补后 workspace all-targets、WASM lib、Clippy 复核通过；
+   `cargo fmt -p cad-app -p cad-engine -- --check` 通过，收尾纠正了局部 formatter 版本造成的格式偏移。
+- 全仓 fmt 仍被基线未跟踪文件 `crates/cad-import-acadrust/examples/debug_fixture.rs` 格式问题阻塞，
+  不要修改该文件。真实 GPU 验收和 Android native check 未运行；虽有显示硬件，本轮没有 render 验收。
+- 续做入口：P2-B 移除 HostCore→UI 依赖，实现 EngineClient + 语义 updates/config 单 authority；接入
+  Slint EngineAdapter 与已有 session bridge 安装入口；apps 持有 UI handle/adapter 并迁移 HostResources。
+  旧 Slint draw 路径仍持有 `DrawTool`、尚未切换，禁止让旧路径与新 app 状态双驱动。随后再做 P3 有界队列
+  与 event-driven 唤醒。不得据此宣称整个架构已完成。
+
 ## cad-engine 解耦 P1 检查点（2026-10-13，P1 审查通过；整体实施中）
 
 - `cad-engine` 当前 manifest 直接依赖 `cad-app`、`cad-db`、`cad-domain`、`cad-render-wgpu`、

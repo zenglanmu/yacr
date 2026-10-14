@@ -367,7 +367,14 @@ fn dispatch_command(
             if ui.get_draw_tool_active() {
                 ui.invoke_cancel_draw_requested();
             }
-            ui.set_pan_active(false);
+            if ui.get_pan_active() {
+                // Pan is engine-owned: route the cancel through the same
+                // interaction callback the toggle uses instead of flipping the
+                // shell property behind the engine's back.
+                ui.invoke_pan_requested();
+            } else {
+                ui.set_pan_active(false);
+            }
             true
         }
         "TOOLS" | "RIBBON" => {

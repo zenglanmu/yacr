@@ -111,13 +111,13 @@ impl Application {
                     return Err(CadError::InvalidInput(format!(
                         "CreateLine needs a Line geometry, got {}",
                         geometry_kind(other)
-                    )))
+                    )));
                 }
             },
             _ => {
                 return Err(CadError::InvalidInput(
                     "CreateLine needs a Points([start, end]) or Geometry payload".into(),
-                ))
+                ));
             }
         };
         self.commit_new_entity(session, command, geometry, "create line")
@@ -219,13 +219,13 @@ impl Application {
                     return Err(CadError::InvalidInput(format!(
                         "CreateArc needs an Arc geometry, got {}",
                         geometry_kind(other)
-                    )))
+                    )));
                 }
             },
             _ => {
                 return Err(CadError::InvalidInput(
                     "CreateArc needs a Points([start, through, end]) or Geometry payload".into(),
-                ))
+                ));
             }
         };
         self.commit_new_entity(session, command, geometry, "create arc")
@@ -260,7 +260,8 @@ impl Application {
             .documents
             .get_mut(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
 
         // Collapse to unique entities, keeping first-seen order, and capture the
         // before state. Reading is done before the transaction opens so a missing
@@ -331,8 +332,9 @@ impl Application {
                 Ok(drawing_patch(before.id, Some(before), Some(after)))
             })
             .collect::<CadResult<Vec<_>>>()?;
-        self.record_drawing(
+        self.publish_candidate(
             document_id,
+            candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: "move entities".into(),
@@ -343,7 +345,7 @@ impl Application {
 
         Ok(CommandOutcome {
             objects: Vec::new(),
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics,
             measurement: None,
         })
@@ -377,7 +379,8 @@ impl Application {
             .documents
             .get_mut(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
 
         let mut seen: Vec<EntityId> = Vec::new();
         let mut before_states: Vec<DbEntity> = Vec::new();
@@ -436,8 +439,9 @@ impl Application {
             .zip(display_states)
             .map(|(before, state)| drawing_patch_deleted(before.id, before, state))
             .collect();
-        self.record_drawing(
+        self.publish_candidate(
             document_id,
+            candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: "erase entities".into(),
@@ -448,7 +452,7 @@ impl Application {
 
         Ok(CommandOutcome {
             objects: Vec::new(),
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics,
             measurement: None,
         })
@@ -483,7 +487,8 @@ impl Application {
             .documents
             .get_mut(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
 
         let translation = Transform3::translation(*delta);
         let mut seen: Vec<EntityId> = Vec::new();
@@ -587,8 +592,9 @@ impl Application {
             .iter()
             .map(|(id, copy)| drawing_patch(*id, None, Some(copy.clone())))
             .collect();
-        self.record_drawing(
+        self.publish_candidate(
             document_id,
+            candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: "copy entities".into(),
@@ -599,7 +605,7 @@ impl Application {
 
         Ok(CommandOutcome {
             objects: copies.iter().map(|(id, _)| ObjectId(id.0)).collect(),
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics,
             measurement: None,
         })
@@ -725,7 +731,8 @@ impl Application {
             .documents
             .get_mut(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
 
         let (before_states, diagnostics) =
             Self::resolve_selection(drawing, document_id, refs, code, operation, action, false)?;
@@ -766,8 +773,9 @@ impl Application {
                 Ok(drawing_patch(before.id, Some(before), Some(after)))
             })
             .collect::<CadResult<Vec<_>>>()?;
-        self.record_drawing(
+        self.publish_candidate(
             document_id,
+            candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: label.into(),
@@ -778,7 +786,7 @@ impl Application {
 
         Ok(CommandOutcome {
             objects: Vec::new(),
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics,
             measurement: None,
         })
@@ -802,7 +810,8 @@ impl Application {
             .documents
             .get_mut(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
 
         let (sources, mut diagnostics) = Self::resolve_selection(
             drawing,
@@ -878,8 +887,9 @@ impl Application {
             .iter()
             .map(|(id, copy)| drawing_patch(*id, None, Some(copy.clone())))
             .collect();
-        self.record_drawing(
+        self.publish_candidate(
             document_id,
+            candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: "mirror entities".into(),
@@ -890,7 +900,7 @@ impl Application {
 
         Ok(CommandOutcome {
             objects: copies.iter().map(|(id, _)| ObjectId(id.0)).collect(),
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics,
             measurement: None,
         })
@@ -1056,7 +1066,8 @@ impl Application {
             .documents
             .get_mut(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
 
         let base_order = drawing
             .model_space()
@@ -1113,8 +1124,9 @@ impl Application {
                 after_state: Some(session.clipboard[index].display.clone()),
             })
             .collect();
-        self.record_drawing(
+        self.publish_candidate(
             document_id,
+            candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: "paste clipboard".into(),
@@ -1125,7 +1137,7 @@ impl Application {
 
         Ok(CommandOutcome {
             objects: copies.iter().map(|(id, _)| ObjectId(id.0)).collect(),
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics: vec![Diagnostic {
                 object: None,
                 code: "drawing.clipboard.paste".into(),
@@ -1336,7 +1348,7 @@ impl Application {
                 return Err(CadError::Unsupported(format!(
                     "TRIM target must be a LINE; {} is not supported",
                     geometry_kind(other)
-                )))
+                )));
             }
         };
         let mut segments: Vec<(Point3, Point3)> = Vec::new();
@@ -1372,7 +1384,8 @@ impl Application {
         let target_state = document.drawing.entity_display_state(target_entity.id);
 
         let transaction = next_transaction_id();
-        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
         let change_set = match plan {
             TrimPlan::Delete => {
                 let mut staged = drawing.begin_drawing_transaction("trim entity", transaction)?;
@@ -1394,14 +1407,15 @@ impl Application {
             TrimPlan::Keep { .. } => {
                 // `after` was recomputed above; rebuild it from the committed
                 // geometry so the patch is the exact stored value.
-                let after = document.drawing.entity(target_id).cloned().ok_or_else(|| {
+                let after = drawing.entity(target_id).cloned().ok_or_else(|| {
                     CadError::Invariant("trimmed entity vanished after commit".into())
                 })?;
                 drawing_patch(target_id, Some(target_entity.clone()), Some(after))
             }
         };
-        self.record_drawing(
+        self.publish_candidate(
             document_id,
+            candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: "trim entity".into(),
@@ -1412,7 +1426,7 @@ impl Application {
 
         Ok(CommandOutcome {
             objects: vec![ObjectId(target_id.0)],
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics: vec![Diagnostic {
                 object: Some(ObjectId(target_id.0)),
                 code: "drawing.trim".into(),
@@ -1485,7 +1499,7 @@ impl Application {
                 return Err(CadError::Unsupported(format!(
                     "EXTEND target must be a LINE; {} is not supported",
                     geometry_kind(other)
-                )))
+                )));
             }
         };
         let mut segments: Vec<(Point3, Point3)> = Vec::new();
@@ -1521,7 +1535,8 @@ impl Application {
         };
 
         let transaction = next_transaction_id();
-        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
         let mut after = target_entity.clone();
         after.geometry = SemanticGeometry::Line { start, end };
         let change_set = {
@@ -1532,12 +1547,13 @@ impl Application {
         let target_id = target_entity.id;
         // Read the committed entity back so the undo patch's `after` is the exact
         // stored value, never a re-derivation.
-        let stored =
-            document.drawing.entity(target_id).cloned().ok_or_else(|| {
-                CadError::Invariant("extended entity vanished after commit".into())
-            })?;
-        self.record_drawing(
+        let stored = drawing
+            .entity(target_id)
+            .cloned()
+            .ok_or_else(|| CadError::Invariant("extended entity vanished after commit".into()))?;
+        self.publish_candidate(
             document_id,
+            candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: "extend entity".into(),
@@ -1548,7 +1564,7 @@ impl Application {
 
         Ok(CommandOutcome {
             objects: vec![ObjectId(target_id.0)],
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics: vec![Diagnostic {
                 object: Some(ObjectId(target_id.0)),
                 code: "drawing.extend".into(),
@@ -1596,9 +1612,10 @@ impl Application {
         let document = self
             .workspace
             .documents
-            .get_mut(&document_id)
+            .get(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let drawing = Arc::make_mut(&mut document.drawing);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
 
         if drawing.layer(layer).is_none() {
             return Err(CadError::InvalidInput(format!(
@@ -1637,8 +1654,9 @@ impl Application {
         if let Some(display) = &display {
             drawing.restore_entity_display_state(entity_id, display);
         }
-        self.record_drawing(
+        self.publish_candidate(
             document_id,
+            candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: label.to_string(),
@@ -1655,22 +1673,35 @@ impl Application {
 
         Ok(CommandOutcome {
             objects: vec![ObjectId(entity_id.0)],
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics: Vec::new(),
             measurement: None,
         })
     }
 
-    /// Append one drawing undo record to the document's history.
-    fn record_drawing(
+    /// Record a committed candidate before publishing it as authoritative state.
+    ///
+    /// `record_drawing` validates before mutating history. Therefore a failure
+    /// leaves both the current drawing (including its ID allocator) and history
+    /// unchanged; after it succeeds, publishing the already-built candidate is
+    /// infallible.
+    fn publish_candidate(
         &mut self,
         document_id: DocumentId,
+        candidate: DrawingDatabase,
         record: DrawingUndoRecord,
     ) -> CadResult<()> {
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
         self.history
             .entry(document_id)
             .or_default()
-            .record_drawing(record)
+            .record_drawing(record)?;
+        document.drawing = Arc::new(candidate);
+        Ok(())
     }
 }
 
@@ -1679,7 +1710,7 @@ impl Application {
 /// Mirrors the layer counter style but lives in the app layer so a
 /// command never depends on a host. The counter is process-global and only needs
 /// to be unique within a session's history.
-fn next_transaction_id() -> TransactionId {
+pub(crate) fn next_transaction_id() -> TransactionId {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     TransactionId(COUNTER.fetch_add(1, Ordering::Relaxed) as u128)

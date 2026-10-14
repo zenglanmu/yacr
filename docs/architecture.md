@@ -41,10 +41,12 @@ Slint↔wgpu 合成（`cad-ui-slint/src/bridge.rs`）。仍返回 NotImplemented
   `cad-ui-slint`、`cad-host`、Slint 或直接依赖 wgpu；wgpu 类型仅由 renderer 通过其 API/re-export
   提供。`cad-app` 不依赖 `cad-engine`，`cad-ui-slint` 不依赖 `cad-host`。这些方向由
   `scripts/check-architecture.py` 按 Cargo manifest 显式校验。
-- 渲染协调分阶段实施中（ADR 0005）：P1 会话边界已通过审查；当前 host 仍依赖
-  `cad-ui-slint`，Slint 仍作为单 surface 协调者与 presenter；不得将此过渡状态描述为 host
-  已完成去 UI 化或已完成跨平台性能验收。整体项目仍实施中：P2 才将工具状态归入 SessionState
-  并移除 host 对具体 UI 的依赖；P3 再落地有界语义队列与 event-driven dirty 唤醒。增量算法本轮不扩张。
+- 渲染协调分阶段实施中（ADR 0005）：P1 已审查通过；P2-B writers 活跃但 HostCore/UI 尚未整合，当前 host
+  仍依赖 `cad-ui-slint`；Slint 仍是单 surface 协调者与 presenter。清理 target 后 workspace 全目标冷编译
+  通过不表示该集成完成。P3 队列仍未完成；P4 命令/API 与事件订阅仅为后续设计，排在 P2/P3 后，不能视为
+  已实现。P4 受控写入须用 expected revision 原子提交并走 history/ChangeSet；订阅 lag 明确且需重取快照，
+  不暴露裸 DB mut、不在锁内 callback，事件不是第二数据库。不得宣称整体架构完成或跨平台运行验收通过，
+  增量算法本轮不扩张。
 - `cad-host` 不得直接依赖 `slint`/`wgpu`/`web-sys`/Android 类型；它只通过 `cad-ui-slint`
   的固有 API 与 sink trait 推送状态，平台 I/O 一律经 `cad-platform` 的
   `PlatformFiles`/`ConfigStore`/`SurfaceSource` 契约（事件式、无 futures、无 `Send`），

@@ -1,8 +1,8 @@
 //! Canvas-local picking for the web host: logical pixels → world.
 //!
-//! The shared `HostCore` owns the adapter's `CanvasPickMapper`; this module keeps
-//! the pure mapping helpers the browser selection gesture in [`super::input`]
-//! shares with it, so a pick and a render of the same pixel agree (audit
+//! With P2-B the attached engine owns picking; this module keeps the pure mapping
+//! helpers the browser selection gesture in [`super::input`] uses before the
+//! dispatch is attached, so a pick and a render of the same pixel agree (audit
 //! U07/B17). Degenerate input returns `None`/an error rather than a fabricated
 //! world point.
 
@@ -11,8 +11,7 @@ use cad_app::input::{CanvasMetrics, ViewMetrics};
 use cad_app::picking::pick_at_screen;
 use cad_app::{BackFacePolicy, PickReport, Viewport};
 use cad_domain::{CadError, CadResult, Point3, SelectionRef, TolerancePolicy};
-
-use super::SharedHandle;
+use cad_ui_slint::UiHandle;
 
 /// Map a canvas-local logical point to a world point on the viewport work plane.
 ///
@@ -56,15 +55,13 @@ pub(super) fn selection_refs_from_report(report: &PickReport) -> Vec<SelectionRe
 /// Prefers the shell's real CAD rectangle; falls back to the viewport's cached
 /// logical size when the handle is not available (for example before the shell
 /// has laid out).
-pub(super) fn canvas_size(handle: &SharedHandle, viewport: &Viewport) -> Option<[f64; 2]> {
-    if let Some(handle) = handle.borrow().as_ref() {
-        if let Some((size, _scale)) = handle.cad_surface_size() {
-            if size[0].is_finite() && size[1].is_finite() && size[0] > 0.0 && size[1] > 0.0 {
-                // The shell reports the surface; the CSS safe area shrinks it to
-                // the canvas, matching the authoritative viewport metrics
-                // (`HostCore::metrics`).
-                return super::inset_canvas_size(size);
-            }
+pub(super) fn canvas_size(handle: &UiHandle, viewport: &Viewport) -> Option<[f64; 2]> {
+    if let Some((size, _scale)) = handle.cad_surface_size() {
+        if size[0].is_finite() && size[1].is_finite() && size[0] > 0.0 && size[1] > 0.0 {
+            // The shell reports the surface; the CSS safe area shrinks it to
+            // the canvas, matching the authoritative viewport metrics
+            // (`HostCore::metrics`).
+            return super::inset_canvas_size(size);
         }
     }
     let size = viewport.logical_size;

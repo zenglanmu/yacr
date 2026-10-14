@@ -47,14 +47,18 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
     assert!(ui.invoke_command_submitted("   ".into()));
     assert_eq!(ui.get_ribbon_expanded(), toggled);
 
-    // An ambiguous prefix is not consumed and must not run anything.
+    // An ambiguous prefix is not consumed and must not run anything. Draw
+    // ownership moved to the engine, so the vocabulary is observed through the
+    // begin-draw callback rather than the shell's draw-tool-active property.
     assert!(!ui.invoke_command_submitted("ZOOM".into()));
-    assert!(!ui.get_draw_tool_active());
+    let started = Rc::new(RefCell::new(Vec::<String>::new()));
+    let observed = started.clone();
+    ui.on_begin_draw_tool(move |name| observed.borrow_mut().push(name.to_string()));
     // A unique prefix executes and is consumed; a gated alias does too.
     assert!(ui.invoke_command_submitted("LIN".into()));
-    assert!(ui.get_draw_tool_active());
+    assert_eq!(&*started.borrow(), &["line"], "LIN starts LINE");
     assert!(ui.invoke_command_submitted("ESC".into()));
-    assert!(!ui.get_draw_tool_active());
+    assert_eq!(&*started.borrow(), &["line"], "ESC starts no tool");
     assert!(ui.invoke_command_submitted("ZO".into()));
 
     // Recognized-but-unimplemented vs unknown are both explicit and consumed.
@@ -97,14 +101,21 @@ fn command_line_prefix_alias_repeat_and_explicit_failures() {
         .handle()
         .update_config_json(r#"{"interaction":{"keyboardShortcuts":false}}"#)
         .unwrap();
+    let started = Rc::new(RefCell::new(Vec::<String>::new()));
+    let observed = started.clone();
+    ui.on_begin_draw_tool(move |name| observed.borrow_mut().push(name.to_string()));
     assert!(ui.invoke_command_submitted("L".into()));
     assert!(
-        !ui.get_draw_tool_active(),
+        started.borrow().is_empty(),
         "a gated alias must not run LINE"
     );
     assert!(ui.get_status_label().contains('L'));
     assert!(ui.invoke_command_submitted("LINE".into()));
-    assert!(ui.get_draw_tool_active(), "a canonical name always works");
+    assert_eq!(
+        &*started.borrow(),
+        &["line"],
+        "a canonical name always works"
+    );
     assert!(
         ui.invoke_command_submitted("FIT".into()),
         "a full-word synonym always works"

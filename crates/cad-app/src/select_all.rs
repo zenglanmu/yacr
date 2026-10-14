@@ -11,7 +11,7 @@
 
 use crate::{
     drawing_pick_items, Application, Command, CommandOutcome, CommandPayload, SelectionSet,
-    SessionState, ToolState,
+    SessionState,
 };
 use cad_db::{DbEntity, DrawingDatabase, MAX_INSTANCE_DEPTH};
 use cad_domain::{BlockId, CadError, CadResult, SemanticGeometry, SpaceId};
@@ -62,7 +62,7 @@ impl Application {
             }
         }
         session.selection = selection;
-        session.tool = ToolState::Selecting;
+        session.begin_selecting();
         Ok(CommandOutcome::none())
     }
 }

@@ -1,27 +1,42 @@
 //! Browser command sink and pointer navigation.
 //!
 //! Command routing, state push and the generic navigation/pick/draw sinks live
-//! in `cad_host::HostCore`; this module keeps only what is genuinely
-//! browser-specific:
+//! in `cad_host::HostCore`; the single callback path is the `EngineAdapter`
+//! installed by the composition root, and the browser-only `SwitchBackend` /
+//! `OpenDrawing` behaviour is intercepted by [`super::client::WebEngineClient`].
+//! The `UiCommandSink` below is therefore a detached refusal: once the engine
+//! dispatch is attached it is never reached, so the legacy and engine paths
+//! cannot double-send.
 //!
-//! * the `OpenDrawing` / `SwitchBackend` interception (a hidden file input click
-//!   and a backend preference store + reload), and
-//! * the browser pointer semantics — the drag threshold, the button set and the
-//!   wheel sign differ from the desktop winit backend, and a move feeds the
-//!   active capture tool's live preview cursor.
-//!
-//! Every command still runs through the shared `HostCore::execute` funnel, so
-//! panels, history and overlays are pushed exactly once.
+//! This module also keeps the genuinely browser-specific pointer semantics — the
+//! drag threshold, the button set and the wheel sign differ from the desktop
+//! winit backend — for the pre-attach window and the `pinch` path the engine
+//! does not own.
 
 use std::cell::Cell;
 
 use cad_app::{Command, CommandId, CommandPayload, ToolState};
 use cad_domain::{CadResult, Point3, ViewportId};
 use cad_host::HostCore;
-use cad_ui_slint::{LayoutSwitchSink, UiCommandSink, ViewInput};
+use cad_ui_slint::{UiCommandSink, UiHandle, ViewInput};
 
-use super::persistence::open_dialog;
 use super::pick;
+
+/// The pre-attach command slot.
+///
+/// `EngineAdapter::attach` installs the single engine dispatch immediately after
+/// construction, so this slot is never reached in production: the adapter routes
+/// every command through the engine once a client is attached. It refuses
+/// explicitly instead of silently succeeding.
+pub(super) struct DetachedCommandSink;
+
+impl UiCommandSink for DetachedCommandSink {
+    fn send(&mut self, _command: Command) -> CadResult<()> {
+        Err(cad_domain::CadError::Unsupported(
+            "the browser engine dispatch is not attached".into(),
+        ))
+    }
+}
 
 /// Whether a down→up sequence is a tap (a selection candidate) rather than a
 /// navigation drag.
@@ -72,79 +87,33 @@ pub(super) fn preview_cursor_for(tool: &ToolState) -> PreviewCursor {
     }
 }
 
-/// UI command sink; also the adapter's layout-switch sink is the shared core.
+/// Browser pointer navigation, retained for the pre-attach window and `pinch`.
 ///
-/// The browser intercepts the two commands whose implementation is genuinely
-/// browser-specific and delegates every other command to `HostCore::execute`.
-#[derive(Clone)]
-pub(super) struct WebSink {
-    pub(super) core: HostCore,
-}
-
-impl WebSink {
-    fn set_status(&self, text: String) {
-        if let Some(handle) = self.core.handle.borrow().as_ref() {
-            let _ = handle.set_status(text);
-        }
-    }
-}
-
-impl UiCommandSink for WebSink {
-    fn send(&mut self, command: Command) -> CadResult<()> {
-        match command.id {
-            CommandId::OpenDrawing => {
-                open_dialog("file-input");
-                self.set_status(super::messages::current_messages().text("file.choose", &[]));
-                Ok(())
-            }
-            CommandId::SwitchBackend => {
-                if let CommandPayload::Backend(choice) = command.payload {
-                    let preference = super::preference_for(choice);
-                    self.set_status(format!("切换后端为 {preference:?}，重建渲染会话…"));
-                    if let Err(e) = cad_ui_slint::web::store_preference_and_reload(preference) {
-                        self.set_status(format!("切换失败：{e}"));
-                    }
-                } else {
-                    self.set_status("SwitchBackend 需要后端参数".into());
-                }
-                Ok(())
-            }
-            _ => super::run_command(&self.core, command),
-        }
-    }
-}
-
-/// Layout panel switch (F04): dispatch the validated `SwitchSpace` command
-/// through the **web** funnel (`run_command`), so the browser overlay is
-/// re-applied after the shared `HostCore::push` — a layout click must not
-/// clobber the browser font summary / import panel or claim images are modeled.
-impl LayoutSwitchSink for WebSink {
-    fn select(&mut self, space: cad_representation::SpaceSelection) {
-        let (document, viewport) = {
-            let c = self.core.controller.borrow();
-            (c.document_id, c.viewport_id)
-        };
-        let command = Command {
-            schema_version: 1,
-            id: CommandId::SwitchSpace,
-            document,
-            viewport,
-            payload: cad_app::input::space_switch_payload(space),
-        };
-        let _ = super::run_command(&self.core, command);
-    }
-}
-
+/// Once `EngineAdapter::attach` installs the engine client, the adapter routes
+/// pointer/scroll/pick through `EngineClient::dispatch`; this sink is reached
+/// only before that (and never double-dispatches).
 pub(super) struct WebViewInput {
-    pub(super) core: HostCore,
-    pub(super) viewport: ViewportId,
-    pub(super) last: Cell<[f64; 2]>,
-    pub(super) dragging: Cell<bool>,
+    core: HostCore,
+    handle: UiHandle,
+    viewport: ViewportId,
+    last: Cell<[f64; 2]>,
+    dragging: Cell<bool>,
     /// Where the current left/primary pointer went down, for tap-vs-drag.
-    pub(super) down: Cell<Option<[f64; 2]>>,
+    down: Cell<Option<[f64; 2]>>,
 }
 
 impl WebViewInput {
+    pub(super) fn new(core: HostCore, handle: UiHandle, viewport: ViewportId) -> Self {
+        Self {
+            core,
+            handle,
+            viewport,
+            last: Cell::new([0.0, 0.0]),
+            dragging: Cell::new(false),
+            down: Cell::new(None),
+        }
+    }
+
     fn send(&self, id: CommandId, payload: CommandPayload) {
         let document = self.core.controller.borrow().document_id;
         let command = Command {
@@ -169,7 +138,7 @@ impl WebViewInput {
                 .get(&self.viewport)
             {
                 None => return,
-                Some(viewport) => match pick::canvas_size(&self.core.handle, viewport) {
+                Some(viewport) => match pick::canvas_size(&self.handle, viewport) {
                     None => return,
                     Some(size) => pick::pick_selection(&controller, size, logical),
                 },
@@ -178,9 +147,11 @@ impl WebViewInput {
         match outcome {
             Ok(refs) => self.send(CommandId::Select, CommandPayload::Selection(refs)),
             Err(error) => {
-                if let Some(handle) = self.core.handle.borrow().as_ref() {
-                    let _ = handle.set_status(format!("选择失败：{error}"));
-                }
+                // Catalog-only status; no hardcoded user text.
+                let _ = self
+                    .core
+                    .set_catalog_status("command.failed", &[("error", &error.to_string())]);
+                super::flush_pending();
             }
         }
     }
@@ -206,7 +177,7 @@ impl WebViewInput {
                         .get(&self.viewport)
                     {
                         None => return,
-                        Some(viewport) => match pick::canvas_size(&self.core.handle, viewport) {
+                        Some(viewport) => match pick::canvas_size(&self.handle, viewport) {
                             None => return,
                             Some(size) => pick::map_canvas_point(viewport, size, logical),
                         },
@@ -225,7 +196,7 @@ impl WebViewInput {
                 return;
             }
         }
-        super::push_state(&self.core);
+        super::flush_pending();
     }
 }
 

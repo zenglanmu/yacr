@@ -27,12 +27,23 @@ pub struct CadView {
 }
 
 impl CadView {
+    /// Build a facade over a freshly created session that consumes `incoming`.
+    ///
+    /// Retained for the legacy construction path; the engine-owned session is
+    /// installed with `install_existing` / `from_session`, so this constructor is
+    /// no longer called by the adapter itself.
+    #[allow(dead_code)]
     pub(super) fn new(
         handle: UiHandle,
         incoming: IncomingDocument,
         preference: BackendPreference,
     ) -> Self {
         let session = RenderSessionHandle::with_incoming(incoming.clone(), preference);
+        Self::from_session(handle, session)
+    }
+
+    pub(super) fn from_session(handle: UiHandle, session: RenderSessionHandle) -> Self {
+        let preference = session.preference();
         Self {
             session,
             messages: handle.messages.clone(),

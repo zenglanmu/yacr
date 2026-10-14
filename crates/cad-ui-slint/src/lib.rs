@@ -5,7 +5,7 @@ use std::rc::Rc;
 pub use cad_app::viewer_config::{
     ResolvedRibbon, ResolvedRibbonCommand, ResolvedRibbonGroup, ResolvedRibbonTab,
 };
-use cad_app::{Command, CommandId, CommandPayload, MeasurementToolKind};
+use cad_app::{Command, CommandId, CommandPayload, DrawToolKind, MeasurementToolKind};
 
 use cad_domain::{CadError, CadResult, DocumentId, LayerId, Point3, SpaceId, ViewportId};
 
@@ -46,9 +46,19 @@ pub mod web;
 pub use bridge::{
     build_scene, build_scene_with_fonts, build_scene_with_overrides, build_scene_with_space,
     camera2d_from_params, camera3d_from_params, fit_camera, install as install_cad_bridge,
-    install_with_preference, layout_descriptors, BridgeCamera, CadView, IncomingDocument,
-    OverlayVisibility, SnapHint, SnapHintKind,
+    install_existing as install_existing_cad_bridge, install_with_preference, layout_descriptors,
+    BridgeCamera, CadView, IncomingDocument, OverlayVisibility, SnapHint, SnapHintKind,
 };
+
+/// Owner-thread render session installed by [`install_existing_cad_bridge`].
+///
+/// Re-exported so apps can name the type handed to
+/// [`EngineAdapter::attach`] without a direct `cad-engine` dependency.
+pub use cad_engine::render::RenderSessionHandle;
+
+/// Result of one bounded engine queue pump, returned by
+/// [`EngineAdapter::pump_requests`]. Re-exported for app convenience.
+pub use cad_engine::protocol::PumpReport;
 
 pub use draw::{
     draw_error_text, draw_kind_from_label, draw_kind_labels, DrawCommandSink, DrawPreviewSink,
@@ -262,6 +272,7 @@ pub trait LayoutSwitchSink: 'static {
 #[derive(Clone)]
 pub struct UiHandle {
     viewer_config: Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>>,
+    engine_client: Rc<RefCell<Option<Rc<dyn cad_engine::protocol::EngineClient>>>>,
     ui: Weak<YacrWindow>,
     /// The active catalog. Shared with the adapter so `set_locale` can rebuild
     /// every chrome label, not just the Open button.
@@ -272,6 +283,7 @@ pub struct UiHandle {
     /// Shared with the adapter; canvas clicks only act as picks while a
     /// measurement tool is running, so navigation clicks stay silent.
     measurement_active: Rc<Cell<bool>>,
+    draw_active: Rc<Cell<bool>>,
     /// Ordered `LayerId`s matching the pushed `layer-rows` model, so a toggle
     /// callback index maps back to the exact id.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
@@ -296,33 +308,51 @@ pub struct UiHandle {
     /// Last pushed asynchronous-open snapshot (F01), so a locale switch can
     /// reformat the phase/progress labels without the host re-polling.
     import_snapshot: Rc<RefCell<Option<cad_app::ImportProgressSnapshot>>>,
+    host_state: Rc<RefCell<Option<cad_engine::protocol::HostState>>>,
+    status_message: Rc<RefCell<Option<cad_engine::protocol::StatusMessage>>>,
+    config_snapshot: Rc<RefCell<Option<cad_engine::protocol::ConfigSnapshot>>>,
+    /// Last raw backend lifecycle delta (real renderer api + outcome), kept so a
+    /// full state push or locale switch never clobbers the real backend label.
+    backend_state: Rc<RefCell<Option<cad_engine::protocol::RenderBackendState>>>,
+    /// Retained draw-tool selection. `Some` only while the host reports an active
+    /// capture; `None` (idle) leaves the previously shown selection untouched
+    /// instead of resetting it to a synthetic `Line`.
+    selected_draw_kind: Rc<Cell<Option<DrawToolKind>>>,
 }
 
 /// Owns the Slint component and routes UI callbacks into commands.
 pub struct UiAdapter {
     viewer_config: Rc<RefCell<cad_app::viewer_config::ViewerConfigStore>>,
+    engine_client: Rc<RefCell<Option<Rc<dyn cad_engine::protocol::EngineClient>>>>,
+    pub(crate) engine_dispatch: Rc<crate::engine_adapter::EngineDispatch>,
     pub configuration: UiConfiguration,
     ui: YacrWindow,
     view_input: Rc<RefCell<Option<Rc<dyn ViewInput>>>>,
+    /// Legacy logical-pixel → world converter. Retained for source compatibility
+    /// so existing hosts still compile; an attached engine now owns picking, so
+    /// no callback reads this anymore.
+    #[allow(dead_code)]
     pick_mapper: Rc<RefCell<Option<Rc<dyn CanvasPickMapper>>>>,
     /// Host sink for layout (paper-space) switches (F04); see
     /// [`LayoutSwitchSink`]. `None` makes the layout click report "unwired".
     layout_switch: Rc<RefCell<Option<Box<dyn LayoutSwitchSink>>>>,
-    /// Host sink that turns a confirmed draw/edit [`cad_app::DrawIntent`] into
-    /// exactly one drawing command (drawing-edit §2/§4). `None` makes a confirm
-    /// report "unwired" instead of fabricating a command.
+    /// Legacy confirmed-draw sink. Retained for source compatibility; an attached
+    /// engine confirms draws through `InteractionRequest::Confirm`, so no
+    /// callback reads this anymore.
+    #[allow(dead_code)]
     draw_command_sink: Rc<RefCell<Option<Box<dyn DrawCommandSink>>>>,
-    /// Host sink that receives the in-progress draw preview for the CAD overlay
-    /// ([`CadView::set_draw_preview`]). `None` simply means no live overlay.
+    /// Legacy in-progress draw preview sink; the engine publishes the preview
+    /// through `HostUpdates` and the UI mirrors it. Retained for source
+    /// compatibility only and no longer read by any callback.
+    #[allow(dead_code)]
     draw_preview_sink: Rc<RefCell<Option<Rc<dyn DrawPreviewSink>>>>,
-    /// The active draw/edit capture state, driven by this adapter's callbacks.
-    draw_tool: Rc<RefCell<Option<cad_app::DrawTool>>>,
     /// Kind currently selected in the shell; the Measure button and the canvas
     /// picks both use it so they cannot disagree.
     selected_kind: Rc<Cell<MeasurementToolKind>>,
     /// Mirrors `MeasurementUiState::active` so canvas clicks are only picks
     /// while a tool runs.
     measurement_active: Rc<Cell<bool>>,
+    draw_active: Rc<Cell<bool>>,
     /// Ordered `LayerId`s matching the pushed `layer-rows` model.
     layer_order: Rc<RefCell<Vec<LayerId>>>,
     /// Ordered `LayoutId`s matching the pushed `layout-rows` model.
@@ -347,6 +377,11 @@ pub struct UiAdapter {
     /// Last pushed asynchronous-open snapshot (F01), shared with handles so a
     /// locale switch reforms the phase/progress labels.
     import_snapshot: Rc<RefCell<Option<cad_app::ImportProgressSnapshot>>>,
+    host_state: Rc<RefCell<Option<cad_engine::protocol::HostState>>>,
+    status_message: Rc<RefCell<Option<cad_engine::protocol::StatusMessage>>>,
+    config_snapshot: Rc<RefCell<Option<cad_engine::protocol::ConfigSnapshot>>>,
+    backend_state: Rc<RefCell<Option<cad_engine::protocol::RenderBackendState>>>,
+    selected_draw_kind: Rc<Cell<Option<DrawToolKind>>>,
 }
 
 mod adapter;
@@ -355,11 +390,13 @@ mod command_completion;
 mod command_completion_ui;
 mod command_history;
 mod command_line;
+mod engine_adapter;
 mod handle;
 mod state;
 
 pub use adapter::*;
 pub use chrome::*;
+pub use engine_adapter::EngineAdapter;
 pub use state::*;
 
 #[cfg(test)]

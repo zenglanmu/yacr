@@ -57,9 +57,10 @@ trait，平台 I/O 一律走 `cad-platform` 契约；`app-linux` 只提供桌面
 权威数据库、领域类型、renderer 与显示表示，均为 UI 无关的核心契约而非 UI 实现。`cad-app` 不依赖 `cad-engine`，`cad-engine`
 不依赖 `cad-ui-slint`/`cad-host`/Slint 或直接依赖 wgpu，`cad-ui-slint` 不依赖
 `cad-host`。wgpu 仍只由 `cad-render-wgpu` 依赖，并经 renderer API/re-export 提供所需类型。
-该拆分整体仍实施中，P1 会话边界审查已通过；当前仍保留 host→`cad-ui-slint` 过渡依赖与 Slint 单
-surface/presenter。P2 才移除 host 对具体 UI 的依赖并将工具状态归入 SessionState，P3 才实现有界语义队列及
-event-driven dirty 唤醒。不得据此宣称 host 已完成去 UI 化或跨平台性能已验证。详细决策见
+该拆分整体仍实施中，P1 会话边界审查已通过；P2-A 合同通过，P2-B 源码已有 Host/Slint/apps 去 UI 核心改动，
+Oracle attempt 4 接受 P2 架构/源码 codegate；P2 真实 GPU 证据分轮取得，非单次六用例全绿。Oracle 已最终接受 P3 queue
+codegate，P4 App/engine/Host/Web codegate 均 accept；指定 sweep 与末次差异门禁均 exit 0。P4 真实 P620/Vulkan 8 cases 全部 terminal PASS。App343/engine73/Host86/Android30/Web23/UI132+37/Linux测试的证据分轮记录。P4 是 bounded in-process API/event foundation，不是插件兼容或完整 CAD 产品；queue 压力/lag 是合成合同。browser RAF/GC/WebGPU、Android device、vendor DWG、视觉 golden 未验。不得据此宣称全平台产品验收。renderer-only wgpu
+与 Slint 单 presenter 边界仍保持。详细决策见
 `docs/adr/0005-cad-engine-decoupling.md`。
 
 `check-architecture.py` 强制的边界：`cad-domain` 不依赖任何 CAD 包；`cad-db` 只依赖

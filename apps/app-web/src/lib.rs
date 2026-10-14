@@ -13,6 +13,18 @@
 #[cfg(target_arch = "wasm32")]
 mod browser;
 
+/// Browser backend-switch decision logic (payload → preference → store →
+/// reload), kept UI-free so host tests exercise it directly. Compiled for the
+/// wasm host and for host test builds; a non-wasm non-test build has no caller.
+#[cfg(any(target_arch = "wasm32", test))]
+mod backend_switch;
+
+/// Browser request-queue wiring logic (scroll normalization, backend-switch
+/// admission, pump clock wrapper), kept UI-free so host tests exercise it
+/// directly. Compiled for the wasm host and for host test builds.
+#[cfg(any(target_arch = "wasm32", test))]
+mod request_queue;
+
 #[cfg(target_arch = "wasm32")]
 pub use browser::{font_report, open_document, renderer_report, start};
 
@@ -124,15 +136,13 @@ pub fn open_document_bytes(name: String, bytes: Vec<u8>) -> Result<(), JsValue> 
     open_document(&name, bytes).map_err(|e| JsValue::from_str(&e))
 }
 
-/// Poll the asynchronous / cancellable open and push the progress panel.
+/// Poll the host pipeline and push the real import progress panel.
 ///
-/// The JS heartbeat calls this. On a worker-capable host it publishes a current
-/// background result exactly once (the manager's stamp guard discards
-/// superseded/cancelled results) and installs the document through the shared
-/// `install_opened` path; in the browser it re-reads the synchronous fallback's
-/// real terminal snapshot. Returns the stable panel JSON (see
-/// `browser::async_open::snapshot_json`). New export; existing exports are
-/// unchanged.
+/// The JS heartbeat calls this. It runs the fixed P3 order
+/// `IO → metrics → binding.pump_requests → flush` through the host tick and
+/// reports the host's real import snapshot (`HostCore::import_snapshot`), never a
+/// platform-authored fallback. Returns the stable panel JSON (see
+/// `browser::async_open::snapshot_json`). Existing exports are unchanged.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn async_open_poll_json() -> String {

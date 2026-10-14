@@ -55,7 +55,7 @@ impl Application {
             .finish_drawing()?;
         Ok(CommandOutcome {
             objects: Vec::new(),
-            changes: Some(changes),
+            changes: Some(Arc::new(changes)),
             diagnostics: Vec::new(),
             measurement: None,
         })
@@ -96,7 +96,7 @@ impl Application {
             .finish_drawing()?;
         Ok(CommandOutcome {
             objects: Vec::new(),
-            changes: Some(changes),
+            changes: Some(Arc::new(changes)),
             diagnostics: Vec::new(),
             measurement: None,
         })

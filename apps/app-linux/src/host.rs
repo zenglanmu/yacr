@@ -1,21 +1,103 @@
 //! Thin desktop wrapper over the platform-common [`HostCore`].
 //!
-//! All controller/Slint orchestration (the open/save/plot funnels, the command
-//! routing table, the state push, the navigation/draw sinks) lives in
-//! `cad-host`; this module supplies the desktop platform implementations
-//! (file chooser + read, XDG/APPDATA config store, window surface) and owns the
-//! event loop and the 50 ms timer.
+//! All controller/host orchestration (the open/save/plot funnels, the command
+//! routing table, the single synchronous state push) lives in `cad-host`; this
+//! module supplies the desktop platform implementations (file chooser + read,
+//! XDG/APPDATA config store, live window surface), creates the UI-free render
+//! session the engine and Slint facade share, installs the one
+//! [`EngineAdapter`] binding, and owns the event loop and the 50 ms timer.
 use cad_domain::{CadError, CadResult};
+use cad_engine::protocol::EngineClient;
+use cad_engine::render::RenderSessionHandle;
 use cad_host::{HostCore, HostOptions, HostPlatform};
 use cad_platform::HostCapabilities;
-use cad_ui_slint::{UiAdapter, UiConfiguration};
+use cad_render_wgpu::BackendPreference;
+use cad_ui_slint::{CadView, EngineAdapter, UiAdapter, UiCommandSink, UiConfiguration, UiHandle};
 use slint::ComponentHandle;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
 };
+
+/// Schedules one pending pump cycle on the owner-thread event loop.
+type WakeDriver = Rc<dyn Fn(Box<dyn FnOnce()>)>;
+
+/// The desktop shell's pre-attach command slot.
+///
+/// The single engine dispatch is installed by [`EngineAdapter::attach`]
+/// immediately after construction, so this slot is never reached in production:
+/// the adapter routes every command through the engine once a client is
+/// attached. It refuses explicitly instead of silently succeeding.
+struct DetachedCommandSink;
+
+impl UiCommandSink for DetachedCommandSink {
+    fn send(&mut self, _command: cad_app::Command) -> CadResult<()> {
+        Err(CadError::Unsupported(
+            "the desktop engine dispatch is not attached".into(),
+        ))
+    }
+}
+
+/// Coalesces engine queue wake-ups into at most one scheduled pump cycle.
+///
+/// The engine is given only a `Weak`-backed, schedule-only waker: on the queue's
+/// empty→nonempty edge it schedules one cycle; a further wake while a cycle is
+/// already scheduled is coalesced (no timer storm); the engine re-arms it while
+/// queued work remains. The scheduled cycle clears the pending flag *before* it
+/// runs, so a wake that arrives while the cycle executes schedules the next one.
+/// The waker never pumps synchronously and never keeps the app alive.
+struct QueueWakeScheduler {
+    /// `true` between a wake scheduling a cycle and that cycle starting.
+    scheduled: Rc<Cell<bool>>,
+    cycle: Rc<dyn Fn()>,
+    driver: WakeDriver,
+}
+
+impl QueueWakeScheduler {
+    fn new(cycle: Rc<dyn Fn()>, driver: WakeDriver) -> Rc<Self> {
+        Rc::new(Self {
+            scheduled: Rc::new(Cell::new(false)),
+            cycle,
+            driver,
+        })
+    }
+
+    /// The schedule-only waker to register with the engine (`Weak`, so the
+    /// engine never holds a strong reference back to the app).
+    fn waker(self: &Rc<Self>) -> Rc<dyn Fn()> {
+        let weak = Rc::downgrade(self);
+        Rc::new(move || {
+            if let Some(this) = weak.upgrade() {
+                this.schedule();
+            }
+        })
+    }
+
+    /// Schedule one cycle unless one is already pending (coalesced).
+    fn schedule(self: &Rc<Self>) {
+        if self.scheduled.replace(true) {
+            return;
+        }
+        let scheduled = Rc::clone(&self.scheduled);
+        let cycle = Rc::downgrade(&self.cycle);
+        (self.driver)(Box::new(move || {
+            scheduled.set(false);
+            if let Some(cycle) = cycle.upgrade() {
+                cycle();
+            }
+        }));
+    }
+}
+
+/// Report a pump-cycle failure through the catalog and republish the status.
+fn report_cycle_error(rt: &HostCore, binding: &EngineAdapter, error: &CadError) {
+    if let Some(diagnostic) = timer_error_diagnostic(error) {
+        let _ = rt.set_catalog_status("linux.failed", &[("error", &diagnostic)]);
+        let _ = binding.flush_updates();
+    }
+}
 
 pub mod config_file;
 mod file_picker;
@@ -123,6 +205,15 @@ impl LinuxOptions {
 pub struct LinuxApp {
     pub adapter: UiAdapter,
     runtime: HostCore,
+    /// The single engine→UI binding: holds the client, the UI handle and the
+    /// shared render session, and drives `refresh_metrics`/`flush_updates`.
+    binding: Rc<EngineAdapter>,
+    /// The Slint-facing compatibility facade over the shared render session.
+    /// Always `Some` once construction returns; the slot mirrors the old
+    /// core-owned `view` and is retained for acceptance/inspection.
+    view: RefCell<Option<CadView>>,
+    /// The single-shot queue waker scheduler registered with the engine.
+    scheduler: Rc<QueueWakeScheduler>,
     timer: slint::Timer,
     /// Diagnostics from reading the config / preference files at startup.
     startup_diagnostics: Vec<String>,
@@ -164,10 +255,14 @@ impl LinuxApp {
             .preferences
             .clone()
             .or_else(config_file::default_preference_path);
-        // The handle slot is shared between the core and the desktop surface
-        // source, so `surface()` reads the live window without the core having
-        // to hand its handle out.
-        let handle_slot: Rc<RefCell<Option<cad_ui_slint::UiHandle>>> = Rc::new(RefCell::new(None));
+        // The render session is created UI-free: the engine owns it, the desktop
+        // surface only reads the live window, and Slint installs its presenter
+        // hooks around the same session.
+        let render = RenderSessionHandle::new(BackendPreference::WebGpu);
+        // The handle slot is shared between the desktop surface source and the
+        // app, so `surface()` reads the live window without the engine owning a
+        // UI handle.
+        let handle_slot: Rc<RefCell<Option<UiHandle>>> = Rc::new(RefCell::new(None));
         let host_options = HostOptions {
             fonts: options.fonts.clone(),
             fonts_dir: options.fonts_dir.clone(),
@@ -175,7 +270,6 @@ impl LinuxApp {
             headless: options.headless,
             drawing: options.drawing.clone(),
             size: options.size,
-            locale: options.locale.clone(),
         };
         let platform = HostPlatform {
             files: Rc::new(platform::DesktopFiles::new(&options, picker, saver)),
@@ -193,7 +287,7 @@ impl LinuxApp {
                 import_worker: !options.headless,
             },
         };
-        let runtime = HostCore::new(host_options, handle_slot, platform)?;
+        let runtime = HostCore::new(host_options, platform, render.clone())?;
         let config = {
             let c = runtime.controller.borrow();
             UiConfiguration {
@@ -204,10 +298,9 @@ impl LinuxApp {
                 ..UiConfiguration::default()
             }
         };
-        let mut adapter = UiAdapter::new(config, runtime.clone(), true)?;
-        // The same command funnel serves as the layout-switch sink: a layout click
-        // dispatches the validated `SwitchSpace` command (docs/layouts.md §4).
-        adapter.set_layout_switch_sink(Box::new(runtime.clone()));
+        // The legacy slot is never reached once `EngineAdapter::attach` installs
+        // the single engine dispatch below.
+        let mut adapter = UiAdapter::new(config, DetachedCommandSink, true)?;
         adapter
             .component()
             .set_can_open(!options.headless || options.drawing.is_some());
@@ -217,7 +310,8 @@ impl LinuxApp {
         if !options.headless {
             adapter.window().set_maximized(true);
         }
-        runtime.set_handle(adapter.handle());
+        let handle = adapter.handle();
+        *handle_slot.borrow_mut() = Some(handle.clone());
         // Read the host config and user preference before the first state push;
         // a malformed file is reported and never aborts startup.
         let startup_diagnostics = runtime.load_startup();
@@ -225,37 +319,23 @@ impl LinuxApp {
             eprintln!("yacr-linux: {diagnostic}");
         }
         runtime.open_configured_drawing()?;
-        let incoming = Rc::new(RefCell::new(runtime.controller.borrow().drawing()));
-        let view = cad_ui_slint::install_cad_bridge(adapter.handle(), adapter.window(), incoming)?;
+        // Install Slint's presenter hooks around the engine-owned session.
+        let view = cad_ui_slint::install_existing_cad_bridge(
+            handle.clone(),
+            adapter.window(),
+            render.clone(),
+        )?;
         // Fonts: the sibling `fonts/` package, `--font` entries, then the system
-        // default fallback. A drawing font that is missing shapes with the
-        // default instead of being dropped.
-        runtime.install_fonts(&view)?;
-        runtime.install_images(&view)?;
-        runtime.set_view(view);
-        // A status-bar overlay toggle changes the shared config store but does not
-        // run the host `push()` funnel, so without mirroring the new visibility
-        // onto the view the toggle would update only the button (grid "enabled"
-        // but never drawn). Mirror it on every real config change. The observer
-        // receives the config directly, so it never re-borrows the store (which
-        // is mutably borrowed during `publish`).
-        {
-            let view_slot = runtime.view.clone();
-            adapter
-                .handle()
-                .on_config_changed(Rc::new(move |config, _revision| {
-                    if let Some(view) = view_slot.borrow().as_ref() {
-                        view.set_overlay_visibility(config.view.overlays.clone().into());
-                    }
-                }))
-                .map_err(|error| CadError::Invariant(error.to_string()))?;
-        }
-        adapter.set_view_input(Rc::new(runtime.clone()));
-        adapter.set_canvas_pick_mapper(Rc::new(runtime.clone()));
-        adapter.set_draw_command_sink(Box::new(runtime.clone()));
-        adapter.set_draw_preview_sink(Rc::new(runtime.clone()));
-        runtime.push()?;
-        adapter.handle().set_status(runtime.message(
+        // default fallback. The resource strategy installs onto the shared
+        // session, so the facade needs no separate view argument.
+        runtime.install_fonts()?;
+        runtime.install_images()?;
+        // The single engine→UI binding; it installs the dispatch callbacks and is
+        // the only state path (no legacy sink is registered, so there is no
+        // double dispatch).
+        let client: Rc<dyn EngineClient> = Rc::new(runtime.clone());
+        let binding = Rc::new(EngineAdapter::attach(&mut adapter, client, view.clone())?);
+        runtime.set_catalog_status(
             if options.drawing.is_some() && options.headless {
                 "linux.opened"
             } else if options.drawing.is_some() {
@@ -264,35 +344,68 @@ impl LinuxApp {
                 "status.synthetic"
             },
             &[],
-        ))?;
+        )?;
         // Surface the first startup problem on the status bar; the full list is
         // logged above and retained for tests.
         if let Some(diagnostic) = startup_diagnostics.first() {
-            adapter
-                .handle()
-                .set_status(runtime.message("linux.failed", &[("error", diagnostic)]))?;
+            runtime.set_catalog_status("linux.failed", &[("error", diagnostic)])?;
         }
-        // Retain the timer: real desktop resize and drawer changes update content
-        // metrics without refitting.
+        // Publish the initial full/navigation/config/status state through the one
+        // binding. An attached host no longer pushes through a UI handle.
+        binding.flush_updates()?;
+        // One owner-thread pump cycle (the apps fixed order): necessary I/O poll
+        // → refresh metrics → `pump_requests` (which advances the queue and
+        // drains completions) → UI `flush_updates` → redraw the surface only when
+        // the engine actually has a dirty CAD frame. A completion that does not
+        // dirty the session never wakes the window (no revision churn).
+        let cycle: Rc<dyn Fn()> = {
+            let rt = runtime.clone();
+            let cycle_binding = binding.clone();
+            let cycle_view = view.clone();
+            Rc::new(move || {
+                if let Err(error) = rt.tick() {
+                    report_cycle_error(&rt, &cycle_binding, &error);
+                }
+                if let Err(error) = cycle_binding.refresh_metrics() {
+                    report_cycle_error(&rt, &cycle_binding, &error);
+                }
+                if let Err(error) = cycle_binding.pump_requests() {
+                    report_cycle_error(&rt, &cycle_binding, &error);
+                }
+                if let Err(error) = cycle_binding.flush_updates() {
+                    report_cycle_error(&rt, &cycle_binding, &error);
+                }
+                if rt.render.cad_frame_dirty() {
+                    cycle_view.request_redraw();
+                }
+            })
+        };
+        // The engine holds only a weak, schedule-only waker. The queue's
+        // empty→nonempty edge schedules one coalesced cycle; queued work re-arms
+        // it. The waker never pumps synchronously and never keeps the app alive.
+        let scheduler = QueueWakeScheduler::new(
+            cycle.clone(),
+            Rc::new(|fire| {
+                slint::Timer::single_shot(std::time::Duration::from_millis(0), fire);
+            }),
+        );
+        binding.set_request_waker(Some(scheduler.waker()))?;
+        // The retained 50 ms timer is the I/O poll (file/import completions and
+        // window resize metrics), not the queue scheduler. Its pump is a no-op
+        // when the queue is empty, so there is no permanent CAD busy-poll.
         let timer = slint::Timer::default();
-        let rt = runtime.clone();
+        let cycle_timer = cycle.clone();
         timer.start(
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(50),
-            move || {
-                if let Err(error) = rt.tick() {
-                    if let Some(diagnostic) = timer_error_diagnostic(&error) {
-                        if let Some(handle) = rt.handle.borrow().as_ref() {
-                            let _ = handle
-                                .set_status(rt.message("linux.failed", &[("error", &diagnostic)]));
-                        }
-                    }
-                }
-            },
+            move || cycle_timer(),
         );
         Ok(Self {
             adapter,
             runtime,
+            binding,
+            view: RefCell::new(Some(view)),
+            scheduler,
             timer,
             startup_diagnostics,
         })
@@ -318,6 +431,10 @@ impl LinuxApp {
     }
     pub fn run(&self) -> CadResult<()> {
         let _ = &self.timer;
+        // Retain the owned engine→UI binding and its queue-wake scheduler for the
+        // process lifetime.
+        let _ = &self.binding;
+        let _ = &self.scheduler;
         self.adapter
             .component()
             .run()
@@ -354,6 +471,30 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> CadResult<()> {
 #[cfg(test)]
 mod tests {
     use slint::ComponentHandle;
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    /// Install the process-global offscreen platform once per test binary.
+    fn install_offscreen() {
+        use std::sync::OnceLock;
+        static PLATFORM: OnceLock<Result<(), String>> = OnceLock::new();
+        let result = PLATFORM
+            .get_or_init(|| cad_ui_slint::offscreen::install().map_err(|error| error.to_string()));
+        if let Err(error) = result {
+            panic!("offscreen platform install failed: {error}");
+        }
+    }
+
+    /// Serialize the app-showing tests: the offscreen platform installs a
+    /// process-global rendering notifier, so only one shown `LinuxApp` may exist
+    /// at a time (the same convention as the other desktop test binaries).
+    fn serial_app_guard() -> std::sync::MutexGuard<'static, ()> {
+        use std::sync::{Mutex, OnceLock};
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     #[test]
     fn timer_ignores_cancellation_but_reports_real_errors() {
@@ -375,13 +516,72 @@ mod tests {
         c.application.workspace.viewports[&c.viewport_id].world_per_px()
     }
 
+    /// Synthetic wiring contract for the P2-B desktop path: the engine client
+    /// and the Slint facade share exactly one owner-thread render session, the
+    /// core owns no UI handle (the engine binding publishes status), and an
+    /// unchanged poll neither re-dirties nor requests a redraw.
+    #[test]
+    fn desktop_engine_binding_shares_one_session_and_idle_poll_does_not_redraw() {
+        let _guard = serial_app_guard();
+        install_offscreen();
+        let app = crate::LinuxApp::new(crate::LinuxOptions {
+            headless: true,
+            ..Default::default()
+        })
+        .unwrap();
+        app.adapter.component().show().unwrap();
+        let view = app
+            .view
+            .borrow()
+            .clone()
+            .expect("LinuxApp installs its CadView");
+
+        // 1. Session identity: the engine and the facade must be the same
+        //    owner-thread session (`EngineAdapter::attach` rejects a mismatch).
+        assert!(
+            app.runtime.render.same_session(&view.render_session()),
+            "engine client and UI facade must share one render session"
+        );
+
+        // 2. The core owns no UI handle: the initial status reached the shell
+        //    only through the engine binding's `flush_updates`, and its text is
+        //    the localized resolution of the host's own last status.
+        let expected =
+            cad_ui_slint::MessageSource::from_request(&crate::LinuxOptions::default().locale)
+                .text("status.synthetic", &[]);
+        assert_eq!(
+            app.adapter.component().get_status_label().to_string(),
+            expected,
+            "the engine binding must publish host status without a core-owned handle"
+        );
+
+        // 3. No idle redraw: drain the initial publication, then poll and flush
+        //    with no state change; the facade must not request another frame.
+        app.binding.flush_updates().unwrap();
+        app.runtime.tick().unwrap();
+        app.binding.refresh_metrics().unwrap();
+        app.binding.pump_requests().unwrap();
+        app.binding.flush_updates().unwrap();
+        let baseline = view.redraw_requests();
+        app.runtime.tick().unwrap();
+        app.binding.refresh_metrics().unwrap();
+        app.binding.pump_requests().unwrap();
+        app.binding.flush_updates().unwrap();
+        assert_eq!(
+            view.redraw_requests(),
+            baseline,
+            "an unchanged poll must not request another redraw"
+        );
+    }
+
     /// The desktop wheel comes from Slint's winit backend, whose positive
     /// `delta_y` is a wheel-up rotation (winit documents positive as content
     /// moving down / revealing content above). Wheel-up must therefore zoom in
     /// (a smaller world-per-pixel), matching every other host's "up = closer".
     #[test]
     fn desktop_wheel_up_zooms_in() {
-        cad_ui_slint::offscreen::install().unwrap();
+        let _guard = serial_app_guard();
+        install_offscreen();
         let app = crate::LinuxApp::new(crate::LinuxOptions {
             headless: true,
             ..Default::default()
@@ -419,6 +619,201 @@ mod tests {
         assert!(
             after_down > after_up,
             "wheel down must zoom out: {after_up} -> {after_down}"
+        );
+    }
+
+    /// Deterministic stand-in for the single-shot event-loop driver: records
+    /// scheduled cycles and lets a test fire them synchronously (no real timer).
+    #[derive(Default)]
+    struct FakeDriver {
+        scheduled: Cell<usize>,
+        pending: RefCell<Vec<Box<dyn FnOnce()>>>,
+    }
+
+    impl FakeDriver {
+        fn driver(self: &Rc<Self>) -> super::WakeDriver {
+            let me = Rc::clone(self);
+            Rc::new(move |fire| {
+                me.scheduled.set(me.scheduled.get() + 1);
+                me.pending.borrow_mut().push(fire);
+            })
+        }
+
+        fn scheduled_count(&self) -> usize {
+            self.scheduled.get()
+        }
+
+        fn fire_pending(&self) {
+            for _ in 0..64 {
+                let next = self.pending.borrow_mut().pop();
+                match next {
+                    Some(fire) => fire(),
+                    None => return,
+                }
+            }
+            panic!("fake driver kept rescheduling; cycles did not settle");
+        }
+    }
+
+    /// The queue waker is coalesced: waking while a cycle is already scheduled
+    /// does not schedule another; after the cycle runs, a wake schedules again.
+    #[test]
+    fn queue_wake_coalesces_pending_cycles_and_rearms_after_firing() {
+        let cycles = Rc::new(Cell::new(0usize));
+        let cycle: Rc<dyn Fn()> = {
+            let cycles = cycles.clone();
+            Rc::new(move || cycles.set(cycles.get() + 1))
+        };
+        let driver = Rc::new(FakeDriver::default());
+        let scheduler = super::QueueWakeScheduler::new(cycle, driver.driver());
+        let waker = scheduler.waker();
+
+        waker();
+        waker();
+        assert_eq!(
+            driver.scheduled_count(),
+            1,
+            "a wake while a cycle is pending must be coalesced"
+        );
+        driver.fire_pending();
+        assert_eq!(cycles.get(), 1);
+
+        waker();
+        assert_eq!(
+            driver.scheduled_count(),
+            2,
+            "after firing, a wake (the host re-arm) must schedule again"
+        );
+        driver.fire_pending();
+        assert_eq!(cycles.get(), 2);
+    }
+
+    /// The engine's waker is weak: dropping the scheduler leaves an inert waker
+    /// (no panic, no schedule) instead of a strong reference cycle.
+    #[test]
+    fn queue_wake_weak_handle_expires_and_waker_is_inert() {
+        let driver = Rc::new(FakeDriver::default());
+        let scheduler = super::QueueWakeScheduler::new(Rc::new(|| {}), driver.driver());
+        let waker = scheduler.waker();
+        drop(scheduler);
+        waker();
+        assert_eq!(
+            driver.scheduled_count(),
+            0,
+            "an expired waker must be inert"
+        );
+    }
+
+    /// End-to-end queue wire against the **real** engine `RequestQueue` (no UI,
+    /// so it does not contend for the process-global Slint platform): the queue's
+    /// empty→nonempty edge wakes exactly once, the fired cycle executes the
+    /// request through the real queue state machine, a drained queue does not
+    /// re-arm, and an empty/idle queue stages no wake. The window-level
+    /// idle-no-redraw contract stays covered by the app test above.
+    #[test]
+    fn queue_submit_schedules_once_and_empty_queue_stages_no_wake() {
+        use cad_app::interaction::{InteractionRequest, PointInput};
+        use cad_domain::{DocumentId, ViewportId};
+        use cad_engine::protocol::{
+            EngineRequest, InteractionOutcome, RequestContext, RequestResult,
+        };
+        use cad_engine::queue::RequestQueue;
+
+        let queue = Rc::new(RequestQueue::new());
+        let driver = Rc::new(FakeDriver::default());
+        let executed = Rc::new(Cell::new(0usize));
+        let cycle: Rc<dyn Fn()> = {
+            let queue = queue.clone();
+            let executed = executed.clone();
+            Rc::new(move || {
+                if let Some(mut executing) = queue.begin() {
+                    let _ = executing.take_request();
+                    executing.complete(Ok(RequestResult::Interaction(
+                        InteractionOutcome::CursorMoved,
+                    )));
+                    executed.set(executed.get() + 1);
+                }
+            })
+        };
+        let scheduler = super::QueueWakeScheduler::new(cycle, driver.driver());
+        let waker = scheduler.waker();
+
+        let context = RequestContext {
+            document: DocumentId(0),
+            document_generation: 0,
+            viewport: ViewportId(0),
+            tool_generation: None,
+            metrics_revision: Some(0),
+            config_revision: 0,
+        };
+        let request =
+            EngineRequest::Interaction(InteractionRequest::MoveCursor(PointInput::CanvasLocal {
+                logical_position: [12.0, 12.0],
+                metrics_revision: 0,
+            }));
+        queue
+            .submit(context, request)
+            .expect("the real queue must accept an async MoveCursor");
+        if queue.take_wake() {
+            waker();
+        }
+        assert_eq!(
+            driver.scheduled_count(),
+            1,
+            "empty→nonempty must schedule exactly one cycle"
+        );
+
+        driver.fire_pending();
+        assert_eq!(
+            executed.get(),
+            1,
+            "the fired cycle must execute the request"
+        );
+        assert!(
+            !queue.pending(),
+            "the queue must be drained after execution"
+        );
+
+        // The host re-arms only while queued work remains.
+        if queue.rearm_wake() {
+            waker();
+        }
+        assert_eq!(
+            driver.scheduled_count(),
+            1,
+            "a drained queue must not re-arm another wake"
+        );
+
+        // Idle: an empty queue stages no wake at all (no idle window wake).
+        assert!(!queue.pending());
+        assert!(!queue.take_wake());
+        assert!(!queue.rearm_wake());
+        assert_eq!(driver.scheduled_count(), 1);
+    }
+
+    /// An empty real queue never stages a wake — the mechanism that keeps an idle
+    /// desktop from waking or redrawing the window.
+    #[test]
+    fn idle_queue_stages_no_wake() {
+        use cad_engine::queue::RequestQueue;
+
+        let queue = Rc::new(RequestQueue::new());
+        let driver = Rc::new(FakeDriver::default());
+        let cycle: Rc<dyn Fn()> = Rc::new(|| {});
+        let scheduler = super::QueueWakeScheduler::new(cycle, driver.driver());
+        let waker = scheduler.waker();
+
+        assert!(!queue.pending());
+        if queue.take_wake() {
+            waker();
+        }
+        if queue.rearm_wake() {
+            waker();
+        }
+        assert_eq!(
+            driver.scheduled_count(),
+            0,
+            "an idle queue must stage no wake"
         );
     }
 }

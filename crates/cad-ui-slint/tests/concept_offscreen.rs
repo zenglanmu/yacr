@@ -5,7 +5,7 @@ use cad_domain::CadResult;
 use cad_render_wgpu::headless::{encode_png, RgbaImage};
 use cad_ui_slint::{offscreen, UiAdapter, UiCommandSink, UiConfiguration};
 use slint::ComponentHandle;
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::Cell, cell::RefCell, rc::Rc, sync::Arc};
 
 struct Sink(Rc<RefCell<Vec<CommandId>>>);
 impl UiCommandSink for Sink {
@@ -130,6 +130,19 @@ fn concept_shell_renders_on_lavapipe_and_canvas_only_removes_hit_regions() {
             assert!(!adapter.handle().canvas_hit_test([345.0, 92.0]).unwrap());
             assert!(!adapter.handle().canvas_hit_test([32.0, 80.0]).unwrap());
             assert!(adapter.handle().canvas_hit_test([180.0, 400.0]).unwrap());
+            // Measurement is engine-owned after the decoupling, so the shell
+            // action is observed through its callbacks rather than a legacy
+            // `Measure` command. Either the start button or the kind selector is
+            // a valid single action; both funnel to the one measure control.
+            let measures = Rc::new(Cell::new(0));
+            let observed = measures.clone();
+            adapter.component().on_measure_requested(move || {
+                observed.set(observed.get() + 1);
+            });
+            let observed = measures.clone();
+            adapter.component().on_measure_kind_selected(move |_| {
+                observed.set(observed.get() + 1);
+            });
             click(&adapter, 145.0, 810.0);
             let frame = pump(&adapter);
             save("mobile-tools", &frame);
@@ -138,7 +151,7 @@ fn concept_shell_renders_on_lavapipe_and_canvas_only_removes_hit_regions() {
             // fixed bottom bar, so the ribbon content sits 52px higher; target
             // the measure control accordingly.
             click(&adapter, 52.0, 656.0);
-            assert_eq!(&*commands.borrow(), &[CommandId::Measure]);
+            assert_eq!(measures.get(), 1, "the measure control dispatches once");
             commands.borrow_mut().clear();
             adapter.component().set_tools_open(false);
             adapter.component().set_side_panel_open(true);

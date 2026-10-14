@@ -1,8 +1,9 @@
 //! Android-specific panel overlay on top of the shared state funnel.
 //!
 //! The generic panels (layers/properties/layout/diagnostics/view state), the
-//! resources drawer and the view sync are pushed by `cad_host::HostCore::push`.
-//! This module adds the two channels that are genuinely Android-specific:
+//! resources drawer and the view sync are mirrored from `HostUpdates` by the
+//! attached `EngineAdapter` (`flush_updates`). This module adds the two channels
+//! that are genuinely Android-specific:
 //!
 //! * the asynchronous-open progress panel (the shared push does not set it; the
 //!   poll driver does, and a command must not leave it stale); and
@@ -18,11 +19,12 @@
 use std::cell::RefCell;
 
 use cad_app::host::HostController;
+use cad_engine::protocol::{FontResourceState, ResourceState};
 use cad_host::HostCore;
 use cad_platform::fonts::FontLoadReport;
 use cad_ui_slint::{
     FontResourceSummary, ImportProgressUiState, ImportResourceSummary, ReferencesResourceSummary,
-    ResourceCompleteness, ResourceSections,
+    ResourceCompleteness, ResourceSections, UiHandle,
 };
 
 // Last font-loading report, set by the platform font path (the Android asset
@@ -58,29 +60,46 @@ pub(crate) fn take_pending_font_status() -> Option<String> {
     PENDING_FONT_STATUS.with(|slot| slot.borrow_mut().take())
 }
 
-/// Run one command through the shared funnel, then re-apply the Android overlay.
+/// Overlay the Android asset-loader resource facts onto a host-derived resource
+/// state before it reaches the shell.
 ///
-/// `HostCore::execute` already pushes every generic panel; the Android overlay
-/// (the import progress panel and the resources font summary) is re-applied
-/// after it so a command cannot clobber them or claim images are modeled.
+/// The UI-free host cannot read the APK asset loader, so its own
+/// `HostState.resources` leaves `fonts: None` (unavailable) and reports
+/// `images_modeled: true`. Android resolves fonts through its asset loader and
+/// does not model raster images, so the composition root injects the real font
+/// report and the honest `images_modeled: false` into every full update. This
+/// keeps the drawer correct on command-driven pushes (the generic path) as well
+/// as on the poll/overlay path, without changing the shared schema.
+pub(crate) fn apply_android_resources(resources: &mut ResourceState) {
+    resources.fonts = last_font_report().map(|report| FontResourceState {
+        catalog_entries: report.catalog_entries,
+        requested: report.requested,
+        planned: report.planned,
+        registered: report.registered,
+        failed: report.failed,
+        unresolved: report.unresolved,
+        default_face: report.default_face,
+    });
+    resources.proxy = None;
+    resources.images_modeled = false;
+}
+
+/// Run one command through the shared core funnel.
+///
+/// The engine-owned UI callbacks reach the core through `EngineClient::dispatch`
+/// and mirror the resulting state via `EngineAdapter::flush_updates`; this
+/// helper is retained only for the legacy pre-attach sink, which drives
+/// `HostCore::execute` directly.
 pub(crate) fn run_command(core: &HostCore, command: cad_app::Command) -> cad_domain::CadResult<()> {
-    let result = core.execute(command);
-    push_android_overlay(core);
-    result
+    core.execute(command)
 }
 
-/// Push every derived panel state and the Android overlay in one place.
-pub(crate) fn push_android_state(core: &HostCore) {
-    if let Err(error) = core.push() {
-        log::warn!("android host state push failed: {error}");
-    }
-    push_android_overlay(core);
-}
-
-/// The two channels the shared `HostCore::push` does not cover.
-pub(crate) fn push_android_overlay(core: &HostCore) {
-    push_import_state(core);
-    push_resource_sections(core);
+/// The two Android-specific channels the generic `HostUpdates` push does not
+/// fully cover: the synthesized in-read import snapshot and the asset-loader
+/// font summary (which the host cannot read and would otherwise clear).
+pub(crate) fn push_android_overlay(handle: &UiHandle, core: &HostCore) {
+    push_import_state(handle, core);
+    push_resource_sections(handle, core);
 }
 
 /// Push the asynchronous-open progress panel from the shared import snapshot.
@@ -90,11 +109,8 @@ pub(crate) fn push_android_overlay(core: &HostCore) {
 /// state (before the async job exists), so the panel is not cleared during the
 /// sample-path read. Idle/opened clear the panel; cancelled/failed stay visible
 /// with their explicit terminal text.
-pub(crate) fn push_import_state(core: &HostCore) {
-    let Some(handle) = core.handle.borrow().as_ref().cloned() else {
-        return;
-    };
-    let messages = core.messages();
+pub(crate) fn push_import_state(handle: &UiHandle, core: &HostCore) {
+    let messages = crate::platform::messages();
     let snapshot = core.import_snapshot();
     let state = ImportProgressUiState::from_snapshot(snapshot.as_ref(), &messages);
     let _ = handle.set_import_state(&state);
@@ -105,10 +121,7 @@ pub(crate) fn push_import_state(core: &HostCore) {
 /// Overrides the shared push's font section with the Android asset loader's real
 /// `FontLoadReport`, and keeps `images_modeled: false`: Android does not model
 /// raster images this phase.
-pub(crate) fn push_resource_sections(core: &HostCore) {
-    let Some(handle) = core.handle.borrow().as_ref().cloned() else {
-        return;
-    };
+pub(crate) fn push_resource_sections(handle: &UiHandle, core: &HostCore) {
     let controller = core.controller.borrow();
     let sections = resource_sections(&controller, last_font_report().as_ref());
     let _ = handle.set_resources_sections(&sections);

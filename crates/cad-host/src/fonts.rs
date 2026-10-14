@@ -15,10 +15,10 @@ use super::*;
 /// refuse explicitly (`Unsupported`) rather than silently no-op.
 pub trait HostResources {
     /// (Re)load the shaping fonts the current drawing references onto `view`.
-    fn install_fonts(&self, core: &HostCore, view: &CadView) -> CadResult<()>;
+    fn install_fonts(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()>;
 
     /// (Re)load the drawing's raster images onto `view`.
-    fn install_images(&self, core: &HostCore, view: &CadView) -> CadResult<()>;
+    fn install_images(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()>;
 }
 
 /// A strategy for a host that resolves resources through its own path (or does
@@ -26,13 +26,13 @@ pub trait HostResources {
 pub struct UnsupportedResources;
 
 impl HostResources for UnsupportedResources {
-    fn install_fonts(&self, _core: &HostCore, _view: &CadView) -> CadResult<()> {
+    fn install_fonts(&self, _core: &HostCore, _render: &RenderSessionHandle) -> CadResult<()> {
         Err(CadError::Unsupported(
             "font loading is not wired for this host yet".into(),
         ))
     }
 
-    fn install_images(&self, _core: &HostCore, _view: &CadView) -> CadResult<()> {
+    fn install_images(&self, _core: &HostCore, _render: &RenderSessionHandle) -> CadResult<()> {
         Err(CadError::Unsupported(
             "image loading is not wired for this host yet".into(),
         ))
@@ -41,13 +41,13 @@ impl HostResources for UnsupportedResources {
 
 impl HostCore {
     /// (Re)load shaping fonts for the current drawing through the host strategy.
-    pub fn install_fonts(&self, view: &CadView) -> CadResult<()> {
-        self.resources.install_fonts(self, view)
+    pub fn install_fonts(&self) -> CadResult<()> {
+        self.resources.install_fonts(self, &self.render)
     }
 
     /// (Re)load the drawing's raster images through the host strategy.
-    pub fn install_images(&self, view: &CadView) -> CadResult<()> {
-        self.resources.install_images(self, view)
+    pub fn install_images(&self) -> CadResult<()> {
+        self.resources.install_images(self, &self.render)
     }
 }
 
@@ -64,7 +64,7 @@ impl HostResources for DesktopResources {
     /// Reads the sibling `fonts/` package (or `--fonts-dir`), merges explicit
     /// `--font` entries and installs a best-effort system default face as the
     /// first fallback.
-    fn install_fonts(&self, core: &HostCore, view: &CadView) -> CadResult<()> {
+    fn install_fonts(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()> {
         let requested = core
             .controller
             .borrow()
@@ -72,8 +72,12 @@ impl HostResources for DesktopResources {
             .map(|drawing| cad_platform::fonts::requested_fonts(drawing.as_ref()))
             .unwrap_or_default();
         match core.load_font_engine(&requested)? {
-            Some(engine) => view.set_fonts(engine),
-            None => view.clear_fonts(),
+            Some(engine) => {
+                render.set_fonts(Some(engine));
+            }
+            None => {
+                render.set_fonts(None);
+            }
         }
         Ok(())
     }
@@ -85,7 +89,7 @@ impl HostResources for DesktopResources {
     /// and installs the cache on the view. An empty request clears the cache.
     /// Unresolved/undecodable keys are retained in `last_image_report` and
     /// surfaced by the diagnostics drawer, never silently dropped.
-    fn install_images(&self, core: &HostCore, view: &CadView) -> CadResult<()> {
+    fn install_images(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()> {
         let requested = core
             .controller
             .borrow()
@@ -93,7 +97,7 @@ impl HostResources for DesktopResources {
             .map(|drawing| cad_platform::images::requested_images(drawing.as_ref()))
             .unwrap_or_default();
         if requested.is_empty() {
-            view.clear_images();
+            render.set_images(None);
             *core.last_image_report.borrow_mut() = None;
             return Ok(());
         }
@@ -111,9 +115,9 @@ impl HostResources for DesktopResources {
             &cad_resources::ResourceLimits::default(),
         )?;
         if cache.is_empty() {
-            view.clear_images();
+            render.set_images(None);
         } else {
-            view.set_images(cache);
+            render.set_images(Some(cache));
         }
         *core.last_image_report.borrow_mut() = Some(report);
         Ok(())
@@ -165,7 +169,7 @@ impl HostCore {
         if requested.is_empty() {
             return Ok(None);
         }
-        match self.view.borrow().as_ref().and_then(|view| view.fonts()) {
+        match self.render.fonts() {
             Some(engine) => Ok(Some(engine)),
             None => Err(CadError::Unsupported(
                 self.message("web.fonts_unavailable", &[]),

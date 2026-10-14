@@ -603,6 +603,9 @@ impl StatusModel {
         let tool = match &session.tool {
             ToolState::Idle => ToolStatus::None,
             ToolState::Selecting => ToolStatus::Select,
+            // The legacy status projection has no draw-specific catalog value;
+            // preview/status panels consume the typed draw snapshot directly.
+            ToolState::Drawing(_) => ToolStatus::None,
             ToolState::Measuring(_) => ToolStatus::Measure,
             ToolState::Panning => ToolStatus::Pan,
         };

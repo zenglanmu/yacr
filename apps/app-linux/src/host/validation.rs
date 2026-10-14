@@ -18,7 +18,6 @@ impl LinuxApp {
             let frame = cad_ui_slint::offscreen::snapshot(self.adapter.window())
                 .map_err(|e| CadError::Unsupported(e.to_string()))?;
             if self
-                .runtime
                 .view
                 .borrow()
                 .as_ref()
@@ -33,7 +32,7 @@ impl LinuxApp {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         };
-        let view = self.runtime.view.borrow();
+        let view = self.view.borrow();
         let view = view.as_ref().ok_or(CadError::Cancelled)?;
         if let Some(error) = view.last_error() {
             return Err(CadError::Unsupported(error));
@@ -97,7 +96,7 @@ impl LinuxApp {
             encode_png(&after).map_err(CadError::InvalidInput)?,
         )
         .map_err(|e| CadError::InvalidInput(e.to_string()))?;
-        let view = self.runtime.view.borrow();
+        let view = self.view.borrow();
         let view = view.as_ref().ok_or(CadError::Cancelled)?;
         let report = serde_json::json!({ "schemaVersion": 1, "host": "app-linux", "softwareGpu": true,
             "source": if self.runtime.options.drawing.is_some() { "external-drawing" } else { "synthetic" },
@@ -139,6 +138,147 @@ fn changed_cad_pixels(before: &RgbaImage, after: &RgbaImage, rect: [f64; 4], sca
 mod tests {
     use super::*;
     use cad_app::host::HostController;
+
+    /// Resolve a host status the same way the UI handle does, so a status
+    /// assertion compares the real localized label rather than a raw variant.
+    fn resolve_status(status: &cad_engine::protocol::StatusMessage, locale: &str) -> String {
+        match status {
+            cad_engine::protocol::StatusMessage::ExternalText(text) => text.clone(),
+            cad_engine::protocol::StatusMessage::Catalog { key, args } => {
+                let values = args
+                    .iter()
+                    .map(|arg| (arg.key.as_str(), arg.value.as_str()))
+                    .collect::<Vec<_>>();
+                cad_ui_slint::MessageSource::from_request(locale).text(key, &values)
+            }
+        }
+    }
+
+    /// UI-free contract over the *actual* reference-grid overlay geometry.
+    ///
+    /// Returns `(vertical_spans_viewport, horizontal_spans_viewport)`: a
+    /// direction is `true` only when the overlay carries at least one segment of
+    /// that direction whose two endpoints reach both viewport edges on the
+    /// perpendicular axis. It reads the real batch geometry produced by
+    /// [`cad_app::render_scene::grid_overlay`] (no renderer algorithm is
+    /// re-implemented and no grid is fabricated). This is the scene-level guard
+    /// for the real-window four-edge `grid_edge_deltas` acceptance.
+    fn grid_axes_cover(
+        overlay: &cad_app::render_scene::VisualOverlay,
+        viewport: (cad_domain::Point3, cad_domain::Point3),
+    ) -> (bool, bool) {
+        let (min, max) = viewport;
+        let tol = 1e-3_f64.max((max.x - min.x).abs().max((max.y - min.y).abs()) * 1e-6);
+        let mut vertical = false;
+        let mut horizontal = false;
+        for batch in &overlay.batches {
+            if batch.color != cad_app::render_scene::GRID_COLOR {
+                continue;
+            }
+            let origin = batch.local_origin;
+            for pair in batch.vertices.as_chunks::<2>().0 {
+                let a = [
+                    origin.x + f64::from(pair[0][0]),
+                    origin.y + f64::from(pair[0][1]),
+                ];
+                let b = [
+                    origin.x + f64::from(pair[1][0]),
+                    origin.y + f64::from(pair[1][1]),
+                ];
+                let dx = (a[0] - b[0]).abs();
+                let dy = (a[1] - b[1]).abs();
+                if dx <= tol && dy > tol {
+                    let ys = [a[1], b[1]];
+                    if ys.iter().any(|y| (y - min.y).abs() <= tol)
+                        && ys.iter().any(|y| (y - max.y).abs() <= tol)
+                    {
+                        vertical = true;
+                    }
+                } else if dy <= tol && dx > tol {
+                    let xs = [a[0], b[0]];
+                    if xs.iter().any(|x| (x - min.x).abs() <= tol)
+                        && xs.iter().any(|x| (x - max.x).abs() <= tol)
+                    {
+                        horizontal = true;
+                    }
+                }
+            }
+        }
+        (vertical, horizontal)
+    }
+
+    /// Positive scene contract: the actual grid overlay has both a vertical
+    /// family spanning the viewport's vertical extent and a horizontal family
+    /// spanning its horizontal extent.
+    #[test]
+    fn grid_overlay_spans_both_axes_across_the_viewport() {
+        let viewport = (
+            cad_domain::Point3 {
+                x: -6.0,
+                y: -4.0,
+                z: 0.0,
+            },
+            cad_domain::Point3 {
+                x: 6.0,
+                y: 4.0,
+                z: 0.0,
+            },
+        );
+        let overlay = cad_app::render_scene::grid_overlay(viewport, cad_domain::DocumentId(1));
+        let (vertical, horizontal) = grid_axes_cover(&overlay, viewport);
+        assert!(
+            vertical,
+            "grid must contain vertical lines spanning the viewport's vertical extent"
+        );
+        assert!(
+            horizontal,
+            "grid must contain horizontal lines spanning the viewport's horizontal extent"
+        );
+    }
+
+    /// Negative scene contract: inverted bounds (the historic host regression
+    /// that wrote screen top-left/bottom-right unnormalized) and a shortened
+    /// span must fail the same predicate in the affected direction.
+    #[test]
+    fn grid_contract_rejects_inverted_or_shortened_bounds() {
+        let p = |x: f64, y: f64| cad_domain::Point3 { x, y, z: 0.0 };
+        let viewport = (p(-6.0, -4.0), p(6.0, 4.0));
+
+        // Inverted Y: the grid builder drops the horizontal family.
+        let inverted_y = cad_app::render_scene::grid_overlay(
+            (p(-6.0, 4.0), p(6.0, -4.0)),
+            cad_domain::DocumentId(1),
+        );
+        let (vertical, horizontal) = grid_axes_cover(&inverted_y, viewport);
+        assert!(vertical, "inverted-Y bounds still emit vertical lines");
+        assert!(
+            !horizontal,
+            "inverted-Y bounds must fail the horizontal coverage contract"
+        );
+
+        // Inverted X: the vertical family is dropped.
+        let inverted_x = cad_app::render_scene::grid_overlay(
+            (p(6.0, -4.0), p(-6.0, 4.0)),
+            cad_domain::DocumentId(1),
+        );
+        let (vertical, horizontal) = grid_axes_cover(&inverted_x, viewport);
+        assert!(
+            !vertical,
+            "inverted-X bounds must fail the vertical coverage contract"
+        );
+        assert!(horizontal, "inverted-X bounds still emit horizontal lines");
+
+        // Shortened span: lines exist but do not reach the viewport edges.
+        let shortened = cad_app::render_scene::grid_overlay(
+            (p(-6.0, -4.0), p(0.0, 2.0)),
+            cad_domain::DocumentId(1),
+        );
+        let (vertical, horizontal) = grid_axes_cover(&shortened, viewport);
+        assert!(
+            !vertical && !horizontal,
+            "a shortened span must fail edge coverage on both axes"
+        );
+    }
 
     #[test]
     #[ignore = "requires a desktop display/GPU and YACR_TEST_DWG; run in a dedicated process"]
@@ -226,7 +366,7 @@ mod tests {
                 assert!(gap < Duration::from_secs(2), "desktop event loop stalled: tick={}, gap={gap:?}", tick_count.get());
                 last_tick = Some(now);
             }
-            if probe.runtime.view.borrow().as_ref().unwrap().frames_rendered() == 0 {
+            if probe.view.borrow().as_ref().unwrap().frames_rendered() == 0 {
                 assert!(started.elapsed() < Duration::from_secs(60), "drawing never rendered");
                 return;
             }
@@ -248,7 +388,7 @@ mod tests {
                 last_tick = Some(now);
             }
             if probe.runtime.controller.borrow().last_import_report.is_none()
-                || !probe.runtime.view.borrow().as_ref().unwrap().current_drawing_presented() {
+                || !probe.view.borrow().as_ref().unwrap().current_drawing_presented() {
                 assert!(started.elapsed() < Duration::from_secs(60), "new drawing never rendered");
                 return;
             }
@@ -256,10 +396,10 @@ mod tests {
             let tick = tick_count.get() + 1;
             tick_count.set(tick);
             if tick == 1 {
-                let progress = probe.runtime.view.borrow().as_ref().unwrap().drawing_progress().expect("progressive drawing progress is required");
+                let progress = probe.view.borrow().as_ref().unwrap().drawing_progress().expect("progressive drawing progress is required");
                 assert_eq!(progress.0, progress.1, "a truncated prefix must not be marked presented");
                 eprintln!("desktop complete drawing batches={progress:?}");
-                eprintln!("desktop drawing bounds={:?}, camera={:?}, loading max_gap={max_gap:?}", probe.runtime.controller.borrow().drawing().unwrap().bounds(), probe.runtime.view.borrow().as_ref().unwrap().camera3d());
+                eprintln!("desktop drawing bounds={:?}, camera={:?}, loading max_gap={max_gap:?}", probe.runtime.controller.borrow().drawing().unwrap().bounds(), probe.view.borrow().as_ref().unwrap().camera3d());
                 if open_after_start {
                     eprintln!("desktop current DWG presented: elapsed={:?}", started.elapsed());
                 } else {
@@ -272,7 +412,7 @@ mod tests {
             }
             if tick == 10 {
                 {
-                    let view = probe.runtime.view.borrow();
+                    let view = probe.view.borrow();
                     let view = view.as_ref().unwrap();
                     assert!(view.frames_rendered() > 0, "drawing never rendered");
                     assert!(view.last_error().is_none(), "GPU initialization failed");
@@ -321,7 +461,7 @@ mod tests {
                 };
                 let (rect, _) = probe.adapter.handle().shell_geometry().unwrap();
                 let changed = changed_cad_pixels(before.as_ref().unwrap(), &after, rect, probe.adapter.window().scale_factor() as f64);
-                let view = probe.runtime.view.borrow();
+                let view = probe.view.borrow();
                 let view = view.as_ref().unwrap();
                 assert_ne!(Some(view.camera3d()), initial_camera);
                 assert!(changed > 0, "navigation did not change CAD pixels");
@@ -519,7 +659,7 @@ mod tests {
             .as_ref()
             .map(|report| (&report.completeness, report.diagnostics.len()));
         let import_snapshot = controller.async_open_snapshot();
-        let view = app.runtime.view.borrow();
+        let view = app.view.borrow();
         let view_state = view.as_ref().map(|view| {
             format!(
                 "frames={}, presented={}, progress={:?}, loading_phase={:?}, last_error={:?}, scene_error={:?}, backend={:?}",
@@ -611,7 +751,7 @@ mod tests {
             Duration::from_millis(100),
             move || {
                 let ready = {
-                    let view = probe.runtime.view.borrow();
+                    let view = probe.view.borrow();
                     view.as_ref().is_some_and(|view| {
                         let progress = view.drawing_progress();
                         let controller = probe.runtime.controller.borrow();
@@ -665,7 +805,7 @@ mod tests {
                             drawing_content_pixels > 0,
                             "CAD canvas is blank; refusing to capture grid/zoom evidence"
                         );
-                        let progress = probe.runtime.view.borrow().as_ref().unwrap().drawing_progress();
+                        let progress = probe.view.borrow().as_ref().unwrap().drawing_progress();
                         assert!(
                             progress.is_some_and(|(complete, total)| complete == total && total > 0),
                             "initial capture requires all drawing batches to be presented: {progress:?}"
@@ -713,7 +853,6 @@ mod tests {
                         std::fs::write(out.join("03-wheel-up.png"), encode_png(&image).unwrap())
                             .unwrap();
                         let backend = probe
-                            .runtime
                             .view
                             .borrow()
                             .as_ref()
@@ -799,7 +938,7 @@ mod tests {
                 .replace([cad_app::selection::model_ref(document, entity)]);
             entity
         };
-        core.push().unwrap();
+        app.binding.flush_updates().unwrap();
         core.command(
             cad_app::CommandId::Measure,
             cad_app::CommandPayload::MeasureTool(cad_app::MeasurementToolKind::Distance),
@@ -863,7 +1002,7 @@ mod tests {
         }
         let cursor_distance = low * 0.75;
         assert!(cursor_distance > 0.0 && set_cursor_and_check(cursor_distance));
-        core.push().unwrap();
+        app.binding.flush_updates().unwrap();
 
         let drawing_before = core.controller.borrow().drawing().unwrap();
         let (generation, selection, history, measurement, camera_before) = {
@@ -876,7 +1015,7 @@ mod tests {
                 controller.application.workspace.viewports[&viewport].camera,
             )
         };
-        let view = core
+        let view = app
             .view
             .borrow()
             .clone()
@@ -951,15 +1090,21 @@ mod tests {
             cad_app::CommandPayload::Selection(Vec::new()),
         )
         .unwrap();
+        app.binding.flush_updates().unwrap();
         assert_eq!(app.adapter.component().get_selection_count(), 0);
         assert!(view.selection_highlight().is_empty());
         let error = core
             .command(cad_app::CommandId::Pan, cad_app::CommandPayload::None)
             .unwrap_err();
         assert!(matches!(error, CadError::InvalidInput(_)));
+        app.binding.flush_updates().unwrap();
+        let expected = resolve_status(
+            &core.last_status().unwrap(),
+            &LinuxOptions::default().locale,
+        );
         assert_eq!(
             app.adapter.component().get_status_label().to_string(),
-            core.last_status().unwrap()
+            expected
         );
         std::fs::write(
             output.join("host-navigation.txt"),
@@ -981,7 +1126,7 @@ mod tests {
         let probe = app.clone();
         let completed_probe = completed.clone();
         timer.start(slint::TimerMode::Repeated, Duration::from_millis(50), move || {
-            let view = probe.runtime.view.borrow();
+            let view = probe.view.borrow();
             let Some(view) = view.as_ref() else {
                 assert!(Instant::now() < deadline, "CadView was not installed before deadline");
                 return;
@@ -1092,7 +1237,7 @@ mod tests {
 
         timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
             let view_ready = {
-                let view = probe.runtime.view.borrow();
+                let view = probe.view.borrow();
                 view.as_ref().is_some_and(|view| {
                     let controller = probe.runtime.controller.borrow();
                     controller.last_import_report.is_some()
@@ -1113,7 +1258,7 @@ mod tests {
                 return;
             }
             if phase == 2 {
-                let view = probe.runtime.view.borrow();
+                let view = probe.view.borrow();
                 if !view
                     .as_ref()
                     .is_some_and(|view| view.current_drawing_presented() && view.last_error().is_none() && view.scene_error().is_none())
@@ -1122,7 +1267,7 @@ mod tests {
                     return;
                 }
             } else if matches!(phase, 1 | 3 | 4 | 6 | 7) {
-                let view = probe.runtime.view.borrow();
+                let view = probe.view.borrow();
                 let view = view.as_ref().unwrap();
                 if view.frames_rendered() <= frame_baseline || !view.current_drawing_presented() {
                     assert!(Instant::now() < phase_deadline, "phase {phase} did not render; {}", real_window_readiness_diagnostic(&probe));
@@ -1144,8 +1289,24 @@ mod tests {
                 c.application.workspace.viewports[&c.viewport_id].camera
             };
             let mut reset_frame_deadline = || {
-                frame_baseline = probe.runtime.view.borrow().as_ref().unwrap().frames_rendered();
+                frame_baseline = probe.view.borrow().as_ref().unwrap().frames_rendered();
                 phase_deadline = Instant::now() + Duration::from_secs(20);
+            };
+            // Controller viewport size vs the shared render session's canvas
+            // size, recorded at every phase that needs it. They are derived from
+            // the same logical viewport, so a settled frame must report equal
+            // sizes; a disagreement is a wiring/size bug, not a grid artifact.
+            let size_state = || {
+                let c = probe.runtime.controller.borrow();
+                let controller_logical =
+                    c.application.workspace.viewports[&c.viewport_id].logical_size;
+                let render_canvas = probe
+                    .view
+                    .borrow()
+                    .as_ref()
+                    .map(|view| view.render_session().view_snapshot().canvas_size)
+                    .unwrap_or([0.0, 0.0]);
+                (controller_logical, render_canvas)
             };
 
             match phase {
@@ -1161,6 +1322,10 @@ mod tests {
                         let c = probe.runtime.controller.borrow();
                         c.application.workspace.viewports[&c.viewport_id].world_per_px()
                     };
+                    let (controller_logical, render_canvas) = size_state();
+                    eprintln!(
+                        "maximized initial sizes: controller_logical={controller_logical:?}, render_session_canvas={render_canvas:?}, shell_cad_rect={canvas:?}"
+                    );
                     initial = Some(image);
                     probe.adapter.component().invoke_overlay_toggled("grid".into(), true);
                     phase = 1;
@@ -1194,7 +1359,7 @@ mod tests {
                         assert!(
                             Instant::now() < phase_deadline,
                             "off-center pointer crosshair did not span the canvas row/column after UI event processing: coverage={coverage:?}, physical_canvas={physical_canvas:?}, hover={hover:?}, scale={scale}, frames={}, {}",
-                            probe.runtime.view.borrow().as_ref().unwrap().frames_rendered(),
+                            probe.view.borrow().as_ref().unwrap().frames_rendered(),
                             real_window_readiness_diagnostic(&probe)
                         );
                         return;
@@ -1260,7 +1425,7 @@ mod tests {
                         (f64::from(before.height) * 0.85).round() as u32,
                     );
                     requested_size = Some(size);
-                    frame_baseline = probe.runtime.view.borrow().as_ref().unwrap().frames_rendered();
+                    frame_baseline = probe.view.borrow().as_ref().unwrap().frames_rendered();
                     probe.adapter.window().set_size(size);
                     phase = 6;
                     phase_deadline = Instant::now() + Duration::from_secs(15);
@@ -1293,7 +1458,7 @@ mod tests {
                     let resized_bounds = canvas_non_background_bounds(&image, rect, probe.adapter.window().scale_factor() as f64);
                     assert!(resized_bounds.is_some(), "resized CAD canvas has no rendered pixels: size={size:?}, rect={rect:?}");
                     resized_size = Some(size);
-                    frame_baseline = probe.runtime.view.borrow().as_ref().unwrap().frames_rendered();
+                    frame_baseline = probe.view.borrow().as_ref().unwrap().frames_rendered();
                     probe.adapter.window().set_maximized(true);
                     phase = 7;
                     phase_deadline = Instant::now() + Duration::from_secs(15);
@@ -1308,10 +1473,16 @@ mod tests {
                     let maximized_size = probe.adapter.window().size();
                     let bounds = canvas_non_background_bounds(&image, probe.adapter.handle().shell_geometry().unwrap().0, probe.adapter.window().scale_factor() as f64);
                     let initial = initial.as_ref().unwrap();
-                    let backend = probe.runtime.view.borrow().as_ref().unwrap().backend_label();
+                    let backend = probe.view.borrow().as_ref().unwrap().backend_label();
                     let backend_lower = backend.as_deref().unwrap_or_default().to_ascii_lowercase();
                     assert!(!["lavapipe", "swiftshader", "software"].iter().any(|name| backend_lower.contains(name)), "software backend is not accepted: {backend:?}");
-                    eprintln!("real-GPU maximized/grid/crosshair evidence: backend={backend:?}, initial_screenshot={:?}, final_screenshot={:?}, requested_restored_size={:?}, actual_restored_size={:?}, actual_maximized_size={maximized_size:?}, initial_cad_rect_logical={canvas:?}, scale={scale}, initial_canvas_non_background_bounds_px={initial_bounds:?}, grid_canvas_non_background_bounds_px={grid_bounds:?}, final_canvas_non_background_bounds_px={bounds:?}, grid_edge_deltas_top_bottom_left_right={edge_deltas:?}, crosshair_hover_canvas_local={hover:?}; artifacts=01-maximized-initial.png,02-maximized-grid.png,03-maximized-crosshair-off-center.png,04-maximized-zoom-out.png,05-maximized-pan.png,06-restored-resized.png,07-maximized-after-resize.png", [initial.width, initial.height], [image.width, image.height], requested_size.unwrap(), resized_size.unwrap());
+                    let (controller_logical, render_canvas) = size_state();
+                    assert!(
+                        (controller_logical[0] - render_canvas[0]).abs() <= 1.0
+                            && (controller_logical[1] - render_canvas[1]).abs() <= 1.0,
+                        "controller viewport size {controller_logical:?} and render session canvas {render_canvas:?} disagree after re-maximize"
+                    );
+                    eprintln!("real-GPU maximized/grid/crosshair evidence: backend={backend:?}, initial_screenshot={:?}, final_screenshot={:?}, requested_restored_size={:?}, actual_restored_size={:?}, actual_maximized_size={maximized_size:?}, initial_cad_rect_logical={canvas:?}, scale={scale}, controller_logical={controller_logical:?}, render_session_canvas={render_canvas:?}, initial_canvas_non_background_bounds_px={initial_bounds:?}, grid_canvas_non_background_bounds_px={grid_bounds:?}, final_canvas_non_background_bounds_px={bounds:?}, grid_edge_deltas_top_bottom_left_right={edge_deltas:?}, crosshair_hover_canvas_local={hover:?}; artifacts=01-maximized-initial.png,02-maximized-grid.png,03-maximized-crosshair-off-center.png,04-maximized-zoom-out.png,05-maximized-pan.png,06-restored-resized.png,07-maximized-after-resize.png", [initial.width, initial.height], [image.width, image.height], requested_size.unwrap(), resized_size.unwrap());
                     assert!(probe.adapter.window().is_maximized());
                     completion.set(8);
                     slint::quit_event_loop().unwrap();
@@ -1378,7 +1549,7 @@ mod tests {
 
         timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
             let view_ready = {
-                let view = probe.runtime.view.borrow();
+                let view = probe.view.borrow();
                 view.as_ref().is_some_and(|view| {
                     let progress = view.drawing_progress();
                     let controller = probe.runtime.controller.borrow();
@@ -1401,7 +1572,7 @@ mod tests {
                 return;
             }
             if ready {
-                let view = probe.runtime.view.borrow();
+                let view = probe.view.borrow();
                 let view = view.as_ref().unwrap();
                 if view.frames_rendered() <= render_frames || !view.current_drawing_presented() {
                     assert!(Instant::now() < action_deadline, "functional state did not render before deadline");
@@ -1508,7 +1679,7 @@ mod tests {
                     "real window pointer did not select any preflight-confirmed visible LINE; rect={rect:?}, viewport={viewport_size:?}, camera={diagnostic_camera:?}, attempts={attempts:?}"
                 );
                 ready = true;
-                render_frames = probe.runtime.view.borrow().as_ref().unwrap().frames_rendered();
+                render_frames = probe.view.borrow().as_ref().unwrap().frames_rendered();
                 action_deadline = Instant::now() + Duration::from_secs(15);
                 return;
             }
@@ -1548,7 +1719,7 @@ mod tests {
                     ui.invoke_canvas_pick(first[0] as f32, first[1] as f32);
                     ui.invoke_canvas_pick(second[0] as f32, second[1] as f32);
                     assert!(ui.invoke_command_submitted("CONFIRM".into()));
-                    render_frames = probe.runtime.view.borrow().as_ref().unwrap().frames_rendered();
+                    render_frames = probe.view.borrow().as_ref().unwrap().frames_rendered();
                     action_deadline = Instant::now() + Duration::from_secs(15);
                 }
                 3 => {
@@ -1568,7 +1739,7 @@ mod tests {
                     assert!(changed_region(selected_pixels.as_ref().unwrap(), &pixels) > 0, "MOVE did not change rendered CAD pixels");
                     moved_pixels = Some(pixels);
                     probe.adapter.component().invoke_undo_requested();
-                    render_frames = probe.runtime.view.borrow().as_ref().unwrap().frames_rendered();
+                    render_frames = probe.view.borrow().as_ref().unwrap().frames_rendered();
                     action_deadline = Instant::now() + Duration::from_secs(15);
                 }
                 4 => {
@@ -1582,7 +1753,7 @@ mod tests {
                     let pixels = canvas_region(&image, rect, probe.adapter.window().scale_factor() as f64);
                     assert!(changed_region(moved_pixels.as_ref().unwrap(), &pixels) > 0, "undo did not change rendered CAD pixels");
                     probe.adapter.component().invoke_redo_requested();
-                    render_frames = probe.runtime.view.borrow().as_ref().unwrap().frames_rendered();
+                    render_frames = probe.view.borrow().as_ref().unwrap().frames_rendered();
                     action_deadline = Instant::now() + Duration::from_secs(15);
                 }
                 5 => {
@@ -1599,7 +1770,7 @@ mod tests {
                     let (rect, _) = probe.adapter.handle().shell_geometry().unwrap();
                     let pixels = canvas_region(&image, rect, probe.adapter.window().scale_factor() as f64);
                     assert_eq!(changed_region(moved_pixels.as_ref().unwrap(), &pixels), 0, "redo render did not reproduce moved pixels");
-                    let backend = probe.runtime.view.borrow().as_ref().unwrap().backend_label();
+                    let backend = probe.view.borrow().as_ref().unwrap().backend_label();
                     assert!(!backend.as_deref().unwrap_or_default().to_ascii_lowercase().contains("lavapipe"), "software Vulkan backend is not accepted: {backend:?}");
                     eprintln!("real GPU functional regression complete: selected entity={:?}, MOVE/undo/redo DB and UI state verified, backend={backend:?}", target.unwrap());
                     slint::quit_event_loop().unwrap();
@@ -1675,7 +1846,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(120);
         let timer = slint::Timer::default();
         timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
-            let ready = probe.runtime.view.borrow().as_ref().is_some_and(|view| {
+            let ready = probe.view.borrow().as_ref().is_some_and(|view| {
                 view.frames_rendered() > 0 && view.current_drawing_presented() && view.last_error().is_none() && view.scene_error().is_none()
             });
             if !ready {
@@ -1686,7 +1857,7 @@ mod tests {
             let (rect, _) = probe.adapter.handle().shell_geometry().unwrap();
             let pixels = canvas_region(&RgbaImage { width: image.width(), height: image.height(), pixels: image.as_bytes().to_vec() }, rect, probe.adapter.window().scale_factor() as f64);
             assert!(canvas_content_pixels(&pixels) > 20, "synthetic Chinese text produced no visible CAD pixels");
-            let view = probe.runtime.view.borrow();
+            let view = probe.view.borrow();
             let view = view.as_ref().unwrap();
             assert_eq!(view.backend_label().as_deref(), Some("vulkan"));
             let backend = format!("{:?}", view.active_backend());
@@ -1700,5 +1871,826 @@ mod tests {
         });
         app.run().unwrap();
         assert!(done.get(), "CJK real-GPU acceptance exited before capture");
+    }
+
+    /// Real-window acceptance for the P3 **asynchronous cursor** path.
+    ///
+    /// The UI's own pointer-move callback must route `MoveCursor` through the
+    /// engine `submit`/edge-waker (not a synchronous dispatch): at `BeginDraw`
+    /// the capture has no cursor yet, and a `PointerMoved` must leave the cursor
+    /// unset in the same call stack (a synchronous dispatch would set it
+    /// inline). The queued request must then execute while the real event loop
+    /// pumps (the app's waker/50 ms cycle, never a manual pump in the test), and
+    /// the authoritative session preview must reach the shared render facade.
+    /// A `Cancel` must clear the capture with **zero database writes**, and the
+    /// settled window must not keep waking (`redraw_requests`/input token stay
+    /// flat).
+    ///
+    /// Real winit window + hardware Vulkan; synthetic authorized input
+    /// (`fixtures/dwg/synthetic-four-lines.dwg`); no vendor/golden claim.
+    #[test]
+    #[ignore = "requires a real display + hardware GPU; run in a dedicated process"]
+    fn real_gpu_async_cursor_submit_wake_and_cancel_acceptance() {
+        use std::cell::Cell;
+        use std::time::{Duration, Instant};
+
+        assert!(
+            std::env::var_os("VK_ICD_FILENAMES").is_none(),
+            "refusing forced Vulkan ICD"
+        );
+        assert!(
+            std::env::var("WAYLAND_DISPLAY").is_ok() || std::env::var("DISPLAY").is_ok(),
+            "no display available"
+        );
+        let out = PathBuf::from(
+            std::env::var("YACR_REAL_ASYNC_CURSOR_OUTPUT")
+                .expect("runner must provide a fresh YACR_REAL_ASYNC_CURSOR_OUTPUT"),
+        );
+        std::fs::create_dir(&out).expect("evidence directory must be new");
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("fixtures/dwg/synthetic-four-lines.dwg");
+        cad_ui_slint::select_wgpu_backend_with(cad_render_wgpu::GpuSelection::Auto).unwrap();
+        let app = Rc::new(
+            LinuxApp::new(
+                LinuxOptions::parse(["--open".into(), fixture.display().to_string()]).unwrap(),
+            )
+            .unwrap(),
+        );
+
+        let phase = Rc::new(Cell::new(0u8));
+        let ticks = Rc::new(Cell::new(0u32));
+        let completion = Rc::new(Cell::new(false));
+        let mut deadline = Instant::now() + Duration::from_secs(120);
+        let mut rect = [0.0_f64; 4];
+        let mut local = [0.0_f64; 2];
+        let mut baseline_entities = 0usize;
+        let mut cursor_revision = 0u64;
+        let mut cursor_frames = 0u64;
+        let mut idle_redraws = 0u64;
+        let mut idle_revision = 0u64;
+        let mut cursor_checked = false;
+
+        let timer = slint::Timer::default();
+        let probe = app.clone();
+        let phase_slot = phase.clone();
+        let tick_slot = ticks.clone();
+        let completion_slot = completion.clone();
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(100),
+            move || {
+                let ready = {
+                    let view = probe.view.borrow();
+                    view.as_ref().is_some_and(|view| {
+                        let controller = probe.runtime.controller.borrow();
+                        controller
+                            .drawing()
+                            .is_some_and(|drawing| drawing.entities().next().is_some())
+                            && view.frames_rendered() > 0
+                            && view.current_drawing_presented()
+                            && view.last_error().is_none()
+                            && view.scene_error().is_none()
+                    })
+                };
+                if !ready {
+                    assert!(
+                        Instant::now() < deadline,
+                        "async-cursor open/presentation deadline: {}",
+                        real_window_readiness_diagnostic(&probe)
+                    );
+                    return;
+                }
+                match phase_slot.get() {
+                    0 => {
+                        // Start a LINE capture through the real UI callback
+                        // (BeginDraw goes through the engine's sync barrier).
+                        let (r, _) = probe.adapter.handle().shell_geometry().unwrap();
+                        rect = r;
+                        local = [r[2] * 0.40, r[3] * 0.40];
+                        baseline_entities = probe
+                            .runtime
+                            .controller
+                            .borrow()
+                            .drawing()
+                            .map(|drawing| drawing.entities().count())
+                            .unwrap_or(0);
+                        let label = cad_ui_slint::MessageSource::from_request("zh-CN")
+                            .text("draw.kind.line", &[]);
+                        probe.adapter.component().invoke_begin_draw_tool(label.into());
+                        deadline = Instant::now() + Duration::from_secs(15);
+                        phase_slot.set(1);
+                    }
+                    1 => {
+                        let capture_active = {
+                            let controller = probe.runtime.controller.borrow();
+                            controller.session.draw_preview().is_some()
+                        };
+                        if !capture_active {
+                            assert!(
+                                Instant::now() < deadline,
+                                "BeginDraw did not start a session capture: {}",
+                                real_window_readiness_diagnostic(&probe)
+                            );
+                            return;
+                        }
+                        {
+                            let controller = probe.runtime.controller.borrow();
+                            let cursor = controller
+                                .session
+                                .draw_preview()
+                                .and_then(|preview| preview.cursor);
+                            assert!(
+                                cursor.is_none(),
+                                "a fresh draw capture must have no cursor yet"
+                            );
+                        }
+                        {
+                            let view = probe.view.borrow();
+                            let view = view.as_ref().unwrap();
+                            cursor_revision = view.render_session().input_revision();
+                            cursor_frames = view.frames_rendered();
+                        }
+                        let position = slint::LogicalPosition::new(
+                            (rect[0] + local[0]) as f32,
+                            (rect[1] + local[1]) as f32,
+                        );
+                        probe.adapter.window().dispatch_event(
+                            slint::platform::WindowEvent::PointerMoved { position },
+                        );
+                        // The UI must have submitted the cursor asynchronously:
+                        // a synchronous dispatch would have set it inline.
+                        let immediate = probe
+                            .runtime
+                            .controller
+                            .borrow()
+                            .session
+                            .draw_preview()
+                            .and_then(|preview| preview.cursor);
+                        assert!(
+                            immediate.is_none(),
+                            "the pointer-move must submit MoveCursor asynchronously, not dispatch it synchronously"
+                        );
+                        deadline = Instant::now() + Duration::from_secs(15);
+                        phase_slot.set(2);
+                    }
+                    2 => {
+                        let session_preview = probe
+                            .runtime
+                            .controller
+                            .borrow()
+                            .session
+                            .draw_preview();
+                        let Some(preview) = session_preview else {
+                            assert!(
+                                Instant::now() < deadline,
+                                "the queued MoveCursor was not executed by the event loop: {}",
+                                real_window_readiness_diagnostic(&probe)
+                            );
+                            return;
+                        };
+                        if preview.cursor.is_none() {
+                            assert!(
+                                Instant::now() < deadline,
+                                "async MoveCursor did not set a preview cursor: {}",
+                                real_window_readiness_diagnostic(&probe)
+                            );
+                            return;
+                        }
+                        if !cursor_checked {
+                            let view_preview = probe
+                                .view
+                                .borrow()
+                                .as_ref()
+                                .unwrap()
+                                .draw_preview();
+                            assert_eq!(
+                                view_preview,
+                                Some(preview.clone()),
+                                "the render overlay preview must mirror the authoritative session preview"
+                            );
+                            let (expected, tolerance) = {
+                                let controller = probe.runtime.controller.borrow();
+                                let viewport = &controller.application.workspace
+                                    .viewports[&controller.viewport_id];
+                                (
+                                    viewport.screen_to_world(local, viewport.logical_size),
+                                    viewport.world_per_px() * 0.5,
+                                )
+                            };
+                            let expected = expected.expect("cursor local point must map into the viewport");
+                            let actual = preview.cursor.unwrap();
+                            assert!(
+                                (actual.x - expected.x).abs() <= tolerance
+                                    && (actual.y - expected.y).abs() <= tolerance,
+                                "async cursor world point {actual:?} must match the viewport mapping of local {local:?} -> {expected:?} (tol {tolerance})"
+                            );
+                            {
+                                let view = probe.view.borrow();
+                                let view = view.as_ref().unwrap();
+                                assert!(
+                                    view.render_session().input_revision() > cursor_revision,
+                                    "the async cursor preview must advance the render input token"
+                                );
+                                assert!(
+                                    view.frames_rendered() > cursor_frames,
+                                    "the waker/event loop must render the cursor preview frame"
+                                );
+                                let image = probe.adapter.window().take_snapshot().unwrap();
+                                std::fs::write(
+                                    out.join("01-async-cursor-preview.png"),
+                                    encode_png(&RgbaImage {
+                                        width: image.width(),
+                                        height: image.height(),
+                                        pixels: image.as_bytes().to_vec(),
+                                    })
+                                    .unwrap(),
+                                )
+                                .unwrap();
+                            }
+                            // Observation only (not the event source): the
+                            // queued async request must be drained.
+                            let report = probe.binding.pump_requests().unwrap();
+                            assert!(
+                                !report.pending,
+                                "the async cursor request must be drained"
+                            );
+                            cursor_checked = true;
+                        }
+                        let entities = probe
+                            .runtime
+                            .controller
+                            .borrow()
+                            .drawing()
+                            .map(|drawing| drawing.entities().count())
+                            .unwrap_or(0);
+                        assert_eq!(
+                            entities, baseline_entities,
+                            "moving the draw cursor must not write to the database"
+                        );
+                        // Cancel (sync barrier) clears the capture, zero writes.
+                        probe.adapter.component().invoke_cancel_draw_requested();
+                        {
+                            let controller = probe.runtime.controller.borrow();
+                            assert!(
+                                controller.session.draw_preview().is_none(),
+                                "Cancel must clear the draw capture"
+                            );
+                        }
+                        let entities_after = probe
+                            .runtime
+                            .controller
+                            .borrow()
+                            .drawing()
+                            .map(|drawing| drawing.entities().count())
+                            .unwrap_or(0);
+                        assert_eq!(
+                            entities_after, baseline_entities,
+                            "Cancel must not write to the database"
+                        );
+                        std::fs::write(
+                            out.join("async-cursor.txt"),
+                            format!(
+                                "fixture={}\nlocal_cursor={local:?}\nbaseline_entities={baseline_entities}\nbackend=native-vulkan\n",
+                                fixture.display()
+                            ),
+                        )
+                        .unwrap();
+                        // Settle one tick, then require a flat idle window.
+                        tick_slot.set(0);
+                        deadline = Instant::now() + Duration::from_secs(5);
+                        phase_slot.set(3);
+                    }
+                    3 => {
+                        let t = tick_slot.get() + 1;
+                        tick_slot.set(t);
+                        if t == 1 {
+                            let view = probe.view.borrow();
+                            let view = view.as_ref().unwrap();
+                            idle_redraws = view.redraw_requests();
+                            idle_revision = view.render_session().input_revision();
+                            return;
+                        }
+                        if t < 9 {
+                            return;
+                        }
+                        {
+                            let view = probe.view.borrow();
+                            let view = view.as_ref().unwrap();
+                            assert_eq!(
+                                view.redraw_requests(),
+                                idle_redraws,
+                                "a settled window must not keep waking/redrawing"
+                            );
+                            assert_eq!(
+                                view.render_session().input_revision(),
+                                idle_revision,
+                                "a settled window must not churn the render input token"
+                            );
+                            // Hardware proof: real native Vulkan, never software.
+                            assert_eq!(
+                                view.backend_label().as_deref(),
+                                Some("vulkan"),
+                                "async-cursor acceptance requires the real Vulkan backend"
+                            );
+                            assert!(
+                                format!("{:?}", view.active_backend()).contains("Native"),
+                                "expected the native desktop Vulkan renderer"
+                            );
+                        }
+                        let fds = std::fs::read_dir("/proc/self/fd")
+                            .unwrap()
+                            .filter_map(Result::ok)
+                            .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                            .collect::<Vec<_>>();
+                        assert!(
+                            fds.iter().any(|path| path == Path::new("/dev/nvidia0")),
+                            "async-cursor acceptance requires the NVIDIA device fd: {fds:?}"
+                        );
+                        completion_slot.set(true);
+                        slint::quit_event_loop().unwrap();
+                        phase_slot.set(4);
+                    }
+                    _ => {}
+                }
+            },
+        );
+        app.run().unwrap();
+        assert!(
+            completion.get(),
+            "async-cursor acceptance did not reach the idle check"
+        );
+        assert_eq!(phase.get(), 4);
+    }
+
+    /// Drain the bounded engine event ring for `sub` until it is empty.
+    fn drain_engine_events(
+        app: &LinuxApp,
+        sub: cad_engine::events::SubscriptionId,
+    ) -> Vec<std::sync::Arc<cad_engine::events::EventEnvelope>> {
+        use cad_engine::events::EventPoll;
+        use cad_engine::protocol::EngineClient;
+        let mut events = Vec::new();
+        for _ in 0..16 {
+            match app.runtime.poll_events(sub, 256).expect("poll_events") {
+                EventPoll::Events(batch) if batch.is_empty() => break,
+                EventPoll::Events(batch) => events.extend(batch),
+                EventPoll::Lagged { .. } => break,
+            }
+        }
+        events
+    }
+
+    /// Real-window acceptance for the P4 controlled API and bounded event stream.
+    ///
+    /// Runs the Host `EngineClient` in the real window through
+    /// `dispatch_with_origin(Api, …)`: a controlled `Commit { Insert Line }` must
+    /// create a real entity/revision/history step and surface its `ChangeSet` as
+    /// an `EntitiesChanged` event sharing the exact same `Arc` (with the request
+    /// id/origin/order carried on the envelopes); `SelectByObjectIds` must produce
+    /// a real selection whose renderer highlight appears only after the event
+    /// loop; typed `Undo`/`Redo` must reflect the same transaction in the
+    /// database, revision, history and events; an unknown subscription must be
+    /// explicitly refused. No raw database writes, no fake ids, no no-op events.
+    ///
+    /// Real winit window + hardware Vulkan; synthetic authorized input
+    /// (`fixtures/dwg/synthetic-four-lines.dwg`); no vendor/golden claim.
+    #[test]
+    #[ignore = "requires a real display + hardware GPU; run in a dedicated process"]
+    fn real_gpu_controlled_api_events_and_history_acceptance() {
+        use cad_domain::{EntityId, LayerId, ObjectId, Point3, SpaceId};
+        use cad_engine::api::{ApiRequest, ApiTarget, EntityEdit, NewEntity, SelectionMode};
+        use cad_engine::events::{EngineEvent, SubscriptionId};
+        use cad_engine::protocol::{EngineClient, EngineRequest, RequestOrigin, RequestResult};
+        use std::cell::Cell;
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        assert!(
+            std::env::var_os("VK_ICD_FILENAMES").is_none(),
+            "refusing forced Vulkan ICD"
+        );
+        assert!(
+            std::env::var("WAYLAND_DISPLAY").is_ok() || std::env::var("DISPLAY").is_ok(),
+            "no display available"
+        );
+        let out = PathBuf::from(
+            std::env::var("YACR_REAL_P4_OUTPUT")
+                .expect("runner must provide a fresh YACR_REAL_P4_OUTPUT"),
+        );
+        std::fs::create_dir(&out).expect("evidence directory must be new");
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("fixtures/dwg/synthetic-four-lines.dwg");
+        cad_ui_slint::select_wgpu_backend_with(cad_render_wgpu::GpuSelection::Auto).unwrap();
+        let app = Rc::new(
+            LinuxApp::new(
+                LinuxOptions::parse(["--open".into(), fixture.display().to_string()]).unwrap(),
+            )
+            .unwrap(),
+        );
+
+        let phase = Rc::new(Cell::new(0u8));
+        let ticks = Rc::new(Cell::new(0u32));
+        let done = Rc::new(Cell::new(false));
+        let mut deadline = Instant::now() + Duration::from_secs(120);
+        let mut subscription: Option<SubscriptionId> = None;
+        let mut created: Option<ObjectId> = None;
+        let mut pre_select_frames = 0u64;
+        let mut idle_redraws = 0u64;
+        let mut idle_revision = 0u64;
+
+        let timer = slint::Timer::default();
+        let probe = app.clone();
+        let phase_slot = phase.clone();
+        let tick_slot = ticks.clone();
+        let done_slot = done.clone();
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(100),
+            move || {
+                let ready = {
+                    let view = probe.view.borrow();
+                    view.as_ref().is_some_and(|view| {
+                        let controller = probe.runtime.controller.borrow();
+                        controller
+                            .drawing()
+                            .is_some_and(|drawing| drawing.entities().next().is_some())
+                            && view.frames_rendered() > 0
+                            && view.current_drawing_presented()
+                            && view.last_error().is_none()
+                            && view.scene_error().is_none()
+                    })
+                };
+                if !ready {
+                    assert!(
+                        Instant::now() < deadline,
+                        "P4 open/presentation deadline: {}",
+                        real_window_readiness_diagnostic(&probe)
+                    );
+                    return;
+                }
+                match phase_slot.get() {
+                    0 => {
+                        let (doc, db, viewport, revision, before_count, undo_before) = {
+                            let controller = probe.runtime.controller.borrow();
+                            let drawing = controller.drawing().unwrap();
+                            let undo_before = controller
+                                .application
+                                .history
+                                .get(&controller.document_id)
+                                .map_or(0, |h| h.undo_depth());
+                            (
+                                controller.document_id,
+                                drawing.id(),
+                                controller.viewport_id,
+                                drawing.revision(),
+                                drawing.entities().count(),
+                                undo_before,
+                            )
+                        };
+                        let target = ApiTarget {
+                            document: doc,
+                            database: db,
+                            viewport,
+                        };
+                        let sub = probe.runtime.subscribe().expect("subscribe must succeed");
+                        subscription = Some(sub);
+
+                        // 1. Controlled API commit creates a real entity/revision/history.
+                        let line = EntityEdit::Insert {
+                            layer: LayerId(0),
+                            space: SpaceId::Model,
+                            entity: NewEntity::Line {
+                                start: Point3 {
+                                    x: -1.0,
+                                    y: 0.0,
+                                    z: 0.0,
+                                },
+                                end: Point3 { x: 1.0, y: 0.0, z: 0.0 },
+                            },
+                        };
+                        let completion = probe
+                            .runtime
+                            .dispatch_with_origin(
+                                RequestOrigin::Api,
+                                EngineRequest::Api {
+                                    target,
+                                    request: ApiRequest::Commit {
+                                        expected_revision: revision,
+                                        edits: vec![line],
+                                    },
+                                },
+                            )
+                            .expect("api commit must dispatch");
+                        let request_id = completion.id;
+                        let outcome = match completion.result {
+                            Ok(RequestResult::Api(outcome)) => outcome,
+                            other => panic!("unexpected API commit result: {other:?}"),
+                        };
+                        assert_eq!(
+                            outcome.created.len(),
+                            1,
+                            "commit must create exactly one entity"
+                        );
+                        let object = outcome.created[0];
+                        created = Some(object);
+                        // The completion shares an `Arc<ApiOutcome>`; the `changes`
+                        // field is an `Arc<ChangeSet>` clone, not a deep copy.
+                        let changes = outcome
+                            .changes
+                            .clone()
+                            .expect("commit must report a ChangeSet");
+                        assert_eq!(
+                            changes.after.0,
+                            revision.0 + 1,
+                            "commit must bump the revision by exactly one"
+                        );
+                        {
+                            let controller = probe.runtime.controller.borrow();
+                            let drawing = controller.drawing().unwrap();
+                            assert!(
+                                drawing.entity(EntityId(object.0)).is_some(),
+                                "the created entity must exist in the authoritative database"
+                            );
+                            assert_eq!(drawing.revision().0, revision.0 + 1);
+                            assert_eq!(
+                                drawing.entities().count(),
+                                before_count + 1,
+                                "exactly one entity must be added"
+                            );
+                            let undo = controller
+                                .application
+                                .history
+                                .get(&doc)
+                                .map_or(0, |h| h.undo_depth());
+                            assert_eq!(
+                                undo,
+                                undo_before + 1,
+                                "the commit must record exactly one history step"
+                            );
+                        }
+
+                        // 2. The event stream shares the exact ChangeSet Arc with the
+                        //    request id/origin/order.
+                        let events = drain_engine_events(&probe, sub);
+                        let entities_index = events
+                            .iter()
+                            .position(|env| {
+                                matches!(&env.event, EngineEvent::EntitiesChanged { changes: ev } if Arc::ptr_eq(ev, &changes))
+                            })
+                            .expect("commit must publish an EntitiesChanged sharing the outcome Arc");
+                        let entities_env = &events[entities_index];
+                        assert_eq!(entities_env.origin, RequestOrigin::Api);
+                        assert_eq!(entities_env.request_id, Some(request_id));
+                        assert_eq!(
+                            entities_env.transaction,
+                            Some(changes.transaction),
+                            "the event must carry the shared transaction"
+                        );
+                        let started_index = events
+                            .iter()
+                            .position(|env| {
+                                env.request_id == Some(request_id)
+                                    && matches!(&env.event, EngineEvent::RequestStarted { .. })
+                            })
+                            .expect("the API request must publish RequestStarted");
+                        let finished_index = events
+                            .iter()
+                            .position(|env| {
+                                env.request_id == Some(request_id)
+                                    && matches!(&env.event, EngineEvent::RequestFinished { .. })
+                            })
+                            .expect("the API request must publish RequestFinished");
+                        assert!(
+                            started_index < entities_index && entities_index < finished_index,
+                            "the API request events must be ordered Started < EntitiesChanged < Finished"
+                        );
+                        assert!(
+                            events.windows(2).all(|w| w[0].sequence < w[1].sequence),
+                            "event sequences must be strictly increasing"
+                        );
+
+                        // 3. Controlled selection by the created object id.
+                        pre_select_frames = probe.view.borrow().as_ref().unwrap().frames_rendered();
+                        let select = probe
+                            .runtime
+                            .dispatch_with_origin(
+                                RequestOrigin::Api,
+                                EngineRequest::Api {
+                                    target,
+                                    request: ApiRequest::SelectByObjectIds {
+                                        ids: vec![object],
+                                        mode: SelectionMode::Replace,
+                                    },
+                                },
+                            )
+                            .expect("api select must dispatch");
+                        let select_id = select.id;
+                        match select.result {
+                            Ok(RequestResult::Api(outcome)) => {
+                                assert!(
+                                    outcome.created.is_empty() && outcome.changes.is_none(),
+                                    "a selection carries no created entities or changes"
+                                );
+                            }
+                            other => panic!("unexpected API select result: {other:?}"),
+                        }
+                        let select_events = drain_engine_events(&probe, sub);
+                        assert!(
+                            select_events.iter().any(|env| {
+                                env.request_id == Some(select_id)
+                                    && env.origin == RequestOrigin::Api
+                                    && matches!(&env.event, EngineEvent::SelectionChanged { refs, .. } if refs.iter().any(|r| r.entity == EntityId(object.0)))
+                            }),
+                            "the API selection must publish a SelectionChanged for the created entity"
+                        );
+                        deadline = Instant::now() + Duration::from_secs(15);
+                        phase_slot.set(1);
+                    }
+                    1 => {
+                        let selected = {
+                            let view = probe.view.borrow();
+                            let view = view.as_ref().unwrap();
+                            view.selection_highlight()
+                                .refs()
+                                .iter()
+                                .any(|reference| reference.entity == EntityId(created.unwrap().0))
+                        };
+                        if !selected {
+                            assert!(
+                                Instant::now() < deadline,
+                                "the API selection did not reach the renderer highlight: {}",
+                                real_window_readiness_diagnostic(&probe)
+                            );
+                            return;
+                        }
+                        {
+                            let view = probe.view.borrow();
+                            let view = view.as_ref().unwrap();
+                            assert!(
+                                view.frames_rendered() > pre_select_frames,
+                                "the selection highlight must render a new frame"
+                            );
+                            let image = probe.adapter.window().take_snapshot().unwrap();
+                            std::fs::write(
+                                out.join("01-p4-api-select-highlight.png"),
+                                encode_png(&RgbaImage {
+                                    width: image.width(),
+                                    height: image.height(),
+                                    pixels: image.as_bytes().to_vec(),
+                                })
+                                .unwrap(),
+                            )
+                            .unwrap();
+                        }
+                        let object = created.unwrap();
+                        let document = probe.runtime.controller.borrow().document_id;
+
+                        // 4. Typed Undo/Redo reflect the shared transaction.
+                        probe
+                            .runtime
+                            .command(cad_app::CommandId::Undo, cad_app::CommandPayload::None)
+                            .expect("typed Undo must run through the host funnel");
+                        {
+                            let controller = probe.runtime.controller.borrow();
+                            let drawing = controller.drawing().unwrap();
+                            assert!(
+                                drawing.entity(EntityId(object.0)).is_none(),
+                                "Undo must remove the API-created entity"
+                            );
+                            assert!(
+                                drawing.revision().0 > 1,
+                                "Undo must advance the revision"
+                            );
+                            let history = controller.application.history.get(&document).unwrap();
+                            assert_eq!(history.redo_depth(), 1, "Undo must leave one redo step");
+                        }
+                        let undo_events = drain_engine_events(&probe, subscription.unwrap());
+                        assert!(
+                            undo_events.iter().any(|env| matches!(
+                                &env.event,
+                                EngineEvent::CommandStarted { command } if *command == cad_app::CommandId::Undo
+                            )),
+                            "typed Undo must emit CommandStarted"
+                        );
+                        assert!(
+                            undo_events.iter().any(|env| matches!(
+                                &env.event,
+                                EngineEvent::CommandFinished { command, .. } if *command == cad_app::CommandId::Undo
+                            )),
+                            "typed Undo must emit CommandFinished"
+                        );
+
+                        probe
+                            .runtime
+                            .command(cad_app::CommandId::Redo, cad_app::CommandPayload::None)
+                            .expect("typed Redo must run through the host funnel");
+                        {
+                            let controller = probe.runtime.controller.borrow();
+                            let drawing = controller.drawing().unwrap();
+                            assert!(
+                                drawing.entity(EntityId(object.0)).is_some(),
+                                "Redo must restore the API-created entity"
+                            );
+                            let history = controller.application.history.get(&document).unwrap();
+                            assert_eq!(history.redo_depth(), 0, "Redo consumes the redo step");
+                            assert!(history.undo_depth() >= 1);
+                        }
+                        let redo_events = drain_engine_events(&probe, subscription.unwrap());
+                        assert!(
+                            redo_events.iter().any(|env| matches!(
+                                &env.event,
+                                EngineEvent::CommandFinished { command, .. } if *command == cad_app::CommandId::Redo
+                            )),
+                            "typed Redo must emit CommandFinished"
+                        );
+
+                        // 5. Unknown subscriptions are refused explicitly.
+                        let unknown = SubscriptionId(u64::MAX);
+                        assert!(
+                            probe.runtime.unsubscribe(unknown).is_err(),
+                            "unsubscribing an unknown id must be an explicit error"
+                        );
+                        probe
+                            .runtime
+                            .unsubscribe(subscription.unwrap())
+                            .expect("unsubscribing the live id must succeed");
+
+                        tick_slot.set(0);
+                        deadline = Instant::now() + Duration::from_secs(5);
+                        phase_slot.set(2);
+                    }
+                    2 => {
+                        let t = tick_slot.get() + 1;
+                        tick_slot.set(t);
+                        if t == 1 {
+                            let view = probe.view.borrow();
+                            let view = view.as_ref().unwrap();
+                            idle_redraws = view.redraw_requests();
+                            idle_revision = view.render_session().input_revision();
+                            return;
+                        }
+                        if t < 9 {
+                            return;
+                        }
+                        {
+                            let view = probe.view.borrow();
+                            let view = view.as_ref().unwrap();
+                            assert_eq!(
+                                view.redraw_requests(),
+                                idle_redraws,
+                                "a settled window must not keep waking/redrawing"
+                            );
+                            assert_eq!(
+                                view.render_session().input_revision(),
+                                idle_revision,
+                                "a settled window must not churn the render input token"
+                            );
+                            assert_eq!(
+                                view.backend_label().as_deref(),
+                                Some("vulkan"),
+                                "P4 acceptance requires the real Vulkan backend"
+                            );
+                            assert!(
+                                format!("{:?}", view.active_backend()).contains("Native"),
+                                "expected the native desktop Vulkan renderer"
+                            );
+                        }
+                        let fds = std::fs::read_dir("/proc/self/fd")
+                            .unwrap()
+                            .filter_map(Result::ok)
+                            .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                            .collect::<Vec<_>>();
+                        assert!(
+                            fds.iter().any(|path| path == Path::new("/dev/nvidia0")),
+                            "P4 acceptance requires the NVIDIA device fd: {fds:?}"
+                        );
+                        assert!(
+                            !probe.binding.pump_requests().unwrap().pending,
+                            "no queued request may remain after the controlled API flow"
+                        );
+                        std::fs::write(
+                            out.join("p4-api-events.txt"),
+                            format!(
+                                "fixture={}\ncreated_object={:?}\nbackend=native-vulkan\n",
+                                fixture.display(),
+                                created
+                            ),
+                        )
+                        .unwrap();
+                        done_slot.set(true);
+                        slint::quit_event_loop().unwrap();
+                        phase_slot.set(3);
+                    }
+                    _ => {}
+                }
+            },
+        );
+        app.run().unwrap();
+        assert!(done.get(), "P4 acceptance did not reach the idle check");
+        assert_eq!(phase.get(), 3);
     }
 }

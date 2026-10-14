@@ -12,6 +12,9 @@ crate-type = ["cdylib"]
 [dependencies]
 cad-host.workspace = true
 cad-ui-slint.workspace = true
+# The Android composition root owns the UI-free `RenderSessionHandle` and the
+# `EngineClient` boundary directly (the host no longer re-exports them).
+cad-engine.workspace = true
 cad-app.workspace = true
 cad-platform.workspace = true
 cad-import-acadrust.workspace = true

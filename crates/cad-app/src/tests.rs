@@ -362,6 +362,50 @@ fn measure_none_starts_a_distance_tool_without_capturing() {
 }
 
 #[test]
+fn measure_none_remains_distance_after_an_area_tool_completed() {
+    let (mut app, mut session) = application_with_document();
+    session
+        .set_measurement_kind(MeasurementToolKind::Area)
+        .unwrap();
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Measure,
+            CommandPayload::MeasureTool(MeasurementToolKind::Area),
+        ),
+    )
+    .unwrap();
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Measure,
+            CommandPayload::Points(vec![point(0.0, 0.0), point(2.0, 0.0), point(2.0, 3.0)]),
+        ),
+    )
+    .unwrap();
+    let area = app
+        .execute(
+            &mut session,
+            command(CommandId::ConfirmMeasurement, CommandPayload::None),
+        )
+        .unwrap();
+    assert_eq!(
+        area.measurement.unwrap().algorithm,
+        MeasurementAlgorithm::PlanarPolygonArea
+    );
+
+    app.execute(
+        &mut session,
+        command(CommandId::Measure, CommandPayload::None),
+    )
+    .unwrap();
+    assert_eq!(
+        session.measurement_preview().unwrap().kind,
+        MeasurementToolKind::Distance
+    );
+}
+
+#[test]
 fn measure_area_uses_the_viewport_work_plane() {
     let (mut app, mut session) = application_with_document();
     app.execute(

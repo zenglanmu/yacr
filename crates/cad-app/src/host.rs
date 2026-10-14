@@ -19,7 +19,10 @@ use cad_import_acadrust::{
 };
 use cad_measure::{MeasurementEngine, SnapCandidate, SnapTarget};
 
-use crate::{AppMode, Application, Command, CommandOutcome, Document, SessionState, Viewport};
+use crate::{
+    AppMode, Application, Command, CommandOutcome, Document, DrawIntent, DrawToolKind,
+    SessionState, Viewport,
+};
 
 /// Synthetic drawing used before a real DWG is opened.
 ///
@@ -355,6 +358,185 @@ impl HostController {
         })
     }
 
+    /// Start a session-owned draw capture. The UI remains a presenter only.
+    pub fn begin_draw_tool(&mut self, kind: DrawToolKind) -> CadResult<()> {
+        self.session.begin_draw(kind)
+    }
+
+    /// Capture a world point through the active session tool.
+    pub fn capture_tool_point(&mut self, point: Point3) -> CadResult<bool> {
+        self.session.capture_point(point)
+    }
+
+    /// Move the active tool preview cursor without advancing its generation.
+    pub fn move_tool_cursor(&mut self, point: Point3) -> CadResult<()> {
+        self.session.move_cursor(point)
+    }
+
+    /// Cancel an active tool without executing a drawing command.
+    pub fn cancel_tool(&mut self) -> CadResult<()> {
+        self.session.cancel_tool()
+    }
+
+    /// Confirm a captured draw through the ordinary command/transaction path.
+    /// The capture is cleared only after execution succeeds.
+    pub fn confirm_draw(&mut self) -> CadResult<CommandOutcome> {
+        let intent = self.session.draw_intent()?;
+        let selection = self
+            .session
+            .draw_selection_snapshot()
+            .ok_or_else(|| CadError::InvalidInput("no drawing tool is active".into()))?
+            .to_vec();
+        let command = self.command_for_draw_intent(intent, &selection)?;
+        let outcome = self.execute(command)?;
+        self.session.complete_tool();
+        Ok(outcome)
+    }
+
+    /// Confirm a captured draw and return the exact command trace. Tool intent
+    /// parsing can fail before a command is entered; an executed command failure
+    /// is retained in the returned trace and leaves the capture untouched.
+    pub fn confirm_draw_traced(&mut self) -> CadResult<crate::TracedCommandOutcome> {
+        let intent = self.session.draw_intent()?;
+        let selection = self
+            .session
+            .draw_selection_snapshot()
+            .ok_or_else(|| CadError::InvalidInput("no drawing tool is active".into()))?
+            .to_vec();
+        let command = self.command_for_draw_intent(intent, &selection)?;
+        let traced = self.execute_traced(command)?;
+        if traced.result.is_ok() {
+            self.session.complete_tool();
+        }
+        Ok(traced)
+    }
+
+    fn command_for_draw_intent(
+        &self,
+        intent: DrawIntent,
+        selection: &[SelectionRef],
+    ) -> CadResult<Command> {
+        let (id, payload) = match intent {
+            DrawIntent::Line { start, end } => (
+                crate::CommandId::CreateLine,
+                crate::CommandPayload::Points(vec![start, end]),
+            ),
+            DrawIntent::Circle { center, edge } => (
+                crate::CommandId::CreateCircle,
+                crate::CommandPayload::Points(vec![center, edge]),
+            ),
+            DrawIntent::Arc { points } => (
+                crate::CommandId::CreateArc,
+                crate::CommandPayload::Points(points.to_vec()),
+            ),
+            DrawIntent::Move { delta } => (
+                crate::CommandId::MoveEntities,
+                crate::CommandPayload::Move {
+                    refs: selection.to_vec(),
+                    delta,
+                },
+            ),
+            DrawIntent::Copy { delta } => (
+                crate::CommandId::CopyEntities,
+                crate::CommandPayload::Copy {
+                    refs: selection.to_vec(),
+                    delta,
+                },
+            ),
+            DrawIntent::Trim {
+                target_pick,
+                boundary_pick,
+            } => (
+                crate::CommandId::TrimEntity,
+                crate::CommandPayload::Trim {
+                    target: self.resolve_draw_pick(target_pick)?,
+                    boundary: vec![self.resolve_draw_pick(boundary_pick)?],
+                    pick_point: target_pick,
+                },
+            ),
+            DrawIntent::Extend {
+                target_pick,
+                boundary_pick,
+            } => (
+                crate::CommandId::ExtendEntity,
+                crate::CommandPayload::Extend {
+                    target: self.resolve_draw_pick(target_pick)?,
+                    boundary: vec![self.resolve_draw_pick(boundary_pick)?],
+                    pick_point: target_pick,
+                },
+            ),
+            DrawIntent::Rotate { base, angle } => (
+                crate::CommandId::RotateEntities,
+                crate::CommandPayload::Rotate {
+                    refs: selection.to_vec(),
+                    base,
+                    angle,
+                },
+            ),
+            DrawIntent::Scale { base, factor } => (
+                crate::CommandId::ScaleEntities,
+                crate::CommandPayload::Scale {
+                    refs: selection.to_vec(),
+                    base,
+                    factor,
+                },
+            ),
+            DrawIntent::Mirror { p1, p2 } => (
+                crate::CommandId::MirrorEntities,
+                crate::CommandPayload::Mirror {
+                    refs: selection.to_vec(),
+                    axis_start: p1,
+                    axis_end: p2,
+                },
+            ),
+            DrawIntent::Offset { side_point } => (
+                crate::CommandId::OffsetEntity,
+                crate::CommandPayload::Offset {
+                    refs: selection.to_vec(),
+                    side_point,
+                },
+            ),
+        };
+        Ok(Command {
+            schema_version: 1,
+            id,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload,
+        })
+    }
+
+    fn resolve_draw_pick(&self, world: Point3) -> CadResult<SelectionRef> {
+        let document = self
+            .application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let viewport = self
+            .application
+            .workspace
+            .viewports
+            .get(&self.viewport_id)
+            .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+        let logical = viewport
+            .camera
+            .world_to_screen(world, viewport.logical_size)
+            .ok_or_else(|| CadError::InvalidInput("draw pick is outside the viewport".into()))?;
+        let report = crate::pick_at_screen(
+            &document.drawing,
+            self.document_id,
+            &viewport.camera,
+            logical,
+            viewport.logical_size,
+            &TolerancePolicy::default(),
+            cad_spatial::BackFacePolicy::DoubleSided,
+        )?;
+        report.hit.map(|hit| hit.source).ok_or_else(|| {
+            CadError::InvalidInput("draw pick did not hit supported geometry".into())
+        })
+    }
+
     /// The current immutable drawing, for the render/composition pipeline.
     pub fn drawing(&self) -> Option<Arc<DrawingDatabase>> {
         self.application
@@ -461,10 +643,12 @@ impl HostController {
     /// no longer reach across documents, and stale selections/overrides/tools
     /// cannot point at new objects.
     fn reset_for_new_content(&mut self) {
+        let tool_generation = self.session.tool_generation.saturating_add(1);
         self.application.history.remove(&self.document_id);
         self.application.query = cad_query::QueryService::new();
         self.session = SessionState::new(self.document_id, self.session.mode());
         self.session.generation = self.session.generation.saturating_add(1);
+        self.session.tool_generation = tool_generation;
     }
 
     /// Replace the active document with a new, empty drawing.
@@ -564,6 +748,28 @@ impl HostController {
             self.last_status = diagnostic.message.clone();
         }
         Ok(outcome)
+    }
+
+    /// Execute once and retain a raw trace for the single command actually
+    /// entered. The legacy owned-outcome method above remains unchanged.
+    pub fn execute_traced(&mut self, command: Command) -> CadResult<crate::TracedCommandOutcome> {
+        let command_id = command.id;
+        if command_id == crate::CommandId::CancelLoading {
+            self.cancel_async_open();
+            return Ok(crate::api::traced_command(
+                command_id,
+                Ok(Arc::new(CommandOutcome::none())),
+            ));
+        }
+        let traced = self
+            .application
+            .execute_traced(&mut self.session, command)?;
+        if let Ok(outcome) = &traced.result {
+            if let Some(diagnostic) = outcome.diagnostics.first() {
+                self.last_status = diagnostic.message.clone();
+            }
+        }
+        Ok(traced)
     }
 
     /// Pure getter: the last UI-facing snapshot of the asynchronous open (F01).
@@ -886,6 +1092,219 @@ mod tests {
         assert!(drawing.entity_count() >= 6);
         let (min, max) = drawing.bounds().unwrap();
         assert!(max.x - min.x > 0.0);
+    }
+
+    #[test]
+    fn line_capture_commits_once_and_invalid_confirm_keeps_capture() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let before = controller.drawing().unwrap();
+        let count = before.entity_count();
+        let revision = before.revision();
+
+        controller.begin_draw_tool(DrawToolKind::Line).unwrap();
+        controller.capture_tool_point(p(10.0, 20.0)).unwrap();
+        assert!(controller.confirm_draw().is_err());
+        let preview = controller.session.draw_preview().unwrap();
+        assert_eq!(preview.points, vec![p(10.0, 20.0)]);
+
+        controller.capture_tool_point(p(40.0, 20.0)).unwrap();
+        let outcome = controller.confirm_draw().unwrap();
+        assert_eq!(outcome.objects.len(), 1);
+        let after = controller.drawing().unwrap();
+        assert_eq!(after.entity_count(), count + 1);
+        assert_ne!(after.revision(), revision);
+        assert!(controller.application.can_undo(&controller.document_id));
+        assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+    }
+
+    #[test]
+    fn failed_geometry_confirmation_preserves_capture_and_cancel_writes_nothing() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let revision = controller.drawing().unwrap().revision();
+        controller.begin_draw_tool(DrawToolKind::Circle).unwrap();
+        controller.capture_tool_point(p(5.0, 5.0)).unwrap();
+        controller.capture_tool_point(p(5.0, 5.0)).unwrap();
+        assert!(controller.confirm_draw().is_err());
+        assert!(controller.session.draw_preview().unwrap().ready);
+        assert_eq!(controller.drawing().unwrap().revision(), revision);
+
+        let generation = controller.session.tool_generation;
+        controller.cancel_tool().unwrap();
+        assert_eq!(controller.drawing().unwrap().revision(), revision);
+        assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+        assert_eq!(controller.session.tool_generation, generation + 1);
+    }
+
+    #[test]
+    fn draw_capture_uses_start_selection_snapshot_and_cursor_keeps_generation() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let entity = controller.drawing().unwrap().model_space()[0].id;
+        let reference = SelectionRef {
+            document: controller.document_id,
+            entity,
+            instance: InstancePath(Vec::new()),
+            sub_element: None,
+        };
+        controller.session.selection.replace([reference.clone()]);
+        controller.begin_draw_tool(DrawToolKind::Move).unwrap();
+        let generation = controller.session.tool_generation;
+        controller.session.selection.clear();
+        assert_eq!(
+            controller.session.draw_selection_snapshot(),
+            Some(&[reference][..])
+        );
+        assert_eq!(
+            controller.session.draw_preview().unwrap().selection_count,
+            1
+        );
+        controller.move_tool_cursor(p(1.0, 2.0)).unwrap();
+        controller.move_tool_cursor(p(3.0, 4.0)).unwrap();
+        assert_eq!(controller.session.tool_generation, generation);
+    }
+
+    #[test]
+    fn select_and_select_all_invalidate_and_discard_draw_capture_without_writes() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        let revision = controller.drawing().unwrap().revision();
+        controller.begin_draw_tool(DrawToolKind::Line).unwrap();
+        controller.capture_tool_point(p(1.0, 2.0)).unwrap();
+        let before_select = controller.session.tool_generation;
+        controller
+            .application
+            .execute(
+                &mut controller.session,
+                Command {
+                    schema_version: 1,
+                    id: crate::CommandId::Select,
+                    document: controller.document_id,
+                    viewport: controller.viewport_id,
+                    payload: crate::CommandPayload::Selection(Vec::new()),
+                },
+            )
+            .unwrap();
+        assert_eq!(controller.session.tool_generation, before_select + 1);
+        assert!(controller.session.draw_preview().is_none());
+        assert!(matches!(
+            controller.session.tool,
+            crate::ToolState::Selecting
+        ));
+        assert!(controller.session.selection.is_empty());
+
+        controller.begin_draw_tool(DrawToolKind::Line).unwrap();
+        controller.capture_tool_point(p(5.0, 6.0)).unwrap();
+        let before_select_all = controller.session.tool_generation;
+        controller
+            .application
+            .execute(
+                &mut controller.session,
+                Command {
+                    schema_version: 1,
+                    id: crate::CommandId::SelectAll,
+                    document: controller.document_id,
+                    viewport: controller.viewport_id,
+                    payload: crate::CommandPayload::None,
+                },
+            )
+            .unwrap();
+        assert_eq!(controller.session.tool_generation, before_select_all + 1);
+        assert!(controller.session.draw_preview().is_none());
+        assert!(matches!(
+            controller.session.tool,
+            crate::ToolState::Selecting
+        ));
+        assert!(!controller.session.selection.is_empty());
+        assert_eq!(controller.drawing().unwrap().revision(), revision);
+    }
+
+    #[test]
+    fn tool_switches_are_mutually_exclusive_and_repeated_cancel_is_idempotent() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller.begin_draw_tool(DrawToolKind::Line).unwrap();
+        controller.capture_tool_point(p(1.0, 2.0)).unwrap();
+        let draw_generation = controller.session.tool_generation;
+        controller
+            .session
+            .begin_measurement(crate::MeasurementToolKind::Distance)
+            .unwrap();
+        assert!(controller.session.tool_generation > draw_generation);
+        assert!(controller.session.draw_preview().is_none());
+        assert!(controller.session.measurement_preview().is_some());
+
+        let measurement_generation = controller.session.tool_generation;
+        controller.begin_draw_tool(DrawToolKind::Line).unwrap();
+        assert!(controller.session.tool_generation > measurement_generation);
+        assert!(controller.session.measurement_preview().is_none());
+        assert!(controller.session.draw_preview().is_some());
+
+        let generation = controller.session.tool_generation;
+        controller.cancel_tool().unwrap();
+        assert_eq!(controller.session.tool_generation, generation + 1);
+        controller.cancel_tool().unwrap();
+        assert_eq!(controller.session.tool_generation, generation + 1);
+    }
+
+    #[test]
+    fn mode_and_document_replacement_invalidate_active_tool_generation() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller.begin_draw_tool(DrawToolKind::Line).unwrap();
+        let generation = controller.session.tool_generation;
+        controller.session.switch_mode(AppMode::Viewer).unwrap();
+        assert!(controller.session.tool_generation > generation);
+        assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+
+        controller.begin_draw_tool(DrawToolKind::Line).unwrap_err();
+        controller.session.switch_mode(AppMode::Work).unwrap();
+        controller.begin_draw_tool(DrawToolKind::Line).unwrap();
+        let generation = controller.session.tool_generation;
+        controller.reset_for_new_content();
+        assert!(controller.session.tool_generation > generation);
+        assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+    }
+
+    #[test]
+    fn undo_keeps_capture_but_invalidated_selection_fails_confirmation_explicitly() {
+        let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+        controller
+            .create_line(p(100.0, 100.0), p(200.0, 100.0))
+            .unwrap();
+        let entity = controller
+            .drawing()
+            .unwrap()
+            .model_space()
+            .last()
+            .unwrap()
+            .id;
+        let reference = SelectionRef {
+            document: controller.document_id,
+            entity,
+            instance: InstancePath(Vec::new()),
+            sub_element: None,
+        };
+        controller.session.selection.replace([reference.clone()]);
+        controller.begin_draw_tool(DrawToolKind::Move).unwrap();
+        controller.capture_tool_point(p(0.0, 0.0)).unwrap();
+        controller.capture_tool_point(p(10.0, 0.0)).unwrap();
+
+        controller
+            .application
+            .execute(
+                &mut controller.session,
+                Command {
+                    schema_version: 1,
+                    id: crate::CommandId::Undo,
+                    document: controller.document_id,
+                    viewport: controller.viewport_id,
+                    payload: crate::CommandPayload::None,
+                },
+            )
+            .unwrap();
+        assert!(controller.session.draw_preview().is_some());
+        assert_eq!(
+            controller.session.draw_selection_snapshot(),
+            Some(&[reference][..])
+        );
+        assert!(controller.confirm_draw().is_err());
+        assert!(controller.session.draw_preview().is_some());
     }
 
     #[test]

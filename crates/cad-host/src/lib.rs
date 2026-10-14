@@ -1,19 +1,15 @@
 //! Platform-common host orchestration.
 //!
-//! [`HostCore`] owns the controller/Slint bridge and the open/save/plot funnels
-//! that were previously duplicated inside the desktop host. It is a `Clone`
-//! handle over shared `Rc`/`Arc` state and implements the shell's sink traits
-//! ([`cad_ui_slint::UiCommandSink`], `LayoutSwitchSink`, `ViewInput`,
-//! `CanvasPickMapper`, `DrawCommandSink`, `DrawPreviewSink`).
+//! [`HostCore`] owns the application session, renderer session, semantic updates,
+//! and open/save/plot funnels. It is a cloneable owner-thread handle over `Rc` state.
 //!
 //! All platform I/O is expressed through the `cad-platform` contracts
 //! ([`cad_platform::PlatformFiles`], [`cad_platform::ConfigStore`],
 //! [`cad_platform::SurfaceSource`]); this crate never imports `slint`, `wgpu`,
 //! `web-sys` or any Android type, and carries no `cfg` for a host platform.
 //!
-//! The business path is unchanged: `HostController::execute` still runs every
-//! command, the database stays the single authority, and the open/save/plot
-//! handlers keep their exact status grading and corruption guards.
+//! The database remains authoritative; application commands and host-owned file
+//! operations share one synchronous dispatch boundary.
 use std::{
     cell::{Cell, RefCell},
     path::PathBuf,
@@ -22,23 +18,38 @@ use std::{
 };
 
 use cad_app::host::HostController;
-use cad_app::{Command, CommandId, CommandOutcome, CommandPayload, ImportProgressSnapshot};
+use cad_app::render_scene::OverlayInputs;
+use cad_app::{
+    input::CanvasMetrics,
+    interaction::{InteractionRequest, PointInput, PointerButton, PointerId, SelectionMode},
+    viewer_config::ViewerConfigStore,
+    Command, CommandId, CommandOutcome, CommandPayload, ImportProgressSnapshot, ImportTerminal,
+    RawCommandTrace, ToolState,
+};
 use cad_db::DrawingDatabase;
-use cad_domain::{CadError, CadResult};
+use cad_domain::{CadError, CadResult, Point3, SelectionRef, SpaceId};
+use cad_engine::{
+    api::{ApiOutcome, ApiRequest, ApiTarget},
+    events::EventRing,
+    protocol::{
+        ConfigSnapshot, EngineClient, EngineRequest, HostCapabilitiesState, HostState, HostUpdates,
+        ImportState, InteractionOutcome, NavigationState, PumpReport, RawDiagnostic,
+        RawDiagnosticParameter, RawEntityCapability, RenderBackendState, RequestCompletion,
+        RequestContext, RequestError, RequestOrigin, RequestResult, ResourceState,
+        SharedRequestResult, SnapHint, StatusArgument, StatusMessage, SubmissionReceipt,
+    },
+    queue::RequestQueue,
+    render::{OverlayVisibility, RenderSessionHandle, ViewSnapshot},
+};
 use cad_platform::{
     ConfigLoad, ConfigStore, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
     SurfaceMetrics, SurfaceSource,
 };
-use cad_ui_slint::{CadView, LayoutSwitchSink, UiCommandSink, UiHandle};
-
-pub(crate) fn pick_profile_enabled() -> bool {
-    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("YACR_PROFILE_PICK").is_some())
-}
 
 mod fonts;
 mod input;
 mod open;
+mod p4;
 pub mod policy;
 mod save;
 mod state;
@@ -72,60 +83,20 @@ pub(crate) fn error_text(error: &CadError) -> String {
     }
 }
 
-fn use_light_navigation_push(
-    id: CommandId,
-    succeeded: bool,
-    viewport_matches: bool,
-    has_drawing: bool,
-    has_handle: bool,
-    has_view: bool,
-    loading: bool,
-) -> bool {
-    succeeded
-        && matches!(id, CommandId::Pan | CommandId::Zoom)
-        && viewport_matches
-        && has_drawing
-        && has_handle
-        && has_view
-        && !loading
-}
-
-/// Select viewport metrics shared by rendering and canvas-local input.
-///
-/// A live UI handle supplies the actual CAD rectangle (excluding chrome) and
-/// window scale. With no handle, retain the platform surface + safe-inset path
-/// used by headless hosts and tests.
-fn select_canvas_metrics(
-    surface: SurfaceMetrics,
-    cad_surface: Option<([f64; 2], f64)>,
-) -> CadResult<cad_app::input::CanvasMetrics> {
-    // SurfaceSource implementations do not guarantee finite dimensions/scale
-    // or valid insets. Validate the platform contract even when a UI handle
-    // provides the authoritative CAD rectangle; do not use the inset-adjusted
-    // result to size that live canvas.
-    cad_app::input::inset_canvas_metrics(
+/// Select valid platform surface metrics for the host canvas.
+fn select_canvas_metrics(surface: SurfaceMetrics) -> CadResult<CanvasMetrics> {
+    let metrics = cad_app::input::inset_canvas_metrics(
         [0.0; 2],
         surface.logical,
         surface.safe_insets,
         surface.scale,
     )
     .ok_or_else(|| CadError::InvalidInput("canvas metrics are degenerate".into()))?;
-
-    if let Some((size, scale)) = cad_surface {
-        // Input commands already use canvas-local coordinates, so the origin
-        // must be zero. The renderer consumes this same CAD size and scale.
-        Ok(cad_app::input::CanvasMetrics::new([0.0; 2], size, scale))
-    } else {
-        // The platform metrics were validated above; recompute their inset
-        // rectangle as the headless fallback canvas.
-        cad_app::input::inset_canvas_metrics(
-            [0.0; 2],
-            surface.logical,
-            surface.safe_insets,
-            surface.scale,
-        )
-        .ok_or_else(|| CadError::InvalidInput("canvas metrics are degenerate".into()))
-    }
+    Ok(CanvasMetrics::new(
+        [0.0; 2],
+        metrics.size_logical,
+        metrics.dpi_scale,
+    ))
 }
 
 /// Platform-general host options.
@@ -144,7 +115,6 @@ pub struct HostOptions {
     /// A drawing to open at startup (`--open`) or the headless input.
     pub drawing: Option<PathBuf>,
     pub size: [f64; 2],
-    pub locale: String,
 }
 
 /// The platform contracts a [`HostCore`] is built from.
@@ -178,30 +148,52 @@ pub(crate) struct PendingSave {
     pub result: Result<FileTarget, FileAbort>,
 }
 
-/// Per-instance navigation state (drag/scroll), driven by [`ViewInput`].
+/// Per-instance pointer navigation state.
+///
+/// The host owns the CAD gesture decisions (touch identity, drag threshold,
+/// pan/orbit); the UI only delivers canvas-local logical positions and the raw
+/// pointer phase. Because the typed request carries per-pointer identity but no
+/// contact count, `active` is the contact set and its length is the contact
+/// count the multi-touch rule keys off.
 pub(crate) struct NavInner {
+    /// Down-ordered active pointer ids.
+    pub active: RefCell<Vec<PointerId>>,
+    /// The single contact's down position, for the drag threshold.
+    pub anchor: Cell<Option<[f64; 2]>>,
+    /// Last position of the single-contact gesture (pan/orbit delta source).
     pub last: Cell<Option<[f64; 2]>>,
+    /// Whether the single-contact gesture has crossed the drag threshold.
     pub dragged: Cell<bool>,
+    /// Whether the current gesture navigates (pan/orbit) rather than taps.
+    pub navigating: Cell<bool>,
+    /// Last position of a multi-touch navigate gesture (pan delta source).
+    pub nav_last: Cell<Option<[f64; 2]>>,
 }
 
 impl Default for NavInner {
     fn default() -> Self {
         Self {
+            active: RefCell::new(Vec::new()),
+            anchor: Cell::new(None),
             last: Cell::new(None),
             dragged: Cell::new(false),
+            navigating: Cell::new(false),
+            nav_last: Cell::new(None),
         }
     }
 }
 
+/// Registered queue empty-to-nonempty wake callback.
+pub(crate) type RequestWaker = Rc<dyn Fn()>;
+
+/// Monotonic millisecond clock source for the pump time budget.
+pub(crate) type RequestClock = Rc<dyn Fn() -> f64>;
+
 /// Clone handle over the shared host orchestration state.
 #[derive(Clone)]
 pub struct HostCore {
-    /// The single application/controller instance.
     pub controller: Rc<RefCell<HostController>>,
-    /// The shell handle; `None` until the adapter is built.
-    pub handle: Rc<RefCell<Option<UiHandle>>>,
-    /// The CAD view; `None` until the bridge is installed.
-    pub view: Rc<RefCell<Option<CadView>>>,
+    pub render: RenderSessionHandle,
     pub options: HostOptions,
     pub files: Rc<dyn PlatformFiles>,
     pub config_store: Rc<dyn ConfigStore>,
@@ -209,13 +201,17 @@ pub struct HostCore {
     /// The host's font/image installation strategy (see [`HostResources`]).
     pub resources: Rc<dyn HostResources>,
     pub capabilities: HostCapabilities,
-    /// The active catalog locale, **shared** across every clone.
-    ///
-    /// A runtime locale switch must reach the shared-catalog text produced by
-    /// `message()`/`messages()` on *every* clone (the web host holds clones in
-    /// the sink, the input sink and the layout sink), so this is one `Rc` slot,
-    /// not a per-clone copy of `options.locale`.
-    pub(crate) locale: Rc<RefCell<String>>,
+    pub(crate) viewer_config: Rc<RefCell<ViewerConfigStore>>,
+    pub(crate) canvas_metrics: Rc<Cell<CanvasMetrics>>,
+    pub(crate) metrics_revision: Rc<Cell<u64>>,
+    pub(crate) full_dirty: Rc<Cell<bool>>,
+    pub(crate) navigation_dirty: Rc<Cell<bool>>,
+    pub(crate) config_dirty: Rc<Cell<bool>>,
+    pub(crate) status_dirty: Rc<Cell<bool>>,
+    /// Last published raw backend state, so a lifecycle/actual-backend change
+    /// yields a `HostUpdates.backend` delta even when every other dirty flag is
+    /// clear. `None` until the first publication.
+    pub(crate) last_backend: Rc<RefCell<Option<RenderBackendState>>>,
     /// A picker/read is in flight (analogous to the old `pending_open`).
     pub(crate) open_pending: Rc<Cell<bool>>,
     /// The drawing captured when an open attempt began, so a superseded result
@@ -243,46 +239,133 @@ pub struct HostCore {
     /// Path of the drawing being opened (or already open), used to resolve its
     /// sibling raster images. Armed only on a **successful** open.
     pub(crate) drawing_path: Rc<RefCell<Option<PathBuf>>>,
-    /// Last status text the core graded. Delivered to the shell handle when one
-    /// exists; retained so a headless/test core (no window) can observe the exact
-    /// graded text and a host can mirror it.
-    pub(crate) last_status: Rc<RefCell<Option<String>>>,
+    /// Last semantic status update.
+    pub(crate) last_status: Rc<RefCell<Option<StatusMessage>>>,
     /// Last raster-image loading outcome, surfaced by the diagnostics drawer.
     pub(crate) last_image_report: Rc<RefCell<Option<cad_platform::images::ImageLoadReport>>>,
-    /// Last `(physical width, physical height, config revision)` pushed through
-    /// `refresh_window_layout`. `None` forces the first refresh.
-    pub(crate) last_layout_key: Rc<RefCell<Option<(u32, u32, u64)>>>,
+    /// The real terminal snapshot of a *synchronous* deliver (no worker): the
+    /// opened entity count or the original failure. Composed by
+    /// [`Self::import_snapshot`] under the real async snapshot; cleared by a new
+    /// open attempt. Reuses the shared `ImportProgressSnapshot` type.
+    pub(crate) sync_terminal: Rc<RefCell<Option<ImportProgressSnapshot>>>,
+    /// Monotonic Host open-attempt id; bumped by every `begin_open_attempt`.
+    /// Scopes the snapshot to the current attempt so an old terminal never masks
+    /// a new picker/read/sync deliver.
+    pub(crate) open_attempt: Rc<Cell<u64>>,
+    /// The attempt id for which a real async job was actually started. The
+    /// controller's retained async snapshot is only eligible when this equals the
+    /// current [`Self::open_attempt`].
+    pub(crate) async_report_attempt: Rc<Cell<Option<u64>>>,
     /// Per-instance pointer navigation state.
     pub(crate) navigation: Rc<NavInner>,
-    /// Entity refs captured when a MOVE tool starts; selection may change while
-    /// its points are being captured.
-    pub(crate) move_selection: Rc<RefCell<Option<Vec<cad_domain::SelectionRef>>>>,
     /// Diagnostics from reading the config / preference files at startup.
     pub(crate) startup_diagnostics: Rc<RefCell<Vec<String>>>,
+    /// The bounded P3 request queue. Admission/identity/ordering live in the
+    /// engine; the host only drives it through `dispatch_immediate`.
+    pub(crate) queue: Rc<RequestQueue>,
+    /// The registered "queue became non-empty" callback. Invoked only after every
+    /// queue borrow is released, and only to schedule (never to pump).
+    pub(crate) request_waker: Rc<RefCell<Option<RequestWaker>>>,
+    /// Independent host document epoch: incremented only when the authoritative
+    /// document is actually replaced (never on edits/tools/camera).
+    pub(crate) document_epoch: Rc<Cell<u64>>,
+    /// The last authoritative drawing seen, compared by real `Arc` identity plus
+    /// document identity so an address reuse is not mistaken for "unchanged".
+    pub(crate) last_document: Rc<RefCell<Option<Arc<DrawingDatabase>>>>,
+    /// Re-entrancy guard: a nested `pump` returns `Busy`.
+    pub(crate) pump_active: Rc<Cell<bool>>,
+    /// The monotonic millisecond clock used to enforce the pump time budget.
+    /// Native hosts install a real `PumpClock`; wasm hosts must inject one (there
+    /// is no platform clock), and pump with pending work refuses without a clock.
+    pub(crate) request_clock: Rc<RefCell<Option<RequestClock>>>,
+    /// Guard while a clock callback is being sampled, so a re-entrant
+    /// `pump`/`dispatch`/`submit`/`set_request_clock` sees `Busy`.
+    pub(crate) clock_sampling: Rc<Cell<bool>>,
+    /// Guard while a public synchronous entry (`command`/`execute`/`dispatch`)
+    /// runs, so a platform service callback cannot re-enter and jump the queue.
+    pub(crate) sync_active: Rc<Cell<bool>>,
+    /// Bounded engine event ring shared with adapters (P4).
+    pub(crate) events: Rc<EventRing>,
+    /// Per accepted queued request: its reserved trace permit and trace
+    /// metadata. Removed when the request finishes (executed) or when its
+    /// superseded completion is polled.
+    pub(crate) permits: Rc<RefCell<p4::PermitMap>>,
+    /// The single actual command trace collected while a request runs; drained
+    /// into events by [`p4`] after the business call returns.
+    pub(crate) pending_trace: Rc<RefCell<Vec<RawCommandTrace>>>,
+    /// Last observed selection refs, for real `SelectionChanged` diffs.
+    pub(crate) last_selection: Rc<RefCell<Vec<SelectionRef>>>,
+    /// Monotonic selection revision, bumped only on a real refs change.
+    pub(crate) selection_revision: Rc<Cell<u64>>,
+    /// Last observed tool generation, for real `ToolChanged` diffs.
+    pub(crate) last_tool_generation: Rc<Cell<u64>>,
+}
+
+/// RAII flag guard: sets the flag on construction and clears it on drop,
+/// including on panic/unwind.
+pub(crate) struct ActiveGuard<'a> {
+    flag: &'a Cell<bool>,
+}
+
+impl<'a> ActiveGuard<'a> {
+    pub(crate) fn new(flag: &'a Cell<bool>) -> Self {
+        flag.set(true);
+        Self { flag }
+    }
+}
+
+impl Drop for ActiveGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.set(false);
+    }
 }
 
 impl HostCore {
     /// Build the core over a demo document and the platform contracts.
     pub fn new(
         options: HostOptions,
-        handle: Rc<RefCell<Option<UiHandle>>>,
         platform: HostPlatform,
+        render: RenderSessionHandle,
     ) -> CadResult<Self> {
         let controller = Rc::new(RefCell::new(HostController::with_demo_document(
             options.size,
         )?));
-        let locale = Rc::new(RefCell::new(options.locale.clone()));
+        let initial_metrics = CanvasMetrics::new([0.0; 2], options.size, 1.0);
+        let mut viewer_config = ViewerConfigStore::default();
+        viewer_config
+            .update_config_json(HOST_ALLOWED_PATHS_JSON)
+            .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+        let initial_document = controller.borrow().drawing();
+        if let Some(drawing) = initial_document.clone() {
+            render.sync_drawing(Some(drawing));
+        }
+        // Native hosts get a real monotonic clock by default; wasm32 has none and
+        // must inject one (an omitted clock is an explicit refusal, never a fake
+        // elapsed of 0).
+        #[cfg(not(target_arch = "wasm32"))]
+        let default_clock: Option<Rc<dyn Fn() -> f64>> = {
+            let clock = cad_engine::queue::PumpClock::new();
+            Some(Rc::new(move || clock.elapsed_millis()))
+        };
+        #[cfg(target_arch = "wasm32")]
+        let default_clock: Option<Rc<dyn Fn() -> f64>> = None;
         Ok(Self {
             controller,
-            handle,
-            view: Rc::new(RefCell::new(None)),
+            render,
             options,
             files: platform.files,
             config_store: platform.config_store,
             surface: platform.surface,
             resources: platform.resources,
             capabilities: platform.capabilities,
-            locale,
+            viewer_config: Rc::new(RefCell::new(viewer_config)),
+            canvas_metrics: Rc::new(Cell::new(initial_metrics)),
+            metrics_revision: Rc::new(Cell::new(0)),
+            full_dirty: Rc::new(Cell::new(true)),
+            navigation_dirty: Rc::new(Cell::new(true)),
+            config_dirty: Rc::new(Cell::new(true)),
+            status_dirty: Rc::new(Cell::new(false)),
+            last_backend: Rc::new(RefCell::new(None)),
             open_pending: Rc::new(Cell::new(false)),
             open_guard: Rc::new(RefCell::new(None)),
             open_abort: Rc::new(Cell::new(false)),
@@ -296,58 +379,186 @@ impl HostCore {
             drawing_path: Rc::new(RefCell::new(None)),
             last_status: Rc::new(RefCell::new(None)),
             last_image_report: Rc::new(RefCell::new(None)),
-            last_layout_key: Rc::new(RefCell::new(None)),
+            sync_terminal: Rc::new(RefCell::new(None)),
+            open_attempt: Rc::new(Cell::new(0)),
+            async_report_attempt: Rc::new(Cell::new(None)),
             navigation: Rc::new(NavInner::default()),
-            move_selection: Rc::new(RefCell::new(None)),
             startup_diagnostics: Rc::new(RefCell::new(Vec::new())),
+            queue: Rc::new(RequestQueue::new()),
+            request_waker: Rc::new(RefCell::new(None)),
+            document_epoch: Rc::new(Cell::new(0)),
+            last_document: Rc::new(RefCell::new(initial_document)),
+            pump_active: Rc::new(Cell::new(false)),
+            request_clock: Rc::new(RefCell::new(default_clock)),
+            clock_sampling: Rc::new(Cell::new(false)),
+            sync_active: Rc::new(Cell::new(false)),
+            events: Rc::new(cad_engine::events::EventRing::new()),
+            permits: Rc::new(RefCell::new(p4::PermitMap::new())),
+            pending_trace: Rc::new(RefCell::new(Vec::new())),
+            last_selection: Rc::new(RefCell::new(Vec::new())),
+            selection_revision: Rc::new(Cell::new(0)),
+            last_tool_generation: Rc::new(Cell::new(0)),
         })
     }
 
-    /// Install the shell handle (called once the adapter is built).
-    pub fn set_handle(&self, handle: UiHandle) {
-        *self.handle.borrow_mut() = Some(handle);
+    /// Whether the engine is busy for admission purposes: a pump is running, a
+    /// clock is being sampled, or a public synchronous entry is executing.
+    pub(crate) fn request_engine_busy(&self) -> bool {
+        self.pump_active.get() || self.clock_sampling.get() || self.sync_active.get()
     }
 
-    /// Install the CAD view (called once the bridge is installed).
-    pub fn set_view(&self, view: CadView) {
-        *self.view.borrow_mut() = Some(view);
-    }
-
-    /// The localized message for `key` in the host's **current** locale.
+    /// Run an external action under a single synchronous guard.
     ///
-    /// Reads the shared locale slot, so a runtime `set_locale` on any clone
-    /// affects every clone's text.
-    pub fn message(&self, key: &str, values: &[(&str, &str)]) -> String {
-        self.messages().text(key, values)
+    /// Reuses [`Self::begin_sync_request`] (queued/executing/active check). The
+    /// action runs with no internal borrow held (the queue snapshot is released
+    /// before the call), and the RAII guard covers the whole action so a nested
+    /// `dispatch`/`submit`/`pump` returns `Busy`. This performs no execution
+    /// probe, no `sync_render` and no status side effect of its own: the caller's
+    /// closure owns its own semantics (for example Web payload validation and
+    /// store/reload, reporting its own catalog errors).
+    pub fn with_sync_request<T>(
+        &self,
+        action: impl FnOnce() -> Result<T, RequestError>,
+    ) -> Result<T, RequestError> {
+        let _guard = self.begin_sync_request()?;
+        action()
     }
 
-    /// The catalog for the host's current locale (a clone of the shared source).
-    pub fn messages(&self) -> cad_ui_slint::MessageSource {
-        cad_ui_slint::MessageSource::from_request(self.locale.borrow().as_str())
+    /// Record a post-commit host-state failure (render sync / status) as an
+    /// explicit diagnostic, without turning the already-committed business
+    /// completion into a failure.
+    pub(crate) fn note_post_commit_error(&self, error: &CadError) {
+        let _ = self.set_external_status(format!("post-commit state sync failed: {error:?}"));
     }
 
-    /// Switch the host's catalog locale at runtime.
+    /// Install the monotonic millisecond clock used for the pump time budget.
     ///
-    /// The slot is shared, so this reaches the text produced by every clone
-    /// (the web host keeps clones in its sink, input sink and layout sink).
-    pub fn set_locale(&self, tag: &str) {
-        *self.locale.borrow_mut() = tag.to_string();
+    /// The clock callback must return a finite, non-negative, non-decreasing
+    /// timestamp in milliseconds. The first sample is validated (finite and
+    /// non-negative) **before** it is installed, so a failing clock never
+    /// replaces a working one; per-sample monotonicity is enforced across the
+    /// pump pass. While queued/executing work or a pump/clock sample is active
+    /// this returns the mapped Busy `CadError`.
+    pub fn set_request_clock(&self, clock: RequestClock) -> CadResult<()> {
+        if self.request_engine_busy() || self.queue.pending() || self.queue.executing_id().is_some()
+        {
+            return Err(Self::config_busy_error());
+        }
+        // Sampling a clock is itself a guarded window: a re-entrant
+        // pump/dispatch/submit/set_request_clock must see Busy.
+        let _guard = ActiveGuard::new(&self.clock_sampling);
+        // The candidate is sampled (and its callback run) with no `request_clock`
+        // borrow held, and only installed after the first sample validates.
+        // Per-sample monotonicity is enforced by `pump` across the pass.
+        let sample = clock();
+        if !sample.is_finite() || sample < 0.0 {
+            return Err(CadError::InvalidInput(
+                "request clock must return a finite non-negative millisecond timestamp".into(),
+            ));
+        }
+        *self.request_clock.borrow_mut() = Some(clock);
+        Ok(())
     }
 
-    /// Set the host status line, recording it for host mirrors and tests.
+    /// Test-only: drop the installed clock to exercise the no-clock path.
+    #[cfg(test)]
+    pub(crate) fn clear_request_clock_for_test(&self) {
+        *self.request_clock.borrow_mut() = None;
+    }
+
+    /// Discard any in-progress pointer gesture.
     ///
-    /// Delivered to the shell handle when one exists; the recorded copy lets a
-    /// headless/test core (no window) observe the exact graded text.
-    pub fn set_status(&self, text: String) -> CadResult<()> {
-        *self.last_status.borrow_mut() = Some(text.clone());
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            handle.set_status(text)?;
+    /// Called when the authoritative document, canvas metrics or config change:
+    /// the pending gesture no longer refers to the current state.
+    pub(crate) fn clear_gestures(&self) {
+        self.navigation.active.borrow_mut().clear();
+        self.navigation.anchor.set(None);
+        self.navigation.last.set(None);
+        self.navigation.nav_last.set(None);
+        self.navigation.dragged.set(false);
+        self.navigation.navigating.set(false);
+    }
+
+    /// Record the authoritative document and bump the host document epoch iff it
+    /// was actually replaced.
+    ///
+    /// Identity is `Arc::ptr_eq` **and** the database id, so a recycled pointer
+    /// address is never mistaken for the same document. Called by every
+    /// replacement entry (initial/new/open publish/external). A replacement also
+    /// invalidates any in-progress gesture.
+    pub(crate) fn note_document_replaced(&self) {
+        let current = self.controller.borrow().drawing();
+        let changed = {
+            let last = self.last_document.borrow();
+            match (last.as_ref(), current.as_ref()) {
+                (Some(previous), Some(now)) => {
+                    !Arc::ptr_eq(previous, now) || previous.id() != now.id()
+                }
+                (None, None) => false,
+                _ => true,
+            }
+        };
+        if changed {
+            self.document_epoch
+                .set(self.document_epoch.get().saturating_add(1));
+            *self.last_document.borrow_mut() = current;
+            self.clear_gestures();
+        }
+    }
+
+    /// The `CadError` a config write returns while queued work is pending.
+    ///
+    /// Mirrors the adapter's mapping of `RequestError::Busy`.
+    pub(crate) fn config_busy_error() -> CadError {
+        CadError::InvalidInput("engine is busy".into())
+    }
+
+    /// Refuse a config write while the queue has queued/executing work or a
+    /// pump/clock/sync window is active.
+    fn require_config_idle(&self) -> CadResult<()> {
+        if self.request_engine_busy() || self.queue.pending() || self.queue.executing_id().is_some()
+        {
+            return Err(Self::config_busy_error());
         }
         Ok(())
     }
 
-    /// The last status text the core graded, if any.
-    pub fn last_status(&self) -> Option<String> {
+    pub fn set_status_message(&self, status: StatusMessage) -> CadResult<()> {
+        *self.last_status.borrow_mut() = Some(status);
+        self.status_dirty.set(true);
+        Ok(())
+    }
+
+    pub fn set_catalog_status(&self, key: &str, values: &[(&str, &str)]) -> CadResult<()> {
+        self.set_status_message(StatusMessage::Catalog {
+            key: key.to_string(),
+            args: values
+                .iter()
+                .map(|(key, value)| StatusArgument {
+                    key: (*key).to_string(),
+                    value: (*value).to_string(),
+                })
+                .collect(),
+        })
+    }
+
+    pub fn set_external_status(&self, text: impl Into<String>) -> CadResult<()> {
+        self.set_status_message(StatusMessage::ExternalText(text.into()))
+    }
+
+    /// Locale-neutral diagnostic text for errors that are returned to a caller.
+    pub(crate) fn message(&self, key: &str, values: &[(&str, &str)]) -> String {
+        let mut text = key.to_string();
+        for (name, value) in values {
+            text.push(' ');
+            text.push_str(name);
+            text.push('=');
+            text.push_str(value);
+        }
+        text
+    }
+
+    pub fn last_status(&self) -> Option<StatusMessage> {
         self.last_status.borrow().clone()
     }
 
@@ -356,35 +567,26 @@ impl HostCore {
         self.startup_diagnostics.borrow().clone()
     }
 
-    /// Reclassify the window layout and map the surface onto the active viewport.
-    ///
-    /// The window layout is reclassified only when the physical size or the
-    /// resolved config changed, not every tick (the 50 ms timer calls this). A
-    /// host with no handle yet (a headless/test core) skips that presentation
-    /// step; the surface mapping below is still applied.
+    /// Read the platform surface and apply validated canvas-local metrics.
     pub fn metrics(&self) -> CadResult<()> {
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            let layout_key = handle
-                .physical_size()
-                .map(|size| (size.width, size.height, handle.config_revision()));
-            let layout_changed = {
-                let mut last = self.last_layout_key.borrow_mut();
-                if *last == layout_key {
-                    false
-                } else {
-                    *last = layout_key;
-                    true
-                }
-            };
-            if layout_changed {
-                handle.refresh_window_layout()?;
-            }
-        }
         let surface = self.surface.surface().ok_or(CadError::Cancelled)?;
-        let cad_surface = match self.handle.borrow().as_ref() {
-            Some(handle) => Some(handle.cad_surface_size().ok_or(CadError::Cancelled)?),
-            None => None,
-        };
+        self.set_canvas_metrics(select_canvas_metrics(surface)?)
+    }
+
+    pub fn set_canvas_metrics(&self, canvas: CanvasMetrics) -> CadResult<()> {
+        if !canvas.is_valid() || canvas.origin_logical != [0.0; 2] {
+            return Err(CadError::InvalidInput(
+                "canvas metrics must be valid and canvas-local".into(),
+            ));
+        }
+        if self.canvas_metrics.get() == canvas {
+            return Ok(());
+        }
+        self.canvas_metrics.set(canvas);
+        self.metrics_revision
+            .set(self.metrics_revision.get().saturating_add(1));
+        // A metrics change invalidates the pending gesture's coordinates.
+        self.clear_gestures();
         let mut c = self.controller.borrow_mut();
         let id = c.viewport_id;
         let viewport = c
@@ -393,11 +595,19 @@ impl HostCore {
             .viewports
             .get_mut(&id)
             .ok_or(CadError::Cancelled)?;
-        let canvas = select_canvas_metrics(surface, cad_surface)?;
-        cad_app::input::apply_canvas_metrics(viewport, &canvas)
+        cad_app::input::apply_canvas_metrics(viewport, &canvas)?;
+        drop(c);
+        self.navigation_dirty.set(true);
+        self.sync_render()
     }
 
     /// Build and run one command through the single host funnel.
+    ///
+    /// Public synchronous entry: it is refused (mapped Busy `CadError`) while
+    /// queued/executing work or a pump/clock/sync window is active. It routes
+    /// through the unified P4 path (real `CommandStarted`/`CommandFinished`
+    /// lifecycle + events), so host commands are traced exactly like engine
+    /// requests.
     pub fn command(&self, id: CommandId, payload: CommandPayload) -> CadResult<()> {
         let c = self.controller.borrow();
         let command = Command {
@@ -411,108 +621,153 @@ impl HostCore {
         self.execute(command)
     }
 
-    /// Run one command, push state and grade the status line.
+    /// Run one command through the unified P4 host/application boundary.
+    ///
+    /// A public synchronous write entry with the same Busy/RAII semantics as
+    /// [`Self::command`], traced as a `Ui`-origin engine request.
     pub fn execute(&self, command: Command) -> CadResult<()> {
-        let command_id = command.id;
-        let command_viewport = command.viewport;
-        let profile = command.id == CommandId::Select && pick_profile_enabled();
-        let started = profile.then(std::time::Instant::now);
-        let metrics_result = self.metrics();
-        if let Some(started) = started {
-            eprintln!(
-                "YACR_PROFILE_PICK execute_metrics elapsed_ms={:.3}",
-                started.elapsed().as_secs_f64() * 1000.0
-            );
+        match self.dispatch_with_origin_impl(RequestOrigin::Ui, EngineRequest::Command(command)) {
+            Ok(completion) => match completion.result {
+                Ok(_) => Ok(()),
+                Err(error) => Err(p4::request_error_to_cad(error)),
+            },
+            Err(error) => Err(p4::request_error_to_cad(error)),
         }
-        metrics_result?;
-        // Plot and Save As own their own success/failure status
-        // (plot.exported / save.exported / ...); the generic completed/failed
-        // text must not overwrite it.
+    }
+
+    /// Build and run a command with no admission/guard of its own.
+    ///
+    /// Used by `pump` and by the host's own navigation/interaction internals so
+    /// they never self-Busy against the entry guard they are running under.
+    pub(crate) fn immediate_command(
+        &self,
+        id: CommandId,
+        payload: CommandPayload,
+    ) -> CadResult<()> {
+        let c = self.controller.borrow();
+        let command = Command {
+            schema_version: 1,
+            id,
+            payload,
+            document: c.document_id,
+            viewport: c.viewport_id,
+        };
+        drop(c);
+        self.execute_with_outcome(command).map(|_| ())
+    }
+
+    /// Record one real command trace (host-owned operations record their own
+    /// actual outcome; a `SwitchBackend` refusal records none, being no execution).
+    fn record_raw_trace(&self, command: CommandId, result: Result<Arc<CommandOutcome>, CadError>) {
+        self.pending_trace
+            .borrow_mut()
+            .push(RawCommandTrace { command, result });
+    }
+
+    /// Set a catalog status, recording a post-commit diagnostic if it fails.
+    fn record_status(&self, key: &str, values: &[(&str, &str)]) {
+        if let Err(error) = self.set_catalog_status(key, values) {
+            self.note_post_commit_error(&error);
+        }
+    }
+
+    fn execute_with_outcome(&self, command: Command) -> CadResult<Option<Arc<CommandOutcome>>> {
+        let command_id = command.id;
+        self.metrics()?;
         let owns_status = policy::owns_status(command_id);
-        let started = profile.then(std::time::Instant::now);
-        let result: CadResult<Option<CommandOutcome>> = match command.id {
+        let none: Arc<CommandOutcome> = Arc::new(CommandOutcome::none());
+        let result = match command.id {
             CommandId::CancelLoading => {
                 self.cancel_loading();
+                self.record_raw_trace(command_id, Ok(none));
                 Ok(None)
             }
-            CommandId::OpenDrawing => self.request_open().map(|_| None),
-            CommandId::NewDrawing => self.request_new().map(|_| None),
-            CommandId::PlotDrawing => self.request_plot().map(|_| None),
-            CommandId::SaveDrawingAs => self.request_save().map(|_| None),
+            // Host-owned funnels record their real host outcome (no App command
+            // executed). An async Open success means the delivery STARTED, not
+            // that the import finished.
+            CommandId::OpenDrawing => match self.request_open() {
+                Ok(()) => {
+                    self.record_raw_trace(command_id, Ok(none));
+                    Ok(None)
+                }
+                Err(error) => {
+                    self.record_raw_trace(command_id, Err(error.clone()));
+                    Err(error)
+                }
+            },
+            CommandId::NewDrawing => match self.request_new() {
+                Ok(()) => {
+                    self.record_raw_trace(command_id, Ok(none));
+                    Ok(None)
+                }
+                Err(error) => {
+                    self.record_raw_trace(command_id, Err(error.clone()));
+                    Err(error)
+                }
+            },
+            CommandId::PlotDrawing => match self.request_plot() {
+                Ok(()) => {
+                    self.record_raw_trace(command_id, Ok(none));
+                    Ok(None)
+                }
+                Err(error) => {
+                    self.record_raw_trace(command_id, Err(error.clone()));
+                    Err(error)
+                }
+            },
+            CommandId::SaveDrawingAs => match self.request_save() {
+                Ok(()) => {
+                    self.record_raw_trace(command_id, Ok(none));
+                    Ok(None)
+                }
+                Err(error) => {
+                    self.record_raw_trace(command_id, Err(error.clone()));
+                    Err(error)
+                }
+            },
+            // A refusal that never executed records no command trace.
             CommandId::SwitchBackend => Err(CadError::Unsupported(
-                self.message("linux.backend_unavailable", &[]),
+                "backend switching is not available through this host".into(),
             )),
-            _ => self.controller.borrow_mut().execute(command).map(Some),
+            _ => {
+                // Every other command runs through the traced app entry so its
+                // single actual command trace is captured (shared `Arc` outcome).
+                let traced = self.controller.borrow_mut().execute_traced(command)?;
+                self.pending_trace.borrow_mut().extend(traced.commands);
+                traced.result.map(Some)
+            }
         };
-        if let Some(started) = started {
-            eprintln!(
-                "YACR_PROFILE_PICK execute_controller elapsed_ms={:.3}",
-                started.elapsed().as_secs_f64() * 1000.0
-            );
-        }
-        // The push is best-effort relative to the command result: a failed push
-        // must never mask the command's own error (it is surfaced only when the
-        // command itself succeeded).
-        let (viewport_matches, has_drawing) = {
-            let c = self.controller.borrow();
-            (c.viewport_id == command_viewport, c.drawing().is_some())
-        };
-        let light_navigation_push = use_light_navigation_push(
-            command_id,
-            result.is_ok(),
-            viewport_matches,
-            has_drawing,
-            self.handle.borrow().is_some(),
-            self.view.borrow().is_some(),
-            self.loading(),
-        );
-        let started = profile.then(std::time::Instant::now);
-        let push_result = if light_navigation_push {
-            self.push_navigation()
-        } else {
-            self.push()
-        };
-        if let Some(started) = started {
-            eprintln!(
-                "YACR_PROFILE_PICK execute_push elapsed_ms={:.3}",
-                started.elapsed().as_secs_f64() * 1000.0
-            );
-        }
-        let started = profile.then(std::time::Instant::now);
-        // An open cancel/failure graded within this gesture owns the status; the
-        // generic "completed" must not overwrite it.
         let open_graded = self.open_status_graded.replace(false);
+        // Status grading and the render sync are POST-business: a failure here is
+        // an explicit diagnostic, never a reclassification of the committed
+        // business completion.
         if let Err(error) = &result {
             if !owns_status {
-                self.set_status(self.message("command.failed", &[("error", &error_text(error))]))?;
+                self.record_status("command.failed", &[("error", &error_text(error))]);
             }
         }
         if result.is_ok() && !self.loading() && !owns_status && !open_graded {
-            // A no-op fit (empty drawing) carries the `fit.empty` code; show
-            // that instead of the generic "completed", never a fake success.
             let diagnostic = result
                 .as_ref()
                 .ok()
                 .and_then(|outcome| outcome.as_ref())
                 .and_then(|outcome| outcome.diagnostics.first());
-            let status = match diagnostic {
-                Some(diagnostic) if diagnostic.code == "fit.empty" => {
-                    self.message("fit.empty", &[])
-                }
-                _ => self.message("command.completed", &[]),
-            };
-            self.set_status(status)?;
+            if diagnostic.is_some_and(|d| d.code == "fit.empty") {
+                self.record_status("fit.empty", &[]);
+            } else {
+                self.record_status("command.completed", &[]);
+            }
         }
-        if let Some(started) = started {
-            eprintln!(
-                "YACR_PROFILE_PICK execute_status elapsed_ms={:.3}",
-                started.elapsed().as_secs_f64() * 1000.0
-            );
+        if matches!(command_id, CommandId::Pan | CommandId::Zoom) {
+            self.navigation_dirty.set(true);
+        } else {
+            self.full_dirty.set(true);
+            self.navigation_dirty.set(true);
         }
-        match result {
-            Ok(_) => push_result,
-            Err(error) => Err(error),
+        if let Err(error) = self.sync_render() {
+            self.note_post_commit_error(&error);
         }
+        result
     }
 
     /// Whether a save-target chooser is in flight or a chosen target is awaiting
@@ -548,13 +803,29 @@ impl HostCore {
 
     /// The import-drawer snapshot for the current open state.
     ///
-    /// Prefers the controller's real async snapshot. While a platform read is in
-    /// flight (picker/read, no async job yet) it synthesizes a running snapshot
-    /// whose `cancellable` reflects the abort flag, so the drawer shows real
-    /// progress with a working cancel — and goes idle once nothing is pending.
+    /// Composition, in order:
+    /// 1. the controller's real async snapshot (a worker job, running or its
+    ///    retained terminal) always wins, so a synchronous terminal can never
+    ///    pollute an active worker;
+    /// 2. otherwise the Host's own synchronous terminal (real opened entity
+    ///    count, or the original failure) so a completed sync deliver stays
+    ///    observable after `loading()` goes false;
+    /// 3. otherwise, while a platform read is in flight (picker/read, no job
+    ///    yet) a synthesized running snapshot whose `cancellable` reflects the
+    ///    abort flag; idle reports `None`.
     pub fn import_snapshot(&self) -> Option<ImportProgressSnapshot> {
-        if let Some(snapshot) = self.controller.borrow().async_open_snapshot() {
-            return Some(snapshot);
+        // The controller's retained async snapshot is scoped to the Host open
+        // attempt that actually started the job: an old worker's terminal must
+        // never mask a new picker/read or a new synchronous deliver. Within the
+        // current attempt its running/terminal state still wins.
+        let async_eligible = self.async_report_attempt.get() == Some(self.open_attempt.get());
+        if async_eligible {
+            if let Some(snapshot) = self.controller.borrow().async_open_snapshot() {
+                return Some(snapshot);
+            }
+        }
+        if let Some(terminal) = self.sync_terminal.borrow().as_ref() {
+            return Some(terminal.clone());
         }
         if self.open_pending.get() {
             let mut running = ImportProgressSnapshot::running();
@@ -571,19 +842,14 @@ impl HostCore {
     /// diagnostic.
     pub fn load_startup(&self) -> Vec<String> {
         let mut diagnostics = Vec::new();
-        let handle = match self.handle.borrow().as_ref().cloned() {
-            Some(handle) => handle,
-            None => return diagnostics,
-        };
-
-        if let Err(error) = handle.update_config_json(HOST_ALLOWED_PATHS_JSON) {
+        if let Err(error) = self.update_config_json(HOST_ALLOWED_PATHS_JSON) {
             diagnostics.push(format!("host config defaults rejected: {error}"));
         }
 
         match self.config_store.load_config() {
             ConfigLoad::Absent => {}
             ConfigLoad::Text { path, text } => {
-                if let Err(error) = handle.set_config_json(&text) {
+                if let Err(error) = self.set_config_json(&text) {
                     diagnostics.push(format!("config file {path} rejected: {error}"));
                 }
             }
@@ -594,9 +860,9 @@ impl HostCore {
 
         match self.config_store.load_preference() {
             ConfigLoad::Absent => {}
-            ConfigLoad::Text { path, text } => match handle.apply_user_preference_json(&text) {
+            ConfigLoad::Text { path, text } => match self.apply_user_preference_json(&text) {
                 Ok(()) => {
-                    if let Err(error) = self.persist_preference(&handle) {
+                    if let Err(error) = self.persist_preference() {
                         diagnostics.push(format!("preferences {path} not re-persisted: {error}"));
                     }
                 }
@@ -612,22 +878,45 @@ impl HostCore {
     }
 
     /// Write the store's allowed projection of the user preference.
-    fn persist_preference(&self, handle: &UiHandle) -> CadResult<()> {
-        self.config_store
-            .persist_preference(&handle.projected_user_preference_json())
+    fn persist_preference(&self) -> CadResult<()> {
+        let projected = self.viewer_config.borrow().projected_user_preference_json();
+        self.config_store.persist_preference(&projected)
     }
 
-    /// Merge a host `ViewerConfig` patch through the shared store.
+    pub fn config_snapshot(&self) -> ConfigSnapshot {
+        let store = self.viewer_config.borrow();
+        ConfigSnapshot {
+            effective: store.effective().clone(),
+            revision: store.revision,
+            preset: store.effective().ui.preset,
+            effective_json: store.effective_json(),
+        }
+    }
+
+    pub fn set_config_json(&self, text: &str) -> CadResult<()> {
+        self.require_config_idle()?;
+        self.viewer_config
+            .borrow_mut()
+            .set_config_json(text)
+            .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+        self.clear_gestures();
+        self.config_dirty.set(true);
+        self.full_dirty.set(true);
+        self.sync_render()
+    }
+
     pub fn update_config_json(&self, text: &str) -> CadResult<()> {
-        let handle = self
-            .handle
-            .borrow()
-            .as_ref()
-            .cloned()
-            .ok_or(CadError::Cancelled)?;
-        handle
+        self.require_config_idle()?;
+        let result = self
+            .viewer_config
+            .borrow_mut()
             .update_config_json(text)
-            .map_err(|error| CadError::InvalidInput(error.to_string()))
+            .map_err(|error| CadError::InvalidInput(error.to_string()));
+        result?;
+        self.clear_gestures();
+        self.config_dirty.set(true);
+        self.full_dirty.set(true);
+        self.sync_render()
     }
 
     /// Apply a host-allowed user preference, then persist the allowed projection.
@@ -636,33 +925,50 @@ impl HostCore {
     /// `ConfigObserver`, which would re-borrow the store while it is mutably
     /// borrowed).
     pub fn apply_user_preference_json(&self, text: &str) -> CadResult<()> {
-        let handle = self
-            .handle
-            .borrow()
-            .as_ref()
-            .cloned()
-            .ok_or(CadError::Cancelled)?;
-        handle
+        self.require_config_idle()?;
+        self.viewer_config
+            .borrow_mut()
             .apply_user_preference_json(text)
             .map_err(|error| CadError::InvalidInput(error.to_string()))?;
-        self.persist_preference(&handle)
+        self.clear_gestures();
+        self.persist_preference()?;
+        self.config_dirty.set(true);
+        self.full_dirty.set(true);
+        self.sync_render()
     }
 
-    /// One timer tick: file events → open/save funnels → metrics → view sync.
+    /// Drop the stored user preference so the host defaults apply again.
     ///
-    /// The order is the desktop host's existing order and is load-bearing: the
-    /// open funnel refreshes availability/status, and `sync_view` runs last.
+    /// This is a real clear of the single [`ViewerConfigStore`]: the accumulated
+    /// preference is emptied, the allowed (now empty) projection is persisted
+    /// through the same policy as [`Self::apply_user_preference_json`], and the
+    /// config + render inputs are republished. It never fakes success: a failed
+    /// persistence returns `Err` with the dirty markers retained for a retry,
+    /// and there is no UI callback.
+    pub fn clear_user_preference(&self) -> CadResult<()> {
+        self.require_config_idle()?;
+        self.viewer_config.borrow_mut().clear_user_preference();
+        self.clear_gestures();
+        // Mark the publish before the fallible persistence, so a failure keeps
+        // the change pending instead of silently dropping it.
+        self.config_dirty.set(true);
+        self.full_dirty.set(true);
+        self.persist_preference()?;
+        self.sync_render()
+    }
+
+    /// One timer tick: file events → open/save funnels → metrics → render sync.
     pub fn tick(&self) -> CadResult<()> {
         self.poll_open()
             .and_then(|_| self.poll_pending_save())
             .and_then(|_| self.metrics())
             .and_then(|_| self.sync_view())
+            .and_then(|_| self.render.poll_preparation().map(|_| ()))
     }
 
     /// Open the configured `--open` drawing at startup (or fit the demo).
     ///
-    /// Runs before the CAD view exists, so the font/image installs are deferred
-    /// to the caller once the bridge is installed.
+    /// Uses the already-owned render session; no UI bridge is required.
     pub fn open_configured_drawing(&self) -> CadResult<()> {
         self.metrics()?;
         if let Some(path) = &self.options.drawing {
@@ -678,26 +984,5 @@ impl HostCore {
             self.controller.borrow_mut().fit()?;
         }
         Ok(())
-    }
-}
-
-impl UiCommandSink for HostCore {
-    fn send(&mut self, command: Command) -> CadResult<()> {
-        self.execute(command)
-    }
-}
-
-/// Layout panel switch (F04): dispatch the validated `SwitchSpace` command.
-///
-/// Installed on the adapter so a layout-row click runs through the same command
-/// path every other host command uses. The command layer validates the layout
-/// against the drawing and refuses an unknown one; the sink never mutates the
-/// database.
-impl LayoutSwitchSink for HostCore {
-    fn select(&mut self, space: cad_representation::SpaceSelection) {
-        let _ = self.command(
-            CommandId::SwitchSpace,
-            cad_app::input::space_switch_payload(space),
-        );
     }
 }

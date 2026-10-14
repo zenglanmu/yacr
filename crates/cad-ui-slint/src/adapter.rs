@@ -1,7 +1,41 @@
 //! adapter module.
 
 use super::*;
+use crate::engine_adapter::EngineDispatch;
+use cad_app::interaction::{InteractionRequest, SelectionMode};
+use cad_engine::protocol::InteractionOutcome;
 use cad_render_wgpu::{wgpu, GpuSelection};
+
+struct RoutedCommandSink<S> {
+    legacy: S,
+    dispatch: Rc<EngineDispatch>,
+}
+
+impl<S: UiCommandSink> UiCommandSink for RoutedCommandSink<S> {
+    fn send(&mut self, command: Command) -> CadResult<()> {
+        if self.dispatch.has_client() {
+            self.dispatch.command(command)
+        } else {
+            self.legacy.send(command)
+        }
+    }
+}
+
+fn report_action_error(
+    report: &Weak<YacrWindow>,
+    messages: &Rc<RefCell<MessageSource>>,
+    error: &CadError,
+) {
+    if let Some(ui) = report.upgrade() {
+        ui.set_status_label(
+            messages
+                .borrow()
+                .text("command.failed", &[("error", &error.to_string())])
+                .into(),
+        );
+        ui.set_command_expanded(true);
+    }
+}
 
 /// Build the command a shell callback emits for the configured document.
 fn command_for(
@@ -100,28 +134,6 @@ pub fn ribbon_command_action(id: &str) -> RibbonCommandAction {
         // shell reports the concrete missing input via
         // [`ribbon_command_unsupported_reason`] rather than faking a target.
         _ => Unsupported,
-    }
-}
-
-/// Push the active draw state into the shell and the host preview sink.
-///
-/// Called after every capture/cursor/start/cancel so the step panel, the
-/// confirm affordance and the CAD overlay always agree with the pure state
-/// machine. A `None` sink simply means no live overlay; it is never an error.
-fn publish_draw(
-    report: &Weak<YacrWindow>,
-    tool: &Rc<RefCell<Option<cad_app::DrawTool>>>,
-    preview_sink: &Rc<RefCell<Option<Rc<dyn DrawPreviewSink>>>>,
-) {
-    let preview = tool.borrow().as_ref().map(|tool| tool.preview());
-    let state = DrawUiState::from_preview(preview.as_ref());
-    if let Some(ui) = report.upgrade() {
-        ui.set_draw_tool_active(state.active);
-        ui.set_draw_can_confirm(state.can_confirm);
-        ui.set_draw_step_label(state.step_label.into());
-    }
-    if let Some(sink) = preview_sink.borrow().as_ref() {
-        sink.set_preview(preview);
     }
 }
 
@@ -233,7 +245,12 @@ impl UiAdapter {
 
         let document = configuration.document;
         let viewport = configuration.viewport;
-        let shared: Rc<RefCell<S>> = Rc::new(RefCell::new(sink));
+        let engine_dispatch = Rc::new(EngineDispatch::new());
+        let engine_client = engine_dispatch.client_slot();
+        let shared: Rc<RefCell<RoutedCommandSink<S>>> = Rc::new(RefCell::new(RoutedCommandSink {
+            legacy: sink,
+            dispatch: engine_dispatch.clone(),
+        }));
         let view_input: Rc<RefCell<Option<Rc<dyn ViewInput>>>> = Rc::new(RefCell::new(None));
         let touch_guard = Rc::new(RefCell::new(CanvasTouchGuard::default()));
         let pick_mapper: Rc<RefCell<Option<Rc<dyn CanvasPickMapper>>>> =
@@ -244,10 +261,10 @@ impl UiAdapter {
             Rc::new(RefCell::new(None));
         let draw_preview_sink: Rc<RefCell<Option<Rc<dyn DrawPreviewSink>>>> =
             Rc::new(RefCell::new(None));
-        let draw_tool: Rc<RefCell<Option<cad_app::DrawTool>>> = Rc::new(RefCell::new(None));
         let selected_kind: Rc<Cell<MeasurementToolKind>> =
             Rc::new(Cell::new(MeasurementToolKind::Distance));
         let measurement_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+        let draw_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
         let layer_order: Rc<RefCell<Vec<LayerId>>> = Rc::new(RefCell::new(Vec::new()));
         let layout_order: Rc<RefCell<Vec<cad_domain::LayoutId>>> =
             Rc::new(RefCell::new(Vec::new()));
@@ -260,6 +277,15 @@ impl UiAdapter {
         let orbit_last: Rc<Cell<Option<[f64; 2]>>> = Rc::new(Cell::new(None));
         let import_snapshot: Rc<RefCell<Option<cad_app::ImportProgressSnapshot>>> =
             Rc::new(RefCell::new(None));
+        let host_state: Rc<RefCell<Option<cad_engine::protocol::HostState>>> =
+            Rc::new(RefCell::new(None));
+        let status_message: Rc<RefCell<Option<cad_engine::protocol::StatusMessage>>> =
+            Rc::new(RefCell::new(None));
+        let config_snapshot: Rc<RefCell<Option<cad_engine::protocol::ConfigSnapshot>>> =
+            Rc::new(RefCell::new(None));
+        let backend_state: Rc<RefCell<Option<cad_engine::protocol::RenderBackendState>>> =
+            Rc::new(RefCell::new(None));
+        let retained_draw_kind: Rc<Cell<Option<DrawToolKind>>> = Rc::new(Cell::new(None));
 
         // Hoisted above every input closure so each event reads the live
         // effective interaction config instead of a value captured at build
@@ -303,6 +329,7 @@ impl UiAdapter {
             // canvas overlay is rebuilt rather than shadowed by a Slint write.
             let weak = ui_weak.clone();
             let config = viewer_config.clone();
+            let client_slot = engine_client.clone();
             let messages = messages_slot.clone();
             ui.on_overlay_toggled(move |key, value| {
                 let Some(ui) = weak.upgrade() else {
@@ -312,7 +339,19 @@ impl UiAdapter {
                     log::warn!("ignoring unknown overlay toggle key {:?}", key.as_str());
                     return;
                 };
-                let applied = config.borrow_mut().update_config_json(&patch);
+                let applied = if let Some(client) = client_slot.borrow().clone() {
+                    match client.update_config_json(&patch) {
+                        Ok(()) => config
+                            .borrow_mut()
+                            .set_config(client.config_snapshot().effective),
+                        Err(error) => Err(cad_app::viewer_config::ConfigError {
+                            path: "engine".into(),
+                            reason: error.to_string(),
+                        }),
+                    }
+                } else {
+                    config.borrow_mut().update_config_json(&patch)
+                };
                 if applied.is_err() {
                     // A refused patch leaves the store and revision untouched;
                     // the toggle simply stays at the last effective value.
@@ -494,94 +533,93 @@ impl UiAdapter {
             });
         }
         {
-            let s = shared.clone();
-            let doc = document;
+            let dispatch = engine_dispatch.clone();
             let weak = ui_weak.clone();
-            let drawing = draw_tool.clone();
-            let preview = draw_preview_sink.clone();
+            let messages = messages_slot.clone();
             ui.on_pan_requested(move || {
-                *drawing.borrow_mut() = None;
-                publish_draw(&weak, &drawing, &preview);
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::CancelMeasurement,
-                    &doc,
-                    viewport,
-                    CommandPayload::None,
-                ));
-                if let Some(ui) = weak.upgrade() {
-                    ui.set_pan_active(!ui.get_pan_active());
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                let enable = !ui.get_pan_active();
+                let request = if enable {
+                    InteractionRequest::BeginPan
+                } else {
+                    InteractionRequest::Cancel
+                };
+                match dispatch.interaction(request) {
+                    Ok(InteractionOutcome::PanStarted) if enable => ui.set_pan_active(true),
+                    Ok(InteractionOutcome::Cancelled) if !enable => ui.set_pan_active(false),
+                    Ok(_) => report_action_error(
+                        &weak,
+                        &messages,
+                        &CadError::Invariant("unexpected pan interaction outcome".into()),
+                    ),
+                    Err(error) => report_action_error(&weak, &messages, &error),
                 }
             });
         }
         {
-            // The Measure button starts (or restarts) the selected algorithm
-            // instead of sending a payload-free guess (audit U04/F06).
-            let s = shared.clone();
-            let doc = document;
+            // Capture lifecycle and measurement evaluation belong to SessionState.
+            let dispatch = engine_dispatch.clone();
             let kind = selected_kind.clone();
             let weak = ui_weak.clone();
+            let messages = messages_slot.clone();
             ui.on_measure_requested(move || {
-                if let Some(ui) = weak.upgrade() {
-                    ui.set_pan_active(false);
+                match dispatch.interaction(InteractionRequest::BeginMeasurement(kind.get())) {
+                    Ok(InteractionOutcome::ToolStarted) => {
+                        if let Some(ui) = weak.upgrade() {
+                            ui.set_pan_active(false);
+                        }
+                    }
+                    Ok(_) => report_action_error(
+                        &weak,
+                        &messages,
+                        &CadError::Invariant("unexpected measurement start outcome".into()),
+                    ),
+                    Err(error) => report_action_error(&weak, &messages, &error),
                 }
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::Measure,
-                    &doc,
-                    viewport,
-                    CommandPayload::MeasureTool(kind.get()),
-                ));
             });
         }
         {
-            // Selecting a kind immediately starts that tool; this is the explicit
-            // user choice of algorithm, not a default. The label is localized, so
-            // it is mapped back through the same catalog-built ordering rather
-            // than the Chinese-only `from_label`.
-            let s = shared.clone();
-            let doc = document;
-            let kind_slot = selected_kind.clone();
+            // A kind selection changes only the retained algorithm option.
+            let dispatch = engine_dispatch.clone();
             let messages = messages_slot.clone();
             let weak = ui_weak.clone();
             ui.on_measure_kind_selected(move |name| {
-                if let Some(ui) = weak.upgrade() {
-                    ui.set_pan_active(false);
-                }
-                let messages = messages.borrow().clone();
-                let Some(kind) = status::measurement_kind_from_label(&messages, name.as_str())
+                let catalog = messages.borrow().clone();
+                let Some(kind) = status::measurement_kind_from_label(&catalog, name.as_str())
                 else {
                     return;
                 };
-                kind_slot.set(kind);
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::Measure,
-                    &doc,
-                    viewport,
-                    CommandPayload::MeasureTool(kind),
-                ));
+                match dispatch.interaction(InteractionRequest::SetMeasurementKind(kind)) {
+                    Ok(InteractionOutcome::SelectionKindChanged) => {}
+                    Ok(_) => report_action_error(
+                        &weak,
+                        &messages,
+                        &CadError::Invariant("unexpected measurement-kind outcome".into()),
+                    ),
+                    Err(error) => report_action_error(&weak, &messages, &error),
+                }
             });
         }
         {
-            let s = shared.clone();
-            let doc = document;
+            let dispatch = engine_dispatch.clone();
+            let weak = ui_weak.clone();
+            let messages = messages_slot.clone();
             ui.on_confirm_measurement_requested(move || {
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::ConfirmMeasurement,
-                    &doc,
-                    viewport,
-                    CommandPayload::None,
-                ));
+                if let Err(error) = dispatch.interaction(InteractionRequest::Confirm) {
+                    report_action_error(&weak, &messages, &error);
+                }
             });
         }
         {
-            let s = shared.clone();
-            let doc = document;
+            let dispatch = engine_dispatch.clone();
+            let weak = ui_weak.clone();
+            let messages = messages_slot.clone();
             ui.on_cancel_measurement_requested(move || {
-                let _ = s.borrow_mut().send(command_for(
-                    CommandId::CancelMeasurement,
-                    &doc,
-                    viewport,
-                    CommandPayload::None,
-                ));
+                if let Err(error) = dispatch.interaction(InteractionRequest::Cancel) {
+                    report_action_error(&weak, &messages, &error);
+                }
             });
         }
         {
@@ -597,8 +635,6 @@ impl UiAdapter {
             let work = work_mode.clone();
             let messages = messages_slot.clone();
             let report = ui_weak.clone();
-            let draw = draw_tool.clone();
-            let draw_preview = draw_preview_sink.clone();
             ui.on_mode_toggled(move || {
                 let target = if work.get() {
                     cad_app::AppMode::Viewer
@@ -607,10 +643,6 @@ impl UiAdapter {
                 };
                 let is_work = target == cad_app::AppMode::Work;
                 work.set(is_work);
-                // A mode switch cancels an unconfirmed tool, never commits it
-                // (mirrors `SessionState::switch_mode`).
-                *draw.borrow_mut() = None;
-                publish_draw(&report, &draw, &draw_preview);
                 if let Some(ui) = report.upgrade() {
                     ui.set_work_mode(is_work);
                     ui.set_mode_label(crate::status::mode_label(&messages.borrow(), target).into());
@@ -808,16 +840,12 @@ impl UiAdapter {
             });
         }
         {
-            // A canvas click becomes one `Measure`/`Points` command when the host
-            // installed a world mapper. Without one the click cannot be turned
-            // into a real point, so it is reported (not silently swallowed).
-            let s = shared.clone();
-            let doc = document;
-            let mapper = pick_mapper.clone();
+            // The UI forwards canvas-local coordinates; the engine owns picking
+            // and world-coordinate resolution.
+            let dispatch = engine_dispatch.clone();
             let report = ui_weak.clone();
             let active = measurement_active.clone();
-            let drawing = draw_tool.clone();
-            let draw_preview = draw_preview_sink.clone();
+            let drawing = draw_active.clone();
             let messages = messages_slot.clone();
             let gate = viewer_config.clone();
             let touch = touch_guard.clone();
@@ -834,77 +862,32 @@ impl UiAdapter {
                 if report.upgrade().is_some_and(|ui| ui.get_pan_active()) {
                     return;
                 }
-                // Ordinary navigation clicks must stay silent; only an active
-                // capture tool turns a click into a pick.
-                let measure = active.get();
-                let drafting = drawing.borrow().is_some();
-                if !measure && !drafting {
-                    return;
-                }
-                let world = mapper
-                    .borrow()
-                    .as_ref()
-                    .and_then(|mapper| mapper.to_world([x as f64, y as f64]));
-                match world {
-                    Some(world) => {
-                        if drafting {
-                            // A drawing capture consumes the click as a point;
-                            // the commit is a later explicit confirm, so a
-                            // multi-touch gesture can never commit it.
-                            let error = {
-                                let mut guard = drawing.borrow_mut();
-                                match guard.as_mut() {
-                                    Some(tool) => tool.push_point(world).err(),
-                                    None => None,
-                                }
-                            };
-                            if let Some(error) = error {
-                                if let Some(ui) = report.upgrade() {
-                                    ui.set_status_label(
-                                        draw_error_text(&messages.borrow(), &error).into(),
-                                    );
-                                }
-                                return;
-                            }
-                            publish_draw(&report, &drawing, &draw_preview);
-                            return;
-                        }
-                        let _ = s.borrow_mut().send(command_for(
-                            CommandId::Measure,
-                            &doc,
-                            viewport,
-                            CommandPayload::Points(vec![world]),
-                        ));
+                let point = match dispatch.point_input([x as f64, y as f64]) {
+                    Ok(point) => point,
+                    Err(error) => {
+                        report_action_error(&report, &messages, &error);
+                        return;
                     }
-                    None => {
-                        // Explicit, never a silent no-op: no mapper (or an
-                        // unresolved point) means the pick is not wired on this
-                        // host yet.
-                        if let Some(ui) = report.upgrade() {
-                            ui.set_status_label(
-                                messages.borrow().text("status.pick_unwired", &[]).into(),
-                            );
-                        }
+                };
+                let request = if active.get() || drawing.get() {
+                    InteractionRequest::CapturePoint(point)
+                } else {
+                    InteractionRequest::SelectAt {
+                        point,
+                        mode: SelectionMode::Replace,
                     }
+                };
+                if let Err(error) = dispatch.interaction(request) {
+                    report_action_error(&report, &messages, &error);
                 }
             });
         }
         {
-            // Start a draw/edit capture from the ribbon or a command word.
-            // Capture itself is session state; the mutation is the confirmed
-            // intent (exactly one command). A Viewer attempt is refused here and
-            // again by the command layer, never hidden behind a dead button.
-            let work = work_mode.clone();
-            let tool = draw_tool.clone();
-            let sink = draw_command_sink.clone();
-            let preview_sink = draw_preview_sink.clone();
+            // Draw capture is owned by SessionState; the UI sends only intent.
+            let dispatch = engine_dispatch.clone();
             let messages = messages_slot.clone();
-            let report = ui_weak.clone();
             let report_state = ui_weak.clone();
             ui.on_begin_draw_tool(move |name| {
-                if let Some(ui) = report_state.upgrade() {
-                    ui.set_pan_active(false);
-                }
                 let Some(kind) = draw_kind_from_label(&messages.borrow(), name.as_str())
                     .or_else(|| cad_app::DrawToolKind::from_key(name.as_str()))
                 else {
@@ -918,104 +901,44 @@ impl UiAdapter {
                     }
                     return;
                 };
-                if !work.get() {
-                    if let Some(ui) = report_state.upgrade() {
-                        ui.set_status_label(
-                            messages.borrow().text("draw.error.read_only", &[]).into(),
-                        );
+                match dispatch.interaction(InteractionRequest::BeginDraw(kind)) {
+                    Ok(InteractionOutcome::ToolStarted) => {
+                        if let Some(ui) = report_state.upgrade() {
+                            ui.set_pan_active(false);
+                        }
                     }
-                    return;
-                }
-                let selection = report_state
-                    .upgrade()
-                    .map(|ui| ui.get_selection_count().max(0) as usize)
-                    .unwrap_or(0);
-                if kind.requires_selection() && selection == 0 {
-                    if let Some(ui) = report_state.upgrade() {
-                        ui.set_status_label(
-                            messages
-                                .borrow()
-                                .text("draw.error.selection_required", &[])
-                                .into(),
-                        );
+                    Ok(_) => {
+                        if let Some(ui) = report_state.upgrade() {
+                            ui.set_status_label(
+                                messages
+                                    .borrow()
+                                    .text("command.failed", &[("error", "unexpected draw outcome")])
+                                    .into(),
+                            );
+                        }
                     }
-                    return;
+                    Err(error) => report_action_error(&report_state, &messages, &error),
                 }
-                *tool.borrow_mut() = Some(cad_app::DrawTool::new(kind, selection));
-                if let Some(sink) = sink.borrow_mut().as_mut() {
-                    sink.begin(kind);
-                }
-                publish_draw(&report, &tool, &preview_sink);
             });
         }
         {
-            let tool = draw_tool.clone();
-            let sink = draw_command_sink.clone();
-            let preview_sink = draw_preview_sink.clone();
+            let dispatch = engine_dispatch.clone();
             let messages = messages_slot.clone();
             let report = ui_weak.clone();
             ui.on_confirm_draw_requested(move || {
-                let intent = {
-                    let borrowed = tool.borrow();
-                    let Some(active) = borrowed.as_ref() else {
-                        return;
-                    };
-                    match active.intent() {
-                        Ok(intent) => intent,
-                        Err(error) => {
-                            if let Some(ui) = report.upgrade() {
-                                ui.set_status_label(
-                                    draw_error_text(&messages.borrow(), &error).into(),
-                                );
-                            }
-                            return;
-                        }
-                    }
-                };
-                let mut guard = sink.borrow_mut();
-                let Some(sink) = guard.as_mut() else {
-                    // Explicit, never a fake success: the host has not installed
-                    // the draw command sink yet, so there is nowhere real to
-                    // commit. The captured parameters are kept for the retry.
-                    if let Some(ui) = report.upgrade() {
-                        ui.set_status_label(
-                            messages.borrow().text("draw.error.unwired", &[]).into(),
-                        );
-                    }
-                    return;
-                };
-                match sink.commit(intent) {
-                    Ok(()) => {
-                        drop(guard);
-                        // Committed: the tool is done and the preview is cleared.
-                        *tool.borrow_mut() = None;
-                        publish_draw(&report, &tool, &preview_sink);
-                    }
-                    Err(error) => {
-                        // A refused commit keeps the captured parameters in place
-                        // so the user can fix the input; no transaction was made.
-                        if let Some(ui) = report.upgrade() {
-                            ui.set_status_label(draw_error_text(&messages.borrow(), &error).into());
-                        }
-                    }
+                if let Err(error) = dispatch.interaction(InteractionRequest::Confirm) {
+                    report_action_error(&report, &messages, &error);
                 }
             });
         }
         {
-            // Cancel never commits; it clears the capture and the preview.
-            let tool = draw_tool.clone();
-            let sink = draw_command_sink.clone();
-            let preview_sink = draw_preview_sink.clone();
+            // Cancel is a single engine interaction, never a local capture reset.
+            let dispatch = engine_dispatch.clone();
             let messages = messages_slot.clone();
             let report = ui_weak.clone();
             ui.on_cancel_draw_requested(move || {
-                *tool.borrow_mut() = None;
-                if let Some(sink) = sink.borrow_mut().as_mut() {
-                    sink.cancel();
-                }
-                publish_draw(&report, &tool, &preview_sink);
-                if let Some(ui) = report.upgrade() {
-                    ui.set_status_label(messages.borrow().text("draw.status.idle", &[]).into());
+                if let Err(error) = dispatch.interaction(InteractionRequest::Cancel) {
+                    report_action_error(&report, &messages, &error);
                 }
             });
         }
@@ -1221,14 +1144,15 @@ impl UiAdapter {
         }
         {
             let input = view_input.clone();
+            let dispatch = engine_dispatch.clone();
+            let client = engine_client.clone();
             let s = shared.clone();
             let doc = document;
             let is_3d = view_3d.clone();
             let orbit_last = orbit_last.clone();
-            let drawing = draw_tool.clone();
-            let draw_preview = draw_preview_sink.clone();
-            let mapper = pick_mapper.clone();
+            let drawing = draw_active.clone();
             let report = ui_weak.clone();
+            let messages = messages_slot.clone();
             let gate = viewer_config.clone();
             let touch = touch_guard.clone();
             ui.on_pointer_input(move |kind, button, x, y, contact_id| {
@@ -1256,6 +1180,58 @@ impl UiAdapter {
                 }
                 let x = x as f64;
                 let y = y as f64;
+                let attached_client = client.borrow().clone();
+                if attached_client.is_some() {
+                    let point = match dispatch.point_input([x, y]) {
+                        Ok(point) => point,
+                        Err(error) => {
+                            report_action_error(&report, &messages, &error);
+                            return;
+                        }
+                    };
+                    if kind == 2 && button == 0 && drawing.get() {
+                        // P3: the cursor is the only asynchronous request. The
+                        // receipt is not an execution result; a refused submit is
+                        // a real error and never fabricates a cursor.
+                        if let Err(error) = dispatch.submit_cursor([x, y]) {
+                            report_action_error(&report, &messages, &error);
+                        }
+                        return;
+                    }
+                    // Slint's pointer callback is an event phase, not a state
+                    // snapshot: 0=down, 1=up, 2=move, anything else=cancel. There
+                    // is no contact-count field to add; each distinct touch keeps
+                    // its own non-zero id so two fingers are never collapsed to 0.
+                    let phase = match kind {
+                        0 => cad_app::interaction::PointerPhase::Down,
+                        1 => cad_app::interaction::PointerPhase::Up,
+                        2 => cad_app::interaction::PointerPhase::Move,
+                        _ => cad_app::interaction::PointerPhase::Cancel,
+                    };
+                    let pointer_kind = if contact_id == 0 {
+                        cad_app::interaction::PointerKind::Mouse
+                    } else {
+                        cad_app::interaction::PointerKind::Touch
+                    };
+                    let pointer_button = match button {
+                        1 => Some(cad_app::interaction::PointerButton::Primary),
+                        2 => Some(cad_app::interaction::PointerButton::Secondary),
+                        3 => Some(cad_app::interaction::PointerButton::Middle),
+                        _ => None,
+                    };
+                    let request = InteractionRequest::Pointer {
+                        id: cad_app::interaction::PointerId(contact_id.max(0) as u64),
+                        kind: pointer_kind,
+                        phase,
+                        button: pointer_button,
+                        position: point,
+                        modifiers: cad_app::interaction::Modifiers::default(),
+                    };
+                    if let Err(error) = dispatch.interaction(request) {
+                        report_action_error(&report, &messages, &error);
+                    }
+                    return;
+                }
                 if report.upgrade().is_some_and(|ui| ui.get_pan_active()) {
                     if let Some(input) = input.borrow().as_ref() {
                         input.pointer_with_id(
@@ -1275,22 +1251,10 @@ impl UiAdapter {
                 // While a draw/edit capture is active a pointer move updates the
                 // rubber-band cursor (no capture, no command); the release picks
                 // through `canvas-pick`. Non-primary navigation stays with the host.
-                if kind == 2 && button == 0 && drawing.borrow().is_some() {
-                    if let Some(world) = mapper
-                        .borrow()
-                        .as_ref()
-                        .and_then(|mapper| mapper.to_world([x, y]))
-                    {
-                        if let Some(tool) = drawing.borrow_mut().as_mut() {
-                            tool.set_cursor(Some(world));
-                        }
-                        publish_draw(&report, &drawing, &draw_preview);
-                    }
-                }
                 // Primary capture belongs to the draw tool. Forwarding it to
                 // navigation would clear MOVE's selection on an empty anchor
                 // (and could pan/orbit while choosing drawing points).
-                if drawing.borrow().is_some() && (button == 0 || button == 1) {
+                if drawing.get() && (button == 0 || button == 1) {
                     return;
                 }
                 // In 3D mode a left-button drag orbits the view through the
@@ -1333,16 +1297,93 @@ impl UiAdapter {
         }
         {
             let input = view_input.clone();
+            let dispatch = engine_dispatch.clone();
+            let client = engine_client.clone();
+            let doc = document;
             let touch = touch_guard.clone();
             let gate = viewer_config.clone();
+            let report = ui_weak.clone();
+            let messages = messages_slot.clone();
             let pinch_forwarded = Rc::new(Cell::new(false));
             let forwarded = pinch_forwarded.clone();
             let pinch_revision = Rc::new(Cell::new(None));
             let seen_revision = pinch_revision.clone();
+            // Cumulative Slint scale of the previous update, so each event can be
+            // turned into an adjacent ratio instead of re-applying the total.
+            let pinch_last_scale: Rc<Cell<Option<f64>>> = Rc::new(Cell::new(None));
+            let last_scale = pinch_last_scale.clone();
             ui.on_pinch_input(move |phase, scale, x, y| {
+                // The gesture also suppresses touch picks, attached or not.
                 touch.borrow_mut().gesture(phase);
                 let enabled = input_enabled(&gate.borrow(), InputKind::Pointer);
                 let revision = gate.borrow().revision;
+
+                if client.borrow().is_some() {
+                    // Attached: the engine owns navigation. Convert the cumulative
+                    // scale into an adjacent ratio and anchor on the canvas-local
+                    // gesture centre; no world point is resolved in the UI. A
+                    // start/end/cancel never fabricates a zoom.
+                    match phase {
+                        0 => {
+                            seen_revision.set(Some(revision));
+                            forwarded.set(enabled);
+                            last_scale.set(enabled.then_some(scale as f64));
+                        }
+                        1 => {
+                            if seen_revision
+                                .get()
+                                .is_some_and(|previous| previous != revision)
+                            {
+                                // Config changed mid-gesture: stop without zoom.
+                                seen_revision.set(Some(revision));
+                                forwarded.set(false);
+                                last_scale.set(None);
+                                return;
+                            }
+                            if !enabled || !forwarded.get() {
+                                forwarded.set(false);
+                                last_scale.set(None);
+                                return;
+                            }
+                            let cumulative = scale as f64;
+                            let Some(previous) = last_scale.get() else {
+                                return;
+                            };
+                            if !cumulative.is_finite()
+                                || cumulative <= 0.0
+                                || !previous.is_finite()
+                                || previous <= 0.0
+                            {
+                                return;
+                            }
+                            last_scale.set(Some(cumulative));
+                            let factor = cumulative / previous;
+                            let cursor = [x as f64, y as f64];
+                            if !factor.is_finite()
+                                || factor <= 0.0
+                                || factor == 1.0
+                                || !cursor.iter().all(|value| value.is_finite())
+                            {
+                                return;
+                            }
+                            if let Err(error) = dispatch.command(command_for(
+                                CommandId::Zoom,
+                                &doc,
+                                viewport,
+                                CommandPayload::ZoomAt { factor, cursor },
+                            )) {
+                                report_action_error(&report, &messages, &error);
+                            }
+                        }
+                        2 | 3 => {
+                            forwarded.set(false);
+                            last_scale.set(None);
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+
                 if let Some(input) = input.borrow().as_ref() {
                     if phase == 0 {
                         seen_revision.set(Some(revision));
@@ -1389,9 +1430,19 @@ impl UiAdapter {
         }
         {
             let input = view_input.clone();
+            let dispatch = engine_dispatch.clone();
+            let has_client = engine_client.clone();
             let touch = touch_guard.clone();
+            let report = ui_weak.clone();
+            let messages = messages_slot.clone();
             ui.on_pointer_exited(move || {
                 touch.borrow_mut().exit();
+                if has_client.borrow().is_some() {
+                    if let Err(error) = dispatch.interaction(InteractionRequest::ClearCursor) {
+                        report_action_error(&report, &messages, &error);
+                    }
+                    return;
+                }
                 if let Some(input) = input.borrow().as_ref() {
                     input.pointer_exited();
                 }
@@ -1399,11 +1450,32 @@ impl UiAdapter {
         }
         {
             let input = view_input.clone();
+            let dispatch = engine_dispatch.clone();
+            let has_client = engine_client.clone();
             let gate = viewer_config.clone();
+            let report = ui_weak.clone();
+            let messages = messages_slot.clone();
             ui.on_scroll_input(move |dx, dy, x, y| {
                 // Scroll is the wheel form of pointer input and shares its gate.
                 let enabled = input_enabled(&gate.borrow(), InputKind::Pointer);
                 if !enabled {
+                    return;
+                }
+                if has_client.borrow().is_some() {
+                    let position = match dispatch.point_input([x as f64, y as f64]) {
+                        Ok(position) => position,
+                        Err(error) => {
+                            report_action_error(&report, &messages, &error);
+                            return;
+                        }
+                    };
+                    if let Err(error) = dispatch.interaction(InteractionRequest::Scroll {
+                        delta_logical: [dx as f64, dy as f64],
+                        position,
+                        modifiers: cad_app::interaction::Modifiers::default(),
+                    }) {
+                        report_action_error(&report, &messages, &error);
+                    }
                     return;
                 }
                 if let Some(input) = input.borrow().as_ref() {
@@ -1412,8 +1484,10 @@ impl UiAdapter {
             });
         }
 
-        Ok(UiAdapter {
+        let adapter = UiAdapter {
             viewer_config,
+            engine_client,
+            engine_dispatch: engine_dispatch.clone(),
             configuration,
             ui,
             view_input,
@@ -1421,9 +1495,9 @@ impl UiAdapter {
             layout_switch,
             draw_command_sink,
             draw_preview_sink,
-            draw_tool,
             selected_kind,
             measurement_active,
+            draw_active,
             layer_order,
             layout_order,
             messages: messages_slot,
@@ -1434,7 +1508,14 @@ impl UiAdapter {
             resources_sections,
             work_mode,
             import_snapshot,
-        })
+            host_state,
+            status_message,
+            config_snapshot,
+            backend_state,
+            selected_draw_kind: retained_draw_kind,
+        };
+        engine_dispatch.set_handle(adapter.handle());
+        Ok(adapter)
     }
 
     /// Route canvas input to the CAD view; call once the view exists.
@@ -1483,7 +1564,10 @@ impl UiAdapter {
     /// A host that prefers polling over the preview sink can forward this to
     /// [`CadView::set_draw_preview`].
     pub fn draw_preview(&self) -> Option<cad_app::DrawPreview> {
-        self.draw_tool.borrow().as_ref().map(|tool| tool.preview())
+        self.host_state
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.draw_preview.clone())
     }
 
     /// The current configuration store, cloned for hosts that persist user
@@ -1496,10 +1580,12 @@ impl UiAdapter {
     pub fn handle(&self) -> UiHandle {
         UiHandle {
             viewer_config: self.viewer_config.clone(),
+            engine_client: self.engine_client.clone(),
             ui: self.ui.as_weak(),
             messages: self.messages.clone(),
             selected_kind: self.selected_kind.clone(),
             measurement_active: self.measurement_active.clone(),
+            draw_active: self.draw_active.clone(),
             layer_order: self.layer_order.clone(),
             layout_order: self.layout_order.clone(),
             layer_override_count: self.layer_override_count.clone(),
@@ -1509,6 +1595,11 @@ impl UiAdapter {
             resources_sections: self.resources_sections.clone(),
             work_mode: self.work_mode.clone(),
             import_snapshot: self.import_snapshot.clone(),
+            host_state: self.host_state.clone(),
+            status_message: self.status_message.clone(),
+            config_snapshot: self.config_snapshot.clone(),
+            backend_state: self.backend_state.clone(),
+            selected_draw_kind: self.selected_draw_kind.clone(),
         }
     }
 
@@ -1548,6 +1639,14 @@ impl UiAdapter {
     /// The measurement algorithm currently selected in the shell.
     pub fn selected_measurement_kind(&self) -> MeasurementToolKind {
         self.selected_kind.get()
+    }
+
+    /// The draw/edit tool the host last reported as actively capturing.
+    ///
+    /// `None` means the host has not reported a capture (idle); the selection is
+    /// retained rather than synthesized from a default.
+    pub fn selected_draw_kind(&self) -> Option<DrawToolKind> {
+        self.selected_draw_kind.get()
     }
 
     /// Show the window and run the platform event loop.

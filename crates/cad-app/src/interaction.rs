@@ -138,6 +138,12 @@ pub enum SelectionMode {
 pub enum InteractionRequest {
     BeginDraw(DrawToolKind),
     BeginMeasurement(MeasurementToolKind),
+    /// Change the retained measurement algorithm choice without starting capture.
+    SetMeasurementKind(MeasurementToolKind),
+    /// Replace any current capture with navigation pan mode; no zero-delta pan is emitted.
+    BeginPan,
+    /// Clear only the live cursor marker, preserving captured points and tool lifecycle.
+    ClearCursor,
     SelectAt {
         point: PointInput,
         mode: SelectionMode,

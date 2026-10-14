@@ -298,6 +298,7 @@ dependencies = [
  "cad-app",
  "cad-db",
  "cad-domain",
+ "cad-engine",
  "cad-host",
  "cad-import-acadrust",
  "cad-platform",
@@ -317,6 +318,7 @@ dependencies = [
  "ashpd",
  "cad-app",
  "cad-domain",
+ "cad-engine",
  "cad-host",
  "cad-platform",
  "cad-render-wgpu",
@@ -341,6 +343,7 @@ dependencies = [
  "cad-app",
  "cad-diagnostics",
  "cad-domain",
+ "cad-engine",
  "cad-host",
  "cad-platform",
  "cad-representation",
@@ -900,10 +903,10 @@ dependencies = [
  "cad-db",
  "cad-diagnostics",
  "cad-domain",
+ "cad-engine",
  "cad-platform",
  "cad-representation",
  "cad-resources",
- "cad-ui-slint",
 ]
 
 [[package]]
@@ -1059,6 +1062,7 @@ dependencies = [
  "cad-scene",
  "js-sys",
  "log",
+ "serde_json",
  "slint",
  "slint-build",
  "wasm-bindgen",

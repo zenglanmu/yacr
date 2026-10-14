@@ -1,18 +1,20 @@
 //! Android host assembly (spec v2.0 §5.3, §9.1).
 //!
 //! The platform-common orchestration (command routing, state push, the
-//! open/plot/save funnels, the navigation/pick/draw sinks) lives in
-//! `cad_host::HostCore`. This crate is the Android composition root: it builds
-//! the core over the Android platform impls ([`platform`]), installs the Slint
-//! adapter and the CAD render bridge, keeps the genuinely Android-specific
-//! adapters (the [`view::AndroidViewInput`] `InputPolicy` state machine, the
-//! [`draw`] command sink, the [`android_fonts`] asset loader and the [`poll`]
-//! Slint timer) and owns the event loop.
+//! open/plot/save funnels and the interaction dispatch) lives in the UI-free
+//! `cad_host::HostCore`, reached through its `cad_engine::protocol::EngineClient`
+//! surface. This crate is the Android composition root: it builds the core over
+//! the Android platform impls ([`platform`]), creates the shared UI-free render
+//! session, installs the Slint adapter/bridge around it, attaches the
+//! [`EngineAdapter`] as the single callback binding, keeps the genuinely
+//! Android-specific adapters (the [`android_fonts`] asset loader, the [`client`]
+//! poll re-arm/resource injection and the [`poll`] Slint timer) and owns the
+//! event loop. The legacy [`view::AndroidViewInput`] remains compiled for the
+//! host-target tests but is not installed on the attached path; the old
+//! draw-command sink was removed (draw transactions are engine-owned).
 //!
 //! No CAD logic is duplicated here; the database stays the single authority and
 //! the shell is a derived presentation of it.
-
-use std::cell::RefCell;
 
 use std::rc::Rc;
 
@@ -20,19 +22,20 @@ use cad_app::{Command, CommandId};
 
 use cad_domain::*;
 
+use cad_engine::render::{BackendPreference, RenderSessionHandle};
+
 use cad_host::{HostCore, HostOptions, HostPlatform};
 
 use cad_ui_slint::{
-    IncomingDocument, LayoutSwitchSink, UiAdapter, UiCommandSink, UiConfiguration, UiHandle,
+    install_existing_cad_bridge, EngineAdapter, LayoutSwitchSink, UiAdapter, UiCommandSink,
+    UiConfiguration,
 };
-
-type SharedHandle = Rc<RefCell<Option<UiHandle>>>;
 
 /// Android host font loading from APK assets (`assets/fonts/…`).
 #[cfg(target_os = "android")]
 mod android_fonts;
 
-mod draw;
+mod client;
 mod platform;
 mod poll;
 #[cfg(target_os = "android")]
@@ -51,14 +54,15 @@ pub struct AndroidHostConfiguration {
     pub sample_paths: Vec<String>,
 }
 
-/// The Android command funnel: run through the shared core, then re-apply the
-/// Android overlay (import progress + resources drawer) so a command cannot
-/// clobber them or claim images are modeled.
+/// Legacy Android command sink.
 ///
-/// Cloneable so the same funnel can be installed as the adapter's
-/// `UiCommandSink` **and** as the layout-switch sink: a layout click must run the
-/// exact `SwitchSpace` command path (validate against the drawing, re-sync the
-/// camera and panels) rather than a parallel path.
+/// Reproduced for source compatibility and for the pre-attach fallback the
+/// adapter still requires (`UiAdapter::new`). Once [`EngineAdapter::attach`]
+/// binds the engine client, every callback routes through the engine dispatch
+/// and this sink is never invoked, so the two paths cannot double-send. It also
+/// carries the legacy `LayoutSwitchSink` implementation retained for the
+/// host-target tests; the live adapter lets a layout click flow through the
+/// engine `SwitchSpace` command path instead of installing this sink.
 #[derive(Clone)]
 pub(crate) struct AndroidSink {
     core: HostCore,
@@ -76,9 +80,7 @@ impl UiCommandSink for AndroidSink {
             // A picker/read resolved to an import in flight: show the Android
             // "opening in background" status and keep the poll timer running for
             // the publish.
-            let _ = self
-                .core
-                .set_status(self.core.message("android.opening", &[]));
+            let _ = self.core.set_catalog_status("android.opening", &[]);
             poll::ensure_polling();
         } else if is_open || is_save {
             // An open or a save picker is asynchronous: keep the poll timer so
@@ -93,10 +95,11 @@ impl UiCommandSink for AndroidSink {
 
 /// Layout panel switch (F04): dispatch the validated `SwitchSpace` command.
 ///
-/// Installed on the adapter so a layout-row click runs through the same command
-/// path every other host command uses. The command layer validates the layout
-/// against the drawing and refuses an unknown one; the sink never mutates the
-/// database.
+/// Legacy compatibility path retained for the host-target tests. The live
+/// adapter routes a layout-row click through the engine `SwitchSpace` command
+/// (the shared path every other host command uses); the command layer validates
+/// the layout against the drawing and refuses an unknown one, and this sink
+/// never mutates the database.
 impl LayoutSwitchSink for AndroidSink {
     fn select(&mut self, space: cad_representation::SpaceSelection) {
         let (document, viewport) = {
@@ -119,7 +122,6 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
     log::info!("yacr android host starting");
     cad_ui_slint::select_wgpu_backend()?;
 
-    let handle_slot: SharedHandle = Rc::new(RefCell::new(None));
     let platform = HostPlatform {
         files: Rc::new(platform::AndroidFiles::new(configuration.sample_paths)),
         config_store: Rc::new(platform::AndroidConfigStore),
@@ -144,20 +146,19 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         headless: false,
         drawing: None,
         size: DEMO_LOGICAL_SIZE,
-        locale: "zh-CN".into(),
     };
-    let core = HostCore::new(host_options, handle_slot, platform)?;
-    let controller = core.controller.clone();
-    let (drawing, document_id, viewport_id) = {
-        let mut controller = controller.borrow_mut();
-        let _ = controller.fit();
-        (
-            controller.drawing(),
-            controller.document_id,
-            controller.viewport_id,
-        )
+    // The UI-free render session is created here and shared by the host (which
+    // owns the authoritative CAD snapshots) and the Slint bridge (which presents
+    // the frames). The explicit WebGpu preference preserves the historical
+    // Android selection (the old `install` default); `EngineAdapter::attach`
+    // later rejects a facade/client pair that does not share this exact session.
+    let render = RenderSessionHandle::new(BackendPreference::WebGpu);
+    let core = HostCore::new(host_options, platform, render.clone())?;
+    let _ = core.controller.borrow_mut().fit();
+    let (document_id, viewport_id) = {
+        let controller = core.controller.borrow();
+        (controller.document_id, controller.viewport_id)
     };
-    let incoming: IncomingDocument = Rc::new(RefCell::new(drawing));
 
     let ui_config = UiConfiguration {
         compact: true,
@@ -169,43 +170,51 @@ pub fn start(configuration: AndroidHostConfiguration) -> CadResult<()> {
         viewport: viewport_id,
     };
 
+    // The legacy command sink is retained for source compatibility only: once the
+    // engine client is attached below, every callback routes through
+    // `EngineAdapter` and the two paths cannot double-send.
     let sink = AndroidSink { core: core.clone() };
-    let layout_sink = sink.clone();
-    let adapter = UiAdapter::new(ui_config, sink, true)?;
-    adapter.set_layout_switch_sink(Box::new(layout_sink));
+    let mut adapter = UiAdapter::new(ui_config, sink, true)?;
     let handle = adapter.handle();
-    core.set_handle(handle.clone());
-    // Replace the shell's "canvas not connected" scaffold status with the host's
-    // real started state.
-    let _ = handle.set_status(core.message("android.ready", &[]));
+    // Install Slint's renderer hooks around the engine-owned session (no second
+    // session is created here).
+    let view = install_existing_cad_bridge(handle.clone(), adapter.window(), render.clone())?;
+    // The single callback binding: the engine owns command and interaction
+    // dispatch; the Android wrapper only re-arms the async file poll.
+    let binding = EngineAdapter::attach(
+        &mut adapter,
+        Rc::new(client::AndroidEngineClient::new(core.clone())),
+        view,
+    )?;
     // Seed the surface from the configured logical size; a later rotation/resize
     // calls `set_surface_size` once the Activity forwards the size (audit U07).
     platform::set_surface_slot(DEMO_LOGICAL_SIZE, 1.0);
-    let view =
-        cad_ui_slint::install_cad_bridge(handle.clone(), adapter.window(), incoming.clone())?;
-    core.set_view(view);
-    // Map the surface onto the authoritative viewport now that both the shell and
-    // the render bridge exist.
     core.metrics()?;
-    // The shared core resolves a canvas-local logical point to a world point on
-    // the viewport work plane (the same mapper every host installs).
-    adapter.set_canvas_pick_mapper(Rc::new(core.clone()));
-    // Draw/edit tools: the shell captures points and emits an intent; the host
-    // maps it to one drawing command (line/circle/move/trim). Without this the
-    // confirm path reports "not wired" instead of fabricating a command.
-    draw::install_draw_sinks(&adapter, core.clone(), viewport_id);
-    // Wire real canvas interaction: drag pans, wheel/pinch zooms and a real tap
-    // selects, all through the shared command funnel.
-    adapter.set_view_input(Rc::new(view::AndroidViewInput::new(
-        core.clone(),
-        viewport_id,
-    )));
-    // Register the live core for the async poll timer and the Activity's
-    // surface-size entry points. All run on this UI thread.
-    poll::install_runtime(core.clone());
-    // Populate every panel from real application state now that both the shell
-    // and the render bridge exist (docs/ui.md §3, docs/panels.md §3.2).
-    state_push::push_android_state(&core);
+    // Replace the shell's "canvas not connected" scaffold status with the host's
+    // real started state (resolved through the caller's catalog on flush).
+    core.set_catalog_status("android.ready", &[])?;
+    // Populate every panel from real application state and mirror the initial
+    // camera now that both the shell and the render bridge exist.
+    binding.flush_updates()?;
+    // No legacy `ViewInput` is installed: pinch, pointer and pick all route
+    // through the single attached `EngineAdapter` dispatch. Installing the
+    // legacy `AndroidViewInput` here would be a second attached path.
+    // Install the P3 queue wake bridge: the engine calls it only on an
+    // empty→nonempty edge and re-arms while work remains; it only schedules a
+    // single-shot (never a synchronous pump, never a permanent timer). The
+    // scheduler is kept weakly by the callback and strongly by the runtime.
+    let request_waker = poll::RequestWaker::new();
+    binding.set_request_waker(Some(request_waker.install()))?;
+    // Register the live core and its UI binding for the async poll timer and the
+    // Activity's surface-size entry points. All run on this UI thread.
+    poll::install_runtime(
+        core,
+        Some(poll::UiBinding {
+            binding,
+            handle,
+            _request_waker: request_waker,
+        }),
+    );
     adapter.run()
 }
 

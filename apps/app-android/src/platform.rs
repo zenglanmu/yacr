@@ -20,12 +20,13 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use cad_domain::{CadError, CadResult};
+use cad_engine::render::RenderSessionHandle;
 use cad_host::{HostCore, HostResources};
 use cad_platform::{
     ConfigLoad, ConfigStore, FileEvent, FilePurpose, FileTarget, PlatformFiles, SavePurpose,
     SurfaceMetrics, SurfaceSource,
 };
-use cad_ui_slint::{CadView, MessageSource};
+use cad_ui_slint::MessageSource;
 
 /// The Android build's catalog locale. The shell is started `zh-CN` and the host
 /// does not expose a runtime language switch, so platform-localized reasons use
@@ -379,7 +380,7 @@ impl SurfaceSource for AndroidSurface {
 pub struct AndroidResources;
 
 impl HostResources for AndroidResources {
-    fn install_fonts(&self, core: &HostCore, view: &CadView) -> CadResult<()> {
+    fn install_fonts(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()> {
         let requested = core
             .controller
             .borrow()
@@ -387,12 +388,12 @@ impl HostResources for AndroidResources {
             .map(|drawing| cad_platform::fonts::requested_fonts(drawing.as_ref()))
             .unwrap_or_default();
         if requested.is_empty() {
-            view.clear_fonts();
+            render.set_fonts(None);
             return Ok(());
         }
         #[cfg(target_os = "android")]
         {
-            let report = match super::android_fonts::install_fonts(Some(view), &requested) {
+            let report = match super::android_fonts::install_fonts(render, &requested) {
                 Ok(report) => report,
                 Err(error) => {
                     // Queue the explicit font-failure text before refusing, so the
@@ -431,8 +432,8 @@ impl HostResources for AndroidResources {
         }
     }
 
-    fn install_images(&self, _core: &HostCore, view: &CadView) -> CadResult<()> {
-        view.clear_images();
+    fn install_images(&self, _core: &HostCore, render: &RenderSessionHandle) -> CadResult<()> {
+        render.set_images(None);
         Ok(())
     }
 }

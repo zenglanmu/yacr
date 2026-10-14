@@ -128,7 +128,7 @@ impl Application {
             CommandId::Select => {
                 // Selection is read-only: it stores the picked refs and enters
                 // the Selecting tool state, but never writes the DWG (F05).
-                session.tool = ToolState::Selecting;
+                session.begin_selecting();
                 if let CommandPayload::Selection(refs) = command.payload {
                     session.selection = SelectionSet::from_refs(refs);
                 }

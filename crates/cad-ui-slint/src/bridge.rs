@@ -44,7 +44,17 @@ pub fn install_with_preference(
     incoming: IncomingDocument,
     preference: BackendPreference,
 ) -> CadResult<CadView> {
-    let view = CadView::new(handle, incoming, preference);
+    let session = render::RenderSessionHandle::with_incoming(incoming, preference);
+    install_existing(handle, window, session)
+}
+
+/// Install Slint's renderer hooks around a render session owned by the engine/client.
+pub fn install_existing(
+    handle: UiHandle,
+    window: &slint::Window,
+    session: render::RenderSessionHandle,
+) -> CadResult<CadView> {
+    let view = CadView::from_session(handle, session);
     let session = view.session.clone();
     let presenter = Rc::new(RefCell::new(presenter::SlintPresenter::default()));
     let frame_handle = view.handle.clone();

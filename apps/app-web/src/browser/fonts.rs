@@ -1,9 +1,9 @@
 //! Browser font fetching, registration and load diagnostics.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
-use cad_domain::{CadError, CadResult};
+use cad_domain::{CadError, CadResult, SceneIdentity};
 use cad_platform::fonts::{load_font_engine, requested_fonts, FontLoadReport};
 use cad_platform::FontLoader;
 use cad_resources::DEFAULT_FONT_BASE_URL;
@@ -11,13 +11,16 @@ use cad_ui_slint::UiHandle;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
-use super::with_runtime;
+use super::{with_runtime, HostRuntime};
 
 // Last font-loading report, surfaced for diagnostics and headless tests.
 thread_local! {
     static FONT_REPORT: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The last real `FontLoadReport`, for the resources drawer (F10).
     static LAST_FONT_REPORT: RefCell<Option<FontLoadReport>> = const { RefCell::new(None) };
+    /// The scene identity the web font load was last started for, so the load
+    /// starts only after the host published a genuinely new document.
+    static LAST_FONT_IDENTITY: Cell<Option<SceneIdentity>> = const { Cell::new(None) };
 }
 
 /// The most recent real font-loading report, if any.
@@ -85,23 +88,11 @@ impl FontLoader for WebFontLoader {
 /// Load and install the shaping fonts the current drawing references.
 /// Stale loads are discarded rather than applied to a replacement drawing.
 pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
-    let (core, incoming) = with_runtime(|rt| (rt.core.clone(), rt.incoming.clone()))
+    let rt = with_runtime(|rt| rt.clone())
         .ok_or_else(|| CadError::Invariant("浏览器宿主尚未启动".into()))?;
-    let handle = core
-        .handle
-        .borrow()
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| CadError::Invariant("浏览器宿主尚未启动".into()))?;
-    let view = core
-        .view
-        .borrow()
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| CadError::Invariant("渲染视图尚未安装".into()))?;
 
     let (requested, identity) = {
-        let controller = core.controller.borrow();
+        let controller = rt.core.controller.borrow();
         match controller.drawing() {
             Some(drawing) => (
                 requested_fonts(drawing.as_ref()),
@@ -112,27 +103,27 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
     };
 
     if requested.is_empty() {
-        view.clear_fonts();
+        rt.view.clear_fonts();
         let report = FontLoadReport::default();
         set_last_font_report(report.clone());
-        super::state_push::push_resource_sections(&core);
-        set_font_status(&handle, "字体：图纸未引用 CAD 文本字体".into());
+        super::state_push::push_resource_sections(&rt.handle, &rt.core);
+        set_font_status(&rt.handle, "字体：图纸未引用 CAD 文本字体".into());
         return Ok(report);
     }
 
     let (engine, report) = load_font_engine(&WebFontLoader, &requested, WEB_FONT_BASE_URL).await?;
-    let current = incoming.borrow().as_ref().map(|d| d.scene_identity());
+    let current = rt.incoming.borrow().as_ref().map(|d| d.scene_identity());
     if current != identity {
         return Err(CadError::StaleResult);
     }
 
     if report.registered.is_empty() {
-        view.clear_fonts();
+        rt.view.clear_fonts();
     } else {
-        view.set_fonts(engine);
+        rt.view.set_fonts(engine);
     }
     set_last_font_report(report.clone());
-    super::state_push::push_resource_sections(&core);
+    super::state_push::push_resource_sections(&rt.handle, &rt.core);
     let text = super::messages::current_messages().text(
         "fonts.loaded",
         &[
@@ -141,7 +132,7 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
             ("unresolved", &report.unresolved.len().to_string()),
         ],
     );
-    set_font_status(&handle, text);
+    set_font_status(&rt.handle, text);
     Ok(report)
 }
 
@@ -149,14 +140,49 @@ pub async fn load_current_fonts() -> CadResult<FontLoadReport> {
 pub(super) fn spawn_font_load() {
     wasm_bindgen_futures::spawn_local(async {
         if let Err(e) = load_current_fonts().await {
-            if let Some(handle) =
-                with_runtime(|rt| rt.core.handle.borrow().as_ref().cloned()).flatten()
-            {
-                let _ = handle.set_status(
+            if let Some(rt) = with_runtime(|rt| rt.clone()) {
+                let _ = rt.handle.set_status(
                     super::messages::current_messages()
                         .text("fonts.failed", &[("error", &e.to_string())]),
                 );
             }
         }
     });
+}
+
+/// Prime the font-identity baseline with the current document, so startup does
+/// not trigger a spurious load for the initial demo drawing.
+pub(super) fn prime_font_identity(rt: &HostRuntime) {
+    let identity = rt
+        .core
+        .controller
+        .borrow()
+        .drawing()
+        .map(|db| db.scene_identity());
+    LAST_FONT_IDENTITY.with(|slot| slot.set(identity));
+}
+
+/// Start the web font load once the host published a genuinely new document.
+///
+/// The identity is the host-owned `DrawingDatabase::scene_identity`, so this
+/// reacts to a real document replacement (sync install or worker publish) and
+/// never to a platform-side mutation or a fabricated open.
+pub(super) fn spawn_font_load_if_identity_changed(rt: &HostRuntime) {
+    let identity = rt
+        .core
+        .controller
+        .borrow()
+        .drawing()
+        .map(|db| db.scene_identity());
+    let changed = LAST_FONT_IDENTITY.with(|slot| {
+        if slot.get() == identity {
+            false
+        } else {
+            slot.set(identity);
+            true
+        }
+    });
+    if changed {
+        spawn_font_load();
+    }
 }

@@ -246,8 +246,7 @@ UI 发命令，查询层接收提交结果再更新模型。程序更新 ViewMod
 
 ### 4.11 渲染会话、工具协议与分阶段宿主边界
 
-以下为已批准的目标架构，按 P1/P2/P3 分阶段实施；目标描述不得作为已完成实现或跨平台运行/性能验收证据。
-P1 实施期间 `cad-host` 仍保留对 `cad-ui-slint` 的过渡依赖；只有 P2 完成后，才可将 host 无 UI 依赖作为当前事实。
+以下为已批准的目标架构，按 P1/P2/P3 分阶段实施；当前 P1 审查通过，P2-A 应用状态与协议 schema 已落地且 `Measure(None)` 保持 `Distance` 的兼容合同已通过，P2-B HostCore/UI writers 正在恢复但尚未整合完成，P3 队列未完成；清理 target 后 workspace 全目标冷编译通过不代表 HostCore/UI 集成或运行验收通过。目标描述不得作为整体架构完成或跨平台运行/性能验收证据。
 
 - `cad-engine` 是 UI 无关的渲染会话协调库，当前 manifest 的直接依赖为 `cad-app`、`cad-db`、
   `cad-domain`、`cad-render-wgpu`、`cad-representation`。它们分别提供应用会话/工具契约、权威数据库、
@@ -271,6 +270,19 @@ P1 实施期间 `cad-host` 仍保留对 `cad-ui-slint` 的过渡依赖；只有 
   dirty；UI-only frame 复用 CAD texture。
 - dirty 唤醒采用 event-driven 失效/调度，现有 ChangeSet → 依赖失效 → 显示表示重建语义不变。本轮不扩张
   或重写增量算法；不引入 React 或其他未来 UI 框架承诺。
+- P4（仅设计，须在 P2/P3 完成后实施）：命令与受控 API 双入口共享事务路径和 P3 队列；预定 typed
+  `EngineRequest::Api(ApiRequest)`，含 expected-revision `Commit`、`SelectByRefs` 与 `SelectByObjectIds`。
+  写入口有 pending 时同步返回 `Busy`；只读查询返回 immutable snapshot/revision，不保证包含排队中的写。
+- Commit 仅支持 Insert(Line/Circle/Arc)、Translate、Delete；engine 分配 ID，校验权限、expected revision 及有效
+  layer/space，经一次原子事务写入并走现有 history/ChangeSet。禁止裸 DB mut、任意实体替换或任意 geometry；
+  unsupported 表/资源编辑显式拒绝。ObjectId 只解析当前文档顶层实体；块内引用必须给完整有效 SelectionRef
+  路径，不得猜测实例。同一实体在一个 batch 中只修改一次。
+- 生命周期事件包括真实 request/command started/finished、成功的权威 ChangeSet、selection 与 tool 变化。
+  失败/取消保持零实体变化事件，noop 不伪造事务；只有明确成功的 Translate/Move 意图可发布 EntitiesMoved，
+  不从 GEOMETRY/TRANSFORM 泛化推断。事件是权威数据库/会话变化通知，不是第二数据库。
+- 订阅使用有界 poll/ring 与独立 cursor；lag 明确报告并要求重取数据库/selection snapshot 和 watermark 后恢复。
+  不做同步 callback；发布前释放 controller borrow/锁，锁内不运行用户业务。P4 不是 plugin loader；React、
+  loader 与 sandbox 不在本轮范围，当前仅记录设计。
 
 ## 5. Slint 与 wgpu 集成规范
 

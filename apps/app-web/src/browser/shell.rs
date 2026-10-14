@@ -5,9 +5,7 @@ use cad_domain::{CadError, CadResult, Point3};
 
 pub fn geometry() -> CadResult<Vec<f64>> {
     with_runtime(|rt| {
-        let handle = rt.core.handle.borrow();
-        let handle = handle.as_ref().ok_or(CadError::Cancelled)?;
-        let (rect, state) = handle.shell_geometry()?;
+        let (rect, state) = rt.handle.shell_geometry()?;
         Ok(rect
             .into_iter()
             .chain(state.map(|v| f64::from(u8::from(v))))
@@ -20,39 +18,15 @@ pub fn pick(x: f64, y: f64) -> CadResult<()> {
     if !x.is_finite() || !y.is_finite() {
         return Err(CadError::InvalidInput("invalid touch pick".into()));
     }
-    with_runtime(|rt| {
-        rt.core
-            .handle
-            .borrow()
-            .as_ref()
-            .ok_or(CadError::Cancelled)?
-            .touch_pick(x, y)
-    })
-    .ok_or(CadError::Cancelled)?
+    with_runtime(|rt| rt.handle.touch_pick(x, y)).ok_or(CadError::Cancelled)?
 }
 
 pub fn canvas_hit_test(x: f64, y: f64) -> CadResult<bool> {
-    with_runtime(|rt| {
-        rt.core
-            .handle
-            .borrow()
-            .as_ref()
-            .ok_or(CadError::Cancelled)?
-            .canvas_hit_test([x, y])
-    })
-    .ok_or(CadError::Cancelled)?
+    with_runtime(|rt| rt.handle.canvas_hit_test([x, y])).ok_or(CadError::Cancelled)?
 }
 
 pub fn cancel_draw_capture() -> CadResult<()> {
-    with_runtime(|rt| {
-        rt.core
-            .handle
-            .borrow()
-            .as_ref()
-            .ok_or(CadError::Cancelled)?
-            .cancel_draw_capture()
-    })
-    .ok_or(CadError::Cancelled)?
+    with_runtime(|rt| rt.handle.cancel_draw_capture()).ok_or(CadError::Cancelled)?
 }
 
 pub fn navigate(dx: f64, dy: f64, zoom: f64) -> CadResult<()> {

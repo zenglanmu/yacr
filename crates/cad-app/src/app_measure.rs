@@ -15,13 +15,12 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         match &command.payload {
             CommandPayload::MeasureTool(kind) => {
-                session.tool = ToolState::Measuring(MeasurementTool::new(*kind));
+                session.begin_measurement(*kind)?;
                 Ok(self.measure_preview_outcome(session))
             }
             CommandPayload::None => {
-                // The shell currently sends no algorithm; default to distance.
-                session.tool =
-                    ToolState::Measuring(MeasurementTool::new(MeasurementToolKind::Distance));
+                // Keep the legacy no-payload command contract explicitly Distance.
+                session.begin_measurement(MeasurementToolKind::Distance)?;
                 Ok(self.measure_preview_outcome(session))
             }
             CommandPayload::Points(points) => self.capture_measure_points(session, command, points),
@@ -38,14 +37,16 @@ impl Application {
         command: &Command,
         points: &[Point3],
     ) -> CadResult<CommandOutcome> {
-        let auto_complete = if let ToolState::Measuring(tool) = &mut session.tool {
+        let auto_complete = if let ToolState::Measuring(tool) = &session.tool {
+            let kind = tool.kind();
             for point in points {
-                tool.push_point(*point);
+                session.capture_point(*point)?;
             }
-            if tool.auto_ready() {
-                Some((tool.kind(), tool.points().to_vec()))
-            } else {
-                None
+            match &session.tool {
+                ToolState::Measuring(tool) if tool.auto_ready() => {
+                    Some((kind, tool.points().to_vec()))
+                }
+                _ => None,
             }
         } else {
             None
@@ -63,7 +64,7 @@ impl Application {
             }
             // A one-shot tool returns to navigation after a result; open-ended
             // tools stay active until confirmed or cancelled.
-            session.tool = ToolState::Idle;
+            session.complete_tool();
             return Ok(outcome);
         }
         if matches!(session.tool, ToolState::Measuring(_)) {
@@ -79,7 +80,7 @@ impl Application {
                 return Err(CadError::InvalidInput(
                     "measurement needs two (distance), three (angle) or more (length) points"
                         .into(),
-                ))
+                ));
             }
         };
         let outcome =
@@ -102,7 +103,7 @@ impl Application {
                 return Err(CadError::InvalidInput(format!(
                     "measurement needs {} more point(s)",
                     tool.remaining()
-                )))
+                )));
             }
             _ => return Err(CadError::InvalidInput("no measurement in progress".into())),
         };
@@ -112,7 +113,7 @@ impl Application {
         if let Some(record) = &outcome.measurement {
             session.set_last_measurement(record.clone());
         }
-        session.tool = ToolState::Idle;
+        session.complete_tool();
         Ok(outcome)
     }
 

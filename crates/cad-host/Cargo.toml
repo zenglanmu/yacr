@@ -6,14 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Platform-common host orchestration: controller/Slint bridge, open/save/plot funnels."
+description = "Platform-common, UI-free host orchestration and open/save/plot funnels."
 
 [dependencies]
 cad-domain.workspace = true
 cad-db.workspace = true
 cad-app.workspace = true
+cad-engine.workspace = true
 cad-platform.workspace = true
 cad-representation.workspace = true
 cad-diagnostics.workspace = true
 cad-resources.workspace = true
-cad-ui-slint.workspace = true

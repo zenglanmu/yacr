@@ -3,12 +3,15 @@
 //!
 //! Runs on the software-Vulkan offscreen platform, separate from
 //! `concept_offscreen.rs` so each binary owns its single `set_platform` call.
+//!
+//! Canvas *pick* routing is not observable on a detached adapter any more: after
+//! the engine decoupling the shell forwards canvas-local points to the attached
+//! engine and has no host to route to when none is attached. The pick and
+//! touch-guard wiring contracts are covered by `engine_adapter_contract.rs`; the
+//! pure guard state machine stays unit-tested in `src/tests.rs`.
 use cad_app::viewer_config::ViewerConfig;
-use cad_domain::{CadResult, Point3};
-use cad_ui_slint::{
-    offscreen, CanvasPickMapper, MeasurementUiState, UiAdapter, UiCommandSink, UiConfiguration,
-    ViewInput,
-};
+use cad_domain::CadResult;
+use cad_ui_slint::{offscreen, UiAdapter, UiCommandSink, UiConfiguration, ViewInput};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -16,8 +19,7 @@ use std::rc::Rc;
 ///
 /// The Slint offscreen platform is thread-local and installs at most once, so
 /// this binary keeps a **single** test that installs it and exercises every
-/// adapter on that one thread. A second `#[test]` would run on another thread
-/// with no platform (see the same constraint in `host_config_disk.rs`).
+/// adapter on that one thread.
 fn install_offscreen() {
     offscreen::install().unwrap();
 }
@@ -43,7 +45,6 @@ struct Counts {
     pointer: Cell<usize>,
     scroll: Cell<usize>,
     scroll_cursor: Cell<Option<[f64; 2]>>,
-    pick: Cell<usize>,
     pinch: Cell<Option<(i32, f64, f64, f64)>>,
 }
 
@@ -61,147 +62,31 @@ impl ViewInput for CountingInput {
     }
 }
 
-struct CountingMapper(Rc<Counts>);
-impl CanvasPickMapper for CountingMapper {
-    fn to_world(&self, _logical: [f64; 2]) -> Option<Point3> {
-        self.0.pick.set(self.0.pick.get() + 1);
-        Some(Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        })
-    }
-}
-
 #[test]
 fn pointer_flag_gates_view_input_and_configured_ribbon_commands_dispatch() {
     install_offscreen();
     let adapter = UiAdapter::new(UiConfiguration::default(), Sink, true).unwrap();
     let counts = Rc::new(Counts::default());
     adapter.set_view_input(Rc::new(CountingInput(counts.clone())));
-    adapter.set_canvas_pick_mapper(Rc::new(CountingMapper(counts.clone())));
-    // A running measurement is what makes a canvas pick consume the mapper at
-    // all, so the pick gate is observable rather than shadowed by the idle rule.
-    adapter
-        .handle()
-        .set_measurement_state(&MeasurementUiState {
-            active: true,
-            ..Default::default()
-        })
-        .unwrap();
 
-    // Defaults: every enabled path is delivered.
+    // Defaults: every enabled path is delivered to the host view input.
     adapter
         .component()
         .invoke_pointer_input(2, 0, 10.0, 10.0, 0);
     adapter
         .component()
         .invoke_scroll_input(1.0, 0.0, 42.0, 73.0);
-    adapter.component().invoke_canvas_pick(5.0, 5.0);
+    adapter.component().invoke_pinch_input(0, 1.0, 42.0, 73.0);
+    adapter.component().invoke_pinch_input(1, 1.5, 42.0, 73.0);
     assert_eq!(counts.pointer.get(), 1);
     assert_eq!(counts.scroll.get(), 1);
     assert_eq!(counts.scroll_cursor.get(), Some([42.0, 73.0]));
-    assert_eq!(counts.pick.get(), 1);
-    adapter.component().invoke_pinch_input(0, 1.0, 42.0, 73.0);
-    adapter.component().invoke_pinch_input(1, 1.5, 42.0, 73.0);
     assert_eq!(counts.pinch.get(), Some((1, 1.5, 42.0, 73.0)));
 
-    // Actual Slint ordering: A is down, then runtime synthesizes Up(B) (there is
-    // no Down(B)) before gesture-started is delivered.
-    adapter
-        .component()
-        .invoke_pointer_input(0, 1, 8.0, 8.0, 101);
-    adapter
-        .component()
-        .invoke_pointer_input(1, 1, 9.0, 9.0, 202);
-    adapter.component().invoke_canvas_pick(9.0, 9.0);
-    assert_eq!(
-        counts.pick.get(),
-        1,
-        "synthetic second-finger release must not pick"
-    );
-    adapter.component().invoke_pointer_exited();
-    adapter.component().invoke_pinch_input(0, 1.0, 9.0, 9.0);
-    adapter.component().invoke_pinch_input(2, 1.0, 9.0, 9.0);
-    adapter.component().invoke_pointer_exited();
-    // Runtime's synthetic re-down/up for the remaining contact drains suppression.
-    adapter
-        .component()
-        .invoke_pointer_input(0, 1, 8.0, 8.0, 101);
-    adapter
-        .component()
-        .invoke_pointer_input(1, 1, 8.0, 8.0, 101);
-    adapter.component().invoke_pointer_exited(); // delayed property callback after tail
-    adapter.component().invoke_canvas_pick(8.0, 8.0);
-    assert_eq!(
-        counts.pick.get(),
-        1,
-        "residual release itself must not pick"
-    );
-    adapter
-        .component()
-        .invoke_pointer_input(0, 1, 7.0, 7.0, 303);
-    adapter
-        .component()
-        .invoke_pointer_input(1, 1, 7.0, 7.0, 303);
-    adapter.component().invoke_canvas_pick(7.0, 7.0);
-    assert_eq!(counts.pick.get(), 2, "next complete tap must be restored");
-    adapter
-        .component()
-        .invoke_pointer_input(0, 1, 4.0, 4.0, 404);
-    adapter
-        .component()
-        .invoke_pointer_input(1, 1, 5.0, 5.0, 505); // synthetic Up(B), no Down(B)
-    adapter.component().invoke_canvas_pick(5.0, 5.0);
-    assert_eq!(counts.pick.get(), 2, "unrecognized light pinch cannot pick");
-    adapter
-        .component()
-        .invoke_pointer_input(0, 1, 5.0, 5.0, 505);
-    adapter
-        .component()
-        .invoke_pointer_input(1, 1, 5.0, 5.0, 505);
-    adapter.component().invoke_canvas_pick(5.0, 5.0);
-    assert_eq!(counts.pick.get(), 2, "unrecognized light pinch cannot pick");
-    adapter
-        .component()
-        .invoke_pointer_input(0, 1, 6.0, 6.0, 606);
-    adapter
-        .component()
-        .invoke_pointer_input(1, 1, 6.0, 6.0, 606);
-    adapter.component().invoke_canvas_pick(6.0, 6.0);
-    assert_eq!(
-        counts.pick.get(),
-        3,
-        "tap after light pinch must be restored"
-    );
-    adapter
-        .component()
-        .invoke_pointer_input(0, 1, 6.0, 6.0, 707);
-    adapter.component().invoke_pointer_input(3, 0, 6.0, 6.0, 0); // cancel can carry ID zero
-    adapter
-        .component()
-        .invoke_pointer_input(1, 1, 6.0, 6.0, 707); // orphan release after cancel
-    adapter.component().invoke_canvas_pick(6.0, 6.0);
-    assert_eq!(
-        counts.pick.get(),
-        3,
-        "orphan release after cancel cannot pick"
-    );
-    adapter
-        .component()
-        .invoke_pointer_input(0, 1, 6.0, 6.0, 808);
-    adapter
-        .component()
-        .invoke_pointer_input(1, 1, 6.0, 6.0, 808);
-    adapter.component().invoke_canvas_pick(6.0, 6.0);
-    assert_eq!(
-        counts.pick.get(),
-        4,
-        "cancel restores the next complete tap"
-    );
+    // A disabled pointer stops pointer and scroll delivery without any callback
+    // reinstall.
     let pointer_before_disable = counts.pointer.get();
-    let picks_before_disable = counts.pick.get();
-
+    let scroll_before_disable = counts.scroll.get();
     let mut disabled = ViewerConfig::default();
     disabled.interaction.pointer = false;
     adapter.handle().set_config(disabled).unwrap();
@@ -212,7 +97,6 @@ fn pointer_flag_gates_view_input_and_configured_ribbon_commands_dispatch() {
     adapter
         .component()
         .invoke_scroll_input(1.0, 0.0, 20.0, 30.0);
-    adapter.component().invoke_canvas_pick(6.0, 6.0);
     assert_eq!(
         counts.pointer.get(),
         pointer_before_disable,
@@ -220,17 +104,11 @@ fn pointer_flag_gates_view_input_and_configured_ribbon_commands_dispatch() {
     );
     assert_eq!(
         counts.scroll.get(),
-        1,
+        scroll_before_disable,
         "disabled pointer must not reach scroll"
     );
-    assert_eq!(
-        counts.pick.get(),
-        picks_before_disable,
-        "disabled pointer must not reach the pick mapper"
-    );
 
-    // The gate reads the store at event time, so re-enabling restores delivery
-    // without reinstalling any callback.
+    // The gate reads the store at event time, so re-enabling restores delivery.
     adapter
         .handle()
         .set_config(ViewerConfig::default())
@@ -241,11 +119,11 @@ fn pointer_flag_gates_view_input_and_configured_ribbon_commands_dispatch() {
     adapter
         .component()
         .invoke_scroll_input(1.0, 0.0, 30.0, 40.0);
-    adapter.component().invoke_canvas_pick(7.0, 7.0);
     assert_eq!(counts.pointer.get(), pointer_before_disable + 1);
-    assert_eq!(counts.scroll.get(), 2);
-    assert_eq!(counts.pick.get(), picks_before_disable + 1);
+    assert_eq!(counts.scroll.get(), scroll_before_disable + 1);
 
+    // An in-flight pinch is cancelled exactly once when the gate closes, and a
+    // re-enabled update cannot invent a baseline.
     adapter.component().invoke_pinch_input(0, 1.0, 3.0, 4.0);
     let mut disabled = ViewerConfig::default();
     disabled.interaction.pointer = false;
@@ -303,8 +181,8 @@ fn pointer_flag_gates_view_input_and_configured_ribbon_commands_dispatch() {
         .invoke_ribbon_command("view.reset".into());
     assert_eq!(recorded.borrow().as_slice(), &[CommandId::ResetView]);
 
-    // A deliberately ambiguous id still produces no command and reports
-    // instead: `layer.toggle` needs a layer row the ribbon cannot supply.
+    // A deliberately ambiguous id still produces no command and reports instead:
+    // `layer.toggle` needs a layer row the ribbon cannot supply.
     recorded.borrow_mut().clear();
     ribbon
         .component()

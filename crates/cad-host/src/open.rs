@@ -14,6 +14,12 @@ impl HostCore {
         self.open_abort.set(false);
         self.open_status_graded.set(false);
         *self.open_target.borrow_mut() = None;
+        // A fresh attempt starts a new eligibility scope: a previous attempt's
+        // sync terminal or async job must not be shown for this one.
+        self.open_attempt
+            .set(self.open_attempt.get().saturating_add(1));
+        self.async_report_attempt.set(None);
+        *self.sync_terminal.borrow_mut() = None;
     }
 
     /// Drain every platform file event into the pending open/save slots.
@@ -47,6 +53,7 @@ impl HostCore {
     /// `abort` carries the already-localized reason verbatim; the core never
     /// re-wraps it (which would double-format the message).
     fn on_file_failure(&self, purpose: FilePurpose, abort: FileAbort) {
+        self.full_dirty.set(true);
         match purpose {
             FilePurpose::Open => {
                 self.open_pending.set(false);
@@ -75,6 +82,7 @@ impl HostCore {
         // installed. Clear the flag so a later open is not aborted by it.
         if self.open_abort.replace(false) {
             self.presenting_open.set(false);
+            self.full_dirty.set(true);
             return Ok(());
         }
         // A superseded attempt: the document changed since the attempt began.
@@ -91,35 +99,104 @@ impl HostCore {
         };
         if superseded {
             self.presenting_open.set(false);
+            self.full_dirty.set(true);
             return Ok(());
         }
         if self.capabilities.import_worker {
             self.presenting_open.set(true);
+            self.full_dirty.set(true);
             // Retain the real target until the import publishes, so the source
             // guard arms against the platform's own handle (not a re-derived path).
             *self.open_target.borrow_mut() = Some(target.clone());
+            // This attempt now owns the controller's async report: mark it before
+            // starting the job so its running/terminal state is eligible.
+            self.async_report_attempt.set(Some(self.open_attempt.get()));
             self.controller
                 .borrow_mut()
                 .begin_async_open(bytes, &target.display_name);
             return Ok(());
         }
         // Synchronous (headless/CLI-style) install.
-        self.controller
+        let opened = match self
+            .controller
             .borrow_mut()
-            .open_bytes(bytes, &target.display_name)?;
+            .open_bytes(bytes, &target.display_name)
+        {
+            Ok(opened) => opened,
+            Err(error) => {
+                // A real failure keeps an explicit terminal; never a fake success.
+                *self.sync_terminal.borrow_mut() =
+                    Some(ImportProgressSnapshot::terminal(ImportTerminal::Failed {
+                        error: error.clone(),
+                    }));
+                self.full_dirty.set(true);
+                return Err(error);
+            }
+        };
+        // The authoritative document was replaced: bump the host document epoch
+        // and record the real opened terminal before any fallible post-step.
+        self.note_document_replaced();
+        *self.sync_terminal.borrow_mut() =
+            Some(ImportProgressSnapshot::terminal(ImportTerminal::Opened {
+                entities: opened.entities,
+            }));
         // Arm the corruption guard only now that the open succeeded, before
         // `install_images` reads the directory for sibling raster resources.
         self.files.set_source(Some(&target));
         *self.drawing_path.borrow_mut() = Some(PathBuf::from(&target.opaque));
         self.controller.borrow_mut().fit()?;
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            handle.cancel_draw_capture()?;
+        self.controller.borrow_mut().cancel_tool()?;
+        // Resource installation is NON-FATAL for presentation (mirroring the
+        // asynchronous publish in `poll_loading`): the drawing is still shown,
+        // and the failure is reported as a status rather than failing the open.
+        let mut resource_error: Option<String> = None;
+        if let Err(error) = self.install_fonts() {
+            resource_error = Some(error_text(&error));
         }
-        if let Some(view) = self.view.borrow().as_ref() {
-            self.install_fonts(view)?;
-            self.install_images(view)?;
+        if let Err(error) = self.install_images() {
+            if resource_error.is_none() {
+                resource_error = Some(error_text(&error));
+            }
         }
+        if let Some(error) = &resource_error {
+            self.set_catalog_status("fonts.failed", &[("error", error)])?;
+        }
+        self.render.sync_drawing(self.controller.borrow().drawing());
+        self.full_dirty.set(true);
         Ok(())
+    }
+
+    /// Deliver externally supplied bytes as an authoritative document open.
+    ///
+    /// Reuses the existing open pipeline ([`Self::begin_open_attempt`] +
+    /// [`Self::deliver_open`]): the sync/worker choice follows the host
+    /// capability exactly, publication records the document epoch immediately,
+    /// and a failed parse returns `Err` without any fake success. Queued old
+    /// input is allowed (an IO replace makes it stale at execution), but active
+    /// work — an executing request, a pump, a clock sample or another sync
+    /// window — is refused with the mapped Busy `CadError` and no mutation.
+    ///
+    /// The whole delivery runs under an RAII sync guard, and it never routes
+    /// through the public `command`/`execute` entries (so it cannot self-Busy).
+    /// A successful `Ok(())` means the document was delivered; for the worker
+    /// capability the import is only *started* — the caller distinguishes
+    /// completion via [`Self::loading`]/status, this never claims "opened".
+    pub fn deliver_external_open(&self, target: FileTarget, bytes: Arc<[u8]>) -> CadResult<()> {
+        if self.request_engine_busy() || self.queue.executing_id().is_some() {
+            return Err(Self::config_busy_error());
+        }
+        let _guard = ActiveGuard::new(&self.sync_active);
+        // Arm the supersession/corruption guards against the current document
+        // immediately before delivering.
+        self.begin_open_attempt();
+        // End any actual picker/read still pending (including a graded failure or
+        // cancel from a superseded gesture): real bytes are here now. This is not
+        // a fake cancel — the fresh supersession guard from `begin_open_attempt`
+        // is left intact.
+        self.open_pending.set(false);
+        *self.open_failure.borrow_mut() = None;
+        self.open_cancelled.set(false);
+        self.deliver_open(target, bytes)
     }
 
     /// User-initiated open: run the chooser (or the headless configured drawing).
@@ -128,7 +205,9 @@ impl HostCore {
         // single file-interaction slot (a SAF save target would be read as an
         // open). Explicit refusal, never a silent no-op.
         if self.save_pending() {
-            return Err(CadError::Unsupported(self.message("linux.busy", &[])));
+            return Err(CadError::Unsupported(
+                "file operation already in progress".into(),
+            ));
         }
         if !self.options.headless && self.loading() {
             return Ok(());
@@ -145,7 +224,7 @@ impl HostCore {
         self.drain_files()?;
         if self.open_pending.get() {
             if !self.options.headless {
-                self.set_status(self.message("linux.picker_waiting", &[]))?;
+                self.set_catalog_status("linux.picker_waiting", &[])?;
             }
         } else {
             // Grade any cancel/failure now, so a synchronous platform's outcome is
@@ -165,10 +244,12 @@ impl HostCore {
     pub(crate) fn grade_pending_open(&self) -> CadResult<()> {
         if self.open_cancelled.replace(false) {
             self.open_status_graded.set(true);
-            self.set_status(self.message("linux.picker_cancelled", &[]))?;
+            self.full_dirty.set(true);
+            self.set_catalog_status("linux.picker_cancelled", &[])?;
         } else if let Some(reason) = self.open_failure.borrow_mut().take() {
             self.open_status_graded.set(true);
-            self.set_status(self.message("command.failed", &[("error", &reason)]))?;
+            self.full_dirty.set(true);
+            self.set_catalog_status("command.failed", &[("error", &reason)])?;
         }
         Ok(())
     }
@@ -182,16 +263,24 @@ impl HostCore {
     pub(crate) fn request_new(&self) -> CadResult<()> {
         if !self.capabilities.new {
             return Err(CadError::Unsupported(
-                self.message("command.unsupported", &[("command", "NEW")]),
+                "NEW is not supported by this host".into(),
             ));
         }
         if self.loading() {
-            return Err(CadError::Unsupported(self.message("linux.busy", &[])));
+            return Err(CadError::Unsupported(
+                "document loading is in progress".into(),
+            ));
         }
         self.controller.borrow_mut().new_blank_document()?;
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            handle.cancel_draw_capture()?;
-        }
+        // New replaces the authoritative document with a fresh blank one: record
+        // the epoch before any fallible post-step and drop any stale synchronous
+        // open terminal.
+        self.note_document_replaced();
+        *self.sync_terminal.borrow_mut() = None;
+        self.async_report_attempt.set(None);
+        self.controller.borrow_mut().cancel_tool()?;
+        self.render.sync_drawing(self.controller.borrow().drawing());
+        self.full_dirty.set(true);
         Ok(())
     }
 
@@ -211,11 +300,19 @@ impl HostCore {
         let poll = self.controller.borrow_mut().poll_async_open();
         let opened = matches!(poll, AsyncOpenPoll::Opened { .. });
         let cancelled = matches!(poll, AsyncOpenPoll::Cancelled { .. });
+        // The asynchronous publish already replaced the authoritative document.
+        // Record the epoch IMMEDIATELY, before any fallible post-step (fit,
+        // cancel, resources): the replacement is real and old requests must go
+        // stale even if a later step fails.
+        if opened {
+            self.note_document_replaced();
+        }
         if matches!(
             poll,
             AsyncOpenPoll::Failed { .. } | AsyncOpenPoll::Cancelled { .. }
         ) {
             self.presenting_open.set(false);
+            self.full_dirty.set(true);
             // Drop a target that will never publish so it cannot arm a later guard.
             *self.open_target.borrow_mut() = None;
         }
@@ -225,9 +322,7 @@ impl HostCore {
         let mut resource_error: Option<String> = None;
         if opened {
             self.controller.borrow_mut().fit()?;
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                handle.cancel_draw_capture()?;
-            }
+            self.controller.borrow_mut().cancel_tool()?;
             // Arm the corruption guard only now that the open succeeded, against
             // the real delivered target (its opaque handle, not a path derived
             // from the display name).
@@ -235,67 +330,40 @@ impl HostCore {
                 self.files.set_source(Some(&target));
                 *self.drawing_path.borrow_mut() = Some(PathBuf::from(&target.opaque));
             }
-            if let Some(view) = self.view.borrow().as_ref() {
-                if let Err(error) = self.install_fonts(view) {
+            if let Err(error) = self.install_fonts() {
+                resource_error = Some(error_text(&error));
+            }
+            if let Err(error) = self.install_images() {
+                if resource_error.is_none() {
                     resource_error = Some(error_text(&error));
                 }
-                if let Err(error) = self.install_images(view) {
-                    if resource_error.is_none() {
-                        resource_error = Some(error_text(&error));
-                    }
-                }
             }
-            self.push()?;
+            self.render.sync_drawing(self.controller.borrow().drawing());
+            self.full_dirty.set(true);
         }
         let snapshot = self.import_snapshot();
-        if let Some(handle) = self.handle.borrow().as_ref() {
-            let messages = self.messages();
-            handle.set_import_state(&cad_ui_slint::ImportProgressUiState::from_snapshot(
-                snapshot.as_ref(),
-                &messages,
-            ))?;
-            if let AsyncOpenPoll::Failed { error, .. } = poll {
-                self.set_status(self.message("linux.failed", &[("error", &error_text(&error))]))?;
-            } else if cancelled {
-                self.set_status(self.message("linux.picker_cancelled", &[]))?;
-            } else if opened {
-                self.set_status(self.message("linux.opened", &[]))?;
+        if snapshot.is_some() {
+            self.full_dirty.set(true);
+        }
+        if let AsyncOpenPoll::Failed { error, .. } = poll {
+            self.set_catalog_status("linux.failed", &[("error", &error_text(&error))])?;
+        } else if cancelled {
+            self.set_catalog_status("linux.picker_cancelled", &[])?;
+        } else if opened {
+            self.set_catalog_status("linux.opened", &[])?;
+        }
+        if self.presenting_open.get() && !snapshot.as_ref().is_some_and(|s| s.running) {
+            if let Some(error) = self.render.scene_error() {
+                self.set_catalog_status("linux.failed", &[("error", &error)])?;
+                self.presenting_open.set(false);
+            } else if self.render.preparation_current() {
+                self.presenting_open.set(false);
+                self.set_catalog_status("linux.opened", &[])?;
             }
-            if self.presenting_open.get() && !snapshot.as_ref().is_some_and(|s| s.running) {
-                if let Some(view) = self.view.borrow().as_ref() {
-                    if let Some(error) = view.scene_error() {
-                        self.set_status(self.message("linux.failed", &[("error", &error)]))?;
-                        self.presenting_open.set(false);
-                    } else if view.current_drawing_presented() {
-                        self.presenting_open.set(false);
-                        self.set_status(self.message("linux.opened", &[]))?;
-                    } else {
-                        self.set_status(match view.loading_phase() {
-                            Some("uploading") => self.message("linux.uploading", &[]),
-                            Some("drawing") => {
-                                let (done, total) = view.drawing_progress().unwrap_or((0, 0));
-                                self.message(
-                                    "linux.drawing",
-                                    &[("done", &done.to_string()), ("total", &total.to_string())],
-                                )
-                            }
-                            _ => self.message("linux.preparing", &[]),
-                        })?;
-                    }
-                }
-            }
-            // Refresh open/save availability LAST, after the presentation state is
-            // settled: a tick that clears `presenting_open` must advertise the idle
-            // availability, or a host whose poll driver stops when idle (Android)
-            // would leave Save As disabled after a completed open.
-            handle.set_open_available(!self.loading())?;
-            // Save As availability tracks the same idle condition as open **and**
-            // the host capability, so a host without save never advertises it.
-            handle.set_save_available(self.capabilities.save && !self.loading())?;
-            // The resource failure is the final status of this tick.
-            if let Some(error) = &resource_error {
-                self.set_status(self.message("fonts.failed", &[("error", error)]))?;
-            }
+        }
+        // The resource failure is the final status of this tick.
+        if let Some(error) = &resource_error {
+            self.set_catalog_status("fonts.failed", &[("error", error)])?;
         }
         Ok(())
     }

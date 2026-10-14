@@ -12,6 +12,7 @@ use cad_query::QueryService;
 use cad_representation::{enumerate_layouts, viewport_transform, SpaceSelection, ViewportState};
 use std::{collections::BTreeMap, sync::Arc};
 
+pub mod api;
 pub mod camera;
 pub mod draw_tool;
 pub mod host;
@@ -25,8 +26,12 @@ pub mod render_scene;
 mod select_all;
 pub mod selection;
 pub mod tasks;
+pub mod tool_state;
 pub mod viewer_config;
 
+pub use api::{
+    ApiOutcome, ApiRequest, ApiTarget, EntityEdit, NewEntity, RawCommandTrace, TracedCommandOutcome,
+};
 pub use cad_spatial::{
     BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
 };
@@ -48,6 +53,7 @@ pub use tasks::{
     import_phase_key, AsyncOpenPoll, ImportJob, ImportManager, ImportProgressSnapshot,
     ImportTerminal,
 };
+pub use tool_state::{DrawCapture, ToolSnapshot, ToolState};
 
 use layers::LayerOverrideSet;
 
@@ -207,14 +213,6 @@ pub struct ClipboardEntry {
     pub display: cad_db::EntityDisplayState,
 }
 
-#[derive(Debug, Clone)]
-pub enum ToolState {
-    Idle,
-    Selecting,
-    Measuring(MeasurementTool),
-    Panning,
-}
-
 pub struct SessionState {
     pub document: DocumentId,
     mode: AppMode,
@@ -223,6 +221,8 @@ pub struct SessionState {
     /// Temporary layer visibility. Never the drawing's layer table (F03).
     pub layer_overrides: LayerOverrideSet,
     pub tool: ToolState,
+    /// Generation incremented whenever an active tool lifecycle is replaced.
+    pub tool_generation: u64,
     pub generation: u64,
     /// Recorded CAD backend preference; the host rebuilds the render session.
     pub backend: BackendChoice,
@@ -239,6 +239,8 @@ pub struct SessionState {
     /// Set when a measurement is evaluated (auto-completed or explicitly
     /// confirmed). Cleared when the session is rebuilt for new content.
     last_measurement: Option<MeasurementRecord>,
+    /// Last measurement choice retained even while no measurement is active.
+    selected_measurement_kind: MeasurementToolKind,
     /// In-process entity clipboard (Phase 8).
     ///
     /// Holds clones of the selected entities (with their display state); it is
@@ -267,10 +269,12 @@ impl SessionState {
             selection: SelectionSet::new(),
             layer_overrides: LayerOverrideSet::new(),
             tool: ToolState::Idle,
+            tool_generation: 0,
             generation: 0,
             backend: BackendChoice::Auto,
             active_layer: LayerId(0),
             last_measurement: None,
+            selected_measurement_kind: MeasurementToolKind::Distance,
             clipboard: Vec::new(),
         }
     }
@@ -289,8 +293,9 @@ impl SessionState {
 
     /// Switch modes; an unconfirmed tool is cancelled, never silently committed.
     pub fn switch_mode(&mut self, mode: AppMode) -> CadResult<()> {
-        if !matches!(self.tool, ToolState::Idle) {
+        if self.mode != mode {
             self.tool = ToolState::Idle;
+            self.bump_tool_generation();
         }
         self.mode = mode;
         Ok(())
@@ -301,8 +306,150 @@ impl SessionState {
     /// Cancelling never opens a transaction, so a cancelled measurement always
     /// leaves the drawing database and history untouched.
     pub fn cancel_tool(&mut self) -> CadResult<()> {
-        self.tool = ToolState::Idle;
+        if !matches!(self.tool, ToolState::Idle) {
+            self.tool = ToolState::Idle;
+            self.bump_tool_generation();
+        }
         Ok(())
+    }
+
+    fn bump_tool_generation(&mut self) {
+        self.tool_generation = self.tool_generation.saturating_add(1);
+    }
+
+    /// Begin drawing capture and snapshot the current selection identity.
+    pub fn begin_draw(&mut self, kind: DrawToolKind) -> CadResult<()> {
+        self.authorize(match kind {
+            DrawToolKind::Line => CommandId::CreateLine,
+            DrawToolKind::Circle => CommandId::CreateCircle,
+            DrawToolKind::Arc => CommandId::CreateArc,
+            DrawToolKind::Move => CommandId::MoveEntities,
+            DrawToolKind::Trim => CommandId::TrimEntity,
+            DrawToolKind::Copy => CommandId::CopyEntities,
+            DrawToolKind::Extend => CommandId::ExtendEntity,
+            DrawToolKind::Rotate => CommandId::RotateEntities,
+            DrawToolKind::Scale => CommandId::ScaleEntities,
+            DrawToolKind::Mirror => CommandId::MirrorEntities,
+            DrawToolKind::Offset => CommandId::OffsetEntity,
+        })?;
+        let selection = self.selection.refs().to_vec();
+        let tool = DrawTool::new(kind, selection.len());
+        self.tool = ToolState::Drawing(DrawCapture { tool, selection });
+        self.bump_tool_generation();
+        Ok(())
+    }
+
+    /// Enter selection mode, replacing any active drawing or measurement tool.
+    pub fn begin_selecting(&mut self) {
+        self.tool = ToolState::Selecting;
+        self.bump_tool_generation();
+    }
+
+    /// Start or restart the selected measurement algorithm.
+    pub fn begin_measurement(&mut self, kind: MeasurementToolKind) -> CadResult<()> {
+        self.authorize(CommandId::Measure)?;
+        self.selected_measurement_kind = kind;
+        self.tool = ToolState::Measuring(MeasurementTool::new(kind));
+        self.bump_tool_generation();
+        Ok(())
+    }
+
+    /// Change the retained measurement choice, restarting capture if active.
+    pub fn set_measurement_kind(&mut self, kind: MeasurementToolKind) -> CadResult<()> {
+        self.selected_measurement_kind = kind;
+        Ok(())
+    }
+
+    pub fn selected_measurement_kind(&self) -> MeasurementToolKind {
+        self.selected_measurement_kind
+    }
+
+    /// Replace any active capture with pan navigation without dispatching a Pan command.
+    pub fn begin_pan(&mut self) {
+        self.tool = ToolState::Panning;
+        self.bump_tool_generation();
+    }
+
+    /// Clear only the active draw/measurement cursor, preserving capture and generation.
+    pub fn clear_cursor(&mut self) {
+        match &mut self.tool {
+            ToolState::Drawing(capture) => capture.tool.set_cursor(None),
+            ToolState::Measuring(tool) => tool.set_cursor(None),
+            ToolState::Idle | ToolState::Selecting | ToolState::Panning => {}
+        }
+    }
+
+    /// Capture a finite point in the active drawing or measurement tool.
+    /// Returns whether an auto-completing measurement became ready.
+    pub fn capture_point(&mut self, point: Point3) -> CadResult<bool> {
+        if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
+            return Err(CadError::InvalidInput("tool point must be finite".into()));
+        }
+        match &mut self.tool {
+            ToolState::Drawing(capture) => {
+                capture.tool.push_point(point)?;
+                Ok(false)
+            }
+            ToolState::Measuring(tool) => {
+                tool.push_point(point);
+                Ok(tool.auto_ready())
+            }
+            _ => Err(CadError::InvalidInput(
+                "no point-capture tool is active".into(),
+            )),
+        }
+    }
+
+    /// Move the preview cursor without advancing the lifecycle generation.
+    pub fn move_cursor(&mut self, point: Point3) -> CadResult<()> {
+        if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
+            return Err(CadError::InvalidInput("tool cursor must be finite".into()));
+        }
+        match &mut self.tool {
+            ToolState::Drawing(capture) => capture.tool.set_cursor(Some(point)),
+            ToolState::Measuring(tool) => tool.set_cursor(Some(point)),
+            _ => return Err(CadError::InvalidInput("no cursor tool is active".into())),
+        }
+        Ok(())
+    }
+
+    pub fn draw_preview(&self) -> Option<DrawPreview> {
+        match &self.tool {
+            ToolState::Drawing(capture) => Some(capture.tool.preview()),
+            _ => None,
+        }
+    }
+
+    pub fn draw_intent(&self) -> CadResult<DrawIntent> {
+        match &self.tool {
+            ToolState::Drawing(capture) => capture.tool.intent(),
+            _ => Err(CadError::InvalidInput("no drawing tool is active".into())),
+        }
+    }
+
+    pub fn draw_selection_snapshot(&self) -> Option<&[SelectionRef]> {
+        match &self.tool {
+            ToolState::Drawing(capture) => Some(&capture.selection),
+            _ => None,
+        }
+    }
+
+    pub fn tool_snapshot(&self) -> ToolSnapshot {
+        match &self.tool {
+            ToolState::Idle => ToolSnapshot::Idle,
+            ToolState::Selecting => ToolSnapshot::Selecting,
+            ToolState::Drawing(capture) => ToolSnapshot::Drawing(capture.tool.preview()),
+            ToolState::Measuring(tool) => ToolSnapshot::Measuring(tool.preview()),
+            ToolState::Panning => ToolSnapshot::Panning,
+        }
+    }
+
+    /// Clear an active tool after successful execution, invalidating stale input.
+    pub(crate) fn complete_tool(&mut self) {
+        if !matches!(self.tool, ToolState::Idle) {
+            self.tool = ToolState::Idle;
+            self.bump_tool_generation();
+        }
     }
 
     /// Number of entities currently held in the in-process clipboard.
@@ -350,6 +497,88 @@ impl SessionState {
                 "no measurement tool is active".into(),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod p2_interaction_tests {
+    use super::*;
+
+    fn point(x: f64, y: f64) -> Point3 {
+        Point3 { x, y, z: 0.0 }
+    }
+
+    #[test]
+    fn set_measurement_kind_does_not_start_or_replace_capture() {
+        let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+        session
+            .set_measurement_kind(MeasurementToolKind::Area)
+            .unwrap();
+        assert_eq!(
+            session.selected_measurement_kind(),
+            MeasurementToolKind::Area
+        );
+        assert!(session.measurement_preview().is_none());
+        assert_eq!(session.tool_generation, 0);
+
+        session
+            .begin_measurement(MeasurementToolKind::Distance)
+            .unwrap();
+        session.capture_point(point(1.0, 2.0)).unwrap();
+        let generation = session.tool_generation;
+        session
+            .set_measurement_kind(MeasurementToolKind::Area)
+            .unwrap();
+        let preview = session.measurement_preview().unwrap();
+        assert_eq!(preview.kind, MeasurementToolKind::Distance);
+        assert_eq!(preview.points, vec![point(1.0, 2.0)]);
+        assert_eq!(
+            session.selected_measurement_kind(),
+            MeasurementToolKind::Area
+        );
+        assert_eq!(session.tool_generation, generation);
+    }
+
+    #[test]
+    fn begin_pan_replaces_capture_and_advances_tool_generation() {
+        let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+        session
+            .begin_measurement(MeasurementToolKind::Distance)
+            .unwrap();
+        session.capture_point(point(1.0, 2.0)).unwrap();
+        let generation = session.tool_generation;
+        session.begin_pan();
+        assert!(matches!(session.tool_snapshot(), ToolSnapshot::Panning));
+        assert!(session.measurement_preview().is_none());
+        assert_eq!(session.tool_generation, generation + 1);
+    }
+
+    #[test]
+    fn clear_cursor_preserves_captured_points_and_tool_generation() {
+        let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+        session
+            .begin_measurement(MeasurementToolKind::Distance)
+            .unwrap();
+        session.capture_point(point(1.0, 2.0)).unwrap();
+        session.move_cursor(point(3.0, 4.0)).unwrap();
+        let generation = session.tool_generation;
+        session.clear_cursor();
+        let preview = session.measurement_preview().unwrap();
+        assert_eq!(preview.points, vec![point(1.0, 2.0)]);
+        assert_eq!(preview.cursor, None);
+        assert_eq!(session.tool_generation, generation);
+
+        session.begin_draw(DrawToolKind::Line).unwrap();
+        session.capture_point(point(5.0, 6.0)).unwrap();
+        session.move_cursor(point(7.0, 8.0)).unwrap();
+        let generation = session.tool_generation;
+        session.clear_cursor();
+        let ToolSnapshot::Drawing(preview) = session.tool_snapshot() else {
+            panic!("draw capture must remain active");
+        };
+        assert_eq!(preview.points, vec![point(5.0, 6.0)]);
+        assert_eq!(preview.cursor, None);
+        assert_eq!(session.tool_generation, generation);
     }
 }
 
@@ -591,7 +820,7 @@ pub struct Command {
 #[derive(Debug)]
 pub struct CommandOutcome {
     pub objects: Vec<ObjectId>,
-    pub changes: Option<ChangeSet>,
+    pub changes: Option<Arc<ChangeSet>>,
     pub diagnostics: Vec<Diagnostic>,
     /// Structured measurement result, when the command produced one (spec F06).
     pub measurement: Option<MeasurementRecord>,

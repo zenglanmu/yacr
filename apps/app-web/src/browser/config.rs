@@ -71,14 +71,20 @@ pub fn apply_user_preference_json(text: &str) -> CadResult<()> {
 }
 
 /// Clear the stored user preference (in-memory and durable) and emit an event.
+///
+/// The authoritative store is the engine's (attached UI handles only mirror it
+/// and refuse a clear), so this routes through the host's real clear — the same
+/// capability the browser `EngineClient` delegates — then flushes the new config
+/// snapshot into the shell and drops the durable `localStorage` projection.
 pub fn clear_user_preference() -> CadResult<()> {
-    let handle = handle()?;
-    handle.clear_user_preference().map_err(config_from_error)?;
+    let rt = super::with_runtime(|rt| rt.clone()).ok_or(CadError::Cancelled)?;
+    rt.core
+        .clear_user_preference()
+        .map_err(|error| config_error("userPreference", &error.to_string()))?;
+    rt.flush_updates()?;
     cad_ui_slint::web::clear_config_preference();
-    cad_ui_slint::web::emit_config_changed(
-        handle.config_revision(),
-        &handle.effective_config_json(),
-    );
+    let snapshot = rt.core.config_snapshot();
+    cad_ui_slint::web::emit_config_changed(snapshot.revision, &snapshot.effective_json);
     Ok(())
 }
 

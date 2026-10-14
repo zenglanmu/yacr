@@ -16,6 +16,7 @@ path = "src/main.rs"
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
 cad-app.workspace = true
 cad-domain.workspace = true
+cad-engine.workspace = true
 cad-host.workspace = true
 cad-platform.workspace = true
 cad-ui-slint.workspace = true

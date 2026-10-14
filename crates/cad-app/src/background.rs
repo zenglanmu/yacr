@@ -30,31 +30,34 @@ impl<I: Send + 'static, O: Send + 'static> LatestTask<I, O> {
         let worker = shared.clone();
         std::thread::Builder::new()
             .name(name.into())
-            .spawn(move || loop {
-                let (generation, input) = {
-                    let (lock, wake) = &*worker;
+            .spawn(move || {
+                loop {
+                    let (generation, input) = {
+                        let (lock, wake) = &*worker;
+                        let mut state = lock.lock().unwrap();
+                        while !state.stopped && state.pending.is_none() {
+                            state = wake.wait(state).unwrap();
+                        }
+                        if state.stopped {
+                            break;
+                        }
+                        state.pending.take().unwrap()
+                    };
+                    let output =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(input)));
+                    let (lock, _) = &*worker;
                     let mut state = lock.lock().unwrap();
-                    while !state.stopped && state.pending.is_none() {
-                        state = wake.wait(state).unwrap();
-                    }
-                    if state.stopped {
-                        break;
-                    }
-                    state.pending.take().unwrap()
-                };
-                let output = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(input)));
-                let (lock, _) = &*worker;
-                let mut state = lock.lock().unwrap();
-                if !state.stopped && state.generation == generation {
-                    match output {
-                        Ok(output) => state.completed = Some((generation, output)),
-                        Err(_) => {
-                            state.failed = Some((generation, "background task panicked".into()))
+                    if !state.stopped && state.generation == generation {
+                        match output {
+                            Ok(output) => state.completed = Some((generation, output)),
+                            Err(_) => {
+                                state.failed = Some((generation, "background task panicked".into()))
+                            }
                         }
                     }
+                    drop(state);
+                    // Stale heavy output is freed here, never on the UI thread.
                 }
-                drop(state);
-                // Stale heavy output is freed here, never on the UI thread.
             })?;
         Ok(Self { shared })
     }

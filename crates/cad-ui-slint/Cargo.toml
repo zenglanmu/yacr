@@ -20,6 +20,7 @@ cad-render-wgpu.workspace = true
 cad-scene.workspace = true
 cad-geometry.workspace = true
 cad-representation.workspace = true
+serde_json.workspace = true
 log.workspace = true
 
 # Android uses the official android-activity backend (Skia behind wgpu). Other

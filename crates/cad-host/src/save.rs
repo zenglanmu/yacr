@@ -75,9 +75,7 @@ impl HostCore {
                 SavePurpose::Plot => "plot.picker_waiting",
                 SavePurpose::SaveDxf => "save.picker_waiting",
             };
-            if let Some(handle) = self.handle.borrow().as_ref() {
-                handle.set_status(self.message(waiting, &[]))?;
-            }
+            self.set_catalog_status(waiting, &[])?;
             return Ok(());
         }
         self.poll_pending_save()
@@ -85,15 +83,14 @@ impl HostCore {
 
     /// The host-configured default vector plot format (`ui.export.plotFormat`).
     ///
-    /// Reads the effective config from the shell handle; a core without a handle
-    /// (headless/test) defaults to SVG. This never fabricates a format: the enum
-    /// is schema-validated, so only `svg`/`pdf` are representable.
+    /// Read the effective format from the host-owned config store.
     fn plot_export_format(&self) -> cad_app::viewer_config::PlotExportFormat {
-        self.handle
+        self.viewer_config
             .borrow()
-            .as_ref()
-            .map(|handle| handle.effective_config().ui.export.plot_format)
-            .unwrap_or_default()
+            .effective()
+            .ui
+            .export
+            .plot_format
     }
 
     /// Save the active drawing as a lossy DXF file, host-owned.
@@ -103,20 +100,18 @@ impl HostCore {
     pub(crate) fn request_save(&self) -> CadResult<()> {
         if !self.capabilities.save {
             let reason = self.message("command.unsupported", &[("command", "SAVE")]);
-            self.set_status(self.message("save.export_failed", &[("reason", &reason)]))?;
+            self.set_catalog_status("save.export_failed", &[("reason", &reason)])?;
             return Err(CadError::Unsupported(reason));
         }
         if self.loading() || self.save_pending.get() || self.pending_save.borrow().is_some() {
             let busy = self.message("linux.busy", &[]);
-            self.set_status(self.message("save.export_failed", &[("reason", &busy)]))?;
+            self.set_catalog_status("save.export_failed", &[("reason", &busy)])?;
             return Err(CadError::Unsupported(busy));
         }
         let hint = self.controller.borrow().document_name_hint.clone();
         let default_name = policy::default_save_name(&hint, "dxf");
         if let Err(error) = self.files.begin_save(SavePurpose::SaveDxf, &default_name) {
-            self.set_status(
-                self.message("save.export_failed", &[("reason", &error_text(&error))]),
-            )?;
+            self.set_catalog_status("save.export_failed", &[("reason", &error_text(&error))])?;
             return Err(error);
         }
         self.save_pending.set(true);
@@ -133,26 +128,34 @@ impl HostCore {
         let Some(PendingSave { purpose, result }) = self.pending_save.borrow_mut().take() else {
             return Ok(());
         };
+        let catalog = |key: &str, args: &[(&str, &str)]| StatusMessage::Catalog {
+            key: key.to_string(),
+            args: args
+                .iter()
+                .map(|(name, value)| StatusArgument {
+                    key: (*name).to_string(),
+                    value: (*value).to_string(),
+                })
+                .collect(),
+        };
         let status = match (purpose, result) {
             // A closed dialog is a cancel, not a failure.
-            (SavePurpose::SaveDxf, Err(FileAbort::Cancelled)) => {
-                self.message("save.cancelled", &[])
-            }
-            (SavePurpose::Plot, Err(FileAbort::Cancelled)) => self.message("plot.cancelled", &[]),
+            (SavePurpose::SaveDxf, Err(FileAbort::Cancelled)) => catalog("save.cancelled", &[]),
+            (SavePurpose::Plot, Err(FileAbort::Cancelled)) => catalog("plot.cancelled", &[]),
             // The platform's reason is already localized: show it verbatim.
             (SavePurpose::SaveDxf, Err(FileAbort::Failed(reason))) => {
-                self.message("save.export_failed", &[("reason", &reason)])
+                catalog("save.export_failed", &[("reason", &reason)])
             }
             (SavePurpose::Plot, Err(FileAbort::Failed(reason))) => {
-                self.message("plot.export_failed", &[("reason", &reason)])
+                catalog("plot.export_failed", &[("reason", &reason)])
             }
             (SavePurpose::SaveDxf, Ok(target)) => match self.export_save(&target) {
                 // Clean success only when the export report is Complete; the UI
                 // never re-derives the verdict from the counts.
                 Ok(outcome) if outcome.completeness == Completeness::Complete => {
-                    self.message("save.exported", &[("path", &target.display_name)])
+                    catalog("save.exported", &[("path", &target.display_name)])
                 }
-                Ok(outcome) => self.message(
+                Ok(outcome) => catalog(
                     "save.exported_partial",
                     &[
                         ("path", &target.display_name),
@@ -160,33 +163,29 @@ impl HostCore {
                         ("dropped", &outcome.dropped.to_string()),
                     ],
                 ),
-                Err(SaveFailure::RefusedSourcePath) => {
-                    self.message("save.refused_source_path", &[])
-                }
-                Err(SaveFailure::DwgDeferred) => self.message("save.dwg_deferred", &[]),
+                Err(SaveFailure::RefusedSourcePath) => catalog("save.refused_source_path", &[]),
+                Err(SaveFailure::DwgDeferred) => catalog("save.dwg_deferred", &[]),
                 Err(SaveFailure::Reason(reason)) => {
-                    self.message("save.export_failed", &[("reason", &reason)])
+                    catalog("save.export_failed", &[("reason", &reason)])
                 }
             },
             (SavePurpose::Plot, Ok(target)) => match self.export_plot(&target) {
                 // Clean success only when nothing was dropped; a partial export
                 // is reported as such, never as a clean success.
                 Ok(outcome) if outcome.dropped == 0 => {
-                    self.message("plot.exported", &[("path", &target.display_name)])
+                    catalog("plot.exported", &[("path", &target.display_name)])
                 }
-                Ok(outcome) => self.message(
+                Ok(outcome) => catalog(
                     "plot.exported_partial",
                     &[
                         ("path", &target.display_name),
                         ("count", &outcome.dropped.to_string()),
                     ],
                 ),
-                Err(error) => {
-                    self.message("plot.export_failed", &[("reason", &error_text(&error))])
-                }
+                Err(error) => catalog("plot.export_failed", &[("reason", &error_text(&error))]),
             },
         };
-        self.set_status(status)?;
+        self.set_status_message(status)?;
         Ok(())
     }
 
@@ -226,7 +225,7 @@ impl HostCore {
     }
 
     fn report_plot_failed(&self, reason: &str) -> CadResult<()> {
-        self.set_status(self.message("plot.export_failed", &[("reason", reason)]))?;
+        self.set_catalog_status("plot.export_failed", &[("reason", reason)])?;
         Ok(())
     }
 

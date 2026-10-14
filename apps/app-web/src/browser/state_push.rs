@@ -21,7 +21,7 @@ use cad_domain::{Completeness, Diagnostic};
 use cad_host::HostCore;
 use cad_ui_slint::{
     FontResourceSummary, ImportProgressUiState, ImportResourceSummary, ReferencesResourceSummary,
-    ResourceCompleteness, ResourceSections,
+    ResourceCompleteness, ResourceSections, UiHandle,
 };
 
 use super::async_open as async_open_state;
@@ -32,12 +32,9 @@ use super::messages::current_messages;
 /// A worker-capable host takes the controller snapshot; the browser re-reads the
 /// synchronous fallback's terminal outcome. A cancelled/failed open is shown
 /// explicitly and a successful open hides the panel.
-pub(super) fn push_import_state(core: &HostCore) {
-    let Some(handle) = core.handle.borrow().as_ref().cloned() else {
-        return;
-    };
+pub(super) fn push_import_state(handle: &UiHandle, core: &HostCore) {
     let messages = current_messages();
-    let snapshot = async_open_state::current_snapshot(&core.controller.borrow());
+    let snapshot = async_open_state::current_snapshot(core);
     let state = ImportProgressUiState::from_snapshot(snapshot.as_ref(), &messages);
     let _ = handle.set_import_state(&state);
 }
@@ -48,10 +45,7 @@ pub(super) fn push_import_state(core: &HostCore) {
 /// `FontLoadReport`, and keeps `images_modeled: false`: the browser resolves
 /// raster images through the browser stack in a later phase, so it must not
 /// claim they are modeled.
-pub(super) fn push_resource_sections(core: &HostCore) {
-    let Some(handle) = core.handle.borrow().as_ref().cloned() else {
-        return;
-    };
+pub(super) fn push_resource_sections(handle: &UiHandle, core: &HostCore) {
     let controller = core.controller.borrow();
     let sections = derive_resource_sections(&controller, super::fonts::last_font_report().as_ref());
     let _ = handle.set_resources_sections(&sections);

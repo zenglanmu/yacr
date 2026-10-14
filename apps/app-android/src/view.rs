@@ -8,13 +8,20 @@
 //!
 //! Every command still runs through the shared `HostCore::execute` funnel, so
 //! panels, history and overlays are pushed exactly once.
+//!
+//! P2-B: pinch, pointer and pick are owned by the attached engine adapter, so
+//! the composition root no longer installs this `ViewInput` (it must never be a
+//! second attached path). The legacy state machine below is retained for the
+//! host-target unit tests that exercise it directly.
+
+#![allow(dead_code)]
 
 use super::*;
 use cad_app::input::{InputOutcome, InputPolicy, PointerPhase, PointerUpdate};
 use cad_app::{Command, CommandId, CommandPayload};
 use cad_host::HostCore;
 use cad_ui_slint::ViewInput;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 impl Default for AndroidHostConfiguration {
     fn default() -> Self {
@@ -60,10 +67,12 @@ impl AndroidViewInput {
         }
     }
 
-    fn status(&self, text: String) {
-        if let Some(handle) = self.core.handle.borrow().as_ref() {
-            let _ = handle.set_status(text);
-        }
+    /// Record a catalog-keyed status on the shared core.
+    ///
+    /// The core is UI-free, so the text is resolved by the shell's active catalog
+    /// when the status update is flushed, never rendered to a literal here.
+    fn status(&self, key: &str, args: &[(&str, &str)]) {
+        let _ = self.core.set_catalog_status(key, args);
     }
 
     fn send(&self, id: CommandId, payload: CommandPayload) -> bool {
@@ -91,9 +100,9 @@ impl AndroidViewInput {
         if result.is_ok() {
             return true;
         }
-        // HostCore returns a post-command UI push error when the command itself
-        // already succeeded. For zoom, camera mutation is authoritative evidence
-        // that the command applied and the cumulative gesture baseline may move.
+        // The UI-free core returns an error only when the command itself was
+        // refused. For zoom, camera mutation is authoritative evidence that the
+        // command applied and the cumulative gesture baseline may move.
         zoom_request.is_some_and(|(before, size, factor, cursor)| {
             let changed = self
                 .core
@@ -134,7 +143,6 @@ impl AndroidViewInput {
     /// viewport via `pick_at_screen`, using the same canvas size the renderer
     /// uses.
     fn pick_selection(&self, logical: [f64; 2]) {
-        let messages = self.core.messages();
         let (camera, logical_size, document) = {
             let controller = self.core.controller.borrow();
             let viewport = match controller
@@ -145,7 +153,7 @@ impl AndroidViewInput {
             {
                 Some(viewport) => viewport,
                 None => {
-                    self.status(messages.text("android.pick_viewport_missing", &[]));
+                    self.status("android.pick_viewport_missing", &[]);
                     return;
                 }
             };
@@ -160,7 +168,7 @@ impl AndroidViewInput {
         // re-borrow inside it.
         let drawing = self.core.controller.borrow().drawing();
         let Some(drawing) = drawing else {
-            self.status(messages.text("android.pick_no_document", &[]));
+            self.status("android.pick_no_document", &[]);
             return;
         };
         let report = cad_app::picking::pick_at_screen(
@@ -180,18 +188,16 @@ impl AndroidViewInput {
                         CommandId::Select,
                         CommandPayload::Selection(vec![hit.source]),
                     );
-                    self.status(messages.text("android.selected", &[("identity", &identity)]));
+                    self.status("android.selected", &[("identity", &identity)]);
                 }
                 None => {
                     // Clear the selection explicitly on empty space; never a
                     // stale or fabricated hit.
                     self.send(CommandId::Select, CommandPayload::Selection(Vec::new()));
-                    self.status(messages.text("android.pick_miss", &[]));
+                    self.status("android.pick_miss", &[]);
                 }
             },
-            Err(error) => {
-                self.status(messages.text("android.pick_failed", &[("error", &error.to_string())]))
-            }
+            Err(error) => self.status("android.pick_failed", &[("error", &error.to_string())]),
         }
     }
 }

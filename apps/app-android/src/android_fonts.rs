@@ -9,9 +9,9 @@ use std::task::{Context, Poll, Waker};
 
 use android_activity::ndk::asset::AssetManager;
 use cad_domain::{CadError, CadResult};
+use cad_engine::render::RenderSessionHandle;
 use cad_platform::fonts::{load_font_engine, FontLoadReport};
 use cad_platform::{FontLoader, HostFuture};
-use cad_ui_slint::CadView;
 
 /// Logical base for fonts packaged under the APK's `assets/` directory.
 pub const ASSET_BASE: &str = "asset://fonts/";
@@ -71,15 +71,17 @@ fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
-/// Load the referenced fonts into `view` from packaged assets.
-pub fn install_fonts(view: Option<&CadView>, requested: &[String]) -> CadResult<FontLoadReport> {
+/// Load the referenced fonts into the engine-owned render session from packaged
+/// assets.
+pub fn install_fonts(
+    render: &RenderSessionHandle,
+    requested: &[String],
+) -> CadResult<FontLoadReport> {
     let (engine, report) = block_on(load_font_engine(&AssetFontLoader, requested, ASSET_BASE))?;
-    if let Some(view) = view {
-        if report.registered.is_empty() {
-            view.clear_fonts();
-        } else {
-            view.set_fonts(engine);
-        }
+    if report.registered.is_empty() {
+        render.set_fonts(None);
+    } else {
+        render.set_fonts(Some(engine));
     }
     // Retain the real report so the resources drawer can surface it (F10).
     super::state_push::set_last_font_report(report.clone());

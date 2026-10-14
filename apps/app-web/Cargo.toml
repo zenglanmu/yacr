@@ -15,6 +15,7 @@ crate-type = ["cdylib", "rlib"]
 # the platform impls and its genuinely browser-specific adapters.
 cad-host.workspace = true
 cad-ui-slint.workspace = true
+cad-engine.workspace = true
 cad-app.workspace = true
 cad-platform.workspace = true
 cad-domain.workspace = true

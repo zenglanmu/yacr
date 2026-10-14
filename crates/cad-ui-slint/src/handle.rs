@@ -4,6 +4,197 @@ use super::*;
 use cad_app::viewer_config::ViewerConfigStore;
 
 impl UiHandle {
+    fn apply_attached_config(
+        &self,
+        operation: impl FnOnce(&dyn cad_engine::protocol::EngineClient) -> CadResult<()>,
+    ) -> Result<bool, cad_app::viewer_config::ConfigError> {
+        let client = self.engine_client.borrow().clone();
+        let Some(client) = client else {
+            return Ok(false);
+        };
+        operation(client.as_ref()).map_err(|error| cad_app::viewer_config::ConfigError {
+            path: "engine".into(),
+            reason: error.to_string(),
+        })?;
+        self.apply_config_snapshot(client.config_snapshot())
+            .map_err(|error| cad_app::viewer_config::ConfigError {
+                path: "engine".into(),
+                reason: error.to_string(),
+            })?;
+        Ok(true)
+    }
+
+    pub(crate) fn apply_config_snapshot(
+        &self,
+        snapshot: cad_engine::protocol::ConfigSnapshot,
+    ) -> CadResult<()> {
+        self.viewer_config
+            .borrow_mut()
+            .set_config(snapshot.effective.clone())
+            .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+        *self.config_snapshot.borrow_mut() = Some(snapshot);
+        let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;
+        apply_ribbon_config(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            &self.messages.borrow(),
+        );
+        push_config_properties(&ui, &self.viewer_config.borrow());
+        let size = ui.window().size().to_logical(ui.window().scale_factor());
+        apply_viewer_presentation_with(
+            &ui,
+            self.viewer_config.borrow().effective(),
+            [size.width as f64, size.height as f64],
+            Some(&self.viewer_config.borrow()),
+        );
+        Ok(())
+    }
+
+    pub(crate) fn apply_host_state(&self, state: cad_engine::protocol::HostState) -> CadResult<()> {
+        *self.host_state.borrow_mut() = Some(state.clone());
+        self.set_open_available(state.capabilities.open)?;
+        self.set_new_available(state.capabilities.new)?;
+        self.set_save_available(state.capabilities.save)?;
+        self.set_plot_available(state.capabilities.plot)?;
+        self.set_document_name(&state.document_name)?;
+        self.set_mode(state.mode)?;
+        self.set_history_availability(state.history)?;
+        // Unknown/drawing units must render their explicit label, never empty.
+        let unit = state
+            .units
+            .as_ref()
+            .map(cad_domain::UnitContext::label)
+            .unwrap_or_else(|| cad_domain::UnitContext::drawing_units().label());
+        let mut measurement =
+            MeasurementUiState::from_preview(state.measurement_preview.as_ref(), unit);
+        measurement.kind = state.selected_measurement_kind;
+        self.set_measurement_state(&measurement)?;
+        let mut draw = DrawUiState::from_preview(state.draw_preview.as_ref());
+        // `Some` updates the retained selection; `None` (idle) leaves the last
+        // reported tool untouched instead of resetting it to a synthetic `Line`.
+        if let Some(kind) = state.selected_draw_kind {
+            self.selected_draw_kind.set(Some(kind));
+            draw.kind = kind;
+        }
+        self.draw_active.set(draw.active);
+        self.set_draw_state(&draw)?;
+        *self.import_snapshot.borrow_mut() = state.import_progress.clone();
+        self.set_import_state(&ImportProgressUiState::from_snapshot(
+            state.import_progress.as_ref(),
+            &self.messages.borrow(),
+        ))?;
+        let empty = self.messages.borrow().text("layers.empty", &[]);
+        let layers = LayerPanelState::from_rows(&state.layer_rows, empty);
+        let ids: Vec<_> = state.layer_rows.iter().map(|row| row.id).collect();
+        self.set_layer_state(&layers, &ids)?;
+        let active = CadView::space_selection(&state.active_space).ok_or_else(|| {
+            CadError::Unsupported("block space cannot be shown in the layout panel".into())
+        })?;
+        let layouts = LayoutPanelState::from_descriptors(
+            &state.layouts,
+            active,
+            self.messages.borrow().text("layout.empty", &[]),
+        );
+        let layout_ids = state
+            .layouts
+            .iter()
+            .map(|layout| layout.id)
+            .collect::<Vec<_>>();
+        self.set_layout_state(&layouts, &layout_ids)?;
+        let props = PropertyPanelState::from_properties(
+            &state.selection_properties,
+            self.messages.borrow().text("properties.empty", &[]),
+            |keys| {
+                self.messages
+                    .borrow()
+                    .text("properties.mixed", &[("keys", &keys.join(","))])
+            },
+        );
+        self.set_property_state(&props)?;
+        let mut resources = resource_sections(&state.resources, state.import.as_ref())?;
+        // A platform wrapper may have published real font facts the core host
+        // does not own; a full update that marks them unavailable must not erase
+        // them. Other sections follow the host's full update.
+        merge_resource_sections(&mut resources, self.resources_sections.borrow().as_ref());
+        self.set_resources_sections(&resources)?;
+        let backend = self.backend_label();
+        let diagnostics = diagnostics_panel(
+            &state.diagnostics,
+            state.import.as_ref().map(|value| &value.completeness),
+            &self.messages.borrow(),
+            &backend,
+        );
+        self.set_diagnostics_state(&diagnostics)?;
+        Ok(())
+    }
+
+    /// Apply an independent backend lifecycle delta.
+    ///
+    /// The renderer's real `api` label and outcome are cached and the diagnostics
+    /// drawer is re-derived from the cached host state, so the backend label
+    /// updates without a full `HostState` push. A later full update does not
+    /// clear this cache, and a locale switch keeps it.
+    pub(crate) fn apply_backend_state(
+        &self,
+        state: cad_engine::protocol::RenderBackendState,
+    ) -> CadResult<()> {
+        *self.backend_state.borrow_mut() = Some(state);
+        let cached = self.host_state.borrow().clone();
+        if let Some(host) = cached {
+            let backend = self.backend_label();
+            let diagnostics = diagnostics_panel(
+                &host.diagnostics,
+                host.import.as_ref().map(|value| &value.completeness),
+                &self.messages.borrow(),
+                &backend,
+            );
+            self.set_diagnostics_state(&diagnostics)?;
+        }
+        Ok(())
+    }
+
+    /// The real renderer api label, or empty when no device has been reported.
+    fn backend_label(&self) -> String {
+        self.backend_state
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.api.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn set_status_message(
+        &self,
+        status: cad_engine::protocol::StatusMessage,
+    ) -> CadResult<()> {
+        *self.status_message.borrow_mut() = Some(status.clone());
+        let text = match status {
+            cad_engine::protocol::StatusMessage::ExternalText(text) => text,
+            cad_engine::protocol::StatusMessage::Catalog { key, args } => {
+                let args = args
+                    .iter()
+                    .map(|arg| (arg.key.as_str(), arg.value.as_str()))
+                    .collect::<Vec<_>>();
+                self.messages.borrow().text(&key, &args)
+            }
+        };
+        self.set_status(text)
+    }
+
+    /// Surface a refused request through the shared `command.failed` catalog copy
+    /// and expand the command row. Used for both synchronous refusals and terminal
+    /// async-completion errors.
+    pub(crate) fn report_action_error(&self, error: &CadError) -> CadResult<()> {
+        let ui = self.ui.upgrade().ok_or(CadError::Cancelled)?;
+        ui.set_status_label(
+            self.messages
+                .borrow()
+                .text("command.failed", &[("error", &error.to_string())])
+                .into(),
+        );
+        ui.set_command_expanded(true);
+        Ok(())
+    }
+
     /// Host capability and unsaved-state gating, independent of entry visibility.
     pub fn set_open_available(&self, available: bool) -> CadResult<()> {
         self.with(|ui| ui.set_can_open(available))
@@ -63,6 +254,15 @@ impl UiHandle {
         &self,
         config: cad_app::viewer_config::ViewerConfig,
     ) -> Result<(), cad_app::viewer_config::ConfigError> {
+        let json = serde_json::to_string(&config).map_err(|error| {
+            cad_app::viewer_config::ConfigError {
+                path: "config".into(),
+                reason: error.to_string(),
+            }
+        })?;
+        if self.apply_attached_config(|client| client.set_config_json(&json))? {
+            return Ok(());
+        }
         let ui = self
             .ui
             .upgrade()
@@ -92,6 +292,9 @@ impl UiHandle {
         &self,
         patch_json: &str,
     ) -> Result<(), cad_app::viewer_config::ConfigError> {
+        if self.apply_attached_config(|client| client.update_config_json(patch_json))? {
+            return Ok(());
+        }
         let ui = self
             .ui
             .upgrade()
@@ -123,6 +326,9 @@ impl UiHandle {
         &self,
         patch_json: &str,
     ) -> Result<(), cad_app::viewer_config::ConfigError> {
+        if self.apply_attached_config(|client| client.apply_user_preference_json(patch_json))? {
+            return Ok(());
+        }
         let ui = self
             .ui
             .upgrade()
@@ -152,6 +358,9 @@ impl UiHandle {
         &self,
         config_json: &str,
     ) -> Result<(), cad_app::viewer_config::ConfigError> {
+        if self.apply_attached_config(|client| client.set_config_json(config_json))? {
+            return Ok(());
+        }
         let ui = self
             .ui
             .upgrade()
@@ -177,7 +386,14 @@ impl UiHandle {
         Ok(())
     }
     /// Drop every stored user preference and recompute.
+    ///
+    /// Attached: delegates to the engine client's own store and mirrors the
+    /// returned snapshot (the client stays the only writable authority).
+    /// Standalone: clears the local store exactly as before.
     pub fn clear_user_preference(&self) -> Result<(), cad_app::viewer_config::ConfigError> {
+        if self.apply_attached_config(|client| client.clear_user_preference())? {
+            return Ok(());
+        }
         let ui = self
             .ui
             .upgrade()
@@ -617,6 +833,23 @@ impl UiHandle {
         let view_state = self.view_state.get();
         let panel = View3dPanelState::from_view_state(&view_state, &messages);
         self.set_view3d_state(&panel)?;
+        // Clone out of the RefCells before re-entering their setters: holding a
+        // `Ref` across `set_status_message` (which borrows the same cell) panics.
+        let cached_status = self.status_message.borrow().clone();
+        if let Some(status) = cached_status {
+            self.set_status_message(status)?;
+        }
+        let cached_host_state = self.host_state.borrow().clone();
+        if let Some(state) = cached_host_state {
+            let backend = self.backend_label();
+            let diagnostics = diagnostics_panel(
+                &state.diagnostics,
+                state.import.as_ref().map(|value| &value.completeness),
+                &messages,
+                &backend,
+            );
+            self.set_diagnostics_state(&diagnostics)?;
+        }
         Ok(resolution)
     }
 
@@ -709,6 +942,221 @@ impl UiHandle {
     }
 }
 
+fn resource_sections(
+    resources: &cad_engine::protocol::ResourceState,
+    import: Option<&cad_engine::protocol::ImportState>,
+) -> CadResult<ResourceSections> {
+    let fonts = resources.fonts.as_ref().map(|font| FontResourceSummary {
+        catalog_entries: font.catalog_entries,
+        requested: font.requested.len(),
+        planned: font.planned.len(),
+        registered: font.registered.len(),
+        failed: font.failed.clone(),
+        unresolved: font.unresolved.clone(),
+        default_face: font.default_face.clone(),
+    });
+    let import = import
+        .map(|report| {
+            let count = report.diagnostics.len();
+            let completeness = match &report.completeness {
+                cad_domain::Completeness::Complete => ResourceCompleteness::Complete,
+                cad_domain::Completeness::Partial(_) => ResourceCompleteness::Partial(count),
+                cad_domain::Completeness::Missing(_) => ResourceCompleteness::Missing(count),
+                cad_domain::Completeness::Unverified => ResourceCompleteness::Unverified,
+            };
+            let parse_ms = report
+                .parse_ms
+                .map(|value| {
+                    if value.is_finite() && value >= 0.0 {
+                        Ok(value.min(u64::MAX as f64) as u64)
+                    } else {
+                        Err(CadError::InvalidInput(
+                            "import parse time must be finite and non-negative".into(),
+                        ))
+                    }
+                })
+                .transpose()?;
+            Ok::<_, CadError>(ImportResourceSummary {
+                identity: report.identity.short(),
+                dwg_version: String::new(),
+                completeness,
+                diagnostics: Some(count),
+                parse_ms,
+            })
+        })
+        .transpose()?;
+    let proxy = resources.proxy.as_ref().map(|proxy| ProxyResourceSummary {
+        decoded_records: proxy.decoded_records,
+        unsupported: proxy
+            .unsupported
+            .iter()
+            .map(|record| ProxyUnsupportedRow {
+                record_type: record.record_type,
+                reason: record.reason.clone(),
+                bytes: record.bytes,
+            })
+            .collect(),
+    });
+    Ok(ResourceSections {
+        fonts,
+        import,
+        proxy,
+        references: resources
+            .references
+            .as_ref()
+            .map(|keys| ReferencesResourceSummary { keys: keys.clone() }),
+        images_modeled: resources.images_modeled,
+    })
+}
+
+/// Localized rendering of one raw diagnostic parameter, mirroring
+/// [`status::parameter_text`] for the protocol's raw parameter shape.
+fn raw_parameter_text(
+    messages: &MessageSource,
+    parameter: &cad_engine::protocol::RawDiagnosticParameter,
+) -> String {
+    use cad_engine::protocol::RawDiagnosticParameter as P;
+    let (key, value) = match parameter {
+        P::Object(id) => ("diagnostic.param.object", id.0.to_string()),
+        P::Key(value) => ("diagnostic.param.key", value.clone()),
+        P::Identifier(value) => ("diagnostic.param.identifier", value.clone()),
+        P::Count(value) => ("diagnostic.param.count", value.to_string()),
+        P::Bytes(value) => ("diagnostic.param.bytes", value.to_string()),
+        P::Limit(value) => ("diagnostic.param.limit", value.to_string()),
+        P::Depth(value) => ("diagnostic.param.depth", value.to_string()),
+    };
+    messages.text(key, &[("value", &value)])
+}
+
+/// Build the diagnostics drawer from the raw protocol rows.
+///
+/// Reuses the existing catalog helpers (`reason_text`/`severity_text`) so an
+/// unknown code still shows the explicit `diagnostics.unknown_code` fallback and
+/// a locale switch re-localizes without a host re-push. The summary is aggregated
+/// through the shared [`cad_diagnostics::DiagnosticsModel`] over the real
+/// per-reason completeness, then combined with the document import verdict, so a
+/// `Complete` import that still carries a `Missing` image/decode reason is never
+/// reported as complete.
+fn diagnostics_panel(
+    diagnostics: &[cad_engine::protocol::RawDiagnostic],
+    import_completeness: Option<&cad_domain::Completeness>,
+    messages: &MessageSource,
+    backend: &str,
+) -> DiagnosticsPanelState {
+    use cad_engine::protocol::DiagnosticSeverity;
+    let separator = messages.text("diagnostics.detail.separator", &[]);
+    let rows = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let description = match status::reason_text(messages, &diagnostic.code) {
+                status::ReasonText::Found(text) | status::ReasonText::Unknown(text) => text,
+            };
+            // Import diagnostics default to Warning when the source did not
+            // classify severity, matching the pre-decoupling host projection.
+            let severity = status::severity_text(
+                messages,
+                match diagnostic.severity.unwrap_or(DiagnosticSeverity::Warning) {
+                    DiagnosticSeverity::Info => cad_diagnostics::model::Severity::Info,
+                    DiagnosticSeverity::Warning => cad_diagnostics::model::Severity::Warning,
+                    DiagnosticSeverity::Error => cad_diagnostics::model::Severity::Error,
+                },
+            );
+            let object = diagnostic
+                .object
+                .map(|id| messages.text("diagnostic.param.object", &[("value", &id.0.to_string())]))
+                .unwrap_or_default();
+            let details = diagnostic
+                .parameters
+                .iter()
+                .map(|parameter| raw_parameter_text(messages, parameter))
+                .collect::<Vec<_>>()
+                .join(&separator);
+            DiagnosticRowUi {
+                code: diagnostic.code.clone(),
+                severity,
+                description,
+                object,
+                details,
+            }
+        })
+        .collect();
+    // Aggregate every real reason's completeness with the existing model rules
+    // (never a hand-rolled ordering). An unclassified row keeps the
+    // pre-decoupling `Partial`/`Warning` fallback and is never promoted to
+    // `Missing`.
+    let mut model = cad_diagnostics::DiagnosticsModel::new();
+    for diagnostic in diagnostics {
+        let severity = match diagnostic.severity.unwrap_or(DiagnosticSeverity::Warning) {
+            DiagnosticSeverity::Info => cad_diagnostics::model::Severity::Info,
+            DiagnosticSeverity::Warning => cad_diagnostics::model::Severity::Warning,
+            DiagnosticSeverity::Error => cad_diagnostics::model::Severity::Error,
+        };
+        let completeness = diagnostic
+            .completeness
+            .clone()
+            .unwrap_or(cad_domain::Completeness::Partial(Vec::new()));
+        let reason = cad_diagnostics::DiagnosticReason::new(
+            diagnostic.code.clone(),
+            severity,
+            completeness,
+            Vec::new(),
+        );
+        match diagnostic.object {
+            Some(object) => model.add(object, reason),
+            None => model.add_document(reason),
+        }
+    }
+    let mut summary = model.summary();
+    // Fold the document import verdict into the aggregated verdict.
+    if let Some(import) = import_completeness {
+        let combined = summary.completeness.clone().combine(import.clone());
+        summary.completeness = combined;
+        summary.complete = matches!(summary.completeness, cad_domain::Completeness::Complete);
+    }
+    // `summary_text` expresses a verdict through object counts. The model's
+    // counts are real object counts; a document-level verdict (the import
+    // record) has no object entry, so it only contributes a minimal `max(1)`
+    // placeholder. Never treat `Completeness::reasons().len()` as an object
+    // count: several reasons on one object (or two import keys) are still one
+    // verdict, not N objects.
+    match &summary.completeness {
+        cad_domain::Completeness::Partial(_) => {
+            summary.partial_objects = summary.partial_objects.max(1);
+        }
+        cad_domain::Completeness::Missing(_) => {
+            summary.missing_objects = summary.missing_objects.max(1);
+        }
+        cad_domain::Completeness::Unverified => {
+            summary.unverified_objects = summary.unverified_objects.max(1);
+        }
+        cad_domain::Completeness::Complete => {}
+    }
+    let summary = DiagnosticsPanelState::summary_text(messages, &summary);
+    DiagnosticsPanelState {
+        rows,
+        summary,
+        // The real renderer api label (from the backend delta), never the
+        // requested preference; empty only when no device has been reported.
+        backend: backend.to_string(),
+        empty_label: messages.text("diagnostics.empty", &[]),
+    }
+}
+
+/// Preserve a platform-published font section when a full update reports it
+/// unavailable, without fabricating any data the host did not publish.
+///
+/// Fonts are installed once by the platform wrapper and are document-independent
+/// (Android keeps them across updates; the Web overlay must do the same). Other
+/// sections are document-scoped and follow the host's full update.
+fn merge_resource_sections(incoming: &mut ResourceSections, cached: Option<&ResourceSections>) {
+    let Some(cached) = cached else {
+        return;
+    };
+    if incoming.fonts.is_none() {
+        incoming.fonts = cached.fonts.clone();
+    }
+}
+
 /// Mirror the resolved config into the shell's data-only readout properties.
 ///
 /// These are the exact values the pure [`cad_app::viewer_config::UiPresentationModel`]
@@ -736,5 +1184,183 @@ fn preset_key(preset: cad_app::viewer_config::Preset) -> &'static str {
         cad_app::viewer_config::Preset::Full => "full",
         cad_app::viewer_config::Preset::Minimal => "minimal",
         cad_app::viewer_config::Preset::CanvasOnly => "canvasOnly",
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_summary_contracts {
+    use super::*;
+    use cad_domain::{Completeness, ObjectId};
+    use cad_engine::protocol::RawDiagnostic;
+
+    fn raw(code: &str, completeness: Option<Completeness>) -> RawDiagnostic {
+        RawDiagnostic {
+            object: None,
+            code: code.into(),
+            message: String::new(),
+            severity: None,
+            completeness,
+            parameters: Vec::new(),
+        }
+    }
+
+    fn raw_object(object: u128, code: &str, completeness: Option<Completeness>) -> RawDiagnostic {
+        RawDiagnostic {
+            object: Some(ObjectId(object)),
+            ..raw(code, completeness)
+        }
+    }
+
+    #[test]
+    fn complete_import_with_a_missing_image_summarizes_missing() {
+        let messages = MessageSource::for_locale(Locale::ZhCn);
+        let diagnostics = [raw(
+            "resource.missing",
+            Some(Completeness::Missing(vec!["missing-image".into()])),
+        )];
+        let panel = diagnostics_panel(
+            &diagnostics,
+            Some(&Completeness::Complete),
+            &messages,
+            "vulkan",
+        );
+        assert_eq!(
+            panel.summary,
+            messages.text("diagnostics.summary.missing", &[("count", "1")]),
+            "a Complete import with a missing image must not summarize as complete"
+        );
+        assert_ne!(
+            panel.summary,
+            messages.text("diagnostics.summary.complete", &[])
+        );
+        // The raw machine key stays visible on the row.
+        assert_eq!(panel.rows[0].code, "resource.missing");
+    }
+
+    #[test]
+    fn decode_failure_missing_summarizes_missing() {
+        let messages = MessageSource::for_locale(Locale::En);
+        let diagnostics = [raw(
+            "proxy.undecoded",
+            Some(Completeness::Missing(vec!["record".into()])),
+        )];
+        let panel = diagnostics_panel(&diagnostics, Some(&Completeness::Complete), &messages, "");
+        assert_eq!(
+            panel.summary,
+            messages.text("diagnostics.summary.missing", &[("count", "1")])
+        );
+    }
+
+    #[test]
+    fn unclassified_reason_is_partial_never_fake_missing() {
+        // A raw reason with no verdict must fall back to the pre-decoupling
+        // Partial/Warning projection, never a fabricated Missing.
+        let messages = MessageSource::for_locale(Locale::En);
+        let diagnostics = [raw("import.unknown_entity", None)];
+        let panel = diagnostics_panel(&diagnostics, Some(&Completeness::Complete), &messages, "");
+        assert_eq!(
+            panel.summary,
+            messages.text("diagnostics.summary.partial", &[("count", "1")])
+        );
+    }
+
+    #[test]
+    fn missing_outranks_partial_when_both_are_present() {
+        let messages = MessageSource::for_locale(Locale::En);
+        let diagnostics = [
+            raw(
+                "import.unknown_entity",
+                Some(Completeness::Partial(Vec::new())),
+            ),
+            raw("resource.missing", Some(Completeness::Missing(Vec::new()))),
+        ];
+        let panel = diagnostics_panel(&diagnostics, Some(&Completeness::Complete), &messages, "");
+        assert_eq!(
+            panel.summary,
+            messages.text("diagnostics.summary.missing", &[("count", "1")]),
+            "the weakest (Missing) verdict must win"
+        );
+    }
+
+    #[test]
+    fn locale_switch_keeps_raw_code_and_localizes_summary() {
+        let diagnostics = [raw(
+            "resource.missing",
+            Some(Completeness::Missing(vec!["missing-image".into()])),
+        )];
+        let zh = diagnostics_panel(
+            &diagnostics,
+            Some(&Completeness::Complete),
+            &MessageSource::for_locale(Locale::ZhCn),
+            "",
+        );
+        let en = diagnostics_panel(
+            &diagnostics,
+            Some(&Completeness::Complete),
+            &MessageSource::for_locale(Locale::En),
+            "",
+        );
+        assert_eq!(
+            zh.rows[0].code, en.rows[0].code,
+            "raw key is locale-independent"
+        );
+        assert_eq!(zh.rows[0].code, "resource.missing");
+        assert_ne!(
+            zh.summary, en.summary,
+            "the summary is localized but the raw code is not"
+        );
+    }
+
+    #[test]
+    fn two_reasons_on_one_object_count_as_one_object() {
+        // Same object, two Partial reasons: the summary must report one object,
+        // never `reasons.len()` (which would inflate it to two).
+        let messages = MessageSource::for_locale(Locale::En);
+        let diagnostics = [
+            raw_object(
+                7,
+                "representation.approximate",
+                Some(Completeness::Partial(Vec::new())),
+            ),
+            raw_object(
+                7,
+                "render.lineweight_not_drawn",
+                Some(Completeness::Partial(Vec::new())),
+            ),
+        ];
+        let panel = diagnostics_panel(&diagnostics, Some(&Completeness::Complete), &messages, "");
+        assert_eq!(
+            panel.summary,
+            messages.text("diagnostics.summary.partial", &[("count", "1")]),
+            "two reasons on one object are still one object"
+        );
+    }
+
+    #[test]
+    fn multiple_real_objects_keep_their_object_count() {
+        let messages = MessageSource::for_locale(Locale::En);
+        let diagnostics = [
+            raw_object(
+                1,
+                "resource.missing",
+                Some(Completeness::Missing(Vec::new())),
+            ),
+            raw_object(
+                2,
+                "resource.missing",
+                Some(Completeness::Missing(Vec::new())),
+            ),
+            raw_object(
+                3,
+                "resource.missing",
+                Some(Completeness::Missing(Vec::new())),
+            ),
+        ];
+        let panel = diagnostics_panel(&diagnostics, Some(&Completeness::Complete), &messages, "");
+        assert_eq!(
+            panel.summary,
+            messages.text("diagnostics.summary.missing", &[("count", "3")]),
+            "three distinct objects must report three objects"
+        );
     }
 }

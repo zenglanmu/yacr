@@ -1,12 +1,12 @@
-//! Web-host draw/edit command sink (F-EDIT).
+//! Web-host draw/edit command sink (F-EDIT) — retained compatibility facade.
 //!
-//! The shell captures points and emits a confirmed [`cad_app::DrawIntent`]; the
-//! host maps it to exactly one application command through the shared
-//! transaction/history path (`docs/drawing-edit.md` §2). The generic preview
-//! sink is the shared `HostCore`; only the command mapping is browser-specific
-//! here because the browser shell enables Trim/Extend, which the desktop host
-//! refuses — resolving the two world picks to `SelectionRef`s is a host job the
-//! shell does not do.
+//! With P2-B the engine owns draw/edit: the Slint `EngineAdapter` routes a
+//! confirmed capture through `InteractionRequest::Confirm`, and the shared
+//! `HostCore` maps the session's [`cad_app::DrawIntent`] to exactly one command
+//! (including Trim/Extend pick resolution, now in `cad-app`). The adapter no
+//! longer reads the legacy draw-command sink once a client is attached, so the
+//! mapping below is kept only as a source-compatible facade and is never
+//! double-dispatched.
 //!
 //! * `Line { start, end }` → `CreateLine` + `Points([start, end])`
 //! * `Circle { center, edge }` → `CreateCircle` + `Points([center, edge])`
@@ -16,8 +16,6 @@
 //!   two world picks to `SelectionRef`s
 //!
 //! An unresolved trim pick is an explicit error (never a payload-free success).
-
-use std::rc::Rc;
 
 use cad_app::host::HostController;
 use cad_app::{Command, DrawIntent, PickOptions};
@@ -246,16 +244,12 @@ impl DrawCommandSink for WebDrawSink {
     }
 }
 
-/// Install the draw command sink and the shared preview sink on the adapter.
+/// Install the legacy draw command sink on the adapter.
 ///
-/// Until this runs, a confirm reports "not wired" rather than faking a success
-/// (see `crates/cad-ui-slint/src/draw.rs`). The preview sink is the shared
-/// `HostCore`, so the live rubber band reaches the overlay through the same
-/// `set_draw_preview` call every host uses.
+/// Once a client is attached the adapter routes a confirmed capture through the
+/// engine (`InteractionRequest::Confirm`), so this sink is never called; it is
+/// retained as a source-compatible facade. The live rubber-band preview travels
+/// through `HostUpdates` (engine-owned), not a host preview sink.
 pub(super) fn install(adapter: &cad_ui_slint::UiAdapter, core: HostCore, viewport: ViewportId) {
-    adapter.set_draw_command_sink(Box::new(WebDrawSink {
-        core: core.clone(),
-        viewport,
-    }));
-    adapter.set_draw_preview_sink(Rc::new(core));
+    adapter.set_draw_command_sink(Box::new(WebDrawSink { core, viewport }));
 }

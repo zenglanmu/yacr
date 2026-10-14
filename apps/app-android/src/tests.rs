@@ -10,16 +10,18 @@ use super::*;
 use std::sync::Arc;
 
 use cad_app::host::HostController;
+use cad_engine::protocol::StatusMessage;
+use cad_engine::render::{BackendPreference, RenderSessionHandle};
 use cad_host::{HostCore, HostOptions, HostPlatform};
 use cad_platform::{ConfigStore, FilePurpose, HostCapabilities, PlatformFiles};
 use cad_ui_slint::{CanvasPickMapper, MessageSource, UiAdapter, UiConfiguration, ViewInput};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 /// A core over the Android platform impls, with the demo surface applied.
 ///
-/// The handle slot stays empty (no Slint window in a unit test); `metrics` maps
-/// the surface without a handle, and a command's push failure is ignored, so the
-/// authoritative controller state is still observable.
+/// No Slint window is built in a unit test, so the core is created over its own
+/// UI-free render session and the recorded status/controller state is observed
+/// directly (`metrics` maps the surface without a UI binding).
 fn test_core(files: Rc<AndroidFiles>) -> HostCore {
     let platform = HostPlatform {
         files,
@@ -41,9 +43,13 @@ fn test_core(files: Rc<AndroidFiles>) -> HostCore {
         headless: false,
         drawing: None,
         size: DEMO_LOGICAL_SIZE,
-        locale: "zh-CN".into(),
     };
-    let core = HostCore::new(options, Rc::new(RefCell::new(None)), platform).unwrap();
+    let core = HostCore::new(
+        options,
+        platform,
+        RenderSessionHandle::new(BackendPreference::WebGpu),
+    )
+    .unwrap();
     crate::platform::set_surface_slot(DEMO_LOGICAL_SIZE, 1.0);
     core
 }
@@ -782,7 +788,7 @@ fn android_surface_size_updates_the_viewport_and_keeps_the_camera_target() {
             .unwrap();
         viewport.camera.target = target;
     }
-    install_runtime(core.clone());
+    install_runtime(core.clone(), None);
 
     set_surface_size(800.0, 600.0, 2.0).unwrap();
     let controller_ref = core.controller.borrow();
@@ -808,7 +814,7 @@ fn android_safe_insets_shrink_the_canvas_and_degenerate_input_is_refused() {
     // the surface minus the safe area (audit U07). Zeros are the honest default
     // until a platform source provides them.
     let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
-    install_runtime(core.clone());
+    install_runtime(core.clone(), None);
 
     set_surface_size(800.0, 600.0, 2.0).unwrap();
     // [top, right, bottom, left] = 24, 8, 16, 4 -> 788 x 560.
@@ -847,7 +853,7 @@ fn android_surface_entry_point_applies_after_runtime_install() {
     assert!(set_surface_size(800.0, 600.0, 2.0).is_err());
 
     let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
-    install_runtime(core.clone());
+    install_runtime(core.clone(), None);
     set_surface_size(800.0, 600.0, 2.0).unwrap();
     assert_eq!(
         core.controller
@@ -1023,9 +1029,8 @@ fn open_with_no_sample_surfaces_the_failure_not_completed() {
         (c.document_id, c.viewport_id)
     };
     let mut sink = AndroidSink { core: core.clone() };
-    // The headless test core has no shell handle, so the shared `push()` fails
-    // and `execute` returns that error even though the command succeeded; the
-    // graded status is what this test asserts.
+    // The command funnel routes through the shared core; the graded status is
+    // recorded on the core (the headless test build has no shell to display it).
     let _ = sink.send(Command {
         schema_version: 1,
         id: CommandId::OpenDrawing,
@@ -1034,20 +1039,27 @@ fn open_with_no_sample_surfaces_the_failure_not_completed() {
         payload: cad_app::CommandPayload::None,
     });
 
-    let expected = core.message(
-        "command.failed",
-        &[("error", &core.message("android.no_sample", &[]))],
-    );
-    assert_eq!(
-        core.last_status().as_deref(),
-        Some(expected.as_str()),
-        "the open failure must be the surfaced status"
-    );
-    assert_ne!(
-        core.last_status().unwrap(),
-        core.message("command.completed", &[]),
-        "a failed open must not report completion"
-    );
+    let localized = MessageSource::from_request("zh-CN").text("android.no_sample", &[]);
+    match core.last_status() {
+        Some(StatusMessage::Catalog { key, args }) => {
+            assert_eq!(
+                key, "command.failed",
+                "the open failure must be the surfaced status"
+            );
+            assert!(
+                args.iter()
+                    .any(|arg| arg.key == "error" && arg.value == localized),
+                "the surfaced failure must carry the localized no-sample reason"
+            );
+        }
+        other => panic!("expected a catalog failure status, got {other:?}"),
+    }
+    if let Some(StatusMessage::Catalog { key, .. }) = core.last_status() {
+        assert_ne!(
+            key, "command.completed",
+            "a failed open must not report completion"
+        );
+    }
     assert_eq!(
         core.controller.borrow().drawing().unwrap().id(),
         demo_id,
@@ -1096,4 +1108,186 @@ fn android_cancel_command_keeps_the_document() {
     }
     assert_eq!(core.controller.borrow().drawing().unwrap().id(), demo_id);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- P3 queue surface: AndroidEngineClient delegation and the request waker ----
+
+#[test]
+fn android_engine_client_delegates_the_p3_queue_surface() {
+    use cad_app::interaction::{InteractionRequest, PointInput};
+    use cad_engine::protocol::{EngineClient, EngineRequest};
+
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
+    core.metrics().unwrap();
+    let client = crate::client::AndroidEngineClient::new(core.clone());
+
+    let wakes = Rc::new(Cell::new(0usize));
+    let counter = wakes.clone();
+    client.set_request_waker(Some(Rc::new(move || counter.set(counter.get() + 1))));
+
+    // An empty queue pumps without a clock and never wakes.
+    let empty = EngineClient::pump(&client).unwrap();
+    assert_eq!((empty.processed, empty.pending), (0, false));
+    assert_eq!(wakes.get(), 0, "an empty queue must not wake");
+
+    let context = EngineClient::request_context(&client);
+    let revision = context.metrics_revision.unwrap();
+    let first = EngineClient::submit(
+        &client,
+        context,
+        EngineRequest::Interaction(InteractionRequest::MoveCursor(PointInput::CanvasLocal {
+            logical_position: [10.0, 10.0],
+            metrics_revision: revision,
+        })),
+    )
+    .unwrap();
+    assert_eq!(wakes.get(), 1, "empty->nonempty must wake exactly once");
+
+    // A second adjacent same-context cursor coalesces and does not re-wake.
+    let _ = EngineClient::submit(
+        &client,
+        context,
+        EngineRequest::Interaction(InteractionRequest::MoveCursor(PointInput::CanvasLocal {
+            logical_position: [11.0, 11.0],
+            metrics_revision: revision,
+        })),
+    )
+    .unwrap();
+    assert_eq!(wakes.get(), 1, "a non-empty queue must not re-wake");
+
+    // Pump advances the queue; every accepted id reaches one terminal completion
+    // (the coalesced-away first id is a quiet `Superseded`, never a fake success).
+    let report = EngineClient::pump(&client).unwrap();
+    assert!(report.processed >= 1);
+    let completions = EngineClient::poll_completions(&client, 64);
+    assert!(
+        completions
+            .iter()
+            .any(|completion| completion.id == first.id),
+        "the accepted id must reach a terminal completion"
+    );
+
+    // Clearing the waker stops notifications (delegated to the host).
+    client.set_request_waker(None);
+    let before = wakes.get();
+    let _ = EngineClient::submit(
+        &client,
+        context,
+        EngineRequest::Interaction(InteractionRequest::MoveCursor(PointInput::CanvasLocal {
+            logical_position: [12.0, 12.0],
+            metrics_revision: revision,
+        })),
+    )
+    .unwrap();
+    assert_eq!(wakes.get(), before, "a cleared waker must not be invoked");
+}
+
+#[test]
+fn request_waker_install_is_weak_and_coalesces_one_pending_wake() {
+    let waker = crate::poll::RequestWaker::new();
+    let wake = waker.install();
+
+    wake();
+    assert_eq!(waker.request_count(), 1);
+    assert_eq!(waker.schedule_count(), 1, "the first signal arms one wake");
+
+    wake();
+    assert_eq!(waker.request_count(), 2);
+    assert_eq!(
+        waker.schedule_count(),
+        1,
+        "a second signal coalesces into the pending wake"
+    );
+
+    // The installed callback captures only a `Weak`: dropping the scheduler makes
+    // it a harmless no-op instead of a strong leak/reference cycle.
+    let installed_after = waker.install();
+    drop(waker);
+    installed_after();
+}
+
+#[test]
+fn runtime_handle_releases_the_thread_local_borrow_for_reentrant_business() {
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
+    install_runtime(core.clone(), None);
+
+    // The handle is cloned out and the thread-local borrow is released, so
+    // re-entrant platform business (a surface resize that itself looks the
+    // runtime up) cannot panic on a held borrow.
+    let handle = crate::poll::runtime_handle().expect("runtime installed");
+    assert!(
+        crate::poll::runtime_borrow_available(),
+        "no thread-local borrow may be held across business"
+    );
+    set_surface_size(800.0, 600.0, 2.0).unwrap();
+    assert_eq!(
+        core.controller.borrow().application.workspace.viewports[&ViewportId(1)].logical_size,
+        [800.0, 600.0],
+        "the same authoritative core is updated (no copy, no fake success)"
+    );
+    drop(handle);
+}
+
+#[test]
+fn android_engine_client_delegates_the_p4_origin_and_event_surface() {
+    use cad_engine::events::{EventPoll, SubscriptionId};
+    use cad_engine::protocol::{EngineClient, EngineRequest, RequestOrigin};
+
+    let core = test_core(Rc::new(AndroidFiles::new(Vec::new())));
+    core.metrics().unwrap();
+    let client = crate::client::AndroidEngineClient::new(core.clone());
+
+    // An unknown subscription is an explicit error, never an empty fake.
+    let unknown = SubscriptionId(u64::MAX);
+    assert!(EngineClient::poll_events(&client, unknown, 4).is_err());
+    assert!(EngineClient::unsubscribe(&client, unknown).is_err());
+
+    // Subscribe before the request so the new trace is delivered to this cursor.
+    let subscription = EngineClient::subscribe(&client).unwrap();
+
+    let (document, viewport) = {
+        let c = core.controller.borrow();
+        (c.document_id, c.viewport_id)
+    };
+    let completion = EngineClient::dispatch_with_origin(
+        &client,
+        RequestOrigin::Api,
+        EngineRequest::Command(Command {
+            schema_version: 1,
+            id: CommandId::FitDrawing,
+            document,
+            viewport,
+            payload: cad_app::CommandPayload::None,
+        }),
+    )
+    .unwrap();
+
+    // The real ring delivers the trace for that request id and origin.
+    let events = match EngineClient::poll_events(&client, subscription, 16).unwrap() {
+        EventPoll::Events(events) => events,
+        EventPoll::Lagged {
+            missed,
+            next_sequence,
+        } => panic!("fresh subscription must not lag: missed={missed} next={next_sequence}"),
+    };
+    assert!(
+        !events.is_empty(),
+        "a dispatched request must publish a real trace"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|envelope| envelope.request_id == Some(completion.id)
+                && envelope.origin == RequestOrigin::Api),
+        "the trace must carry the request id and the trace origin"
+    );
+
+    // The watermark propagates real ring state, not a placeholder.
+    let watermark = EngineClient::event_watermark(&client);
+    assert!(watermark.records >= 1);
+    assert!(watermark.next_sequence > 0);
+
+    // Unsubscribe is real; a second unsubscribe is an explicit error.
+    EngineClient::unsubscribe(&client, subscription).unwrap();
+    assert!(EngineClient::unsubscribe(&client, subscription).is_err());
 }

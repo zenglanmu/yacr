@@ -6,7 +6,10 @@ use cad_app::render_scene::{CadSceneController, DecodedImageCache, OverlayInputs
 use cad_app::{Camera, MeasurementPreview, ProjectionKind, SelectionSet};
 use cad_db::DrawingDatabase;
 use cad_domain::{CadError, CadResult, DocumentId, Point3, SpaceId};
-use cad_render_wgpu::{wgpu, ActiveBackend, BackendPreference, RenderError};
+/// Re-exported so platform adapters (for example Android) can name a render
+/// session's backend preference without depending on `cad-render-wgpu`.
+pub use cad_render_wgpu::BackendPreference;
+use cad_render_wgpu::{wgpu, ActiveBackend, RenderError};
 use cad_representation::{FontEngine, SpaceSelection};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -306,6 +309,11 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
 pub struct RenderSessionHandle(Rc<RefCell<State>>);
 
 impl RenderSessionHandle {
+    /// Whether both handles refer to the exact same owner-thread session state.
+    pub fn same_session(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+
     pub fn new(preference: BackendPreference) -> Self {
         let state = State {
             preference,
@@ -768,6 +776,16 @@ impl RenderSessionHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn same_session_checks_shared_owner_state_identity() {
+        let first = RenderSessionHandle::new(BackendPreference::Auto);
+        let clone = first.clone();
+        let other = RenderSessionHandle::new(BackendPreference::Auto);
+        assert!(first.same_session(&clone));
+        assert!(!first.same_session(&other));
+    }
+
     #[test]
     fn session_is_ui_independent_and_identical_view_does_not_dirty() {
         let session = RenderSessionHandle::new(BackendPreference::Auto);
