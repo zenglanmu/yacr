@@ -501,6 +501,146 @@ fn base_only_navigation_qualifier_identity_includes_authoritative_revision() {
 }
 
 // ---------------------------------------------------------------------------
+// Camera-only navigation must not invalidate the published scene.
+//
+// Pan/zoom advance `view_revision` and the camera-derived reference-grid bounds,
+// but every overlay batch is world-space geometry that renders correctly under
+// any camera. The published scene therefore stays current (no base-only/full
+// frame alternation, no suffix churn) while the reference grid still refines in
+// the background. Real scene-identity changes keep invalidating as before.
+// ---------------------------------------------------------------------------
+
+/// PURE-STATE (no GPU): a pan keeps the published scene current and never enters
+/// the base-only fallback or republishes per step.
+#[test]
+fn camera_only_navigation_keeps_published_scene_and_does_not_churn_overlays() {
+    let session = session_with_published_base();
+    assert!(session.preparation_current());
+    let baseline = session.current_prepared_scene().expect("published scene");
+    let input_before = session.input_revision();
+    let overlay_before = session.overlay_revision();
+    let view_before = session.view_revision();
+    let suffix_before = session.overlay_suffix_commits();
+
+    for step in 1..=3 {
+        let mut view = session.view_snapshot();
+        view.camera.target.x += 250.0 * step as f64;
+        assert!(session.apply_view_snapshot(view).unwrap());
+
+        assert!(
+            session.preparation_current(),
+            "pan step {step} must keep the ready scene current"
+        );
+        let ready = session.current_prepared_scene().expect("ready scene");
+        assert_eq!(
+            ready.revision, baseline.revision,
+            "a camera-only step must not republish the scene"
+        );
+        assert!(
+            !session.overlays_suppressed(),
+            "camera-only navigation never suppresses the overlay suffix"
+        );
+        assert!(
+            session.cad_frame_dirty(),
+            "the new camera still needs a frame"
+        );
+
+        // Nothing new was published, so there is nothing to re-upload. No device
+        // is attached here, so this is a CPU-level churn proof: the runtime has no
+        // suffix commit to make and the counter stays flat.
+        session.apply_ready_updates().unwrap();
+        assert_eq!(
+            session.overlay_suffix_commits(),
+            suffix_before,
+            "a camera-only step must not churn the overlay suffix"
+        );
+    }
+
+    assert_eq!(
+        session.input_revision(),
+        input_before,
+        "camera-only changes must not bump the scene-identity token"
+    );
+    assert!(session.view_revision() > view_before, "the view advanced");
+    assert!(
+        session.overlay_revision() > overlay_before,
+        "the camera-derived viewport bounds advanced the reference geometry"
+    );
+}
+
+/// PURE-STATE (no GPU): the viewport-bounds change still schedules a background
+/// re-prepare that republishes the refined grid while reusing the base.
+#[test]
+fn camera_only_viewport_change_reprepares_grid_without_invalidating_scene() {
+    use std::time::{Duration, Instant};
+
+    let session = session_with_published_base();
+    let before = session.current_prepared_scene().expect("published scene");
+    let input_before = session.input_revision();
+
+    let mut view = session.view_snapshot();
+    view.camera.target.x += 400.0;
+    session.apply_view_snapshot(view).unwrap();
+
+    assert!(
+        session.preparation_current(),
+        "the scene stays current through the camera-only change"
+    );
+    assert_eq!(session.input_revision(), input_before);
+    assert!(!session.overlays_suppressed());
+
+    // The background re-prepare runs for the new viewport bounds.
+    session.request_preparation().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let refined = loop {
+        session.poll_preparation().unwrap();
+        let ready = session.current_prepared_scene().expect("ready scene");
+        if ready.revision > before.revision {
+            break ready;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "grid-extent refinement timed out"
+        );
+        std::thread::yield_now();
+    };
+
+    assert_eq!(
+        refined.base_revision, before.base_revision,
+        "the refinement must not replace the published base"
+    );
+    assert_ne!(
+        refined.highlight.added, before.highlight.added,
+        "the reference grid must reflect the new viewport bounds"
+    );
+    assert!(session.overlays().viewport_bounds.is_some());
+    assert!(session.preparation_current());
+
+    // A second camera step re-prepares again through the same background worker,
+    // which must reuse its base `Arc` across camera-only refinements.
+    let mut view = session.view_snapshot();
+    view.camera.target.x += 400.0;
+    session.apply_view_snapshot(view).unwrap();
+    session.request_preparation().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let refined_again = loop {
+        session.poll_preparation().unwrap();
+        let ready = session.current_prepared_scene().expect("ready scene");
+        if ready.revision > refined.revision {
+            break ready;
+        }
+        assert!(Instant::now() < deadline, "second refinement timed out");
+        std::thread::yield_now();
+    };
+    assert_eq!(refined_again.base_revision, refined.base_revision);
+    assert!(
+        Arc::ptr_eq(&refined_again.base, &refined.base),
+        "camera-only refinements must reuse the worker's resident base"
+    );
+    assert!(session.preparation_current());
+}
+
+// ---------------------------------------------------------------------------
 // Hardware GPU proof (ignored; real adapter).
 // ---------------------------------------------------------------------------
 
@@ -584,10 +724,21 @@ fn base_only_navigation_renders_latest_camera_and_restores_overlays() {
     assert!(session.current_drawing_presented());
     let view_rev_0 = full_frame.view_revision;
 
-    // A camera drag makes preparation stale; the base is unchanged and resident.
+    // A camera drag alone no longer makes preparation stale: camera-only changes
+    // keep the published scene current. The fallback is entered by a real overlay
+    // input change (which rebuilds the reference overlay) while the base stays
+    // unchanged and resident. The visibility flag toggled here produces no batches
+    // for this drawing, so the batch-count comparisons stay valid.
     let mut view = session.view_snapshot();
     view.camera.target.x += 250.0;
     session.apply_view_snapshot(view.clone()).unwrap();
+    assert!(
+        session.preparation_current(),
+        "a camera-only change must keep the published scene current"
+    );
+    let mut overlays = session.overlays();
+    overlays.visibility.snap_hints = !overlays.visibility.snap_hints;
+    assert!(session.set_overlays(overlays));
     assert!(!session.preparation_current());
 
     let base_frame = session
@@ -691,9 +842,9 @@ fn base_only_navigation_blocked_after_device_change_until_reuploaded() {
     let gpu2 = headless_gpu();
     session.attach_device(gpu2.device, gpu2.queue).unwrap();
     assert_eq!(runtime_applied_base(&session), None);
-    let mut view = session.view_snapshot();
-    view.camera.target.x += 100.0;
-    session.apply_view_snapshot(view).unwrap();
+    let mut overlays = session.overlays();
+    overlays.visibility.snap_hints = !overlays.visibility.snap_hints;
+    assert!(session.set_overlays(overlays));
     assert!(!session.preparation_current());
     assert!(
         session.render([800.0, 600.0], 1.0).unwrap().is_none(),
@@ -750,6 +901,12 @@ fn base_only_navigation_progressive_page_restarts_on_camera_change() {
             .max_vertices = total - 1;
     }
 
+    // Enter the base-only fallback through a real overlay input change (a
+    // camera-only change no longer invalidates the published scene), then move the
+    // camera so the next base-only page must restart under the new camera.
+    let mut overlays = session.overlays();
+    overlays.visibility.snap_hints = !overlays.visibility.snap_hints;
+    assert!(session.set_overlays(overlays));
     let mut view = session.view_snapshot();
     view.camera.target.x += 10.0;
     session.apply_view_snapshot(view).unwrap();
@@ -782,6 +939,81 @@ fn base_only_navigation_progressive_page_restarts_on_camera_change() {
         cursor_b, cursor_a,
         "a camera change restarts the progressive page instead of continuing the old one"
     );
+}
+
+/// DETERMINISTIC HARDWARE: with a fully committed current scene, camera-only pan
+/// steps keep the published scene current, present full `CurrentScene` frames,
+/// and never re-upload or truncate the overlay suffix.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
+fn camera_only_navigation_does_not_churn_the_overlay_suffix() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let gpu = headless_gpu();
+    session.attach_device(gpu.device, gpu.queue).unwrap();
+    let drawing = cad_app::host::HostController::with_demo_document([800.0, 600.0])
+        .unwrap()
+        .drawing()
+        .unwrap();
+    session.sync_drawing(Some(drawing));
+    session.prepare().unwrap();
+    drive_uploads(&session);
+
+    let full_batches = renderer_batch_count(&session);
+    let uploaded = cumulative_upload_bytes(&session);
+    let suffix_commits = session.overlay_suffix_commits();
+    let ready_revision = session.current_prepared_scene().unwrap().revision;
+
+    let first = session
+        .render([800.0, 600.0], 1.0)
+        .unwrap()
+        .expect("full-scene frame");
+    assert_eq!(first.completeness, FrameCompleteness::CurrentScene);
+
+    for step in 1..=4 {
+        let mut view = session.view_snapshot();
+        view.camera.target.x += 60.0 * step as f64;
+        session.apply_view_snapshot(view).unwrap();
+
+        assert!(
+            session.preparation_current(),
+            "camera-only step {step} must keep the published scene current"
+        );
+        let frame = session
+            .render([800.0, 600.0], 1.0)
+            .unwrap()
+            .expect("full-scene frame");
+        assert_eq!(
+            frame.completeness,
+            FrameCompleteness::CurrentScene,
+            "camera-only step {step} must present the full scene, never the fallback"
+        );
+        assert_eq!(
+            session.current_prepared_scene().unwrap().revision,
+            ready_revision,
+            "camera-only step {step} must not republish the scene"
+        );
+        assert!(
+            !session.overlays_suppressed(),
+            "camera-only step {step} must not suppress overlays"
+        );
+        assert_eq!(
+            renderer_batch_count(&session),
+            full_batches,
+            "camera-only step {step} must keep the overlay suffix resident"
+        );
+        assert_eq!(
+            cumulative_upload_bytes(&session),
+            uploaded,
+            "camera-only step {step} must upload zero bytes"
+        );
+        assert_eq!(
+            session.overlay_suffix_commits(),
+            suffix_commits,
+            "camera-only step {step} must not churn the overlay suffix"
+        );
+    }
+    assert!(session.current_drawing_presented());
 }
 
 #[cfg(not(target_arch = "wasm32"))]

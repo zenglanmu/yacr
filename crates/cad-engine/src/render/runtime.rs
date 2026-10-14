@@ -98,6 +98,9 @@ pub struct CadRenderRuntime {
     /// suffix from the GPU and is drawing the base-only scene over the latest
     /// authoritative camera. Cleared by a successful full-scene publication.
     overlays_suppressed: bool,
+    /// Cumulative overlay-suffix commits (suffix-only uploads and fallback
+    /// truncations). A camera-only navigation must leave this flat.
+    overlay_suffix_commits: u64,
 }
 impl Default for CadRenderRuntime {
     fn default() -> Self {
@@ -117,6 +120,7 @@ impl Default for CadRenderRuntime {
             pending_upload: None,
             presented_revision: None,
             overlays_suppressed: false,
+            overlay_suffix_commits: 0,
         }
     }
 }
@@ -161,6 +165,7 @@ impl CadRenderRuntime {
         self.lifecycle = RenderLifecycle::Detached;
         self.diagnostic = None;
         self.overlays_suppressed = false;
+        self.overlay_suffix_commits = 0;
         self.dirty.invalidate();
     }
 
@@ -266,6 +271,11 @@ impl CadRenderRuntime {
                 self.base_batches
             },
         )?;
+        // A suffix-only commit re-uploads (or truncates) the transient overlay
+        // batch range; a base change replaces the whole scene instead.
+        if !pending.base_changed {
+            self.overlay_suffix_commits += 1;
+        }
         // Raster images are a resident set separate from the geometry batches.
         // A base change re-resolves every image quad from the cache the scene
         // was built with; a fresh device resets `applied_base`, so this also
@@ -312,6 +322,12 @@ impl CadRenderRuntime {
     /// Whether the 2D navigation fallback is currently withholding overlays.
     pub fn overlays_suppressed(&self) -> bool {
         self.overlays_suppressed
+    }
+
+    /// Cumulative overlay-suffix commits (suffix-only uploads and fallback
+    /// truncations). Camera-only navigation must leave this flat.
+    pub fn overlay_suffix_commits(&self) -> u64 {
+        self.overlay_suffix_commits
     }
 
     /// The GPU base revision the runtime considers resident. Test/diagnostic only.
@@ -379,6 +395,7 @@ impl CadRenderRuntime {
             .commit_upload(empty, self.base_batches)
             .map_err(|error| RenderError::Frame(error.to_string()))?;
         self.overlays_suppressed = true;
+        self.overlay_suffix_commits += 1;
         // The discarded suffix upload (if any) is overlay-only by the
         // `base_fully_resident` qualifier; the full scene re-commits it.
         self.pending_upload = None;

@@ -157,11 +157,31 @@ struct State {
     layers: LayerOverrideSet,
     overlays: OverlayInputs,
     overlay_revision: u64,
+    /// Monotonic revision of the **scene identity**. Advances only when an input
+    /// that changes the published scene advances (drawing, document, space, layer
+    /// overrides, font/image resources, or overlay batches). Camera-only changes
+    /// (pan/zoom, mode, canvas size) deliberately do **not** advance it: the
+    /// published scene stays valid because every overlay batch is world-space
+    /// geometry that renders correctly under any camera.
     input_revision: u64,
+    /// Monotonic revision of the **full preparation input**, including the
+    /// camera-derived `viewport_bounds`. It is the async preparation token and
+    /// publication gate: it advances on every input change (scene-identity
+    /// changes *and* camera-only viewport-bounds changes), so a pan still
+    /// schedules a background re-prepare of the reference grid without
+    /// invalidating the current ready scene.
+    content_revision: u64,
     /// Monotonic revision of the authoritative view (camera/space). Advances only
     /// when the view actually changes, and tags every presented frame.
     view_revision: u64,
+    /// Content revision of the last published scene; guards against publishing
+    /// the same preparation input twice.
     prepared_token: Option<u64>,
+    /// Scene-identity revision (`input_revision`) at the moment the last scene was
+    /// published. The published scene is current iff this equals the live
+    /// `input_revision`, which is what carves camera-only changes out of scene
+    /// invalidation.
+    prepared_identity: Option<u64>,
     observed_drawing: usize,
     scene_publication_revision: u64,
     base_publication_revision: u64,
@@ -188,8 +208,10 @@ impl Default for State {
             overlays: OverlayInputs::default(),
             overlay_revision: 0,
             input_revision: 0,
+            content_revision: 0,
             view_revision: 0,
             prepared_token: None,
+            prepared_identity: None,
             observed_drawing: 0,
             scene_publication_revision: 0,
             base_publication_revision: 0,
@@ -211,6 +233,16 @@ impl State {
             .input_revision
             .checked_add(1)
             .expect("render input revision exhausted");
+        self.advance_content();
+    }
+
+    /// Advance only the preparation content revision (camera-derived reference
+    /// geometry). Never invalidates the published scene.
+    fn advance_content(&mut self) {
+        self.content_revision = self
+            .content_revision
+            .checked_add(1)
+            .expect("render content revision exhausted");
     }
 
     fn observe_drawing(&mut self) {
@@ -227,7 +259,7 @@ impl State {
 }
 
 fn publish_controller(state: &mut State, mut candidate: CadSceneController, token: u64) -> bool {
-    if token != state.input_revision || state.prepared_token == Some(token) {
+    if token != state.content_revision || state.prepared_token == Some(token) {
         return false;
     }
     let Some(mut ready) = candidate.ready.clone() else {
@@ -250,12 +282,16 @@ fn publish_controller(state: &mut State, mut candidate: CadSceneController, toke
     candidate.ready = Some(ready);
     state.controller = candidate;
     state.prepared_token = Some(token);
+    // Record the scene identity this publication was built from. A later
+    // camera-only change advances `content_revision` but not `input_revision`, so
+    // the scene stays current while the refinement republishes.
+    state.prepared_identity = Some(state.input_revision);
     state.runtime.dirty.invalidate();
     true
 }
 
 fn current_ready_scene(state: &State) -> Option<&controller::PreparedScene> {
-    (!state.stopped && state.prepared_token == Some(state.input_revision))
+    (!state.stopped && state.prepared_identity == Some(state.input_revision))
         .then_some(())
         .and(state.controller.ready.as_ref())
 }
@@ -288,7 +324,7 @@ fn base_only_navigation_eligible(state: &State) -> bool {
 #[cfg(not(target_arch = "wasm32"))]
 fn preparation_input(state: &State) -> PreparationInput {
     PreparationInput {
-        token: state.input_revision,
+        token: state.content_revision,
         drawing: state.incoming.borrow().clone(),
         document: state.view.document,
         space: state.view.space,
@@ -323,7 +359,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
 #[cfg(target_arch = "wasm32")]
 fn prepare_synchronously(state: &mut State) -> CadResult<()> {
     state.observe_drawing();
-    let token = state.input_revision;
+    let token = state.content_revision;
     let mut candidate = state.controller.clone();
     candidate.prepare_shared_with_overlays_and_images(
         state.incoming.borrow().clone(),
@@ -400,16 +436,31 @@ impl RenderSessionHandle {
         if state.view == view {
             return Ok(state.input_revision != previous_input_revision);
         }
+        // A document/space switch changes the authoritative scene identity and
+        // must invalidate the published scene. A camera-only change (pan/zoom,
+        // mode, canvas size) must not: every overlay batch is world-space
+        // geometry that renders correctly under any camera, so only
+        // `view_revision` advances and the reference-grid bounds are re-scoped.
+        let identity_changed =
+            view.document != state.view.document || view.space != state.view.space;
         state.view = view;
         state.view_revision = state
             .view_revision
             .checked_add(1)
             .expect("view revision exhausted");
-        state.advance_input();
         let bounds = viewport_world_bounds(&state.view);
-        if state.overlays.viewport_bounds != bounds {
+        let bounds_changed = state.overlays.viewport_bounds != bounds;
+        if bounds_changed {
             state.overlays.viewport_bounds = bounds;
             state.overlay_revision += 1;
+        }
+        if identity_changed {
+            state.advance_input();
+        } else if bounds_changed {
+            // The camera-derived grid extent changed. Schedule a background
+            // re-prepare (the token advances) without invalidating the ready
+            // scene, so no base-only/full frame alternation or suffix churn.
+            state.advance_content();
         }
         state.runtime.dirty.invalidate();
         Ok(true)
@@ -455,13 +506,27 @@ impl RenderSessionHandle {
     }
     pub fn set_overlays(&self, overlays: OverlayInputs) -> bool {
         let mut state = self.0.borrow_mut();
-        if state.overlays != overlays {
-            state.overlays = overlays;
-            state.overlay_revision += 1;
-            state.advance_input();
-            return true;
+        if state.overlays == overlays {
+            return false;
         }
-        false
+        // A change confined to the camera-derived `viewport_bounds` only re-scopes
+        // the reference grid: it must schedule a background re-prepare but never
+        // invalidate the published scene. Any other overlay input (visibility,
+        // selection, previews, snap hints) changes real overlay batches and keeps
+        // invalidating exactly as before.
+        let bounds_only = {
+            let mut probe = state.overlays.clone();
+            probe.viewport_bounds = overlays.viewport_bounds;
+            probe == overlays
+        };
+        state.overlays = overlays;
+        state.overlay_revision += 1;
+        if bounds_only {
+            state.advance_content();
+        } else {
+            state.advance_input();
+        }
+        true
     }
 
     /// CPU-only scene preparation; safe to drive without constructing a UI.
@@ -618,6 +683,12 @@ impl RenderSessionHandle {
     /// Whether the 2D navigation fallback is currently withholding overlays.
     pub fn overlays_suppressed(&self) -> bool {
         self.0.borrow().runtime.overlays_suppressed()
+    }
+    /// Cumulative overlay-suffix commits (uploads or truncations) the runtime has
+    /// performed. A camera-only navigation step must not advance this: it is the
+    /// cheap churn signal for the "camera never invalidates the scene" contract.
+    pub fn overlay_suffix_commits(&self) -> u64 {
+        self.0.borrow().runtime.overlay_suffix_commits()
     }
     pub fn current_prepared_scene(&self) -> Option<controller::PreparedScene> {
         let mut state = self.0.borrow_mut();
