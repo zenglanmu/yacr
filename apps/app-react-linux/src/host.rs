@@ -898,6 +898,23 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         };
         match decision {
             Ok(margins) => {
+                // Keep the CAD surface source in sync with the accepted DOM
+                // rect. The host `tick` re-reads this surface every cycle
+                // (`HostCore::tick` -> `metrics`), so `viewport.logical_size`
+                // always matches the rect the renderer draws into. Leaving it
+                // at the creation-time size made `Camera::zoom_at` anchor off
+                // the cursor after any DOM-rect change (window resize, panel
+                // toggle, DPR change).
+                let scale = lock(shared)
+                    .window
+                    .as_ref()
+                    .and_then(|window| window.scale_factor().ok())
+                    .unwrap_or(1.0);
+                CAD_ENV.with(|cell| {
+                    if let Some(env) = cell.borrow().as_ref() {
+                        env.surface.set_metrics(cad_surface_metrics(&rect, scale));
+                    }
+                });
                 BRIDGE.with(|cell| {
                     if let Some(owner) = cell.borrow_mut().as_mut() {
                         owner.apply_layout(margins);
@@ -956,11 +973,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                 let env = env.as_ref()?;
                 // The surface must report before `CadSession::new` (the open
                 // funnel validates canvas metrics against it).
-                env.surface.set_metrics(SurfaceMetrics {
-                    logical: [f64::from(rect.width), f64::from(rect.height)],
-                    scale,
-                    safe_insets: [0.0; 4],
-                });
+                env.surface.set_metrics(cad_surface_metrics(&rect, scale));
                 let platform = HostPlatform {
                     files: env.files.clone(),
                     config_store: env.config.clone(),
@@ -1429,6 +1442,20 @@ pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> CadStatus {
     status
 }
 
+/// Map an accepted frontend CAD rect (CSS pixels) plus the window scale factor
+/// to the surface metrics the host reads each tick.
+///
+/// The scale is clamped positive so a degenerate window scale factor can never
+/// produce invalid canvas metrics (the host then refuses to advance the
+/// viewport instead of fabricating one).
+fn cad_surface_metrics(rect: &crate::layout::CadMetrics, scale: f64) -> SurfaceMetrics {
+    SurfaceMetrics {
+        logical: [f64::from(rect.width), f64::from(rect.height)],
+        scale: scale.max(0.1),
+        safe_insets: [0.0; 4],
+    }
+}
+
 /// `probe_input` command: sequence-gate one frontend input and route it.
 ///
 /// In CAD mode a pointer/wheel input is queued for the main thread only when the
@@ -1531,6 +1558,25 @@ mod tests {
         // Unknown args are ignored; missing values leave the field unset.
         let empty = LaunchOptions::from_args(["--nope"].into_iter().map(String::from));
         assert!(empty.drawing.is_none() && !empty.probe_only);
+    }
+
+    #[test]
+    fn accepted_rect_maps_to_canvas_surface_metrics() {
+        let rect = crate::layout::CadMetrics {
+            x: 12.0,
+            y: 40.0,
+            width: 800.0,
+            height: 600.0,
+            dpr: 2.0,
+            sequence: 7,
+        };
+        let metrics = cad_surface_metrics(&rect, 2.0);
+        // The surface reports the CAD rect (CSS/logical px), not the offset.
+        assert_eq!(metrics.logical, [800.0, 600.0]);
+        assert_eq!(metrics.scale, 2.0);
+        assert_eq!(metrics.safe_insets, [0.0; 4]);
+        // A degenerate scale factor is clamped, never accepted as-is.
+        assert_eq!(cad_surface_metrics(&rect, 0.0).scale, 0.1);
     }
 
     #[test]

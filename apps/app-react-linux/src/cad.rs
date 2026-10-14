@@ -824,6 +824,30 @@ mod tests {
             .expect("session builds")
     }
 
+    /// A session whose surface source is the live React surface, so a test can
+    /// change the reported CAD rect exactly like the frontend resize handler.
+    fn session_with_surface(
+        files: Rc<FakeFiles>,
+        surface: crate::platform::ReactSurface,
+    ) -> CadSession {
+        let mut host_platform = platform(files);
+        host_platform.surface = Rc::new(surface);
+        CadSession::new(options(), host_platform, RenderSessionHandle::default())
+            .expect("session builds")
+    }
+
+    /// The active viewport's logical canvas size (what `Camera::zoom_at` anchors
+    /// against).
+    fn canvas_logical_size(session: &CadSession) -> [f64; 2] {
+        let c = session.core.controller.borrow();
+        c.application
+            .workspace
+            .viewports
+            .get(&c.viewport_id)
+            .expect("an active viewport")
+            .logical_size
+    }
+
     fn probe(kind: InputKind) -> ProbeInput {
         ProbeInput {
             sequence: 1,
@@ -1181,6 +1205,42 @@ mod tests {
         session.set_canvas_metrics([800.0, 600.0], 1.0).unwrap();
         assert!(session.set_canvas_metrics([0.0, 600.0], 1.0).is_err());
         assert!(session.set_canvas_metrics([800.0, 600.0], 0.0).is_err());
+    }
+
+    #[test]
+    fn tick_tracks_the_live_surface_rect_so_later_inputs_anchor_correctly() {
+        let surface = crate::platform::ReactSurface::new();
+        surface.set_metrics(SurfaceMetrics {
+            logical: [640.0, 480.0],
+            scale: 1.0,
+            safe_insets: [0.0; 4],
+        });
+        let session = session_with_surface(
+            Rc::new(FakeFiles {
+                events: RefCell::new(Vec::new()),
+            }),
+            surface.clone(),
+        );
+        assert_eq!(canvas_logical_size(&session), [640.0, 480.0]);
+        // The frontend reports a new CAD rect. Until the owner tick re-reads the
+        // surface the viewport still holds the creation-time size: exactly the
+        // stale state that made an off-center wheel zoom anchor off the cursor.
+        surface.set_metrics(SurfaceMetrics {
+            logical: [1024.0, 768.0],
+            scale: 1.0,
+            safe_insets: [0.0; 4],
+        });
+        assert_eq!(
+            canvas_logical_size(&session),
+            [640.0, 480.0],
+            "stale viewport until the owner tick re-reads the surface"
+        );
+        session.tick().expect("tick");
+        assert_eq!(
+            canvas_logical_size(&session),
+            [1024.0, 768.0],
+            "the tick must re-apply the accepted surface rect to the viewport"
+        );
     }
 
     #[test]
