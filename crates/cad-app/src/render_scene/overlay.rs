@@ -34,10 +34,13 @@
 //! the user is acting on, so it draws above everything. Object-snap hints sit
 //! below the live preview rubber band.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use cad_db::DrawingDatabase;
-use cad_domain::{Completeness, Diagnostic, DocumentId, Point3, SelectionRef, TaskStamp};
+use cad_domain::{
+    Completeness, Diagnostic, DocumentId, EntityId, Point3, SelectionRef, TaskStamp, Transform3,
+};
 use cad_measure::{SnapCandidate, SnapKind};
 use cad_representation::{
     DisplayRepresentation, FontEngine, ProviderRegistry, RepresentationContext,
@@ -177,7 +180,7 @@ impl OverlayInputs {
 }
 
 /// The built transient overlay.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VisualOverlay {
     pub batches: Vec<RenderBatch>,
     /// Per-selection/preview diagnostics (`highlight.*`, `preview.*`); never
@@ -500,12 +503,13 @@ fn grid_positions(min: f64, max: f64, step: f64, cap: usize) -> Vec<f64> {
 
 /// Build the selection highlight overlay for `selection`.
 ///
-/// Each ref is resolved against the database by expanding `INSERT`s exactly like
-/// [`crate::picking::drawing_pick_items`], so a block child reached through two
-/// placements becomes two distinct refs and highlights independently. The
-/// resolved geometry is tessellated by the default representation provider (the
-/// same discretisation the base scene uses) and converted to overlay batches by
-/// [`cad_scene::highlight_batches`].
+/// Only the **selected** refs are resolved: each ref's own `INSERT` chain is
+/// walked with [`crate::picking::resolve_pick_transform`] instead of scanning the
+/// whole drawing, so a block child reached through two placements becomes two
+/// distinct refs and highlights independently without cloning every entity's
+/// geometry. The resolved geometry is tessellated by the default representation
+/// provider (the same discretisation the base scene uses) and converted to
+/// overlay batches by [`cad_scene::highlight_batches`].
 ///
 /// A ref that no longer resolves (deleted entity, foreign document, or an
 /// `INSERT` root that only exists as an expansion) produces an explicit
@@ -531,31 +535,39 @@ pub fn selection_highlight(
         context = context.with_fonts(fonts);
     }
 
-    // `drawing_pick_items` already flattens INSERTs and carries the exact
-    // `(entity, instance)` source, so two placements never collapse to one.
-    let items = crate::picking::drawing_pick_items(database, document);
     let mut representations: Vec<DisplayRepresentation> = Vec::new();
     let mut build_reasons: Vec<Diagnostic> = Vec::new();
-    for item in &items {
-        let selected = selection
-            .refs()
-            .iter()
-            .any(|reference| same_entity_instance(&item.source, reference));
-        if !selected {
+    // Two refs that share an `(entity, instance)` but differ in sub-element are
+    // the *same* object to the old full scan, which matched both against one
+    // item; resolve each such object exactly once so the batches stay identical.
+    let mut resolved: HashSet<(DocumentId, EntityId, Vec<EntityId>)> = HashSet::new();
+    for reference in selection.refs() {
+        let key = (
+            reference.document,
+            reference.entity,
+            reference.instance.0.clone(),
+        );
+        if !resolved.insert(key) {
             continue;
         }
-        match representation_for_item(&registry, database, item, &context) {
+        let Some(transform) = crate::picking::resolve_pick_transform(database, document, reference)
+        else {
+            // The full scan would not have produced this ref either; the missing
+            // representation becomes an explicit `highlight.unresolved`.
+            continue;
+        };
+        match representation_for_ref(&registry, database, reference, &transform, &context) {
             Some(representation) => representations.push(representation),
             None => {
-                // The pick item was produced from this database, so a missing
-                // entity here is an internal inconsistency, not a user error;
-                // report it rather than drawing something wrong.
+                // The ref resolved against this database, so a missing entity
+                // here is an internal inconsistency, not a user error; report it
+                // rather than drawing something wrong.
                 build_reasons.push(Diagnostic {
                     object: None,
                     code: "highlight.entity-missing".into(),
                     message: format!(
-                        "selection entity {} is present in the pick index but not in the database",
-                        item.source.entity.0
+                        "selection entity {} is present in the selection but not in the database",
+                        reference.entity.0
                     ),
                 });
             }
@@ -583,23 +595,30 @@ pub fn selection_highlight(
 
 /// Whether two refs name the same entity reached through the same instance
 /// chain, ignoring the sub-element (which the highlight face filter applies).
+///
+/// Kept as the correctness oracle for the resolve-only path: production dedups
+/// resolved refs on the same key with a hash set, and the test-only full-scan
+/// reference uses this predicate.
+#[cfg(test)]
 fn same_entity_instance(a: &SelectionRef, b: &SelectionRef) -> bool {
     a.document == b.document && a.entity == b.entity && a.instance == b.instance
 }
 
-/// Build a `DisplayRepresentation` for one pick item.
+/// Build a `DisplayRepresentation` for one resolved selection ref.
 ///
-/// The provider tessellates the entity's `SemanticGeometry`; the item's
-/// accumulated INSERT transform is then applied to each fragment and the
-/// fragment's `source` is replaced by the exact `(entity, instance)` the item
-/// carries. Returns `None` when the database entity no longer exists.
-fn representation_for_item(
+/// The provider tessellates the entity's `SemanticGeometry`; the ref's
+/// accumulated `INSERT` transform is then applied to each fragment and the
+/// fragment's `source` is set to the ref's `(entity, instance)` so two
+/// placements never collapse to one. Returns `None` when the database entity no
+/// longer exists.
+fn representation_for_ref(
     registry: &ProviderRegistry,
     database: &DrawingDatabase,
-    item: &cad_spatial::PickItem,
+    reference: &SelectionRef,
+    transform: &Transform3,
     context: &RepresentationContext,
 ) -> Option<DisplayRepresentation> {
-    let entity = database.entity(item.source.entity)?;
+    let entity = database.entity(reference.entity)?;
     let mut representation = match registry.build(entity, context) {
         Ok(representation) => representation,
         Err(error) => DisplayRepresentation {
@@ -613,8 +632,14 @@ fn representation_for_item(
         },
     };
     for fragment in &mut representation.fragments {
-        fragment.primitive = fragment.primitive.transformed(&item.transform);
-        fragment.source = item.source.clone();
+        fragment.primitive = fragment.primitive.transformed(transform);
+        // The sub-element is applied by `highlight_batches`'s face filter, so the
+        // fragment carries only the `(entity, instance)` identity (as the old
+        // full-scan item did).
+        fragment.source = SelectionRef {
+            sub_element: None,
+            ..reference.clone()
+        };
     }
     Some(representation)
 }
@@ -1082,8 +1107,8 @@ mod tests {
     use super::*;
     use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
     use cad_domain::{
-        BlockId, DatabaseId, EntityId, InstancePath, LayerId, ObjectId, Precision, Revision,
-        SemanticGeometry, SpaceId, Transform3,
+        BlockId, DatabaseId, EntityId, InstancePath, LayerId, Mesh, ObjectId, Precision, Revision,
+        SemanticGeometry, SpaceId, SubElementId, Transform3,
     };
 
     fn p(x: f64, y: f64) -> Point3 {
@@ -1252,6 +1277,232 @@ mod tests {
             .iter()
             .any(|d| d.code == "highlight.unresolved"));
         assert!(matches!(overlay.completeness, Completeness::Missing(_)));
+    }
+
+    // ---- resolve-only-selected-refs contract (perf fix) -------------------
+
+    /// The pre-fix behaviour, kept test-only as the correctness oracle: scan
+    /// **every** pick item, keep the selected ones, build their representations.
+    fn legacy_selection_highlight(
+        database: &DrawingDatabase,
+        selection: &SelectionSet,
+        document: DocumentId,
+        stamp: TaskStamp,
+    ) -> VisualOverlay {
+        let mut out = VisualOverlay::default();
+        if selection.is_empty() {
+            return out;
+        }
+        let registry = ProviderRegistry::with_default_provider();
+        let context =
+            RepresentationContext::new(document, cad_domain::TolerancePolicy::default(), stamp);
+        let items = crate::picking::drawing_pick_items(database, document);
+        let mut representations: Vec<DisplayRepresentation> = Vec::new();
+        let mut build_reasons: Vec<Diagnostic> = Vec::new();
+        for item in &items {
+            let selected = selection
+                .refs()
+                .iter()
+                .any(|reference| same_entity_instance(&item.source, reference));
+            if !selected {
+                continue;
+            }
+            match legacy_representation_for_item(&registry, database, item, &context) {
+                Some(representation) => representations.push(representation),
+                None => build_reasons.push(Diagnostic {
+                    object: None,
+                    code: "highlight.entity-missing".into(),
+                    message: format!(
+                        "selection entity {} is present in the pick index but not in the database",
+                        item.source.entity.0
+                    ),
+                }),
+            }
+        }
+        let HighlightScene {
+            batches,
+            completeness,
+            diagnostics,
+        } = cad_scene::highlight_batches(
+            selection.refs(),
+            representations.iter(),
+            |_| true,
+            &HighlightOptions::default(),
+        );
+        out.batches = batches;
+        out.diagnostics = diagnostics;
+        out.completeness = completeness;
+        for reason in build_reasons {
+            out.diagnostics.push(reason);
+        }
+        out
+    }
+
+    fn legacy_representation_for_item(
+        registry: &ProviderRegistry,
+        database: &DrawingDatabase,
+        item: &cad_spatial::PickItem,
+        context: &RepresentationContext,
+    ) -> Option<DisplayRepresentation> {
+        let entity = database.entity(item.source.entity)?;
+        let mut representation = match registry.build(entity, context) {
+            Ok(representation) => representation,
+            Err(error) => DisplayRepresentation {
+                fragments: Vec::new(),
+                completeness: Completeness::Missing(vec![error.to_string()]),
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "highlight.representation".into(),
+                    message: error.to_string(),
+                }],
+            },
+        };
+        for fragment in &mut representation.fragments {
+            fragment.primitive = fragment.primitive.transformed(&item.transform);
+            fragment.source = item.source.clone();
+        }
+        Some(representation)
+    }
+
+    fn face(key: &str) -> SubElementId {
+        SubElementId {
+            source_key: key.into(),
+            topology_revision: Revision(0),
+        }
+    }
+
+    /// A two-triangle mesh with two distinct stable face sources.
+    fn two_face_mesh() -> Mesh {
+        let p3 = |x: f64, y: f64| Point3 { x, y, z: 0.0 };
+        Mesh {
+            vertices: vec![
+                p3(-2.0, -1.0),
+                p3(-1.0, 1.0),
+                p3(0.0, -1.0),
+                p3(0.0, -1.0),
+                p3(1.0, 1.0),
+                p3(2.0, -1.0),
+            ],
+            triangles: vec![[0, 1, 2], [3, 4, 5]],
+            normals: Vec::new(),
+            face_sources: vec![Some(face("face-a")), Some(face("face-b"))],
+            colors: Vec::new(),
+        }
+    }
+
+    /// A block whose only member is a two-face mesh, placed once at x = 10.
+    fn mesh_insert_drawing() -> DrawingDatabase {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(2));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_block(BlockDefinition {
+            id: BlockId(0),
+            entities: vec![EntityId(300)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+        b.insert_entity(entity(300, SemanticGeometry::Mesh(two_face_mesh()), 0))
+            .unwrap();
+        b.insert_entity(entity(
+            10,
+            SemanticGeometry::Insert {
+                block: BlockId(0),
+                transform: Transform3::translation(p(10.0, 0.0)),
+            },
+            1,
+        ))
+        .unwrap();
+        b.finish().unwrap()
+    }
+
+    fn mesh_child_ref(sub_element: Option<SubElementId>) -> SelectionRef {
+        SelectionRef {
+            document: DocumentId(2),
+            entity: EntityId(300),
+            instance: InstancePath(vec![EntityId(10)]),
+            sub_element,
+        }
+    }
+
+    /// The resolve-only path must be byte-for-byte identical to the old
+    /// full-scan path for every kind of selection (whole entity, INSERT
+    /// instance, mesh face, duplicate `(entity, instance)`, missing entity,
+    /// broken instance path).
+    #[test]
+    fn resolve_only_selected_refs_matches_the_full_scan() {
+        let db = drawing();
+        let selections = [
+            SelectionSet::new(),
+            SelectionSet::from_refs([model_ref(30)]),
+            SelectionSet::from_refs([block_child_ref(10)]),
+            SelectionSet::from_refs([block_child_ref(10), block_child_ref(20)]),
+            SelectionSet::from_refs([model_ref(30), block_child_ref(20)]),
+            SelectionSet::from_refs([model_ref(999)]),
+            // A deleted instance step: no item the scan could have produced.
+            SelectionSet::from_refs([SelectionRef {
+                document: DocumentId(1),
+                entity: EntityId(100),
+                instance: InstancePath(vec![EntityId(999)]),
+                sub_element: None,
+            }]),
+            // A model entity that is not a member of the named block.
+            SelectionSet::from_refs([SelectionRef {
+                document: DocumentId(1),
+                entity: EntityId(30),
+                instance: InstancePath(vec![EntityId(10)]),
+                sub_element: None,
+            }]),
+        ];
+        for selection in selections {
+            let fast = selection_highlight(&db, &selection, DocumentId(1), stamp(), None);
+            let legacy = legacy_selection_highlight(&db, &selection, DocumentId(1), stamp());
+            assert_eq!(fast, legacy, "selection {selection:?} diverged");
+        }
+
+        let mesh_db = mesh_insert_drawing();
+        let mesh_selections = [
+            SelectionSet::from_refs([mesh_child_ref(None)]),
+            SelectionSet::from_refs([mesh_child_ref(Some(face("face-a")))]),
+            SelectionSet::from_refs([mesh_child_ref(Some(face("face-b")))]),
+            // The same object selected both whole and by face: the scan matched
+            // one item for both refs; the resolve path must resolve it once.
+            SelectionSet::from_refs([mesh_child_ref(None), mesh_child_ref(Some(face("face-a")))]),
+        ];
+        for selection in mesh_selections {
+            let fast = selection_highlight(&mesh_db, &selection, DocumentId(2), stamp(), None);
+            let legacy = legacy_selection_highlight(&mesh_db, &selection, DocumentId(2), stamp());
+            assert_eq!(fast, legacy, "mesh selection {selection:?} diverged");
+        }
+    }
+
+    /// An `INSERT` root only ever exists as an expansion, so selecting it is
+    /// unresolved — never a fabricated batch of the block's contents.
+    #[test]
+    fn insert_root_is_unresolved_like_the_full_scan() {
+        let db = drawing();
+        let selection = SelectionSet::from_refs([model_ref(10)]);
+        let overlay = selection_highlight(&db, &selection, DocumentId(1), stamp(), None);
+        assert!(overlay.is_empty());
+        assert!(overlay
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "highlight.unresolved"));
+    }
+
+    /// The shared `(entity, instance)` of a whole-entity and a face selection is
+    /// resolved once: the face is drawn exactly once, not duplicated.
+    #[test]
+    fn a_face_and_its_entity_do_not_duplicate_the_mesh_batch() {
+        let db = mesh_insert_drawing();
+        let selection =
+            SelectionSet::from_refs([mesh_child_ref(None), mesh_child_ref(Some(face("face-a")))]);
+        let overlay = selection_highlight(&db, &selection, DocumentId(2), stamp(), None);
+        // One whole-mesh batch + one face-a batch.
+        assert_eq!(overlay.drawn(), 2);
     }
 
     #[test]

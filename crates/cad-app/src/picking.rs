@@ -174,6 +174,91 @@ fn collect_items<'a>(
     ));
 }
 
+/// Resolve one selection ref to its accumulated world transform, walking
+/// **only** the ref's own `INSERT` chain instead of scanning the drawing.
+///
+/// This is the O(|instance path|) counterpart of [`drawing_pick_items`]: the
+/// root of the instance path must be a model-space `INSERT`, every further step
+/// must be an `INSERT` member of the previous step's block (visibility-filtered
+/// exactly like [`DrawingDatabase::block_entities`]), and the target must be a
+/// non-`INSERT` entity the full scan would have pushed as an item.
+///
+/// Returns `None` for every ref the full scan would **not** have produced — a
+/// foreign document, a deleted entity, a broken/cyclic/over-deep path, a
+/// truncated branch, or an `INSERT` root that only exists as an expansion — so
+/// a caller can report the same "unresolved" outcome and never fabricate one.
+pub fn resolve_pick_transform(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    reference: &SelectionRef,
+) -> Option<Transform3> {
+    if reference.document != document {
+        return None;
+    }
+    let target = database.entity(reference.entity)?;
+    let mut transform = Transform3::identity();
+    let mut scope: Option<BlockId> = None;
+    let mut stack: Vec<BlockId> = Vec::new();
+    for (depth, insert_id) in reference.instance.0.iter().enumerate() {
+        if depth >= MAX_INSTANCE_DEPTH {
+            return None;
+        }
+        let insert = database.entity(*insert_id)?;
+        match scope {
+            None => {
+                // The scan only starts from model space.
+                if !matches!(insert.space, SpaceId::Model) {
+                    return None;
+                }
+            }
+            Some(block) => {
+                // A nested step must be a visible member of the previous block.
+                if !database
+                    .block_entities(block)
+                    .iter()
+                    .any(|e| e.id == *insert_id)
+                {
+                    return None;
+                }
+            }
+        }
+        let SemanticGeometry::Insert {
+            block,
+            transform: local,
+        } = &insert.geometry
+        else {
+            return None;
+        };
+        if stack.contains(block) {
+            return None;
+        }
+        stack.push(*block);
+        transform = transform.matrix_mul(local);
+        scope = Some(*block);
+    }
+    match scope {
+        None => {
+            if !matches!(target.space, SpaceId::Model) {
+                return None;
+            }
+        }
+        Some(block) => {
+            if !database
+                .block_entities(block)
+                .iter()
+                .any(|e| e.id == reference.entity)
+            {
+                return None;
+            }
+        }
+    }
+    // An `INSERT` is always expanded, never pushed as an item.
+    if matches!(target.geometry, SemanticGeometry::Insert { .. }) {
+        return None;
+    }
+    Some(transform)
+}
+
 /// Precise pick of the closest model-space geometry under a world ray.
 ///
 /// Returns the closest hit with its distance and the list of geometries that
