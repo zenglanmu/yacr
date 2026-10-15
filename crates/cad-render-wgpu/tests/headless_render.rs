@@ -171,14 +171,17 @@ fn progressive_pages_match_full_scene_without_raising_per_frame_budget() {
     let target = RenderTarget::new(64, 64);
     renderer.render(camera_2d(), &target).unwrap();
     let reference = renderer.read_target_rgba().unwrap();
-    renderer.frame_budget.max_vertices = 3;
-    renderer.frame_budget.max_triangles = 1;
+    // Anti-aliased line strokes charge 6 vertices + 2 triangles per segment and a
+    // triangle mesh charges 3 vertices + 1 triangle; a `6`/`2` budget fits exactly
+    // one batch per page.
+    renderer.frame_budget.max_vertices = 6;
+    renderer.frame_budget.max_triangles = 2;
     renderer.set_progressive_rendering(true);
     let mut pages = 0;
     loop {
         let stats = renderer.render(camera_2d(), &target).unwrap();
-        assert!(stats.vertices <= 3);
-        assert!(stats.triangles <= 1);
+        assert!(stats.vertices <= 6);
+        assert!(stats.triangles <= 2);
         pages += 1;
         assert!(pages <= delta.added.len());
         if !renderer.frame_pending() {
@@ -258,7 +261,9 @@ fn lines_render_onto_target() {
         .render(camera_2d(), &target)
         .expect("render line frame");
     assert!(stats.draw_calls > 0, "frame submitted no draw calls");
-    assert_eq!(stats.vertices, rectangle_lines().len());
+    // Anti-aliased line strokes charge 6 vertices (two triangles) per 2-vertex
+    // segment: the rectangle outline is four segments.
+    assert_eq!(stats.vertices, 6 * (rectangle_lines().len() / 2));
 
     let image = renderer.read_target_rgba().expect("read back frame");
     assert_eq!((image.width, image.height), (64, 64));
@@ -958,9 +963,10 @@ fn progressive_images_draw_only_on_the_cleared_page() {
         return;
     };
     let mut renderer = init(gpu);
-    // Two 60-vertex line batches: a 100-vertex budget fits the first on page 0
-    // (60) and pushes the second to a continuation page, while leaving room on
-    // page 0 for the image's 4 vertices.
+    // Two 60-vertex line batches (30 segments each). Anti-aliased line strokes
+    // charge 6 vertices per segment, so each batch is 180 vertices: a 200-vertex
+    // budget fits the first on page 0 (180) and pushes the second to a
+    // continuation page, while leaving room on page 0 for the image's 4 vertices.
     let big_line = || {
         let mut vertices = Vec::new();
         for i in 0..30 {
@@ -985,7 +991,7 @@ fn progressive_images_draw_only_on_the_cleared_page() {
         .upload_images(&[image_batch("red")], &cache)
         .expect("upload image");
 
-    renderer.frame_budget.max_vertices = 100;
+    renderer.frame_budget.max_vertices = 200;
     renderer.set_progressive_rendering(true);
 
     let target = RenderTarget::new(64, 64);

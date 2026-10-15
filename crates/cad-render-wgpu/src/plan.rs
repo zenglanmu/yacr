@@ -22,10 +22,10 @@ struct MeshDrawPlan {
     edge_overlay: bool,
 }
 
-fn mesh_draw_plan(has_triangles: bool, has_edge_indices: bool) -> MeshDrawPlan {
+fn mesh_draw_plan(has_triangles: bool, has_overlay_quads: bool) -> MeshDrawPlan {
     MeshDrawPlan {
         triangles: has_triangles,
-        edge_overlay: has_triangles && has_edge_indices,
+        edge_overlay: has_triangles && has_overlay_quads,
     }
 }
 
@@ -336,65 +336,56 @@ pub(crate) fn draw_batch(
     line_pipeline: &wgpu::RenderPipeline,
     mesh_pipeline: &wgpu::RenderPipeline,
 ) {
-    // A batch converted to the instanced line path owns no per-batch vertex
-    // buffer; it is never routed through `draw_batch` (the frame path coalesces
-    // it into an instanced run instead). Legacy batches always carry one.
-    let Some(vertices) = batch.vertices.as_ref() else {
-        return;
-    };
     match batch.topology {
-        RenderTopology::Lines => {
-            state.set_pipeline(pass, line_pipeline);
-            state.set_bind_group0(pass, bind_group, uniform_offset);
-            state.set_vertex_buffer(pass, 0, vertices);
-            if let Some(indices) = &batch.indices {
-                state.set_index_buffer(pass, indices);
-                pass.draw_indexed(0..batch.index_count, 0, 0..1);
-            } else {
-                pass.draw(0..batch.vertex_count, 0..1);
-            }
-        }
-        RenderTopology::Mesh => {
-            state.set_pipeline(pass, mesh_pipeline);
-            state.set_bind_group0(pass, bind_group, uniform_offset);
-            state.set_vertex_buffer(pass, 0, vertices);
-            if let Some(normals) = &batch.normals {
-                state.set_vertex_buffer(pass, 1, normals);
-            }
-            if let Some(colors) = &batch.colors {
-                state.set_vertex_buffer(pass, 2, colors);
-            }
-            let draw_plan = mesh_draw_plan(batch.indices.is_some(), batch.edge_indices.is_some());
-            if !draw_plan.triangles {
-                return;
-            }
-            let indices = batch
-                .indices
-                .as_ref()
-                .expect("mesh draw plan requires triangle indices");
-            state.set_index_buffer(pass, indices);
-            pass.draw_indexed(0..batch.index_count, 0, 0..1);
-            // Optional wireframe overlay over the shared mesh vertices.
-            if draw_plan.edge_overlay {
-                let edges = batch
-                    .edge_indices
-                    .as_ref()
-                    .expect("draw plan requires edge indices");
-                state.set_pipeline(pass, line_pipeline);
-                state.set_vertex_buffer(pass, 0, vertices);
-                state.set_index_buffer(pass, edges);
-                pass.draw_indexed(0..batch.edge_index_count, 0, 0..1);
-            }
-        }
-        RenderTopology::MeshEdges => {
-            state.set_pipeline(pass, line_pipeline);
-            state.set_bind_group0(pass, bind_group, uniform_offset);
-            state.set_vertex_buffer(pass, 0, vertices);
-            let Some(indices) = batch.indices.as_ref() else {
+        // Line geometry (`Lines` and `MeshEdges`) is uploaded pre-expanded into
+        // anti-aliased triangle-list quads (see `expand_line_quads`); a batch with
+        // no quads (fewer than two vertices) draws nothing.
+        RenderTopology::Lines | RenderTopology::MeshEdges => {
+            let Some(quads) = batch.line_quads.as_ref() else {
                 return;
             };
-            state.set_index_buffer(pass, indices);
-            pass.draw_indexed(0..batch.index_count, 0, 0..1);
+            state.set_pipeline(pass, line_pipeline);
+            state.set_bind_group0(pass, bind_group, uniform_offset);
+            state.set_vertex_buffer(pass, 0, quads);
+            pass.draw(0..batch.line_quad_count, 0..1);
+        }
+        RenderTopology::Mesh => {
+            // A mesh converted to a merged chunk owns no per-batch vertex buffer;
+            // it is never routed through `draw_batch`. A batch whose edge overlay
+            // was instanced keeps its triangle buffer but owns no overlay quads.
+            let Some(vertices) = batch.vertices.as_ref() else {
+                return;
+            };
+            let draw_plan = mesh_draw_plan(batch.indices.is_some(), batch.line_quads.is_some());
+            if draw_plan.triangles {
+                state.set_pipeline(pass, mesh_pipeline);
+                state.set_bind_group0(pass, bind_group, uniform_offset);
+                state.set_vertex_buffer(pass, 0, vertices);
+                if let Some(normals) = &batch.normals {
+                    state.set_vertex_buffer(pass, 1, normals);
+                }
+                if let Some(colors) = &batch.colors {
+                    state.set_vertex_buffer(pass, 2, colors);
+                }
+                let indices = batch
+                    .indices
+                    .as_ref()
+                    .expect("mesh draw plan requires triangle indices");
+                state.set_index_buffer(pass, indices);
+                pass.draw_indexed(0..batch.index_count, 0, 0..1);
+            }
+            // Optional anti-aliased wireframe overlay (pre-expanded quads over
+            // the shared mesh vertices), drawn after the triangles exactly as the
+            // legacy line-list overlay was.
+            if draw_plan.edge_overlay {
+                let quads = batch
+                    .line_quads
+                    .as_ref()
+                    .expect("draw plan requires overlay quads");
+                state.set_pipeline(pass, line_pipeline);
+                state.set_vertex_buffer(pass, 0, quads);
+                pass.draw(0..batch.line_quad_count, 0..1);
+            }
         }
         // A conic batch owns no per-batch buffers; it is drawn through the SDF
         // instance-run path, never `draw_batch`.
@@ -402,13 +393,13 @@ pub(crate) fn draw_batch(
     }
 }
 
-/// Submit one coalesced instanced line run: `2` unit vertices expanded once per
-/// instance in `start..start + count` of `stream`.
+/// Submit one coalesced instanced line run: `6` unit-quad vertices expanded once
+/// per instance in `start..start + count` of `stream`.
 ///
-/// `stream` is the instance buffer (slot 1); `unit` is the shared
-/// `(0,0,0)-(1,0,0)` segment (slot 0). Instances are contiguous and in their
-/// original upload order, so the run reproduces exactly the draw order the same
-/// batches would have had as individual `LineList` draws.
+/// `stream` is the instance buffer (slot 1); `quad` is the shared unit quad
+/// `[0,1]^2` (slot 0), the same buffer the SDF conic path binds. Instances are
+/// contiguous and in their original upload order, so the run reproduces exactly
+/// the draw order the same batches would have had as individual draws.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_instance_run(
     pass: &mut wgpu::RenderPass<'_>,
@@ -428,7 +419,7 @@ pub(crate) fn draw_instance_run(
     state.set_bind_group0(pass, bind_group, uniform_offset);
     state.set_vertex_buffer(pass, 0, unit);
     state.set_vertex_buffer(pass, 1, stream);
-    pass.draw(0..2, start..start + count);
+    pass.draw(0..6, start..start + count);
 }
 
 /// Draw and clear a pending coalesced instanced run.
@@ -572,26 +563,46 @@ pub(crate) fn flush_pending_mesh(
 
 /// Vertices a resident batch charges the frame budget this frame.
 ///
-/// An SDF conic batch draws `6` unit-quad vertices per instance (one instance =
-/// one bounding quad); every other topology charges its packed vertex count.
-/// This is the documented unit change from "vertices = stored geometry" to
-/// "vertices = rasterized primitives" (see `docs/render-order.md`).
+/// Every line-like segment rasterizes as an **anti-aliased quad** (six vertices,
+/// two triangles) — whether it travels as a per-instance stream
+/// ([`GpuBatch::instanced`]) or as pre-expanded per-batch quads
+/// ([`GpuBatch::line_quad_count`]). An SDF conic batch draws `6` unit-quad
+/// vertices per instance; a mesh charges its packed vertex count. This is the
+/// documented unit change from "vertices = stored geometry" to "vertices =
+/// rasterized primitives" (see `docs/render-order.md`).
 pub(crate) fn batch_budget_vertices(batch: &GpuBatch) -> usize {
-    if batch.topology == RenderTopology::Conics {
-        batch.arc_instance_count() as usize * 6
-    } else {
-        batch.vertex_count as usize
-    }
+    let line_quads = batch
+        .instanced
+        .iter()
+        .map(|run| run.count as usize)
+        .sum::<usize>()
+        + batch.line_quad_count as usize;
+    let base = match batch.topology {
+        RenderTopology::Conics => batch.arc_instance_count() as usize * 6,
+        RenderTopology::Mesh => batch.vertex_count as usize,
+        // A converted `Lines`/`MeshEdges` batch owns no legacy vertex buffer; its
+        // whole charge is the expanded quads above.
+        _ => 0,
+    };
+    base + line_quads * 6
 }
 
-/// Triangles a resident batch charges the frame budget this frame: `2` per SDF
-/// conic instance (a quad is two triangles), the mesh triangle count, else `0`.
+/// Triangles a resident batch charges the frame budget this frame: `2` per
+/// anti-aliased line quad, `2` per SDF conic instance, the mesh triangle count,
+/// else `0`.
 pub(crate) fn batch_budget_triangles(batch: &GpuBatch) -> usize {
-    match batch.topology {
+    let line_quads = batch
+        .instanced
+        .iter()
+        .map(|run| run.count as usize)
+        .sum::<usize>()
+        + batch.line_quad_count as usize;
+    let base = match batch.topology {
         RenderTopology::Conics => batch.arc_instance_count() as usize * 2,
         RenderTopology::Mesh => batch.index_count as usize / 3,
         _ => 0,
-    }
+    };
+    base + line_quads * 2
 }
 
 pub(crate) fn plan_from_gpu(batches: &[GpuBatch], budget: &FrameBudget) -> GpuPlan {
@@ -1398,28 +1409,120 @@ pub(crate) fn line_instance_layout_64() -> wgpu::VertexBufferLayout<'static> {
     }
 }
 
+/// Byte stride of one [`LineQuadVertex`]: two `vec3<f32>` (`p0`, `p1`) plus one
+/// `vec2<f32>` (quad corner).
+pub(crate) const LINE_QUAD_STRIDE: u32 = 32;
+
+/// One vertex of a pre-expanded anti-aliased line quad (the legacy per-batch
+/// line path). One 2-vertex segment expands to six of these (two triangles); the
+/// vertex stage rebuilds the world-space quad and the fragment stage computes the
+/// distance to the segment — the same SDF the instanced/pulled paths use.
+///
+/// `#[repr(C)]` + `Pod` so the packed bytes are exactly the GPU layout.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct LineQuadVertex {
+    /// `xyz` = segment start (batch-local, the same values the instanced path
+    /// stores relative to its stream origin).
+    pub(crate) p0: [f32; 3],
+    /// `xyz` = segment end (batch-local).
+    pub(crate) p1: [f32; 3],
+    /// Quad corner in `[0, 1]^2`.
+    pub(crate) corner: [f32; 2],
+}
+
+/// The shared unit quad's six corners (two triangles), matching the shared
+/// `unit_quad_buffer` and the constant table in `line_pulled.wgsl`.
+const LINE_QUAD_CORNERS: [[f32; 2]; 6] = [
+    [0.0, 0.0],
+    [1.0, 0.0],
+    [1.0, 1.0],
+    [0.0, 0.0],
+    [1.0, 1.0],
+    [0.0, 1.0],
+];
+
+/// Per-vertex layout of the pre-expanded line-quad buffer (slot 0 of the legacy
+/// line pipeline). `shader_location` 0..=2, matching `line.wgsl` / `pick_line.wgsl`.
+pub(crate) fn line_quad_layout() -> wgpu::VertexBufferLayout<'static> {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
+        0 => Float32x3,
+        1 => Float32x3,
+        2 => Float32x2
+    ];
+    wgpu::VertexBufferLayout {
+        array_stride: u64::from(LINE_QUAD_STRIDE),
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ATTRIBUTES,
+    }
+}
+
+/// The exact packed bytes of `vertices` (one contiguous GPU buffer payload).
+pub(crate) fn line_quad_bytes(vertices: &[LineQuadVertex]) -> Vec<u8> {
+    bytemuck::cast_slice(vertices).to_vec()
+}
+
+/// Expand one batch's line geometry into anti-aliased quad vertices.
+///
+/// With `indices = None` the segments are consecutive pairs of `batch.vertices`
+/// (a `Lines`/`MeshEdges` batch). With `indices = Some(list)` each pair is
+/// `(list[2k], list[2k + 1])` indexed into `batch.vertices` (a mesh edge
+/// overlay); the caller validates the indices are in range.
+///
+/// The pairing rule is exactly [`push_line_instances`]'s, so the legacy per-batch
+/// path and the instanced path rasterize the same segments (conversion-path
+/// equivalence). A trailing unpaired vertex is dropped by both paths.
+pub(crate) fn expand_line_quads(
+    out: &mut Vec<LineQuadVertex>,
+    batch: &cad_scene::RenderBatch,
+    indices: Option<&[u32]>,
+) {
+    let push_pair = |out: &mut Vec<LineQuadVertex>, a: [f32; 3], b: [f32; 3]| {
+        for corner in LINE_QUAD_CORNERS {
+            out.push(LineQuadVertex {
+                p0: a,
+                p1: b,
+                corner,
+            });
+        }
+    };
+    match indices {
+        None => {
+            for pair in batch.vertices.chunks_exact(2) {
+                push_pair(out, pair[0], pair[1]);
+            }
+        }
+        Some(list) => {
+            for pair in list.chunks_exact(2) {
+                push_pair(
+                    out,
+                    batch.vertices[pair[0] as usize],
+                    batch.vertices[pair[1] as usize],
+                );
+            }
+        }
+    }
+}
+
 /// Whether a scene batch is eligible for the instanced line path.
 ///
-/// Only opaque `Lines` batches with a whole number of 2-vertex segments are
-/// converted (an odd trailing vertex stays legacy so the pairing rule is never
-/// reinterpreted). Transparent batches stay legacy (their back-to-front order is
-/// camera-dependent).
+/// Opaque `Lines` **and** `MeshEdges` batches with a whole number of 2-vertex
+/// segments are converted (an odd trailing vertex stays legacy so the pairing
+/// rule is never reinterpreted; it is counted as a `line_odd_vertex_skip`).
+/// Transparent batches stay legacy (their back-to-front order is camera-dependent
+/// and is drawn per-batch); the legacy per-batch path rasterizes the same
+/// anti-aliased quad strokes (`plan::expand_line_quads`), so every line class
+/// carries identical AA ink either way.
 ///
-/// `MeshEdges` is deliberately **not** converted here, and this is reported as a
-/// gap rather than a silent change of behaviour: the legacy `draw_batch` reads
-/// `GpuBatch::indices`, which `prepare_upload_batches` leaves `None` for a
-/// `MeshEdges` batch (it stores the identity line list in `edge_indices`
-/// instead), so a legacy `MeshEdges` batch currently submits **no** draw at all.
-/// Instancing it would start drawing geometry that the legacy path dropped —
-/// a behaviour change, not the byte-equivalence this path claims. Making
-/// `MeshEdges` render is a separate, pre-existing fix outside this slice.
-///
-/// A `Mesh` batch is not a line batch either; its optional edge overlay is
-/// instanced only when the batch is flat-merged (see [`overlay_is_instanced`]),
-/// because the overlay must be drawn separately from the merged triangle run.
+/// `MeshEdges` used to be a documented silent no-op (the legacy `draw_batch`
+/// read `GpuBatch::indices`, which is empty for `MeshEdges`). It is now converted
+/// here — and its legacy fallback renders the same AA quads — so this topology
+/// finally draws (backlog item G3).
 pub(crate) fn line_batch_is_instanced(batch: &cad_scene::RenderBatch) -> bool {
-    batch.topology == RenderTopology::Lines
-        && batch.vertices.len() >= 2
+    matches!(
+        batch.topology,
+        RenderTopology::Lines | RenderTopology::MeshEdges
+    ) && batch.vertices.len() >= 2
         && batch.vertices.len() % 2 == 0
         && classify_alpha(batch.alpha) == AlphaClass::Opaque
 }
@@ -2256,8 +2359,9 @@ pub(crate) const PULLED_LINE_STRIDE: u32 = 64;
 /// `vec4<u32>`.
 pub(crate) const PULLED_MESH_VERTEX_STRIDE: u32 = 64;
 
-/// Byte size of the per-class pulled camera uniform: three `vec4<f32>` columns.
-pub(crate) const PULLED_CAMERA_BYTES: u32 = 48;
+/// Byte size of the per-class pulled camera uniform: four `vec4<f32>` columns
+/// (the fourth carries the world units per pixel for the AA line SDF in its `x`).
+pub(crate) const PULLED_CAMERA_BYTES: u32 = 64;
 
 /// One pulled line segment: the universal [`LineInstance`] fields plus the
 /// per-chunk origin index. `vec4` members (not `vec3`/`uvec2`) so the storage
@@ -2403,18 +2507,21 @@ pub(crate) fn chunk_transform_column(projection: FrameProjection, origin: [f64; 
     [m[12], m[13], m[14], m[15]]
 }
 
-/// The three origin-independent columns of the per-chunk transform.
-pub(crate) fn pulled_camera_columns(projection: FrameProjection) -> [[f32; 4]; 3] {
+/// The four pulled-camera columns: the three origin-independent columns of the
+/// per-chunk transform, plus a fourth whose `x` carries the world units per pixel
+/// (the AA line SDF ramp width). `yzw` are reserved.
+pub(crate) fn pulled_camera_columns(projection: FrameProjection) -> [[f32; 4]; 4] {
     let m = projection.batch_matrix_f64([0.0, 0.0, 0.0]);
     [
         [m[0], m[1], m[2], m[3]],
         [m[4], m[5], m[6], m[7]],
         [m[8], m[9], m[10], m[11]],
+        [projection.world_per_px() as f32, 0.0, 0.0, 0.0],
     ]
 }
 
-/// The packed `f32` bytes of the pulled camera uniform (three columns).
-pub(crate) fn pulled_camera_bytes(columns: &[[f32; 4]; 3]) -> [u8; PULLED_CAMERA_BYTES as usize] {
+/// The packed `f32` bytes of the pulled camera uniform (four columns).
+pub(crate) fn pulled_camera_bytes(columns: &[[f32; 4]; 4]) -> [u8; PULLED_CAMERA_BYTES as usize] {
     let mut bytes = [0u8; PULLED_CAMERA_BYTES as usize];
     for (col, column) in columns.iter().enumerate() {
         for (row, value) in column.iter().enumerate() {
@@ -2961,9 +3068,10 @@ mod instanced_line_tests {
             vec![[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]],
             1.0
         )));
-        // MeshEdges stays legacy: its legacy draw is a no-op (see the gate's
-        // doc), so instancing it would change behaviour rather than preserve it.
-        assert!(!line_batch_is_instanced(&batch(
+        // MeshEdges is now converted too: its legacy draw used to be a no-op
+        // (the gate's doc explains the G3 fix), so it is instanced as line
+        // geometry like `Lines`.
+        assert!(line_batch_is_instanced(&batch(
             RenderTopology::MeshEdges,
             vec![[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
             1.0
@@ -3906,7 +4014,7 @@ mod accelerated_tier_tests {
             std::mem::size_of::<PulledMeshVertex>(),
             PULLED_MESH_VERTEX_STRIDE as usize
         );
-        assert_eq!(PULLED_CAMERA_BYTES, 48);
+        assert_eq!(PULLED_CAMERA_BYTES, 64);
         // The layout is alignment-clean for the storage array stride.
         assert_eq!(std::mem::align_of::<PulledLine>(), 4);
         assert_eq!(std::mem::align_of::<PulledMeshVertex>(), 4);
@@ -4086,6 +4194,9 @@ mod accelerated_tier_tests {
         assert_eq!(columns[0], [m[0], m[1], m[2], m[3]]);
         assert_eq!(columns[1], [m[4], m[5], m[6], m[7]]);
         assert_eq!(columns[2], [m[8], m[9], m[10], m[11]]);
+        // The fourth column carries the world units per pixel for the AA line SDF
+        // in its x (zero here, which selects the `fwidth` fallback).
+        assert_eq!(columns[3], [0.0, 0.0, 0.0, 0.0]);
         // And the chunk column is exactly the per-chunk matrix's last column, so
         // `mat4x4(c0, c1, c2, t)` reproduces `batch_matrix_f64(origin)`.
         let origin = [1.0e6 + 123.5, 2.0e6 - 77.25, 0.0];
@@ -4111,16 +4222,18 @@ mod accelerated_tier_tests {
     }
 
     #[test]
-    fn pulled_camera_bytes_are_three_columns_little_endian() {
+    fn pulled_camera_bytes_are_four_columns_little_endian() {
         let columns = [
             [1.0f32, 2.0, 3.0, 4.0],
             [5.0, 6.0, 7.0, 8.0],
             [9.0, 10.0, 11.0, 12.0],
+            [13.0, 14.0, 15.0, 16.0],
         ];
         let bytes = pulled_camera_bytes(&columns);
         assert_eq!(bytes.len(), PULLED_CAMERA_BYTES as usize);
         for (i, value) in [
-            1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
+            16.0,
         ]
         .iter()
         .enumerate()

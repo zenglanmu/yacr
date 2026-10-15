@@ -399,10 +399,10 @@ fn frame_budget_over_budget_is_reported_not_silent() {
         return;
     };
     let mut renderer = init(gpu);
-    // Two line batches of eight vertices each: the first fits, the second
-    // crosses the tiny vertex limit.
+    // Two line batches of four anti-aliased segments each (24 vertices per batch):
+    // the first fits, the second crosses the tiny vertex limit.
     renderer.frame_budget = FrameBudget {
-        max_vertices: 10,
+        max_vertices: 24,
         max_triangles: 1_000_000,
         max_bytes: usize::MAX,
     };
@@ -422,13 +422,13 @@ fn frame_budget_over_budget_is_reported_not_silent() {
         .over_budget
         .expect("crossing the frame budget must be reported, never silent");
     assert_eq!(over.report.category, "vertices");
-    assert_eq!(over.report.limit, 10);
+    assert_eq!(over.report.limit, 24);
     assert!(
         over.report.skipped_batches >= 1,
         "at least the offending batch must be reported skipped: {over:?}"
     );
     assert!(
-        stats.vertices <= 10,
+        stats.vertices <= 24,
         "only accepted vertices may be submitted, got {}",
         stats.vertices
     );
@@ -1066,6 +1066,35 @@ fn many_line_batches_collapse_and_match_legacy() {
     );
 }
 
+/// An odd-length `Lines` batch pairs its leading vertices and **counts** the
+/// trailing unpaired one instead of dropping it silently (both the legacy quad
+/// path and the instance path pair the same way). The batch still renders.
+#[test]
+fn odd_line_batch_counts_its_trailing_vertex() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+    // Three vertices: one segment plus a trailing unpaired vertex.
+    let batches = vec![lines_batch(vec![
+        [-0.8, -0.5, 0.0],
+        [0.8, -0.5, 0.0],
+        [0.8, 0.5, 0.0],
+    ])];
+    let (pixels, _) = render_pixels(&mut renderer, &target, &batches, false, camera_2d());
+    assert_eq!(
+        renderer.line_odd_vertex_skips(),
+        1,
+        "the trailing unpaired vertex must be counted, never silently dropped"
+    );
+    let background = opaque_black(&pixels);
+    assert!(
+        pixels.chunks_exact(4).any(|px| px != background.as_slice()),
+        "the paired segment must still render"
+    );
+}
+
 /// The upload byte charge must account the exact instance-stream bytes.
 #[test]
 fn instanced_upload_charges_exact_stream_bytes() {
@@ -1084,12 +1113,13 @@ fn instanced_upload_charges_exact_stream_bytes() {
     );
     assert_eq!(renderer.instance_segment_count(), 16);
 
-    // The legacy path uploads 32 vertices * 12 B, a different exact number.
+    // The legacy path uploads pre-expanded anti-aliased line quads: 6 vertices
+    // of 32 B per 2-vertex segment, a different exact number.
     let (_, legacy_stats) = render_pixels(&mut renderer, &target, &batches, false, camera_2d());
     assert_eq!(
         legacy_stats.uploaded_bytes - stats.uploaded_bytes,
-        32 * 12,
-        "the legacy path uploads its packed vertex bytes"
+        (16 * 6 * cad_render_wgpu::LINE_QUAD_BYTES) as u64,
+        "the legacy path uploads its pre-expanded line-quad bytes"
     );
 }
 
@@ -1285,11 +1315,34 @@ fn instanced_deep_zoom_on_a_large_drawing_stays_within_the_precision_bound() {
         legacy.chunks_exact(4).any(|px| px != background.as_slice()),
         "the framed object must rasterize; the comparison would be vacuous"
     );
+    // Anti-aliased strokes make every sub-unit-coverage fringe pixel sensitive to
+    // the f32 origin reduction, so the instanced and legacy frames are no longer
+    // byte-identical (only the f32-representable shared-origin case is). The
+    // precision-meaningful fence is that the framed object stays in the **same
+    // pixel columns**: the whole-scene shared-origin regression this fence exists
+    // for moved the object to a different column, which this still catches.
+    let inked_columns = |px: &[u8]| -> Vec<u32> {
+        let bg = [px[0], px[1], px[2], px[3]];
+        (0..64u32)
+            .filter(|&x| {
+                (0..64u32).any(|y| {
+                    let i = (y as usize * 64 + x as usize) * 4;
+                    px[i..i + 4] != bg
+                })
+            })
+            .collect()
+    };
+    assert_eq!(
+        inked_columns(&instanced),
+        inked_columns(&legacy),
+        "a per-chunk origin must keep the framed object in the same pixel columns"
+    );
+    // The fringe difference is bounded: the two AA paths agree on every pixel
+    // outside the object's ~2 px stroke band.
     let diff = differing_pixels(&instanced, &legacy, 4);
     assert!(
-        diff <= 4,
-        "instanced deep-zoom must stay within a small pixel bound of the legacy \
-         path (positions bounded by MAX_STREAM_RADIUS); {diff} pixels differed"
+        diff <= 4 * 64,
+        "instanced deep-zoom AA fringes must stay bounded; {diff} pixels differed"
     );
 }
 
@@ -1778,9 +1831,16 @@ fn merged_meshes_lines_and_overlays_match_legacy_pixels() {
         legacy.chunks_exact(4).any(|px| px != background.as_slice()),
         "the mixed scene must rasterize something; the comparison would be vacuous"
     );
-    assert_eq!(
-        merged, legacy,
-        "a glyph-heavy mixed scene must match the all-legacy frame byte-for-byte"
+    // Merged/instanced batches use per-chunk `f64` origins while the legacy path
+    // uses per-batch origins; the f32 reduction differs by ~1 ulp, which with
+    // anti-aliased strokes shifts sub-unit-coverage fringe pixels (invisible on
+    // hard 1 px lines). The paths still agree on every pixel outside the
+    // geometry's ~2 px AA bands; the collapsed draw counts above are unchanged.
+    let diff = differing_pixels(&merged, &legacy, 4);
+    assert!(
+        diff <= 128,
+        "a glyph-heavy mixed scene must match the all-legacy frame outside the AA \
+         fringe; {diff} pixels differed"
     );
 }
 
@@ -2181,9 +2241,16 @@ fn instanced_edge_overlay_matches_legacy_pixels() {
     );
     let (legacy, _) =
         render_pixels_full(&mut renderer, &target, &batches, false, false, camera_2d());
-    assert_eq!(
-        instanced, legacy,
-        "instanced edge overlays must be byte-identical to the legacy overlay draw"
+    // Instancing a merged batch's overlay uses the chunk's `f64` origin while the
+    // legacy per-batch overlay uses the batch's own origin, so the f32 reduction
+    // differs by ~1 ulp; with anti-aliased strokes that shifts sub-unit-coverage
+    // fringe pixels (it was invisible on hard 1 px lines). The two conversion
+    // paths still agree on every pixel outside the overlays' ~2 px AA bands.
+    let diff = differing_pixels(&instanced, &legacy, 4);
+    assert!(
+        diff <= 64,
+        "instanced edge overlays must match the legacy overlay draw outside the \
+         AA fringe; {diff} pixels differed"
     );
 }
 
@@ -2379,15 +2446,14 @@ fn incremental_commit_and_gc_renumber_merged_meshes() {
     );
 }
 
-/// Sentinel: a `MeshEdges` batch currently renders **nothing**. The legacy
-/// `draw_batch` reads `GpuBatch::indices`, which `prepare_upload_batches` leaves
-/// empty for `MeshEdges` (the identity line list goes to `edge_indices`), so the
-/// draw early-returns; the topology is also deliberately not converted to the
-/// instanced path. This is a pre-existing gap (see `line_batch_is_instanced`'s
-/// doc). The fence pins the current no-op so P3 cannot silently start dropping
-/// *or* drawing this topology without a deliberate, tested change.
+/// `MeshEdges` geometry now renders. The topology used to be a documented silent
+/// no-op (the legacy `draw_batch` read `GpuBatch::indices`, which is empty for a
+/// `MeshEdges` batch), and is now converted to anti-aliased line segments on the
+/// instanced path and drawn as the same pre-expanded AA quads on the legacy
+/// per-batch fallback (backlog item G3). Both conversion paths must rasterize the
+/// same segments.
 #[test]
-fn mesh_edges_batch_currently_renders_nothing() {
+fn mesh_edges_batch_renders_anti_aliased_segments() {
     let Some(gpu) = gpu() else {
         return;
     };
@@ -2401,7 +2467,7 @@ fn mesh_edges_batch_currently_renders_nothing() {
     ]);
     batch.topology = RenderTopology::MeshEdges;
 
-    // Legacy path (no conversion): the batch is submitted but draws nothing.
+    // Legacy per-batch path: the topology now draws its two AA segments.
     let (legacy, legacy_stats) = render_pixels_full(
         &mut renderer,
         &target,
@@ -2412,19 +2478,33 @@ fn mesh_edges_batch_currently_renders_nothing() {
     );
     assert_eq!(legacy_stats.draw_calls, 1, "the batch is submitted once");
     let background = opaque_black(&legacy);
+    let legacy_drawn = legacy
+        .chunks_exact(4)
+        .filter(|px| *px != background.as_slice())
+        .count();
     assert!(
-        legacy.chunks_exact(4).all(|px| px == background.as_slice()),
-        "a MeshEdges batch must currently render nothing (pre-existing no-op)"
+        legacy_drawn > 0,
+        "a MeshEdges batch must now render its segments (previously a silent no-op)"
     );
 
-    // Same under the converted paths: the topology is not converted.
-    let (converted, _) =
+    // Converted path: the same topology instanced as AA line segments.
+    let (converted, converted_stats) =
         render_pixels_full(&mut renderer, &target, &[batch], true, true, camera_2d());
     assert!(
-        converted
-            .chunks_exact(4)
-            .all(|px| px == background.as_slice()),
-        "MeshEdges must stay a no-op on the instanced/merged paths too"
+        converted_stats.instanced_draws > 0,
+        "the MeshEdges batch must be converted to an instanced line run"
+    );
+    let converted_drawn = converted
+        .chunks_exact(4)
+        .filter(|px| *px != background.as_slice())
+        .count();
+    assert!(
+        converted_drawn > 0,
+        "MeshEdges must render on the converted path too"
+    );
+    assert_eq!(
+        converted, legacy,
+        "both conversion paths must rasterize the same anti-aliased segments"
     );
 }
 

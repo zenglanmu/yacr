@@ -182,6 +182,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // at the curve, ramping to zero one pixel out. (The old
     // `saturate(0.5 - d / w)` is the filled-shape boundary formula and caps the
     // peak at 0.5 — a half-intensity, dashed hairline.)
+    //
+    // Ink semantics: the triangle integrates to exactly its half-width `w`
+    // (`∫ saturate(1 - |d|/w) dd = w`), so `w = world_per_px` gives **1.0 px of
+    // ink** — byte-for-byte the visual weight of the hard-aliased 1 px straight
+    // lines. The peak is phase-dependent (0.5 between two pixel rows/columns,
+    // 1.0 through a pixel centre); that is correct anti-aliasing — peak and ink
+    // cannot both be had. Integrating the sRGB-encoded channel instead of this
+    // linear coverage inflates the soft stroke by ~√2; measure ink linearly.
     let coverage = saturate(1.0 - d / max(w, 1e-8));
     // Mandatory: one instance = one bounding quad; without this discard every
     // quad pixel would write depth and erase the geometry behind it.

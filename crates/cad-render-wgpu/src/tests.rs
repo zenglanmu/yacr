@@ -369,3 +369,157 @@ fn the_uniform_struct_grew_for_the_pick_key_without_moving_the_slot_stride() {
         INSTANCE_FLAG_OPAQUE
     );
 }
+
+/// Numeric proof of the SDF conic **ramp-width** semantics — the root cause of
+/// the reported "arc stroke is √2 too wide".
+///
+/// `shaders/arc.wgsl` shades `coverage = saturate(1 - d/w)` where
+/// `d = length(vec2(dot(q, u), dot(q, normalize(v)))) - r` is evaluated in the
+/// conic's packed `u`/`v` frame and `w = world_per_px` (one screen pixel in
+/// world units, the `key_flags.z` uniform word). Two independent facts pin the
+/// ink to exactly one pixel, so no scale factor (√2 or otherwise) can hide:
+///
+/// 1. the **packed frame is orthonormal** — `u` is unit, `normalize(v)` is unit
+///    and `u ⟂ normalize(v)` — so `q -> (x, y)` is an isometry and `d` is a
+///    **unit-gradient** distance field: one world unit of `d` is one world unit
+///    on screen. (A non-unit `u`, or a `v` that is not perpendicular, would
+///    make the gradient differ from 1 — the only way the on-screen ramp width
+///    could disagree with `w`.)
+/// 2. the triangle filter integrates to exactly `w`: `∫ saturate(1 - |d|/w) dd
+///    = w`. With `w = world_per_px` the ink is therefore exactly
+///    `w / world_per_px = 1.0 px`.
+///
+/// Integrating the **sRGB-encoded** channel instead of linear coverage is what
+/// makes a soft triangle stroke *look* √2 wide in a raw pixel-value integral
+/// (up to `1.47` vs a hard 1 px line's `1.00`); the render itself is correct.
+/// `tests/sdf_arcs.rs` fences the linear-coverage ink on the real GPU.
+#[test]
+fn sdf_conic_field_is_unit_gradient_and_triangle_ink_is_one_pixel() {
+    let r = 7.0f64;
+    let center = Point3 {
+        x: 100_000.0,
+        y: -250_000.0,
+        z: 0.0,
+    };
+    let conic = cad_scene::RenderConic {
+        center,
+        major: Point3 {
+            x: r,
+            y: 0.0,
+            z: 0.0,
+        },
+        minor: Point3 {
+            x: 0.0,
+            y: r,
+            z: 0.0,
+        },
+        start: 0.0,
+        sweep: std::f64::consts::TAU,
+        full: true,
+    };
+    let batch = cad_scene::RenderBatch {
+        local_origin: center,
+        topology: cad_scene::RenderTopology::Conics,
+        vertices: Vec::new(),
+        normals: Vec::new(),
+        colors: Vec::new(),
+        indices: Vec::new(),
+        edges: Vec::new(),
+        conics: vec![conic],
+        mirrored: false,
+        alpha: 1.0,
+        color: [1.0, 1.0, 1.0],
+        color_unresolved: false,
+        lineweight: 0.0,
+        lineweight_unresolved: false,
+        linetype: cad_scene::LinetypePattern::continuous(),
+        linetype_unresolved: false,
+        sources: Vec::new(),
+        draw_order: 0,
+    };
+    let mut instances = Vec::new();
+    assert!(crate::plan::push_arc_instance(
+        &mut instances,
+        &batch,
+        0,
+        [center.x, center.y, center.z],
+        1,
+    ));
+    assert_eq!(instances.len(), 1);
+    let inst = instances[0];
+
+    // (1) The packed frame is orthonormal.
+    let u = [inst.uvec[0], inst.uvec[1], inst.uvec[2]];
+    let v = [inst.vvec[0], inst.vvec[1], inst.vvec[2]];
+    let u_len = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
+    let v_len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    assert!(
+        (u_len - 1.0).abs() < 1e-6,
+        "the major direction must be unit, got |u|={u_len}"
+    );
+    assert!(
+        (v_len as f64 - r).abs() < 1e-3,
+        "the minor is carried as its full semi-diameter, got |v|={v_len} vs r={r}"
+    );
+    let vhat = [v[0] / v_len, v[1] / v_len, v[2] / v_len];
+    let uv = u[0] * vhat[0] + u[1] * vhat[1] + u[2] * vhat[2];
+    assert!(
+        uv.abs() < 1e-6,
+        "the u/v frame must be orthogonal for a circle, got u·v̂={uv}"
+    );
+
+    // (2) The exact shader field is a unit-gradient distance field.
+    let c = [
+        inst.center_r[0] as f64,
+        inst.center_r[1] as f64,
+        inst.center_r[2] as f64,
+    ];
+    let rr = inst.center_r[3] as f64;
+    let field = |p: [f64; 3]| -> f64 {
+        let q = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
+        let x = q[0] * u[0] as f64 + q[1] * u[1] as f64 + q[2] * u[2] as f64;
+        let y = q[0] * vhat[0] as f64 + q[1] * vhat[1] as f64 + q[2] * vhat[2] as f64;
+        (x * x + y * y).sqrt() - rr
+    };
+    let h = 1e-4;
+    for k in 0..64 {
+        let theta = k as f64 / 64.0 * std::f64::consts::TAU;
+        let radius = rr * 1.7;
+        let p = [
+            c[0] + radius * theta.cos(),
+            c[1] + radius * theta.sin(),
+            c[2],
+        ];
+        let gx = (field([p[0] + h, p[1], p[2]]) - field([p[0] - h, p[1], p[2]])) / (2.0 * h);
+        let gy = (field([p[0], p[1] + h, p[2]]) - field([p[0], p[1] - h, p[2]])) / (2.0 * h);
+        let g = (gx * gx + gy * gy).sqrt();
+        assert!(
+            (g - 1.0).abs() < 1e-6,
+            "gradient magnitude at theta={theta:.4} is {g}; the field must be a true \
+             distance field (unit gradient) or the on-screen ramp width would differ from w"
+        );
+    }
+
+    // (3) The triangle filter's ink is exactly `w` world units, i.e. exactly
+    // one pixel for `w = world_per_px`.
+    for &world_per_px in &[0.0078125f64, 0.2, 0.5, 3.0] {
+        let w = world_per_px;
+        let steps = 100_000usize;
+        let span = 2.0 * w;
+        let dd = span / steps as f64;
+        let mut ink = 0.0;
+        for i in 0..steps {
+            let d = -w + (i as f64 + 0.5) * dd;
+            ink += (1.0 - d.abs() / w).max(0.0) * dd;
+        }
+        assert!(
+            (ink - w).abs() < 1e-9 * w.max(1.0),
+            "triangle-filter ink is {ink} world units, expected exactly w={w}"
+        );
+        let ink_px = ink / world_per_px;
+        assert!(
+            (ink_px - 1.0).abs() < 1e-9,
+            "triangle-filter ink is {ink_px} px, expected exactly 1.0"
+        );
+    }
+}

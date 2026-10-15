@@ -155,9 +155,10 @@ impl Renderer {
         let image_shader = module("cad-pick-image", PICK_IMAGE_SHADER);
 
         // Line primitives: no culling, `LessEqual` and depth writes on, exactly
-        // like `cad-lines-pipeline`.
+        // like `cad-lines-pipeline`. Both the legacy per-batch and the instanced
+        // line pipelines now rasterize anti-aliased triangle-list quads.
         let line_primitive = wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::LineList,
+            topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: None,
@@ -180,7 +181,7 @@ impl Renderer {
                     module: &line_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[Some(position_only_layout())],
+                    buffers: &[Some(line_quad_layout())],
                 },
                 primitive: line_primitive,
                 depth_stencil: Some(line_depth.clone()),
@@ -509,6 +510,12 @@ impl Renderer {
         let mut slot = 0u32;
         // World units per pixel, shared by every conic entry this id pass.
         let world_per_px_bits = (projection.world_per_px() as f32).to_bits();
+        // The line class may use an overridden ramp width (test hook), so the id
+        // pass rasterizes the same quad the colour pass did.
+        let line_wpp_bits = self
+            .line_ramp_override
+            .map(f32::to_bits)
+            .unwrap_or(world_per_px_bits);
         for &index in &ordered {
             let batch = &self.batches[index];
             // Mirror the colour pass's order for a converted mesh batch: the
@@ -546,7 +553,7 @@ impl Renderer {
                         slot,
                         matrix: projection.batch_matrix_f64(origin),
                         key: batch.pick_key,
-                        world_per_px_bits: 0,
+                        world_per_px_bits: line_wpp_bits,
                         draw: PickDraw::LineRun(run.stream as usize, start, run.count),
                     });
                     slot += 1;
@@ -575,7 +582,7 @@ impl Renderer {
                     slot,
                     matrix: projection.batch_matrix(batch.origin),
                     key: batch.pick_key,
-                    world_per_px_bits: 0,
+                    world_per_px_bits: line_wpp_bits,
                     draw: PickDraw::Legacy(index),
                 });
                 slot += 1;
@@ -679,9 +686,7 @@ impl Renderer {
                         draw_instance_run(
                             &mut pass,
                             &mut state,
-                            self.unit_segment_buffer
-                                .as_ref()
-                                .expect("unit segment buffer"),
+                            self.unit_quad_buffer.as_ref().expect("unit quad buffer"),
                             &self.instance_streams[stream].buffer,
                             bind_group,
                             offset,

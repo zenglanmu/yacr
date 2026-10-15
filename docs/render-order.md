@@ -92,11 +92,21 @@
 - **未变**：椭圆（slice 2）、虚线/非连续 conic、非不透明 conic 仍走弦展开并计数（**透明**
   conic 批次在上传校验处**拒绝**，不静默丢弃；`alpha ≤ 0` 仍按不可见批次上报、不绘制）。
 
-### 预算（slice B 单位变化）
+### 预算（图元单位变化）
 
-弧批次在帧预算中按**光栅化图元**计费（与既有「顶点 = 存储几何」不同，已文档化）：每个 SDF
-实例计 `vertices += 6`（四边形 6 顶点）、`triangles += 2`（四边形 2 三角形），字节计入
-`upload_size_bytes` 的 **72 × instance_count**。line/mesh 批次的计费不变。
+**所有线类图元与 SDF 弧一样按光栅化图元计费**（与既有「顶点 = 存储几何」不同，已文档化）：
+每个 2 顶点线段（无论走实例流还是 legacy 逐批四边扩展）计 `vertices += 6`（四边形 6 顶点）、
+`triangles += 2`（四边形 2 三角形）。SDF 弧实例同样计 `vertices += 6`、`triangles += 2`。
+字节：弧 `72 × instance_count`；实例线段 `56 B`（加速档 pulled 存储 `64 B`）；legacy 逐批线
+四边 `32 B × 6` 每线段；merged mesh 仍 `44 B/顶点 + 4 B/索引`。mesh 批次自身仍按存储顶点/
+三角形计费（其叠加线框另按线四边计费）。line/mesh 的**存储**格式未变。
+
+**AA 统一（`docs/adr/0009-antialiased-line-strokes.md`）**：`line.wgsl` / `line_instanced.wgsl` /
+`line_pulled.wgsl` 现与 `arc.wgsl` 同语义——到**线段**的距离场 + 三角（线性）滤波，
+`coverage = saturate(1 − d / w)`，`w = world_per_px`，即**1.0 px 线性墨量**；`coverage <= 0`
+强制 `discard`。legacy 线几何在上传时展开为三角列表四边（`plan::expand_line_quads`），
+`MeshEdges` 由静默 no-op 改为正常绘制（G3）。拾取（`pick_line*.wgsl`）栅格化同一 SDF，
+`coverage < 0.5` 丢弃（±0.5 px 容差，与 `pick_arc` 一致）。
 
 **顺序 / tie 语义（与合并前一致）**：
 
@@ -125,7 +135,9 @@
 - 关闭透明 pass 的深度写入，使由远及近的每层按 alpha 合成到已解析的不透明结果上，
   而不是用自身深度遮挡后面的层。
 - 线条/线框（`Lines`、`MeshEdges` 及网格叠加线）使用 `cad-lines-pipeline`，其深度写入
-  保持开启；**透明线条的深度写入策略尚未区分**，属于显式未实现。
+  保持开启；该管线现为**抗锯齿三角列表四边**（每线段 6 顶点 / 2 三角形，与 SDF 弧同语义）。
+  **透明线条**走 legacy 逐批四边路径（同为 AA），其深度写入策略尚未与 mesh 透明变体区分，
+  属于显式未实现。
 
 ### alpha 边界规则（已测）
 

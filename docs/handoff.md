@@ -73,8 +73,10 @@
   world-per-px**——`fwidth` 单独在网格对齐点塌缩；**强制包围四边形 `discard`**）。发射门把
   eligible conic（不透明、连续线型、slice-1 圆形）翻到 SDF，**虚线/椭圆/退化仍计数走弦**；资格在
   **变换后** conic 上判定，故 INSERT 造出的椭圆保持诚实。`pick_arc` 光栅化**同一 SDF**，字面
-  ±0.5 px。**椭圆 SDF = slice 2（未做）**。视觉证据 `/tmp/opencode/yacr-sdf-arcs-v2/`（混合弧+线
-  before 弦 / after SDF；连续性 + 满不透明 + 权重一致性已 fence）。
+  ±0.5 px。**椭圆 SDF = slice 2（未做）**。视觉证据 `/tmp/opencode/yacr-sdf-arcs-v3/`（混合弧+线
+  before 弦 / after SDF；连续性 + 满不透明 + **线性墨量对齐**已 fence；峰值随相位 0.5–1.0 是
+  正确 AA——**峰值与墨量不可兼得**，直线硬别名 1 px、弧按墨量对齐；sRGB 通道直接积分会把软边
+  笔画高估 ≈√2，是取证伪影，非宽度缺陷，详见 ADR 0008 §2/§实施记录 4）。
 - **Conic 中性载体**（`226651c`）：Circle/Arc/Ellipse 以 `DisplayPrimitive::Conic`（f64 世界空间、
   仿射保持参数角）上行，下游消费者仍**全部弦展开**（输出与旧路径逐字节一致，已 fence）；SDF 资格
   记入 `ConicStats`。**渲染/性能 backlog**（`844ab14`）为独立历史项。

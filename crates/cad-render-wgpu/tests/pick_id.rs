@@ -243,6 +243,37 @@ fn first_drawn_pixel(pixels: &[u8], width: u32, height: u32) -> Option<(u32, u32
     None
 }
 
+/// The first pixel in `y0..y1` the colour pass drew that the id pass also
+/// resolves. Anti-aliased line strokes put a sub-unit-coverage fringe outside the
+/// id pass's 0.5-coverage pick threshold (±0.5 px, matching `pick_arc`), so a
+/// plain "first inked pixel" scan can return an unpickable fringe pixel.
+fn first_pickable_pixel(
+    renderer: &mut Renderer,
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    y0: u32,
+    y1: u32,
+) -> Option<(u32, u32)> {
+    for y in y0..y1.min(height) {
+        for x in 0..width {
+            let i = (y as usize * width as usize + x as usize) * 4;
+            let drawn = pixels[i] > 8 || pixels[i + 1] > 8 || pixels[i + 2] > 8;
+            if !drawn {
+                continue;
+            }
+            if renderer
+                .pick_at(x, y)
+                .expect("pick while scanning")
+                .is_some()
+            {
+                return Some((x, y));
+            }
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Id-pass correctness per class
 // ---------------------------------------------------------------------------
@@ -268,7 +299,8 @@ fn a_line_pixel_resolves_to_its_entity() {
         .upload(&scene(vec![line_band(6.0, 3, 0xABC)]))
         .expect("upload");
     let pixels = render(&mut renderer, &target);
-    let (x, y) = first_drawn_pixel(&pixels, 96, 96).expect("the band must rasterize");
+    let (x, y) = first_pickable_pixel(&mut renderer, &pixels, 96, 96, 0, 96)
+        .expect("the band must rasterize a pickable pixel");
 
     let hit = renderer.pick_at(x, y).expect("pick").expect("a hit");
     assert_eq!(hit.entity_key, renderer.pick_key_for_batch(0).unwrap());
@@ -411,7 +443,7 @@ fn a_multi_source_batch_reports_every_candidate_and_never_the_first() {
     batch.sources = vec![source(0x1000), source(0x2000)];
     renderer.upload(&scene(vec![batch])).expect("upload");
     let pixels = render(&mut renderer, &target);
-    let (x, y) = first_drawn_pixel(&pixels, 96, 96).expect("drawn");
+    let (x, y) = first_pickable_pixel(&mut renderer, &pixels, 96, 96, 0, 96).expect("drawn");
 
     let hit = renderer.pick_at(x, y).expect("pick").expect("a hit");
     assert!(
@@ -671,7 +703,7 @@ fn the_packed_rgba8_fallback_picks_identically() {
         );
         renderer.upload(&scene(batches.clone())).expect("upload");
         let pixels = render(&mut renderer, &target);
-        let (lx, ly) = first_drawn_pixel(&pixels, 96, 96).expect("drawn");
+        let (lx, ly) = first_pickable_pixel(&mut renderer, &pixels, 96, 96, 0, 96).expect("drawn");
         let quad_hit = renderer.pick_at(qx, qy).expect("pick").expect("a hit");
         let line_hit = renderer.pick_at(lx, ly).expect("pick").expect("a hit");
         picked.push((
@@ -772,12 +804,7 @@ fn an_image_pixel_resolves_to_its_source_through_the_id_pass() {
     let pixels = render(&mut renderer, &target);
     // The image covers rows ~40..56 and the line sits below it (rows > 60), so
     // scan the lower band for a pixel the color pass actually drew.
-    let (lx, ly) = (60..96u32)
-        .flat_map(|y| (0..96u32).map(move |x| (x, y)))
-        .find(|&(x, y)| {
-            let i = (y as usize * 96 + x as usize) * 4;
-            pixels[i] > 8 || pixels[i + 1] > 8 || pixels[i + 2] > 8
-        })
+    let (lx, ly) = first_pickable_pixel(&mut renderer, &pixels, 96, 96, 60, 96)
         .expect("the line must rasterize below the image");
     let line_hit = renderer.pick_at(lx, ly).expect("pick").expect("a hit");
     assert_eq!(

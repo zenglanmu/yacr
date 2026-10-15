@@ -11,6 +11,10 @@ slice A 预留的发射门。这是**语义像素变化**（SDF 抗锯齿比折�
 真实 GPU（默认 Vulkan ICD，未设 `VK_ICD_FILENAMES`）证据由运行适配器标注；软件后端产出的
 数字/截图必须显式标注为软件渲染。本切片**未**做浏览器/WebGL2/Android/vendor/golden 验收。
 
+> 后续：ADR-0009 把所有**线**类几何也改为与本文同语义的抗锯齿笔画（1.0 px 线性墨量）。
+> 因此本文中「与硬抗锯齿 1 px 直线等墨量」的对照描述仅适用于 ADR-0009 之前的状态；线现已
+> 同样 AA，墨量对照改为「跨类 AA 墨量一致」（见 `docs/render-order.md` 与 ADR-0009）。
+
 ## 背景
 
 - 弧今天先离散为折线弦（`ConicSegment::tessellate` → `Lines` 批次 → instanced line 流）。
@@ -69,6 +73,24 @@ coverage = saturate(1.0 − d / max(w, 1e-8));           // w = 1 world-pixel
   collapses to ~0 wherever the ring straddles a pixel pair symmetrically, which
   discarded the four axis points of a grid-aligned circle (the observed
   dashes/holes). Using the analytic 1-pixel width removes both.
+- **墨量语义（width semantics）**：三角滤波的积分墨量恰为半宽 `w`：
+  `∫ saturate(1 − |d|/w) dd = w`（三角形面积）。因此 `w = world_per_px` ⇒
+  **墨量 = 1.0 px**，与硬别名 1 px 直线的单位长度墨量**逐值相等**（视觉重量对齐）。
+  单位梯度 + 正交归一帧（`u` 单位、`normalize(v)` 单位且 `u ⟂ normalize(v)`）保证
+  「1 world 单位的 `d` = 1 world 单位的屏幕距离」；两者缺一都会让墨量偏离 1.0。
+  数值证明见 `crates/cad-render-wgpu/src/tests.rs` 的
+  `sdf_conic_field_is_unit_gradient_and_triangle_ink_is_one_pixel`
+  （打包帧正交归一 + 梯度模长 = 1 + 三角滤波墨量 = `w`），GPU 侧见 §8(a′)。
+- **AA 取舍（已文档化，非缺陷）**：**峰值与墨量不可兼得**。直线是**硬别名 1 px**
+  （峰值 255、墨量 1.0）；弧按**墨量对齐**（墨量 1.0），其峰值随相位在 **0.5–1.0** 之间
+  （曲线正好落在两像素行/列之间时 0.5，正好穿过像素中心时 1.0），笔画像素均值 ≈0.5
+  （≈185/255 sRGB）。这是**正确的抗锯齿**，**不**追峰值 = 255（那会牺牲墨量、把弧压得比
+  直线更轻）。
+- **sRGB 积分陷阱（取证教训）**：把**sRGB 编码通道**直接求和当作「墨量」会**高估**软边笔画
+  ≈√2：理想 1 px 三角滤波在 sRGB 下积分 1.38–1.47，而硬别名 1 px 直线恒为 1.00。
+  屏幕先把 sRGB 解码为线性光、人眼再积分，故**物理墨量必须在线性覆盖率上积分**
+  （`tests/sdf_arcs.rs::rendered_coverage` / `coverage_at`）。图像取证报出的「弧 1.40–1.46 px、
+  √2 偏宽」即此伪影，**不是**渲染缺陷：同一帧线性墨量为 1.000（见 §8(a′)）。
 - `fwidth(d)` **必须在统一控制流中计算**（不能在 `discard` 之后）；`if coverage <= 0.0
   { discard; }` 是**强制**的：一个实例 = 一个包围四边形，若不 `discard`，四边形的**每一个**
   像素都会写深度并抹掉其后的几何。
@@ -142,6 +164,15 @@ coverage = saturate(1.0 − d / max(w, 1e-8));           // w = 1 world-pixel
 - **(a) coverage-vs-analytic**：在 ~1e5–1e6 世界坐标上布网格圆心/半径/扫掠（full、近 τ、
   顺时针）/平面；采样落在 **f64 解析曲线**上的像素 → coverage **≥ 0.9**（三角形滤波的设计
   峰值）；偏离 **≥1.5 px** → **0**；±1 px 带容忍；含 chunk 边界用例。
+- **(a′) 墨量宽度对齐（forensics-grade）**：同帧 SDF 弧 + 硬别名 1 px 直线；沿 48 个角度对
+  **线性覆盖率**积分得笔画墨量（px），断言弧墨量 ∈ **[0.85, 1.15]**、且与直线墨量相差 ≤15%。
+  真正的宽度尺度回归（`w = √2·world_per_px`、或非正交归一帧）在此失败；sRGB 伪影不会。
+  （数值：弧 mean 0.987 [0.897, 1.059]，直线 1.000。）
+- **(b′) 逐相位峰值边界（forensics-grade）**：360 个相位取样环上最近像素的峰值覆盖率，
+  断言 **min ≥ 0.45**（几何下界 0.5 留 8-bit 余量）、**max ≤ 1.0**、且 max ≥ 0.9、min < 0.9
+  （峰值确实随相位变化，不是硬边）。（数值：mean 0.865 [0.723, 1.000]。）
+- **(c′) 墨量连续性（forensics-grade）**：360 个相位的积分墨量，断言**无任何样本低于中位数的
+  50%**（B1 的轴点空洞、半强度段都会失败）。（数值：median 0.997，min 0.892。）
 - **(b) chord-baseline containment**：当前弦细分的**每个顶点**都落在 SDF ≥0.5 覆盖带内
   （关节无缝隙）。
 - **(c) id-pass parity**：可拾取 ⇔ coverage ≥ 0.5，**双向扫描**（跨越 0.5 阈值两侧各取样）。
@@ -152,10 +183,10 @@ coverage = saturate(1.0 − d / max(w, 1e-8));           // w = 1 world-pixel
 - **(f) determinism + pan/zoom 零弧流重传**。
 - **(g) wgsl_validation + 弧 shader 的 GLSL-ES-300 回译**（`pick_arc` 是 native-only，像
   `pick_line` 一样排除出 GLSL 列表）。
-- **(h) 视觉验收**：把真实**混合弧+线** fixture 渲进**新目录** `/tmp/opencode/yacr-sdf-arcs-v2/`
+- **(h) 视觉验收**：把真实**混合弧+线** fixture 渲进**新目录** `/tmp/opencode/yacr-sdf-arcs-v3/`
   （before=弦，after=SDF；直线两帧相同，用于比对权重）——这是本切片**授权的语义变化证据**（弧
-  更平滑、不透明、连续）；断言弧环连续（无缺口）、核心达到满不透明、与直线权重相差 ≤20%；
-  **任何地方都不得**做与弦的逐字节一致声明。
+  更平滑、不透明、连续）；断言弧环连续（无缺口）、核心达到满不透明、**墨量**与直线相差 ≤15%、
+  且每个采样角度墨量 ∈ [0.85, 1.15] px；**任何地方都不得**做与弦的逐字节一致声明。
 
 ### 9. 停止 / 回退
 
@@ -181,7 +212,7 @@ coverage = saturate(1.0 − d / max(w, 1e-8));           // w = 1 world-pixel
 - 真实 GPU（默认 Vulkan ICD，运行适配器标注）逐用例运行；软件后端（lavapipe/SwiftShader）
   产出的数字/截图显式标注软件渲染。
 - **未**做浏览器/WebGL2/Android/vendor/golden 验收；**未**做椭圆 SDF。
-- 视觉验收目录 `/tmp/opencode/yacr-sdf-arcs-v2/`（before 弦 / after SDF）是语义变化证据，
+- 视觉验收目录 `/tmp/opencode/yacr-sdf-arcs-v3/`（before 弦 / after SDF）是语义变化证据，
   非逐字节一致证据。
 
 ## 实施记录（2026-10-15，真实 GPU）
@@ -225,11 +256,25 @@ coverage = saturate(1.0 − d / max(w, 1e-8));           // w = 1 world-pixel
 3. **id pass 的 discard 阈值回到字面的 `coverage < 0.5`**。峰值现在是 **1.0**（不再是 0.5），
    因此 `coverage ≥ 0.5 ⇔ d ≤ 0.5·w` 即 **±0.5 px**，与设计声明一致；旧「ink 阈值」偏离取消。
    同理，**弧-vs-线等深并列现在是不透明替换**（按计划顺序），旧「混合/hairline」记录作废。
+4. **墨量语义的数值闭环（本轮新增）**。图像取证一度报「弧墨量 1.40–1.46 px vs 直线 1.00 px、
+   √2 偏宽」，并据此怀疑 `world_per_px` 用了 `hypot(sx, sy)`、或 `uvec`/`normalize(vvec)` 帧
+   非正交归一、或三角半宽语义错位。逐项排除：
+   - `renderer_impl.rs` 的 `key_flags.z` 写的是 `projection.world_per_px()`（正交档即
+     `camera.world_per_px`），**不是** `hypot`；且正交档 `sx = 2/(w·wpp)`、`sy = 2/(h·wpp)` ⇒
+     **无论宽高比**，1 像素 = `wpp` world 单位（各轴一致），标量宽度正确；
+   - 打包帧正交归一：`u` 单位、`v` 为完整半直径向量（`|v| = r`）、`normalize(v)` 单位且
+     `u ⟂ normalize(v)`，故 `d` 是**单位梯度**距离场；
+   - 三角半宽语义正确：墨量 = `w`，`w = world_per_px` ⇒ 墨量 = **1.0 px**。
+   结论：**渲染正确**；1.40–1.46 是把 **sRGB 编码通道**直接积分的伪影（理想 1 px 三角滤波在
+   sRGB 下积分 1.38–1.47，硬别名 1 px 直线恒 1.00）。数值证明：
+   `src/tests.rs::sdf_conic_field_is_unit_gradient_and_triangle_ink_is_one_pixel`（打包帧正交
+   归一 + 64 角梯度模长 = 1 + 三角滤波墨量 = `w`）与 §8(a′) 的真实 GPU 线性墨量对齐
+   （弧 mean 0.987 / 直线 1.000）。**未改任何渲染常数**（默认目标语义 = 现状）。
 
 ### 实测（真实 NVIDIA Quadro P620 / Vulkan，未设 `VK_ICD_FILENAMES`，运行适配器
 `AdapterInfo { backend: "vulkan", name: "Quadro P620", device_type: "discrete_gpu" }`）
 
-`crates/cad-render-wgpu/tests/sdf_arcs.rs`（`--test-threads=1`，**10/10 + 1 ignored** 全绿）：
+`crates/cad-render-wgpu/tests/sdf_arcs.rs`（`--test-threads=1`，**13/13 + 1 ignored** 全绿）：
 
 - **(a) coverage-vs-analytic**：~1e5–1e6 世界坐标上的圆/弧（full、near-τ、顺时针）逐像素与
   **f64 解析曲线**比对；`d_px ≤ 0.05` 的像素 coverage **≥ 0.9**，`d_px ≥ 1.5` 严格为背景
@@ -243,10 +288,17 @@ coverage = saturate(1.0 − d / max(w, 1e-8));           // w = 1 world-pixel
 - **(f) determinism + pan/zoom**：同一场景逐像素确定；5 次相机移动 `arc_stream_uploads` 不变。
 - **(g) wgsl_validation**：`arc.wgsl` 通过 naga 校验并成功回译 GLSL ES 3.00（WebGL2 安全声明
   被测试，不是假设）；`pick_arc.wgsl` 是 native-only，像 `pick_line` 一样排除出 GLSL 列表。
-- **(h) 视觉验收**（`#[ignore]`，`YACR_SDF_ARC_OUT`，默认 `/tmp/opencode/yacr-sdf-arcs-v2/`）：
+- **(h) 视觉验收**（`#[ignore]`，`YACR_SDF_ARC_OUT`，默认 `/tmp/opencode/yacr-sdf-arcs-v3/`）：
   **混合弧+线**的 before=弦 / after=SDF 两帧写入**新目录**；断言弧环连续（144 角无缺口）、
-  核心满不透明（ring peak=1.000，与直线 core=1.000 一致，≤20% 差）、灰阶数 ≥ 弦
-  （实测 chord=118 / sdf=137）。
+  核心满不透明（ring peak=1.000，与直线 core=1.000 一致，≤20% 差）、**线性墨量对齐**
+  （ring ink mean=1.000 [0.888, 1.134] px vs 直线 ink=1.000 px，每个采样角 ∈ [0.85, 1.15]）、
+  灰阶数 ≥ 弦（实测 chord=118 / sdf=137）。
+- **新增 forensics-grade (a′) 墨量宽度对齐**：48 角线性墨量（弧 mean 0.987 [0.897, 1.059] vs
+  直线 1.000，差 ≤15%）。
+- **新增 forensics-grade (b′) 逐相位峰值边界**：360 相位峰值 mean 0.865 [0.723, 1.000]，
+  min ≥ 0.45、max ≤ 1.0、max ≥ 0.9、min < 0.9。
+- **新增 forensics-grade (c′) 墨量连续性**：360 相位墨量 median 0.997、min 0.892，无样本
+  低于中位数 50%。
 - **新增 cross-class 强度一致性**（捕获 B1 的 fence）：同色圆（SDF）+ 椭圆（弦）+ 直线（弦）
   同帧，三类核心峰值均 1.000，最轻类 ≥ 0.8×最重类；并逐角检查圆无缺口。
 - **新增 small-circle margin/zoom-out 扫描**（S3）：屏幕半径 40→3 px，四个轴点的外沿范围与

@@ -33,6 +33,9 @@ struct PullCamera {
     c0: vec4<f32>,
     c1: vec4<f32>,
     c2: vec4<f32>,
+    // x = world units per pixel (unused by the mesh path; it is the AA line SDF
+    // ramp width on the pulled line pipeline), yzw reserved.
+    c3: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: PullCamera;
 

@@ -332,6 +332,11 @@ pub struct FrameStats {
     /// Draw calls issued by the accelerated per-class path this frame (opaque
     /// line class + merged-mesh classes). `0` when the universal path was used.
     pub accelerated_draws: u64,
+    /// Trailing unpaired vertices dropped from `Lines`/`MeshEdges` batches whose
+    /// vertex count is odd. A `LineList` cannot pair them and both the legacy and
+    /// the converted path drop the same trailing vertex; this counts the drop so
+    /// it is reported rather than silent (see `docs/render-order.md`).
+    pub line_odd_vertex_skips: u64,
 }
 
 /// One batch whose lineweight was carried but not rasterized.
@@ -547,9 +552,13 @@ struct GpuBatch {
     /// Triangle index buffer (mesh topology only).
     indices: Option<wgpu::Buffer>,
     index_count: u32,
-    /// Line index buffer over the shared mesh vertices (wireframe only).
-    edge_indices: Option<wgpu::Buffer>,
-    edge_index_count: u32,
+    /// Pre-expanded anti-aliased line quads for this batch's line geometry: the
+    /// `Lines`/`MeshEdges` line list, or a non-merged mesh's wireframe overlay.
+    /// `None` when the batch owns no per-batch line geometry (a converted
+    /// instance stream, or a mesh with no overlay).
+    line_quads: Option<wgpu::Buffer>,
+    /// Vertex count of [`GpuBatch::line_quads`] (six per segment).
+    line_quad_count: u32,
     /// `true` when the batch's transform mirrors winding.
     mirrored: bool,
     /// Constant per-object alpha.
@@ -1019,6 +1028,11 @@ pub const MIN_GUARANTEED_TEXTURE_DIMENSION: u32 = 2048;
 /// `docs/adr/0007-entity-as-data-renderer.md`.
 pub const LINE_INSTANCE_BYTES: u32 = plan::LINE_INSTANCE_STRIDE;
 
+/// Bytes of one **legacy** anti-aliased line-quad vertex (the pre-expanded
+/// per-batch path: two `vec3<f32>` endpoints plus a `vec2<f32>` quad corner).
+/// Six such vertices make one segment's quad.
+pub const LINE_QUAD_BYTES: u32 = plan::LINE_QUAD_STRIDE;
+
 // Compile-time floor: mirrors `texture_dimension_floor_is_guaranteed`.
 const _: () = assert!(MIN_GUARANTEED_TEXTURE_DIMENSION >= 2048);
 
@@ -1034,17 +1048,14 @@ pub struct Renderer {
     queue: Option<wgpu::Queue>,
     layout: Option<wgpu::BindGroupLayout>,
     line_pipeline: Option<wgpu::RenderPipeline>,
-    /// Instanced line pipeline: one instance per 2-vertex `LineList` segment,
-    /// expanded against `unit_segment_buffer`.
+    /// Instanced line pipeline: one instance per 2-vertex segment, expanded into
+    /// an anti-aliased quad against [`Renderer::unit_quad_buffer`].
     line_instanced_pipeline: Option<wgpu::RenderPipeline>,
-    /// Shared `(0,0,0)-(1,0,0)` unit segment bound at slot 0 of the instanced
-    /// line pipeline.
-    unit_segment_buffer: Option<wgpu::Buffer>,
     /// SDF conic pipeline: one instance per analytic circle/arc, expanded against
     /// [`Renderer::unit_quad_buffer`].
     arc_pipeline: Option<wgpu::RenderPipeline>,
     /// Shared unit quad `[0,1]^2` (6 vertices, `TriangleList`) bound at slot 0 of
-    /// the SDF conic pipeline.
+    /// the SDF conic **and** the anti-aliased instanced line pipelines.
     unit_quad_buffer: Option<wgpu::Buffer>,
     mesh_pipeline: Option<wgpu::RenderPipeline>,
     /// Mirrored mesh pipeline: same shader but `front_face = Cw`, so mirrored
@@ -1107,6 +1118,9 @@ pub struct Renderer {
     /// Monotonic count of degenerate conics skipped at pack (a defensive guard
     /// the provider already excludes). Counted, never silent (iron rule #2).
     arc_degenerate_skips: u64,
+    /// Monotonic count of trailing unpaired vertices dropped from odd-length
+    /// `Lines`/`MeshEdges` batches. Counted, never silent (iron rule #2).
+    line_odd_vertex_skips: u64,
     /// Monotonic count of merged mesh chunk buffers uploaded since init. A pan or
     /// zoom must never increase it (asserted by the zero-reupload test).
     mesh_chunk_uploads: u64,
@@ -1131,6 +1145,11 @@ pub struct Renderer {
     /// segment, so the multi-segment path is exercisable on a small scene.
     /// `None` uses the binding-derived capacity.
     pulled_line_segment_elems_override: Option<usize>,
+    /// Test hook: override the anti-aliased line SDF ramp width (world units per
+    /// pixel) for the line class only. `None` uses the projection's real value.
+    /// Used by the visual-acceptance test to render the **pre-unification**
+    /// hard-aliased line look (a sub-pixel ramp) as a genuine GPU "before".
+    line_ramp_override: Option<f32>,
     /// Group-0 layout/uniform/bind group of the pulled pipelines: the three
     /// origin-independent transform columns shared by every chunk.
     pulled_camera_layout: Option<wgpu::BindGroupLayout>,
@@ -1279,6 +1298,9 @@ pub struct PreparedUpload {
     arcs: Vec<ArcStream>,
     /// Degenerate conics skipped at pack in this upload (counted, never silent).
     arc_degenerate_skips: u64,
+    /// Trailing unpaired vertices dropped from odd-length `Lines`/`MeshEdges`
+    /// batches in this upload (counted, never silent).
+    line_odd_vertex_skips: u64,
     /// Merged mesh chunks created for the staged batches; their run indices are
     /// re-based when the upload is published.
     mesh_chunks: Vec<GpuMeshChunk>,

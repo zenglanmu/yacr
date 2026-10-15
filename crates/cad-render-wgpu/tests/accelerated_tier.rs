@@ -245,8 +245,11 @@ fn line_band(y: f32, rows: u32, entity: u128) -> RenderBatch {
     batch
 }
 
-/// The first pixel the colour pass actually drew within `y0..y1`, scanning
-/// row-major. Used to pick a pixel the accelerated colour pass covered.
+/// The first **core** pixel the colour pass drew within `y0..y1`, scanning
+/// row-major. Used to pick a pixel the accelerated colour pass covered at high
+/// (pickable) coverage: with anti-aliased line strokes the outermost fringe can
+/// carry a few units of ink but sits below the id pass's 0.5-coverage pick
+/// threshold, so a `> 8` scan would pick an unpickable fringe pixel.
 fn drawn_pixel_in_rows(
     pixels: &[u8],
     width: u32,
@@ -257,7 +260,7 @@ fn drawn_pixel_in_rows(
     for y in y0..y1.min(height) {
         for x in 0..width {
             let i = (y as usize * width as usize + x as usize) * 4;
-            if pixels[i] > 8 || pixels[i + 1] > 8 || pixels[i + 2] > 8 {
+            if pixels[i] > 128 || pixels[i + 1] > 128 || pixels[i + 2] > 128 {
                 return Some((x, y));
             }
         }
@@ -891,14 +894,36 @@ fn accelerated_multi_stream_line_pick_reads_the_right_instance() {
     let top = drawn_pixel_in_rows(&pixels, 96, 96, 0, 48).expect("the top band must rasterize");
     let bottom =
         drawn_pixel_in_rows(&pixels, 96, 96, 48, 96).expect("the bottom band must rasterize");
+    // A band's first inked pixel can be an anti-aliased fringe below the id pass's
+    // 0.5-coverage pick threshold, so scan the band for a **pickable** pixel: the
+    // colour pass covered it and the id pass resolves it (the ±0.5 px AA-fringe
+    // pick tolerance, matching `pick_arc`).
+    let pickable = |renderer: &mut Renderer, y0: u32, y1: u32| -> Option<(u32, u32, u32)> {
+        for y in y0..y1 {
+            for x in 0..96u32 {
+                let i = (y as usize * 96 + x as usize) * 4;
+                if pixels[i] <= 8 && pixels[i + 1] <= 8 && pixels[i + 2] <= 8 {
+                    continue;
+                }
+                if let Some(hit) = renderer.pick_at(x, y).expect("pick") {
+                    return Some((x, y, hit.entity_key));
+                }
+            }
+        }
+        None
+    };
+    let (top_x, top_y, _) = pickable(&mut renderer, 0, 48).expect("the top band must be picked");
+    let (bottom_x, bottom_y, _) =
+        pickable(&mut renderer, 48, 96).expect("the bottom band must be picked");
     let top_hit = renderer
-        .pick_at(top.0, top.1)
+        .pick_at(top_x, top_y)
         .expect("pick")
         .expect("the top band must be picked");
     let bottom_hit = renderer
-        .pick_at(bottom.0, bottom.1)
+        .pick_at(bottom_x, bottom_y)
         .expect("pick")
         .expect("the bottom band must be picked");
+    let _ = (top, bottom);
     assert_eq!(
         top_hit.source.expect("exact top").entity,
         EntityId(0xA1),

@@ -28,7 +28,6 @@ impl Renderer {
             layout: None,
             line_pipeline: None,
             line_instanced_pipeline: None,
-            unit_segment_buffer: None,
             arc_pipeline: None,
             unit_quad_buffer: None,
             mesh_pipeline: None,
@@ -56,6 +55,7 @@ impl Renderer {
             instance_stream_uploads: 0,
             arc_stream_uploads: 0,
             arc_degenerate_skips: 0,
+            line_odd_vertex_skips: 0,
             mesh_chunk_uploads: 0,
             // No device yet: the universal path is the safe default until
             // `initialize_with_device` probes the real device.
@@ -65,6 +65,7 @@ impl Renderer {
             pulled_mesh: None,
             pulled_binding_limit_override: None,
             pulled_line_segment_elems_override: None,
+            line_ramp_override: None,
             pulled_camera_layout: None,
             pulled_camera_buffer: None,
             pulled_camera_bind_group: None,
@@ -194,6 +195,10 @@ impl Renderer {
             bind_group_layouts: &[Some(&layout), Some(&flags_layout)],
             immediate_size: 0,
         });
+        // Anti-aliased line pipeline: a pre-expanded triangle-list quad per
+        // segment (see `shaders/line.wgsl` and
+        // `docs/adr/0009-antialiased-line-strokes.md`). Each vertex carries the
+        // segment endpoints plus a quad corner.
         let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("cad-lines-pipeline"),
             layout: Some(&pipeline_layout),
@@ -201,10 +206,10 @@ impl Renderer {
                 module: &line_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(position_only_layout())],
+                buffers: &[Some(line_quad_layout())],
             },
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: None,
@@ -256,7 +261,7 @@ impl Renderer {
                     ],
                 },
                 primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::LineList,
+                    topology: wgpu::PrimitiveTopology::TriangleList,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: None,
@@ -285,12 +290,6 @@ impl Renderer {
                 multiview_mask: None,
                 cache: None,
             });
-        // One shared unit segment for every instanced line draw.
-        let unit_segment_buffer = Self::vertex_buffer(
-            &device,
-            Some(&queue),
-            &pack_positions(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
-        );
         // SDF conic pipeline (slice B): one instance per analytic circle/arc, the
         // shared unit quad expanded to the conic's extent. Same layout/depth/blend
         // state as the line pipeline (the flags table is group 1); the fragment
@@ -340,7 +339,9 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
-        // One shared unit quad `[0,1]^2` (two triangles) for every SDF conic draw.
+        // One shared unit quad `[0,1]^2` (two triangles) for every SDF conic draw
+        // and every anti-aliased instanced line draw (the six corners match
+        // `line_pulled.wgsl`'s constant table).
         let unit_quad_buffer = Self::vertex_buffer(
             &device,
             Some(&queue),
@@ -531,7 +532,6 @@ impl Renderer {
         self.layout = Some(layout);
         self.line_pipeline = Some(line_pipeline);
         self.line_instanced_pipeline = Some(line_instanced_pipeline);
-        self.unit_segment_buffer = Some(unit_segment_buffer);
         self.arc_pipeline = Some(arc_pipeline);
         self.unit_quad_buffer = Some(unit_quad_buffer);
         self.mesh_pipeline = Some(mesh_pipeline);
@@ -626,7 +626,10 @@ impl Renderer {
                 label: Some("cad-pulled-camera-layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    // The pulled line fragment stage reads `c3.x` (the AA line SDF
+                    // ramp width), so the camera uniform must be visible to both
+                    // stages; the mesh fragment stage ignores it.
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -710,7 +713,7 @@ impl Renderer {
                     buffers: &[],
                 },
                 primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::LineList,
+                    topology: wgpu::PrimitiveTopology::TriangleList,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: None,
@@ -1744,6 +1747,7 @@ impl Renderer {
             }
         }
 
+        let mut line_odd_vertex_skips = 0u64;
         for (index, batch) in batches.iter().enumerate() {
             let run = batch_runs[index].take();
             let mesh_run = batch_mesh_runs[index].take();
@@ -1751,9 +1755,21 @@ impl Renderer {
             let instanced = run.is_some();
             let merged = mesh_run.is_some();
             let arc_instanced = arc_run.is_some();
+            // A trailing unpaired vertex of a `Lines`/`MeshEdges` batch is dropped
+            // by every path (a `LineList` cannot pair it). Count it so the drop is
+            // reported, never silent.
+            if matches!(
+                batch.topology,
+                RenderTopology::Lines | RenderTopology::MeshEdges
+            ) {
+                line_odd_vertex_skips += (batch.vertices.len() % 2) as u64;
+            }
             // A converted batch owns no per-batch buffers: skip packing its
             // geometry entirely (its bytes live in the shared stream/chunk).
-            let (vertices, indices, edge_indices, normals, colors) =
+            // `line_quads` holds the pre-expanded anti-aliased line quads for a
+            // legacy `Lines`/`MeshEdges` batch or a non-merged mesh's wireframe
+            // overlay (empty for a converted batch).
+            let (vertices, indices, normals, colors, line_quads) =
                 if instanced || merged || arc_instanced {
                     Default::default()
                 } else {
@@ -1765,31 +1781,36 @@ impl Renderer {
                                 .iter()
                                 .flat_map(|t| [t[0], t[1], t[2]])
                                 .collect();
-                            let edges = geometry::mesh_edge_indices(batch);
                             let normals = geometry::repaired_normals(batch);
                             // Always bound (white when the batch has no per-vertex
                             // colours), so the mesh pipeline's `@location(2)` is valid.
                             let colors = geometry::repaired_colors(batch);
+                            let edges = geometry::mesh_edge_indices(batch);
+                            let mut quads = Vec::new();
+                            if !edges.is_empty() {
+                                expand_line_quads(&mut quads, batch, Some(&edges));
+                            }
                             (
                                 verts,
                                 idx,
-                                edges,
                                 pack_positions(&normals),
                                 pack_positions(&colors),
+                                line_quad_bytes(&quads),
                             )
                         }
-                        RenderTopology::MeshEdges => {
-                            let verts = pack_positions(&batch.vertices);
-                            let idx: Vec<u32> = (0..batch.vertices.len() as u32).collect();
-                            (verts, Vec::new(), idx, Vec::new(), Vec::new())
+                        // Line geometry is expanded into anti-aliased quads; no
+                        // legacy position/index buffer is kept.
+                        RenderTopology::MeshEdges | RenderTopology::Lines => {
+                            let mut quads = Vec::new();
+                            expand_line_quads(&mut quads, batch, None);
+                            (
+                                Vec::new(),
+                                Vec::new(),
+                                Vec::new(),
+                                Vec::new(),
+                                line_quad_bytes(&quads),
+                            )
                         }
-                        RenderTopology::Lines => (
-                            pack_positions(&batch.vertices),
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                        ),
                         // A conic batch's geometry lives in the SDF instance streams
                         // (`arc_instanced` is always true here); it owns no per-batch
                         // buffers.
@@ -1800,7 +1821,7 @@ impl Renderer {
             // A converted batch owns no per-batch vertex buffer; its exact upload
             // charge is the instance/merged/conic bytes it contributed (never the
             // legacy vertex bytes).
-            let vertex_buffer = if instanced || merged || arc_instanced {
+            let vertex_buffer = if instanced || merged || arc_instanced || vertices.is_empty() {
                 None
             } else {
                 Some(Self::vertex_buffer(device, self.queue.as_ref(), &vertices))
@@ -1821,13 +1842,14 @@ impl Renderer {
             } else {
                 Some(Self::index_buffer(device, self.queue.as_ref(), &indices))
             };
-            let edge_buffer = if edge_indices.is_empty() {
+            let line_quad_count = (line_quads.len() / LINE_QUAD_STRIDE as usize) as u32;
+            let line_quad_buffer = if line_quads.is_empty() {
                 None
             } else {
-                Some(Self::index_buffer(
+                Some(Self::vertex_buffer(
                     device,
                     self.queue.as_ref(),
-                    &edge_indices,
+                    &line_quads,
                 ))
             };
             let normal_buffer = if is_mesh && !merged {
@@ -1845,9 +1867,9 @@ impl Renderer {
             // (56 B per segment; 64 B on the accelerated tier, whose segment
             // buffer is also the pulled storage) and/or its merged-chunk share
             // (44 B per stored vertex + 4 B per triangle index), otherwise
-            // positions/normals/colours 12 B per vertex and triangle/edge indices
-            // 4 B each. Kept in lockstep with `GpuBatch::upload_size_bytes`, which
-            // the frame budget charges.
+            // positions/normals/colours 12 B per vertex, triangle indices 4 B each
+            // and anti-aliased line quads 32 B per vertex. Kept in lockstep with
+            // `GpuBatch::upload_size_bytes`, which the frame budget charges.
             //
             // On the accelerated tier the merged mesh also contributes to the
             // whole-scene pulled storage buffers (64 B per merged vertex, 4 B per
@@ -1891,11 +1913,7 @@ impl Renderer {
             let bytes = if instanced || merged || arc_instanced {
                 line_bytes + mesh_bytes + pulled_bytes + arc_bytes
             } else {
-                normals.len()
-                    + vertices.len()
-                    + colors.len()
-                    + indices.len() * 4
-                    + edge_indices.len() * 4
+                normals.len() + vertices.len() + colors.len() + indices.len() * 4 + line_quads.len()
             };
             uploaded_bytes += bytes as u64;
             staged.push(GpuBatch {
@@ -1906,8 +1924,8 @@ impl Renderer {
                 topology: batch.topology,
                 indices: index_buffer,
                 index_count: triangle_index_count,
-                edge_indices: edge_buffer,
-                edge_index_count: edge_indices.len() as u32,
+                line_quads: line_quad_buffer,
+                line_quad_count,
                 mirrored: batch.mirrored,
                 alpha: batch.alpha,
                 color: batch.color,
@@ -1932,6 +1950,7 @@ impl Renderer {
             instances: instance_streams,
             arcs: arc_streams,
             arc_degenerate_skips,
+            line_odd_vertex_skips,
             mesh_chunks: mesh_chunk_buffers,
             device_generation: self.device_generation,
             device: device.clone(),
@@ -1979,6 +1998,7 @@ impl Renderer {
         self.instance_stream_uploads += prepared.instances.len() as u64;
         self.arc_stream_uploads += prepared.arcs.len() as u64;
         self.arc_degenerate_skips += prepared.arc_degenerate_skips;
+        self.line_odd_vertex_skips += prepared.line_odd_vertex_skips;
         self.mesh_chunk_uploads += prepared.mesh_chunks.len() as u64;
         self.instance_streams.append(&mut prepared.instances);
         self.arc_streams.append(&mut prepared.arcs);
@@ -2850,7 +2870,6 @@ impl Renderer {
     pub fn rebuild_device(&mut self, _target: &RenderTarget) -> CadResult<()> {
         self.line_pipeline = None;
         self.line_instanced_pipeline = None;
-        self.unit_segment_buffer = None;
         self.arc_pipeline = None;
         self.unit_quad_buffer = None;
         self.mesh_pipeline = None;
@@ -2928,7 +2947,6 @@ impl Renderer {
         let detail = detail.into();
         self.line_pipeline = None;
         self.line_instanced_pipeline = None;
-        self.unit_segment_buffer = None;
         self.arc_pipeline = None;
         self.unit_quad_buffer = None;
         self.mesh_pipeline = None;
@@ -3176,11 +3194,6 @@ impl Renderer {
                 "renderer resources missing".into(),
             ));
         };
-        let Some(unit_segment_buffer) = self.unit_segment_buffer.as_ref() else {
-            return Err(RenderError::NotInitialized(
-                "renderer resources missing".into(),
-            ));
-        };
         let Some(arc_pipeline) = self.arc_pipeline.as_ref() else {
             return Err(RenderError::NotInitialized(
                 "renderer resources missing".into(),
@@ -3412,6 +3425,18 @@ impl Renderer {
         // per-batch uniform (the whole stream/chunk shares one), so they are
         // skipped and the legacy slots are compacted: a fully converted scene
         // needs one stream slot and one chunk slot, not one slot per batch.
+        // World units per pixel travels in the otherwise-unused `key_flags.z` word
+        // (bitcast f32) for every uniform: the SDF conic vertex stage floors its
+        // quad margin with it, and the anti-aliased line stages use it as the SDF
+        // ramp width (`w = world_per_px` → 1.0 px of linear ink). The mesh/image
+        // shaders ignore it.
+        let world_per_px_bits = (projection.world_per_px() as f32).to_bits();
+        // The line class may use an overridden ramp width (test hook); the SDF
+        // conic class always uses the projection's real value.
+        let line_wpp_bits = self
+            .line_ramp_override
+            .map(f32::to_bits)
+            .unwrap_or(world_per_px_bits);
         let mut legacy_slots = 0usize;
         for &index in &budget_plan.accepted {
             let batch = &self.batches[index];
@@ -3427,7 +3452,7 @@ impl Renderer {
             let uniform = uniform_bytes(
                 &m,
                 [r, g, b, alpha],
-                [batch.pick_key, batch.instance_flags(), 0, 0],
+                [batch.pick_key, batch.instance_flags(), line_wpp_bits, 0],
             );
             self.uniforms.write_slot(legacy_slots, &uniform);
             self.frame_slots[index] = legacy_slots as u32;
@@ -3463,8 +3488,8 @@ impl Renderer {
             let matrix = projection.batch_matrix_f64(self.instance_streams[s].origin);
             // The instanced shader ignores the uniform tint (colour and the pick
             // key are per-instance) but the layout keeps them; write opaque white
-            // and a zero key.
-            let uniform = uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, 0, 0]);
+            // and a zero key, and the SDF ramp width in `key_flags.z`.
+            let uniform = uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, line_wpp_bits, 0]);
             self.uniforms.write_slot(slot as usize, &uniform);
         }
 
@@ -3492,7 +3517,6 @@ impl Renderer {
         // World units per pixel travels in the otherwise-unused `key_flags.z` word
         // (bitcast f32) so the SDF conic vertex stage can floor its quad margin
         // at ~2 px for small on-screen circles (see `shaders/arc.wgsl`).
-        let world_per_px_bits = (projection.world_per_px() as f32).to_bits();
         for (a, &slot) in arc_slots.iter().enumerate() {
             let matrix = projection.batch_matrix_f64(self.arc_streams[a].origin);
             let uniform =
@@ -3517,7 +3541,11 @@ impl Renderer {
         // (the `camera_move_*` fences assert the upload counters stay flat).
         if use_pulled {
             if let Some(camera_buffer) = self.pulled_camera_buffer.as_ref() {
-                let columns = pulled_camera_columns(projection);
+                let mut columns = pulled_camera_columns(projection);
+                // The line class may use an overridden ramp width (test hook).
+                if let Some(w) = self.line_ramp_override {
+                    columns[3][0] = w;
+                }
                 queue.write_buffer(camera_buffer, 0, &pulled_camera_bytes(&columns));
             }
             if let (Some(pulled), false) =
@@ -3660,21 +3688,16 @@ impl Renderer {
                         converted_batches += 1;
                     }
                 }
-                if let (Some(pulled), Some(pipeline), Some(camera_bg)) = (
-                    self.pulled_lines.as_ref(),
-                    self.line_pulled_pipeline.as_ref(),
-                    self.pulled_camera_bind_group.as_ref(),
-                ) {
-                    for segment in &pulled.segments {
-                        encode_state.set_pipeline(&mut pass, pipeline);
-                        encode_state.set_bind_group0_static(&mut pass, camera_bg);
-                        encode_state.set_bind_group2(&mut pass, &segment.bind_group);
-                        // Two unit vertices expanded once per pulled instance; the
-                        // instance index addresses this segment's storage buffer.
-                        pass.draw(0..2, 0..segment.instance_count);
-                        instanced_draws += 1;
-                    }
-                }
+                // The merged-mesh class is drawn **before** the line class: with
+                // anti-aliased line strokes an overlapping line's sub-unit-coverage
+                // fringe composites over whatever is behind it, and the universal
+                // per-run path draws the meshes (plan order) before the lines, so
+                // drawing the mesh class first keeps the accelerated frame
+                // byte-identical to the universal one for a line crossing a mesh at
+                // equal depth (fenced by
+                // `accelerated_overlapping_ties_match_universal_pixels`). The tie
+                // itself is order-independent (the line's `LessEqual` beats the
+                // meshes' `Less`); only the fringe blend background depends on it.
                 if let (Some(pulled), Some(camera_bg)) = (
                     self.pulled_mesh.as_ref(),
                     self.pulled_camera_bind_group.as_ref(),
@@ -3698,6 +3721,22 @@ impl Renderer {
                                 mesh_draws += 1;
                             }
                         }
+                    }
+                }
+                if let (Some(pulled), Some(pipeline), Some(camera_bg)) = (
+                    self.pulled_lines.as_ref(),
+                    self.line_pulled_pipeline.as_ref(),
+                    self.pulled_camera_bind_group.as_ref(),
+                ) {
+                    for segment in &pulled.segments {
+                        encode_state.set_pipeline(&mut pass, pipeline);
+                        encode_state.set_bind_group0_static(&mut pass, camera_bg);
+                        encode_state.set_bind_group2(&mut pass, &segment.bind_group);
+                        // Six unit-quad vertices expanded once per pulled instance
+                        // (the corners are selected from a constant table); the
+                        // instance index addresses this segment's storage buffer.
+                        pass.draw(0..6, 0..segment.instance_count);
+                        instanced_draws += 1;
                     }
                 }
                 // The SDF conic class is residual on the accelerated tier: it has
@@ -3823,7 +3862,7 @@ impl Renderer {
                             &self.uniforms,
                             &stream_slots,
                             &self.instance_streams,
-                            unit_segment_buffer,
+                            unit_quad_buffer,
                             line_instanced_pipeline,
                         ) {
                             instanced_draws += 1;
@@ -3895,7 +3934,7 @@ impl Renderer {
                                 &self.uniforms,
                                 &stream_slots,
                                 &self.instance_streams,
-                                unit_segment_buffer,
+                                unit_quad_buffer,
                                 line_instanced_pipeline,
                             ) {
                                 instanced_draws += 1;
@@ -3972,7 +4011,7 @@ impl Renderer {
                                 &self.uniforms,
                                 &stream_slots,
                                 &self.instance_streams,
-                                unit_segment_buffer,
+                                unit_quad_buffer,
                                 line_instanced_pipeline,
                             ) {
                                 instanced_draws += 1;
@@ -4028,7 +4067,7 @@ impl Renderer {
                                 &self.uniforms,
                                 &stream_slots,
                                 &self.instance_streams,
-                                unit_segment_buffer,
+                                unit_quad_buffer,
                                 line_instanced_pipeline,
                             ) {
                                 instanced_draws += 1;
@@ -4068,7 +4107,7 @@ impl Renderer {
                     &self.uniforms,
                     &stream_slots,
                     &self.instance_streams,
-                    unit_segment_buffer,
+                    unit_quad_buffer,
                     line_instanced_pipeline,
                 ) {
                     instanced_draws += 1;
@@ -4202,6 +4241,7 @@ impl Renderer {
             } else {
                 0
             },
+            line_odd_vertex_skips: self.line_odd_vertex_skips,
         })
     }
 
@@ -4377,6 +4417,14 @@ impl Renderer {
         self.pulled_line_segment_elems_override = elems;
     }
 
+    /// Test hook: override the anti-aliased line SDF ramp width (world units per
+    /// pixel) for the line class only. `None` restores the projection's real
+    /// value. A sub-pixel ramp reproduces the pre-unification hard-aliased 1 px
+    /// line look, which the visual-acceptance test uses as its "before" frame.
+    pub fn set_line_ramp_override(&mut self, world_per_px: Option<f32>) {
+        self.line_ramp_override = world_per_px;
+    }
+
     /// Number of resident instanced line streams.
     pub fn instance_stream_count(&self) -> usize {
         self.instance_streams.len()
@@ -4422,6 +4470,14 @@ impl Renderer {
     /// instanced.
     pub fn arc_degenerate_skips(&self) -> u64 {
         self.arc_degenerate_skips
+    }
+
+    /// Monotonic count of trailing unpaired vertices dropped from odd-length
+    /// `Lines`/`MeshEdges` batches since the last device initialization. A
+    /// `LineList` cannot pair the trailing vertex and every path drops it; this
+    /// reports the drop so it is never silent.
+    pub fn line_odd_vertex_skips(&self) -> u64 {
+        self.line_odd_vertex_skips
     }
 
     /// Number of resident merged mesh chunks.
