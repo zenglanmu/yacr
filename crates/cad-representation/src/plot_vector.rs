@@ -246,6 +246,13 @@ pub fn build_vector_document(
                     collect_lines(&mut document, object, pair, fragment, &vector_page);
                 }
             }
+            // This slice keeps the chord draw: expand the conic through the same
+            // tessellation the pre-conic path used. A normal paper-space build
+            // has already expanded conics, so this is a safety net.
+            DisplayPrimitive::Conic(conic) => {
+                let points = conic.chord_points();
+                collect_lines(&mut document, object, &points, fragment, &vector_page);
+            }
             DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
                 collect_mesh(&mut document, object, mesh, fragment, &vector_page);
             }

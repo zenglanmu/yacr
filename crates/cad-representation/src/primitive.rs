@@ -16,11 +16,122 @@ pub struct ImageVertex {
     pub uv: [f64; 2],
 }
 
+/// An analytic conic in world space: a full circle or an elliptical/arc sweep,
+/// parameterised as `p(t) = center + major*cos(t) + minor*sin(t)`.
+///
+/// `major`/`minor` are conjugate semi-diameter vectors (not necessarily
+/// orthogonal or equal length) — the affine image of a circle's two axes. Under
+/// an affine map `p -> M*p + c` the parameterisation becomes
+/// `(M*center + c) + (M*major)*cos(t) + (M*minor)*sin(t)`, so the angles `start`
+/// and `sweep` are unchanged: only `center`/`major`/`minor` transform. That
+/// property is what makes a conic the natural carrier for a future analytic
+/// (SDF-style) draw; today it is chord-tessellated exactly like the curves it
+/// replaces.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConicSegment {
+    pub center: Point3,
+    /// Semi-diameter vector along `cos(t)`.
+    pub major: Point3,
+    /// Conjugate semi-diameter vector along `sin(t)`.
+    pub minor: Point3,
+    /// Parameter angle (radians) at `t = 0`.
+    pub start: f64,
+    /// Signed sweep (radians); a negative sweep draws a clockwise/reflected arc.
+    pub sweep: f64,
+    /// `true` when the conic is a closed full circle (its `start`/`sweep` span a
+    /// whole turn).
+    pub full: bool,
+}
+
+impl ConicSegment {
+    /// Whether the semi-diameter axes are finite and non-degenerate, i.e. the
+    /// conic actually sweeps an area (not a point or a straight line). This is
+    /// the axis half of the future SDF eligibility gate.
+    pub fn axes_are_non_degenerate(&self) -> bool {
+        let finite = |p: &Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+        if !finite(&self.center)
+            || !finite(&self.major)
+            || !finite(&self.minor)
+            || !self.start.is_finite()
+            || !self.sweep.is_finite()
+        {
+            return false;
+        }
+        let major_len = cad_geometry::length(self.major);
+        let minor_len = cad_geometry::length(self.minor);
+        // Components are finite here, so the lengths are finite: `<=` rejects a
+        // zero axis without letting a NaN through.
+        if major_len <= 1e-12 || minor_len <= 1e-12 {
+            return false;
+        }
+        // The axes must span a plane: a parallel pair collapses to a segment.
+        let cross_len = cad_geometry::length(cad_geometry::cross(self.major, self.minor));
+        cross_len > 1e-9 * major_len * minor_len
+    }
+
+    /// The equivalent [`SemanticGeometry::Ellipse`] so the legacy chord
+    /// tessellation can be reused unchanged.
+    ///
+    /// The minor axis is rebuilt from the plane normal, matching
+    /// [`cad_geometry::tessellate_geometry`]'s own ellipse frame, so the chord
+    /// points are the same as the pre-conic path.
+    pub fn to_semantic_geometry(&self) -> SemanticGeometry {
+        let major_len = cad_geometry::length(self.major);
+        let minor_len = cad_geometry::length(self.minor);
+        let normal = {
+            let c = cad_geometry::cross(self.major, self.minor);
+            let len = cad_geometry::length(c);
+            if len >= 1e-24 {
+                cad_geometry::scale(c, 1.0 / len)
+            } else {
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                }
+            }
+        };
+        SemanticGeometry::Ellipse {
+            center: self.center,
+            normal,
+            major_axis: self.major,
+            ratio: if major_len > 0.0 {
+                minor_len / major_len
+            } else {
+                0.0
+            },
+            start: self.start,
+            sweep: if self.full {
+                std::f64::consts::TAU
+            } else {
+                self.sweep
+            },
+        }
+    }
+
+    /// Chord-tessellate this conic with `params`, reusing the legacy curve
+    /// tessellation so the current (chord) draw is unchanged.
+    pub fn tessellate(&self, params: TessellationParams) -> Vec<Point3> {
+        tessellate_geometry(&self.to_semantic_geometry(), params)
+    }
+
+    /// Chord-tessellate with the default tolerance, for consumers that have no
+    /// tolerance policy of their own (the scene cache / vector export safety
+    /// net). Normal builds never reach them: `build_expanded` already expands a
+    /// conic to chords with the build's tolerance.
+    pub fn chord_points(&self) -> Vec<Point3> {
+        self.tessellate(TessellationParams::default())
+    }
+}
+
 /// One drawable piece of an entity, in world coordinates.
 pub enum DisplayPrimitive {
     Lines(Arc<[Point3]>),
     /// Independent endpoint pairs. Unlike `Lines`, adjacent pairs are not joined.
     LineSegments(Arc<[Point3]>),
+    /// An analytic conic (circle/arc/ellipse). Named `Conic`, not `Arc`, to
+    /// avoid colliding with [`std::sync::Arc`] in this enum.
+    Conic(Arc<ConicSegment>),
     Mesh(Arc<Mesh>),
     /// Filled mesh that deliberately omits the per-triangle-edge overlay.
     /// Used for triangulated font glyphs, where the overlay would expose
@@ -67,6 +178,17 @@ impl DisplayPrimitive {
                     .collect::<Vec<_>>()
                     .into_boxed_slice(),
             )),
+            // An affine map sends `center + major*cos t + minor*sin t` to
+            // `(M*center + c) + (M*major)*cos t + (M*minor)*sin t`: the angles
+            // pass through unchanged, only the center and semi-diameters move.
+            DisplayPrimitive::Conic(conic) => DisplayPrimitive::Conic(Arc::new(ConicSegment {
+                center: transform.apply_point(conic.center),
+                major: transform.apply_vector(conic.major),
+                minor: transform.apply_vector(conic.minor),
+                start: conic.start,
+                sweep: conic.sweep,
+                full: conic.full,
+            })),
             DisplayPrimitive::Mesh(mesh) => {
                 DisplayPrimitive::Mesh(Arc::new(transform_mesh(mesh, transform)))
             }

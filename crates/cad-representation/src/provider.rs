@@ -45,17 +45,94 @@ struct TextScale {
     height: Option<f64>,
 }
 
-impl DefaultRepresentationProvider {
-    /// Tolerance used for CPU display discretisation at the current zoom.
-    ///
-    /// The engine's `tessellate_curve` interprets the policy's pixel budget as
-    /// world units when no camera is available; callers that know the zoom
-    /// should scale `display_pixels` before building.
-    fn params(context: &RepresentationContext) -> TessellationParams {
-        TessellationParams {
-            tolerance: context.tolerance.display_pixels.max(1e-12),
-            ..TessellationParams::default()
+/// The chord-tessellation tolerance a build uses for curve geometry.
+///
+/// Shared by the provider's chord fallback and by the conic chord expansion so
+/// the two can never drift apart.
+pub(crate) fn chord_tessellation_params(context: &RepresentationContext) -> TessellationParams {
+    TessellationParams {
+        tolerance: context.tolerance.display_pixels.max(1e-12),
+        ..TessellationParams::default()
+    }
+}
+
+/// Build the analytic conic for a curve entity, or `None` when the source is
+/// degenerate or non-finite (the caller then keeps the legacy chord path).
+///
+/// The semi-diameter vectors mirror the frame [`tessellate_geometry`] uses, so
+/// expanding the conic back through that same tessellation reproduces the
+/// pre-conic chord output.
+fn conic_from_geometry(geometry: &SemanticGeometry) -> Option<ConicSegment> {
+    match geometry {
+        SemanticGeometry::Circle {
+            center,
+            normal,
+            radius,
+        } => {
+            let (ax, ay, _) = cad_geometry::arbitrary_axis(*normal);
+            let conic = ConicSegment {
+                center: *center,
+                major: cad_geometry::scale(ax, *radius),
+                minor: cad_geometry::scale(ay, *radius),
+                start: 0.0,
+                sweep: std::f64::consts::TAU,
+                full: true,
+            };
+            conic.axes_are_non_degenerate().then_some(conic)
         }
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => {
+            let (ax, ay, _) = cad_geometry::arbitrary_axis(*normal);
+            let conic = ConicSegment {
+                center: *center,
+                major: cad_geometry::scale(ax, *radius),
+                minor: cad_geometry::scale(ay, *radius),
+                start: *start,
+                sweep: *sweep,
+                full: sweep.abs() >= std::f64::consts::TAU - 1e-9,
+            };
+            conic.axes_are_non_degenerate().then_some(conic)
+        }
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => {
+            let major_len = cad_geometry::length(*major_axis);
+            if !(major_len.is_finite() && major_len > 0.0) {
+                return None;
+            }
+            let u = cad_geometry::scale(*major_axis, 1.0 / major_len);
+            // The minor direction is the in-plane +90° rotation of the major
+            // axis, matching `ellipse_minor_dir` in the tessellation frame.
+            let minor_dir = {
+                let c = cad_geometry::cross(*normal, u);
+                let len = cad_geometry::length(c);
+                if len >= 1e-12 {
+                    cad_geometry::scale(c, 1.0 / len)
+                } else {
+                    return None;
+                }
+            };
+            let conic = ConicSegment {
+                center: *center,
+                major: *major_axis,
+                minor: cad_geometry::scale(minor_dir, major_len * ratio.abs()),
+                start: *start,
+                sweep: *sweep,
+                full: sweep.abs() >= std::f64::consts::TAU - 1e-9,
+            };
+            conic.axes_are_non_degenerate().then_some(conic)
+        }
+        _ => None,
     }
 }
 
@@ -575,36 +652,106 @@ impl DefaultRepresentationProvider {
                     }
                 }
             }
-            other => {
-                let points = tessellate_geometry(other, Self::params(context));
-                if points.len() >= 2 {
-                    representation.fragments.push(DisplayFragment {
-                        source,
-                        geometry_source,
-                        precision: Precision::Analytic,
-                        alpha: 1.0,
-                        color: DEFAULT_RENDER_COLOR,
-                        color_unresolved: true,
-                        lineweight: DEFAULT_LINEWEIGHT_MM,
-                        lineweight_unresolved: true,
-                        linetype: LinetypePattern::continuous(),
-                        linetype_unresolved: true,
-                        linetype_scale: 1.0,
-                        primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
-                    });
-                } else {
-                    representation.completeness = Completeness::Missing(vec![
-                        "no display representation in this build".into(),
-                    ]);
-                    representation.diagnostics.push(Diagnostic {
-                        object: Some(ObjectId(entity.id.0)),
-                        code: "representation.empty".into(),
-                        message: format!("{} produced no drawable points", entity.object.type_key),
-                    });
+            SemanticGeometry::Circle { .. }
+            | SemanticGeometry::Arc { .. }
+            | SemanticGeometry::Ellipse { .. } => {
+                match conic_from_geometry(geometry) {
+                    Some(conic) => {
+                        representation.fragments.push(DisplayFragment {
+                            source,
+                            geometry_source,
+                            precision: Precision::Analytic,
+                            alpha: 1.0,
+                            color: DEFAULT_RENDER_COLOR,
+                            color_unresolved: true,
+                            lineweight: DEFAULT_LINEWEIGHT_MM,
+                            lineweight_unresolved: true,
+                            linetype: LinetypePattern::continuous(),
+                            linetype_unresolved: true,
+                            linetype_scale: 1.0,
+                            primitive: DisplayPrimitive::Conic(Arc::new(conic)),
+                        });
+                    }
+                    None => {
+                        // Degenerate or non-finite axes: keep the legacy chord
+                        // path so the draw is unchanged. A non-finite source is
+                        // reported rather than silently tessellated to NaN.
+                        if !cad_geometry::geometry_is_finite(geometry) {
+                            representation.completeness =
+                                representation
+                                    .completeness
+                                    .combine(Completeness::Partial(vec![
+                                        "conic has non-finite axes; drawn as chords".into(),
+                                    ]));
+                            representation.diagnostics.push(Diagnostic {
+                                object: Some(ObjectId(entity.id.0)),
+                                code: "representation.conic_degenerate".into(),
+                                message: "conic has non-finite axes; falling back to the chord \
+                                          tessellation"
+                                    .into(),
+                            });
+                        }
+                        push_chord_fragment(
+                            entity,
+                            geometry,
+                            context,
+                            source,
+                            geometry_source,
+                            &mut representation,
+                        );
+                    }
                 }
             }
+            other => push_chord_fragment(
+                entity,
+                other,
+                context,
+                source,
+                geometry_source,
+                &mut representation,
+            ),
         }
         Ok(representation)
+    }
+}
+
+/// Tessellate a curve-like entity into a chord polyline and push it as a
+/// `Lines` fragment (the pre-conic display path).
+///
+/// A shape that yields fewer than two points becomes an explicit `Missing`
+/// result with a diagnostic, never an empty success.
+fn push_chord_fragment(
+    entity: &DbEntity,
+    geometry: &SemanticGeometry,
+    context: &RepresentationContext,
+    source: SelectionRef,
+    geometry_source: GeometrySource,
+    representation: &mut DisplayRepresentation,
+) {
+    let points = tessellate_geometry(geometry, chord_tessellation_params(context));
+    if points.len() >= 2 {
+        representation.fragments.push(DisplayFragment {
+            source,
+            geometry_source,
+            precision: Precision::Analytic,
+            alpha: 1.0,
+            color: DEFAULT_RENDER_COLOR,
+            color_unresolved: true,
+            lineweight: DEFAULT_LINEWEIGHT_MM,
+            lineweight_unresolved: true,
+            linetype: LinetypePattern::continuous(),
+            linetype_unresolved: true,
+            linetype_scale: 1.0,
+            primitive: DisplayPrimitive::Lines(Arc::from(points.into_boxed_slice())),
+        });
+    } else {
+        representation.completeness =
+            Completeness::Missing(vec!["no display representation in this build".into()]);
+        representation.diagnostics.push(Diagnostic {
+            object: Some(ObjectId(entity.id.0)),
+            code: "representation.empty".into(),
+            message: format!("{} produced no drawable points", entity.object.type_key),
+        });
     }
 }
 
@@ -1073,104 +1220,58 @@ impl ProviderRegistry {
                     stack.pop();
                 }
                 DisplayPrimitive::Lines(points) => {
-                    // Dash subdivision happens on the transformed world-space
-                    // polyline so arc length is measured in final units.
-                    let world: Vec<Point3> =
-                        points.iter().map(|p| transform.apply_point(*p)).collect();
-                    let packed = context.packed_line_segments && own_alpha == 1.0;
-                    let (runs, fallback_reason) = if packed {
-                        let (segments, reason) = if own_linetype.is_continuous() {
-                            (world.windows(2).flatten().copied().collect(), None)
-                        } else {
-                            match cad_geometry::dash_polyline_segments(
-                                &world,
-                                &own_linetype.elements,
-                                linetype_scale as f64 * global_lt_scale,
-                            ) {
-                                Ok(segments) => (segments, None),
-                                Err(issue) => (
-                                    world.windows(2).flatten().copied().collect(),
-                                    Some(issue.reason().to_string()),
-                                ),
-                            }
-                        };
-                        (vec![segments], reason)
-                    } else {
-                        subdivide_dashes(
-                            &world,
-                            &own_linetype,
-                            linetype_scale as f64,
-                            global_lt_scale,
-                        )
-                    };
-                    if let Some(reason) = fallback_reason {
-                        out.completeness = weaker_completeness(
-                            &out.completeness,
-                            &Completeness::Partial(vec![format!(
-                                "linetype dashes could not be generated: {reason}"
-                            )]),
-                        );
-                        out.diagnostics.push(Diagnostic {
-                            object: Some(ObjectId(entity.id.0)),
-                            code: "representation.linetype_fallback".into(),
-                            message: format!("linetype dashes fell back to continuous: {reason}"),
-                        });
+                    emit_polyline(
+                        entity,
+                        &points,
+                        transform,
+                        path,
+                        &fragment.source,
+                        &attributes,
+                        own_alpha,
+                        own_color,
+                        color_unresolved,
+                        own_lineweight,
+                        lineweight_unresolved,
+                        &own_linetype,
+                        linetype_unresolved,
+                        linetype_scale,
+                        context.packed_line_segments,
+                        global_lt_scale,
+                        out,
+                    );
+                }
+                DisplayPrimitive::Conic(conic) => {
+                    // This slice keeps the chord draw. Record the eligibility
+                    // facts for the future SDF gate (continuous linetype, opaque,
+                    // non-degenerate axes), then expand the conic through the
+                    // same tessellation the pre-conic path used so the rendered
+                    // output is unchanged.
+                    let eligible = own_alpha == 1.0
+                        && own_linetype.is_continuous()
+                        && conic.axes_are_non_degenerate();
+                    if let Some(stats) = context.conic_stats.as_deref() {
+                        stats.record(eligible);
                     }
-                    let runs = if packed {
-                        // Preserve all segments (including corners) but avoid
-                        // duplicating paths and styles once per dash. Bound each
-                        // packed fragment so downstream GPU buffers stay small.
-                        let mut packed = Vec::new();
-                        let mut chunk: Vec<Point3> = Vec::new();
-                        for run in runs {
-                            for pair in run.chunks_exact(2) {
-                                if let Some(origin) = chunk.first() {
-                                    if pair.iter().any(|p| {
-                                        [p.x - origin.x, p.y - origin.y, p.z - origin.z]
-                                            .iter()
-                                            .any(|v| !v.is_finite() || v.abs() > 8192.0)
-                                    }) {
-                                        packed.push(std::mem::take(&mut chunk));
-                                    }
-                                }
-                                chunk.extend_from_slice(pair);
-                                if chunk.len() == 65_536 {
-                                    packed.push(std::mem::take(&mut chunk));
-                                }
-                            }
-                        }
-                        if !chunk.is_empty() {
-                            packed.push(chunk);
-                        }
-                        packed
-                    } else {
-                        runs
-                    };
-                    for run in runs {
-                        if run.len() < 2 {
-                            continue;
-                        }
-                        let mut source = fragment.source.clone();
-                        source.instance = path.clone();
-                        out.fragments.push(DisplayFragment {
-                            source,
-                            geometry_source: attributes.geometry_source.clone(),
-                            precision: precision_for_source(&attributes.geometry_source),
-                            alpha: own_alpha,
-                            color: own_color,
-                            color_unresolved,
-                            lineweight: own_lineweight,
-                            lineweight_unresolved,
-                            linetype: own_linetype.clone(),
-                            linetype_unresolved,
-                            linetype_scale,
-                            primitive: if packed {
-                                DisplayPrimitive::LineSegments(Arc::from(run.into_boxed_slice()))
-                            } else {
-                                DisplayPrimitive::Lines(Arc::from(run.into_boxed_slice()))
-                            },
-                        });
-                    }
+                    let points = conic.tessellate(chord_tessellation_params(context));
+                    emit_polyline(
+                        entity,
+                        &points,
+                        transform,
+                        path,
+                        &fragment.source,
+                        &attributes,
+                        own_alpha,
+                        own_color,
+                        color_unresolved,
+                        own_lineweight,
+                        lineweight_unresolved,
+                        &own_linetype,
+                        linetype_unresolved,
+                        linetype_scale,
+                        context.packed_line_segments,
+                        global_lt_scale,
+                        out,
+                    );
                 }
                 primitive => {
                     let mut source = fragment.source;
@@ -1193,5 +1294,124 @@ impl ProviderRegistry {
             }
         }
         Ok(())
+    }
+}
+
+/// Transform a world-space polyline, subdivide it into dashes and push the
+/// resulting line/segment fragments.
+///
+/// Shared by `Lines` fragments and by the chord expansion of a `Conic`
+/// fragment, so the two paths cannot diverge.
+#[allow(clippy::too_many_arguments)]
+fn emit_polyline(
+    entity: &DbEntity,
+    points: &[Point3],
+    transform: &Transform3,
+    path: &InstancePath,
+    source: &SelectionRef,
+    attributes: &EntityRenderAttributes,
+    own_alpha: f32,
+    own_color: [f32; 3],
+    color_unresolved: bool,
+    own_lineweight: f32,
+    lineweight_unresolved: bool,
+    own_linetype: &LinetypePattern,
+    linetype_unresolved: bool,
+    linetype_scale: f32,
+    packed_configured: bool,
+    global_lt_scale: f64,
+    out: &mut DisplayRepresentation,
+) {
+    // Dash subdivision happens on the transformed world-space polyline so arc
+    // length is measured in final units.
+    let world: Vec<Point3> = points.iter().map(|p| transform.apply_point(*p)).collect();
+    let packed = packed_configured && own_alpha == 1.0;
+    let (runs, fallback_reason) = if packed {
+        let (segments, reason) = if own_linetype.is_continuous() {
+            (world.windows(2).flatten().copied().collect(), None)
+        } else {
+            match cad_geometry::dash_polyline_segments(
+                &world,
+                &own_linetype.elements,
+                linetype_scale as f64 * global_lt_scale,
+            ) {
+                Ok(segments) => (segments, None),
+                Err(issue) => (
+                    world.windows(2).flatten().copied().collect(),
+                    Some(issue.reason().to_string()),
+                ),
+            }
+        };
+        (vec![segments], reason)
+    } else {
+        subdivide_dashes(&world, own_linetype, linetype_scale as f64, global_lt_scale)
+    };
+    if let Some(reason) = fallback_reason {
+        out.completeness = weaker_completeness(
+            &out.completeness,
+            &Completeness::Partial(vec![format!(
+                "linetype dashes could not be generated: {reason}"
+            )]),
+        );
+        out.diagnostics.push(Diagnostic {
+            object: Some(ObjectId(entity.id.0)),
+            code: "representation.linetype_fallback".into(),
+            message: format!("linetype dashes fell back to continuous: {reason}"),
+        });
+    }
+    let runs = if packed {
+        // Preserve all segments (including corners) but avoid duplicating paths
+        // and styles once per dash. Bound each packed fragment so downstream GPU
+        // buffers stay small.
+        let mut packed = Vec::new();
+        let mut chunk: Vec<Point3> = Vec::new();
+        for run in runs {
+            for pair in run.chunks_exact(2) {
+                if let Some(origin) = chunk.first() {
+                    if pair.iter().any(|p| {
+                        [p.x - origin.x, p.y - origin.y, p.z - origin.z]
+                            .iter()
+                            .any(|v| !v.is_finite() || v.abs() > 8192.0)
+                    }) {
+                        packed.push(std::mem::take(&mut chunk));
+                    }
+                }
+                chunk.extend_from_slice(pair);
+                if chunk.len() == 65_536 {
+                    packed.push(std::mem::take(&mut chunk));
+                }
+            }
+        }
+        if !chunk.is_empty() {
+            packed.push(chunk);
+        }
+        packed
+    } else {
+        runs
+    };
+    for run in runs {
+        if run.len() < 2 {
+            continue;
+        }
+        let mut source = source.clone();
+        source.instance = path.clone();
+        out.fragments.push(DisplayFragment {
+            source,
+            geometry_source: attributes.geometry_source.clone(),
+            precision: precision_for_source(&attributes.geometry_source),
+            alpha: own_alpha,
+            color: own_color,
+            color_unresolved,
+            lineweight: own_lineweight,
+            lineweight_unresolved,
+            linetype: own_linetype.clone(),
+            linetype_unresolved,
+            linetype_scale,
+            primitive: if packed {
+                DisplayPrimitive::LineSegments(Arc::from(run.into_boxed_slice()))
+            } else {
+                DisplayPrimitive::Lines(Arc::from(run.into_boxed_slice()))
+            },
+        });
     }
 }

@@ -172,6 +172,13 @@ impl SceneCache {
         };
         let mut previous_was_lines = false;
         for fragment in &representation.fragments {
+            // A conic is chord-expanded once, up front, so the rest of the loop
+            // treats it exactly like a `Lines` primitive. A normal build has
+            // already expanded conics (`build_expanded`), so this is a safety net.
+            let expanded_conic: Option<Vec<Point3>> = match &fragment.primitive {
+                DisplayPrimitive::Conic(conic) => Some(conic.chord_points()),
+                _ => None,
+            };
             let paired = matches!(fragment.primitive, DisplayPrimitive::LineSegments(_));
             if let DisplayPrimitive::LineSegments(points) = &fragment.primitive {
                 if points.len() % 2 != 0 {
@@ -184,6 +191,7 @@ impl SceneCache {
                 DisplayPrimitive::Lines(p) | DisplayPrimitive::LineSegments(p) if p.len() >= 2 => {
                     Some(p.as_ref())
                 }
+                DisplayPrimitive::Conic(_) => expanded_conic.as_deref().filter(|p| p.len() >= 2),
                 _ => None,
             };
             if let Some(points) = line_points.filter(|_| compact && previous_was_lines) {
@@ -245,6 +253,38 @@ impl SceneCache {
                             ]
                         };
                         let verts: Vec<[f32; 3]> = if compact && !paired {
+                            points.windows(2).flatten().map(relative).collect()
+                        } else {
+                            points.iter().map(relative).collect()
+                        };
+                        (
+                            RenderTopology::Lines,
+                            verts,
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            origin,
+                            false,
+                        )
+                    }
+                    // The conic's chord expansion is treated exactly like a
+                    // continuous `Lines` polyline (never a paired segment list).
+                    DisplayPrimitive::Conic(_) => {
+                        let points: &[Point3] = expanded_conic.as_deref().unwrap_or(&[]);
+                        let origin = points.first().copied().unwrap_or(Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        });
+                        let relative = |p: &Point3| {
+                            [
+                                (p.x - origin.x) as f32,
+                                (p.y - origin.y) as f32,
+                                (p.z - origin.z) as f32,
+                            ]
+                        };
+                        let verts: Vec<[f32; 3]> = if compact {
                             points.windows(2).flatten().map(relative).collect()
                         } else {
                             points.iter().map(relative).collect()

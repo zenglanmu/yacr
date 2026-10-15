@@ -575,6 +575,21 @@ impl Transform3 {
         }
     }
 
+    /// Apply only the 3x3 linear part of the transform to a direction/vector:
+    /// no translation is added.
+    ///
+    /// For a point `p`, `apply_point(p) == apply_vector(p) + translation`, and a
+    /// vector is invariant under the translation column. This is what an affine
+    /// map does to a direction (for example a conic's semi-diameter axes): `M·v`.
+    pub fn apply_vector(&self, v: Point3) -> Point3 {
+        let m = &self.matrix;
+        Point3 {
+            x: m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z,
+            y: m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
+            z: m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z,
+        }
+    }
+
     /// Determinant of the 3x3 linear part (translation excluded).
     ///
     /// Used to reject singular mappings that cannot be inverted (audit B10).
@@ -811,5 +826,61 @@ mod tests {
             }
             other => panic!("expected Mask, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn apply_vector_is_the_linear_part_of_apply_point() {
+        // A uniform scale composed with a translation: the linear part is the
+        // scale, so the point/vector difference is exactly the translation.
+        let t = Transform3::translation(point(3.0, -4.0, 5.0)).matrix_mul(&Transform3::scale(2.0));
+        let v = point(1.5, -2.0, 0.25);
+        let p = t.apply_point(v);
+        let linear = t.apply_vector(v);
+        assert_eq!(linear, point(3.0, -4.0, 0.5));
+        assert_eq!(p.x - linear.x, 3.0);
+        assert_eq!(p.y - linear.y, -4.0);
+        assert_eq!(p.z - linear.z, 5.0);
+        // A pure translation leaves every vector unchanged.
+        let tr = Transform3::translation(point(9.0, 8.0, 7.0));
+        assert_eq!(tr.apply_vector(v), v);
+        assert_eq!(tr.apply_point(v), point(10.5, 6.0, 7.25));
+    }
+
+    #[test]
+    fn apply_vector_composes_through_nested_transforms() {
+        // Non-uniform scale (2, 0.5) as the inner (block) transform, a rotation
+        // about Z plus a translation as the outer (insert) transform.
+        let inner = Transform3::from_basis(
+            point(2.0, 0.0, 0.0),
+            point(0.0, 0.5, 0.0),
+            point(1.0, 1.0, 0.0),
+        );
+        let (s, c) = (
+            std::f64::consts::FRAC_1_SQRT_2,
+            std::f64::consts::FRAC_1_SQRT_2,
+        );
+        let rotation =
+            Transform3::from_basis(point(c, s, 0.0), point(-s, c, 0.0), point(10.0, -3.0, 2.0));
+        let composed = rotation.matrix_mul(&inner);
+        let v = point(1.0, -2.0, 0.75);
+        let nested = rotation.apply_vector(inner.apply_vector(v));
+        let direct = composed.apply_vector(v);
+        assert!(
+            (direct.x - nested.x).abs() < 1e-9,
+            "{direct:?} vs {nested:?}"
+        );
+        assert!(
+            (direct.y - nested.y).abs() < 1e-9,
+            "{direct:?} vs {nested:?}"
+        );
+        assert!(
+            (direct.z - nested.z).abs() < 1e-9,
+            "{direct:?} vs {nested:?}"
+        );
+        // The composed translation is still excluded from a vector.
+        let via_point = composed.apply_point(v);
+        assert!((via_point.x - direct.x - composed.matrix[0][3]).abs() < 1e-9);
+        assert!((via_point.y - direct.y - composed.matrix[1][3]).abs() < 1e-9);
+        assert!((via_point.z - direct.z - composed.matrix[2][3]).abs() < 1e-9);
     }
 }

@@ -1,6 +1,7 @@
 //! Unit tests.
 
 use super::*;
+use cad_representation::ConicSegment;
 use cad_representation::DisplayFragment;
 use std::sync::Arc;
 
@@ -1334,4 +1335,67 @@ fn text_and_instance_fragments_still_produce_no_batches() {
     let delta = cache.build(&rep, stamp()).unwrap();
     assert!(delta.added.is_empty());
     assert!(delta.images.is_empty());
+}
+
+/// A conic fragment must batch byte-for-byte like the equivalent chord polyline
+/// (SDF slice A keeps the chord draw).
+#[test]
+fn conic_fragment_batches_like_its_chord_polyline() {
+    let conic = ConicSegment {
+        center: Point3 {
+            x: 100.0,
+            y: -50.0,
+            z: 0.0,
+        },
+        major: Point3 {
+            x: 8.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        minor: Point3 {
+            x: 0.0,
+            y: 4.0,
+            z: 0.0,
+        },
+        start: 0.0,
+        sweep: std::f64::consts::TAU,
+        full: true,
+    };
+    let chord = conic.chord_points();
+    assert!(chord.len() >= 3);
+
+    let mut conic_rep = line_representation(7, Vec::new());
+    conic_rep.fragments[0].primitive = DisplayPrimitive::Conic(Arc::new(conic));
+    let lines_rep = line_representation(7, chord);
+
+    for compact in [false, true] {
+        let mut conic_cache = SceneCache::default();
+        let mut lines_cache = SceneCache::default();
+        let conic_delta = if compact {
+            conic_cache.build_compact(&conic_rep, stamp()).unwrap()
+        } else {
+            conic_cache.build(&conic_rep, stamp()).unwrap()
+        };
+        let lines_delta = if compact {
+            lines_cache.build_compact(&lines_rep, stamp()).unwrap()
+        } else {
+            lines_cache.build(&lines_rep, stamp()).unwrap()
+        };
+        assert_eq!(conic_delta.added.len(), 1, "compact={compact}");
+        assert_eq!(lines_delta.added.len(), 1, "compact={compact}");
+        let conic_batch = &conic_delta.added[0];
+        let lines_batch = &lines_delta.added[0];
+        assert_eq!(
+            conic_batch.topology, lines_batch.topology,
+            "compact={compact}"
+        );
+        assert_eq!(
+            conic_batch.local_origin, lines_batch.local_origin,
+            "compact={compact}"
+        );
+        assert_eq!(
+            conic_batch.vertices, lines_batch.vertices,
+            "compact={compact}"
+        );
+    }
 }

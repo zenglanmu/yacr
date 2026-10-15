@@ -1,6 +1,43 @@
 //! Display representations and the representation context.
 
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Optional diagnostic counters a host attaches to a [`RepresentationContext`]
+/// to observe how many analytic conics the provider produced and how many
+/// satisfy the eligibility facts for a future SDF-instance draw (continuous
+/// linetype, opaque, non-degenerate axes).
+///
+/// Purely observational: a context without one records nothing, and attaching
+/// one never changes the built geometry. The counters are monotonic.
+#[derive(Debug, Default)]
+pub struct ConicStats {
+    produced: AtomicU64,
+    sdf_eligible: AtomicU64,
+}
+
+impl ConicStats {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Conics produced by `build_expanded` since construction.
+    pub fn produced(&self) -> u64 {
+        self.produced.load(Ordering::Relaxed)
+    }
+
+    /// Produced conics that are eligible for the future SDF gate.
+    pub fn sdf_eligible(&self) -> u64 {
+        self.sdf_eligible.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn record(&self, eligible: bool) {
+        self.produced.fetch_add(1, Ordering::Relaxed);
+        if eligible {
+            self.sdf_eligible.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
 
 pub struct DisplayRepresentation {
     pub fragments: Vec<DisplayFragment>,
@@ -138,6 +175,9 @@ pub struct RepresentationContext {
     /// Pack opaque dash runs as independent endpoint pairs instead of allocating
     /// a fragment and copying provenance/style for every microscopic dash.
     pub packed_line_segments: bool,
+    /// Optional Conic plumbing counters (see [`ConicStats`]). `None` records
+    /// nothing; attaching one never changes the built geometry.
+    pub conic_stats: Option<Arc<ConicStats>>,
 }
 
 /// The active annotation scale a host applies while building representations.
@@ -170,6 +210,7 @@ impl RepresentationContext {
             images: None,
             annotation_scale: None,
             packed_line_segments: false,
+            conic_stats: None,
         }
     }
 
@@ -188,6 +229,13 @@ impl RepresentationContext {
 
     pub fn with_packed_line_segments(mut self) -> Self {
         self.packed_line_segments = true;
+        self
+    }
+
+    /// Attach Conic plumbing counters so a caller can observe how many conics
+    /// were produced and how many are SDF-eligible.
+    pub fn with_conic_stats(mut self, stats: Arc<ConicStats>) -> Self {
+        self.conic_stats = Some(stats);
         self
     }
 

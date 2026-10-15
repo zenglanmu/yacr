@@ -257,6 +257,11 @@ impl FragmentHistogram {
                     self.glyph_meshes += 1;
                     self.glyph_triangles += mesh.triangles.len();
                 }
+                DisplayPrimitive::Conic(conic) => {
+                    // Chord-expanded downstream today; count its line form.
+                    self.lines += 1;
+                    self.line_vertices += conic.chord_points().len();
+                }
                 DisplayPrimitive::Text { .. } => self.texts += 1,
                 DisplayPrimitive::Instance { .. } => self.instances += 1,
                 DisplayPrimitive::Image { .. } => self.images += 1,

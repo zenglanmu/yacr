@@ -205,6 +205,11 @@ pub(crate) fn run_build_representation(
                             meshes += 1;
                             vertices += mesh.vertices.len();
                         }
+                        cad_representation::DisplayPrimitive::Conic(conic) => {
+                            // Chord-expanded downstream today; count its line form.
+                            lines += 1;
+                            vertices += conic.chord_points().len();
+                        }
                         cad_representation::DisplayPrimitive::Text { .. } => texts += 1,
                         cad_representation::DisplayPrimitive::Instance { .. } => instances += 1,
                         cad_representation::DisplayPrimitive::Image { .. } => images += 1,
