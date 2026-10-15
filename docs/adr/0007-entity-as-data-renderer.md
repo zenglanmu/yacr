@@ -94,7 +94,12 @@ NVIDIA Quadro P620 / Vulkan 实测；契约变更经用户 2026-10-15 授权。*
 - **glyph outline-keyed instancing**：文字轮廓仍是主要残留 draw（参考图 instanced 帧中
   glyph mesh 占 4,630 / 6,228），未按 outline 键做实例化。
 - **id-readback picking**：`entity_flags` 已写入顶点，但**没有** id 回读 picking 通路。
-- **selection flags**：选择/高亮标志未纳入合并路径的逐顶点数据。
+- **selection flags**：**P3a-2 已闭环**。实体级选择/悬停/隐藏改由渲染器的 in-stream 标志机
+  承载（`FLAG_SELECTED`/`FLAG_HOVERED`/`FLAG_HIDDEN`，`Renderer::set_entity_flags` 按
+  `PickTable` 的 source→key 解析写入；静态流/chunk 不随选择变化重传），整实体高亮 overlay
+  退役。**例外（保留 overlay）**：子元素（网格面）高亮——face 级 flags 不在静态合并流数据里，
+  静态流不随选择变化重传，故 face 仍需一次小的独立 draw（用户已授权）。多源合并 batch 按
+  batch 粒度着色（已知限制）。见 `docs/picking-gpu-id-pass.md` §0。
 - **加速档（accelerated tier）**：vertex pulling / multi-draw 等更强合并档未做；且 **WebGL2
   不支持** multi-draw，属 **capability-gated future**。
 - **MeshEdges sentinel gap**：`MeshEdges` 拓扑在当前合并路径仍是**既有 no-op 哨兵**

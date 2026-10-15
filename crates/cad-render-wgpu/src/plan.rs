@@ -1963,6 +1963,29 @@ impl PickTable {
         &self.collisions
     }
 
+    /// Every pick key whose entry names `source` as one of its sources.
+    ///
+    /// Identity is `document + entity + instance`; the sub-element is ignored
+    /// because the flags path is **whole-entity** (a mesh face is a separate
+    /// overlay). A key is returned once even when several of its sources match:
+    /// the caller sets the whole batch's bits, which is the documented
+    /// batch-granularity limit for a multi-source merged run.
+    pub(crate) fn keys_for_source(&self, source: &SelectionRef) -> Vec<u32> {
+        let mut keys = Vec::new();
+        for (key, entry) in self.entries.iter().enumerate() {
+            if let Some(entry) = entry {
+                if entry
+                    .sources
+                    .iter()
+                    .any(|candidate| same_source_entity(candidate, source))
+                {
+                    keys.push(key as u32);
+                }
+            }
+        }
+        keys
+    }
+
     /// Highest key present (0 when empty).
     pub(crate) fn max_key(&self) -> u32 {
         self.max_key
@@ -1972,6 +1995,12 @@ impl PickTable {
     pub(crate) fn len(&self) -> usize {
         self.entries.iter().filter(|entry| entry.is_some()).count()
     }
+}
+
+/// Whether two sources name the same whole entity: `document + entity +
+/// instance`, ignoring the sub-element.
+fn same_source_entity(a: &SelectionRef, b: &SelectionRef) -> bool {
+    a.document == b.document && a.entity == b.entity && a.instance == b.instance
 }
 
 /// Group every source's low-32 `EntityId` and report the values shared by two or
@@ -2851,6 +2880,43 @@ mod pick_table_tests {
         assert!(resolved.source.is_none());
         assert!(resolved.sources.is_empty());
         assert_eq!(resolved.reason, Some(PICK_REASON_NO_SOURCE));
+    }
+
+    #[test]
+    fn keys_for_source_matches_identity_and_ignores_the_sub_element() {
+        let instance_a = source(20, &[10]);
+        let instance_b = source(20, &[20]);
+        let table = PickTable::build(&[
+            (1, vec![instance_a.clone()]),
+            (2, vec![instance_b.clone()]),
+            (3, vec![source(7, &[])]),
+        ])
+        .expect("unique keys");
+
+        // Exact placement match, in key order.
+        assert_eq!(table.keys_for_source(&instance_a), vec![1]);
+        assert_eq!(table.keys_for_source(&instance_b), vec![2]);
+        // The same entity under a different instance is a different placement.
+        assert!(table.keys_for_source(&source(20, &[99])).is_empty());
+        // A sub-element ref names the same whole entity: the flags path ignores
+        // the sub-element and matches the placement's key.
+        let mut face = instance_a.clone();
+        face.sub_element = Some(cad_domain::SubElementId {
+            source_key: "face-a".into(),
+            topology_revision: cad_domain::Revision(0),
+        });
+        assert_eq!(table.keys_for_source(&face), vec![1]);
+    }
+
+    #[test]
+    fn keys_for_source_returns_a_multi_source_batch_key_once() {
+        // A merged batch whose sources are two entities: a flag on either source
+        // must map to the batch's single key (batch-granularity limit).
+        let a = source(11, &[]);
+        let b = source(22, &[]);
+        let table = PickTable::build(&[(5, vec![a.clone(), b.clone()])]).expect("unique keys");
+        assert_eq!(table.keys_for_source(&a), vec![5]);
+        assert_eq!(table.keys_for_source(&b), vec![5]);
     }
 
     #[test]

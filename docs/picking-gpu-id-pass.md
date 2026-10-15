@@ -4,8 +4,44 @@
 选择标志机与实测证据。CPU 精确拾取（`cad-spatial` / `cad-app::picking`）仍是**权威参考与
 回退路径**，契约见 `docs/picking-3d.md`；本文只补充 GPU 侧。
 
-状态：P3a-1 = **仅渲染器侧**（`crates/cad-render-wgpu`）。高亮体系退役与宿主接线由 P3a-2
-负责；`cad-scene` / `cad-app` / `cad-engine` 本轮**未改动**。
+状态：P3a-1 = 渲染器侧 id pass / 标志机；**P3a-2 = 实体级选择视觉切换到标志机、整实体高亮 overlay 退役**。
+P3a-2 修改了 `cad-scene` / `cad-app` / `cad-render-wgpu`，并把生产会话（`cad-engine`
+`CadRenderRuntime`）接线到标志机（这是需求 1「在 production session path 打开
+`set_selection_flags_enabled(true)`」与需求 5c「选择变化只上传标志数据」的唯一落点，见 §9）。
+
+## 0. P3a-2：实体级视觉走标志机（整实体 overlay 退役）
+
+**已退役**：整实体（whole-entity）选择/高亮不再产生 overlay batch。
+
+- `cad-scene::highlight_batches` 现在**只**处理子元素（网格面）overlay；实体级 ref 直接跳过
+  （不产生 batch、不产生诊断——实体级是标志路径，应用层会把它们路由到标志解析器）。
+- `cad-app::render_scene::selection_highlight` 只对 `sub_element.is_some()` 的 ref 建
+  representation 与 batch；新增 `selection_entity_flags`（同一套 resolve-only-refs 逻辑的
+  flags 孪生）把实体级 ref 解析成 `(SelectionRef, bits)`。
+- `PreparedScene` 新增 `entity_flags`；控制器用**独立**指纹
+  （`overlay_fingerprint` 只含子元素 ref，`entity_flags_fingerprint` 含实体级
+  selection/hover/hidden）决定重建哪一部分。因此**实体级选择变化不重建、不重传任何 overlay
+  几何**（复用同一个 `Arc<SceneDelta>`），只改标志。
+- 生产会话（`cad-engine::CadRenderRuntime`）在 attach 时打开标志，并在
+  `apply_ready_updates` 中：overlay `Arc` 指针未变且 base 未变时**只**调用
+  `Renderer::set_entity_flags`（跳过任何 batch/stream/chunk 上传）；否则在 commit 后重推标志
+  （base 变化会重建 pick key，必须对新表重解析）。
+
+**仍然保留 overlay（有据）**：**子元素高亮**（网格面）与**工具预览**。原因：静态合并流
+不随选择变化重传，face 级 flags 不在数据里；用户明确授权「为少量选中项单独 draw 一次」。
+`HIGHLIGHT_DRAW_ORDER`（`900_000`）与 `HighlightOptions`（alpha/tint）只为该子元素 overlay
+保留。
+
+**语义（有意、简单、已文档化）**：着色器 tint 是**颜色替换**（`SELECTED_TINT`/`HOVERED_TINT`
+直接替换 rgb，保留 alpha），不是混合；`FLAG_HIDDEN` 直接 `discard`。这与旧 overlay 的视觉
+**不**保证一致（用户已授权），但选中/悬停状态清晰可见。
+
+**已知限制（诚实）**：多源合并 batch 按 **batch 粒度**着色——合并 run 不记录哪段 fragment
+属于哪个 source，所以对其任一 source 打标志会给整批着色（
+`a_multi_source_batch_is_tinted_at_batch_granularity`）。逐 fragment 解析在合并 run 上不可行。
+
+**实体级 hover/hidden 输入**：`OverlayInputs` 新增 `hovered` / `hidden`（默认空）。宿主尚未
+产生二者（`cad-host` 传空）；机制与测试已就绪，宿主侧生产是后续切片。
 
 ## 1. id pass（按需，绝不逐帧）
 
@@ -84,6 +120,8 @@ id pass **不解析** mesh face：wgpu 的 fragment stage 拿不到 primitive in
 | `Renderer::pick_key_for_batch(i)` / `pick_table_len()` | 诊断 |
 | `Renderer::id_target_format()` / `set_id_format_override(..)` | 当前/强制 id target 格式（测试钩子） |
 | `Renderer::id_format_for_features(features)` | 纯决策函数，可离线复现 |
+| `Renderer::set_entity_flags(&[(SelectionRef, u32)])` | P3a-2：把实体级 `(ref, bits)` 解析到驻留 batch 的 pick key 并写标志表；只上传位变化的行、清除掉出集合的行。多源 batch 按 batch 粒度着色 |
+| `Renderer::entity_flag_keys()` | P3a-2：当前带实体级标志的 key（诊断/测试） |
 
 `pick_at` 返回 `Result<Option<..>>`（而非裸 `Option`）：设备丢失/帧错误必须能与「没拾到」
 区分，符合本仓库既有 `RenderError` 约定。
@@ -105,7 +143,7 @@ id pass **不解析** mesh face：wgpu 的 fragment stage 拿不到 primitive in
 `set_id_format_override` 强制（因此 packed 回退能在支持 `R32Uint` 的硬件上被真实测到：
 `the_packed_rgba8_fallback_picks_identically`）。
 
-## 5. 选择标志机（默认关闭）
+## 5. 选择标志机（渲染器 API 默认关闭；生产会话已打开）
 
 - 标志表：`Rgba8Uint` 的 `texture_2d<u32>`，**一个 texel 一个 pick key**（超过
   `max_texture_dimension_2d` 时按行折叠，shader 用 `(key % width, key / width)` 寻址）；
@@ -157,14 +195,19 @@ YACR_PICK_PARITY_GRID=12x9 cargo test -p cad-cli-tools --test pick_parity --lock
 ```
 
 - 适配器（本轮重跑实测）：`Quadro P620 (vulkan, discrete_gpu)`，`id_format=r32uint`。
-- `crates/cad-render-wgpu`（本轮重跑，上面第一行命令）：106 lib + 19 headless + **21** pick_id +
-  44 render_effects + **8** wgsl_validation 全绿；`pick_id` 覆盖 lines / glyph mesh（merged）/
-  带边 overlay mesh（merged 与 legacy 两条路径）/ **图像**（R32Uint 与 packed 两个 tier）/
-  背景 / 多源 / 碰撞 / 格式回退 / 标志开关 /「只上传标志表」/ 场景重置不遗留驻留图像 key /
-  增量提交后标志存活 / 各类 draw class 在标志关闭时逐像素不变；`wgsl_validation` 新增五个
-  color shader 的 GLSL ES 3.00 back-translation。
-- 下方 parity harness 表是**上一轮**的真实 DWG 运行记录；本轮只重跑了上面的 crate 测试，
-  **未重跑** parity harness，旧数字保留仅供追溯。
+- `crates/cad-render-wgpu`（P3a-2 本轮重跑，上面第一行命令）：108 lib + 19 headless + **28**
+  pick_id + 44 render_effects + 8 wgsl_validation 全绿（`pick_id` 单跑
+  `--test pick_id -- --test-threads=1 --nocapture` exit 0，每个用例打印适配器
+  `Quadro P620 (vulkan, discrete_gpu)`）。新增 7 个实体级 flags 用例：source→key 解析、
+  INSERT 实例只命中该 placement、多源 batch 按 batch 粒度、selected/hovered 可见 tint 且
+  hidden 不画、instanced line 被 tint、选择变化只上传标志数据（stream/chunk 计数不变）、
+  标志开启但为空逐像素不变；另加 2 个 `plan.rs` 纯数据单测（`keys_for_source`）。
+- `crates/cad-scene` / `crates/cad-app` 单测：`cargo test -p cad-scene -p cad-app --locked
+  -- --test-threads=1` 全绿（cad-scene 56；cad-app 348）。`cargo check -p cad-engine
+  -p cad-host --all-targets` 通过；`cargo clippy -p cad-scene -p cad-app -p cad-render-wgpu
+  --all-targets -- -D warnings` 通过；`scripts/check-architecture.py` OK。
+- **未运行**：`cad-engine` 的真实 GPU 会话用例（`#[ignore]` 硬件用例）本轮未跑；parity harness
+  本轮未重跑。旧数字保留仅供追溯。
 
 parity harness（真实 DWG，**渲染器 id pass** vs **CPU `cad_spatial` 参考**）：
 
@@ -191,8 +234,12 @@ parity harness（真实 DWG，**渲染器 id pass** vs **CPU `cad_spatial` 参�
   「WebGL2 安全」由离线 **GLSL ES 3.00 back-translation** 测试覆盖
   （`color_shaders_back_translate_to_glsl_es_300`），同样**不是**真实浏览器运行。
 - **Android 真机 / 模拟器**：未验证。
-- **高亮退役与宿主接线**：P3a-2。
-- **视觉 tint**：占位常量，最终视觉归 UI 切片。
+- **整实体高亮退役与生产接线**：**P3a-2 已完成**（见 §0）：整实体 overlay 退役、生产会话走
+  标志机、选择变化只上传标志数据。子元素 overlay 与工具预览仍保留（有据）。
+- **实体级 hover / hidden 的宿主生产**：机制与 `OverlayInputs::hovered`/`hidden` 已就绪，
+  宿主尚未产生（`cad-host` 传空）；属后续宿主切片。
+- **视觉 tint**：`SELECTED_TINT`/`HOVERED_TINT` 仍是机械常量（颜色替换，非混合），最终视觉
+  归 UI 切片；与旧 overlay 的视觉**不**保证一致（用户已授权）。
 - **逐帧 id pass**：不做（按需）。
-- `docs/picking-3d.md`、`docs/handoff.md` 的交叉引用与交接条目未在本轮更新（P3a-1 作用域
-  限定为渲染器源码 + 新测试文件 + 本文档）。
+- `docs/picking-3d.md`、`docs/handoff.md` 的交叉引用与交接条目本轮未更新（P3a-2 作用域限定为
+  渲染器/scene/app/engine 源码 + 测试 + 本文档 + ADR-0007 deferred 列表）。

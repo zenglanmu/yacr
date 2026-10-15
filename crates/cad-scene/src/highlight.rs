@@ -1,18 +1,25 @@
-//! Selection highlight overlay (spec F05 / F14).
+//! Sub-element selection highlight overlay (spec F05 / F14).
 //!
-//! A selection (entity / INSERT instance / mesh face) has to be drawable
-//! *distinctly* from the authoritative scene, without touching the database or
-//! the scene cache. This module turns a list of [`SelectionRef`]s plus the
-//! already-built [`DisplayRepresentation`]s into **overlay batches** that reuse
-//! the existing [`RenderBatch`] type — there is deliberately no second
-//! renderer and no mutation of the authoritative scene.
+//! **Whole-entity selection is no longer an overlay.** Since P3a-2 an
+//! entity-level selection/hover/hidden state is carried by the renderer's
+//! *in-stream flags* path ([`FLAG_SELECTED`] / [`FLAG_HOVERED`] / [`FLAG_HIDDEN`],
+//! see `cad-render-wgpu`), which tints (or discards) the resident scene geometry
+//! in the shader — no second draw, no scene rebuild. `highlight_batches`
+//! therefore only builds the **sub-element** overlay: a mesh face cannot be
+//! expressed as a whole-batch flag because the static merged streams do not
+//! re-upload per selection change, so a face still needs its own small draw (the
+//! user explicitly authorized a separate draw for the few selected sub-elements).
+//!
+//! This module turns the **sub-element** [`SelectionRef`]s plus the already-built
+//! [`DisplayRepresentation`]s into **overlay batches** that reuse the existing
+//! [`RenderBatch`] type — there is deliberately no second renderer and no
+//! mutation of the authoritative scene.
 //!
 //! ## What is converted
 //!
 //! | selection | overlay |
 //! |---|---|
-//! | whole entity, line/curve fragment | the fragment's polyline |
-//! | whole entity, mesh fragment | the mesh's triangles |
+//! | whole entity (any primitive) | **nothing** — routed to the flags path, not here |
 //! | mesh **face** sub-element | only the triangles whose `face_sources` match |
 //!
 //! The emitted batches use a distinct [`HighlightOptions::draw_order`] (default
@@ -22,6 +29,11 @@
 //!
 //! ## Explicit, non-silent limitations
 //!
+//! - **Entity-level refs contribute no batch.** They are the flags path: a
+//!   whole-entity selection tints the resident geometry in-shader, so drawing a
+//!   second overlay batch for it would double-highlight. This function silently
+//!   ignores an entity-level ref **by design**; the app layer routes those refs
+//!   to `cad_render_wgpu`'s `set_entity_flags` instead.
 //! - **Highlight tint.** Since `RenderBatch` gained a per-batch RGB channel the
 //!   overlay carries [`HighlightOptions::color`] (a selection tint); ordering and
 //!   alpha blending still apply. A host that installs no tint uses the documented
@@ -33,14 +45,15 @@
 //!   always unresolved.
 //! - **Hidden selections contribute nothing.** A ref rejected by the caller's
 //!   `visible` predicate is skipped silently (a session choice, not a gap,
-//!   exactly like the annotation overlay). A visible ref whose fragments are all
-//!   fully transparent (`alpha <= 0`, which the renderer classifies invisible) is
-//!   reported as `highlight.invisible` and still contributes no batch.
+//!   exactly like the annotation overlay). A visible sub-element whose fragments
+//!   are all fully transparent (`alpha <= 0`, which the renderer classifies
+//!   invisible) is reported as `highlight.invisible` and still contributes no
+//!   batch.
 //! - **Text / image / instance primitives are not batched** by the scene (same
-//!   as [`crate::SceneCache::build`]); selecting one is an explicit
+//!   as [`crate::SceneCache::build`]); a sub-element of one is an explicit
 //!   `highlight.unsupported` diagnostic rather than a fake batch.
 
-use cad_domain::{Completeness, Diagnostic, Mesh, Point3, SelectionRef, SubElementId};
+use cad_domain::{Completeness, Diagnostic, Mesh, SelectionRef, SubElementId};
 use cad_representation::{DisplayFragment, DisplayPrimitive, DisplayRepresentation};
 
 use crate::{sanitize_alpha, RenderBatch, RenderTopology};
@@ -58,6 +71,23 @@ pub const DEFAULT_HIGHLIGHT_ALPHA: f32 = 0.55;
 /// Default overlay tint: a warm selection highlight, distinct from the drawing's
 /// normal per-entity colours.
 pub const DEFAULT_HIGHLIGHT_COLOR: [f32; 3] = [1.0, 0.62, 0.19];
+
+/// Selection/hover/visibility bits of the renderer's in-stream flags path.
+///
+/// These are the **canonical** bits: the renderer (`cad-render-wgpu`) re-exports
+/// them and its WGSL shaders declare the matching constants. A host resolves an
+/// entity-level selection into `(SelectionRef, bits)` pairs and hands them to the
+/// renderer, which maps each ref to the pick keys of the resident batches whose
+/// sources name it (see `Renderer::set_entity_flags`).
+///
+/// The bits are a *whole-entity* visual state, not a sub-element one: a merged
+/// batch that concatenated several sources is tinted as a whole (documented
+/// granularity limit), and a mesh face still needs the sub-element overlay above.
+pub const FLAG_SELECTED: u32 = 1 << 0;
+/// Hovered (lighter tint of the same mechanism).
+pub const FLAG_HOVERED: u32 = 1 << 1;
+/// Hidden: the fragment is discarded, so a flagged entity is not drawn.
+pub const FLAG_HIDDEN: u32 = 1 << 2;
 
 /// Overlay paint parameters.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -169,8 +199,11 @@ where
                 continue;
             }
             opaque += 1;
+            // Entity-level refs are the renderer's in-stream flags path, not an
+            // overlay batch: drawing one here would double-highlight the entity.
+            // Only a sub-element (mesh face) still needs its own small draw.
             let batch = match &reference.sub_element {
-                None => whole_fragment(reference, fragment, order, options.alpha, options.color),
+                None => None,
                 Some(id) => face_only(reference, fragment, id, order, options.alpha, options.color),
             };
             match batch {
@@ -180,12 +213,14 @@ where
                     drawn += 1;
                 }
                 None => {
-                    if matches!(
-                        &fragment.primitive,
-                        DisplayPrimitive::Text { .. }
-                            | DisplayPrimitive::Image { .. }
-                            | DisplayPrimitive::Instance { .. }
-                    ) {
+                    if reference.sub_element.is_some()
+                        && matches!(
+                            &fragment.primitive,
+                            DisplayPrimitive::Text { .. }
+                                | DisplayPrimitive::Image { .. }
+                                | DisplayPrimitive::Instance { .. }
+                        )
+                    {
                         unsupported = true;
                         scene.partial(
                             "highlight.unsupported",
@@ -199,7 +234,7 @@ where
             }
         }
 
-        if drawn == 0 && !unsupported {
+        if drawn == 0 && !unsupported && reference.sub_element.is_some() {
             if opaque == 0 {
                 scene.partial(
                     "highlight.invisible",
@@ -208,19 +243,11 @@ where
                         SelectionLabel(reference)
                     ),
                 );
-            } else if reference.sub_element.is_some() {
+            } else {
                 scene.missing(
                     "highlight.face-missing",
                     format!(
                         "selection {}: no mesh triangle carries that stable source id",
-                        SelectionLabel(reference)
-                    ),
-                );
-            } else {
-                scene.partial(
-                    "highlight.empty",
-                    format!(
-                        "selection {} has no drawable geometry in the representations",
                         SelectionLabel(reference)
                     ),
                 );
@@ -229,28 +256,6 @@ where
     }
 
     scene
-}
-
-/// Whole-fragment overlay for an entity-level selection.
-fn whole_fragment(
-    reference: &SelectionRef,
-    fragment: &DisplayFragment,
-    draw_order: i64,
-    alpha: f32,
-    color: [f32; 3],
-) -> Option<RenderBatch> {
-    match &fragment.primitive {
-        DisplayPrimitive::Lines(points) => line_batch(reference, points, draw_order, alpha, color),
-        DisplayPrimitive::LineSegments(points) => {
-            line_batch(reference, points, draw_order, alpha, color)
-        }
-        DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
-            mesh_batch(reference, mesh, None, draw_order, alpha, color)
-        }
-        DisplayPrimitive::Text { .. }
-        | DisplayPrimitive::Image { .. }
-        | DisplayPrimitive::Instance { .. } => None,
-    }
 }
 
 /// Face-only overlay for a sub-element selection. Returns `None` when the
@@ -265,61 +270,23 @@ fn face_only(
 ) -> Option<RenderBatch> {
     match &fragment.primitive {
         DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
-            mesh_batch(reference, mesh, Some(id), draw_order, alpha, color)
+            mesh_batch(reference, mesh, id, draw_order, alpha, color)
         }
         _ => None,
     }
 }
 
-fn line_batch(
-    reference: &SelectionRef,
-    points: &[Point3],
-    draw_order: i64,
-    alpha: f32,
-    color: [f32; 3],
-) -> Option<RenderBatch> {
-    if points.len() < 2 {
-        return None;
-    }
-    let origin = points[0];
-    let vertices = points
-        .iter()
-        .map(|p| [p.x - origin.x, p.y - origin.y, p.z - origin.z].map(|v| v as f32))
-        .collect();
-    Some(RenderBatch {
-        local_origin: origin,
-        topology: RenderTopology::Lines,
-        vertices,
-        normals: Vec::new(),
-        colors: Vec::new(),
-        indices: Vec::new(),
-        edges: Vec::new(),
-        mirrored: false,
-        alpha: sanitize_alpha(alpha),
-        color: crate::sanitize_color(color),
-        color_unresolved: false,
-        lineweight: 0.0,
-        lineweight_unresolved: false,
-        // The highlight overlay is solid: the fragment's dash pattern is not
-        // reapplied to the tint so the selection stays fully visible.
-        linetype: cad_db::LinetypePattern::continuous(),
-        linetype_unresolved: false,
-        sources: vec![reference.clone()],
-        draw_order,
-    })
-}
-
-/// Build an overlay mesh batch.
+/// Build a face-only overlay mesh batch.
 ///
-/// `only == None` selects every in-range triangle; `Some(id)` selects only the
-/// triangles whose `face_sources` equal `id`. Vertices are compacted to those
-/// referenced by the selected triangles and rebased on a local origin. Normals
-/// are carried only when the mesh has one per vertex; otherwise they are left
-/// empty for the renderer's repair path.
+/// Selects only the triangles whose `face_sources` equal `id`. Vertices are
+/// compacted to those referenced by the selected triangles and rebased on a
+/// local origin. Normals are carried only when the mesh has one per vertex;
+/// otherwise they are left empty for the renderer's repair path. Returns `None`
+/// when no in-range triangle carries the id.
 fn mesh_batch(
     reference: &SelectionRef,
     mesh: &Mesh,
-    only: Option<&SubElementId>,
+    id: &SubElementId,
     draw_order: i64,
     alpha: f32,
     color: [f32; 3],
@@ -333,10 +300,7 @@ fn mesh_batch(
             if !in_range {
                 return false;
             }
-            match only {
-                None => true,
-                Some(id) => matches!(mesh.face_sources.get(*index), Some(Some(s)) if s == id),
-            }
+            matches!(mesh.face_sources.get(*index), Some(Some(s)) if s == id)
         })
         .map(|(_, tri)| *tri)
         .collect();
@@ -460,7 +424,9 @@ impl HighlightScene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cad_domain::{DocumentId, EntityId, GeometrySource, InstancePath, Precision, Revision};
+    use cad_domain::{
+        DocumentId, EntityId, GeometrySource, InstancePath, Point3, Precision, Revision,
+    };
     use cad_representation::DisplayFragment;
     use cad_representation::{DEFAULT_LINEWEIGHT_MM, DEFAULT_RENDER_COLOR};
     use std::sync::Arc;
@@ -575,7 +541,9 @@ mod tests {
     }
 
     #[test]
-    fn entity_selection_emits_an_overlay_batch_with_a_distinct_draw_order() {
+    fn entity_level_selection_is_routed_to_the_flags_path_not_an_overlay() {
+        // A whole-entity ref is the in-stream flags path (see `FLAG_SELECTED`);
+        // building an overlay batch here would double-highlight it.
         let reps = vec![line_rep(
             1,
             Vec::new(),
@@ -583,23 +551,15 @@ mod tests {
         )];
         let selection = [reference(1, Vec::new(), None)];
         let scene = highlight(&selection, &reps);
-        assert_eq!(scene.drawn(), 1);
-        let batch = &scene.batches[0];
-        assert_eq!(batch.topology, RenderTopology::Lines);
-        assert_eq!(batch.vertices.len(), 2);
-        assert_eq!(batch.draw_order, HIGHLIGHT_DRAW_ORDER);
         assert!(
-            batch.draw_order > 0,
-            "after the base drawing geometry at order 0"
+            scene.is_empty(),
+            "entity-level must not emit an overlay batch"
         );
-        assert!(
-            batch.draw_order < 1_000_000,
-            "below the tool-preview order so transient markup stays on top"
-        );
-        assert!((batch.alpha - DEFAULT_HIGHLIGHT_ALPHA).abs() < 1e-6);
-        assert_eq!(batch.sources, vec![reference(1, Vec::new(), None)]);
         assert_eq!(scene.completeness, Completeness::Complete);
-        assert!(scene.diagnostics.is_empty());
+        assert!(
+            scene.diagnostics.is_empty(),
+            "entity-level is not a gap: it is routed to flags"
+        );
     }
 
     #[test]
@@ -621,6 +581,10 @@ mod tests {
                 .map(|s| s.source_key.as_str()),
             Some("face-a")
         );
+        // The sub-element overlay keeps the distinct paint order (above the base
+        // drawing at 0, below the tool preview).
+        assert_eq!(batch.draw_order, HIGHLIGHT_DRAW_ORDER);
+        assert!((batch.alpha - DEFAULT_HIGHLIGHT_ALPHA).abs() < 1e-6);
         assert_eq!(scene.completeness, Completeness::Complete);
     }
 
@@ -643,11 +607,14 @@ mod tests {
     }
 
     #[test]
-    fn whole_mesh_selection_emits_both_triangles() {
+    fn whole_mesh_selection_is_routed_to_the_flags_path_not_an_overlay() {
         let reps = vec![mesh_rep(50, Vec::new(), two_face_mesh())];
         let scene = highlight(&[reference(50, Vec::new(), None)], &reps);
-        assert_eq!(scene.drawn(), 1);
-        assert_eq!(scene.batches[0].indices.len(), 2);
+        assert!(
+            scene.is_empty(),
+            "a whole mesh is flags-tinted, not overlaid"
+        );
+        assert!(scene.diagnostics.is_empty());
     }
 
     #[test]
@@ -684,19 +651,17 @@ mod tests {
     }
 
     #[test]
-    fn fully_transparent_selection_is_reported_but_contributes_no_batch() {
+    fn fully_transparent_sub_element_is_reported_but_contributes_no_batch() {
         let reps = vec![rep(
-            1,
+            50,
             Vec::new(),
-            DisplayPrimitive::Lines(Arc::from(
-                vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)].into_boxed_slice(),
-            )),
+            DisplayPrimitive::Mesh(Arc::new(two_face_mesh())),
             0.0,
         )];
-        let scene = highlight(&[reference(1, Vec::new(), None)], &reps);
+        let scene = highlight(&[reference(50, Vec::new(), Some(face("face-a")))], &reps);
         assert!(
             scene.is_empty(),
-            "invisible selection must not be fabricated"
+            "an invisible sub-element must not be fabricated"
         );
         assert!(scene
             .diagnostics
@@ -721,23 +686,22 @@ mod tests {
     }
 
     #[test]
-    fn insert_instances_highlight_independently() {
+    fn insert_instances_are_entity_level_and_produce_no_overlay() {
+        // Two placements of the same block child are distinct entity-level refs;
+        // both are the flags path, so neither emits an overlay batch. The
+        // per-placement distinction is exercised by the renderer's entity-flag
+        // resolution (the PickTable sources carry the instance path).
         let reps = vec![
             line_rep(20, vec![10], vec![p(10.0, 0.0, 0.0), p(10.0, 5.0, 0.0)]),
             line_rep(20, vec![20], vec![p(20.0, 0.0, 0.0), p(20.0, 5.0, 0.0)]),
         ];
-        // Only the first instance is selected.
         let scene = highlight(&[reference(20, vec![10], None)], &reps);
-        assert_eq!(scene.drawn(), 1);
-        assert_eq!(scene.batches[0].local_origin, p(10.0, 0.0, 0.0));
-        assert_eq!(
-            scene.batches[0].sources[0].instance,
-            InstancePath(vec![EntityId(10)])
-        );
+        assert!(scene.is_empty());
+        assert!(scene.diagnostics.is_empty());
     }
 
     #[test]
-    fn unsupported_primitive_is_reported_not_faked() {
+    fn sub_element_of_an_unsupported_primitive_is_reported_not_faked() {
         let reps = vec![rep(
             7,
             Vec::new(),
@@ -747,7 +711,7 @@ mod tests {
             },
             1.0,
         )];
-        let scene = highlight(&[reference(7, Vec::new(), None)], &reps);
+        let scene = highlight(&[reference(7, Vec::new(), Some(face("face-a")))], &reps);
         assert!(scene.is_empty());
         assert!(scene
             .diagnostics
@@ -757,18 +721,14 @@ mod tests {
 
     #[test]
     fn overlay_alpha_is_sanitised() {
-        let reps = [line_rep(
-            1,
-            Vec::new(),
-            vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)],
-        )];
+        let reps = [mesh_rep(50, Vec::new(), two_face_mesh())];
         let options = HighlightOptions {
             draw_order: HIGHLIGHT_DRAW_ORDER,
             alpha: 2.0,
             color: DEFAULT_HIGHLIGHT_COLOR,
         };
         let scene = highlight_batches(
-            &[reference(1, Vec::new(), None)],
+            &[reference(50, Vec::new(), Some(face("face-a")))],
             reps.iter(),
             |_| true,
             &options,

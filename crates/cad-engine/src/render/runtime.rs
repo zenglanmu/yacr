@@ -2,6 +2,7 @@
 use super::controller::PreparedScene;
 use super::*;
 use cad_render_wgpu::{wgpu, BackendCapabilities, RenderError, RenderTarget, Renderer};
+use std::sync::Arc;
 
 struct PendingUpload {
     scene: PreparedScene,
@@ -101,6 +102,12 @@ pub struct CadRenderRuntime {
     /// Cumulative overlay-suffix commits (suffix-only uploads and fallback
     /// truncations). A camera-only navigation must leave this flat.
     overlay_suffix_commits: u64,
+    /// Pointer identity of the last committed overlay delta.
+    ///
+    /// An entity-only selection change republishes the scene with the **same**
+    /// overlay `Arc` (the controller reuses it), so a matching pointer means
+    /// there is no geometry to re-upload: only the entity flags changed.
+    applied_highlight: Option<usize>,
 }
 impl Default for CadRenderRuntime {
     fn default() -> Self {
@@ -121,6 +128,7 @@ impl Default for CadRenderRuntime {
             presented_revision: None,
             overlays_suppressed: false,
             overlay_suffix_commits: 0,
+            applied_highlight: None,
         }
     }
 }
@@ -136,6 +144,13 @@ impl CadRenderRuntime {
         renderer.set_progressive_rendering(true);
         match renderer.initialize_with_device(device, queue) {
             Ok(caps) => {
+                // The production session uses the in-stream flags path for
+                // entity-level selection/hover/hidden: the app resolves those
+                // refs into `(SelectionRef, bits)` (see `PreparedScene::entity_flags`)
+                // and `apply_ready_updates` pushes them here. Enabling the toggle
+                // is a 16-byte control-uniform write; with no entity flags set it
+                // is pixel-identical to the pre-flags renderer.
+                renderer.set_selection_flags_enabled(true);
                 self.epoch += 1;
                 self.outcome = Some(BackendOutcome::Initialized {
                     preference: preference_choice(preference),
@@ -166,6 +181,7 @@ impl CadRenderRuntime {
         self.diagnostic = None;
         self.overlays_suppressed = false;
         self.overlay_suffix_commits = 0;
+        self.applied_highlight = None;
         self.dirty.invalidate();
     }
 
@@ -202,6 +218,26 @@ impl CadRenderRuntime {
         }
         let renderer = self.renderer.as_mut().expect("ready renderer");
         let base_changed = self.applied_base != Some(ready.base_revision);
+        // An entity-only selection/hover/hidden change republishes the scene with
+        // the **same** overlay `Arc` (the controller reuses it) and no base
+        // change, so there is no geometry to upload — only flags to push. This is
+        // the "selection change uploads only flags data" path: it never re-uploads
+        // a batch, stream or chunk.
+        let overlay_reused = self
+            .applied_highlight
+            .is_some_and(|previous| previous == Arc::as_ptr(&ready.highlight) as usize);
+        if !base_changed
+            && overlay_reused
+            && self.pending_upload.is_none()
+            && !self.overlays_suppressed
+        {
+            renderer.set_entity_flags(&ready.entity_flags)?;
+            self.applied_revision = Some(ready.revision);
+            self.applied_highlight = Some(Arc::as_ptr(&ready.highlight) as usize);
+            self.dirty.invalidate();
+            self.diagnostic = None;
+            return Ok(());
+        }
         // Base drawing batches are the prefix; the transient highlight/preview
         // overlay is the replaceable suffix. A highlight-only change still
         // re-uploads the suffix, but never the base.
@@ -271,6 +307,11 @@ impl CadRenderRuntime {
                 self.base_batches
             },
         )?;
+        // Push the entity-level flags for the freshly committed scene. A base
+        // change rebuilt the pick keys, so the flags must be re-resolved against
+        // the new table; a suffix-only commit re-applies idempotently (the diff
+        // uploads nothing when the bits are unchanged).
+        renderer.set_entity_flags(&ready.entity_flags)?;
         // A suffix-only commit re-uploads (or truncates) the transient overlay
         // batch range; a base change replaces the whole scene instead.
         if !pending.base_changed {
@@ -301,6 +342,7 @@ impl CadRenderRuntime {
         self.base_batches = ready.base.added.len();
         self.applied_base = Some(ready.base_revision);
         self.applied_revision = Some(ready.revision);
+        self.applied_highlight = Some(Arc::as_ptr(&ready.highlight) as usize);
         // A committed full scene restores the transient overlay suffix, so the
         // base-only fallback is no longer active.
         self.overlays_suppressed = false;

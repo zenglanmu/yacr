@@ -1,7 +1,7 @@
 //! CPU scene preparation. No Slint handles, GPU resources or render callbacks.
 use crate::layers::LayerOverrideSet;
 use cad_db::DrawingDatabase;
-use cad_domain::{CadResult, DocumentId, SceneIdentity, TaskStamp};
+use cad_domain::{CadResult, DocumentId, SceneIdentity, SelectionRef, TaskStamp};
 use cad_representation::{FontEngine, SpaceSelection};
 use cad_scene::SceneDelta;
 use std::sync::Arc;
@@ -33,8 +33,12 @@ pub struct PreparedScene {
     pub revision: u64,
     pub base_revision: u64,
     pub base: Arc<SceneDelta>,
-    /// Transient selection-highlight and tool-preview batches.
+    /// Transient sub-element-highlight and tool-preview batches.
     pub highlight: Arc<SceneDelta>,
+    /// Entity-level selection/hover/hidden flags for the renderer's in-stream
+    /// flags path (see `cad_scene::FLAG_*` and `Renderer::set_entity_flags`).
+    /// Empty when nothing is selected/hovered/hidden.
+    pub entity_flags: Vec<(SelectionRef, u32)>,
     pub highlight_diagnostics: Vec<cad_domain::Diagnostic>,
     pub highlight_completeness: cad_domain::Completeness,
     /// Decoded-image cache the base was built with, carried to the renderer so
@@ -45,13 +49,20 @@ pub struct PreparedScene {
 #[derive(Clone, Default)]
 pub struct CadSceneController {
     version: Option<SceneVersion>,
-    /// `(base_revision, transient overlay fingerprint)`.
+    /// `(base_revision, sub-element overlay fingerprint)`.
     visual_version: Option<(u64, u64)>,
+    /// Fingerprint of the entity-flag inputs (entity-level selection/hover/hidden).
+    flags_version: Option<u64>,
     pub fonts_revision: u64,
     revision: u64,
     base_revision: u64,
     base: Option<Arc<SceneDelta>>,
     visual_overlay: Option<Arc<SceneDelta>>,
+    visual_diagnostics: Option<Vec<cad_domain::Diagnostic>>,
+    visual_completeness: Option<cad_domain::Completeness>,
+    entity_flags: Option<Vec<(SelectionRef, u32)>>,
+    flags_diagnostics: Option<Vec<cad_domain::Diagnostic>>,
+    flags_completeness: Option<cad_domain::Completeness>,
     shared_document: Option<(Arc<DrawingDatabase>, SceneIdentity)>,
     document_epoch: u64,
     /// Decoded raster-image cache fed to the base build, stored so a later
@@ -220,8 +231,10 @@ impl CadSceneController {
         let base_changed = self.base.is_none() || self.version != version;
         let next_base = self.base_revision + u64::from(base_changed);
         let visual_version = (next_base, overlay_fingerprint(overlays));
+        let flags_version = entity_flags_fingerprint(overlays);
         let visual_changed = base_changed || self.visual_version != Some(visual_version);
-        if !base_changed && !visual_changed {
+        let flags_changed = base_changed || self.flags_version != Some(flags_version);
+        if !base_changed && !visual_changed && !flags_changed {
             return Ok(());
         }
         let mut stamp = TaskStamp::new(document, self.revision + 1);
@@ -252,7 +265,7 @@ impl CadSceneController {
             self.base.as_ref().expect("base prepared").clone()
         };
 
-        let (visual_delta, highlight_diagnostics, highlight_completeness) =
+        let (visual_delta, visual_diagnostics, visual_completeness) =
             if visual_changed || self.visual_overlay.is_none() {
                 let mut overlay = VisualOverlay::default();
                 if let Some(db) = doc {
@@ -327,25 +340,56 @@ impl CadSceneController {
                 self.visual_result()
             };
 
+        // Entity-level flags are resolved separately from the overlay batches, so
+        // an entity-only selection change republishes the flags without touching
+        // the overlay delta (the same `Arc` is reused) or the base.
+        let (entity_flags, flags_diagnostics, flags_completeness) =
+            if flags_changed || self.entity_flags.is_none() {
+                match doc {
+                    Some(db) => {
+                        let scene = selection_entity_flags(db, overlays, document);
+                        (scene.flags, scene.diagnostics, scene.completeness)
+                    }
+                    None => (Vec::new(), Vec::new(), cad_domain::Completeness::Complete),
+                }
+            } else {
+                (
+                    self.entity_flags.clone().unwrap_or_default(),
+                    self.flags_diagnostics.clone().unwrap_or_default(),
+                    self.flags_completeness
+                        .clone()
+                        .unwrap_or(cad_domain::Completeness::Complete),
+                )
+            };
+
         self.revision += 1;
         self.base_revision = next_base;
         self.version = version;
         self.visual_version = Some(visual_version);
+        self.flags_version = Some(flags_version);
         self.base = Some(base.clone());
         self.visual_overlay = Some(visual_delta.clone());
+        self.visual_diagnostics = Some(visual_diagnostics.clone());
+        self.visual_completeness = Some(visual_completeness.clone());
+        self.entity_flags = Some(entity_flags.clone());
+        self.flags_diagnostics = Some(flags_diagnostics.clone());
+        self.flags_completeness = Some(flags_completeness.clone());
+        let mut highlight_diagnostics = visual_diagnostics;
+        highlight_diagnostics.extend(flags_diagnostics);
         self.ready = Some(PreparedScene {
             revision: self.revision,
             base_revision: next_base,
             base,
             highlight: visual_delta,
+            entity_flags,
             highlight_diagnostics,
-            highlight_completeness,
+            highlight_completeness: visual_completeness.combine(flags_completeness),
             images: self.images.clone(),
         });
         Ok(())
     }
 
-    /// The cached transient overlay plus its diagnostics/completeness.
+    /// The cached transient overlay batches plus their diagnostics/completeness.
     fn visual_result(
         &self,
     ) -> (
@@ -353,18 +397,20 @@ impl CadSceneController {
         Vec<cad_domain::Diagnostic>,
         cad_domain::Completeness,
     ) {
-        match (&self.visual_overlay, &self.ready) {
-            (Some(delta), Some(ready)) => (
-                delta.clone(),
-                ready.highlight_diagnostics.clone(),
-                ready.highlight_completeness.clone(),
-            ),
-            (Some(delta), None) => (
+        match (
+            &self.visual_overlay,
+            &self.visual_diagnostics,
+            &self.visual_completeness,
+        ) {
+            (Some(delta), Some(diagnostics), Some(completeness)) => {
+                (delta.clone(), diagnostics.clone(), completeness.clone())
+            }
+            (Some(delta), _, _) => (
                 delta.clone(),
                 Vec::new(),
                 cad_domain::Completeness::Complete,
             ),
-            (None, _) => (
+            (None, _, _) => (
                 Arc::new(SceneDelta {
                     stamp: TaskStamp::new(DocumentId(0), 0),
                     added: Vec::new(),
@@ -679,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn selection_change_rebuilds_only_the_highlight_overlay() {
+    fn entity_selection_change_publishes_flags_without_rebuilding_the_overlay() {
         use crate::selection::{model_ref, SelectionSet};
         let db = db_with_line();
         let mut controller = CadSceneController::default();
@@ -698,10 +744,12 @@ mod tests {
         let first = controller.ready.as_ref().unwrap();
         let base = first.base.clone();
         let base_revision = first.base_revision;
+        let highlight = first.highlight.clone();
         assert!(first.highlight.added.is_empty());
-        assert_eq!(first.highlight_diagnostics.len(), 0);
+        assert!(first.entity_flags.is_empty());
 
-        // Selecting the line rebuilds only the transient highlight overlay.
+        // Selecting the line is the flags path: the base and the (empty) overlay
+        // delta are both reused; only the entity flags change.
         let overlays = OverlayInputs {
             selection: SelectionSet::from_refs([model_ref(
                 DocumentId(73),
@@ -730,17 +778,21 @@ mod tests {
             "the base drawing must be reused across a selection change"
         );
         assert_eq!(after.base_revision, base_revision);
-        assert_eq!(after.highlight.added.len(), 1);
-        assert!(after
-            .highlight
-            .added
-            .iter()
-            .all(|b| b.draw_order > 0 && b.draw_order < 1_000_000));
-        assert!(after.highlight.added.iter().all(|b| !b.color_unresolved));
+        assert!(
+            Arc::ptr_eq(&highlight, &after.highlight),
+            "an entity-level selection must not rebuild the overlay delta"
+        );
+        assert!(after.highlight.added.is_empty());
+        assert_eq!(
+            after.entity_flags,
+            vec![(
+                model_ref(DocumentId(73), cad_domain::EntityId(1)),
+                cad_scene::FLAG_SELECTED
+            )]
+        );
 
         // Rebuilding with the same selection is a no-op (revision unchanged).
         let revision = after.revision;
-        let highlight = after.highlight.clone();
         controller
             .prepare_with_overlays(
                 Some(&db),
@@ -752,10 +804,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
-        assert!(Arc::ptr_eq(
-            &highlight,
-            &controller.ready.as_ref().unwrap().highlight
-        ));
     }
 
     #[test]
@@ -970,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn disabling_the_selection_highlight_omits_the_selection_batch() {
+    fn disabling_the_selection_highlight_omits_the_selection_flags() {
         use crate::selection::{model_ref, SelectionSet};
         let db = db_with_line();
         let mut controller = CadSceneController::default();
@@ -998,15 +1046,14 @@ mod tests {
                 &hidden,
             )
             .unwrap();
+        let ready = controller.ready.as_ref().unwrap();
         assert!(
-            controller
-                .ready
-                .as_ref()
-                .unwrap()
-                .highlight
-                .added
-                .is_empty(),
+            ready.highlight.added.is_empty(),
             "a non-empty selection with selection_highlight off must draw nothing"
+        );
+        assert!(
+            ready.entity_flags.is_empty(),
+            "selection_highlight off must also clear the selected flags"
         );
     }
 

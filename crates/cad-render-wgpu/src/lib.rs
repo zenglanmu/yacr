@@ -361,10 +361,13 @@ pub struct PickCollision {
 }
 
 /// Selection/hover/visibility bits of the flags table (see
-/// [`Renderer::set_selection_flags`]).
-pub const FLAG_SELECTED: u32 = 1 << 0;
-pub const FLAG_HOVERED: u32 = 1 << 1;
-pub const FLAG_HIDDEN: u32 = 1 << 2;
+/// [`Renderer::set_entity_flags`]).
+///
+/// The canonical values live in `cad-scene` (`cad_scene::FLAG_*`) so the app
+/// layer, which does not depend on this crate, can name them without a second
+/// definition drifting out of sync; this crate re-exports them and its WGSL
+/// shaders declare the matching constants.
+pub use cad_scene::{FLAG_HIDDEN, FLAG_HOVERED, FLAG_SELECTED};
 
 /// The color-attachment format of the id target.
 ///
@@ -1023,6 +1026,14 @@ pub struct Renderer {
     flags_upload_bytes: u64,
     /// Number of flags updates that reached the GPU.
     flags_upload_count: u64,
+    /// Keys whose bits were last written by [`Renderer::set_entity_flags`].
+    ///
+    /// Used to diff an entity-flag update so a selection change only uploads the
+    /// rows whose bits actually changed (and clears the rows that fell out of the
+    /// selection). `set_pick_key_flags` does not touch this set, so a manual
+    /// per-key write is never clobbered by a later entity-flag diff unless the
+    /// same key is in the entity set.
+    entity_flag_keys: std::collections::BTreeSet<u32>,
 }
 
 /// Staged GPU resources, owned by the renderer that prepared them. Publishing

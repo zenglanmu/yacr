@@ -24,6 +24,16 @@ fn source(entity: u128) -> SelectionRef {
     }
 }
 
+/// A source reached through an `INSERT` instance chain.
+fn source_instance(entity: u128, instance: &[u128]) -> SelectionRef {
+    SelectionRef {
+        document: DocumentId(1),
+        entity: EntityId(entity),
+        instance: InstancePath(instance.iter().copied().map(EntityId).collect()),
+        sub_element: None,
+    }
+}
+
 fn gpu() -> Option<HeadlessGpu> {
     match create_headless_gpu(BackendPreference::Auto) {
         Ok(gpu) => Some(gpu),
@@ -976,5 +986,223 @@ fn flags_disabled_is_pixel_identical_for_every_draw_class() {
     assert_eq!(
         after, before,
         "with the toggle off, flag bits must not change any class's pixels"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Entity-level flags API (P3a-2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn entity_flags_resolve_a_source_to_its_batch_key() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    renderer
+        .upload(&scene(vec![quad(0.0, 0.0, 8.0, 0x123, false)]))
+        .expect("upload");
+    let key = renderer.pick_key_for_batch(0).expect("key");
+
+    renderer
+        .set_entity_flags(&[(source(0x123), FLAG_SELECTED)])
+        .expect("set entity flags");
+    assert_eq!(renderer.entity_flag_keys(), vec![key]);
+    assert_eq!(renderer.pick_key_flags(key), FLAG_SELECTED);
+
+    // The call replaces the whole entity set: an empty list clears it.
+    renderer.set_entity_flags(&[]).expect("clear entity flags");
+    assert!(renderer.entity_flag_keys().is_empty());
+    assert_eq!(renderer.pick_key_flags(key), 0);
+}
+
+#[test]
+fn an_insert_instance_flag_targets_only_that_placement() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let mut first = line_band(6.0, 3, 0);
+    first.sources = vec![source_instance(20, &[10])];
+    let mut second = line_band(-6.0, 3, 0);
+    second.sources = vec![source_instance(20, &[20])];
+    renderer
+        .upload(&scene(vec![first, second]))
+        .expect("upload");
+    let first_key = renderer.pick_key_for_batch(0).expect("key");
+    let second_key = renderer.pick_key_for_batch(1).expect("key");
+
+    renderer
+        .set_entity_flags(&[(source_instance(20, &[10]), FLAG_SELECTED)])
+        .expect("set entity flags");
+    assert_eq!(renderer.entity_flag_keys(), vec![first_key]);
+    assert_eq!(renderer.pick_key_flags(first_key), FLAG_SELECTED);
+    assert_eq!(
+        renderer.pick_key_flags(second_key),
+        0,
+        "the sibling placement must stay unflagged"
+    );
+}
+
+/// A merged multi-source batch is tinted as a whole: the static streams do not
+/// record which fragment range belongs to which source, so a flag on one of its
+/// sources necessarily tints the batch. This is the documented granularity limit,
+/// not a silent per-fragment claim.
+#[test]
+fn a_multi_source_batch_is_tinted_at_batch_granularity() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let mut batch = line_band(6.0, 3, 0);
+    batch.sources = vec![source(0x1000), source(0x2000)];
+    renderer.upload(&scene(vec![batch])).expect("upload");
+    let key = renderer.pick_key_for_batch(0).expect("key");
+
+    // Flag only one of the batch's two sources.
+    renderer
+        .set_entity_flags(&[(source(0x1000), FLAG_SELECTED)])
+        .expect("set entity flags");
+    assert_eq!(
+        renderer.entity_flag_keys(),
+        vec![key],
+        "the whole multi-source batch's key carries the flag"
+    );
+    assert_eq!(renderer.pick_key_flags(key), FLAG_SELECTED);
+}
+
+#[test]
+fn entity_selected_and_hovered_are_visibly_tinted_and_hidden_is_not_drawn() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let target = RenderTarget::new(96, 96);
+    renderer
+        .upload(&scene(vec![quad(0.0, 0.0, 8.0, 0x55, false)]))
+        .expect("upload");
+    let plain = render(&mut renderer, &target);
+    let (x, y) = world_to_pixel(&camera_2d(), 96, 96, [0.0, 0.0]);
+    let i = (y as usize * 96 + x as usize) * 4;
+
+    renderer.set_selection_flags_enabled(true);
+    renderer
+        .set_entity_flags(&[(source(0x55), FLAG_SELECTED)])
+        .expect("selected");
+    let selected = render(&mut renderer, &target);
+    assert_ne!(selected, plain, "a selected entity must be tinted");
+    assert!(
+        selected[i] > 8 || selected[i + 1] > 8 || selected[i + 2] > 8,
+        "the selected entity stays visible"
+    );
+
+    renderer
+        .set_entity_flags(&[(source(0x55), FLAG_HOVERED)])
+        .expect("hovered");
+    let hovered = render(&mut renderer, &target);
+    assert_ne!(hovered, plain, "a hovered entity must be tinted");
+    assert_ne!(
+        hovered, selected,
+        "hover is a lighter/different tint of the same mechanism"
+    );
+
+    renderer
+        .set_entity_flags(&[(source(0x55), FLAG_HIDDEN)])
+        .expect("hidden");
+    let hidden = render(&mut renderer, &target);
+    assert!(
+        hidden[i] <= 8 && hidden[i + 1] <= 8 && hidden[i + 2] <= 8,
+        "a hidden entity must be discarded, got {:?}",
+        &hidden[i..i + 4]
+    );
+}
+
+#[test]
+fn entity_flags_tint_an_instanced_line() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let target = RenderTarget::new(96, 96);
+    renderer
+        .upload(&scene(vec![line_band(6.0, 3, 0xAB)]))
+        .expect("upload");
+    let plain = render(&mut renderer, &target);
+    let (x, y) = first_drawn_pixel(&plain, 96, 96).expect("drawn");
+    let i = (y as usize * 96 + x as usize) * 4;
+
+    renderer.set_selection_flags_enabled(true);
+    renderer
+        .set_entity_flags(&[(source(0xAB), FLAG_SELECTED)])
+        .expect("selected");
+    let tinted = render(&mut renderer, &target);
+    assert_ne!(
+        &tinted[i..i + 4],
+        &plain[i..i + 4],
+        "an instanced line entity must be tinted through the in-stream flags"
+    );
+}
+
+#[test]
+fn a_selection_change_uploads_only_flags_data() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let target = RenderTarget::new(96, 96);
+    renderer
+        .upload(&scene(vec![
+            quad(-12.0, 0.0, 5.0, 0x0A, false),
+            line_band(6.0, 3, 0x0B),
+        ]))
+        .expect("upload");
+    let _ = render(&mut renderer, &target);
+    let streams = renderer.instance_stream_uploads();
+    let chunks = renderer.mesh_chunk_uploads();
+    let flags_before = renderer.flags_upload_count();
+
+    // A selection change is only a flags update: no stream/chunk re-upload.
+    renderer
+        .set_entity_flags(&[(source(0x0A), FLAG_SELECTED)])
+        .expect("select A");
+    renderer
+        .set_entity_flags(&[(source(0x0B), FLAG_SELECTED)])
+        .expect("select B");
+    assert!(
+        renderer.flags_upload_count() > flags_before,
+        "a selection change must upload flags"
+    );
+    assert_eq!(
+        renderer.instance_stream_uploads(),
+        streams,
+        "a selection change must not re-upload the static instance streams"
+    );
+    assert_eq!(
+        renderer.mesh_chunk_uploads(),
+        chunks,
+        "a selection change must not re-upload the static merged chunks"
+    );
+}
+
+#[test]
+fn flags_enabled_with_no_entity_flags_is_pixel_identical() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let target = RenderTarget::new(96, 96);
+    renderer
+        .upload(&scene(vec![quad(0.0, 0.0, 8.0, 0x55, false)]))
+        .expect("upload");
+    let before = render(&mut renderer, &target);
+
+    // The production session enables the toggle; with an empty entity-flag set
+    // the output must be byte-identical to the pre-flags frame.
+    renderer.set_selection_flags_enabled(true);
+    renderer.set_entity_flags(&[]).expect("no flags");
+    let after = render(&mut renderer, &target);
+    assert_eq!(
+        after, before,
+        "flags enabled but empty must be identical to before"
     );
 }

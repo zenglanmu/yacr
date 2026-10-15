@@ -148,6 +148,19 @@ impl Default for PreviewOptions {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct OverlayInputs {
     pub selection: SelectionSet,
+    /// Entity-level hovered refs.
+    ///
+    /// Hover is the *same* flags mechanism as selection, just a lighter tint
+    /// (`FLAG_HOVERED`); it is a whole-entity state, so it is carried as flags
+    /// rather than an overlay batch. Empty by default, so a host that never feeds
+    /// a hover gets no tint.
+    pub hovered: SelectionSet,
+    /// Entity-level refs the session wants hidden (`FLAG_HIDDEN` discards the
+    /// fragment in-shader, so a flagged entity is not drawn).
+    ///
+    /// This is a transient session state distinct from the database/layer
+    /// visibility that decides what is in the base scene at all. Empty by default.
+    pub hidden: SelectionSet,
     pub measurement: Option<MeasurementPreview>,
     /// In-progress draw/edit preview (drawing-edit §4), drawn through the same
     /// transient overlay so a draw gesture gets live rubber-band feedback.
@@ -169,10 +182,12 @@ pub struct OverlayInputs {
 }
 
 impl OverlayInputs {
-    /// Whether every overlay input is empty (no highlight, no preview, no
-    /// resolved snap hints).
+    /// Whether every overlay input is empty (no highlight, no hover/hidden
+    /// flags, no preview, no resolved snap hints).
     pub fn is_empty(&self) -> bool {
         self.selection.is_empty()
+            && self.hovered.is_empty()
+            && self.hidden.is_empty()
             && self.measurement.is_none()
             && self.draw_preview.is_none()
             && self.snap_hints_input.is_empty()
@@ -230,16 +245,24 @@ impl VisualOverlay {
     }
 }
 
-/// A stable change fingerprint of the transient overlay inputs.
+/// A stable change fingerprint of the transient **overlay batch** inputs.
 ///
-/// The controller uses it to rebuild **only** the highlight/preview overlay when
-/// the selection or a preview point/cursor changes, leaving the base drawing
-/// `Arc` untouched. Selecting a different object or moving a preview cursor
-/// changes this value; rebuilding the scene with the same inputs does not.
+/// The controller uses it to rebuild **only** the sub-element/preview overlay
+/// when a face selection or a preview point/cursor changes, leaving the base
+/// drawing `Arc` untouched. Entity-level selection/hover/hidden are the renderer's
+/// flags path, not overlay batches, so they are deliberately **excluded** here
+/// (see [`entity_flags_fingerprint`]): an entity-only selection change must not
+/// rebuild or re-upload any overlay geometry.
 pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for reference in inputs.selection.refs() {
+    // Only sub-element (mesh face) refs still produce an overlay batch.
+    for reference in inputs
+        .selection
+        .refs()
+        .iter()
+        .filter(|reference| reference.sub_element.is_some())
+    {
         reference.document.0.hash(&mut hasher);
         reference.entity.0.hash(&mut hasher);
         for instance in &reference.instance.0 {
@@ -294,6 +317,41 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
         }
         None => 0u8.hash(&mut hasher),
     }
+    hasher.finish()
+}
+
+/// A stable change fingerprint of the **entity flags** inputs.
+///
+/// Entity-level selection/hover/hidden are resolved into renderer flags, not
+/// overlay batches, so they are hashed here (not in [`overlay_fingerprint`]).
+/// The controller uses it to republish the flags without rebuilding or
+/// re-uploading any overlay geometry: an entity-only selection change leaves the
+/// base `Arc` and the overlay delta byte-identical.
+///
+/// `selection_highlight` gates the selected tint only; hover/hidden are
+/// independent transient states and always participate.
+pub fn entity_flags_fingerprint(inputs: &OverlayInputs) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let hash_refs =
+        |hasher: &mut std::collections::hash_map::DefaultHasher, tag: u8, refs: &[SelectionRef]| {
+            tag.hash(hasher);
+            for reference in refs
+                .iter()
+                .filter(|reference| reference.sub_element.is_none())
+            {
+                reference.document.0.hash(hasher);
+                reference.entity.0.hash(hasher);
+                for instance in &reference.instance.0 {
+                    instance.0.hash(hasher);
+                }
+                u8::MAX.hash(hasher);
+            }
+        };
+    hash_refs(&mut hasher, 0, inputs.selection.refs());
+    hash_refs(&mut hasher, 1, inputs.hovered.refs());
+    hash_refs(&mut hasher, 2, inputs.hidden.refs());
+    inputs.visibility.selection_highlight.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -501,15 +559,22 @@ fn grid_positions(min: f64, max: f64, step: f64, cap: usize) -> Vec<f64> {
     out
 }
 
-/// Build the selection highlight overlay for `selection`.
+/// Build the **sub-element** selection highlight overlay for `selection`.
 ///
-/// Only the **selected** refs are resolved: each ref's own `INSERT` chain is
-/// walked with [`crate::picking::resolve_pick_transform`] instead of scanning the
-/// whole drawing, so a block child reached through two placements becomes two
-/// distinct refs and highlights independently without cloning every entity's
-/// geometry. The resolved geometry is tessellated by the default representation
-/// provider (the same discretisation the base scene uses) and converted to
-/// overlay batches by [`cad_scene::highlight_batches`].
+/// Whole-entity refs are the renderer's in-stream flags path (see
+/// [`selection_entity_flags`]): they produce no batch here, so a whole-entity
+/// selection never double-highlights. Only mesh-face sub-elements still need a
+/// small separate draw, because the static merged streams do not re-upload per
+/// selection change (the user explicitly authorized a separate draw for the few
+/// selected sub-elements). Tool previews are built by [`preview_overlay`].
+///
+/// Only the selected **sub-element** refs are resolved: each ref's own `INSERT`
+/// chain is walked with [`crate::picking::resolve_pick_transform`] instead of
+/// scanning the whole drawing, so a block child reached through two placements
+/// becomes two distinct refs and highlights independently without cloning every
+/// entity's geometry. The resolved geometry is tessellated by the default
+/// representation provider (the same discretisation the base scene uses) and
+/// converted to overlay batches by [`cad_scene::highlight_batches`].
 ///
 /// A ref that no longer resolves (deleted entity, foreign document, or an
 /// `INSERT` root that only exists as an expansion) produces an explicit
@@ -524,7 +589,14 @@ pub fn selection_highlight(
     fonts: Option<Arc<FontEngine>>,
 ) -> VisualOverlay {
     let mut out = VisualOverlay::default();
-    if selection.is_empty() {
+    // Entity-level refs are the flags path; only sub-elements are overlaid.
+    let sub_element_refs: Vec<SelectionRef> = selection
+        .refs()
+        .iter()
+        .filter(|reference| reference.sub_element.is_some())
+        .cloned()
+        .collect();
+    if sub_element_refs.is_empty() {
         return out;
     }
 
@@ -541,7 +613,7 @@ pub fn selection_highlight(
     // the *same* object to the old full scan, which matched both against one
     // item; resolve each such object exactly once so the batches stay identical.
     let mut resolved: HashSet<(DocumentId, EntityId, Vec<EntityId>)> = HashSet::new();
-    for reference in selection.refs() {
+    for reference in &sub_element_refs {
         let key = (
             reference.document,
             reference.entity,
@@ -579,7 +651,7 @@ pub fn selection_highlight(
         completeness,
         diagnostics,
     } = cad_scene::highlight_batches(
-        selection.refs(),
+        &sub_element_refs,
         representations.iter(),
         |_| true,
         &HighlightOptions::default(),
@@ -593,13 +665,103 @@ pub fn selection_highlight(
     out
 }
 
+/// The entity-level flags resolved from an [`OverlayInputs`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityFlagScene {
+    /// One `(SelectionRef, bits)` per entity-level ref, in selection/hover/hidden
+    /// order, with the bits of the same placement OR-ed. Bits are
+    /// [`cad_scene::FLAG_SELECTED`] / [`FLAG_HOVERED`] / [`FLAG_HIDDEN`].
+    pub flags: Vec<(SelectionRef, u32)>,
+    /// `highlight.unresolved` per entity-level ref the database does not resolve.
+    pub diagnostics: Vec<Diagnostic>,
+    pub completeness: Completeness,
+}
+
+/// Resolve the entity-level selection/hover/hidden inputs into renderer flags.
+///
+/// This is the flags twin of [`selection_highlight`]: it reuses the same
+/// resolve-only-refs logic (`resolve_pick_transform` per ref, never a full pick
+/// scan) but produces `(SelectionRef, bits)` pairs for the renderer's
+/// `set_entity_flags` instead of overlay geometry. A ref that does not resolve
+/// (deleted entity, foreign document, or an `INSERT` root that only exists as an
+/// expansion) produces an explicit `highlight.unresolved` diagnostic and **no**
+/// flag — never a silent miss. Sub-element refs are ignored here: they are the
+/// overlay path.
+///
+/// `inputs.visibility.selection_highlight` gates the selected tint (turning the
+/// selection highlight off clears it); hover and hidden are independent transient
+/// states and always participate.
+pub fn selection_entity_flags(
+    database: &DrawingDatabase,
+    inputs: &OverlayInputs,
+    document: DocumentId,
+) -> EntityFlagScene {
+    let mut out = EntityFlagScene {
+        flags: Vec::new(),
+        diagnostics: Vec::new(),
+        completeness: Completeness::Complete,
+    };
+    let resolve = |reference: &SelectionRef, bits: u32, out: &mut EntityFlagScene| {
+        if crate::picking::resolve_pick_transform(database, document, reference).is_none() {
+            let message = format!(
+                "selection {} is not present in the supplied representations",
+                reference.entity.0
+            );
+            out.diagnostics.push(Diagnostic {
+                object: None,
+                code: "highlight.unresolved".into(),
+                message: message.clone(),
+            });
+            out.completeness = out
+                .completeness
+                .clone()
+                .combine(Completeness::Missing(vec![message]));
+            return;
+        }
+        match out
+            .flags
+            .iter_mut()
+            .find(|(existing, _)| same_entity_instance(existing, reference))
+        {
+            Some(entry) => entry.1 |= bits,
+            None => out.flags.push((reference.clone(), bits)),
+        }
+    };
+
+    if inputs.visibility.selection_highlight {
+        for reference in inputs
+            .selection
+            .refs()
+            .iter()
+            .filter(|reference| reference.sub_element.is_none())
+        {
+            resolve(reference, cad_scene::FLAG_SELECTED, &mut out);
+        }
+    }
+    for reference in inputs
+        .hovered
+        .refs()
+        .iter()
+        .filter(|reference| reference.sub_element.is_none())
+    {
+        resolve(reference, cad_scene::FLAG_HOVERED, &mut out);
+    }
+    for reference in inputs
+        .hidden
+        .refs()
+        .iter()
+        .filter(|reference| reference.sub_element.is_none())
+    {
+        resolve(reference, cad_scene::FLAG_HIDDEN, &mut out);
+    }
+    out
+}
+
 /// Whether two refs name the same entity reached through the same instance
 /// chain, ignoring the sub-element (which the highlight face filter applies).
 ///
-/// Kept as the correctness oracle for the resolve-only path: production dedups
-/// resolved refs on the same key with a hash set, and the test-only full-scan
-/// reference uses this predicate.
-#[cfg(test)]
+/// The flags resolver merges bits by this identity, and the test-only full-scan
+/// reference uses the same predicate.
 fn same_entity_instance(a: &SelectionRef, b: &SelectionRef) -> bool {
     a.document == b.document && a.entity == b.entity && a.instance == b.instance
 }
@@ -1217,66 +1379,91 @@ mod tests {
         assert!(overlay.diagnostics.is_empty());
     }
 
+    fn flags_inputs(selection: SelectionSet) -> OverlayInputs {
+        OverlayInputs {
+            selection,
+            ..OverlayInputs::default()
+        }
+    }
+
     #[test]
-    fn highlight_of_a_line_has_expected_vertices() {
+    fn entity_level_selection_is_flags_not_an_overlay_batch() {
         let db = drawing();
         let selection = SelectionSet::from_refs([model_ref(30)]);
+        // No overlay batch: a whole entity is the renderer flags path.
         let overlay = selection_highlight(&db, &selection, DocumentId(1), stamp(), None);
-        assert_eq!(overlay.drawn(), 1);
-        let batch = &overlay.batches[0];
-        assert_eq!(batch.topology, RenderTopology::Lines);
-        assert_eq!(batch.vertices.len(), 2);
-        // Local origin is the line start; the second vertex is the delta.
-        assert_eq!(batch.local_origin, p(30.0, -1.0));
-        assert_eq!(batch.vertices[1], [0.0, 2.0, 0.0]);
-        // Highlight tint is concrete and the draw order sits between the base
-        // drawing (0) and the selection highlight (900_000).
-        assert!(!batch.color_unresolved);
-        assert_eq!(batch.color, cad_scene::DEFAULT_HIGHLIGHT_COLOR);
-        assert!(batch.draw_order > 0 && batch.draw_order < 1_000_000);
-        assert_eq!(batch.sources, vec![model_ref(30)]);
+        assert!(overlay.is_empty());
+        assert!(overlay.diagnostics.is_empty());
+
+        // The flags resolver produces one SELECTED flag for the entity.
+        let scene = selection_entity_flags(&db, &flags_inputs(selection), DocumentId(1));
+        assert_eq!(scene.flags, vec![(model_ref(30), cad_scene::FLAG_SELECTED)]);
+        assert!(scene.diagnostics.is_empty());
+        assert_eq!(scene.completeness, Completeness::Complete);
     }
 
     #[test]
-    fn two_insert_instances_highlight_independently() {
+    fn two_insert_instances_flag_independently() {
         let db = drawing();
         // Only the first placement (instance [10]) is selected.
-        let selection = SelectionSet::from_refs([block_child_ref(10)]);
-        let overlay = selection_highlight(&db, &selection, DocumentId(1), stamp(), None);
-        assert_eq!(overlay.drawn(), 1);
-        let batch = &overlay.batches[0];
-        assert_eq!(batch.sources, vec![block_child_ref(10)]);
-        // The block child is a vertical line at local x = 0; placing it at
-        // x = 10 gives start (10, -1).
-        assert_eq!(batch.local_origin, p(10.0, -1.0));
-        assert_eq!(batch.vertices[1], [0.0, 2.0, 0.0]);
-
-        // Selecting both placements yields two batches with distinct origins.
-        let both = SelectionSet::from_refs([block_child_ref(10), block_child_ref(20)]);
-        let overlay = selection_highlight(&db, &both, DocumentId(1), stamp(), None);
-        assert_eq!(overlay.drawn(), 2);
-        assert_ne!(
-            overlay.batches[0].local_origin,
-            overlay.batches[1].local_origin
+        let scene = selection_entity_flags(
+            &db,
+            &flags_inputs(SelectionSet::from_refs([block_child_ref(10)])),
+            DocumentId(1),
         );
-        assert_eq!(overlay.batches[0].sources, vec![block_child_ref(10)]);
-        assert_eq!(overlay.batches[1].sources, vec![block_child_ref(20)]);
+        assert_eq!(
+            scene.flags,
+            vec![(block_child_ref(10), cad_scene::FLAG_SELECTED)]
+        );
+
+        // Both placements are distinct entity-level refs, flagged independently
+        // (the renderer resolves each to its own placement's pick key).
+        let scene = selection_entity_flags(
+            &db,
+            &flags_inputs(SelectionSet::from_refs([
+                block_child_ref(10),
+                block_child_ref(20),
+            ])),
+            DocumentId(1),
+        );
+        assert_eq!(scene.flags.len(), 2);
+        assert_eq!(scene.flags[0].0, block_child_ref(10));
+        assert_eq!(scene.flags[1].0, block_child_ref(20));
     }
 
     #[test]
-    fn unresolved_ref_yields_a_diagnostic_and_no_batch() {
-        let db = drawing();
-        let selection = SelectionSet::from_refs([model_ref(999)]);
-        let overlay = selection_highlight(&db, &selection, DocumentId(1), stamp(), None);
-        assert!(
-            overlay.is_empty(),
-            "a deleted entity must not produce a fabricated batch"
+    fn a_sub_element_selection_still_gets_an_overlay_batch() {
+        let db = mesh_insert_drawing();
+        let selection = SelectionSet::from_refs([mesh_child_ref(Some(face("face-a")))]);
+        let overlay = selection_highlight(&db, &selection, DocumentId(2), stamp(), None);
+        assert_eq!(overlay.drawn(), 1);
+        assert_eq!(overlay.batches[0].topology, RenderTopology::Mesh);
+        assert_eq!(
+            overlay.batches[0].sources[0]
+                .sub_element
+                .as_ref()
+                .map(|s| s.source_key.as_str()),
+            Some("face-a")
         );
-        assert!(overlay
+    }
+
+    #[test]
+    fn unresolved_entity_level_ref_is_reported_by_the_flags_resolver() {
+        let db = drawing();
+        let scene = selection_entity_flags(
+            &db,
+            &flags_inputs(SelectionSet::from_refs([model_ref(999)])),
+            DocumentId(1),
+        );
+        assert!(
+            scene.flags.is_empty(),
+            "a deleted entity must not produce a fabricated flag"
+        );
+        assert!(scene
             .diagnostics
             .iter()
             .any(|d| d.code == "highlight.unresolved"));
-        assert!(matches!(overlay.completeness, Completeness::Missing(_)));
+        assert!(matches!(scene.completeness, Completeness::Missing(_)));
     }
 
     // ---- resolve-only-selected-refs contract (perf fix) -------------------
@@ -1428,43 +1615,16 @@ mod tests {
         }
     }
 
-    /// The resolve-only path must be byte-for-byte identical to the old
-    /// full-scan path for every kind of selection (whole entity, INSERT
-    /// instance, mesh face, duplicate `(entity, instance)`, missing entity,
-    /// broken instance path).
+    /// The resolve-only sub-element path must be byte-for-byte identical to the
+    /// old full-scan path for every sub-element selection (mesh face, duplicate
+    /// `(entity, instance)`, missing entity, broken instance path). Entity-level
+    /// refs are the flags path and never reach `highlight_batches`, so they are
+    /// exercised by `selection_entity_flags` tests instead.
     #[test]
-    fn resolve_only_selected_refs_matches_the_full_scan() {
-        let db = drawing();
-        let selections = [
-            SelectionSet::new(),
-            SelectionSet::from_refs([model_ref(30)]),
-            SelectionSet::from_refs([block_child_ref(10)]),
-            SelectionSet::from_refs([block_child_ref(10), block_child_ref(20)]),
-            SelectionSet::from_refs([model_ref(30), block_child_ref(20)]),
-            SelectionSet::from_refs([model_ref(999)]),
-            // A deleted instance step: no item the scan could have produced.
-            SelectionSet::from_refs([SelectionRef {
-                document: DocumentId(1),
-                entity: EntityId(100),
-                instance: InstancePath(vec![EntityId(999)]),
-                sub_element: None,
-            }]),
-            // A model entity that is not a member of the named block.
-            SelectionSet::from_refs([SelectionRef {
-                document: DocumentId(1),
-                entity: EntityId(30),
-                instance: InstancePath(vec![EntityId(10)]),
-                sub_element: None,
-            }]),
-        ];
-        for selection in selections {
-            let fast = selection_highlight(&db, &selection, DocumentId(1), stamp(), None);
-            let legacy = legacy_selection_highlight(&db, &selection, DocumentId(1), stamp());
-            assert_eq!(fast, legacy, "selection {selection:?} diverged");
-        }
-
+    fn resolve_only_selected_refs_matches_the_full_scan_for_sub_elements() {
         let mesh_db = mesh_insert_drawing();
         let mesh_selections = [
+            SelectionSet::new(),
             SelectionSet::from_refs([mesh_child_ref(None)]),
             SelectionSet::from_refs([mesh_child_ref(Some(face("face-a")))]),
             SelectionSet::from_refs([mesh_child_ref(Some(face("face-b")))]),
@@ -1480,29 +1640,37 @@ mod tests {
     }
 
     /// An `INSERT` root only ever exists as an expansion, so selecting it is
-    /// unresolved — never a fabricated batch of the block's contents.
+    /// unresolved — never a fabricated flag of the block's contents.
     #[test]
-    fn insert_root_is_unresolved_like_the_full_scan() {
+    fn insert_root_is_unresolved_for_the_flags_resolver() {
         let db = drawing();
-        let selection = SelectionSet::from_refs([model_ref(10)]);
-        let overlay = selection_highlight(&db, &selection, DocumentId(1), stamp(), None);
-        assert!(overlay.is_empty());
-        assert!(overlay
+        let scene = selection_entity_flags(
+            &db,
+            &flags_inputs(SelectionSet::from_refs([model_ref(10)])),
+            DocumentId(1),
+        );
+        assert!(scene.flags.is_empty());
+        assert!(scene
             .diagnostics
             .iter()
             .any(|d| d.code == "highlight.unresolved"));
     }
 
-    /// The shared `(entity, instance)` of a whole-entity and a face selection is
-    /// resolved once: the face is drawn exactly once, not duplicated.
+    /// A whole-entity and a face selection of the same object: the entity is a
+    /// flag and the face is the single overlay batch, so neither duplicates.
     #[test]
-    fn a_face_and_its_entity_do_not_duplicate_the_mesh_batch() {
+    fn a_face_and_its_entity_produce_one_overlay_batch_and_one_flag() {
         let db = mesh_insert_drawing();
         let selection =
             SelectionSet::from_refs([mesh_child_ref(None), mesh_child_ref(Some(face("face-a")))]);
         let overlay = selection_highlight(&db, &selection, DocumentId(2), stamp(), None);
-        // One whole-mesh batch + one face-a batch.
-        assert_eq!(overlay.drawn(), 2);
+        // Only the face-a batch; the whole entity is a flag, not a batch.
+        assert_eq!(overlay.drawn(), 1);
+        let scene = selection_entity_flags(&db, &flags_inputs(selection), DocumentId(2));
+        assert_eq!(
+            scene.flags,
+            vec![(mesh_child_ref(None), cad_scene::FLAG_SELECTED)]
+        );
     }
 
     #[test]
@@ -1578,14 +1746,24 @@ mod tests {
     }
 
     #[test]
-    fn overlay_fingerprint_tracks_selection_and_cursor() {
+    fn overlay_fingerprint_tracks_sub_element_selection_and_cursor() {
         let mut a = OverlayInputs::default();
         let base = overlay_fingerprint(&a);
-        a.selection = SelectionSet::from_refs([block_child_ref(10)]);
+        a.selection = SelectionSet::from_refs([mesh_child_ref(Some(face("face-a")))]);
         let selected = overlay_fingerprint(&a);
         assert_ne!(base, selected);
-        a.selection.replace([block_child_ref(20)]);
+        a.selection.replace([mesh_child_ref(Some(face("face-b")))]);
         assert_ne!(selected, overlay_fingerprint(&a));
+
+        // An entity-level selection is the flags path: it must NOT change the
+        // overlay fingerprint (so no overlay geometry is rebuilt/re-uploaded),
+        // only the flags fingerprint.
+        let mut entity_only = OverlayInputs::default();
+        let overlay_before = overlay_fingerprint(&entity_only);
+        let flags_before = entity_flags_fingerprint(&entity_only);
+        entity_only.selection = SelectionSet::from_refs([block_child_ref(10)]);
+        assert_eq!(overlay_fingerprint(&entity_only), overlay_before);
+        assert_ne!(entity_flags_fingerprint(&entity_only), flags_before);
 
         let mut b = OverlayInputs {
             measurement: Some(MeasurementPreview {
@@ -1602,6 +1780,26 @@ mod tests {
         assert_ne!(no_cursor, overlay_fingerprint(&b));
         // Rebuilding with identical inputs is stable.
         assert_eq!(overlay_fingerprint(&b), overlay_fingerprint(&b));
+    }
+
+    #[test]
+    fn entity_flags_fingerprint_tracks_hover_and_hidden() {
+        let base = entity_flags_fingerprint(&OverlayInputs::default());
+        let hovered = OverlayInputs {
+            hovered: SelectionSet::from_refs([block_child_ref(10)]),
+            ..OverlayInputs::default()
+        };
+        let hidden = OverlayInputs {
+            hidden: SelectionSet::from_refs([block_child_ref(10)]),
+            ..OverlayInputs::default()
+        };
+        assert_ne!(entity_flags_fingerprint(&hovered), base);
+        assert_ne!(entity_flags_fingerprint(&hidden), base);
+        assert_ne!(
+            entity_flags_fingerprint(&hovered),
+            entity_flags_fingerprint(&hidden),
+            "hover and hidden are distinct flag kinds"
+        );
     }
 
     #[test]

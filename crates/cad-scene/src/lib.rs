@@ -19,7 +19,7 @@ pub mod highlight;
 
 pub use highlight::{
     highlight_batches, HighlightOptions, HighlightScene, DEFAULT_HIGHLIGHT_ALPHA,
-    DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_DRAW_ORDER,
+    DEFAULT_HIGHLIGHT_COLOR, FLAG_HIDDEN, FLAG_HOVERED, FLAG_SELECTED, HIGHLIGHT_DRAW_ORDER,
 };
 
 mod batch;

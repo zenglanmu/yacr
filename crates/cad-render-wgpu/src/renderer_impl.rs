@@ -100,6 +100,7 @@ impl Renderer {
             flags_table_dirty: true,
             flags_upload_bytes: 0,
             flags_upload_count: 0,
+            entity_flag_keys: std::collections::BTreeSet::new(),
         }
     }
 
@@ -754,6 +755,58 @@ impl Renderer {
     /// The CPU mirror of one key's flag bits (0 when unset).
     pub fn pick_key_flags(&self, key: u32) -> u32 {
         self.flags_bits.get(key as usize).copied().unwrap_or(0)
+    }
+
+    /// Set the whole-entity [`FLAG_SELECTED`]/[`FLAG_HOVERED`]/[`FLAG_HIDDEN`]
+    /// bits for a list of entity references.
+    ///
+    /// Each `(SelectionRef, bits)` is resolved to the pick keys of the resident
+    /// batches whose sources name that entity (see [`PickTable::keys_for_source`]),
+    /// so an entity reached through an INSERT instance tints exactly that
+    /// placement, and a multi-source merged batch is tinted as a whole
+    /// (documented batch-granularity limit: the merged run does not record which
+    /// fragment range belongs to which source). Bits from several refs that land
+    /// on the same key are OR-ed.
+    ///
+    /// Only the rows whose bits changed since the previous call are uploaded, and
+    /// rows that fell out of the list are cleared, so a selection change is a
+    /// flags-table update — never a geometry re-upload. A ref that matches no key
+    /// is skipped: it names geometry the resident scene does not contain (the
+    /// caller already reports that at the database level).
+    ///
+    /// The call replaces the whole entity-flag set: a key set by a previous
+    /// `set_entity_flags` but absent here is cleared to `0`. `set_pick_key_flags`
+    /// writes are only overwritten for keys this call actually manages.
+    pub fn set_entity_flags(&mut self, flags: &[(SelectionRef, u32)]) -> CadResult<()> {
+        let mut desired: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+        for (reference, bits) in flags {
+            for key in self.pick_table.keys_for_source(reference) {
+                *desired.entry(key).or_insert(0) |= *bits;
+            }
+        }
+        let stale: Vec<u32> = self
+            .entity_flag_keys
+            .iter()
+            .copied()
+            .filter(|key| !desired.contains_key(key))
+            .collect();
+        for key in stale {
+            self.set_pick_key_flags(key, 0)?;
+        }
+        for (&key, &bits) in &desired {
+            if self.pick_key_flags(key) != bits {
+                self.set_pick_key_flags(key, bits)?;
+            }
+        }
+        self.entity_flag_keys = desired.keys().copied().collect();
+        Ok(())
+    }
+
+    /// The keys currently carrying an entity-level flag, in ascending order.
+    ///
+    /// Diagnostic/test surface: it is the diff base of [`Self::set_entity_flags`].
+    pub fn entity_flag_keys(&self) -> Vec<u32> {
+        self.entity_flag_keys.iter().copied().collect()
     }
 
     /// Bytes uploaded by flags updates since init. A flags update must not grow
@@ -1888,9 +1941,12 @@ impl Renderer {
         self.pick_key_counter.store(1, Ordering::Relaxed);
         self.pick_table = PickTable::default();
         // A retired scene's keys must not keep their bits: the whole table is
-        // re-uploaded (zeroed) before it is used again.
+        // re-uploaded (zeroed) before it is used again. The entity-flag diff base
+        // is dropped with the scene too, so a later update cannot try to clear a
+        // key that belonged to the retired scene.
         self.flags_bits.clear();
         self.flags_table_dirty = true;
+        self.entity_flag_keys.clear();
     }
 
     /// Reset derived GPU resources after a device loss.

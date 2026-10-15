@@ -48,6 +48,11 @@ impl HostCore {
         // input/scene revision even with no state change.
         let overlays = OverlayInputs {
             selection,
+            // The host does not yet produce a transient hover or per-entity hide;
+            // both are the same entity-flags mechanism and stay empty until a host
+            // slice feeds them (see `OverlayInputs::hovered`/`hidden`).
+            hovered: cad_app::SelectionSet::new(),
+            hidden: cad_app::SelectionSet::new(),
             measurement,
             draw_preview: preview,
             snap_hints_input: snap_hints,
