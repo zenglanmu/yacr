@@ -29,6 +29,8 @@ impl Renderer {
             line_pipeline: None,
             line_instanced_pipeline: None,
             unit_segment_buffer: None,
+            arc_pipeline: None,
+            unit_quad_buffer: None,
             mesh_pipeline: None,
             mesh_pipeline_mirrored: None,
             mesh_pipeline_transparent: None,
@@ -45,12 +47,15 @@ impl Renderer {
             target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
             batches: Vec::new(),
             instance_streams: Vec::new(),
+            arc_streams: Vec::new(),
             mesh_chunks: Vec::new(),
             line_instancing: true,
             mesh_merging: true,
             max_instances_per_stream: MAX_INSTANCES_PER_STREAM,
             max_vertices_per_mesh_stream: MAX_VERTICES_PER_MESH_STREAM,
             instance_stream_uploads: 0,
+            arc_stream_uploads: 0,
+            arc_degenerate_skips: 0,
             mesh_chunk_uploads: 0,
             // No device yet: the universal path is the safe default until
             // `initialize_with_device` probes the real device.
@@ -100,6 +105,7 @@ impl Renderer {
             pick_size: (0, 0),
             pick_line_pipeline: None,
             pick_line_instanced_pipeline: None,
+            pick_arc_pipeline: None,
             pick_mesh_pipeline: None,
             pick_mesh_pipeline_mirrored: None,
             pick_mesh_merged_pipeline: None,
@@ -285,6 +291,68 @@ impl Renderer {
             Some(&queue),
             &pack_positions(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
         );
+        // SDF conic pipeline (slice B): one instance per analytic circle/arc, the
+        // shared unit quad expanded to the conic's extent. Same layout/depth/blend
+        // state as the line pipeline (the flags table is group 1); the fragment
+        // shader computes the signed distance and discards the quad outside the
+        // anti-aliased band.
+        let arc_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-arcs"),
+            source: wgpu::ShaderSource::Wgsl(ARC_SHADER.into()),
+        });
+        let arc_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cad-arcs-pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &arc_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(position_only_layout()), Some(arc_instance_layout())],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                // The quad may be mirrored by the conic frame; never cull it.
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &arc_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.target_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        // One shared unit quad `[0,1]^2` (two triangles) for every SDF conic draw.
+        let unit_quad_buffer = Self::vertex_buffer(
+            &device,
+            Some(&queue),
+            &pack_positions(&[
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]),
+        );
         let mesh_pipeline = Self::create_mesh_pipeline(
             &device,
             &pipeline_layout,
@@ -446,6 +514,7 @@ impl Renderer {
         self.images.clear();
         self.image_textures.clear();
         self.instance_streams.clear();
+        self.arc_streams.clear();
         self.mesh_chunks.clear();
         self.pulled_lines = None;
         self.pulled_mesh = None;
@@ -463,6 +532,8 @@ impl Renderer {
         self.line_pipeline = Some(line_pipeline);
         self.line_instanced_pipeline = Some(line_instanced_pipeline);
         self.unit_segment_buffer = Some(unit_segment_buffer);
+        self.arc_pipeline = Some(arc_pipeline);
+        self.unit_quad_buffer = Some(unit_quad_buffer);
         self.mesh_pipeline = Some(mesh_pipeline);
         self.mesh_pipeline_mirrored = Some(mesh_pipeline_mirrored);
         self.mesh_pipeline_transparent = Some(mesh_pipeline_transparent);
@@ -1410,6 +1481,11 @@ impl Renderer {
         for &index in &mesh_converted {
             converted_mask[index] = true;
         }
+        // SDF conic batches (slice B): every opaque `Conics` batch converts.
+        let arc_converted = convert_arc_batches(batches);
+        for source in &arc_converted {
+            converted_mask[source.batch] = true;
+        }
         // Allocate one renderer pick key per staged batch (see `PickTable`). The
         // keys are monotonic within a device generation and never reused, so
         // independently staged pieces (see `PreparedUpload::append`) cannot
@@ -1467,6 +1543,19 @@ impl Renderer {
             } else {
                 (batch.vertices.len() as u64).saturating_mul(12)
             };
+            if batch.topology == RenderTopology::Conics
+                && classify_alpha(batch.alpha) == AlphaClass::Transparent
+            {
+                // The SDF conic pipeline is opaque-only and `draw_batch` has no
+                // conic arm, so a transparent conic batch would be drawn by the
+                // transparent pass and silently rasterise nothing. Reject it
+                // loudly (iron rule #2: never a silent drop); the provider never
+                // emits one today. (An `alpha <= 0` conic is already reported as
+                // invisible and is not drawn at all.)
+                return Err(CadError::InvalidInput(
+                    "transparent conic batch has no supported draw path".into(),
+                ));
+            }
             if batch.vertices.len() > u32::MAX as usize
                 || batch.indices.len() > u32::MAX as usize / 3
                 || vertex_bytes > max_buffer_size
@@ -1477,6 +1566,25 @@ impl Renderer {
                     .flatten()
                     .any(|i| *i as usize >= batch.vertices.len())
                 || batch.vertices.iter().flatten().any(|v| !v.is_finite())
+                // A conic batch carries f64 semantic records, not vertices; guard
+                // its own buffer size and finiteness.
+                || (batch.topology == RenderTopology::Conics
+                    && ((batch.conics.len() as u64)
+                        .saturating_mul(ARC_INSTANCE_STRIDE as u64)
+                        > max_buffer_size
+                        || batch.conics.iter().any(|conic| {
+                            !(conic.center.x.is_finite()
+                                && conic.center.y.is_finite()
+                                && conic.center.z.is_finite()
+                                && conic.major.x.is_finite()
+                                && conic.major.y.is_finite()
+                                && conic.major.z.is_finite()
+                                && conic.minor.x.is_finite()
+                                && conic.minor.y.is_finite()
+                                && conic.minor.z.is_finite()
+                                && conic.start.is_finite()
+                                && conic.sweep.is_finite())
+                        })))
             {
                 return Err(CadError::InvalidInput(
                     "invalid or over-limit GPU batch".into(),
@@ -1600,56 +1708,99 @@ impl Renderer {
             }
         }
 
+        // --- SDF conic streams (slice B) ------------------------------------
+        //
+        // Pack eligible circle/arc batches into static SDF instance streams here,
+        // at upload (see `build_arc_chunks`). Each stream is a spatially bounded
+        // chunk with its own `f64` origin; conics are packed in original batch
+        // order, so no re-sorting happens. The per-instance pick key is
+        // first-class (see `ArcInstance`). Universal-tier only this round.
+        let mut arc_streams: Vec<ArcStream> = Vec::new();
+        let mut batch_arc_runs: Vec<Option<Vec<ArcRun>>> = vec![None; batches.len()];
+        let mut arc_degenerate_skips = 0u64;
+        if !arc_converted.is_empty() {
+            let (chunks, runs, skipped) = build_arc_chunks(
+                batches,
+                &arc_converted,
+                &keys,
+                self.max_instances_per_stream,
+                MAX_STREAM_RADIUS,
+            );
+            batch_arc_runs = runs;
+            arc_degenerate_skips = skipped;
+            for chunk in chunks {
+                let bytes = arc_instance_bytes(&chunk.instances);
+                if bytes.len() as u64 > max_buffer_size {
+                    return Err(CadError::InvalidInput(
+                        "invalid or over-limit GPU batch".into(),
+                    ));
+                }
+                arc_streams.push(ArcStream {
+                    buffer: Self::vertex_buffer(device, self.queue.as_ref(), &bytes),
+                    instance_count: chunk.instances.len() as u32,
+                    origin: chunk.origin,
+                    base: 0,
+                });
+            }
+        }
+
         for (index, batch) in batches.iter().enumerate() {
             let run = batch_runs[index].take();
             let mesh_run = batch_mesh_runs[index].take();
+            let arc_run = batch_arc_runs[index].take();
             let instanced = run.is_some();
             let merged = mesh_run.is_some();
+            let arc_instanced = arc_run.is_some();
             // A converted batch owns no per-batch buffers: skip packing its
             // geometry entirely (its bytes live in the shared stream/chunk).
-            let (vertices, indices, edge_indices, normals, colors) = if instanced || merged {
-                Default::default()
-            } else {
-                match batch.topology {
-                    RenderTopology::Mesh => {
-                        let verts = pack_positions(&batch.vertices);
-                        let idx: Vec<u32> = batch
-                            .indices
-                            .iter()
-                            .flat_map(|t| [t[0], t[1], t[2]])
-                            .collect();
-                        let edges = geometry::mesh_edge_indices(batch);
-                        let normals = geometry::repaired_normals(batch);
-                        // Always bound (white when the batch has no per-vertex
-                        // colours), so the mesh pipeline's `@location(2)` is valid.
-                        let colors = geometry::repaired_colors(batch);
-                        (
-                            verts,
-                            idx,
-                            edges,
-                            pack_positions(&normals),
-                            pack_positions(&colors),
-                        )
+            let (vertices, indices, edge_indices, normals, colors) =
+                if instanced || merged || arc_instanced {
+                    Default::default()
+                } else {
+                    match batch.topology {
+                        RenderTopology::Mesh => {
+                            let verts = pack_positions(&batch.vertices);
+                            let idx: Vec<u32> = batch
+                                .indices
+                                .iter()
+                                .flat_map(|t| [t[0], t[1], t[2]])
+                                .collect();
+                            let edges = geometry::mesh_edge_indices(batch);
+                            let normals = geometry::repaired_normals(batch);
+                            // Always bound (white when the batch has no per-vertex
+                            // colours), so the mesh pipeline's `@location(2)` is valid.
+                            let colors = geometry::repaired_colors(batch);
+                            (
+                                verts,
+                                idx,
+                                edges,
+                                pack_positions(&normals),
+                                pack_positions(&colors),
+                            )
+                        }
+                        RenderTopology::MeshEdges => {
+                            let verts = pack_positions(&batch.vertices);
+                            let idx: Vec<u32> = (0..batch.vertices.len() as u32).collect();
+                            (verts, Vec::new(), idx, Vec::new(), Vec::new())
+                        }
+                        RenderTopology::Lines => (
+                            pack_positions(&batch.vertices),
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                        ),
+                        // A conic batch's geometry lives in the SDF instance streams
+                        // (`arc_instanced` is always true here); it owns no per-batch
+                        // buffers.
+                        RenderTopology::Conics => Default::default(),
                     }
-                    RenderTopology::MeshEdges => {
-                        let verts = pack_positions(&batch.vertices);
-                        let idx: Vec<u32> = (0..batch.vertices.len() as u32).collect();
-                        (verts, Vec::new(), idx, Vec::new(), Vec::new())
-                    }
-                    RenderTopology::Lines => (
-                        pack_positions(&batch.vertices),
-                        Vec::new(),
-                        Vec::new(),
-                        Vec::new(),
-                        Vec::new(),
-                    ),
-                }
-            };
+                };
 
             // A converted batch owns no per-batch vertex buffer; its exact upload
-            // charge is the instance/merged bytes it contributed (never the
+            // charge is the instance/merged/conic bytes it contributed (never the
             // legacy vertex bytes).
-            let vertex_buffer = if instanced || merged {
+            let vertex_buffer = if instanced || merged || arc_instanced {
                 None
             } else {
                 Some(Self::vertex_buffer(device, self.queue.as_ref(), &vertices))
@@ -1732,8 +1883,13 @@ impl Renderer {
             } else {
                 0
             };
-            let bytes = if instanced || merged {
-                line_bytes + mesh_bytes + pulled_bytes
+            let arc_bytes = arc_run.as_ref().map_or(0, |run| {
+                run.iter()
+                    .map(|piece| piece.count as usize * ARC_INSTANCE_STRIDE as usize)
+                    .sum()
+            });
+            let bytes = if instanced || merged || arc_instanced {
+                line_bytes + mesh_bytes + pulled_bytes + arc_bytes
             } else {
                 normals.len()
                     + vertices.len()
@@ -1765,6 +1921,7 @@ impl Renderer {
                 ],
                 instanced: run.unwrap_or_default(),
                 mesh_runs: mesh_run.unwrap_or_default(),
+                arc_runs: arc_run.unwrap_or_default(),
                 upload_bytes: bytes,
                 pick_key: keys[index],
                 sources: batch.sources.clone(),
@@ -1773,6 +1930,8 @@ impl Renderer {
         Ok(PreparedUpload {
             batches: staged,
             instances: instance_streams,
+            arcs: arc_streams,
+            arc_degenerate_skips,
             mesh_chunks: mesh_chunk_buffers,
             device_generation: self.device_generation,
             device: device.clone(),
@@ -1810,13 +1969,24 @@ impl Renderer {
                 run.chunk += mesh_base;
             }
         }
+        // Re-base the prepared conic runs onto the existing conic streams.
+        let arc_base = self.arc_streams.len() as u32;
+        for batch in &mut prepared.batches {
+            for run in &mut batch.arc_runs {
+                run.stream += arc_base;
+            }
+        }
         self.instance_stream_uploads += prepared.instances.len() as u64;
+        self.arc_stream_uploads += prepared.arcs.len() as u64;
+        self.arc_degenerate_skips += prepared.arc_degenerate_skips;
         self.mesh_chunk_uploads += prepared.mesh_chunks.len() as u64;
         self.instance_streams.append(&mut prepared.instances);
+        self.arc_streams.append(&mut prepared.arcs);
         self.mesh_chunks.append(&mut prepared.mesh_chunks);
         self.batches.truncate(keep_prefix);
         self.batches.extend(prepared.batches);
         self.gc_instance_streams();
+        self.gc_arc_streams();
         self.gc_mesh_chunks();
         self.rebuild_pulled();
         self.rebuild_pick_table()?;
@@ -1869,6 +2039,51 @@ impl Renderer {
             }
         }
         self.instance_streams = result
+            .into_iter()
+            .map(|stream| stream.expect("referenced by a surviving batch"))
+            .collect();
+    }
+
+    /// Drop SDF conic streams no surviving batch references and re-number the
+    /// rest, so a truncated scene does not leak GPU buffers across commits.
+    fn gc_arc_streams(&mut self) {
+        if self.arc_streams.is_empty() {
+            return;
+        }
+        let mut map: Vec<Option<usize>> = vec![None; self.arc_streams.len()];
+        let mut next = 0usize;
+        for batch in &mut self.batches {
+            for run in &mut batch.arc_runs {
+                let slot = &mut map[run.stream as usize];
+                let new_index = match *slot {
+                    Some(index) => index,
+                    None => {
+                        *slot = Some(next);
+                        next += 1;
+                        next - 1
+                    }
+                };
+                run.stream = new_index as u32;
+            }
+        }
+        if next == self.arc_streams.len()
+            && map
+                .iter()
+                .enumerate()
+                .all(|(index, slot)| *slot == Some(index))
+        {
+            return;
+        }
+        let mut result: Vec<Option<ArcStream>> = (0..next).map(|_| None).collect();
+        for (old_index, stream) in std::mem::take(&mut self.arc_streams)
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(new_index) = map[old_index] {
+                result[new_index] = Some(stream);
+            }
+        }
+        self.arc_streams = result
             .into_iter()
             .map(|stream| stream.expect("referenced by a surviving batch"))
             .collect();
@@ -2554,6 +2769,7 @@ impl Renderer {
         self.draw_plan = None;
         self.batches.clear();
         self.instance_streams.clear();
+        self.arc_streams.clear();
         self.mesh_chunks.clear();
         self.pulled_lines = None;
         self.pulled_mesh = None;
@@ -2635,6 +2851,8 @@ impl Renderer {
         self.line_pipeline = None;
         self.line_instanced_pipeline = None;
         self.unit_segment_buffer = None;
+        self.arc_pipeline = None;
+        self.unit_quad_buffer = None;
         self.mesh_pipeline = None;
         self.mesh_pipeline_mirrored = None;
         self.mesh_pipeline_transparent = None;
@@ -2661,6 +2879,7 @@ impl Renderer {
         self.device_lost = true;
         self.draw_plan = None;
         self.instance_streams.clear();
+        self.arc_streams.clear();
         self.mesh_chunks.clear();
         self.pick_target = None;
         self.pick_view = None;
@@ -2710,6 +2929,8 @@ impl Renderer {
         self.line_pipeline = None;
         self.line_instanced_pipeline = None;
         self.unit_segment_buffer = None;
+        self.arc_pipeline = None;
+        self.unit_quad_buffer = None;
         self.mesh_pipeline = None;
         self.mesh_pipeline_mirrored = None;
         self.mesh_pipeline_transparent = None;
@@ -2734,6 +2955,7 @@ impl Renderer {
         self.device_lost = true;
         self.draw_plan = None;
         self.instance_streams.clear();
+        self.arc_streams.clear();
         self.mesh_chunks.clear();
         self.pick_target = None;
         self.pick_view = None;
@@ -2794,6 +3016,7 @@ impl Renderer {
                 sy,
                 center: [camera.center.x, camera.center.y, camera.center.z],
                 z_plane: camera.z_plane,
+                world_per_px: camera.world_per_px,
             },
             camera_matrix,
             [
@@ -2835,7 +3058,10 @@ impl Renderer {
             camera.eye.z as f32,
         ];
         self.render_with_projection(
-            FrameProjection::Perspective { vp },
+            FrameProjection::Perspective {
+                vp,
+                world_per_px: camera.world_per_px_at_target(target.height),
+            },
             camera_matrix,
             eye,
             target,
@@ -2951,6 +3177,16 @@ impl Renderer {
             ));
         };
         let Some(unit_segment_buffer) = self.unit_segment_buffer.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer resources missing".into(),
+            ));
+        };
+        let Some(arc_pipeline) = self.arc_pipeline.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer resources missing".into(),
+            ));
+        };
+        let Some(unit_quad_buffer) = self.unit_quad_buffer.as_ref() else {
             return Err(RenderError::NotInitialized(
                 "renderer resources missing".into(),
             ));
@@ -3155,7 +3391,14 @@ impl Renderer {
         } else {
             self.mesh_chunks.len()
         };
-        let max_slots = accepted_len + draw_images.len() + stream_slot_count + chunk_slot_count;
+        // SDF conic streams draw on the universal per-run path on **every** tier,
+        // so their uniform slots are always reserved.
+        let arc_slot_count = self.arc_streams.len();
+        let max_slots = accepted_len
+            + draw_images.len()
+            + stream_slot_count
+            + chunk_slot_count
+            + arc_slot_count;
         self.uniforms.ensure_slots(max_slots, device, layout);
 
         // Write only this page's uniforms. Rewriting every batch for every
@@ -3238,9 +3481,32 @@ impl Renderer {
             self.uniforms.write_slot(slot as usize, &uniform);
         }
 
+        // SDF conic streams: one uniform slot per stream, carrying the stream's
+        // fixed-point origin through the same `f64` camera subtraction as a legacy
+        // batch. The tint is opaque white and the key 0: colour and the pick key
+        // are per-instance.
+        let arc_base_slot = chunk_base + chunk_slot_count;
+        let arc_slots: Vec<u32> = (0..arc_slot_count)
+            .map(|a| (arc_base_slot + a) as u32)
+            .collect();
+        // World units per pixel travels in the otherwise-unused `key_flags.z` word
+        // (bitcast f32) so the SDF conic vertex stage can floor its quad margin
+        // at ~2 px for small on-screen circles (see `shaders/arc.wgsl`).
+        let world_per_px_bits = (projection.world_per_px() as f32).to_bits();
+        for (a, &slot) in arc_slots.iter().enumerate() {
+            let matrix = projection.batch_matrix_f64(self.arc_streams[a].origin);
+            let uniform =
+                uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, world_per_px_bits, 0]);
+            self.uniforms.write_slot(slot as usize, &uniform);
+        }
+
         // One `Queue::write_buffer` per page (vs. one per batch), reported as
         // `FrameStats::uniform_writes`. Only the compacted slot count is flushed.
-        let total_slots = legacy_slots + draw_images.len() + stream_slot_count + chunk_slot_count;
+        let total_slots = legacy_slots
+            + draw_images.len()
+            + stream_slot_count
+            + chunk_slot_count
+            + arc_slot_count;
         let uniform_writes = self.uniforms.flush(&queue, total_slots);
         let uniform_ms = uniform_started.elapsed().as_secs_f64() * 1000.0;
 
@@ -3281,6 +3547,9 @@ impl Renderer {
         let mut instanced_batches = 0usize;
         let mut mesh_draws = 0u64;
         let mut merged_mesh_batches = 0usize;
+        // SDF conic draws this frame (coalesced runs) and member batches.
+        let mut arc_draws = 0u64;
+        let mut arc_batches = 0usize;
         // Opaque batches that issued no legacy per-batch draw because they were
         // converted to the line path and/or the merged mesh path. A mesh batch
         // with an instanced overlay counts once here.
@@ -3377,13 +3646,17 @@ impl Renderer {
                     let batch = &self.batches[i];
                     let has_line = !batch.instanced.is_empty();
                     let has_mesh = !batch.mesh_runs.is_empty();
+                    let has_arc = !batch.arc_runs.is_empty();
                     if has_line {
                         instanced_batches += 1;
                     }
                     if has_mesh {
                         merged_mesh_batches += 1;
                     }
-                    if has_line || has_mesh {
+                    if has_arc {
+                        arc_batches += 1;
+                    }
+                    if has_line || has_mesh || has_arc {
                         converted_batches += 1;
                     }
                 }
@@ -3427,10 +3700,59 @@ impl Renderer {
                         }
                     }
                 }
+                // The SDF conic class is residual on the accelerated tier: it has
+                // no pulled variant this round, so it draws per-run (universal
+                // style) after the pulled classes. This is the documented
+                // "pulled classes draw before residual" tie exception (ADR-0008).
+                let mut pending_arc: Option<(usize, u32, u32)> = None;
                 for &i in &opaque {
                     let batch = &self.batches[i];
                     if !batch.instanced.is_empty() || !batch.mesh_runs.is_empty() {
                         continue;
+                    }
+                    if !batch.arc_runs.is_empty() {
+                        for run in &batch.arc_runs {
+                            let start = self.arc_streams[run.stream as usize].base + run.offset;
+                            let end = start + run.count;
+                            if let Some((stream, _, pending_end)) = pending_arc {
+                                if stream == run.stream as usize && pending_end == start {
+                                    let start = pending_arc.map_or(0, |pending| pending.1);
+                                    pending_arc = Some((stream, start, end));
+                                    continue;
+                                }
+                            }
+                            if flush_pending_arc(
+                                &mut pass,
+                                &mut encode_state,
+                                &mut pending_arc,
+                                &self.uniforms,
+                                &arc_slots,
+                                &self.arc_streams,
+                                unit_quad_buffer,
+                                arc_pipeline,
+                            ) {
+                                arc_draws += 1;
+                            }
+                            pending_arc = Some((run.stream as usize, start, end));
+                        }
+                        continue;
+                    }
+                    // A pending SDF conic run precedes this legacy batch in plan
+                    // order: flush it before the legacy `draw_batch` so the
+                    // residual path never reorders the arc behind the batch (and
+                    // so a legacy batch between two arc batches cannot let their
+                    // runs coalesce across it).
+                    if flush_pending_arc(
+                        &mut pass,
+                        &mut encode_state,
+                        &mut pending_arc,
+                        &self.uniforms,
+                        &arc_slots,
+                        &self.arc_streams,
+                        unit_quad_buffer,
+                        arc_pipeline,
+                    ) {
+                        arc_draws += 1;
                     }
                     let (bind_group, offset) = self.uniforms.binding(self.frame_slots[i] as usize);
                     draw_batch(
@@ -3447,15 +3769,29 @@ impl Renderer {
                         },
                     );
                 }
+                if flush_pending_arc(
+                    &mut pass,
+                    &mut encode_state,
+                    &mut pending_arc,
+                    &self.uniforms,
+                    &arc_slots,
+                    &self.arc_streams,
+                    unit_quad_buffer,
+                    arc_pipeline,
+                ) {
+                    arc_draws += 1;
+                }
             } else {
                 let mut pending: Option<(usize, u32, u32)> = None;
                 let mut pending_mesh: Option<(usize, u32, u32)> = None;
+                let mut pending_arc: Option<(usize, u32, u32)> = None;
                 for &i in &opaque {
                     let batch = &self.batches[i];
                     let has_mesh = !batch.mesh_runs.is_empty();
                     let has_line = !batch.instanced.is_empty();
-                    if !has_mesh && !has_line {
-                        // Legacy per-batch draw: flush both pending runs.
+                    let has_arc = !batch.arc_runs.is_empty();
+                    if !has_mesh && !has_line && !has_arc {
+                        // Legacy per-batch draw: flush every pending run.
                         if flush_pending_mesh(
                             &mut pass,
                             &mut encode_state,
@@ -3467,6 +3803,18 @@ impl Renderer {
                             mesh_pipeline_merged_mirrored,
                         ) {
                             mesh_draws += 1;
+                        }
+                        if flush_pending_arc(
+                            &mut pass,
+                            &mut encode_state,
+                            &mut pending_arc,
+                            &self.uniforms,
+                            &arc_slots,
+                            &self.arc_streams,
+                            unit_quad_buffer,
+                            arc_pipeline,
+                        ) {
+                            arc_draws += 1;
                         }
                         if flush_pending_run(
                             &mut pass,
@@ -3528,6 +3876,18 @@ impl Renderer {
                             }
                             // A new mesh run starts: flush the pending line run so the
                             // mesh keeps its interleaved position among the lines.
+                            if flush_pending_arc(
+                                &mut pass,
+                                &mut encode_state,
+                                &mut pending_arc,
+                                &self.uniforms,
+                                &arc_slots,
+                                &self.arc_streams,
+                                unit_quad_buffer,
+                                arc_pipeline,
+                            ) {
+                                arc_draws += 1;
+                            }
                             if flush_pending_run(
                                 &mut pass,
                                 &mut encode_state,
@@ -3577,6 +3937,20 @@ impl Renderer {
                             // merged `A+B.tri` run would draw after the line. Exact
                             // depth ties still resolve line-wins, but non-exact
                             // coplanar fragments could flip on other vendors.
+                            // A pending SDF conic run precedes this line in plan
+                            // order: flush it before starting the line run.
+                            if flush_pending_arc(
+                                &mut pass,
+                                &mut encode_state,
+                                &mut pending_arc,
+                                &self.uniforms,
+                                &arc_slots,
+                                &self.arc_streams,
+                                unit_quad_buffer,
+                                arc_pipeline,
+                            ) {
+                                arc_draws += 1;
+                            }
                             if pending.is_some()
                                 && flush_pending_mesh(
                                     &mut pass,
@@ -3606,6 +3980,62 @@ impl Renderer {
                             pending = Some((run.stream as usize, start, end));
                         }
                     }
+                    if has_arc {
+                        arc_batches += 1;
+                        // SDF conic runs coalesce only with adjacent conic runs in
+                        // the same stream. A non-contiguous run flushes the pending
+                        // conic run, then any pending mesh/line run, so plan order is
+                        // preserved (arcs and lines are both `LessEqual`+depth-write,
+                        // so an equal-depth arc-vs-line tie is decided by plan order).
+                        for run in &batch.arc_runs {
+                            let start = self.arc_streams[run.stream as usize].base + run.offset;
+                            let end = start + run.count;
+                            if let Some((stream, _, pending_end)) = pending_arc {
+                                if stream == run.stream as usize && pending_end == start {
+                                    let start = pending_arc.map_or(0, |pending| pending.1);
+                                    pending_arc = Some((stream, start, end));
+                                    continue;
+                                }
+                            }
+                            if flush_pending_arc(
+                                &mut pass,
+                                &mut encode_state,
+                                &mut pending_arc,
+                                &self.uniforms,
+                                &arc_slots,
+                                &self.arc_streams,
+                                unit_quad_buffer,
+                                arc_pipeline,
+                            ) {
+                                arc_draws += 1;
+                            }
+                            if flush_pending_mesh(
+                                &mut pass,
+                                &mut encode_state,
+                                &mut pending_mesh,
+                                &self.uniforms,
+                                &chunk_slots,
+                                &self.mesh_chunks,
+                                mesh_pipeline_merged,
+                                mesh_pipeline_merged_mirrored,
+                            ) {
+                                mesh_draws += 1;
+                            }
+                            if flush_pending_run(
+                                &mut pass,
+                                &mut encode_state,
+                                &mut pending,
+                                &self.uniforms,
+                                &stream_slots,
+                                &self.instance_streams,
+                                unit_segment_buffer,
+                                line_instanced_pipeline,
+                            ) {
+                                instanced_draws += 1;
+                            }
+                            pending_arc = Some((run.stream as usize, start, end));
+                        }
+                    }
                 }
                 if flush_pending_mesh(
                     &mut pass,
@@ -3618,6 +4048,18 @@ impl Renderer {
                     mesh_pipeline_merged_mirrored,
                 ) {
                     mesh_draws += 1;
+                }
+                if flush_pending_arc(
+                    &mut pass,
+                    &mut encode_state,
+                    &mut pending_arc,
+                    &self.uniforms,
+                    &arc_slots,
+                    &self.arc_streams,
+                    unit_quad_buffer,
+                    arc_pipeline,
+                ) {
+                    arc_draws += 1;
                 }
                 if flush_pending_run(
                     &mut pass,
@@ -3677,6 +4119,7 @@ impl Renderer {
         let draw_calls = (legacy_opaque
             + instanced_draws as usize
             + mesh_draws as usize
+            + arc_draws as usize
             + transparent_batches
             + draw_images.len()) as u64;
 
@@ -3744,6 +4187,14 @@ impl Renderer {
             mesh_draws,
             merged_mesh_batches,
             mesh_chunks: self.mesh_chunks.len(),
+            arc_draws,
+            arc_batches,
+            arc_streams: self.arc_streams.len(),
+            arc_instances: self
+                .arc_streams
+                .iter()
+                .map(|stream| u64::from(stream.instance_count))
+                .sum(),
             tier: self.render_tier,
             accelerated: use_pulled,
             accelerated_draws: if use_pulled {
@@ -3944,6 +4395,33 @@ impl Renderer {
     /// device initialization. A camera move (pan/zoom) must never increase it.
     pub fn instance_stream_uploads(&self) -> u64 {
         self.instance_stream_uploads
+    }
+
+    /// Number of resident SDF conic streams.
+    pub fn arc_stream_count(&self) -> usize {
+        self.arc_streams.len()
+    }
+
+    /// Total number of SDF conic instances across all resident streams.
+    pub fn arc_instance_count(&self) -> u64 {
+        self.arc_streams
+            .iter()
+            .map(|stream| u64::from(stream.instance_count))
+            .sum()
+    }
+
+    /// Monotonic count of SDF conic stream buffers uploaded since the last
+    /// device initialization. A camera move (pan/zoom) must never increase it.
+    pub fn arc_stream_uploads(&self) -> u64 {
+        self.arc_stream_uploads
+    }
+
+    /// Monotonic count of degenerate conics skipped at pack since the last device
+    /// initialization (a defensive guard the provider already excludes). Never
+    /// silent: a non-zero value means a conic was dropped before it could be
+    /// instanced.
+    pub fn arc_degenerate_skips(&self) -> u64 {
+        self.arc_degenerate_skips
     }
 
     /// Number of resident merged mesh chunks.

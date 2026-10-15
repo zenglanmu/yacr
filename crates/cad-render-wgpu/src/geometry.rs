@@ -118,6 +118,25 @@ impl Camera3d {
         true
     }
 
+    /// Approximate world units per pixel at the camera **target** plane for a
+    /// viewport `viewport_height` pixels tall.
+    ///
+    /// Used only to floor the SDF conic quad margin so a small on-screen circle's
+    /// anti-aliased fringe is not clipped on the 3D path. A perspective view has
+    /// no single world-per-pixel; the target-plane value is the honest estimate
+    /// (the same depth the view is framed around). Degenerate cameras fall back
+    /// to `0.0`, which disables the floor.
+    pub fn world_per_px_at_target(&self, viewport_height: u32) -> f64 {
+        let height = viewport_height.max(1) as f64;
+        let distance = length(sub(self.target, self.eye));
+        let span = 2.0 * (self.fov_y * 0.5).tan() * distance;
+        if span.is_finite() && span > 0.0 {
+            span / height
+        } else {
+            0.0
+        }
+    }
+
     fn look_at(&self) -> Option<[[f64; 4]; 4]> {
         let forward = normalize(sub(self.target, self.eye));
         if length(forward) < 1e-12 {
@@ -319,11 +338,15 @@ pub fn plan_frame<'a>(
     let mut usage = FrameUsage::default();
     let mut accepted = Vec::with_capacity(batches.len());
     for batch in batches {
-        let vertices = batch.vertices.len();
-        let triangles = if batch.topology == RenderTopology::Mesh {
-            batch.triangle_count()
+        let vertices = if batch.topology == RenderTopology::Conics {
+            batch.conics.len() * 6
         } else {
-            0
+            batch.vertices.len()
+        };
+        let triangles = match batch.topology {
+            RenderTopology::Conics => batch.conics.len() * 2,
+            RenderTopology::Mesh => batch.triangle_count(),
+            _ => 0,
         };
         let bytes = batch.upload_size_bytes();
         // Charge bytes first so a batch that crosses several categories reports
@@ -701,6 +724,7 @@ mod tests {
 
     fn mesh_batch(mirrored: bool) -> RenderBatch {
         RenderBatch {
+            conics: Vec::new(),
             local_origin: point(0.0, 0.0, 0.0),
             topology: RenderTopology::Mesh,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],

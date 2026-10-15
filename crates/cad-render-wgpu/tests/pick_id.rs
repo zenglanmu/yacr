@@ -143,6 +143,7 @@ fn image_batch(resource: &str, entity: u128) -> ImageBatch {
 
 fn base_batch(topology: RenderTopology, vertices: Vec<[f32; 3]>, entity: u128) -> RenderBatch {
     RenderBatch {
+        conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
             y: 0.0,

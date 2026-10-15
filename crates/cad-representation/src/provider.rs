@@ -1241,37 +1241,70 @@ impl ProviderRegistry {
                     );
                 }
                 DisplayPrimitive::Conic(conic) => {
-                    // This slice keeps the chord draw. Record the eligibility
-                    // facts for the future SDF gate (continuous linetype, opaque,
-                    // non-degenerate axes), then expand the conic through the
-                    // same tessellation the pre-conic path used so the rendered
-                    // output is unchanged.
+                    // Slice B flips the emission gate (see
+                    // `docs/adr/0008-sdf-conic-rendering.md`): an **eligible**
+                    // circle/arc travels as the analytic SDF instance the
+                    // renderer draws, instead of being chord-expanded. Every
+                    // other conic keeps the chord draw and is counted by
+                    // `ConicStats`, so nothing is dropped silently.
+                    //
+                    // Eligibility is decided on the **transformed** conic: a
+                    // non-uniform INSERT turns a circle into an ellipse, which is
+                    // slice 2 and must stay chords. The transformed frame keeps
+                    // `start`/`sweep` unchanged (an affine map preserves the
+                    // parameter), so only `center`/`major`/`minor` move.
+                    let transformed =
+                        match DisplayPrimitive::Conic(conic.clone()).transformed(transform) {
+                            DisplayPrimitive::Conic(transformed) => transformed,
+                            _ => unreachable!("transforming a conic yields a conic"),
+                        };
+                    let geometric = transformed.is_sdf_circle_arc();
                     let eligible = own_alpha == 1.0
                         && own_linetype.is_continuous()
-                        && conic.axes_are_non_degenerate();
+                        && !context.force_chord_conics
+                        && geometric;
                     if let Some(stats) = context.conic_stats.as_deref() {
-                        stats.record(eligible);
+                        stats.record(geometric, eligible);
                     }
-                    let points = conic.tessellate(chord_tessellation_params(context));
-                    emit_polyline(
-                        entity,
-                        &points,
-                        transform,
-                        path,
-                        &fragment.source,
-                        &attributes,
-                        own_alpha,
-                        own_color,
-                        color_unresolved,
-                        own_lineweight,
-                        lineweight_unresolved,
-                        &own_linetype,
-                        linetype_unresolved,
-                        linetype_scale,
-                        context.packed_line_segments,
-                        global_lt_scale,
-                        out,
-                    );
+                    if eligible {
+                        let mut source = fragment.source;
+                        source.instance = path.clone();
+                        out.fragments.push(DisplayFragment {
+                            source,
+                            geometry_source: attributes.geometry_source.clone(),
+                            precision: Precision::Analytic,
+                            alpha: own_alpha,
+                            color: own_color,
+                            color_unresolved,
+                            lineweight: own_lineweight,
+                            lineweight_unresolved,
+                            linetype: own_linetype.clone(),
+                            linetype_unresolved,
+                            linetype_scale,
+                            primitive: DisplayPrimitive::Conic(transformed),
+                        });
+                    } else {
+                        let points = conic.tessellate(chord_tessellation_params(context));
+                        emit_polyline(
+                            entity,
+                            &points,
+                            transform,
+                            path,
+                            &fragment.source,
+                            &attributes,
+                            own_alpha,
+                            own_color,
+                            color_unresolved,
+                            own_lineweight,
+                            lineweight_unresolved,
+                            &own_linetype,
+                            linetype_unresolved,
+                            linetype_scale,
+                            context.packed_line_segments,
+                            global_lt_scale,
+                            out,
+                        );
+                    }
                 }
                 primitive => {
                     let mut source = fragment.source;

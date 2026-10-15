@@ -244,6 +244,20 @@ P3b 引入**能力门控的加速档**（color pass 的 opaque 阶段按类折�
 - **未验证**：加速档的 WebGL2 降级路径由离线能力门控 + `tier_for` 单测覆盖，
   **未在真实 WebGL2 浏览器运行**；id pass 本身是 native-only。
 
+## 6c. SDF 弧的 id pass（slice B）
+
+SDF 圆/弧（`RenderTopology::Conics`，见 `docs/adr/0008-sdf-conic-rendering.md`）在 id pass 里
+有**自己的** `PickDraw::ArcRun`（镜像 `LineRun`）与 `pick_arc.wgsl` 管线：
+
+- **不合并**：与 line/mesh run 一样逐 run 一次 uniform，携带该 batch 的 pick key；
+  段内实例偏移同样以 **`base + run.offset`** 重定基（`base` 恒为 0，弧流不共享 storage 段）。
+- **同一 SDF**：`pick_arc.wgsl` 光栅化与 `arc.wgsl` **完全相同**的距离场。二者都用三角形滤波
+  `coverage = saturate(1 − d/w)`（`w` = 1 屏像素的 `world_per_px`，峰值 1.0）；pick 在字面的
+  `coverage < 0.5` 处丢弃，因此 `coverage ≥ 0.5 ⇔ d ≤ 0.5·w`，即 **±0.5 px 拾取容差**。
+- **实测**：`crates/cad-render-wgpu/tests/sdf_arcs.rs::sdf_arc_id_pass_parity`（真实
+  Quadro P620 / Vulkan）沿一条穿越环的扫描线**双向**断言 `coverage ≥ 0.55` 可拾取、
+  `coverage ≤ 0.45` 不可拾取，背景像素不可拾取。
+
 ## 7. 实测证据
 
 命令（真实 GPU，默认 Vulkan ICD，未设 `VK_ICD_FILENAMES`）：

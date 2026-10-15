@@ -91,7 +91,10 @@ NVIDIA Quadro P620 / Vulkan 实测；契约变更经用户 2026-10-15 授权。*
 
 以下项本轮**未实现**，须显式建模为未支持，不得当作已完成：
 
-- **解析弧**（analytic arcs）：弧仍先离散为线段；无解析弧的实例化路径。
+- **解析弧**（analytic arcs）：**slice B 已实现为 SDF 圆/弧实例**（见
+  `docs/adr/0008-sdf-conic-rendering.md`）。可 SDF 化的圆/弧（不透明、连续线型、slice-1 圆形）
+  改由解析 SDF 实例绘制；**椭圆（slice 2）仍弦展开**。这是语义像素变化（更平滑），已获用户
+  视觉验收授权。
 - **glyph outline-keyed instancing**：文字轮廓仍是主要残留 draw（参考图 instanced 帧中
   glyph mesh 占 4,630 / 6,228），未按 outline 键做实例化。
 - **id-readback picking**：`entity_flags` 已写入顶点，但**没有** id 回读 picking 通路。

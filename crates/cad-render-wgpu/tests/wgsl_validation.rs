@@ -50,6 +50,12 @@ fn line_instanced_shader_is_valid_wgsl() {
 }
 
 #[test]
+fn arc_shader_is_valid_wgsl() {
+    validate_wgsl("arc.wgsl", include_str!("../shaders/arc.wgsl"))
+        .expect("SDF conic shader must validate");
+}
+
+#[test]
 fn mesh_shader_is_valid_wgsl() {
     validate_wgsl("mesh.wgsl", include_str!("../shaders/mesh.wgsl"))
         .expect("mesh shader must validate");
@@ -98,7 +104,7 @@ fn id_pass_shaders_validate_for_both_target_formats() {
         let sources = pick_id_shader_sources(format);
         assert_eq!(
             sources.len(),
-            5,
+            6,
             "every visible draw class needs an id-pass shader"
         );
         for (name, source) in sources {
@@ -122,6 +128,7 @@ fn color_shaders_back_translate_to_glsl_es_300() {
             "line_instanced.wgsl",
             include_str!("../shaders/line_instanced.wgsl"),
         ),
+        ("arc.wgsl", include_str!("../shaders/arc.wgsl")),
         ("mesh.wgsl", include_str!("../shaders/mesh.wgsl")),
         (
             "mesh_merged.wgsl",

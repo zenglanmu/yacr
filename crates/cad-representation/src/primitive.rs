@@ -69,6 +69,38 @@ impl ConicSegment {
         cross_len > 1e-9 * major_len * minor_len
     }
 
+    /// Whether this conic is a **slice-1 SDF candidate**: a circle or circular
+    /// arc whose two semi-diameter axes are equal-length and orthogonal, with a
+    /// non-degenerate angular span.
+    ///
+    /// Slice 1 (see `docs/adr/0008-sdf-conic-rendering.md`) renders with an
+    /// orthonormal `u`/`v̂` frame and a radial distance
+    /// `length(vec2(x, y)) - r`; that is the correct signed distance only when
+    /// `|major| == |minor|` and `major ⟂ minor` (a circle). An **ellipse**
+    /// (`|major| != |minor|`) is slice 2 and stays chord-tessellated, because
+    /// the normalized-`v` radial form would draw a circle of the major radius.
+    ///
+    /// A zero-length arc (`sweep == 0 && !full`) is degenerate and excluded so
+    /// it takes the chord path (which reports it as `Missing`), never a
+    /// fabricated SDF instance.
+    pub fn is_sdf_circle_arc(&self) -> bool {
+        if !self.axes_are_non_degenerate() {
+            return false;
+        }
+        if !self.full && self.sweep == 0.0 {
+            return false;
+        }
+        let major_len = cad_geometry::length(self.major);
+        let minor_len = cad_geometry::length(self.minor);
+        let scale = major_len.max(minor_len);
+        if (major_len - minor_len).abs() > 1e-6 * scale {
+            return false;
+        }
+        let u = cad_geometry::scale(self.major, 1.0 / major_len);
+        let v = cad_geometry::scale(self.minor, 1.0 / minor_len);
+        cad_geometry::dot(u, v).abs() <= 1e-6
+    }
+
     /// The equivalent [`SemanticGeometry::Ellipse`] so the legacy chord
     /// tessellation can be reused unchanged.
     ///

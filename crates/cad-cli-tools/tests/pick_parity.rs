@@ -98,6 +98,8 @@ enum BatchClass {
     /// A `Mesh` batch with a wireframe overlay (a solid), whose overlay the
     /// renderer instances.
     SolidMesh,
+    /// An analytic SDF conic batch (slice B).
+    Conics,
 }
 
 impl BatchClass {
@@ -107,6 +109,7 @@ impl BatchClass {
             RenderTopology::MeshEdges => BatchClass::MeshEdges,
             RenderTopology::Mesh if batch.edges.is_empty() => BatchClass::GlyphMesh,
             RenderTopology::Mesh => BatchClass::SolidMesh,
+            RenderTopology::Conics => BatchClass::Conics,
         }
     }
 
@@ -116,6 +119,7 @@ impl BatchClass {
             BatchClass::MeshEdges => "mesh-edges",
             BatchClass::GlyphMesh => "glyph-mesh",
             BatchClass::SolidMesh => "solid-mesh",
+            BatchClass::Conics => "conics",
         }
     }
 }

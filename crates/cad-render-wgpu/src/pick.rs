@@ -55,6 +55,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 // tail above (see `pick.rs`'s module docs). Both tails are validated offline.
 const PICK_LINE_SHADER: &str = include_str!("../shaders/pick_line.wgsl");
 const PICK_LINE_INSTANCED_SHADER: &str = include_str!("../shaders/pick_line_instanced.wgsl");
+const PICK_ARC_SHADER: &str = include_str!("../shaders/pick_arc.wgsl");
 const PICK_MESH_SHADER: &str = include_str!("../shaders/pick_mesh.wgsl");
 const PICK_MESH_MERGED_SHADER: &str = include_str!("../shaders/pick_mesh_merged.wgsl");
 const PICK_IMAGE_SHADER: &str = include_str!("../shaders/pick_image.wgsl");
@@ -69,9 +70,10 @@ pub fn pick_shader_source(body: &str, format: IdTargetFormat) -> String {
 }
 
 /// The id-pass shader bodies, for the offline WGSL validation test.
-const PICK_SHADER_BODIES: [(&str, &str); 5] = [
+const PICK_SHADER_BODIES: [(&str, &str); 6] = [
     ("pick_line.wgsl", PICK_LINE_SHADER),
     ("pick_line_instanced.wgsl", PICK_LINE_INSTANCED_SHADER),
+    ("pick_arc.wgsl", PICK_ARC_SHADER),
     ("pick_mesh.wgsl", PICK_MESH_SHADER),
     ("pick_mesh_merged.wgsl", PICK_MESH_MERGED_SHADER),
     ("pick_image.wgsl", PICK_IMAGE_SHADER),
@@ -98,6 +100,8 @@ enum PickDraw {
     Legacy(usize),
     /// One instanced line run: `(stream, first instance, instance count)`.
     LineRun(usize, u32, u32),
+    /// One SDF conic run: `(stream, first instance, instance count)`.
+    ArcRun(usize, u32, u32),
     /// One merged mesh run: `(chunk, first index, one-past-last index)`.
     MeshRun(usize, u32, u32),
     /// One textured image quad.
@@ -211,6 +215,37 @@ impl Renderer {
                 depth_stencil: Some(line_depth.clone()),
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(IdFragment::new(&line_instanced_shader, id_format).state()),
+                multiview_mask: None,
+                cache: None,
+            },
+        ));
+
+        // SDF conic id pass: the same SDF as `arc.wgsl` (see `pick_arc.wgsl`),
+        // discarding below half-pixel coverage. Same primitive/depth state as the
+        // colour arc pipeline.
+        let arc_shader = module("cad-pick-arcs", PICK_ARC_SHADER);
+        self.pick_arc_pipeline = Some(device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("cad-pick-arcs-pipeline"),
+                layout: Some(&pick_layout),
+                vertex: wgpu::VertexState {
+                    module: &arc_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[Some(position_only_layout()), Some(arc_instance_layout())],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: Some(line_depth.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(IdFragment::new(&arc_shader, id_format).state()),
                 multiview_mask: None,
                 cache: None,
             },
@@ -402,6 +437,11 @@ impl Renderer {
                 "id-pass pipelines missing".into(),
             ));
         };
+        let Some(arc_pipeline) = self.pick_arc_pipeline.clone() else {
+            return Err(RenderError::NotInitialized(
+                "id-pass pipelines missing".into(),
+            ));
+        };
         let Some(mesh_pipeline) = self.pick_mesh_pipeline.clone() else {
             return Err(RenderError::NotInitialized(
                 "id-pass pipelines missing".into(),
@@ -459,10 +499,16 @@ impl Renderer {
             slot: u32,
             matrix: [f32; 16],
             key: u32,
+            /// `key_flags.z` for an SDF conic entry: world units per pixel as
+            /// `bitcast<f32>` bits, so the id pass rasterises the same quad as
+            /// the colour pass. `0` for every other draw.
+            world_per_px_bits: u32,
             draw: PickDraw,
         }
         let mut pending: Vec<Pending> = Vec::new();
         let mut slot = 0u32;
+        // World units per pixel, shared by every conic entry this id pass.
+        let world_per_px_bits = (projection.world_per_px() as f32).to_bits();
         for &index in &ordered {
             let batch = &self.batches[index];
             // Mirror the colour pass's order for a converted mesh batch: the
@@ -475,6 +521,7 @@ impl Renderer {
                         slot,
                         matrix: projection.batch_matrix_f64(origin),
                         key: batch.pick_key,
+                        world_per_px_bits: 0,
                         draw: PickDraw::MeshRun(
                             run.chunk as usize,
                             run.index_offset,
@@ -499,16 +546,36 @@ impl Renderer {
                         slot,
                         matrix: projection.batch_matrix_f64(origin),
                         key: batch.pick_key,
+                        world_per_px_bits: 0,
                         draw: PickDraw::LineRun(run.stream as usize, start, run.count),
                     });
                     slot += 1;
                 }
             }
-            if batch.mesh_runs.is_empty() && batch.instanced.is_empty() {
+            if !batch.arc_runs.is_empty() {
+                for run in &batch.arc_runs {
+                    let stream = &self.arc_streams[run.stream as usize];
+                    let origin = stream.origin;
+                    // Same `base + run.offset` re-basing convention as the line
+                    // run (never regress to the stream-local `run.offset`).
+                    let start = stream.base + run.offset;
+                    pending.push(Pending {
+                        slot,
+                        matrix: projection.batch_matrix_f64(origin),
+                        key: batch.pick_key,
+                        world_per_px_bits,
+                        draw: PickDraw::ArcRun(run.stream as usize, start, run.count),
+                    });
+                    slot += 1;
+                }
+            }
+            if batch.mesh_runs.is_empty() && batch.instanced.is_empty() && batch.arc_runs.is_empty()
+            {
                 pending.push(Pending {
                     slot,
                     matrix: projection.batch_matrix(batch.origin),
                     key: batch.pick_key,
+                    world_per_px_bits: 0,
                     draw: PickDraw::Legacy(index),
                 });
                 slot += 1;
@@ -521,6 +588,7 @@ impl Renderer {
                 slot,
                 matrix: camera_matrix,
                 key: image.pick_key,
+                world_per_px_bits: 0,
                 draw: PickDraw::Image(index),
             });
             slot += 1;
@@ -529,7 +597,11 @@ impl Renderer {
         let total_slots = slot as usize;
         self.uniforms.ensure_slots(total_slots, &device, &layout);
         for entry in &pending {
-            let uniform = uniform_bytes(&entry.matrix, [1.0, 1.0, 1.0, 1.0], [entry.key, 0, 0, 0]);
+            let uniform = uniform_bytes(
+                &entry.matrix,
+                [1.0, 1.0, 1.0, 1.0],
+                [entry.key, 0, entry.world_per_px_bits, 0],
+            );
             self.uniforms.write_slot(entry.slot as usize, &uniform);
         }
         self.uniforms.flush(&queue, total_slots);
@@ -616,6 +688,19 @@ impl Renderer {
                             start,
                             count,
                             &line_instanced_pipeline,
+                        );
+                    }
+                    PickDraw::ArcRun(stream, start, count) => {
+                        draw_arc_instance_run(
+                            &mut pass,
+                            &mut state,
+                            self.unit_quad_buffer.as_ref().expect("unit quad buffer"),
+                            &self.arc_streams[stream].buffer,
+                            bind_group,
+                            offset,
+                            start,
+                            count,
+                            &arc_pipeline,
                         );
                     }
                     PickDraw::MeshRun(chunk, start, end) => {

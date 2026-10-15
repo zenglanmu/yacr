@@ -5,14 +5,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Optional diagnostic counters a host attaches to a [`RepresentationContext`]
 /// to observe how many analytic conics the provider produced and how many
-/// satisfy the eligibility facts for a future SDF-instance draw (continuous
-/// linetype, opaque, non-degenerate axes).
+/// satisfy the slice-1 SDF eligibility facts (continuous linetype, opaque, a
+/// circular/arc slice-1 frame; see `docs/adr/0008-sdf-conic-rendering.md`).
 ///
 /// Purely observational: a context without one records nothing, and attaching
 /// one never changes the built geometry. The counters are monotonic.
 #[derive(Debug, Default)]
 pub struct ConicStats {
     produced: AtomicU64,
+    sdf_geometric: AtomicU64,
     sdf_eligible: AtomicU64,
 }
 
@@ -26,13 +27,30 @@ impl ConicStats {
         self.produced.load(Ordering::Relaxed)
     }
 
-    /// Produced conics that are eligible for the future SDF gate.
+    /// Produced conics whose **geometry** is slice-1 SDF-shaped (a circle or
+    /// circular arc: equal, orthogonal semi-axes, non-degenerate span), ignoring
+    /// style and the force-chord hook. This is the geometric fact; it stays
+    /// meaningful even when a style gate (dashed, transparent) or the soft-revert
+    /// hook routes the conic to chords.
+    pub fn sdf_geometric(&self) -> u64 {
+        self.sdf_geometric.load(Ordering::Relaxed)
+    }
+
+    /// Produced conics that are **actually eligible** for the slice-1 SDF gate:
+    /// geometrically SDF-shaped **and** opaque, continuous-lined and not forced to
+    /// chords. An ineligible conic (ellipse, dashed, transparent, hook-forced or
+    /// degenerate) is chord-expanded and still counted in [`ConicStats::produced`],
+    /// never dropped silently.
     pub fn sdf_eligible(&self) -> u64 {
         self.sdf_eligible.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn record(&self, eligible: bool) {
+    pub(crate) fn record(&self, geometric: bool, eligible: bool) {
+        debug_assert!(!eligible || geometric, "eligible conics are geometric");
         self.produced.fetch_add(1, Ordering::Relaxed);
+        if geometric {
+            self.sdf_geometric.fetch_add(1, Ordering::Relaxed);
+        }
         if eligible {
             self.sdf_eligible.fetch_add(1, Ordering::Relaxed);
         }
@@ -178,6 +196,11 @@ pub struct RepresentationContext {
     /// Optional Conic plumbing counters (see [`ConicStats`]). `None` records
     /// nothing; attaching one never changes the built geometry.
     pub conic_stats: Option<Arc<ConicStats>>,
+    /// Test/revert hook: force every conic through the **chord** path even when
+    /// it is slice-1 SDF-eligible. This is the documented soft-revert lever for
+    /// the SDF arc slice (see `docs/adr/0008-sdf-conic-rendering.md`); it never
+    /// changes eligibility, only which draw a conic takes.
+    pub force_chord_conics: bool,
 }
 
 /// The active annotation scale a host applies while building representations.
@@ -211,6 +234,7 @@ impl RepresentationContext {
             annotation_scale: None,
             packed_line_segments: false,
             conic_stats: None,
+            force_chord_conics: false,
         }
     }
 
@@ -236,6 +260,12 @@ impl RepresentationContext {
     /// were produced and how many are SDF-eligible.
     pub fn with_conic_stats(mut self, stats: Arc<ConicStats>) -> Self {
         self.conic_stats = Some(stats);
+        self
+    }
+
+    /// Force every conic through the chord path (the SDF soft-revert lever).
+    pub fn with_force_chord_conics(mut self) -> Self {
+        self.force_chord_conics = true;
         self
     }
 

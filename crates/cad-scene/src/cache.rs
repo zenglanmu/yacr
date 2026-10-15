@@ -171,14 +171,8 @@ impl SceneCache {
             images: Vec::new(),
         };
         let mut previous_was_lines = false;
+        let mut previous_was_conic = false;
         for fragment in &representation.fragments {
-            // A conic is chord-expanded once, up front, so the rest of the loop
-            // treats it exactly like a `Lines` primitive. A normal build has
-            // already expanded conics (`build_expanded`), so this is a safety net.
-            let expanded_conic: Option<Vec<Point3>> = match &fragment.primitive {
-                DisplayPrimitive::Conic(conic) => Some(conic.chord_points()),
-                _ => None,
-            };
             let paired = matches!(fragment.primitive, DisplayPrimitive::LineSegments(_));
             if let DisplayPrimitive::LineSegments(points) = &fragment.primitive {
                 if points.len() % 2 != 0 {
@@ -191,7 +185,6 @@ impl SceneCache {
                 DisplayPrimitive::Lines(p) | DisplayPrimitive::LineSegments(p) if p.len() >= 2 => {
                     Some(p.as_ref())
                 }
-                DisplayPrimitive::Conic(_) => expanded_conic.as_deref().filter(|p| p.len() >= 2),
                 _ => None,
             };
             if let Some(points) = line_points.filter(|_| compact && previous_was_lines) {
@@ -234,9 +227,71 @@ impl SceneCache {
                     draw_order: 0,
                     sources: vec![fragment.source.clone()],
                 });
+                previous_was_lines = false;
+                previous_was_conic = false;
                 continue;
             }
+            // Slice B: an eligible circle/arc becomes an SDF conic batch (see
+            // `docs/adr/0008-sdf-conic-rendering.md`). An ineligible conic — an
+            // ellipse (slice 2), a dashed/transparent conic or a degenerate span
+            // — keeps the chord draw below, so the scene never silently changes
+            // it. The eligibility gate is recomputed here from the fragment's own
+            // fields, so a hand-built `build()` (no provider) is still correct.
+            if let DisplayPrimitive::Conic(conic) = &fragment.primitive {
+                let eligible = fragment.alpha == 1.0
+                    && fragment.linetype.is_continuous()
+                    && conic.is_sdf_circle_arc();
+                if eligible {
+                    let record = RenderConic {
+                        center: conic.center,
+                        major: conic.major,
+                        minor: conic.minor,
+                        start: conic.start,
+                        sweep: if conic.full {
+                            std::f64::consts::TAU
+                        } else {
+                            conic.sweep
+                        },
+                        full: conic.full,
+                    };
+                    if compact && previous_was_conic {
+                        let batch = delta.added.last_mut().expect("previous conic batch");
+                        if conic_fragment_merges_into(batch, fragment, record, SCENE_DRAW_ORDER) {
+                            batch.conics.push(record);
+                            if batch.sources.last() != Some(&fragment.source) {
+                                batch.sources.push(fragment.source.clone());
+                            }
+                            previous_was_lines = false;
+                            continue;
+                        }
+                    }
+                    delta.added.push(RenderBatch {
+                        local_origin: record.center,
+                        topology: RenderTopology::Conics,
+                        vertices: Vec::new(),
+                        normals: Vec::new(),
+                        colors: Vec::new(),
+                        indices: Vec::new(),
+                        edges: Vec::new(),
+                        conics: vec![record],
+                        mirrored: false,
+                        alpha: sanitize_alpha(fragment.alpha),
+                        color: sanitize_color(fragment.color),
+                        color_unresolved: fragment.color_unresolved,
+                        lineweight: sanitize_lineweight(fragment.lineweight),
+                        lineweight_unresolved: fragment.lineweight_unresolved,
+                        linetype: fragment.linetype.clone(),
+                        linetype_unresolved: fragment.linetype_unresolved,
+                        sources: vec![fragment.source.clone()],
+                        draw_order: SCENE_DRAW_ORDER,
+                    });
+                    previous_was_lines = false;
+                    previous_was_conic = true;
+                    continue;
+                }
+            }
             previous_was_lines = line_points.is_some();
+            previous_was_conic = false;
             let (topology, vertices, normals, colors, indices, edges, origin, mirrored) =
                 match &fragment.primitive {
                     DisplayPrimitive::Lines(points) | DisplayPrimitive::LineSegments(points) => {
@@ -268,10 +323,11 @@ impl SceneCache {
                             false,
                         )
                     }
-                    // The conic's chord expansion is treated exactly like a
-                    // continuous `Lines` polyline (never a paired segment list).
-                    DisplayPrimitive::Conic(_) => {
-                        let points: &[Point3] = expanded_conic.as_deref().unwrap_or(&[]);
+                    // An ineligible conic (ellipse, dashed or degenerate) is
+                    // chord-expanded exactly like a continuous `Lines` polyline.
+                    DisplayPrimitive::Conic(conic) => {
+                        let points = conic.chord_points();
+                        let points: &[Point3] = &points;
                         let origin = points.first().copied().unwrap_or(Point3 {
                             x: 0.0,
                             y: 0.0,
@@ -398,6 +454,7 @@ impl SceneCache {
                 colors,
                 indices,
                 edges,
+                conics: Vec::new(),
                 mirrored: false,
                 alpha: sanitize_alpha(fragment.alpha),
                 color: sanitize_color(fragment.color),
@@ -549,5 +606,42 @@ pub(crate) fn line_fragment_merges_into(
             ]
             .iter()
             .all(|v| v.is_finite() && v.abs() <= 8192.0)
+        })
+}
+
+/// Whether an eligible conic `fragment` may be absorbed into the adjacent conic
+/// `batch` (the conic half of [`SceneCache::build_compact`]).
+///
+/// Mirrors [`line_fragment_merges_into`]: it joins only when every attribute the
+/// renderer reads matches (including paint order), the batch is a conic batch and
+/// the conic's whole extent stays within the 8,192-unit stream radius of the
+/// batch origin. A conic never merges into a line batch and vice versa.
+pub(crate) fn conic_fragment_merges_into(
+    batch: &RenderBatch,
+    fragment: &DisplayFragment,
+    record: RenderConic,
+    incoming_draw_order: i64,
+) -> bool {
+    batch.topology == RenderTopology::Conics
+        && batch.draw_order == incoming_draw_order
+        && batch.alpha == 1.0
+        && batch.alpha == sanitize_alpha(fragment.alpha)
+        && batch.color == sanitize_color(fragment.color)
+        && batch.color_unresolved == fragment.color_unresolved
+        && batch.lineweight == sanitize_lineweight(fragment.lineweight)
+        && batch.lineweight_unresolved == fragment.lineweight_unresolved
+        && batch.linetype == fragment.linetype
+        && batch.linetype_unresolved == fragment.linetype_unresolved
+        && record.world_aabb().is_some_and(|(min, max)| {
+            let origin = batch.local_origin;
+            [min, max].iter().all(|corner| {
+                [
+                    corner[0] - origin.x,
+                    corner[1] - origin.y,
+                    corner[2] - origin.z,
+                ]
+                .iter()
+                .all(|v| v.is_finite() && v.abs() <= 8192.0)
+            })
         })
 }

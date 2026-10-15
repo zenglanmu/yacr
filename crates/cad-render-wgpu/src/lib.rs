@@ -310,6 +310,15 @@ pub struct FrameStats {
     /// Resident merged mesh chunks. Uploaded once per scene change; a pan or zoom
     /// never changes it.
     pub mesh_chunks: usize,
+    /// SDF conic draw calls issued this frame (coalesced runs).
+    pub arc_draws: u64,
+    /// Batches this frame drew through the SDF conic path.
+    pub arc_batches: usize,
+    /// Resident SDF conic streams. Uploaded once per scene change; a pan or zoom
+    /// never changes it.
+    pub arc_streams: usize,
+    /// SDF conic instances resident this frame (summed across streams).
+    pub arc_instances: u64,
     /// The draw tier this frame used (see [`RenderTier`]). Chosen once per
     /// device; an accelerated device reports [`RenderTier::Accelerated`] even on
     /// a frame that falls back to the universal per-run organization (for
@@ -567,6 +576,12 @@ struct GpuBatch {
     /// adjacent ranges in the same chunk) instead of a per-batch draw. Usually
     /// one run; a batch larger than the vertex cap contributes one run per piece.
     mesh_runs: Vec<MeshRun>,
+    /// Empty unless this batch's conics live in SDF instance streams (see
+    /// [`ArcChunk`]). The frame path draws each `[offset, offset + count)`
+    /// instance slice in order (coalescing against adjacent slices in the same
+    /// stream). Usually one run; a batch larger than the instance cap contributes
+    /// one run per chunk.
+    arc_runs: Vec<ArcRun>,
     /// Exact bytes this batch uploads, cached at upload time so the per-frame
     /// byte budget does not recompute the edge index list every frame.
     upload_bytes: usize,
@@ -615,6 +630,17 @@ pub(crate) struct InstanceRun {
     count: u32,
 }
 
+/// Where a conic batch's SDF instances live in the conic streams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ArcRun {
+    /// Index into [`Renderer::arc_streams`].
+    stream: u32,
+    /// First instance of this batch within its stream.
+    offset: u32,
+    /// Number of conic instances this batch contributes.
+    count: u32,
+}
+
 /// One device-resident instanced line stream, plus the `f64` reference origin
 /// its positions are stored relative to.
 ///
@@ -644,6 +670,25 @@ pub(crate) struct InstanceStream {
     /// populated when the accelerated tier is live; the universal tier leaves it
     /// empty.
     pulled_instances: Vec<LineInstance>,
+}
+
+/// One device-resident SDF conic stream, plus the `f64` reference origin its
+/// centers are stored relative to.
+///
+/// Uploaded once (upload/commit) and never rewritten on pan/zoom: a camera move
+/// is a small uniform write only. Each stream covers a spatially bounded chunk of
+/// the converted conics (see `build_arc_chunks`), so a stored center is within
+/// `MAX_STREAM_RADIUS` of `origin` and the f32 ulp stays under ~1 µm. The conic
+/// path is **universal-tier only** (no pulled variant this round); `base` is kept
+/// for symmetry with [`InstanceStream`] and is always `0`.
+pub(crate) struct ArcStream {
+    buffer: wgpu::Buffer,
+    instance_count: u32,
+    origin: [f64; 3],
+    /// First instance of this stream within its buffer (always `0`: each conic
+    /// stream owns its buffer).
+    #[allow(dead_code)]
+    base: u32,
 }
 
 /// One accelerated line storage segment: a bind group over a
@@ -702,6 +747,11 @@ impl GpuBatch {
     /// reported `FrameStats::uploaded_bytes` cannot disagree.
     fn upload_size_bytes(&self) -> usize {
         self.upload_bytes
+    }
+
+    /// Total SDF conic instances this batch contributes across its streams.
+    fn arc_instance_count(&self) -> u32 {
+        self.arc_runs.iter().map(|run| run.count).sum()
     }
 
     /// The [`INSTANCE_FLAG_*`] bitfield of this resident batch, for
@@ -990,6 +1040,12 @@ pub struct Renderer {
     /// Shared `(0,0,0)-(1,0,0)` unit segment bound at slot 0 of the instanced
     /// line pipeline.
     unit_segment_buffer: Option<wgpu::Buffer>,
+    /// SDF conic pipeline: one instance per analytic circle/arc, expanded against
+    /// [`Renderer::unit_quad_buffer`].
+    arc_pipeline: Option<wgpu::RenderPipeline>,
+    /// Shared unit quad `[0,1]^2` (6 vertices, `TriangleList`) bound at slot 0 of
+    /// the SDF conic pipeline.
+    unit_quad_buffer: Option<wgpu::Buffer>,
     mesh_pipeline: Option<wgpu::RenderPipeline>,
     /// Mirrored mesh pipeline: same shader but `front_face = Cw`, so mirrored
     /// batches cull the correct side instead of the visible one.
@@ -1019,6 +1075,9 @@ pub struct Renderer {
     /// Device-resident instanced line streams. Uploaded once per scene change;
     /// never rewritten on pan/zoom. Garbage-collected (and re-based) on commit.
     instance_streams: Vec<InstanceStream>,
+    /// Device-resident SDF conic streams. Uploaded once per scene change; never
+    /// rewritten on pan/zoom. Garbage-collected on commit. Universal-tier only.
+    arc_streams: Vec<ArcStream>,
     /// Device-resident merged mesh chunks. Uploaded once per scene change; never
     /// rewritten on pan/zoom. Garbage-collected (and re-based) on commit.
     mesh_chunks: Vec<GpuMeshChunk>,
@@ -1042,6 +1101,12 @@ pub struct Renderer {
     /// Monotonic count of instanced stream buffers uploaded since init. A pan or
     /// zoom must never increase it (asserted by the zero-reupload test).
     instance_stream_uploads: u64,
+    /// Monotonic count of SDF conic stream buffers uploaded since init. A pan or
+    /// zoom must never increase it (asserted by the zero-reupload test).
+    arc_stream_uploads: u64,
+    /// Monotonic count of degenerate conics skipped at pack (a defensive guard
+    /// the provider already excludes). Counted, never silent (iron rule #2).
+    arc_degenerate_skips: u64,
     /// Monotonic count of merged mesh chunk buffers uploaded since init. A pan or
     /// zoom must never increase it (asserted by the zero-reupload test).
     mesh_chunk_uploads: u64,
@@ -1158,6 +1223,7 @@ pub struct Renderer {
     /// uses (the id pass must rasterize the same fragments).
     pick_line_pipeline: Option<wgpu::RenderPipeline>,
     pick_line_instanced_pipeline: Option<wgpu::RenderPipeline>,
+    pick_arc_pipeline: Option<wgpu::RenderPipeline>,
     pick_mesh_pipeline: Option<wgpu::RenderPipeline>,
     pick_mesh_pipeline_mirrored: Option<wgpu::RenderPipeline>,
     pick_mesh_merged_pipeline: Option<wgpu::RenderPipeline>,
@@ -1208,6 +1274,11 @@ pub struct PreparedUpload {
     /// Instanced line streams created for the staged batches; their run indices
     /// are re-based when the upload is published.
     instances: Vec<InstanceStream>,
+    /// SDF conic streams created for the staged batches; their run indices are
+    /// re-based when the upload is published.
+    arcs: Vec<ArcStream>,
+    /// Degenerate conics skipped at pack in this upload (counted, never silent).
+    arc_degenerate_skips: u64,
     /// Merged mesh chunks created for the staged batches; their run indices are
     /// re-based when the upload is published.
     mesh_chunks: Vec<GpuMeshChunk>,
@@ -1263,8 +1334,17 @@ impl PreparedUpload {
                 run.chunk += mesh_base;
             }
         }
+        // Re-base the appended piece's conic stream indices.
+        let arc_base = self.arcs.len() as u32;
+        for batch in &mut piece.batches {
+            for run in &mut batch.arc_runs {
+                run.stream += arc_base;
+            }
+        }
         self.batches.append(&mut piece.batches);
         self.instances.append(&mut piece.instances);
+        self.arcs.append(&mut piece.arcs);
+        self.arc_degenerate_skips += piece.arc_degenerate_skips;
         self.mesh_chunks.append(&mut piece.mesh_chunks);
         self.bytes += piece.bytes;
         self.elapsed_ms += piece.elapsed_ms;

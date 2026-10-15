@@ -258,7 +258,11 @@ impl FragmentHistogram {
                     self.glyph_triangles += mesh.triangles.len();
                 }
                 DisplayPrimitive::Conic(conic) => {
-                    // Chord-expanded downstream today; count its line form.
+                    // Slice B: an eligible circle/arc is drawn as an SDF conic
+                    // batch (tallied in `conic_batches`); an ineligible one
+                    // (ellipse/dashed/transparent) is chord-expanded. This
+                    // representation-level tally is a rough upper bound and is
+                    // superseded by the batch histogram below.
                     self.lines += 1;
                     self.line_vertices += conic.chord_points().len();
                 }
@@ -294,6 +298,8 @@ struct BatchHistogram {
     transparent: usize,
     invisible: usize,
     images: usize,
+    /// Analytic SDF conic batches (slice B).
+    conic_batches: usize,
 }
 
 impl BatchHistogram {
@@ -305,6 +311,7 @@ impl BatchHistogram {
                     self.line_vertices += batch.vertices.len();
                 }
                 RenderTopology::MeshEdges => self.mesh_edge_batches += 1,
+                RenderTopology::Conics => self.conic_batches += 1,
                 RenderTopology::Mesh => {
                     if batch.edges.is_empty() {
                         self.glyph_batches += 1;

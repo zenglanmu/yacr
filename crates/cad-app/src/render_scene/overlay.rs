@@ -1148,6 +1148,7 @@ fn line_batch(
         })
         .collect();
     Some(RenderBatch {
+        conics: Vec::new(),
         local_origin: origin,
         topology: RenderTopology::Lines,
         vertices,
@@ -1230,6 +1231,7 @@ fn marker_batch(
         );
     }
     Some(RenderBatch {
+        conics: Vec::new(),
         local_origin: origin,
         topology: RenderTopology::Lines,
         vertices,

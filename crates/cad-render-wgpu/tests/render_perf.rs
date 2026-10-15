@@ -71,6 +71,7 @@ fn source(index: usize) -> SelectionRef {
 fn line_batch(index: usize, transparent: bool) -> RenderBatch {
     let x = index as f32 * 0.25;
     RenderBatch {
+        conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
             y: 0.0,
@@ -687,6 +688,7 @@ fn grid_batch(first: usize, count: usize, draw_order: i64) -> RenderBatch {
         vertices.push([x0 + 2.0, y0 + 1.5, 0.0]);
     }
     RenderBatch {
+        conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
             y: 0.0,

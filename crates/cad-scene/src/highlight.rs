@@ -366,6 +366,7 @@ fn mesh_batch(
     }
 
     Some(RenderBatch {
+        conics: Vec::new(),
         local_origin: origin,
         topology: RenderTopology::Mesh,
         vertices,

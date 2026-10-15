@@ -103,9 +103,11 @@
 
 ### P4 — SDF 圆/弧（SDF circles/arcs）
 
-- **现状/问题**：弧先离散为线段（折线弦），圆/弧无解析或 SDF 路径。**本项取代** ADR-0007
-  deferred 中的「解析弧（analytic arcs）」（`docs/adr/0007-entity-as-data-renderer.md:93`）：
-  「折线→解析弧」是较弱变体，SDF 是更强的实现形态。
+- **状态（2026-10-15）：已实现（slice B）**，见 `docs/adr/0008-sdf-conic-rendering.md`。
+  可 SDF 化的圆/弧（不透明、连续线型、slice-1 圆形）渲染为抗锯齿 SDF 实例；椭圆（slice 2）、
+  虚线/非连续、非不透明 conic 仍弦展开。真实 P620/Vulkan 的覆盖-解析曲线、弦基线包含、id
+  pass 一致性、flags、绘制顺序、确定性/零重传与 before/after 视觉验收均已 fence（见 ADR-0008
+  实施记录）。**未**做椭圆 SDF、`PulledArc`、透视域精度、浏览器/Android 验收。
 - **预期收益**：把弧渲染为 **SDF 四边形**（实例化：center/radius/起始角/终止角/颜色/线宽），
   片元着色器用**有符号距离**做抗锯齿 → **分辨率无关、无需三角化、每类约 1 个 draw**。替代大量
   弧折线实例，减少 line 实例数。**预期**，未实测。

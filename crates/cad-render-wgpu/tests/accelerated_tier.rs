@@ -24,7 +24,7 @@ use cad_render_wgpu::{
     BackendPreference, Camera2d, Camera3d, FrameStats, RenderTarget, RenderTier, Renderer,
     FLAG_HIDDEN, FLAG_SELECTED,
 };
-use cad_scene::{RenderBatch, RenderTopology, SceneDelta};
+use cad_scene::{RenderBatch, RenderConic, RenderTopology, SceneDelta};
 
 fn source(entity: u128) -> SelectionRef {
     SelectionRef {
@@ -126,6 +126,7 @@ fn camera_3d() -> Camera3d {
 
 fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
     RenderBatch {
+        conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
             y: 0.0,
@@ -170,6 +171,7 @@ fn quad_mesh(
     mirrored: bool,
 ) -> RenderBatch {
     RenderBatch {
+        conics: Vec::new(),
         local_origin: origin,
         topology: RenderTopology::Mesh,
         vertices: vec![
@@ -1054,5 +1056,190 @@ fn accelerated_uploaded_bytes_charge_pulled_geometry_once() {
         stats.uploaded_bytes,
         (line + merged + pulled + tables) as u64,
         "pulled geometry must be charged once, not again on every rebuild"
+    );
+}
+
+/// A one-conic SDF batch (opaque white by default).
+fn conic_batch(conics: Vec<RenderConic>, entity: u128) -> RenderBatch {
+    let origin = conics.first().map(|c| c.center).unwrap_or(Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    RenderBatch {
+        local_origin: origin,
+        topology: RenderTopology::Conics,
+        vertices: Vec::new(),
+        normals: Vec::new(),
+        colors: Vec::new(),
+        indices: Vec::new(),
+        edges: Vec::new(),
+        conics,
+        mirrored: false,
+        alpha: 1.0,
+        color: [1.0, 0.0, 0.0],
+        color_unresolved: false,
+        lineweight: 0.0,
+        lineweight_unresolved: false,
+        linetype: cad_scene::LinetypePattern::continuous(),
+        linetype_unresolved: false,
+        sources: vec![source(entity)],
+        draw_order: 0,
+    }
+}
+
+fn circle(center: Point3, radius: f64) -> RenderConic {
+    RenderConic {
+        center,
+        major: Point3 {
+            x: radius,
+            y: 0.0,
+            z: 0.0,
+        },
+        minor: Point3 {
+            x: 0.0,
+            y: radius,
+            z: 0.0,
+        },
+        start: 0.0,
+        sweep: std::f64::consts::TAU,
+        full: true,
+    }
+}
+
+/// S2: the accelerated tier's **residual** SDF conic path is exercised, and an
+/// arc-vs-legacy-batch equal-depth tie still resolves by plan order (the S1
+/// flush), so the accelerated frame matches the universal frame.
+///
+/// The ADR's "arc-vs-pulled-class tie exception" is about *pulled* classes; this
+/// fence pins the residual path and a legacy-batch tie, which the S1 fix
+/// (`flush_pending_arc` before the legacy `draw_batch`) makes order-correct.
+#[test]
+fn accelerated_sdf_arc_residual_path_and_legacy_tie_match_universal() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    if !supports_storage(&gpu) {
+        return;
+    }
+    let target = RenderTarget::new(64, 64);
+    // The circle (red, SDF) and a horizontal legacy `Lines` batch (default
+    // colour) cross at the ring's two axis points at equal depth.
+    let arc = conic_batch(
+        vec![circle(
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            0.5,
+        )],
+        1,
+    );
+    // Three vertices -> not an instanced pair, so it stays a legacy per-batch
+    // draw on the accelerated tier (the residual path's neighbour).
+    let mut legacy = lines_batch(vec![[-0.9, 0.0, 0.0], [0.9, 0.0, 0.0], [0.9, 0.01, 0.0]]);
+    legacy.color = [0.0, 0.0, 1.0];
+    legacy.color_unresolved = false;
+    // A converted (pulled) line class elsewhere, so the accelerated tier actually
+    // engages its per-class pulled path (which the arc residual path sits beside).
+    let pulled_line = lines_batch(vec![[-0.9, 0.8, 0.0], [0.9, 0.8, 0.0]]);
+
+    let stats = assert_tiers_identical(
+        &gpu,
+        &target,
+        &[arc, legacy, pulled_line],
+        camera_2d(),
+        "residual SDF arc + legacy tie",
+    );
+    assert!(
+        stats.arc_draws > 0,
+        "the accelerated frame must draw the SDF arc through the residual path"
+    );
+    assert_eq!(
+        stats.arc_batches, 1,
+        "one conic batch must go through the residual path"
+    );
+}
+
+/// S2: the accelerated tier's documented **arc-vs-pulled-class** tie exception.
+///
+/// Pulled classes draw before the residual SDF conic class, so on the accelerated
+/// tier an arc-vs-pulled-line equal-depth tie is always won by the arc (drawn
+/// after, `LessEqual`), independent of plan order — whereas the universal tier
+/// resolves the tie by plan order. This fence pins that difference (and therefore
+/// the honesty of the ADR claim).
+#[test]
+fn accelerated_sdf_arc_vs_pulled_class_tie_is_the_documented_exception() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    if !supports_storage(&gpu) {
+        return;
+    }
+    let target = RenderTarget::new(64, 64);
+    let wpp = 2.0 / 64.0;
+    // World coordinates that are integer multiples of `wpp` land on pixel centres
+    // (the ring's right point and the line's row are both centred).
+    let cam = Camera2d {
+        center: Point3 {
+            x: 0.5 * wpp,
+            y: 0.5 * wpp,
+            z: 0.0,
+        },
+        world_per_px: wpp,
+        z_plane: 0.0,
+    };
+    let origin = Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    let mut arc = conic_batch(vec![circle(origin, 0.5)], 1);
+    arc.color = [1.0, 0.0, 0.0];
+    let mut line = lines_batch(vec![[-0.9, 0.0, 0.0], [0.9, 0.0, 0.0]]);
+    line.color = [0.0, 0.0, 1.0];
+    line.color_unresolved = false;
+
+    let sample = |renderer: &mut Renderer, batches: &[RenderBatch]| -> [u8; 4] {
+        renderer.clear_batches();
+        renderer
+            .upload(&scene(batches.to_vec()))
+            .expect("upload tie scene");
+        renderer.render(cam, &target).expect("render tie scene");
+        renderer.read_target_rgba().unwrap().pixel(47, 32)
+    };
+
+    let mut accel = init_tier(&gpu, true);
+    let mut univ = init_tier(&gpu, false);
+    let accel_arc_first = sample(&mut accel, &[arc.clone(), line.clone()]);
+    let accel_line_first = sample(&mut accel, &[line.clone(), arc.clone()]);
+    let univ_arc_first = sample(&mut univ, &[arc.clone(), line.clone()]);
+    let univ_line_first = sample(&mut univ, &[line.clone(), arc.clone()]);
+
+    // Accelerated: the residual arc is drawn after the pulled line, so it always
+    // wins the tie (red), whatever the plan order.
+    for (name, px) in [
+        ("arc-first", accel_arc_first),
+        ("line-first", accel_line_first),
+    ] {
+        assert!(
+            px[0] > px[2].saturating_add(40),
+            "accelerated ({name}): the residual arc must win the pulled-line tie (red), got {px:?}"
+        );
+    }
+    // Universal: plan order decides (the later draw wins).
+    assert!(
+        univ_arc_first[2] > univ_arc_first[0].saturating_add(40),
+        "universal (arc-first): the later line must win the tie (blue), got {univ_arc_first:?}"
+    );
+    assert!(
+        univ_line_first[0] > univ_line_first[2].saturating_add(40),
+        "universal (line-first): the later arc must win the tie (red), got {univ_line_first:?}"
+    );
+    // The exception: with the arc first in plan order the two tiers disagree.
+    assert_ne!(
+        accel_arc_first, univ_arc_first,
+        "the accelerated tier's pulled-before-residual order is the documented tie exception"
     );
 }

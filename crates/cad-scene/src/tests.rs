@@ -918,6 +918,7 @@ fn centroid_keeps_precision_at_large_coordinates() {
 #[test]
 fn empty_batch_centroid_falls_back_to_local_origin() {
     let batch = RenderBatch {
+        conics: Vec::new(),
         local_origin: Point3 {
             x: 3.0,
             y: 4.0,
@@ -1337,10 +1338,11 @@ fn text_and_instance_fragments_still_produce_no_batches() {
     assert!(delta.images.is_empty());
 }
 
-/// A conic fragment must batch byte-for-byte like the equivalent chord polyline
-/// (SDF slice A keeps the chord draw).
+/// An **ineligible** conic fragment (unequal semi-axes: an ellipse, slice 2)
+/// must still batch byte-for-byte like the equivalent chord polyline. Slice B
+/// only routes a slice-1 circle/arc to the SDF path.
 #[test]
-fn conic_fragment_batches_like_its_chord_polyline() {
+fn ineligible_conic_fragment_batches_like_its_chord_polyline() {
     let conic = ConicSegment {
         center: Point3 {
             x: 100.0,
@@ -1361,6 +1363,10 @@ fn conic_fragment_batches_like_its_chord_polyline() {
         sweep: std::f64::consts::TAU,
         full: true,
     };
+    assert!(
+        !conic.is_sdf_circle_arc(),
+        "unequal semi-axes are slice 2 and must stay chords"
+    );
     let chord = conic.chord_points();
     assert!(chord.len() >= 3);
 
@@ -1398,4 +1404,50 @@ fn conic_fragment_batches_like_its_chord_polyline() {
             "compact={compact}"
         );
     }
+}
+
+/// A slice-1 **circle** fragment becomes a `Conics` batch carrying one f64
+/// `RenderConic`, and `build_compact` merges adjacent same-style circles into
+/// one batch. It never produces chord vertices.
+#[test]
+fn eligible_circle_fragment_becomes_a_conic_batch_and_merges() {
+    let circle = |cx: f64| ConicSegment {
+        center: Point3 {
+            x: cx,
+            y: 0.0,
+            z: 0.0,
+        },
+        major: Point3 {
+            x: 5.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        minor: Point3 {
+            x: 0.0,
+            y: 5.0,
+            z: 0.0,
+        },
+        start: 0.0,
+        sweep: std::f64::consts::TAU,
+        full: true,
+    };
+    let mut rep = line_representation(7, Vec::new());
+    rep.fragments[0].primitive = DisplayPrimitive::Conic(Arc::new(circle(0.0)));
+    let mut second = line_representation(8, Vec::new());
+    second.fragments[0].primitive = DisplayPrimitive::Conic(Arc::new(circle(20.0)));
+    rep.fragments
+        .push(second.fragments.pop().expect("one fragment"));
+
+    let mut cache = SceneCache::default();
+    let delta = cache.build_compact(&rep, stamp()).unwrap();
+    assert_eq!(delta.added.len(), 1, "adjacent same-style circles merge");
+    let batch = &delta.added[0];
+    assert_eq!(batch.topology, RenderTopology::Conics);
+    assert_eq!(batch.conics.len(), 2);
+    assert!(
+        batch.vertices.is_empty(),
+        "a conic batch has no chord vertices"
+    );
+    assert!(batch.conics[0].full);
+    assert_eq!(batch.local_origin.x, 0.0);
 }

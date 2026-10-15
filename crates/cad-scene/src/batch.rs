@@ -29,6 +29,71 @@ pub enum RenderTopology {
     Mesh,
     /// A mesh displayed as its edges: one line segment per edge.
     MeshEdges,
+    /// Analytic circles/arcs carried in [`RenderBatch::conics`] and drawn as
+    /// anti-aliased SDF instances (slice B; see
+    /// `docs/adr/0008-sdf-conic-rendering.md`). `vertices` is empty; the
+    /// renderer packs each conic into a 72-byte `ArcInstance`.
+    Conics,
+}
+
+/// One analytic circle/arc a [`RenderTopology::Conics`] batch draws as an SDF
+/// instance.
+///
+/// This is the **f64 semantic record**; the renderer packs it into a 72-byte
+/// `ArcInstance` (center reduced against the chunk origin, unit major direction,
+/// minor semi-diameter vector, start angle and signed sweep). Only slice-1
+/// circles/arcs reach here — an ellipse (`|major| != |minor|`) stays
+/// chord-tessellated (slice 2, see `docs/adr/0008-sdf-conic-rendering.md`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RenderConic {
+    /// Circle center in world space.
+    pub center: Point3,
+    /// Semi-diameter vector along `cos(t)`.
+    pub major: Point3,
+    /// Conjugate semi-diameter vector along `sin(t)`.
+    pub minor: Point3,
+    /// Parameter angle (radians) at `t = 0`.
+    pub start: f64,
+    /// Signed sweep (radians); negative is a clockwise arc.
+    pub sweep: f64,
+    /// `true` for a closed full circle.
+    pub full: bool,
+}
+
+impl RenderConic {
+    /// World-space AABB `(min, max)` of the full conic extent.
+    ///
+    /// Every point is `center + major·cos t + minor·sin t`, so per axis the
+    /// extent is `center ± (|major_k| + |minor_k|)` (a superset of the arc's own
+    /// extent, which is what the chunk splitter needs). `None` when any
+    /// component is non-finite.
+    pub fn world_aabb(&self) -> Option<([f64; 3], [f64; 3])> {
+        let values = [
+            self.center.x,
+            self.center.y,
+            self.center.z,
+            self.major.x,
+            self.major.y,
+            self.major.z,
+            self.minor.x,
+            self.minor.y,
+            self.minor.z,
+        ];
+        if !values.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let mut min = [0.0f64; 3];
+        let mut max = [0.0f64; 3];
+        let center = [self.center.x, self.center.y, self.center.z];
+        let major = [self.major.x, self.major.y, self.major.z];
+        let minor = [self.minor.x, self.minor.y, self.minor.z];
+        for axis in 0..3 {
+            let extent = major[axis].abs() + minor[axis].abs();
+            min[axis] = center[axis] - extent;
+            max[axis] = center[axis] + extent;
+        }
+        Some((min, max))
+    }
 }
 
 /// A GPU-ready batch. `vertices` are relative to `local_origin`.
@@ -53,6 +118,10 @@ pub struct RenderBatch {
     /// Edge positions for the optional wireframe overlay, relative to
     /// `local_origin`. Empty when no wireframe is requested.
     pub edges: Vec<[f32; 3]>,
+    /// Analytic circles/arcs drawn as SDF instances. Non-empty only for
+    /// [`RenderTopology::Conics`], whose `vertices` is empty. Each entry is a
+    /// slice-1 circle/arc (see [`RenderConic`]).
+    pub conics: Vec<RenderConic>,
     /// `true` when the source transform has a negative determinant, so triangle
     /// winding is mirrored and the renderer must flip back-face culling.
     pub mirrored: bool,
@@ -116,6 +185,7 @@ impl RenderBatch {
     pub fn approx_bytes(&self) -> usize {
         (self.vertices.len() + self.normals.len() + self.edges.len() + self.colors.len()) * 12
             + self.indices.len() * 12
+            + self.conics.len() * std::mem::size_of::<RenderConic>()
     }
 
     /// The exact packed GPU upload size of this batch, in bytes.
@@ -129,6 +199,11 @@ impl RenderBatch {
     /// de-duplicated edge list as `u32`. [`SceneBudget::upload_bytes_per_frame`]
     /// is charged this amount.
     pub fn upload_size_bytes(&self) -> usize {
+        if self.topology == RenderTopology::Conics {
+            // One 72-byte SDF instance per conic (see `ArcInstance` in
+            // `cad-render-wgpu`); mirrors `CONIC_INSTANCE_BYTES`.
+            return self.conics.len() * CONIC_INSTANCE_BYTES as usize;
+        }
         let positions = self.vertices.len() * 12;
         let edges = self.edges.len() * 12;
         let normals = if self.topology == RenderTopology::Mesh {
@@ -161,8 +236,21 @@ impl RenderBatch {
     ///
     /// It is `local_origin + mean(vertices)`. The mean is taken in `f64` before
     /// narrowing so large coordinates do not lose precision. A batch with no
-    /// vertices falls back to its `local_origin`.
+    /// vertices falls back to its `local_origin`. A conic batch (empty vertices)
+    /// uses the mean of its conic centers.
     pub fn centroid(&self) -> [f32; 3] {
+        if self.vertices.is_empty() && !self.conics.is_empty() {
+            let n = self.conics.len() as f64;
+            let mut sx = 0.0f64;
+            let mut sy = 0.0f64;
+            let mut sz = 0.0f64;
+            for conic in &self.conics {
+                sx += conic.center.x;
+                sy += conic.center.y;
+                sz += conic.center.z;
+            }
+            return [(sx / n) as f32, (sy / n) as f32, (sz / n) as f32];
+        }
         let n = self.vertices.len();
         if n == 0 {
             return [
@@ -227,6 +315,14 @@ pub const DEFAULT_BATCH_COLOR: [f32; 3] = cad_representation::DEFAULT_RENDER_COL
 /// Default batch lineweight in millimetres, matching
 /// `cad_representation::DEFAULT_LINEWEIGHT_MM`.
 pub const DEFAULT_BATCH_LINEWEIGHT_MM: f32 = cad_representation::DEFAULT_LINEWEIGHT_MM;
+
+/// Byte size of one packed SDF conic instance on the GPU (`ArcInstance` in
+/// `cad-render-wgpu`: four `vec4<f32>` + one `vec2<u32>`).
+///
+/// Public so a caller can reason about the exact conic-stream byte charge
+/// without duplicating the layout; the renderer's `ARC_INSTANCE_STRIDE` is
+/// fenced against it by a compile-time assertion.
+pub const CONIC_INSTANCE_BYTES: u32 = 72;
 
 /// Sanitise one colour channel into `[0, 1]`.
 ///

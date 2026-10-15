@@ -71,6 +71,33 @@
   - **图片**批次；
   - **`MeshEdges` 拓扑**——当前是**既有 no-op 哨兵**（无实际 draw），缺口未闭合。
 
+### SDF 圆/弧类（slice B，2026-10-15）
+
+自 2026-10-15 起，**可 SDF 化的圆/弧**（不透明、连续线型、slice-1 圆形）不再是 line 实例，
+而是 `RenderTopology::Conics` 批次，打包进 **SDF 实例流**（`ArcInstance` **72 B**/个，
+`shaders/arc.wgsl`）：共享单位四边形按实例扩展到 conic 的 u/v 平面范围，片元用**距离场**做
+抗锯齿（三角形滤波 `coverage = saturate(1 − d/w)`，`w` = 1 屏像素的 `world_per_px`，峰值 1.0），
+**必须在统一控制流外 `discard`**（一个实例 = 一个包围四边形，不丢弃会抹掉其后几何）。决策与实测见
+`docs/adr/0008-sdf-conic-rendering.md`。
+
+- **绘制顺序**：弧与线同用 `LessEqual` + `depth_write = true`，因此**弧-vs-线等深并列由计划
+  顺序裁决**（后画者胜，且弧核心满不透明 → 不透明替换）；mesh 用 `Less`，**弧-vs-mesh 等深并列
+  弧胜**（与线一致）。弧 run 只与同一 stream 内**相邻**的弧 run 合并；遇到 legacy/mesh/line
+  边界时按计划顺序 flush（加速档的残留路径同样在 legacy `draw_batch` 前 flush pending 弧）。
+- **不透明核心**：三角形滤波的峰值是 1.0（曲线处满强度，1 px 内衰减到 0），弧与背景/其它几何
+  在边缘处按覆盖混合、在核心处不透明替换。
+- **TIER**：弧走**通用 per-run**（`PulledArc` 推迟）。加速档下弧属「pulled 类先于残留」的既有
+  等价例外：**弧-vs-已拉取类的等深并列恒由弧胜**（pulled 先画、残留弧后画），与通用档的计划
+  顺序裁决不同，已记入 ADR-0008 并 fence；残留路径内部（弧 vs legacy batch）仍按计划顺序。
+- **未变**：椭圆（slice 2）、虚线/非连续 conic、非不透明 conic 仍走弦展开并计数（**透明**
+  conic 批次在上传校验处**拒绝**，不静默丢弃；`alpha ≤ 0` 仍按不可见批次上报、不绘制）。
+
+### 预算（slice B 单位变化）
+
+弧批次在帧预算中按**光栅化图元**计费（与既有「顶点 = 存储几何」不同，已文档化）：每个 SDF
+实例计 `vertices += 6`（四边形 6 顶点）、`triangles += 2`（四边形 2 三角形），字节计入
+`upload_size_bytes` 的 **72 × instance_count**。line/mesh 批次的计费不变。
+
 **顺序 / tie 语义（与合并前一致）**：
 
 - 合并只发生在同管线、同不透明类别、**相邻绘制顺序**的批次之间；跨顺序/跨拓扑不合并。
