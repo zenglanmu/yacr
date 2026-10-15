@@ -1057,6 +1057,15 @@ pub struct Renderer {
     pulled_lines: Option<PulledLines>,
     /// Accelerated whole-scene merged-mesh storage.
     pulled_mesh: Option<PulledMesh>,
+    /// Test hook: override the storage-buffer binding limit `rebuild_pulled`
+    /// sizes its segments against, so the reduced-limit regime (oversize stream,
+    /// clean downgrade) is exercisable without a low-limit device. `None` uses
+    /// the device's real limit.
+    pulled_binding_limit_override: Option<u64>,
+    /// Test hook: override the maximum instances per accelerated line storage
+    /// segment, so the multi-segment path is exercisable on a small scene.
+    /// `None` uses the binding-derived capacity.
+    pulled_line_segment_elems_override: Option<usize>,
     /// Group-0 layout/uniform/bind group of the pulled pipelines: the three
     /// origin-independent transform columns shared by every chunk.
     pulled_camera_layout: Option<wgpu::BindGroupLayout>,

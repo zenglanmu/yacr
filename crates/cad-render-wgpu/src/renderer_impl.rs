@@ -58,6 +58,8 @@ impl Renderer {
             storage_support_override: None,
             pulled_lines: None,
             pulled_mesh: None,
+            pulled_binding_limit_override: None,
+            pulled_line_segment_elems_override: None,
             pulled_camera_layout: None,
             pulled_camera_buffer: None,
             pulled_camera_bind_group: None,
@@ -140,6 +142,19 @@ impl Renderer {
             &device.limits(),
             self.storage_support_override,
         );
+        // The flags layout exists on every tier and is a precondition of the
+        // pulled pipelines, so create it first and let the tier be finalised
+        // before any pipeline picks a vertex layout from it.
+        let flags_layout = Self::create_flags_layout(&device);
+        self.flags_layout = Some(flags_layout.clone());
+        // The tier is accelerated only if its pulled resources can actually be
+        // created. If they cannot, downgrade **here**, before the
+        // line-instanced pipeline chooses its 56- vs 64-byte stride, so the
+        // universal path is used consistently instead of drawing a placeholder
+        // buffer through an accelerated pipeline (the tier must never stay
+        // labelled Accelerated with a silently missing pulled path).
+        let pulled_ready = self.create_pulled_resources(&device);
+        self.render_tier = finalize_tier(self.render_tier, pulled_ready);
         let accelerated = self.render_tier == RenderTier::Accelerated;
         let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cad-lines"),
@@ -168,7 +183,6 @@ impl Renderer {
                 count: None,
             }],
         });
-        let flags_layout = Self::create_flags_layout(&device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("cad-pipeline-layout"),
             bind_group_layouts: &[Some(&layout), Some(&flags_layout)],
@@ -435,10 +449,6 @@ impl Renderer {
         self.mesh_chunks.clear();
         self.pulled_lines = None;
         self.pulled_mesh = None;
-        self.pulled_camera_bind_group = None;
-        self.line_pulled_pipeline = None;
-        self.mesh_pulled_pipeline = None;
-        self.mesh_pulled_mirrored_pipeline = None;
         self.uniforms = UniformArena::new(&device.limits());
         self.frame_slots.clear();
         self.image_slots.clear();
@@ -472,7 +482,6 @@ impl Renderer {
         let device_ref = self.device.as_ref().expect("device just set").clone();
         let queue_ref = self.queue.as_ref().expect("queue just set").clone();
         self.ensure_flags(&device_ref, &queue_ref, 1);
-        self.create_pulled_resources(&device_ref);
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.id_format = self
@@ -516,17 +525,30 @@ impl Renderer {
     }
 
     /// Create the accelerated tier's pipelines, layouts and per-frame camera
-    /// uniform. No-op unless the tier is [`RenderTier::Accelerated`].
+    /// uniform. Returns `false` (and leaves the pulled resources cleared) unless
+    /// the tier is [`RenderTier::Accelerated`] and the shared flags layout is
+    /// present; the caller downgrades the tier on `false` rather than leaving it
+    /// labelled `Accelerated` with a missing pulled path.
     ///
     /// The pulled pipelines have **no vertex buffers**: every input is pulled
     /// from group 2's read-only storage buffers, so they are not WebGL2-safe and
     /// exist only on the accelerated tier.
-    fn create_pulled_resources(&mut self, device: &wgpu::Device) {
+    fn create_pulled_resources(&mut self, device: &wgpu::Device) -> bool {
+        // Drop any previous device generation's pulled resources first, so a
+        // downgrade cannot leave stale handles from the old device.
+        self.pulled_camera_bind_group = None;
+        self.pulled_camera_layout = None;
+        self.pulled_camera_buffer = None;
+        self.pulled_line_storage_layout = None;
+        self.pulled_mesh_storage_layout = None;
+        self.line_pulled_pipeline = None;
+        self.mesh_pulled_pipeline = None;
+        self.mesh_pulled_mirrored_pipeline = None;
         if self.render_tier != RenderTier::Accelerated {
-            return;
+            return false;
         }
         let Some(flags_layout) = self.flags_layout.clone() else {
-            return;
+            return false;
         };
         let pulled_camera_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -701,6 +723,7 @@ impl Renderer {
         self.pulled_camera_bind_group = Some(camera_bind_group);
         self.pulled_line_storage_layout = Some(line_storage_layout);
         self.pulled_mesh_storage_layout = Some(mesh_storage_layout);
+        true
     }
 
     /// Decide the id-target format from the device's own format features.
@@ -2242,16 +2265,30 @@ impl Renderer {
     /// The pulled buffers are rebuilt on **every** commit (not per frame): a
     /// camera move rewrites only the small per-chunk translation table, exactly
     /// like the universal path's per-stream uniform slot, and never re-uploads
-    /// the static geometry storage. Runs on scene changes only, so the O(total)
-    /// rebuild is not on the frame path.
+    /// the static geometry storage. A commit that keeps a prefix (for example an
+    /// annotation append) **does** rebuild and re-upload the whole pulled scene:
+    /// the rebuild is `O(total resident geometry)` per commit, not `O(appended)`.
+    /// That cost is stated here rather than hidden; an incremental segment update
+    /// is a deferred optimisation (see ADR-0007).
     ///
     /// A real scene's whole-scene storage can exceed
     /// `max_storage_buffer_binding_size`, so each class is split into
     /// binding-sized **segments** (one draw per segment — still `O(1)` in the
-    /// chunk count, not one per chunk). A class that cannot be segmented (a
-    /// single chunk larger than the binding limit) is left unbuilt; the frame
-    /// then reports `accelerated == false` and the class renders on the universal
-    /// per-run path rather than being silently dropped.
+    /// chunk count, not one per chunk). A class that cannot be segmented — a
+    /// single line stream or mesh chunk larger than the binding limit — is left
+    /// unbuilt; the frame then reports `accelerated == false` and the class
+    /// renders on the universal per-run path rather than being silently dropped.
+    /// The universal fallback must then have **real** geometry: the line class's
+    /// per-stream buffers are (re)built here so it never draws the prepare-time
+    /// placeholder, and the merged mesh class always keeps its own per-chunk
+    /// buffers.
+    ///
+    /// Byte accounting: the pulled geometry bytes are charged per batch at
+    /// `prepare_upload_batches` (line 64 B/instance, mesh 64 B/vertex + 4 B/index);
+    /// only the small per-class chunk tables are new here, so the lifetime
+    /// `uploaded_bytes` counter does not double-count the geometry. (One bounded
+    /// exception: an oversized mesh chunk that is left unbuilt was still charged
+    /// at prepare, so the counter can over-report that class by its pulled share.)
     fn rebuild_pulled(&mut self) {
         self.pulled_lines = None;
         self.pulled_mesh = None;
@@ -2267,18 +2304,36 @@ impl Renderer {
         ) else {
             return;
         };
-        let limit = device
-            .limits()
-            .max_storage_buffer_binding_size
-            .min(device.limits().max_buffer_size);
-        let mut uploaded = 0u64;
+        let limit = self.pulled_binding_limit_override.unwrap_or_else(|| {
+            device
+                .limits()
+                .max_storage_buffer_binding_size
+                .min(device.limits().max_buffer_size)
+        });
+        let mut table_bytes_uploaded = 0u64;
 
         // --- whole-scene line storage -------------------------------------
         if !self.instance_streams.is_empty() {
             let table_bytes = vec![0u8; self.instance_streams.len() * 16];
-            if table_bytes.len() as u64 <= limit {
+            let max_elems = (limit / u64::from(PULLED_LINE_STRIDE)).max(1) as usize;
+            // Test hook: shrink the per-segment element cap so the multi-segment
+            // path can be exercised on a small scene without allocating a real
+            // binding-sized stream.
+            let segment_elems = self
+                .pulled_line_segment_elems_override
+                .unwrap_or(max_elems)
+                .max(1);
+            // A single stream larger than a binding cannot be segmented without
+            // splitting one of its runs across two buffers (per-run segment
+            // mapping is not implemented), so the class falls back to the
+            // universal per-run path rather than emit an oversized binding that
+            // would fail validation.
+            let oversized = self
+                .instance_streams
+                .iter()
+                .any(|stream| stream.pulled_instances.len() > segment_elems);
+            if !oversized && table_bytes.len() as u64 <= limit {
                 let chunk_table = Self::storage_buffer(&device, Some(&queue), &table_bytes);
-                let max_elems = (limit / u64::from(PULLED_LINE_STRIDE)).max(1) as usize;
                 // Segment boundaries fall on whole streams, so a run never
                 // straddles two buffers. The segment buffer is the per-run
                 // instance vertex buffer too, so the accelerated tier keeps one
@@ -2292,7 +2347,7 @@ impl Renderer {
                 let mut seg_start = 0usize;
                 let mut seg_elems = 0usize;
                 for (i, &n) in counts.iter().enumerate() {
-                    if i > seg_start && seg_elems + n > max_elems {
+                    if i > seg_start && seg_elems + n > segment_elems {
                         ranges.push((seg_start, i));
                         seg_start = i;
                         seg_elems = 0;
@@ -2307,9 +2362,14 @@ impl Renderer {
                         .map(|stream| stream.pulled_instances.as_slice())
                         .collect();
                     let records = build_pulled_lines(&streams, a as u32);
-                    if records.is_empty() {
-                        continue;
-                    }
+                    // Every resident stream is non-empty by construction, so a
+                    // segment always holds at least one record. Assert that
+                    // instead of silently skipping a segment, which would leave
+                    // its streams pointing at the prepare-time placeholder.
+                    debug_assert!(
+                        !records.is_empty(),
+                        "a pulled line segment must hold at least one instance"
+                    );
                     let bytes = pulled_line_bytes(&records);
                     let buffer = Self::vertex_storage_buffer(&device, Some(&queue), &bytes);
                     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2326,7 +2386,6 @@ impl Renderer {
                             },
                         ],
                     });
-                    uploaded += bytes.len() as u64;
                     // Point each stream in the segment at the shared buffer.
                     let mut base = 0u32;
                     for stream in self.instance_streams[a..b].iter_mut() {
@@ -2340,12 +2399,20 @@ impl Renderer {
                     });
                 }
                 if !segments.is_empty() {
-                    uploaded += table_bytes.len() as u64;
+                    table_bytes_uploaded += table_bytes.len() as u64;
                     self.pulled_lines = Some(PulledLines {
                         segments,
                         chunk_table,
                     });
                 }
+            }
+            if self.pulled_lines.is_none() {
+                // The whole-scene pulled line class could not be built: give
+                // every stream a real `VERTEX | STORAGE` buffer (64-byte pulled
+                // layout, matching the accelerated line pipeline) so the
+                // universal per-run fallback draws actual geometry rather than
+                // the prepare-time placeholder.
+                self.build_line_fallback(&device, &queue);
             }
         }
 
@@ -2420,7 +2487,6 @@ impl Renderer {
                                     },
                                 ],
                             });
-                            uploaded += vertex_bytes.len() as u64 + index_bytes.len() as u64;
                             segments.push(PulledMeshSegment {
                                 bind_group,
                                 vertex_count: vertices.len() as u32,
@@ -2438,7 +2504,7 @@ impl Renderer {
                     indices += idx;
                 }
                 if !segments.is_empty() {
-                    uploaded += table_bytes.len() as u64;
+                    table_bytes_uploaded += table_bytes.len() as u64;
                     self.pulled_mesh = Some(PulledMesh {
                         segments,
                         chunk_table,
@@ -2446,7 +2512,24 @@ impl Renderer {
                 }
             }
         }
-        self.uploaded_bytes += uploaded;
+        self.uploaded_bytes += table_bytes_uploaded;
+    }
+
+    /// Point every resident instance stream at its own real `VERTEX | STORAGE`
+    /// buffer (64-byte pulled layout) with `base = 0`.
+    ///
+    /// Used when the whole-scene pulled line class cannot be built (an oversized
+    /// stream, or a chunk table past the binding limit). The universal per-run
+    /// path and the id pass both read `stream.buffer` at `base + run.offset`, so
+    /// without this they would draw the prepare-time placeholder and silently
+    /// lose the line geometry (or trip validation).
+    fn build_line_fallback(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        for stream in &mut self.instance_streams {
+            let records = build_pulled_lines(&[stream.pulled_instances.as_slice()], 0);
+            let bytes = pulled_line_bytes(&records);
+            stream.buffer = Self::vertex_storage_buffer(device, Some(queue), &bytes);
+            stream.base = 0;
+        }
     }
 
     /// Rebuild the cached "lineweight carried but not drawn" report from the
@@ -3824,6 +3907,23 @@ impl Renderer {
     /// allocating a million-segment batch. Takes effect on the next upload.
     pub fn set_max_instances_per_stream(&mut self, max_instances: usize) {
         self.max_instances_per_stream = max_instances;
+    }
+
+    /// Test hook: override the storage-buffer binding limit the accelerated tier
+    /// sizes its segments against. Lets the reduced-limit regime (an oversize
+    /// stream that must downgrade to the universal per-run path, and the chunk
+    /// table limit) be exercised without a device that reports such a limit.
+    /// `None` restores the device's real limit. Takes effect on the next commit.
+    pub fn set_pulled_binding_limit_override(&mut self, limit: Option<u64>) {
+        self.pulled_binding_limit_override = limit;
+    }
+
+    /// Test hook: override the maximum instances per accelerated line storage
+    /// segment, so the multi-segment path is exercisable on a small scene.
+    /// `None` restores the binding-derived capacity. Takes effect on the next
+    /// commit.
+    pub fn set_pulled_line_segment_elems_override(&mut self, elems: Option<usize>) {
+        self.pulled_line_segment_elems_override = elems;
     }
 
     /// Number of resident instanced line streams.

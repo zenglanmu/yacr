@@ -50,7 +50,9 @@ fn gpu() -> Option<HeadlessGpu> {
 /// is fenced by `capability_fallback_*` and the pure `tier_for` unit tests.
 fn supports_storage(gpu: &HeadlessGpu) -> bool {
     let limits = gpu.device.limits();
-    limits.max_storage_buffers_per_shader_stage >= 1
+    // Three vertex-stage storage bindings is the true requirement (the pulled
+    // merged-mesh pipeline binds vertices, indices and the chunk table).
+    limits.max_storage_buffers_per_shader_stage >= 3
         && limits.max_storage_buffer_binding_size >= 64 * 1024
         && gpu.adapter.backend != "webgl2"
 }
@@ -224,6 +226,41 @@ fn grid_line_batches(rows: usize, cols: usize) -> Vec<RenderBatch> {
         }
     }
     batches
+}
+
+/// A horizontal band of `rows` segments at `y`, spanning most of the target, so
+/// a scanline is guaranteed to rasterize (a single zero-width line through a
+/// pixel centre is not reliably covered on every rasterizer).
+fn line_band(y: f32, rows: u32, entity: u128) -> RenderBatch {
+    let mut vertices = Vec::new();
+    for row in 0..rows {
+        let offset = y + row as f32 * 0.02;
+        vertices.push([-0.9, offset, 0.0]);
+        vertices.push([0.9, offset, 0.0]);
+    }
+    let mut batch = lines_batch(vertices);
+    batch.sources = vec![source(entity)];
+    batch
+}
+
+/// The first pixel the colour pass actually drew within `y0..y1`, scanning
+/// row-major. Used to pick a pixel the accelerated colour pass covered.
+fn drawn_pixel_in_rows(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    y0: u32,
+    y1: u32,
+) -> Option<(u32, u32)> {
+    for y in y0..y1.min(height) {
+        for x in 0..width {
+            let i = (y as usize * width as usize + x as usize) * 4;
+            if pixels[i] > 8 || pixels[i + 1] > 8 || pixels[i + 2] > 8 {
+                return Some((x, y));
+            }
+        }
+    }
+    None
 }
 
 /// Non-overlapping quads on a grid, one batch each.
@@ -427,6 +464,12 @@ fn accelerated_storage_is_one_segment_for_a_small_scene() {
     // storage segment.
     assert_eq!(renderer.pulled_line_segment_count(), 1);
     assert_eq!(renderer.pulled_mesh_segment_count(), 1);
+    // Every mesh vertex is resident in the pulled storage (3x3 quads -> 36).
+    assert_eq!(
+        renderer.pulled_mesh_vertex_count(),
+        36,
+        "the pulled mesh storage must cover every resident merged vertex"
+    );
     let stats = renderer.render(camera_2d(), &target).unwrap();
     assert!(stats.accelerated);
     assert_eq!(
@@ -803,5 +846,213 @@ fn accelerated_page_boundary_falls_back_to_universal_without_loss() {
         renderer.read_target_rgba().unwrap().pixels,
         reference,
         "the fallback pages must reconstruct the accelerated reference frame"
+    );
+}
+
+/// B1 fence: on the accelerated tier every stream in a storage segment shares
+/// one buffer, so a line run's global instance index is `base + offset`. Two
+/// streams in one segment with distinct entities must each pick their own
+/// entity; reading `offset` alone (stream-local) would resolve both to the first
+/// stream's key.
+#[test]
+fn accelerated_multi_stream_line_pick_reads_the_right_instance() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    if !supports_storage(&gpu) {
+        return;
+    }
+    let target = RenderTarget::new(96, 96);
+    // Two bands at distinct y, three segments each so a scanline is reliably
+    // covered. `set_max_instances_per_stream(1)` makes every segment its own
+    // stream (six streams), and the whole scene fits one storage segment, so the
+    // second band's runs have a non-zero `base`.
+    let batches = vec![line_band(0.5, 3, 0xA1), line_band(-0.5, 3, 0xB2)];
+    let mut renderer = init_tier(&gpu, true);
+    renderer.set_max_instances_per_stream(1);
+    let (pixels, stats) = upload_and_render(&mut renderer, &target, &batches, camera_2d());
+    assert!(
+        stats.accelerated,
+        "the accelerated per-class draw must be live for this fence"
+    );
+    assert_eq!(
+        renderer.instance_stream_count(),
+        6,
+        "one stream per segment"
+    );
+    assert_eq!(
+        renderer.pulled_line_segment_count(),
+        1,
+        "all six streams must share ONE storage segment for base re-basing to matter"
+    );
+
+    let top = drawn_pixel_in_rows(&pixels, 96, 96, 0, 48).expect("the top band must rasterize");
+    let bottom =
+        drawn_pixel_in_rows(&pixels, 96, 96, 48, 96).expect("the bottom band must rasterize");
+    let top_hit = renderer
+        .pick_at(top.0, top.1)
+        .expect("pick")
+        .expect("the top band must be picked");
+    let bottom_hit = renderer
+        .pick_at(bottom.0, bottom.1)
+        .expect("pick")
+        .expect("the bottom band must be picked");
+    assert_eq!(
+        top_hit.source.expect("exact top").entity,
+        EntityId(0xA1),
+        "the top band must resolve to its own entity"
+    );
+    assert_eq!(
+        bottom_hit.source.expect("exact bottom").entity,
+        EntityId(0xB2),
+        "the bottom band must resolve to its own entity (base + offset, not offset)"
+    );
+}
+
+/// S4 fence: force the line class across several storage segments and assert the
+/// per-segment accelerated draws are byte-identical to the universal per-run
+/// frame.
+#[test]
+fn accelerated_forced_multi_segment_lines_match_universal_pixels() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    if !supports_storage(&gpu) {
+        return;
+    }
+    let target = RenderTarget::new(64, 64);
+    let batches = grid_line_batches(6, 6); // 36 non-overlapping segments
+
+    let mut accelerated = init_tier(&gpu, true);
+    // 36 streams, split into segments of two: eighteen storage segments, each
+    // drawn once, still covering every instance.
+    accelerated.set_max_instances_per_stream(1);
+    accelerated.set_pulled_line_segment_elems_override(Some(2));
+    let (accel_px, accel_stats) =
+        upload_and_render(&mut accelerated, &target, &batches, camera_2d());
+    assert!(accel_stats.accelerated);
+    assert!(
+        accelerated.pulled_line_segment_count() > 1,
+        "the override must force several storage segments, got {}",
+        accelerated.pulled_line_segment_count()
+    );
+    assert_eq!(
+        accelerated.pulled_line_instance_count() as usize,
+        36,
+        "every instance must still be resident across the segments"
+    );
+    assert_eq!(
+        accel_stats.instanced_draws as usize,
+        accelerated.pulled_line_segment_count(),
+        "the accelerated frame must issue one draw per storage segment"
+    );
+
+    let mut universal = init_tier(&gpu, false);
+    universal.set_max_instances_per_stream(1);
+    let (univ_px, univ_stats) = upload_and_render(&mut universal, &target, &batches, camera_2d());
+    assert!(
+        univ_stats.instanced_draws > 1,
+        "the universal path uses per-run draws"
+    );
+    assert_eq!(
+        accel_px, univ_px,
+        "the multi-segment accelerated frame must match the universal frame"
+    );
+}
+
+/// B2 fence: an oversized line stream at reduced limits must not emit an invalid
+/// storage binding. The class downgrades to the universal per-run path, whose
+/// per-stream buffers must hold the real geometry (not the prepare-time
+/// placeholder), and the frame is pixel-identical to the universal renderer.
+#[test]
+fn accelerated_oversized_line_stream_downgrades_without_validation_error() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    if !supports_storage(&gpu) {
+        return;
+    }
+    let target = RenderTarget::new(64, 64);
+    // One stream of 2048 instances, far past a 64 KiB binding's 1024 records.
+    let mut vertices = Vec::new();
+    for i in 0..2048u32 {
+        let x = -0.9 + (i / 64) as f32 * 0.028;
+        let y = -0.9 + (i % 64) as f32 * 0.028;
+        vertices.push([x, y, 0.0]);
+        vertices.push([x + 0.02, y + 0.02, 0.0]);
+    }
+    let batches = vec![lines_batch(vertices)];
+
+    let mut renderer = init_tier(&gpu, true);
+    renderer.set_pulled_binding_limit_override(Some(64 * 1024));
+    let (pixels, stats) = upload_and_render(&mut renderer, &target, &batches, camera_2d());
+    assert_eq!(
+        renderer.render_tier(),
+        RenderTier::Accelerated,
+        "the device is still accelerated; only this class falls back"
+    );
+    assert!(
+        !stats.accelerated,
+        "an oversized stream must fall back to the universal per-run path, not accelerate"
+    );
+    assert_eq!(
+        renderer.pulled_line_segment_count(),
+        0,
+        "no storage segment may be built for an oversized stream"
+    );
+    assert_eq!(
+        renderer.instance_stream_count(),
+        1,
+        "one stream for the batch"
+    );
+    // The fallback must draw real geometry, not the prepare-time placeholder.
+    let background = [pixels[0], pixels[1], pixels[2], pixels[3]];
+    assert!(
+        pixels.chunks_exact(4).any(|px| px != background.as_slice()),
+        "the fallback frame is blank; the per-stream buffers held no real geometry"
+    );
+
+    let mut universal = init_tier(&gpu, false);
+    let (univ_px, _) = upload_and_render(&mut universal, &target, &batches, camera_2d());
+    assert_eq!(
+        pixels, univ_px,
+        "the reduced-limit fallback must draw the same geometry as the universal path"
+    );
+}
+
+/// S2 fence: the lifetime `uploaded_bytes` counter must charge the accelerated
+/// pulled geometry exactly once. A 2-segment line batch plus one merged quad
+/// charges, at prepare, line `2*64` + merged `4*44 + 6*4` + pulled
+/// `4*64 + 6*4`; the commit then adds only the two 16-byte chunk tables — not
+/// the segment buffers a second time.
+#[test]
+fn accelerated_uploaded_bytes_charge_pulled_geometry_once() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    if !supports_storage(&gpu) {
+        return;
+    }
+    let target = RenderTarget::new(64, 64);
+    let batches = vec![
+        lines_batch(vec![
+            [-0.9, -0.5, 0.0],
+            [0.9, -0.5, 0.0],
+            [-0.9, 0.5, 0.0],
+            [0.9, 0.5, 0.0],
+        ]),
+        mesh_at(0.3, 0.0, 0.0, false, 3, 0),
+    ];
+    let mut renderer = init_tier(&gpu, true);
+    let (_, stats) = upload_and_render(&mut renderer, &target, &batches, camera_2d());
+    assert!(stats.accelerated);
+    let line = 2 * 64;
+    let merged = 4 * 44 + 6 * 4;
+    let pulled = 4 * 64 + 6 * 4;
+    let tables = 2 * 16; // one line storage segment + one mesh storage segment
+    assert_eq!(
+        stats.uploaded_bytes,
+        (line + merged + pulled + tables) as u64,
+        "pulled geometry must be charged once, not again on every rebuild"
     );
 }

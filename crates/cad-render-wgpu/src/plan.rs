@@ -113,8 +113,12 @@ pub(crate) fn slot_location(slot: usize, slots_per_page: usize, slot_size: u32) 
 ///
 /// * the backend's capability snapshot must report storage buffers (WebGL2 does
 ///   not; `caps_for` already encodes this);
-/// * `max_storage_buffers_per_shader_stage` must be at least 1 (a device may
-///   report 0 when the limit is disabled);
+/// * `max_storage_buffers_per_shader_stage` must be at least
+///   [`MIN_PULLED_STORAGE_BINDINGS`] — the true requirement, not `1`: the pulled
+///   merged-mesh pipeline binds three read-only storage buffers in the vertex
+///   stage (`mesh_pulled.wgsl`) and the pulled line pipeline two. A device
+///   reporting only one or two bindings would pass a `< 1` gate and then fail
+///   at bind-group/pipeline creation, so the gate is sized to the real demand;
 /// * `max_storage_buffer_binding_size` must be large enough to bind a
 ///   meaningful pulled buffer.
 ///
@@ -137,7 +141,7 @@ pub(crate) fn tier_for(
         if !storage_buffers {
             return RenderTier::Universal;
         }
-        if limits.max_storage_buffers_per_shader_stage < 1 {
+        if limits.max_storage_buffers_per_shader_stage < MIN_PULLED_STORAGE_BINDINGS {
             return RenderTier::Universal;
         }
         if limits.max_storage_buffer_binding_size < MIN_PULLED_BINDING_BYTES {
@@ -151,6 +155,28 @@ pub(crate) fn tier_for(
 /// accelerated tier to be selected. Below this a pulled buffer could not hold
 /// even a tiny scene, so the universal per-run path is the honest choice.
 pub(crate) const MIN_PULLED_BINDING_BYTES: u64 = 64 * 1024;
+
+/// Number of read-only vertex-stage storage buffers the accelerated tier
+/// actually binds in one pipeline: three in `mesh_pulled.wgsl` (vertices,
+/// indices, chunk table), two in `line_pulled.wgsl` (instances, chunk table).
+/// The tier gate requires this many, so a device that reports fewer cannot
+/// select a tier it would then fail to create pipelines for.
+pub(crate) const MIN_PULLED_STORAGE_BINDINGS: u32 = 3;
+
+/// Finalise the tier once the pulled resources have been created.
+///
+/// A device that selected [`RenderTier::Accelerated`] but whose pulled
+/// pipelines/layouts could not be built (for example a missing flags layout)
+/// must downgrade to [`RenderTier::Universal`]: leaving it labelled Accelerated
+/// with a missing pulled path would draw the prepare-time placeholder buffers
+/// instead of real geometry.
+pub(crate) fn finalize_tier(preliminary: RenderTier, pulled_resources_ready: bool) -> RenderTier {
+    if preliminary == RenderTier::Accelerated && !pulled_resources_ready {
+        RenderTier::Universal
+    } else {
+        preliminary
+    }
+}
 
 /// Per-frame count of render-pass state-setting calls actually issued.
 ///
@@ -3451,16 +3477,58 @@ mod accelerated_tier_tests {
 
     #[test]
     fn tier_gate_rejects_zero_storage_buffers_and_tiny_bindings() {
+        // The gate must require the *true* number of vertex-stage storage
+        // bindings (three: `mesh_pulled.wgsl` binds vertices, indices and the
+        // chunk table), not one. A device reporting 0, 1 or 2 must downgrade
+        // rather than select a tier whose pipelines it cannot create.
+        for reported in 0..MIN_PULLED_STORAGE_BINDINGS {
+            let limits = wgpu::Limits {
+                max_storage_buffers_per_shader_stage: reported,
+                ..wgpu::Limits::default()
+            };
+            assert_eq!(
+                tier_for(true, &limits, None),
+                RenderTier::Universal,
+                "{reported} storage bindings must downgrade"
+            );
+        }
         let limits = wgpu::Limits {
-            max_storage_buffers_per_shader_stage: 0,
+            max_storage_buffers_per_shader_stage: MIN_PULLED_STORAGE_BINDINGS,
             ..wgpu::Limits::default()
         };
-        assert_eq!(tier_for(true, &limits, None), RenderTier::Universal);
+        assert_eq!(
+            tier_for(true, &limits, None),
+            RenderTier::Accelerated,
+            "exactly the required binding count must still select accelerated"
+        );
         let limits = wgpu::Limits {
             max_storage_buffer_binding_size: MIN_PULLED_BINDING_BYTES - 1,
             ..wgpu::Limits::default()
         };
         assert_eq!(tier_for(true, &limits, None), RenderTier::Universal);
+    }
+
+    #[test]
+    fn finalize_tier_downgrades_when_pulled_resources_are_missing() {
+        // A device that selected accelerated but could not build its pulled
+        // pipelines (a missing flags layout) must downgrade rather than stay
+        // labelled Accelerated with a missing pulled path.
+        assert_eq!(
+            finalize_tier(RenderTier::Accelerated, true),
+            RenderTier::Accelerated
+        );
+        assert_eq!(
+            finalize_tier(RenderTier::Accelerated, false),
+            RenderTier::Universal
+        );
+        assert_eq!(
+            finalize_tier(RenderTier::Universal, true),
+            RenderTier::Universal
+        );
+        assert_eq!(
+            finalize_tier(RenderTier::Universal, false),
+            RenderTier::Universal
+        );
     }
 
     fn instance(p0: [f32; 3], p1: [f32; 3], key: u32, flags: u32) -> LineInstance {

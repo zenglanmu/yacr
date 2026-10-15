@@ -116,9 +116,13 @@ NVIDIA Quadro P620 / Vulkan 实测；契约变更经用户 2026-10-15 授权。*
 
 - **tier 选择**：`initialize_with_device` 读取**设备自身**的 backend/limits 决定
   [`RenderTier`]：需要 VS 只读 storage buffer（WebGL2 无此能力）、
-  `max_storage_buffers_per_shader_stage >= 1`、`max_storage_buffer_binding_size >= 64 KiB`。
-  **从不向宿主设备请求 feature**；不满足即**静默但带标签**降级（`Renderer::render_tier()` /
-  `FrameStats::tier` / `FrameStats::accelerated`）。测试钩子
+  `max_storage_buffers_per_shader_stage >= 3`（真实需求：`mesh_pulled.wgsl` 一次绑 3 个
+  只读 storage——顶点、索引、chunk 表；`line_pulled.wgsl` 绑 2 个。旧门限 `< 1` 会让只报
+  1–2 个 binding 的设备通过、随后在建 pipeline 时失败）、
+  `max_storage_buffer_binding_size >= 64 KiB`。**从不向宿主设备请求 feature**；不满足即
+  **静默但带标签**降级（`Renderer::render_tier()` / `FrameStats::tier` /
+  `FrameStats::accelerated`）。拉取资源建不起来时（例如缺少 flags layout）tier 也在此
+  **降级**（`finalize_tier`），不会以 `Accelerated` 之名缺拉取通路。测试钩子
   `set_storage_buffer_support_override(Some(false))` 可在有能力设备上复现降级。
 - **单类 draw**：color pass 的 opaque 阶段把已转换的 line 类与 merged mesh 类各折叠为
   **每段一次 draw**（不是每 chunk 一次）。逐图元数据从**只读 VS storage buffer** 拉取
@@ -133,9 +137,15 @@ NVIDIA Quadro P620 / Vulkan 实测；契约变更经用户 2026-10-15 授权。*
   段（64 B 步长，属性偏移与 56 B 版一致，故 `line_instanced.wgsl` 与
   `pick_line_instanced.wgsl` **无需修改**）。段按整条 stream 边界切分（每段 ≤
   `max_storage_buffer_binding_size`），一段一次 draw。**id pass 与分页回退仍走通用 per-run
-  路径**，绑同一批段 buffer（`InstanceStream::base` 给出段内全局实例偏移）。
+  路径**，绑同一批段 buffer；段内实例偏移由 `InstanceStream::base` 给出，id pass 与 color
+  回退路径都以 **`base + run.offset`** 寻址（`run.offset` 是 stream 局部偏移，`base` 才是段内
+  全局起点）。**唯一例外**：当某条 stream 本身超过一个 binding 容量、无法在不切断 run 的前提
+  下分段时，line 类**整体回退通用 per-run**，并为每条 stream 单独上传一份真实的
+  `VERTEX | STORAGE`（64 B 步长）缓冲——此时 line 几何确有第二份拷贝，但它是回退路径的真实
+  数据，不是被隐藏的优化，也绝不画 prepare 期的 4 字节占位。
 - **mesh 类**：仍额外保存一份 whole-scene 拉取 storage（64 B/顶点 + 4 B/索引），
-  **已知内存代价**（见下）。
+  **已知内存代价**（见下）。mesh chunk 的 per-chunk buffer 始终存在，故 mesh 类回退时通用
+  per-run 路径始终有真实几何。
 - **分页回退**：per-class draw 覆盖**全部**已转换 batch，因此只有当本帧接受了全部已转换
   batch 时才走加速档；否则（progressive 分页 / over-budget）**回退通用 per-run**，绝不拉取
   被预算挡住的几何。此时 `FrameStats::accelerated == false`（显式报告）。
@@ -143,15 +153,22 @@ NVIDIA Quadro P620 / Vulkan 实测；契约变更经用户 2026-10-15 授权。*
 
 ### 等价性（真实 GPU 实测，逐像素）
 
-`crates/cad-render-wgpu/tests/accelerated_tier.rs`（16 用例，Quadro P620 / Vulkan 全绿）在
+`crates/cad-render-wgpu/tests/accelerated_tier.rs`（21 用例，Quadro P620 / Vulkan 全绿）在
 **同一场景上同时跑加速档与通用档**并断言逐字节相同：instanced lines、merged meshes、
 mirrored merged meshes、混合类、大坐标、深缩放 mixed-origin、3D 透视、重叠 tie、
-选择/隐藏标志、分页回退（回退页重建出的帧等于加速参考帧）。另有能力降级用例断言
-降级后**一像素不差**。
+选择/隐藏标志、分页回退（回退页重建出的帧等于加速参考帧）、**强制多段**（`set_pulled_line_segment_elems_override`
+把 line 类切成多段后仍逐字节一致）、**多 stream 拾取**（一段内 ≥2 条 stream，各自拾回自己的实体，
+fence B1 的 `base + offset` 重定基）、**超大 stream 降级**（reduced-limit 下不产生非法 binding、
+回退帧与通用档一致）、**字节记账**（拉取几何只记一次）。另有能力降级用例断言降级后**一像素不差**。
 
-诚实边界：mirrored 与 non-mirrored 合并 chunk 在加速档被分组（先 non-mirrored 后
-mirrored），**跨镜像类的等深 tie 顺序**与通用档可能不同（非重叠场景已 fenced；本文不外推
-逐字节）。通用档/加速档之间的等价只在**算术一致处**成立。
+诚实边界：
+- mirrored 与 non-mirrored 合并 chunk 在加速档被分组（先 non-mirrored 后 mirrored），
+  **跨镜像类的等深 tie 顺序**与通用档可能不同（非重叠场景已 fenced；本文不外推逐字节）。
+  通用档/加速档之间的等价只在**算术一致处**成立。
+- **加速档的类 draw 先于残留未转换 opaque batch 发出**（line 类 → mesh 类 → 残留 per-batch），
+  而通用档严格按 opaque 批序；因此「已转换类 vs 残留未转换批」以及「残留未转换批之间」在
+  **等深并列**处的胜者可能与通用档不同（非重叠/非共面场景不受影响，已在像素 fence 中覆盖）。
+  这类 tie 差异与 ADR 已记录的镜像分组属同一类**已知等价例外**，不外推逐字节。
 
 ### 真实场景实测（P620 / Vulkan，`crates/cad-cli-tools/tests/realscene_render_perf.rs`）
 
@@ -168,6 +185,7 @@ mirrored），**跨镜像类的等深 tie 顺序**与通用档可能不同（非
   旧文 `5.91 ms` 不同量测口径，不构成跨版本回归结论。分页/over-budget 帧仍回退通用
   （报告 `accelerated=false`）。
 - **内存（诚实、已知代价）**：拉取的 line storage 是实例 buffer 的**同一份**（不复制）；
+  唯一的例外是**超大 stream 回退**（见上），此时 line 类确有 per-stream 的真实缓冲。
   merged mesh 仍额外一份拉取 storage。`complex-test` 的 line 实例约 2,945 万条，整机 4 GB
   VRAM 下必须在 `rebuild_pulled` 里按 `max_storage_buffer_binding_size` 分段；
   `max_buffer_size` 仅 256 MiB，故**不能**用单一大 buffer 共享。因此 mesh 类的复制是当前
@@ -176,11 +194,18 @@ mirrored），**跨镜像类的等深 tie 顺序**与通用档可能不同（非
 ### 字节记账 / 静态性
 
 - 拉取 storage 的字节按 batch 计入 `upload_size_bytes`（line 段 64 B/实例，mesh 拉取
-  64 B/顶点 + 4 B/索引），与其它缓冲一致地进入帧预算；`uploaded_bytes` 也计入段缓冲。
+  64 B/顶点 + 4 B/索引），与其它缓冲一致地进入帧预算。**lifetime `uploaded_bytes` 只在
+  `prepare_upload_batches` 记一次**：`rebuild_pulled` 只把每类的 chunk 表（`n × 16 B`）计入，
+  不再重复累加段缓冲，否则同一份拉取几何会被记约 2×（line）/更高倍（mesh）。已知的有界例外：
+  一个因超限而未建成的 mesh chunk 仍在 prepare 处被记过它的拉取份额，故该类可能被高报。
 - **静态流不随相机重传**：相机移动只重写小的 per-chunk 平移表（storage，等价于通用档的
   per-stream uniform 槽）+ 一个 48 B camera uniform。fence
   `accelerated_camera_move_does_not_reupload_static_storage` 断言
   `instance_stream_uploads` / `mesh_chunk_uploads` 在 10 帧 pan 全程不变。
+- **`keep_prefix` 增量提交不是增量的（诚实记录）**：任何 commit（包括保留前缀的批注追加）都会
+  `rebuild_pulled` **整场景**并**重传全部拉取段缓冲**，即每次 commit 是
+  `O(总驻留几何)` 的 GPU 上传，而不是 `O(追加部分)`。这是**已知代价**，不是被隐藏的回归；
+  增量段更新是 deferred 优化（见 `docs/render-optimization-backlog.md`）。
 - 残余：透明批次、图像、`MeshEdges` 哨兵、以及**未被接受的**已转换 batch 仍走通用
   per-run；未转换的 opaque 批次（本例中 `instanced_batches < opaque`）每 batch 一次 draw。
 - 上述 deferred 项与后续优化项（视锥剔除、LOD、SDF 弧、加速档等）的完整清单见
@@ -212,6 +237,6 @@ mirrored），**跨镜像类的等深 tie 顺序**与通用档可能不同（非
 - P3b 加速档证据：`/tmp/opencode/yacr-p3b-realscene/`（真实 DWG，适配器
   `Quadro P620 / vulkan / discrete_gpu / driver NVIDIA 580.178.04`）、
   `/tmp/opencode/yacr-p3b-synth/`（合成 sweep / frame cpu）。逐像素等价 fence 见
-  `crates/cad-render-wgpu/tests/accelerated_tier.rs`（16 用例，真实 P620 全绿）。
+  `crates/cad-render-wgpu/tests/accelerated_tier.rs`（21 用例，真实 P620 全绿）。
 - 汇总表见 `docs/validation-render-perf-2026-10-15.md`。
 - 绘制顺序现行语义见 `docs/render-order.md`。

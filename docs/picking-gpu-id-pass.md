@@ -208,7 +208,7 @@ id pass **不解析** mesh face：wgpu 的 fragment stage 拿不到 primitive in
   从「首个 source 的 EntityId 低 32 位」改为**渲染器 pick key**。这是 P3a-1 的核心修正，
   已在代码注释与本文档中显式记录。
 
-## 6b. P3b 加速档对 id pass 的影响（无）
+## 6b. P3b 加速档对 id pass 的影响（组织不变，段内寻址须重定基）
 
 P3b 引入**能力门控的加速档**（color pass 的 opaque 阶段按类折叠为 per-class draw，
 逐图元数据从 VS storage buffer 拉取；见 ADR-0007「P3b」节）。对 id pass：
@@ -219,12 +219,28 @@ P3b 引入**能力门控的加速档**（color pass 的 opaque 阶段按类折�
   `VERTEX | STORAGE` 的拉取 storage 段（64 B 步长）。id pass 的 `pick_line_instanced`
   管线在加速档用 **64 B 顶点布局**读取**同一批段 buffer**（属性偏移与 56 B 版一致，shader
   无需改），因此 id pass 与 color 加速档**共用**一份 line 几何，没有「通用路径 + 拉取路径」
-  两份拷贝。段内实例偏移由 `InstanceStream::base` 给出。
+  两份拷贝。
+  **段内实例偏移必须以 `base + run.offset` 计算**：`run.offset`（`plan.rs` 的
+  `build_instance_chunks`）是 **stream 局部**偏移，而加速档一段 buffer 内多条 stream 共享同一
+  buffer，`InstanceStream::base` 才是该 stream 在段内的全局起点（color 回退路径同样用
+  `base + run.offset`，见 `renderer_impl.rs`）。id pass 曾只喂 `run.offset`，会在多 stream
+  段里读错实例/用错 origin；现已在 `pick.rs` 修正，并由 fence
+  `accelerated_multi_stream_line_pick_reads_the_right_instance`（一段内两条 stream、各自拾回
+  自己的实体）覆盖。
 - **mesh 类仍保留各自的 chunk buffer**：merged mesh 的拉取 storage 是**额外**一份（已知内存
   代价，见 ADR-0007）。id pass 继续用 `GpuMeshChunk` 的 per-chunk buffer。
+- **超大 stream 回退对 id pass 的影响**：当某条 line stream 超过一个 storage binding 容量、
+  无法分段时，line 类**整体回退通用 per-run**，并为每条 stream 单独上传真实的
+  `VERTEX | STORAGE`（64 B 步长）缓冲（`rebuild_pulled` 的 `build_line_fallback`）。此时
+  id pass 与 color 回退路径读的是**同一批** per-stream 真实缓冲，不会读到 prepare 期的 4 字节
+  占位（铁律 #2：降级必须是真实的，不是空成功）。
 - **tier 是标签而非隐式**：`Renderer::render_tier()` / `FrameStats::tier` /
   `FrameStats::accelerated` 报告当前档位；一个分页/over-budget 的 color 帧会回退通用
   per-run 并报告 `accelerated=false`，此时 id pass 与 color 的组织重新一致。
+- **已知等价例外（诚实）**：加速档的类 draw 先于**残留未转换 opaque batch** 发出（line 类 →
+  mesh 类 → 残留 per-batch），而通用档严格按 opaque 批序。因此「已转换类 vs 残留未转换批」
+  以及「残留未转换批之间」在**等深并列**处的胜者可能与通用档不同（非重叠/非共面场景不受影响）。
+  这与 ADR-0007 记录的镜像分组属同一类已知例外；id pass 本身逐 batch/run 组织，不受该重排影响。
 - **未验证**：加速档的 WebGL2 降级路径由离线能力门控 + `tier_for` 单测覆盖，
   **未在真实 WebGL2 浏览器运行**；id pass 本身是 native-only。
 

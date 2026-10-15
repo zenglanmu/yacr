@@ -486,12 +486,20 @@ impl Renderer {
             }
             if !batch.instanced.is_empty() {
                 for run in &batch.instanced {
-                    let origin = self.instance_streams[run.stream as usize].origin;
+                    let stream = &self.instance_streams[run.stream as usize];
+                    let origin = stream.origin;
+                    // `run.offset` is stream-local (see `build_instance_chunks`);
+                    // on the accelerated tier every stream in a storage segment
+                    // shares one buffer, so the global instance index is
+                    // `stream.base + run.offset` — exactly as the colour path
+                    // re-bases it. `base` is 0 on the universal tier, where each
+                    // stream owns its buffer, so the two paths agree there too.
+                    let start = stream.base + run.offset;
                     pending.push(Pending {
                         slot,
                         matrix: projection.batch_matrix_f64(origin),
                         key: batch.pick_key,
-                        draw: PickDraw::LineRun(run.stream as usize, run.offset, run.count),
+                        draw: PickDraw::LineRun(run.stream as usize, start, run.count),
                     });
                     slot += 1;
                 }
