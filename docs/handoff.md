@@ -1,5 +1,47 @@
 # 后续 agent 接手入口
 
+## 线/弧抗锯齿统一轮（2026-10-15，`309e1a2` / ADR-0009）
+
+- 用户批准「1+3」：把**所有线类**几何改为与 SDF 弧（ADR-0008）**同语义**的抗锯齿笔画——
+  `coverage = saturate(1 − d/w)`、`w = world_per_px`、**1.0 px 线性墨量**、相位相关峰值。覆盖：
+  实例化线流、legacy/奇数顶点线、透明线、**`MeshEdges` 叠加（此前是文档化的静默 no-op，本轮关闭
+  backlog G3）**、网格叠加线框、弦展开 conic；拾取 shader 光栅化同一 SDF，字面 ±0.5 px。决策与
+  语义见 `docs/adr/0009-antialiased-line-strokes.md`。
+- **两个真实 bug（实现中实测）**：① 水平线段帧退化——`cross(dir, ref)` 对水平线段给出屏幕法线
+  （z）方向，正交俯视下四边形零面积；改为绘制平面内垂直 `vec2(-dir.y, dir.x)`。② 加速档类绘制
+  顺序——合并 mesh 类**先于**线类（此前相反），使 AA 线边缘在穿越处按 mesh 之上混合，两档帧逐字节
+  一致（`accelerated_overlapping_ties_match_universal_pixels`）。
+- **Fence 重划（显式、诚实）**：「legacy vs instanced 逐字节一致」→ **转换路径等价**；**与硬抗锯齿
+  线的逐像素一致声明作废**（已授权的语义像素变化）；大坐标精度、确定性与相机移动零重传保留；新增
+  跨类线性墨量、逐相位峰值包络、折线连续性、接头 alpha 并集、确定性 fences。**弧视觉验收的「SDF ≥
+  弦展开 AA 灰阶数」排序也作废**：弦线现在同样是 AA，灰阶计数是 sRGB 启发式而非可靠平滑度度量；
+  改为断言两帧都确有 AA（各 ≥32 中间灰阶）。该 fence 在本轮由绿转红（父提交 `b449337` 通过、
+  `309e1a2` 失败），已修正。
+- 线性墨量一致（同帧，真实 GPU P620/Vulkan，`unified_line_ink_parity_across_classes`）：
+
+  | 类 | 线性墨量 (px) |
+  |---|---|
+  | SDF 弧 | 1.000 |
+  | 实例化直线 | 1.000 |
+  | `MeshEdges` | 1.000 |
+  | 透明线（÷α） | 0.994 |
+  | 弦展开 conic | 1.004 |
+
+  逐相位峰值：mean 0.748、[0.497, 1.000]（0.5–1.0 随相位是设计语义，非缺陷）。
+- 视觉证据目录：`/tmp/opencode/yacr-sdf-arcs-v3/`（弧 before 弦 / after SDF）、`.../v4/`（线统一
+  **初版**捕获，**保留不覆盖**、标注缺陷）、`.../v5/`（**修正版**线 before/after）。`v4`/`v5` 各含
+  `METRICS.md`（测量契约：ink = **线性覆盖积分**；sRGB 编码积分虚增软笔画 ≈1.4×，ADR-0008 §2 已
+  关闭；峰值随相位 0.5–1.0 为设计）。
+- **本 bookkeeping lane 修正的两个 harness 缺陷**：① 视觉验收 harness 对同一 delta 两次 `upload`
+  ——`Renderer::upload` 是增量暂存、不替换常驻场景，故圆被重复混合；② 亚像素 ramp 的
+  `coverage <= 0 → discard` 会丢弃垂直相位落在两像素行之间的线段（v4 `before` 丢失两条水平线）。
+  修正：**一次 upload、两帧只改 ramp uniform**，场景改按屏幕像素定义（保证相位对齐），并在测试内
+  断言两帧 core-ink 掩码连通分量相同、异或 0（v5 实测分量 4/4、异或 0、union 503 px；线区部分覆盖
+  像素 hard 0 vs unified 64）。
+- **NOT RUN / 边界（诚实）**：浏览器/WebGL2/WebGPU、Android 设备、vendor DWG、视觉 golden **未验**；
+  `lineweight` 仍「携带不绘制」，**未**光栅化线宽（backlog）；全量 workspace 门禁未跑（用户政策）。
+  本轮仅测试/文档/证据改动，**未 commit**（由 orchestrator 提交）。
+
 ## 渲染性能 “entity = data” 轮（2026-10-15）
 
 - 用户导向渲染架构 **“entity = data”** 并授权相应契约变更。本轮修三个独立问题：①

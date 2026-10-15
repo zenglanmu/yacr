@@ -1594,8 +1594,14 @@ fn sdf_arc_visual_acceptance_before_after() {
          differ by more than 15%"
     );
 
-    // Smoother: the SDF's analytic AA produces at least as many distinct
-    // intermediate grey levels as the chord draw.
+    // Smoother: both paths now share the unified AA stroke (ADR-0009), so the
+    // chord draw is no longer a hard-aliased baseline and the "SDF at least as
+    // anti-aliased as the chord draw" *ordering* (distinct sRGB grey-level
+    // counts) is no longer a sound smoothness metric — the two AA rasterizations
+    // merely produce different grey populations (measured ~137 vs ~152; a
+    // grey-level count is an sRGB-encoded heuristic, see ADR-0008 §2). Assert
+    // instead that both frames carry genuine anti-aliasing (a hard/binary draw
+    // has only a handful of levels) and report the counts for the record.
     let levels = |image: &RgbaImage| -> usize {
         let mut set = std::collections::BTreeSet::new();
         for p in image.pixels.chunks_exact(4) {
@@ -1611,8 +1617,11 @@ fn sdf_arc_visual_acceptance_before_after() {
         levels(&after)
     );
     assert!(
-        levels(&after) >= levels(&before),
-        "the SDF should be at least as anti-aliased as the chord draw"
+        levels(&before) >= 32 && levels(&after) >= 32,
+        "both the chord and the SDF frame must carry anti-aliased edges \
+         (chord={} sdf={})",
+        levels(&before),
+        levels(&after)
     );
 }
 
@@ -2008,12 +2017,72 @@ fn unified_line_streams_are_deterministic_and_static_across_a_camera_move() {
     }
 }
 
-/// Fence (h2): visual acceptance for the line unification. A mixed scene (SDF
-/// arcs, straight lines and polyline joints) is rendered twice into a NEW output
-/// directory: `before` with the line ramp overridden to a sub-pixel width (the
-/// pre-unification hard-aliased 1 px look) and `after` with the unified AA
-/// strokes. There is **no** byte-identity claim; the fence asserts both frames
-/// rasterize and reports the per-class linear ink.
+/// Core-ink mask of a frame: one boolean per pixel, true where the linear
+/// coverage reaches the pickable/`0.5` threshold. Two captures of the same scene
+/// (differing only in stroke rendering mode) must produce the same mask.
+fn core_mask(image: &RgbaImage) -> Vec<bool> {
+    image
+        .pixels
+        .chunks_exact(4)
+        .map(|p| coverage(p[0]) >= 0.5)
+        .collect()
+}
+
+/// The number of 8-connected components of a `SIZE x SIZE` boolean mask
+/// (row-major). Used to prove two frames cover the same strokes.
+fn mask_components(mask: &[bool]) -> usize {
+    let n = SIZE as usize;
+    let mut seen = vec![false; mask.len()];
+    let mut stack = Vec::new();
+    let mut components = 0usize;
+    for start in 0..mask.len() {
+        if !mask[start] || seen[start] {
+            continue;
+        }
+        components += 1;
+        seen[start] = true;
+        stack.push(start);
+        while let Some(i) = stack.pop() {
+            let x = i % n;
+            let y = i / n;
+            for dy in -1i64..=1 {
+                for dx in -1i64..=1 {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let nx = x as i64 + dx;
+                    let ny = y as i64 + dy;
+                    if nx < 0 || ny < 0 || nx >= n as i64 || ny >= n as i64 {
+                        continue;
+                    }
+                    let j = ny as usize * n + nx as usize;
+                    if mask[j] && !seen[j] {
+                        seen[j] = true;
+                        stack.push(j);
+                    }
+                }
+            }
+        }
+    }
+    components
+}
+
+/// Fence (h2): visual acceptance for the line unification. A mixed scene (an SDF
+/// circle, straight lines and polyline joints) is rendered **twice with the
+/// identical geometry** into a NEW output directory: `before` with the line ramp
+/// overridden to a sub-pixel width (the pre-unification hard-aliased 1 px look)
+/// and `after` with the unified AA strokes. The two captures differ **only** in
+/// the line stroke rendering mode, so the fence asserts their core-ink masks
+/// cover the same geometry (equal connected components, a bounded symmetric
+/// difference, and per-piece analytic coverage in both frames) and reports the
+/// per-class linear ink. There is **no** byte-identity claim.
+///
+/// The scene is defined in screen-pixel coordinates so every stroke runs through
+/// pixel centres. That is required by the harness: the hard look is emulated with
+/// a sub-pixel line ramp whose `coverage <= 0` discard removes a stroke whose
+/// perpendicular phase falls between pixel rows — an off-phase scene drops whole
+/// segments from the `before` capture (the v4 evidence defect: two horizontal
+/// segments absent from `before`).
 #[test]
 #[ignore = "real-GPU visual acceptance; writes PNGs to YACR_SDF_ARC_OUT"]
 fn unified_line_visual_acceptance_before_after() {
@@ -2033,6 +2102,13 @@ fn unified_line_visual_acceptance_before_after() {
     );
     let target = RenderTarget::new(256, 256);
 
+    // Screen-pixel -> world. Every argument is an integer pixel coordinate, so
+    // the result is an exact multiple of `wpp` on both axes and therefore lands
+    // on a pixel centre under `aligned_camera` (whose pixel centre `(px, py)`
+    // maps to `((px - 127) * wpp, (128 - py) * wpp)`). Defining the scene in
+    // screen pixels keeps every stroke phase-aligned to a pixel centre.
+    let at = |sx: f64, sy: f64| [(sx - 127.0) * wpp, (127.0 - sy) * wpp, 0.0];
+
     let conics = vec![circle(
         Point3 {
             x: -0.5,
@@ -2041,7 +2117,9 @@ fn unified_line_visual_acceptance_before_after() {
         },
         0.25,
     )];
-    // Straight lines and a polyline with an angled joint, on the right half.
+    // Straight lines and a polyline with an angled joint on the right half; a
+    // 45-degree diagonal (phase-aligned through pixel centres) gives the AA draw
+    // intermediate grey levels the hard draw cannot.
     let lines = straight_lines(
         Point3 {
             x: 0.0,
@@ -2049,38 +2127,43 @@ fn unified_line_visual_acceptance_before_after() {
             z: 0.0,
         },
         vec![
-            [0.1, -0.6, 0.0],
-            [0.9, -0.6, 0.0],
-            [0.1, 0.0, 0.0],
-            [0.5, 0.0, 0.0],
-            [0.5, 0.0, 0.0],
-            [0.5, 0.6, 0.0],
-            [0.5, 0.6, 0.0],
-            [0.9, 0.6, 0.0],
+            at(139.0, 207.0),
+            at(239.0, 207.0),
+            at(139.0, 127.0),
+            at(191.0, 127.0),
+            at(191.0, 127.0),
+            at(191.0, 47.0),
+            at(191.0, 47.0),
+            at(239.0, 47.0),
+            at(139.0, 110.0),
+            at(171.0, 78.0),
         ],
         9,
     );
 
-    // after: the unified anti-aliased strokes.
+    // Upload the scene ONCE: the two captures must differ only in the line
+    // stroke rendering mode, which is a per-frame uniform value (the ramp
+    // override), not a scene change. Re-uploading the same delta would append
+    // duplicate batches — `Renderer::upload` stages an incremental delta and
+    // never replaces the resident scene — which double-blends the circle and is
+    // the other half of the v4 "different scene" defect.
     renderer.set_line_ramp_override(None);
     renderer
         .upload(&scene(vec![conic_batch(conics.clone(), 1), lines.clone()]))
-        .expect("upload unified scene");
+        .expect("upload scene");
     renderer.render(cam, &target).expect("render unified");
     let after = renderer.read_target_rgba().expect("read unified frame");
-    let after_ink = perpendicular_ink(&after, &cam, (0.5, -0.6), (0.0, 1.0));
+    let bottom_mid = at(189.0, 207.0);
+    let after_ink = perpendicular_ink(&after, &cam, (bottom_mid[0], bottom_mid[1]), (0.0, 1.0));
 
-    // before: the same geometry with a sub-pixel line ramp (hard-aliased look).
+    // before: the same resident geometry with a sub-pixel line ramp (hard look).
     renderer.set_line_ramp_override(Some(1e-3));
-    renderer
-        .upload(&scene(vec![conic_batch(conics.clone(), 1), lines.clone()]))
-        .expect("upload hard scene");
     renderer.render(cam, &target).expect("render hard");
     let before = renderer.read_target_rgba().expect("read hard frame");
     renderer.set_line_ramp_override(None);
 
     let dir = std::env::var("YACR_SDF_ARC_OUT")
-        .unwrap_or_else(|_| "/tmp/opencode/yacr-sdf-arcs-v4".to_string());
+        .unwrap_or_else(|_| "/tmp/opencode/yacr-sdf-arcs-v5".to_string());
     std::fs::create_dir_all(&dir).expect("create output dir");
     std::fs::write(
         format!("{dir}/before-hard-lines.png"),
@@ -2106,23 +2189,122 @@ fn unified_line_visual_acceptance_before_after() {
         (0.85..=1.15).contains(&after_ink),
         "the unified line ink {after_ink:.3} px is outside [0.85, 1.15]"
     );
-    // The unified draw is smoother than the hard one.
-    let levels = |image: &RgbaImage| -> usize {
-        let mut set = std::collections::BTreeSet::new();
-        for p in image.pixels.chunks_exact(4) {
-            if p[0] > 8 && p[0] < 247 {
-                set.insert(p[0]);
-            }
-        }
-        set.len()
-    };
+
+    // Both captures must draw the SAME geometry, differing only in stroke
+    // rendering mode, so their core-ink masks must cover the same strokes: equal
+    // connected components and a bounded symmetric difference. (v4 dropped two
+    // whole horizontal segments from `before`; this fails here.)
+    let mask_before = core_mask(&before);
+    let mask_after = core_mask(&after);
+    let comps_before = mask_components(&mask_before);
+    let comps_after = mask_components(&mask_after);
+    let xor = mask_before
+        .iter()
+        .zip(&mask_after)
+        .filter(|(a, b)| a != b)
+        .count();
+    let union = mask_before
+        .iter()
+        .zip(&mask_after)
+        .filter(|(a, b)| **a || **b)
+        .count();
     eprintln!(
-        "line AA grey levels: hard={} unified={}",
-        levels(&before),
-        levels(&after)
+        "core ink masks: before components={comps_before} after={comps_after} xor={xor} \
+         union={union}"
     );
     assert!(
-        levels(&after) > levels(&before),
-        "the unified AA line must produce more intermediate grey levels than the hard line"
+        union > 300,
+        "the core ink masks are too small to be meaningful ({union} px)"
+    );
+    assert_eq!(
+        comps_before, comps_after,
+        "the before/after core masks have different connected-component counts ({comps_before} vs \
+         {comps_after}); the captures are not the same scene"
+    );
+    assert!(
+        xor * 5 <= union,
+        "the before/after core masks differ on {xor} of {union} px; the captures must cover the \
+         same geometry"
+    );
+
+    // Direct per-piece coverage: every analytic piece of the scene must carry
+    // core ink in BOTH frames. This is the assertion that would have caught the
+    // v4 defect (the two off-phase horizontal segments vanished from `before`).
+    let mut probes: Vec<(f64, f64)> = Vec::new();
+    for k in 0..8 {
+        let theta = k as f64 / 8.0 * TAU;
+        probes.push((-0.5 + 0.25 * theta.cos(), 0.25 * theta.sin()));
+    }
+    for (sx, sy) in [
+        (139.0, 207.0),
+        (189.0, 207.0),
+        (239.0, 207.0),
+        (139.0, 127.0),
+        (165.0, 127.0),
+        (191.0, 87.0),
+        (191.0, 47.0),
+        (215.0, 47.0),
+        (239.0, 47.0),
+        (139.0, 110.0),
+        (155.0, 94.0),
+        (171.0, 78.0),
+    ] {
+        let p = at(sx, sy);
+        probes.push((p[0], p[1]));
+    }
+    let core_at = |image: &RgbaImage, wx: f64, wy: f64| -> f64 {
+        let (sx, sy) = pixel_at(&cam, wx, wy);
+        let mut best = 0.0f64;
+        for dy in -2i64..=2 {
+            for dx in -2i64..=2 {
+                let (x, y) = (sx as i64 + dx, sy as i64 + dy);
+                if x < 0 || y < 0 || x >= 256 || y >= 256 {
+                    continue;
+                }
+                best = best.max(rendered_coverage(image, x as u32, y as u32));
+            }
+        }
+        best
+    };
+    for (wx, wy) in probes {
+        let b = core_at(&before, wx, wy);
+        let a = core_at(&after, wx, wy);
+        assert!(
+            b >= 0.5,
+            "the hard (before) frame is missing geometry near world ({wx:.4},{wy:.4}) \
+             (core ink {b:.3})"
+        );
+        assert!(
+            a >= 0.5,
+            "the unified (after) frame is missing geometry near world ({wx:.4},{wy:.4}) \
+             (core ink {a:.3})"
+        );
+    }
+
+    // The unified AA line is smoother than the hard one: in the line region
+    // (x >= 100, clear of the circle) the sub-pixel hard ramp is binary (no
+    // intermediate pixels) while the AA strokes carry partial-coverage edge
+    // pixels (the 45-degree diagonal, in particular). Measured there so the
+    // circle's own AA greys cannot mask the difference; a whole-frame distinct
+    // sRGB grey-level count is not a sound smoothness metric (ADR-0008 §2).
+    let partial_in_lines = |image: &RgbaImage| -> usize {
+        let mut n = 0usize;
+        for y in 0..SIZE {
+            for x in 100..SIZE {
+                let c = rendered_coverage(image, x, y);
+                if c > 0.02 && c < 0.98 {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    let partial_hard = partial_in_lines(&before);
+    let partial_aa = partial_in_lines(&after);
+    eprintln!("line-region partial-coverage pixels: hard={partial_hard} unified={partial_aa}");
+    assert!(
+        partial_aa >= 16 && partial_aa > partial_hard,
+        "the unified AA line must carry partial-coverage edge pixels the hard ramp cannot \
+         (hard={partial_hard} unified={partial_aa})"
     );
 }

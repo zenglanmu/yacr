@@ -81,15 +81,26 @@ legacy 四边 32 B × 6、弧 72 B、merged mesh 44 B/顶点 + 4 B/索引。`bat
   边缘像素差（`instanced_edge_overlay_matches_legacy_pixels`、`merged_meshes_lines_and_overlays_match_legacy_pixels`
   现按有界像素数断言；`instanced_deep_zoom_*` 改断言**同一像素列**——精度语义量）。
 - 大坐标精度 fence 保留其解析检查；弧弦包含基线按 AA 弦重测。
+- 弧视觉验收 `sdf_arc_visual_acceptance_before_after` 的「SDF 至少与弦展开一样抗锯齿」
+  （distinct sRGB 灰阶数排序）**作废**：弦展开现在也是 AA（本 ADR 的统一语义），二者只产生不同
+  的灰阶分布（实测 ~137 vs ~152），灰阶计数本身是 sRGB 编码启发式、非可靠平滑度度量；改为断言
+  **两帧都确有抗锯齿**（各 ≥ 32 个中间灰阶）并记录数值。
 - **新增统一 fences**（`tests/sdf_arcs.rs`）：
   (i) 跨类线性墨量一致——弧/线/`MeshEdges`/透明线/弦展开 conic 同帧，均 ∈ [0.85, 1.15] px；
   (ii) 线类逐相位峰值包络（16 相位一帧，min ≥ 0.45、max ≥ 0.9、相位相关）；
   (iii) 折线连续性（共线与折角接头无孔）；
   (iv) 接头 alpha 并集（接头不暗于单笔、不超过满强度）；
   (v) 确定性 + 相机移动零重传。
-- 视觉验收：`/tmp/opencode/yacr-sdf-arcs-v4/{before-hard-lines,after-unified-aa}.png`，
-  混合场景（弧 + 直线 + 折线接头）；「before」用测试钩子 `set_line_ramp_override` 把线 ramp
-  压到亚像素以复现统一前的硬抗锯齿外观（真实 GPU 输出，非合成）。
+- 视觉验收：`/tmp/opencode/yacr-sdf-arcs-v5/{before-hard-lines,after-unified-aa}.png`（**修正版**，
+  **同场景**：两帧由同一份常驻场景渲染、仅线 ramp uniform 不同；in-test 断言两帧 core-ink 掩码
+  连通分量相同、异或 0），混合场景（弧 + 直线 + 折线接头 + 45° 斜线）；「before」用测试钩子
+  `set_line_ramp_override` 把线 ramp 压到亚像素以复现统一前的硬抗锯齿外观（真实 GPU 输出，非合成）。
+  初版 `/tmp/opencode/yacr-sdf-arcs-v4/` 保留不覆盖：其两次 `upload` 使圆重复混合、且亚像素 ramp 会
+  丢弃相位落在像素行之间的线段（两条水平线在 before 消失），故 v4 的 before/after **不是同一场景**；
+  详见各目录的 `METRICS.md`。
+- **测量契约（致未来审计者）**：墨量一律取**线性覆盖积分**；直接积分 **sRGB 编码通道**会把软边 AA
+  笔画虚增 ≈√2（理想三角滤波 1.38–1.47 vs 硬线 1.00），是测量假象而非宽度缺陷（ADR-0008 §2）；
+  峰值随相位 0.5–1.0 是设计语义，不可用单点峰值判断连续性。
 
 ## 实施记录（真实 GPU，Quadro P620 / Vulkan）
 
@@ -100,7 +111,8 @@ legacy 四边 32 B × 6、弧 72 B、merged mesh 44 B/顶点 + 4 B/索引。`bat
   mesh_edges 1.000、transparent 0.994、chord 1.004 px。
 - 相位峰值：mean 0.748、[0.497, 1.000]。
 - 折线接头峰值全 1.0（无孔、无双重覆盖）。
-- 视觉验收：after 线墨量 1.001 px；AA 灰阶 hard=24 vs unified=34。
+- 视觉验收：after 线墨量 1.001 px；AA 灰阶 hard=24 vs unified=34（**v4 初版**数值，该版
+  before/after 非同一场景，见上「Fence 重划」；修正版 v5 线墨量 1.000 px、core-ink 掩码异或 0）。
 - 拾取对齐：`pick_id` / `accelerated_tier` 拾取用例按 ±0.5 px 容差重划后全绿。
 
 **未验证**：浏览器/WebGL2/WebGPU、Android 设备、vendor DWG、视觉 golden；真机 GPU 以外的
