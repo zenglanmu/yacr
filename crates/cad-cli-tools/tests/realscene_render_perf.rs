@@ -396,6 +396,18 @@ fn run_phase(
     }
 }
 
+/// Force wgpu to process its deferred-destruction queue after a renderer is
+/// dropped, so the next path's buffers are allocated against reclaimed memory.
+/// `wgpu` defers buffer/texture destruction to the next poll, and this harness
+/// runs three paths (legacy / instanced-universal / accelerated) over a real
+/// DWG whose geometry is large enough for that deferral to matter.
+fn reclaim(device: &cad_render_wgpu::wgpu::Device) {
+    let _ = device.poll(cad_render_wgpu::wgpu::PollType::Wait {
+        submission_index: None,
+        timeout: Some(Duration::from_secs(60)),
+    });
+}
+
 fn pan_cameras(base: Camera2d, frames: usize, px_per_frame: f64) -> Vec<Camera2d> {
     let step = base.world_per_px * px_per_frame;
     (1..=frames)
@@ -473,10 +485,15 @@ struct FixtureReport {
     /// Full-scene single frame (unbounded budget): the whole drawing.
     legacy: FrameStatsSummary,
     instanced: FrameStatsSummary,
+    /// Converted path with the accelerated tier forced **off**: the universal
+    /// per-run organization on the same scene/device, so the tier's effect is
+    /// isolated from the conversion's effect.
+    instanced_universal: FrameStatsSummary,
     /// Single frame at the renderer's default budget (the CLI's real one-frame
     /// result): a page of the scene, with the over-budget reason.
     legacy_default: FrameStatsSummary,
     instanced_default: FrameStatsSummary,
+    instanced_universal_default: FrameStatsSummary,
     phases: Vec<PhaseResult>,
     instance_streams: usize,
     instance_segments: u64,
@@ -503,6 +520,12 @@ struct FrameStatsSummary {
     vertices: usize,
     triangles: usize,
     over_budget: Option<String>,
+    /// The live draw tier of the frame (`"universal"`/`"accelerated"`).
+    tier: &'static str,
+    /// Whether the frame's opaque pass used the accelerated per-class draws.
+    accelerated: bool,
+    /// Draw calls issued by the accelerated per-class path this frame.
+    accelerated_draws: u64,
 }
 
 impl FrameStatsSummary {
@@ -531,6 +554,9 @@ impl FrameStatsSummary {
                     reason.report.skipped_batches
                 )
             }),
+            tier: stats.tier.as_str(),
+            accelerated: stats.accelerated,
+            accelerated_draws: stats.accelerated_draws,
         }
     }
 }
@@ -616,6 +642,20 @@ fn run_fixture(
         .ok_or_else(|| "no drawable geometry to frame".to_string())?;
     let target = RenderTarget::new(width, height);
 
+    // --- per-path measurements, one renderer alive at a time ----------------
+    //
+    // A real DWG's accelerated storage (whole-scene line + merged-mesh buffers,
+    // plus the CPU copies kept for rebuild) is large; running all three
+    // renderers concurrently OOMs on `complex-test.dwg`. Each path is measured
+    // and then dropped before the next is created.
+    let mut deep = base_camera;
+    deep.world_per_px = base_camera.world_per_px / deep_zoom;
+    let pan_legacy = pan_cameras(base_camera, frames, 8.0);
+    let pan_mid = pan_cameras(base_camera, frames, 8.0);
+    let pan_deep = pan_cameras(deep, frames, 8.0);
+    let zoom_mid = zoom_cameras(base_camera, frames, 0.95);
+    let mut phases = Vec::new();
+
     // --- legacy path (BEFORE instancing) ------------------------------------
     //
     // The full-scene frame uses an unbounded budget so the class breakdown and
@@ -639,8 +679,48 @@ fn run_fixture(
     let legacy_default = legacy
         .render(base_camera, &target)
         .map_err(|e| format!("legacy default-budget render: {e}"))?;
+    phases.push(run_phase(
+        "pan_mid_legacy",
+        &mut legacy,
+        &pan_legacy,
+        &target,
+    ));
+    drop(legacy);
+    reclaim(&gpu.device);
 
-    // --- instanced path (AFTER instancing) ----------------------------------
+    // --- instanced path with the accelerated tier forced off ----------------
+    //
+    // Same conversion (instancing + flat merge) but the universal per-run
+    // organization, so the tier's effect is isolated from the conversion's.
+    let mut instanced_universal = Renderer::new(BackendPreference::Auto);
+    instanced_universal.set_poll_timeout(Duration::from_secs(600));
+    instanced_universal.set_storage_buffer_support_override(Some(false));
+    instanced_universal
+        .initialize_with_device(gpu.device.clone(), gpu.queue.clone())
+        .map_err(|e| format!("instanced-universal init: {e}"))?;
+    instanced_universal.set_line_instancing(true);
+    instanced_universal.set_mesh_merging(true);
+    instanced_universal
+        .upload(&delta)
+        .map_err(|e| format!("instanced-universal upload: {e}"))?;
+    instanced_universal.frame_budget = FULL_FRAME_BUDGET;
+    let instanced_universal_frame = instanced_universal
+        .render(base_camera, &target)
+        .map_err(|e| format!("instanced-universal render: {e}"))?;
+    instanced_universal.frame_budget = DEFAULT_FRAME_BUDGET;
+    let instanced_universal_default = instanced_universal
+        .render(base_camera, &target)
+        .map_err(|e| format!("instanced-universal default-budget render: {e}"))?;
+    phases.push(run_phase(
+        "pan_mid_instanced_universal",
+        &mut instanced_universal,
+        &pan_mid,
+        &target,
+    ));
+    drop(instanced_universal);
+    reclaim(&gpu.device);
+
+    // --- instanced path (AFTER instancing, live tier) -----------------------
     let mut instanced = Renderer::new(BackendPreference::Auto);
     instanced.set_poll_timeout(Duration::from_secs(600));
     instanced
@@ -681,20 +761,25 @@ fn run_fixture(
         Err(_) => None,
     };
 
-    // --- phase tables -------------------------------------------------------
-    let mut deep = base_camera;
-    deep.world_per_px = base_camera.world_per_px / deep_zoom;
-    let pan_legacy = pan_cameras(base_camera, frames, 8.0);
-    let pan_mid = pan_cameras(base_camera, frames, 8.0);
-    let pan_deep = pan_cameras(deep, frames, 8.0);
-    let zoom_mid = zoom_cameras(base_camera, frames, 0.95);
-
-    let phases = vec![
-        run_phase("pan_mid_legacy", &mut legacy, &pan_legacy, &target),
-        run_phase("pan_mid_instanced", &mut instanced, &pan_mid, &target),
-        run_phase("pan_deep_instanced", &mut instanced, &pan_deep, &target),
-        run_phase("zoom_mid_instanced", &mut instanced, &zoom_mid, &target),
-    ];
+    phases.push(run_phase(
+        "pan_mid_instanced",
+        &mut instanced,
+        &pan_mid,
+        &target,
+    ));
+    phases.push(run_phase(
+        "pan_deep_instanced",
+        &mut instanced,
+        &pan_deep,
+        &target,
+    ));
+    phases.push(run_phase(
+        "zoom_mid_instanced",
+        &mut instanced,
+        &zoom_mid,
+        &target,
+    ));
+    drop(instanced);
 
     Ok(FixtureReport {
         path: path.display().to_string(),
@@ -717,8 +802,10 @@ fn run_fixture(
         ),
         legacy: FrameStatsSummary::from_stats(&legacy_frame),
         instanced: FrameStatsSummary::from_stats(&instanced_frame),
+        instanced_universal: FrameStatsSummary::from_stats(&instanced_universal_frame),
         legacy_default: FrameStatsSummary::from_stats(&legacy_default),
         instanced_default: FrameStatsSummary::from_stats(&instanced_default),
+        instanced_universal_default: FrameStatsSummary::from_stats(&instanced_universal_default),
         phases,
         instance_streams,
         instance_segments,
@@ -1026,6 +1113,31 @@ fn write_report(
             r.batches.overlay_draws,
             r.instanced.draw_calls,
         ));
+        // Tier isolation: the same conversion on the universal per-run path vs the
+        // accelerated per-class path. The `instanced` rows are the live tier
+        // (accelerated on a storage-buffer device); the `instanced-universal` rows
+        // force the tier off.
+        let tier_ratio = if r.instanced.draw_calls == 0 {
+            f64::NAN
+        } else {
+            r.instanced_universal.draw_calls as f64 / r.instanced.draw_calls as f64
+        };
+        md.push_str(&format!(
+            "- **tier**: legacy={} (accelerated={}) | instanced={} (accelerated={}, \
+             accelerated_draws={}) | instanced-universal={} (accelerated={})\n",
+            r.legacy.tier,
+            r.legacy.accelerated,
+            r.instanced.tier,
+            r.instanced.accelerated,
+            r.instanced.accelerated_draws,
+            r.instanced_universal.tier,
+            r.instanced_universal.accelerated,
+        ));
+        md.push_str(&format!(
+            "- converted-path draws (same scene/device): universal per-run={} vs accelerated \
+             per-class={} ({tier_ratio:.2}× fewer)\n",
+            r.instanced_universal.draw_calls, r.instanced.draw_calls,
+        ));
         md.push_str(&format!(
             "- resident instance streams: {} ({} segments); stream uploads after `upload()`: {}\n",
             r.instance_streams, r.instance_segments, r.uploads_after_upload
@@ -1073,6 +1185,13 @@ fn write_report(
             r.instanced_default.draw_calls,
             r.instanced_default.opaque_batches,
             r.instanced_default.over_budget
+        ));
+        md.push_str(&format!(
+            "- instanced-universal (tier forced off): draw_calls={} accepted opaque={} \
+             over_budget={:?}\n",
+            r.instanced_universal_default.draw_calls,
+            r.instanced_universal_default.opaque_batches,
+            r.instanced_universal_default.over_budget
         ));
 
         // Verdict.
@@ -1203,8 +1322,12 @@ fn write_report(
             })),
             "full_scene_legacy_frame": frame_summary_json(&r.legacy),
             "full_scene_instanced_frame": frame_summary_json(&r.instanced),
+            "full_scene_instanced_universal_frame": frame_summary_json(&r.instanced_universal),
             "default_budget_legacy_frame": frame_summary_json(&r.legacy_default),
             "default_budget_instanced_frame": frame_summary_json(&r.instanced_default),
+            "default_budget_instanced_universal_frame": frame_summary_json(
+                &r.instanced_universal_default
+            ),
             "instance_streams": r.instance_streams,
             "instance_segments": r.instance_segments,
             "uploads_after_upload": r.uploads_after_upload,
@@ -1262,6 +1385,9 @@ fn frame_summary_json(s: &FrameStatsSummary) -> serde_json::Value {
         "vertices": s.vertices,
         "triangles": s.triangles,
         "over_budget": s.over_budget,
+        "tier": s.tier,
+        "accelerated": s.accelerated,
+        "accelerated_draws": s.accelerated_draws,
     })
 }
 

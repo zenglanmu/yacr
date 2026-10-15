@@ -43,6 +43,11 @@ fn init(gpu: HeadlessGpu) -> Renderer {
         adapter: _,
     } = gpu;
     let mut renderer = Renderer::new(BackendPreference::Auto);
+    // This suite's fences pin the **universal** per-run draw organization
+    // (coalesced instanced/merged runs and their exact draw counts), so the
+    // automatic accelerated-tier selection is disabled here. The accelerated
+    // tier has its own fences in `tests/accelerated_tier.rs`.
+    renderer.set_storage_buffer_support_override(Some(false));
     renderer
         .initialize_with_device(device, queue)
         .expect("initialize headless renderer");

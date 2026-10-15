@@ -117,6 +117,9 @@ fn init(gpu: HeadlessGpu) -> Renderer {
         adapter: _,
     } = gpu;
     let mut renderer = Renderer::new(BackendPreference::Auto);
+    // This suite pins the universal per-run path (progressive pages, non-blank
+    // checks); the accelerated tier is fenced in `tests/accelerated_tier.rs`.
+    renderer.set_storage_buffer_support_override(Some(false));
     renderer
         .initialize_with_device(device, queue)
         .expect("initialize headless renderer");

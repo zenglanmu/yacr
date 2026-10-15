@@ -208,6 +208,26 @@ id pass **不解析** mesh face：wgpu 的 fragment stage 拿不到 primitive in
   从「首个 source 的 EntityId 低 32 位」改为**渲染器 pick key**。这是 P3a-1 的核心修正，
   已在代码注释与本文档中显式记录。
 
+## 6b. P3b 加速档对 id pass 的影响（无）
+
+P3b 引入**能力门控的加速档**（color pass 的 opaque 阶段按类折叠为 per-class draw，
+逐图元数据从 VS storage buffer 拉取；见 ADR-0007「P3b」节）。对 id pass：
+
+- **id pass 完全不变**：`pick_*.wgsl` 逐字节未动，id pass 仍**不合并** run、每个 batch/run
+  各自一次 uniform，仍按需触发。加速档只改变 color pass 的组织，不改变拾取语义。
+- **line 类不复制几何（加速档）**：加速档的实例 buffer 同时是
+  `VERTEX | STORAGE` 的拉取 storage 段（64 B 步长）。id pass 的 `pick_line_instanced`
+  管线在加速档用 **64 B 顶点布局**读取**同一批段 buffer**（属性偏移与 56 B 版一致，shader
+  无需改），因此 id pass 与 color 加速档**共用**一份 line 几何，没有「通用路径 + 拉取路径」
+  两份拷贝。段内实例偏移由 `InstanceStream::base` 给出。
+- **mesh 类仍保留各自的 chunk buffer**：merged mesh 的拉取 storage 是**额外**一份（已知内存
+  代价，见 ADR-0007）。id pass 继续用 `GpuMeshChunk` 的 per-chunk buffer。
+- **tier 是标签而非隐式**：`Renderer::render_tier()` / `FrameStats::tier` /
+  `FrameStats::accelerated` 报告当前档位；一个分页/over-budget 的 color 帧会回退通用
+  per-run 并报告 `accelerated=false`，此时 id pass 与 color 的组织重新一致。
+- **未验证**：加速档的 WebGL2 降级路径由离线能力门控 + `tier_for` 单测覆盖，
+  **未在真实 WebGL2 浏览器运行**；id pass 本身是 native-only。
+
 ## 7. 实测证据
 
 命令（真实 GPU，默认 Vulkan ICD，未设 `VK_ICD_FILENAMES`）：

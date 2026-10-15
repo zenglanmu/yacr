@@ -59,6 +59,10 @@ fn init(gpu: HeadlessGpu, format: Option<IdTargetFormat>) -> Renderer {
     );
     let mut renderer = Renderer::new(BackendPreference::Auto);
     renderer.set_id_format_override(format);
+    // The id-pass fences compare against the universal color path's exact
+    // pixels and draw counts; pin the universal tier here. The accelerated tier
+    // has its own fences in `tests/accelerated_tier.rs`.
+    renderer.set_storage_buffer_support_override(Some(false));
     renderer
         .initialize_with_device(device, queue)
         .expect("initialize renderer");

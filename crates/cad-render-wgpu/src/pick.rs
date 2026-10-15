@@ -194,7 +194,18 @@ impl Renderer {
                     module: &line_instanced_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[Some(position_only_layout()), Some(line_instance_layout())],
+                    buffers: &[
+                        Some(position_only_layout()),
+                        // The accelerated tier's instance buffer is also its
+                        // pulled storage buffer (64-byte stride); the id pass must
+                        // read the same layout or it would rasterize different
+                        // fragments.
+                        Some(if self.render_tier == RenderTier::Accelerated {
+                            line_instance_layout_64()
+                        } else {
+                            line_instance_layout()
+                        }),
+                    ],
                 },
                 primitive: line_primitive,
                 depth_stencil: Some(line_depth.clone()),

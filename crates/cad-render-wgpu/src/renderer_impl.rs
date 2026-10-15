@@ -52,6 +52,20 @@ impl Renderer {
             max_vertices_per_mesh_stream: MAX_VERTICES_PER_MESH_STREAM,
             instance_stream_uploads: 0,
             mesh_chunk_uploads: 0,
+            // No device yet: the universal path is the safe default until
+            // `initialize_with_device` probes the real device.
+            render_tier: RenderTier::Universal,
+            storage_support_override: None,
+            pulled_lines: None,
+            pulled_mesh: None,
+            pulled_camera_layout: None,
+            pulled_camera_buffer: None,
+            pulled_camera_bind_group: None,
+            pulled_line_storage_layout: None,
+            pulled_mesh_storage_layout: None,
+            line_pulled_pipeline: None,
+            mesh_pulled_pipeline: None,
+            mesh_pulled_mirrored_pipeline: None,
             images: Vec::new(),
             image_textures: HashMap::new(),
             uniforms: UniformArena::new(&wgpu::Limits::default()),
@@ -115,6 +129,18 @@ impl Renderer {
         queue: wgpu::Queue,
     ) -> CadResult<BackendCapabilities> {
         let caps = Self::caps_for(&device);
+        // Choose the draw tier once per device from the device's own
+        // backend/limits. Storage buffers in the vertex stage are core WebGPU but
+        // absent on WebGL2, so this is capability-gated rather than assumed; a
+        // host-provided device is never asked for a feature. A device that fails
+        // the gate downgrades to the universal per-run path, labelled by
+        // `render_tier()` / `FrameStats::tier`.
+        self.render_tier = tier_for(
+            caps.storage_buffers,
+            &device.limits(),
+            self.storage_support_override,
+        );
+        let accelerated = self.render_tier == RenderTier::Accelerated;
         let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cad-lines"),
             source: wgpu::ShaderSource::Wgsl(LINE_SHADER.into()),
@@ -198,7 +224,16 @@ impl Renderer {
                     module: &line_instanced_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[Some(position_only_layout()), Some(line_instance_layout())],
+                    buffers: &[
+                        Some(position_only_layout()),
+                        // On the accelerated tier the instance buffer is also the
+                        // pulled storage buffer, so it uses the 64-byte stride.
+                        Some(if accelerated {
+                            line_instance_layout_64()
+                        } else {
+                            line_instance_layout()
+                        }),
+                    ],
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::LineList,
@@ -398,6 +433,12 @@ impl Renderer {
         self.image_textures.clear();
         self.instance_streams.clear();
         self.mesh_chunks.clear();
+        self.pulled_lines = None;
+        self.pulled_mesh = None;
+        self.pulled_camera_bind_group = None;
+        self.line_pulled_pipeline = None;
+        self.mesh_pulled_pipeline = None;
+        self.mesh_pulled_mirrored_pipeline = None;
         self.uniforms = UniformArena::new(&device.limits());
         self.frame_slots.clear();
         self.image_slots.clear();
@@ -431,6 +472,7 @@ impl Renderer {
         let device_ref = self.device.as_ref().expect("device just set").clone();
         let queue_ref = self.queue.as_ref().expect("queue just set").clone();
         self.ensure_flags(&device_ref, &queue_ref, 1);
+        self.create_pulled_resources(&device_ref);
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.id_format = self
@@ -471,6 +513,194 @@ impl Renderer {
                 },
             ],
         })
+    }
+
+    /// Create the accelerated tier's pipelines, layouts and per-frame camera
+    /// uniform. No-op unless the tier is [`RenderTier::Accelerated`].
+    ///
+    /// The pulled pipelines have **no vertex buffers**: every input is pulled
+    /// from group 2's read-only storage buffers, so they are not WebGL2-safe and
+    /// exist only on the accelerated tier.
+    fn create_pulled_resources(&mut self, device: &wgpu::Device) {
+        if self.render_tier != RenderTier::Accelerated {
+            return;
+        }
+        let Some(flags_layout) = self.flags_layout.clone() else {
+            return;
+        };
+        let pulled_camera_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cad-pulled-camera-layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(u64::from(PULLED_CAMERA_BYTES)),
+                    },
+                    count: None,
+                }],
+            });
+        let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cad-pulled-camera"),
+            size: u64::from(PULLED_CAMERA_BYTES),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cad-pulled-camera-bind"),
+            layout: &pulled_camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &camera_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(u64::from(PULLED_CAMERA_BYTES)),
+                }),
+            }],
+        });
+        let storage_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let line_storage_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cad-pulled-line-storage-layout"),
+                entries: &[storage_entry(0), storage_entry(1)],
+            });
+        let mesh_storage_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cad-pulled-mesh-storage-layout"),
+                entries: &[storage_entry(0), storage_entry(1), storage_entry(2)],
+            });
+        let line_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cad-pulled-line-pipeline-layout"),
+            bind_group_layouts: &[
+                Some(&pulled_camera_layout),
+                Some(&flags_layout),
+                Some(&line_storage_layout),
+            ],
+            immediate_size: 0,
+        });
+        let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cad-pulled-mesh-pipeline-layout"),
+            bind_group_layouts: &[
+                Some(&pulled_camera_layout),
+                Some(&flags_layout),
+                Some(&mesh_storage_layout),
+            ],
+            immediate_size: 0,
+        });
+        let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-pulled-lines"),
+            source: wgpu::ShaderSource::Wgsl(LINE_PULLED_SHADER.into()),
+        });
+        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-pulled-mesh"),
+            source: wgpu::ShaderSource::Wgsl(MESH_PULLED_SHADER.into()),
+        });
+        self.line_pulled_pipeline = Some(device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("cad-pulled-lines-pipeline"),
+                layout: Some(&line_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &line_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &line_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.target_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            },
+        ));
+        let mesh_pipeline = |front_face: wgpu::FrontFace, label: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&mesh_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &mesh_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face,
+                    cull_mode: Some(wgpu::Face::Back),
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &mesh_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.target_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        self.mesh_pulled_pipeline = Some(mesh_pipeline(
+            wgpu::FrontFace::Ccw,
+            "cad-pulled-mesh-pipeline",
+        ));
+        self.mesh_pulled_mirrored_pipeline = Some(mesh_pipeline(
+            wgpu::FrontFace::Cw,
+            "cad-pulled-mesh-pipeline-mirrored",
+        ));
+        self.pulled_camera_layout = Some(pulled_camera_layout);
+        self.pulled_camera_buffer = Some(camera_buffer);
+        self.pulled_camera_bind_group = Some(camera_bind_group);
+        self.pulled_line_storage_layout = Some(line_storage_layout);
+        self.pulled_mesh_storage_layout = Some(mesh_storage_layout);
     }
 
     /// Decide the id-target format from the device's own format features.
@@ -1242,6 +1472,7 @@ impl Renderer {
         // flags.
         let mut instance_streams: Vec<InstanceStream> = Vec::new();
         let mut batch_runs: Vec<Option<Vec<InstanceRun>>> = vec![None; batches.len()];
+        let accelerated = self.render_tier == RenderTier::Accelerated;
         if !line_converted.is_empty() {
             let (chunks, runs) = build_instance_chunks(
                 batches,
@@ -1260,11 +1491,31 @@ impl Renderer {
                         "invalid or over-limit GPU batch".into(),
                     ));
                 }
-                let buffer = Self::vertex_buffer(device, self.queue.as_ref(), &bytes);
+                // On the accelerated tier the instance buffers are the
+                // whole-scene `VERTEX | STORAGE` segments, rebuilt by
+                // `rebuild_pulled` at commit (they must span every resident
+                // stream, including a kept prefix). A placeholder keeps the
+                // `InstanceStream` shape valid until then; nothing draws between
+                // prepare and commit.
+                let buffer = if accelerated {
+                    Self::vertex_buffer(device, self.queue.as_ref(), &[0u8; 4])
+                } else {
+                    Self::vertex_buffer(device, self.queue.as_ref(), &bytes)
+                };
                 instance_streams.push(InstanceStream {
                     buffer,
                     instance_count: chunk.instances.len() as u32,
                     origin: chunk.origin,
+                    base: 0,
+                    // Keep the packed instances so the accelerated tier's
+                    // whole-scene pulled buffer can be rebuilt on every commit
+                    // (including an overlay append that keeps a prefix). The
+                    // universal tier keeps no CPU copy.
+                    pulled_instances: if accelerated {
+                        chunk.instances
+                    } else {
+                        Vec::new()
+                    },
                 });
             }
         }
@@ -1310,6 +1561,18 @@ impl Renderer {
                     index_count: chunk.indices.len() as u32,
                     origin: chunk.origin,
                     mirrored: chunk.mirrored,
+                    // CPU copies for the accelerated whole-scene rebuild (see
+                    // `InstanceStream::pulled_instances`).
+                    pulled_vertices: if accelerated {
+                        chunk.vertices
+                    } else {
+                        Vec::new()
+                    },
+                    pulled_indices: if accelerated {
+                        chunk.indices
+                    } else {
+                        Vec::new()
+                    },
                 });
             }
         }
@@ -1405,14 +1668,25 @@ impl Renderer {
             };
 
             // The exact bytes this batch uploads: its instance-stream share
-            // (56 B per segment) and/or its merged-chunk share (44 B per stored
-            // vertex + 4 B per triangle index), otherwise positions/normals/
-            // colours 12 B per vertex and triangle/edge indices 4 B each. Kept in
-            // lockstep with `GpuBatch::upload_size_bytes`, which the frame budget
-            // charges.
+            // (56 B per segment; 64 B on the accelerated tier, whose segment
+            // buffer is also the pulled storage) and/or its merged-chunk share
+            // (44 B per stored vertex + 4 B per triangle index), otherwise
+            // positions/normals/colours 12 B per vertex and triangle/edge indices
+            // 4 B each. Kept in lockstep with `GpuBatch::upload_size_bytes`, which
+            // the frame budget charges.
+            //
+            // On the accelerated tier the merged mesh also contributes to the
+            // whole-scene pulled storage buffers (64 B per merged vertex, 4 B per
+            // rebased index), charged here so the budget contract stays honest
+            // rather than hiding the second copy.
+            let line_stride = if accelerated {
+                PULLED_LINE_STRIDE as usize
+            } else {
+                LINE_INSTANCE_STRIDE as usize
+            };
             let line_bytes = run.as_ref().map_or(0, |run| {
                 run.iter()
-                    .map(|piece| piece.count as usize * LINE_INSTANCE_STRIDE as usize)
+                    .map(|piece| piece.count as usize * line_stride)
                     .sum()
             });
             let mesh_bytes = mesh_run.as_ref().map_or(0, |run| {
@@ -1423,8 +1697,20 @@ impl Renderer {
                     })
                     .sum()
             });
+            let pulled_bytes = if accelerated && merged {
+                mesh_run.as_ref().map_or(0, |run| {
+                    run.iter()
+                        .map(|piece| {
+                            piece.vertex_count as usize * PULLED_MESH_VERTEX_STRIDE as usize
+                                + piece.index_count as usize * 4
+                        })
+                        .sum::<usize>()
+                })
+            } else {
+                0
+            };
             let bytes = if instanced || merged {
-                line_bytes + mesh_bytes
+                line_bytes + mesh_bytes + pulled_bytes
             } else {
                 normals.len()
                     + vertices.len()
@@ -1509,6 +1795,7 @@ impl Renderer {
         self.batches.extend(prepared.batches);
         self.gc_instance_streams();
         self.gc_mesh_chunks();
+        self.rebuild_pulled();
         self.rebuild_pick_table()?;
         self.progressive_frame = None;
         self.draw_plan = None;
@@ -1908,6 +2195,260 @@ impl Renderer {
         buffer
     }
 
+    /// Create a read-only storage buffer for the accelerated tier and upload
+    /// `bytes` (a multiple of 4; the caller never passes an empty payload).
+    fn storage_buffer(
+        device: &wgpu::Device,
+        queue: Option<&wgpu::Queue>,
+        bytes: &[u8],
+    ) -> wgpu::Buffer {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cad-pulled-storage"),
+            size: bytes.len().max(4) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        if let Some(queue) = queue {
+            queue.write_buffer(&buffer, 0, bytes);
+        }
+        buffer
+    }
+
+    /// Create a buffer that is both the accelerated line class's pulled storage
+    /// and its per-run instance vertex buffer, so the two paths share one copy of
+    /// the geometry.
+    fn vertex_storage_buffer(
+        device: &wgpu::Device,
+        queue: Option<&wgpu::Queue>,
+        bytes: &[u8],
+    ) -> wgpu::Buffer {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cad-pulled-line-storage"),
+            size: bytes.len().max(4) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        if let Some(queue) = queue {
+            queue.write_buffer(&buffer, 0, bytes);
+        }
+        buffer
+    }
+
+    /// Rebuild the accelerated tier's whole-scene pulled buffers from the
+    /// resident streams/chunks, or clear them on the universal tier.
+    ///
+    /// The pulled buffers are rebuilt on **every** commit (not per frame): a
+    /// camera move rewrites only the small per-chunk translation table, exactly
+    /// like the universal path's per-stream uniform slot, and never re-uploads
+    /// the static geometry storage. Runs on scene changes only, so the O(total)
+    /// rebuild is not on the frame path.
+    ///
+    /// A real scene's whole-scene storage can exceed
+    /// `max_storage_buffer_binding_size`, so each class is split into
+    /// binding-sized **segments** (one draw per segment — still `O(1)` in the
+    /// chunk count, not one per chunk). A class that cannot be segmented (a
+    /// single chunk larger than the binding limit) is left unbuilt; the frame
+    /// then reports `accelerated == false` and the class renders on the universal
+    /// per-run path rather than being silently dropped.
+    fn rebuild_pulled(&mut self) {
+        self.pulled_lines = None;
+        self.pulled_mesh = None;
+        if self.render_tier != RenderTier::Accelerated {
+            return;
+        }
+        let (Some(device), Some(queue)) = (self.device.clone(), self.queue.clone()) else {
+            return;
+        };
+        let (Some(line_layout), Some(mesh_layout)) = (
+            self.pulled_line_storage_layout.clone(),
+            self.pulled_mesh_storage_layout.clone(),
+        ) else {
+            return;
+        };
+        let limit = device
+            .limits()
+            .max_storage_buffer_binding_size
+            .min(device.limits().max_buffer_size);
+        let mut uploaded = 0u64;
+
+        // --- whole-scene line storage -------------------------------------
+        if !self.instance_streams.is_empty() {
+            let table_bytes = vec![0u8; self.instance_streams.len() * 16];
+            if table_bytes.len() as u64 <= limit {
+                let chunk_table = Self::storage_buffer(&device, Some(&queue), &table_bytes);
+                let max_elems = (limit / u64::from(PULLED_LINE_STRIDE)).max(1) as usize;
+                // Segment boundaries fall on whole streams, so a run never
+                // straddles two buffers. The segment buffer is the per-run
+                // instance vertex buffer too, so the accelerated tier keeps one
+                // copy of the line geometry.
+                let counts: Vec<usize> = self
+                    .instance_streams
+                    .iter()
+                    .map(|stream| stream.pulled_instances.len())
+                    .collect();
+                let mut ranges: Vec<(usize, usize)> = Vec::new();
+                let mut seg_start = 0usize;
+                let mut seg_elems = 0usize;
+                for (i, &n) in counts.iter().enumerate() {
+                    if i > seg_start && seg_elems + n > max_elems {
+                        ranges.push((seg_start, i));
+                        seg_start = i;
+                        seg_elems = 0;
+                    }
+                    seg_elems += n;
+                }
+                ranges.push((seg_start, counts.len()));
+                let mut segments = Vec::new();
+                for (a, b) in ranges {
+                    let streams: Vec<&[LineInstance]> = self.instance_streams[a..b]
+                        .iter()
+                        .map(|stream| stream.pulled_instances.as_slice())
+                        .collect();
+                    let records = build_pulled_lines(&streams, a as u32);
+                    if records.is_empty() {
+                        continue;
+                    }
+                    let bytes = pulled_line_bytes(&records);
+                    let buffer = Self::vertex_storage_buffer(&device, Some(&queue), &bytes);
+                    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("cad-pulled-line-storage-bind"),
+                        layout: &line_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: chunk_table.as_entire_binding(),
+                            },
+                        ],
+                    });
+                    uploaded += bytes.len() as u64;
+                    // Point each stream in the segment at the shared buffer.
+                    let mut base = 0u32;
+                    for stream in self.instance_streams[a..b].iter_mut() {
+                        stream.base = base;
+                        base += stream.instance_count;
+                        stream.buffer = buffer.clone();
+                    }
+                    segments.push(PulledLineSegment {
+                        bind_group,
+                        instance_count: records.len() as u32,
+                    });
+                }
+                if !segments.is_empty() {
+                    uploaded += table_bytes.len() as u64;
+                    self.pulled_lines = Some(PulledLines {
+                        segments,
+                        chunk_table,
+                    });
+                }
+            }
+        }
+
+        // --- whole-scene merged-mesh storage ------------------------------
+        if !self.mesh_chunks.is_empty() {
+            let table_bytes = vec![0u8; self.mesh_chunks.len() * 16];
+            let max_verts = (limit / u64::from(PULLED_MESH_VERTEX_STRIDE)).max(1) as usize;
+            let max_indices = (limit / 4).max(1) as usize;
+            // A single chunk larger than a binding is not segmentable; leave the
+            // class on the universal path rather than emit an invalid binding.
+            let oversized = self.mesh_chunks.iter().any(|chunk| {
+                chunk.pulled_vertices.len() > max_verts || chunk.pulled_indices.len() > max_indices
+            });
+            if !oversized && table_bytes.len() as u64 <= limit {
+                let chunk_table = Self::storage_buffer(&device, Some(&queue), &table_bytes);
+                // Greedy segmentation over whole chunks (a triangle never spans
+                // chunks, so a segment's indices reference only its own vertices).
+                let count = self.mesh_chunks.len();
+                let mut segments = Vec::new();
+                let mut start = 0usize;
+                let mut verts = 0usize;
+                let mut indices = 0usize;
+                for i in 0..=count {
+                    let v = self
+                        .mesh_chunks
+                        .get(i)
+                        .map_or(0, |chunk| chunk.pulled_vertices.len());
+                    let idx = self
+                        .mesh_chunks
+                        .get(i)
+                        .map_or(0, |chunk| chunk.pulled_indices.len());
+                    if i > start
+                        && (i == count || verts + v > max_verts || indices + idx > max_indices)
+                    {
+                        let mut chunk_vertices: Vec<&[MeshVertex]> = Vec::with_capacity(i - start);
+                        let mut chunk_indices: Vec<(&[u32], u32, bool)> =
+                            Vec::with_capacity(i - start);
+                        for chunk in &self.mesh_chunks[start..i] {
+                            chunk_vertices.push(chunk.pulled_vertices.as_slice());
+                            chunk_indices.push((
+                                chunk.pulled_indices.as_slice(),
+                                chunk.vertex_count,
+                                chunk.mirrored,
+                            ));
+                        }
+                        let vertices = build_pulled_mesh_vertices(&chunk_vertices, start as u32);
+                        let (seg_indices, mirror_split) =
+                            build_pulled_mesh_indices_with_bases(&chunk_indices);
+                        if !vertices.is_empty() && !seg_indices.is_empty() {
+                            let vertex_bytes = pulled_mesh_vertex_bytes(&vertices);
+                            let index_bytes: Vec<u8> =
+                                seg_indices.iter().flat_map(|i| i.to_le_bytes()).collect();
+                            let vertex_buffer =
+                                Self::storage_buffer(&device, Some(&queue), &vertex_bytes);
+                            let index_buffer =
+                                Self::storage_buffer(&device, Some(&queue), &index_bytes);
+                            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("cad-pulled-mesh-storage-bind"),
+                                layout: &mesh_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: vertex_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: index_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: chunk_table.as_entire_binding(),
+                                    },
+                                ],
+                            });
+                            uploaded += vertex_bytes.len() as u64 + index_bytes.len() as u64;
+                            segments.push(PulledMeshSegment {
+                                bind_group,
+                                vertex_count: vertices.len() as u32,
+                                index_count: seg_indices.len() as u32,
+                                mirror_split,
+                                vertex_buffer,
+                                index_buffer,
+                            });
+                        }
+                        start = i;
+                        verts = 0;
+                        indices = 0;
+                    }
+                    verts += v;
+                    indices += idx;
+                }
+                if !segments.is_empty() {
+                    uploaded += table_bytes.len() as u64;
+                    self.pulled_mesh = Some(PulledMesh {
+                        segments,
+                        chunk_table,
+                    });
+                }
+            }
+        }
+        self.uploaded_bytes += uploaded;
+    }
+
     /// Rebuild the cached "lineweight carried but not drawn" report from the
     /// resident batch set.
     ///
@@ -1931,6 +2472,8 @@ impl Renderer {
         self.batches.clear();
         self.instance_streams.clear();
         self.mesh_chunks.clear();
+        self.pulled_lines = None;
+        self.pulled_mesh = None;
         // Resident image quads own pick keys too, and `reset_pick_keys` restarts
         // the key space at 1. Keeping the images would let a re-uploaded batch
         // reuse an image's key, which the pick table could only resolve by
@@ -2052,6 +2595,12 @@ impl Renderer {
         self.flags_view = None;
         self.flags_bind_group = None;
         self.flags_ctl_buffer = None;
+        self.pulled_lines = None;
+        self.pulled_mesh = None;
+        self.pulled_camera_bind_group = None;
+        self.line_pulled_pipeline = None;
+        self.mesh_pulled_pipeline = None;
+        self.mesh_pulled_mirrored_pipeline = None;
         self.last_projection = None;
         self.last_camera_position = None;
         self.reset_pick_keys();
@@ -2465,6 +3014,37 @@ impl Renderer {
         // mutation (`rebuild_lineweight_cache`), so the frame path only clones
         // the small cached Vec instead of scanning every resident batch.
         let lineweight_not_drawn: Vec<LineweightNotDrawn> = self.lineweight_not_drawn.clone();
+
+        // Decide whether this frame uses the accelerated per-class draw
+        // organization. It requires: the accelerated tier is live; the pulled
+        // storage buffers were actually built (a class whose pulled buffer
+        // exceeded a device limit leaves its geometry on the universal per-run
+        // path, never silently dropped); and **every** converted batch is
+        // accepted this frame, so the per-class draw cannot pull geometry the
+        // frame budget held back. A paginated/over-budget frame therefore falls
+        // back to the universal per-run organization (reported as
+        // `FrameStats::accelerated == false`).
+        let has_line_class = self.batches.iter().any(|b| !b.instanced.is_empty());
+        let has_mesh_class = self.batches.iter().any(|b| !b.mesh_runs.is_empty());
+        let converted_total = self
+            .batches
+            .iter()
+            .filter(|b| !b.instanced.is_empty() || !b.mesh_runs.is_empty())
+            .count();
+        let converted_accepted = opaque
+            .iter()
+            .filter(|&&i| {
+                let b = &self.batches[i];
+                !b.instanced.is_empty() || !b.mesh_runs.is_empty()
+            })
+            .count();
+        let use_pulled = self.render_tier == RenderTier::Accelerated
+            && (has_line_class || has_mesh_class)
+            && (!has_line_class || self.pulled_lines.is_some())
+            && (!has_mesh_class || self.pulled_mesh.is_some())
+            && converted_total > 0
+            && converted_accepted == converted_total;
+
         let plan_ms = plan_started.elapsed().as_secs_f64() * 1000.0;
 
         // Slots are assigned per frame in accepted order; the slot maps are
@@ -2479,8 +3059,20 @@ impl Renderer {
         }
         // Upper bound for arena growth; the frame flushes only the slots it
         // actually filled (converted batches are compacted out; see below).
-        let max_slots =
-            accepted_len + draw_images.len() + self.instance_streams.len() + self.mesh_chunks.len();
+        // On the accelerated path the per-stream/per-chunk uniforms are replaced
+        // by the pulled pipelines' shared camera uniform + storage chunk table,
+        // so no stream/chunk slots are written.
+        let stream_slot_count = if use_pulled {
+            0
+        } else {
+            self.instance_streams.len()
+        };
+        let chunk_slot_count = if use_pulled {
+            0
+        } else {
+            self.mesh_chunks.len()
+        };
+        let max_slots = accepted_len + draw_images.len() + stream_slot_count + chunk_slot_count;
         self.uniforms.ensure_slots(max_slots, device, layout);
 
         // Write only this page's uniforms. Rewriting every batch for every
@@ -2535,8 +3127,10 @@ impl Renderer {
         // stream's fixed-point origin through the same `f64` camera subtraction
         // as a legacy batch (see `FrameProjection::batch_matrix_f64`). Every run
         // of a stream shares it, so streams — not batches — bound this cost.
+        // Skipped on the accelerated path, which writes the equivalent per-chunk
+        // translation table into its storage buffer instead.
         let stream_base = legacy_slots + draw_images.len();
-        let stream_slots: Vec<u32> = (0..self.instance_streams.len())
+        let stream_slots: Vec<u32> = (0..stream_slot_count)
             .map(|s| (stream_base + s) as u32)
             .collect();
         for (s, &slot) in stream_slots.iter().enumerate() {
@@ -2551,8 +3145,8 @@ impl Renderer {
         // Merged mesh chunks: one uniform slot per chunk, carrying the chunk's
         // fixed-point origin through the same `f64` camera subtraction. The tint
         // is opaque white because the per-batch colour is baked into each vertex.
-        let chunk_base = stream_base + self.instance_streams.len();
-        let chunk_slots: Vec<u32> = (0..self.mesh_chunks.len())
+        let chunk_base = stream_base + stream_slot_count;
+        let chunk_slots: Vec<u32> = (0..chunk_slot_count)
             .map(|c| (chunk_base + c) as u32)
             .collect();
         for (c, &slot) in chunk_slots.iter().enumerate() {
@@ -2563,10 +3157,40 @@ impl Renderer {
 
         // One `Queue::write_buffer` per page (vs. one per batch), reported as
         // `FrameStats::uniform_writes`. Only the compacted slot count is flushed.
-        let total_slots =
-            legacy_slots + draw_images.len() + self.instance_streams.len() + self.mesh_chunks.len();
+        let total_slots = legacy_slots + draw_images.len() + stream_slot_count + chunk_slot_count;
         let uniform_writes = self.uniforms.flush(&queue, total_slots);
         let uniform_ms = uniform_started.elapsed().as_secs_f64() * 1000.0;
+
+        // Accelerated tier per-frame camera data: the shared three-column camera
+        // uniform plus one translation column per resident stream/chunk. These
+        // are the ONLY per-frame writes the pulled path issues — the static
+        // instance/merged storage buffers are never rewritten on a camera move
+        // (the `camera_move_*` fences assert the upload counters stay flat).
+        if use_pulled {
+            if let Some(camera_buffer) = self.pulled_camera_buffer.as_ref() {
+                let columns = pulled_camera_columns(projection);
+                queue.write_buffer(camera_buffer, 0, &pulled_camera_bytes(&columns));
+            }
+            if let (Some(pulled), false) =
+                (self.pulled_lines.as_ref(), self.instance_streams.is_empty())
+            {
+                let table: Vec<[f32; 4]> = self
+                    .instance_streams
+                    .iter()
+                    .map(|stream| chunk_transform_column(projection, stream.origin))
+                    .collect();
+                queue.write_buffer(&pulled.chunk_table, 0, &chunk_transform_bytes(&table));
+            }
+            if let (Some(pulled), false) = (self.pulled_mesh.as_ref(), self.mesh_chunks.is_empty())
+            {
+                let table: Vec<[f32; 4]> = self
+                    .mesh_chunks
+                    .iter()
+                    .map(|chunk| chunk_transform_column(projection, chunk.origin))
+                    .collect();
+                queue.write_buffer(&pulled.chunk_table, 0, &chunk_transform_bytes(&table));
+            }
+        }
 
         let mut encode_state = EncodeState::new();
         // Coalesced-instanced bookkeeping (kept outside the render-pass block).
@@ -2661,37 +3285,69 @@ impl Renderer {
             // `A.tri, A.overlay, line, B.tri` order instead of drawing `A.tri`
             // after the line (fenced by
             // `merged_mesh_overlay_line_mesh_keeps_legacy_order`).
-            let mut pending: Option<(usize, u32, u32)> = None;
-            let mut pending_mesh: Option<(usize, u32, u32)> = None;
-            for &i in &opaque {
-                let batch = &self.batches[i];
-                let has_mesh = !batch.mesh_runs.is_empty();
-                let has_line = !batch.instanced.is_empty();
-                if !has_mesh && !has_line {
-                    // Legacy per-batch draw: flush both pending runs.
-                    if flush_pending_mesh(
-                        &mut pass,
-                        &mut encode_state,
-                        &mut pending_mesh,
-                        &self.uniforms,
-                        &chunk_slots,
-                        &self.mesh_chunks,
-                        mesh_pipeline_merged,
-                        mesh_pipeline_merged_mirrored,
-                    ) {
-                        mesh_draws += 1;
+            //
+            // On the accelerated tier the converted classes collapse to one draw
+            // each (see `use_pulled` above); the legacy per-batch branch below
+            // still runs for the residual unconverted opaque batches.
+            if use_pulled {
+                for &i in &opaque {
+                    let batch = &self.batches[i];
+                    let has_line = !batch.instanced.is_empty();
+                    let has_mesh = !batch.mesh_runs.is_empty();
+                    if has_line {
+                        instanced_batches += 1;
                     }
-                    if flush_pending_run(
-                        &mut pass,
-                        &mut encode_state,
-                        &mut pending,
-                        &self.uniforms,
-                        &stream_slots,
-                        &self.instance_streams,
-                        unit_segment_buffer,
-                        line_instanced_pipeline,
-                    ) {
+                    if has_mesh {
+                        merged_mesh_batches += 1;
+                    }
+                    if has_line || has_mesh {
+                        converted_batches += 1;
+                    }
+                }
+                if let (Some(pulled), Some(pipeline), Some(camera_bg)) = (
+                    self.pulled_lines.as_ref(),
+                    self.line_pulled_pipeline.as_ref(),
+                    self.pulled_camera_bind_group.as_ref(),
+                ) {
+                    for segment in &pulled.segments {
+                        encode_state.set_pipeline(&mut pass, pipeline);
+                        encode_state.set_bind_group0_static(&mut pass, camera_bg);
+                        encode_state.set_bind_group2(&mut pass, &segment.bind_group);
+                        // Two unit vertices expanded once per pulled instance; the
+                        // instance index addresses this segment's storage buffer.
+                        pass.draw(0..2, 0..segment.instance_count);
                         instanced_draws += 1;
+                    }
+                }
+                if let (Some(pulled), Some(camera_bg)) = (
+                    self.pulled_mesh.as_ref(),
+                    self.pulled_camera_bind_group.as_ref(),
+                ) {
+                    for segment in &pulled.segments {
+                        if segment.mirror_split > 0 {
+                            if let Some(pipeline) = self.mesh_pulled_pipeline.as_ref() {
+                                encode_state.set_pipeline(&mut pass, pipeline);
+                                encode_state.set_bind_group0_static(&mut pass, camera_bg);
+                                encode_state.set_bind_group2(&mut pass, &segment.bind_group);
+                                pass.draw(0..segment.mirror_split, 0..1);
+                                mesh_draws += 1;
+                            }
+                        }
+                        if segment.index_count > segment.mirror_split {
+                            if let Some(pipeline) = self.mesh_pulled_mirrored_pipeline.as_ref() {
+                                encode_state.set_pipeline(&mut pass, pipeline);
+                                encode_state.set_bind_group0_static(&mut pass, camera_bg);
+                                encode_state.set_bind_group2(&mut pass, &segment.bind_group);
+                                pass.draw(segment.mirror_split..segment.index_count, 0..1);
+                                mesh_draws += 1;
+                            }
+                        }
+                    }
+                }
+                for &i in &opaque {
+                    let batch = &self.batches[i];
+                    if !batch.instanced.is_empty() || !batch.mesh_runs.is_empty() {
+                        continue;
                     }
                     let (bind_group, offset) = self.uniforms.binding(self.frame_slots[i] as usize);
                     draw_batch(
@@ -2707,24 +3363,16 @@ impl Renderer {
                             mesh_pipeline
                         },
                     );
-                    continue;
                 }
-                converted_batches += 1;
-                if has_mesh {
-                    merged_mesh_batches += 1;
-                    // A batch over the vertex cap contributes several runs (one
-                    // per piece); a normal batch one.
-                    for run in &batch.mesh_runs {
-                        let contiguous = matches!(
-                            pending_mesh,
-                            Some((chunk, _, end))
-                                if chunk == run.chunk as usize && end == run.index_offset
-                        );
-                        if contiguous {
-                            let (chunk, start, _) = pending_mesh.expect("contiguous mesh run");
-                            pending_mesh = Some((chunk, start, run.index_offset + run.index_count));
-                            continue;
-                        }
+            } else {
+                let mut pending: Option<(usize, u32, u32)> = None;
+                let mut pending_mesh: Option<(usize, u32, u32)> = None;
+                for &i in &opaque {
+                    let batch = &self.batches[i];
+                    let has_mesh = !batch.mesh_runs.is_empty();
+                    let has_line = !batch.instanced.is_empty();
+                    if !has_mesh && !has_line {
+                        // Legacy per-batch draw: flush both pending runs.
                         if flush_pending_mesh(
                             &mut pass,
                             &mut encode_state,
@@ -2737,8 +3385,6 @@ impl Renderer {
                         ) {
                             mesh_draws += 1;
                         }
-                        // A new mesh run starts: flush the pending line run so the
-                        // mesh keeps its interleaved position among the lines.
                         if flush_pending_run(
                             &mut pass,
                             &mut encode_state,
@@ -2751,39 +3397,41 @@ impl Renderer {
                         ) {
                             instanced_draws += 1;
                         }
-                        pending_mesh = Some((
-                            run.chunk as usize,
-                            run.index_offset,
-                            run.index_offset + run.index_count,
-                        ));
+                        let (bind_group, offset) =
+                            self.uniforms.binding(self.frame_slots[i] as usize);
+                        draw_batch(
+                            &mut pass,
+                            &mut encode_state,
+                            &self.batches[i],
+                            bind_group,
+                            offset,
+                            line_pipeline,
+                            if self.batches[i].mirrored {
+                                mesh_pipeline_mirrored
+                            } else {
+                                mesh_pipeline
+                            },
+                        );
+                        continue;
                     }
-                }
-                if has_line {
-                    // Instanced batch: draw each of its runs in order. A batch
-                    // over the stream cap contributes several runs; a normal
-                    // batch one.
-                    instanced_batches += 1;
-                    for run in &batch.instanced {
-                        if let Some((stream, _, end)) = pending {
-                            if stream == run.stream as usize && end == run.offset {
-                                let start = pending.map_or(0, |pending| pending.1);
-                                pending = Some((stream, start, run.offset + run.count));
+                    converted_batches += 1;
+                    if has_mesh {
+                        merged_mesh_batches += 1;
+                        // A batch over the vertex cap contributes several runs (one
+                        // per piece); a normal batch one.
+                        for run in &batch.mesh_runs {
+                            let contiguous = matches!(
+                                pending_mesh,
+                                Some((chunk, _, end))
+                                    if chunk == run.chunk as usize && end == run.index_offset
+                            );
+                            if contiguous {
+                                let (chunk, start, _) = pending_mesh.expect("contiguous mesh run");
+                                pending_mesh =
+                                    Some((chunk, start, run.index_offset + run.index_count));
                                 continue;
                             }
-                        }
-                        // This line run cannot extend the pending run, so the
-                        // line-coalescing window ends here. If a line run is
-                        // actually pending (a draw is about to be issued), flush
-                        // the pending merged-mesh run *first* so a mesh that
-                        // would otherwise merge across this line batch keeps its
-                        // legacy position relative to it: legacy order for
-                        // `mesh A + overlay A`, line, `mesh B` is
-                        // `A.tri, A.overlay, line, B.tri`. Without this flush the
-                        // merged `A+B.tri` run would draw after the line. Exact
-                        // depth ties still resolve line-wins, but non-exact
-                        // coplanar fragments could flip on other vendors.
-                        if pending.is_some()
-                            && flush_pending_mesh(
+                            if flush_pending_mesh(
                                 &mut pass,
                                 &mut encode_state,
                                 &mut pending_mesh,
@@ -2792,49 +3440,114 @@ impl Renderer {
                                 &self.mesh_chunks,
                                 mesh_pipeline_merged,
                                 mesh_pipeline_merged_mirrored,
-                            )
-                        {
-                            mesh_draws += 1;
+                            ) {
+                                mesh_draws += 1;
+                            }
+                            // A new mesh run starts: flush the pending line run so the
+                            // mesh keeps its interleaved position among the lines.
+                            if flush_pending_run(
+                                &mut pass,
+                                &mut encode_state,
+                                &mut pending,
+                                &self.uniforms,
+                                &stream_slots,
+                                &self.instance_streams,
+                                unit_segment_buffer,
+                                line_instanced_pipeline,
+                            ) {
+                                instanced_draws += 1;
+                            }
+                            pending_mesh = Some((
+                                run.chunk as usize,
+                                run.index_offset,
+                                run.index_offset + run.index_count,
+                            ));
                         }
-                        if flush_pending_run(
-                            &mut pass,
-                            &mut encode_state,
-                            &mut pending,
-                            &self.uniforms,
-                            &stream_slots,
-                            &self.instance_streams,
-                            unit_segment_buffer,
-                            line_instanced_pipeline,
-                        ) {
-                            instanced_draws += 1;
+                    }
+                    if has_line {
+                        // Instanced batch: draw each of its runs in order. A batch
+                        // over the stream cap contributes several runs; a normal
+                        // batch one.
+                        instanced_batches += 1;
+                        for run in &batch.instanced {
+                            // Global instance index within the stream's buffer
+                            // (`base` is 0 on the universal tier, where each
+                            // stream owns its buffer).
+                            let base = self.instance_streams[run.stream as usize].base;
+                            let start = base + run.offset;
+                            let end = start + run.count;
+                            if let Some((stream, _, pending_end)) = pending {
+                                if stream == run.stream as usize && pending_end == start {
+                                    let start = pending.map_or(0, |pending| pending.1);
+                                    pending = Some((stream, start, end));
+                                    continue;
+                                }
+                            }
+                            // This line run cannot extend the pending run, so the
+                            // line-coalescing window ends here. If a line run is
+                            // actually pending (a draw is about to be issued), flush
+                            // the pending merged-mesh run *first* so a mesh that
+                            // would otherwise merge across this line batch keeps its
+                            // legacy position relative to it: legacy order for
+                            // `mesh A + overlay A`, line, `mesh B` is
+                            // `A.tri, A.overlay, line, B.tri`. Without this flush the
+                            // merged `A+B.tri` run would draw after the line. Exact
+                            // depth ties still resolve line-wins, but non-exact
+                            // coplanar fragments could flip on other vendors.
+                            if pending.is_some()
+                                && flush_pending_mesh(
+                                    &mut pass,
+                                    &mut encode_state,
+                                    &mut pending_mesh,
+                                    &self.uniforms,
+                                    &chunk_slots,
+                                    &self.mesh_chunks,
+                                    mesh_pipeline_merged,
+                                    mesh_pipeline_merged_mirrored,
+                                )
+                            {
+                                mesh_draws += 1;
+                            }
+                            if flush_pending_run(
+                                &mut pass,
+                                &mut encode_state,
+                                &mut pending,
+                                &self.uniforms,
+                                &stream_slots,
+                                &self.instance_streams,
+                                unit_segment_buffer,
+                                line_instanced_pipeline,
+                            ) {
+                                instanced_draws += 1;
+                            }
+                            pending = Some((run.stream as usize, start, end));
                         }
-                        pending = Some((run.stream as usize, run.offset, run.offset + run.count));
                     }
                 }
-            }
-            if flush_pending_mesh(
-                &mut pass,
-                &mut encode_state,
-                &mut pending_mesh,
-                &self.uniforms,
-                &chunk_slots,
-                &self.mesh_chunks,
-                mesh_pipeline_merged,
-                mesh_pipeline_merged_mirrored,
-            ) {
-                mesh_draws += 1;
-            }
-            if flush_pending_run(
-                &mut pass,
-                &mut encode_state,
-                &mut pending,
-                &self.uniforms,
-                &stream_slots,
-                &self.instance_streams,
-                unit_segment_buffer,
-                line_instanced_pipeline,
-            ) {
-                instanced_draws += 1;
+                if flush_pending_mesh(
+                    &mut pass,
+                    &mut encode_state,
+                    &mut pending_mesh,
+                    &self.uniforms,
+                    &chunk_slots,
+                    &self.mesh_chunks,
+                    mesh_pipeline_merged,
+                    mesh_pipeline_merged_mirrored,
+                ) {
+                    mesh_draws += 1;
+                }
+                if flush_pending_run(
+                    &mut pass,
+                    &mut encode_state,
+                    &mut pending,
+                    &self.uniforms,
+                    &stream_slots,
+                    &self.instance_streams,
+                    unit_segment_buffer,
+                    line_instanced_pipeline,
+                ) {
+                    instanced_draws += 1;
+                }
             }
             // Pass 2 — transparent, back-to-front. Depth writes are off so each
             // blended layer composites over the already-resolved opaque pass.
@@ -2948,6 +3661,13 @@ impl Renderer {
             mesh_draws,
             merged_mesh_batches,
             mesh_chunks: self.mesh_chunks.len(),
+            tier: self.render_tier,
+            accelerated: use_pulled,
+            accelerated_draws: if use_pulled {
+                instanced_draws + mesh_draws
+            } else {
+                0
+            },
         })
     }
 
@@ -3031,6 +3751,64 @@ impl Renderer {
     /// toggling to switch the resident scene onto the other path.
     pub fn set_mesh_merging(&mut self, enabled: bool) {
         self.mesh_merging = enabled;
+    }
+
+    /// The live draw tier (see [`RenderTier`]), chosen once per device in
+    /// [`Renderer::initialize_with_device`]. Before a device exists this is
+    /// [`RenderTier::Universal`].
+    pub fn render_tier(&self) -> RenderTier {
+        self.render_tier
+    }
+
+    /// Test hook: override the storage-buffer capability the tier decision reads.
+    ///
+    /// `Some(false)` simulates a device without vertex-stage storage buffers (the
+    /// automatic downgrade a WebGL2 device takes); `Some(true)` forces the
+    /// accelerated tier so it can be exercised on a device that has storage
+    /// buffers; `None` restores the real probe. Takes effect on the next
+    /// `initialize_with_device`.
+    pub fn set_storage_buffer_support_override(&mut self, support: Option<bool>) {
+        self.storage_support_override = support;
+    }
+
+    /// Number of instances in the resident accelerated line storage (0 on the
+    /// universal tier).
+    pub fn pulled_line_instance_count(&self) -> u32 {
+        self.pulled_lines.as_ref().map_or(0, |pulled| {
+            pulled
+                .segments
+                .iter()
+                .map(|segment| segment.instance_count)
+                .sum()
+        })
+    }
+
+    /// Number of vertices in the resident accelerated merged-mesh storage (0 on
+    /// the universal tier).
+    pub fn pulled_mesh_vertex_count(&self) -> u32 {
+        self.pulled_mesh.as_ref().map_or(0, |pulled| {
+            pulled
+                .segments
+                .iter()
+                .map(|segment| segment.vertex_count)
+                .sum()
+        })
+    }
+
+    /// Number of storage segments the accelerated line class is split into (a
+    /// real scene can exceed `max_storage_buffer_binding_size`).
+    pub fn pulled_line_segment_count(&self) -> usize {
+        self.pulled_lines
+            .as_ref()
+            .map_or(0, |pulled| pulled.segments.len())
+    }
+
+    /// Number of storage segments the accelerated merged-mesh class is split
+    /// into.
+    pub fn pulled_mesh_segment_count(&self) -> usize {
+        self.pulled_mesh
+            .as_ref()
+            .map_or(0, |pulled| pulled.segments.len())
     }
 
     /// Override the maximum vertices per merged mesh chunk (default

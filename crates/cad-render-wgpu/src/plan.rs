@@ -104,6 +104,54 @@ pub(crate) fn slot_location(slot: usize, slots_per_page: usize, slot_size: u32) 
     )
 }
 
+/// Decide the draw tier once per device.
+///
+/// The accelerated tier (one draw per class via vertex-stage storage-buffer
+/// pulling) needs a **read-only storage buffer in the vertex stage**. That is
+/// core WebGPU but absent from WebGL2, so it is capability-gated here rather
+/// than assumed:
+///
+/// * the backend's capability snapshot must report storage buffers (WebGL2 does
+///   not; `caps_for` already encodes this);
+/// * `max_storage_buffers_per_shader_stage` must be at least 1 (a device may
+///   report 0 when the limit is disabled);
+/// * `max_storage_buffer_binding_size` must be large enough to bind a
+///   meaningful pulled buffer.
+///
+/// The renderer **never requests a feature** from a host-provided device; it
+/// only reads `limits()`/`features()` and downgrades silently-but-labelled (the
+/// live tier is reported by [`Renderer::render_tier`] and on
+/// [`FrameStats::tier`]). Pure, so the decision is unit-testable without a GPU.
+pub(crate) fn tier_for(
+    storage_buffers: bool,
+    limits: &wgpu::Limits,
+    storage_support_override: Option<bool>,
+) -> RenderTier {
+    // Test hook: a caller can strip storage-buffer support to exercise the
+    // automatic downgrade without a WebGL2 device.
+    if storage_support_override == Some(false) {
+        return RenderTier::Universal;
+    }
+    let forced_on = storage_support_override == Some(true);
+    if !forced_on {
+        if !storage_buffers {
+            return RenderTier::Universal;
+        }
+        if limits.max_storage_buffers_per_shader_stage < 1 {
+            return RenderTier::Universal;
+        }
+        if limits.max_storage_buffer_binding_size < MIN_PULLED_BINDING_BYTES {
+            return RenderTier::Universal;
+        }
+    }
+    RenderTier::Accelerated
+}
+
+/// Smallest `max_storage_buffer_binding_size` a device must report for the
+/// accelerated tier to be selected. Below this a pulled buffer could not hold
+/// even a tiny scene, so the universal per-run path is the honest choice.
+pub(crate) const MIN_PULLED_BINDING_BYTES: u64 = 64 * 1024;
+
 /// Per-frame count of render-pass state-setting calls actually issued.
 ///
 /// The counters are incremented at the call site (never derived from batch
@@ -182,6 +230,23 @@ impl EncodeState {
         pass.set_bind_group(0, bind_group, &[offset]);
         self.last_bind_group0 = Some(bind_group.clone());
         self.last_bind_offset0 = offset;
+        self.tally.set_bind_group_calls += 1;
+    }
+
+    /// Bind group 0 without a dynamic offset (the accelerated tier's shared
+    /// pulled-camera uniform). Kept separate from [`EncodeState::set_bind_group0`]
+    /// so the dynamic-offset dedup state cannot be confused by a static bind.
+    pub(crate) fn set_bind_group0_static(
+        &mut self,
+        pass: &mut wgpu::RenderPass<'_>,
+        bind_group: &wgpu::BindGroup,
+    ) {
+        if self.last_bind_group0.as_ref() == Some(bind_group) && self.last_bind_offset0 == 0 {
+            return;
+        }
+        pass.set_bind_group(0, bind_group, &[]);
+        self.last_bind_group0 = Some(bind_group.clone());
+        self.last_bind_offset0 = 0;
         self.tally.set_bind_group_calls += 1;
     }
 
@@ -1069,6 +1134,12 @@ pub(crate) const LINE_SHADER: &str = include_str!("../shaders/line.wgsl");
 // dominant CAD primitive class collapses to one draw call per contiguous run.
 pub(crate) const LINE_INSTANCED_SHADER: &str = include_str!("../shaders/line_instanced.wgsl");
 
+// Accelerated (vertex-pulling) instanced line shader: one draw covers every
+// instanced line segment of the resident scene by pulling the per-instance
+// record from a read-only vertex-stage storage buffer. Capability-gated (see
+// `Renderer::initialize_with_device`); deliberately not WebGL2-safe.
+pub(crate) const LINE_PULLED_SHADER: &str = include_str!("../shaders/line_pulled.wgsl");
+
 // Mesh shader. Shading is intentionally explicit: a single fixed headlight
 // direction, N·L diffuse plus a constant ambient term. There is no claim of
 // physically based rendering, environment lighting or specular response.
@@ -1078,6 +1149,11 @@ pub(crate) const MESH_SHADER: &str = include_str!("../shaders/mesh.wgsl");
 // per-vertex `entity_flags` attribute and a per-vertex baked colour (the
 // per-batch tint is folded in at upload, see `push_mesh_vertices`).
 pub(crate) const MESH_MERGED_SHADER: &str = include_str!("../shaders/mesh_merged.wgsl");
+
+// Accelerated (vertex-pulling) merged-mesh shader: one indexed draw covers
+// every flat-merged mesh chunk by pulling vertices and triangle indices from
+// read-only vertex-stage storage buffers. Capability-gated; not WebGL2-safe.
+pub(crate) const MESH_PULLED_SHADER: &str = include_str!("../shaders/mesh_pulled.wgsl");
 
 // Raster image shader. It samples a texture and modulates it by a per-image
 // alpha/colour factor; there is no lighting model.
@@ -1186,6 +1262,25 @@ pub(crate) fn line_instance_layout() -> wgpu::VertexBufferLayout<'static> {
     ];
     wgpu::VertexBufferLayout {
         array_stride: u64::from(LINE_INSTANCE_STRIDE),
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &ATTRIBUTES,
+    }
+}
+
+/// Per-instance layout of the **accelerated** line buffer: the same attributes at
+/// the same offsets, but a 64-byte stride so the same buffer is also a legal
+/// `array<PulledLine>` storage binding (WGSL rounds the 56-byte struct up to its
+/// 16-byte alignment). The extra 8 bytes are the per-chunk index the pulled
+/// shader reads; the universal shaders ignore them.
+pub(crate) fn line_instance_layout_64() -> wgpu::VertexBufferLayout<'static> {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
+        1 => Float32x4,
+        2 => Float32x4,
+        3 => Float32x4,
+        4 => Uint32x2
+    ];
+    wgpu::VertexBufferLayout {
+        array_stride: u64::from(PULLED_LINE_STRIDE),
         step_mode: wgpu::VertexStepMode::Instance,
         attributes: &ATTRIBUTES,
     }
@@ -1659,6 +1754,205 @@ pub(crate) fn push_line_instances(
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Accelerated tier: vertex pulling (capability-gated)
+// ---------------------------------------------------------------------------
+//
+// The universal path coalesces draws per *chunk* (a per-chunk `f64` origin
+// bounds every stored coordinate to `MAX_STREAM_RADIUS`, so a stream buffer is
+// never oversized and the f32 ulp stays under ~1 µm). That still leaves one
+// draw per contiguous chunk run. The accelerated tier collapses the converted
+// opaque classes to **one draw per class** by concatenating every chunk into a
+// single storage buffer and pulling each primitive with
+// `@builtin(instance_index)` / `@builtin(vertex_index)`.
+//
+// What is *not* relaxed: the per-chunk `f64` reduction still happens on the CPU
+// at upload (stored coordinate = `(world - origin) as f32`), and the per-chunk
+// translation column is still `FrameProjection::batch_matrix_f64(origin)`'s last
+// column. The shader only adds a radius-bounded `f32` position to that column,
+// so the precision contract is byte-identical to the universal path.
+//
+// The tier requires a read-only storage buffer in the vertex stage, which
+// WebGL2 does not provide. It is chosen once per device in
+// `Renderer::initialize_with_device` from the device's own limits/backend and
+// never requests a feature from a host-provided device.
+
+/// Byte stride of one [`PulledLine`]: three `vec4<f32>` plus one `vec4<u32>`.
+pub(crate) const PULLED_LINE_STRIDE: u32 = 64;
+
+/// Byte stride of one [`PulledMeshVertex`]: three `vec4<f32>` plus one
+/// `vec4<u32>`.
+pub(crate) const PULLED_MESH_VERTEX_STRIDE: u32 = 64;
+
+/// Byte size of the per-class pulled camera uniform: three `vec4<f32>` columns.
+pub(crate) const PULLED_CAMERA_BYTES: u32 = 48;
+
+/// One pulled line segment: the universal [`LineInstance`] fields plus the
+/// per-chunk origin index. `vec4` members (not `vec3`/`uvec2`) so the storage
+/// array element stride is exactly [`PULLED_LINE_STRIDE`] with no implicit
+/// padding.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct PulledLine {
+    pub(crate) p0_width: [f32; 4],
+    pub(crate) p1_pad: [f32; 4],
+    pub(crate) rgba: [f32; 4],
+    /// `[0]` = renderer pick key, `[1]` = [`INSTANCE_FLAG_*`] bits,
+    /// `[2]` = per-chunk origin index, `[3]` = reserved (0).
+    pub(crate) meta: [u32; 4],
+}
+
+/// One pulled merged-mesh vertex: the universal [`MeshVertex`] fields plus the
+/// per-chunk origin index, in a storage-friendly `vec4` layout.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct PulledMeshVertex {
+    /// `xyz` = chunk-relative position, `w` reserved (0).
+    pub(crate) position: [f32; 4],
+    /// `xyz` = repaired normal, `w` reserved (0).
+    pub(crate) normal: [f32; 4],
+    /// `rgb` = baked per-vertex colour, `a` reserved (0).
+    pub(crate) color: [f32; 4],
+    /// `[0]` = renderer pick key, `[1]` = [`INSTANCE_FLAG_*`] bits,
+    /// `[2]` = per-chunk origin index, `[3]` = reserved (0).
+    pub(crate) meta: [u32; 4],
+}
+
+/// The exact packed bytes of `lines` (one contiguous storage payload).
+pub(crate) fn pulled_line_bytes(lines: &[PulledLine]) -> Vec<u8> {
+    bytemuck::cast_slice(lines).to_vec()
+}
+
+/// The exact packed bytes of `vertices` (one contiguous storage payload).
+pub(crate) fn pulled_mesh_vertex_bytes(vertices: &[PulledMeshVertex]) -> Vec<u8> {
+    bytemuck::cast_slice(vertices).to_vec()
+}
+
+/// The packed `f32` bytes of a per-chunk translation-column table.
+pub(crate) fn chunk_transform_bytes(columns: &[[f32; 4]]) -> Vec<u8> {
+    bytemuck::cast_slice(columns).to_vec()
+}
+
+/// Concatenate `streams` into one pulled line storage payload, stamping each
+/// record with `chunk_base + its stream index`.
+///
+/// Streams are visited in index order, which is the converted-batch order, so
+/// the concatenated sequence preserves the exact draw order the per-stream runs
+/// had: one draw over `0..total` rasterizes the segments in the same order.
+/// `chunk_base` is the index of `streams[0]` in the whole-scene chunk table, so
+/// a class split into binding-sized segments still addresses the shared table.
+pub(crate) fn build_pulled_lines(streams: &[&[LineInstance]], chunk_base: u32) -> Vec<PulledLine> {
+    let total: usize = streams.iter().map(|s| s.len()).sum();
+    let mut out = Vec::with_capacity(total);
+    for (offset, instances) in streams.iter().enumerate() {
+        let chunk = chunk_base + offset as u32;
+        for inst in instances.iter() {
+            out.push(PulledLine {
+                p0_width: inst.p0_width,
+                p1_pad: inst.p1_pad,
+                rgba: inst.rgba,
+                meta: [inst.id_flags[0], inst.id_flags[1], chunk, 0],
+            });
+        }
+    }
+    out
+}
+
+/// Concatenate `chunks` into one pulled vertex storage payload, stamping each
+/// vertex with `chunk_base + its chunk index`.
+pub(crate) fn build_pulled_mesh_vertices(
+    chunks: &[&[MeshVertex]],
+    chunk_base: u32,
+) -> Vec<PulledMeshVertex> {
+    let total: usize = chunks.iter().map(|c| c.len()).sum();
+    let mut out = Vec::with_capacity(total);
+    for (offset, vertices) in chunks.iter().enumerate() {
+        let chunk = chunk_base + offset as u32;
+        for v in vertices.iter() {
+            out.push(PulledMeshVertex {
+                position: [v.position[0], v.position[1], v.position[2], 0.0],
+                normal: [v.normal[0], v.normal[1], v.normal[2], 0.0],
+                color: [v.color[0], v.color[1], v.color[2], 0.0],
+                meta: [v.entity_flags[0], v.entity_flags[1], chunk, 0],
+            });
+        }
+    }
+    out
+}
+
+/// Build the whole-scene triangle index list, rebased onto the concatenated
+/// vertex buffer and split into a **non-mirrored** then a **mirrored** range.
+///
+/// The mirrored range is emitted after the non-mirrored one so a single draw per
+/// pipeline can cover each winding class (a mirrored chunk culls the opposite
+/// face, which is fixed-function state). The returned value is
+/// `(indices, mirror_split)` where `mirror_split` is the number of non-mirrored
+/// indices.
+///
+/// `chunks` is `(local_indices, vertex_count, mirrored)` per resident chunk, in
+/// chunk order; each chunk's vertices occupy
+/// `[vertex_base, vertex_base + vertex_count)` of the concatenated buffer.
+pub(crate) fn build_pulled_mesh_indices_with_bases(
+    chunks: &[(&[u32], u32, bool)],
+) -> (Vec<u32>, u32) {
+    let mut vertex_base = Vec::with_capacity(chunks.len());
+    let mut base = 0u32;
+    for (_, vertex_count, _) in chunks {
+        vertex_base.push(base);
+        base += *vertex_count;
+    }
+    let mut indices = Vec::new();
+    for (i, (local, _, mirrored)) in chunks.iter().enumerate() {
+        if *mirrored {
+            continue;
+        }
+        let vb = vertex_base[i];
+        indices.extend(local.iter().map(|v| v + vb));
+    }
+    let mirror_split = indices.len() as u32;
+    for (i, (local, _, mirrored)) in chunks.iter().enumerate() {
+        if !*mirrored {
+            continue;
+        }
+        let vb = vertex_base[i];
+        indices.extend(local.iter().map(|v| v + vb));
+    }
+    (indices, mirror_split)
+}
+
+/// The per-chunk translation column of `projection.batch_matrix_f64(origin)`.
+///
+/// The first three columns are origin-independent, so one camera uniform serves
+/// every chunk; only this last column (the `f64`-reduced translation) is per
+/// chunk. Reusing the exact column the universal per-stream uniform carries
+/// makes the pulled multiply byte-identical.
+pub(crate) fn chunk_transform_column(projection: FrameProjection, origin: [f64; 3]) -> [f32; 4] {
+    let m = projection.batch_matrix_f64(origin);
+    [m[12], m[13], m[14], m[15]]
+}
+
+/// The three origin-independent columns of the per-chunk transform.
+pub(crate) fn pulled_camera_columns(projection: FrameProjection) -> [[f32; 4]; 3] {
+    let m = projection.batch_matrix_f64([0.0, 0.0, 0.0]);
+    [
+        [m[0], m[1], m[2], m[3]],
+        [m[4], m[5], m[6], m[7]],
+        [m[8], m[9], m[10], m[11]],
+    ]
+}
+
+/// The packed `f32` bytes of the pulled camera uniform (three columns).
+pub(crate) fn pulled_camera_bytes(columns: &[[f32; 4]; 3]) -> [u8; PULLED_CAMERA_BYTES as usize] {
+    let mut bytes = [0u8; PULLED_CAMERA_BYTES as usize];
+    for (col, column) in columns.iter().enumerate() {
+        for (row, value) in column.iter().enumerate() {
+            let at = (col * 4 + row) * 4;
+            bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+    }
+    bytes
 }
 
 /// One image vertex: world-space position (`@location(0)`) plus a normalized
@@ -3104,6 +3398,207 @@ impl FrameProjection {
             FrameProjection::Perspective { vp } => {
                 translate_left(&vp, [origin[0] as f32, origin[1] as f32, origin[2] as f32])
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod accelerated_tier_tests {
+    use super::*;
+
+    #[test]
+    fn pulled_strides_match_their_wgsl_vec4_layouts() {
+        // The WGSL structs are four `vec4`s (16 B each); the CPU structs must be
+        // exactly that stride or the storage array indexing is wrong.
+        assert_eq!(
+            std::mem::size_of::<PulledLine>(),
+            PULLED_LINE_STRIDE as usize
+        );
+        assert_eq!(
+            std::mem::size_of::<PulledMeshVertex>(),
+            PULLED_MESH_VERTEX_STRIDE as usize
+        );
+        assert_eq!(PULLED_CAMERA_BYTES, 48);
+        // The layout is alignment-clean for the storage array stride.
+        assert_eq!(std::mem::align_of::<PulledLine>(), 4);
+        assert_eq!(std::mem::align_of::<PulledMeshVertex>(), 4);
+    }
+
+    #[test]
+    fn tier_gate_requires_storage_buffers_and_a_usable_binding() {
+        let limits = wgpu::Limits::default();
+        // A capable device (storage buffers, defaults) selects accelerated.
+        assert_eq!(
+            tier_for(true, &limits, None),
+            RenderTier::Accelerated,
+            "a storage-buffer device must select the accelerated tier"
+        );
+        // WebGL2 (no storage buffers) downgrades silently.
+        assert_eq!(
+            tier_for(false, &limits, None),
+            RenderTier::Universal,
+            "a device without storage buffers must downgrade"
+        );
+        // The test hook can strip support on a capable device.
+        assert_eq!(tier_for(true, &limits, Some(false)), RenderTier::Universal);
+        // ...and force it on a device that reports none, so the tier is testable
+        // on any adapter.
+        assert_eq!(
+            tier_for(false, &limits, Some(true)),
+            RenderTier::Accelerated
+        );
+    }
+
+    #[test]
+    fn tier_gate_rejects_zero_storage_buffers_and_tiny_bindings() {
+        let limits = wgpu::Limits {
+            max_storage_buffers_per_shader_stage: 0,
+            ..wgpu::Limits::default()
+        };
+        assert_eq!(tier_for(true, &limits, None), RenderTier::Universal);
+        let limits = wgpu::Limits {
+            max_storage_buffer_binding_size: MIN_PULLED_BINDING_BYTES - 1,
+            ..wgpu::Limits::default()
+        };
+        assert_eq!(tier_for(true, &limits, None), RenderTier::Universal);
+    }
+
+    fn instance(p0: [f32; 3], p1: [f32; 3], key: u32, flags: u32) -> LineInstance {
+        LineInstance {
+            p0_width: [p0[0], p0[1], p0[2], 0.0],
+            p1_pad: [p1[0], p1[1], p1[2], 0.0],
+            rgba: [0.25, 0.5, 0.75, 1.0],
+            id_flags: [key, flags],
+        }
+    }
+
+    #[test]
+    fn pulled_lines_concatenate_streams_in_order_and_stamp_the_chunk() {
+        let s0 = vec![
+            instance([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 1, 5),
+            instance([0.0, 1.0, 0.0], [1.0, 1.0, 0.0], 2, 5),
+        ];
+        let s1 = vec![instance([2.0, 0.0, 0.0], [3.0, 0.0, 0.0], 3, 1)];
+        let streams: Vec<&[LineInstance]> = vec![&s0, &s1];
+        let pulled = build_pulled_lines(&streams, 0);
+        assert_eq!(pulled.len(), 3);
+        // Stream order preserved, each record stamped with its stream index.
+        assert_eq!(pulled[0].meta, [1, 5, 0, 0]);
+        assert_eq!(pulled[1].meta, [2, 5, 0, 0]);
+        assert_eq!(pulled[2].meta, [3, 1, 1, 0]);
+        // Geometry fields are carried verbatim.
+        assert_eq!(pulled[2].p0_width, [2.0, 0.0, 0.0, 0.0]);
+        assert_eq!(pulled[2].p1_pad, [3.0, 0.0, 0.0, 0.0]);
+        assert_eq!(pulled[2].rgba, [0.25, 0.5, 0.75, 1.0]);
+    }
+
+    fn mesh_vertex(position: [f32; 3], key: u32) -> MeshVertex {
+        MeshVertex {
+            position,
+            normal: [0.0, 0.0, 1.0],
+            color: [0.5, 0.5, 0.5],
+            entity_flags: [key, 0],
+        }
+    }
+
+    #[test]
+    fn pulled_mesh_vertices_are_stamped_with_their_chunk() {
+        let c0 = vec![
+            mesh_vertex([0.0, 0.0, 0.0], 1),
+            mesh_vertex([1.0, 0.0, 0.0], 1),
+        ];
+        let c1 = vec![mesh_vertex([2.0, 0.0, 0.0], 2)];
+        let chunks: Vec<&[MeshVertex]> = vec![&c0, &c1];
+        let pulled = build_pulled_mesh_vertices(&chunks, 0);
+        assert_eq!(pulled.len(), 3);
+        assert_eq!(pulled[0].meta, [1, 0, 0, 0]);
+        assert_eq!(pulled[1].meta, [1, 0, 0, 0]);
+        assert_eq!(pulled[2].meta, [2, 0, 1, 0]);
+        assert_eq!(pulled[2].position, [2.0, 0.0, 0.0, 0.0]);
+        assert_eq!(pulled[2].color, [0.5, 0.5, 0.5, 0.0]);
+    }
+
+    #[test]
+    fn pulled_mesh_indices_rebase_and_split_mirrored_chunks_last() {
+        // Chunk 0: 4 vertices, non-mirrored. Chunk 1: 3 vertices, mirrored.
+        let i0: Vec<u32> = vec![0, 2, 1, 0, 3, 2];
+        let i1: Vec<u32> = vec![0, 1, 2];
+        let chunks: Vec<(&[u32], u32, bool)> =
+            vec![(i0.as_slice(), 4, false), (i1.as_slice(), 3, true)];
+        let (indices, mirror_split) = build_pulled_mesh_indices_with_bases(&chunks);
+        // Non-mirrored first (unchanged, base 0), then mirrored rebased by +4.
+        assert_eq!(indices, vec![0, 2, 1, 0, 3, 2, 4, 5, 6]);
+        assert_eq!(mirror_split, 6);
+    }
+
+    #[test]
+    fn pulled_mesh_indices_with_no_mirrored_chunks_have_a_full_split() {
+        let i0: Vec<u32> = vec![0, 1, 2];
+        let chunks: Vec<(&[u32], u32, bool)> = vec![(i0.as_slice(), 3, false)];
+        let (indices, mirror_split) = build_pulled_mesh_indices_with_bases(&chunks);
+        assert_eq!(indices, vec![0, 1, 2]);
+        assert_eq!(mirror_split, 3);
+    }
+
+    #[test]
+    fn pulled_camera_columns_are_origin_independent_and_match_the_batch_matrix() {
+        let projection = FrameProjection::Ortho {
+            sx: 0.03125,
+            sy: 0.03125,
+            center: [1.0e6, 2.0e6, 0.0],
+            z_plane: 0.0,
+        };
+        let columns = pulled_camera_columns(projection);
+        // The first three columns of a per-chunk matrix must not depend on the
+        // chunk origin: one camera uniform serves every chunk.
+        let m = projection.batch_matrix_f64([1.0e6, 2.0e6, 0.0]);
+        assert_eq!(columns[0], [m[0], m[1], m[2], m[3]]);
+        assert_eq!(columns[1], [m[4], m[5], m[6], m[7]]);
+        assert_eq!(columns[2], [m[8], m[9], m[10], m[11]]);
+        // And the chunk column is exactly the per-chunk matrix's last column, so
+        // `mat4x4(c0, c1, c2, t)` reproduces `batch_matrix_f64(origin)`.
+        let origin = [1.0e6 + 123.5, 2.0e6 - 77.25, 0.0];
+        let t = chunk_transform_column(projection, origin);
+        let mo = projection.batch_matrix_f64(origin);
+        assert_eq!(t, [mo[12], mo[13], mo[14], mo[15]]);
+    }
+
+    #[test]
+    fn chunk_transform_column_keeps_the_f64_camera_reduction() {
+        // A large drawing coordinate: the translation column must be the f64
+        // reduction `sx * (origin - center)`, not a large-magnitude f32 origin.
+        let projection = FrameProjection::Ortho {
+            sx: 0.001,
+            sy: 0.001,
+            center: [1.0e7, 0.0, 0.0],
+            z_plane: 0.0,
+        };
+        let origin = [1.0e7 + 1000.0, 0.0, 0.0];
+        let t = chunk_transform_column(projection, origin);
+        assert!((t[0] - 1.0).abs() < 1e-4, "expected ~1.0, got {t:?}");
+    }
+
+    #[test]
+    fn pulled_camera_bytes_are_three_columns_little_endian() {
+        let columns = [
+            [1.0f32, 2.0, 3.0, 4.0],
+            [5.0, 6.0, 7.0, 8.0],
+            [9.0, 10.0, 11.0, 12.0],
+        ];
+        let bytes = pulled_camera_bytes(&columns);
+        assert_eq!(bytes.len(), PULLED_CAMERA_BYTES as usize);
+        for (i, value) in [
+            1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ]
+        .iter()
+        .enumerate()
+        {
+            let at = i * 4;
+            assert_eq!(
+                &bytes[at..at + 4],
+                &value.to_le_bytes(),
+                "column word {i} must be little-endian"
+            );
         }
     }
 }

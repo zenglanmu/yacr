@@ -138,6 +138,36 @@ impl ActiveBackend {
     }
 }
 
+/// Which draw organization the renderer is using for the converted opaque
+/// classes.
+///
+/// Chosen **once per device** in [`Renderer::initialize_with_device`] from the
+/// device's own backend/limits, never by requesting a feature from a
+/// host-provided device. The live tier is reported by [`Renderer::render_tier`]
+/// and on every [`FrameStats::tier`], so a downgrade is labelled rather than
+/// silent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderTier {
+    /// Per-run draws: the WebGL2-safe path. Opaque lines/meshes coalesce into
+    /// instanced/merged runs bounded by the per-chunk stream count, each drawn
+    /// with its own per-stream uniform.
+    Universal,
+    /// One draw per converted class per pass: primitives are pulled from
+    /// read-only vertex-stage storage buffers (see `shaders/*_pulled.wgsl`).
+    /// Requires storage buffers in the vertex stage (absent on WebGL2).
+    Accelerated,
+}
+
+impl RenderTier {
+    /// Stable lowercase name for UI/CLI/diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RenderTier::Universal => "universal",
+            RenderTier::Accelerated => "accelerated",
+        }
+    }
+}
+
 pub struct BackendCapabilities {
     pub actual: ActiveBackend,
     /// Stable API name obtained from the shared device's adapter information.
@@ -280,6 +310,19 @@ pub struct FrameStats {
     /// Resident merged mesh chunks. Uploaded once per scene change; a pan or zoom
     /// never changes it.
     pub mesh_chunks: usize,
+    /// The draw tier this frame used (see [`RenderTier`]). Chosen once per
+    /// device; an accelerated device reports [`RenderTier::Accelerated`] even on
+    /// a frame that falls back to the universal per-run organization (for
+    /// example a paginated/over-budget frame — see [`FrameStats::accelerated`]).
+    pub tier: RenderTier,
+    /// Whether this frame's opaque pass actually used the accelerated per-class
+    /// draw organization. `false` on a [`RenderTier::Accelerated`] device when
+    /// the frame could not (no converted geometry, or a page that did not accept
+    /// every converted batch).
+    pub accelerated: bool,
+    /// Draw calls issued by the accelerated per-class path this frame (opaque
+    /// line class + merged-mesh classes). `0` when the universal path was used.
+    pub accelerated_draws: u64,
 }
 
 /// One batch whose lineweight was carried but not rasterized.
@@ -553,6 +596,12 @@ pub(crate) struct GpuMeshChunk {
     index_count: u32,
     origin: [f64; 3],
     mirrored: bool,
+    /// CPU copy of the chunk's packed vertices and rebased indices, kept so the
+    /// accelerated tier's whole-scene pulled buffers can be rebuilt on every
+    /// commit (including an overlay append that keeps a prefix). Only populated
+    /// when the accelerated tier is live; the universal tier leaves both empty.
+    pulled_vertices: Vec<MeshVertex>,
+    pulled_indices: Vec<u32>,
 }
 
 /// Where a converted batch's segments live in the instanced line streams.
@@ -585,6 +634,63 @@ pub(crate) struct InstanceStream {
     buffer: wgpu::Buffer,
     instance_count: u32,
     origin: [f64; 3],
+    /// First instance of this stream within its buffer. `0` on the universal
+    /// tier (each stream owns its buffer); on the accelerated tier every stream
+    /// in a storage segment shares one `VERTEX | STORAGE` buffer, so a run's
+    /// global instance index is `base + run.offset`.
+    base: u32,
+    /// CPU copy of the stream's packed instances, kept so the accelerated tier's
+    /// whole-scene pulled line buffer can be rebuilt on every commit. Only
+    /// populated when the accelerated tier is live; the universal tier leaves it
+    /// empty.
+    pulled_instances: Vec<LineInstance>,
+}
+
+/// One accelerated line storage segment: a bind group over a
+/// `VERTEX | STORAGE` buffer holding the [`PulledLine`] records of a run of
+/// whole instance streams. A real scene can exceed
+/// `max_storage_buffer_binding_size`, so the class is split into segments and
+/// drawn once per segment (still `O(1)` in the chunk count, not one per chunk).
+/// The same buffer is bound as the per-run instance vertex buffer (64-byte
+/// layout), so the accelerated tier keeps **one** copy of the line geometry —
+/// not a per-run copy plus a pulled copy.
+pub(crate) struct PulledLineSegment {
+    /// Group 2 of the pulled line pipeline: this segment's instances + the shared
+    /// chunk table.
+    bind_group: wgpu::BindGroup,
+    instance_count: u32,
+}
+
+/// The accelerated tier's whole-scene line storage: every resident instance in
+/// binding-sized segments, plus the per-chunk translation table rewritten each
+/// frame.
+pub(crate) struct PulledLines {
+    segments: Vec<PulledLineSegment>,
+    /// Per-chunk translation columns (one `vec4<f32>` per resident stream),
+    /// rewritten each frame exactly like the universal path's per-stream uniform.
+    chunk_table: wgpu::Buffer,
+}
+
+/// One accelerated merged-mesh storage segment (see [`PulledLineSegment`]).
+pub(crate) struct PulledMeshSegment {
+    /// Group 2 of the pulled mesh pipeline: this segment's vertices + indices +
+    /// the shared chunk table.
+    bind_group: wgpu::BindGroup,
+    vertex_count: u32,
+    index_count: u32,
+    /// Number of non-mirrored indices (the first `mirror_split` entries).
+    mirror_split: u32,
+    #[allow(dead_code)]
+    vertex_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    index_buffer: wgpu::Buffer,
+}
+
+/// The accelerated tier's whole-scene merged-mesh storage.
+pub(crate) struct PulledMesh {
+    segments: Vec<PulledMeshSegment>,
+    /// Per-chunk translation columns, rewritten each frame.
+    chunk_table: wgpu::Buffer,
 }
 
 impl GpuBatch {
@@ -856,6 +962,11 @@ pub const MIN_GUARANTEED_TEXTURE_DIMENSION: u32 = 2048;
 /// Byte size of one packed instanced line segment on the GPU (2-vertex
 /// `LineList` pair). Public so callers can reason about the exact instance-stream
 /// byte charge without duplicating the layout.
+///
+/// This is the **universal** tier's stride. The accelerated tier packs the same
+/// instance into a 64-byte `VERTEX | STORAGE` record (the extra 8 bytes are the
+/// per-chunk origin index the pulled shader reads); see
+/// `docs/adr/0007-entity-as-data-renderer.md`.
 pub const LINE_INSTANCE_BYTES: u32 = plan::LINE_INSTANCE_STRIDE;
 
 // Compile-time floor: mirrors `texture_dimension_floor_is_guaranteed`.
@@ -934,6 +1045,30 @@ pub struct Renderer {
     /// Monotonic count of merged mesh chunk buffers uploaded since init. A pan or
     /// zoom must never increase it (asserted by the zero-reupload test).
     mesh_chunk_uploads: u64,
+    /// Live draw tier (see [`RenderTier`]), chosen once per device in
+    /// `initialize_with_device`.
+    render_tier: RenderTier,
+    /// Test hook: force storage-buffer support on/off for the tier decision
+    /// before a device is initialized, so the automatic downgrade is testable
+    /// without a WebGL2 device.
+    storage_support_override: Option<bool>,
+    /// Accelerated whole-scene line storage; `None` on the universal tier or
+    /// when no instanced lines are resident.
+    pulled_lines: Option<PulledLines>,
+    /// Accelerated whole-scene merged-mesh storage.
+    pulled_mesh: Option<PulledMesh>,
+    /// Group-0 layout/uniform/bind group of the pulled pipelines: the three
+    /// origin-independent transform columns shared by every chunk.
+    pulled_camera_layout: Option<wgpu::BindGroupLayout>,
+    pulled_camera_buffer: Option<wgpu::Buffer>,
+    pulled_camera_bind_group: Option<wgpu::BindGroup>,
+    /// Group-2 storage layouts of the pulled pipelines.
+    pulled_line_storage_layout: Option<wgpu::BindGroupLayout>,
+    pulled_mesh_storage_layout: Option<wgpu::BindGroupLayout>,
+    /// The accelerated pipelines (only created on the accelerated tier).
+    line_pulled_pipeline: Option<wgpu::RenderPipeline>,
+    mesh_pulled_pipeline: Option<wgpu::RenderPipeline>,
+    mesh_pulled_mirrored_pipeline: Option<wgpu::RenderPipeline>,
     /// Resident image quads uploaded by [`Renderer::upload_images`].
     images: Vec<GpuImage>,
     /// One GPU texture per resolved [`ResourceKey`], shared by every resident

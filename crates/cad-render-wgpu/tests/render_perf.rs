@@ -183,6 +183,10 @@ struct SceneResult {
     instanced_batches: usize,
     /// `true` when the measured scene ran on the instanced path.
     instanced: bool,
+    /// The live draw tier of the frame (`"universal"`/`"accelerated"`).
+    tier: &'static str,
+    /// Whether the frame's opaque pass used the accelerated per-class draws.
+    accelerated: bool,
     /// Resident instanced segments after the scene's upload.
     instance_segments: u64,
     /// Instanced stream buffers uploaded for the scene.
@@ -287,6 +291,8 @@ fn measure_scene(
         instanced_draws: stats.instanced_draws,
         instanced_batches: stats.instanced_batches,
         instanced,
+        tier: stats.tier.as_str(),
+        accelerated: stats.accelerated,
         instance_segments: renderer.instance_segment_count(),
         instance_streams: renderer.instance_stream_count(),
     }
@@ -415,14 +421,16 @@ fn write_report(
 
     md.push_str("## Frame composition (constant across timed frames)\n\n");
     md.push_str(
-        "| Scene | batches | draw_calls | instanced_draws | instanced_batches | instance_streams | instance_segments | uniform_writes | vertices | opaque | transparent | invisible |\n",
+        "| Scene | batches | tier | accelerated | draw_calls | instanced_draws | instanced_batches | instance_streams | instance_segments | uniform_writes | vertices | opaque | transparent | invisible |\n",
     );
-    md.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    md.push_str("|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for r in results {
         md.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             r.label,
             r.batches,
+            r.tier,
+            r.accelerated,
             r.draw_calls,
             r.instanced_draws,
             r.instanced_batches,
@@ -444,15 +452,20 @@ fn write_report(
          per-instance streams at upload; draws collapse to one per coalesced run while \
          colour/width/pick-key ride in the instance (never as a draw split). Transparent \
          batches and mesh overlays stay on the legacy per-batch path, so the draw count is \
-         `legacy draws + instanced runs`.\n\n",
+         `legacy draws + instanced runs`.\n\n\
+         The `tier` column reports the live draw organization: on a storage-buffer-capable \
+         device the `instanced` rows run the **accelerated** tier (one draw per class via \
+         vertex pulling), while `legacy` rows are the universal per-batch path.\n\n",
     );
-    md.push_str("| Scene | path | draw_calls | cpu mean ms | submit mean ms | encode mean ms |\n");
-    md.push_str("|---|---|---:|---:|---:|---:|\n");
+    md.push_str("| Scene | path | tier | accelerated | draw_calls | cpu mean ms | submit mean ms | encode mean ms |\n");
+    md.push_str("|---|---|---|---:|---:|---:|---:|---:|\n");
     for r in results {
         md.push_str(&format!(
-            "| {} | {} | {} | {:.3} | {:.3} | {:.3} |\n",
+            "| {} | {} | {} | {} | {} | {:.3} | {:.3} | {:.3} |\n",
             r.label,
             if r.instanced { "instanced" } else { "legacy" },
+            r.tier,
+            r.accelerated,
             r.draw_calls,
             r.cpu.mean_ms,
             r.submit.mean_ms,
@@ -615,11 +628,13 @@ fn renderer_frame_cpu_measurement() {
                 instanced,
             );
             eprintln!(
-                "{}: batches={} mode={mode} cpu mean={:.3}ms median={:.3}ms p95={:.3}ms \
-                 wall mean={:.3}ms draw_calls={} instanced_draws={} instanced_batches={} \
-                 streams={} segments={} uniform_writes={}",
+                "{}: batches={} mode={mode} tier={} accelerated={} cpu mean={:.3}ms \
+                 median={:.3}ms p95={:.3}ms wall mean={:.3}ms draw_calls={} \
+                 instanced_draws={} instanced_batches={} streams={} segments={} uniform_writes={}",
                 label,
                 batches,
+                result.tier,
+                result.accelerated,
                 result.cpu.mean_ms,
                 result.cpu.median_ms,
                 result.cpu.p95_ms,
@@ -771,6 +786,8 @@ struct SweepRow {
     cpu: Stats,
     draw_calls: u64,
     instanced_draws: u64,
+    tier: &'static str,
+    accelerated: bool,
     set_pipeline: u64,
     set_bind_group: u64,
     set_vertex_buffer: u64,
@@ -822,13 +839,15 @@ fn write_sweep_report(
     md.push_str(&format!(
         "Frames per point: {frames}; warmup frames per point: {warmup} (untimed).\n\n"
     ));
-    md.push_str("| B batches | path | cpu mean ms | cpu p95 ms | draw_calls | instanced_draws | encode mean ms | set_pipeline | set_bind_group | set_vertex_buffer | set_index_buffer | uniform_slots |\n");
-    md.push_str("|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    md.push_str("| B batches | path | tier | accelerated | cpu mean ms | cpu p95 ms | draw_calls | instanced_draws | encode mean ms | set_pipeline | set_bind_group | set_vertex_buffer | set_index_buffer | uniform_slots |\n");
+    md.push_str("|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for row in rows {
         md.push_str(&format!(
-            "| {} | {} | {:.3} | {:.3} | {} | {} | {:.3} | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {:.3} | {:.3} | {} | {} | {:.3} | {} | {} | {} | {} | {} |\n",
             row.batches,
             if row.instanced { "instanced" } else { "legacy" },
+            row.tier,
+            row.accelerated,
             row.cpu.mean_ms,
             row.cpu.p95_ms,
             row.draw_calls,
@@ -920,8 +939,10 @@ fn renderer_batch_count_sweep() {
             let stats = samples.last.expect("at least one timed frame");
             let mode = if instanced { "instanced" } else { "legacy" };
             eprintln!(
-                "sweep B={b} mode={mode}: cpu mean={:.3}ms p95={:.3}ms draw_calls={} \
-                 instanced_draws={} encode mean={:.3}ms slots={}",
+                "sweep B={b} mode={mode} tier={} accelerated={}: cpu mean={:.3}ms p95={:.3}ms \
+                 draw_calls={} instanced_draws={} encode mean={:.3}ms slots={}",
+                stats.tier.as_str(),
+                stats.accelerated,
                 cpu.mean_ms,
                 cpu.p95_ms,
                 stats.draw_calls,
@@ -935,6 +956,8 @@ fn renderer_batch_count_sweep() {
                 cpu,
                 draw_calls: stats.draw_calls,
                 instanced_draws: stats.instanced_draws,
+                tier: stats.tier.as_str(),
+                accelerated: stats.accelerated,
                 set_pipeline: stats.set_pipeline_calls,
                 set_bind_group: stats.set_bind_group_calls,
                 set_vertex_buffer: stats.set_vertex_buffer_calls,

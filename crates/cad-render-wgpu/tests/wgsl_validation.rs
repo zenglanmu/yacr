@@ -64,6 +64,23 @@ fn mesh_merged_shader_is_valid_wgsl() {
     .expect("merged mesh shader must validate");
 }
 
+/// The two accelerated-tier shaders use vertex-stage storage buffers, so they
+/// are **not** WebGL2-safe and are deliberately excluded from the GLSL ES 300
+/// back-translation test below. They must still parse and validate as WGSL.
+#[test]
+fn pulled_shaders_are_valid_wgsl() {
+    validate_wgsl(
+        "line_pulled.wgsl",
+        include_str!("../shaders/line_pulled.wgsl"),
+    )
+    .expect("pulled line shader must validate");
+    validate_wgsl(
+        "mesh_pulled.wgsl",
+        include_str!("../shaders/mesh_pulled.wgsl"),
+    )
+    .expect("pulled mesh shader must validate");
+}
+
 #[test]
 fn image_shader_is_valid_wgsl() {
     validate_wgsl("image.wgsl", include_str!("../shaders/image.wgsl"))
