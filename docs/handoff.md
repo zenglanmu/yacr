@@ -37,6 +37,65 @@
 - 本轮之后待优化项（视锥剔除/LOD/SDF 弧/RenderBundle/加速层 + G 系列结转项）清单见
   `docs/render-optimization-backlog.md`。
 
+## 渲染性能 “entity = data” 轮 — 续：GPU 拾取 / 选择标志 / 加速档 / SDF 弧（2026-10-15）
+
+- 承接上一节（上半段）。下半段在同一轮内把渲染架构继续推进到 **GPU id 回读拾取 → 标志机 →
+  能力门控加速档 → SDF 解析弧**，全部已提交：上半段 `3bb3446`…`0d2034c`（含端点 9 个提交）、
+  下半段 `52ab9d5`…`1fc395e`（9 个提交）。本文档条目本身为文档更新，**未提交**（本次改动仅限
+  `docs/handoff.md` 与 backlog/ADR-0007 的状态对齐，无代码改动）。
+- **P3a-1 GPU id 回读拾取**（`52ab9d5`，修复 `0f193dc`）：`Renderer::pick_at(x,y)` 按需把同一
+  可见几何渲进**独立 id target**（自有深度缓冲、run **不合并**，片段不会继承邻批 key），回读
+  1 texel。GPU 32 位 pick key → CPU `PickTable` 保存**完整 u128** 身份，解析按构造精确；低 32 位
+  截断**检测并上报**（`pick_collisions`），多源批次给出**全部**候选，**绝不**静默取
+  `sources.first()`。`R32Uint` 主格式 + 已测 packed-RGBA8 回退；标志纹理默认**关闭**（像素相同）。
+  uniform 80→96 B（`key_flags`），槽步长不变。真实 DWG parity（渲染器 id pass vs CPU
+  `cad_spatial`）：**CPU 可复现 GPU 实体 1.000、不可解释冲突 0**；精确一致率偏低（0.579 / 0.103）
+  已定位为共面/等深并列的排序差异（harness 不断言该率）。CPU 拾取仍是**主路径/回退**，mesh 面
+  仍走 CPU 细化。详见 `docs/picking-gpu-id-pass.md`。
+- **P3a-2 实体级选择视觉走渲染器标志**（`933e45d`，修复 `a6192a6`）：**整实体高亮 overlay batch
+  退役**；选择/悬停/隐藏经标志表（`Renderer::set_entity_flags` 按 `PickTable` 的 source→key 解析、
+  只 diff 上传变化的行）。**子元素（网格面）高亮与工具预览**保留一次小 overlay（有据，用户授权）。
+  生产会话（`cad-engine`）走 **flags-only 快路径**（overlay `Arc::ptr_eq` 身份判据——review 抓到的
+  ABA 修复）；图像标志生命周期修复（base/图像重传会重编号 key，标志按新键重解析）；标志变化丢弃
+  已完成的 progressive 帧，**选择立即着色**，不必等相机移动。限制：多源合并 batch 按 **batch
+  粒度**着色；hover/hidden **生产者未接线**（`cad-host` 传空）；id pass **忽略 `FLAG_HIDDEN`**
+  （hidden 切片落地前**必须先修**）。
+- **P3b 能力门控加速档**（`dc1aabb`，修复 `b3a9453`）：已转换的不透明 line/mesh 类经 VS 只读
+  storage（vertex pulling）折叠为**每段一次 draw**；档位由**设备自身 limits** 决定（**从不**向
+  宿主设备请求 feature），WebGL2 **自动降级并带标签**（`render_tier()` / `FrameStats::tier` /
+  `FrameStats::accelerated`）。精度契约不变（per-chunk 矩阵**逐位相同**、f32 运算序列一致）。
+  真实 DWG + 字体（P620）：debug-default-fonts **3** draws / **1.85 ms** 帧 cpu，complex-test
+  **19** draws / **6.72 ms**（legacy 分别为 10,474 / 122,006 draws；相对通用 per-run 少 301×/434×）。
+  review 抓到的修复：id pass 多 stream **`base + offset`** 重定基（曾静默读错实例）、line 回退
+  改为**真实数据** + oversize 守卫、tier 门限改为 **≥3** 个 VS storage binding、字节遥测重复计数。
+- **SDF 圆/弧**（`1fc395e`，`docs/adr/0008-sdf-conic-rendering.md`）：圆/弧改为抗锯齿 **SDF 实例**
+  （`ArcInstance` 72 B，共轭半直径参数化；**三角形滤波覆盖峰值 1.0**；ramp 宽度用**解析
+  world-per-px**——`fwidth` 单独在网格对齐点塌缩；**强制包围四边形 `discard`**）。发射门把
+  eligible conic（不透明、连续线型、slice-1 圆形）翻到 SDF，**虚线/椭圆/退化仍计数走弦**；资格在
+  **变换后** conic 上判定，故 INSERT 造出的椭圆保持诚实。`pick_arc` 光栅化**同一 SDF**，字面
+  ±0.5 px。**椭圆 SDF = slice 2（未做）**。视觉证据 `/tmp/opencode/yacr-sdf-arcs-v2/`（混合弧+线
+  before 弦 / after SDF；连续性 + 满不透明 + 权重一致性已 fence）。
+- **Conic 中性载体**（`226651c`）：Circle/Arc/Ellipse 以 `DisplayPrimitive::Conic`（f64 世界空间、
+  仿射保持参数角）上行，下游消费者仍**全部弦展开**（输出与旧路径逐字节一致，已 fence）；SDF 资格
+  记入 `ConicStats`。**渲染/性能 backlog**（`844ab14`）为独立历史项。
+- **复核门（本半段）**：4 个**独立** code-review gate（id pass / 标志切换 / 加速档 / SDF），findings
+  依次为 **1 blocker + 4 should-fix**、**2 blockers + 4**、**2 blockers + 4**、**1 blocker + 4**，
+  **全部**修复，能在不伪造证据的前提下都补了**负向测试栅栏**。另有**一次图像取证**抓到 code review
+  曾合理化的 **50% 覆盖缺陷**（弧断成半权重/虚线，即 `fwidth` 塌缩 + 0.5 峰值）。
+- **NOT RUN / 边界（诚实）**：**全量 workspace 门禁整场未跑**（用户政策：只验证改动范围；全量门禁
+  仅在用户要求或发版前）；**flags + SDF 弧的 WebGL2 真实浏览器验证未做**（「WebGL2 安全」目前由
+  离线 GLSL ES 3.00 back-translation 测试覆盖，非真实浏览器）；**椭圆 SDF（slice 2）、`PulledArc`、
+  虚线 SDF 弧、线宽光栅化**未做；**hidden 切片**（id pass 先读 `FLAG_HIDDEN`）、hover/hidden
+  生产者未接线；**像素 LOD / 视锥剔除 / 帧缓冲复用**等见 `docs/render-optimization-backlog.md`。
+  pre-existing 失败按用户指示**保持失败**（沿用上半段条目所列，不重复）：5 项浏览器检查、
+  `app-linux` 的 `plot_export`/`save_export`/`verify_ui*`、`cad-engine`
+  `pending_overlay_upload_never_labels_stale_suffix_current`。
+- **状态对齐（本轮已改）**：`docs/render-optimization-backlog.md` 的 **P4（SDF）→ 已实现**（见
+  ADR-0008；椭圆/虚线/宽度为后续）、**加速层 A → 已实现（P3b）**、**G7 的 parity 复跑 → 已重跑**
+  （P3a-1，`docs/picking-gpu-id-pass.md` §7）；`docs/adr/0007-entity-as-data-renderer.md` 的
+  deferred 列表已交叉引用 ADR-0008，并把 **id-readback picking 由「无通路」更新为 P3a-1 已实现**
+  （指向 picking 文档）。
+
 ## cad-engine P4 codegate 与最终证据状态
 
 - Oracle P3、P4 App/engine/Host/Web codegate 均 accept。最终 sweep `sh_137d0698a001J14BRMEOwCRSk6` exit 0：workspace all-targets/tests，App343/engine73/Host83/Android30/Web23/UI132+37 integration/Linux12 passed + 9 ignored，workspace WASM lib、Android aarch64 UI/app local-Skia、Clippy（既有 exclusions）、7 packages fmt、architecture/fixture/workflow/i18n306 与 diff check。

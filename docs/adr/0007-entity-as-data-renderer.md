@@ -1,8 +1,10 @@
 # ADR 0007：渲染器 “entity = data” 演进（类实例化 + 平铺合并）
 
 状态：已实现并通过两轮独立 oracle review gate（7 项 must-fix findings 全部修复）。真实
-NVIDIA Quadro P620 / Vulkan 实测；契约变更经用户 2026-10-15 授权。**P3b 能力门控加速档
-（vertex pulling，单类 draw）已实现并实测**（见「P3b」节）。**未**做 WebGL2/Android/
+NVIDIA Quadro P620 / Vulkan 实测；契约变更经用户 2026-10-15 授权。**P3a GPU id 回读拾取 +
+实体级选择标志机已实现**（见 `docs/picking-gpu-id-pass.md`），**P3b 能力门控加速档
+（vertex pulling，单类 draw）已实现并实测**（见「P3b」节），**SDF 圆/弧（解析弧）已实现**
+（见 `docs/adr/0008-sdf-conic-rendering.md`）。**未**做 WebGL2/Android/
 浏览器视觉验收，也未做 vendor/golden 结论。
 
 ## 背景与问题
@@ -97,7 +99,11 @@ NVIDIA Quadro P620 / Vulkan 实测；契约变更经用户 2026-10-15 授权。*
   视觉验收授权。
 - **glyph outline-keyed instancing**：文字轮廓仍是主要残留 draw（参考图 instanced 帧中
   glyph mesh 占 4,630 / 6,228），未按 outline 键做实例化。
-- **id-readback picking**：`entity_flags` 已写入顶点，但**没有** id 回读 picking 通路。
+- **id-readback picking**：**P3a-1 已实现**（`52ab9d5`，修复 `0f193dc`）：`Renderer::pick_at`
+  按需渲进独立 id target、回读 32 位 pick key，经 CPU `PickTable` 解析**完整** `SelectionRef`
+  （低 32 位截断检测并上报，多源批次给全部候选）；`LineInstance::id_flags[0]` /
+  `MeshVertex::entity_flags[0]` 由「首个 source 的 EntityId 低位」改为**渲染器 pick key**。
+  见 `docs/picking-gpu-id-pass.md`。CPU 拾取仍是主路径/回退。
 - **selection flags**：**P3a-2 已闭环**。实体级选择/悬停/隐藏改由渲染器的 in-stream 标志机
   承载（`FLAG_SELECTED`/`FLAG_HOVERED`/`FLAG_HIDDEN`，`Renderer::set_entity_flags` 按
   `PickTable` 的 source→key 解析写入；静态流/chunk 不随选择变化重传），整实体高亮 overlay

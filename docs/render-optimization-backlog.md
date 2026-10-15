@@ -2,7 +2,8 @@
 
 本文是渲染与性能的**待优化项清单**（backlog），不是已完成能力表、也不是发布承诺。每项给出
 现状、预期收益、前置条件/风险、需要的产品/UX 决策、相关契约/栅栏与优先级。已完成项见
-`docs/adr/0007-entity-as-data-renderer.md`、`docs/validation-render-perf-2026-10-15.md`。
+`docs/adr/0007-entity-as-data-renderer.md`、`docs/adr/0008-sdf-conic-rendering.md`、
+`docs/picking-gpu-id-pass.md`、`docs/validation-render-perf-2026-10-15.md`。
 
 **当前基线（真实 NVIDIA Quadro P620 / Vulkan，`debug-default-fonts.dwg` / `complex-test.dwg`，
 见 `docs/validation-render-perf-2026-10-15.md`）**：
@@ -103,21 +104,22 @@
 
 ### P4 — SDF 圆/弧（SDF circles/arcs）
 
-- **状态（2026-10-15）：已实现（slice B）**，见 `docs/adr/0008-sdf-conic-rendering.md`。
-  可 SDF 化的圆/弧（不透明、连续线型、slice-1 圆形）渲染为抗锯齿 SDF 实例；椭圆（slice 2）、
-  虚线/非连续、非不透明 conic 仍弦展开。真实 P620/Vulkan 的覆盖-解析曲线、弦基线包含、id
-  pass 一致性、flags、绘制顺序、确定性/零重传与 before/after 视觉验收均已 fence（见 ADR-0008
-  实施记录）。**未**做椭圆 SDF、`PulledArc`、透视域精度、浏览器/Android 验收。
-- **预期收益**：把弧渲染为 **SDF 四边形**（实例化：center/radius/起始角/终止角/颜色/线宽），
-  片元着色器用**有符号距离**做抗锯齿 → **分辨率无关、无需三角化、每类约 1 个 draw**。替代大量
-  弧折线实例，减少 line 实例数。**预期**，未实测。
-- **前置条件/风险**：需要新的 SDF 管线 + 实例布局 + 片元 SDF；与现有 line/mesh 合并路径的绘制
-  顺序（`docs/render-order.md`）需对齐。**语义像素变化**：SDF 抗锯齿**比当前折线弦更平滑** →
-  需**视觉验收**；不得宣称与旧折线逐字节一致。
-- **需要的决策（视觉）**：抗锯齿边缘的外观、线宽语义、与折线路径并存的过渡策略。
-- **相关契约/栅栏**：SDF 弧的几何精度 fence（中心/半径/角度映射）、视觉验收证据、绘制顺序与
-  既有管线一致。
-- **优先级**：P4（收益可观但需视觉验收；排在 P1/P2 之后）。
+- **状态（2026-10-15）：已实现（slice B，`1fc395e`）**，见 `docs/adr/0008-sdf-conic-rendering.md`。
+  可 SDF 化的圆/弧（不透明、连续线型、slice-1 圆形）渲染为抗锯齿 SDF 实例（`ArcInstance` 72 B、
+  三角形滤波覆盖峰值 1.0、解析 world-per-px ramp、强制包围四边形 `discard`）；发射门把 eligible
+  conic 翻到 SDF，**虚线/椭圆/退化仍计数走弦**（资格在**变换后** conic 上判定，INSERT 椭圆保持
+  诚实）；`pick_arc` 光栅化**同一 SDF**、±0.5 px。真实 P620/Vulkan 的覆盖-解析曲线、弦基线包含、
+  id pass 一致性、flags、跨类强度一致性、绘制顺序、确定性/零重传与 before/after 视觉验收均已
+  fence（见 ADR-0008 实施记录）。
+- **后续（显式未做）**：**椭圆 SDF（slice 2）**、`PulledArc`（弧现走通用 per-run 残留路径）、
+  **虚线/非连续 SDF 弧**、**线宽光栅化**、透视域精度；浏览器/WebGL2/Android 验收未做。
+- **原设计意图（实施前评估，保留供追溯）**：把弧渲染为 **SDF 四边形**（实例化：
+  center/radius/起始角/终止角/颜色/线宽）→ **分辨率无关、无需三角化、每类约 1 个 draw**，减少
+  line 实例数。**语义像素变化**（SDF 抗锯齿**比折线弦更平滑**）需**视觉验收**——已获用户授权并
+  fence（ADR-0008 §8(h)）；**不**做与旧折线逐字节一致声明。
+- **相关契约/栅栏**：几何精度（覆盖-解析曲线）、弦基线包含、id parity、flags、跨类强度一致性、
+  绘制顺序（`docs/render-order.md`）、视觉验收证据——均见 ADR-0008。
+- **优先级**：已实现（其余见上「后续」）。
 
 ---
 
@@ -197,13 +199,15 @@
   须补真实 GPU 证据。
 - **优先级**：G6（证据标注项）。
 
-### G7 — 真实浏览器 WebGL2 验证 + DWG pick-parity 复跑
+### G7 — 真实浏览器 WebGL2 验证（DWG pick-parity 复跑已在 P3a-1 完成）
 
 - **现状/问题**：① 标志块「WebGL2 安全」由离线 **GLSL ES 3.00 back-translation** 测试覆盖
   （`color_shaders_back_translate_to_glsl_es_300`），**非**真实浏览器运行；id target 回退路径
   已实现并测试但未在真实 WebGL2 浏览器上运行（`docs/picking-gpu-id-pass.md` §8）。② parity
-  harness（渲染器 id pass vs CPU `cad_spatial`）本轮未重跑；「不可解释冲突 = 0」是关键指标
-  （§7，`complex-test.dwg` 精确一致率偏低已定位为等深并列差异，harness 不断言该率）。
+  harness（渲染器 id pass vs CPU `cad_spatial`）**已在 P3a-1 重跑**（`docs/picking-gpu-id-pass.md`
+  §7：CPU 可复现 GPU 实体 **1.000**、**不可解释冲突 0**；`complex-test.dwg` 精确一致率偏低已定位
+  为共面/等深并列差异，harness 不断言该率）。**未完成**的仅剩真实浏览器 WebGL2 运行；未来变更后
+  仍须复跑 parity。
 - **预期收益**：无性能收益；**验证补全**——把"离线可译"升级为"真实浏览器运行"，并在未来变更后
   复跑 pick-parity。
 - **前置条件/风险**：需要真实 WebGL2 浏览器（headful + 真实 GPU，非 SwiftShader）；DWG
@@ -215,25 +219,30 @@
 
 ---
 
-## 加速层（P6 + 本轮进行中项）
+## 加速层（P6 + P3b 已完成项）
 
 ### A — capability-gated accelerated tier（vertex pulling via storage buffers）
 
-- **现状/问题**：更强合并档（vertex pulling / storage buffer 取顶点；配合 P6 的 indirect）**尚未
-  落地**。ADR-0007 记为 deferred（`docs/adr/0007-entity-as-data-renderer.md:103-104`），并明确
-  **WebGL2 不支持 multi-draw**，属 **capability-gated future**。
-- **预期收益**：进一步减少每批 uniform/绑定开销、提升顶点读取效率；**仅加速档**，未实测。
-- **前置条件/风险**：**capability 探测决定档位**；WebGPU/native 走加速档，**WebGL2 自动回退**
-  通用路径。加速档**不得**成为架构依赖，回退必须像素一致。
+- **状态（2026-10-15）：已实现（P3b，`dc1aabb` + `b3a9453`）**，见
+  `docs/adr/0007-entity-as-data-renderer.md`「P3b」节。已转换的不透明 line/mesh 类经 VS 只读
+  storage（vertex pulling）折叠为**每段一次 draw**；档位由**设备自身 limits** 决定（**从不**向
+  宿主设备请求 feature），**WebGL2 自动降级并带标签**。真实 P620 实测 debug-default-fonts
+  903→**3** draws、complex-test 8,252→**19** draws；逐像素等价 fence 见
+  `crates/cad-render-wgpu/tests/accelerated_tier.rs`。
+- **后续（显式未做）**：**multi-draw indirect 未做**（不在 WebGPU core，故意不架构其上，见 P6）；
+  **WebGL2 真实浏览器验证未做**；`PulledArc` 未做（弧走通用 per-run 残留）。
+- **原设计意图（实施前评估，保留供追溯）**：进一步减少每批 uniform/绑定开销、提升顶点读取效率；
+  加速档**不得**成为架构依赖、回退必须像素一致——已按此实现（能力门控 + 带标签降级）。
 - **需要的决策**：无（架构约束已定）。
 - **相关契约/栅栏**：档位探测 + 回退一致性 fence；加速档在兼容表中显式建模。
-- **优先级**：加速层（**本轮进行中，状态见 ADR-0007**）。
+- **优先级**：已实现（P6 的 indirect 部分仍待评估）。
 
 ---
 
 ## 交叉引用
 
 - 渲染架构决策与 deferred 列表：`docs/adr/0007-entity-as-data-renderer.md`。
+- SDF 圆/弧（解析弧）决策与实施记录：`docs/adr/0008-sdf-conic-rendering.md`。
 - GPU id 回读拾取 / 选择标志机 / 已知限制与未做项：`docs/picking-gpu-id-pass.md`（尤其 §0、§4、§6、§7、§8）。
 - 绘制顺序与透明策略（instanced / merged / legacy 并存）：`docs/render-order.md`。
 - 性能基线与证据边界：`docs/validation-render-perf-2026-10-15.md`。
