@@ -34,6 +34,8 @@
   HEAD 既有）：5 项浏览器检查（mobile label i18n staleness、ribbon viewport、drawing LINE、
   drawing-safety capture、overlay selection flake）与 `app-linux` 的
   `plot_export`/`save_export`/`verify_ui*`。本轮仅文档/证据，未 commit。
+- 本轮之后待优化项（视锥剔除/LOD/SDF 弧/RenderBundle/加速层 + G 系列结转项）清单见
+  `docs/render-optimization-backlog.md`。
 
 ## cad-engine P4 codegate 与最终证据状态
 
