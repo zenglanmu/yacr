@@ -2,9 +2,11 @@
 //
 // Draws the same textured quad `image.wgsl` draws (same transform, no culling)
 // but writes the image's renderer pick key instead of a sampled colour. The
-// texture group is still declared so the pipeline can share the image bind group
-// layout; it is never sampled here. Used only by the on-demand id pass; see
-// `pick_line.wgsl` for the assembly contract.
+// pipeline shares the color image pipeline's group order (camera, flags table,
+// sampled texture), so the texture stays at `@group(2)`; the texture and the
+// flags table are declared for layout compatibility but never read here (the id
+// pass writes a raw key, not a tinted colour). Used only by the on-demand id
+// pass; see `pick_line.wgsl` for the assembly contract.
 
 struct Camera {
     transform: mat4x4<f32>,
@@ -14,8 +16,8 @@ struct Camera {
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 
-@group(1) @binding(0) var image_texture: texture_2d<f32>;
-@group(1) @binding(1) var image_sampler: sampler;
+@group(2) @binding(0) var image_texture: texture_2d<f32>;
+@group(2) @binding(1) var image_sampler: sampler;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,

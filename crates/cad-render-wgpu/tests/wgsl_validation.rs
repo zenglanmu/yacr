@@ -91,6 +91,68 @@ fn id_pass_shaders_validate_for_both_target_formats() {
     }
 }
 
+/// The five color shaders carry a selection-flags block — an integer
+/// `texture_2d<u32>` `textureLoad`, a `discard`, and (for the instanced/merged
+/// paths) a `flat u32` varying — that is claimed to be WebGL2-safe. WGSL
+/// validation alone does not test that claim: the browser tier compiles GLSL ES
+/// 3.00. Back-translate each color shader to GLSL ES 3.00 with the same naga
+/// wgpu embeds, for both entry points, so the tier claim is tested, not assumed.
+#[test]
+fn color_shaders_back_translate_to_glsl_es_300() {
+    let shaders = [
+        ("line.wgsl", include_str!("../shaders/line.wgsl")),
+        (
+            "line_instanced.wgsl",
+            include_str!("../shaders/line_instanced.wgsl"),
+        ),
+        ("mesh.wgsl", include_str!("../shaders/mesh.wgsl")),
+        (
+            "mesh_merged.wgsl",
+            include_str!("../shaders/mesh_merged.wgsl"),
+        ),
+        ("image.wgsl", include_str!("../shaders/image.wgsl")),
+    ];
+    for (name, source) in shaders {
+        let module = naga::front::wgsl::parse_str(source)
+            .unwrap_or_else(|e| panic!("{name}: WGSL parse error: {}", e.emit_to_string(source)));
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::empty(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|e| panic!("{name}: WGSL validation error: {e:?}"));
+        for (entry, stage) in [
+            ("vs_main", naga::ShaderStage::Vertex),
+            ("fs_main", naga::ShaderStage::Fragment),
+        ] {
+            let options = naga::back::glsl::Options {
+                version: naga::back::glsl::Version::new_gles(300),
+                ..Default::default()
+            };
+            let mut glsl = String::new();
+            naga::back::glsl::Writer::new(
+                &mut glsl,
+                &module,
+                &info,
+                &options,
+                &naga::back::glsl::PipelineOptions {
+                    shader_stage: stage,
+                    entry_point: entry.to_string(),
+                    multiview: None,
+                },
+                naga::proc::BoundsCheckPolicies::default(),
+            )
+            .unwrap_or_else(|e| panic!("{name} {entry}: GLSL ES 300 writer error: {e:?}"))
+            .write()
+            .unwrap_or_else(|e| panic!("{name} {entry}: GLSL ES 300 write error: {e:?}"));
+            assert!(
+                glsl.contains("#version 300 es"),
+                "{name} {entry}: expected a GLSL ES 300 header, got:\n{glsl}"
+            );
+        }
+    }
+}
+
 #[test]
 fn deliberately_broken_shader_fails_validation() {
     // Guards against the validator test being a no-op.

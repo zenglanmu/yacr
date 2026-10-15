@@ -188,7 +188,7 @@ pub struct FrameStats {
     pub draw_calls: u64,
     /// Number of `Queue::write_buffer` calls issued for this frame's uniforms.
     ///
-    /// Every accepted batch (and every drawn image) writes its 80-byte uniform
+    /// Every accepted batch (and every drawn image) writes its 96-byte uniform
     /// into a shared, dynamically-offset slot buffer, so a frame issues **one
     /// write per uniform page** touched (a page holds
     /// `max_uniform_buffer_binding_size / slot_size` slots) instead of one per
@@ -328,7 +328,14 @@ pub struct PickHit {
     /// picking therefore stays on CPU refinement (`cad_spatial`), and this field
     /// is not faked to look precise.
     pub sub_element: Option<SubElementId>,
-    /// Machine key explaining a non-exact `source` (never translated prose).
+    /// Machine key describing how the key resolved (never translated prose).
+    ///
+    /// It is set for a non-exact resolution (`source == None`, e.g.
+    /// `pick-multi-source-batch`) **and** for an exact hit the id pass cannot
+    /// refine to a sub-element (`pick-sub-element-requires-cpu-refinement`), so
+    /// a `Some(reason)` does **not** by itself mean the hit is ambiguous.
+    /// [`PickHit::is_ambiguous`] is the real predicate for "more than one
+    /// possible entity".
     pub reason: Option<&'static str>,
     /// `true` when one of this key's sources shares its low-32 `EntityId` with a
     /// different full identity elsewhere in the resident scene: the `u128`
@@ -603,7 +610,7 @@ struct GpuTexture {
     /// The uploaded texture. Kept alive both for the bind group and so a new
     /// quad can clone a handle into its [`GpuImage`].
     texture: wgpu::Texture,
-    /// Group 1 bind group (texture view + shared sampler), shared by every quad
+    /// Group 2 bind group (texture view + shared sampler), shared by every quad
     /// that samples this key.
     bind_group: wgpu::BindGroup,
     /// Padded RGBA bytes actually uploaded: `height` rows of `width * 4` bytes
@@ -630,7 +637,7 @@ struct GpuImage {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     vertex_count: u32,
-    /// Group 1: the sampled texture and its sampler (shared per resource key).
+    /// Group 2: the sampled texture and its sampler (shared per resource key).
     texture_bind_group: wgpu::BindGroup,
     /// A handle to the shared texture, kept alive for as long as the texture view
     /// bound in `texture_bind_group` is used.
@@ -665,7 +672,7 @@ struct UniformPage {
 
 /// Shared per-frame uniform storage.
 ///
-/// Every accepted geometry batch (and drawn image) writes its 80-byte uniform
+/// Every accepted geometry batch (and drawn image) writes its 96-byte uniform
 /// into a slot of a shared uniform buffer and draws it with the slot's byte
 /// offset as a *dynamic* offset. This replaces one `queue.write_buffer` per
 /// batch with one per page: a page holds `slots_per_page` slots and its total
@@ -867,9 +874,9 @@ pub struct Renderer {
     /// mesh pipelines. `_mirrored` uses `front_face = Cw`, like the legacy pair.
     mesh_pipeline_merged: Option<wgpu::RenderPipeline>,
     mesh_pipeline_merged_mirrored: Option<wgpu::RenderPipeline>,
-    /// Textured-quad pipeline for raster images (group 1 = texture + sampler).
+    /// Textured-quad pipeline for raster images (group 2 = texture + sampler).
     image_pipeline: Option<wgpu::RenderPipeline>,
-    /// Bind-group layout for group 1 of the image pipeline.
+    /// Bind-group layout for group 2 of the image pipeline.
     image_texture_layout: Option<wgpu::BindGroupLayout>,
     /// Shared linear, clamp-to-edge sampler for every uploaded image.
     image_sampler: Option<wgpu::Sampler>,

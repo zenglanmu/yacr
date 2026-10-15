@@ -6,12 +6,14 @@
 //! and assert exact identities, not just "something happened". When no adapter is
 //! available they skip with a clear message rather than pretending to pass.
 
-use cad_domain::{DocumentId, EntityId, InstancePath, Point3, SelectionRef, TaskStamp};
+use cad_domain::{DocumentId, EntityId, InstancePath, Point3, SelectionRef, TaskStamp, Transform3};
 use cad_render_wgpu::headless::{create_headless_gpu, HeadlessGpu};
 use cad_render_wgpu::{
-    BackendPreference, Camera2d, IdTargetFormat, RenderTarget, Renderer, FLAG_HIDDEN, FLAG_SELECTED,
+    BackendPreference, Camera2d, IdTargetFormat, RenderTarget, Renderer, FLAG_HIDDEN, FLAG_HOVERED,
+    FLAG_SELECTED,
 };
-use cad_scene::{RenderBatch, RenderTopology, SceneDelta};
+use cad_resources::{DecodedImage, DecodedImageCache, ResourceKey, ResourceLimits};
+use cad_scene::{ImageBatch, RenderBatch, RenderTopology, SceneDelta};
 
 fn source(entity: u128) -> SelectionRef {
     SelectionRef {
@@ -70,6 +72,56 @@ fn camera_2d() -> Camera2d {
         world_per_px: 1.0,
         z_plane: 0.0,
     }
+}
+
+/// A solid-colour `width`x`height` RGBA8 image.
+fn solid_image(width: u32, height: u32, rgba: [u8; 4]) -> DecodedImage {
+    let pixels: Vec<u8> = rgba
+        .iter()
+        .copied()
+        .cycle()
+        .take((width * height * 4) as usize)
+        .collect();
+    DecodedImage {
+        width,
+        height,
+        rgba: pixels.into(),
+    }
+}
+
+/// An image batch mapping the unit square to a 16x16 world square centred on
+/// `center` (so at `world_per_px == 1` it covers ~16 px, well clear of geometry
+/// placed elsewhere in the target).
+fn image_batch_at(resource: &str, entity: u128, center: [f64; 2]) -> ImageBatch {
+    ImageBatch {
+        resource: ResourceKey(resource.to_string()),
+        transform: Transform3::from_basis(
+            Point3 {
+                x: 16.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 0.0,
+                y: 16.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: center[0] - 8.0,
+                y: center[1] - 8.0,
+                z: 0.0,
+            },
+        ),
+        clip: None,
+        alpha: 1.0,
+        draw_order: 0,
+        sources: vec![source(entity)],
+    }
+}
+
+/// The origin-centred image batch used by the id-pass image tests.
+fn image_batch(resource: &str, entity: u128) -> ImageBatch {
+    image_batch_at(resource, entity, [0.0, 0.0])
 }
 
 fn base_batch(topology: RenderTopology, vertices: Vec<[f32; 3]>, entity: u128) -> RenderBatch {
@@ -664,5 +716,265 @@ fn a_scene_reset_clears_the_flag_table() {
     assert_eq!(
         reselected, tinted,
         "re-selecting the same key in the new scene must tint it identically"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Raster images through the id pass
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_image_pixel_resolves_to_its_source_through_the_id_pass() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let target = RenderTarget::new(96, 96);
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("red".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert red image");
+
+    // A line batch *and* a resident image. Images are appended to the id pass
+    // unconditionally, so before the pipeline-layout fix every `pick_at` failed
+    // wgpu validation (`MissingBindGroup { index: 1 }`) as soon as any image was
+    // resident, whether or not the picked pixel was the image.
+    renderer
+        .upload(&scene(vec![line_band(-20.0, 3, 0xB0)]))
+        .expect("upload");
+    let report = renderer
+        .upload_images(&[image_batch("red", 0xE0)], &cache)
+        .expect("upload image");
+    assert_eq!(report.uploaded, 1);
+
+    let pixels = render(&mut renderer, &target);
+    // The image covers rows ~40..56 and the line sits below it (rows > 60), so
+    // scan the lower band for a pixel the color pass actually drew.
+    let (lx, ly) = (60..96u32)
+        .flat_map(|y| (0..96u32).map(move |x| (x, y)))
+        .find(|&(x, y)| {
+            let i = (y as usize * 96 + x as usize) * 4;
+            pixels[i] > 8 || pixels[i + 1] > 8 || pixels[i + 2] > 8
+        })
+        .expect("the line must rasterize below the image");
+    let line_hit = renderer.pick_at(lx, ly).expect("pick").expect("a hit");
+    assert_eq!(
+        line_hit.source.expect("exact").entity,
+        EntityId(0xB0),
+        "a geometry pixel must still resolve to its own batch with an image resident"
+    );
+
+    let (ix, iy) = world_to_pixel(&camera_2d(), 96, 96, [0.0, 0.0]);
+    assert!(
+        pixels[(iy as usize * 96 + ix as usize) * 4] > 8,
+        "the image must rasterize at the centre"
+    );
+    let image_hit = renderer.pick_at(ix, iy).expect("pick").expect("a hit");
+    assert_eq!(
+        image_hit.source.expect("exact").entity,
+        EntityId(0xE0),
+        "the id pass must resolve an image fragment to the image's own source"
+    );
+}
+
+#[test]
+fn an_image_pick_works_through_the_packed_rgba8_fallback() {
+    let Some(available) = gpu() else {
+        return;
+    };
+    drop(available);
+    let target = RenderTarget::new(96, 96);
+    for format in [IdTargetFormat::R32Uint, IdTargetFormat::PackedRgba8] {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let mut renderer = init(gpu, Some(format));
+        let mut cache = DecodedImageCache::new();
+        cache
+            .insert(
+                ResourceKey("red".into()),
+                solid_image(2, 2, [255, 0, 0, 255]),
+                &ResourceLimits::default(),
+            )
+            .expect("insert red image");
+        renderer
+            .upload_images(&[image_batch("red", 0xE0)], &cache)
+            .expect("upload image");
+        let _ = render(&mut renderer, &target);
+        let (x, y) = world_to_pixel(&camera_2d(), 96, 96, [0.0, 0.0]);
+        let hit = renderer.pick_at(x, y).expect("pick").expect("a hit");
+        assert_eq!(
+            hit.source.expect("exact").entity,
+            EntityId(0xE0),
+            "{}: an image pixel must resolve through this id-target tier",
+            format.as_str()
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Key-space lifecycle: a reset must not alias resident image keys
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_scene_reset_with_resident_images_does_not_alias_pick_keys() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let target = RenderTarget::new(96, 96);
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("red".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert red image");
+
+    // One batch (key 1) plus one image (key 2) placed away from the batches, so a
+    // stale image key would later alias a *different* batch's pixel. Then a full
+    // reset.
+    renderer
+        .upload(&scene(vec![quad(-30.0, 0.0, 4.0, 0xB0, false)]))
+        .expect("upload");
+    renderer
+        .upload_images(&[image_batch_at("red", 0xE0, [30.0, 30.0])], &cache)
+        .expect("image");
+    renderer.clear_batches();
+
+    // Re-upload three batches (keys 1..3) and no images. A stale resident image
+    // would still hold key 2; the id pass draws it unconditionally, so a pick on
+    // it would resolve to whatever batch also owns key 2 — an entity nowhere near
+    // the picked pixel. The reset must have dropped the image.
+    renderer
+        .upload(&scene(vec![
+            quad(-30.0, 0.0, 4.0, 0x11, false),
+            quad(0.0, 0.0, 4.0, 0x22, false),
+            quad(30.0, 0.0, 4.0, 0x33, false),
+        ]))
+        .expect("re-upload");
+    let stats = renderer.render(camera_2d(), &target).expect("render");
+    assert_eq!(
+        stats.image_batches, 0,
+        "a scene reset must drop the resident image, not keep it for the next frame"
+    );
+    for (world_x, expected) in [(-30.0, 0x11u128), (0.0, 0x22), (30.0, 0x33)] {
+        let (x, y) = world_to_pixel(&camera_2d(), 96, 96, [world_x, 0.0]);
+        let hit = renderer.pick_at(x, y).expect("pick").expect("a hit");
+        assert_eq!(
+            hit.source.expect("exact").entity,
+            EntityId(expected),
+            "world x={world_x} must resolve to its own batch after a reset with resident images"
+        );
+    }
+    // The old image's pixel is now empty: no stale image and no aliased batch.
+    let (ix, iy) = world_to_pixel(&camera_2d(), 96, 96, [30.0, 30.0]);
+    assert!(
+        renderer.pick_at(ix, iy).expect("pick").is_none(),
+        "a reset must not leave a stale image key to alias a batch on an unrelated pixel"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Selection flags across an incremental commit (P3a-2 contract)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn selection_flags_survive_an_incremental_commit_that_grows_the_key_space() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let target = RenderTarget::new(96, 96);
+    renderer
+        .upload(&scene(vec![quad(0.0, 0.0, 8.0, 0x55, false)]))
+        .expect("upload");
+    let key = renderer.pick_key_for_batch(0).expect("key");
+    renderer
+        .set_pick_key_flags(key, FLAG_SELECTED)
+        .expect("set flags");
+    renderer.set_selection_flags_enabled(true);
+    let before = render(&mut renderer, &target);
+    let (x, y) = world_to_pixel(&camera_2d(), 96, 96, [0.0, 0.0]);
+    let i = (y as usize * 96 + x as usize) * 4;
+    let selected = [before[i], before[i + 1], before[i + 2], before[i + 3]];
+
+    // Incremental commit adding batches: the key space grows, which used to
+    // recreate the flags table on the width change and zero every bit. The host
+    // must NOT have to re-push the flags after every commit (P3a-2).
+    let added: Vec<RenderBatch> = (0..8)
+        .map(|n| quad(-40.0 + n as f32 * 4.0, -30.0, 1.0, 0x100 + n as u128, false))
+        .collect();
+    let prepared = renderer.prepare_upload(&scene(added)).expect("prepare");
+    renderer.commit_upload(prepared, 1).expect("commit");
+    assert_eq!(
+        renderer.pick_key_flags(key),
+        FLAG_SELECTED,
+        "the flag bit must survive an incremental commit that grows the key space"
+    );
+
+    let after = render(&mut renderer, &target);
+    assert_eq!(
+        [after[i], after[i + 1], after[i + 2], after[i + 3]],
+        selected,
+        "the selected batch must stay tinted after the key space grows"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Flags-disabled pixel identity per draw class
+// ---------------------------------------------------------------------------
+
+#[test]
+fn flags_disabled_is_pixel_identical_for_every_draw_class() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let target = RenderTarget::new(96, 96);
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("red".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert red image");
+    // One batch per visible class: an instanced line, a merged glyph mesh, a
+    // mesh with an edge overlay (instanced overlay), and a resident image.
+    renderer
+        .upload(&scene(vec![
+            line_band(-20.0, 3, 0x01),
+            quad(0.0, 0.0, 8.0, 0x02, false),
+            quad(-30.0, 0.0, 4.0, 0x03, true),
+        ]))
+        .expect("upload");
+    renderer
+        .upload_images(&[image_batch("red", 0x04)], &cache)
+        .expect("image");
+    assert!(
+        !renderer.selection_flags_enabled(),
+        "the tint is off by default"
+    );
+    let before = render(&mut renderer, &target);
+    assert_eq!(renderer.pick_table_len(), 4, "3 batches + 1 image");
+
+    // Set flags on every resident key. With the toggle off this must be a no-op
+    // for every shader class (the legacy quad case is covered by
+    // `flags_are_off_by_default_and_a_flag_update_leaves_pixels_unchanged`).
+    for key in 1..=4 {
+        renderer
+            .set_pick_key_flags(key, FLAG_SELECTED | FLAG_HOVERED)
+            .expect("set flags");
+    }
+    let after = render(&mut renderer, &target);
+    assert_eq!(
+        after, before,
+        "with the toggle off, flag bits must not change any class's pixels"
     );
 }

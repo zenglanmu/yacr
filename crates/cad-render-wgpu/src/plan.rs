@@ -1675,7 +1675,7 @@ pub(crate) fn image_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
 }
 
 /// Submit one uploaded image: bind the camera uniform (group 0, with this
-/// image's dynamic slot offset) and the texture/sampler (group 1), then draw the
+/// image's dynamic slot offset) and the texture/sampler (group 2), then draw the
 /// indexed quad.
 pub(crate) fn draw_image(
     pass: &mut wgpu::RenderPass<'_>,
@@ -1834,7 +1834,9 @@ pub(crate) const PICK_REASON_SUB_ELEMENT: &str = "pick-sub-element-requires-cpu-
 /// The CPU-side resolution of one pick key.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PickEntry {
-    /// Index of the owning batch in the resident batch list.
+    /// Index into the *combined* batch+image list this entry was built from:
+    /// batches first (`0..batches.len()`), then images (`batches.len() + i`).
+    /// Internal bookkeeping for the table; not part of the public hit surface.
     pub(crate) batch: u32,
     /// Every source that can own a fragment of this key, in the batch's own
     /// order.
@@ -1842,6 +1844,22 @@ pub(crate) struct PickEntry {
     /// `true` when one of this entry's sources shares its low-32 `EntityId` with
     /// another distinct identity elsewhere in the table.
     pub(crate) collision: bool,
+}
+
+/// A repeated renderer pick key in the resident set.
+///
+/// Keys are allocated monotonically within a device generation, so a duplicate
+/// can only come from the allocator being restarted while keys are still
+/// resident — a lifecycle error, never a legitimate state. The table cannot be
+/// built unambiguously, so it is reported rather than resolved "first wins".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DuplicatePickKey {
+    /// The key carried by two different owners.
+    pub(crate) key: u32,
+    /// Combined batch/image index of the first owner.
+    pub(crate) first: u32,
+    /// Combined batch/image index of the second owner.
+    pub(crate) second: u32,
 }
 
 /// The resolution of one key, owned so a caller can hold it past the table.
@@ -1871,11 +1889,16 @@ pub(crate) struct PickTable {
 }
 
 impl PickTable {
-    /// Build the table over `keys[i] -> sources[i]` pairs (the resident batches).
+    /// Build the table over `keys[i] -> sources[i]` pairs (the resident batches
+    /// and images).
     ///
-    /// `key` values must be `1..=MAX_PICK_KEYS`; a repeated key is a programming
-    /// error and is ignored (the first wins) rather than silently overwriting.
-    pub(crate) fn build(entries: &[(u32, Vec<SelectionRef>)]) -> PickTable {
+    /// `key` values must be `1..=MAX_PICK_KEYS`; a value outside that range is
+    /// skipped (it can never be written to the id target). A repeated key is a
+    /// programming/lifecycle error and is returned as [`DuplicatePickKey`] rather
+    /// than silently resolved.
+    pub(crate) fn build(
+        entries: &[(u32, Vec<SelectionRef>)],
+    ) -> Result<PickTable, DuplicatePickKey> {
         let max_key = entries.iter().map(|(key, _)| *key).max().unwrap_or(0);
         let mut slots: Vec<Option<PickEntry>> = vec![None; max_key as usize + 1];
         for (batch, (key, sources)) in entries.iter().enumerate() {
@@ -1883,13 +1906,18 @@ impl PickTable {
                 continue;
             }
             let slot = &mut slots[*key as usize];
-            if slot.is_none() {
-                *slot = Some(PickEntry {
-                    batch: batch as u32,
-                    sources: sources.clone(),
-                    collision: false,
+            if let Some(existing) = slot.as_ref() {
+                return Err(DuplicatePickKey {
+                    key: *key,
+                    first: existing.batch,
+                    second: batch as u32,
                 });
             }
+            *slot = Some(PickEntry {
+                batch: batch as u32,
+                sources: sources.clone(),
+                collision: false,
+            });
         }
         let collisions = detect_truncation_collisions(&slots);
         let colliding: std::collections::HashSet<u32> = collisions
@@ -1902,11 +1930,11 @@ impl PickTable {
                 .iter()
                 .any(|source| colliding.contains(&(source.entity.0 as u32)));
         }
-        PickTable {
+        Ok(PickTable {
             entries: slots,
             collisions,
             max_key,
-        }
+        })
     }
 
     /// Resolve a key read back from the id target. `None` for the background
@@ -2776,7 +2804,7 @@ mod pick_table_tests {
 
     #[test]
     fn pick_key_none_is_the_background_and_never_resolves() {
-        let table = PickTable::build(&[(1, vec![source(7, &[])])]);
+        let table = PickTable::build(&[(1, vec![source(7, &[])])]).expect("unique keys");
         assert_eq!(PICK_KEY_NONE, 0);
         assert!(table.resolve(PICK_KEY_NONE).is_none());
         assert!(table.resolve(999).is_none(), "an unknown key is not a hit");
@@ -2788,7 +2816,7 @@ mod pick_table_tests {
         // An EntityId far beyond 32 bits: the table must return the whole value,
         // not its low 32 bits.
         let entity = (1u128 << 100) | 0xDEAD_BEEF;
-        let table = PickTable::build(&[(3, vec![source(entity, &[])])]);
+        let table = PickTable::build(&[(3, vec![source(entity, &[])])]).expect("unique keys");
         let resolved = table.resolve(3).expect("known key");
         assert_eq!(resolved.batch, 0, "batch ordinal is the entry position");
         let hit = resolved.source.expect("exact");
@@ -2809,7 +2837,7 @@ mod pick_table_tests {
         // resolution must list both and never silently pick the first.
         let a = source(11, &[]);
         let b = source(22, &[]);
-        let table = PickTable::build(&[(1, vec![a.clone(), b.clone()])]);
+        let table = PickTable::build(&[(1, vec![a.clone(), b.clone()])]).expect("unique keys");
         let resolved = table.resolve(1).expect("known key");
         assert!(resolved.source.is_none(), "no exact identity");
         assert_eq!(resolved.sources, vec![a, b]);
@@ -2818,7 +2846,7 @@ mod pick_table_tests {
 
     #[test]
     fn a_batch_with_no_source_resolves_to_no_identity() {
-        let table = PickTable::build(&[(1, Vec::new())]);
+        let table = PickTable::build(&[(1, Vec::new())]).expect("unique keys");
         let resolved = table.resolve(1).expect("known key");
         assert!(resolved.source.is_none());
         assert!(resolved.sources.is_empty());
@@ -2832,7 +2860,8 @@ mod pick_table_tests {
         let low = 0x0000_1234u128;
         let a = low;
         let b = (1u128 << 64) | low;
-        let table = PickTable::build(&[(1, vec![source(a, &[])]), (2, vec![source(b, &[])])]);
+        let table = PickTable::build(&[(1, vec![source(a, &[])]), (2, vec![source(b, &[])])])
+            .expect("unique keys");
         assert_eq!(table.collisions().len(), 1);
         let collision = &table.collisions()[0];
         assert_eq!(collision.truncated_key, 0x1234);
@@ -2857,35 +2886,37 @@ mod pick_table_tests {
         // a 32-bit consumer they are indistinguishable, so this is reported.
         let a = source(5, &[100]);
         let b = source(5, &[200]);
-        let table = PickTable::build(&[(1, vec![a]), (2, vec![b])]);
+        let table = PickTable::build(&[(1, vec![a]), (2, vec![b])]).expect("unique keys");
         assert_eq!(table.collisions().len(), 1);
         assert_eq!(table.collisions()[0].identities.len(), 2);
     }
 
     #[test]
     fn distinct_entities_with_distinct_low_bits_are_not_a_collision() {
-        let table = PickTable::build(&[(1, vec![source(1, &[])]), (2, vec![source(2, &[])])]);
+        let table = PickTable::build(&[(1, vec![source(1, &[])]), (2, vec![source(2, &[])])])
+            .expect("unique keys");
         assert!(table.collisions().is_empty());
         assert!(!table.resolve(1).unwrap().collision);
         assert!(!table.resolve(2).unwrap().collision);
     }
 
     #[test]
-    fn a_repeated_key_is_ignored_rather_than_silently_overwritten() {
-        // Keys must be unique; a duplicate is a programming error. The first
-        // wins and the second is dropped, so the table can never report a key
-        // that names two different batches.
-        let table = PickTable::build(&[(1, vec![source(1, &[])]), (1, vec![source(2, &[])])]);
-        assert_eq!(table.len(), 1);
-        assert_eq!(
-            table.resolve(1).unwrap().source.unwrap().entity,
-            EntityId(1)
-        );
+    fn a_repeated_key_is_a_hard_error_not_first_wins() {
+        // Keys are allocated monotonically, so a duplicate can only come from a
+        // lifecycle bug (the allocator restarted while keys were resident).
+        // Silently keeping one owner would resolve a fragment to the wrong
+        // entity, so the table refuses to build.
+        let duplicate = PickTable::build(&[(1, vec![source(1, &[])]), (1, vec![source(2, &[])])])
+            .expect_err("a duplicate key must not build a table");
+        assert_eq!(duplicate.key, 1);
+        assert_eq!(duplicate.first, 0);
+        assert_eq!(duplicate.second, 1);
     }
 
     #[test]
     fn max_key_tracks_the_highest_live_key() {
-        let table = PickTable::build(&[(4, vec![source(1, &[])]), (9, vec![source(2, &[])])]);
+        let table = PickTable::build(&[(4, vec![source(1, &[])]), (9, vec![source(2, &[])])])
+            .expect("unique keys");
         assert_eq!(table.max_key(), 9);
         assert!(table.resolve(5).is_none(), "a gap is not a hit");
     }

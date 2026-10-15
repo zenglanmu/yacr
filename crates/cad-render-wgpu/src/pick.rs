@@ -110,9 +110,11 @@ impl Renderer {
     /// rasterizes the same fragments the user sees; depth writes are on for every
     /// id draw so the front-most fragment wins.
     pub(crate) fn create_pick_pipelines(&mut self, device: &wgpu::Device) {
-        let (Some(camera_layout), Some(image_layout)) =
-            (self.layout.clone(), self.image_texture_layout.clone())
-        else {
+        let (Some(camera_layout), Some(flags_layout), Some(image_layout)) = (
+            self.layout.clone(),
+            self.flags_layout.clone(),
+            self.image_texture_layout.clone(),
+        ) else {
             return;
         };
         let id_format = self.id_format;
@@ -121,9 +123,18 @@ impl Renderer {
             bind_group_layouts: &[Some(&camera_layout)],
             immediate_size: 0,
         });
+        // The image pipeline uses the *color* image pipeline's group order
+        // (camera, flags table, sampled texture) so `draw_image` can bind the
+        // texture at group 2 exactly as it does in the color pass. The flags
+        // group is unused by the id shader but must be present (and bound) to
+        // satisfy the pipeline layout.
         let pick_image_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("cad-pick-image-pipeline-layout"),
-            bind_group_layouts: &[Some(&camera_layout), Some(&image_layout)],
+            bind_group_layouts: &[
+                Some(&camera_layout),
+                Some(&flags_layout),
+                Some(&image_layout),
+            ],
             immediate_size: 0,
         });
         let module = |label: &str, body: &str| {
@@ -538,6 +549,13 @@ impl Renderer {
                 multiview_mask: None,
             });
             let mut state = EncodeState::new();
+            // The pick-image pipeline shares the color image pipeline's group
+            // order (camera, flags table, sampled texture), so group 1 must be
+            // bound for an image draw even though the id shaders never read it.
+            // Frame-constant, exactly as in the color pass.
+            if let Some(flags_bind_group) = self.flags_bind_group.as_ref() {
+                pass.set_bind_group(1, flags_bind_group, &[]);
+            }
             for entry in &pending {
                 let (bind_group, offset) = self.uniforms.binding(entry.slot as usize);
                 match entry.draw {

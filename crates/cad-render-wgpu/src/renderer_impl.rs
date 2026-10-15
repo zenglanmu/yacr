@@ -541,7 +541,7 @@ impl Renderer {
             .expect("flags control buffer created above");
         let max_dim = device.limits().max_texture_dimension_2d.max(1);
         let needed = key_count.max(1);
-        let width = needed.min(max_dim);
+        let width = flags_table_width(needed, max_dim);
         let height = needed.div_ceil(width).max(1);
         let recreate = self.flags_width != width
             || self
@@ -582,9 +582,10 @@ impl Renderer {
             self.flags_texture = Some(texture);
             self.flags_view = Some(view);
             self.flags_width = width;
-            // A fresh table is zeroed by the driver, so the CPU mirror starts
-            // empty and is re-uploaded below.
-            self.flags_bits.clear();
+            // The CPU mirror is *preserved* across a recreate and fully
+            // re-uploaded into the new row layout below, so growing the key
+            // space (an incremental commit) never clears previously-set bits.
+            // Only `reset_pick_keys` (a full scene reset) clears the mirror.
             self.flags_table_dirty = true;
         }
         // Keep the CPU mirror at least as long as the addressed texel space; the
@@ -1410,7 +1411,7 @@ impl Renderer {
         self.batches.extend(prepared.batches);
         self.gc_instance_streams();
         self.gc_mesh_chunks();
-        self.rebuild_pick_table();
+        self.rebuild_pick_table()?;
         self.progressive_frame = None;
         self.draw_plan = None;
         self.rebuild_lineweight_cache();
@@ -1575,10 +1576,27 @@ impl Renderer {
 
         let mut report = ImageUploadReport::default();
         let mut staged = Vec::with_capacity(images.len());
+        // Allocate one renderer pick key per requested image up front, mirroring
+        // the batch path (`prepare_upload_batches`): exhaustion is an
+        // invalid-input error rather than a silently unpickable key. A skipped
+        // (unresolved) image still burns its key; keys are monotonic and never
+        // reused within a device generation, so that is only a small waste.
+        let mut image_keys = Vec::with_capacity(images.len());
+        for _ in 0..images.len() {
+            let key = self.pick_key_counter.fetch_add(1, Ordering::Relaxed);
+            if key == PICK_KEY_NONE || key > MAX_PICK_KEYS {
+                return Err(CadError::InvalidInput(
+                    "renderer pick key space exhausted (too many images uploaded \
+                     without a full scene clear)"
+                        .into(),
+                ));
+            }
+            image_keys.push(key);
+        }
         // Resource keys still referenced after this call; textures for any other
         // key are dropped so the cache tracks the resident set, not history.
         let mut live: std::collections::HashSet<ResourceKey> = std::collections::HashSet::new();
-        for batch in images {
+        for (index, batch) in images.iter().enumerate() {
             let Some(decoded) = cache.get(&batch.resource) else {
                 report.unresolved.push(batch.resource.clone());
                 continue;
@@ -1630,13 +1648,13 @@ impl Renderer {
                 alpha: clamp_alpha(batch.alpha),
                 draw_order: batch.draw_order,
                 upload_bytes: quad_bytes,
-                pick_key: self.pick_key_counter.fetch_add(1, Ordering::Relaxed),
+                pick_key: image_keys[index],
                 sources: batch.sources.clone(),
             });
         }
         self.image_textures.retain(|key, _| live.contains(key));
         self.images = staged;
-        self.rebuild_pick_table();
+        self.rebuild_pick_table()?;
         Ok(report)
     }
 
@@ -1815,6 +1833,13 @@ impl Renderer {
         self.batches.clear();
         self.instance_streams.clear();
         self.mesh_chunks.clear();
+        // Resident image quads own pick keys too, and `reset_pick_keys` restarts
+        // the key space at 1. Keeping the images would let a re-uploaded batch
+        // reuse an image's key, which the pick table could only resolve by
+        // silently preferring one owner. Drop them with the batches; the host
+        // re-uploads its images after a reset (the texture cache is left to be
+        // pruned on the next `upload_images`).
+        self.images.clear();
         self.rebuild_lineweight_cache();
         self.reset_pick_keys();
     }
@@ -1822,13 +1847,19 @@ impl Renderer {
     /// Rebuild the CPU-side pick table from the resident batches, and reset the
     /// key allocator when nothing is resident.
     ///
-    /// Called whenever `batches` changes (commit/clear/device loss). A full clear
-    /// restarts the key space so a re-opened drawing does not inherit a growing
-    /// key counter.
-    fn rebuild_pick_table(&mut self) {
+    /// Called whenever `batches`/`images` change (commit/clear/device loss). A
+    /// full clear restarts the key space so a re-opened drawing does not inherit
+    /// a growing key counter.
+    ///
+    /// A repeated key is a **hard error**, not "first wins": keys are allocated
+    /// monotonically within a device generation, so a duplicate can only come
+    /// from the allocator being restarted while keys are still resident (a
+    /// lifecycle hole). Silently keeping one owner would resolve a fragment to
+    /// the wrong entity.
+    fn rebuild_pick_table(&mut self) -> CadResult<()> {
         if self.batches.is_empty() && self.images.is_empty() {
             self.reset_pick_keys();
-            return;
+            return Ok(());
         }
         let mut entries: Vec<(u32, Vec<SelectionRef>)> = self
             .batches
@@ -1840,10 +1871,17 @@ impl Renderer {
                 .iter()
                 .map(|image| (image.pick_key, image.sources.clone())),
         );
-        self.pick_table = PickTable::build(&entries);
+        self.pick_table = PickTable::build(&entries).map_err(|duplicate| {
+            CadError::InvalidInput(format!(
+                "duplicate renderer pick key {} (owners {} and {}): the key space was \
+                 restarted while keys were still resident",
+                duplicate.key, duplicate.first, duplicate.second
+            ))
+        })?;
         // The flags table is indexed by key, so it must cover the live key space.
         self.flags_bits
             .resize(self.pick_table.max_key() as usize + 1, 0);
+        Ok(())
     }
 
     fn reset_pick_keys(&mut self) {
@@ -2962,4 +3000,17 @@ impl Renderer {
             vec![DiagnosticParameter::Identifier(detail.to_string())],
         )
     }
+}
+
+/// The row width of the flags table for a key space of `needed` keys.
+///
+/// Rounded up to a power of two (capped at the adapter's `max_dim`) so the width
+/// only changes at bucket boundaries. An incremental commit that grows the key
+/// space *inside* the current bucket therefore never recreates the table, and a
+/// recreation that does happen preserves the CPU mirror (see `ensure_flags`), so
+/// previously-set flag bits survive either way. Without bucketing, the width
+/// tracked `needed` exactly and every added batch recreated (and zeroed) the
+/// table.
+fn flags_table_width(needed: u32, max_dim: u32) -> u32 {
+    needed.max(1).next_power_of_two().min(max_dim.max(1))
 }

@@ -24,8 +24,9 @@ log.workspace = true
 
 [dev-dependencies]
 # Used only by the offline WGSL validation test; pinned to the exact naga that
-# wgpu 30.0.1 embeds so validation matches the runtime parser.
-naga = { version = "=30.0.1", features = ["wgsl-in"] }
+# wgpu 30.0.1 embeds so validation matches the runtime parser. `glsl-out` backs
+# the GLSL ES 3.00 (WebGL2) back-translation test of the color shaders.
+naga = { version = "=30.0.1", features = ["wgsl-in", "glsl-out"] }
 # Tests construct `ImageBatch::clip` polygons, whose `ImageVertex` type is
 # defined by `cad-representation` and re-exported through `cad-scene`'s public
 # `ImageBatch` field. Test-only (downward) edge; the crate itself does not
