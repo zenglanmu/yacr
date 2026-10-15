@@ -70,15 +70,23 @@ pub const DEFAULT_HIGHLIGHT_ALPHA: f32 = 0.55;
 
 /// Default overlay tint: a warm selection highlight, distinct from the drawing's
 /// normal per-entity colours.
+///
+/// This is the **sub-element overlay** tint only (via [`HighlightOptions::color`]).
+/// Entity-level selection/hover is tinted by the renderer's in-stream flags path,
+/// whose shader tint constants (`SELECTED_TINT`/`HOVERED_TINT` in
+/// `cad-render-wgpu`) are a separate, mechanical choice — changing this constant
+/// does not affect an entity-level selection.
 pub const DEFAULT_HIGHLIGHT_COLOR: [f32; 3] = [1.0, 0.62, 0.19];
 
 /// Selection/hover/visibility bits of the renderer's in-stream flags path.
 ///
-/// These are the **canonical** bits: the renderer (`cad-render-wgpu`) re-exports
-/// them and its WGSL shaders declare the matching constants. A host resolves an
-/// entity-level selection into `(SelectionRef, bits)` pairs and hands them to the
-/// renderer, which maps each ref to the pick keys of the resident batches whose
-/// sources name it (see `Renderer::set_entity_flags`).
+/// These are the **canonical bit values**: the renderer (`cad-render-wgpu`)
+/// re-exports them and its WGSL shaders declare the matching constants. A host
+/// resolves an entity-level selection into `(SelectionRef, bits)` pairs and hands
+/// them to the renderer, which maps each ref to the pick keys of the resident
+/// whole-entity batches whose sources name it (see `Renderer::set_entity_flags`).
+/// The *tint colours* those bits select are the renderer's shader constants, not
+/// [`DEFAULT_HIGHLIGHT_COLOR`] (which is the sub-element overlay tint).
 ///
 /// The bits are a *whole-entity* visual state, not a sub-element one: a merged
 /// batch that concatenated several sources is tinted as a whole (documented
@@ -123,6 +131,15 @@ pub struct HighlightScene {
     pub completeness: Completeness,
     /// Machine-keyed diagnostics (`highlight.*`); never translated prose.
     pub diagnostics: Vec<Diagnostic>,
+    /// How many **entity-level** refs were seen and routed to the renderer's
+    /// in-stream flags path instead of producing an overlay batch.
+    ///
+    /// An entity-level ref contributes no batch by design (it is tinted in-shader
+    /// by `cad_render_wgpu`'s `set_entity_flags`), so it is not a gap and does not
+    /// make the scene `Partial`. This count makes that shape explicit instead of
+    /// an unexplained empty/`Complete` result; the caller is expected to route
+    /// those refs to the flags path.
+    pub entity_level_refs: usize,
 }
 
 impl HighlightScene {
@@ -167,10 +184,17 @@ where
         batches: Vec::new(),
         completeness: Completeness::Complete,
         diagnostics: Vec::new(),
+        entity_level_refs: 0,
     };
     let mut order = options.draw_order;
 
     for reference in selection {
+        if reference.sub_element.is_none() {
+            // Whole-entity refs are the renderer's in-stream flags path, not an
+            // overlay batch: count them so the result's shape is explicit and
+            // they are never mistaken for a silently-dropped selection.
+            scene.entity_level_refs += 1;
+        }
         if !visible(reference) {
             // Hidden is a session choice: it is not `Partial`.
             continue;
@@ -560,6 +584,8 @@ mod tests {
             scene.diagnostics.is_empty(),
             "entity-level is not a gap: it is routed to flags"
         );
+        // The shape is explicit: the ref was seen and routed, not dropped.
+        assert_eq!(scene.entity_level_refs, 1);
     }
 
     #[test]

@@ -6,7 +6,10 @@
 //! and assert exact identities, not just "something happened". When no adapter is
 //! available they skip with a clear message rather than pretending to pass.
 
-use cad_domain::{DocumentId, EntityId, InstancePath, Point3, SelectionRef, TaskStamp, Transform3};
+use cad_domain::{
+    DocumentId, EntityId, InstancePath, Point3, Revision, SelectionRef, SubElementId, TaskStamp,
+    Transform3,
+};
 use cad_render_wgpu::headless::{create_headless_gpu, HeadlessGpu};
 use cad_render_wgpu::{
     BackendPreference, Camera2d, IdTargetFormat, RenderTarget, Renderer, FLAG_HIDDEN, FLAG_HOVERED,
@@ -1204,5 +1207,139 @@ fn flags_enabled_with_no_entity_flags_is_pixel_identical() {
     assert_eq!(
         after, before,
         "flags enabled but empty must be identical to before"
+    );
+}
+
+/// B2: an image entity flag must survive a base-change image re-upload onto the
+/// **current** key. `upload_images` allocates fresh keys per call and rebuilds the
+/// pick table, so a flag pushed before the re-upload would otherwise stay on a
+/// retired key and the flagged image would flash back to unflagged after an edit.
+#[test]
+fn an_image_entity_flag_survives_a_re_upload_onto_the_current_key() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("red".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert red image");
+    renderer
+        .upload_images(&[image_batch("red", 0xE0)], &cache)
+        .expect("image");
+    let first = renderer.pick_key_for_image(0).expect("image key");
+    renderer
+        .set_entity_flags(&[(source(0xE0), FLAG_SELECTED)])
+        .expect("select image");
+    assert_eq!(renderer.pick_key_flags(first), FLAG_SELECTED);
+
+    // A base change re-uploads the image: a fresh key, a rebuilt pick table.
+    renderer
+        .upload_images(&[image_batch("red", 0xE0)], &cache)
+        .expect("re-upload");
+    let current = renderer.pick_key_for_image(0).expect("image key");
+    assert_ne!(current, first, "the re-upload allocates a fresh key");
+    assert_eq!(
+        renderer.pick_key_flags(current),
+        FLAG_SELECTED,
+        "the current image key must carry the flag after the re-upload (B2)"
+    );
+}
+
+/// S2: an entity-level flag must not tint the sub-element overlay batch. The face
+/// overlay's source is `E#face-a`; matching it by whole-entity identity would
+/// double-tint the face and let a future `FLAG_HIDDEN` discard the face highlight.
+#[test]
+fn an_entity_flag_does_not_tint_a_sub_element_overlay_batch() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let mut face = quad(0.0, 12.0, 4.0, 0xE1, false);
+    face.sources = vec![SelectionRef {
+        document: DocumentId(1),
+        entity: EntityId(0xE1),
+        instance: InstancePath::default(),
+        sub_element: Some(SubElementId {
+            source_key: "face-a".into(),
+            topology_revision: Revision(0),
+        }),
+    }];
+    renderer
+        .upload(&scene(vec![quad(0.0, -12.0, 4.0, 0xE1, false), face]))
+        .expect("upload");
+    let base_key = renderer.pick_key_for_batch(0).expect("base key");
+    let face_key = renderer.pick_key_for_batch(1).expect("face key");
+
+    // The combined `E` + `E#face-a` selection resolves the entity flag for `E`
+    // only; the face batch must stay unflagged.
+    renderer
+        .set_entity_flags(&[(source(0xE1), FLAG_SELECTED)])
+        .expect("select E");
+    assert_eq!(
+        renderer.entity_flag_keys(),
+        vec![base_key],
+        "only the whole-entity batch carries the entity flag"
+    );
+    assert_eq!(renderer.pick_key_flags(base_key), FLAG_SELECTED);
+    assert_eq!(
+        renderer.pick_key_flags(face_key),
+        0,
+        "the sub-element overlay batch must not be tinted by an entity-level flag (S2)"
+    );
+}
+
+/// S1: a requested ref that resolves in the database but matches no resident pick
+/// key must be reported, not silently dropped (iron rule #2).
+#[test]
+fn an_entity_flag_with_no_resident_key_is_reported_not_silently_dropped() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    renderer
+        .upload(&scene(vec![quad(0.0, 0.0, 4.0, 0x01, false)]))
+        .expect("upload");
+    let report = renderer
+        .set_entity_flags(&[(source(0xDEAD), FLAG_SELECTED)])
+        .expect("set flags");
+    assert_eq!(report.matched, 0);
+    assert_eq!(
+        report.unmatched,
+        vec![source(0xDEAD)],
+        "the unmatched ref must be surfaced for the caller to report"
+    );
+    assert!(renderer.entity_flag_keys().is_empty());
+}
+
+/// A flag change must invalidate a *completed* progressive frame. Otherwise the
+/// next `render` with an unchanged frame key draws nothing and keeps the
+/// pre-flag pixels, so a selection would not tint until the camera moved — the
+/// exact bug the production session (progressive rendering on) exposed.
+#[test]
+fn a_flag_change_redraws_a_completed_progressive_frame() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu, None);
+    let target = RenderTarget::new(96, 96);
+    renderer.set_progressive_rendering(true);
+    renderer
+        .upload(&scene(vec![quad(0.0, 0.0, 8.0, 0x55, false)]))
+        .expect("upload");
+    renderer.set_selection_flags_enabled(true);
+    let plain = render(&mut renderer, &target);
+
+    renderer
+        .set_entity_flags(&[(source(0x55), FLAG_SELECTED)])
+        .expect("select");
+    let tinted = render(&mut renderer, &target);
+    assert_ne!(
+        plain, tinted,
+        "a flags change must redraw the completed progressive frame"
     );
 }

@@ -369,6 +369,22 @@ pub struct PickCollision {
 /// shaders declare the matching constants.
 pub use cad_scene::{FLAG_HIDDEN, FLAG_HOVERED, FLAG_SELECTED};
 
+/// Result of [`Renderer::set_entity_flags`].
+///
+/// `matched` is the number of distinct pick keys the update wrote bits to.
+/// `unmatched` names the requested refs that resolved to **no** resident
+/// whole-entity pick key — for example an entity the base build excluded (a
+/// hidden/frozen layer). The caller must surface these as a diagnostic rather
+/// than treat the update as a silent success (iron rule #2: an unsupported
+/// capability is modelled explicitly, never turned into an empty success).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EntityFlagReport {
+    /// Distinct pick keys that carry a flag after the update.
+    pub matched: usize,
+    /// Requested refs that matched no resident whole-entity key.
+    pub unmatched: Vec<SelectionRef>,
+}
+
 /// The color-attachment format of the id target.
 ///
 /// `R32Uint` is the primary choice: the WebGPU spec guarantees it as a render
@@ -1034,6 +1050,11 @@ pub struct Renderer {
     /// per-key write is never clobbered by a later entity-flag diff unless the
     /// same key is in the entity set.
     entity_flag_keys: std::collections::BTreeSet<u32>,
+    /// The last entity-flag request, retained so a pick-table rebuild (a base
+    /// change or an image re-upload renumbers keys) re-resolves the flags against
+    /// the new keys instead of leaving them on retired ones. Cleared by a scene
+    /// reset (`reset_pick_keys`).
+    entity_flags_request: Vec<(SelectionRef, u32)>,
 }
 
 /// Staged GPU resources, owned by the renderer that prepared them. Publishing

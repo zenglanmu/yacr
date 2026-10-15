@@ -3,7 +3,6 @@ use crate::layers::LayerOverrideSet;
 use cad_db::DrawingDatabase;
 use cad_domain::{CadResult, DocumentId, SceneIdentity, SelectionRef, TaskStamp};
 use cad_representation::{FontEngine, SpaceSelection};
-use cad_scene::SceneDelta;
 use std::sync::Arc;
 mod assembly;
 pub use assembly::*;
@@ -13,6 +12,11 @@ pub use overlay::*;
 /// Decoded raster-image cache fed to the base scene build, re-exported so the UI
 /// bridge can name the type carried by [`PreparedScene::images`].
 pub use cad_resources::DecodedImageCache;
+/// The prepared-scene delta type carried by [`PreparedScene::base`] /
+/// [`PreparedScene::highlight`], re-exported so a consumer that must retain the
+/// overlay `Arc` by identity (for example the engine's flags-only fast path) can
+/// name it without a direct `cad-scene` dependency.
+pub use cad_scene::SceneDelta;
 
 #[derive(Clone, Debug, PartialEq)]
 struct SceneVersion {

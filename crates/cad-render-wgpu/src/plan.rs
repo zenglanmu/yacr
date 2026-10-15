@@ -1,7 +1,7 @@
 //! Batch planning, GPU packing and pipeline layout helpers.
 
 use super::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) struct GpuPlan {
     pub(crate) accepted: Vec<usize>,
@@ -1886,6 +1886,13 @@ pub(crate) struct PickTable {
     collisions: Vec<PickCollision>,
     /// Highest key present (0 when the table has no entries).
     max_key: u32,
+    /// Whole-entity identity → pick keys, so an entity-flag update is
+    /// `O(refs)` instead of `O(refs × entries × sources)`. Only sources that are
+    /// themselves whole-entity (`sub_element.is_none()`) are indexed: a
+    /// sub-element-carrying source is the sub-element overlay and must never be
+    /// matched by an entity-level flag (a face highlight would otherwise be
+    /// double-tinted, or discarded by `FLAG_HIDDEN`).
+    source_index: HashMap<(DocumentId, EntityId, Vec<EntityId>), Vec<u32>>,
 }
 
 impl PickTable {
@@ -1930,10 +1937,30 @@ impl PickTable {
                 .iter()
                 .any(|source| colliding.contains(&(source.entity.0 as u32)));
         }
+        // Index the whole-entity sources so an entity-flag update resolves by
+        // identity in `O(refs)` rather than scanning every entry.
+        let mut source_index: HashMap<(DocumentId, EntityId, Vec<EntityId>), Vec<u32>> =
+            HashMap::new();
+        for (key, entry) in slots.iter().enumerate() {
+            let Some(entry) = entry else { continue };
+            for source in &entry.sources {
+                if source.sub_element.is_some() {
+                    continue;
+                }
+                let keys = source_index
+                    .entry((source.document, source.entity, source.instance.0.clone()))
+                    .or_default();
+                let key = key as u32;
+                if keys.last() != Some(&key) {
+                    keys.push(key);
+                }
+            }
+        }
         Ok(PickTable {
             entries: slots,
             collisions,
             max_key,
+            source_index,
         })
     }
 
@@ -1963,27 +1990,22 @@ impl PickTable {
         &self.collisions
     }
 
-    /// Every pick key whose entry names `source` as one of its sources.
+    /// Every pick key whose entry names `source` as one of its **whole-entity**
+    /// sources, in key order.
     ///
-    /// Identity is `document + entity + instance`; the sub-element is ignored
-    /// because the flags path is **whole-entity** (a mesh face is a separate
-    /// overlay). A key is returned once even when several of its sources match:
-    /// the caller sets the whole batch's bits, which is the documented
-    /// batch-granularity limit for a multi-source merged run.
+    /// Identity is `document + entity + instance`; the sub-element is ignored on
+    /// the **query** side because the flags path is whole-entity (a mesh face is
+    /// a separate overlay). A batch source that itself carries a sub-element is
+    /// the sub-element overlay and is **excluded**: an entity-level flag must not
+    /// tint (or hide) the face overlay batch. A key is returned once even when
+    /// several of its sources match: the caller sets the whole batch's bits,
+    /// which is the documented batch-granularity limit for a multi-source run.
     pub(crate) fn keys_for_source(&self, source: &SelectionRef) -> Vec<u32> {
-        let mut keys = Vec::new();
-        for (key, entry) in self.entries.iter().enumerate() {
-            if let Some(entry) = entry {
-                if entry
-                    .sources
-                    .iter()
-                    .any(|candidate| same_source_entity(candidate, source))
-                {
-                    keys.push(key as u32);
-                }
-            }
-        }
-        keys
+        let identity = (source.document, source.entity, source.instance.0.clone());
+        self.source_index
+            .get(&identity)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Highest key present (0 when empty).
@@ -1995,12 +2017,6 @@ impl PickTable {
     pub(crate) fn len(&self) -> usize {
         self.entries.iter().filter(|entry| entry.is_some()).count()
     }
-}
-
-/// Whether two sources name the same whole entity: `document + entity +
-/// instance`, ignoring the sub-element.
-fn same_source_entity(a: &SelectionRef, b: &SelectionRef) -> bool {
-    a.document == b.document && a.entity == b.entity && a.instance == b.instance
 }
 
 /// Group every source's low-32 `EntityId` and report the values shared by two or
@@ -2917,6 +2933,35 @@ mod pick_table_tests {
         let table = PickTable::build(&[(5, vec![a.clone(), b.clone()])]).expect("unique keys");
         assert_eq!(table.keys_for_source(&a), vec![5]);
         assert_eq!(table.keys_for_source(&b), vec![5]);
+    }
+
+    #[test]
+    fn a_sub_element_batch_source_is_not_matched_by_an_entity_flag() {
+        // The sub-element overlay batch's source is `E#face-a`. Selecting the
+        // whole entity `E` must not resolve to that batch's key, or the face
+        // overlay would be double-tinted (and a future `FLAG_HIDDEN` would
+        // discard the face highlight). S2.
+        let face = |entity: u128| {
+            let mut source = source(entity, &[]);
+            source.sub_element = Some(cad_domain::SubElementId {
+                source_key: "face-a".into(),
+                topology_revision: cad_domain::Revision(0),
+            });
+            source
+        };
+        let whole = source(40, &[]);
+        let table = PickTable::build(&[(1, vec![whole.clone()]), (2, vec![face(40)])])
+            .expect("unique keys");
+        assert_eq!(
+            table.keys_for_source(&whole),
+            vec![1],
+            "only the whole-entity batch matches"
+        );
+        // A batch that carries *only* the face source is never matched by an
+        // entity-level ref (nor by a different entity).
+        let face_only = PickTable::build(&[(2, vec![face(40)])]).expect("unique keys");
+        assert!(face_only.keys_for_source(&whole).is_empty());
+        assert!(face_only.keys_for_source(&source(41, &[])).is_empty());
     }
 
     #[test]

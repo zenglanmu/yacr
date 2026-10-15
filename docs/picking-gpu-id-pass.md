@@ -26,6 +26,13 @@ P3a-2 修改了 `cad-scene` / `cad-app` / `cad-render-wgpu`，并把生产会话
   `apply_ready_updates` 中：overlay `Arc` 指针未变且 base 未变时**只**调用
   `Renderer::set_entity_flags`（跳过任何 batch/stream/chunk 上传）；否则在 commit 后重推标志
   （base 变化会重建 pick key，必须对新表重解析）。
+  - overlay 复用判据用 **`Arc::ptr_eq`（保留强引用）**，不是裸地址 `usize`：一个被释放后
+    重新分配到同一地址的 `SceneDelta` 会让旧判据 ABA 误判、静默跳过新 overlay 上传。
+  - 标志推送在 **base/图像重传之后**：base 变化会重编号 pick key（图像键每次
+    `upload_images` 都新分配），先推的标志会留在退役键上，导致被标志的实体/图像在编辑后
+    闪回未着色。渲染器同时**保留最后一次标志请求**，在 pick 表重建时按新键重解析（双保险）。
+  - `set_entity_flags` 返回 [`EntityFlagReport`]：匹配到 0 个驻留键的 ref 必须由调用方上报为
+    `flags.unresolved` 诊断，而不是静默成功（例如隐藏/冻结图层把实体排除出底图时）。
 
 **仍然保留 overlay（有据）**：**子元素高亮**（网格面）与**工具预览**。原因：静态合并流
 不随选择变化重传，face 级 flags 不在数据里；用户明确授权「为少量选中项单独 draw 一次」。
@@ -40,8 +47,24 @@ P3a-2 修改了 `cad-scene` / `cad-app` / `cad-render-wgpu`，并把生产会话
 属于哪个 source，所以对其任一 source 打标志会给整批着色（
 `a_multi_source_batch_is_tinted_at_batch_granularity`）。逐 fragment 解析在合并 run 上不可行。
 
+**实体级标志不作用于子元素 overlay**：`keys_for_source` 只匹配 **整实体** 的 batch source
+（`sub_element.is_none()`）。子元素 overlay batch 的 source 是 `E#face-a`，选择整实体 `E`
+时**不会**命中它，否则面高亮会被重复着色、且将来的 `FLAG_HIDDEN` 会把面高亮一起丢弃
+（`a_sub_element_batch_source_is_not_matched_by_an_entity_flag`）。
+
+**标志变化必须让已完成的 progressive 帧失效**：`set_pick_key_flags` /
+`set_selection_flags_enabled` 会丢弃缓存的 progressive 帧。否则 `render` 在同一
+frame key 下不再重绘、保留加标志前的像素，选择要等到相机移动才可见
+（`a_flag_change_redraws_a_completed_progressive_frame`；生产会话开着 progressive，
+这正是引擎侧真机用例抓到的路径）。重绘只复用驻留缓冲，**不**重传几何。
+
 **实体级 hover/hidden 输入**：`OverlayInputs` 新增 `hovered` / `hidden`（默认空）。宿主尚未
 产生二者（`cad-host` 传空）；机制与测试已就绪，宿主侧生产是后续切片。
+
+**「只上传标志」的已知例外**：当处于 2D 导航回退（`overlays_suppressed`，即 overlay 后缀被
+有意丢弃）时，一次实体级选择变化不再走标志-only 快路径——它会把 overlay 后缀重传并
+`overlay_suffix_commits += 1`。这是**有意**的：此时 GPU 上的后缀本就缺失，必须靠一次完整提交
+恢复，标志-only 的前提（后缀驻留）不成立。相机-only 导航仍不触碰该计数器。
 
 ## 1. id pass（按需，绝不逐帧）
 
@@ -120,7 +143,7 @@ id pass **不解析** mesh face：wgpu 的 fragment stage 拿不到 primitive in
 | `Renderer::pick_key_for_batch(i)` / `pick_table_len()` | 诊断 |
 | `Renderer::id_target_format()` / `set_id_format_override(..)` | 当前/强制 id target 格式（测试钩子） |
 | `Renderer::id_format_for_features(features)` | 纯决策函数，可离线复现 |
-| `Renderer::set_entity_flags(&[(SelectionRef, u32)])` | P3a-2：把实体级 `(ref, bits)` 解析到驻留 batch 的 pick key 并写标志表；只上传位变化的行、清除掉出集合的行。多源 batch 按 batch 粒度着色 |
+| `Renderer::set_entity_flags(&[(SelectionRef, u32)]) -> Result<EntityFlagReport, _>` | P3a-2：把实体级 `(ref, bits)` 解析到驻留**整实体** batch 的 pick key 并写标志表；只上传位变化的行、清除掉出集合的行；请求被保留，pick 表重建（base 变化 / 图像重传）后按新键重解析。多源 batch 按 batch 粒度着色；无匹配键的 ref 在 `EntityFlagReport::unmatched` 中返回（调用方须上报 `flags.unresolved`） |
 | `Renderer::entity_flag_keys()` | P3a-2：当前带实体级标志的 key（诊断/测试） |
 
 `pick_at` 返回 `Result<Option<..>>`（而非裸 `Option`）：设备丢失/帧错误必须能与「没拾到」
@@ -206,8 +229,13 @@ YACR_PICK_PARITY_GRID=12x9 cargo test -p cad-cli-tools --test pick_parity --lock
   -- --test-threads=1` 全绿（cad-scene 56；cad-app 348）。`cargo check -p cad-engine
   -p cad-host --all-targets` 通过；`cargo clippy -p cad-scene -p cad-app -p cad-render-wgpu
   --all-targets -- -D warnings` 通过；`scripts/check-architecture.py` OK。
-- **未运行**：`cad-engine` 的真实 GPU 会话用例（`#[ignore]` 硬件用例）本轮未跑；parity harness
-  本轮未重跑。旧数字保留仅供追溯。
+- **未运行**：`cad-engine` 的既有真实 GPU 会话用例（`base_only_*` / `pending_overlay_*` /
+  `camera_only_*`）本轮未重跑；parity harness 本轮未重跑。旧数字保留仅供追溯。**本轮新增**
+  两个 `cad-engine` 真机（P620/Vulkan）`#[ignore]` 用例并已运行通过：
+  `selection_flags_only_fast_path_tints_without_reuploading_geometry`（选择 A→着色且只涨
+  标志计数，切到 B→A 退色 B 着色，stream/chunk/suffix 计数不变；含 B1 的 overlay `Arc`
+  保留断言）与 `a_selected_entity_excluded_from_the_base_reports_a_diagnostic`（隐藏图层
+  排除的选中实体产出 `flags.unresolved` 诊断）。
 
 parity harness（真实 DWG，**渲染器 id pass** vs **CPU `cad_spatial` 参考**）：
 
@@ -236,6 +264,12 @@ parity harness（真实 DWG，**渲染器 id pass** vs **CPU `cad_spatial` 参�
 - **Android 真机 / 模拟器**：未验证。
 - **整实体高亮退役与生产接线**：**P3a-2 已完成**（见 §0）：整实体 overlay 退役、生产会话走
   标志机、选择变化只上传标志数据。子元素 overlay 与工具预览仍保留（有据）。
+- **id pass 忽略 `FLAG_HIDDEN`（必须的后续项）**：`pick_*.wgsl` 写的是**原始 pick key**，不读
+  标志表，所以被 `FLAG_HIDDEN` 的实体会**继续可拾取并遮挡**其它几何（color pass 已 `discard`，
+  id pass 没有）。当前 **hidden 生产者尚未接线**（`cad-host` 传空的 `hidden`），因此该缺陷
+  暂不可见；但 **hidden 切片落地前必须**让 id pass 也按 key 查标志表并跳过 `FLAG_HIDDEN`
+  的片段（否则「隐藏」实体仍会被拾取，违反铁律 #2 的显式建模要求）。本切片**不**做投机实现，
+  仅在此记录为硬性前置项。
 - **实体级 hover / hidden 的宿主生产**：机制与 `OverlayInputs::hovered`/`hidden` 已就绪，
   宿主尚未产生（`cad-host` 传空）；属后续宿主切片。
 - **视觉 tint**：`SELECTED_TINT`/`HOVERED_TINT` 仍是机械常量（颜色替换，非混合），最终视觉

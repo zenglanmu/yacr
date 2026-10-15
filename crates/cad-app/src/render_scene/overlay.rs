@@ -330,6 +330,10 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
 ///
 /// `selection_highlight` gates the selected tint only; hover/hidden are
 /// independent transient states and always participate.
+///
+/// Note: `selection_highlight` is hashed **here and** in [`overlay_fingerprint`]
+/// on purpose — it gates both the sub-element overlay (built only when on) and
+/// the entity-level selected tint, so a toggle must rebuild/republish both.
 pub fn entity_flags_fingerprint(inputs: &OverlayInputs) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -650,6 +654,7 @@ pub fn selection_highlight(
         batches,
         completeness,
         diagnostics,
+        ..
     } = cad_scene::highlight_batches(
         &sub_element_refs,
         representations.iter(),
@@ -704,7 +709,7 @@ pub fn selection_entity_flags(
     let resolve = |reference: &SelectionRef, bits: u32, out: &mut EntityFlagScene| {
         if crate::picking::resolve_pick_transform(database, document, reference).is_none() {
             let message = format!(
-                "selection {} is not present in the supplied representations",
+                "selected entity {} is not present in the document",
                 reference.entity.0
             );
             out.diagnostics.push(Diagnostic {
@@ -1510,6 +1515,7 @@ mod tests {
             batches,
             completeness,
             diagnostics,
+            ..
         } = cad_scene::highlight_batches(
             selection.refs(),
             representations.iter(),

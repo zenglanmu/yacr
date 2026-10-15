@@ -1,6 +1,8 @@
 //! Derived GPU state. Never builds representations or owns a window.
 use super::controller::PreparedScene;
 use super::*;
+use cad_app::render_scene::SceneDelta;
+use cad_domain::SelectionRef;
 use cad_render_wgpu::{wgpu, BackendCapabilities, RenderError, RenderTarget, Renderer};
 use std::sync::Arc;
 
@@ -102,12 +104,25 @@ pub struct CadRenderRuntime {
     /// Cumulative overlay-suffix commits (suffix-only uploads and fallback
     /// truncations). A camera-only navigation must leave this flat.
     overlay_suffix_commits: u64,
-    /// Pointer identity of the last committed overlay delta.
+    /// The last committed overlay delta, retained by strong reference.
     ///
     /// An entity-only selection change republishes the scene with the **same**
-    /// overlay `Arc` (the controller reuses it), so a matching pointer means
-    /// there is no geometry to re-upload: only the entity flags changed.
-    applied_highlight: Option<usize>,
+    /// overlay `Arc` (the controller reuses it), so `Arc::ptr_eq` with the
+    /// candidate means there is no geometry to re-upload: only the entity flags
+    /// changed. Retaining the `Arc` (rather than its raw address as `usize`) is
+    /// deliberate: a freed-and-reallocated `SceneDelta` could otherwise land on
+    /// the same address between two applies (rapid preview/snap updates with
+    /// mailbox coalescing), and the fast path would silently skip the new overlay
+    /// upload and mark the stale scene current. The strong reference also keeps
+    /// the address alive, so `Arc::ptr_eq` cannot observe an ABA reuse.
+    applied_highlight: Option<Arc<SceneDelta>>,
+    /// Diagnostic from the last base-change image upload (`None` when every image
+    /// resolved). Kept separate from the flags diagnostic so a flags-only update
+    /// does not wipe a still-relevant image diagnostic.
+    image_diagnostic: Option<String>,
+    /// Diagnostic from the last entity-flag apply: the requested refs that matched
+    /// no resident whole-entity pick key. `None` when every requested ref resolved.
+    flags_diagnostic: Option<String>,
 }
 impl Default for CadRenderRuntime {
     fn default() -> Self {
@@ -129,6 +144,8 @@ impl Default for CadRenderRuntime {
             overlays_suppressed: false,
             overlay_suffix_commits: 0,
             applied_highlight: None,
+            image_diagnostic: None,
+            flags_diagnostic: None,
         }
     }
 }
@@ -182,6 +199,8 @@ impl CadRenderRuntime {
         self.overlays_suppressed = false;
         self.overlay_suffix_commits = 0;
         self.applied_highlight = None;
+        self.image_diagnostic = None;
+        self.flags_diagnostic = None;
         self.dirty.invalidate();
     }
 
@@ -216,28 +235,37 @@ impl CadRenderRuntime {
         if self.applied_revision == Some(ready.revision) {
             return Ok(());
         }
-        let renderer = self.renderer.as_mut().expect("ready renderer");
         let base_changed = self.applied_base != Some(ready.base_revision);
         // An entity-only selection/hover/hidden change republishes the scene with
         // the **same** overlay `Arc` (the controller reuses it) and no base
         // change, so there is no geometry to upload — only flags to push. This is
         // the "selection change uploads only flags data" path: it never re-uploads
         // a batch, stream or chunk.
-        let overlay_reused = self
-            .applied_highlight
-            .is_some_and(|previous| previous == Arc::as_ptr(&ready.highlight) as usize);
+        let overlay_reused =
+            overlay_identity_matches(self.applied_highlight.as_ref(), &ready.highlight);
         if !base_changed
             && overlay_reused
             && self.pending_upload.is_none()
             && !self.overlays_suppressed
         {
-            renderer.set_entity_flags(&ready.entity_flags)?;
+            let report = self
+                .renderer
+                .as_mut()
+                .expect("ready renderer")
+                .set_entity_flags(&ready.entity_flags)?;
+            self.flags_diagnostic = flags_diagnostic(&report.unmatched);
             self.applied_revision = Some(ready.revision);
-            self.applied_highlight = Some(Arc::as_ptr(&ready.highlight) as usize);
+            self.applied_highlight = Some(ready.highlight.clone());
+            // A flags-only update must not wipe a still-relevant image diagnostic:
+            // merge rather than clear.
+            self.diagnostic = merge_diagnostics(
+                self.image_diagnostic.as_deref(),
+                self.flags_diagnostic.as_deref(),
+            );
             self.dirty.invalidate();
-            self.diagnostic = None;
             return Ok(());
         }
+        let renderer = self.renderer.as_mut().expect("ready renderer");
         // Base drawing batches are the prefix; the transient highlight/preview
         // overlay is the replaceable suffix. A highlight-only change still
         // re-uploads the suffix, but never the base.
@@ -307,11 +335,6 @@ impl CadRenderRuntime {
                 self.base_batches
             },
         )?;
-        // Push the entity-level flags for the freshly committed scene. A base
-        // change rebuilt the pick keys, so the flags must be re-resolved against
-        // the new table; a suffix-only commit re-applies idempotently (the diff
-        // uploads nothing when the bits are unchanged).
-        renderer.set_entity_flags(&ready.entity_flags)?;
         // A suffix-only commit re-uploads (or truncates) the transient overlay
         // batch range; a base change replaces the whole scene instead.
         if !pending.base_changed {
@@ -338,16 +361,29 @@ impl CadRenderRuntime {
                 image_diagnostic = Some(format!("{}: {keys}", reason.code));
             }
         }
+        // Push the entity-level flags for the freshly committed scene, **after**
+        // any base/image re-upload. A base change (re)allocates pick keys —
+        // including the image keys, which `upload_images` assigns fresh per call —
+        // so flags pushed before the re-upload would stay on retired keys and the
+        // flagged image/geometry would flash back to unflagged after an edit. The
+        // renderer also re-applies its retained request on the rebuild; this call
+        // surfaces the unmatched refs so the runtime can report them.
+        let flag_report = renderer.set_entity_flags(&ready.entity_flags)?;
         // Publication follows successful GPU preparation/commit, never precedes it.
         self.base_batches = ready.base.added.len();
         self.applied_base = Some(ready.base_revision);
         self.applied_revision = Some(ready.revision);
-        self.applied_highlight = Some(Arc::as_ptr(&ready.highlight) as usize);
+        self.applied_highlight = Some(ready.highlight.clone());
         // A committed full scene restores the transient overlay suffix, so the
         // base-only fallback is no longer active.
         self.overlays_suppressed = false;
         self.dirty.invalidate();
-        self.diagnostic = image_diagnostic;
+        self.image_diagnostic = image_diagnostic;
+        self.flags_diagnostic = flags_diagnostic(&flag_report.unmatched);
+        self.diagnostic = merge_diagnostics(
+            self.image_diagnostic.as_deref(),
+            self.flags_diagnostic.as_deref(),
+        );
         Ok(())
     }
 
@@ -382,6 +418,13 @@ impl CadRenderRuntime {
     #[cfg(test)]
     pub(super) fn base_batches_for_test(&self) -> usize {
         self.base_batches
+    }
+
+    /// The retained applied-overlay `Arc`, so a hardware test can assert it is the
+    /// same allocation as the published scene's overlay (the ABA guard). Test only.
+    #[cfg(test)]
+    pub(super) fn applied_highlight_for_test(&self) -> Option<Arc<SceneDelta>> {
+        self.applied_highlight.clone()
     }
 
     /// Model a resident base without a GPU so the pure-state qualifier can be
@@ -557,5 +600,142 @@ impl CadRenderRuntime {
             completeness,
             texture: texture.clone(),
         }))
+    }
+}
+
+/// Whether the applied overlay `Arc` is the **same allocation** as `candidate`.
+///
+/// Pointer equality on a retained `Arc` — never a raw address — so a freed and
+/// reallocated `SceneDelta` cannot alias the previous overlay (the ABA hazard of
+/// the earlier `usize` identity).
+fn overlay_identity_matches(
+    applied: Option<&Arc<SceneDelta>>,
+    candidate: &Arc<SceneDelta>,
+) -> bool {
+    applied.is_some_and(|previous| Arc::ptr_eq(previous, candidate))
+}
+
+/// The `flags.unresolved` diagnostic for the refs an entity-flag apply could not
+/// place on a resident key, or `None` when every ref resolved.
+fn flags_diagnostic(unmatched: &[SelectionRef]) -> Option<String> {
+    if unmatched.is_empty() {
+        return None;
+    }
+    let refs = unmatched
+        .iter()
+        .map(|reference| reference.entity.0.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!("flags.unresolved: {refs}"))
+}
+
+/// Combine the image and flags diagnostics so a flags-only update preserves a
+/// still-relevant image diagnostic instead of wiping it.
+fn merge_diagnostics(image: Option<&str>, flags: Option<&str>) -> Option<String> {
+    match (image, flags) {
+        (Some(image), Some(flags)) => Some(format!("{image}; {flags}")),
+        (Some(image), None) => Some(image.to_string()),
+        (None, Some(flags)) => Some(flags.to_string()),
+        (None, None) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cad_domain::{DocumentId, EntityId, InstancePath, TaskStamp};
+
+    fn delta(revision: u64) -> SceneDelta {
+        SceneDelta {
+            stamp: TaskStamp::new(DocumentId(1), revision),
+            added: Vec::new(),
+            removed_chunks: Vec::new(),
+            images: Vec::new(),
+        }
+    }
+
+    fn reference(entity: u128) -> SelectionRef {
+        SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(entity),
+            instance: InstancePath::default(),
+            sub_element: None,
+        }
+    }
+
+    #[test]
+    fn overlay_reuse_is_pointer_identity_on_a_retained_arc() {
+        // The applied overlay is retained by strong reference, so its allocation
+        // stays alive and a later rebuild cannot land on the same address. This
+        // is what makes `Arc::ptr_eq` sound where the raw `usize` identity was
+        // ABA-prone (a freed overlay reallocated at the same address between two
+        // applies silently skipped the new overlay upload).
+        let applied = Arc::new(delta(1));
+        let runtime = CadRenderRuntime {
+            applied_highlight: Some(applied.clone()),
+            ..CadRenderRuntime::default()
+        };
+        assert!(
+            overlay_identity_matches(runtime.applied_highlight.as_ref(), &applied),
+            "the same allocation is reused"
+        );
+        assert_eq!(
+            Arc::strong_count(&applied),
+            2,
+            "the runtime retains the overlay Arc, so its address cannot be reused"
+        );
+        drop(applied);
+        // A rebuild is a distinct allocation: the fast path must not match it.
+        let rebuilt = Arc::new(delta(2));
+        assert!(
+            !overlay_identity_matches(runtime.applied_highlight.as_ref(), &rebuilt),
+            "a distinct overlay must not take the flags-only fast path"
+        );
+    }
+
+    #[test]
+    fn flags_diagnostic_names_unmatched_refs_and_is_none_when_all_resolve() {
+        assert_eq!(flags_diagnostic(&[]), None);
+        let diagnostic = flags_diagnostic(&[reference(7), reference(9)]).expect("unmatched");
+        assert!(diagnostic.starts_with("flags.unresolved: "));
+        assert!(diagnostic.contains('7') && diagnostic.contains('9'));
+    }
+
+    #[test]
+    fn merge_diagnostics_preserves_the_image_part_across_a_flags_update() {
+        assert_eq!(merge_diagnostics(None, None), None);
+        assert_eq!(
+            merge_diagnostics(Some("image: a"), None).as_deref(),
+            Some("image: a")
+        );
+        assert_eq!(
+            merge_diagnostics(None, Some("flags.unresolved: 3")).as_deref(),
+            Some("flags.unresolved: 3")
+        );
+        assert_eq!(
+            merge_diagnostics(Some("image: a"), Some("flags.unresolved: 3")).as_deref(),
+            Some("image: a; flags.unresolved: 3")
+        );
+    }
+
+    #[test]
+    fn applied_highlight_strong_count_is_observable_for_the_hardware_test() {
+        // The hardware session test asserts the runtime retains the applied
+        // overlay (the ABA guard); this keeps the helper exercised without a GPU.
+        let runtime = CadRenderRuntime::default();
+        assert!(runtime.applied_highlight_for_test().is_none());
+        let applied = Arc::new(delta(1));
+        let runtime = CadRenderRuntime {
+            applied_highlight: Some(applied.clone()),
+            ..CadRenderRuntime::default()
+        };
+        let retained = runtime.applied_highlight_for_test().expect("retained");
+        assert!(Arc::ptr_eq(&retained, &applied));
+        drop(retained);
+        assert_eq!(
+            Arc::strong_count(&applied),
+            2,
+            "the runtime retains the overlay Arc"
+        );
     }
 }

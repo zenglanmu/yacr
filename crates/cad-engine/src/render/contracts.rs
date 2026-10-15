@@ -7,7 +7,8 @@ use cad_app::BackendChoice;
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer, Layout, PaperViewport};
 use cad_domain::TaskStamp;
 use cad_domain::{
-    Completeness, EntityId, InstancePath, LayerId, LayoutId, ObjectId, Point3, Revision,
+    Completeness, DatabaseId, EntityId, InstancePath, LayerId, LayoutId, Mesh, ObjectId, Point3,
+    Revision,
 };
 use cad_domain::{SelectionRef, SemanticGeometry, SpaceId};
 
@@ -1197,4 +1198,272 @@ fn pending_overlay_upload_never_labels_stale_suffix_current() {
     assert_eq!(restored.completeness, FrameCompleteness::CurrentScene);
     assert!(session.current_drawing_presented());
     assert!(renderer_batch_count(&session) > committed_batches);
+}
+
+// ---------------------------------------------------------------------------
+// Production flags-only fast path (B1/B2/S1/S4): a selection change must tint
+// through the in-stream flags without re-uploading any geometry.
+// ---------------------------------------------------------------------------
+
+#[cfg(not(target_arch = "wasm32"))]
+fn model_entity(id: u128) -> SelectionRef {
+    SelectionRef {
+        document: DocumentId(0),
+        entity: EntityId(id),
+        instance: InstancePath::default(),
+        sub_element: None,
+    }
+}
+
+/// A filled axis-aligned quad (two triangles, CCW in a Y-up world — the winding
+/// the renderer's quad tests use) as an `AcDbMesh` entity.
+#[cfg(not(target_arch = "wasm32"))]
+fn quad_entity(id: u128, cx: f64, cy: f64, half: f64) -> DbEntity {
+    let vertices = vec![
+        Point3 {
+            x: cx - half,
+            y: cy - half,
+            z: 0.0,
+        },
+        Point3 {
+            x: cx - half,
+            y: cy + half,
+            z: 0.0,
+        },
+        Point3 {
+            x: cx + half,
+            y: cy + half,
+            z: 0.0,
+        },
+        Point3 {
+            x: cx + half,
+            y: cy - half,
+            z: 0.0,
+        },
+    ];
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: "AcDbMesh".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Mesh(Mesh {
+            vertices,
+            triangles: vec![[0, 2, 1], [0, 3, 2]],
+            normals: vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                };
+                4
+            ],
+            face_sources: vec![None; 2],
+            colors: Vec::new(),
+        }),
+        draw_order: id as i64,
+    }
+}
+
+/// Two well-separated filled quads (entities 1 and 2) so a selected tint can be
+/// sampled at a known pixel per entity.
+#[cfg(not(target_arch = "wasm32"))]
+fn db_with_two_quads() -> DrawingDatabase {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(quad_entity(1, -40.0, 0.0, 15.0)).unwrap();
+    b.insert_entity(quad_entity(2, 40.0, 0.0, 15.0)).unwrap();
+    b.finish().unwrap()
+}
+
+/// The pixel containing world point `(wx, wy)` under the default session camera
+/// (centre `(0, 0)`, orthographic scale `1.0`).
+#[cfg(not(target_arch = "wasm32"))]
+fn world_to_pixel_2d(width: u32, height: u32, world: [f64; 2]) -> (u32, u32) {
+    let sx = 2.0 / f64::from(width);
+    let sy = 2.0 / f64::from(height);
+    let px = ((sx * world[0] + 1.0) * 0.5 * f64::from(width)).floor() as i64;
+    let py = ((1.0 - sy * world[1]) * 0.5 * f64::from(height)).floor() as i64;
+    (
+        px.clamp(0, i64::from(width) - 1) as u32,
+        py.clamp(0, i64::from(height) - 1) as u32,
+    )
+}
+
+/// Render the current scene through the session and read the frame back.
+#[cfg(not(target_arch = "wasm32"))]
+fn session_frame(session: &RenderSessionHandle, size: [f64; 2]) -> Vec<u8> {
+    session.render(size, 1.0).unwrap().expect("frame");
+    session
+        .0
+        .borrow_mut()
+        .runtime
+        .renderer
+        .as_mut()
+        .expect("attached renderer")
+        .read_target_rgba()
+        .expect("read back frame")
+        .pixels
+}
+
+/// `(flags_upload_count, instance_stream_uploads, mesh_chunk_uploads)`.
+#[cfg(not(target_arch = "wasm32"))]
+fn renderer_counters(session: &RenderSessionHandle) -> (u64, u64, u64) {
+    let state = session.0.borrow();
+    let renderer = state.runtime.renderer.as_ref().expect("attached renderer");
+    (
+        renderer.flags_upload_count(),
+        renderer.instance_stream_uploads(),
+        renderer.mesh_chunk_uploads(),
+    )
+}
+
+/// DETERMINISTIC HARDWARE: an entity-only selection change goes through the
+/// production flags-only fast path — it tints the selected entity, uploads only
+/// flags data, and leaves the instance streams, mesh chunks and overlay suffix
+/// untouched. Switching the selection tints the new entity and untints the old.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
+fn selection_flags_only_fast_path_tints_without_reuploading_geometry() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let gpu = headless_gpu();
+    session.attach_device(gpu.device, gpu.queue).unwrap();
+    session.sync_drawing(Some(Arc::new(db_with_two_quads())));
+    // Turn off the reference axes/grid so the sampled pixels are the quads' own
+    // pixels, not a white axis/grid line drawn over the quad centre.
+    session.set_overlay_visibility(OverlayVisibility {
+        axes: false,
+        grid: false,
+        ..OverlayVisibility::default()
+    });
+    session.prepare().unwrap();
+    drive_uploads(&session);
+
+    let size = [200.0, 100.0];
+    let baseline = session_frame(&session, size);
+    let (ax, ay) = world_to_pixel_2d(200, 100, [-40.0, 0.0]);
+    let (bx, by) = world_to_pixel_2d(200, 100, [40.0, 0.0]);
+    let ai = (ay as usize * 200 + ax as usize) * 4;
+    let bi = (by as usize * 200 + bx as usize) * 4;
+    for (label, i) in [("A", ai), ("B", bi)] {
+        assert!(
+            baseline[i] > 8 || baseline[i + 1] > 8 || baseline[i + 2] > 8,
+            "quad {label} must be drawn at its sample pixel"
+        );
+    }
+
+    let (flags0, streams0, chunks0) = renderer_counters(&session);
+    let suffix0 = session.overlay_suffix_commits();
+
+    // Select A: a flags-only change (the controller reuses the overlay `Arc`).
+    assert!(session.set_selection(SelectionSet::from_refs([model_entity(1)])));
+    session.prepare().unwrap();
+    session.apply_ready_updates().unwrap();
+    {
+        // B1 guard: the runtime retains the applied overlay `Arc` by identity, so
+        // a freed-and-reallocated overlay cannot alias the fast-path comparison.
+        let state = session.0.borrow();
+        let applied = state
+            .runtime
+            .applied_highlight_for_test()
+            .expect("the applied overlay is retained");
+        let ready = state.controller.ready.as_ref().expect("ready scene");
+        assert!(
+            Arc::ptr_eq(&applied, &ready.highlight),
+            "the retained overlay must be the published one"
+        );
+    }
+    let frame_a = session_frame(&session, size);
+    assert_ne!(
+        &frame_a[ai..ai + 3],
+        &baseline[ai..ai + 3],
+        "selecting A must tint A"
+    );
+    assert_eq!(
+        &frame_a[bi..bi + 3],
+        &baseline[bi..bi + 3],
+        "selecting A must not tint B"
+    );
+    let (flags1, streams1, chunks1) = renderer_counters(&session);
+    assert!(flags1 > flags0, "a selection change must upload flags");
+    assert_eq!(
+        streams1, streams0,
+        "a selection change must not re-upload instance streams"
+    );
+    assert_eq!(
+        chunks1, chunks0,
+        "a selection change must not re-upload mesh chunks"
+    );
+    assert_eq!(
+        session.overlay_suffix_commits(),
+        suffix0,
+        "a selection change must not commit the overlay suffix"
+    );
+
+    // Switch to B: A untinted, B tinted, counters still flat.
+    assert!(session.set_selection(SelectionSet::from_refs([model_entity(2)])));
+    session.prepare().unwrap();
+    session.apply_ready_updates().unwrap();
+    let frame_b = session_frame(&session, size);
+    assert_eq!(
+        &frame_b[ai..ai + 3],
+        &baseline[ai..ai + 3],
+        "switching to B must untint A"
+    );
+    assert_ne!(
+        &frame_b[bi..bi + 3],
+        &baseline[bi..bi + 3],
+        "switching to B must tint B"
+    );
+    let (flags2, streams2, chunks2) = renderer_counters(&session);
+    assert!(
+        flags2 > flags1,
+        "the second selection change must upload flags"
+    );
+    assert_eq!(streams2, streams1);
+    assert_eq!(chunks2, chunks1);
+    assert_eq!(session.overlay_suffix_commits(), suffix0);
+}
+
+/// DETERMINISTIC HARDWARE: a selected entity the base build excluded (a hidden
+/// layer) resolves in the database but has no resident pick key. The runtime must
+/// surface `flags.unresolved` instead of treating the update as a silent success.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
+fn a_selected_entity_excluded_from_the_base_reports_a_diagnostic() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let gpu = headless_gpu();
+    session.attach_device(gpu.device, gpu.queue).unwrap();
+    session.sync_drawing(Some(Arc::new(db_with_two_quads())));
+
+    // Hide the layer both entities live on, so neither is resident.
+    let mut layers = LayerOverrideSet::new();
+    layers.set(LayerId(0), false);
+    session.set_layers(layers);
+    session.prepare().unwrap();
+    drive_uploads(&session);
+
+    // Entity 1 still resolves in the database, so it yields a flag request; but it
+    // has no resident key, so the apply must report it.
+    assert!(session.set_selection(SelectionSet::from_refs([model_entity(1)])));
+    session.prepare().unwrap();
+    session.apply_ready_updates().unwrap();
+
+    let diagnostic = session.diagnostic().expect("a diagnostic is surfaced");
+    assert!(
+        diagnostic.contains("flags.unresolved"),
+        "the unmatched selection must be reported, got {diagnostic:?}"
+    );
+    assert!(diagnostic.contains('1'));
 }

@@ -101,6 +101,7 @@ impl Renderer {
             flags_upload_bytes: 0,
             flags_upload_count: 0,
             entity_flag_keys: std::collections::BTreeSet::new(),
+            entity_flags_request: Vec::new(),
         }
     }
 
@@ -671,6 +672,9 @@ impl Renderer {
     /// per-batch uniforms.
     pub fn set_selection_flags_enabled(&mut self, enabled: bool) {
         self.flags_enabled = enabled;
+        // Toggling the tint changes the output: drop any completed progressive
+        // frame so the next render redraws instead of reusing the cached pixels.
+        self.progressive_frame = None;
         let queue = self.queue.clone();
         if let Some(queue) = queue.as_ref() {
             self.write_flags_ctl(queue);
@@ -749,6 +753,12 @@ impl Renderer {
         );
         self.flags_upload_bytes += aligned as u64;
         self.flags_upload_count += 1;
+        // A flag change alters the shaded output, so a *completed* progressive
+        // frame must not be reused: `render` with an unchanged frame key would
+        // otherwise draw nothing and keep the pre-flag pixels (a selection would
+        // not tint until the camera moved). Dropping the cached plan forces the
+        // next render to redraw from the resident buffers — no geometry re-upload.
+        self.progressive_frame = None;
         Ok(())
     }
 
@@ -761,26 +771,53 @@ impl Renderer {
     /// bits for a list of entity references.
     ///
     /// Each `(SelectionRef, bits)` is resolved to the pick keys of the resident
-    /// batches whose sources name that entity (see [`PickTable::keys_for_source`]),
-    /// so an entity reached through an INSERT instance tints exactly that
-    /// placement, and a multi-source merged batch is tinted as a whole
-    /// (documented batch-granularity limit: the merged run does not record which
-    /// fragment range belongs to which source). Bits from several refs that land
-    /// on the same key are OR-ed.
+    /// whole-entity batches whose sources name that entity (see
+    /// [`PickTable::keys_for_source`]), so an entity reached through an INSERT
+    /// instance tints exactly that placement, and a multi-source merged batch is
+    /// tinted as a whole (documented batch-granularity limit: the merged run does
+    /// not record which fragment range belongs to which source). Bits from
+    /// several refs that land on the same key are OR-ed.
     ///
     /// Only the rows whose bits changed since the previous call are uploaded, and
     /// rows that fell out of the list are cleared, so a selection change is a
-    /// flags-table update — never a geometry re-upload. A ref that matches no key
-    /// is skipped: it names geometry the resident scene does not contain (the
-    /// caller already reports that at the database level).
+    /// flags-table update — never a geometry re-upload.
     ///
     /// The call replaces the whole entity-flag set: a key set by a previous
     /// `set_entity_flags` but absent here is cleared to `0`. `set_pick_key_flags`
     /// writes are only overwritten for keys this call actually manages.
-    pub fn set_entity_flags(&mut self, flags: &[(SelectionRef, u32)]) -> CadResult<()> {
+    ///
+    /// The returned [`EntityFlagReport`] names the refs that resolved to **no**
+    /// resident key: the caller must surface them (a base-excluded entity on a
+    /// hidden/frozen layer, or geometry that is not resident), never treat the
+    /// update as a silent success.
+    ///
+    /// The request is retained: a later pick-table rebuild (a base change or an
+    /// image re-upload) re-resolves it against the renumbered keys, so the bits
+    /// never stay on a retired key.
+    pub fn set_entity_flags(
+        &mut self,
+        flags: &[(SelectionRef, u32)],
+    ) -> CadResult<EntityFlagReport> {
+        self.entity_flags_request = flags.to_vec();
+        self.apply_entity_flags()
+    }
+
+    /// Resolve the retained entity-flag request against the current pick table.
+    ///
+    /// Called by [`Self::set_entity_flags`] and again after a pick-table rebuild
+    /// (see [`Self::rebuild_pick_table`]), so the bits always land on the
+    /// **current** key of each requested entity rather than on a key from a
+    /// previous upload that the renumbering retired.
+    fn apply_entity_flags(&mut self) -> CadResult<EntityFlagReport> {
+        let request = self.entity_flags_request.clone();
         let mut desired: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
-        for (reference, bits) in flags {
-            for key in self.pick_table.keys_for_source(reference) {
+        let mut unmatched: Vec<SelectionRef> = Vec::new();
+        for (reference, bits) in &request {
+            let keys = self.pick_table.keys_for_source(reference);
+            if keys.is_empty() {
+                unmatched.push(reference.clone());
+            }
+            for key in keys {
                 *desired.entry(key).or_insert(0) |= *bits;
             }
         }
@@ -799,7 +836,10 @@ impl Renderer {
             }
         }
         self.entity_flag_keys = desired.keys().copied().collect();
-        Ok(())
+        Ok(EntityFlagReport {
+            matched: desired.len(),
+            unmatched,
+        })
     }
 
     /// The keys currently carrying an entity-level flag, in ascending order.
@@ -832,6 +872,11 @@ impl Renderer {
     /// The renderer pick key of resident batch `index`, if any.
     pub fn pick_key_for_batch(&self, index: usize) -> Option<u32> {
         self.batches.get(index).map(|batch| batch.pick_key)
+    }
+
+    /// The renderer pick key of resident image `index`, if any. Diagnostic/test.
+    pub fn pick_key_for_image(&self, index: usize) -> Option<u32> {
+        self.images.get(index).map(|image| image.pick_key)
     }
 
     /// Number of live entries in the pick table.
@@ -1934,6 +1979,11 @@ impl Renderer {
         // The flags table is indexed by key, so it must cover the live key space.
         self.flags_bits
             .resize(self.pick_table.max_key() as usize + 1, 0);
+        // A rebuild renumbers keys (a base change or an image re-upload), so the
+        // retained entity-flag request must be re-resolved against the new table:
+        // otherwise the bits stay on the retired keys and a flagged image would
+        // flash back to its unflagged colour after an edit.
+        self.apply_entity_flags()?;
         Ok(())
     }
 
@@ -1942,11 +1992,12 @@ impl Renderer {
         self.pick_table = PickTable::default();
         // A retired scene's keys must not keep their bits: the whole table is
         // re-uploaded (zeroed) before it is used again. The entity-flag diff base
-        // is dropped with the scene too, so a later update cannot try to clear a
-        // key that belonged to the retired scene.
+        // and the retained request are dropped with the scene too, so a later
+        // update cannot try to clear a key that belonged to the retired scene.
         self.flags_bits.clear();
         self.flags_table_dirty = true;
         self.entity_flag_keys.clear();
+        self.entity_flags_request.clear();
     }
 
     /// Reset derived GPU resources after a device loss.
