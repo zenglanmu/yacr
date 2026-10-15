@@ -12,6 +12,11 @@
 // This layout deliberately uses only per-instance *vertex attributes* (no
 // vertex-stage storage buffer), so it is WebGL2-safe.
 //
+// `id_flags.x` is the batch's renderer pick key (see `PickTable`); it is passed
+// to the fragment stage flat and read by the selection-flags block (group 1).
+// With `flags_ctl.enabled == 0` (default) the output is exactly the pre-flags
+// output.
+//
 // Kept in sync with `LINE_INSTANCED_SHADER` in `src/plan.rs` via `include_str!`.
 // Group 0 is the shared geometry uniform; the instanced path only consumes
 // `transform` (stream-relative world -> clip). `tint` is unused here but kept so
@@ -20,12 +25,56 @@
 struct Camera {
     transform: mat4x4<f32>,
     tint: vec4<f32>,
+    // x = renderer pick key (unused: the per-instance key wins), y = flags.
+    key_flags: vec4<u32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
+
+// --- selection flags (group 1) ---------------------------------------------
+struct FlagsCtl {
+    enabled: u32,
+    // Texels per row; the key is addressed as (key % width, key / width).
+    width: u32,
+    _pad0: u32,
+    _pad1: u32,
+};
+@group(1) @binding(0) var flags_table: texture_2d<u32>;
+@group(1) @binding(1) var<uniform> flags_ctl: FlagsCtl;
+
+const FLAG_SELECTED: u32 = 1u;
+const FLAG_HOVERED: u32 = 2u;
+const FLAG_HIDDEN: u32 = 4u;
+// Mechanical placeholder tints so the toggle is observable; the final selection
+// visual system is owned by the follow-up UI slice.
+const SELECTED_TINT: vec3<f32> = vec3<f32>(1.0, 0.55, 0.12);
+const HOVERED_TINT: vec3<f32> = vec3<f32>(0.30, 0.85, 1.0);
+
+fn flag_bits(key: u32) -> u32 {
+    let k = i32(key);
+    let w = i32(flags_ctl.width);
+    let xy = vec2<i32>(k % w, k / w);
+    return textureLoad(flags_table, xy, 0).r;
+}
+
+fn flag_tint(color: vec4<f32>, key: u32) -> vec4<f32> {
+    if (flags_ctl.enabled == 0u) {
+        return color;
+    }
+    let bits = flag_bits(key);
+    if ((bits & FLAG_SELECTED) != 0u) {
+        return vec4<f32>(SELECTED_TINT, color.a);
+    }
+    if ((bits & FLAG_HOVERED) != 0u) {
+        return vec4<f32>(HOVERED_TINT, color.a);
+    }
+    return color;
+}
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) color: vec4<f32>,
+    // The pick key is an integer, so it must be passed flat.
+    @location(1) @interpolate(flat) key: u32,
 };
 
 @vertex
@@ -39,10 +88,8 @@ fn vs_main(
     @location(2) p1_pad: vec4<f32>,
     // Sanitised linear sRGB colour (rgb) and clamped alpha (a).
     @location(3) rgba: vec4<f32>,
-    // First-class pick key: [0] is the low 32 bits of the source `EntityId`,
-    // [1] is a reserved flags bitfield. Not consumed by this slice's shader;
-    // declared so the pipeline supplies the attribute the later picking phase
-    // will read.
+    // First-class pick key: [0] is the batch's renderer pick key, [1] its
+    // INSTANCE_FLAG_* bitfield.
     @location(4) id_flags: vec2<u32>,
 ) -> VsOut {
     // Exact endpoint selection: `unit.x` is exactly 0 or 1 (shared unit
@@ -53,10 +100,14 @@ fn vs_main(
     // `rgba` is sanitised at upload (finite, clamped to [0, 1]), exactly like
     // the per-batch tint the legacy line shader receives.
     out.color = rgba;
+    out.key = id_flags.x;
     return out;
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    return in.color;
+    if (flags_ctl.enabled != 0u && (flag_bits(in.key) & FLAG_HIDDEN) != 0u) {
+        discard;
+    }
+    return flag_tint(in.color, in.key);
 }

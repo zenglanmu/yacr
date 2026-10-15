@@ -52,10 +52,22 @@ pub(crate) fn draw_passes(
     }
 }
 
-/// Bytes of the per-batch uniform struct: `mat4x4<f32>` (64) + `vec4<f32>` (16)
-/// in `shaders/{line,mesh,image}.wgsl`. The shaders are unchanged, so this is
-/// fixed at 80.
-pub(crate) const UNIFORM_STRUCT_BYTES: u32 = 80;
+/// Bytes of the per-batch uniform struct: `mat4x4<f32>` (64) + `vec4<f32>` tint
+/// (16) + `vec4<u32> key_flags` (16) in
+/// `shaders/{line,mesh,image,line_instanced,mesh_merged}.wgsl`. `key_flags.x` is
+/// the batch's renderer pick key and `.y` its [`INSTANCE_FLAG_*`] bitfield; the
+/// uniform is 16-byte aligned, so the struct is 96 bytes.
+pub(crate) const UNIFORM_STRUCT_BYTES: u32 = 96;
+
+/// Bytes of the selection-flags control uniform (`enabled` + row width + two
+/// reserved words, 16-byte aligned for the uniform layout).
+pub(crate) const FLAGS_CTL_BYTES: u32 = 16;
+
+/// Texel format of the selection-flags table: one `u32` of bits per key, split
+/// across the four `unorm8` channels. An integer format with `TEXTURE_BINDING`
+/// on every tier, addressed with `textureLoad` (no sampler), so the layout stays
+/// WebGL2-safe.
+pub(crate) const FLAGS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Uint;
 
 /// Hard ceiling on slots per uniform page. `max_uniform_buffer_binding_size` is
 /// only 64 KiB by default, but an adapter may report far more; this keeps the
@@ -124,7 +136,7 @@ pub(crate) struct EncodeState {
     last_pipeline: Option<wgpu::RenderPipeline>,
     last_bind_group0: Option<wgpu::BindGroup>,
     last_bind_offset0: u32,
-    last_bind_group1: Option<wgpu::BindGroup>,
+    last_bind_group2: Option<wgpu::BindGroup>,
     last_vertex: [Option<wgpu::Buffer>; 3],
     last_index: Option<wgpu::Buffer>,
 }
@@ -136,13 +148,17 @@ impl EncodeState {
             last_pipeline: None,
             last_bind_group0: None,
             last_bind_offset0: u32::MAX,
-            last_bind_group1: None,
+            last_bind_group2: None,
             last_vertex: [None, None, None],
             last_index: None,
         }
     }
 
-    fn set_pipeline(&mut self, pass: &mut wgpu::RenderPass<'_>, pipeline: &wgpu::RenderPipeline) {
+    pub(crate) fn set_pipeline(
+        &mut self,
+        pass: &mut wgpu::RenderPass<'_>,
+        pipeline: &wgpu::RenderPipeline,
+    ) {
         // Skip when the identical pipeline is already bound. Draw order is not
         // changed; only a redundant state-setting call is elided.
         if self.last_pipeline.as_ref() == Some(pipeline) {
@@ -153,7 +169,7 @@ impl EncodeState {
         self.tally.set_pipeline_calls += 1;
     }
 
-    fn set_bind_group0(
+    pub(crate) fn set_bind_group0(
         &mut self,
         pass: &mut wgpu::RenderPass<'_>,
         bind_group: &wgpu::BindGroup,
@@ -169,16 +185,21 @@ impl EncodeState {
         self.tally.set_bind_group_calls += 1;
     }
 
-    fn set_bind_group1(&mut self, pass: &mut wgpu::RenderPass<'_>, bind_group: &wgpu::BindGroup) {
-        if self.last_bind_group1.as_ref() == Some(bind_group) {
+    /// Bind the sampled texture (group 2; group 1 is the selection-flags table).
+    pub(crate) fn set_bind_group2(
+        &mut self,
+        pass: &mut wgpu::RenderPass<'_>,
+        bind_group: &wgpu::BindGroup,
+    ) {
+        if self.last_bind_group2.as_ref() == Some(bind_group) {
             return;
         }
-        pass.set_bind_group(1, bind_group, &[]);
-        self.last_bind_group1 = Some(bind_group.clone());
+        pass.set_bind_group(2, bind_group, &[]);
+        self.last_bind_group2 = Some(bind_group.clone());
         self.tally.set_bind_group_calls += 1;
     }
 
-    fn set_vertex_buffer(
+    pub(crate) fn set_vertex_buffer(
         &mut self,
         pass: &mut wgpu::RenderPass<'_>,
         slot: u32,
@@ -193,7 +214,11 @@ impl EncodeState {
         self.tally.set_vertex_buffer_calls += 1;
     }
 
-    fn set_index_buffer(&mut self, pass: &mut wgpu::RenderPass<'_>, buffer: &wgpu::Buffer) {
+    pub(crate) fn set_index_buffer(
+        &mut self,
+        pass: &mut wgpu::RenderPass<'_>,
+        buffer: &wgpu::Buffer,
+    ) {
         if self.last_index.as_ref() == Some(buffer) {
             return;
         }
@@ -502,8 +527,28 @@ pub(crate) fn pack_positions(vectors: &[[f32; 3]]) -> Vec<u8> {
     bytes
 }
 
-/// Sanitise a batch colour for the uniform: finite `[0, 1]` channels.
+/// Pack one per-batch uniform: `mat4x4<f32>` transform, `vec4<f32>` tint and
+/// `vec4<u32> key_flags` (x = renderer pick key, y = [`INSTANCE_FLAG_*`] bits).
 ///
+/// Word-oriented so the byte layout is exactly what the shaders declare and does
+/// not depend on the host's float representation or `bytemuck` alignment rules.
+pub(crate) fn uniform_bytes(matrix: &[f32; 16], tint: [f32; 4], key_flags: [u32; 4]) -> [u8; 96] {
+    let mut words = [0u32; 24];
+    for (slot, value) in matrix.iter().enumerate() {
+        words[slot] = value.to_bits();
+    }
+    for (slot, value) in tint.iter().enumerate() {
+        words[16 + slot] = value.to_bits();
+    }
+    words[20..24].copy_from_slice(&key_flags);
+    let mut bytes = [0u8; UNIFORM_STRUCT_BYTES as usize];
+    for (slot, word) in words.iter().enumerate() {
+        bytes[slot * 4..slot * 4 + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    bytes
+}
+
+/// Sanitise a batch colour for the uniform: finite `[0, 1]` channels.///
 /// Mirrors `cad_scene::sanitize_color` so a value that bypassed the scene cache
 /// still cannot put a NaN into the shader.
 pub(crate) fn renderer_color(color: [f32; 3]) -> [f32; 3] {
@@ -638,11 +683,16 @@ pub(crate) struct MeshVertex {
     /// mesh or the tint is white; a varying-colour mesh is equal only within a
     /// documented tolerance.
     pub(crate) color: [f32; 3],
-    /// `[0]` = low 32 bits of the *first* source's `EntityId` (a multi-source
-    /// batch exposes only that one id here); `[1]` = reserved
-    /// [`INSTANCE_FLAG_*`] bits. New per-vertex metadata for a later picking
-    /// phase — not a replacement for a per-batch key, which the legacy draw never
-    /// carried explicitly.
+    /// `[0]` = the renderer **pick key** of the vertex's source batch (see
+    /// [`PickTable`]; `0` = none); `[1]` = the batch's [`INSTANCE_FLAG_*`] bits.
+    ///
+    /// This is a *renderer* key, deliberately not a truncated `EntityId`: the
+    /// key indexes the CPU-side [`PickTable`], which preserves the full `u128`
+    /// identity (and detects truncation collisions), so an id-pass readback can
+    /// never silently mis-pick between two entities. A multi-source batch
+    /// resolves to its whole source list and is reported as ambiguous rather
+    /// than attributed to its first source. The legacy per-batch draw carried no
+    /// explicit pick key at all; the key rides the per-batch uniform instead.
     pub(crate) entity_flags: [u32; 2],
 }
 
@@ -883,12 +933,17 @@ impl MeshChunkBuilder {
 ///
 /// Returns the chunks and, per input batch, its run list (`None` for a batch that
 /// was not converted).
+///
+/// `keys[i]` is `batches[i]`'s renderer pick key, packed into every vertex it
+/// contributes so the id pass and the flag tint can resolve a fragment.
 pub(crate) fn build_mesh_chunks(
     batches: &[cad_scene::RenderBatch],
     converted: &[usize],
+    keys: &[u32],
     max_vertices: usize,
     max_radius: f64,
 ) -> (Vec<MeshChunkData>, Vec<Option<Vec<MeshRun>>>) {
+    debug_assert_eq!(batches.len(), keys.len());
     let cap = max_vertices.max(3);
     let mut pieces: Vec<MeshPiece> = Vec::new();
     for &index in converted {
@@ -929,7 +984,7 @@ pub(crate) fn build_mesh_chunks(
             let batch = &batches[piece.batch];
             let vertex_base = vertices.len() as u32;
             let index_offset = indices.len() as u32;
-            push_mesh_vertices(&mut vertices, batch, piece, origin);
+            push_mesh_vertices(&mut vertices, batch, piece, origin, keys[piece.batch]);
             for tri in &piece.triangles {
                 indices.push(tri[0] + vertex_base);
                 indices.push(tri[1] + vertex_base);
@@ -961,34 +1016,18 @@ pub(crate) fn build_mesh_chunks(
 /// `f64` before narrowing, mirroring [`push_line_instances`]. The colour is the
 /// sanitized per-vertex colour multiplied by the sanitized batch tint, so the
 /// merged draw's uniform tint can stay opaque white. `entity_flags` carries the
-/// batch's source id and flags.
+/// batch's renderer pick key and its [`INSTANCE_FLAG_*`] bits.
 pub(crate) fn push_mesh_vertices(
     out: &mut Vec<MeshVertex>,
     batch: &cad_scene::RenderBatch,
     piece: &MeshPiece,
     origin: [f64; 3],
+    pick_key: u32,
 ) {
     let normals = geometry::repaired_normals(batch);
     let colors = geometry::repaired_colors(batch);
     let tint = renderer_color(batch.color);
-    // Only the first source's `EntityId` low 32 bits ride per vertex: a
-    // multi-source batch (e.g. a glyph run sharing one mesh) exposes a single id
-    // here, so a later picking phase needs a collision/multi-source story (P3).
-    let entity_low = batch
-        .sources
-        .first()
-        .map_or(0, |source| source.entity.0 as u32);
-    let flags = INSTANCE_FLAG_OPAQUE
-        | if batch.sources.is_empty() {
-            0
-        } else {
-            INSTANCE_FLAG_HAS_SOURCE
-        }
-        | if batch.lineweight > 0.0 {
-            INSTANCE_FLAG_LINEWEIGHT
-        } else {
-            0
-        };
+    let flags = batch_instance_flags(batch);
     let o = [
         batch.local_origin.x,
         batch.local_origin.y,
@@ -1016,7 +1055,7 @@ pub(crate) fn push_mesh_vertices(
                 tint[1] * vertex_color[1],
                 tint[2] * vertex_color[2],
             ],
-            entity_flags: [entity_low, flags],
+            entity_flags: [pick_key, flags],
         });
     }
 }
@@ -1079,12 +1118,34 @@ pub(crate) const MAX_INSTANCES_PER_STREAM: usize = 1 << 20;
 /// like the legacy per-batch path (which stores batch-local coordinates).
 pub(crate) const MAX_STREAM_RADIUS: f64 = 8192.0;
 
-/// Reserved instance flags. This slice only ever sets [`INSTANCE_FLAG_OPAQUE`]
-/// (converted batches are opaque); the rest are first-class fields the later
-/// picking/selection phase will consume.
+/// Reserved instance flags, packed in the second component of
+/// [`LineInstance::id_flags`] / [`MeshVertex::entity_flags`] and in
+/// `Camera::key_flags.y` of the per-batch uniform. This slice sets
+/// [`INSTANCE_FLAG_OPAQUE`], [`INSTANCE_FLAG_HAS_SOURCE`] and
+/// [`INSTANCE_FLAG_LINEWEIGHT`] from the batch's own fields; they are
+/// descriptive metadata (the selection bits live in the separate flags table,
+/// see `FLAG_SELECTED`), never a pick key.
 pub(crate) const INSTANCE_FLAG_OPAQUE: u32 = 1 << 0;
 pub(crate) const INSTANCE_FLAG_HAS_SOURCE: u32 = 1 << 1;
 pub(crate) const INSTANCE_FLAG_LINEWEIGHT: u32 = 1 << 2;
+
+/// The [`INSTANCE_FLAG_*`] bitfield describing one scene batch.
+///
+/// Shared by the instanced/merged packers and the per-batch uniform, so the
+/// three carriers cannot disagree.
+pub(crate) fn batch_instance_flags(batch: &cad_scene::RenderBatch) -> u32 {
+    INSTANCE_FLAG_OPAQUE
+        | if batch.sources.is_empty() {
+            0
+        } else {
+            INSTANCE_FLAG_HAS_SOURCE
+        }
+        | if batch.lineweight > 0.0 {
+            INSTANCE_FLAG_LINEWEIGHT
+        } else {
+            0
+        }
+}
 
 /// One instanced line segment (a single 2-vertex `LineList` pair).
 ///
@@ -1100,8 +1161,11 @@ pub(crate) struct LineInstance {
     pub(crate) p1_pad: [f32; 4],
     /// Sanitised linear sRGB colour (`rgb`) and clamped alpha (`a`).
     pub(crate) rgba: [f32; 4],
-    /// `[0]` = low 32 bits of the source `EntityId` (further resolution goes
-    /// through the batch's `sources`); `[1]` = reserved [`INSTANCE_FLAG_*`] bits.
+    /// `[0]` = the batch's renderer **pick key** (see [`PickTable`]; `0` = none);
+    /// `[1]` = the batch's [`INSTANCE_FLAG_*`] bits. The key is deliberately a
+    /// renderer key rather than a truncated `EntityId`, so the CPU-side table can
+    /// preserve the full `u128` identity and report truncation collisions instead
+    /// of mis-picking.
     pub(crate) id_flags: [u32; 2],
 }
 
@@ -1424,12 +1488,17 @@ impl ChunkBuilder {
 ///
 /// Returns the chunks (each with its chosen origin and packed instances) and,
 /// per input batch, its run list (`None` for a batch that was not converted).
+///
+/// `keys[i]` is `batches[i]`'s renderer pick key, packed into every instance it
+/// contributes.
 pub(crate) fn build_instance_chunks(
     batches: &[cad_scene::RenderBatch],
     converted: &[ConvertedLine],
+    keys: &[u32],
     max_instances: usize,
     max_radius: f64,
 ) -> (Vec<InstanceChunk>, Vec<Option<Vec<InstanceRun>>>) {
+    debug_assert_eq!(batches.len(), keys.len());
     let cap = max_instances.max(1);
     let mut builders: Vec<ChunkBuilder> = Vec::new();
     let mut current: Option<ChunkBuilder> = None;
@@ -1496,6 +1565,7 @@ pub(crate) fn build_instance_chunks(
                 origin,
                 first,
                 count,
+                keys[source.batch],
             );
             runs[source.batch]
                 .get_or_insert_with(Vec::new)
@@ -1523,7 +1593,9 @@ pub(crate) fn build_instance_chunks(
 /// `f64` before narrowing to `f32`. Either way the camera-relative subtraction
 /// never happens in the shader at large magnitudes. `origin` is the chunk's
 /// [`choose_instance_origin`]. The range lets a batch larger than a stream's
-/// instance cap be split across chunks.
+/// instance cap be split across chunks. `pick_key` is the batch's renderer pick
+/// key, packed per instance so the id pass and the flag tint can resolve a
+/// fragment without a per-batch draw.
 pub(crate) fn push_line_instances(
     out: &mut Vec<LineInstance>,
     batch: &cad_scene::RenderBatch,
@@ -1531,6 +1603,7 @@ pub(crate) fn push_line_instances(
     origin: [f64; 3],
     first_segment: u32,
     segment_count: u32,
+    pick_key: u32,
 ) {
     let [r, g, b] = renderer_color(batch.color);
     let rgba = [r, g, b, clamp_alpha(batch.alpha)];
@@ -1539,21 +1612,7 @@ pub(crate) fn push_line_instances(
     } else {
         0.0
     };
-    let flags = INSTANCE_FLAG_OPAQUE
-        | if batch.sources.is_empty() {
-            0
-        } else {
-            INSTANCE_FLAG_HAS_SOURCE
-        }
-        | if batch.lineweight > 0.0 {
-            INSTANCE_FLAG_LINEWEIGHT
-        } else {
-            0
-        };
-    let entity_low = batch
-        .sources
-        .first()
-        .map_or(0, |source| source.entity.0 as u32);
+    let flags = batch_instance_flags(batch);
     let o = [
         batch.local_origin.x,
         batch.local_origin.y,
@@ -1581,7 +1640,7 @@ pub(crate) fn push_line_instances(
             p0_width: [p0[0], p0[1], p0[2], width],
             p1_pad: [p1[0], p1[1], p1[2], 0.0],
             rgba,
-            id_flags: [entity_low, flags],
+            id_flags: [pick_key, flags],
         });
     };
     match indices {
@@ -1628,7 +1687,7 @@ pub(crate) fn draw_image(
 ) {
     state.set_pipeline(pass, pipeline);
     state.set_bind_group0(pass, bind_group, uniform_offset);
-    state.set_bind_group1(pass, &image.texture_bind_group);
+    state.set_bind_group2(pass, &image.texture_bind_group);
     state.set_vertex_buffer(pass, 0, &image.vertex_buffer);
     state.set_index_buffer(pass, &image.index_buffer);
     pass.draw_indexed(0..image.index_count, 0, 0..1);
@@ -1729,6 +1788,192 @@ pub(crate) fn charge_images(
     (accepted, None)
 }
 
+// ---------------------------------------------------------------------------
+// Pick keys and the CPU-side id → entity resolution table
+// ---------------------------------------------------------------------------
+//
+// The id pass (see `pick.rs`) writes one 32-bit **pick key** per fragment. The
+// key is a renderer key, `1 + <batch ordinal>`: the first resident batch is key
+// 1, and 0 means "no geometry" (the background). `PickTable` is the CPU half of
+// that contract: it maps a key back to the batch and to the *full* identities
+// that can own a fragment of it.
+//
+// Why a renderer key rather than a truncated `EntityId`: a `u128` `EntityId`
+// does not fit in the 32-bit id target, and packing its low 32 bits would make
+// two distinct entities share a fragment value — a silent mis-pick. The table
+// keeps the whole `SelectionRef`, so resolution is exact by construction. The
+// truncation itself is still *detected and reported* (`PickTable::collisions`),
+// because the low-32 form is what a 32-bit-only consumer would see.
+//
+// A batch may carry **several** sources (the scene builder concatenates adjacent
+// line fragments of different entities into one batch, and the merged runs
+// concatenate such batches). Fragment geometry does not record which source owns
+// which range, so a hit on a multi-source batch resolves to the whole list and is
+// reported as ambiguous — never silently attributed to `sources.first()`.
+
+/// The id-pass value for "no geometry": the cleared background.
+pub(crate) const PICK_KEY_NONE: u32 = 0;
+
+/// Upper bound on renderer pick keys within one device generation. The key space
+/// grows with the batches appended since the last full clear; the bound keeps the
+/// flags table (indexed by key) finite and is reported when exhausted rather than
+/// silently wrapping.
+pub(crate) const MAX_PICK_KEYS: u32 = 1 << 20;
+
+/// Machine key: the batch carries no source at all, so the key cannot name an
+/// entity.
+pub(crate) const PICK_REASON_NO_SOURCE: &str = "pick-batch-has-no-source";
+/// Machine key: the batch carries several sources whose geometry is
+/// indistinguishable after representation, so the hit is ambiguous.
+pub(crate) const PICK_REASON_MULTI_SOURCE: &str = "pick-multi-source-batch";
+/// Machine key: a mesh-face sub-element is not derivable from the id pass (wgpu
+/// exposes no primitive index to the fragment stage); CPU refinement is the
+/// documented fallback.
+pub(crate) const PICK_REASON_SUB_ELEMENT: &str = "pick-sub-element-requires-cpu-refinement";
+
+/// The CPU-side resolution of one pick key.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PickEntry {
+    /// Index of the owning batch in the resident batch list.
+    pub(crate) batch: u32,
+    /// Every source that can own a fragment of this key, in the batch's own
+    /// order.
+    pub(crate) sources: Vec<SelectionRef>,
+    /// `true` when one of this entry's sources shares its low-32 `EntityId` with
+    /// another distinct identity elsewhere in the table.
+    pub(crate) collision: bool,
+}
+
+/// The resolution of one key, owned so a caller can hold it past the table.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ResolvedPick {
+    pub(crate) batch: u32,
+    pub(crate) sources: Vec<SelectionRef>,
+    /// The exact identity when the key names exactly one source.
+    pub(crate) source: Option<SelectionRef>,
+    /// Machine key explaining a non-exact resolution.
+    pub(crate) reason: Option<&'static str>,
+    pub(crate) collision: bool,
+}
+
+/// Key → (batch, full identities) resolution, plus the detected truncation
+/// collisions.
+///
+/// Indexed by key, so `entries[0]` is the background slot and gaps (retired keys)
+/// are `None`. Pure data: built from the resident batches and unit-tested without
+/// a GPU.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PickTable {
+    entries: Vec<Option<PickEntry>>,
+    collisions: Vec<PickCollision>,
+    /// Highest key present (0 when the table has no entries).
+    max_key: u32,
+}
+
+impl PickTable {
+    /// Build the table over `keys[i] -> sources[i]` pairs (the resident batches).
+    ///
+    /// `key` values must be `1..=MAX_PICK_KEYS`; a repeated key is a programming
+    /// error and is ignored (the first wins) rather than silently overwriting.
+    pub(crate) fn build(entries: &[(u32, Vec<SelectionRef>)]) -> PickTable {
+        let max_key = entries.iter().map(|(key, _)| *key).max().unwrap_or(0);
+        let mut slots: Vec<Option<PickEntry>> = vec![None; max_key as usize + 1];
+        for (batch, (key, sources)) in entries.iter().enumerate() {
+            if *key == PICK_KEY_NONE || *key > MAX_PICK_KEYS {
+                continue;
+            }
+            let slot = &mut slots[*key as usize];
+            if slot.is_none() {
+                *slot = Some(PickEntry {
+                    batch: batch as u32,
+                    sources: sources.clone(),
+                    collision: false,
+                });
+            }
+        }
+        let collisions = detect_truncation_collisions(&slots);
+        let colliding: std::collections::HashSet<u32> = collisions
+            .iter()
+            .map(|collision| collision.truncated_key)
+            .collect();
+        for entry in slots.iter_mut().flatten() {
+            entry.collision = entry
+                .sources
+                .iter()
+                .any(|source| colliding.contains(&(source.entity.0 as u32)));
+        }
+        PickTable {
+            entries: slots,
+            collisions,
+            max_key,
+        }
+    }
+
+    /// Resolve a key read back from the id target. `None` for the background
+    /// (`0`) and for a key the current table does not know.
+    pub(crate) fn resolve(&self, key: u32) -> Option<ResolvedPick> {
+        let entry = self.entries.get(key as usize)?.as_ref()?;
+        let source = (entry.sources.len() == 1).then(|| entry.sources[0].clone());
+        let reason = if entry.sources.is_empty() {
+            Some(PICK_REASON_NO_SOURCE)
+        } else if entry.sources.len() > 1 {
+            Some(PICK_REASON_MULTI_SOURCE)
+        } else {
+            None
+        };
+        Some(ResolvedPick {
+            batch: entry.batch,
+            sources: entry.sources.clone(),
+            source,
+            reason,
+            collision: entry.collision,
+        })
+    }
+
+    /// The detected `EntityId` truncation collisions, in key order.
+    pub(crate) fn collisions(&self) -> &[PickCollision] {
+        &self.collisions
+    }
+
+    /// Highest key present (0 when empty).
+    pub(crate) fn max_key(&self) -> u32 {
+        self.max_key
+    }
+
+    /// Number of live entries.
+    pub(crate) fn len(&self) -> usize {
+        self.entries.iter().filter(|entry| entry.is_some()).count()
+    }
+}
+
+/// Group every source's low-32 `EntityId` and report the values shared by two or
+/// more *distinct* full identities.
+///
+/// Distinctness is the full `SelectionRef` (document + entity + instance +
+/// sub-element): two sources of the same entity under different insert instances
+/// are distinct placements and therefore a real collision for a 32-bit consumer.
+fn detect_truncation_collisions(entries: &[Option<PickEntry>]) -> Vec<PickCollision> {
+    let mut groups: std::collections::BTreeMap<u32, Vec<SelectionRef>> =
+        std::collections::BTreeMap::new();
+    for entry in entries.iter().flatten() {
+        for source in &entry.sources {
+            let truncated = source.entity.0 as u32;
+            let group = groups.entry(truncated).or_default();
+            if !group.contains(source) {
+                group.push(source.clone());
+            }
+        }
+    }
+    groups
+        .into_iter()
+        .filter(|(_, identities)| identities.len() > 1)
+        .map(|(truncated_key, identities)| PickCollision {
+            truncated_key,
+            identities,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod mesh_overlay_tests {
     use super::*;
@@ -1815,6 +2060,12 @@ mod instanced_line_tests {
                 indices: None,
             })
             .collect()
+    }
+
+    /// The renderer pick keys these tests use: `1 + batch ordinal`, exactly what
+    /// `prepare_upload_batches` assigns (see `PickTable`).
+    fn keys(batches: &[cad_scene::RenderBatch]) -> Vec<u32> {
+        (0..batches.len() as u32).map(|index| index + 1).collect()
     }
 
     #[test]
@@ -1948,7 +2199,7 @@ mod instanced_line_tests {
         b.lineweight = 0.35;
         let origin = [10.0, 20.0, 30.0];
         let mut out = Vec::new();
-        push_line_instances(&mut out, &b, None, origin, 0, 1);
+        push_line_instances(&mut out, &b, None, origin, 0, 1, 9);
         assert_eq!(out.len(), 1);
         let instance = out[0];
         // (origin-relative) positions
@@ -1956,8 +2207,8 @@ mod instanced_line_tests {
         assert_eq!(instance.p1_pad, [-6.0, -15.0, -24.0, 0.0]);
         // sanitized colour + clamped alpha
         assert_eq!(instance.rgba, [0.25, 0.5, 0.75, 1.0]);
-        // first-class pick key: low 32 bits of the source EntityId + flags
-        assert_eq!(instance.id_flags[0], 42);
+        // the renderer pick key (not a truncated EntityId) + the descriptive flags
+        assert_eq!(instance.id_flags[0], 9);
         assert_eq!(
             instance.id_flags[1],
             INSTANCE_FLAG_OPAQUE | INSTANCE_FLAG_HAS_SOURCE | INSTANCE_FLAG_LINEWEIGHT
@@ -1977,7 +2228,7 @@ mod instanced_line_tests {
         };
         let origin = [b.local_origin.x, b.local_origin.y, b.local_origin.z];
         let mut out = Vec::new();
-        push_line_instances(&mut out, &b, None, origin, 0, 1);
+        push_line_instances(&mut out, &b, None, origin, 0, 1, 1);
         assert_eq!(
             [out[0].p0_width[0], out[0].p0_width[1], out[0].p0_width[2]],
             vertices[0]
@@ -2012,6 +2263,7 @@ mod instanced_line_tests {
         let (chunks, runs) = build_instance_chunks(
             &batches,
             &converted(&batches),
+            &keys(&batches),
             MAX_INSTANCES_PER_STREAM,
             MAX_STREAM_RADIUS,
         );
@@ -2042,8 +2294,13 @@ mod instanced_line_tests {
         // 5 segments in ONE batch with a cap of 2: split into 2 + 2 + 1 with no
         // segment lost, no empty chunk and no oversized buffer.
         let batches = vec![multi_segment_batch(5, origin(0.0, 0.0, 0.0))];
-        let (chunks, runs) =
-            build_instance_chunks(&batches, &converted(&batches), 2, MAX_STREAM_RADIUS);
+        let (chunks, runs) = build_instance_chunks(
+            &batches,
+            &converted(&batches),
+            &keys(&batches),
+            2,
+            MAX_STREAM_RADIUS,
+        );
         assert_eq!(chunks.len(), 3, "ceil(5 / 2) chunks");
         assert!(
             chunks
@@ -2087,6 +2344,7 @@ mod instanced_line_tests {
         let (chunks, runs) = build_instance_chunks(
             &batches,
             &converted(&batches),
+            &keys(&batches),
             MAX_INSTANCES_PER_STREAM,
             MAX_STREAM_RADIUS,
         );
@@ -2120,6 +2378,7 @@ mod instanced_line_tests {
         let (chunks, runs) = build_instance_chunks(
             &batches,
             &converted(&batches),
+            &keys(&batches),
             MAX_INSTANCES_PER_STREAM,
             MAX_STREAM_RADIUS,
         );
@@ -2140,6 +2399,7 @@ mod instanced_line_tests {
         let (chunks, _) = build_instance_chunks(
             &batches,
             &converted(&batches),
+            &keys(&batches),
             MAX_INSTANCES_PER_STREAM,
             MAX_STREAM_RADIUS,
         );
@@ -2160,6 +2420,12 @@ mod mesh_merge_tests {
             instance: Default::default(),
             sub_element: None,
         }
+    }
+
+    /// The renderer pick keys these tests use: `1 + batch ordinal`, exactly what
+    /// `prepare_upload_batches` assigns (see `PickTable`).
+    fn keys(batches: &[cad_scene::RenderBatch]) -> Vec<u32> {
+        (0..batches.len() as u32).map(|index| index + 1).collect()
     }
 
     /// A quad mesh (4 vertices, 2 triangles) at `origin`, tint `color`.
@@ -2239,6 +2505,7 @@ mod mesh_merge_tests {
         let (chunks, runs) = build_mesh_chunks(
             &batches,
             &[0, 1],
+            &keys(&batches),
             MAX_VERTICES_PER_MESH_STREAM,
             MAX_STREAM_RADIUS,
         );
@@ -2273,7 +2540,8 @@ mod mesh_merge_tests {
         // Two quads (4 vertices each) with a cap of 4: each piece is its own
         // chunk, no triangle lost and no empty chunk.
         let batches = vec![quad([0.0; 3], [1.0; 3], 1), quad([0.0; 3], [1.0; 3], 2)];
-        let (chunks, runs) = build_mesh_chunks(&batches, &[0, 1], 4, MAX_STREAM_RADIUS);
+        let (chunks, runs) =
+            build_mesh_chunks(&batches, &[0, 1], &keys(&batches), 4, MAX_STREAM_RADIUS);
         assert_eq!(chunks.len(), 2, "a full chunk starts a new one");
         assert!(chunks.iter().all(|chunk| !chunk.vertices.is_empty()));
         assert_eq!(
@@ -2295,7 +2563,8 @@ mod mesh_merge_tests {
         batch.normals = vec![[0.0, 0.0, 1.0]; 6];
         batch.indices = vec![[0, 1, 2], [0, 2, 3], [3, 2, 4], [2, 5, 4]];
         let batches = vec![batch];
-        let (chunks, runs) = build_mesh_chunks(&batches, &[0], 4, MAX_STREAM_RADIUS);
+        let (chunks, runs) =
+            build_mesh_chunks(&batches, &[0], &keys(&batches), 4, MAX_STREAM_RADIUS);
         assert!(chunks.len() >= 2, "an oversized batch must split");
         assert!(chunks.iter().all(|chunk| !chunk.vertices.is_empty()));
         assert_eq!(
@@ -2321,6 +2590,7 @@ mod mesh_merge_tests {
         let (chunks, _) = build_mesh_chunks(
             &batches,
             &[0, 1],
+            &keys(&batches),
             MAX_VERTICES_PER_MESH_STREAM,
             MAX_STREAM_RADIUS,
         );
@@ -2330,7 +2600,7 @@ mod mesh_merge_tests {
     }
 
     #[test]
-    fn push_mesh_vertices_bakes_the_tint_and_carries_the_entity_id() {
+    fn push_mesh_vertices_bakes_the_tint_and_carries_the_pick_key() {
         let mut batch = quad([100.0, 200.0, 0.0], [0.5, 0.25, 0.75], 42);
         // A per-vertex gradient: the shader multiplies the batch tint by this.
         batch.colors = vec![
@@ -2346,17 +2616,17 @@ mod mesh_merge_tests {
             batch.local_origin.z,
         ];
         let mut out = Vec::new();
-        push_mesh_vertices(&mut out, &batch, piece, origin);
+        push_mesh_vertices(&mut out, &batch, piece, origin, 9);
         assert_eq!(out.len(), 4);
         // Baked colour = sanitized tint * sanitized vertex colour.
         assert_eq!(out[0].color, [0.5, 0.0, 0.0]);
         assert_eq!(out[1].color, [0.0, 0.25, 0.0]);
         assert_eq!(out[2].color, [0.0, 0.0, 0.75]);
         assert_eq!(out[3].color, [0.5, 0.25, 0.75]);
-        // The source id/flags ride per vertex (the legacy per-batch draw carried
-        // no explicit pick key).
+        // The renderer pick key/flags ride per vertex (the legacy per-batch draw
+        // carried no explicit pick key at all).
         for vertex in &out {
-            assert_eq!(vertex.entity_flags[0], 42);
+            assert_eq!(vertex.entity_flags[0], 9);
             assert_eq!(
                 vertex.entity_flags[1],
                 INSTANCE_FLAG_OPAQUE | INSTANCE_FLAG_HAS_SOURCE
@@ -2376,6 +2646,7 @@ mod mesh_merge_tests {
         let (chunks, runs) = build_mesh_chunks(
             &batches,
             &[0, 1],
+            &keys(&batches),
             MAX_VERTICES_PER_MESH_STREAM,
             MAX_STREAM_RADIUS,
         );
@@ -2388,13 +2659,13 @@ mod mesh_merge_tests {
         // chunk vertices and attribute each to its batch by that ordering.
         for (index, vertex) in chunks[0].vertices.iter().enumerate() {
             let expected = if index < first.vertex_count as usize {
-                111
+                1
             } else {
-                222
+                2
             };
             assert_eq!(
                 vertex.entity_flags[0], expected,
-                "vertex {index} must carry its own batch's entity id"
+                "vertex {index} must carry its own batch's pick key"
             );
             assert_eq!(
                 vertex.entity_flags[1],
@@ -2423,7 +2694,7 @@ mod mesh_merge_tests {
             batch.local_origin.z,
         ];
         let mut out = Vec::new();
-        push_mesh_vertices(&mut out, &batch, piece, origin);
+        push_mesh_vertices(&mut out, &batch, piece, origin, 1);
         assert_eq!(out[0].position, vertices[0]);
         assert_eq!(out[1].position, vertices[1]);
     }
@@ -2471,7 +2742,7 @@ mod mesh_merge_tests {
         let indices = overlay_is_instanced(&batch).expect("overlay");
         let origin = [0.0, 0.0, 0.0];
         let mut out = Vec::new();
-        push_line_instances(&mut out, &batch, Some(&indices), origin, 0, 5);
+        push_line_instances(&mut out, &batch, Some(&indices), origin, 0, 5, 7);
         assert_eq!(out.len(), 5);
         // First edge (0,1): vertices[0] -> vertices[1].
         assert_eq!(
@@ -2482,9 +2753,215 @@ mod mesh_merge_tests {
             [out[0].p1_pad[0], out[0].p1_pad[1], out[0].p1_pad[2]],
             batch.vertices[1]
         );
-        // Colour comes from the batch (as the legacy line uniform did); the id is
-        // new per-instance metadata the legacy draw did not carry.
+        // Colour comes from the batch (as the legacy line uniform did); the pick
+        // key is new per-instance metadata the legacy draw did not carry.
         assert_eq!(out[0].rgba, [0.25, 0.5, 0.75, 1.0]);
         assert_eq!(out[0].id_flags[0], 7);
+    }
+}
+
+#[cfg(test)]
+mod pick_table_tests {
+    use super::*;
+    use cad_domain::{EntityId, InstancePath, SelectionRef};
+
+    fn source(entity: u128, instance: &[u128]) -> SelectionRef {
+        SelectionRef {
+            document: cad_domain::DocumentId(1),
+            entity: EntityId(entity),
+            instance: InstancePath(instance.iter().copied().map(EntityId).collect()),
+            sub_element: None,
+        }
+    }
+
+    #[test]
+    fn pick_key_none_is_the_background_and_never_resolves() {
+        let table = PickTable::build(&[(1, vec![source(7, &[])])]);
+        assert_eq!(PICK_KEY_NONE, 0);
+        assert!(table.resolve(PICK_KEY_NONE).is_none());
+        assert!(table.resolve(999).is_none(), "an unknown key is not a hit");
+        assert_eq!(table.len(), 1);
+    }
+
+    #[test]
+    fn a_single_source_key_resolves_exactly_and_preserves_the_full_u128() {
+        // An EntityId far beyond 32 bits: the table must return the whole value,
+        // not its low 32 bits.
+        let entity = (1u128 << 100) | 0xDEAD_BEEF;
+        let table = PickTable::build(&[(3, vec![source(entity, &[])])]);
+        let resolved = table.resolve(3).expect("known key");
+        assert_eq!(resolved.batch, 0, "batch ordinal is the entry position");
+        let hit = resolved.source.expect("exact");
+        assert_eq!(hit.entity, EntityId(entity), "full u128 identity preserved");
+        assert_eq!(
+            hit.entity.0 as u32, 0xDEAD_BEEF,
+            "low 32 bits are the truncation"
+        );
+        assert!(resolved.reason.is_none());
+        assert!(!resolved.collision);
+        assert!(table.collisions().is_empty());
+    }
+
+    #[test]
+    fn a_multi_source_batch_is_ambiguous_and_names_every_candidate() {
+        // The scene builder concatenates adjacent line fragments of different
+        // entities into one batch; the id pass cannot tell them apart, so the
+        // resolution must list both and never silently pick the first.
+        let a = source(11, &[]);
+        let b = source(22, &[]);
+        let table = PickTable::build(&[(1, vec![a.clone(), b.clone()])]);
+        let resolved = table.resolve(1).expect("known key");
+        assert!(resolved.source.is_none(), "no exact identity");
+        assert_eq!(resolved.sources, vec![a, b]);
+        assert_eq!(resolved.reason, Some(PICK_REASON_MULTI_SOURCE));
+    }
+
+    #[test]
+    fn a_batch_with_no_source_resolves_to_no_identity() {
+        let table = PickTable::build(&[(1, Vec::new())]);
+        let resolved = table.resolve(1).expect("known key");
+        assert!(resolved.source.is_none());
+        assert!(resolved.sources.is_empty());
+        assert_eq!(resolved.reason, Some(PICK_REASON_NO_SOURCE));
+    }
+
+    #[test]
+    fn distinct_entities_sharing_the_low_32_bits_are_reported_as_a_collision() {
+        // Two distinct u128 entities whose low 32 bits agree. The dense key still
+        // resolves exactly (no mis-pick), and the truncation is reported.
+        let low = 0x0000_1234u128;
+        let a = low;
+        let b = (1u128 << 64) | low;
+        let table = PickTable::build(&[(1, vec![source(a, &[])]), (2, vec![source(b, &[])])]);
+        assert_eq!(table.collisions().len(), 1);
+        let collision = &table.collisions()[0];
+        assert_eq!(collision.truncated_key, 0x1234);
+        assert_eq!(collision.identities.len(), 2);
+        // Both keys still resolve to their own full identity...
+        assert_eq!(
+            table.resolve(1).unwrap().source.unwrap().entity,
+            EntityId(a)
+        );
+        assert_eq!(
+            table.resolve(2).unwrap().source.unwrap().entity,
+            EntityId(b)
+        );
+        // ...and both are flagged as colliding.
+        assert!(table.resolve(1).unwrap().collision);
+        assert!(table.resolve(2).unwrap().collision);
+    }
+
+    #[test]
+    fn the_same_entity_under_two_instances_is_a_collision_too() {
+        // One block placed twice: the same EntityId, two distinct placements. For
+        // a 32-bit consumer they are indistinguishable, so this is reported.
+        let a = source(5, &[100]);
+        let b = source(5, &[200]);
+        let table = PickTable::build(&[(1, vec![a]), (2, vec![b])]);
+        assert_eq!(table.collisions().len(), 1);
+        assert_eq!(table.collisions()[0].identities.len(), 2);
+    }
+
+    #[test]
+    fn distinct_entities_with_distinct_low_bits_are_not_a_collision() {
+        let table = PickTable::build(&[(1, vec![source(1, &[])]), (2, vec![source(2, &[])])]);
+        assert!(table.collisions().is_empty());
+        assert!(!table.resolve(1).unwrap().collision);
+        assert!(!table.resolve(2).unwrap().collision);
+    }
+
+    #[test]
+    fn a_repeated_key_is_ignored_rather_than_silently_overwritten() {
+        // Keys must be unique; a duplicate is a programming error. The first
+        // wins and the second is dropped, so the table can never report a key
+        // that names two different batches.
+        let table = PickTable::build(&[(1, vec![source(1, &[])]), (1, vec![source(2, &[])])]);
+        assert_eq!(table.len(), 1);
+        assert_eq!(
+            table.resolve(1).unwrap().source.unwrap().entity,
+            EntityId(1)
+        );
+    }
+
+    #[test]
+    fn max_key_tracks_the_highest_live_key() {
+        let table = PickTable::build(&[(4, vec![source(1, &[])]), (9, vec![source(2, &[])])]);
+        assert_eq!(table.max_key(), 9);
+        assert!(table.resolve(5).is_none(), "a gap is not a hit");
+    }
+}
+
+/// Per-batch world→clip projection for one frame.
+///
+/// The 2D variant reproduces, bit for bit, the f64 camera-centre subtraction the
+/// large-coordinate precision test fences before narrowing to `f32`; the 3D
+/// variant multiplies the view-projection by the batch origin (matching the
+/// previous `translate_left(&vp, origin)`). Building the matrix inline per
+/// accepted batch avoids materialising and cloning a full `Vec<[f32; 16]>` every
+/// frame.
+#[derive(Clone, Copy)]
+pub(crate) enum FrameProjection {
+    Ortho {
+        sx: f64,
+        sy: f64,
+        /// Camera centre, kept in f64 so the subtraction stays precise.
+        center: [f64; 3],
+        z_plane: f32,
+    },
+    Perspective {
+        vp: [[f32; 4]; 4],
+    },
+}
+
+impl FrameProjection {
+    pub(crate) fn batch_matrix(self, origin: [f32; 3]) -> [f32; 16] {
+        self.batch_matrix_f64([
+            f64::from(origin[0]),
+            f64::from(origin[1]),
+            f64::from(origin[2]),
+        ])
+    }
+
+    /// Per-batch matrix for an `f64` origin.
+    ///
+    /// The **Ortho** variant keeps the origin and the camera centre in `f64`
+    /// through the subtraction before narrowing — the precision contract fenced
+    /// by `large_coordinate_batch_keeps_precision`. The instanced line path
+    /// passes its stream's exact `f64` fixed-point origin here, so stream
+    /// positions stay small even at large drawing coordinates. The **Perspective**
+    /// variant narrows the origin to `f32` before `translate_left`, so this `f64`
+    /// camera-relative subtraction does not apply on the 3D path.
+    pub(crate) fn batch_matrix_f64(self, origin: [f64; 3]) -> [f32; 16] {
+        match self {
+            FrameProjection::Ortho {
+                sx,
+                sy,
+                center,
+                z_plane,
+            } => [
+                sx as f32,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                sy as f32,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                (sx * (origin[0] - center[0])) as f32,
+                (sy * (origin[1] - center[1])) as f32,
+                (origin[2] - center[2]) as f32 + z_plane,
+                1.0,
+            ],
+            // Perspective narrows the origin to `f32` *before* applying the
+            // (already `f32`) view-projection, so the `f64` camera-relative
+            // subtraction claimed for the Ortho arm above does not apply here.
+            FrameProjection::Perspective { vp } => {
+                translate_left(&vp, [origin[0] as f32, origin[1] as f32, origin[2] as f32])
+            }
+        }
     }
 }

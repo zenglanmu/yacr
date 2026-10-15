@@ -29,3 +29,6 @@ cad-render-wgpu.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+# The parity harness (`tests/pick_parity.rs`) compares the renderer's id pass
+# against CPU picking; `cad-spatial` is the reference precise-pick stage.
+cad-spatial.workspace = true

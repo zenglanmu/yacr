@@ -7,6 +7,8 @@
 
 use naga::valid::{Capabilities, ValidationFlags, Validator};
 
+use cad_render_wgpu::{pick_id_shader_sources, IdTargetFormat};
+
 fn validate_wgsl(name: &str, source: &str) -> Result<(), String> {
     let module = naga::front::wgsl::parse_str(source)
         .map_err(|e| format!("{name}: WGSL parse error: {}", e.emit_to_string(source)))?;
@@ -66,6 +68,27 @@ fn mesh_merged_shader_is_valid_wgsl() {
 fn image_shader_is_valid_wgsl() {
     validate_wgsl("image.wgsl", include_str!("../shaders/image.wgsl"))
         .expect("image shader must validate");
+}
+
+/// The id-pass shaders are *assembled*: `shaders/pick_*.wgsl` provide the
+/// uniform, the vertex stage and `fs_key`, and a generated fragment tail declares
+/// the entry point for the active id-target format. Validating the file alone
+/// would therefore only prove the body parses; this validates the exact module
+/// text the pipelines compile, for both id-target formats.
+#[test]
+fn id_pass_shaders_validate_for_both_target_formats() {
+    for format in [IdTargetFormat::R32Uint, IdTargetFormat::PackedRgba8] {
+        let sources = pick_id_shader_sources(format);
+        assert_eq!(
+            sources.len(),
+            5,
+            "every visible draw class needs an id-pass shader"
+        );
+        for (name, source) in sources {
+            validate_wgsl(&format!("{name} ({})", format.as_str()), &source)
+                .unwrap_or_else(|e| panic!("{e}"));
+        }
+    }
 }
 
 #[test]

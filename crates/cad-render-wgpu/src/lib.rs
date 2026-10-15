@@ -33,6 +33,10 @@ pub use native_presenter::{
     ProbeStageTimings, SurfaceProbePresenter,
 };
 
+/// Native id-pass shader sources (see [`pick_at`](Renderer::pick_at)).
+#[cfg(not(target_arch = "wasm32"))]
+pub use pick::{pick_id_shader_sources, pick_shader_source};
+
 /// Alias for hosts that think of this as a native surface presenter. The
 /// canonical name stays [`SurfaceProbePresenter`] so existing callers compile.
 #[cfg(not(target_arch = "wasm32"))]
@@ -299,6 +303,102 @@ impl OverBudgetReason {
     }
 }
 
+/// One fragment-level result of [`Renderer::pick_at`].
+///
+/// The id pass writes one 32-bit **pick key** per fragment (see [`PickTable`]).
+/// `entity_key` is that raw value; the remaining fields are its CPU-side
+/// resolution, which preserves the full `u128` `EntityId` and reports — never
+/// guesses — anything it cannot resolve exactly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickHit {
+    /// The raw key the id pass wrote for the picked fragment. `0` is the cleared
+    /// background and never reaches a `PickHit`.
+    pub entity_key: u32,
+    /// The exact identity when the key names exactly one source. `None` when the
+    /// hit is ambiguous or the batch carries no source (see `reason`).
+    pub source: Option<SelectionRef>,
+    /// Every entity that can own a fragment of this key, in the owning batch's
+    /// order. One element for an exact hit; several when the batch concatenated
+    /// sources whose geometry is indistinguishable after representation.
+    pub candidates: Vec<SelectionRef>,
+    /// A mesh-face sub-element when the id pass could resolve one.
+    ///
+    /// Always `None` in this slice: wgpu exposes no primitive index to the
+    /// fragment stage, so a face cannot be derived from the id pass. Sub-element
+    /// picking therefore stays on CPU refinement (`cad_spatial`), and this field
+    /// is not faked to look precise.
+    pub sub_element: Option<SubElementId>,
+    /// Machine key explaining a non-exact `source` (never translated prose).
+    pub reason: Option<&'static str>,
+    /// `true` when one of this key's sources shares its low-32 `EntityId` with a
+    /// different full identity elsewhere in the resident scene: the `u128`
+    /// truncation collision that a 32-bit-only consumer could not see.
+    pub key_collision: bool,
+}
+
+impl PickHit {
+    /// Whether the key resolved to more than one possible entity.
+    pub fn is_ambiguous(&self) -> bool {
+        self.source.is_none()
+    }
+}
+
+/// One detected `EntityId` truncation collision: two or more *distinct* full
+/// identities whose low 32 bits agree.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickCollision {
+    /// The shared low-32 value (`EntityId.0 as u32`).
+    pub truncated_key: u32,
+    /// The distinct identities that share it, in first-seen order.
+    pub identities: Vec<SelectionRef>,
+}
+
+/// Selection/hover/visibility bits of the flags table (see
+/// [`Renderer::set_selection_flags`]).
+pub const FLAG_SELECTED: u32 = 1 << 0;
+pub const FLAG_HOVERED: u32 = 1 << 1;
+pub const FLAG_HIDDEN: u32 = 1 << 2;
+
+/// The color-attachment format of the id target.
+///
+/// `R32Uint` is the primary choice: the WebGPU spec guarantees it as a render
+/// attachment (`R32Uint.guaranteed_format_features`), and wgpu's GL backend
+/// likewise advertises `COLOR_ATTACHMENT` for it, so one 32-bit integer channel
+/// carries a whole key with no packing. `PackedRgba8` is the fallback for a
+/// device whose adapter does not report `R32Uint` renderable: the key is split
+/// into four `unorm8` channels, which every tier can render to. The active
+/// choice is decided at init from the device and reported by
+/// [`Renderer::id_target_format`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdTargetFormat {
+    /// One `u32` channel (`TextureFormat::R32Uint`).
+    R32Uint,
+    /// Four `unorm8` channels (`TextureFormat::Rgba8Unorm`), low byte in `r`.
+    PackedRgba8,
+}
+
+impl IdTargetFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IdTargetFormat::R32Uint => "r32uint",
+            IdTargetFormat::PackedRgba8 => "packed-rgba8",
+        }
+    }
+
+    /// The wgpu texture format this choice renders into.
+    pub fn texture_format(self) -> wgpu::TextureFormat {
+        match self {
+            IdTargetFormat::R32Uint => wgpu::TextureFormat::R32Uint,
+            IdTargetFormat::PackedRgba8 => wgpu::TextureFormat::Rgba8Unorm,
+        }
+    }
+
+    /// Bytes per texel in the readback buffer.
+    pub fn bytes_per_texel(self) -> u32 {
+        4
+    }
+}
+
 /// A renderer failure that the caller can distinguish from a bad frame.
 ///
 /// Audit F12: a device loss must not be confused with a per-frame validation
@@ -401,6 +501,15 @@ struct GpuBatch {
     /// Exact bytes this batch uploads, cached at upload time so the per-frame
     /// byte budget does not recompute the edge index list every frame.
     upload_bytes: usize,
+    /// This batch's renderer pick key (see [`PickTable`]): `1 + <ordinal>`, never
+    /// `0`. Packed into every instance/merged vertex the batch contributes and
+    /// into `Camera::key_flags.x` of its per-batch uniform, so the id pass and
+    /// the selection-flags table can resolve any fragment of it.
+    pick_key: u32,
+    /// The full `SelectionRef` list this batch's fragments can belong to,
+    /// preserved so the CPU-side pick table can return the whole `u128` identity
+    /// (the scene builder may concatenate several entities into one batch).
+    sources: Vec<SelectionRef>,
 }
 
 /// One device-resident merged mesh chunk: an interleaved vertex buffer, a
@@ -462,6 +571,26 @@ impl GpuBatch {
     fn upload_size_bytes(&self) -> usize {
         self.upload_bytes
     }
+
+    /// The [`INSTANCE_FLAG_*`] bitfield of this resident batch, for
+    /// `Camera::key_flags.y` of its per-batch uniform. Mirrors
+    /// [`batch_instance_flags`] on the packed form (converted batches are always
+    /// opaque, a legacy batch keeps its own alpha class).
+    fn instance_flags(&self) -> u32 {
+        (if classify_alpha(self.alpha) == AlphaClass::Opaque {
+            INSTANCE_FLAG_OPAQUE
+        } else {
+            0
+        }) | if self.sources.is_empty() {
+            0
+        } else {
+            INSTANCE_FLAG_HAS_SOURCE
+        } | if self.lineweight > 0.0 {
+            INSTANCE_FLAG_LINEWEIGHT
+        } else {
+            0
+        }
+    }
 }
 
 /// A device-resident texture for one [`ResourceKey`], shared by every resident
@@ -517,6 +646,11 @@ struct GpuImage {
     draw_order: i64,
     /// Exact bytes this quad uploads (vertex + index buffers).
     upload_bytes: usize,
+    /// This image's renderer pick key (see [`PickTable`]).
+    pick_key: u32,
+    /// The full identities this quad can belong to (an `ImageBatch` carries its
+    /// own `sources`), preserved for the CPU-side pick table.
+    sources: Vec<SelectionRef>,
 }
 
 /// One shared uniform buffer plus its bind group (group 0).
@@ -825,6 +959,63 @@ pub struct Renderer {
     /// large frame, so a headless caller raises it explicitly instead of the
     /// renderer misreporting a slow CPU frame as a device loss.
     poll_timeout: std::time::Duration,
+    /// Monotonic allocator for renderer pick keys within the current device
+    /// generation (see [`PickTable`]). Reset when the resident batch list is
+    /// emptied, so a full re-upload starts again from key 1.
+    pick_key_counter: std::sync::atomic::AtomicU32,
+    /// CPU-side key → identity table for the resident batches. Rebuilt on every
+    /// commit/clear; read by `pick_at`.
+    pick_table: PickTable,
+    /// The projection of the most recent color frame. `pick_at` reuses it so the
+    /// id pass draws the same view the user is looking at.
+    last_projection: Option<FrameProjection>,
+    /// Camera-only world→clip matrix of the most recent color frame (the
+    /// transform image vertices use; they are already in world space).
+    last_camera_matrix: [f32; 16],
+    /// Camera position of the most recent color frame (transparent ordering).
+    last_camera_position: Option<[f32; 3]>,
+    /// Active id-target format (see [`IdTargetFormat`]).
+    id_format: IdTargetFormat,
+    /// Test hook: forces a format regardless of the adapter probe.
+    id_format_override: Option<IdTargetFormat>,
+    /// Offscreen id target: same size as the color target, own depth buffer, so
+    /// a pick never disturbs the color pass's attachments.
+    pick_target: Option<wgpu::Texture>,
+    pick_view: Option<wgpu::TextureView>,
+    pick_depth_view: Option<wgpu::TextureView>,
+    pick_size: (u32, u32),
+    /// Id-pass pipelines. One per vertex layout/primitive state the color pass
+    /// uses (the id pass must rasterize the same fragments).
+    pick_line_pipeline: Option<wgpu::RenderPipeline>,
+    pick_line_instanced_pipeline: Option<wgpu::RenderPipeline>,
+    pick_mesh_pipeline: Option<wgpu::RenderPipeline>,
+    pick_mesh_pipeline_mirrored: Option<wgpu::RenderPipeline>,
+    pick_mesh_merged_pipeline: Option<wgpu::RenderPipeline>,
+    pick_mesh_merged_pipeline_mirrored: Option<wgpu::RenderPipeline>,
+    pick_image_pipeline: Option<wgpu::RenderPipeline>,
+    /// Group-1 layout of the selection-flags table (`texture_2d<u32>` + control
+    /// uniform), shared by every color pipeline.
+    flags_layout: Option<wgpu::BindGroupLayout>,
+    flags_texture: Option<wgpu::Texture>,
+    flags_view: Option<wgpu::TextureView>,
+    flags_bind_group: Option<wgpu::BindGroup>,
+    /// 16-byte control uniform: `enabled` + the texture row width.
+    flags_ctl_buffer: Option<wgpu::Buffer>,
+    /// Whether the shaders apply the flags tint. Off by default so the existing
+    /// highlight-overlay batches keep working unchanged.
+    flags_enabled: bool,
+    /// CPU mirror of the flags table, indexed by pick key.
+    flags_bits: Vec<u32>,
+    /// Texels per row of the flags texture (see `FlagsCtl::width`).
+    flags_width: u32,
+    /// Set when the GPU table must be re-uploaded from the CPU mirror (table
+    /// recreation or a scene reset) so a retired key's bits cannot linger.
+    flags_table_dirty: bool,
+    /// Bytes uploaded by flags updates since init. A flags update must never
+    /// grow this and the static stream counters together.
+    flags_upload_bytes: u64,
+    /// Number of flags updates that reached the GPU.
+    flags_upload_count: u64,
 }
 
 /// Staged GPU resources, owned by the renderer that prepared them. Publishing
@@ -904,6 +1095,10 @@ impl Default for Renderer {
     }
 }
 
+/// Native id-pass + readback (`Renderer::pick_at`). The browser tiers keep CPU
+/// picking (`cad_spatial`); a blocking GPU→CPU readback is not available there.
+#[cfg(not(target_arch = "wasm32"))]
+mod pick;
 mod plan;
 mod renderer_impl;
 

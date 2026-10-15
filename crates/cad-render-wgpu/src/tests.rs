@@ -318,3 +318,54 @@ fn slot_location_picks_page_and_offset_across_buffers() {
     assert_eq!(slot_location(3, 3, 256), (1, 0));
     assert_eq!(slot_location(259, 256, 256), (1, 3 * 256));
 }
+
+#[test]
+fn the_id_target_probe_prefers_r32uint_when_the_spec_guarantees_it_renderable() {
+    // The WebGPU spec's guaranteed format features list `R32Uint` as a render
+    // attachment, so a device that enabled no optional feature still gets the
+    // single-channel id target. A device that did not would take the packed
+    // fallback, which the headless tests exercise through the override hook.
+    assert_eq!(
+        Renderer::id_format_for_features(wgpu::Features::empty()),
+        IdTargetFormat::R32Uint
+    );
+    assert_eq!(
+        IdTargetFormat::R32Uint.texture_format(),
+        wgpu::TextureFormat::R32Uint
+    );
+    assert_eq!(
+        IdTargetFormat::PackedRgba8.texture_format(),
+        wgpu::TextureFormat::Rgba8Unorm
+    );
+    assert_eq!(IdTargetFormat::R32Uint.as_str(), "r32uint");
+    assert_eq!(IdTargetFormat::PackedRgba8.as_str(), "packed-rgba8");
+    // A renderer with no device has no id target format.
+    assert!(Renderer::default().id_target_format().is_none());
+}
+
+#[test]
+fn the_uniform_struct_grew_for_the_pick_key_without_moving_the_slot_stride() {
+    // `mat4x4` (64) + tint `vec4<f32>` (16) + key_flags `vec4<u32>` (16) = 96.
+    assert_eq!(UNIFORM_STRUCT_BYTES, 96);
+    // The dynamic-offset slot stride stays at the 256-byte alignment, so the
+    // per-page slot count is unchanged by the extra field.
+    let (slot_size, slots) = uniform_layout_params(&wgpu::Limits::default());
+    assert_eq!(slot_size, 256);
+    assert_eq!(slots, 256);
+    let uniform = uniform_bytes(
+        &[1.0; 16],
+        [0.25, 0.5, 0.75, 1.0],
+        [7, INSTANCE_FLAG_OPAQUE, 0, 0],
+    );
+    assert_eq!(uniform.len(), UNIFORM_STRUCT_BYTES as usize);
+    // Word 16..20 = tint, 20..24 = key/flags (little-endian words).
+    assert_eq!(
+        f32::from_le_bytes(uniform[64..68].try_into().unwrap()),
+        0.25
+    );
+    assert_eq!(u32::from_le_bytes(uniform[80..84].try_into().unwrap()), 7);
+    assert_eq!(
+        u32::from_le_bytes(uniform[84..88].try_into().unwrap()),
+        INSTANCE_FLAG_OPAQUE
+    );
+}

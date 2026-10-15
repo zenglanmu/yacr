@@ -1,6 +1,7 @@
 //! Implementation of [`Renderer`]: GPU upload, batching and frame submission.
 
 use super::*;
+use std::sync::atomic::Ordering;
 
 // `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
 // implemented on this platform"); the browser gets `Performance.now()` through
@@ -70,6 +71,35 @@ impl Renderer {
             device_lost: false,
             last_device_lost: None,
             poll_timeout: std::time::Duration::from_secs(1),
+            pick_key_counter: std::sync::atomic::AtomicU32::new(1),
+            pick_table: PickTable::default(),
+            last_projection: None,
+            last_camera_matrix: [0.0; 16],
+            last_camera_position: None,
+            id_format: IdTargetFormat::R32Uint,
+            id_format_override: None,
+            pick_target: None,
+            pick_view: None,
+            pick_depth_view: None,
+            pick_size: (0, 0),
+            pick_line_pipeline: None,
+            pick_line_instanced_pipeline: None,
+            pick_mesh_pipeline: None,
+            pick_mesh_pipeline_mirrored: None,
+            pick_mesh_merged_pipeline: None,
+            pick_mesh_merged_pipeline_mirrored: None,
+            pick_image_pipeline: None,
+            flags_layout: None,
+            flags_texture: None,
+            flags_view: None,
+            flags_bind_group: None,
+            flags_ctl_buffer: None,
+            flags_enabled: false,
+            flags_bits: Vec::new(),
+            flags_width: 1,
+            flags_table_dirty: true,
+            flags_upload_bytes: 0,
+            flags_upload_count: 0,
         }
     }
 
@@ -110,9 +140,10 @@ impl Renderer {
                 count: None,
             }],
         });
+        let flags_layout = Self::create_flags_layout(&device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("cad-pipeline-layout"),
-            bind_group_layouts: &[Some(&layout)],
+            bind_group_layouts: &[Some(&layout), Some(&flags_layout)],
             immediate_size: 0,
         });
         let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -294,7 +325,13 @@ impl Renderer {
         let image_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("cad-image-pipeline-layout"),
-                bind_group_layouts: &[Some(&layout), Some(&image_texture_layout)],
+                // Flags precede the sampled texture so every geometry pipeline in
+                // this crate binds the flags table at the same group index.
+                bind_group_layouts: &[
+                    Some(&layout),
+                    Some(&flags_layout),
+                    Some(&image_texture_layout),
+                ],
                 immediate_size: 0,
             });
         let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -385,7 +422,367 @@ impl Renderer {
         self.active_backend = Some(caps.actual);
         self.device_generation += 1;
         self.device_lost = false;
+        // Selection flags: the group layout and a 1x1 table (grown on demand).
+        self.flags_layout = Some(flags_layout);
+        self.flags_enabled = false;
+        self.reset_pick_keys();
+        let device_ref = self.device.as_ref().expect("device just set").clone();
+        let queue_ref = self.queue.as_ref().expect("queue just set").clone();
+        self.ensure_flags(&device_ref, &queue_ref, 1);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.id_format = self
+                .id_format_override
+                .unwrap_or_else(|| Self::probe_id_format(&device_ref));
+            self.create_pick_pipelines(&device_ref);
+        }
         Ok(caps)
+    }
+
+    /// Group-1 layout of the selection-flags table: an integer lookup texture
+    /// (`texture_2d<u32>`, addressed with `textureLoad`) plus a 16-byte control
+    /// uniform. Deliberately a texture, not a vertex-stage storage buffer, so the
+    /// layout stays WebGL2-safe.
+    fn create_flags_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cad-flags-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(u64::from(FLAGS_CTL_BYTES)),
+                    },
+                    count: None,
+                },
+            ],
+        })
+    }
+
+    /// Decide the id-target format from the device's own format features.
+    ///
+    /// `R32Uint` is preferred: the WebGPU spec's guaranteed features list it as a
+    /// render attachment, and wgpu's GL backend advertises `COLOR_ATTACHMENT` for
+    /// it too, so one 32-bit integer channel carries the whole key. A device that
+    /// does not report it renderable falls back to the packed RGBA8 encoding,
+    /// which every tier can render to. Pure decision, so it is unit-testable
+    /// without a GPU.
+    pub fn id_format_for_features(features: wgpu::Features) -> IdTargetFormat {
+        let renderable = wgpu::TextureFormat::R32Uint
+            .guaranteed_format_features(features)
+            .allowed_usages
+            .contains(wgpu::TextureUsages::RENDER_ATTACHMENT);
+        if renderable {
+            IdTargetFormat::R32Uint
+        } else {
+            IdTargetFormat::PackedRgba8
+        }
+    }
+
+    fn probe_id_format(device: &wgpu::Device) -> IdTargetFormat {
+        Self::id_format_for_features(device.features())
+    }
+
+    /// The active device's enabled features, or `Features::empty()` before a
+    /// device exists. Exposed so a caller can reproduce the id-target probe.
+    pub fn device_features(&self) -> wgpu::Features {
+        self.device
+            .as_ref()
+            .map_or(wgpu::Features::empty(), |device| device.features())
+    }
+
+    /// The active id-target format, or `None` before a device exists.
+    pub fn id_target_format(&self) -> Option<IdTargetFormat> {
+        self.device.as_ref().map(|_| self.id_format)
+    }
+
+    /// Test hook: force the id-target format regardless of the adapter probe.
+    ///
+    /// Exists so the packed-RGBA8 fallback (the path a device without a
+    /// renderable `R32Uint` takes) is exercised on hardware that has `R32Uint`.
+    /// Takes effect on the next device initialization.
+    pub fn set_id_format_override(&mut self, format: Option<IdTargetFormat>) {
+        self.id_format_override = format;
+    }
+
+    /// (Re)create the flags texture, bind group and control buffer so the table
+    /// covers at least `key_count` keys.
+    ///
+    /// The table is one texel per key, packed into rows of at most the adapter's
+    /// `max_texture_dimension_2d`; the shader addresses a key as
+    /// `(key % width, key / width)`.
+    fn ensure_flags(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, key_count: u32) {
+        let Some(layout) = self.flags_layout.as_ref() else {
+            return;
+        };
+        if self.flags_ctl_buffer.is_none() {
+            self.flags_ctl_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("cad-flags-ctl"),
+                size: u64::from(FLAGS_CTL_BYTES),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        let ctl_buffer = self
+            .flags_ctl_buffer
+            .as_ref()
+            .expect("flags control buffer created above");
+        let max_dim = device.limits().max_texture_dimension_2d.max(1);
+        let needed = key_count.max(1);
+        let width = needed.min(max_dim);
+        let height = needed.div_ceil(width).max(1);
+        let recreate = self.flags_width != width
+            || self
+                .flags_texture
+                .as_ref()
+                .is_none_or(|texture| texture.height() < height);
+        if recreate {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("cad-flags-table"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: FLAGS_FORMAT,
+                // COPY_DST so a flags update writes only this table.
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.flags_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cad-flags-bind"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: ctl_buffer.as_entire_binding(),
+                    },
+                ],
+            }));
+            self.flags_texture = Some(texture);
+            self.flags_view = Some(view);
+            self.flags_width = width;
+            // A fresh table is zeroed by the driver, so the CPU mirror starts
+            // empty and is re-uploaded below.
+            self.flags_bits.clear();
+            self.flags_table_dirty = true;
+        }
+        // Keep the CPU mirror at least as long as the addressed texel space; the
+        // texture can be reused while the key space grows inside one row.
+        let texels = width as usize * height as usize;
+        if self.flags_bits.len() < texels {
+            self.flags_bits.resize(texels, 0);
+        }
+        if self.flags_table_dirty {
+            self.upload_flags_table(queue, width, height);
+        }
+        self.write_flags_ctl(queue);
+    }
+
+    /// Upload the whole flags table from the CPU mirror.
+    ///
+    /// Runs once after a table (re)creation or a scene reset — not per frame — so
+    /// a stale GPU table can never keep a retired key's bits.
+    fn upload_flags_table(&mut self, queue: &wgpu::Queue, width: u32, height: u32) {
+        let Some(texture) = self.flags_texture.as_ref() else {
+            return;
+        };
+        let row_bytes = width as usize * 4;
+        let aligned = row_bytes.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let mut staging = vec![0u8; aligned * height as usize];
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let bits = self
+                    .flags_bits
+                    .get(y * width as usize + x)
+                    .copied()
+                    .unwrap_or(0);
+                let slot = y * aligned + x * 4;
+                staging[slot] = (bits & 0xFF) as u8;
+                staging[slot + 1] = ((bits >> 8) & 0xFF) as u8;
+                staging[slot + 2] = ((bits >> 16) & 0xFF) as u8;
+                staging[slot + 3] = ((bits >> 24) & 0xFF) as u8;
+            }
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &staging,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(aligned as u32),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.flags_upload_bytes += staging.len() as u64;
+        self.flags_upload_count += 1;
+        self.flags_table_dirty = false;
+    }
+
+    /// Upload the 16-byte control uniform (`enabled` + row width).
+    fn write_flags_ctl(&mut self, queue: &wgpu::Queue) {
+        let Some(buffer) = self.flags_ctl_buffer.as_ref() else {
+            return;
+        };
+        let ctl: [u32; 4] = [u32::from(self.flags_enabled), self.flags_width.max(1), 0, 0];
+        queue.write_buffer(buffer, 0, bytemuck::bytes_of(&ctl));
+    }
+
+    /// Whether the color shaders apply the flags tint. Off by default, so the
+    /// existing highlight-overlay batches keep working with no double-highlight.
+    pub fn selection_flags_enabled(&self) -> bool {
+        self.flags_enabled
+    }
+
+    /// Turn the flag-driven tint on or off. The toggle is a 16-byte uniform write
+    /// to the flags control buffer; it never touches the static streams or the
+    /// per-batch uniforms.
+    pub fn set_selection_flags_enabled(&mut self, enabled: bool) {
+        self.flags_enabled = enabled;
+        let queue = self.queue.clone();
+        if let Some(queue) = queue.as_ref() {
+            self.write_flags_ctl(queue);
+            self.flags_upload_bytes += u64::from(FLAGS_CTL_BYTES);
+            self.flags_upload_count += 1;
+        }
+    }
+
+    /// Set the [`FLAG_SELECTED`]/[`FLAG_HOVERED`]/[`FLAG_HIDDEN`] bits of one
+    /// pick key.
+    ///
+    /// Uploads **only** the flags table row that contains the key (plus the
+    /// 16-byte control uniform); the static instance/merged streams, the batch
+    /// buffers and the per-batch uniforms are untouched, which is what the
+    /// "a flag update uploads only the flags buffer" fence asserts.
+    pub fn set_pick_key_flags(&mut self, key: u32, bits: u32) -> CadResult<()> {
+        if key == PICK_KEY_NONE || key > MAX_PICK_KEYS {
+            return Err(CadError::InvalidInput(format!(
+                "pick key {key} is outside the flags table (1..={MAX_PICK_KEYS})"
+            )));
+        }
+        let device = self
+            .device
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+        let queue = self
+            .queue
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+        let needed = self.pick_table.max_key().max(key) + 1;
+        self.ensure_flags(&device, &queue, needed);
+        let Some(texture) = self.flags_texture.as_ref() else {
+            return Err(CadError::GpuFailure("flags table unavailable".into()));
+        };
+        let width = self.flags_width.max(1);
+        let row = key / width;
+        if self.flags_bits.len() <= key as usize {
+            self.flags_bits.resize(key as usize + 1, 0);
+        }
+        self.flags_bits[key as usize] = bits;
+        // Upload the whole row that contains `key`: it is the smallest
+        // `copy`-aligned unit the API accepts, and it keeps the update independent
+        // of the table's height.
+        let row_bytes = width as usize * 4;
+        let aligned = row_bytes.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let mut staging = vec![0u8; aligned];
+        let base = row as usize * width as usize;
+        for x in 0..width as usize {
+            let texel = self.flags_bits[base + x];
+            staging[x * 4] = (texel & 0xFF) as u8;
+            staging[x * 4 + 1] = ((texel >> 8) & 0xFF) as u8;
+            staging[x * 4 + 2] = ((texel >> 16) & 0xFF) as u8;
+            staging[x * 4 + 3] = ((texel >> 24) & 0xFF) as u8;
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: 0, y: row, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &staging,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(aligned as u32),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.flags_upload_bytes += aligned as u64;
+        self.flags_upload_count += 1;
+        Ok(())
+    }
+
+    /// The CPU mirror of one key's flag bits (0 when unset).
+    pub fn pick_key_flags(&self, key: u32) -> u32 {
+        self.flags_bits.get(key as usize).copied().unwrap_or(0)
+    }
+
+    /// Bytes uploaded by flags updates since init. A flags update must not grow
+    /// [`Renderer::instance_stream_uploads`] or [`Renderer::mesh_chunk_uploads`].
+    pub fn flags_upload_bytes(&self) -> u64 {
+        self.flags_upload_bytes
+    }
+
+    /// Number of flags updates that reached the GPU.
+    pub fn flags_upload_count(&self) -> u64 {
+        self.flags_upload_count
+    }
+
+    /// The detected `EntityId` truncation collisions of the resident scene.
+    ///
+    /// Two distinct entities whose low 32 bits agree. Resolution is still exact
+    /// (the pick key is a renderer key, not the truncated value), so this is a
+    /// *reported* hazard for any 32-bit-only consumer rather than a mis-pick.
+    pub fn pick_collisions(&self) -> &[PickCollision] {
+        self.pick_table.collisions()
+    }
+
+    /// The renderer pick key of resident batch `index`, if any.
+    pub fn pick_key_for_batch(&self, index: usize) -> Option<u32> {
+        self.batches.get(index).map(|batch| batch.pick_key)
+    }
+
+    /// Number of live entries in the pick table.
+    pub fn pick_table_len(&self) -> usize {
+        self.pick_table.len()
     }
 
     fn create_mesh_pipeline(
@@ -661,6 +1058,24 @@ impl Renderer {
         for &index in &mesh_converted {
             converted_mask[index] = true;
         }
+        // Allocate one renderer pick key per staged batch (see `PickTable`). The
+        // keys are monotonic within a device generation and never reused, so
+        // independently staged pieces (see `PreparedUpload::append`) cannot
+        // collide even though neither knows the other's ordinal. Exhaustion is
+        // reported as an invalid-input error rather than silently wrapping onto a
+        // key that would resolve to the wrong entity.
+        let mut keys = Vec::with_capacity(batches.len());
+        for _ in 0..batches.len() {
+            let key = self.pick_key_counter.fetch_add(1, Ordering::Relaxed);
+            if key == PICK_KEY_NONE || key > MAX_PICK_KEYS {
+                return Err(CadError::InvalidInput(
+                    "renderer pick key space exhausted (too many batches uploaded \
+                     without a full scene clear)"
+                        .into(),
+                ));
+            }
+            keys.push(key);
+        }
         let cap = self.max_instances_per_stream.max(1);
         let mesh_cap = self.max_vertices_per_mesh_stream.max(3);
         let max_buffer_size = device.limits().max_buffer_size;
@@ -732,6 +1147,7 @@ impl Renderer {
             let (chunks, runs) = build_instance_chunks(
                 batches,
                 &line_converted,
+                &keys,
                 self.max_instances_per_stream,
                 MAX_STREAM_RADIUS,
             );
@@ -770,6 +1186,7 @@ impl Renderer {
             let (chunks, runs) = build_mesh_chunks(
                 batches,
                 &mesh_converted,
+                &keys,
                 self.max_vertices_per_mesh_stream,
                 MAX_STREAM_RADIUS,
             );
@@ -941,6 +1358,8 @@ impl Renderer {
                 instanced: run.unwrap_or_default(),
                 mesh_runs: mesh_run.unwrap_or_default(),
                 upload_bytes: bytes,
+                pick_key: keys[index],
+                sources: batch.sources.clone(),
             });
         }
         Ok(PreparedUpload {
@@ -991,6 +1410,7 @@ impl Renderer {
         self.batches.extend(prepared.batches);
         self.gc_instance_streams();
         self.gc_mesh_chunks();
+        self.rebuild_pick_table();
         self.progressive_frame = None;
         self.draw_plan = None;
         self.rebuild_lineweight_cache();
@@ -1210,10 +1630,13 @@ impl Renderer {
                 alpha: clamp_alpha(batch.alpha),
                 draw_order: batch.draw_order,
                 upload_bytes: quad_bytes,
+                pick_key: self.pick_key_counter.fetch_add(1, Ordering::Relaxed),
+                sources: batch.sources.clone(),
             });
         }
         self.image_textures.retain(|key, _| live.contains(key));
         self.images = staged;
+        self.rebuild_pick_table();
         Ok(report)
     }
 
@@ -1393,6 +1816,43 @@ impl Renderer {
         self.instance_streams.clear();
         self.mesh_chunks.clear();
         self.rebuild_lineweight_cache();
+        self.reset_pick_keys();
+    }
+
+    /// Rebuild the CPU-side pick table from the resident batches, and reset the
+    /// key allocator when nothing is resident.
+    ///
+    /// Called whenever `batches` changes (commit/clear/device loss). A full clear
+    /// restarts the key space so a re-opened drawing does not inherit a growing
+    /// key counter.
+    fn rebuild_pick_table(&mut self) {
+        if self.batches.is_empty() && self.images.is_empty() {
+            self.reset_pick_keys();
+            return;
+        }
+        let mut entries: Vec<(u32, Vec<SelectionRef>)> = self
+            .batches
+            .iter()
+            .map(|batch| (batch.pick_key, batch.sources.clone()))
+            .collect();
+        entries.extend(
+            self.images
+                .iter()
+                .map(|image| (image.pick_key, image.sources.clone())),
+        );
+        self.pick_table = PickTable::build(&entries);
+        // The flags table is indexed by key, so it must cover the live key space.
+        self.flags_bits
+            .resize(self.pick_table.max_key() as usize + 1, 0);
+    }
+
+    fn reset_pick_keys(&mut self) {
+        self.pick_key_counter.store(1, Ordering::Relaxed);
+        self.pick_table = PickTable::default();
+        // A retired scene's keys must not keep their bits: the whole table is
+        // re-uploaded (zeroed) before it is used again.
+        self.flags_bits.clear();
+        self.flags_table_dirty = true;
     }
 
     /// Reset derived GPU resources after a device loss.
@@ -1431,6 +1891,25 @@ impl Renderer {
         self.draw_plan = None;
         self.instance_streams.clear();
         self.mesh_chunks.clear();
+        self.pick_target = None;
+        self.pick_view = None;
+        self.pick_depth_view = None;
+        self.pick_size = (0, 0);
+        self.pick_line_pipeline = None;
+        self.pick_line_instanced_pipeline = None;
+        self.pick_mesh_pipeline = None;
+        self.pick_mesh_pipeline_mirrored = None;
+        self.pick_mesh_merged_pipeline = None;
+        self.pick_mesh_merged_pipeline_mirrored = None;
+        self.pick_image_pipeline = None;
+        self.flags_layout = None;
+        self.flags_texture = None;
+        self.flags_view = None;
+        self.flags_bind_group = None;
+        self.flags_ctl_buffer = None;
+        self.last_projection = None;
+        self.last_camera_position = None;
+        self.reset_pick_keys();
         Err(CadError::GpuFailure(
             "device rebuild requires a new shared device from the host".into(),
         ))
@@ -1479,6 +1958,18 @@ impl Renderer {
         self.draw_plan = None;
         self.instance_streams.clear();
         self.mesh_chunks.clear();
+        self.pick_target = None;
+        self.pick_view = None;
+        self.pick_depth_view = None;
+        self.pick_size = (0, 0);
+        self.flags_layout = None;
+        self.flags_texture = None;
+        self.flags_view = None;
+        self.flags_bind_group = None;
+        self.flags_ctl_buffer = None;
+        self.last_projection = None;
+        self.last_camera_position = None;
+        self.reset_pick_keys();
         self.last_device_lost = Some(detail.clone());
         RenderError::DeviceLost(detail)
     }
@@ -1588,11 +2079,26 @@ impl Renderer {
                     .unwrap_or_else(|| "device lost; rebuild required".into()),
             ));
         }
+        // Remember the view this frame used: `pick_at` re-runs the same
+        // projection for the id pass, so a pick always matches the frame the user
+        // is looking at.
+        self.last_projection = Some(projection);
+        self.last_camera_matrix = camera_matrix;
+        self.last_camera_position = Some(camera_position);
         // CPU-path timer: plan + uniforms + encode + submit. Stopped right after
         // `queue.submit` so the blocking device poll below is never counted as
         // CPU work.
         let cpu_started = Instant::now();
         self.ensure_target(target)?;
+        // The selection-flags table must cover the live key space before the
+        // shaders address it by key. It only ever grows, so this is a no-op on a
+        // steady scene.
+        {
+            let device = self.device.as_ref().expect("device").clone();
+            let queue = self.queue.as_ref().expect("queue").clone();
+            let needed = self.pick_table.max_key() + 1;
+            self.ensure_flags(&device, &queue, needed);
+        }
         // Phase timers below break `cpu_ms` down into plan / uniform / encode /
         // submit; `wait_ms` separately measures the blocking poll (excluded from
         // `cpu_ms`).
@@ -1855,14 +2361,12 @@ impl Renderer {
                 renderer_color(batch.color),
                 clamp_alpha(batch.alpha),
             );
-            let mut uniform = [0.0f32; 20];
-            uniform[..16].copy_from_slice(&m);
-            uniform[16] = r;
-            uniform[17] = g;
-            uniform[18] = b;
-            uniform[19] = alpha;
-            self.uniforms
-                .write_slot(legacy_slots, bytemuck::bytes_of(&uniform));
+            let uniform = uniform_bytes(
+                &m,
+                [r, g, b, alpha],
+                [batch.pick_key, batch.instance_flags(), 0, 0],
+            );
+            self.uniforms.write_slot(legacy_slots, &uniform);
             self.frame_slots[index] = legacy_slots as u32;
             legacy_slots += 1;
         }
@@ -1872,14 +2376,13 @@ impl Renderer {
         // already world space) and the tint is white with the image's alpha.
         for (j, &i) in draw_images.iter().enumerate() {
             let alpha = self.images[i].alpha;
-            let mut uniform = [0.0f32; 20];
-            uniform[..16].copy_from_slice(&camera_matrix);
-            uniform[16] = 1.0;
-            uniform[17] = 1.0;
-            uniform[18] = 1.0;
-            uniform[19] = alpha;
+            let uniform = uniform_bytes(
+                &camera_matrix,
+                [1.0, 1.0, 1.0, alpha],
+                [self.images[i].pick_key, 0, 0, 0],
+            );
             let slot = legacy_slots + j;
-            self.uniforms.write_slot(slot, bytemuck::bytes_of(&uniform));
+            self.uniforms.write_slot(slot, &uniform);
             self.image_slots[i] = slot as u32;
         }
 
@@ -1893,16 +2396,11 @@ impl Renderer {
             .collect();
         for (s, &slot) in stream_slots.iter().enumerate() {
             let matrix = projection.batch_matrix_f64(self.instance_streams[s].origin);
-            let mut uniform = [0.0f32; 20];
-            uniform[..16].copy_from_slice(&matrix);
-            // The instanced shader ignores the tint (colour is per-instance) but
-            // the uniform layout keeps it; write opaque white.
-            uniform[16] = 1.0;
-            uniform[17] = 1.0;
-            uniform[18] = 1.0;
-            uniform[19] = 1.0;
-            self.uniforms
-                .write_slot(slot as usize, bytemuck::bytes_of(&uniform));
+            // The instanced shader ignores the uniform tint (colour and the pick
+            // key are per-instance) but the layout keeps them; write opaque white
+            // and a zero key.
+            let uniform = uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, 0, 0]);
+            self.uniforms.write_slot(slot as usize, &uniform);
         }
 
         // Merged mesh chunks: one uniform slot per chunk, carrying the chunk's
@@ -1914,14 +2412,8 @@ impl Renderer {
             .collect();
         for (c, &slot) in chunk_slots.iter().enumerate() {
             let matrix = projection.batch_matrix_f64(self.mesh_chunks[c].origin);
-            let mut uniform = [0.0f32; 20];
-            uniform[..16].copy_from_slice(&matrix);
-            uniform[16] = 1.0;
-            uniform[17] = 1.0;
-            uniform[18] = 1.0;
-            uniform[19] = 1.0;
-            self.uniforms
-                .write_slot(slot as usize, bytemuck::bytes_of(&uniform));
+            let uniform = uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, 0, 0]);
+            self.uniforms.write_slot(slot as usize, &uniform);
         }
 
         // One `Queue::write_buffer` per page (vs. one per batch), reported as
@@ -1977,6 +2469,14 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+
+            // Group 1 is the selection-flags table for every pipeline in this
+            // crate (the image pipeline's sampled texture moved to group 2). It is
+            // frame-constant, so it is bound once here, outside the per-draw
+            // state dedup.
+            if let Some(flags_bind_group) = self.flags_bind_group.as_ref() {
+                pass.set_bind_group(1, flags_bind_group, &[]);
+            }
 
             // Pass 1 — opaque, in ascending draw order. Depth writes are on.
             //
@@ -2461,80 +2961,5 @@ impl Renderer {
             codes::RENDER_DEVICE_LOST,
             vec![DiagnosticParameter::Identifier(detail.to_string())],
         )
-    }
-}
-
-/// Per-batch world→clip projection for one frame.
-///
-/// The 2D variant reproduces, bit for bit, the f64 camera-centre subtraction the
-/// large-coordinate precision test fences before narrowing to `f32`; the 3D
-/// variant multiplies the view-projection by the batch origin (matching the
-/// previous `translate_left(&vp, origin)`). Building the matrix inline per
-/// accepted batch avoids materialising and cloning a full `Vec<[f32; 16]>` every
-/// frame.
-#[derive(Clone, Copy)]
-enum FrameProjection {
-    Ortho {
-        sx: f64,
-        sy: f64,
-        /// Camera centre, kept in f64 so the subtraction stays precise.
-        center: [f64; 3],
-        z_plane: f32,
-    },
-    Perspective {
-        vp: [[f32; 4]; 4],
-    },
-}
-
-impl FrameProjection {
-    fn batch_matrix(self, origin: [f32; 3]) -> [f32; 16] {
-        self.batch_matrix_f64([
-            f64::from(origin[0]),
-            f64::from(origin[1]),
-            f64::from(origin[2]),
-        ])
-    }
-
-    /// Per-batch matrix for an `f64` origin.
-    ///
-    /// The **Ortho** variant keeps the origin and the camera centre in `f64`
-    /// through the subtraction before narrowing — the precision contract fenced
-    /// by `large_coordinate_batch_keeps_precision`. The instanced line path
-    /// passes its stream's exact `f64` fixed-point origin here, so stream
-    /// positions stay small even at large drawing coordinates. The **Perspective**
-    /// variant narrows the origin to `f32` before `translate_left`, so this `f64`
-    /// camera-relative subtraction does not apply on the 3D path.
-    fn batch_matrix_f64(self, origin: [f64; 3]) -> [f32; 16] {
-        match self {
-            FrameProjection::Ortho {
-                sx,
-                sy,
-                center,
-                z_plane,
-            } => [
-                sx as f32,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                sy as f32,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                0.0,
-                (sx * (origin[0] - center[0])) as f32,
-                (sy * (origin[1] - center[1])) as f32,
-                (origin[2] - center[2]) as f32 + z_plane,
-                1.0,
-            ],
-            // Perspective narrows the origin to `f32` *before* applying the
-            // (already `f32`) view-projection, so the `f64` camera-relative
-            // subtraction claimed for the Ortho arm above does not apply here.
-            FrameProjection::Perspective { vp } => {
-                translate_left(&vp, [origin[0] as f32, origin[1] as f32, origin[2] as f32])
-            }
-        }
     }
 }
