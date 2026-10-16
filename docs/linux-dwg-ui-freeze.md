@@ -1,5 +1,10 @@
 # Linux 真实 DWG 打开后无响应排查（2026-10-04）
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 ## 最新一轮：加载响应与预算截断处理（2026-10-04）
 
 用户继续反馈 release 卡死、只显示一团小点/局部。本轮发现两个不同问题，不能混作一个：

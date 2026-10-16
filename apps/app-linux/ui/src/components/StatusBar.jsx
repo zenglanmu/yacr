@@ -1,0 +1,105 @@
+// Status bar: coordinate readout, drafting-aid toggles (only the ones this build
+// really has — unavailable aids stay visibly off), and the right-side utilities
+// including the real clean-screen / command-line view toggles.
+import React from 'react';
+import { Icon } from '../icons.jsx';
+import { useI18n, useShell } from '../context.mjs';
+import { commandById } from '../commands.mjs';
+import { importProgressView } from '../cad.mjs';
+
+const DRAFTING = ['GRID', 'SNAP', 'ORTHO', 'OSNAP'];
+
+function Toggle({ label, on, onClick, title, disabled }) {
+  return (
+    <button
+      type="button"
+      className={['status-toggle', on ? 'is-on' : '', disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
+      aria-pressed={Boolean(on)}
+      disabled={disabled}
+      title={title}
+      onClick={disabled ? undefined : onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
+export function StatusBar() {
+  const { t } = useI18n();
+  const shell = useShell();
+  const cursor = shell.cursor;
+  const coordinate = cursor ? `${cursor.x.toFixed(0)}, ${cursor.y.toFixed(0)}` : '\u2014, \u2014';
+  const progress = importProgressView(shell.importProgress, t);
+  // Announce only the phase here (rare changes); the steadily-incrementing
+  // count/bytes stay in the document-tab bar, so a polite live region never
+  // chatters on every tick.
+  const stateLabel = shell.error ? t('diagnostics.severity.error')
+    : shell.pollError ? t('diagnostics.severity.error')
+      : progress ? progress.phase
+        : shell.loading ? t('import.panel')
+          : shell.documentOpen ? t('status.ready') : t('plot.no_document');
+  return (
+    <div className="region region--status statusbar app-region" role="contentinfo">
+      <output
+        className="statusbar__coords"
+        title={t('status.coordinate_hint')}
+        aria-label={t('status.coordinates')}
+      >
+        <Icon name="snap" size={13} />
+        <span className="mono">{coordinate}</span>
+      </output>
+
+      <span className="statusbar__state" aria-live="polite">{stateLabel}</span>
+
+      <div className="statusbar__group" role="group" aria-label={t('status.drafting')}>
+        {DRAFTING.map(id => {
+          const command = commandById(id);
+          const name = t(command.labelKey);
+          return (
+            <Toggle
+              key={id}
+              label={name}
+              on={false}
+              disabled
+              title={t('status.toggle_unsupported', { name })}
+            />
+          );
+        })}
+      </div>
+
+      <span className="statusbar__spacer" />
+
+      {shell.errorText ? (
+        <span className="statusbar__error" role="alert" title={shell.errorText}>
+          <Icon name="alert" size={13} />
+          {shell.errorText}
+        </span>
+      ) : null}
+
+      <div className="statusbar__group statusbar__group--end">
+        <button type="button" className="statusbar__workspace" disabled title={t('status.workspace')}>
+          <Icon name="settings" size={13} />
+          {t('status.workspace')}
+        </button>
+        <Toggle
+          label={t('status.command_line')}
+          on={shell.commandLineOpen}
+          title={`${t('status.command_line')} (Ctrl+9)`}
+          onClick={() => shell.setCommandLineOpen(!shell.commandLineOpen)}
+        />
+        <Toggle
+          label={t('status.clean_screen')}
+          on={shell.cleanScreen}
+          title={`${t('status.clean_screen')} (Ctrl+0)`}
+          onClick={() => shell.setCleanScreen(!shell.cleanScreen)}
+        />
+        <Toggle
+          label={t('diagnostics.title')}
+          on={shell.diagnosticsOpen}
+          title={t('diagnostics.title')}
+          onClick={() => shell.setDiagnosticsOpen(!shell.diagnosticsOpen)}
+        />
+      </div>
+    </div>
+  );
+}

@@ -1,5 +1,10 @@
 # Windows 宿主（`yacr.exe`）
 
+> **已退役（2026-10-16）**：Windows GUI **未实现**。`apps/app-windows` 是显式 NOT IMPLEMENTED 失败
+> 桩（bin `yacr-windows`，无 Tauri 依赖，打印诊断并非零退出）；`scripts/package-windows-release.sh`
+> 非零失败；CI `windows-check` 只做编译。**没有可运行/可分发的 Windows GUI。** 当前桌面 UI 见
+> `docs/react-linux-app.md` 与 [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史。
+
 > 状态：**构建路径为 GitHub Actions `windows-latest` 原生 MSVC**（`windows-check` /
 > `windows-release`）；本机已用 `cargo xwin` 复现 MSVC release 与 MinGW 交叉，并用 Wine
 > 做参数解析 smoke。窗口、设备选择、原生文件对话框与真实 GPU 渲染 **未在真实 Windows 上

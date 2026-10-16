@@ -391,11 +391,21 @@ impl SurfaceProbePresenter {
     /// The caller must guarantee, for the entire lifetime of the returned
     /// presenter (until it is **fully dropped**):
     ///
-    /// - `display` and `window` are a **matched, live** pair for the same X
-    ///   server/window (the raw handles are not validated here);
-    /// - the native display and window outlive the presenter and are never
-    ///   unrealized, destroyed or given a new XID while it exists;
-    /// - **no other Vulkan presenter/surface uses the same drawable**;
+    /// - `display` and `window` are a **matched, live** pair identifying the
+    ///   same drawable. Two backends satisfy this: an **Xlib/Xcb** pair for the
+    ///   same X server/window, **or** a **Wayland** pair of the `wl_display` and
+    ///   the **app-owned** `wl_surface` presented through that display. The raw
+    ///   handles are not validated here, so a mismatched or stale pair is
+    ///   undefined behaviour;
+    /// - the native display and window stay alive and keep their identity until
+    ///   the presenter is dropped: they are never destroyed, unrealized,
+    ///   re-created or given a new XID, and no surface role/lifetime change
+    ///   (e.g. a Wayland surface re-role) happens while it exists;
+    /// - this presenter is the **single presentation owner** of that drawable:
+    ///   no other Vulkan presenter/surface writes to the same window, and for a
+    ///   Wayland `wl_surface` the surface is app-owned — it is **never** a
+    ///   GTK/GDK-owned surface that GDK itself attaches/commits to (no double
+    ///   writer against GDK's own composition);
     /// - construction, every `frame`/`resize`, and the final drop all happen on
     ///   the host's **main thread** (the same thread that owns the native
     ///   window), matching the safe path's semantics.

@@ -5,8 +5,9 @@
 //!
 //! All platform I/O is expressed through the `cad-platform` contracts
 //! ([`cad_platform::PlatformFiles`], [`cad_platform::ConfigStore`],
-//! [`cad_platform::SurfaceSource`]); this crate never imports `slint`, `wgpu`,
-//! `web-sys` or any Android type, and carries no `cfg` for a host platform.
+//! [`cad_platform::SurfaceSource`]); this crate never imports `wgpu`, a UI
+//! framework, `web-sys` or any Android type, and carries no `cfg` for a host
+//! platform.
 //!
 //! The database remains authoritative; application commands and host-owned file
 //! operations share one synchronous dispatch boundary.

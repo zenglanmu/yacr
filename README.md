@@ -3,34 +3,42 @@
 [English](README.md) | [中文](README.zh-CN.md)
 
 > **The project is still in an early development stage and has no shippable product yet.**
-> yacr is a CAD system written from scratch in Rust, targeting DWG/DXF drawings on desktop,
-> Android and the browser. Current capabilities are backed by **contract tests, synthetic
-> samples and actual runs on some hosts**; there is no real-device, real-GPU or real-drawing
-> visual acceptance, and no validated DWG compatibility. Do not treat it as a usable or
-> production CAD application.
+> yacr is a CAD system written from scratch in Rust, targeting DWG/DXF drawings. The desktop
+> UI was migrated from Slint to a **React + Tauri native host** (Linux first, 2026-10-16); the
+> Web/Android UIs and the Windows/macOS desktop hosts are currently **explicit NOT IMPLEMENTED
+> placeholders**. Current capabilities are backed by **contract tests, synthetic samples and
+> some host runs**; there is no real-device, real-GPU or real-drawing visual acceptance, and no
+> validated DWG compatibility. Do not treat it as a usable or production CAD application.
 >
-> **Scope change**: the user annotation feature was removed as a whole on 2026-10-05, and the
-> project now focuses on **viewing + measurement** (measurement F06 and DXF annotative scaling
-> are retained).
+> **Scope changes**: user annotations were removed on 2026-10-05 (viewing + measurement only);
+> on 2026-10-16 the desktop UI moved from Slint to React/Tauri and `cad-ui-slint` was deleted.
 
 ## What yacr is
 
 Drawing data and business logic only operate on the database, transactions and commands;
 rendering is a derived result of the database. One shared core (`cad-*` crates: domain model,
-database/transactions, geometry, semantic representation, scene, wgpu renderer, Slint UI) is
-reused by every platform host, so behavior stays consistent across platforms, can be tested in
-isolation, and is usable from a headless CLI and for plotting.
+database/transactions, geometry, semantic representation, scene, wgpu renderer) plus the
+platform-independent UI layer (`cad-ui-core`: wire protocol, layout, CAD session, shell state,
+i18n) is reused by the host, so behavior stays testable in isolation and usable from a headless
+CLI and for plotting.
 
-Foundation: DWG/DXF parsing uses **unmodified acadrust 0.6.3**, drawing uses **wgpu**, the UI
-uses **Slint**, and the core has no platform dependencies (it compiles to `wasm32`). The
-database (`cad-db`) is the single source of truth; UI and rendering are derived from it. See
-`docs/architecture.md` for the full boundaries.
+Foundation: DWG/DXF parsing uses **unmodified acadrust 0.6.3**, drawing uses **wgpu**
+(renderer-only: `cad-render-wgpu` is the only crate that depends on wgpu), and the desktop UI
+is a **React (Vite) chrome in a Tauri 2 WebView** composited over a **native GTK/wgpu CAD
+partition** (`apps/app-linux`, binary `yacr`). The database (`cad-db`) is the single source of
+truth; UI and rendering are derived from it. See `docs/architecture.md` for the full boundaries
+and [`docs/adr/0010-react-linux-host-replaces-slint.md`](docs/adr/0010-react-linux-host-replaces-slint.md)
+for the migration decision.
 
 ## What it can do today
 
-The capabilities below exist in code and are covered by contract/synthetic tests, with some
-hosts already run for real; **fidelity varies** — many entities are only approximate or still
-have gaps. Per-item status is in `docs/compatibility.md` and `docs/dxf-entity-coverage.md`.
+The capabilities below describe the **shared core / headless-CLI capability set** (covered by
+contract/synthetic tests, and historically run on the now-retired Slint hosts). They are **not**
+the current GUI scope: the current **React/Tauri desktop host wires only OPEN and FIT plus native
+navigation**, with every other control explicitly disabled, and the Windows/macOS/Android/Web
+hosts are **NOT IMPLEMENTED** placeholders. **Fidelity varies** — many entities are only
+approximate or still have gaps. Per-item status is in `docs/compatibility.md` and
+`docs/dxf-entity-coverage.md`.
 
 - **Open & parse**: local DWG / DXF (ASCII and binary), sharing one semantic/database
   conversion; asynchronous import with progress and cancellation.
@@ -50,29 +58,35 @@ have gaps. Per-item status is in `docs/compatibility.md` and `docs/dxf-entity-co
 - **ACIS solids (subset)**: 3DSOLID / BODY / REGION / SURFACE are parsed into a neutral B-rep
   and tessellated only for planes (with holes) / spheres / cylinders / tori / cones; everything
   else is explicitly marked unsupported.
-- **Fonts**: release packages ship a font directory; missing fonts fall back to a default
-  outline face.
+- **Fonts**: a bundled/configured font directory is resolved at runtime; missing fonts fall back
+  to a default outline face. (Release packaging is currently retired — see `docs/build.md`; this
+  describes available resources/configuration, not a distributable package.)
 - **Plot**: model/layout raster PNG (the CLI also has a pure-CPU SVG/PDF vector path); no
   vector print style tables (CTB).
 - **Large-drawing protection**: hard scene batch/vertex budgets; exceeding them **fails
   explicitly** instead of OOM.
 - **Proxy entities**: custom entities from vendors such as Tianzheng and TSSD are shown only
   from the public **proxy graphics cache records**; no cached geometry means no display.
-- **Cross-platform reuse**: one core + Slint UI, built for Linux/Windows/macOS desktop,
-  Android and Web.
+- **Cross-platform reuse**: one core + the `cad-ui-core` shared UI layer; the desktop host is
+  built for Linux only today, and the Windows/macOS/Android/Web hosts are explicit NOT
+  IMPLEMENTED placeholders (see below).
 
 ## Platforms and run status
 
 **Compiling is not run acceptance.** How far each target has actually run (evidence in
-`docs/validation*.md`):
+`docs/validation*.md`, which is historical for the retired Slint host):
 
 | Platform | Host | Actual status |
 |---|---|---|
-| **Linux desktop (primary)** | `apps/app-linux` (`yacr-linux`) | Default gate is debug compile + static checks; release GUI packaging and **offscreen rendering (software Vulkan / lavapipe)** have been run. Real window system and real-GPU pixel acceptance **NOT RUN**. |
-| **Windows desktop** | `apps/app-windows` (`yacr.exe`) | Reuses the shared desktop implementation; CI compiles natively with MSVC on `windows-latest` and packages a font-bundled zip; reproduced locally via GNU cross / MSVC plus a Wine argument-parsing smoke. Real Windows window/file-dialog/GPU **NOT RUN**. |
-| **macOS desktop** | `apps/app-macos` (`yacr-macos`) | Reuses the shared desktop implementation; CI builds on `macos-latest` and packages a universal (arm64+x86_64) `Yacr.app`. A Linux host cannot produce Mach-O, so real Mac / Metal GPU **NOT RUN**. |
-| **Android** | `apps/app-android` | The x86_64 release APK was installed, launched and rendered on a headless **emulator** (KVM + SwiftShader); canvas pan/fit verified by pixel diff. **Real device** and SAF file picking **NOT RUN**. |
-| **Web** | `apps/app-web` (`web-dist/`) | The wasm artifact runs in a real desktop browser on a real GPU (Playwright, headful by default) and was re-verified locally. Headless WebGL2/SwiftShader is an explicit `YACR_SOFTWARE_GPU=1` opt-in labeled SOFTWARE. CI `web-deploy` has actually published to Cloudflare Pages (example <https://yacr-examples.pages.dev>). Real WebGPU hardware adapters and the browser matrix **NOT RUN**. |
+| **Linux desktop (primary, current)** | `apps/app-linux` (`yacr`) | React/Tauri chrome + native GTK/wgpu CAD partition. **Only OPEN and FIT + native navigation are wired**; every other control is explicitly disabled with a reason. P6 final verification **executed (bounded)**; Gate P6 attempt2 **ACCEPT-WITH-FIXES** (doc qualification applied) and the observer found **no material visual defect** in captured frames — see [`docs/validation-react-linux-migration-2026-10-16.md`](docs/validation-react-linux-migration-2026-10-16.md). **Bounded local-Linux migration acceptance only** — not a full CAD product / cross-platform / vendor / golden / performance approval. |
+| **Windows desktop** | `apps/app-windows` (`yacr-windows`) | **NOT IMPLEMENTED** failure stub (no Tauri dependency, prints a diagnostic, exits non-zero). CI compiles it (`windows-check`) but there is no runnable GUI product. |
+| **macOS desktop** | `apps/app-macos` (`yacr-macos`) | **NOT IMPLEMENTED** failure stub. CI compiles it (`macos-check`); no runnable GUI product. |
+| **Android** | `apps/app-android` | **NOT IMPLEMENTED** placeholder (retired UI; the native entry aborts with a diagnostic). |
+| **Web** | `apps/app-web` | **NOT IMPLEMENTED** placeholder (retired UI; wasm entry points return an error). |
+| **Headless CLI** | `cad-cli-tools` | Kept: opens/plots headless through the shared application path. |
+
+> Historical Slint-host evidence (offscreen/software-Vulkan/emulator/browser runs) is retained in
+> `docs/validation*.md` **as history** and does **not** transfer to the React/Tauri host.
 
 ## Quick start
 
@@ -82,18 +96,24 @@ Toolchain 1.99.0 (`rust-toolchain.toml`), with `Cargo.lock` pinned; if `cargo` i
 ### Linux desktop (primary host)
 
 ```bash
-sudo apt-get install -y pkgconf libfontconfig-dev libfreetype-dev mesa-vulkan-drivers
-cargo build -p app-linux --bin yacr-linux --release --locked
-./target/release/yacr-linux                                  # launch (needs a desktop session)
-./target/release/yacr-linux --open /absolute/drawing.dwg      # open a drawing
-./target/release/yacr-linux --open /absolute/drawing.dxf --locale en
-bash scripts/run-real-gpu-e2e.sh                               # real-GPU acceptance (hardware Vulkan; use this when a GPU exists)
-bash scripts/check-linux-app.sh                              # windowless offscreen run check (real GPU by default; YACR_SOFTWARE_GPU=1 only for no-GPU envs)
+sudo apt-get install -y pkgconf libgtk-3-dev libwebkit2gtk-4.1-dev libwayland-dev \
+  libfontconfig-dev libfreetype-dev mesa-vulkan-drivers
+# Recommended launcher: does NOT force GDK_BACKEND (Auto prefers native Wayland; explicit
+# x11/wayland preserved), builds the Vite frontend, runs with custom-protocol
+bash scripts/run-react-linux.sh --open /absolute/drawing.dwg
 ```
 
-`--headless --output <new-dir>` plots offscreen through the same host/controller/Slint bridge;
-`--gpu auto|high|low` selects an adapter preference (dual-GPU defaults to the discrete GPU).
-Full options and limits are in `docs/linux-app.md`.
+Direct run (build the frontend first with `npm run build`). Native Wayland (real, not XWayland):
+
+```bash
+env -u DISPLAY -u XAUTHORITY GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-0 \
+    XDG_RUNTIME_DIR=/run/user/1000 ./target/release/yacr --open /absolute/drawing.dwg
+# explicit X11/XWayland alternative: GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open ...
+```
+
+Config lives in `~/.config/yacr/` (migrated from `~/.config/yacr-react/`, **no automatic
+transfer**). Backend policy, the native Wayland subsurface and full options/limits are in
+`docs/react-linux-app.md` and `docs/adr/0011-native-wayland-subsurface.md`.
 
 ### Headless CLI
 
@@ -108,28 +128,21 @@ plus a structured error. Operations and options are in `docs/cli.md`.
 
 ### Other platforms
 
-- Android (`cargo-apk`, not a Gradle project): `docs/build.md`, `docs/validation-android.md`.
-- Web (wasm + minimal JS host): `scripts/build-web.sh` produces `web-dist/`, served locally by
-  `scripts/serve-web.py`; see `docs/build.md`.
-- Windows / macOS packaging (CI `windows-release` / `macos-release`): `docs/windows-app.md`,
-  `docs/macos-app.md`.
-
-### Release packages
-
-CI (`.github/workflows/build.yml`), triggered by `workflow_dispatch` or a `v*` tag, produces
-font-bundled release packages for Linux (a `dev.yacr.app` Flatpak bundle), Windows, macOS and
-Android and uploads them as artifacts (per-platform packaging scripts are in `docs/build.md`).
-The outputs are CI artifacts; **no official distribution channel exists yet**.
+Windows/macOS/Android/Web are **NOT IMPLEMENTED** this round; their build/package/deploy scripts
+fail non-zero (retired) and the CI release jobs are hard-disabled. See `docs/build.md` and
+`docs/ci.md` for the honest current state — do not treat the retired scripts as working.
 
 ## Current status and boundaries (honest)
 
 - **There is no validated DWG compatibility, entity or platform.** `fixtures/manifest` holds
   synthetic fixtures plus one open-source QCAD `flange` sample (`Partial`); build evidence is
   not compatibility.
-- **Evidence boundaries**: static gates and contract/synthetic tests, software Vulkan
-  (lavapipe) offscreen rendering, a headless emulator, and headless/real browsers. Real-GPU
-  pixel matrices, real devices and real-drawing visual acceptance are **all NOT RUN** and must
-  not be generalized from the above.
+- **Evidence boundaries**: static gates and contract/synthetic tests, and the P6 executable evidence
+  (frontend tests, `--locked` compile/tests, and a hardware-Vulkan real-window smoke on the synthetic
+  fixture — `docs/validation-react-linux-migration-2026-10-16.md`; Gate P6 attempt2 **ACCEPT-WITH-FIXES**,
+  bounded local-Linux acceptance). Historical Slint-host runs remain historical. Real-GPU pixel matrices,
+  real devices, exact visual golden, performance and real-drawing acceptance are **not covered** and must
+  not be generalized.
 - **Explicitly unsupported / unimplemented** (no success is faked):
   - Vendor opcode records of proxy entities (public cache records only); no cached geometry
     means no display.
@@ -161,10 +174,12 @@ The outputs are CI artifacts; **no official distribution channel exists yet**.
 **Build & platforms**
 
 - Per-platform build: `docs/build.md`
-- Linux host: `docs/linux-app.md`; Windows host: `docs/windows-app.md`; macOS host: `docs/macos-app.md`
-- Linux Flatpak packaging: `docs/flatpak.md`
+- Linux desktop host (current): `docs/react-linux-app.md`
+- Authored/technical decisions: `docs/adr/` (ADR 0010 = React host replaces Slint)
 - Headless rendering: `docs/headless-render.md`; CI layers: `docs/ci.md`
 - CLI: `docs/cli.md`; fonts: `docs/fonts.md`; app icon: `docs/app-icon.md`
+- Retired (historical, kept with notices): `docs/linux-app.md`, `docs/windows-app.md`,
+  `docs/macos-app.md`, `docs/flatpak.md`, `docs/verify-ui.md`
 
 **Capabilities & topics**
 
@@ -179,11 +194,11 @@ The outputs are CI artifacts; **no official distribution channel exists yet**.
 
 **Reference & decisions**
 
-- OpenCADStudio functional-spec reference (not source): `docs/ui-requirements/00-INDEX.md`; historical survey: `docs/migration-map.md`
-- Decision records: `docs/adr/`
+- OpenCADStudio historical functional/interaction reference (before the 2026-10-15 close-out; no code was ever copied): survey kept in `docs/migration-map.md`; UI design now follows AutoCAD desktop conventions (`docs/react-linux-app.md`)
+- Decision records: `docs/adr/` — the desktop UI decision is **ADR 0010 (React host replaces Slint)**
 
 ## License and third parties
 
 This repository is released under **AGPL-3.0** (`LICENSE`). Sources and licenses of
-dependencies and bundled resources (acadrust, Slint/wgpu, QCAD samples, osifont, mlightcad
+dependencies and bundled resources (acadrust, wgpu/Tauri/GTK, QCAD samples, osifont, mlightcad
 fonts, etc.) are documented in `THIRD_PARTY_NOTICES.md` and `fonts/SOURCE.md`.

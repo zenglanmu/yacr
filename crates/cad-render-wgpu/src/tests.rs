@@ -65,6 +65,24 @@ fn upload_time_is_absent_before_any_upload() {
 }
 
 #[test]
+fn commit_timing_is_absent_before_any_commit_and_defaults_to_zero() {
+    let renderer = Renderer::default();
+    assert!(renderer.last_commit_timing().is_none());
+    let timing = crate::CommitTiming::default();
+    assert_eq!(timing.total_us, 0);
+    for stage in [
+        timing.rebase_us,
+        timing.append_us,
+        timing.gc_us,
+        timing.pulled_us,
+        timing.pick_us,
+        timing.lineweight_us,
+    ] {
+        assert_eq!(stage, 0);
+    }
+}
+
+#[test]
 fn render_before_init_is_not_a_device_loss() {
     let mut renderer = Renderer::default();
     let target = RenderTarget::new(64, 64);

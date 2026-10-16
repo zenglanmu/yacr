@@ -1,141 +1,75 @@
 #!/usr/bin/env python3
-"""Static + mutation contracts for the Linux Flatpak packaging.
+"""Retirement contracts for the Linux release packaging.
 
-The packaging script is a heavy, host-specific release build (it links the Slint
-GUI, assembles the font catalogue and runs flatpak-builder), so it is not run in
-this checker. Instead this guard rail asserts the packaging keeps its guarantees:
-
-  * scripts/package-linux-release.sh builds and stages *both* the headless CLI
-    and the GUI host, then emits a single-file Flatpak bundle;
-  * the Flatpak manifest packages the prebuilt binaries under /app, points at the
-    freedesktop runtime/sdk, and keeps the GPU/display finish-args;
-  * the desktop entry, AppStream metainfo and icons all use the manifest app-id;
-  * the script never falls back to the old tarball.
-
-Each guarantee is deleted in turn and the checker must report it, so the contract
-cannot silently degrade into an empty success. This checks text only; it is not
-evidence that a bundle was built, installed or that its GUI renders.
+The old Flatpak pipeline built the retired Slint ``yacr-linux`` headless host.
+It is disabled pending a validated replacement: ``scripts/package-linux-release.sh``
+now fails with ``NOT IMPLEMENTED`` and the Flatpak manifest/desktop/metainfo under
+``packaging/flatpak`` are retired, so the release path cannot invent an untested
+distributable. Each guarantee is removed in turn and the checker must report it,
+so the retirement cannot silently degrade into a published stub. Text only; it is
+not evidence that any package was (or can be) built.
 """
 from __future__ import annotations
 
 import pathlib
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts/package-linux-release.sh"
-MANIFEST = ROOT / "packaging/flatpak/dev.yacr.app.yml"
-DESKTOP = ROOT / "packaging/flatpak/dev.yacr.app.desktop"
-METAINFO = ROOT / "packaging/flatpak/dev.yacr.app.metainfo.xml"
+FLATPAK_DIR = ROOT / "packaging/flatpak"
 
-APP_ID = "dev.yacr.app"
-
-# (human label, fragment that must appear in the packaging script).
-SCRIPT_FRAGMENTS: tuple[tuple[str, str], ...] = (
-    ("headless CLI build", "cargo build --release --offline --locked -p cad-cli-tools"),
-    ("GUI host build", "cargo build --release --offline --locked -p app-linux --bin yacr-linux"),
-    ("stage CLI binary", 'cp "$BIN" "$PAYLOAD/bin/cad-cli-tools"'),
-    ("stage GUI binary", 'cp "$GUI" "$PAYLOAD/bin/yacr-linux"'),
-    ("assemble CAD fonts", '"$ROOT/scripts/fetch-fonts.sh" "$PAYLOAD/fonts"'),
-    ("prepared font dir override", 'FONTS_DIR must contain fonts.json'),
-    ("copy prepared fonts", 'cp -R "$FONTS_DIR"/. "$PAYLOAD/fonts/"'),
-    ("verify GUI loads", "--headless requires --output NEW_DIRECTORY"),
-    ("refuse unresolved libraries", "grep -q 'not found'"),
-    ("flatpak-builder required", "flatpak-builder not found"),
-    ("flatpak-builder invocation", '--repo="$REPO"'),
-    ("single-file bundle", 'flatpak build-bundle "$REPO" "$BUNDLE" "$APP_ID"'),
-    ("app id", f'APP_ID="{APP_ID}"'),
-    ("committed manifest path", 'MANIFEST="packaging/flatpak/dev.yacr.app.yml"'),
-    ("optional DWG smoke", "YACR_TEST_DWG"),
-    ("optional sandbox smoke", "YACR_FLATPAK_SMOKE"),
-    ("flatpak artifact", 'BUNDLE="${DIST}/${NAME}.flatpak"'),
-)
-
-# (human label, fragment that must appear in the Flatpak manifest).
-MANIFEST_FRAGMENTS: tuple[tuple[str, str], ...] = (
-    ("app id", f"app-id: {APP_ID}"),
-    ("runtime", "runtime: org.freedesktop.Platform"),
-    ("runtime version", "runtime-version: '26.08'"),
-    ("sdk", "sdk: org.freedesktop.Sdk"),
-    ("command", "command: yacr-linux"),
-    ("ipc share", "--share=ipc"),
-    ("wayland socket", "--socket=wayland"),
-    ("x11 fallback socket", "--socket=fallback-x11"),
-    ("dri device", "--device=dri"),
-    ("home filesystem", "--filesystem=home"),
-    ("install GUI", "install -Dm755 bin/yacr-linux /app/bin/yacr-linux"),
-    ("install CLI", "install -Dm755 bin/cad-cli-tools /app/bin/cad-cli-tools"),
-    ("install fonts", "- cp -a fonts/. /app/fonts/"),
-    ("install desktop", f"/app/share/applications/{APP_ID}.desktop"),
-    ("install metainfo", f"/app/share/metainfo/{APP_ID}.metainfo.xml"),
-    ("install scalable icon", f"/app/share/icons/hicolor/scalable/apps/{APP_ID}.svg"),
-    ("install png icon", f"/app/share/icons/hicolor/256x256/apps/{APP_ID}.png"),
-    ("prebuilt payload source", "path: ../../target/flatpak/payload"),
+# Live packaging/publish signatures that must NOT remain in a retired script.
+FORBIDDEN_FRAGMENTS: tuple[tuple[str, str], ...] = (
+    ("flatpak-builder invocation", "flatpak-builder"),
+    ("single-file bundle", "flatpak build-bundle"),
+    ("release cargo build", "cargo build --release"),
+    ("retired Slint GUI binary", "yacr-linux"),
+    ("font catalogue assembly", "fetch-fonts.sh"),
 )
 
 
-def check_script(text: str) -> list[str]:
-    """Return one problem string per missing packaging guarantee."""
-    problems = [
-        f"missing {label}: {fragment!r}"
-        for label, fragment in SCRIPT_FRAGMENTS
-        if fragment not in text
-    ]
-    if ".tar.gz" in text:
-        problems.append("script still references a .tar.gz artifact")
+def check_retired_script(text: str) -> list[str]:
+    problems: list[str] = []
+    if "NOT IMPLEMENTED" not in text:
+        problems.append("missing the NOT IMPLEMENTED diagnostic")
+    if not re.search(r"^exit 1\s*$", text, re.MULTILINE):
+        problems.append("must exit non-zero ('exit 1')")
+    for label, fragment in FORBIDDEN_FRAGMENTS:
+        if fragment in text:
+            problems.append(f"still contains live packaging path {label}: {fragment!r}")
     return problems
 
 
-def check_manifest(text: str) -> list[str]:
-    return [
-        f"missing {label}: {fragment!r}"
-        for label, fragment in MANIFEST_FRAGMENTS
-        if fragment not in text
-    ]
-
-
-class PackageLinuxFlatpakContracts(unittest.TestCase):
+class PackageLinuxReleaseRetiredContracts(unittest.TestCase):
     def setUp(self) -> None:
         self.script = SCRIPT.read_text(encoding="utf-8")
-        self.manifest = MANIFEST.read_text(encoding="utf-8")
-        self.desktop = DESKTOP.read_text(encoding="utf-8")
-        self.metainfo = METAINFO.read_text(encoding="utf-8")
 
-    def test_script_satisfies_every_guarantee(self) -> None:
-        self.assertEqual(check_script(self.script), [])
+    def test_script_is_an_explicit_not_implemented_failure(self) -> None:
+        self.assertEqual(check_retired_script(self.script), [])
 
-    def test_each_script_guarantee_is_required(self) -> None:
-        for label, fragment in SCRIPT_FRAGMENTS:
-            with self.subTest(guarantee=label):
-                mutated = self.script.replace(fragment, "")
+    def test_not_implemented_diagnostic_is_required(self) -> None:
+        mutated = self.script.replace("NOT IMPLEMENTED", "")
+        self.assertNotEqual(check_retired_script(mutated), [])
+
+    def test_nonzero_exit_is_required(self) -> None:
+        mutated = self.script.replace("exit 1", "exit 0")
+        problems = check_retired_script(mutated)
+        self.assertTrue(any("non-zero" in problem for problem in problems))
+
+    def test_each_forbidden_live_path_is_required_for_retirement(self) -> None:
+        for label, fragment in FORBIDDEN_FRAGMENTS:
+            with self.subTest(fragment=label):
+                mutated = self.script + f"\n# {fragment}\n{fragment}\n"
                 self.assertNotEqual(
-                    check_script(mutated), [], f"mutation not detected: {label}"
+                    check_retired_script(mutated), [],
+                    f"mutation not detected: {label}",
                 )
 
-    def test_gui_binary_cannot_be_dropped_silently(self) -> None:
-        mutated = self.script.replace('cp "$GUI" "$PAYLOAD/bin/yacr-linux"', "")
-        problems = check_script(mutated)
-        self.assertTrue(problems)
-        self.assertTrue(any("GUI" in problem for problem in problems))
-
-    def test_tarball_cannot_creep_back(self) -> None:
-        mutated = self.script + '\ntar -C "$DIST" -czf x.tar.gz "$NAME"\n'
-        self.assertTrue(any(".tar.gz" in p for p in check_script(mutated)))
-
-    def test_manifest_satisfies_every_guarantee(self) -> None:
-        self.assertEqual(check_manifest(self.manifest), [])
-
-    def test_each_manifest_guarantee_is_required(self) -> None:
-        for label, fragment in MANIFEST_FRAGMENTS:
-            with self.subTest(guarantee=label):
-                mutated = self.manifest.replace(fragment, "")
-                self.assertNotEqual(
-                    check_manifest(mutated), [], f"mutation not detected: {label}"
-                )
-
-    def test_desktop_and_metainfo_use_the_manifest_app_id(self) -> None:
-        self.assertIn(f"Icon={APP_ID}", self.desktop)
-        self.assertIn(f"<id>{APP_ID}</id>", self.metainfo)
-        self.assertIn(f"<launchable type=\"desktop-id\">{APP_ID}.desktop</launchable>", self.metainfo)
+    def test_flatpak_packaging_is_retired(self) -> None:
+        # The manifest + desktop + metainfo are gone; keeping any of them would
+        # claim a distributable that is not built or validated.
+        self.assertFalse(FLATPAK_DIR.exists(), "packaging/flatpak must be retired")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,10 @@
 # 应用图标（App icon）
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 单一来源：**`assets/yacr-icon.svg`**（仓库根 `assets/`，用户提供的 YACR “Y” 蓝图图标，
 自包含，无外部引用）。所有平台派生资产都由它生成，不得各自维护副本。
 

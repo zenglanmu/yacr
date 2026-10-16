@@ -49,7 +49,7 @@ pub enum DrawToolKind {
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
-    /// authoritative ordering; the Slint shell mirrors it instead of keeping a
+    /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
     pub const ALL: [DrawToolKind; 11] = [
         DrawToolKind::Line,
@@ -197,7 +197,7 @@ impl DrawPreview {
 
     /// One-line, locale-facing capture step for the tool panel.
     ///
-    /// Kept in `cad-app` so the Slint layer never re-implements the state
+    /// Kept in `cad-app` so the UI layer never re-implements the state
     /// machine's counting rules.
     pub fn status_line(&self) -> String {
         if self.kind.requires_selection() && self.selection_count == 0 {

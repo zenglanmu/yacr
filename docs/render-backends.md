@@ -1,5 +1,10 @@
 # 渲染后端契约
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 ## 2026-10-03 共享设备诊断修正
 
 `BackendCapabilities.actual` 与新增 `api` 来自共享设备的 `adapter_info().backend`，不来自

@@ -1,33 +1,36 @@
 name: CI build layers
 
-# N02 §6.2 build/validation layers that need extra toolchains beyond core.yml.
+# Layered CI mirroring the repository's real gate. After the UI replacement the
+# desktop host is React/Tauri, the Slint crate is gone and the Android/Web/
+# Windows/macOS UIs are explicit NOT IMPLEMENTED placeholders.
 #
-# Real jobs (run on GitHub-hosted runners):
-#   linux-app        : debug host compilation (no offscreen rendering)
-#   windows-check    : native MSVC debug host compilation (windows-latest)
-#   macos-check      : native macOS debug host compilation (macos-latest)
-#   web-build        : scripts/build-web.sh -> web-dist artifact + wasm/js pairing
+# Real (genuine) jobs:
+#   linux-app        : debug host compilation of the Tauri `app-linux` host
+#                      (frontend built first; no offscreen rendering)
+#   windows-check    : native MSVC debug compilation of the NOT IMPLEMENTED
+#                      `app-windows` placeholder (windows-latest)
+#   macos-check      : native macOS debug compilation of the NOT IMPLEMENTED
+#                      `app-macos` placeholder (macos-latest)
 #   shader-validation: offline naga WGSL test (no GPU needed; forced to fail on
 #                      a broken shader)
 #
-# Capability-gated jobs (reported SKIPPED, never green, until a maintainer
-# provisions the runner / variable):
-#   android-apk  : scripts/build-android.sh -> APK artifact + real manifest facts
-#   web-smoke    : scripts/check-web-ui.mjs under Playwright with an explicit
-#                  YACR_SOFTWARE_GPU=1 software-labelled smoke (no GPU runner)
-#   web-deploy   : publish the verified web-dist artifact to Cloudflare Pages
-#                  on release (workflow_dispatch or a v* tag); requires the
-#                  CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets
+# Retired platform build/deploy/release jobs — kept *declared* so the capability
+# gap stays visible, but hard-disabled with an unconditional `if: false` and a
+# `RETIRED` marker. They never carry a mutable `vars.…` switch or a `secrets.…`
+# publish path, so a stub can never be built, signed or published:
+#   linux-release   : was the Flatpak bundle (retired pending replacement packaging)
+#   windows-release : was the MSVC release zip
+#   macos-release   : was the universal Yacr.app tarball
+#   android-apk     : was the cargo-apk build (Android UI retired)
+#   android-release : was the release APK with fonts
+#   web-build       : was scripts/build-web.sh -> web-dist
+#   web-deploy      : was the Cloudflare Pages publish
+#   web-smoke       : was the Playwright smoke over web-dist
 #
-# On-demand release jobs (workflow_dispatch or a v* tag):
-#   linux-release   : Linux GUI+CLI Flatpak bundle with fonts (ubuntu-latest)
-#   windows-release : native MSVC release zip (windows-latest)
-#   macos-release   : native macOS universal tar.gz with an Yacr.app bundle
-#                     (macos-latest)
-#   android-release : capability-gated APK with fonts (see ANDROID_CI_ENABLED)
+# The public entry points for the retired paths fail with NOT IMPLEMENTED:
+#   scripts/{build-web,deploy-cloudflare-pages,build-android,
+#             package-linux-release,package-windows-release,package-macos-release}.sh
 #
-# Anything that genuinely needs a real device / real GPU is modelled as a skipped
-# job with an explicit not-run summary and documented in docs/ci.md "NOT RUN".
 # No job sets `continue-on-error`, so a green check is a real pass.
 
 on:
@@ -44,17 +47,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Pinned tool versions. Keep in lock-step with docs/build.md and Cargo.lock;
-  # each job re-verifies the pin at runtime and fails loudly on drift.
-  WASM_BINDGEN_VERSION: "0.2.129"     # == wasm-bindgen crate in Cargo.lock
-  CARGO_APK_VERSION: "0.10.0"         # docs/build.md
-  ANDROID_NDK_VERSION: "27.0.12077973" # docs/build.md
-  ANDROID_BUILD_TOOLS: "34.0.0"        # docs/build.md
-  ANDROID_PLATFORM: "android-34"        # docs/build.md
-  ANDROID_TARGET_SDK: "30"             # REQUIRED, must match aapt2 manifest facts
-  ANDROID_ABI: "arm64-v8a"             # aarch64-linux-android only (build_targets metadata includes armv7/x86_64 but cargo-apk builds the --target ABI)
-  NODE_VERSION: "22.22.1"              # pinned Node major/minor
-  PLAYWRIGHT_VERSION: "1.55.1"        # pinned Playwright npm package
+  NODE_VERSION: "22.22.1"              # pinned Node major/minor (React frontend build)
 
 jobs:
   linux-app:
@@ -64,6 +57,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - name: Cache Linux debug check
         uses: actions/cache@v4
         with:
@@ -74,8 +70,22 @@ jobs:
           key: ${{ runner.os }}-cargo-linux-app-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-linux-app-
-      - name: Install native Slint dependencies (no display server)
-        run: sudo apt-get update && sudo apt-get install -y pkgconf libfontconfig1-dev libfreetype6-dev
+      - name: Install Linux host build dependencies (GTK3 / WebKitGTK4.1 / Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkgconf libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - name: Test and build the React frontend (apps/app-linux/ui)
+        # The frontend's own node:test suite runs first so the native compile gate
+        # also exercises the React logic; `tauri::generate_context!` embeds
+        # `apps/app-linux/ui/dist` at compile time, so the Vite bundle must exist
+        # before the Rust host is checked.
+        working-directory: apps/app-linux/ui
+        run: |
+          npm ci
+          npm test
+          npm run build
       - name: Linux host debug compilation
         env:
           CARGO_BUILD_JOBS: "2"
@@ -85,8 +95,8 @@ jobs:
           git diff --exit-code -- Cargo.lock
           {
             echo '## Linux App debug compilation'
-            echo 'Host and contract test code compiled; tests were not executed.'
-            echo 'Offscreen rendering and release compilation are not default gates.'
+            echo 'The React/Tauri host and its contract test code compiled; tests were not executed.'
+            echo 'Window/GPU rendering and release compilation are not default gates.'
             echo 'This is not runtime, visual, desktop-window or real-GPU acceptance.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Linux compilation log (including failed runs)
@@ -122,7 +132,7 @@ jobs:
           cargo check -p app-windows --all-targets --locked 2>&1 | tee windows-check.log
           {
             echo '## Windows host debug compilation (MSVC)'
-            echo 'Host and contract test code compiled for the MSVC host; nothing was executed.'
+            echo 'The NOT IMPLEMENTED `app-windows` placeholder compiled for the MSVC host; nothing was executed.'
             echo 'This is not a real-Windows, real-GPU or native-file-dialog acceptance.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Windows compilation log (including failed runs)
@@ -133,54 +143,6 @@ jobs:
           path: windows-check.log
           if-no-files-found: warn
           retention-days: 14
-
-  windows-release:
-    name: windows-release (MSVC release zip)
-    runs-on: windows-latest
-    timeout-minutes: 90
-    # On-demand (or a version tag): builds the release package on a real Windows
-    # MSVC runner and uploads the zip. Not run on every PR to keep the default
-    # gate cheap; the compile gate is `windows-check`.
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.99.0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Cache Windows release build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-windows-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-windows-release-
-      - name: Build and package the Windows release (full font catalogue)
-        shell: bash
-        env:
-          WITH_FONTS: "1"
-        run: bash scripts/package-windows-release.sh
-      - name: Record packaging summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo '## Windows release package (MSVC)'
-            echo 'Built and packaged on windows-latest; the MSVC CRT is linked statically.'
-            echo 'Window/GPU/native-dialog behaviour is not exercised by this job.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload the Windows release zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: yacr-windows-release
-          path: |
-            target/x86_64-pc-windows-msvc/release/dist/*.zip
-            target/x86_64-pc-windows-msvc/release/dist/*.zip.sha256
-          if-no-files-found: error
-          retention-days: 30
 
   macos-check:
     name: macos-check (native macOS debug compile)
@@ -206,7 +168,7 @@ jobs:
           cargo check -p app-macos --all-targets --locked 2>&1 | tee macos-check.log
           {
             echo '## macOS host debug compilation'
-            echo 'Host and contract test code compiled for the arm64 macOS host; nothing was executed.'
+            echo 'The NOT IMPLEMENTED `app-macos` placeholder compiled for the arm64 macOS host; nothing was executed.'
             echo 'This is not a real-Mac window, Metal-GPU or native-dialog acceptance.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload macOS compilation log (including failed runs)
@@ -217,282 +179,6 @@ jobs:
           path: macos-check.log
           if-no-files-found: warn
           retention-days: 14
-
-  macos-release:
-    name: macos-release (universal tar.gz with Yacr.app)
-    runs-on: macos-latest
-    timeout-minutes: 120
-    # On-demand (or a version tag): builds the release package on a real macOS
-    # runner and uploads the tarball. Not run on every PR to keep the default
-    # gate cheap; the compile gate is `macos-check`.
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Cache macOS release build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-macos-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-macos-release-
-      - name: Build and package the macOS release (universal, full font catalogue)
-        shell: bash
-        env:
-          WITH_FONTS: "1"
-          MACOS_ARCH: universal
-        run: bash scripts/package-macos-release.sh
-      - name: Record packaging summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo '## macOS release package (universal)'
-            echo 'Built and packaged on macos-latest; Mach-O dependencies are checked to be system-only.'
-            echo 'Window/Metal-GPU/native-dialog behaviour is not exercised by this job.'
-            echo 'The bundle is unsigned and not notarized (see docs/macos-app.md).'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload the macOS release tarball
-        uses: actions/upload-artifact@v4
-        with:
-          name: yacr-macos-release
-          path: |
-            target/macos/universal/dist/*.tar.gz
-            target/macos/universal/dist/*.tar.gz.sha256
-          if-no-files-found: error
-          retention-days: 30
-
-  linux-release:
-    name: linux-release (Flatpak with fonts)
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    # On-demand (or a version tag): builds the release package and uploads the
-    # Flatpak bundle. Not run on every PR to keep the default gate cheap; the
-    # compile gate is `linux-app` and the core gate is `core-quality`.
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.99.0
-      - name: Cache Linux release build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-linux-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-linux-release-
-      - name: Install native Slint build deps and flatpak-builder
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkgconf libfontconfig1-dev libfreetype6-dev flatpak flatpak-builder
-      # The manifest packages prebuilt binaries against org.freedesktop.Platform
-      # 26.08 (glibc 2.44, newer than the runner's, so the host build loads).
-      - name: Install the freedesktop runtime and SDK
-        run: |
-          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y --noninteractive flathub \
-            org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
-      # package-linux-release.sh builds with `--offline` so the lock cannot be
-      # silently re-resolved; prefetch the crates first so a cache miss still
-      # succeeds instead of failing the release build.
-      - name: Prefetch crates for the offline release build
-        run: cargo fetch --locked
-      - name: Build and package the Linux Flatpak (full font catalogue)
-        env:
-          WITH_FONTS: "1"
-          YACR_FLATPAK_SMOKE: "1"
-        run: scripts/package-linux-release.sh
-      - name: Record packaging summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo '## Linux release Flatpak'
-            echo 'Built dev.yacr.app on ubuntu-latest with the full CAD font catalogue.'
-            echo 'Sandbox launch of cad-cli-tools --help is exercised; window/GPU rendering is not.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload the Linux release Flatpak
-        uses: actions/upload-artifact@v4
-        with:
-          name: yacr-linux-release
-          path: |
-            target/release/dist/*.flatpak
-            target/release/dist/*.flatpak.sha256
-          if-no-files-found: error
-          retention-days: 30
-
-  web-host-contracts:
-    name: web-host-contracts
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Browser host module contracts (no wasm/GPU)
-        run: node --test scripts/test-web-host.mjs scripts/test-web-touch.mjs scripts/test-web-a11y.mjs scripts/test-web-pixels.mjs scripts/test-web-responsive.mjs scripts/test-host-panel-parity.mjs scripts/test-web-icon.mjs
-
-  web-build:
-    name: web-build
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Cache cargo (registry / git / target)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-web-build-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-web-build-
-
-      - name: Verify wasm-bindgen-cli pin matches Cargo.lock (fail loudly)
-        run: |
-          set -euo pipefail
-          LOCKED="$(python3 - <<'PY'
-          import re, pathlib
-          text = pathlib.Path("Cargo.lock").read_text()
-          # First wasm-bindgen package block is the crate itself.
-          m = re.search(r'name = "wasm-bindgen"\nversion = "([^"]+)"', text)
-          assert m, "wasm-bindgen crate not found in Cargo.lock"
-          print(m.group(1))
-          PY
-          )"
-          echo "Cargo.lock wasm-bindgen = $LOCKED ; pinned cli = $WASM_BINDGEN_VERSION"
-          if [ "$LOCKED" != "$WASM_BINDGEN_VERSION" ]; then
-            echo "::error::wasm-bindgen-cli pin $WASM_BINDGEN_VERSION != Cargo.lock $LOCKED" >&2
-            echo "Update the pin in .github/workflows/build.yml and docs/build.md together." >&2
-            exit 1
-          fi
-          # Install exactly the pinned cli; fail if that version is unavailable.
-          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked
-          HAVE="$(wasm-bindgen --version | awk '{print $2}')"
-          echo "installed wasm-bindgen $HAVE"
-          if [ "$HAVE" != "$WASM_BINDGEN_VERSION" ]; then
-            echo "::error::wasm-bindgen $HAVE != pinned $WASM_BINDGEN_VERSION" >&2
-            exit 1
-          fi
-
-      - name: Build web-dist (scripts/build-web.sh)
-        env:
-          DIST: ${{ github.workspace }}/web-dist
-          PROFILE: release
-        run: scripts/build-web.sh
-
-      - name: Fail if Cargo.lock was rewritten
-        run: |
-          set -euo pipefail
-          if ! git diff --quiet -- Cargo.lock; then
-            echo "::error::Cargo.lock changed during the build; builds must not rewrite the lock file" >&2
-            git diff -- Cargo.lock
-            exit 1
-          fi
-          echo "Cargo.lock unchanged"
-
-      - name: Verify wasm/js pairing and static entry points
-        run: |
-          set -euo pipefail
-          test -s web-dist/index.html
-          test -s web-dist/main.js
-          test -s web-dist/style.css
-          test -s web-dist/pkg/yacr.js
-          test -s web-dist/pkg/yacr_bg.wasm
-          for module in files i18n renderer runtime startup; do
-            test -s "web-dist/host/$module.js"
-          done
-          test -s web-dist/ui-font/YacrUI-Regular.otf
-          test -s web-dist/ui-font/OFL.txt
-          # wasm-bindgen emits a wasm import name that must match the JS glue's
-          # expected module; mismatch is the classic silent break. Check the JS
-          # names the same basename the glue file uses.
-          grep -q "yacr_bg.wasm" web-dist/pkg/yacr.js
-          WASM_BYTES=$(stat -c %s web-dist/pkg/yacr_bg.wasm)
-          echo "web-dist/pkg/yacr_bg.wasm = ${WASM_BYTES} bytes"
-          {
-            echo "## web-build"
-            echo ""
-            echo "- profile: ${PROFILE:-release}"
-            echo "- index.html / main.js / style.css present"
-            echo "- pkg/yacr.js + pkg/yacr_bg.wasm paired"
-            echo "- yacr_bg.wasm bytes: ${WASM_BYTES}"
-            echo "- wasm-bindgen-cli: ${WASM_BINDGEN_VERSION} (matched Cargo.lock)"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload web-dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-dist
-          path: web-dist/
-          retention-days: 14
-
-  web-deploy:
-    name: web-deploy (Cloudflare Pages)
-    # Production publish of the verified web bundle, triggered on release like
-    # the other *-release jobs (workflow_dispatch or a v* tag). It reuses the
-    # web-build artifact (SKIP_BUILD=1): what is published is exactly what the
-    # web-build job verified, not a second unverified rebuild. The deploy step
-    # fails loudly if the CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets
-    # are missing, so it can never silently pass. PRs/forks cannot trigger a
-    # workflow_dispatch and do not create tags, so they never see the secrets.
-    # See docs/ci.md ("web-deploy") for the deploy script and prerequisites.
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    needs: web-build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Download the verified web-dist artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: web-dist
-
-      - name: Deploy web-dist to Cloudflare Pages
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CF_PAGES_PROJECT: yacr-examples
-          CF_PAGES_BRANCH: main
-          DIST: ${{ github.workspace }}/web-dist
-          # Deploy the artifact as-is; do not rebuild an unverified bundle.
-          SKIP_BUILD: "1"
-        run: |
-          set -euo pipefail
-          : "${CLOUDFLARE_API_TOKEN:?set the CLOUDFLARE_API_TOKEN repository secret}"
-          : "${CLOUDFLARE_ACCOUNT_ID:?set the CLOUDFLARE_ACCOUNT_ID repository secret}"
-          scripts/deploy-cloudflare-pages.sh
-          {
-            echo "## web-deploy (Cloudflare Pages)"
-            echo ""
-            echo "- project: ${CF_PAGES_PROJECT} (branch ${CF_PAGES_BRANCH})"
-            echo "- source: web-build artifact, deployed with SKIP_BUILD=1 (no rebuild)"
-            echo "- URL: https://${CF_PAGES_PROJECT}.pages.dev/"
-          } >> "$GITHUB_STEP_SUMMARY"
 
   shader-validation:
     name: shader-validation
@@ -520,338 +206,109 @@ jobs:
       - name: WGSL naga validation (offline, no GPU)
         run: cargo test -p cad-render-wgpu --test wgsl_validation --locked
 
-  android-apk:
-    name: android-apk
-    # Capability-gated. Needs the pinned JDK 17 + Android SDK build-tools 34.0.0
-    # + NDK 27.0.12077973; GitHub-hosted runners do not ship these. When the
-    # variable is unset the job is SKIPPED (never a pass). See docs/ci.md.
-    if: ${{ vars.ANDROID_CI_ENABLED == 'true' }}
-    runs-on: ${{ vars.ANDROID_RUNNER_LABEL || 'ubuntu-latest' }}
-    timeout-minutes: 90
+  # --- Retired platform build/deploy/release jobs ---------------------------
+  # Each is declared (so the gap is visible) but hard-disabled with an
+  # unconditional `if: false`. Deliberately NOT a mutable `vars.…` switch: a repo
+  # variable could accidentally re-enable a stub publish. See scripts/check-workflows.py.
+
+  linux-release:
+    name: linux-release (RETIRED — packaging NOT IMPLEMENTED)
+    # RETIRED (P3b): the old Flatpak pipeline built the retired Slint headless
+    # host. Linux release packaging is disabled pending a validated replacement
+    # (scripts/package-linux-release.sh exits non-zero with NOT IMPLEMENTED).
+    if: false
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          targets: aarch64-linux-android
-
-      - name: Cache cargo (registry / git / target)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-android-apk-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-android-apk-
-
-      - name: Require pinned Android toolchain (fail loudly when absent)
+      - name: Retired — no Linux package is built or uploaded
         run: |
-          set -euo pipefail
-          : "${ANDROID_HOME:?ANDROID_HOME is not set: provision the runner per docs/build.md}"
-          : "${JAVA_HOME:?JAVA_HOME (JDK 17) is not set: provision the runner per docs/build.md}"
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "JAVA_HOME=$JAVA_HOME"
-          JAVA_MAJOR="$("$JAVA_HOME/bin/java" -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1)"
-          echo "JDK major = $JAVA_MAJOR (required 17)"
-          [ "$JAVA_MAJOR" = "17" ] || { echo "::error::JDK $JAVA_MAJOR != required 17" >&2; exit 1; }
-          NDK="$ANDROID_NDK_HOME"
-          echo "ANDROID_NDK_HOME=$NDK"
-          [ -d "$NDK" ] || { echo "::error::NDK $NDK_MISSING not found; required $ANDROID_NDK_VERSION (docs/build.md)" >&2; exit 1; }
-          BT="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
-          [ -x "$BT/aapt2" ] || { echo "::error::aapt2 not found at $BT; required build-tools $ANDROID_BUILD_TOOLS" >&2; exit 1; }
-          echo "aapt2 = $BT/aapt2"
+          echo "RETIRED: linux-release is NOT IMPLEMENTED; nothing is built."
+          exit 1
 
-      - name: Install pinned cargo-apk
+  windows-release:
+    name: windows-release (RETIRED — Windows GUI NOT IMPLEMENTED)
+    # RETIRED (P3b): `apps/app-windows` is a NOT IMPLEMENTED stub; there is no
+    # GUI to package (scripts/package-windows-release.sh exits non-zero).
+    if: false
+    runs-on: windows-latest
+    steps:
+      - name: Retired — no Windows package is built or uploaded
+        shell: bash
         run: |
-          set -euo pipefail
-          cargo install cargo-apk --version "$CARGO_APK_VERSION" --locked
-          command -v cargo-apk >/dev/null
+          echo "RETIRED: windows-release is NOT IMPLEMENTED; nothing is built."
+          exit 1
 
-      - name: Build signed release debug APK (scripts/build-android.sh)
-        # The script defaults ANDROID_NDK_HOME to $ANDROID_HOME/ndk/27.0.12077973
-        # and runs its target checks with --locked. `cargo apk` has no --locked
-        # flag, so lock integrity is asserted explicitly below.
-        run: scripts/build-android.sh --release
-
-      - name: Fail if Cargo.lock was rewritten
+  macos-release:
+    name: macos-release (RETIRED — macOS GUI NOT IMPLEMENTED)
+    # RETIRED (P3b): `apps/app-macos` is a NOT IMPLEMENTED stub; there is no GUI
+    # to package (scripts/package-macos-release.sh exits non-zero).
+    if: false
+    runs-on: macos-latest
+    steps:
+      - name: Retired — no macOS package is built or uploaded
+        shell: bash
         run: |
-          set -euo pipefail
-          if ! git diff --quiet -- Cargo.lock; then
-            echo "::error::Cargo.lock changed during the build; builds must not rewrite the lock file" >&2
-            git diff -- Cargo.lock
-            exit 1
-          fi
-          echo "Cargo.lock unchanged"
+          echo "RETIRED: macos-release is NOT IMPLEMENTED; nothing is built."
+          exit 1
 
-      - name: Record REAL manifest facts (never press facts into a green claim)
+  android-apk:
+    name: android-apk (RETIRED — Android UI NOT IMPLEMENTED)
+    # RETIRED (P3b): the Android UI was retired to a NOT IMPLEMENTED placeholder
+    # and scripts/build-android.sh exits non-zero. The plain compile gate lives in
+    # core.yml (`android-check`, capability-gated).
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retired — no Android APK is built or uploaded
         run: |
-          set -euo pipefail
-          APK="$(ls target/*/apk/yacr.apk 2>/dev/null | tail -1)"
-          [ -n "$APK" ] || { echo "::error::no yacr.apk produced" >&2; exit 1; }
-          echo "APK = $APK ($(stat -c %s "$APK") bytes)"
-          AAPT2="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt2"
-          BADGING="$("$AAPT2" dump badging "$APK" | tr -d '\r')"
-          echo "$BADGING" | grep -E '^(package|sdkVersion|targetSdkVersion|native-code)'
-          PKG="$(echo "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
-          MIN="$(echo "$BADGING" | sed -n "s/^sdkVersion:'\([^']*\)'.*/\1/p")"
-          TGT="$(echo "$BADGING" | sed -n "s/^targetSdkVersion:'\([^']*\)'.*/\1/p")"
-          CODES="$(echo "$BADGING" | sed -n "s/^native-code: \(.*\)/\1/p")"
-          SIG="none"
-          unzip -l "$APK" 2>/dev/null | grep -qiE 'META-INF/.*\.(RSA|DSA|EC)$' && SIG="jarsigner (v1 debug/dev keystore)"
-          {
-            echo "## android-apk (NOT install-run)"
-            echo ""
-            echo "| fact | value |"
-            echo "|---|---|"
-            echo "| package | ${PKG} |"
-            echo "| minSdk (actual manifest) | ${MIN} |"
-            echo "| targetSdk (actual manifest) | ${TGT} |"
-            echo "| ABI | ${CODES} |"
-            echo "| signing | ${SIG} |"
-            echo "| apk bytes | $(stat -c %s "$APK") |"
-            echo ""
-            echo "This records the artifact only. It is **not** an install/run result:"
-            echo "no device or emulator was used. See docs/ci.md \"NOT RUN\"."
-          } >> "$GITHUB_STEP_SUMMARY"
-          # Contract check against the documented expectations; a mismatch is a
-          # regression in packaging metadata and must fail the job.
-          [ "$TGT" = "$ANDROID_TARGET_SDK" ] || { echo "::error::targetSdk $TGT != pinned $ANDROID_TARGET_SDK" >&2; exit 1; }
-          echo "$CODES" | grep -q "$ANDROID_ABI" || { echo "::error::ABI $CODES missing $ANDROID_ABI" >&2; exit 1; }
-          # minSdk metadata (26) does NOT take effect (build.md); record 23 but do
-          # not silently accept a change without review.
-          [ "$MIN" = "23" ] || { echo "::error::minSdk changed to $MIN; update docs/build.md and the pin" >&2; exit 1; }
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-apk
-          path: target/*/apk/yacr.apk
-          retention-days: 14
+          echo "RETIRED: android-apk is NOT IMPLEMENTED; nothing is built."
+          exit 1
 
   android-release:
-    name: android-release (APK with fonts)
-    # Self-contained release packaging: provisions the pinned JDK 17 and the
-    # Android SDK/NDK from docs/build.md on a hosted runner, bundles the full CAD
-    # font catalogue into assets/fonts/ and uploads the APK. Runs on demand or a
-    # version tag, like the other *-release jobs.
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    name: android-release (RETIRED — Android UI NOT IMPLEMENTED)
+    # RETIRED (P3b): no release APK is produced; scripts/build-android.sh exits
+    # non-zero.
+    if: false
     runs-on: ubuntu-latest
-    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install pinned JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          targets: aarch64-linux-android
-
-      - name: Cache cargo (registry / git / target)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-android-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-android-release-
-
-      - name: Provision pinned Android SDK/NDK components
+      - name: Retired — no Android release is built or uploaded
         run: |
-          set -euo pipefail
-          ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          export ANDROID_HOME
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          SDKMANAGER="$(command -v sdkmanager || true)"
-          if [ -z "$SDKMANAGER" ]; then
-            SDKMANAGER="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
-          fi
-          [ -n "$SDKMANAGER" ] && [ -x "$SDKMANAGER" ] || { echo "::error::sdkmanager not found under $ANDROID_HOME"; exit 1; }
-          echo "sdkmanager = $SDKMANAGER"
-          # `yes |` accepts the SDK licenses; pipefail is disabled around it so
-          # the SIGPIPE that ends `yes` does not mask sdkmanager's real status.
-          set +o pipefail
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
-            "platform-tools" \
-            "platforms;$ANDROID_PLATFORM" \
-            "platforms;android-30" \
-            "build-tools;$ANDROID_BUILD_TOOLS" \
-            "ndk;$ANDROID_NDK_VERSION"
-          set -o pipefail
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+          echo "RETIRED: android-release is NOT IMPLEMENTED; nothing is built."
+          exit 1
 
-      - name: Require pinned Android toolchain (fail loudly when absent)
+  web-build:
+    name: web-build (RETIRED — browser UI NOT IMPLEMENTED)
+    # RETIRED (P3b): the browser UI was retired and scripts/build-web.sh exits
+    # non-zero. Kept declared so the missing web artifact is visible, never silent.
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retired — no web bundle is built or uploaded
         run: |
-          set -euo pipefail
-          : "${ANDROID_HOME:?ANDROID_HOME is not set: provision the runner per docs/build.md}"
-          : "${JAVA_HOME:?JAVA_HOME (JDK 17) is not set: provision the runner per docs/build.md}"
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "JAVA_HOME=$JAVA_HOME"
-          JAVA_MAJOR="$("$JAVA_HOME/bin/java" -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1)"
-          echo "JDK major = $JAVA_MAJOR (required 17)"
-          [ "$JAVA_MAJOR" = "17" ] || { echo "::error::JDK $JAVA_MAJOR != required 17" >&2; exit 1; }
-          NDK="$ANDROID_NDK_HOME"
-          echo "ANDROID_NDK_HOME=$NDK"
-          [ -d "$NDK" ] || { echo "::error::NDK $NDK not found; required $ANDROID_NDK_VERSION (docs/build.md)" >&2; exit 1; }
-          BT="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
-          [ -x "$BT/aapt2" ] || { echo "::error::aapt2 not found at $BT; required build-tools $ANDROID_BUILD_TOOLS" >&2; exit 1; }
+          echo "RETIRED: web-build is NOT IMPLEMENTED; nothing is built."
+          exit 1
 
-      - name: Install pinned cargo-apk
+  web-deploy:
+    name: web-deploy (RETIRED — browser UI NOT IMPLEMENTED)
+    # RETIRED (P3b): the public deploy entry point exits non-zero, so this
+    # Cloudflare Pages publish is hard-disabled. It carries no credentials and no
+    # mutable switch: it can never publish a stub bundle.
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retired — nothing is published
         run: |
-          set -euo pipefail
-          cargo install cargo-apk --version "$CARGO_APK_VERSION" --locked
-          command -v cargo-apk >/dev/null
-
-      - name: Generate the development release keystore (gitignored, CI-only signing)
-        run: |
-          set -euo pipefail
-          "$JAVA_HOME/bin/keytool" -genkeypair -keystore apps/app-android/dev-release.jks -alias yacr \
-            -keyalg RSA -keysize 2048 -validity 10000 -storepass yacrdev -keypass yacrdev \
-            -dname "CN=yacr dev, O=yacr"
-
-      - name: Bundle the full CAD font catalogue into assets/fonts
-        run: scripts/fetch-fonts.sh apps/app-android/assets/fonts
-
-      - name: Build signed release APK (scripts/build-android.sh)
-        run: scripts/build-android.sh --release
-
-      - name: Fail if Cargo.lock was rewritten
-        run: |
-          set -euo pipefail
-          if ! git diff --quiet -- Cargo.lock; then
-            echo "::error::Cargo.lock changed during the build; builds must not rewrite the lock file" >&2
-            git diff -- Cargo.lock
-            exit 1
-          fi
-          echo "Cargo.lock unchanged"
-
-      - name: Record REAL manifest facts (packaging, not install-run)
-        run: |
-          set -euo pipefail
-          APK="$(ls target/*/apk/yacr.apk 2>/dev/null | tail -1)"
-          [ -n "$APK" ] || { echo "::error::no yacr.apk produced" >&2; exit 1; }
-          echo "APK = $APK ($(stat -c %s "$APK") bytes)"
-          AAPT2="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt2"
-          BADGING="$("$AAPT2" dump badging "$APK" | tr -d '\r')"
-          echo "$BADGING" | grep -E '^(package|sdkVersion|targetSdkVersion|native-code)'
-          PKG="$(echo "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
-          {
-            echo "## android-release (NOT install-run)"
-            echo ""
-            echo "| fact | value |"
-            echo "|---|---|"
-            echo "| package | ${PKG} |"
-            echo "| apk bytes | $(stat -c %s "$APK") |"
-            echo "| fonts | full CAD catalogue bundled under assets/fonts |"
-            echo ""
-            echo "This records the artifact only. It is **not** an install/run result:"
-            echo "no device or emulator was used. See docs/ci.md \"NOT RUN\"."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the Android release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: yacr-android-release
-          path: target/*/apk/yacr.apk
-          if-no-files-found: error
-          retention-days: 30
+          echo "RETIRED: web-deploy is NOT IMPLEMENTED; nothing is published."
+          exit 1
 
   web-smoke:
-    name: web-smoke
-    # Capability-gated. Builds the web-dist, then drives
-    # scripts/check-web-ui.mjs with an explicit YACR_SOFTWARE_GPU=1 opt-in (the
-    # GitHub runner has no GPU, and the script fails loudly without it). This
-    # exercises a software-labelled SwiftShader path only; it is explicitly NOT a
-    # mobile/real-device or WebGPU acceptance. When the variable is unset the job
-    # is SKIPPED, never green.
-    if: ${{ vars.WEB_SMOKE_ENABLED == 'true' }}
+    name: web-smoke (RETIRED — browser UI NOT IMPLEMENTED)
+    # RETIRED (P3b): the Playwright smoke drove a web-dist that is no longer built
+    # (the browser host and its JS shell were retired). Hard-disabled, not the
+    # former mutable `WEB_SMOKE_ENABLED` switch.
+    if: false
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          targets: wasm32-unknown-unknown
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Cache cargo (registry / git / target)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-web-smoke-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-web-smoke-
-
-      - name: Install pinned wasm-bindgen-cli and build web-dist
-        env:
-          DIST: ${{ github.workspace }}/web-dist
+      - name: Retired — no browser smoke is run
         run: |
-          set -euo pipefail
-          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked
-          HAVE="$(wasm-bindgen --version | awk '{print $2}')"
-          [ "$HAVE" = "$WASM_BINDGEN_VERSION" ] || { echo "::error::wasm-bindgen $HAVE != $WASM_BINDGEN_VERSION" >&2; exit 1; }
-          scripts/build-web.sh
-
-      - name: Install pinned Playwright Chromium
-        run: |
-          set -euo pipefail
-          npm install --no-save "playwright@${PLAYWRIGHT_VERSION}"
-          npx playwright --version
-          npx playwright install --with-deps chromium
-
-      - name: Serve web-dist and run headless browser check
-        env:
-          PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.js
-          # No GPU on the runner: opt into the software (SwiftShader) path
-          # explicitly, which check-web-ui.mjs labels SOFTWARE.
-          YACR_SOFTWARE_GPU: "1"
-        run: |
-          set -euo pipefail
-          # /tmp/opencode is a local-dev convention and does not exist on the
-          # runner; use the runner's temp dir so `tee` can create its output
-          # (a failed tee would fail the step via `pipefail` even on a pass).
-          OUT="${RUNNER_TEMP:-/tmp}/yacr-web-smoke"
-          mkdir -p "$OUT"
-          python3 scripts/serve-web.py --directory web-dist --port 8090 &
-          SERVER_PID=$!
-          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
-          # Wait for the static server before driving the browser.
-          for _ in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8090/ -o /dev/null && break
-            sleep 1
-          done
-          node scripts/check-web-ui.mjs http://127.0.0.1:8090/ "$OUT/yacr-web.png" 2>&1 | tee "$OUT/web-smoke.log"
-          {
-            echo "## web-smoke (YACR_SOFTWARE_GPU=1 software, NOT a real device)"
-            echo ""
-            echo "- Playwright ${PLAYWRIGHT_VERSION} / Node ${NODE_VERSION}"
-            echo "- backend: see JSON report (explicit YACR_SOFTWARE_GPU=1, labelled SOFTWARE)"
-            echo "- WebGPU: not asserted here; absence must not be reported as a pass."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload web-smoke evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-smoke
-          path: |
-            ${{ runner.temp }}/yacr-web-smoke/yacr-web.png
-            ${{ runner.temp }}/yacr-web-smoke/yacr-web.json
-            ${{ runner.temp }}/yacr-web-smoke/web-smoke.log
-          if-no-files-found: warn
-          retention-days: 14
+          echo "RETIRED: web-smoke is NOT IMPLEMENTED; nothing is run."
+          exit 1

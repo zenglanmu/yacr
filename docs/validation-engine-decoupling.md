@@ -1,5 +1,10 @@
 # cad-engine 解耦阶段验证记录
 
+> **历史执行证据（Slint 桌面已退役，2026-10-16）**：本文记录的是**迁移前** Slint 宿主/模拟器/浏览器
+> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；Slint→React 迁移后的
+> 最终验证 **NOT RUN**（P6）。当前架构见 `docs/architecture.md` 与
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
+
 ## 当前结论
 
 Oracle P2/P3/P4 App/engine/Host/Web codegate 均 accept；P3/P4 指定硬件用例与最新差异门禁已通过。P4 最终 workspace/WASM/Android 编译/测试 sweep 及后续差异门禁证据按 shell 分轮记录；不等于 browser、Android 设备、vendor DWG 或视觉验收。event subscription 是 in-process bounded foundation，不是外部插件兼容验收。未知设备/浏览器能力不外推。

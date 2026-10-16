@@ -1,4 +1,4 @@
-//! CPU scene preparation. No Slint handles, GPU resources or render callbacks.
+//! CPU scene preparation. No UI handles, GPU resources or render callbacks.
 use crate::layers::LayerOverrideSet;
 use cad_db::DrawingDatabase;
 use cad_domain::{CadResult, DocumentId, SceneIdentity, SelectionRef, TaskStamp};

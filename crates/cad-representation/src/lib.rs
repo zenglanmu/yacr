@@ -1,8 +1,8 @@
 //! Disposable CPU display descriptions; no surfaces or GPU commands.
 //!
 //! Spec v2.0 §4.8: providers turn a read-only entity view plus resource/style
-//! context into display primitives and a completeness report. They never touch
-//! Slint, GPU objects or the event loop, and they never mutate the database.
+//! context into display primitives and a completeness report. They never touch a
+//! UI toolkit, GPU objects or the event loop, and they never mutate the database.
 
 use cad_db::{
     DbEntity, DrawingDatabase, EntityColor, EntityLineType, EntityLineWeight,

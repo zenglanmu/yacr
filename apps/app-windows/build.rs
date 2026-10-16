@@ -1,11 +1,11 @@
-//! Embed the application icon into `yacr.exe`.
+//! Embed the application icon into the Windows binary (`yacr-windows`).
 //!
 //! Only Windows targets carry a PE resource section; on other hosts (the crate
 //! is still compiled for `--lib`/`--all-targets` checks) the build script is a
 //! no-op. `winresource` drives `rc.exe` on MSVC and `windres` on GNU, so the
-//! icon is embedded both in the Windows CI release and in a local MinGW cross
-//! build. A missing resource compiler fails the build loudly rather than
-//! silently shipping an icon-less executable.
+//! icon is embedded in the Windows compile (the CI `windows-check` job and local
+//! MinGW cross builds alike). A missing resource compiler fails the build loudly
+//! rather than silently shipping an icon-less executable.
 fn main() {
     // The icon is the shared single source of truth; rebuild if it changes.
     println!("cargo:rerun-if-changed=../../assets/yacr-icon.ico");
@@ -16,7 +16,7 @@ fn main() {
 
     let mut resource = winresource::WindowsResource::new();
     resource.set_icon("../../assets/yacr-icon.ico");
-    resource.set("ProductName", "yacr");
+    resource.set("ProductName", "yacr-windows");
     resource.set("FileDescription", "yacr CAD");
     if let Err(error) = resource.compile() {
         panic!("failed to compile the Windows icon resource: {error}");

@@ -1,5 +1,10 @@
 # 宿主代码拆分
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 本文件记录宿主层（桌面 / Web / Android）的代码拆分。P1 轮（2026-10-11）把 `apps/app-web`
 迁移到共享 `cad_host::HostCore`；P2 轮（2026-10-11）把 `apps/app-android` 迁移到同一核心。
 两轮都**不改变**领域模型、crate 依赖方向、命令协议或平台导出名称。核心 CAD 算法的大文件仍可按

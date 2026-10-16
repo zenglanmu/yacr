@@ -1,5 +1,10 @@
 # macOS 宿主（`Yacr.app` / `yacr-macos`）
 
+> **已退役（2026-10-16）**：macOS GUI **未实现**。`apps/app-macos` 是显式 NOT IMPLEMENTED 失败桩
+> （bin `yacr-macos`，打印诊断并非零退出）；`scripts/package-macos-release.sh` 非零失败；
+> CI `macos-check` 只做编译。**没有可运行/可分发的 macOS GUI。** 当前桌面 UI 见
+> `docs/react-linux-app.md` 与 [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史。
+
 > 状态：**构建路径为 GitHub Actions `macos-latest` 原生构建**（`macos-check` /
 > `macos-release`）。本仓库的开发主机是 Linux，**没有** Apple SDK/链接器，无法在本机
 > 产出 Mach-O 可执行文件（Slint 的 Cocoa/Metal 后端也无法真正跨平台链接），因此本机

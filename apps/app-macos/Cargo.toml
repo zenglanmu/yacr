@@ -8,7 +8,6 @@ license.workspace = true
 name = "yacr-macos"
 path = "src/main.rs"
 
-# The macOS GUI binary is a thin wrapper over the shared desktop host in
-# `app-linux`; all controller/Slint/host logic lives there.
-[target.'cfg(target_os = "macos")'.dependencies]
-app-linux = { path = "../app-linux" }
+# The macOS host is NOT IMPLEMENTED in this round (see src/main.rs); the binary
+# is an explicit failure stub with no runtime dependencies. The former
+# `app-linux` (shared Slint host) dependency is gone — that host is retired.

@@ -11,6 +11,63 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
+/// Scalar facts the fast-path admission checks (see
+/// [`Renderer::checkpoint_scalar_admits`]). Pure so every failure mode is
+/// unit-testable without a GPU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CheckpointFacts {
+    device_generation: u64,
+    cache_epoch: u64,
+    accelerated: bool,
+    instance_streams: usize,
+    mesh_chunks: usize,
+    arc_streams: usize,
+    line_segments: usize,
+    mesh_segments: usize,
+}
+
+/// What the rebuild tail should do (pure): count a **successful** reuse, establish
+/// a checkpoint, or invalidate it. A failed reuse must never count as a reuse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrefixOutcome {
+    CountReuse,
+    Establish,
+    Invalidate,
+}
+
+fn prefix_outcome(is_reuse: bool, reuse_failed: bool, establish: Option<usize>) -> PrefixOutcome {
+    if reuse_failed {
+        return PrefixOutcome::Invalidate;
+    }
+    if is_reuse {
+        return PrefixOutcome::CountReuse;
+    }
+    match establish {
+        Some(_) => PrefixOutcome::Establish,
+        None => PrefixOutcome::Invalidate,
+    }
+}
+
+/// The **new (incoming)** suffix's rebased resource references (the prepared
+/// upload), used by the fast-path ownership proof so a suffix that references a
+/// retained resource is rejected before a checkpoint is published or reused.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct IncomingResources {
+    streams: Vec<u32>,
+    meshes: Vec<u32>,
+    arcs: Vec<u32>,
+}
+
+impl IncomingResources {
+    /// Whether every incoming reference lies outside the retained prefix `[0, n)`
+    /// (i.e. the replaced suffix shares no retained resource).
+    fn disjoint_from(&self, streams: usize, meshes: usize, arcs: usize) -> bool {
+        self.streams.iter().all(|&i| i as usize >= streams)
+            && self.meshes.iter().all(|&i| i as usize >= meshes)
+            && self.arcs.iter().all(|&i| i as usize >= arcs)
+    }
+}
+
 impl Renderer {
     pub fn new(preference: BackendPreference) -> Self {
         Renderer {
@@ -86,6 +143,11 @@ impl Renderer {
             texture_revision: 0,
             uploaded_bytes: 0,
             last_upload_ms: None,
+            last_commit_timing: None,
+            pulled_prefix_checkpoint: None,
+            pulled_cache_epoch: 0,
+            pulled_prefix_reuses: 0,
+            pulled_prefix_rebuilds: 0,
             draw_calls: 0,
             progressive: false,
             progressive_frame: None,
@@ -130,8 +192,9 @@ impl Renderer {
 
     /// Initialize from a host-provided shared device/queue.
     ///
-    /// Slint supplies these through `set_rendering_notifier` as
-    /// `GraphicsAPI::WGPU30 { device, queue, .. }`.
+    /// The host owns the `Device`/`Queue` (from its windowing/UI runtime or a
+    /// headless device) and hands them in; the renderer never creates or owns
+    /// them.
     pub fn initialize_with_device(
         &mut self,
         device: wgpu::Device,
@@ -519,6 +582,7 @@ impl Renderer {
         self.mesh_chunks.clear();
         self.pulled_lines = None;
         self.pulled_mesh = None;
+        self.invalidate_pulled_prefix();
         self.uniforms = UniformArena::new(&device.limits());
         self.frame_slots.clear();
         self.image_slots.clear();
@@ -1974,8 +2038,54 @@ impl Renderer {
         {
             return Err(CadError::StaleResult);
         }
+        // `commit_started` covers the incoming reference collection and the
+        // admission (prefix scans/allocs) below plus the staging/append/commit, so
+        // `CommitTiming::total_us >= the sum of the substages` (it additionally
+        // covers those prefix scans/allocs and the append). It begins **after** the
+        // stale-validation guard above, which is therefore not attributed to any
+        // substage or to `total_us` (negligible, and deliberately unclaimed).
+        let commit_started = std::time::Instant::now();
+        // The **new (incoming)** suffix's rebased resource references (for the
+        // ownership proof): the prepared runs are rebased onto the current
+        // resource counts.
+        let incoming = IncomingResources {
+            streams: prepared
+                .batches
+                .iter()
+                .flat_map(|batch| {
+                    batch
+                        .instanced
+                        .iter()
+                        .map(|run| run.stream + self.instance_streams.len() as u32)
+                })
+                .collect(),
+            meshes: prepared
+                .batches
+                .iter()
+                .flat_map(|batch| {
+                    batch
+                        .mesh_runs
+                        .iter()
+                        .map(|run| run.chunk + self.mesh_chunks.len() as u32)
+                })
+                .collect(),
+            arcs: prepared
+                .batches
+                .iter()
+                .flat_map(|batch| {
+                    batch
+                        .arc_runs
+                        .iter()
+                        .map(|run| run.stream + self.arc_streams.len() as u32)
+                })
+                .collect(),
+        };
+        // Admission is computed **before** any mutation, from the renderer's own
+        // retained state (never from the caller's `base_changed` alone).
+        let fast = self.pulled_fastpath_plan(keep_prefix, &incoming);
         // Re-base the prepared streams' run indices onto the existing streams so
         // a kept prefix's converted batches keep pointing at valid buffers.
+        let rebase_started = std::time::Instant::now();
         let base = self.instance_streams.len() as u32;
         for batch in &mut prepared.batches {
             for run in &mut batch.instanced {
@@ -1995,6 +2105,8 @@ impl Renderer {
                 run.stream += arc_base;
             }
         }
+        let rebase_us = rebase_started.elapsed().as_micros() as u64;
+        let append_started = std::time::Instant::now();
         self.instance_stream_uploads += prepared.instances.len() as u64;
         self.arc_stream_uploads += prepared.arcs.len() as u64;
         self.arc_degenerate_skips += prepared.arc_degenerate_skips;
@@ -2005,16 +2117,34 @@ impl Renderer {
         self.mesh_chunks.append(&mut prepared.mesh_chunks);
         self.batches.truncate(keep_prefix);
         self.batches.extend(prepared.batches);
+        let append_us = append_started.elapsed().as_micros() as u64;
+        let gc_started = std::time::Instant::now();
         self.gc_instance_streams();
         self.gc_arc_streams();
         self.gc_mesh_chunks();
-        self.rebuild_pulled();
+        let gc_us = gc_started.elapsed().as_micros() as u64;
+        let pulled_started = std::time::Instant::now();
+        self.rebuild_pulled(fast);
+        let pulled_us = pulled_started.elapsed().as_micros() as u64;
+        let pick_started = std::time::Instant::now();
         self.rebuild_pick_table()?;
+        let pick_us = pick_started.elapsed().as_micros() as u64;
         self.progressive_frame = None;
         self.draw_plan = None;
+        let lineweight_started = std::time::Instant::now();
         self.rebuild_lineweight_cache();
+        let lineweight_us = lineweight_started.elapsed().as_micros() as u64;
         self.uploaded_bytes += prepared.bytes;
         self.last_upload_ms = Some(prepared.elapsed_ms);
+        self.last_commit_timing = Some(CommitTiming {
+            rebase_us,
+            append_us,
+            gc_us,
+            pulled_us,
+            pick_us,
+            lineweight_us,
+            total_us: commit_started.elapsed().as_micros() as u64,
+        });
         Ok(())
     }
 
@@ -2418,6 +2548,12 @@ impl Renderer {
         self.last_upload_ms
     }
 
+    /// Microsecond substage timings of the most recent [`Renderer::commit_upload`]
+    /// (diagnostics only; `None` until a commit has run).
+    pub fn last_commit_timing(&self) -> Option<CommitTiming> {
+        self.last_commit_timing
+    }
+
     fn vertex_buffer(
         device: &wgpu::Device,
         queue: Option<&wgpu::Queue>,
@@ -2524,9 +2660,299 @@ impl Renderer {
     /// `uploaded_bytes` counter does not double-count the geometry. (One bounded
     /// exception: an oversized mesh chunk that is left unbuilt was still charged
     /// at prepare, so the counter can over-report that class by its pulled share.)
-    fn rebuild_pulled(&mut self) {
-        self.pulled_lines = None;
-        self.pulled_mesh = None;
+    /// The retained-prefix reuse plan for a commit (renderer-owned proof).
+    ///
+    /// Never trusts the caller's `base_changed`/`keep_prefix` alone: every
+    /// precondition is re-verified against the renderer's own state, and anything
+    /// unexpected falls back to a full rebuild (never a skip of cached data).
+    fn pulled_fastpath_plan(
+        &self,
+        keep_prefix: usize,
+        incoming: &IncomingResources,
+    ) -> PulledFastPath {
+        let establish = (keep_prefix > 0).then_some(keep_prefix);
+        let Some(checkpoint) = self.pulled_prefix_checkpoint.as_ref() else {
+            return PulledFastPath::Full { establish };
+        };
+        let facts = CheckpointFacts {
+            device_generation: self.device_generation,
+            cache_epoch: self.pulled_cache_epoch,
+            accelerated: self.render_tier == RenderTier::Accelerated,
+            instance_streams: self.instance_streams.len(),
+            mesh_chunks: self.mesh_chunks.len(),
+            arc_streams: self.arc_streams.len(),
+            line_segments: self
+                .pulled_lines
+                .as_ref()
+                .map_or(0, |pulled| pulled.segments.len()),
+            mesh_segments: self
+                .pulled_mesh
+                .as_ref()
+                .map_or(0, |pulled| pulled.segments.len()),
+        };
+        let admitted = Self::checkpoint_scalar_admits(checkpoint, keep_prefix, &facts)
+            // The retained prefix owns exactly the retained resources in identity
+            // order, and the **new (incoming)** suffix shares none of them.
+            && Self::prefix_identity_count(
+                &Self::instanced_sequence(&self.batches[..keep_prefix]),
+                checkpoint.instance_streams,
+            ) == Some(checkpoint.instance_streams)
+            && Self::prefix_identity_count(
+                &Self::mesh_sequence(&self.batches[..keep_prefix]),
+                checkpoint.mesh_chunks,
+            ) == Some(checkpoint.mesh_chunks)
+            && Self::prefix_identity_count(
+                &Self::arc_sequence(&self.batches[..keep_prefix]),
+                checkpoint.arc_streams,
+            ) == Some(checkpoint.arc_streams)
+            && incoming.disjoint_from(
+                checkpoint.instance_streams,
+                checkpoint.mesh_chunks,
+                checkpoint.arc_streams,
+            );
+        if admitted {
+            PulledFastPath::Reuse(Box::new(checkpoint.clone()))
+        } else {
+            PulledFastPath::Full { establish }
+        }
+    }
+
+    /// Invalidate the retained pulled prefix. Bumped on every event that can
+    /// change the meaning of the retained base geometry/indices.
+    fn invalidate_pulled_prefix(&mut self) {
+        self.pulled_cache_epoch = self.pulled_cache_epoch.wrapping_add(1);
+        self.pulled_prefix_checkpoint = None;
+    }
+
+    /// First-encounter renumbering of a resource-index sequence: `Some(count)`
+    /// only when the sequence is identity (`k`-th distinct index == `k`), which is
+    /// exactly the condition under which the generic GC is a no-op and the
+    /// retained ranges/indices stay valid. `None` for an out-of-range index.
+    fn prefix_identity_count(sequence: &[u32], len: usize) -> Option<usize> {
+        let mut seen = vec![false; len];
+        let mut next = 0usize;
+        let mut identity = true;
+        for &index in sequence {
+            let index = index as usize;
+            if index >= len {
+                return None;
+            }
+            if !seen[index] {
+                seen[index] = true;
+                if next != index {
+                    identity = false;
+                }
+                next += 1;
+            }
+        }
+        identity.then_some(next)
+    }
+
+    /// Whether the retained prefix owns exactly `[0, n)` resources in identity
+    /// order **and** the suffix references none of them (no resource shared across
+    /// the boundary). `None` when the prefix is not identity, an index is
+    /// out of range, or a suffix reference points into the retained range —
+    /// in which case the fast path is declined (full, safe rebuild).
+    fn owned_prefix_count(prefix_seq: &[u32], suffix_seq: &[u32], len: usize) -> Option<usize> {
+        let boundary = Self::prefix_identity_count(prefix_seq, len)?;
+        for &index in suffix_seq {
+            let index = index as usize;
+            if index >= len || index < boundary {
+                return None;
+            }
+        }
+        Some(boundary)
+    }
+
+    /// The derived retained resource boundaries for a commit (pure). `establish`
+    /// is the surviving prefix length, or `None` for a base replacement.
+    ///
+    /// For a `Reuse` plan the boundaries come from the checkpoint; for a
+    /// `Full { establish: Some(prefix) }` plan they are derived from the validated
+    /// prefix ownership (identity order + no suffix sharing), so a full warm-up
+    /// still forces the base boundary and can record the base ranges. `None`
+    /// boundaries mean "no checkpoint" (the tail invalidates).
+    fn derived_boundaries(&self, fast: &PulledFastPath) -> (Option<usize>, Option<usize>, bool) {
+        match fast {
+            PulledFastPath::Reuse(checkpoint) => (
+                (checkpoint.instance_streams > 0).then_some(checkpoint.instance_streams),
+                (checkpoint.mesh_chunks > 0).then_some(checkpoint.mesh_chunks),
+                true,
+            ),
+            PulledFastPath::Full { establish: None } => (None, None, false),
+            PulledFastPath::Full {
+                establish: Some(prefix),
+            } => {
+                let prefix = (*prefix).min(self.batches.len());
+                let line = Self::owned_prefix_count(
+                    &Self::instanced_sequence(&self.batches[..prefix]),
+                    &Self::instanced_sequence(&self.batches[prefix..]),
+                    self.instance_streams.len(),
+                );
+                let mesh = Self::owned_prefix_count(
+                    &Self::mesh_sequence(&self.batches[..prefix]),
+                    &Self::mesh_sequence(&self.batches[prefix..]),
+                    self.mesh_chunks.len(),
+                );
+                let arcs = Self::owned_prefix_count(
+                    &Self::arc_sequence(&self.batches[..prefix]),
+                    &Self::arc_sequence(&self.batches[prefix..]),
+                    self.arc_streams.len(),
+                );
+                // The ownership proof must hold on every class; otherwise the
+                // checkpoint cannot be established safely.
+                if arcs.is_none() {
+                    return (None, None, false);
+                }
+                let line = line.filter(|n| *n > 0);
+                let mesh = mesh.filter(|n| *n > 0);
+                // At least one *pulled* class must own a retained prefix.
+                let any = line.is_some() || mesh.is_some();
+                (line, mesh, any)
+            }
+        }
+    }
+
+    /// Whether every checkpoint-owned class **actually completed the reuse**: the
+    /// pulled class is still present, the recorded base ranges equal the
+    /// checkpoint's recorded ranges, and every required retained segment was
+    /// reused. If any owned class fell back to the universal path (for example a
+    /// segment/table that now exceeds the binding limit) this is false, so the
+    /// reuse is declined and the checkpoint invalidated. Pure, so the matrix is
+    /// unit-testable without a GPU.
+    fn reuse_completion(
+        checkpoint: &PulledPrefixCheckpoint,
+        line_present: bool,
+        mesh_present: bool,
+        line_ranges: &[(usize, usize)],
+        mesh_ranges: &[(usize, usize)],
+    ) -> bool {
+        let line_ok = checkpoint.instance_streams == 0
+            || (line_present
+                && line_ranges.len() == checkpoint.line_segments
+                && line_ranges == checkpoint.line_base_ranges.as_slice());
+        let mesh_ok = checkpoint.mesh_chunks == 0
+            || (mesh_present
+                && mesh_ranges.len() == checkpoint.mesh_segments
+                && mesh_ranges == checkpoint.mesh_base_ranges.as_slice());
+        // At least one pulled class must have completed the reuse.
+        line_ok && mesh_ok && (checkpoint.instance_streams > 0 || checkpoint.mesh_chunks > 0)
+    }
+
+    /// Greedy whole-stream line segmentation that never straddles `boundary`, so
+    /// the base ranges are identical across suffix commits (pure).
+    fn forced_boundary_ranges(
+        counts: &[usize],
+        segment_elems: usize,
+        boundary: Option<usize>,
+    ) -> Vec<(usize, usize)> {
+        let segment_elems = segment_elems.max(1);
+        let mut ranges = Vec::new();
+        let mut seg_start = 0usize;
+        let mut seg_elems = 0usize;
+        for (i, &n) in counts.iter().enumerate() {
+            if i > seg_start && (seg_elems + n > segment_elems || Some(i) == boundary) {
+                ranges.push((seg_start, i));
+                seg_start = i;
+                seg_elems = 0;
+            }
+            seg_elems += n;
+        }
+        ranges.push((seg_start, counts.len()));
+        ranges
+    }
+
+    /// Greedy whole-chunk mesh segmentation that never straddles `boundary` (pure).
+    fn forced_boundary_chunk_ranges(
+        vertices: &[usize],
+        indices: &[usize],
+        max_verts: usize,
+        max_indices: usize,
+        boundary: Option<usize>,
+    ) -> Vec<(usize, usize)> {
+        let count = vertices.len();
+        let mut ranges = Vec::new();
+        let mut start = 0usize;
+        let mut verts = 0usize;
+        let mut idx = 0usize;
+        for i in 0..=count {
+            let v = vertices.get(i).copied().unwrap_or(0);
+            let n = indices.get(i).copied().unwrap_or(0);
+            if i > start
+                && (i == count
+                    || verts + v > max_verts
+                    || idx + n > max_indices
+                    || Some(i) == boundary)
+            {
+                ranges.push((start, i));
+                start = i;
+                verts = 0;
+                idx = 0;
+            }
+            verts += v;
+            idx += n;
+        }
+        ranges
+    }
+
+    /// The number of leading ranges that end at or before `boundary`.
+    fn base_range_count(ranges: &[(usize, usize)], boundary: Option<usize>) -> usize {
+        boundary
+            .map(|boundary| ranges.iter().filter(|(_, end)| *end <= boundary).count())
+            .unwrap_or(0)
+    }
+
+    /// The scalar (non-batch) half of the fast-path admission (pure).
+    fn checkpoint_scalar_admits(
+        checkpoint: &PulledPrefixCheckpoint,
+        keep_prefix: usize,
+        facts: &CheckpointFacts,
+    ) -> bool {
+        keep_prefix > 0
+            && keep_prefix == checkpoint.retained_batches
+            && checkpoint.device_generation == facts.device_generation
+            && checkpoint.cache_epoch == facts.cache_epoch
+            && facts.accelerated
+            && checkpoint.instance_streams <= facts.instance_streams
+            && checkpoint.mesh_chunks <= facts.mesh_chunks
+            && checkpoint.arc_streams <= facts.arc_streams
+            && checkpoint.line_segments <= facts.line_segments
+            && checkpoint.mesh_segments <= facts.mesh_segments
+            // At least one *pulled* class must be retained (arcs have no pulled
+            // variant), and a class that owns resources must retain a base segment
+            // — but a class with no resources must NOT require one (line-only and
+            // mesh-only scenes are admitted).
+            && (checkpoint.instance_streams > 0 || checkpoint.mesh_chunks > 0)
+            && (checkpoint.instance_streams == 0 || checkpoint.line_segments > 0)
+            && (checkpoint.mesh_chunks == 0 || checkpoint.mesh_segments > 0)
+    }
+
+    fn instanced_sequence(batches: &[GpuBatch]) -> Vec<u32> {
+        batches
+            .iter()
+            .flat_map(|batch| batch.instanced.iter().map(|run| run.stream))
+            .collect()
+    }
+
+    fn mesh_sequence(batches: &[GpuBatch]) -> Vec<u32> {
+        batches
+            .iter()
+            .flat_map(|batch| batch.mesh_runs.iter().map(|run| run.chunk))
+            .collect()
+    }
+
+    fn arc_sequence(batches: &[GpuBatch]) -> Vec<u32> {
+        batches
+            .iter()
+            .flat_map(|batch| batch.arc_runs.iter().map(|run| run.stream))
+            .collect()
+    }
+
+    fn rebuild_pulled(&mut self, fast: PulledFastPath) {
+        // Take the previous pulled state so an admitted reuse can retain its base
+        // segments; both classes are replaced below either way.
+        let previous_lines = self.pulled_lines.take();
+        let previous_mesh = self.pulled_mesh.take();
         if self.render_tier != RenderTier::Accelerated {
             return;
         }
@@ -2546,6 +2972,70 @@ impl Renderer {
                 .min(device.limits().max_buffer_size)
         });
         let mut table_bytes_uploaded = 0u64;
+
+        // Resolve the reuse plan: the retained base segments, the resource
+        // boundaries, and whether a checkpoint should be (re)established.
+        let is_reuse_plan = matches!(fast, PulledFastPath::Reuse(_));
+        // Derived retained boundaries: the checkpoint's for a reuse, the validated
+        // prefix ownership for a full warm-up (so the warm-up still forces the
+        // base boundary and can record the base ranges).
+        let (derived_line, derived_mesh, boundaries_ok) = self.derived_boundaries(&fast);
+        let mut establish = match &fast {
+            PulledFastPath::Full { establish } => *establish,
+            PulledFastPath::Reuse(_) => None,
+        };
+        if !boundaries_ok {
+            // The ownership proof failed: do not establish a checkpoint.
+            establish = None;
+        }
+        let checkpoint = match &fast {
+            PulledFastPath::Reuse(checkpoint) if boundaries_ok => Some((**checkpoint).clone()),
+            _ => None,
+        };
+        let is_reuse = is_reuse_plan && checkpoint.is_some();
+        let reuse_line_boundary = derived_line;
+        let reuse_mesh_boundary = derived_mesh;
+        let mut reusable_line_segments = match (&checkpoint, previous_lines) {
+            (Some(checkpoint), Some(pulled))
+                if pulled.segments.len() >= checkpoint.line_segments =>
+            {
+                let mut segments = pulled.segments;
+                let base = segments
+                    .drain(..checkpoint.line_segments)
+                    .collect::<Vec<_>>();
+                base
+            }
+            _ => Vec::new(),
+        };
+        let mut reusable_mesh_segments = match (&checkpoint, previous_mesh) {
+            (Some(checkpoint), Some(pulled))
+                if pulled.segments.len() >= checkpoint.mesh_segments =>
+            {
+                let mut segments = pulled.segments;
+                let base = segments
+                    .drain(..checkpoint.mesh_segments)
+                    .collect::<Vec<_>>();
+                base
+            }
+            _ => Vec::new(),
+        };
+        // Diagnostics + the base ranges an established checkpoint would record.
+        let mut line_base_ranges: Vec<(usize, usize)> = Vec::new();
+        let mut mesh_base_ranges: Vec<(usize, usize)> = Vec::new();
+        // A class that owns resources must have retained *all* of its base
+        // segments; a class with no resources requires none. At least one pulled
+        // class must be retained.
+        let mut reuse_failed = checkpoint.as_ref().is_some_and(|checkpoint| {
+            (checkpoint.instance_streams == 0 && checkpoint.mesh_chunks == 0)
+                || (checkpoint.instance_streams > 0
+                    && reusable_line_segments.len() < checkpoint.line_segments)
+                || (checkpoint.mesh_chunks > 0
+                    && reusable_mesh_segments.len() < checkpoint.mesh_segments)
+        });
+        if reuse_failed {
+            reusable_line_segments.clear();
+            reusable_mesh_segments.clear();
+        }
 
         // --- whole-scene line storage -------------------------------------
         if !self.instance_streams.is_empty() {
@@ -2578,20 +3068,72 @@ impl Renderer {
                     .iter()
                     .map(|stream| stream.pulled_instances.len())
                     .collect();
-                let mut ranges: Vec<(usize, usize)> = Vec::new();
-                let mut seg_start = 0usize;
-                let mut seg_elems = 0usize;
-                for (i, &n) in counts.iter().enumerate() {
-                    if i > seg_start && seg_elems + n > segment_elems {
-                        ranges.push((seg_start, i));
-                        seg_start = i;
-                        seg_elems = 0;
-                    }
-                    seg_elems += n;
+                // A segment never straddles the retained base boundary, so the
+                // base ranges (and therefore the retained geometry buffers) are
+                // identical across suffix commits.
+                let line_boundary = reuse_line_boundary.filter(|b| *b > 0 && *b <= counts.len());
+                let ranges = Self::forced_boundary_ranges(&counts, segment_elems, line_boundary);
+                // Base ranges are exactly those ending at or before the boundary.
+                let base_range_count = Self::base_range_count(&ranges, line_boundary);
+                // The recomputed base ranges must match the checkpoint's recorded
+                // ranges exactly (boundary stability).
+                let ranges_match = checkpoint.as_ref().is_some_and(|checkpoint| {
+                    checkpoint.line_base_ranges.len() == base_range_count
+                        && checkpoint.line_base_ranges.as_slice() == &ranges[..base_range_count]
+                });
+                // Verify the reuse plan against the recomputed ranges; any doubt
+                // falls back to a full rebuild (never a skip).
+                if !reusable_line_segments.is_empty()
+                    && (!ranges_match
+                        || base_range_count != reusable_line_segments.len()
+                        || reusable_line_segments.iter().zip(ranges.iter()).any(
+                            |(segment, (a, b))| {
+                                let expected: u32 = self.instance_streams[*a..*b]
+                                    .iter()
+                                    .map(|stream| stream.instance_count)
+                                    .sum();
+                                segment.instance_count != expected
+                            },
+                        ))
+                {
+                    reusable_line_segments.clear();
+                    reuse_failed = true;
                 }
-                ranges.push((seg_start, counts.len()));
+                let mut reuse_line = std::mem::take(&mut reusable_line_segments).into_iter();
+                let base_range_count = if reuse_failed { 0 } else { base_range_count };
                 let mut segments = Vec::new();
-                for (a, b) in ranges {
+                for (index, (a, b)) in ranges.iter().copied().enumerate() {
+                    if index < base_range_count {
+                        if let Some(mut segment) = reuse_line.next() {
+                            // Reuse the retained base geometry buffer; only the
+                            // chunk table binding changed, so just recreate the
+                            // bind group.
+                            segment.bind_group =
+                                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("cad-pulled-line-storage-bind"),
+                                    layout: &line_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: segment.geometry_buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: chunk_table.as_entire_binding(),
+                                        },
+                                    ],
+                                });
+                            let mut base = 0u32;
+                            for stream in self.instance_streams[a..b].iter_mut() {
+                                stream.base = base;
+                                base += stream.instance_count;
+                                stream.buffer = segment.geometry_buffer.clone();
+                            }
+                            line_base_ranges.push((a, b));
+                            segments.push(segment);
+                            continue;
+                        }
+                    }
                     let streams: Vec<&[LineInstance]> = self.instance_streams[a..b]
                         .iter()
                         .map(|stream| stream.pulled_instances.as_slice())
@@ -2631,6 +3173,7 @@ impl Renderer {
                     segments.push(PulledLineSegment {
                         bind_group,
                         instance_count: records.len() as u32,
+                        geometry_buffer: buffer,
                     });
                 }
                 if !segments.is_empty() {
@@ -2639,6 +3182,11 @@ impl Renderer {
                         segments,
                         chunk_table,
                     });
+                    // A full warm-up that survives a prefix records the base
+                    // ranges it just built (a reuse records them per range above).
+                    if establish.is_some() {
+                        line_base_ranges = ranges[..base_range_count].to_vec();
+                    }
                 }
             }
             if self.pulled_lines.is_none() {
@@ -2664,79 +3212,134 @@ impl Renderer {
             if !oversized && table_bytes.len() as u64 <= limit {
                 let chunk_table = Self::storage_buffer(&device, Some(&queue), &table_bytes);
                 // Greedy segmentation over whole chunks (a triangle never spans
-                // chunks, so a segment's indices reference only its own vertices).
+                // chunks, so a segment's indices reference only its own
+                // vertices), forced to break at the retained base boundary so the
+                // base chunk ranges (and their retained buffers) are stable.
                 let count = self.mesh_chunks.len();
+                let mesh_boundary = reuse_mesh_boundary.filter(|b| *b > 0 && *b <= count);
+                let chunk_vertices_len: Vec<usize> = self
+                    .mesh_chunks
+                    .iter()
+                    .map(|chunk| chunk.pulled_vertices.len())
+                    .collect();
+                let chunk_indices_len: Vec<usize> = self
+                    .mesh_chunks
+                    .iter()
+                    .map(|chunk| chunk.pulled_indices.len())
+                    .collect();
+                let ranges = Self::forced_boundary_chunk_ranges(
+                    &chunk_vertices_len,
+                    &chunk_indices_len,
+                    max_verts,
+                    max_indices,
+                    mesh_boundary,
+                );
+                let base_range_count = Self::base_range_count(&ranges, mesh_boundary);
+                // The recomputed base ranges must match the checkpoint's recorded
+                // ranges exactly (boundary stability).
+                let ranges_match = checkpoint.as_ref().is_some_and(|checkpoint| {
+                    checkpoint.mesh_base_ranges.len() == base_range_count
+                        && checkpoint.mesh_base_ranges.as_slice() == &ranges[..base_range_count]
+                });
+                // Verify the reuse plan against the recomputed ranges; any doubt
+                // falls back to a full rebuild (never a skip).
+                if !reusable_mesh_segments.is_empty()
+                    && (!ranges_match
+                        || base_range_count != reusable_mesh_segments.len()
+                        || reusable_mesh_segments.iter().zip(ranges.iter()).any(
+                            |(segment, (a, b))| {
+                                let expected_vertices: usize = self.mesh_chunks[*a..*b]
+                                    .iter()
+                                    .map(|chunk| chunk.pulled_vertices.len())
+                                    .sum();
+                                segment.vertex_count as usize != expected_vertices
+                            },
+                        ))
+                {
+                    reusable_mesh_segments.clear();
+                    reuse_failed = true;
+                }
+                let mut reuse_mesh = std::mem::take(&mut reusable_mesh_segments).into_iter();
+                let base_range_count = if reuse_failed { 0 } else { base_range_count };
                 let mut segments = Vec::new();
-                let mut start = 0usize;
-                let mut verts = 0usize;
-                let mut indices = 0usize;
-                for i in 0..=count {
-                    let v = self
-                        .mesh_chunks
-                        .get(i)
-                        .map_or(0, |chunk| chunk.pulled_vertices.len());
-                    let idx = self
-                        .mesh_chunks
-                        .get(i)
-                        .map_or(0, |chunk| chunk.pulled_indices.len());
-                    if i > start
-                        && (i == count || verts + v > max_verts || indices + idx > max_indices)
-                    {
-                        let mut chunk_vertices: Vec<&[MeshVertex]> = Vec::with_capacity(i - start);
-                        let mut chunk_indices: Vec<(&[u32], u32, bool)> =
-                            Vec::with_capacity(i - start);
-                        for chunk in &self.mesh_chunks[start..i] {
-                            chunk_vertices.push(chunk.pulled_vertices.as_slice());
-                            chunk_indices.push((
-                                chunk.pulled_indices.as_slice(),
-                                chunk.vertex_count,
-                                chunk.mirrored,
-                            ));
+                for (index, (start, end)) in ranges.iter().copied().enumerate() {
+                    if index < base_range_count {
+                        if let Some(mut segment) = reuse_mesh.next() {
+                            // Reuse the retained base vertex/index buffers; only
+                            // the chunk table binding changed.
+                            segment.bind_group =
+                                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("cad-pulled-mesh-storage-bind"),
+                                    layout: &mesh_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: segment.vertex_buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: segment.index_buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: chunk_table.as_entire_binding(),
+                                        },
+                                    ],
+                                });
+                            mesh_base_ranges.push((start, end));
+                            segments.push(segment);
+                            continue;
                         }
-                        let vertices = build_pulled_mesh_vertices(&chunk_vertices, start as u32);
-                        let (seg_indices, mirror_split) =
-                            build_pulled_mesh_indices_with_bases(&chunk_indices);
-                        if !vertices.is_empty() && !seg_indices.is_empty() {
-                            let vertex_bytes = pulled_mesh_vertex_bytes(&vertices);
-                            let index_bytes: Vec<u8> =
-                                seg_indices.iter().flat_map(|i| i.to_le_bytes()).collect();
-                            let vertex_buffer =
-                                Self::storage_buffer(&device, Some(&queue), &vertex_bytes);
-                            let index_buffer =
-                                Self::storage_buffer(&device, Some(&queue), &index_bytes);
-                            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("cad-pulled-mesh-storage-bind"),
-                                layout: &mesh_layout,
-                                entries: &[
-                                    wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: vertex_buffer.as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 1,
-                                        resource: index_buffer.as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 2,
-                                        resource: chunk_table.as_entire_binding(),
-                                    },
-                                ],
-                            });
-                            segments.push(PulledMeshSegment {
-                                bind_group,
-                                vertex_count: vertices.len() as u32,
-                                index_count: seg_indices.len() as u32,
-                                mirror_split,
-                                vertex_buffer,
-                                index_buffer,
-                            });
-                        }
-                        start = i;
-                        verts = 0;
-                        indices = 0;
                     }
-                    verts += v;
-                    indices += idx;
+                    let mut chunk_vertices: Vec<&[MeshVertex]> = Vec::with_capacity(end - start);
+                    let mut chunk_indices: Vec<(&[u32], u32, bool)> =
+                        Vec::with_capacity(end - start);
+                    for chunk in &self.mesh_chunks[start..end] {
+                        chunk_vertices.push(chunk.pulled_vertices.as_slice());
+                        chunk_indices.push((
+                            chunk.pulled_indices.as_slice(),
+                            chunk.vertex_count,
+                            chunk.mirrored,
+                        ));
+                    }
+                    let vertices = build_pulled_mesh_vertices(&chunk_vertices, start as u32);
+                    let (seg_indices, mirror_split) =
+                        build_pulled_mesh_indices_with_bases(&chunk_indices);
+                    if !vertices.is_empty() && !seg_indices.is_empty() {
+                        let vertex_bytes = pulled_mesh_vertex_bytes(&vertices);
+                        let index_bytes: Vec<u8> =
+                            seg_indices.iter().flat_map(|i| i.to_le_bytes()).collect();
+                        let vertex_buffer =
+                            Self::storage_buffer(&device, Some(&queue), &vertex_bytes);
+                        let index_buffer =
+                            Self::storage_buffer(&device, Some(&queue), &index_bytes);
+                        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("cad-pulled-mesh-storage-bind"),
+                            layout: &mesh_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: vertex_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: index_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: chunk_table.as_entire_binding(),
+                                },
+                            ],
+                        });
+                        segments.push(PulledMeshSegment {
+                            bind_group,
+                            vertex_count: vertices.len() as u32,
+                            index_count: seg_indices.len() as u32,
+                            mirror_split,
+                            vertex_buffer,
+                            index_buffer,
+                        });
+                    }
                 }
                 if !segments.is_empty() {
                     table_bytes_uploaded += table_bytes.len() as u64;
@@ -2744,10 +3347,117 @@ impl Renderer {
                         segments,
                         chunk_table,
                     });
+                    // A full warm-up that survives a prefix records the base chunk
+                    // ranges it just built (a reuse records them above).
+                    if establish.is_some() {
+                        mesh_base_ranges = ranges[..base_range_count].to_vec();
+                    }
                 }
             }
         }
         self.uploaded_bytes += table_bytes_uploaded;
+
+        // (Re)establish or invalidate the retained-prefix checkpoint.
+        // Final completion proof: the resource counts can match while a class
+        // still fell back (an oversized suffix stream, or a chunk table past the
+        // binding limit, drops the pulled class), which must NOT count as a reuse.
+        if let Some(checkpoint) = checkpoint.as_ref() {
+            if !Self::reuse_completion(
+                checkpoint,
+                self.pulled_lines.is_some(),
+                self.pulled_mesh.is_some(),
+                &line_base_ranges,
+                &mesh_base_ranges,
+            ) {
+                reuse_failed = true;
+            }
+        }
+        if reuse_failed {
+            self.invalidate_pulled_prefix();
+        }
+        match prefix_outcome(is_reuse, reuse_failed, establish) {
+            PrefixOutcome::CountReuse => self.pulled_prefix_reuses += 1,
+            PrefixOutcome::Establish => {
+                if let Some(prefix) = establish {
+                    self.establish_pulled_prefix(prefix, line_base_ranges, mesh_base_ranges);
+                }
+            }
+            PrefixOutcome::Invalidate => self.invalidate_pulled_prefix(),
+        }
+    }
+
+    /// Record a retained-prefix checkpoint after a full rebuild that kept a base
+    /// prefix. Only established when the prefix actually references resources and
+    /// both classes produced reusable base segments.
+    fn establish_pulled_prefix(
+        &mut self,
+        prefix: usize,
+        line_base_ranges: Vec<(usize, usize)>,
+        mesh_base_ranges: Vec<(usize, usize)>,
+    ) {
+        let prefix = prefix.min(self.batches.len());
+        let Some(instance_streams) = Self::owned_prefix_count(
+            &Self::instanced_sequence(&self.batches[..prefix]),
+            &Self::instanced_sequence(&self.batches[prefix..]),
+            self.instance_streams.len(),
+        ) else {
+            self.invalidate_pulled_prefix();
+            return;
+        };
+        let Some(mesh_chunks) = Self::owned_prefix_count(
+            &Self::mesh_sequence(&self.batches[..prefix]),
+            &Self::mesh_sequence(&self.batches[prefix..]),
+            self.mesh_chunks.len(),
+        ) else {
+            self.invalidate_pulled_prefix();
+            return;
+        };
+        let Some(arc_streams) = Self::owned_prefix_count(
+            &Self::arc_sequence(&self.batches[..prefix]),
+            &Self::arc_sequence(&self.batches[prefix..]),
+            self.arc_streams.len(),
+        ) else {
+            self.invalidate_pulled_prefix();
+            return;
+        };
+        // At least one *pulled* class must own a retained prefix (arcs have no
+        // pulled variant).
+        if instance_streams == 0 && mesh_chunks == 0 {
+            self.invalidate_pulled_prefix();
+            return;
+        }
+        // A class that fell back to the universal path (no pulled segments) cannot
+        // be reused, so a checkpoint with base content but no base segments is
+        // refused outright.
+        if (instance_streams > 0 && line_base_ranges.is_empty())
+            || (mesh_chunks > 0 && mesh_base_ranges.is_empty())
+        {
+            self.invalidate_pulled_prefix();
+            return;
+        }
+        self.pulled_prefix_rebuilds += 1;
+        self.pulled_prefix_checkpoint = Some(PulledPrefixCheckpoint {
+            device_generation: self.device_generation,
+            cache_epoch: self.pulled_cache_epoch,
+            retained_batches: prefix,
+            instance_streams,
+            mesh_chunks,
+            arc_streams,
+            line_segments: line_base_ranges.len(),
+            mesh_segments: mesh_base_ranges.len(),
+            line_base_ranges,
+            mesh_base_ranges,
+        });
+    }
+
+    /// Diagnostics: suffix commits that reused the retained pulled base.
+    pub fn pulled_prefix_reuses(&self) -> u64 {
+        self.pulled_prefix_reuses
+    }
+
+    /// Diagnostics: full pulled rebuilds that (re)established a checkpoint.
+    pub fn pulled_prefix_rebuilds(&self) -> u64 {
+        self.pulled_prefix_rebuilds
     }
 
     /// Point every resident instance stream at its own real `VERTEX | STORAGE`
@@ -2793,6 +3503,7 @@ impl Renderer {
         self.mesh_chunks.clear();
         self.pulled_lines = None;
         self.pulled_mesh = None;
+        self.invalidate_pulled_prefix();
         // Resident image quads own pick keys too, and `reset_pick_keys` restarts
         // the key space at 1. Keeping the images would let a re-uploaded batch
         // reuse an image's key, which the pick table could only resolve by
@@ -2919,6 +3630,7 @@ impl Renderer {
         self.pulled_lines = None;
         self.pulled_mesh = None;
         self.pulled_camera_bind_group = None;
+        self.invalidate_pulled_prefix();
         self.line_pulled_pipeline = None;
         self.mesh_pulled_pipeline = None;
         self.mesh_pulled_mirrored_pipeline = None;
@@ -2939,7 +3651,7 @@ impl Renderer {
     /// Mark the device as lost after the host's device-lost callback fires.
     ///
     /// The renderer cannot own the lost callback itself because the device is
-    /// shared with the host (Slint). The host calls this when wgpu reports
+    /// shared with the host. The host calls this when wgpu reports
     /// `DeviceLostReason`, or when a backend/surface failure is observed. All
     /// derived GPU resources are dropped; the host must re-initialize and
     /// re-upload the scene. Batches are never silently recreated.
@@ -4407,6 +5119,9 @@ impl Renderer {
     /// `None` restores the device's real limit. Takes effect on the next commit.
     pub fn set_pulled_binding_limit_override(&mut self, limit: Option<u64>) {
         self.pulled_binding_limit_override = limit;
+        // The override changes the segmentation capacity, so a retained base range
+        // set is no longer valid.
+        self.invalidate_pulled_prefix();
     }
 
     /// Test hook: override the maximum instances per accelerated line storage
@@ -4415,6 +5130,9 @@ impl Renderer {
     /// commit.
     pub fn set_pulled_line_segment_elems_override(&mut self, elems: Option<usize>) {
         self.pulled_line_segment_elems_override = elems;
+        // The override changes the line segmentation, so a retained base range
+        // set is no longer valid.
+        self.invalidate_pulled_prefix();
     }
 
     /// Test hook: override the anti-aliased line SDF ramp width (world units per
@@ -4532,4 +5250,388 @@ impl Renderer {
 /// table.
 fn flags_table_width(needed: u32, max_dim: u32) -> u32 {
     needed.max(1).next_power_of_two().min(max_dim.max(1))
+}
+
+#[cfg(test)]
+mod pulled_prefix_tests {
+    //! Pure contracts for the retained pulled-prefix checkpoint + boundary-aware
+    //! segmentation (no GPU required).
+
+    use super::*;
+
+    fn mk_checkpoint(
+        retained_batches: usize,
+        instance_streams: usize,
+        mesh_chunks: usize,
+        line_segments: usize,
+        mesh_segments: usize,
+    ) -> PulledPrefixCheckpoint {
+        PulledPrefixCheckpoint {
+            device_generation: 1,
+            cache_epoch: 0,
+            retained_batches,
+            instance_streams,
+            mesh_chunks,
+            arc_streams: 0,
+            line_segments,
+            mesh_segments,
+            line_base_ranges: (0..line_segments).map(|i| (i, i + 1)).collect(),
+            mesh_base_ranges: (0..mesh_segments).map(|i| (i, i + 1)).collect(),
+        }
+    }
+
+    fn facts() -> CheckpointFacts {
+        CheckpointFacts {
+            device_generation: 1,
+            cache_epoch: 0,
+            accelerated: true,
+            instance_streams: 4,
+            mesh_chunks: 4,
+            arc_streams: 0,
+            line_segments: 4,
+            mesh_segments: 4,
+        }
+    }
+
+    #[test]
+    fn prefix_identity_count_accepts_only_identity_subsequences() {
+        assert_eq!(Renderer::prefix_identity_count(&[], 0), Some(0));
+        assert_eq!(Renderer::prefix_identity_count(&[0, 1, 2], 3), Some(3));
+        assert_eq!(
+            Renderer::prefix_identity_count(&[0, 1, 2, 0, 1], 3),
+            Some(3)
+        );
+        // A shrunken prefix (lower indices only) is still identity.
+        assert_eq!(Renderer::prefix_identity_count(&[0, 1], 3), Some(2));
+        // Out of order (a resource first encountered later) is not identity.
+        assert_eq!(Renderer::prefix_identity_count(&[1, 0], 3), None);
+        assert_eq!(Renderer::prefix_identity_count(&[0, 2], 3), None);
+        // An index beyond the retained range is a shared/foreign resource.
+        assert_eq!(Renderer::prefix_identity_count(&[0, 1, 3], 3), None);
+    }
+
+    #[test]
+    fn boundary_ranges_isolate_the_base_prefix() {
+        let counts = [4usize, 4, 4, 4];
+        assert_eq!(
+            Renderer::forced_boundary_ranges(&counts, usize::MAX, None),
+            vec![(0, 4)]
+        );
+        let split = Renderer::forced_boundary_ranges(&counts, usize::MAX, Some(2));
+        assert_eq!(split, vec![(0, 2), (2, 4)]);
+        assert_eq!(Renderer::base_range_count(&split, Some(2)), 1);
+        assert_eq!(
+            split[..Renderer::base_range_count(&split, Some(2))],
+            [(0, 2)]
+        );
+        // The base ranges are stable when the suffix grows.
+        let grown = [4usize, 4, 4, 4, 4, 4];
+        let base = Renderer::forced_boundary_ranges(&counts, 4, Some(2));
+        let base_long = Renderer::forced_boundary_ranges(&grown, 4, Some(2));
+        let n = Renderer::base_range_count(&base, Some(2));
+        assert_eq!(
+            base[..n],
+            base_long[..Renderer::base_range_count(&base_long, Some(2))]
+        );
+        // Breaks only ever fall on a whole stream index.
+        for (start, end) in &base_long {
+            assert!(start < end && *end <= grown.len());
+        }
+    }
+
+    #[test]
+    fn boundary_chunk_ranges_isolate_the_base_prefix() {
+        let verts = [10usize, 10, 10, 10];
+        let indices = [30usize, 30, 30, 30];
+        assert_eq!(
+            Renderer::forced_boundary_chunk_ranges(&verts, &indices, usize::MAX, usize::MAX, None),
+            vec![(0, 4)]
+        );
+        let split = Renderer::forced_boundary_chunk_ranges(
+            &verts,
+            &indices,
+            usize::MAX,
+            usize::MAX,
+            Some(3),
+        );
+        assert_eq!(split, vec![(0, 3), (3, 4)]);
+        assert_eq!(Renderer::base_range_count(&split, Some(3)), 1);
+        // A vertex cap splits greedily; the base ranges stay stable when the
+        // suffix grows.
+        let base =
+            Renderer::forced_boundary_chunk_ranges(&verts, &indices, 20, usize::MAX, Some(2));
+        assert_eq!(base, vec![(0, 2), (2, 4)]);
+        let grown = Renderer::forced_boundary_chunk_ranges(
+            &[10usize, 10, 10, 10, 10, 10],
+            &[30usize, 30, 30, 30, 30, 30],
+            20,
+            usize::MAX,
+            Some(2),
+        );
+        let n = Renderer::base_range_count(&base, Some(2));
+        assert_eq!(
+            base[..n],
+            grown[..Renderer::base_range_count(&grown, Some(2))]
+        );
+    }
+
+    #[test]
+    fn checkpoint_admission_rejects_every_failure_mode() {
+        let checkpoint = mk_checkpoint(10, 4, 4, 2, 2);
+        let good = facts();
+        assert!(Renderer::checkpoint_scalar_admits(&checkpoint, 10, &good));
+        // No retained prefix.
+        assert!(!Renderer::checkpoint_scalar_admits(&checkpoint, 0, &good));
+        // A different retained prefix length.
+        assert!(!Renderer::checkpoint_scalar_admits(&checkpoint, 9, &good));
+        // A different device generation (rebuild).
+        let mut rebuild = good;
+        rebuild.device_generation = 2;
+        assert!(!Renderer::checkpoint_scalar_admits(
+            &checkpoint,
+            10,
+            &rebuild
+        ));
+        // An invalidated epoch (clear/loss/config change).
+        let mut invalidated = good;
+        invalidated.cache_epoch = 1;
+        assert!(!Renderer::checkpoint_scalar_admits(
+            &checkpoint,
+            10,
+            &invalidated
+        ));
+        // Not the accelerated tier.
+        let mut universal = good;
+        universal.accelerated = false;
+        assert!(!Renderer::checkpoint_scalar_admits(
+            &checkpoint,
+            10,
+            &universal
+        ));
+        // A resource shrank below the retained count.
+        let mut shrunk = good;
+        shrunk.instance_streams = 3;
+        assert!(!Renderer::checkpoint_scalar_admits(
+            &checkpoint,
+            10,
+            &shrunk
+        ));
+        // The retained segments for a class that owns resources are gone.
+        let mut no_segments = good;
+        no_segments.line_segments = 0;
+        assert!(!Renderer::checkpoint_scalar_admits(
+            &checkpoint,
+            10,
+            &no_segments
+        ));
+        // A checkpoint with no reusable base segments is refused outright.
+        let empty = mk_checkpoint(10, 4, 4, 0, 0);
+        assert!(!Renderer::checkpoint_scalar_admits(&empty, 10, &good));
+    }
+
+    #[test]
+    fn checkpoint_admission_requires_segments_only_for_classes_with_resources() {
+        let good = facts();
+        // Line-only scene: mesh has no resources, so no mesh segments are required.
+        let line_only = mk_checkpoint(10, 4, 0, 2, 0);
+        assert!(Renderer::checkpoint_scalar_admits(&line_only, 10, &good));
+        // Mesh-only scene: line has no resources, so no line segments are required.
+        let mesh_only = mk_checkpoint(10, 0, 4, 0, 2);
+        assert!(Renderer::checkpoint_scalar_admits(&mesh_only, 10, &good));
+        // Both classes present, both segmented.
+        let both = mk_checkpoint(10, 4, 4, 2, 2);
+        assert!(Renderer::checkpoint_scalar_admits(&both, 10, &good));
+        // Neither pulled class owns resources (arcs-only base): refused.
+        let neither = mk_checkpoint(10, 0, 0, 0, 0);
+        assert!(!Renderer::checkpoint_scalar_admits(&neither, 10, &good));
+        // A class with resources but no segment is refused (per class).
+        let line_missing = mk_checkpoint(10, 4, 0, 0, 0);
+        assert!(!Renderer::checkpoint_scalar_admits(
+            &line_missing,
+            10,
+            &good
+        ));
+        let mesh_missing = mk_checkpoint(10, 0, 4, 0, 0);
+        assert!(!Renderer::checkpoint_scalar_admits(
+            &mesh_missing,
+            10,
+            &good
+        ));
+    }
+
+    #[test]
+    fn ownership_proof_rejects_a_suffix_sharing_a_retained_resource() {
+        // The prefix owns [0,2) in identity order; the suffix uses only new ones.
+        assert_eq!(Renderer::owned_prefix_count(&[0, 1], &[2, 3], 4), Some(2));
+        // A shrunken prefix (only the first resource) still owns [0,1).
+        assert_eq!(Renderer::owned_prefix_count(&[0], &[1, 2], 3), Some(1));
+        // Out-of-range prefix index is rejected.
+        assert_eq!(Renderer::owned_prefix_count(&[0, 5], &[1], 6), None);
+        // Non-identity prefix (a resource first encountered later) is rejected.
+        assert_eq!(Renderer::owned_prefix_count(&[1, 0], &[2], 3), None);
+        // A SUFFIX that references a retained resource is rejected (shared
+        // resource across the boundary).
+        assert_eq!(Renderer::owned_prefix_count(&[0, 1], &[2, 0], 3), None);
+        // An out-of-range SUFFIX index is rejected too.
+        assert_eq!(Renderer::owned_prefix_count(&[0, 1], &[7], 3), None);
+        // Empty prefix owns nothing and any suffix index is fine.
+        assert_eq!(Renderer::owned_prefix_count(&[], &[0], 1), Some(0));
+    }
+
+    #[test]
+    fn reuse_completion_requires_every_owned_class_to_have_completed() {
+        let both = mk_checkpoint(10, 4, 4, 2, 2);
+        let line_ranges = both.line_base_ranges.clone();
+        let mesh_ranges = both.mesh_base_ranges.clone();
+        // Both classes present with the recorded ranges: completed.
+        assert!(Renderer::reuse_completion(
+            &both,
+            true,
+            true,
+            &line_ranges,
+            &mesh_ranges
+        ));
+        // A class fell back to the universal path (pulled class gone): declined.
+        assert!(!Renderer::reuse_completion(
+            &both,
+            false,
+            true,
+            &line_ranges,
+            &mesh_ranges
+        ));
+        assert!(!Renderer::reuse_completion(
+            &both,
+            true,
+            false,
+            &line_ranges,
+            &mesh_ranges
+        ));
+        // Fewer ranges than the checkpoint recorded (a segment was not reused).
+        assert!(!Renderer::reuse_completion(
+            &both,
+            true,
+            true,
+            &line_ranges[..1],
+            &mesh_ranges
+        ));
+        // Ranges that differ from the checkpoint's record: declined.
+        assert!(!Renderer::reuse_completion(
+            &both,
+            true,
+            true,
+            &[(9, 10), (10, 11)],
+            &mesh_ranges
+        ));
+        // Line-only: the mesh class requires nothing.
+        let line_only = mk_checkpoint(10, 4, 0, 2, 0);
+        assert!(Renderer::reuse_completion(
+            &line_only,
+            true,
+            false,
+            &line_only.line_base_ranges,
+            &[]
+        ));
+        assert!(!Renderer::reuse_completion(
+            &line_only,
+            false,
+            false,
+            &line_only.line_base_ranges,
+            &[]
+        ));
+        // Mesh-only: the line class requires nothing.
+        let mesh_only = mk_checkpoint(10, 0, 4, 0, 2);
+        assert!(Renderer::reuse_completion(
+            &mesh_only,
+            false,
+            true,
+            &[],
+            &mesh_only.mesh_base_ranges
+        ));
+        // No pulled class at all: never completed.
+        let none = mk_checkpoint(10, 0, 0, 0, 0);
+        assert!(!Renderer::reuse_completion(&none, false, false, &[], &[]));
+    }
+
+    #[test]
+    fn prefix_outcome_never_counts_a_failed_reuse() {
+        use super::PrefixOutcome as O;
+        // A successful reuse counts; a failed reuse invalidates (and never counts).
+        assert_eq!(prefix_outcome(true, false, None), O::CountReuse);
+        assert_eq!(prefix_outcome(true, true, None), O::Invalidate);
+        // A full rebuild with a prefix establishes; without one it invalidates.
+        assert_eq!(prefix_outcome(false, false, Some(5)), O::Establish);
+        assert_eq!(prefix_outcome(false, false, None), O::Invalidate);
+        assert_eq!(prefix_outcome(false, true, Some(5)), O::Invalidate);
+        // A reuse plan never establishes.
+        assert_eq!(prefix_outcome(true, false, Some(5)), O::CountReuse);
+    }
+
+    #[test]
+    fn invalidation_clears_the_checkpoint_and_bumps_the_epoch() {
+        let mut renderer = Renderer {
+            pulled_prefix_checkpoint: Some(mk_checkpoint(10, 4, 4, 2, 2)),
+            ..Renderer::default()
+        };
+        let epoch = renderer.pulled_cache_epoch;
+        renderer.invalidate_pulled_prefix();
+        assert!(renderer.pulled_prefix_checkpoint.is_none());
+        assert_eq!(renderer.pulled_cache_epoch, epoch + 1);
+        // The test-hook override changes the segmentation, so it invalidates too.
+        renderer.pulled_prefix_checkpoint = Some(mk_checkpoint(10, 4, 4, 2, 2));
+        renderer.set_pulled_line_segment_elems_override(Some(2));
+        assert!(renderer.pulled_prefix_checkpoint.is_none());
+        renderer.set_pulled_line_segment_elems_override(None);
+        // The binding-limit override changes the segmentation capacity too.
+        let epoch = renderer.pulled_cache_epoch;
+        renderer.pulled_prefix_checkpoint = Some(mk_checkpoint(10, 4, 4, 2, 2));
+        renderer.set_pulled_binding_limit_override(Some(1 << 20));
+        assert!(renderer.pulled_prefix_checkpoint.is_none());
+        assert_eq!(renderer.pulled_cache_epoch, epoch + 1);
+        renderer.set_pulled_binding_limit_override(None);
+        // Counters start at zero (diagnostics only).
+        assert_eq!(renderer.pulled_prefix_reuses(), 0);
+        assert_eq!(renderer.pulled_prefix_rebuilds(), 0);
+    }
+
+    #[test]
+    fn plan_is_full_without_a_checkpoint_and_establishes_only_with_a_prefix() {
+        let renderer = Renderer::default();
+        // No checkpoint: a base replacement (keep_prefix 0) establishes nothing.
+        assert!(matches!(
+            renderer.pulled_fastpath_plan(0, &IncomingResources::default()),
+            PulledFastPath::Full { establish: None }
+        ));
+        // A surviving prefix asks for a checkpoint to be established.
+        assert!(matches!(
+            renderer.pulled_fastpath_plan(7, &IncomingResources::default()),
+            PulledFastPath::Full { establish: Some(7) }
+        ));
+    }
+
+    #[test]
+    fn incoming_resources_must_be_disjoint_from_the_retained_prefix() {
+        // A suffix of new resources is disjoint.
+        let disjoint = IncomingResources {
+            streams: vec![4, 5],
+            meshes: vec![2],
+            arcs: vec![],
+        };
+        assert!(disjoint.disjoint_from(4, 2, 0));
+        // A suffix that references a retained resource is rejected.
+        let shared = IncomingResources {
+            streams: vec![4, 1],
+            meshes: vec![],
+            arcs: vec![],
+        };
+        assert!(!shared.disjoint_from(4, 2, 0));
+        // A retained mesh chunk referenced by the suffix is rejected.
+        let shared_mesh = IncomingResources {
+            streams: vec![],
+            meshes: vec![0],
+            arcs: vec![2],
+        };
+        assert!(!shared_mesh.disjoint_from(4, 2, 2));
+        // No retained resources: everything is disjoint.
+        assert!(shared_mesh.disjoint_from(0, 0, 0));
+    }
 }

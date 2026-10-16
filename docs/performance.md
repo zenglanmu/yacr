@@ -1,5 +1,10 @@
 # 性能与资源预算（测量方法，非成绩）
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 本文只描述**如何测量**、**测量了什么**、**没有测量什么**。仓库当前没有任何
 “手机预算”“FPS 成绩”或峰值内存数字，本文也不声称任何一项。
 

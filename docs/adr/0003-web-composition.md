@@ -1,6 +1,11 @@
 # ADR 0003：浏览器宿主的 Slint / wgpu 组合
 
-状态：采用。范围：规范 §5.3 Web 平台组合、§6 多后端、§9.2 Web 发布。
+> **已退役（2026-10-16）**：浏览器 UI 已退役为 NOT IMPLEMENTED 占位，`build-web.sh`/
+> `deploy-cloudflare-pages.sh` 非零退出。当前桌面 UI 见
+> [ADR 0010](0010-react-linux-host-replaces-slint.md) 与 `docs/architecture.md`。
+> 下文保留为历史事实。
+
+状态：采用（历史）。范围：规范 §5.3 Web 平台组合、§6 多后端、§9.2 Web 发布。
 
 ## 问题
 

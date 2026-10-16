@@ -144,7 +144,7 @@ Linux 离屏、release 构建、真实图纸/GPU/窗口/浏览器/真机或远�
 
 ### 范围与实施方式
 
-本轮从 `docs/ui-requirements/10-statusbar-and-commandline.md`、
+本轮从 `docs/ui-requirements/10-statusbar-and-commandline.md`（目录已随 ui-requirements 移除）、
 `11-properties-and-docks.md`、`15-command-input-and-selection.md` 补齐可直接接入现有
 命令/数据库派生模型的交互。功能参考不是源码移植要求；原始图元编辑、DWG 回写、
 参数化建模等不因参考文档列出而成为本项目必须交付的功能。

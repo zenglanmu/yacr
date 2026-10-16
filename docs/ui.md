@@ -1,5 +1,9 @@
 # Slint 外壳接线状态（U03 / U04 / U11）
 
+> **已退役（2026-10-16）**：本文件描述的 `cad-ui-slint` 外壳接线已随 Slint 删除。当前桌面 UI 是
+> React/Tauri chrome + 原生 GTK/wgpu 分区，共享逻辑在 `cad-ui-core`；见 `docs/react-linux-app.md`、
+> `docs/architecture.md`、[ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史事实。
+
 本文件记录 `crates/cad-ui-slint` 与 `crates/cad-app` 之间已接线的 UI 契约，以及
 **刻意未接线**的部分与原因。规范权威是 `CAD_IMPLEMENTATION_SPEC.md` v2.0；交互
 状态机细节见 `docs/interaction.md`，需求追踪见 `docs/requirements.md` 与

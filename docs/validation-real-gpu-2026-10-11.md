@@ -1,5 +1,10 @@
 # 真实硬件桌面集成验收（2026-10-11）
 
+> **历史执行证据（Slint 桌面已退役，2026-10-16）**：本文记录的是**迁移前** Slint 宿主/模拟器/浏览器
+> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；Slint→React 迁移后的
+> 最终验证 **NOT RUN**（P6）。当前架构见 `docs/architecture.md` 与
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
+
 ## 环境与命令
 
 - Revision：`0013140d57b9276a6de261881c13e207efc2be76`；本地工作树含本轮并行改动。

@@ -9,31 +9,14 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# The web UI is retired (explicit NOT IMPLEMENTED placeholder): the wasm entry
+# points only reject with a diagnostic, so the old cad-* / Slint host
+# dependencies are gone. Only the wasm bindings the entry points need remain.
 [dependencies]
-# The shared platform-common host orchestration (command routing, state push,
-# open/plot/save funnels, navigation/draw sinks); the browser host supplies only
-# the platform impls and its genuinely browser-specific adapters.
-cad-host.workspace = true
-cad-ui-slint.workspace = true
-cad-engine.workspace = true
-cad-app.workspace = true
-cad-platform.workspace = true
-cad-domain.workspace = true
-cad-resources.workspace = true
-# Panel-state derivation reads the structured diagnostics model, the pick report
-# shape and the layout descriptors directly.
-cad-diagnostics.workspace = true
-cad-spatial.workspace = true
-cad-representation.workspace = true
 
 # Browser host stack. wasm-bindgen must match the wasm-bindgen-cli used to
 # post-process the module; Slint already pins these versions in Cargo.lock.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-js-sys.workspace = true
-web-sys = { workspace = true, features = [
-    "Window", "Document", "Element", "Node", "HtmlElement", "HtmlInputElement",
-    "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement",
-    "console", "Response",
-] }
+web-sys = { workspace = true, features = ["console"] }

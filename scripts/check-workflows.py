@@ -1,22 +1,33 @@
 #!/usr/bin/env python3
-"""Validate the layered GitHub Actions CI workflows (N02).
+"""Validate the layered GitHub Actions CI workflows.
 
-Standard library only. What it checks:
+Standard library only (PyYAML is used only as an optional extra parse). What it
+checks:
 
-  * at least one workflow file exists under ``.github/workflows`` and is non-empty;
-  * every required job is declared as a job key in some workflow
-    (``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
-     ``linux-app``, ``linux-release``, ``windows-check``, ``windows-release``,
-     ``macos-check``, ``macos-release``, ``android-release``, ``web-build``,
-     ``web-host-contracts``, ``web-deploy``, ``android-check``, ``android-apk``,
-     ``web-smoke``; the capability-gated ones must still be *declared* so
-     their absence is visible rather than silent);
-  * no required job declares ``continue-on-error: true`` (job-level or step-level);
-  * each required job still contains its expected command fragment, so the job
-    keeps mirroring the real gate instead of drifting into an empty success.
+  * at least one workflow file exists under ``.github/workflows`` and is
+    non-empty;
+  * every **required** job is declared as a job key in some workflow and still
+    contains its expected command fragment, so the job keeps mirroring the real
+    gate instead of drifting into an empty success. The required jobs are the
+    genuine compile/check gates that survive the UI replacement:
+    ``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
+    ``linux-app``, ``windows-check``, ``macos-check``, ``android-check``;
+  * every **retired** platform build/deploy/release job
+    (``web-build``, ``web-deploy``, ``web-smoke``, ``android-apk``,
+    ``android-release``, ``linux-release``, ``windows-release``,
+    ``macos-release``) is still *declared* so its absence stays visible, but is
+    hard-disabled with an unconditional ``if: false`` and a ``RETIRED`` marker,
+    and its only step fails non-zero (``exit 1``) if it is ever run. It must NOT
+    carry a mutable capability variable (``vars.…``): a repository variable that
+    could accidentally re-enable a stub publish is exactly the foot-gun this
+    check removes. The one still capability-gated job is the ``android-check``
+    compile gate, which cannot publish anything;
+  * no required or retired job declares ``continue-on-error: true`` (job-level or
+    step-level).
 
-PyYAML is used when importable for a real parse. Otherwise it falls back to a
-structural text check and says so explicitly. The script is a guard rail, not a
+Each guarantee is enforced structurally (and, when PyYAML is importable, with a
+real parse as well) so a mutation that removes a fragment or a disable guard is
+reported rather than silently accepted. The script is a guard rail, not a
 replacement for a YAML parser or for actually running the workflow.
 """
 from __future__ import annotations
@@ -29,25 +40,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
 WORKFLOW_SUFFIXES = (".yml", ".yaml")
 
-# Job key -> command fragments that must appear inside that job.
-#
-# `shader-validation`, `web-build`, `web-host-contracts`, `web-deploy`,
-# `android-check`, `android-apk` and `web-smoke` are all required to be
-# *declared*. The gated jobs (`web-deploy`, `android-check`, `android-apk`,
-# `web-smoke`) must keep their explicit `if:` capability guard, checked
-# separately below, so a gate can never be mistaken for a silent
-# skip-to-green.
+# Required (genuine) job key -> command fragments that must appear inside it.
 REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     "linux-app": (
         "cargo check -p app-linux --all-targets --locked",
+        # Tauri/GTK native prerequisites plus the React test + build the native
+        # gate must run before `tauri::generate_context!` embeds `ui/dist`.
+        "libwebkit2gtk-4.1-dev",
+        "apps/app-linux/ui",
+        "npm test",
+        "npm run build",
         "actions/upload-artifact",
         "linux-app.log",
-    ),
-    "linux-release": (
-        "scripts/package-linux-release.sh",
-        "flatpak-builder",
-        "org.freedesktop.Sdk",
-        "actions/upload-artifact",
     ),
     "core-quality": (
         "cargo fmt --all -- --check",
@@ -55,23 +59,24 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "check-architecture.py",
         "check-fixture-manifest.py",
         "cargo check --workspace --all-targets --locked",
+        # core-quality also compiles app-linux (clippy + workspace check), so it
+        # needs the same Tauri/GTK prerequisites and the frontend dist — and it
+        # runs the React tests and the retained platform-neutral node contract.
+        "libwebkit2gtk-4.1-dev",
+        "apps/app-linux/ui",
+        "npm test",
+        "npm run build",
+        "node --test scripts/test-web-pixels.mjs",
+        "test-ui-migration-guards.py",
     ),
     "windows-check": (
         "cargo check -p app-windows --all-targets --locked",
-        "actions/upload-artifact",
-    ),
-    "windows-release": (
-        "scripts/package-windows-release.sh",
         "actions/upload-artifact",
     ),
     "macos-check": (
         "cargo check -p app-macos --all-targets --locked",
         "actions/upload-artifact",
         "macos-check.log",
-    ),
-    "macos-release": (
-        "scripts/package-macos-release.sh",
-        "actions/upload-artifact",
     ),
     "wasm-check": (
         "cargo check --workspace --lib --target wasm32-unknown-unknown --locked",
@@ -83,55 +88,44 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     "shader-validation": (
         "cargo test -p cad-render-wgpu --test wgsl_validation --locked",
     ),
-    "web-build": (
-        "scripts/build-web.sh",
-        "wasm-bindgen-cli",
-        "actions/upload-artifact",
-    ),
-    "web-host-contracts": (
-        "node --test scripts/test-web-host.mjs",
-        "actions/setup-node",
-    ),
-    "web-deploy": (
-        "scripts/deploy-cloudflare-pages.sh",
-        "actions/download-artifact",
-        "secrets.CLOUDFLARE_API_TOKEN",
-        "startsWith(github.ref, 'refs/tags/v')",
-    ),
     "android-check": (
-        "cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked",
-    ),
-    "android-apk": (
-        "scripts/build-android.sh",
-        "dump badging",
-        "actions/upload-artifact",
-    ),
-    "android-release": (
-        "scripts/build-android.sh",
-        "scripts/fetch-fonts.sh",
-        "actions/upload-artifact",
-    ),
-    "web-smoke": (
-        "scripts/check-web-ui.mjs",
-        "scripts/serve-web.py",
+        # The retired Slint UI is dropped from the Android compile gate; only the
+        # explicit NOT IMPLEMENTED `app-android` placeholder is compiled.
+        "cargo check --target aarch64-linux-android -p app-android --locked",
     ),
 }
 
 # Jobs that are capability-gated: they must carry an explicit `if:` guard so
-# that when the capability is absent GitHub reports SKIPPED, never a pass.
-GATED_JOBS: tuple[str, ...] = (
-    "android-check",
-    "android-apk",
-    "web-smoke",
-)
+# that when the capability is absent GitHub reports SKIPPED, never a pass. Only
+# the `android-check` compile gate remains gated (it cannot publish anything).
+GATED_JOBS: tuple[str, ...] = ("android-check",)
 
 # `if:` fragment each gated job must retain (the capability switch).
 GATED_JOB_IF: dict[str, str] = {
     "android-check": "vars.ANDROID_CI_ENABLED",
-    "android-apk": "vars.ANDROID_CI_ENABLED",
-    "web-smoke": "vars.WEB_SMOKE_ENABLED",
 }
 
+# Retired platform build/deploy/release jobs. They are kept declared (so the
+# gap stays visible) but must be hard-disabled: an unconditional `if: false` and
+# a `RETIRED` marker, never a mutable `vars.…` switch.
+RETIRED_JOBS: tuple[str, ...] = (
+    "web-build",
+    "web-deploy",
+    "web-smoke",
+    "android-apk",
+    "android-release",
+    "linux-release",
+    "windows-release",
+    "macos-release",
+)
+
+RETIRED_MARKER = "RETIRED"
+HARD_DISABLE_RE = re.compile(r"^    if:\s*false\s*(?:#.*)?$", re.MULTILINE)
+MUTABLE_GATE_RE = re.compile(r"\bvars\.")
+# A retired job must not reference repository credentials: a disabled publish job
+# has no reason to touch a secret, and a stray `secrets.…` is the signature of a
+# publish path that was not really retired.
+SECRETS_RE = re.compile(r"\bsecrets\.")
 TRUE_CONTINUE_ON_ERROR = re.compile(r"continue-on-error\s*:\s*true\b", re.IGNORECASE)
 
 
@@ -168,8 +162,9 @@ def job_block(text: str, key: str) -> str | None:
 
 def structural_pass(
     files: list[pathlib.Path],
-) -> tuple[dict[str, list[str]], list[str]]:
+) -> tuple[dict[str, list[str]], dict[str, list[str]], list[str]]:
     declared: dict[str, list[str]] = {}
+    retired_declared: dict[str, list[str]] = {}
     errors: list[str] = []
     for path in files:
         rel = str(path.relative_to(ROOT))
@@ -203,16 +198,53 @@ def structural_pass(
                     f"{rel}: gated job '{key}' is missing its capability guard "
                     f"{GATED_JOB_IF[key]!r} (a gate must SKIP, never pass silently)"
                 )
-    return declared, errors
+        for key in RETIRED_JOBS:
+            block = job_block(text, key)
+            if block is None:
+                continue
+            retired_declared.setdefault(key, []).append(rel)
+            if not HARD_DISABLE_RE.search(block):
+                errors.append(
+                    f"{rel}: retired job '{key}' must be hard-disabled with an "
+                    "unconditional 'if: false'"
+                )
+            if RETIRED_MARKER not in block:
+                errors.append(
+                    f"{rel}: retired job '{key}' is missing the 'RETIRED' marker "
+                    "that documents its status"
+                )
+            # Belt-and-braces: even if the disable is ever removed, the retired
+            # job's only step must fail non-zero, never pass as an empty success.
+            if "exit 1" not in block:
+                errors.append(
+                    f"{rel}: retired job '{key}' must fail non-zero ('exit 1') if "
+                    "it is ever run"
+                )
+            if MUTABLE_GATE_RE.search(block):
+                errors.append(
+                    f"{rel}: retired job '{key}' must not carry a mutable 'vars.…' "
+                    "capability switch (it could re-enable a stub publish)"
+                )
+            if SECRETS_RE.search(block):
+                errors.append(
+                    f"{rel}: retired job '{key}' must not reference repository "
+                    "secrets (a publish path was not fully retired)"
+                )
+            if TRUE_CONTINUE_ON_ERROR.search(block):
+                errors.append(
+                    f"{rel}: retired job '{key}' contains 'continue-on-error: true'"
+                )
+    return declared, retired_declared, errors
 
 
 def yaml_pass(
     files: list[pathlib.Path],
-) -> tuple[dict[str, list[str]], list[str]]:
+) -> tuple[dict[str, list[str]], dict[str, list[str]], list[str]]:
     """Real parse when PyYAML is available; returns its own errors."""
     import yaml  # type: ignore  # local import: optional dependency
 
     declared: dict[str, list[str]] = {}
+    retired_declared: dict[str, list[str]] = {}
     errors: list[str] = []
     for path in files:
         rel = str(path.relative_to(ROOT))
@@ -265,7 +297,26 @@ def yaml_pass(
                         f"{rel}: required job '{key}' step '{label}' sets "
                         "'continue-on-error: true'"
                     )
-    return declared, errors
+        for key in RETIRED_JOBS:
+            job = jobs.get(key)
+            if job is None:
+                continue
+            retired_declared.setdefault(key, []).append(rel)
+            if not isinstance(job, dict):
+                errors.append(f"{rel}: retired job '{key}' is not a mapping")
+                continue
+            # `if: false` parses to the boolean False; any string condition (in
+            # particular a `vars.…` switch) is a failure.
+            if job.get("if") is not False:
+                errors.append(
+                    f"{rel}: retired job '{key}' must be hard-disabled with "
+                    "'if: false' (got " + repr(job.get("if")) + ")"
+                )
+            if is_true(job.get("continue-on-error")):
+                errors.append(
+                    f"{rel}: retired job '{key}' sets 'continue-on-error: true'"
+                )
+    return declared, retired_declared, errors
 
 
 def load_yaml() -> object | None:
@@ -287,16 +338,17 @@ def main() -> int:
             return 1
 
     yaml_module = load_yaml()
-    declared, errors = structural_pass(files)
+    declared, retired_declared, errors = structural_pass(files)
     if yaml_module is not None:
         mode = "PyYAML parse + structural pass"
-        yaml_declared, yaml_errors = yaml_pass(files)
+        yaml_declared, yaml_retired, yaml_errors = yaml_pass(files)
         errors.extend(yaml_errors)
-        for key, locations in yaml_declared.items():
-            declared.setdefault(key, [])
-            for location in locations:
-                if location not in declared[key]:
-                    declared[key].append(location)
+        for bucket, extra in ((declared, yaml_declared), (retired_declared, yaml_retired)):
+            for key, locations in extra.items():
+                bucket.setdefault(key, [])
+                for location in locations:
+                    if location not in bucket[key]:
+                        bucket[key].append(location)
     else:
         mode = "structural text check (PyYAML unavailable)"
 
@@ -310,6 +362,19 @@ def main() -> int:
         else:
             print(f"  [FAIL] required job '{key}' is not declared")
             errors.append(f"required job '{key}' is not declared in any workflow")
+    for key in RETIRED_JOBS:
+        locations = retired_declared.get(key, [])
+        if locations:
+            print(
+                f"  [ok]   retired job '{key}' declared (hard-disabled) in "
+                f"{', '.join(sorted(set(locations)))}"
+            )
+        else:
+            print(f"  [FAIL] retired job '{key}' is not declared")
+            errors.append(
+                f"retired job '{key}' is not declared in any workflow "
+                "(a silent removal hides the capability gap)"
+            )
 
     if errors:
         print(f"\n{len(errors)} problem(s):")
@@ -317,7 +382,10 @@ def main() -> int:
             print(f"  - {error}")
         return 1
 
-    print("\nOK: required jobs present, commands intact, no continue-on-error: true")
+    print(
+        "\nOK: required jobs present with commands intact, retired jobs hard-disabled, "
+        "no continue-on-error: true"
+    )
     return 0
 
 

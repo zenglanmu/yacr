@@ -12,12 +12,19 @@
 >
 > **2026-10-14 实验范围增补（用户授权）**：桌面 UI 目标允许以 **React + Tauri** 实验替代 Slint，
 > 见 §21；该增补仅覆盖桌面实验路线，不改变 Web/Android 交付与既有核心不变量。
+>
+> **2026-10-16 桌面 UI 迁移完成（用户路线确认）**：§21 的 React/Tauri **实验**路线**已被采用为
+> 正式桌面实现**，Slint 桌面 UI 与 `cad-ui-slint` 已删除；决策记录见
+> `docs/adr/0010-react-linux-host-replaces-slint.md`，当前架构见 `docs/architecture.md`，
+> 宿主使用说明见 `docs/react-linux-app.md`。因此本文中一切以 Slint 为**当前桌面实现**的表述
+> （含 §2.1 决策 3/7、§4.5/§4.9/§4.11、§5、§9/§10 中的相关条目）**对桌面部分作废**；
+> Web/Android UI 当前为 **NOT IMPLEMENTED 占位**（见 §9）。**历史记录不改写**，仅就地标注。
 
 ## 1. 文档使用规则
 
 本文中的“必须”是实现和验收约束；“建议”是可通过实验调整的默认设计；“待验证”表示尚不能作为事实依赖的技术假设。用户已确认的约束优先于建议。发现框架能力与本文假设不符时，应记录证据和替代设计，不得静默删减需求或换用另一套技术栈。
 
-本规范初稿基于当时对话需求及官方文档核查编写；实际实现与运行证据以最新交接和验证文档为准。OpenCADStudio 仅作为功能规格与交互对照参考，入口为 `docs/ui-requirements/00-INDEX.md`，不是源码、算法、渲染核心或依赖的采用来源。文中的性能阈值属于建议验收预算，不是已有测试结果。实际依赖以最终锁定的版本为准。
+本规范初稿基于当时对话需求及官方文档核查编写；实际实现与运行证据以最新交接和验证文档为准。OpenCADStudio 曾在早期作为功能规格与交互对照的历史参考；该参考练习已结束（2026-10-15 用户决定），本地参考目录 `docs/ui-requirements/` 已移除，本文不再指向任何本地参考清单。OpenCADStudio 从来不是源码、算法、渲染核心或依赖的采用来源。此后 UI 设计直接遵循 AutoCAD 桌面惯例，见 `docs/react-linux-app.md` 与 `docs/adr/0010-react-linux-host-replaces-slint.md`。文中的性能阈值属于建议验收预算，不是已有测试结果。实际依赖以最终锁定的版本为准。
 
 ## 2. 产品目标与边界
 
@@ -25,11 +32,14 @@
 
 1. 核心语言 Rust；DWG 解析使用 acadrust；CAD 绘制使用 wgpu。
 2. 不修改 acadrust 上游源码，不维护修改版 fork，不用 Cargo patch 偷换为修改版本。所有补充处理位于自有 crate；允许评估未修改的正式版本升级。
-3. UI 使用 Slint，复用 UI 定义、组件和应用状态；允许必要的平台宿主和浏览器 JS 接入。（2026-10-14 用户授权以 React/Tauri 作为桌面 UI 替代实验目标，见 §21；Slint 仍为 Web/Android 与现有实现基线。）
-4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。2026-10-04 用户调整默认提交门禁为 debug 编译与静态检查，不默认运行完整测试、Linux 离屏渲染或 release 编译。实际 Linux 运行验收仍须使用 `apps/app-linux` 的宿主/命令/数据库/共享 Slint/wgpu 链路，不以仅 UI 编译或测试替身代替；未运行须明确标注。无窗口可选验证默认真实 GPU，软件 Vulkan/lavapipe 仅显式开启并标注；桌面窗口、真实 GPU、真实图纸分别记录验证范围。（2026-10-15 用户决定：日常功能开发只验证改动范围，全量测试与全量门禁仅在用户明确要求或发版时运行。）架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。
+3. UI 桌面实现为 **React + Tauri 原生宿主**（2026-10-16 正式采用；见 ADR 0010 与 §21），
+   `cad-ui-slint` 与 Slint 依赖已删除；平台无关 UI 逻辑在 `cad-ui-core`。**历史**：曾以 Slint 复用
+   UI 定义/组件与应用状态。（2026-10-14 用户授权以 React/Tauri 作为桌面 UI 替代实验目标，见 §21。）
+4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。2026-10-04 用户调整默认提交门禁为 debug 编译与静态检查，不默认运行完整测试、Linux 离屏渲染或 release 编译。实际 Linux 运行验收仍须使用 `apps/app-linux` 的宿主/命令/数据库/**React/Tauri + 原生 wgpu** 链路（2026-10-16 起取代旧共享 Slint/wgpu 链路），不以仅 UI 编译或测试替身代替；未运行须明确标注。无窗口可选验证默认真实 GPU，软件 Vulkan/lavapipe 仅显式开启并标注；桌面窗口、真实 GPU、真实图纸分别记录验证范围。（2026-10-15 用户决定：日常功能开发只验证改动范围，全量测试与全量门禁仅在用户明确要求或发版时运行。）架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。**当前 Windows/macOS/Android/Web 均为 NOT IMPLEMENTED 占位。**
 5. Web 必须支持 WebGL2 与 WebGPU 两条 CAD 绘制路径，提供 Auto / WebGPU / WebGL2 选择。WebGL1 不属于要求。
-6. 项目准备开源。OpenCADStudio 仅作为功能规格与 UI 交互参考，通过 `docs/ui-requirements/` 对照功能；不作为源码抽取、移植或核心实现参考，不要求采用其算法、shader、类型或依赖树。绘制、几何离散、相机和 3D 能力在本项目契约下独立实现；不从 JS 项目迁移绘制核心。mlightcad/cad-viewer 仅保留为 UI 功能组织及交互对照参考。
-7. 保留 Slint，不随参考项目改用 Iced。以数据库对象、事务、变更集和显示表示为核心架构；业务层操作数据，不调用 GPU 绘制命令。
+6. 项目准备开源。OpenCADStudio 曾仅作为功能规格与 UI 交互的历史对照参考（该对照练习已结束，原 `docs/ui-requirements/` 目录已移除）；它不作为源码抽取、移植或核心实现参考，不要求采用其算法、shader、类型或依赖树，也未采用其代码。绘制、几何离散、相机和 3D 能力在本项目契约下独立实现；不从 JS 项目迁移绘制核心。2026-10-15 起 UI 设计直接遵循 AutoCAD 桌面惯例（见 `docs/react-linux-app.md`、`docs/adr/0006-react-native-linux-experiment.md`）。mlightcad/cad-viewer 仅保留为 UI 功能组织及交互对照参考。
+7. 桌面 UI 为 React/Tauri（见决策 3 与 ADR 0010）；**不再**使用 Slint/Iced。以数据库对象、事务、
+   变更集和显示表示为核心架构；业务层操作数据，不调用 GPU 绘制命令。
 8. 产品包含极简查看模式及增强工作模式。初期增强模式仅包含测量及其管理，不修改 DWG 原始图元。（2026-10-05：批注功能整体移除，增强模式不再包含批注。）
 9. 天正、探索者等自定义图元优先通过代理图形缓存显示；不能承诺无缓存或未知专有格式的完整兼容。
 10. 渲染器架构演进为 **“entity = data”**（2026-10-15 用户导向，授权相应契约变更）：几何以数据流承载、类实例化 + 平铺合并，取代“每图元一批”的逐批提交。P2 已把参考图 draw 数从 10,474 降到 797，并保持绘制顺序 tie 语义（merged-vs-legacy 逐字节一致 fence）。per-chunk f64 origin 精度契约仅限正交相机；解析弧、glyph outline-keyed instancing、id-readback picking、selection flags、加速档（vertex pulling / multi-draw，WebGL2 不支持，capability-gated future）与 `MeshEdges` 哨兵缺口为推迟项。P3 待用户决定。见 `docs/adr/0007-entity-as-data-renderer.md` 与 `docs/validation-render-perf-2026-10-15.md`。
@@ -40,7 +50,7 @@
 
 支持二维工作视图和三维观察视图：轨道旋转、标准视图、正交/透视切换，以及基础 3D 线面网格显示。ACIS 实体/曲面通过独立适配和离散模块接入，以公开能力表和样本验证范围为准，不承诺任意实体完整显示。
 
-两端共享 CAD 数据库、事务、语义几何、显示表示、渲染、工具状态与 Slint UI 组件。Web 后端切换后，文档与相机状态可恢复。大图运行有可复现性能数据、资源预算和可控降级行为，不以隐藏缺图或降低测量精度换取性能数字。
+两端共享 CAD 数据库、事务、语义几何、显示表示、渲染、工具状态与共享 UI 层（`cad-ui-core` + React chrome）。Web 后端切换后，文档与相机状态可恢复。大图运行有可复现性能数据、资源预算和可控降级行为，不以隐藏缺图或降低测量精度换取性能数字。
 
 ### 2.3 长期架构目标与非目标
 
@@ -125,7 +135,7 @@ DPI、屏幕旋转、软键盘弹出、浏览器缩放及安全区域变化后�
 
 ```mermaid
 flowchart TD
-    UI["Slint UI 与工具输入"] --> CMD["应用命令与能力检查"]
+    UI["React/Tauri UI 与工具输入"] --> CMD["应用命令与能力检查"]
     CMD --> TX["数据库事务"]
     TX --> DB["底图数据库"]
     TX --> CS["有序变更集"]
@@ -190,11 +200,12 @@ Rust 中建议采用稳定 ID + 显式数据类型/枚举 + 外部协议提供�
 | cad-resources | 字体、图片、外参解析契约及缓存 | 任意网络/路径访问 |
 | cad-measure | 捕捉、测量、单位与精度报告 | 用屏幕图片反推尺寸 |
 | cad-history | 撤销重做、命令合并、恢复日志接口 | 重放鼠标输入代替恢复数据 |
+| 查询 | cad-query：分页查询/Mixed/Unset |
 | cad-app | Session/Workspace、命令、能力与工具状态 | 平台 API 穿透 |
-| cad-query | 面板查询、ViewModel、增量更新 | 复制整个数据库给 UI |
-| cad-ui-slint | 共用控件和响应式布局 | 每实体创建 Slint 图形元素 |
+| ui-core | cad-ui-core：平台无关 wire protocol/布局/CAD 会话/shell 状态/i18n | 依赖 UI 工具包或 GPU |
 | cad-platform | 文件、任务、存储、生命周期与合成契约 | 平台具体实现 |
-| app-android / app-web | 宿主装配、输入、系统接口与发布 | 复制 CAD 业务逻辑 |
+| app-linux | React/Tauri 真实 Linux GUI（GTK 原生 CAD 分区 + DOM chrome） | 把 CAD 业务逻辑放进 UI |
+| app-windows / app-macos / app-android / app-web | 显式 NOT IMPLEMENTED 占位（非可运行 GUI） | 伪装成可用平台产品 |
 | cad-diagnostics / cad-cli-tools | 报告、核心测试、基准和固定视口工具 | 生产 GUI 必需服务端 |
 
 小模块可以物理合并，但不得反转依赖方向。通过 crate 依赖约束和编译验证，不只依赖注释。
@@ -228,7 +239,7 @@ Command 表达意图，Transaction 管数据一致性，UndoRecord 管数据恢�
 
 ### 4.8 显示表示协议
 
-RepresentationProvider 根据只读 EntityView、资源/样式上下文和显示精度配置，输出 DisplayRepresentation 与完整性报告。提供器注册在应用组合根，按实体类型/能力匹配。输出线/曲线、网格、文字、图片、实例与来源映射，不输出 Slint 控件或直接 GPU 命令。
+RepresentationProvider 根据只读 EntityView、资源/样式上下文和显示精度配置，输出 DisplayRepresentation 与完整性报告。提供器注册在应用组合根，按实体类型/能力匹配。输出线/曲线、网格、文字、图片、实例与来源映射，不输出 UI 控件或直接 GPU 命令。
 
 将基础语义几何、可复用离散等级与视口专属显示配置分离，避免每个视口复制全部几何。一个实体可以产生多个显示片段；多个实体可以合成一个 RenderBatch。片段必须保留 entity/instance/sub-element 来源以支持批处理后的拾取。
 
@@ -236,7 +247,7 @@ SolidTessellator 接收自有几何描述或明确的交换数据、容差与取
 
 ### 4.9 UI 查询层
 
-Slint 绑定 LayerListModel、SelectionPropertiesModel、ToolStateModel 和 DiagnosticsModel。列表采用可分页/虚拟化查询与增量行更新，不为海量实体构建 UI 对象。多选属性显示 Mixed/Unset，不用空字符串混淆。
+UI 层（`cad-ui-core` 的 CAD 会话/状态 + React chrome，或未来 Web/Android 的等价实现）绑定 LayerListModel、SelectionPropertiesModel、ToolStateModel 和 DiagnosticsModel。列表采用可分页/虚拟化查询与增量行更新，不为海量实体构建 UI 对象。多选属性显示 Mixed/Unset，不用空字符串混淆。
 
 UI 发命令，查询层接收提交结果再更新模型。程序更新 ViewModel 不应反向触发同一命令。验证失败显示错误并保持数据库原值；不要让 UI 和数据库各保存一份无法同步的可写真相。
 
@@ -255,18 +266,19 @@ UI 发命令，查询层接收提交结果再更新模型。程序更新 ViewMod
 - `cad-engine` 是 UI 无关的渲染会话协调库，当前 manifest 的直接依赖为 `cad-app`、`cad-db`、
   `cad-domain`、`cad-render-wgpu`、`cad-representation`。它们分别提供应用会话/工具契约、权威数据库、
   领域类型、renderer 和显示表示，都是 UI 无关的核心层，不意味着依赖 UI 或宿主实现。`cad-app`
-  不依赖 `cad-engine`；engine 不依赖 `cad-ui-slint`、`cad-host`、Slint，也不直接依赖 wgpu。
+  不依赖 `cad-engine`；engine 不依赖 `cad-ui-core`、`cad-host`、任何 UI 工具包，也不直接依赖 wgpu。
 - P1 的 `RenderSessionHandle` 由 owner-thread 独占持有，管理 CAD 快照、准备流程、dirty runtime、资源与
   overlays；所有权不要求跨线程发送。对外采用 typed render/session API 与 protocol（如 `RenderWake`），
   不承诺稳定的跨语言序列化协议。请求上下文关联 document/tool/viewport/metrics generations；输入类型区分
   world 与 canvas-local 逻辑坐标及 metrics revision，工具开始与事务提交是不同操作。
 - wgpu Device/Queue 通过 `cad-render-wgpu` 的 renderer API/re-export 提供；runtime/render 提交仍由 renderer
-  封装。遵循 §5.2：每条合成路径只有一个 Surface/呈现协调者，Slint 继续拥有 surface/事件循环并作为
-  presenter；CAD 不建立第二套事件循环、不争抢 present，也不进行整幅 GPU→CPU 回读。
+  封装。每条合成路径只有一个 Surface/呈现协调者；当前桌面宿主中 **GTK native 分区**拥有 CAD surface，
+  宿主 UI（WebView chrome）不争抢 same drawable（见 §5 横幅与 §21）；CAD 不建立第二套事件循环、
+  不争抢 present，也不进行整幅 GPU→CPU 回读。
 - P2 将绘图工具状态归入 `SessionState` 的 `Drawing(DrawCapture)`，捕获 `DrawTool` 与开始时的
   `SelectionRef` 快照。确认成功后清除 capture，失败时保留；取消不写事务；模式或文档切换清理状态。
-  测量沿用现有实现。P2 同时移除 host 对 `cad-ui-slint` 与 UI 专属 handle/view/message trait 的依赖；
-  apps 持有 UI/平台适配器，Slint 本地化留在 Slint。
+  测量沿用现有实现。P2 同时移除 host 对旧 UI 专属 handle/view/message trait 的依赖；
+  apps 持有 UI/平台适配器，UI 本地化留在表现层（`cad-ui-core`/React）。
 - P3 使用有界语义队列，默认容量 256，每次最多处理 64 个请求或约 4ms（非实时、不可抢占）。仅合并
   相邻且 context 相同的 `MoveCursor`（latest-wins）；其他输入、命令及 context 变化均为顺序屏障。已接受
   请求有完成结果；过期上下文明确取消，队列满显式报错并为终结输入预留空间。队列由空转非空时唤醒，
@@ -290,6 +302,11 @@ UI 发命令，查询层接收提交结果再更新模型。程序更新 ViewMod
   loader 与 sandbox 不在本轮范围，当前仅记录设计。（React 桌面实验的授权增补见 §21；loader 与 sandbox 仍不在范围。）
 
 ## 5. Slint 与 wgpu 集成规范
+
+> **已退役（2026-10-16）**：本节是 Slint 桌面时代的集成研究记录，**桌面部分作废**（Slint 已删除，
+> 见 ADR 0010 与 §21）。当前桌面组合为 **GTK native CAD 分区 + DOM chrome（WebView）**，仍遵守
+> 「每条合成路径只有一个 Surface/呈现协调者」与 renderer-only wgpu。本节其余内容仅作历史研究保留；
+> **Web/Android 部分亦已退役为 NOT IMPLEMENTED 占位**（见 §9）。
 
 ### 5.1 已知事实与待验证项
 
@@ -414,13 +431,13 @@ GPU 剔除、compute 曲线生成、间接绘制、复杂瓦片缓存和高级�
 
 通过系统文件选择器/SAF 读取 content URI，按权限规则保存与导出，避免申请不必要的全盘权限。处理暂停、恢复、旋转、低内存、进程重建和 Surface 重建。GPU 资源可重建，未保存的编辑状态有恢复机制。区分临时 URI 权限和可持久权限。
 
-锁定 SDK/NDK、Rust target 和打包工具链；生成可安装 APK 并提供构建说明。开发签名与发布签名分开，密钥不进入仓库。最低系统版本和 GPU 支持范围依据最终 Slint/wgpu 组合实测确定并写入兼容表。
+锁定 SDK/NDK、Rust target 和打包工具链；生成可安装 APK 并提供构建说明。开发签名与发布签名分开，密钥不进入仓库。**历史**：最低系统版本与 GPU 支持范围曾依据最终 Slint/wgpu 组合实测确定。**当前（2026-10-16）**：Android UI 已退役为 NOT IMPLEMENTED 占位，不再产出 APK，`build-android.sh` 非零退出。
 
 ### 9.2 Web
 
 交付静态可部署资源、Wasm 和最小 JS 宿主，记录 MIME、HTTPS、安全上下文及可选 COOP/COEP 配置。不要求后端处理 DWG。文件打开使用用户授权 File API；持久化采用可用浏览器 API，并保留下载导出路径。
 
-WebGPU 和 WebGL2 初始化、错误回退、刷新恢复均测试。Web 应用在页面隐藏时暂停无必要绘制。支持目标浏览器矩阵需记录版本和设备；不能将桌面 Chrome 通过等同于移动 Safari 通过。无障碍受 Slint Canvas 路径限制，应明确边界，不宣称拥有 HTML 原生语义。
+**历史**：WebGPU 和 WebGL2 初始化、错误回退、刷新恢复均测试。**当前（2026-10-16）**：浏览器 UI 已退役为 NOT IMPLEMENTED 占位，`build-web.sh`/`deploy-cloudflare-pages.sh` 非零退出；无 web 发布。若未来重建，仍须遵守浏览器矩阵记录与无障碍边界（不得宣称拥有 HTML 原生语义）。
 
 ### 9.3 后续平台可扩展性
 
@@ -430,22 +447,22 @@ WebGPU 和 WebGL2 初始化、错误回退、刷新恢复均测试。Web 应用�
 
 ### 10.1 依据与边界
 
-OpenCADStudio（https://github.com/HakanSeven12/OpenCADStudio）仅提供功能规格与交互对照。参考清单见 `docs/ui-requirements/00-INDEX.md` 及分册；其中上游文件、符号、命令名仅用于说明条目的调查出处，不是本项目源码引用、API 契约或移植入口。
+OpenCADStudio（https://github.com/HakanSeven12/OpenCADStudio）仅提供功能规格与交互对照；2026-10-15 用户决定结束该参考练习并移除本地参考目录 `docs/ui-requirements/`，历史调查记录仍保留在 `docs/migration-map.md`。其中上游文件、符号、命令名仅用于说明历史调查出处，不是本项目源码引用、API 契约或移植入口。此后 UI 设计直接遵循 AutoCAD 桌面惯例，见 `docs/react-linux-app.md` 与 `docs/adr/0006-react-native-linux-experiment.md`。
 
 本规范不授权抽取或移植 OpenCADStudio 源码，不要求依赖其 Iced、opencadcodec、opencadkernel 或 opencadgraph。实际采用的其他依赖和资源仍须独立核查版本、来源与许可；“功能参考”不构成代码或资源的复制授权。
 
 ### 10.2 功能对照与本项目落点
 
-从 UI 需求分册提取用户可见行为，按本规范确认范围后映射到本项目命令、数据库、显示表示和 Slint UI；不按上游源码结构划分模块。
+已从历史 UI 需求分册提取用户可见行为，并按本规范确认范围映射到本项目命令、数据库、显示表示和 UI；不按上游源码结构划分模块。
 
 | 功能类别 | 本项目落点 | 实现与验收要求 |
 |---|---|---|
-| 查看与导航 | Viewport / cad-app / Slint UI | 独立实现相机与输入，验证鼠标/触控与 2D/3D 行为 |
-| 图层、布局、属性查询 | cad-db / cad-query / Slint UI | 数据库唯一权威，命令权限与不支持状态可测试 |
+| 查看与导航 | Viewport / cad-app / cad-ui-core + React UI | 独立实现相机与输入，验证鼠标/触控与 2D/3D 行为 |
+| 图层、布局、属性查询 | cad-db / cad-query / cad-ui-core + React UI | 数据库唯一权威，命令权限与不支持状态可测试 |
 | 测量 | cad-measure | 精度与来源可追踪，结构化 MeasurementRecord |
 | 几何与曲面显示 | cad-geometry / cad-kernel-adapter / cad-representation | 独立实现或另行评估依赖，验证离散误差和完整性 |
 | GPU 显示 | cad-render-wgpu | 自有管线，验证资源所有权和 WebGL2/WebGPU 能力 |
-| 完整编辑、建模与插件 | 不纳入初期范围 | 参考清单不自动扩大已确认交付范围 |
+| 完整编辑、建模与插件 | 不纳入初期范围 | 历史功能参考清单不自动扩大已确认交付范围 |
 
 每项纳入范围的功能必须有行为契约与验收测试，不能以参考项目拥有该功能证明本项目已实现。若需独立引入几何内核，须另行评估接口、许可和平台能力，并明确它与 acadrust 的职责：前者生成可显示几何，后者读取 DWG；不得静默替换解析器。
 
@@ -461,23 +478,28 @@ C. ACIS 实体/曲面：SAT/SAB 或可用结构到几何内核，再按曲面离
 
 ### 10.4 需求对照与验证
 
-维护功能对照：UI 需求分册/条目 → 本规范功能编号与范围决定 → 本项目模块/命令 → 行为差异 → 契约与验收证据。`docs/migration-map.md` 保留为历史调查记录，不再作为源码迁移任务或交付门禁。
+维护功能对照：历史 UI 需求分册/条目（`docs/ui-requirements/` 目录已移除，对照保留为历史映射）→ 本规范功能编号与范围决定 → 本项目模块/命令 → 行为差异 → 契约与验收证据。`docs/migration-map.md` 保留为历史调查记录，不再作为源码迁移任务或交付门禁。
 
 mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主线。截图参考需与可信 CAD 输出和坐标断言结合，不能以参考项目已有错误为标准。
 
 ## 11. 测试、基准与验收
 
-### 11.0 Linux App 主验收与构建契约（2026-10-03 用户确认）
+### 11.0 Linux App 主验收与构建契约（2026-10-03 用户确认；2026-10-16 桌面迁移更新）
 
-- 主入口：`cargo build -p app-linux --bin yacr-linux --release --locked`，主机质量门禁必须包含
-  `cad-ui-slint` 和 `app-linux`；串行执行 GPU 测试。Android/Web 的平台专用门禁仍独立保留。
-- 主验收：`bash scripts/check-linux-app.sh` 执行 release Linux App，无窗口时使用官方 Slint
-  FemtoVG/wgpu 离屏平台与 lavapipe。命令改变权威相机、真实 CAD 帧产生、PNG 和结构化报告
-  均需检查，失败必须非零退出。每轮创建新证据目录，失败证据不覆盖。
-- GitHub Actions 必须有默认启用且不可忽略失败的 `linux-app` job，包含 release 构建、宿主契约
-  和离屏运行，上传可执行文件/报告/截图；工作流声明与本机运行证据分别记录。
-- Linux 优先不等于删减 Android/Web 需求。WASM 全 workspace lib 检查继续保留；非 Linux 目标
-  的 Linux 空库隔离检查仅验证依赖边界，不算 Linux 编译或运行验收。
+- 主入口（当前）：`cargo build -p app-linux --bin yacr --release --locked`（React/Tauri 宿主），
+  主机质量门禁必须包含 `cad-ui-core`/`cad-host`/`app-linux` 与 React 前端构建；串行执行 GPU 测试。
+  **历史**：曾为 `--bin yacr-linux` + `cad-ui-slint`（Slint 桌面已删除）。
+- 主验收（当前）：真实显示 + 硬件 Vulkan，经 `scripts/run-react-linux.sh` 启动宿主，使用 env-gated
+  证据驱动（`YACR_PROBE_EVIDENCE`/`YACR_PROBE_LIFECYCLE`）与 `apps/app-linux/scripts/x11-window-grab.c`
+  捕获。命令改变权威相机、真实 CAD 帧产生、截图与结构化报告均需检查，失败必须非零退出。每轮创建
+  新证据目录，失败证据不覆盖。**旧 `scripts/check-linux-app.sh`（Slint 离屏）+ lavapipe 已退役。**
+- **当前状态**：Slint→React 迁移后的完整编译/测试/门禁/真实 GPU 验收 **尚未运行**（NOT RUN，
+  由编排者在 P6 统一执行并记录）；旧 Slint 阶段的 Linux PASS 结果**不**构成 React 宿主验收。
+- GitHub Actions 必须有默认启用且不可忽略失败的 `linux-app` job（安装 GTK/WebKitGTK 前置 + 构建
+  并测试 React 前端 + `cargo check -p app-linux --all-targets`）；工作流声明与本机运行证据分别记录。
+- Android/Web 平台专用门禁当前仅编译占位（`android-check`；Web 无 UI）；**不代表可运行产品**。
+- WASM 全 workspace lib 检查继续保留；非 Linux 目标的 Linux 空库隔离检查仅验证依赖边界，
+  不算 Linux 编译或运行验收。
 - 合成图软件 GPU smoke 不等于视觉正确、真实图纸兼容、桌面窗口交互或真实 GPU 验收；这些结论
   必须分别记录。Linux 未接线能力显式 `Unsupported`，不能回退为假数据或空成功。
 
@@ -551,7 +573,7 @@ mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主
 
 | 项目 | 当前默认决定 | 需要的证据或输入 |
 |---|---|---|
-| UI | Slint 共享组件与响应式布局 | Android/Web 合成原型 |
+| UI | cad-ui-core 共享会话/状态/布局契约 + React chrome | 其它平台合成原型（当前 NOT IMPLEMENTED） |
 | 架构 | 数据库、事务、显示表示与查询层 | 依赖方向、增量更新和恢复测试 |
 | 功能规格参考 | OpenCADStudio UI 需求分册；核心独立实现 | 范围映射、行为契约与本项目验收证据 |
 | 三维 | 观察与直接网格必需，ACIS 按样本验收 | 数据适配、离散完整性、跨后端显示 |
@@ -567,7 +589,7 @@ mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主
 
 ## 14. 最终交付物清单
 
-1. 可复现构建的 Rust workspace、Slint UI、WGSL shader 与最小平台宿主，附数据库/事务/显示协议公共契约。
+1. 可复现构建的 Rust workspace、React/Tauri 桌面宿主（含 `cad-ui-core` 共享 UI 层）、WGSL shader 与最小平台宿主，附数据库/事务/显示协议公共契约。
 2. 可安装 Android APK，以及浏览器静态构建产物与部署说明。
 3. 两种模式、测量与独立导出/说明文件（批注 sidecar 已随子系统移除）。
 4. acadrust 外部适配层、代理解码模块、代理诊断 CLI 和支持矩阵。
@@ -598,7 +620,6 @@ mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主
 - S14 wgpu downlevel capabilities： https://docs.rs/wgpu/latest/wgpu/struct.DownlevelCapabilities.html
 - S15 Autodesk 代理实体显示原理： https://help.autodesk.com/cloudhelp/2022/ENU/OARX-DevGuide/files/GUID-7DBB1CCB-6E54-46D9-A827-25C5A7379E6E.htm
 - S17 OpenCADStudio（仅功能规格参考）： https://github.com/HakanSeven12/OpenCADStudio
-- S18 本地 UI 功能参考目录： [docs/ui-requirements/00-INDEX.md](docs/ui-requirements/00-INDEX.md)
 - S19 历史调查记录（非源码采用要求）： [docs/migration-map.md](docs/migration-map.md)
 - S16 Autodesk 代理图形生成： https://help.autodesk.com/cloudhelp/2022/ENU/AutoCAD-Architecture/files/GUID-316EFE07-0D38-4E65-ABE3-A766F714700D.htm
 
@@ -716,9 +737,15 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
 
 ## 21. 实验范围增补：React/Tauri 原生桌面宿主（2026-10-14 用户授权）
 
-> 本节为用户授权的**实验范围增补**，只覆盖**桌面 React/Tauri 实验路线**；不修改 §1–§20 的既有
-> 需求、P1–P4 历史与验收条款，也不改变 Web/Android 交付要求。细节契约见
-> `docs/adr/0006-react-native-linux-experiment.md`。
+> **已采用并取代历史定位（2026-10-16）**：本节的 React/Tauri **实验**路线已成为**正式桌面实现**；
+> Slint 桌面 UI 与 `cad-ui-slint` 已删除。当前决策契约见
+> `docs/adr/0010-react-linux-host-replaces-slint.md`（本节保留为授权与窄 2D 导航合同的来源）。
+> 下文“实验/未删旧代码/Web 仍以 Slint 为基线”等表述按此更新；**Windows/macOS 仍 NOT IMPLEMENTED**。
+
+> 本节为用户授权的**实验范围增补**（现已采用）；只覆盖**桌面 React/Tauri 路线**，不修改 §1–§20 的
+> 既有需求、P1–P4 历史与验收条款。细节契约见
+> `docs/adr/0006-react-native-linux-experiment.md`（起源）与
+> `docs/adr/0010-react-linux-host-replaces-slint.md`（当前决策）。
 
 - **授权目标**：桌面 UI 以 **React + Tauri** 作为替代 Slint 的实验目标；CAD 核心保持 **native
   Rust** 与 **renderer-only wgpu**（wgpu 仍仅由 `cad-render-wgpu` 依赖）；本实验路线**不允许

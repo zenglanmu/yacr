@@ -1,5 +1,10 @@
 # 诊断抽屉与双语 chrome（N01/U08/N02）
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 本轮把 **UI chrome 的双语化** 落到真实目录，并把诊断抽屉接到结构化诊断模型；
 同时新增 `i18n-contracts` CI job。渲染未在本机运行（见“未完成”）。
 

@@ -1,5 +1,10 @@
 # UI、DXF 与文字尺寸修复（2026-10-03）
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 本轮用户要求按 `docs/ui-spec/` 补齐图标/禁用状态/视图操作，支持 DXF，使用网络 DWG
 对比文字；**明确不跑完整测试，只要求 Linux/Web 构建**，最后提交推送并发布 Cloudflare Pages。
 这里只记录本轮的针对性契约与样本，不沿用上一轮完整门禁作为本轮结论。

@@ -1,5 +1,90 @@
 # 后续 agent 接手入口
 
+> **当前状态横幅（2026-10-16）**
+>
+> 本文是**逐轮历史日志**（最新在顶部）。桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
+> （`apps/app-linux`，二进制 `yacr`），`cad-ui-slint` 与 Slint 依赖已删除；Windows/macOS/Android/Web
+> 当前是**显式 NOT IMPLEMENTED 占位**。要了解**当前**架构与构建，先读：
+> `docs/architecture.md`、`docs/adr/0010-react-linux-host-replaces-slint.md`、
+> `docs/adr/0011-native-wayland-subsurface.md`、`docs/react-linux-app.md`、
+> `docs/build.md`、`docs/ci.md`、`AGENTS.md`。下列各轮小节中的 Slint/`app-linux`(旧)/`yacr-linux`/
+> 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
+> `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
+
+## 原生 Wayland 后端（2026-10-16，有界；ADR-0011）
+
+- **决策**：`apps/app-linux` 在保留 X11/XWayland 的同时加入**真实原生 Wayland** 后端（**非**
+  XWayland，无 UI 重设计，无 CPU 帧拷贝）。CAD 分区在 Wayland 上是 **app-owned child
+  `wl_surface` + `wl_subsurface`**（父级为 GDK toplevel 的 `wl_surface`），渲染器只接收该 child 的
+  live raw handles；X11 仍走既有原生 X child 窗口。见 `docs/adr/0011-native-wayland-subsurface.md`。
+- **后端策略**：`apps/app-linux/src/backend.rs` 在 GTK 启动前显式决议 `GDK_BACKEND`——`Auto` 优先
+  原生 Wayland（需 `WAYLAND_DISPLAY` + `XDG_RUNTIME_DIR`），否则 X11；显式 `x11`/`wayland` 原样保留；
+  非法/歧义值硬错；**无静默回退**。选择意图与**实际**后端/协议证据分开记录。
+- **私有 C shim**：`apps/app-linux/native/wayland_shim.{c,h}` 用系统 `wayland-client-protocol.h` 包装；
+  借用 GDK 的 `wl_display`，**GTK 独占分发**（不 dispatch/roundtrip/flush）；异步 registry + 
+  `wl_display_sync` discovery 屏障；缺失/过老 global 显式失败（不永远 Pending）；空 input region；
+  整数 buffer scale；父级 commit 语义（只 `queue_draw`，不提交 GDK surface）；释放顺序
+  presenter→subsurface→child 且早于 GTK parent unrealize；Ready 健康检查（shim/display 错误 + 当前父
+  `wl_surface` 身份）；构造期有界 `catch_unwind` 诚实诊断。
+- **有界证据（实际运行）**：scoped `cargo check --all-targets`、`cargo test --lib`（`app-linux` **58/58**、
+  `cad-ui-core` **61/61**）、clippy（0 warning）、wasm32 cfg 隔离、`check-architecture.py`、`check-i18n.py`、
+  scoped `fmt`；真实原生 Wayland `--probe`（`DISPLAY` 未设、`GDK_BACKEND=wayland`、物理 Vulkan Quadro P620、
+  真实 app-owned child `wl_subsurface` 协议身份）；以及 W3 有界运行（CAD/输入/生命周期/几何/视觉/X11，见上）。
+  最终 release 二进制 `target/release/yacr` sha256 `7618d0d263498bac75c68eabc18ec6fcaba310a412a06d2467d83552b1393129`。
+  完整命令/退出码/日志/边界见 `docs/validation-native-wayland-2026-10-16.md`；源码门禁见
+  `.slim/deepwork/native-wayland/gate-w2-attempt2.md` 与 `gate-w3-geometry.md`。
+- **W3 有界运行（实际运行）**：原生 CAD（`--open`，4 实体、`current_scene`、P620、`error=None`）、9 个合成 DOM
+  输入全 `accepted` 且相机实际改变（**≠ 真实用户指针精度验收**）、resize 遥测；强制 **overlay** 生命周期
+  释放/重建/恢复（**不是** toplevel `wl_surface` 替换证明）；分类修复后 gap 由旧 120 error 变为 **0 error/122
+  waiting**、gen2 新 child `device_epoch=2`、自然退出 0；**几何修复**（子缓冲 52×99 过小 → 最终 sha
+  `7618d0d2…` 下 `DOM 926x266/1166x513` 与 native 一致，margins `34/84`）；**Observer 终态：有界截图视觉
+  PASS**（Mutter 同 UID ScreenCast 自身捕获 baseline/resized；灰带消失、无覆盖/间隙/溢出，**无** golden/精度/
+  vendor 声明）；**X11 运行证据 PASS**（真实 XID、自然退出 0；X11 PNG **非**原生证据，reader 无法解码故不判视觉）。
+  退出码**按 case 精确**：原生 baseline `capA` 捕获后 SIGTERM **143**，resized `capB` 与 X11 **自然 0**。
+- **最终 Oracle 终判（W3 attempt3）：ACCEPT-WITH-LIMITATIONS（无 blocker）** —— **有界本地验收**
+  （GNOME/Mutter + Quadro P620 + `scale=1`），**不是**完整产品/跨平台/vendor/golden/性能验收；判词见
+  `.slim/deepwork/native-wayland/gate-w3-final.md`。生命周期运行用的 `6894e423` **未**在最终几何二进制
+  `7618d0d2` 上复跑（admission 在几何轮未改动）；X11 视觉**未**由 observer 判读（仅运行证据 PASS）。
+- **NOT RUN / 未支持（不得夸大）**：**DPR>1/分数缩放**（只测 `scale=1`）、
+  GTK **toplevel** 替换、GPU 设备丢失、vendor/adapter 广度、几何/像素精度、性能/60fps、跨平台、打包。
+  **首次 scoped 编译失败（exit 101）与源码 REJECT 保留为负面证据**。
+- **边界不变**：`cad-host`/`cad-ui-core` 工具包与 GPU 无关；renderer-only wgpu、importer-only
+  acadrust 不变；C shim 与 GDK Wayland 访问只存在于 `app-linux`。非 Linux 占位与退役脚本未变。
+
+## Slint → React/Tauri 桌面迁移（2026-10-16，源码级；ADR-0010）
+
+- **决策**：桌面 UI 正式由 Slint 迁移为 **React（Vite）chrome in Tauri 2 WebView + 原生 GTK/wgpu
+  CAD 分区**；见 `docs/adr/0010-react-linux-host-replaces-slint.md`（取代 ADR 0006 的实验定位，
+  使 ADR 0002/0003 的 Slint 桌面基线作废）。本文件以下历史小节**不改写**。
+- **宿主**：`apps/app-linux`（Linux 优先真实 GUI，bin `yacr`，Tauri id `dev.yacr.app`）；非 Linux
+  目标编译为空库、二进制返回显式 NOT IMPLEMENTED。配置目录 `~/.config/yacr/`（由 `yacr-react`
+  迁移，**不自动迁移**）。
+- **共享层**：新增 `cad-ui-core`（protocol/layout/session/shell/i18n），位于 UI 无关的
+  `cad-app`/`cad-host`/`cad-engine`/`cad-platform` 契约之上；宿主显式 `state.shell.*` + 直接 `use
+  cad_ui_core::…`，无过渡 re-export。
+- **退役**：删除 `cad-ui-slint`（含重复 i18n 副本）+ workspace 的 `slint`/`slint-build`；
+  `Cargo.lock` 按可达性剪枝 845 → 622 包；旧 Slint 验证/离屏/真实 GPU 测试与 web shell/Flatpak 退役；
+  6 个公共构建/打包/部署脚本改为非零 NOT IMPLEMENTED；8 个 CI job `if: false` 硬禁用；**Linux release
+  暂时不可用，等待替代打包验收**。
+- **守卫**：`check-architecture.py` 全 workspace 禁 `slint`/`slint-build`/`iced`（含 build/dev/target
+  表与 workspace 继承别名）；`check-i18n.py` 权威目录改为 `cad-ui-core/i18n` 并新增 React CJK 扫描；
+  新契约 `scripts/test-ui-migration-guards.py`（18 项负向/正向控制，已接入 CI 契约步骤）。
+- **支持范围（诚实）**：仅 **OPEN / FIT** 接线；其余控件显式禁用并标注原因；**不新增投机 IPC**；
+  **不是完整 CAD 产品**。
+- **证据（分级诚实）**：**P6 最终验证已执行（有界、分区）**——前端 `npm ci`/`npm test` 43/43/`npm run
+  build`、`cargo fmt --check`、clippy、四个 Python 门禁与十个 Python 契约（含 18 项迁移守卫）、
+  `--locked` metadata/clippy/workspace all-targets check/wasm lib check/workspace 测试（1825 passed/0 failed/
+  19 ignored）/桩 lib 测试，以及真实硬件 GPU（Quadro P620/Vulkan，真实 GTK XWayland）的 open+渲染 smoke、
+  原生分区生命周期（forced unrealize→新 XID+generation 2、自然 exit 0）、外部 WM minimize→restore 与真实
+  resize；完整命令/退出码/日志/限制见 `docs/validation-react-linux-migration-2026-10-16.md`（及
+  `.slim/deepwork/replace-slint-ui/p6-*.md`）。解析器一度被手工锁阻断，已按**批准的最小离线同步**修复
+  （仅 `Cargo.lock` 622→595，纯删 27 孤儿，无版本变动）。**Gate P6 attempt2：ACCEPT-WITH-FIXES（文档限定
+  已应用）**；observer 终判所观察截图**无重大视觉缺陷**；**有界本地 Linux 迁移验收通过**，**不是**完整 CAD
+  产品/跨平台/vendor/golden/性能验收。应用侧 `unminimize()`+强制 unrealize 序列**未解决**。
+  **早期阶段在其当时分支/代码树上另有有界执行**：P1 lib 契约（59+27→86）与 check/fmt；P2a host/wasm/
+  aarch64 编译检查；P4 前端构建 + 43/43 测试。**P2b/P3b/P5 为纯源码实施/评审**。旧 `#[ignore]` Slint
+  真实 GPU 套件与其 runner 已退役，其结论不得复用。
+
 ## 线/弧抗锯齿统一轮（2026-10-15，`309e1a2` / ADR-0009）
 
 - 用户批准「1+3」：把**所有线类**几何改为与 SDF 弧（ADR-0008）**同语义**的抗锯齿笔画——
@@ -2289,7 +2374,7 @@ debug/release 二进制构建通过。全树严格 clippy 在未修改的 `cad-a
 ## 功能参考契约修订（2026-10-04）
 
 用户明确 OpenCADStudio 仅为功能规格参考，不为源码参考。已同步规范 §2/§10/§13–15、
-UI 需求总目录与实施追踪：从 `docs/ui-requirements/` 对照用户可见功能，核心独立实现，
+UI 需求总目录与实施追踪：从 `docs/ui-requirements/`（该目录已于 2026-10-15 随参考练习结束而移除）对照用户可见功能，核心独立实现，
 不要求源码抽取、移植、上游依赖或算法采用；参考清单不扩大只读/测量/批注范围。
 `docs/migration-map.md` 保留历史调查事实，旧迁移待办不再有效；既有实现与历史证据不删除。
 本轮仅文档与 Rust 文档注释修订，不宣称新的产品运行或兼容性证据。

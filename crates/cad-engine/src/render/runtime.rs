@@ -6,12 +6,179 @@ use cad_domain::SelectionRef;
 use cad_render_wgpu::{wgpu, BackendCapabilities, RenderError, RenderTarget, Renderer};
 use std::sync::Arc;
 
+/// Observation of one **actual** renderer invocation (`Renderer::render`/
+/// `render_3d`). Produced only when the engine really invoked the renderer this
+/// frame; a retained/reused frame or a gate `Ok(None)` never produces one, so a
+/// host can never replay stale stats. Delivered at most once per render.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderStatsObservation {
+    /// Monotonic engine render sequence (one per actual renderer invocation).
+    pub render_seq: u64,
+    /// Device epoch this frame rendered on.
+    pub device_epoch: u64,
+    /// View revision tagged on this frame.
+    pub view_revision: u64,
+    /// Scene revision committed at render time.
+    pub applied_revision: Option<u64>,
+    /// Base publication revision committed at render time.
+    pub applied_base: Option<u64>,
+    /// Upload bookkeeping counters at render time.
+    pub uploads_started: u64,
+    pub upload_revision_resets: u64,
+    pub ready_none_clears: u64,
+    /// CPU milliseconds of the renderer's CPU path (excludes the blocking poll).
+    pub cpu_ms: f64,
+    /// GPU milliseconds if the backend reported them; `None` is honest (no
+    /// invented GPU timestamp).
+    pub gpu_ms: Option<f64>,
+    pub plan_ms: f64,
+    pub uniform_ms: f64,
+    pub encode_ms: f64,
+    pub submit_ms: f64,
+    /// Blocking device-poll wait (excluded from `cpu_ms`).
+    pub wait_ms: f64,
+    pub draw_calls: u64,
+    pub vertices: usize,
+    pub triangles: usize,
+    pub instanced_draws: u64,
+    pub mesh_draws: u64,
+    /// Stable lowercase render tier (`"universal"`/`"accelerated"`).
+    pub tier: &'static str,
+    /// Whether part of the scene was held back by the frame budget.
+    pub over_budget: bool,
+    /// Progressive cursor / total (existing `frame_progress`), if progressive.
+    pub progressive_cursor: Option<usize>,
+    pub progressive_total: Option<usize>,
+    /// Whether the progressive frame completed this render.
+    pub progressive_complete: bool,
+}
+
+/// Stage timings of one bounded upload work unit (diagnostics only).
+///
+/// Produced only when `apply_ready_updates` actually staged or committed an
+/// upload; a no-op/flags-only call produces none. Delivered at most once.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UploadTimingObservation {
+    /// Monotonic upload-timing sequence.
+    pub seq: u64,
+    /// Scene revision this upload belongs to.
+    pub scene_revision: u64,
+    /// Whether this upload replaces the base (vs an overlay-suffix re-upload).
+    pub base_changed: bool,
+    /// Whether the upload committed (false = chunked staging only this call).
+    pub committed: bool,
+    /// 0 = base group, 1 = overlay group, 2 = committed.
+    pub group: usize,
+    /// Batches staged (staging) or staged+committed (commit).
+    pub batches: usize,
+    /// `prepare_upload_batches` wall time in this call.
+    pub prepare_us: u64,
+    /// `PreparedUpload::append` wall time in this call.
+    pub append_us: u64,
+    /// `commit_upload` wall time in this call (0 when not committed).
+    pub commit_us: u64,
+    /// Whole `apply_ready_updates` work-unit wall time.
+    pub total_us: u64,
+    /// Renderer-side `commit_upload` substage timings, when it committed.
+    pub commit: Option<cad_render_wgpu::CommitTiming>,
+}
+
 struct PendingUpload {
     scene: PreparedScene,
     group: usize,
     offset: usize,
     prepared: Option<cad_render_wgpu::PreparedUpload>,
     base_changed: bool,
+}
+
+/// Read-only snapshot of an in-flight chunked upload (diagnostics only).
+///
+/// `offset` is the number of batches already staged in the current group;
+/// `group` 0 is the base prefix and group 1 the overlay suffix. A host samples
+/// this over time to tell a monotonic (progressing) upload from a reset/stalled
+/// one, without touching the renderer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UploadDiagnostics {
+    /// Scene revision being uploaded.
+    pub scene_revision: u64,
+    /// 0 = base prefix, 1 = overlay suffix.
+    pub group: usize,
+    /// Batches staged so far in the current group.
+    pub offset: usize,
+    /// Whether this upload replaces the base (vs an overlay-suffix re-upload).
+    pub base_changed: bool,
+}
+
+/// Read-only runtime bookkeeping for the waiting/upload diagnosis.
+///
+/// Pure projected state: reading it never advances an upload, a revision or the
+/// view, and never forces engine work.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeDiagnostics {
+    /// `"detached"` / `"ready"` / `"lost"` / `"failed"`.
+    pub lifecycle: &'static str,
+    /// Scene revision the GPU last committed (`applied_revision`).
+    pub applied_revision: Option<u64>,
+    /// Base publication revision the GPU last committed.
+    pub applied_base: Option<u64>,
+    /// Resident base batch prefix length.
+    pub resident_base_batches: usize,
+    /// Whether a chunked upload is currently in flight.
+    pub uploading: bool,
+    /// The in-flight upload, if any.
+    pub upload: Option<UploadDiagnostics>,
+    /// Whether the 2D navigation fallback is withholding overlays.
+    pub overlays_suppressed: bool,
+    /// Cumulative overlay-suffix commits.
+    pub overlay_suffix_commits: u64,
+    /// Cumulative pulled-prefix **reuses** (the accelerator retained the base
+    /// pulled segments for a suffix commit), `0` when no renderer is attached.
+    pub pulled_prefix_reuses: u64,
+    /// Cumulative pulled-prefix **rebuilds** (a full pulled rebuild that
+    /// (re)established a checkpoint), `0` when no renderer is attached.
+    pub pulled_prefix_rebuilds: u64,
+    /// Cumulative frames the renderer actually produced (`frames_rendered`).
+    pub frames_rendered: u64,
+    /// Uploads started from scratch (no prior pending upload).
+    pub uploads_started: u64,
+    /// Pending uploads **reset** because the ready scene revision changed.
+    pub upload_revision_resets: u64,
+    /// Pending uploads **cleared** because `apply_ready_updates` saw no ready scene.
+    pub ready_none_clears: u64,
+    /// Most recent reset reason: `"revision_replace"` / `"ready_none"` / `None`.
+    pub last_upload_reset: Option<&'static str>,
+    /// Last real failure/diagnostic string (never a converted success).
+    pub diagnostic: Option<String>,
+}
+
+/// What `apply_ready_updates` should do with the pending upload for a ready scene.
+///
+/// Pure so the reset/clear counters are contract-tested without a GPU.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UploadDecision {
+    /// No ready scene: clear any pending upload (`ready_none`).
+    ClearPending,
+    /// Start a fresh upload.
+    Start,
+    /// The pending upload is for a different scene revision: reset it.
+    ResetRevision,
+    /// The pending upload continues for the same revision.
+    Continue,
+}
+
+fn upload_decision(
+    ready_present: bool,
+    pending_revision: Option<u64>,
+    ready_revision: u64,
+) -> UploadDecision {
+    if !ready_present {
+        return UploadDecision::ClearPending;
+    }
+    match pending_revision {
+        None => UploadDecision::Start,
+        Some(revision) if revision == ready_revision => UploadDecision::Continue,
+        Some(_) => UploadDecision::ResetRevision,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,7 +231,7 @@ pub struct PresentedFrame {
 }
 
 /// The requested and rendered frame versions are separate: errors never mark
-/// a frame clean. UI-only Slint frames reuse the previously drawn texture.
+/// a frame clean. UI-only frames reuse the previously drawn texture.
 #[derive(Default)]
 pub(super) struct FrameInvalidation {
     requested: u64,
@@ -123,6 +290,24 @@ pub struct CadRenderRuntime {
     /// Diagnostic from the last entity-flag apply: the requested refs that matched
     /// no resident whole-entity pick key. `None` when every requested ref resolved.
     flags_diagnostic: Option<String>,
+    /// Upload bookkeeping for the waiting/upload diagnosis (counters only; they
+    /// never influence behaviour).
+    uploads_started: u64,
+    upload_revision_resets: u64,
+    ready_none_clears: u64,
+    last_upload_reset: Option<&'static str>,
+    /// Monotonic actual-renderer-invocation sequence.
+    render_seq: u64,
+    /// The most recent actual renderer observation, if any.
+    pending_render_observation: Option<RenderStatsObservation>,
+    /// Render sequence already handed out by `take_render_observation`.
+    last_taken_render_seq: Option<u64>,
+    /// Monotonic upload-timing sequence.
+    upload_timing_seq: u64,
+    /// The most recent upload stage-timing observation, if any.
+    pending_upload_timing: Option<UploadTimingObservation>,
+    /// Upload-timing sequence already handed out.
+    last_taken_upload_timing_seq: Option<u64>,
 }
 impl Default for CadRenderRuntime {
     fn default() -> Self {
@@ -146,6 +331,16 @@ impl Default for CadRenderRuntime {
             applied_highlight: None,
             image_diagnostic: None,
             flags_diagnostic: None,
+            uploads_started: 0,
+            upload_revision_resets: 0,
+            ready_none_clears: 0,
+            last_upload_reset: None,
+            render_seq: 0,
+            pending_render_observation: None,
+            last_taken_render_seq: None,
+            upload_timing_seq: 0,
+            pending_upload_timing: None,
+            last_taken_upload_timing_seq: None,
         }
     }
 }
@@ -201,6 +396,16 @@ impl CadRenderRuntime {
         self.applied_highlight = None;
         self.image_diagnostic = None;
         self.flags_diagnostic = None;
+        self.uploads_started = 0;
+        self.upload_revision_resets = 0;
+        self.ready_none_clears = 0;
+        self.last_upload_reset = None;
+        // A device change invalidates any un-taken observation: it must never be
+        // replayed against the new device epoch.
+        self.pending_render_observation = None;
+        self.last_taken_render_seq = None;
+        self.pending_upload_timing = None;
+        self.last_taken_upload_timing_seq = None;
         self.dirty.invalidate();
     }
 
@@ -229,7 +434,10 @@ impl CadRenderRuntime {
             return Ok(());
         }
         let Some(ready) = ready else {
-            self.pending_upload = None;
+            if self.pending_upload.take().is_some() {
+                self.ready_none_clears += 1;
+                self.last_upload_reset = Some("ready_none");
+            }
             return Ok(());
         };
         if self.applied_revision == Some(ready.revision) {
@@ -274,6 +482,21 @@ impl CadRenderRuntime {
             .as_ref()
             .is_none_or(|pending| pending.scene.revision != ready.revision)
         {
+            match upload_decision(
+                true,
+                self.pending_upload
+                    .as_ref()
+                    .map(|pending| pending.scene.revision),
+                ready.revision,
+            ) {
+                UploadDecision::ResetRevision => {
+                    self.upload_revision_resets += 1;
+                    self.last_upload_reset = Some("revision_replace");
+                }
+                UploadDecision::Start => self.uploads_started += 1,
+                // Unreachable by the guard above; keep the compiler honest.
+                UploadDecision::Continue | UploadDecision::ClearPending => {}
+            }
             self.pending_upload = Some(PendingUpload {
                 scene: ready.clone(),
                 group: usize::from(!base_changed),
@@ -286,6 +509,8 @@ impl CadRenderRuntime {
         #[cfg(not(target_arch = "wasm32"))]
         let started = std::time::Instant::now();
         let mut slices = 0;
+        let mut prepare_us = 0u64;
+        let mut append_us = 0u64;
         while pending.group < 2 && slices < 4 {
             #[cfg(not(target_arch = "wasm32"))]
             if started.elapsed() >= std::time::Duration::from_millis(8) {
@@ -310,16 +535,49 @@ impl CadRenderRuntime {
                 vertices = next;
                 end += 1;
             }
+            let prepare_started = std::time::Instant::now();
             let piece = renderer.prepare_upload_batches(&batches[pending.offset..end])?;
+            prepare_us += prepare_started.elapsed().as_micros() as u64;
+            let append_started = std::time::Instant::now();
             if let Some(prepared) = &mut pending.prepared {
                 prepared.append(piece)?;
             } else {
                 pending.prepared = Some(piece);
             }
+            append_us += append_started.elapsed().as_micros() as u64;
             pending.offset = end;
             slices += 1;
         }
-        if pending.group < 2 {
+        if self
+            .pending_upload
+            .as_ref()
+            .is_some_and(|pending| pending.group < 2)
+        {
+            // Chunked staging only (no commit yet): record the staged progress.
+            // Copy the facts out first so the `pending_upload` borrow ends before
+            // the whole-`self` timing record.
+            let (group, offset, scene_revision, base_changed) = {
+                let pending = self.pending_upload.as_ref().expect("checked above");
+                (
+                    pending.group,
+                    pending.offset,
+                    pending.scene.revision,
+                    pending.base_changed,
+                )
+            };
+            self.record_upload_timing(UploadTimingObservation {
+                seq: 0,
+                scene_revision,
+                base_changed,
+                committed: false,
+                group,
+                batches: offset,
+                prepare_us,
+                append_us,
+                commit_us: 0,
+                total_us: started.elapsed().as_micros() as u64,
+                commit: None,
+            });
             return Ok(());
         }
         let pending = self.pending_upload.take().unwrap();
@@ -327,6 +585,7 @@ impl CadRenderRuntime {
             Some(prepared) => prepared,
             None => renderer.prepare_upload_batches(&[])?,
         };
+        let commit_started = std::time::Instant::now();
         renderer.commit_upload(
             prepared,
             if pending.base_changed {
@@ -335,6 +594,8 @@ impl CadRenderRuntime {
                 self.base_batches
             },
         )?;
+        let commit_us = commit_started.elapsed().as_micros() as u64;
+        let commit_timing = renderer.last_commit_timing();
         // A suffix-only commit re-uploads (or truncates) the transient overlay
         // batch range; a base change replaces the whole scene instead.
         if !pending.base_changed {
@@ -384,6 +645,21 @@ impl CadRenderRuntime {
             self.image_diagnostic.as_deref(),
             self.flags_diagnostic.as_deref(),
         );
+        // Record the committed upload's stage timings **after** the last `renderer`
+        // borrow (diagnostics only; taken at most once so a host never replays them).
+        self.record_upload_timing(UploadTimingObservation {
+            seq: 0,
+            scene_revision: pending.scene.revision,
+            base_changed: pending.base_changed,
+            committed: true,
+            group: 2,
+            batches: pending.scene.base.added.len() + pending.scene.highlight.added.len(),
+            prepare_us,
+            append_us,
+            commit_us,
+            total_us: started.elapsed().as_micros() as u64,
+            commit: commit_timing,
+        });
         Ok(())
     }
 
@@ -445,6 +721,135 @@ impl CadRenderRuntime {
     /// scene while claiming it is current).
     pub fn scene_committed(&self, scene_revision: u64, base_revision: u64) -> bool {
         self.applied_revision == Some(scene_revision) && self.applied_base == Some(base_revision)
+    }
+
+    /// The in-flight upload's `base_changed` kind, if any (`diagnostics` only).
+    pub(super) fn pending_upload_kind(&self) -> Option<bool> {
+        self.pending_upload
+            .as_ref()
+            .map(|pending| pending.base_changed)
+    }
+
+    /// The current device epoch (incremented on every successful attach).
+    pub(super) fn device_epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// Record the observation of one actual renderer invocation.
+    fn record_render_observation(
+        &mut self,
+        stats: cad_render_wgpu::FrameStats,
+        view_revision: u64,
+        progressive: Option<(usize, usize)>,
+        progressive_complete: bool,
+    ) {
+        self.render_seq += 1;
+        let (cursor, total) = match progressive {
+            Some((cursor, total)) => (Some(cursor), Some(total)),
+            None => (None, None),
+        };
+        self.pending_render_observation = Some(RenderStatsObservation {
+            render_seq: self.render_seq,
+            device_epoch: self.epoch,
+            view_revision,
+            applied_revision: self.applied_revision,
+            applied_base: self.applied_base,
+            uploads_started: self.uploads_started,
+            upload_revision_resets: self.upload_revision_resets,
+            ready_none_clears: self.ready_none_clears,
+            cpu_ms: stats.cpu_ms,
+            gpu_ms: stats.gpu_ms,
+            plan_ms: stats.plan_ms,
+            uniform_ms: stats.uniform_ms,
+            encode_ms: stats.encode_ms,
+            submit_ms: stats.submit_ms,
+            wait_ms: stats.wait_ms,
+            draw_calls: stats.draw_calls,
+            vertices: stats.vertices,
+            triangles: stats.triangles,
+            instanced_draws: stats.instanced_draws,
+            mesh_draws: stats.mesh_draws,
+            tier: stats.tier.as_str(),
+            over_budget: stats.over_budget.is_some(),
+            progressive_cursor: cursor,
+            progressive_total: total,
+            progressive_complete,
+        });
+    }
+
+    /// Take the latest actual-render observation, at most once per render
+    /// sequence (so a retained/waiting frame can never replay stale stats).
+    pub fn take_render_observation(&mut self) -> Option<RenderStatsObservation> {
+        let observation = self.pending_render_observation.as_ref()?;
+        if self.last_taken_render_seq == Some(observation.render_seq) {
+            return None;
+        }
+        let taken = self.pending_render_observation.take();
+        self.last_taken_render_seq = taken.as_ref().map(|observation| observation.render_seq);
+        taken
+    }
+
+    /// Record one upload work-unit's stage timings (assigning its sequence).
+    fn record_upload_timing(&mut self, mut observation: UploadTimingObservation) {
+        self.upload_timing_seq += 1;
+        observation.seq = self.upload_timing_seq;
+        self.pending_upload_timing = Some(observation);
+    }
+
+    /// Take the latest upload stage-timing observation, at most once per upload
+    /// work unit (so a host never replays stale timings).
+    pub fn take_upload_timing_observation(&mut self) -> Option<UploadTimingObservation> {
+        let observation = self.pending_upload_timing.as_ref()?;
+        if self.last_taken_upload_timing_seq == Some(observation.seq) {
+            return None;
+        }
+        let taken = self.pending_upload_timing.take();
+        self.last_taken_upload_timing_seq = taken.as_ref().map(|observation| observation.seq);
+        taken
+    }
+
+    /// Read-only runtime bookkeeping for the waiting/upload diagnosis.
+    ///
+    /// Pure projection: it borrows `&self` and never advances an upload, a
+    /// revision or the view, and never forces engine work.
+    pub fn diagnostics(&self) -> RuntimeDiagnostics {
+        RuntimeDiagnostics {
+            lifecycle: match &self.lifecycle {
+                RenderLifecycle::Detached => "detached",
+                RenderLifecycle::Ready { .. } => "ready",
+                RenderLifecycle::Lost { .. } => "lost",
+                RenderLifecycle::Failed { .. } => "failed",
+            },
+            applied_revision: self.applied_revision,
+            applied_base: self.applied_base,
+            resident_base_batches: self.base_batches,
+            uploading: self.pending_upload.is_some(),
+            upload: self
+                .pending_upload
+                .as_ref()
+                .map(|pending| UploadDiagnostics {
+                    scene_revision: pending.scene.revision,
+                    group: pending.group,
+                    offset: pending.offset,
+                    base_changed: pending.base_changed,
+                }),
+            overlays_suppressed: self.overlays_suppressed,
+            overlay_suffix_commits: self.overlay_suffix_commits,
+            pulled_prefix_reuses: self
+                .renderer
+                .as_ref()
+                .map_or(0, |renderer| renderer.pulled_prefix_reuses()),
+            pulled_prefix_rebuilds: self
+                .renderer
+                .as_ref()
+                .map_or(0, |renderer| renderer.pulled_prefix_rebuilds()),
+            frames_rendered: self.frames_rendered,
+            uploads_started: self.uploads_started,
+            upload_revision_resets: self.upload_revision_resets,
+            ready_none_clears: self.ready_none_clears,
+            last_upload_reset: self.last_upload_reset,
+            diagnostic: self.diagnostic.clone(),
+        }
     }
 
     /// The latest published base is fully resident on the GPU: the device is
@@ -558,7 +963,7 @@ impl CadRenderRuntime {
         // for presentation even when CAD pixels do not need redrawing.
         if self.dirty.dirty() {
             let target = RenderTarget::new(size.0, size.1);
-            match view.mode {
+            let stats = match view.mode {
                 ProjectionKind::TwoD => {
                     let params = view
                         .camera
@@ -569,26 +974,45 @@ impl CadRenderRuntime {
                     // A changed camera makes `render` rebuild the progressive
                     // frame (transforms/camera differ), so no earlier page
                     // continues under the new camera.
-                    renderer.render(camera, &target)?;
+                    renderer.render(camera, &target)?
                 }
                 ProjectionKind::ThreeD => {
                     let params = view
                         .camera
                         .camera3d_params()
                         .map_err(|e| RenderError::Frame(e.to_string()))?;
-                    renderer.render_3d(camera3d_from_params(params), &target)?;
+                    renderer.render_3d(camera3d_from_params(params), &target)?
                 }
-            }
+            };
             self.target_size = Some(size);
-            if !renderer.frame_pending() {
+            let progressive_complete = !renderer.frame_pending();
+            let progressive = renderer.frame_progress();
+            if progressive_complete {
                 self.dirty.complete();
             }
             self.frames_rendered += 1;
-            self.presented_revision = if renderer.frame_pending() {
-                None
-            } else {
+            self.presented_revision = if progressive_complete {
                 self.applied_revision
+            } else {
+                None
             };
+            // Capture the attachment identity/texture, ending the `renderer` field
+            // borrow, then record the **actual** renderer invocation (the stats
+            // that would otherwise be dropped). Retained/reused frames never reach
+            // here.
+            let texture_revision = renderer.texture_revision();
+            let texture = renderer.frame_texture().cloned();
+            self.record_render_observation(stats, view_revision, progressive, progressive_complete);
+            return Ok(texture.map(|texture| PresentedFrame {
+                binding: FrameBinding {
+                    device_epoch: self.epoch,
+                    texture_revision,
+                    size,
+                },
+                view_revision,
+                completeness,
+                texture,
+            }));
         }
         Ok(renderer.frame_texture().map(|texture| PresentedFrame {
             binding: FrameBinding {
@@ -737,5 +1161,172 @@ mod tests {
             2,
             "the runtime retains the overlay Arc"
         );
+    }
+
+    #[test]
+    fn upload_decision_distinguishes_clear_start_continue_and_reset() {
+        // No ready scene clears any pending upload.
+        assert_eq!(
+            upload_decision(false, Some(1), 1),
+            UploadDecision::ClearPending
+        );
+        assert_eq!(
+            upload_decision(false, None, 1),
+            UploadDecision::ClearPending
+        );
+        // A ready scene with nothing pending starts a fresh upload.
+        assert_eq!(upload_decision(true, None, 7), UploadDecision::Start);
+        // Same revision continues (no reset, offset keeps advancing).
+        assert_eq!(upload_decision(true, Some(7), 7), UploadDecision::Continue);
+        // A different revision resets (the reset/starvation signal).
+        assert_eq!(
+            upload_decision(true, Some(7), 8),
+            UploadDecision::ResetRevision
+        );
+    }
+
+    #[test]
+    fn diagnostics_snapshot_reports_the_default_detached_state_without_side_effects() {
+        let runtime = CadRenderRuntime::default();
+        let diagnostics = runtime.diagnostics();
+        assert_eq!(diagnostics.lifecycle, "detached");
+        assert_eq!(diagnostics.applied_revision, None);
+        assert_eq!(diagnostics.applied_base, None);
+        assert_eq!(diagnostics.resident_base_batches, 0);
+        assert!(!diagnostics.uploading);
+        assert_eq!(diagnostics.upload, None);
+        assert_eq!(diagnostics.frames_rendered, 0);
+        assert_eq!(diagnostics.uploads_started, 0);
+        assert_eq!(diagnostics.upload_revision_resets, 0);
+        assert_eq!(diagnostics.ready_none_clears, 0);
+        assert_eq!(diagnostics.last_upload_reset, None);
+        assert_eq!(diagnostics.diagnostic, None);
+        // Reading twice is stable (pure projection).
+        assert_eq!(runtime.diagnostics(), diagnostics);
+    }
+
+    fn sample_observation(render_seq: u64) -> RenderStatsObservation {
+        RenderStatsObservation {
+            render_seq,
+            device_epoch: 1,
+            view_revision: 2,
+            applied_revision: Some(1),
+            applied_base: Some(1),
+            uploads_started: 0,
+            upload_revision_resets: 0,
+            ready_none_clears: 0,
+            cpu_ms: 0.0,
+            gpu_ms: None,
+            plan_ms: 0.0,
+            uniform_ms: 0.0,
+            encode_ms: 0.0,
+            submit_ms: 0.0,
+            wait_ms: 0.0,
+            draw_calls: 0,
+            vertices: 0,
+            triangles: 0,
+            instanced_draws: 0,
+            mesh_draws: 0,
+            tier: "universal",
+            over_budget: false,
+            progressive_cursor: None,
+            progressive_total: None,
+            progressive_complete: true,
+        }
+    }
+
+    #[test]
+    fn render_observation_is_delivered_once_and_never_replayed() {
+        // A retained/waiting frame (no actual render) has nothing to take.
+        let mut runtime = CadRenderRuntime::default();
+        assert_eq!(runtime.take_render_observation(), None);
+        let mut runtime = CadRenderRuntime {
+            pending_render_observation: Some(sample_observation(1)),
+            ..CadRenderRuntime::default()
+        };
+        let first = runtime
+            .take_render_observation()
+            .expect("first actual render");
+        assert_eq!(first.render_seq, 1);
+        assert_eq!(first.gpu_ms, None, "gpu_ms stays honestly absent");
+        // The SAME observation is never delivered twice (no replay on a retained
+        // or waiting frame).
+        assert_eq!(runtime.take_render_observation(), None);
+        runtime.pending_render_observation = Some(sample_observation(2));
+        assert_eq!(
+            runtime.take_render_observation().map(|o| o.render_seq),
+            Some(2)
+        );
+        assert_eq!(runtime.take_render_observation(), None);
+    }
+
+    fn upload_timing(scene_revision: u64, committed: bool) -> UploadTimingObservation {
+        UploadTimingObservation {
+            seq: 0,
+            scene_revision,
+            base_changed: true,
+            committed,
+            group: if committed { 2 } else { 0 },
+            batches: 512,
+            prepare_us: 1200,
+            append_us: 300,
+            commit_us: if committed { 4200 } else { 0 },
+            total_us: if committed { 5700 } else { 1600 },
+            commit: None,
+        }
+    }
+
+    #[test]
+    fn upload_timing_observation_is_delivered_once_and_never_replayed() {
+        let mut runtime = CadRenderRuntime::default();
+        // No upload work -> nothing to take.
+        assert_eq!(runtime.take_upload_timing_observation(), None);
+        let mut runtime = CadRenderRuntime {
+            pending_upload_timing: Some(upload_timing(3, false)),
+            ..CadRenderRuntime::default()
+        };
+        // `record_upload_timing` assigns the sequence.
+        let staged = runtime.pending_upload_timing.take().unwrap();
+        runtime.record_upload_timing(staged);
+        let observation = runtime.take_upload_timing_observation().expect("first");
+        assert_eq!(observation.seq, 1);
+        assert_eq!(observation.scene_revision, 3);
+        assert!(!observation.committed);
+        assert_eq!((observation.prepare_us, observation.append_us), (1200, 300));
+        // The same observation is never delivered twice (no replay).
+        assert_eq!(runtime.take_upload_timing_observation(), None);
+    }
+
+    #[test]
+    fn detach_invalidates_an_untaken_upload_timing_observation() {
+        let mut runtime = CadRenderRuntime {
+            pending_upload_timing: Some(upload_timing(1, true)),
+            ..CadRenderRuntime::default()
+        };
+        let staged = runtime.pending_upload_timing.take().unwrap();
+        runtime.record_upload_timing(staged);
+        assert!(runtime.take_upload_timing_observation().is_some());
+        // Inject a fresh, un-taken observation, then drop the device: it must not
+        // be replayed afterwards.
+        let mut observation = upload_timing(2, true);
+        runtime.record_upload_timing(observation.clone());
+        observation = runtime.pending_upload_timing.clone().unwrap();
+        assert_eq!(observation.scene_revision, 2);
+        runtime.detach();
+        assert_eq!(runtime.take_upload_timing_observation(), None);
+    }
+
+    #[test]
+    fn detach_invalidates_an_untaken_render_observation() {
+        let mut runtime = CadRenderRuntime {
+            pending_render_observation: Some(sample_observation(5)),
+            ..CadRenderRuntime::default()
+        };
+        // A device change must not let an old-epoch observation be replayed.
+        runtime.detach();
+        assert_eq!(runtime.take_render_observation(), None);
+        assert_eq!(runtime.device_epoch(), 0);
+        // The render sequence stays monotonic for the session.
+        assert_eq!(runtime.render_seq, 0);
     }
 }

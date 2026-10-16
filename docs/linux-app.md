@@ -1,5 +1,9 @@
 # Linux App：主验收宿主
 
+> **已退役（2026-10-16）**：本文件的 Slint `yacr-linux` 宿主与其脚本（`check-linux-app.sh` 等）已随
+> Slint 删除。当前 Linux 桌面宿主见 `docs/react-linux-app.md`（`apps/app-linux`，bin `yacr`）与
+> `docs/build.md`；决策见 [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史事实。
+
 2026-10-03 用户要求新增 Linux App，并将其设为优先验收标准，见规范 §1/§11.0。
 不是复用 Android 宿主，也不是用 mock sink 的 UI 测试冒充应用。
 

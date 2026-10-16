@@ -316,7 +316,7 @@ pub enum ImportTerminal {
 /// The stable machine key of an [`ImportPhase`] (e.g. `"entities"`).
 ///
 /// This keeps phase labels in the UI catalog keyed by a locale-independent
-/// string, so `cad-ui-slint` never has to depend on the importer crate.
+/// string, so the UI layer never has to depend on the importer crate.
 pub fn import_phase_key(phase: ImportPhase) -> &'static str {
     match phase {
         ImportPhase::Reading => "reading",
@@ -330,7 +330,7 @@ pub fn import_phase_key(phase: ImportPhase) -> &'static str {
 
 /// A UI-facing, locale-independent snapshot of the asynchronous open (F01).
 ///
-/// This is the pollable form the Slint shell binds to: it carries only real
+/// This is the pollable form the host UI binds to: it carries only real
 /// values, so a UI can render an indeterminate bar when `entities_total` is
 /// `None` and omit a byte count that was never measured. A host that does not
 /// use the snapshot path can keep driving [`AsyncOpenPoll`] directly.

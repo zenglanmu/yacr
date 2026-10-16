@@ -1,5 +1,9 @@
 # verify-ui：无头环境中的 UI 调试循环
 
+> **已退役（2026-10-16）**：本在线/离屏 UI 调试循环依赖 `cad-ui-slint` 与 `scripts/verify-ui.sh`，
+> 二者已随 Slint 删除。当前桌面宿主见 `docs/react-linux-app.md`；决策见
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史记录。
+
 2026-10-03 新增。对应测试计划的**第二层**：在无窗口环境里实际运行应用、自动操作控件、
 截图、收集 panic 与超时，让界面与功能迭代不依赖真机。入口
 `scripts/verify-ui.sh`，汇总脚本 `scripts/verify-ui-summary.py`。

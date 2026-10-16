@@ -1,4 +1,4 @@
-//! Database-derived scene assembly, independent of the Slint/GPU lifecycle.
+//! Database-derived scene assembly, independent of the UI/GPU lifecycle.
 
 use std::sync::Arc;
 

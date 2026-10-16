@@ -1,5 +1,9 @@
 # Concept 界面重设计（2026-10-03）
 
+> **已退役（2026-10-16）**：本次是 Slint 时代的界面概念重设计，已随 Slint 删除。当前桌面 UI 设计
+> 以 AutoCAD 桌面惯例重做（React/Tauri），见 `docs/react-linux-app.md` 与
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史记录。
+
 > 后续轮（2026-10-03）：按用户要求把外观从“浅银色 concept”改为 **AutoCAD 风格深色**
 > （`ui/theme.slint`：深灰 chrome/panel、浅色文字、蓝色选中、近黑模型空间；并设
 > `Palette.color-scheme = dark` 让 std-widgets 的命令栏/下拉/按钮/进度条也变深）。

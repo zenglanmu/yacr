@@ -1,13 +1,19 @@
 # DWG 打开与渲染测试指南
 
+> **2026-10-16 迁移更新**：桌面宿主已改为 **React/Tauri + 原生 GTK/wgpu 分区**
+> （`apps/app-linux`，bin `yacr`，`scripts/run-react-linux.sh`）；Slint 桌面与其测试脚本已退役，
+> Web/Android UI 为 NOT IMPLEMENTED 占位。下文提到真实 winit + Slint、浏览器 Playwright、
+> `check-web-*.mjs`/`verify-ui.sh` 等**已退役**；当前真实 GPU 路线见 `docs/react-linux-app.md`
+> 「证据机制」。**最终合并树尚未运行任何编译/测试/GPU 验收（P6）**；早期阶段（P1 core/app 契约
+> 测试、P2a 编译检查、P4 前端构建/测试）曾在**当时**的分支上有界运行，**不**构成最终树或真实 GPU 验收。
+
 ## 1. 测试顺序与结论
 
-**有真实显示/GPU 时以真实硬件 GPU 为主测试**（桌面 = 真实 winit 窗口 + 硬件 Vulkan；
-Android 模拟器 = `-gpu host`；浏览器 = headful + 真实 GPU），定位导入、表示、字体、相机、
-几何与 GPU 问题。**只有确无显示/GPU 的环境**才回退 Linux 原生离屏 wgpu + Mesa lavapipe
-（不依赖桌面显示服务、Slint 或浏览器）。最后使用 **WASM + Playwright 做一次第二层集成
-测试**，验证浏览器 File API、宿主接线、字体加载和实际呈现；有真实 GPU 时用 headful 真实
-GPU，无 GPU 才用 SwiftShader 软件路径。软件渲染通过不等于 WebGPU/真实 GPU/真机通过。
+**有真实显示/GPU 时以真实硬件 GPU 为主测试**（桌面 = 当前 React/Tauri 宿主经
+`scripts/run-react-linux.sh` 启动 + 硬件 Vulkan，env-gated 证据驱动；**历史**：真实 winit 窗口、
+Android 模拟器 `-gpu host`、headful 浏览器）。**只有确无显示/GPU 的环境**才回退 Linux 原生离屏
+wgpu + Mesa lavapipe（不依赖桌面显示服务；用 lavapipe 时须显式 `--software`）。**历史**：曾用
+WASM + Playwright 做第二层集成测试；浏览器 UI 已退役。软件渲染通过不等于真实 GPU/真机通过。
 
 必须分别记录三个结论：
 

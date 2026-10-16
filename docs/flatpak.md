@@ -1,5 +1,10 @@
 # Linux Flatpak 打包
 
+> **已退役（2026-10-16）**：旧 Flatpak 流水线（打包 Slint `yacr-linux` 宿主）已退役，
+> `scripts/package-linux-release.sh` 与 `packaging/flatpak/**` 已删除，脚本改为非零 NOT IMPLEMENTED；
+> **Linux release 暂时不可用，等待替代打包方案验收**。当前桌面宿主见 `docs/react-linux-app.md`。
+> 下文保留为历史记录。
+
 Linux 发布包改为 **Flatpak**（app-id `dev.yacr.app`），取代此前的 tar.gz。本文记录 manifest、
 打包流程、CI 接线与本地实际验证证据。
 

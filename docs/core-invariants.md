@@ -1,5 +1,10 @@
 # Core invariants (B23–B31 focus)
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 This document records which audit items the core crates
 (`cad-domain`, `cad-geometry`, `cad-db`) close with pure value-level
 invariants and unit tests, and which remain open because they need crates,

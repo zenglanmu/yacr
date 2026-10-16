@@ -1,17 +1,43 @@
-//! Shared desktop host: the Slint/wgpu GUI for Linux (`yacr-linux`), Windows
-//! (`yacr`, in `apps/app-windows`) and macOS (`yacr-macos`, in `apps/app-macos`).
+//! Native Linux desktop host for the CAD viewer/measure/annotation app.
 //!
-//! On every other target this library is empty, so cross-platform `--lib`
-//! checks still validate workspace isolation rather than claiming support.
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-mod host;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-pub use host::{config_file, FilePicker, LinuxApp, LinuxOptions, SavePathProvider};
+//! The host is a **React (Vite) chrome in a Tauri 2 webview** composited over a
+//! native GTK/wgpu CAD surface: the single Tauri event loop drives
+//! `cad-render-wgpu::SurfaceProbePresenter` on a windowed `GtkDrawingArea` inside
+//! a `GtkOverlay` (the webview is a transparent sibling on top), and exposes a
+//! small status/input protocol to the frontend.
+//!
+//! The platform-independent half (wire protocol, logical layout, CAD session,
+//! shell admission/error state, i18n catalogs) lives in `cad-ui-core` and is
+//! imported directly — this crate keeps **no** re-export shim for it.
+//!
+//! **Linux only** (GTK X11/XWayland **or** native Wayland; the native CAD
+//! partition is an X11 child window on X11 and an app-owned Wayland
+//! `wl_subsurface` on Wayland). On every other target this crate's GUI modules
+//! are empty (no `tauri`/`wry`/`tao`, no GTK, no renderer), so the binary is an
+//! explicit NOT IMPLEMENTED stub ([`entry::run`] returns an error). A
+//! workspace-wide wasm (or other-target) `--lib` check therefore validates
+//! isolation instead of pretending the host can run there.
 
-/// Platform-neutral aliases for the shared desktop host.
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-pub use host::{LinuxApp as DesktopApp, LinuxOptions as DesktopOptions};
+#[cfg(target_os = "linux")]
+pub mod backend;
+#[cfg(target_os = "linux")]
+pub mod evidence;
+#[cfg(target_os = "linux")]
+pub mod gtk_bridge;
+#[cfg(target_os = "linux")]
+pub mod host;
+#[cfg(target_os = "linux")]
+pub mod platform;
+#[cfg(target_os = "linux")]
+pub mod redraw;
+#[cfg(target_os = "linux")]
+pub mod wayland_surface;
 
-/// Shared command-line entry point used by all desktop binaries.
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub use backend::{
+    parse_backend_policy, prepare_backend, BackendPlan, BackendPolicy, ResolvedBackend,
+};
+
+/// The desktop entry point: Linux runs the real host, every other target is an
+/// explicit NOT IMPLEMENTED error (see [`entry::run`]).
 pub mod entry;

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Static server for the yacr web build with correct wasm MIME and COOP/COEP.
+"""Static server for a yacr web bundle with correct wasm MIME and COOP/COEP.
 
-Spec v2.0 §9.2: the browser build must be static-deployable; `application/wasm`
-and a secure context are required. COOP/COEP are only needed for the optional
-shared-memory path, so they are opt-in via --cross-origin-isolation.
+The browser UI is retired, so there is no default bundle: `--directory` is
+required. A wasm bundle needs `application/wasm` and a secure context; COOP/COEP
+are only needed for the optional shared-memory path, so they are opt-in via
+`--coi`.
 
-Usage: scripts/serve-web.py [--directory web-dist] [--port 8090] [--coi]
+Usage: scripts/serve-web.py --directory <bundle-dir> [--port 8090] [--coi]
 """
 from __future__ import annotations
 
@@ -36,13 +37,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--directory", default="web-dist")
+    parser.add_argument(
+        "--directory",
+        required=True,
+        help="bundle directory to serve (must contain index.html)",
+    )
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument("--coi", action="store_true", help="enable COOP/COEP headers")
     args = parser.parse_args()
     directory = pathlib.Path(args.directory).resolve()
     if not (directory / "index.html").is_file():
-        raise SystemExit(f"{directory} has no index.html; run scripts/build-web.sh first")
+        raise SystemExit(f"{directory} has no index.html; produce a bundle to serve first")
     Handler.coi = args.coi
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), functools.partial(Handler, directory=str(directory)))
     print(f"[serve-web] http://127.0.0.1:{args.port}/ serving {directory}")

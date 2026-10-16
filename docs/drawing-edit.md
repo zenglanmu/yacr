@@ -1,5 +1,10 @@
 # Drawing 写事务与绘制/编辑命令（设计契约，F-EDIT）
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 规范 v2.0 §4.3/§4.6/§4.7：底图导入后只读；**未来底图编辑**必须经同一验证与变更追踪
 路径，不得为预留而暴露 unrestricted mutable access。本文件固定本轮实现的接口，供并行
 workstream 对齐。权威仍以源码与 `CAD_IMPLEMENTATION_SPEC.md` 为准。

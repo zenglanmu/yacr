@@ -1,5 +1,10 @@
 # 命令行与快捷键参考
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 本文件是本程序（命令行 + 固定键位 + 绘制/编辑工具）的**单一诚实参考**。所有证据为**合成/离屏**
 （软件 Vulkan lavapipe，`apps/app-linux`），**不代表真实 GPU、真实窗口或真实设备**；逐轮证据与
 未完成项见 `docs/handoff.md`。支持的硬件/平台结论见 `docs/compatibility.md`。

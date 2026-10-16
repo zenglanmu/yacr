@@ -1,5 +1,10 @@
 # ADR 0006：React + Tauri 原生 Linux 宿主实验（X11/XWayland-only 探针）
 
+> **已被取代 / 定位更新（2026-10-16）**：本次**实验已被采用为正式桌面实现**，见
+> [ADR 0010](0010-react-linux-host-replaces-slint.md)。下文“实验/未删旧 Slint 代码/Web 仍以 Slint
+> 为基线”等描述已过时（Slint 已删除）；宿主使用说明见 `docs/react-linux-app.md`。
+> 下文保留为实验过程记录。
+
 状态：实验（用户批准替代目标；**bounded prototype 已达**，仍**非完整 CAD 产品验收**）。
 最新（2026-10-14 第四轮）：Linux **GTK 中央 native 分区（nativechild）** 与 React UI **co-visible**，
 实际 CAD（native Rust + P620/Vulkan）达到**有界原型**验收（见末节）；顶层透明 alpha full overlay

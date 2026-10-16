@@ -1,7 +1,12 @@
 # AGENTS.md
 
 Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + 合成测试，没有可交付产品。
-需求唯一权威是 `CAD_IMPLEMENTATION_SPEC.md`（v2.0）；`docs/handoff.md` 是逐轮交接入口。
+需求唯一权威是 `CAD_IMPLEMENTATION_SPEC.md`（v2.0，含 §21 桌面宿主增补）；`docs/handoff.md`
+是逐轮交接入口；桌面 UI 决策见 `docs/adr/0010-react-linux-host-replaces-slint.md`。
+
+> **2026-10-16 迁移状态**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
+> （`apps/app-linux`，二进制 `yacr`）；`cad-ui-slint` 与所有 Slint 依赖已删除。
+> Windows/macOS/Android/Web 是**显式 NOT IMPLEMENTED 占位**，不是可运行 GUI 产品。
 
 ## 铁律（违反即返工）
 
@@ -13,18 +18,20 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 5. 每项改动同步补契约测试与文档。
 6. 证据诚实：未运行就说未运行。README/handoff 中大量“已通过”注明仅为**合成测试**或
    特定环境（模拟器/软件 GPU/无头浏览器），不得推广为真机、真实 GPU、vendor 兼容结论。
+   历史 Slint 宿主的证据不得冒充 React 宿主结论。
 7. 不覆盖/删除陌生变更（并发实现常见）；先读源码和最新构建证据。
 
 ## 语言约定
 
 代码标识、注释、测试名、commit message 用英文；`docs/`、`AGENTS.md` 用中文。
-用户可见文案只能来自 `crates/cad-ui-slint/i18n/{zh-CN,en}.json`（键集必须一致，见
-`scripts/check-i18n.py`），不得在 Slint/Rust UI 里硬编码中文。
+用户可见文案只能来自**唯一权威目录** `crates/cad-ui-core/i18n/{zh-CN,en}.json`（键集必须一致，
+见 `scripts/check-i18n.py`），不得在 React JSX/JS 或 Rust UI 里硬编码中文（脚本会拒绝硬编码 CJK）。
 
 ## 仓库结构
 
-Cargo workspace（`crates/cad-*` + `apps/app-linux`、`apps/app-android`、`apps/app-web`）。分层示意，
-**不可反转**；实际依赖以 manifests 与 `scripts/check-architecture.py` 为准：
+Cargo workspace（`crates/cad-*` + `apps/app-linux`、`apps/app-android`、`apps/app-web`、
+`apps/app-windows`、`apps/app-macos`）。分层示意，**不可反转**；实际依赖以 manifests 与
+`scripts/check-architecture.py` 为准：
 
 ```
 cad-domain
@@ -37,39 +44,46 @@ cad-spatial ─ cad-scene ─ cad-render-wgpu
   ↑
 cad-proxy ─ cad-import-acadrust ─ cad-resources
   ↑
-cad-measure ─ cad-annotations ─ cad-query ─ cad-app
+cad-measure ─ cad-query ─ cad-app
   ↑
-cad-ui-slint ─ cad-platform ─ cad-diagnostics ─ cad-cli-tools
-  ↑（cad-host 仅依赖 cad-ui-slint/cad-platform/cad-diagnostics/cad-resources，不依赖 cad-cli-tools）
-cad-host
+cad-engine ─ cad-platform ─ cad-diagnostics ─ cad-cli-tools
   ↑
-apps/app-linux  apps/app-windows  apps/app-macos  apps/app-android  apps/app-web
+cad-host（HostCore：命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink；平台无关）
+  ↑
+cad-ui-core（protocol/layout/session/shell/i18n；UI 框架与 GPU 无关）
+  ↑
+apps/app-linux（React/Tauri 真实 Linux GUI）  apps/app-windows|app-macos|app-android|app-web（NOT IMPLEMENTED 占位）
 ```
 
-`app-linux` 是 Linux/Windows/macOS 共享的桌面宿主实现（`cfg(any(target_os = "linux",
-target_os = "windows", target_os = "macos"))`）；`app-windows` 与 `app-macos` 只是调用其
-入口的薄封装（`yacr.exe` / `yacr-macos`）。`cad-host` 是平台无关的宿主编排层（`HostCore`：
-命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink），实现 `cad-ui-slint` 的 sink
-trait，平台 I/O 一律走 `cad-platform` 契约；`app-linux` 只提供桌面平台实现与事件循环。
-
-新增 `cad-engine` 是 UI 无关的渲染会话协调库，当前 manifest 的直接依赖为
-`cad-app`、`cad-db`、`cad-domain`、`cad-render-wgpu`、`cad-representation`：分别提供应用会话/工具契约、
-权威数据库、领域类型、renderer 与显示表示，均为 UI 无关的核心契约而非 UI 实现。`cad-app` 不依赖 `cad-engine`，`cad-engine`
-不依赖 `cad-ui-slint`/`cad-host`/Slint 或直接依赖 wgpu，`cad-ui-slint` 不依赖
-`cad-host`。wgpu 仍只由 `cad-render-wgpu` 依赖，并经 renderer API/re-export 提供所需类型。
-该拆分整体仍实施中，P1 会话边界审查已通过；P2-A 合同通过，P2-B 源码已有 Host/Slint/apps 去 UI 核心改动，
-Oracle attempt 4 接受 P2 架构/源码 codegate；P2 真实 GPU 证据分轮取得，非单次六用例全绿。Oracle 已最终接受 P3 queue
-codegate，P4 App/engine/Host/Web codegate 均 accept；指定 sweep 与末次差异门禁均 exit 0。P4 真实 P620/Vulkan 8 cases 全部 terminal PASS。App343/engine73/Host86/Android30/Web23/UI132+37/Linux测试的证据分轮记录。P4 是 bounded in-process API/event foundation，不是插件兼容或完整 CAD 产品；queue 压力/lag 是合成合同。browser RAF/GC/WebGPU、Android device、vendor DWG、视觉 golden 未验。不得据此宣称全平台产品验收。renderer-only wgpu
-与 Slint 单 presenter 边界仍保持。详细决策见
-`docs/adr/0005-cad-engine-decoupling.md`。
+- `cad-host` 是平台无关的宿主编排层，**不依赖任何 UI 工具包**（不依赖 slint/tauri/gtk/wgpu/
+  web-sys/Android 类型）；平台 I/O 一律走 `cad-platform` 契约（事件式、无 futures、无 `Send`）。
+- **`cad-ui-core`** 承载平台无关的 UI 逻辑（wire protocol、逻辑布局、CAD 会话、宿主 admission/
+  error 状态、i18n 目录），位于 `cad-host` 之上、具体宿主之下。它依赖 `cad-host`（会话包装
+  `HostCore`），必须保持 UI 工具包/GPU 无关。宿主通过显式 `state.shell.*` 访问共享状态、
+  直接 `use cad_ui_core::…`，**不保留**过渡 re-export 别名。
+- `cad-engine` 是 UI 无关的渲染会话协调库（`cad-app`/`cad-db`/`cad-domain`/`cad-render-wgpu`/
+  `cad-representation`）；`cad-app` 不依赖 `cad-engine`，`cad-engine` 不依赖 `cad-ui-core`/
+  `cad-host`/任何 UI 工具包或直接依赖 wgpu。
+- `apps/app-linux` 是 React/Tauri 真实 Linux GUI（Tauri 2 WebView 中的 React chrome + GTK 中央
+  原生 CAD 分区 + renderer-only wgpu），支持 **X11/XWayland** 与**原生 Wayland** 两种后端：
+  X11 用原生 X child 窗口，Wayland 用 app-owned `wl_subsurface`（`apps/app-linux/native/` 私有 C
+  shim；`build.rs` 经 `cc`+`pkg-config wayland-client` 编译，需 `libwayland-dev`）；后端由
+  `backend.rs` 在 GTK 启动前显式决议 `GDK_BACKEND`，**无静默回退**。非 Linux 目标上它编译为空库、
+  二进制返回显式 NOT IMPLEMENTED。`apps/app-windows|app-macos|app-android|app-web` 是显式 NOT
+  IMPLEMENTED 占位。平台 I/O（文件、配置、表面度量）只存在于 `app-*`。
+- **桌面窗口策略**：Linux 宿主默认以**最大化窗口**启动（`apps/app-linux/src/host.rs` 的
+  `start_maximized` 默认 `true`，`WindowBuilder::maximized(true)`），**保留标题栏/系统面板**——
+  这是**窗口管理器最大化**，**不是**全屏/无边框 kiosk（源码未调用 `fullscreen`/`decorations(false)`）。
+  仅验收/证据运行用 opt-out 环境变量 `YACR_PROBE_NO_MAXIMIZE`（**其存在**即退出最大化）；
+  `tauri.conf.json` 无窗口配置（`"windows": []`），不覆盖此默认。跨窗口管理器/平台的行为不保证
+  （见下方「构建与门禁」的 NOT VERIFIED 边界）。
 
 `check-architecture.py` 强制的边界：`cad-domain` 不依赖任何 CAD 包；`cad-db` 只依赖
 `cad-domain`；`cad-import-acadrust` 是**唯一**依赖 acadrust 的 crate；`cad-render-wgpu`
-是唯一依赖 wgpu 的 crate；`cad-engine` 仅按上文方向依赖应用契约和 renderer，不放宽
-acadrust/wgpu 唯一依赖规则；Slint 只允许出现在 `cad-ui-slint`/`app-*`（`cad-host` 只依赖
-`cad-ui-slint`，不直接依赖 slint）；平台类型
-（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`。`cad-db` 是唯一权威数据
-源；UI 与渲染均为派生。
+是唯一依赖 wgpu 的 crate；`cad-ui-core` 不得依赖 slint/wgpu/tauri/gtk/portal/平台类型；
+**全 workspace 禁止任何直接 `slint`/`slint-build`/`iced` 依赖**（含 build/dev 与 target 表、
+workspace 继承别名）；平台类型（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`。
+`cad-db` 是唯一权威数据源；UI 与渲染均为派生。详见 `docs/architecture.md`。
 
 ## 构建与门禁
 
@@ -78,7 +92,13 @@ acadrust/wgpu 唯一依赖规则；Slint 只允许出现在 `cad-ui-slint`/`app-
 （改动 crate 的编译、自己的契约测试、自己文件的 fmt/clippy）。不要为小改动跑全量测试、
 全量门禁或平台编译矩阵。全量测试与全量门禁（下方命令块，CI 同款，见 `docs/ci.md`）只在
 两种情形运行：① 用户明确要求；② 发版/发布验收前。证据诚实规则不变：未运行必须标注
-NOT RUN，不得以旧证据冒充。CI workflow 仍按自身节奏运行，不受此本地策略影响：
+NOT RUN，不得以旧证据冒充。CI workflow 仍按自身节奏运行，不受此本地策略影响。
+
+**这**是日常提效策略，**不是永久免测**：Slint→React 迁移的**最终验证**（P6）**已执行（有界、分区）**，
+证据见 `docs/validation-react-linux-migration-2026-10-16.md`（编译/测试/门禁/硬件 GPU 完成；解析器
+一度被手工锁阻断，已按批准最小离线同步修复，仅改 `Cargo.lock`）。**Gate P6 attempt2：ACCEPT-WITH-FIXES
+（文档限定已应用）**，observer 终判已观察截图**无重大视觉缺陷**；**有界本地 Linux 迁移验收通过**，
+但**不是**完整 CAD 产品/跨平台/vendor/golden/性能验收。
 
 ```bash
 cargo fmt --all -- --check
@@ -89,101 +109,59 @@ python3 scripts/check-workflows.py
 python3 scripts/check-i18n.py
 cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 workspace，含 UI/宿主
+(cd apps/app-linux/ui && npm ci && npm test && npm run build)
 ```
 
 默认 Linux host workspace 编译包含 `app-android` 与 `app-web` 包的 host target；这不替代
 下方独立的 WASM 与 Android 原生目标编译门禁，也不代表这些平台的运行验收。clippy 仍按
 既有配置排除 `app-android` 与 `app-web`。
 
-Windows：CI `windows-check`（`windows-latest` 原生 MSVC 编译）与按需 `windows-release`
-（MSVC release + 全量字体 zip）；本机可用 `scripts/package-windows-release.sh`
-（默认 GNU 交叉，`CARGO_XWIN=1` 走 MSVC/cargo-xwin），见 `docs/windows-app.md`。
-
-macOS：CI `macos-check`（`macos-latest` 原生 arm64 编译）与按需 `macos-release`
-（universal `lipo` + 自包含 `Yacr.app` + 全量字体 tar.gz）。**Apple SDK/链接器缺失，
-Linux 主机无法交叉产出 Mach-O**，故只能在 macOS runner/真机运行
-`scripts/package-macos-release.sh`，见 `docs/macos-app.md`。
-
-Linux/Android 发布层：按需 `linux-release`（`ubuntu-latest` 运行
-`scripts/package-linux-release.sh`，产出**含全量字体的 Flatpak bundle** `dev.yacr.app`）与
-`android-release`（`ubuntu-latest`
-自装 **JDK 17** + 固定 SDK/NDK，`scripts/fetch-fonts.sh` 带全量字体后
-`scripts/build-android.sh --release`）。二者与 `windows-release`/`macos-release` 同在
-`workflow_dispatch`/`v*` tag 触发；Android **打包不等于安装运行**，见 `docs/ci.md`。
-
-- 全量门禁（用户要求/发版前）的主机编译必须包含 Linux App 和 Slint；编译通过不是运行或
-  渲染验收。release 编译用于可选发布验证；Web 是第二层，Android 平台契约继续保留。
-- **渲染/端到端验证优先真实硬件 GPU（任何宿主 / 模拟器 / 浏览器）**：只要环境存在真实显示与
-  显卡（本机为 Wayland 桌面 + Intel UHD + Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），
-  验收**必须**走真实 GPU：
-  - 桌面 = 真实 winit 窗口 + 硬件 Vulkan，例如
-    `cargo test -p app-linux --lib real_gpu_grid_zoom_axes_acceptance --locked -- --ignored
-    --test-threads=1 --nocapture`（证据默认写 `/tmp/opencode/yacr-real-gpu/`）；完整真机台面回归
-    （全部 6 个用例、每用例一个独立进程）以 `scripts/run-real-gpu-e2e.sh` 为入口；
-  - **Android 模拟器 = `-gpu host`**（把宿主显卡透传给模拟器，其 GLES/Vulkan 走真实 GPU，
-    本机实测 `GLES: … Mesa Intel(R) UHD Graphics (CML GT2) …`，非 SwiftShader）；
-  - 浏览器 = headful + 真实 GPU（非 SwiftShader）。
-
-  **不得**用 SwiftShader/lavapipe 等软件后端产出"真实 GPU"结论；软件后端产出的数字/截图必须
-  显式标注为软件渲染。只有**确无显示/GPU** 的环境才回退软件渲染（桌面 Slint offscreen +
-  lavapipe：`bash scripts/check-linux-app.sh`、`bash scripts/verify-ui.sh` **默认走真实 GPU**，
-  软件渲染须显式 `YACR_SOFTWARE_GPU=1` 开启（脚本会标注 SOFTWARE）；Android
-  `-gpu swiftshader`；CI 无 GPU runner 的软件冒烟）——本机已具备硬件，故这些仅为回退路径。
-  **性能/CPU 测量同样适用真实 GPU 优先**：软件后端的 `device.poll`/`queue.write_buffer`/
-  驱动时序不代表真实硬件，lavapipe/SwiftShader 耗时不得用作性能结论。文档/脚本中出现的
-  `VK_ICD_FILENAMES=…/lvp_icd.json` 仅属上述回退场景，或个别离线单测为确定性钉住软件后端的
-  **特例**；在本机做渲染验收/性能测量/e2e 一律不设置它（真实 GPU 路径：
-  `scripts/run-real-gpu-e2e.sh`，其自行清除该变量）。
-- 用户授权解除原生 Slint 编译限制：允许使用开发依赖，在无窗口环境以 Slint FemtoVG/wgpu 做
-  离屏验证（默认真实 GPU；软件 lavapipe 须显式开启，已授权 `sudo apt` 安装
-  pkgconf/fontconfig/freetype 开发包）。
-  不需要 Android 模拟器，不安装桌面/X11/Wayland，不改系统/LXC 配置；实际执行与编译证据分开记录。
-- Rust 单测试：`cargo test -p <crate> <name> --locked`。GPU/CLI 用例串行跑，避免并发软件
-  Vulkan 互相干扰。下面命令钉住软件 ICD 是**特例**（这两组离线单测求确定性、可在无 GPU
-  环境复现，不是默认姿势；渲染验收/性能测量**禁用**此变量，走真实 GPU）：
-  `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cargo test -p cad-render-wgpu -p cad-cli-tools --locked -- --test-threads=1`。
-- 需要真实 DWG 的测试（如 `cli_contracts` 的 render）设 `YACR_TEST_DWG=<绝对路径>`，否则
-  跳过；跳过不是已运行证据。
-- 无头 UI 调试循环（测试计划第二层，可选、非 CI 必需，**无显示环境的回退**）：`bash scripts/verify-ui.sh`
-  用 Slint offscreen 平台实际运行应用、操作控件、截图、扫 panic/超时并产出分层证据包（默认走真实
-  GPU；软件 lavapipe 须 `YACR_SOFTWARE_GPU=1` 显式开启并标注 SOFTWARE）；不安装 X11/Wayland，
-  不等于真实窗口/真机，见 `docs/verify-ui.md`。
-- Web 门禁：`scripts/build-web.sh`（需 wasm-bindgen-cli **0.2.129**，与 Cargo.lock 严格一致）
-  产出 `web-dist/`；`node --test scripts/test-web-host.mjs scripts/test-web-touch.mjs ...`
-  是无 wasm/GPU 的模块契约；浏览器脚本见 `docs/testing-dwg.md`、`docs/validation-web.md`。
+- **Windows/macOS/Android/Web**：本轮为 **NOT IMPLEMENTED 占位**。CI 只做**编译门禁**
+  （`windows-check`/`macos-check`/`android-check`），**不代表**可运行 GUI 或运行验收。旧的
+  平台发布/打包脚本已退役或禁用（非零退出）；Linux release 暂时不可用，等待替代打包验收。
+  **不要**把已退役脚本当作可用流程。
+- **渲染/端到端验证优先真实硬件 GPU**：只要环境存在真实显示与显卡（本机为 Wayland 桌面 +
+  Intel UHD + Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），验收**必须**走真实 GPU。
+  当前桌面宿主（React/Tauri）的后端支持 **X11/XWayland** 与**原生 Wayland**（原生 Wayland 决策/
+  子表面桥见 `docs/adr/0011-native-wayland-subsurface.md`；本轮有界源码/门禁/原生 `--probe` 证据见
+  `docs/validation-native-wayland-2026-10-16.md`）。真实 GPU 路线是 env-gated 证据驱动
+  （`apps/app-linux/src/evidence.rs`：`YACR_PROBE_EVIDENCE`/`YACR_PROBE_LIFECYCLE`）+
+  `apps/app-linux/scripts/x11-window-grab.c` 窗口捕获（**X11**），由 `scripts/run-react-linux.sh`
+  启动（**不强制** `GDK_BACKEND`）。W3 已执行有界原生运行（CAD/输入/生命周期/几何/X11）并由 Observer
+  终态判定**有界截图视觉 PASS**（同 UID Mutter `ScreenCast` 捕获，无安全策略变更）；**最终 Oracle W3
+  attempt3 终判 ACCEPT-WITH-LIMITATIONS（无 blocker）**：有界本地验收（GNOME/Mutter + P620 + `scale=1`），
+  不得据此宣称完整原生支持或 vendor/精度/性能结论；X11 截图**不是**原生证据（且视觉未判读）。
+  证据见 `docs/validation-native-wayland-2026-10-16.md`。
+  **旧 Slint 离屏/无头与真实 GPU 测试套件（`scripts/check-linux-app.sh`、`verify-ui.sh`、
+  `run-real-gpu-e2e.sh`）已随 Slint 退役，不再存在**。P6 已定义并**实际运行**替代的真实 GPU 程序
+  （硬件 Vulkan + 真实 GTK/XWayland 窗口 + env-gated 证据驱动；证据见
+  `docs/validation-react-linux-migration-2026-10-16.md` 与 `.slim/deepwork/replace-slint-ui/p6-real-gpu.md`）；
+  旧套件结果不得复用，也不得用软件后端冒充真实 GPU。
+  - **不得**用 SwiftShader/lavapipe 等软件后端产出"真实 GPU"结论；软件后端产出的数字/截图必须
+    显式标注为软件渲染。只有**确无显示/GPU** 的环境才回退软件渲染。
+  - **性能/CPU 测量同样适用真实 GPU 优先**；软件后端耗时不得用作性能结论。
+- Rust 单测试：`cargo test -p <crate> <name> --locked`。GPU/CLI 用例串行跑。
+- 需要真实 DWG 的测试设 `YACR_TEST_DWG=<绝对路径>`，否则跳过；跳过不是已运行证据。
 - 离线 WGSL 校验（无需 GPU）：`cargo test -p cad-render-wgpu --test wgsl_validation --locked`。
 
-## Android（无头模拟器）
+## 平台占位（NOT IMPLEMENTED，勿当可运行）
 
-宿主是 Rust `cargo-apk`（android-activity + Slint），**不是 Gradle 工程**，不要运行
-`./gradlew`。设备需 x86_64 ABI（本机模拟器镜像为 x86_64）。
-
-```bash
-cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked  # 仅编译检查
-~/android-dev/emulator-start.sh    # 无头 KVM + `-gpu host`（宿主有 GPU 时；幂等）
-~/android-dev/wait-boot.sh         # adb 连接 + sys.boot_completed=1
-PROFILE=release ~/android-dev/build-apk.sh   # 模拟器用 x86_64
-~/android-dev/install-run.sh
-~/android-dev/logcat.sh            # 崩溃：~/android-dev/logcat.sh crash
-~/android-dev/emulator-stop.sh
-```
-
-规则：**宿主有 GPU/显示时用 `-gpu host`（真实显卡，仍无头）**，例如
-`emulator -avd yacr35 -no-window -gpu host -no-audio -no-boot-anim -no-snapshot -read-only &`；
-只有**确无 GPU** 的环境才回退 `-gpu swiftshader`（软件渲染，证据须显式标注）。不要装
-桌面/X11/Wayland，不要改 Proxmox/LXC 配置。安装用 release APK（debug `.so` ~510 MB 会超
-ActivityManager attach 超时）。**模拟器 ≠ 真机**，真机能力一律标注未验证。
+- **Android**（`apps/app-android`）：UI 已退役，是显式占位（原生入口打印退役诊断后 abort）。
+  仅保留 `cargo check --target aarch64-linux-android -p app-android --locked` 编译检查。
+  `build-android.sh` 非零失败；不再有 APK 流水线。**模拟器 ≠ 真机**，真机一律未验证。
+- **Web**（`apps/app-web`）：UI 已退役，wasm 入口返回错误；`build-web.sh`/`deploy-cloudflare-pages.sh`
+  非零失败。不再有 web 发布。
+- **Windows/macOS**：显式 NOT IMPLEMENTED 失败桩（`yacr-windows`/`yacr-macos`），只随
+  `--all-targets` 编译；不打可分发 GUI。
 
 ## 真实 DWG 回归
 
-流程见 `docs/testing-dwg.md`：**有真实显示/GPU 时以真实硬件 GPU 为主**（真实 winit 窗口 +
-硬件 Vulkan，如 `real_gpu_grid_zoom_axes_acceptance`；Android 模拟器用 `-gpu host` 透传宿主
-显卡）；**无显示环境**才回退原生离屏 wgpu + Mesa lavapipe（`cargo build -p cad-cli-tools
---release`，`scripts/check-dwg-native.py`，用 lavapipe 时须显式 `--software`），
-WASM + Playwright 为第二层（浏览器检查脚本默认真实 GPU headful，软件路径须
-`YACR_SOFTWARE_GPU=1` 显式开启并标注 SOFTWARE）。
-必须分别记录「打开 / 出图 smoke / 视觉验收」三个结论；退出码 0、非空截图、`error=None`
-都不能单独证明视觉正确。外部大样本默认放仓库外（默认 `~/sources/cad-test-files/`），
+流程见 `docs/testing-dwg.md` 与 `docs/react-linux-app.md`：**有真实显示/GPU 时以真实硬件 GPU
+为主**（React/Tauri 宿主经 `scripts/run-react-linux.sh` 启动，env-gated 证据驱动 +
+硬件 Vulkan）；**无显示环境**才回退原生离屏 wgpu + Mesa lavapipe
+（`cargo build -p cad-cli-tools --release`，`scripts/check-dwg-native.py`，用 lavapipe 时须显式
+`--software`）。必须分别记录「打开 / 出图 smoke / 视觉验收」三个结论；退出码 0、非空截图、
+`error=None` 都不能单独证明视觉正确。外部大样本默认放仓库外（默认 `~/sources/cad-test-files/`），
 也可用 `scripts/fetch-test-dwg.sh` 拉到 `/tmp/opencode`。**授权明确、可再分发的图纸与参考图
 可提交进 `fixtures/` 并记入 `fixtures/manifest`**，须在 `provenance` 记录来源 URL、下载
 日期、许可与 SHA-256；未授权或来源不明的用户/厂商数据仍不得提交。每轮用新输出目录，
@@ -197,7 +175,8 @@ WASM + Playwright 为第二层（浏览器检查脚本默认真实 GPU headful�
 
 ## 文档索引
 
-`docs/architecture.md`（边界与不变量）、`docs/build.md`（各平台构建）、`docs/ci.md`（CI
-分层与 NOT RUN）、`docs/validation*.md`（实际执行证据）、`docs/compatibility.md`（能力表）、
-`docs/handoff.md`（逐轮交接）、`docs/adr/`、`docs/testing-dwg.md`、`docs/app-icon.md`、
+`docs/architecture.md`（边界与不变量）、`docs/react-linux-app.md`（当前桌面宿主）、
+`docs/build.md`（构建与退役入口）、`docs/ci.md`（CI 分层与 NOT RUN）、`docs/validation*.md`
+（历史执行证据，含 NOT RUN 边界）、`docs/compatibility.md`（能力表）、`docs/handoff.md`
+（逐轮交接）、`docs/adr/`（含 ADR 0010）、`docs/testing-dwg.md`、`docs/app-icon.md`、
 `fixtures/manifest`。

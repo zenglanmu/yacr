@@ -1,8 +1,8 @@
 //! wgpu pipelines over CPU scene batches.
 //!
 //! Spec v2.0 §5.2, §8: the renderer does not own the window or the device. The
-//! host (Slint) provides a shared `Device`/`Queue`; CAD draws into a texture the
-//! host composites. Camera navigation updates only small uniform buffers, never
+//! host provides a shared `Device`/`Queue`; CAD draws into a texture the host
+//! composites. Camera navigation updates only small uniform buffers, never
 //! the static vertex buffers.
 //!
 //! Two pipelines are provided: a `LineList` pipeline for polylines and a
@@ -200,6 +200,26 @@ impl RenderTarget {
             samples: 1,
         }
     }
+}
+
+/// Microsecond timings of the last [`Renderer::commit_upload`] call (diagnostics
+/// only). Purely observational: it changes no commit semantics.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CommitTiming {
+    /// Re-basing prepared runs onto the existing streams (append/reindex).
+    pub rebase_us: u64,
+    /// Appending the prepared streams/batches into the resident sets.
+    pub append_us: u64,
+    /// Garbage-collecting the resident instance/arc/mesh streams.
+    pub gc_us: u64,
+    /// Rebuilding the pulled vertex-stage storage buffers.
+    pub pulled_us: u64,
+    /// Rebuilding the pick table.
+    pub pick_us: u64,
+    /// Rebuilding the lineweight cache.
+    pub lineweight_us: u64,
+    /// Total `commit_upload` wall time.
+    pub total_us: u64,
 }
 
 pub struct FrameStats {
@@ -713,6 +733,47 @@ pub(crate) struct PulledLineSegment {
     /// chunk table.
     bind_group: wgpu::BindGroup,
     instance_count: u32,
+    /// The segment's `VERTEX | STORAGE` geometry buffer (also the per-run instance
+    /// vertex buffer). Retained across admitted suffix commits so the base
+    /// geometry is not re-encoded/re-uploaded.
+    geometry_buffer: wgpu::Buffer,
+}
+
+/// How a commit's pulled rebuild should proceed (see [`PulledPrefixCheckpoint`]).
+pub(crate) enum PulledFastPath {
+    /// Full rebuild of the pulled classes. `establish` is the surviving prefix
+    /// length (`keep_prefix`) when a checkpoint should be recorded afterwards,
+    /// else `None` (a base replacement or no prefix).
+    Full { establish: Option<usize> },
+    /// Reuse the retained base segments and build only the suffix.
+    Reuse(Box<PulledPrefixCheckpoint>),
+}
+
+/// A retained pulled-buffer prefix checkpoint (accelerated tier only).
+///
+/// Established after a **full** pulled rebuild that retained a base batch prefix
+/// (`keep_prefix > 0`). An admitted later suffix commit then reuses the retained
+/// base geometry buffers and rebuilds only the suffix, instead of re-encoding and
+/// re-uploading the whole base. Every field is verified before the fast path is
+/// taken; anything unexpected falls back to a full rebuild (never a skip).
+#[derive(Clone)]
+pub(crate) struct PulledPrefixCheckpoint {
+    /// Device generation the retained buffers were built on.
+    device_generation: u64,
+    /// Renderer pulled-cache epoch (bumped on every invalidation).
+    cache_epoch: u64,
+    /// Retained batch prefix length (the commit `keep_prefix`).
+    retained_batches: usize,
+    /// Retained resource prefix counts.
+    instance_streams: usize,
+    mesh_chunks: usize,
+    arc_streams: usize,
+    /// Retained pulled segment counts.
+    line_segments: usize,
+    mesh_segments: usize,
+    /// Retained base segment resource ranges (whole-stream / whole-chunk ranges).
+    line_base_ranges: Vec<(usize, usize)>,
+    mesh_base_ranges: Vec<(usize, usize)>,
 }
 
 /// The accelerated tier's whole-scene line storage: every resident instance in
@@ -1194,6 +1255,18 @@ pub struct Renderer {
     /// Wall-clock ms of the last `upload`, or `None` before the first upload.
     /// Real measured upload time for `LoadTimings::upload_ms`.
     last_upload_ms: Option<f64>,
+    /// Microsecond substage timings of the last `commit_upload` (diagnostics only).
+    last_commit_timing: Option<CommitTiming>,
+    /// Retained pulled-buffer prefix checkpoint (accelerated tier; see
+    /// [`PulledPrefixCheckpoint`]).
+    pulled_prefix_checkpoint: Option<PulledPrefixCheckpoint>,
+    /// Pulled-cache epoch: bumped on every invalidation so an admission can
+    /// reject a checkpoint built before the invalidation.
+    pulled_cache_epoch: u64,
+    /// Diagnostics: suffix commits that reused the retained pulled base.
+    pulled_prefix_reuses: u64,
+    /// Diagnostics: full pulled rebuilds that (re)established a checkpoint.
+    pulled_prefix_rebuilds: u64,
     draw_calls: u64,
     progressive: bool,
     progressive_frame: Option<ProgressiveFrame>,
@@ -1389,5 +1462,10 @@ mod renderer_impl;
 
 pub(crate) use plan::*;
 
+// Private accelerated-tier GPU contracts for the pulled-prefix fast path. Test
+// only (it reads private renderer state and needs a real device); native only,
+// like `headless`.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod pulled_prefix_gpu_tests;
 #[cfg(test)]
 mod tests;

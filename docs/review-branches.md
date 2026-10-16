@@ -1,5 +1,10 @@
 # 独立分支并行审查（2026-10-04）
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 本轮由用户要求增至 4 个子代理，在主控已验证并推送的 `2d6b9ec` 基线上
 分别使用独立分支/worktree。子代理只写代码与回归测试，不编译、格式化、测试或推送；
 主控负责审查、整合分支、执行统一门禁及最终提交/推送。

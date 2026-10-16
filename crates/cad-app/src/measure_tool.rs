@@ -20,7 +20,7 @@ pub enum MeasurementToolKind {
 
 impl MeasurementToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
-    /// authoritative ordering; the Slint panel mirrors it instead of keeping a
+    /// authoritative ordering; the UI panel mirrors it instead of keeping a
     /// second hand-written list that can drift.
     pub const ALL: [MeasurementToolKind; 4] = [
         MeasurementToolKind::Distance,
@@ -144,7 +144,7 @@ impl MeasurementPreview {
 
     /// One-line, locale-facing capture step for the tool panel.
     ///
-    /// Kept in `cad-app` so the Slint layer never re-implements the state
+    /// Kept in `cad-app` so the UI layer never re-implements the state
     /// machine's counting rules.
     pub fn status_line(&self) -> String {
         if self.remaining > 0 {

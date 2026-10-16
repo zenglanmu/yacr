@@ -1,7 +1,7 @@
 //! UI-free synthetic contracts for the host boundary.
 //!
 //! These drive `HostCore` directly through the platform contracts and the
-//! `EngineClient` surface (no Slint handle, no window, no GPU), so they are
+//! `EngineClient` surface (no UI handle, no window, no GPU), so they are
 //! platform-general. They are not render/run acceptance evidence.
 use super::*;
 use cad_app::{DrawToolKind, Viewport};
@@ -3735,4 +3735,136 @@ fn dispatch_external_with_origin_action_reentry_is_busy_without_panicking() {
             command: CommandId::SwitchBackend
         }
     )));
+}
+
+// ---------------------------------------------------------------------------
+// Camera-settle deferral through the REAL host sequence (Oracle Finding 2).
+//
+// The host tick applies the engine view snapshot and then the host-computed
+// overlay `viewport_bounds` (`HostCore::canvas_bounds`, built from projected
+// screen corners). If that host computation disagreed with the engine's
+// `viewport_world_bounds` by even 1 ULP, `set_overlays` would see a bounds-only
+// change on every tick, advance the content revision and clear the engine's
+// deferred grid refresh — silently making the deferral a no-op in production
+// while the pure engine contracts stayed green. These fences pin that the two
+// bounds authorities agree bitwise and that the deferral survives a real pan.
+// ---------------------------------------------------------------------------
+
+/// Pan the active 2D viewport's camera by `dx` world units (what a drag produces).
+fn pan_active_camera(core: &HostCore, dx: f64) {
+    let mut c = core.controller.borrow_mut();
+    let id = c.viewport_id;
+    let viewport = c
+        .application
+        .workspace
+        .viewports
+        .get_mut(&id)
+        .expect("the host always has an active viewport");
+    viewport.camera.target.x += dx;
+}
+
+#[test]
+fn host_tick_preserves_the_deferred_camera_grid_refresh_across_a_pan_gesture() {
+    let core = core();
+    // Long enough that no assertion below can trip the settle.
+    core.render
+        .set_grid_settle_timeout(std::time::Duration::from_secs(3600));
+    core.sync_render().unwrap();
+
+    // Quiescent ticks must stay quiescent: no content churn, no armed refresh.
+    let idle = core.render.diagnostics();
+    core.sync_render().unwrap();
+    assert!(
+        !core.render.grid_refresh_pending(),
+        "an idle host tick must not arm a deferred camera refresh"
+    );
+    assert_eq!(
+        core.render.diagnostics().requested_token,
+        idle.requested_token,
+        "an idle host tick must not churn the content revision"
+    );
+
+    // A pan gesture driven through the real host sequence.
+    let mut last_view = idle.view_revision;
+    for step in 1..=3 {
+        pan_active_camera(&core, 40.0 * step as f64);
+        core.sync_render().unwrap();
+        assert!(
+            core.render.grid_refresh_pending(),
+            "host tick {step} must keep the deferred grid refresh pending: the host's \
+             `canvas_bounds` and the engine's `viewport_world_bounds` must agree bitwise"
+        );
+        let diagnostics = core.render.diagnostics();
+        assert_eq!(
+            diagnostics.view_revision,
+            last_view + 1,
+            "host tick {step} advances the view exactly once"
+        );
+        assert_eq!(
+            diagnostics.input_revision, idle.input_revision,
+            "a camera-only pan must not bump the scene identity"
+        );
+        last_view = diagnostics.view_revision;
+    }
+
+    // A zoom step is the same camera field family (`world_per_px == scale`), so it
+    // must defer identically — and again through the host's own bounds.
+    {
+        let mut c = core.controller.borrow_mut();
+        let id = c.viewport_id;
+        let viewport = c
+            .application
+            .workspace
+            .viewports
+            .get_mut(&id)
+            .expect("active viewport");
+        let cad_app::Projection::Orthographic { scale } = viewport.camera.projection else {
+            panic!("the 2D fixture must use an orthographic camera");
+        };
+        viewport.camera.projection = cad_app::Projection::Orthographic { scale: scale * 1.3 };
+    }
+    core.sync_render().unwrap();
+    assert!(
+        core.render.grid_refresh_pending(),
+        "a zoom step must keep the deferred refresh pending through the host sequence"
+    );
+
+    // Fit-on-resize through the host sequence (Oracle Finding 1): the canvas halves
+    // while the camera zooms in by 2x, so the world extent is identical and
+    // `camera_only` is false. The pending refresh covers exactly those bounds and
+    // must be turned into one content advance, never silently dropped.
+    let armed = core.render.diagnostics();
+    {
+        let mut c = core.controller.borrow_mut();
+        let id = c.viewport_id;
+        let viewport = c
+            .application
+            .workspace
+            .viewports
+            .get_mut(&id)
+            .expect("active viewport");
+        let cad_app::Projection::Orthographic { scale } = viewport.camera.projection else {
+            panic!("the 2D fixture must use an orthographic camera");
+        };
+        viewport.camera.projection = cad_app::Projection::Orthographic { scale: scale * 2.0 };
+        viewport.logical_size = [
+            viewport.logical_size[0] * 0.5,
+            viewport.logical_size[1] * 0.5,
+        ];
+    }
+    core.sync_render().unwrap();
+    assert!(
+        !core.render.grid_refresh_pending(),
+        "a fit-on-resize must cover the deferred refresh instead of dropping it"
+    );
+    assert_eq!(
+        core.render.diagnostics().requested_token,
+        armed.requested_token + 1,
+        "the covered bounds become exactly one content advance"
+    );
+    assert_eq!(
+        core.render.diagnostics().input_revision,
+        armed.input_revision,
+        "a bounds-preserving fit-on-resize must not bump the scene identity"
+    );
 }

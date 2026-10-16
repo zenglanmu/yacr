@@ -1,5 +1,10 @@
 # CAD 场景 / GPU runtime / Slint 呈现边界
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 保留 ADR 0002/0003：Slint 是唯一呈现协调者，提供共享 Device/Queue，CAD 绘制离屏
 纹理供 Slint 合成。没有第二个窗口/呈现循环，也没有逐帧 CPU 像素回读。
 

@@ -393,6 +393,21 @@ impl Renderer {
         Ok(())
     }
 
+    /// Whether this key's whole-entity draw is suppressed by the selection flags.
+    ///
+    /// Mirrors the colour pass's `FLAG_HIDDEN` discard exactly (`shaders/*.wgsl`:
+    /// `if (flags_ctl.enabled != 0u && (flag_bits(key) & FLAG_HIDDEN) != 0u) {
+    /// discard; }`): while the toggle is off (`flags_enabled == false`, i.e. the
+    /// control uniform's `enabled` word is zero) the flags path is inert and hides
+    /// nothing, and a key is suppressed only when its bits carry `FLAG_HIDDEN`.
+    /// The id-pass shaders never sample a flags texture, so the discard is applied
+    /// here, per whole-entity draw: skipping the draw makes the id pass rasterise
+    /// whatever lies beneath the hidden entity — the same picture the colour pass
+    /// draws.
+    fn draw_suppressed_by_flags(&self, key: u32) -> bool {
+        self.flags_enabled && (self.pick_key_flags(key) & cad_scene::FLAG_HIDDEN) != 0
+    }
+
     /// Encode and submit one id-pass frame for the current scene and projection.
     ///
     /// The geometry is exactly the color pass's: the same batches, the same
@@ -518,6 +533,15 @@ impl Renderer {
             .unwrap_or(world_per_px_bits);
         for &index in &ordered {
             let batch = &self.batches[index];
+            // A hidden whole-entity draw is not pickable: every run of this batch
+            // (merged mesh, instanced lines, conic arcs, or the legacy fallback)
+            // shares this batch's key, so skipping the whole batch here is exactly
+            // what the colour pass does per fragment. The id target is cleared to
+            // "no geometry" before every pass, so a hidden entity reveals whatever
+            // is drawn beneath it instead of leaving a stale key.
+            if self.draw_suppressed_by_flags(batch.pick_key) {
+                continue;
+            }
             // Mirror the colour pass's order for a converted mesh batch: the
             // triangles first, then the wireframe overlay. Both are drawn (no
             // coalescing), each with this batch's own key.
@@ -588,9 +612,13 @@ impl Renderer {
                 slot += 1;
             }
         }
-        // Images are drawn last, exactly as in the color pass.
+        // Images are drawn last, exactly as in the color pass; they follow the
+        // same `FLAG_HIDDEN` rule as the batches above.
         for index in 0..self.images.len() {
             let image = &self.images[index];
+            if self.draw_suppressed_by_flags(image.pick_key) {
+                continue;
+            }
             pending.push(Pending {
                 slot,
                 matrix: camera_matrix,
@@ -985,5 +1013,88 @@ mod shader_tests {
             let decoded = (encoded * 255.0).round() as u32 & 0xFF;
             assert_eq!(decoded, byte, "unorm8 round trip for {byte}");
         }
+    }
+}
+
+#[cfg(test)]
+mod hidden_pick_tests {
+    //! Pure contract for the id pass's `FLAG_HIDDEN` suppression (no GPU): the
+    //! predicate must mirror the colour pass's in-shader discard exactly,
+    //! including the `flags_ctl.enabled == 0` short-circuit.
+
+    use super::*;
+    use crate::BackendPreference;
+
+    /// A renderer whose CPU-side flag mirror is set directly, so the predicate is
+    /// testable without a device.
+    fn renderer(flags_enabled: bool, bits: &[(u32, u32)]) -> Renderer {
+        let mut renderer = Renderer::new(BackendPreference::Auto);
+        renderer.set_selection_flags_enabled(flags_enabled);
+        let len = bits
+            .iter()
+            .map(|(key, _)| *key as usize + 1)
+            .max()
+            .unwrap_or(0);
+        renderer.flags_bits = vec![0; len];
+        for (key, value) in bits {
+            renderer.flags_bits[*key as usize] = *value;
+        }
+        renderer
+    }
+
+    #[test]
+    fn hidden_suppression_matrix_matches_the_colour_shader() {
+        let hidden = cad_scene::FLAG_HIDDEN;
+        let selected = cad_scene::FLAG_SELECTED;
+        let hovered = cad_scene::FLAG_HOVERED;
+        let cases = [
+            (true, hidden, true, "enabled + HIDDEN"),
+            (
+                true,
+                hidden | selected,
+                true,
+                "enabled + HIDDEN|SELECTED (inclusion, not equality)",
+            ),
+            (
+                true,
+                selected,
+                false,
+                "enabled + SELECTED must stay pickable",
+            ),
+            (true, hovered, false, "enabled + HOVERED must stay pickable"),
+            (true, 0, false, "enabled + no bits must stay pickable"),
+            (
+                false,
+                hidden,
+                false,
+                "with the toggle off a HIDDEN bit hides nothing (shader short-circuit)",
+            ),
+        ];
+        for (enabled, bits, expected, what) in cases {
+            let renderer = renderer(enabled, &[(1, bits)]);
+            assert_eq!(
+                renderer.draw_suppressed_by_flags(1),
+                expected,
+                "{what} (enabled={enabled}, bits={bits:#x})"
+            );
+        }
+    }
+
+    #[test]
+    fn keys_without_recorded_bits_are_never_suppressed() {
+        let renderer = renderer(true, &[(1, cad_scene::FLAG_HIDDEN)]);
+        assert!(
+            !renderer.draw_suppressed_by_flags(0),
+            "the background key (0) carries no entity"
+        );
+        assert!(
+            !renderer.draw_suppressed_by_flags(99),
+            "a key beyond the recorded mirror has no bits and must stay pickable"
+        );
+        assert_eq!(
+            renderer.pick_key_flags(99),
+            0,
+            "the mirror reads 0 for an unrecorded key"
+        );
     }
 }

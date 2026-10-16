@@ -1,5 +1,5 @@
 //! Pure host policy: command routing, status ownership and export-format
-//! classification. Every function here is free of Slint/GPU/platform state, so
+//! classification. Every function here is free of UI/GPU/platform state, so
 //! it is unit-testable in isolation.
 use cad_app::CommandId;
 

@@ -1,23 +1,24 @@
 name: CI
 
-# Layered CI mirroring the repository's real gate (AGENTS.md "构建", N02 §6).
+# Layered CI mirroring the repository's real gate (AGENTS.md "构建").
 #
-# Jobs actually implemented here:
-#   core-quality  : core + Linux UI/host debug checks, fmt, clippy, boundaries (required)
+# After the UI replacement the desktop host is React/Tauri (`apps/app-linux`,
+# bin `yacr`); the Slint crate is gone and the Android/Web/Windows/macOS UIs are
+# explicit NOT IMPLEMENTED placeholders. This workflow keeps the genuine
+# compile/check gates:
+#   core-quality  : fmt, clippy (incl. the Tauri app-linux host), React (Vite)
+#                   test + build, architecture boundaries, fixture/workflow/
+#                   migration contracts, workspace host debug compilation (required)
 #   wasm-check    : full-workspace wasm --lib check + a separate app-web check (required)
 #   i18n-contracts: bilingual catalog parity + no hardcoded chrome literals (required)
-#   android-check : aarch64 UI+host check, capability-dependent (gated, see below)
+#   android-check : aarch64 `app-android` placeholder check, capability-gated
 #
-# The remaining N02 §6.2 layers live in `.github/workflows/build.yml`:
-#   web-build, shader-validation, android-apk (gated), web-smoke (gated).
-# Jobs that need a real device/GPU are modelled as skipped with a not-run summary;
-# nothing is faked green. See docs/ci.md.
+# The retired platform build/deploy/release jobs live in `.github/workflows/build.yml`
+# and are hard-disabled (`if: false`) so they can never publish a stub. See docs/ci.md.
 #
-# Action pins: `actions/checkout@v4` and `dtolnay/rust-toolchain@1.99.0` are the
-# exact pins already used by this repository. `actions/cache@v4` is the one new
-# action; it is pinned by the same major-version tag style (a full commit SHA
-# could not be network-verified while authoring this). Replace it with a
-# verified full SHA when the repository adopts SHA pinning.
+# Action pins: `actions/checkout@v4`, `dtolnay/rust-toolchain@1.99.0`,
+# `actions/setup-node@v4` and `actions/cache@v4` are pinned by major-version tag
+# (a full commit SHA could not be network-verified while authoring this).
 
 on:
   push:
@@ -33,6 +34,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: "22.22.1"              # pinned Node major/minor (React frontend build)
+
 jobs:
   core-quality:
     name: core-quality
@@ -43,6 +47,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
           components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - name: Cache cargo (registry / git / target)
         uses: actions/cache@v4
         with:
@@ -55,15 +62,29 @@ jobs:
             ${{ runner.os }}-cargo-core-quality-
       - name: Formatting
         run: cargo fmt --all -- --check
-      - name: Linux UI build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkgconf libfontconfig1-dev libfreetype6-dev
+      - name: Linux host build dependencies (GTK3 / WebKitGTK4.1 / Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkgconf libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - name: Test and build the React frontend (apps/app-linux/ui)
+        # The frontend's own node:test suite runs first; clippy and the workspace
+        # check then compile the Tauri host, whose `tauri::generate_context!`
+        # embeds `apps/app-linux/ui/dist`, so the Vite bundle must exist before
+        # the Rust host compiles.
+        working-directory: apps/app-linux/ui
+        run: |
+          npm ci
+          npm test
+          npm run build
       - name: Clippy (deny warnings)
         run: cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
       - name: Architecture boundaries
         run: python3 scripts/check-architecture.py
       - name: Fixture manifest
         run: python3 scripts/check-fixture-manifest.py
-      - name: Workflow contracts including primary Linux failure policy
+      - name: Workflow, packaging and migration contracts
         run: |
           python3 scripts/check-workflows.py
           python3 scripts/test-linux-workflow.py
@@ -72,9 +93,12 @@ jobs:
           python3 scripts/test-package-windows-release.py
           python3 scripts/test-package-macos-release.py
           python3 scripts/test-fetch-fonts.py
-          python3 scripts/test-web-backend-fallback.py
-          python3 scripts/test-web-cache-busting.py
           python3 scripts/test-android-icon.py
+          python3 scripts/test-ui-migration-guards.py
+      - name: Retained platform-neutral node contracts (no web shell)
+        # scripts/test-web-pixels.mjs is the one web-era test kept because it is a
+        # pure node zlib PNG decoder with no web-shell/wasm/browser dependency.
+        run: node --test scripts/test-web-pixels.mjs
       - name: Workspace host debug compilation (including test code)
         run: cargo check --workspace --all-targets --locked
 
@@ -98,7 +122,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-wasm-check-
       # Full workspace, no UI/host exclusions: this is the gate that exposes
-      # host coupling (audit B03) instead of pretending both ends compile.
+      # host coupling instead of pretending both ends compile. `app-linux` is
+      # Linux-target-only, so this compiles its empty non-Linux lib.
       - name: Full workspace wasm library check
         run: cargo check --workspace --lib --target wasm32-unknown-unknown --locked
       # Separate check so an app-web regression is locatable independently of
@@ -108,12 +133,10 @@ jobs:
 
   i18n-contracts:
     name: i18n-contracts
-    # N01/N02: bilingual catalog parity, missing-key detection and the
-    # hardcoded-chrome-literal scan (audit U10). This is a pure Python gate, so
-    # it needs no Rust toolchain and no Slint host.
-    #
-      # Catalog Rust unit tests compile in core-quality but are not executed.
-      # This remains the quick Python gate.
+    # Bilingual catalog parity, missing-key detection and the
+    # hardcoded-chrome-literal scan. This is a pure Python gate, so it needs no
+    # Rust toolchain and no UI host. Catalog Rust unit tests compile in
+    # core-quality but are not executed; this remains the quick Python gate.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -123,10 +146,11 @@ jobs:
 
   android-check:
     name: android-check
-    # Capability-dependent (N02 §6.2). GitHub-hosted runners do not ship the
-    # pinned JDK 17 / Android SDK / NDK 27.0.12077973 from docs/build.md, so this
-    # job is disabled by default. When disabled it is reported as SKIPPED, never
-    # as a pass, and the gap is recorded in docs/ci.md "NOT RUN".
+    # Capability-dependent. GitHub-hosted runners do not ship the pinned JDK 17 /
+    # Android SDK / NDK, so this job is disabled by default. When disabled it is
+    # reported as SKIPPED, never as a pass, and the gap is recorded in
+    # docs/ci.md "NOT RUN". It compiles the retired `app-android` NOT IMPLEMENTED
+    # placeholder only; the deleted Slint UI crate is NOT part of the gate.
     #
     # To enable: set repository variable ANDROID_CI_ENABLED=true and point
     # ANDROID_RUNNER_LABEL at a provisioned runner/label (e.g. "android-ci").
@@ -156,5 +180,5 @@ jobs:
           : "${JAVA_HOME:?JAVA_HOME (JDK 17) is not set: provision the runner per docs/build.md}"
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "JAVA_HOME=$JAVA_HOME"
-      - name: Android target check (UI + host)
-        run: cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked
+      - name: Android target check (retired placeholder)
+        run: cargo check --target aarch64-linux-android -p app-android --locked

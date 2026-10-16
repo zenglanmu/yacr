@@ -14,6 +14,7 @@ use cad_representation::{FontEngine, SpaceSelection};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod preparation;
@@ -23,7 +24,10 @@ mod camera;
 mod runtime;
 pub use camera::{camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera};
 use runtime::CadRenderRuntime;
-pub use runtime::{FrameBinding, FrameCompleteness, PresentedFrame, RenderLifecycle};
+pub use runtime::{
+    FrameBinding, FrameCompleteness, PresentedFrame, RenderLifecycle, RenderStatsObservation,
+    RuntimeDiagnostics, UploadDiagnostics, UploadTimingObservation,
+};
 
 fn backend_kind(actual: ActiveBackend) -> ActiveBackendKind {
     match actual {
@@ -77,6 +81,16 @@ impl Default for ViewSnapshot {
             mode: ProjectionKind::TwoD,
             canvas_size: [1280.0, 800.0],
         }
+    }
+}
+
+/// Honest label for the deferred camera-only reference-grid refresh (never a fake
+/// final-commit claim).
+fn grid_refresh_label(pending: bool) -> &'static str {
+    if pending {
+        "grid-refresh-pending"
+    } else {
+        "grid-refresh-idle"
     }
 }
 
@@ -146,6 +160,10 @@ impl BaseInputIdentity {
     }
 }
 
+/// Default camera-settle timeout for the deferred reference-grid refresh
+/// (camera-only pan/zoom/rotate). See [`State::grid_refresh_pending`].
+const CAMERA_SETTLE_TIMEOUT: Duration = Duration::from_millis(250);
+
 struct State {
     incoming: IncomingDocument,
     controller: CadSceneController,
@@ -191,6 +209,18 @@ struct State {
     redraw_requests: u64,
     stopped: bool,
     view_diagnostic: Option<String>,
+    /// A camera-only (pan/zoom/rotate) change moved the viewport world bounds and
+    /// its reference-grid re-prepare is **deferred** until the navigation settles:
+    /// during a gesture the published scene keeps its old grid extent instead of
+    /// re-preparing on every step. Cleared only when the content revision advances
+    /// (a settle commit, or any immediate/non-camera input), so it can never report
+    /// a fake final commit.
+    grid_refresh_pending: bool,
+    /// When the deferred camera-only refresh was last (re)armed.
+    last_camera_change: Option<Instant>,
+    /// Camera-settle timeout. `Duration::ZERO` disables the deferral entirely
+    /// (today's immediate behaviour); it is also the test kill-switch.
+    settle_timeout: Duration,
     #[cfg(not(target_arch = "wasm32"))]
     preparation: NativePreparation,
 }
@@ -221,6 +251,9 @@ impl Default for State {
             redraw_requests: 0,
             stopped: false,
             view_diagnostic: None,
+            grid_refresh_pending: false,
+            last_camera_change: None,
+            settle_timeout: CAMERA_SETTLE_TIMEOUT,
             #[cfg(not(target_arch = "wasm32"))]
             preparation: NativePreparation::default(),
         }
@@ -238,11 +271,55 @@ impl State {
 
     /// Advance only the preparation content revision (camera-derived reference
     /// geometry). Never invalidates the published scene.
+    ///
+    /// Advancing the content revision is exactly "something covering the current
+    /// bounds is being advanced", so it also clears a deferred camera-only refresh:
+    /// `grid_refresh_pending` is only ever true while the current bounds are *not*
+    /// yet re-prepared.
     fn advance_content(&mut self) {
         self.content_revision = self
             .content_revision
             .checked_add(1)
             .expect("render content revision exhausted");
+        self.clear_camera_settle();
+    }
+
+    /// Arm/refresh the deferred camera-only reference-grid refresh.
+    fn arm_camera_settle(&mut self, now: Instant) {
+        self.grid_refresh_pending = true;
+        self.last_camera_change = Some(now);
+    }
+
+    /// Forget a deferred camera-only refresh (it was covered by an advance, or a
+    /// non-transient input superseded it).
+    fn clear_camera_settle(&mut self) {
+        self.grid_refresh_pending = false;
+        self.last_camera_change = None;
+    }
+
+    /// Whether the camera-only deferral is active: never on wasm (there is no
+    /// async pump to settle it) and never with a zero timeout (kill-switch).
+    fn camera_settle_enabled(&self) -> bool {
+        cfg!(not(target_arch = "wasm32")) && !self.settle_timeout.is_zero()
+    }
+
+    /// One `Instant` compare per pump: settle a deferred camera-only refresh once
+    /// the navigation has been quiet for `settle_timeout`. Returns whether the
+    /// content revision advanced.
+    fn settle_camera_if_due(&mut self, now: Instant) -> bool {
+        if !self.grid_refresh_pending {
+            return false;
+        }
+        let due = match self.last_camera_change {
+            Some(last) => now.saturating_duration_since(last) >= self.settle_timeout,
+            None => true,
+        };
+        if due {
+            self.advance_content();
+            true
+        } else {
+            false
+        }
     }
 
     fn observe_drawing(&mut self) {
@@ -294,6 +371,162 @@ fn current_ready_scene(state: &State) -> Option<&controller::PreparedScene> {
     (!state.stopped && state.prepared_identity == Some(state.input_revision))
         .then_some(())
         .and(state.controller.ready.as_ref())
+}
+
+/// Why the render gate did (not) produce a CAD frame. Diagnostics only — it is
+/// derived from the same read-only facts `RenderSessionHandle::render` uses and
+/// never relaxes the gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderGateReason {
+    /// No renderer attached (device detached / never attached).
+    Detached,
+    /// Terminal backend failure/loss.
+    Failed,
+    /// CPU scene preparation has not published the current scene yet (the
+    /// `prepared_identity`/`content_revision` path is still busy or has not run).
+    Preparing,
+    /// The current scene is published but its **base** upload has not committed.
+    UploadingBase,
+    /// The current scene is published but an optional overlay-suffix upload has
+    /// not committed.
+    UploadingOverlay,
+    /// The current scene is published and no upload is pending, but the GPU base
+    /// resident for its revision does not match the live base identity (for
+    /// example after a device rebuild) — the gate cannot draw the current scene.
+    BaseIdentityMismatch,
+    /// Gate met: the current scene and its base are GPU-committed.
+    Ready,
+}
+
+/// The facts the gate decision is made from (pure, so it is unit-testable
+/// without a GPU).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GateFacts {
+    detached: bool,
+    ready_lifecycle: bool,
+    scene_current: bool,
+    committed: bool,
+    /// `Some(base_changed)` when an upload is in flight.
+    pending: Option<bool>,
+    base_resident: bool,
+}
+
+fn classify_gate(facts: GateFacts) -> RenderGateReason {
+    if facts.detached {
+        return RenderGateReason::Detached;
+    }
+    if !facts.ready_lifecycle {
+        return RenderGateReason::Failed;
+    }
+    if !facts.scene_current {
+        return RenderGateReason::Preparing;
+    }
+    if facts.committed {
+        return RenderGateReason::Ready;
+    }
+    match facts.pending {
+        Some(true) => RenderGateReason::UploadingBase,
+        Some(false) => RenderGateReason::UploadingOverlay,
+        None if facts.base_resident => RenderGateReason::Preparing,
+        None => RenderGateReason::BaseIdentityMismatch,
+    }
+}
+
+/// Read-only structured snapshot of the render session's gate/waiting state.
+///
+/// Projected from the same state `render` reads; producing it never advances a
+/// revision, an upload or the view, and never forces engine work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderDiagnostics {
+    /// The gate reason the next `render` would see.
+    pub gate: RenderGateReason,
+    /// `"detached"` / `"ready"` / `"lost"` / `"failed"`.
+    pub lifecycle: &'static str,
+    /// Monotonic scene-identity revision (advances on identity changes only).
+    pub input_revision: u64,
+    /// Monotonic preparation token: the **most recently requested** input.
+    pub requested_token: u64,
+    /// Monotonic authoritative view revision.
+    pub view_revision: u64,
+    /// Content revision of the last **published** scene.
+    pub prepared_token: Option<u64>,
+    /// Scene-identity revision the published scene was built from.
+    pub prepared_identity: Option<u64>,
+    /// Published scene revision, if a current ready scene exists.
+    pub ready_revision: Option<u64>,
+    /// Published scene's base revision.
+    pub ready_base_revision: Option<u64>,
+    /// Cumulative scene publication revision.
+    pub scene_publication_revision: u64,
+    /// Cumulative base publication revision.
+    pub base_publication_revision: u64,
+    /// Whether async CPU preparation is busy.
+    pub preparation_busy: bool,
+    /// Whether async CPU preparation exists on this target (false on wasm).
+    pub preparation_available: bool,
+    /// Last real scene/runtime diagnostic (never a converted success).
+    pub result_status: Option<String>,
+    /// Whether a camera-only (pan/zoom/rotate) reference-grid refresh is deferred
+    /// until the navigation settles. `true` only while the current bounds have not
+    /// been re-prepared yet, so it can never claim a fake final commit.
+    pub grid_refresh_pending: bool,
+    /// Human-readable companion for [`Self::grid_refresh_pending`].
+    pub grid_refresh: &'static str,
+    /// Runtime upload/render bookkeeping.
+    pub runtime: RuntimeDiagnostics,
+}
+
+impl RenderSessionHandle {
+    /// Read-only render-gate diagnostics (see [`RenderDiagnostics`]).
+    ///
+    /// Deliberately does **not** call `observe_drawing` (which can advance the
+    /// input revision): a telemetry read must not mutate readiness.
+    pub fn diagnostics(&self) -> RenderDiagnostics {
+        let state = self.0.borrow();
+        let scene = current_ready_scene(&state);
+        let committed = scene.is_some_and(|scene| {
+            state
+                .runtime
+                .scene_committed(scene.revision, scene.base_revision)
+        });
+        let facts = GateFacts {
+            detached: matches!(state.runtime.lifecycle, RenderLifecycle::Detached),
+            ready_lifecycle: matches!(state.runtime.lifecycle, RenderLifecycle::Ready { .. }),
+            scene_current: scene.is_some(),
+            committed,
+            pending: state.runtime.pending_upload_kind(),
+            base_resident: scene
+                .is_some_and(|scene| state.runtime.base_fully_resident(scene.base_revision)),
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let preparation_busy = state.preparation.busy();
+        #[cfg(target_arch = "wasm32")]
+        let preparation_busy = false;
+        let runtime = state.runtime.diagnostics();
+        RenderDiagnostics {
+            gate: classify_gate(facts),
+            lifecycle: runtime.lifecycle,
+            input_revision: state.input_revision,
+            requested_token: state.content_revision,
+            view_revision: state.view_revision,
+            prepared_token: state.prepared_token,
+            prepared_identity: state.prepared_identity,
+            ready_revision: scene.map(|scene| scene.revision),
+            ready_base_revision: scene.map(|scene| scene.base_revision),
+            scene_publication_revision: state.scene_publication_revision,
+            base_publication_revision: state.base_publication_revision,
+            preparation_busy,
+            preparation_available: !cfg!(target_arch = "wasm32"),
+            result_status: state
+                .controller
+                .diagnostic
+                .clone()
+                .or_else(|| state.runtime.diagnostic.clone()),
+            grid_refresh_pending: state.grid_refresh_pending,
+            grid_refresh: grid_refresh_label(state.grid_refresh_pending),
+            runtime,
+        }
+    }
 }
 
 /// Narrow qualifier for the 2D navigation fallback.
@@ -438,11 +671,19 @@ impl RenderSessionHandle {
         }
         // A document/space switch changes the authoritative scene identity and
         // must invalidate the published scene. A camera-only change (pan/zoom,
-        // mode, canvas size) must not: every overlay batch is world-space
+        // rotation, mode, canvas size) must not: every overlay batch is world-space
         // geometry that renders correctly under any camera, so only
         // `view_revision` advances and the reference-grid bounds are re-scoped.
         let identity_changed =
             view.document != state.view.document || view.space != state.view.space;
+        // Deferral is admitted **only** when the two snapshots differ solely in
+        // camera fields (center/zoom/rotation): a canvas-size, mode, document or
+        // space change keeps today's immediate path.
+        let camera_only = state.view.document == view.document
+            && state.view.space == view.space
+            && state.view.mode == view.mode
+            && state.view.canvas_size == view.canvas_size
+            && state.view.camera != view.camera;
         state.view = view;
         state.view_revision = state
             .view_revision
@@ -455,12 +696,29 @@ impl RenderSessionHandle {
             state.overlay_revision += 1;
         }
         if identity_changed {
+            // Never defer across a scene-identity change: this clears any pending
+            // camera refresh as well (`advance_input` -> `advance_content`).
             state.advance_input();
         } else if bounds_changed {
-            // The camera-derived grid extent changed. Schedule a background
-            // re-prepare (the token advances) without invalidating the ready
-            // scene, so no base-only/full frame alternation or suffix churn.
-            state.advance_content();
+            if camera_only && state.camera_settle_enabled() {
+                // Defer: the published scene keeps the old grid extent and one
+                // refresh is committed when the gesture settles.
+                state.arm_camera_settle(Instant::now());
+            } else {
+                // Today's immediate path (non-camera bounds change, or the
+                // zero-timeout kill-switch). Clears any pending refresh.
+                state.advance_content();
+            }
+        } else if !camera_only {
+            // A non-camera view change that did not move the bounds schedules
+            // nothing by itself. It must NOT drop a pending refresh for the
+            // **current** bounds (reachable through a fit-on-resize, where canvas
+            // size and camera change together while the world extent stays
+            // identical): cover those bounds with one content advance, which also
+            // clears the pending flag. A genuine immediate path never lands here.
+            if state.grid_refresh_pending {
+                state.advance_content();
+            }
         }
         state.runtime.dirty.invalidate();
         Ok(true)
@@ -548,6 +806,7 @@ impl RenderSessionHandle {
         #[cfg(not(target_arch = "wasm32"))]
         {
             state.observe_drawing();
+            state.settle_camera_if_due(Instant::now());
             let input = preparation_input(&state);
             match state.preparation.update(input) {
                 Ok(Some((token, controller))) => {
@@ -574,6 +833,7 @@ impl RenderSessionHandle {
                 return Ok(false);
             }
             state.observe_drawing();
+            state.settle_camera_if_due(Instant::now());
             let input = preparation_input(&state);
             match state.preparation.update(input) {
                 Ok(Some((token, controller))) => {
@@ -683,6 +943,28 @@ impl RenderSessionHandle {
     /// Whether the 2D navigation fallback is currently withholding overlays.
     pub fn overlays_suppressed(&self) -> bool {
         self.0.borrow().runtime.overlays_suppressed()
+    }
+    /// Whether a camera-only (pan/zoom/rotate) reference-grid refresh is deferred
+    /// until the navigation settles. Honest: it is `true` only while the current
+    /// bounds have **not** been re-prepared yet, and it clears exactly when the
+    /// content revision advances (settle commit, or any immediate input).
+    pub fn grid_refresh_pending(&self) -> bool {
+        self.0.borrow().grid_refresh_pending
+    }
+    /// Human-readable companion for [`Self::grid_refresh_pending`]; never a fake
+    /// final-commit claim.
+    pub fn grid_refresh_diagnostic(&self) -> &'static str {
+        grid_refresh_label(self.grid_refresh_pending())
+    }
+    /// The camera-settle timeout currently in force.
+    pub fn grid_settle_timeout(&self) -> Duration {
+        self.0.borrow().settle_timeout
+    }
+    /// Test hook: set the camera-settle timeout. `Duration::ZERO` disables the
+    /// deferral (today's immediate behaviour) and flushes any pending refresh on
+    /// the next pump.
+    pub fn set_grid_settle_timeout(&self, timeout: Duration) {
+        self.0.borrow_mut().settle_timeout = timeout;
     }
     /// Cumulative overlay-suffix commits (uploads or truncations) the runtime has
     /// performed. A camera-only navigation step must not advance this: it is the
@@ -884,6 +1166,23 @@ impl RenderSessionHandle {
     }
     pub fn diagnostic(&self) -> Option<String> {
         self.0.borrow().runtime.diagnostic.clone()
+    }
+    /// Take the observation of the most recent **actual** renderer invocation.
+    ///
+    /// Delivered at most once per render sequence, so a host can never replay
+    /// stale stats for a retained/reused or waiting frame. `None` when no new
+    /// actual render happened since the previous take.
+    pub fn take_render_stats_observation(&self) -> Option<RenderStatsObservation> {
+        self.0.borrow_mut().runtime.take_render_observation()
+    }
+    /// Take the latest upload stage-timing observation (at most once per upload
+    /// work unit). `None` when no new upload staged/committed since the last take.
+    pub fn take_upload_timing_observation(&self) -> Option<UploadTimingObservation> {
+        self.0.borrow_mut().runtime.take_upload_timing_observation()
+    }
+    /// The current device epoch (increments on every successful attach).
+    pub fn device_epoch(&self) -> u64 {
+        self.0.borrow().runtime.device_epoch()
     }
     pub fn frames_rendered(&self) -> u64 {
         self.0.borrow().runtime.frames_rendered
@@ -1140,6 +1439,99 @@ mod tests {
         session.prepare().unwrap();
         let after = session.current_prepared_scene().unwrap().base_revision;
         assert!(after > before, "resource generations must invalidate the base even without an intermediate publication");
+    }
+
+    fn facts(
+        detached: bool,
+        ready_lifecycle: bool,
+        scene_current: bool,
+        committed: bool,
+        pending: Option<bool>,
+        base_resident: bool,
+    ) -> GateFacts {
+        GateFacts {
+            detached,
+            ready_lifecycle,
+            scene_current,
+            committed,
+            pending,
+            base_resident,
+        }
+    }
+
+    #[test]
+    fn render_gate_reason_covers_every_waiting_stage() {
+        // Detached: no renderer at all.
+        assert_eq!(
+            classify_gate(facts(true, false, false, false, None, false)),
+            RenderGateReason::Detached
+        );
+        // Attached-but-terminal.
+        assert_eq!(
+            classify_gate(facts(false, false, false, false, None, false)),
+            RenderGateReason::Failed
+        );
+        // CPU scene preparation has not published the current scene.
+        assert_eq!(
+            classify_gate(facts(false, true, false, false, None, false)),
+            RenderGateReason::Preparing
+        );
+        // Published scene, base upload still in flight.
+        assert_eq!(
+            classify_gate(facts(false, true, true, false, Some(true), false)),
+            RenderGateReason::UploadingBase
+        );
+        // Published scene, overlay-suffix upload in flight.
+        assert_eq!(
+            classify_gate(facts(false, true, true, false, Some(false), true)),
+            RenderGateReason::UploadingOverlay
+        );
+        // Published scene, nothing pending, base not resident (identity mismatch /
+        // device reset) — never reported Ready.
+        assert_eq!(
+            classify_gate(facts(false, true, true, false, None, false)),
+            RenderGateReason::BaseIdentityMismatch
+        );
+        // Gate met.
+        assert_eq!(
+            classify_gate(facts(false, true, true, true, None, true)),
+            RenderGateReason::Ready
+        );
+        // A committed scene is Ready regardless of a stale pending flag.
+        assert_eq!(
+            classify_gate(facts(false, true, true, true, Some(true), true)),
+            RenderGateReason::Ready
+        );
+    }
+
+    #[test]
+    fn diagnostics_read_is_pure_and_never_labels_a_success() {
+        let session = RenderSessionHandle::new(BackendPreference::Auto);
+        let input_before = session.input_revision();
+        let view_before = session.view_revision();
+        let frames_before = session.frames_rendered();
+        let first = session.diagnostics();
+        let second = session.diagnostics();
+        // Repeated reads are identical (no time/state dependent drift).
+        assert_eq!(first, second);
+        // Reading diagnostics must not advance revisions or render anything.
+        assert_eq!(session.input_revision(), input_before);
+        assert_eq!(session.view_revision(), view_before);
+        assert_eq!(session.frames_rendered(), frames_before);
+        // A fresh, device-less session is Detached and never a fabricated Ready /
+        // current scene.
+        assert_eq!(first.gate, RenderGateReason::Detached);
+        assert_eq!(first.lifecycle, "detached");
+        assert_eq!(first.ready_revision, None);
+        assert_eq!(first.ready_base_revision, None);
+        assert_eq!(first.prepared_token, None);
+        assert_eq!(first.prepared_identity, None);
+        assert!(!first.runtime.uploading);
+        assert_eq!(first.runtime.upload, None);
+        assert_eq!(first.runtime.frames_rendered, 0);
+        assert_eq!(first.runtime.uploads_started, 0);
+        assert_eq!(first.runtime.upload_revision_resets, 0);
+        assert_eq!(first.runtime.ready_none_clears, 0);
     }
 }
 

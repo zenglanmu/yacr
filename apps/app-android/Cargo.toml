@@ -9,30 +9,17 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 
+# The Android UI is retired (explicit NOT IMPLEMENTED placeholder): the native
+# entry point only reports the retirement and aborts, so the old
+# Slint/cad-host/cad-engine composition-root dependencies are gone. `log` is the
+# facade the entry point logs through.
 [dependencies]
-cad-host.workspace = true
-cad-ui-slint.workspace = true
-# The Android composition root owns the UI-free `RenderSessionHandle` and the
-# `EngineClient` boundary directly (the host no longer re-exports them).
-cad-engine.workspace = true
-cad-app.workspace = true
-cad-platform.workspace = true
-cad-import-acadrust.workspace = true
-cad-db.workspace = true
-cad-domain.workspace = true
-# The layout panel's `active` space is a `cad_representation::SpaceSelection`;
-# the host must name that type when pushing `LayoutPanelState`.
-cad-representation.workspace = true
 log.workspace = true
 
-# The android-activity stack is Android-only; keeping it target-scoped lets the
-# rest of the workspace compile for wasm/host targets.
+# The Android native-activity stack is Android-only; keeping it target-scoped
+# lets the rest of the workspace compile the crate's host target.
 [target.'cfg(target_os = "android")'.dependencies]
-slint.workspace = true
 android-activity = { version = "0.6", features = ["native-activity"] }
-jni = "0.21"
-ndk-context = "0.1"
-ndk-sys = "0.6"
 android_logger = "0.14"
 
 [package.metadata.android]
@@ -46,10 +33,11 @@ build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-lin
 # `d8 --min-api` (23); see docs/build.md and docs/ci.md.
 min_sdk_version = 23
 target_sdk_version = 30
-# Bundle the optional font package under `assets/fonts/`. The host reads it via
-# the activity AssetManager (`android_fonts::ASSET_BASE = "asset://fonts/"`).
-# Fonts are third-party (mlightcad/cad-data) and included for on-device testing;
-# see docs/fonts.md for provenance and licensing.
+# Retained packaging artifacts from the retired UI. The optional font package
+# under `assets/fonts/` and the launcher `res/` are no longer read by any Rust
+# code (the APK asset loader was retired with the UI); they are kept because the
+# out-of-scope packaging scripts and CI still reference them. Fonts are
+# third-party (mlightcad/cad-data); see docs/fonts.md for provenance.
 assets = "assets"
 
 # Launcher icon resources. `res/` holds the PNG mipmaps plus the API 26+
@@ -66,11 +54,12 @@ label = "yacr"
 # during the `scripts/build-android.sh` post-processing step.
 has_code = true
 
-# The declared launcher activity is a NativeActivity subclass (see
-# `android/dev/yacr/app/YacrNativeActivity.java`) that mediates the SAF picker.
-# Subclassing keeps the exact native lifecycle android-activity/Slint depend on
-# while giving us `onActivityResult`, and — unlike a second `<activity>` entry —
-# needs no fragile edit of the compiled binary AndroidManifest.xml.
+# Retained packaging metadata from the retired UI. The declared launcher activity
+# is still a NativeActivity subclass (see
+# `android/dev/yacr/app/YacrNativeActivity.java`); the native entry point it
+# reaches (`android_main`) now reports the retirement and aborts. The Java shim
+# and this activity declaration are dead wiring kept only because the
+# out-of-scope `scripts/build-android.sh` post-processing still references them.
 [package.metadata.android.application.activity]
 name = "dev.yacr.app.YacrNativeActivity"
 

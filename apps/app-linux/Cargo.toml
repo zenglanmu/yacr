@@ -5,31 +5,61 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "yacr-linux"
+name = "yacr"
 path = "src/main.rs"
 
-# Shared desktop implementation for the Linux host (`yacr-linux`), the Windows
-# host (`yacr`, in `apps/app-windows`) and the macOS host (`yacr-macos`, in
-# `apps/app-macos`). The hosts differ only in the file chooser, the per-user
-# config directory and the system-font source, all of which are cfg-selected
-# inside `src/host/`; the controller/Slint bridge is identical.
-[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
+# Native Linux desktop host for the CAD viewer/measure/annotation app: a React
+# chrome in a Tauri 2 webview composited over a GTK/wgpu CAD surface. It drives
+# `cad-render-wgpu::SurfaceProbePresenter` on a windowed `GtkDrawingArea` and
+# exposes a small status/input protocol to the frontend. The platform-independent
+# UI logic lives in `cad-ui-core`.
+#
+# **Linux only** (GTK X11/XWayland or native Wayland). tauri/wry/tao and the
+# renderer are Linux-target-only, so a workspace wasm (or other-target) `--lib`
+# check compiles an empty crate instead of pulling unsupported windowing code.
+# The binary returns an explicit NOT IMPLEMENTED error elsewhere (`src/entry.rs`).
+[target.'cfg(target_os = "linux")'.dependencies]
+tauri.workspace = true
+cad-render-wgpu.workspace = true
+raw-window-handle.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# CAD host/engine contracts for the host platform layer: the `cad-platform`
+# trait implementations in `src/platform.rs` (`ReactFiles`/`ReactSurface`/
+# `ReactConfigStore`) and the `HostCore`/`RenderSessionHandle` composition the
+# host builds on. `cad-ui-core` carries the platform-independent UI logic.
+cad-ui-core.workspace = true
 cad-app.workspace = true
-cad-domain.workspace = true
 cad-engine.workspace = true
 cad-host.workspace = true
 cad-platform.workspace = true
-cad-ui-slint.workspace = true
-cad-render-wgpu.workspace = true
-serde_json.workspace = true
-slint.workspace = true
+cad-resources.workspace = true
+cad-db.workspace = true
+cad-domain.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+# GTK overlay bridge: the probe surface lives on a windowed GtkDrawingArea
+# inside a GtkOverlay, with the React webview reparented as a transparent sibling.
+gtk.workspace = true
+gdk.workspace = true
+gdkx11.workspace = true
+
+# Native Wayland subsurface bridge (`src/wayland_surface.rs`): borrows the GDK
+# Wayland `wl_display`/toplevel `wl_surface` for the app-owned child surface.
+# `lib` name is `gdk_wayland_sys`.
+gdkwayland-sys.workspace = true
+
+# Native open chooser (XDG desktop portal).
 ashpd = { version = "0.12.3", default-features = false, features = ["async-std"] }
 pollster = "0.4"
 
-# Native Windows/macOS file chooser. `default-features = false` drops the
-# optional XDG-portal (Linux) backend; the Windows and macOS backends need no
-# feature (`rfd`'s macOS backend is compiled from the `objc2` stack).
-[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
-rfd = { version = "0.15", default-features = false }
+# `tauri-build` is a build-dependency (compiled for the host). It is gated to the
+# Linux target so non-Linux targets do not pull it; `build.rs` additionally checks
+# the *target* os at runtime before calling `tauri_build::build()`.
+#
+# `cc`/`pkg-config` compile the private Wayland protocol shim and probe
+# `wayland-client.pc` for its include/link flags (Linux target only).
+[target.'cfg(target_os = "linux")'.build-dependencies]
+tauri-build.workspace = true
+cc.workspace = true
+pkg-config.workspace = true

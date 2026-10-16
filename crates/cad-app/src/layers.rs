@@ -171,8 +171,8 @@ pub fn filter_layer_rows(rows: &[LayerRow], needle: &str) -> Vec<LayerRow> {
 ///
 /// This is the exact, testable decision the render bridge uses; keeping it in
 /// `cad-app` means the filtering rule is covered by `cargo test -p cad-app`
-/// even though the Slint crate's own tests cannot build on a host without
-/// fontconfig. Order follows [`DrawingDatabase::model_space`] (draw order).
+/// without the UI host's graphics/font toolchain (fontconfig/GTK). Order
+/// follows [`DrawingDatabase::model_space`] (draw order).
 pub fn visible_model_entities<'a>(
     database: &'a DrawingDatabase,
     overrides: &LayerOverrideSet,

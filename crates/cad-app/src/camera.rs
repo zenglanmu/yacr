@@ -12,7 +12,7 @@
 //!   (plan "up"), `+Z` up. The default 2D view looks down `-Z` with screen
 //!   `+right = +X` and screen `+up = +Y`.
 //! * **Units**: world coordinates are in drawing units, screen coordinates are
-//!   logical pixels with `y` growing **downwards** (the Slint/pointer
+//!   logical pixels with `y` growing **downwards** (the screen/pointer
 //!   convention). [`Camera::world_to_screen`] flips the sign accordingly.
 //! * **Angles**: all angles are radians unless a function name says otherwise;
 //!   a perspective field of view is the full *vertical* angle in radians.

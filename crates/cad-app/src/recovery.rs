@@ -2,7 +2,7 @@
 //!
 //! This module is the *pure* half of the app/bridge contract: it models what a
 //! backend selection attempt produced. It performs no GPU work and no platform
-//! I/O, so it is testable on the host and on wasm32. The Slint host and the
+//! I/O, so it is testable on the host and on wasm32. The UI host and the
 //! bridge only map these values to real device initialization.
 //!
 //! **A failed backend is never reported as success.** [`BackendOutcome`]

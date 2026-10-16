@@ -1,7 +1,7 @@
 //! Shared input, DPI, IME and status policy (audit U05–U08).
 //!
-//! Platform hosts (Slint, Android, Web) differ wildly in how they deliver
-//! pointers, keys and surface metrics, but the *decisions* they must make are
+//! Platform hosts differ wildly in how they deliver pointers, keys and surface
+//! metrics, but the *decisions* they must make are
 //! identical: does this pointer start a draw or a pan, is a multi-touch gesture
 //! allowed to commit, does Esc cancel a tool or leave the app, and where does a
 //! physical pixel land in world space. Keeping that policy here — pure, host
@@ -397,7 +397,7 @@ impl CanvasMetrics {
 
 /// The mapping canvas rectangle → logical → physical → world (audit U07).
 ///
-/// `surface_logical` is a point in *surface* logical pixels (what a Slint/Web
+/// `surface_logical` is a point in *surface* logical pixels (what a host
 /// pointer gives). The mapping subtracts the canvas origin, so drawing and
 /// picking agree no matter where the canvas sits (audit U07 "frame 用全窗口尺寸
 /// 而 Image 只占工具栏之间区域").
@@ -493,8 +493,8 @@ pub fn apply_canvas_metrics(viewport: &mut Viewport, canvas: &CanvasMetrics) -> 
 /// Fold safe-area insets into a surface rectangle, producing the canvas metrics.
 ///
 /// `safe_insets` is ordered `[top, right, bottom, left]` in logical pixels
-/// (`cad-ui-slint::UiConfiguration::safe_insets`, matching CSS
-/// `env(safe-area-inset-*)`). The canvas origin shifts in by the left/top inset
+/// (matching CSS `env(safe-area-inset-*)`). The canvas origin shifts in by the
+/// left/top inset
 /// and the canvas size shrinks by the sum of the opposing insets, so the host
 /// supplies the canvas rect **minus** the safe area (audit U07,
 /// `docs/input.md` §3).
@@ -547,9 +547,10 @@ pub fn inset_canvas_metrics(
 
 /// Map a layout-panel `SpaceSelection` to the validated `SwitchSpace` payload.
 ///
-/// The three hosts install a [`cad_ui_slint::LayoutSwitchSink`] that dispatches
+/// The UI host installs a layout-switch sink that dispatches
 /// the same command the layout rows use (`CommandId::SwitchSpace`); naming the
-/// payload here keeps them from drifting on the mapping. It does **not** validate
+/// payload here keeps the host and the UI from drifting on the mapping. It does
+/// **not** validate
 /// the layout: the command layer refuses an unknown `LayoutId` against the real
 /// layout table, so an unknown space is an explicit failure, never a silent
 /// success or a database mutation (`docs/layouts.md` §4).

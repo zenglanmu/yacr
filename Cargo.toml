@@ -19,14 +19,13 @@ members = [
     "crates/cad-app",
     "crates/cad-engine",
     "crates/cad-host",
-    "crates/cad-ui-slint",
+    "crates/cad-ui-core",
     "crates/cad-platform",
     "crates/cad-diagnostics",
     "crates/cad-cli-tools",
     "apps/app-android",
     "apps/app-web",
     "apps/app-linux",
-    "apps/app-react-linux",
     "apps/app-windows",
     "apps/app-macos",
 ]
@@ -58,14 +57,12 @@ cad-query = { path = "crates/cad-query" }
 cad-app = { path = "crates/cad-app" }
 cad-engine = { path = "crates/cad-engine" }
 cad-host = { path = "crates/cad-host" }
-cad-ui-slint = { path = "crates/cad-ui-slint" }
+cad-ui-core = { path = "crates/cad-ui-core" }
 cad-platform = { path = "crates/cad-platform" }
 cad-diagnostics = { path = "crates/cad-diagnostics" }
 
 # Integration candidates only: not linked or validated by the scaffold.
 acadrust = { version = "0.6.3", features = ["serde", "import"] }
-slint = "=1.18.1"
-slint-build = "=1.18.1"
 wgpu = "=30.0.1"
 glam = { version = "0.33", features = ["serde", "bytemuck"] }
 serde = { version = "1", features = ["derive"] }
@@ -84,34 +81,42 @@ encoding_rs = "0.8"
 # adapter/device requests, and encoding the offscreen frame to PNG.
 png = "0.18"
 # Decoding raster images referenced by a drawing (`cad-resources`). Pure-Rust
-# and wasm-safe; zune-core is already in the lock via the Slint/wgpu stack.
+# and wasm-safe; zune-core is already in the lock via the image/wgpu stack.
 zune-jpeg = "0.5"
 futures-lite = "2.6"
 
 # Portable wall clock. `std::time::Instant::now()` panics on
 # wasm32-unknown-unknown ("time not implemented"); `web-time` re-exports std on
 # native and uses `Performance.now()` in the browser. Already in the lock via
-# winit / Slint / acadrust.
+# winit / acadrust.
 web-time = "1"
 
 # Browser host (wasm32 only). Pinned to the versions already in Cargo.lock via
-# the Slint/wgpu web stack; wasm-bindgen-cli must match `wasm-bindgen` exactly.
+# the wgpu web stack; wasm-bindgen-cli must match `wasm-bindgen` exactly.
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"
 js-sys = "=0.3.106"
 web-sys = "=0.3.106"
 
-# React + Tauri native Linux probe host (experiment; ADR 0006). Tauri2 and its
-# build helper are the only new runtime/build dependencies; the probe reuses the
-# existing `cad-render-wgpu::SurfaceProbePresenter` with no renderer changes.
+# React + Tauri native Linux desktop host (`apps/app-linux`). Tauri2 and its
+# build helper are the runtime/build dependencies; the host reuses the existing
+# `cad-render-wgpu::SurfaceProbePresenter` with no renderer changes.
 # `tauri-build` is versioned independently of `tauri` (2.7.x vs 2.11.x).
 tauri = { version = "=2.11.6", features = ["unstable"] }
 tauri-build = { version = "=2.6.3" }
-# GTK overlay bridge for the React probe (Linux only). Versions match the
-# gtk/gdk/gdkx11 already in the lock via Tauri.
+# GTK overlay bridge for the Linux host. Versions match the gtk/gdk/gdkx11
+# already in the lock via Tauri.
 gtk = "0.18"
 gdk = "0.18"
 gdkx11 = "0.18"
+# GDK Wayland accessors (`gdk_wayland_display_get_wl_display` /
+# `gdk_wayland_window_get_wl_surface`) for the app-owned child wl_surface bridge.
+# Same version family as gtk/gdk/gdkx11 (already in the lock via tao).
+gdkwayland-sys = "0.18"
+# Compile the private Wayland protocol shim (cc) and probe wayland-client.pc
+# (pkg-config) in `apps/app-linux/build.rs`.
+cc = "1"
+pkg-config = "0.3"
 # Needed to read the X11 top-level XID of the Tauri window (tauri does not
 # re-export raw-window-handle). Matches the 0.6.2 already in the lock via wgpu.
 raw-window-handle = "0.6"

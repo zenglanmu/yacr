@@ -1,5 +1,10 @@
 # 代码审计与下游 Coding Agent 交接
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 审计日期：2026-10-01。基线 commit：`c260d8bfc44a108bdcc99b6114ac069b451284ec`。
 需求权威：`CAD_IMPLEMENTATION_SPEC.md` v2.0；本报告是审计结果及用户新增需求，不取代原规范。
 本轮仅新增本文件，不修改业务实现。审计开始时工作区干净。

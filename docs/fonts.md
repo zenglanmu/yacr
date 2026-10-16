@@ -1,5 +1,10 @@
 # 字体来源与目录
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 本文记录 CAD 文本/字体资源从哪里来、如何编目、如何随客户端输出打包，以及当前的
 实现边界。规范依据：§7.3（逻辑键，非平台路径）、§10（资源）、§16.2。
 

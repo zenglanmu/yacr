@@ -104,7 +104,7 @@ const SNAP_HINT_CIRCLE_SEGMENTS: usize = 12;
 /// This is the real [`cad_measure::SnapCandidate`] the measurement snap engine
 /// already returns: `cad-app` depends on `cad-measure`, and no architecture rule
 /// forbids that edge (`scripts/check-architecture.py` only constrains the
-/// acadrust/wgpu/slint/platform boundaries and the `cad-domain`/`cad-db` bases).
+/// acadrust/wgpu/UI/platform boundaries and the `cad-domain`/`cad-db` bases).
 /// Reusing the engine type avoids a lossy mirror and means a host can hand the
 /// exact `snap_best`/`snap_targets` result straight to the renderer; a host that
 /// only knows a point and a kind builds the struct literal directly.

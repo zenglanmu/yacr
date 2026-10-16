@@ -6,8 +6,8 @@
 # Generated (committed so packaging/CI needs no rasteriser at build time):
 #   assets/yacr-icon.ico                        multi-resolution Windows icon
 #   assets/yacr-icon.icns                       multi-resolution macOS icon
-#   assets/icons/yacr-<size>.png                PNG set for Linux hicolor and
-#                                               the web manifest
+#   assets/icons/yacr-<size>.png                PNG set for the Linux hicolor
+#                                               icon theme
 #   apps/app-android/res/mipmap-*/ic_launcher*.png
 #                                               Android launcher icon (legacy +
 #                                               adaptive-foreground densities)

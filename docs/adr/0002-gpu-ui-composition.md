@@ -1,6 +1,10 @@
 # ADR 0002：Slint / wgpu 合成与 Android 宿主
 
-状态：采用。范围：规范 §5.3 平台组合、§12.3 最小可编译证据。
+> **已退役 / 被取代（2026-10-16）**：本文描述的 Slint 桌面合成与 Android 宿主已作废。
+> 桌面改为 **React/Tauri + 原生 GTK CAD 分区**（见 [ADR 0010](0010-react-linux-host-replaces-slint.md)
+> 与 `docs/architecture.md`）；Android 为 NOT IMPLEMENTED 占位。下文保留为历史事实，请勿据此推断当前实现。
+
+状态：采用（历史）。范围：规范 §5.3 平台组合、§12.3 最小可编译证据。
 
 ## 问题
 

@@ -1,0 +1,23 @@
+[package]
+name = "cad-ui-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "UI-framework-independent shared layer: wire protocol, layout, CAD session, host admission and i18n."
+
+# The shared UI layer carries **no** windowing toolkit and **no** GPU dependency.
+# It sits above the UI-free application/host contracts it consumes — it depends
+# on `cad-host` (the owner-thread session wraps `HostCore`) — and below every
+# concrete host/presenter. The only dependencies are the CAD application/host/
+# engine/platform contracts and serde; slint/wgpu/tauri/gtk (and platform types)
+# are forbidden here and enforced by `scripts/check-architecture.py`.
+[dependencies]
+cad-app.workspace = true
+cad-domain.workspace = true
+cad-engine.workspace = true
+cad-host.workspace = true
+cad-platform.workspace = true
+serde.workspace = true

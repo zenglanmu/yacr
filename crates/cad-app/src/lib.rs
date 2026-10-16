@@ -661,7 +661,7 @@ impl Viewport {
     /// Map a canvas point in logical pixels to a world point on the work plane.
     ///
     /// `logical` is measured from the top-left of the CAD content rectangle with
-    /// y growing downwards (the Slint/pointer convention); the world y axis
+    /// y growing downwards (the screen/pointer convention); the world y axis
     /// points up, so the sign flips. The camera target sits at the rectangle
     /// centre. This is the inverse of the 2D view mapping and is the function a
     /// host uses to turn a measurement pick into a real point.

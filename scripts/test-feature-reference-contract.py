@@ -1,4 +1,12 @@
-"""Synthetic documentation contracts for feature-only reference boundaries."""
+"""Synthetic documentation contracts for the historical feature-reference boundary.
+
+The OpenCADStudio functional-reference exercise is closed (2026-10-15 user decision):
+the local `docs/ui-requirements/` reference set was removed and UI design now follows
+AutoCAD desktop conventions. These contracts assert the new state instead of the old
+one: the spec must not point back at the removed directory, the directory must stay
+gone, and the historical survey must stay honest (consultation happened, no code was
+copied, and it is not an active migration plan).
+"""
 
 from pathlib import Path
 import unittest
@@ -11,16 +19,17 @@ class FeatureReferenceContractTests(unittest.TestCase):
     def test_spec_requires_independent_implementation(self):
         spec = (ROOT / "CAD_IMPLEMENTATION_SPEC.md").read_text()
         section = spec.split("## 10. ", 1)[1].split("## 11. ", 1)[0]
-        self.assertIn("docs/ui-requirements/00-INDEX.md", section)
         self.assertIn("不授权抽取或移植 OpenCADStudio 源码", section)
         self.assertIn("不再作为源码迁移任务或交付门禁", section)
         self.assertNotIn("源 commit/文件/函数 → 目标模块", section)
 
-    def test_ui_reference_does_not_expand_product_scope(self):
-        index = (ROOT / "docs/ui-requirements/00-INDEX.md").read_text()
-        self.assertIn("不是源码、算法、shader 或依赖采用来源", index)
-        self.assertIn("931 个参考条目不是全部必须交付", index)
-        self.assertIn("为唯一需求权威", index)
+    def test_removed_ui_reference_set_stays_removed(self):
+        self.assertFalse((ROOT / "docs/ui-requirements").exists())
+        # The spec may record the removal as history, but must not point at the
+        # deleted reference set as a live source.
+        spec = (ROOT / "CAD_IMPLEMENTATION_SPEC.md").read_text()
+        self.assertNotIn("docs/ui-requirements/00-INDEX.md", spec)
+        self.assertNotIn("](docs/ui-requirements", spec)
 
     def test_historical_mapping_is_not_an_active_migration_plan(self):
         mapping = (ROOT / "docs/migration-map.md").read_text()

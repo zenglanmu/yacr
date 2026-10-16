@@ -1,5 +1,10 @@
 # 宿主字体取字节（Web / Android）
 
+> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
+> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
+> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+
 本文记录 F10「宿主持有字体字节」的实现接线与验证边界。契约与字形来源见
 `docs/fonts.md`；平台组装见 `docs/adr/0003-web-composition.md`。
 
