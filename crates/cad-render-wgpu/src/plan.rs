@@ -570,18 +570,38 @@ pub(crate) fn flush_pending_mesh(
 /// vertices per instance; a mesh charges its packed vertex count. This is the
 /// documented unit change from "vertices = stored geometry" to "vertices =
 /// rasterized primitives" (see `docs/render-order.md`).
-pub(crate) fn batch_budget_vertices(batch: &GpuBatch) -> usize {
+///
+/// `cull` charges **zero** for a run whose chunk the frame's view cull removed
+/// (the run is not drawn): a culled instanced/conic run contributes no quads, and
+/// a converted mesh batch charges its vertex count only while at least one of its
+/// mesh runs survives (conservative for a partially culled split batch). Legacy
+/// per-batch geometry (per-batch quads, a non-converted mesh) is never culled.
+///
+/// Byte charging is **unchanged** (batch-granular): `FrameBudget::max_bytes` is
+/// `usize::MAX` in the product and models upload residency, not draw work, so
+/// culling does not reduce it.
+pub(crate) fn batch_budget_vertices(batch: &GpuBatch, cull: &ChunkCull) -> usize {
     let line_quads = batch
         .instanced
         .iter()
+        .filter(|run| cull.stream_visible(run.stream as usize))
         .map(|run| run.count as usize)
         .sum::<usize>()
         + batch.line_quad_count as usize;
     let base = match batch.topology {
-        RenderTopology::Conics => batch.arc_instance_count() as usize * 6,
-        RenderTopology::Mesh => batch.vertex_count as usize,
+        RenderTopology::Conics => {
+            batch
+                .arc_runs
+                .iter()
+                .filter(|run| cull.arc_visible(run.stream as usize))
+                .map(|run| run.count as usize)
+                .sum::<usize>()
+                * 6
+        }
+        RenderTopology::Mesh if mesh_batch_visible(batch, cull) => batch.vertex_count as usize,
         // A converted `Lines`/`MeshEdges` batch owns no legacy vertex buffer; its
-        // whole charge is the expanded quads above.
+        // whole charge is the expanded quads above. A fully culled converted mesh
+        // charges nothing (falls through to `_`).
         _ => 0,
     };
     base + line_quads * 6
@@ -589,32 +609,73 @@ pub(crate) fn batch_budget_vertices(batch: &GpuBatch) -> usize {
 
 /// Triangles a resident batch charges the frame budget this frame: `2` per
 /// anti-aliased line quad, `2` per SDF conic instance, the mesh triangle count,
-/// else `0`.
-pub(crate) fn batch_budget_triangles(batch: &GpuBatch) -> usize {
+/// else `0`. Culled runs are charged zero (see [`batch_budget_vertices`]).
+pub(crate) fn batch_budget_triangles(batch: &GpuBatch, cull: &ChunkCull) -> usize {
     let line_quads = batch
         .instanced
         .iter()
+        .filter(|run| cull.stream_visible(run.stream as usize))
         .map(|run| run.count as usize)
         .sum::<usize>()
         + batch.line_quad_count as usize;
     let base = match batch.topology {
-        RenderTopology::Conics => batch.arc_instance_count() as usize * 2,
-        RenderTopology::Mesh => batch.index_count as usize / 3,
+        RenderTopology::Conics => {
+            batch
+                .arc_runs
+                .iter()
+                .filter(|run| cull.arc_visible(run.stream as usize))
+                .map(|run| run.count as usize)
+                .sum::<usize>()
+                * 2
+        }
+        RenderTopology::Mesh if mesh_batch_visible(batch, cull) => batch.index_count as usize / 3,
         _ => 0,
     };
     base + line_quads * 2
+}
+
+/// Whether a converted mesh batch keeps any of its chunk runs under `cull`. A
+/// batch with no mesh runs (a legacy, non-converted mesh) is never culled.
+fn mesh_batch_visible(batch: &GpuBatch, cull: &ChunkCull) -> bool {
+    batch.mesh_runs.is_empty()
+        || batch
+            .mesh_runs
+            .iter()
+            .any(|run| cull.mesh_visible(run.chunk as usize))
+}
+
+/// Whether an accepted batch actually issues at least one draw under `cull`: a
+/// converted batch needs a surviving run; a legacy per-batch draw always runs.
+/// Used to decide whether a page is a real pacing cost observation.
+pub(crate) fn batch_has_visible_work(batch: &GpuBatch, cull: &ChunkCull) -> bool {
+    if batch.instanced.is_empty() && batch.mesh_runs.is_empty() && batch.arc_runs.is_empty() {
+        return true;
+    }
+    batch
+        .instanced
+        .iter()
+        .any(|run| cull.stream_visible(run.stream as usize))
+        || batch
+            .mesh_runs
+            .iter()
+            .any(|run| cull.mesh_visible(run.chunk as usize))
+        || batch
+            .arc_runs
+            .iter()
+            .any(|run| cull.arc_visible(run.stream as usize))
 }
 
 pub(crate) fn plan_from_gpu(
     batches: &[GpuBatch],
     budget: &FrameBudget,
     initial: cad_scene::FrameUsage,
+    cull: &ChunkCull,
 ) -> GpuPlan {
     let mut usage = initial;
     let mut accepted = Vec::with_capacity(batches.len());
     for (i, batch) in batches.iter().enumerate() {
-        let vertices = batch_budget_vertices(batch);
-        let triangles = batch_budget_triangles(batch);
+        let vertices = batch_budget_vertices(batch, cull);
+        let triangles = batch_budget_triangles(batch, cull);
         // The GPU bytes actually submitted: position, normal and edge-index
         // buffers plus the triangle index buffer. Derived from the packed GpuBatch
         // so `upload_bytes_per_frame` is charged the same numbers the device sees.
@@ -661,16 +722,17 @@ pub(crate) fn plan_ordered_page(
     cursor: usize,
     budget: &FrameBudget,
     initial: cad_scene::FrameUsage,
+    cull: &ChunkCull,
 ) -> GpuPlan {
     let mut usage = initial;
     let mut accepted = Vec::new();
     for &index in &ordered[cursor..] {
         let batch = &batches[index];
         let mut next = usage;
-        let triangles = batch_budget_triangles(batch);
+        let triangles = batch_budget_triangles(batch, cull);
         let result = budget
             .charge_bytes(&mut next, batch.upload_size_bytes())
-            .and_then(|()| budget.charge(&mut next, batch_budget_vertices(batch), triangles));
+            .and_then(|()| budget.charge(&mut next, batch_budget_vertices(batch, cull), triangles));
         if let Err(exceeded) = result {
             let report = OverBudget {
                 category: exceeded.category,
@@ -709,6 +771,7 @@ pub(crate) fn plan_cursor_batch(
     ordered: &[usize],
     cursor: usize,
     budget: &FrameBudget,
+    cull: &ChunkCull,
 ) -> Option<GpuPlan> {
     let index = *ordered.get(cursor)?;
     let batch = batches.get(index)?;
@@ -719,8 +782,8 @@ pub(crate) fn plan_cursor_batch(
     budget
         .charge(
             &mut usage,
-            batch_budget_vertices(batch),
-            batch_budget_triangles(batch),
+            batch_budget_vertices(batch, cull),
+            batch_budget_triangles(batch, cull),
         )
         .ok()?;
     Some(GpuPlan {
@@ -1030,6 +1093,10 @@ pub(crate) struct MeshChunkData {
     pub(crate) mirrored: bool,
     pub(crate) vertices: Vec<MeshVertex>,
     pub(crate) indices: Vec<u32>,
+    /// World-space AABB of the chunk's vertices, retained from the builder for
+    /// per-frame view culling (see [`cull`]). A source split across several
+    /// chunks carries the whole-batch AABB in every piece (conservative).
+    pub(crate) aabb: WorldAabb,
 }
 
 /// A single batch's contribution to a chunk: the subset of its vertices used by
@@ -1284,6 +1351,14 @@ pub(crate) fn build_mesh_chunks(
             mirrored: builder.mirrored,
             vertices,
             indices,
+            // Retained from the builder (no per-frame computation). An oversized
+            // source split across chunks carries the whole-batch box in every
+            // piece; a chunk mixing distant batches has a large box that never
+            // culls — both conservative.
+            aabb: WorldAabb {
+                min: builder.min,
+                max: builder.max,
+            },
         });
     }
     (chunks, runs)
@@ -1791,6 +1866,10 @@ pub(crate) struct InstanceChunk {
     pub(crate) origin: [f64; 3],
     /// Packed instances, in original batch order.
     pub(crate) instances: Vec<LineInstance>,
+    /// World-space AABB of the chunk's segments, retained from the builder for
+    /// per-frame view culling (see [`cull`]). A source split across several
+    /// chunks carries the whole-batch AABB in every piece (conservative).
+    pub(crate) aabb: WorldAabb,
 }
 
 /// A chunk under construction.
@@ -1982,7 +2061,14 @@ pub(crate) fn build_instance_chunks(
                     count,
                 });
         }
-        chunks.push(InstanceChunk { origin, instances });
+        chunks.push(InstanceChunk {
+            origin,
+            instances,
+            aabb: WorldAabb {
+                min: chunk.min,
+                max: chunk.max,
+            },
+        });
     }
     (chunks, runs)
 }
@@ -2171,6 +2257,11 @@ pub(crate) struct ArcChunk {
     pub(crate) origin: [f64; 3],
     /// Packed instances, in original batch order.
     pub(crate) instances: Vec<ArcInstance>,
+    /// World-space AABB of the chunk's conic full extents, retained from the
+    /// builder for per-frame view culling (see [`cull`]). An oversized source
+    /// split across several chunks carries the whole-batch AABB in every piece
+    /// (conservative).
+    pub(crate) aabb: WorldAabb,
 }
 
 /// One conic's contribution to a chunk: its batch, index within the batch, and
@@ -2339,7 +2430,14 @@ pub(crate) fn build_arc_chunks(
             });
             previous_batch = Some(item.batch);
         }
-        chunks.push(ArcChunk { origin, instances });
+        chunks.push(ArcChunk {
+            origin,
+            instances,
+            aabb: WorldAabb {
+                min: builder.min,
+                max: builder.max,
+            },
+        });
     }
     (chunks, runs, degenerate_skips)
 }

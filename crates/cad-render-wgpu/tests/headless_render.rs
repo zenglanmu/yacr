@@ -1448,3 +1448,291 @@ fn progressive_images_draw_only_on_the_cleared_page() {
         "each image is drawn exactly once per frame"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Chunk-level view culling (backlog §P1)
+// ---------------------------------------------------------------------------
+
+/// A single-segment line batch whose chunk origin is `(origin_x, 0, 0)`. With
+/// [`Renderer::set_max_instances_per_stream`] set to `1` every batch is its own
+/// chunk, so an off-screen batch is an off-screen chunk.
+fn line_at(origin_x: f32, y: f32) -> RenderBatch {
+    let mut batch = lines_batch(vec![[-0.5, y - 0.2, 0.0], [0.5, y + 0.2, 0.0]]);
+    batch.local_origin = Point3 {
+        x: f64::from(origin_x),
+        y: 0.0,
+        z: 0.0,
+    };
+    batch
+}
+
+/// Three on-screen chunks and two far off-screen chunks (each its own chunk).
+fn cull_scene() -> Vec<RenderBatch> {
+    vec![
+        line_at(0.0, -0.5),
+        line_at(0.0, 0.0),
+        line_at(0.0, 0.5),
+        line_at(1000.0, 0.0),
+        line_at(-1000.0, 0.0),
+    ]
+}
+
+/// (e)/(h) A settled frame with culling is byte-identical to the unculled frame,
+/// and exactly the culled chunks' draws and vertex charge disappear.
+#[test]
+fn culled_frame_is_byte_identical_and_drops_exactly_the_culled_runs() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer.set_max_instances_per_stream(1);
+    renderer.upload(&scene(cull_scene())).unwrap();
+    let target = RenderTarget::new(64, 64);
+
+    renderer.set_view_culling(false);
+    let unculled = renderer.render(camera_2d(), &target).unwrap();
+    let reference = renderer.read_target_rgba().unwrap();
+    assert_eq!(unculled.cull_chunks_total, 5);
+    assert_eq!(
+        unculled.cull_chunks_kept, 5,
+        "culling disabled: nothing removed"
+    );
+    assert_eq!(unculled.instanced_draws, 5, "one coalesced run per chunk");
+
+    renderer.set_view_culling(true);
+    let culled = renderer.render(camera_2d(), &target).unwrap();
+    assert_eq!(culled.cull_chunks_total, 5);
+    assert_eq!(culled.cull_chunks_kept, 3, "the two far chunks are culled");
+    assert_eq!(culled.instanced_draws, 3);
+    assert_eq!(
+        unculled.draw_calls - culled.draw_calls,
+        2,
+        "exactly the culled chunks' draws must disappear"
+    );
+    assert_eq!(
+        unculled.vertices - culled.vertices,
+        2 * 6,
+        "a culled 1-segment chunk drops its 6-quad charge"
+    );
+    assert_eq!(
+        renderer.read_target_rgba().unwrap().pixels,
+        reference.pixels,
+        "culling must be pixel-identical to the unculled render"
+    );
+}
+
+/// (f) A large finite lineweight at the viewport edge must not change pixels:
+/// lineweight is carried, not rasterized, and contributes no cull pad.
+#[test]
+fn large_lineweight_at_the_viewport_edge_is_pixel_identical() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer.set_max_instances_per_stream(1);
+    let weighted = |origin_x: f32, y: f32| {
+        let mut batch = line_at(origin_x, y);
+        batch.lineweight = 1000.0;
+        batch.lineweight_unresolved = false;
+        batch
+    };
+    // A chunk just outside the right edge (world x in [1.02, 1.5]) whose stroke
+    // band (3·wpp = 0.09375) reaches back into the view, plus a far chunk and an
+    // on-screen chunk, all with a large lineweight.
+    renderer
+        .upload(&scene(vec![
+            weighted(1.02, 0.0),
+            weighted(1000.0, 0.0),
+            weighted(0.0, 0.0),
+        ]))
+        .unwrap();
+    let target = RenderTarget::new(64, 64);
+
+    renderer.set_view_culling(false);
+    renderer.render(camera_2d(), &target).unwrap();
+    let reference = renderer.read_target_rgba().unwrap();
+
+    renderer.set_view_culling(true);
+    let culled = renderer.render(camera_2d(), &target).unwrap();
+    assert_eq!(culled.cull_chunks_total, 3);
+    assert_eq!(
+        culled.cull_chunks_kept, 2,
+        "the edge chunk's stroke band keeps it; only the far chunk is culled"
+    );
+    assert_eq!(
+        renderer.read_target_rgba().unwrap().pixels,
+        reference.pixels,
+        "a large finite lineweight must not change the culled frame"
+    );
+}
+
+/// (g) A pick reads the un-paced, **unculled** scene: toggling culling must not
+/// change a pick result.
+#[test]
+fn pick_is_invariant_under_chunk_culling() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer.set_max_instances_per_stream(1);
+    let mut pickable = quad_mesh();
+    pickable.draw_order = 100;
+    let mut batches = vec![pickable];
+    batches.extend(line_batches(3));
+    batches.push(line_at(1000.0, 0.0));
+    renderer.upload(&scene(batches)).unwrap();
+    let target = RenderTarget::new(64, 64);
+
+    renderer.set_view_culling(false);
+    renderer.render(camera_2d(), &target).unwrap();
+    let reference = renderer.pick_at(32, 32).expect("unculled pick");
+    assert!(reference.is_some(), "the centre must be pickable");
+
+    renderer.set_view_culling(true);
+    let stats = renderer.render(camera_2d(), &target).unwrap();
+    assert!(
+        stats.cull_chunks_kept < stats.cull_chunks_total,
+        "the far chunk must actually be culled for this fence to be meaningful"
+    );
+    let culled = renderer.pick_at(32, 32).expect("culled pick");
+    assert_eq!(culled, reference, "picking must be independent of culling");
+}
+
+/// (i) Panning a camera across a chunk border must not pop: at every camera the
+/// culled frame equals the unculled frame.
+#[test]
+fn culling_does_not_pop_across_a_chunk_border() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer.set_max_instances_per_stream(1);
+    // Chunks spread across world x so panning moves them in and out of the view.
+    let batches: Vec<RenderBatch> = [-2.0f32, -1.0, 0.0, 1.0, 2.0]
+        .into_iter()
+        .map(|x| line_at(x, 0.0))
+        .collect();
+    renderer.upload(&scene(batches)).unwrap();
+    let target = RenderTarget::new(64, 64);
+
+    for step in 0..=40 {
+        let mut camera = camera_2d();
+        camera.center.x = -1.5 + step as f64 * 0.075;
+        renderer.set_view_culling(false);
+        renderer.render(camera, &target).unwrap();
+        let reference = renderer.read_target_rgba().unwrap().pixels;
+        renderer.set_view_culling(true);
+        renderer.render(camera, &target).unwrap();
+        assert_eq!(
+            renderer.read_target_rgba().unwrap().pixels,
+            reference,
+            "culling popped at camera center.x = {}",
+            camera.center.x
+        );
+    }
+}
+
+/// (j) The perspective path: culling is byte-identical to the unculled 3D frame.
+#[test]
+fn culling_is_byte_identical_on_the_3d_path() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer.set_max_instances_per_stream(1);
+    // An on-screen chunk near the origin plus a chunk far off to the side, in
+    // front of the camera but outside the frustum.
+    renderer
+        .upload(&scene(vec![line_at(0.0, 0.0), line_at(1000.0, 0.0)]))
+        .unwrap();
+    let camera = Camera3d {
+        eye: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 4.0,
+        },
+        target: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        up: Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        fov_y: std::f64::consts::FRAC_PI_4,
+        near: 0.1,
+        far: 100.0,
+    };
+    let target = RenderTarget::new(64, 64);
+
+    renderer.set_view_culling(false);
+    renderer.render_3d(camera, &target).unwrap();
+    let reference = renderer.read_target_rgba().unwrap();
+
+    renderer.set_view_culling(true);
+    let culled = renderer.render_3d(camera, &target).unwrap();
+    assert_eq!(culled.cull_chunks_total, 2);
+    assert_eq!(culled.cull_chunks_kept, 1, "the far chunk is off-frustum");
+    assert_eq!(
+        renderer.read_target_rgba().unwrap().pixels,
+        reference.pixels,
+        "culling must be pixel-identical on the 3D path"
+    );
+}
+
+/// (k) Culling must not break the progressive cursor/pacing hygiene fence: with
+/// off-screen chunks culled the cursor still advances and the settled frame
+/// equals the unculled settled frame.
+#[test]
+fn culling_does_not_break_the_progressive_cursor() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer.set_max_instances_per_stream(1);
+    let mut batches = line_batches(8);
+    // Two far chunks that are culled on every page.
+    batches.push(line_at(1000.0, 0.0));
+    batches.push(line_at(-1000.0, 0.0));
+    renderer.upload(&scene(batches)).unwrap();
+    let target = RenderTarget::new(64, 64);
+
+    // Unculled settled reference (full-ceiling, non-progressive).
+    renderer.set_view_culling(false);
+    renderer.render(camera_2d(), &target).unwrap();
+    let reference = renderer.read_target_rgba().unwrap().pixels;
+
+    // Progressive, paced, culling on.
+    renderer.set_view_culling(true);
+    renderer.frame_budget.max_vertices = 6;
+    renderer.frame_budget.max_triangles = 2;
+    renderer.set_progressive_rendering(true);
+    renderer.set_frame_budget_target_ms(0.001);
+
+    let mut previous_cursor = 0usize;
+    let mut pages = 0;
+    loop {
+        let stats = renderer
+            .render(camera_2d(), &target)
+            .expect("a ceiling-fitting batch must not be an error");
+        let (cursor, total) = renderer.frame_progress().expect("progressive frame");
+        assert!(cursor > previous_cursor, "cursor must strictly advance");
+        assert_eq!(total, 10);
+        assert_eq!(stats.cull_chunks_total, 10);
+        assert_eq!(stats.cull_chunks_kept, 8, "the two far chunks stay culled");
+        previous_cursor = cursor;
+        pages += 1;
+        assert!(pages <= 10, "paced frame did not terminate");
+        if !renderer.frame_pending() {
+            break;
+        }
+    }
+    assert_eq!(previous_cursor, 10);
+    assert_eq!(
+        renderer.read_target_rgba().unwrap().pixels,
+        reference,
+        "culling must not change the settled progressive frame"
+    );
+}

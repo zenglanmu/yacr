@@ -130,6 +130,7 @@ impl Renderer {
             pulled_oom_injection: None,
             pulled_state: PulledState::Unavailable,
             line_ramp_override: None,
+            cull_disabled: false,
             pulled_camera_layout: None,
             pulled_camera_buffer: None,
             pulled_camera_bind_group: None,
@@ -1720,6 +1721,7 @@ impl Renderer {
                     buffer,
                     instance_count: chunk.instances.len() as u32,
                     origin: chunk.origin,
+                    aabb: chunk.aabb,
                     base: 0,
                     // Keep the packed instances so the accelerated tier's
                     // whole-scene pulled buffer can be rebuilt on every commit
@@ -1774,6 +1776,7 @@ impl Renderer {
                     vertex_count: chunk.vertices.len() as u32,
                     index_count: chunk.indices.len() as u32,
                     origin: chunk.origin,
+                    aabb: chunk.aabb,
                     mirrored: chunk.mirrored,
                     // CPU copies for the accelerated whole-scene rebuild (see
                     // `InstanceStream::pulled_instances`).
@@ -1822,6 +1825,7 @@ impl Renderer {
                     buffer: Self::vertex_buffer(device, self.queue.as_ref(), &bytes),
                     instance_count: chunk.instances.len() as u32,
                     origin: chunk.origin,
+                    aabb: chunk.aabb,
                     base: 0,
                 });
             }
@@ -4396,6 +4400,31 @@ impl Renderer {
         // plan used, and so the controller can sample this frame afterwards.
         let active_budget = self.active_frame_budget();
         let pacing_mode = self.pacing_mode();
+        // Chunk-level view culling (backlog §P1): build the frame's mask once,
+        // from the per-chunk world AABBs retained at upload (no per-frame AABB
+        // computation). The mask is threaded into the planners (so culled runs
+        // are charged zero) and the encode sites (so culled runs are skipped). A
+        // test disables culling to render the unculled reference frame.
+        let cull = {
+            let wpp_arc = projection.world_per_px();
+            // The line class may use the overridden ramp width (test hook); the
+            // SDF conic class always uses the projection's real value.
+            let wpp_line = self.line_ramp_override.map(f64::from).unwrap_or(wpp_arc);
+            let built = cull::build(
+                projection,
+                wpp_line,
+                wpp_arc,
+                self.instance_streams.iter().map(|stream| stream.aabb),
+                self.mesh_chunks.iter().map(|chunk| chunk.aabb),
+                self.arc_streams.iter().map(|stream| stream.aabb),
+            );
+            if self.cull_disabled {
+                // Test hook: report the resident chunk set but cull nothing.
+                built.force_all_visible()
+            } else {
+                built
+            }
+        };
         let paced_scale = match pacing_mode {
             pacing::PacingMode::Active => self.pacing.scale,
             pacing::PacingMode::DisabledNoCompletionSignal | pacing::PacingMode::AtCeiling => 1.0,
@@ -4461,6 +4490,7 @@ impl Renderer {
                 frame.cursor,
                 &active_budget,
                 image_usage,
+                &cull,
             );
             if plan.accepted.is_empty() && frame.cursor < frame.ordered.len() {
                 // Progress floor: a cursor batch that fits the un-paced ceiling
@@ -4471,6 +4501,7 @@ impl Renderer {
                     &frame.ordered,
                     frame.cursor,
                     &self.frame_budget,
+                    &cull,
                 ) {
                     Some(mut floor) => {
                         floor.over_budget = Some(plan::pacing_floor_reason(
@@ -4495,7 +4526,7 @@ impl Renderer {
             transparent.extend_from_slice(&plan.accepted[split..]);
             (plan, frame.invisible)
         } else {
-            let plan = plan_from_gpu(&self.batches, &active_budget, image_usage);
+            let plan = plan_from_gpu(&self.batches, &active_budget, image_usage, &cull);
             let cache = self.draw_plan.as_mut().expect("draw plan cache");
             cache.sort_transparent(Some(camera_position));
             if plan.accepted.len() == self.batches.len() {
@@ -4580,7 +4611,13 @@ impl Renderer {
             && (!has_line_class || self.pulled_lines.is_some())
             && (!has_mesh_class || self.pulled_mesh.is_some())
             && converted_total > 0
-            && converted_accepted == converted_total;
+            && converted_accepted == converted_total
+            // A pulled draw redraws whole streams/chunks, so it must not run
+            // while culling excluded any chunk: that would draw (uncharged)
+            // geometry the cull removed. Pulled-subset draws are not implemented
+            // (that is backlog §N1d), so culling forces the universal per-run
+            // organization instead.
+            && !cull.any_culled();
 
         let plan_ms = plan_started.elapsed().as_secs_f64() * 1000.0;
 
@@ -5095,6 +5132,13 @@ impl Renderer {
                         // A batch over the vertex cap contributes several runs (one
                         // per piece); a normal batch one.
                         for run in &batch.mesh_runs {
+                            // Culled chunk: skip this run entirely (never drawn,
+                            // never charged). The next visible run's offset is not
+                            // contiguous with the pending run across the gap, so a
+                            // merge can never span a culled chunk.
+                            if !cull.mesh_visible(run.chunk as usize) {
+                                continue;
+                            }
                             let contiguous = matches!(
                                 pending_mesh,
                                 Some((chunk, _, end))
@@ -5157,6 +5201,13 @@ impl Renderer {
                         // batch one.
                         instanced_batches += 1;
                         for run in &batch.instanced {
+                            // Culled chunk: skip this run entirely. The next
+                            // visible run's offset is not contiguous with the
+                            // pending run across the gap, so no merge spans a
+                            // culled chunk.
+                            if !cull.stream_visible(run.stream as usize) {
+                                continue;
+                            }
                             // Global instance index within the stream's buffer
                             // (`base` is 0 on the universal tier, where each
                             // stream owns its buffer).
@@ -5232,6 +5283,10 @@ impl Renderer {
                         // preserved (arcs and lines are both `LessEqual`+depth-write,
                         // so an equal-depth arc-vs-line tie is decided by plan order).
                         for run in &batch.arc_runs {
+                            // Culled chunk: skip this conic run entirely.
+                            if !cull.arc_visible(run.stream as usize) {
+                                continue;
+                            }
                             let start = self.arc_streams[run.stream as usize].base + run.offset;
                             let end = start + run.count;
                             if let Some((stream, _, pending_end)) = pending_arc {
@@ -5399,12 +5454,20 @@ impl Renderer {
         // Adaptive page-budget feedback: fold this frame's measured cost in.
         // Only a frame that accepted page work is a signal, and only when pacing
         // is active (progressive + a completion signal); camera moves never reset
-        // the controller, so a pan keeps feeding it.
-        if pacing_mode == pacing::PacingMode::Active && !budget_plan.accepted.is_empty() {
+        // the controller, so a pan keeps feeding it. `accepted` counts only
+        // batches with a **surviving** run (a culled chunk's batch is not work),
+        // so a page whose accepted batches were all culled is not a cost
+        // observation.
+        let accepted_with_work = budget_plan
+            .accepted
+            .iter()
+            .filter(|&&i| batch_has_visible_work(&self.batches[i], &cull))
+            .count();
+        if pacing_mode == pacing::PacingMode::Active && accepted_with_work > 0 {
             let sample = pacing::Sample {
                 cpu_ms,
                 wait_ms,
-                accepted: budget_plan.accepted.len(),
+                accepted: accepted_with_work,
                 restart: self.pacing_restart_pending,
             };
             let (next, _) = pacing::step(self.pacing, sample);
@@ -5434,6 +5497,8 @@ impl Renderer {
             transparent_batches,
             invisible_batches,
             image_batches: draw_images.len(),
+            cull_chunks_total: cull.total() as u64,
+            cull_chunks_kept: cull.kept(),
             lineweight_not_drawn: lineweight_not_drawn.clone(),
             lineweight_reason: lineweight_reason(&lineweight_not_drawn),
             plan_ms,
@@ -5681,6 +5746,13 @@ impl Renderer {
     /// line look, which the visual-acceptance test uses as its "before" frame.
     pub fn set_line_ramp_override(&mut self, world_per_px: Option<f32>) {
         self.line_ramp_override = world_per_px;
+    }
+
+    /// Test hook: enable/disable chunk-level view culling. The product always
+    /// culls; a test disables it to render the *unculled* reference frame and
+    /// fence byte parity against the culled frame.
+    pub fn set_view_culling(&mut self, enabled: bool) {
+        self.cull_disabled = !enabled;
     }
 
     /// Number of resident instanced line streams.

@@ -454,6 +454,13 @@ pub struct FrameStats {
     /// masking are **not** implemented; images are drawn last, in ascending
     /// `draw_order` among themselves (see [`Renderer::upload_images`]).
     pub image_batches: usize,
+    /// Chunks (instance streams + merged mesh chunks + SDF conic streams) tested
+    /// by this frame's view cull. `0` when the scene has no chunked geometry.
+    /// Reporting only; `kept + culled == total`.
+    pub cull_chunks_total: u64,
+    /// Chunks kept (visible) by this frame's view cull. A culled chunk's runs are
+    /// neither drawn nor charged to the page budget (see `cull.rs`).
+    pub cull_chunks_kept: u64,
     /// Lineweights that were carried but **not drawn** this frame.
     ///
     /// Wide lines are not portable across wgpu backends (and the browser
@@ -831,6 +838,9 @@ pub(crate) struct GpuMeshChunk {
     vertex_count: u32,
     index_count: u32,
     origin: [f64; 3],
+    /// World-space AABB of the chunk's vertices, retained from the builder for
+    /// per-frame view culling (see [`cull`]). Never rewritten on a camera move.
+    aabb: WorldAabb,
     mirrored: bool,
     /// CPU copy of the chunk's packed vertices and rebased indices, kept so the
     /// accelerated tier's whole-scene pulled buffers can be rebuilt on every
@@ -881,6 +891,9 @@ pub(crate) struct InstanceStream {
     buffer: wgpu::Buffer,
     instance_count: u32,
     origin: [f64; 3],
+    /// World-space AABB of the chunk's segments, retained from the builder for
+    /// per-frame view culling (see [`cull`]). Never rewritten on a camera move.
+    aabb: WorldAabb,
     /// First instance of this stream within its buffer. `0` on the universal
     /// tier (each stream owns its buffer); on the accelerated tier every stream
     /// in a storage segment shares one `VERTEX | STORAGE` buffer, so a run's
@@ -906,6 +919,10 @@ pub(crate) struct ArcStream {
     buffer: wgpu::Buffer,
     instance_count: u32,
     origin: [f64; 3],
+    /// World-space AABB of the chunk's conic full extents, retained from the
+    /// builder for per-frame view culling (see [`cull`]). Never rewritten on a
+    /// camera move.
+    aabb: WorldAabb,
     /// First instance of this stream within its buffer (always `0`: each conic
     /// stream owns its buffer).
     #[allow(dead_code)]
@@ -1009,11 +1026,6 @@ impl GpuBatch {
     /// reported `FrameStats::uploaded_bytes` cannot disagree.
     fn upload_size_bytes(&self) -> usize {
         self.upload_bytes
-    }
-
-    /// Total SDF conic instances this batch contributes across its streams.
-    fn arc_instance_count(&self) -> u32 {
-        self.arc_runs.iter().map(|run| run.count).sum()
     }
 
     /// The [`INSTANCE_FLAG_*`] bitfield of this resident batch, for
@@ -1432,6 +1444,10 @@ pub struct Renderer {
     /// Used by the visual-acceptance test to render the **pre-unification**
     /// hard-aliased line look (a sub-pixel ramp) as a genuine GPU "before".
     line_ramp_override: Option<f32>,
+    /// Test hook: disable chunk-level view culling for the frame so a test can
+    /// render the *unculled* reference and compare it to the culled frame. The
+    /// product always culls (`false`).
+    cull_disabled: bool,
     /// Group-0 layout/uniform/bind group of the pulled pipelines: the three
     /// origin-independent transform columns shared by every chunk.
     pulled_camera_layout: Option<wgpu::BindGroupLayout>,
@@ -1674,6 +1690,10 @@ impl Default for Renderer {
     }
 }
 
+/// Chunk-level view culling (backlog §P1): pure predicate over the retained
+/// per-chunk world AABBs. Kept separate from the planners so it is unit-testable
+/// without a GPU.
+mod cull;
 /// Native id-pass + readback (`Renderer::pick_at`). The browser tiers keep CPU
 /// picking (`cad_spatial`); a blocking GPU→CPU readback is not available there.
 #[cfg(not(target_arch = "wasm32"))]
@@ -1681,6 +1701,7 @@ mod pick;
 mod plan;
 mod renderer_impl;
 
+pub(crate) use cull::{ChunkCull, WorldAabb};
 pub(crate) use plan::*;
 
 // Private accelerated-tier GPU contracts for the pulled-prefix fast path. Test

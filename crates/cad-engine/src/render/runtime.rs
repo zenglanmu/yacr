@@ -51,6 +51,12 @@ pub struct RenderStatsObservation {
     pub transparent_batches: usize,
     /// Raster image quads drawn (the `image_batches` term of `draw_calls`).
     pub image_batches: usize,
+    /// Chunks (instance streams + merged mesh chunks + SDF conic streams) tested
+    /// by this frame's chunk-level view cull. `0` when the scene has no chunked
+    /// geometry. Reporting only; `kept + culled == total`.
+    pub cull_chunks_total: u64,
+    /// Chunks kept (visible) by this frame's view cull.
+    pub cull_chunks_kept: u64,
     /// Whether this frame's opaque pass used the accelerated per-class draw
     /// organization (see `cad_render_wgpu::FrameStats::accelerated`). Required to
     /// interpret `instanced_draws`/`mesh_draws`: on the accelerated tier they are
@@ -823,6 +829,8 @@ impl CadRenderRuntime {
             arc_draws: stats.arc_draws,
             transparent_batches: stats.transparent_batches,
             image_batches: stats.image_batches,
+            cull_chunks_total: stats.cull_chunks_total,
+            cull_chunks_kept: stats.cull_chunks_kept,
             accelerated: stats.accelerated,
             pulled_state: stats.pulled_state,
             instance_streams: stats.instance_streams,
@@ -1295,6 +1303,8 @@ mod tests {
             arc_draws: 0,
             transparent_batches: 0,
             image_batches: 0,
+            cull_chunks_total: 0,
+            cull_chunks_kept: 0,
             accelerated: false,
             pulled_state: cad_render_wgpu::PulledState::Unavailable,
             instance_streams: 0,

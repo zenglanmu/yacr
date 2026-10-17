@@ -489,11 +489,15 @@ impl Renderer {
         // progressive (a pick always covers the whole resident page) and is
         // deliberately **not** paced: it reads the un-paced `frame_budget`, so a
         // pick resolves exactly the resident scene regardless of the page size a
-        // pan happened to use.
+        // pan happened to use. It is also **not culled**: chunk-level view
+        // culling is a color-frame optimization and must never change a pick
+        // result, so the identity mask (culls nothing) is passed here.
+        let cull = ChunkCull::all_visible();
         let plan = plan_from_gpu(
             &self.batches,
             &self.frame_budget,
             cad_scene::FrameUsage::default(),
+            &cull,
         );
         let entries: Vec<BatchOrderEntry> = plan
             .accepted
