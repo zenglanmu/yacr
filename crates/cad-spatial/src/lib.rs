@@ -6,11 +6,13 @@
 
 use cad_domain::*;
 
+pub mod chunk;
 pub mod pick;
+pub use chunk::ChunkGridIndex;
 pub use pick::{
-    hit_geometry, pick_closest, pick_closest_borrowed, ray_segment_closest, ray_triangle,
-    validate_ray, BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome, PickReport,
-    SkippedGeometry, MAX_PICK_SEGMENTS, MIN_RAY_DIRECTION, REASON_FACE_SOURCES_ABSENT,
+    hit_geometry, pick_closest, pick_closest_borrowed, pick_world_bounds, ray_segment_closest,
+    ray_triangle, validate_ray, BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome,
+    PickReport, SkippedGeometry, MAX_PICK_SEGMENTS, MIN_RAY_DIRECTION, REASON_FACE_SOURCES_ABSENT,
     REASON_FACE_SOURCE_MISSING, REASON_FACE_SOURCE_OUT_OF_RANGE,
 };
 

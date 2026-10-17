@@ -46,7 +46,10 @@ pub use input::{
     PointerPhase, PointerUpdate, StatusModel, ToolStatus, ViewMetrics, DRAG_THRESHOLD_LOGICAL_PX,
 };
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
-pub use picking::{drawing_pick_items, filter_by_index, pick_at_screen, pick_ray, pick_tolerance};
+pub use picking::{
+    drawing_pick_items, filter_by_index, last_pick_stats, pick_at_screen, pick_ray,
+    pick_ray_exhaustive, pick_ray_with_index, pick_tolerance, PickIndex, PickStats,
+};
 pub use recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
 pub use selection::{entity_property_rows, PropertyRow, SelectionProperties, SelectionSet};
 pub use tasks::{
