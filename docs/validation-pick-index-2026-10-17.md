@@ -5,7 +5,9 @@
 **差分测试抓到的一个真实几何 bug**、**偏离项**与**未测边界**。改动落在 `crates/cad-spatial`
 （新 `chunk.rs` 的 `ChunkGridIndex` + `pick.rs` 的保守包围盒）与 `crates/cad-app`（`picking.rs` 的
 `PickIndex` 与索引化拾取路径），实现 commit `13f7808`，是 ADR-0012 §10 **S4 的拾取部分**。
-**未**改宿主协议、**未**改 UI、**未**改 `Cargo.*`、**未**新增诊断码。
+**未**改宿主协议、**未**改 UI、**未**改 `Cargo.*`、**未**新增诊断码。后续 commit `c4b66c6`
+（`perf(pick)`）追加了**每 chunk `rstar` 实验**与**粗网格落地**，见下文「每 chunk `rstar` 实验与粗网格
+落地」；本页 `13f7808` 的历史数字保持原样，**不**被后续轮次改写。
 
 **这不是**性能验收、**不是** vendor/视觉结论，也**不是**宿主交互判定（见「未测 / 边界」）。单机、
 单会话。口径与 `docs/validation-pick-table-incremental-2026-10-17.md`（提交路径 pick 表增量）、
@@ -162,13 +164,70 @@ YACR_PICK_HARNESS picks={} hits={hits} cold_ms={cold:.3} warm_median_ms={median:
 `polyline_plane_normal`，`pick.rs:1106`，与 tessellator 同一 Newell 法、含闭合边与退化回退），
 对**任意平面**都包含整段弧。
 
+## 每 chunk `rstar` 实验与粗网格落地（后续 commit `c4b66c6`）
+
+上面的数字与偏离项出自 commit `13f7808`（每 chunk 为**扁平 payload 列表**）。随后按 ADR-0012 §7 的
+**字面**要求实现了**每 chunk `rstar`**（`bulk_load` 重建式 + 不可变快照；`rstar` **0.13.0** 仅接入
+`cad-spatial`，§10.2 版本/来源/许可核查按解析后的 `Cargo.lock` 与已发布 crate 元数据完成：crates.io、
+`MIT OR Apache-2.0`、`no_std`、默认 feature 为空、MSRV 1.85），并在**同一**夹具上对**旧扁平 per-chunk
+列表**做了**单元尺寸扫描**。
+
+复现命令（harness 文档给出）：
+`YACR_PROFILE_PICK=1 cargo test -p cad-app --test pick_index_real_fixture --locked --release -- --ignored --nocapture`
+
+### 单元尺寸扫描（**实测**，`fixtures/complex-test.dwg`，**723,587** 展开条目）
+
+| entries/chunk | structure | build ms | RSS MB | warm med ms | warm max ms |
+|---|---|---|---|---|---|
+| 11 (fine) | flat / rstar | 520 / 652 | 128 / 157 | 0.447 / 0.561 | 36.8 / 41.2 |
+| 256 | flat / rstar | 509 / 687 | 121 / 161 | 0.312 / 0.421 | 34.2 / 38.9 |
+| 512 | flat / rstar | 508 / 685 | 118 / 160 | 0.310 / 0.435 | 34.2 / 38.8 |
+| 4096 | flat / rstar | 511 / 717 | 123 / 163 | 0.318 / 0.449 | 33.9 / 39.6 |
+| 65536 | flat / rstar | 503 / 686 | 118 / 162 | 0.310 / 0.446 | 36.1 / 38.7 |
+
+每行给出 `flat / rstar` 两种结构；候选数在**每行都相同**（中位 **842**、最大 **21,762**）。per-chunk
+R-tree 在**每个尺寸上都是净回归**：构建时间、热拾取中位/最差、RSS 全面变差，候选数不变。**原因**：
+拾取容差与条目间距同量级，被访问 chunk 的查询包络覆盖其大部分，R-tree 几无可剪枝却仍付每棵树的开销。
+**单独把网格变粗就有收益**：ADR 强制的单松弛格放置规则于是不再把跨格条目推进恒扫描的 oversized 列表。
+
+### 落地结构（commit `c4b66c6`）
+
+**粗网格**（目标 **512** 条目/chunk ⇒ **1,419** chunk，而非 65,637）+ **扁平 per-chunk 列表**；
+`SMALL_CHUNK_MAX` 已移除（扁平唯一结构下无意义）。编排者**独立复测**：构建 **504.8 ms**、热拾取中位
+**0.290 ms**、最差 **33.1 ms**、索引 RSS 增量 **115,812 kB（~113 MB）**、oversized **598**（原 2,066）、
+chunk **1,419**、候选不变。该结果在**每个指标**上都优于旧的细扁平网格**与** rstar 变体。**`rstar` 依赖
+从未提交、也不需要**——最终树 `Cargo.toml`/`Cargo.lock` 未动。§7 其余要求全部保留：松弛 2× 边界 +
+单格放置、独立 oversized 列表、build-once 不可变快照、`Revision` 键控版本、保守超集语义、
+`YACR_PICK_EXHAUSTIVE` 穷举回退；随机差分测试原样通过。
+
+**测试（实测）**：`cad-spatial` **47**、`cad-app` **358**、`cad-host` **102**、`check-architecture.py` OK、
+wasm lib check OK、release build OK。
+
+### 口径与边界（不得省略）
+
+- **单个已提交夹具、纯 CPU 拾取**；**不给** GPU/视觉/vendor/跨平台或通用性能结论。
+- **RSS 口径**：索引 RSS 为**构建前后的进程 RSS 增量**，是**上界**、依赖分配器、逐次运行波动
+  **±~10 MB**，且**含**共享的 `items: Vec<SelectionRef>`（**不是**索引独占）。
+- 扫描表中 pre-rstar「**细扁平**」基线行（含 `11 (fine)` 行）来自**上一轮** harness 运行，**本轮未重测**；
+  其「flat」列与 `13f7808` 历史数字同源，**不得**与 `c4b66c6` 的粗网格数字混算。
+- 热拾取**中位**由**稀疏区**拾取主导、**最差**由**稠密区**拾取的**精确阶段**主导，**都不单独隔离**
+  broad phase（结构对比仍**同口径**：同网格、同放置、同候选）。
+
 ## 偏离项（记录，不隐藏）
 
-- **ADR-0012 §7 命名的是每 chunk 的 `rstar`**（不可变快照 + `bulk_load` 重建式）；本轮 `Cargo.*`
-  超出任务范围，故每个 chunk 持**扁平 payload 列表**。`rstar` **仍未实现**。`chunk.rs` 头部注释
-  明确写出该偏离与退化情形（点状查询访问一个 chunk，长对角射线退化为跨 chunk 的线性扫描；该退化
-  **被记录、不隐藏**）。
-- **内存足迹**：该索引在 `fixtures/complex-test.dwg` 上占 **~90–100 MB**（**真实**足迹，**未**削减）。
+- **ADR-0012 §7 命名的是每 chunk 的 `rstar`**（不可变快照 + `bulk_load` 重建式）。它**已实现并实测**，
+  但在本夹具上对旧扁平列表**在每个单元尺寸上都是净回归**（见上「每 chunk `rstar` 实验」表），故
+  **未落地**；最终每 chunk 持**扁平 payload 列表**，网格**有意变粗**（目标 512 条目/chunk）。这是一次
+  **由实测驱动**的偏离，本 ADR 自身的门允许（§10 S6「按实测再评估」、§8.5 profiling 先行）。`chunk.rs`
+  头部注释明确写出该偏离与退化情形（点状查询访问一个 chunk，长对角射线退化为跨 chunk 的线性扫描；该
+  退化**被记录、不隐藏**）。
+- **复用/扩展网格算术的残余缺口**：§7 要求「复用/扩展 `GridSpatialIndex` 的网格算术」，但拾取 chunk
+  布局**复制**了该算术而非共享；`GridSpatialIndex`/`SpatialIndex`/`PendingSpatialIndex` 在 `cad-spatial`
+  之外**无消费者**（已 grep 全 workspace 确认），故只改了 `chunk.rs` 的副本，`lib.rs`/`pick.rs`/
+  `tests.rs` 未动。抽公共 helper 被**有意**略过，以免改动他人正在调整的尺寸。
+- **内存足迹**：落地后的索引在 `fixtures/complex-test.dwg` 上占 **115,812 kB（~113 MB）** 的**进程 RSS
+  增量**（**实测**，是**上界**，依赖分配器，逐次波动 **±~10 MB**，且**含**共享的 `items:
+  Vec<SelectionRef>`）。上一轮（细扁平，commit `13f7808`）粗记为 **~90–100 MB**，**本轮未重测**。
   本轮**未**测量跨图纸的足迹分布。
 
 ## 未测 / 边界（不得省略）

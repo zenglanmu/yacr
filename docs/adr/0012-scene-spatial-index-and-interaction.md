@@ -130,10 +130,28 @@ GPU 提交转向**CPU 侧场景组织与空间查询**：每帧遍历、可见�
 - **多核**：本轮**不**引入。渲染会话属主线程、`cad-platform` 契约无 futures/无 `Send`，rayon 进渲染路径
   与 ADR-0007 及平台契约冲突。串行先行，按实测再议（§8.5 要求 profiling 先行）。
 
-- **实施状态（2026-10-17，记录，不改本决策）**：本节的**顶层 chunk 网格 + 超大图元策略**已接入**生产
-  拾取路径**（`cad-app::picking` 的 `PickIndex` + `cad-spatial` 的 `ChunkGridIndex`，commit `13f7808`）；
-  **每 chunk 的 `rstar` 仍未实现**（本轮 `Cargo.*` 未动），当前每 chunk 为**扁平 payload 列表**。
-  证据见 `docs/validation-pick-index-2026-10-17.md`（含偏离项与内存足迹）。
+- **实施状态（2026-10-18，记录，不改本决策）**：本节的**顶层 chunk 网格 + 超大图元策略**已接入**生产
+  拾取路径**（`cad-app::picking` 的 `PickIndex` + `cad-spatial` 的 `ChunkGridIndex`，commit `13f7808`）。
+  §7 字面要求的**每 chunk `rstar`** 随后**已实现并实测**（`rstar` **0.13.0** 仅接入 `cad-spatial`，
+  `bulk_load` 重建式 + 不可变快照；§10.2 版本/来源/许可核查按解析后的 `Cargo.lock` 与已发布 crate
+  元数据完成：crates.io、`MIT OR Apache-2.0`、`no_std`、默认 feature 为空、MSRV 1.85），并在
+  `fixtures/complex-test.dwg`（**723,587** 展开条目）上以 release 拾取 harness 对**旧扁平 per-chunk
+  列表**做**单元尺寸扫描**（约 11 → 65536 条目/chunk）。结论：per-chunk R-tree **在每个尺寸上都是净
+  回归**（构建时间、热拾取中位/最差、RSS 全面变差，候选数**完全相同**）。**原因**：拾取容差与条目间距
+  同量级，被访问 chunk 的查询包络覆盖其大部分，R-tree 几无可剪枝却仍付每棵树的开销。
+- **落地结构（commit `c4b66c6`）**：**粗网格**（目标 **512** 条目/chunk ⇒ **1,419** chunk，而非
+  65,637）+ **扁平 per-chunk 列表**；`SMALL_CHUNK_MAX` 已移除。编排者**独立复测**：构建 **504.8 ms**、
+  热拾取中位 **0.290 ms**、最差 **33.1 ms**、索引 RSS 增量 **115,812 kB（~113 MB）**、oversized
+  **598**（原 2,066）、候选不变。**`rstar` 依赖未落地**（最终树 `Cargo.toml`/`Cargo.lock` 未动），
+  §7 其余要求全部保留：松弛 2× 边界 + 单格放置（不跨格复制）、独立 oversized 列表、build-once 不可变
+  快照、`Revision` 键控版本（无并行计数器）、保守超集语义、`YACR_PICK_EXHAUSTIVE` 穷举回退；随机差分
+  测试原样通过。
+- **这是一次由实测驱动的偏离**，本 ADR 自身的门允许（§10 S6「按实测再评估」、§8.5 profiling 先行）。
+- **残余缺口（如实记录）**：§7 要求「复用/扩展 `GridSpatialIndex` 的网格算术」，但拾取 chunk 布局
+  **复制**了该算术而非共享；`GridSpatialIndex`/`SpatialIndex`/`PendingSpatialIndex` 在 `cad-spatial`
+  之外**无消费者**（已 grep 全 workspace 确认），故本轮只改了 `chunk.rs` 的副本，`lib.rs`/`pick.rs`/
+  `tests.rs` 未动。抽公共 helper 被**有意**略过，以免改动他人正在调整的尺寸。证据见
+  `docs/validation-pick-index-2026-10-17.md`（含扫描表、偏离项与内存足迹）。
 
 ### 8. 交互语义
 

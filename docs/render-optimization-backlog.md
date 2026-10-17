@@ -965,18 +965,36 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     （**16 种子 × 30 射线** × 全部家族，断言 `PickReport` **完全相等**；源码为准），外加容差边界 /
     chunk 边界 / 无命中 / 容差下限各一个；`the_index_examines_fewer_items_on_a_large_scene`
     （5,000 线 <1/10）。
-  - **偏离项（记录）**：ADR-0012 §7 命名**每 chunk 的 `rstar`**；本轮 `Cargo.*` 超出范围，每 chunk 为
-    **扁平 payload 列表**（`rstar` 仍**未实现**）。索引在本夹具占 **~90–100 MB**（真实足迹，未削减）。
+  - **后续（2026-10-18，commit `c4b66c6`）——粗网格落地，每 chunk `rstar` 实测否决**：§7 字面要求的
+    每 chunk `rstar`（`rstar` 0.13.0，`bulk_load` 不可变快照）**已实现并实测**，在本夹具的单元尺寸
+    扫描（约 11 → 65536 条目/chunk）上**每个尺寸都是净回归**（构建时间、热拾取中位/最差、RSS 全面变差，
+    候选数**完全相同**；原因：拾取容差与条目间距同量级，被访问 chunk 的查询包络覆盖其大部分，R-tree
+    几无可剪枝却仍付每棵树开销）。**落地**改为**粗网格**（目标 **512** 条目/chunk ⇒ **1,419** chunk）+
+    扁平 per-chunk 列表；`SMALL_CHUNK_MAX` 移除。编排者**独立复测**：构建 **504.8 ms**、热拾取中位
+    **0.290 ms**、最差 **33.1 ms**、索引 RSS 增量 **115,812 kB（~113 MB）**、oversized **598**（原
+    2,066）、候选不变——**每个指标**都优于旧细扁平网格与 rstar 变体。`rstar` 依赖**未落地**
+    （最终树 `Cargo.toml`/`Cargo.lock` 未动）。证据见 `docs/validation-pick-index-2026-10-17.md`。
+  - **偏离项（记录）**：ADR-0012 §7 命名**每 chunk 的 `rstar`**；它**已实现并实测为净回归**（见上），
+    故最终每 chunk 为**扁平 payload 列表**，网格**有意变粗**（目标 512 条目/chunk）。这是一次**实测
+    驱动**的偏离，本 ADR 自身的门允许（§10 S6「按实测再评估」、§8.5 profiling 先行）。**残余缺口**：
+    §7 要求「复用/扩展 `GridSpatialIndex` 的网格算术」，但拾取 chunk 布局**复制**了该算术而非共享
+    （`GridSpatialIndex`/`SpatialIndex`/`PendingSpatialIndex` 在 `cad-spatial` 之外无消费者），故只改了
+    `chunk.rs` 的副本。索引在本夹具占 **115,812 kB（~113 MB）** 的进程 RSS 增量（上界、含共享
+    `items`；上一轮细扁平粗记 **~90–100 MB**，本轮未重测）。
   - **边界**：after 数字来自 release harness，**不是**宿主交互（无探针钩子可 hover/select）；harness
-    **纯 CPU、不触碰 GPU** ⇒ **不给** GPU/视觉/vendor 结论；单机单会话。
+    **纯 CPU、不触碰 GPU** ⇒ **不给** GPU/视觉/vendor/跨平台/通用性能结论；单个已提交夹具、单机单会话。
+    RSS 为构建前后的进程 RSS 增量（上界，±~10 MB，含共享 `items`）；热拾取中位由稀疏区、最差由稠密区
+    精确阶段主导，均不单独隔离 broad phase（结构对比仍同口径）。
 - **现状/问题（更新于 2026-10-17）**：**拾取半已接线**（见上）。`SceneCache::apply_changes`
   （`cad-scene/src/cache.rs:90`）**只在测试调用**，生产每次全量 rebuild；`CacheKey`
   （`cad-scene/src/batch.rs:8`）**定义即废弃**。这两项仍待接入。
 - **预期收益**：拾取/框选/查询成本与图纸总规模脱钩（**拾取半已实测**，见上；框选/查询仍**预期**）。
 - **前置条件/风险**：按 ADR-0012 §7 落两级结构（顶层网格 + local `rstar` 0.13 不可变快照）——顶层
-  网格与超大图元策略**已落地**（拾取半），**每 chunk 的 `rstar` 仍未实现**（当前为扁平 payload 列表）；
-  版本取自 `Revision`，陈旧判定复用 `ChangeSet::follows()` / `TaskStamp`，**不**新增并行版本计数器。
-- **需要的决策**：`rstar` 引入的 `Cargo.lock` 更新与许可核查结论（ADR-0012 未决项）；以及
+  网格与超大图元策略**已落地**（拾取半）；**每 chunk 的 `rstar` 已实现并实测为净回归，故不落地**
+  （当前为扁平 payload 列表，网格**有意变粗**，见上「后续」）。版本取自 `Revision`，陈旧判定复用
+  `ChangeSet::follows()` / `TaskStamp`，**不**新增并行版本计数器。
+- **需要的决策**：`rstar` 引入的 `Cargo.lock` 更新与许可核查**已做**（0.13.0，crates.io，
+  `MIT OR Apache-2.0`），但因实测净回归**不引入**（ADR-0012 未决项就此收敛）；以及
   `SceneCache::apply_changes` / `CacheKey` 接入生产的排期。
 - **相关契约/栅栏**：索引接入前后 pick 结果一致 fence（**已落地**，见上）；`CacheKey` 版本键有效性测试；
   超大图元不跨块复制的内存 fence（**已落地**：overflow 列表）。

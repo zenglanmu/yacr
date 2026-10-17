@@ -12,6 +12,42 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 粗网格落地、每 chunk rstar 实测否决（2026-10-18；纯 `cad-spatial` 改动）
+
+**范围**：`crates/cad-spatial/src/chunk.rs`（网格尺寸由条目数派生、`TARGET_ENTRIES_PER_CHUNK = 512`；
+`SMALL_CHUNK_MAX` 移除；头部注释记录偏离）；**未**改宿主协议、**未**改 UI、**未**改 `Cargo.*`、
+**未**新增诊断码。commit `c4b66c6`（`perf(pick)`），是 ADR-0012 §10 **S4 拾取半**的后续；逐条证据见
+`docs/validation-pick-index-2026-10-17.md`。
+
+- **背景**：ADR-0012 §7 **字面**要求**每 chunk 的 `rstar`**（`bulk_load` 重建式 + 不可变快照）。
+- **做了并实测**：per-chunk `rstar` **已实现**（`rstar` **0.13.0** 仅接入 `cad-spatial`；§10.2
+  版本/来源/许可核查按解析后的 `Cargo.lock` 与已发布元数据完成：crates.io、`MIT OR Apache-2.0`、
+  `no_std`、默认 feature 为空、MSRV 1.85），在 `fixtures/complex-test.dwg`（**723,587** 展开条目）上以
+  release 拾取 harness 对**旧扁平 per-chunk 列表**做**单元尺寸扫描**（约 11 → 65536 条目/chunk）。
+- **结论（实测）**：per-chunk R-tree **在每个尺寸上都是净回归**——构建时间、热拾取中位/最差、RSS 全面
+  变差，候选数**完全相同**（中位 842、最大 21,762）。**原因**：拾取容差与条目间距同量级，被访问 chunk
+  的查询包络覆盖其大部分，R-tree 几无可剪枝却仍付每棵树开销；**单独把网格变粗就有收益**，因为 ADR
+  强制的单松弛格放置规则不再把跨格条目推进恒扫描的 oversized 列表。
+- **落地结构（commit `c4b66c6`）**：**粗网格**（目标 **512** 条目/chunk ⇒ **1,419** chunk，而非
+  65,637）+ **扁平 per-chunk 列表**；`SMALL_CHUNK_MAX` 移除。编排者**独立复测**：构建 **504.8 ms**、
+  热拾取中位 **0.290 ms**、最差 **33.1 ms**、索引 RSS 增量 **115,812 kB（~113 MB）**、oversized
+  **598**（原 2,066）、候选不变——**每个指标**都优于旧细扁平网格与 rstar 变体。**`rstar` 依赖从未
+  提交、也不需要**（最终树 `Cargo.toml`/`Cargo.lock` 未动）。§7 其余要求全部保留：松弛 2× 边界 +
+  单格放置、独立 oversized 列表、build-once 不可变快照、`Revision` 键控版本、保守超集语义、
+  `YACR_PICK_EXHAUSTIVE` 穷举回退；随机差分测试原样通过。
+- **偏离（记录，不隐藏）**：这是**实测驱动**的偏离，本 ADR 自身的门允许（§10 S6「按实测再评估」、
+  §8.5 profiling 先行）。**残余缺口**：§7 要求「复用/扩展 `GridSpatialIndex` 的网格算术」，但拾取
+  chunk 布局**复制**了该算术而非共享；`GridSpatialIndex`/`SpatialIndex`/`PendingSpatialIndex` 在
+  `cad-spatial` 之外**无消费者**（grep 确认），故只改了 `chunk.rs` 的副本，`lib.rs`/`pick.rs`/
+  `tests.rs` 未动。抽公共 helper 被**有意**略过，以免改动他人正在调整的尺寸。
+- **测试（实测）**：`cad-spatial` **47**、`cad-app` **358**、`cad-host` **102**、
+  `check-architecture.py` OK、wasm lib check OK、release build OK。
+- **边界（不得软化）**：**单个已提交夹具、纯 CPU 拾取**；**不给** GPU/视觉/vendor/跨平台或通用性能
+  结论。RSS 是**构建前后的进程 RSS 增量**（**上界**，依赖分配器，逐次波动 **±~10 MB**），且**含**共享的
+  `items: Vec<SelectionRef>`。扫描表中 pre-rstar「细扁平」基线行来自**上一轮** harness 运行，**本轮未
+  重测**。热拾取中位由**稀疏区**拾取主导、最差由**稠密区**拾取的**精确阶段**主导，**都不单独隔离**
+  broad phase（结构对比仍同口径：同网格、同放置、同候选）。
+
 ## 空间索引接入生产 CPU 拾取 + 相机-only 导航保持选择高亮（2026-10-17；两项修复）
 
 本轮两项修复：**A** 把 ADR-0012 规定的空间索引真正接入**生产 CPU 拾取**（`perf(pick)`，commit
