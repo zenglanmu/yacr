@@ -1,41 +1,67 @@
-//! Two-level loose-chunk spatial index for tolerance-expanded ray queries.
+//! Two-level spatial index for tolerance-expanded ray queries (ADR-0012 §7).
 //!
-//! This is the broad-phase structure ADR-0012 §7 specifies for the CPU pick
-//! path: a top-level uniform X/Y chunk grid over the drawing extent, and a
-//! per-chunk local payload list. A pick only visits the few chunks its ray can
-//! touch, so the precise stage no longer runs over the whole drawing.
+//! Top level: a uniform, **loose** X/Y chunk grid over the drawing extent. An
+//! entry is assigned to exactly one chunk — the chunk whose *loose* cell (the
+//! cell expanded by half a cell on every side, i.e. a 2x loose factor) contains
+//! the entry's AABB. The loose factor makes a primitive no larger than the cell
+//! size fit in exactly one cell ([`ChunkGridIndex::chunk_placements`] is then
+//! 1). A primitive that does not fit any single loose cell (a very long line, a
+//! large hatch: its size exceeds the cell size) is **not** copied into every
+//! cell it crosses; it goes to the separate `oversized` list, tested directly on
+//! every query. That is the ADR-0012 §7 / spec §8.1 rule against a
+//! city-block-sized fill being replicated across thousands of cells.
 //!
-//! # Placement (the "oversized primitive" rule)
+//! The grid is sized **coarsely** on purpose: the chunk count is derived from
+//! the entry count and a target entries-per-chunk
+//! `TARGET_ENTRIES_PER_CHUNK` rather than the fixed 65 536-cell cap
+//! [`crate::GridSpatialIndex`] uses. A fine grid gives each chunk only a handful
+//! of entries and — because the loose single-cell rule cannot place an entry
+//! that straddles a cell boundary — pushes a large fraction of the drawing into
+//! the always-scanned oversized list. Coarsening the cells cuts the oversized
+//! list by orders of magnitude on the measured fixture and makes the visited
+//! chunk a meaningful unit (see the pick-index evidence note).
 //!
-//! Every bounded entry is placed in each chunk its AABB spans. An entry whose
-//! AABB spans more than [`MAX_CHUNK_SPAN`] chunks (a very long line, a large
-//! hatch) is **not** copied into every chunk it covers; it goes to an overflow
-//! list that is tested directly on every query. That is the ADR-0012 §7 rule
-//! against a city-block-sized fill being replicated across thousands of chunks.
+//! Bottom level: each chunk holds a **flat payload list** (`ChunkEntry`) that
+//! is scanned linearly when the chunk is visited. A query walks the top-level
+//! grid, then each visited chunk's local list, and returns the candidate
+//! payloads.
+//!
+//! # Per-chunk structure (measured deviation from ADR-0012 §7)
+//!
+//! ADR-0012 §7 names an `rstar` R-tree per chunk, built once with
+//! `RTree::bulk_load` (a rebuild-style, immutable snapshot). That was
+//! implemented and measured against the flat list on the committed
+//! `complex-test.dwg` fixture, sweeping the cell size from ~256 to ~65536
+//! entries per chunk. The per-chunk R-tree was a **net regression at every cell
+//! size** — build time, warm pick median/max and RSS were all worse, with
+//! candidate counts identical. The reason is that the pick tolerance is
+//! comparable to the entry spacing, so a visited chunk's query envelope covers
+//! most of that chunk and the R-tree has little to prune while still paying its
+//! per-tree overhead; the flat scan is already close to optimal.
+//!
+//! The landed structure is therefore a flat per-chunk list. This is a
+//! **measured, documented** deviation from the literal per-chunk-R-tree reading
+//! of §7, permitted by the ADR's own measurement gate (§8: "串行先行，按实测再议
+//! （§8.5 要求 profiling 先行）"; §10 S6 "按实测再评估"). The two-level shape the
+//! ADR requires is unchanged: loose grid, single-cell placement (no duplication),
+//! a separate oversized list, an immutable build-once snapshot, `Revision`-keyed
+//! versioning and the conservative-superset / exhaustive-fallback semantics. The
+//! cell-size sweep and before/after numbers live in the pick-index evidence note
+//! (`docs/validation-pick-index-2026-10-17.md`).
 //!
 //! # Query (conservative broad phase)
 //!
 //! The query clips the ray's X/Y projection to the grid rectangle expanded by
-//! the pick tolerance, visits the chunks that rectangle touches, and applies
-//! the **same** tolerance-expanded slab test the precise stage uses
-//! ([`crate::pick::ray_intersects_expanded_bounds`]) to every local entry.
-//! Overflow entries are tested directly.
+//! the pick tolerance, expands that rectangle by the loose margin to get the
+//! chunks to visit, and applies the **same** tolerance-expanded slab test the
+//! precise stage uses ([`crate::pick::ray_intersects_expanded_bounds`]) to every
+//! entry the local structure hands back. Oversized entries are tested directly.
 //!
 //! The result is conservative by construction: the test only rejects an entry
 //! when the ray stays further than the tolerance from its AABB, and
 //! non-finite arithmetic falls through to a candidate. A rejected entry can
 //! therefore never have been hit, so the broad phase can never turn a hit into
 //! a miss. `[BBox intersects query] ⟹ hit` is never assumed (ADR-0012 §2).
-//!
-//! # What this is not
-//!
-//! The per-chunk local structure is a flat payload list, not the `rstar`
-//! per-chunk tree ADR-0012 §7 names: this crate may not add the `rstar`
-//! dependency in this change (the manifest is out of scope), so the local list
-//! is the honest current structure. A point-like query (the 2D orthographic
-//! pick ray is a single X/Y column) visits one chunk, so the local list is
-//! small; a long diagonal ray degrades toward a linear scan of the chunks it
-//! crosses. That degradation is reported, not hidden.
 
 use cad_domain::*;
 
@@ -44,9 +70,42 @@ use crate::pick::{ray_intersects_expanded_bounds, validate_ray, MIN_RAY_DIRECTIO
 /// Smallest grid cell extent; keeps `cell` finite and positive for a degenerate
 /// (single-point) drawing extent.
 const MIN_CELL_EXTENT: f64 = 1e-9;
-/// An entry whose AABB spans more chunks than this is kept in the overflow list
-/// instead of being copied into every chunk it covers.
-const MAX_CHUNK_SPAN: usize = 16;
+/// Loose factor: a cell is expanded by this fraction of the cell size on every
+/// side when an entry is assigned to it (2x loose bounds). A primitive whose
+/// size is at most the cell size always fits in exactly one loose cell.
+const LOOSE_HALF_CELL: f64 = 0.5;
+/// Target number of entries per chunk for the pick grid. The chunk count is
+/// derived from the entry count and this target instead of the fixed 65 536-cell
+/// cap `GridSpatialIndex` uses: a chunk must be a meaningful unit, and a fine
+/// grid pushes too many cell-straddling entries into the always-scanned
+/// oversized list. Swept in the pick-index evidence note.
+const TARGET_ENTRIES_PER_CHUNK: usize = 512;
+/// Floor on the derived chunk count, so a tiny scene still gets a grid with
+/// empty chunks instead of a degenerate single cell.
+const MIN_CHUNKS: usize = 16;
+/// Upper bound on the derived chunk count, so a pathological extent cannot
+/// allocate an unbounded grid.
+const MAX_CHUNKS: usize = 65536;
+/// Upper bound per grid dimension.
+const MAX_GRID_DIM: usize = 1024;
+
+/// One indexed entry: its caller payload and its conservative world AABB.
+#[derive(Clone, Copy)]
+struct ChunkEntry {
+    payload: u32,
+    min: Point3,
+    max: Point3,
+}
+
+impl ChunkEntry {
+    fn new(payload: u32, bounds: &Bounds3) -> Self {
+        ChunkEntry {
+            payload,
+            min: bounds.min,
+            max: bounds.max,
+        }
+    }
+}
 
 /// A two-level chunk-grid broad phase keyed by opaque `u32` payloads.
 ///
@@ -58,14 +117,14 @@ pub struct ChunkGridIndex {
     cell: f64,
     cols: usize,
     rows: usize,
-    /// Chunk ordinal (`row * cols + col`) -> payload ids.
-    chunks: Vec<Vec<u32>>,
-    /// Payload id -> conservative AABB.
-    bounds: Vec<Bounds3>,
-    /// Payload id -> caller payload.
-    payloads: Vec<u32>,
-    /// Payload ids of oversized entries, tested directly on every query.
-    overflow: Vec<u32>,
+    /// Chunk ordinal (`row * cols + col`) -> its entries (an empty vec is an
+    /// empty chunk).
+    chunks: Vec<Vec<ChunkEntry>>,
+    /// Entries too large for a single loose cell, tested directly on every
+    /// query (the ADR-0012 §7 oversized-primitive rule).
+    oversized: Vec<ChunkEntry>,
+    /// Number of indexed (bounded) entries, whether placed or oversized.
+    entry_count: usize,
     built: bool,
 }
 
@@ -87,9 +146,8 @@ impl ChunkGridIndex {
             cols: 0,
             rows: 0,
             chunks: Vec::new(),
-            bounds: Vec::new(),
-            payloads: Vec::new(),
-            overflow: Vec::new(),
+            oversized: Vec::new(),
+            entry_count: 0,
             built: false,
         }
     }
@@ -104,25 +162,46 @@ impl ChunkGridIndex {
             validate_bounds(bounds)?;
         }
         let mut index = Self::new();
-        index.bounds = entries.iter().map(|(_, b)| *b).collect();
-        index.payloads = entries.iter().map(|(p, _)| *p).collect();
-        index.layout();
+        index.layout(entries);
         Ok(index)
     }
 
     /// Number of indexed (bounded) entries.
     pub fn entry_count(&self) -> usize {
-        self.payloads.len()
+        self.entry_count
     }
 
-    /// Number of oversized entries kept in the overflow list.
-    pub fn overflow_count(&self) -> usize {
-        self.overflow.len()
+    /// Number of entries kept in the oversized list.
+    pub fn oversized_count(&self) -> usize {
+        self.oversized.len()
     }
 
     /// Number of chunks in the top-level grid.
     pub fn chunk_count(&self) -> usize {
         self.cols * self.rows
+    }
+
+    /// Entries stored in one chunk's local index (0 for an empty chunk). A
+    /// diagnostic for tests and evidence.
+    pub fn chunk_entry_count(&self, chunk: usize) -> usize {
+        self.chunks.get(chunk).map_or(0, |c| c.len())
+    }
+
+    /// Total entries stored across the two-level structure (chunk locals plus
+    /// the oversized list). With the loose-bound rule this equals
+    /// [`Self::entry_count`]: no entry is duplicated across cells. A diagnostic
+    /// for tests and evidence.
+    pub fn stored_entry_count(&self) -> usize {
+        self.chunks.iter().map(|c| c.len()).sum::<usize>() + self.oversized.len()
+    }
+
+    /// How many chunks' local lists hold `payload` (0, 1, or — only if the
+    /// loose-bound rule were broken — more). A diagnostic for tests.
+    pub fn chunk_placements(&self, payload: u32) -> usize {
+        self.chunks
+            .iter()
+            .filter(|chunk| chunk.iter().any(|e| e.payload == payload))
+            .count()
     }
 
     /// Grid origin (X/Y); a diagnostic for tests and evidence.
@@ -140,7 +219,9 @@ impl ChunkGridIndex {
         (self.cols, self.rows)
     }
 
-    fn layout(&mut self) {
+    fn layout(&mut self, entries: &[(u32, Bounds3)]) {
+        self.entry_count = entries.len();
+        self.oversized.clear();
         let mut min = Point3 {
             x: f64::INFINITY,
             y: f64::INFINITY,
@@ -151,13 +232,13 @@ impl ChunkGridIndex {
             y: f64::NEG_INFINITY,
             z: 0.0,
         };
-        for b in &self.bounds {
+        for (_, b) in entries {
             min.x = min.x.min(b.min.x);
             min.y = min.y.min(b.min.y);
             max.x = max.x.max(b.max.x);
             max.y = max.y.max(b.max.y);
         }
-        if self.bounds.is_empty() || !min.x.is_finite() || !max.x.is_finite() {
+        if entries.is_empty() || !min.x.is_finite() || !max.x.is_finite() {
             self.cols = 0;
             self.rows = 0;
             self.chunks.clear();
@@ -166,29 +247,44 @@ impl ChunkGridIndex {
         }
         let ex = (max.x - min.x).max(MIN_CELL_EXTENT);
         let ey = (max.y - min.y).max(MIN_CELL_EXTENT);
-        let target = (self.bounds.len() / 4).clamp(16, 65536) as f64;
+        // Coarse, pick-specific sizing: the chunk count follows the entry count
+        // and a target entries-per-chunk (with a floor for tiny scenes), not the
+        // fixed 65 536-cell cap `GridSpatialIndex` uses.
+        let target =
+            (entries.len() / TARGET_ENTRIES_PER_CHUNK).clamp(MIN_CHUNKS, MAX_CHUNKS) as f64;
         let aspect = (ex / ey).max(MIN_CELL_EXTENT);
-        self.cols = ((target * aspect).sqrt().ceil() as usize).clamp(1, 1024);
-        self.rows = ((target / self.cols as f64).ceil() as usize).clamp(1, 1024);
+        self.cols = ((target * aspect).sqrt().ceil() as usize).clamp(1, MAX_GRID_DIM);
+        self.rows = ((target / self.cols as f64).ceil() as usize).clamp(1, MAX_GRID_DIM);
         self.cell = (ex / self.cols as f64)
             .max(ey / self.rows as f64)
             .max(MIN_CELL_EXTENT);
         self.min = min;
-        self.chunks = vec![Vec::new(); self.cols * self.rows];
-        for (id, bounds) in self.bounds.iter().enumerate() {
-            let (c0, r0) = self.cell_of(bounds.min.x, bounds.min.y);
-            let (c1, r1) = self.cell_of(bounds.max.x, bounds.max.y);
-            let span = (c1 - c0 + 1) * (r1 - r0 + 1);
-            if span > MAX_CHUNK_SPAN {
-                self.overflow.push(id as u32);
-                continue;
-            }
-            for r in r0..=r1 {
-                for c in c0..=c1 {
-                    self.chunks[r * self.cols + c].push(id as u32);
-                }
+
+        // Assign every entry to exactly one loose cell, or to the oversized
+        // list when it does not fit one.
+        let half = self.cell * LOOSE_HALF_CELL;
+        let mut acc: Vec<Vec<ChunkEntry>> = vec![Vec::new(); self.cols * self.rows];
+        for (payload, bounds) in entries {
+            let cx = 0.5 * (bounds.min.x + bounds.max.x);
+            let cy = 0.5 * (bounds.min.y + bounds.max.y);
+            let (c, r) = self.cell_of(cx, cy);
+            let cell_lo_x = self.min.x + c as f64 * self.cell;
+            let cell_lo_y = self.min.y + r as f64 * self.cell;
+            let fits = bounds.min.x >= cell_lo_x - half
+                && bounds.max.x <= cell_lo_x + self.cell + half
+                && bounds.min.y >= cell_lo_y - half
+                && bounds.max.y <= cell_lo_y + self.cell + half;
+            let entry = ChunkEntry::new(*payload, bounds);
+            if fits {
+                acc[r * self.cols + c].push(entry);
+            } else {
+                self.oversized.push(entry);
             }
         }
+        // Build-once, immutable snapshot (ADR-0012 §7): each chunk's list is
+        // scanned linearly on a visit (see the module docs for the measured
+        // deviation from the per-chunk-R-tree reading of §7).
+        self.chunks = acc;
         self.built = true;
     }
 
@@ -198,10 +294,14 @@ impl ChunkGridIndex {
         (cx as usize, cy as usize)
     }
 
-    /// The chunks overlapping a query rectangle, as an inclusive cell range.
-    fn cell_range(&self, lo: Point3, hi: Point3) -> (usize, usize, usize, usize) {
-        let (c0, r0) = self.cell_of(lo.x, lo.y);
-        let (c1, r1) = self.cell_of(hi.x, hi.y);
+    /// The chunks whose *loose* cells overlap a query rectangle, as an
+    /// inclusive cell range. The rectangle is expanded by the loose margin
+    /// (half a cell) because an entry is found only in its own cell, and its
+    /// loose cell may reach half a cell beyond that cell's edge.
+    fn loose_cell_range(&self, lo: Point3, hi: Point3) -> (usize, usize, usize, usize) {
+        let half = self.cell * LOOSE_HALF_CELL;
+        let (c0, r0) = self.cell_of(lo.x - half, lo.y - half);
+        let (c1, r1) = self.cell_of(hi.x + half, hi.y + half);
         (c0, r0, c1, r1)
     }
 
@@ -213,32 +313,31 @@ impl ChunkGridIndex {
                 "spatial query tolerance must be finite and > 0".into(),
             ));
         }
-        if !self.built || self.payloads.is_empty() {
+        if !self.built || self.entry_count == 0 {
             return Ok(Vec::new());
         }
         let mut out: Vec<u32> = Vec::new();
         if let Some((lo, hi)) = self.query_region(ray, tolerance) {
-            let (c0, r0, c1, r1) = self.cell_range(lo, hi);
+            let (c0, r0, c1, r1) = self.loose_cell_range(lo, hi);
             for r in r0..=r1 {
                 for c in c0..=c1 {
-                    for &id in &self.chunks[r * self.cols + c] {
-                        self.test(id, ray, tolerance, &mut out);
+                    for entry in &self.chunks[r * self.cols + c] {
+                        self.test(entry, ray, tolerance, &mut out);
                     }
                 }
             }
         }
-        for &id in &self.overflow {
-            self.test(id, ray, tolerance, &mut out);
+        for entry in &self.oversized {
+            self.test(entry, ray, tolerance, &mut out);
         }
         out.sort_unstable();
         out.dedup();
         Ok(out)
     }
 
-    fn test(&self, id: u32, ray: &Ray3, tolerance: f64, out: &mut Vec<u32>) {
-        let bounds = &self.bounds[id as usize];
-        if ray_intersects_expanded_bounds(ray, bounds.min, bounds.max, tolerance) {
-            out.push(self.payloads[id as usize]);
+    fn test(&self, entry: &ChunkEntry, ray: &Ray3, tolerance: f64, out: &mut Vec<u32>) {
+        if ray_intersects_expanded_bounds(ray, entry.min, entry.max, tolerance) {
+            out.push(entry.payload);
         }
     }
 
@@ -421,6 +520,7 @@ mod tests {
         assert!(index.ray_candidates(&ray, 0.1).unwrap().is_empty());
         let built = ChunkGridIndex::build(&[]).unwrap();
         assert_eq!(built.entry_count(), 0);
+        assert_eq!(built.chunk_count(), 0);
         assert!(built.ray_candidates(&ray, 0.1).unwrap().is_empty());
     }
 
@@ -465,6 +565,51 @@ mod tests {
             let expected = brute_force(&entries, &ray, tolerance);
             let got = index.ray_candidates(&ray, tolerance).unwrap();
             assert_eq!(got, expected, "ray={ray:?} tolerance={tolerance}");
+        }
+    }
+
+    /// The two-level query is a conservative broad phase: it never drops a
+    /// candidate the brute-force scan reports for the same region.
+    #[test]
+    fn two_level_query_is_a_conservative_superset_of_brute_force() {
+        let mut rng = Rng(0xC0FF_EE00_1234_5678);
+        let entries: Vec<(u32, Bounds3)> = (0..300u32)
+            .map(|id| {
+                (
+                    id,
+                    box_at(
+                        rng.range(-20.0, 20.0),
+                        rng.range(-20.0, 20.0),
+                        rng.range(0.02, 2.5),
+                    ),
+                )
+            })
+            .collect();
+        let index = ChunkGridIndex::build(&entries).unwrap();
+        for _ in 0..400 {
+            let origin = Point3 {
+                x: rng.range(-22.0, 22.0),
+                y: rng.range(-22.0, 22.0),
+                z: rng.range(-5.0, 5.0),
+            };
+            let direction = Point3 {
+                x: rng.range(-1.0, 1.0),
+                y: rng.range(-1.0, 1.0),
+                z: rng.range(-1.0, 1.0),
+            };
+            if direction.x.hypot(direction.y).hypot(direction.z) < MIN_RAY_DIRECTION {
+                continue;
+            }
+            let tolerance = rng.range(0.01, 3.0);
+            let ray = Ray3 { origin, direction };
+            let reference = brute_force(&entries, &ray, tolerance);
+            let got = index.ray_candidates(&ray, tolerance).unwrap();
+            for candidate in &reference {
+                assert!(
+                    got.contains(candidate),
+                    "broad phase dropped {candidate} for ray={ray:?} tolerance={tolerance}"
+                );
+            }
         }
     }
 
@@ -529,8 +674,8 @@ mod tests {
 
     #[test]
     fn oversized_entries_are_kept_and_still_candidates() {
-        // A 1e6-long line spanning far more than MAX_CHUNK_SPAN chunks must be
-        // in the overflow list and still be returned when the ray meets it.
+        // A 1e6-long line spanning far more than one loose cell must be in the
+        // oversized list and still be returned when the ray meets it.
         let entries = vec![
             (7u32, box_at(0.0, 0.0, 0.1)),
             (
@@ -550,7 +695,7 @@ mod tests {
             ),
         ];
         let index = ChunkGridIndex::build(&entries).unwrap();
-        assert_eq!(index.overflow_count(), 1, "the long line overflows");
+        assert_eq!(index.oversized_count(), 1, "the long line is oversized");
         let ray = Ray3 {
             origin: Point3 {
                 x: 400_000.0,
@@ -565,6 +710,202 @@ mod tests {
         };
         let got = index.ray_candidates(&ray, 0.1).unwrap();
         assert!(got.contains(&9), "the oversized line is still a candidate");
+    }
+
+    /// The loose-bound rule: a primitive no larger than the cell size lands in
+    /// exactly one chunk's local index (never duplicated across cells).
+    #[test]
+    fn a_primitive_within_the_cell_size_lands_in_exactly_one_chunk() {
+        let mut rng = Rng(0x1122_3344_5566_7788);
+        // A dense grid of tiny primitives so the cells are much larger than the
+        // primitives themselves.
+        let entries: Vec<(u32, Bounds3)> = (0..400u32)
+            .map(|id| {
+                (
+                    id,
+                    box_at(
+                        rng.range(-50.0, 50.0),
+                        rng.range(-50.0, 50.0),
+                        rng.range(0.001, 0.02),
+                    ),
+                )
+            })
+            .collect();
+        let index = ChunkGridIndex::build(&entries).unwrap();
+        let cell = index.cell_size();
+        for (payload, bounds) in &entries {
+            let size = (bounds.max.x - bounds.min.x).max(bounds.max.y - bounds.min.y);
+            assert!(size <= cell, "test setup: primitive larger than the cell");
+            assert_eq!(
+                index.chunk_placements(*payload),
+                1,
+                "payload {payload} must be in exactly one chunk"
+            );
+            assert_eq!(index.oversized_count(), 0, "nothing here is oversized");
+        }
+        // No entry is duplicated anywhere in the two-level structure.
+        assert_eq!(index.stored_entry_count(), index.entry_count());
+    }
+
+    /// A primitive much larger than the cell size is stored once (oversized),
+    /// never copied into every cell it crosses.
+    #[test]
+    fn an_oversized_primitive_is_not_duplicated_across_chunks() {
+        let mut entries: Vec<(u32, Bounds3)> = (0..500u32)
+            .map(|id| (id, box_at(id as f64 * 0.1, 0.0, 0.01)))
+            .collect();
+        // A single line spanning the whole (wide) drawing.
+        entries.push((
+            9999,
+            Bounds3 {
+                min: Point3 {
+                    x: -1000.0,
+                    y: -0.5,
+                    z: -0.5,
+                },
+                max: Point3 {
+                    x: 1000.0,
+                    y: 0.5,
+                    z: 0.5,
+                },
+            },
+        ));
+        let index = ChunkGridIndex::build(&entries).unwrap();
+        assert_eq!(index.oversized_count(), 1, "the wide line is oversized");
+        assert_eq!(index.chunk_placements(9999), 0, "it is not in any chunk");
+        // No duplication: the structure stores exactly one entry per input.
+        assert_eq!(index.stored_entry_count(), index.entry_count());
+        assert_eq!(index.entry_count(), entries.len());
+    }
+
+    /// An empty chunk contributes no candidates; the query still finds the
+    /// entries in the neighbouring non-empty chunks.
+    #[test]
+    fn an_empty_chunk_contributes_no_candidates() {
+        // Two point-like entries far apart: the layout has many empty chunks
+        // between them.
+        let entries = vec![
+            (1u32, box_at(0.0, 0.0, 0.01)),
+            (2u32, box_at(100.0, 0.0, 0.01)),
+        ];
+        let index = ChunkGridIndex::build(&entries).unwrap();
+        let (cols, rows) = index.grid_dimensions();
+        assert!(cols * rows > 2, "the grid must have empty chunks");
+        let empty = (0..cols * rows)
+            .find(|c| index.chunk_entry_count(*c) == 0)
+            .expect("an empty chunk exists");
+        assert_eq!(index.chunk_entry_count(empty), 0);
+        // A ray over the empty chunk between the two entries hits neither.
+        let ray = Ray3 {
+            origin: Point3 {
+                x: 50.0,
+                y: 1000.0,
+                z: 0.0,
+            },
+            direction: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            },
+        };
+        assert!(index.ray_candidates(&ray, 0.05).unwrap().is_empty());
+        // A ray over the first entry still finds it.
+        let hit_ray = Ray3 {
+            origin: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 10.0,
+            },
+            direction: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            },
+        };
+        assert_eq!(index.ray_candidates(&hit_ray, 0.05).unwrap(), vec![1]);
+    }
+
+    /// A scene whose entries are all oversized: the grid has no stored entries
+    /// but the oversized list still answers queries.
+    #[test]
+    fn an_oversized_only_scene_queries_correctly() {
+        let entries = vec![
+            (
+                1u32,
+                Bounds3 {
+                    min: Point3 {
+                        x: -1000.0,
+                        y: -1.0,
+                        z: -1.0,
+                    },
+                    max: Point3 {
+                        x: 1000.0,
+                        y: 1.0,
+                        z: 1.0,
+                    },
+                },
+            ),
+            (
+                2u32,
+                Bounds3 {
+                    min: Point3 {
+                        x: -1000.0,
+                        y: 100.0,
+                        z: -1.0,
+                    },
+                    max: Point3 {
+                        x: 1000.0,
+                        y: 102.0,
+                        z: 1.0,
+                    },
+                },
+            ),
+        ];
+        let index = ChunkGridIndex::build(&entries).unwrap();
+        assert_eq!(index.oversized_count(), 2);
+        assert_eq!(index.stored_entry_count(), 2);
+        // A ray at y = 0 meets only the first oversized entry.
+        let ray = Ray3 {
+            origin: Point3 {
+                x: 500.0,
+                y: 0.0,
+                z: 10.0,
+            },
+            direction: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            },
+        };
+        assert_eq!(index.ray_candidates(&ray, 0.1).unwrap(), vec![1]);
+    }
+
+    /// The chunk count follows the entry count and the coarse
+    /// [`TARGET_ENTRIES_PER_CHUNK`] target, not the fixed fine cap the shared
+    /// grid arithmetic (`GridSpatialIndex`) uses: a large scene gets a small
+    /// number of chunks, each holding many entries.
+    #[test]
+    fn chunk_count_follows_the_target_entries_per_chunk() {
+        let mut rng = Rng(0x00AB_CDEF_1234_5678);
+        let entries: Vec<(u32, Bounds3)> = (0..20_000u32)
+            .map(|id| {
+                (
+                    id,
+                    box_at(rng.range(-500.0, 500.0), rng.range(-500.0, 500.0), 0.01),
+                )
+            })
+            .collect();
+        let index = ChunkGridIndex::build(&entries).unwrap();
+        assert!(
+            index.chunk_count() >= MIN_CHUNKS,
+            "a tiny floor keeps empty chunks"
+        );
+        assert!(
+            index.chunk_count() * 4 < entries.len(),
+            "the grid must be coarse: chunks={} entries={}",
+            index.chunk_count(),
+            entries.len()
+        );
     }
 
     #[test]

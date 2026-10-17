@@ -33,6 +33,24 @@ fn pick_profile_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("YACR_PROFILE_PICK").is_some())
 }
 
+/// The process resident set size in kibibytes, read from `/proc` on Linux.
+/// `None` elsewhere (or when the file cannot be read). A diagnostic for the
+/// pick-index footprint evidence only; it never affects a pick.
+#[cfg(target_os = "linux")]
+fn process_rss_kb() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    status.lines().find_map(|line| {
+        line.strip_prefix("VmRSS:")
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|kb| kb.parse().ok())
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_rss_kb() -> Option<u64> {
+    None
+}
+
 /// Whether the pick path must fall back to the exhaustive scan.
 ///
 /// A diagnostic escape hatch (`YACR_PICK_EXHAUSTIVE`) for evidence runs that
@@ -329,6 +347,7 @@ impl PickIndex {
     /// be bounded conservatively is stored as an always-candidate instead.
     pub fn build(database: &DrawingDatabase, document: DocumentId) -> CadResult<Self> {
         let profile = pick_profile_enabled();
+        let rss_before = if profile { process_rss_kb() } else { None };
         let started = profile.then(Instant::now);
         let borrowed = borrowed_pick_items(database, document);
         if let Some(started) = started {
@@ -353,15 +372,35 @@ impl PickIndex {
             }
         }
         let broad = ChunkGridIndex::build(&entries)?;
+        // The `entries` scratch (payload + AABB pairs) is not part of the
+        // retained index; drop it before reporting the footprint so the RSS
+        // delta measures the index, not the build scratch.
+        drop(entries);
         if let Some(started) = build_started {
             eprintln!(
-                "YACR_PROFILE_PICK pick_index_build items={} bounded={} unbounded={} chunks={} overflow={} elapsed_ms={:.3}",
+                "YACR_PROFILE_PICK pick_index_build items={} bounded={} unbounded={} chunks={} oversized={} stored={} elapsed_ms={:.3}",
                 items.len(),
                 broad.entry_count(),
                 unbounded.len(),
                 broad.chunk_count(),
-                broad.overflow_count(),
+                broad.oversized_count(),
+                broad.stored_entry_count(),
                 started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        if profile {
+            // Process RSS across the build: a true measurement of the retained
+            // index footprint. Allocator retention of freed build scratch can
+            // only inflate it, so it is an upper bound; the before/after runs
+            // use the same method.
+            let rss_after = process_rss_kb();
+            let delta = match (rss_before, rss_after) {
+                (Some(before), Some(after)) => Some(after as i64 - before as i64),
+                _ => None,
+            };
+            eprintln!(
+                "YACR_PROFILE_PICK pick_index_footprint rss_before_kb={:?} rss_after_kb={:?} rss_delta_kb={:?}",
+                rss_before, rss_after, delta
             );
         }
         Ok(PickIndex {
