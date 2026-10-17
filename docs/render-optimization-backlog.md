@@ -10,7 +10,8 @@
 `docs/validation-gpu-time-2026-10-17.md`；**每帧 CPU plan 成本（N1e）**的实测见
 `docs/validation-plan-cost-2026-10-17.md`；**每帧 uniform/encode 成本（N1e 后续）**的实测见
 `docs/validation-uniform-encode-skip-2026-10-17.md`；**提交路径 pick 表增量更新（N1f）**的实测见
-`docs/validation-pick-table-incremental-2026-10-17.md`。
+`docs/validation-pick-table-incremental-2026-10-17.md`；**后缀提交保持 pacing 成本模型（N1a 后续）**的实测见
+`docs/validation-pacing-suffix-commit-2026-10-17.md`。
 
 ## 当前基线（2026-10-17，真实宿主**分页**口径）
 
@@ -395,6 +396,56 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   逐条证据、测试矩阵与**未测边界**见 `docs/validation-frame-pacing-2026-10-17.md`、`docs/handoff.md`
   本轮条目。**未测**：wasm/浏览器真实运行时 disabled 路径、跨页 z-order、视觉/截图判定、GPU 时间、
   120 Hz/刷新率自适应。
+- **N1a 后续 — 后缀提交不再重置 pacing 成本模型：已落地（2026-10-17）**。逐条证据见
+  `docs/validation-pacing-suffix-commit-2026-10-17.md`（实现 commit `0fb2bc1`）。这是 N1a 的**收敛性**残余项：
+  控制器此前**每次提交**都重置。
+  - **症状（用户手动交互，实测）**：**全览拖动卡顿**，而**放大看细节反而顺滑**。机制上二者是同一现象的
+    两面——全览帧画的是**整幅 draw-order 前缀页**（无剔除），放大后 **P1 块级剔除**把视口外工作消掉，
+    帧就便宜。
+  - **病根（实测）**：`Renderer::commit_upload` **在每一次提交上**重置自适应页预算控制器——**包括**
+    引擎**每次相机 settle** 发出的**后缀专用 overlay 提交**（延迟参考网格刷新：仅相机范围变化布防 settle，
+    相机静默满 **250 ms** 后 overlay 后缀被重准备并以**后缀提交**提交，`cad-engine/src/render/mod.rs:309-323`
+    的 `settle_camera_if_due`，超时常量 `mod.rs:165`；该后缀提交**只追加一条 overlay 批次**）。⇒ 连续交互
+    期间**每次 settle 都把已学 `scale` 打回 `1.0`**，控制器**永不收敛**、渐进页**始终顶点过重**（实测全览帧
+    `draw_calls≈2720`、`gpu_ms 15.80`、`wait_ms 16.15`、`over_budget=true` 69/75）。
+  - **改动**：`commit_upload` 只在**基座变更**时重置——`if keep_prefix == 0 { self.reset_pacing(); }`
+    （`crates/cad-render-wgpu/src/renderer_impl.rs:2284-2303`）。**判据 `keep_prefix == 0` 正是 N1f
+    pick 表增量路径所用的同一判别式**（`keep_prefix > 0` = 保留了真实前缀 = 后缀提交）。
+    - **仍重置的集合**：**基座变更**（`keep_prefix == 0`）、`clear_batches`、**新设备世代**、**设备丢失**、
+      **图像重传**（保留重置——它替换**整幅驻留图像集**、**从不**是增量后缀）。
+    - **`reset_pacing` 只清成本模型状态**（`renderer_impl.rs:2776-2779`，用 `pacing::PacingState::new`
+      重建）：`scale` / `cost_ema_ms` / `over_under_streak` / `seeded` 等**学习状态**。
+      **restart-pending 是另一路信号，对后缀提交被保留**（后缀提交不调用 `reset_pacing`，故一次真实重置
+      置起的 pending 仍**正确保持**）。
+    - **未引入 dirty/invalidation 标志**：源码注释明确这是**启发式成本模型**、**不是**正确性状态，故
+      **刻意不**建模为失效标志，重置**不与任何其它状态耦合**（**铁律 4**：不新增第二套失效真相）。
+  - **实测（本机原生 Wayland / Vulkan / Quadro P620 / `scale=1`；同 UID、无 root/sudo、无屏录、无虚拟显示；
+    合成 `YACR_PROBE_POSTLOAD_PAN` 手势）**——`budget_scale` 分布 before → after：
+
+    | 运行 | 帧数 | `=1.000` | `<1.0` | `>1.0` | EMA 重置 |
+    |---|---:|---:|---:|---:|---|
+    | before（用户手动捕获固定副本 `janky-postpickfix-21h58.log`） | 75 | **35（47%，撞顶）** | 40 | 0 | —（`budget_cost_ema_ms=0.00` 出现在 15 帧＝反复重学） |
+    | after（探针运行） | 1888 | **6（仅前 6 帧）** | **1758（93.1%）** | **125（6.6%）** | **1**（仅初始） |
+    | 独立复跑（编排者） | 1842 | 6 | **1808** | 28 | **2**（初始 + base 变更） |
+
+    **后缀提交逐次保持已学 `scale`**：`0.435 → 0.435`、`0.485 → 0.485`、`0.471 → 0.471`（**实测**）。
+    after 的 `>1.0` 是**合法**的——合成 pan 把图拖进**空白区**，廉价相位里控制器**合理地爬回 1.0 以上**
+    去寻 13 ms 目标；after 的 EMA **只重置一次**（初始）。
+  - **栅栏（已落地，名称即契约；`crates/cad-render-wgpu/tests/pacing_commit_suffix.rs`，3 个 GPU fence）**：
+    `suffix_only_commit_preserves_pacing_knowledge_while_a_base_change_resets_it`（后缀提交**逐位**保持
+    `pacing_scale()`/`pacing_cost_ema_ms()`，基座变更仍重置）；
+    `repeated_suffix_commits_do_not_return_the_scale_to_one`（**六轮**后缀提交从不把 `scale` 打回 `1.0`）；
+    `suffix_commit_after_an_over_target_observation_keeps_the_shrunk_budget`（超目标观测之后的后缀提交保持
+    `budget_scale < 1.0` 且 `budget_vertices` 低于上限）。
+  - **既有 fixture 披露**：`headless_render::scene_mutation_resets_pacing_knowledge`（`tests/headless_render.rs:603`）
+    原以 `renderer.upload(…)` 作"场景变更"，但 `upload` 的提交是 `keep_prefix = self.batches.len()`——一次
+    **后缀追加提交**、**不是**基座变更——故在修正后的规则下**不再**重置。该 fixture 现改为执行**真实基座变更**
+    （`prepare_upload_batches` + `commit_upload(staged, 0)`）；其**契约不变**（"一次**基座变更**的场景变更重置
+    成本知识"）。**这是本轮唯一被修改的既有测试**。
+  - **混淆项（不得软化）**：**before/after 的每帧 GPU 数字不可比**——baseline 窗口**最大化**，探针运行用
+    **926×266** 窗口（被 `YACR_PROBE_NO_MAXIMIZE=1` 强制）；且驱动是**合成 DOM 手势、不是真实鼠标**。
+    ⇒ **不得**给出"倍数下降"结论，**不得**给出**人工交互判定**（**归用户**）。**单机/单适配器**，**不外推**。
+  - **优先级**：已落地（N1a 的收敛性残余项）。
 - **N1e — 每帧 CPU plan 成本：剔除感知的分段页规划：已落地（2026-10-17）**。这是 P0 结论工作顺序的
   **#1**（"每帧 CPU plan 成本"）。逐条证据见 `docs/validation-plan-cost-2026-10-17.md`。
   - **病根（实测）**：`plan_ordered_page` 本应在首个越预算批处停下，但**完全被剔除的批计零**、产品里

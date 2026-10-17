@@ -127,6 +127,15 @@ HATCH 的检测需要上游提供 3D 边界。渐变 HATCH 仍只绘制边界。
 - **控制器**（`crates/cad-render-wgpu/src/pacing.rs`，纯状态机）：输入是每帧实测
   `cpu_ms + wait_ms`，目标默认 13 ms，±5% 死区，连续 2 次超目标 `×0.75`、连续 8 次低于目标
   `×1.08`，`scale ∈ [0.05, 4.0]`。**不得**改用 tick 间隔（被 vsync 量化，会形成极限环）。
+- **成本模型在仅后缀提交上存活（2026-10-17 落地）**：控制器**只在基座变更时**重置
+  （`commit_upload` 的 `if keep_prefix == 0 { self.reset_pacing(); }`，`renderer_impl.rs:2284-2303`，
+  与 pick 表增量路径同一判别式）。引擎**每次相机 settle** 发出的**后缀 overlay 提交**（延迟参考网格刷新，
+  只追加一条 overlay 批）**不**重置它——因为**一次 settle 不是一次成本剖面变化**：后缀提交只重传瞬态
+  overlay 范围、**不改变基座 draw 成本剖面**。此前每次提交都重置，导致**每次 settle 把已学 `scale` 打回
+  `1.0`**、控制器**永不收敛**、渐进页始终顶点过重（**实测**全览帧 `draw_calls≈2720`、`gpu_ms 15.80`）。
+  `reset_pacing` **只清成本模型学习状态**（`scale`/`cost_ema_ms`/`over_under_streak`/`seeded`），
+  **restart-pending 是另一路信号、对后缀提交被保留**；**未引入 dirty/invalidation 标志**（启发式成本模型，
+  非正确性状态，**铁律 4**）。逐条证据见 `docs/validation-pacing-suffix-commit-2026-10-17.md`。
 - **清屏页图像先预留**：图像只在清屏页绘制（续页 `LoadOp::Load`，避免 alpha 累积）。清屏页现在**先**
   按活动预算预留**整幅图像记账**（paced 预算装不下全部图像时回落**上限**），几何再填剩余 ⇒ 页切分
   **不会**把图像丢在续页上。绘制顺序不变（图像仍最后）。
@@ -155,3 +164,8 @@ HATCH 的检测需要上游提供 3D 边界。渐变 HATCH 仍只绘制边界。
   被完全剔除的已转换批在其 ~200 B `GpuBatch` 被读取**之前**即跳过。settled 1-draw 页的 CPU 现约 **≈2 ms**
   （**实测**；`uniform_ms` **6.071 → 0.151**、`encode_ms` **5.365 → 0.656**）。逐条证据见
   `docs/validation-uniform-encode-skip-2026-10-17.md`。
+- **字段澄清（探针口径）**：`[probe] cad-stages` 的 **`apply_us` 不是 GPU draw、也不是交互帧渲染成本**——
+  它是 `apply_ready_updates` 的**墙钟**（`gtk_bridge.rs:926-932` → `render/mod.rs:1137` →
+  `runtime.rs:494`），即**有界分块的场景增量 CPU 暂存**（每次 **≤4 slice 或 ≤8 ms**，`runtime.rs:576-612`，
+  由 `prepare_upload_batches` 主导）；`presented=false` 的 `apply_us` 是**一次性批量应用**（如
+  `complex-test.dwg` 的 166k 批），**不是**逐帧渲染开销。
