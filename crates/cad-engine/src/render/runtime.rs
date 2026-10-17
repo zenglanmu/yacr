@@ -591,6 +591,11 @@ impl CadRenderRuntime {
                     pending.base_changed,
                 )
             };
+            // `started` only exists off wasm (no monotonic clock there); report 0.
+            #[cfg(not(target_arch = "wasm32"))]
+            let total_us = started.elapsed().as_micros() as u64;
+            #[cfg(target_arch = "wasm32")]
+            let total_us = 0u64;
             self.record_upload_timing(UploadTimingObservation {
                 seq: 0,
                 scene_revision,
@@ -601,7 +606,7 @@ impl CadRenderRuntime {
                 prepare_us,
                 append_us,
                 commit_us: 0,
-                total_us: started.elapsed().as_micros() as u64,
+                total_us,
                 commit: None,
             });
             return Ok(());
@@ -671,6 +676,11 @@ impl CadRenderRuntime {
             self.image_diagnostic.as_deref(),
             self.flags_diagnostic.as_deref(),
         );
+        // `started` only exists off wasm (no monotonic clock there); report 0.
+        #[cfg(not(target_arch = "wasm32"))]
+        let total_us = started.elapsed().as_micros() as u64;
+        #[cfg(target_arch = "wasm32")]
+        let total_us = 0u64;
         // Record the committed upload's stage timings **after** the last `renderer`
         // borrow (diagnostics only; taken at most once so a host never replays them).
         self.record_upload_timing(UploadTimingObservation {
@@ -683,7 +693,7 @@ impl CadRenderRuntime {
             prepare_us,
             append_us,
             commit_us,
-            total_us: started.elapsed().as_micros() as u64,
+            total_us,
             commit: commit_timing,
         });
         Ok(())
