@@ -12,6 +12,68 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 每帧 CPU plan 成本：剔除感知的分段页规划（2026-10-17；纯 renderer 改动）
+
+**范围**：`crates/cad-render-wgpu`（`src/plan.rs` 的 `plan_ordered_page` 分段化 + 每批集变更一次的
+`BatchFacts` + 每次重启重建的 `OrderedPageIndex` + `plan_from_gpu` 的统一 `usage` 契约 + 7 个新
+planner 测试）。**未**改宿主协议、**未**改 UI、**未**新增诊断码。设计动机与状态：
+`docs/render-optimization-backlog.md` 的 §N1e（P0 结论工作顺序的 **#1**）；逐条证据见
+`docs/validation-plan-cost-2026-10-17.md`。
+
+- **病根（实测）**：`plan_ordered_page` 本应在首个越预算批处停下并保留 cursor，但**完全被剔除的批计零**
+  顶点/三角形，而产品的 `max_bytes` 为 `usize::MAX` ⇒ 零计费批**永不失败**；剔除把视图清空时，线性游走
+  会**跑到有序表末尾（complex-test 166,346 条）**，为每一条算成本，只为接受一切并画一个 run。实测该病态页
+  `plan_ms` 中位 **10.5** / p90 **18.1**、`cpu_ms` **22.4**。
+- **改动（分层，无第二套失效真相）**：
+  - **剔除无关的批集事实 `BatchFacts`**（`plan.rs:896-995`）——按类（instance/mesh/arc）× chunk 的
+    chunk→batch 索引、`always_active`（**无论剔除都计费**的批）集合、类标志 `has_line_class`/
+    `has_mesh_class`、`converted_total`、紧凑 `upload_bytes`——**每个批集变更只算一次**，复用既有的
+    `draw_plan = None` 失效（`renderer_impl.rs:4364-4377`），**不新增**失效真相。
+  - **每次 `ordered` 重建时的索引 `OrderedPageIndex`**（`plan.rs:997-1047`）——批→位置逆表 `batch_pos`
+    + **字节前缀和** `bytes_prefix`——在**既有的重启清扫**里随 `ordered` 一起重建
+    （`renderer_impl.rs:4409`），跨重启复用分配。
+  - `plan_ordered_page` 只走**活动批**（可见 chunk 的批 ∪ `always_active`），由它们的**空隙**导出被接受
+    前缀；字节边界来自**前缀和二分查找**（`plan.rs:1100-1119`）。字节计费**仍按批粒度**，故**完全被剔除的
+    已转换批仍计字节**（**不是**免费的）——`always_active` 谓词**刻意不**是 `batch_has_visible_work`
+    （`plan.rs:912-916`）。
+  - **回退**：无剔除、或估计活动批超过 **4096**（`SEGMENTED_ACTIVE_THRESHOLD`，`plan.rs:894`）⇒ 走
+    **原线性游走**，不变（缩放出去的大页行为与改动前**完全一致**）。
+  - **统一 `usage` 契约（用户批准）**：`plan_ordered_page` 与 `plan_from_gpu` 在失败时共用一条契约——
+    顶点/三角形失败**保留失败批的字节**（先计字节后查顶点），字节失败**不保留**（`plan.rs:671-679`）；
+    该字段**不**出现在任何 probe 输出里。
+  - **未触碰**：`plan_from_gpu` / `plan_cursor_batch` 的函数体、进度下限、draw-order 切分、图像预留/上限
+    回落、`ChunkCull` 公式。
+- **真实宿主实测（本机原生 Wayland / Vulkan / Quadro P620 / `scale=1`；同 UID、无 root/sudo、无屏录、
+  无虚拟显示、exit 0）**：
+
+  | fixture | 页 | `plan_ms` before → after（中位 / p90） | `cpu_ms` before → after（中位 / p90） |
+  |---|---|---|---|
+  | complex-test | 稳定 1-draw（`cull=1/9362`） | 10.747 / 18.084 → **1.221 / 2.749** | 22.42 / 30.78 → **13.65 / 21.94** |
+  | complex-test | 全部帧 | 2.075 / 4.349 → 0.923 / 1.416 | 4.111 / 8.542 → 3.260 / 7.921 |
+  | debug-default-fonts | 稳定 1-draw（`cull=1/806`） | 0.677 / 0.759 → **0.114 / 0.213** | 1.244 / 1.367 → 1.144 / 1.829 |
+
+- **独立 orchestrator 复跑（另一次宿主运行，同一 fixture）**：接受**整条**有序表的帧
+  （`prog=Some(166346)/Some(166346)`）`plan_ms` 中位由 **10.547（n=47）** 降到 **1.168（n=5）**；
+  深剔除帧（kept<100 / 9362）由 **10.541** 降到 **0.588**；两次运行都出现**同一病态页**
+  （`draw_calls=1 verts=12 cull=1/9362`），现 `plan_ms=1.168`。
+- **测试（实测）**：`cargo test -p cad-render-wgpu --lib` **192 passed / 3 ignored**（**7** 个新 planner
+  测试，含一个 **4000 例随机差分测试**，对 `#[cfg(test)]` 的旧规划器参照断言**完全一致**的被接受前缀、
+  `over_budget` 类别/requested/limit/skipped、cursor 推进与 pacing 样本）；`--test headless_render`
+  **35**；`--test accelerated_tier` **23**、`--test pulled_prefix_equivalence` **9**、
+  `--test render_effects` **45**、`--test pick_id` **32**。
+- **边界（不得软化）**：
+  - complex-test 的 `plan_ms` **p90** 改动后（跨运行 2.53–2.75）**正落在 2.5 ms 边界上**——中位目标达成，
+    p90 目标只是勉强。
+  - **paced 帧数字被混淆**：自适应 pacing 控制器的轨迹依赖墙钟，不同运行走不同 `budget_scale`/接受路径。
+    **只有**稳定的 1-draw 页是**预算无关**的（一切零计费，故该页接受全部），因此是干净的 before/after。
+    **引用任何 paced 数字时必须显式说明这一点**。
+  - 稳定帧仍要付**重启清扫**（每次相机移动 O(166,346)）外加 `uniform_ms`（~6 ms）、`encode_ms`（~5.2 ms）、
+    `submit_ms`（~5 ms）循环——这就是稳定帧 `cpu_ms` 是 13.65 ms 而不是 ~1 ms 的原因。这些循环是**同一种病**，
+    仍是显式后续项；本轮**未**修它们。
+  - 稳定帧上观察到的**逐帧渐进重启**是 **probe/证据驱动重新发出视图变更**（每个稳定帧前都有一次合成
+    `pointer_move` 且 `view_rev` 同步递增），**不是**相机 f32 抖动。未做修复，也不应修；记录证据。
+  - 单机/单适配器；**不**给出 vendor/视觉/性能结论。
+
 ## 测量专用 GPU 帧时间（P0，2026-10-17；measurement-only）
 
 **范围**：`crates/cad-render-wgpu`（新纯模块 `src/gpu_time.rs` + `Renderer::set_gpu_time_measurement`

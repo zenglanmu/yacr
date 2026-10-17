@@ -144,3 +144,7 @@ HATCH 的检测需要上游提供 3D 边界。渐变 HATCH 仍只绘制边界。
   `gpu_time=enabled|disabled|unsupported(<FEATURE>)` token，关闭时 `gpu_ms` 为 `None`（**不填估算值**）。
   本机（P620/Vulkan）实测 **`wait_ms` ≈ 93% 是真实 GPU 执行**（present/queue 仅约 6–7%）。逐条证据见
   `docs/validation-gpu-time-2026-10-17.md`。
+- **每帧 plan 成本（N1e，2026-10-17 落地）**：分页规划现**与可见工作量成正比**——只走可见 chunk 的批
+  ∪ 无条件计费的批（`always_active`），由它们的空隙导出被接受前缀，字节边界用**前缀和二分**；无剔除或估计
+  活动批 **> 4096** 时回退**原线性游走**（缩放出去的大页行为不变）。**字节计费仍按批粒度**——被完全剔除的
+  已转换批**仍计字节**（不是免费的）。逐条证据见 `docs/validation-plan-cost-2026-10-17.md`。

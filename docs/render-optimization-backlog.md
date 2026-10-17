@@ -7,7 +7,8 @@
 与**帧成本分布**分别见 `docs/validation-realhost-frame-cost-2026-10-17.md`、
 `docs/validation-render-perf-2026-10-17.md`；**分页预算 pacing（N1a）**的实测见
 `docs/validation-frame-pacing-2026-10-17.md`；**测量专用 GPU 帧时间（P0）**的实测见
-`docs/validation-gpu-time-2026-10-17.md`。
+`docs/validation-gpu-time-2026-10-17.md`；**每帧 CPU plan 成本（N1e）**的实测见
+`docs/validation-plan-cost-2026-10-17.md`。
 
 ## 当前基线（2026-10-17，真实宿主**分页**口径）
 
@@ -358,7 +359,7 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     **只画一个已接受子集**（而非要求整场景被接受）。**N1d 同时是 N5 的前提**。
     - **实测重排（2026-10-17，P0 落地后）**：工作顺序变为 **(1) 每帧 CPU plan 成本** → **(2) N2 流水** →
       **(3) N5 indirect multi-draw**。N1d 是 **N5 的结构性前提**，故随 N5 一并**降级**（N5 前提已被测量、
-      非瓶颈，见 §N5）；**未取消**。
+      非瓶颈，见 §N5）；**未取消**。**(1) 每帧 CPU plan 成本已落地（见 §N1e）**。
 - **N1a — 时间驱动自适应页预算：已落地（2026-10-17）**。纯控制器
   `crates/cad-render-wgpu/src/pacing.rs`（`PacingState`/`Sample`/`PacingMode`/`step`/`apply_scale`，
   12 个纯测试）。常数（**实测**实现值）：`target_ms = 13.0`（默认，可由
@@ -386,6 +387,36 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   逐条证据、测试矩阵与**未测边界**见 `docs/validation-frame-pacing-2026-10-17.md`、`docs/handoff.md`
   本轮条目。**未测**：wasm/浏览器真实运行时 disabled 路径、跨页 z-order、视觉/截图判定、GPU 时间、
   120 Hz/刷新率自适应。
+- **N1e — 每帧 CPU plan 成本：剔除感知的分段页规划：已落地（2026-10-17）**。这是 P0 结论工作顺序的
+  **#1**（"每帧 CPU plan 成本"）。逐条证据见 `docs/validation-plan-cost-2026-10-17.md`。
+  - **病根（实测）**：`plan_ordered_page` 本应在首个越预算批处停下，但**完全被剔除的批计零**、产品里
+    `max_bytes = usize::MAX` ⇒ 零计费批**永不失败**；剔除清空视图时线性游走会跑到有序表末尾（complex-test
+    166,346 条）只为接受一切并画一个 run。实测病态页 `plan_ms` 中位 **10.5** / p90 **18.1**、`cpu_ms` **22.4**。
+  - **机制**：剔除无关的 `BatchFacts`（**每个批集变更只算一次**，复用既有 `draw_plan = None` 失效，
+    `crates/cad-render-wgpu/src/plan.rs:896-995`）+ 每次 `ordered` 重建时的 `OrderedPageIndex`（批→位置逆表
+    `batch_pos` + **字节前缀和** `bytes_prefix`，`plan.rs:997-1047`，随既有重启清扫重建
+    `crates/cad-render-wgpu/src/renderer_impl.rs:4409`）+ `plan_ordered_page` 只走**活动批**（可见 chunk 的批
+    ∪ `always_active`）并由它们的**空隙**导出被接受前缀，字节边界用**前缀和二分**（`plan.rs:1080-…`）。
+  - **回退阈值**：`!cull.any_culled()` 或估计活动批 **> 4096**（`SEGMENTED_ACTIVE_THRESHOLD`，
+    `plan.rs:894`）⇒ 原线性游走，**不变**（缩放出去的大页与改动前完全一致）。
+  - **字节计费仍按批粒度**：被完全剔除的已转换批**仍计字节**（**不是**免费的）；`always_active` **刻意不**是
+    `batch_has_visible_work`（`plan.rs:912-916`）。
+  - **附带修订（用户批准）**：`plan_ordered_page` 与 `plan_from_gpu` 统一失败时的 `usage` 契约——顶点/三角形
+    失败**保留失败批的字节**；该字段**不**出现在 probe 输出。
+  - **实测（本机真实宿主；单机单适配器，见证据文）**：complex-test 稳定 1-draw 页 `plan_ms` 中位/p90
+    **10.747/18.084 → 1.221/2.749**、`cpu_ms` **22.42/30.78 → 13.65/21.94**；debug 稳定 1-draw 页 `plan_ms`
+    **0.677/0.759 → 0.114/0.213**。**独立复跑**：接受整条有序表的帧 `plan_ms` 中位 **10.547（n=47）→
+    1.168（n=5）**，深剔除帧 **10.541 → 0.588**。
+  - **测试（实测）**：`--lib` **192 passed / 3 ignored**（**7** 个新 planner 测试，含 4000 例随机差分）；
+    `--test headless_render` **35**、accelerated_tier **23**、pulled_prefix_equivalence **9**、render_effects
+    **45**、pick_id **32**。
+  - **边界（不得软化）**：complex-test `plan_ms` **p90**（跨运行 2.53–2.75）**正落在 2.5 ms 边界上**
+    （中位达成，p90 勉强）；**paced 帧数字被墙钟轨迹混淆**，只有稳定 1-draw 页是预算无关的干净 before/after；
+    稳定帧仍付**重启清扫**（每次相机移动 O(166,346)）+ `uniform_ms`（~6 ms）/`encode_ms`（~5.2 ms）/
+    `submit_ms`（~5 ms）——**同一种病**，见下「后续」。
+  - **后续（显式，未做）**：`uniform_ms` / `encode_ms` / `submit_ms` 三个每帧循环与**重启清扫**是**同一种病**
+    （每帧 O(场景)，与可见工作无关）；新的 `OrderedPageIndex`/`BatchFacts` 已为其**解锁**，但**本轮未动**——
+    它们是「每帧 CPU plan 成本」落地后 CPU 侧的**下一个残余项**。
 - **预期收益（诚实）**：**(a)** 时间驱动预算使**每帧预算与实测成本对齐**（收益**未测**，需 P0 的
   GPU 时间 + 跨 fixture 校准）——**N1a 已把"对齐"落地为活动预算 + 逐帧上报**，但其**性能收益**仍**未测**
   （无 GPU 时间，且视觉/截图未判读）；**(b)** 纯文档/显式上报，无性能收益；**(c) N1d** 让加速档能在**分页
@@ -426,7 +457,7 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   - **② 为真（已答）**：paced 帧**超目标**，`cpu_ms` ≈ 帧时间 **41–52%**（≥ 40%）。
   - **③ 成立（已答）**：120 Hz / **8.33 ms** 下 complex `cpu_ms` p90 ≈ **8.5 ms** **单独**即超预算。
   - ⇒ **满足 ② 与 ③ ⇒ 重开评估**。实测 `cpu ≈ gpu ≈ 4 ms`，重叠大致可把帧时间减半，但**不减少** CPU
-    工作量本身。⇒ 在新的工作顺序里 N2 排 **#2**（在"每帧 CPU plan 成本"之后、N5 之前）。
+    工作量本身。⇒ 在新的工作顺序里 N2 排 **#2**（在"每帧 CPU plan 成本"之后、N5 之前）。**#1 已落地（见 §N1e）**。
 - **前置条件/风险**：须**保留 device-lost / `FrameError` 的分类**（不得因异步化把错误吞成空成功）；
   需**有界队列深度**（内存上界）；需与 **pick readback** 交互（读回与在飞帧的同步）。
 - **需要的决策**：队列深度与在飞帧数上界（内存权衡）。
@@ -511,7 +542,7 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **P0 落地后判定（2026-10-17，实测）——前提被测量，非瓶颈**：每帧 CPU 相位（中位份额）实测 `plan` **48–56%**、
   `uniform` 7–27%、`encode` 6–24%、`submit` 1–18% ⇒ **CPU 提交成本不是瓶颈**，`encode`/`submit` 都不主导，
   且 N5 **碰不到** `plan_ms` 与 GPU 执行（`gpu_ms` 实测中位 3.948 / 2.643，见 P0）。⇒ **N5 降级（demote）而非取消**，
-  在新的工作顺序里排 **#3**（在"每帧 CPU plan 成本"与 N2 之后）。
+  在新的工作顺序里排 **#3**（在"每帧 CPU plan 成本"与 N2 之后）。**#1 已落地（见 §N1e）**。
   - **重促（re-promote）条件（实测门控）**：仅在 **N1d 已落地**（结构性前提）**且**在"每帧 CPU plan 成本"
     与 N2 流水之后、`encode_ms + submit_ms` 仍占据**剩余帧时间的显著份额**（实测）时才重促——即 N5 打击的相位
     必须真正成为残余瓶颈。在此之前**不开工**。
