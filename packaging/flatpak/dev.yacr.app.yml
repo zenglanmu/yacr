@@ -1,0 +1,63 @@
+# Flatpak manifest for yacr (dev.yacr.app) — React + Tauri Linux desktop host.
+#
+# This manifest packages a *prebuilt* payload. Nothing is compiled inside the
+# sandbox: `scripts/package-linux-release.sh` builds the React frontend, builds
+# the release binary with `--features tauri/custom-protocol` (so `ui/dist` is
+# embedded in the executable and it runs standalone), and stages
+#
+#   target/flatpak/payload/bin/yacr
+#   target/flatpak/payload/fonts/      (the committed `fonts/` package)
+#
+# The runtime supplies glibc, GTK3, WebKitGTK 4.1, fontconfig/freetype, the
+# GL/Vulkan loader and the Wayland/X11 client libraries, so no host libraries are
+# bundled here. Runtime majors are pinned to the SDK used for the build.
+#
+# Build (see scripts/package-linux-release.sh):
+#   scripts/package-linux-release.sh
+# Output:
+#   target/release/dist/yacr-<version>-linux-<arch>.flatpak
+app-id: dev.yacr.app
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+command: yacr
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Raster images referenced by a drawing are resolved from the *drawing's own
+  # directory* (cad-host/src/fonts.rs: the sibling images/ package next to the
+  # opened file), not from a fixed assets directory. The document portal only
+  # forwards the document itself, so a portal-only sandbox would hide the
+  # siblings and drawings with external references would silently render without
+  # them. Home-wide read access keeps those drawings intact.
+  - --filesystem=home
+
+modules:
+  - name: yacr
+    buildsystem: simple
+    build-commands:
+      # The binary resolves its font package from `<exe dir>/fonts` then
+      # `<exe dir>/../fonts` (cad-platform/src/fonts.rs), so /app/bin/yacr +
+      # /app/fonts is found with no `--fonts-dir` flag.
+      - install -Dm755 bin/yacr /app/bin/yacr
+      - mkdir -p /app/fonts
+      - cp -a fonts/. /app/fonts/
+      - install -Dm644 dev.yacr.app.desktop /app/share/applications/dev.yacr.app.desktop
+      - install -Dm644 dev.yacr.app.metainfo.xml /app/share/metainfo/dev.yacr.app.metainfo.xml
+      - install -Dm644 yacr-icon.svg /app/share/icons/hicolor/scalable/apps/dev.yacr.app.svg
+      - install -Dm644 yacr-256.png /app/share/icons/hicolor/256x256/apps/dev.yacr.app.png
+    sources:
+      # Prebuilt release payload: bin/yacr + fonts/ (committed font package).
+      - type: dir
+        path: ../../target/flatpak/payload
+      - type: file
+        path: dev.yacr.app.desktop
+      - type: file
+        path: dev.yacr.app.metainfo.xml
+      - type: file
+        path: ../../assets/yacr-icon.svg
+      - type: file
+        path: ../../assets/icons/yacr-256.png

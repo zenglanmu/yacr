@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Yacr
+Name[zh_CN]=Yacr
+Comment=View, measure and annotate DWG/DXF drawings
+Comment[zh_CN]=查看、测量与批注 DWG/DXF 图纸
+Exec=yacr %F
+Icon=dev.yacr.app
+Terminal=false
+Categories=Graphics;Engineering;
+MimeType=image/vnd.dwg;image/vnd.dxf;application/acad;application/dxf;
+Keywords=CAD;DWG;DXF;drawing;measure;annotate;
