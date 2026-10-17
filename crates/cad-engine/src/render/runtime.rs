@@ -29,8 +29,13 @@ pub struct RenderStatsObservation {
     /// CPU milliseconds of the renderer's CPU path (excludes the blocking poll).
     pub cpu_ms: f64,
     /// GPU milliseconds if the backend reported them; `None` is honest (no
-    /// invented GPU timestamp).
+    /// invented GPU timestamp). Present only under the measurement-only opt-in
+    /// (ADR 0013 class 1); the product configuration always reports `None`.
     pub gpu_ms: Option<f64>,
+    /// The measurement-state token for this frame
+    /// (`enabled`/`disabled`/`unsupported(<FEATURE>)`), passed through from the
+    /// renderer so the host can label the numbers. Report-only.
+    pub gpu_time: cad_render_wgpu::gpu_time::GpuTimeState,
     pub plan_ms: f64,
     pub uniform_ms: f64,
     pub encode_ms: f64,
@@ -391,11 +396,18 @@ impl Default for CadRenderRuntime {
     }
 }
 impl CadRenderRuntime {
-    pub fn attach(
+    /// Attach a host device and initialize the renderer.
+    ///
+    /// `gpu_time` is the **explicit** measurement-only GPU frame-time opt-in
+    /// (ADR 0013 class 1) the host derived from its environment gate; the engine
+    /// never reads the environment itself. Callers that do not measure pass
+    /// `cad_render_wgpu::gpu_time::GpuTimeConfig::disabled()`.
+    pub fn attach_with_gpu_time(
         &mut self,
         device: wgpu::Device,
         queue: wgpu::Queue,
         preference: BackendPreference,
+        gpu_time: cad_render_wgpu::gpu_time::GpuTimeConfig,
     ) {
         self.detach();
         let mut renderer = Renderer::new(preference);
@@ -409,6 +421,10 @@ impl CadRenderRuntime {
                 // is a 16-byte control-uniform write; with no entity flags set it
                 // is pixel-identical to the pre-flags renderer.
                 renderer.set_selection_flags_enabled(true);
+                // Measurement-only: apply the explicit opt-in against the live
+                // device's granted features. Never a runtime dependency; the
+                // verdict (enabled/disabled/unsupported) is carried per frame.
+                renderer.set_gpu_time_measurement(gpu_time);
                 self.epoch += 1;
                 self.outcome = Some(BackendOutcome::Initialized {
                     preference: preference_choice(preference),
@@ -815,6 +831,7 @@ impl CadRenderRuntime {
             ready_none_clears: self.ready_none_clears,
             cpu_ms: stats.cpu_ms,
             gpu_ms: stats.gpu_ms,
+            gpu_time: stats.gpu_time,
             plan_ms: stats.plan_ms,
             uniform_ms: stats.uniform_ms,
             encode_ms: stats.encode_ms,
@@ -1289,6 +1306,7 @@ mod tests {
             ready_none_clears: 0,
             cpu_ms: 0.0,
             gpu_ms: None,
+            gpu_time: cad_render_wgpu::gpu_time::GpuTimeState::Disabled,
             plan_ms: 0.0,
             uniform_ms: 0.0,
             encode_ms: 0.0,

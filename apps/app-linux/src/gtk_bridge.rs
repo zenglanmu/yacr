@@ -39,7 +39,8 @@ use crate::wayland_surface::{
 };
 use cad_engine::render::{FrameCompleteness, RenderSessionHandle};
 use cad_render_wgpu::{
-    NativeTextureKey, ProbeFrameStats, ProbePresentMode, ProbeStageTimings, SurfaceProbePresenter,
+    gpu_time::GpuTimeConfig, NativeTextureKey, ProbeFrameStats, ProbePresentMode,
+    ProbeStageTimings, SurfaceProbePresenter,
 };
 use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
@@ -90,6 +91,10 @@ pub struct GtkOverlayOwner {
     last_cad_frame: Option<CadFrameObservation>,
     /// Stage wall-times of the last `frame_cad` call (telemetry only).
     last_frame_stages: Option<FrameCadStages>,
+    /// Measurement-only GPU frame-time opt-in (ADR 0013 class 1), derived from
+    /// the host environment and threaded to device creation and the render
+    /// session. `Disabled` on the product default.
+    gpu_time: GpuTimeConfig,
 }
 
 /// Metadata of the last **actually presented** CAD frame (host telemetry only).
@@ -164,16 +169,26 @@ pub struct LayoutGeometry {
 }
 
 /// Install the bridge: build the overlay + windowed drawing area, realize it,
-/// and register it for the webview reparent. GPU init is deferred.
-pub fn install(window: &tauri::Window, label: &str) -> Result<GtkOverlayOwner, String> {
-    GtkOverlayOwner::install(window, label)
+/// and register it for the webview reparent. GPU init is deferred. `gpu_time` is
+/// the measurement-only opt-in (ADR 0013 class 1) the host derived from its
+/// environment gate; the bridge never reads the environment itself.
+pub fn install(
+    window: &tauri::Window,
+    label: &str,
+    gpu_time: GpuTimeConfig,
+) -> Result<GtkOverlayOwner, String> {
+    GtkOverlayOwner::install(window, label, gpu_time)
 }
 
 impl GtkOverlayOwner {
     /// Build the overlay + windowed drawing area, realize it, and register the
     /// webview-reparent hook. GPU init is deferred until the drawing area is
     /// mapped with a non-zero allocation *and* the reparent has completed.
-    pub fn install(window: &tauri::Window, label: &str) -> Result<Self, String> {
+    pub fn install(
+        window: &tauri::Window,
+        label: &str,
+        gpu_time: GpuTimeConfig,
+    ) -> Result<Self, String> {
         let gtk_window = window
             .gtk_window()
             .map_err(|error| format!("gtk_window: {error}"))?;
@@ -232,6 +247,7 @@ impl GtkOverlayOwner {
             session: None,
             last_cad_frame: None,
             last_frame_stages: None,
+            gpu_time,
         })
     }
 
@@ -419,6 +435,7 @@ impl GtkOverlayOwner {
                 phys_w,
                 phys_h,
                 ProbePresentMode::MailboxElseImmediate,
+                self.gpu_time,
             )
         } {
             Ok(presenter) => presenter,
@@ -477,7 +494,7 @@ impl GtkOverlayOwner {
             .as_ref()
             .expect("presenter was just set")
             .device_queue();
-        if let Err(error) = session.attach_device(device, queue) {
+        if let Err(error) = session.attach_device_with_gpu_time(device, queue, self.gpu_time) {
             session.fail_device(format!("attach_device: {error}"), false);
             let message = format!("render session attach failed: {error}");
             // Ordered release BEFORE the terminal failure: the presenter owns a
@@ -629,6 +646,7 @@ impl GtkOverlayOwner {
                 phys_w,
                 phys_h,
                 ProbePresentMode::MailboxElseImmediate,
+                self.gpu_time,
             )
         }));
         let presenter = match created {
@@ -873,7 +891,7 @@ impl GtkOverlayOwner {
         };
         if let Some(presenter) = self.presenter.as_ref() {
             let (device, queue) = presenter.device_queue();
-            if let Err(error) = session.attach_device(device, queue) {
+            if let Err(error) = session.attach_device_with_gpu_time(device, queue, self.gpu_time) {
                 session.fail_device(format!("attach_device: {error}"), false);
                 return Err(format!("render session attach failed: {error}"));
             }

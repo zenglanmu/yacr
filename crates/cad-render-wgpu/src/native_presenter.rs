@@ -282,6 +282,9 @@ pub struct SurfaceProbePresenter {
     /// [`crate::headless::negotiated_device_limits`]), including the degraded
     /// fallback verdict.
     device_limits: crate::headless::DeviceLimitsReport,
+    /// Measurement-only feature negotiation (ADR 0013 class 1): what the opt-in
+    /// requested, what the device granted, and the explicit state.
+    gpu_time: crate::gpu_time::GpuTimeReport,
 }
 
 impl SurfaceProbePresenter {
@@ -307,6 +310,7 @@ impl SurfaceProbePresenter {
             height,
             preferred_names,
             ProbePresentMode::Fifo,
+            crate::gpu_time::GpuTimeConfig::disabled(),
         )
     }
 
@@ -327,7 +331,14 @@ impl SurfaceProbePresenter {
             .iter()
             .map(|name| (*name).to_string())
             .collect();
-        Self::build(window, width, height, preferred_names, present_mode)
+        Self::build(
+            window,
+            width,
+            height,
+            preferred_names,
+            present_mode,
+            crate::gpu_time::GpuTimeConfig::disabled(),
+        )
     }
 
     /// Create a probe with an explicit adapter-name preference list.
@@ -353,6 +364,7 @@ impl SurfaceProbePresenter {
             height,
             preferred_names,
             ProbePresentMode::Fifo,
+            crate::gpu_time::GpuTimeConfig::disabled(),
         )
     }
 
@@ -362,6 +374,7 @@ impl SurfaceProbePresenter {
         height: u32,
         preferred_names: Vec<String>,
         present_mode_request: ProbePresentMode,
+        gpu_time: crate::gpu_time::GpuTimeConfig,
     ) -> Result<Self, ProbeError>
     where
         W: wgpu::rwh::HasWindowHandle + wgpu::rwh::HasDisplayHandle + Send + Sync + 'static,
@@ -379,6 +392,7 @@ impl SurfaceProbePresenter {
             height,
             preferred_names,
             present_mode_request,
+            gpu_time,
         )
     }
 
@@ -423,6 +437,7 @@ impl SurfaceProbePresenter {
         width: u32,
         height: u32,
         present_mode: ProbePresentMode,
+        gpu_time: crate::gpu_time::GpuTimeConfig,
     ) -> Result<Self, ProbeError> {
         let preferred_names = DEFAULT_PREFERRED_ADAPTER_NAMES
             .iter()
@@ -444,6 +459,7 @@ impl SurfaceProbePresenter {
             height,
             preferred_names,
             present_mode,
+            gpu_time,
         )
     }
 
@@ -461,6 +477,7 @@ impl SurfaceProbePresenter {
         height: u32,
         preferred_names: Vec<String>,
         present_mode_request: ProbePresentMode,
+        gpu_time_config: crate::gpu_time::GpuTimeConfig,
     ) -> Result<Self, ProbeError> {
         let adapters = block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN));
         if adapters.is_empty() {
@@ -495,6 +512,7 @@ impl SurfaceProbePresenter {
         let negotiated = crate::headless::request_device_with_negotiated_limits(
             &adapter,
             "cad-surface-probe-device",
+            gpu_time_config,
         )
         .map_err(ProbeError::DeviceRequest)?;
         let device = negotiated.device;
@@ -505,6 +523,15 @@ impl SurfaceProbePresenter {
         // `budget_bytes`. A degraded line means the device fell back to the
         // WebGPU defaults and the pulled budget is 256 MiB again.
         eprintln!("[probe] device-limits {}", negotiated.limits.summary());
+        // Measurement-only (ADR 0013 class 1): the explicit opt-in, what the
+        // device granted, and the resulting state. Appended as an explicit token
+        // so a missing feature is named rather than silently ignored.
+        eprintln!(
+            "[probe] gpu-time requested={:?} granted={:?} state={}",
+            negotiated.gpu_time.requested,
+            negotiated.gpu_time.granted,
+            negotiated.gpu_time.state.as_token(),
+        );
 
         let (pipeline, bind_group, uniform) = build_probe_pipeline(&device, format);
 
@@ -561,6 +588,7 @@ impl SurfaceProbePresenter {
             texture_sampler: None,
             texture_bind: None,
             device_limits: negotiated.limits,
+            gpu_time: negotiated.gpu_time,
         })
     }
 
@@ -957,6 +985,12 @@ impl SurfaceProbePresenter {
     /// was taken (see [`crate::headless::DeviceLimitsReport`]).
     pub fn device_limits(&self) -> &crate::headless::DeviceLimitsReport {
         &self.device_limits
+    }
+
+    /// The measurement-only feature negotiation (ADR 0013 class 1): what the
+    /// opt-in requested, what the device granted, and the explicit state.
+    pub fn gpu_time(&self) -> &crate::gpu_time::GpuTimeReport {
+        &self.gpu_time
     }
 
     /// The configured surface texture format.
@@ -1597,6 +1631,7 @@ mod tests {
             u32,
             u32,
             ProbePresentMode,
+            crate::gpu_time::GpuTimeConfig,
         ) -> Result<SurfaceProbePresenter, ProbeError> =
             SurfaceProbePresenter::new_from_raw_handles;
     }

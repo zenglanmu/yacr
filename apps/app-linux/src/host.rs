@@ -1320,10 +1320,22 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
     if no_gpu {
         eprintln!("[probe] YACR_PROBE_NO_GPU: GPU bridge skipped (React-only baseline)");
     } else {
+        // Measurement-only GPU frame-time opt-in (ADR 0013 class 1). This is the
+        // **only** place the flag is read; it is threaded explicitly to device
+        // creation and the render session. Off by default (product config).
+        let gpu_time = cad_render_wgpu::gpu_time::GpuTimeConfig {
+            enabled: std::env::var_os("YACR_PROBE_GPU_TIME").is_some(),
+        };
+        if gpu_time.enabled {
+            eprintln!(
+                "[probe] YACR_PROBE_GPU_TIME: measurement-only GPU frame-time opt-in enabled \
+                 (the readback perturbs the frame; not a product configuration)"
+            );
+        }
         // GTK overlay bridge: an independent native child surface (windowed
         // GtkDrawingArea) with the React webview reparented as a transparent
         // sibling. **No top-level fallback** — failure is explicit.
-        match crate::gtk_bridge::install(&window, WINDOW_LABEL) {
+        match crate::gtk_bridge::install(&window, WINDOW_LABEL, gpu_time) {
             Ok(owner) => {
                 owner.log_tree();
                 let release = std::rc::Rc::new(release_presenter);
@@ -1978,7 +1990,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         if let Some(actual) = actual {
             if cad_log {
                 eprintln!(
-                    "[probe] actual-render seq={} device_epoch={} view_rev={} applied_rev={:?} applied_base={:?} cpu_ms={:.3} gpu_ms={:?} plan_ms={:.3} uniform_ms={:.3} encode_ms={:.3} submit_ms={:.3} wait_ms={:.3} draw_calls={} verts={} tris={} instanced={} mesh={} legacy_opaque={} arc={} transparent={} images={} accelerated={} instance_streams={} instanced_batches={} tier={} over_budget={} prog={:?}/{:?} complete={} uploads_started={} rev_resets={} ready_none={} pulled={} budget_scale={:.3} budget_target_ms={:.2} budget_cost_ema_ms={:.2} budget_verts={} budget_tris={} pacing={} cull_chunks={}/{}",
+                    "[probe] actual-render seq={} device_epoch={} view_rev={} applied_rev={:?} applied_base={:?} cpu_ms={:.3} gpu_ms={:?} plan_ms={:.3} uniform_ms={:.3} encode_ms={:.3} submit_ms={:.3} wait_ms={:.3} draw_calls={} verts={} tris={} instanced={} mesh={} legacy_opaque={} arc={} transparent={} images={} accelerated={} instance_streams={} instanced_batches={} tier={} over_budget={} prog={:?}/{:?} complete={} uploads_started={} rev_resets={} ready_none={} pulled={} budget_scale={:.3} budget_target_ms={:.2} budget_cost_ema_ms={:.2} budget_verts={} budget_tris={} pacing={} cull_chunks={}/{} gpu_time={}",
                     actual.render_seq,
                     actual.device_epoch,
                     actual.view_revision,
@@ -2020,6 +2032,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                     actual.pacing,
                     actual.cull_chunks_kept,
                     actual.cull_chunks_total,
+                    actual.gpu_time.as_token(),
                 );
             }
             lock(shared).last_actual_render = Some(ActualRenderSummary {

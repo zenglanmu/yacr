@@ -177,6 +177,9 @@ pub struct NegotiatedDevice {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub limits: DeviceLimitsReport,
+    /// Measurement-only feature negotiation (ADR 0013 class 1). `Disabled` on the
+    /// product configuration; see [`crate::gpu_time`].
+    pub gpu_time: crate::gpu_time::GpuTimeReport,
 }
 
 /// The single policy for the limits this crate asks a device for.
@@ -263,21 +266,30 @@ fn request_with_default_fallback<D, E: std::fmt::Display>(
     }
 }
 
-/// Create a device asking for [`negotiated_device_limits`].
+/// Create a device asking for [`negotiated_device_limits`] and the measurement
+/// feature set implied by `gpu_time` (ADR 0013 class 1).
 ///
 /// Infallible **in effect**: if the negotiated request is rejected, the device
 /// is created with [`wgpu::Limits::default`] and [`DeviceLimitsReport`] carries
 /// the negotiated `max_buffer_size` plus the rejection reason (degraded state).
 /// Only a failure of *both* attempts is an `Err`; nothing here panics and a
 /// degraded creation is never reported as if the negotiation had succeeded.
+///
+/// `gpu_time` is the explicit measurement opt-in. Disabled ⇒ no feature is
+/// requested (the product default). Enabled ⇒ the timestamp feature set is
+/// requested **only** when the adapter supports it, and the granted/requested
+/// sets plus the resulting state are carried on [`NegotiatedDevice::gpu_time`].
 pub fn request_device_with_negotiated_limits(
     adapter: &wgpu::Adapter,
     label: &str,
+    gpu_time: crate::gpu_time::GpuTimeConfig,
 ) -> Result<NegotiatedDevice, String> {
     let supported = adapter.limits();
     let requested = negotiated_device_limits(&supported);
+    let gpu_time_report = crate::gpu_time::negotiate_gpu_time(adapter.features(), gpu_time);
     let descriptor = |limits: &wgpu::Limits| wgpu::DeviceDescriptor {
         label: Some(label),
+        required_features: gpu_time_report.granted,
         required_limits: limits.clone(),
         ..Default::default()
     };
@@ -295,6 +307,7 @@ pub fn request_device_with_negotiated_limits(
         device,
         queue,
         limits: report,
+        gpu_time: gpu_time_report,
     })
 }
 
@@ -320,10 +333,29 @@ pub fn create_headless_gpu(preference: BackendPreference) -> CadResult<HeadlessG
 /// Create a headless device, preferring a GPU kind through [`GpuSelection`]
 /// within the active backend. `GpuSelection::Auto` keeps the historical
 /// deterministic first-adapter order.
+///
+/// The measurement-only GPU-time opt-in is **off** here (the CLI/headless caller
+/// has no environment gate); see [`create_headless_gpu_with_gpu_time`].
 pub fn create_headless_gpu_with(
     preference: BackendPreference,
     gpu: GpuSelection,
 ) -> CadResult<HeadlessGpu> {
+    create_headless_gpu_with_gpu_time(preference, gpu, crate::gpu_time::GpuTimeConfig::disabled())
+        .map(|(gpu, _report)| gpu)
+}
+
+/// [`create_headless_gpu_with`] with an explicit measurement-only GPU-time opt-in
+/// (ADR 0013 class 1).
+///
+/// Returns the device **and** the measurement negotiation report (requested /
+/// granted features and the explicit state), so a caller can tell whether the
+/// feature was granted without a second probe. The product/CLI path uses
+/// [`create_headless_gpu_with`], which defaults the flag off.
+pub fn create_headless_gpu_with_gpu_time(
+    preference: BackendPreference,
+    gpu: GpuSelection,
+    gpu_time: crate::gpu_time::GpuTimeConfig,
+) -> CadResult<(HeadlessGpu, crate::gpu_time::GpuTimeReport)> {
     let instance = make_instance(preference);
     let adapters =
         futures_lite::future::block_on(instance.enumerate_adapters(backends_for(preference)));
@@ -351,8 +383,9 @@ pub fn create_headless_gpu_with(
     let adapter = adapters[index].clone();
 
     let info = infos[index].clone();
-    let negotiated = request_device_with_negotiated_limits(&adapter, "cad-headless-device")
-        .map_err(|e| CadError::GpuFailure(format!("wgpu device request failed: {e}")))?;
+    let negotiated =
+        request_device_with_negotiated_limits(&adapter, "cad-headless-device", gpu_time)
+            .map_err(|e| CadError::GpuFailure(format!("wgpu device request failed: {e}")))?;
     // The headless path has no probe stdout contract, and a CLI success must not
     // write to stderr, so the only headless signal is the **degraded** case: an
     // explicit warning rather than a silent fallback to the 256 MiB defaults.
@@ -364,11 +397,14 @@ pub fn create_headless_gpu_with(
         );
     }
 
-    Ok(HeadlessGpu {
-        device: negotiated.device,
-        queue: negotiated.queue,
-        adapter: info,
-    })
+    Ok((
+        HeadlessGpu {
+            device: negotiated.device,
+            queue: negotiated.queue,
+            adapter: info,
+        },
+        negotiated.gpu_time,
+    ))
 }
 
 /// Deterministic adapter choice shared by the headless device path and its
@@ -780,10 +816,34 @@ mod device_limit_tests {
             eprintln!("[device-limit-test] SKIP: no wgpu adapter; NOT a pass");
             return;
         };
-        let created = match request_device_with_negotiated_limits(adapter, "cad-limit-test") {
+        let created = match request_device_with_negotiated_limits(
+            adapter,
+            "cad-limit-test",
+            crate::gpu_time::GpuTimeConfig::disabled(),
+        ) {
             Ok(created) => created,
             Err(error) => panic!("negotiated device request failed: {error}"),
         };
+        // Fence 1 (device half): the default (disabled) path requests no feature
+        // and the granted set is empty.
+        assert_eq!(
+            created.gpu_time.requested,
+            wgpu::Features::empty(),
+            "the product default must request no measurement feature"
+        );
+        assert_eq!(created.gpu_time.granted, wgpu::Features::empty());
+        assert_eq!(
+            created.gpu_time.state,
+            crate::gpu_time::GpuTimeState::Disabled
+        );
+        assert!(
+            !created
+                .device
+                .features()
+                .contains(crate::gpu_time::GPU_TIME_FEATURES),
+            "a disabled measurement config must leave the device without the \
+             timestamp feature set"
+        );
         assert!(
             !created.limits.is_degraded(),
             "a policy request within adapter limits must not degrade: {:?}",

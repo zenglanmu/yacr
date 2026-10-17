@@ -1736,3 +1736,145 @@ fn culling_does_not_break_the_progressive_cursor() {
         "culling must not change the settled progressive frame"
     );
 }
+
+/// Measurement-only GPU frame-time contracts (ADR 0013 class 1).
+///
+/// These are the fences for the explicit, documented opt-in: the product default
+/// requests no feature and reports `gpu_ms = None`; the enabled path measures a
+/// real bracket **without** changing pixels; the resources are created once and
+/// reused across frames; and a missing feature is named, never silently ignored.
+mod gpu_time_contracts {
+    use super::*;
+    use cad_render_wgpu::gpu_time::{GpuTimeConfig, GpuTimeState, GPU_TIME_FEATURES};
+    use cad_render_wgpu::headless::create_headless_gpu_with_gpu_time;
+    use cad_render_wgpu::wgpu;
+    use cad_render_wgpu::GpuSelection;
+
+    /// Fence 1: with the flag off the device requests no measurement feature and
+    /// `gpu_ms` stays `None`.
+    #[test]
+    fn disabled_requests_no_feature_and_reports_none() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        assert!(
+            !gpu.device.features().contains(GPU_TIME_FEATURES),
+            "the product-default device must not have the timestamp feature set"
+        );
+        let mut renderer = init(gpu);
+        assert_eq!(
+            renderer.set_gpu_time_measurement(GpuTimeConfig::disabled()),
+            GpuTimeState::Disabled
+        );
+        assert_eq!(
+            renderer.gpu_time_resource_creations(),
+            0,
+            "the disabled path allocates no measurement resources"
+        );
+        renderer
+            .upload(&scene(vec![lines_batch(rectangle_lines())]))
+            .unwrap();
+        let stats = renderer
+            .render(camera_2d(), &RenderTarget::new(64, 64))
+            .unwrap();
+        assert_eq!(
+            stats.gpu_ms, None,
+            "gpu_ms stays honestly absent when measurement is off"
+        );
+        assert_eq!(stats.gpu_time, GpuTimeState::Disabled);
+    }
+
+    /// Fence 3: the opt-in is on but the feature is absent — the reported state
+    /// names the missing feature. Simulated through the capability-injection hook
+    /// (no fake device), so the `Unsupported` branch is real code under test.
+    #[test]
+    fn unsupported_state_names_the_missing_feature() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let mut renderer = init(gpu);
+        // Simulate an adapter whose granted set lacks the timestamp feature.
+        renderer.set_gpu_time_feature_override(Some(wgpu::Features::empty()));
+        let state = renderer.set_gpu_time_measurement(GpuTimeConfig::enabled());
+        assert_eq!(state, GpuTimeState::Unsupported("TIMESTAMP_QUERY"));
+        assert_eq!(state.as_token(), "unsupported(TIMESTAMP_QUERY)");
+        assert_eq!(
+            renderer.gpu_time_resource_creations(),
+            0,
+            "an unsupported request must not create measurement resources"
+        );
+        // Only the encoder feature missing: it is the one named.
+        renderer.set_gpu_time_feature_override(Some(wgpu::Features::TIMESTAMP_QUERY));
+        assert_eq!(
+            renderer.set_gpu_time_measurement(GpuTimeConfig::enabled()),
+            GpuTimeState::Unsupported("TIMESTAMP_QUERY_INSIDE_ENCODERS")
+        );
+    }
+
+    /// Fences 4 + 5: enabling measurement reports a real `gpu_ms` and leaves the
+    /// rendered output **byte-identical** to the disabled device, and the
+    /// measurement resources are created once and reused across frames.
+    #[test]
+    fn enabled_measures_without_changing_pixels_and_does_not_grow() {
+        let (gpu_on, report) = match create_headless_gpu_with_gpu_time(
+            BackendPreference::Auto,
+            GpuSelection::Auto,
+            GpuTimeConfig::enabled(),
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("skipping: no headless GPU: {error}");
+                return;
+            }
+        };
+        if report.state != GpuTimeState::Enabled {
+            eprintln!(
+                "SKIP: this adapter cannot measure ({}); NOT a pass",
+                report.state.as_token()
+            );
+            return;
+        }
+        let Some(gpu_off) = gpu() else {
+            return;
+        };
+
+        let mut renderer_on = init(gpu_on);
+        let mut renderer_off = init(gpu_off);
+        let batches = || vec![lines_batch(rectangle_lines()), triangle_mesh()];
+        renderer_on.upload(&scene(batches())).unwrap();
+        renderer_off.upload(&scene(batches())).unwrap();
+        renderer_off.set_gpu_time_measurement(GpuTimeConfig::disabled());
+        assert_eq!(
+            renderer_on.set_gpu_time_measurement(GpuTimeConfig::enabled()),
+            GpuTimeState::Enabled
+        );
+
+        let target = RenderTarget::new(64, 64);
+        let stats_on = renderer_on.render(camera_2d(), &target).unwrap();
+        let pixels_on = renderer_on.read_target_rgba().unwrap();
+        let stats_off = renderer_off.render(camera_2d(), &target).unwrap();
+        let pixels_off = renderer_off.read_target_rgba().unwrap();
+
+        assert_eq!(stats_on.gpu_time, GpuTimeState::Enabled);
+        assert!(
+            stats_on.gpu_ms.is_some(),
+            "an enabled measurement must report a real gpu_ms"
+        );
+        assert_eq!(stats_off.gpu_ms, None);
+        assert_eq!(
+            pixels_on.pixels, pixels_off.pixels,
+            "enabling measurement must not change rendered output"
+        );
+
+        // Fence 5: no per-frame allocation of the measurement resources.
+        assert_eq!(renderer_on.gpu_time_resource_creations(), 1);
+        for _ in 0..4 {
+            renderer_on.render(camera_2d(), &target).unwrap();
+        }
+        assert_eq!(
+            renderer_on.gpu_time_resource_creations(),
+            1,
+            "the query set / buffers must be reused across frames, not re-allocated"
+        );
+    }
+}

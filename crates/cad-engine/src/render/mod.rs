@@ -1091,9 +1091,28 @@ impl RenderSessionHandle {
     }
 
     pub fn attach_device(&self, device: wgpu::Device, queue: wgpu::Queue) -> Result<(), String> {
+        self.attach_device_with_gpu_time(
+            device,
+            queue,
+            cad_render_wgpu::gpu_time::GpuTimeConfig::disabled(),
+        )
+    }
+
+    /// [`RenderSessionHandle::attach_device`] with the measurement-only GPU
+    /// frame-time opt-in (ADR 0013 class 1). The config is threaded to the
+    /// renderer through [`CadRenderRuntime::attach_with_gpu_time`]; the engine
+    /// never reads the environment.
+    pub fn attach_device_with_gpu_time(
+        &self,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        gpu_time: cad_render_wgpu::gpu_time::GpuTimeConfig,
+    ) -> Result<(), String> {
         let mut state = self.0.borrow_mut();
         let preference = state.preference;
-        state.runtime.attach(device, queue, preference);
+        state
+            .runtime
+            .attach_with_gpu_time(device, queue, preference, gpu_time);
         match &state.runtime.lifecycle {
             RenderLifecycle::Ready { .. } => Ok(()),
             RenderLifecycle::Failed { reason } | RenderLifecycle::Lost { reason } => {

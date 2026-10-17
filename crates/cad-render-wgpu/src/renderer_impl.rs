@@ -85,6 +85,11 @@ impl Renderer {
             active_backend: None,
             device: None,
             queue: None,
+            // Measurement-only; created on demand by `set_gpu_time_measurement`.
+            gpu_time: None,
+            gpu_time_state: gpu_time::GpuTimeState::Disabled,
+            gpu_time_feature_override: None,
+            gpu_time_resource_creations: 0,
             layout: None,
             line_pipeline: None,
             line_instanced_pipeline: None,
@@ -642,6 +647,100 @@ impl Renderer {
             self.create_pick_pipelines(&device_ref);
         }
         Ok(caps)
+    }
+
+    /// Apply the measurement-only GPU frame-time opt-in (ADR 0013 class 1).
+    ///
+    /// Pure-config in, explicit verdict out. `config.enabled` is the **only**
+    /// way measurement turns on; the renderer never reads the environment. The
+    /// feature set is requested at **device creation** (see
+    /// `headless::request_device_with_negotiated_limits`), so this method reads
+    /// the live device's granted features and:
+    ///
+    /// * disabled ⇒ no resources, [`gpu_time::GpuTimeState::Disabled`];
+    /// * enabled + granted ⇒ create the query set/buffers once and report
+    ///   [`gpu_time::GpuTimeState::Enabled`];
+    /// * enabled + missing ⇒ no resources, and report
+    ///   [`gpu_time::GpuTimeState::Unsupported`] naming the missing feature —
+    ///   never a silent fallback that pretends measurement worked.
+    ///
+    /// On `wasm32` the platform has no blocking poll to read the result back, so
+    /// the state is always [`gpu_time::GpuTimeState::Disabled`] (the wasm path
+    /// never pretends to measure).
+    pub fn set_gpu_time_measurement(
+        &mut self,
+        config: gpu_time::GpuTimeConfig,
+    ) -> gpu_time::GpuTimeState {
+        self.gpu_time = None;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = config;
+            self.gpu_time_state = gpu_time::GpuTimeState::Disabled;
+            return self.gpu_time_state;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Some(device) = self.device.as_ref() else {
+                self.gpu_time_state = gpu_time::GpuTimeState::Disabled;
+                return self.gpu_time_state;
+            };
+            let features = self
+                .gpu_time_feature_override
+                .unwrap_or_else(|| device.features());
+            let report = gpu_time::negotiate_gpu_time(features, config);
+            self.gpu_time_state = report.state;
+            if report.state == gpu_time::GpuTimeState::Enabled {
+                let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+                    label: Some("cad-gpu-time-queries"),
+                    ty: wgpu::QueryType::Timestamp,
+                    count: 2,
+                });
+                // `resolve_query_set` needs a 256-byte-aligned destination; two
+                // timestamps need only 16 bytes, so 256 satisfies both.
+                let resolve = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("cad-gpu-time-resolve"),
+                    size: wgpu::QUERY_RESOLVE_BUFFER_ALIGNMENT,
+                    usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                });
+                let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("cad-gpu-time-readback"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                self.gpu_time = Some(GpuTimeResources {
+                    query_set,
+                    resolve,
+                    readback,
+                });
+                self.gpu_time_resource_creations += 1;
+            }
+            self.gpu_time_state
+        }
+    }
+
+    /// The current measurement state token (see [`Renderer::set_gpu_time_measurement`]).
+    pub fn gpu_time_state(&self) -> gpu_time::GpuTimeState {
+        self.gpu_time_state
+    }
+
+    /// How many times the measurement-only timestamp resources were created.
+    ///
+    /// Diagnostics/contract only: it must stay `1` across frames once measurement
+    /// is enabled (the resources are reused, not re-allocated per frame).
+    pub fn gpu_time_resource_creations(&self) -> u64 {
+        self.gpu_time_resource_creations
+    }
+
+    /// Test hook: override the feature set `set_gpu_time_measurement` reads.
+    ///
+    /// `Some(features)` simulates an adapter whose granted set differs from the
+    /// live device's (for example missing `TIMESTAMP_QUERY`), so the
+    /// `Unsupported(<feature>)` state is exercisable **without** faking a device.
+    /// `None` uses the live device's granted set.
+    pub fn set_gpu_time_feature_override(&mut self, features: Option<wgpu::Features>) {
+        self.gpu_time_feature_override = features;
     }
 
     /// Group-1 layout of the selection-flags table: an integer lookup texture
@@ -4015,6 +4114,9 @@ impl Renderer {
         self.device = None;
         self.queue = None;
         self.active_backend = None;
+        // Measurement resources belong to the dropped device generation.
+        self.gpu_time = None;
+        self.gpu_time_state = gpu_time::GpuTimeState::Disabled;
         self.device_lost = true;
         self.draw_plan = None;
         self.instance_streams.clear();
@@ -4828,6 +4930,12 @@ impl Renderer {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("cad-encoder"),
         });
+        // Measurement-only (ADR 0013 class 1): open the frame bracket on the
+        // existing encoder (no extra submission). `gpu_time` is `None` on the
+        // product configuration, so this is a no-op there.
+        if let Some(gpu_time) = self.gpu_time.as_ref() {
+            encoder.write_timestamp(&gpu_time.query_set, 0);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("cad-pass"),
@@ -5423,8 +5531,25 @@ impl Renderer {
             + draw_images.len()) as u64;
 
         let submit_started = Instant::now();
+        // Measurement-only: close the bracket, resolve the two queries and copy
+        // the ticks into the reusable `MAP_READ` buffer — all on the **same**
+        // encoder/submission (no extra submit). The copy perturbs the frame; it
+        // exists only under the explicit opt-in.
+        if let Some(gpu_time) = self.gpu_time.as_ref() {
+            encoder.write_timestamp(&gpu_time.query_set, 1);
+            encoder.resolve_query_set(&gpu_time.query_set, 0..2, &gpu_time.resolve, 0);
+            encoder.copy_buffer_to_buffer(&gpu_time.resolve, 0, &gpu_time.readback, 0, 16);
+        }
         let submission = queue.submit(Some(encoder.finish()));
         let submit_ms = submit_started.elapsed().as_secs_f64() * 1000.0;
+        // Request the timestamp readback mapping before the blocking poll below,
+        // so that poll completes it (blocking readback strategy: no second poll).
+        if let Some(gpu_time) = self.gpu_time.as_ref() {
+            gpu_time
+                .readback
+                .slice(0..16)
+                .map_async(wgpu::MapMode::Read, |_| {});
+        }
         // Stop the CPU timer here: everything above is the render thread's CPU
         // work (plan/cache, uniforms, encode, submit). The poll below blocks on
         // the GPU and is not CPU time.
@@ -5435,6 +5560,11 @@ impl Renderer {
         let wait_started = Instant::now();
         let outcome = self.device_scope_outcome(device, submission);
         let wait_ms = wait_started.elapsed().as_secs_f64() * 1000.0;
+        // Measurement-only readback: the blocking poll above has completed the
+        // mapping requested right after submit, so this reads ticks without a
+        // second blocking wait. `None` when measurement is off, unsupported, or
+        // the mapping did not complete (never an estimate).
+        let gpu_ms = self.read_gpu_time_ms(&queue);
         self.draw_calls = draw_calls;
         match outcome {
             ScopeOutcome::Clean => {}
@@ -5479,7 +5609,8 @@ impl Renderer {
         self.scratch_transparent = transparent;
         Ok(FrameStats {
             cpu_ms,
-            gpu_ms: None,
+            gpu_ms,
+            gpu_time: self.gpu_time_state,
             draw_calls,
             legacy_opaque_draws: legacy_opaque as u64,
             uniform_writes,
@@ -5551,6 +5682,46 @@ impl Renderer {
     /// and must never block the main thread: `PollType::Wait` is unavailable, so
     /// a non-blocking `Poll` is used and a timeout is **not** treated as device
     /// loss (a lost browser device surfaces through wgpu's device-lost callback).
+    /// Read the measurement-only GPU-frame-time bracket, if it is active.
+    ///
+    /// Measurement-only (ADR 0013 class 1). Returns `None` unless the timestamp
+    /// resources exist and the readback mapping completed, so the product
+    /// configuration always reports `None`. The blocking readback strategy is
+    /// deliberately the **existing** poll: `render_with_projection` requests the
+    /// mapping right after `queue.submit` and the device-loss classification poll
+    /// (`device_scope_outcome`) completes it — no extra blocking wait is added.
+    fn read_gpu_time_ms(&self, queue: &wgpu::Queue) -> Option<f64> {
+        let resources = self.gpu_time.as_ref()?;
+        let slice = resources.readback.slice(0..16);
+        let view = match slice.get_mapped_range() {
+            Ok(view) => view,
+            // The mapping did not complete (for example a poll timeout on the
+            // device-lost path). Report no measurement rather than a guess, and
+            // clear the pending map so the next frame's copy into this buffer is
+            // valid.
+            Err(_) => {
+                resources.readback.unmap();
+                return None;
+            }
+        };
+        let mut ticks = [0u64; 2];
+        for (index, slot) in ticks.iter_mut().enumerate() {
+            let start = index * 8;
+            let mut bytes = [0u8; 8];
+            bytes.copy_from_slice(&view[start..start + 8]);
+            *slot = u64::from_le_bytes(bytes);
+        }
+        drop(view);
+        // Always unmap, so the next frame's `copy_buffer_to_buffer` into this
+        // `MAP_READ` buffer is valid.
+        resources.readback.unmap();
+        let period = queue.get_timestamp_period();
+        Some(gpu_time::ticks_to_ms(
+            ticks[1].saturating_sub(ticks[0]),
+            period,
+        ))
+    }
+
     fn device_scope_outcome(
         &self,
         device: &wgpu::Device,

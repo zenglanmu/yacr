@@ -24,6 +24,11 @@ pub mod pacing;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;
 
+/// Measurement-only GPU frame timing (ADR 0013 class 1): the explicit opt-in
+/// config, the pure feature-negotiation policy and the tick→ms conversion.
+/// Never a runtime dependency; never a product default.
+pub mod gpu_time;
+
 /// Native-only surface probe presenter (forced Vulkan, real GPU) for host
 /// bring-up. Deliberately **not** the production CAD presenter: it draws only a
 /// grid, a moving colour block and corner markers, performs no readback, and
@@ -382,7 +387,18 @@ pub struct FrameStats {
     /// `queue.submit`. It deliberately **excludes** the blocking device poll, so
     /// it does not fold GPU execution time into a CPU number.
     pub cpu_ms: f64,
+    /// Real GPU milliseconds, present **only** when the measurement-only opt-in
+    /// (ADR 0013 class 1) was explicitly enabled *and* the device granted the
+    /// timestamp feature set. `None` is honest: no estimate is ever substituted,
+    /// and the product configuration (measurement off) always reports `None`.
+    /// The value comes from a timestamp-query bracket around this frame's GPU
+    /// work; it is a **measurement** (the readback perturbs the frame) and never
+    /// a product-configuration number.
     pub gpu_ms: Option<f64>,
+    /// The explicit measurement state token for this frame
+    /// ([`gpu_time::GpuTimeState`]): `enabled`, `disabled` or
+    /// `unsupported(<FEATURE>)`. Report-only; the renderer never depends on it.
+    pub gpu_time: gpu_time::GpuTimeState,
     /// Draw submissions this frame, derived from the plan's batch/run accounting
     /// (non-converted opaque batches + coalesced instanced runs + coalesced
     /// merged-mesh runs + transparent batches + drawn images) rather than by
@@ -1301,6 +1317,22 @@ pub const LINE_QUAD_BYTES: u32 = plan::LINE_QUAD_STRIDE;
 // Compile-time floor: mirrors `texture_dimension_floor_is_guaranteed`.
 const _: () = assert!(MIN_GUARANTEED_TEXTURE_DIMENSION >= 2048);
 
+/// The GPU objects a measurement-only timestamp bracket needs, created once and
+/// reused across frames (no per-frame allocation of the measurement resources).
+///
+/// Created only by [`Renderer::set_gpu_time_measurement`] when the opt-in is
+/// enabled and the device granted the feature set; otherwise no such resources
+/// exist. The readback buffer is `MAP_READ`; it is unmapped before every frame so
+/// the next frame's `copy_buffer_to_buffer` is valid.
+pub(crate) struct GpuTimeResources {
+    /// Two timestamp queries: index 0 before the frame's GPU work, index 1 after.
+    pub(crate) query_set: wgpu::QuerySet,
+    /// `QUERY_RESOLVE` target for `resolve_query_set` (256-byte aligned, ≥ 16 B).
+    pub(crate) resolve: wgpu::Buffer,
+    /// `MAP_READ` staging buffer the two resolved `u64` ticks are copied into.
+    pub(crate) readback: wgpu::Buffer,
+}
+
 /// The CAD renderer. Owns only derived GPU resources.
 pub struct Renderer {
     pub preference: BackendPreference,
@@ -1326,6 +1358,23 @@ pub struct Renderer {
     active_backend: Option<ActiveBackend>,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
+    /// Measurement-only timestamp resources (ADR 0013 class 1). `Some` only when
+    /// the explicit opt-in was enabled **and** the device granted the feature
+    /// set; `None` on the product configuration. Reused across frames (created
+    /// once in [`Renderer::set_gpu_time_measurement`]); never a runtime
+    /// dependency of the render path.
+    gpu_time: Option<GpuTimeResources>,
+    /// The explicit measurement state token ([`gpu_time::GpuTimeState`]) carried
+    /// onto every [`FrameStats`]. `Disabled` until the opt-in is applied.
+    gpu_time_state: gpu_time::GpuTimeState,
+    /// Test hook: override the feature set `set_gpu_time_measurement` reads, so
+    /// the `Unsupported(<feature>)` path is exercisable without faking a device
+    /// that lacks `TIMESTAMP_QUERY`. `None` uses the live device's granted set.
+    gpu_time_feature_override: Option<wgpu::Features>,
+    /// Monotonic count of measurement-resource creations. It must stay `1` across
+    /// frames once measurement is enabled (the query set / buffers are reused,
+    /// never re-allocated per frame); diagnostics only.
+    gpu_time_resource_creations: u64,
     layout: Option<wgpu::BindGroupLayout>,
     line_pipeline: Option<wgpu::RenderPipeline>,
     /// Instanced line pipeline: one instance per 2-vertex segment, expanded into
