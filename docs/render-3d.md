@@ -139,3 +139,8 @@ HATCH 的检测需要上游提供 3D 边界。渐变 HATCH 仍只绘制边界。
 - **块级视锥剔除**（backlog §P1，2026-10-17 落地）：被剔除的 chunk 的 run **计零**顶点/三角形且
   **不被光栅化**，故活动预算只对**实际提交**的图元计费（不在此重复谓词/pad 细节，见
   `docs/validation-chunk-culling-2026-10-17.md` 与 `docs/render-order.md` 的记账单位节）。
+- **测量专用 GPU 帧时间（P0，2026-10-17 落地）**：`gpu_ms` **仅在显式 opt-in**（环境变量
+  `YACR_PROBE_GPU_TIME`，**只在宿主读取**、逐层显式透传）打开时为**真时间戳**；逐帧行尾带
+  `gpu_time=enabled|disabled|unsupported(<FEATURE>)` token，关闭时 `gpu_ms` 为 `None`（**不填估算值**）。
+  本机（P620/Vulkan）实测 **`wait_ms` ≈ 93% 是真实 GPU 执行**（present/queue 仅约 6–7%）。逐条证据见
+  `docs/validation-gpu-time-2026-10-17.md`。

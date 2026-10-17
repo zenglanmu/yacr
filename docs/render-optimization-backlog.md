@@ -6,7 +6,8 @@
 `docs/picking-gpu-id-pass.md`、`docs/validation-render-perf-2026-10-15.md`。本轮**真实宿主实测**
 与**帧成本分布**分别见 `docs/validation-realhost-frame-cost-2026-10-17.md`、
 `docs/validation-render-perf-2026-10-17.md`；**分页预算 pacing（N1a）**的实测见
-`docs/validation-frame-pacing-2026-10-17.md`。
+`docs/validation-frame-pacing-2026-10-17.md`；**测量专用 GPU 帧时间（P0）**的实测见
+`docs/validation-gpu-time-2026-10-17.md`。
 
 ## 当前基线（2026-10-17，真实宿主**分页**口径）
 
@@ -87,40 +88,60 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 
 ## 性能类（P0–P3、P5–P7；**P5 已否决、P6 已拆分**）
 
-### P0 — 测量前置（measurement prerequisite，blocking）：GPU 帧时间 + P1 剔除 A/B
+### P0 — 测量前置（measurement prerequisite）：GPU 帧时间 + P1 剔除 A/B（**已落地**）
 
-- **现状/问题（2026-10-17 更新）**：**分布半已完成、GPU 时间半未做**。
-  - **已完成（实测）**：每帧 CPU 相位分布由 `docs/validation-render-perf-2026-10-17.md` 建立（合成
-    scale-matched 腿 + `debug-default-fonts.dwg` 真实腿 + `complex-test.dwg` 集显腿，full/zoom 两视图态）。
-    本轮并由**既有日志**零成本把每帧 CPU 相位列表化（见文首相位表）——**这是已完成的免费动作，无新运行**。
-  - **未做（NOT RUN）**：**GPU 帧时间本身**。`gpu_ms=None`——无 `TIMESTAMP_QUERY`（本仓默认不向宿主
-    设备请求 feature）；`wait_ms` / `residual` 都只是**代理，不是 GPU 时间**。`tests/render_perf.rs:559`
-    记录 `gpu_ms` 未测量。所有"GPU 收益"表述（P1 加速档部分、P6/P7）仍是**结构推理，不是证据**。
-  - **N1a 之后的现状（2026-10-17）**：pacing 现**每帧**提供**代价信号**（`budget_cost_ema_ms` /
-    `budget_scale` / `budget_verts` / `budget_tris` / `pacing`，见 N1a），但该信号是
-    **`cpu_ms + wait_ms` 的 EWMA**——**仍不是 GPU 时间**。⇒ P0 的"GPU 时间"半**未因此推进**；
-    `wait_ms` 仍是在飞帧完成的阻塞 poll/呈现**代理**。
-- **GPU 能力探针（本轮真实查询，`crates/cad-render-wgpu/tests/gpu_capabilities.rs`）**：本机
-  **app-choice** 适配器**支持** `MULTI_DRAW_INDIRECT_COUNT`、`INDIRECT_FIRST_INSTANCE`、
-  `TIMESTAMP_QUERY`（+inside encoders/passes）与 `DownlevelFlags::INDIRECT_EXECUTION`；但**运行时
-  enabled features 仍为空**（什么都不请求）。**具体不支持用例**：GL-backend 适配器报
-  `MULTI_DRAW_INDIRECT_COUNT=false`——任何 indirect 回退都必须处理它。
-- **预期收益**：非性能项；**是 P1（GPU 侧）/N1/N2/N5/P6/P7 的证据前提**。
-- **前置条件/风险**：两种可选路径，均须显式记录：
-  - **`TIMESTAMP_QUERY`**：仅支持设备可用；**须显式、有文档地请求 feature**，是对仓库
-    「从不向宿主设备请求 feature」规则的一次**偏离**，因此**只作为测量门控**（measurement-only），
-    不得成为运行时依赖；且它与 `MULTI_DRAW_INDIRECT_COUNT` 一样**在 P620 的设备上并未启用**
-    ——两处设备创建点（`headless.rs` / `native_presenter.rs`）**仍未请求任何 feature**。
-    注意：**limits 已不再是 `Limits::default()`**（2026-10-17 协商落地，见 N3 与 ADR 0013
-    「实现状态」）；本项未因此变化，`gpu_ms` 仍 `None`。
-  - **draw-all-vs-skip 消融的墙钟减 poll 代理**：不请求 feature，作为替代代理（不是精确 GPU 时间）。
-  - **P1 的 CPU A/B**：用既有 `FrameStats` 相位计时器 `plan_ms` / `uniform_ms` / `encode_ms` /
-    `submit_ms`（`crates/cad-render-wgpu/src/lib.rs:284-298`）与**剔除比**（skipped/kept chunks）
-    在**多个缩放级别**下对照。
-- **需要的决策**：是否合入一次**有文档的、测量专用的** feature 请求（`TIMESTAMP_QUERY`）。
-- **相关契约/栅栏**：测量脚本/记录须标注为**估算代理**或**真时间戳**，二者不得混口径；未运行即
-  NOT RUN。
-- **优先级**：P0（**blocking 前提**；P6/P7 与 P1 的 GPU 侧收益在其之前不得开工）。
+- **已落地（2026-10-17）**。逐条证据见 `docs/validation-gpu-time-2026-10-17.md`；政策见 ADR 0013
+  第 1 类（measurement-only）。
+  - **唯一读取点与分层**：环境变量 **`YACR_PROBE_GPU_TIME`** 只在 `apps/app-linux/src/host.rs:1327`
+    读取；**渲染器/引擎从不读环境**——宿主把结果装进显式 `cad_render_wgpu::gpu_time::GpuTimeConfig`，
+    经 `gtk_bridge::install` → 呈现器设备创建（`native_presenter.rs`）→
+    `attach_device_with_gpu_time`（`crates/cad-engine/src/render/mod.rs:1105`）→
+    `Renderer::set_gpu_time_measurement` 逐层显式传参。
+  - **关闭（产品默认）**：设备**不请求任何 feature**，`gpu_ms` 保持 `None`，打印
+    `[probe] gpu-time … state=disabled`；**不填估算值**。**打开**：请求
+    `TIMESTAMP_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS` 与 adapter 集**取交**；本机两者**均授予**
+    （`state=enabled`）；`TIMESTAMP_QUERY_INSIDE_PASSES` **刻意不请求**（写入在编码器上）；缺 feature
+    时显式报 `gpu_time=unsupported(<FEATURE>)`，**绝不**静默回退。
+  - **读回策略（无额外提交）**：帧**既有**编码器上帧首/帧尾 `write_timestamp`，随后 `resolve_query_set`
+    + `copy_buffer_to_buffer` 到 16 B `MAP_READ` 缓冲（`renderer_impl.rs:5538-5543`），**同一次提交**；
+    `map_async` 在 `submit` 之后、阻塞 poll **之前**排队，poll 完成映射后读 ticks（**无第二次等待**），
+    用 `queue.get_timestamp_period()` 经 `ticks_to_ms` 换算；资源一次性创建、逐帧复用（创建计数器恒 **1**）。
+  - **上报（追加式）**：`FrameStats::gpu_ms`（`Option<f64>`）+ `gpu_time` 状态；
+    `[probe] actual-render` 行尾追加 `gpu_time={}`；启动一行 `[probe] gpu-time requested=… granted=… state=…`。
+    **未新增**诊断码。
+- **真实宿主实测（本机原生 Wayland / Vulkan / Quadro P620 / 驱动 580.178.04 / `scale=1`；同 UID、
+  无 root/sudo、无屏录、无虚拟显示；四次运行均 exit 0、无 panic）**：
+
+  | fixture | opt-in | frames | `gpu_ms` 中位 / p90 / max | `wait_ms` 中位 | `cpu_ms` 中位 | gpu/frame | gpu/wait |
+  |---|---|---:|---|---:|---:|---:|---:|
+  | `complex-test.dwg` | off | 697 | —（`None`） | 4.203 | 4.463 | — | — |
+  | `complex-test.dwg` | on | 698 | **3.948 / 7.479 / 24.416** | 4.242 | 4.111 | **43.8%** | **93.0%** |
+  | `debug-default-fonts.dwg` | off | 452 | —（`None`） | 2.234 | 2.055 | — | — |
+  | `debug-default-fonts.dwg` | on | 462 | **2.643 / 6.205 / 6.600** | 2.909 | 1.439 | **55.0%** | **93.9%** |
+
+  - settled `complete=true` 页（paced）：complex **50** 帧（`gpu_ms` 中位 0.025、`cpu_ms` 22.158、
+    `wait_ms` 0.683、frame 22.930、gpu 0.1% / cpu 97.0%）；debug **376** 帧（`gpu_ms` 2.551、`cpu_ms` 1.294、
+    `wait_ms` 2.806、frame 6.726、gpu 50.3% / cpu 44.3%）。
+  - **关闭腿 0/697 与 0/452 帧带值**（`None` 是未请求 feature 的诚实结果，不是缺测）。
+  - 每帧 CPU 相位（中位份额）：complex all-paced plan **53.2%** / uniform 22.8% / encode 5.9% / submit 17.2%；
+    complex complete plan 48.0% / uniform 26.9% / encode 23.9% / submit 0.9%；debug all plan **55.2%** /
+    uniform 7.1% / encode 20.4% / submit 18.1%；debug complete plan 56.3% / uniform 7.7% / encode 19.9% / submit 17.5%。
+- **栅栏（已落地，名称即契约）**：`crates/cad-render-wgpu/tests/headless_render.rs` 的 `gpu_time_contracts`——
+  `disabled_requests_no_feature_and_reports_none`（关闭 ⇒ 无 feature、`gpu_ms=None`、**0** 资源）；
+  `unsupported_state_names_the_missing_feature`（缺 feature ⇒ **命名**它、**0** 资源）；
+  `enabled_measures_without_changing_pixels_and_does_not_grow`（打开 ⇒ 真 `gpu_ms`、与关闭腿**逐字节一致**、
+  资源创建计数器恒 **1**）。另：tick 换算为纯测试；wasm 库编译且 `wasm32` 恒报 `Disabled`。
+- **本轮主结论（证据驱动重排优先级）**：N2 重开三条件据此判定——**(a) 为假**（`exec ≈ wait_ms`，比值 **0.93**
+  ⇒ `wait_ms` 就是真实 GPU 执行、present/queue 仅约 6–7%）；**(b) 为真**（paced 帧超目标且 `cpu_ms` ≈ 帧时间
+  **41–52%**）；**(c) 成立**（120 Hz / 8.33 ms 下 complex `cpu_ms` p90 ≈8.5 ms 单独超预算）。⇒ 工作顺序变为
+  **(1) 每帧 CPU plan 成本** → **(2) N2 流水** → **(3) N5 indirect multi-draw 最后**（详见 §N1d / §N2 / §N5）。
+- **未测 / 边界（不得软化）**：**GPU 内部归因**（只有每帧总量，未分顶点/三角形吞吐 vs draw 数 vs 带宽）；
+  **N1d / N2 / N5 是否真能降低 `gpu_ms`**；**真实 adapter 的 `unsupported(<feature>)`**（只在 fence 里经
+  **能力注入钩子**模拟——本机两 feature 均授予）；**wasm 运行时**（只有库编译）；**真实宿主像素捕获**（字节一致在
+  headless harness 证明，宿主两次运行只有日志）；**扰动**：测量设备**不是**产品配置（多了 resolve/copy + map
+  开销）；**vendor / golden / 性能结论**：单机、单适配器，**不得**外推。
+- **原「未做」表述（保留供追溯）**：`gpu_ms=None`、无 `TIMESTAMP_QUERY`、`wait_ms` 只是代理、所有"GPU 收益"
+  均为结构推理——这些在落地前成立；落地后仅在 **opt-in 打开**时为真时间戳，**产品默认仍 `None`**。
 
 ### P1 — 块级视锥剔除（chunk-level frustum culling）
 
@@ -335,6 +356,9 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     （`converted_accepted == converted_total`，`crates/cad-render-wgpu/src/renderer_impl.rs:4271-4276`），
     即**必须接受整场景**才启用 pulled ⇒ 生产分页帧一律 `accelerated=false`。N1d = 让 pulled/加速组织
     **只画一个已接受子集**（而非要求整场景被接受）。**N1d 同时是 N5 的前提**。
+    - **实测重排（2026-10-17，P0 落地后）**：工作顺序变为 **(1) 每帧 CPU plan 成本** → **(2) N2 流水** →
+      **(3) N5 indirect multi-draw**。N1d 是 **N5 的结构性前提**，故随 N5 一并**降级**（N5 前提已被测量、
+      非瓶颈，见 §N5）；**未取消**。
 - **N1a — 时间驱动自适应页预算：已落地（2026-10-17）**。纯控制器
   `crates/cad-render-wgpu/src/pacing.rs`（`PacingState`/`Sample`/`PacingMode`/`step`/`apply_scale`，
   12 个纯测试）。常数（**实测**实现值）：`target_ms = 13.0`（默认，可由
@@ -372,13 +396,15 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **需要的决策（产品/UX）**：预算是否改为**时间目标**（例如每页目标 `ms`），以及超时是否仍显式上报。
 - **相关契约/栅栏**：`budget_is_adjustable_per_frame`、`accelerated_tier_engages_on_paginated_frames`、
   `pulled_page_subset_matches_universal_pixels`。
-- **优先级**：N1（**最高，与 P1 并列**）。
+- **优先级**：N1（**最高，与 P1 并列**）。其中 **(c) N1d 已按实测降级**为 N5 的前提（见 §N1d 与 §N5）；
+  **(a) 的"时间驱动预算"已由 N1a 落地**，但其性能收益仍**未测**。
 
 ### N2 — CPU/GPU 流水（pipelining；消除每帧阻塞 poll）
 
 - **现状/问题**：每帧末尾有**阻塞式 device poll**（`crates/cad-render-wgpu/src/renderer_impl.rs:5172-5176`），
   它把 **CPU(n+1) 串在 GPU(n) 之后** ⇒ 帧时间 ≈ `cpu + wait`（**实测** complex **27.75 ms**，`wait`
-  占 ≈70%）。`wait_ms` 是 GPU/呈现等待的**代理，不是 GPU 时间**。
+  占 ≈70%）。`wait_ms` 当时被当作 GPU/呈现等待的**代理**；**P0 落地后实测其为真实 GPU 执行**
+  （见下「P0 落地后判定」）。
 - **预期收益（估算，未测）**：流水化（CPU 编码 n+1 与 GPU 执行 n 重叠）后帧时间 ≈
   `max(cpu, wait)` ≈ `max(8.3, 19.4)` ≈ **19.4 ms** ⇒ **估算 ≈ -30% 帧时间，且零 GPU 工作改动**。
   **这是估算，不是测量。**
@@ -392,13 +418,21 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     `presented_revision`/`rev_resets`/`ready_none_clears` 这些**以在飞帧为键**的 admission、
     错误作用域的顺序、`stages_us` 的归因、pick 读回的排序——都要随在飞帧重做。
   - **(d) debug 已在预算内**（每帧 ≈5 ms，**实测**），流水化对它**买不到任何东西**。
-  - **重开条件（满足其一即重开评估）**：① P0 的 GPU 时间显示**paced 帧**上 `exec ≪ wait_ms`；
-    ② paced 帧持续超目标且 `cpu_ms ≥ 帧时间 ~40%`；③ **120 Hz（8.3 ms）成为产品需求**。
+  - **重开条件（写于 2026-10-17 延后时，保留供追溯）**：① P0 的 GPU 时间显示**paced 帧**上
+    `exec ≪ wait_ms`；② paced 帧持续超目标且 `cpu_ms ≥ 帧时间 ~40%`；③ **120 Hz（8.3 ms）成为产品需求**。
+- **P0 落地后判定（2026-10-17，实测；见 `docs/validation-gpu-time-2026-10-17.md`）**：
+  - **① 为假（已答）**：实测 `exec ≈ wait_ms`（比值 **0.93**）⇒ `wait_ms` 就是真实 GPU 执行，
+    present/queue 只占其约 **6–7%**。⇒ **「延后阻塞 poll 近乎免费」不成立**，条件①**不满足**。
+  - **② 为真（已答）**：paced 帧**超目标**，`cpu_ms` ≈ 帧时间 **41–52%**（≥ 40%）。
+  - **③ 成立（已答）**：120 Hz / **8.33 ms** 下 complex `cpu_ms` p90 ≈ **8.5 ms** **单独**即超预算。
+  - ⇒ **满足 ② 与 ③ ⇒ 重开评估**。实测 `cpu ≈ gpu ≈ 4 ms`，重叠大致可把帧时间减半，但**不减少** CPU
+    工作量本身。⇒ 在新的工作顺序里 N2 排 **#2**（在"每帧 CPU plan 成本"之后、N5 之前）。
 - **前置条件/风险**：须**保留 device-lost / `FrameError` 的分类**（不得因异步化把错误吞成空成功）；
   需**有界队列深度**（内存上界）；需与 **pick readback** 交互（读回与在飞帧的同步）。
 - **需要的决策**：队列深度与在飞帧数上界（内存权衡）。
 - **相关契约/栅栏**：device-lost/`FrameError` 分类保持；有界队列深度；pick-readback 交互 fence。
-- **优先级**：N2（**已延后**；重开条件见上）。
+- **优先级**：N2（**重开（2026-10-17，P0 落地后）**：条件 ②③ 满足 ⇒ 实测工作顺序 **#2**；
+  条件 ① 已答为**假**——见上「P0 落地后判定」）。
 
 ### N3 — 显存容量（4 GB 卡）：显式建模取代 panic
 
@@ -474,6 +508,13 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **预期收益（诚实上限）**：**提交侧收益很弱**。ADR-0007「P3b」A/B 实测 **≈0.16–0.6 µs CPU/draw**；
   本轮实测 **`submit_ms` = 3.412 ms / 3,027 draws**（文首）⇒ indirect 最多省 **≈10–12% 帧时间（估算）**，
   且**对主导相 `wait_ms` 19.4 ms 零影响**。**这是估算，不是测量**；GPU 时间**未测**（P0）。
+- **P0 落地后判定（2026-10-17，实测）——前提被测量，非瓶颈**：每帧 CPU 相位（中位份额）实测 `plan` **48–56%**、
+  `uniform` 7–27%、`encode` 6–24%、`submit` 1–18% ⇒ **CPU 提交成本不是瓶颈**，`encode`/`submit` 都不主导，
+  且 N5 **碰不到** `plan_ms` 与 GPU 执行（`gpu_ms` 实测中位 3.948 / 2.643，见 P0）。⇒ **N5 降级（demote）而非取消**，
+  在新的工作顺序里排 **#3**（在"每帧 CPU plan 成本"与 N2 之后）。
+  - **重促（re-promote）条件（实测门控）**：仅在 **N1d 已落地**（结构性前提）**且**在"每帧 CPU plan 成本"
+    与 N2 流水之后、`encode_ms + submit_ms` 仍占据**剩余帧时间的显著份额**（实测）时才重促——即 N5 打击的相位
+    必须真正成为残余瓶颈。在此之前**不开工**。
 - **前置条件/风险（结构性）**：
   - 生产帧用**per-run draw + 逐 draw 动态 uniform 偏移**（`crates/cad-render-wgpu/src/plan.rs:246-260`、
     `:347-350`、`:418-422`），**单次 multi-draw 无法逐 draw 变 offset** ⇒ **必须 N1d 先行**（先有
@@ -487,7 +528,8 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   规定**设备 feature / limits 的协商策略**（与**测量专用**的 `TIMESTAMP_QUERY` 设备是**同一政策轴**）。
 - **相关契约/栅栏**：draw-order/并列（tie）parity；id-pass parity；`indirect_page_does_not_draw_rejected_batches`；
   续页**不得**重绘已画内容。
-- **优先级**：N5（低；capability-gated、ADR 门控，**需 N1d 先行**）。
+- **优先级**：N5（**已降级（2026-10-17，P0 落地后）**：前提被测量、非瓶颈 ⇒ 实测工作顺序 **#3**；
+  capability-gated、ADR 门控、**需 N1d 先行**；重促条件见上）。
 
 ---
 
@@ -773,10 +815,14 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   对**每个非 WebGL2 backend 按 backend 类别**报 `compute` / `storage_buffers` / `indirect_draw = true`，
   **不**做运行时探测 ⇒ **不得**当作设备测量引用（与 **G6** 同类证据等级）。真实能力查询见 P0 的
   `crates/cad-render-wgpu/tests/gpu_capabilities.rs`。
-- **`wait_ms` 是 GPU/呈现等待的代理，不是 GPU 时间**；`gpu_ms=None`（无 `TIMESTAMP_QUERY`）。
+- **`wait_ms` 是 GPU/呈现等待的代理，不是 GPU 时间**；`gpu_ms` 在**产品默认（`YACR_PROBE_GPU_TIME`
+  关闭）**下仍为 `None`（无 `TIMESTAMP_QUERY`）；仅**测量 opt-in 打开**时为真时间戳（见 §P0 与
+  `docs/validation-gpu-time-2026-10-17.md`）。
 - **WebGL2 真实浏览器运行仍 NOT RUN（G7）**；加速档的降级路径只有**离线单测**。
-- **GPU 帧时间从未测量**——上文所有"GPU 收益"表述（P1 加速档部分、P6、P7、N5）均为**结构推理，
-  不是证据**；N2 的 ≈ -30% 与 N5 的 ≈10–12% 均为**估算**。
+- **GPU 帧时间仅在 opt-in 下测量**——§P0 已落地（**每帧总量**已实测）；但 **GPU 内部归因**
+  （顶点/三角形吞吐 vs draw 数 vs 带宽）与 **N1d/N2/N5 是否真能降低 `gpu_ms`** 仍**未测**，故上文
+  "GPU 收益"表述（P1 加速档部分、P6、P7、N5）仍为**结构推理，不是证据**；N2 的 ≈ -30% 与
+  N5 的 ≈10–12% 均为**估算**。
 
 ---
 

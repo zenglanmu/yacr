@@ -12,6 +12,69 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 测量专用 GPU 帧时间（P0，2026-10-17；measurement-only）
+
+**范围**：`crates/cad-render-wgpu`（新纯模块 `src/gpu_time.rs` + `Renderer::set_gpu_time_measurement`
+一次性资源创建 + 帧内两查询 bracket + 帧尾读回 + `FrameStats` 追加字段）+ `crates/cad-engine`
+（`attach_device_with_gpu_time` 透传）+ `apps/app-linux`（宿主读 `YACR_PROBE_GPU_TIME` 并经
+`gtk_bridge::install` → 设备创建 → 会话透传）。**未**改宿主协议、**未**改 UI、**未**新增诊断码、
+**未**改渲染/像素。政策依据：`docs/adr/0013-device-capability-negotiation.md` 第 1 类
+（measurement-only）；逐条证据见 `docs/validation-gpu-time-2026-10-17.md`。
+
+- **唯一读取点与分层**：环境变量 **`YACR_PROBE_GPU_TIME`** 只在 `apps/app-linux/src/host.rs:1327`
+  读取；**渲染器/引擎从不读环境**——宿主把结果装进显式 `GpuTimeConfig`，经
+  `gtk_bridge::install(&window, …, gpu_time)` → 呈现器设备创建（`native_presenter.rs`
+  `build_with_surface(…, gpu_time_config)`）→ `session.attach_device_with_gpu_time`
+  （`crates/cad-engine/src/render/mod.rs:1105`）→ `Renderer::set_gpu_time_measurement` 逐层显式传参。
+- **关闭时（产品默认）**：设备**不请求任何 feature**，`gpu_ms` 保持 `None`，打印一行 `[probe] gpu-time …`
+  报 `state=disabled`；**不填估算值**。
+- **打开时**：请求 `TIMESTAMP_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS`，与 adapter 支持集**取交**；
+  本机（P620/Vulkan）两者**均授予**（`state=enabled`）。`TIMESTAMP_QUERY_INSIDE_PASSES` **刻意不请求**
+  （两次写入都在**编码器**上）。缺 feature 时显式报 `gpu_time=unsupported(<FEATURE>)`，**绝不**静默回退。
+- **读回策略（无额外提交）**：帧**既有**的单个编码器上帧首/帧尾各 `write_timestamp`，随后
+  `resolve_query_set` + `copy_buffer_to_buffer` 到 16 B `MAP_READ` 缓冲（`renderer_impl.rs:5538-5543`），
+  **同一次提交**；`map_async` 在 `submit` 之后、阻塞 poll **之前**排队，poll 完成映射后读 ticks，
+  **不做第二次等待**；ticks 用 `queue.get_timestamp_period()` 经 `ticks_to_ms` 换算。资源
+  （`QuerySet` + 256 B `QUERY_RESOLVE` 缓冲 + 16 B `MAP_READ` 缓冲）**一次性创建、逐帧复用**
+  （创建计数器恒为 **1**）。
+- **上报（追加式）**：`FrameStats::gpu_ms`（`Option<f64>`）与 `gpu_time` 状态；`[probe] actual-render`
+  行尾追加 `gpu_time={}`（`host.rs:1993`）；启动一行 `[probe] gpu-time requested={:?} granted={:?} state={}`
+  （`native_presenter.rs:530`）。**未新增**诊断码。
+- **真实宿主实测（本机原生 Wayland / Vulkan / Quadro P620 / 驱动 580.178.04 / `scale=1`；同 UID、
+  无 root/sudo、无屏录、无虚拟显示；四次运行均 exit 0、无 panic、无残留进程）**：
+  - 每帧（on/off 各一次）：`complex-test.dwg` off **697** 帧（`gpu_ms=None`、`wait_ms` 中位 4.203、
+    `cpu_ms` 4.463）、on **698** 帧（`gpu_ms` 中位 **3.948** / p90 7.479 / max 24.416、`wait_ms` 4.242、
+    `cpu_ms` 4.111、gpu/frame **43.8%**、gpu/wait **93.0%**）；`debug-default-fonts.dwg` off **452** 帧
+    （`None`、2.234、2.055）、on **462** 帧（`gpu_ms` 中位 **2.643** / p90 6.205 / max 6.600、`wait_ms` 2.909、
+    `cpu_ms` 1.439、gpu/frame **55.0%**、gpu/wait **93.9%**）。**关闭腿 0/697 与 0/452 帧带值**（`None` 是
+    未请求 feature 的诚实结果，不是缺测）。
+  - settled `complete=true` 页（paced）：complex **50** 帧（`gpu_ms` 中位 0.025、`cpu_ms` 22.158、
+    `wait_ms` 0.683、frame 22.930、gpu 0.1% / cpu 97.0%）；debug **376** 帧（`gpu_ms` 2.551、`cpu_ms` 1.294、
+    `wait_ms` 2.806、frame 6.726、gpu 50.3% / cpu 44.3%）。
+  - 每帧 CPU 相位（中位份额）：complex all-paced plan **53.2%** / uniform 22.8% / encode 5.9% / submit 17.2%；
+    complex complete plan 48.0% / uniform 26.9% / encode 23.9% / submit 0.9%；debug all plan **55.2%** /
+    uniform 7.1% / encode 20.4% / submit 18.1%；debug complete plan 56.3% / uniform 7.7% / encode 19.9% / submit 17.5%。
+- **本轮主结论（证据驱动重排优先级）**：N2 重开规则三条件据此判定——**(a) 为假**（`exec ≈ wait_ms`，
+  比值 0.93 ⇒ `wait_ms` 就是真实 GPU 执行、present/queue 仅约 6–7%）；**(b) 为真**（paced 帧超目标且
+  `cpu_ms` ≈ 帧时间 41–52%）；**(c) 成立**（120 Hz / 8.33 ms 下 complex `cpu_ms` p90 ≈8.5 ms 单独超预算）。
+  ⇒ 工作顺序变为 **(1) 每帧 CPU plan 成本**（`plan_ms` 占 CPU 48–56% 且大体与页大小无关——1-draw settled 页
+  仍 ~22 ms CPU）→ **(2) N2 流水**（`cpu ≈ gpu ≈ 4 ms`，重叠大致可把帧时间减半，但不减少 CPU 工作量本身）→
+  **(3) N5 indirect multi-draw 最后**（只打击 encode 6–24% / submit 1–18%，均不主导，且碰不到 `plan_ms` 与
+  GPU 执行）。**N5 前提已被测量且不是瓶颈 ⇒ 降级而非取消**（重促条件见 backlog §N5）。
+- **测试（实测）**：`cargo test -p cad-render-wgpu --lib` **185 passed / 3 ignored**；
+  `--test headless_render` **35**（含 **3** 个新 `gpu_time_contracts` fence：
+  `disabled_requests_no_feature_and_reports_none`、`unsupported_state_names_the_missing_feature`、
+  `enabled_measures_without_changing_pixels_and_does_not_grow`）；`--test accelerated_tier` **23**、
+  `--test pulled_prefix_equivalence` **9**；`cargo test -p cad-engine` **100 passed / 8 ignored**。
+- **门禁（实测）**：`fmt` / `check --all-targets` / `clippy -D warnings` /
+  `check --lib --target wasm32-unknown-unknown` 全 clean；release 构建（`--features tauri/custom-protocol`）OK。
+- **P0 的未测 / 边界（不得软化）**：**GPU 内部归因未测**（只有每帧总量，未分顶点/三角形吞吐 vs draw 数 vs
+  带宽）；**N1d / N2 / N5 是否真能降低 `gpu_ms` 未测**；**真实 adapter 的 `unsupported(<feature>)` 未测**
+  （只在 fence 里经**能力注入钩子**模拟——本机两 feature 均授予，无缺该 feature 的真 adapter）；
+  **wasm 运行时未测**（只有库编译）；**真实宿主像素捕获未做**（字节一致在 headless harness 证明，宿主两次运行
+  只有日志）；**扰动**：测量设备**不是**产品配置（多了 resolve/copy + map 开销）；**vendor / golden / 性能
+  结论**：单机、单适配器，**不得**外推。
+
 ## 块级视锥剔除（P1，2026-10-17；纯 renderer 改动）
 
 **范围**：`crates/cad-render-wgpu`（新 `src/cull.rs` + 三个 chunk 构建器保留既有 AABB + 逐帧一次可见性测试 +

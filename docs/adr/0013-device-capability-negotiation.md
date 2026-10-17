@@ -135,8 +135,9 @@
 - **栅栏落地（对应上文「合入时必须新增的栅栏」）**：`headless.rs` 增策略/降级单测（含确定性
   `refused_allocation_is_reported_without_panicking`，请求 `max_buffer_size + 1` 触发真实的
   invalid-handle/validation 机制、不耗显存）；`crates/cad-render-wgpu/src/lib.rs` 的 `PulledState`
-  新增 `skipped-allocation-failed` 状态与文本。**未做**：runtime-optional feature（`MULTI_DRAW_*`）
-  与 `TIMESTAMP_QUERY` 的请求——feature 集合仍为空，三态中「未启用」一列不变。
+  新增 `skipped-allocation-failed` 状态与文本。**未做（本 limits 轮）**：runtime-optional feature
+  （`MULTI_DRAW_*`）——feature 集合在**产品默认**下仍为空，三态中「未启用」一列不变；
+  **`TIMESTAMP_QUERY` 的请求见下条（第 1 类已落地）**。
 - **测试（实测）**：`cargo test -p cad-render-wgpu --lib -- --test-threads=1` → 155 passed / 0 failed /
   3 ignored；`--test accelerated_tier` 23、`--test pulled_prefix_equivalence` 9、`--test headless_render` 19。
 - **真实宿主（实测）**：`fixtures/complex-test.dwg` 由
@@ -144,7 +145,14 @@
   `pulled=active`，`entityCount=44591`、settled 帧 `complete=true`、自然 exit 0；
   `fixtures/debug-default-fonts.dwg` `pulled=active`、`entityCount=10656`；无 panic、无 `is invalid`。
 - **未测**：真实驱动/显存 OOM 在本机**不可模拟**（新测试触发的是无效 handle/validation，不是 OOM）；
-  其它 GPU/vendor/平台未验证；`gpu_ms` 仍 `None`。
+  其它 GPU/vendor/平台未验证；`gpu_ms` 在**产品默认（opt-in 关闭）**下仍 `None`（opt-in 打开时为真时间戳，见下条）。
+- **第 1 类（measurement-only，`TIMESTAMP_QUERY`）已落地（2026-10-17）**：opt-in 环境变量
+  **`YACR_PROBE_GPU_TIME`**（**只在宿主** `apps/app-linux/src/host.rs` 读取；渲染器/引擎**从不读环境**），
+  逐层显式透传至 `Renderer::set_gpu_time_measurement`。关闭时设备**不请求任何 feature**、`gpu_ms` 保持
+  `None`；打开时请求 `TIMESTAMP_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS`（与 adapter 集取交，
+  `TIMESTAMP_QUERY_INSIDE_PASSES` **刻意不请求**），缺 feature 显式报 `gpu_time=unsupported(<FEATURE>)`。
+  本机 P620/Vulkan 两 feature **均授予**、`state=enabled`。⇒ 第 1 类的两条义务（**显式 opt-in** +
+  **标注为测量**）已实现；**测量设备不是产品配置**。逐条证据见 `docs/validation-gpu-time-2026-10-17.md`。
 
 ## 合入时必须新增的栅栏
 
@@ -174,5 +182,7 @@
 ## 证据边界
 
 - 单机、单适配器（Quadro P620 / Vulkan / 驱动 580.178.04），Linux 宿主。**未**做 vendor 交叉验证，
-  **未**跑浏览器/WebGL2，**未**做任何 GPU 时间测量（`gpu_ms` 至今仍为 `None`）。
+  **未**跑浏览器/WebGL2。GPU 时间测量已在**测量 opt-in**（第 1 类，见「实现状态」）下落地：本机测得**每帧
+  总量**（`gpu_ms` **产品默认**仍为 `None`）；**GPU 内部归因**与**真实缺 feature 的 adapter**仍**未测**
+  （见 `docs/validation-gpu-time-2026-10-17.md`）。
 - 文中 gpu_capabilities 的原始输出为本轮记录，非长期基线；换机后必须重跑探针再引用。
