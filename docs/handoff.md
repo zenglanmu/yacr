@@ -6,10 +6,258 @@
 > （`apps/app-linux`，二进制 `yacr`），`cad-ui-slint` 与 Slint 依赖已删除；Windows/macOS/Android/Web
 > 当前是**显式 NOT IMPLEMENTED 占位**。要了解**当前**架构与构建，先读：
 > `docs/architecture.md`、`docs/adr/0010-react-linux-host-replaces-slint.md`、
-> `docs/adr/0011-native-wayland-subsurface.md`、`docs/react-linux-app.md`、
+> `docs/adr/0011-native-wayland-subsurface.md`、`docs/adr/0012-scene-spatial-index-and-interaction.md`、
+> `docs/react-linux-app.md`、
 > `docs/build.md`、`docs/ci.md`、`AGENTS.md`。下列各轮小节中的 Slint/`app-linux`(旧)/`yacr-linux`/
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
+
+## 自动证据采集脚本（2026-10-17；本轮交付；无 Rust 改动）
+
+- **新增文件**（**未**改任何 Rust 源码、**未**改既有脚本）：`scripts/collect-evidence.sh`（一键：
+  前端构建 → `cargo build --release --locked -p app-linux --bin yacr --features tauri/custom-protocol`
+  → 按后端启动真实 `yacr --open … --fonts-dir …`（**非** `--probe` 假打开）→ 截图 → 汇总日志）；
+  `scripts/screencast-capture.py`（同 UID `org.gnome.Mutter.ScreenCast` → GStreamer `pipewiresrc`
+  单帧 PNG）；`scripts/test-collect-evidence.py`（22 契约）。
+- **行为**：X11 后端抓窗口**自身 drawable**（`shot-top`/`shot-cad`，`gcc` 现场编译
+  `apps/app-linux/scripts/x11-window-grab.c`）；原生 Wayland 后端抓合成帧（`wayland-frame.png`，整屏
+  monitor）。输出 `${YACR_EVIDENCE_ROOT:-/tmp/opencode}/yacr-evidence-<UTC>Z/`（`results.tsv` 逐后端
+  记录 `NATURAL_EXIT`/`PLANNED_TIMEOUT`/`SKIPPED`/`NO_DISPLAY` + 真实退出码 + 截图 `captured`/`missing`
+  + `README.md`）。CLI `--backend auto|x11|wayland|both`；探针 `YACR_PROBE_CAD_LOG=1` +
+  `YACR_PROBE_LIFECYCLE=<mode>`（默认 `exit`）+ 默认 `YACR_PROBE_NO_MAXIMIZE=1`。
+- **本轮实际运行证据（本机 GNOME/Mutter + Quadro P620，非软件后端）**：
+  `/tmp/opencode/yacr-evidence-20261017T005210Z/` — `x11` 与 `wayland` 两后端均
+  `NATURAL_EXIT exit=0 screenshot=captured`；X11 `shot-top.png` 1200x800、`shot-cad.png` 1166x513
+  （与当轮日志 `geometry` 一致，`cad-frame … complete=current_scene`、`entityCount:4`、camera
+  `[1.5,0.5]/0.00503`）；Wayland `wayland-frame.png` 1920x1080（`bridge wayland presenter ready …
+  adapter=Quadro P620`）。`bash -n` / `py_compile` / 契约测试 **22/22** 全过。
+- **截图视觉读判（observer，独立读判，非产品验收）**：三张 PNG 均为**真实应用画面、非空**——
+  React chrome（tabs 文件/常用/绘图/测量/批注/视图、语言 zh-CN、ribbon、命令行、状态栏）+ 纯黑 CAD
+  视口内的 fixture 五段线（白、反走样）；`shot-cad` 的 `mean=1.0` 属"黑底细白线"正常现象，非缺陷；
+  Wayland 帧为整屏合成（含桌面其它窗口、`RecordMonitor` 特性）。**不**据此宣称视觉正确性/精度/golden。
+- **授权边界（脚本设计即如此，非事后声明）**：以同 UID 用户会话运行，**不提权 / 不 `sudo` / 不以 root /
+  不解锁或修改会话 / 不改 portal·ScreenCast 权限 / 不装包 / 不起虚拟或离屏显示**；无真实显示 ⇒ **非零
+  退出**而非假装成功；截图仅本地保存、不上传。**不**据此宣称完整/跨平台/vendor/精度/性能验收；
+  X11 窗口截图**不是**原生证据。
+
+## 场景空间索引与交互架构（2026-10-17；ADR-0012；架构固化轮本无实现，S1 点选切片随后交付）
+
+- **决策（Accepted）**：`docs/adr/0012-scene-spatial-index-and-interaction.md` 固化五级空间过滤模型
+  （Scene/Viewport → Chunk → Entity Bounds / R-tree → PickProxy·Primitive Bounds → Exact Geometry → Ranking）、
+  三段纪律（BBox 找候选 / Geometry 定命中 / screen-space distance 定排序）与**早判不对称性**：
+  Pick 的 bounds 不相交是可靠早退、但**未知/无效 bounds 必须落回精确判定**；Window Selection 只有
+  `rect ⊇ bounds` 是**可靠早接受**、`¬contains` **不得**判 reject（本仓 bounds 保守、且 text/凸度 polyline/mesh
+  的 `local_pick_bounds` 为 `None`，会误拒已完全选中的图元）；Crossing Selection 只有
+  `rect ∩ bounds = ∅` 是可靠早退、相交**仅作候选**。任何 bounds 早判都必须基于**当前** geometry 版本。
+- **索引结构**：顶层固定/松弛 chunk 网格 + 每 chunk 内 `rstar 0.13`（MIT/Apache-2.0，MSRV 1.85，`no_std`）
+  `bulk_load` 不可变快照；`rstar` 唯一落点 `cad-spatial`；**必须**实现规范 §8.1 强制的**超大图元策略**
+  （松弛边界 + 单独列表 / 子 AABB，禁止跨块复制膨胀）；**不**新增并行版本计数器（快照版本取自
+  `Revision`，陈旧判定复用 `ChangeSet::follows()` / `TaskStamp`）。
+- **明确否决**：全局单棵 rstar 先行；`DynamicEntitySet`（§4.7 拖拽只改 `PreviewState` + 一次提交）；
+  chunk 级并行渲染/框选；`SpatialQueryService` trait 层；每帧重新收集 Primitive / 合批（与 ADR-0007 静态
+  `GpuBatch` + §8.1 冲突）；`render_bounds(view_scale)` 尺度参数化（迫使 pan/zoom 重建索引）；新脏标记体系
+  与 `EntityChange`（第二套失效真相，违铁律 4）；独立 `PickProxy` 类型层级；现在切换屏幕距离判定/排序
+  （正交 2D 下与世界射线容差等价，纯返工）。
+- **采纳但受限**：`trait Pickable`（用户要求引入）**必须**三态返回
+  `PickVerdict::{ Hit(PickHit), Miss, Unsupported(&'static str) }`，**禁止**裸 `Option`（会把"未支持"静默成
+  "未命中"，违反铁律 2）。圆/弧拾取按 AutoCAD 惯例**仅圆周可选**，内部可选须显式产品选项 + 测试。
+- **实施顺序（垂直切片优先）**：S1 点选闭环（DOM → `SelectAt` → `pick_at_screen` → 高亮/属性）→ S2 Hover
+  （兼作全量拾取路径的第一次真实压力测量）→ S3 Snap 接线 → S4 索引与增量失效接入热路径（由 S2 实测门控）
+  → S5 Window/Crossing 框选（串行）→ S6 按实测再评估；**Dirty Region / Tile 排最后**（backlog P3）。
+- **本轮证据边界**：ADR-0012 为**架构固化**（该 ADR 轮**未**运行任何测试/门禁/渲染）；`rstar` **尚未引入**，
+  `Cargo.lock` **未改**（更新与许可核查为未决项）。相关待办见 `docs/render-optimization-backlog.md`
+  的 S1–S6 节。**S1 实现轮的证据与 NOT RUN 边界单列于下方 S1 小节**。
+
+### S1 交付：点选垂直切片（2026-10-17，有界、合成/本地）
+
+- **两条并行 lane**（ADR-0012 §10 item S1）：
+  - **Rust**（`crates/cad-ui-core`、`crates/cad-host`）：`protocol.rs` 新增公开常量
+    `BUTTON_PRIMARY = 0` / `BUTTON_MIDDLE = 1` / `BUTTON_SECONDARY = 2`；`ProbeInput` 新增可选
+    `button: Option<i32>`（`#[serde(default)]`），缺省/`null` ⇒ 主键，超范围值（含 DOM 的 `-1`）以稳定原因
+    拒绝；`InputKind` **未**扩展。`session.rs` 保留 `PointerPress { button, down, dragged }`，`pointer_move`
+    优先按下键，越过 4.0 逻辑像素圆盘即锁存 `dragged`；主键“按下+抬起、无拖拽、位移 < 4.0 逻辑像素”发出
+    `Pointer{Up}` **与** `SelectAt{Replace}`（携带当前 `metrics_revision`）。**主键专属**；中/右键永不选择；
+    左/中键拖拽平移；框选**未**实现（S5）。按下状态仅在全部请求被接纳后才提交。
+  - **React**（`apps/app-linux/ui`、`crates/cad-ui-core/i18n/{zh-CN,en}.json`）：`input.mjs` 在指针载荷携带
+    DOM `button`；**P0 修复**让 `pointermove`/滚轮**省略**该字段（DOM 上报 `-1`，而线协议拒绝 `-1` 而非猜测）。
+    `cad.mjs` 的 `parseCadStatus` 严格校验 `selection` 块（畸形 ⇒ `CAD_STATUS_INVALID`，不臆造空状态）；未知
+    行键容忍并原样渲染机器键。新增只读属性面板 `components/PropertiesPalette.jsx`（状态栏停靠，默认**关闭**——
+    停靠会改变分区宽度且原生 CAD 表面几何敏感，启动几何保持逐字节一致），仅在打开文档时显示；两目录共加 40 个
+    `properties.row.<machine key>` 标签键 + `properties.close`。
+- **僵化 `selection` 状态块**（`CadStatus.selection`，**永久存在、永不为 `null`**，camelCase）：
+  `{"count": <int>=0>, "empty": <bool>, "rows": [{"key": "<机器键，永不翻译>", "value": "<string>"}], "mixedKeys": ["<机器键>"]}`；
+  不变量 `empty == (count == 0)`，`rows` 仅在 `count == 1` 时非空，`mixedKeys` 仅在 `count > 1` 时非空；
+  探测/无能力状态携带 `{count:0, empty:true, rows:[], mixedKeys:[]}`；单个不可解析引用如实报告 `id` +
+  `status:"unresolved"` 行，不伪造几何。
+- **按键契约**：`button` 可选，按 DOM `MouseEvent.button` 编码（0/1/2）；**无按键变化的事件必须省略该字段**；
+  `-1` 及任何超范围值被拒，稳定原因
+  `unsupported pointer button: N (expected 0, 1 or 2, or omit it for primary)`。
+- **P0 集成缺陷（对账时发现）**：`input.mjs` 原本**无条件**上报 `event.button`，而 DOM 在 `pointermove`/滚轮上
+  报告 `-1`（“无按键变化”）；线协议**拒绝** `-1` 而非猜测主键。若放任，**正常移动即会以稳定原因失败**。该冲突
+  **仅靠跨 lane 阅读两处源码才被发现**（Rust lane 的拒绝语义 vs React lane 的无条件上报）——任一 lane 的**单侧**
+  测试都不会暴露它。**修复已合入并验证**：`input.mjs` 仅在确有按键变化时携带该字段（`buttonField`；`pointermove`/
+  滚轮**省略**），UI 测试显式断言 `pointermove` 与滚轮载荷**不含** `button` 键（`npm test` 58/58 通过）。
+- **证据（实际运行，合成/本地）**：`cargo fmt -p cad-ui-core -p cad-host -- --check` PASS；
+  `cargo check -p cad-ui-core -p cad-host --locked` PASS；`cargo clippy -p cad-ui-core -p cad-host --all-targets
+  --locked -- -D warnings` PASS（0 warning）；`cargo test -p cad-ui-core --locked` **77 passed / 0 failed**；
+  `cargo test -p cad-host --locked` **92 passed / 0 failed / 1 ignored**（预存 `perf_baseline`，需 `YACR_TEST_DWG`）；
+  额外 `cargo check -p app-linux --locked` PASS；`(cd apps/app-linux/ui && npm ci)` OK、`npm test`
+  **58 passed / 0 failed**、`npm run build` OK（41 modules）；`check-i18n.py` **OK: 404 keys, 2 catalogs**。
+- **门禁（主控在合入前实际运行，全树）**：`scripts/check-architecture.py`（27 packages、无环、核心边界完整）、
+  `check-i18n.py`（404 keys / 2 catalogs）、`check-fixture-manifest.py`（22 fixtures）、`check-workflows.py` 全部 PASS；
+  `cargo fmt -p cad-ui-core -p cad-host -- --check` PASS；`cargo test -p cad-ui-core --locked` **77 passed** 与
+  `cargo test -p cad-host --locked` **92 passed / 1 ignored** 由主控复跑一致。
+- **NOT RUN（诚实边界）**：任何 GUI/原生窗口/真实 GPU 运行、任何截图、任何真实 DWG、全量 workspace 测试矩阵，
+  以及本切片的 wasm/Android/Windows/macOS 目标。**这是有界、合成/本地的垂直切片**，**不**构成完整 CAD / 跨平台 / 真机 / 视觉
+  验收；点选自始至终只在**合成/本地会话**中验证，`SelectionRef` **未**在真实宿主窗口闭环。
+
+### S2 交付：hover 接线 + `pointer_leave` 跟进（2026-10-17，有界、合成/本地）
+
+- **落地（按 crate）**：
+  - **`crates/cad-ui-core`**（`protocol.rs`）：新增 `InputKind::PointerLeave`，线字符串恰为 `pointer_leave`，
+    **非终态**（`is_terminal` 仅含 `pointer_up`/`pointer_cancel`/`blur`）；`InputTracker::apply` 对其做**保状态空操作**
+    （sequence 仍被消费，marker/press/dirty 均不变）。据此**当前 kind 集合**为 `pointer_down`、`pointer_move`、
+    `pointer_up`、`pointer_cancel`、`pointer_leave`、`wheel`、`resize`、`blur`（`docs/input.md` §1.1.1 是当前线载荷契约；
+    **未**改已废弃的 ADR-0006）。
+  - **`crates/cad-ui-core`**（`session.rs`）：`plan_input` 的 `PointerMove` 分支在**空闲**（无按下）时，除普通
+    `Pointer{Move}` 外**额外**发出 `InteractionRequest::MoveCursor(CanvasLocal{ logical_position, metrics_revision })`；
+    有按下保持旧单请求形态。`PointerLeave` → **既有** `ClearCursor`（不带坐标、不要求 revision，且**不扰动**进行中的按下）。
+  - **`crates/cad-host`**：`HoverState`（宿主本地、**单个** ref；`lib.rs:186-208`）+ `MoveCursor` hover 分支用与点选**完全相同**的
+    `pick_at_screen`（`TolerancePolicy::default()` + `BackFacePolicy::Cull`，**无**新容差/排序），结果喂 `OverlayInputs.hovered`
+    （`state.rs`；此前恒空）；`ClearCursor`/hover `MoveCursor` 无捕获时归 `DirtyScope::Overlay`（`input.rs:8-31`）。
+  - **`apps/app-linux/ui/src/input.mjs`**：`pointerleave` 处理器仅在**无按下**时压入 `{ kind: 'pointer_leave' }`
+    （载荷恰为 kind + lane `sequence`，**无**位置/按键/metrics、**不** `preventDefault`），且**先 flush** 待发的 rAF 合并移动。
+  - `crates/cad-app` **未改**；`hidden` 生产者**未**接线（受 G2 门控）。
+- **冻结行为**：
+  - hover 是**实体级、单个**：空闲移动 → 与点选相同拾取路径取**排名第一** ref；命中点亮 `FLAG_HOVERED`，未命中**立即清除**（无陈旧着色）。
+  - **抑制/清除**：按下/导航/捕获**拥有**指针时抑制，按下开始/`Cancel`/`ClearCursor`/pointer cancel/`blur`/未命中即清除；
+    拾取**报错**先清 hover，再把错误作为**显式拒绝**传播（不静默空成功）。
+  - **节流（无时间窗）**：依赖 UI 既有 **rAF 合并**；宿主在逻辑位置**未变**时**整段跳过**拾取查询。这是行为契约
+    （以查询计数这类可观测量表述），**不是**频率/性能承诺。
+  - **`pointer_leave` 契约**：瞬态、**非终态**；映射既有 `ClearCursor`；**不携带**坐标、**不要求** revision；**不扰动**进行中的按下；
+    宿主无捕获时为 **overlay-only**。
+  - **用户可见修正（行为变更）**：此前会话**从不**发 `MoveCursor`，故捕获（绘制/测量）进行中的空闲移动**不**到达既有工具光标分支；
+    现在这类移动到达（由捕获拥有），工具预览光标跟随指针。这是**用户可见修复**，**非**改 `move_tool_cursor` 语义。
+- **对账发现的顺序缺陷（同类于早期 `button: -1`）**：`pointerleave` 若不**先 flush** 待发的 rAF 合并移动，合并移动会在**下一帧**、
+  即 leave **之后**到达——宿主先因 leave 清掉 hover，又据一个**已离面的陈旧位置**重新点亮 hover。该冲突**仅靠跨 lane 阅读两侧
+  源码**才发现（React lane 的 flush 时机 vs 宿主 leave→clear 语义），任一 lane 的**单侧**测试都不会暴露。**修复已合入并验证**
+  （`input.mjs` 的 `leave` 先 `flush()` 再压 `pointer_leave`；UI 测试覆盖）。
+- **证据（主控在最终树独立复跑，全部 PASS）**：`scripts/check-architecture.py`（27 packages、无环、核心边界完整）、
+  `scripts/check-i18n.py`（404 keys、2 catalogs）、`scripts/check-fixture-manifest.py`（22 fixtures）、`scripts/check-workflows.py`；
+  `cargo fmt -p cad-ui-core -p cad-host -- --check`；`cargo clippy -p cad-ui-core -p cad-host --all-targets --locked -- -D warnings`
+  （0 warning）；`cargo check -p app-linux --locked` PASS；`cargo test -p cad-ui-core --locked` **91 passed / 0 failed**；
+  `cargo test -p cad-host --locked` **102 passed / 0 failed / 1 ignored**（预存 `perf_baseline`，需 `YACR_TEST_DWG`）；
+  `(cd apps/app-linux/ui && npm test)` **62 passed / 0 failed**、`npm run build` OK；可选探针行仅在 `YACR_PROFILE_PICK=1`
+  时出现（未设该变量时 **0** 行）。该探针 `YACR_PROFILE_PICK hover elapsed_ms=… picked=…` 的**任何数字仅为合成/本地**
+  （记录运行用 6 实体 demo 文档，无真实 DWG/GPU），**不是**性能结论。
+- **NOT RUN（诚实边界）**：任何 GUI / 原生窗口 / 真实 GPU / 截图 / 真实 DWG、全量 workspace 测试矩阵，以及本切片的
+  wasm/Android/Windows/macOS 目标。**这是有界、合成/本地的切片**：hover 与点选**从未**在真实宿主窗口闭环，**不**构成完整
+  CAD / 跨平台 / 真机 / 视觉验收。
+
+### 宿主支持位置参数打开图纸（2026-10-17，真机验证）
+
+- **需求**：`yacr <path>` 直接打开图纸——flatpak 后由文件管理器（`Exec=… %F`）调用 `yacr` 的前置条件。
+- **实现**（`apps/app-linux/src/host.rs:91-162`）：参数解析拆为**纯函数** `LaunchOptions::parse_args`
+  → `(LaunchOptions, Vec<String>)`，`from_args` 只负责打印诊断；`--open/--fonts-dir/--images-dir/--probe`
+  行为**逐字节保持**。裸位置参数＝图纸路径；多个位置参数只取**第一个**并**显式诊断**其余；`--open`
+  **优先**（与顺序无关）且被忽略的位置参数**显式报告**；含 `://` 的参数（`file://`）**显式拒绝**、
+  绝不误当路径；未知 `-flag` 仍忽略；无参数 ⇒ `drawing = None`（demo 文档）。诊断串为英文
+  `[probe]`/`error:` 前缀，**未**新增 i18n 键、**未**新增用户可见文案，`entry.rs` 未改。
+- **真机证据（主控在本机用户自身 Wayland 会话内实测，真实 GPU）**：
+  - 构建：`cargo build --release --locked -p app-linux --bin yacr --features tauri/custom-protocol` → OK。
+  - `./target/release/yacr fixtures/debug-default-fonts.dwg`（**位置参数**）→ `exit=0`（平移驱动自然退出）、
+    `[probe] page_load url=tauri://localhost`（内嵌前端）、`positional drawing argument:` 与 `startup drawing:`
+    各 1 行、**473 行 `actual-render`**、`cad_status` 报 `documentLabel=fixtures/debug-default-fonts.dwg,
+    entityCount=10656`、**零 OOM / 零 device lost**。
+  - 回归：`--open <same>` → 同样 `entityCount=10656`、`exit=0`。
+  - 边界：`/tmp/opencode/does-not-exist.dwg` → `cad_status.error` 显式报 `drawing path does not exist: …`
+    （96 行），**不**静默成功；`file:///…` → `error: unsupported argument …` 且 **0** 行 `startup drawing`
+    （**未**误加载）。
+  - 单元测试 `cargo test -p app-linux` **74 passed / 0 failed**（含 6 个新测）；`fmt`/`clippy -D warnings`
+    /`check-i18n.py`(404 keys) 由主控独立复跑，全 PASS。
+- **流程教训（诚实记录）**：主控一度用**普通** `cargo build --release -p app-linux` 重建，产出指向
+  `http://localhost:1420` 的 **dev-URL 二进制**（症状 `page_load url=http://localhost:1420/` + 持续
+  `cad-frame no-session`），与既有文档 `docs/react-linux-app.md:46` 已写明的正确命令不符——属**流程疏漏**，
+  按正确命令重建后恢复正常。该陷阱的**症状**已补记入 `docs/react-linux-app.md` 启动段。
+- **NOT RUN**：X11/XWayland 后端下的同一验证；flatpak 打包与 desktop entry（打包管线 2026-10-16
+  已退役，`MimeType`/`Exec=… %F` 属未来替代打包轮）；多文档打开（NOT IMPLEMENTED）。
+
+### 真实宿主帧成本探针：解释手测的 `complex-test.dwg` 卡顿（2026-10-17，真实运行；**非**验收）
+
+- **缘起**：用户手测 release 宿主：`debug-default-fonts.dwg` 的 pan/zoom 较流畅，`complex-test.dwg` 明显卡顿；
+  且**深度放大到大部分图元出屏后仍卡**。主控在本机**用户自身 Wayland 会话内**用**已有** release 二进制
+  （**未**重新构建）实测取证：`YACR_PROBE_CAD_LOG=1` + 有界 `YACR_PROBE_POSTLOAD_PAN=1`（一次 8 s 真实平移手势），
+  两个 fixture 各一次，均 `exit=0`。本轮**未**跑 cargo/npm/门禁（无源码改动）。
+- **环境**：后端 **Wayland**（宿主决议并打印）、`adapter=Quadro P620`、`api=vulkan`、**`tier=accelerated`**（两图一致）；
+  `target/release/yacr` `sha256 61d5d4ae…`（08:53 构建，prebuilt）；**`gpu_ms=None`——无 timestamp query，GPU 时间仍未测量**，
+  `wait_ms` 仅为 GPU/呈现等待的**代理**。
+- **实测（逐帧中位）**：complex `entityCount=44,591`、359 帧、`draw_calls` **3,027**、`verts` **5,454,559**、
+  `tris` 1,999,514（**饱和在 ≈2.0M**）、`wait_ms` **19.382**（p90 22.652）、`cpu_ms` 8.274；debug `entityCount=10,656`、
+  479 帧、1,195 / 2,170,905 / 1,999,961 / **2.895**（p90 5.369）/ 2.072。
+- **结论**：① 手感差异由 **GPU/呈现等待主导**——complex 单帧约 **8.3 ms CPU + 19.4 ms 等待 ≈ 28 ms（≈36 fps）**，
+  debug 约 **2.1 + 2.9 ≈ 5 ms**；② **complex 有 61.3% 的帧仅"等待"就超过 60 fps 预算**（debug 0.4%）；
+  ③ 两图 **99% 的帧都 `over_budget=true` 且 `complete=false`**（渐进分页，单页三角形饱和 ≈2.0M），
+  complex 整帧工作量单位总量 166,346 vs debug 10,548；④ 与"**放大后仍卡**"一致——整帧工作量由**整套图纸计划**决定、
+  **不随可见矩形收缩**，即**缺少视口剔除**的直接后果（backlog P1/P7 的动机）。
+- **对既有推断的更正（重要）**：合成 scale-matched 场景下加速档只有 3/19 次 draw，据此曾推断"P1 在加速档≈省 0 次 draw"；
+  **真实 complex 场景加速档每页约 3,027 次 draw**（差三个数量级）。因此该推断**必须**先按 draw 类别分解重验，
+  **不得**据合成场景结论直接判定 P1 在加速档无收益。
+- **证据位置**：`${YACR_EVIDENCE_ROOT:-/tmp/opencode}/yacr-evidence-20261017T024549Z-realhost-probe/`
+  （原始 `stderr.log` + `results.tsv`，**仅本地、未上传**）；文档见 `docs/validation-realhost-frame-cost-2026-10-17.md`。
+- **NOT RUN（诚实边界）**：**zoom 腿**——仓库只有 `YACR_PROBE_POSTLOAD_PAN[_GESTURES]`，**没有 zoom 驱动**，
+  故"放大后仍卡"是**用户观察**＋结构性推理，**未经本轮脚本化量化**；GPU 时间本身（`gpu_ms=None`，无 `TIMESTAMP_QUERY`）；
+  任何视觉/精度/vendor/golden 判定；全量门禁/测试矩阵与跨平台目标。单机、单适配器、一对图纸、**prebuilt** 二进制、
+  未做重复轮次统计，**不得**外推。
+- **口径提醒**：本轮 complex 的 `entityCount=44,591` 与 `docs/validation-render-perf-2026-10-15.md` 的 **122,006
+  不是同一口径**，**禁止混用或相除**。
+- **已澄清（2026-10-17）**：用户确认那次手测是**从 UI 打开**的 ⇒ 该前提疑点**不成立**。位置参数支持随后已实现
+  （见本文件「宿主支持位置参数打开图纸」小节）。
+- **再分析（同一批日志，未新跑，仍是测量）**：每帧 CPU 相位中位 complex `cpu 8.364 = plan 2.590 + uniform 1.123 +
+  encode 1.131 + **submit 3.412**`（`submit` 是 CPU 最大相位，3,027 draws ⇒ ≈1.13 µs/draw），`wait 19.389`
+  ⇒ 帧 ≈ **27.75 ms**；debug `2.072 + 2.895 ≈ 4.97 ms`。**帧时间由 `wait_ms` 主导（≈70%）**。
+- **分页重启（实测）**：complex **182 次相机变更全部**使本帧完成度塌缩（中位 **4.6%** ≈ 7,716/166,346），
+  356 帧仅 **2** 帧 `complete=true`；debug 中位 86.3%、6 帧完成 ⇒ 交互期间每帧只呈现 **draw-order 前缀首页**
+  （`FrameKey` 含相机，`renderer_impl.rs:3856-3890`）。
+- **`tier` ≠ `accelerated`（源码核对）**：`FrameStats` 两字段并存（`crates/cad-render-wgpu/src/lib.rs:353-364`）；
+  `use_pulled` 要求整场景全接纳（`renderer_impl.rs:4085-4090`）⇒ **分页/超预算帧一律走通用 per-run**，
+  这也解释了每页 `instanced`=1,615（按 stream 合并的 run）而非 pulled 路径的 ~15 段量级。
+- **产品决定（2026-10-17，用户）**：**接受**运动过程中的帧内容不全 ⇒ **不**做可见性排序页内容
+  （取消原拟的"运动中帧"截图判读）；但分页重启的**代价不变**——每帧仍重付 plan/submit，`wait_ms` 仍主导帧时间。
+
+### 归档：GPU-vs-CPU 剔除分析（2026-10-17，复核轮；纯文档，无实现/无运行）
+
+- **问题**：视口剔除 / 几何检查 / 局部重绘中，**哪些能移到 GPU**？（由资深复核读渲染器 + wgpu 30.0.1
+  源码回答；**本轮未运行任何 cargo/npm/门禁/渲染**。）
+- **分析结论**：**提交已近乎免费**——ADR-0007「P3b」A/B 去掉 8,233 draws 仅省 **1.28 ms** CPU
+  （complex-test）、≈900 draws 省 **0.52 ms**（debug）⇒ **≈0.16–0.6 µs CPU/draw**；残留每帧 ~5–7 ms 是
+  plan/sort/uniform/encode 的**每批记账**，**任何**剔除方案都降不下来。唯一值得 GPU 侧剔除的地方是
+  **加速档**——它每帧绘制**全部**几何（complex-test ≈29.45M line 实例 × 6 ≈ **1.77×10^8** 次 VS 调用/帧），
+  而 **GPU 帧时间在本仓从未测量**（`tests/render_perf.rs:559`：无 timestamp queries）。
+- **对首轮答案的更正（首轮答案部分错误，已记入 backlog）**：
+  - **提交不是瓶颈**："减少提交"是**弱杠杆**；间接绘制的提交节省**微弱**（≈0.16–0.6 µs/draw 的 A/B 即证）。
+  - **间接绘制措辞更正**：`draw_indirect`/`multi_draw_*` 在 wgpu 30.0.1 **API 齐全**，仅受
+    `DownlevelFlags::INDIRECT_EXECUTION` 门控；**WebGL2（GLES 3.0）连单次 draw-indirect 都没有**；
+    真正 native-only 的是**未模拟**的 `MULTI_DRAW_INDIRECT_COUNT`（缺它时 wgpu 把 `multi_draw_*` 模拟为
+    一串 `draw_indirect` ⇒ **不省提交**）。**仓库两处设备创建点均零 feature 请求**
+    （`headless.rs:155-158` / `native_presenter.rs:491-494` 的 `DeviceDescriptor { ..Default::default() }`）
+    ⇒ `MULTI_DRAW_INDIRECT_COUNT` 与 `TIMESTAMP_QUERY` **在 P620 上亦未启用**；请求任一**本身即架构决策**。
+  - **VS 早退不是提交流程的胜者**：**VS 内 chunk 早退省 0 提交、约 0 片元**（通用档 CPU 跳过严格占优；
+    加速档 segment 跨多 chunk、chunk 跳过跳不掉 draw）⇒ **VS 早退省 0 ms CPU（精确，非估算）**，只省
+    VS 调用 + 顶点取数。
+- **由此产生的 backlog 修订**（`docs/render-optimization-backlog.md`）：新增 **P0**（测量前置，**blocking**：
+  GPU 帧时间 + P1 剔除 A/B，用既有 `FrameStats` 相位计时器 `plan_ms`/`uniform_ms`/`encode_ms`/`submit_ms`
+  `lib.rs:284-298` 与剔除比）；**P1** 修正陈旧行号、限定范围为**通用档 draw 跳过**（加速档只到残留
+  per-batch draw；记录「segment 粒度 × 可剔除性」为**开放决策**）、新增**缩放相关笔画边距 padding**
+  （测试加 ~`2·world_per_px`，fence `cull_test_pads_stroke_margin_at_deep_zoom`）；**P3** 重标为
+  **bandwidth+fragment 优化，非 GPU compute，且本身不省 CPU**；新增 **P7**（可移植的 per-chunk 可见性
+  VS 早退，**条件于 P0**）；**P6** 重述其唯一幸存收益 + 更正间接绘制措辞；文档头新增**绑定原则**
+  （能力门控 bonus、永非架构依赖、须 capability 检测 + 基础路径 + 对比基线 + 先 profiling）；新增
+  「证据边界与陷阱」节。**ADR-0012 仅追加一行**到「显式延后（NOT NOW）」：GPU 侧剔除保持能力门控的
+  渲染器内部 bonus，永非架构依赖 / pick 权威 / 第二套失效真相，且 GPU 帧时间存在前不得构建。
+- **NOT RUN 边界（本轮）**：**GPU 帧时间从未测量**（每次"GPU 收益"均为**结构推理，非证据**）；基线
+  **单机 / debug profile / Quadro P620 + Vulkan + 驱动 580.178.04**，不外推 release/其它 vendor/更大图纸/
+  浏览器；**797/7,627 与 903/8,252 是不同轮次、不同口径，绝不可混算**；`caps_for` 按 backend 类别
+  （非运行时探测）报能力，**不得**当设备测量（与 G6 同类）；**WebGL2 真实浏览器运行仍 NOT RUN（G7）**。
 
 ## 原生 Wayland 后端（2026-10-16，有界；ADR-0011）
 
