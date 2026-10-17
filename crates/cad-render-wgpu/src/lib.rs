@@ -1589,6 +1589,12 @@ pub struct Renderer {
     /// CPU-side key → identity table for the resident batches. Rebuilt on every
     /// commit/clear; read by `pick_at`.
     pick_table: PickTable,
+    /// Diagnostic: cumulative **full** pick-table rebuilds (never a behaviour).
+    /// An append/suffix commit that keeps the resident prefix must not bump this
+    /// (see [`Renderer::pick_table_full_rebuilds`]).
+    pick_table_full_rebuilds: u64,
+    /// Diagnostic: cumulative incremental pick-table suffix replacements.
+    pick_table_incremental_extends: u64,
     /// The projection of the most recent color frame. `pick_at` reuses it so the
     /// id pass draws the same view the user is looking at.
     last_projection: Option<FrameProjection>,

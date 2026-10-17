@@ -172,6 +172,8 @@ impl Renderer {
             poll_timeout: std::time::Duration::from_secs(1),
             pick_key_counter: std::sync::atomic::AtomicU32::new(1),
             pick_table: PickTable::default(),
+            pick_table_full_rebuilds: 0,
+            pick_table_incremental_extends: 0,
             last_projection: None,
             last_camera_matrix: [0.0; 16],
             last_camera_position: None,
@@ -1319,6 +1321,12 @@ impl Renderer {
     /// previous upload that the renumbering retired.
     fn apply_entity_flags(&mut self) -> CadResult<EntityFlagReport> {
         let request = self.entity_flags_request.clone();
+        // The identity index is built lazily (a scene that never issues an
+        // entity-flag request never needs it): make sure it exists before the
+        // first query, so a request never silently resolves to "no key".
+        if !request.is_empty() {
+            self.pick_table.ensure_source_index();
+        }
         let mut desired: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
         let mut unmatched: Vec<SelectionRef> = Vec::new();
         for (reference, bits) in &request {
@@ -1391,6 +1399,22 @@ impl Renderer {
     /// Number of live entries in the pick table.
     pub fn pick_table_len(&self) -> usize {
         self.pick_table.len()
+    }
+
+    /// Diagnostic: cumulative **full** pick-table rebuilds since init.
+    ///
+    /// A commit that keeps the resident batch prefix (an append/suffix overlay
+    /// commit) must extend the table incrementally and leave this flat; only a
+    /// base change, an image re-upload, a device rebuild or a full clear bumps
+    /// it. Purely observational: it changes no pick semantics.
+    pub fn pick_table_full_rebuilds(&self) -> u64 {
+        self.pick_table_full_rebuilds
+    }
+
+    /// Diagnostic: cumulative incremental pick-table suffix replacements since
+    /// init (the complement of [`Self::pick_table_full_rebuilds`]).
+    pub fn pick_table_incremental_extends(&self) -> u64 {
+        self.pick_table_incremental_extends
     }
 
     fn create_mesh_pipeline(
@@ -2236,6 +2260,13 @@ impl Renderer {
         self.instance_streams.append(&mut prepared.instances);
         self.arc_streams.append(&mut prepared.arcs);
         self.mesh_chunks.append(&mut prepared.mesh_chunks);
+        // The pick keys of the batches this commit drops (the replaced suffix):
+        // the pick table retires exactly these entries incrementally instead of
+        // rebuilding over the whole resident scene.
+        let retired_pick_keys: Vec<u32> = self.batches[keep_prefix..]
+            .iter()
+            .map(|batch| batch.pick_key)
+            .collect();
         self.batches.truncate(keep_prefix);
         self.batches.extend(prepared.batches);
         let append_us = append_started.elapsed().as_micros() as u64;
@@ -2248,7 +2279,7 @@ impl Renderer {
         self.rebuild_pulled(fast);
         let pulled_us = pulled_started.elapsed().as_micros() as u64;
         let pick_started = std::time::Instant::now();
-        self.rebuild_pick_table()?;
+        self.rebuild_pick_table(Some((keep_prefix, retired_pick_keys)))?;
         let pick_us = pick_started.elapsed().as_micros() as u64;
         self.progressive_frame = None;
         self.draw_plan = None;
@@ -2550,7 +2581,9 @@ impl Renderer {
         }
         self.image_textures.retain(|key, _| live.contains(key));
         self.images = staged;
-        self.rebuild_pick_table()?;
+        // The resident image set was replaced wholesale (fresh keys per call), so
+        // this is a full rebuild, never an incremental suffix replacement.
+        self.rebuild_pick_table(None)?;
         // The resident image set is scene data; page cost knowledge is stale.
         self.reset_pacing();
         Ok(report)
@@ -4032,42 +4065,100 @@ impl Renderer {
     /// full clear restarts the key space so a re-opened drawing does not inherit
     /// a growing key counter.
     ///
+    /// When `incremental` is `Some((keep_prefix, retired_keys))` the update
+    /// **replaces the resident suffix**: the kept prefix's entries are unchanged
+    /// and only the new suffix entries are appended (keys are never renumbered or
+    /// reused within a device generation, so the kept prefix's `key → entry`
+    /// mapping cannot change). The incremental path is taken only when it is
+    /// provably equivalent to a full rebuild — see
+    /// [`Self::pick_table_covers_prefix`] — otherwise a full rebuild runs and
+    /// `pick_table_full_rebuilds` is bumped.
+    ///
     /// A repeated key is a **hard error**, not "first wins": keys are allocated
     /// monotonically within a device generation, so a duplicate can only come
     /// from the allocator being restarted while keys are still resident (a
     /// lifecycle hole). Silently keeping one owner would resolve a fragment to
     /// the wrong entity.
-    fn rebuild_pick_table(&mut self) -> CadResult<()> {
+    fn rebuild_pick_table(&mut self, incremental: Option<(usize, Vec<u32>)>) -> CadResult<()> {
         if self.batches.is_empty() && self.images.is_empty() {
             self.reset_pick_keys();
             return Ok(());
         }
-        let mut entries: Vec<(u32, Vec<SelectionRef>)> = self
-            .batches
-            .iter()
-            .map(|batch| (batch.pick_key, batch.sources.clone()))
-            .collect();
-        entries.extend(
-            self.images
+        // The identity index is only needed by the entity-flag path; skip
+        // building it when no request is retained (a later request builds it
+        // lazily in `apply_entity_flags`).
+        let want_index = !self.entity_flags_request.is_empty();
+        let mut used_incremental = false;
+        if let Some((keep_prefix, retired_keys)) = incremental.as_ref() {
+            // A true prefix must be kept (`keep_prefix > 0`): a base change
+            // (`keep_prefix == 0`) retires every key and is a full rebuild.
+            //
+            // `self.images.is_empty()` keeps the combined batch/image index of
+            // every existing entry stable: a resident image entry is indexed as
+            // `batches.len() + i`, so appending batches would renumber it. With no
+            // images resident, the appended batches take `keep_prefix + i`, exactly
+            // what a full rebuild would assign.
+            if *keep_prefix > 0
+                && self.images.is_empty()
+                && self.pick_table_covers_prefix(*keep_prefix)
+            {
+                let added: Vec<(u32, Vec<SelectionRef>)> = self.batches[*keep_prefix..]
+                    .iter()
+                    .map(|batch| (batch.pick_key, batch.sources.clone()))
+                    .collect();
+                self.pick_table
+                    .replace_suffix(*keep_prefix as u32, retired_keys, added)
+                    .map_err(duplicate_pick_key_error)?;
+                used_incremental = true;
+            }
+        }
+        if used_incremental {
+            self.pick_table_incremental_extends += 1;
+        } else {
+            self.pick_table_full_rebuilds += 1;
+            let entries: Vec<(u32, Vec<SelectionRef>)> = self
+                .batches
                 .iter()
-                .map(|image| (image.pick_key, image.sources.clone())),
-        );
-        self.pick_table = PickTable::build(&entries).map_err(|duplicate| {
-            CadError::InvalidInput(format!(
-                "duplicate renderer pick key {} (owners {} and {}): the key space was \
-                 restarted while keys were still resident",
-                duplicate.key, duplicate.first, duplicate.second
-            ))
-        })?;
+                .map(|batch| (batch.pick_key, batch.sources.clone()))
+                .chain(
+                    self.images
+                        .iter()
+                        .map(|image| (image.pick_key, image.sources.clone())),
+                )
+                .collect();
+            self.pick_table =
+                PickTable::build(entries, want_index).map_err(duplicate_pick_key_error)?;
+        }
         // The flags table is indexed by key, so it must cover the live key space.
+        // A key is never reused, so `max_key` only grows: this extends the vector
+        // rather than resizing it from scratch on the incremental path.
         self.flags_bits
             .resize(self.pick_table.max_key() as usize + 1, 0);
-        // A rebuild renumbers keys (a base change or an image re-upload), so the
+        // A rebuild or suffix replacement retires the dropped keys, so the
         // retained entity-flag request must be re-resolved against the new table:
         // otherwise the bits stay on the retired keys and a flagged image would
         // flash back to its unflagged colour after an edit.
         self.apply_entity_flags()?;
         Ok(())
+    }
+
+    /// Whether the pick table still covers the resident batch prefix `prefix`
+    /// (the batches `0..prefix`), so an incremental suffix replacement is valid.
+    ///
+    /// Entries are only ever appended in ascending batch index and a kept prefix's
+    /// indices never move, so it suffices to check that the last kept batch's key
+    /// is present at combined index `prefix - 1` (O(1)). A table that does not
+    /// cover the prefix (a lifecycle hole) falls back to a full rebuild.
+    fn pick_table_covers_prefix(&self, prefix: usize) -> bool {
+        if prefix == 0 {
+            return true;
+        }
+        match self.batches.get(prefix - 1) {
+            Some(batch) => {
+                self.pick_table.batch_index_of_key(batch.pick_key) == Some(prefix as u32 - 1)
+            }
+            None => false,
+        }
     }
 
     fn reset_pick_keys(&mut self) {
@@ -6318,6 +6409,189 @@ pub(crate) fn allocation_guard<R>(
 /// table.
 fn flags_table_width(needed: u32, max_dim: u32) -> u32 {
     needed.max(1).next_power_of_two().min(max_dim.max(1))
+}
+
+/// Map a [`DuplicatePickKey`] to the renderer's invalid-input diagnostic. A
+/// duplicate key is a lifecycle error (the allocator restarted while keys were
+/// resident), never something to paper over: keeping one owner would resolve a
+/// fragment to the wrong entity.
+fn duplicate_pick_key_error(duplicate: DuplicatePickKey) -> CadError {
+    CadError::InvalidInput(format!(
+        "duplicate renderer pick key {} (owners {} and {}): the key space was \
+         restarted while keys were still resident",
+        duplicate.key, duplicate.first, duplicate.second
+    ))
+}
+
+#[cfg(test)]
+mod pick_table_incremental_tests {
+    //! Pure contracts for the incremental pick-table update (no GPU required):
+    //! an append/suffix commit must extend the table, never rebuild it, and the
+    //! result must equal a full rebuild.
+
+    use super::*;
+
+    fn source(entity: u128) -> SelectionRef {
+        SelectionRef {
+            document: cad_domain::DocumentId(1),
+            entity: cad_domain::EntityId(entity),
+            instance: Default::default(),
+            sub_element: None,
+        }
+    }
+
+    /// A `GpuBatch` carrying only the fields the pick table reads; the GPU
+    /// buffers are `None` (the table is pure CPU data).
+    fn gpu_batch(pick_key: u32, sources: Vec<SelectionRef>) -> GpuBatch {
+        GpuBatch {
+            vertices: None,
+            vertex_count: 0,
+            normals: None,
+            colors: None,
+            topology: cad_scene::RenderTopology::Lines,
+            indices: None,
+            index_count: 0,
+            line_quads: None,
+            line_quad_count: 0,
+            mirrored: false,
+            alpha: 1.0,
+            color: [1.0, 1.0, 1.0],
+            lineweight: 0.0,
+            draw_order: 0,
+            centroid: [0.0; 3],
+            origin: [0.0; 3],
+            instanced: Vec::new(),
+            mesh_runs: Vec::new(),
+            arc_runs: Vec::new(),
+            upload_bytes: 0,
+            pick_key,
+            sources,
+        }
+    }
+
+    fn fresh_table(renderer: &Renderer) -> PickTable {
+        let entries: Vec<(u32, Vec<SelectionRef>)> = renderer
+            .batches
+            .iter()
+            .map(|batch| (batch.pick_key, batch.sources.clone()))
+            .chain(
+                renderer
+                    .images
+                    .iter()
+                    .map(|image| (image.pick_key, image.sources.clone())),
+            )
+            .collect();
+        let mut table = PickTable::build(entries, false).expect("resident keys are unique");
+        table.ensure_source_index();
+        table
+    }
+
+    #[test]
+    fn an_append_only_commit_extends_the_pick_table_without_a_full_rebuild() {
+        let mut renderer = Renderer::new(BackendPreference::Auto);
+        renderer.batches = (1..=3)
+            .map(|key| gpu_batch(key, vec![source(key as u128)]))
+            .collect();
+        renderer.rebuild_pick_table(None).expect("initial build");
+        assert_eq!(renderer.pick_table_full_rebuilds(), 1);
+        assert_eq!(renderer.pick_table_incremental_extends(), 0);
+
+        // Append two batches (keys 4, 5): a commit that keeps the whole prefix.
+        renderer.batches.push(gpu_batch(4, vec![source(40)]));
+        renderer.batches.push(gpu_batch(5, vec![source(50)]));
+        renderer
+            .rebuild_pick_table(Some((3, Vec::new())))
+            .expect("append");
+        assert_eq!(
+            renderer.pick_table_full_rebuilds(),
+            1,
+            "an append must not rebuild the whole table"
+        );
+        assert_eq!(renderer.pick_table_incremental_extends(), 1);
+        assert_eq!(renderer.pick_table_len(), 5);
+        assert_eq!(renderer.pick_key_for_batch(4), Some(5));
+
+        let mut incremental = renderer.pick_table.clone();
+        incremental.ensure_source_index();
+        assert_eq!(incremental, fresh_table(&renderer));
+    }
+
+    #[test]
+    fn a_camera_settle_suffix_commit_stays_cheap_on_a_large_batch_set() {
+        // A large synthetic base set, then repeated camera-settle-style overlay
+        // suffix re-prepares: each keeps the base prefix and replaces the single
+        // overlay batch. None of them may trigger a full rebuild.
+        let mut renderer = Renderer::new(BackendPreference::Auto);
+        renderer.batches = (1..=4096)
+            .map(|key| gpu_batch(key, vec![source(key as u128)]))
+            .collect();
+        renderer.rebuild_pick_table(None).expect("base build");
+        let full_rebuilds = renderer.pick_table_full_rebuilds();
+
+        // The first overlay suffix (key 4097), then a settle re-prepare that
+        // retires it and appends key 4098.
+        renderer.batches.push(gpu_batch(4097, vec![source(9001)]));
+        renderer
+            .rebuild_pick_table(Some((4096, Vec::new())))
+            .expect("first suffix");
+        renderer.batches.truncate(4096);
+        renderer.batches.push(gpu_batch(4098, vec![source(9002)]));
+        renderer
+            .rebuild_pick_table(Some((4096, vec![4097])))
+            .expect("settle re-prepare");
+
+        assert_eq!(
+            renderer.pick_table_full_rebuilds(),
+            full_rebuilds,
+            "a camera-settle suffix commit must not rebuild the whole table"
+        );
+        assert_eq!(renderer.pick_table_incremental_extends(), 2);
+        assert_eq!(renderer.pick_table_len(), 4097);
+        assert_eq!(renderer.pick_key_for_batch(4096), Some(4098));
+        assert!(
+            renderer.pick_table.resolve(4097).is_none(),
+            "the retired suffix key is a gap"
+        );
+
+        let mut incremental = renderer.pick_table.clone();
+        incremental.ensure_source_index();
+        assert_eq!(incremental, fresh_table(&renderer));
+    }
+
+    #[test]
+    fn a_base_change_falls_back_to_a_full_rebuild() {
+        let mut renderer = Renderer::new(BackendPreference::Auto);
+        renderer.batches = (1..=3)
+            .map(|key| gpu_batch(key, vec![source(key as u128)]))
+            .collect();
+        renderer.rebuild_pick_table(None).expect("initial build");
+
+        // A base change (keep_prefix = 0) retires every key: a full rebuild.
+        renderer.batches = (10..=12)
+            .map(|key| gpu_batch(key, vec![source(key as u128)]))
+            .collect();
+        renderer
+            .rebuild_pick_table(Some((0, vec![1, 2, 3])))
+            .expect("base change");
+        assert_eq!(renderer.pick_table_full_rebuilds(), 2);
+        assert_eq!(renderer.pick_table_incremental_extends(), 0);
+        assert_eq!(renderer.pick_table_len(), 3);
+        assert!(renderer.pick_table.resolve(1).is_none());
+        assert_eq!(renderer.pick_key_for_batch(0), Some(10));
+
+        // A prefix the table does not cover (a lifecycle hole) must also fall
+        // back to a full rebuild rather than extend a stale table.
+        renderer.batches = (20..=22)
+            .map(|key| gpu_batch(key, vec![source(key as u128)]))
+            .collect();
+        renderer
+            .rebuild_pick_table(Some((5, Vec::new())))
+            .expect("uncovered prefix");
+        assert_eq!(renderer.pick_table_full_rebuilds(), 3);
+        assert_eq!(renderer.pick_table_incremental_extends(), 0);
+        assert_eq!(renderer.pick_table_len(), 3);
+        assert_eq!(renderer.pick_key_for_batch(0), Some(20));
+    }
 }
 
 #[cfg(test)]

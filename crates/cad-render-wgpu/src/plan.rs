@@ -3550,6 +3550,11 @@ pub(crate) struct ResolvedPick {
     pub(crate) collision: bool,
 }
 
+/// Whole-entity identity (`document + entity + instance`) → the pick keys whose
+/// entry carries that identity as a **whole-entity** source. The lazy index the
+/// entity-flag path builds (see `PickTable::ensure_source_index`).
+type SourceIdentityIndex = HashMap<(DocumentId, EntityId, Vec<EntityId>), Vec<u32>>;
+
 /// Key → (batch, full identities) resolution, plus the detected truncation
 /// collisions.
 ///
@@ -3568,7 +3573,20 @@ pub(crate) struct PickTable {
     /// sub-element-carrying source is the sub-element overlay and must never be
     /// matched by an entity-level flag (a face highlight would otherwise be
     /// double-tinted, or discarded by `FLAG_HIDDEN`).
-    source_index: HashMap<(DocumentId, EntityId, Vec<EntityId>), Vec<u32>>,
+    ///
+    /// `None` when the index has not been built: it is only ever read by
+    /// [`Self::keys_for_source`], which is only called from the entity-flag path,
+    /// so a scene that never issues an entity-flag request never pays for it
+    /// (see [`Self::ensure_source_index`]). [`Self::replace_suffix`] keeps an
+    /// already-built index exact and leaves an unbuilt one unbuilt.
+    source_index: Option<SourceIdentityIndex>,
+    /// Truncated `EntityId` (`entity.0 as u32`) → the ascending pick keys whose
+    /// entry carries a source with that low-32 value. Retained so an incremental
+    /// [`Self::replace_suffix`] keeps `EntityId`-truncation collision detection
+    /// **exact** without rescanning every resident source: a fresh
+    /// [`Self::build`] derives the identical index, so the two agree by
+    /// construction (see [`Self::collision_identities_for`]).
+    truncated_index: std::collections::BTreeMap<u32, Vec<u32>>,
 }
 
 impl PickTable {
@@ -3579,51 +3597,209 @@ impl PickTable {
     /// skipped (it can never be written to the id target). A repeated key is a
     /// programming/lifecycle error and is returned as [`DuplicatePickKey`] rather
     /// than silently resolved.
+    ///
+    /// The entries are **consumed** (their `sources` moved into the table) so a
+    /// caller that already owns them pays no second clone; the renderer clones
+    /// each resident batch's `sources` exactly once, into this argument.
+    ///
+    /// `build_source_index` is `false` when the caller knows the table will not
+    /// be asked an entity-flag question before the next rebuild (see
+    /// [`Self::ensure_source_index`]): the identity index is then left unbuilt.
     pub(crate) fn build(
-        entries: &[(u32, Vec<SelectionRef>)],
+        entries: Vec<(u32, Vec<SelectionRef>)>,
+        build_source_index: bool,
     ) -> Result<PickTable, DuplicatePickKey> {
-        let max_key = entries.iter().map(|(key, _)| *key).max().unwrap_or(0);
-        let mut slots: Vec<Option<PickEntry>> = vec![None; max_key as usize + 1];
-        for (batch, (key, sources)) in entries.iter().enumerate() {
-            if *key == PICK_KEY_NONE || *key > MAX_PICK_KEYS {
+        let declared_max = entries.iter().map(|(key, _)| *key).max().unwrap_or(0);
+        let mut slots: Vec<Option<PickEntry>> = vec![None; declared_max as usize + 1];
+        for (batch, (key, sources)) in entries.into_iter().enumerate() {
+            if key == PICK_KEY_NONE || key > MAX_PICK_KEYS {
                 continue;
             }
-            let slot = &mut slots[*key as usize];
+            let slot = &mut slots[key as usize];
             if let Some(existing) = slot.as_ref() {
                 return Err(DuplicatePickKey {
-                    key: *key,
+                    key,
                     first: existing.batch,
                     second: batch as u32,
                 });
             }
             *slot = Some(PickEntry {
                 batch: batch as u32,
-                sources: sources.clone(),
+                sources,
                 collision: false,
             });
         }
-        let collisions = detect_truncation_collisions(&slots);
-        let colliding: std::collections::HashSet<u32> = collisions
-            .iter()
-            .map(|collision| collision.truncated_key)
-            .collect();
-        for entry in slots.iter_mut().flatten() {
-            entry.collision = entry
-                .sources
-                .iter()
-                .any(|source| colliding.contains(&(source.entity.0 as u32)));
+        // `max_key` is the highest key **present** (the doc contract), so the
+        // slot vector is trimmed of trailing gaps: a fresh build and an
+        // incremental update then size the table identically even when the
+        // largest keys were retired without replacement.
+        while slots.last().is_some_and(Option::is_none) {
+            slots.pop();
         }
-        // Index the whole-entity sources so an entity-flag update resolves by
-        // identity in `O(refs)` rather than scanning every entry.
-        let mut source_index: HashMap<(DocumentId, EntityId, Vec<EntityId>), Vec<u32>> =
-            HashMap::new();
-        for (key, entry) in slots.iter().enumerate() {
+        let max_key = slots.len().saturating_sub(1) as u32;
+        let mut table = PickTable {
+            entries: slots,
+            collisions: Vec::new(),
+            max_key,
+            source_index: None,
+            truncated_index: std::collections::BTreeMap::new(),
+        };
+        table.rebuild_truncated_index();
+        table.rebuild_collisions();
+        if build_source_index {
+            table.ensure_source_index();
+        }
+        Ok(table)
+    }
+
+    /// Replace the resident suffix incrementally: retire `retired_keys` (the pick
+    /// keys of the dropped batches) and append `added` entries whose combined
+    /// batch/image indices start at `base`.
+    ///
+    /// Valid **only** when the kept prefix is a true prefix of the resident batch
+    /// list (the caller guarantees `keep_prefix <= the resident batch count`, and
+    /// keys are never renumbered or reused within a device generation), so every
+    /// entry outside `retired_keys` is unchanged and the new keys are strictly
+    /// greater than every existing key. `max_key` is recomputed as the highest
+    /// key **present**, exactly as a fresh [`Self::build`] computes it (it can
+    /// shrink when the largest keys are retired without replacement). The result
+    /// is **identical** to a fresh [`Self::build`] over the resident set: the
+    /// entry mapping, the `keys_for_source` answers, the truncation-collision set
+    /// and `max_key` all agree (fenced by the differential test).
+    ///
+    /// A repeated key (a new key that is already resident) is a lifecycle error
+    /// and is returned as [`DuplicatePickKey`], exactly as in [`Self::build`].
+    pub(crate) fn replace_suffix(
+        &mut self,
+        base: u32,
+        retired_keys: &[u32],
+        added: Vec<(u32, Vec<SelectionRef>)>,
+    ) -> Result<(), DuplicatePickKey> {
+        // Truncated ids touched by this update; only these can change a collision.
+        let mut affected: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+        // Validate the added keys **before** mutating, so a duplicate leaves the
+        // table untouched (a fresh build refuses the same way).
+        let retired: std::collections::HashSet<u32> = retired_keys.iter().copied().collect();
+        let mut added_keys: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        for (index, (key, _)) in added.iter().enumerate() {
+            if *key == PICK_KEY_NONE || *key > MAX_PICK_KEYS {
+                continue;
+            }
+            if !added_keys.insert(*key) {
+                return Err(DuplicatePickKey {
+                    key: *key,
+                    first: base + index as u32,
+                    second: base + index as u32,
+                });
+            }
+            if !retired.contains(key) {
+                if let Some(Some(existing)) = self.entries.get(*key as usize) {
+                    return Err(DuplicatePickKey {
+                        key: *key,
+                        first: existing.batch,
+                        second: base + index as u32,
+                    });
+                }
+            }
+        }
+        // 1. Retire the dropped entries.
+        for &key in retired_keys {
+            if key == PICK_KEY_NONE || key > MAX_PICK_KEYS {
+                continue;
+            }
+            let Some(slot) = self.entries.get_mut(key as usize) else {
+                continue;
+            };
+            let Some(entry) = slot.take() else {
+                continue;
+            };
+            for source in &entry.sources {
+                let truncated = source.entity.0 as u32;
+                affected.insert(truncated);
+                if let Some(keys) = self.truncated_index.get_mut(&truncated) {
+                    keys.retain(|existing| *existing != key);
+                    if keys.is_empty() {
+                        self.truncated_index.remove(&truncated);
+                    }
+                }
+                if let Some(index) = self.source_index.as_mut() {
+                    if source.sub_element.is_none() {
+                        let identity = (source.document, source.entity, source.instance.0.clone());
+                        if let Some(keys) = index.get_mut(&identity) {
+                            keys.retain(|existing| *existing != key);
+                            if keys.is_empty() {
+                                index.remove(&identity);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 2. Append the new entries. `base` is the combined index of the first
+        //    new entry, so `base + i` matches `build`'s enumerate position.
+        let declared_max = added.iter().map(|(key, _)| *key).max().unwrap_or(0);
+        if declared_max as usize >= self.entries.len() {
+            self.entries.resize(declared_max as usize + 1, None);
+        }
+        for (index, (key, sources)) in added.into_iter().enumerate() {
+            if key == PICK_KEY_NONE || key > MAX_PICK_KEYS {
+                continue;
+            }
+            for source in &sources {
+                let truncated = source.entity.0 as u32;
+                affected.insert(truncated);
+                let keys = self.truncated_index.entry(truncated).or_default();
+                if keys.last() != Some(&key) {
+                    keys.push(key);
+                }
+            }
+            if let Some(index_map) = self.source_index.as_mut() {
+                for source in &sources {
+                    if source.sub_element.is_some() {
+                        continue;
+                    }
+                    let keys = index_map
+                        .entry((source.document, source.entity, source.instance.0.clone()))
+                        .or_default();
+                    if keys.last() != Some(&key) {
+                        keys.push(key);
+                    }
+                }
+            }
+            self.entries[key as usize] = Some(PickEntry {
+                batch: base + index as u32,
+                sources,
+                collision: false,
+            });
+        }
+        // Trim trailing gaps and take `max_key` as the highest key **present**, so
+        // the table is sized exactly as a fresh build would size it even when the
+        // retired suffix carried the largest keys (see `Self::build`).
+        while self.entries.last().is_some_and(Option::is_none) {
+            self.entries.pop();
+        }
+        self.max_key = self.entries.len().saturating_sub(1) as u32;
+        // 3. Recompute collisions exactly, only for the touched truncated ids.
+        self.update_collisions(&affected);
+        Ok(())
+    }
+
+    /// Build the whole-entity identity index if it is not built yet.
+    ///
+    /// Called by the entity-flag path (and only there): `keys_for_source` reads
+    /// it, and a scene that never issues an entity-flag request never needs it.
+    pub(crate) fn ensure_source_index(&mut self) {
+        if self.source_index.is_some() {
+            return;
+        }
+        let mut index: SourceIdentityIndex = HashMap::new();
+        for (key, entry) in self.entries.iter().enumerate() {
             let Some(entry) = entry else { continue };
             for source in &entry.sources {
                 if source.sub_element.is_some() {
                     continue;
                 }
-                let keys = source_index
+                let keys = index
                     .entry((source.document, source.entity, source.instance.0.clone()))
                     .or_default();
                 let key = key as u32;
@@ -3632,12 +3808,173 @@ impl PickTable {
                 }
             }
         }
-        Ok(PickTable {
-            entries: slots,
-            collisions,
-            max_key,
-            source_index,
-        })
+        self.source_index = Some(index);
+    }
+
+    /// The combined batch/image index of the entry owning `key`, or `None` when
+    /// `key` is not a live entry. O(1); used by the renderer to prove its table
+    /// still covers the kept batch prefix before an incremental update.
+    pub(crate) fn batch_index_of_key(&self, key: u32) -> Option<u32> {
+        self.entries
+            .get(key as usize)?
+            .as_ref()
+            .map(|entry| entry.batch)
+    }
+
+    /// Rebuild [`Self::truncated_index`] from `entries` (fresh-build path only).
+    fn rebuild_truncated_index(&mut self) {
+        self.truncated_index.clear();
+        for (key, entry) in self.entries.iter().enumerate() {
+            let Some(entry) = entry else { continue };
+            for source in &entry.sources {
+                let keys = self
+                    .truncated_index
+                    .entry(source.entity.0 as u32)
+                    .or_default();
+                let key = key as u32;
+                if keys.last() != Some(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+    }
+
+    /// The distinct full identities that share the low-32 `truncated` value, in
+    /// key order then source order — the exact group
+    /// `detect_truncation_collisions` reported before the index existed.
+    fn distinct_identities_for(&self, truncated: u32) -> Vec<SelectionRef> {
+        let Some(keys) = self.truncated_index.get(&truncated) else {
+            return Vec::new();
+        };
+        let mut identities: Vec<SelectionRef> = Vec::new();
+        for &key in keys {
+            let Some(Some(entry)) = self.entries.get(key as usize) else {
+                continue;
+            };
+            for source in &entry.sources {
+                if source.entity.0 as u32 != truncated {
+                    continue;
+                }
+                if !identities.contains(source) {
+                    identities.push(source.clone());
+                }
+            }
+        }
+        identities
+    }
+
+    /// Recompute [`Self::collisions`] and every entry's `collision` flag from the
+    /// current `truncated_index` (fresh-build path only).
+    ///
+    /// A single pass over the truncated ids: `collisions` stays sorted by
+    /// `truncated_key` because the index is a `BTreeMap` (ascending iteration).
+    /// Non-colliding ids (the common case) are rejected by
+    /// [`Self::collision_identities_for`] without allocating.
+    fn rebuild_collisions(&mut self) {
+        let mut collisions: Vec<PickCollision> = Vec::new();
+        let mut colliding: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+        for &truncated in self.truncated_index.keys() {
+            if let Some(identities) = self.collision_identities_for(truncated) {
+                colliding.insert(truncated);
+                collisions.push(PickCollision {
+                    truncated_key: truncated,
+                    identities,
+                });
+            }
+        }
+        self.collisions = collisions;
+        if !colliding.is_empty() {
+            for entry in self.entries.iter_mut().flatten() {
+                entry.collision = entry
+                    .sources
+                    .iter()
+                    .any(|source| colliding.contains(&(source.entity.0 as u32)));
+            }
+        }
+    }
+
+    /// Recompute the collision set and the entry flags, touching only the
+    /// truncated ids in `affected`.
+    ///
+    /// A truncated id is colliding iff two or more **distinct** full identities
+    /// carry it. `affected` must contain every truncated id whose identity set
+    /// changed (the added and retired sources); every other id's colliding status
+    /// is unchanged, so its collision entry and its entries' flags are left
+    /// untouched — the whole point of the incremental update (a scene with many
+    /// pre-existing collisions must not re-derive them on every commit).
+    fn update_collisions(&mut self, affected: &std::collections::BTreeSet<u32>) {
+        if affected.is_empty() {
+            return;
+        }
+        // Re-derive only the affected ids' collision entries.
+        let mut inserts: Vec<PickCollision> = Vec::new();
+        for &truncated in affected {
+            if let Some(identities) = self.collision_identities_for(truncated) {
+                inserts.push(PickCollision {
+                    truncated_key: truncated,
+                    identities,
+                });
+            }
+        }
+        // `collisions` is kept sorted by `truncated_key`; drop the affected ids'
+        // stale entries and merge the fresh ones back in order.
+        self.collisions
+            .retain(|collision| !affected.contains(&collision.truncated_key));
+        inserts.sort_by_key(|collision| collision.truncated_key);
+        for collision in inserts {
+            let position = self
+                .collisions
+                .partition_point(|existing| existing.truncated_key < collision.truncated_key);
+            self.collisions.insert(position, collision);
+        }
+        // Only the affected ids' entries can have flipped their flag.
+        let colliding: std::collections::BTreeSet<u32> = self
+            .collisions
+            .iter()
+            .map(|collision| collision.truncated_key)
+            .collect();
+        for &truncated in affected {
+            let Some(keys) = self.truncated_index.get(&truncated).cloned() else {
+                continue;
+            };
+            for key in keys {
+                let Some(Some(entry)) = self.entries.get_mut(key as usize) else {
+                    continue;
+                };
+                entry.collision = entry
+                    .sources
+                    .iter()
+                    .any(|source| colliding.contains(&(source.entity.0 as u32)));
+            }
+        }
+    }
+
+    /// The distinct identities carrying `truncated` **iff** it is a truncation
+    /// collision (two or more distinct full identities), else `None`.
+    ///
+    /// The cheap path (every source equal to the first) allocates nothing, so a
+    /// fresh build does not pay a `Vec` per non-colliding `EntityId`.
+    fn collision_identities_for(&self, truncated: u32) -> Option<Vec<SelectionRef>> {
+        let keys = self.truncated_index.get(&truncated)?;
+        let mut first: Option<&SelectionRef> = None;
+        for &key in keys {
+            let Some(Some(entry)) = self.entries.get(key as usize) else {
+                continue;
+            };
+            for source in &entry.sources {
+                if source.entity.0 as u32 != truncated {
+                    continue;
+                }
+                match first {
+                    None => first = Some(source),
+                    Some(existing) if existing != source => {
+                        return Some(self.distinct_identities_for(truncated));
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        None
     }
 
     /// Resolve a key read back from the id target. `None` for the background
@@ -3676,11 +4013,16 @@ impl PickTable {
     /// tint (or hide) the face overlay batch. A key is returned once even when
     /// several of its sources match: the caller sets the whole batch's bits,
     /// which is the documented batch-granularity limit for a multi-source run.
+    ///
+    /// The caller must have ensured the index exists
+    /// ([`Self::ensure_source_index`]); the entity-flag path always does. An
+    /// unbuilt index answers "no key", which is why the flags path builds it
+    /// before querying rather than relying on a silent empty result.
     pub(crate) fn keys_for_source(&self, source: &SelectionRef) -> Vec<u32> {
         let identity = (source.document, source.entity, source.instance.0.clone());
         self.source_index
-            .get(&identity)
-            .cloned()
+            .as_ref()
+            .and_then(|index| index.get(&identity).cloned())
             .unwrap_or_default()
     }
 
@@ -3693,34 +4035,6 @@ impl PickTable {
     pub(crate) fn len(&self) -> usize {
         self.entries.iter().filter(|entry| entry.is_some()).count()
     }
-}
-
-/// Group every source's low-32 `EntityId` and report the values shared by two or
-/// more *distinct* full identities.
-///
-/// Distinctness is the full `SelectionRef` (document + entity + instance +
-/// sub-element): two sources of the same entity under different insert instances
-/// are distinct placements and therefore a real collision for a 32-bit consumer.
-fn detect_truncation_collisions(entries: &[Option<PickEntry>]) -> Vec<PickCollision> {
-    let mut groups: std::collections::BTreeMap<u32, Vec<SelectionRef>> =
-        std::collections::BTreeMap::new();
-    for entry in entries.iter().flatten() {
-        for source in &entry.sources {
-            let truncated = source.entity.0 as u32;
-            let group = groups.entry(truncated).or_default();
-            if !group.contains(source) {
-                group.push(source.clone());
-            }
-        }
-    }
-    groups
-        .into_iter()
-        .filter(|(_, identities)| identities.len() > 1)
-        .map(|(truncated_key, identities)| PickCollision {
-            truncated_key,
-            identities,
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -4528,7 +4842,7 @@ mod pick_table_tests {
 
     #[test]
     fn pick_key_none_is_the_background_and_never_resolves() {
-        let table = PickTable::build(&[(1, vec![source(7, &[])])]).expect("unique keys");
+        let table = PickTable::build(vec![(1, vec![source(7, &[])])], true).expect("unique keys");
         assert_eq!(PICK_KEY_NONE, 0);
         assert!(table.resolve(PICK_KEY_NONE).is_none());
         assert!(table.resolve(999).is_none(), "an unknown key is not a hit");
@@ -4540,7 +4854,8 @@ mod pick_table_tests {
         // An EntityId far beyond 32 bits: the table must return the whole value,
         // not its low 32 bits.
         let entity = (1u128 << 100) | 0xDEAD_BEEF;
-        let table = PickTable::build(&[(3, vec![source(entity, &[])])]).expect("unique keys");
+        let table =
+            PickTable::build(vec![(3, vec![source(entity, &[])])], true).expect("unique keys");
         let resolved = table.resolve(3).expect("known key");
         assert_eq!(resolved.batch, 0, "batch ordinal is the entry position");
         let hit = resolved.source.expect("exact");
@@ -4561,7 +4876,8 @@ mod pick_table_tests {
         // resolution must list both and never silently pick the first.
         let a = source(11, &[]);
         let b = source(22, &[]);
-        let table = PickTable::build(&[(1, vec![a.clone(), b.clone()])]).expect("unique keys");
+        let table =
+            PickTable::build(vec![(1, vec![a.clone(), b.clone()])], true).expect("unique keys");
         let resolved = table.resolve(1).expect("known key");
         assert!(resolved.source.is_none(), "no exact identity");
         assert_eq!(resolved.sources, vec![a, b]);
@@ -4570,7 +4886,7 @@ mod pick_table_tests {
 
     #[test]
     fn a_batch_with_no_source_resolves_to_no_identity() {
-        let table = PickTable::build(&[(1, Vec::new())]).expect("unique keys");
+        let table = PickTable::build(vec![(1, Vec::new())], true).expect("unique keys");
         let resolved = table.resolve(1).expect("known key");
         assert!(resolved.source.is_none());
         assert!(resolved.sources.is_empty());
@@ -4581,11 +4897,14 @@ mod pick_table_tests {
     fn keys_for_source_matches_identity_and_ignores_the_sub_element() {
         let instance_a = source(20, &[10]);
         let instance_b = source(20, &[20]);
-        let table = PickTable::build(&[
-            (1, vec![instance_a.clone()]),
-            (2, vec![instance_b.clone()]),
-            (3, vec![source(7, &[])]),
-        ])
+        let table = PickTable::build(
+            vec![
+                (1, vec![instance_a.clone()]),
+                (2, vec![instance_b.clone()]),
+                (3, vec![source(7, &[])]),
+            ],
+            true,
+        )
         .expect("unique keys");
 
         // Exact placement match, in key order.
@@ -4609,7 +4928,8 @@ mod pick_table_tests {
         // must map to the batch's single key (batch-granularity limit).
         let a = source(11, &[]);
         let b = source(22, &[]);
-        let table = PickTable::build(&[(5, vec![a.clone(), b.clone()])]).expect("unique keys");
+        let table =
+            PickTable::build(vec![(5, vec![a.clone(), b.clone()])], true).expect("unique keys");
         assert_eq!(table.keys_for_source(&a), vec![5]);
         assert_eq!(table.keys_for_source(&b), vec![5]);
     }
@@ -4629,7 +4949,7 @@ mod pick_table_tests {
             source
         };
         let whole = source(40, &[]);
-        let table = PickTable::build(&[(1, vec![whole.clone()]), (2, vec![face(40)])])
+        let table = PickTable::build(vec![(1, vec![whole.clone()]), (2, vec![face(40)])], true)
             .expect("unique keys");
         assert_eq!(
             table.keys_for_source(&whole),
@@ -4638,7 +4958,7 @@ mod pick_table_tests {
         );
         // A batch that carries *only* the face source is never matched by an
         // entity-level ref (nor by a different entity).
-        let face_only = PickTable::build(&[(2, vec![face(40)])]).expect("unique keys");
+        let face_only = PickTable::build(vec![(2, vec![face(40)])], true).expect("unique keys");
         assert!(face_only.keys_for_source(&whole).is_empty());
         assert!(face_only.keys_for_source(&source(41, &[])).is_empty());
     }
@@ -4650,8 +4970,11 @@ mod pick_table_tests {
         let low = 0x0000_1234u128;
         let a = low;
         let b = (1u128 << 64) | low;
-        let table = PickTable::build(&[(1, vec![source(a, &[])]), (2, vec![source(b, &[])])])
-            .expect("unique keys");
+        let table = PickTable::build(
+            vec![(1, vec![source(a, &[])]), (2, vec![source(b, &[])])],
+            true,
+        )
+        .expect("unique keys");
         assert_eq!(table.collisions().len(), 1);
         let collision = &table.collisions()[0];
         assert_eq!(collision.truncated_key, 0x1234);
@@ -4676,15 +4999,18 @@ mod pick_table_tests {
         // a 32-bit consumer they are indistinguishable, so this is reported.
         let a = source(5, &[100]);
         let b = source(5, &[200]);
-        let table = PickTable::build(&[(1, vec![a]), (2, vec![b])]).expect("unique keys");
+        let table = PickTable::build(vec![(1, vec![a]), (2, vec![b])], true).expect("unique keys");
         assert_eq!(table.collisions().len(), 1);
         assert_eq!(table.collisions()[0].identities.len(), 2);
     }
 
     #[test]
     fn distinct_entities_with_distinct_low_bits_are_not_a_collision() {
-        let table = PickTable::build(&[(1, vec![source(1, &[])]), (2, vec![source(2, &[])])])
-            .expect("unique keys");
+        let table = PickTable::build(
+            vec![(1, vec![source(1, &[])]), (2, vec![source(2, &[])])],
+            true,
+        )
+        .expect("unique keys");
         assert!(table.collisions().is_empty());
         assert!(!table.resolve(1).unwrap().collision);
         assert!(!table.resolve(2).unwrap().collision);
@@ -4696,8 +5022,11 @@ mod pick_table_tests {
         // lifecycle bug (the allocator restarted while keys were resident).
         // Silently keeping one owner would resolve a fragment to the wrong
         // entity, so the table refuses to build.
-        let duplicate = PickTable::build(&[(1, vec![source(1, &[])]), (1, vec![source(2, &[])])])
-            .expect_err("a duplicate key must not build a table");
+        let duplicate = PickTable::build(
+            vec![(1, vec![source(1, &[])]), (1, vec![source(2, &[])])],
+            true,
+        )
+        .expect_err("a duplicate key must not build a table");
         assert_eq!(duplicate.key, 1);
         assert_eq!(duplicate.first, 0);
         assert_eq!(duplicate.second, 1);
@@ -4705,10 +5034,246 @@ mod pick_table_tests {
 
     #[test]
     fn max_key_tracks_the_highest_live_key() {
-        let table = PickTable::build(&[(4, vec![source(1, &[])]), (9, vec![source(2, &[])])])
-            .expect("unique keys");
+        let table = PickTable::build(
+            vec![(4, vec![source(1, &[])]), (9, vec![source(2, &[])])],
+            true,
+        )
+        .expect("unique keys");
         assert_eq!(table.max_key(), 9);
         assert!(table.resolve(5).is_none(), "a gap is not a hit");
+    }
+
+    /// A tiny deterministic PRNG (SplitMix64): the differential sequence is
+    /// reproducible without pulling a dependency into the crate.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    fn random_source(rng: &mut Rng) -> SelectionRef {
+        // Bias toward dense / high-bit-aliased entity ids so low-32 truncation
+        // collisions actually occur in the sequence.
+        let entity = match rng.below(4) {
+            0 => rng.below(8) as u128,
+            1 => (rng.below(8) as u128) | (1u128 << 64),
+            _ => rng.next() as u128,
+        };
+        let instance = if rng.below(3) == 0 {
+            Vec::new()
+        } else {
+            vec![cad_domain::EntityId(rng.below(4) as u128)]
+        };
+        let sub_element = if rng.below(5) == 0 {
+            Some(cad_domain::SubElementId {
+                source_key: "face-a".into(),
+                topology_revision: cad_domain::Revision(0),
+            })
+        } else {
+            None
+        };
+        SelectionRef {
+            document: cad_domain::DocumentId(1),
+            entity: EntityId(entity),
+            instance: InstancePath(instance),
+            sub_element,
+        }
+    }
+
+    fn random_entry(rng: &mut Rng, key: u32) -> (u32, Vec<SelectionRef>) {
+        let count = 1 + rng.below(3) as usize;
+        (key, (0..count).map(|_| random_source(rng)).collect())
+    }
+
+    /// The modelled resident set: the base/suffix batches (combined indices
+    /// `0..batches.len()`) followed by the resident image quads (indices
+    /// `batches.len()..`), exactly as the renderer feeds `PickTable::build`.
+    struct Resident {
+        batches: Vec<(u32, Vec<SelectionRef>)>,
+        images: Vec<(u32, Vec<SelectionRef>)>,
+        next_key: u32,
+    }
+
+    impl Resident {
+        fn combined(&self) -> Vec<(u32, Vec<SelectionRef>)> {
+            self.batches
+                .iter()
+                .chain(self.images.iter())
+                .cloned()
+                .collect()
+        }
+        fn alloc(&mut self) -> u32 {
+            let key = self.next_key;
+            self.next_key += 1;
+            key
+        }
+    }
+
+    /// The table a full rebuild would produce for `resident`, with its identity
+    /// index built (so it compares like-for-like with the maintained table).
+    fn fresh(resident: &Resident) -> PickTable {
+        let mut table =
+            PickTable::build(resident.combined(), false).expect("resident keys are unique");
+        table.ensure_source_index();
+        table
+    }
+
+    /// The renderer's incremental precondition: no resident image (which would
+    /// renumber), and the table still covers the kept batch prefix.
+    fn covers(table: &PickTable, resident: &Resident, prefix: usize) -> bool {
+        if prefix == 0 {
+            return true;
+        }
+        match resident.batches.get(prefix - 1) {
+            Some((key, _)) => table.batch_index_of_key(*key) == Some(prefix as u32 - 1),
+            None => false,
+        }
+    }
+
+    #[test]
+    fn incremental_pick_table_matches_a_fresh_build_across_commit_sequences() {
+        // Randomized commit sequences (append-only, suffix replacement, image
+        // re-upload, reset). After every step the incrementally maintained table
+        // must equal a freshly built one byte for byte: the entry mapping, the
+        // `keys_for_source` answers, the collision set and `max_key`.
+        for seed in 0..128u64 {
+            let mut rng = Rng(seed.wrapping_mul(0x100_0000_01B3).wrapping_add(0x9E37));
+            let mut resident = Resident {
+                batches: Vec::new(),
+                images: Vec::new(),
+                next_key: 1,
+            };
+            let mut table = PickTable::default();
+            for step in 0..40 {
+                match rng.below(8) {
+                    // Append batches (a base/overlay commit that keeps everything).
+                    0..=2 => {
+                        let n = 1 + rng.below(6) as usize;
+                        let added: Vec<_> = (0..n)
+                            .map(|_| {
+                                let key = resident.alloc();
+                                random_entry(&mut rng, key)
+                            })
+                            .collect();
+                        let incremental = resident.images.is_empty()
+                            && covers(&table, &resident, resident.batches.len());
+                        if incremental {
+                            table
+                                .replace_suffix(resident.batches.len() as u32, &[], added.clone())
+                                .expect("unique keys");
+                        }
+                        resident.batches.extend(added);
+                        if !incremental {
+                            table = PickTable::build(resident.combined(), false)
+                                .expect("resident keys are unique");
+                        }
+                    }
+                    // Replace a suffix (drop the batches after `keep`, append new).
+                    3 | 4 => {
+                        let keep = rng.below(resident.batches.len() as u64 + 1) as usize;
+                        let retired: Vec<u32> = resident.batches[keep..]
+                            .iter()
+                            .map(|(key, _)| *key)
+                            .collect();
+                        let m = rng.below(4) as usize;
+                        let added: Vec<_> = (0..m)
+                            .map(|_| {
+                                let key = resident.alloc();
+                                random_entry(&mut rng, key)
+                            })
+                            .collect();
+                        let incremental =
+                            resident.images.is_empty() && covers(&table, &resident, keep);
+                        if incremental {
+                            table
+                                .replace_suffix(keep as u32, &retired, added.clone())
+                                .expect("unique keys");
+                        }
+                        resident.batches.truncate(keep);
+                        resident.batches.extend(added);
+                        if !incremental {
+                            table = PickTable::build(resident.combined(), false)
+                                .expect("resident keys are unique");
+                        }
+                    }
+                    // Re-upload the images (a wholesale replacement: full rebuild).
+                    5 => {
+                        let n = rng.below(4) as usize;
+                        resident.images = (0..n)
+                            .map(|_| {
+                                let key = resident.alloc();
+                                random_entry(&mut rng, key)
+                            })
+                            .collect();
+                        if resident.batches.is_empty() && resident.images.is_empty() {
+                            table = PickTable::default();
+                        } else {
+                            table = PickTable::build(resident.combined(), false)
+                                .expect("resident keys are unique");
+                        }
+                    }
+                    // A full clear: the table resets with the resident set.
+                    6 => {
+                        resident.batches.clear();
+                        resident.images.clear();
+                        table = PickTable::default();
+                    }
+                    // Simulate an entity-flag request: the index must be built and
+                    // thereafter kept exact by the incremental updates.
+                    _ => table.ensure_source_index(),
+                }
+                let mut expected = fresh(&resident);
+                let mut actual = table.clone();
+                actual.ensure_source_index();
+                expected.ensure_source_index();
+                assert_eq!(
+                    actual, expected,
+                    "seed {seed} step {step}: incremental table diverged from a fresh build"
+                );
+                assert_eq!(
+                    actual.max_key(),
+                    expected.max_key(),
+                    "seed {seed} step {step}: max_key diverged"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_incremental_duplicate_key_is_rejected_exactly_like_a_build() {
+        let mk = |key: u32| (key, vec![source(key as u128, &[])]);
+        // A resident set with keys 1..=3, replaced down to a prefix of 2, then a
+        // new suffix that reuses the still-resident key 2.
+        let mut table = PickTable::build(vec![mk(1), mk(2), mk(3)], true).expect("unique keys");
+        let duplicate = table
+            .replace_suffix(2, &[3], vec![mk(2)])
+            .expect_err("a duplicate key must not update the table");
+        assert_eq!(duplicate.key, 2);
+        // The rejected update left the table untouched (never a partial result).
+        assert_eq!(table.max_key(), 3);
+        assert_eq!(table.batch_index_of_key(1), Some(0));
+        assert_eq!(table.batch_index_of_key(2), Some(1));
+        assert_eq!(table.batch_index_of_key(3), Some(2));
+        // A fresh build over the same (invalid) resident set refuses identically.
+        let built = PickTable::build(vec![mk(1), mk(2), mk(2)], true)
+            .expect_err("a duplicate key must not build a table");
+        assert_eq!(built.key, 2);
+        assert_eq!(built.first, 1);
+        assert_eq!(built.second, 2);
+        // A duplicate *within* the appended set is rejected too.
+        let within = table
+            .replace_suffix(3, &[], vec![mk(5), mk(5)])
+            .expect_err("a duplicate key must not update the table");
+        assert_eq!(within.key, 5);
     }
 }
 
