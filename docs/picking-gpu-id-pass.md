@@ -69,6 +69,20 @@ frame key 下不再重绘、保留加标志前的像素，选择要等到相机�
 `overlay_suffix_commits += 1`。这是**有意**的：此时 GPU 上的后缀本就缺失，必须靠一次完整提交
 恢复，标志-only 的前提（后缀驻留）不成立。相机-only 导航仍不触碰该计数器。
 
+## 0b. 生产拾取走 CPU 路径，现已由空间索引加速（记录）
+
+**生产**的点选/悬停走的是 **CPU 路径** `cad_app::picking::pick_at_screen`（`crates/cad-app/src/picking.rs`；
+宿主 `cad-host` 的 `SelectAt`/`MoveCursor` 落点见 §0、`docs/input.md` §1.1/§1.1.2 与 backlog S1/S2）。
+本文记录的 GPU **id pass**（`Renderer::pick_at`）**没有生产调用方**——它只被测试使用
+（`crates/cad-render-wgpu/tests/pick_id.rs`、`crates/cad-cli-tools/tests/pick_parity.rs`、
+`pulled_prefix_equivalence.rs`），是 ADR-0012 §8.5/§10 的**可选加速 / parity 参考**，**不是** pick 权威
+（§7 的 parity harness 同样只证明这一点）。
+
+该 CPU 路径现已由 ADR-0012 §7 的两级空间索引加速（`cad-app::picking` 的 `PickIndex` +
+`cad-spatial::ChunkGridIndex`，commit `13f7808`）：点选/悬停的**候选集**由索引收窄，精确判定语义不变
+（索引路径与穷举路径的 `PickReport` **完全相等**）。机制、实测、偏离（每 chunk 为**扁平 payload 列表**
+而非 `rstar`）与边界见 `docs/validation-pick-index-2026-10-17.md`（本条不重复其内容）。
+
 ## 1. id pass（按需，绝不逐帧）
 
 `Renderer::pick_at(x, y)` 触发一次**独立的** id pass：

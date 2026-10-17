@@ -130,6 +130,11 @@ GPU 提交转向**CPU 侧场景组织与空间查询**：每帧遍历、可见�
 - **多核**：本轮**不**引入。渲染会话属主线程、`cad-platform` 契约无 futures/无 `Send`，rayon 进渲染路径
   与 ADR-0007 及平台契约冲突。串行先行，按实测再议（§8.5 要求 profiling 先行）。
 
+- **实施状态（2026-10-17，记录，不改本决策）**：本节的**顶层 chunk 网格 + 超大图元策略**已接入**生产
+  拾取路径**（`cad-app::picking` 的 `PickIndex` + `cad-spatial` 的 `ChunkGridIndex`，commit `13f7808`）；
+  **每 chunk 的 `rstar` 仍未实现**（本轮 `Cargo.*` 未动），当前每 chunk 为**扁平 payload 列表**。
+  证据见 `docs/validation-pick-index-2026-10-17.md`（含偏离项与内存足迹）。
+
 ### 8. 交互语义
 
 - **圆/弧拾取按 AutoCAD 惯例：仅圆周可选**（`|d − r| ≤ tol`）；"内部可选"必须**显式**开产品选项并配测试。

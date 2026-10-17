@@ -12,6 +12,100 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 空间索引接入生产 CPU 拾取 + 相机-only 导航保持选择高亮（2026-10-17；两项修复）
+
+本轮两项修复：**A** 把 ADR-0012 规定的空间索引真正接入**生产 CPU 拾取**（`perf(pick)`，commit
+`13f7808`）；**B** 修复**相机-only 导航**把已选实体的**高亮**抹掉（`fix(render)`，commit `38e3ae8`）。
+逐条证据分别见 `docs/validation-pick-index-2026-10-17.md` 与
+`docs/validation-selection-survives-camera-2026-10-17.md`。两项**均未**改宿主协议、**未**改 UI、
+**未**新增诊断码。
+
+### A. 生产 CPU 拾取接入空间索引（commit `13f7808`）
+
+**范围**：`crates/cad-spatial`（新 `chunk.rs` 的 `ChunkGridIndex`；`pick.rs` 的 `pick_world_bounds` /
+`index_local_bounds` / `bulge_arc_bounds`；`lib.rs` 导出）与 `crates/cad-app/src/picking.rs`
+（`PickIndex`、`cached_pick_index`、`pick_ray_exhaustive`、`pick_ray_with_index`、`last_pick_stats`；
+`lib.rs` 导出）。**未**改 `Cargo.*`。这是 ADR-0012 §10 **S4 的拾取部分**。
+
+- **症状（实测）**：在 `fixtures/complex-test.dwg`（44,591 实体）上**点选一个实体停顿约一秒**；
+  同一函数还在**每次指针移动**上跑（hover）。
+- **病根（实测/源码核查）**：生产拾取是**纯 CPU**——`SelectAt` → `cad_app::picking::pick_at_screen`
+  把 `model_space()` 的**每个**实体（含**递归 INSERT**）展开成一个列表（`borrowed_pick_items`，
+  `picking.rs:141`），再由 `pick_closest_borrowed` **逐项**测试、且**每次调用**新建一次 bounds 缓存；
+  ADR-0012 规定的空间索引存在但**在拾取链里没有调用方**（`filter_by_index` 是死代码）。
+- **改动**：新增**持久化** `PickIndex`（`picking.rs:311`）——缓存展开条目 + 一个**保守包围盒的两级
+  chunk 网格**（`ChunkGridIndex`，`crates/cad-spatial/src/chunk.rs`，ADR-0012 §7），键为
+  `DrawingDatabase::scene_identity()`（内嵌 `Revision`）+ document id，**复用既有单一失效真相**
+  （ADR-0012 §5），**不**新增第二套失效真相。查询把射线的 X/Y 投影裁剪到网格区域并按**拾取容差**
+  展开，复用精确阶段**同一个** slab 谓词（`ray_intersects_expanded_bounds`），故 broad/narrow
+  **按构造**一致。无法给出保守盒的家族（opaque、权重非正/NaN 的样条、含无界子节点的 compound）
+  **恒为候选**，保留 `skipped` 记账与可选择性。超大图元（跨 chunk 数 > `MAX_CHUNK_SPAN` = **16**）
+  进 **overflow 列表**，**不**跨块复制（规范 §8.1）。
+- **回退与上报（无静默改变）**：索引不可用或 `YACR_PICK_EXHAUSTIVE` 诊断门打开 ⇒ 穷举扫描；
+  **索引路径**打印 `pick_broad_phase mode=indexed items=… candidates=…`，**穷举路径**打印
+  `borrowed_pick_items …`，两种模式的机读区分是 `last_pick_stats()`（`picking.rs:65`）的 `indexed` 字段。
+- **实测（release harness 驱动**同一**生产 `pick_at_screen`，同一夹具；**非**宿主交互）**：展开条目
+  **723,587**；热拾取中位 **~1055 ms → ~0.32 ms**（**842** 个候选）；一次性建索引 **~535 ms**；
+  最差热拾取（大半径，**13,491** 候选）**~20 ms**。
+- **测试（实测）**：随机差分 `indexed_and_exhaustive_picks_agree_over_random_scenes`（**16 种子 × 30
+  射线** = 480 次差分；**源码为准**，commit message 记为「60 rays」），覆盖**全部实体家族**、稠密/稀疏、
+  嵌套 INSERT、子元素来源、容差边界、chunk 边界、无命中射线，断言索引路径与穷举路径的 `PickReport`
+  **完全相等**；另有 `the_index_examines_fewer_items_on_a_large_scene`（5,000 线场景 <1/10）。
+  `cad-spatial` **41**、`cad-app` **358**（+4/+11/+17 集成）、`cad-host` **102**、`cad-engine` **100**、
+  `check-architecture.py` OK。
+- **它抓到的一个真实几何 bug（记录）**：带凸度的 polyline，其圆弧在 polyline 于 3D 中**非共面**时
+  可**远超**弦盒（超过矢高）——凸度弧现由**绕 tessellator 弧心的球**来界定（`bulge_arc_bounds`，
+  `pick.rs:1142`）。
+- **偏离项（记录，不隐藏）**：ADR-0012 §7 命名的是**每 chunk 的 `rstar`**；本轮 `Cargo.*` 超出范围，
+  故每个 chunk 持**扁平 payload 列表**（`rstar` **仍未实现**）。该索引在本夹具上占 **~90–100 MB**
+  （**真实**内存足迹，**未**削减）。
+- **边界（不得软化）**：after 数字来自 **release harness**，**不是**宿主交互——**没有任何探针钩子能
+  hover 或 select**（`YACR_PROBE_POSTLOAD_PAN` 以按下开始，故无 hover；baseline 那次唯一的宿主 hover
+  来自一次**不确定**的合成器移动）。harness **纯 CPU、不触碰 GPU** ⇒ **不给** GPU/视觉/vendor 结论；
+  单机单会话。ADR-0012 §10 S4 的另一半（`SceneCache::apply_changes` / `CacheKey`）**未**在本轮接入生产。
+
+### B. 相机-only 导航保持选择高亮（commit `38e3ae8`）
+
+**范围**：`crates/cad-render-wgpu`（`renderer_impl.rs` 的 `reset_pick_keys` / 新
+`reset_pick_keys_and_drop_request` / `rebuild_pick_table` 空集早退分支；新 fence 套件
+`tests/selection_flag_lifecycle.rs`）、`crates/cad-engine/src/render/runtime.rs`
+（`applied_entity_flags` + `suppress_overlays` 重推）、`crates/cad-app/src/render_scene/overlay.rs`
+（1 个 fence）、`crates/cad-engine/src/render/contracts.rs`（3 个 fence）。**未**改 `commit_upload`。
+
+- **症状（用户手动交互，实测）**：用户**选中一个实体、缩放**，画布上的**高亮消失**（用户确认**未**看
+  属性面板，只看了画布高亮）。不变量：**相机-only 操作不是场景变更**——选择必须存活。
+- **两条在改动前已确认的机制（实测）**：
+  1. `Renderer::reset_pick_keys`（`renderer_impl.rs:4214`）会清掉**保留的实体标志请求**，而
+     `rebuild_pick_table`（`:4114`）在提交后 `batches` 与 `images` **皆空**时**调用它并早退**——这在
+     相机-only 操作上**可达**（2D 导航回退截断一个**零批 base**），于是选择的身份请求被销毁且**无人**
+     重推。请求现在**在瞬时空驻留集上存活**，只在 key 空间**真正重启**处丢弃（新设备世代、
+     `clear_batches`、`rebuild_device`、设备丢失），经 `reset_pick_keys_and_drop_request`（`:4234`）。
+  2. `CadRenderRuntime::suppress_overlays`（`runtime.rs:988`）提交其截断后**没有**像
+     `apply_ready_updates` 那样重推标志；它现在重推**最后一次已应用**的实体标志
+     （`applied_entity_flags`，`runtime.rs:342`；**记录**，非重新推导；**不是**第二套真相）并记录
+     `flags.unresolved` 报告。重推**未变**集合**不写**标志行（渲染器会 diff），故正常回退进入**不花**
+     GPU 上传。
+- **已调查但未改代码（记录）**：`unmatched` 状态**已经**经 `RenderDiagnostics.result_status`
+  （`cad-engine/src/render/mod.rs:468`；探针 `[probe] pan-wait … status={:?}`，`host.rs:636`）与用户
+  可见的 `cad_status.error` 暴露；子元素高亮**纯**由选择 + 数据库派生，故一次相机 settle **无法**使其
+  退化（fence `sub_element_highlight_is_identical_across_a_camera_settle`）。
+- **范围划分（诚实，不得模糊）**：本修复覆盖**高亮着色/overlay**，**不是**选择**状态**——滚轮缩放
+  **不能**清掉状态（它映射到 `CommandId::Zoom`，`session.rs:782` / `input.rs:229`，只置
+  `navigation_dirty`；只有带 replace 载荷的 `CommandId::Select` 才清选择，而 `SelectAt{Replace}` **仅在
+  点击**时发出）。
+- **测试（实测）**：新 renderer 生命周期套件 `selection_flag_lifecycle`（**3** 测试；其中**两个**
+  ——`transient_empty_resident_commit_keeps_the_retained_flag_request`、
+  `explicit_clear_drops_the_retained_flag_request`——在修复前代码上**失败**，经**临时回退**验证），以及
+  **3** 个引擎契约测试（`#[ignore]`，需真实适配器）含跨**四个**缩放步 + 一次 settle 的**像素着色**比较；
+  `cad-render-wgpu --lib` **200**。
+- **发现的预存失败（记录为**既有遗留**，非本轮引入）**：两个 `--ignored` 引擎测试
+  （`base_only_navigation_renders_latest_camera_and_restores_overlays`、
+  `pending_overlay_upload_never_labels_stale_suffix_current`）在**纯净 HEAD** 上**同样失败**
+  （用 `git stash` 复现；差异 `left: 3064, right: 3048`）。本 commit **未**修它们。
+- **边界（不得软化）**：**未**做人工视觉判读（引擎 fence 只做**着色像素**的机器比较，不构成视觉验收）；
+  `--ignored` 硬件 fence 需**显式**在真实适配器上运行；**人工交互判定归用户**；单机单适配器，
+  **不给** vendor/视觉/性能结论；wasm/Windows/macOS/Android 未测。
+
 ## 后缀提交不再重置 pacing 成本模型：全览拖动卡顿修复（2026-10-17；纯 renderer 改动）
 
 **范围**：`crates/cad-render-wgpu`（`renderer_impl.rs:2284-2303` 的 `commit_upload` 重置条件 +

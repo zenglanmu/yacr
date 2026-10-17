@@ -11,7 +11,9 @@
 `docs/validation-plan-cost-2026-10-17.md`；**每帧 uniform/encode 成本（N1e 后续）**的实测见
 `docs/validation-uniform-encode-skip-2026-10-17.md`；**提交路径 pick 表增量更新（N1f）**的实测见
 `docs/validation-pick-table-incremental-2026-10-17.md`；**后缀提交保持 pacing 成本模型（N1a 后续）**的实测见
-`docs/validation-pacing-suffix-commit-2026-10-17.md`。
+`docs/validation-pacing-suffix-commit-2026-10-17.md`；**生产 CPU 拾取接入空间索引（S4）**的实测见
+`docs/validation-pick-index-2026-10-17.md`；**相机-only 导航保持选择高亮**的实测见
+`docs/validation-selection-survives-camera-2026-10-17.md`。
 
 ## 当前基线（2026-10-17，真实宿主**分页**口径）
 
@@ -943,17 +945,42 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 
 ### S4 — 空间索引与增量失效接入热路径（chunk 网格 + local rstar）
 
-- **现状/问题**：`filter_by_index`（`picking.rs:351`）**只在测试使用**；生产 `pick_ray` 每次全量遍历；
-  `SceneCache::apply_changes`（`cad-scene/src/cache.rs:90`）**只在测试调用**，生产每次全量 rebuild；
-  `CacheKey`（`cad-scene/src/batch.rs:8`）**定义即废弃**。
-- **预期收益**：拾取/框选/查询成本与图纸总规模脱钩（**预期**，由 S2 实测驱动）。
-- **前置条件/风险**：按 ADR-0012 §7 落两级结构（顶层网格 + local `rstar` 0.13 不可变快照）；**必须**实现
-  规范 §8.1 强制的**超大图元策略**（松弛边界 + 单独列表 / 子 AABB），**禁止**跨块复制膨胀；版本取自
-  `Revision`，陈旧判定复用 `ChangeSet::follows()` / `TaskStamp`，**不**新增并行版本计数器。
-- **需要的决策**：`rstar` 引入的 `Cargo.lock` 更新与许可核查结论（ADR-0012 未决项）。
-- **相关契约/栅栏**：索引接入前后 pick 结果一致 fence；`CacheKey` 版本键有效性测试；超大图元不跨块
-  复制的内存 fence。
-- **优先级**：S4（中；**由 S2 实测门控**，不得在无测量时先做）。
+- **已落地（2026-10-17）——生产 CPU 拾取接入空间索引（拾取半）**。逐条证据见
+  `docs/validation-pick-index-2026-10-17.md`（实现 commit `13f7808`）。这是 ADR-0012 §10 **S4 的
+  拾取部分**；`SceneCache::apply_changes` / `CacheKey` 半**未**动（仍见下方「现状/问题」）。
+  - **病根（实测）**：生产拾取是**纯 CPU**，`pick_at_screen` 每次展开 `model_space()` **全部**实体
+    （含递归 INSERT）并逐项测试；`filter_by_index` 是**死代码**，索引在拾取链里**无调用方**。在
+    `fixtures/complex-test.dwg`（44,591 实体、**723,587** 展开条目）上点选**停顿约一秒**，且每次指针
+    移动都跑同一路径（hover）。
+  - **改动**：`cad-app::picking` 新增持久化 `PickIndex`（展开条目 + `cad-spatial` 的 `ChunkGridIndex`
+    两级 chunk 网格），键为 `scene_identity()`（内嵌 `Revision`）+ document id；`pick_ray` 走
+    `pick_ray_with_index`，把射线 X/Y 投影裁剪到网格区域并按容差展开，复用精确阶段**同一** slab 谓词；
+    超大图元（跨 chunk > `MAX_CHUNK_SPAN` = **16**）进 overflow 列表、**不**跨块复制；无法给出保守盒的
+    家族（opaque / 非正或 NaN 权重样条 / 含无界子节点的 compound）**恒为候选**。
+  - **回退与上报**：索引不可用或 `YACR_PICK_EXHAUSTIVE` ⇒ 穷举扫描；模式经 `last_pick_stats()` 的
+    `indexed` 字段机读给出（索引路径另打印 `pick_broad_phase mode=indexed …`）。
+  - **实测（release harness 驱动**同一**生产 `pick_at_screen`，**非**宿主交互）**：热拾取中位
+    **~1055 ms → ~0.32 ms**（842 候选）、一次性建索引 **~535 ms**、最差热拾取（13,491 候选）**~20 ms**。
+  - **栅栏（名称即契约）**：随机差分 `indexed_and_exhaustive_picks_agree_over_random_scenes`
+    （**16 种子 × 30 射线** × 全部家族，断言 `PickReport` **完全相等**；源码为准），外加容差边界 /
+    chunk 边界 / 无命中 / 容差下限各一个；`the_index_examines_fewer_items_on_a_large_scene`
+    （5,000 线 <1/10）。
+  - **偏离项（记录）**：ADR-0012 §7 命名**每 chunk 的 `rstar`**；本轮 `Cargo.*` 超出范围，每 chunk 为
+    **扁平 payload 列表**（`rstar` 仍**未实现**）。索引在本夹具占 **~90–100 MB**（真实足迹，未削减）。
+  - **边界**：after 数字来自 release harness，**不是**宿主交互（无探针钩子可 hover/select）；harness
+    **纯 CPU、不触碰 GPU** ⇒ **不给** GPU/视觉/vendor 结论；单机单会话。
+- **现状/问题（更新于 2026-10-17）**：**拾取半已接线**（见上）。`SceneCache::apply_changes`
+  （`cad-scene/src/cache.rs:90`）**只在测试调用**，生产每次全量 rebuild；`CacheKey`
+  （`cad-scene/src/batch.rs:8`）**定义即废弃**。这两项仍待接入。
+- **预期收益**：拾取/框选/查询成本与图纸总规模脱钩（**拾取半已实测**，见上；框选/查询仍**预期**）。
+- **前置条件/风险**：按 ADR-0012 §7 落两级结构（顶层网格 + local `rstar` 0.13 不可变快照）——顶层
+  网格与超大图元策略**已落地**（拾取半），**每 chunk 的 `rstar` 仍未实现**（当前为扁平 payload 列表）；
+  版本取自 `Revision`，陈旧判定复用 `ChangeSet::follows()` / `TaskStamp`，**不**新增并行版本计数器。
+- **需要的决策**：`rstar` 引入的 `Cargo.lock` 更新与许可核查结论（ADR-0012 未决项）；以及
+  `SceneCache::apply_changes` / `CacheKey` 接入生产的排期。
+- **相关契约/栅栏**：索引接入前后 pick 结果一致 fence（**已落地**，见上）；`CacheKey` 版本键有效性测试；
+  超大图元不跨块复制的内存 fence（**已落地**：overflow 列表）。
+- **优先级**：S4（**拾取半已落地**；`SceneCache`/`CacheKey` 半仍中；由 S2 实测驱动，不得在无测量时先做）。
 
 ### S5 — Window / Crossing 框选（串行）
 
@@ -1022,6 +1049,8 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - 性能基线与证据边界（历史**整幅**口径）：`docs/validation-render-perf-2026-10-15.md`。
 - 帧成本分布 + P0 前半（CPU 相位、`TIMESTAMP_QUERY` 调查）：`docs/validation-render-perf-2026-10-17.md`。
 - **真实宿主分页帧成本 + 4 GB 卡 OOM + 产品决定**：`docs/validation-realhost-frame-cost-2026-10-17.md`。
+- **生产 CPU 拾取接入空间索引（S4）**：`docs/validation-pick-index-2026-10-17.md`；**相机-only 导航保持
+  选择高亮**：`docs/validation-selection-survives-camera-2026-10-17.md`。
 - 能力表与显式未支持项：`docs/compatibility.md`。
 
 > 证据诚实：本文所有未实测收益均标注为「预期」；未运行项（真实浏览器 WebGL2、DWG
