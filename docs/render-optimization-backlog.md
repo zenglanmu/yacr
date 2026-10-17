@@ -9,7 +9,8 @@
 `docs/validation-frame-pacing-2026-10-17.md`；**测量专用 GPU 帧时间（P0）**的实测见
 `docs/validation-gpu-time-2026-10-17.md`；**每帧 CPU plan 成本（N1e）**的实测见
 `docs/validation-plan-cost-2026-10-17.md`；**每帧 uniform/encode 成本（N1e 后续）**的实测见
-`docs/validation-uniform-encode-skip-2026-10-17.md`。
+`docs/validation-uniform-encode-skip-2026-10-17.md`；**提交路径 pick 表增量更新（N1f）**的实测见
+`docs/validation-pick-table-incremental-2026-10-17.md`。
 
 ## 当前基线（2026-10-17，真实宿主**分页**口径）
 
@@ -470,6 +471,63 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   `pulled_page_subset_matches_universal_pixels`。
 - **优先级**：N1（**最高，与 P1 并列**）。其中 **(c) N1d 已按实测降级**为 N5 的前提（见 §N1d 与 §N5）；
   **(a) 的"时间驱动预算"已由 N1a 落地**，但其性能收益仍**未测**。
+
+### N1f — 提交路径的 pick 表增量更新（**已落地**）
+
+- **已落地（2026-10-17）**。逐条证据见 `docs/validation-pick-table-incremental-2026-10-17.md`
+  （实现 commit `0f5d5c7`）。这是 N1e 之后的**下一个 CPU 残余项**，但病在**提交路径**而非每帧循环：
+  `Renderer::rebuild_pick_table` 在**每次**批次/图像变更时**整表重建**（~16 万批的图 ⇒ 一次后缀提交也要
+  付整幅重建成本）。**触发场景**：用户报告的交互缺陷——拖动/缩放时画面冻结、松手后跳变
+  （`fixtures/complex-test.dwg`）。
+- **病根（实测）**：后缀提交 `pick` = **1,449,615 / 1,487,525 / 1,454,073** µs（7 次提交），
+  `input_us` 排队延迟中位 **1,045,445** µs（n=18），拖动期间 `cad-frame` 冻结。**同夹具在近期 perf 轮次
+  之前** `pick=1530380` µs ⇒ **预存缺陷，非回归**。
+- **机制**：`rebuild_pick_table`（`crates/cad-render-wgpu/src/renderer_impl.rs:4082`）**在满足条件时走
+  增量后缀路径**——`keep_prefix > 0` **且** **无驻留图像** **且** `pick_table_covers_prefix(keep_prefix)`
+  （O(1) 覆盖证明，`:4152`）；增量动作为 `PickTable::replace_suffix`（`crates/cad-render-wgpu/src/plan.rs:3672`）
+  ——**退役**被丢弃后缀的 key、**只追加**新条目（`:4105-4113`）。计数 `pick_table_incremental_extends`
+  （`lib.rs:1597`）。
+- **回退（一切其余情形 ⇒ 整表重建）**：base 变更（`keep_prefix == 0`）、图像重传（`self.images` 非空）、
+  设备丢失 / `clear_batches` 复位、前缀未被覆盖；计数 `pick_table_full_rebuilds`（`lib.rs:1595`，
+  与 `pick_table_incremental_extends` 互补）。
+- **有效性条件**：pick key 在一个设备世代内**单调分配、永不重用、永不重编号**（`pick_key_counter` 只在
+  `reset_pick_keys` 重启，`renderer_impl.rs:4164`，**恰在批次被清空时**发生）⇒ 被保留前缀之外的条目**不变**、
+  追加 key **严格更大** ⇒ 增量结果与 fresh `PickTable::build` **完全一致**（条目 / `keys_for_source` /
+  截断碰撞集合 / `max_key`）。
+- **配套改动**：`PickTable::build`（`plan.rs:3608`）**消耗**条目（一次克隆而非两次；渲染器仍持自己的副本，
+  **不可能**自引用借用）；实体标志身份索引**惰性构建**（`source_index: Option<SourceIdentityIndex>`
+  `plan.rs:3582`，仅 `entity_flags_request` 非空时构建，`apply_entity_flags` 首次查询前经
+  `ensure_source_index` `plan.rs:3791`）；`detect_truncation_collisions` 被保留的 `truncated_index`
+  （`plan.rs:3589`）+ 增量 `update_collisions`（`plan.rs:3905`）取代。
+- **实测（本机真实宿主）**：后缀提交 `pick` **1,449,615 / 1,487,525 / 1,454,073 → 866 / 433 / 541** µs；
+  base-load `pick` 1,310,440 → 1,021,559 µs；`input_us` 中位 **1,045,445（n=18）→ 29（n=1185）** µs
+  （p90 41、max 116）；`cad-frame presented` 由**冻结**变为 **2051–2054 行连续**。**独立复跑**：后缀提交
+  `pick=866/433/541` µs、`input_us` 中位 29 µs、**2054** 行、exit 0。
+- **测试（实测）**：`--lib` **200 passed / 3 ignored**（含
+  `incremental_pick_table_matches_a_fresh_build_across_commit_sequences`：**128 种子 × 40 步**差分，
+  每步断言与 fresh `build` 完全相等 + 重复 key 事务式拒绝）；`--test pick_id` **32**、`pick_hidden_flags`
+  **8**、`headless_render` **35**、`accelerated_tier` **23**、`pulled_prefix_equivalence` **9**、
+  `render_effects` **45**；`fmt`/`check --all-targets`/`clippy -D warnings`/wasm check clean。
+- **三处更正 / 已否决方案（记录）**：① `append=97` 是**微秒**（`apps/app-linux/src/host.rs:2086-2093`），
+  真实追加量是**一个**批次；② 因此「追加批次全为 `PICK_KEY_NONE` 时跳过重建」**无生产者**（key 恒在
+  `1..=MAX_PICK_KEYS`，`PICK_KEY_NONE`（0）从不进表）；③ **pick 时 dirty/惰性重建：已否决**（急切成本已
+  ≈0.4–0.9 ms；`apply_entity_flags` 必须在提交时运行——`runtime.rs:699`；`pick_collisions`/`pick_table_len`/
+  `pick_key_for_batch` 是 `&self` 访问器；新 dirty 标志 = 第二套失效真相，**铁律 4**）。
+- **重复提交的发现（记录）**：生产者是**延迟参考网格刷新**——仅相机的范围变化布防 settle
+  （`cad-engine/src/render/mod.rs:703-706`），相机静默满 **250 ms**（`mod.rs:309-323`、常量 `mod.rs:165`）后
+  overlay 后缀被重准备（`cad-app/src/render_scene/overlay.rs:452`）并以**后缀提交**提交
+  （`runtime.rs:656-663`，`base_changed=false`）⇒ **相机变化每次 settle 提交一次，不是每帧**。原始 7 次
+  settle 被 1.5–3.8 s 的提交本身放大；修复后 3 手势 = 3 后缀提交且画面连续。**完全避免 settle 提交**需
+  相机无关网格（无限 shader 网格）或大得多的预扩展网格——**设计改动**；**刻意保持现状**（记录理由）。
+- **仍开放（未修）**：base 变更后**第一次**后缀提交仍付整幅 pulled 重建（`pulled=2,506,646` µs，
+  `pulled_reuses=0`）；后续后缀提交复用（`pulled=590/731` µs）；base load 本身
+  `pulled=2,518,896` + `pick=1,021,559` µs（一次性）。**均非** pick 表问题。
+- **边界（不得软化）**：**不得从日志得出人工交互判定**——验收用**合成 DOM 手势驱动**
+  （`YACR_PROBE_POSTLOAD_PAN`，**不是**真实鼠标），日志只证**提交路径便宜**且**帧持续呈现**，不证
+  人感知的拖动流畅；**人工判定归用户**。`debug-default-fonts.dwg` 相机路径**未测**（pan 驱动两次报
+  「concurrent resize … invalidated the report」），只测到 base-load 提交 `pick=4675` µs 与 exit 0。
+  单机/单适配器，**不**给 vendor/视觉/性能结论。
+- **优先级**：已落地（N1e 之后的提交路径残余项）。
 
 ### N2 — CPU/GPU 流水（pipelining；消除每帧阻塞 poll）
 

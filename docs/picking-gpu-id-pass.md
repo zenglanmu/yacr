@@ -197,6 +197,13 @@ id pass **不解析** mesh face：wgpu 的 fragment stage 拿不到 primitive in
   `a_scene_reset_with_resident_images_does_not_alias_pick_keys`）；
 - 场景重置（`clear_batches`）会把整张表**重新上传为零**，退役 key 的位不会残留
   （fence：`a_scene_reset_clears_the_flag_table`）。
+- **pick 表的增量后缀更新（2026-10-17，commit `0f5d5c7`）**：前缀保持的后缀提交（`keep_prefix > 0`
+  **且**无驻留图像 **且** `pick_table_covers_prefix` 的 O(1) 覆盖证明为真）走 `PickTable::replace_suffix`
+  ——**退役**被丢弃后缀的 key、**只追加**新条目；**其余一切**（base 变更、图像重传、场景复位、前缀未被
+  覆盖）**回退整表重建**（`Renderer::rebuild_pick_table` 的 `pick_table_full_rebuilds`，与
+  `pick_table_incremental_extends` 互补）。有效性：key 在一个设备世代内单调分配、**永不重用或重编号**。
+  机制、有效性条件、回退、实测与边界见 `docs/validation-pick-table-incremental-2026-10-17.md`
+  （本条不重复其内容）。
 
 着色器里的 tint 常量是**机械占位**，最终选择视觉系统归后续 UI 切片；本文不主张视觉设计。
 
