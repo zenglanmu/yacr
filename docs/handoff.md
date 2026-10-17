@@ -12,6 +12,64 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 每帧 CPU uniform/encode 成本：超集安全的编码跳过与 slot 压缩（2026-10-17；纯 renderer 改动）
+
+**范围**：`crates/cad-render-wgpu`（`plan.rs` 的 `BatchFacts` 紧凑 run class + `EncodeEmitMask`；`renderer_impl.rs`
+的 uniform slot 压缩与 encode 跳过；**3** 个新纯测试；实现 commit `1058af2`）。**未**改宿主协议、**未**改 UI、
+**未**新增诊断码。这是 `docs/render-optimization-backlog.md` §N1e 的**后续项**（"每帧 uniform/encode 成本"）；
+逐条证据见 `docs/validation-uniform-encode-skip-2026-10-17.md`。
+
+- **病根（实测）**：N1e 后 planner 已能接受**整条**有序表（complex-test **166,346** 条）而只发**一次** draw，
+  但 **uniform 循环与 encode 循环仍逐条走完全部批**——一张 1-draw 的 settled 页仍耗 `uniform_ms` **6.071**、
+  `encode_ms` **5.365**，`cpu_ms` 合计 **22.42**。
+- **改动（超集安全，无第二套失效真相）**：
+  - `BatchFacts` 增**紧凑每批 run class**（一个缓存驻留字节，`0` = 不拥有 run）+ `legacy_batches` 列表
+    （`plan.rs:927-941`）；每帧 `EncodeEmitMask`（`plan.rs:1048-1120`）标记参与 encode 的批：无 run 的批、
+    有 run 且该 run 存活本帧剔除的批、加恒活动 legacy quad/mesh 集。掩码是 planner 活动集的**超集**，
+    **绝不**丢 draw 或 flush；run 全被剔除的已转换批在 encode 循环里是纯 no-op，在其 ~200 B `GpuBatch`
+    被读取**之前**即跳过（`renderer_impl.rs:5220-5235`）。`Default` 掩码恒 `all`（未重建绝不跳过）。
+  - **slot 压缩**：只有无 run 的批拿每批 uniform slot（`renderer_impl.rs:4804-4828`）；per-stream/chunk/conic
+    slot 只为可见 chunk 写，经运行 slot 计数器压缩（settled 页 `total_slots` **41,322 → 1**）。每个存活条目的
+    96 B uniform 由**同一次调用、同一输入**产出 ⇒ 字节**逐字节相同**；上报计数从 class 字节**精确复现**。
+  - **刻意不跳过**：透明 pass（转换要求不透明批 ⇒ 每个透明批都是真实发出的工作）与加速计数循环
+    （`use_pulled` 要求无剔除）。两个主循环仍迭代 Θ(accepted)/Θ(opaque)——每个被跳过条目只花**一次字节读**，
+    因为上报计数定义在整个被接受集上。
+- **真实宿主实测（本机原生 Wayland / Vulkan / Quadro P620 / `scale=1`；同 UID、无 root/sudo、无屏录、
+  无虚拟显示、exit 0）**，settled 1-draw 页（中位 / p90）：
+
+  | fixture | `plan_ms` | `uniform_ms` | `encode_ms` | `submit_ms` | `cpu_ms` |
+  |---|---|---|---|---|---|
+  | complex-test | 10.747 / 18.084 → **1.130 / 1.341** | 6.071 / 6.862 → **0.151 / 0.197** | 5.365 / 5.598 → **0.656 / 0.802** | 0.206 → 0.186 | 22.42 / 30.78 → **2.180 / 2.511** |
+  | debug-default-fonts | 0.677 / 0.759 → **0.132 / 0.207** | 0.135 → **0.026** | 0.247 → **0.090** | 0.140 → 0.224 | 1.244 / 1.367 → **0.522 / 0.796** |
+
+- **独立 orchestrator 复跑（另一次宿主运行，complex-test）**：settled 帧 **50 → 128**，`plan_ms` **10.499 → 1.131**、
+  `uniform_ms` **6.056 → 0.155**、`encode_ms` **5.335 → 0.652**、`submit_ms` 0.207 → 0.182、`cpu_ms` **22.158 → 2.207**；
+  两次运行都出现同一病态页签名（`draw_calls=1 verts=12 tris=4 over_budget=false pacing=active cull_chunks=1/9362`）。
+- **确定性字段（settled 页）**：`draw_calls`/`verts`/`tris`/`instanced`/`mesh`/`legacy_opaque`/`arc`/`transparent`/
+  `images`/`accelerated`/`instance_streams`/`instanced_batches`/`tier`/`over_budget`/`prog=`/`complete`/`pacing=`/
+  `cull_chunks=` before/after **逐字段一致**；**唯一移动**的是 `budget_verts`/`budget_tris`（仅因 pacing scale
+  依赖墙钟）。
+- **测试（实测）**：`cargo test -p cad-render-wgpu --lib` **195 passed / 3 ignored**（**3** 个新纯测试：
+  `encode_skip_is_superset_safe_and_preserves_counters` 4000 例超集安全差分、
+  `fully_culled_batch_with_legacy_quads_is_still_processed` legacy-quad 回归、
+  `skipped_uniform_slots_leave_surviving_bytes_bit_identical` 2000 例 uniform 字节同一）；`--test headless_render`
+  **35**、accelerated_tier **23**、pulled_prefix_equivalence **9**、render_effects **45**、pick_id **32**。
+- **两处诚实更正**：
+  - **settled 页 `submit_ms ~5 ms` 估算错误**：实测 **0.206 ms**（`22.42 = 10.75 + 6.07 + 5.37 + 0.21`），
+    提交在该页**从来不是因素**。已更正 `docs/validation-plan-cost-2026-10-17.md`（dated 注）与 backlog §N1e。
+  - **paced 帧数字被混淆**：after 运行的 paced 页接受约 **1.6×** 顶点 / **2×** draw（更快的 settled 帧让墙钟
+    相关的 pacing 控制器放大 scale）；按单位发出工作计 encode/submit 成本**没有**增加。**只有 settled 1-draw
+    页是干净的 before/after**。
+- **N2 重估（本轮第二项结论）**：运动（paced）帧现约 `cpu_ms ≈ 3.6` + `wait_ms ≈ 4.2` ≈ **8 ms**（**实测**，
+  逐运行被墙钟轨迹混淆，但两相位现均小）⇒ **在 60 fps 预算之内且有裕量**；`gpu_ms ≈ 3.95`（**实测**）约为
+  `wait_ms` 的 **93%** ⇒ 主导残余是 **GPU 执行**，任何 CPU 杠杆（含 N2）都不减少它。N2 或可把运动帧从 ≈8 ms
+  压到 **≈4–5 ms**（**估算，未测**）⇒ 买延迟裕量而非补预算缺口。⇒ **不以旧理由开工**；N2 **重挂于产品需求**
+  （120 Hz，或更重图纸使运动帧再次越预算）。backlog §N2 已按此重写（旧重开条件保留为历史并逐条标注现状：
+  ① 已答为假、② 已失效 moot、③ 仍有效）。
+- **边界（不得软化）**：**只有 settled 1-draw 页是干净的 before/after**；**full-view（无剔除）帧仍未修、未测**
+  （跳过只在有剔除时生效）；**GPU 执行份额未归因**、**是否还有值得做的 CPU 工作未测**；字段一致是**日志级**
+  证据，不是像素级；**wasm 运行时 / Windows/macOS/Android 未测**；单机/单适配器，**不**给出 vendor/视觉/性能结论。
+
 ## 每帧 CPU plan 成本：剔除感知的分段页规划（2026-10-17；纯 renderer 改动）
 
 **范围**：`crates/cad-render-wgpu`（`src/plan.rs` 的 `plan_ordered_page` 分段化 + 每批集变更一次的
@@ -70,6 +128,10 @@ planner 测试）。**未**改宿主协议、**未**改 UI、**未**新增诊断
   - 稳定帧仍要付**重启清扫**（每次相机移动 O(166,346)）外加 `uniform_ms`（~6 ms）、`encode_ms`（~5.2 ms）、
     `submit_ms`（~5 ms）循环——这就是稳定帧 `cpu_ms` 是 13.65 ms 而不是 ~1 ms 的原因。这些循环是**同一种病**，
     仍是显式后续项；本轮**未**修它们。
+    **更正（2026-10-17，同日下一轮）**：上面的 `submit_ms`（~5 ms）**有误**——稳定 1-draw 页实测
+    `submit_ms` 为 **0.206 ms**（`22.42 = 10.75 + 6.07 + 5.37 + 0.21`），提交在该页**从来不是**瓶颈；
+    上述三个循环已由同日下一轮修掉（见本文件顶部条目与
+    `docs/validation-uniform-encode-skip-2026-10-17.md`）。
   - 稳定帧上观察到的**逐帧渐进重启**是 **probe/证据驱动重新发出视图变更**（每个稳定帧前都有一次合成
     `pointer_move` 且 `view_rev` 同步递增），**不是**相机 f32 抖动。未做修复，也不应修；记录证据。
   - 单机/单适配器；**不**给出 vendor/视觉/性能结论。

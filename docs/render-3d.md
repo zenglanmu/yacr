@@ -148,3 +148,10 @@ HATCH 的检测需要上游提供 3D 边界。渐变 HATCH 仍只绘制边界。
   ∪ 无条件计费的批（`always_active`），由它们的空隙导出被接受前缀，字节边界用**前缀和二分**；无剔除或估计
   活动批 **> 4096** 时回退**原线性游走**（缩放出去的大页行为不变）。**字节计费仍按批粒度**——被完全剔除的
   已转换批**仍计字节**（不是免费的）。逐条证据见 `docs/validation-plan-cost-2026-10-17.md`。
+- **每帧 uniform/encode 成本（N1e 后续，2026-10-17 落地）**：uniform/encode 路径**不再随被接受页规模增长**
+  ——只有**无 run 的批**拿每批 uniform slot（有 run 的批走 stream/chunk/arc slot；全剔除的批什么都不发），
+  per-stream/chunk/conic slot **只为可见 chunk 写**、经运行 slot 计数器**压缩**（settled 页 `total_slots`
+  **41,322 → 1**）；每帧 `EncodeEmitMask` 标记参与编码的批（planner 活动集的**超集**，故绝不丢 draw/flush），
+  被完全剔除的已转换批在其 ~200 B `GpuBatch` 被读取**之前**即跳过。settled 1-draw 页的 CPU 现约 **≈2 ms**
+  （**实测**；`uniform_ms` **6.071 → 0.151**、`encode_ms` **5.365 → 0.656**）。逐条证据见
+  `docs/validation-uniform-encode-skip-2026-10-17.md`。

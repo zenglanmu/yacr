@@ -8,7 +8,8 @@
 `docs/validation-render-perf-2026-10-17.md`；**分页预算 pacing（N1a）**的实测见
 `docs/validation-frame-pacing-2026-10-17.md`；**测量专用 GPU 帧时间（P0）**的实测见
 `docs/validation-gpu-time-2026-10-17.md`；**每帧 CPU plan 成本（N1e）**的实测见
-`docs/validation-plan-cost-2026-10-17.md`。
+`docs/validation-plan-cost-2026-10-17.md`；**每帧 uniform/encode 成本（N1e 后续）**的实测见
+`docs/validation-uniform-encode-skip-2026-10-17.md`。
 
 ## 当前基线（2026-10-17，真实宿主**分页**口径）
 
@@ -136,6 +137,9 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   ⇒ `wait_ms` 就是真实 GPU 执行、present/queue 仅约 6–7%）；**(b) 为真**（paced 帧超目标且 `cpu_ms` ≈ 帧时间
   **41–52%**）；**(c) 成立**（120 Hz / 8.33 ms 下 complex `cpu_ms` p90 ≈8.5 ms 单独超预算）。⇒ 工作顺序变为
   **(1) 每帧 CPU plan 成本** → **(2) N2 流水** → **(3) N5 indirect multi-draw 最后**（详见 §N1d / §N2 / §N5）。
+  > **更新（2026-10-17，§N1e 后续落地后）**：工作顺序 **(1) 每帧 CPU plan 成本** 及其 **uniform/encode 后续**均已
+  > 落地（见 §N1e）；条件 **(b) 已失效（moot）**——运动帧 ≈8 ms 已在 60 fps 预算内，**N2 已按实测重挂**（见 §N2）；
+  > **(3) N5** 的降级不变。
 - **未测 / 边界（不得软化）**：**GPU 内部归因**（只有每帧总量，未分顶点/三角形吞吐 vs draw 数 vs 带宽）；
   **N1d / N2 / N5 是否真能降低 `gpu_ms`**；**真实 adapter 的 `unsupported(<feature>)`**（只在 fence 里经
   **能力注入钩子**模拟——本机两 feature 均授予）；**wasm 运行时**（只有库编译）；**真实宿主像素捕获**（字节一致在
@@ -360,6 +364,9 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     - **实测重排（2026-10-17，P0 落地后）**：工作顺序变为 **(1) 每帧 CPU plan 成本** → **(2) N2 流水** →
       **(3) N5 indirect multi-draw**。N1d 是 **N5 的结构性前提**，故随 N5 一并**降级**（N5 前提已被测量、
       非瓶颈，见 §N5）；**未取消**。**(1) 每帧 CPU plan 成本已落地（见 §N1e）**。
+    - **更新（2026-10-17，§N1e 后续落地后）**：工作顺序 #1 及其 **uniform/encode 后续**均已落地（见 §N1e）；
+      **N2 已按实测重挂**（运动帧 ≈8 ms 在 60 fps 预算内，主导残余是 GPU 执行，见 §N2）；**N1d/N5 的降级与重促
+      条件不变**。
 - **N1a — 时间驱动自适应页预算：已落地（2026-10-17）**。纯控制器
   `crates/cad-render-wgpu/src/pacing.rs`（`PacingState`/`Sample`/`PacingMode`/`step`/`apply_scale`，
   12 个纯测试）。常数（**实测**实现值）：`target_ms = 13.0`（默认，可由
@@ -412,11 +419,45 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     **45**、pick_id **32**。
   - **边界（不得软化）**：complex-test `plan_ms` **p90**（跨运行 2.53–2.75）**正落在 2.5 ms 边界上**
     （中位达成，p90 勉强）；**paced 帧数字被墙钟轨迹混淆**，只有稳定 1-draw 页是预算无关的干净 before/after；
-    稳定帧仍付**重启清扫**（每次相机移动 O(166,346)）+ `uniform_ms`（~6 ms）/`encode_ms`（~5.2 ms）/
-    `submit_ms`（~5 ms）——**同一种病**，见下「后续」。
-  - **后续（显式，未做）**：`uniform_ms` / `encode_ms` / `submit_ms` 三个每帧循环与**重启清扫**是**同一种病**
-    （每帧 O(场景)，与可见工作无关）；新的 `OrderedPageIndex`/`BatchFacts` 已为其**解锁**，但**本轮未动**——
-    它们是「每帧 CPU plan 成本」落地后 CPU 侧的**下一个残余项**。
+    稳定帧仍付**重启清扫**（每次相机移动 O(166,346)）。**更正（2026-10-17，N1e 后续落地后）**：此条原写稳定帧
+    另付 `uniform_ms`（~6 ms）/`encode_ms`（~5.2 ms）/`submit_ms`（~5 ms）——`submit_ms` 的 **~5 ms 估算
+    是错的**（settled 页实测 **0.206 ms**，提交从来不是因素），`uniform_ms`/`encode_ms` 已由后续修复（见下）；
+    **重启清扫**仍未修。
+  - **N1e 后续 —— 每帧 uniform/encode 成本：超集安全的编码跳过 + slot 压缩：已落地（2026-10-17）**。
+    这是 N1e 落地后 CPU 侧的**下一个残余项**（`uniform_ms`/`encode_ms` 两个每帧循环与重启清扫是**同一种病**）。
+    逐条证据见 `docs/validation-uniform-encode-skip-2026-10-17.md`（实现 commit `1058af2`）。
+    - **机制**：`BatchFacts` 增一个**紧凑每批 run class**（一个缓存驻留字节，`0` = 不拥有 run）+ `legacy_batches`
+      列表（`crates/cad-render-wgpu/src/plan.rs:927-941`）；每帧 `EncodeEmitMask`（`plan.rs:1048-1120`）标记
+      参与 encode 的批——无 run 的批、有 run 且该 run 存活本帧剔除的批、加恒活动的 legacy quad/mesh 集。
+      掩码是 planner 活动集的**超集**，**绝不**丢 draw 或 flush；一张 run 全被剔除的**已转换**批在 encode 循环里
+      是纯 no-op，在其 ~200 B `GpuBatch` 被读取**之前**即跳过（`renderer_impl.rs:5220-5235`）。
+    - **slot 压缩**：只有无 run 的批拿每批 uniform slot；per-stream/chunk/conic slot 只为可见 chunk 写，经运行
+      slot 计数器压缩（settled 页 `total_slots` **41,322 → 1**）。每个存活条目的 96 B uniform 由**同一次调用、
+      同一输入**产出，故字节**逐字节相同**；上报计数从 class 字节**精确复现**。
+    - **刻意不跳过**：透明 pass（转换要求不透明批 ⇒ 每个透明批都是真实发出的工作）与加速计数循环
+      （`use_pulled` 要求无剔除）。两个主循环仍迭代 Θ(accepted)/Θ(opaque)——每个被跳过条目只花**一次字节读**，
+      因为上报计数定义在整个被接受集上。
+    - **实测（settled 1-draw 页；中位 / p90）**：
+
+      | fixture | `plan_ms` | `uniform_ms` | `encode_ms` | `submit_ms` | `cpu_ms` |
+      |---|---|---|---|---|---|
+      | complex-test | 10.747 / 18.084 → **1.130 / 1.341** | 6.071 / 6.862 → **0.151 / 0.197** | 5.365 / 5.598 → **0.656 / 0.802** | 0.206 → 0.186 | 22.42 / 30.78 → **2.180 / 2.511** |
+      | debug-default-fonts | 0.677 / 0.759 → **0.132 / 0.207** | 0.135 → **0.026** | 0.247 → **0.090** | 0.140 → 0.224 | 1.244 / 1.367 → **0.522 / 0.796** |
+
+      **独立复跑**（complex-test，另一宿主运行）：settled 帧 **50 → 128**，`plan_ms` **10.499 → 1.131**、
+      `uniform_ms` **6.056 → 0.155**、`encode_ms` **5.335 → 0.652**、`submit_ms` 0.207 → 0.182、`cpu_ms`
+      **22.158 → 2.207**；两次运行都出现同一病态页签名（`draw_calls=1 verts=12 tris=4 cull_chunks=1/9362`）。
+      settled 页的确定性字段 before/after **逐字段一致**（仅 `budget_verts`/`budget_tris` 因墙钟相关 scale 移动）。
+    - **测试（实测）**：`--lib` **195 passed / 3 ignored**（**3** 个新纯测试：
+      `encode_skip_is_superset_safe_and_preserves_counters` 4000 例超集安全差分、
+      `fully_culled_batch_with_legacy_quads_is_still_processed` legacy-quad 回归、
+      `skipped_uniform_slots_leave_surviving_bytes_bit_identical` 2000 例 uniform 字节同一）；
+      `--test headless_render` **35**、accelerated_tier **23**、pulled_prefix_equivalence **9**、
+      render_effects **45**、pick_id **32**。
+    - **边界（不得软化）**：**只有 settled 1-draw 页是干净的 before/after**（paced 帧被墙钟轨迹混淆：after 运行
+      的 paced 页接受约 1.6× 顶点 / 2× draw，按单位发出工作计 encode/submit 成本**没有**增加）；**full-view
+      （无剔除）帧仍未修、未测**（跳过只在有剔除时生效）；**GPU 执行份额未归因**、**是否还有值得做的 CPU 工作
+      未测**；字段一致是**日志级**证据，不是像素级。
 - **预期收益（诚实）**：**(a)** 时间驱动预算使**每帧预算与实测成本对齐**（收益**未测**，需 P0 的
   GPU 时间 + 跨 fixture 校准）——**N1a 已把"对齐"落地为活动预算 + 逐帧上报**，但其**性能收益**仍**未测**
   （无 GPU 时间，且视觉/截图未判读）；**(b)** 纯文档/显式上报，无性能收益；**(c) N1d** 让加速档能在**分页
@@ -432,38 +473,36 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 
 ### N2 — CPU/GPU 流水（pipelining；消除每帧阻塞 poll）
 
-- **现状/问题**：每帧末尾有**阻塞式 device poll**（`crates/cad-render-wgpu/src/renderer_impl.rs:5172-5176`），
-  它把 **CPU(n+1) 串在 GPU(n) 之后** ⇒ 帧时间 ≈ `cpu + wait`（**实测** complex **27.75 ms**，`wait`
-  占 ≈70%）。`wait_ms` 当时被当作 GPU/呈现等待的**代理**；**P0 落地后实测其为真实 GPU 执行**
-  （见下「P0 落地后判定」）。
-- **预期收益（估算，未测）**：流水化（CPU 编码 n+1 与 GPU 执行 n 重叠）后帧时间 ≈
-  `max(cpu, wait)` ≈ `max(8.3, 19.4)` ≈ **19.4 ms** ⇒ **估算 ≈ -30% 帧时间，且零 GPU 工作改动**。
-  **这是估算，不是测量。**
-- **本轮决定（2026-10-17）：延后（deferred），不是取消**。理由（写下来供重开时对照）：
-  - **(a) 今天没有替代信号**：每帧末尾的阻塞 `Wait` poll（`renderer_impl.rs` 的 `device_scope_outcome`）
-    **目前是唯一的 GPU 侧时间信号**，也是 **pacing 反馈环的输入**（`wait_ms`）；拆掉它等于同时拆掉
-    pacing 的观测源（除非先有 P0 的 GPU 时间）。
-  - **(b) 流水化本身到不了 60 fps**：它把 `cpu + wait` 变成 ≈ `max(cpu, wait)`——complex
-    ≈ **19.4 ms** vs 今天 **27.75 ms**（**估算，未测**）——仍高于 16.7 ms，**单靠它无法达标**。
-  - **(c) 打开的正确性面很大**：device-lost/`FrameError` 的 submission-index 记账、
-    `presented_revision`/`rev_resets`/`ready_none_clears` 这些**以在飞帧为键**的 admission、
-    错误作用域的顺序、`stages_us` 的归因、pick 读回的排序——都要随在飞帧重做。
-  - **(d) debug 已在预算内**（每帧 ≈5 ms，**实测**），流水化对它**买不到任何东西**。
-  - **重开条件（写于 2026-10-17 延后时，保留供追溯）**：① P0 的 GPU 时间显示**paced 帧**上
-    `exec ≪ wait_ms`；② paced 帧持续超目标且 `cpu_ms ≥ 帧时间 ~40%`；③ **120 Hz（8.3 ms）成为产品需求**。
-- **P0 落地后判定（2026-10-17，实测；见 `docs/validation-gpu-time-2026-10-17.md`）**：
-  - **① 为假（已答）**：实测 `exec ≈ wait_ms`（比值 **0.93**）⇒ `wait_ms` 就是真实 GPU 执行，
-    present/queue 只占其约 **6–7%**。⇒ **「延后阻塞 poll 近乎免费」不成立**，条件①**不满足**。
-  - **② 为真（已答）**：paced 帧**超目标**，`cpu_ms` ≈ 帧时间 **41–52%**（≥ 40%）。
-  - **③ 成立（已答）**：120 Hz / **8.33 ms** 下 complex `cpu_ms` p90 ≈ **8.5 ms** **单独**即超预算。
-  - ⇒ **满足 ② 与 ③ ⇒ 重开评估**。实测 `cpu ≈ gpu ≈ 4 ms`，重叠大致可把帧时间减半，但**不减少** CPU
-    工作量本身。⇒ 在新的工作顺序里 N2 排 **#2**（在"每帧 CPU plan 成本"之后、N5 之前）。**#1 已落地（见 §N1e）**。
+- **现状/问题**：每帧末尾有**阻塞式 device poll**（`crates/cad-render-wgpu/src/renderer_impl.rs:5615` 的
+  `device_scope_outcome`；`PollType::Wait` 在 `:5790`），它把 **CPU(n+1) 串在 GPU(n) 之后** ⇒ 帧时间 ≈
+  `cpu + wait`。`wait_ms` 在 **P0 落地后实测为真实 GPU 执行**（`gpu/wait` 比值 **0.93**，见 §P0 与
+  `docs/validation-gpu-time-2026-10-17.md`）。
+- **本轮重估（2026-10-17，§N1e 后续落地后实测）——N2 的旧理由已不成立**：
+  - **运动（paced）帧现在约 8 ms**：`cpu_ms ≈ 3.6` + `wait_ms ≈ 4.2`（**实测**，逐运行被墙钟轨迹混淆，
+    但两相位现均小）⇒ **已在 60 fps 预算（16.7 ms）之内且有裕量**。
+  - **主导残余是 GPU 执行**：`gpu_ms ≈ 3.95`（**实测**，见 §P0），约为 `wait_ms` 的 **93%**；**任何 CPU 侧
+    杠杆（含 N2）都不减少 GPU 执行**。
+  - **N2 只能买延迟裕量，不是补预算缺口**：流水化把 `cpu` 与 `gpu` 重叠，或可把运动帧从 ≈8 ms 压到
+    **≈4–5 ms**（**估算，未测**）。
+- **预期收益（估算，未测；已按本轮数字更新）**：帧时间 ≈ `max(cpu, wait)` ⇒ 运动帧 ≈ **8 → 4–5 ms**
+  （**估算**），**零 GPU 工作改动**；**这是估算，不是测量**。
+- **旧重开条件（写于 2026-10-17 延后时，保留供追溯；已逐条标注现状）**：
+  - **① P0 的 GPU 时间显示 paced 帧上 `exec ≪ wait_ms`** —— **已答为假**（实测 `exec ≈ wait_ms`，比值 **0.93**；
+    present/queue 只占约 6–7%）⇒ 「延后阻塞 poll 近乎免费」不成立。
+  - **② paced 帧持续超目标且 `cpu_ms ≥ 帧时间 ~40%`** —— **已失效（moot）**：§N1e 后续落地后运动帧 ≈8 ms
+    **在预算内**，此条件不再成立。
+  - **③ 120 Hz（8.3 ms）成为产品需求** —— **仍有效**（唯一成立的重开触发）。
+- **本轮决定（2026-10-17 重估）：重挂（re-gated）于产品需求，不是按旧理由开工**：
+  - 旧判定（2026-10-17 P0 落地后）曾为"满足 ②③ ⇒ 重开评估、工作顺序 **#2**"——该判定**已作废**：② 现不成立
+    （运动帧在预算内），故 **N2 不再是 #2 的既定下一步**。
+  - **重开触发**：仅在出现明确产品需求时重开——例如 **120 Hz 目标**，或**更重的图纸**使运动帧重新越过预算。
+    **记录的重开条件须按上述这些数字重新评估**（①② 已按此重评）。
 - **前置条件/风险**：须**保留 device-lost / `FrameError` 的分类**（不得因异步化把错误吞成空成功）；
   需**有界队列深度**（内存上界）；需与 **pick readback** 交互（读回与在飞帧的同步）。
-- **需要的决策**：队列深度与在飞帧数上界（内存权衡）。
+- **需要的决策**：队列深度与在飞帧数上界（内存权衡）；**以及是否真有需要 N2 的产品需求**（120 Hz / 更重图纸）。
 - **相关契约/栅栏**：device-lost/`FrameError` 分类保持；有界队列深度；pick-readback 交互 fence。
-- **优先级**：N2（**重开（2026-10-17，P0 落地后）**：条件 ②③ 满足 ⇒ 实测工作顺序 **#2**；
-  条件 ① 已答为**假**——见上「P0 落地后判定」）。
+- **优先级**：N2（**重挂（2026-10-17 重估）**：旧理由已不成立——运动帧 ≈8 ms 在 60 fps 预算内，主导残余是
+  **GPU 执行**（CPU 杠杆不可及）；**仅在 120 Hz 或更重图纸使运动帧再次越预算时重开**）。
 
 ### N3 — 显存容量（4 GB 卡）：显式建模取代 panic
 
@@ -542,7 +581,13 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **P0 落地后判定（2026-10-17，实测）——前提被测量，非瓶颈**：每帧 CPU 相位（中位份额）实测 `plan` **48–56%**、
   `uniform` 7–27%、`encode` 6–24%、`submit` 1–18% ⇒ **CPU 提交成本不是瓶颈**，`encode`/`submit` 都不主导，
   且 N5 **碰不到** `plan_ms` 与 GPU 执行（`gpu_ms` 实测中位 3.948 / 2.643，见 P0）。⇒ **N5 降级（demote）而非取消**，
-  在新的工作顺序里排 **#3**（在"每帧 CPU plan 成本"与 N2 之后）。**#1 已落地（见 §N1e）**。
+  在新的工作顺序里排 **#3**（在"每帧 CPU plan 成本"与 N2 之后）。**#1 及其 uniform/encode 后续均已落地（见 §N1e）**。
+  - **一致性更新（2026-10-17，§N1e 后续落地后）**：上述相位份额是 **N1e 后续之前**的口径；settled 1-draw 页上
+    `uniform_ms`/`encode_ms` 已大幅收缩（**6.071 → 0.151** / **5.365 → 0.656** ms），`submit_ms` 的 **~5 ms
+    估算已更正**（settled 页实测 **0.206 ms**，从来不是因素）——见
+    `docs/validation-uniform-encode-skip-2026-10-17.md`。⇒ **N5 的降级结论不变**（`encode`/`submit` 仍不主导，
+    N5 仍碰不到 `plan_ms` 与 GPU 执行）。**N2 已按实测重挂**（见 §N2），故"在 N2 之后"只是**顺序**表述，
+    不是 N2 即将开工。
   - **重促（re-promote）条件（实测门控）**：仅在 **N1d 已落地**（结构性前提）**且**在"每帧 CPU plan 成本"
     与 N2 流水之后、`encode_ms + submit_ms` 仍占据**剩余帧时间的显著份额**（实测）时才重促——即 N5 打击的相位
     必须真正成为残余瓶颈。在此之前**不开工**。
@@ -852,8 +897,8 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **WebGL2 真实浏览器运行仍 NOT RUN（G7）**；加速档的降级路径只有**离线单测**。
 - **GPU 帧时间仅在 opt-in 下测量**——§P0 已落地（**每帧总量**已实测）；但 **GPU 内部归因**
   （顶点/三角形吞吐 vs draw 数 vs 带宽）与 **N1d/N2/N5 是否真能降低 `gpu_ms`** 仍**未测**，故上文
-  "GPU 收益"表述（P1 加速档部分、P6、P7、N5）仍为**结构推理，不是证据**；N2 的 ≈ -30% 与
-  N5 的 ≈10–12% 均为**估算**。
+  "GPU 收益"表述（P1 加速档部分、P6、P7、N5）仍为**结构推理，不是证据**；N2 的收益估算已按本轮实测更新为
+  **8 → 4–5 ms**（仍为**估算**，且 N2 已按实测**重挂于产品需求**，见 §N2）；N5 的 ≈10–12% 仍为**估算**。
 
 ---
 
