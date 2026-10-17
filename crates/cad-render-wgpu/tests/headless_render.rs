@@ -596,8 +596,9 @@ fn non_progressive_frames_report_the_un_paced_ceiling() {
     assert_eq!(stats.budget_triangles, renderer.frame_budget.max_triangles);
 }
 
-/// Scene mutation / `clear_batches` drop the scene-specific cost knowledge; a
-/// camera move does not (covered by the parity test).
+/// A **base-changing** scene mutation / `clear_batches` drop the scene-specific
+/// cost knowledge; a camera move does not (covered by the parity test), and
+/// neither does a suffix-only overlay commit (see `tests/pacing_commit_suffix.rs`).
 #[test]
 fn scene_mutation_resets_pacing_knowledge() {
     let Some(gpu) = gpu() else {
@@ -623,10 +624,15 @@ fn scene_mutation_resets_pacing_knowledge() {
         "the controller must have adapted before the reset is meaningful"
     );
 
-    // A scene mutation (commit) forgets the cost knowledge immediately.
+    // A **base-changing** scene mutation (a commit with `keep_prefix == 0`)
+    // forgets the cost knowledge immediately. A suffix-only commit does **not**
+    // reset it — that is the separate `pacing_commit_suffix` contract.
+    let staged = renderer
+        .prepare_upload_batches(&line_batches(8))
+        .expect("stage a base replacement");
     renderer
-        .upload(&scene(line_batches(8)))
-        .expect("mutate scene");
+        .commit_upload(staged, 0)
+        .expect("mutate the base scene");
     assert_eq!(renderer.pacing_scale(), 1.0);
     assert_eq!(renderer.pacing_cost_ema_ms(), 0.0);
     let stats = renderer.render(camera_2d(), &target).unwrap();

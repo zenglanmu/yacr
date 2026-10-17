@@ -2283,8 +2283,25 @@ impl Renderer {
         let pick_us = pick_started.elapsed().as_micros() as u64;
         self.progressive_frame = None;
         self.draw_plan = None;
-        // Scene mutation: the page cost knowledge is scene-specific.
-        self.reset_pacing();
+        // Page-cost knowledge is scene-specific, so a commit that replaces the
+        // scene resets the controller. A **suffix-only** commit (a true prefix is
+        // kept: `keep_prefix > 0`, the same discriminator the pick table's
+        // incremental path uses) only re-uploads the transient overlay range and
+        // does not change the base draw-cost profile, so it must NOT reset:
+        // otherwise a periodic overlay refresh (e.g. the deferred reference-grid
+        // settle, once per camera settle) knocks the learned scale back to 1.0
+        // every settle, the controller never converges, and pages stay
+        // vertex-heavy. A base change (`keep_prefix == 0`) still resets, as do
+        // `clear_batches` and a device generation change / device loss.
+        //
+        // This is a heuristic cost model, **not** correctness state: it is
+        // deliberately not modelled as a dirty/invalidation flag, and nothing
+        // else is coupled to the reset (the restart-pending flag is left as-is
+        // here — a suffix commit does not reset the knowledge, so a pending
+        // restart from an earlier real reset correctly stays pending).
+        if keep_prefix == 0 {
+            self.reset_pacing();
+        }
         let lineweight_started = std::time::Instant::now();
         self.rebuild_lineweight_cache();
         let lineweight_us = lineweight_started.elapsed().as_micros() as u64;
@@ -2584,7 +2601,12 @@ impl Renderer {
         // The resident image set was replaced wholesale (fresh keys per call), so
         // this is a full rebuild, never an incremental suffix replacement.
         self.rebuild_pick_table(None)?;
-        // The resident image set is scene data; page cost knowledge is stale.
+        // The resident image set was replaced wholesale (fresh keys per call, a
+        // full rebuild — never an incremental suffix), and image quads are drawn
+        // scene data that change the draw-cost profile, so the page cost knowledge
+        // is stale and a reset is justified. In practice the runtime only calls
+        // this on a base change (`runtime.rs`), which already reset via
+        // `commit_upload`; the reset here keeps the contract true for any caller.
         self.reset_pacing();
         Ok(report)
     }
@@ -2747,8 +2769,10 @@ impl Renderer {
         }
     }
 
-    /// Forget scene-specific cost knowledge. Called on scene mutation /
-    /// `clear_batches` / a device-generation change, never on camera motion.
+    /// Forget scene-specific cost knowledge. Called on a **base-changing** scene
+    /// mutation (`keep_prefix == 0`), `clear_batches` and a device-generation
+    /// change / device loss; **never** on camera motion or a suffix-only overlay
+    /// commit (both preserve the cost model — see [`Renderer::commit_upload`]).
     fn reset_pacing(&mut self) {
         self.pacing = pacing::PacingState::new(self.pacing.target_ms);
         self.pacing_restart_pending = true;

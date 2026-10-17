@@ -1343,9 +1343,11 @@ pub struct Renderer {
     /// frame (see [`pacing`]); every consumer that deliberately ignores pacing
     /// (picking) reads this field directly.
     pub frame_budget: FrameBudget,
-    /// Adaptive page-budget controller state (see [`pacing`]). Reset on scene
-    /// mutation / `clear_batches` / a device-generation change; **never** on
-    /// camera motion (cost knowledge is scene-specific, not view-specific).
+    /// Adaptive page-budget controller state (see [`pacing`]). Reset on a
+    /// **base-changing** scene mutation (`keep_prefix == 0`), `clear_batches` and
+    /// a device-generation change; **never** on camera motion or a suffix-only
+    /// overlay commit (cost knowledge is scene-specific, not view-specific, and a
+    /// suffix commit does not change the base draw-cost profile).
     pacing: pacing::PacingState,
     /// Set when a scene mutation reset the controller; the next observed frame
     /// seeds the EWMA instead of adapting ([`pacing::Sample::restart`]).

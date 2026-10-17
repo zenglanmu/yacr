@@ -141,10 +141,12 @@ pub struct Sample {
     /// Batches accepted by this frame's page plan. A frame that accepted no
     /// batch is not a cost observation (it drew nothing to pay for).
     pub accepted: usize,
-    /// The controller's cost knowledge was reset before this frame (scene
-    /// mutation / `clear_batches` / a new device generation). This sample seeds
-    /// the EWMA and does **not** adapt. A camera move is *not* a restart: cost
-    /// knowledge is scene-specific, not view-specific.
+    /// The controller's cost knowledge was reset before this frame (a
+    /// base-changing scene mutation / `clear_batches` / a new device generation).
+    /// This sample seeds the EWMA and does **not** adapt. A camera move is *not*
+    /// a restart, and neither is a suffix-only overlay commit: cost knowledge is
+    /// scene-specific, not view-specific, and a suffix commit leaves the base
+    /// draw-cost profile unchanged.
     pub restart: bool,
 }
 
