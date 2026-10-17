@@ -21,8 +21,13 @@
 //! a batch-level class histogram, the "BEFORE instancing / AFTER instancing"
 //! per-class draw breakdown from `FrameStats` + the scene itself, the total
 //! `draw_calls` on both paths, and per-frame phase tables
-//! (`plan`/`uniform`/`encode`/`submit`/`wait`, plus `cpu_ms`) over pan and zoom
-//! frames at a mid and a deep zoom. `instance_stream_uploads` is recorded before
+//! (`plan`/`uniform`/`encode`/`submit`/`wait`, plus `cpu_ms`) together with the
+//! whole-call `wall_ms` and the `residual_ms = wall_ms − Σ CPU phases` **frame
+//! cost distribution** (residual is *not* GPU time) over pan and zoom frames at
+//! a mid and a deep zoom, plus a full-view vs deep-zoom **constancy** comparison
+//! (does the frame cost track the visible geometry?) and the tier/path each leg
+//! actually ran (`accelerated` vs universal per-run, incl. any budget fallback).
+//! `instance_stream_uploads` is recorded before
 //! and after every phase to show a camera-only move re-uploads no stream.
 //!
 //! Markdown + JSON are written to `YACR_PERF_OUT`, or
@@ -144,6 +149,18 @@ fn output_dir() -> PathBuf {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     PathBuf::from(format!("/tmp/opencode/yacr-perf/{stamp}-realscene"))
+}
+
+/// Adapter kind for the run: `YACR_PERF_GPU` = `auto` (default; discrete GPU
+/// preferred), `high` or `low`. The default keeps the historical
+/// discrete-first behaviour; `low` exists so a large drawing that exhausts a
+/// small discrete card's VRAM can still be measured on an integrated adapter —
+/// the report always states which adapter actually ran.
+fn gpu_selection() -> GpuSelection {
+    std::env::var("YACR_PERF_GPU")
+        .ok()
+        .and_then(|value| GpuSelection::parse(&value))
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -343,25 +360,39 @@ impl BatchHistogram {
 
 #[derive(Clone, Copy, Default)]
 struct FrameRecord {
+    /// The whole `Renderer::render()` call (CPU + GPU + the blocking poll).
+    wall_ms: f64,
     cpu_ms: f64,
     plan_ms: f64,
     uniform_ms: f64,
     encode_ms: f64,
     submit_ms: f64,
     wait_ms: f64,
+    /// `wall_ms - (plan_ms + uniform_ms + encode_ms + submit_ms)`.
+    ///
+    /// **Not** GPU time: it folds in the blocking device poll (`wait_ms`, which
+    /// waits on the GPU), any present and the small pre-phase CPU
+    /// (`ensure_target` / flags top-up). It is only ever wall time the phase
+    /// timers do not cover.
+    residual_ms: f64,
     draw_calls: u64,
     uniform_writes: u64,
 }
 
 impl FrameRecord {
-    fn from_stats(stats: &FrameStats) -> Self {
+    /// `wall_ms` is measured by the caller around `Renderer::render`; the phase
+    /// fields and the derived residual come from the returned [`FrameStats`].
+    fn from_stats(stats: &FrameStats, wall_ms: f64) -> Self {
+        let phase_ms = stats.plan_ms + stats.uniform_ms + stats.encode_ms + stats.submit_ms;
         FrameRecord {
+            wall_ms,
             cpu_ms: stats.cpu_ms,
             plan_ms: stats.plan_ms,
             uniform_ms: stats.uniform_ms,
             encode_ms: stats.encode_ms,
             submit_ms: stats.submit_ms,
             wait_ms: stats.wait_ms,
+            residual_ms: wall_ms - phase_ms,
             draw_calls: stats.draw_calls,
             uniform_writes: stats.uniform_writes,
         }
@@ -376,6 +407,19 @@ struct PhaseResult {
     mesh_uploads_before: u64,
     mesh_uploads_after: u64,
     draw_calls_first: u64,
+    /// The live draw tier of this phase's frames (`"universal"`/`"accelerated"`).
+    tier: &'static str,
+    /// Whether the opaques used the accelerated per-class draws, i.e. whether
+    /// this phase ran the accelerated tier or fell back to the universal per-run
+    /// organization on the same device.
+    accelerated: bool,
+    /// The over-budget reason of the first frame, or `None` when the phase's
+    /// frames accepted the whole resident scene. A `Some` here is a budget
+    /// fallback: the frame is a *page* of the scene, not the whole drawing.
+    over_budget: Option<String>,
+    /// The camera's `world_per_px` (first frame) — the view scale this phase ran
+    /// at, so full-view vs deep-zoom legs are comparable.
+    world_per_px: f64,
 }
 
 fn run_phase(
@@ -388,12 +432,30 @@ fn run_phase(
     let mesh_uploads_before = renderer.mesh_chunk_uploads();
     let mut records = Vec::with_capacity(cameras.len());
     let mut draw_calls_first = 0;
+    let mut tier = "universal";
+    let mut accelerated = false;
+    let mut over_budget = None;
+    let mut world_per_px = f64::NAN;
     for (index, camera) in cameras.iter().enumerate() {
+        let started = Instant::now();
         let stats = renderer.render(*camera, target).expect("frame");
+        let wall_ms = started.elapsed().as_secs_f64() * 1000.0;
         if index == 0 {
             draw_calls_first = stats.draw_calls;
+            tier = stats.tier.as_str();
+            accelerated = stats.accelerated;
+            over_budget = stats.over_budget.as_ref().map(|reason| {
+                format!(
+                    "{} requested={} limit={} skipped_batches={}",
+                    reason.report.category,
+                    reason.report.requested,
+                    reason.report.limit,
+                    reason.report.skipped_batches
+                )
+            });
+            world_per_px = camera.world_per_px;
         }
-        records.push(FrameRecord::from_stats(&stats));
+        records.push(FrameRecord::from_stats(&stats, wall_ms));
     }
     let uploads_after = renderer.instance_stream_uploads();
     let mesh_uploads_after = renderer.mesh_chunk_uploads();
@@ -405,6 +467,10 @@ fn run_phase(
         mesh_uploads_before,
         mesh_uploads_after,
         draw_calls_first,
+        tier,
+        accelerated,
+        over_budget,
+        world_per_px,
     }
 }
 
@@ -885,9 +951,17 @@ fn short(path: &str) -> String {
 
 fn phase_table(md: &mut String, result: &PhaseResult) {
     md.push_str(&format!(
-        "**{}** ({} frames; `instance_stream_uploads` {} → {}; `mesh_chunk_uploads` {} → {})\n\n",
+        "**{}** ({} frames; `world_per_px` {:.6e}; tier={} accelerated={}; over_budget={}; \
+         `instance_stream_uploads` {} → {}; `mesh_chunk_uploads` {} → {})\n\n",
         result.name,
         result.records.len(),
+        result.world_per_px,
+        result.tier,
+        result.accelerated,
+        result
+            .over_budget
+            .as_deref()
+            .unwrap_or("none (whole resident scene accepted)"),
         result.uploads_before,
         result.uploads_after,
         result.mesh_uploads_before,
@@ -897,8 +971,10 @@ fn phase_table(md: &mut String, result: &PhaseResult) {
         "| phase | n | min | mean | median | p95 | max |\n|---|---:|---:|---:|---:|---:|---:|\n",
     );
     type Row = (&'static str, fn(&FrameRecord) -> f64);
-    let rows: [Row; 8] = [
+    let rows: [Row; 10] = [
+        ("wall_ms", |r| r.wall_ms),
         ("cpu_ms", |r| r.cpu_ms),
+        ("residual_ms", |r| r.residual_ms),
         ("plan_ms", |r| r.plan_ms),
         ("uniform_ms", |r| r.uniform_ms),
         ("encode_ms", |r| r.encode_ms),
@@ -914,7 +990,11 @@ fn phase_table(md: &mut String, result: &PhaseResult) {
             s.n, s.min, s.mean, s.median, s.p95, s.max
         ));
     }
-    md.push('\n');
+    md.push_str(
+        "\n`residual_ms = wall_ms − (plan_ms + uniform_ms + encode_ms + submit_ms)`. \
+         **Not GPU time**: it folds in the blocking poll (`wait_ms`), any present and the \
+         small pre-phase CPU; no `TIMESTAMP_QUERY` exists on this device.\n\n",
+    );
 }
 
 fn write_report(
@@ -948,6 +1028,14 @@ fn write_report(
         "Frames per phase: {frames}; render target {width}x{height}; deep zoom \
          = fit / {deep_zoom:.1}.\n\n"
     ));
+    md.push_str(
+        "Per-frame `wall_ms` is the whole `Renderer::render()` call; \
+         `residual_ms = wall_ms − (plan_ms + uniform_ms + encode_ms + submit_ms)`. \
+         **`residual_ms` is NOT GPU time**: it folds in the blocking device poll \
+         (`wait_ms`, which waits on the GPU), the pre-phase CPU and timer noise. No feature \
+         is ever requested (`DeviceDescriptor { ..Default::default() }`), so there is no \
+         `TIMESTAMP_QUERY` and **no GPU execution time appears in these tables**.\n\n",
+    );
 
     let adapter = reports
         .first()
@@ -1236,6 +1324,65 @@ fn write_report(
         for phase in &r.phases {
             phase_table(&mut md, phase);
         }
+
+        // Full view vs deep zoom: does the frame cost track the visible
+        // geometry? Both legs use the same renderer, budget and tier, so a ratio
+        // near 1.0 is the honest evidence that this frame's cost is ~constant in
+        // the visible geometry (there is no visibility culling — backlog §P1).
+        if let (Some(mid), Some(deep)) = (
+            r.phases.iter().find(|p| p.name == "pan_mid_instanced"),
+            r.phases.iter().find(|p| p.name == "pan_deep_instanced"),
+        ) {
+            md.push_str("### Full view vs deep zoom (frame cost vs visible geometry)\n\n");
+            md.push_str(&format!(
+                "Both legs run the same renderer, frame budget and tier; the deep leg is the \
+                 fit view's `world_per_px` / {deep_zoom:.1} (so the visible world area is \
+                 ≈1/{} of the fit view), panned the same 8 px/frame. A ratio near 1.0 means \
+                 the frame cost does **not** track the visible geometry — the expected result \
+                 while no chunk-visibility culling exists (backlog §P1).\n\n",
+                deep_zoom * deep_zoom
+            ));
+            md.push_str("| leg | world_per_px | path | tier | accelerated | over_budget | wall mean ms | cpu mean ms | residual mean ms | wait mean ms | draw_calls (first) |\n");
+            md.push_str("|---|---:|---|---|---:|---|---:|---:|---:|---:|---:|\n");
+            for (tag, phase) in [("full (pan_mid)", mid), ("deep (pan_deep)", deep)] {
+                md.push_str(&format!(
+                    "| {} | {:.6e} | instanced+merged | {} | {} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {} |\n",
+                    tag,
+                    phase.world_per_px,
+                    phase.tier,
+                    phase.accelerated,
+                    phase.over_budget.as_deref().unwrap_or("none"),
+                    field(&phase.records, |r| r.wall_ms).mean,
+                    field(&phase.records, |r| r.cpu_ms).mean,
+                    field(&phase.records, |r| r.residual_ms).mean,
+                    field(&phase.records, |r| r.wait_ms).mean,
+                    phase.draw_calls_first,
+                ));
+            }
+            let ratio = |f: fn(&FrameRecord) -> f64| {
+                let m = field(&mid.records, f).mean;
+                let d = field(&deep.records, f).mean;
+                if m.abs() < f64::EPSILON {
+                    f64::NAN
+                } else {
+                    d / m
+                }
+            };
+            md.push_str(&format!(
+                "\nDeep/full mean ratios: wall **{:.2}×**, cpu {:.2}×, residual {:.2}×, wait \
+                 {:.2}×. A mean ratio ≈1 (within run-to-run noise) is measured *constancy*: \
+                 the frame does the same amount of work at the fit view and deep inside the \
+                 drawing. The structural reason is that the renderer submits every resident \
+                 draw regardless of the view (no chunk-visibility culling exists), so \
+                 `draw_calls` and the plan/encode work are view-independent. This is **not** a \
+                 GPU measurement (see the residual note above) and it does not by itself say \
+                 the cost is GPU-bound.\n\n",
+                ratio(|r| r.wall_ms),
+                ratio(|r| r.cpu_ms),
+                ratio(|r| r.residual_ms),
+                ratio(|r| r.wait_ms),
+            ));
+        }
     }
 
     md.push_str(
@@ -1243,7 +1390,9 @@ fn write_report(
          cargo test -p cad-cli-tools --test realscene_render_perf -- --ignored --nocapture --test-threads=1\n\
          ```\n\n\
          (Override fixtures with `YACR_PERF_DWGS=\"a.dwg:b.dwg\"` or `YACR_TEST_DWG=a.dwg`; \
-         frame count with `YACR_PERF_FRAMES`; output with `YACR_PERF_OUT`.)\n\n",
+         frame count with `YACR_PERF_FRAMES`; deep zoom with `YACR_PERF_DEEP_ZOOM`; adapter \
+         kind with `YACR_PERF_GPU=auto|high|low` (default `auto`, discrete preferred); output \
+         with `YACR_PERF_OUT`.)\n\n",
     );
 
     md.push_str(
@@ -1256,6 +1405,9 @@ fn write_report(
          - No selection/highlight or tool overlay: only the base model scene is measured.\n\
          - Raster images are not decoded/uploaded (no `--images-dir`); the image class is the \
          batch count only.\n\
+         - **No GPU time is measured**: `FrameStats::gpu_ms` stays `None`, no `TIMESTAMP_QUERY` \
+         is requested or available, and `residual_ms` is *not* a GPU measurement (it contains \
+         the blocking poll and the pre-phase CPU). `wall_ms` includes the blocking poll.\n\
          - Single machine / single run; not a cross-machine, vendor, or thermal claim.\n",
     );
 
@@ -1276,7 +1428,13 @@ fn write_report(
                     "mesh_chunk_uploads_before": p.mesh_uploads_before,
                     "mesh_chunk_uploads_after": p.mesh_uploads_after,
                     "draw_calls_first_frame": p.draw_calls_first,
+                    "tier": p.tier,
+                    "accelerated": p.accelerated,
+                    "over_budget": p.over_budget,
+                    "world_per_px": p.world_per_px,
+                    "wall_ms": stats_json(&field(&p.records, |r| r.wall_ms)),
                     "cpu_ms": stats_json(&field(&p.records, |r| r.cpu_ms)),
+                    "residual_ms": stats_json(&field(&p.records, |r| r.residual_ms)),
                     "plan_ms": stats_json(&field(&p.records, |r| r.plan_ms)),
                     "uniform_ms": stats_json(&field(&p.records, |r| r.uniform_ms)),
                     "encode_ms": stats_json(&field(&p.records, |r| r.encode_ms)),
@@ -1441,7 +1599,7 @@ fn realscene_render_frame_perf() {
         return;
     }
 
-    let gpu = match create_headless_gpu_with(BackendPreference::Auto, GpuSelection::Auto) {
+    let gpu = match create_headless_gpu_with(BackendPreference::Auto, gpu_selection()) {
         Ok(gpu) => gpu,
         Err(error) => {
             eprintln!("SKIP realscene_render_frame_perf: no wgpu adapter: {error}");
@@ -1449,7 +1607,8 @@ fn realscene_render_frame_perf() {
         }
     };
     eprintln!(
-        "realscene_render_frame_perf: adapter backend={} name={} device_type={} driver={} driver_info={}",
+        "realscene_render_frame_perf: gpu_selection={} adapter backend={} name={} device_type={} driver={} driver_info={}",
+        gpu_selection().as_str(),
         gpu.adapter.backend,
         gpu.adapter.name,
         gpu.adapter.device_type,

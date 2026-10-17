@@ -10,7 +10,17 @@
 //!   packing the page's uniforms into one shared, dynamically-offset buffer,
 //!   command encoding, `queue.submit`), with the blocking device poll excluded;
 //! * the outer wall time of one `render()` call (CPU + GPU, including the poll);
+//! * the frame's **residual** `wall - (plan_ms + uniform_ms + encode_ms +
+//!   submit_ms)`, reported explicitly as *"GPU + present + blocking poll — NOT
+//!   a GPU measurement"*. It is never presented as GPU time: no timestamp
+//!   query exists (see the report's skipped/not-run section).
 //! * `FrameStats::draw_calls` and `FrameStats::uniform_writes`.
+//!
+//! The fixture-scale leg drives **two view states** of the same synthetic scene:
+//! `full` (the whole scene fits the target) and `zoom` (a fixed factor closer,
+//! so most of the scene is off-screen). A frame-cost distribution per view state
+//! is what a later culling change (backlog §P1) must move, so the baseline is
+//! recorded for both rather than for a single camera.
 //!
 //! It opens **no DWG** (`cad-render-wgpu` cannot depend on the importer); the
 //! scene is a synthetic set of small line batches whose *count* equals the
@@ -20,8 +30,9 @@
 //! Two legs are measured:
 //!
 //! * `renderer_frame_cpu_measurement` — the fixture-scale scenes, now also
-//!   reporting a `plan`/`uniform`/`encode`/`submit`/`wait` phase table and the
-//!   per-frame `set_*` call counters;
+//!   reporting a `plan`/`uniform`/`encode`/`submit`/`wait` phase table, the
+//!   per-frame `set_*` call counters and the wall/residual frame-cost
+//!   distribution per view state;
 //! * `renderer_batch_count_sweep` — a fixed 88k-segment scene split into
 //!   `B ∈ {1, 100, 1k, 10k, 44.5k, 88k}` line batches, fit as
 //!   `cpu_ms = a + b*B` to isolate the per-batch CPU constant `b`, plus the
@@ -113,15 +124,72 @@ fn scene(batches: usize) -> SceneDelta {
     }
 }
 
-fn camera(center_x: f64) -> Camera2d {
+/// A pan camera: `center_x` is in world units, `world_per_px` sets the view
+/// scale. The fixture-scale leg pans the camera by 3 *screen pixels* per frame
+/// at every view state (the caller scales the step by `world_per_px`), so the
+/// `full` and `zoom` legs drive the same motion in screen space.
+fn camera(center_x: f64, world_per_px: f64) -> Camera2d {
     Camera2d {
         center: Point3 {
             x: center_x,
             y: 0.0,
             z: 0.0,
         },
-        world_per_px: 1.0,
+        world_per_px,
         z_plane: 0.0,
+    }
+}
+
+/// The view state a measured leg drives the camera in.
+///
+/// `Full` fits the whole synthetic scene in the target; `Zoom` is
+/// [`ZOOM_FACTOR`] times closer, so most of the scene is off-screen. Chunk
+/// visibility (backlog §P1) only matters in the zoomed state, so the baseline
+/// frame-cost distribution is recorded for both.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ViewMode {
+    Full,
+    Zoom,
+}
+
+impl ViewMode {
+    fn label(self) -> &'static str {
+        match self {
+            ViewMode::Full => "full",
+            ViewMode::Zoom => "zoom",
+        }
+    }
+}
+
+/// The `Full` view fits the scene; `Zoom` divides `world_per_px` by this.
+const ZOOM_FACTOR: f64 = 16.0;
+
+/// World-x extent of the synthetic [`scene`]: `line_batch(i)` spans
+/// `x in [i*0.25, i*0.25 + 0.1]`, so the last batch ends at
+/// `(batches-1)*0.25 + 0.1`.
+fn scene_span_x(batches: usize) -> f64 {
+    (batches.saturating_sub(1)) as f64 * 0.25 + 0.1
+}
+
+/// `world_per_px` that fits the whole synthetic scene into `target` (the `Full`
+/// view). Uses the larger of the two axis requirements, so both axes fit.
+fn fit_all_world_per_px(batches: usize, target: &RenderTarget) -> f64 {
+    let span_x = scene_span_x(batches).max(f64::MIN_POSITIVE);
+    let span_y = 0.2_f64;
+    (span_x / target.width.max(1) as f64).max(span_y / target.height.max(1) as f64)
+}
+
+/// The `world_per_px` a leg measured in `view` drives.
+fn view_world_per_px(
+    view: ViewMode,
+    batches: usize,
+    target: &RenderTarget,
+    zoom_factor: f64,
+) -> f64 {
+    let full = fit_all_world_per_px(batches, target);
+    match view {
+        ViewMode::Full => full,
+        ViewMode::Zoom => full / zoom_factor,
     }
 }
 
@@ -159,8 +227,18 @@ fn percentiles(samples: &[f64]) -> Stats {
 struct SceneResult {
     label: String,
     batches: usize,
+    /// `"full"` or `"zoom"`: the view state this row was measured in.
+    view: &'static str,
+    /// The `world_per_px` this row's camera used.
+    world_per_px: f64,
     cpu: Stats,
     wall: Stats,
+    /// `wall - (plan_ms + uniform_ms + encode_ms + submit_ms)` per frame.
+    ///
+    /// **Not** a GPU measurement: it folds the blocking device poll (which
+    /// waits on the GPU), any present and the pre-phase CPU (`ensure_target`
+    /// and the flags-table top-up) together with timer noise.
+    residual: Stats,
     plan: Stats,
     uniform: Stats,
     encode: Stats,
@@ -188,6 +266,9 @@ struct SceneResult {
     tier: &'static str,
     /// Whether the frame's opaque pass used the accelerated per-class draws.
     accelerated: bool,
+    /// The over-budget reason when the frame was a *page* of the scene rather
+    /// than the whole resident scene (a budget fallback), else `None`.
+    over_budget: Option<String>,
     /// Resident instanced segments after the scene's upload.
     instance_segments: u64,
     /// Instanced stream buffers uploaded for the scene.
@@ -200,6 +281,8 @@ struct SceneResult {
 struct FrameSamples {
     cpu: Vec<f64>,
     wall: Vec<f64>,
+    /// `wall - (plan + uniform + encode + submit)` per timed frame.
+    residual: Vec<f64>,
     plan: Vec<f64>,
     uniform: Vec<f64>,
     encode: Vec<f64>,
@@ -213,6 +296,7 @@ impl FrameSamples {
         FrameSamples {
             cpu: Vec::with_capacity(frames),
             wall: Vec::with_capacity(frames),
+            residual: Vec::with_capacity(frames),
             plan: Vec::with_capacity(frames),
             uniform: Vec::with_capacity(frames),
             encode: Vec::with_capacity(frames),
@@ -225,6 +309,9 @@ impl FrameSamples {
 
 /// Upload `delta`, then drive `warmup + frames` panning frames and record the
 /// phase spans of the timed ones.
+///
+/// The camera pans 3 *screen pixels* per frame at `world_per_px`, so the pan is
+/// identical in screen space across view states.
 fn run_frames(
     renderer: &mut Renderer,
     target: &RenderTarget,
@@ -232,19 +319,23 @@ fn run_frames(
     frames: usize,
     warmup: usize,
     instanced: bool,
+    world_per_px: f64,
 ) -> FrameSamples {
     renderer.set_line_instancing(instanced);
     renderer.clear_batches();
     renderer.upload(delta).expect("upload scene");
     let mut samples = FrameSamples::new(frames);
     for step in 0..(warmup + frames) {
-        let cam = camera(step as f64 * 3.0); // a 3 px pan per frame
+        // a 3 px pan per frame
+        let cam = camera(step as f64 * 3.0 * world_per_px, world_per_px);
         let start = Instant::now();
         let stats = renderer.render(cam, target).expect("render frame");
         let elapsed = start.elapsed().as_secs_f64() * 1000.0;
         if step >= warmup {
+            let phase_ms = stats.plan_ms + stats.uniform_ms + stats.encode_ms + stats.submit_ms;
             samples.cpu.push(stats.cpu_ms);
             samples.wall.push(elapsed);
+            samples.residual.push(elapsed - phase_ms);
             samples.plan.push(stats.plan_ms);
             samples.uniform.push(stats.uniform_ms);
             samples.encode.push(stats.encode_ms);
@@ -256,22 +347,42 @@ fn run_frames(
     samples
 }
 
+/// One measurement leg: which synthetic scene scale, which draw path and which
+/// view state. Kept as a struct so `measure_scene` stays within clippy's
+/// argument limit.
+struct Leg<'a> {
+    label: &'a str,
+    batches: usize,
+    instanced: bool,
+    view: ViewMode,
+    world_per_px: f64,
+}
+
 fn measure_scene(
     renderer: &mut Renderer,
     target: &RenderTarget,
-    label: &str,
-    batches: usize,
+    leg: &Leg<'_>,
     frames: usize,
     warmup: usize,
-    instanced: bool,
 ) -> SceneResult {
-    let samples = run_frames(renderer, target, &scene(batches), frames, warmup, instanced);
+    let samples = run_frames(
+        renderer,
+        target,
+        &scene(leg.batches),
+        frames,
+        warmup,
+        leg.instanced,
+        leg.world_per_px,
+    );
     let stats = samples.last.expect("at least one timed frame");
     SceneResult {
-        label: label.to_string(),
-        batches,
+        label: leg.label.to_string(),
+        batches: leg.batches,
+        view: leg.view.label(),
+        world_per_px: leg.world_per_px,
         cpu: percentiles(&samples.cpu),
         wall: percentiles(&samples.wall),
+        residual: percentiles(&samples.residual),
         plan: percentiles(&samples.plan),
         uniform: percentiles(&samples.uniform),
         encode: percentiles(&samples.encode),
@@ -291,9 +402,18 @@ fn measure_scene(
         progressive_restarts: stats.progressive_restarts,
         instanced_draws: stats.instanced_draws,
         instanced_batches: stats.instanced_batches,
-        instanced,
+        instanced: leg.instanced,
         tier: stats.tier.as_str(),
         accelerated: stats.accelerated,
+        over_budget: stats.over_budget.as_ref().map(|reason| {
+            format!(
+                "{} requested={} limit={} skipped_batches={}",
+                reason.report.category,
+                reason.report.requested,
+                reason.report.limit,
+                reason.report.skipped_batches
+            )
+        }),
         instance_segments: renderer.instance_segment_count(),
         instance_streams: renderer.instance_stream_count(),
     }
@@ -350,6 +470,13 @@ fn env_usize(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+fn env_f64(key: &str, default: f64) -> f64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
 fn output_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("YACR_PERF_OUT") {
         return PathBuf::from(dir);
@@ -368,18 +495,45 @@ fn stat_row(label: &str, s: &Stats) -> String {
     )
 }
 
+/// The device facts the report must state: which adapter actually ran the
+/// frames, and which features are enabled on that device.
+///
+/// The features list is the honest proof that **no** feature was requested
+/// (both device-creation sites use `DeviceDescriptor { ..Default::default() }`),
+/// which is why there is no `TIMESTAMP_QUERY` and therefore no GPU time in this
+/// report.
+struct DeviceFacts {
+    adapter: cad_render_wgpu::headless::AdapterInfo,
+    /// `Renderer::device_features()` rendered with `Debug`.
+    enabled_features: String,
+    /// Whether `TIMESTAMP_QUERY` is enabled on the live device.
+    timestamp_query_enabled: bool,
+}
+
+/// The frames/zoom shape a report describes.
+struct RunShape {
+    frames: usize,
+    warmup: usize,
+    zoom_factor: f64,
+}
+
 fn write_report(
     dir: &Path,
     tag: &str,
-    adapter: &cad_render_wgpu::headless::AdapterInfo,
+    facts: &DeviceFacts,
     results: &[SceneResult],
-    frames: usize,
-    warmup: usize,
+    run: RunShape,
     host: &[(usize, f64, f64)],
 ) -> String {
+    let RunShape {
+        frames,
+        warmup,
+        zoom_factor,
+    } = run;
+    let adapter = &facts.adapter;
     std::fs::create_dir_all(dir).expect("create output dir");
     let mut md = String::new();
-    md.push_str("# Renderer per-frame CPU-cost measurement\n\n");
+    md.push_str("# Renderer per-frame cost measurement (CPU phases + wall/residual)\n\n");
     md.push_str(&format!("Generated: {}\n\n", timestamp_human()));
     md.push_str(
         "Measured path: `Renderer::render(camera, target)` in a loop of panning frames \
@@ -392,6 +546,19 @@ fn write_report(
          the scene is synthetic and scale-matched, not the real drawing geometry. \
          Per-frame CPU cost scales with batch count, which is what this leg varies.\n\n",
     );
+    md.push_str(&format!(
+        "Each scene is measured in two view states of the same scene: `full` fits the \
+         whole scene in the 1280×800 target, `zoom` is {zoom_factor}× closer \
+         (`world_per_px = full / {zoom_factor}`), so most of the scene is off-screen — \
+         the view state a chunk-visibility change must move. The per-frame **frame-cost \
+         distribution** is `wall`, `cpu` and **`residual = wall − (plan_ms + uniform_ms + \
+         encode_ms + submit_ms)`**.\n\n\
+         **`residual` is NOT a GPU measurement.** It is the wall time the CPU phase timers \
+         do not cover: the blocking device poll (`wait_ms`, which waits on the GPU), any \
+         present, the pre-phase CPU (`ensure_target` + the flags-table top-up) and timer \
+         noise. There is no `TIMESTAMP_QUERY` on this device (see the adapter section), so \
+         **no number in this report is GPU execution time**.\n\n",
+    ));
 
     md.push_str("## GPU adapter (proof this is real hardware)\n\n");
     md.push_str(&format!(
@@ -399,7 +566,12 @@ fn write_report(
         adapter.backend, adapter.device_type, adapter.name, adapter.driver
     ));
     md.push_str(&format!(
-        "Frames per scene: {frames}; warmup frames per scene: {warmup} (untimed).\n\n"
+        "Enabled device features: `{}` — `TIMESTAMP_QUERY` enabled: **{}**. The list is the \
+         proof that no feature was requested (`DeviceDescriptor {{ ..Default::default() }}`); \
+         no cross-machine, vendor or software-vs-hardware claim is made here beyond the \
+         adapter row above.\n\nFrames per scene/state: {frames}; warmup frames: {warmup} \
+         (untimed).\n\n",
+        facts.enabled_features, facts.timestamp_query_enabled
     ));
 
     md.push_str("## Per-frame CPU time (ms) — `FrameStats::cpu_ms`\n\n");
@@ -420,18 +592,52 @@ fn write_report(
     }
     md.push('\n');
 
-    md.push_str("## Frame composition (constant across timed frames)\n\n");
+    // The frame-cost distribution the backlog §P0 asks for: wall, the CPU
+    // phase sum, and the residual (which is NOT GPU time).
+    md.push_str("## Frame-cost distribution per view state (ms/frame)\n\n");
     md.push_str(
-        "| Scene | batches | tier | accelerated | draw_calls | instanced_draws | instanced_batches | instance_streams | instance_segments | uniform_writes | vertices | opaque | transparent | invisible |\n",
+        "`residual = wall − (plan_ms + uniform_ms + encode_ms + submit_ms)`, aggregated \
+         mean / median / p95 over the timed frames. **`residual` is not GPU time**: it \
+         contains the blocking poll (see `wait mean`), any present and the small \
+         pre-phase CPU (`ensure_target` / flags top-up), so it is only ever an upper \
+         bound on non-CPU frame cost, not a GPU measurement.\n\n",
     );
-    md.push_str("|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    md.push_str("| Scene | view | world_per_px | n | wall mean | wall median | wall p95 | cpu mean | cpu median | cpu p95 | residual mean | residual median | residual p95 | wait mean |\n");
+    md.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for r in results {
         md.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | {:e} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |\n",
+            r.label,
+            r.view,
+            r.world_per_px,
+            r.wall.n,
+            r.wall.mean_ms,
+            r.wall.median_ms,
+            r.wall.p95_ms,
+            r.cpu.mean_ms,
+            r.cpu.median_ms,
+            r.cpu.p95_ms,
+            r.residual.mean_ms,
+            r.residual.median_ms,
+            r.residual.p95_ms,
+            r.wait.mean_ms,
+        ));
+    }
+    md.push('\n');
+
+    md.push_str("## Frame composition (constant across timed frames)\n\n");
+    md.push_str(
+        "| Scene | batches | tier | accelerated | over_budget | draw_calls | instanced_draws | instanced_batches | instance_streams | instance_segments | uniform_writes | vertices | opaque | transparent | invisible |\n",
+    );
+    md.push_str("|---|---:|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    for r in results {
+        md.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             r.label,
             r.batches,
             r.tier,
             r.accelerated,
+            r.over_budget.as_deref().unwrap_or("none"),
             r.draw_calls,
             r.instanced_draws,
             r.instanced_batches,
@@ -550,14 +756,19 @@ fn write_report(
 
     md.push_str("## Reproduce\n\n```bash\nexport PATH=\"$HOME/.cargo/bin:$PATH\"\n# real hardware GPU (default Vulkan ICD; discrete preferred):\n");
     md.push_str(&format!(
-        "YACR_PERF_TAG={tag} YACR_PERF_OUT=\"$PWD/…\" \\\n  cargo test -p cad-render-wgpu --test render_perf -- --ignored --nocapture --test-threads=1\n```\n\n"
+        "YACR_PERF_TAG={tag} YACR_PERF_OUT=\"$PWD/…\" \\\n  cargo test -p cad-render-wgpu --test render_perf renderer_frame_cpu_measurement -- --ignored --nocapture --test-threads=1\n```\n\n"
     ));
     md.push_str(
         "## Skipped / not run\n\n\
          - No real DWG geometry in this leg (synthetic scale-matched batches); the real \
            import + preparation cost is measured in `cad-host`'s `pan_zoom_cpu_baseline`.\n\
-         - `gpu_ms` is not measured (no timestamp queries); `wall` includes the blocking poll.\n\
-         - Single machine / single run; no cross-machine or thermal bounds claim.\n",
+         - **No GPU time is measured.** `FrameStats::gpu_ms` stays `None`; there is no \
+           `TIMESTAMP_QUERY` (no feature is ever requested — see the adapter section) and \
+           the crate has no timestamp/`QuerySet` plumbing at all. The **residual** \
+           (`wall − Σ CPU phases`) is *not* GPU time: it folds in the blocking poll, any \
+           present and the small pre-phase CPU. `wall` likewise includes the blocking poll.\n\
+         - Single machine / single run; no cross-machine, vendor, thermal or \
+           release-profile claim.\n",
     );
 
     let report = dir.join(format!("{tag}.md"));
@@ -572,6 +783,7 @@ fn write_report(
 fn renderer_frame_cpu_measurement() {
     let frames = env_usize("YACR_PERF_FRAMES", 30);
     let warmup = env_usize("YACR_PERF_WARMUP", 5);
+    let zoom_factor = env_f64("YACR_PERF_ZOOM_FACTOR", ZOOM_FACTOR);
     let tag = env_string("YACR_PERF_TAG").unwrap_or_else(|| "render".to_string());
     let dir = output_dir();
 
@@ -612,42 +824,70 @@ fn renderer_frame_cpu_measurement() {
         .expect("initialize renderer");
     let target = RenderTarget::new(1280, 800);
 
+    // Which adapter actually ran these frames is reported, never assumed. The
+    // enabled features prove that no feature (notably `TIMESTAMP_QUERY`) was
+    // requested, which is why this report holds no GPU time.
+    let features = renderer.device_features();
+    let timestamp_query_enabled =
+        features.contains(cad_render_wgpu::wgpu::Features::TIMESTAMP_QUERY);
+    eprintln!(
+        "adapter: api={} device_type={} name={} driver={} features={:?} timestamp_query_enabled={}",
+        adapter.backend,
+        adapter.device_type,
+        adapter.name,
+        adapter.driver,
+        features,
+        timestamp_query_enabled,
+    );
+
     let mut results = Vec::new();
     for (label, batches) in &scales {
-        // "before" (legacy per-batch path) and "after" (instanced streams) are
-        // measured on the same binary, device and scene, so the delta is the
-        // instanced path alone.
-        for instanced in [false, true] {
-            let mode = if instanced { "instanced" } else { "legacy" };
-            let result = measure_scene(
-                &mut renderer,
-                &target,
-                &format!("{label} [{mode}]"),
-                *batches,
-                frames,
-                warmup,
-                instanced,
-            );
-            eprintln!(
-                "{}: batches={} mode={mode} tier={} accelerated={} cpu mean={:.3}ms \
-                 median={:.3}ms p95={:.3}ms wall mean={:.3}ms draw_calls={} \
-                 instanced_draws={} instanced_batches={} streams={} segments={} uniform_writes={}",
-                label,
-                batches,
-                result.tier,
-                result.accelerated,
-                result.cpu.mean_ms,
-                result.cpu.median_ms,
-                result.cpu.p95_ms,
-                result.wall.mean_ms,
-                result.draw_calls,
-                result.instanced_draws,
-                result.instanced_batches,
-                result.instance_streams,
-                result.instance_segments,
-                result.uniform_writes,
-            );
-            results.push(result);
+        // The same scene measured at two view states: `full` fits the scene in
+        // the target, `zoom` is `zoom_factor` times closer (most of the scene
+        // off-screen). Chunk visibility (backlog §P1) only bites in `zoom`, so
+        // both are recorded as the baseline distribution.
+        for view in [ViewMode::Full, ViewMode::Zoom] {
+            let world_per_px = view_world_per_px(view, *batches, &target, zoom_factor);
+            // "before" (legacy per-batch path) and "after" (instanced streams)
+            // are measured on the same binary, device, scene and view, so the
+            // delta is the instanced path alone.
+            for instanced in [false, true] {
+                let mode = if instanced { "instanced" } else { "legacy" };
+                let label = format!("{label} [{mode}] [{}]", view.label());
+                let leg = Leg {
+                    label: &label,
+                    batches: *batches,
+                    instanced,
+                    view,
+                    world_per_px,
+                };
+                let result = measure_scene(&mut renderer, &target, &leg, frames, warmup);
+                eprintln!(
+                    "{}: batches={} mode={mode} view={} wpp={:.6} tier={} accelerated={} \
+                     cpu mean={:.3}ms median={:.3}ms p95={:.3}ms wall mean={:.3}ms \
+                     residual mean={:.3}ms wait mean={:.3}ms draw_calls={} \
+                     instanced_draws={} instanced_batches={} streams={} segments={} uniform_writes={}",
+                    label,
+                    batches,
+                    result.view,
+                    result.world_per_px,
+                    result.tier,
+                    result.accelerated,
+                    result.cpu.mean_ms,
+                    result.cpu.median_ms,
+                    result.cpu.p95_ms,
+                    result.wall.mean_ms,
+                    result.residual.mean_ms,
+                    result.wait.mean_ms,
+                    result.draw_calls,
+                    result.instanced_draws,
+                    result.instanced_batches,
+                    result.instance_streams,
+                    result.instance_segments,
+                    result.uniform_writes,
+                );
+                results.push(result);
+            }
         }
     }
 
@@ -656,7 +896,23 @@ fn renderer_frame_cpu_measurement() {
         .map(|text| parse_host_summary(&text))
         .unwrap_or_default();
 
-    let report = write_report(&dir, &tag, &adapter, &results, frames, warmup, &host);
+    let facts = DeviceFacts {
+        adapter,
+        enabled_features: format!("{features:?}"),
+        timestamp_query_enabled,
+    };
+    let report = write_report(
+        &dir,
+        &tag,
+        &facts,
+        &results,
+        RunShape {
+            frames,
+            warmup,
+            zoom_factor,
+        },
+        &host,
+    );
     eprintln!("wrote {report}");
 }
 
@@ -936,6 +1192,7 @@ fn renderer_batch_count_sweep() {
                 frames,
                 warmup,
                 instanced,
+                1.0,
             );
             let cpu = percentiles(&samples.cpu);
             let stats = samples.last.expect("at least one timed frame");
