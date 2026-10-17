@@ -209,6 +209,29 @@ pub enum PulledState {
         /// The captured wgpu error text (whitespace-normalized).
         message: String,
     },
+    /// The rebuild was skipped because the device reported an error while a
+    /// pulled resource was being allocated that is **not** provably an
+    /// out-of-memory condition.
+    ///
+    /// This is not a catch-all for convenience: on wgpu 30.0.1 a `create_buffer`
+    /// the driver cannot satisfy hands back an *invalid* handle, and the failure
+    /// is reported as a **validation** error on the next use of that handle
+    /// (`Buffer with '…' label is invalid`). Reporting that as
+    /// [`PulledState::SkippedOutOfMemory`] would claim evidence of VRAM
+    /// exhaustion the device never gave, so it is its own verdict. Any partially
+    /// built pulled state was discarded and the universal per-run path was
+    /// rebuilt; pixels are unchanged.
+    SkippedAllocationFailed {
+        /// The pre-flight requirement the failed attempt was trying to allocate
+        /// (the pulled payload estimate), so a caller can compare it with the
+        /// budget exactly as it would for the other skip verdicts.
+        required_bytes: u64,
+        /// The budget the estimate was checked against.
+        budget_bytes: u64,
+        /// The captured wgpu error text (whitespace-normalized), plus a note when
+        /// the universal fallback itself could not be reallocated.
+        message: String,
+    },
     /// A class could not be built because it cannot be segmented below the
     /// device's storage-binding limit: a single resident stream/chunk (or the
     /// chunk table) is larger than one binding, and a run is never split across
@@ -234,6 +257,7 @@ impl PulledState {
             PulledState::Active => "active",
             PulledState::SkippedInsufficientVram { .. } => "skipped-insufficient-vram",
             PulledState::SkippedOutOfMemory { .. } => "skipped-out-of-memory",
+            PulledState::SkippedAllocationFailed { .. } => "skipped-allocation-failed",
             PulledState::SkippedUnsegmentable { .. } => "skipped-unsegmentable",
             PulledState::SkippedNoConvertedGeometry => "skipped-no-converted-geometry",
             PulledState::Unavailable => "unavailable",
@@ -270,6 +294,15 @@ impl std::fmt::Display for PulledState {
             } => write!(
                 f,
                 "skipped-out-of-memory(required_bytes={required_bytes},budget_bytes={budget_bytes},message={})",
+                message.split_whitespace().collect::<Vec<_>>().join("_")
+            ),
+            PulledState::SkippedAllocationFailed {
+                required_bytes,
+                budget_bytes,
+                message,
+            } => write!(
+                f,
+                "skipped-allocation-failed(required_bytes={required_bytes},budget_bytes={budget_bytes},message={})",
                 message.split_whitespace().collect::<Vec<_>>().join("_")
             ),
             PulledState::SkippedUnsegmentable {

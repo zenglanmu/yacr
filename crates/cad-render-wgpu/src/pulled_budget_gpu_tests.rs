@@ -25,7 +25,16 @@
 //! machine's driver routes a real OOM into the scope. No portable test can
 //! provoke a real GPU OOM deterministically, so the wgpu-level routing is
 //! verified by reading the pinned wgpu 30.0.1 backend source (see
-//! `capture_oom_scope`) rather than by faking a driver failure.
+//! `allocation_guard` / `allocation_verdict` in `renderer_impl`) rather than by
+//! faking a driver failure.
+//!
+//! Contract 4 (`refused_allocation_is_reported_without_panicking`) exercises the
+//! *mechanism* of the defect on a real device: an allocation the device refuses
+//! leaves an invalid handle whose next use is a validation error. It provokes
+//! that deterministically by asking for one byte past `max_buffer_size` (wgpu-core
+//! rejects it before touching the driver, so it costs no memory), which produces
+//! the same (invalid handle, validation error) pair a driver OOM produces. A real
+//! OOM is **not** simulatable here and is not claimed.
 //!
 //! Adapter policy: every test prints the adapter it ran on. Without an adapter,
 //! or without vertex-stage storage buffers, it prints `SKIP ... NOT a pass` and
@@ -38,7 +47,7 @@
 //! ```
 
 use crate::headless::{create_headless_gpu, HeadlessGpu};
-use crate::renderer_impl::pulled_payload_bytes;
+use crate::renderer_impl::{allocation_guard, pulled_payload_bytes, PulledAllocationError};
 use crate::{BackendPreference, Camera2d, PulledState, RenderTarget, RenderTier, Renderer};
 use cad_domain::{DocumentId, EntityId, InstancePath, Point3, SelectionRef};
 use cad_scene::{RenderBatch, RenderTopology};
@@ -409,5 +418,60 @@ fn captured_out_of_memory_falls_back_instead_of_panicking() {
     assert_eq!(
         fallback_px, universal_px,
         "{what}: the fallback frame must be byte-identical to the universal tier"
+    );
+}
+
+#[test]
+fn refused_allocation_is_reported_without_panicking() {
+    let what = "refused-allocation";
+    let Some(gpu) = gpu_or_skip(what) else {
+        return;
+    };
+    let max_buffer_size = gpu.device.limits().max_buffer_size;
+    // One byte past the device's per-allocation ceiling. wgpu-core rejects this
+    // as a **validation** error and hands back an *invalid* buffer handle — the
+    // same pair a driver-refused OOM produces, produced deterministically and
+    // without allocating anything. Before the error-scope fix the follow-up use
+    // of that handle (a `write_buffer`) reached wgpu's default handler and
+    // aborted the process.
+    let refused = allocation_guard(&gpu.device, || {
+        gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cad-pulled-line-storage"),
+            size: max_buffer_size + 1,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    });
+    match &refused {
+        // The measured failure mode on this backend: reported as validation.
+        Err(PulledAllocationError::Other(message)) => {
+            eprintln!("[pulled-budget-gpu] {what}: captured validation error: {message}");
+            assert!(
+                message.contains("cad-pulled-line-storage"),
+                "{what}: the captured message must name the refused resource ({message})"
+            );
+        }
+        // A backend that classifies it as OOM is equally a skip, never a pass.
+        Err(PulledAllocationError::OutOfMemory(message)) => {
+            eprintln!("[pulled-budget-gpu] {what}: captured out-of-memory: {message}");
+        }
+        Ok(_) => panic!("{what}: a refused allocation must not report success"),
+    }
+    // No verdict may ever reach the caller as "proceed".
+    assert!(refused.is_err(), "{what}: the guard must stop the attempt");
+
+    // Both scopes were popped: the device still allocates and no scope leaked, so
+    // a later frame cannot inherit a swallowed error scope.
+    let usable = allocation_guard(&gpu.device, || {
+        gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cad-pulled-test-small"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    });
+    assert!(
+        usable.is_ok(),
+        "{what}: the device must stay usable after a captured allocation failure ({usable:?})"
     );
 }
