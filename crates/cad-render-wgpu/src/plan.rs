@@ -665,6 +665,18 @@ pub(crate) fn batch_has_visible_work(batch: &GpuBatch, cull: &ChunkCull) -> bool
             .any(|run| cull.arc_visible(run.stream as usize))
 }
 
+/// Plan one frame from the resident batches in upload order (the legacy planner,
+/// also used by the pick path with [`ChunkCull::all_visible`]).
+///
+/// # Returned `usage` on failure (shared semantics)
+///
+/// `usage` is charged in place, so a failing batch leaves whatever the byte
+/// charge already committed: on a **vertices/triangles** failure the failing
+/// batch's bytes are included (its byte charge succeeded before the vertex check
+/// ran); on a **bytes** failure nothing of the failing batch is included. This is
+/// the single usage contract for both planners — `plan_ordered_page` and its
+/// fallback now return the same value, so the two can be differentially compared
+/// without a quirk delta.
 pub(crate) fn plan_from_gpu(
     batches: &[GpuBatch],
     budget: &FrameBudget,
@@ -716,7 +728,122 @@ pub(crate) fn plan_from_gpu(
 /// `initial` is the usage the page already reserved before geometry (the image
 /// reservation on a clear page); the page budget covers geometry *plus* that
 /// reservation.
+///
+/// # Segmented planning
+///
+/// The linear walk ([`plan_ordered_page_linear`]) is Θ(accepted+1) only while a
+/// batch actually fails the budget. A **fully-culled** batch charges `0`
+/// vertices and `0` triangles, and the product's `max_bytes == usize::MAX`, so a
+/// page whose view cull removes almost everything accepts *every* batch and the
+/// walk runs to the end of `ordered` — computing a per-batch vertex/triangle cost
+/// for all of them — only to draw one run. This function walks only the **active**
+/// batches (those whose charge is non-zero for this cull) and derives the accepted
+/// prefix from their gaps. It is exact, not an approximation.
+///
+/// The active set for this frame is the union of:
+/// * every batch that owns a run in a **visible** chunk (`BatchFacts::chunk_batches`,
+///   indexed by class and chunk), and
+/// * `BatchFacts::always_active` — batches that charge regardless of the cull.
+///
+/// A gap between two active positions is a batch that charges `0` vertices/triangles
+/// and is therefore accepted unconditionally. Gaps still charge **bytes** (byte
+/// charging is batch-granular and cull-independent), so the byte boundary is a
+/// prefix-sum binary search over `ordered`, not part of the active walk.
+///
+/// `plan_ordered_page_linear` remains the fallback when nothing is culled (the
+/// active set is the whole scene) or the estimated active count is large.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn plan_ordered_page(
+    batches: &[GpuBatch],
+    ordered: &[usize],
+    cursor: usize,
+    budget: &FrameBudget,
+    initial: cad_scene::FrameUsage,
+    cull: &ChunkCull,
+    facts: &BatchFacts,
+    index: &OrderedPageIndex,
+) -> GpuPlan {
+    let len = ordered.len();
+    if cursor >= len {
+        return GpuPlan {
+            accepted: Vec::new(),
+            usage: initial,
+            over_budget: None,
+        };
+    }
+    // Fallback (unchanged linear walk): when the cull removed nothing the active
+    // set is the whole scene, so the segmented walk would do the same per-batch
+    // work plus a sort; and when the estimated active count is large it is cheaper
+    // to walk `ordered` linearly.
+    if !cull.any_culled() || estimated_active(facts, cull) > SEGMENTED_ACTIVE_THRESHOLD {
+        return plan_ordered_page_linear(batches, ordered, cursor, budget, initial, cull);
+    }
+    plan_ordered_page_segmented(
+        batches, ordered, cursor, budget, initial, cull, facts, index,
+    )
+}
+
+/// The linear page planner: walk `ordered[cursor..]` and accept a contiguous
+/// prefix, stopping at the first batch that crosses the budget.
+///
+/// Kept as the segmented planner's fallback. The returned `usage` follows the
+/// shared contract documented on [`plan_from_gpu`]: a vertices/triangles failure
+/// keeps the failing batch's bytes, a bytes failure keeps none of it.
+pub(crate) fn plan_ordered_page_linear(
+    batches: &[GpuBatch],
+    ordered: &[usize],
+    cursor: usize,
+    budget: &FrameBudget,
+    initial: cad_scene::FrameUsage,
+    cull: &ChunkCull,
+) -> GpuPlan {
+    let mut usage = initial;
+    let mut accepted = Vec::new();
+    for &index in &ordered[cursor..] {
+        let batch = &batches[index];
+        let mut next = usage;
+        let triangles = batch_budget_triangles(batch, cull);
+        let result = budget
+            .charge_bytes(&mut next, batch.upload_size_bytes())
+            .and_then(|()| budget.charge(&mut next, batch_budget_vertices(batch, cull), triangles));
+        if let Err(exceeded) = result {
+            let report = OverBudget {
+                category: exceeded.category,
+                requested: exceeded.requested,
+                limit: exceeded.limit,
+                skipped_batches: ordered.len() - cursor - accepted.len(),
+            };
+            return GpuPlan {
+                accepted,
+                // `next` carries the byte charge that already committed (none on
+                // a byte failure, the failing batch's bytes on a vertex/triangle
+                // failure), matching `plan_from_gpu`.
+                usage: next,
+                over_budget: Some(OverBudgetReason {
+                    reason: over_budget_reason(&report),
+                    report,
+                }),
+            };
+        }
+        usage = next;
+        accepted.push(index);
+    }
+    GpuPlan {
+        accepted,
+        usage,
+        over_budget: None,
+    }
+}
+
+/// The **pre-amendment** linear page planner, kept only as the differential
+/// test's reference for the accepted prefix and the `over_budget` report.
+///
+/// Its returned `usage` is the pre-batch usage (it excludes the failing batch
+/// entirely); the production planner now returns the unified usage
+/// ([`plan_from_gpu`] semantics). The test asserts the prefix/report are
+/// unchanged and derives the expected unified usage from this one.
+#[cfg(test)]
+pub(crate) fn plan_ordered_page_reference(
     batches: &[GpuBatch],
     ordered: &[usize],
     cursor: usize,
@@ -756,6 +883,364 @@ pub(crate) fn plan_ordered_page(
         accepted,
         usage,
         over_budget: None,
+    }
+}
+
+/// Above this many estimated active batches the segmented planner falls back to
+/// the linear walk: the per-active work plus the gather/sort would no longer beat
+/// walking `ordered`. `4096` keeps the gather allocation modest while covering
+/// every page whose cull leaves a small visible set (the settled 1-draw page has
+/// `m` in the single digits).
+const SEGMENTED_ACTIVE_THRESHOLD: usize = 4096;
+
+/// Batch-set facts for the segmented planner, derived once when the resident
+/// batch set changes — the same invalidation as [`DrawOrderCache`]
+/// (`Renderer::draw_plan = None`). Never rebuilt per frame.
+///
+/// [`DrawOrderCache`]: crate::DrawOrderCache
+#[derive(Default)]
+pub(crate) struct BatchFacts {
+    /// Per class (`[instance, mesh, arc]`) and chunk index, the batch indices
+    /// that own a run in that chunk. A batch listed under a **visible** chunk has
+    /// a surviving run, so it charges the frame budget and is a candidate to
+    /// terminate the accepted prefix.
+    pub(crate) chunk_batches: [Vec<Vec<u32>>; 3],
+    /// Batch indices that charge the frame budget **regardless of the cull**:
+    /// legacy per-batch geometry with no runs (a per-batch quad line list or a
+    /// non-converted mesh) and any batch with `line_quad_count > 0`.
+    ///
+    /// This must **not** be replaced by [`batch_has_visible_work`]: that predicate
+    /// answers "does an accepted batch issue a draw", and a fully-culled converted
+    /// batch with legacy per-batch quads is *not* free — its quads are charged
+    /// unconditionally (`plan.rs` line-quad term) even though no run survives.
+    pub(crate) always_active: Vec<u32>,
+    /// Whether any batch has an instanced line run (the "line class" exists).
+    pub(crate) has_line_class: bool,
+    /// Whether any batch has a merged mesh run (the "mesh class" exists).
+    pub(crate) has_mesh_class: bool,
+    /// Number of batches converted to an instanced stream or a merged mesh chunk.
+    pub(crate) converted_total: usize,
+    /// Compact per-batch upload sizes, indexed by batch index. `OrderedPageIndex`
+    /// reads this instead of `batches[batch]` so the per-restart byte prefix scan
+    /// does not DRAM-miss on the large resident `GpuBatch` struct.
+    pub(crate) upload_bytes: Vec<usize>,
+}
+
+impl BatchFacts {
+    /// Derive the batch-set facts from the resident batches. O(total runs); run
+    /// only when the batch set changes, never per frame.
+    pub(crate) fn build(batches: &[GpuBatch]) -> Self {
+        let instance_n = batches
+            .iter()
+            .flat_map(|batch| batch.instanced.iter())
+            .map(|run| run.stream as usize + 1)
+            .max()
+            .unwrap_or(0);
+        let mesh_n = batches
+            .iter()
+            .flat_map(|batch| batch.mesh_runs.iter())
+            .map(|run| run.chunk as usize + 1)
+            .max()
+            .unwrap_or(0);
+        let arc_n = batches
+            .iter()
+            .flat_map(|batch| batch.arc_runs.iter())
+            .map(|run| run.stream as usize + 1)
+            .max()
+            .unwrap_or(0);
+        let mut facts = BatchFacts {
+            chunk_batches: [
+                vec![Vec::new(); instance_n],
+                vec![Vec::new(); mesh_n],
+                vec![Vec::new(); arc_n],
+            ],
+            always_active: Vec::new(),
+            has_line_class: false,
+            has_mesh_class: false,
+            converted_total: 0,
+            upload_bytes: Vec::new(),
+        };
+        facts.upload_bytes = batches
+            .iter()
+            .map(|batch| batch.upload_size_bytes())
+            .collect();
+        for (i, batch) in batches.iter().enumerate() {
+            let batch_index = i as u32;
+            for run in &batch.instanced {
+                facts.chunk_batches[0][run.stream as usize].push(batch_index);
+            }
+            for run in &batch.mesh_runs {
+                facts.chunk_batches[1][run.chunk as usize].push(batch_index);
+            }
+            for run in &batch.arc_runs {
+                facts.chunk_batches[2][run.stream as usize].push(batch_index);
+            }
+            let converted = !batch.instanced.is_empty() || !batch.mesh_runs.is_empty();
+            if converted {
+                facts.converted_total += 1;
+            }
+            facts.has_line_class |= !batch.instanced.is_empty();
+            facts.has_mesh_class |= !batch.mesh_runs.is_empty();
+            // Charge independent of the cull: legacy line quads are always charged
+            // (`batch_budget_vertices` line-quad term) and a legacy mesh
+            // (`mesh_runs` empty) is never culled (`mesh_batch_visible`).
+            if batch.line_quad_count > 0
+                || (batch.mesh_runs.is_empty() && batch.topology == RenderTopology::Mesh)
+            {
+                facts.always_active.push(batch_index);
+            }
+        }
+        facts
+    }
+}
+
+/// Per-`ordered` index for the segmented planner, rebuilt whenever `ordered` is
+/// rebuilt (the progressive restart / camera move). Derived from the same
+/// restart, not a second invalidation truth.
+///
+/// The buffers are retained across restarts (the previous frame's index is taken
+/// and refilled) so a camera move does not allocate ~2 MB of fresh, page-faulting
+/// memory every frame.
+#[derive(Default)]
+pub(crate) struct OrderedPageIndex {
+    /// Batch index -> its position in `ordered`, or `u32::MAX` when the batch is
+    /// not drawn this frame (invisible, or outside the ordered set).
+    pub(crate) batch_pos: Vec<u32>,
+    /// Prefix sums of upload bytes over `ordered`: `bytes_prefix[i]` is the total
+    /// upload bytes of `ordered[..i]`. Lets a page's byte charge be a range sum.
+    pub(crate) bytes_prefix: Vec<usize>,
+}
+
+impl OrderedPageIndex {
+    /// Build a fresh index (test/standalone use).
+    #[cfg(test)]
+    pub(crate) fn build(batches: &[GpuBatch], ordered: &[usize]) -> Self {
+        let upload_bytes: Vec<usize> = batches
+            .iter()
+            .map(|batch| batch.upload_size_bytes())
+            .collect();
+        let mut index = OrderedPageIndex::default();
+        index.rebuild(&upload_bytes, ordered);
+        index
+    }
+
+    /// Refill the index for `ordered`, reusing the existing allocations.
+    ///
+    /// `upload_bytes` is [`BatchFacts::upload_bytes`] — the compact per-batch
+    /// upload sizes, indexed by batch index.
+    pub(crate) fn rebuild(&mut self, upload_bytes: &[usize], ordered: &[usize]) {
+        self.batch_pos.clear();
+        self.batch_pos.resize(upload_bytes.len(), u32::MAX);
+        self.bytes_prefix.clear();
+        self.bytes_prefix.reserve(ordered.len() + 1);
+        self.bytes_prefix.push(0usize);
+        for (pos, &batch) in ordered.iter().enumerate() {
+            self.batch_pos[batch] = pos as u32;
+            // Read from the compact `upload_bytes` table, not `batches[batch]`:
+            // the resident `GpuBatch` is ~200 bytes, so a scattered read of it
+            // (the frame order is not the upload order) is a DRAM miss per batch,
+            // while the table is a few MB and stays in cache.
+            self.bytes_prefix
+                .push(self.bytes_prefix[pos] + upload_bytes[batch]);
+        }
+    }
+}
+
+/// Upper bound on the active-batch count for this cull: the sum of the
+/// per-visible-chunk batch lists plus the always-active set. Counts a batch once
+/// per visible chunk it appears in (so it over-estimates), which is exactly what
+/// the fallback threshold needs.
+fn estimated_active(facts: &BatchFacts, cull: &ChunkCull) -> usize {
+    let mut count = facts.always_active.len();
+    // Index by the chunk lists, not the mask: a chunk index beyond the mask is
+    // reported visible by `stream_visible`/`mesh_visible`/`arc_visible`, so it
+    // must be counted here too.
+    for c in 0..facts.chunk_batches[0].len() {
+        if cull.stream_visible(c) {
+            count += facts.chunk_batches[0][c].len();
+        }
+    }
+    for c in 0..facts.chunk_batches[1].len() {
+        if cull.mesh_visible(c) {
+            count += facts.chunk_batches[1][c].len();
+        }
+    }
+    for c in 0..facts.chunk_batches[2].len() {
+        if cull.arc_visible(c) {
+            count += facts.chunk_batches[2][c].len();
+        }
+    }
+    count
+}
+
+/// The segmented page planner. Preconditions (enforced by [`plan_ordered_page`]):
+/// the cull removed at least one chunk and the estimated active count is at most
+/// [`SEGMENTED_ACTIVE_THRESHOLD`].
+#[allow(clippy::too_many_arguments)]
+fn plan_ordered_page_segmented(
+    batches: &[GpuBatch],
+    ordered: &[usize],
+    cursor: usize,
+    budget: &FrameBudget,
+    initial: cad_scene::FrameUsage,
+    cull: &ChunkCull,
+    facts: &BatchFacts,
+    index: &OrderedPageIndex,
+) -> GpuPlan {
+    let len = ordered.len();
+    let bytes_prefix = &index.bytes_prefix;
+    let base_bytes = bytes_prefix[cursor];
+
+    // --- byte boundary ------------------------------------------------------
+    // The first position `p` in `[cursor, len)` whose cumulative page bytes
+    // (including `p`) exceed `max_bytes`. Gaps charge bytes too (byte charging is
+    // batch-granular and cull-independent), so this is a prefix-sum search over
+    // `ordered`, not part of the active walk. With `max_bytes == usize::MAX` the
+    // predicate is never true (the boundary is +∞).
+    let byte_exceeds = |p: usize| {
+        initial
+            .bytes
+            .saturating_add(bytes_prefix[p + 1] - base_bytes)
+            > budget.max_bytes
+    };
+    // Binary search for the first `p` where `byte_exceeds(p)` holds. The
+    // predicate is monotonic (prefix sums are non-decreasing), so this finds the
+    // boundary; `len` means the byte limit is never crossed.
+    let mut lo = cursor;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if byte_exceeds(mid) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    let byte_fail = lo;
+
+    // --- active positions in `[cursor, len)`, ascending ---------------------
+    let batch_pos = &index.batch_pos;
+    let mut active: Vec<u32> = Vec::new();
+    for c in 0..facts.chunk_batches[0].len() {
+        if cull.stream_visible(c) {
+            active.extend_from_slice(&facts.chunk_batches[0][c]);
+        }
+    }
+    for c in 0..facts.chunk_batches[1].len() {
+        if cull.mesh_visible(c) {
+            active.extend_from_slice(&facts.chunk_batches[1][c]);
+        }
+    }
+    for c in 0..facts.chunk_batches[2].len() {
+        if cull.arc_visible(c) {
+            active.extend_from_slice(&facts.chunk_batches[2][c]);
+        }
+    }
+    active.extend_from_slice(&facts.always_active);
+    // Drop batches already drawn on an earlier page (position < cursor) and any
+    // batch not in `ordered` this frame, then order by position and de-duplicate.
+    active.retain(|&b| {
+        let pos = batch_pos[b as usize];
+        pos != u32::MAX && pos as usize >= cursor
+    });
+    active.sort_unstable_by_key(|&b| batch_pos[b as usize]);
+    active.dedup_by_key(|b| batch_pos[*b as usize]);
+    // Always evaluate the cursor batch: an image reservation may already exceed
+    // the budget, in which case even a zero-charge batch fails.
+    if active.first().map(|&b| batch_pos[b as usize] as usize) != Some(cursor) {
+        active.insert(0, ordered[cursor] as u32);
+    }
+
+    // --- vertex/triangle boundary over the active positions -----------------
+    let mut usage = initial;
+    let mut vt_fail = len;
+    let mut vt_category = "vertices";
+    let mut vt_requested = 0usize;
+    for &b in &active {
+        let pos = batch_pos[b as usize] as usize;
+        // A byte failure at or before this position means the page never reaches
+        // it; the byte category wins (charge_bytes runs first).
+        if pos >= byte_fail {
+            break;
+        }
+        let batch = &batches[ordered[pos]];
+        let vertices = batch_budget_vertices(batch, cull);
+        let triangles = batch_budget_triangles(batch, cull);
+        let vertex_total = usage.vertices.checked_add(vertices);
+        let next_vertices = vertex_total.unwrap_or(usize::MAX);
+        if vertex_total.is_none() || next_vertices > budget.max_vertices {
+            vt_fail = pos;
+            vt_category = "vertices";
+            vt_requested = next_vertices;
+            break;
+        }
+        let triangle_total = usage.triangles.checked_add(triangles);
+        let next_triangles = triangle_total.unwrap_or(usize::MAX);
+        if triangle_total.is_none() || next_triangles > budget.max_triangles {
+            vt_fail = pos;
+            vt_category = "triangles";
+            vt_requested = next_triangles;
+            break;
+        }
+        usage.vertices = next_vertices;
+        usage.triangles = next_triangles;
+    }
+
+    let fail_pos = byte_fail.min(vt_fail);
+    let accepted = ordered[cursor..fail_pos].to_vec();
+    // Usage follows the shared contract (see `plan_from_gpu`): bytes are the page
+    // bytes of `cursor..fail_pos` (gaps included, batch-granular), and when the
+    // failure is on vertices/triangles the failing batch's byte charge already
+    // committed, so its bytes are included too. On a byte failure (or no failure)
+    // nothing extra is added. Vertices/triangles are the active charges already
+    // accumulated before `fail_pos`.
+    let usage_end = if fail_pos < len && byte_fail != fail_pos {
+        fail_pos + 1
+    } else {
+        fail_pos
+    };
+    usage.bytes = initial
+        .bytes
+        .saturating_add(bytes_prefix[usage_end] - base_bytes);
+    if fail_pos == len {
+        return GpuPlan {
+            accepted,
+            usage,
+            over_budget: None,
+        };
+    }
+    // Category precedence at the boundary batch: `charge_bytes` runs first and
+    // `and_then` short-circuits, so a batch that crosses bytes *and* vertices is
+    // reported as `"bytes"`.
+    let (category, requested, limit) = if byte_fail == fail_pos {
+        (
+            "bytes",
+            initial
+                .bytes
+                .saturating_add(bytes_prefix[fail_pos + 1] - base_bytes),
+            budget.max_bytes,
+        )
+    } else {
+        let limit = if vt_category == "vertices" {
+            budget.max_vertices
+        } else {
+            budget.max_triangles
+        };
+        (vt_category, vt_requested, limit)
+    };
+    let report = OverBudget {
+        category,
+        requested,
+        limit,
+        skipped_batches: len - fail_pos,
+    };
+    GpuPlan {
+        accepted,
+        usage,
+        over_budget: Some(OverBudgetReason {
+            reason: over_budget_reason(&report),
+            report,
+        }),
     }
 }
 
@@ -4438,6 +4923,595 @@ mod accelerated_tier_tests {
                 &bytes[at..at + 4],
                 &value.to_le_bytes(),
                 "column word {i} must be little-endian"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod page_plan_tests {
+    use super::*;
+
+    /// Deterministic xorshift PRNG so the property tests need no dev-dependency.
+    struct Rng(u64);
+
+    impl Rng {
+        fn new(seed: u64) -> Self {
+            Rng(seed | 1)
+        }
+
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            assert!(n > 0);
+            (self.next() % n as u64) as usize
+        }
+    }
+
+    fn instance_run(stream: u32, count: u32) -> InstanceRun {
+        InstanceRun {
+            stream,
+            offset: 0,
+            count,
+        }
+    }
+
+    fn arc_run(stream: u32, count: u32) -> ArcRun {
+        ArcRun {
+            stream,
+            offset: 0,
+            count,
+        }
+    }
+
+    fn mesh_run(chunk: u32, index_count: u32, vertex_count: u32) -> MeshRun {
+        MeshRun {
+            chunk,
+            index_offset: 0,
+            index_count,
+            vertex_count,
+        }
+    }
+
+    /// A resident batch with no device buffers: the budget planners only read the
+    /// run lists, the counts and the cached upload bytes, so `None` buffers are
+    /// enough to exercise them without a GPU.
+    #[allow(clippy::too_many_arguments)]
+    fn gpu_batch(
+        topology: RenderTopology,
+        vertex_count: u32,
+        index_count: u32,
+        line_quad_count: u32,
+        instanced: Vec<InstanceRun>,
+        mesh_runs: Vec<MeshRun>,
+        arc_runs: Vec<ArcRun>,
+        upload_bytes: usize,
+    ) -> GpuBatch {
+        GpuBatch {
+            vertices: None,
+            vertex_count,
+            normals: None,
+            colors: None,
+            topology,
+            indices: None,
+            index_count,
+            line_quads: None,
+            line_quad_count,
+            mirrored: false,
+            alpha: 1.0,
+            color: [1.0, 1.0, 1.0],
+            lineweight: 0.0,
+            draw_order: 0,
+            centroid: [0.0; 3],
+            origin: [0.0; 3],
+            instanced,
+            mesh_runs,
+            arc_runs,
+            upload_bytes,
+            pick_key: 0,
+            sources: Vec::new(),
+        }
+    }
+
+    /// A random resident batch mixing runs, legacy geometry and line quads.
+    fn random_batch(rng: &mut Rng, streams: usize, chunks: usize) -> GpuBatch {
+        let topology = match rng.below(4) {
+            0 => RenderTopology::Lines,
+            1 => RenderTopology::Mesh,
+            2 => RenderTopology::MeshEdges,
+            _ => RenderTopology::Conics,
+        };
+        let mut instanced = Vec::new();
+        let mut mesh_runs = Vec::new();
+        let mut arc_runs = Vec::new();
+        match topology {
+            RenderTopology::Lines | RenderTopology::MeshEdges => {
+                for _ in 0..rng.below(3) {
+                    instanced.push(instance_run(rng.below(streams) as u32, rng.below(8) as u32));
+                }
+            }
+            RenderTopology::Mesh => {
+                for _ in 0..rng.below(3) {
+                    mesh_runs.push(mesh_run(
+                        rng.below(chunks) as u32,
+                        rng.below(15) as u32,
+                        rng.below(9) as u32,
+                    ));
+                }
+            }
+            RenderTopology::Conics => {
+                for _ in 0..rng.below(3) {
+                    arc_runs.push(arc_run(rng.below(streams) as u32, rng.below(8) as u32));
+                }
+            }
+        }
+        // Legacy per-batch quads can coexist with runs (a converted batch never
+        // has them, but the planner must not assume that).
+        let line_quad_count = if rng.below(2) == 0 {
+            rng.below(6) as u32
+        } else {
+            0
+        };
+        gpu_batch(
+            topology,
+            rng.below(20) as u32,
+            rng.below(30) as u32,
+            line_quad_count,
+            instanced,
+            mesh_runs,
+            arc_runs,
+            rng.below(200),
+        )
+    }
+
+    /// The unified `usage.bytes` the production planner must return, derived from
+    /// the pre-amendment reference: identical to it except that a
+    /// vertices/triangles failure keeps the failing batch's byte charge (which had
+    /// already committed).
+    fn expected_unified_bytes(
+        reference: &GpuPlan,
+        batches: &[GpuBatch],
+        ordered: &[usize],
+        cursor: usize,
+    ) -> usize {
+        match reference.over_budget.as_ref() {
+            Some(r) if r.report.category != "bytes" => {
+                let fail_pos = cursor + reference.accepted.len();
+                reference.usage.bytes + batches[ordered[fail_pos]].upload_size_bytes()
+            }
+            _ => reference.usage.bytes,
+        }
+    }
+
+    fn assert_same_plan(
+        case: usize,
+        got: &GpuPlan,
+        reference: &GpuPlan,
+        batches: &[GpuBatch],
+        ordered: &[usize],
+        cursor: usize,
+    ) {
+        assert_eq!(
+            got.accepted, reference.accepted,
+            "case {case}: accepted prefix"
+        );
+        assert_eq!(
+            got.usage.vertices, reference.usage.vertices,
+            "case {case}: usage vertices"
+        );
+        assert_eq!(
+            got.usage.triangles, reference.usage.triangles,
+            "case {case}: usage triangles"
+        );
+        assert_eq!(
+            got.usage.bytes,
+            expected_unified_bytes(reference, batches, ordered, cursor),
+            "case {case}: unified usage bytes"
+        );
+        match (&got.over_budget, &reference.over_budget) {
+            (None, None) => {}
+            (Some(a), Some(b)) => assert_eq!(a.report, b.report, "case {case}: over_budget report"),
+            (a, b) => panic!("case {case}: over_budget presence differs: {a:?} vs {b:?}"),
+        }
+    }
+
+    /// The differential/property test: the segmented planner must return exactly
+    /// what the linear reference returns over randomized batches, cull masks,
+    /// orders, cursors, initial reservations and budgets (finite `max_bytes` and
+    /// saturating corners included).
+    #[test]
+    fn segmented_page_planner_matches_the_linear_reference() {
+        let mut rng = Rng::new(0xC0FFEE);
+        for case in 0..4000 {
+            let streams = 1 + rng.below(4);
+            let chunks = 1 + rng.below(4);
+            let n = 1 + rng.below(40);
+            let batches: Vec<GpuBatch> = (0..n)
+                .map(|_| random_batch(&mut rng, streams, chunks))
+                .collect();
+
+            // A random permutation of the batch indices; sometimes drop entries to
+            // model invisible (non-drawn) batches.
+            let mut ordered: Vec<usize> = (0..n).collect();
+            for i in (1..n).rev() {
+                let j = rng.below(i + 1);
+                ordered.swap(i, j);
+            }
+            if rng.below(4) == 0 && !ordered.is_empty() {
+                let drop = rng.below(ordered.len());
+                ordered.remove(drop);
+            }
+            let cursor = rng.below(ordered.len() + 1);
+
+            // Arbitrary cull mask, forced to cull at least one chunk so the
+            // segmented path (not the fallback) is exercised.
+            let mut instance: Vec<bool> = (0..streams).map(|_| rng.below(4) != 0).collect();
+            let mesh: Vec<bool> = (0..chunks).map(|_| rng.below(4) != 0).collect();
+            let arc: Vec<bool> = (0..streams).map(|_| rng.below(4) != 0).collect();
+            instance[0] = false;
+            let cull = ChunkCull::from_visibility(instance, mesh, arc);
+            assert!(cull.any_culled());
+
+            let max_bytes = match rng.below(4) {
+                0 => usize::MAX,
+                1 => 0,
+                2 => rng.below(400),
+                _ => rng.below(4000),
+            };
+            let max_vertices = match rng.below(4) {
+                0 => usize::MAX,
+                1 => 0,
+                2 => rng.below(60),
+                _ => rng.below(600),
+            };
+            let max_triangles = match rng.below(4) {
+                0 => usize::MAX,
+                1 => 0,
+                2 => rng.below(40),
+                _ => rng.below(400),
+            };
+            let budget = FrameBudget {
+                max_vertices,
+                max_triangles,
+                max_bytes,
+            };
+            // Initial reservation, sometimes already over the budget (the image
+            // reservation case).
+            let initial = cad_scene::FrameUsage {
+                vertices: rng.below(30),
+                triangles: rng.below(30),
+                bytes: rng.below(120),
+            };
+
+            let facts = BatchFacts::build(&batches);
+            let index = OrderedPageIndex::build(&batches, &ordered);
+            let reference =
+                plan_ordered_page_reference(&batches, &ordered, cursor, &budget, initial, &cull);
+            let got = plan_ordered_page(
+                &batches, &ordered, cursor, &budget, initial, &cull, &facts, &index,
+            );
+            assert_same_plan(case, &got, &reference, &batches, &ordered, cursor);
+        }
+    }
+
+    /// The fallback path (nothing culled / a large active set) must still match
+    /// the reference exactly.
+    #[test]
+    fn fallback_path_matches_the_reference() {
+        let mut rng = Rng::new(0x5EED);
+        for case in 0..200 {
+            let n = 1 + rng.below(20);
+            let batches: Vec<GpuBatch> = (0..n).map(|_| random_batch(&mut rng, 2, 2)).collect();
+            let ordered: Vec<usize> = (0..n).collect();
+            let cursor = rng.below(n + 1);
+            // The identity mask culls nothing, so `plan_ordered_page` takes the
+            // linear fallback.
+            let cull = ChunkCull::all_visible();
+            let budget = FrameBudget {
+                max_vertices: rng.below(200),
+                max_triangles: rng.below(200),
+                max_bytes: rng.below(2000),
+            };
+            let initial = cad_scene::FrameUsage::default();
+            let facts = BatchFacts::build(&batches);
+            let index = OrderedPageIndex::build(&batches, &ordered);
+            let reference =
+                plan_ordered_page_reference(&batches, &ordered, cursor, &budget, initial, &cull);
+            let got = plan_ordered_page(
+                &batches, &ordered, cursor, &budget, initial, &cull, &facts, &index,
+            );
+            assert_same_plan(case, &got, &reference, &batches, &ordered, cursor);
+        }
+    }
+
+    /// A fully-culled batch is accepted with unchanged usage; a batch with legacy
+    /// line quads whose runs are all culled is **active** (the gap predicate is
+    /// `always_active`, not `batch_has_visible_work`).
+    #[test]
+    fn fully_culled_batches_are_accepted_and_line_quad_batches_stay_active() {
+        let batches = vec![
+            // Fully culled instanced batch: charges zero vertices/triangles.
+            gpu_batch(
+                RenderTopology::Lines,
+                0,
+                0,
+                0,
+                vec![instance_run(0, 4)],
+                Vec::new(),
+                Vec::new(),
+                8,
+            ),
+            // Same culled run, but legacy quads keep it charged unconditionally.
+            gpu_batch(
+                RenderTopology::Lines,
+                0,
+                0,
+                1,
+                vec![instance_run(0, 4)],
+                Vec::new(),
+                Vec::new(),
+                8,
+            ),
+        ];
+        let cull = ChunkCull::from_visibility(vec![false], Vec::new(), Vec::new());
+        let budget = FrameBudget {
+            max_vertices: 0,
+            max_triangles: 0,
+            max_bytes: usize::MAX,
+        };
+        let initial = cad_scene::FrameUsage::default();
+        let facts = BatchFacts::build(&batches);
+        let index = OrderedPageIndex::build(&batches, &[0, 1]);
+
+        // The culled run makes batch 1 look invisible to `batch_has_visible_work`
+        // only when it has no quads; here its quads keep it active.
+        assert!(facts.always_active.contains(&1));
+        assert!(!facts.always_active.contains(&0));
+
+        let plan = plan_ordered_page(
+            &batches,
+            &[0, 1],
+            0,
+            &budget,
+            initial,
+            &cull,
+            &facts,
+            &index,
+        );
+        assert_eq!(
+            plan.accepted,
+            vec![0],
+            "the culled zero-charge batch is free"
+        );
+        assert_eq!(plan.usage.vertices, 0);
+        assert_eq!(plan.usage.triangles, 0);
+        let report = plan.over_budget.as_ref().expect("over budget").report;
+        assert_eq!(report.category, "vertices");
+        assert_eq!(report.requested, 6, "line quads charge 6 vertices");
+        assert_eq!(report.skipped_batches, 1);
+    }
+
+    /// The cursor advances monotonically to completion, counting culled batches,
+    /// so `frame_pending` (cursor < len) eventually turns false.
+    #[test]
+    fn progressive_cursor_advances_monotonically_to_completion() {
+        let mut rng = Rng::new(0xA11CE);
+        let n = 30;
+        let batches: Vec<GpuBatch> = (0..n).map(|_| random_batch(&mut rng, 3, 3)).collect();
+        let ordered: Vec<usize> = (0..n).collect();
+        // A budget every batch fits individually, so each page makes progress.
+        let budget = FrameBudget {
+            max_vertices: 64,
+            max_triangles: 64,
+            max_bytes: usize::MAX,
+        };
+        let initial = cad_scene::FrameUsage::default();
+        let cull = ChunkCull::from_visibility(vec![false], vec![false], vec![false]);
+        let facts = BatchFacts::build(&batches);
+        let index = OrderedPageIndex::build(&batches, &ordered);
+
+        let mut cursor = 0;
+        let mut pages = 0;
+        while cursor < ordered.len() {
+            let plan = plan_ordered_page(
+                &batches, &ordered, cursor, &budget, initial, &cull, &facts, &index,
+            );
+            assert!(!plan.accepted.is_empty(), "every page makes progress");
+            let next = cursor + plan.accepted.len();
+            assert!(next > cursor, "cursor strictly increases");
+            cursor = next;
+            pages += 1;
+            assert!(pages <= ordered.len(), "pages are bounded by the scene");
+        }
+        assert_eq!(cursor, ordered.len());
+        assert!(
+            !(cursor < ordered.len()),
+            "frame_pending is false once the cursor reaches the end"
+        );
+    }
+
+    /// A batch that crosses bytes and vertices at the same position reports the
+    /// `"bytes"` category: `charge_bytes` runs first and short-circuits.
+    #[test]
+    fn byte_category_wins_when_bytes_and_vertices_cross_together() {
+        let batches = vec![gpu_batch(
+            RenderTopology::Mesh,
+            4,
+            6,
+            0,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            100,
+        )];
+        // Force the segmented path: one culled chunk.
+        let cull = ChunkCull::from_visibility(vec![false], Vec::new(), Vec::new());
+        let budget = FrameBudget {
+            max_vertices: 0,
+            max_triangles: usize::MAX,
+            max_bytes: 50,
+        };
+        let initial = cad_scene::FrameUsage::default();
+        let facts = BatchFacts::build(&batches);
+        let index = OrderedPageIndex::build(&batches, &[0]);
+        let plan = plan_ordered_page(&batches, &[0], 0, &budget, initial, &cull, &facts, &index);
+        assert!(plan.accepted.is_empty());
+        let report = plan.over_budget.as_ref().expect("over budget").report;
+        assert_eq!(report.category, "bytes");
+        assert_eq!(report.requested, 100);
+        assert_eq!(report.limit, 50);
+        assert_eq!(report.skipped_batches, 1);
+    }
+
+    /// The two planners share the unified usage contract: a vertices/triangles
+    /// failure keeps the failing batch's bytes, a bytes failure keeps none of it.
+    /// The accepted prefix and report stay identical.
+    #[test]
+    fn both_planners_share_the_failing_batch_bytes_usage_contract() {
+        let quad = |bytes| {
+            gpu_batch(
+                RenderTopology::Lines,
+                0,
+                0,
+                1,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                bytes,
+            )
+        };
+        let cull = ChunkCull::from_visibility(vec![false], Vec::new(), Vec::new());
+        let initial = cad_scene::FrameUsage::default();
+
+        // (a) vertices failure after the byte charge succeeded: both keep the
+        // failing batch's 40 bytes.
+        let batches = vec![quad(40), quad(40)];
+        let budget = FrameBudget {
+            max_vertices: 8,
+            max_triangles: usize::MAX,
+            max_bytes: usize::MAX,
+        };
+        let facts = BatchFacts::build(&batches);
+        let ordered: Vec<usize> = (0..batches.len()).collect();
+        let index = OrderedPageIndex::build(&batches, &ordered);
+        let from_gpu = plan_from_gpu(&batches, &budget, initial, &cull);
+        let page = plan_ordered_page(
+            &batches, &ordered, 0, &budget, initial, &cull, &facts, &index,
+        );
+        assert_eq!(from_gpu.accepted, vec![0]);
+        assert_eq!(page.accepted, vec![0]);
+        assert_eq!(from_gpu.usage, page.usage);
+        assert_eq!(page.usage.bytes, 80, "the failing batch's bytes are kept");
+        assert_eq!(page.usage.vertices, 6);
+        assert_eq!(
+            from_gpu.over_budget.as_ref().map(|r| r.report),
+            page.over_budget.as_ref().map(|r| r.report)
+        );
+
+        // (b) bytes failure: neither keeps the failing batch's bytes.
+        let batches = vec![quad(40), quad(100)];
+        let budget = FrameBudget {
+            max_vertices: usize::MAX,
+            max_triangles: usize::MAX,
+            max_bytes: 60,
+        };
+        let facts = BatchFacts::build(&batches);
+        let index = OrderedPageIndex::build(&batches, &ordered);
+        let from_gpu = plan_from_gpu(&batches, &budget, initial, &cull);
+        let page = plan_ordered_page(
+            &batches, &ordered, 0, &budget, initial, &cull, &facts, &index,
+        );
+        assert_eq!(from_gpu.accepted, vec![0]);
+        assert_eq!(page.accepted, vec![0]);
+        assert_eq!(from_gpu.usage, page.usage);
+        assert_eq!(page.usage.bytes, 40, "a byte failure keeps none of it");
+    }
+
+    /// The pacing signal (`accepted_with_work` per page) is identical between the
+    /// planners, so the `pacing::step` trajectory is identical.
+    #[test]
+    fn accepted_with_work_sequence_and_pacing_trajectory_are_identical() {
+        let mut rng = Rng::new(0xBEEF);
+        for case in 0..300 {
+            let n = 1 + rng.below(30);
+            let batches: Vec<GpuBatch> = (0..n).map(|_| random_batch(&mut rng, 3, 3)).collect();
+            let mut ordered: Vec<usize> = (0..n).collect();
+            for i in (1..n).rev() {
+                let j = rng.below(i + 1);
+                ordered.swap(i, j);
+            }
+            let cull = ChunkCull::from_visibility(
+                vec![false, rng.below(2) == 0],
+                vec![false],
+                vec![false],
+            );
+            let budget = FrameBudget {
+                max_vertices: 200,
+                max_triangles: 200,
+                max_bytes: usize::MAX,
+            };
+            let initial = cad_scene::FrameUsage::default();
+            let facts = BatchFacts::build(&batches);
+            let index = OrderedPageIndex::build(&batches, &ordered);
+
+            let mut reference_seq = Vec::new();
+            let mut segmented_seq = Vec::new();
+            let mut cursor = 0;
+            while cursor < ordered.len() {
+                let reference = plan_ordered_page_reference(
+                    &batches, &ordered, cursor, &budget, initial, &cull,
+                );
+                let got = plan_ordered_page(
+                    &batches, &ordered, cursor, &budget, initial, &cull, &facts, &index,
+                );
+                assert_eq!(reference.accepted, got.accepted, "case {case}");
+                let work = |plan: &GpuPlan| {
+                    plan.accepted
+                        .iter()
+                        .filter(|&&i| batch_has_visible_work(&batches[i], &cull))
+                        .count()
+                };
+                reference_seq.push(work(&reference));
+                segmented_seq.push(work(&got));
+                cursor += reference.accepted.len().max(1);
+            }
+            assert_eq!(reference_seq, segmented_seq, "case {case}: pacing signal");
+
+            let mut reference_state = pacing::PacingState::new(13.0);
+            let mut segmented_state = pacing::PacingState::new(13.0);
+            for (&r, &s) in reference_seq.iter().zip(segmented_seq.iter()) {
+                reference_state = pacing::step(
+                    reference_state,
+                    pacing::Sample {
+                        cpu_ms: 5.0,
+                        wait_ms: 1.0,
+                        accepted: r,
+                        restart: false,
+                    },
+                )
+                .0;
+                segmented_state = pacing::step(
+                    segmented_state,
+                    pacing::Sample {
+                        cpu_ms: 5.0,
+                        wait_ms: 1.0,
+                        accepted: s,
+                        restart: false,
+                    },
+                )
+                .0;
+            }
+            assert_eq!(reference_state.scale, segmented_state.scale, "case {case}");
+            assert_eq!(
+                reference_state.cost_ema_ms, segmented_state.cost_ema_ms,
+                "case {case}"
             );
         }
     }

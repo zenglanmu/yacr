@@ -1561,6 +1561,11 @@ pub struct Renderer {
     /// only its transparent slice is re-sorted for the camera. `None` means
     /// "stale, rebuild from `batches`".
     draw_plan: Option<DrawOrderCache>,
+    /// Batch-set facts for the segmented page planner (per-class chunk→batch
+    /// lists, the always-active set) plus the once-per-batch-set class flags.
+    /// Rebuilt in the **same** block that rebuilds `draw_plan`, so it shares that
+    /// single invalidation (`draw_plan = None`) and is never a second truth.
+    batch_facts: plan::BatchFacts,
     /// Set once a device-loss is observed, until the host rebuilds.
     device_lost: bool,
     /// Detail string carried by the last device-loss observation.
@@ -1676,6 +1681,10 @@ struct ProgressiveFrame {
     opaque_count: usize,
     invisible: usize,
     cursor: usize,
+    /// Per-`ordered` index (batch→position inverse, byte prefix sums) for the
+    /// segmented page planner. Built in the same restart sweep that rebuilds
+    /// `ordered`, so it is derived from that one truth, never a second one.
+    page_index: plan::OrderedPageIndex,
 }
 
 /// O(1)-comparable identity of the camera + attachments a cached frame plan was

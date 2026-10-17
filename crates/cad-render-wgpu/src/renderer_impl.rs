@@ -165,6 +165,7 @@ impl Renderer {
             progressive: false,
             progressive_frame: None,
             draw_plan: None,
+            batch_facts: plan::BatchFacts::default(),
             device_lost: false,
             last_device_lost: None,
             poll_timeout: std::time::Duration::from_secs(1),
@@ -4371,6 +4372,9 @@ impl Renderer {
                 })
                 .collect();
             self.draw_plan = Some(DrawOrderCache::new(entries));
+            // The segmented planner's batch-set facts share this single
+            // invalidation (`draw_plan = None`): no second invalidation truth.
+            self.batch_facts = plan::BatchFacts::build(&self.batches);
         }
         let frame_key = FrameKey {
             camera_matrix,
@@ -4385,13 +4389,13 @@ impl Renderer {
                 .is_none_or(|frame| frame.key != frame_key)
         {
             progressive_restarts += 1;
-            // Reuse the previous frame's `ordered` allocation: the restart
-            // replaces it, so the old Vec is cleared and refilled instead of a
-            // fresh collect per camera move.
-            let mut ordered = self
+            // Reuse the previous frame's `ordered` and page-index allocations:
+            // the restart replaces them, so the old Vecs are cleared and refilled
+            // instead of freshly collected per camera move.
+            let (mut ordered, mut page_index) = self
                 .progressive_frame
                 .take()
-                .map(|frame| frame.ordered)
+                .map(|frame| (frame.ordered, frame.page_index))
                 .unwrap_or_default();
             let cache = self.draw_plan.as_mut().expect("draw plan cache");
             cache.sort_transparent(Some(camera_position));
@@ -4399,12 +4403,17 @@ impl Renderer {
             let invisible = cache.invisible().len();
             ordered.clear();
             ordered.extend(cache.opaque().iter().chain(cache.transparent()).copied());
+            // Fuse the segmented planner's per-`ordered` index into the same
+            // sweep that (re)builds `ordered`, so it is derived from that one
+            // truth and rebuilt exactly when the order is.
+            page_index.rebuild(&self.batch_facts.upload_bytes, &ordered);
             self.progressive_frame = Some(ProgressiveFrame {
                 key: frame_key,
                 ordered,
                 opaque_count,
                 invisible,
                 cursor: 0,
+                page_index,
             });
         }
         // Cloned so the shared uniform arena can be mutated (grown/filled) while
@@ -4593,6 +4602,8 @@ impl Renderer {
                 &active_budget,
                 image_usage,
                 &cull,
+                &self.batch_facts,
+                &frame.page_index,
             );
             if plan.accepted.is_empty() && frame.cursor < frame.ordered.len() {
                 // Progress floor: a cursor batch that fits the un-paced ceiling
@@ -4694,32 +4705,35 @@ impl Renderer {
         // frame budget held back. A paginated/over-budget frame therefore falls
         // back to the universal per-run organization (reported as
         // `FrameStats::accelerated == false`).
-        let has_line_class = self.batches.iter().any(|b| !b.instanced.is_empty());
-        let has_mesh_class = self.batches.iter().any(|b| !b.mesh_runs.is_empty());
-        let converted_total = self
-            .batches
-            .iter()
-            .filter(|b| !b.instanced.is_empty() || !b.mesh_runs.is_empty())
-            .count();
-        let converted_accepted = opaque
-            .iter()
-            .filter(|&&i| {
-                let b = &self.batches[i];
-                !b.instanced.is_empty() || !b.mesh_runs.is_empty()
-            })
-            .count();
-        let use_pulled = self.render_tier == RenderTier::Accelerated
+        // Pure batch-set facts, computed once at the draw-order rebuild
+        // (`batch_facts`) instead of scanning every resident batch per frame.
+        let has_line_class = self.batch_facts.has_line_class;
+        let has_mesh_class = self.batch_facts.has_mesh_class;
+        let converted_total = self.batch_facts.converted_total;
+        // Everything that decides `use_pulled` except the accepted-set scan. A
+        // culled frame can never use the pulled organisation (below), so the
+        // O(accepted) converted-batch scan is skipped there instead of running on
+        // every settled page whose accepted set is the whole scene.
+        let pulled_ready = self.render_tier == RenderTier::Accelerated
             && (has_line_class || has_mesh_class)
             && (!has_line_class || self.pulled_lines.is_some())
             && (!has_mesh_class || self.pulled_mesh.is_some())
             && converted_total > 0
-            && converted_accepted == converted_total
             // A pulled draw redraws whole streams/chunks, so it must not run
             // while culling excluded any chunk: that would draw (uncharged)
             // geometry the cull removed. Pulled-subset draws are not implemented
             // (that is backlog §N1d), so culling forces the universal per-run
             // organization instead.
             && !cull.any_culled();
+        let use_pulled = pulled_ready
+            && opaque
+                .iter()
+                .filter(|&&i| {
+                    let b = &self.batches[i];
+                    !b.instanced.is_empty() || !b.mesh_runs.is_empty()
+                })
+                .count()
+                == converted_total;
 
         let plan_ms = plan_started.elapsed().as_secs_f64() * 1000.0;
 

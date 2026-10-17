@@ -111,6 +111,22 @@ impl ChunkCull {
         self.culled > 0
     }
 
+    /// Test-only constructor: build a mask from explicit per-class visibility
+    /// bits, deriving the culled count. Used by the page-plan differential test,
+    /// which needs arbitrary masks without a projection or AABBs.
+    #[cfg(test)]
+    pub(crate) fn from_visibility(instance: Vec<bool>, mesh: Vec<bool>, arc: Vec<bool>) -> Self {
+        let culled = instance.iter().filter(|v| !**v).count()
+            + mesh.iter().filter(|v| !**v).count()
+            + arc.iter().filter(|v| !**v).count();
+        ChunkCull {
+            instance,
+            mesh,
+            arc,
+            culled,
+        }
+    }
+
     /// Test hook: keep every chunk visible while retaining the chunk counts, so
     /// the reporting still reflects the resident chunk set. Used by
     /// [`Renderer::set_view_culling`](crate::Renderer::set_view_culling) to render
