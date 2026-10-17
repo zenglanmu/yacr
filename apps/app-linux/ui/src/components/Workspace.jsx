@@ -7,6 +7,7 @@
 import React from 'react';
 import { NavRail } from './NavRail.jsx';
 import { StartPanel } from './StartPanel.jsx';
+import { PropertiesPalette } from './PropertiesPalette.jsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.jsx';
 import { useI18n, useShell } from '../context.mjs';
 
@@ -14,10 +15,16 @@ export function Workspace() {
   const { t } = useI18n();
   const shell = useShell();
   const showStart = !shell.documentOpen;
+  // The inspector is only meaningful with a drawing open; on the start screen the
+  // start panel keeps the whole dock. Off by default so the startup partition
+  // geometry is unchanged until the user opens it.
+  const showProperties = shell.propertiesOpen && !showStart;
+  const leftOpen = showStart || showProperties || shell.diagnosticsOpen;
   return (
     <div className="region region--workspace workspace app-region">
-      <div className={['workspace__left', showStart || shell.diagnosticsOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
+      <div className={['workspace__left', leftOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
         {showStart ? <StartPanel /> : null}
+        {showProperties ? <PropertiesPalette /> : null}
         {shell.diagnosticsOpen ? <DiagnosticsPalette /> : null}
       </div>
       <div className="workspace__canvas">

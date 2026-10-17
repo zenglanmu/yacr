@@ -25,10 +25,14 @@ pub use layout::{
     insets_from, surface_metrics, validate_metrics, CadMetrics, LayoutError, LayoutTracker,
     ViewportInsets,
 };
-pub use protocol::{InputKind, InputTracker, ProbeInput, ProbeInputAck, ProbeStatus};
+pub use protocol::{
+    InputKind, InputTracker, ProbeInput, ProbeInputAck, ProbeStatus, BUTTON_MIDDLE, BUTTON_PRIMARY,
+    BUTTON_SECONDARY,
+};
 pub use session::{
     canonical_command_name, normalize_command, unsupported_command_reason, unsupported_status,
-    CadCamera, CadSession, CadStatus, COMMAND_ALIASES, COMMAND_TABLE,
+    CadCamera, CadSelection, CadSelectionRow, CadSession, CadStatus, COMMAND_ALIASES,
+    COMMAND_TABLE,
 };
 pub use shell::{
     admit_command, bind_allowed, clear_host_error, note_host_error, projected_status,

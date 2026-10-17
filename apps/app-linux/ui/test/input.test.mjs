@@ -145,7 +145,7 @@ test('pointer capture, RAF flush, cancel, blur, overlay exclusion, wheel and DPR
   const lane = { canStart: () => allowed, push: input => inputs.push(input) };
   const binding = bindProbeInput(element, lane, env);
   assert.deepEqual(inputs[0], { kind: 'resize', x: 0, y: 0, width: 800, height: 600, dpr: 1 });
-  const point = (x, pointerId = 7) => ({ pointerId, clientX: x, clientY: 10 });
+  const point = (x, pointerId = 7) => ({ pointerId, clientX: x, clientY: 10, button: 0 });
   element.emit('pointerdown', point(1));
   assert.equal(captured(), 7);
   for (let x = 2; x <= 500; x++) element.emit('pointermove', point(x));
@@ -214,9 +214,9 @@ test('CAD rect reports ribbon offset, dynamic footer height and local pointer CS
   const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
   assert.equal(env.observedTarget, element);
   assert.deepEqual(inputs[0], { kind: 'resize', x: 8, y: 101, width: 784, height: 439, dpr: 1 });
-  element.emit('pointerdown', { pointerId: 1, clientX: 28, clientY: 131 });
-  assert.deepEqual(inputs.at(-1), { kind: 'pointer_down', x: 20, y: 30 });
-  element.emit('pointermove', { pointerId: 1, clientX: 38, clientY: 141 });
+  element.emit('pointerdown', { pointerId: 1, clientX: 28, clientY: 131, button: 0 });
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_down', x: 20, y: 30, button: 0 });
+  element.emit('pointermove', { pointerId: 1, clientX: 38, clientY: 141, button: 0 });
   element.rect = { left: 8, top: 101, width: 784, height: 409 };
   for (let i = 0; i < 1000; i++) env.observerNotify();
   assert.equal(frames.size, 2); // One move RAF and one geometry RAF, regardless of notify count.
@@ -232,11 +232,131 @@ test('CAD rect reports ribbon offset, dynamic footer height and local pointer CS
   media.at(-1).emit('change'); env.tick();
   assert.deepEqual(inputs.at(-1), { kind: 'resize', x: 8, y: 101, width: 784, height: 409, dpr: 1.5 });
   element.rect = { left: 8, top: 201, width: 784, height: 309 };
-  element.emit('pointerup', { pointerId: 1, clientX: 48, clientY: 251 });
+  element.emit('pointerup', { pointerId: 1, clientX: 48, clientY: 251, button: 0 });
   assert.deepEqual(inputs.slice(-2), [
     { kind: 'resize', x: 8, y: 201, width: 784, height: 309, dpr: 1.5 },
-    { kind: 'pointer_up', x: 40, y: 50 },
+    { kind: 'pointer_up', x: 40, y: 50, button: 0 },
   ]);
+  binding.dispose();
+});
+
+test('pointer_down and pointer_up carry the real button; move and wheel omit it', () => {
+  const { env, element, frames } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  element.emit('pointerdown', { pointerId: 1, clientX: 5, clientY: 5, button: 2 });
+  assert.equal(inputs.at(-1).button, 2);
+  // A real move reports button -1 ("no button changed"); the field is omitted
+  // entirely rather than normalized to a bogus value the wire would refuse.
+  const moved = { pointerId: 1, clientX: 6, clientY: 5, button: -1 };
+  element.emit('pointermove', moved);
+  assert.equal(frames.size, 1);
+  env.tick();
+  assert.ok(!('button' in inputs.at(-1)));
+  element.emit('pointerup', { pointerId: 1, clientX: 6, clientY: 5, button: 2 });
+  assert.equal(inputs.at(-1).button, 2);
+  // A move the DOM reports with any button number is still omitted: a move never
+  // owns a press, so the host reads the button the press went down with.
+  element.emit('pointerdown', { pointerId: 2, clientX: 7, clientY: 5, button: 0 });
+  assert.equal(inputs.at(-1).button, 0);
+  element.emit('pointermove', { pointerId: 2, clientX: 8, clientY: 5, button: 0 });
+  env.tick();
+  assert.ok(!('button' in inputs.at(-1)));
+  element.emit('pointerup', { pointerId: 2, clientX: 8, clientY: 5, button: 0 });
+  assert.equal(inputs.at(-1).button, 0);
+  // A middle-button press is preserved as-is: never normalized to a primary one.
+  element.emit('pointerdown', { pointerId: 3, clientX: 9, clientY: 5, button: 1 });
+  assert.equal(inputs.at(-1).button, 1);
+  element.emit('pointerup', { pointerId: 3, clientX: 9, clientY: 5, button: 1 });
+  assert.equal(inputs.at(-1).button, 1);
+  // A wheel reports no button change; omit the field there too.
+  element.emit('wheel', { clientX: 4, clientY: 5, deltaX: 0, deltaY: 3, deltaMode: 0, button: -1, preventDefault() {} });
+  assert.deepEqual(inputs.at(-1), { kind: 'wheel', x: 4, y: 5, dx: 0, dy: 3 });
+  binding.dispose();
+});
+
+test('pointerleave while idle pushes one bare leave and does not cancel the gesture', () => {
+  const { env, element, frames } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  const before = inputs.length;
+  let prevented = false;
+  // The real event carries position/button, and a leave must drop all of it:
+  // only the kind travels, so the host cannot mistake it for a move.
+  element.emit('pointerleave', {
+    pointerId: 7, clientX: 12, clientY: 13, button: 0, buttons: 0,
+    preventDefault() { prevented = true; },
+  });
+  assert.equal(prevented, false);
+  assert.equal(inputs.length, before + 1);
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_leave' });
+  assert.ok(!('x' in inputs.at(-1)) && !('y' in inputs.at(-1)) && !('button' in inputs.at(-1)));
+  assert.equal(frames.size, 0);
+  // A second leave is its own discrete event: it is never coalesced away, and it
+  // never becomes a terminal signal that steals the pointer press state.
+  element.emit('pointerleave', { pointerId: 7, clientX: 14, clientY: 15, button: 0 });
+  assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_leave', 'pointer_leave']);
+  element.emit('pointerdown', { pointerId: 7, clientX: 20, clientY: 30, button: 0 });
+  element.emit('pointerup', { pointerId: 7, clientX: 20, clientY: 30, button: 0 });
+  assert.deepEqual(inputs.slice(-2).map(input => input.kind), ['pointer_down', 'pointer_up']);
+  binding.dispose();
+});
+
+test('pointerleave payload is exactly the leave kind plus the lane sequence', async () => {
+  const { env, element } = mockEnvironment();
+  const sent = [];
+  const lane = createInputLane(async input => { sent.push(input); }, assert.fail);
+  const binding = bindProbeInput(element, lane, env);
+  element.emit('pointerleave', { pointerId: 3, clientX: 40, clientY: 50, button: 0, buttons: 0 });
+  await settle();
+  assert.deepEqual(sent.at(-1), { kind: 'pointer_leave', sequence: 2 });
+  assert.equal(sent[0].kind, 'resize');
+  binding.dispose();
+});
+
+test('a pending coalesced move is flushed before the leave so hover cannot be retinted', () => {
+  const { env, element, frames } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  const before = inputs.length;
+  // The last in-surface move is still inside the rAF window when the pointer
+  // leaves. The move must be ordered *before* the leave: otherwise the host
+  // clears hover on the leave and then immediately re-tints from that stale
+  // in-surface position, leaving the highlight stuck again.
+  element.emit('pointermove', { pointerId: 7, clientX: 1, clientY: 2, button: -1, buttons: 0 });
+  assert.equal(frames.size, 1);
+  element.emit('pointerleave', { pointerId: 7, clientX: 3, clientY: 4, button: 0, buttons: 0 });
+  const kinds = inputs.slice(before).map(input => input.kind).filter(kind => kind !== 'resize');
+  assert.deepEqual(kinds, ['pointer_move', 'pointer_leave']);
+  assert.equal(frames.size, 0);
+  binding.dispose();
+});
+
+test('pointerleave during an active press pushes nothing and the drag still ends', () => {
+  const { env, element, frames, captured } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  element.emit('pointerdown', { pointerId: 7, clientX: 3, clientY: 4, button: 0 });
+  assert.equal(captured(), 7);
+  const before = inputs.length;
+  // Belt-and-braces: a captured pointer should not report a leave mid-capture,
+  // but if it does, the press keeps the gesture — nothing is emitted and the
+  // capture is untouched, so a pan that leaves the element is not disturbed.
+  element.emit('pointerleave', { pointerId: 7, clientX: 3, clientY: 4, button: 0, buttons: 1 });
+  assert.equal(inputs.length, before);
+  assert.equal(captured(), 7);
+  element.emit('pointermove', { pointerId: 7, clientX: 9, clientY: 4, button: -1 });
+  assert.equal(frames.size, 1);
+  element.emit('pointerleave', { pointerId: 7, clientX: 9, clientY: 4, button: -1, buttons: 1 });
+  element.emit('pointerup', { pointerId: 7, clientX: 9, clientY: 4, button: 0 });
+  assert.equal(captured(), null);
+  assert.deepEqual(inputs.slice(before), [
+    { kind: 'pointer_move', x: 9, y: 4 },
+    { kind: 'pointer_up', x: 9, y: 4, button: 0 },
+  ]);
+  // With the press released the guard is gone again: leaving now reports.
+  element.emit('pointerleave', { pointerId: 7, clientX: 9, clientY: 4, button: -1, buttons: 0 });
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_leave' });
   binding.dispose();
 });
 

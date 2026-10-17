@@ -3,6 +3,33 @@ use super::*;
 use cad_app::input::DRAG_THRESHOLD_LOGICAL_PX;
 use cad_app::interaction::PointerPhase;
 use cad_engine::events::{EventPoll, EventWatermark, SubscriptionId};
+use std::time::Instant;
+
+/// Which derived shell state one interaction invalidates.
+///
+/// `Overlay` is the hover case: a hovered entity only tints the renderer's
+/// flags input, which `sync_render` refreshes on every dispatch anyway, so no
+/// published state (`HostState`/`NavigationState`) changes and a mere cursor
+/// move schedules no host update.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DirtyScope {
+    /// Only the transient render overlay inputs change.
+    Overlay,
+    /// Only the navigation/camera view state changes.
+    Navigation,
+    /// Every derived shell state changes.
+    Full,
+}
+
+/// Whether the opt-in pick profile log is enabled.
+///
+/// The same environment gate the pick path itself uses (`YACR_PROFILE_PICK`,
+/// see `cad_app::picking`), read here so the hover wrapper can label its own
+/// measurement. Off by default: no always-on metric exists.
+fn hover_profile_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("YACR_PROFILE_PICK").is_some())
+}
 
 impl HostCore {
     fn world_point(&self, input: PointInput) -> CadResult<Point3> {
@@ -40,14 +67,20 @@ impl HostCore {
     ) -> CadResult<InteractionOutcome> {
         request.validate()?;
         // Pointer and scroll are navigation-only: they must not force a full
-        // state re-query. Every other interaction changes derived shell state.
-        let navigation_only = matches!(
-            &request,
-            InteractionRequest::Pointer { .. } | InteractionRequest::Scroll { .. }
-        );
+        // state re-query. A hover-only `MoveCursor` and a `ClearCursor` with no
+        // active capture are overlay-only for the same reason (both demote to
+        // `DirtyScope::Overlay` inside their arms); every other interaction
+        // changes derived shell state.
+        let mut scope = match &request {
+            InteractionRequest::Pointer { .. } | InteractionRequest::Scroll { .. } => {
+                DirtyScope::Navigation
+            }
+            _ => DirtyScope::Full,
+        };
         let outcome = match request {
             InteractionRequest::BeginDraw(kind) => {
                 self.controller.borrow_mut().begin_draw_tool(kind)?;
+                self.clear_hover();
                 InteractionOutcome::ToolStarted
             }
             InteractionRequest::BeginMeasurement(kind) => {
@@ -55,6 +88,7 @@ impl HostCore {
                     .borrow_mut()
                     .session
                     .begin_measurement(kind)?;
+                self.clear_hover();
                 InteractionOutcome::ToolStarted
             }
             InteractionRequest::SetMeasurementKind(kind) => {
@@ -66,10 +100,24 @@ impl HostCore {
             }
             InteractionRequest::BeginPan => {
                 self.controller.borrow_mut().session.begin_pan();
+                self.clear_hover();
                 InteractionOutcome::PanStarted
             }
             InteractionRequest::ClearCursor => {
                 self.controller.borrow_mut().session.clear_cursor();
+                // The UI reports "no cursor on the surface" through this request:
+                // the hover it produced must not survive it.
+                self.clear_hover();
+                // Clearing a *capture's* cursor changes the published
+                // `draw_preview`/`measurement_preview` inside `HostState`, so a
+                // capture keeps the full rebuild. Without a capture this only
+                // clears the transient hover overlay, which `sync_render`
+                // republishes anyway, so it is overlay-only exactly like the
+                // hover `MoveCursor` (ADR-0012 §10 S2): leaving the surface
+                // schedules no O(layers+entities) host-state rebuild.
+                if !self.capturing() {
+                    scope = DirtyScope::Overlay;
+                }
                 InteractionOutcome::CursorCleared
             }
             InteractionRequest::CapturePoint(point) => {
@@ -81,8 +129,19 @@ impl HostCore {
                 InteractionOutcome::PointCaptured
             }
             InteractionRequest::MoveCursor(point) => {
-                let point = self.world_point(point)?;
-                self.controller.borrow_mut().move_tool_cursor(point)?;
+                if self.capturing() {
+                    // A draw/measurement capture owns the cursor: this is the
+                    // tool preview cursor, unchanged.
+                    let point = self.world_point(point)?;
+                    self.controller.borrow_mut().move_tool_cursor(point)?;
+                    // The capture, not the pointer, decides what is highlighted.
+                    self.clear_hover();
+                } else {
+                    // Without a capture the same request is the hover probe
+                    // (ADR-0012 §10 S2): it only refreshes the flags overlay.
+                    scope = DirtyScope::Overlay;
+                    self.resolve_hover(point)?;
+                }
                 InteractionOutcome::CursorMoved
             }
             InteractionRequest::Confirm => return self.confirm_tool(),
@@ -90,6 +149,7 @@ impl HostCore {
                 self.controller.borrow_mut().cancel_tool()?;
                 self.render.set_draw_preview(None);
                 self.render.set_measurement_preview(None);
+                self.clear_hover();
                 InteractionOutcome::Cancelled
             }
             InteractionRequest::SelectAt { point, mode } => {
@@ -175,11 +235,13 @@ impl HostCore {
                 InteractionOutcome::ScrollObserved
             }
         };
-        if navigation_only {
-            self.navigation_dirty.set(true);
-        } else {
-            self.full_dirty.set(true);
-            self.navigation_dirty.set(true);
+        match scope {
+            DirtyScope::Overlay => {}
+            DirtyScope::Navigation => self.navigation_dirty.set(true),
+            DirtyScope::Full => {
+                self.full_dirty.set(true);
+                self.navigation_dirty.set(true);
+            }
         }
         // Post-business render sync: an error is an explicit diagnostic, never a
         // reclassification of a successful interaction.
@@ -265,6 +327,160 @@ impl HostCore {
         self.immediate_command(CommandId::Select, CommandPayload::Selection(refs))
     }
 
+    /// Whether a hover query must be suppressed right now.
+    ///
+    /// A positive tool (draw/measure capture or pan), a press/navigation gesture
+    /// (pan/orbit/drag), or an active multi-contact navigation owns the pointer;
+    /// hover must not compete with it. `Selecting` deliberately does not
+    /// suppress: after a click the user must be able to hover the next object.
+    /// This is the second line of defence — the session already emits no hover
+    /// request for a pressed pointer — so a host that delivers one anyway never
+    /// leaves a stale tint behind.
+    fn hover_suppressed(&self) -> bool {
+        let tool_owns_pointer = matches!(
+            &self.controller.borrow().session.tool,
+            ToolState::Drawing(_) | ToolState::Measuring(_) | ToolState::Panning
+        );
+        tool_owns_pointer
+            || self.navigation.dragged.get()
+            || self.navigation.navigating.get()
+            || !self.navigation.active.borrow().is_empty()
+    }
+
+    /// Clear the hovered set and forget the last hover query position.
+    ///
+    /// Pure session/overlay state: no database write, no history entry, and no
+    /// published shell state change, so nothing is marked dirty here. The
+    /// `sync_render` that ends every interaction dispatch republishes the
+    /// overlay inputs.
+    pub(crate) fn clear_hover(&self) {
+        self.hover.hovered.borrow_mut().clear();
+        self.hover.last_query.set(None);
+    }
+
+    /// The number of hover pick queries this host has actually executed.
+    ///
+    /// Read-only observable behaviour for the hover throttle contract: an
+    /// unchanged cursor position re-runs no pick, so the counter does not move.
+    /// It is a counter, never a wall-clock measurement.
+    pub fn hover_query_count(&self) -> u64 {
+        self.hover.queries.get()
+    }
+
+    /// The canvas-local logical cursor position a hover request names.
+    ///
+    /// A canvas-local point is used as-is and its metrics revision validated
+    /// exactly like `SelectAt`'s; a world point is projected through the active
+    /// camera for a host that supplies one directly.
+    fn hover_logical(&self, point: PointInput) -> CadResult<[f64; 2]> {
+        match point {
+            PointInput::CanvasLocal {
+                logical_position,
+                metrics_revision,
+            } => {
+                if metrics_revision != self.metrics_revision.get() {
+                    return Err(CadError::InvalidInput(
+                        "stale canvas metrics revision".into(),
+                    ));
+                }
+                Ok(logical_position)
+            }
+            PointInput::World(world) => {
+                let c = self.controller.borrow();
+                let viewport = c
+                    .application
+                    .workspace
+                    .viewports
+                    .get(&c.viewport_id)
+                    .ok_or(CadError::Cancelled)?;
+                viewport
+                    .camera
+                    .world_to_screen(world, viewport.logical_size)
+                    .ok_or_else(|| CadError::InvalidInput("world point cannot be projected".into()))
+            }
+        }
+    }
+
+    /// Resolve the top-ranked pick under the cursor and publish it as hover.
+    ///
+    /// Hover reuses the **exact** click-selection path — `pick_at_screen` with
+    /// the default `TolerancePolicy` and `BackFacePolicy::Cull` — so there is no
+    /// second tolerance, no second ranking and no second identity type. Hover is
+    /// entity-level and single: the one top-ranked ref the report returns.
+    ///
+    /// Throttling (ADR-0012 §10 S2): the UI already coalesces pointer moves to
+    /// at most one per animation frame, so no time-window throttle exists here;
+    /// an unchanged logical position re-runs no pick at all.
+    fn resolve_hover(&self, point: PointInput) -> CadResult<()> {
+        if self.hover_suppressed() {
+            self.clear_hover();
+            return Ok(());
+        }
+        let logical = self.hover_logical(point)?;
+        if self.hover.last_query.get() == Some(logical) {
+            return Ok(());
+        }
+        let profile = hover_profile_enabled();
+        let started = profile.then(Instant::now);
+        self.metrics()?;
+        let picked = {
+            let c = self.controller.borrow();
+            let viewport = c
+                .application
+                .workspace
+                .viewports
+                .get(&c.viewport_id)
+                .ok_or(CadError::Cancelled)?;
+            let drawing = c.drawing().ok_or(CadError::Cancelled)?;
+            let report = cad_app::picking::pick_at_screen(
+                &drawing,
+                c.document_id,
+                &viewport.camera,
+                logical,
+                viewport.logical_size,
+                &cad_domain::TolerancePolicy::default(),
+                cad_app::BackFacePolicy::Cull,
+            );
+            report.map(|report| report.hit.map(|hit| hit.source))
+        };
+        let picked = match picked {
+            Ok(picked) => picked,
+            Err(error) => {
+                // A hover that cannot be resolved is an explicit refusal, never
+                // a silent "still hovering the previous entity".
+                self.clear_hover();
+                return Err(error);
+            }
+        };
+        if let Some(started) = started {
+            // Opt-in (`YACR_PROFILE_PICK`, the same gate the pick path itself
+            // uses) and measured, never estimated. A local/synthetic number: it
+            // is not a performance conclusion.
+            eprintln!(
+                "YACR_PROFILE_PICK hover elapsed_ms={:.3} picked={}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                picked.is_some()
+            );
+        }
+        self.hover.last_query.set(Some(logical));
+        self.hover
+            .queries
+            .set(self.hover.queries.get().saturating_add(1));
+        let mut hovered = self.hover.hovered.borrow_mut();
+        let changed = match &picked {
+            // Hover is single: an equal one-ref set is not a change.
+            Some(reference) => !(hovered.len() == 1 && hovered.contains(reference)),
+            None => !hovered.is_empty(),
+        };
+        if changed {
+            match picked {
+                Some(reference) => hovered.replace([reference]),
+                None => hovered.clear(),
+            }
+        }
+        Ok(())
+    }
+
     fn pointer(
         &self,
         id: PointerId,
@@ -321,6 +537,9 @@ impl HostCore {
     }
 
     fn pointer_down(&self, id: PointerId, point: [f64; 2]) -> CadResult<()> {
+        // A press starts a gesture (pan/orbit/drag or a tap): hover must not
+        // survive into it, and the tint is cleared before anything else.
+        self.clear_hover();
         let mut active = self.navigation.active.borrow_mut();
         if active.contains(&id) {
             return Ok(());
@@ -426,6 +645,9 @@ impl HostCore {
     }
 
     fn pointer_cancel(&self, id: PointerId) -> CadResult<()> {
+        // A cancel/blur ends the interaction: no hover from the interrupted
+        // gesture may remain.
+        self.clear_hover();
         let mut active = self.navigation.active.borrow_mut();
         active.retain(|active| active != &id);
         let empty = active.is_empty();

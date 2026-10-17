@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { commandEnabled, handleCommandKey, importProgressView, parseCadStatus, queueCadCommand, requestImportCancel, startCadPolling } from '../src/cad.mjs';
 import { readAppSource, readComponentsSource } from './helpers.mjs';
 
-const empty = { documentLabel: null, entityCount: null, loading: false, importProgress: null, error: null, canOpen: true, canFit: false, backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0 };
+const empty = { documentLabel: null, entityCount: null, loading: false, importProgress: null, error: null, canOpen: true, canFit: false, backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0, selection: { count: 0, empty: true, rows: [], mixedKeys: [] } };
 const loaded = { ...empty, documentLabel: 'fixture.dwg', entityCount: 3, canFit: true, backend: 'Vulkan', adapter: 'hardware', camera: { center: [10, 20], scale: 2 }, importCount: 1, frameCount: 10 };
 const importing = { ...empty, loading: true, canOpen: false, importProgress: { phase: 'entities', entitiesDone: 40, entitiesTotal: 200, bytes: 4096, cancellable: true } };
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -28,6 +28,46 @@ test('import progress is validated and never rendered from a malformed block', (
   for (const value of bad) assert.throws(() => parseCadStatus(value), /CAD_STATUS_INVALID/);
   const indeterminate = { ...empty, loading: true, importProgress: { phase: null, entitiesDone: 0, entitiesTotal: null, bytes: null, cancellable: true } };
   assert.equal(parseCadStatus(indeterminate), indeterminate);
+});
+
+test('selection block is validated: empty, single, multi are well-formed and a malformed one is rejected', () => {
+  const single = { count: 1, empty: false, rows: [{ key: 'id', value: '1' }, { key: 'length', value: '5.000000' }], mixedKeys: [] };
+  const multi = { count: 3, empty: false, rows: [], mixedKeys: ['id', 'type'] };
+  for (const selection of [empty.selection, single, multi]) {
+    const status = { ...empty, selection };
+    assert.equal(parseCadStatus(status), status);
+  }
+  const bad = [
+    { ...empty, selection: null },
+    { ...empty, selection: undefined },
+    { ...empty, selection: [] },
+    { ...empty, selection: 'none' },
+    { ...empty, selection: { count: 1, empty: true, rows: [], mixedKeys: [] } },
+    { ...empty, selection: { count: 0, empty: false, rows: [], mixedKeys: [] } },
+    { ...empty, selection: { count: -1, empty: false, rows: [], mixedKeys: [] } },
+    { ...empty, selection: { count: 1.5, empty: false, rows: [], mixedKeys: [] } },
+    { ...empty, selection: { count: 1, empty: false, rows: null, mixedKeys: [] } },
+    { ...empty, selection: { count: 1, empty: false, rows: [], mixedKeys: null } },
+    { ...empty, selection: { count: 1, empty: false, rows: [{ key: '', value: 'x' }], mixedKeys: [] } },
+    { ...empty, selection: { count: 1, empty: false, rows: [{ key: 'id' }], mixedKeys: [] } },
+    { ...empty, selection: { count: 1, empty: false, rows: [{ key: 'id', value: 3 }], mixedKeys: [] } },
+    { ...empty, selection: { count: 1, empty: false, rows: ['id'], mixedKeys: [] } },
+    // rows only describe one object: they cannot appear for an empty/multi block.
+    { ...empty, selection: { count: 0, empty: true, rows: [{ key: 'id', value: '1' }], mixedKeys: [] } },
+    { ...empty, selection: { count: 2, empty: false, rows: [{ key: 'id', value: '1' }], mixedKeys: [] } },
+    // mixed keys are only meaningful for a real multi-selection.
+    { ...empty, selection: { count: 1, empty: false, rows: [], mixedKeys: ['id'] } },
+    { ...empty, selection: { count: 2, empty: false, rows: [], mixedKeys: [3] } },
+  ];
+  for (const value of bad) assert.throws(() => parseCadStatus(value), /CAD_STATUS_INVALID/);
+});
+
+test('an unknown row key is tolerated and never coerced to a fabricated state', () => {
+  const status = {
+    ...empty,
+    selection: { count: 1, empty: false, rows: [{ key: 'future_key', value: 'raw' }, { key: 'id', value: '7' }], mixedKeys: [] },
+  };
+  assert.equal(parseCadStatus(status), status);
 });
 
 test('import progress view is determinate only with a real total and never invents 100%', () => {

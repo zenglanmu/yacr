@@ -52,7 +52,16 @@ export function bindProbeInput(element, lane, env = window) {
   let frame = null;
   let resizeFrame = null;
   let accepting = true;
+  // `button` is the DOM `MouseEvent.button` (0 primary / 1 middle / 2 secondary).
+  // It is only meaningful on a press/release, so it rides `pointer_down` and
+  // `pointer_up`; a `pointermove` (and a wheel) reports no button change as `-1`,
+  // and the wire refuses anything outside `0..=2` — including that `-1` — instead
+  // of guessing. Those kinds therefore omit the field entirely (never `null`,
+  // `0` or `-1`), leaving the host to treat the omission as the pressed/primary
+  // button. Normalizing this DOM quirk here matches the wheel-delta
+  // normalization below.
   const position = event => pointerPosition(element, event);
+  const buttonField = event => (event.button >= 0 ? { button: event.button } : {});
   const flush = () => {
     if (frame !== null) env.cancelAnimationFrame(frame);
     frame = null;
@@ -74,7 +83,7 @@ export function bindProbeInput(element, lane, env = window) {
     flush();
     active = event.pointerId;
     element.setPointerCapture(active);
-    lane.push({ kind: 'pointer_down', ...position(event) });
+    lane.push({ kind: 'pointer_down', ...position(event), ...buttonField(event) });
   };
   const moving = event => {
     if (!accepting || (active !== null && event.pointerId !== active)) return;
@@ -86,10 +95,22 @@ export function bindProbeInput(element, lane, env = window) {
     if (event.pointerId !== active) return;
     resize();
     flush();
-    lane.push({ kind: 'pointer_up', ...position(event) });
+    lane.push({ kind: 'pointer_up', ...position(event), ...buttonField(event) });
     release();
   };
   const cancelled = event => { if (event.pointerId === active) cancel(); };
+  // Leaving the surface clears the host's hover highlight. It carries no
+  // position, button or metrics: the host only needs to know the pointer is
+  // gone. A press owns the gesture (and a captured pointer should not report a
+  // leave mid-capture at all), so an active press is never disturbed here.
+  // Any coalesced move is flushed first, exactly like `down`/`up`/`wheel`, so an
+  // in-flight move can never arrive *after* the leave and re-tint hover from a
+  // stale in-surface position.
+  const leave = () => {
+    if (active !== null) return;
+    flush();
+    lane.push({ kind: 'pointer_leave' });
+  };
   const wheel = event => {
     event.preventDefault();
     if (!accepting) return;
@@ -131,7 +152,7 @@ export function bindProbeInput(element, lane, env = window) {
   // metrics in sync, which is what anchors wheel zoom at the cursor.
   const layoutRoot = element.closest?.('.shell') ?? element.parentElement;
   for (const region of layoutRoot?.querySelectorAll('.app-region') ?? []) observer.observe(region);
-  const handlers = { pointerdown: down, pointermove: moving, pointerup: up, pointercancel: cancelled, lostpointercapture: cancelled, wheel };
+  const handlers = { pointerdown: down, pointermove: moving, pointerup: up, pointercancel: cancelled, lostpointercapture: cancelled, pointerleave: leave, wheel };
   for (const [type, handler] of Object.entries(handlers)) element.addEventListener(type, handler, { passive: false });
   env.addEventListener('blur', blur);
   env.addEventListener('resize', scheduleResize);

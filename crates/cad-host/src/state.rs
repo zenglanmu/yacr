@@ -46,12 +46,18 @@ impl HostCore {
         // Passing `None` here and then calling `set_viewport_bounds` mutated the
         // overlay input twice per sync, so every idle tick bumped the render
         // input/scene revision even with no state change.
+        //
+        // `hovered` carries the host's transient hover state (ADR-0012 §10 S2),
+        // which the `MoveCursor` handler resolves through the click-selection
+        // pick path and clears on a miss/suppression. `hidden` stays the
+        // hardcoded empty set: its producer is gated by the id pass honouring
+        // `FLAG_HIDDEN` first (backlog G2/G5), and wiring it early would leave
+        // hidden entities still pickable and occluding instead of openly
+        // unsupported (rule 2).
+        let hovered = self.hover.hovered.borrow().clone();
         let overlays = OverlayInputs {
             selection,
-            // The host does not yet produce a transient hover or per-entity hide;
-            // both are the same entity-flags mechanism and stay empty until a host
-            // slice feeds them (see `OverlayInputs::hovered`/`hidden`).
-            hovered: cad_app::SelectionSet::new(),
+            hovered,
             hidden: cad_app::SelectionSet::new(),
             measurement,
             draw_preview: preview,

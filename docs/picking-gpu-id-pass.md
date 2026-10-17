@@ -58,8 +58,11 @@ frame key 下不再重绘、保留加标志前的像素，选择要等到相机�
 （`a_flag_change_redraws_a_completed_progressive_frame`；生产会话开着 progressive，
 这正是引擎侧真机用例抓到的路径）。重绘只复用驻留缓冲，**不**重传几何。
 
-**实体级 hover/hidden 输入**：`OverlayInputs` 新增 `hovered` / `hidden`（默认空）。宿主尚未
-产生二者（`cad-host` 传空）；机制与测试已就绪，宿主侧生产是后续切片。
+**实体级 hover/hidden 输入**：`OverlayInputs` 新增 `hovered` / `hidden`（默认空）。**hover 生产者已接线**
+（2026-10-17，有界、合成/本地）：宿主在空闲移动时用与点选**相同**的拾取路径产生**单个**实体级 ref，喂给
+`OverlayInputs.hovered`——该输入在**生产会话中由此非空**（`cad-host` 的 `HoverState` → `state.rs`；ADR-0012 §10 S2、
+`docs/input.md` §1.1.2）。**`hidden` 生产者仍未接线**（`cad-host` 传空），受 G2 门控（id pass 必须先按 key 跳过
+`FLAG_HIDDEN` 片段）；机制与测试仍就绪，hidden 的宿主生产属后续切片（backlog G2/G5）。
 
 **「只上传标志」的已知例外**：当处于 2D 导航回退（`overlays_suppressed`，即 overlay 后缀被
 有意丢弃）时，一次实体级选择变化不再走标志-only 快路径——它会把 overlay 后缀重传并
@@ -320,8 +323,9 @@ parity harness（真实 DWG，**渲染器 id pass** vs **CPU `cad_spatial` 参�
   暂不可见；但 **hidden 切片落地前必须**让 id pass 也按 key 查标志表并跳过 `FLAG_HIDDEN`
   的片段（否则「隐藏」实体仍会被拾取，违反铁律 #2 的显式建模要求）。本切片**不**做投机实现，
   仅在此记录为硬性前置项。
-- **实体级 hover / hidden 的宿主生产**：机制与 `OverlayInputs::hovered`/`hidden` 已就绪，
-  宿主尚未产生（`cad-host` 传空）；属后续宿主切片。
+- **实体级 hover / hidden 的宿主生产**：**hover 生产者已接线**（2026-10-17，有界、合成/本地；见 §0），
+  生产会话的 `OverlayInputs.hovered` 已非空；**`hidden` 生产者仍未接线**（`cad-host` 传空），受 G2 门控
+  （backlog G2/G5）。
 - **视觉 tint**：`SELECTED_TINT`/`HOVERED_TINT` 仍是机械常量（颜色替换，非混合），最终视觉
   归 UI 切片；与旧 overlay 的视觉**不**保证一致（用户已授权）。
 - **逐帧 id pass**：不做（按需）。

@@ -40,6 +40,79 @@ Idle ──1 触点按下──▶ Pending ──移动 ≥ 阈值──▶ Drag
 `EscapeAction`（`escape_action`）：Esc/Android 返回**先取消工具，再处理退出**；
 若文本框/IME 持有焦点则不碰画布工具，直接返回 `Exit` 让文本框或宿主处理。
 
+### 1.1 宿主线载荷与点选映射（`cad-ui-core` 会话层；ADR-0012 §10 S1）
+
+`crates/cad-ui-core/src/protocol.rs` 的 `ProbeInput` 是宿主→会话的**线载荷**；`crates/cad-ui-core/src/session.rs`
+的 `CadSession` / `plan_input` 把它映射为类型化 `InteractionRequest`：
+
+- **`button` 字段（可选）**：编码沿用 DOM `MouseEvent.button` 数值，公开常量 `BUTTON_PRIMARY = 0`、
+  `BUTTON_MIDDLE = 1`、`BUTTON_SECONDARY = 2`（`protocol.rs`）。字段带 `#[serde(default)]`：**缺省该成员或
+  显式 `null`** 均表示主键，使不报按键的旧调用方保持既有主键行为。
+- **不做猜测**：其余任何值——**包括 DOM 在 `pointermove`/滚轮上报告“无按键变化”的 `-1`**——一律**拒绝**，稳定
+  原因字符串为 `unsupported pointer button: N (expected 0, 1 or 2, or omit it for primary)`，绝不静默当作主键。
+  因此**无按键变化的事件必须省略 `button` 字段**（`input.mjs` 的 `pointermove`/滚轮省略该字段），而非上报 `-1`。
+- **点选 vs 拖拽判定**：`CadSession` 保留一次按下 `PointerPress { button, down, dragged }`；`pointer_move`
+  优先采用按下时的按键，并在一经离开按下点 4.0 逻辑像素的圆盘后把该次按下锁存为 `dragged`
+  （`DRAG_THRESHOLD_LOGICAL_PX`，`crates/cad-app/src/input.rs:77`；离去再返回仍算拖拽，故不会伪造点击）。
+- **点击（select）**：`pointer_up` 的按键与按下**同一主键**、期间**未拖拽**且位移 `< 4.0` 逻辑像素时，发出
+  **两个**请求——普通的 `Pointer{Up}` 释放，**以及** `InteractionRequest::SelectAt { point: 抬起点, mode: Replace }`，
+  携带**当前** `metrics_revision`（陈旧 revision 由宿主显式拒绝，不臆造通过）。因此**在空白处点击即清空选择**。
+- **其余情况**只发出普通释放：中键/右键抬起**永不**选择；左键拖拽与中键拖拽**都**平移（pan）。
+- **框选未实现**：左键拖拽仍只是平移，Window/Crossing 框选归 ADR-0012 §10 item 5（S5）。
+- **状态原子性**：按下状态**仅**在每个请求均被接纳后才提交，故被拒绝的输入不会留下幽灵按下。
+
+#### 1.1.1 当前线载荷 kind 集合
+
+`ProbeInput.kind`（`InputKind`）当前恰好是下列 **8** 个值，线字符串即其 snake_case 名：
+
+`pointer_down`、`pointer_move`、`pointer_up`、`pointer_cancel`、`pointer_leave`、`wheel`、`resize`、`blur`。
+
+其中**终态（terminal）** kind 有三个——`pointer_up`、`pointer_cancel`、`blur`（结束输入 marker/序列）；
+其余为非终态，`pointer_leave` 见下（ADR-0012 §10 S2）。**历史 ADR-0006 的 kind 列表已过时**，本文件才是
+当前线载荷契约；本仓库**不**回改已废弃的 ADR（ADR-0010 已取代 ADR-0006）。
+
+#### 1.1.2 空闲移动 → hover（`MoveCursor`；ADR-0012 §10 S2）
+
+- **空闲移动额外请求**：`plan_input` 的 `PointerMove` 分支在**无按下**（空闲）时，除普通的
+  `Pointer{Move}` 外，**额外**发出一个 `InteractionRequest::MoveCursor(PointInput::CanvasLocal { logical_position,
+  metrics_revision })`（`crates/cad-ui-core/src/session.rs`）。携带**当前** `metrics_revision`（陈旧 revision 由宿主显式拒绝）。
+  **有按下**的移动保持旧的单请求形态（不产生 hover）。
+- **语义**：这是**实体级、单个** hover——宿主用与**点选完全相同**的拾取路径（`cad_app::picking::pick_at_screen`，
+  `TolerancePolicy::default()` + `BackFacePolicy::Cull`）解析，只取**排名第一**的 ref 存进宿主本地
+  `cad_host::HoverState`；**无**新容差、**无**新排序。命中即点亮该实体的 `FLAG_HOVERED`（经 `OverlayInputs.hovered`），
+  未命中的一次移动**立即清除** hover（**绝不**留下陈旧着色）。
+- **抑制与清除**：按下/导航/捕获**拥有**指针时 hover 被抑制并在按下开始、`Cancel`、`ClearCursor`、pointer cancel、
+  `blur` 与**未命中**时清除。拾取**报错**时先清 hover，再把错误作为**显式拒绝**向上传播（不静默空成功）。
+- **节流规则（无时间窗）**：hover **没有**时间窗节流。它依赖 UI 既有 **rAF 合并**（`input.mjs` 把一次移动并入一帧的
+  `pointer_move`），宿主在同一逻辑位置**未变**时**整段跳过**拾取查询（`HoverState.last_query`）。这是**行为契约**
+  （以查询计数这类可观测量表述），**不是**频率/性能承诺。
+- **分类为 overlay-only**：hover 的 `MoveCursor` 在宿主侧归 `DirtyScope::Overlay`（`crates/cad-host/src/input.rs`），
+  故逐帧 hover **不会**触发 O(layers+entities) 的 `HostState` 重建。
+- **用户可见修正（行为变更）**：此前会话**从不**发出 `MoveCursor`，故在绘制/测量**捕获进行中**的空闲移动**不**到达
+  既有的工具光标分支；现在这类移动会到达（并由捕获拥有），工具预览光标因此跟随指针。这是**用户可见的修复**，
+  并非改动 `move_tool_cursor` 语义。
+
+#### 1.1.3 `pointer_leave`：离开表面（瞬态、非终态）
+
+- **线字符串**恰为 `pointer_leave`（`crates/cad-ui-core/src/protocol.rs`）。
+- **非终态**：它是**瞬态**事件，**刻意不**结束输入 marker/序列——离开表面是暂时的，指针可能**重新进入**并继续；
+  `InputTracker::apply` 对它做**保状态空操作**（sequence 仍被消费，marker/press/dirty 均不变）。
+- **映射**：会话把 `PointerLeave` 映射到**既有**的 `InteractionRequest::ClearCursor`；它**不携带**坐标、**不要求**
+  revision。
+- **不扰动进行中的按下**：`ClearCursor` **不动**进行中的按下（其后的 `PointerUp` 仍按常规解析）。React 侧亦仅在
+  **无按下**时上报该 kind（见下）。
+- **宿主分类**：`cad-host` 中，`ClearCursor` 在**无捕获**时为 **overlay-only**（与 hover 的 `MoveCursor` 同构）；
+  仅当有绘制/测量**捕获**激活时才保持 `Full`（因为清除捕获光标会改变 `HostState` 里的预览）。
+
+#### 1.1.4 React 侧 flush-before-leave 顺序（必须）
+
+`apps/app-linux/ui/src/input.mjs` 的 `pointerleave` 处理器在**无按下**时才压入 `{ kind: 'pointer_leave' }`
+（载荷**恰为** kind + lane `sequence`，**无**位置/按键/metrics，**不** `preventDefault`），且**必须先 flush**
+任何仍待发的 rAF 合并移动，正如 `down`/`up`/`wheel` 一样。**为何必须**：若合并移动留到**下一帧**才 flush，
+它会在 leave **之后**到达宿主——宿主先因 leave 清掉 hover，又据一个**已离面的陈旧位置**重新点亮 hover。
+这是与早期 `button: -1` 同类的**跨 lane 对账缺陷**：两侧各自单测都不会暴露，**仅靠跨 lane 阅读两处源码**
+才发现。
+
 ## 2. U06 键盘/IME 策略
 
 `InputPolicy` 记录两件事：`text_focus`（文本框/弹窗获得焦点）与 `composing`
@@ -110,3 +183,9 @@ Idle ──1 触点按下──▶ Pending ──移动 ≥ 阈值──▶ Drag
 - **上下文菜单**：长按/右键菜单策略未在本模块建模。
 - **状态来源**：`StatusModel` 目前由调用方提供 `units`/`unsaved`/`loading`，
   尚未从 `host.rs` 的完整会话一次性派生。
+- **点选/hover 端到端运行未做**：§1.1 的 DOM 点选闭环（`SelectAt` → `pick_at_screen` → 高亮/属性）与
+  §1.1.2/§1.1.3 的 hover / `pointer_leave` 只在**合成/本地**单元测试中覆盖；**未**运行真实 GUI、原生窗口、
+  真实 GPU 或真实 DWG，`SelectionRef` 与 hover 高亮均**未**在真实宿主窗口闭环。可选探针
+  `YACR_PROFILE_PICK hover elapsed_ms=… picked=…` 只在 `YACR_PROFILE_PICK=1` 时输出，其**任何数字仅为
+  合成/本地**（记录运行用的是 6 实体 demo 文档，无真实 DWG/GPU），**不构成**性能结论。框选（S5）仍未实现。
+  证据与 NOT RUN 边界见 `docs/handoff.md` 的 2026-10-17 S1/S2 小节与 `docs/render-optimization-backlog.md` 的 S1/S2 项。

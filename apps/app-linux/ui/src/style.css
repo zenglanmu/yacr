@@ -291,6 +291,15 @@ button, input, select { font: inherit; color: inherit; }
 .kv dt { color: var(--text-muted); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
 
+/* Properties palette ----------------------------------------------------- */
+/* The inspector reuses the shared `.kv` label/value grid. Only the wrapping of
+   long machine keys/labels (e.g. an instance path or a raw unknown key) and the
+   multi-selection summary need extra rules; no new visual system is introduced. */
+.properties__rows dt { overflow-wrap: anywhere; }
+.properties__multi { display: flex; flex-direction: column; gap: 6px; }
+.properties__count { margin: 0; color: var(--text); font-weight: 600; }
+.properties__mixed { margin: 0; color: var(--text-muted); overflow-wrap: anywhere; }
+
 .start-panel { animation: fade var(--t-med) both; }
 .start-panel__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; }
 .start-panel__hint { margin: 0 0 14px; color: var(--text-dim); }
@@ -440,4 +449,6 @@ button, input, select { font: inherit; color: inherit; }
   .statusbar__state { display: none; }
   .ribbon-panel { padding: 0 5px; }
   .import-progress__phase { display: none; }
+  /* Give long values room by narrowing the label column on the small dock. */
+  .properties__rows { grid-template-columns: 76px minmax(0, 1fr); }
 }

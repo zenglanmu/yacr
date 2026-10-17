@@ -43,6 +43,7 @@ export function App() {
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
   const [cleanScreen, setCleanScreen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
   const [commandLineOpen, setCommandLineOpen] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [cursor, setCursor] = useState(null);
@@ -191,6 +192,8 @@ export function App() {
     setCleanScreen,
     diagnosticsOpen,
     setDiagnosticsOpen,
+    propertiesOpen,
+    setPropertiesOpen,
     commandLineOpen,
     setCommandLineOpen,
     surfaceRef,

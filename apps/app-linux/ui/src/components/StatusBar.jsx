@@ -94,6 +94,12 @@ export function StatusBar() {
           onClick={() => shell.setCleanScreen(!shell.cleanScreen)}
         />
         <Toggle
+          label={t('properties.panel')}
+          on={shell.propertiesOpen}
+          title={t('properties.panel')}
+          onClick={() => shell.setPropertiesOpen(!shell.propertiesOpen)}
+        />
+        <Toggle
           label={t('diagnostics.title')}
           on={shell.diagnosticsOpen}
           title={t('diagnostics.title')}

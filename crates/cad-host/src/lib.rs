@@ -184,6 +184,28 @@ impl Default for NavInner {
     }
 }
 
+/// Transient, entity-level hover state (ADR-0012 §10 S2).
+///
+/// Hover is **pure session state**: it never touches the database, the history
+/// or the selection. It exists only so the host can feed the renderer's
+/// `OverlayInputs::hovered` flags input (the same entity-flags mechanism as the
+/// selection, with a lighter tint). It is host-local because no CAD authority,
+/// command or property view reads it — the application layer and the UI see
+/// only the derived status, which carries no hover field.
+#[derive(Default)]
+pub(crate) struct HoverState {
+    /// The current hovered ref (the top-ranked pick), empty when nothing is
+    /// hovered. A miss always clears it, so a stale tint can never survive.
+    pub hovered: RefCell<cad_app::SelectionSet>,
+    /// The logical cursor position of the last executed hover query, so an
+    /// unchanged position re-runs no pick. `None` after any clear/suppression.
+    pub last_query: Cell<Option<[f64; 2]>>,
+    /// Number of hover pick queries actually executed. Observable behaviour for
+    /// the throttle contract (a counter, not a wall-clock measurement); it is
+    /// also what tells the profile log apart from a cached move.
+    pub queries: Cell<u64>,
+}
+
 /// Registered queue empty-to-nonempty wake callback.
 pub(crate) type RequestWaker = Rc<dyn Fn()>;
 
@@ -259,6 +281,8 @@ pub struct HostCore {
     pub(crate) async_report_attempt: Rc<Cell<Option<u64>>>,
     /// Per-instance pointer navigation state.
     pub(crate) navigation: Rc<NavInner>,
+    /// Transient hover state feeding `OverlayInputs::hovered` (ADR-0012 §10 S2).
+    pub(crate) hover: Rc<HoverState>,
     /// Diagnostics from reading the config / preference files at startup.
     pub(crate) startup_diagnostics: Rc<RefCell<Vec<String>>>,
     /// The bounded P3 request queue. Admission/identity/ordering live in the
@@ -384,6 +408,7 @@ impl HostCore {
             open_attempt: Rc::new(Cell::new(0)),
             async_report_attempt: Rc::new(Cell::new(None)),
             navigation: Rc::new(NavInner::default()),
+            hover: Rc::new(HoverState::default()),
             startup_diagnostics: Rc::new(RefCell::new(Vec::new())),
             queue: Rc::new(RequestQueue::new()),
             request_waker: Rc::new(RefCell::new(None)),
@@ -470,7 +495,9 @@ impl HostCore {
     /// Discard any in-progress pointer gesture.
     ///
     /// Called when the authoritative document, canvas metrics or config change:
-    /// the pending gesture no longer refers to the current state.
+    /// the pending gesture no longer refers to the current state. The hover
+    /// resolved under the invalidated state is dropped with it, so a tint can
+    /// never describe a document/metrics pair that is gone.
     pub(crate) fn clear_gestures(&self) {
         self.navigation.active.borrow_mut().clear();
         self.navigation.anchor.set(None);
@@ -478,6 +505,7 @@ impl HostCore {
         self.navigation.nav_last.set(None);
         self.navigation.dragged.set(false);
         self.navigation.navigating.set(false);
+        self.clear_hover();
     }
 
     /// Record the authoritative document and bump the host document epoch iff it
