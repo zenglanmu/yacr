@@ -56,7 +56,21 @@ GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
 二进制并处理 `node_modules`/前端构建；若要复测**当前** `target/release/yacr` 而不触发重建，请用上面的
 直接命令。手动本地验收由用户自行进行。）
 
-参数（透传给宿主）：`--open <path>`、`--fonts-dir <path>`、`--images-dir <path>`、`--probe`。
+参数（透传给宿主）：`--open <path>`、`--fonts-dir <path>`、`--images-dir <path>`、`--probe`，
+外加**裸位置参数**：`yacr <path>` 与 `yacr --open <path>` 等价（flatpak 后由文件管理器
+`Exec=… %F` 调用的前置条件）。**语义（已实现，有真机证据，见 `docs/handoff.md` 2026-10-17 小节）**：
+
+- 多个位置参数只打开**第一个**，其余**显式诊断**（多文档打开 NOT IMPLEMENTED，绝不静默丢弃）；
+- 同时给 `--open` 与位置参数时 **`--open` 优先**（与顺序无关），被忽略的位置参数**显式报告**；
+- 任何含 `://` 的参数（如 `file://…`）**显式拒绝**且**绝不**当路径使用 ⇒ 未来 desktop entry
+  **必须**用 `%F` 而非 `%U`；
+- 未知 `-flag` 行为不变（仍忽略、不新失败）；不存在的路径仍走**同一**打开漏斗并**显式报错**
+  （`cad_status.error`，如 `drawing path does not exist: …`），**不**静默空成功。
+
+⚠ **构建陷阱（症状级）**：普通 `cargo build --release -p app-linux` **不会**嵌入前端——
+`generate_context!` 会退回 `build.devUrl`（`http://localhost:1420`），产出**无法独立运行**的二进制。
+症状：`[probe] page_load url=http://localhost:1420/`，且持续 `[probe] cad-frame no-session`
+（CAD 会话永不建立）。**必须**用上面的 `--features tauri/custom-protocol`（或 `scripts/collect-evidence.sh`）。
 环境变量（证据/诊断）：`YACR_TEST_DWG`、`YACR_LOCALE`、`YACR_PROBE_EVIDENCE`、
 `YACR_PROBE_LIFECYCLE`、`YACR_PROBE_ONLY`、`YACR_PROBE_NO_GPU`、`YACR_PROBE_OPAQUE`、
 `YACR_PROBE_NO_MAXIMIZE`、`YACR_PROBE_CAD_LOG`。
@@ -159,6 +173,15 @@ origin/scale/extent）。窗口捕获可用 `apps/app-linux/scripts/x11-window-g
 身份由协议日志（`WAYLAND_DEBUG=client` 的 child `wl_surface`/`get_subsurface`/`set_desync`/`set_position`/
 空 `input_region`）+ 适配器遥测证明；**原生视觉**由自身同 UID 的 Mutter `ScreenCast`（无安全策略变更/无安装/
 无 sudo）捕获的合成帧佐证（**有界截图视觉 PASS**，无 golden/精度声明）。X11 窗口截图**不是**原生证据。
+
+**一键自动采集**：`scripts/collect-evidence.sh` 自动完成「构建 → 启动真实 `yacr`（`--open`，非
+`--probe`）→ 截图 → 汇总日志」：X11 用 `apps/app-linux/scripts/x11-window-grab.c` 抓窗口自身 drawable
+（`shot-top`/`shot-cad`），原生 Wayland 用 `scripts/screencast-capture.py`（同 UID Mutter `ScreenCast`）
+抓合成帧（`wayland-frame`），输出 `${YACR_EVIDENCE_ROOT:-/tmp/opencode}/yacr-evidence-<UTC>Z/`
+（`results.tsv` 逐后端记录真实 verdict/退出码/截图是否产出 + `README.md`）。契约测试
+`python3 scripts/test-collect-evidence.py`。该脚本以同 UID 会话运行，**不提权/不 `sudo`/不解锁会话/
+不改 portal 权限/不装包/不起虚拟显示**，无真实显示时非零退出；截图仅本地保存，不代表视觉正确性。
+X11 截图只含应用窗口本身；Wayland 帧为**整屏合成**（`RecordMonitor`），会含桌面上其它窗口。
 
 ## 验证状态与限制（不夸大）
 
