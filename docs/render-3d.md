@@ -111,3 +111,28 @@ HATCH 的检测需要上游提供 3D 边界。渐变 HATCH 仍只绘制边界。
   文件，另有故意错误 shader 的对照测试。仅静态校验，**不编译管线、不执行 draw**。
 - **GPU 提交无法在本环境验证**：没有可用适配器/设备初始化路径，管线创建、深度精度、
   镜像剔除和透明合成的真实行为均未运行验证。不得据此宣称渲染正确。
+
+## 分页预算与每帧活动预算（2026-10-17）
+
+逐条证据见 `docs/validation-frame-pacing-2026-10-17.md`；决策与基线见 `docs/render-optimization-backlog.md`。
+
+- **两个预算**：`Renderer::frame_budget` 是**未 pacing 的上限**（静态默认 8,000,000 顶点 /
+  2,000,000 三角形）；`active_frame_budget()` 是分页规划点**实际使用**的**活动预算**——上限乘上
+  自适应 `scale` 的结果。`max_bytes` **不**随 scale 缩放。
+- **三种 `pacing=` 状态**（`FrameStats::pacing`，逐帧上报）：
+  `active`（渐进渲染 + 有完成信号：活动预算是缩放预算，每帧喂控制器）、
+  `at-ceiling`（非渐进帧：整场景按上限规划，无可 pace）、
+  `disabled-no-completion-signal`（无完成信号，如 wasm 非阻塞 poll：用静态上限，预算与 pacing
+  之前**逐位一致**）。**pick/snap 不 pacing**（用上限）。
+- **控制器**（`crates/cad-render-wgpu/src/pacing.rs`，纯状态机）：输入是每帧实测
+  `cpu_ms + wait_ms`，目标默认 13 ms，±5% 死区，连续 2 次超目标 `×0.75`、连续 8 次低于目标
+  `×1.08`，`scale ∈ [0.05, 4.0]`。**不得**改用 tick 间隔（被 vsync 量化，会形成极限环）。
+- **清屏页图像先预留**：图像只在清屏页绘制（续页 `LoadOp::Load`，避免 alpha 累积）。清屏页现在**先**
+  按活动预算预留**整幅图像记账**（paced 预算装不下全部图像时回落**上限**），几何再填剩余 ⇒ 页切分
+  **不会**把图像丢在续页上。绘制顺序不变（图像仍最后）。
+- **`over_budget` 不再意味着"慢"**：它的字面含义始终是"本帧**计划**越过了**活动**预算"，诊断码仍是
+  `render.frame_over_budget`。`budget_scale` / `budget_target_ms` / `budget_cost_ema_ms` /
+  `budget_verts` / `budget_tris` / `pacing` 字段（追加在 `pulled={}` 之后）负责**分类**：撞上按页
+  顶点/三角形上限（如饱和在 ≈2.0M 三角形）会报超预算，**但该帧可以完全在 60 fps 预算之内**
+  （`debug-default-fonts.dwg`：`over_budget=true` 473/479 帧，`wait_ms > 16.6 ms` 仅 0.4%，
+  每帧 ≈5 ms，**实测**）。被**进度下限**强制而越界的一页带原因 `pacing-floor`。

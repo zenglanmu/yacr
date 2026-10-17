@@ -12,6 +12,60 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 时间驱动分页预算 pacing（N1a，2026-10-17；纯 renderer 改动）
+
+**范围**：`crates/cad-render-wgpu`（新 `src/pacing.rs` + 三个分页规划点接入 + 上报字段）。**未**改宿主协议、
+**未**改 UI、**未**新增诊断码。设计动机与状态：`docs/render-optimization-backlog.md` 的 N1a；逐条证据见
+`docs/validation-frame-pacing-2026-10-17.md`。
+
+- **控制器（实测实现值）**：纯函数 `step(state, sample)` + `apply_scale`（`pacing.rs`，12 个纯测试）。
+  `target_ms=13.0`（默认，可由 `Renderer::set_frame_budget_target_ms` 覆盖）；信号 = 本帧**实测**
+  `cpu_ms + wait_ms`（**不是** tick 间隔——那被 vsync 量化、会振荡；也**不是** `frame_total_us`/`present_us`
+  ——那含预算控制不了的固定 apply/present 成本）；EWMA `0.25*new + 0.75*old`，**首个样本只播种**
+  （第三个被观测帧前不收缩）；死区 `0.95–1.05 × target`；连续 **2** 帧超目标 ⇒ `×0.75`；连续 **8** 帧
+  低于目标 ⇒ `×1.08`；`scale ∈ [0.05, 4.0]`（同时作用于顶点与三角形，保持比例，`max_bytes` 不动）；
+  方向翻转清反向 streak；**接受 0 批次的帧不是观测**。
+- **预算语义**：`Renderer::frame_budget` 是**未 pacing 的上限**；`active_frame_budget()` 是三个分页规划点
+  实际使用的**活动预算**；**pick/snap 不 pacing**（用上限）。三态：`pacing=active`（渐进 + 完成信号）、
+  `pacing=at-ceiling`（非渐进帧按上限规划）、`pacing=disabled-no-completion-signal`（wasm/无信号；预算与
+  静态默认**逐位一致**）。**进度下限**：cursor 批次能装进**上限**时一页至少接受 1 批；被下限强制的一页报
+  超预算、原因 `pacing-floor`；只有单个批次**超出上限**才保留既有的显式错误。
+- **预存缺陷修复（先于本轮存在，本轮修掉）**：图像**只在清屏页**绘制（续页 `LoadOp::Load`，避免 alpha
+  累积），而此前图像只按**剩余**页预算记账 ⇒ 几何在页 1 饱和时被扣下的图像在续页**永不绘制**、
+  "complete" 帧**静默缺图**。现在清屏页**先预留整幅图像记账**（paced 预算装不下全部图像时回落**上限**），
+  几何再填剩余；**绘制顺序不变**（图像最后）。栅栏：`paced_pages_keep_images_in_the_settled_frame`。
+- **上报（追加式）**：`FrameStats` 与 `[probe] actual-render` 在 `pulled={}` **之后**追加 `budget_scale`、
+  `budget_target_ms`、`budget_cost_ema_ms`、`budget_verts`、`budget_tris`、`pacing`。`over_budget` 字面含义
+  **不变**（本帧计划越过**活动**预算），诊断码仍是 `render.frame_over_budget`；新字段只做分类。
+- **真实宿主实测（本机原生 Wayland / Vulkan / Quadro P620 / 驱动 580.178.04 / `scale=1`；同 UID、无
+  root/sudo、无屏录、无虚拟显示；exit 0、无 panic、无 `is invalid`、无残留进程）**：
+  - `complex-test.dwg` **790** 帧，全部 `pacing=active`，`complete=true` 出现在 seq 1/2/3/171/790。
+    逐帧原文（中段 `…` 省略）：
+    `[probe] actual-render seq=200 … cpu_ms=3.367 … wait_ms=5.631 … over_budget=true
+    prog=Some(2447)/Some(166346) complete=false … pulled=active budget_scale=0.262 budget_target_ms=13.00
+    budget_cost_ema_ms=8.94 budget_verts=2099799 budget_tris=524950 pacing=active`。
+    轨迹：**709 ms** 首帧离群把 `budget_scale` 从 **1.000 → 0.750 → 0.562 → 0.422 → 0.100**（seq 4–21），
+    同时 `wait_ms` **21.0 → 2.3 ms**；后段 `wait_ms` **7.7 → 11.3 ms**（seq 746–750）把 EMA 抬到
+    **13.87/14.67**、`scale` **0.336 → 0.252**（seq 751）；稳定下来的一页达到 `complete=true`。
+  - `debug-default-fonts.dwg` **458** 帧，全部 `pacing=active`，`complete=true` **375** / `false` **83**。逐帧原文：
+    `[probe] actual-render seq=200 … cpu_ms=1.102 … wait_ms=2.886 … over_budget=false
+    prog=Some(10548)/Some(10548) complete=true … pulled=active budget_scale=3.567 budget_target_ms=13.00
+    budget_cost_ema_ms=3.97 budget_verts=28535313 budget_tris=7133828 pacing=active`。
+    轨迹：一个 **46 ms** 离群把 `scale` **1.000 → 0.422**，随后慢升路径抬到上夹紧
+    **`budget_scale=4.000` / 32,000,000 verts**（到 seq 240）。
+- **测试（实测）**：`cargo test -p cad-render-wgpu --lib -- --test-threads=1` **167 passed / 3 ignored**；
+  `--test headless_render` **26**（含 6 个新 GPU fence：逐帧可调预算 / pick 不变 / 进度下限 /
+  settled 帧图像完整 / disabled 与静态默认逐位一致 / 场景变更重置代价知识）；`--test accelerated_tier` **23**、
+  `--test pulled_prefix_equivalence` **9**、`--test render_effects` **45**、`--test pick_id` **32**、
+  `--test pick_hidden_flags` **8**；`cargo test -p cad-engine` **100 passed / 8 ignored**。
+- **N1a 的未测**：wasm/浏览器真实运行时（只有 wasm **库**编译通过；`disabled-no-completion-signal` 是在
+  native 上用测试 override 断言的）；Windows/macOS/Android；图像与后续页几何重叠时的**跨页 z-order**
+  （图像只画清屏页；fence 只断言图像完整性）；**视觉/截图判定**（headless 只做逐字节 parity，宿主运行是
+  **从日志读的**）；**任何 GPU 时间**（`gpu_ms=None`，`wait_ms` 仍是阻塞 poll/呈现代理）；
+  **120 Hz / 刷新率自适应**（目标是显式 13 ms 常数，不是由刷新率推导）。
+- **N2（去掉每帧阻塞 poll）本轮决定：延后，不取消**——理由与重开条件见
+  `docs/render-optimization-backlog.md` 的 N2。P0 现状：pacing 现提供**每帧代价信号**，但**仍无 GPU 时间**。
+
 ## 设备 limits 协商 + Flatpak 打包重启（2026-10-17，两项交付）
 
 **范围**：A = renderer 设备 limits 协商与 pulled 分配失败显式化（Rust 源码改动）；B = React/Tauri 宿主的

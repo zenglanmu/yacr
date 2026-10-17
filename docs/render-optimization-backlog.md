@@ -5,7 +5,8 @@
 `docs/adr/0007-entity-as-data-renderer.md`、`docs/adr/0008-sdf-conic-rendering.md`、
 `docs/picking-gpu-id-pass.md`、`docs/validation-render-perf-2026-10-15.md`。本轮**真实宿主实测**
 与**帧成本分布**分别见 `docs/validation-realhost-frame-cost-2026-10-17.md`、
-`docs/validation-render-perf-2026-10-17.md`。
+`docs/validation-render-perf-2026-10-17.md`；**分页预算 pacing（N1a）**的实测见
+`docs/validation-frame-pacing-2026-10-17.md`。
 
 ## 当前基线（2026-10-17，真实宿主**分页**口径）
 
@@ -17,10 +18,16 @@
 | `complex-test.dwg` | 44,591 | **3,027** | 5,454,559 | **1,999,514**（≈2.0M 饱和） | **19.382** | 22.652 | 8.274 | **166,346** |
 | `debug-default-fonts.dwg` | 10,656 | 1,195 | 2,170,905 | 1,999,961（≈2.0M 饱和） | 2.895 | 5.369 | 2.072 | 10,548 |
 
-- **99% 的帧 `over_budget=true` / `complete=false`**（分页/超预算）；`tris` 饱和在 ≈2.0M ⇒ 存在
-  **按页预算截断**，整帧被切成多页呈现。
+- **99% 的帧 `over_budget=true` / `complete=false`**（分页/超预算）。**口径更正（2026-10-17）**：
+  `over_budget=true` 的含义是"本帧**计划**越过了**按页预算**"，**不是**"这一帧慢"。两图 `tris` 都饱和在
+  ≈2.0M（complex 1,999,514 / debug 1,999,961）⇒ 这是**按页预算截断**，整帧被切成多页呈现。
+  **debug 不是时间受限**：其 `over_budget=true` 为 473/479 帧，但 `wait_ms > 16.6 ms` 仅 **0.4%**、
+  每帧 ≈ 2.072 + 2.895 ≈ **5 ms**（**实测**，同一批**pacing 之前**的日志），在 60 fps 预算之内——
+  固定顶点/tri 记账与实测帧成本脱钩（N1a 动机）在 debug 上表现为"**页预算偏小**"（每页早早撞上 2M 三角形
+  上限、帧被切成多页），**而非**"帧超时"。
 - **complex 有 61.3% 的帧仅 `wait_ms` 就超过 60 fps 预算**（debug 0.4%）。**`wait_ms` 是 GPU/呈现
-  等待的代理，不是 GPU 时间**（`gpu_ms=None`，无 `TIMESTAMP_QUERY`）。
+  等待的代理，不是 GPU 时间**（`gpu_ms=None`，无 `TIMESTAMP_QUERY`）。⇒ **两 fixture 只有 complex 是
+  时间受限**（同上，**实测**）。
 - **每帧 CPU 相位（中位，ms；由既有日志列表化，非新运行）**：
   complex `cpu 8.364 = plan 2.590 + uniform 1.123 + encode 1.131 + submit 3.412`（未覆盖 0.109）；
   debug `2.072 = 0.484 + 0.126 + 0.482 + 0.936`（未覆盖 0.044）。
@@ -44,7 +51,8 @@
   **通用 per-run、每帧都走的路径**。
 - **分页在相机变化时重启**（同文）：complex 182 次相机变化，**182/182 把该帧完成度压到 <5%**
   （中位 **4.6%** ≈ 7,716/166,346）；356 帧里**仅 2 帧** `complete=true`。⇒ 运动帧呈现的是
-  **draw-order 前缀页**，**不是**基于视口的集合。debug 变更后完成度中位 **86.3%**。
+  **draw-order 前缀页**，**不是**基于视口的集合。debug 变更后完成度中位 **86.3%**（这是**相机变更后第 1 帧
+  的完成度中位**，**不是**"超预算帧占比"、也**不是**耗时指标；debug 一页基本就能画完）。
 - **`tier` 与 `accelerated` 是两个字段**（`crates/cad-render-wgpu/src/lib.rs:473-481`）：设备档可为
   `accelerated` 而**帧**为 `accelerated=false`；`use_pulled` 要求二者相等
   （`converted_accepted == converted_total`，`crates/cad-render-wgpu/src/renderer_impl.rs:4271-4276`）。
@@ -88,6 +96,10 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   - **未做（NOT RUN）**：**GPU 帧时间本身**。`gpu_ms=None`——无 `TIMESTAMP_QUERY`（本仓默认不向宿主
     设备请求 feature）；`wait_ms` / `residual` 都只是**代理，不是 GPU 时间**。`tests/render_perf.rs:559`
     记录 `gpu_ms` 未测量。所有"GPU 收益"表述（P1 加速档部分、P6/P7）仍是**结构推理，不是证据**。
+  - **N1a 之后的现状（2026-10-17）**：pacing 现**每帧**提供**代价信号**（`budget_cost_ema_ms` /
+    `budget_scale` / `budget_verts` / `budget_tris` / `pacing`，见 N1a），但该信号是
+    **`cpu_ms + wait_ms` 的 EWMA**——**仍不是 GPU 时间**。⇒ P0 的"GPU 时间"半**未因此推进**；
+    `wait_ms` 仍是在飞帧完成的阻塞 poll/呈现**代理**。
 - **GPU 能力探针（本轮真实查询，`crates/cad-render-wgpu/tests/gpu_capabilities.rs`）**：本机
   **app-choice** 适配器**支持** `MULTI_DRAW_INDIRECT_COUNT`、`INDIRECT_FIRST_INSTANCE`、
   `TIMESTAMP_QUERY`（+inside encoders/passes）与 `DownlevelFlags::INDIRECT_EXECUTION`；但**运行时
@@ -292,8 +304,36 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     （`converted_accepted == converted_total`，`crates/cad-render-wgpu/src/renderer_impl.rs:4271-4276`），
     即**必须接受整场景**才启用 pulled ⇒ 生产分页帧一律 `accelerated=false`。N1d = 让 pulled/加速组织
     **只画一个已接受子集**（而非要求整场景被接受）。**N1d 同时是 N5 的前提**。
+- **N1a — 时间驱动自适应页预算：已落地（2026-10-17）**。纯控制器
+  `crates/cad-render-wgpu/src/pacing.rs`（`PacingState`/`Sample`/`PacingMode`/`step`/`apply_scale`，
+  12 个纯测试）。常数（**实测**实现值）：`target_ms = 13.0`（默认，可由
+  `Renderer::set_frame_budget_target_ms` 覆盖）；信号 = 本帧**实测** `cpu_ms + wait_ms`
+  （**不是** tick 间隔——被 vsync 量化、会振荡；**不是** `frame_total_us`/`present_us`——含预算控制不了的
+  固定 apply/present 成本）；EWMA `0.25*new + 0.75*old`，**首个样本只播种**（第三个被观测帧前不收缩）；
+  死区 `0.95–1.05 × target`；连续 **2** 帧超目标 ⇒ `×0.75`，连续 **8** 帧低于目标 ⇒ `×1.08`；
+  `scale ∈ [0.05, 4.0]`（顶点与三角形同缩放、保持比例，`max_bytes` 不动）；方向翻转清反向 streak；
+  **接受 0 批次的帧不是观测**。预算语义：`Renderer::frame_budget` 是**未 pacing 的上限**，
+  `active_frame_budget()` 是三个分页规划点使用的**活动预算**，**pick/snap 不 pacing**。三态：
+  `pacing=active`（渐进 + 完成信号）/ `pacing=at-ceiling`（非渐进）/ `pacing=disabled-no-completion-signal`
+  （wasm/无信号；预算与静态默认**逐位一致**）。**进度下限**：cursor 批次能装进**上限**时一页至少接受 1 批，
+  被下限强制的一页报超预算、原因 `pacing-floor`；只有单个批次**超出上限**才保留既有显式错误。
+  上报为**追加式**（`budget_scale`/`budget_target_ms`/`budget_cost_ema_ms`/`budget_verts`/`budget_tris`/
+  `pacing`，位于 `pulled={}` 之后），`over_budget` 字面含义与诊断码 `render.frame_over_budget` **不变**。
+  **同轮修掉的预存缺陷（先于本轮存在）**：图像只在清屏页绘制，而此前只按**剩余**页预算记账 ⇒ 几何在页 1
+  饱和时被扣下的图像在续页**永不绘制**、"complete" 帧**静默缺图**；现在清屏页**先预留整幅图像记账**
+  （paced 预算装不下全部图像时回落上限），几何再填剩余，**绘制顺序不变**（图像最后）。
+  **真实宿主实测轨迹（本机原生 Wayland / Vulkan / Quadro P620 / 驱动 580.178.04 / `scale=1`，exit 0、
+  无 panic）**：`complex-test.dwg` 790 帧全 `pacing=active`，**709 ms** 首帧离群把 `scale`
+  **1.000 → 0.750 → 0.562 → 0.422 → 0.100**（seq 4–21）而 `wait_ms` **21.0 → 2.3 ms**，后段 `wait_ms`
+  **7.7 → 11.3 ms**（seq 746–750）把 EMA 抬到 **13.87/14.67**、`scale` **0.336 → 0.252**（seq 751），
+  稳定页最终 `complete=true`；`debug-default-fonts.dwg` 458 帧全 `pacing=active`，**46 ms** 离群把 `scale`
+  **1.000 → 0.422**，随后慢升抬到上夹紧 **`budget_scale=4.000` / 32,000,000 verts**（seq 240）。
+  逐条证据、测试矩阵与**未测边界**见 `docs/validation-frame-pacing-2026-10-17.md`、`docs/handoff.md`
+  本轮条目。**未测**：wasm/浏览器真实运行时 disabled 路径、跨页 z-order、视觉/截图判定、GPU 时间、
+  120 Hz/刷新率自适应。
 - **预期收益（诚实）**：**(a)** 时间驱动预算使**每帧预算与实测成本对齐**（收益**未测**，需 P0 的
-  GPU 时间 + 跨 fixture 校准）；**(b)** 纯文档/显式上报，无性能收益；**(c) N1d** 让加速档能在**分页
+  GPU 时间 + 跨 fixture 校准）——**N1a 已把"对齐"落地为活动预算 + 逐帧上报**，但其**性能收益**仍**未测**
+  （无 GPU 时间，且视觉/截图未判读）；**(b)** 纯文档/显式上报，无性能收益；**(c) N1d** 让加速档能在**分页
   帧**上生效——是 N5/P7 的**结构性前提**，其自身收益**未测**。
 - **前置条件/风险**：(a) 改预算策略触及帧卫生（pixel/顺序不变性），须 fence 预算可逐帧调整且不改
   像素；(c) 改 `use_pulled` 判据须保证 **pulled 子集页与通用页逐像素一致**；(b) **不得**引入视口
@@ -311,11 +351,23 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **预期收益（估算，未测）**：流水化（CPU 编码 n+1 与 GPU 执行 n 重叠）后帧时间 ≈
   `max(cpu, wait)` ≈ `max(8.3, 19.4)` ≈ **19.4 ms** ⇒ **估算 ≈ -30% 帧时间，且零 GPU 工作改动**。
   **这是估算，不是测量。**
+- **本轮决定（2026-10-17）：延后（deferred），不是取消**。理由（写下来供重开时对照）：
+  - **(a) 今天没有替代信号**：每帧末尾的阻塞 `Wait` poll（`renderer_impl.rs` 的 `device_scope_outcome`）
+    **目前是唯一的 GPU 侧时间信号**，也是 **pacing 反馈环的输入**（`wait_ms`）；拆掉它等于同时拆掉
+    pacing 的观测源（除非先有 P0 的 GPU 时间）。
+  - **(b) 流水化本身到不了 60 fps**：它把 `cpu + wait` 变成 ≈ `max(cpu, wait)`——complex
+    ≈ **19.4 ms** vs 今天 **27.75 ms**（**估算，未测**）——仍高于 16.7 ms，**单靠它无法达标**。
+  - **(c) 打开的正确性面很大**：device-lost/`FrameError` 的 submission-index 记账、
+    `presented_revision`/`rev_resets`/`ready_none_clears` 这些**以在飞帧为键**的 admission、
+    错误作用域的顺序、`stages_us` 的归因、pick 读回的排序——都要随在飞帧重做。
+  - **(d) debug 已在预算内**（每帧 ≈5 ms，**实测**），流水化对它**买不到任何东西**。
+  - **重开条件（满足其一即重开评估）**：① P0 的 GPU 时间显示**paced 帧**上 `exec ≪ wait_ms`；
+    ② paced 帧持续超目标且 `cpu_ms ≥ 帧时间 ~40%`；③ **120 Hz（8.3 ms）成为产品需求**。
 - **前置条件/风险**：须**保留 device-lost / `FrameError` 的分类**（不得因异步化把错误吞成空成功）；
   需**有界队列深度**（内存上界）；需与 **pick readback** 交互（读回与在飞帧的同步）。
 - **需要的决策**：队列深度与在飞帧数上界（内存权衡）。
 - **相关契约/栅栏**：device-lost/`FrameError` 分类保持；有界队列深度；pick-readback 交互 fence。
-- **优先级**：N2（高；紧随 N1/P1）。
+- **优先级**：N2（**已延后**；重开条件见上）。
 
 ### N3 — 显存容量（4 GB 卡）：显式建模取代 panic
 
