@@ -167,6 +167,21 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
 日期、许可与 SHA-256；未授权或来源不明的用户/厂商数据仍不得提交。每轮用新输出目录，
 保留失败/超时记录，不用旧证据冒充本轮通过。
 
+**自动证据采集（一键：构建 + 启动 + 截图 + 汇总）**：`scripts/collect-evidence.sh` 串起
+「前端构建 → `cargo build --release` 宿主 → 按后端启动真实 `yacr`（`--open` + `--fonts-dir`，
+**不用** `--probe` 假打开）→ 截图 → 汇总日志」。X11 后端用 `apps/app-linux/scripts/x11-window-grab.c`
+抓窗口**自身 drawable**（`shot-top`/`shot-cad`）；原生 Wayland 后端用 `scripts/screencast-capture.py`
+经同 UID `org.gnome.Mutter.ScreenCast` 抓合成帧（`wayland-frame`）。输出落
+`${YACR_EVIDENCE_ROOT:-/tmp/opencode}/yacr-evidence-<UTC>Z/`：`results.tsv` 逐后端记录
+`NATURAL_EXIT`/`PLANNED_TIMEOUT`/`SKIPPED`/`NO_DISPLAY`、真实退出码、截图 `captured`/`missing`；
+`README.md` 附授权边界。契约测试 `python3 scripts/test-collect-evidence.py`。
+**授权边界**：以当前会话同 UID 用户运行，**不提权、不以 root 运行、不 `sudo`、不解锁/修改会话、不改
+portal/ScreenCast 权限、不装包、不起虚拟/无头显示**；无真实显示时**显式非零退出**而非假装成功；
+截图仅本地保存、不上传。X11 自窗口抓取不需额外授权；Wayland 走用户**自身会话内**的 ScreenCast
+（有录制指示、不抑制），**不是**绕过授权。X11 截图只含应用窗口本身；**Wayland 帧为整屏合成**（同 UID
+`RecordMonitor`），**会包含桌面上其它窗口**——仅供本地读判、不上传。截图只是窗口/合成像素，
+**不等于**视觉正确性、精度或 vendor 结论。
+
 ## 交接点
 
 用 `rg 'pending\(' crates apps` 查找显式占位（文件路径与标识对应实施单元）。替换 `pending`
