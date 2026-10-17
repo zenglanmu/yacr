@@ -166,6 +166,7 @@ impl Renderer {
             progressive_frame: None,
             draw_plan: None,
             batch_facts: plan::BatchFacts::default(),
+            encode_emit_mask: plan::EncodeEmitMask::default(),
             device_lost: false,
             last_device_lost: None,
             poll_timeout: std::time::Duration::from_secs(1),
@@ -4536,6 +4537,10 @@ impl Renderer {
                 built
             }
         };
+        // The frame's encode-participation set, from the batch facts and the cull
+        // just built. Derived from the same facts/restart invalidation, not a
+        // second truth.
+        self.encode_emit_mask.rebuild(&self.batch_facts, &cull);
         let paced_scale = match pacing_mode {
             pacing::PacingMode::Active => self.pacing.scale,
             pacing::PacingMode::DisabledNoCompletionSignal | pacing::PacingMode::AtCeiling => 1.0,
@@ -4797,11 +4802,16 @@ impl Renderer {
             .unwrap_or(world_per_px_bits);
         let mut legacy_slots = 0usize;
         for &index in &budget_plan.accepted {
-            let batch = &self.batches[index];
-            if !batch.instanced.is_empty() || !batch.mesh_runs.is_empty() {
-                self.frame_slots[index] = u32::MAX;
+            // Only a batch that owns **no runs** needs a per-batch uniform slot:
+            // the legacy `draw_batch` path is the only reader of `frame_slots`, and
+            // it is taken only for a run-free batch. A batch with runs draws through
+            // its runs (stream/chunk/arc slots) and a fully-culled one emits
+            // nothing at all, so both are skipped. `class` is a cache-resident byte
+            // instead of the ~200-byte `GpuBatch` the old scan read per batch.
+            if self.batch_facts.class[index] != 0 {
                 continue;
             }
+            let batch = &self.batches[index];
             let (m, [r, g, b], alpha) = (
                 projection.batch_matrix(batch.origin),
                 renderer_color(batch.color),
@@ -4832,63 +4842,73 @@ impl Renderer {
             self.image_slots[i] = slot as u32;
         }
 
-        // Instanced line streams: one uniform slot per stream, carrying the
-        // stream's fixed-point origin through the same `f64` camera subtraction
-        // as a legacy batch (see `FrameProjection::batch_matrix_f64`). Every run
-        // of a stream shares it, so streams — not batches — bound this cost.
-        // Skipped on the accelerated path, which writes the equivalent per-chunk
-        // translation table into its storage buffer instead.
-        let stream_base = legacy_slots + draw_images.len();
-        let stream_slots: Vec<u32> = (0..stream_slot_count)
-            .map(|s| (stream_base + s) as u32)
-            .collect();
-        for (s, &slot) in stream_slots.iter().enumerate() {
+        // Instanced line streams: one uniform slot per **visible** stream,
+        // carrying the stream's fixed-point origin through the same `f64` camera
+        // subtraction as a legacy batch (see `FrameProjection::batch_matrix_f64`).
+        // Every run of a stream shares it, so streams — not batches — bound this
+        // cost. A culled stream's runs are never drawn, so its slot is skipped and
+        // its `stream_slots` entry stays `u32::MAX` (never bound by a draw).
+        // Skipped entirely on the accelerated path, which writes the equivalent
+        // per-chunk translation table into its storage buffer instead.
+        //
+        // Each surviving entry's 96-byte uniform is byte-identical to the
+        // pre-skip layout; only the (purely internal) slot index changes, and the
+        // `flush` range shrinks to the compacted count.
+        let mut next_slot = legacy_slots + draw_images.len();
+        let mut stream_slots: Vec<u32> = vec![u32::MAX; stream_slot_count];
+        for (s, slot) in stream_slots.iter_mut().enumerate() {
+            if !cull.stream_visible(s) {
+                continue;
+            }
+            *slot = next_slot as u32;
             let matrix = projection.batch_matrix_f64(self.instance_streams[s].origin);
             // The instanced shader ignores the uniform tint (colour and the pick
             // key are per-instance) but the layout keeps them; write opaque white
             // and a zero key, and the SDF ramp width in `key_flags.z`.
             let uniform = uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, line_wpp_bits, 0]);
-            self.uniforms.write_slot(slot as usize, &uniform);
+            self.uniforms.write_slot(next_slot, &uniform);
+            next_slot += 1;
         }
 
-        // Merged mesh chunks: one uniform slot per chunk, carrying the chunk's
-        // fixed-point origin through the same `f64` camera subtraction. The tint
-        // is opaque white because the per-batch colour is baked into each vertex.
-        let chunk_base = stream_base + stream_slot_count;
-        let chunk_slots: Vec<u32> = (0..chunk_slot_count)
-            .map(|c| (chunk_base + c) as u32)
-            .collect();
-        for (c, &slot) in chunk_slots.iter().enumerate() {
+        // Merged mesh chunks: one uniform slot per **visible** chunk, carrying the
+        // chunk's fixed-point origin through the same `f64` camera subtraction. The
+        // tint is opaque white because the per-batch colour is baked into each
+        // vertex. A culled chunk's runs are never drawn, so its slot is skipped.
+        let mut chunk_slots: Vec<u32> = vec![u32::MAX; chunk_slot_count];
+        for (c, slot) in chunk_slots.iter_mut().enumerate() {
+            if !cull.mesh_visible(c) {
+                continue;
+            }
+            *slot = next_slot as u32;
             let matrix = projection.batch_matrix_f64(self.mesh_chunks[c].origin);
             let uniform = uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, 0, 0]);
-            self.uniforms.write_slot(slot as usize, &uniform);
+            self.uniforms.write_slot(next_slot, &uniform);
+            next_slot += 1;
         }
 
-        // SDF conic streams: one uniform slot per stream, carrying the stream's
-        // fixed-point origin through the same `f64` camera subtraction as a legacy
-        // batch. The tint is opaque white and the key 0: colour and the pick key
-        // are per-instance.
-        let arc_base_slot = chunk_base + chunk_slot_count;
-        let arc_slots: Vec<u32> = (0..arc_slot_count)
-            .map(|a| (arc_base_slot + a) as u32)
-            .collect();
+        // SDF conic streams: one uniform slot per **visible** stream, carrying the
+        // stream's fixed-point origin through the same `f64` camera subtraction as a
+        // legacy batch. The tint is opaque white and the key 0: colour and the pick
+        // key are per-instance. A culled conic stream's runs are never drawn, so its
+        // slot is skipped.
+        let mut arc_slots: Vec<u32> = vec![u32::MAX; arc_slot_count];
         // World units per pixel travels in the otherwise-unused `key_flags.z` word
         // (bitcast f32) so the SDF conic vertex stage can floor its quad margin
         // at ~2 px for small on-screen circles (see `shaders/arc.wgsl`).
-        for (a, &slot) in arc_slots.iter().enumerate() {
+        for (a, slot) in arc_slots.iter_mut().enumerate() {
+            if !cull.arc_visible(a) {
+                continue;
+            }
+            *slot = next_slot as u32;
             let matrix = projection.batch_matrix_f64(self.arc_streams[a].origin);
             let uniform =
                 uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, world_per_px_bits, 0]);
-            self.uniforms.write_slot(slot as usize, &uniform);
+            self.uniforms.write_slot(next_slot, &uniform);
+            next_slot += 1;
         }
-
         // One `Queue::write_buffer` per page (vs. one per batch), reported as
         // `FrameStats::uniform_writes`. Only the compacted slot count is flushed.
-        let total_slots = legacy_slots
-            + draw_images.len()
-            + stream_slot_count
-            + chunk_slot_count
-            + arc_slot_count;
+        let total_slots = next_slot;
         let uniform_writes = self.uniforms.flush(&queue, total_slots);
         let uniform_ms = uniform_started.elapsed().as_secs_f64() * 1000.0;
 
@@ -5034,21 +5054,22 @@ impl Renderer {
             // each (see `use_pulled` above); the legacy per-batch branch below
             // still runs for the residual unconverted opaque batches.
             if use_pulled {
+                // `use_pulled` requires `!cull.any_culled()`, so every batch keeps
+                // its runs and there is nothing to skip; only the reporting
+                // counters remain, and they read the cache-resident class byte
+                // instead of the ~200-byte `GpuBatch`.
                 for &i in &opaque {
-                    let batch = &self.batches[i];
-                    let has_line = !batch.instanced.is_empty();
-                    let has_mesh = !batch.mesh_runs.is_empty();
-                    let has_arc = !batch.arc_runs.is_empty();
-                    if has_line {
+                    let class = self.batch_facts.class[i];
+                    if class & plan::CLASS_INSTANCED != 0 {
                         instanced_batches += 1;
                     }
-                    if has_mesh {
+                    if class & plan::CLASS_MESH != 0 {
                         merged_mesh_batches += 1;
                     }
-                    if has_arc {
+                    if class & plan::CLASS_ARC != 0 {
                         arc_batches += 1;
                     }
-                    if has_line || has_mesh || has_arc {
+                    if class != 0 {
                         converted_batches += 1;
                     }
                 }
@@ -5189,6 +5210,29 @@ impl Renderer {
                 let mut pending_mesh: Option<(usize, u32, u32)> = None;
                 let mut pending_arc: Option<(usize, u32, u32)> = None;
                 for &i in &opaque {
+                    // Skip a batch that provably emits nothing this frame: it owns
+                    // runs, none of which survives the cull, so its per-class branch
+                    // below is a pure no-op (no draw, no pending-run flush). The
+                    // reporting counters still fold it in — they count accepted
+                    // converted batches, not emitted draws. `class` is one
+                    // cache-resident byte, so the skipped entries cost almost
+                    // nothing (the old scan read the ~200-byte `GpuBatch`).
+                    let class = self.batch_facts.class[i];
+                    if class != 0 {
+                        converted_batches += 1;
+                        if class & plan::CLASS_MESH != 0 {
+                            merged_mesh_batches += 1;
+                        }
+                        if class & plan::CLASS_INSTANCED != 0 {
+                            instanced_batches += 1;
+                        }
+                        if class & plan::CLASS_ARC != 0 {
+                            arc_batches += 1;
+                        }
+                        if !self.encode_emit_mask.participates(i) {
+                            continue;
+                        }
+                    }
                     let batch = &self.batches[i];
                     let has_mesh = !batch.mesh_runs.is_empty();
                     let has_line = !batch.instanced.is_empty();
@@ -5248,9 +5292,7 @@ impl Renderer {
                         );
                         continue;
                     }
-                    converted_batches += 1;
                     if has_mesh {
-                        merged_mesh_batches += 1;
                         // A batch over the vertex cap contributes several runs (one
                         // per piece); a normal batch one.
                         for run in &batch.mesh_runs {
@@ -5321,7 +5363,6 @@ impl Renderer {
                         // Instanced batch: draw each of its runs in order. A batch
                         // over the stream cap contributes several runs; a normal
                         // batch one.
-                        instanced_batches += 1;
                         for run in &batch.instanced {
                             // Culled chunk: skip this run entirely. The next
                             // visible run's offset is not contiguous with the
@@ -5398,7 +5439,6 @@ impl Renderer {
                         }
                     }
                     if has_arc {
-                        arc_batches += 1;
                         // SDF conic runs coalesce only with adjacent conic runs in
                         // the same stream. A non-contiguous run flushes the pending
                         // conic run, then any pending mesh/line run, so plan order is

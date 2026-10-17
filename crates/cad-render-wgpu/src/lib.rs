@@ -1566,6 +1566,11 @@ pub struct Renderer {
     /// Rebuilt in the **same** block that rebuilds `draw_plan`, so it shares that
     /// single invalidation (`draw_plan = None`) and is never a second truth.
     batch_facts: plan::BatchFacts,
+    /// This frame's set of batches that participate in the encode pass (own no
+    /// runs, or own a run that survives the cull). Rebuilt per frame from
+    /// `batch_facts` and the frame cull; used to skip provably-non-emitting
+    /// accepted entries in the uniform and encode loops.
+    encode_emit_mask: plan::EncodeEmitMask,
     /// Set once a device-loss is observed, until the host rebuilds.
     device_lost: bool,
     /// Detail string carried by the last device-loss observation.

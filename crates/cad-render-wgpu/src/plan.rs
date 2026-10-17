@@ -924,7 +924,29 @@ pub(crate) struct BatchFacts {
     /// reads this instead of `batches[batch]` so the per-restart byte prefix scan
     /// does not DRAM-miss on the large resident `GpuBatch` struct.
     pub(crate) upload_bytes: Vec<usize>,
+    /// Compact per-batch run class, indexed by batch index: a bitfield of
+    /// [`CLASS_INSTANCED`]/[`CLASS_MESH`]/[`CLASS_ARC`]. `0` means the batch owns
+    /// **no runs** and therefore takes the legacy per-batch encode branch (it
+    /// flushes the pending runs and draws its legacy buffers), so it always
+    /// participates and always needs a per-batch uniform slot.
+    ///
+    /// Read instead of `batches[i]` in the uniform and encode loops: the class is
+    /// one byte per batch (cache-resident) while the resident `GpuBatch` is ~200
+    /// bytes (a DRAM miss when the frame order is not the upload order).
+    pub(crate) class: Vec<u8>,
+    /// Batch indices whose [`BatchFacts::class`] is `0` (they own no runs). These
+    /// are the only batches that need a per-batch uniform slot and the only
+    /// run-free participants in the encode loop; kept as a list so a frame can
+    /// enumerate them without scanning every resident batch.
+    pub(crate) legacy_batches: Vec<u32>,
 }
+
+/// Batch owns instanced line runs.
+pub(crate) const CLASS_INSTANCED: u8 = 1;
+/// Batch owns merged mesh runs.
+pub(crate) const CLASS_MESH: u8 = 2;
+/// Batch owns SDF conic runs.
+pub(crate) const CLASS_ARC: u8 = 4;
 
 impl BatchFacts {
     /// Derive the batch-set facts from the resident batches. O(total runs); run
@@ -959,13 +981,30 @@ impl BatchFacts {
             has_mesh_class: false,
             converted_total: 0,
             upload_bytes: Vec::new(),
+            class: Vec::new(),
+            legacy_batches: Vec::new(),
         };
         facts.upload_bytes = batches
             .iter()
             .map(|batch| batch.upload_size_bytes())
             .collect();
+        facts.class = Vec::with_capacity(batches.len());
         for (i, batch) in batches.iter().enumerate() {
             let batch_index = i as u32;
+            let mut class = 0u8;
+            if !batch.instanced.is_empty() {
+                class |= CLASS_INSTANCED;
+            }
+            if !batch.mesh_runs.is_empty() {
+                class |= CLASS_MESH;
+            }
+            if !batch.arc_runs.is_empty() {
+                class |= CLASS_ARC;
+            }
+            facts.class.push(class);
+            if class == 0 {
+                facts.legacy_batches.push(batch_index);
+            }
             for run in &batch.instanced {
                 facts.chunk_batches[0][run.stream as usize].push(batch_index);
             }
@@ -991,6 +1030,92 @@ impl BatchFacts {
             }
         }
         facts
+    }
+}
+
+/// The per-frame set of batches that participate in the encode pass.
+///
+/// A batch participates iff it owns **no runs** (it takes the legacy branch, which
+/// flushes the pending coalesced runs and draws its legacy buffers) or at least
+/// one of its runs survives this frame's cull. A batch with runs whose runs are
+/// **all** culled is a pure no-op in the encode loop: its per-class branch only
+/// bumps the reporting counters, issues no draw and touches no pending run, so
+/// skipping it cannot change the emitted work.
+///
+/// This is exactly [`batch_has_visible_work`]. That predicate is the **right** one
+/// here (unlike the segmented planner's gap logic, where a fully-culled converted
+/// batch with legacy quads is still charged).
+pub(crate) struct EncodeEmitMask {
+    /// The cull removed nothing, so every batch keeps its runs and participates.
+    /// The bitset stays empty and [`EncodeEmitMask::participates`] returns true.
+    all: bool,
+    bits: Vec<u64>,
+}
+
+impl Default for EncodeEmitMask {
+    fn default() -> Self {
+        // A never-rebuilt mask must not skip anything (and must not index an empty
+        // bitset), so it starts in the `all` state.
+        EncodeEmitMask {
+            all: true,
+            bits: Vec::new(),
+        }
+    }
+}
+
+fn set_bit(bits: &mut [u64], index: u32) {
+    bits[index as usize / 64] |= 1u64 << (index % 64);
+}
+
+impl EncodeEmitMask {
+    /// Rebuild the mask for this frame's `cull`, reusing `self.bits`.
+    pub(crate) fn rebuild(&mut self, facts: &BatchFacts, cull: &ChunkCull) {
+        if !cull.any_culled() {
+            // Nothing was removed, so every run survives and every batch
+            // participates: skip building the mask entirely.
+            self.all = true;
+            self.bits.clear();
+            return;
+        }
+        self.all = false;
+        self.bits.clear();
+        self.bits.resize(facts.class.len().div_ceil(64), 0);
+        // Run-free batches take the legacy branch; `always_active` covers the
+        // cull-independent charge cases (legacy line quads, legacy mesh) so a batch
+        // with `line_quad_count > 0` is never skipped even in the synthetic case
+        // where it also owns runs. Both are supersets of "takes the legacy branch".
+        for &b in &facts.legacy_batches {
+            set_bit(&mut self.bits, b);
+        }
+        for &b in &facts.always_active {
+            set_bit(&mut self.bits, b);
+        }
+        for c in 0..facts.chunk_batches[0].len() {
+            if cull.stream_visible(c) {
+                for &b in &facts.chunk_batches[0][c] {
+                    set_bit(&mut self.bits, b);
+                }
+            }
+        }
+        for c in 0..facts.chunk_batches[1].len() {
+            if cull.mesh_visible(c) {
+                for &b in &facts.chunk_batches[1][c] {
+                    set_bit(&mut self.bits, b);
+                }
+            }
+        }
+        for c in 0..facts.chunk_batches[2].len() {
+            if cull.arc_visible(c) {
+                for &b in &facts.chunk_batches[2][c] {
+                    set_bit(&mut self.bits, b);
+                }
+            }
+        }
+    }
+
+    /// Whether batch `index` participates in the encode pass this frame.
+    pub(crate) fn participates(&self, index: usize) -> bool {
+        self.all || (self.bits[index / 64] >> (index % 64)) & 1 == 1
     }
 }
 
@@ -5513,6 +5638,214 @@ mod page_plan_tests {
                 reference_state.cost_ema_ms, segmented_state.cost_ema_ms,
                 "case {case}"
             );
+        }
+    }
+
+    /// The encode loop's per-batch effect under `cull`, with no skipping: a
+    /// run-free batch takes the legacy branch (which flushes the pending coalesced
+    /// runs, and usually draws its legacy buffers), and a batch with runs issues a
+    /// draw for each run that survives the cull. A batch whose runs are all culled
+    /// and which owns runs is a pure no-op.
+    fn encode_reference_emits(batch: &GpuBatch, cull: &ChunkCull) -> bool {
+        let has_mesh = !batch.mesh_runs.is_empty();
+        let has_line = !batch.instanced.is_empty();
+        let has_arc = !batch.arc_runs.is_empty();
+        if !has_mesh && !has_line && !has_arc {
+            return true;
+        }
+        batch
+            .mesh_runs
+            .iter()
+            .any(|run| cull.mesh_visible(run.chunk as usize))
+            || batch
+                .instanced
+                .iter()
+                .any(|run| cull.stream_visible(run.stream as usize))
+            || batch
+                .arc_runs
+                .iter()
+                .any(|run| cull.arc_visible(run.stream as usize))
+    }
+
+    /// The encode-skip predicate is a **superset-safe** filter: an entry is skipped
+    /// only when today's encode loop would do nothing for it (no draw, no
+    /// pending-run flush). Compares the mask against a reference walk that never
+    /// skips and asserts the emitted-entry set and the reporting counters are
+    /// identical.
+    #[test]
+    fn encode_skip_is_superset_safe_and_preserves_counters() {
+        let mut rng = Rng::new(0xE0C0DE);
+        for case in 0..4000 {
+            let streams = 1 + rng.below(4);
+            let chunks = 1 + rng.below(4);
+            let n = 1 + rng.below(40);
+            let batches: Vec<GpuBatch> = (0..n)
+                .map(|_| random_batch(&mut rng, streams, chunks))
+                .collect();
+            // A cull mask that removes at least one chunk; otherwise the mask is
+            // the trivial `all` and nothing is ever skipped.
+            let mut instance: Vec<bool> = (0..streams).map(|_| rng.below(4) != 0).collect();
+            let mesh: Vec<bool> = (0..chunks).map(|_| rng.below(4) != 0).collect();
+            let arc: Vec<bool> = (0..streams).map(|_| rng.below(4) != 0).collect();
+            instance[0] = false;
+            let cull = ChunkCull::from_visibility(instance, mesh, arc);
+            assert!(cull.any_culled());
+
+            let facts = BatchFacts::build(&batches);
+            let mut mask = EncodeEmitMask::default();
+            mask.rebuild(&facts, &cull);
+
+            let mut emitted_reference = Vec::new();
+            let mut emitted_skipped = Vec::new();
+            let mut counters_reference = [0usize; 4];
+            let mut counters_skipped = [0usize; 4];
+            for (i, batch) in batches.iter().enumerate() {
+                let emits = encode_reference_emits(batch, &cull);
+                if emits {
+                    emitted_reference.push(i);
+                }
+                let participates = mask.participates(i);
+                if !participates {
+                    assert!(
+                        !emits,
+                        "case {case}: batch {i} skipped but the reference emits"
+                    );
+                }
+                if participates && emits {
+                    emitted_skipped.push(i);
+                }
+                // The reporting counters count accepted converted batches, not
+                // emitted draws; the class byte must reproduce the batch-derived
+                // counts exactly.
+                let class = facts.class[i];
+                if class != 0 {
+                    counters_skipped[0] += 1;
+                    if class & CLASS_MESH != 0 {
+                        counters_skipped[1] += 1;
+                    }
+                    if class & CLASS_INSTANCED != 0 {
+                        counters_skipped[2] += 1;
+                    }
+                    if class & CLASS_ARC != 0 {
+                        counters_skipped[3] += 1;
+                    }
+                }
+                if !batch.instanced.is_empty()
+                    || !batch.mesh_runs.is_empty()
+                    || !batch.arc_runs.is_empty()
+                {
+                    counters_reference[0] += 1;
+                    if !batch.mesh_runs.is_empty() {
+                        counters_reference[1] += 1;
+                    }
+                    if !batch.instanced.is_empty() {
+                        counters_reference[2] += 1;
+                    }
+                    if !batch.arc_runs.is_empty() {
+                        counters_reference[3] += 1;
+                    }
+                }
+            }
+            assert_eq!(
+                emitted_skipped, emitted_reference,
+                "case {case}: emitted-entry set"
+            );
+            assert_eq!(
+                counters_skipped, counters_reference,
+                "case {case}: counters"
+            );
+        }
+    }
+
+    /// Regression for the predicate: a fully-culled batch with legacy
+    /// `line_quad_count > 0` is never skipped, even though it also owns runs.
+    #[test]
+    fn fully_culled_batch_with_legacy_quads_is_still_processed() {
+        let batches = vec![gpu_batch(
+            RenderTopology::Lines,
+            0,
+            0,
+            1,
+            vec![instance_run(0, 4)],
+            Vec::new(),
+            Vec::new(),
+            8,
+        )];
+        let cull = ChunkCull::from_visibility(vec![false], Vec::new(), Vec::new());
+        let facts = BatchFacts::build(&batches);
+        let mut mask = EncodeEmitMask::default();
+        mask.rebuild(&facts, &cull);
+        assert!(facts.always_active.contains(&0));
+        assert!(
+            mask.participates(0),
+            "a fully-culled batch with legacy line quads must not be skipped"
+        );
+    }
+
+    /// The uniform bytes written for every entry that still gets a slot are
+    /// bit-identical with and without the skip: the skip only drops entries whose
+    /// slot is never read (a batch with runs owns no per-batch uniform, and a
+    /// fully-culled one draws nothing). Models the old (no-skip) slot set and the
+    /// new one over randomized batches.
+    #[test]
+    fn skipped_uniform_slots_leave_surviving_bytes_bit_identical() {
+        let projection = FrameProjection::Ortho {
+            sx: 0.03125,
+            sy: 0.03125,
+            center: [0.0, 0.0, 0.0],
+            z_plane: 0.0,
+            world_per_px: 0.0,
+        };
+        let line_wpp_bits = (projection.world_per_px() as f32).to_bits();
+        let pack = |batch: &GpuBatch| {
+            let (m, [r, g, b], alpha) = (
+                projection.batch_matrix(batch.origin),
+                renderer_color(batch.color),
+                clamp_alpha(batch.alpha),
+            );
+            uniform_bytes(
+                &m,
+                [r, g, b, alpha],
+                [batch.pick_key, batch.instance_flags(), line_wpp_bits, 0],
+            )
+        };
+
+        let mut rng = Rng::new(0x5107);
+        for case in 0..2000 {
+            let n = 1 + rng.below(30);
+            let batches: Vec<GpuBatch> = (0..n).map(|_| random_batch(&mut rng, 3, 3)).collect();
+            let facts = BatchFacts::build(&batches);
+            let mut reference: Vec<(usize, [u8; 96])> = Vec::new();
+            let mut skipped: Vec<(usize, [u8; 96])> = Vec::new();
+            for (i, batch) in batches.iter().enumerate() {
+                // Old (no-skip) slot condition: no instanced and no mesh runs.
+                if batch.instanced.is_empty() && batch.mesh_runs.is_empty() {
+                    reference.push((i, pack(batch)));
+                }
+                // New (skip) condition: owns no runs at all.
+                if facts.class[i] == 0 {
+                    skipped.push((i, pack(batch)));
+                }
+            }
+            // Every entry that still gets a slot has identical bytes.
+            for (index, bytes) in &skipped {
+                let reference_bytes = reference
+                    .iter()
+                    .find(|(j, _)| j == index)
+                    .map(|(_, b)| b)
+                    .expect("a run-free batch is slotted by both");
+                assert_eq!(bytes, reference_bytes, "case {case}: batch {index} bytes");
+            }
+            // The dropped entries are exactly the arc-only batches (which never
+            // read `frame_slots`).
+            for (index, _) in &reference {
+                if facts.class[*index] != 0 {
+                    assert_eq!(
+                        facts.class[*index], CLASS_ARC,
+                        "case {case}: only arc-only batches may be dropped"
+                    );
+                }
+            }
         }
     }
 }
