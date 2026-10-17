@@ -43,32 +43,18 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 报告中出图 smoke、导航命令+像素变化是自动检查，`visualAcceptance` 始终等待独立人工审查，
 软件 GPU 成功不能推广为窗口系统、真实 GPU 或 DWG vendor 兼容。
 
-## 发布包（Flatpak：GUI + CLI）
+## 发布包（Flatpak：历史与当前指向）
 
-`scripts/package-linux-release.sh` 产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak`
-（单文件 Flatpak bundle，app-id `dev.yacr.app`；及 `.sha256`）。它只打包**预构建**的 release
-二进制，沙箱内不编译：脚本先 `cargo build --release --locked`，把 `bin/yacr-linux`、
-`bin/cad-cli-tools` 与 `fonts/` 落到 `target/flatpak/payload`，再用
-`packaging/flatpak/dev.yacr.app.yml` 运行 `flatpak-builder`。
-
-- 应用安装在 `/app`：`bin/yacr-linux`、`bin/cad-cli-tools`、`fonts/`（二进制同级，CLI 与 GUI
-  都自动加载）、`share/{applications,metainfo,icons}` 下的桌面项/AppStream 元数据/图标。
-- 运行时库由 `org.freedesktop.Platform//26.08` 提供（glibc、fontconfig/freetype、GL/Vulkan
-  加载器、窗口库），**不**打包宿主共享库；`runtime-version 26.08` 的 glibc 2.44 高于受支持
-  构建主机的 glibc，故宿主构建的二进制可在沙箱内加载。
-- 打包时脚本会：构建两个 release 二进制；`ldd` 解析无缺失；用 `bin/yacr-linux --headless`
-  （缺 `--output` 的既定解析错误）确认动态加载成功；`flatpak-builder` 构建并导出；最终
-  `flatpak build-bundle` 产出单文件。任一项失败即中止，不产出包。
-- `YACR_FLATPAK_SMOKE=1` 追加：在构建沙箱内 `flatpak-builder --run … cad-cli-tools --help`，
-  证明 bundle 能真正启动。
-- `YACR_TEST_DWG=<dwg>` 追加：打包前用暂存 CLI 出图并校验 PNG 非空（宿主侧）。
-- `WITH_FONTS=1`（默认）组装全量字体（需网络）；`WITH_FONTS=0` 离线仅带已提交字体；
-  `FONTS_DIR=<目录>`（须含 `fonts.json`）直接用已备好的字体目录，跳过下载（宿主先下载、再交给
-  flatpak-builder，打包步骤不联网）。
-- 限制：glibc/内核、窗口系统、Vulkan 驱动、`xdg-desktop-portal`（桌面打开对话框）与
-  `fc-match`（系统默认回退）仍由运行时/宿主提供；bundle **未签名**；沙箱内 GPU 走
-  `--device=dri` + 运行时 GL 扩展。开发环境已实测构建、安装、运行与 CLI 沙箱渲染，见
-  `docs/flatpak.md`、`docs/validation.md`。
+> **本节原描述的是 Slint 时代的当前分发路径，已过时（2026-10-16 退役）**。旧流水线把 Slint 宿主
+> `yacr-linux` + `cad-cli-tools` 打进 app-id `dev.yacr.app`，运行时为 `org.freedesktop.Platform//26.08`，
+> 那次实测产物是 `yacr-0.1.1-linux-x86_64.flatpak`（**15,368,080 B**，**历史**，非当前）。
+> `scripts/package-linux-release.sh` 与 `packaging/flatpak/**` 曾随 Slint 删除。
+>
+> **当前（2026-10-17）**：该打包流水线已为 **React + Tauri** 宿主（`apps/app-linux`，bin `yacr`）
+> **重新启用**，manifest 改用 `org.gnome.Platform//51`，bundle 内只有 GUI 宿主 + 字体（**不含** CLI），
+> 产出为**本地** `target/release/dist/yacr-<version>-linux-<arch>.flatpak`。**未发布 Flathub**，CI 的
+> `linux-release` job 仍硬禁用。当前 manifest、前置条件、构建/运行命令与实测结果见
+> **`docs/flatpak.md`** 与 **`docs/validation-flatpak-linux-2026-10-17.md`**；本节不再重复。
 
 ## 已接线范围与限制
 
@@ -93,10 +79,10 @@ Slint 属性并触发 `request_redraw`，空闲视图以 ~20fps 重绘、单核 
 - 未保存批注时打开/关闭被阻止，无隐式 discard。尚无保存/恢复/丢弃决策对话框及恢复缓存。
 - Trim 点选显式 Unsupported 且按钮禁用；CAD 字体由同级 `fonts/` 目录自动加载（缺字体时
   回退到系统默认轮廓面，`--font` 仍是最高优先级显式指定）；原生多触控仍未闭环。
-- `scripts/package-linux-release.sh` 现在把 `yacr-linux` 一并打进 release 包，并把其非基础
-  系统共享库（fontconfig/freetype 及其依赖）复制到包内 `lib/`，二进制带 `$ORIGIN/../lib`
-  RPATH；glibc/内核、窗口系统、Vulkan 驱动与 `xdg-desktop-portal` 仍由宿主提供，因此这
-  **不是**静态独立发行包，也不构成跨发行版兼容声明。默认 CI 仍只做 debug 编译，不产出安装包。
+- `scripts/package-linux-release.sh` 的**Slint 时代**行为（把 `yacr-linux` 打进包并把
+  fontconfig/freetype 复制到包内 `lib/`）已随 Slint 退役；2026-10-17 重启后的脚本只打包预构建的
+  React 宿主 `bin/yacr` + `fonts/`，不打包宿主共享库，见 `docs/flatpak.md`。glibc/内核、窗口系统、
+  Vulkan 驱动与 `xdg-desktop-portal` 仍由运行时/宿主提供，故**不是**静态独立发行包。
 
 ## 配置与用户偏好持久化（2026-10-03）
 

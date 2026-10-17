@@ -113,7 +113,7 @@ cargo build -p cad-cli-tools --release --locked
 ## 已退役 / 禁用的平台入口（勿当可用）
 
 以下入口**不是可运行的构建路径**；脚本显式非零失败或在 CI 中 `if: false` 硬禁用。**不要**把它们
-当作可用的发布流程：
+当作可用的发布流程（唯一例外是 2026-10-17 重启的 `scripts/package-linux-release.sh`，见下）：
 
 | 入口 | 状态 |
 |---|---|
@@ -121,7 +121,13 @@ cargo build -p cad-cli-tools --release --locked
 | `scripts/build-android.sh` | **RETIRED**——Android UI 未实现（`apps/app-android` 为占位）；非零退出 |
 | `scripts/package-windows-release.sh` | **RETIRED**——Windows GUI 未实现（`apps/app-windows` 占位 `yacr-windows`）；非零退出 |
 | `scripts/package-macos-release.sh` | **RETIRED**——macOS GUI 未实现（`apps/app-macos` 占位 `yacr-macos`）；非零退出 |
-| `scripts/package-linux-release.sh` | **DISABLED**——旧 Flatpak 流水线退役；**等待替代打包方案验收**；非零退出 |
+
+**Linux 打包（2026-10-17 重启，非 RETIRED）**：`scripts/package-linux-release.sh` 现在为
+React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，运行时
+`org.gnome.Platform//51`），产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256`。
+它**不是**分发/发布流程：**未发布 Flathub**，CI 的 `linux-release` job（`.github/workflows/build.yml`）
+**仍是 `if: false` 硬禁用**（本轮**未**改 CI），因此没有可下载的发布包。见 `docs/flatpak.md`、
+`docs/validation-flatpak-linux-2026-10-17.md`。
 
 平台包状态（源码级）：
 
@@ -131,8 +137,9 @@ cargo build -p cad-cli-tools --release --locked
   叙述已作废。
 - **Android / Web**：`apps/app-android` / `apps/app-web` 是**显式 NOT IMPLEMENTED 占位**
   （Android 打印退役诊断后 abort；Web wasm 入口返回错误）。旧的 wasm/APK 构建与部署全部退役。
-- **Linux release**：旧的 `dev.yacr.app` Flatpak bundle **暂时不可用**，等待替代打包方案；
-  当前没有受支持的 Linux 发布包。
+- **Linux release**：`dev.yacr.app` Flatpak bundle 可**本地构建并安装**（`scripts/package-linux-release.sh`，
+  2026-10-17 重启，见上）；但**没有受支持的发布通道**——未提交 Flathub、无分发产物，CI `linux-release`
+  job 仍硬禁用。本机实测细节见 `docs/flatpak.md`。
 
 CI 分层、被禁用的 job 清单与 NOT RUN 边界见 `docs/ci.md`。
 

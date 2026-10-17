@@ -50,8 +50,9 @@ GitHub 显示 **skipped（未运行）**，绝不显示为通过。`windows-chec
 `web-build`、`web-deploy`、`web-smoke`、`android-apk`、`android-release`、`linux-release`、
 `windows-release`、`macos-release`。
 
-含义：浏览器 UI / Android UI / Windows / macOS GUI 均已退役为显式 NOT IMPLEMENTED 占位；
-**Linux release 暂时不可用，等待替代打包方案验收**。这些 job **不会**再产出或发布任何产物。
+含义：浏览器 UI / Android UI / Windows / macOS GUI 均已退役为显式 NOT IMPLEMENTED 占位。
+`linux-release` 的**脚本**已于 2026-10-17 重启（本地可构建，见 `docs/flatpak.md`），但该 CI job 仍
+**硬禁用**；它与其余 job 一样不会产出或发布任何产物。
 
 ## 锁定工具版本
 
@@ -72,7 +73,9 @@ GitHub 显示 **skipped（未运行）**，绝不显示为通过。`windows-chec
 - 8 个退役 job：**永远不会**在受支持配置下运行（硬禁用）。
 - **CI 上的真实 GPU / 黄金图 / 浏览器矩阵 / Android 真机**：未运行。GitHub 托管 runner 无 GPU，
   软件渲染不能作为真实 GPU 证据。
-- **Linux 发布包**：当前没有受支持的流水线；旧 Flatpak 已退役，`package-linux-release.sh` 非零退出。
+- **Linux 发布包**：CI 上仍没有受支持的流水线（`linux-release` 硬禁用）。`package-linux-release.sh`
+  已于 2026-10-17 重启，本地可构建并安装 `.flatpak`（证据见
+  `docs/validation-flatpak-linux-2026-10-17.md`）；**未**发布到 Flathub，也未在 CI 运行。
 
 ## 本地复现（当前门禁）
 
@@ -105,10 +108,13 @@ cargo test -p cad-render-wgpu --test wgsl_validation --locked
 
 ```bash
 for s in build-web deploy-cloudflare-pages build-android \
-         package-linux-release package-windows-release package-macos-release; do
+         package-windows-release package-macos-release; do
   bash "scripts/$s.sh"; echo "$s exit=$? (expect 1)"
 done
 ```
+
+`package-linux-release.sh` **不在**该列表：它已于 2026-10-17 重启，按退出码 0 完成构建（本地产物，
+无发布，见 `docs/flatpak.md`）。
 
 `scripts/check-workflows.py` 有 PyYAML 时做真实解析，否则退化为结构化文本检查并如实说明；
 变异契约（`test-linux-workflow.py`、`test-web-deploy-workflow.py`、`test-package-*.py`）故意删除

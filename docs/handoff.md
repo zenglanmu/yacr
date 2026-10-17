@@ -12,6 +12,97 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 设备 limits 协商 + Flatpak 打包重启（2026-10-17，两项交付）
+
+**范围**：A = renderer 设备 limits 协商与 pulled 分配失败显式化（Rust 源码改动）；B = React/Tauri 宿主的
+Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.sh`）。两项**同日、独立**，
+证据各自独立；A 的宿主数字来自 `target/release/yacr`，B 的宿主数字来自沙箱内 `flatpak run`。
+
+### A. 设备 limits 协商（实测；单机 Quadro P620 / Vulkan）
+
+- **改动前**：两处设备创建点（`crates/cad-render-wgpu/src/headless.rs`、`native_presenter.rs`）都用
+  `DeviceDescriptor { ..Default::default() }` ⇒ 设备 `max_buffer_size` **268,435,456 B（256 MiB）**，
+  而 adapter 报 **4,292,870,144 B**。这是**请求限制**，不是硬件上限。
+- **改动**：纯策略函数 `negotiated_device_limits`（`headless.rs:232`）以
+  `Limits::default().or_worse_values_from(adapter)` 为底，**只**把 `max_buffer_size` 抬到 adapter 值；
+  两处设备创建点都经同一 `request_device_with_negotiated_limits`（`headless.rs:273`）请求设备。
+  本机实测：`[probe] device-limits adapter_max_buffer_size=4292870144
+  requested_max_buffer_size=4292870144 granted_max_buffer_size=4292870144
+  requested_max_storage_buffer_binding_size=134217728
+  granted_max_storage_buffer_binding_size=134217728 degraded=false reason=-`。
+- **`max_storage_buffer_binding_size` 刻意不抬**（adapter 报 2,147,483,644 B，仍请求 WebGPU 默认
+  134,217,728 B）：**实测**抬高后 pulled 分段器产出约 2 GiB 单次分配，一次 pulled 重建的
+  `create_buffer` 失败、wgpu 30.0.1 返回**无效 handle**，其下一次使用表现为 **validation** 错误
+  （`Buffer with 'cad-pulled-line-storage' label is invalid`），`ErrorFilter::OutOfMemory` 作用域
+  **捕获不到** ⇒ 默认处理器 abort（exit 101）。锁回默认值后同一重建成功，仅分段更多、draw 更多，
+  **像素不变**。
+- **降级**：`request_device` 以协商值失败 ⇒ 用 `Limits::default()` 重试并报 `degraded=true reason=…`；
+  两次都失败 ⇒ 显式错误。不静默、不 panic。
+- **真实宿主（实测）**：`fixtures/complex-test.dwg` 由
+  `pulled=skipped-insufficient-vram(required_bytes=2281858648,budget_bytes=268435456)` 变为
+  **`pulled=active`**，`entityCount=44591`、settled 帧 `complete=true`、自然 exit 0；
+  `fixtures/debug-default-fonts.dwg` `pulled=active`、`entityCount=10656`。无 panic。
+- **同轮修掉的预存缺陷（被本次放宽 unmask，不是本次引入）**：驱动拒绝的 `create_buffer` 返回无效
+  handle，随后的 `write_buffer` 以 **validation** 错误出现，OOM-only 作用域不捕获 ⇒ 进程 abort。
+  256 MiB 预算下这条路实际不可达，4 GiB 下可达。修复在
+  `crates/cad-render-wgpu/src/renderer_impl.rs`：pulled 构建置于嵌套 `Validation` + `OutOfMemory`
+  作用域（每条路径 LIFO push/pop，`ErrorScopeGuard::drop` 兜底），每次分配单独守护且**先验证创建**
+  再上传/绑定，首次失败即中止并丢弃半成品，本帧回退通用 per-run 并给出显式状态：
+  设备报 OOM ⇒ `pulled=skipped-out-of-memory(required_bytes=…,budget_bytes=…,message=…)`；
+  其它错误 ⇒ 新增 **`pulled=skipped-allocation-failed(…)`**（**不**冒充显存耗尽证据）。
+  容量门、通用路径与像素不变。
+- **测试（实测）**：`cargo test -p cad-render-wgpu --lib -- --test-threads=1` → 155 passed / 0 failed /
+  3 ignored；`--test accelerated_tier` 23、`--test pulled_prefix_equivalence` 9、`--test headless_render`
+  19。新增确定性设备测试 `refused_allocation_is_reported_without_panicking`（请求
+  `max_buffer_size + 1` 触发真实的 invalid-handle/validation 机制，不耗显存）。
+- **修复后真实宿主（实测）**：`complex-test.dwg` 持续 `pulled=active`、`complete=true`、exit 0、
+  零 `is invalid`、零 panic。
+- **A 的未测**：真实驱动/显存 OOM 在本机**不可模拟**（新测试触发的不是 OOM）；其它 GPU/vendor、
+  feature 请求（仍为空）、`gpu_ms`（仍 `None`）均未测。策略与实现状态见
+  `docs/adr/0013-device-capability-negotiation.md`。
+
+### B. Flatpak 打包重启（实测；本机 GNOME/Mutter + P620 + `scale=1`）
+
+- **工具链（实测）**：`flatpak 1.16.6`、`flatpak-builder 1.4.8`，`org.gnome.Platform//51` 与
+  `org.gnome.Sdk//51` 装在 **user scope**。**镜像说明**：运行时/依赖经本机 `flathub-mirror` 远端
+  取得（直连 CDN 约 38 KB/s）；摘要签名用官方 key 校验通过（subkey `562702E9E3ED7EE8`，属
+  Flathub Repo Signing Key `4184DD4D907A7CAE`）⇒ 这是**传输镜像**，不是替代信任根。
+- **glibc/webkit 前置（实测）**：release 二进制最高需要 `GLIBC_2.43`（`objdump -T`）；
+  `org.gnome.Platform//51` 提供 **glibc 2.44** 与 `libwebkit2gtk-4.1.so.0` / `libgtk-3`。GNOME 50 运行时
+  为 glibc 2.42（低于该要求）⇒ 这也是选 51 的原因（**未**单独跑 50 验证加载失败）。
+- **新增/重启的产物**：`packaging/flatpak/dev.yacr.app.yml`（app-id `dev.yacr.app`、runtime
+  `org.gnome.Platform` 51、`command: yacr`、finish-args `--share=ipc --socket=wayland
+  --socket=fallback-x11 --device=dri --filesystem=home`、prebuilt `type: dir` payload
+  `target/flatpak/payload` = `bin/yacr` + committed `fonts/`，**不含 CLI**）、`dev.yacr.app.desktop`
+  （`Exec=yacr %F`）、`dev.yacr.app.metainfo.xml`（AGPL-3.0 / CC0-1.0、mediatypes）、
+  `scripts/package-linux-release.sh`（从 NOT IMPLEMENTED stub 重写）；
+  `scripts/test-package-linux-release.py` 断言**重启后**的静态契约（11/11 实测通过）。
+- **`%F` 是硬要求**：宿主拒绝任何含 `://` 的参数（`LaunchOptions::parse_args`），`%U` 会让文件管理器
+  打开失败；裸位置参数现在按 `--open` 处理。
+- **UI 不单独发运**：`ui/dist` 在构建时嵌入，`--features tauri/custom-protocol` 必需。脚本用
+  **hashed asset 文件名**（`ui/dist/assets/index-*.js|css`）验证嵌入；**不**用
+  `http://localhost:1420` 当判据——该串在 dev 与 release 里都存在（嵌入的 `tauri.conf.json` 带
+  `build.devUrl`），第一版守卫是**假阳性**，会挡下正确构建（2026-10-17 发现并修掉）。
+- **构建/安装（实测）**：`scripts/package-linux-release.sh` → exit 0；产出
+  `target/release/dist/yacr-0.1.2-linux-x86_64.flatpak`，**6,724,496 B**，sha256
+  `cd453e230aac16f64583c25f34552c561ce0761f7338a9c4d31fbde484661e90`；`flatpak install --user`
+  用同 app-id/branch 覆盖旧 0.1.1 Slint 包；`flatpak info dev.yacr.app` 显示 0.1.2 / AGPL-3.0 /
+  runtime `org.gnome.Platform//51`；`xdg-mime query default image/vnd.dwg` → `dev.yacr.app.desktop`。
+- **沙箱运行（同 UID，无 root/sudo，无屏录，Wayland 会话；实测）**：
+  `debug-default-fonts.dwg` → `tauri://localhost` Finished、Vulkan `Quadro P620`、
+  `entityCount=10656`、`pulled=active`、exit 0；`complex-test.dwg` → 523 帧 `pulled=active`、
+  `granted_max_buffer_size=4292870144`、`degraded=false`、exit 0、**无 panic、无 `is invalid`**；
+  `--file-forwarding … @@ <path> @@`：**home** 路径原样传入（`synthetic-four-lines.dwg`，4 实体）；
+  **`/tmp`** 路径变为 `/run/user/1000/doc/9f5d78c3/fwd-outside.dwg`（document portal，4 实体）——
+  该模式下**图纸的同级文件不可见**，故保留 `--filesystem=home`。
+- **未发布 Flathub**（用户 2026-10-17 明确决定）：bundle 只是**本地产物**；没有提交、审核或 CI 发布。
+- **B 的未测**：沙箱内 X11（`--socket=fallback-x11`）；本机之外的宿主；沙箱内 portal 文件选择器；
+  沙箱窗口的视觉/截图像素判定；Wayland 子表面的视觉判读；其它 GPU/vendor；非 x86_64 Flatpak。
+- **历史说明**：`packaging/flatpak/**` 曾在 `7d83572` 被删除，2026-10-17 是**重新引入**；旧删除是历史，
+  不是本轮回滚的“事故”。旧 Slint 流水线事实见 `docs/linux-app.md` 历史小节。
+- 详情与逐条结果：`docs/flatpak.md`、`docs/validation-flatpak-linux-2026-10-17.md`；
+  `docs/compatibility.md` 的 limits 行与 `docs/render-optimization-backlog.md` 的 P0/N3 已同步。
+
 ## 自动证据采集脚本（2026-10-17；本轮交付；无 Rust 改动）
 
 - **新增文件**（**未**改任何 Rust 源码、**未**改既有脚本）：`scripts/collect-evidence.sh`（一键：

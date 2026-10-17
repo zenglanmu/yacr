@@ -97,8 +97,10 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **前置条件/风险**：两种可选路径，均须显式记录：
   - **`TIMESTAMP_QUERY`**：仅支持设备可用；**须显式、有文档地请求 feature**，是对仓库
     「从不向宿主设备请求 feature」规则的一次**偏离**，因此**只作为测量门控**（measurement-only），
-    不得成为运行时依赖；且它与 `MULTI_DRAW_INDIRECT_COUNT` 一样**在 P620 的默认设备上并未启用**
-    （两处 `DeviceDescriptor { ..Default::default() }`，`headless.rs:155` / `native_presenter.rs:491`）。
+    不得成为运行时依赖；且它与 `MULTI_DRAW_INDIRECT_COUNT` 一样**在 P620 的设备上并未启用**
+    ——两处设备创建点（`headless.rs` / `native_presenter.rs`）**仍未请求任何 feature**。
+    注意：**limits 已不再是 `Limits::default()`**（2026-10-17 协商落地，见 N3 与 ADR 0013
+    「实现状态」）；本项未因此变化，`gpu_ms` 仍 `None`。
   - **draw-all-vs-skip 消融的墙钟减 poll 代理**：不请求 feature，作为替代代理（不是精确 GPU 时间）。
   - **P1 的 CPU A/B**：用既有 `FrameStats` 相位计时器 `plan_ms` / `uniform_ms` / `encode_ms` /
     `submit_ms`（`crates/cad-render-wgpu/src/lib.rs:284-298`）与**剔除比**（skipped/kept chunks）
@@ -324,7 +326,7 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   `max_buffer_size = 268,435,456 B（256 MiB）`。**注意**：**adapter** 上限是 **4,292,870,144 B**，
   故这是**请求限制（requested-limits）**，**不是硬件限制**。另有同轮 harness **legacy 逐批** OOM 记录
   （`docs/validation-render-perf-2026-10-17.md` §5）。
-- **修复（本轮，已实现）**：**容量门 + 显式三态**（`PulledState` 枚举：
+- **修复（2026-10-17 早先落地，已实现）**：**容量门 + 显式三态**（`PulledState` 枚举：
   `Active`、`SkippedInsufficientVram{required,budget}`、`SkippedOutOfMemory{..}`、
   `SkippedUnsegmentable{..}`、`SkippedNoConvertedGeometry`、`Unavailable`；
   `crates/cad-render-wgpu/src/lib.rs:183-235`；门 `pulled_capacity_fits`
@@ -332,14 +334,33 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   - complex-test **现可打开**（**exit 0、0 panic、371 渲染帧、entityCount 44,591**），
     `pulled=skipped-insufficient-vram(required_bytes=2281858648,budget_bytes=268435456)`（**实测**）；
   - `debug-default-fonts` 仍 `pulled=active`（180,550,060 ≤ 256 MiB）。
-- **诚实边界（必须记录）**：① 上述为该修复的**判定**（真实宿主）；② 预算是**单缓冲**限制、却拿去和
-  **总 payload** 比较 ⇒ **刻意保守**；③ 因设备 limits 为 `Limits::default()`，**pulled 路径对 payload
-  超过 256 MiB 的图纸不可用**——**抬高设备 limits 是独立的设备契约决策**（与 device feature 请求同轴）。
-  另：`prepare_us` 字段单位是**微秒**（早先一条注记误读为"秒"，**已更正**）。
+- **后续（2026-10-17，同轮已实现）：limits 协商 + 分配失败显式化**。
+  - **limits**：`negotiated_device_limits`（`crates/cad-render-wgpu/src/headless.rs:232`）以
+    `Limits::default().or_worse_values_from(adapter)` 为底，**只**把 `max_buffer_size` 抬到 adapter 值；
+    本机实测 requested = granted = **4,292,870,144 B**、`degraded=false`。
+    `max_storage_buffer_binding_size` **刻意**保持 WebGPU 默认 **134,217,728 B**（adapter 报
+    2,147,483,644 B）：抬高会让 pulled 分段器产出约 2 GiB 单次分配，`create_buffer` 失败返回无效
+    handle，后续使用报 **validation**（OOM-only 作用域捕获不到）⇒ abort exit 101；锁回默认后重建成功、
+    **像素不变**。
+  - **分配失败判定**：pulled 构建置于嵌套 `Validation` + `OutOfMemory` 作用域，逐分配先验证创建再上传，
+    首次失败即丢弃半成品并回退通用 per-run；新增显式状态 **`skipped-allocation-failed`**
+    （与 `skipped-out-of-memory` 分开，**不**把非 OOM 错误说成显存耗尽）。
+  - **实测（真实宿主）**：`complex-test.dwg` 由 `skipped-insufficient-vram` 变为 **`pulled=active`**
+    （`entityCount=44591`、settled 帧 `complete=true`、exit 0、无 panic/`is invalid`）；
+    `debug-default-fonts.dwg` 仍 `pulled=active`（`entityCount=10656`）。
+  - **未测**：真实驱动/显存 OOM 在本机不可模拟（新设备测试触发的是无效 handle/validation 路径）；
+    其它 GPU/vendor 未验证。逐帧证据见 `docs/handoff.md` 本轮条目，政策见 ADR 0013。
+- **诚实边界（必须记录）**：① 上述均为**本机判定**（真实宿主，单适配器）；② 预算是**单缓冲**限制、
+  却拿去和**总 payload** 比较 ⇒ **刻意保守**（limits 抬高后仍保留，作为最后一道安全网）；
+  ③ limits 协商后 `complex-test.dwg` 的 pulled 已可用，但**任意图纸**是否可用仍取决于单次分配 payload
+  与设备 `max_buffer_size`——**不是**“pulled 已通用可用”的结论。另：`prepare_us` 字段单位是**微秒**
+  （早先一条注记误读为"秒"，**已更正**）。
 - **预期收益**：无性能收益；**正确性/容量**——用**显式建模取代 panic**（铁律 2）。
-- **前置条件/风险**：容量门已落地；后续候选：**共享顶点 arena**、**设备 limits 决策**。保守预算的
-  语义须保留并在兼容表中显式。
-- **需要的决策**：是否抬高设备 limits（或改共享 arena）以让 pulled 覆盖更大图纸。
+- **前置条件/风险**：容量门与 limits 协商已落地；仍开放的候选是**共享顶点 arena**（降低单次分配）。
+  保守预算的语义须保留并在兼容表中显式。
+- **需要的决策**：**已决（2026-10-17）**：`max_buffer_size` 按 adapter 协商、
+  `max_storage_buffer_binding_size` 封顶 WebGPU 默认；仍开放：是否改**共享顶点 arena**以让 pulled
+  覆盖更大图纸。
 - **相关契约/栅栏**：三态显式建模（**不 panic**）fence；pulled 预算保守性 fence；容量门测试
   （`crates/cad-render-wgpu/src/pulled_budget_gpu_tests.rs`）。
 - **优先级**：N3（高；容量/正确性）。

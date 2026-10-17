@@ -59,8 +59,10 @@ approximate or still have gaps. Per-item status is in `docs/compatibility.md` an
   and tessellated only for planes (with holes) / spheres / cylinders / tori / cones; everything
   else is explicitly marked unsupported.
 - **Fonts**: a bundled/configured font directory is resolved at runtime; missing fonts fall back
-  to a default outline face. (Release packaging is currently retired — see `docs/build.md`; this
-  describes available resources/configuration, not a distributable package.)
+  to a default outline face. (A local Flatpak bundle can be built with `scripts/package-linux-release.sh`
+  — see `docs/flatpak.md`; it is **not** published to Flathub and the CI release job stays disabled,
+  so there is still no distributed package. This describes available resources/configuration, not a
+  distributable package.)
 - **Plot**: model/layout raster PNG (the CLI also has a pure-CPU SVG/PDF vector path); no
   vector print style tables (CTB).
 - **Large-drawing protection**: hard scene batch/vertex budgets; exceeding them **fails
@@ -175,11 +177,13 @@ fail non-zero (retired) and the CI release jobs are hard-disabled. See `docs/bui
 
 - Per-platform build: `docs/build.md`
 - Linux desktop host (current): `docs/react-linux-app.md`
+- Linux Flatpak packaging (local bundle, not published to Flathub): `docs/flatpak.md`,
+  `docs/validation-flatpak-linux-2026-10-17.md`
 - Authored/technical decisions: `docs/adr/` (ADR 0010 = React host replaces Slint)
 - Headless rendering: `docs/headless-render.md`; CI layers: `docs/ci.md`
 - CLI: `docs/cli.md`; fonts: `docs/fonts.md`; app icon: `docs/app-icon.md`
 - Retired (historical, kept with notices): `docs/linux-app.md`, `docs/windows-app.md`,
-  `docs/macos-app.md`, `docs/flatpak.md`, `docs/verify-ui.md`
+  `docs/macos-app.md`, `docs/verify-ui.md`
 
 **Capabilities & topics**
 
