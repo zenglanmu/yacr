@@ -278,6 +278,10 @@ pub struct SurfaceProbePresenter {
     texture_sampler: Option<wgpu::Sampler>,
     /// Cached bind group for the last presented texture, keyed by the full key.
     texture_bind: Option<(NativeTextureKey, wgpu::Texture, wgpu::BindGroup)>,
+    /// The limits this device was created with (see
+    /// [`crate::headless::negotiated_device_limits`]), including the degraded
+    /// fallback verdict.
+    device_limits: crate::headless::DeviceLimitsReport,
 }
 
 impl SurfaceProbePresenter {
@@ -488,11 +492,19 @@ impl SurfaceProbePresenter {
         let max_dimension = adapter.limits().max_texture_dimension_2d;
         validate_size(width, height, max_dimension)?;
 
-        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("cad-surface-probe-device"),
-            ..Default::default()
-        }))
-        .map_err(|error| ProbeError::DeviceRequest(error.to_string()))?;
+        let negotiated = crate::headless::request_device_with_negotiated_limits(
+            &adapter,
+            "cad-surface-probe-device",
+        )
+        .map_err(ProbeError::DeviceRequest)?;
+        let device = negotiated.device;
+        let queue = negotiated.queue;
+        // One-off startup diagnostic (never per frame): the negotiated capacity
+        // is what explains the pulled budget in `[probe] actual-render`'s
+        // `pulled=…` token, which reports the same `max_buffer_size` as
+        // `budget_bytes`. A degraded line means the device fell back to the
+        // WebGPU defaults and the pulled budget is 256 MiB again.
+        eprintln!("[probe] device-limits {}", negotiated.limits.summary());
 
         let (pipeline, bind_group, uniform) = build_probe_pipeline(&device, format);
 
@@ -548,6 +560,7 @@ impl SurfaceProbePresenter {
             texture_layout: None,
             texture_sampler: None,
             texture_bind: None,
+            device_limits: negotiated.limits,
         })
     }
 
@@ -938,6 +951,12 @@ impl SurfaceProbePresenter {
     /// The adapter the probe selected (backend, name, device type, driver).
     pub fn adapter(&self) -> &ProbeAdapterInfo {
         &self.adapter
+    }
+
+    /// The negotiated device limits and whether the fallback to WebGPU defaults
+    /// was taken (see [`crate::headless::DeviceLimitsReport`]).
+    pub fn device_limits(&self) -> &crate::headless::DeviceLimitsReport {
+        &self.device_limits
     }
 
     /// The configured surface texture format.

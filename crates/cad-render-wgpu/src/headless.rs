@@ -98,6 +98,206 @@ fn adapter_info(info: &wgpu::AdapterInfo) -> AdapterInfo {
     }
 }
 
+/// The limits a device was asked for, the limits it granted, and whether the
+/// negotiated request had to be abandoned for the WebGPU defaults.
+///
+/// This is the *reporting* half of device-limit negotiation
+/// ([`negotiated_device_limits`]); it is plain data, so a host can log or
+/// inspect it without touching `wgpu` handles. `requested` is the negotiated
+/// policy: on the degraded path it is the request that **failed**, which is why
+/// the report keeps both `requested` and `granted` instead of one value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceLimitsReport {
+    /// The adapter's own `max_buffer_size` (single-allocation ceiling).
+    pub adapter_max_buffer_size: u64,
+    /// The adapter's own `max_storage_buffer_binding_size`.
+    pub adapter_max_storage_buffer_binding_size: u64,
+    /// Limits requested in the first `request_device` attempt.
+    pub requested: wgpu::Limits,
+    /// Limits the live device reports after creation.
+    pub granted: wgpu::Limits,
+    /// `None` when the negotiated request succeeded. `Some(wgpu error text)`
+    /// when it failed and the device was created with [`wgpu::Limits::default`]
+    /// instead — an explicit degraded state, never a silent one.
+    pub degraded_reason: Option<String>,
+}
+
+impl DeviceLimitsReport {
+    /// `max_buffer_size` the negotiation asked for.
+    ///
+    /// On the degraded path this is the value that was rejected, i.e. the
+    /// capacity the negotiation *tried* to obtain; `granted` is what is really
+    /// usable.
+    pub fn negotiated_max_buffer_size(&self) -> u64 {
+        self.requested.max_buffer_size
+    }
+
+    /// `max_buffer_size` the live device actually allows.
+    pub fn granted_max_buffer_size(&self) -> u64 {
+        self.granted.max_buffer_size
+    }
+
+    /// Whether the device fell back to the WebGPU defaults.
+    pub fn is_degraded(&self) -> bool {
+        self.degraded_reason.is_some()
+    }
+
+    /// Single-line, whitespace-free token for probe logs and status lines.
+    ///
+    /// Shape:
+    /// `adapter_max_buffer_size=… requested_max_buffer_size=…
+    /// granted_max_buffer_size=… requested_max_storage_buffer_binding_size=…
+    /// granted_max_storage_buffer_binding_size=… degraded=… reason=…`
+    /// (`reason` is `-` when not degraded; spaces in wgpu error text become
+    /// underscores so the line stays one token per field).
+    pub fn summary(&self) -> String {
+        let reason = match &self.degraded_reason {
+            None => "-".to_string(),
+            Some(reason) => reason.split_whitespace().collect::<Vec<_>>().join("_"),
+        };
+        format!(
+            "adapter_max_buffer_size={} requested_max_buffer_size={} \
+             granted_max_buffer_size={} \
+             requested_max_storage_buffer_binding_size={} \
+             granted_max_storage_buffer_binding_size={} degraded={} reason={}",
+            self.adapter_max_buffer_size,
+            self.requested.max_buffer_size,
+            self.granted.max_buffer_size,
+            self.requested.max_storage_buffer_binding_size,
+            self.granted.max_storage_buffer_binding_size,
+            self.is_degraded(),
+            reason,
+        )
+    }
+}
+
+/// A device created by [`request_device_with_negotiated_limits`], with the
+/// negotiation report attached.
+pub struct NegotiatedDevice {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub limits: DeviceLimitsReport,
+}
+
+/// The single policy for the limits this crate asks a device for.
+///
+/// **Why this exists.** `wgpu::Limits::default()` is the WebGPU *portability*
+/// floor, not the hardware's capability: its `max_buffer_size` is 256 MiB even
+/// when the adapter reports ~4 GiB (`VkPhysicalDeviceLimits::
+/// maxMemoryAllocationSize`). The renderer derives its whole-scene pulled
+/// budget from the **device's** `max_buffer_size` (see
+/// `Renderer::pulled_budget_bytes`), so requesting the defaults silently capped
+/// every real drawing's accelerated organisation at 256 MiB and skipped it —
+/// a capacity limit created by the request, not by the GPU. Measured on the
+/// acceptance machine (Vulkan, NVIDIA Quadro P620): adapter and negotiated
+/// `max_buffer_size` are both 4 292 870 144 B, which is what lets the
+/// complex-test pulled payload (2 281 858 648 B) fit the budget gate.
+///
+/// **Policy.** Start from [`wgpu::Limits::default`] clamped *down* to what the
+/// adapter accepts ([`wgpu::Limits::or_worse_values_from`], for downlevel
+/// adapters that are worse than the WebGPU floor), then raise exactly one
+/// field: `max_buffer_size` = the adapter's reported value.
+///
+/// * `max_buffer_size` is the driver's **per-allocation ceiling**; it reserves
+///   nothing and cannot make a smaller allocation fail, so no artificial cap is
+///   applied. Raising it is what lets the capacity gate see real capacity. The
+///   renderer's own budget policy (one `max_buffer_size` of additional memory
+///   for the pulled organisation) and its pre-flight gate are unchanged.
+/// * `max_storage_buffer_binding_size` is deliberately **left at the WebGPU
+///   default (128 MiB)** even though this machine's adapter advertises
+///   2 147 483 644 B. This cap is evidence-based, not theoretical: the pulled
+///   segment limit is `min(max_storage_buffer_binding_size, max_buffer_size)`,
+///   so raising this field makes the segmenter emit multi-GiB **single**
+///   allocations. A real-host run of `fixtures/complex-test.dwg` with the
+///   raised binding limit created such a ~2 GiB segment and the allocation
+///   failed during a pulled *rebuild* (the retained prefix's old segments are
+///   still alive while the replacement set is allocated). wgpu 30.0.1 then
+///   returns an invalid buffer handle for the failed `create_buffer`, and the
+///   following `Queue::write_buffer` is reported as a **validation** error — a
+///   kind an `ErrorFilter::OutOfMemory` scope does not capture — so it reached
+///   wgpu's default handler and aborted the process
+///   (`Buffer with 'cad-pulled-line-storage' label is invalid`). With the
+///   binding limit at the default the same rebuild succeeds: the allocations
+///   are 128 MiB-sized and the driver reclaims the old segments as they are
+///   dropped. The cost is more pulled segments (draw calls) for the same
+///   payload; **no pixel changes**. This bound is what makes negotiation
+///   *safe* on this class of 4 GiB adapter; behaviour beyond this machine is
+///   not claimed.
+///
+/// Every other limit stays at the WebGPU default: nothing in this crate reads
+/// them beyond the portability floor, and requesting more would grant
+/// capabilities no code uses (and could fail on adapters that do not offer
+/// them). Capability negotiation (features, storage-buffer availability) is a
+/// separate decision and deliberately untouched.
+pub fn negotiated_device_limits(supported: &wgpu::Limits) -> wgpu::Limits {
+    let mut limits = wgpu::Limits::default().or_worse_values_from(supported);
+    limits.max_buffer_size = supported.max_buffer_size;
+    limits
+}
+
+/// Try `request(negotiated)`; on failure retry `request(defaults)` and report
+/// the first error as the degraded reason.
+///
+/// Pure decision logic: the caller supplies the actual device request, so the
+/// fallback/verdict path is unit-testable without a GPU. Returning `Err` means
+/// **both** requests failed; the message carries both errors and the negotiated
+/// `max_buffer_size`, and the caller maps it to its own error type (never a
+/// panic, never a device-less success).
+fn request_with_default_fallback<D, E: std::fmt::Display>(
+    negotiated: &wgpu::Limits,
+    mut request: impl FnMut(&wgpu::Limits) -> Result<D, E>,
+) -> Result<(D, Option<String>), String> {
+    match request(negotiated) {
+        Ok(value) => Ok((value, None)),
+        Err(error) => {
+            let reason = error.to_string();
+            match request(&wgpu::Limits::default()) {
+                Ok(value) => Ok((value, Some(reason))),
+                Err(fallback_error) => Err(format!(
+                    "device request failed with negotiated limits (max_buffer_size={}): {reason}; \
+                     retry with wgpu defaults failed: {fallback_error}",
+                    negotiated.max_buffer_size
+                )),
+            }
+        }
+    }
+}
+
+/// Create a device asking for [`negotiated_device_limits`].
+///
+/// Infallible **in effect**: if the negotiated request is rejected, the device
+/// is created with [`wgpu::Limits::default`] and [`DeviceLimitsReport`] carries
+/// the negotiated `max_buffer_size` plus the rejection reason (degraded state).
+/// Only a failure of *both* attempts is an `Err`; nothing here panics and a
+/// degraded creation is never reported as if the negotiation had succeeded.
+pub fn request_device_with_negotiated_limits(
+    adapter: &wgpu::Adapter,
+    label: &str,
+) -> Result<NegotiatedDevice, String> {
+    let supported = adapter.limits();
+    let requested = negotiated_device_limits(&supported);
+    let descriptor = |limits: &wgpu::Limits| wgpu::DeviceDescriptor {
+        label: Some(label),
+        required_limits: limits.clone(),
+        ..Default::default()
+    };
+    let ((device, queue), degraded_reason) = request_with_default_fallback(&requested, |limits| {
+        futures_lite::future::block_on(adapter.request_device(&descriptor(limits)))
+    })?;
+    let report = DeviceLimitsReport {
+        adapter_max_buffer_size: supported.max_buffer_size,
+        adapter_max_storage_buffer_binding_size: supported.max_storage_buffer_binding_size,
+        requested,
+        granted: device.limits(),
+        degraded_reason,
+    };
+    Ok(NegotiatedDevice {
+        device,
+        queue,
+        limits: report,
+    })
+}
+
 /// Enumerate adapters visible to wgpu (for diagnostics). Empty when no adapter
 /// is available; that empty list is itself the honest answer.
 pub fn enumerate_adapters(preference: BackendPreference) -> Vec<AdapterInfo> {
@@ -151,16 +351,22 @@ pub fn create_headless_gpu_with(
     let adapter = adapters[index].clone();
 
     let info = infos[index].clone();
-    let (device, queue) =
-        futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("cad-headless-device"),
-            ..Default::default()
-        }))
+    let negotiated = request_device_with_negotiated_limits(&adapter, "cad-headless-device")
         .map_err(|e| CadError::GpuFailure(format!("wgpu device request failed: {e}")))?;
+    // The headless path has no probe stdout contract, and a CLI success must not
+    // write to stderr, so the only headless signal is the **degraded** case: an
+    // explicit warning rather than a silent fallback to the 256 MiB defaults.
+    if let Some(reason) = &negotiated.limits.degraded_reason {
+        eprintln!(
+            "[probe] device-limits degraded: negotiated limits rejected, using wgpu defaults \
+             ({}); reason={reason}",
+            negotiated.limits.summary()
+        );
+    }
 
     Ok(HeadlessGpu {
-        device,
-        queue,
+        device: negotiated.device,
+        queue: negotiated.queue,
         adapter: info,
     })
 }
@@ -382,6 +588,220 @@ impl Renderer {
             height,
             pixels,
         })
+    }
+}
+
+#[cfg(test)]
+mod device_limit_tests {
+    //! Contracts for [`negotiated_device_limits`] and the degraded request path.
+    //!
+    //! The policy tests are pure. The request-fallback tests drive the real
+    //! decision function with a stand-in request closure (no GPU): they assert
+    //! the *verdict* and the reported reason, not wgpu's device creation. A real
+    //! `request_device` rejection cannot be produced from the shipped policy
+    //! because the policy only ever asks for values the adapter advertises —
+    //! the last test covers the real device path on this machine instead.
+
+    use super::*;
+
+    /// Synthetic adapter limits: the WebGPU floor plus the 4 GiB-ish
+    /// single-allocation ceiling the desktop adapter on this machine reports.
+    fn synthetic_adapter() -> wgpu::Limits {
+        wgpu::Limits {
+            max_buffer_size: 4_292_870_144,
+            max_storage_buffer_binding_size: 4_292_870_144,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn policy_never_exceeds_supported_and_raises_max_buffer_size() {
+        let supported = synthetic_adapter();
+        let requested = negotiated_device_limits(&supported);
+
+        assert!(
+            requested.check_limits(&supported),
+            "a request must never ask for more than the adapter supports"
+        );
+        assert!(
+            requested.max_buffer_size > wgpu::Limits::default().max_buffer_size,
+            "the negotiated max_buffer_size must exceed the 256 MiB WebGPU floor"
+        );
+        assert_eq!(requested.max_buffer_size, supported.max_buffer_size);
+        assert_eq!(
+            requested.max_storage_buffer_binding_size,
+            wgpu::Limits::default().max_storage_buffer_binding_size,
+            "the binding limit is deliberately capped at the WebGPU default even \
+             though the adapter advertises more (the documented multi-GiB cap)"
+        );
+        assert!(
+            supported.max_storage_buffer_binding_size
+                > wgpu::Limits::default().max_storage_buffer_binding_size,
+            "the synthetic adapter must advertise more than the cap for this to mean anything"
+        );
+        // Untouched portability fields stay at their defaults.
+        assert_eq!(
+            requested.max_texture_dimension_2d,
+            wgpu::Limits::default().max_texture_dimension_2d
+        );
+    }
+
+    #[test]
+    fn policy_clamps_to_a_downlevel_adapter() {
+        // An adapter worse than the WebGPU floor (downlevel GL-style limits):
+        // the request must still be satisfiable.
+        let supported = wgpu::Limits {
+            max_buffer_size: 128 << 20,
+            max_storage_buffer_binding_size: 64 << 20,
+            max_texture_dimension_2d: 2048,
+            ..Default::default()
+        };
+        let requested = negotiated_device_limits(&supported);
+
+        assert!(requested.check_limits(&supported));
+        assert_eq!(requested.max_buffer_size, 128 << 20);
+        assert_eq!(requested.max_storage_buffer_binding_size, 64 << 20);
+        assert_eq!(requested.max_texture_dimension_2d, 2048);
+    }
+
+    #[test]
+    fn binding_limit_is_capped_at_the_webgpu_default() {
+        let supported = wgpu::Limits {
+            max_buffer_size: 4 << 30,
+            // An adapter whose binding range is far wider than the cap.
+            max_storage_buffer_binding_size: 4 << 30,
+            ..Default::default()
+        };
+        let requested = negotiated_device_limits(&supported);
+        assert!(requested.check_limits(&supported));
+        assert_eq!(
+            requested.max_storage_buffer_binding_size,
+            wgpu::Limits::default().max_storage_buffer_binding_size,
+            "the cap must bound every pulled segment allocation, whatever the adapter claims"
+        );
+        // A binding limit below the cap is never raised.
+        let low = wgpu::Limits {
+            max_buffer_size: 4 << 30,
+            max_storage_buffer_binding_size: 32 << 20,
+            ..Default::default()
+        };
+        assert_eq!(
+            negotiated_device_limits(&low).max_storage_buffer_binding_size,
+            32 << 20
+        );
+    }
+
+    #[test]
+    fn degraded_request_falls_back_to_defaults_with_the_reason() {
+        let negotiated = negotiated_device_limits(&synthetic_adapter());
+        let defaults = wgpu::Limits::default();
+        let mut attempts: Vec<u64> = Vec::new();
+        let outcome = request_with_default_fallback(&negotiated, |limits| {
+            attempts.push(limits.max_buffer_size);
+            if *limits == defaults {
+                Ok("device-on-defaults")
+            } else {
+                Err("limits exceeded: max_buffer_size")
+            }
+        });
+
+        let (device, degraded_reason) =
+            outcome.expect("a defaults fallback must still create a device");
+        assert_eq!(device, "device-on-defaults");
+        assert_eq!(
+            degraded_reason.as_deref(),
+            Some("limits exceeded: max_buffer_size"),
+            "the degraded state must carry the negotiation failure reason"
+        );
+        assert_eq!(
+            attempts,
+            vec![negotiated.max_buffer_size, defaults.max_buffer_size],
+            "the fallback must retry exactly once, with the WebGPU defaults"
+        );
+        // The report the caller receives carries the rejected capacity.
+        let report = DeviceLimitsReport {
+            adapter_max_buffer_size: negotiated.max_buffer_size,
+            adapter_max_storage_buffer_binding_size: negotiated.max_storage_buffer_binding_size,
+            requested: negotiated.clone(),
+            granted: defaults.clone(),
+            degraded_reason,
+        };
+        assert!(report.is_degraded());
+        assert_eq!(
+            report.negotiated_max_buffer_size(),
+            negotiated.max_buffer_size
+        );
+        assert_eq!(report.granted_max_buffer_size(), defaults.max_buffer_size);
+        let summary = report.summary();
+        assert!(summary.contains("degraded=true"));
+        assert!(summary.contains(&format!(
+            "requested_max_buffer_size={}",
+            negotiated.max_buffer_size
+        )));
+        assert!(summary.contains(&format!(
+            "granted_max_buffer_size={}",
+            defaults.max_buffer_size
+        )));
+    }
+
+    #[test]
+    fn accepted_request_is_not_degraded() {
+        let negotiated = negotiated_device_limits(&synthetic_adapter());
+        let outcome = request_with_default_fallback(&negotiated, |_| Ok::<_, String>("device"));
+        let (device, degraded_reason) = outcome.expect("an accepted request must succeed");
+        assert_eq!(device, "device");
+        assert_eq!(degraded_reason, None);
+    }
+
+    #[test]
+    fn both_attempts_failing_is_an_explicit_error() {
+        let negotiated = negotiated_device_limits(&synthetic_adapter());
+        let mut attempts = 0;
+        let outcome = request_with_default_fallback(&negotiated, |_| {
+            attempts += 1;
+            Err::<(), _>("adapter lost")
+        });
+        let message = outcome.expect_err("two failures must be an explicit error, not a panic");
+        assert_eq!(attempts, 2);
+        assert!(message.contains(&format!("max_buffer_size={}", negotiated.max_buffer_size)));
+        assert!(message.contains("adapter lost"));
+        assert!(message.contains("retry with wgpu defaults failed"));
+    }
+
+    #[test]
+    fn real_adapter_grants_the_negotiated_max_buffer_size() {
+        // Real-device contract (skipped explicitly when the machine has no
+        // adapter; a skip is not a pass). This proves the negotiated request is
+        // actually accepted and granted, not merely well-formed.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let backends = wgpu::Backends::VULKAN | wgpu::Backends::GL;
+        let adapters = futures_lite::future::block_on(instance.enumerate_adapters(backends));
+        let Some(adapter) = adapters.first() else {
+            eprintln!("[device-limit-test] SKIP: no wgpu adapter; NOT a pass");
+            return;
+        };
+        let created = match request_device_with_negotiated_limits(adapter, "cad-limit-test") {
+            Ok(created) => created,
+            Err(error) => panic!("negotiated device request failed: {error}"),
+        };
+        assert!(
+            !created.limits.is_degraded(),
+            "a policy request within adapter limits must not degrade: {:?}",
+            created.limits.degraded_reason
+        );
+        assert_eq!(
+            created.limits.granted_max_buffer_size(),
+            adapter.limits().max_buffer_size,
+            "the granted max_buffer_size must be the adapter's, not the 256 MiB floor"
+        );
+        assert_eq!(
+            created.limits.granted.max_storage_buffer_binding_size,
+            adapter
+                .limits()
+                .max_storage_buffer_binding_size
+                .min(wgpu::Limits::default().max_storage_buffer_binding_size),
+            "the granted binding limit must be the capped one, never a multi-GiB segment budget"
+        );
     }
 }
 
