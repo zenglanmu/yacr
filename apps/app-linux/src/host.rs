@@ -33,6 +33,7 @@ use cad_engine::render::{
 use cad_host::{HostOptions, HostPlatform};
 use cad_platform::{ConfigStore, HostCapabilities, PlatformFiles};
 use cad_render_wgpu::ProbeStageTimings;
+use cad_render_wgpu::PulledState;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
 use cad_ui_core::layout::{surface_metrics, LayoutError, LayoutTracker};
@@ -1104,6 +1105,11 @@ pub struct Shared {
     /// The most recent **actual** render (render_seq/view/device), for the
     /// post-load pan driver's readiness/final-frame admission.
     last_actual_render: Option<ActualRenderSummary>,
+    /// Observable state of the accelerated pulled organisation from the most
+    /// recent **actual** render (`cad_render_wgpu::PulledState`). Surfaced in the
+    /// `cad_status` evidence line so a skipped accelerated organisation is visible
+    /// next to the status the frontend receives.
+    last_pulled_state: Option<PulledState>,
     /// Bounded post-load pan evidence driver state (`YACR_PROBE_POSTLOAD_PAN`).
     postload_pan: Option<PostloadPanState>,
     /// App handle for the post-load driver's bounded natural exit.
@@ -1139,6 +1145,7 @@ pub fn new_shared(launch: LaunchOptions) -> Arc<Mutex<Shared>> {
         last_render_diag: None,
         last_render_diag_log: None,
         last_actual_render: None,
+        last_pulled_state: None,
         postload_pan: crate::evidence::postload_pan_enabled().then(PostloadPanState::new),
         app_handle: None,
         postload_pan_exit: None,
@@ -1971,7 +1978,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         if let Some(actual) = actual {
             if cad_log {
                 eprintln!(
-                    "[probe] actual-render seq={} device_epoch={} view_rev={} applied_rev={:?} applied_base={:?} cpu_ms={:.3} gpu_ms={:?} plan_ms={:.3} uniform_ms={:.3} encode_ms={:.3} submit_ms={:.3} wait_ms={:.3} draw_calls={} verts={} tris={} instanced={} mesh={} tier={} over_budget={} prog={:?}/{:?} complete={} uploads_started={} rev_resets={} ready_none={}",
+                    "[probe] actual-render seq={} device_epoch={} view_rev={} applied_rev={:?} applied_base={:?} cpu_ms={:.3} gpu_ms={:?} plan_ms={:.3} uniform_ms={:.3} encode_ms={:.3} submit_ms={:.3} wait_ms={:.3} draw_calls={} verts={} tris={} instanced={} mesh={} legacy_opaque={} arc={} transparent={} images={} accelerated={} instance_streams={} instanced_batches={} tier={} over_budget={} prog={:?}/{:?} complete={} uploads_started={} rev_resets={} ready_none={} pulled={}",
                     actual.render_seq,
                     actual.device_epoch,
                     actual.view_revision,
@@ -1989,6 +1996,13 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                     actual.triangles,
                     actual.instanced_draws,
                     actual.mesh_draws,
+                    actual.legacy_opaque_draws,
+                    actual.arc_draws,
+                    actual.transparent_batches,
+                    actual.image_batches,
+                    actual.accelerated,
+                    actual.instance_streams,
+                    actual.instanced_batches,
                     actual.tier,
                     actual.over_budget,
                     actual.progressive_cursor,
@@ -1997,6 +2011,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                     actual.uploads_started,
                     actual.upload_revision_resets,
                     actual.ready_none_clears,
+                    actual.pulled_state,
                 );
             }
             lock(shared).last_actual_render = Some(ActualRenderSummary {
@@ -2004,6 +2019,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                 view_revision: actual.view_revision,
                 device_epoch: actual.device_epoch,
             });
+            lock(shared).last_pulled_state = Some(actual.pulled_state.clone());
         }
         let snapshot = CAD.with(|cell| {
             cell.borrow()
@@ -2287,10 +2303,18 @@ pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> CadStatus {
     };
     // Env-gated, evidence-only JSON dump of the exact payload the frontend
     // receives. No behavior change: disabled unless `YACR_PROBE_CAD_LOG` is set.
+    // The pulled organisation state is appended as a separate token (the JSON is
+    // unchanged and stays first) so a skipped accelerated organisation is visible
+    // next to the status payload.
     if std::env::var_os("YACR_PROBE_CAD_LOG").is_some() {
+        let pulled = lock(&shared.0)
+            .last_pulled_state
+            .as_ref()
+            .map(PulledState::to_string)
+            .unwrap_or_else(|| "-".to_string());
         match serde_json::to_string(&status) {
-            Ok(json) => eprintln!("[probe] cad_status {json}"),
-            Err(error) => eprintln!("[probe] cad_status serialize failed: {error}"),
+            Ok(json) => eprintln!("[probe] cad_status {json} pulled={pulled}"),
+            Err(error) => eprintln!("[probe] cad_status serialize failed: {error} pulled={pulled}"),
         }
     }
     status

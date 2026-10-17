@@ -42,6 +42,32 @@ pub struct RenderStatsObservation {
     pub triangles: usize,
     pub instanced_draws: u64,
     pub mesh_draws: u64,
+    /// Opaque batches drawn as a legacy per-batch draw (the `legacy_opaque` term
+    /// of `draw_calls`; diagnostics only).
+    pub legacy_opaque_draws: u64,
+    /// Coalesced SDF conic draws (the `arc_draws` term of `draw_calls`).
+    pub arc_draws: u64,
+    /// Transparent batches drawn (the `transparent_batches` term of `draw_calls`).
+    pub transparent_batches: usize,
+    /// Raster image quads drawn (the `image_batches` term of `draw_calls`).
+    pub image_batches: usize,
+    /// Whether this frame's opaque pass used the accelerated per-class draw
+    /// organization (see `cad_render_wgpu::FrameStats::accelerated`). Required to
+    /// interpret `instanced_draws`/`mesh_draws`: on the accelerated tier they are
+    /// per-pulled-segment draws, on the universal tier per-coalesced-run draws.
+    pub accelerated: bool,
+    /// Observable state of the accelerated pulled organisation at this frame
+    /// (`cad_render_wgpu::PulledState`): `Active`, or the explicit reason the
+    /// organisation was skipped (insufficient VRAM with its byte numbers,
+    /// captured OOM, an unsegmentable class, nothing converted, unavailable).
+    /// A skip is never reported as a success.
+    pub pulled_state: cad_render_wgpu::PulledState,
+    /// Resident instance streams (one per chunk) backing `instanced_draws`.
+    /// Comparing this with `instanced_draws` yields draws-per-stream, which is what
+    /// decides whether a chunk-level skip can remove whole draws.
+    pub instance_streams: usize,
+    /// Batches that contributed coalesced instanced runs this frame.
+    pub instanced_batches: usize,
     /// Stable lowercase render tier (`"universal"`/`"accelerated"`).
     pub tier: &'static str,
     /// Whether part of the scene was held back by the frame budget.
@@ -769,6 +795,14 @@ impl CadRenderRuntime {
             triangles: stats.triangles,
             instanced_draws: stats.instanced_draws,
             mesh_draws: stats.mesh_draws,
+            legacy_opaque_draws: stats.legacy_opaque_draws,
+            arc_draws: stats.arc_draws,
+            transparent_batches: stats.transparent_batches,
+            image_batches: stats.image_batches,
+            accelerated: stats.accelerated,
+            pulled_state: stats.pulled_state,
+            instance_streams: stats.instance_streams,
+            instanced_batches: stats.instanced_batches,
             tier: stats.tier.as_str(),
             over_budget: stats.over_budget.is_some(),
             progressive_cursor: cursor,
@@ -1227,6 +1261,14 @@ mod tests {
             triangles: 0,
             instanced_draws: 0,
             mesh_draws: 0,
+            legacy_opaque_draws: 0,
+            arc_draws: 0,
+            transparent_batches: 0,
+            image_batches: 0,
+            accelerated: false,
+            pulled_state: cad_render_wgpu::PulledState::Unavailable,
+            instance_streams: 0,
+            instanced_batches: 0,
             tier: "universal",
             over_budget: false,
             progressive_cursor: None,

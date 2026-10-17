@@ -168,6 +168,123 @@ impl RenderTier {
     }
 }
 
+/// Observable state of the accelerated whole-scene **pulled** organisation (the
+/// one-draw-per-class vertex-pulling path).
+///
+/// It is a *decision* record, not a performance metric: it exists so a skipped
+/// accelerated organisation is never reported as success (AGENTS.md iron rule
+/// #2). Every variant other than [`PulledState::Active`] means the covered
+/// classes are drawn by the universal per-run path instead — which produces the
+/// same pixels, so an over-conservative skip costs speed, never correctness.
+///
+/// The state is decided in `Renderer::rebuild_pulled` (per commit) and is
+/// surfaced on every [`FrameStats`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PulledState {
+    /// Every resident converted class is built as pulled vertex-stage storage
+    /// (whole-scene line segments and/or merged-mesh segments).
+    Active,
+    /// The rebuild was **skipped before allocating**: the exact bytes the pulled
+    /// organisation needs exceed the renderer's memory budget for it, derived
+    /// from the device's own limits (see `Renderer::pulled_budget_bytes`). The
+    /// universal per-run path is used instead; pixels are unchanged.
+    SkippedInsufficientVram {
+        /// Exact bytes one rebuilt pulled organisation would allocate (line +
+        /// mesh storage payloads and both chunk tables; see
+        /// `pulled_payload_bytes`).
+        required_bytes: u64,
+        /// The budget those bytes were compared against.
+        budget_bytes: u64,
+    },
+    /// The rebuild was skipped because an out-of-memory error was **captured**
+    /// from the device while allocating the pulled buffers (fragmentation the
+    /// pre-flight estimate cannot see). Any partially built pulled state was
+    /// discarded and the universal per-run path was rebuilt.
+    SkippedOutOfMemory {
+        /// The pre-flight requirement that was under budget (i.e. the estimate
+        /// the capture disproved).
+        required_bytes: u64,
+        /// The budget the estimate was checked against.
+        budget_bytes: u64,
+        /// The captured wgpu error text (whitespace-normalized).
+        message: String,
+    },
+    /// A class could not be built because it cannot be segmented below the
+    /// device's storage-binding limit: a single resident stream/chunk (or the
+    /// chunk table) is larger than one binding, and a run is never split across
+    /// two buffers.
+    SkippedUnsegmentable {
+        /// Bytes of the largest single allocation the class would need.
+        largest_class_bytes: u64,
+        /// The storage-binding limit it must fit in.
+        binding_limit_bytes: u64,
+    },
+    /// Nothing to pull: no converted line/mesh class is resident.
+    SkippedNoConvertedGeometry,
+    /// The pulled organisation does not apply to this renderer: the live tier is
+    /// [`RenderTier::Universal`] (WebGL2 / no vertex-stage storage buffers), or
+    /// the device and its derived pulled resources are absent.
+    Unavailable,
+}
+
+impl PulledState {
+    /// Stable machine code for CLI/UI/diagnostics.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PulledState::Active => "active",
+            PulledState::SkippedInsufficientVram { .. } => "skipped-insufficient-vram",
+            PulledState::SkippedOutOfMemory { .. } => "skipped-out-of-memory",
+            PulledState::SkippedUnsegmentable { .. } => "skipped-unsegmentable",
+            PulledState::SkippedNoConvertedGeometry => "skipped-no-converted-geometry",
+            PulledState::Unavailable => "unavailable",
+        }
+    }
+
+    /// Whether this state permits the accelerated per-class draw organisation.
+    ///
+    /// A frame may legitimately report `accelerated == false` while the state is
+    /// [`PulledState::Active`] (a paginated/over-budget page that did not accept
+    /// every converted batch), but the converse is impossible: a skipped state
+    /// must never be drawn through the pulled path.
+    pub fn allows_accelerated(&self) -> bool {
+        matches!(self, PulledState::Active)
+    }
+}
+
+impl std::fmt::Display for PulledState {
+    /// Single-line token for probe logs: `name` plus its numbers, no whitespace.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PulledState::Active => write!(f, "active"),
+            PulledState::SkippedInsufficientVram {
+                required_bytes,
+                budget_bytes,
+            } => write!(
+                f,
+                "skipped-insufficient-vram(required_bytes={required_bytes},budget_bytes={budget_bytes})"
+            ),
+            PulledState::SkippedOutOfMemory {
+                required_bytes,
+                budget_bytes,
+                message,
+            } => write!(
+                f,
+                "skipped-out-of-memory(required_bytes={required_bytes},budget_bytes={budget_bytes},message={})",
+                message.split_whitespace().collect::<Vec<_>>().join("_")
+            ),
+            PulledState::SkippedUnsegmentable {
+                largest_class_bytes,
+                binding_limit_bytes,
+            } => write!(
+                f,
+                "skipped-unsegmentable(largest_class_bytes={largest_class_bytes},binding_limit_bytes={binding_limit_bytes})"
+            ),
+            PulledState::SkippedNoConvertedGeometry => write!(f, "skipped-no-converted-geometry"),
+            PulledState::Unavailable => write!(f, "unavailable"),
+        }
+    }
+}
+
 pub struct BackendCapabilities {
     pub actual: ActiveBackend,
     /// Stable API name obtained from the shared device's adapter information.
@@ -236,6 +353,16 @@ pub struct FrameStats {
     /// metric: a converted batch is represented by the coalesced runs it joins,
     /// and each run contributes one entry however many member batches it covers.
     pub draw_calls: u64,
+    /// Opaque batches drawn as a legacy per-batch draw this frame, i.e.
+    /// `opaque_batches - converted_batches`. This is the `legacy_opaque` term of
+    /// [`FrameStats::draw_calls`]: every other term of that sum is an explicit
+    /// field (`arc_draws`, `instanced_draws`, `mesh_draws`) or `transparent`.
+    /// The identity
+    /// `legacy_opaque_draws + arc_draws + instanced_draws + mesh_draws +
+    /// transparent_batches + image_batches == draw_calls` holds by construction
+    /// (see `renderer_impl.rs`, the `draw_calls` expression). Diagnostics only;
+    /// no behaviour depends on it.
+    pub legacy_opaque_draws: u64,
     /// Number of `Queue::write_buffer` calls issued for this frame's uniforms.
     ///
     /// Every accepted batch (and every drawn image) writes its 96-byte uniform
@@ -357,6 +484,10 @@ pub struct FrameStats {
     /// the converted path drop the same trailing vertex; this counts the drop so
     /// it is reported rather than silent (see `docs/render-order.md`).
     pub line_odd_vertex_skips: u64,
+    /// Observable state of the accelerated pulled organisation at this frame
+    /// (see [`PulledState`]). `Active` never appears while the pulled path was
+    /// skipped: a skip is reported with its reason and byte numbers.
+    pub pulled_state: PulledState,
 }
 
 /// One batch whose lineweight was carried but not rasterized.
@@ -1206,6 +1337,20 @@ pub struct Renderer {
     /// segment, so the multi-segment path is exercisable on a small scene.
     /// `None` uses the binding-derived capacity.
     pulled_line_segment_elems_override: Option<usize>,
+    /// Test hook: override the memory budget the pre-flight pulled capacity gate
+    /// compares its requirement against. `None` derives the budget from the
+    /// device limits (see [`Renderer::pulled_budget_bytes`]).
+    pulled_memory_budget_override: Option<u64>,
+    /// Test hook (test builds only): when set, the pulled rebuild treats the
+    /// allocation error scope as if it had captured this out-of-memory message,
+    /// so the capture → discard → universal-fallback path is exercisable without
+    /// provoking a real driver OOM (which no portable test can do
+    /// deterministically).
+    #[cfg(test)]
+    pulled_oom_injection: Option<&'static str>,
+    /// Observable state of the accelerated pulled organisation (see
+    /// [`PulledState`]), updated by every `rebuild_pulled`.
+    pulled_state: PulledState,
     /// Test hook: override the anti-aliased line SDF ramp width (world units per
     /// pixel) for the line class only. `None` uses the projection's real value.
     /// Used by the visual-acceptance test to render the **pre-unification**
@@ -1465,6 +1610,8 @@ pub(crate) use plan::*;
 // Private accelerated-tier GPU contracts for the pulled-prefix fast path. Test
 // only (it reads private renderer state and needs a real device); native only,
 // like `headless`.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod pulled_budget_gpu_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod pulled_prefix_gpu_tests;
 #[cfg(test)]

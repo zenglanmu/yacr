@@ -122,6 +122,10 @@ impl Renderer {
             pulled_mesh: None,
             pulled_binding_limit_override: None,
             pulled_line_segment_elems_override: None,
+            pulled_memory_budget_override: None,
+            #[cfg(test)]
+            pulled_oom_injection: None,
+            pulled_state: PulledState::Unavailable,
             line_ramp_override: None,
             pulled_camera_layout: None,
             pulled_camera_buffer: None,
@@ -583,6 +587,13 @@ impl Renderer {
         self.pulled_lines = None;
         self.pulled_mesh = None;
         self.invalidate_pulled_prefix();
+        // A fresh device has no converted geometry yet; the pulled organisation
+        // is decidable, not skipped for capacity.
+        self.pulled_state = if accelerated {
+            PulledState::SkippedNoConvertedGeometry
+        } else {
+            PulledState::Unavailable
+        };
         self.uniforms = UniformArena::new(&device.limits());
         self.frame_slots.clear();
         self.image_slots.clear();
@@ -2954,15 +2965,18 @@ impl Renderer {
         let previous_lines = self.pulled_lines.take();
         let previous_mesh = self.pulled_mesh.take();
         if self.render_tier != RenderTier::Accelerated {
+            self.pulled_state = PulledState::Unavailable;
             return;
         }
         let (Some(device), Some(queue)) = (self.device.clone(), self.queue.clone()) else {
+            self.pulled_state = PulledState::Unavailable;
             return;
         };
         let (Some(line_layout), Some(mesh_layout)) = (
             self.pulled_line_storage_layout.clone(),
             self.pulled_mesh_storage_layout.clone(),
         ) else {
+            self.pulled_state = PulledState::Unavailable;
             return;
         };
         let limit = self.pulled_binding_limit_override.unwrap_or_else(|| {
@@ -2972,6 +2986,38 @@ impl Renderer {
                 .min(device.limits().max_buffer_size)
         });
         let mut table_bytes_uploaded = 0u64;
+
+        // --- capacity gate (pre-flight, before any allocation) --------------
+        //
+        // A whole-scene pulled organisation is one extra copy of every converted
+        // instance/vertex, allocated in binding-sized segments. `create_buffer` is
+        // not fallible through its return value, so an over-capacity request
+        // panics through wgpu's default error handler; the gate refuses it here
+        // instead and lets the universal per-run path draw the class. See
+        // `pulled_budget_for` for how the budget is derived and
+        // `pulled_payload_bytes` for the requirement.
+        //
+        // The requirement counts the **whole resident** pulled set, so a
+        // prefix-retaining suffix commit is checked conservatively (it would reuse
+        // its base segments instead of reallocating them). Skipping is always
+        // correct — the universal path draws the same pixels — so a conservative
+        // verdict only costs the accelerated organisation.
+        let required_bytes = self.pulled_required_bytes();
+        let budget_bytes = self.pulled_budget_bytes(&device.limits());
+        if !pulled_capacity_fits(required_bytes, budget_bytes) {
+            // Drop the resident pulled classes (their buffers survive through the
+            // streams' handles until the fallback replaces them, so nothing is
+            // left dangling) and give every stream real per-run geometry.
+            self.pulled_lines = None;
+            self.pulled_mesh = None;
+            self.invalidate_pulled_prefix();
+            self.build_line_fallback(&device, &queue);
+            self.pulled_state = PulledState::SkippedInsufficientVram {
+                required_bytes,
+                budget_bytes,
+            };
+            return;
+        }
 
         // Resolve the reuse plan: the retained base segments, the resource
         // boundaries, and whether a checkpoint should be (re)established.
@@ -3038,6 +3084,16 @@ impl Renderer {
         }
 
         // --- whole-scene line storage -------------------------------------
+        // The classes are built inside an out-of-memory error scope: an
+        // allocation the pre-flight estimate could not foresee (driver
+        // fragmentation) is captured instead of panicking through wgpu's default
+        // error handler. `capture_oom_scope` pops the scope and returns the
+        // captured error text (native backends; the browser tier cannot await the
+        // pop synchronously and relies on the pre-flight gate).
+        let oom_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        // Largest single allocation a class needed but could not segment (see
+        // `PulledState::SkippedUnsegmentable`), if any.
+        let mut unsegmentable: Option<(u64, u64)> = None;
         if !self.instance_streams.is_empty() {
             let table_bytes = vec![0u8; self.instance_streams.len() * 16];
             let max_elems = (limit / u64::from(PULLED_LINE_STRIDE)).max(1) as usize;
@@ -3188,6 +3244,21 @@ impl Renderer {
                         line_base_ranges = ranges[..base_range_count].to_vec();
                     }
                 }
+            } else {
+                // The class cannot be segmented below the binding limit (a single
+                // stream, or the chunk table itself, is larger than one binding).
+                // Reported explicitly; never built oversized.
+                let largest_stream = self
+                    .instance_streams
+                    .iter()
+                    .filter(|stream| stream.pulled_instances.len() > segment_elems)
+                    .map(|stream| {
+                        stream.pulled_instances.len() as u64
+                            * std::mem::size_of::<PulledLine>() as u64
+                    })
+                    .max()
+                    .unwrap_or(0);
+                unsegmentable = Some((largest_stream.max(table_bytes.len() as u64), limit));
             }
             if self.pulled_lines.is_none() {
                 // The whole-scene pulled line class could not be built: give
@@ -3353,7 +3424,45 @@ impl Renderer {
                         mesh_base_ranges = ranges[..base_range_count].to_vec();
                     }
                 }
+            } else {
+                // As for the line class: not segmentable below the binding limit.
+                let largest_chunk = self
+                    .mesh_chunks
+                    .iter()
+                    .filter(|chunk| {
+                        chunk.pulled_vertices.len() > max_verts
+                            || chunk.pulled_indices.len() > max_indices
+                    })
+                    .map(|chunk| {
+                        (chunk.pulled_vertices.len() as u64
+                            * std::mem::size_of::<PulledMeshVertex>() as u64)
+                            .max(chunk.pulled_indices.len() as u64 * 4)
+                    })
+                    .max()
+                    .unwrap_or(0);
+                unsegmentable = Some((largest_chunk.max(table_bytes.len() as u64), limit));
             }
+        }
+        // Close the out-of-memory scope and take whatever it captured. A captured
+        // error means the device could not satisfy an allocation the estimate
+        // allowed (fragmentation): discard the partial pulled state and fall back.
+        let captured_oom =
+            capture_oom_scope(oom_scope, self.injected_pulled_oom().map(str::to_string));
+        if let Some(message) = captured_oom {
+            self.pulled_lines = None;
+            self.pulled_mesh = None;
+            self.invalidate_pulled_prefix();
+            // The universal per-run path needs real geometry (see
+            // `build_line_fallback`). An allocation that fails *here* is a device
+            // that is genuinely exhausted: it panics loudly rather than drawing an
+            // empty success.
+            self.build_line_fallback(&device, &queue);
+            self.pulled_state = PulledState::SkippedOutOfMemory {
+                required_bytes,
+                budget_bytes,
+                message,
+            };
+            return;
         }
         self.uploaded_bytes += table_bytes_uploaded;
 
@@ -3383,6 +3492,72 @@ impl Renderer {
                 }
             }
             PrefixOutcome::Invalidate => self.invalidate_pulled_prefix(),
+        }
+
+        // Report what the rebuild actually produced. `Active` requires at least
+        // one resident converted class to be pulled; a class that exists but could
+        // not be segmented is reported as such, never as success (and never as
+        // "no converted geometry").
+        let has_line_class = !self.instance_streams.is_empty();
+        let has_mesh_class = !self.mesh_chunks.is_empty();
+        self.pulled_state = if !has_line_class && !has_mesh_class {
+            PulledState::SkippedNoConvertedGeometry
+        } else if (has_line_class && self.pulled_lines.is_none())
+            || (has_mesh_class && self.pulled_mesh.is_none())
+        {
+            let (largest, binding) = unsegmentable.unwrap_or((required_bytes, limit));
+            PulledState::SkippedUnsegmentable {
+                largest_class_bytes: largest,
+                binding_limit_bytes: binding,
+            }
+        } else {
+            PulledState::Active
+        };
+    }
+
+    /// Exact bytes one pulled rebuild would allocate for the resident scene.
+    ///
+    /// Collected from the real resident classes and reduced by
+    /// [`pulled_payload_bytes`]; it is the requirement the pre-flight capacity
+    /// gate compares against `pulled_budget_bytes`.
+    fn pulled_required_bytes(&self) -> u64 {
+        let line_instances: Vec<usize> = self
+            .instance_streams
+            .iter()
+            .map(|stream| stream.pulled_instances.len())
+            .collect();
+        let mesh_vertices: Vec<usize> = self
+            .mesh_chunks
+            .iter()
+            .map(|chunk| chunk.pulled_vertices.len())
+            .collect();
+        let mesh_indices: Vec<usize> = self
+            .mesh_chunks
+            .iter()
+            .map(|chunk| chunk.pulled_indices.len())
+            .collect();
+        pulled_payload_bytes(&line_instances, &mesh_vertices, &mesh_indices)
+    }
+
+    /// The memory budget the whole pulled organisation of one rebuild may claim.
+    ///
+    /// `pulled_memory_budget_override` (test hook) wins; otherwise the budget is
+    /// [`pulled_budget_for`] of the live device limits.
+    fn pulled_budget_bytes(&self, limits: &wgpu::Limits) -> u64 {
+        self.pulled_memory_budget_override
+            .unwrap_or_else(|| pulled_budget_for(limits))
+    }
+
+    /// The test-only injected out-of-memory message, if any (production builds
+    /// always return `None`).
+    fn injected_pulled_oom(&self) -> Option<&'static str> {
+        #[cfg(test)]
+        {
+            self.pulled_oom_injection
+        }
+        #[cfg(not(test))]
+        {
+            None
         }
     }
 
@@ -3504,6 +3679,11 @@ impl Renderer {
         self.pulled_lines = None;
         self.pulled_mesh = None;
         self.invalidate_pulled_prefix();
+        self.pulled_state = if self.render_tier == RenderTier::Accelerated {
+            PulledState::SkippedNoConvertedGeometry
+        } else {
+            PulledState::Unavailable
+        };
         // Resident image quads own pick keys too, and `reset_pick_keys` restarts
         // the key space at 1. Keeping the images would let a re-uploaded batch
         // reuse an image's key, which the pick table could only resolve by
@@ -3631,6 +3811,9 @@ impl Renderer {
         self.pulled_mesh = None;
         self.pulled_camera_bind_group = None;
         self.invalidate_pulled_prefix();
+        // The pulled organisation is gone with the device: report it as
+        // unavailable rather than leaving a stale `Active`.
+        self.pulled_state = PulledState::Unavailable;
         self.line_pulled_pipeline = None;
         self.mesh_pulled_pipeline = None;
         self.mesh_pulled_mirrored_pipeline = None;
@@ -3699,6 +3882,9 @@ impl Renderer {
         self.last_projection = None;
         self.last_camera_position = None;
         self.reset_pick_keys();
+        // Derived GPU resources are torn down by the loss; the pulled organisation
+        // is no longer active. Reported so a reader never sees a stale `Active`.
+        self.pulled_state = PulledState::Unavailable;
         self.last_device_lost = Some(detail.clone());
         RenderError::DeviceLost(detail)
     }
@@ -4910,6 +5096,7 @@ impl Renderer {
             cpu_ms,
             gpu_ms: None,
             draw_calls,
+            legacy_opaque_draws: legacy_opaque as u64,
             uniform_writes,
             uploaded_bytes: self.uploaded_bytes,
             vertices: budget_plan.usage.vertices,
@@ -4954,6 +5141,7 @@ impl Renderer {
                 0
             },
             line_odd_vertex_skips: self.line_odd_vertex_skips,
+            pulled_state: self.pulled_state.clone(),
         })
     }
 
@@ -5135,6 +5323,30 @@ impl Renderer {
         self.invalidate_pulled_prefix();
     }
 
+    /// Test hook: override the memory budget the pre-flight pulled capacity gate
+    /// compares its exact requirement against (see
+    /// [`Renderer::pulled_budget_bytes`]). `None` restores the device-limit
+    /// derived budget. Takes effect on the next commit; segmentation (and
+    /// therefore any retained base range set) is unaffected.
+    pub fn set_pulled_memory_budget_override(&mut self, budget: Option<u64>) {
+        self.pulled_memory_budget_override = budget;
+    }
+
+    /// Test-only hook: treat the pulled allocation error scope as if it had
+    /// captured this out-of-memory message, so the capture → discard → universal
+    /// fallback path is exercisable without provoking a real driver OOM. Test
+    /// builds only; takes effect on the next commit.
+    #[cfg(test)]
+    pub fn set_pulled_oom_injection(&mut self, message: Option<&'static str>) {
+        self.pulled_oom_injection = message;
+    }
+
+    /// Observable state of the accelerated pulled organisation (see
+    /// [`PulledState`]); also carried on every [`FrameStats`].
+    pub fn pulled_state(&self) -> PulledState {
+        self.pulled_state.clone()
+    }
+
     /// Test hook: override the anti-aliased line SDF ramp width (world units per
     /// pixel) for the line class only. `None` restores the projection's real
     /// value. A sub-pixel ramp reproduces the pre-unification hard-aliased 1 px
@@ -5237,6 +5449,106 @@ impl Renderer {
             vec![DiagnosticParameter::Identifier(detail.to_string())],
         )
     }
+}
+
+/// Exact bytes one pulled rebuild allocates for the given resident classes.
+///
+/// Derived from the **real packed types**, never from a tuned constant:
+/// `size_of::<PulledLine>()` per line instance, `size_of::<PulledMeshVertex>()`
+/// per merged-mesh vertex, 4 bytes per rebased mesh index, and one `[f32; 4]`
+/// chunk-table entry per resident stream/chunk (the tables `rebuild_pulled`
+/// zero-fills). Segmentation does not change the total: each record and index is
+/// written exactly once, into whichever binding-sized buffer it lands.
+pub(crate) fn pulled_payload_bytes(
+    line_instances: &[usize],
+    mesh_vertices: &[usize],
+    mesh_indices: &[usize],
+) -> u64 {
+    let line = line_instances
+        .iter()
+        .map(|count| *count as u64 * std::mem::size_of::<PulledLine>() as u64)
+        .sum::<u64>();
+    let line_table = line_instances.len() as u64 * std::mem::size_of::<[f32; 4]>() as u64;
+    let mesh = mesh_vertices
+        .iter()
+        .map(|count| *count as u64 * std::mem::size_of::<PulledMeshVertex>() as u64)
+        .sum::<u64>()
+        + mesh_indices
+            .iter()
+            .map(|count| *count as u64 * 4)
+            .sum::<u64>();
+    let mesh_table = mesh_vertices.len() as u64 * std::mem::size_of::<[f32; 4]>() as u64;
+    line + line_table + mesh + mesh_table
+}
+
+/// The pre-flight capacity verdict: the pulled organisation may be built only
+/// when its exact requirement fits the budget.
+///
+/// An exact fit is allowed: the budget is the renderer's own ceiling on the
+/// allocation it asks the device for, not a device-side hard limit. Pure so the
+/// boundary is unit-testable without a GPU.
+pub(crate) fn pulled_capacity_fits(required_bytes: u64, budget_bytes: u64) -> bool {
+    required_bytes <= budget_bytes
+}
+
+/// Budget for **all** whole-scene pulled allocations of one rebuild.
+///
+/// Derived from the device's own limits, not from a scene or machine constant:
+/// the budget is the device's largest single allocation, `max_buffer_size`
+/// (the adapter's reported maximum allocation clamped by the shared device's
+/// requested limits — on the Vulkan backend,
+/// `VkPhysicalDeviceLimits::maxMemoryAllocationSize`, wgpu-hal 30.0.1
+/// `src/vulkan/adapter.rs:1494-1514`).
+///
+/// Policy: the pulled organisation is a **second** copy of every converted
+/// instance/vertex, allocated as binding-sized segments on top of the resident
+/// per-run buffers. It may claim at most one `max_buffer_size` worth of
+/// additional device memory; past that it is many separate allocations
+/// competing with the per-chunk mesh buffers, the textures, the desktop
+/// compositor sharing the same heap and driver fragmentation, which is exactly
+/// the regime that made a ~2 GiB pulled set panic (`create_buffer: Out of
+/// Memory`) on a 4 GB adapter.
+///
+/// A budget below one `max_buffer_size` (for example a share of
+/// `max_storage_buffer_binding_size`) was rejected: the device's *usable*
+/// bindings are already capped at `min(max_buffer_size,
+/// max_storage_buffer_binding_size)` by the segmenter, so a tighter total bound
+/// would skip the accelerated organisation for scenes that build and draw it
+/// comfortably (the repository's 10 656-entity fixture needs ~172 MiB).
+///
+/// wgpu 30.0.1 exposes **no** total/free-memory query (`Adapter`/`Device` have
+/// none), and this machine's NVIDIA driver exposes no VRAM size through
+/// sysfs/procfs, so no tighter memory hint is obtainable here. The asymmetry is
+/// deliberate: over-estimating is the failure being fixed, while
+/// under-estimating only costs the accelerated organisation, because the
+/// universal per-run fallback draws the same pixels.
+pub(crate) fn pulled_budget_for(limits: &wgpu::Limits) -> u64 {
+    limits.max_buffer_size
+}
+
+/// Pop an out-of-memory error scope and return the captured error text, if any.
+///
+/// `injected` is a test-only synthetic error (see
+/// `Renderer::injected_pulled_oom`); the scope is always popped, so the scope
+/// stack stays balanced.
+///
+/// On native backends wgpu-core resolves a popped scope immediately
+/// (`wgpu-30.0.1/src/backend/wgpu_core.rs:1860-1897` returns
+/// `Box::pin(ready(scope.error))`), so `block_on` cannot stall. The browser tier
+/// cannot await the pop on the render path, so it pops without observing the
+/// result and relies on the pre-flight gate.
+pub(crate) fn capture_oom_scope(
+    scope: wgpu::ErrorScopeGuard,
+    injected: Option<String>,
+) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let captured = futures_lite::future::block_on(scope.pop()).map(|error| error.to_string());
+    #[cfg(target_arch = "wasm32")]
+    let captured = {
+        drop(scope);
+        None
+    };
+    injected.or(captured)
 }
 
 /// The row width of the flags table for a key space of `needed` keys.
@@ -5633,5 +5945,111 @@ mod pulled_prefix_tests {
         assert!(!shared_mesh.disjoint_from(4, 2, 2));
         // No retained resources: everything is disjoint.
         assert!(shared_mesh.disjoint_from(0, 0, 0));
+    }
+}
+
+#[cfg(test)]
+mod pulled_budget_tests {
+    //! Pure contracts for the pulled capacity gate (no GPU required).
+    //!
+    //! Byte-identity of the two paths under a skip, and the reported state, are
+    //! GPU-tested in `crate::pulled_budget_gpu_tests`.
+
+    use super::*;
+
+    #[test]
+    fn payload_bytes_count_every_record_and_table_entry() {
+        // Three and two line instances; four mesh vertices with six indices.
+        // Every term is derived from the real packed types, not from a constant.
+        let line_record = std::mem::size_of::<PulledLine>() as u64;
+        let mesh_record = std::mem::size_of::<PulledMeshVertex>() as u64;
+        let table_entry = std::mem::size_of::<[f32; 4]>() as u64;
+        assert_eq!(line_record, u64::from(PULLED_LINE_STRIDE));
+        assert_eq!(mesh_record, u64::from(PULLED_MESH_VERTEX_STRIDE));
+        let expected = 5 * line_record   // instances
+            + 2 * table_entry            // one chunk-table entry per line stream
+            + 4 * mesh_record            // merged-mesh vertices
+            + 6 * 4                      // rebased mesh indices
+            + table_entry; // one chunk-table entry per mesh chunk
+        assert_eq!(pulled_payload_bytes(&[3, 2], &[4], &[6]), expected);
+        // No converted geometry: nothing would be allocated.
+        assert_eq!(pulled_payload_bytes(&[], &[], &[]), 0);
+        // A mesh-only class allocates no line payload or line table.
+        assert_eq!(
+            pulled_payload_bytes(&[], &[4], &[6]),
+            4 * mesh_record + 6 * 4 + table_entry
+        );
+    }
+
+    #[test]
+    fn capacity_gate_rejects_only_requirements_above_the_budget() {
+        assert!(pulled_capacity_fits(0, 0));
+        // An exact fit is allowed: the budget is the renderer's own ceiling.
+        assert!(pulled_capacity_fits(1_000, 1_000));
+        assert!(pulled_capacity_fits(999, 1_000));
+        // One byte over is rejected.
+        assert!(!pulled_capacity_fits(1_001, 1_000));
+        assert!(!pulled_capacity_fits(u64::MAX, 1_000));
+        assert!(!pulled_capacity_fits(1, 0));
+    }
+
+    #[test]
+    fn budget_is_the_device_single_allocation_limit() {
+        // Derived from `Limits` only, with no machine or scene constant.
+        for limits in [
+            wgpu::Limits::default(),
+            wgpu::Limits::downlevel_defaults(),
+            wgpu::Limits::downlevel_webgl2_defaults(),
+        ] {
+            assert_eq!(pulled_budget_for(&limits), limits.max_buffer_size);
+        }
+        // The limit pair this machine's shared device reports (the host requests
+        // `Limits::default()`): 256 MiB, which admits the repository's
+        // 10 656-entity fixture (~172 MiB) and rejects the 44 591-entity fixture
+        // (~2.3 GiB) that used to panic.
+        let p620_shared_device = wgpu::Limits::default();
+        assert_eq!(pulled_budget_for(&p620_shared_device), 268_435_456);
+        assert!(pulled_budget_for(&p620_shared_device) > 180_550_060);
+        assert!(pulled_budget_for(&p620_shared_device) < 2_281_858_648);
+    }
+
+    #[test]
+    fn only_the_active_state_permits_the_accelerated_path() {
+        // The one-way invariant behind `FrameStats::accelerated`: a frame may
+        // report `accelerated == false` while the state is `Active` (a paginated
+        // page), but a skipped state must never be drawn through the pulled path.
+        assert!(PulledState::Active.allows_accelerated());
+        for skipped in [
+            PulledState::SkippedInsufficientVram {
+                required_bytes: 1_000,
+                budget_bytes: 999,
+            },
+            PulledState::SkippedOutOfMemory {
+                required_bytes: 1_000,
+                budget_bytes: 2_000,
+                message: "out of memory".to_string(),
+            },
+            PulledState::SkippedUnsegmentable {
+                largest_class_bytes: 9,
+                binding_limit_bytes: 8,
+            },
+            PulledState::SkippedNoConvertedGeometry,
+            PulledState::Unavailable,
+        ] {
+            assert!(
+                !skipped.allows_accelerated(),
+                "{skipped:?} must not permit the accelerated path"
+            );
+            assert_ne!(skipped.as_str(), "active");
+        }
+        // The probe/status rendering is single-line and whitespace-free.
+        let oom = PulledState::SkippedOutOfMemory {
+            required_bytes: 1,
+            budget_bytes: 2,
+            message: "Out of Memory: driver said no".to_string(),
+        };
+        let rendered = oom.to_string();
+        assert!(!rendered.contains(char::is_whitespace), "{rendered}");
+        assert!(rendered.starts_with("skipped-out-of-memory("), "{rendered}");
     }
 }
