@@ -486,8 +486,15 @@ impl Renderer {
         };
 
         // The same budgeted plan a single color page uses; the id pass is not
-        // progressive (a pick always covers the whole resident page).
-        let plan = plan_from_gpu(&self.batches, &self.frame_budget);
+        // progressive (a pick always covers the whole resident page) and is
+        // deliberately **not** paced: it reads the un-paced `frame_budget`, so a
+        // pick resolves exactly the resident scene regardless of the page size a
+        // pan happened to use.
+        let plan = plan_from_gpu(
+            &self.batches,
+            &self.frame_budget,
+            cad_scene::FrameUsage::default(),
+        );
         let entries: Vec<BatchOrderEntry> = plan
             .accepted
             .iter()

@@ -1978,7 +1978,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         if let Some(actual) = actual {
             if cad_log {
                 eprintln!(
-                    "[probe] actual-render seq={} device_epoch={} view_rev={} applied_rev={:?} applied_base={:?} cpu_ms={:.3} gpu_ms={:?} plan_ms={:.3} uniform_ms={:.3} encode_ms={:.3} submit_ms={:.3} wait_ms={:.3} draw_calls={} verts={} tris={} instanced={} mesh={} legacy_opaque={} arc={} transparent={} images={} accelerated={} instance_streams={} instanced_batches={} tier={} over_budget={} prog={:?}/{:?} complete={} uploads_started={} rev_resets={} ready_none={} pulled={}",
+                    "[probe] actual-render seq={} device_epoch={} view_rev={} applied_rev={:?} applied_base={:?} cpu_ms={:.3} gpu_ms={:?} plan_ms={:.3} uniform_ms={:.3} encode_ms={:.3} submit_ms={:.3} wait_ms={:.3} draw_calls={} verts={} tris={} instanced={} mesh={} legacy_opaque={} arc={} transparent={} images={} accelerated={} instance_streams={} instanced_batches={} tier={} over_budget={} prog={:?}/{:?} complete={} uploads_started={} rev_resets={} ready_none={} pulled={} budget_scale={:.3} budget_target_ms={:.2} budget_cost_ema_ms={:.2} budget_verts={} budget_tris={} pacing={}",
                     actual.render_seq,
                     actual.device_epoch,
                     actual.view_revision,
@@ -2012,6 +2012,12 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                     actual.upload_revision_resets,
                     actual.ready_none_clears,
                     actual.pulled_state,
+                    actual.budget_scale,
+                    actual.budget_target_ms,
+                    actual.budget_cost_ema_ms,
+                    actual.budget_vertices,
+                    actual.budget_triangles,
+                    actual.pacing,
                 );
             }
             lock(shared).last_actual_render = Some(ActualRenderSummary {

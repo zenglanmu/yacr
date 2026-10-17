@@ -177,11 +177,32 @@ fn progressive_pages_match_full_scene_without_raising_per_frame_budget() {
     renderer.frame_budget.max_vertices = 6;
     renderer.frame_budget.max_triangles = 2;
     renderer.set_progressive_rendering(true);
+    // Drive the controller hard down: the paced page then cannot fit a 6-vertex
+    // batch, so the progress floor must keep every page advancing while the
+    // settled frame stays byte-identical to the single un-paced full scene.
+    renderer.set_frame_budget_target_ms(0.001);
     let mut pages = 0;
+    let mut saw_paced_page = false;
+    let mut saw_floor = false;
     loop {
         let stats = renderer.render(camera_2d(), &target).unwrap();
         assert!(stats.vertices <= 6);
         assert!(stats.triangles <= 2);
+        assert_eq!(
+            stats.pacing, "active",
+            "progressive native pacing is active"
+        );
+        if stats.budget_scale < 1.0 {
+            saw_paced_page = true;
+            assert_eq!(stats.budget_target_ms, 0.001);
+        }
+        if stats
+            .over_budget
+            .as_ref()
+            .is_some_and(|over| over.report.category == "pacing-floor")
+        {
+            saw_floor = true;
+        }
         pages += 1;
         assert!(pages <= delta.added.len());
         if !renderer.frame_pending() {
@@ -189,6 +210,14 @@ fn progressive_pages_match_full_scene_without_raising_per_frame_budget() {
         }
     }
     assert!(pages > 1);
+    assert!(
+        saw_paced_page,
+        "the controller must have scaled the page budget down for this trace"
+    );
+    assert!(
+        saw_floor,
+        "a paced page smaller than one batch must report the progress floor"
+    );
     assert_eq!(
         renderer.frame_progress(),
         Some((delta.added.len(), delta.added.len()))
@@ -223,6 +252,404 @@ fn progressive_oversized_batch_is_an_explicit_error_not_empty_completion() {
         .render(camera_2d(), &RenderTarget::new(64, 64))
         .is_err());
     assert_eq!(renderer.frame_progress(), Some((0, 1)));
+}
+
+/// A `2`-triangle quad covering the centre, facing +Z (same winding convention
+/// as [`triangle_mesh`]). Charges 4 vertices / 2 triangles, one more vertex than
+/// a minimum triangle, so a tiny paced budget can be shown to reject it.
+fn quad_mesh() -> RenderBatch {
+    RenderBatch {
+        conics: Vec::new(),
+        local_origin: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        topology: RenderTopology::Mesh,
+        vertices: vec![
+            [-0.5, -0.5, 0.0],
+            [0.5, -0.5, 0.0],
+            [0.5, 0.5, 0.0],
+            [-0.5, 0.5, 0.0],
+        ],
+        normals: vec![[0.0, 0.0, 1.0]; 4],
+        colors: Vec::new(),
+        indices: vec![[0, 1, 2], [0, 2, 3]],
+        edges: Vec::new(),
+        mirrored: false,
+        alpha: 1.0,
+        color: cad_scene::DEFAULT_BATCH_COLOR,
+        color_unresolved: true,
+        lineweight: 0.0,
+        lineweight_unresolved: true,
+        linetype: cad_scene::LinetypePattern::continuous(),
+        linetype_unresolved: true,
+        sources: vec![source()],
+        draw_order: 0,
+    }
+}
+
+/// `n` independent one-segment line batches (each charges 6 vertices / 2
+/// triangles), all in the same upload order.
+fn line_batches(n: usize) -> Vec<RenderBatch> {
+    (0..n)
+        .map(|i| {
+            let y = -0.8 + i as f32 * 0.1;
+            lines_batch(vec![[-0.8, y, 0.0], [0.8, y, 0.0]])
+        })
+        .collect()
+}
+
+/// The paced page budget must follow the per-frame ceiling and the cursor must
+/// advance by exactly the accepted count — no skip, no duplicate.
+#[test]
+fn paced_budget_is_adjustable_per_frame_without_skipping_or_duplicating() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let batches = line_batches(8);
+    let delta = scene(batches);
+    renderer.upload(&delta).expect("upload eight line batches");
+    let target = RenderTarget::new(64, 64);
+    renderer.render(camera_2d(), &target).unwrap();
+    let reference = renderer.read_target_rgba().unwrap();
+
+    renderer.set_progressive_rendering(true);
+    // A huge target disables adaptation, so the *ceiling* is the budget and we
+    // control it directly frame by frame.
+    renderer.set_frame_budget_target_ms(1.0e9);
+
+    let alternate = [12usize, 18];
+    let mut accepted_sequence = Vec::new();
+    let mut previous_cursor = 0usize;
+    let mut frames = 0;
+    loop {
+        renderer.frame_budget.max_vertices = alternate[frames % alternate.len()];
+        let stats = renderer.render(camera_2d(), &target).unwrap();
+        let (cursor, total) = renderer.frame_progress().expect("progressive frame");
+        assert_eq!(total, 8);
+        assert!(
+            cursor > previous_cursor,
+            "the cursor must advance on every page, {previous_cursor} -> {cursor}"
+        );
+        assert_eq!(
+            cursor - previous_cursor,
+            stats.opaque_batches,
+            "the cursor must advance by exactly the accepted batch count"
+        );
+        accepted_sequence.push(stats.opaque_batches);
+        previous_cursor = cursor;
+        frames += 1;
+        assert!(frames <= 8, "paged frame did not terminate");
+        if !renderer.frame_pending() {
+            break;
+        }
+    }
+    assert_eq!(
+        accepted_sequence,
+        vec![2, 3, 2, 1],
+        "each page must accept exactly what its budget allows"
+    );
+    assert_eq!(renderer.frame_progress(), Some((8, 8)));
+    assert_eq!(
+        renderer.read_target_rgba().unwrap().pixels,
+        reference.pixels,
+        "no skip and no duplicate: the settled frame equals the full scene"
+    );
+}
+
+/// A pick reads the un-paced ceiling, so shrinking the *active* page budget must
+/// not change a pick result.
+#[test]
+fn pick_is_invariant_under_a_tiny_active_page_budget() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // The pickable quad is uploaded first (renderer key 1) and drawn last
+    // (highest draw order), so both the full-ceiling reference pick and the tiny
+    // ceiling pick resolve the centre to it. It charges 4 vertices, more than a
+    // scaled 6-vertex page can hold once pacing has stepped down.
+    let mut pickable = quad_mesh();
+    pickable.draw_order = 100;
+    let mut batches = vec![pickable];
+    batches.extend(line_batches(6));
+    renderer
+        .upload(&scene(batches))
+        .expect("upload pickable scene");
+    let target = RenderTarget::new(64, 64);
+    renderer.render(camera_2d(), &target).unwrap();
+    let reference_pick = renderer.pick_at(32, 32).expect("reference pick");
+    assert!(reference_pick.is_some(), "the centre must be pickable");
+
+    renderer.frame_budget.max_vertices = 6;
+    renderer.frame_budget.max_triangles = 2;
+    renderer.set_progressive_rendering(true);
+    renderer.set_frame_budget_target_ms(0.001);
+    let mut frames = 0;
+    loop {
+        renderer.render(camera_2d(), &target).unwrap();
+        frames += 1;
+        assert!(frames <= 16, "paced pick scene did not terminate");
+        if !renderer.frame_pending() {
+            break;
+        }
+    }
+    assert!(
+        renderer.pacing_scale() < 1.0,
+        "the trace must have shrunk the active page budget, got {}",
+        renderer.pacing_scale()
+    );
+    let paced_pick = renderer.pick_at(32, 32).expect("paced pick");
+    assert_eq!(
+        paced_pick, reference_pick,
+        "picking must be independent of the paced page budget"
+    );
+}
+
+/// The progress floor: batches that fit the un-paced ceiling must never produce
+/// the "one GPU batch exceeds..." error, and the cursor must strictly advance.
+#[test]
+fn progress_floor_keeps_the_cursor_monotone_for_ceiling_fitting_batches() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // One batch per un-paced page (6 vertices), so a scaled page cannot fit a
+    // batch once the controller has stepped down.
+    renderer.frame_budget.max_vertices = 6;
+    renderer.frame_budget.max_triangles = 2;
+    renderer
+        .upload(&scene(line_batches(8)))
+        .expect("upload eight line batches");
+    renderer.set_progressive_rendering(true);
+    renderer.set_frame_budget_target_ms(0.001);
+
+    let target = RenderTarget::new(64, 64);
+    let mut previous_cursor = 0usize;
+    let mut saw_floor = false;
+    let mut pages = 0;
+    loop {
+        let stats = renderer
+            .render(camera_2d(), &target)
+            .expect("a batch that fits the ceiling must not be an error");
+        let (cursor, total) = renderer.frame_progress().expect("progressive frame");
+        assert!(cursor > previous_cursor, "cursor must strictly advance");
+        assert!(total == 8);
+        if stats
+            .over_budget
+            .as_ref()
+            .is_some_and(|over| over.report.category == "pacing-floor")
+        {
+            saw_floor = true;
+        }
+        previous_cursor = cursor;
+        pages += 1;
+        assert!(pages <= 8, "paced frame did not terminate");
+        if !renderer.frame_pending() {
+            break;
+        }
+    }
+    assert_eq!(previous_cursor, 8);
+    assert!(
+        saw_floor,
+        "a paced page smaller than one batch must take the progress floor"
+    );
+}
+
+/// An image-heavy scene must keep its images in the settled frame under small
+/// paced pages: the full image charge is reserved on the cleared page before
+/// geometry fills the remainder.
+#[test]
+fn paced_pages_keep_images_in_the_settled_frame() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // Five 30-segment line batches (180 vertices each), drawn outside the image
+    // box so the image centre stays assertable. A 183-vertex ceiling fits one
+    // batch; adding the image's 4 vertices pushes a geometry-first plan over it,
+    // which is exactly the latent drop this change fixes.
+    let big_line = || {
+        let mut vertices = Vec::new();
+        for i in 0..30 {
+            let x = 0.85 + i as f32 * 0.001;
+            vertices.push([x, -0.5, 0.0]);
+            vertices.push([x, 0.5, 0.0]);
+        }
+        lines_batch(vertices)
+    };
+    let batches: Vec<RenderBatch> = (0..5).map(|_| big_line()).collect();
+    renderer
+        .upload(&scene(batches))
+        .expect("upload line batches");
+    let mut cache = DecodedImageCache::new();
+    cache
+        .insert(
+            ResourceKey("red".into()),
+            solid_image(2, 2, [255, 0, 0, 255]),
+            &ResourceLimits::default(),
+        )
+        .expect("insert red image");
+    renderer
+        .upload_images(&[image_batch("red")], &cache)
+        .expect("upload red image");
+
+    renderer.frame_budget.max_vertices = 183;
+    renderer.set_progressive_rendering(true);
+    renderer.set_frame_budget_target_ms(0.001);
+
+    let target = RenderTarget::new(64, 64);
+    let mut image_draws = 0usize;
+    let mut saw_paced_page = false;
+    let mut pages = 0;
+    loop {
+        let stats = renderer.render(camera_2d(), &target).unwrap();
+        image_draws += stats.image_batches;
+        if stats.budget_scale < 1.0 {
+            saw_paced_page = true;
+        }
+        pages += 1;
+        assert!(pages <= 16, "paced image scene did not terminate");
+        if !renderer.frame_pending() {
+            break;
+        }
+    }
+    assert!(saw_paced_page, "the trace must exercise a paced page");
+    assert_eq!(
+        image_draws, 1,
+        "the resident image must be drawn exactly once, on the cleared page"
+    );
+    let frame = renderer.read_target_rgba().expect("read settled frame");
+    let centre = frame.pixel(32, 32);
+    assert!(
+        centre[0] > 240 && centre[1] < 15 && centre[2] < 15,
+        "the image centre must be opaque red in the settled frame, got {centre:?}"
+    );
+}
+
+/// With no completion signal the pacing is disabled by state: the static ceiling
+/// is used and no cost knowledge is accumulated.
+#[test]
+fn disabled_pacing_uses_the_static_default_budget() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&scene(line_batches(4)))
+        .expect("upload line batches");
+    renderer.frame_budget.max_vertices = 6;
+    renderer.frame_budget.max_triangles = 2;
+    renderer.set_progressive_rendering(true);
+    // The wasm non-blocking poll has no completion signal; force that decision.
+    renderer.set_pacing_signal_override(Some(false));
+    renderer.set_frame_budget_target_ms(0.001);
+
+    let target = RenderTarget::new(64, 64);
+    let mut pages = 0;
+    loop {
+        let stats = renderer.render(camera_2d(), &target).unwrap();
+        assert_eq!(stats.pacing, "disabled-no-completion-signal");
+        assert_eq!(stats.budget_scale, 1.0, "the static budget is not scaled");
+        assert_eq!(
+            stats.budget_vertices, 6,
+            "the static vertex ceiling is used"
+        );
+        assert_eq!(
+            stats.budget_triangles, 2,
+            "the static triangle ceiling is used"
+        );
+        assert_eq!(
+            stats.budget_cost_ema_ms, 0.0,
+            "a disabled controller must not accumulate cost knowledge"
+        );
+        pages += 1;
+        assert!(pages <= 4, "paced frame did not terminate");
+        if !renderer.frame_pending() {
+            break;
+        }
+    }
+    assert!(pages > 1);
+    assert_eq!(renderer.pacing_scale(), 1.0);
+    assert_eq!(renderer.pacing_cost_ema_ms(), 0.0);
+}
+
+/// A non-progressive frame is planned against the un-paced ceiling and says so:
+/// there is no page to pace.
+#[test]
+fn non_progressive_frames_report_the_un_paced_ceiling() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&scene(line_batches(3)))
+        .expect("upload line batches");
+    let stats = renderer
+        .render(camera_2d(), &RenderTarget::new(64, 64))
+        .unwrap();
+    assert_eq!(stats.pacing, "at-ceiling");
+    assert_eq!(stats.budget_scale, 1.0);
+    assert_eq!(stats.budget_vertices, renderer.frame_budget.max_vertices);
+    assert_eq!(stats.budget_triangles, renderer.frame_budget.max_triangles);
+}
+
+/// Scene mutation / `clear_batches` drop the scene-specific cost knowledge; a
+/// camera move does not (covered by the parity test).
+#[test]
+fn scene_mutation_resets_pacing_knowledge() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer.frame_budget.max_vertices = 6;
+    renderer.frame_budget.max_triangles = 2;
+    renderer
+        .upload(&scene(line_batches(8)))
+        .expect("upload line batches");
+    renderer.set_progressive_rendering(true);
+    renderer.set_frame_budget_target_ms(0.001);
+
+    let target = RenderTarget::new(64, 64);
+    let mut frames = 0;
+    while renderer.pacing_scale() >= 1.0 && frames < 40 {
+        renderer.render(camera_2d(), &target).unwrap();
+        frames += 1;
+    }
+    assert!(
+        renderer.pacing_scale() < 1.0 && renderer.pacing_cost_ema_ms() > 0.0,
+        "the controller must have adapted before the reset is meaningful"
+    );
+
+    // A scene mutation (commit) forgets the cost knowledge immediately.
+    renderer
+        .upload(&scene(line_batches(8)))
+        .expect("mutate scene");
+    assert_eq!(renderer.pacing_scale(), 1.0);
+    assert_eq!(renderer.pacing_cost_ema_ms(), 0.0);
+    let stats = renderer.render(camera_2d(), &target).unwrap();
+    assert_eq!(stats.pacing, "active");
+    assert_eq!(
+        stats.budget_scale, 1.0,
+        "the first post-mutation frame is un-paced"
+    );
+    assert_eq!(
+        stats.budget_cost_ema_ms, 0.0,
+        "the seed frame has no prior EMA"
+    );
+
+    // Adapt again, then clear: `clear_batches` is also a reset.
+    let mut frames = 0;
+    while renderer.pacing_scale() >= 1.0 && frames < 40 {
+        renderer.render(camera_2d(), &target).unwrap();
+        frames += 1;
+    }
+    assert!(renderer.pacing_scale() < 1.0);
+    renderer.clear_batches();
+    assert_eq!(renderer.pacing_scale(), 1.0);
+    assert_eq!(renderer.pacing_cost_ema_ms(), 0.0);
 }
 
 #[test]

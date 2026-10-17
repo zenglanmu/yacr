@@ -72,6 +72,20 @@ pub struct RenderStatsObservation {
     pub tier: &'static str,
     /// Whether part of the scene was held back by the frame budget.
     pub over_budget: bool,
+    /// Adaptive page-budget scale this frame's plan used (1.0 when pacing is
+    /// disabled or the renderer is not paging).
+    pub budget_scale: f64,
+    /// Adaptive page-budget target (`cpu_ms + wait_ms`) in milliseconds.
+    pub budget_target_ms: f64,
+    /// Cost EWMA (ms) the scale was based on, before this frame's own sample.
+    pub budget_cost_ema_ms: f64,
+    /// Active page-budget vertex limit this frame's plan used.
+    pub budget_vertices: usize,
+    /// Active page-budget triangle limit this frame's plan used.
+    pub budget_triangles: usize,
+    /// Pacing regime: `"active"`, `"disabled-no-completion-signal"` (no measured
+    /// completion signal; static budget) or `"at-ceiling"` (non-progressive).
+    pub pacing: &'static str,
     /// Progressive cursor / total (existing `frame_progress`), if progressive.
     pub progressive_cursor: Option<usize>,
     pub progressive_total: Option<usize>,
@@ -815,6 +829,12 @@ impl CadRenderRuntime {
             instanced_batches: stats.instanced_batches,
             tier: stats.tier.as_str(),
             over_budget: stats.over_budget.is_some(),
+            budget_scale: stats.budget_scale,
+            budget_target_ms: stats.budget_target_ms,
+            budget_cost_ema_ms: stats.budget_cost_ema_ms,
+            budget_vertices: stats.budget_vertices,
+            budget_triangles: stats.budget_triangles,
+            pacing: stats.pacing,
             progressive_cursor: cursor,
             progressive_total: total,
             progressive_complete,
@@ -1281,6 +1301,12 @@ mod tests {
             instanced_batches: 0,
             tier: "universal",
             over_budget: false,
+            budget_scale: 1.0,
+            budget_target_ms: 13.0,
+            budget_cost_ema_ms: 0.0,
+            budget_vertices: 8_000_000,
+            budget_triangles: 2_000_000,
+            pacing: "active",
             progressive_cursor: None,
             progressive_total: None,
             progressive_complete: true,

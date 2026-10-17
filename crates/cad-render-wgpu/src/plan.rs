@@ -605,8 +605,12 @@ pub(crate) fn batch_budget_triangles(batch: &GpuBatch) -> usize {
     base + line_quads * 2
 }
 
-pub(crate) fn plan_from_gpu(batches: &[GpuBatch], budget: &FrameBudget) -> GpuPlan {
-    let mut usage = cad_scene::FrameUsage::default();
+pub(crate) fn plan_from_gpu(
+    batches: &[GpuBatch],
+    budget: &FrameBudget,
+    initial: cad_scene::FrameUsage,
+) -> GpuPlan {
+    let mut usage = initial;
     let mut accepted = Vec::with_capacity(batches.len());
     for (i, batch) in batches.iter().enumerate() {
         let vertices = batch_budget_vertices(batch);
@@ -647,13 +651,18 @@ pub(crate) fn plan_from_gpu(batches: &[GpuBatch], budget: &FrameBudget) -> GpuPl
 
 /// Budget one consecutive page of a globally ordered scene. Unlike the legacy
 /// one-frame planner, callers retain the cursor and never discard the suffix.
+///
+/// `initial` is the usage the page already reserved before geometry (the image
+/// reservation on a clear page); the page budget covers geometry *plus* that
+/// reservation.
 pub(crate) fn plan_ordered_page(
     batches: &[GpuBatch],
     ordered: &[usize],
     cursor: usize,
     budget: &FrameBudget,
+    initial: cad_scene::FrameUsage,
 ) -> GpuPlan {
-    let mut usage = cad_scene::FrameUsage::default();
+    let mut usage = initial;
     let mut accepted = Vec::new();
     for &index in &ordered[cursor..] {
         let batch = &batches[index];
@@ -686,6 +695,94 @@ pub(crate) fn plan_ordered_page(
         usage,
         over_budget: None,
     }
+}
+
+/// Plan exactly the cursor batch on its own against `budget`.
+///
+/// The **progress floor** of adaptive pacing: when a paced page would accept no
+/// batch while the cursor still has work, the cursor batch alone is planned
+/// against the un-paced ceiling, so every page makes progress and only a batch
+/// that genuinely exceeds the ceiling is an error. `None` means the cursor is
+/// exhausted or the batch does not fit the ceiling.
+pub(crate) fn plan_cursor_batch(
+    batches: &[GpuBatch],
+    ordered: &[usize],
+    cursor: usize,
+    budget: &FrameBudget,
+) -> Option<GpuPlan> {
+    let index = *ordered.get(cursor)?;
+    let batch = batches.get(index)?;
+    let mut usage = cad_scene::FrameUsage::default();
+    budget
+        .charge_bytes(&mut usage, batch.upload_size_bytes())
+        .ok()?;
+    budget
+        .charge(
+            &mut usage,
+            batch_budget_vertices(batch),
+            batch_budget_triangles(batch),
+        )
+        .ok()?;
+    Some(GpuPlan {
+        accepted: vec![index],
+        usage,
+        over_budget: None,
+    })
+}
+
+/// The over-budget reason for a frame that crossed the **active** (paced) page
+/// budget only to make progress.
+///
+/// The diagnostic code stays `render.frame_over_budget`; the category parameter
+/// is [`crate::pacing::PACING_FLOOR_REASON`], so a reader can tell a paced floor
+/// from a genuine ceiling overflow without a second diagnostic code.
+pub(crate) fn pacing_floor_reason(
+    plan: &GpuPlan,
+    active: &FrameBudget,
+    skipped_batches: usize,
+) -> OverBudgetReason {
+    let report = OverBudget {
+        category: crate::pacing::PACING_FLOOR_REASON,
+        requested: plan.usage.vertices,
+        limit: active.max_vertices,
+        skipped_batches,
+    };
+    OverBudgetReason {
+        reason: over_budget_reason(&report),
+        report,
+    }
+}
+
+/// Report usage that crossed `budget`, if any.
+///
+/// Used to keep the `over_budget` contract intact when a page reserves more than
+/// the active budget without going through the geometry planner (an image set
+/// that fits the ceiling but not the paced page). Uses the existing
+/// vertex/triangle/byte categories, so no second diagnostic code is introduced.
+pub(crate) fn usage_over_budget_reason(
+    usage: &cad_scene::FrameUsage,
+    budget: &FrameBudget,
+    skipped_batches: usize,
+) -> Option<OverBudgetReason> {
+    let (category, requested, limit) = if usage.vertices > budget.max_vertices {
+        ("vertices", usage.vertices, budget.max_vertices)
+    } else if usage.triangles > budget.max_triangles {
+        ("triangles", usage.triangles, budget.max_triangles)
+    } else if usage.bytes > budget.max_bytes {
+        ("bytes", usage.bytes, budget.max_bytes)
+    } else {
+        return None;
+    };
+    let report = OverBudget {
+        category,
+        requested,
+        limit,
+        skipped_batches,
+    };
+    Some(OverBudgetReason {
+        reason: over_budget_reason(&report),
+        report,
+    })
 }
 
 pub(crate) fn over_budget_reason(report: &OverBudget) -> DiagnosticReason {

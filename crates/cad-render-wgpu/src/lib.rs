@@ -14,6 +14,10 @@ pub use wgpu;
 
 pub mod geometry;
 
+/// Time-driven adaptive page-budget controller (pure; no wgpu types). See
+/// [`pacing`] for the adaptation policy and the disabled-signal boundary.
+pub mod pacing;
+
 /// Native headless path: create a software device, render offscreen, read the
 /// target back and encode PNG. Native only; the browser path gets its device
 /// from the host canvas instead.
@@ -413,7 +417,31 @@ pub struct FrameStats {
     /// Present when part of the scene was held back because the frame budget
     /// was crossed. The caller must surface this; batches are never silently
     /// dropped.
+    ///
+    /// The literal meaning is unchanged by adaptive pacing: "this frame's plan
+    /// crossed the *active* page budget" (the scaled budget while
+    /// [`FrameStats::pacing`] is `active`, the static ceiling otherwise). A
+    /// frame that only crossed the scaled budget to make progress carries the
+    /// category `pacing-floor`; the diagnostic code stays
+    /// `render.frame_over_budget`.
     pub over_budget: Option<OverBudgetReason>,
+    /// Adaptive page-budget scale this frame's plan **used** (1.0 when pacing is
+    /// disabled or the renderer is not paging). See [`pacing`].
+    pub budget_scale: f64,
+    /// Adaptive page-budget target for `cpu_ms + wait_ms`, in milliseconds.
+    pub budget_target_ms: f64,
+    /// Cost EWMA (milliseconds) the scale was based on, i.e. the value **before**
+    /// this frame's own sample was folded in. `0.0` before the first observation.
+    pub budget_cost_ema_ms: f64,
+    /// Active page-budget vertex limit this frame's plan used.
+    pub budget_vertices: usize,
+    /// Active page-budget triangle limit this frame's plan used.
+    pub budget_triangles: usize,
+    /// Pacing regime for this frame: `"active"`,
+    /// `"disabled-no-completion-signal"` (wasm non-blocking poll: no measured
+    /// completion, static budget) or `"at-ceiling"` (non-progressive frame
+    /// planned against the un-paced ceiling).
+    pub pacing: &'static str,
     /// Opaque batches submitted this frame.
     pub opaque_batches: usize,
     /// Transparent batches (`0 < alpha < 1`) submitted after the opaque pass.
@@ -1266,7 +1294,22 @@ pub struct Renderer {
     pub preference: BackendPreference,
     pub recovery_limit: u32,
     /// Per-frame vertex/triangle budget, enforced before submission.
+    ///
+    /// This is the **un-paced ceiling**. Adaptive pacing scales a copy of it per
+    /// frame (see [`pacing`]); every consumer that deliberately ignores pacing
+    /// (picking) reads this field directly.
     pub frame_budget: FrameBudget,
+    /// Adaptive page-budget controller state (see [`pacing`]). Reset on scene
+    /// mutation / `clear_batches` / a device-generation change; **never** on
+    /// camera motion (cost knowledge is scene-specific, not view-specific).
+    pacing: pacing::PacingState,
+    /// Set when a scene mutation reset the controller; the next observed frame
+    /// seeds the EWMA instead of adapting ([`pacing::Sample::restart`]).
+    pacing_restart_pending: bool,
+    /// Test hook: override the "a completion signal exists" decision used by
+    /// [`Renderer::pacing_mode`]. `None` derives it from the target: the wasm
+    /// non-blocking poll path has no completion signal, native does.
+    pacing_signal_override: Option<bool>,
     /// Real activated backend. `None` until a device is initialized.
     active_backend: Option<ActiveBackend>,
     device: Option<wgpu::Device>,

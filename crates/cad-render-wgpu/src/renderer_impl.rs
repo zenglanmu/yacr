@@ -78,6 +78,9 @@ impl Renderer {
                 max_triangles: 2_000_000,
                 max_bytes: usize::MAX,
             },
+            pacing: pacing::PacingState::default(),
+            pacing_restart_pending: true,
+            pacing_signal_override: None,
             // No device yet, so no backend has actually been activated.
             active_backend: None,
             device: None,
@@ -620,6 +623,8 @@ impl Renderer {
         self.image_sampler = Some(image_sampler);
         self.active_backend = Some(caps.actual);
         self.device_generation += 1;
+        // A new device generation invalidates any page-cost knowledge.
+        self.reset_pacing();
         self.device_lost = false;
         // Selection flags: the group layout and a 1x1 table (grown on demand).
         self.flags_layout = Some(flags_layout);
@@ -2142,6 +2147,8 @@ impl Renderer {
         let pick_us = pick_started.elapsed().as_micros() as u64;
         self.progressive_frame = None;
         self.draw_plan = None;
+        // Scene mutation: the page cost knowledge is scene-specific.
+        self.reset_pacing();
         let lineweight_started = std::time::Instant::now();
         self.rebuild_lineweight_cache();
         let lineweight_us = lineweight_started.elapsed().as_micros() as u64;
@@ -2439,6 +2446,8 @@ impl Renderer {
         self.image_textures.retain(|key, _| live.contains(key));
         self.images = staged;
         self.rebuild_pick_table()?;
+        // The resident image set is scene data; page cost knowledge is stale.
+        self.reset_pacing();
         Ok(report)
     }
 
@@ -2531,6 +2540,80 @@ impl Renderer {
     pub fn set_progressive_rendering(&mut self, enabled: bool) {
         self.progressive = enabled;
         self.progressive_frame = None;
+    }
+
+    /// Override the adaptive page-budget target (`cpu_ms + wait_ms`, default
+    /// [`pacing::DEFAULT_TARGET_MS`]).
+    ///
+    /// A non-finite or non-positive target falls back to the default rather than
+    /// silently producing a nonsense budget. Streaks are cleared because they
+    /// were measured against the previous target; the scale and cost EMA (real
+    /// scene knowledge) are kept.
+    pub fn set_frame_budget_target_ms(&mut self, target_ms: f64) {
+        self.pacing.target_ms = pacing::sanitize_target_ms(target_ms);
+        self.pacing.over_streak = 0;
+        self.pacing.under_streak = 0;
+    }
+
+    /// The adaptive page-budget target in milliseconds.
+    pub fn frame_budget_target_ms(&self) -> f64 {
+        self.pacing.target_ms
+    }
+
+    /// Current adaptive scale (`1.0` until the controller has adapted).
+    pub fn pacing_scale(&self) -> f64 {
+        self.pacing.scale
+    }
+
+    /// Current cost EWMA in milliseconds (`0.0` before the first observation).
+    pub fn pacing_cost_ema_ms(&self) -> f64 {
+        self.pacing.cost_ema_ms
+    }
+
+    /// Test hook: force the "a completion signal exists" decision.
+    ///
+    /// Native has one (the blocking poll measures completion); the wasm
+    /// non-blocking poll does not, so pacing is disabled there and the static
+    /// budget is used. This override makes the disabled path assertable on a
+    /// native test device.
+    pub fn set_pacing_signal_override(&mut self, available: Option<bool>) {
+        self.pacing_signal_override = available;
+    }
+
+    /// The pacing regime for the current configuration.
+    fn pacing_mode(&self) -> pacing::PacingMode {
+        let signal = self
+            .pacing_signal_override
+            .unwrap_or(!cfg!(target_arch = "wasm32"));
+        if !signal {
+            pacing::PacingMode::DisabledNoCompletionSignal
+        } else if self.progressive {
+            pacing::PacingMode::Active
+        } else {
+            pacing::PacingMode::AtCeiling
+        }
+    }
+
+    /// The page budget this frame's plan uses.
+    ///
+    /// Always derived from the un-paced ceiling [`Renderer::frame_budget`], so a
+    /// test that injects a tiny ceiling keeps governing every page.
+    fn active_frame_budget(&self) -> FrameBudget {
+        match self.pacing_mode() {
+            pacing::PacingMode::Active => {
+                pacing::apply_scale(&self.frame_budget, self.pacing.scale)
+            }
+            pacing::PacingMode::DisabledNoCompletionSignal | pacing::PacingMode::AtCeiling => {
+                self.frame_budget
+            }
+        }
+    }
+
+    /// Forget scene-specific cost knowledge. Called on scene mutation /
+    /// `clear_batches` / a device-generation change, never on camera motion.
+    fn reset_pacing(&mut self) {
+        self.pacing = pacing::PacingState::new(self.pacing.target_ms);
+        self.pacing_restart_pending = true;
     }
 
     pub fn frame_pending(&self) -> bool {
@@ -3813,6 +3896,7 @@ impl Renderer {
     pub fn clear_batches(&mut self) {
         self.progressive_frame = None;
         self.draw_plan = None;
+        self.reset_pacing();
         self.batches.clear();
         self.instance_streams.clear();
         self.arc_streams.clear();
@@ -4023,6 +4107,8 @@ impl Renderer {
         self.last_projection = None;
         self.last_camera_position = None;
         self.reset_pick_keys();
+        // The resident scene is gone with the device; drop its cost knowledge too.
+        self.reset_pacing();
         // Derived GPU resources are torn down by the loss; the pulled organisation
         // is no longer active. Reported so a reader never sees a stale `Active`.
         self.pulled_state = PulledState::Unavailable;
@@ -4305,80 +4391,160 @@ impl Renderer {
         opaque.clear();
         transparent.clear();
 
-        let (mut budget_plan, invisible_batches, clear) =
-            if let Some(frame) = &self.progressive_frame {
-                let plan = plan::plan_ordered_page(
+        // The active page budget this frame's plan uses. Captured before planning
+        // so the reported `FrameStats::budget_*` fields describe exactly what the
+        // plan used, and so the controller can sample this frame afterwards.
+        let active_budget = self.active_frame_budget();
+        let pacing_mode = self.pacing_mode();
+        let paced_scale = match pacing_mode {
+            pacing::PacingMode::Active => self.pacing.scale,
+            pacing::PacingMode::DisabledNoCompletionSignal | pacing::PacingMode::AtCeiling => 1.0,
+        };
+        let pacing_cost_ema_ms = self.pacing.cost_ema_ms;
+
+        // Images are drawn only on the page that clears the target (the first
+        // page of a progressive frame, or every frame when not progressive).
+        // Continuation pages load the existing colour, so re-drawing an
+        // `alpha < 1` image every page would accumulate its opacity and charge it
+        // repeatedly; a continuation page must not composite images again.
+        //
+        // The full image charge is reserved **before** geometry, so geometry
+        // cannot saturate the cleared page and leave the images undeclared on the
+        // continuation pages (which never composite images again). It is charged
+        // against the active page budget, with a fallback to the un-paced ceiling
+        // when a paced page cannot hold every image: an image draws exactly once,
+        // so a page split must never drop it. Geometry then fills what is left of
+        // the active page budget. Visual order is unchanged (images still draw
+        // last, in ascending `draw_order` among themselves).
+        let clear = self
+            .progressive_frame
+            .as_ref()
+            .is_none_or(|frame| frame.cursor == 0);
+        let mut image_usage = cad_scene::FrameUsage::default();
+        let mut draw_images: Vec<usize> = Vec::new();
+        let mut image_over_budget = None;
+        if clear {
+            // Reserve the full image charge before geometry, against the active
+            // page budget. When the paced page cannot hold every image, fall
+            // back to the un-paced ceiling instead of dropping images: they draw
+            // exactly once, so a page split must never lose one. Geometry then
+            // fills whatever the active budget has left (nothing, in that case),
+            // and the page reports crossing the active budget.
+            let (accepted_images, over) =
+                charge_images(&mut image_usage, &active_budget, &self.images);
+            draw_images = accepted_images;
+            image_over_budget = over;
+            if image_over_budget.is_some() && active_budget != self.frame_budget {
+                let mut ceiling_usage = cad_scene::FrameUsage::default();
+                let (all_images, ceiling_over) =
+                    charge_images(&mut ceiling_usage, &self.frame_budget, &self.images);
+                if ceiling_over.is_none() {
+                    // The whole image set fits the un-paced ceiling; keep it all
+                    // and let the over-budget invariant report the active-page
+                    // crossing below.
+                    image_usage = ceiling_usage;
+                    draw_images = all_images;
+                    image_over_budget = None;
+                } else {
+                    image_usage = ceiling_usage;
+                    draw_images = all_images;
+                    image_over_budget = ceiling_over;
+                }
+            }
+            draw_images.sort_by_key(|&i| self.images[i].draw_order);
+        }
+
+        let (mut budget_plan, invisible_batches) = if let Some(frame) = &self.progressive_frame {
+            let mut plan = plan::plan_ordered_page(
+                &self.batches,
+                &frame.ordered,
+                frame.cursor,
+                &active_budget,
+                image_usage,
+            );
+            if plan.accepted.is_empty() && frame.cursor < frame.ordered.len() {
+                // Progress floor: a cursor batch that fits the un-paced ceiling
+                // must be drawn rather than turning the frame into an error, so
+                // every page of a paced frame makes progress.
+                match plan::plan_cursor_batch(
                     &self.batches,
                     &frame.ordered,
                     frame.cursor,
                     &self.frame_budget,
-                );
-                if plan.accepted.is_empty() && frame.cursor < frame.ordered.len() {
-                    return Err(RenderError::Frame(
-                        "one GPU batch exceeds the progressive frame budget".into(),
-                    ));
+                ) {
+                    Some(mut floor) => {
+                        floor.over_budget = Some(plan::pacing_floor_reason(
+                            &floor,
+                            &active_budget,
+                            frame.ordered.len() - frame.cursor - 1,
+                        ));
+                        plan = floor;
+                    }
+                    None => {
+                        return Err(RenderError::Frame(
+                            "one GPU batch exceeds the progressive frame budget".into(),
+                        ))
+                    }
                 }
-                let split = frame
-                    .opaque_count
-                    .saturating_sub(frame.cursor)
-                    .min(plan.accepted.len());
-                opaque.extend_from_slice(&plan.accepted[..split]);
-                transparent.extend_from_slice(&plan.accepted[split..]);
-                (plan, frame.invisible, frame.cursor == 0)
-            } else {
-                let plan = plan_from_gpu(&self.batches, &self.frame_budget);
-                let cache = self.draw_plan.as_mut().expect("draw plan cache");
-                cache.sort_transparent(Some(camera_position));
-                if plan.accepted.len() == self.batches.len() {
-                    // Full acceptance keeps upload order, so the cached
-                    // camera-sorted partition over all batches is exact.
-                    opaque.extend_from_slice(cache.opaque());
-                    transparent.extend_from_slice(cache.transparent());
-                    (plan, cache.invisible().len(), true)
-                } else {
-                    // Over budget: `accepted` is an upload-order prefix. Fall
-                    // back to the fresh plan over that prefix; this path is rare
-                    // (the frame reported over-budget) and must stay identical to
-                    // the pre-cache behaviour.
-                    let accepted: Vec<usize> = plan.accepted.clone();
-                    let entries: Vec<_> = accepted
-                        .iter()
-                        .map(|&i| BatchOrderEntry {
-                            draw_order: self.batches[i].draw_order,
-                            alpha: self.batches[i].alpha,
-                            centroid: self.batches[i].centroid,
-                        })
-                        .collect();
-                    let passes = draw_passes(&accepted, &entries, Some(camera_position));
-                    opaque.extend_from_slice(&passes.opaque);
-                    transparent.extend_from_slice(&passes.transparent);
-                    (plan, passes.invisible, true)
-                }
-            };
-
-        // Charge the resident image quads against the same frame budget and
-        // assign their uniform slots. Images are drawn last (after opaque and
-        // transparent geometry); full draw-order interleaving and WIPEOUT
-        // masking are not implemented. The accepted images are ordered among
-        // themselves by ascending `draw_order`.
-        //
-        // Images are drawn only on the page that clears the target (the first
-        // page of a progressive frame, or every frame when not progressive).
-        // Continuation pages load the existing colour, so re-drawing an
-        // `alpha < 1` image every page would accumulate its opacity and charge
-        // it repeatedly; a continuation page must not composite images again.
-        //
-        // Charged here, before the uniform upload, so the image slots are known
-        // when the arena capacity is sized.
-        let mut draw_images: Vec<usize> = Vec::new();
-        if clear {
-            let (accepted_images, image_over_budget) =
-                charge_images(&mut budget_plan.usage, &self.frame_budget, &self.images);
-            if budget_plan.over_budget.is_none() {
-                budget_plan.over_budget = image_over_budget;
             }
-            draw_images = accepted_images;
-            draw_images.sort_by_key(|&i| self.images[i].draw_order);
+            let split = frame
+                .opaque_count
+                .saturating_sub(frame.cursor)
+                .min(plan.accepted.len());
+            opaque.extend_from_slice(&plan.accepted[..split]);
+            transparent.extend_from_slice(&plan.accepted[split..]);
+            (plan, frame.invisible)
+        } else {
+            let plan = plan_from_gpu(&self.batches, &active_budget, image_usage);
+            let cache = self.draw_plan.as_mut().expect("draw plan cache");
+            cache.sort_transparent(Some(camera_position));
+            if plan.accepted.len() == self.batches.len() {
+                // Full acceptance keeps upload order, so the cached
+                // camera-sorted partition over all batches is exact.
+                opaque.extend_from_slice(cache.opaque());
+                transparent.extend_from_slice(cache.transparent());
+                (plan, cache.invisible().len())
+            } else {
+                // Over budget: `accepted` is an upload-order prefix. Fall
+                // back to the fresh plan over that prefix; this path is rare
+                // (the frame reported over-budget) and must stay identical to
+                // the pre-cache behaviour.
+                let accepted: Vec<usize> = plan.accepted.clone();
+                let entries: Vec<_> = accepted
+                    .iter()
+                    .map(|&i| BatchOrderEntry {
+                        draw_order: self.batches[i].draw_order,
+                        alpha: self.batches[i].alpha,
+                        centroid: self.batches[i].centroid,
+                    })
+                    .collect();
+                let passes = draw_passes(&accepted, &entries, Some(camera_position));
+                opaque.extend_from_slice(&passes.opaque);
+                transparent.extend_from_slice(&passes.transparent);
+                (plan, passes.invisible)
+            }
+        };
+
+        // The image over-budget (images that crossed the un-paced ceiling) is
+        // reported unless geometry already reported one.
+        if budget_plan.over_budget.is_none() {
+            budget_plan.over_budget = image_over_budget;
+        }
+        // Invariant: a page whose usage (including the image reservation) crossed
+        // the active budget must report it. Geometry is charged against the
+        // remainder, so this is only reachable when the image reservation alone
+        // exceeds a paced page (`pacing-floor` already covers the geometry
+        // case).
+        if budget_plan.over_budget.is_none() {
+            let remaining = match &self.progressive_frame {
+                Some(frame) => frame
+                    .ordered
+                    .len()
+                    .saturating_sub(frame.cursor + budget_plan.accepted.len()),
+                None => 0,
+            };
+            budget_plan.over_budget =
+                plan::usage_over_budget_reason(&budget_plan.usage, &active_budget, remaining);
         }
 
         // Lineweight is carried, never drawn: the report is cached at batch
@@ -5230,6 +5396,21 @@ impl Renderer {
         if let Some(frame) = &mut self.progressive_frame {
             frame.cursor += budget_plan.accepted.len();
         }
+        // Adaptive page-budget feedback: fold this frame's measured cost in.
+        // Only a frame that accepted page work is a signal, and only when pacing
+        // is active (progressive + a completion signal); camera moves never reset
+        // the controller, so a pan keeps feeding it.
+        if pacing_mode == pacing::PacingMode::Active && !budget_plan.accepted.is_empty() {
+            let sample = pacing::Sample {
+                cpu_ms,
+                wait_ms,
+                accepted: budget_plan.accepted.len(),
+                restart: self.pacing_restart_pending,
+            };
+            let (next, _) = pacing::step(self.pacing, sample);
+            self.pacing = next;
+            self.pacing_restart_pending = false;
+        }
         // Return the scratch index buffers so the next frame reuses them.
         self.scratch_opaque = opaque;
         self.scratch_transparent = transparent;
@@ -5243,6 +5424,12 @@ impl Renderer {
             vertices: budget_plan.usage.vertices,
             triangles: budget_plan.usage.triangles,
             over_budget: budget_plan.over_budget,
+            budget_scale: paced_scale,
+            budget_target_ms: self.pacing.target_ms,
+            budget_cost_ema_ms: pacing_cost_ema_ms,
+            budget_vertices: active_budget.max_vertices,
+            budget_triangles: active_budget.max_triangles,
+            pacing: pacing_mode.as_str(),
             opaque_batches,
             transparent_batches,
             invisible_batches,
