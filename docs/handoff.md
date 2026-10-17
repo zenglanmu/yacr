@@ -224,6 +224,19 @@
 - **产品决定（2026-10-17，用户）**：**接受**运动过程中的帧内容不全 ⇒ **不**做可见性排序页内容
   （取消原拟的"运动中帧"截图判读）；但分页重启的**代价不变**——每帧仍重付 plan/submit，`wait_ms` 仍主导帧时间。
 
+### 修复 wasm32 门禁（2026-10-17，**既有缺陷**，非本轮引入）
+
+- **现象**：文档化门禁 `cargo check --workspace --lib --target wasm32-unknown-unknown` 在
+  `crates/cad-engine/src/render/runtime.rs` 报两处 `E0425: cannot find value 'started'`。
+  `git blame` 指向 **`7d83572`**（本轮 8 个提交**之前**）⇒ **既有缺陷**；因日常验证按 AGENTS.md
+  只验改动范围，这道门禁长期未被跑到，直到全量矩阵才暴露。
+- **原因**：`started`（函数起始 `Instant`）仅在 `#[cfg(not(target_arch = "wasm32"))]` 下声明
+  （wasm 无单调时钟），而 `apply_ready_updates` 中两处 `total_us:` 初始化**无条件**使用它。
+- **修复**（`42c8e37`）：两处 `total_us` 改为在**同一 cfg** 下求值；wasm 分支报 `0`（无时钟可用）。
+- **证据**：`cargo check --workspace --lib --target wasm32-unknown-unknown` 转 **PASS**；
+  `fmt`/`clippy -p cad-engine --all-targets -D warnings`/host 目标 `check` 均通过。
+- **边界**：Android 目标检查（`--target aarch64-linux-android`）**NOT RUN**（需 Android target/NDK）。
+
 ### 归档：GPU-vs-CPU 剔除分析（2026-10-17，复核轮；纯文档，无实现/无运行）
 
 - **问题**：视口剔除 / 几何检查 / 局部重绘中，**哪些能移到 GPU**？（由资深复核读渲染器 + wgpu 30.0.1
