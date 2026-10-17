@@ -1647,6 +1647,37 @@ mod tests {
         }
     }
 
+    /// A camera settle re-prepares the transient overlay with a new `TaskStamp`
+    /// (the next scene revision) over the same selection and database. The
+    /// sub-element highlight is derived **only** from the selection and the
+    /// database, so it must be byte-identical and add no diagnostic: a camera-only
+    /// operation cannot degrade it. A `highlight.unresolved` requires a ref the
+    /// database no longer resolves, i.e. a scene mutation.
+    #[test]
+    fn sub_element_highlight_is_identical_across_a_camera_settle() {
+        let db = mesh_insert_drawing();
+        let selection = SelectionSet::from_refs([mesh_child_ref(Some(face("face-a")))]);
+        let before = selection_highlight(&db, &selection, DocumentId(2), stamp(), None);
+        assert_eq!(
+            before.drawn(),
+            1,
+            "the face selection must produce one batch"
+        );
+        assert!(before.diagnostics.is_empty());
+
+        // The settle commit re-prepares the same inputs with the next revision.
+        let settled = TaskStamp::new(DocumentId(2), 2);
+        let after = selection_highlight(&db, &selection, DocumentId(2), settled, None);
+        assert_eq!(
+            after, before,
+            "a camera settle must not change the sub-element highlight"
+        );
+        assert!(
+            after.diagnostics.is_empty(),
+            "a camera settle must not add a highlight diagnostic"
+        );
+    }
+
     /// An `INSERT` root only ever exists as an expansion, so selecting it is
     /// unresolved — never a fabricated flag of the block's contents.
     #[test]

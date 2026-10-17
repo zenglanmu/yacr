@@ -639,7 +639,10 @@ impl Renderer {
         // Selection flags: the group layout and a 1x1 table (grown on demand).
         self.flags_layout = Some(flags_layout);
         self.flags_enabled = false;
-        self.reset_pick_keys();
+        // A new device generation restarts the key space **and** retires the
+        // retained entity-flag request: the old device's keys are gone and a
+        // later request would otherwise re-tint on the rebuilt scene.
+        self.reset_pick_keys_and_drop_request();
         let device_ref = self.device.as_ref().expect("device just set").clone();
         let queue_ref = self.queue.as_ref().expect("queue just set").clone();
         self.ensure_flags(&device_ref, &queue_ref, 1);
@@ -4079,15 +4082,20 @@ impl Renderer {
         // pruned on the next `upload_images`).
         self.images.clear();
         self.rebuild_lineweight_cache();
-        self.reset_pick_keys();
+        // An explicit full teardown is a document switch/close, not a transient
+        // empty resident set: the retained entity-flag request belongs to the
+        // retired scene and must not survive into the next document.
+        self.reset_pick_keys_and_drop_request();
     }
 
     /// Rebuild the CPU-side pick table from the resident batches, and reset the
     /// key allocator when nothing is resident.
     ///
-    /// Called whenever `batches`/`images` change (commit/clear/device loss). A
-    /// full clear restarts the key space so a re-opened drawing does not inherit
-    /// a growing key counter.
+    /// Called whenever `batches`/`images` change (commit/clear/device loss). An
+    /// empty resident set restarts the key space so a re-opened drawing does not
+    /// inherit a growing key counter — but it does **not** drop the retained
+    /// entity-flag request, because an empty resident set can be a transient
+    /// commit state rather than a document switch (see [`Self::reset_pick_keys`]).
     ///
     /// When `incremental` is `Some((keep_prefix, retired_keys))` the update
     /// **replaces the resident suffix**: the kept prefix's entries are unchanged
@@ -4105,6 +4113,11 @@ impl Renderer {
     /// the wrong entity.
     fn rebuild_pick_table(&mut self, incremental: Option<(usize, Vec<u32>)>) -> CadResult<()> {
         if self.batches.is_empty() && self.images.is_empty() {
+            // A **transient** empty resident set (a commit between scenes, e.g.
+            // the 2D navigation fallback truncating a zero-batch base). Only the
+            // key space restarts; the retained entity-flag request is kept so a
+            // live selection survives a camera-only operation and re-resolves
+            // when the scene returns. See [`Self::reset_pick_keys`].
             self.reset_pick_keys();
             return Ok(());
         }
@@ -4185,16 +4198,41 @@ impl Renderer {
         }
     }
 
+    /// Restart the pick key space for a scene that is no longer resident.
+    ///
+    /// Called whenever the resident set changes shape (commit/clear/device
+    /// loss) and, crucially, on the **transient** empty resident set
+    /// [`Self::rebuild_pick_table`] sees while a commit is between scenes (for
+    /// example the 2D navigation fallback truncating a zero-batch base).
+    ///
+    /// The retained [`Self::entity_flags_request`] is deliberately **not**
+    /// cleared here: a camera-only operation is not a scene mutation, so a live
+    /// selection must survive a transient empty resident set (its keys are
+    /// retired, its identity request is not). The request is dropped only where
+    /// the key space truly restarts — a new device generation or an explicit
+    /// full teardown — via [`Self::reset_pick_keys_and_drop_request`].
     fn reset_pick_keys(&mut self) {
         self.pick_key_counter.store(1, Ordering::Relaxed);
         self.pick_table = PickTable::default();
         // A retired scene's keys must not keep their bits: the whole table is
         // re-uploaded (zeroed) before it is used again. The entity-flag diff base
-        // and the retained request are dropped with the scene too, so a later
-        // update cannot try to clear a key that belonged to the retired scene.
+        // is dropped with the scene, so a later update cannot try to clear a key
+        // that belonged to the retired scene.
         self.flags_bits.clear();
         self.flags_table_dirty = true;
         self.entity_flag_keys.clear();
+    }
+
+    /// The **full** reset: restart the key space **and** drop the retained
+    /// entity-flag request.
+    ///
+    /// Only a new device generation or an explicit full teardown
+    /// ([`Self::clear_batches`]) may retire the request: the request names refs
+    /// of the retired scene/document, so keeping it could tint an unrelated
+    /// entity that reuses an identity in the next document. A transient empty
+    /// resident set uses [`Self::reset_pick_keys`] instead and keeps it.
+    fn reset_pick_keys_and_drop_request(&mut self) {
+        self.reset_pick_keys();
         self.entity_flags_request.clear();
     }
 
@@ -4267,7 +4305,8 @@ impl Renderer {
         self.mesh_pulled_mirrored_pipeline = None;
         self.last_projection = None;
         self.last_camera_position = None;
-        self.reset_pick_keys();
+        // A device rebuild is a new device generation: retire the request too.
+        self.reset_pick_keys_and_drop_request();
         Err(CadError::GpuFailure(
             "device rebuild requires a new shared device from the host".into(),
         ))
@@ -4329,7 +4368,9 @@ impl Renderer {
         self.flags_ctl_buffer = None;
         self.last_projection = None;
         self.last_camera_position = None;
-        self.reset_pick_keys();
+        // Device loss is a new device generation: the key space and the retained
+        // entity-flag request are both retired with the old device.
+        self.reset_pick_keys_and_drop_request();
         // The resident scene is gone with the device; drop its cost knowledge too.
         self.reset_pacing();
         // Derived GPU resources are torn down by the loss; the pulled organisation

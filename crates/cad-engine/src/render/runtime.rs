@@ -334,6 +334,12 @@ pub struct CadRenderRuntime {
     /// upload and mark the stale scene current. The strong reference also keeps
     /// the address alive, so `Arc::ptr_eq` cannot observe an ABA reuse.
     applied_highlight: Option<Arc<SceneDelta>>,
+    /// The entity-flag set the runtime last pushed to the renderer, retained so
+    /// the 2D navigation fallback can **re-assert** it after its truncating
+    /// commit (see [`Self::suppress_overlays`]). This is a re-assertion mirror of
+    /// the last applied `PreparedScene::entity_flags`, never a second truth: the
+    /// controller remains the sole producer of the flags.
+    applied_entity_flags: Vec<(SelectionRef, u32)>,
     /// Diagnostic from the last base-change image upload (`None` when every image
     /// resolved). Kept separate from the flags diagnostic so a flags-only update
     /// does not wipe a still-relevant image diagnostic.
@@ -380,6 +386,7 @@ impl Default for CadRenderRuntime {
             overlays_suppressed: false,
             overlay_suffix_commits: 0,
             applied_highlight: None,
+            applied_entity_flags: Vec::new(),
             image_diagnostic: None,
             flags_diagnostic: None,
             uploads_started: 0,
@@ -456,6 +463,7 @@ impl CadRenderRuntime {
         self.overlays_suppressed = false;
         self.overlay_suffix_commits = 0;
         self.applied_highlight = None;
+        self.applied_entity_flags = Vec::new();
         self.image_diagnostic = None;
         self.flags_diagnostic = None;
         self.uploads_started = 0;
@@ -523,6 +531,9 @@ impl CadRenderRuntime {
                 .as_mut()
                 .expect("ready renderer")
                 .set_entity_flags(&ready.entity_flags)?;
+            // Retain the applied flags so the 2D navigation fallback can
+            // re-assert them after its truncating commit.
+            self.applied_entity_flags = ready.entity_flags.clone();
             self.flags_diagnostic = flags_diagnostic(&report.unmatched);
             self.applied_revision = Some(ready.revision);
             self.applied_highlight = Some(ready.highlight.clone());
@@ -697,6 +708,9 @@ impl CadRenderRuntime {
         // renderer also re-applies its retained request on the rebuild; this call
         // surfaces the unmatched refs so the runtime can report them.
         let flag_report = renderer.set_entity_flags(&ready.entity_flags)?;
+        // Retain the applied flags so the 2D navigation fallback can re-assert
+        // them after its truncating commit.
+        self.applied_entity_flags = ready.entity_flags.clone();
         // Publication follows successful GPU preparation/commit, never precedes it.
         self.base_batches = ready.base.added.len();
         self.applied_base = Some(ready.base_revision);
@@ -962,7 +976,19 @@ impl CadRenderRuntime {
     /// `prepare_upload_batches(&[])` stages zero bytes, so this re-upload of the
     /// base is impossible by construction: only the replaceable suffix after
     /// `base_batches` is truncated.
+    ///
+    /// The commit can transiently leave the renderer with an **empty** resident
+    /// set (a zero-batch base), which restarts its pick key space. The last
+    /// applied entity flags are therefore re-pushed afterwards, exactly as
+    /// [`Self::apply_ready_updates`] does on a commit: a camera-only fallback is
+    /// not a scene mutation, so the selection tint must survive it, and an
+    /// unmatched ref is reported rather than silently dropped. Re-pushing the
+    /// unchanged set writes no flags row (the renderer diffs), so a normal
+    /// fallback entry costs no GPU upload.
     fn suppress_overlays(&mut self) -> Result<(), RenderError> {
+        // Cloned before the renderer borrow (it is the flags the runtime last
+        // pushed; the controller remains the sole producer).
+        let flags = self.applied_entity_flags.clone();
         let renderer = self
             .renderer
             .as_mut()
@@ -973,6 +999,9 @@ impl CadRenderRuntime {
         renderer
             .commit_upload(empty, self.base_batches)
             .map_err(|error| RenderError::Frame(error.to_string()))?;
+        // Record the truncation-derived state **before** the flags re-push, so a
+        // flags failure still leaves the runtime consistent with the dropped
+        // suffix (a later full commit restores both).
         self.overlays_suppressed = true;
         self.overlay_suffix_commits += 1;
         // The discarded suffix upload (if any) is overlay-only by the
@@ -981,6 +1010,14 @@ impl CadRenderRuntime {
         // The presented frame is no longer the full current scene.
         self.applied_revision = None;
         self.presented_revision = None;
+        let flag_report = renderer
+            .set_entity_flags(&flags)
+            .map_err(|error| RenderError::Frame(error.to_string()))?;
+        self.flags_diagnostic = flags_diagnostic(&flag_report.unmatched);
+        self.diagnostic = merge_diagnostics(
+            self.image_diagnostic.as_deref(),
+            self.flags_diagnostic.as_deref(),
+        );
         self.dirty.invalidate();
         Ok(())
     }
