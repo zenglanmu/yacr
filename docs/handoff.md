@@ -12,6 +12,60 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 块级视锥剔除（P1，2026-10-17；纯 renderer 改动）
+
+**范围**：`crates/cad-render-wgpu`（新 `src/cull.rs` + 三个 chunk 构建器保留既有 AABB + 逐帧一次可见性测试 +
+encode/合并点跳过被剔除 run + `FrameStats`/`[probe] actual-render` 追加字段）。**未**改宿主协议、**未**改 UI、
+**未**新增诊断码。设计状态：`docs/render-optimization-backlog.md` 的 P1；逐条证据见
+`docs/validation-chunk-culling-2026-10-17.md`。
+
+- **谓词（纯逻辑，无 GPU 依赖）**：`crates/cad-render-wgpu/src/cull.rs`（`WorldAabb` / `ChunkCull` / `build` /
+  `ortho_visible` / `perspective_visible` / `class_visible`，**10** 个纯单测）。三个构建器（`plan.rs`）本已为
+  各自切分启发式算出的 world-space `f64` AABB 现被**保留**到上传结构（`InstanceStream.aabb` / `GpuMeshChunk.aabb` /
+  `ArcStream.aabb`），每帧对 `FrameProjection` 测试**一次**，**O(chunks)**——**不新增**逐实体逐帧计算。
+- **保守且单侧**（只会保留，绝不误剔除）：非有限/空/反向 AABB ⇒ 恒可见；跨 chunk 的超大源每个分片携带**整批**
+  AABB；混合远处批次的 chunk 从不剔除。
+- **测试期 pad（绝不烘焙进存储 box），逐类**：line `3·wpp_line + 1e-6`；mesh `1e-6`（无 stroke/quad 展开）；
+  arc `2·wpp_arc + max(0.02·R, 0) + 1e-6`（`R` = chunk AABB 最大半extent）。
+  `wpp_line = line_ramp_override.unwrap_or(projection.world_per_px())`、`wpp_arc = projection.world_per_px()`。
+  **`lineweight` 不产生 pad 项**——它被**携带但未光栅化**（`line_instanced.wgsl`），**不是**遗漏项。
+- **Ortho / Perspective**：Ortho 为精确 `f64` 2 轴 NDC 测试、**z 刻意不测**（深度映射不是可见性判据）；
+  Perspective 为 6 平面 p-vertex 测试 + f32 相对 margin（透视原点被 f32 窄化）。
+- **记账**：被剔除 run 在**每个** encode/合并点跳过（**从不重排、从不跨空隙合并**）并计**零**顶点/三角形；
+  字节记账仍按批粒度（`max_bytes` 产品里为 `usize::MAX`，建模上传驻留而非 draw 工作量）。透明 legacy draw
+  与图像**不**剔除。
+- **`use_pulled` 合取项**：加速 pulled 路径在**任何**剔除发生时被禁用（`&& !cull.any_culled()`，
+  `renderer_impl.rs:4620`）——一次 pulled draw 会重绘**整条 stream/chunk**、会重绘被剔除的几何。**不做
+  pulled 子集 draw**（那仍是 **N1d**，**仍开放**）⇒ **剔除目前强制走通用 per-run 组织**（每 run 属单 chunk，
+  故整条可跳过）。
+- **pick 从不剔除**：`pick.rs:495` 传恒等掩码 `ChunkCull::all_visible()`，命中测试与视图剔除**独立**。
+- **上报（追加式）**：`FrameStats` 新增 `cull_chunks_total` / `cull_chunks_kept`；`[probe] actual-render` 在
+  `pacing={}` **之后**追加 `cull_chunks={kept}/{total}`。
+- **真实宿主实测（本机原生 Wayland / Vulkan / Quadro P620；同 UID、无 root/sudo、无屏录、无虚拟显示；
+  两次运行均 exit 0、无 panic、无 invalid-buffer/validation/device-lost 行）**：
+  - `fixtures/complex-test.dwg` **681** 页、**161** 页 `kept<total`；`cull_chunks` 区间 **`1/9362` … `9362/9362`**；
+    `draw_calls` 区间 **`1` … `3027`**（剔除前基线 **3,027** 在 `cull_chunks=9362/9362` 复现）；最深剔除页
+    `draw_calls=1 verts=12 tris=4 instanced=1`；`accelerated=false`、`pulled=active`、`budget_scale` 0.050…1.000、
+    `pacing=active`、`complete=true` 50 个 probe、`over_budget=true` 653 页。
+  - `fixtures/debug-default-fonts.dwg` **466** 页、**215** 页 `kept<total`；`cull_chunks` 区间 **`1/806` … `806/806`**；
+    `draw_calls` 区间 **`1` … `1299`**；最深剔除页 `draw_calls=1 verts=12 tris=4 instanced=1`；`accelerated`
+    混合（**163** true / **303** false）、`pulled=active`、`budget_scale` 0.562…4.000、`complete=true` 381 个 probe。
+  - post-load 的**平移（pan）**已足以驱动深剔除（`kept` 最低到 **1**）；**无需**单独的 zoom 钩子。
+- **测试（实测）**：`cargo test -p cad-render-wgpu --lib` **177 passed / 0 failed**（**10** 个新纯 cull 单测）；
+  `--test headless_render` **32 passed**（**6** 个新 GPU fence：`culled_frame_is_byte_identical_and_drops_exactly_the_culled_runs`、
+  `large_lineweight_at_the_viewport_edge_is_pixel_identical`、`pick_is_invariant_under_chunk_culling`、
+  `culling_does_not_pop_across_a_chunk_border`、`culling_is_byte_identical_on_the_3d_path`、
+  `culling_does_not_break_the_progressive_cursor`）；`--test accelerated_tier` **23**、
+  `--test pulled_prefix_equivalence` **9**、`--test render_effects` **45**、`--test pick_id` **32**、
+  `--test pick_hidden_flags` **8**、`--test sdf_arcs` **17**。
+- **门禁（实测）**：`fmt` / `check --all-targets` / `clippy -D warnings` / `check --lib --target wasm32-unknown-unknown`
+  全 clean；release 构建（`--features tauri/custom-protocol`）OK。
+- **P1 的未测 / 边界（不得软化）**：**逐字节 parity fence 跑在 headless 软件 Vulkan 适配器上，不是硬件**；
+  真实宿主两次运行只产出**日志证据**（**无**像素读回）⇒ **剔除比不推出任何 vendor / 精度 / 性能结论**。
+  **开放问题（逐字记录，非解释）**：debug 的最大 `draw_calls` 为 **1299**，**高于**更早的 **1,195** 基线，
+  实现 lane **未**对账（**可能**不同的相机/页构成）。**未测（NOT RUN）**：全量 workspace 门禁矩阵、打包路径、
+  X11 沙箱、其它 GPU/vendor、**视觉判定**。
+
 ## 时间驱动分页预算 pacing（N1a，2026-10-17；纯 renderer 改动）
 
 **范围**：`crates/cad-render-wgpu`（新 `src/pacing.rs` + 三个分页规划点接入 + 上报字段）。**未**改宿主协议、

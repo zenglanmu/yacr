@@ -101,6 +101,13 @@
 四边 `32 B × 6` 每线段；merged mesh 仍 `44 B/顶点 + 4 B/索引`。mesh 批次自身仍按存储顶点/
 三角形计费（其叠加线框另按线四边计费）。line/mesh 的**存储**格式未变。
 
+**块级剔除与记账单位（2026-10-17）**：该单位计的是**被提交光栅化**的图元。chunk 级视锥剔除
+（backlog §P1，`crates/cad-render-wgpu/src/cull.rs`）在 encode/合并点**跳过**被剔除的 run，
+这些 run 因此**计零顶点/三角形且不被光栅化**——单位仍然只数**实际提交**的图元（剔除**不是**把
+已计费的几何隐藏掉，而是根本不提交）。剔除**从不重排**剩余 run，也**从不跨空隙合并**：绘制
+顺序与 tie 语义对保留集合**逐字节不变**（见 `docs/validation-chunk-culling-2026-10-17.md`）。
+字节记账**不**随剔除变化（仍按批粒度，`max_bytes` 在产品里为 `usize::MAX`）。
+
 **AA 统一（`docs/adr/0009-antialiased-line-strokes.md`）**：`line.wgsl` / `line_instanced.wgsl` /
 `line_pulled.wgsl` 现与 `arc.wgsl` 同语义——到**线段**的距离场 + 三角（线性）滤波，
 `coverage = saturate(1 − d / w)`，`w = world_per_px`，即**1.0 px 线性墨量**；`coverage <= 0`

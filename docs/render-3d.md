@@ -136,3 +136,6 @@ HATCH 的检测需要上游提供 3D 边界。渐变 HATCH 仍只绘制边界。
   顶点/三角形上限（如饱和在 ≈2.0M 三角形）会报超预算，**但该帧可以完全在 60 fps 预算之内**
   （`debug-default-fonts.dwg`：`over_budget=true` 473/479 帧，`wait_ms > 16.6 ms` 仅 0.4%，
   每帧 ≈5 ms，**实测**）。被**进度下限**强制而越界的一页带原因 `pacing-floor`。
+- **块级视锥剔除**（backlog §P1，2026-10-17 落地）：被剔除的 chunk 的 run **计零**顶点/三角形且
+  **不被光栅化**，故活动预算只对**实际提交**的图元计费（不在此重复谓词/pad 细节，见
+  `docs/validation-chunk-culling-2026-10-17.md` 与 `docs/render-order.md` 的记账单位节）。

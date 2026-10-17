@@ -124,7 +124,32 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 
 ### P1 — 块级视锥剔除（chunk-level frustum culling）
 
-- **现状/问题**：`build_instance_chunks`（`crates/cad-render-wgpu/src/plan.rs:1804`）与
+- **已落地（2026-10-17）**。逐条证据见 `docs/validation-chunk-culling-2026-10-17.md`。
+  - **谓词**：新纯模块 `crates/cad-render-wgpu/src/cull.rs`（`WorldAabb` / `ChunkCull` / `build` /
+    `ortho_visible` / `perspective_visible` / `class_visible`，**10** 个纯单测）。三个构建器本已为切分
+    启发式算出的 world-space `f64` AABB 现被**保留**到上传结构（`InstanceStream` / `GpuMeshChunk` /
+    `ArcStream` 的 `aabb`），每帧对 `FrameProjection` 测试**一次**，**O(chunks)**，无逐实体逐帧计算。
+  - **保守单侧**：非有限/空/反向 AABB 恒可见；跨 chunk 的超大源每个分片携带**整批** AABB；
+    混合远处批次的 chunk 从不剔除。
+  - **测试期 pad（绝不烘焙进存储 box），逐类**：line `3·wpp_line + 1e-6`；mesh `1e-6`（无 stroke/quad
+    展开）；arc `2·wpp_arc + max(0.02·R, 0) + 1e-6`（`R` = chunk AABB 最大半extent）。
+    `wpp_line = line_ramp_override.unwrap_or(projection.world_per_px())`、`wpp_arc = projection.world_per_px()`。
+    **`lineweight` 不产生 pad 项**——它被携带但**未光栅化**（`line_instanced.wgsl`），**不是**遗漏项。
+  - **Ortho**：精确 `f64` 2 轴 NDC 测试，**z 刻意不测**（深度映射不是可见性判据）。**Perspective**：
+    6 平面 p-vertex 测试 + f32 相对 margin（透视原点被 f32 窄化）。
+  - **记账**：被剔除 run 在每个 encode/合并点跳过（**从不重排、从不跨空隙合并**）并计**零**顶点/三角形；
+    字节记账仍按批粒度。透明 legacy draw 与图像**不**剔除。
+  - **pick 从不剔除**：`pick.rs` 传恒等掩码（`ChunkCull::all_visible()`），命中测试与视图剔除独立。
+  - **上报（追加式）**：`FrameStats` 新增 `cull_chunks_total` / `cull_chunks_kept`；`[probe] actual-render`
+    在 `pacing={}` 之后追加 `cull_chunks={kept}/{total}`。
+  - **实测区间（本机真实宿主；口径与 pacing 轮不同，不得混算）**：`complex-test.dwg` 681 页、161 页
+    `kept<total`，`cull_chunks` **`1/9362` … `9362/9362`**、`draw_calls` **`1` … `3027`**（3,027 基线在
+    `9362/9362` 复现），最深剔除页 `draw_calls=1 verts=12 tris=4 instanced=1`；`debug-default-fonts.dwg`
+    466 页、215 页 `kept<total`，`cull_chunks` **`1/806` … `806/806`**、`draw_calls` **`1` … `1299`**。
+  - **同轮实现边界**：parity fence 跑在 **headless 软件 Vulkan**，**不是**硬件；真实宿主运行只产出
+    **日志证据**（无像素读回）；**性能/vendor/精度结论不由此得出**。**开放问题（逐字记录）**：debug 的
+    最大 `draw_calls` **1299** 高于更早的 1,195 基线，实现 lane **未**对账（可能不同的相机/页构成）。
+- **现状/问题（落地前，保留供追溯）**：`build_instance_chunks`（`crates/cad-render-wgpu/src/plan.rs:1804`）与
   `build_mesh_chunks`（`plan.rs:1122`）在构建 chunk 时**已经算出世界坐标 AABB**
   （`batch_world_aabb` `plan.rs:1664-1680`、`piece_world_aabb` `plan.rs:1017-1033`、
   `aabb_half_diagonal` `plan.rs:1684-1689`）：构建器**保留**它们（`ChunkBuilder.min/max`
@@ -164,11 +189,17 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     `centroid`（`lib.rs:593-594`），要做同类剔除须另加 AABB。
 - **需要的决策（未决，非已解决）**：**「segment 粒度 × 可剔除性」**——加速档上要么维持 segment
   粒度（chunk 不可剔），要么重新按可剔除单元切分 stream（代价与收益未知）；**记录为开放决策**。
-  该加速档子问题现由 **N1d**（pulled 子集门）承接。
-- **相关契约/栅栏**：`merged-vs-legacy` 逐字节一致 fence 的扩展——剔除后保留集合的像素须与未剔除
-  一致；新增 `culled_chunks_are_not_drawn` / `frustum_culling_does_not_pop_at_chunk_borders` /
-  `cull_test_pads_stroke_margin_at_deep_zoom`。
-- **优先级**：P1（最高；通用档、低成本、放大场景收益大；加速档覆盖有限，见上）。
+  该加速档子问题现由 **N1d**（pulled 子集门）承接，**N1d 仍开放**：本轮**不做** pulled **子集** draw，
+  而是在任何剔除发生时用合取项 `&& !cull.any_culled()` 禁用 pulled（`renderer_impl.rs:4620`）——
+  因为一次 pulled draw 会重绘整条 stream/chunk、会重绘被剔除的几何。⇒ **剔除目前强制走通用 per-run
+  组织**（每 run 属单 chunk，故整条可跳过）。
+- **相关契约/栅栏（已落地，名称即契约）**：`merged-vs-legacy` 逐字节一致的扩展已实现为
+  `culled_frame_is_byte_identical_and_drops_exactly_the_culled_runs`（剔除帧逐字节一致且**恰好**丢掉
+  被剔除的 run）；另有 `large_lineweight_at_the_viewport_edge_is_pixel_identical`、
+  `pick_is_invariant_under_chunk_culling`、`culling_does_not_pop_across_a_chunk_border`、
+  `culling_is_byte_identical_on_the_3d_path`、`culling_does_not_break_the_progressive_cursor`
+  （共 6 个 GPU fence，见 `crates/cad-render-wgpu/tests/headless_render.rs`）。
+- **优先级**：P1（最高；**已落地**——通用档、低成本、放大场景收益大；加速档覆盖有限，见上）。
 
 ### P2 — 像素级剔除 / LOD（pixel culling / LOD）
 
