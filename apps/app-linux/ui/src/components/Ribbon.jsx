@@ -2,11 +2,14 @@
 // inside each tab. Panel titles sit at the bottom, matching the desktop ribbon
 // convention, and a dialog-launcher arrow marks panels with deeper settings.
 //
-// Variant drop-downs open *inline*: they join the panel flow and grow the ribbon
-// (which re-reports the CAD rect). The host composites a native CAD surface in
-// the central partition, so nothing may float across it and a clipped overlay
-// would be wrong anyway.
-import React, { useState } from 'react';
+// The panel band has one fixed height (--ribbon-h, see style.css) on every tab,
+// so switching tabs never reflows the chrome nor the CAD partition rect.
+//
+// Variant drop-downs open as an *in-band popover*: the menu is absolutely
+// positioned inside the panel body, so it stays inside the fixed band and never
+// paints below it over the native CAD partition. It scrolls internally if the
+// list is taller than the body. Escape or a click outside dismisses it.
+import React, { useEffect, useState } from 'react';
 import { Icon } from '../icons.jsx';
 import { IconButton, RibbonButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
@@ -37,7 +40,7 @@ function PanelItem({ item, openMenu, setOpenMenu }) {
   const hasVariants = Boolean(item.variants?.length);
   const menuOpen = openMenu === item.id;
   return (
-    <div className={['ribbon-panel__item', item.large ? 'is-large' : 'is-small', hasVariants ? 'has-variants' : ''].filter(Boolean).join(' ')}>
+    <div className={['ribbon-panel__item', item.large ? 'is-large' : 'is-small', hasVariants ? 'has-variants' : '', menuOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
       <ItemButton item={item} />
       {hasVariants ? (
         <button
@@ -85,7 +88,8 @@ function VariantMenu({ item, onClose }) {
 
 function Panel({ panel, openMenu, setOpenMenu }) {
   const { t } = useI18n();
-  // Group consecutive small items into one stacked column so the panel stays compact.
+  // Group consecutive small items into one cluster; small clusters render as a
+  // column-major grid that wraps across the fixed band height.
   const groups = [];
   for (const item of panel.items) {
     if (item.large) groups.push([item]);
@@ -94,15 +98,15 @@ function Panel({ panel, openMenu, setOpenMenu }) {
   }
   const openItem = panel.items.find(item => item.id === openMenu && item.variants?.length);
   return (
-    <section className={['ribbon-panel', openItem ? 'is-open' : ''].filter(Boolean).join(' ')} aria-label={t(panel.titleKey)}>
+    <section className="ribbon-panel" aria-label={t(panel.titleKey)}>
       <div className="ribbon-panel__body">
         {groups.map((group, index) => (
           <div key={`${panel.id}-${index}`} className={group[0].large ? 'ribbon-panel__group is-large' : 'ribbon-panel__group is-small'}>
             {group.map(item => <PanelItem key={item.id} item={item} openMenu={openMenu} setOpenMenu={setOpenMenu} />)}
           </div>
         ))}
+        {openItem ? <VariantMenu item={openItem} onClose={() => setOpenMenu(null)} /> : null}
       </div>
-      {openItem ? <VariantMenu item={openItem} onClose={() => setOpenMenu(null)} /> : null}
       <footer className="ribbon-panel__title">
         <span>{t(panel.titleKey)}</span>
         {panel.launcher ? (
@@ -114,7 +118,8 @@ function Panel({ panel, openMenu, setOpenMenu }) {
             title={t('ribbon.command_unsupported', { command: t('ribbon.panel_settings') })}
           />
         ) : null}
-      </footer>    </section>
+      </footer>
+    </section>
   );
 }
 
@@ -123,6 +128,19 @@ export function Ribbon() {
   const shell = useShell();
   const [openMenu, setOpenMenu] = useState(null);
   const tab = ribbonTab(shell.ribbonTab);
+  // Dismiss an open variant popover on Escape or a click outside it. The
+  // invoking item sits above the menu, so its caret still toggles it closed.
+  useEffect(() => {
+    if (!openMenu) return undefined;
+    const onKeyDown = event => { if (event.key === 'Escape') setOpenMenu(null); };
+    const onPointerDown = event => { if (!event.target?.closest?.('.ribbon-panel__menu')) setOpenMenu(null); };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [openMenu]);
   return (
     <div className={['region', 'region--ribbon', 'ribbon', 'app-region', shell.ribbonCollapsed ? 'is-collapsed' : ''].filter(Boolean).join(' ')}>
       <div className="ribbon__tabs" role="tablist" aria-label={t('ribbon.tabs_label')}>

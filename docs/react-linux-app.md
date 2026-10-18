@@ -145,6 +145,12 @@ GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
 右侧导航栏）→ 模型/布局标签 → 命令行（含补全与 F2 历史）→ 状态栏。所有用户可见文案来自
 `crates/cad-ui-core/i18n/{zh-CN,en}.json`，组件内不写死文案。
 
+功能区面板带为**固定高度**（`--ribbon-h`，`apps/app-linux/ui/src/style.css`），所有选项卡一致，
+切换选项卡**不改变** chrome 高度（因而不会重报 CAD 分区矩形）；小按钮在固定高度内按列优先网格
+**横向**排布，超宽时面板带横向滚动、不静默丢命令。变体下拉改为**带内浮层**（绝对定位于面板
+body 内，不越出功能区、不撑高），Escape/点击外部关闭。契约测试见
+`apps/app-linux/ui/test/ribbon.test.mjs`。
+
 ## 支持范围
 
 - **OPEN / FIT 已支持**：`--open` 经真实文件打开漏斗；OPEN 也可走原生 portal picker；FIT 适应图纸。
