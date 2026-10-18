@@ -114,6 +114,28 @@ pub struct SessionState {
     /// the persisted `view.overlays.snapHints` preference, which only controls
     /// whether resolved hints are drawn.
     snap_enabled: bool,
+    /// Whether idle pointer movement previews the entity under the cursor.
+    ///
+    /// Session/display state only: toggling it writes no database, produces no
+    /// history entry and schedules no ChangeSet. The default is **`false`**: this
+    /// is a deliberate product decision, not AutoCAD's initial value. AutoCAD's
+    /// `SELECTIONPREVIEW` system variable starts at `3` (preview while no command
+    /// is active and at "Select objects" prompts); this viewer shows no highlight
+    /// on plain mouse movement unless the user explicitly turns the preview on.
+    /// It never affects object-snap markers, which stay gated on an active point
+    /// prompt.
+    hover_preview: bool,
+    /// How long a resolved hover must stay stable before it is tinted, in
+    /// milliseconds (default **300**).
+    ///
+    /// **Explicit deviation from AutoCAD**, not a parity claim: AutoCAD defines
+    /// no dwell for the hover highlight (the highlight is immediate and only
+    /// distance/pickbox-gated — verified against the sysvar set). The product
+    /// owner asked for a deferred highlight so a fast sweep paints nothing.
+    /// `0` restores the immediate highlight (the documented escape hatch). Read
+    /// only when the preview is enabled; object-snap markers are unaffected.
+    /// Session/display state only.
+    hover_dwell_ms: u64,
     /// The last structured measurement result produced in this session (F06).
     ///
     /// Set when a measurement is evaluated (auto-completed or explicitly
@@ -154,6 +176,8 @@ impl SessionState {
             backend: BackendChoice::Auto,
             active_layer: LayerId(0),
             snap_enabled: true,
+            hover_preview: false,
+            hover_dwell_ms: 300,
             last_measurement: None,
             selected_measurement_kind: MeasurementToolKind::Distance,
             clipboard: Vec::new(),
@@ -182,6 +206,51 @@ impl SessionState {
     pub fn toggle_snap(&mut self) -> bool {
         self.snap_enabled = !self.snap_enabled;
         self.snap_enabled
+    }
+
+    /// Whether idle pointer movement previews the entity under the cursor.
+    ///
+    /// See [`SessionState::set_hover_preview`] for the deliberate default and
+    /// the AutoCAD comparison.
+    pub fn hover_preview(&self) -> bool {
+        self.hover_preview
+    }
+
+    /// Enable or disable the idle hover entity preview for this session.
+    ///
+    /// Session/display state only: no database write, no history entry and no
+    /// ChangeSet. The default is **`false`**, a deliberate product decision that
+    /// deviates from AutoCAD's `SELECTIONPREVIEW` initial value `3`. Object-snap
+    /// markers are unaffected: they remain gated on an active point prompt.
+    pub fn set_hover_preview(&mut self, enabled: bool) {
+        self.hover_preview = enabled;
+    }
+
+    /// Flip the idle hover entity preview and return the new state.
+    pub fn toggle_hover_preview(&mut self) -> bool {
+        self.hover_preview = !self.hover_preview;
+        self.hover_preview
+    }
+
+    /// How long a resolved hover must stay stable before it is tinted, in
+    /// milliseconds.
+    ///
+    /// **A deliberate deviation from AutoCAD**, which has no hover timer; see
+    /// [`SessionState::set_hover_dwell_ms`]. It is a documented extension, never
+    /// presented as AutoCAD parity.
+    pub fn hover_dwell_ms(&self) -> u64 {
+        self.hover_dwell_ms
+    }
+
+    /// Set the hover dwell in milliseconds (`0` = immediate highlight).
+    ///
+    /// Session/display state only: no database write, no history entry, no
+    /// ChangeSet. The default is **300 ms**, an explicit product extension —
+    /// AutoCAD defines no dwell for `SELECTIONPREVIEW` (the highlight is
+    /// immediate, distance-gated only). The dwell is honoured only while the
+    /// preview is enabled.
+    pub fn set_hover_dwell_ms(&mut self, dwell_ms: u64) {
+        self.hover_dwell_ms = dwell_ms;
     }
 
     pub fn authorize(&self, command: CommandId) -> CadResult<()> {

@@ -85,7 +85,7 @@ fn plan_input_suppresses_hover_while_a_press_is_active() {
 
 #[test]
 fn an_idle_move_over_an_entity_reaches_the_overlay_hovered_input() {
-    let session = session(Rc::new(FakeFiles {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
     let pixel = screen_of(&session, demo_circle_rim(&session));
@@ -124,7 +124,7 @@ fn an_idle_move_over_an_entity_reaches_the_overlay_hovered_input() {
 
 #[test]
 fn an_idle_move_that_picks_nothing_clears_the_hovered_input() {
-    let session = session(Rc::new(FakeFiles {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
     let pixel = screen_of(&session, demo_circle_rim(&session));
@@ -149,7 +149,7 @@ fn an_idle_move_that_picks_nothing_clears_the_hovered_input() {
 
 #[test]
 fn a_repeated_idle_move_at_the_same_position_is_skipped() {
-    let session = session(Rc::new(FakeFiles {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
     let pixel = screen_of(&session, demo_circle_rim(&session));
@@ -177,7 +177,7 @@ fn a_repeated_idle_move_at_the_same_position_is_skipped() {
 
 #[test]
 fn a_press_clears_the_hover_and_the_release_claims_no_new_hover() {
-    let session = session(Rc::new(FakeFiles {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
     let pixel = screen_of(&session, demo_circle_rim(&session));
@@ -217,7 +217,7 @@ fn a_press_clears_the_hover_and_the_release_claims_no_new_hover() {
 
 #[test]
 fn a_primary_drag_leaves_the_hover_cleared_until_the_next_move() {
-    let session = session(Rc::new(FakeFiles {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
     let start = screen_of(&session, demo_circle_rim(&session));
@@ -260,7 +260,7 @@ fn a_primary_drag_leaves_the_hover_cleared_until_the_next_move() {
 
 #[test]
 fn a_blur_clears_the_hovered_input() {
-    let session = session(Rc::new(FakeFiles {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
     let pixel = screen_of(&session, demo_circle_rim(&session));
@@ -295,7 +295,7 @@ fn plan_input_maps_pointer_leave_to_clear_cursor_without_touching_the_press() {
 
 #[test]
 fn a_pointer_leave_clears_the_hover_overlay_only() {
-    let session = session(Rc::new(FakeFiles {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
     let pixel = screen_of(&session, demo_circle_rim(&session));
@@ -332,7 +332,7 @@ fn a_pointer_leave_clears_the_hover_overlay_only() {
 
 #[test]
 fn a_pointer_leave_never_ends_or_wedges_an_in_flight_press() {
-    let session = session(Rc::new(FakeFiles {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
     let pixel = screen_of(&session, demo_circle_rim(&session));
@@ -367,8 +367,92 @@ fn a_pointer_leave_never_ends_or_wedges_an_in_flight_press() {
 }
 
 #[test]
-fn a_stale_hover_cursor_is_refused_and_never_tints() {
+fn hover_preview_is_off_by_default_so_idle_moves_run_no_pick() {
     let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let pixel = screen_of(&session, demo_circle_rim(&session));
+    assert!(
+        !session.snapshot(None, None, 0).hover_preview,
+        "the status reports the deliberate default: off"
+    );
+
+    // Several idle moves, including positions far apart, must run no pick and
+    // leave no tint: plain mouse movement is not a hover query.
+    for (sequence, step) in (1..=4).enumerate() {
+        let position = [pixel[0] + step as f64 * 40.0, pixel[1]];
+        session
+            .handle_input(&pointer_at(
+                InputKind::PointerMove,
+                sequence as u64 + 1,
+                position,
+                None,
+            ))
+            .expect("the idle move is admitted");
+        assert_eq!(
+            session.core.hover_query_count(),
+            0,
+            "no hover pick may run while the preview is off"
+        );
+        assert!(
+            hovered_refs(&session).is_empty(),
+            "nothing may be tinted while the preview is off"
+        );
+    }
+}
+
+#[test]
+fn the_hover_preview_command_toggles_both_ways_and_clears_a_stationary_tint() {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let pixel = screen_of(&session, demo_circle_rim(&session));
+    let expected = picked_ref_at(&session, pixel);
+    session
+        .handle_input(&pointer_at(InputKind::PointerMove, 1, pixel, None))
+        .expect("the hover move is admitted");
+    assert_eq!(hovered_refs(&session), vec![expected.clone()]);
+    let queries = session.core.hover_query_count();
+
+    // Turning it off through the public selector clears the already painted
+    // tint even though the cursor never moved again.
+    session
+        .command("HOVERPREVIEW")
+        .expect("the toggle is admitted");
+    assert!(!session.snapshot(None, None, 0).hover_preview);
+    assert!(
+        hovered_refs(&session).is_empty(),
+        "disabling the preview immediately clears the stationary tint"
+    );
+    session
+        .handle_input(&pointer_at(InputKind::PointerMove, 2, pixel, None))
+        .expect("the idle move is admitted");
+    assert_eq!(
+        session.core.hover_query_count(),
+        queries,
+        "a disabled preview runs no pick on the next move"
+    );
+    assert!(hovered_refs(&session).is_empty());
+
+    // Turning it back on restores the hover on the next real move.
+    session
+        .command("HOVERPREVIEW")
+        .expect("the toggle is admitted");
+    assert!(session.snapshot(None, None, 0).hover_preview);
+    session
+        .handle_input(&pointer_at(InputKind::PointerMove, 3, pixel, None))
+        .expect("the hover move is admitted");
+    assert_eq!(hovered_refs(&session), vec![expected]);
+    assert_eq!(
+        session.core.hover_query_count(),
+        queries + 1,
+        "the enabled preview queries once at the new position"
+    );
+}
+
+#[test]
+fn a_stale_hover_cursor_is_refused_and_never_tints() {
+    let session = hover_enabled_session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
     let pixel = screen_of(&session, demo_circle_rim(&session));

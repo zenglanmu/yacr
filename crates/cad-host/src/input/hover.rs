@@ -15,7 +15,10 @@ fn hover_profile_enabled() -> bool {
 impl HostCore {
     /// Whether a hover query must be suppressed right now.
     ///
-    /// A positive tool (draw/measure capture or pan), a press/navigation gesture
+    /// The idle entity preview is **off by default** (a deliberate product
+    /// decision; AutoCAD's `SELECTIONPREVIEW` starts at `3`), so a plain cursor
+    /// move runs no pick and leaves no tint until the user enables it. A positive
+    /// tool (draw/measure capture or pan), a press/navigation gesture
     /// (pan/orbit/drag), or an active multi-contact navigation owns the pointer;
     /// hover must not compete with it. `Selecting` deliberately does not
     /// suppress: after a click the user must be able to hover the next object.
@@ -28,12 +31,14 @@ impl HostCore {
             ToolState::Drawing(_) | ToolState::Measuring(_) | ToolState::Panning
         );
         tool_owns_pointer
+            || !self.controller.borrow().session.hover_preview()
             || self.navigation.dragged.get()
             || self.navigation.navigating.get()
             || !self.navigation.active.borrow().is_empty()
     }
 
-    /// Clear the hovered set and forget the last hover query position.
+    /// Clear the hovered set, any pending dwell, and forget the last hover query
+    /// position.
     ///
     /// Pure session/overlay state: no database write, no history entry, and no
     /// published shell state change, so nothing is marked dirty here. The
@@ -41,6 +46,7 @@ impl HostCore {
     /// overlay inputs.
     pub(crate) fn clear_hover(&self) {
         self.hover.hovered.borrow_mut().clear();
+        *self.hover.pending.borrow_mut() = None;
         self.hover.last_query.set(None);
         self.hover.last_query_identity.set(None);
     }
@@ -97,16 +103,27 @@ impl HostCore {
     /// and no second identity type. Hover is entity-level and single: the one
     /// top-ranked ref the report returns.
     ///
-    /// Pickbox aperture (ADR-0012 §10 S2): the highlight is **sticky** like
-    /// AutoCAD's pickbox. While the cursor stays within
-    /// [`TolerancePolicy::interaction_logical_pixels`] of the last *query*
-    /// position (the same aperture the pick itself uses) the current hover is
-    /// kept and no pick runs; only moving strictly beyond it re-hits. The
-    /// cached position is also invalidated when the hover **identity** changes
-    /// (the drawing scene identity plus the session layer-override
-    /// fingerprint), so a stayed-in-place cursor after an edit/undo or a layer
-    /// visibility toggle re-resolves instead of keeping a stale tint;
-    /// `clear_hover` (pointer down/up, tool start, …) still forgets it outright.
+    /// Pickbox aperture (ADR-0012 §10 S2): the highlight is **sticky**. While the
+    /// cursor stays within [`TolerancePolicy::pickbox_logical_pixels`] of the
+    /// last *query* position — the **same** `PICKBOX`-analogue aperture
+    /// [`cad_app::picking::pick_tolerance`] uses, so hover and click can never
+    /// disagree — the current hover is kept and no pick runs; only moving
+    /// strictly beyond it re-hits. The cached position is also invalidated when
+    /// the hover **identity** changes (the drawing scene identity plus the
+    /// session layer-override fingerprint), so a stayed-in-place cursor after an
+    /// edit/undo or a layer visibility toggle re-resolves instead of keeping a
+    /// stale tint; `clear_hover` (pointer down/up, tool start, …) still forgets
+    /// it outright.
+    ///
+    /// When the session's idle preview is disabled (the default) this clears
+    /// any tint and pending dwell and returns before taking a pick: a plain
+    /// cursor move is not a query.
+    ///
+    /// Dwell (an explicit product extension, not AutoCAD): when the session's
+    /// `hover_dwell_ms` is non-zero, a freshly resolved ref that differs from the
+    /// applied one is not tinted immediately — it is recorded as a
+    /// [`PendingHover`] and applied by [`HostCore::apply_due_hover`] once it has
+    /// been stable for the dwell. `0` restores the immediate highlight.
     pub(super) fn resolve_hover(&self, point: PointInput) -> CadResult<()> {
         if self.hover_suppressed() {
             self.clear_hover();
@@ -114,7 +131,7 @@ impl HostCore {
         }
         let logical = self.hover_logical(point)?;
         // The one tolerance policy the pick itself uses. Its
-        // `interaction_logical_pixels` is also the pickbox aperture, so the
+        // `pickbox_logical_pixels` is also the sticky-re-query aperture, so the
         // throttle and the pick can never disagree about their radius.
         let policy = cad_domain::TolerancePolicy::default();
         // The identity a resolved hover depends on (ADR-0012 §5): the drawing's
@@ -137,7 +154,7 @@ impl HostCore {
             if same_identity {
                 let dx = logical[0] - last[0];
                 let dy = logical[1] - last[1];
-                let aperture = policy.interaction_logical_pixels;
+                let aperture = policy.pickbox_logical_pixels;
                 // Strictly more than the aperture re-hits; inside it the
                 // highlight persists and no pick runs.
                 if dx * dx + dy * dy <= aperture * aperture {
@@ -193,6 +210,59 @@ impl HostCore {
         self.hover
             .queries
             .set(self.hover.queries.get().saturating_add(1));
+        let dwell_ms = self.controller.borrow().session.hover_dwell_ms();
+        self.apply_resolved_hover(picked, dwell_ms);
+        Ok(())
+    }
+
+    /// Apply a freshly resolved hover, honouring the session dwell.
+    ///
+    /// * `dwell_ms == 0`: immediate (the AutoCAD-immediate behaviour).
+    /// * a ref equal to the applied one: no change, and any pending dwell is
+    ///   dropped (the highlight is already stable).
+    /// * `None`: the applied tint is cleared immediately — leaving geometry must
+    ///   never leave a stale tint for a whole dwell; the pending dwell is dropped.
+    /// * a different `Some(ref)`: recorded as pending with a fresh deadline. A
+    ///   move that re-resolves the **same** pending ref keeps its deadline (so the
+    ///   dwell can elapse); a move that yields a different ref restarts it (a
+    ///   fast sweep paints nothing).
+    fn apply_resolved_hover(&self, picked: Option<SelectionRef>, dwell_ms: u64) {
+        if dwell_ms == 0 {
+            *self.hover.pending.borrow_mut() = None;
+            self.set_applied_hover(picked);
+            return;
+        }
+        let applied_single = {
+            let applied = self.hover.hovered.borrow();
+            (applied.len() == 1).then(|| applied.refs()[0].clone())
+        };
+        match picked {
+            None => {
+                *self.hover.pending.borrow_mut() = None;
+                self.set_applied_hover(None);
+            }
+            Some(reference) => {
+                if applied_single.as_ref() == Some(&reference) {
+                    // The tint already matches: stable, nothing to defer.
+                    *self.hover.pending.borrow_mut() = None;
+                    return;
+                }
+                let mut pending = self.hover.pending.borrow_mut();
+                let already_pending = pending
+                    .as_ref()
+                    .is_some_and(|existing| existing.reference == reference);
+                if !already_pending {
+                    *pending = Some(PendingHover {
+                        reference,
+                        resolved_at: (self.hover_now)(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Replace the applied (tinted) hover set with `picked`, if it differs.
+    fn set_applied_hover(&self, picked: Option<SelectionRef>) {
         let mut hovered = self.hover.hovered.borrow_mut();
         let changed = match &picked {
             // Hover is single: an equal one-ref set is not a change.
@@ -205,6 +275,43 @@ impl HostCore {
                 None => hovered.clear(),
             }
         }
-        Ok(())
+    }
+
+    /// Apply a pending hover whose dwell has elapsed, if any.
+    ///
+    /// Called once per frame from [`HostCore::tick`] — this is the only timing
+    /// hook; there is no timer thread. Returns `true` when the applied hover set
+    /// changed, so the caller knows the render overlay inputs need republishing.
+    /// A call with nothing due touches no state, so a stable tick schedules no
+    /// render revision churn.
+    pub(crate) fn apply_due_hover(&self) -> bool {
+        let due = {
+            let pending = self.hover.pending.borrow();
+            pending
+                .as_ref()
+                .map(|pending| (pending.reference.clone(), pending.resolved_at))
+        };
+        let Some((reference, resolved_at)) = due else {
+            return false;
+        };
+        let dwell_ms = self.controller.borrow().session.hover_dwell_ms();
+        if dwell_ms > 0
+            && (self.hover_now)()
+                .saturating_duration_since(resolved_at)
+                .as_millis()
+                < u128::from(dwell_ms)
+        {
+            return false;
+        }
+        *self.hover.pending.borrow_mut() = None;
+        let already_applied = {
+            let hovered = self.hover.hovered.borrow();
+            hovered.len() == 1 && hovered.contains(&reference)
+        };
+        if already_applied {
+            return false;
+        }
+        self.set_applied_hover(Some(reference));
+        true
     }
 }

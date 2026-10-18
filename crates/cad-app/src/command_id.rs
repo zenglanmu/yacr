@@ -110,6 +110,11 @@ pub enum CommandId {
     /// Set the session's active layer for new drawing entities. Session state
     /// only; no database write. Work-only.
     SetActiveLayer,
+    /// Flip the idle hover entity preview for this session. Session/display
+    /// state only (no database write, no history, no ChangeSet), so it is
+    /// allowed in Viewer and Work. The default is off; see
+    /// [`crate::SessionState::hover_preview`].
+    ToggleHoverPreview,
 }
 
 impl CommandId {

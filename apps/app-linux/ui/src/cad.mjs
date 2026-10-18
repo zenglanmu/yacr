@@ -68,7 +68,35 @@ export function parseCadStatus(value) {
   parseImportProgress(value.importProgress);
   // The selection block is always present; a malformed one is rejected outright.
   parseSelection(value.selection);
+  // Idle hover preview is optional for older hosts, but a present flag must be a
+  // real boolean rather than a truthy string the UI would render as "on".
+  if (value.hoverPreview !== undefined && typeof value.hoverPreview !== 'boolean') {
+    throw Error('CAD_STATUS_INVALID');
+  }
   return value;
+}
+
+/** The single router command that flips idle hover preview. */
+export const HOVER_PREVIEW_COMMAND = 'HOVERPREVIEW';
+
+/**
+ * Status-bar view for the idle hover-preview toggle.
+ *
+ * The server's `hoverPreview` flag is the single source of truth. A payload
+ * without the field (older host) yields `null`, so the caller renders no chip at
+ * all instead of guessing `false`. `admitted` is the shell's normal command
+ * admission (`canCommand`), which already accounts for a pending command and a
+ * loading/unavailable host.
+ */
+export function hoverPreviewToggle(status, admitted) {
+  const on = status?.hoverPreview;
+  if (typeof on !== 'boolean') return null;
+  return { on, disabled: admitted !== true };
+}
+
+/** Dispatch the toggle as the one command the router accepts. */
+export function dispatchHoverPreview(runCommand) {
+  runCommand(HOVER_PREVIEW_COMMAND);
 }
 
 /** The catalog label for a locale-independent import phase key. */

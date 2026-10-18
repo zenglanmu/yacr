@@ -12,6 +12,39 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 悬停预览开关 + pickbox/捕捉光圈分离 + 悬停停留延时（2026-10-18）
+
+**范围**：`crates/cad-domain`（`TolerancePolicy.pickbox_logical_pixels`）、`crates/cad-app`（会话开关 +
+`ToggleHoverPreview` 命令 + 拾取容差）、`crates/cad-host`（悬停抑制/停留状态机/每帧 due 应用）、
+`crates/cad-ui-core`（`HOVERPREVIEW` 选择子、`CadStatus.hoverPreview`）、`apps/app-linux/ui`（状态栏开关 +
+测试）、i18n 3 键、`docs/interaction.md`。**未**改 acadrust/wgpu/Cargo.lock/架构边界。
+
+- **产品决定（有意偏离 AutoCAD）**：空闲悬停高亮**默认关闭**（AutoCAD `SELECTIONPREVIEW` 初值是 3=开）。
+  提供 `HOVERPREVIEW` 命令与状态栏"悬停预览"开关；关闭时空闲移动**零拾取**、零高亮。文档明确标注这是
+  偏离，不冒充 AutoCAD 行为。
+- **光圈分离（对齐 AutoCAD）**：新增 `TolerancePolicy::pickbox_logical_pixels = 3.0`（AutoCAD `PICKBOX`
+  初值 3，管**单击与悬停预览**），`interaction_logical_pixels = 12.0` 只服务 snap 候选（`APERTURE`
+  初值 10 的对应物，12 的差异如实记录）。**用户可见后果**：单击命中范围由 12 收紧到 3，细线更难命中
+  —— 这是 AutoCAD 原样行为，且现在是单一可调数值。
+- **悬停停留延时（显式偏离）**：`SessionState.hover_dwell_ms` 默认 **300**；
+  `0` = 即时（AutoCAD 语义）。行为：离开光圈/身份变化后重新解算，但**同一候选需稳定满 300ms 才上色**；
+  换目标重新计时（快速扫过完全不亮）；离开图元**立即**清除；`clear_hover()`/工具启动/捕获/关闭开关
+  同时清除 applied 与 pending。由既有每帧 `HostCore::tick` 的 `apply_due_hover()` 应用，未引入线程/定时器；
+  测试用可注入 `Instant` seam（`#[cfg(test)] set_hover_clock_for_test`）确定性驱动。
+- **文献依据**：AutoCAD **没有**悬停延时概念（sysvar 集合无任何毫秒级悬停门控；`TOOLTIPDELAY` 不是
+  AutoCAD 系统变量；Options 的"seconds"只属于 ribbon/toolbar 工具提示）。因此 300ms 是**人机改善**，
+  不是 parity，已在 `docs/interaction.md` §3 与代码注释中双处标注。
+- **证据**：`cargo test` cad-domain 25 / cad-app 371+42 / cad-host 114 / cad-ui-core 105 /
+  cad-engine 103 / cad-geometry 104 / cad-measure 52 全通过；`cargo check --workspace --all-targets`、
+  clippy（workspace，`-D warnings`）、wasm `--lib`、architecture/i18n 脚本、UI `npm test` 74/74 全绿。
+  新增判别性测试：`pick_and_hover_use_the_pickbox_value_and_snap_keeps_the_wider_aperture`、
+  `dwell_defers_the_tint_until_the_deadline_then_tick_applies_it`（299ms 不上色/无修订churn，300ms 上色）、
+  `a_changed_pending_ref_restarts_the_dwell_timer`、`leaving_geometry_clears_the_applied_tint_immediately`、
+  `idle_hover_preview_is_off_by_default_so_cursor_moves_run_no_pick`。
+- **NOT RUN**：真实 GPU 复测（改完即待用户手测）；全量 `cargo test --workspace`；原生 Wayland；跨平台。
+- **后续**：悬停延时/预览的 UI 控件（当前只有开/关，延时值需改代码或后续加选择器）、
+  `SELECTIONPREVIEWLIMIT` 式上限、`PREVIEWFILTER` 锁定图层/xref 排除、`COMMANDPREVIEW` 互斥、P1b 框选手势。
+
 ## 悬停不再触发重准备：flags-only 发布 + 光圈粘滞 + pick 图层过滤 + snap/求交成本（2026-10-18）
 
 **范围**：`crates/cad-engine`（渲染输入分类与 `flags_revision`）、`crates/cad-app`（`render_scene` flags

@@ -171,6 +171,27 @@ pub(super) fn session(files: Rc<FakeFiles>) -> CadSession {
         .expect("session builds")
 }
 
+/// A session with the idle hover preview explicitly enabled through the public
+/// command path (it is off by default) and the dwell disabled, so the existing
+/// hover contracts observe the immediate highlight.
+pub(super) fn hover_enabled_session(files: Rc<FakeFiles>) -> CadSession {
+    let session = session(files);
+    session
+        .command("HOVERPREVIEW")
+        .expect("HOVERPREVIEW is admitted");
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .session
+        .set_hover_dwell_ms(0);
+    assert!(
+        session.core.controller.borrow().hover_preview_enabled(),
+        "the preview command enabled the session flag"
+    );
+    session
+}
+
 /// A session whose surface source is mutable, so a test can change the
 /// reported CAD rect exactly like a frontend resize handler.
 pub(super) fn session_with_surface(files: Rc<FakeFiles>, surface: MutableSurface) -> CadSession {

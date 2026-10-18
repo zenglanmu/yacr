@@ -91,9 +91,11 @@ fn record_pick_stats(stats: PickStats) {
 
 /// Derive the world-space pick tolerance from the tolerance policy.
 ///
-/// A pick is a screen-space gesture: the policy expresses the interaction radius
-/// in logical pixels ([`TolerancePolicy::interaction_logical_pixels`]) and the
-/// projection converts it to world units.
+/// A pick is a screen-space gesture: the policy expresses the pick/selection
+/// radius in logical pixels ([`TolerancePolicy::pickbox_logical_pixels`], the
+/// AutoCAD `PICKBOX` analogue) and the projection converts it to world units.
+/// The snap/candidate aperture ([`TolerancePolicy::interaction_logical_pixels`])
+/// is deliberately **not** used here: pick and snap are distinct quantities.
 ///
 /// * **Orthographic** — the scale is already world units per logical pixel.
 /// * **Perspective** — the world size of a pixel grows with depth; a pixel at
@@ -123,7 +125,7 @@ pub fn pick_tolerance(
             2.0 * depth * (vertical_fov_radians * 0.5).tan() / height
         }
     };
-    let tolerance = (policy.interaction_logical_pixels * world_per_px)
+    let tolerance = (policy.pickbox_logical_pixels * world_per_px)
         .max(policy.computation_world)
         .max(f64::MIN_POSITIVE);
     if !tolerance.is_finite() || tolerance <= 0.0 {

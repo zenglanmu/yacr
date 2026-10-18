@@ -54,6 +54,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("PASTECLIP", CommandId::PasteFromClipboard),
     ("OFFSET", CommandId::OffsetEntity),
     ("SETACTIVELAYER", CommandId::SetActiveLayer),
+    ("HOVERPREVIEW", CommandId::ToggleHoverPreview),
 ];
 
 /// Full-word command synonyms, always accepted, that map onto a canonical

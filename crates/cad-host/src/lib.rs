@@ -60,7 +60,9 @@ mod tests;
 #[cfg(test)]
 mod zoom_anchor_tests;
 
-pub(crate) use core::{ActiveGuard, FileAbort, HoverState, NavInner, PendingSave, RequestClock};
+pub(crate) use core::{
+    ActiveGuard, FileAbort, HoverState, NavInner, PendingHover, PendingSave, RequestClock,
+};
 pub use core::{HostCore, HostOptions, HostPlatform};
 #[cfg(not(target_arch = "wasm32"))]
 pub use fonts::DesktopResources;
@@ -167,6 +169,7 @@ impl HostCore {
             async_report_attempt: Rc::new(Cell::new(None)),
             navigation: Rc::new(NavInner::default()),
             hover: Rc::new(HoverState::default()),
+            hover_now: Rc::new(std::time::Instant::now),
             startup_diagnostics: Rc::new(RefCell::new(Vec::new())),
             queue: Rc::new(RequestQueue::new()),
             request_waker: Rc::new(RefCell::new(None)),
@@ -248,6 +251,16 @@ impl HostCore {
     #[cfg(test)]
     pub(crate) fn clear_request_clock_for_test(&self) {
         *self.request_clock.borrow_mut() = None;
+    }
+
+    /// Test-only: install a deterministic instant source for the hover dwell.
+    ///
+    /// Production always uses `Instant::now`; this seam lets host tests advance
+    /// the dwell without sleeping or spawning a timer. It is the smallest
+    /// test-visible seam that keeps production on `std::time::Instant`.
+    #[cfg(test)]
+    pub(crate) fn set_hover_clock_for_test(&mut self, clock: Rc<dyn Fn() -> std::time::Instant>) {
+        self.hover_now = clock;
     }
 
     /// Discard any in-progress pointer gesture.
@@ -471,6 +484,7 @@ impl HostCore {
     fn execute_with_outcome(&self, command: Command) -> CadResult<Option<Arc<CommandOutcome>>> {
         let command_id = command.id;
         self.metrics()?;
+        let hover_preview_before = self.controller.borrow().session.hover_preview();
         let owns_status = policy::owns_status(command_id);
         let none: Arc<CommandOutcome> = Arc::new(CommandOutcome::none());
         let result = match command.id {
@@ -535,6 +549,16 @@ impl HostCore {
             }
         };
         let open_graded = self.open_status_graded.replace(false);
+        // A toggle that disables the idle preview must drop the already painted
+        // tint even when the pointer never moves again: the command reached the
+        // host through this single funnel, so this is the one transition point.
+        // The `sync_render` below republishes the empty overlay inputs.
+        if command_id == CommandId::ToggleHoverPreview
+            && hover_preview_before
+            && !self.controller.borrow().session.hover_preview()
+        {
+            self.clear_hover();
+        }
         // Status grading and the render sync are POST-business: a failure here is
         // an explicit diagnostic, never a reclassification of the committed
         // business completion.
@@ -754,8 +778,14 @@ impl HostCore {
         self.sync_render()
     }
 
-    /// One timer tick: file events → open/save funnels → metrics → render sync.
+    /// One timer tick: due hover dwell → file events → open/save funnels →
+    /// metrics → render sync.
+    ///
+    /// The due-hover application is the only timing hook for the hover dwell; it
+    /// is a no-op when nothing is pending or the deadline has not elapsed, so a
+    /// stable tick schedules no render revision churn.
     pub fn tick(&self) -> CadResult<()> {
+        self.apply_due_hover();
         self.poll_open()
             .and_then(|_| self.poll_pending_save())
             .and_then(|_| self.metrics())

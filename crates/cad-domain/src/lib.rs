@@ -228,7 +228,25 @@ pub struct TolerancePolicy {
     pub computation_world: f64,
     pub topology_world: f64,
     pub display_pixels: f64,
+    /// Snap/candidate aperture in logical pixels — the analogue of AutoCAD's
+    /// `APERTURE` system variable, which governs object-snap detection only.
+    /// AutoCAD's initial `APERTURE` is **10**; this project uses **12** (an
+    /// existing, deliberate choice, not a claim of parity). Pick and hover
+    /// preview must **not** read this field; they use
+    /// [`TolerancePolicy::pickbox_logical_pixels`].
     pub interaction_logical_pixels: f64,
+    /// Pick + selection-preview (hover) aperture in logical pixels — the
+    /// **single** tunable for what a click or a hover highlight can hit. Models
+    /// AutoCAD's `PICKBOX` system variable, whose initial value is **3**
+    /// device-independent pixels and which governs both selection and selection
+    /// preview (hover inherits the pickbox so "hover shows what a click would
+    /// select"). `PICKBOX = 0` in AutoCAD disables preview; this project keeps
+    /// the value positive.
+    ///
+    /// User-visible consequence: with the AutoCAD-faithful default of 3 the pick
+    /// radius is tighter than the project's former 12, so clicking thin geometry
+    /// is harder than before. That is intentional and is now one number to tune.
+    pub pickbox_logical_pixels: f64,
     pub formatting_decimals: u8,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -417,8 +435,12 @@ impl Default for TolerancePolicy {
             topology_world: 1e-6,
             // display discretisation budget in logical pixels
             display_pixels: 0.6,
-            // interaction/snap radius in logical pixels
+            // object-snap/candidate radius in logical pixels (APERTURE analogue;
+            // AutoCAD's initial APERTURE is 10, ours is 12)
             interaction_logical_pixels: 12.0,
+            // pick + selection-preview (hover) radius in logical pixels (the
+            // AutoCAD PICKBOX default of 3)
+            pickbox_logical_pixels: 3.0,
             // decimal places for user-facing numbers
             formatting_decimals: 3,
         }

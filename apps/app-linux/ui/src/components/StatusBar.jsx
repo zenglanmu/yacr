@@ -5,7 +5,7 @@ import React from 'react';
 import { Icon } from '../icons.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { commandById, toolLabelKey } from '../commands.mjs';
-import { importProgressView } from '../cad.mjs';
+import { dispatchHoverPreview, hoverPreviewToggle, importProgressView } from '../cad.mjs';
 
 const DRAFTING = ['GRID', 'SNAP', 'ORTHO', 'OSNAP'];
 
@@ -36,6 +36,9 @@ export function StatusBar() {
   const tool = shell.status?.tool ?? null;
   const toolNameKey = tool ? toolLabelKey(tool.key) : null;
   const toolPoints = tool && Number.isSafeInteger(tool.points) ? tool.points : 0;
+  // Idle hover preview is real host state (`status.hoverPreview`), never a local
+  // mirror. An older payload without the field renders no chip at all.
+  const hoverPreview = hoverPreviewToggle(shell.status, shell.canCommand('HOVERPREVIEW'));
   // Announce only the phase here (rare changes); the steadily-incrementing
   // count/bytes stay in the document-tab bar, so a polite live region never
   // chatters on every tick.
@@ -82,6 +85,15 @@ export function StatusBar() {
             />
           );
         })}
+        {hoverPreview ? (
+          <Toggle
+            label={t('status.toggle.hover_preview')}
+            on={hoverPreview.on}
+            disabled={hoverPreview.disabled}
+            title={t(hoverPreview.on ? 'status.toggle.hover_preview_on' : 'status.toggle.hover_preview_off')}
+            onClick={() => dispatchHoverPreview(shell.runCommand)}
+          />
+        ) : null}
       </div>
 
       <span className="statusbar__spacer" />

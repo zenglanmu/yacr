@@ -233,6 +233,7 @@ mod tests {
             camera: None,
             selection: CadSelection::empty(),
             tool: None,
+            hover_preview: false,
             import_count: 0,
             frame_count: 0,
         }

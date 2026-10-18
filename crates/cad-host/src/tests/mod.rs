@@ -180,6 +180,33 @@ fn core() -> HostCore {
     core_with(Rc::new(FakeFiles::default()), false)
 }
 
+/// A core whose session has the idle hover preview enabled (it is off by
+/// default) and the dwell disabled (immediate highlight), so the existing
+/// aperture/tint contracts are about the pickbox alone. The dwell has its own
+/// tests below.
+fn hover_core() -> HostCore {
+    let core = core();
+    {
+        let mut controller = core.controller.borrow_mut();
+        controller.session.set_hover_preview(true);
+        controller.session.set_hover_dwell_ms(0);
+    }
+    core
+}
+
+/// Install a deterministic instant source for the hover dwell and return the
+/// millisecond counter the test advances. The seam returns
+/// `base_instant + counter`; production uses `Instant::now`.
+fn install_hover_clock(core: &mut HostCore) -> Rc<Cell<u64>> {
+    let now_ms = Rc::new(Cell::new(0_u64));
+    let clock = now_ms.clone();
+    let base = std::time::Instant::now();
+    core.set_hover_clock_for_test(Rc::new(move || {
+        base + std::time::Duration::from_millis(clock.get())
+    }));
+    now_ms
+}
+
 fn core_with_config(config_store: Rc<dyn ConfigStore>) -> HostCore {
     let platform = HostPlatform {
         files: Rc::new(FakeFiles::default()),

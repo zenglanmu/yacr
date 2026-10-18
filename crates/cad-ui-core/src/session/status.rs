@@ -204,6 +204,10 @@ pub struct CadStatus {
     pub selection: CadSelection,
     /// The active draw/measurement tool, or `null` when no capture is active.
     pub tool: Option<CadTool>,
+    /// Whether idle pointer movement previews (tints) the entity under the
+    /// cursor. Session/display state only; defaults to `false` (a deliberate
+    /// product decision, unlike AutoCAD's `SELECTIONPREVIEW` initial `3`).
+    pub hover_preview: bool,
     /// Count of verified successful authoritative document transitions caused by
     /// an import. It is **not** a parsed-entity count and must not be read as
     /// proof that no reparse happened.
@@ -230,6 +234,7 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         camera: None,
         selection: CadSelection::empty(),
         tool: None,
+        hover_preview: false,
         import_count: 0,
         frame_count: 0,
     }
@@ -277,6 +282,7 @@ pub(super) fn assemble_status(
     import_count: u64,
     frame_count: u64,
     tool: Option<CadTool>,
+    hover_preview: bool,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -291,6 +297,7 @@ pub(super) fn assemble_status(
         camera: if has_document { camera } else { None },
         selection,
         tool,
+        hover_preview,
         import_count,
         frame_count,
     }

@@ -693,6 +693,22 @@ impl HostController {
         self.session.toggle_snap()
     }
 
+    /// Whether idle pointer movement previews the entity under the cursor.
+    ///
+    /// See [`crate::SessionState::hover_preview`] for the deliberate default
+    /// (`false`, unlike AutoCAD's `SELECTIONPREVIEW` initial `3`).
+    pub fn hover_preview_enabled(&self) -> bool {
+        self.session.hover_preview()
+    }
+
+    /// Flip the idle hover entity preview and return the new state.
+    ///
+    /// Session/display state only: no database write, no history entry and no
+    /// ChangeSet. Object-snap markers are unaffected.
+    pub fn toggle_hover_preview(&mut self) -> bool {
+        self.session.toggle_hover_preview()
+    }
+
     /// Resolve the single object-snap candidate for a raw world point.
     ///
     /// This is the one acquisition entry point used by both tool boundaries

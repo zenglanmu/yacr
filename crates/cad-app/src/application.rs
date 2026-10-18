@@ -178,6 +178,22 @@ impl Application {
                     "SetMode needs a Mode(AppMode) payload".into(),
                 )),
             },
+            CommandId::ToggleHoverPreview => {
+                // Display/session state only: no database write, no history and
+                // no ChangeSet. The host also clears a stale tint when this
+                // transition disables a hover that is already painted.
+                let enabled = session.toggle_hover_preview();
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: None,
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "view.hover_preview".into(),
+                        message: format!("hover preview: {enabled}"),
+                    }],
+                    measurement: None,
+                })
+            }
             CommandId::CreateLine
             | CommandId::CreateCircle
             | CommandId::CreateArc

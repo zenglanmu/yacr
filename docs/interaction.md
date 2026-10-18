@@ -66,8 +66,10 @@ units/source/precision），而不是只给格式化字符串。
 
 | 主题 | AutoCAD 权威事实 | 出处 | 本项目当前状态 |
 |---|---|---|---|
-| 空闲悬停高亮 | **默认开启**：`SELECTIONPREVIEW` 初值 **3**（no command 时 + "Select objects" 提示时都开）；文档只按"显示/视觉效果"描述，是**叠加高亮**而非重生成 | [SELECTIONPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-77B3B59F-95E5-4F8A-85E2-D9411D712AF0.htm) | 已实现（`FLAG_HOVERED`）。**但**每次悬停实体变化会推进渲染内容修订并触发 overlay 重准备，实测 180 次移动中出现 14 帧 `base_only_pending_overlays` —— 是**待修的性能缺陷**，非语义差异 |
-| 悬停命中口径 | 命中范围是 **pickbox 大小**（`PICKBOX` 初值 **3**），高亮"若此刻点击会选中的整个对象"；`PICKBOX=0` 关闭 preview | [About Cursors](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-566B8C0C-57BC-4986-942D-BC683C4F90A4.htm)、[PICKBOX](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-363698CF-C3DC-4770-81EF-CB09D86B3D3A.htm) | 与点击共用 `TolerancePolicy::interaction_logical_pixels`（**12.0** 逻辑像素）⇒ **高亮与"点击会得到什么"一致**，但容差比 pickbox 默认大（属既有设计选择，未改） |
+| 空闲悬停高亮 | **默认开启**：`SELECTIONPREVIEW` 初值 **3**（no command 时 + "Select objects" 提示时都开）；文档只按"显示/视觉效果"描述，是**叠加高亮**而非重生成 | [SELECTIONPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-77B3B59F-95E5-4F8A-85E2-D9411D712AF0.htm) | **有意偏离**：本项目默认 **关闭**（`HOVERPREVIEW` 命令 / 状态栏"悬停预览"开关可开），因为产品负责人不要空闲悬停高亮。开启后走 flags-only 快路径（见下行），不触发 overlay 重准备 |
+| 悬停延时 | **无**：AutoCAD 高亮是"pickbox 滚过即亮"的即时命中，整个 sysvar 集合**没有任何毫秒/秒级悬停门控**（`TOOLTIPDELAY`/`HOVER*` 不存在；Options 里的 "seconds" 只属于 ribbon/toolbar 工具提示） | [SELECTIONPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-77B3B59F-95E5-4F8A-85E2-D9411D712AF0.htm)、[Display Tab](https://help.autodesk.com/cloudhelp/2026/ENU/AutoCAD-LT/files/GUID-F464608C-15BC-48E8-9484-D311053D9B73.htm) | **有意偏离**：`SessionState.hover_dwell_ms` 默认 **300ms**（同一光圈内稳定 300ms 才上色，快速扫过不闪；`0` = 即时，AutoCAD 语义）。**不得**把它说成 AutoCAD 行为 |
+| 悬停命中口径 | 命中范围是 **pickbox 大小**（`PICKBOX` 初值 **3**），高亮"若此刻点击会选中的整个对象"；`PICKBOX=0` 关闭 preview | [About Cursors](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-566B8C0C-57BC-4986-942D-BC683C4F90A4.htm)、[PICKBOX](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-363698CF-C3DC-4770-81EF-CB09D86B3D3A.htm) | 已对齐：`TolerancePolicy::pickbox_logical_pixels = 3.0` 同时用于**单击与悬停**（高亮 = 点击会得到什么）。用户可见后果：点击命中范围由 12 收紧到 3，细线更难命中（AutoCAD 原样行为，单一可调数值） |
+| 捕捉查找范围 | 与选择分开：`APERTURE` 初值 **10**（设备无关像素），只影响对象捕捉候选搜索/磁吸 | [APERTURE](https://help.autodesk.com/cloudhelp/2021/ENU/AutoCAD-LT/files/GUID-C8603032-7E55-4EEF-B2DF-CD2FD9EDEF91.htm) | `TolerancePolicy::interaction_logical_pixels = 12.0` 只服务 snap 候选（未随 pickbox 变窄）；12 vs AutoCAD 10 的差异如实记录 |
 | 悬停排除项 | `PREVIEWFILTER` 初值 **3**：锁定图层对象与 xref 内对象**不高亮**（但仍可被选中） | [PREVIEWFILTER](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-9B75C028-6429-4FC0-9EC6-72C21E29A5D8.htm) | **未实现**：`pick_at_screen` 不做图层可见性过滤（`select_all`/`select_in_box` 才做）⇒ 临时隐藏图层上的对象仍可能被高亮/点中。**开放项** |
 | 悬停性能上限 | `SELECTIONPREVIEWLIMIT` 初值 **20000**：预览对象数超限时**整体停止**预览高亮 | [SELECTIONPREVIEWLIMIT](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-9CDDA4F9-5B88-428F-B0C8-345E9A9DC4F1.htm) | **未实现**（无上限、无开关）。**开放项** |
 | 命令预览优先 | `COMMANDPREVIEW=1` 时 `SELECTIONPREVIEW` **被忽略**（TRIM/EXTEND/ERASE 等） | [COMMANDPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-2B245436-029A-4E14-92C2-0ED4F4F1362E.htm) | 工具占用指针时宿主直接抑制 hover（`hover_suppressed`），效果一致 |
@@ -84,4 +86,10 @@ units/source/precision），而不是只给格式化字符串。
 **结论（本项目要补的）**：悬停高亮本身与 AutoCAD 一致，需要修的是**实现代价**（悬停不得触发
 overlay/几何重准备）与**命中过滤/上限**（`PREVIEWFILTER` 式隐藏图层排除、`SELECTIONPREVIEWLIMIT`
 式上限、用户可见开关）；左键拖拽语义按 ADR-0014 决策 B 改为框选。
+
+**当前已落地（2026-10-18）**：悬停=flags-only（不推进 `input_revision`/`content_revision`，ADR-0012 §10 S2
+修订）；`pickbox_logical_pixels = 3.0` 与 snap 光圈 12.0 分离；空闲悬停预览默认关闭（`HOVERPREVIEW`）；
+悬停延时 300ms（`hover_dwell_ms`，显式偏离）；hidden 图层对象既不高亮也不可点选。
+**仍待做**：`SELECTIONPREVIEWLIMIT` 式上限（当前 hover 恒为单实体）、`PREVIEWFILTER` 的锁定图层/xref
+排除（目前只有隐藏图层过滤）、`COMMANDPREVIEW` 互斥、左键拖拽=框选（P1b）。
 

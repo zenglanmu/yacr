@@ -86,6 +86,19 @@ impl Default for NavInner {
     }
 }
 
+/// A resolved-but-not-yet-applied hover, awaiting the hover dwell deadline.
+///
+/// This models a deliberate deviation from AutoCAD (which has **no** hover
+/// timer): the highlight is deferred so a fast pointer sweep never tints
+/// anything. It exists only while the session's dwell is non-zero.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingHover {
+    /// The freshly resolved top-ranked ref that is not yet applied.
+    pub reference: cad_domain::SelectionRef,
+    /// The instant the ref was resolved; the dwell is measured from here.
+    pub resolved_at: std::time::Instant,
+}
+
 /// Transient, entity-level hover state (ADR-0012 §10 S2).
 ///
 /// Hover is **pure session state**: it never touches the database, the history
@@ -99,6 +112,10 @@ pub(crate) struct HoverState {
     /// The current hovered ref (the top-ranked pick), empty when nothing is
     /// hovered. A miss always clears it, so a stale tint can never survive.
     pub hovered: RefCell<cad_app::SelectionSet>,
+    /// The resolved ref awaiting the dwell deadline, if any. Applied by
+    /// [`HostCore::apply_due_hover`] from the per-frame tick, never by a timer
+    /// thread.
+    pub pending: RefCell<Option<PendingHover>>,
     /// The logical cursor position of the last executed hover query, so a move
     /// that stays inside the pickbox aperture re-runs no pick. `None` after any
     /// clear/suppression.
@@ -195,6 +212,10 @@ pub struct HostCore {
     pub(crate) navigation: Rc<NavInner>,
     /// Transient hover state feeding `OverlayInputs::hovered` (ADR-0012 §10 S2).
     pub(crate) hover: Rc<HoverState>,
+    /// The monotonic clock the hover dwell is measured against. Defaults to
+    /// `Instant::now` on every target; host tests install a fake to drive the
+    /// dwell deterministically (no timer thread exists).
+    pub(crate) hover_now: Rc<dyn Fn() -> std::time::Instant>,
     /// Diagnostics from reading the config / preference files at startup.
     pub(crate) startup_diagnostics: Rc<RefCell<Vec<String>>>,
     /// The bounded P3 request queue. Admission/identity/ordering live in the

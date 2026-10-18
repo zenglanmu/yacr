@@ -333,7 +333,7 @@ fn pick_tolerance_scales_with_orthographic_zoom() {
     let t2 = pick_tolerance(&policy, &camera, [800.0, 600.0]).unwrap();
     // Doubling world-units-per-pixel doubles the world tolerance.
     assert!((t2 - 2.0 * t1).abs() < 1e-9);
-    assert!((t1 - policy.interaction_logical_pixels).abs() < 1e-9);
+    assert!((t1 - policy.pickbox_logical_pixels).abs() < 1e-9);
 }
 
 #[test]
@@ -353,9 +353,9 @@ fn pick_tolerance_scales_inversely_with_perspective_height() {
 
 #[test]
 fn pick_tolerance_never_drops_below_the_predicate_tolerance() {
-    // A tiny interaction radius with a big predicate tolerance.
+    // A tiny pick radius with a big predicate tolerance.
     let policy = TolerancePolicy {
-        interaction_logical_pixels: 0.0,
+        pickbox_logical_pixels: 0.0,
         computation_world: 0.5,
         ..TolerancePolicy::default()
     };

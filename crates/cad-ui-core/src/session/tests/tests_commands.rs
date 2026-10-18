@@ -71,6 +71,7 @@ command_selector_contract! {
     PasteFromClipboard => "PASTECLIP",
     OffsetEntity => "OFFSET",
     SetActiveLayer => "SETACTIVELAYER",
+    ToggleHoverPreview => "HOVERPREVIEW",
 }
 
 /// A committed synthetic, writer-produced AC1032 DWG with four LINE
@@ -89,7 +90,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 45,
+        EXPECTED_COMMAND_COUNT, 46,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -267,6 +268,7 @@ fn blank_status_reports_no_document_capabilities() {
         0,
         0,
         None,
+        false,
     );
     assert_eq!(status.document_label, None);
     assert_eq!(status.entity_count, None);
@@ -275,6 +277,10 @@ fn blank_status_reports_no_document_capabilities() {
     assert!(status.can_open);
     assert_eq!(status.import_count, 0);
     assert_eq!(status.frame_count, 0);
+    assert!(
+        !status.hover_preview,
+        "the idle hover preview defaults to off"
+    );
     // The selection block is always carried, never omitted.
     assert_eq!(status.selection, CadSelection::empty());
 }
@@ -298,11 +304,16 @@ fn document_status_reports_counts_and_camera() {
         1,
         10,
         None,
+        true,
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
     assert_eq!(status.entity_count, Some(3));
     assert!(status.can_fit);
     assert_eq!(status.frame_count, 10);
+    assert!(
+        status.hover_preview,
+        "the status projects the session's hover preview flag"
+    );
 }
 
 #[test]
