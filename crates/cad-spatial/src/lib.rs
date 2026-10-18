@@ -7,6 +7,7 @@
 use cad_domain::*;
 
 pub mod chunk;
+mod grid;
 pub mod pick;
 pub use chunk::ChunkGridIndex;
 pub use pick::{
@@ -58,10 +59,8 @@ pub trait SpatialIndex {
 /// leave the previous index unchanged.
 pub struct GridSpatialIndex {
     entries: Vec<SpatialEntry>,
-    min: Point3,
-    cell: f64,
-    cols: usize,
-    rows: usize,
+    /// Shared X/Y grid arithmetic (see [`grid`]).
+    layout: grid::GridLayout,
     cells: Vec<Vec<u32>>,
     built: bool,
 }
@@ -70,14 +69,7 @@ impl Default for GridSpatialIndex {
     fn default() -> Self {
         GridSpatialIndex {
             entries: Vec::new(),
-            min: Point3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            cell: 1.0,
-            cols: 0,
-            rows: 0,
+            layout: grid::GridLayout::empty(),
             cells: Vec::new(),
             built: false,
         }
@@ -117,50 +109,49 @@ impl GridSpatialIndex {
             };
         }
         if !min.x.is_finite() || !max.x.is_finite() {
-            self.cols = 0;
-            self.rows = 0;
+            self.layout = grid::GridLayout::empty();
             self.cells.clear();
             self.built = true;
             return;
         }
-        let ex = (max.x - min.x).max(1e-6);
-        let ey = (max.y - min.y).max(1e-6);
-        let target = target_cells.max(1) as f64;
-        let aspect = (ex / ey).max(1e-6);
-        self.cols = ((target * aspect).sqrt().ceil() as usize).clamp(1, 1024);
-        self.rows = ((target / self.cols as f64).ceil() as usize).clamp(1, 1024);
-        self.cell = (ex / self.cols as f64).max(ey / self.rows as f64).max(1e-9);
-        self.min = min;
-        self.cells = vec![Vec::new(); self.cols * self.rows];
+        // The shared grid arithmetic; `GridSpatialIndex` keeps its own (fine)
+        // sizing inputs so its behaviour is unchanged by the extraction.
+        self.layout = grid::layout(
+            min,
+            max,
+            target_cells.max(1) as f64,
+            grid::GridSizing {
+                extent_eps: 1e-6,
+                cell_eps: grid::MIN_CELL_EXTENT,
+                max_dim: 1024,
+            },
+        );
+        self.cells = vec![Vec::new(); self.layout.cell_count()];
+        let cols = self.layout.cols;
         for (i, e) in self.entries.iter().enumerate() {
-            let (c0, r0) = self.cell_of(e.bounds.min.x, e.bounds.min.y);
-            let (c1, r1) = self.cell_of(e.bounds.max.x, e.bounds.max.y);
+            let (c0, r0) = self.layout.cell_of(e.bounds.min.x, e.bounds.min.y);
+            let (c1, r1) = self.layout.cell_of(e.bounds.max.x, e.bounds.max.y);
             for r in r0..=r1 {
                 for c in c0..=c1 {
-                    self.cells[r * self.cols + c].push(i as u32);
+                    self.cells[r * cols + c].push(i as u32);
                 }
             }
         }
         self.built = true;
     }
 
-    fn cell_of(&self, x: f64, y: f64) -> (usize, usize) {
-        let cx = (((x - self.min.x) / self.cell).floor() as isize).clamp(0, self.cols as isize - 1);
-        let cy = (((y - self.min.y) / self.cell).floor() as isize).clamp(0, self.rows as isize - 1);
-        (cx as usize, cy as usize)
-    }
-
     fn query_cells(&self, b: &Bounds3) -> Vec<SelectionRef> {
         if !self.built || self.cells.is_empty() {
             return Vec::new();
         }
-        let (c0, r0) = self.cell_of(b.min.x, b.min.y);
-        let (c1, r1) = self.cell_of(b.max.x, b.max.y);
+        let (c0, r0) = self.layout.cell_of(b.min.x, b.min.y);
+        let (c1, r1) = self.layout.cell_of(b.max.x, b.max.y);
+        let cols = self.layout.cols;
         let mut seen = std::collections::BTreeSet::new();
         let mut out = Vec::new();
         for r in r0..=r1 {
             for c in c0..=c1 {
-                for &idx in &self.cells[r * self.cols + c] {
+                for &idx in &self.cells[r * cols + c] {
                     if seen.insert(idx) {
                         let e = &self.entries[idx as usize];
                         if intersects(&e.bounds, b) {

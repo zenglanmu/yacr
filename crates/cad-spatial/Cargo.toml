@@ -10,3 +10,6 @@ description = "Spatial index, instance queries, ray candidates."
 [dependencies]
 cad-domain.workspace = true
 cad-geometry.workspace = true
+# Per-chunk local R-tree for the pick broad phase (ADR-0012 §7). Only this crate
+# may depend on it.
+rstar.workspace = true

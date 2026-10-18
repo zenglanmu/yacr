@@ -378,11 +378,12 @@ impl PickIndex {
         drop(entries);
         if let Some(started) = build_started {
             eprintln!(
-                "YACR_PROFILE_PICK pick_index_build items={} bounded={} unbounded={} chunks={} oversized={} stored={} elapsed_ms={:.3}",
+                "YACR_PROFILE_PICK pick_index_build items={} bounded={} unbounded={} chunks={} rstar_chunks={} oversized={} stored={} elapsed_ms={:.3}",
                 items.len(),
                 broad.entry_count(),
                 unbounded.len(),
                 broad.chunk_count(),
+                broad.rstar_chunks(),
                 broad.oversized_count(),
                 broad.stored_entry_count(),
                 started.elapsed().as_secs_f64() * 1000.0

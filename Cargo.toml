@@ -85,6 +85,13 @@ png = "0.18"
 zune-jpeg = "0.5"
 futures-lite = "2.6"
 
+# Per-chunk local R-tree for the two-level pick broad phase (ADR-0012 §7:
+# "每 chunk 内以 rstar 作 local 索引，bulk_load 重建式 + 不可变快照"). Consumed
+# only by `cad-spatial`; `cad-scene`/`cad-app`/`cad-measure` go through it.
+# `default-features = false`: rstar's default feature set is empty, stated
+# explicitly so a future default cannot silently widen the dependency.
+rstar = { version = "0.13.0", default-features = false }
+
 # Portable wall clock. `std::time::Instant::now()` panics on
 # wasm32-unknown-unknown ("time not implemented"); `web-time` re-exports std on
 # native and uses `Performance.now()` in the browser. Already in the lock via

@@ -21,32 +21,29 @@
 //! list by orders of magnitude on the measured fixture and makes the visited
 //! chunk a meaningful unit (see the pick-index evidence note).
 //!
-//! Bottom level: each chunk holds a **flat payload list** (`ChunkEntry`) that
-//! is scanned linearly when the chunk is visited. A query walks the top-level
-//! grid, then each visited chunk's local list, and returns the candidate
-//! payloads.
+//! Bottom level: each chunk holds a local **`rstar` R-tree** (ADR-0012 §7),
+//! built once with [`rstar::RTree::bulk_load`] and immutable afterwards. A query
+//! walks the top-level grid, then each visited chunk's local tree, and returns
+//! the candidate payloads.
 //!
-//! # Per-chunk structure (measured deviation from ADR-0012 §7)
+//! # Per-chunk R-tree (landed, with its measured cost)
 //!
-//! ADR-0012 §7 names an `rstar` R-tree per chunk, built once with
-//! `RTree::bulk_load` (a rebuild-style, immutable snapshot). That was
-//! implemented and measured against the flat list on the committed
-//! `complex-test.dwg` fixture, sweeping the cell size from ~256 to ~65536
-//! entries per chunk. The per-chunk R-tree was a **net regression at every cell
-//! size** — build time, warm pick median/max and RSS were all worse, with
-//! candidate counts identical. The reason is that the pick tolerance is
-//! comparable to the entry spacing, so a visited chunk's query envelope covers
-//! most of that chunk and the R-tree has little to prune while still paying its
-//! per-tree overhead; the flat scan is already close to optimal.
+//! ADR-0012 §7 specifies the per-chunk `rstar` R-tree. It was implemented and
+//! measured against a flat per-chunk list on the committed `complex-test.dwg`
+//! fixture and was a **net regression** there — build time, warm pick
+//! median/max and RSS were all worse, with candidate counts identical. The
+//! reason is structural: the pick tolerance is comparable to the entry spacing,
+//! so a visited chunk's query envelope covers most of that chunk and the tree
+//! has little to prune while still paying its per-tree overhead.
 //!
-//! The landed structure is therefore a flat per-chunk list. This is a
-//! **measured, documented** deviation from the literal per-chunk-R-tree reading
-//! of §7, permitted by the ADR's own measurement gate (§8: "串行先行，按实测再议
-//! （§8.5 要求 profiling 先行）"; §10 S6 "按实测再评估"). The two-level shape the
-//! ADR requires is unchanged: loose grid, single-cell placement (no duplication),
-//! a separate oversized list, an immutable build-once snapshot, `Revision`-keyed
-//! versioning and the conservative-superset / exhaustive-fallback semantics. The
-//! cell-size sweep and before/after numbers live in the pick-index evidence note
+//! The dependency was nevertheless landed on an explicit product decision
+//! ("全面落地 rstar") because ADR conformance is required; the measured cost is
+//! accepted and recorded, not hidden. The two-level shape and every other §7
+//! requirement are unchanged: loose grid, single-cell placement (no
+//! duplication), a separate oversized list, an immutable build-once snapshot,
+//! `Revision`-keyed versioning and the conservative-superset /
+//! exhaustive-fallback semantics. The cell-size sweep, the node-size tuning and
+//! the before/after numbers live in the pick-index evidence note
 //! (`docs/validation-pick-index-2026-10-17.md`).
 //!
 //! # Query (conservative broad phase)
@@ -64,12 +61,11 @@
 //! a miss. `[BBox intersects query] ⟹ hit` is never assumed (ADR-0012 §2).
 
 use cad_domain::*;
+use rstar::{RStarInsertionStrategy, RTree, RTreeObject, RTreeParams, AABB};
 
+use crate::grid::{self, GridLayout, GridSizing, MIN_CELL_EXTENT};
 use crate::pick::{ray_intersects_expanded_bounds, validate_ray, MIN_RAY_DIRECTION};
 
-/// Smallest grid cell extent; keeps `cell` finite and positive for a degenerate
-/// (single-point) drawing extent.
-const MIN_CELL_EXTENT: f64 = 1e-9;
 /// Loose factor: a cell is expanded by this fraction of the cell size on every
 /// side when an entry is assigned to it (2x loose bounds). A primitive whose
 /// size is at most the cell size always fits in exactly one loose cell.
@@ -107,19 +103,59 @@ impl ChunkEntry {
     }
 }
 
+/// The X/Y envelope the per-chunk R-tree indexes. The pick grid is planar, so
+/// the local tree is 2D; the exact test then runs on the full 3D box.
+impl RTreeObject for ChunkEntry {
+    type Envelope = AABB<[f64; 2]>;
+
+    fn envelope(&self) -> Self::Envelope {
+        AABB::from_corners([self.min.x, self.min.y], [self.max.x, self.max.y])
+    }
+}
+
+/// rstar node-size parameters for a chunk's local tree (ADR-0012 §7).
+///
+/// `bulk_load` (OMT) builds the tree with this fan-out; `MAX_SIZE` trades query
+/// branching for cache locality. The library default (`MIN_SIZE = 3`,
+/// `MAX_SIZE = 6`) pays per-node overhead a chunk-sized tree cannot earn back
+/// here (the pick tolerance is comparable to the entry spacing, so the tree
+/// barely prunes), and a **larger** node is measurably better on every axis:
+/// build, RSS and warm pick all improve up to `MAX_SIZE ≈ 512`, then flatten.
+/// `(256, 1024)` was the best balanced point in the sweep; it brings warm pick
+/// to parity with the flat list while roughly halving the build/RSS regression
+/// of the default parameters. `REINSERTION_COUNT` only affects incremental
+/// `insert`, which the build-once snapshot never calls. Numbers live in the
+/// pick-index evidence note (`docs/validation-pick-index-2026-10-17.md`).
+struct PickTreeParams;
+
+impl RTreeParams for PickTreeParams {
+    const MIN_SIZE: usize = 256;
+    const MAX_SIZE: usize = 1024;
+    const REINSERTION_COUNT: usize = 256;
+    type DefaultInsertionStrategy = RStarInsertionStrategy;
+}
+
+/// A chunk's local R-tree: built once with `bulk_load`, immutable afterwards.
+type ChunkTree = RTree<ChunkEntry, PickTreeParams>;
+
+/// Build one chunk's immutable local R-tree.
+fn build_chunk_tree(entries: Vec<ChunkEntry>) -> ChunkTree {
+    RTree::bulk_load_with_params(entries)
+}
+
 /// A two-level chunk-grid broad phase keyed by opaque `u32` payloads.
 ///
 /// The payload is whatever the caller uses to identify an entry (here: the
 /// item's expansion ordinal). Payloads are returned in ascending order so the
 /// caller's stable tie handling is preserved.
 pub struct ChunkGridIndex {
-    min: Point3,
-    cell: f64,
-    cols: usize,
-    rows: usize,
-    /// Chunk ordinal (`row * cols + col`) -> its entries (an empty vec is an
-    /// empty chunk).
-    chunks: Vec<Vec<ChunkEntry>>,
+    /// Shared X/Y grid arithmetic (see [`crate::grid`]); empty when the index
+    /// has no entries.
+    layout: GridLayout,
+    /// Chunk ordinal (`row * cols + col`) -> its local R-tree. An empty chunk is
+    /// `None` so it allocates nothing (rstar's empty `RTree` still allocates a
+    /// root node, and a coarse grid leaves most chunks empty).
+    chunks: Vec<Option<ChunkTree>>,
     /// Entries too large for a single loose cell, tested directly on every
     /// query (the ADR-0012 §7 oversized-primitive rule).
     oversized: Vec<ChunkEntry>,
@@ -137,14 +173,7 @@ impl Default for ChunkGridIndex {
 impl ChunkGridIndex {
     pub fn new() -> Self {
         ChunkGridIndex {
-            min: Point3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            cell: 1.0,
-            cols: 0,
-            rows: 0,
+            layout: GridLayout::empty(),
             chunks: Vec::new(),
             oversized: Vec::new(),
             entry_count: 0,
@@ -178,13 +207,25 @@ impl ChunkGridIndex {
 
     /// Number of chunks in the top-level grid.
     pub fn chunk_count(&self) -> usize {
-        self.cols * self.rows
+        self.layout.cell_count()
+    }
+
+    /// Number of chunks that hold a non-empty local R-tree. A diagnostic for
+    /// tests and evidence.
+    pub fn rstar_chunks(&self) -> usize {
+        self.chunks
+            .iter()
+            .filter(|tree| tree.as_ref().is_some_and(|t| t.size() > 0))
+            .count()
     }
 
     /// Entries stored in one chunk's local index (0 for an empty chunk). A
     /// diagnostic for tests and evidence.
     pub fn chunk_entry_count(&self, chunk: usize) -> usize {
-        self.chunks.get(chunk).map_or(0, |c| c.len())
+        self.chunks
+            .get(chunk)
+            .and_then(|tree| tree.as_ref())
+            .map_or(0, |tree| tree.size())
     }
 
     /// Total entries stored across the two-level structure (chunk locals plus
@@ -192,31 +233,37 @@ impl ChunkGridIndex {
     /// [`Self::entry_count`]: no entry is duplicated across cells. A diagnostic
     /// for tests and evidence.
     pub fn stored_entry_count(&self) -> usize {
-        self.chunks.iter().map(|c| c.len()).sum::<usize>() + self.oversized.len()
+        self.chunks
+            .iter()
+            .flatten()
+            .map(|tree| tree.size())
+            .sum::<usize>()
+            + self.oversized.len()
     }
 
-    /// How many chunks' local lists hold `payload` (0, 1, or — only if the
+    /// How many chunks' local trees hold `payload` (0, 1, or — only if the
     /// loose-bound rule were broken — more). A diagnostic for tests.
     pub fn chunk_placements(&self, payload: u32) -> usize {
         self.chunks
             .iter()
-            .filter(|chunk| chunk.iter().any(|e| e.payload == payload))
+            .flatten()
+            .filter(|tree| tree.iter().any(|e| e.payload == payload))
             .count()
     }
 
     /// Grid origin (X/Y); a diagnostic for tests and evidence.
     pub fn grid_origin(&self) -> Point3 {
-        self.min
+        self.layout.origin()
     }
 
     /// Grid cell size (X/Y); a diagnostic for tests and evidence.
     pub fn cell_size(&self) -> f64 {
-        self.cell
+        self.layout.cell
     }
 
     /// Grid dimensions `(cols, rows)`; a diagnostic for tests and evidence.
     pub fn grid_dimensions(&self) -> (usize, usize) {
-        (self.cols, self.rows)
+        (self.layout.cols, self.layout.rows)
     }
 
     fn layout(&mut self, entries: &[(u32, Bounds3)]) {
@@ -239,59 +286,57 @@ impl ChunkGridIndex {
             max.y = max.y.max(b.max.y);
         }
         if entries.is_empty() || !min.x.is_finite() || !max.x.is_finite() {
-            self.cols = 0;
-            self.rows = 0;
+            self.layout = GridLayout::empty();
             self.chunks.clear();
             self.built = true;
             return;
         }
-        let ex = (max.x - min.x).max(MIN_CELL_EXTENT);
-        let ey = (max.y - min.y).max(MIN_CELL_EXTENT);
         // Coarse, pick-specific sizing: the chunk count follows the entry count
         // and a target entries-per-chunk (with a floor for tiny scenes), not the
-        // fixed 65 536-cell cap `GridSpatialIndex` uses.
+        // fixed 65 536-cell cap `GridSpatialIndex` uses. The grid arithmetic
+        // itself is shared (`crate::grid`).
         let target =
             (entries.len() / TARGET_ENTRIES_PER_CHUNK).clamp(MIN_CHUNKS, MAX_CHUNKS) as f64;
-        let aspect = (ex / ey).max(MIN_CELL_EXTENT);
-        self.cols = ((target * aspect).sqrt().ceil() as usize).clamp(1, MAX_GRID_DIM);
-        self.rows = ((target / self.cols as f64).ceil() as usize).clamp(1, MAX_GRID_DIM);
-        self.cell = (ex / self.cols as f64)
-            .max(ey / self.rows as f64)
-            .max(MIN_CELL_EXTENT);
-        self.min = min;
+        self.layout = grid::layout(
+            min,
+            max,
+            target,
+            GridSizing {
+                extent_eps: MIN_CELL_EXTENT,
+                cell_eps: MIN_CELL_EXTENT,
+                max_dim: MAX_GRID_DIM,
+            },
+        );
+        let cols = self.layout.cols;
+        let cell = self.layout.cell;
 
         // Assign every entry to exactly one loose cell, or to the oversized
         // list when it does not fit one.
-        let half = self.cell * LOOSE_HALF_CELL;
-        let mut acc: Vec<Vec<ChunkEntry>> = vec![Vec::new(); self.cols * self.rows];
+        let half = cell * LOOSE_HALF_CELL;
+        let mut acc: Vec<Vec<ChunkEntry>> = vec![Vec::new(); self.layout.cell_count()];
         for (payload, bounds) in entries {
             let cx = 0.5 * (bounds.min.x + bounds.max.x);
             let cy = 0.5 * (bounds.min.y + bounds.max.y);
-            let (c, r) = self.cell_of(cx, cy);
-            let cell_lo_x = self.min.x + c as f64 * self.cell;
-            let cell_lo_y = self.min.y + r as f64 * self.cell;
+            let (c, r) = self.layout.cell_of(cx, cy);
+            let (cell_lo_x, cell_lo_y) = self.layout.cell_origin(c, r);
             let fits = bounds.min.x >= cell_lo_x - half
-                && bounds.max.x <= cell_lo_x + self.cell + half
+                && bounds.max.x <= cell_lo_x + cell + half
                 && bounds.min.y >= cell_lo_y - half
-                && bounds.max.y <= cell_lo_y + self.cell + half;
+                && bounds.max.y <= cell_lo_y + cell + half;
             let entry = ChunkEntry::new(*payload, bounds);
             if fits {
-                acc[r * self.cols + c].push(entry);
+                acc[r * cols + c].push(entry);
             } else {
                 self.oversized.push(entry);
             }
         }
-        // Build-once, immutable snapshot (ADR-0012 §7): each chunk's list is
-        // scanned linearly on a visit (see the module docs for the measured
-        // deviation from the per-chunk-R-tree reading of §7).
-        self.chunks = acc;
+        // Build-once, immutable snapshot (ADR-0012 §7): each chunk becomes an
+        // `rstar` R-tree built with `bulk_load`, immutable afterwards.
+        self.chunks = acc
+            .into_iter()
+            .map(|entries| (!entries.is_empty()).then(|| build_chunk_tree(entries)))
+            .collect();
         self.built = true;
-    }
-
-    fn cell_of(&self, x: f64, y: f64) -> (usize, usize) {
-        let cx = (((x - self.min.x) / self.cell).floor() as isize).clamp(0, self.cols as isize - 1);
-        let cy = (((y - self.min.y) / self.cell).floor() as isize).clamp(0, self.rows as isize - 1);
-        (cx as usize, cy as usize)
     }
 
     /// The chunks whose *loose* cells overlap a query rectangle, as an
@@ -299,9 +344,9 @@ impl ChunkGridIndex {
     /// (half a cell) because an entry is found only in its own cell, and its
     /// loose cell may reach half a cell beyond that cell's edge.
     fn loose_cell_range(&self, lo: Point3, hi: Point3) -> (usize, usize, usize, usize) {
-        let half = self.cell * LOOSE_HALF_CELL;
-        let (c0, r0) = self.cell_of(lo.x - half, lo.y - half);
-        let (c1, r1) = self.cell_of(hi.x + half, hi.y + half);
+        let half = self.layout.cell * LOOSE_HALF_CELL;
+        let (c0, r0) = self.layout.cell_of(lo.x - half, lo.y - half);
+        let (c1, r1) = self.layout.cell_of(hi.x + half, hi.y + half);
         (c0, r0, c1, r1)
     }
 
@@ -318,10 +363,19 @@ impl ChunkGridIndex {
         }
         let mut out: Vec<u32> = Vec::new();
         if let Some((lo, hi)) = self.query_region(ray, tolerance) {
+            // Each visited chunk's local R-tree is queried with the X/Y envelope
+            // of the query region. An entry whose 2D envelope does not meet that
+            // region cannot pass the 3D tolerance-expanded test, so this only
+            // removes work; the exact predicate still decides every candidate.
+            let envelope = AABB::from_corners([lo.x, lo.y], [hi.x, hi.y]);
             let (c0, r0, c1, r1) = self.loose_cell_range(lo, hi);
+            let cols = self.layout.cols;
             for r in r0..=r1 {
                 for c in c0..=c1 {
-                    for entry in &self.chunks[r * self.cols + c] {
+                    let Some(tree) = &self.chunks[r * cols + c] else {
+                        continue;
+                    };
+                    for entry in tree.locate_in_envelope_intersecting(envelope) {
                         self.test(entry, ray, tolerance, &mut out);
                     }
                 }
@@ -351,13 +405,13 @@ impl ChunkGridIndex {
     /// outside it.
     fn query_region(&self, ray: &Ray3, tolerance: f64) -> Option<(Point3, Point3)> {
         let lo = Point3 {
-            x: self.min.x - tolerance,
-            y: self.min.y - tolerance,
+            x: self.layout.origin_x - tolerance,
+            y: self.layout.origin_y - tolerance,
             z: 0.0,
         };
         let hi = Point3 {
-            x: self.min.x + self.cols as f64 * self.cell + tolerance,
-            y: self.min.y + self.rows as f64 * self.cell + tolerance,
+            x: self.layout.origin_x + self.layout.cols as f64 * self.layout.cell + tolerance,
+            y: self.layout.origin_y + self.layout.rows as f64 * self.layout.cell + tolerance,
             z: 0.0,
         };
         let (ox, oy) = (ray.origin.x, ray.origin.y);
