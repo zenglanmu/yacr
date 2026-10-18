@@ -508,3 +508,28 @@ fn preview_status_and_cursor_follow_the_state_machine() {
     tool.push_point(p(1.0, 1.0)).unwrap();
     assert_eq!(tool.preview().status_line(), "直线：已选 2 点，可确认");
 }
+
+#[test]
+fn a_click_after_both_pick_steps_is_refused_as_ready_not_as_a_free_point() {
+    // Once both TRIM steps are resolved the tool is ready and waiting for the
+    // Enter confirmation. A further click cannot advance the capture, so it is
+    // refused with that reason — not the misleading "captures entity picks, not
+    // free points", which describes a step that is still un-captured.
+    let mut tool = DrawTool::new(DrawToolKind::Trim, 0);
+    tool.push_pick(p(1.0, 0.0), pick(1)).unwrap();
+    tool.push_pick(p(1.0, 5.0), pick(2)).unwrap();
+    assert!(tool.is_ready());
+
+    let message = match tool.push_point(p(3.0, 3.0)) {
+        Err(CadError::InvalidInput(message)) => message,
+        other => panic!("expected a ready refusal, got {other:?}"),
+    };
+    assert!(message.contains("ready"), "{message}");
+    assert!(message.contains("Enter"), "{message}");
+    assert!(message.contains(DrawToolKind::Trim.key()), "{message}");
+
+    // The refusal does not disturb the completed capture.
+    assert_eq!(tool.picks().len(), 2);
+    assert_eq!(tool.points().len(), 2);
+    assert!(tool.is_ready());
+}

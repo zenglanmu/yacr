@@ -919,3 +919,79 @@ fn admissible_names_cover_the_vocabulary_exactly_once() {
         );
     }
 }
+
+/// The measurement selector table is exhaustive over [`cad_app::MeasurementToolKind`]
+/// and shares no name with any other selector family.
+///
+/// `MEASUREMENT_SELECTORS` is hand-written, so without this contract a fifth
+/// `MeasurementToolKind` could silently have no selector and a measurement
+/// button would start the wrong algorithm. `MeasurementToolKind::key` is an
+/// exhaustive `match` in `cad-app` (no wildcard arm), so a new variant cannot
+/// compile until it is listed there and in `ALL`; this test then fails until
+/// `MEASUREMENT_SELECTORS` matches `ALL` one-to-one. The disjointness is a
+/// **tested invariant**, not prose: `CadSession::command` resolves the
+/// measurement selectors *before* `normalize_command`, so a name shared with
+/// `COMMAND_TABLE`, an alias or `ZOOM_STEP_SELECTORS` would silently prefer the
+/// measurement path. No such collision exists today.
+#[test]
+fn measurement_selectors_are_exhaustive_and_disjoint_from_the_command_vocabulary() {
+    // No missing, no extra, no duplicate: one selector per kind, and each
+    // selector resolves back to exactly its own kind.
+    assert_eq!(
+        MEASUREMENT_SELECTORS.len(),
+        cad_app::MeasurementToolKind::ALL.len(),
+        "MEASUREMENT_SELECTORS must cover MeasurementToolKind::ALL one-to-one"
+    );
+    for kind in cad_app::MeasurementToolKind::ALL {
+        let selectors: Vec<&str> = MEASUREMENT_SELECTORS
+            .iter()
+            .filter(|(_, mapped)| *mapped == kind)
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(
+            selectors.len(),
+            1,
+            "{kind:?} must have exactly one selector: {selectors:?}"
+        );
+        assert_eq!(measurement_selector_kind(selectors[0]), Some(kind));
+        assert_eq!(canonical_command_name(selectors[0]), Some(selectors[0]));
+        assert_eq!(
+            normalize_command(selectors[0]),
+            None,
+            "carries no CommandId"
+        );
+    }
+    let unique: std::collections::BTreeSet<&str> = MEASUREMENT_SELECTORS
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
+    assert_eq!(
+        unique.len(),
+        MEASUREMENT_SELECTORS.len(),
+        "duplicate measurement selector name"
+    );
+
+    // Disjoint from every other selector family (the lookup-order invariant).
+    for (name, _) in MEASUREMENT_SELECTORS {
+        assert!(
+            !COMMAND_TABLE.iter().any(|(candidate, _)| candidate == name),
+            "{name} collides with COMMAND_TABLE (would silently prefer the measurement path)"
+        );
+        assert!(
+            !COMMAND_ALIASES.iter().any(|(alias, _)| alias == name),
+            "{name} collides with a COMMAND_ALIASES alias"
+        );
+        assert!(
+            !COMMAND_ALIASES
+                .iter()
+                .any(|(_, canonical)| canonical == name),
+            "{name} is an alias target and would shadow the measurement dispatch"
+        );
+        assert!(
+            !ZOOM_STEP_SELECTORS
+                .iter()
+                .any(|(candidate, _)| candidate == name),
+            "{name} collides with ZOOM_STEP_SELECTORS"
+        );
+    }
+}

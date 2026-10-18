@@ -151,6 +151,22 @@ fn preview_candidate(core: &HostCore) -> Option<SelectionRef> {
         .candidate
 }
 
+/// Whether the renderer's flags producer would emit a `highlight.unresolved`
+/// for the current overlay inputs.
+///
+/// This runs the **real** `selection_entity_flags` derivation the renderer uses
+/// over the published `OverlayInputs`: a `hovered`/`selection` ref the database
+/// does not resolve becomes a `highlight.unresolved` "… is not present in the
+/// document" diagnostic. A cleared/dropped ref must produce none.
+fn has_unresolved_highlight(core: &HostCore) -> bool {
+    let c = core.controller.borrow();
+    let drawing = c.drawing().expect("the host always has a document");
+    cad_app::render_scene::selection_entity_flags(&drawing, &core.render.overlays(), c.document_id)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "highlight.unresolved")
+}
+
 #[test]
 fn trim_capture_tints_the_candidate_and_clears_over_empty_space() {
     let core = trim_core();
@@ -189,24 +205,30 @@ fn candidate_follows_the_second_step_after_the_first_pick() {
     move_cursor(&core, screen_of(&core, p(-150.0, 100.0)));
     assert_eq!(hovered_refs(&core), vec![target.clone()]);
 
-    // Capturing the first step clears the candidate: the picked ref is stored
-    // on the tool, not carried as a pending tint.
+    // Capturing the first step clears the candidate; the committed pick is now
+    // the tint on its own, so the target stays visible while the boundary is
+    // chosen (N1).
     capture_world(&core, p(-150.0, 100.0));
     assert_eq!(
         preview_candidate(&core),
         None,
         "a captured step must not keep its old candidate"
     );
-    assert!(hovered_refs(&core).is_empty());
+    assert_eq!(
+        hovered_refs(&core),
+        vec![target.clone()],
+        "the committed pick stays tinted after the candidate is cleared"
+    );
 
-    // The next move resolves the pending boundary step, not the target.
+    // The next move resolves the pending boundary step; the tint is the
+    // committed target plus the boundary candidate, in pick-then-candidate
+    // order.
     move_cursor(&core, screen_of(&core, p(0.0, 250.0)));
     assert_eq!(
         hovered_refs(&core),
-        vec![boundary.clone()],
-        "the tint must follow the second step's entity"
+        vec![target.clone(), boundary.clone()],
+        "the committed pick and the boundary candidate are tinted together"
     );
-    assert_ne!(hovered_refs(&core), vec![target.clone()]);
 
     let preview = core.controller.borrow().session.draw_preview().unwrap();
     assert_eq!(preview.picks, vec![target]);
@@ -241,11 +263,16 @@ fn cancel_and_confirm_both_clear_the_candidate_tint() {
     move_cursor(&confirmed, screen_of(&confirmed, p(-150.0, 100.0)));
     capture_world(&confirmed, p(-150.0, 100.0));
     move_cursor(&confirmed, screen_of(&confirmed, p(0.0, 250.0)));
-    assert_eq!(hovered_refs(&confirmed), vec![entity_ref(&confirmed, 102)]);
+    assert_eq!(
+        hovered_refs(&confirmed),
+        vec![entity_ref(&confirmed, 101), entity_ref(&confirmed, 102)],
+        "the committed target and the boundary candidate are tinted together"
+    );
     capture_world(&confirmed, p(0.0, 250.0));
-    assert!(
-        hovered_refs(&confirmed).is_empty(),
-        "the second pick clears the candidate before confirm"
+    assert_eq!(
+        hovered_refs(&confirmed),
+        vec![entity_ref(&confirmed, 101), entity_ref(&confirmed, 102)],
+        "both committed picks stay tinted until confirm"
     );
 
     dispatch_pointer(&confirmed, InteractionRequest::Confirm);
@@ -409,6 +436,26 @@ fn a_candidate_only_tint_is_flags_only_while_the_preview_cursor_is_visual() {
         "a candidate-only tint must stay on the flags path (no re-prepare)"
     );
 
+    // The committed picks join the **same** `FLAG_HOVERED` set (N1), so a
+    // pick-set change over an otherwise identical preview is still a flags-only
+    // publication: `picks` and `candidate` are not overlay-batch inputs (only
+    // `points`/`cursor` are), and the derived `hovered` set changes, so this
+    // must not re-prepare either.
+    let second = entity_ref(&core, 102);
+    let mut picked = base.clone();
+    {
+        let preview = picked.draw_preview.as_mut().unwrap();
+        preview.picks = vec![reference.clone()];
+        preview.candidate = Some(second.clone());
+    }
+    picked.hovered = cad_app::SelectionSet::from_refs([reference.clone(), second.clone()]);
+    let _ = core.render.set_overlays(picked);
+    assert_eq!(
+        core.render.input_revision(),
+        input_after_base,
+        "a picks+candidate tint must stay on the flags path (no re-prepare)"
+    );
+
     // Moving the preview cursor (what the live tool does on every pointer move)
     // is a visual overlay input and does schedule the overlay prepare.
     let mut moved = base;
@@ -418,4 +465,171 @@ fn a_candidate_only_tint_is_flags_only_while_the_preview_cursor_is_visual() {
         core.render.input_revision() > input_after_base,
         "the preview cursor is visual overlay input, so a cursor move re-prepares"
     );
+}
+
+#[test]
+fn the_committed_picks_and_the_pending_candidate_are_tinted_together() {
+    let core = trim_core();
+    begin_trim(&core);
+    let target = entity_ref(&core, 101);
+    let boundary = entity_ref(&core, 102);
+
+    // Step 1 commits the target: with no candidate left the committed pick is
+    // the tint on its own (AutoCAD shows the chosen object as it is picked).
+    capture_world(&core, p(-150.0, 100.0));
+    assert_eq!(preview_candidate(&core), None);
+    assert_eq!(
+        hovered_refs(&core),
+        vec![target.clone()],
+        "the first committed pick must be tinted"
+    );
+
+    // While the boundary is hovered, the committed target and the pending
+    // boundary candidate are tinted together, in pick-then-candidate order.
+    move_cursor(&core, screen_of(&core, p(0.0, 250.0)));
+    assert_eq!(
+        hovered_refs(&core),
+        vec![target.clone(), boundary.clone()],
+        "the committed pick and the boundary candidate share the tint"
+    );
+
+    // Second pick, then confirm: the capture ends and nothing is tinted.
+    capture_world(&core, p(0.0, 250.0));
+    dispatch_pointer(&core, InteractionRequest::Confirm);
+    assert!(core.controller.borrow().session.draw_preview().is_none());
+    assert!(
+        hovered_refs(&core).is_empty(),
+        "confirm must leave no capture tint behind"
+    );
+
+    // Cancel: after a first pick the tint is cleared immediately too.
+    let cancelled = trim_core();
+    begin_trim(&cancelled);
+    capture_world(&cancelled, p(-150.0, 100.0));
+    assert_eq!(hovered_refs(&cancelled), vec![entity_ref(&cancelled, 101)]);
+    dispatch_pointer(&cancelled, InteractionRequest::Cancel);
+    assert!(
+        hovered_refs(&cancelled).is_empty(),
+        "cancel clears the committed-pick tint"
+    );
+}
+
+#[test]
+fn a_mid_capture_erase_drops_the_tinted_candidate_without_a_highlight_unresolved() {
+    let core = trim_core();
+    begin_trim(&core);
+    let target = entity_ref(&core, 101);
+
+    // Hover the target so it is the live candidate (no pick committed yet).
+    move_cursor(&core, screen_of(&core, p(-150.0, 100.0)));
+    assert_eq!(hovered_refs(&core), vec![target.clone()]);
+
+    // ERASE at the command line is not capture-modal: it replaces the document
+    // while the TRIM capture is still active, leaving the candidate dead.
+    select_entity(&core, EntityId(101));
+    core.command(CommandId::EraseEntities, CommandPayload::None)
+        .expect("the erase runs mid-capture");
+
+    assert!(
+        core.controller.borrow().session.draw_preview().is_some(),
+        "the capture is not cancelled by an edit"
+    );
+    assert_eq!(
+        preview_candidate(&core),
+        None,
+        "the dead candidate must be cleared"
+    );
+    assert!(
+        hovered_refs(&core).is_empty(),
+        "the dead candidate must not keep a tint"
+    );
+    assert!(
+        !has_unresolved_highlight(&core),
+        "a cleared candidate must not produce a highlight.unresolved"
+    );
+
+    // The very next move does not resurrect it: the entity is gone, so the
+    // re-resolved candidate is honestly `None` and no diagnostic appears.
+    move_cursor(&core, screen_of(&core, p(-150.0, 100.0)));
+    assert!(hovered_refs(&core).is_empty());
+    assert_eq!(preview_candidate(&core), None);
+    assert!(!has_unresolved_highlight(&core));
+}
+
+#[test]
+fn erasing_a_picked_entity_mid_capture_drops_its_tint_and_confirm_refuses() {
+    let core = trim_core();
+    begin_trim(&core);
+    let target = entity_ref(&core, 101);
+    let boundary = entity_ref(&core, 102);
+
+    // Commit both picks; both are tinted (N1).
+    capture_world(&core, p(-150.0, 100.0));
+    move_cursor(&core, screen_of(&core, p(0.0, 250.0)));
+    capture_world(&core, p(0.0, 250.0));
+    assert_eq!(hovered_refs(&core), vec![target.clone(), boundary.clone()]);
+
+    // Erase the picked target while the capture is still live.
+    select_entity(&core, EntityId(101));
+    core.command(CommandId::EraseEntities, CommandPayload::None)
+        .expect("the erase runs mid-capture");
+
+    assert!(core.controller.borrow().session.draw_preview().is_some());
+    assert_eq!(
+        hovered_refs(&core),
+        vec![boundary.clone()],
+        "only the still-resolving pick is tinted; the vanished one is dropped"
+    );
+    assert!(
+        !has_unresolved_highlight(&core),
+        "a vanished pick must not become a highlight.unresolved tint"
+    );
+
+    // CONFIRM refuses honestly: the target no longer exists, so the capture is
+    // not silently committed against a stale ref, and it is preserved.
+    let refused = EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(InteractionRequest::Confirm),
+    );
+    assert!(refused.is_err(), "a vanished pick is refused at confirm");
+    assert!(
+        core.controller.borrow().session.draw_preview().is_some(),
+        "a refused confirm preserves the capture"
+    );
+}
+
+#[test]
+fn a_mid_capture_edit_that_keeps_the_candidate_refreshes_the_tint() {
+    let core = trim_core();
+    begin_trim(&core);
+    let target = entity_ref(&core, 101);
+
+    move_cursor(&core, screen_of(&core, p(-150.0, 100.0)));
+    assert_eq!(hovered_refs(&core), vec![target.clone()]);
+
+    // Erase a *different* entity: the document content changes (a new scene
+    // identity) but the candidate's entity survives.
+    select_entity(&core, EntityId(103));
+    core.command(CommandId::EraseEntities, CommandPayload::None)
+        .expect("the erase runs mid-capture");
+
+    assert_eq!(
+        preview_candidate(&core),
+        None,
+        "the candidate is re-derived against the new document, never carried"
+    );
+    assert!(
+        hovered_refs(&core).is_empty(),
+        "the pre-edit tint is dropped, never left stuck"
+    );
+    assert!(
+        core.controller.borrow().session.draw_preview().is_some(),
+        "the capture stays usable after an edit that kept the candidate"
+    );
+
+    // The next move re-resolves the same entity: the tint is simply refreshed.
+    move_cursor(&core, screen_of(&core, p(-150.0, 100.0)));
+    assert_eq!(hovered_refs(&core), vec![target.clone()]);
+    assert_eq!(preview_candidate(&core), Some(target));
+    assert!(!has_unresolved_highlight(&core));
 }

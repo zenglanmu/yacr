@@ -85,7 +85,11 @@ pub struct CadSession {
     /// Document generation whose stale render resource caches were already
     /// cleared after a failed install.
     resource_guard: Cell<Option<u64>>,
-    /// Verified successful-import transition counter.
+    /// Successful-import transition counter: the number of times the host
+    /// published a replacement authoritative document from a successful import.
+    /// Its key is `(document generation, import report identity)` — host
+    /// replacement + import report — never the render session observing the
+    /// incoming drawing.
     import_count: Cell<u64>,
     /// `(document generation, opened identity)` last counted, so a repeated
     /// snapshot never double-counts. Both components are import-only: the
@@ -612,7 +616,7 @@ impl CadSession {
         }
     }
 
-    /// Count a verified successful import transition exactly once.
+    /// Count a host-published successful-import transition exactly once.
     ///
     /// The counter is not a parsed-entity count and proves nothing about
     /// reparsing; it records that the authoritative document was replaced by a
@@ -621,7 +625,8 @@ impl CadSession {
     /// `document generation` advances only when the host publishes a replacement
     /// authoritative drawing (`note_document_replaced` runs solely from the
     /// open/import/`NewDrawing` pipelines, never from an edit commit), and the
-    /// identity comes from the successful import report.
+    /// identity comes from the successful import report — it is **not** the render
+    /// session observing the incoming drawing.
     ///
     /// An edit commit swaps the controller's drawing `Arc` and the host re-syncs
     /// the render session every tick, so the render session's `incoming`

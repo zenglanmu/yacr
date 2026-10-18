@@ -302,3 +302,212 @@ fn a_copy_keeps_the_source_selection_and_does_not_select_the_copies() {
     assert!(session.selection.contains(&ref_of(1)));
     assert_selection_resolves(&app, &session);
 }
+
+#[test]
+fn a_foreign_document_ref_is_not_retained_by_a_coinciding_entity_id() {
+    // The open drawing has an entity 2, so an entity-only prune would keep a
+    // ref whose *document* is a different one. Reconciliation keys on
+    // `(document, entity)`, so the foreign ref is dropped while the local ref
+    // survives and no ref is silently attributed to a document it is not from.
+    let (mut app, mut session) = drawing_app();
+    let mut foreign = ref_of(2);
+    foreign.document = DocumentId(2);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Select,
+        CommandPayload::Selection(vec![ref_of(1), foreign]),
+    )
+    .unwrap();
+    assert_eq!(session.selection.len(), 2);
+
+    // A transform of a still-resolving local ref runs reconciliation.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::MoveEntities,
+        CommandPayload::Move {
+            refs: vec![ref_of(1)],
+            delta: p3(1.0, 0.0, 0.0),
+        },
+    )
+    .unwrap();
+
+    assert!(
+        !session
+            .selection
+            .refs()
+            .iter()
+            .any(|reference| reference.document != DocumentId(1)),
+        "a foreign-document ref must not survive reconciliation: {:?}",
+        session.selection.refs()
+    );
+    assert!(
+        session.selection.contains(&ref_of(1)),
+        "the local ref survives"
+    );
+    assert_eq!(session.selection.len(), 1);
+    assert_selection_resolves(&app, &session);
+}
+
+#[test]
+fn cutting_the_selection_drops_every_removed_ref() {
+    // CUT deletes the selected entities and moves them to the clipboard: every
+    // removed ref must be dropped, leaving no `unresolved` row or dangling ref.
+    let (mut app, mut session) = drawing_app();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Select,
+        CommandPayload::Selection(vec![ref_of(1), ref_of(2)]),
+    )
+    .unwrap();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::CutToClipboard,
+        CommandPayload::None,
+    )
+    .unwrap();
+
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(
+        drawing.entity(EntityId(1)).is_none(),
+        "cut deletes entity 1"
+    );
+    assert!(
+        drawing.entity(EntityId(2)).is_none(),
+        "cut deletes entity 2"
+    );
+    assert_eq!(
+        session.clipboard_len(),
+        2,
+        "both cut entities are on the clipboard"
+    );
+    assert!(
+        session.selection.is_empty(),
+        "every cut ref is dropped from the selection"
+    );
+    assert_selection_resolves(&app, &session);
+}
+
+#[test]
+fn pasting_after_a_cut_does_not_retarget_the_emptied_selection() {
+    // PASTE inserts fresh ids for the clipboard entities (never reusing the cut
+    // ids), so after a cut the emptied selection must stay empty: it must not
+    // silently retarget onto the new ids.
+    let (mut app, mut session) = drawing_app();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Select,
+        CommandPayload::Selection(vec![ref_of(1)]),
+    )
+    .unwrap();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::CutToClipboard,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert!(session.selection.is_empty());
+    let before = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .model_space()
+        .len();
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::PasteFromClipboard,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(outcome.objects.len(), 1, "one pasted copy");
+
+    let pasted = EntityId(outcome.objects[0].0);
+    assert_ne!(pasted, EntityId(1), "the paste is a fresh id, not entity 1");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(drawing.entity(pasted).is_some(), "the pasted entity exists");
+    assert_eq!(
+        drawing.model_space().len(),
+        before + 1,
+        "the paste adds exactly one entity"
+    );
+    assert!(
+        session.selection.is_empty(),
+        "paste must not silently select the new ids"
+    );
+    assert_selection_resolves(&app, &session);
+}
+
+#[test]
+fn redo_of_a_delete_drops_the_reselected_refs() {
+    // REDO of an ERASE removes entities again (application.rs reconciles REDO
+    // like the original edit), so a selection made after the UNDO that pointed
+    // at the now-restored entities must be dropped on the redo.
+    let (mut app, mut session) = drawing_app();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Select,
+        CommandPayload::Selection(vec![ref_of(1), ref_of(2)]),
+    )
+    .unwrap();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::EraseEntities,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert!(session.selection.is_empty(), "the erase dropped both refs");
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(1))
+            .is_some(),
+        "undo restored the erased entity"
+    );
+
+    // Re-select the (restored) entities, then redo the delete.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Select,
+        CommandPayload::Selection(vec![ref_of(1), ref_of(2)]),
+    )
+    .unwrap();
+    assert_eq!(session.selection.len(), 2);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .unwrap();
+
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(
+        drawing.entity(EntityId(1)).is_none(),
+        "redo deletes entity 1"
+    );
+    assert!(
+        drawing.entity(EntityId(2)).is_none(),
+        "redo deletes entity 2"
+    );
+    assert!(
+        session.selection.is_empty(),
+        "a redone delete drops the reselected refs"
+    );
+    assert_selection_resolves(&app, &session);
+}

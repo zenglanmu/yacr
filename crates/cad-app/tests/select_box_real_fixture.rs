@@ -224,3 +224,64 @@ fn the_crossing_rectangle_selects_the_line_it_intersects() {
     assert_eq!(count, 1);
     assert_eq!(precision, "exact");
 }
+
+/// Pin the geometry premise the edit-evidence driver's click coordinates rest
+/// on: the committed fixture is **four vertical LINE entities at x = 0, 1, 2, 3
+/// spanning y = 0…1**, with no horizontal entity and no segment below y = 0.
+///
+/// The evidence driver clicks world coordinates that silently assume exactly
+/// this geometry; a fixture change must fail here instead of silently
+/// invalidating an evidence run. This asserts the real imported geometry (the
+/// same import the evidence uses), not the manifest prose.
+#[test]
+fn the_fixture_is_four_vertical_unit_lines_at_x_0_1_2_3() {
+    let Some((app, _session)) = load() else {
+        eprintln!("SKIP: no four-line fixture (set YACR_TEST_DWG)");
+        return;
+    };
+    let drawing = &app.workspace.documents[&DOC].drawing;
+    let mut xs: Vec<f64> = Vec::new();
+    let mut count = 0usize;
+    for entity in drawing.model_space() {
+        let SemanticGeometry::Line { start, end } = &entity.geometry else {
+            panic!(
+                "fixture entity {:?} is not a LINE: {:?}",
+                entity.id, entity.geometry
+            );
+        };
+        count += 1;
+        // No horizontal entity: a horizontal line would share y at both ends.
+        assert!(
+            (start.y - end.y).abs() >= 1e-9,
+            "LINE {:?} is horizontal: {start:?}..{end:?}",
+            entity.id
+        );
+        // Vertical: identical x at both ends.
+        assert!(
+            (start.x - end.x).abs() < 1e-9,
+            "LINE {:?} is not vertical: {start:?}..{end:?}",
+            entity.id
+        );
+        // Spans y = 0…1 and never dips below y = 0.
+        let (low, high) = if start.y <= end.y {
+            (start.y, end.y)
+        } else {
+            (end.y, start.y)
+        };
+        assert!(low >= -1e-9, "LINE {:?} dips below y = 0: {low}", entity.id);
+        assert!(
+            low.abs() < 1e-9 && (high - 1.0).abs() < 1e-9,
+            "LINE {:?} does not span y = 0..1: {low}..{high}",
+            entity.id
+        );
+        xs.push(start.x);
+    }
+    assert_eq!(count, 4, "the fixture must be exactly four LINE entities");
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    for (index, x) in xs.iter().enumerate() {
+        assert!(
+            (x - index as f64).abs() < 1e-9,
+            "expected vertical lines at x = 0,1,2,3; got {xs:?}"
+        );
+    }
+}

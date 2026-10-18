@@ -397,9 +397,19 @@ impl DrawTool {
     ///
     /// The entity-picking kinds refuse here: their steps are entity picks, so a
     /// blind point that cannot carry an entity must never be captured as one
-    /// ([`Self::push_pick`] is the only path for them).
+    /// ([`Self::push_pick`] is the only path for them). Once both TRIM/EXTEND
+    /// steps are resolved the tool is ready and waiting for confirmation, so a
+    /// further click is refused with **that** reason instead of the misleading
+    /// "captures entity picks, not free points" (which describes a step that is
+    /// still un-captured). The refusal is a machine reason, never a silent drop.
     pub fn push_point(&mut self, point: Point3) -> CadResult<()> {
         if self.kind.needs_picked_entities() {
+            if self.remaining() == 0 {
+                return Err(CadError::InvalidInput(format!(
+                    "draw kind '{}' is ready; press Enter to confirm",
+                    self.kind.key()
+                )));
+            }
             return Err(CadError::InvalidInput(format!(
                 "draw kind '{}' captures entity picks, not free points",
                 self.kind.key()

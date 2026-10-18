@@ -137,6 +137,12 @@ impl HostController {
     /// pick path ([`HostController::resolve_draw_pick`]). A miss is refused
     /// immediately (no point stored, no step consumed), so the user can simply
     /// click again; a hit stores the ref and the raw point together.
+    ///
+    /// Once both TRIM/EXTEND steps are resolved the tool is ready and the click
+    /// falls past the pick routing: it is refused with the "ready; press Enter
+    /// to confirm" reason (a machine string, see [`DrawTool::push_point`])
+    /// rather than the misleading entity-pick text. The click is never silently
+    /// ignored.
     pub fn capture_tool_point(&mut self, point: Point3) -> CadResult<bool> {
         let point = self.resolve_snap(point)?.map_or(point, |snap| snap.point);
         if self.session.draw_requires_entity_pick() {

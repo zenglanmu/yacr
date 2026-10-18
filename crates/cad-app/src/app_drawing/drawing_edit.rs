@@ -242,11 +242,21 @@ impl Application {
     /// step are untouched.
     ///
     /// The rule is **drop only the removed refs, keep the rest**: a ref survives
-    /// iff `DrawingDatabase::entity(ref.entity)` still resolves (which covers
-    /// model space, paper space and block children). Sub-element/instance refs
-    /// whose owning entity survives are kept. When there is no open document
-    /// there is nothing to reconcile against, so the selection is left untouched
-    /// (never cleared behind the user's back).
+    /// iff it belongs to the open document (`reference.document ==
+    /// session.document`) **and** `DrawingDatabase::entity(ref.entity)` still
+    /// resolves (which covers model space, paper space and block children).
+    /// Sub-element/instance refs whose owning entity survives are kept. When
+    /// there is no open document there is nothing to reconcile against, so the
+    /// selection is left untouched (never cleared behind the user's back).
+    ///
+    /// Keying on `(document, entity)` rather than `entity` alone closes a latent
+    /// wrong-retention: an entity-only prune would keep a **foreign-document**
+    /// ref whenever its id merely coincided with an entity of the open drawing,
+    /// attributing it here as though it belonged. The session selection is
+    /// single-document (rebuilt per document, and `SelectionSet` dedups without
+    /// the document), so no legitimate flow places a foreign-document ref in it;
+    /// this only ever drops a ref that was already wrong. Behaviour change: such
+    /// a foreign ref is now dropped instead of silently retained.
     ///
     /// Replacement-ids decision: none of the edit commands replace an existing
     /// entity with a new id — MOVE/ROTATE/SCALE and a keeping TRIM mutate the
@@ -260,9 +270,9 @@ impl Application {
             return;
         };
         let drawing = &document.drawing;
-        session
-            .selection
-            .retain(|reference| drawing.entity(reference.entity).is_some());
+        session.selection.retain(|reference| {
+            reference.document == session.document && drawing.entity(reference.entity).is_some()
+        });
     }
 
     /// Clone every selected entity with a fresh id, translating its geometry.

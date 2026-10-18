@@ -506,12 +506,21 @@ impl HostCore {
         let command_id = command.id;
         self.metrics()?;
         let hover_preview_before = self.controller.borrow().session.hover_preview();
-        // The mode/space context a pending TRIM/EXTEND candidate was resolved
-        // in. A switch invalidates it: the cursor did not move, but the entity
-        // it resolved belongs to the previous context.
+        // The context a pending TRIM/EXTEND candidate was resolved in. A mode or
+        // space switch invalidates it: the cursor did not move, but the entity
+        // it resolved belongs to the previous context. The document's content
+        // identity does too: the command line is not capture-modal, so an edit
+        // that ran mid-capture (a typed `ERASE`/`UNDO`/`MOVE`) can remove the
+        // entity the candidate/pick points at even though the mode and space are
+        // unchanged. Keyed on the drawing's existing scene identity (id +
+        // revision + structural counts + bounds), never a new counter.
         let capture_context_before = {
             let c = self.controller.borrow();
-            (c.mode(), c.session.active_space.clone())
+            (
+                c.mode(),
+                c.session.active_space.clone(),
+                c.drawing().map(|drawing| drawing.scene_identity()),
+            )
         };
         let owns_status = policy::owns_status(command_id);
         let none: Arc<CommandOutcome> = Arc::new(CommandOutcome::none());
@@ -577,15 +586,24 @@ impl HostCore {
             }
         };
         let open_graded = self.open_status_graded.replace(false);
-        // A mode or space switch invalidates the pending capture candidate even
-        // though no cursor move happened: clear both the capture's presentation
-        // candidate and the transient hover so no stale `FLAG_HOVERED` tint
-        // survives the transition (the candidate is host-visible through the
-        // render overlay, and `sync_render` below republishes the empty set).
+        // A mode/space switch, or a document content change, invalidates the
+        // pending capture candidate/picks even though no cursor move happened:
+        // clear the capture's presentation candidate and the transient hover so
+        // no stale `FLAG_HOVERED` tint survives (the candidate is host-visible
+        // through the render overlay, and `sync_render` below republishes the
+        // empty set and re-derives the pick tint against the new document).
+        //
+        // Clearing the candidate/hover is deliberate over cancelling the whole
+        // capture: an edit that does not remove the picks (a different entity
+        // erased, a selection MOVE) must leave the capture usable — the next
+        // cursor move re-resolves the candidate against the new document — while
+        // a capture whose picks became invalid is refused honestly at CONFIRM by
+        // the command layer rather than silently committed against stale refs.
         let capture_context_changed = {
             let c = self.controller.borrow();
             c.mode() != capture_context_before.0
                 || c.session.active_space != capture_context_before.1
+                || c.drawing().map(|drawing| drawing.scene_identity()) != capture_context_before.2
         };
         if capture_context_changed {
             self.controller

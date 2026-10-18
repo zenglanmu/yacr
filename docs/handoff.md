@@ -23,9 +23,13 @@
   单击选择/悬停**同一条**拾取路径；**点空处当场拒绝**（沿用 `draw pick did not hit supported geometry`，
   状态不变、可立即重点）；命中则**原子**存入 `SelectionRef` + 原始点；`DrawIntent::Trim/Extend` 带捕获的
   refs，`confirm` **不再二次拾取**（避免"看到的"与"提交的"不一致）；就绪判定 = 两步都解析到实体。
-- **命令内对象高亮**：捕获步骤里光标下的候选实体走**同一 `FLAG_HOVERED` 通道**着色（`OverlayInputs::hovered`，
-  空闲 hover 在捕获期本就抑制，故只有一个生产者）；候选变化是 **flags-only** 发布（`input_revision` 不变，
-  有测试钉住）；切空间/切模式/换文档/取消/确认/指针离开都会清除，不会留下过期着色。
+- **命令内对象高亮**：捕获步骤里**已拾取的实体与光标下候选一起**走**同一 `FLAG_HOVERED` 通道**着色
+  （`OverlayInputs::hovered`，按 `resolve_pick_transform`——即 flags 生产者所用的同一谓词——过滤，非解析 ref
+  只不着色、不伪造；空闲 hover 在捕获期本就抑制，故只有一个生产者）；候选/pick 变化是 **flags-only** 发布
+  （`input_revision` 不变，有测试钉住）；切空间/切模式/**文档内容变化**（`scene_identity` 纳入捕获上下文比较，
+  因此捕获期间从命令行派发 ERASE/UNDO 也会清候选与 hover，不会再冒出 `highlight.unresolved`）/换文档/取消/
+  确认/指针离开都会清除，不会留下过期着色（副作用：文档变化也会清掉**空闲** hover——这是有意的放宽，下一次
+  移动即重新解算）。
 - **chrome 死入口**（审计后修）：`DIST`→Distance、`AREA`→Area、`MEASUREPOLYLINE`→PolylineLength、
   `MEASUREANGLE`→Angle（**刻意不占用** `PLINE`/`ANGLE`：AutoCAD 的 `PLINE` 是多段线**绘制**命令，属 P3；
   `ANGLE` 不是 AutoCAD 命令）；`PAN` 改走 `InteractionRequest::BeginPan`（不再因缺 `Points` 载荷报错）；
@@ -37,7 +41,8 @@
   `COMMAND_TABLE` 仍是 `CommandId` 的唯一映射（每个 `CommandId` 恰好一个 selector）；`PLINE`/`ANGLE`/`SNAP`
   有"当前不可用"回归测试，防止以后被误接。
 - **证据（真实 GPU：Vulkan / Quadro P620 / X11，`YACR_PROBE_EDIT_EVIDENCE`）**：
-  - TRIM 交互链**已真机证明**：`startack=true`、`trim_started_tool=draw.trim`、漏点后 `miss_advanced=false`
+  - TRIM 交互链**已在真机运行中证明**（输入由**合成 DOM 指针事件**驱动，**非真实鼠标**、不经 evdev/XTest；
+    该限定词同样适用于本轮全部证据驱动）：`startack=true`、`trim_started_tool=draw.trim`、漏点后 `miss_advanced=false`
     且 `miss_error=InvalidInput("draw_pick_did_not_hit_supported_geometry")`、目标点击 `target_points=1`、
     边界点击 `boundary_points=2` + `boundary_ready=true`、`CONFIRM` 到达命令层并以
     `InvalidInput("TRIM found no intersection between the target and the boundary")` 拒绝（正确——该夹具

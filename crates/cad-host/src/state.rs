@@ -58,21 +58,28 @@ impl HostCore {
         // Capture-candidate tint (TRIM/EXTEND). A drawing capture owns the
         // pointer, so idle hover is suppressed for its whole duration and the
         // entity under the cursor is published on `DrawPreview::candidate`
-        // instead. Feed that candidate through the **existing** `hovered`
-        // input / `FLAG_HOVERED` tint rather than adding a second flag, overlay
-        // input or colour: `hovered` already means "the entity under the
-        // pointer", the two producers can never compete (idle hover is cleared
-        // for the capture), and a distinct candidate colour would be a renderer
-        // change, not a host one.
+        // instead. Feed the capture's picks and candidate through the
+        // **existing** `hovered` input / `FLAG_HOVERED` tint rather than adding
+        // a second flag, overlay input or colour: `hovered` already means "the
+        // entity under the pointer", the two producers can never compete (idle
+        // hover is cleared for the capture), and a distinct candidate colour
+        // would be a renderer change, not a host one.
         //
-        // While a pending entity-pick step owns the capture, the candidate is
-        // the *only* hovered ref — and an empty set when the cursor is over
-        // nothing — so a ref from the previous step or cursor position can never
-        // leak through. Any other active capture also forces the set empty, so
-        // an idle hover can never become a second producer.
+        // The tint is the committed picks **and** the pending candidate as one
+        // set, so the entity a step already committed stays visible while the
+        // next one is chosen — the way AutoCAD shows the cutting edge(s) as the
+        // objects are picked. It is empty when there is neither. Any other
+        // active capture forces the set empty, so an idle hover can never become
+        // a second producer.
+        //
+        // The set is filtered to refs that still resolve against the
+        // authoritative drawing (see [`HostCore::capture_pick_tint`]): the
+        // command line is not capture-modal, so an edit that ran mid-capture can
+        // leave a pick pointing at a vanished entity, and feeding that to the
+        // flags path would turn it into a `highlight.unresolved` diagnostic.
         let hovered = match &preview {
             Some(preview) if preview.kind.needs_picked_entities() => {
-                cad_app::SelectionSet::from_refs(preview.candidate.iter().cloned())
+                self.capture_pick_tint(preview)
             }
             Some(_) => cad_app::SelectionSet::new(),
             None => self.hover.hovered.borrow().clone(),
@@ -101,6 +108,42 @@ impl HostCore {
         self.render.set_overlays(overlays);
         let _ = self.render.request_preparation()?;
         Ok(())
+    }
+
+    /// The `FLAG_HOVERED` set a TRIM/EXTEND capture publishes: its committed
+    /// picks and its pending candidate as **one** set, in pick-then-candidate
+    /// order, empty when there is neither.
+    ///
+    /// Only refs that still resolve against the authoritative drawing are
+    /// included. The command line is not capture-modal, so a command can replace
+    /// the document in the middle of a capture (an `ERASE`/`UNDO` typed at the
+    /// prompt) and leave a pick or candidate pointing at a vanished entity.
+    /// Feeding such a ref to the flags path would produce a
+    /// `highlight.unresolved` "… is not present in the document" error — the
+    /// exact P2 error class this tint must not reintroduce. A non-resolving ref
+    /// is simply not tinted (never fabricated, never forced through); the
+    /// capture itself stays alive and a `CONFIRM` over a vanished pick is
+    /// refused by the command layer.
+    ///
+    /// Presentation only: the capture's own `DrawPreview::picks` remain the
+    /// commit source and are never mutated here.
+    fn capture_pick_tint(&self, preview: &cad_app::DrawPreview) -> cad_app::SelectionSet {
+        let c = self.controller.borrow();
+        // No authoritative drawing means nothing can be verified to resolve, so
+        // tint nothing rather than fabricate.
+        let Some(drawing) = c.drawing() else {
+            return cad_app::SelectionSet::new();
+        };
+        let document = c.document_id;
+        let refs = preview
+            .picks
+            .iter()
+            .chain(preview.candidate.iter())
+            .filter(|reference| {
+                cad_app::picking::resolve_pick_transform(&drawing, document, reference).is_some()
+            })
+            .cloned();
+        cad_app::SelectionSet::from_refs(refs)
     }
 
     /// The world-space rectangle the active 2D plan viewport covers.

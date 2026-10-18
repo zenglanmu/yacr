@@ -223,3 +223,53 @@ fn undo_keeps_capture_but_invalidated_selection_fails_confirmation_explicitly() 
     assert!(controller.confirm_draw().is_err());
     assert!(controller.session.draw_preview().is_some());
 }
+
+#[test]
+fn a_click_on_a_ready_trim_is_refused_as_waiting_for_confirmation() {
+    // Both TRIM steps resolved -> the tool is ready and waiting for Enter. A
+    // further click falls past the entity-pick routing (no step is pending) and
+    // must say so honestly instead of the stale "captures entity picks" text,
+    // and must never be silently ignored.
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    controller.begin_draw_tool(DrawToolKind::Trim).unwrap();
+    let (document, first, second) = {
+        let drawing = controller.drawing().unwrap();
+        let entities: Vec<_> = drawing
+            .model_space()
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        (controller.document_id, entities[0], entities[1])
+    };
+    let reference = |entity| SelectionRef {
+        document,
+        entity,
+        instance: InstancePath(Vec::new()),
+        sub_element: None,
+    };
+    // Resolve both picks directly; pick resolution itself has its own tests.
+    controller
+        .session
+        .capture_draw_pick(p(0.0, 0.0), reference(first))
+        .unwrap();
+    controller
+        .session
+        .capture_draw_pick(p(1.0, 1.0), reference(second))
+        .unwrap();
+    assert!(controller.session.draw_preview().unwrap().ready);
+
+    let error = controller.capture_tool_point(p(2.0, 2.0)).unwrap_err();
+    let message = match error {
+        CadError::InvalidInput(message) => message,
+        other => panic!("expected an InvalidInput refusal, got {other:?}"),
+    };
+    assert!(message.contains("ready"), "{message}");
+    assert!(message.contains("Enter"), "{message}");
+
+    // The refused click did not capture anything or consume a step.
+    let preview = controller.session.draw_preview().unwrap();
+    assert!(preview.ready);
+    assert_eq!(preview.picks.len(), 2);
+    assert_eq!(preview.points.len(), 2);
+}
