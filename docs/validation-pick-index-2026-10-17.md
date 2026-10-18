@@ -5,9 +5,11 @@
 **差分测试抓到的一个真实几何 bug**、**偏离项**与**未测边界**。改动落在 `crates/cad-spatial`
 （新 `chunk.rs` 的 `ChunkGridIndex` + `pick.rs` 的保守包围盒）与 `crates/cad-app`（`picking.rs` 的
 `PickIndex` 与索引化拾取路径），实现 commit `13f7808`，是 ADR-0012 §10 **S4 的拾取部分**。
-**未**改宿主协议、**未**改 UI、**未**改 `Cargo.*`、**未**新增诊断码。后续 commit `c4b66c6`
-（`perf(pick)`）追加了**每 chunk `rstar` 实验**与**粗网格落地**，见下文「每 chunk `rstar` 实验与粗网格
-落地」；本页 `13f7808` 的历史数字保持原样，**不**被后续轮次改写。
+**未**改宿主协议、**未**改 UI、**未**新增诊断码（`13f7808` 亦**未**改 `Cargo.*`）。后续 commit
+`c4b66c6`（`perf(pick)`）追加了**每 chunk `rstar` 实验**与**粗网格落地**，commit `7031404`
+（`feat(spatial)`）随后**按产品决定落地调优后的 per-chunk `rstar`**（并**改**了
+`Cargo.toml`/`Cargo.lock` 与新增 `crates/cad-spatial/src/grid.rs`），见下文「每 chunk `rstar` 实验、粗
+网格落地与 rstar 最终落地」；本页 `13f7808` 的历史数字保持原样，**不**被后续轮次改写。
 
 **这不是**性能验收、**不是** vendor/视觉结论，也**不是**宿主交互判定（见「未测 / 边界」）。单机、
 单会话。口径与 `docs/validation-pick-table-incremental-2026-10-17.md`（提交路径 pick 表增量）、
@@ -164,7 +166,7 @@ YACR_PICK_HARNESS picks={} hits={hits} cold_ms={cold:.3} warm_median_ms={median:
 `polyline_plane_normal`，`pick.rs:1106`，与 tessellator 同一 Newell 法、含闭合边与退化回退），
 对**任意平面**都包含整段弧。
 
-## 每 chunk `rstar` 实验与粗网格落地（后续 commit `c4b66c6`）
+## 每 chunk `rstar` 实验、粗网格落地与 rstar 最终落地（commit `c4b66c6` / `7031404`）
 
 上面的数字与偏离项出自 commit `13f7808`（每 chunk 为**扁平 payload 列表**）。随后按 ADR-0012 §7 的
 **字面**要求实现了**每 chunk `rstar`**（`bulk_load` 重建式 + 不可变快照；`rstar` **0.13.0** 仅接入
@@ -200,8 +202,55 @@ chunk **1,419**、候选不变。该结果在**每个指标**上都优于旧的�
 单格放置、独立 oversized 列表、build-once 不可变快照、`Revision` 键控版本、保守超集语义、
 `YACR_PICK_EXHAUSTIVE` 穷举回退；随机差分测试原样通过。
 
-**测试（实测）**：`cad-spatial` **47**、`cad-app` **358**、`cad-host` **102**、`check-architecture.py` OK、
-wasm lib check OK、release build OK。
+**测试（实测，commit `c4b66c6`）**：`cad-spatial` **47**、`cad-app` **358**、`cad-host` **102**、
+`check-architecture.py` OK、wasm lib check OK、release build OK。
+
+### 节点尺寸调优扫描（**实测**，同一夹具）
+
+rstar 库默认节点尺寸（`MIN_SIZE = 3` / `MAX_SIZE = 6`）对这些 chunk 尺寸是**差拟合**。把 `MIN/MAX` 从
+3/6 扫到 512/1024：**更大节点在每个轴上都更好**，直到约 512 后趋平；**`(256, 1024)`** 是扫描中的最佳
+平衡点。调优把未调优版本的代价**大致减半**：
+
+| structure | build ms | warm median ms | warm max ms | index RSS |
+|---|---|---|---|---|
+| untuned rstar (3,6) | 691 | 0.407 | 39.5 | ~146 MB |
+| **tuned rstar (256,1024)** | **554** | **0.319** | **33.1** | **~136 MB** |
+
+**小 chunk 扁平路径**在 512- 与 128-条目阈值上测量，**均被否决**（两种阈值的 warm 中位都差于纯树）。
+
+### rstar 最终落地（commit `7031404`）
+
+**产品决定**：**产品负责人明确选择 ADR 一致性、接受实测代价**（"全面落地 rstar"），故每 chunk 的
+`rstar` **现已落地**：每非空 chunk 一棵 `RTree`（`bulk_load_with_params` 重建式 + 不可变快照；空 chunk
+不分配），查询先按查询区域包络取候选、再走既有精确 slab 谓词。粗网格保留（目标 **512** 条目/chunk ⇒
+**1,419** chunk），故单松弛格放置规则不把跨格条目推进恒扫描的 oversized 列表（**17,903 → 598**）。
+候选数与 `PickReport`、保守超集语义**不变**。
+
+**最终实测权衡（相对扁平 per-chunk 列表，同夹具 release 拾取 harness）**：
+
+| structure | build ms | warm median ms | warm max ms | index RSS |
+|---|---|---|---|---|
+| flat + coarse（上一版） | ~520（简报：504.8） | ~0.309（简报：0.290） | ~34.6（简报：33.1） | ~126 MB（简报：115,812 kB） |
+| **落地的 rstar（256,1024）** | **554**（独立复测：553.6） | **0.319**（独立复测：0.328） | **33.1**（独立复测：33.05） | **~136 MB**（独立复测：138,984 kB） |
+| 未调优 rstar（3,6） | 691 | 0.407 | 39.5 | ~146 MB |
+
+候选数在**每一行都相同**（中位 **842**、最大 **21,762**）。⇒ 构建与热拾取中位**变差**、warm 最差
+**略好**；这是**为 ADR 一致性接受代价**，不是性能改进。
+
+**依赖/锁事实**：`rstar` **0.13.0**、`default-features = false`、**仅** `cad-spatial`（`cad-app`/
+`cad-scene`/`cad-measure` 不依赖）。§10.2 式核查（解析后的 `Cargo.lock` + 已发布 crate 元数据）
+**无失配**（crates.io、`MIT OR Apache-2.0`、`no_std`、默认 feature 为空、MSRV 1.85）。`Cargo.lock` 差为
+**纯新增（+31/-0）**；**诚实注记**：一次普通 `cargo check` 会重解析并顶起约八个无关包，故锁被还原、
+**恰好**插入三个解析器条目（`rstar`/`heapless`/`hash32`），再以 `cargo check --locked` 与锁定 release
+构建验证。
+
+**网格算术复用（残余缺口已闭合）**：共享 helper `cad-spatial/src/grid.rs` 现由 `GridSpatialIndex` **与**
+拾取 `ChunkGridIndex` **共用**（每个调用方保留自己的尺寸输入；新公式经核对与旧内联算术**逐位相同**，
+故无既有尺寸改变）。
+
+**测试（实测，commit `7031404`）**：`cad-spatial` **47**、`cad-app` **358**（+4/+11/+17 集成）、
+`cad-host` **102**，全 0 failed；随机差分与边界测试**原样通过**；`check-architecture.py` OK、
+wasm lib check OK、`clippy -D warnings` 干净、`fmt --all --check` 干净、锁定 release 构建 OK。
 
 ### 口径与边界（不得省略）
 
@@ -210,25 +259,32 @@ wasm lib check OK、release build OK。
   **±~10 MB**，且**含**共享的 `items: Vec<SelectionRef>`（**不是**索引独占）。
 - 扫描表中 pre-rstar「**细扁平**」基线行（含 `11 (fine)` 行）来自**上一轮** harness 运行，**本轮未重测**；
   其「flat」列与 `13f7808` 历史数字同源，**不得**与 `c4b66c6` 的粗网格数字混算。
+- **「flat + coarse」行的来源（不得混算）**：其**简报**数字（构建 **504.8 ms**、中位 **0.290 ms**、最差
+  **33.1 ms**、RSS **115,812 kB**）来自**上一轮**（`c4b66c6` 的编排者复测），**本轮未在该 SHA 重跑**；
+  **实现 lane** 在**当前树内**重测了 flat+coarse（构建 **~520 ms**、中位 **~0.309 ms**、最差 **~34.6 ms**、
+  RSS **~126 MB**），**编排者**则**独立复跑**了 **rstar 腿**（**553.6 ms / 0.328 ms / 33.05 ms /
+  138,984 kB**）。三组数字**分别来自不同运行**，**不得**互相代入或合并。
 - 热拾取**中位**由**稀疏区**拾取主导、**最差**由**稠密区**拾取的**精确阶段**主导，**都不单独隔离**
   broad phase（结构对比仍**同口径**：同网格、同放置、同候选）。
 
 ## 偏离项（记录，不隐藏）
 
-- **ADR-0012 §7 命名的是每 chunk 的 `rstar`**（不可变快照 + `bulk_load` 重建式）。它**已实现并实测**，
-  但在本夹具上对旧扁平列表**在每个单元尺寸上都是净回归**（见上「每 chunk `rstar` 实验」表），故
-  **未落地**；最终每 chunk 持**扁平 payload 列表**，网格**有意变粗**（目标 512 条目/chunk）。这是一次
-  **由实测驱动**的偏离，本 ADR 自身的门允许（§10 S6「按实测再评估」、§8.5 profiling 先行）。`chunk.rs`
-  头部注释明确写出该偏离与退化情形（点状查询访问一个 chunk，长对角射线退化为跨 chunk 的线性扫描；该
-  退化**被记录、不隐藏**）。
-- **复用/扩展网格算术的残余缺口**：§7 要求「复用/扩展 `GridSpatialIndex` 的网格算术」，但拾取 chunk
-  布局**复制**了该算术而非共享；`GridSpatialIndex`/`SpatialIndex`/`PendingSpatialIndex` 在 `cad-spatial`
-  之外**无消费者**（已 grep 全 workspace 确认），故只改了 `chunk.rs` 的副本，`lib.rs`/`pick.rs`/
-  `tests.rs` 未动。抽公共 helper 被**有意**略过，以免改动他人正在调整的尺寸。
-- **内存足迹**：落地后的索引在 `fixtures/complex-test.dwg` 上占 **115,812 kB（~113 MB）** 的**进程 RSS
-  增量**（**实测**，是**上界**，依赖分配器，逐次波动 **±~10 MB**，且**含**共享的 `items:
-  Vec<SelectionRef>`）。上一轮（细扁平，commit `13f7808`）粗记为 **~90–100 MB**，**本轮未重测**。
-  本轮**未**测量跨图纸的足迹分布。
+- **ADR-0012 §7 命名的是每 chunk 的 `rstar`**（不可变快照 + `bulk_load` 重建式）。它先被实现并实测为
+  对旧扁平列表**在每个单元尺寸上都净回归**（见上「单元尺寸扫描」表，**这是回归的证据基础**）；**随后
+  产品负责人明确选择 ADR 一致性、接受实测代价**（"全面落地 rstar"），故 **rstar 现已落地**（调优
+  `(256,1024)`，在粗网格之上，commit `7031404`，见上「rstar 最终落地」）。⇒ 这是**一次被记录的产品
+  权衡，不是疏忽**：构建与热拾取中位相对扁平列表**变差**、warm 最差**略好**，候选数**不变**。
+  `chunk.rs` 头部注释明确写出该结构、代价与退化情形（点状查询访问一个 chunk，长对角射线退化为跨 chunk
+  的线性扫描；该退化**被记录、不隐藏**）。
+- **网格算术复用（残余缺口已闭合）**：§7 要求「复用/扩展 `GridSpatialIndex` 的网格算术」。早先拾取
+  chunk 布局**复制**了该算术而非共享；现已抽出共享 helper `cad-spatial/src/grid.rs`，由
+  `GridSpatialIndex` **与** `ChunkGridIndex` **共用**，每个调用方保留自己的尺寸输入，新公式经核对与旧
+  内联算术**逐位相同**（无既有尺寸改变）。`GridSpatialIndex`/`SpatialIndex`/`PendingSpatialIndex` 在
+  `cad-spatial` 之外**无消费者**（已 grep 全 workspace 确认）。
+- **内存足迹**：落地后的索引在 `fixtures/complex-test.dwg` 上占 **~136 MB**（**实测**，独立复测
+  **138,984 kB**）的**进程 RSS 增量**（**上界**，依赖分配器，逐次波动 **±~10 MB**，且**含**共享的
+  `items: Vec<SelectionRef>`）。扁平列表版为 **~126 MB**（简报 **115,812 kB**）。上一轮（细扁平，
+  commit `13f7808`）粗记为 **~90–100 MB**，**本轮未重测**。本轮**未**测量跨图纸的足迹分布。
 
 ## 未测 / 边界（不得省略）
 

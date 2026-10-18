@@ -965,40 +965,61 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     （**16 种子 × 30 射线** × 全部家族，断言 `PickReport` **完全相等**；源码为准），外加容差边界 /
     chunk 边界 / 无命中 / 容差下限各一个；`the_index_examines_fewer_items_on_a_large_scene`
     （5,000 线 <1/10）。
-  - **后续（2026-10-18，commit `c4b66c6`）——粗网格落地，每 chunk `rstar` 实测否决**：§7 字面要求的
-    每 chunk `rstar`（`rstar` 0.13.0，`bulk_load` 不可变快照）**已实现并实测**，在本夹具的单元尺寸
-    扫描（约 11 → 65536 条目/chunk）上**每个尺寸都是净回归**（构建时间、热拾取中位/最差、RSS 全面变差，
-    候选数**完全相同**；原因：拾取容差与条目间距同量级，被访问 chunk 的查询包络覆盖其大部分，R-tree
-    几无可剪枝却仍付每棵树开销）。**落地**改为**粗网格**（目标 **512** 条目/chunk ⇒ **1,419** chunk）+
-    扁平 per-chunk 列表；`SMALL_CHUNK_MAX` 移除。编排者**独立复测**：构建 **504.8 ms**、热拾取中位
-    **0.290 ms**、最差 **33.1 ms**、索引 RSS 增量 **115,812 kB（~113 MB）**、oversized **598**（原
-    2,066）、候选不变——**每个指标**都优于旧细扁平网格与 rstar 变体。`rstar` 依赖**未落地**
-    （最终树 `Cargo.toml`/`Cargo.lock` 未动）。证据见 `docs/validation-pick-index-2026-10-17.md`。
-  - **偏离项（记录）**：ADR-0012 §7 命名**每 chunk 的 `rstar`**；它**已实现并实测为净回归**（见上），
-    故最终每 chunk 为**扁平 payload 列表**，网格**有意变粗**（目标 512 条目/chunk）。这是一次**实测
-    驱动**的偏离，本 ADR 自身的门允许（§10 S6「按实测再评估」、§8.5 profiling 先行）。**残余缺口**：
-    §7 要求「复用/扩展 `GridSpatialIndex` 的网格算术」，但拾取 chunk 布局**复制**了该算术而非共享
-    （`GridSpatialIndex`/`SpatialIndex`/`PendingSpatialIndex` 在 `cad-spatial` 之外无消费者），故只改了
-    `chunk.rs` 的副本。索引在本夹具占 **115,812 kB（~113 MB）** 的进程 RSS 增量（上界、含共享
-    `items`；上一轮细扁平粗记 **~90–100 MB**，本轮未重测）。
+  - **后续（2026-10-18，commit `c4b66c6`）——粗网格落地，每 chunk `rstar` 实测否决（后被产品决定反转，
+    见下条）**：§7 字面要求的每 chunk `rstar`（`rstar` 0.13.0，`bulk_load` 不可变快照）**已实现并实测**，
+    在本夹具的单元尺寸扫描（约 11 → 65536 条目/chunk）上**每个尺寸都是净回归**（构建时间、热拾取
+    中位/最差、RSS 全面变差，候选数**完全相同**；原因：拾取容差与条目间距同量级，被访问 chunk 的查询
+    包络覆盖其大部分，R-tree 几无可剪枝却仍付每棵树开销）。**落地**改为**粗网格**（目标 **512** 条目/chunk
+    ⇒ **1,419** chunk）+ 扁平 per-chunk 列表；`SMALL_CHUNK_MAX` 移除。编排者**独立复测**：构建
+    **504.8 ms**、热拾取中位 **0.290 ms**、最差 **33.1 ms**、索引 RSS 增量 **115,812 kB（~113 MB）**、
+    oversized **598**（原 2,066）、候选不变。该轮 `rstar` 依赖**未落地**（`Cargo.toml`/`Cargo.lock` 未动）。
+    证据见 `docs/validation-pick-index-2026-10-17.md`。
+  - **后续（2026-10-18，commit `7031404`）—— rstar 最终落地（调优 + 粗网格之上）**：**产品负责人明确
+    选择 ADR 一致性、接受实测代价**（"全面落地 rstar"），故每 chunk 的 `rstar` **现已落地**：每非空
+    chunk 一棵 `RTree`（`bulk_load_with_params` 重建式 + 不可变快照），空 chunk 不分配；查询先按查询
+    区域包络取候选、再走既有精确 slab 谓词；粗网格保留（目标 **512** 条目/chunk ⇒ **1,419** chunk，
+    单松弛格放置规则不把跨格条目推进 oversized 列表：**17,903 → 598**）。**节点尺寸调优**：库默认
+    `(3,6)` 对这些 chunk 尺寸是差拟合，扫描到约 512 显示更大节点每轴更好，**`(256,1024)`** 作为最佳
+    平衡点落地，把未调优代价**大致减半**（构建 691→554、warm 中位 0.407→0.319、warm 最差 39.5→33.1 ms、
+    索引 RSS ~146→~136 MB）；小 chunk 扁平路径在 512/128 阈值上测量**均被否决**。**最终实测权衡（相对
+    扁平列表，候选数不变：中位 842 / 最大 21,762）**：构建 ~520→**554 ms**、warm 中位 ~0.309→**0.319 ms**、
+    warm 最差 ~34.6→**33.1 ms**（略好）、索引 RSS ~126→**~136 MB**。⇒ **构建与中位变差、warm 最差略好**
+    ——**这是为 ADR 一致性接受的代价，不是性能改进**。**依赖落点**：`rstar` **0.13.0**、
+    `default-features = false`、**仅** `cad-spatial`；§10.2 式核查（解析后 `Cargo.lock` + 已发布元数据）
+    **无失配**（crates.io、`MIT OR Apache-2.0`、`no_std`、默认 feature 为空、MSRV 1.85）；`Cargo.lock` 差为
+    **纯新增（+31/-0）**（**诚实注记**：一次普通 `cargo check` 会重解析并顶起约八个无关包，故锁被还原、
+    **恰好**插入 `rstar`/`heapless`/`hash32` 三个解析器条目，再以 `cargo check --locked` 与锁定 release
+    构建验证）。**网格算术复用（残余缺口已闭合）**：共享 helper `cad-spatial/src/grid.rs` 现由
+    `GridSpatialIndex` **与** `ChunkGridIndex` **共用**（每个调用方保留自己的尺寸输入；新公式经核对与旧
+    内联算术**逐位相同**）。**测试（实测）**：`cad-spatial` **47**、`cad-app` **358**（+4/+11/+17 集成）、
+    `cad-host` **102**，全 0 failed；随机差分与边界测试**原样通过**；`check-architecture.py` OK、
+    wasm lib check OK、`clippy -D warnings` 干净、`fmt --all --check` 干净、锁定 release 构建 OK。
+  - **偏离项（记录）**：ADR-0012 §7 命名**每 chunk 的 `rstar`**；它先被实测为净回归（见上「粗网格落地」
+    条），**随后产品负责人明确选择 ADR 一致性、接受实测代价**，故 **rstar 现已落地**（调优 `(256,1024)`，
+    在粗网格之上，见上「rstar 最终落地」条）——**这是被记录的产品权衡，不是疏忽**。索引在本夹具占
+    **~136 MB**（独立复测 **138,984 kB**）的进程 RSS 增量（上界、含共享 `items`；扁平列表版 **~126 MB**，
+    上一轮细扁平粗记 **~90–100 MB**，本轮未重测）。
   - **边界**：after 数字来自 release harness，**不是**宿主交互（无探针钩子可 hover/select）；harness
     **纯 CPU、不触碰 GPU** ⇒ **不给** GPU/视觉/vendor/跨平台/通用性能结论；单个已提交夹具、单机单会话。
     RSS 为构建前后的进程 RSS 增量（上界，±~10 MB，含共享 `items`）；热拾取中位由稀疏区、最差由稠密区
-    精确阶段主导，均不单独隔离 broad phase（结构对比仍同口径）。
+    精确阶段主导，均不单独隔离 broad phase（结构对比仍同口径）。「flat + coarse」行的**简报**数字
+    （504.8/0.290/33.1 ms、115,812 kB）来自**上一轮**、**本轮未在该 SHA 重跑**；实现 lane 在**当前树内**
+    重测 flat+coarse、编排者**独立复跑** rstar 腿（553.6/0.328/33.05 ms、138,984 kB），三组数字**不得**混算。
 - **现状/问题（更新于 2026-10-17）**：**拾取半已接线**（见上）。`SceneCache::apply_changes`
   （`cad-scene/src/cache.rs:90`）**只在测试调用**，生产每次全量 rebuild；`CacheKey`
   （`cad-scene/src/batch.rs:8`）**定义即废弃**。这两项仍待接入。
 - **预期收益**：拾取/框选/查询成本与图纸总规模脱钩（**拾取半已实测**，见上；框选/查询仍**预期**）。
 - **前置条件/风险**：按 ADR-0012 §7 落两级结构（顶层网格 + local `rstar` 0.13 不可变快照）——顶层
-  网格与超大图元策略**已落地**（拾取半）；**每 chunk 的 `rstar` 已实现并实测为净回归，故不落地**
-  （当前为扁平 payload 列表，网格**有意变粗**，见上「后续」）。版本取自 `Revision`，陈旧判定复用
-  `ChangeSet::follows()` / `TaskStamp`，**不**新增并行版本计数器。
-- **需要的决策**：`rstar` 引入的 `Cargo.lock` 更新与许可核查**已做**（0.13.0，crates.io，
-  `MIT OR Apache-2.0`），但因实测净回归**不引入**（ADR-0012 未决项就此收敛）；以及
+  网格与超大图元策略**已落地**（拾取半），**每 chunk 的 `rstar` 亦已落地**（调优 `(256,1024)`，粗网格
+  之上，见上「rstar 最终落地」）。版本取自 `Revision`，陈旧判定复用 `ChangeSet::follows()` / `TaskStamp`，
+  **不**新增并行版本计数器。
+- **需要的决策**：`rstar` 引入的 `Cargo.lock` 更新与许可核查**已做并已引入**（0.13.0，crates.io，
+  `MIT OR Apache-2.0`，仅 `cad-spatial`；ADR-0012 未决项就此收敛）；以及
   `SceneCache::apply_changes` / `CacheKey` 接入生产的排期。
 - **相关契约/栅栏**：索引接入前后 pick 结果一致 fence（**已落地**，见上）；`CacheKey` 版本键有效性测试；
   超大图元不跨块复制的内存 fence（**已落地**：overflow 列表）。
-- **优先级**：S4（**拾取半已落地**；`SceneCache`/`CacheKey` 半仍中；由 S2 实测驱动，不得在无测量时先做）。
+- **优先级**：S4（**拾取半已落地**（含每 chunk `rstar`）；`SceneCache`/`CacheKey` 半仍中；由 S2 实测驱动，
+  不得在无测量时先做）。
 
 ### S5 — Window / Crossing 框选（串行）
 

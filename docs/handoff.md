@@ -12,6 +12,49 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 每 chunk rstar 最终落地（调优 + 粗网格之上）（2026-10-18；commit `7031404`）
+
+**范围**：`crates/cad-spatial`（`chunk.rs` 每 chunk `RTree` + 节点尺寸参数 `PickTreeParams`；新
+`grid.rs` 共享网格算术；`lib.rs` 导出）、`crates/cad-spatial/Cargo.toml` 与 workspace `Cargo.toml`
+（`rstar = { version = "0.13.0", default-features = false }`）、`Cargo.lock`（纯新增 +31/-0）、
+`crates/cad-app/src/picking.rs`（1 行）。**未**改宿主协议、**未**改 UI、**未**新增诊断码。是 ADR-0012
+§10 **S4 拾取半**的收尾；逐条证据见 `docs/validation-pick-index-2026-10-17.md`。
+
+- **背景**：上一轮（`c4b66c6`）把**每 chunk `rstar`** 实测为**每个单元尺寸都净回归**，落地的是**粗网格 +
+  扁平 per-chunk 列表**（见下一条）。**产品负责人随后明确选择 ADR 一致性、接受实测代价**（"全面落地
+  rstar"）。
+- **落地结构**：每**非空** chunk 一棵 `RTree`（`bulk_load_with_params` 重建式 + 不可变快照），空 chunk
+  不分配；查询先按查询区域包络取候选，再走既有精确 slab 谓词。**粗网格保留**（目标 **512** 条目/chunk
+  ⇒ **1,419** chunk），故单松弛格放置规则不把跨格条目推进恒扫描的 oversized 列表（**17,903 → 598**）。
+  候选数与 `PickReport`、保守超集语义**不变**。
+- **节点尺寸调优（关键）**：rstar 库默认 `MIN=3`/`MAX=6` 对这些 chunk 尺寸是差拟合；从 3/6 到 512/1024
+  扫描显示更大节点每轴更好，**`(256,1024)`** 作为最佳平衡点落地，把未调优代价**大致减半**（构建
+  **691 → 554 ms**、warm 中位 **0.407 → 0.319 ms**、warm 最差 **39.5 → 33.1 ms**、索引 RSS
+  **~146 → ~136 MB**）。小 chunk 扁平路径在 512/128 阈值上测量**均被否决**。
+- **最终实测权衡（相对扁平列表；候选数不变：中位 842 / 最大 21,762）**：构建 ~520 → **554 ms**、warm
+  中位 ~0.309 → **0.319 ms**、warm 最差 ~34.6 → **33.1 ms**（略好）、索引 RSS ~126 → **~136 MB**。⇒
+  **构建与中位变差、warm 最差略好**——**这是为 ADR 一致性接受的代价，不是性能改进**。
+- **依赖落点**：`rstar` **0.13.0**、`default-features = false`、**仅** `cad-spatial`
+  （`cad-app`/`cad-scene`/`cad-measure` 不依赖）。§10.2 式核查（解析后 `Cargo.lock` + 已发布元数据）
+  **无失配**（crates.io、`MIT OR Apache-2.0`、`no_std`、默认 feature 为空、MSRV 1.85）。`Cargo.lock` 差为
+  **纯新增（+31/-0）**；**诚实注记**：一次普通 `cargo check` 会重解析并顶起约八个无关包，故锁被还原、
+  **恰好**插入三个解析器条目（`rstar`/`heapless`/`hash32`），再以 `cargo check --locked` 与锁定 release
+  构建验证。
+- **残余缺口闭合**：§7 要求「复用/扩展 `GridSpatialIndex` 的网格算术」——共享 helper
+  `crates/cad-spatial/src/grid.rs` 现由 `GridSpatialIndex` **与** 拾取 `ChunkGridIndex` **共用**（每个
+  调用方保留自己的尺寸输入；新公式经核对与旧内联算术**逐位相同**，无既有尺寸改变）。
+- **测试（实测）**：`cad-spatial` **47**、`cad-app` **358**（+4/+11/+17 集成）、`cad-host` **102**，
+  全 0 failed；随机差分与边界测试**原样通过**；`check-architecture.py` OK、wasm lib check OK、
+  `clippy -D warnings` 干净、`fmt --all --check` 干净、锁定 release 构建 OK。
+- **边界（不得软化）**：**单个已提交夹具、纯 CPU 拾取**；**不给** GPU/视觉/vendor/跨平台或通用性能
+  结论。RSS 是**构建前后的进程 RSS 增量**（**上界**，依赖分配器，逐次波动 **±~10 MB**），且**含**共享的
+  `items: Vec<SelectionRef>`。表中「flat + coarse」行的**简报**数字（504.8/0.290/33.1 ms、115,812 kB）
+  来自**上一轮**（`c4b66c6`）、**本轮未在该 SHA 重跑**；实现 lane 在**当前树内**重测 flat+coarse
+  （~520/0.309/34.6 ms、~126 MB），编排者**独立复跑** rstar 腿（553.6/0.328/33.05 ms、138,984 kB），
+  三组数字**分别来自不同运行、不得混算**。热拾取中位由**稀疏区**拾取主导、最差由**稠密区**拾取的
+  **精确阶段**主导，均不单独隔离 broad phase。ADR-0012 §10 S4 的另一半
+  （`SceneCache::apply_changes` / `CacheKey`）**仍**未接入生产。
+
 ## 粗网格落地、每 chunk rstar 实测否决（2026-10-18；纯 `cad-spatial` 改动）
 
 **范围**：`crates/cad-spatial/src/chunk.rs`（网格尺寸由条目数派生、`TARGET_ENTRIES_PER_CHUNK = 512`；
