@@ -695,8 +695,8 @@ impl HostController {
 
     /// Whether idle pointer movement previews the entity under the cursor.
     ///
-    /// See [`crate::SessionState::hover_preview`] for the deliberate default
-    /// (`false`, unlike AutoCAD's `SELECTIONPREVIEW` initial `3`).
+    /// See [`crate::SessionState::hover_preview`] for the default (`true`,
+    /// matching AutoCAD's `SELECTIONPREVIEW` initial `3`).
     pub fn hover_preview_enabled(&self) -> bool {
         self.session.hover_preview()
     }

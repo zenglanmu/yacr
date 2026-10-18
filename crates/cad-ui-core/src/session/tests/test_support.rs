@@ -171,23 +171,20 @@ pub(super) fn session(files: Rc<FakeFiles>) -> CadSession {
         .expect("session builds")
 }
 
-/// A session with the idle hover preview explicitly enabled through the public
-/// command path (it is off by default) and the dwell disabled, so the existing
-/// hover contracts observe the immediate highlight.
+/// A session with the idle hover preview explicitly pinned ON (it now defaults
+/// on, but the pin keeps these contracts independent of the default) and the
+/// dwell disabled, so the existing hover contracts observe the immediate
+/// highlight.
 pub(super) fn hover_enabled_session(files: Rc<FakeFiles>) -> CadSession {
     let session = session(files);
-    session
-        .command("HOVERPREVIEW")
-        .expect("HOVERPREVIEW is admitted");
-    session
-        .core
-        .controller
-        .borrow_mut()
-        .session
-        .set_hover_dwell_ms(0);
+    {
+        let mut controller = session.core.controller.borrow_mut();
+        controller.session.set_hover_preview(true);
+        controller.session.set_hover_dwell_ms(0);
+    }
     assert!(
         session.core.controller.borrow().hover_preview_enabled(),
-        "the preview command enabled the session flag"
+        "the helper pinned the preview flag on"
     );
     session
 }

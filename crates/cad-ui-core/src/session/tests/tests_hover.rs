@@ -367,31 +367,57 @@ fn a_pointer_leave_never_ends_or_wedges_an_in_flight_press() {
 }
 
 #[test]
-fn hover_preview_is_off_by_default_so_idle_moves_run_no_pick() {
+fn hover_preview_defaults_on_and_disabling_it_stops_picks_and_tint() {
     let session = session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
+    // Immediate highlight, so the tint half is observable (the dwell has its
+    // own contracts elsewhere).
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .session
+        .set_hover_dwell_ms(0);
     let pixel = screen_of(&session, demo_circle_rim(&session));
+    let expected = picked_ref_at(&session, pixel);
     assert!(
-        !session.snapshot(None, None, 0).hover_preview,
-        "the status reports the deliberate default: off"
+        session.snapshot(None, None, 0).hover_preview,
+        "the status reports the AutoCAD-matching default: on"
     );
 
-    // Several idle moves, including positions far apart, must run no pick and
-    // leave no tint: plain mouse movement is not a hover query.
-    for (sequence, step) in (1..=4).enumerate() {
-        let position = [pixel[0] + step as f64 * 40.0, pixel[1]];
+    // Default on: a move beyond the aperture runs exactly one pick and tints.
+    session
+        .handle_input(&pointer_at(InputKind::PointerMove, 1, pixel, None))
+        .expect("the idle move is admitted");
+    assert_eq!(
+        session.core.hover_query_count(),
+        1,
+        "the default-on preview runs one pick on an idle move"
+    );
+    assert_eq!(hovered_refs(&session), vec![expected]);
+
+    // Turning it off through the public selector clears the tint, and further
+    // moves run no pick and tint nothing.
+    session
+        .command("HOVERPREVIEW")
+        .expect("the toggle is admitted");
+    assert!(!session.snapshot(None, None, 0).hover_preview);
+    assert!(hovered_refs(&session).is_empty());
+    let queries = session.core.hover_query_count();
+    for (sequence, step) in (0..4).enumerate() {
+        let position = [pixel[0] + step as f64 * 60.0, pixel[1]];
         session
             .handle_input(&pointer_at(
                 InputKind::PointerMove,
-                sequence as u64 + 1,
+                sequence as u64 + 2,
                 position,
                 None,
             ))
             .expect("the idle move is admitted");
         assert_eq!(
             session.core.hover_query_count(),
-            0,
+            queries,
             "no hover pick may run while the preview is off"
         );
         assert!(

@@ -112,7 +112,8 @@ pub enum CommandId {
     SetActiveLayer,
     /// Flip the idle hover entity preview for this session. Session/display
     /// state only (no database write, no history, no ChangeSet), so it is
-    /// allowed in Viewer and Work. The default is off; see
+    /// allowed in Viewer and Work. It defaults to on (AutoCAD's
+    /// `SELECTIONPREVIEW` initial `3`); see
     /// [`crate::SessionState::hover_preview`].
     ToggleHoverPreview,
 }

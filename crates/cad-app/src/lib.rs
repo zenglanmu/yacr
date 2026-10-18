@@ -117,13 +117,13 @@ pub struct SessionState {
     /// Whether idle pointer movement previews the entity under the cursor.
     ///
     /// Session/display state only: toggling it writes no database, produces no
-    /// history entry and schedules no ChangeSet. The default is **`false`**: this
-    /// is a deliberate product decision, not AutoCAD's initial value. AutoCAD's
-    /// `SELECTIONPREVIEW` system variable starts at `3` (preview while no command
-    /// is active and at "Select objects" prompts); this viewer shows no highlight
-    /// on plain mouse movement unless the user explicitly turns the preview on.
-    /// It never affects object-snap markers, which stay gated on an active point
-    /// prompt.
+    /// history entry and schedules no ChangeSet. The default is **`true`**, which
+    /// matches AutoCAD's `SELECTIONPREVIEW` initial value `3` (on while no
+    /// command is active and at "Select objects" prompts). It can be turned off
+    /// with the `HOVERPREVIEW` selector. AutoCAD has no hover timer, so the
+    /// dwell (`hover_dwell_ms`) remains an explicit deviation, not parity. The
+    /// preview never affects object-snap markers, which stay gated on an active
+    /// point prompt.
     hover_preview: bool,
     /// How long a resolved hover must stay stable before it is tinted, in
     /// milliseconds (default **300**).
@@ -176,7 +176,7 @@ impl SessionState {
             backend: BackendChoice::Auto,
             active_layer: LayerId(0),
             snap_enabled: true,
-            hover_preview: false,
+            hover_preview: true,
             hover_dwell_ms: 300,
             last_measurement: None,
             selected_measurement_kind: MeasurementToolKind::Distance,
@@ -210,8 +210,7 @@ impl SessionState {
 
     /// Whether idle pointer movement previews the entity under the cursor.
     ///
-    /// See [`SessionState::set_hover_preview`] for the deliberate default and
-    /// the AutoCAD comparison.
+    /// See [`SessionState::set_hover_preview`] for the AutoCAD-matching default.
     pub fn hover_preview(&self) -> bool {
         self.hover_preview
     }
@@ -219,9 +218,11 @@ impl SessionState {
     /// Enable or disable the idle hover entity preview for this session.
     ///
     /// Session/display state only: no database write, no history entry and no
-    /// ChangeSet. The default is **`false`**, a deliberate product decision that
-    /// deviates from AutoCAD's `SELECTIONPREVIEW` initial value `3`. Object-snap
-    /// markers are unaffected: they remain gated on an active point prompt.
+    /// ChangeSet. The default is **`true`**, matching AutoCAD's
+    /// `SELECTIONPREVIEW` initial value `3`; `HOVERPREVIEW` turns it off. The
+    /// dwell remains a documented deviation (AutoCAD has no hover timer).
+    /// Object-snap markers are unaffected: they remain gated on an active point
+    /// prompt.
     pub fn set_hover_preview(&mut self, enabled: bool) {
         self.hover_preview = enabled;
     }

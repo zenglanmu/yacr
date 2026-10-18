@@ -205,8 +205,9 @@ pub struct CadStatus {
     /// The active draw/measurement tool, or `null` when no capture is active.
     pub tool: Option<CadTool>,
     /// Whether idle pointer movement previews (tints) the entity under the
-    /// cursor. Session/display state only; defaults to `false` (a deliberate
-    /// product decision, unlike AutoCAD's `SELECTIONPREVIEW` initial `3`).
+    /// cursor. Session/display state only; defaults to `true`, matching
+    /// AutoCAD's `SELECTIONPREVIEW` initial `3` (on when no command is active),
+    /// and can be turned off with `HOVERPREVIEW`.
     pub hover_preview: bool,
     /// Count of verified successful authoritative document transitions caused by
     /// an import. It is **not** a parsed-entity count and must not be read as

@@ -19,9 +19,9 @@
 `crates/cad-ui-core`（`HOVERPREVIEW` 选择子、`CadStatus.hoverPreview`）、`apps/app-linux/ui`（状态栏开关 +
 测试）、i18n 3 键、`docs/interaction.md`。**未**改 acadrust/wgpu/Cargo.lock/架构边界。
 
-- **产品决定（有意偏离 AutoCAD）**：空闲悬停高亮**默认关闭**（AutoCAD `SELECTIONPREVIEW` 初值是 3=开）。
-  提供 `HOVERPREVIEW` 命令与状态栏"悬停预览"开关；关闭时空闲移动**零拾取**、零高亮。文档明确标注这是
-  偏离，不冒充 AutoCAD 行为。
+- **产品决定（与 AutoCAD 对齐）**：空闲悬停高亮**默认开启**（AutoCAD `SELECTIONPREVIEW` 初值 3=开）。
+  提供 `HOVERPREVIEW` 命令与状态栏"悬停预览"开关；关闭时空闲移动**零拾取**、零高亮。
+  （落地时曾先按"默认关闭"实现，产品负责人随后决定与 AutoCAD 保持一致 → 已改为默认开启。）
 - **光圈分离（对齐 AutoCAD）**：新增 `TolerancePolicy::pickbox_logical_pixels = 3.0`（AutoCAD `PICKBOX`
   初值 3，管**单击与悬停预览**），`interaction_logical_pixels = 12.0` 只服务 snap 候选（`APERTURE`
   初值 10 的对应物，12 的差异如实记录）。**用户可见后果**：单击命中范围由 12 收紧到 3，细线更难命中

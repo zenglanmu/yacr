@@ -279,7 +279,7 @@ fn blank_status_reports_no_document_capabilities() {
     assert_eq!(status.frame_count, 0);
     assert!(
         !status.hover_preview,
-        "the idle hover preview defaults to off"
+        "the assembled status carries the flag it was given"
     );
     // The selection block is always carried, never omitted.
     assert_eq!(status.selection, CadSelection::empty());

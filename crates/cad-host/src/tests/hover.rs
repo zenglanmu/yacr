@@ -454,27 +454,45 @@ fn a_pan_mode_session_suppresses_hover() {
     );
 }
 
-// --- idle hover preview toggle (default OFF, a product decision) -------------
+// --- idle hover preview toggle (default ON, AutoCAD-matching) ----------------
 
 #[test]
-fn idle_hover_preview_is_off_by_default_so_cursor_moves_run_no_pick() {
+fn idle_hover_preview_defaults_on_and_disabling_it_stops_picks_and_tint() {
     let core = core();
+    // Immediate highlight, so the tint half is observable (the dwell has its
+    // own tests).
+    core.controller.borrow_mut().session.set_hover_dwell_ms(0);
     core.controller.borrow_mut().fit().expect("the demo fits");
     let pixel = screen_of(&core, demo_circle_rim(&core));
+    let expected = picked_ref_at(&core, pixel);
     let aperture = cad_domain::TolerancePolicy::default().pickbox_logical_pixels;
     assert!(
-        !core.controller.borrow().hover_preview_enabled(),
-        "the idle hover preview must default to off"
+        core.controller.borrow().hover_preview_enabled(),
+        "the idle hover preview defaults on (AutoCAD SELECTIONPREVIEW 3)"
     );
 
-    // Several moves, each strictly beyond the pickbox aperture of the previous
-    // one, must produce no query and no tint at all.
+    // Default on: a move beyond the aperture runs exactly one pick and tints.
+    dispatch_pointer(&core, hover_cursor(&core, pixel));
+    assert_eq!(
+        core.hover_query_count(),
+        1,
+        "the default-on preview runs one pick on an idle move"
+    );
+    assert_eq!(hovered_refs(&core), vec![expected]);
+
+    // Turning it off clears the tint immediately and further moves (each beyond
+    // the aperture) run no pick and leave no tint.
+    core.command(CommandId::ToggleHoverPreview, CommandPayload::None)
+        .expect("the toggle command is admitted");
+    assert!(!core.controller.borrow().hover_preview_enabled());
+    assert!(hovered_refs(&core).is_empty());
+    let queries = core.hover_query_count();
     for step in 0..5 {
         let position = [pixel[0] + step as f64 * (aperture + 10.0), pixel[1]];
         dispatch_pointer(&core, hover_cursor(&core, position));
         assert_eq!(
             core.hover_query_count(),
-            0,
+            queries,
             "a disabled preview must run no pick on a plain cursor move"
         );
         assert!(hovered_refs(&core).is_empty(), "nothing may be tinted");
@@ -486,8 +504,14 @@ fn idle_hover_preview_is_off_by_default_so_cursor_moves_run_no_pick() {
 }
 
 #[test]
-fn enabling_hover_preview_restores_the_pick_and_the_tint() {
+fn turning_hover_preview_on_restores_the_pick_and_the_tint() {
     let core = core();
+    // Pin off explicitly: the default is on, and this contract is about the
+    // off→on transition.
+    core.controller
+        .borrow_mut()
+        .session
+        .set_hover_preview(false);
     // Immediate highlight (the dwell has its own tests).
     core.controller.borrow_mut().session.set_hover_dwell_ms(0);
     core.controller.borrow_mut().fit().expect("the demo fits");
@@ -571,8 +595,13 @@ fn the_hover_preview_command_flips_both_ways_and_clears_a_stationary_tint() {
 
 #[test]
 fn click_selection_is_unaffected_by_the_hover_preview_switch() {
-    // Preview off (the default): the click still selects through SelectAt.
+    // Preview explicitly off (the session default is now on).
     let disabled = core();
+    disabled
+        .controller
+        .borrow_mut()
+        .session
+        .set_hover_preview(false);
     disabled
         .controller
         .borrow_mut()

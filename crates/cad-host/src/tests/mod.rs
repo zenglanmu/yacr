@@ -180,10 +180,10 @@ fn core() -> HostCore {
     core_with(Rc::new(FakeFiles::default()), false)
 }
 
-/// A core whose session has the idle hover preview enabled (it is off by
-/// default) and the dwell disabled (immediate highlight), so the existing
-/// aperture/tint contracts are about the pickbox alone. The dwell has its own
-/// tests below.
+/// A core whose session has the idle hover preview explicitly pinned ON (it now
+/// defaults on, but the pin keeps these contracts independent of the default)
+/// and the dwell disabled (immediate highlight), so the existing aperture/tint
+/// contracts are about the pickbox alone. The dwell has its own tests below.
 fn hover_core() -> HostCore {
     let core = core();
     {

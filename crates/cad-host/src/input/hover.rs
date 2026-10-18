@@ -15,9 +15,9 @@ fn hover_profile_enabled() -> bool {
 impl HostCore {
     /// Whether a hover query must be suppressed right now.
     ///
-    /// The idle entity preview is **off by default** (a deliberate product
-    /// decision; AutoCAD's `SELECTIONPREVIEW` starts at `3`), so a plain cursor
-    /// move runs no pick and leaves no tint until the user enables it. A positive
+    /// The idle entity preview is **on by default**, matching AutoCAD's
+    /// `SELECTIONPREVIEW` initial `3`, and `HOVERPREVIEW` turns it off; once off a
+    /// plain cursor move runs no pick and leaves no tint. A positive
     /// tool (draw/measure capture or pan), a press/navigation gesture
     /// (pan/orbit/drag), or an active multi-contact navigation owns the pointer;
     /// hover must not compete with it. `Selecting` deliberately does not

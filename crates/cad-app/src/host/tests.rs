@@ -935,15 +935,15 @@ fn hint_overlay_reuses_the_move_query_and_agrees_with_the_committed_point() {
     );
 }
 
-// --- idle hover preview toggle (default OFF, a product decision) -------------
+// --- idle hover preview toggle (default ON, AutoCAD-matching) ----------------
 
 #[test]
-fn hover_preview_defaults_off_and_the_controller_toggles_session_state_only() {
+fn hover_preview_defaults_on_and_the_controller_toggles_session_state_only() {
     let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
     let before = controller.drawing().unwrap();
     assert!(
-        !controller.hover_preview_enabled(),
-        "the deliberate default is off"
+        controller.hover_preview_enabled(),
+        "the default matches AutoCAD's SELECTIONPREVIEW initial value 3"
     );
     assert_eq!(
         controller.session.hover_dwell_ms(),
@@ -955,12 +955,15 @@ fn hover_preview_defaults_off_and_the_controller_toggles_session_state_only() {
     controller.session.set_hover_dwell_ms(300);
 
     assert!(
+        !controller.toggle_hover_preview(),
+        "the first toggle disables"
+    );
+    assert!(!controller.hover_preview_enabled());
+    assert!(
         controller.toggle_hover_preview(),
-        "the first toggle enables"
+        "the second toggle enables"
     );
     assert!(controller.hover_preview_enabled());
-    assert!(!controller.toggle_hover_preview(), "the second disables");
-    assert!(!controller.hover_preview_enabled());
 
     // Session/display state only: no database revision and no history step.
     let after = controller.drawing().unwrap();
@@ -973,6 +976,9 @@ fn hover_preview_defaults_off_and_the_controller_toggles_session_state_only() {
 #[test]
 fn toggle_hover_preview_is_allowed_in_viewer_mode_and_reports_the_value() {
     let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    // Start explicitly from off so both directions are exercised regardless of
+    // the default.
+    controller.session.set_hover_preview(false);
     controller.set_mode(AppMode::Viewer).unwrap();
     assert_eq!(controller.mode(), AppMode::Viewer);
     assert!(
