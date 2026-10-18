@@ -169,14 +169,16 @@ fn pointer_navigation_pans_and_multi_touch_never_commits() {
         },
         modifiers: cad_app::interaction::Modifiers::default(),
     };
-    // A left drag pans the view; the world point under the drag start shifts.
+    // A middle drag pans the view; the world point under the drag start shifts.
+    // (A *primary* 2D drag is a box selection now — ADR 0014 B.2 — and is covered
+    // by `tests/box_select.rs`.)
     assert!(matches!(
         EngineClient::dispatch(
             &core,
             EngineRequest::Interaction(pointer(
                 1,
                 cad_app::interaction::PointerPhase::Down,
-                Some(PointerButton::Primary),
+                Some(PointerButton::Middle),
                 [100.0, 100.0],
             ))
         )
@@ -188,7 +190,7 @@ fn pointer_navigation_pans_and_multi_touch_never_commits() {
         EngineRequest::Interaction(pointer(
             1,
             cad_app::interaction::PointerPhase::Move,
-            Some(PointerButton::Primary),
+            Some(PointerButton::Middle),
             [160.0, 100.0],
         )),
     )
@@ -198,7 +200,7 @@ fn pointer_navigation_pans_and_multi_touch_never_commits() {
         EngineRequest::Interaction(pointer(
             1,
             cad_app::interaction::PointerPhase::Up,
-            Some(PointerButton::Primary),
+            Some(PointerButton::Middle),
             [160.0, 100.0],
         )),
     )
@@ -210,7 +212,7 @@ fn pointer_navigation_pans_and_multi_touch_never_commits() {
             .screen_to_world([100.0, 100.0], viewport.logical_size)
             .unwrap()
     };
-    assert_ne!(origin, origin_after, "a left drag must pan the camera");
+    assert_ne!(origin, origin_after, "a middle drag must pan the camera");
     assert!(matches!(
         core.controller.borrow().session.tool,
         ToolState::Idle

@@ -244,6 +244,71 @@ fn flags_only_selection_hover_and_hidden_never_defer_or_invalidate() {
 }
 
 #[test]
+fn box_selection_is_a_visual_overlay_change_not_bounds_or_flags_only() {
+    let session = session_with_published_base();
+    session.set_grid_settle_timeout(NO_SETTLE);
+    pan_step(&session, 80.0);
+    assert!(session.grid_refresh_pending());
+    let armed = session.diagnostics();
+    let base_before = session
+        .current_prepared_scene()
+        .expect("published scene")
+        .base
+        .clone();
+
+    // A box-only change: same camera/bounds, same entity flags, only the live
+    // rubber band moves. Its fingerprint is a visual-overlay input, so it must
+    // take the immediate `advance_input` path and never the bounds-only one.
+    let mut overlays = session.overlays();
+    overlays.selection_box = Some(cad_app::render_scene::BoxSelectionPreview {
+        segments: vec![
+            [p(0.0, 0.0), p(10.0, 0.0)],
+            [p(10.0, 0.0), p(10.0, 10.0)],
+            [p(10.0, 10.0), p(0.0, 10.0)],
+            [p(0.0, 10.0), p(0.0, 0.0)],
+        ],
+        crossing: false,
+    });
+    assert!(session.set_overlays(overlays));
+    let after = session.diagnostics();
+    assert_eq!(
+        after.input_revision,
+        armed.input_revision + 1,
+        "a box-only change is a visual (scene-identity) change, not flags-only"
+    );
+    assert_eq!(
+        after.requested_token,
+        armed.requested_token + 1,
+        "a visual change schedules a preparation immediately"
+    );
+    assert!(
+        !session.grid_refresh_pending(),
+        "the immediate visual path clears the deferred refresh"
+    );
+    assert!(
+        session.current_prepared_scene().is_none(),
+        "the bounds-only path keeps the published scene current; a visual change must not"
+    );
+
+    // The rebuild touches only the overlay: the base `Arc` is reused and the box
+    // is the new highlight batch at its own draw order.
+    session.prepare().unwrap();
+    let after_prepare = session.controller_ready().expect("prepared scene");
+    assert!(Arc::ptr_eq(&base_before, &after_prepare.base));
+    let box_batches: Vec<_> = after_prepare
+        .highlight
+        .added
+        .iter()
+        .filter(|batch| batch.draw_order == cad_app::render_scene::BOX_SELECT_DRAW_ORDER)
+        .collect();
+    assert_eq!(box_batches.len(), 1, "one box-selection batch");
+    assert_eq!(
+        box_batches[0].color,
+        cad_app::render_scene::BOX_SELECT_WINDOW_COLOR
+    );
+}
+
+#[test]
 fn hover_after_submission_is_not_regressed_by_the_published_scene() {
     let session = session_with_published_base();
     // A live ref resolved from the published base, so the flags actually resolve.

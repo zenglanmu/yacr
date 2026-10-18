@@ -51,13 +51,30 @@ pub(crate) struct PendingSave {
     pub result: Result<FileTarget, FileAbort>,
 }
 
+/// A live box-selection drag (ADR 0014 decision B).
+///
+/// Single-contact only: it is created when a 2D primary-button drag crosses the
+/// drag threshold and cleared on release/cancel. It is pure transient gesture
+/// state — the host never writes the database, the revision or the history for
+/// it; the selection itself is computed by `cad_app`'s `SelectInBox` command on
+/// release.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BoxGesture {
+    /// The press anchor in canvas logical pixels.
+    pub anchor: [f64; 2],
+    /// The latest pointer position in canvas logical pixels.
+    pub current: [f64; 2],
+    /// Whether Shift was held on the press (the release merges, i.e. `Add`).
+    pub shift: bool,
+}
+
 /// Per-instance pointer navigation state.
 ///
 /// The host owns the CAD gesture decisions (touch identity, drag threshold,
-/// pan/orbit); the UI only delivers canvas-local logical positions and the raw
-/// pointer phase. Because the typed request carries per-pointer identity but no
-/// contact count, `active` is the contact set and its length is the contact
-/// count the multi-touch rule keys off.
+/// pan/orbit/box-select); the UI only delivers canvas-local logical positions
+/// and the raw pointer phase. Because the typed request carries per-pointer
+/// identity but no contact count, `active` is the contact set and its length is
+/// the contact count the multi-touch rule keys off.
 pub(crate) struct NavInner {
     /// Down-ordered active pointer ids.
     pub active: RefCell<Vec<PointerId>>,
@@ -71,6 +88,16 @@ pub(crate) struct NavInner {
     pub navigating: Cell<bool>,
     /// Last position of a multi-touch navigate gesture (pan delta source).
     pub nav_last: Cell<Option<[f64; 2]>>,
+    /// The button the single contact went down with, for gesture arbitration
+    /// (ADR 0014 B.2): a 2D primary drag boxes, a 3D primary drag orbits, and
+    /// every other button pans. Recorded on the press because the UI reports no
+    /// button change on a move.
+    pub button: Cell<Option<PointerButton>>,
+    /// The modifiers of the press, kept for the gesture. Only `shift` is used
+    /// today (ADR 0014 B.4): the release maps it to `SelectionMode::Add`.
+    pub press_modifiers: Cell<Option<Modifiers>>,
+    /// The live box-selection drag, if a 2D primary drag is in progress.
+    pub box_gesture: RefCell<Option<BoxGesture>>,
 }
 
 impl Default for NavInner {
@@ -82,6 +109,9 @@ impl Default for NavInner {
             dragged: Cell::new(false),
             navigating: Cell::new(false),
             nav_last: Cell::new(None),
+            button: Cell::new(None),
+            press_modifiers: Cell::new(None),
+            box_gesture: RefCell::new(None),
         }
     }
 }

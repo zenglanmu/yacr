@@ -61,6 +61,10 @@ impl HostCore {
             hidden: cad_app::SelectionSet::new(),
             measurement,
             draw_preview: preview,
+            // The live box-selection rubber band (ADR 0014 B.9): a transient
+            // gesture input, never a database write. `None` unless a 2D primary
+            // drag is in progress.
+            selection_box: self.box_selection_preview(),
             snap_hints_input: snap_hints,
             visibility: OverlayVisibility::from(
                 self.viewer_config

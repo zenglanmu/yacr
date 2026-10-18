@@ -85,6 +85,20 @@ fn logical_distance(a: [f64; 2], b: [f64; 2]) -> f64 {
     (dx * dx + dy * dy).sqrt()
 }
 
+/// The decoded modifiers of one pointer input.
+///
+/// Only `shift` travels on the wire this round (ADR 0014 B.4): the first UI
+/// version sends `Replace` and Shift sends `Add`. An omitted `shift` (or an
+/// explicit `null`) means "not held", so every other modifier stays at its
+/// default rather than being inferred from the event stream, and a
+/// `pointer_move` never re-reports a modifier change.
+fn modifiers(input: &ProbeInput) -> Modifiers {
+    Modifiers {
+        shift: input.shift.unwrap_or(false),
+        ..Modifiers::default()
+    }
+}
+
 /// The typed pointer request for one phase at the input's position.
 fn pointer_request(
     input: &ProbeInput,
@@ -98,7 +112,7 @@ fn pointer_request(
         phase,
         button,
         position: canvas_point(input, revision, true)?,
-        modifiers: Modifiers::default(),
+        modifiers: modifiers(input),
     })
 }
 

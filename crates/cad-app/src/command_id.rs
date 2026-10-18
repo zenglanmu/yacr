@@ -116,6 +116,12 @@ pub enum CommandId {
     /// `SELECTIONPREVIEW` initial `3`); see
     /// [`crate::SessionState::hover_preview`].
     ToggleHoverPreview,
+    /// Flip object snapping for this session (ADR 0014 A.4). Session/display
+    /// state only (no database write, no history, no ChangeSet), so it is
+    /// allowed in Viewer and Work. It defaults to on; independent of the
+    /// persisted `view.overlays.snapHints` preference, which only gates the hint
+    /// overlay. See [`crate::SessionState::snap_enabled`].
+    ToggleSnap,
 }
 
 impl CommandId {

@@ -59,6 +59,9 @@ impl HostCore {
             self.navigation.nav_last.set(None);
             self.navigation.dragged.set(false);
             self.navigation.navigating.set(false);
+            self.navigation.button.set(None);
+            self.navigation.press_modifiers.set(None);
+            *self.navigation.box_gesture.borrow_mut() = None;
         }
     }
 

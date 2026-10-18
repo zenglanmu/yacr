@@ -1,7 +1,18 @@
-//! Pointer gesture handling (press/drag/orbit/pan) and 3D navigation.
+//! Pointer gesture handling (press/drag/orbit/pan/box-select) and 3D navigation.
 use super::*;
 use cad_app::input::DRAG_THRESHOLD_LOGICAL_PX;
 use cad_app::interaction::PointerPhase;
+
+/// Dash length of a CROSSING box-selection edge, in logical pixels (ADR 0014 B.9).
+const BOX_DASH_LOGICAL_PX: f64 = 5.0;
+/// Gap between two dashes of a CROSSING edge, in logical pixels.
+const BOX_GAP_LOGICAL_PX: f64 = 5.0;
+/// Safety cap on the number of world-space segments one rubber band emits.
+///
+/// A pathological drag across the whole canvas could otherwise ask for unbounded
+/// dashing; the generator stops at this many segments and the overlay batch stays
+/// bounded. It is a guard, not the normal count.
+const BOX_MAX_SEGMENTS: usize = 512;
 
 impl HostCore {
     pub(super) fn pointer(
@@ -10,12 +21,13 @@ impl HostCore {
         phase: PointerPhase,
         button: Option<PointerButton>,
         position: PointInput,
+        modifiers: Modifiers,
     ) -> CadResult<()> {
         let point = self.pointer_logical(position)?;
         match phase {
-            PointerPhase::Down => self.pointer_down(id, point),
+            PointerPhase::Down => self.pointer_down(id, button, point, modifiers),
             PointerPhase::Move => self.pointer_move(id, button, point),
-            PointerPhase::Up => self.pointer_up(id, point),
+            PointerPhase::Up => self.pointer_up(id, point, modifiers),
             PointerPhase::Cancel => self.pointer_cancel(id),
         }
     }
@@ -59,7 +71,13 @@ impl HostCore {
         }
     }
 
-    fn pointer_down(&self, id: PointerId, point: [f64; 2]) -> CadResult<()> {
+    fn pointer_down(
+        &self,
+        id: PointerId,
+        button: Option<PointerButton>,
+        point: [f64; 2],
+        modifiers: Modifiers,
+    ) -> CadResult<()> {
         // A press starts a gesture (pan/orbit/drag or a tap): hover must not
         // survive into it, and the tint is cleared before anything else.
         self.clear_hover();
@@ -75,9 +93,17 @@ impl HostCore {
             self.navigation.last.set(Some(point));
             self.navigation.dragged.set(false);
             self.navigation.navigating.set(false);
+            // Remember the button and modifiers for the single-contact gesture:
+            // the arbitration (box / orbit / pan) reads them, and the UI reports
+            // no button change on a move.
+            self.navigation.button.set(button);
+            self.navigation.press_modifiers.set(Some(modifiers));
+            *self.navigation.box_gesture.borrow_mut() = None;
         } else {
             // Hard rule: multi-touch navigation replaces any active tool and
-            // never commits a capture.
+            // never commits a capture. It also takes over any single-contact box
+            // gesture: the winner is navigation, never a rubber band.
+            self.clear_box_gesture();
             self.controller.borrow_mut().cancel_tool()?;
             self.navigation.dragged.set(true);
             self.navigation.navigating.set(true);
@@ -99,6 +125,7 @@ impl HostCore {
         }
         let contacts = self.navigation.active.borrow().len();
         if contacts >= 2 {
+            self.clear_box_gesture();
             self.navigation.navigating.set(true);
             if let Some(last) = self.navigation.nav_last.get() {
                 let delta = [point[0] - last[0], point[1] - last[1]];
@@ -110,24 +137,41 @@ impl HostCore {
             return Ok(());
         }
         // A draw/measure capture owns single-contact gestures: the UI delivers
-        // those as MoveCursor / CapturePoint, so the pointer path never pans.
+        // those as MoveCursor / CapturePoint, so the pointer path never pans and
+        // never starts a box selection.
         if self.capturing() {
             return Ok(());
         }
+        // An active box gesture owns the single contact: track the live
+        // rectangle. The camera must not move and no pan is emitted.
+        if self.navigation.box_gesture.borrow().is_some() {
+            self.track_box_gesture(point);
+            return Ok(());
+        }
         let nav = &self.navigation;
+        // The recorded press button is authoritative; the move's button is a
+        // fallback for a host that supplies one directly.
+        let pressed = nav.button.get().or(button);
         if !nav.dragged.get() {
             let anchor = nav.anchor.get().unwrap_or(point);
             if logical_distance(anchor, point) < DRAG_THRESHOLD_LOGICAL_PX {
                 return Ok(());
             }
             nav.dragged.set(true);
-            nav.navigating.set(true);
             nav.last.set(Some(anchor));
+            // The single winner for this gesture (ADR 0014 B.2): a 2D
+            // primary-button drag is a box selection, not a pan. A capture
+            // (handled above) and 3D keep their own behaviour.
+            if pressed == Some(PointerButton::Primary) && !self.mode_is_3d() {
+                self.begin_box_gesture(anchor, point);
+                return Ok(());
+            }
+            nav.navigating.set(true);
         } else if !nav.navigating.get() {
             return Ok(());
         }
         let from = nav.last.get().unwrap_or(point);
-        if self.mode_is_3d() && button == Some(PointerButton::Primary) {
+        if self.mode_is_3d() && pressed == Some(PointerButton::Primary) {
             let (yaw, pitch) = orbit_delta(from, point);
             self.orbit(yaw, pitch)?;
         } else {
@@ -141,7 +185,7 @@ impl HostCore {
         Ok(())
     }
 
-    fn pointer_up(&self, id: PointerId, point: [f64; 2]) -> CadResult<()> {
+    fn pointer_up(&self, id: PointerId, point: [f64; 2], modifiers: Modifiers) -> CadResult<()> {
         let mut active = self.navigation.active.borrow_mut();
         let Some(index) = active.iter().position(|active| active == &id) else {
             return Ok(());
@@ -150,7 +194,9 @@ impl HostCore {
         let remaining = active.len();
         drop(active);
         if remaining > 0 {
-            // Still navigating: keep the gesture alive for the contacts left.
+            // Still navigating: keep the gesture alive for the contacts left. A
+            // box gesture cannot continue under multi-touch, so it is dropped.
+            self.clear_box_gesture();
             self.navigation.anchor.set(None);
             self.navigation.nav_last.set(Some(point));
             return Ok(());
@@ -160,6 +206,15 @@ impl HostCore {
         self.navigation.anchor.set(None);
         self.navigation.last.set(None);
         self.navigation.nav_last.set(None);
+        let box_gesture = self.navigation.box_gesture.borrow_mut().take();
+        self.navigation.button.set(None);
+        self.navigation.press_modifiers.set(None);
+        if let Some(gesture) = box_gesture {
+            // A 2D primary drag selects a box: dispatch the real command through
+            // the normal funnel and surface any refusal. The gesture and its
+            // preview are already cleared, so a failure leaves no stale band.
+            return self.finish_box_gesture(gesture, modifiers);
+        }
         if was_navigating && matches!(self.controller.borrow().session.tool, ToolState::Panning) {
             self.controller.borrow_mut().cancel_tool()?;
             self.full_dirty.set(true);
@@ -169,8 +224,9 @@ impl HostCore {
 
     fn pointer_cancel(&self, id: PointerId) -> CadResult<()> {
         // A cancel/blur ends the interaction: no hover from the interrupted
-        // gesture may remain.
+        // gesture and no rubber band may remain.
         self.clear_hover();
+        self.clear_box_gesture();
         let mut active = self.navigation.active.borrow_mut();
         active.retain(|active| active != &id);
         let empty = active.is_empty();
@@ -181,11 +237,143 @@ impl HostCore {
             self.navigation.nav_last.set(None);
             self.navigation.dragged.set(false);
             self.navigation.navigating.set(false);
+            self.navigation.button.set(None);
+            self.navigation.press_modifiers.set(None);
             // An OS/browser pointer cancel must not leave an open tool behind.
             self.controller.borrow_mut().cancel_tool()?;
             self.full_dirty.set(true);
         }
         Ok(())
+    }
+
+    /// Start a box-selection drag (ADR 0014 B.2/B.9).
+    ///
+    /// The anchor is the press position; `current` is the move that crossed the
+    /// threshold. The hover tint is cleared so a gesture never shows a stale
+    /// tint. No pan is emitted and `ToolState::Panning` is never entered.
+    fn begin_box_gesture(&self, anchor: [f64; 2], current: [f64; 2]) {
+        let shift = self
+            .navigation
+            .press_modifiers
+            .get()
+            .is_some_and(|modifiers| modifiers.shift);
+        *self.navigation.box_gesture.borrow_mut() = Some(BoxGesture {
+            anchor,
+            current,
+            shift,
+        });
+        self.clear_hover();
+    }
+
+    /// Track the live rectangle of an active box gesture.
+    fn track_box_gesture(&self, point: [f64; 2]) {
+        if let Some(gesture) = self.navigation.box_gesture.borrow_mut().as_mut() {
+            gesture.current = point;
+        }
+    }
+
+    /// Drop an active box gesture (and therefore its preview input).
+    fn clear_box_gesture(&self) {
+        *self.navigation.box_gesture.borrow_mut() = None;
+    }
+
+    /// Dispatch the release of a box gesture as the real `SelectInBox` command.
+    ///
+    /// The rectangle is in canvas logical pixels (the same convention as
+    /// `ZoomAt`), `crossing` follows AutoCAD's right-to-left rule
+    /// (`current.x < anchor.x`), and the mode is `Add` when Shift was held.
+    /// A non-finite or degenerate rectangle is dropped rather than dispatched —
+    /// the command would refuse it, and a rubber band of zero extent is not a
+    /// selection.
+    fn finish_box_gesture(&self, gesture: BoxGesture, modifiers: Modifiers) -> CadResult<()> {
+        let rect_logical = [gesture.anchor, gesture.current];
+        if !rect_logical.iter().flatten().all(|value| value.is_finite()) {
+            return Ok(());
+        }
+        let width = (gesture.current[0] - gesture.anchor[0]).abs();
+        let height = (gesture.current[1] - gesture.anchor[1]).abs();
+        if width <= 0.0 || height <= 0.0 {
+            // A perfectly axis-aligned drag has no area to select; never dispatch
+            // a degenerate rectangle.
+            return Ok(());
+        }
+        let crossing = gesture.current[0] < gesture.anchor[0];
+        let mode = if gesture.shift || modifiers.shift {
+            SelectionMode::Add
+        } else {
+            SelectionMode::Replace
+        };
+        self.immediate_command(
+            CommandId::SelectInBox,
+            CommandPayload::BoxSelect {
+                rect_logical,
+                crossing,
+                mode,
+            },
+        )
+    }
+
+    /// The world-space rubber band for the live box gesture, or `None`.
+    ///
+    /// The rectangle's two logical corners are projected to the work plane with
+    /// the viewport's own `screen_to_world` (the same mapping measurement picks
+    /// use — never a hand-rolled second projection). A WINDOW rectangle emits its
+    /// four solid edges; a CROSSING rectangle dashes them in **logical-pixel**
+    /// screen space (dash 5 px, gap 5 px) and converts each dash's endpoints, so
+    /// the dash length stays uniform on screen regardless of zoom. The total
+    /// segment count is capped at [`BOX_MAX_SEGMENTS`].
+    pub(crate) fn box_selection_preview(&self) -> Option<BoxSelectionPreview> {
+        let gesture = *self.navigation.box_gesture.borrow();
+        let gesture = gesture?;
+        let c = self.controller.borrow();
+        let viewport = c.application.workspace.viewports.get(&c.viewport_id)?;
+        let size = viewport.logical_size;
+        let anchor = gesture.anchor;
+        let current = gesture.current;
+        let corners = [
+            anchor,
+            [current[0], anchor[1]],
+            current,
+            [anchor[0], current[1]],
+        ];
+        let crossing = current[0] < anchor[0];
+        let mut segments: Vec<[Point3; 2]> = Vec::new();
+        for index in 0..4 {
+            if segments.len() >= BOX_MAX_SEGMENTS {
+                break;
+            }
+            let start = corners[index];
+            let end = corners[(index + 1) % 4];
+            if crossing {
+                let dx = end[0] - start[0];
+                let dy = end[1] - start[1];
+                let length = (dx * dx + dy * dy).sqrt();
+                if !length.is_finite() || length <= 0.0 {
+                    continue;
+                }
+                let (ux, uy) = (dx / length, dy / length);
+                let step = BOX_DASH_LOGICAL_PX + BOX_GAP_LOGICAL_PX;
+                let mut travelled = 0.0;
+                while travelled < length && segments.len() < BOX_MAX_SEGMENTS {
+                    let dash_end = (travelled + BOX_DASH_LOGICAL_PX).min(length);
+                    let from = [start[0] + ux * travelled, start[1] + uy * travelled];
+                    let to = [start[0] + ux * dash_end, start[1] + uy * dash_end];
+                    if let (Some(world_from), Some(world_to)) = (
+                        viewport.screen_to_world(from, size),
+                        viewport.screen_to_world(to, size),
+                    ) {
+                        segments.push([world_from, world_to]);
+                    }
+                    travelled += step;
+                }
+            } else if let (Some(world_from), Some(world_to)) = (
+                viewport.screen_to_world(start, size),
+                viewport.screen_to_world(end, size),
+            ) {
+                segments.push([world_from, world_to]);
+            }
+        }
+        Some(BoxSelectionPreview { segments, crossing })
     }
 
     pub(super) fn capturing(&self) -> bool {

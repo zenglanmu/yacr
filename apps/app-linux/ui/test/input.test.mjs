@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bindProbeInput, createInputLane } from '../src/input.mjs';
+import { bindProbeInput, createInputLane, shiftField } from '../src/input.mjs';
 import { readAppSource, readCatalog } from './helpers.mjs';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -215,7 +215,7 @@ test('CAD rect reports ribbon offset, dynamic footer height and local pointer CS
   assert.equal(env.observedTarget, element);
   assert.deepEqual(inputs[0], { kind: 'resize', x: 8, y: 101, width: 784, height: 439, dpr: 1 });
   element.emit('pointerdown', { pointerId: 1, clientX: 28, clientY: 131, button: 0 });
-  assert.deepEqual(inputs.at(-1), { kind: 'pointer_down', x: 20, y: 30, button: 0 });
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_down', x: 20, y: 30, button: 0, shift: false });
   element.emit('pointermove', { pointerId: 1, clientX: 38, clientY: 141, button: 0 });
   element.rect = { left: 8, top: 101, width: 784, height: 409 };
   for (let i = 0; i < 1000; i++) env.observerNotify();
@@ -235,7 +235,7 @@ test('CAD rect reports ribbon offset, dynamic footer height and local pointer CS
   element.emit('pointerup', { pointerId: 1, clientX: 48, clientY: 251, button: 0 });
   assert.deepEqual(inputs.slice(-2), [
     { kind: 'resize', x: 8, y: 201, width: 784, height: 309, dpr: 1.5 },
-    { kind: 'pointer_up', x: 40, y: 50, button: 0 },
+    { kind: 'pointer_up', x: 40, y: 50, button: 0, shift: false },
   ]);
   binding.dispose();
 });
@@ -272,6 +272,39 @@ test('pointer_down and pointer_up carry the real button; move and wheel omit it'
   // A wheel reports no button change; omit the field there too.
   element.emit('wheel', { clientX: 4, clientY: 5, deltaX: 0, deltaY: 3, deltaMode: 0, button: -1, preventDefault() {} });
   assert.deepEqual(inputs.at(-1), { kind: 'wheel', x: 4, y: 5, dx: 0, dy: 3 });
+  binding.dispose();
+});
+
+test('the shift helper forwards the real Shift and never guesses', () => {
+  assert.deepEqual(shiftField({ shiftKey: true }), { shift: true });
+  assert.deepEqual(shiftField({ shiftKey: false }), { shift: false });
+  // A synthetic/missing `shiftKey` is not held, never a guessed `true`.
+  for (const event of [{}, { shiftKey: undefined }, { shiftKey: null }, { shiftKey: 1 }]) {
+    assert.deepEqual(shiftField(event), { shift: false });
+  }
+});
+
+test('pointer_down and pointer_up carry the real shift; move and wheel omit it', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  // A held Shift on the press and release is forwarded verbatim.
+  element.emit('pointerdown', { pointerId: 1, clientX: 5, clientY: 5, button: 0, shiftKey: true });
+  assert.equal(inputs.at(-1).shift, true);
+  // A move never re-reports a modifier change: the field is omitted there.
+  element.emit('pointermove', { pointerId: 1, clientX: 6, clientY: 5, button: -1, shiftKey: true });
+  env.tick();
+  assert.ok(!('shift' in inputs.at(-1)));
+  element.emit('pointerup', { pointerId: 1, clientX: 6, clientY: 5, button: 0, shiftKey: true });
+  assert.equal(inputs.at(-1).shift, true);
+  // A released Shift is reported as not held, never omitted-as-true.
+  element.emit('pointerdown', { pointerId: 2, clientX: 7, clientY: 5, button: 0, shiftKey: false });
+  assert.equal(inputs.at(-1).shift, false);
+  element.emit('pointerup', { pointerId: 2, clientX: 7, clientY: 5, button: 0 });
+  assert.equal(inputs.at(-1).shift, false);
+  // A wheel reports no shift (only pointer phases carry it).
+  element.emit('wheel', { clientX: 4, clientY: 5, deltaX: 0, deltaY: 3, deltaMode: 0, shiftKey: true, preventDefault() {} });
+  assert.ok(!('shift' in inputs.at(-1)));
   binding.dispose();
 });
 
@@ -352,7 +385,7 @@ test('pointerleave during an active press pushes nothing and the drag still ends
   assert.equal(captured(), null);
   assert.deepEqual(inputs.slice(before), [
     { kind: 'pointer_move', x: 9, y: 4 },
-    { kind: 'pointer_up', x: 9, y: 4, button: 0 },
+    { kind: 'pointer_up', x: 9, y: 4, button: 0, shift: false },
   ]);
   // With the press released the guard is gone again: leaving now reports.
   element.emit('pointerleave', { pointerId: 7, clientX: 9, clientY: 4, button: -1, buttons: 0 });

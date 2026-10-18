@@ -28,11 +28,14 @@
 //! | base drawing (`SceneCache`) | `0` |
 //! | selection highlight (`HIGHLIGHT_DRAW_ORDER`) | `900_000` |
 //! | object-snap hints ([`SNAP_HINT_DRAW_ORDER`]) | `1_500_000` |
+//! | box-selection rubber band ([`BOX_SELECT_DRAW_ORDER`]) | `1_750_000` |
 //! | tool preview ([`PREVIEW_DRAW_ORDER`]) | `2_000_000` |
 //!
 //! A selection is a transient decoration; a tool preview is the live feedback
 //! the user is acting on, so it draws above everything. Object-snap hints sit
-//! below the live preview rubber band.
+//! below the live preview rubber band and below the box-selection rubber band,
+//! so the snap marker the user aims at stays visible while both the draw
+//! preview and the selection rectangle draw above it.
 //!
 //! The implementation is split across the submodules of this directory; every
 //! moved item is re-exported here under its original name, so the module path

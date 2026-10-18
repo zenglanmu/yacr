@@ -82,7 +82,7 @@ fn a_click_on_empty_space_clears_the_selection_without_navigating() {
 }
 
 #[test]
-fn a_drag_beyond_the_threshold_pans_and_never_selects() {
+fn a_primary_drag_beyond_the_threshold_boxes_and_never_pans() {
     let core = core();
     core.controller.borrow_mut().fit().expect("the demo fits");
     let start = screen_of(&core, demo_circle_rim(&core));
@@ -103,27 +103,32 @@ fn a_drag_beyond_the_threshold_pans_and_never_selects() {
         &core,
         mouse(1, cad_app::interaction::PointerPhase::Move, end, revision),
     );
+    // A 2D primary drag is a box selection (ADR 0014 B.2), never a pan.
+    assert!(
+        core.navigation.box_gesture.borrow().is_some(),
+        "a primary drag beyond the threshold starts a box gesture"
+    );
     dispatch_pointer(
         &core,
         mouse(1, cad_app::interaction::PointerPhase::Up, end, revision),
     );
 
     assert!(
-        core.controller.borrow().session.selection.is_empty(),
-        "a drag beyond the threshold must not select"
+        core.render.overlays().selection_box.is_none(),
+        "the rubber band is cleared on release"
     );
     assert!(
-        core.render.overlays().selection.is_empty(),
-        "no flags are fabricated from a drag"
+        core.navigation.box_gesture.borrow().is_none(),
+        "the box gesture is finished on release"
     );
-    assert_ne!(
+    assert_eq!(
         active_camera(&core),
         camera_before,
-        "a primary drag still pans the view"
+        "a primary drag must not pan the view any more"
     );
     assert!(
-        matches!(core.controller.borrow().session.tool, ToolState::Idle),
-        "the pan gesture is finished and did not leave the pan tool active"
+        !matches!(core.controller.borrow().session.tool, ToolState::Panning),
+        "a box gesture never enters the pan tool state"
     );
 }
 

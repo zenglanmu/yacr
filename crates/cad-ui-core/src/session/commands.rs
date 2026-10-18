@@ -55,6 +55,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("OFFSET", CommandId::OffsetEntity),
     ("SETACTIVELAYER", CommandId::SetActiveLayer),
     ("HOVERPREVIEW", CommandId::ToggleHoverPreview),
+    ("OSNAP", CommandId::ToggleSnap),
 ];
 
 /// Full-word command synonyms, always accepted, that map onto a canonical
@@ -66,6 +67,7 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("QSAVE", "SAVE"),
     ("ZOOM EXTENTS", "FIT"),
     ("ENTER", "CONFIRM"),
+    ("SNAP", "OSNAP"),
 ];
 
 /// The canonical, stable uppercase selector a command name resolves to, or

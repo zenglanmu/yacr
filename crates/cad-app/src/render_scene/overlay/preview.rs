@@ -172,6 +172,47 @@ pub fn snap_hint_overlay(
     out
 }
 
+/// Build the live box-selection rubber band (ADR 0014 decision B.9).
+///
+/// The host tessellates the rectangle into world-space segments (any dashing
+/// included); this builder only groups them into **one** `Lines` batch at
+/// [`BOX_SELECT_DRAW_ORDER`] with the WINDOW/CROSSING colour. It is live gesture
+/// feedback, not a selection tint, so it is independent of
+/// `visibility.selection_highlight`; an empty segment list produces no batch
+/// (an explicit empty overlay, never a fabricated one).
+///
+/// This never writes the database, the revision or the history: a cancelled
+/// drag simply stops passing the preview in.
+pub fn box_selection_overlay(
+    selection: &BoxSelectionPreview,
+    document: DocumentId,
+) -> VisualOverlay {
+    let mut out = VisualOverlay::default();
+    if selection.segments.is_empty() {
+        return out;
+    }
+    let mut points: Vec<Point3> = Vec::with_capacity(selection.segments.len() * 2);
+    for segment in &selection.segments {
+        points.extend_from_slice(segment);
+    }
+    let color = if selection.crossing {
+        BOX_SELECT_CROSSING_COLOR
+    } else {
+        BOX_SELECT_WINDOW_COLOR
+    };
+    // One batch; `line_batch` rejects fewer than two vertices.
+    if let Some(batch) = line_batch(
+        &points,
+        color,
+        document,
+        BOX_SELECT_DRAW_ORDER,
+        "overlay.box-select",
+    ) {
+        out.batches.push(batch);
+    }
+    out
+}
+
 /// The maximum number of line segments any single snap marker emits, used to
 /// pre-size the vertex buffer without a second pass.
 fn snap_hint_segment_count() -> usize {

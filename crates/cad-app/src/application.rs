@@ -194,6 +194,22 @@ impl Application {
                     measurement: None,
                 })
             }
+            CommandId::ToggleSnap => {
+                // Display/session state only (ADR 0014 A.4): no database write,
+                // no history and no ChangeSet. The two tool boundaries read this
+                // same flag through `HostController::resolve_snap`.
+                let enabled = session.toggle_snap();
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: None,
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "view.snap".into(),
+                        message: format!("object snap: {enabled}"),
+                    }],
+                    measurement: None,
+                })
+            }
             CommandId::CreateLine
             | CommandId::CreateCircle
             | CommandId::CreateArc

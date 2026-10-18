@@ -161,6 +161,20 @@ pub struct ProbeInput {
     /// mapping; it is never silently treated as primary.
     #[serde(default)]
     pub button: Option<i32>,
+    /// Whether Shift was held on a pointer event (ADR 0014 B.4).
+    ///
+    /// Optional like [`ProbeInput::button`]: an omitted `shift` (or an explicit
+    /// `null`) means "not held", so a frontend that does not report modifiers
+    /// keeps its existing `Replace` behaviour. The React host sends it on
+    /// `pointer_down`/`pointer_up` only; a move does not re-report a modifier
+    /// change.
+    ///
+    /// A value of any other JSON type (for example the string `"true"` or the
+    /// number `1`) is **refused** by the decoder, never coerced to `false` or
+    /// `true`. `shift` is the only modifier on the wire this round; there is no
+    /// general modifier bundle.
+    #[serde(default)]
+    pub shift: Option<bool>,
 }
 
 /// The acknowledgement for `probe_input`.
@@ -391,6 +405,7 @@ mod tests {
             height: None,
             dpr: None,
             button: None,
+            shift: None,
         }
     }
 
@@ -525,6 +540,7 @@ mod tests {
         Text(&'static str),
         U64(u64),
         I32(i32),
+        Bool(bool),
         Null,
     }
 
@@ -538,6 +554,7 @@ mod tests {
                 Wire::Text(value) => value.into_deserializer().deserialize_any(visitor),
                 Wire::U64(value) => value.into_deserializer().deserialize_any(visitor),
                 Wire::I32(value) => value.into_deserializer().deserialize_any(visitor),
+                Wire::Bool(value) => value.into_deserializer().deserialize_any(visitor),
                 Wire::Null => ().into_deserializer().deserialize_any(visitor),
             }
         }
@@ -643,6 +660,70 @@ mod tests {
             assert!(tracker.is_active());
             assert!(tracker.take_dirty());
         }
+    }
+
+    // --- the optional `shift` payload (frozen wire contract) -----------------
+
+    #[test]
+    fn a_caller_that_omits_shift_still_decodes_and_defaults_to_not_held() {
+        // A pre-existing JS caller sends no `shift` member at all.
+        let omitted = decode(vec![
+            ("sequence", Wire::U64(1)),
+            ("kind", Wire::Text("pointer_down")),
+            ("x", Wire::I32(24)),
+            ("y", Wire::I32(12)),
+            ("button", Wire::I32(BUTTON_PRIMARY)),
+        ])
+        .expect("an input without `shift` decodes");
+        assert_eq!(omitted.kind, InputKind::PointerDown);
+        assert_eq!(omitted.shift, None, "an absent shift is no modifier report");
+
+        // An explicit `null` behaves like the absent member.
+        let null = decode(vec![
+            ("sequence", Wire::U64(2)),
+            ("kind", Wire::Text("pointer_up")),
+            ("shift", Wire::Null),
+        ])
+        .expect("a null shift decodes");
+        assert_eq!(null.shift, None);
+    }
+
+    #[test]
+    fn shift_booleans_round_trip_and_any_non_boolean_is_refused() {
+        for (wire, expected) in [(true, true), (false, false)] {
+            let input = decode(vec![
+                ("sequence", Wire::U64(1)),
+                ("kind", Wire::Text("pointer_down")),
+                ("shift", Wire::Bool(wire)),
+            ])
+            .unwrap_or_else(|error| panic!("shift {wire} must decode: {error}"));
+            assert_eq!(input.shift, Some(expected));
+        }
+
+        // A non-boolean value is never coerced: `"true"`, `1` and `0` all fail.
+        for wire in [Wire::Text("true"), Wire::I32(1), Wire::U64(0)] {
+            assert!(
+                decode(vec![
+                    ("sequence", Wire::U64(1)),
+                    ("kind", Wire::Text("pointer_down")),
+                    ("shift", wire),
+                ])
+                .is_err(),
+                "a non-boolean shift must be refused, never coerced"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tracker_accepts_a_shift_report_without_disturbing_its_marker() {
+        let mut tracker = InputTracker::new();
+        let mut down = input(1, InputKind::PointerDown);
+        down.x = Some(25.0);
+        down.width = Some(100.0);
+        down.shift = Some(true);
+        let ack = tracker.apply(&down);
+        assert!(ack.accepted, "the tracker accepts a shift report");
+        assert!((ack.marker_offset - 0.25).abs() < 1e-6);
     }
 
     // --- the transient `pointer_leave` event --------------------------------

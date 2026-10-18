@@ -34,6 +34,7 @@ impl HostCore {
             || !self.controller.borrow().session.hover_preview()
             || self.navigation.dragged.get()
             || self.navigation.navigating.get()
+            || self.navigation.box_gesture.borrow().is_some()
             || !self.navigation.active.borrow().is_empty()
     }
 

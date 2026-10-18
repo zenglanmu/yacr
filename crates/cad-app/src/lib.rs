@@ -126,12 +126,15 @@ pub struct SessionState {
     /// point prompt.
     hover_preview: bool,
     /// How long a resolved hover must stay stable before it is tinted, in
-    /// milliseconds (default **300**).
+    /// milliseconds (default **20**).
     ///
     /// **Explicit deviation from AutoCAD**, not a parity claim: AutoCAD defines
     /// no dwell for the hover highlight (the highlight is immediate and only
     /// distance/pickbox-gated — verified against the sysvar set). The product
-    /// owner asked for a deferred highlight so a fast sweep paints nothing.
+    /// owner asked for a deferred highlight so a fast sweep paints nothing; the
+    /// owner then lowered the default from 300 ms to 20 ms, which at a 60 Hz
+    /// frame cadence is roughly one frame: it filters within-frame jitter and
+    /// small sweeps, and no longer suppresses a deliberate fast sweep.
     /// `0` restores the immediate highlight (the documented escape hatch). Read
     /// only when the preview is enabled; object-snap markers are unaffected.
     /// Session/display state only.
@@ -177,7 +180,7 @@ impl SessionState {
             active_layer: LayerId(0),
             snap_enabled: true,
             hover_preview: true,
-            hover_dwell_ms: 300,
+            hover_dwell_ms: 20,
             last_measurement: None,
             selected_measurement_kind: MeasurementToolKind::Distance,
             clipboard: Vec::new(),
@@ -246,7 +249,8 @@ impl SessionState {
     /// Set the hover dwell in milliseconds (`0` = immediate highlight).
     ///
     /// Session/display state only: no database write, no history entry, no
-    /// ChangeSet. The default is **300 ms**, an explicit product extension —
+    /// ChangeSet. The default is **20 ms** (lowered from 300 ms by the product
+    /// owner; at 60 Hz that is roughly one frame), an explicit product extension —
     /// AutoCAD defines no dwell for `SELECTIONPREVIEW` (the highlight is
     /// immediate, distance-gated only). The dwell is honoured only while the
     /// preview is enabled.

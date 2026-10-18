@@ -222,6 +222,7 @@ pub(super) fn probe(kind: InputKind) -> ProbeInput {
         height: None,
         dpr: None,
         button: None,
+        shift: None,
     }
 }
 

@@ -47,6 +47,31 @@ pub const SNAP_HINT_COLOR: [f32; 3] = [1.0, 0.72, 0.16];
 /// Number of segments used to approximate the `Center` snap marker circle.
 pub(super) const SNAP_HINT_CIRCLE_SEGMENTS: usize = 12;
 
+/// `draw_order` of the live box-selection rubber band.
+///
+/// Below the tool preview (`PREVIEW_DRAW_ORDER`, 2_000_000) and above the
+/// object-snap hints (`SNAP_HINT_DRAW_ORDER`, 1_500_000): the snap marker the
+/// user is aiming at stays visible, the live draw rubber band stays on top.
+pub const BOX_SELECT_DRAW_ORDER: i64 = 1_750_000;
+
+/// AutoCAD paints a WINDOW selection rectangle blue (left-to-right drag).
+pub const BOX_SELECT_WINDOW_COLOR: [f32; 3] = [0.29, 0.56, 0.95];
+/// AutoCAD paints a CROSSING rectangle green (right-to-left drag).
+pub const BOX_SELECT_CROSSING_COLOR: [f32; 3] = [0.35, 0.85, 0.45];
+
+/// The live box-selection rubber band.
+///
+/// The host tessellates the rectangle (and any dashing) into world-space
+/// segments on the work plane, so this crate never guesses a dash length in
+/// screen pixels it cannot see. Purely transient: it never writes the
+/// database, the revision or the history.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoxSelectionPreview {
+    pub segments: Vec<[Point3; 2]>,
+    /// `true` = CROSSING (right-to-left, green); `false` = WINDOW (blue).
+    pub crossing: bool,
+}
+
 /// A resolved object-snap hint a host feeds into the transient overlay.
 ///
 /// This is the real [`cad_measure::SnapCandidate`] the measurement snap engine
@@ -113,6 +138,12 @@ pub struct OverlayInputs {
     /// In-progress draw/edit preview (drawing-edit §4), drawn through the same
     /// transient overlay so a draw gesture gets live rubber-band feedback.
     pub draw_preview: Option<DrawPreview>,
+    /// Live box-selection rubber band (ADR 0014 decision B.9).
+    ///
+    /// Gesture feedback, not a selection tint: it is drawn whenever present and
+    /// is **not** gated by `visibility.selection_highlight`. `None` by default,
+    /// so a host that never drags a selection box gets no batch.
+    pub selection_box: Option<BoxSelectionPreview>,
     /// Resolved object-snap hints (the markers the measurement snap engine
     /// reports), drawn as a distinct overlay. Empty by default, so a host that
     /// never feeds snaps gets no snap-hint batch. Gated by
@@ -131,13 +162,14 @@ pub struct OverlayInputs {
 
 impl OverlayInputs {
     /// Whether every overlay input is empty (no highlight, no hover/hidden
-    /// flags, no preview, no resolved snap hints).
+    /// flags, no preview, no box selection, no resolved snap hints).
     pub fn is_empty(&self) -> bool {
         self.selection.is_empty()
             && self.hovered.is_empty()
             && self.hidden.is_empty()
             && self.measurement.is_none()
             && self.draw_preview.is_none()
+            && self.selection_box.is_none()
             && self.snap_hints_input.is_empty()
     }
 }

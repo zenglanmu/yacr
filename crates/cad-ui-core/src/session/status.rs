@@ -209,6 +209,12 @@ pub struct CadStatus {
     /// AutoCAD's `SELECTIONPREVIEW` initial `3` (on when no command is active),
     /// and can be turned off with `HOVERPREVIEW`.
     pub hover_preview: bool,
+    /// Whether object snapping is active in this session (ADR 0014 A.4).
+    ///
+    /// Session/display state only; defaults to `true` and can be flipped with
+    /// the `OSNAP` selector (F3). It is independent of the persisted
+    /// `view.overlays.snapHints` preference, which only gates the hint overlay.
+    pub snap_enabled: bool,
     /// Count of verified successful authoritative document transitions caused by
     /// an import. It is **not** a parsed-entity count and must not be read as
     /// proof that no reparse happened.
@@ -236,6 +242,7 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         selection: CadSelection::empty(),
         tool: None,
         hover_preview: false,
+        snap_enabled: false,
         import_count: 0,
         frame_count: 0,
     }
@@ -284,6 +291,7 @@ pub(super) fn assemble_status(
     frame_count: u64,
     tool: Option<CadTool>,
     hover_preview: bool,
+    snap_enabled: bool,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -299,6 +307,7 @@ pub(super) fn assemble_status(
         selection,
         tool,
         hover_preview,
+        snap_enabled,
         import_count,
         frame_count,
     }

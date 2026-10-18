@@ -29,6 +29,7 @@ const HOST_NAMES = [
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'MOVE', 'TRIM',
   'EXTEND', 'ERASE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   'OFFSET', 'SETACTIVELAYER', 'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER',
+  'HOVERPREVIEW', 'OSNAP', 'SNAP',
 ];
 setCommandCatalog(HOST_NAMES);
 
@@ -50,6 +51,9 @@ test('admission is the loaded host catalog: empty before load, exclusions stay e
   assert.equal(isSupportedCommand('MOVE'), true);
   assert.equal(isSupportedCommand('UNDO'), true);
   assert.equal(isSupportedCommand('CONFIRM'), true);
+  // The object-snap selector and its alias are part of the host vocabulary.
+  assert.equal(isSupportedCommand('OSNAP'), true);
+  assert.equal(isSupportedCommand('snap'), true);
   // Host-owned names the React host cannot service are excluded explicitly.
   assert.deepEqual(excludedCommandNames(), ['NEW', 'SAVE', 'SAVEAS', 'QSAVE', 'PLOT', 'EXPORT', 'PRINT']);
   assert.deepEqual([...HOST_EXCLUDED_COMMANDS], ['NEW', 'SAVE', 'SAVEAS', 'QSAVE', 'PLOT', 'EXPORT', 'PRINT']);

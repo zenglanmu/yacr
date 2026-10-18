@@ -439,6 +439,7 @@ impl CadSession {
             frame_count,
             cad_tool(&self.core.tool_snapshot()),
             self.core.controller.borrow().hover_preview_enabled(),
+            self.core.controller.borrow().snap_enabled(),
         );
         // Real live open progress (running only) from the host snapshot, so the
         // chrome can show a determinate/indeterminate bar without inventing data.

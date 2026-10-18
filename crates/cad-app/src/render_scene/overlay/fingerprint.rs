@@ -58,6 +58,21 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
         hint.kind.as_str().hash(&mut hasher);
         hash_point(&mut hasher, hint.point);
     }
+    // The live box-selection rubber band is also overlay geometry: a moving
+    // rectangle must rebuild the transient overlay only, never the base scene.
+    3u8.hash(&mut hasher);
+    match &inputs.selection_box {
+        Some(selection) => {
+            1u8.hash(&mut hasher);
+            selection.crossing.hash(&mut hasher);
+            selection.segments.len().hash(&mut hasher);
+            for segment in &selection.segments {
+                hash_point(&mut hasher, segment[0]);
+                hash_point(&mut hasher, segment[1]);
+            }
+        }
+        None => 0u8.hash(&mut hasher),
+    }
     // Visibility is part of the inputs: turning an overlay off must rebuild the
     // transient overlay even when the selection and previews are unchanged.
     inputs.visibility.axes.hash(&mut hasher);

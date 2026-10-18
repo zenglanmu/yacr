@@ -336,6 +336,12 @@ impl CadSceneController {
                             &PreviewOptions::default(),
                         ));
                     }
+                    // The live box-selection rubber band is gesture feedback, not
+                    // a selection tint: it is drawn whenever the host feeds it,
+                    // independently of `visibility.selection_highlight`.
+                    if let Some(selection_box) = overlays.selection_box.as_ref() {
+                        overlay.merge(box_selection_overlay(selection_box, document));
+                    }
                     // Resolved object-snap hint markers are a separate concept
                     // from the pointer-cursor crosses above: distinct shapes
                     // encoding the snap kind, at their own draw order. Only

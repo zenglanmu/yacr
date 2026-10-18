@@ -188,6 +188,12 @@ export function App() {
       if (event.ctrlKey && event.key === '0') { event.preventDefault(); setCleanScreen(value => !value); return; }
       if (event.ctrlKey && event.key === '9') { event.preventDefault(); setCommandLineOpen(value => !value); return; }
       if (event.key === 'F2') { event.preventDefault(); setHistoryOpen(value => !value); return; }
+      // F3 flips the object-snap master switch (ADR 0014 A.4) through the same
+      // command funnel every other affordance uses; `preventDefault` keeps the
+      // webview from consuming F3 itself. Like F2 it is a global accelerator that
+      // a focused text field does not swallow, and it never collides with a tool's
+      // Enter/Escape (handled above only for those two keys).
+      if (event.key === 'F3') { event.preventDefault(); void submitCommand('OSNAP'); return; }
       if (event.key === 'Escape') {
         setHistoryOpen(false);
         if (isTyping(event.target)) event.target.blur();

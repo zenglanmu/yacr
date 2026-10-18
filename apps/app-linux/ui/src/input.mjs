@@ -46,6 +46,20 @@ export function createInputLane(send, onError, capacity = 64) {
   };
 }
 
+/**
+ * The Shift modifier field of a pointer press/release.
+ *
+ * Only `shift` travels as a modifier this round (ADR 0014 B.4: the first UI
+ * version sends `Replace` and Shift sends `Add`), and it matters only on the
+ * two phases that decide the selection mode, so the existing button
+ * normalization is left untouched. The browser value at the event is forwarded
+ * verbatim; a missing/undefined `shiftKey` is **not held** (`false`), never a
+ * guessed `true`.
+ */
+export function shiftField(event) {
+  return { shift: event.shiftKey === true };
+}
+
 export function bindProbeInput(element, lane, env = window) {
   let active = null;
   let move = null;
@@ -83,7 +97,7 @@ export function bindProbeInput(element, lane, env = window) {
     flush();
     active = event.pointerId;
     element.setPointerCapture(active);
-    lane.push({ kind: 'pointer_down', ...position(event), ...buttonField(event) });
+    lane.push({ kind: 'pointer_down', ...position(event), ...buttonField(event), ...shiftField(event) });
   };
   const moving = event => {
     if (!accepting || (active !== null && event.pointerId !== active)) return;
@@ -95,7 +109,7 @@ export function bindProbeInput(element, lane, env = window) {
     if (event.pointerId !== active) return;
     resize();
     flush();
-    lane.push({ kind: 'pointer_up', ...position(event), ...buttonField(event) });
+    lane.push({ kind: 'pointer_up', ...position(event), ...buttonField(event), ...shiftField(event) });
     release();
   };
   const cancelled = event => { if (event.pointerId === active) cancel(); };

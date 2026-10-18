@@ -844,3 +844,111 @@ fn snap_hints_false_suppresses_measurement_markers_but_keeps_the_chain() {
     assert_eq!(without.drawn(), 1);
     assert_eq!(without.batches[0].topology, RenderTopology::Lines);
 }
+
+/// A four-segment rectangle on the work plane (the shape the host tessellates).
+fn selection_box(crossing: bool) -> BoxSelectionPreview {
+    BoxSelectionPreview {
+        segments: vec![
+            [p(0.0, 0.0), p(4.0, 0.0)],
+            [p(4.0, 0.0), p(4.0, 3.0)],
+            [p(4.0, 3.0), p(0.0, 3.0)],
+            [p(0.0, 3.0), p(0.0, 0.0)],
+        ],
+        crossing,
+    }
+}
+
+#[test]
+fn window_box_is_one_blue_batch_at_the_box_selection_draw_order() {
+    let selection = selection_box(false);
+    let overlay = box_selection_overlay(&selection, DocumentId(1));
+    assert_eq!(overlay.drawn(), 1, "the box shares one bounded batch");
+    let batch = &overlay.batches[0];
+    assert_eq!(batch.topology, RenderTopology::Lines);
+    assert_eq!(batch.draw_order, BOX_SELECT_DRAW_ORDER);
+    assert_eq!(batch.color, BOX_SELECT_WINDOW_COLOR);
+    assert!(!batch.color_unresolved);
+    // Segment count is preserved: two vertices per host segment, no markers.
+    assert_eq!(segment_pairs(batch).len(), selection.segments.len());
+    assert_eq!(
+        batch.vertices.len(),
+        selection.segments.len() * 2,
+        "no point markers are invented"
+    );
+    assert!(batch.draw_order > SNAP_HINT_DRAW_ORDER && batch.draw_order < PREVIEW_DRAW_ORDER);
+}
+
+#[test]
+fn crossing_box_is_green_at_the_same_draw_order() {
+    let overlay = box_selection_overlay(&selection_box(true), DocumentId(1));
+    assert_eq!(overlay.drawn(), 1);
+    let batch = &overlay.batches[0];
+    assert_eq!(batch.draw_order, BOX_SELECT_DRAW_ORDER);
+    assert_eq!(batch.color, BOX_SELECT_CROSSING_COLOR);
+    assert!(!batch.color_unresolved);
+    assert_eq!(batch.vertices.len(), 8);
+}
+
+#[test]
+fn empty_box_segments_yield_no_batch_and_empty_inputs() {
+    let empty = BoxSelectionPreview {
+        segments: Vec::new(),
+        crossing: false,
+    };
+    let overlay = box_selection_overlay(&empty, DocumentId(1));
+    assert!(overlay.is_empty(), "not an empty batch");
+    assert!(overlay.diagnostics.is_empty());
+    let inputs = OverlayInputs {
+        selection_box: Some(empty),
+        ..OverlayInputs::default()
+    };
+    assert!(
+        !inputs.is_empty(),
+        "a present box input participates in `OverlayInputs::is_empty`"
+    );
+}
+
+#[test]
+fn overlay_fingerprint_tracks_every_box_endpoint() {
+    let baseline = overlay_fingerprint(&OverlayInputs::default());
+    let with_box = OverlayInputs {
+        selection_box: Some(selection_box(false)),
+        ..OverlayInputs::default()
+    };
+    let hashed = overlay_fingerprint(&with_box);
+    assert_ne!(baseline, hashed);
+
+    // Moving exactly one endpoint (the live cursor while dragging) must
+    // invalidate the transient overlay.
+    let mut moved = selection_box(false);
+    moved.segments[1][1].x += 0.5;
+    let moved_inputs = OverlayInputs {
+        selection_box: Some(moved),
+        ..OverlayInputs::default()
+    };
+    assert_ne!(hashed, overlay_fingerprint(&moved_inputs));
+
+    // Crossing vs WINDOW is a colour change, so it is part of the fingerprint.
+    let crossing = OverlayInputs {
+        selection_box: Some(selection_box(true)),
+        ..OverlayInputs::default()
+    };
+    assert_ne!(hashed, overlay_fingerprint(&crossing));
+
+    // Rebuilding with identical inputs is stable.
+    assert_eq!(hashed, overlay_fingerprint(&with_box));
+}
+
+#[test]
+fn entity_flags_fingerprint_ignores_the_box_selection() {
+    let baseline = entity_flags_fingerprint(&OverlayInputs::default());
+    let with_box = OverlayInputs {
+        selection_box: Some(selection_box(true)),
+        ..OverlayInputs::default()
+    };
+    assert_eq!(
+        baseline,
+        entity_flags_fingerprint(&with_box),
+        "the box is live gesture feedback, not an entity flag"
+    );
+}

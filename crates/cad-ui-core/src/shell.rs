@@ -216,6 +216,7 @@ mod tests {
             height: None,
             dpr: None,
             button: None,
+            shift: None,
         }
     }
 
@@ -234,6 +235,7 @@ mod tests {
             selection: CadSelection::empty(),
             tool: None,
             hover_preview: false,
+            snap_enabled: false,
             import_count: 0,
             frame_count: 0,
         }
@@ -248,6 +250,10 @@ mod tests {
         assert!(!status.can_open && !status.can_fit && !status.loading);
         assert_eq!(status.import_count, 0);
         assert_eq!(status.frame_count, 0);
+        assert!(
+            !status.snap_enabled,
+            "no session means no installed switch to advertise"
+        );
         // The selection block is present and honest: nothing can be selected
         // when no CAD session exists.
         assert_eq!(status.selection, CadSelection::empty());

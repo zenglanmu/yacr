@@ -19,10 +19,12 @@ use std::{
 };
 
 use cad_app::host::HostController;
-use cad_app::render_scene::OverlayInputs;
+use cad_app::render_scene::{BoxSelectionPreview, OverlayInputs};
 use cad_app::{
     input::CanvasMetrics,
-    interaction::{InteractionRequest, PointInput, PointerButton, PointerId, SelectionMode},
+    interaction::{
+        InteractionRequest, Modifiers, PointInput, PointerButton, PointerId, SelectionMode,
+    },
     viewer_config::ViewerConfigStore,
     Command, CommandId, CommandOutcome, CommandPayload, ImportProgressSnapshot, ImportTerminal,
     RawCommandTrace, ToolState,
@@ -61,7 +63,8 @@ mod tests;
 mod zoom_anchor_tests;
 
 pub(crate) use core::{
-    ActiveGuard, FileAbort, HoverState, NavInner, PendingHover, PendingSave, RequestClock,
+    ActiveGuard, BoxGesture, FileAbort, HoverState, NavInner, PendingHover, PendingSave,
+    RequestClock,
 };
 pub use core::{HostCore, HostOptions, HostPlatform};
 #[cfg(not(target_arch = "wasm32"))]
@@ -276,6 +279,9 @@ impl HostCore {
         self.navigation.nav_last.set(None);
         self.navigation.dragged.set(false);
         self.navigation.navigating.set(false);
+        self.navigation.button.set(None);
+        self.navigation.press_modifiers.set(None);
+        *self.navigation.box_gesture.borrow_mut() = None;
         self.clear_hover();
     }
 
@@ -395,8 +401,23 @@ impl HostCore {
         self.canvas_metrics.set(canvas);
         self.metrics_revision
             .set(self.metrics_revision.get().saturating_add(1));
-        // A metrics change invalidates the pending gesture's coordinates.
-        self.clear_gestures();
+        // A metrics change invalidates world-space hovers and every *in-flight*
+        // gesture whose positions were already recorded against the old canvas.
+        // A stationary press (no movement, no box, not navigating) is preserved:
+        // its canvas-local anchor is still a valid corner in the resized canvas,
+        // and the first pointer event after a layout change reports the new DOM
+        // rect **and** the press in the same batch. Clearing it here deleted that
+        // press, so the following move had no anchor and collapsed to the
+        // zero-area drag the move handler drops — the WINDOW/CROSSING box was
+        // never dispatched (real GUI run: `wide_window_count=0`).
+        if self.navigation.dragged.get()
+            || self.navigation.navigating.get()
+            || self.navigation.box_gesture.borrow().is_some()
+        {
+            self.clear_gestures();
+        } else {
+            self.clear_hover();
+        }
         let mut c = self.controller.borrow_mut();
         let id = c.viewport_id;
         let viewport = c

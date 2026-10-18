@@ -160,7 +160,8 @@ body 内，不越出功能区、不撑高），Escape/点击外部关闭。契�
 `PLOT`/`EXPORT`/`PRINT`（需要原生对话框/打印归属，本宿主未实现），按钮保持禁用并给出原因。
 
 - **可从 chrome 触达**：`OPEN`（`--open` 真实打开漏斗，或原生 portal picker 见下节）、`FIT`、`PAN`、
-  `SELECTALL`、`UNDO`、`REDO`、`ORBIT`、`ZOOM`，以及
+  `SELECTALL`、`UNDO`、`REDO`、`ORBIT`、`ZOOM`、`OSNAP`（**F3** 同义，切对象捕捉总开关）、
+  `HOVERPREVIEW`（状态栏「悬停预览」开关，默认开），以及
   交互工具 `LINE`/`CIRCLE`/`ARC`/`MOVE`/`COPY`/`ROTATE`/`SCALE`/`MIRROR`/`OFFSET`/`TRIM`/`EXTEND`
   （经 `InteractionRequest::BeginDraw`）与 `MEASURE`（Distance）。
 - **交互语义**：工具激活后画布单击 = 取点（`CapturePoint`，不再是选择）；`Enter` = `CONFIRM`，
@@ -168,11 +169,17 @@ body 内，不越出功能区、不撑高），Escape/点击外部关闭。契�
   open-cancel）；状态栏显示 `status.tool`（机器键 `draw.*`/`measure.*` + 已取点数 + 可确认性）。
   提交语义：**绘制/编辑工具不会自动提交**，必须显式 `CONFIRM`（`cad_app::SessionState::capture_point`
   对 `Drawing` 恒返回 `false`）；测量工具按自身 `auto_ready` 自动提交。
+- **鼠标手势（ADR-0014 决策 B，行为变更）**：**2D 左键拖拽（≥4 逻辑像素）= 框选**（左→右 WINDOW /
+  右→左 CROSSING，按住时画橡皮筋：走 **renderer overlay**，`BOX_SELECT_DRAW_ORDER`；WINDOW 蓝实线、
+  CROSSING 绿虚线）；`Shift` 拖拽 = 加选，否则替换；**中键拖拽 = 平移**（2D/3D），滚轮 = 缩放；
+  3D 左键拖拽仍是**轨道旋转**（3D 框选显式 NOT IMPLEMENTED）；阈值以下仍是单点 pick。Secondary/
+  Back/Forward 的拖拽行为本轮**未改**（仍为平移；AutoCAD 该位置是右键快捷菜单，未实现）。
 - **选择要求**：编辑类工具需要先有选择；空选择在确认时由 `cad_app`（`DrawTool::is_ready`）显式拒绝，
   UI 不预判、不静默丢弃。
-- **仍未接线**：`GRID`/`SNAP`/`ORTHO`/`OSNAP` drafting 开关、图层/特性面板、`ZOOMIN`/`ZOOMOUT`
+- **仍未接线**：`GRID`/`SNAP`/`ORTHO` drafting 开关（AutoCAD 的 `SNAP`=栅格捕捉 F9，与本项目的
+  对象捕捉 `OSNAP` 是两件事，前者未实现）、图层/特性面板、`ZOOMIN`/`ZOOMOUT`
   别名（router 名为 `ZOOM`）、测量子类型 `DIST`/`PLINE`/`ANGLE`/`AREA`、`NEW`/`SAVE`/`PLOT`、
-  窗口/交叉框选与对象捕捉获取（见 `docs/adr/0014-object-snap-and-box-selection.md`）。
+  `SELECTIONPREVIEWLIMIT` 式预览上限、`PREVIEWFILTER` 的锁定图层/xref 排除、Secondary 拖拽的右键菜单。
 - **只读**：不写回 DWG；未知命令走既有 not supported 路径，不空成功。
 - 语言切换（chrome 文案）已接线；**运行时语言切换不重排 Rust 宿主的宿主侧字符串**（见限制）。
 - 导航复用**同一权威底图**（GPU-resident、同一 DB revision）；拖拽期间 overlay 后缀可经显式

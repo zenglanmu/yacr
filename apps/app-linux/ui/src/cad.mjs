@@ -73,6 +73,11 @@ export function parseCadStatus(value) {
   if (value.hoverPreview !== undefined && typeof value.hoverPreview !== 'boolean') {
     throw Error('CAD_STATUS_INVALID');
   }
+  // The object-snap master switch is likewise optional for older hosts, but a
+  // present flag must be a real boolean; a coercion would show a wrong chip.
+  if (value.snapEnabled !== undefined && typeof value.snapEnabled !== 'boolean') {
+    throw Error('CAD_STATUS_INVALID');
+  }
   return value;
 }
 
@@ -97,6 +102,30 @@ export function hoverPreviewToggle(status, admitted) {
 /** Dispatch the toggle as the one command the router accepts. */
 export function dispatchHoverPreview(runCommand) {
   runCommand(HOVER_PREVIEW_COMMAND);
+}
+
+/** The single router command that flips the object-snap master switch (F3). */
+export const OBJECT_SNAP_COMMAND = 'OSNAP';
+
+/**
+ * Status-bar view for the object-snap master switch (ADR 0014 A.4).
+ *
+ * The server's `snapEnabled` flag is the single source of truth: it is the
+ * session's live switch, not a local mirror and not the persisted
+ * `view.overlays.snapHints` preference. A payload without the field (older host)
+ * yields `null`, so the caller renders no chip at all instead of guessing
+ * `false`. `admitted` is the shell's normal command admission (`canCommand`),
+ * which already accounts for a pending command and a loading/unavailable host.
+ */
+export function objectSnapToggle(status, admitted) {
+  const on = status?.snapEnabled;
+  if (typeof on !== 'boolean') return null;
+  return { on, disabled: admitted !== true };
+}
+
+/** Dispatch the toggle as the one command the router accepts. */
+export function dispatchObjectSnap(runCommand) {
+  runCommand(OBJECT_SNAP_COMMAND);
 }
 
 /** The catalog label for a locale-independent import phase key. */

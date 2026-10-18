@@ -67,15 +67,16 @@ units/source/precision），而不是只给格式化字符串。
 | 主题 | AutoCAD 权威事实 | 出处 | 本项目当前状态 |
 |---|---|---|---|
 | 空闲悬停高亮 | **默认开启**：`SELECTIONPREVIEW` 初值 **3**（no command 时 + "Select objects" 提示时都开）；文档只按"显示/视觉效果"描述，是**叠加高亮**而非重生成 | [SELECTIONPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-77B3B59F-95E5-4F8A-85E2-D9411D712AF0.htm) | **已对齐**：默认 **开启**（与初值 3 一致），可用 `HOVERPREVIEW` 命令/状态栏"悬停预览"关闭。开启时走 flags-only 快路径（见下行），不触发 overlay 重准备；关闭时空闲移动**零拾取**、零高亮 |
-| 悬停延时 | **无**：AutoCAD 高亮是"pickbox 滚过即亮"的即时命中，整个 sysvar 集合**没有任何毫秒/秒级悬停门控**（`TOOLTIPDELAY`/`HOVER*` 不存在；Options 里的 "seconds" 只属于 ribbon/toolbar 工具提示） | [SELECTIONPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-77B3B59F-95E5-4F8A-85E2-D9411D712AF0.htm)、[Display Tab](https://help.autodesk.com/cloudhelp/2026/ENU/AutoCAD-LT/files/GUID-F464608C-15BC-48E8-9484-D311053D9B73.htm) | **有意偏离**：`SessionState.hover_dwell_ms` 默认 **300ms**（同一光圈内稳定 300ms 才上色，快速扫过不闪；`0` = 即时，AutoCAD 语义）。**不得**把它说成 AutoCAD 行为 |
+| 悬停延时 | **无**：AutoCAD 高亮是"pickbox 滚过即亮"的即时命中，整个 sysvar 集合**没有任何毫秒/秒级悬停门控**（`TOOLTIPDELAY`/`HOVER*` 不存在；Options 里的 "seconds" 只属于 ribbon/toolbar 工具提示） | [SELECTIONPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-77B3B59F-95E5-4F8A-85E2-D9411D712AF0.htm)、[Display Tab](https://help.autodesk.com/cloudhelp/2026/ENU/AutoCAD-LT/files/GUID-F464608C-15BC-48E8-9484-D311053D9B73.htm) | **有意偏离**：`SessionState.hover_dwell_ms` 默认 **20ms**（同一光圈内稳定 20ms 才上色；`0` = 即时=AutoCAD 语义）。20ms 在 60Hz 下约 **1 帧**，只过滤帧内抖动与极小扫掠，**不再**抑制刻意的快速扫掠（默认值由 300ms 下调，产品负责人决定）。**不得**把它说成 AutoCAD 行为 |
 | 悬停命中口径 | 命中范围是 **pickbox 大小**（`PICKBOX` 初值 **3**），高亮"若此刻点击会选中的整个对象"；`PICKBOX=0` 关闭 preview | [About Cursors](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-566B8C0C-57BC-4986-942D-BC683C4F90A4.htm)、[PICKBOX](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-363698CF-C3DC-4770-81EF-CB09D86B3D3A.htm) | 已对齐：`TolerancePolicy::pickbox_logical_pixels = 3.0` 同时用于**单击与悬停**（高亮 = 点击会得到什么）。用户可见后果：点击命中范围由 12 收紧到 3，细线更难命中（AutoCAD 原样行为，单一可调数值） |
 | 捕捉查找范围 | 与选择分开：`APERTURE` 初值 **10**（设备无关像素），只影响对象捕捉候选搜索/磁吸 | [APERTURE](https://help.autodesk.com/cloudhelp/2021/ENU/AutoCAD-LT/files/GUID-C8603032-7E55-4EEF-B2DF-CD2FD9EDEF91.htm) | `TolerancePolicy::interaction_logical_pixels = 12.0` 只服务 snap 候选（未随 pickbox 变窄）；12 vs AutoCAD 10 的差异如实记录 |
-| 悬停排除项 | `PREVIEWFILTER` 初值 **3**：锁定图层对象与 xref 内对象**不高亮**（但仍可被选中） | [PREVIEWFILTER](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-9B75C028-6429-4FC0-9EC6-72C21E29A5D8.htm) | **未实现**：`pick_at_screen` 不做图层可见性过滤（`select_all`/`select_in_box` 才做）⇒ 临时隐藏图层上的对象仍可能被高亮/点中。**开放项** |
+| 悬停排除项 | `PREVIEWFILTER` 初值 **3**：锁定图层对象与 xref 内对象**不高亮**（但仍可被选中） | [PREVIEWFILTER](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-9B75C028-6429-4FC0-9EC6-72C21E29A5D8.htm) | **部分对齐**：`pick_at_screen_with_visibility`/`pick_ray_with_visibility`/`ref_is_visible` 已按图层可见性过滤（隐藏图层对象既不高亮、也不可点选）；**锁定图层与 xref 的排除仍未实现**（AutoCAD 中二者可选中但不预览）。**开放项** |
 | 悬停性能上限 | `SELECTIONPREVIEWLIMIT` 初值 **20000**：预览对象数超限时**整体停止**预览高亮 | [SELECTIONPREVIEWLIMIT](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-9CDDA4F9-5B88-428F-B0C8-345E9A9DC4F1.htm) | **未实现**（无上限、无开关）。**开放项** |
 | 命令预览优先 | `COMMANDPREVIEW=1` 时 `SELECTIONPREVIEW` **被忽略**（TRIM/EXTEND/ERASE 等） | [COMMANDPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-2B245436-029A-4E14-92C2-0ED4F4F1362E.htm) | 工具占用指针时宿主直接抑制 hover（`hover_suppressed`），效果一致 |
 | 空闲悬停的 OSNAP 标记 | **不显示**：文档明确 "Object snaps work only when you are prompted for a point"；空闲时既不显示标记也不显示追踪 | [About Using Object Snaps](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-8F5E5431-9EFB-414E-BC6D-2C65EFB2DAC3.htm) | 一致：无工具光标时 `snap_hints_near_cursor` 返回空 |
-| 空闲左键拖拽 | = **隐含窗口/交叉选择**（`PICKAUTO` 初值 **5**、`PICKDRAG` 初值 **2**）；左→右=window（完全包含），右→左=crossing（相交） | [PICKAUTO](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-7BAAA374-8409-4296-B520-C5355941C836.htm)、[To Select Objects](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-243E4DD0-8947-4905-AFE2-BE9B903A8C3F.htm) | **不一致**：当前 2D 左键拖拽是**平移**。ADR-0014 决策 B 已规定改为框选（P1b 实施） |
-| 平移 / 缩放 | **中键（滚轮）按住拖动 = 平移**（`MBUTTONPAN=1`）；滚轮 = 缩放；`PAN` 命令内才有左键平移 | [PAN](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-2F05DC89-7065-4655-BA49-AC149B0F5E1A.htm) | 需在 P1b 确认中键拖拽仍平移（现状 `pointer_move` 的非主键分支即平移） |
+| 捕捉总开关（F3） | `F3` 切换对象捕捉开关（AutoCAD 帮助「Function Keys」；本轮**未逐字复核**，仅作对照） | Autodesk『Function Keys』（未逐字复核） | **已实现**：`OSNAP` 选择子（别名 `SNAP`）↔ `CommandId::ToggleSnap`，`F3` 经正常命令通路派发；只切会话级 `snap_enabled`（**不改**持久化 viewer config），无 ChangeSet/revision/历史；状态栏 OSNAP 由禁用占位变为真实开关，投影 `CadStatus.snapEnabled` |
+| 空闲左键拖拽 | = **隐含窗口/交叉选择**（`PICKAUTO` 初值 **5**、`PICKDRAG` 初值 **2**）；左→右=window（完全包含），右→左=crossing（相交） | [PICKAUTO](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-7BAAA374-8409-4296-B520-C5355941C836.htm)、[To Select Objects](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-243E4DD0-8947-4905-AFE2-BE9B903A8C3F.htm) | **已对齐（P1b 实施，行为变更）**：2D 左键拖拽（≥ `DRAG_THRESHOLD_LOGICAL_PX=4`）= 框选，左→右 WINDOW、右→左 CROSSING；`Shift`=Add，否则 Replace；按住时画橡皮筋（WINDOW 蓝实线 / CROSSING 绿虚线，screen-space 5px dash，≤512 段）；<4px 仍是单点 pick。**3D 左键拖拽仍是轨道旋转**，3D 框选显式 NOT IMPLEMENTED |
+| 平移 / 缩放 | **中键（滚轮）按住拖动 = 平移**（`MBUTTONPAN=1`）；滚轮 = 缩放；`PAN` 命令内才有左键平移 | [PAN](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-2F05DC89-7065-4655-BA49-AC149B0F5E1A.htm) | **已对齐**：中键拖拽=平移（2D/3D 均然），滚轮=缩放；左键**不再**平移（见上行）。Secondary/Back/Forward 的拖拽行为**未改**（现状仍平移）——AutoCAD 该位置是右键快捷菜单，本项目未实现，记为开放项 |
 | 高亮的两套 | 悬停=preselection（`PRESELECTIONEFFECT`），选中后=`HIGHLIGHT`/`SELECTIONEFFECT`；`HIGHLIGHT` **不随文件保存**（每会话回到 1） | [HIGHLIGHT](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-A0543122-803C-4692-9EEB-090483C4025C.htm) | 本项目两种状态分别为 `FLAG_HOVERED`/`FLAG_SELECTED`，语义一致；无持久化设置项 |
 | 只读上下文 | **AutoCAD 未定义**只读/查看器的悬停策略；preview 由系统变量门控，与文件可编辑性无关（DWF Design Review 未查证） | 见 `SELECTIONPREVIEW` 条目 | 本项目按"显示特性 + 开关"处理，不绑定 Viewer/Work 模式 |
 
@@ -89,8 +90,10 @@ overlay/几何重准备）与**命中过滤/上限**（`PREVIEWFILTER` 式隐藏
 
 **当前已落地（2026-10-18）**：悬停=flags-only（不推进 `input_revision`/`content_revision`，ADR-0012 §10 S2
 修订）；`pickbox_logical_pixels = 3.0` 与 snap 光圈 12.0 分离；空闲悬停预览默认**开启**（AutoCAD
-`SELECTIONPREVIEW=3` 对齐，`HOVERPREVIEW` 可关）；悬停延时 300ms（`hover_dwell_ms`，显式偏离）；
-hidden 图层对象既不高亮也不可点选。
+`SELECTIONPREVIEW=3` 对齐，`HOVERPREVIEW` 可关）；悬停延时 20ms（`hover_dwell_ms`，显式偏离；60Hz 下约 1 帧）；
+hidden 图层对象既不高亮也不可点选；2D 左键拖拽=框选（橡皮筋走 renderer overlay，非 DOM）且中键=平移；
+`F3`/`OSNAP` 切捕捉总开关。
 **仍待做**：`SELECTIONPREVIEWLIMIT` 式上限（当前 hover 恒为单实体）、`PREVIEWFILTER` 的锁定图层/xref
-排除（目前只有隐藏图层过滤）、`COMMANDPREVIEW` 互斥、左键拖拽=框选（P1b）。
+排除（目前只有隐藏图层过滤）、`COMMANDPREVIEW` 互斥、Secondary 拖拽的右键菜单语义、3D/纸空间框选、
+`PICKADD` 式选择加选策略、框选对 Opaque/超深 INSERT 的显式拒绝面复核。
 

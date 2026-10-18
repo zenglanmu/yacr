@@ -5,9 +5,11 @@ import React from 'react';
 import { Icon } from '../icons.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { commandById, toolLabelKey } from '../commands.mjs';
-import { dispatchHoverPreview, hoverPreviewToggle, importProgressView } from '../cad.mjs';
+import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle } from '../cad.mjs';
 
-const DRAFTING = ['GRID', 'SNAP', 'ORTHO', 'OSNAP'];
+// The drafting aids this build still has only as placeholders. OSNAP is a real
+// toggle (ADR 0014 A.4) and is rendered separately below.
+const DRAFTING = ['GRID', 'SNAP', 'ORTHO'];
 
 function Toggle({ label, on, onClick, title, disabled }) {
   return (
@@ -39,6 +41,10 @@ export function StatusBar() {
   // Idle hover preview is real host state (`status.hoverPreview`), never a local
   // mirror. An older payload without the field renders no chip at all.
   const hoverPreview = hoverPreviewToggle(shell.status, shell.canCommand('HOVERPREVIEW'));
+  // The object-snap master switch is real host session state (`status.snapEnabled`),
+  // never a local mirror (ADR 0014 A.4). An older payload without the field renders
+  // no chip at all, exactly like the hover-preview chip above.
+  const objectSnap = objectSnapToggle(shell.status, shell.canCommand('OSNAP'));
   // Announce only the phase here (rare changes); the steadily-incrementing
   // count/bytes stay in the document-tab bar, so a polite live region never
   // chatters on every tick.
@@ -85,6 +91,15 @@ export function StatusBar() {
             />
           );
         })}
+        {objectSnap ? (
+          <Toggle
+            label={t('status.toggle.osnap')}
+            on={objectSnap.on}
+            disabled={objectSnap.disabled}
+            title={`${t('status.toggle.osnap')} (F3)`}
+            onClick={() => dispatchObjectSnap(shell.runCommand)}
+          />
+        ) : null}
         {hoverPreview ? (
           <Toggle
             label={t('status.toggle.hover_preview')}

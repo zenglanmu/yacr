@@ -12,6 +12,7 @@ use cad_platform::{
 };
 use std::collections::BTreeMap;
 
+mod box_select;
 mod compat;
 mod engine_config;
 mod file_open_save;

@@ -175,9 +175,10 @@ impl HostCore {
                 phase,
                 button,
                 position,
+                modifiers,
                 ..
             } => {
-                self.pointer(id, phase, button, position)?;
+                self.pointer(id, phase, button, position, modifiers)?;
                 InteractionOutcome::PointerObserved
             }
             InteractionRequest::Scroll {

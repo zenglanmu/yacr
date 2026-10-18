@@ -72,6 +72,7 @@ command_selector_contract! {
     OffsetEntity => "OFFSET",
     SetActiveLayer => "SETACTIVELAYER",
     ToggleHoverPreview => "HOVERPREVIEW",
+    ToggleSnap => "OSNAP",
 }
 
 /// A committed synthetic, writer-produced AC1032 DWG with four LINE
@@ -90,7 +91,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 46,
+        EXPECTED_COMMAND_COUNT, 47,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -269,6 +270,7 @@ fn blank_status_reports_no_document_capabilities() {
         0,
         None,
         false,
+        false,
     );
     assert_eq!(status.document_label, None);
     assert_eq!(status.entity_count, None);
@@ -280,6 +282,10 @@ fn blank_status_reports_no_document_capabilities() {
     assert!(
         !status.hover_preview,
         "the assembled status carries the flag it was given"
+    );
+    assert!(
+        !status.snap_enabled,
+        "the assembled status carries the object-snap flag it was given"
     );
     // The selection block is always carried, never omitted.
     assert_eq!(status.selection, CadSelection::empty());
@@ -305,6 +311,7 @@ fn document_status_reports_counts_and_camera() {
         10,
         None,
         true,
+        true,
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
     assert_eq!(status.entity_count, Some(3));
@@ -314,6 +321,41 @@ fn document_status_reports_counts_and_camera() {
         status.hover_preview,
         "the status projects the session's hover preview flag"
     );
+    assert!(
+        status.snap_enabled,
+        "the status projects the session's object-snap flag"
+    );
+}
+
+#[test]
+fn object_snap_selector_toggles_the_projected_session_flag_only() {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let (document, before) = {
+        let c = session.core.controller.borrow();
+        (c.document_id, c.drawing().unwrap())
+    };
+    assert!(
+        session.snapshot(None, None, 0).snap_enabled,
+        "object snapping defaults on and is projected"
+    );
+
+    // The canonical selector and its alias both flip the session flag.
+    session.command("OSNAP").expect("OSNAP is admitted");
+    assert!(!session.snapshot(None, None, 0).snap_enabled);
+    session.command("snap").expect("the SNAP alias is admitted");
+    assert!(session.snapshot(None, None, 0).snap_enabled);
+
+    // Session state only: no database revision, no undo entry.
+    let after = session.core.controller.borrow().drawing().unwrap();
+    assert_eq!(after.revision(), before.revision());
+    assert_eq!(after.entity_count(), before.entity_count());
+    {
+        let c = session.core.controller.borrow();
+        assert!(!c.application.can_undo(&document));
+        assert!(!c.application.can_redo(&document));
+    }
 }
 
 #[test]

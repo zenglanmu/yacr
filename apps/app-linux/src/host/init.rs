@@ -191,6 +191,7 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
     // Env-gated, evidence-only lifecycle driver (no effect on normal runs).
     crate::evidence::maybe_spawn(&evidence_window, child.as_ref());
     crate::evidence::maybe_spawn_tool_evidence(child.as_ref());
+    crate::evidence::maybe_spawn_box_evidence(child.as_ref());
     crate::evidence::maybe_spawn_hover_evidence(child.as_ref());
     crate::evidence::maybe_spawn_lifecycle(&evidence_window, app.handle());
     Ok(())

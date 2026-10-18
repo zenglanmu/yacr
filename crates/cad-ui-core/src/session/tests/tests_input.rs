@@ -72,6 +72,48 @@ fn plan_input_classifies_a_click_and_tags_it_with_the_current_revision() {
 }
 
 #[test]
+fn plan_input_carries_the_shift_modifier_and_defaults_to_not_held() {
+    // The wire's optional shift is decoded into the typed pointer request; the
+    // first UI version sends Replace and Shift sends Add (ADR 0014 B.4).
+    let mut down = pointer_at(InputKind::PointerDown, 1, [1.0, 2.0], None);
+    down.shift = Some(true);
+    let (requests, _) = plan_input(None, &down, 0, false).unwrap();
+    match &requests[0] {
+        InteractionRequest::Pointer { modifiers, .. } => {
+            assert!(modifiers.shift, "a held Shift reaches the pointer request");
+            assert!(!modifiers.control && !modifiers.alt && !modifiers.meta);
+        }
+        other => panic!("unexpected request: {other:?}"),
+    }
+
+    // An absent or explicitly-false field never invents a held modifier.
+    for shift in [None, Some(false)] {
+        let mut plain = pointer_at(InputKind::PointerUp, 2, [1.0, 2.0], None);
+        plain.shift = shift;
+        let (requests, _) = plan_input(None, &plain, 0, false).unwrap();
+        match &requests[0] {
+            InteractionRequest::Pointer { modifiers, .. } => assert!(
+                !modifiers.shift,
+                "shift {shift:?} must not be treated as held"
+            ),
+            other => panic!("unexpected request: {other:?}"),
+        }
+    }
+
+    // A wheel carries no shift this round: only pointer phases decode it.
+    let mut wheel = probe(InputKind::Wheel);
+    wheel.x = Some(1.0);
+    wheel.y = Some(2.0);
+    wheel.dy = Some(1.0);
+    wheel.shift = Some(true);
+    let (requests, _) = plan_input(None, &wheel, 0, false).unwrap();
+    assert!(matches!(
+        &requests[0],
+        InteractionRequest::Scroll { modifiers, .. } if !modifiers.shift
+    ));
+}
+
+#[test]
 fn plan_input_keeps_a_drag_on_the_navigation_path() {
     let press = primary_press([10.0, 20.0]);
     // A move past the drag threshold marks the gesture as a drag.
@@ -349,7 +391,7 @@ fn a_synthesized_click_selects_the_picked_entity_and_feeds_the_overlay_flags_pat
 }
 
 #[test]
-fn a_primary_drag_pans_without_selecting() {
+fn a_primary_drag_is_a_box_selection_and_never_pans() {
     let session = session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
@@ -370,25 +412,19 @@ fn a_primary_drag_pans_without_selecting() {
         .handle_input(&pointer_at(InputKind::PointerUp, 3, end, None))
         .unwrap();
 
-    assert!(
-        session
-            .core
-            .controller
-            .borrow()
-            .session
-            .selection
-            .is_empty(),
-        "a drag beyond the threshold must not select"
-    );
-    assert_ne!(
+    // The single winner for a 2D primary drag is box selection (ADR 0014 B.2):
+    // the view must not pan, even though the gesture crossed the drag threshold.
+    assert_eq!(
         viewport_camera(&session),
         camera_before,
-        "a primary drag still pans the view"
+        "a 2D primary drag is a box selection, not a pan (ADR 0014 B.2)"
     );
+    // Whatever the box gesture resolved, the status block mirrors the session's
+    // real selection; it never fabricates one.
     assert_eq!(
-        session.snapshot(None, None, 0).selection,
-        CadSelection::empty(),
-        "the status block stays honestly empty"
+        session.snapshot(None, None, 0).selection.count as usize,
+        session.core.controller.borrow().session.selection.len(),
+        "the status selection block stays honest about what the box selected"
     );
 }
 
@@ -576,6 +612,10 @@ fn a_session_without_a_document_reports_an_honest_empty_selection_block() {
     assert_eq!(status.selection.count, 0);
     assert!(status.selection.rows.is_empty());
     assert!(status.selection.mixed_keys.is_empty());
+    assert!(
+        !status.snap_enabled,
+        "no session means no object-snap switch is advertised"
+    );
 }
 
 #[test]

@@ -12,6 +12,53 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## P1b：框选手势 + 橡皮筋 overlay + OSNAP/F3（2026-10-18/19）
+
+**范围**：`crates/cad-app`（overlay 契约 + `ToggleSnap` + 框选命令已在 P1a）、`crates/cad-host`（手势仲裁 +
+metrics 竞态修复）、`crates/cad-ui-core`（`OSNAP` 选择子、`snapEnabled`、协议可选 `shift`）、
+`apps/app-linux/ui`（F3、OSNAP 开关）、`apps/app-linux/src/evidence.rs`（框选证据驱动）、
+`crates/cad-app/src/lib.rs`（悬停延时默认值）、i18n（未新增键）、docs。**未**改 acadrust/wgpu/Cargo.lock/架构边界。
+
+- **手势仲裁（ADR-0014 决策 B，行为变更）**：**2D 左键拖拽（≥ `DRAG_THRESHOLD_LOGICAL_PX=4`）= 框选**，
+  左→右 WINDOW / 右→左 CROSSING；`Shift`=Add、否则 Replace；**中键拖拽=平移**（2D/3D）；3D 左键仍轨道旋转；
+  阈值以下仍是单点 pick；捕获（Drawing/Measuring）期间不框选；Secondary/Back/Forward 行为**未改**（仍平移）。
+- **橡皮筋**：宿主把两个逻辑角点经既有 `screen_to_world` 投到工作面，作为**瞬态 renderer overlay 输入**
+  `OverlayInputs::selection_box: Option<BoxSelectionPreview { segments, crossing }>`（`BOX_SELECT_DRAW_ORDER
+  = 1_750_000`，介于 SNAP_HINT 与 PREVIEW 之间；WINDOW 蓝实线 / CROSSING 绿虚线 screen-space 5px、
+  总段数 ≤512）。**不是 DOM overlay**（CAD 面是 GTK 最上层子窗口）。只重建 overlay，不进数据库/ChangeSet/历史。
+- **提交**：抬起时经正常命令通路口派发 `SelectInBox` + `CommandPayload::BoxSelect { rect_logical, crossing,
+  mode }`；失败显式上报，不吞成空成功。
+- **OSNAP/F3**：`CommandId::ToggleSnap`、选择子 `OSNAP`（`COMMAND_TABLE` 46→47）、别名 `SNAP`、
+  `CadStatus.snapEnabled`、状态栏 OSNAP 由禁用占位改为真实开关、**F3** 经正常命令通路派发；只切会话级
+  `snap_enabled`，**不写**持久化 viewer config，无 ChangeSet/revision/历史。协议新增**可选** `shift`
+  （缺省/null=false；非布尔拒绝，不强制转换），只供指针请求用。
+- **本轮修掉的真实缺陷（重要）**：`crates/cad-host/src/lib.rs` 的 `set_canvas_metrics` 原先**无条件**
+  `clear_gestures()`。真实 GUI 里布局 resize 与按下会同批到达（日志：`resize seq=2 width=926` 紧跟
+  `pointer_down seq=3`），刚建立的按下被清掉 → 拖拽退化为零面积手势 → `SelectInBox` **从未派发**。
+  现象是"WINDOW 框选什么都选不中"。修法：只在**确有在飞手势**（`dragged`/`navigating`/`box_gesture`）时清理，
+  静止按下存活的锚点仍是合法角点；world 空间 hover 仍清理；revision 仍推进、陈旧 revision 请求仍被拒。
+- **悬停延时默认值**：`hover_dwell_ms` 由 300 **下调为 20**（产品负责人决定；60Hz 下约 1 帧，只过滤帧内抖动，
+  不再抑制刻意快速扫掠）。仍是**显式偏离**（AutoCAD 无悬停计时），`0` = 即时。
+- **证据（真实硬件 GPU：Vulkan / Quadro P620 / X11；`scripts/collect-evidence.sh --backend x11 --lifecycle 0`）**：
+  驱动 `YACR_PROBE_BOX_EVIDENCE`（合成 DOM 指针事件，**非真实鼠标**，不经 evdev/XTest；由 Rust `webview.eval`
+  注入、在 React 侧 `.native-input` 上 `dispatchEvent`，走 UI→IPC→宿主 正常路径）报告：
+  `baseline_count=0 wide_window_count=4 window_count=0 crossing_count=1 discriminating=true entity_count=4
+  snap_enabled=true box_overlay_channel=none downs=3 moves=3 ups=3`（输出 `/tmp/opencode/yacr-evidence-20261018T161400Z`；
+  同轮日志 `input kind` 计数 3/3/3，与驱动自报一致 ⇒ 无污染输入）。
+  命令级真实夹具测试 `crates/cad-app/tests/select_box_real_fixture.rs` 锁定同一组期望（全画布 WINDOW=4、
+  2%→98% WINDOW=4、25%→60% WINDOW=0、60%→25% CROSSING=1）。
+  **视觉**（observer 读同一轮截图）：CAD 面上有**绿色虚线**、轴对齐、空心矩形，范围恰为 x 24.9–60.0%、
+  y 24.6–60.1%（与 60%→25% 保持中的拖拽一致）；无任何图元被高亮（选择在**抬起**后生效，符合 AutoCAD）；
+  窗口内无错误横幅/对话框。
+- **NOT RUN / 未证**：WINDOW 的**正选**在真实 GUI 里只用"近乎全幅"矩形证到（夹具几何下 25%→60% 矩形
+  本就无"完全包含"图元，0 是正确语义）；橡皮筋**无 probe 可见通道**（`box_overlay_channel=none`，未伪造）；
+  全量 `cargo test --workspace` 未完成（`accelerated_tier` 二进制跑逾 10 分钟被杀 → 记 NOT RUN，其余 crate
+  均通过）；3D 框选/纸空间框选、`SELECTIONPREVIEWLIMIT`、`PREVIEWFILTER` 锁定图层/xref 排除、Secondary
+  右键菜单语义仍为开放项。
+- **遗留观察**：更早一轮（`153655Z`）日志里出现 23 次驱动未派发的 `pointer_move`，而同轮无其它驱动 banner；
+  该轮 `crossing_count=2` 因此**不作为结论**采用（本轮 3/3/3 的干净运行取 `crossing_count=1`）。夹具矩形边界
+  会擦到图元，crossing 计数对矩形精度敏感。
+
 ## 悬停预览开关 + pickbox/捕捉光圈分离 + 悬停停留延时（2026-10-18）
 
 **范围**：`crates/cad-domain`（`TolerancePolicy.pickbox_logical_pixels`）、`crates/cad-app`（会话开关 +
@@ -26,7 +73,8 @@
   初值 3，管**单击与悬停预览**），`interaction_logical_pixels = 12.0` 只服务 snap 候选（`APERTURE`
   初值 10 的对应物，12 的差异如实记录）。**用户可见后果**：单击命中范围由 12 收紧到 3，细线更难命中
   —— 这是 AutoCAD 原样行为，且现在是单一可调数值。
-- **悬停停留延时（显式偏离）**：`SessionState.hover_dwell_ms` 默认 **300**；
+- **悬停停留延时（显式偏离）**：`SessionState.hover_dwell_ms` 默认 **20**（由 300 下调，产品负责人决定；
+  60Hz 下约 1 帧，只过滤帧内抖动，不再抑制刻意快速扫掠）；
   `0` = 即时（AutoCAD 语义）。行为：离开光圈/身份变化后重新解算，但**同一候选需稳定满 300ms 才上色**；
   换目标重新计时（快速扫过完全不亮）；离开图元**立即**清除；`clear_hover()`/工具启动/捕获/关闭开关
   同时清除 applied 与 pending。由既有每帧 `HostCore::tick` 的 `apply_due_hover()` 应用，未引入线程/定时器；
