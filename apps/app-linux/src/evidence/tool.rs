@@ -33,6 +33,12 @@ pub fn tool_evidence_enabled() -> bool {
 /// `cad_status`/`cad_command` commands and dispatch synthetic DOM pointer
 /// events. No command/session logic is changed and no GPU state is touched.
 pub fn maybe_spawn_tool_evidence(webview: Option<&tauri::Webview>) {
+    // The TRIM/EXTEND edit driver (`YACR_PROBE_EDIT_EVIDENCE`) is independent of
+    // this LINE driver: it has its own env var and runs even when
+    // `YACR_PROBE_TOOL_EVIDENCE` is off. It is spawned from this host-init entry
+    // point so the evidence subsystem stays self-contained (no file outside
+    // `src/evidence/` is touched except the module declaration).
+    crate::evidence::maybe_spawn_edit_evidence(webview);
     if !tool_evidence_enabled() {
         return;
     }

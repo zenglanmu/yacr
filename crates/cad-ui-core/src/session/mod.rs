@@ -28,7 +28,6 @@ mod status;
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use cad_app::input::CanvasMetrics;
 use cad_app::{CommandPayload, DrawToolKind, MeasurementToolKind, ToolSnapshot};
@@ -55,8 +54,9 @@ use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
 use self::status::{assemble_status, cad_tool};
 
 pub use self::commands::{
-    admissible_names, canonical_command_name, normalize_command, unsupported_command_reason,
-    COMMAND_ALIASES, COMMAND_TABLE,
+    admissible_names, canonical_command_name, measurement_selector_kind, normalize_command,
+    unsupported_command_reason, zoom_step_factor, COMMAND_ALIASES, COMMAND_TABLE,
+    MEASUREMENT_SELECTORS, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::status::{
     unsupported_status, CadCamera, CadImportProgress, CadSelection, CadSelectionRow, CadStatus,
@@ -87,9 +87,11 @@ pub struct CadSession {
     resource_guard: Cell<Option<u64>>,
     /// Verified successful-import transition counter.
     import_count: Cell<u64>,
-    /// `(document generation, opened identity, incoming database pointer)` last
-    /// counted, so a repeated snapshot never double-counts.
-    last_import: RefCell<Option<(u64, DocumentIdentity, usize)>>,
+    /// `(document generation, opened identity)` last counted, so a repeated
+    /// snapshot never double-counts. Both components are import-only: the
+    /// generation advances only on an authoritative document replacement, and
+    /// the identity is the successful import report's own identity.
+    last_import: RefCell<Option<(u64, DocumentIdentity)>>,
     /// Receipt ids submitted through this session and not yet observed terminal.
     pending: RefCell<VecDeque<RequestId>>,
     /// Last actual present count recorded through [`CadSession::note_frame`].
@@ -178,9 +180,21 @@ impl CadSession {
     /// | selector | request |
     /// | --- | --- |
     /// | `LINE`..`EXTEND` | `BeginDraw(<kind>)` |
-    /// | `MEASURE` | `BeginMeasurement(Distance)` |
+    /// | `MEASURE` / `DIST` | `BeginMeasurement(Distance)` |
+    /// | `MEASUREPOLYLINE` | `BeginMeasurement(PolylineLength)` |
+    /// | `MEASUREANGLE` | `BeginMeasurement(Angle)` |
+    /// | `AREA` | `BeginMeasurement(Area)` |
+    /// | `PAN` | `BeginPan` (modal pan; never a zero-delta pan) |
     /// | `CONFIRM` | `Confirm` |
     /// | `CANCEL` | `Cancel` |
+    ///
+    /// The interaction-only selectors ([`MEASUREMENT_SELECTORS`],
+    /// [`ZOOM_STEP_SELECTORS`]) carry no [`CommandId`] and are dispatched
+    /// directly: a measurement selector starts its own
+    /// [`MeasurementToolKind`] (so the four measurement buttons never collapse
+    /// onto Distance), and `ZOOMIN`/`ZOOMOUT` synthesize a real
+    /// [`CommandPayload::ZoomAt`] about the viewport centre — the deliberate
+    /// behaviour of a cursor-less zoom button, not an invented no-op.
     ///
     /// `CANCEL` keeps the host-owned open-cancel behaviour (the same selector is
     /// the import-cancel affordance): it always submits the typed cancel, and
@@ -200,7 +214,21 @@ impl CadSession {
     /// `cad_app` refuses them at confirm (`DrawTool::is_ready`), the single
     /// authority for that decision.
     pub fn command(&self, text: &str) -> Result<(), String> {
-        let Some(id) = normalize_command(text) else {
+        let Some(name) = canonical_command_name(text) else {
+            return Err(unsupported_command_reason(text));
+        };
+        // Interaction-only selectors carry no `CommandId`: dispatch them through
+        // the same typed funnel the other tools use, before the `CommandId` path.
+        if let Some(kind) = measurement_selector_kind(name) {
+            return self.submit_interactions(vec![InteractionRequest::BeginMeasurement(kind)]);
+        }
+        if let Some(factor) = zoom_step_factor(name) {
+            return self.zoom_step(factor);
+        }
+        let Some(id) = normalize_command(name) else {
+            // Unreachable for a name `canonical_command_name` admitted (an alias
+            // always resolves to a `COMMAND_TABLE` selector); keep the explicit
+            // refusal rather than fabricating a dispatch.
             return Err(unsupported_command_reason(text));
         };
         let interaction = match id {
@@ -218,6 +246,11 @@ impl CadSession {
             CommandId::Measure => Some(InteractionRequest::BeginMeasurement(
                 MeasurementToolKind::Distance,
             )),
+            // The bare `PAN` selector is the modal-pan affordance, exactly like
+            // the other interactive tools: `Application::pan` needs a `Points`
+            // world delta a selector cannot supply, so routing it through
+            // `BeginPan` is what makes the button work instead of erroring.
+            CommandId::Pan => Some(InteractionRequest::BeginPan),
             CommandId::ConfirmMeasurement => Some(InteractionRequest::Confirm),
             CommandId::CancelLoading => Some(InteractionRequest::Cancel),
             _ => None,
@@ -241,6 +274,50 @@ impl CadSession {
                 }
             }
             None => self.dispatch_command(id),
+        }
+    }
+
+    /// Apply a fixed zoom step about the **viewport centre**.
+    ///
+    /// A `ZOOMIN`/`ZOOMOUT` button supplies no cursor, so the step is anchored
+    /// at the logical centre of the active viewport — the deliberate behaviour
+    /// of a cursor-less zoom control (a real zoom about the viewport centre that
+    /// keeps the centre fixed), never a fabricated no-op. The
+    /// [`CommandPayload::ZoomAt`] payload is synthesized here because the
+    /// router's payload-bearing `ZOOM` selector otherwise requires a
+    /// caller-supplied factor. The application validates the factor and
+    /// projection and refuses explicitly on failure; the outcome is never turned
+    /// into an empty success.
+    fn zoom_step(&self, factor: f64) -> Result<(), String> {
+        let centre = {
+            let c = self.core.controller.borrow();
+            c.application
+                .workspace
+                .viewports
+                .get(&c.viewport_id)
+                .map(|viewport| {
+                    [
+                        viewport.logical_size[0] * 0.5,
+                        viewport.logical_size[1] * 0.5,
+                    ]
+                })
+        };
+        let Some(cursor) = centre else {
+            return Err("zoom step needs an active viewport".into());
+        };
+        match self
+            .core
+            .command(CommandId::Zoom, CommandPayload::ZoomAt { factor, cursor })
+        {
+            Ok(()) => {
+                *self.error.borrow_mut() = None;
+                Ok(())
+            }
+            Err(error) => {
+                let text = cad_error_text(&error);
+                *self.error.borrow_mut() = Some(text.clone());
+                Err(text)
+            }
         }
     }
 
@@ -539,12 +616,20 @@ impl CadSession {
     ///
     /// The counter is not a parsed-entity count and proves nothing about
     /// reparsing; it records that the authoritative document was replaced by a
-    /// **successful import**, using the host document generation, the opened
-    /// document identity and the render session's observed incoming database.
-    /// A failed/pending open keeps the old report and database, `NewDrawing`
-    /// clears the report, and navigation never touches either, so none of them
-    /// increments the counter. A missing incoming database is not a verified
-    /// transition and is never counted with a `0` sentinel.
+    /// **successful import**. The discriminator is the pair
+    /// `(document generation, import report identity)`, both import-only:
+    /// `document generation` advances only when the host publishes a replacement
+    /// authoritative drawing (`note_document_replaced` runs solely from the
+    /// open/import/`NewDrawing` pipelines, never from an edit commit), and the
+    /// identity comes from the successful import report.
+    ///
+    /// An edit commit swaps the controller's drawing `Arc` and the host re-syncs
+    /// the render session every tick, so the render session's `incoming`
+    /// database pointer changes on every plain edit; it is deliberately **not**
+    /// part of the key so an edit can never re-count. A failed/pending open keeps
+    /// the old report and generation, `NewDrawing` clears the report (the
+    /// early-reset path below), and navigation touches neither, so none of them
+    /// increments the counter.
     fn observe_import(&self) {
         let generation = self.core.request_context().document_generation;
         let identity = self
@@ -560,19 +645,7 @@ impl CadSession {
             *self.last_import.borrow_mut() = None;
             return;
         };
-        let Some(incoming) = self
-            .core
-            .render
-            .incoming_document()
-            .borrow()
-            .as_ref()
-            .map(|database| Arc::as_ptr(database) as usize)
-        else {
-            // The render session has not observed the replacement yet: not a
-            // verified transition, so do not count.
-            return;
-        };
-        let key = (generation, identity, incoming);
+        let key = (generation, identity);
         if self.last_import.borrow().as_ref() != Some(&key) {
             *self.last_import.borrow_mut() = Some(key);
             self.import_count

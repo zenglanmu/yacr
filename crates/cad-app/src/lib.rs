@@ -356,6 +356,12 @@ impl SessionState {
 
     /// Capture a finite point in the active drawing or measurement tool.
     /// Returns whether an auto-completing measurement became ready.
+    ///
+    /// For the entity-picking draw kinds (TRIM/EXTEND) this is **not** the
+    /// capture path: their steps are entity picks and go through
+    /// [`SessionState::capture_draw_pick`] with the ref the host resolved at
+    /// capture time. A blind point for such a kind is refused rather than
+    /// stored (see [`DrawTool::push_point`]).
     pub fn capture_point(&mut self, point: Point3) -> CadResult<bool> {
         if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
             return Err(CadError::InvalidInput("tool point must be finite".into()));
@@ -372,6 +378,41 @@ impl SessionState {
             _ => Err(CadError::InvalidInput(
                 "no point-capture tool is active".into(),
             )),
+        }
+    }
+
+    /// Capture one TRIM/EXTEND entity pick: the raw point and the resolved ref.
+    ///
+    /// The ref is resolved by the host **at capture time** through the one pick
+    /// path; this method only stores the pair atomically, so the entity the user
+    /// saw is exactly the one the commit will use. It refuses when no drawing
+    /// tool is active or when the active kind is not an entity picker.
+    pub fn capture_draw_pick(&mut self, point: Point3, reference: SelectionRef) -> CadResult<()> {
+        match &mut self.tool {
+            ToolState::Drawing(capture) => capture.tool.push_pick(point, reference),
+            _ => Err(CadError::InvalidInput("no drawing tool is active".into())),
+        }
+    }
+
+    /// Whether the active drawing tool has a pending entity-pick step.
+    ///
+    /// True only for TRIM/EXTEND while a step is still un-captured; the host
+    /// uses it to route a click to the pick path and to know whether to resolve
+    /// a cursor-time candidate.
+    pub fn draw_requires_entity_pick(&self) -> bool {
+        matches!(
+            &self.tool,
+            ToolState::Drawing(capture) if capture.tool.requires_entity_pick()
+        )
+    }
+
+    /// Record the entity under the cursor for the pending pick step.
+    ///
+    /// Presentation feedback only (never a commit source); a no-op for any tool
+    /// that is not a drawing tool.
+    pub fn set_draw_candidate(&mut self, candidate: Option<SelectionRef>) {
+        if let ToolState::Drawing(capture) = &mut self.tool {
+            capture.tool.set_candidate(candidate);
         }
     }
 

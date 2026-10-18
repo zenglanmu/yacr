@@ -18,7 +18,7 @@
 //! a cancelled draw always leaves the drawing and history untouched. Confirming
 //! yields exactly one intent, which the caller commits through one transaction.
 
-use cad_domain::{CadError, CadResult, Point3, Transform3};
+use cad_domain::{CadError, CadResult, Point3, SelectionRef, Transform3};
 
 /// The drawing/editing operation a tool captures for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +171,18 @@ impl DrawToolKind {
             Self::Move | Self::Copy | Self::Rotate | Self::Scale | Self::Mirror | Self::Offset
         )
     }
+
+    /// Whether each capture step of this operation picks an **existing entity**
+    /// rather than a free point.
+    ///
+    /// TRIM and EXTEND are the two AutoCAD commands whose arguments are object
+    /// selections, not arbitrary coordinates: the click is an entity pick, and
+    /// an empty-space click is refused instead of being accepted as a point and
+    /// resolved later. These kinds therefore resolve their refs at capture time
+    /// and are only ready once both steps have a real entity behind them.
+    pub fn needs_picked_entities(self) -> bool {
+        matches!(self, Self::Trim | Self::Extend)
+    }
 }
 
 /// Snapshot of an in-progress draw for the UI preview layer.
@@ -179,8 +191,22 @@ pub struct DrawPreview {
     pub kind: DrawToolKind,
     /// Captured points in order.
     pub points: Vec<Point3>,
+    /// Entities resolved at capture time, in step order.
+    ///
+    /// Empty for the free-point kinds. For the entity-picking kinds
+    /// ([`DrawToolKind::needs_picked_entities`]) this is one parallel entry per
+    /// captured step, so readiness is honest: a TRIM/EXTEND with two raw points
+    /// but fewer than two resolved entities is **not** confirmable.
+    pub picks: Vec<SelectionRef>,
     /// Live cursor position, if any; never committed until confirmed.
     pub cursor: Option<Point3>,
+    /// The entity under the **current cursor** for the pending capture step, or
+    /// `None`.
+    ///
+    /// Resolved through the exact pick path a click uses, only while a step is
+    /// pending, and never fabricated: it is presentation feedback for the
+    /// follow-up highlight wiring, not a commit source.
+    pub candidate: Option<SelectionRef>,
     /// Captured points still needed before the operation is defined.
     pub remaining: usize,
     /// Number of selected entities the tool was started with (MOVE needs > 0).
@@ -198,20 +224,22 @@ impl DrawPreview {
     /// One-line, locale-facing capture step for the tool panel.
     ///
     /// Kept in `cad-app` so the UI layer never re-implements the state
-    /// machine's counting rules.
+    /// machine's counting rules. The entity-picking kinds count *resolved
+    /// entities* ([`Self::picks`]) rather than raw points, so the step text
+    /// cannot claim a step that an empty-space click never resolved.
     pub fn status_line(&self) -> String {
         if self.kind.requires_selection() && self.selection_count == 0 {
             return format!("{}：请先选择对象", self.kind.label());
         }
         if self.kind == DrawToolKind::Trim {
-            return match self.points.len() {
+            return match self.picks.len() {
                 0 => "修剪：请选择要修剪的目标".to_string(),
                 1 => "修剪：请选择边界".to_string(),
                 _ => "修剪：已选目标与边界，可确认".to_string(),
             };
         }
         if self.kind == DrawToolKind::Extend {
-            return match self.points.len() {
+            return match self.picks.len() {
                 0 => "延伸：请选择要延伸的目标".to_string(),
                 1 => "延伸：请选择边界".to_string(),
                 _ => "延伸：已选目标与边界，可确认".to_string(),
@@ -237,12 +265,13 @@ impl DrawPreview {
 /// The pure description of a commit the command layer turns into exactly one
 /// drawing transaction.
 ///
-/// It carries only geometry captured from the user. `Move` carries the delta
-/// (the command layer supplies the refs from the session selection); `Trim`
-/// carries the two pick points (the command layer resolves them to
-/// `SelectionRef`s against the database, exactly as `docs/drawing-edit.md` §2
-/// requires).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// It carries the geometry captured from the user. `Move` carries the delta
+/// (the command layer supplies the refs from the session selection); `Trim` and
+/// `Extend` carry the `SelectionRef`s resolved **at capture time** alongside the
+/// raw `pick_point` the command needs (which side to trim, which end to extend).
+/// The command layer must not re-pick at confirm: the refs here are the single
+/// truth for what the user saw under the cursor.
+#[derive(Debug, Clone, PartialEq)]
 pub enum DrawIntent {
     /// Insert a LINE from `start` to `end` on the active layer.
     Line { start: Point3, end: Point3 },
@@ -254,15 +283,17 @@ pub enum DrawIntent {
     Move { delta: Point3 },
     /// Duplicate the current selection translated by `delta`.
     Copy { delta: Point3 },
-    /// Trim `target_pick` against `boundary_pick`.
+    /// Trim `target` against `boundary`; `pick_point` selects the kept side.
     Trim {
-        target_pick: Point3,
-        boundary_pick: Point3,
+        target: SelectionRef,
+        boundary: SelectionRef,
+        pick_point: Point3,
     },
-    /// Extend `target_pick` to `boundary_pick`.
+    /// Extend `target` to `boundary`; `pick_point` selects the extended end.
     Extend {
-        target_pick: Point3,
-        boundary_pick: Point3,
+        target: SelectionRef,
+        boundary: SelectionRef,
+        pick_point: Point3,
     },
     /// Rotate the current selection about `base` by `angle` radians (about +Z).
     Rotate { base: Point3, angle: f64 },
@@ -285,7 +316,12 @@ pub enum DrawIntent {
 pub struct DrawTool {
     kind: DrawToolKind,
     points: Vec<Point3>,
+    /// Entity refs resolved at capture time, one per captured step for the
+    /// entity-picking kinds (TRIM/EXTEND); empty otherwise.
+    picks: Vec<SelectionRef>,
     cursor: Option<Point3>,
+    /// Entity under the current cursor for the pending pick step, or `None`.
+    candidate: Option<SelectionRef>,
     selection_count: usize,
 }
 
@@ -299,7 +335,9 @@ impl DrawTool {
         Self {
             kind,
             points: Vec::new(),
+            picks: Vec::new(),
             cursor: None,
+            candidate: None,
             selection_count,
         }
     }
@@ -312,8 +350,18 @@ impl DrawTool {
         &self.points
     }
 
+    /// The entity refs resolved at capture time (empty for free-point kinds).
+    pub fn picks(&self) -> &[SelectionRef] {
+        &self.picks
+    }
+
     pub fn cursor(&self) -> Option<Point3> {
         self.cursor
+    }
+
+    /// The entity under the current cursor for the pending pick step, if any.
+    pub fn candidate(&self) -> Option<&SelectionRef> {
+        self.candidate.as_ref()
     }
 
     pub fn selection_count(&self) -> usize {
@@ -330,9 +378,58 @@ impl DrawTool {
         self.cursor = cursor;
     }
 
-    /// Capture one point, refusing non-finite input and overflow past the exact
-    /// complement rather than silently resetting or dropping it.
+    /// Record the entity under the cursor for the pending pick step.
+    ///
+    /// Presentation feedback only: it never advances the capture and is cleared
+    /// when the next step's pick is captured. Passing `None` is the honest "no
+    /// entity under the cursor" state, never a fabricated ref.
+    pub fn set_candidate(&mut self, candidate: Option<SelectionRef>) {
+        self.candidate = candidate;
+    }
+
+    /// Whether the pending step is an entity pick (TRIM/EXTEND with a step left).
+    pub fn requires_entity_pick(&self) -> bool {
+        self.kind.needs_picked_entities() && self.remaining() > 0
+    }
+
+    /// Capture one free point, refusing non-finite input and overflow past the
+    /// exact complement rather than silently resetting or dropping it.
+    ///
+    /// The entity-picking kinds refuse here: their steps are entity picks, so a
+    /// blind point that cannot carry an entity must never be captured as one
+    /// ([`Self::push_pick`] is the only path for them).
     pub fn push_point(&mut self, point: Point3) -> CadResult<()> {
+        if self.kind.needs_picked_entities() {
+            return Err(CadError::InvalidInput(format!(
+                "draw kind '{}' captures entity picks, not free points",
+                self.kind.key()
+            )));
+        }
+        self.push_point_checked(point)
+    }
+
+    /// Capture one entity pick: the raw point and the ref resolved for it.
+    ///
+    /// This is the atomic capture for the entity-picking kinds — the point and
+    /// the entity it was resolved against are stored together, so the two can
+    /// never drift. Free-point kinds refuse it.
+    pub fn push_pick(&mut self, point: Point3, reference: SelectionRef) -> CadResult<()> {
+        if !self.kind.needs_picked_entities() {
+            return Err(CadError::InvalidInput(format!(
+                "draw kind '{}' does not take entity picks",
+                self.kind.key()
+            )));
+        }
+        self.push_point_checked(point)?;
+        self.picks.push(reference);
+        // The next step starts with no candidate; it is re-resolved on the next
+        // cursor move rather than carried over from the previous step.
+        self.candidate = None;
+        Ok(())
+    }
+
+    /// Finite/overflow-checked point push shared by both capture paths.
+    fn push_point_checked(&mut self, point: Point3) -> CadResult<()> {
         if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
             return Err(CadError::InvalidInput("draw point must be finite".into()));
         }
@@ -354,15 +451,23 @@ impl DrawTool {
     }
 
     /// Whether the captured parameters define the operation.
+    ///
+    /// The entity-picking kinds additionally require a resolved ref for **every**
+    /// step, so two raw points with a missed pick are never confirmable.
     pub fn is_ready(&self) -> bool {
-        self.remaining() == 0 && (!self.kind.requires_selection() || self.selection_count > 0)
+        self.remaining() == 0
+            && (!self.kind.requires_selection() || self.selection_count > 0)
+            && (!self.kind.needs_picked_entities()
+                || self.picks.len() >= self.kind.required_points())
     }
 
     pub fn preview(&self) -> DrawPreview {
         DrawPreview {
             kind: self.kind,
             points: self.points.clone(),
+            picks: self.picks.clone(),
             cursor: self.cursor,
+            candidate: self.candidate.clone(),
             remaining: self.remaining(),
             selection_count: self.selection_count,
             ready: self.is_ready(),
@@ -384,6 +489,14 @@ impl DrawTool {
                 self.kind.key(),
                 self.kind.required_points(),
                 self.points.len()
+            )));
+        }
+        if self.kind.needs_picked_entities() && self.picks.len() < self.kind.required_points() {
+            return Err(CadError::InvalidInput(format!(
+                "draw kind '{}' needs {} resolved entity pick(s), has {}",
+                self.kind.key(),
+                self.kind.required_points(),
+                self.picks.len()
             )));
         }
         let a = self.points[0];
@@ -411,12 +524,14 @@ impl DrawTool {
                 },
             },
             DrawToolKind::Trim => DrawIntent::Trim {
-                target_pick: a,
-                boundary_pick: b,
+                target: self.picks[0].clone(),
+                boundary: self.picks[1].clone(),
+                pick_point: a,
             },
             DrawToolKind::Extend => DrawIntent::Extend {
-                target_pick: a,
-                boundary_pick: b,
+                target: self.picks[0].clone(),
+                boundary: self.picks[1].clone(),
+                pick_point: a,
             },
             // ROTATE: the absolute direction angle from `base` to the second
             // point, measured about +Z from the +X axis. A zero-length direction

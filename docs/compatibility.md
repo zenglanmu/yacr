@@ -95,10 +95,13 @@
   剪贴板，不读写操作系统剪贴板。
 - **导出**：`SAVE` 为**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；
   `PLOT` 为矢量 SVG/PDF。真实图纸上的导出兼容性**未验证**。
-- **证据范围**：以上均为合成/离屏（软件 Vulkan lavapipe）契约与场景证据，**不代表真实 GPU、真实
-  窗口或真机**；仅 Web 宿主接线 `TRIM`/`EXTEND` 的取点，桌面端（`app-linux`）两者取点尚未接线，
-  按下时显式 `Unsupported`（`linux.trim` / `linux.extend`）；Android 宿主未编译验证。逐轮证据见
-  `docs/handoff.md`。
+- **证据范围**：上述表格是**契约/场景**证据，不等于真实图纸兼容性。Linux 桌面宿主（React/Tauri）
+  另有**真实硬件 GPU** 有界证据（Vulkan / Quadro P620 / X11）：打开与渲染、悬停、框选（含橡皮筋像素判据）、
+  TRIM 的交互链（实体拾取/漏点拒绝/CONFIRM 到达命令层）、以及 **ERASE 的真实提交**（`entityCount` 4→3）。
+  **桌面端 `TRIM`/`EXTEND` 的取点已接线**（选择目标 + 边界两次实体拾取 → `CONFIRM`），旧文档中的
+  `linux.trim`/`linux.extend` 显式 `Unsupported` **已不存在**；但当前唯一在库 DWG 夹具是四条**平行**竖线，
+  因此"桌面端真的裁剪出几何改动"与本仓库的 EXTEND 演示**尚未取得真机证据**（命令层与宿主层有确定性测试，
+  见 `docs/handoff.md`）。Windows/macOS/Android/Web 仍是 NOT IMPLEMENTED 占位，未运行验收。
 
 ## 三维
 

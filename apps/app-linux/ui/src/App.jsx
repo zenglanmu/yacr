@@ -12,7 +12,7 @@ import { bindProbeInput, createInputLane } from './input.mjs';
 import { pointerPosition } from './metrics.mjs';
 import { queueCadCommand, requestImportCancel, startCadPolling } from './cad.mjs';
 import { createFpsSampler } from './fps.mjs';
-import { admitCommandText, commandCatalog, pushHistory, setCommandCatalog, toolCommandForKey } from './commands.mjs';
+import { admitCommandText, commandCatalog, pushHistory, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands.mjs';
 import { I18nContext, ShellContext } from './context.mjs';
 import { TitleBar } from './components/TitleBar.jsx';
 import { Ribbon } from './components/Ribbon.jsx';
@@ -61,7 +61,7 @@ export function App() {
   const displayError = status?.error || error || pollError || '';
   const commandMessage = useMemo(() => {
     if (!commandResult) return null;
-    if (commandResult.kind === 'unsupported') return { kind: 'error', text: t('command.unsupported', { command: commandResult.command }) };
+    if (commandResult.kind === 'unsupported') return { kind: 'error', text: t(unavailableReasonKey(commandResult.command), { command: commandResult.command }) };
     if (commandResult.kind === 'failed') return { kind: 'error', text: t('command.failed', { error: commandResult.error }) };
     return null;
   }, [commandResult, t]);

@@ -55,6 +55,134 @@ fn command_routing_starts_measurement_distance() {
 }
 
 #[test]
+fn measurement_selectors_start_distinct_kinds() {
+    // The four measurement selectors dispatch `BeginMeasurement(<kind>)`; the
+    // four kinds are distinct, so no button silently collapses onto Distance.
+    let cases: &[(&str, cad_app::MeasurementToolKind, &str)] = &[
+        (
+            "DIST",
+            cad_app::MeasurementToolKind::Distance,
+            "measure.distance",
+        ),
+        (
+            "MEASUREPOLYLINE",
+            cad_app::MeasurementToolKind::PolylineLength,
+            "measure.polyline",
+        ),
+        (
+            "MEASUREANGLE",
+            cad_app::MeasurementToolKind::Angle,
+            "measure.angle",
+        ),
+        ("AREA", cad_app::MeasurementToolKind::Area, "measure.area"),
+    ];
+    // Every selector is router-admitted; the UI enables it from this one
+    // vocabulary (never a second list).
+    let admitted = admissible_names();
+    for (selector, kind, _) in cases {
+        assert!(admitted.contains(selector), "{selector} not advertised");
+        assert_eq!(canonical_command_name(selector), Some(*selector));
+        assert_eq!(
+            measurement_selector_kind(selector),
+            Some(*kind),
+            "{selector} maps to the wrong kind"
+        );
+    }
+    let distinct: std::collections::BTreeSet<&str> = cases.iter().map(|(_, _, key)| *key).collect();
+    assert_eq!(
+        distinct.len(),
+        4,
+        "the four measurement kinds must be distinct"
+    );
+    // The session really starts each kind (the typed request reaches the host).
+    for (selector, _, key) in cases {
+        let session = fresh_session();
+        session
+            .command(selector)
+            .unwrap_or_else(|error| panic!("{selector} refused: {error}"));
+        let tool = session
+            .snapshot(None, None, 0)
+            .tool
+            .unwrap_or_else(|| panic!("{selector} started no tool"));
+        assert_eq!(&tool.key, key, "{selector} started the wrong kind");
+    }
+    // `MEASURE` remains the default Distance selector.
+    let session = fresh_session();
+    session.command("MEASURE").expect("MEASURE is admitted");
+    assert_eq!(
+        session.snapshot(None, None, 0).tool.unwrap().key,
+        "measure.distance"
+    );
+}
+
+#[test]
+fn pan_selector_enters_modal_pan_without_a_host_error() {
+    let session = fresh_session();
+    // The bare `PAN` selector must not reach the payload-requiring
+    // `CommandId::Pan` command (which needs a `Points` world delta and would
+    // error). It starts modal pan mode exactly like the other interactive tools.
+    session.command("PAN").expect("PAN is admitted");
+    assert!(
+        matches!(session.core.tool_snapshot(), cad_app::ToolSnapshot::Panning),
+        "PAN must enter modal pan mode"
+    );
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(status.error, None, "PAN must not produce a host error");
+}
+
+#[test]
+fn zoom_step_selectors_are_opposite_and_centred() {
+    let session = fresh_session();
+    let base = session
+        .snapshot(None, None, 0)
+        .camera
+        .expect("the demo view is a 2D plan");
+    // The two selectors are router-admitted and carry opposite factors.
+    for selector in ["ZOOMIN", "ZOOMOUT"] {
+        assert!(admissible_names().contains(&selector), "{selector}");
+        assert_eq!(canonical_command_name(selector), Some(selector));
+    }
+    let zoom_in_factor = zoom_step_factor("ZOOMIN").expect("ZOOMIN has a factor");
+    let zoom_out_factor = zoom_step_factor("ZOOMOUT").expect("ZOOMOUT has a factor");
+    assert_eq!(zoom_in_factor, ZOOM_IN_FACTOR);
+    assert_eq!(zoom_out_factor, ZOOM_OUT_FACTOR);
+    assert!(zoom_in_factor > 1.0, "zoom in must enlarge");
+    assert!(zoom_out_factor < 1.0, "zoom out must shrink");
+    assert!(
+        (zoom_in_factor * zoom_out_factor - 1.0).abs() < 1e-12,
+        "the two steps are exact opposites"
+    );
+
+    session.command("ZOOMIN").expect("ZOOMIN is admitted");
+    let zoomed_in = session
+        .snapshot(None, None, 0)
+        .camera
+        .expect("still a 2D plan");
+    // Zooming in reduces world-units-per-pixel; the centre is unchanged because
+    // the step is anchored at the viewport centre.
+    assert!(
+        zoomed_in.scale < base.scale,
+        "zoom in must reduce the scale"
+    );
+    assert_eq!(zoomed_in.center, base.center, "zoom is about the centre");
+
+    session.command("ZOOMOUT").expect("ZOOMOUT is admitted");
+    let zoomed_out = session
+        .snapshot(None, None, 0)
+        .camera
+        .expect("still a 2D plan");
+    assert!(
+        zoomed_out.scale > zoomed_in.scale,
+        "zoom out must increase the scale"
+    );
+    assert_eq!(zoomed_out.center, base.center, "zoom is about the centre");
+    assert!(
+        (zoomed_out.scale - base.scale).abs() < 1e-9,
+        "opposite steps round trip"
+    );
+}
+
+#[test]
 fn cancel_clears_the_started_tool() {
     let session = fresh_session();
     session.command("LINE").expect("LINE is admitted");

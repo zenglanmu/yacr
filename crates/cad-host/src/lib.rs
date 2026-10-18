@@ -506,6 +506,13 @@ impl HostCore {
         let command_id = command.id;
         self.metrics()?;
         let hover_preview_before = self.controller.borrow().session.hover_preview();
+        // The mode/space context a pending TRIM/EXTEND candidate was resolved
+        // in. A switch invalidates it: the cursor did not move, but the entity
+        // it resolved belongs to the previous context.
+        let capture_context_before = {
+            let c = self.controller.borrow();
+            (c.mode(), c.session.active_space.clone())
+        };
         let owns_status = policy::owns_status(command_id);
         let none: Arc<CommandOutcome> = Arc::new(CommandOutcome::none());
         let result = match command.id {
@@ -570,6 +577,23 @@ impl HostCore {
             }
         };
         let open_graded = self.open_status_graded.replace(false);
+        // A mode or space switch invalidates the pending capture candidate even
+        // though no cursor move happened: clear both the capture's presentation
+        // candidate and the transient hover so no stale `FLAG_HOVERED` tint
+        // survives the transition (the candidate is host-visible through the
+        // render overlay, and `sync_render` below republishes the empty set).
+        let capture_context_changed = {
+            let c = self.controller.borrow();
+            c.mode() != capture_context_before.0
+                || c.session.active_space != capture_context_before.1
+        };
+        if capture_context_changed {
+            self.controller
+                .borrow_mut()
+                .session
+                .set_draw_candidate(None);
+            self.clear_hover();
+        }
         // A toggle that disables the idle preview must drop the already painted
         // tint even when the pointer never moves again: the command reached the
         // host through this single funnel, so this is the one transition point.

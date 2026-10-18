@@ -105,6 +105,16 @@ impl SelectionSet {
         self.refs.clear();
     }
 
+    /// Keep only the refs for which `keep` returns `true`, preserving order.
+    ///
+    /// Used to reconcile a session selection with the authoritative document
+    /// after an edit that removed entities: the surviving refs keep their
+    /// pick order, and only the removed ones are dropped (never a blanket
+    /// clear).
+    pub fn retain(&mut self, mut keep: impl FnMut(&SelectionRef) -> bool) {
+        self.refs.retain(|reference| keep(reference));
+    }
+
     pub fn len(&self) -> usize {
         self.refs.len()
     }

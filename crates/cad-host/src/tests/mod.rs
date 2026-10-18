@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 mod box_select;
 mod box_select_edge_cases;
+mod capture_candidate;
 mod compat;
 mod engine_config;
 mod file_open_save;

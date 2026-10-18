@@ -21,12 +21,14 @@
 //! - [`pan`]: the `YACR_PROBE_POSTLOAD_PAN` gesture scripts (polled by
 //!   `host::postload`);
 //! - [`tool`]: the `YACR_PROBE_TOOL_EVIDENCE` interactive tool driver;
+//! - [`edit`]: the `YACR_PROBE_EDIT_EVIDENCE` TRIM/EXTEND entity-pick driver;
 //! - [`hover`]: the `YACR_PROBE_HOVER` hover-cost driver;
 //! - [`box_select`]: the `YACR_PROBE_BOX_EVIDENCE` box-selection driver.
 
 use std::time::{Duration, Instant};
 
 mod box_select;
+mod edit;
 mod hover;
 mod input;
 mod lifecycle;
@@ -34,6 +36,7 @@ mod pan;
 mod tool;
 
 pub use box_select::{box_evidence_enabled, maybe_spawn_box_evidence};
+pub use edit::{edit_evidence_enabled, maybe_spawn_edit_evidence};
 pub use hover::{hover_evidence_enabled, maybe_spawn_hover_evidence};
 pub use input::{enabled, maybe_spawn};
 pub use lifecycle::maybe_spawn_lifecycle;

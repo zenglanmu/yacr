@@ -100,7 +100,13 @@ impl HostCore {
             InteractionRequest::ClearCursor => {
                 self.controller.borrow_mut().session.clear_cursor();
                 // The UI reports "no cursor on the surface" through this request:
-                // the hover it produced must not survive it.
+                // the hover it produced must not survive it, and neither may the
+                // capture candidate resolved at that departed cursor position
+                // (otherwise a TRIM/EXTEND tint stays painted with no pointer).
+                self.controller
+                    .borrow_mut()
+                    .session
+                    .set_draw_candidate(None);
                 self.clear_hover();
                 // Clearing a *capture's* cursor changes the published
                 // `draw_preview`/`measurement_preview` inside `HostState`, so a

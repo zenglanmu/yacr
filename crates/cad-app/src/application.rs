@@ -76,8 +76,21 @@ impl Application {
                 session.cancel_tool()?;
                 Ok(CommandOutcome::none())
             }
-            CommandId::Undo => self.undo(&command),
-            CommandId::Redo => self.redo(&command),
+            CommandId::Undo => {
+                // An undo can remove the entity a live selection points at (for
+                // example undoing its creation); reconcile so the selection never
+                // dangles.
+                let outcome = self.undo(&command)?;
+                self.reconcile_selection(session);
+                Ok(outcome)
+            }
+            CommandId::Redo => {
+                // A redo of a deleting edit removes entities just like the
+                // original edit did.
+                let outcome = self.redo(&command)?;
+                self.reconcile_selection(session);
+                Ok(outcome)
+            }
             CommandId::SwitchProjection => {
                 // Explicit toggle of the projection kind, preserving the target.
                 // 2D/3D mode is updated to stay consistent with the projection.
@@ -225,7 +238,16 @@ impl Application {
             | CommandId::CutToClipboard
             | CommandId::PasteFromClipboard
             | CommandId::OffsetEntity
-            | CommandId::SetActiveLayer => self.drawing_command(session, &command),
+            | CommandId::SetActiveLayer => {
+                // Every edit runs through one funnel so the session selection is
+                // reconciled against the authoritative drawing afterwards: an
+                // edit that removed entities (ERASE, a deleting TRIM, CUT) leaves
+                // no dangling ref, and an edit that only adds or transforms
+                // entities leaves a still-resolving selection unchanged.
+                let outcome = self.drawing_command(session, &command)?;
+                self.reconcile_selection(session);
+                Ok(outcome)
+            }
         }
     }
 

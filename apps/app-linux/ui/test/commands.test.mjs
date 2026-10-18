@@ -7,6 +7,7 @@ import {
   defaultSuggestionIndex,
   excludedCommandNames,
   filterCommandSuggestions,
+  GESTURE_ONLY_COMMANDS,
   HOST_EXCLUDED_COMMANDS,
   historyText,
   isSupportedCommand,
@@ -16,22 +17,27 @@ import {
   stepHistoryCursor,
   toolCommandForKey,
   toolLabelKey,
+  unavailableReasonKey,
 } from '../src/commands.mjs';
 import { RIBBON_TABS, ribbonCommandIds, ribbonTab } from '../src/ribbon-model.mjs';
 
-// Mirrors `cad_ui_core::session::admissible_names()` (canonical selectors plus
-// aliases) closely enough for admission tests. NEW/SAVE/PLOT are present because
-// the **router** accepts them; the chrome excludes them explicitly. `SNAP` is
-// **absent** because the router refuses it (AutoCAD's `SNAP` is grid snap, a
-// different feature); `OSNAP` is the object-snap toggle the router does accept.
+// Mirrors `cad_ui_core::session::admissible_names()` (canonical `CommandId`
+// selectors, interaction-only measurement/zoom selectors, then aliases).
+// NEW/SAVE/PLOT are present because the **router** accepts them; the chrome
+// excludes them explicitly. `SNAP` is **absent** because the router refuses it
+// (AutoCAD's `SNAP` is grid snap, a different feature); `OSNAP` is the
+// object-snap toggle the router does accept.
 const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'MOVE', 'TRIM',
   'EXTEND', 'ERASE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
-  'OFFSET', 'SETACTIVELAYER', 'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER',
-  'HOVERPREVIEW', 'OSNAP',
+  'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'OSNAP',
+  // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
+  'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT',
+  // Full-word aliases.
+  'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER',
 ];
 setCommandCatalog(HOST_NAMES);
 
@@ -103,6 +109,180 @@ test('the grid-snap affordance stays visible but router-disabled, and OSNAP stay
   assert.ok(ribbon.includes('disabled hint={unavailable(t, item)}'), 'an unadmitted item renders disabled with the unsupported hint');
 });
 
+test('ERASE is a modify affordance in the ribbon and catalog, enabled only by router admission', async () => {
+  const { readModule } = await import('./helpers.mjs');
+  // The catalog entry mirrors the neighbouring edit commands (`draw.kind.*`).
+  const entry = COMMAND_CATALOG.find(command => command.id === 'ERASE');
+  assert.ok(entry, 'ERASE must be in the command catalog');
+  assert.equal(entry.labelKey, 'draw.kind.erase');
+  assert.equal(entry.icon, 'erase');
+  assert.equal(entry.group, 'modify');
+  // Placed with the other modify actions on the Home and Draw tabs, never in the
+  // view panel, and wired as a router command (no local shell action).
+  for (const tabId of ['home', 'draw']) {
+    const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
+    assert.ok(modify, `${tabId} must keep its modify panel`);
+    const item = modify.items.find(candidate => candidate.id === 'ERASE');
+    assert.ok(item, `${tabId}/modify must carry the ERASE affordance`);
+    assert.equal(item.command, 'ERASE');
+    assert.equal(item.labelKey, 'draw.kind.erase');
+    assert.equal(item.action, undefined, 'ERASE must not be a local shell action');
+  }
+  const view = RIBBON_TABS.find(tab => tab.id === 'view');
+  for (const panel of view.panels) {
+    assert.equal(panel.items.some(item => item.id === 'ERASE'), false, panel.id);
+  }
+  // Router admission is the single enable gate: admitted when the host vocabulary
+  // carries ERASE, unsupported (never locally enabled) when it does not.
+  assert.equal(isSupportedCommand('ERASE'), true);
+  assert.equal(admitCommandText('ERASE', { status: loaded }).kind, 'admitted');
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand('ERASE'), false);
+  assert.equal(admitCommandText('ERASE', { status: loaded }).kind, 'unsupported');
+  setCommandCatalog(HOST_NAMES);
+  // The renderer dispatches the ERASE selector through the normal command funnel.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(
+    ribbon.includes('if (item.command) return shell.runCommand(item.command);'),
+    'ribbon items dispatch through shell.runCommand, never an action',
+  );
+});
+
+// Chrome catalog entries the router does not accept: they stay **visible but
+// permanently disabled** (never deleted, never locally enabled) — the same
+// contract the grid-snap affordance holds. This is the audited dead set; a
+// future edit that adds or restores an affordance must move its id out of this
+// list.
+//
+// Remaining dead affordances, and why:
+//  - GRID, ORTHO: unimplemented drafting aids (the router has no selector).
+//  - SNAP: AutoCAD's grid snap (F9), deliberately absent from the router; it is
+//    a different feature from object snap (`OSNAP`) and must never alias it.
+//  - LAYER, PROPERTIES: panel affordances deferred to a later phase.
+// The four measurement kinds (DIST/MEASUREPOLYLINE/MEASUREANGLE/AREA) and the
+// fixed zoom steps (ZOOMIN/ZOOMOUT) were fixed: they are router-admitted
+// selectors now and moved into HOST_NAMES. `PLINE`/`ANGLE` are deliberately
+// **not** part of this set either: they are reserved/unbound names, not dead
+// affordances. `ORBIT` is **gesture-only** (router-admitted, click-disabled
+// with an explicit reason) and is asserted separately via GESTURE_ONLY_COMMANDS,
+// not lumped into this router-refused set.
+const ROUTER_REFUSED_AFFORDANCES = ['GRID', 'LAYER', 'ORTHO', 'PROPERTIES', 'SNAP'];
+
+test('the command catalog lists exactly the router-refused dead affordances, and ERASE is not one', () => {
+  const refused = COMMAND_CATALOG
+    .filter(command => !HOST_EXCLUDED_COMMANDS.includes(command.id)
+      && !GESTURE_ONLY_COMMANDS.includes(command.id)
+      && !isSupportedCommand(command.id))
+    .map(command => command.id)
+    .sort();
+  assert.deepEqual(refused, [...ROUTER_REFUSED_AFFORDANCES].sort());
+  for (const id of ROUTER_REFUSED_AFFORDANCES) {
+    assert.equal(isSupportedCommand(id), false, id);
+    assert.equal(admitCommandText(id, { status: loaded }).kind, 'unsupported', id);
+  }
+  assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('ERASE'), false, 'ERASE must be reachable');
+  // `PLINE` (planned P3 draw command) and `ANGLE` (not an AutoCAD command) are
+  // not measurement affordances at all: they are neither admitted nor dead
+  // catalog ids, so they must not appear in this refused set.
+  for (const reserved of ['PLINE', 'ANGLE']) {
+    assert.equal(ROUTER_REFUSED_AFFORDANCES.includes(reserved), false, reserved);
+    assert.equal(COMMAND_CATALOG.some(command => command.id === reserved), false, reserved);
+    assert.equal(isSupportedCommand(reserved), false, reserved);
+  }
+  // The fixed affordances are no longer dead.
+  for (const id of ['DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT']) {
+    assert.equal(ROUTER_REFUSED_AFFORDANCES.includes(id), false, id);
+    assert.equal(isSupportedCommand(id), true, id);
+  }
+});
+
+test('the four measurement buttons dispatch their own admitted kind selectors', async () => {
+  const { readModule } = await import('./helpers.mjs');
+  const measure = RIBBON_TABS.find(tab => tab.id === 'measure');
+  const panel = measure.panels.find(candidate => candidate.id === 'measure');
+  assert.ok(panel, 'the Measure tab keeps its measurement panel');
+  // Each button dispatches its own selector; none collapses onto
+  // `MEASURE`/Distance. The internal ids keep the familiar words, but the
+  // **dispatched selectors** are explicit: `PLINE` stays reserved for the P3
+  // polyline draw command and `ANGLE` is deliberately unbound.
+  const dispatched = panel.items.map(item => item.command);
+  assert.deepEqual(dispatched, ['DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA']);
+  const idToSelector = Object.fromEntries(panel.items.map(item => [item.id, item.command]));
+  assert.deepEqual(idToSelector, {
+    DIST: 'DIST',
+    PLINE: 'MEASUREPOLYLINE',
+    ANGLE: 'MEASUREANGLE',
+    AREA: 'AREA',
+  });
+  for (const id of dispatched) {
+    assert.equal(isSupportedCommand(id), true, id);
+    assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
+  }
+  // The old words are not selectors at all (neither shadows the measurement).
+  for (const reserved of ['PLINE', 'ANGLE']) {
+    assert.equal(isSupportedCommand(reserved), false, reserved);
+    assert.equal(admitCommandText(reserved, { status: loaded }).kind, 'unsupported', reserved);
+  }
+  // Distinct labels, so four different measurement kinds are presented.
+  assert.equal(new Set(panel.items.map(item => item.labelKey)).size, 4);
+  // The renderer dispatches each selector through the single command funnel.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(ribbon.includes('if (item.command) return shell.runCommand(item.command);'));
+});
+
+test('PAN is an admitted router command, not a local action', () => {
+  assert.equal(isSupportedCommand('PAN'), true);
+  assert.equal(admitCommandText('PAN', { status: loaded }).kind, 'admitted');
+  for (const tabId of ['home', 'view']) {
+    const navigate = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'navigate');
+    const pan = navigate.items.find(item => item.id === 'PAN');
+    assert.ok(pan, `${tabId} keeps its PAN affordance`);
+    assert.equal(pan.command, 'PAN');
+    assert.equal(pan.action, undefined, 'PAN must dispatch through the router');
+  }
+});
+
+test('ZOOMIN and ZOOMOUT dispatch admitted fixed zoom steps', () => {
+  for (const id of ['ZOOMIN', 'ZOOMOUT']) {
+    assert.equal(isSupportedCommand(id), true, id);
+    assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
+  }
+  const zoomIn = COMMAND_CATALOG.find(command => command.id === 'ZOOMIN');
+  const zoomOut = COMMAND_CATALOG.find(command => command.id === 'ZOOMOUT');
+  assert.equal(zoomIn.labelKey, 'toolbar.zoom_in');
+  assert.equal(zoomOut.labelKey, 'toolbar.zoom_out');
+  // The View tab exposes both as router commands.
+  const navigate = RIBBON_TABS.find(tab => tab.id === 'view').panels.find(panel => panel.id === 'navigate');
+  for (const id of ['ZOOMIN', 'ZOOMOUT']) {
+    assert.equal(navigate.items.find(item => item.id === id).command, id);
+  }
+});
+
+test('ORBIT stays visible but gesture-disabled with an explicit orbit reason', async () => {
+  const { readModule, readCatalog } = await import('./helpers.mjs');
+  // The router knows ORBIT, but a click cannot supply yaw/pitch; the chrome
+  // disables it with a gesture hint (drag in a 3D view) instead of fabricating
+  // an orbit. This is an explicit disable, never a local enable.
+  assert.equal(isSupportedCommand('ORBIT'), false);
+  assert.equal(admitCommandText('ORBIT', { status: loaded }).kind, 'unsupported');
+  assert.deepEqual([...GESTURE_ONLY_COMMANDS], ['ORBIT']);
+  assert.equal(unavailableReasonKey('ORBIT'), 'view.orbit.gesture');
+  assert.equal(unavailableReasonKey('GRID'), 'command.unsupported');
+  // It stays in the ribbon (visible, never silently deleted) as a command.
+  const navigate = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'navigate');
+  const orbit = navigate.items.find(item => item.id === 'ORBIT');
+  assert.ok(orbit, 'ORBIT must stay visible');
+  assert.equal(orbit.command, 'ORBIT');
+  assert.equal(orbit.labelKey, 'view.orbit_label');
+  // The ribbon renders the explicit reason, and the catalog defines it.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(ribbon.includes('unavailableReasonKey(item.command)'), 'the ribbon must use the explicit reason key');
+  const en = await readCatalog('en');
+  const zh = await readCatalog('zh-CN');
+  assert.equal(typeof en['view.orbit.gesture'], 'string');
+  assert.equal(typeof zh['view.orbit.gesture'], 'string');
+});
+
 test('autocomplete prefers prefix matches, then usage, then alphabetical', () => {
   const all = filterCommandSuggestions('');
   assert.ok(all.length > 0);
@@ -122,8 +302,17 @@ test('autocomplete marks supported commands and never injects unknown ids', () =
   const line = filterCommandSuggestions('LINE');
   assert.equal(line[0].id, 'LINE');
   assert.equal(line.find(suggestion => suggestion.id === 'LINE').supported, true);
-  // `PLINE` is a chrome display alias the router does not know: it stays unsupported.
-  assert.equal(line.find(suggestion => suggestion.id === 'PLINE').supported, false);
+  // The polyline/angle measurement selectors are explicit `MEASURE*` names, so
+  // they neither shadow the planned P3 `PLINE` draw command nor a vague `ANGLE`.
+  const measure = filterCommandSuggestions('MEASURE');
+  assert.equal(measure.find(suggestion => suggestion.id === 'MEASUREPOLYLINE').supported, true);
+  assert.equal(measure.find(suggestion => suggestion.id === 'MEASUREANGLE').supported, true);
+  // A reserved word is not a suggestion at all, so it cannot be inserted.
+  assert.equal(filterCommandSuggestions('PLINE').some(suggestion => suggestion.id === 'PLINE'), false);
+  assert.equal(filterCommandSuggestions('ANGLE').some(suggestion => suggestion.id === 'ANGLE'), false);
+  // A router-refused display id (`LAYER`, a later-phase panel) stays unsupported.
+  const layer = filterCommandSuggestions('LAYER');
+  assert.equal(layer.find(suggestion => suggestion.id === 'LAYER').supported, false);
   const open = filterCommandSuggestions('open');
   assert.deepEqual(open.map(suggestion => suggestion.id), ['OPEN']);
   assert.equal(open[0].supported, true);

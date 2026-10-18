@@ -12,6 +12,51 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## P2：编辑工作流接线 + TRIM/EXTEND 取点 + chrome 死入口（2026-10-19）
+
+**范围**：`crates/cad-app`（取点即解算实体、`DrawPreview.picks/candidate`、选择/`importCount` 一致性）、
+`crates/cad-host`（捕获候选着色）、`crates/cad-ui-core`（测量类型选择子、`PAN`→`BeginPan`、`ZOOMIN/OUT`、
+`ORBIT` 明确禁用）、`apps/app-linux/ui`（ERASE 入口、测量按钮、`ORBIT` 说明）、`apps/app-linux/src/evidence`
+（`YACR_PROBE_EDIT_EVIDENCE`）、docs。**未**改 acadrust/wgpu/Cargo.lock/架构边界。
+
+- **TRIM/EXTEND 改为取点即解算实体**（此前是两次"盲点"，实体只在 `CONFIRM` 时解算）：每次点击都走与
+  单击选择/悬停**同一条**拾取路径；**点空处当场拒绝**（沿用 `draw pick did not hit supported geometry`，
+  状态不变、可立即重点）；命中则**原子**存入 `SelectionRef` + 原始点；`DrawIntent::Trim/Extend` 带捕获的
+  refs，`confirm` **不再二次拾取**（避免"看到的"与"提交的"不一致）；就绪判定 = 两步都解析到实体。
+- **命令内对象高亮**：捕获步骤里光标下的候选实体走**同一 `FLAG_HOVERED` 通道**着色（`OverlayInputs::hovered`，
+  空闲 hover 在捕获期本就抑制，故只有一个生产者）；候选变化是 **flags-only** 发布（`input_revision` 不变，
+  有测试钉住）；切空间/切模式/换文档/取消/确认/指针离开都会清除，不会留下过期着色。
+- **chrome 死入口**（审计后修）：`DIST`→Distance、`AREA`→Area、`MEASUREPOLYLINE`→PolylineLength、
+  `MEASUREANGLE`→Angle（**刻意不占用** `PLINE`/`ANGLE`：AutoCAD 的 `PLINE` 是多段线**绘制**命令，属 P3；
+  `ANGLE` 不是 AutoCAD 命令）；`PAN` 改走 `InteractionRequest::BeginPan`（不再因缺 `Points` 载荷报错）；
+  `ZOOMIN/ZOOMOUT` 变为围绕视口中心 ±25% 的真实缩放；`ORBIT` **不做点击特效**（轨道是 3D 拖拽手势），
+  改为可见但禁用并给出"切到 3D 后拖拽"的理由。新增 ERASE 入口（无载荷、作用于当前选择）。
+  仍保留的显式不可用项：`GRID`/`SNAP`/`ORTHO`（未实现的制图辅助；`SNAP` 是栅格捕捉 F9，故意不占名）、
+  `LAYER`/`PROPERTIES`（面板，后续阶段）。
+- **词汇表**：新增 `MEASUREMENT_SELECTORS` / `ZOOM_STEP_SELECTORS` 并入 `admissible_names()`，
+  `COMMAND_TABLE` 仍是 `CommandId` 的唯一映射（每个 `CommandId` 恰好一个 selector）；`PLINE`/`ANGLE`/`SNAP`
+  有"当前不可用"回归测试，防止以后被误接。
+- **证据（真实 GPU：Vulkan / Quadro P620 / X11，`YACR_PROBE_EDIT_EVIDENCE`）**：
+  - TRIM 交互链**已真机证明**：`startack=true`、`trim_started_tool=draw.trim`、漏点后 `miss_advanced=false`
+    且 `miss_error=InvalidInput("draw_pick_did_not_hit_supported_geometry")`、目标点击 `target_points=1`、
+    边界点击 `boundary_points=2` + `boundary_ready=true`、`CONFIRM` 到达命令层并以
+    `InvalidInput("TRIM found no intersection between the target and the boundary")` 拒绝（正确——该夹具
+    只有**四条平行竖线**，不存在可裁剪的相交边界）。
+  - **ERASE 真实提交**：`entityCount` 4→3（`erase_count_delta=-1`，两次运行复现）。
+  - **EXTEND 无法演示**：夹具无"非平行边界"，`extend_demonstrable=false`，未硬凑。
+  - **夹具前提更正**：`fixtures/dwg/synthetic-four-lines.dwg` 实际是 **x=0,1,2,3、y=0..1 的四条平行竖线**
+    （无水平线、无 y<0 段）。此前按截图误判为有水平线，已纠正。
+  - 宿主层（非真机）确定性测试补上了**几何改动**：`trim_confirm_commits_the_real_geometry_change_through_confirm_draw`
+    断言目标 LINE 由 `(-200,100)→(200,100)` 变为 `(-200,100)→(0,100)`（|Δ|<1e-9）、恰好一次事务 + 一步撤销；
+    平行边界对照测试断言 `Unsupported/InvalidInput` 且几何**逐字节不变**。
+- **真机暴露并修复的两处诚实性缺陷**：① ERASE 成功后会话选择仍持有已删除实体（`selection.count=1` +
+  `unresolved` + `error="selected entity 4 is not present in the document"`）→ 编辑删除后按"仍能解析的 refs"
+  重建选择；② `importCount` 在非导入提交上自增（1→2）→ 只统计**导入**造成的权威发布。
+- **NOT RUN / 未证**：桌面端 TRIM 的**实际几何裁剪**与 EXTEND 演示（受夹具所限，见上）；全量
+  `cargo test --workspace`（`accelerated_tier` 超 10 分钟被杀）；Windows/macOS/Android/Web 未运行。
+- **开放项**：多边界/曲线边界/多目标 TRIM、`Enter`=全部、TRIM 目标扩到 ARC/SPLINE/INSERT、编辑工具的
+  AutoCAD 选项（ROTATE 参考角、COPY 多份、MOVE 多份）、ERASE 之外的删除类命令选择一致性、子元素/实例级编辑。
+
 ## P1b：框选手势 + 橡皮筋 overlay + OSNAP/F3（2026-10-18/19）
 
 **范围**：`crates/cad-app`（overlay 契约 + `ToggleSnap` + 框选命令已在 P1a）、`crates/cad-host`（手势仲裁 +

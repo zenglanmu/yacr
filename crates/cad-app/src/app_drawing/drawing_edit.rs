@@ -228,6 +228,43 @@ impl Application {
         })
     }
 
+    /// Reconcile the session selection with the authoritative document after an
+    /// edit: drop exactly the refs whose entity no longer exists.
+    ///
+    /// An edit can remove entities (ERASE, a TRIM that deletes the whole target,
+    /// CUT, and undo/redo of a deleting edit). A session selection that still
+    /// holds a removed entity is a dangling reference: the status projection
+    /// reports it as an `unresolved` row and the render overlay surfaces a
+    /// `highlight.unresolved` "… is not present in the document" error that the
+    /// user cannot act on. This is the **single** reconciliation point, run after
+    /// a successful edit command; it is session state only (no database write,
+    /// no history entry, no ChangeSet), so an edit's one transaction and one undo
+    /// step are untouched.
+    ///
+    /// The rule is **drop only the removed refs, keep the rest**: a ref survives
+    /// iff `DrawingDatabase::entity(ref.entity)` still resolves (which covers
+    /// model space, paper space and block children). Sub-element/instance refs
+    /// whose owning entity survives are kept. When there is no open document
+    /// there is nothing to reconcile against, so the selection is left untouched
+    /// (never cleared behind the user's back).
+    ///
+    /// Replacement-ids decision: none of the edit commands replace an existing
+    /// entity with a new id — MOVE/ROTATE/SCALE and a keeping TRIM mutate the
+    /// same entity in place, while COPY/MIRROR/OFFSET/PASTE insert *new* entities
+    /// (`objects` in the outcome) and leave the sources intact. So the selection
+    /// is never redirected onto a copy; it keeps the original refs, which still
+    /// resolve. Following this project's honest convention, a ref that stops
+    /// resolving is dropped rather than silently retargeted onto a fresh id.
+    pub(crate) fn reconcile_selection(&self, session: &mut SessionState) {
+        let Some(document) = self.workspace.documents.get(&session.document) else {
+            return;
+        };
+        let drawing = &document.drawing;
+        session
+            .selection
+            .retain(|reference| drawing.entity(reference.entity).is_some());
+    }
+
     /// Clone every selected entity with a fresh id, translating its geometry.
     ///
     /// Mirrors [`Application::move_entities`] but inserts new entities instead of

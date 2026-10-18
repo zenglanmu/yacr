@@ -275,4 +275,5 @@ mod clipboard;
 mod create_trim;
 mod offset;
 mod reports;
+mod selection_reconcile;
 mod transform;

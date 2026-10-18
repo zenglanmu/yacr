@@ -25,6 +25,7 @@ use crate::{
 };
 
 mod databases;
+mod draw_pick;
 
 #[cfg(test)]
 mod tests;
@@ -130,8 +131,19 @@ impl HostController {
     /// the committed point is the snapped point (ADR 0014 A.2). When there is
     /// no candidate the raw point is used unchanged; a resolution error (for
     /// example a non-finite point) is propagated, never swallowed.
+    ///
+    /// For a pending TRIM/EXTEND step the click is an **entity pick**: the
+    /// entity under the point is resolved here, at capture time, through the one
+    /// pick path ([`HostController::resolve_draw_pick`]). A miss is refused
+    /// immediately (no point stored, no step consumed), so the user can simply
+    /// click again; a hit stores the ref and the raw point together.
     pub fn capture_tool_point(&mut self, point: Point3) -> CadResult<bool> {
         let point = self.resolve_snap(point)?.map_or(point, |snap| snap.point);
+        if self.session.draw_requires_entity_pick() {
+            let reference = self.resolve_draw_pick(point)?;
+            self.session.capture_draw_pick(point, reference)?;
+            return Ok(false);
+        }
         self.session.capture_point(point)
     }
 
@@ -139,10 +151,21 @@ impl HostController {
     ///
     /// Like [`HostController::capture_tool_point`], the stored cursor is the
     /// resolved snap point so the preview and the eventual commit share one
-    /// truth (ADR 0014 A.2).
+    /// truth (ADR 0014 A.2). For a pending TRIM/EXTEND step it also resolves the
+    /// entity under the cursor through the same pick path and publishes it as
+    /// [`crate::DrawPreview::candidate`] — presentation feedback for the
+    /// follow-up highlight, never a commit source, and `None` when nothing is
+    /// under the cursor.
     pub fn move_tool_cursor(&mut self, point: Point3) -> CadResult<()> {
         let point = self.resolve_snap(point)?.map_or(point, |snap| snap.point);
-        self.session.move_cursor(point)
+        self.session.move_cursor(point)?;
+        let candidate = if self.session.draw_requires_entity_pick() {
+            self.draw_pick_ref(point)?
+        } else {
+            None
+        };
+        self.session.set_draw_candidate(candidate);
+        Ok(())
     }
 
     /// Cancel an active tool without executing a drawing command.
@@ -216,25 +239,27 @@ impl HostController {
                 },
             ),
             DrawIntent::Trim {
-                target_pick,
-                boundary_pick,
+                target,
+                boundary,
+                pick_point,
             } => (
                 crate::CommandId::TrimEntity,
                 crate::CommandPayload::Trim {
-                    target: self.resolve_draw_pick(target_pick)?,
-                    boundary: vec![self.resolve_draw_pick(boundary_pick)?],
-                    pick_point: target_pick,
+                    target,
+                    boundary: vec![boundary],
+                    pick_point,
                 },
             ),
             DrawIntent::Extend {
-                target_pick,
-                boundary_pick,
+                target,
+                boundary,
+                pick_point,
             } => (
                 crate::CommandId::ExtendEntity,
                 crate::CommandPayload::Extend {
-                    target: self.resolve_draw_pick(target_pick)?,
-                    boundary: vec![self.resolve_draw_pick(boundary_pick)?],
-                    pick_point: target_pick,
+                    target,
+                    boundary: vec![boundary],
+                    pick_point,
                 },
             ),
             DrawIntent::Rotate { base, angle } => (
@@ -275,37 +300,6 @@ impl HostController {
             document: self.document_id,
             viewport: self.viewport_id,
             payload,
-        })
-    }
-
-    fn resolve_draw_pick(&self, world: Point3) -> CadResult<SelectionRef> {
-        let document = self
-            .application
-            .workspace
-            .documents
-            .get(&self.document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let viewport = self
-            .application
-            .workspace
-            .viewports
-            .get(&self.viewport_id)
-            .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
-        let logical = viewport
-            .camera
-            .world_to_screen(world, viewport.logical_size)
-            .ok_or_else(|| CadError::InvalidInput("draw pick is outside the viewport".into()))?;
-        let report = crate::pick_at_screen(
-            &document.drawing,
-            self.document_id,
-            &viewport.camera,
-            logical,
-            viewport.logical_size,
-            &TolerancePolicy::default(),
-            cad_spatial::BackFacePolicy::DoubleSided,
-        )?;
-        report.hit.map(|hit| hit.source).ok_or_else(|| {
-            CadError::InvalidInput("draw pick did not hit supported geometry".into())
         })
     }
 

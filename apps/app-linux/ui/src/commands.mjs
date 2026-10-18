@@ -6,11 +6,11 @@
 // source of truth). Until that answer arrives the catalog is empty, so every
 // command is explicitly unsupported — never "everything allowed by default".
 //
-// On top of the router's vocabulary the chrome keeps an explicit **exclusion**
-// list: names the router would accept but this React host cannot service yet
-// (they need a native file-dialog/printer owner the chrome does not have). The
-// exclusion is deliberate and named, not a silent omission — the buttons stay
-// visible but disabled with the existing `command.unsupported` reason.
+// On top of the router's vocabulary the chrome keeps explicit **exclusion**
+// lists: names the router would accept but this React host cannot service yet
+// (native file-dialog/printer owners) and gesture-only names (a click cannot
+// supply a drag payload). The exclusion is deliberate and named, not a silent
+// omission — the buttons stay visible but disabled with the real reason.
 
 /** Normalize typed input the same way the host does (trim + upper-case). */
 export function normalizeCommandText(text) {
@@ -50,6 +50,16 @@ export const HOST_EXCLUDED_COMMANDS = Object.freeze([
   'NEW', 'SAVE', 'SAVEAS', 'QSAVE', 'PLOT', 'EXPORT', 'PRINT',
 ]);
 
+/**
+ * Commands the Rust router accepts but a **click cannot perform** because they
+ * are canvas drag gestures: `ORBIT` is the 3D primary drag, and its `yaw`/
+ * `pitch` come from pointer motion, not from a button payload. Inventing an
+ * orbit here would fabricate a camera move, so the affordance stays visible but
+ * disabled with a gesture reason that tells the user how to orbit. This is an
+ * explicit disable, never a local enable.
+ */
+export const GESTURE_ONLY_COMMANDS = Object.freeze(['ORBIT']);
+
 /** The names kept disabled on top of the host vocabulary (for tests/UI copy). */
 export function excludedCommandNames() {
   return [...HOST_EXCLUDED_COMMANDS];
@@ -57,8 +67,20 @@ export function excludedCommandNames() {
 
 export function isSupportedCommand(id) {
   const name = normalizeCommandText(id);
-  if (!name || HOST_EXCLUDED_COMMANDS.includes(name)) return false;
+  if (!name || HOST_EXCLUDED_COMMANDS.includes(name) || GESTURE_ONLY_COMMANDS.includes(name)) return false;
   return loadedCatalog.includes(name);
+}
+
+/**
+ * The catalog key for why `id` is unavailable in this chrome: the real gesture
+ * hint for a drag-only command (`ORBIT`), otherwise the generic unsupported
+ * reason. It keeps the refusal explicit instead of telling the user a command
+ * "is not supported" when the real answer is "drag on the canvas".
+ */
+export function unavailableReasonKey(id) {
+  return GESTURE_ONLY_COMMANDS.includes(normalizeCommandText(id))
+    ? 'view.orbit.gesture'
+    : 'command.unsupported';
 }
 
 /**
@@ -118,9 +140,10 @@ export const COMMAND_CATALOG = Object.freeze([
   { id: 'SCALE', labelKey: 'draw.kind.scale', icon: 'scale', group: 'modify' },
   { id: 'MIRROR', labelKey: 'draw.kind.mirror', icon: 'mirror', group: 'modify' },
   { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', group: 'modify' },
+  { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', group: 'modify' },
   { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', group: 'measure' },
-  { id: 'PLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },
-  { id: 'ANGLE', labelKey: 'measure.kind.angle', icon: 'angle', group: 'measure' },
+  { id: 'MEASUREPOLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },
+  { id: 'MEASUREANGLE', labelKey: 'measure.kind.angle', icon: 'angle', group: 'measure' },
   { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', group: 'measure' },
   { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', group: 'annotate' },
   { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', group: 'annotate' },

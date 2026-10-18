@@ -67,6 +67,7 @@ export const RIBBON_TABS = Object.freeze([
         titleKey: 'ribbon.panel.modify',
         items: [
           { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', command: 'TRIM', large: true },
+          { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', command: 'ERASE' },
           { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', command: 'EXTEND' },
           { id: 'MIRROR', labelKey: 'draw.kind.mirror', command: 'MIRROR', icon: 'mirror' },
           { id: 'SCALE', labelKey: 'draw.kind.scale', command: 'SCALE', icon: 'scale' },
@@ -122,6 +123,7 @@ export const RIBBON_TABS = Object.freeze([
         titleKey: 'ribbon.panel.modify',
         launcher: true,
         items: [
+          { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', command: 'ERASE' },
           { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', command: 'MOVE' },
           { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', command: 'COPY' },
           { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', command: 'TRIM' },
@@ -143,8 +145,8 @@ export const RIBBON_TABS = Object.freeze([
         launcher: true,
         items: [
           { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', command: 'DIST', large: true },
-          { id: 'PLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', command: 'PLINE', large: true },
-          { id: 'ANGLE', labelKey: 'measure.kind.angle', icon: 'angle', command: 'ANGLE', large: true },
+          { id: 'PLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', command: 'MEASUREPOLYLINE', large: true },
+          { id: 'ANGLE', labelKey: 'measure.kind.angle', icon: 'angle', command: 'MEASUREANGLE', large: true },
           { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', command: 'AREA', large: true },
         ],
       },

@@ -54,7 +54,29 @@ impl HostCore {
         // `FLAG_HIDDEN` first (backlog G2/G5), and wiring it early would leave
         // hidden entities still pickable and occluding instead of openly
         // unsupported (rule 2).
-        let hovered = self.hover.hovered.borrow().clone();
+        //
+        // Capture-candidate tint (TRIM/EXTEND). A drawing capture owns the
+        // pointer, so idle hover is suppressed for its whole duration and the
+        // entity under the cursor is published on `DrawPreview::candidate`
+        // instead. Feed that candidate through the **existing** `hovered`
+        // input / `FLAG_HOVERED` tint rather than adding a second flag, overlay
+        // input or colour: `hovered` already means "the entity under the
+        // pointer", the two producers can never compete (idle hover is cleared
+        // for the capture), and a distinct candidate colour would be a renderer
+        // change, not a host one.
+        //
+        // While a pending entity-pick step owns the capture, the candidate is
+        // the *only* hovered ref — and an empty set when the cursor is over
+        // nothing — so a ref from the previous step or cursor position can never
+        // leak through. Any other active capture also forces the set empty, so
+        // an idle hover can never become a second producer.
+        let hovered = match &preview {
+            Some(preview) if preview.kind.needs_picked_entities() => {
+                cad_app::SelectionSet::from_refs(preview.candidate.iter().cloned())
+            }
+            Some(_) => cad_app::SelectionSet::new(),
+            None => self.hover.hovered.borrow().clone(),
+        };
         let overlays = OverlayInputs {
             selection,
             hovered,

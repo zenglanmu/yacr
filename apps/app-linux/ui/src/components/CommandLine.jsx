@@ -6,7 +6,7 @@ import { Icon } from '../icons.jsx';
 import { Button, IconButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { handleCommandKey } from '../cad.mjs';
-import { defaultSuggestionIndex, filterCommandSuggestions, historyText, stepHistoryCursor } from '../commands.mjs';
+import { defaultSuggestionIndex, filterCommandSuggestions, historyText, stepHistoryCursor, unavailableReasonKey } from '../commands.mjs';
 
 export function CommandLine() {
   const { t } = useI18n();
@@ -120,7 +120,7 @@ export function CommandLine() {
               onMouseEnter={() => setHighlight(index)}
               onMouseDown={event => event.preventDefault()}
               onClick={() => { shell.setCommand(suggestion.id); inputRef.current?.focus(); }}
-              title={suggestion.supported ? undefined : t('command.unsupported', { command: suggestion.id })}
+              title={suggestion.supported ? undefined : t(unavailableReasonKey(suggestion.id), { command: suggestion.id })}
             >
               <Icon name={suggestion.icon} size={15} />
               <span className="completion__id">{suggestion.id}</span>

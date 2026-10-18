@@ -8,6 +8,7 @@ use super::databases::{p, snap_target_build_count};
 use super::*;
 
 mod document;
+mod draw_pick;
 mod snap;
 mod status;
 mod toggles;

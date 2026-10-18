@@ -79,6 +79,28 @@ command_selector_contract! {
 /// entities (`fixtures/manifest`). It is not a vendor sample.
 const SYNTHETIC_DWG: &[u8] = include_bytes!("../../../../../fixtures/dwg/synthetic-four-lines.dwg");
 
+/// Queue one synthetic-DWG `Opened` event through the fake file source.
+fn import_synthetic(files: &Rc<FakeFiles>, name: &str) {
+    files.events.borrow_mut().push(FileEvent::Opened {
+        target: FileTarget::from_path(name),
+        bytes: Arc::from(SYNTHETIC_DWG.to_vec().into_boxed_slice()),
+    });
+}
+
+/// The render session's observed incoming database pointer: the discriminator
+/// component that changed on **every** authoritative publish (an edit commit
+/// swaps the drawing `Arc` and the host re-syncs it each tick). Used by tests to
+/// prove a non-import publish cannot move the import count.
+fn incoming_ptr(session: &CadSession) -> Option<usize> {
+    session
+        .core
+        .render
+        .incoming_document()
+        .borrow()
+        .as_ref()
+        .map(|database| Arc::as_ptr(database) as usize)
+}
+
 #[test]
 fn command_normalization_covers_every_variant() {
     assert_eq!(normalize_command(" open "), Some(CommandId::OpenDrawing));
@@ -371,6 +393,44 @@ fn object_snap_selector_toggles_the_projected_session_flag_only() {
 }
 
 #[test]
+fn reserved_drawing_names_are_not_measurement_selectors() {
+    // `SNAP` must stay absent (grid snap ≠ object snap). The same footgun class
+    // applies to the measurement vocabulary:
+    //  - `PLINE` is the planned P3 polyline **draw** command, so binding it to a
+    //    polyline-length measurement now would make P3 break a shipped selector;
+    //  - `ANGLE` is not an AutoCAD command at all (the real ones are
+    //    `DIMANGULAR`/`MEASUREGEOM`), so it must not shadow anything either.
+    // The explicit project selectors are `MEASUREPOLYLINE` / `MEASUREANGLE`.
+    for reserved in ["SNAP", "PLINE", "ANGLE"] {
+        assert_eq!(
+            canonical_command_name(reserved),
+            None,
+            "{reserved} must not be admitted"
+        );
+        assert_eq!(normalize_command(reserved), None, "{reserved}");
+        assert!(
+            !admissible_names().contains(&reserved),
+            "{reserved} must not appear in the advertised vocabulary"
+        );
+    }
+    // A reserved name is refused before the host, leaving the tool untouched.
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    assert!(session.command("PLINE").is_err());
+    assert!(session.command("ANGLE").is_err());
+    assert_eq!(session.snapshot(None, None, 0).tool, None);
+    // The explicit selectors are the ones that actually start the kinds.
+    for selector in ["MEASUREPOLYLINE", "MEASUREANGLE"] {
+        assert!(
+            admissible_names().contains(&selector),
+            "{selector} must be advertised"
+        );
+        assert_eq!(canonical_command_name(selector), Some(selector));
+    }
+}
+
+#[test]
 fn import_progress_projects_only_a_live_import_and_never_invents_counts() {
     // A pre-tick running snapshot: no phase, no totals, no bytes — the UI
     // must render indeterminate rather than a fabricated 0/0.
@@ -487,6 +547,197 @@ fn successful_synthetic_import_counts_once_and_reports_real_entities() {
     move_input.sequence = 2;
     session.handle_input(&move_input).unwrap();
     assert_eq!(session.snapshot(None, None, 0).import_count, 1);
+}
+
+#[test]
+fn the_same_file_imported_twice_counts_twice() {
+    let files = Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    });
+    let session = session(files.clone());
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    session.command("OPEN").expect("OPEN is admitted");
+    session.tick().expect("tick");
+    assert_eq!(session.snapshot(None, None, 0).import_count, 1);
+
+    // The exact same file again is a second authoritative import transition: the
+    // host replaced the drawing (fresh generation) even though the identity is
+    // byte-identical, so the counter advances once more.
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    session.command("OPEN").expect("OPEN is admitted");
+    session.tick().expect("tick");
+    assert_eq!(
+        session.snapshot(None, None, 0).import_count,
+        2,
+        "a second successful import counts again even for the same file"
+    );
+}
+
+#[test]
+fn successful_erase_commit_does_not_increment_the_import_count() {
+    let files = Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    });
+    let session = session(files.clone());
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    session.command("OPEN").expect("OPEN is admitted");
+    session.tick().expect("tick");
+    assert_eq!(
+        session.snapshot(None, None, 0).import_count,
+        1,
+        "the import"
+    );
+
+    // Select exactly one entity and erase it: a real edit commit, no import.
+    let reference = {
+        let c = session.core.controller.borrow();
+        let drawing = c.drawing().expect("the imported document");
+        let entity = drawing.model_space().first().expect("an entity").id;
+        cad_app::selection::model_ref(c.document_id, entity)
+    };
+    let incoming_before = incoming_ptr(&session);
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .session
+        .selection
+        .replace([reference]);
+    session.command("ERASE").expect("ERASE is admitted");
+    // The host re-syncs the replaced drawing on the next tick, exactly like the
+    // real GPU host: the render session's incoming database pointer changes.
+    session.tick().expect("tick");
+    let incoming_after = incoming_ptr(&session);
+    assert_ne!(
+        incoming_before, incoming_after,
+        "an edit commit must have replaced the render incoming database (the defect's trigger)"
+    );
+    assert_eq!(
+        session.snapshot(None, None, 0).import_count,
+        1,
+        "a successful edit must not move the import count"
+    );
+}
+
+#[test]
+fn refused_edit_does_not_increment_the_import_count() {
+    let files = Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    });
+    let session = session(files.clone());
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    session.command("OPEN").expect("OPEN is admitted");
+    session.tick().expect("tick");
+    assert_eq!(session.snapshot(None, None, 0).import_count, 1);
+
+    // ERASE with an empty selection is an explicit refusal that changes nothing.
+    let error = session
+        .command("ERASE")
+        .expect_err("an empty ERASE is refused");
+    assert!(error.contains("non-empty selection"), "{error}");
+    session.tick().expect("tick");
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(
+        status.import_count, 1,
+        "a refused edit must not move the import count"
+    );
+    assert!(status.error.is_some(), "the refusal stays a real error");
+}
+
+#[test]
+fn new_blank_document_does_not_increment_through_the_import_path() {
+    let files = Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    });
+    let session = session(files.clone());
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    session.command("OPEN").expect("OPEN is admitted");
+    session.tick().expect("tick");
+    assert_eq!(session.snapshot(None, None, 0).import_count, 1);
+
+    session.command("NEW").expect("NEW is admitted");
+    session.tick().expect("tick");
+    assert_eq!(
+        session.snapshot(None, None, 0).import_count,
+        1,
+        "a new/blank document is not an import"
+    );
+    // The blank document cleared the report, so a later genuine import counts.
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    session.command("OPEN").expect("OPEN is admitted");
+    session.tick().expect("tick");
+    assert_eq!(
+        session.snapshot(None, None, 0).import_count,
+        2,
+        "a genuine import after NEW counts again"
+    );
+}
+
+#[test]
+fn a_changed_render_incoming_alone_does_not_recount() {
+    // Pins the exact defect: identical `(document generation, import identity)`
+    // with a *different* render incoming database pointer must not count. The
+    // pointer changes on every authoritative publish (the host re-syncs the
+    // drawing each tick and an edit commit swaps the `Arc`), so keying the import
+    // discriminator on it made any edit produce a fresh key and a false
+    // increment.
+    let files = Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    });
+    let session = session(files.clone());
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    session.command("OPEN").expect("OPEN is admitted");
+    session.tick().expect("tick");
+    let generation = session.core.request_context().document_generation;
+    let identity = session
+        .core
+        .controller
+        .borrow()
+        .last_import_report
+        .as_ref()
+        .map(|report| report.identity.clone())
+        .expect("a successful import left a report");
+    let before = incoming_ptr(&session).expect("the render observed the drawing");
+
+    // Swap the render incoming database for a distinct allocation while the
+    // generation and identity stay put: exactly what an edit commit + tick does.
+    let fresh = {
+        let current = session
+            .core
+            .render
+            .incoming_document()
+            .borrow()
+            .clone()
+            .expect("incoming");
+        Arc::new((*current).clone())
+    };
+    session.core.render.sync_drawing(Some(fresh));
+    assert_ne!(
+        incoming_ptr(&session),
+        Some(before),
+        "the incoming pointer must have changed"
+    );
+    assert_eq!(
+        session.core.request_context().document_generation,
+        generation,
+        "the generation is unchanged (no import transition)"
+    );
+    assert_eq!(
+        session
+            .core
+            .controller
+            .borrow()
+            .last_import_report
+            .as_ref()
+            .map(|report| report.identity.clone()),
+        Some(identity),
+        "the import identity is unchanged"
+    );
+    assert_eq!(
+        session.snapshot(None, None, 0).import_count,
+        1,
+        "a changed render incoming alone must not move the import count"
+    );
 }
 
 #[test]
@@ -626,13 +877,27 @@ fn startup_diagnostics_accessor_is_exposed() {
 }
 
 #[test]
-fn admissible_names_cover_the_table_plus_aliases_exactly_once() {
+fn admissible_names_cover_the_vocabulary_exactly_once() {
     let names = admissible_names();
-    // Every canonical selector is advertised.
+    // Every canonical `CommandId` selector is advertised.
     for (canonical, _) in COMMAND_TABLE {
         assert!(
             names.contains(canonical),
             "{canonical} missing from the admissible list"
+        );
+    }
+    // Every interaction-only selector (measurement kinds + zoom steps) is
+    // advertised, so the frontend enables them without a second list.
+    for (selector, _) in MEASUREMENT_SELECTORS {
+        assert!(
+            names.contains(selector),
+            "{selector} missing from the admissible list"
+        );
+    }
+    for (selector, _) in ZOOM_STEP_SELECTORS {
+        assert!(
+            names.contains(selector),
+            "{selector} missing from the admissible list"
         );
     }
     // Every alias is advertised (an alias is a name the host admits).

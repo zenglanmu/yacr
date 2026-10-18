@@ -14,6 +14,7 @@ import { Icon } from '../icons.jsx';
 import { IconButton, RibbonButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
+import { unavailableReasonKey } from '../commands.mjs';
 
 function runItem(shell, item) {
   if (item.action) return shell.runAction(item.action);
@@ -22,7 +23,7 @@ function runItem(shell, item) {
 }
 
 function unavailable(t, item) {
-  return t('ribbon.command_unsupported', { command: t(item.labelKey) });
+  return t(unavailableReasonKey(item.command), { command: t(item.labelKey) });
 }
 
 function ItemButton({ item }) {
