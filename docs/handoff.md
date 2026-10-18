@@ -12,6 +12,52 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## React 宿主工具接线：命令准入单源 + 交互工具真正可用（2026-10-18）
+
+**范围**：`crates/cad-ui-core`（session 命令路由、捕捉点、`CadStatus.tool`、`admissible_names`）、
+`crates/cad-host`（`HostCore::tool_snapshot`）、`apps/app-linux`（`cad_commands` IPC、
+`YACR_PROBE_TOOL_EVIDENCE` 证据驱动）、`apps/app-linux/ui`（准入目录、Enter/Esc、状态栏工具 chip）、
+i18n `tool.*` 18 键、`docs/react-linux-app.md`、`docs/adr/0014-object-snap-and-box-selection.md`。
+**未**改 acadrust、wgpu、`Cargo.lock`、架构边界。
+
+- **问题（勘察纠正）**：React 宿主准入表硬编码 `OPEN`/`FIT`（`ui/src/commands.mjs`），且
+  `InteractionRequest::BeginDraw`/`BeginMeasurement`/`Confirm`/`Cancel` **没有任何 IPC 入口**；
+  `plan_input` 的单击恒为 `SelectAt`。⇒ 绘制/编辑/测量只在命令层测试里存在，GUI 里点不到。
+- **修复**：`CadSession::command` 把 `LINE`/`CIRCLE`/`ARC`/`MOVE`/`COPY`/`ROTATE`/`SCALE`/`MIRROR`/
+  `OFFSET`/`TRIM`/`EXTEND` 路由到 `InteractionRequest::BeginDraw(<kind>)`、`MEASURE` 到
+  `BeginMeasurement(Distance)`、`CONFIRM`/`CANCEL` 到 `Confirm`/`Cancel`；`plan_input(press, input,
+  revision, capturing)` 在捕获中把单击发成 `CapturePoint`（不再 `SelectAt`）；新增 `cad_commands`
+  把 `admissible_names()`（`COMMAND_TABLE` + 别名）交给前端，React **不再**手写白名单（宿主未应答前
+  目录为空 ⇒ 全部显式 unsupported）。
+- **交互语义**：工具激活后 `Enter`=CONFIRM、`Esc`=CANCEL（**仅在无 draw/measure 捕获时**才把
+  `CANCEL` 转发给宿主 open-cancel）；`CadStatus.tool = {key, points, ready}` 投影真实工具状态，
+  状态栏显示工具名与已取点数。绘制工具**不会**自动提交（`capture_point` 对 `Drawing` 恒返回 `false`），
+  提交必须显式 `CONFIRM`；测量工具按自身 `auto_ready` 自动提交。
+- **证据（真实硬件 GPU，本机 X11）**：`YACR_PROBE_TOOL_EVIDENCE=1 scripts/collect-evidence.sh
+  --backend x11 --no-build --capture-at 22`，夹具 `fixtures/dwg/synthetic-four-lines.dwg`
+  （**未使用 `complex-test.dwg`**）：`clicks=2 before_count=4 after_count=5 delta=1
+  before_tool=- after_tool=- start_ack=accepted=true confirm_ack=accepted=true`，
+  `adapter=Quadro P620 (vulkan)`、`present_mode=Immediate`、`verdict=NATURAL_EXIT exit=0
+  screenshot=captured`；证据目录 `/tmp/opencode/yacr-p0-tool2-20261018T105219Z/`
+  （输入为**合成 DOM 事件，非真实鼠标**）。
+- **门禁**：`cargo fmt --check`、`cargo clippy --workspace --exclude app-android --exclude app-web
+  --all-targets --locked -- -D warnings`、`cargo check --workspace --all-targets --locked`、
+  wasm `--lib` 目标、`check-architecture.py`（27 包）、`check-i18n.py`（422 键/2 catalogs）、
+  `check-fixture-manifest.py`、`check-workflows.py`、UI `npm test`（70/70）、`npm run build` 全绿。
+  受影响 crate 测试：`cad-ui-core` 101、`cad-host` 102（1 ignored：真实 DWG 性能基线）。
+- **NOT RUN（不得当作已通过）**：全量 `cargo test --workspace` 因 harness 超时**未完成**；
+  原生 Wayland 后端本轮**未跑**（只跑 X11）；**无** vendor/精度/性能/跨平台结论。
+- **仍然未接线**：drafting 开关（`GRID`/`SNAP`/`ORTHO`/`OSNAP`）、图层/特性面板、
+  `ZOOMIN`/`ZOOMOUT` 别名、测量子类型（`DIST`/`PLINE`/`ANGLE`/`AREA`）、`NEW`/`SAVE`/`PLOT`（React 侧
+  显式排除）、窗口/交叉框选与对象捕捉获取（设计见 ADR-0014，待实施）。
+- **已记录的后续项（Gate P0 评审，均非阻塞）**：① 把 `CommandId → 工具` 路由表下沉到 `cad-app`
+  （`SessionState::begin_draw` 已有反向映射），避免在测量子类型落地前出现第二套词汇表；
+  ② `tick` 先排空全部命令再排空全部输入，同 tick 内"先点击后 LINE"会被判为取点——P1 拖拽分类前需固化该顺序；
+  ③ `submit_interactions` 局部接纳失败时可能留下过期 press（既有行为，现无注释）；
+  ④ 为 `CANCEL` 仲裁补一个**有区分度**的会话级测试（需要一个可观察的 `dispatch_command` seam；
+  现有测试只能证明决策函数与 idle-safe，**不能**抓到"改回提交后采样"的回归）；
+  ⑤ 证据驱动可加中途 `tool.key` 断言，使 `entityCount` 增量严格归因于工具路径。
+
 ## 每 chunk rstar 最终落地（调优 + 粗网格之上）（2026-10-18；commit `7031404`）
 
 **范围**：`crates/cad-spatial`（`chunk.rs` 每 chunk `RTree` + 节点尺寸参数 `PickTreeParams`；新

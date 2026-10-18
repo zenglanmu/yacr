@@ -47,7 +47,9 @@ mod tick;
 mod tests;
 
 // Public host API (unchanged external surface; `crate::host::…` still resolves).
-pub use commands::{cad_command, cad_status, probe_input, probe_status, CadCommandAck};
+pub use commands::{
+    cad_command, cad_commands, cad_status, probe_input, probe_status, CadCommandAck,
+};
 pub use init::init;
 pub use options::{
     LaunchOptions, ANIMATION_STEP, FRAME_INTERVAL, INITIAL_HEIGHT, INITIAL_WIDTH, WEBVIEW_LABEL,
@@ -60,9 +62,10 @@ pub(crate) use postload::resolve_process_exit;
 // re-export them alongside the command functions so `generate_handler!` (which
 // resolves them at `crate::host::…`) keeps working after the split.
 pub(crate) use commands::{
-    __cmd__cad_command, __cmd__cad_status, __cmd__probe_input, __cmd__probe_status,
-    __tauri_command_name_cad_command, __tauri_command_name_cad_status,
-    __tauri_command_name_probe_input, __tauri_command_name_probe_status,
+    __cmd__cad_command, __cmd__cad_commands, __cmd__cad_status, __cmd__probe_input,
+    __cmd__probe_status, __tauri_command_name_cad_command, __tauri_command_name_cad_commands,
+    __tauri_command_name_cad_status, __tauri_command_name_probe_input,
+    __tauri_command_name_probe_status,
 };
 pub use presenter::{
     close_presenter, force_realize, force_unrealize, release_presenter, request_stop,

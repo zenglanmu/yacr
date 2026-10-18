@@ -98,3 +98,19 @@ pub fn normalize_command(text: &str) -> Option<CommandId> {
 pub fn unsupported_command_reason(text: &str) -> String {
     format!("unsupported CAD command: {}", text.trim())
 }
+
+/// Every name the host admits, for a frontend that must disable what cannot run
+/// instead of keeping a hand-written mirror that drifts.
+///
+/// Canonical selectors come first, then every alias that is not already
+/// canonical. Order is stable, so a frontend may sort it for display without
+/// losing the canonical-first grouping.
+pub fn admissible_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = COMMAND_TABLE.iter().map(|(name, _)| *name).collect();
+    for (alias, _) in COMMAND_ALIASES {
+        if !names.contains(alias) {
+            names.push(alias);
+        }
+    }
+    names
+}

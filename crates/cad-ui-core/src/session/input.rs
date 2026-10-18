@@ -2,7 +2,9 @@
 //!
 //! Pure decision code: it maps the wire protocol onto the typed engine
 //! interaction requests and owns the click/gesture classification, so the
-//! session only applies the outcome.
+//! session only applies the outcome. A click inside a draw/measurement capture
+//! is a point capture; `Enter` confirms and `Esc` cancels through the command
+//! funnel.
 
 use cad_app::input::DRAG_THRESHOLD_LOGICAL_PX;
 use cad_app::interaction::{
@@ -100,6 +102,34 @@ fn pointer_request(
     })
 }
 
+/// What a `CANCEL` selector means, given whether a draw/measure capture owns
+/// input right now.
+///
+/// `CANCEL` is two affordances behind one selector: it ends an active tool, and
+/// it is the host-owned import/open cancel. A capture must win, otherwise an
+/// `Esc` inside a tool would also abort an unrelated in-flight import.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CancelTarget {
+    /// A capture owns input: cancel the tool and stop there.
+    Tool,
+    /// No capture: cancel the tool (idle-safe) *and* forward the host cancel.
+    ToolAndHost,
+}
+
+/// Resolve [`CancelTarget`] from the capture state **sampled before the cancel
+/// request is submitted**.
+///
+/// Ordering matters: submitting the typed cancel resets the tool to `Idle`
+/// through the host, so sampling afterwards would always report "no capture"
+/// and forward the host cancel unconditionally.
+pub(super) fn cancel_target(capturing: bool) -> CancelTarget {
+    if capturing {
+        CancelTarget::Tool
+    } else {
+        CancelTarget::ToolAndHost
+    }
+}
+
 /// Classify one DOM input against the retained press state.
 ///
 /// Pure: it returns the request(s) to admit, in order, plus the press state that
@@ -111,9 +141,12 @@ fn pointer_request(
 ///   no button change on a move), and marks a press as dragged once the pointer
 ///   leaves the drag-threshold disc around the press position;
 /// * `pointer_up` of the same primary button without an intervening drag is a
-///   click: it emits the ordinary release **and** a
-///   [`InteractionRequest::SelectAt`] replace-selection at the release position;
-/// * `pointer_cancel`/`blur` end any press without selecting;
+///   click: it emits the ordinary release **and** a typed point at the release
+///   position — [`InteractionRequest::CapturePoint`] while a draw/measurement
+///   capture owns the pointer (`capturing`), otherwise
+///   [`InteractionRequest::SelectAt`] replace-selection. Never both;
+/// * a drag or a non-primary button never captures a point and never selects;
+/// * `pointer_cancel`/`blur` end any press without capturing or selecting;
 /// * `pointer_leave` clears the cursor overlay (the same
 ///   [`InteractionRequest::ClearCursor`] the existing clear path uses) without
 ///   ending or disturbing any press — it is transient and non-terminal, so a
@@ -124,6 +157,7 @@ pub(super) fn plan_input(
     press: Option<PointerPress>,
     input: &ProbeInput,
     revision: u64,
+    capturing: bool,
 ) -> Result<(Vec<InteractionRequest>, Option<PointerPress>), String> {
     match input.kind {
         InputKind::PointerDown => {
@@ -191,13 +225,19 @@ pub(super) fn plan_input(
                 Some(button),
             )?];
             if click {
-                // A click replaces the selection at the release position, tagged
-                // with the **current** metrics revision: a revision the host no
-                // longer has is its explicit refusal, never a fabricated pass.
-                requests.push(InteractionRequest::SelectAt {
-                    point: canvas_point(input, revision, true)?,
-                    mode: SelectionMode::Replace,
-                });
+                // The click is either a point capture (a tool owns the pointer)
+                // or a replace-selection, never both. Both carry the **current**
+                // metrics revision: a revision the host no longer has is its
+                // explicit refusal, never a fabricated pass.
+                let point = canvas_point(input, revision, true)?;
+                if capturing {
+                    requests.push(InteractionRequest::CapturePoint(point));
+                } else {
+                    requests.push(InteractionRequest::SelectAt {
+                        point,
+                        mode: SelectionMode::Replace,
+                    });
+                }
             }
             Ok((requests, None))
         }

@@ -4,7 +4,7 @@
 import React from 'react';
 import { Icon } from '../icons.jsx';
 import { useI18n, useShell } from '../context.mjs';
-import { commandById } from '../commands.mjs';
+import { commandById, toolLabelKey } from '../commands.mjs';
 import { importProgressView } from '../cad.mjs';
 
 const DRAFTING = ['GRID', 'SNAP', 'ORTHO', 'OSNAP'];
@@ -30,6 +30,12 @@ export function StatusBar() {
   const cursor = shell.cursor;
   const coordinate = cursor ? `${cursor.x.toFixed(0)}, ${cursor.y.toFixed(0)}` : '\u2014, \u2014';
   const progress = importProgressView(shell.importProgress, t);
+  // The interactive tool the host reports as active (`status.tool`:
+  // `{key, points, ready} | null`). A missing/null block means no tool, so
+  // nothing extra is rendered — never a placeholder chip.
+  const tool = shell.status?.tool ?? null;
+  const toolNameKey = tool ? toolLabelKey(tool.key) : null;
+  const toolPoints = tool && Number.isSafeInteger(tool.points) ? tool.points : 0;
   // Announce only the phase here (rare changes); the steadily-incrementing
   // count/bytes stay in the document-tab bar, so a polite live region never
   // chatters on every tick.
@@ -50,6 +56,17 @@ export function StatusBar() {
       </output>
 
       <span className="statusbar__state" aria-live="polite">{stateLabel}</span>
+
+      {tool && toolNameKey ? (
+        <span
+          className="statusbar__tool"
+          title={`${t('tool.prompt.confirm')} (Enter) \u00b7 ${t('tool.prompt.cancel')} (Esc)`}
+        >
+          <Icon name="snap" size={13} />
+          {t(toolNameKey)}
+          <span className="mono">{t('tool.points', { count: toolPoints })}</span>
+        </span>
+      ) : null}
 
       <div className="statusbar__group" role="group" aria-label={t('status.drafting')}>
         {DRAFTING.map(id => {

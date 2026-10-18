@@ -9,3 +9,4 @@ mod test_support;
 mod tests_commands;
 mod tests_hover;
 mod tests_input;
+mod tests_tools;

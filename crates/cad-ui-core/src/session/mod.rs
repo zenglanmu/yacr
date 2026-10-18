@@ -31,7 +31,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use cad_app::input::CanvasMetrics;
-use cad_app::CommandPayload;
+use cad_app::{CommandPayload, DrawToolKind, MeasurementToolKind, ToolSnapshot};
 use cad_domain::{CadResult, DocumentIdentity};
 use cad_engine::protocol::{EngineClient, EngineRequest, RequestError, RequestId, StatusMessage};
 use cad_engine::render::RenderSessionHandle;
@@ -51,15 +51,16 @@ use self::diagnostics::{
     cad_error_text, camera_status, request_error_text, resource_diagnostic_text,
     resource_keys_error, status_error,
 };
-use self::input::{plan_input, PointerPress};
-use self::status::assemble_status;
+use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
+use self::status::{assemble_status, cad_tool};
 
 pub use self::commands::{
-    canonical_command_name, normalize_command, unsupported_command_reason, COMMAND_ALIASES,
-    COMMAND_TABLE,
+    admissible_names, canonical_command_name, normalize_command, unsupported_command_reason,
+    COMMAND_ALIASES, COMMAND_TABLE,
 };
 pub use self::status::{
     unsupported_status, CadCamera, CadImportProgress, CadSelection, CadSelectionRow, CadStatus,
+    CadTool,
 };
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this
@@ -170,20 +171,89 @@ impl CadSession {
 
     /// Run one named CAD command through the host funnel.
     ///
-    /// The full [`CommandId`] vocabulary is mapped by [`normalize_command`];
-    /// every mapped command is dispatched as `core.command(CommandId,
-    /// CommandPayload::None)`. A name that maps to no command is refused
-    /// **before** the host is touched, with a stable reason, so an unsupported
-    /// command changes nothing and is never a silent no-op.
+    /// The full [`CommandId`] vocabulary is mapped by [`normalize_command`].
+    /// The interactive tool commands are routed through the typed
+    /// [`InteractionRequest`] path so the real host capture starts:
+    ///
+    /// | selector | request |
+    /// | --- | --- |
+    /// | `LINE`..`EXTEND` | `BeginDraw(<kind>)` |
+    /// | `MEASURE` | `BeginMeasurement(Distance)` |
+    /// | `CONFIRM` | `Confirm` |
+    /// | `CANCEL` | `Cancel` |
+    ///
+    /// `CANCEL` keeps the host-owned open-cancel behaviour (the same selector is
+    /// the import-cancel affordance): it always submits the typed cancel, and
+    /// forwards the ordinary command **only when no draw/measurement capture was
+    /// active when the cancel was submitted** (see [`cancel_target`]) — an `Esc`
+    /// that ended a tool must not also abort an unrelated in-flight import.
+    ///
+    /// Every other mapped command is dispatched as `core.command(CommandId,
+    /// CommandPayload::None)`, exactly as before. A name that maps to no command
+    /// is refused **before** the host is touched, with a stable reason, so an
+    /// unsupported command changes nothing and is never a silent no-op.
     ///
     /// A command whose variant requires a payload (for example `CreateLine` or
     /// `StandardView`) is still dispatched through the same funnel; the
     /// application/host layer then refuses it explicitly rather than fabricating
-    /// a success.
+    /// a success. Selection-requiring tools are **not** pre-rejected here:
+    /// `cad_app` refuses them at confirm (`DrawTool::is_ready`), the single
+    /// authority for that decision.
     pub fn command(&self, text: &str) -> Result<(), String> {
         let Some(id) = normalize_command(text) else {
             return Err(unsupported_command_reason(text));
         };
+        let interaction = match id {
+            CommandId::CreateLine => Some(InteractionRequest::BeginDraw(DrawToolKind::Line)),
+            CommandId::CreateCircle => Some(InteractionRequest::BeginDraw(DrawToolKind::Circle)),
+            CommandId::CreateArc => Some(InteractionRequest::BeginDraw(DrawToolKind::Arc)),
+            CommandId::MoveEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Move)),
+            CommandId::CopyEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Copy)),
+            CommandId::RotateEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Rotate)),
+            CommandId::ScaleEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Scale)),
+            CommandId::MirrorEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Mirror)),
+            CommandId::OffsetEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Offset)),
+            CommandId::TrimEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Trim)),
+            CommandId::ExtendEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Extend)),
+            CommandId::Measure => Some(InteractionRequest::BeginMeasurement(
+                MeasurementToolKind::Distance,
+            )),
+            CommandId::ConfirmMeasurement => Some(InteractionRequest::Confirm),
+            CommandId::CancelLoading => Some(InteractionRequest::Cancel),
+            _ => None,
+        };
+        match interaction {
+            Some(request) => {
+                // Sample the capture state **before** the request is submitted:
+                // the typed cancel resets the tool, so a post-submit sample
+                // would always read "no capture" and forward the host cancel
+                // unconditionally (including when an Esc only meant to end a
+                // tool while an unrelated import was running).
+                let was_capturing = self.capturing();
+                self.submit_interactions(vec![request])?;
+                match (id, cancel_target(was_capturing)) {
+                    // `CANCEL` is also the host-owned open-cancel selector; only
+                    // forward it when no draw/measurement capture consumed it.
+                    (CommandId::CancelLoading, CancelTarget::ToolAndHost) => {
+                        self.dispatch_command(id)
+                    }
+                    _ => Ok(()),
+                }
+            }
+            None => self.dispatch_command(id),
+        }
+    }
+
+    /// Whether a draw/measurement capture currently owns pointer input.
+    fn capturing(&self) -> bool {
+        matches!(
+            self.core.tool_snapshot(),
+            ToolSnapshot::Drawing(_) | ToolSnapshot::Measuring(_)
+        )
+    }
+
+    /// Dispatch one non-interactive command through the ordinary host funnel.
+    fn dispatch_command(&self, id: CommandId) -> Result<(), String> {
         match self.core.command(id, CommandPayload::None) {
             Ok(()) => {
                 *self.error.borrow_mut() = None;
@@ -205,15 +275,20 @@ impl CadSession {
     /// [`InteractionRequest::Scroll`] with the DOM deltaY sign inverted to the
     /// host's wheel-up-zooms-in convention.
     ///
-    /// A press/release without an intervening drag is a **click**: it emits the
-    /// typed [`InteractionRequest::SelectAt`] (mode
-    /// [`SelectionMode::Replace`]) at the release position, tagged with the
-    /// **current** canvas metrics revision, plus the ordinary release
+    /// A press/release without an intervening drag is a **click**: outside a
+    /// capture it emits the typed [`InteractionRequest::SelectAt`] (mode
+    /// [`SelectionMode::Replace`]) at the release position; inside a draw or
+    /// measurement capture the same click is a typed
+    /// [`InteractionRequest::CapturePoint`] instead. Both are tagged with the
+    /// **current** canvas metrics revision and both follow the ordinary release
     /// [`InteractionRequest::Pointer`] so the host's gesture life is closed. Any
     /// drag beyond [`DRAG_THRESHOLD_LOGICAL_PX`] (or a release of a different
     /// button) keeps the plain pointer mapping, which the host resolves as
-    /// navigation (a primary/middle drag pans in 2D). Box selection is **not**
-    /// implemented: a primary drag still pans.
+    /// navigation (a primary/middle drag pans in 2D); a drag never captures a
+    /// point. Box selection is **not** implemented: a primary drag still pans.
+    ///
+    /// `Enter` (`CONFIRM`) confirms a capture and `Esc`/`CANCEL` cancels it
+    /// through the command funnel; this method only routes the pointer stream.
     ///
     /// The request(s) are admitted through the engine queue (`submit`), the
     /// queue is advanced (`pump`) and its terminal completions are consumed
@@ -228,11 +303,26 @@ impl CadSession {
     /// The actual completion outcome is reflected in [`CadStatus::error`] from
     /// the next [`CadSession::snapshot`].
     pub fn handle_input(&self, input: &ProbeInput) -> Result<(), String> {
+        let capturing = self.capturing();
         let (requests, next_press) = plan_input(
             self.press.borrow().as_ref().copied(),
             input,
             self.metrics_revision(),
+            capturing,
         )?;
+        self.submit_interactions(requests)?;
+        *self.press.borrow_mut() = next_press;
+        Ok(())
+    }
+
+    /// Admit a batch of typed interactions through the single engine path.
+    ///
+    /// Shared by [`CadSession::command`] (tool start/confirm/cancel) and
+    /// [`CadSession::handle_input`] (pointer capture), so queue admission, the
+    /// error funnel, pumping and completion draining exist exactly once. A
+    /// refusal records the technical reason in [`CadSession::error`] and is
+    /// returned; nothing is turned into an empty success.
+    fn submit_interactions(&self, requests: Vec<InteractionRequest>) -> Result<(), String> {
         let context = self.core.request_context();
         for request in requests {
             match self
@@ -241,16 +331,12 @@ impl CadSession {
             {
                 Ok(receipt) => self.track_receipt(receipt.id),
                 Err(error) => {
-                    // The gesture state is deliberately **not** advanced: an
-                    // input the host never admitted must not leave a phantom
-                    // press behind that a later release turns into a selection.
                     let text = request_error_text(&error);
                     *self.error.borrow_mut() = Some(text.clone());
                     return Err(text);
                 }
             }
         }
-        *self.press.borrow_mut() = next_press;
         let pump = self.pump();
         let completed = self.drain_completions();
         pump?;
@@ -351,6 +437,7 @@ impl CadSession {
             selection,
             self.import_count.get(),
             frame_count,
+            cad_tool(&self.core.tool_snapshot()),
         );
         // Real live open progress (running only) from the host snapshot, so the
         // chrome can show a determinate/indeterminate bar without inventing data.

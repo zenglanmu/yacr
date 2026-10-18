@@ -232,6 +232,7 @@ mod tests {
             adapter: Some("P600".into()),
             camera: None,
             selection: CadSelection::empty(),
+            tool: None,
             import_count: 0,
             frame_count: 0,
         }

@@ -5,6 +5,9 @@
 //! already-derived values.
 
 use serde::Serialize;
+
+use cad_app::ToolSnapshot;
+
 /// Camera block of the frontend status (`{center, scale}`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct CadCamera {
@@ -156,6 +159,24 @@ impl CadSelection {
     }
 }
 
+/// The active interactive tool, projected from `cad_app`'s real capture state.
+///
+/// Present only while a draw or measurement capture is active: an idle,
+/// selecting or panning session carries `tool: null`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CadTool {
+    /// Stable machine key: `"draw.line"`..`"draw.offset"`, `"measure.distance"`,
+    /// `"measure.polyline"`, `"measure.angle"`, `"measure.area"`.
+    pub key: String,
+    /// Points captured so far (the real count from the preview).
+    pub points: usize,
+    /// Whether the tool can be confirmed right now, from `cad-app`'s own
+    /// readiness ([`cad_app::DrawPreview::can_confirm`] /
+    /// [`cad_app::MeasurementPreview::can_confirm`]).
+    pub ready: bool,
+}
+
 /// The `cad_status` snapshot consumed by the frontend.
 ///
 /// The field set is the frozen frontend contract: every key is always present,
@@ -181,6 +202,8 @@ pub struct CadStatus {
     pub camera: Option<CadCamera>,
     /// The current selection; always present, never `null`.
     pub selection: CadSelection,
+    /// The active draw/measurement tool, or `null` when no capture is active.
+    pub tool: Option<CadTool>,
     /// Count of verified successful authoritative document transitions caused by
     /// an import. It is **not** a parsed-entity count and must not be read as
     /// proof that no reparse happened.
@@ -206,8 +229,31 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         adapter: None,
         camera: None,
         selection: CadSelection::empty(),
+        tool: None,
         import_count: 0,
         frame_count: 0,
+    }
+}
+
+/// Project the real interactive tool state onto the frozen wire shape.
+///
+/// Idle/selecting/panning map to `None` (no capture is active). A drawing or
+/// measurement capture carries its `cad-app` machine key, the **real** captured
+/// point count and `cad-app`'s own readiness; nothing is inferred from the
+/// pointer stream or fabricated for a tool the state machine does not hold.
+pub(super) fn cad_tool(snapshot: &ToolSnapshot) -> Option<CadTool> {
+    match snapshot {
+        ToolSnapshot::Drawing(preview) => Some(CadTool {
+            key: format!("draw.{}", preview.kind.key()),
+            points: preview.points.len(),
+            ready: preview.can_confirm(),
+        }),
+        ToolSnapshot::Measuring(preview) => Some(CadTool {
+            key: format!("measure.{}", preview.kind.key()),
+            points: preview.points.len(),
+            ready: preview.can_confirm(),
+        }),
+        ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,
     }
 }
 
@@ -230,6 +276,7 @@ pub(super) fn assemble_status(
     selection: CadSelection,
     import_count: u64,
     frame_count: u64,
+    tool: Option<CadTool>,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -243,6 +290,7 @@ pub(super) fn assemble_status(
         adapter,
         camera: if has_document { camera } else { None },
         selection,
+        tool,
         import_count,
         frame_count,
     }

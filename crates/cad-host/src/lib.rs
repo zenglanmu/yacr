@@ -349,6 +349,16 @@ impl HostCore {
         self.last_status.borrow().clone()
     }
 
+    /// Pure read of the session's current interactive tool state.
+    ///
+    /// Exposes the real `cad_app` snapshot (idle/selecting/drawing/measuring/
+    /// panning) so callers can decide how to route pointer input without
+    /// duplicating the tool state machine. Reading it has no side effects: it
+    /// dispatches no command, captures no point and never mutates the capture.
+    pub fn tool_snapshot(&self) -> cad_app::ToolSnapshot {
+        self.controller.borrow().session.tool_snapshot()
+    }
+
     /// Diagnostics from reading the host config / user preference at startup.
     pub fn startup_diagnostics(&self) -> Vec<String> {
         self.startup_diagnostics.borrow().clone()

@@ -12,7 +12,7 @@ import { bindProbeInput, createInputLane } from './input.mjs';
 import { pointerPosition } from './metrics.mjs';
 import { queueCadCommand, requestImportCancel, startCadPolling } from './cad.mjs';
 import { createFpsSampler } from './fps.mjs';
-import { admitCommandText, pushHistory } from './commands.mjs';
+import { admitCommandText, commandCatalog, pushHistory, setCommandCatalog, toolCommandForKey } from './commands.mjs';
 import { I18nContext, ShellContext } from './context.mjs';
 import { TitleBar } from './components/TitleBar.jsx';
 import { Ribbon } from './components/Ribbon.jsx';
@@ -48,6 +48,9 @@ export function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [surfaceNode, setSurfaceNode] = useState(null);
+  // The host command vocabulary (names the Rust router accepts). Empty until
+  // `cad_commands` answers; the state exists so the chrome re-renders once it does.
+  const [catalogNames, setCatalogNames] = useState(commandCatalog);
 
   const submitting = useRef(false);
   const laneRef = useRef(null);
@@ -119,23 +122,21 @@ export function App() {
     };
   }, []);
 
-  // Global shortcuts: Ctrl+0 clean screen, Ctrl+9 command line, F2 history, Esc.
+  // Load the host's command vocabulary exactly once. It is the admission source
+  // of truth (`cad_commands` -> `cad_ui_core::session::admissible_names`), so a
+  // failed load keeps the catalog empty — every command is then explicitly
+  // unsupported — and surfaces the failure instead of pretending success.
   useEffect(() => {
-    const isTyping = target => target instanceof HTMLElement
-      && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName);
-    const onKeyDown = event => {
-      if (event.defaultPrevented || event.metaKey || event.altKey) return;
-      if (event.ctrlKey && event.key === '0') { event.preventDefault(); setCleanScreen(value => !value); return; }
-      if (event.ctrlKey && event.key === '9') { event.preventDefault(); setCommandLineOpen(value => !value); return; }
-      if (event.key === 'F2') { event.preventDefault(); setHistoryOpen(value => !value); return; }
-      if (event.key === 'Escape') {
-        setHistoryOpen(false);
-        if (isTyping(event.target)) event.target.blur();
-        else setDiagnosticsOpen(false);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    let cancelled = false;
+    invoke('cad_commands').then(names => {
+      if (cancelled) return;
+      setCatalogNames(setCommandCatalog(names));
+    }).catch(reason => {
+      if (cancelled) return;
+      setCatalogNames(setCommandCatalog([]));
+      setError(`cad_commands: ${String(reason)}`);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const documentLabel = status?.documentLabel ?? null;
@@ -143,6 +144,7 @@ export function App() {
   const loading = Boolean(status?.loading);
   const importProgress = status?.importProgress ?? null;
   const cadReady = Boolean(status) && !loading;
+  const toolActive = Boolean(status?.tool?.key);
 
   const submitCommand = useCallback(async (text, options = {}) => {
     if (submitting.current) return;
@@ -160,6 +162,48 @@ export function App() {
       setPending(false);
     }
   }, [status]);
+
+  // Global shortcuts: Ctrl+0 clean screen, Ctrl+9 command line, F2 history, Esc.
+  // While a CAD tool is active (and the keyboard is not in a field) Enter/Escape
+  // are the tool's confirm/cancel instead.
+  useEffect(() => {
+    const isTyping = target => target instanceof HTMLElement
+      && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName);
+    const onKeyDown = event => {
+      if (event.defaultPrevented || event.metaKey || event.altKey) return;
+      // An active tool owns Enter/Escape: Enter confirms, Escape cancels, and
+      // that Escape does not also close a panel. With no tool active the
+      // branches below are exactly as before.
+      const toolCommand = toolCommandForKey(event.key, {
+        toolActive,
+        typing: isTyping(event.target),
+        composing: event.isComposing,
+        repeat: event.repeat,
+      });
+      if (toolCommand) {
+        event.preventDefault();
+        void submitCommand(toolCommand);
+        return;
+      }
+      if (event.ctrlKey && event.key === '0') { event.preventDefault(); setCleanScreen(value => !value); return; }
+      if (event.ctrlKey && event.key === '9') { event.preventDefault(); setCommandLineOpen(value => !value); return; }
+      if (event.key === 'F2') { event.preventDefault(); setHistoryOpen(value => !value); return; }
+      if (event.key === 'Escape') {
+        setHistoryOpen(false);
+        if (isTyping(event.target)) event.target.blur();
+        else setDiagnosticsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [submitCommand, toolActive]);
+
+  // Admission recomputes when the loaded host vocabulary changes, so the chrome
+  // enables exactly the tools the router really accepts.
+  const canCommand = useCallback(
+    id => admitCommandText(id, { status, pending }).kind === 'admitted',
+    [status, pending, catalogNames],
+  );
 
   const shell = {
     status,
@@ -197,7 +241,7 @@ export function App() {
     commandLineOpen,
     setCommandLineOpen,
     surfaceRef,
-    canCommand: id => admitCommandText(id, { status, pending }).kind === 'admitted',
+    canCommand,
     runCommand: id => { void submitCommand(id); },
     cancelImport: () => { void requestImportCancel(invoke, status); },
     runAction: action => {

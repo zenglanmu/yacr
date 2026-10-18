@@ -153,11 +153,27 @@ body 内，不越出功能区、不撑高），Escape/点击外部关闭。契�
 
 ## 支持范围
 
-- **OPEN / FIT 已支持**：`--open` 经真实文件打开漏斗；OPEN 也可走原生 portal picker；FIT 适应图纸。
-- **原生导航**按实际源码能力支持（滚轮缩放锚定光标、平移）；其余命令/面板/绘图编辑均**未接线**：
-  一律**显式禁用并标注原因**（`command.unsupported`、`command.badge.unwired`、
-  `status.toggle_unsupported`、`layout.switch_unwired` 等），不伪造可用。
-- **只读**：不写回 DWG；**不新增投机 IPC**；未知命令走既有 **not supported** 路径，不空成功。
+**命令准入以 Rust 为唯一来源**：前端启动时经 `cad_commands` 取
+`cad_ui_core::session::admissible_names()`（`COMMAND_TABLE` + 别名，见
+`crates/cad-ui-core/src/session/commands.rs`），**不再**手写 `OPEN`/`FIT` 白名单；宿主未应答前目录为空，
+所有命令显式 unsupported（不是默认放行）。React 宿主**显式排除** `NEW`/`SAVE`/`SAVEAS`/`QSAVE`/
+`PLOT`/`EXPORT`/`PRINT`（需要原生对话框/打印归属，本宿主未实现），按钮保持禁用并给出原因。
+
+- **可从 chrome 触达**：`OPEN`（`--open` 真实打开漏斗，或原生 portal picker 见下节）、`FIT`、`PAN`、
+  `SELECTALL`、`UNDO`、`REDO`、`ORBIT`、`ZOOM`，以及
+  交互工具 `LINE`/`CIRCLE`/`ARC`/`MOVE`/`COPY`/`ROTATE`/`SCALE`/`MIRROR`/`OFFSET`/`TRIM`/`EXTEND`
+  （经 `InteractionRequest::BeginDraw`）与 `MEASURE`（Distance）。
+- **交互语义**：工具激活后画布单击 = 取点（`CapturePoint`，不再是选择）；`Enter` = `CONFIRM`，
+  `Esc` = `CANCEL`（`CANCEL` 的捕获态在提交**之前**采样：有 draw/measure 捕获时只取消工具，不转发宿主
+  open-cancel）；状态栏显示 `status.tool`（机器键 `draw.*`/`measure.*` + 已取点数 + 可确认性）。
+  提交语义：**绘制/编辑工具不会自动提交**，必须显式 `CONFIRM`（`cad_app::SessionState::capture_point`
+  对 `Drawing` 恒返回 `false`）；测量工具按自身 `auto_ready` 自动提交。
+- **选择要求**：编辑类工具需要先有选择；空选择在确认时由 `cad_app`（`DrawTool::is_ready`）显式拒绝，
+  UI 不预判、不静默丢弃。
+- **仍未接线**：`GRID`/`SNAP`/`ORTHO`/`OSNAP` drafting 开关、图层/特性面板、`ZOOMIN`/`ZOOMOUT`
+  别名（router 名为 `ZOOM`）、测量子类型 `DIST`/`PLINE`/`ANGLE`/`AREA`、`NEW`/`SAVE`/`PLOT`、
+  窗口/交叉框选与对象捕捉获取（见 `docs/adr/0014-object-snap-and-box-selection.md`）。
+- **只读**：不写回 DWG；未知命令走既有 not supported 路径，不空成功。
 - 语言切换（chrome 文案）已接线；**运行时语言切换不重排 Rust 宿主的宿主侧字符串**（见限制）。
 - 导航复用**同一权威底图**（GPU-resident、同一 DB revision）；拖拽期间 overlay 后缀可经显式
   `FrameCompleteness::BaseOnlyPendingOverlays` **临时省略**（非静默），`PresentedFrame.view_revision`
@@ -173,7 +189,9 @@ body 内，不越出功能区、不撑高），Escape/点击外部关闭。契�
 ## 证据机制（真实 GPU 路线）
 
 宿主内置 env-gated 证据驱动：`apps/app-linux/src/evidence.rs`（`YACR_PROBE_EVIDENCE` 合成输入/
-resize/minimize/restore；`YACR_PROBE_LIFECYCLE` 生命周期），以及 host telemetry 日志
+resize/minimize/restore；`YACR_PROBE_LIFECYCLE` 生命周期；**`YACR_PROBE_TOOL_EVIDENCE`** 交互工具
+端到端——读真实 `cad_status` 基线 → `cad_command LINE` → 两次合成点击取点 → `cad_command CONFIRM`
+→ 读回 `entityCount`，通过判据是**真实实体数增量**且 `tool` 回到 `null`，**非**伪造），以及 host telemetry 日志
 （`[probe] …` 行，`YACR_PROBE_CAD_LOG` 输出 JSON 状态，`[probe] geometry …` 记录 DOM rect/容器/DrawingArea/
 origin/scale/extent）。窗口捕获可用 `apps/app-linux/scripts/x11-window-grab.c`（**X11** 窗口）。原生 Wayland
 身份由协议日志（`WAYLAND_DEBUG=client` 的 child `wl_surface`/`get_subsurface`/`set_desync`/`set_position`/

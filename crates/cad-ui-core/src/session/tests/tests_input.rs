@@ -1,12 +1,22 @@
 //! Click-select, gesture classification and selection-block session tests.
 
-use super::super::input::{interaction_request, pointer_button};
+use super::super::input::{cancel_target, interaction_request, pointer_button, CancelTarget};
 use super::super::*;
 use super::test_support::*;
+
+#[test]
+fn cancel_target_keeps_the_host_cancel_out_of_an_active_capture() {
+    // A capture owns the cancel: the host's import/open cancel must not also
+    // fire, or an Esc inside a tool would abort an unrelated running import.
+    assert_eq!(cancel_target(true), CancelTarget::Tool);
+    // With no capture the selector keeps both meanings.
+    assert_eq!(cancel_target(false), CancelTarget::ToolAndHost);
+}
+
 #[test]
 fn plan_input_classifies_a_click_and_tags_it_with_the_current_revision() {
     let down = pointer_at(InputKind::PointerDown, 1, [10.0, 20.0], None);
-    let (requests, press) = plan_input(None, &down, 7).unwrap();
+    let (requests, press) = plan_input(None, &down, 7, false).unwrap();
     assert_eq!(requests.len(), 1);
     match &requests[0] {
         InteractionRequest::Pointer {
@@ -32,7 +42,7 @@ fn plan_input_classifies_a_click_and_tags_it_with_the_current_revision() {
     // closes the host's gesture life) plus a replace-selection at the
     // release position tagged with the current metrics revision.
     let up = pointer_at(InputKind::PointerUp, 2, [10.75, 20.0], None);
-    let (requests, next) = plan_input(Some(press), &up, 7).unwrap();
+    let (requests, next) = plan_input(Some(press), &up, 7, false).unwrap();
     assert!(next.is_none(), "a release ends the press");
     assert_eq!(requests.len(), 2, "release then select: {requests:?}");
     assert!(matches!(
@@ -71,7 +81,7 @@ fn plan_input_keeps_a_drag_on_the_navigation_path() {
         [10.0 + DRAG_THRESHOLD_LOGICAL_PX, 20.0],
         None,
     );
-    let (requests, press) = plan_input(Some(press), &moved, 7).unwrap();
+    let (requests, press) = plan_input(Some(press), &moved, 7, false).unwrap();
     assert!(matches!(
         requests.as_slice(),
         [InteractionRequest::Pointer {
@@ -85,7 +95,7 @@ fn plan_input_keeps_a_drag_on_the_navigation_path() {
     // Releasing back at the press position is still a drag, not a click: a
     // round trip never fabricates a selection.
     let back = pointer_at(InputKind::PointerUp, 3, [10.0, 20.0], None);
-    let (requests, next) = plan_input(Some(press), &back, 7).unwrap();
+    let (requests, next) = plan_input(Some(press), &back, 7, false).unwrap();
     assert!(next.is_none());
     assert_eq!(
         requests.len(),
@@ -108,7 +118,7 @@ fn plan_input_keeps_a_drag_on_the_navigation_path() {
         [10.0 + DRAG_THRESHOLD_LOGICAL_PX, 20.0],
         None,
     );
-    let (requests, _) = plan_input(Some(primary_press([10.0, 20.0])), &far, 7).unwrap();
+    let (requests, _) = plan_input(Some(primary_press([10.0, 20.0])), &far, 7, false).unwrap();
     assert_eq!(
         requests.len(),
         1,
@@ -121,7 +131,7 @@ fn plan_input_carries_the_pressed_button_through_a_gesture() {
     // The middle button is the pan gesture: the press button owns the move
     // even when the move reports no button change (the DOM's convention).
     let down = pointer_at(InputKind::PointerDown, 1, [0.0, 0.0], Some(BUTTON_MIDDLE));
-    let (requests, press) = plan_input(None, &down, 3).unwrap();
+    let (requests, press) = plan_input(None, &down, 3, false).unwrap();
     assert!(matches!(
         requests[0],
         InteractionRequest::Pointer {
@@ -133,7 +143,7 @@ fn plan_input_carries_the_pressed_button_through_a_gesture() {
     assert_eq!(press.button, PointerButton::Middle);
 
     let moved = pointer_at(InputKind::PointerMove, 2, [30.0, 10.0], None);
-    let (requests, press) = plan_input(Some(press), &moved, 3).unwrap();
+    let (requests, press) = plan_input(Some(press), &moved, 3, false).unwrap();
     assert!(
         matches!(
             requests[0],
@@ -149,7 +159,7 @@ fn plan_input_carries_the_pressed_button_through_a_gesture() {
     // A middle release is never a click: no selection is invented from a
     // pan gesture.
     let up = pointer_at(InputKind::PointerUp, 3, [0.0, 0.0], Some(BUTTON_MIDDLE));
-    let (requests, next) = plan_input(press, &up, 3).unwrap();
+    let (requests, next) = plan_input(press, &up, 3, false).unwrap();
     assert_eq!(requests.len(), 1, "a middle click must not select");
     assert!(next.is_none());
 
@@ -160,7 +170,7 @@ fn plan_input_carries_the_pressed_button_through_a_gesture() {
         [0.0, 0.0],
         Some(BUTTON_SECONDARY),
     );
-    let (requests, press) = plan_input(None, &down, 3).unwrap();
+    let (requests, press) = plan_input(None, &down, 3, false).unwrap();
     assert!(matches!(
         requests[0],
         InteractionRequest::Pointer {
@@ -169,12 +179,12 @@ fn plan_input_carries_the_pressed_button_through_a_gesture() {
         }
     ));
     let up = pointer_at(InputKind::PointerUp, 5, [0.0, 0.0], Some(BUTTON_SECONDARY));
-    let (requests, _) = plan_input(press, &up, 3).unwrap();
+    let (requests, _) = plan_input(press, &up, 3, false).unwrap();
     assert_eq!(requests.len(), 1, "a secondary release must not select");
 
     // A release that names a different button than the press does not select.
     let up = pointer_at(InputKind::PointerUp, 6, [0.0, 0.0], Some(BUTTON_SECONDARY));
-    let (requests, _) = plan_input(Some(primary_press([0.0, 0.0])), &up, 3).unwrap();
+    let (requests, _) = plan_input(Some(primary_press([0.0, 0.0])), &up, 3, false).unwrap();
     assert_eq!(
         requests.len(),
         1,
@@ -216,7 +226,7 @@ fn plan_input_refuses_an_undefined_button_instead_of_treating_it_as_primary() {
         InputKind::PointerUp,
     ] {
         let input = pointer_at(kind, 1, [1.0, 2.0], Some(-1));
-        let error = plan_input(None, &input, 0).unwrap_err();
+        let error = plan_input(None, &input, 0, false).unwrap_err();
         assert!(error.contains("unsupported pointer button"), "{error}");
     }
     // The stateless mapping refuses it too (no silent primary fallback).
@@ -230,7 +240,7 @@ fn plan_input_refuses_an_undefined_button_instead_of_treating_it_as_primary() {
 #[test]
 fn plan_input_ends_the_press_on_cancel_and_keeps_it_across_a_wheel() {
     let cancel = pointer_at(InputKind::PointerCancel, 2, [1.0, 2.0], None);
-    let (requests, next) = plan_input(Some(primary_press([0.0, 0.0])), &cancel, 0).unwrap();
+    let (requests, next) = plan_input(Some(primary_press([0.0, 0.0])), &cancel, 0, false).unwrap();
     assert!(next.is_none(), "a cancel ends the press");
     assert!(matches!(
         requests[0],
@@ -242,7 +252,7 @@ fn plan_input_ends_the_press_on_cancel_and_keeps_it_across_a_wheel() {
     ));
 
     let blur = probe(InputKind::Blur);
-    let (_, next) = plan_input(Some(primary_press([0.0, 0.0])), &blur, 0).unwrap();
+    let (_, next) = plan_input(Some(primary_press([0.0, 0.0])), &blur, 0, false).unwrap();
     assert!(next.is_none(), "a blur ends the press");
 
     let mut wheel = probe(InputKind::Wheel);
@@ -250,7 +260,7 @@ fn plan_input_ends_the_press_on_cancel_and_keeps_it_across_a_wheel() {
     wheel.y = Some(2.0);
     wheel.dy = Some(-3.0);
     let press = primary_press([0.0, 0.0]);
-    let (requests, next) = plan_input(Some(press), &wheel, 0).unwrap();
+    let (requests, next) = plan_input(Some(press), &wheel, 0, false).unwrap();
     assert!(matches!(
         requests[0],
         InteractionRequest::Scroll { delta_logical, .. } if delta_logical == [0.0, 3.0]
@@ -258,7 +268,7 @@ fn plan_input_ends_the_press_on_cancel_and_keeps_it_across_a_wheel() {
     assert_eq!(next, Some(press), "a wheel never disturbs the press");
 
     // Resize stays an explicit refusal (it goes through set_canvas_metrics).
-    assert!(plan_input(None, &probe(InputKind::Resize), 0).is_err());
+    assert!(plan_input(None, &probe(InputKind::Resize), 0, false).is_err());
 }
 
 #[test]

@@ -1,26 +1,104 @@
 // Command catalog, admission rules and command-line autocomplete.
 //
-// `SUPPORTED_COMMANDS` mirrors the host's `normalize_cad_command`: only `OPEN`
-// and `FIT` reach `cad_command`. Everything else the app names is shown, but
-// marked unsupported so the UI can disable it with an explicit reason instead
-// of pretending it works.
-
-/** Commands the host admits today (host `normalize_cad_command`). */
-export const SUPPORTED_COMMANDS = Object.freeze(['OPEN', 'FIT']);
+// Admission is **not** a hand-written mirror any more: the exact set of command
+// names the Rust router accepts is loaded once at runtime from the `cad_commands`
+// IPC command (backed by `cad_ui_core::session::admissible_names`, the single
+// source of truth). Until that answer arrives the catalog is empty, so every
+// command is explicitly unsupported — never "everything allowed by default".
+//
+// On top of the router's vocabulary the chrome keeps an explicit **exclusion**
+// list: names the router would accept but this React host cannot service yet
+// (they need a native file-dialog/printer owner the chrome does not have). The
+// exclusion is deliberate and named, not a silent omission — the buttons stay
+// visible but disabled with the existing `command.unsupported` reason.
 
 /** Normalize typed input the same way the host does (trim + upper-case). */
 export function normalizeCommandText(text) {
   return String(text ?? '').trim().toUpperCase();
 }
 
-export function isSupportedCommand(id) {
-  return SUPPORTED_COMMANDS.includes(normalizeCommandText(id));
+/**
+ * The loaded host vocabulary, uppercased and deduped. Empty until
+ * [`setCommandCatalog`] receives the `cad_commands` answer.
+ */
+let loadedCatalog = Object.freeze([]);
+
+/** Replace the admission catalog with the names the host reported. */
+export function setCommandCatalog(names) {
+  const seen = new Set();
+  for (const name of names ?? []) {
+    const id = normalizeCommandText(name);
+    if (id) seen.add(id);
+  }
+  loadedCatalog = Object.freeze([...seen]);
+  return loadedCatalog;
+}
+
+/** The current admission catalog (empty until the host has answered). */
+export function commandCatalog() {
+  return loadedCatalog;
 }
 
 /**
- * Every command name the app exposes in the chrome. `labelKey` is a catalog
- * key; `icon` names an entry in the icon set. Order is the AutoCAD-style
- * listing order (file, draw, modify, view, measure, annotate, classify).
+ * Commands the Rust router accepts but the React host cannot service yet: they
+ * are owned by native dialogs/printing that the chrome has no implementation
+ * for, so their buttons stay disabled with `command.unsupported`. This is an
+ * explicit exclusion list — sourced from the host vocabulary, not a claim that
+ * the names are unknown to the router.
+ */
+export const HOST_EXCLUDED_COMMANDS = Object.freeze([
+  'NEW', 'SAVE', 'SAVEAS', 'QSAVE', 'PLOT', 'EXPORT', 'PRINT',
+]);
+
+/** The names kept disabled on top of the host vocabulary (for tests/UI copy). */
+export function excludedCommandNames() {
+  return [...HOST_EXCLUDED_COMMANDS];
+}
+
+export function isSupportedCommand(id) {
+  const name = normalizeCommandText(id);
+  if (!name || HOST_EXCLUDED_COMMANDS.includes(name)) return false;
+  return loadedCatalog.includes(name);
+}
+
+/**
+ * Catalog key for a host tool selector (`draw.line` -> `tool.draw.line`), or
+ * `null` when there is no selector so the caller renders no name.
+ */
+export function toolLabelKey(toolKey) {
+  const key = String(toolKey ?? '').trim().toLowerCase();
+  return key ? `tool.${key}` : null;
+}
+
+/**
+ * The CAD command a global key press should submit while an interactive tool is
+ * active, or `null` when the press is not ours.
+ *
+ * `Enter` confirms and `Escape` cancels the active tool, but only when a tool is
+ * really active and the key was not typed into a field (`typing`), was not an IME
+ * composition, and was not an auto-repeat. A missing tool returns `null` for
+ * every key, so Escape keeps its panel-closing behaviour when no tool is running.
+ */
+export function toolCommandForKey(key, {
+  toolActive = false,
+  typing = false,
+  composing = false,
+  repeat = false,
+} = {}) {
+  if (!toolActive || typing || composing || repeat) return null;
+  if (key === 'Enter') return 'CONFIRM';
+  if (key === 'Escape') return 'CANCEL';
+  return null;
+}
+
+/**
+ * Every command name the app exposes in the chrome, in AutoCAD-style listing
+ * order (file, draw, modify, view, measure, annotate, classify). `labelKey` is a
+ * catalog key; `icon` names an entry in the icon set.
+ *
+ * This is a **display** table only: whether an entry is enabled comes from the
+ * loaded host vocabulary ([`isSupportedCommand`]), so a command missing here can
+ * still be typed and admitted when the router knows it.
  */
 export const COMMAND_CATALOG = Object.freeze([
   { id: 'OPEN', labelKey: 'file.open', icon: 'open', group: 'file' },
@@ -132,7 +210,8 @@ export function pushHistory(history, entry, limit = 64) {
 
 /**
  * Admission for the command line: what would `cad_command` do with this text?
- * Mirrors `cad_command`/`commandEnabled` without touching IPC.
+ * Uses the vocabulary loaded from the host ([`isSupportedCommand`]) plus the
+ * capability gates, without touching IPC.
  */
 export function admitCommandText(text, { status = null, pending = false } = {}) {
   const id = normalizeCommandText(text);

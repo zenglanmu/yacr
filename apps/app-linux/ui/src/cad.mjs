@@ -1,3 +1,5 @@
+import { admitCommandText } from './commands.mjs';
+
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
 // this set is a contract violation, not a runtime surprise.
 const IMPORT_PHASES = new Set(['reading', 'parsing', 'tables', 'entities', 'resolving', 'finishing']);
@@ -220,15 +222,36 @@ export async function requestImportCancel(invoke, status) {
   } catch (error) { return { kind: 'failed', error: String(error) }; }
 }
 
+/**
+ * Whether the host capability gates allow `command` right now.
+ *
+ * Only the two capability-gated commands this build has gates for are checked
+ * here (`OPEN`, `FIT`); the general admission decision comes from
+ * [`admitCommandText`], which also consults the loaded host vocabulary.
+ */
 export function commandEnabled(status, pending, command) {
   return Boolean(status && !pending && !status.loading
     && (command === 'OPEN' ? status.canOpen : command === 'FIT' ? status.canFit && status.documentLabel !== null && status.entityCount !== null : false));
 }
 
+/**
+ * Admit `text` through `cad_command`.
+ *
+ * The command vocabulary is the one loaded from the host (`admitCommandText`),
+ * so an interactive tool (`LINE`, `MOVE`, `CONFIRM`, …) reaches the router; only
+ * a name the host does not know, or an explicitly excluded host-owned command,
+ * is refused before IPC. `{kind:'accepted'}` is queue admission, never
+ * completion; a host-side refusal is an explicit `failed`, never a silent
+ * success.
+ */
 export async function queueCadCommand(invoke, text, status, pending) {
-  const command = text.trim().toUpperCase();
-  if (!['OPEN', 'FIT'].includes(command)) return { kind: 'unsupported', command };
-  if (!commandEnabled(status, pending, command)) return { kind: 'failed', error: 'CAD_COMMAND_UNAVAILABLE' };
+  const admission = admitCommandText(text, { status, pending });
+  const command = admission.command;
+  if (admission.kind !== 'admitted') {
+    return admission.kind === 'unavailable'
+      ? { kind: 'failed', error: 'CAD_COMMAND_UNAVAILABLE' }
+      : { kind: 'unsupported', command };
+  }
   try {
     const response = await invoke('cad_command', { command });
     if (!response || response.accepted !== true) throw Error('CAD_COMMAND_NOT_ACCEPTED');

@@ -132,11 +132,12 @@ fn unknown_command_is_refused_before_any_host_change() {
 fn payload_requiring_command_is_refused_explicitly_not_silently() {
     // A mapped command whose variant needs a payload still goes through the
     // funnel; the application layer refuses it explicitly (never a silent
-    // empty success).
+    // empty success). `LINE` now starts the interactive tool, so this contract
+    // is asserted with a command that is still payload-requiring.
     let session = session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
-    let error = session.command("LINE").unwrap_err();
+    let error = session.command("STANDARDVIEW").unwrap_err();
     assert!(!error.is_empty(), "an explicit refusal, not empty success");
 }
 
@@ -264,6 +265,7 @@ fn blank_status_reports_no_document_capabilities() {
         CadSelection::empty(),
         0,
         0,
+        None,
     );
     assert_eq!(status.document_label, None);
     assert_eq!(status.entity_count, None);
@@ -294,6 +296,7 @@ fn document_status_reports_counts_and_camera() {
         CadSelection::empty(),
         1,
         10,
+        None,
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
     assert_eq!(status.entity_count, Some(3));
@@ -554,4 +557,34 @@ fn startup_diagnostics_accessor_is_exposed() {
         events: RefCell::new(Vec::new()),
     }));
     let _ = session.startup_diagnostics();
+}
+
+#[test]
+fn admissible_names_cover_the_table_plus_aliases_exactly_once() {
+    let names = admissible_names();
+    // Every canonical selector is advertised.
+    for (canonical, _) in COMMAND_TABLE {
+        assert!(
+            names.contains(canonical),
+            "{canonical} missing from the admissible list"
+        );
+    }
+    // Every alias is advertised (an alias is a name the host admits).
+    for (alias, canonical) in COMMAND_ALIASES {
+        assert!(
+            names.contains(alias),
+            "{alias} missing from the admissible list"
+        );
+        assert!(names.contains(canonical), "{canonical} missing");
+    }
+    // No duplicates: a frontend may build a set from this list.
+    let unique: std::collections::BTreeSet<&str> = names.iter().copied().collect();
+    assert_eq!(unique.len(), names.len(), "duplicate admissible name");
+    // Every advertised name is actually admitted by the normalizer.
+    for name in &names {
+        assert!(
+            canonical_command_name(name).is_some(),
+            "{name} is advertised but does not normalize"
+        );
+    }
 }

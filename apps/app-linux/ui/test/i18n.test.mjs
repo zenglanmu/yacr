@@ -49,6 +49,21 @@ test('both catalogs are complete, flat and placeholder-balanced', () => {
   }
 });
 
+test('the active-tool chip keys exist in both catalogs with matching placeholders', () => {
+  const toolKeys = [
+    'tool.draw.line', 'tool.draw.circle', 'tool.draw.arc', 'tool.draw.move', 'tool.draw.trim',
+    'tool.draw.copy', 'tool.draw.extend', 'tool.draw.rotate', 'tool.draw.scale', 'tool.draw.mirror',
+    'tool.draw.offset', 'tool.measure.distance', 'tool.measure.polyline', 'tool.measure.angle',
+    'tool.measure.area', 'tool.points', 'tool.prompt.confirm', 'tool.prompt.cancel',
+  ];
+  for (const key of toolKeys) {
+    assert.equal(typeof zh[key], 'string', `zh-CN missing ${key}`);
+    assert.equal(typeof en[key], 'string', `en missing ${key}`);
+  }
+  assert.equal(formatMessage(zh['tool.points'], { count: 3 }), '3 个点');
+  assert.equal(formatMessage(en['tool.points'], { count: 3 }), '3 points');
+});
+
 test('every translation key used in the app exists in both catalogs', async () => {
   const source = await readAppSource();
   const keys = new Set();

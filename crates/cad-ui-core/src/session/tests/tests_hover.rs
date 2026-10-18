@@ -5,7 +5,7 @@ use super::test_support::*;
 #[test]
 fn plan_input_emits_a_hover_cursor_request_tagged_with_the_current_revision() {
     let moved = pointer_at(InputKind::PointerMove, 1, [40.0, 50.0], None);
-    let (requests, next) = plan_input(None, &moved, 9).unwrap();
+    let (requests, next) = plan_input(None, &moved, 9, false).unwrap();
     assert!(next.is_none(), "an idle move retains no press");
     assert_eq!(requests.len(), 2, "move then hover: {requests:?}");
     assert!(matches!(
@@ -34,7 +34,8 @@ fn plan_input_emits_a_hover_cursor_request_tagged_with_the_current_revision() {
 fn plan_input_suppresses_hover_while_a_press_is_active() {
     // Within the drag threshold the press is a pending tap, not a hover.
     let moved = pointer_at(InputKind::PointerMove, 2, [10.0, 20.5], None);
-    let (requests, press) = plan_input(Some(primary_press([10.0, 20.0])), &moved, 7).unwrap();
+    let (requests, press) =
+        plan_input(Some(primary_press([10.0, 20.0])), &moved, 7, false).unwrap();
     assert_eq!(
         requests.len(),
         1,
@@ -56,7 +57,8 @@ fn plan_input_suppresses_hover_while_a_press_is_active() {
         [10.0 + DRAG_THRESHOLD_LOGICAL_PX + 5.0, 20.0],
         None,
     );
-    let (requests, press) = plan_input(Some(primary_press([10.0, 20.0])), &dragged, 7).unwrap();
+    let (requests, press) =
+        plan_input(Some(primary_press([10.0, 20.0])), &dragged, 7, false).unwrap();
     assert!(
         matches!(
             requests.as_slice(),
@@ -71,9 +73,9 @@ fn plan_input_suppresses_hover_while_a_press_is_active() {
 
     // The same holds for a middle-button press (the pan gesture).
     let down = pointer_at(InputKind::PointerDown, 4, [0.0, 0.0], Some(BUTTON_MIDDLE));
-    let (_, middle_press) = plan_input(None, &down, 7).unwrap();
+    let (_, middle_press) = plan_input(None, &down, 7, false).unwrap();
     let moved = pointer_at(InputKind::PointerMove, 5, [30.0, 10.0], None);
-    let (requests, _) = plan_input(middle_press, &moved, 7).unwrap();
+    let (requests, _) = plan_input(middle_press, &moved, 7, false).unwrap();
     assert_eq!(
         requests.len(),
         1,
@@ -279,14 +281,14 @@ fn plan_input_maps_pointer_leave_to_clear_cursor_without_touching_the_press() {
     // A bare leave yields exactly the overlay cursor clear: no pointer
     // request, no coordinates, and no revision demand it cannot satisfy.
     let leave = probe(InputKind::PointerLeave);
-    let (requests, next) = plan_input(None, &leave, 0).unwrap();
+    let (requests, next) = plan_input(None, &leave, 0, false).unwrap();
     assert_eq!(requests, vec![InteractionRequest::ClearCursor]);
     assert!(next.is_none(), "a leave with no press retains none");
 
     // It also leaves an in-flight press untouched: the exact same press is
     // returned, so a later release still resolves against it.
     let press = primary_press([10.0, 20.0]);
-    let (requests, next) = plan_input(Some(press), &leave, 0).unwrap();
+    let (requests, next) = plan_input(Some(press), &leave, 0, false).unwrap();
     assert_eq!(requests, vec![InteractionRequest::ClearCursor]);
     assert_eq!(next, Some(press), "the leave must not disturb the press");
 }

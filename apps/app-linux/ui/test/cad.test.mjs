@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { commandEnabled, handleCommandKey, importProgressView, parseCadStatus, queueCadCommand, requestImportCancel, startCadPolling } from '../src/cad.mjs';
+import { setCommandCatalog } from '../src/commands.mjs';
 import { readAppSource, readComponentsSource } from './helpers.mjs';
+
+// The admission vocabulary the host reports; without it every command would be
+// explicitly unsupported, so load a representative set once.
+setCommandCatalog(['OPEN', 'NEW', 'SAVE', 'PLOT', 'FIT', 'LINE', 'MOVE', 'CONFIRM', 'CANCEL', 'UNDO']);
 
 const empty = { documentLabel: null, entityCount: null, loading: false, importProgress: null, error: null, canOpen: true, canFit: false, backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0, selection: { count: 0, empty: true, rows: [], mixedKeys: [] } };
 const loaded = { ...empty, documentLabel: 'fixture.dwg', entityCount: 3, canFit: true, backend: 'Vulkan', adapter: 'hardware', camera: { center: [10, 20], scale: 2 }, importCount: 1, frameCount: 10 };
@@ -124,10 +129,14 @@ test('command admission is not completion and invokes only the frozen command IP
   assert.equal(loaded.importCount, 1);
   const open = await queueCadCommand(async (name, args) => { assert.equal(name, 'cad_command'); assert.equal(args.command, 'OPEN'); return { accepted: true }; }, 'OPEN', empty, false);
   assert.equal(open.kind, 'accepted');
+  // An interactive tool admitted by the loaded host vocabulary now reaches IPC.
+  const line = await queueCadCommand(async (name, args) => { assert.equal(name, 'cad_command'); assert.equal(args.command, 'LINE'); return { accepted: true }; }, ' line ', loaded, false);
+  assert.deepEqual(line, { kind: 'accepted', command: 'LINE' });
 });
 
 test('unsupported, full queue, IPC failure and malformed acceptance do not clear or pretend success', async () => {
-  assert.deepEqual(await queueCadCommand(() => assert.fail('unsupported command reached IPC'), 'LINE', loaded, false), { kind: 'unsupported', command: 'LINE' });
+  assert.deepEqual(await queueCadCommand(() => assert.fail('unknown command reached IPC'), 'NOT_A_COMMAND', loaded, false), { kind: 'unsupported', command: 'NOT_A_COMMAND' });
+  assert.deepEqual(await queueCadCommand(() => assert.fail('excluded command reached IPC'), 'NEW', loaded, false), { kind: 'unsupported', command: 'NEW' });
   for (const invoke of [async () => { throw Error('QUEUE_FULL'); }, async () => { throw Error('IPC_DISCONNECTED'); }, async () => ({ accepted: false }), async () => null]) {
     const result = await queueCadCommand(invoke, 'OPEN', loaded, false);
     assert.equal(result.kind, 'failed');

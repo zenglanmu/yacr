@@ -79,6 +79,19 @@ pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> CadStatus {
     status
 }
 
+/// `cad_commands` command: every command name the Rust router admits, so the
+/// chrome never keeps a hand-written mirror that drifts from the host.
+///
+/// This is the single source of truth (`cad_ui_core::session::admissible_names`,
+/// i.e. the canonical `COMMAND_TABLE` selectors plus their aliases, deduped). The
+/// frontend still owns an explicit, documented exclusion list for names the
+/// **React host** cannot service yet (native file-dialog/printer owners), but it
+/// no longer invents which names the router would accept.
+#[tauri::command]
+pub fn cad_commands() -> Vec<&'static str> {
+    cad_ui_core::session::admissible_names()
+}
+
 /// `probe_input` command: sequence-gate one frontend input and route it.
 ///
 /// In CAD mode a pointer/wheel input is queued for the main thread only when the
