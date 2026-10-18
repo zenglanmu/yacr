@@ -1,0 +1,618 @@
+use super::*;
+
+#[test]
+fn staged_upload_failure_preserves_active_scene_and_overlay_prefix() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let base = lines_batch(rectangle_lines());
+    renderer.upload(&scene(vec![base.clone()])).unwrap();
+    let mut invalid = base.clone();
+    invalid.vertices[0][0] = f32::NAN;
+    assert!(renderer
+        .prepare_upload(&scene(vec![base.clone(), invalid]))
+        .is_err());
+    assert_eq!(renderer.batch_count(), 1, "failed staging must retain base");
+    let overlay = renderer.prepare_upload(&scene(vec![base])).unwrap();
+    assert_eq!(renderer.batch_count(), 1, "prepare is not publication");
+    renderer.commit_upload(overlay, 1).unwrap();
+    assert_eq!(renderer.batch_count(), 2);
+    let empty = renderer.prepare_upload(&scene(vec![])).unwrap();
+    renderer.commit_upload(empty, 1).unwrap();
+    assert_eq!(
+        renderer.batch_count(),
+        1,
+        "clearing overlay retains base buffers"
+    );
+    let stale = renderer.prepare_upload(&scene(vec![])).unwrap();
+    renderer.note_device_lost("test loss");
+    assert!(renderer.commit_upload(stale, 0).is_err());
+}
+
+#[test]
+fn texture_revision_changes_only_when_attachment_is_replaced() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let device = gpu.device.clone();
+    let queue = gpu.queue.clone();
+    let mut renderer = init(gpu);
+    renderer
+        .render(camera_2d(), &RenderTarget::new(64, 64))
+        .unwrap();
+    let first = renderer.texture_revision();
+    renderer
+        .render(camera_2d(), &RenderTarget::new(64, 64))
+        .unwrap();
+    assert_eq!(renderer.texture_revision(), first);
+    renderer.initialize_with_device(device, queue).unwrap();
+    renderer
+        .render(camera_2d(), &RenderTarget::new(64, 64))
+        .unwrap();
+    assert!(
+        renderer.texture_revision() > first,
+        "same-size reattachment changes texture identity"
+    );
+    let reattached = renderer.texture_revision();
+    renderer
+        .render(camera_2d(), &RenderTarget::new(128, 64))
+        .unwrap();
+    assert!(renderer.texture_revision() > reattached);
+}
+
+#[test]
+fn transparent_batch_composites_over_opaque() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+
+    // Scene 1: overlay alpha = 0.5 (transparent pass).
+    renderer
+        .upload(&transparency_scene(0.5))
+        .expect("upload transparent scene");
+    let half_stats = renderer.render(camera_2d(), &target).expect("render half");
+    assert_eq!(
+        half_stats.transparent_batches, 1,
+        "the 0.5-alpha overlay belongs to the transparent pass"
+    );
+    assert!(
+        half_stats.opaque_batches >= 1,
+        "the full-cover square is an opaque batch"
+    );
+    assert_eq!(
+        half_stats.invisible_batches, 1,
+        "the alpha = 0.0 ghost must be reported as invisible"
+    );
+    let half_image = renderer.read_target_rgba().expect("read half frame");
+
+    // Scene 2: the exact same scene with the overlay alpha = 1.0 (opaque pass).
+    renderer.clear_batches();
+    renderer
+        .upload(&transparency_scene(1.0))
+        .expect("upload opaque scene");
+    let opaque_stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render opaque");
+    assert_eq!(
+        opaque_stats.transparent_batches, 0,
+        "alpha = 1.0 must not use the transparent pass"
+    );
+    assert_eq!(opaque_stats.invisible_batches, 1);
+    let opaque_image = renderer.read_target_rgba().expect("read opaque frame");
+
+    // Probe pixels: one covered only by the full-cover square, one inside the
+    // overlay. Neither lies on a quad diagonal.
+    let cover = opaque_image.pixel(8, 9);
+    let overlay = opaque_image.pixel(36, 28);
+    let blended = half_image.pixel(36, 28);
+
+    assert_ne!(
+        overlay, cover,
+        "the alpha = 1.0 overlay must repaint the covered pixel"
+    );
+    assert_ne!(
+        blended, overlay,
+        "alpha = 0.5 must differ from alpha = 1.0: blending ran"
+    );
+    assert_ne!(
+        blended, cover,
+        "the blended pixel must not equal the backdrop"
+    );
+
+    // A linear blend encoded to sRGB stays numerically between its endpoints,
+    // channel by channel.
+    for channel in 0..4 {
+        let lo = cover[channel].min(overlay[channel]);
+        let hi = cover[channel].max(overlay[channel]);
+        assert!(
+            blended[channel] >= lo.saturating_sub(3) && blended[channel] <= hi.saturating_add(3),
+            "blended channel {channel} = {} not between {lo} and {hi} (cover {cover:?}, overlay {overlay:?}, blended {blended:?})",
+            blended[channel]
+        );
+    }
+
+    // Scene 3: only the alpha = 0.0 ghost; it must be counted and not drawn.
+    renderer.clear_batches();
+    renderer
+        .upload(&scene(vec![ghost_quad()]))
+        .expect("upload ghost scene");
+    let ghost_stats = renderer.render(camera_2d(), &target).expect("render ghost");
+    assert_eq!(ghost_stats.invisible_batches, 1);
+    assert_eq!(ghost_stats.opaque_batches, 0);
+    assert_eq!(ghost_stats.transparent_batches, 0);
+    assert_eq!(
+        ghost_stats.draw_calls, 0,
+        "nothing submitted for an invisible batch"
+    );
+    let ghost_image = renderer.read_target_rgba().expect("read ghost frame");
+    let background = ghost_image.pixel(0, 0);
+    assert_eq!(
+        ghost_image.count_differing_from(background, 0),
+        0,
+        "an alpha = 0.0 batch must leave the frame untouched"
+    );
+}
+
+#[test]
+fn frame_budget_over_budget_is_reported_not_silent() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // Two line batches of four anti-aliased segments each (24 vertices per batch):
+    // the first fits, the second crosses the tiny vertex limit.
+    renderer.frame_budget = FrameBudget {
+        max_vertices: 24,
+        max_triangles: 1_000_000,
+        max_bytes: usize::MAX,
+    };
+    renderer
+        .upload(&scene(vec![
+            lines_batch(rectangle_lines()),
+            lines_batch(rectangle_lines()),
+        ]))
+        .expect("upload two batches");
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("over-budget frame must still render the batches that fit");
+
+    let over = stats
+        .over_budget
+        .expect("crossing the frame budget must be reported, never silent");
+    assert_eq!(over.report.category, "vertices");
+    assert_eq!(over.report.limit, 24);
+    assert!(
+        over.report.skipped_batches >= 1,
+        "at least the offending batch must be reported skipped: {over:?}"
+    );
+    assert!(
+        stats.vertices <= 24,
+        "only accepted vertices may be submitted, got {}",
+        stats.vertices
+    );
+    assert_eq!(
+        stats.draw_calls, 1,
+        "exactly the one batch that fit should be drawn"
+    );
+}
+
+#[test]
+fn frame_byte_budget_is_reported_not_silent() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // Two line batches of eight vertices each. Each converts to an instanced
+    // stream of four segments, charged at the exact instance stride
+    // (4 * 56 = 224 bytes), which is what the frame budget must account. The
+    // first fits a 300-byte budget; the second crosses it on the byte category.
+    renderer.frame_budget = FrameBudget {
+        max_vertices: usize::MAX,
+        max_triangles: usize::MAX,
+        max_bytes: 300,
+    };
+    renderer
+        .upload(&scene(vec![
+            lines_batch(rectangle_lines()),
+            lines_batch(rectangle_lines()),
+        ]))
+        .expect("upload two batches");
+    // The upload phase records a real measured wall-clock time.
+    let upload_ms = renderer
+        .last_upload_ms()
+        .expect("upload must record a measured time");
+    assert!(upload_ms.is_finite() && upload_ms >= 0.0, "got {upload_ms}");
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("over-budget frame must still render the batches that fit");
+
+    let over = stats
+        .over_budget
+        .expect("crossing the byte budget must be reported, never silent");
+    assert_eq!(over.report.category, "bytes");
+    assert_eq!(over.report.limit, 300);
+    assert_eq!(over.report.requested, 448);
+    assert_eq!(
+        stats.draw_calls, 1,
+        "the one accepted (converted) batch is a single instanced draw"
+    );
+}
+
+#[test]
+fn device_loss_is_classified_after_note() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer.note_device_lost("test reset");
+    assert!(renderer.is_device_lost(), "renderer must latch the loss");
+
+    let target = RenderTarget::new(32, 32);
+    let error = renderer
+        .render(camera_2d(), &target)
+        .err()
+        .expect("rendering after a device loss must fail");
+    assert!(
+        matches!(error, RenderError::DeviceLost(_)),
+        "device loss must not be reported as a bad frame: {error:?}"
+    );
+    assert!(error.is_device_loss());
+}
+
+#[test]
+fn same_scene_is_deterministic() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&scene(vec![
+            lines_batch(rectangle_lines()),
+            quad_mesh(
+                0.4,
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                1.0,
+                FULL_COVER_NORMAL,
+                1,
+            ),
+        ]))
+        .expect("upload deterministic scene");
+
+    let target = RenderTarget::new(64, 64);
+    renderer.render(camera_2d(), &target).expect("render first");
+    let first = renderer.read_target_rgba().expect("read first frame");
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render second");
+    let second = renderer.read_target_rgba().expect("read second frame");
+
+    assert_eq!(
+        first.pixels, second.pixels,
+        "rendering the same scene twice must be byte-identical"
+    );
+}
+
+#[test]
+fn large_coordinate_batch_keeps_precision() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // A small local square placed at a very large world origin. The renderer
+    // must subtract the camera centre in f64 before narrowing, so centring the
+    // camera on the batch still rasterizes it.
+    let origin = Point3 {
+        x: 1.0e7,
+        y: 1.0e7,
+        z: 0.0,
+    };
+    renderer
+        .upload(&scene(vec![quad_mesh(
+            0.5,
+            origin,
+            1.0,
+            FULL_COVER_NORMAL,
+            0,
+        )]))
+        .expect("upload large-coordinate batch");
+
+    let target = RenderTarget::new(64, 64);
+    renderer
+        .render(camera_2d_at(1.0e7, 1.0e7), &target)
+        .expect("render large-coordinate frame");
+
+    let image = renderer
+        .read_target_rgba()
+        .expect("read large-coordinate frame");
+    let background = image.pixel(0, 0);
+    assert!(
+        image.count_differing_from(background, 8) > 0,
+        "a batch at 1e7 centred under the camera must still rasterize"
+    );
+}
+
+#[test]
+fn uniform_arena_places_batches_across_shared_buffers() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    // The per-batch uniform arena's page/offset selection is a property of the
+    // legacy per-batch path: converted line batches share one stream uniform and
+    // deliberately collapse to a single draw. Force the legacy path here so this
+    // test keeps exercising the multi-page arena (see
+    // `instanced_lines_match_legacy_pixels` for the instanced equivalent).
+    renderer.set_line_instancing(false);
+    // Many more batches than one WebGPU-default uniform page (256 slots), so the
+    // last batch necessarily lands in a later shared buffer with a non-zero
+    // dynamic offset. Every other batch sits far off-screen; only the last one is
+    // a visible rectangle at the origin. A wrong page/offset selection would hand
+    // the visible batch a neighbour's far-away transform and blank the frame.
+    let total = 300usize;
+    let mut batches: Vec<RenderBatch> = (0..total - 1)
+        .map(|k| {
+            let x = 10_000.0 + k as f32;
+            lines_batch(vec![[x, 0.0, 0.0], [x + 0.5, 0.5, 0.0]])
+        })
+        .collect();
+    batches.push(lines_batch(rectangle_lines()));
+    renderer
+        .upload(&scene(batches))
+        .expect("upload many batches");
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render many batches");
+    assert_eq!(
+        stats.draw_calls, total as u64,
+        "consolidating uniforms must not change the draw call count"
+    );
+    assert!(
+        stats.uniform_writes < total as u64,
+        "uniforms must consolidate into shared pages, got {} writes for {total} batches",
+        stats.uniform_writes
+    );
+
+    let image = renderer.read_target_rgba().expect("read many-batch frame");
+    let background = image.pixel(0, 0);
+    assert!(
+        image.count_differing_from(background, 8) > 0,
+        "a batch in a later uniform buffer must still rasterize at its own origin"
+    );
+
+    // Repeating the frame must be byte-identical (stable slot assignment).
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render many batches again");
+    let again = renderer.read_target_rgba().expect("read again");
+    assert_eq!(
+        image.pixels, again.pixels,
+        "shared uniform slot assignment must be deterministic"
+    );
+}
+
+#[test]
+fn frame_png_is_written_and_valid() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&scene(vec![lines_batch(rectangle_lines())]))
+        .expect("upload png scene");
+
+    let target = RenderTarget::new(64, 64);
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render png frame");
+    let image = renderer.read_target_rgba().expect("read png frame");
+    let png = encode_png(&image).expect("encode frame png");
+
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "PNG signature");
+    assert_eq!(&png[12..16], b"IHDR", "first chunk must be IHDR");
+    let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
+    let height = u32::from_be_bytes(png[20..24].try_into().unwrap());
+    assert_eq!((width, height), (64, 64));
+
+    // Lossless round-trip through the `png` crate must reproduce the readback
+    // exactly (`encode_png` performs no colour conversion).
+    let decoder = png::Decoder::new(std::io::Cursor::new(png));
+    let mut reader = decoder.read_info().expect("png read_info");
+    let required = reader.output_buffer_size().expect("png output size");
+    let mut decoded = vec![0u8; required];
+    let info = reader.next_frame(&mut decoded).expect("png next_frame");
+    assert_eq!((info.width, info.height), (64, 64));
+    assert_eq!(info.color_type, png::ColorType::Rgba);
+    assert_eq!(info.bit_depth, png::BitDepth::Eight);
+    assert_eq!(
+        &decoded[..required],
+        &image.pixels[..],
+        "PNG round-trip must be byte-identical to the readback"
+    );
+}
+
+/// Linetype dashes are visible: a pre-subdivided dashed line lights strictly
+/// fewer pixels than the solid line over the same span, and the midpoint (a
+/// gap) stays at the background colour.
+#[test]
+fn dashed_line_renders_a_visible_gap() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+    let camera = camera_2d();
+
+    renderer
+        .upload(&scene(vec![lines_batch(solid_horizontal_lines())]))
+        .expect("upload solid line");
+    renderer.render(camera, &target).expect("render solid line");
+    let solid = renderer.read_target_rgba().expect("read solid frame");
+    let background = solid.pixel(0, 0);
+    let solid_lit = solid.count_differing_from(background, 8);
+
+    renderer.clear_batches();
+    renderer
+        .upload(&scene(dashed_horizontal_batches()))
+        .expect("upload dashed line");
+    renderer
+        .render(camera, &target)
+        .expect("render dashed line");
+    let dashed = renderer.read_target_rgba().expect("read dashed frame");
+    // A pixel in the middle of the gap (world x = 0 -> pixel x = 32) must be
+    // background, while the solid frame is lit along its whole span.
+    assert_eq!(
+        dashed.pixel(32, 32),
+        background,
+        "the midpoint of a dashed line must be an unfilled gap"
+    );
+    let dashed_lit = dashed.count_differing_from(background, 8);
+    assert!(
+        dashed_lit < solid_lit,
+        "dashed line ({dashed_lit} px) must light fewer pixels than solid ({solid_lit} px)"
+    );
+    assert!(dashed_lit > 0, "the dashes themselves must still render");
+}
+
+/// Two entities with different colours must render differently. `RenderBatch`'s
+/// per-batch colour reaches the shader uniform; this is a real software-Vulkan
+/// (lavapipe) frame, not a plan-level assertion.
+#[test]
+fn batches_with_different_colors_render_different_frames() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+
+    renderer
+        .upload(&scene(vec![colored_line_batch([1.0, 0.0, 0.0])]))
+        .expect("upload red batch");
+    renderer.render(camera_2d(), &target).expect("render red");
+    let red = renderer.read_target_rgba().expect("read red frame");
+
+    renderer.clear_batches();
+    renderer
+        .upload(&scene(vec![colored_line_batch([0.0, 0.0, 1.0])]))
+        .expect("upload blue batch");
+    renderer.render(camera_2d(), &target).expect("render blue");
+    let blue = renderer.read_target_rgba().expect("read blue frame");
+
+    assert_ne!(
+        red.pixels, blue.pixels,
+        "the same geometry with different batch colours must produce different frames"
+    );
+    // The red frame must be redder than the blue frame on some pixel, and vice
+    // versa, rather than merely differing by antialiasing noise.
+    let redder = (0..64)
+        .flat_map(|y| (0..64).map(move |x| (x, y)))
+        .any(|(x, y)| red.pixel(x, y)[0] > blue.pixel(x, y)[0] + 8);
+    let bluer = (0..64)
+        .flat_map(|y| (0..64).map(move |x| (x, y)))
+        .any(|(x, y)| blue.pixel(x, y)[2] > red.pixel(x, y)[2] + 8);
+    assert!(
+        redder && bluer,
+        "each coloured frame must dominate its own channel"
+    );
+}
+
+/// ByLayer resolves to the layer colour upstream; at the renderer the important
+/// contract is that the resolved value travels into the uniform, so two batches
+/// that differ only in colour (one red, one the default white) are not equal.
+#[test]
+fn resolved_layer_color_reaches_the_uniform() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+
+    let mut default_batch = lines_batch(rectangle_lines());
+    default_batch.color = cad_scene::DEFAULT_BATCH_COLOR;
+    renderer
+        .upload(&scene(vec![default_batch]))
+        .expect("upload default batch");
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render default");
+    let default_frame = renderer.read_target_rgba().expect("read default");
+
+    renderer.clear_batches();
+    renderer
+        .upload(&scene(vec![colored_line_batch([1.0, 0.0, 0.0])]))
+        .expect("upload layer-colour batch");
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render layer-colour");
+    let layer_frame = renderer
+        .read_target_rgba()
+        .expect("read layer-colour frame");
+
+    assert_ne!(
+        default_frame.pixels, layer_frame.pixels,
+        "a batch whose colour came from the layer must render differently from \
+         the default colour"
+    );
+}
+
+/// Lineweight is carried but not drawn: the frame must report it explicitly.
+#[test]
+fn lineweight_is_reported_not_drawn() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let mut batch = lines_batch(rectangle_lines());
+    batch.lineweight = 0.5;
+    batch.lineweight_unresolved = false;
+    renderer
+        .upload(&scene(vec![batch]))
+        .expect("upload weighted batch");
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render weighted");
+
+    assert_eq!(
+        stats.lineweight_not_drawn.len(),
+        1,
+        "a non-zero lineweight must be reported as not drawn"
+    );
+    assert!((stats.lineweight_not_drawn[0].millimeters - 0.5).abs() < 1e-6);
+    let reason = stats
+        .lineweight_reason
+        .as_ref()
+        .expect("an explicit diagnostic reason must accompany the gap");
+    assert_eq!(
+        reason.code,
+        cad_diagnostics::codes::RENDER_LINEWEIGHT_NOT_DRAWN
+    );
+
+    // A batch that asks for no weight reports nothing.
+    renderer.clear_batches();
+    renderer
+        .upload(&scene(vec![lines_batch(rectangle_lines())]))
+        .expect("upload hairline batch");
+    let stats = renderer
+        .render(camera_2d(), &target)
+        .expect("render hairline");
+    assert!(
+        stats.lineweight_not_drawn.is_empty(),
+        "a zero lineweight must not be reported, got {:?}",
+        stats.lineweight_not_drawn
+    );
+    assert!(stats.lineweight_reason.is_none());
+}

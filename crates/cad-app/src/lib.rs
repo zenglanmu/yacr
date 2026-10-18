@@ -29,6 +29,9 @@ pub mod tasks;
 pub mod tool_state;
 pub mod viewer_config;
 
+mod command_id;
+mod space;
+
 pub use api::{
     ApiOutcome, ApiRequest, ApiTarget, EntityEdit, NewEntity, RawCommandTrace, TracedCommandOutcome,
 };
@@ -39,6 +42,7 @@ pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Camera2dParams, Camera3dParams, Projection,
     ProjectionKind, StandardView, ViewBasis,
 };
+pub use command_id::*;
 pub use draw_tool::{circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind};
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
@@ -52,6 +56,7 @@ pub use picking::{
 };
 pub use recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
 pub use selection::{entity_property_rows, PropertyRow, SelectionProperties, SelectionSet};
+pub use space::*;
 pub use tasks::{
     import_phase_key, AsyncOpenPoll, ImportJob, ImportManager, ImportProgressSnapshot,
     ImportTerminal,
@@ -59,143 +64,6 @@ pub use tasks::{
 pub use tool_state::{DrawCapture, ToolSnapshot, ToolState};
 
 use layers::LayerOverrideSet;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppMode {
-    Viewer,
-    Work,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandId {
-    OpenDrawing,
-    /// Start a new, empty drawing. Host-owned like `OpenDrawing`: the
-    /// application layer has no document factory, so it returns `Unsupported`
-    /// and a platform host performs the replacement.
-    NewDrawing,
-    /// Export the active drawing to a vector file (SVG/PDF). Host-owned like
-    /// `OpenDrawing`: the application layer has no file chooser, so it returns
-    /// `Unsupported` and a platform host performs the export.
-    PlotDrawing,
-    /// Save the active drawing as a lossy DXF file. Host-owned like
-    /// `OpenDrawing`: the application layer has no file chooser, so it returns
-    /// `Unsupported` and a platform host performs the save.
-    SaveDrawingAs,
-    CancelLoading,
-    Pan,
-    Zoom,
-    FitDrawing,
-    ResetView,
-    ToggleLayer,
-    /// Atomically publish a nonempty batch of temporary layer overrides.
-    /// Allowed in Viewer and Work; no drawing write, reparse or undo entry.
-    SetLayerVisibilities,
-    RestoreLayers,
-    SwitchSpace,
-    Select,
-    /// Select visible model-space pick items without editing the drawing.
-    /// Requires `CommandPayload::None`; incomplete picking is explicitly refused.
-    SelectAll,
-    Measure,
-    /// Confirm the points captured by the active open-ended measurement tool.
-    ConfirmMeasurement,
-    /// Cancel the active tool without committing anything.
-    CancelMeasurement,
-    Undo,
-    Redo,
-    Resources,
-    Diagnostics,
-    SwitchBackend,
-    Switch2d3d,
-    StandardView,
-    Orbit,
-    SwitchProjection,
-    /// Switch the session between Viewer and Work mode (audit U02).
-    ///
-    /// Allowed in both directions and in both modes: the mode change itself is
-    /// not a Work-only operation, but it cancels any unconfirmed tool. The
-    /// command layer still refuses every Work-only command while in Viewer mode.
-    SetMode,
-    /// Draw a LINE through two payload points into model space. Work-only.
-    CreateLine,
-    /// Draw a CIRCLE with a centre and an edge point. The radius is the exact
-    /// centre→edge distance and must be positive. Work-only.
-    CreateCircle,
-    /// Draw an ARC through three points (start, a point on the arc, end) on the
-    /// work plane. The three points must be non-collinear and finite; a
-    /// degenerate input is an explicit refusal that changes nothing. Work-only.
-    CreateArc,
-    /// Translate one or more selected entities by a world delta. Exactly one
-    /// transaction and one undo step for the whole selection. Work-only.
-    MoveEntities,
-    /// Trim one LINE against LINE/LWPOLYLINE segments (the honest subset of
-    /// §3 of `docs/drawing-edit.md`); anything else is an explicit refusal that
-    /// changes nothing. Work-only.
-    TrimEntity,
-    /// Extend one LINE to the nearest LINE/LWPOLYLINE boundary segment beyond
-    /// the picked end (the honest subset of EXTEND); anything else is an
-    /// explicit refusal that changes nothing. Work-only.
-    ExtendEntity,
-    /// Delete every entity in the current selection in one transaction. An
-    /// empty selection is an explicit refusal. Work-only.
-    EraseEntities,
-    /// Clone every entity in the current selection with a fresh id, translating
-    /// its geometry by a world delta, in one transaction. An empty selection or
-    /// a geometry that cannot be transformed is an explicit refusal. Work-only.
-    CopyEntities,
-    /// Rotate the current selection about a base point in the XY plane by an
-    /// absolute angle (radians). One transaction and one undo step. Work-only.
-    RotateEntities,
-    /// Scale the current selection uniformly about a base point by a positive
-    /// factor. One transaction and one undo step. Work-only.
-    ScaleEntities,
-    /// Mirror the current selection across the line through two points, keeping
-    /// the originals and adding mirrored copies in one transaction. Work-only.
-    MirrorEntities,
-    /// Capture the current selection into the in-process clipboard. Read-only
-    /// (the drawing and history are untouched), so it is allowed in Viewer too.
-    CopyToClipboard,
-    /// Capture the current selection into the clipboard, then delete it in one
-    /// transaction and one undo step. Work-only.
-    CutToClipboard,
-    /// Insert fresh-id clones of the clipboard entities at their original
-    /// coordinates in one transaction (PASTEORIG). Work-only.
-    PasteFromClipboard,
-    /// Create an offset copy of a single LINE/CIRCLE source, at the distance and
-    /// side given by the picked point. Another geometry kind is an explicit
-    /// `Unsupported` refusal. Work-only.
-    OffsetEntity,
-    /// Set the session's active layer for new drawing entities. Session state
-    /// only; no database write. Work-only.
-    SetActiveLayer,
-}
-
-impl CommandId {
-    pub fn requires_work_mode(self) -> bool {
-        matches!(
-            self,
-            Self::Measure
-                | Self::ConfirmMeasurement
-                | Self::Undo
-                | Self::Redo
-                | Self::CreateLine
-                | Self::CreateCircle
-                | Self::CreateArc
-                | Self::MoveEntities
-                | Self::TrimEntity
-                | Self::ExtendEntity
-                | Self::EraseEntities
-                | Self::CopyEntities
-                | Self::RotateEntities
-                | Self::ScaleEntities
-                | Self::MirrorEntities
-                | Self::CutToClipboard
-                | Self::PasteFromClipboard
-                | Self::OffsetEntity
-                | Self::SetActiveLayer
-        )
-    }
-}
 
 pub struct Document {
     pub id: DocumentId,
@@ -837,121 +705,6 @@ impl CommandOutcome {
             diagnostics: Vec::new(),
             measurement: None,
         }
-    }
-}
-
-/// Validate that model space or a named paper layout can be drawn.
-///
-/// `SpaceSelection::Model` is always valid. A paper selection must name a layout
-/// that exists in `database` **and** whose viewports this build can draw; an
-/// unknown layout is `InvalidInput` and a known-but-undrawable one is
-/// `Unsupported` with the representation layer's own reason. This is what keeps
-/// an unsupported layout an explicit diagnostic instead of a blank success
-/// (audit F04/B22).
-pub fn validate_space(database: &DrawingDatabase, space: SpaceSelection) -> CadResult<()> {
-    match space {
-        SpaceSelection::Model => Ok(()),
-        SpaceSelection::Paper(id) => match enumerate_layouts(database)
-            .into_iter()
-            .find(|descriptor| descriptor.id == id)
-        {
-            None => Err(CadError::InvalidInput(format!(
-                "unknown paper layout {}",
-                id.0
-            ))),
-            Some(descriptor) if !descriptor.supported => Err(CadError::Unsupported(format!(
-                "layout {:?} cannot be drawn: {}",
-                descriptor.name, descriptor.reason
-            ))),
-            Some(_) => Ok(()),
-        },
-    }
-}
-
-/// Validate the domain `SpaceId` payload form of a space switch.
-///
-/// `SpaceId::Block` is block-definition space, which is reached only through an
-/// `INSERT` and is never a selectable observation space, so it is refused.
-pub fn validate_space_id(database: &DrawingDatabase, space: &SpaceId) -> CadResult<()> {
-    match space {
-        SpaceId::Model => Ok(()),
-        SpaceId::Paper(id) => validate_space(database, SpaceSelection::Paper(*id)),
-        SpaceId::Block(_) => Err(CadError::InvalidInput(
-            "block space is not a selectable drawing space".into(),
-        )),
-    }
-}
-
-/// The measurement space for a pick in the session's active space.
-///
-/// Model space keeps the existing split (planar algorithms use the viewport work
-/// plane, spatial ones use [`MeasurementSpace::World3d`]). Paper space measures
-/// the sheet directly, so a distance becomes a planar paper distance and an
-/// angle (undefined on a 2D sheet) is refused rather than guessed. This is what
-/// keeps a paper distance distinguishable from a model distance (F04/F06).
-pub fn resolve_measurement_space(
-    active_space: &SpaceId,
-    work_plane: WorkPlane,
-    algorithm: MeasurementAlgorithm,
-) -> CadResult<(MeasurementAlgorithm, MeasurementSpace)> {
-    match active_space {
-        SpaceId::Model => {
-            let space = match algorithm {
-                MeasurementAlgorithm::Distance3d | MeasurementAlgorithm::Angle3Points => {
-                    MeasurementSpace::World3d
-                }
-                _ => MeasurementSpace::Plane(work_plane),
-            };
-            Ok((algorithm, space))
-        }
-        SpaceId::Paper(layout) => match algorithm {
-            // A 3D distance on a 2D sheet is a planar paper distance.
-            MeasurementAlgorithm::Distance3d => Ok((
-                MeasurementAlgorithm::Distance2d,
-                MeasurementSpace::Paper(*layout),
-            )),
-            MeasurementAlgorithm::Angle3Points => Err(CadError::Unsupported(format!(
-                "angle is not defined in paper space of layout {}; switch to model space",
-                layout.0
-            ))),
-            _ => Ok((algorithm, MeasurementSpace::Paper(*layout))),
-        },
-        SpaceId::Block(_) => Err(CadError::InvalidInput(
-            "block space is not a selectable drawing space".into(),
-        )),
-    }
-}
-
-/// The [`MeasurementSpace`] for measuring *inside* one layout viewport.
-///
-/// The returned space carries the viewport's verified paper→model inverse, so a
-/// pick on the sheet measures real model distance. A viewport whose state cannot
-/// be represented has no valid inverse and is refused with the representation
-/// layer's stable reason: model measurement is disabled, never guessed from
-/// paper pixels (F04).
-pub fn viewport_measurement_space(
-    database: &DrawingDatabase,
-    layout_id: LayoutId,
-    viewport_index: usize,
-) -> CadResult<MeasurementSpace> {
-    let layout = database
-        .layout(layout_id)
-        .ok_or_else(|| CadError::InvalidInput(format!("unknown paper layout {}", layout_id.0)))?;
-    let viewport = layout.viewports.get(viewport_index).ok_or_else(|| {
-        CadError::InvalidInput(format!(
-            "layout {} has no viewport {}",
-            layout_id.0, viewport_index
-        ))
-    })?;
-    match viewport_transform(viewport) {
-        ViewportState::Supported(t) => Ok(MeasurementSpace::ViewportModel {
-            layout: layout_id,
-            inverse: t.to_model,
-        }),
-        ViewportState::Unsupported(why) => Err(CadError::Unsupported(format!(
-            "layout {} viewport {} cannot be measured in model space: {why}",
-            layout_id.0, viewport_index
-        ))),
     }
 }
 

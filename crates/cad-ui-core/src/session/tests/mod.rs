@@ -1,0 +1,11 @@
+//! Session unit tests.
+//!
+//! The test gate lives on the single `mod tests;` declaration in the
+//! parent `session` module, so this module and its children are test-only. Each
+//! child reaches the session items through `super::super::*` and the shared
+//! fixtures through `super::test_support::*`.
+
+mod test_support;
+mod tests_commands;
+mod tests_hover;
+mod tests_input;

@@ -1,0 +1,273 @@
+//! Pointer gesture handling (press/drag/orbit/pan) and 3D navigation.
+use super::*;
+use cad_app::input::DRAG_THRESHOLD_LOGICAL_PX;
+use cad_app::interaction::PointerPhase;
+
+impl HostCore {
+    pub(super) fn pointer(
+        &self,
+        id: PointerId,
+        phase: PointerPhase,
+        button: Option<PointerButton>,
+        position: PointInput,
+    ) -> CadResult<()> {
+        let point = self.pointer_logical(position)?;
+        match phase {
+            PointerPhase::Down => self.pointer_down(id, point),
+            PointerPhase::Move => self.pointer_move(id, button, point),
+            PointerPhase::Up => self.pointer_up(id, point),
+            PointerPhase::Cancel => self.pointer_cancel(id),
+        }
+    }
+
+    /// Resolve a pointer position to canvas-local logical coordinates.
+    ///
+    /// A UI delivers canvas-local logical positions tagged with the metrics
+    /// revision it observed; a world point is accepted and projected only for a
+    /// host that supplies one directly.
+    fn pointer_logical(&self, position: PointInput) -> CadResult<[f64; 2]> {
+        match position {
+            PointInput::CanvasLocal {
+                logical_position,
+                metrics_revision,
+            } => {
+                if metrics_revision != self.metrics_revision.get() {
+                    return Err(CadError::InvalidInput(
+                        "stale canvas metrics revision".into(),
+                    ));
+                }
+                if !logical_position.iter().copied().all(f64::is_finite) {
+                    return Err(CadError::InvalidInput(
+                        "pointer position must be finite".into(),
+                    ));
+                }
+                Ok(logical_position)
+            }
+            PointInput::World(world) => {
+                let c = self.controller.borrow();
+                let viewport = c
+                    .application
+                    .workspace
+                    .viewports
+                    .get(&c.viewport_id)
+                    .ok_or(CadError::Cancelled)?;
+                viewport
+                    .camera
+                    .world_to_screen(world, viewport.logical_size)
+                    .ok_or_else(|| CadError::InvalidInput("world point cannot be projected".into()))
+            }
+        }
+    }
+
+    fn pointer_down(&self, id: PointerId, point: [f64; 2]) -> CadResult<()> {
+        // A press starts a gesture (pan/orbit/drag or a tap): hover must not
+        // survive into it, and the tint is cleared before anything else.
+        self.clear_hover();
+        let mut active = self.navigation.active.borrow_mut();
+        if active.contains(&id) {
+            return Ok(());
+        }
+        active.push(id);
+        let contacts = active.len();
+        drop(active);
+        if contacts == 1 {
+            self.navigation.anchor.set(Some(point));
+            self.navigation.last.set(Some(point));
+            self.navigation.dragged.set(false);
+            self.navigation.navigating.set(false);
+        } else {
+            // Hard rule: multi-touch navigation replaces any active tool and
+            // never commits a capture.
+            self.controller.borrow_mut().cancel_tool()?;
+            self.navigation.dragged.set(true);
+            self.navigation.navigating.set(true);
+            self.navigation.nav_last.set(Some(point));
+            self.full_dirty.set(true);
+        }
+        Ok(())
+    }
+
+    fn pointer_move(
+        &self,
+        id: PointerId,
+        button: Option<PointerButton>,
+        point: [f64; 2],
+    ) -> CadResult<()> {
+        if !self.navigation.active.borrow().contains(&id) {
+            // A move for a pointer that never went down (hover) is not a gesture.
+            return Ok(());
+        }
+        let contacts = self.navigation.active.borrow().len();
+        if contacts >= 2 {
+            self.navigation.navigating.set(true);
+            if let Some(last) = self.navigation.nav_last.get() {
+                let delta = [point[0] - last[0], point[1] - last[1]];
+                if delta != [0.0, 0.0] {
+                    self.pan_by_logical_delta(delta)?;
+                }
+            }
+            self.navigation.nav_last.set(Some(point));
+            return Ok(());
+        }
+        // A draw/measure capture owns single-contact gestures: the UI delivers
+        // those as MoveCursor / CapturePoint, so the pointer path never pans.
+        if self.capturing() {
+            return Ok(());
+        }
+        let nav = &self.navigation;
+        if !nav.dragged.get() {
+            let anchor = nav.anchor.get().unwrap_or(point);
+            if logical_distance(anchor, point) < DRAG_THRESHOLD_LOGICAL_PX {
+                return Ok(());
+            }
+            nav.dragged.set(true);
+            nav.navigating.set(true);
+            nav.last.set(Some(anchor));
+        } else if !nav.navigating.get() {
+            return Ok(());
+        }
+        let from = nav.last.get().unwrap_or(point);
+        if self.mode_is_3d() && button == Some(PointerButton::Primary) {
+            let (yaw, pitch) = orbit_delta(from, point);
+            self.orbit(yaw, pitch)?;
+        } else {
+            if !matches!(self.controller.borrow().session.tool, ToolState::Panning) {
+                self.controller.borrow_mut().session.begin_pan();
+                self.full_dirty.set(true);
+            }
+            self.pan_by_logical_delta([point[0] - from[0], point[1] - from[1]])?;
+        }
+        nav.last.set(Some(point));
+        Ok(())
+    }
+
+    fn pointer_up(&self, id: PointerId, point: [f64; 2]) -> CadResult<()> {
+        let mut active = self.navigation.active.borrow_mut();
+        let Some(index) = active.iter().position(|active| active == &id) else {
+            return Ok(());
+        };
+        active.remove(index);
+        let remaining = active.len();
+        drop(active);
+        if remaining > 0 {
+            // Still navigating: keep the gesture alive for the contacts left.
+            self.navigation.anchor.set(None);
+            self.navigation.nav_last.set(Some(point));
+            return Ok(());
+        }
+        let was_navigating = self.navigation.navigating.replace(false);
+        self.navigation.dragged.set(false);
+        self.navigation.anchor.set(None);
+        self.navigation.last.set(None);
+        self.navigation.nav_last.set(None);
+        if was_navigating && matches!(self.controller.borrow().session.tool, ToolState::Panning) {
+            self.controller.borrow_mut().cancel_tool()?;
+            self.full_dirty.set(true);
+        }
+        Ok(())
+    }
+
+    fn pointer_cancel(&self, id: PointerId) -> CadResult<()> {
+        // A cancel/blur ends the interaction: no hover from the interrupted
+        // gesture may remain.
+        self.clear_hover();
+        let mut active = self.navigation.active.borrow_mut();
+        active.retain(|active| active != &id);
+        let empty = active.is_empty();
+        drop(active);
+        if empty {
+            self.navigation.anchor.set(None);
+            self.navigation.last.set(None);
+            self.navigation.nav_last.set(None);
+            self.navigation.dragged.set(false);
+            self.navigation.navigating.set(false);
+            // An OS/browser pointer cancel must not leave an open tool behind.
+            self.controller.borrow_mut().cancel_tool()?;
+            self.full_dirty.set(true);
+        }
+        Ok(())
+    }
+
+    pub(super) fn capturing(&self) -> bool {
+        matches!(
+            &self.controller.borrow().session.tool,
+            ToolState::Drawing(_) | ToolState::Measuring(_)
+        )
+    }
+
+    /// Whether the active view is in 3D navigation mode.
+    ///
+    /// Keyed off the session's [`cad_app::ViewMode2d3d`], never the camera
+    /// projection, so a legitimate 3D view with an orthographic camera still
+    /// orbits (the legacy adapter's `is_3d`). This also matches the application
+    /// layer, whose `Orbit` command requires `view_mode.kind() == ThreeD`.
+    fn mode_is_3d(&self) -> bool {
+        let c = self.controller.borrow();
+        c.application
+            .workspace
+            .viewports
+            .get(&c.viewport_id)
+            .is_some_and(|viewport| viewport.view_mode.kind() == cad_app::ProjectionKind::ThreeD)
+    }
+
+    /// Pan the view by a logical-pixel delta, converted to world units.
+    ///
+    /// The same `world_per_px` the renderer uses converts the delta, so a pan
+    /// keeps the picked world point under the pointer.
+    fn pan_by_logical_delta(&self, delta: [f64; 2]) -> CadResult<()> {
+        if delta == [0.0, 0.0] {
+            return Ok(());
+        }
+        let world_per_px = {
+            let c = self.controller.borrow();
+            c.application
+                .workspace
+                .viewports
+                .get(&c.viewport_id)
+                .ok_or(CadError::Cancelled)?
+                .world_per_px()
+        };
+        self.immediate_command(
+            CommandId::Pan,
+            CommandPayload::Points(vec![Point3 {
+                x: delta[0] * world_per_px,
+                y: -delta[1] * world_per_px,
+                z: 0.0,
+            }]),
+        )
+    }
+
+    /// Orbit the 3D view by a `(yaw, pitch)` radian delta.
+    fn orbit(&self, yaw: f64, pitch: f64) -> CadResult<()> {
+        if yaw == 0.0 && pitch == 0.0 {
+            return Ok(());
+        }
+        self.immediate_command(CommandId::Orbit, CommandPayload::Orbit { yaw, pitch })
+    }
+}
+
+/// Radians of orbit per logical pixel of drag.
+///
+/// Mirrors the shared navigation constant; the UI-free host owns the orbit
+/// decision under the engine boundary.
+const ORBIT_RADIANS_PER_PIXEL: f64 = 0.008;
+
+/// Convert a 3D orbit drag delta (logical pixels) into `(yaw, pitch)` radians.
+///
+/// Horizontal drag yaws about world `+Z`; vertical drag pitches about the view
+/// right axis. Non-finite input yields `(0, 0)` rather than poisoning a camera.
+fn orbit_delta(from: [f64; 2], to: [f64; 2]) -> (f64, f64) {
+    let dx = to[0] - from[0];
+    let dy = to[1] - from[1];
+    if !dx.is_finite() || !dy.is_finite() {
+        return (0.0, 0.0);
+    }
+    (-dx * ORBIT_RADIANS_PER_PIXEL, dy * ORBIT_RADIANS_PER_PIXEL)
+}
+
+/// Euclidean distance between two logical positions.
+fn logical_distance(a: [f64; 2], b: [f64; 2]) -> f64 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    (dx * dx + dy * dy).sqrt()
+}
