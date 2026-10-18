@@ -26,16 +26,20 @@
 //! | overlay | `draw_order` |
 //! |---|---|
 //! | base drawing (`SceneCache`) | `0` |
+//! | world axes/grid ([`AXES_GRID_DRAW_ORDER`]) | `800_000` |
+//! | POINT markers ([`POINT_MARKER_DRAW_ORDER`]) | `850_000` |
 //! | selection highlight (`HIGHLIGHT_DRAW_ORDER`) | `900_000` |
 //! | object-snap hints ([`SNAP_HINT_DRAW_ORDER`]) | `1_500_000` |
 //! | box-selection rubber band ([`BOX_SELECT_DRAW_ORDER`]) | `1_750_000` |
 //! | tool preview ([`PREVIEW_DRAW_ORDER`]) | `2_000_000` |
 //!
 //! A selection is a transient decoration; a tool preview is the live feedback
-//! the user is acting on, so it draws above everything. Object-snap hints sit
-//! below the live preview rubber band and below the box-selection rubber band,
-//! so the snap marker the user aims at stays visible while both the draw
-//! preview and the selection rectangle draw above it.
+//! the user is acting on, so it draws above everything. Visible POINT markers
+//! are real drawing content, so they draw above the reference axes/grid but
+//! below all transient chrome. Object-snap hints sit below the live preview
+//! rubber band and below the box-selection rubber band, so the snap marker the
+//! user aims at stays visible while both the draw preview and the selection
+//! rectangle draw above it.
 //!
 //! The implementation is split across the submodules of this directory; every
 //! moved item is re-exported here under its original name, so the module path
@@ -61,6 +65,7 @@ use crate::viewer_config::OverlayVisibility;
 
 mod axes_grid;
 mod fingerprint;
+mod point_markers;
 mod preview;
 mod selection;
 mod types;
@@ -70,6 +75,7 @@ mod tests;
 
 pub use axes_grid::*;
 pub use fingerprint::*;
+pub use point_markers::*;
 pub use preview::*;
 pub use selection::*;
 pub use types::*;

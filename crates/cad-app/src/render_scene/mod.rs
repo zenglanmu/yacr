@@ -4,7 +4,7 @@
 //! sibling `tests` module so this file stays navigable.
 use crate::layers::LayerOverrideSet;
 use cad_db::DrawingDatabase;
-use cad_domain::{CadResult, DocumentId, SceneIdentity, SelectionRef, TaskStamp};
+use cad_domain::{CadResult, DocumentId, Point3, SceneIdentity, SelectionRef, TaskStamp};
 use cad_representation::{FontEngine, SpaceSelection};
 use std::sync::Arc;
 mod assembly;
@@ -88,6 +88,11 @@ pub struct CadSceneController {
     /// Decoded raster-image cache fed to the base build, stored so a later
     /// [`PreparedScene`] carries it to the renderer. `None` = no image context.
     images: Option<Arc<DecodedImageCache>>,
+    /// Visible POINT positions derived from the displayed drawing
+    /// (ADR 0015 decision E). Cached because they can only change when the base
+    /// changes; a camera-only overlay rebuild reuses them instead of rescanning
+    /// the model space on every navigation step.
+    point_markers: Vec<Point3>,
     pub ready: Option<PreparedScene>,
     pub diagnostic: Option<String>,
 }
@@ -249,6 +254,23 @@ impl CadSceneController {
             crate::validate_space(db, space)?;
         }
         let base_changed = self.base.is_none() || self.version != version;
+        // The visible POINT markers are drawing content: they can only change
+        // when the base changes, so derive them once per base revision and reuse
+        // the cache for every camera-only overlay rebuild (a full model-space
+        // scan per navigation step would be wasted work). The derived positions
+        // are injected into the effective inputs so they participate in the
+        // overlay fingerprint below.
+        if base_changed {
+            self.point_markers = match doc {
+                Some(db) => visible_point_marker_positions(db, layers, space),
+                None => Vec::new(),
+            };
+        }
+        let injected = (overlays.point_markers != self.point_markers).then(|| OverlayInputs {
+            point_markers: self.point_markers.clone(),
+            ..overlays.clone()
+        });
+        let overlays = injected.as_ref().unwrap_or(overlays);
         let next_base = self.base_revision + u64::from(base_changed);
         let visual_version = (next_base, overlay_fingerprint(overlays));
         let flags_version = entity_flags_fingerprint(overlays);
@@ -313,6 +335,15 @@ impl CadSceneController {
                             ),
                         }
                     }
+                    // Visible POINT markers (ADR 0015 decision E): real drawing
+                    // content, drawn above the reference axes/grid and below all
+                    // transient chrome. `viewport_bounds` is `None` in a 3D view,
+                    // so no marker is emitted there.
+                    overlay.merge(point_marker_overlay(
+                        &overlays.point_markers,
+                        overlays.viewport_bounds,
+                        document,
+                    ));
                     if overlays.visibility.selection_highlight {
                         overlay.merge(selection_highlight(
                             db,

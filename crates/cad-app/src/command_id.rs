@@ -67,6 +67,25 @@ pub enum CommandId {
     /// work plane. The three points must be non-collinear and finite; a
     /// degenerate input is an explicit refusal that changes nothing. Work-only.
     CreateArc,
+    /// Draw an open LWPOLYLINE through the payload points (at least two, all
+    /// finite and not all identical) on the active layer. Straight segments
+    /// only (one zero bulge per vertex, `closed == false`); fewer than two
+    /// distinct points is an explicit refusal that changes nothing. Work-only.
+    CreatePolyline,
+    /// Draw an axis-aligned RECTANG from two opposite corners: a closed
+    /// four-vertex LWPOLYLINE (one zero bulge per vertex) on the active layer.
+    /// Payload is `Points([corner1, corner2])` in click order; the handler
+    /// canonicalises the winding and refuses a non-finite, degenerate (zero
+    /// width/height) or non-coplanar pair. Work-only.
+    CreateRectangle,
+    /// Draw a full ELLIPSE by AutoCAD's **axis-endpoint method**: the two
+    /// endpoints of the first axis plus a third point giving the distance to the
+    /// other axis. Payload is `Points([p1, p2, p3])` in click order; the handler
+    /// builds the `SemanticGeometry::Ellipse` (centre, `+Z` normal, longer axis as
+    /// `major_axis`, `ratio <= 1`) and refuses a non-finite, degenerate
+    /// (coincident endpoints / third point on the first axis) or non-coplanar
+    /// triple. The centre method is not implemented. Work-only.
+    CreateEllipse,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
@@ -135,6 +154,9 @@ impl CommandId {
                 | Self::CreateLine
                 | Self::CreateCircle
                 | Self::CreateArc
+                | Self::CreatePolyline
+                | Self::CreateRectangle
+                | Self::CreateEllipse
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity

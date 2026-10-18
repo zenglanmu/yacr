@@ -678,6 +678,22 @@ impl DefaultRepresentationProvider {
                     }
                 }
             }
+            // A POINT has no base-scene geometry. The chord tessellator would
+            // degenerate it to a zero-length `[p, p]` segment (invisible), so
+            // skip it here and record honestly that the overlay marker draws it.
+            // `cad_geometry::tessellate_geometry` is deliberately unchanged: its
+            // `[p, p]` output is what picking, bounds and snapping consume.
+            SemanticGeometry::Point(_) => {
+                representation.completeness = Completeness::Partial(vec![
+                    "point is drawn by the overlay marker, not by base-scene geometry".into(),
+                ]);
+                representation.diagnostics.push(Diagnostic {
+                    object: Some(ObjectId(entity.id.0)),
+                    code: "representation.point_overlay".into(),
+                    message: "POINT has no base-scene geometry; it is drawn by the overlay marker"
+                        .into(),
+                });
+            }
             other => push_chord_fragment(
                 entity,
                 other,

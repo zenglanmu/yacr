@@ -87,6 +87,15 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
         }
         None => 0u8.hash(&mut hasher),
     }
+    // Visible POINT markers are overlay geometry: a changed point set (a new or
+    // erased POINT, or a different drawing) must rebuild the transient overlay.
+    // The marker size is derived from `viewport_bounds` (hashed above), so a
+    // camera-only change re-scales them without rebuilding the base scene.
+    4u8.hash(&mut hasher);
+    inputs.point_markers.len().hash(&mut hasher);
+    for point in &inputs.point_markers {
+        hash_point(&mut hasher, *point);
+    }
     hasher.finish()
 }
 

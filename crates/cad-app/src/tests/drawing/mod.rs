@@ -272,8 +272,11 @@ fn line_and_opaque_app() -> Application {
 
 mod arc_extend;
 mod clipboard;
+mod create_polyline;
 mod create_trim;
+mod ellipse;
 mod offset;
+mod rectangle;
 mod reports;
 mod selection_reconcile;
 mod transform;

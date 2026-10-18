@@ -38,15 +38,34 @@ fn keys_indices_and_labels_round_trip_and_reject_unknowns() {
 fn required_points_and_selection_are_explicit_per_kind() {
     for kind in DrawToolKind::ALL {
         let expected = match kind {
-            DrawToolKind::Arc | DrawToolKind::Scale => 3,
+            DrawToolKind::Arc | DrawToolKind::Ellipse | DrawToolKind::Scale => 3,
             DrawToolKind::Offset => 1,
             _ => 2,
         };
         assert_eq!(kind.required_points(), expected, "{kind:?}");
     }
+    // The arity model: PLINE is the only open-ended kind; every other kind keeps
+    // its exact complement (byte-identical to the pre-arity state machine).
+    assert_eq!(DrawToolKind::Polyline.arity(), PointArity::AtLeast(2));
+    for kind in DrawToolKind::ALL {
+        if kind == DrawToolKind::Polyline {
+            continue;
+        }
+        assert_eq!(
+            kind.arity(),
+            PointArity::Exact(kind.required_points()),
+            "{kind:?} must stay fixed-arity"
+        );
+    }
+    assert!(PointArity::AtLeast(2).is_open_ended());
+    assert!(!PointArity::Exact(2).is_open_ended());
+    assert_eq!(PointArity::AtLeast(2).minimum(), 2);
+    assert_eq!(PointArity::Exact(3).minimum(), 3);
     assert!(!DrawToolKind::Line.requires_selection());
     assert!(!DrawToolKind::Circle.requires_selection());
     assert!(!DrawToolKind::Arc.requires_selection());
+    assert!(!DrawToolKind::Polyline.requires_selection());
+    assert!(!DrawToolKind::Polyline.needs_picked_entities());
     assert!(DrawToolKind::Move.requires_selection());
     assert!(!DrawToolKind::Trim.requires_selection());
     assert!(DrawToolKind::Copy.requires_selection());
@@ -60,7 +79,7 @@ fn required_points_and_selection_are_explicit_per_kind() {
 #[test]
 fn offset_captures_one_side_point() {
     let mut tool = DrawTool::new(DrawToolKind::Offset, 1);
-    assert_eq!(tool.remaining(), 1);
+    assert_eq!(tool.remaining(), Some(1));
     assert!(!tool.is_ready());
     tool.push_point(p(3.0, 4.0)).unwrap();
     assert!(tool.is_ready());
@@ -188,10 +207,10 @@ fn rotate_scale_mirror_transforms_are_correct() {
 #[test]
 fn arc_captures_three_points_and_confirms_an_arc_intent() {
     let mut tool = DrawTool::new(DrawToolKind::Arc, 0);
-    assert_eq!(tool.remaining(), 3);
+    assert_eq!(tool.remaining(), Some(3));
     tool.push_point(p(0.0, 0.0)).unwrap();
     tool.push_point(p(5.0, 5.0)).unwrap();
-    assert_eq!(tool.remaining(), 1);
+    assert_eq!(tool.remaining(), Some(1));
     assert!(!tool.is_ready());
     tool.push_point(p(10.0, 0.0)).unwrap();
     assert!(tool.is_ready());
@@ -354,10 +373,10 @@ fn arc_parameters_refuse_non_coplanar_points() {
 #[test]
 fn line_captures_two_points_and_confirms_a_line_intent() {
     let mut tool = DrawTool::new(DrawToolKind::Line, 0);
-    assert_eq!(tool.remaining(), 2);
+    assert_eq!(tool.remaining(), Some(2));
     assert!(!tool.is_ready());
     tool.push_point(p(0.0, 0.0)).unwrap();
-    assert_eq!(tool.remaining(), 1);
+    assert_eq!(tool.remaining(), Some(1));
     assert!(!tool.is_ready());
     tool.push_point(p(4.0, 3.0)).unwrap();
     assert!(tool.is_ready());
@@ -532,4 +551,278 @@ fn a_click_after_both_pick_steps_is_refused_as_ready_not_as_a_free_point() {
     assert_eq!(tool.picks().len(), 2);
     assert_eq!(tool.points().len(), 2);
     assert!(tool.is_ready());
+}
+
+#[test]
+fn fixed_arity_still_refuses_the_n_plus_one_point_and_ready_exactly_at_n() {
+    // Byte-identical contract for every fixed kind: ready exactly at n, and the
+    // (n + 1)-th point is refused without capturing. The entity-picking kinds
+    // (TRIM/EXTEND) take entity picks, so their capture goes through
+    // `push_pick` (the point and the resolved ref together).
+    for kind in DrawToolKind::ALL {
+        if kind == DrawToolKind::Polyline {
+            continue;
+        }
+        let n = kind.required_points();
+        // A selection-requiring kind needs a selection only for readiness, not
+        // for the point-complement refusal this test pins.
+        let mut tool = DrawTool::new(kind, 1);
+        let capture = |tool: &mut DrawTool, i: usize, point: Point3| {
+            if kind.needs_picked_entities() {
+                tool.push_pick(point, pick(i as u128 + 100))
+            } else {
+                tool.push_point(point)
+            }
+        };
+        for i in 0..n {
+            assert_eq!(tool.remaining(), Some(n - i), "{kind:?}");
+            capture(&mut tool, i, p(i as f64, 0.0)).unwrap();
+            assert_eq!(tool.remaining(), Some(n - 1 - i), "{kind:?}");
+        }
+        assert_eq!(tool.remaining(), Some(0), "{kind:?}");
+        assert!(
+            tool.is_ready(),
+            "{kind:?} must be ready at exactly n points"
+        );
+        let error = capture(&mut tool, 99, p(99.0, 99.0)).unwrap_err();
+        assert!(matches!(error, CadError::InvalidInput(_)), "{kind:?}");
+        assert_eq!(
+            tool.points().len(),
+            n,
+            "{kind:?} refused point not captured"
+        );
+        // Every fixed-arity preview still reports a numeric 0 remainder.
+        assert_eq!(tool.preview().remaining, 0);
+        assert!(!tool.preview().is_open_ended());
+        assert_eq!(tool.preview().remaining_points(), Some(0));
+    }
+}
+
+#[test]
+fn open_ended_polyline_accepts_more_points_and_is_ready_at_its_minimum() {
+    let mut tool = DrawTool::new(DrawToolKind::Polyline, 0);
+    assert_eq!(DrawToolKind::Polyline.arity(), PointArity::AtLeast(2));
+    assert!(tool.remaining().is_some());
+    assert_eq!(tool.remaining(), Some(2));
+    assert!(!tool.is_ready());
+    // Below the minimum the capture is not confirmable and reports a count.
+    assert!(matches!(tool.intent(), Err(CadError::InvalidInput(_))));
+
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    assert_eq!(tool.remaining(), Some(1));
+    assert!(!tool.is_ready());
+
+    tool.push_point(p(1.0, 0.0)).unwrap();
+    // At the minimum: ready, and there is **no** fixed remaining count (never a
+    // fabricated 0) because more points are still accepted.
+    assert_eq!(tool.remaining(), None);
+    assert!(tool.is_ready());
+    assert!(tool.preview().can_confirm());
+    assert!(tool.preview().is_open_ended());
+    assert_eq!(tool.preview().remaining_points(), None);
+    assert_eq!(
+        tool.preview().status_line(),
+        "polyline: 2 point(s) captured, press Enter to finish"
+    );
+
+    // More points are accepted indefinitely (up to the cap) and the tool stays
+    // ready; the intent carries every captured vertex in order.
+    tool.push_point(p(2.0, 0.0)).unwrap();
+    tool.push_point(p(2.0, 1.0)).unwrap();
+    assert_eq!(tool.remaining(), None);
+    assert!(tool.is_ready());
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::Polyline {
+            points: vec![p(0.0, 0.0), p(1.0, 0.0), p(2.0, 0.0), p(2.0, 1.0)]
+        }
+    );
+
+    // A non-finite point is refused mid-capture without disturbing the capture.
+    assert!(tool.push_point(p(f64::NAN, 0.0)).is_err());
+    assert_eq!(tool.points().len(), 4);
+}
+
+#[test]
+fn open_ended_capture_refuses_past_the_hard_cap_explicitly() {
+    let mut tool = DrawTool::new(DrawToolKind::Polyline, 0);
+    for i in 0..MAX_OPEN_CAPTURE_POINTS {
+        tool.push_point(p(i as f64, 0.0)).unwrap();
+    }
+    assert_eq!(tool.points().len(), MAX_OPEN_CAPTURE_POINTS);
+    let message = match tool.push_point(p(1.0e9, 1.0e9)) {
+        Err(CadError::InvalidInput(message)) => message,
+        other => panic!("expected a cap refusal, got {other:?}"),
+    };
+    assert!(message.contains("maximum"), "{message}");
+    assert!(
+        message.contains(&MAX_OPEN_CAPTURE_POINTS.to_string()),
+        "{message}"
+    );
+    assert_eq!(tool.points().len(), MAX_OPEN_CAPTURE_POINTS);
+    assert!(tool.is_ready());
+}
+
+#[test]
+fn polyline_captures_two_and_three_points_into_an_exact_intent() {
+    let mut two = DrawTool::new(DrawToolKind::Polyline, 0);
+    two.push_point(p(0.0, 0.0)).unwrap();
+    two.push_point(p(3.0, 4.0)).unwrap();
+    assert_eq!(
+        two.intent().unwrap(),
+        DrawIntent::Polyline {
+            points: vec![p(0.0, 0.0), p(3.0, 4.0)]
+        }
+    );
+
+    let mut three = DrawTool::new(DrawToolKind::Polyline, 0);
+    three.push_point(p(0.0, 0.0)).unwrap();
+    three.push_point(p(5.0, 0.0)).unwrap();
+    three.push_point(p(5.0, 5.0)).unwrap();
+    assert_eq!(
+        three.intent().unwrap(),
+        DrawIntent::Polyline {
+            points: vec![p(0.0, 0.0), p(5.0, 0.0), p(5.0, 5.0)]
+        }
+    );
+}
+
+#[test]
+fn rectang_captures_two_corners_exactly_and_ready_at_two() {
+    // RECTANG is fixed arity 2 (like LINE): ready exactly at the second corner,
+    // and the (2 + 1)-th click is refused. No selection and no entity pick.
+    let mut tool = DrawTool::new(DrawToolKind::Rectang, 0);
+    assert_eq!(DrawToolKind::Rectang.arity(), PointArity::Exact(2));
+    assert_eq!(tool.remaining(), Some(2));
+    assert!(!tool.is_ready());
+    assert!(!DrawToolKind::Rectang.requires_selection());
+    assert!(!DrawToolKind::Rectang.needs_picked_entities());
+    assert!(!tool.requires_entity_pick());
+
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    assert_eq!(tool.remaining(), Some(1));
+    assert!(!tool.is_ready());
+    // An incomplete capture has no intent.
+    assert!(matches!(tool.intent(), Err(CadError::InvalidInput(_))));
+
+    tool.push_point(p(4.0, 3.0)).unwrap();
+    assert_eq!(tool.remaining(), Some(0));
+    assert!(tool.is_ready());
+    assert!(tool.preview().can_confirm());
+    assert_eq!(tool.preview().remaining_points(), Some(0));
+    assert!(!tool.preview().is_open_ended());
+    // The intent carries the two captured corners **exactly**, in click order
+    // (the winding is canonicalised by the command layer, not here).
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::Rect {
+            corner1: p(0.0, 0.0),
+            corner2: p(4.0, 3.0),
+        }
+    );
+
+    // The third point is refused and does not disturb the capture.
+    let error = tool.push_point(p(9.0, 9.0)).unwrap_err();
+    assert!(matches!(error, CadError::InvalidInput(_)));
+    assert_eq!(tool.points().len(), 2);
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::Rect {
+            corner1: p(0.0, 0.0),
+            corner2: p(4.0, 3.0),
+        }
+    );
+
+    // A non-finite corner is refused at capture, never silently stored.
+    let mut fresh = DrawTool::new(DrawToolKind::Rectang, 0);
+    assert!(fresh.push_point(p(f64::NAN, 0.0)).is_err());
+    assert!(fresh.points().is_empty());
+}
+
+#[test]
+fn rectang_status_line_reports_the_corner_progress() {
+    let mut tool = DrawTool::new(DrawToolKind::Rectang, 0);
+    assert_eq!(tool.preview().status_line(), "矩形：已选 0 点，还需 2 点");
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    assert_eq!(tool.preview().status_line(), "矩形：已选 1 点，还需 1 点");
+    tool.push_point(p(2.0, 2.0)).unwrap();
+    assert_eq!(tool.preview().status_line(), "矩形：已选 2 点，可确认");
+}
+
+#[test]
+fn ellipse_captures_three_picks_exactly_and_ready_at_three() {
+    // ELLIPSE is fixed arity 3 (axis-endpoint method): ready exactly at the third
+    // pick, and the (3 + 1)-th click is refused. No selection and no entity pick.
+    let mut tool = DrawTool::new(DrawToolKind::Ellipse, 0);
+    assert_eq!(DrawToolKind::Ellipse.arity(), PointArity::Exact(3));
+    assert_eq!(tool.remaining(), Some(3));
+    assert!(!tool.is_ready());
+    assert!(!DrawToolKind::Ellipse.requires_selection());
+    assert!(!DrawToolKind::Ellipse.needs_picked_entities());
+    assert!(!tool.requires_entity_pick());
+
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    assert_eq!(tool.remaining(), Some(2));
+    tool.push_point(p(4.0, 0.0)).unwrap();
+    assert_eq!(tool.remaining(), Some(1));
+    assert!(!tool.is_ready());
+    // An incomplete capture has no intent.
+    assert!(matches!(tool.intent(), Err(CadError::InvalidInput(_))));
+
+    tool.push_point(p(2.0, 3.0)).unwrap();
+    assert_eq!(tool.remaining(), Some(0));
+    assert!(tool.is_ready());
+    assert!(tool.preview().can_confirm());
+    assert_eq!(tool.preview().remaining_points(), Some(0));
+    assert!(!tool.preview().is_open_ended());
+    // The intent carries the three captured picks **exactly**, in click order (the
+    // geometry construction and axis swap are the command layer's job, not here).
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::Ellipse {
+            p1: p(0.0, 0.0),
+            p2: p(4.0, 0.0),
+            p3: p(2.0, 3.0),
+        }
+    );
+
+    // The fourth pick is refused and does not disturb the capture.
+    let error = tool.push_point(p(9.0, 9.0)).unwrap_err();
+    assert!(matches!(error, CadError::InvalidInput(_)));
+    assert_eq!(tool.points().len(), 3);
+
+    // A non-finite pick is refused at capture, never silently stored.
+    let mut fresh = DrawTool::new(DrawToolKind::Ellipse, 0);
+    assert!(fresh.push_point(p(f64::NAN, 0.0)).is_err());
+    assert!(fresh.points().is_empty());
+}
+
+#[test]
+fn ellipse_status_line_reports_the_pick_progress() {
+    let mut tool = DrawTool::new(DrawToolKind::Ellipse, 0);
+    assert_eq!(tool.preview().status_line(), "椭圆：已选 0 点，还需 3 点");
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    tool.push_point(p(4.0, 0.0)).unwrap();
+    assert_eq!(tool.preview().status_line(), "椭圆：已选 2 点，还需 1 点");
+    tool.push_point(p(2.0, 3.0)).unwrap();
+    assert_eq!(tool.preview().status_line(), "椭圆：已选 3 点，可确认");
+}
+
+#[test]
+fn polyline_status_line_reports_open_ended_progress_without_a_fixed_count() {
+    let mut tool = DrawTool::new(DrawToolKind::Polyline, 0);
+    assert_eq!(
+        tool.preview().status_line(),
+        "polyline: 0 point(s) captured, at least 2 needed"
+    );
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    assert_eq!(
+        tool.preview().status_line(),
+        "polyline: 1 point(s) captured, at least 2 needed"
+    );
+    tool.push_point(p(1.0, 0.0)).unwrap();
+    assert_eq!(
+        tool.preview().status_line(),
+        "polyline: 2 point(s) captured, press Enter to finish"
+    );
 }

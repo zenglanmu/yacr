@@ -25,6 +25,7 @@ use crate::{
 };
 
 mod databases;
+mod draw_create;
 mod draw_pick;
 
 #[cfg(test)]
@@ -229,6 +230,26 @@ impl HostController {
             DrawIntent::Arc { points } => (
                 crate::CommandId::CreateArc,
                 crate::CommandPayload::Points(points.to_vec()),
+            ),
+            // PLINE: the captured vertices travel as `Points` (the payload the
+            // create path already reads), so the handler builds the
+            // `SemanticGeometry::Polyline` from exactly the points the user saw.
+            DrawIntent::Polyline { points } => (
+                crate::CommandId::CreatePolyline,
+                crate::CommandPayload::Points(points),
+            ),
+            // RECTANG: the two captured corners travel in click order as `Points`
+            // (the payload the create path already reads); the handler canonicalises
+            // the winding and builds the closed four-vertex polyline.
+            DrawIntent::Rect { corner1, corner2 } => (
+                crate::CommandId::CreateRectangle,
+                crate::CommandPayload::Points(vec![corner1, corner2]),
+            ),
+            // ELLIPSE: the three captured axis-endpoint picks travel in click
+            // order as `Points`; the handler builds the ellipse frame.
+            DrawIntent::Ellipse { p1, p2, p3 } => (
+                crate::CommandId::CreateEllipse,
+                crate::CommandPayload::Points(vec![p1, p2, p3]),
             ),
             DrawIntent::Move { delta } => (
                 crate::CommandId::MoveEntities,
@@ -578,28 +599,6 @@ impl HostController {
             payload: crate::CommandPayload::ActiveLayer(layer),
         })?;
         Ok(())
-    }
-
-    /// Draw a LINE through two world points in one transaction (spec F-EDIT).
-    pub fn create_line(&mut self, start: Point3, end: Point3) -> CadResult<CommandOutcome> {
-        self.execute(Command {
-            schema_version: 1,
-            id: crate::CommandId::CreateLine,
-            document: self.document_id,
-            viewport: self.viewport_id,
-            payload: crate::CommandPayload::Points(vec![start, end]),
-        })
-    }
-
-    /// Draw a CIRCLE from a centre and an edge point in one transaction.
-    pub fn create_circle(&mut self, center: Point3, edge: Point3) -> CadResult<CommandOutcome> {
-        self.execute(Command {
-            schema_version: 1,
-            id: crate::CommandId::CreateCircle,
-            document: self.document_id,
-            viewport: self.viewport_id,
-            payload: crate::CommandPayload::Points(vec![center, edge]),
-        })
     }
 
     /// Move a set of selected refs by a world delta in one transaction.

@@ -18,7 +18,38 @@
 //! a cancelled draw always leaves the drawing and history untouched. Confirming
 //! yields exactly one intent, which the caller commits through one transaction.
 
-use cad_domain::{CadError, CadResult, Point3, SelectionRef, Transform3};
+use cad_domain::{CadError, CadResult, Point3, SelectionRef};
+
+/// How many points a capture needs: a fixed complement, or an open-ended
+/// minimum.
+///
+/// The interactive tools were historically fixed-arity (`required_points`),
+/// which cannot express a polyline: PLINE accepts as many vertices as the user
+/// clicks and is finished with Enter. Making the arity explicit lets the state
+/// machine keep the two models apart instead of pretending an open-ended tool
+/// has a fixed "0 remaining".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointArity {
+    /// Exactly this many points; the `(n + 1)`-th is refused.
+    Exact(usize),
+    /// At least this many points; further points are accepted (up to the hard
+    /// cap [`MAX_OPEN_CAPTURE_POINTS`]) and the capture is confirmed with Enter.
+    AtLeast(usize),
+}
+
+impl PointArity {
+    /// The minimum number of points required to define the operation.
+    pub fn minimum(self) -> usize {
+        match self {
+            Self::Exact(n) | Self::AtLeast(n) => n,
+        }
+    }
+
+    /// Whether the capture accepts points beyond the minimum (open-ended).
+    pub fn is_open_ended(self) -> bool {
+        matches!(self, Self::AtLeast(_))
+    }
+}
 
 /// The drawing/editing operation a tool captures for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +60,64 @@ pub enum DrawToolKind {
     Circle,
     /// ARC: three points (start, a point on the arc, end).
     Arc,
+    /// PLINE: an open-ended polyline (at least two points, then Enter).
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now, so the honest union of
+    /// supported options stays explicit):
+    /// * no arc segments / bulge authoring — every captured vertex joins its
+    ///   neighbour with a straight segment (`bulges = [0.0; n]`); the `Arc`
+    ///   sub-command is not offered;
+    /// * no `Close` — the created polyline is always `closed = false`;
+    /// * no `Width` / `Halfwidth` — no per-segment start/end width is authored;
+    /// * no `Undo` at a vertex prompt — the capture is all-or-nothing (cancel
+    ///   discards it, Enter confirms it), and there is no vertex-level undo;
+    /// * no 3D / OCS input — like LINE/CIRCLE/ARC this is the flat work-plane
+    ///   subset, so points carry only the `+Z` the picker produced and are never
+    ///   silently reprojected onto another plane.
+    Polyline,
+    /// RECTANG: two opposite corners of an axis-aligned rectangle.
+    ///
+    /// The commit is a **closed** four-vertex polyline (`closed = true`, one zero
+    /// bulge per vertex), which is the LWPOLYLINE the database already validates
+    /// and the lossy DXF export already maps exactly.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now, so the honest union of
+    /// supported options stays explicit):
+    /// * no `Chamfer` / `Fillet` — the four corners are always square, and the
+    ///   AutoCAD quirk of a fillet/chamfer radius persisting across RECTANG
+    ///   invocations within a session is not modelled (there is no tool-parameter
+    ///   channel yet, see ADR 0015 decision C);
+    /// * no `Thickness` / `Elevation` — the rectangle is a flat `+Z` planar
+    ///   construction; no extrusion thickness and no work-plane elevation offset;
+    /// * no `Width` — no polyline start/end width is authored (DXF default 0);
+    /// * no `Area` / `Dimensions` — the two numeric area/dimension entry modes are
+    ///   not offered (they would need the numeric input channel);
+    /// * no `Rotation` — the rectangle is axis-aligned in the world frame, never
+    ///   rotated by a typed angle;
+    /// * no 3D / OCS input — like LINE/CIRCLE/ARC this is the flat work-plane
+    ///   subset, so a pair of corners that is not coplanar on one `+Z` plane is an
+    ///   explicit refusal rather than a silent projection.
+    Rectang,
+    /// ELLIPSE: three points by AutoCAD's **axis-endpoint method** (the two
+    /// endpoints of the first axis, then a third point giving the distance to the
+    /// other axis), committed as one `SemanticGeometry::Ellipse`.
+    ///
+    /// The centre method (`C`) is **NOT IMPLEMENTED**; this is the axis-endpoint
+    /// default only. The three picks are captured exactly as clicked; the
+    /// geometry-side construction, the axis-swap rule and every degeneracy
+    /// refusal live in the command layer (`ellipse_parameters`), so the tool never
+    /// invents a centre, a ratio or an axis.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now, so the honest union of
+    /// supported options stays explicit):
+    /// * no `Center` — the centre construction is not offered;
+    /// * no `Arc` — only a full ellipse (`start = 0`, `sweep = 2π`) is authored;
+    /// * no `Rotation` / `Isocircle` / `PELLIPSE` — no rotation parameter, no
+    ///   isometric circle and no legacy polyline ellipse;
+    /// * no 3D / OCS input — like LINE/CIRCLE/ARC this is the flat work-plane
+    ///   subset, so a non-coplanar (`+Z`) triple is an explicit refusal rather
+    ///   than a silent projection.
+    Ellipse,
     /// MOVE: requires a selection, then a two-point delta.
     Move,
     /// TRIM: a target pick plus a boundary pick.
@@ -51,10 +140,13 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 11] = [
+    pub const ALL: [DrawToolKind; 14] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
+        DrawToolKind::Polyline,
+        DrawToolKind::Rectang,
+        DrawToolKind::Ellipse,
         DrawToolKind::Move,
         DrawToolKind::Trim,
         DrawToolKind::Copy,
@@ -71,6 +163,9 @@ impl DrawToolKind {
             Self::Line => "line",
             Self::Circle => "circle",
             Self::Arc => "arc",
+            Self::Polyline => "polyline",
+            Self::Rectang => "rectang",
+            Self::Ellipse => "ellipse",
             Self::Move => "move",
             Self::Trim => "trim",
             Self::Copy => "copy",
@@ -89,6 +184,9 @@ impl DrawToolKind {
             "line" => Some(Self::Line),
             "circle" => Some(Self::Circle),
             "arc" => Some(Self::Arc),
+            "polyline" => Some(Self::Polyline),
+            "rectang" => Some(Self::Rectang),
+            "ellipse" => Some(Self::Ellipse),
             "move" => Some(Self::Move),
             "trim" => Some(Self::Trim),
             "copy" => Some(Self::Copy),
@@ -128,6 +226,9 @@ impl DrawToolKind {
             Self::Line => "直线",
             Self::Circle => "圆",
             Self::Arc => "圆弧",
+            Self::Polyline => "多段线",
+            Self::Rectang => "矩形",
+            Self::Ellipse => "椭圆",
             Self::Move => "移动",
             Self::Trim => "修剪",
             Self::Copy => "复制",
@@ -139,24 +240,39 @@ impl DrawToolKind {
         }
     }
 
-    /// Exact number of points this operation needs to be defined.
-    pub fn required_points(self) -> usize {
+    /// The capture arity: an exact complement, or an open-ended minimum.
+    pub fn arity(self) -> PointArity {
         match self {
-            // Start, a point on the arc, end; or base, reference, target.
-            Self::Arc | Self::Scale => 3,
+            // PLINE is the one open-ended capture: at least two vertices, more
+            // accepted, finished with Enter.
+            Self::Polyline => PointArity::AtLeast(2),
+            // Start, a point on the arc, end; two axis endpoints plus the
+            // other-axis distance; or base, reference, target.
+            Self::Arc | Self::Ellipse | Self::Scale => PointArity::Exact(3),
             // One side/distance point.
-            Self::Offset => 1,
-            // Two endpoints, centre+radius point, a move/copy delta,
-            // target+boundary, or a rotate angle / mirror axis.
+            Self::Offset => PointArity::Exact(1),
+            // Two endpoints, centre+radius point, two opposite rectangle
+            // corners, a move/copy delta, target+boundary, or a rotate angle /
+            // mirror axis.
             Self::Line
             | Self::Circle
+            | Self::Rectang
             | Self::Move
             | Self::Trim
             | Self::Copy
             | Self::Extend
             | Self::Rotate
-            | Self::Mirror => 2,
+            | Self::Mirror => PointArity::Exact(2),
         }
+    }
+
+    /// Minimum number of points this operation needs to be defined.
+    ///
+    /// For a fixed-arity (`Exact`) kind this is the exact complement; for the
+    /// open-ended (`AtLeast`) PLINE it is the minimum needed to confirm, with
+    /// more points still accepted.
+    pub fn required_points(self) -> usize {
+        self.arity().minimum()
     }
 
     /// Whether this operation needs a non-empty selection before it can run.
@@ -208,6 +324,13 @@ pub struct DrawPreview {
     /// follow-up highlight wiring, not a commit source.
     pub candidate: Option<SelectionRef>,
     /// Captured points still needed before the operation is defined.
+    ///
+    /// This is the *minimum* complement ([`PointArity::minimum`] minus the
+    /// captured count), so it is `0` once the operation can be confirmed. For an
+    /// **open-ended** tool a further point is still accepted while this is `0`;
+    /// the honest projection is [`Self::remaining_points`] (which returns `None`
+    /// there) — this raw count is retained as the legacy numeric field the
+    /// `cad-host`/`cad-engine` wire shape reads.
     pub remaining: usize,
     /// Number of selected entities the tool was started with (MOVE needs > 0).
     pub selection_count: usize,
@@ -221,13 +344,62 @@ impl DrawPreview {
         self.ready
     }
 
+    /// The capture arity of the tool this preview describes.
+    pub fn arity(&self) -> PointArity {
+        self.kind.arity()
+    }
+
+    /// Whether this capture is open-ended (accepts points past its minimum).
+    pub fn is_open_ended(&self) -> bool {
+        self.kind.arity().is_open_ended()
+    }
+
+    /// Honest projection of how many more points the capture requires.
+    ///
+    /// `Some(k)` means exactly `k` more points are needed to become confirmable
+    /// (`Some(0)` = the exact complement is complete). `None` means the minimum
+    /// is met on an **open-ended** tool: more points are still accepted up to
+    /// the hard cap and the user finishes with Enter, so there is no fixed
+    /// "remaining" count to report (never a fabricated `0`).
+    pub fn remaining_points(&self) -> Option<usize> {
+        let minimum = self.kind.required_points();
+        if self.points.len() < minimum {
+            Some(minimum - self.points.len())
+        } else if self.kind.arity().is_open_ended() {
+            None
+        } else {
+            Some(0)
+        }
+    }
+
     /// One-line, locale-facing capture step for the tool panel.
     ///
     /// Kept in `cad-app` so the UI layer never re-implements the state
     /// machine's counting rules. The entity-picking kinds count *resolved
     /// entities* ([`Self::picks`]) rather than raw points, so the step text
-    /// cannot claim a step that an empty-space click never resolved.
+    /// cannot claim a step that an empty-space click never resolved. The
+    /// open-ended kinds report the captured count and the minimum to confirm.
+    ///
+    /// NOTE (pre-existing i18n deviation): the branches below hardcode Chinese.
+    /// The open-ended branch adds **locale-neutral ASCII** text instead of more
+    /// hardcoded copy, so this change does not widen that deviation.
     pub fn status_line(&self) -> String {
+        if self.kind.arity().is_open_ended() {
+            let minimum = self.kind.required_points();
+            if self.points.len() < minimum {
+                return format!(
+                    "{}: {} point(s) captured, at least {} needed",
+                    self.kind.key(),
+                    self.points.len(),
+                    minimum
+                );
+            }
+            return format!(
+                "{}: {} point(s) captured, press Enter to finish",
+                self.kind.key(),
+                self.points.len()
+            );
+        }
         if self.kind.requires_selection() && self.selection_count == 0 {
             return format!("{}：请先选择对象", self.kind.label());
         }
@@ -279,6 +451,26 @@ pub enum DrawIntent {
     Circle { center: Point3, edge: Point3 },
     /// Insert an ARC through three points (start, on-arc, end).
     Arc { points: [Point3; 3] },
+    /// Insert an open polyline through `points` (at least two), on the active
+    /// layer. Always `closed == false`, one zero bulge per vertex (straight
+    /// segments only); see [`DrawToolKind::Polyline`] for the honest subset.
+    Polyline { points: Vec<Point3> },
+    /// Insert a closed four-vertex rectangle whose opposite corners are
+    /// `corner1` and `corner2`, on the active layer.
+    ///
+    /// The two points are the two opposite corners the user clicked, in click
+    /// order; they do **not** define a winding, so the command layer canonicalises
+    /// them (see `rectangle_geometry`). Always `closed == true` with one zero bulge
+    /// per vertex; see [`DrawToolKind::Rectang`] for the honest subset.
+    Rect { corner1: Point3, corner2: Point3 },
+    /// Insert a full ELLIPSE from the three axis-endpoint picks: the two endpoints
+    /// `p1`/`p2` of the first axis and the third pick `p3` giving the other
+    /// half-axis distance, on the active layer.
+    ///
+    /// The three points are exactly the three clicks, in order; the geometry-side
+    /// construction (`ellipse_parameters`), the axis swap and every degeneracy
+    /// refusal live in the command layer.
+    Ellipse { p1: Point3, p2: Point3, p3: Point3 },
     /// Translate the current selection by `delta`.
     Move { delta: Point3 },
     /// Duplicate the current selection translated by `delta`.
@@ -389,11 +581,12 @@ impl DrawTool {
 
     /// Whether the pending step is an entity pick (TRIM/EXTEND with a step left).
     pub fn requires_entity_pick(&self) -> bool {
-        self.kind.needs_picked_entities() && self.remaining() > 0
+        self.kind.needs_picked_entities() && self.points.len() < self.kind.required_points()
     }
 
     /// Capture one free point, refusing non-finite input and overflow past the
-    /// exact complement rather than silently resetting or dropping it.
+    /// exact complement (or the open-ended hard cap) rather than silently
+    /// resetting or dropping it.
     ///
     /// The entity-picking kinds refuse here: their steps are entity picks, so a
     /// blind point that cannot carry an entity must never be captured as one
@@ -404,7 +597,7 @@ impl DrawTool {
     /// still un-captured). The refusal is a machine reason, never a silent drop.
     pub fn push_point(&mut self, point: Point3) -> CadResult<()> {
         if self.kind.needs_picked_entities() {
-            if self.remaining() == 0 {
+            if self.points.len() >= self.kind.required_points() {
                 return Err(CadError::InvalidInput(format!(
                     "draw kind '{}' is ready; press Enter to confirm",
                     self.kind.key()
@@ -439,25 +632,54 @@ impl DrawTool {
     }
 
     /// Finite/overflow-checked point push shared by both capture paths.
+    ///
+    /// A fixed-arity kind refuses the `(n + 1)`-th point exactly as before; an
+    /// open-ended kind accepts points up to [`MAX_OPEN_CAPTURE_POINTS`] and then
+    /// refuses explicitly rather than growing without bound.
     fn push_point_checked(&mut self, point: Point3) -> CadResult<()> {
         if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
             return Err(CadError::InvalidInput("draw point must be finite".into()));
         }
-        if self.points.len() >= self.kind.required_points() {
-            return Err(CadError::InvalidInput(format!(
-                "draw kind '{}' already has its {} points",
-                self.kind.key(),
-                self.kind.required_points()
-            )));
+        match self.kind.arity() {
+            PointArity::Exact(n) => {
+                if self.points.len() >= n {
+                    return Err(CadError::InvalidInput(format!(
+                        "draw kind '{}' already has its {} points",
+                        self.kind.key(),
+                        n
+                    )));
+                }
+            }
+            PointArity::AtLeast(_) => {
+                if self.points.len() >= MAX_OPEN_CAPTURE_POINTS {
+                    return Err(CadError::InvalidInput(format!(
+                        "draw kind '{}' has reached its maximum of {} points",
+                        self.kind.key(),
+                        MAX_OPEN_CAPTURE_POINTS
+                    )));
+                }
+            }
         }
         self.points.push(point);
         Ok(())
     }
 
-    pub fn remaining(&self) -> usize {
-        self.kind
-            .required_points()
-            .saturating_sub(self.points.len())
+    /// How many more points the capture still requires, honestly per arity.
+    ///
+    /// `Some(k)`: exactly `k` more points are needed before the tool is
+    /// confirmable (identical to the old fixed-arity complement for every fixed
+    /// kind). `None`: the minimum is met on an **open-ended** tool — more points
+    /// are still accepted and the capture is finished with Enter, so there is no
+    /// fixed count to report (never a fabricated `0`).
+    pub fn remaining(&self) -> Option<usize> {
+        let minimum = self.kind.required_points();
+        if self.points.len() < minimum {
+            Some(minimum - self.points.len())
+        } else if self.kind.arity().is_open_ended() {
+            None
+        } else {
+            Some(0)
+        }
     }
 
     /// Whether the captured parameters define the operation.
@@ -465,7 +687,7 @@ impl DrawTool {
     /// The entity-picking kinds additionally require a resolved ref for **every**
     /// step, so two raw points with a missed pick are never confirmable.
     pub fn is_ready(&self) -> bool {
-        self.remaining() == 0
+        self.points.len() >= self.kind.required_points()
             && (!self.kind.requires_selection() || self.selection_count > 0)
             && (!self.kind.needs_picked_entities()
                 || self.picks.len() >= self.kind.required_points())
@@ -478,7 +700,9 @@ impl DrawTool {
             picks: self.picks.clone(),
             cursor: self.cursor,
             candidate: self.candidate.clone(),
-            remaining: self.remaining(),
+            // The legacy numeric field is the minimum complement; the honest
+            // open-ended projection lives in `DrawPreview::remaining_points`.
+            remaining: self.remaining().unwrap_or(0),
             selection_count: self.selection_count,
             ready: self.is_ready(),
         }
@@ -493,9 +717,9 @@ impl DrawTool {
                 self.kind.key()
             )));
         }
-        if self.remaining() > 0 {
+        if self.points.len() < self.kind.required_points() {
             return Err(CadError::InvalidInput(format!(
-                "draw kind '{}' needs {} point(s), has {}",
+                "draw kind '{}' needs at least {} point(s), has {}",
                 self.kind.key(),
                 self.kind.required_points(),
                 self.points.len()
@@ -518,6 +742,28 @@ impl DrawTool {
             DrawToolKind::Circle => DrawIntent::Circle { center: a, edge: b },
             DrawToolKind::Arc => DrawIntent::Arc {
                 points: [a, b, self.points[2]],
+            },
+            // PLINE: every captured vertex, in order. The open-ended capture is
+            // refused above while below the minimum, so `points` has at least
+            // the two vertices the command layer requires.
+            DrawToolKind::Polyline => DrawIntent::Polyline {
+                points: self.points.clone(),
+            },
+            // RECTANG: the two captured corners exactly as clicked. The
+            // geometry-side refusal (non-finite, degenerate, non-coplanar) and
+            // the canonical vertex ordering live in the command layer, so the
+            // edit tool's capture never invents or reorders a corner.
+            DrawToolKind::Rectang => DrawIntent::Rect {
+                corner1: a,
+                corner2: b,
+            },
+            // ELLIPSE: the three captured picks exactly as clicked, in order. The
+            // geometry-side construction, axis swap and degeneracy refusals live
+            // in the command layer, so the tool never invents a centre or ratio.
+            DrawToolKind::Ellipse => DrawIntent::Ellipse {
+                p1: a,
+                p2: b,
+                p3: self.points[2],
             },
             DrawToolKind::Move => DrawIntent::Move {
                 delta: Point3 {
@@ -600,221 +846,27 @@ impl DrawTool {
 /// (mirror): a shorter span has no well-defined angle or line and is refused.
 const MIN_DIRECTION_EXTENT: f64 = 1e-12;
 
+/// Hard cap on an open-ended capture (PLINE), in points.
+///
+/// An interactive polyline is digitised a handful of vertices at a time; 1024 is
+/// far beyond any hand-placed screen/plan run (and ≈32 KiB of `Point3`, a small
+/// bounded footprint), while the bound stops a stuck pointer or a synthetic
+/// click loop from growing the capture without limit. Reaching it is an explicit
+/// refusal, never a silent drop of the extra click.
+pub const MAX_OPEN_CAPTURE_POINTS: usize = 1024;
+
 /// Euclidean distance between two points.
 fn distance(a: Point3, b: Point3) -> f64 {
     (a.x - b.x).hypot(a.y - b.y).hypot(a.z - b.z)
 }
-
-/// Rotation about `base` by `angle` radians in the XY plane (about the +Z axis).
-///
-/// Built as `T(base) ∘ R(angle) ∘ T(−base)` through `matrix_mul` (right-hand side
-/// applied first) and `from_basis` for the orthonormal rotation.
-pub(crate) fn rotation_transform(base: Point3, angle: f64) -> Transform3 {
-    let (sin, cos) = angle.sin_cos();
-    let to_origin = Transform3::translation(Point3 {
-        x: -base.x,
-        y: -base.y,
-        z: -base.z,
-    });
-    let back = Transform3::translation(base);
-    let rotation = Transform3::from_basis(
-        Point3 {
-            x: cos,
-            y: sin,
-            z: 0.0,
-        },
-        Point3 {
-            x: -sin,
-            y: cos,
-            z: 0.0,
-        },
-        Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        },
-    );
-    back.matrix_mul(&rotation).matrix_mul(&to_origin)
-}
-
-/// Uniform scale about `base` by `factor`, built as
-/// `T(base) ∘ S(factor) ∘ T(−base)`.
-pub(crate) fn scale_transform(base: Point3, factor: f64) -> Transform3 {
-    let to_origin = Transform3::translation(Point3 {
-        x: -base.x,
-        y: -base.y,
-        z: -base.z,
-    });
-    let back = Transform3::translation(base);
-    back.matrix_mul(&Transform3::scale(factor))
-        .matrix_mul(&to_origin)
-}
-
-/// Reflection across the line through `p1` and `p2` (in the XY plane).
-///
-/// The reflection is a negative-determinant affine, so it cannot be expressed
-/// with `from_basis` (which is always right-handed); the 2×2 reflection is built
-/// directly and translated to pass through `p1`. A zero-length axis is refused.
-pub(crate) fn mirror_transform(p1: Point3, p2: Point3) -> CadResult<Transform3> {
-    let dx = p2.x - p1.x;
-    let dy = p2.y - p1.y;
-    let len = dx.hypot(dy);
-    if !len.is_finite() || len <= 1e-12 {
-        return Err(CadError::InvalidInput(
-            "mirror axis needs two distinct points".into(),
-        ));
-    }
-    let (ux, uy) = (dx / len, dy / len);
-    let linear = [
-        [ux * ux - uy * uy, 2.0 * ux * uy, 0.0],
-        [2.0 * ux * uy, uy * uy - ux * ux, 0.0],
-        [0.0, 0.0, 1.0],
-    ];
-    let mut matrix = [[0.0f64; 4]; 4];
-    for r in 0..3 {
-        for c in 0..3 {
-            matrix[r][c] = linear[r][c];
-        }
-    }
-    matrix[3][3] = 1.0;
-    // Translation column = p1 − M·p1, so the reflection passes through p1.
-    let mapped = [
-        linear[0][0] * p1.x + linear[0][1] * p1.y + linear[0][2] * p1.z,
-        linear[1][0] * p1.x + linear[1][1] * p1.y + linear[1][2] * p1.z,
-        linear[2][0] * p1.x + linear[2][1] * p1.y + linear[2][2] * p1.z,
-    ];
-    matrix[0][3] = p1.x - mapped[0];
-    matrix[1][3] = p1.y - mapped[1];
-    matrix[2][3] = p1.z - mapped[2];
-    Ok(Transform3 { matrix })
-}
-
-/// The centre and radius point of a CIRCLE intent, if the radius is positive.
-///
-/// A zero-radius circle is refused here so the UI can show the explicit
-/// invalid-input reason before emitting a command; the database validates it
-/// again.
-pub fn circle_radius(center: Point3, edge: Point3) -> CadResult<f64> {
-    let dx = edge.x - center.x;
-    let dy = edge.y - center.y;
-    let dz = edge.z - center.z;
-    let radius = (dx * dx + dy * dy + dz * dz).sqrt();
-    if !radius.is_finite() || radius <= 0.0 {
-        return Err(CadError::InvalidInput(
-            "circle radius must be positive and finite".into(),
-        ));
-    }
-    Ok(radius)
-}
-
-/// The centre, radius and signed angular span of the arc through three XY points.
-///
-/// The arc starts at `start`, passes through `through` and ends at `end`, on the
-/// work-plane `+Z` normal. `sweep` is signed (negative means clockwise) so a
-/// reflected capture is not silently re-drawn as its complement. Non-finite,
-/// non-coplanar (different z) or collinear/coincident points are an explicit
-/// refusal so no degenerate or silently-wrong 3D arc is ever created.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ArcParameters {
-    pub center: Point3,
-    pub radius: f64,
-    /// Start angle in radians about `+Z`.
-    pub start: f64,
-    /// Signed sweep in radians; `|sweep| < 2π`.
-    pub sweep: f64,
-}
-
-/// Compute the arc (centre/radius/start/sweep) through three points.
-///
-/// The circumcircle is solved in a frame translated by `start`, which makes both
-/// the degeneracy test and the centre arithmetic translation- and
-/// scale-invariant: a valid arc at large world coordinates is neither refused
-/// nor computed with catastrophic cancellation. The operation is the documented
-/// flat XY subset: points whose `z` differs from `start.z` beyond tolerance are
-/// refused rather than projected into a silently-wrong arc. Collinear, coincident
-/// or non-finite points are refused; the caller must not fabricate a centre or a
-/// default sweep.
-pub fn arc_parameters(start: Point3, through: Point3, end: Point3) -> CadResult<ArcParameters> {
-    if !finite(start) || !finite(through) || !finite(end) {
-        return Err(CadError::InvalidInput("arc points must be finite".into()));
-    }
-    // XY-only subset: a 3-point arc is a planar construction. Refuse a
-    // non-coplanar pickup rather than silently projecting it.
-    let z_tol = 1e-9 * (1.0 + start.z.abs() + through.z.abs() + end.z.abs());
-    if (through.z - start.z).abs() > z_tol || (end.z - start.z).abs() > z_tol {
-        return Err(CadError::InvalidInput(
-            "arc points must lie in one XY plane".into(),
-        ));
-    }
-    // Translate to `start` so the circumcircle is computed in a local frame.
-    let a = (through.x - start.x, through.y - start.y);
-    let b = (end.x - start.x, end.y - start.y);
-    let a_len = a.0.hypot(a.1);
-    let b_len = b.0.hypot(b.1);
-    if a_len <= 1e-12 || b_len <= 1e-12 {
-        return Err(CadError::InvalidInput("arc points are coincident".into()));
-    }
-    // Translation- and scale-invariant collinearity test (relative cross product).
-    let cross = a.0 * b.1 - a.1 * b.0;
-    if !cross.is_finite() || cross.abs() <= 1e-12 * a_len * b_len {
-        return Err(CadError::InvalidInput("arc points are collinear".into()));
-    }
-    // Local circumcentre: `|C| = |a - C| = |b - C|` gives `a·C = |a|²/2`,
-    // `b·C = |b|²/2`; solving by Cramer's rule yields the offset from `start`.
-    let a_sq = a.0 * a.0 + a.1 * a.1;
-    let b_sq = b.0 * b.0 + b.1 * b.1;
-    let denom = 2.0 * cross;
-    let offset_x = (a_sq * b.1 - b_sq * a.1) / denom;
-    let offset_y = (a.0 * b_sq - b.0 * a_sq) / denom;
-    let center = Point3 {
-        x: start.x + offset_x,
-        y: start.y + offset_y,
-        z: start.z,
-    };
-    let radius = offset_x.hypot(offset_y);
-    if !radius.is_finite() || radius <= 0.0 {
-        return Err(CadError::InvalidInput(
-            "arc radius must be positive and finite".into(),
-        ));
-    }
-    let angle = |p: Point3| (p.y - center.y).atan2(p.x - center.x);
-    let start_angle = angle(start);
-    let through_angle = angle(through);
-    let end_angle = angle(end);
-    let norm = |x: f64| {
-        let tau = std::f64::consts::TAU;
-        let x = x % tau;
-        if x < 0.0 {
-            x + tau
-        } else {
-            x
-        }
-    };
-    let ccw = norm(end_angle - start_angle);
-    let to_through = norm(through_angle - start_angle);
-    // If the middle point is not on the counter-clockwise path, the arc runs
-    // clockwise: a negative sweep, never the complementary CCW arc.
-    let sweep = if to_through <= ccw {
-        ccw
-    } else {
-        ccw - std::f64::consts::TAU
-    };
-    if !sweep.is_finite() || sweep.abs() <= 1e-12 {
-        return Err(CadError::InvalidInput(
-            "arc points are collinear or coincident".into(),
-        ));
-    }
-    Ok(ArcParameters {
-        center,
-        radius,
-        start: start_angle,
-        sweep,
-    })
-}
-
-fn finite(p: Point3) -> bool {
-    p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
-}
+mod geometry;
+// Re-exported so the historical `crate::draw_tool::<name>` paths and the public
+// `cad_app::circle_radius` (via `lib.rs`) stay valid for the callers that used the
+// pre-split module layout.
+pub use geometry::{
+    arc_parameters, circle_radius, ellipse_parameters, ArcParameters, EllipseParameters,
+};
+pub(crate) use geometry::{mirror_transform, rotation_transform, scale_transform};
 
 #[cfg(test)]
 mod tests;

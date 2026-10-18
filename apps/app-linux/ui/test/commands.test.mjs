@@ -31,7 +31,7 @@ const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
-  'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'MOVE', 'TRIM',
+  'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'MOVE', 'TRIM',
   'EXTEND', 'ERASE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'OSNAP',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
@@ -148,6 +148,140 @@ test('ERASE is a modify affordance in the ribbon and catalog, enabled only by ro
   );
 });
 
+test('PLINE is a draw affordance in the ribbon and catalog, enabled only by router admission', async () => {
+  const { readModule } = await import('./helpers.mjs');
+  // The catalog entry mirrors the neighbouring draw commands (`draw.kind.*`).
+  const entry = COMMAND_CATALOG.find(command => command.id === 'PLINE');
+  assert.ok(entry, 'PLINE must be in the command catalog');
+  assert.equal(entry.labelKey, 'draw.kind.polyline');
+  assert.equal(entry.icon, 'polyline');
+  assert.equal(entry.group, 'draw');
+  // Placed with the other draw actions on the Home and Draw tabs, wired as a
+  // router command (no local shell action).
+  for (const tabId of ['home', 'draw']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+    assert.ok(draw, `${tabId} must keep its draw panel`);
+    const item = draw.items.find(candidate => candidate.id === 'PLINE');
+    assert.ok(item, `${tabId}/draw must carry the PLINE affordance`);
+    assert.equal(item.command, 'PLINE');
+    assert.equal(item.labelKey, 'draw.kind.polyline');
+    assert.equal(item.action, undefined, 'PLINE must not be a local shell action');
+  }
+  // The measurement panel must not dispatch `PLINE` (it dispatches the explicit
+  // `MEASUREPOLYLINE`), so the polyline draw command never shadows the length
+  // measurement.
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  assert.equal(measurePanel.items.some(item => item.command === 'PLINE'), false);
+  // Router admission is the single enable gate: admitted when the host vocabulary
+  // carries PLINE, unsupported (never locally enabled) when it does not.
+  assert.equal(isSupportedCommand('PLINE'), true);
+  assert.equal(admitCommandText('PLINE', { status: loaded }).kind, 'admitted');
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand('PLINE'), false);
+  assert.equal(admitCommandText('PLINE', { status: loaded }).kind, 'unsupported');
+  setCommandCatalog(HOST_NAMES);
+  // The renderer dispatches the PLINE selector through the normal command funnel.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(
+    ribbon.includes('if (item.command) return shell.runCommand(item.command);'),
+    'ribbon items dispatch through shell.runCommand, never an action',
+  );
+});
+
+test('RECTANG is a draw affordance in the ribbon and catalog, enabled only by router admission', async () => {
+  const { readModule } = await import('./helpers.mjs');
+  // The catalog entry mirrors the neighbouring draw commands (`draw.kind.*`).
+  const entry = COMMAND_CATALOG.find(command => command.id === 'RECTANG');
+  assert.ok(entry, 'RECTANG must be in the command catalog');
+  assert.equal(entry.labelKey, 'draw.kind.rectang');
+  assert.equal(entry.icon, 'rectang');
+  assert.equal(entry.group, 'draw');
+  // Placed with the other draw actions on the Home and Draw tabs, wired as a
+  // router command (no local shell action).
+  for (const tabId of ['home', 'draw']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+    assert.ok(draw, `${tabId} must keep its draw panel`);
+    const item = draw.items.find(candidate => candidate.id === 'RECTANG');
+    assert.ok(item, `${tabId}/draw must carry the RECTANG affordance`);
+    assert.equal(item.command, 'RECTANG');
+    assert.equal(item.labelKey, 'draw.kind.rectang');
+    assert.equal(item.action, undefined, 'RECTANG must not be a local shell action');
+  }
+  // The measurement panel never dispatches `RECTANG`: it is a draw command only.
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  assert.equal(measurePanel.items.some(item => item.command === 'RECTANG'), false);
+  // Router admission is the single enable gate: admitted when the host vocabulary
+  // carries RECTANG, unsupported (never locally enabled) when it does not.
+  assert.equal(isSupportedCommand('RECTANG'), true);
+  assert.equal(admitCommandText('RECTANG', { status: loaded }).kind, 'admitted');
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand('RECTANG'), false);
+  assert.equal(admitCommandText('RECTANG', { status: loaded }).kind, 'unsupported');
+  setCommandCatalog(HOST_NAMES);
+  // The label keys resolve in both catalogs (the ribbon/list name source).
+  const { readCatalog } = await import('./helpers.mjs');
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  assert.equal(typeof zh['draw.kind.rectang'], 'string');
+  assert.equal(typeof en['draw.kind.rectang'], 'string');
+  assert.equal(typeof zh['tool.draw.rectang'], 'string');
+  assert.equal(typeof en['tool.draw.rectang'], 'string');
+  // The renderer dispatches the RECTANG selector through the normal command funnel.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(
+    ribbon.includes('if (item.command) return shell.runCommand(item.command);'),
+    'ribbon items dispatch through shell.runCommand, never an action',
+  );
+});
+
+test('ELLIPSE is a draw affordance in the ribbon and catalog, enabled only by router admission', async () => {
+  const { readModule } = await import('./helpers.mjs');
+  // The catalog entry mirrors the neighbouring draw commands (`draw.kind.*`).
+  const entry = COMMAND_CATALOG.find(command => command.id === 'ELLIPSE');
+  assert.ok(entry, 'ELLIPSE must be in the command catalog');
+  assert.equal(entry.labelKey, 'draw.kind.ellipse');
+  assert.equal(entry.icon, 'ellipse');
+  assert.equal(entry.group, 'draw');
+  // Placed with the other draw actions on the Home and Draw tabs, wired as a
+  // router command (no local shell action).
+  for (const tabId of ['home', 'draw']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+    assert.ok(draw, `${tabId} must keep its draw panel`);
+    const item = draw.items.find(candidate => candidate.id === 'ELLIPSE');
+    assert.ok(item, `${tabId}/draw must carry the ELLIPSE affordance`);
+    assert.equal(item.command, 'ELLIPSE');
+    assert.equal(item.labelKey, 'draw.kind.ellipse');
+    assert.equal(item.action, undefined, 'ELLIPSE must not be a local shell action');
+  }
+  // The measurement panel never dispatches `ELLIPSE`: it is a draw command only.
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  assert.equal(measurePanel.items.some(item => item.command === 'ELLIPSE'), false);
+  // Router admission is the single enable gate: admitted when the host vocabulary
+  // carries ELLIPSE, unsupported (never locally enabled) when it does not.
+  assert.equal(isSupportedCommand('ELLIPSE'), true);
+  assert.equal(admitCommandText('ELLIPSE', { status: loaded }).kind, 'admitted');
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand('ELLIPSE'), false);
+  assert.equal(admitCommandText('ELLIPSE', { status: loaded }).kind, 'unsupported');
+  setCommandCatalog(HOST_NAMES);
+  // The label keys resolve in both catalogs (the ribbon/list name source), and the
+  // active-tool chip key (`tool.draw.ellipse`) is what the host key maps onto.
+  const { readCatalog } = await import('./helpers.mjs');
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  assert.equal(typeof zh['draw.kind.ellipse'], 'string');
+  assert.equal(typeof en['draw.kind.ellipse'], 'string');
+  assert.equal(typeof zh['tool.draw.ellipse'], 'string');
+  assert.equal(typeof en['tool.draw.ellipse'], 'string');
+  assert.equal(toolLabelKey('draw.ellipse'), 'tool.draw.ellipse');
+  // The renderer dispatches the ELLIPSE selector through the normal command funnel.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(
+    ribbon.includes('if (item.command) return shell.runCommand(item.command);'),
+    'ribbon items dispatch through shell.runCommand, never an action',
+  );
+});
+
 // Chrome catalog entries the router does not accept: they stay **visible but
 // permanently disabled** (never deleted, never locally enabled) — the same
 // contract the grid-snap affordance holds. This is the audited dead set; a
@@ -161,9 +295,11 @@ test('ERASE is a modify affordance in the ribbon and catalog, enabled only by ro
 //  - LAYER, PROPERTIES: panel affordances deferred to a later phase.
 // The four measurement kinds (DIST/MEASUREPOLYLINE/MEASUREANGLE/AREA) and the
 // fixed zoom steps (ZOOMIN/ZOOMOUT) were fixed: they are router-admitted
-// selectors now and moved into HOST_NAMES. `PLINE`/`ANGLE` are deliberately
-// **not** part of this set either: they are reserved/unbound names, not dead
-// affordances. `ORBIT` is **gesture-only** (router-admitted, click-disabled
+// selectors now and moved into HOST_NAMES. `PLINE` is now the polyline **draw**
+// selector (a router-admitted `COMMAND_TABLE` entry → `BeginDraw(Polyline)`), so
+// it is a real affordance, not reserved. `ANGLE` (not an AutoCAD command) is
+// deliberately **not** in this set: it is an unbound name, not a dead
+// affordance. `ORBIT` is **gesture-only** (router-admitted, click-disabled
 // with an explicit reason) and is asserted separately via GESTURE_ONLY_COMMANDS,
 // not lumped into this router-refused set.
 const ROUTER_REFUSED_AFFORDANCES = ['GRID', 'LAYER', 'ORTHO', 'PROPERTIES', 'SNAP'];
@@ -181,14 +317,13 @@ test('the command catalog lists exactly the router-refused dead affordances, and
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'unsupported', id);
   }
   assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('ERASE'), false, 'ERASE must be reachable');
-  // `PLINE` (planned P3 draw command) and `ANGLE` (not an AutoCAD command) are
-  // not measurement affordances at all: they are neither admitted nor dead
-  // catalog ids, so they must not appear in this refused set.
-  for (const reserved of ['PLINE', 'ANGLE']) {
-    assert.equal(ROUTER_REFUSED_AFFORDANCES.includes(reserved), false, reserved);
-    assert.equal(COMMAND_CATALOG.some(command => command.id === reserved), false, reserved);
-    assert.equal(isSupportedCommand(reserved), false, reserved);
-  }
+  // `PLINE` is now a real (draw) selector, so it is neither reserved nor dead:
+  // `ANGLE` (not an AutoCAD command) stays absent from the catalog and refused.
+  assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('ANGLE'), false, 'ANGLE');
+  assert.equal(COMMAND_CATALOG.some(command => command.id === 'ANGLE'), false, 'ANGLE');
+  assert.equal(isSupportedCommand('ANGLE'), false, 'ANGLE');
+  assert.equal(isSupportedCommand('PLINE'), true, 'PLINE is a router-admitted draw selector');
+  assert.equal(COMMAND_CATALOG.some(command => command.id === 'PLINE'), true, 'PLINE is catalogued');
   // The fixed affordances are no longer dead.
   for (const id of ['DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT']) {
     assert.equal(ROUTER_REFUSED_AFFORDANCES.includes(id), false, id);
@@ -218,11 +353,14 @@ test('the four measurement buttons dispatch their own admitted kind selectors', 
     assert.equal(isSupportedCommand(id), true, id);
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
   }
-  // The old words are not selectors at all (neither shadows the measurement).
-  for (const reserved of ['PLINE', 'ANGLE']) {
-    assert.equal(isSupportedCommand(reserved), false, reserved);
-    assert.equal(admitCommandText(reserved, { status: loaded }).kind, 'unsupported', reserved);
-  }
+  // The old words are not selectors at all (neither shadows the measurement),
+  // except `PLINE`, which is now the polyline **draw** selector: it is admitted
+  // but never a measurement selector (it must not collapse onto MEASUREPOLYLINE).
+  assert.equal(isSupportedCommand('PLINE'), true, 'PLINE is the draw selector');
+  assert.equal(admitCommandText('PLINE', { status: loaded }).kind, 'admitted');
+  assert.equal(dispatched.includes('PLINE'), false, 'PLINE is not a measurement selector');
+  assert.equal(isSupportedCommand('ANGLE'), false, 'ANGLE');
+  assert.equal(admitCommandText('ANGLE', { status: loaded }).kind, 'unsupported', 'ANGLE');
   // Distinct labels, so four different measurement kinds are presented.
   assert.equal(new Set(panel.items.map(item => item.labelKey)).size, 4);
   // The renderer dispatches each selector through the single command funnel.
@@ -307,8 +445,14 @@ test('autocomplete marks supported commands and never injects unknown ids', () =
   const measure = filterCommandSuggestions('MEASURE');
   assert.equal(measure.find(suggestion => suggestion.id === 'MEASUREPOLYLINE').supported, true);
   assert.equal(measure.find(suggestion => suggestion.id === 'MEASUREANGLE').supported, true);
-  // A reserved word is not a suggestion at all, so it cannot be inserted.
-  assert.equal(filterCommandSuggestions('PLINE').some(suggestion => suggestion.id === 'PLINE'), false);
+  // `PLINE` is now the polyline **draw** command: it is a real suggestion
+  // (catalogued + router-admitted), and it never shadows the explicit
+  // `MEASUREPOLYLINE` measurement selector. `ANGLE` (not an AutoCAD command)
+  // stays unbound, so it is not a suggestion at all.
+  const pline = filterCommandSuggestions('PLINE');
+  assert.equal(pline.some(suggestion => suggestion.id === 'PLINE'), true);
+  assert.equal(pline.find(suggestion => suggestion.id === 'PLINE').supported, true);
+  assert.equal(pline.some(suggestion => suggestion.id === 'MEASUREPOLYLINE'), false);
   assert.equal(filterCommandSuggestions('ANGLE').some(suggestion => suggestion.id === 'ANGLE'), false);
   // A router-refused display id (`LAYER`, a later-phase panel) stays unsupported.
   const layer = filterCommandSuggestions('LAYER');

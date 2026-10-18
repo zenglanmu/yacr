@@ -53,7 +53,8 @@ test('the active-tool chip keys exist in both catalogs with matching placeholder
   const toolKeys = [
     'tool.draw.line', 'tool.draw.circle', 'tool.draw.arc', 'tool.draw.move', 'tool.draw.trim',
     'tool.draw.copy', 'tool.draw.extend', 'tool.draw.rotate', 'tool.draw.scale', 'tool.draw.mirror',
-    'tool.draw.offset', 'tool.measure.distance', 'tool.measure.polyline', 'tool.measure.angle',
+    'tool.draw.offset', 'tool.draw.rectang', 'tool.draw.ellipse',
+    'tool.measure.distance', 'tool.measure.polyline', 'tool.measure.angle',
     'tool.measure.area', 'tool.points', 'tool.prompt.confirm', 'tool.prompt.cancel',
   ];
   for (const key of toolKeys) {

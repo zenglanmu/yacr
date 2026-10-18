@@ -41,6 +41,9 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LINE", CommandId::CreateLine),
     ("CIRCLE", CommandId::CreateCircle),
     ("ARC", CommandId::CreateArc),
+    ("PLINE", CommandId::CreatePolyline),
+    ("RECTANG", CommandId::CreateRectangle),
+    ("ELLIPSE", CommandId::CreateEllipse),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
     ("EXTEND", CommandId::ExtendEntity),
@@ -67,10 +70,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
 /// kind instead of every button collapsing onto `MEASURE`/Distance. `DIST`
 /// (distance) and `AREA` are the real AutoCAD command names with exactly this
 /// meaning. `MEASUREPOLYLINE` (polyline length) and `MEASUREANGLE` are explicit
-/// project selectors: `PLINE` is reserved for the planned P3 polyline **draw**
-/// command and `ANGLE` is not an AutoCAD command at all, so neither is bound
-/// here (and neither shadows a real command). `MEASURE` remains the default
-/// [`MeasurementToolKind::Distance`] selector.
+/// project selectors: AutoCAD's `PLINE` now names the polyline **draw** command
+/// (a [`COMMAND_TABLE`] entry, not a measurement selector) and `ANGLE` is not an
+/// AutoCAD command at all, so neither measurement meaning shadows a real
+/// command. `MEASURE` remains the default [`MeasurementToolKind::Distance`]
+/// selector.
 ///
 /// These names live in this table (never a hand-written UI list):
 /// [`admissible_names`] folds them into the single vocabulary a frontend enables

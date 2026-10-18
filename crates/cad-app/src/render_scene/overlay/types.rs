@@ -158,11 +158,22 @@ pub struct OverlayInputs {
     /// Updated on camera, canvas size, and zoom changes; the base scene remains
     /// reusable while only this visual overlay is regenerated.
     pub viewport_bounds: Option<(Point3, Point3)>,
+    /// Positions of the visible POINT entities, drawn as screen-relative cross
+    /// markers (ADR 0015 decision E).
+    ///
+    /// Filled by the scene assembly from the drawing being displayed
+    /// (`CadSceneController::prepare_*`), respecting the same layer-visibility
+    /// overrides the rest of the overlay uses; a host normally leaves it empty.
+    /// It participates in [`overlay_fingerprint`], so a changed point set
+    /// rebuilds the transient overlay, and the marker size is derived from
+    /// [`Self::viewport_bounds`] (see `point_marker_overlay`). Empty by default.
+    pub point_markers: Vec<Point3>,
 }
 
 impl OverlayInputs {
     /// Whether every overlay input is empty (no highlight, no hover/hidden
-    /// flags, no preview, no box selection, no resolved snap hints).
+    /// flags, no preview, no box selection, no resolved snap hints, no visible
+    /// POINT markers).
     pub fn is_empty(&self) -> bool {
         self.selection.is_empty()
             && self.hovered.is_empty()
@@ -171,6 +182,7 @@ impl OverlayInputs {
             && self.draw_preview.is_none()
             && self.selection_box.is_none()
             && self.snap_hints_input.is_empty()
+            && self.point_markers.is_empty()
     }
 }
 

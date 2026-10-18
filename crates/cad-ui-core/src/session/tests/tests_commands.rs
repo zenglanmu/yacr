@@ -58,6 +58,9 @@ command_selector_contract! {
     CreateLine => "LINE",
     CreateCircle => "CIRCLE",
     CreateArc => "ARC",
+    CreatePolyline => "PLINE",
+    CreateRectangle => "RECTANG",
+    CreateEllipse => "ELLIPSE",
     MoveEntities => "MOVE",
     TrimEntity => "TRIM",
     ExtendEntity => "EXTEND",
@@ -113,7 +116,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 47,
+        EXPECTED_COMMAND_COUNT, 50,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -394,33 +397,26 @@ fn object_snap_selector_toggles_the_projected_session_flag_only() {
 
 #[test]
 fn reserved_drawing_names_are_not_measurement_selectors() {
-    // `SNAP` must stay absent (grid snap ≠ object snap). The same footgun class
-    // applies to the measurement vocabulary:
-    //  - `PLINE` is the planned P3 polyline **draw** command, so binding it to a
-    //    polyline-length measurement now would make P3 break a shipped selector;
-    //  - `ANGLE` is not an AutoCAD command at all (the real ones are
-    //    `DIMANGULAR`/`MEASUREGEOM`), so it must not shadow anything either.
-    // The explicit project selectors are `MEASUREPOLYLINE` / `MEASUREANGLE`.
-    for reserved in ["SNAP", "PLINE", "ANGLE"] {
-        assert_eq!(
-            canonical_command_name(reserved),
-            None,
-            "{reserved} must not be admitted"
-        );
+    // `SNAP` must stay absent (grid snap ≠ object snap). `ANGLE` is not an
+    // AutoCAD command at all (the real ones are `DIMANGULAR`/`MEASUREGEOM`), so
+    // it must not shadow anything. `PLINE` is now the polyline **draw** selector
+    // (`COMMAND_TABLE` → `BeginDraw(Polyline)`), never a measurement selector;
+    // the explicit measurement selectors are `MEASUREPOLYLINE` / `MEASUREANGLE`.
+    for reserved in ["SNAP", "ANGLE"] {
+        assert_eq!(canonical_command_name(reserved), None, "{reserved}");
         assert_eq!(normalize_command(reserved), None, "{reserved}");
-        assert!(
-            !admissible_names().contains(&reserved),
-            "{reserved} must not appear in the advertised vocabulary"
-        );
+        assert!(!admissible_names().contains(&reserved), "{reserved}");
     }
+    assert_eq!(normalize_command("PLINE"), Some(CommandId::CreatePolyline));
+    assert_eq!(measurement_selector_kind("PLINE"), None);
+    assert!(admissible_names().contains(&"PLINE"));
     // A reserved name is refused before the host, leaving the tool untouched.
     let session = session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
-    assert!(session.command("PLINE").is_err());
+    assert!(session.command("SNAP").is_err());
     assert!(session.command("ANGLE").is_err());
     assert_eq!(session.snapshot(None, None, 0).tool, None);
-    // The explicit selectors are the ones that actually start the kinds.
     for selector in ["MEASUREPOLYLINE", "MEASUREANGLE"] {
         assert!(
             admissible_names().contains(&selector),

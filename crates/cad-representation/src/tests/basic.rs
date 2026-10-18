@@ -27,6 +27,37 @@ fn line_becomes_a_lines_primitive() {
     }
 }
 
+/// A POINT must not be drawn as the degenerate zero-length `[p, p]` chord the
+/// generic fallback used to emit (ADR 0015 decision E). The omission is
+/// reported honestly, and the shared tessellator's `[p, p]` output is kept for
+/// the picking/bounds/snap consumers that rely on it.
+#[test]
+fn point_entity_emits_no_zero_length_line_in_the_base_scene() {
+    let registry = ProviderRegistry::with_default_provider();
+    let e = curve_entity(7, "AcDbPoint", SemanticGeometry::Point(p(3.0, 4.0)));
+    let r = registry.build(&e, &context()).unwrap();
+    assert!(r.fragments.is_empty(), "POINT must not draw base geometry");
+    assert!(
+        r.fragments.iter().all(|fragment| !matches!(
+            &fragment.primitive,
+            DisplayPrimitive::Lines(points) if points.len() == 2 && points[0] == points[1]
+        )),
+        "no zero-length line for a POINT"
+    );
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "representation.point_overlay"));
+    assert!(matches!(r.completeness, Completeness::Partial(_)));
+
+    // The skip is narrow: the shared tessellator is unchanged.
+    let chord = cad_geometry::tessellate_geometry(
+        &SemanticGeometry::Point(p(3.0, 4.0)),
+        cad_geometry::TessellationParams::default(),
+    );
+    assert_eq!(chord, vec![p(3.0, 4.0), p(3.0, 4.0)]);
+}
+
 #[test]
 fn sfnt_text_provider_emits_meshes_without_outline_lines() {
     let mut fonts = FontEngine::new();

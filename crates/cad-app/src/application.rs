@@ -226,6 +226,9 @@ impl Application {
             CommandId::CreateLine
             | CommandId::CreateCircle
             | CommandId::CreateArc
+            | CommandId::CreatePolyline
+            | CommandId::CreateRectangle
+            | CommandId::CreateEllipse
             | CommandId::MoveEntities
             | CommandId::TrimEntity
             | CommandId::ExtendEntity

@@ -184,6 +184,8 @@ impl CadSession {
     /// | selector | request |
     /// | --- | --- |
     /// | `LINE`..`EXTEND` | `BeginDraw(<kind>)` |
+    /// | `RECTANG` | `BeginDraw(Rectang)` |
+    /// | `ELLIPSE` | `BeginDraw(Ellipse)` |
     /// | `MEASURE` / `DIST` | `BeginMeasurement(Distance)` |
     /// | `MEASUREPOLYLINE` | `BeginMeasurement(PolylineLength)` |
     /// | `MEASUREANGLE` | `BeginMeasurement(Angle)` |
@@ -239,6 +241,13 @@ impl CadSession {
             CommandId::CreateLine => Some(InteractionRequest::BeginDraw(DrawToolKind::Line)),
             CommandId::CreateCircle => Some(InteractionRequest::BeginDraw(DrawToolKind::Circle)),
             CommandId::CreateArc => Some(InteractionRequest::BeginDraw(DrawToolKind::Arc)),
+            CommandId::CreatePolyline => {
+                Some(InteractionRequest::BeginDraw(DrawToolKind::Polyline))
+            }
+            CommandId::CreateRectangle => {
+                Some(InteractionRequest::BeginDraw(DrawToolKind::Rectang))
+            }
+            CommandId::CreateEllipse => Some(InteractionRequest::BeginDraw(DrawToolKind::Ellipse)),
             CommandId::MoveEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Move)),
             CommandId::CopyEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Copy)),
             CommandId::RotateEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Rotate)),

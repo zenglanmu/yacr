@@ -11,6 +11,9 @@ impl Application {
             CommandId::CreateLine => self.create_line(session, command),
             CommandId::CreateCircle => self.create_circle(session, command),
             CommandId::CreateArc => self.create_arc(session, command),
+            CommandId::CreatePolyline => self.create_polyline(session, command),
+            CommandId::CreateRectangle => self.create_rectangle(session, command),
+            CommandId::CreateEllipse => self.create_ellipse(session, command),
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
             CommandId::ExtendEntity => self.extend_entity(command),
@@ -208,4 +211,265 @@ impl Application {
         };
         self.commit_new_entity(session, command, geometry, "create arc")
     }
+
+    /// Insert an open LWPOLYLINE through the payload points into model space.
+    ///
+    /// Accepts `Points(points)` (the UI/capture path) or a fully formed
+    /// `Geometry(SemanticGeometry::Polyline { .. })` (the programmatic path,
+    /// mirroring `CreateLine`/`CreateArc`). The honest subset is straight
+    /// segments only: one zero bulge per vertex and `closed == false`. Fewer
+    /// than two points, any non-finite point, or fewer than two **distinct**
+    /// vertices (for example all points identical) is an explicit refusal that
+    /// creates nothing — a programmatic closed polyline or one carrying bulges
+    /// is refused rather than silently rewritten to the supported subset.
+    pub(crate) fn create_polyline(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let geometry = match &command.payload {
+            CommandPayload::Points(points) => polyline_geometry(points.clone())?,
+            CommandPayload::Geometry(geometry) => match geometry.as_ref() {
+                SemanticGeometry::Polyline {
+                    points,
+                    bulges,
+                    closed,
+                } => {
+                    if *closed || bulges.iter().any(|bulge| bulge.abs() > 0.0) {
+                        return Err(CadError::InvalidInput(
+                            "CreatePolyline authors neither arc segments (bulges) nor closed \
+                             polylines"
+                                .into(),
+                        ));
+                    }
+                    polyline_geometry(points.clone())?
+                }
+                other => {
+                    return Err(CadError::InvalidInput(format!(
+                        "CreatePolyline needs a Polyline geometry, got {}",
+                        geometry_kind(other)
+                    )));
+                }
+            },
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "CreatePolyline needs a Points or Geometry(Polyline) payload".into(),
+                ));
+            }
+        };
+        self.commit_new_entity(session, command, geometry, "create polyline")
+    }
+
+    /// Insert an axis-aligned rectangle as a **closed** four-vertex LWPOLYLINE.
+    ///
+    /// Payload choice: `Points([corner1, corner2])` — the two opposite corners the
+    /// user clicked, in click order. This is the same shape LINE/PLINE use, and it
+    /// is the *input* the capture produced, not an output geometry: RECTANG means
+    /// "two corners", so a `Geometry(SemanticGeometry::Polyline)` arm would have to
+    /// accept exactly one canonical closed four-vertex straight polyline and
+    /// re-derive the two corners from it, adding a second source of truth for a
+    /// caller who already holds the finished polyline and does not need a rectangle
+    /// command at all. Like `CreateCircle` (also `Points`-only) the payload is the
+    /// construction input, so only the `Points` arm is accepted; anything else is an
+    /// explicit refusal that changes nothing.
+    ///
+    /// The geometry is built by [`rectangle_geometry`], the single
+    /// construction/validation point, and committed through the shared
+    /// [`Self::commit_new_entity`] funnel so the rectangle is one entity, one
+    /// transaction and one undo step, with the active-layer check (a missing layer
+    /// is refused there) intact.
+    pub(crate) fn create_rectangle(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::Points(points) = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "CreateRectangle needs a Points([corner1, corner2]) payload".into(),
+            ));
+        };
+        let corner1 = *points.first().ok_or_else(|| {
+            CadError::InvalidInput("CreateRectangle needs a first corner point".into())
+        })?;
+        let corner2 = *points.get(1).ok_or_else(|| {
+            CadError::InvalidInput("CreateRectangle needs a second corner point".into())
+        })?;
+        let geometry = rectangle_geometry(corner1, corner2)?;
+        self.commit_new_entity(session, command, geometry, "create rectangle")
+    }
+
+    /// Insert a full ELLIPSE by the axis-endpoint method as one entity.
+    ///
+    /// Payload choice: `Points([p1, p2, p3])` — the two endpoints of the first
+    /// axis and the third pick that gives the other half-axis distance, exactly
+    /// as clicked (the construction input, like `CreateCircle`/`CreateRectangle`;
+    /// a pre-built `SemanticGeometry::Ellipse` arm would be a second source of
+    /// truth for a caller who already holds the geometry).
+    ///
+    /// The geometry is built by [`crate::draw_tool::ellipse_parameters`] — the
+    /// single construction/validation point shared with the preview — which
+    /// stores the **longer** semi-axis as `major_axis` (`ratio <= 1`) and refuses
+    /// a non-finite, degenerate (coincident first-axis endpoints, or a third pick
+    /// on the first axis) or non-coplanar triple. The ellipse is committed through
+    /// the shared [`Self::commit_new_entity`] funnel, so it is one entity, one
+    /// transaction and one undo step, with the active-layer check intact. Only a
+    /// full ellipse is authored (`start = 0`, `sweep = 2π`); the centre method and
+    /// ellipse arcs are NOT IMPLEMENTED.
+    pub(crate) fn create_ellipse(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::Points(points) = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "CreateEllipse needs a Points([p1, p2, p3]) payload".into(),
+            ));
+        };
+        let p1 = *points
+            .first()
+            .ok_or_else(|| CadError::InvalidInput("CreateEllipse needs p1".into()))?;
+        let p2 = *points
+            .get(1)
+            .ok_or_else(|| CadError::InvalidInput("CreateEllipse needs p2".into()))?;
+        let p3 = *points
+            .get(2)
+            .ok_or_else(|| CadError::InvalidInput("CreateEllipse needs p3".into()))?;
+        let frame = crate::draw_tool::ellipse_parameters(p1, p2, p3)?;
+        let geometry = SemanticGeometry::Ellipse {
+            center: frame.center,
+            // The axis-endpoint method is a work-plane construction; a full
+            // ellipse uses +Z, never a fabricated tilt.
+            normal: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            major_axis: frame.major_axis,
+            ratio: frame.ratio,
+            start: 0.0,
+            sweep: std::f64::consts::TAU,
+        };
+        self.commit_new_entity(session, command, geometry, "create ellipse")
+    }
+}
+
+/// The minimum separation (world units) for two polyline vertices to count as
+/// distinct. Below this a capture is a repeated single point and has no segment.
+const MIN_POLYLINE_VERTEX_SEPARATION: f64 = 1e-12;
+
+/// Build a straight-segment open polyline from a captured point list.
+///
+/// The single construction/validation point shared by both payload arms, so the
+/// UI and programmatic paths cannot drift. Refuses explicitly (never a silent
+/// fix-up) when there are fewer than two points, any point is non-finite, or
+/// fewer than two vertices are distinct.
+fn polyline_geometry(points: Vec<Point3>) -> CadResult<SemanticGeometry> {
+    if points.len() < 2 {
+        return Err(CadError::InvalidInput(
+            "CreatePolyline needs at least two points".into(),
+        ));
+    }
+    if !points.iter().all(|point| is_finite_point(*point)) {
+        return Err(CadError::InvalidInput(
+            "CreatePolyline points must all be finite".into(),
+        ));
+    }
+    let first = points[0];
+    let has_distinct_vertex = points
+        .iter()
+        .any(|point| distance(first, *point) > MIN_POLYLINE_VERTEX_SEPARATION);
+    if !has_distinct_vertex {
+        return Err(CadError::InvalidInput(
+            "CreatePolyline needs at least two distinct points".into(),
+        ));
+    }
+    let bulges = vec![0.0; points.len()];
+    Ok(SemanticGeometry::Polyline {
+        points,
+        bulges,
+        closed: false,
+    })
+}
+
+/// The minimum width/height (world units) for a rectangle to have any area.
+///
+/// A capture whose two corners share an `x` (zero width) or a `y` (zero height)
+/// collapses to a segment or a point and has no rectangle; like
+/// [`MIN_POLYLINE_VERTEX_SEPARATION`] the threshold is a tiny relative-free world
+/// epsilon so an exactly-degenerate click pair is refused while any real span is
+/// accepted.
+const MIN_RECTANGLE_EXTENT: f64 = 1e-12;
+
+/// Build the closed four-vertex rectangle through two opposite corners.
+///
+/// The two clicks are two opposite corners and do **not** define a winding, so the
+/// four stored vertices are canonicalised to a counter-clockwise outline starting
+/// at the lower-left corner:
+/// `(min_x, min_y) → (max_x, min_y) → (max_x, max_y) → (min_x, max_y)`, closed.
+/// This makes the stored geometry identical whichever diagonal the user clicked
+/// (the click order only reaches the DXF round trip through this canonical order),
+/// and gives a stable vertex order for an area/measurement consumer. The `z` plane
+/// is the `+Z` work plane of the first corner.
+///
+/// Explicit refusals that create nothing (never a silent fix-up, projection or
+/// degenerate entity): a non-finite corner; two corners that are not coplanar on
+/// one `+Z` plane; and a zero-width or zero-height capture (a click-click on the
+/// same axis line).
+fn rectangle_geometry(corner1: Point3, corner2: Point3) -> CadResult<SemanticGeometry> {
+    if !is_finite_point(corner1) || !is_finite_point(corner2) {
+        return Err(CadError::InvalidInput(
+            "CreateRectangle corners must be finite".into(),
+        ));
+    }
+    // Flat `+Z` subset: a rectangle is a planar construction, so a corner pair
+    // that is not coplanar on one plane is refused rather than projected onto the
+    // first corner's plane (ADR 0015, non-planar input is NOT IMPLEMENTED).
+    let z_tol = 1e-9 * (1.0 + corner1.z.abs() + corner2.z.abs());
+    if (corner2.z - corner1.z).abs() > z_tol {
+        return Err(CadError::InvalidInput(
+            "CreateRectangle corners must lie in one +Z plane".into(),
+        ));
+    }
+    let min_x = corner1.x.min(corner2.x);
+    let max_x = corner1.x.max(corner2.x);
+    let min_y = corner1.y.min(corner2.y);
+    let max_y = corner1.y.max(corner2.y);
+    if max_x - min_x <= MIN_RECTANGLE_EXTENT {
+        return Err(CadError::InvalidInput(
+            "CreateRectangle needs two corners with distinct X (zero width)".into(),
+        ));
+    }
+    if max_y - min_y <= MIN_RECTANGLE_EXTENT {
+        return Err(CadError::InvalidInput(
+            "CreateRectangle needs two corners with distinct Y (zero height)".into(),
+        ));
+    }
+    let z = corner1.z;
+    let points = vec![
+        Point3 {
+            x: min_x,
+            y: min_y,
+            z,
+        },
+        Point3 {
+            x: max_x,
+            y: min_y,
+            z,
+        },
+        Point3 {
+            x: max_x,
+            y: max_y,
+            z,
+        },
+        Point3 {
+            x: min_x,
+            y: max_y,
+            z,
+        },
+    ];
+    Ok(SemanticGeometry::Polyline {
+        bulges: vec![0.0; points.len()],
+        points,
+        closed: true,
+    })
 }

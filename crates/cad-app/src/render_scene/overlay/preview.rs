@@ -42,7 +42,27 @@ pub fn draw_preview_overlay(
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }),
+        // RECTANG: the live rectangle outline between the captured first corner
+        // and the cursor (the second corner). Uses the same `DrawPreview` points +
+        // cursor plumbing as the chain and circle previews, so no new overlay
+        // channel is introduced; it falls back to the rubber-band chain while the
+        // span is degenerate.
+        DrawToolKind::Rectang => rectangle_points(&preview.points, preview.cursor).or_else(|| {
+            let chain = preview_chain(&preview.points, preview.cursor);
+            (chain.len() >= 2).then_some(chain)
+        }),
+        // ELLIPSE: a bounded chord tessellation of the exact ellipse the commit
+        // stores, between the captured axis-endpoint picks and the live cursor.
+        // The preview is an **approximation** (the stored entity is exact); it
+        // falls back to the rubber-band chain while the capture cannot define an
+        // ellipse (fewer than two picks, coincident endpoints, or the third pick
+        // on the first axis), never a fabricated full ellipse.
+        DrawToolKind::Ellipse => ellipse_points(&preview.points, preview.cursor).or_else(|| {
+            let chain = preview_chain(&preview.points, preview.cursor);
+            (chain.len() >= 2).then_some(chain)
+        }),
         DrawToolKind::Line
+        | DrawToolKind::Polyline
         | DrawToolKind::Move
         | DrawToolKind::Trim
         | DrawToolKind::Copy
@@ -123,6 +143,93 @@ fn circle_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3
             x: center.x + radius * cos,
             y: center.y + radius * sin,
             z: center.z,
+        });
+    }
+    Some(out)
+}
+
+/// The closed outline for a RECTANG preview: the captured first corner plus the
+/// live cursor as the second, closed back onto the first.
+///
+/// `None` (so the caller falls back to the rubber-band chain) while fewer than two
+/// corners are known or the span has no width/height, so a zero-area rectangle is
+/// never previewed as if it were a real one. The four corners are the same
+/// canonical outline the commit builds (lower-left first, counter-clockwise).
+fn rectangle_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
+    let corner1 = *points.first()?;
+    let corner2 = points.get(1).copied().or(cursor)?;
+    let min_x = corner1.x.min(corner2.x);
+    let max_x = corner1.x.max(corner2.x);
+    let min_y = corner1.y.min(corner2.y);
+    let max_y = corner1.y.max(corner2.y);
+    if max_x - min_x <= 1e-12 || max_y - min_y <= 1e-12 {
+        return None;
+    }
+    let z = corner1.z;
+    let corner = |x: f64, y: f64| Point3 { x, y, z };
+    Some(vec![
+        corner(min_x, min_y),
+        corner(max_x, min_y),
+        corner(max_x, max_y),
+        corner(min_x, max_y),
+        corner(min_x, min_y),
+    ])
+}
+
+/// Bounds on the ELLIPSE preview tessellation segment count.
+///
+/// The stored entity is the exact ellipse; the preview is a bounded chord
+/// approximation, so its cost stays bounded no matter how eccentric the capture
+/// is. The count grows as the axis ratio shrinks (a flatter ellipse needs more
+/// chords) and is clamped into `[MIN, MAX]`.
+const MIN_ELLIPSE_PREVIEW_SEGMENTS: usize = 16;
+const MAX_ELLIPSE_PREVIEW_SEGMENTS: usize = 128;
+
+/// The closed tessellated outline for an ELLIPSE preview.
+///
+/// The axis-endpoint capture needs three picks (the two endpoints of the first
+/// axis plus the other-axis distance); the live cursor fills the next missing
+/// pick. The outline is a **bounded chord approximation** of the exact ellipse
+/// the commit stores ([`MAX_ELLIPSE_PREVIEW_SEGMENTS`] at most), not the stored
+/// entity. `None` (so the caller falls back to the rubber-band chain) while fewer
+/// than two picks are known or the picks cannot define an ellipse — coincident
+/// endpoints or a third pick on the first-axis line — so a degenerate capture is
+/// never previewed as a fabricated full ellipse.
+fn ellipse_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
+    let (p1, p2, p3) = match points {
+        [a, b, c, ..] => (*a, *b, *c),
+        [a, b] => (*a, *b, cursor?),
+        _ => return None,
+    };
+    let frame = crate::draw_tool::ellipse_parameters(p1, p2, p3).ok()?;
+    let major = frame.major_axis;
+    let major_len = (major.x * major.x + major.y * major.y + major.z * major.z).sqrt();
+    if !major_len.is_finite() || major_len <= 0.0 {
+        return None;
+    }
+    // More eccentric ellipses get more chords so the flat ends still read as a
+    // smooth curve; the count is hard-capped so the preview cost is bounded
+    // regardless of the capture (the third pick only reaches it through `ratio`).
+    let segments = (64.0 / frame.ratio).clamp(
+        MIN_ELLIPSE_PREVIEW_SEGMENTS as f64,
+        MAX_ELLIPSE_PREVIEW_SEGMENTS as f64,
+    ) as usize;
+    // `minor = cross(+Z, major_unit) · (major_len · ratio)` keeps the tessellation
+    // in the ellipse's own `+Z` plane, exactly like `cad-geometry::tessellate`.
+    let minor_len = major_len * frame.ratio;
+    let minor = Point3 {
+        x: -major.y / major_len * minor_len,
+        y: major.x / major_len * minor_len,
+        z: 0.0,
+    };
+    let mut out = Vec::with_capacity(segments + 1);
+    for i in 0..=segments {
+        let t = std::f64::consts::TAU * (i as f64) / (segments as f64);
+        let (sin, cos) = t.sin_cos();
+        out.push(Point3 {
+            x: frame.center.x + major.x * cos + minor.x * sin,
+            y: frame.center.y + major.y * cos + minor.y * sin,
+            z: frame.center.z + major.z * cos + minor.z * sin,
         });
     }
     Some(out)

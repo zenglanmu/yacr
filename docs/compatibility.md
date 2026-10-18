@@ -25,7 +25,7 @@
 | LWPOLYLINE/POLYLINE(bulge) | 实现 | 实现 | 实现(含 bulge) | 实现 | 折线长度实现 |
 | CIRCLE / ARC / ELLIPSE | 实现 | 实现(保留 normal/OCS)；非均匀仿射重解为真椭圆 | 实现 | 实现 | 距离实现；面积限共面环 |
 | SPLINE | 实现 | 实现(保留 degree/knots/weights，真实 NURBS) | 弦高自适应离散 | 实现 | 解析/采样(与显示 LOD 解耦) |
-| POINT | 实现 | 实现 | 实现 | 实现 | 部分 |
+| POINT | 实现 | 实现 | **无可见图元**（`tessellate` 退化为零长线段 ⇒ 当前等价"不可见"）；计划以 overlay 屏占比标记实现，见 ADR-0015 决策 E | 实现 | 部分 |
 | SOLID / TRACE / 3DFACE | 实现 | 网格(四边形→三角) | 网格 | 实现 | 不支持 |
 | INSERT / 块 | 实现(定义与实例分离) | 实现 | 实例展开块几何(嵌套有界，保留 InstancePath) | 实现 | 不支持 |
 | TEXT / MTEXT | 实现(保留字体名/字高/旋转) | 实现 | 整形为线段：outline(TTF/OTF/WOFF)+SHX(shapes/unifont/bigfont)，缺失字体走回退链 | 同上 | 不支持 |
@@ -94,7 +94,23 @@
 - 命令行、别名、固定键位与补全行为的完整参考见 **`docs/shortcuts.md`**；`Ctrl+C/X/V` 仅为应用内
   剪贴板，不读写操作系统剪贴板。
 - **导出**：`SAVE` 为**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；
-  `PLOT` 为矢量 SVG/PDF。真实图纸上的导出兼容性**未验证**。
+  `PLOT` 为矢量 SVG/PDF。真实图纸上的导出兼容性**未验证**。逐类：LWPOLYLINE（平面的）/ELLIPSE/POINT
+  为精确映射；**SPLINE 记为 `Converted`**（`DxfSpline`，几何保留，**closed/periodic 标志不携带**）；
+  Shape/Image/Mask/Opaque 被丢弃并逐条记录。
+
+### 创建命令（ADR-0015，逐条按实施状态）
+
+| 命令 | 状态 | 实体 | 显式未实现 |
+|---|---|---|---|
+| `PLINE` | **实现** | 开放 LWPOLYLINE（每顶点 bulge=0） | 弧段/`Angle`/`Center`/`Direction`/`Radius`/`Second pt`/`Halfwidth`/`Width`/`Close`/`Length`/顶点 `Undo`；3D/OCS |
+| `RECTANG` | **实现** | 闭合 LWPOLYLINE（4 顶点，bulge=0） | `Chamfer`/`Fillet`/`Thickness`/`Elevation`/`Width`/`Area`/`Dimensions`/`Rotation`（含圆角会话内持久怪癖）；3D/OCS |
+| `ELLIPSE` | **实现** | 单个 `Ellipse`（`center`、`+Z`、中心相对 `major_axis`、`ratio = 短/长 ≤ 1`、`start=0`、`sweep=2π`） | 轴端点法；`Center` 法/`Arc`/`Rotation`/`Isocircle`/`PELLIPSE`；**长短轴重排为未对齐假设**：本仓库把较长者存为长轴以保证 DXF 组 40 ≤ 1，AutoCAD 确切重排规则**未查证**；预览为有界弦近似（16–128 段），存储实体精确 |
+| `POLYGON` | 未实现（P3b 排期） | — | 计划：边数（会话参数，默认 4）+ 中心 + 半径 → 闭合折线（**内接**）；`Edge` 分支与**外切**模式不做；边数不跨会话持久化 |
+| `POINT` | 未实现（P3c 排期） | — | 计划：单次放置；`PDMODE`/`PDSIZE`/点样式、Multiple Points 重复放置、**3D 视图中的点标记**均不做 |
+| `SPLINE` | 未实现（P3d 排期；`cad-geometry` 插值纯函数已落地） | — | 计划：fit 点法、**≥4 fit 点**、三次/clamped/chord 插值 → NURBS；CV 法/节点类型/阶数/切向/公差/`Close`/`Object` 不做；**fit 点数据不参与往返** |
+
+- 创建命令均为 **Work 模式**（Viewer 显式拒绝）、**模型空间**（插入漏斗固定 `SpaceId::Model`）、
+  **一次事务 + 一步撤销**；未支持选项一律显式拒绝，不用近似静默顶替。
 - **证据范围**：上述表格是**契约/场景**证据，不等于真实图纸兼容性。Linux 桌面宿主（React/Tauri）
   另有**真实硬件 GPU** 有界证据（Vulkan / Quadro P620 / X11）：打开与渲染、悬停、框选（含橡皮筋像素判据）、
   TRIM 的交互链（实体拾取/漏点拒绝/CONFIRM 到达命令层）、以及 **ERASE 的真实提交**（`entityCount` 4→3）。

@@ -104,6 +104,9 @@ impl HostCore {
                     .clone(),
             ),
             viewport_bounds: self.canvas_bounds(),
+            // Visible POINT markers are derived by the scene assembly from the
+            // drawing being displayed, so the host feeds none itself.
+            point_markers: Vec::new(),
         };
         self.render.set_overlays(overlays);
         let _ = self.render.request_preparation()?;

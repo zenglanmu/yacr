@@ -44,7 +44,7 @@ pub use camera::{
     ProjectionKind, StandardView, ViewBasis,
 };
 pub use command_id::*;
-pub use draw_tool::{circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind};
+pub use draw_tool::{circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity};
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
     DiagnosticsDrawer, EscapeAction, InputOutcome, InputPolicy, KeyAction, LoadingState,
@@ -298,6 +298,9 @@ impl SessionState {
             DrawToolKind::Line => CommandId::CreateLine,
             DrawToolKind::Circle => CommandId::CreateCircle,
             DrawToolKind::Arc => CommandId::CreateArc,
+            DrawToolKind::Polyline => CommandId::CreatePolyline,
+            DrawToolKind::Rectang => CommandId::CreateRectangle,
+            DrawToolKind::Ellipse => CommandId::CreateEllipse,
             DrawToolKind::Move => CommandId::MoveEntities,
             DrawToolKind::Trim => CommandId::TrimEntity,
             DrawToolKind::Copy => CommandId::CopyEntities,

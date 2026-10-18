@@ -3,11 +3,14 @@
 use super::super::*;
 use super::test_support::*;
 
-/// The 11 draw selectors mapped to their `cad-app` machine keys.
+/// The 14 draw selectors mapped to their `cad-app` machine keys.
 const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("LINE", "draw.line"),
     ("CIRCLE", "draw.circle"),
     ("ARC", "draw.arc"),
+    ("PLINE", "draw.polyline"),
+    ("RECTANG", "draw.rectang"),
+    ("ELLIPSE", "draw.ellipse"),
     ("MOVE", "draw.move"),
     ("TRIM", "draw.trim"),
     ("COPY", "draw.copy"),
@@ -39,6 +42,104 @@ fn command_routing_starts_every_draw_tool_with_its_cad_app_key() {
         assert_eq!(tool.points, 0, "{selector} starts with no captured point");
         assert!(!tool.ready, "{selector} must not be ready before any point");
     }
+}
+
+#[test]
+fn rectang_selector_is_admitted_and_starts_the_rectangle_kind() {
+    // ADR 0015 P3a: RECTANG is a real `COMMAND_TABLE` draw selector that routes to
+    // `BeginDraw(Rectang)`, and it is disjoint from the interaction-only selector
+    // families (a measurement/zoom name would otherwise silently win the lookup).
+    assert!(admissible_names().contains(&"RECTANG"));
+    assert_eq!(canonical_command_name("RECTANG"), Some("RECTANG"));
+    assert_eq!(
+        normalize_command("rectang"),
+        Some(CommandId::CreateRectangle)
+    );
+    assert_eq!(measurement_selector_kind("RECTANG"), None);
+    assert!(zoom_step_factor("RECTANG").is_none());
+    assert!(
+        !COMMAND_ALIASES.iter().any(|(alias, _)| *alias == "RECTANG"),
+        "RECTANG must not be an alias"
+    );
+
+    // The session really starts the rectangle kind (the typed request reaches the
+    // host), with no captured point and not ready.
+    let session = fresh_session();
+    session.command("RECTANG").expect("RECTANG is admitted");
+    let tool = session
+        .snapshot(None, None, 0)
+        .tool
+        .expect("RECTANG starts a tool");
+    assert_eq!(tool.key, "draw.rectang");
+    assert_eq!(tool.points, 0);
+    assert!(!tool.ready);
+
+    // Two clicks make it ready: the router-started tool is the real arity-2 capture.
+    let capture = |pixel: [f64; 2], sequence: u64| {
+        session
+            .handle_input(&pointer_at(InputKind::PointerDown, sequence, pixel, None))
+            .expect("the press is admitted");
+        session
+            .handle_input(&pointer_at(InputKind::PointerUp, sequence + 1, pixel, None))
+            .expect("the release is admitted");
+    };
+    capture([400.0, 300.0], 1);
+    assert_eq!(session.snapshot(None, None, 0).tool.unwrap().points, 1);
+    capture([460.0, 340.0], 3);
+    let tool = session.snapshot(None, None, 0).tool.unwrap();
+    assert_eq!(tool.key, "draw.rectang");
+    assert_eq!(tool.points, 2);
+    assert!(tool.ready, "two corners define a rectangle");
+}
+
+#[test]
+fn ellipse_selector_is_admitted_and_starts_the_ellipse_kind() {
+    // ADR 0015 P3a: ELLIPSE is a real `COMMAND_TABLE` draw selector that routes to
+    // `BeginDraw(Ellipse)`, and it is disjoint from the interaction-only selector
+    // families (a measurement/zoom name would otherwise silently win the lookup).
+    assert!(admissible_names().contains(&"ELLIPSE"));
+    assert_eq!(canonical_command_name("ELLIPSE"), Some("ELLIPSE"));
+    assert_eq!(normalize_command("ellipse"), Some(CommandId::CreateEllipse));
+    assert_eq!(measurement_selector_kind("ELLIPSE"), None);
+    assert!(zoom_step_factor("ELLIPSE").is_none());
+    assert!(
+        !COMMAND_ALIASES.iter().any(|(alias, _)| *alias == "ELLIPSE"),
+        "ELLIPSE must not be an alias"
+    );
+
+    // The session really starts the ellipse kind (the typed request reaches the
+    // host), with no captured point and not ready.
+    let session = fresh_session();
+    session.command("ELLIPSE").expect("ELLIPSE is admitted");
+    let tool = session
+        .snapshot(None, None, 0)
+        .tool
+        .expect("ELLIPSE starts a tool");
+    assert_eq!(tool.key, "draw.ellipse");
+    assert_eq!(tool.points, 0);
+    assert!(!tool.ready);
+
+    // Three clicks make it ready: the router-started tool is the real arity-3
+    // axis-endpoint capture (ready exactly at the third pick, not before).
+    let capture = |pixel: [f64; 2], sequence: u64| {
+        session
+            .handle_input(&pointer_at(InputKind::PointerDown, sequence, pixel, None))
+            .expect("the press is admitted");
+        session
+            .handle_input(&pointer_at(InputKind::PointerUp, sequence + 1, pixel, None))
+            .expect("the release is admitted");
+    };
+    capture([400.0, 300.0], 1);
+    assert_eq!(session.snapshot(None, None, 0).tool.unwrap().points, 1);
+    capture([500.0, 300.0], 3);
+    let tool = session.snapshot(None, None, 0).tool.unwrap();
+    assert_eq!(tool.points, 2);
+    assert!(!tool.ready, "two picks are not an ellipse");
+    capture([450.0, 360.0], 5);
+    let tool = session.snapshot(None, None, 0).tool.unwrap();
+    assert_eq!(tool.key, "draw.ellipse");
+    assert_eq!(tool.points, 3);
+    assert!(tool.ready, "three picks define an ellipse");
 }
 
 #[test]
