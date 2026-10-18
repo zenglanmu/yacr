@@ -99,9 +99,19 @@ pub(crate) struct HoverState {
     /// The current hovered ref (the top-ranked pick), empty when nothing is
     /// hovered. A miss always clears it, so a stale tint can never survive.
     pub hovered: RefCell<cad_app::SelectionSet>,
-    /// The logical cursor position of the last executed hover query, so an
-    /// unchanged position re-runs no pick. `None` after any clear/suppression.
+    /// The logical cursor position of the last executed hover query, so a move
+    /// that stays inside the pickbox aperture re-runs no pick. `None` after any
+    /// clear/suppression.
     pub last_query: Cell<Option<[f64; 2]>>,
+    /// The identity the last hover query was resolved against: the drawing's
+    /// [`cad_domain::SceneIdentity`] **plus** the session layer-override
+    /// fingerprint ([`cad_app::layers::LayerOverrideSet::fingerprint`]). The
+    /// cached `last_query` position is only reusable while both are unchanged,
+    /// so a stayed-in-place cursor after an edit/undo — or after a layer
+    /// visibility toggle, which changes the pick answer without touching the
+    /// database revision — re-resolves instead of keeping a stale tint. `None`
+    /// after any clear/suppression.
+    pub last_query_identity: Cell<Option<(cad_domain::SceneIdentity, u64)>>,
     /// Number of hover pick queries actually executed. Observable behaviour for
     /// the throttle contract (a counter, not a wall-clock measurement); it is
     /// also what tells the profile log apart from a cached move.

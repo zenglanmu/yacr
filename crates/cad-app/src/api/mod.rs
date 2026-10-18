@@ -438,7 +438,11 @@ impl Application {
     }
 }
 
-fn apply_selection(session: &mut SessionState, refs: Vec<SelectionRef>, mode: SelectionMode) {
+pub(crate) fn apply_selection(
+    session: &mut SessionState,
+    refs: Vec<SelectionRef>,
+    mode: SelectionMode,
+) {
     let unique = crate::SelectionSet::from_refs(refs).refs().to_vec();
     let mut selection = session.selection.clone();
     match mode {

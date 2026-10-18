@@ -24,6 +24,7 @@ pub mod picking;
 pub mod recovery;
 pub mod render_scene;
 mod select_all;
+mod select_box;
 pub mod selection;
 pub mod tasks;
 pub mod tool_state;
@@ -63,6 +64,7 @@ pub use tasks::{
 };
 pub use tool_state::{DrawCapture, ToolSnapshot, ToolState};
 
+use interaction::SelectionMode;
 use layers::LayerOverrideSet;
 
 pub struct Document {
@@ -105,6 +107,13 @@ pub struct SessionState {
     /// required to have; a create naming a layer the database does not contain
     /// is an explicit `InvalidInput` rather than a silent fallback.
     pub active_layer: LayerId,
+    /// Whether object snapping is active for this session (ADR 0014).
+    ///
+    /// Session state only: toggling it writes no database and creates no
+    /// history entry. The default is `true`; it is deliberately independent of
+    /// the persisted `view.overlays.snapHints` preference, which only controls
+    /// whether resolved hints are drawn.
+    snap_enabled: bool,
     /// The last structured measurement result produced in this session (F06).
     ///
     /// Set when a measurement is evaluated (auto-completed or explicitly
@@ -144,6 +153,7 @@ impl SessionState {
             generation: 0,
             backend: BackendChoice::Auto,
             active_layer: LayerId(0),
+            snap_enabled: true,
             last_measurement: None,
             selected_measurement_kind: MeasurementToolKind::Distance,
             clipboard: Vec::new(),
@@ -152,6 +162,26 @@ impl SessionState {
 
     pub fn mode(&self) -> AppMode {
         self.mode
+    }
+
+    /// Whether object snapping is active in this session.
+    pub fn snap_enabled(&self) -> bool {
+        self.snap_enabled
+    }
+
+    /// Enable or disable object snapping for this session.
+    ///
+    /// Session state only: no database write, no history entry. When disabled,
+    /// [`crate::host::HostController::resolve_snap`] returns `Ok(None)` (the raw
+    /// point is used) and the snap-hint overlay is empty.
+    pub fn set_snap_enabled(&mut self, enabled: bool) {
+        self.snap_enabled = enabled;
+    }
+
+    /// Flip object snapping and return the new state (F3 binding).
+    pub fn toggle_snap(&mut self) -> bool {
+        self.snap_enabled = !self.snap_enabled;
+        self.snap_enabled
     }
 
     pub fn authorize(&self, command: CommandId) -> CadResult<()> {
@@ -617,6 +647,21 @@ pub enum CommandPayload {
     /// Replace the current selection with these refs (read-only; never writes
     /// the DWG). An empty list clears the selection.
     Selection(Vec<SelectionRef>),
+    /// Select every visible model-space item whose geometry satisfies a
+    /// window/crossing rectangle (ADR 0014 B).
+    ///
+    /// `rect_logical` is two opposite corners in **canvas logical pixels**, the
+    /// same convention as [`CommandPayload::ZoomAt`]; the command maps them to
+    /// the active viewport's work plane. `crossing == false` is a WINDOW
+    /// selection (fully inside only); `crossing == true` is a CROSSING
+    /// selection (intersect or contain), i.e. the right-to-left drag semantic.
+    /// `mode` is the merge mode applied to the current selection. Read-only: no
+    /// ChangeSet, no revision change, no history entry.
+    BoxSelect {
+        rect_logical: [[f64; 2]; 2],
+        crossing: bool,
+        mode: SelectionMode,
+    },
     /// Translate a set of selected refs by a world delta (MOVE, spec F-EDIT).
     Move {
         refs: Vec<SelectionRef>,

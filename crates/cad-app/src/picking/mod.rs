@@ -22,6 +22,7 @@
 //! analytic curve/line precision are open items; none of them is faked.
 
 use crate::camera::{Camera, Projection};
+use crate::layers::LayerOverrideSet;
 use cad_db::{DrawingDatabase, MAX_INSTANCE_DEPTH};
 use cad_domain::*;
 use cad_spatial::{BackFacePolicy, ChunkGridIndex, PickItem, PickOptions, PickReport};
@@ -131,6 +132,31 @@ pub fn pick_tolerance(
         ));
     }
     Ok(tolerance)
+}
+
+/// Whether a ref is drawn under the temporary layer overrides.
+///
+/// This is the **exact** rule `select_all`/`select_box` apply: every step of the
+/// ref's instance path and its target entity must be visible under
+/// [`LayerOverrideSet::is_entity_visible`]. It is reused here — not duplicated as
+/// a second predicate — so a screen/ray pick targets the same set the rendered
+/// base contains. A ref with an unresolved step is refused (never silently
+/// included): an entity that cannot be resolved is not visible.
+pub fn ref_is_visible(
+    database: &DrawingDatabase,
+    overrides: &LayerOverrideSet,
+    reference: &SelectionRef,
+) -> bool {
+    reference
+        .instance
+        .0
+        .iter()
+        .chain(std::iter::once(&reference.entity))
+        .all(|id| {
+            database
+                .entity(*id)
+                .is_some_and(|entity| overrides.is_entity_visible(database, entity))
+        })
 }
 
 /// Collect the model-space pick items of a drawing.
@@ -496,8 +522,44 @@ pub fn pick_ray(
     ray: &Ray3,
     options: &PickOptions,
 ) -> CadResult<PickReport> {
+    pick_ray_filtered(database, document, ray, options, None)
+}
+
+/// The layer-visibility-aware counterpart of [`pick_ray`].
+///
+/// Identical candidate set and ranking to [`pick_ray`], except that every
+/// candidate hidden under `overrides` (see [`ref_is_visible`]) is dropped
+/// **before** the precise stage, so the next visible candidate wins exactly as
+/// it would in the rendered base. Without this the screen/ray pick could target
+/// an entity on a temporarily hidden layer — a ref that is not resident in the
+/// scene — and its `FLAG_HOVERED`/`FLAG_SELECTED` would surface as
+/// `flags.unresolved` instead of a real highlight.
+pub fn pick_ray_with_visibility(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    ray: &Ray3,
+    options: &PickOptions,
+    overrides: &LayerOverrideSet,
+) -> CadResult<PickReport> {
+    pick_ray_filtered(database, document, ray, options, Some(overrides))
+}
+
+fn pick_ray_filtered(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    ray: &Ray3,
+    options: &PickOptions,
+    overrides: Option<&LayerOverrideSet>,
+) -> CadResult<PickReport> {
     let index = cached_pick_index(database, document);
-    pick_ray_with_index(database, document, ray, options, index.as_deref())
+    pick_ray_with_index_filtered(
+        database,
+        document,
+        ray,
+        options,
+        index.as_deref(),
+        overrides,
+    )
 }
 
 /// Precise pick over the exhaustive item scan — the pre-index reference path.
@@ -511,9 +573,29 @@ pub fn pick_ray_exhaustive(
     ray: &Ray3,
     options: &PickOptions,
 ) -> CadResult<PickReport> {
+    pick_ray_exhaustive_filtered(database, document, ray, options, None)
+}
+
+fn pick_ray_exhaustive_filtered(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    ray: &Ray3,
+    options: &PickOptions,
+    overrides: Option<&LayerOverrideSet>,
+) -> CadResult<PickReport> {
     let profile = pick_profile_enabled();
     let started = profile.then(Instant::now);
     let items = borrowed_pick_items(database, document);
+    // Drop the hidden candidates before the precise stage (the same predicate
+    // the indexed path applies), so the exhaustive fallback and the index agree
+    // on the visible set. Without overrides the list is untouched.
+    let items: Vec<_> = match overrides {
+        Some(overrides) => items
+            .into_iter()
+            .filter(|(source, _, _)| ref_is_visible(database, overrides, source))
+            .collect(),
+        None => items,
+    };
     let item_count = items.len();
     if let Some(started) = started {
         eprintln!(
@@ -587,12 +669,29 @@ pub fn pick_ray_with_index(
     options: &PickOptions,
     index: Option<&PickIndex>,
 ) -> CadResult<PickReport> {
+    pick_ray_with_index_filtered(database, document, ray, options, index, None)
+}
+
+fn pick_ray_with_index_filtered(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    ray: &Ray3,
+    options: &PickOptions,
+    index: Option<&PickIndex>,
+    overrides: Option<&LayerOverrideSet>,
+) -> CadResult<PickReport> {
     let Some(index) = index else {
-        return pick_ray_exhaustive(database, document, ray, options);
+        return pick_ray_exhaustive_filtered(database, document, ray, options, overrides);
     };
     let profile = pick_profile_enabled();
     let started = profile.then(Instant::now);
-    let candidates = filter_by_index(index, ray, options.tolerance)?;
+    let mut candidates = filter_by_index(index, ray, options.tolerance)?;
+    // The index is a conservative AABB broad phase and is keyed by scene
+    // identity, which a session-only layer override does not change; the
+    // visibility rule therefore has to be applied here, at query time.
+    if let Some(overrides) = overrides {
+        candidates.retain(|source| ref_is_visible(database, overrides, source));
+    }
     let candidate_count = candidates.len();
     if let Some(started) = started {
         eprintln!(
@@ -651,6 +750,58 @@ pub fn pick_at_screen(
     policy: &TolerancePolicy,
     back_faces: BackFacePolicy,
 ) -> CadResult<PickReport> {
+    pick_at_screen_filtered(
+        database,
+        document,
+        camera,
+        logical,
+        logical_size,
+        policy,
+        back_faces,
+        None,
+    )
+}
+
+/// The layer-visibility-aware counterpart of [`pick_at_screen`].
+///
+/// The screen→ray→pick funnel of [`pick_at_screen`], with the temporary layer
+/// overrides applied to the candidate set (see [`pick_ray_with_visibility`]).
+/// This is the entry point a host uses so hover and click can never target an
+/// entity that a temporarily hidden layer keeps out of the rendered base.
+#[allow(clippy::too_many_arguments)]
+pub fn pick_at_screen_with_visibility(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    camera: &Camera,
+    logical: [f64; 2],
+    logical_size: [f64; 2],
+    policy: &TolerancePolicy,
+    back_faces: BackFacePolicy,
+    overrides: &LayerOverrideSet,
+) -> CadResult<PickReport> {
+    pick_at_screen_filtered(
+        database,
+        document,
+        camera,
+        logical,
+        logical_size,
+        policy,
+        back_faces,
+        Some(overrides),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pick_at_screen_filtered(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    camera: &Camera,
+    logical: [f64; 2],
+    logical_size: [f64; 2],
+    policy: &TolerancePolicy,
+    back_faces: BackFacePolicy,
+    overrides: Option<&LayerOverrideSet>,
+) -> CadResult<PickReport> {
     let profile = pick_profile_enabled();
     let total_started = profile.then(Instant::now);
     let started = profile.then(Instant::now);
@@ -665,7 +816,7 @@ pub fn pick_at_screen(
             started.elapsed().as_secs_f64() * 1000.0
         );
     }
-    let result = pick_ray(database, document, &ray, &options);
+    let result = pick_ray_filtered(database, document, &ray, &options, overrides);
     if let Some(started) = total_started {
         eprintln!(
             "YACR_PROFILE_PICK pick_at_screen_total elapsed_ms={:.3}",

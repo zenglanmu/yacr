@@ -374,6 +374,65 @@ fn entity_selection_change_publishes_flags_without_rebuilding_the_overlay() {
 }
 
 #[test]
+fn flags_only_refresh_republishes_flags_without_touching_the_scene() {
+    use crate::selection::{model_ref, SelectionSet};
+    let db = db_with_line();
+    let mut controller = CadSceneController::default();
+    let layers = LayerOverrideSet::new();
+    let empty = overlays_without_reference();
+    controller
+        .prepare_with_overlays(
+            Some(&db),
+            DocumentId(73),
+            None,
+            &layers,
+            SpaceSelection::Model,
+            &empty,
+        )
+        .unwrap();
+    let before = controller.ready.as_ref().unwrap().clone();
+    assert!(before.entity_flags.is_empty());
+
+    let overlays = OverlayInputs {
+        selection: SelectionSet::from_refs([model_ref(DocumentId(73), cad_domain::EntityId(1))]),
+        visibility: OverlayVisibility {
+            axes: false,
+            grid: false,
+            ..OverlayVisibility::default()
+        },
+        ..OverlayInputs::default()
+    };
+    assert!(
+        controller.refresh_flags_only(Some(&db), DocumentId(73), &overlays),
+        "a selection change re-resolves the flags"
+    );
+    let after = controller.ready.as_ref().unwrap();
+    assert_eq!(
+        after.entity_flags,
+        vec![(
+            model_ref(DocumentId(73), cad_domain::EntityId(1)),
+            cad_scene::FLAG_SELECTED
+        )]
+    );
+    assert_eq!(
+        after.revision, before.revision,
+        "a flags-only refresh must not advance the scene revision"
+    );
+    assert_eq!(after.base_revision, before.base_revision);
+    assert!(Arc::ptr_eq(&after.base, &before.base));
+    assert!(Arc::ptr_eq(&after.highlight, &before.highlight));
+    assert!(
+        after.flags_revision > before.flags_revision,
+        "the flags revision advances on a flags-only refresh"
+    );
+
+    // The same inputs are a no-op (nothing is republished).
+    let revision = controller.ready.as_ref().unwrap().flags_revision;
+    assert!(!controller.refresh_flags_only(Some(&db), DocumentId(73), &overlays));
+    assert_eq!(controller.ready.as_ref().unwrap().flags_revision, revision);
+}
+
+#[test]
 fn preview_change_rebuilds_only_the_highlight_overlay_and_cancel_clears_it() {
     use crate::measure_tool::{MeasurementPreview, MeasurementToolKind};
     let db = db_with_line();

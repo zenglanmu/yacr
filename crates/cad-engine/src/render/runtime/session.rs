@@ -54,6 +54,7 @@ impl CadRenderRuntime {
         self.pending_upload = None;
         self.presented_revision = None;
         self.applied_base = None;
+        self.applied_flags_revision = None;
         self.target_size = None;
         self.base_batches = 0;
         self.lifecycle = RenderLifecycle::Detached;
@@ -108,6 +109,37 @@ impl CadRenderRuntime {
             }
             return Ok(());
         };
+        // Flags-first delta over the committed geometry. A flags-only preview
+        // publication keeps the scene revision, so this must be evaluated
+        // BEFORE the `applied_revision == Some(ready.revision)` early return:
+        // otherwise the new flags would be silently skipped. Only the entity
+        // flags are pushed — no batch, stream or chunk is re-uploaded, and the
+        // overlay suffix stays resident (no suppression, no base-only frame).
+        if flags_delta_applies(
+            self.applied_revision,
+            self.applied_flags_revision,
+            self.pending_upload.is_some(),
+            self.overlays_suppressed,
+            ready,
+        ) {
+            let report = self
+                .renderer
+                .as_mut()
+                .expect("ready renderer")
+                .set_entity_flags(&ready.entity_flags)?;
+            // Retain the applied flags so the 2D navigation fallback can
+            // re-assert them after its truncating commit.
+            self.applied_entity_flags = ready.entity_flags.clone();
+            self.applied_flags_revision = Some(ready.flags_revision);
+            self.flags_diagnostic = flags_diagnostic(&report.unmatched);
+            // Never wipe a still-relevant image diagnostic: merge.
+            self.diagnostic = merge_diagnostics(
+                self.image_diagnostic.as_deref(),
+                self.flags_diagnostic.as_deref(),
+            );
+            self.dirty.invalidate();
+            return Ok(());
+        }
         if self.applied_revision == Some(ready.revision) {
             return Ok(());
         }
@@ -134,6 +166,7 @@ impl CadRenderRuntime {
             self.applied_entity_flags = ready.entity_flags.clone();
             self.flags_diagnostic = flags_diagnostic(&report.unmatched);
             self.applied_revision = Some(ready.revision);
+            self.applied_flags_revision = Some(ready.flags_revision);
             self.applied_highlight = Some(ready.highlight.clone());
             // A flags-only update must not wipe a still-relevant image diagnostic:
             // merge rather than clear.
@@ -313,6 +346,7 @@ impl CadRenderRuntime {
         self.base_batches = ready.base.added.len();
         self.applied_base = Some(ready.base_revision);
         self.applied_revision = Some(ready.revision);
+        self.applied_flags_revision = Some(ready.flags_revision);
         self.applied_highlight = Some(ready.highlight.clone());
         // A committed full scene restores the transient overlay suffix, so the
         // base-only fallback is no longer active.

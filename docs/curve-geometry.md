@@ -79,11 +79,15 @@ OCS 顶点/中心：
 - segment/ellipse（投影到椭圆平面解二次，再校验共面与 sweep）。
 
 容差来自 `TolerancePolicy::computation_world` / `topology_world`，**与 `display_pixels` 无关**。
-对样条或不支持组合，回退到以 world 计算容差的自适应采样（同样不看显示 LOD）。
+对样条或不支持组合，回退到**尺度相对**的自适应采样（同样不看显示 LOD）：弦高取算子自身尺度的
+`FALLBACK_CHORD_FRACTION = 1e-4`，并以 `FALLBACK_MAX_SEGMENTS = 256` 封顶，故该路径是**近似候选**
+（2026-10-18：原实现误用绝对 `1e-9` 弦高，把圆 × 带 bulge 折线细分到 4096 段上限做 ~1600 万次段测试，
+实测 209.9 ms/次；改正后 0.141 ms）。解析圆锥曲线路径仍精确。
 
 ## 5. 显示 LOD 与测量语义分离
 
-- `tessellate_curve` / `intersect_local` 只用 `computation_world` 决定弦高与接受容差；
+- `tessellate_curve` / `intersect_local` 的**接受**容差只用 `computation_world`；
+  `intersect_local` 的**非解析回退**弦高由算子尺度与段预算决定（见 §4），两者都与显示 LOD 无关；
 - `display_pixels` 只影响显示用密度（`TessellationParams::from_policy`）；
 - 测试 `intersection_is_independent_of_display_lod_for_curves`（`tests/curves.rs`）与
   `intersection_is_independent_of_display_pixel_budget`（`tests/invariants.rs`）锁定：

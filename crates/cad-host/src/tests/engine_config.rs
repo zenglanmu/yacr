@@ -136,6 +136,10 @@ fn move_uses_the_tool_start_selection_and_history_round_trips() {
         .borrow_mut()
         .begin_draw_tool(DrawToolKind::Move)
         .unwrap();
+    // Object snap is on by default and would resolve the base point onto the
+    // fixture's own geometry; this contract is about the selection snapshot and
+    // the history round trip, so the raw points are used deliberately.
+    core.controller.borrow_mut().set_snap_enabled(false);
     select_entity(&core, b);
     core.controller
         .borrow_mut()

@@ -207,6 +207,20 @@ GPU 提交转向**CPU 侧场景组织与空间查询**：每帧遍历、可见�
    均在）。**最高性价比，且是后续一切交互的前提。**
 2. **S2 Hover**：`MoveCursor` → 节流拾取 → hover 高亮。**这是对全量拾取路径第一次真实压力测量**，也是
    启动 S4 的诚实触发条件。
+   - **S2 修订（2026-10-18，实测 + Oracle Gate H1）**：hover 是**纯显示效果**（AutoCAD
+     `SELECTIONPREVIEW` 语义），因此其 overlay 变化**不得**推进 `input_revision` 或 `content_revision`。
+     旧实现对两者都推进（`advance_input()` → `advance_content()`），使 `prepared_identity != input_revision`，
+     `render()` 于是退回 `base_only_navigation_eligible` → `render_base_only` → `suppress_overlays`
+     截断 overlay 后缀，**反而把已存在的 flags-only 快路径（`overlay_identity_matches`）挡掉**。
+     实测后果：180 次纯 hover、18 次悬停实体变化 → 每次一次 overlay 重上传 + 观测到
+     14 帧 `complete=base_only_pending_overlays`（网格/坐标轴/预览闪没）。
+     **现行规则**：`set_overlays` 三分类——视觉 overlay 指纹变化 → `advance_input()`（不变）；
+     仅 `viewport_bounds` 变化 → `advance_content()`（不变）；仅**实体标志**指纹变化 →
+     **只推进独立的 `flags_revision`**（`State::flags_publication_revision` /
+     `PreparedScene::flags_revision` / `CadRenderRuntime::applied_flags_revision`），两个既有修订都不动，
+     `ready.revision`/`scene_publication_revision` 语义不变，发布边界从**当前** overlay 重解析
+     flags（worker 结果不会回退更新的 hover）。命中口径另按 AutoCAD 加**光圈粘滞**：光标未离开
+     12 逻辑像素 pickbox 且 hover 身份（`SceneIdentity` + 图层覆盖指纹）未变时不重跑拾取。
 3. **S3 Snap 接线**：db 解析 `SnapTarget` → `collect_candidates`/`best_candidate` → 标记（引擎已存在，
    宿主未接）。
 4. **S4 索引与增量失效接入热路径**：落地 §7 的 chunk + local rstar，把 `filter_by_index` 接入生产的

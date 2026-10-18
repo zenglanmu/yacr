@@ -1,5 +1,5 @@
 use super::*;
-use cad_domain::{DocumentId, EntityId, InstancePath, TaskStamp};
+use cad_domain::{Completeness, DocumentId, EntityId, InstancePath, TaskStamp};
 
 fn delta(revision: u64) -> SceneDelta {
     SceneDelta {
@@ -277,4 +277,132 @@ fn detach_invalidates_an_untaken_render_observation() {
     assert_eq!(runtime.device_epoch(), 0);
     // The render sequence stays monotonic for the session.
     assert_eq!(runtime.render_seq, 0);
+}
+
+fn prepared_scene(revision: u64, base_revision: u64, flags_revision: u64) -> PreparedScene {
+    PreparedScene {
+        revision,
+        base_revision,
+        flags_revision,
+        base: Arc::new(delta(revision)),
+        highlight: Arc::new(delta(revision)),
+        entity_flags: Vec::new(),
+        highlight_diagnostics: Vec::new(),
+        highlight_completeness: Completeness::Complete,
+        images: None,
+    }
+}
+
+#[test]
+fn flags_delta_applies_only_over_a_committed_or_suppressed_scene() {
+    let scene = prepared_scene(7, 3, 5);
+    assert!(flags_delta_applies(Some(7), Some(4), false, false, &scene));
+    assert!(
+        flags_delta_applies(None, Some(4), false, true, &scene),
+        "the suppressed base-only scene still takes the flags delta"
+    );
+    assert!(
+        !flags_delta_applies(Some(7), Some(5), false, false, &scene),
+        "the same flags revision is a no-op"
+    );
+    assert!(
+        !flags_delta_applies(Some(6), Some(4), false, false, &scene),
+        "a new scene revision must take the upload path (F4)"
+    );
+    assert!(
+        !flags_delta_applies(Some(7), Some(4), true, false, &scene),
+        "a pending upload keeps the upload path"
+    );
+    assert!(
+        !flags_delta_applies(None, Some(4), false, false, &scene),
+        "no applied scene and no suppression means no flags delta"
+    );
+    assert!(!flags_delta_applies(None, None, false, false, &scene));
+}
+
+/// A worker publication that lands after a synchronous flags refresh must not
+/// regress the flags to the hover captured at submission time: the publication
+/// boundary re-resolves them from the CURRENT overlay inputs, and because the
+/// geometry allocations are unchanged it keeps the published scene revision
+/// (never a fresh un-applied revision that would re-enter the base-only path).
+#[test]
+fn publication_recomputes_flags_from_the_latest_overlay_inputs() {
+    use crate::render::publish_controller;
+
+    let drawing = cad_app::host::HostController::with_demo_document([800.0, 600.0])
+        .unwrap()
+        .drawing()
+        .unwrap();
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    session.sync_drawing(Some(drawing.clone()));
+    session.prepare().unwrap();
+
+    let published = session.current_prepared_scene().expect("published scene");
+    let mut whole_entities = published
+        .base
+        .added
+        .iter()
+        .flat_map(|batch| batch.sources.iter())
+        .filter(|reference| reference.sub_element.is_none())
+        .cloned();
+    let older = whole_entities.next().expect("a resident whole-entity ref");
+    let latest = whole_entities
+        .find(|reference| reference.entity != older.entity)
+        .expect("a second resident whole-entity ref");
+
+    let mut state = session.0.borrow_mut();
+    // An in-flight preparation token. `advance_content` models a submission
+    // whose inputs produced the same geometry as the published scene.
+    state.advance_content();
+    let token = state.content_revision;
+    let document = state.view.document;
+    let mut candidate = state.controller.clone();
+    let overlays_older = OverlayInputs {
+        hovered: SelectionSet::from_refs([older.clone()]),
+        ..OverlayInputs::default()
+    };
+    candidate
+        .prepare_shared_with_overlays_and_images(
+            Some(drawing.clone()),
+            document,
+            state.fonts.clone(),
+            &state.layers.clone(),
+            state.view.space,
+            &overlays_older,
+            state.images.clone(),
+        )
+        .unwrap();
+
+    // The hover moves after submission: applied synchronously to the state
+    // controller, while the candidate still carries the older hover.
+    let overlays_latest = OverlayInputs {
+        hovered: SelectionSet::from_refs([latest.clone()]),
+        ..OverlayInputs::default()
+    };
+    state.overlays = overlays_latest;
+    state.refresh_flags_only();
+    let scene_revision_before = state.controller.ready.as_ref().unwrap().revision;
+
+    publish_controller(&mut state, candidate, token);
+
+    let ready = state.controller.ready.as_ref().expect("published scene");
+    assert_eq!(
+        ready.revision, scene_revision_before,
+        "a same-geometry publication must keep the published scene revision"
+    );
+    assert!(
+        ready
+            .entity_flags
+            .iter()
+            .any(|(flagged, _)| flagged.entity == latest.entity),
+        "the published flags must reflect the latest hover"
+    );
+    assert!(
+        !ready
+            .entity_flags
+            .iter()
+            .any(|(flagged, _)| flagged.entity == older.entity),
+        "the stale submitted hover must never be published"
+    );
+    assert_eq!(ready.flags_revision, state.flags_publication_revision);
 }

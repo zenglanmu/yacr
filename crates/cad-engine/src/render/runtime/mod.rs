@@ -308,6 +308,11 @@ pub struct CadRenderRuntime {
     epoch: u64,
     applied_revision: Option<u64>,
     applied_base: Option<u64>,
+    /// The entity-flag revision the renderer last applied. A flags-only publish
+    /// advances this without touching `applied_revision`/`applied_base`: the
+    /// committed geometry is unchanged and only the in-stream flags delta is
+    /// pushed.
+    applied_flags_revision: Option<u64>,
     base_batches: usize,
     target_size: Option<(u32, u32)>,
     pub dirty: FrameInvalidation,
@@ -376,6 +381,7 @@ impl Default for CadRenderRuntime {
             epoch: 0,
             applied_revision: None,
             applied_base: None,
+            applied_flags_revision: None,
             base_batches: 0,
             target_size: None,
             dirty: FrameInvalidation::default(),
@@ -413,6 +419,24 @@ fn overlay_identity_matches(
     candidate: &Arc<SceneDelta>,
 ) -> bool {
     applied.is_some_and(|previous| Arc::ptr_eq(previous, candidate))
+}
+
+/// Whether a ready scene is a **flags-only** delta over what the GPU already has.
+///
+/// True only when the committed scene revision is still current (or the 2D
+/// fallback holds the base with the suffix suppressed) and no upload is in
+/// flight. A `ready.revision` that is not yet applied takes the upload path: its
+/// geometry has to be committed first, and it always re-pushes the flags.
+fn flags_delta_applies(
+    applied_revision: Option<u64>,
+    applied_flags_revision: Option<u64>,
+    pending_upload: bool,
+    overlays_suppressed: bool,
+    ready: &PreparedScene,
+) -> bool {
+    applied_flags_revision != Some(ready.flags_revision)
+        && !pending_upload
+        && (applied_revision == Some(ready.revision) || overlays_suppressed)
 }
 
 /// The `flags.unresolved` diagnostic for the refs an entity-flag apply could not

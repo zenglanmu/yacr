@@ -212,3 +212,110 @@ fn mask_tessellates_to_a_closed_boundary() {
     assert_eq!(out.len(), 4);
     assert_eq!(out.first(), out.last());
 }
+
+// ---------------------------------------------------------------------------
+// Bounded approximate intersection fallback
+// ---------------------------------------------------------------------------
+
+fn circle_with_radius(radius: f64) -> SemanticGeometry {
+    SemanticGeometry::Circle {
+        center: p(0.0, 0.0),
+        normal: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+        radius,
+    }
+}
+
+/// An open polyline of `segments` unit chords, each with the same bulge.
+fn dense_bulge_polyline(segments: usize, bulge: f64) -> SemanticGeometry {
+    let points: Vec<Point3> = (0..=segments).map(|i| p(i as f64, 0.0)).collect();
+    let bulges = vec![bulge; segments];
+    SemanticGeometry::Polyline {
+        points,
+        bulges,
+        closed: false,
+    }
+}
+
+#[test]
+fn fallback_params_are_scale_relative_and_budgeted() {
+    let policy = TolerancePolicy::default();
+    let mut counts = Vec::new();
+    for radius in [5.0, 5_000.0] {
+        let circle = circle_with_radius(radius);
+        let params = fallback_tessellation_params(&circle, &policy);
+        assert_eq!(params.max_segments, FALLBACK_MAX_SEGMENTS);
+        assert_eq!(params.min_segments, 4);
+        // The chord follows the entity's diameter, not a world constant.
+        let expected = 2.0 * radius * FALLBACK_CHORD_FRACTION;
+        assert!(
+            (params.tolerance - expected).abs() <= expected * 1e-12,
+            "chord {} != expected {expected}",
+            params.tolerance
+        );
+        let points = tessellate_geometry(&circle, params);
+        assert!(
+            points.len() <= FALLBACK_MAX_SEGMENTS + 1,
+            "{} samples exceeds the {} segment budget",
+            points.len(),
+            FALLBACK_MAX_SEGMENTS
+        );
+        assert!(points.len() > 32, "circle must not be collapsed");
+        counts.push(points.len());
+    }
+    assert_eq!(
+        counts[0], counts[1],
+        "the same curve at 1000x scale must use the same segment count"
+    );
+}
+
+#[test]
+fn fallback_bounds_a_dense_bulge_polyline_to_the_segment_budget() {
+    let policy = TolerancePolicy::default();
+    let geometry = dense_bulge_polyline(200, 0.2);
+    let params = fallback_tessellation_params(&geometry, &policy);
+    assert_eq!(params.max_segments, FALLBACK_MAX_SEGMENTS);
+
+    let raw = tessellate_geometry(&geometry, params);
+    assert!(
+        raw.len() > FALLBACK_MAX_SEGMENTS + 1,
+        "fixture must exceed one curve's budget: {} samples",
+        raw.len()
+    );
+    let bounded = bound_fallback_samples(raw.clone());
+    assert!(
+        bounded.len() <= FALLBACK_MAX_SEGMENTS + 1,
+        "{} samples after bounding",
+        bounded.len()
+    );
+    assert_eq!(bounded.first(), raw.first(), "first vertex kept");
+    assert_eq!(bounded.last(), raw.last(), "last vertex kept");
+    // Decimation only drops samples; it never reorders or duplicates.
+    let mut cursor = 0;
+    for q in &bounded {
+        let found = raw[cursor..].iter().position(|r| r == q);
+        assert!(found.is_some(), "bounded sample is out of order: {q:?}");
+        cursor += found.unwrap();
+    }
+}
+
+#[test]
+fn fallback_chord_never_drops_below_the_computation_tolerance() {
+    // A zero-extent description (a single-vertex polyline) still respects the
+    // world predicate tolerance as the floor.
+    let policy = TolerancePolicy {
+        computation_world: 1e-7,
+        ..TolerancePolicy::default()
+    };
+    let point = SemanticGeometry::Polyline {
+        points: vec![p(1.0, 2.0)],
+        bulges: Vec::new(),
+        closed: false,
+    };
+    let params = fallback_tessellation_params(&point, &policy);
+    assert_eq!(params.tolerance, 1e-7);
+    assert_eq!(params.max_segments, FALLBACK_MAX_SEGMENTS);
+}

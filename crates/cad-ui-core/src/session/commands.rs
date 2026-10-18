@@ -24,6 +24,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("SPACE", CommandId::SwitchSpace),
     ("SELECT", CommandId::Select),
     ("SELECTALL", CommandId::SelectAll),
+    ("SELECTINBOX", CommandId::SelectInBox),
     ("MEASURE", CommandId::Measure),
     ("CONFIRM", CommandId::ConfirmMeasurement),
     ("CANCELMEASURE", CommandId::CancelMeasurement),

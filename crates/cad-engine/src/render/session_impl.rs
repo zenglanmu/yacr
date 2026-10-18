@@ -155,21 +155,42 @@ impl RenderSessionHandle {
         if state.overlays == overlays {
             return false;
         }
-        // A change confined to the camera-derived `viewport_bounds` only re-scopes
-        // the reference grid: it must schedule a background re-prepare but never
-        // invalidate the published scene. Any other overlay input (visibility,
-        // selection, previews, snap hints) changes real overlay batches and keeps
-        // invalidating exactly as before.
+        let previous = state.overlays.clone();
+        // Three-way classification, using the same fingerprints the controller
+        // uses. A change confined to the camera-derived `viewport_bounds` only
+        // re-scopes the reference grid: it schedules a background re-prepare
+        // (content revision) but never invalidates the published scene.
         let bounds_only = {
-            let mut probe = state.overlays.clone();
+            let mut probe = previous.clone();
             probe.viewport_bounds = overlays.viewport_bounds;
             probe == overlays
         };
+        // `overlay_fingerprint` covers every overlay-**batch** input (including
+        // the viewport bounds) but deliberately excludes entity-level
+        // selection/hover/hidden, which are the renderer's flags path.
+        let visual_changed = controller::overlay_fingerprint(&previous)
+            != controller::overlay_fingerprint(&overlays);
+        let flags_changed = controller::entity_flags_fingerprint(&previous)
+            != controller::entity_flags_fingerprint(&overlays);
         state.overlays = overlays;
         state.overlay_revision += 1;
         if bounds_only {
+            // Reference grid only: content revision, never the scene identity.
             state.advance_content();
+        } else if visual_changed {
+            // Real overlay batches changed (sub-element highlight, previews,
+            // snap hints, visibility): today's full immediate path.
+            state.advance_input();
+        } else if flags_changed {
+            // Entity-level selection/hover/hidden only. Advance a separate flags
+            // publication revision: the scene stays current (no base-only
+            // frame), no worker preparation is submitted, and a pending
+            // camera-settle grid refresh survives. The controller is updated
+            // synchronously so the host sees the new tint without a worker.
+            state.refresh_flags_only();
         } else {
+            // Defensive: an input change covered by neither fingerprint keeps the
+            // historical immediate path rather than being silently dropped.
             state.advance_input();
         }
         true

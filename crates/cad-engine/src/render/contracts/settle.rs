@@ -150,38 +150,83 @@ fn resize_takes_the_immediate_path_and_clears_the_pending_refresh() {
     );
 }
 
+/// A whole-entity ref used for flags-only assertions (works on wasm too, unlike
+/// the GPU-only `model_entity`).
+fn flags_ref(id: u128) -> SelectionRef {
+    SelectionRef {
+        document: DocumentId(0),
+        entity: EntityId(id),
+        instance: InstancePath::default(),
+        sub_element: None,
+    }
+}
+
 #[test]
-fn selection_and_visibility_changes_keep_the_immediate_path() {
+fn flags_only_selection_hover_and_hidden_never_defer_or_invalidate() {
     let session = session_with_published_base();
     session.set_grid_settle_timeout(NO_SETTLE);
     pan_step(&session, 80.0);
     assert!(session.grid_refresh_pending());
     let armed = session.diagnostics();
+    let scene_before = session.current_prepared_scene().expect("published scene");
+    let suffix_before = session.overlay_suffix_commits();
+    assert!(!session.overlays_suppressed());
 
-    // Selection is a real overlay-batch change: it must NOT be deferred.
-    assert!(session.set_selection(SelectionSet::from_refs([model_entity(1)])));
+    // Whole-entity selection is the flags path: it changes no overlay batch, so
+    // it must not advance the scene identity or the preparation token, must not
+    // drop the pending camera settle, and must not touch the published scene.
+    assert!(session.set_selection(SelectionSet::from_refs([flags_ref(1)])));
+    let after_selection = session.diagnostics();
+    assert_eq!(
+        after_selection.input_revision, armed.input_revision,
+        "a flags-only selection must not bump the scene identity"
+    );
+    assert_eq!(
+        after_selection.requested_token, armed.requested_token,
+        "a flags-only selection must not schedule a worker preparation"
+    );
+    assert_eq!(
+        after_selection.view_revision, armed.view_revision,
+        "a flags-only selection does not touch the view"
+    );
     assert!(
-        !session.grid_refresh_pending(),
-        "a selection change clears the deferred refresh"
+        session.grid_refresh_pending(),
+        "a flags-only selection must not drop a pending camera settle"
     );
     assert_eq!(
-        session.diagnostics().input_revision,
-        armed.input_revision + 1,
-        "a selection change bumps the scene identity immediately"
+        session.current_prepared_scene().expect("scene").revision,
+        scene_before.revision,
+        "a flags-only selection must not republish the scene"
+    );
+    assert!(
+        !session.overlays_suppressed(),
+        "a flags-only selection must not enter the base-only fallback"
     );
     assert_eq!(
-        session.diagnostics().view_revision,
-        armed.view_revision,
-        "a selection change does not touch the view"
+        session.overlay_suffix_commits(),
+        suffix_before,
+        "a flags-only selection must not truncate the overlay suffix"
     );
 
-    // Overlay visibility is the same immediate path.
-    pan_step(&session, 40.0);
+    // Hover and hidden are the same flags-only path.
+    let mut hovered = session.overlays();
+    hovered.hovered = SelectionSet::from_refs([flags_ref(2)]);
+    assert!(session.set_overlays(hovered));
+    assert_eq!(session.diagnostics().input_revision, armed.input_revision);
+    assert_eq!(session.diagnostics().requested_token, armed.requested_token);
     assert!(session.grid_refresh_pending());
-    let armed = session.diagnostics();
-    let mut overlays = session.overlays();
-    overlays.visibility.grid = !overlays.visibility.grid;
-    assert!(session.set_overlays(overlays));
+    let mut hidden = session.overlays();
+    hidden.hidden = SelectionSet::from_refs([flags_ref(3)]);
+    assert!(session.set_overlays(hidden));
+    assert_eq!(session.diagnostics().input_revision, armed.input_revision);
+    assert_eq!(session.diagnostics().requested_token, armed.requested_token);
+    assert!(session.grid_refresh_pending());
+
+    // A visible reference-grid toggle is a real overlay-batch change: today's
+    // immediate path, which clears the deferred refresh.
+    let mut grid = session.overlays();
+    grid.visibility.grid = !grid.visibility.grid;
+    assert!(session.set_overlays(grid));
     assert!(
         !session.grid_refresh_pending(),
         "a visibility change clears the deferred refresh"
@@ -190,6 +235,60 @@ fn selection_and_visibility_changes_keep_the_immediate_path() {
         session.diagnostics().input_revision,
         armed.input_revision + 1,
         "a visibility change bumps the scene identity immediately"
+    );
+    assert_eq!(
+        session.diagnostics().requested_token,
+        armed.requested_token + 1,
+        "a visibility change schedules a preparation immediately"
+    );
+}
+
+#[test]
+fn hover_after_submission_is_not_regressed_by_the_published_scene() {
+    let session = session_with_published_base();
+    // A live ref resolved from the published base, so the flags actually resolve.
+    let reference = session
+        .current_prepared_scene()
+        .expect("published scene")
+        .base
+        .added
+        .iter()
+        .flat_map(|batch| batch.sources.iter())
+        .find(|reference| reference.sub_element.is_none())
+        .cloned()
+        .expect("a resident whole-entity ref");
+
+    // Submit a preparation, then move the hover before it lands (the worker
+    // result carries the pre-hover flags).
+    session.set_grid_settle_timeout(NO_SETTLE);
+    pan_step(&session, 120.0);
+    session.set_grid_settle_timeout(Duration::ZERO);
+    session.poll_preparation().unwrap();
+    let mut overlays = session.overlays();
+    overlays.hovered = SelectionSet::from_refs([reference.clone()]);
+    assert!(session.set_overlays(overlays));
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        session.poll_preparation().unwrap();
+        let diagnostics = session.diagnostics();
+        if diagnostics.prepared_token == Some(diagnostics.requested_token) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the publication after the hover change timed out"
+        );
+        std::thread::yield_now();
+    }
+
+    let ready = session.current_prepared_scene().expect("published scene");
+    assert!(
+        ready
+            .entity_flags
+            .iter()
+            .any(|(flagged, bits)| { flagged.entity == reference.entity && *bits != 0 }),
+        "the publication boundary must use the LATEST hover, not the submitted one"
     );
 }
 

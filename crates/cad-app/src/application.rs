@@ -23,6 +23,7 @@ impl Application {
         }
         match command.id {
             CommandId::SelectAll => self.select_all(session, &command),
+            CommandId::SelectInBox => self.select_in_box(session, &command),
             CommandId::FitDrawing => self.fit_drawing(session, &command),
             CommandId::RestoreLayers => {
                 // Drop temporary overrides; the drawing's own layer flags remain

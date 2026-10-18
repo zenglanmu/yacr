@@ -180,6 +180,117 @@ fn camera_settle_fallback_reasserts_the_retained_entity_flags() {
     assert_eq!(entity_flag_keys(&session), keys_before);
 }
 
+/// DETERMINISTIC HARDWARE: N consecutive hover changes upload **only** entity
+/// flags. The published scene identity is untouched, so no base-only frame is
+/// ever produced, no geometry stream/chunk or overlay suffix is re-uploaded, and
+/// the current scene stays committed and presented throughout.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
+fn hover_changes_push_only_flags_and_never_drop_the_current_scene() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let gpu = headless_gpu();
+    session.attach_device(gpu.device, gpu.queue).unwrap();
+    session.sync_drawing(Some(Arc::new(db_with_two_quads())));
+    session.set_overlay_visibility(OverlayVisibility {
+        axes: false,
+        grid: false,
+        ..OverlayVisibility::default()
+    });
+    session.prepare().unwrap();
+    drive_uploads(&session);
+    session.render([200.0, 100.0], 1.0).unwrap().expect("frame");
+
+    let reference = session
+        .current_prepared_scene()
+        .expect("published scene")
+        .base
+        .added
+        .iter()
+        .flat_map(|batch| batch.sources.iter())
+        .find(|reference| reference.sub_element.is_none())
+        .cloned()
+        .expect("a resident whole-entity ref");
+    let scene = session.current_prepared_scene().unwrap();
+    let scene_revision = scene.revision;
+    let flags_revision = scene.flags_revision;
+    let (flags_before, streams_before, meshes_before) = renderer_counters(&session);
+    let batches_before = renderer_batch_count(&session);
+    let uploads_before = session.diagnostics().runtime.uploads_started;
+    let suffix_before = session.overlay_suffix_commits();
+
+    for step in 0..8 {
+        let mut overlays = session.overlays();
+        overlays.hovered = if step % 2 == 0 {
+            SelectionSet::from_refs([reference.clone()])
+        } else {
+            SelectionSet::new()
+        };
+        assert!(session.set_overlays(overlays));
+        // Flags-only: no worker preparation, the scene stays current.
+        assert!(
+            session.preparation_current(),
+            "hover step {step} must keep the published scene current"
+        );
+        session.apply_ready_updates().unwrap();
+        assert!(
+            uploads_committed(&session),
+            "hover step {step} must keep the scene committed"
+        );
+        let frame = session.render([200.0, 100.0], 1.0).unwrap().expect("frame");
+        assert_eq!(
+            frame.completeness,
+            FrameCompleteness::CurrentScene,
+            "hover step {step} must present the full scene, never the fallback"
+        );
+        assert!(
+            !session.overlays_suppressed(),
+            "hover step {step} must not suppress overlays"
+        );
+        assert!(
+            session.current_drawing_presented(),
+            "hover step {step} must present the current drawing"
+        );
+        assert_eq!(
+            session.current_prepared_scene().unwrap().revision,
+            scene_revision,
+            "hover step {step} must not republish the scene"
+        );
+        let (_, streams, meshes) = renderer_counters(&session);
+        assert_eq!(
+            streams, streams_before,
+            "hover step {step} must not re-upload an instance stream"
+        );
+        assert_eq!(
+            meshes, meshes_before,
+            "hover step {step} must not re-upload a mesh chunk"
+        );
+        assert_eq!(
+            renderer_batch_count(&session),
+            batches_before,
+            "hover step {step} must not change the resident batch set"
+        );
+        assert_eq!(
+            session.overlay_suffix_commits(),
+            suffix_before,
+            "hover step {step} must not churn the overlay suffix"
+        );
+        assert_eq!(
+            session.diagnostics().runtime.uploads_started,
+            uploads_before,
+            "hover step {step} must not start a geometry upload"
+        );
+    }
+    assert!(
+        renderer_counters(&session).0 > flags_before,
+        "the hover tint must reach the renderer through the flags path"
+    );
+    assert!(
+        session.current_prepared_scene().unwrap().flags_revision > flags_revision,
+        "each distinct hover must advance the flags revision"
+    );
+}
+
 /// DETERMINISTIC HARDWARE: the `flags.unresolved` state an unmatched selection
 /// re-resolution produces reaches a probe-visible place — `RenderDiagnostics`
 /// `result_status`, which the host logs as `[probe] pan-wait … status=…` under

@@ -34,6 +34,10 @@ pub enum CommandId {
     /// Select visible model-space pick items without editing the drawing.
     /// Requires `CommandPayload::None`; incomplete picking is explicitly refused.
     SelectAll,
+    /// Select model-space items in a window/crossing rectangle without editing
+    /// the drawing (ADR 0014 B). Allowed in Viewer and Work; requires
+    /// `CommandPayload::BoxSelect`.
+    SelectInBox,
     Measure,
     /// Confirm the points captured by the active open-ended measurement tool.
     ConfirmMeasurement,

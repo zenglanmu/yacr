@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Instant;
 
 /// Synthetic drawing used before a real DWG is opened.
 ///
@@ -129,6 +130,102 @@ fn class_name(geometry: &SemanticGeometry) -> &'static str {
     crate::app_drawing::class_name(geometry)
 }
 
+/// Whether the snap profiler is enabled.
+///
+/// Gated by the same `YACR_PROFILE_PICK` flag as the pick profiler, so one run
+/// produces the measured before/after numbers for both paths. The lines are
+/// prefixed `YACR_PROFILE_SNAP` to keep them distinguishable from pick output.
+fn snap_profile_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("YACR_PROFILE_PICK").is_some())
+}
+
+/// The identity a baked snap-target list was built for.
+///
+/// It is the same `SceneIdentity` + document pair [`crate::picking::PickIndex`]
+/// caches on, so the snap targets share that single invalidation truth instead
+/// of keeping a private revision of their own.
+#[derive(Clone, Copy, PartialEq)]
+struct SnapCacheKey {
+    scene: SceneIdentity,
+    document: DocumentId,
+}
+
+/// The transform-baked target list for one scene identity.
+struct SnapTargetCache {
+    key: SnapCacheKey,
+    targets: Arc<Vec<SnapTarget>>,
+}
+
+/// The single candidate resolution of the last pointer move.
+///
+/// [`HostController::resolve_snap`] stores the snapped point in the tool
+/// preview; [`HostController::snap_hints_near_cursor`] then reads that stored
+/// point back. Keeping the resolved candidate set here lets the hint overlay
+/// reuse the move's candidates instead of walking the drawing a second time,
+/// without becoming a second source for the committed point.
+struct SnapQueryCache {
+    key: SnapQueryKey,
+    /// The point the host stored for the query: the first candidate's point, or
+    /// the raw cursor when nothing was found.
+    stored: [u64; 3],
+    candidates: Arc<Vec<SnapCandidate>>,
+}
+
+/// The exact inputs of one snap resolution.
+#[derive(Clone, PartialEq)]
+struct SnapQueryKey {
+    scene: SceneIdentity,
+    document: DocumentId,
+    space: SpaceId,
+    cursor: [u64; 3],
+    world_per_px_bits: u64,
+}
+
+impl SnapQueryKey {
+    fn new(
+        drawing: &DrawingDatabase,
+        document: DocumentId,
+        cursor: Point3,
+        world_per_px: f64,
+        space: &SpaceId,
+    ) -> Self {
+        SnapQueryKey {
+            scene: drawing.scene_identity(),
+            document,
+            space: space.clone(),
+            cursor: point_bits(cursor),
+            world_per_px_bits: world_per_px.to_bits(),
+        }
+    }
+}
+
+fn point_bits(point: Point3) -> [u64; 3] {
+    [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()]
+}
+
+thread_local! {
+    static SNAP_TARGET_CACHE: std::cell::RefCell<Option<SnapTargetCache>> =
+        const { std::cell::RefCell::new(None) };
+    static SNAP_QUERY_CACHE: std::cell::RefCell<Option<SnapQueryCache>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    static SNAP_TARGET_BUILD_COUNT: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
+}
+
+/// How many baked snap-target lists this thread has built.
+///
+/// Test-only: it makes the cache contract (one build for repeated queries on
+/// the same scene) directly observable without parsing a log.
+#[cfg(test)]
+pub(super) fn snap_target_build_count() -> u64 {
+    SNAP_TARGET_BUILD_COUNT.with(std::cell::Cell::get)
+}
+
 /// Build the local snap targets for a drawing's model-space geometry.
 ///
 /// [`crate::drawing_pick_items`] expands `INSERT`s and returns each item's
@@ -174,6 +271,165 @@ fn snap_targets_for(drawing: &DrawingDatabase, document: DocumentId) -> Vec<Snap
         .collect()
 }
 
+/// The cached, transform-baked targets for `drawing`/`document`.
+///
+/// On a key change the whole list is rebuilt; there is no partial/stale reuse.
+/// The rebuild reason is always stated in the profile log (`cold`,
+/// `scene_changed` or `document_changed`), so a miss is never mistaken for a
+/// cache hit. Construction itself is total (untransformable items are skipped
+/// by [`snap_targets_for`]), so the cache has no "unavailable" state to fall
+/// back from: it either returns targets built for this exact identity or
+/// rebuilds first.
+fn cached_snap_targets(drawing: &DrawingDatabase, document: DocumentId) -> Arc<Vec<SnapTarget>> {
+    let key = SnapCacheKey {
+        scene: drawing.scene_identity(),
+        document,
+    };
+    let profile = snap_profile_enabled();
+    let lookup_started = profile.then(Instant::now);
+    let cached = SNAP_TARGET_CACHE.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .map(|cached| (cached.key, cached.targets.clone()))
+    });
+    if let Some((cached_key, targets)) = &cached {
+        if *cached_key == key {
+            if let Some(started) = lookup_started {
+                eprintln!(
+                    "YACR_PROFILE_SNAP snap_targets_cache mode=hit targets={} elapsed_ms={:.3}",
+                    targets.len(),
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+            return targets.clone();
+        }
+    }
+    let reason = match &cached {
+        None => "cold",
+        Some((cached_key, _)) if cached_key.document != document => "document_changed",
+        Some(_) => "scene_changed",
+    };
+    let build_started = profile.then(Instant::now);
+    let targets = Arc::new(snap_targets_for(drawing, document));
+    #[cfg(test)]
+    SNAP_TARGET_BUILD_COUNT.with(|count| count.set(count.get() + 1));
+    if let Some(started) = build_started {
+        eprintln!(
+            "YACR_PROFILE_SNAP snap_targets_build reason={reason} targets={} elapsed_ms={:.3}",
+            targets.len(),
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    SNAP_TARGET_CACHE.with(|cell| {
+        *cell.borrow_mut() = Some(SnapTargetCache {
+            key,
+            targets: targets.clone(),
+        })
+    });
+    targets
+}
+
+/// Validate the inputs every snap entry point shares.
+fn validate_snap_inputs(cursor: Point3, world_per_px: f64) -> CadResult<()> {
+    if !cursor.x.is_finite() || !cursor.y.is_finite() || !cursor.z.is_finite() {
+        return Err(CadError::InvalidInput(
+            "snap cursor must be finite".to_string(),
+        ));
+    }
+    if !world_per_px.is_finite() || world_per_px <= 0.0 {
+        return Err(CadError::InvalidInput(
+            "snap world_per_px must be finite and positive".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Resolve candidates from an already-built target list.
+///
+/// `mode` only labels the profile line (`cached`, `uncached`); the geometry and
+/// engine inputs are identical on every path, so results cannot differ by mode.
+fn resolve_candidates(
+    targets: &[SnapTarget],
+    cursor: Point3,
+    world_per_px: f64,
+    space: &SpaceId,
+    mode: &'static str,
+) -> CadResult<Vec<SnapCandidate>> {
+    let plane = WorkPlane {
+        origin: cursor,
+        u: Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        v: Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+    };
+    let ray = Ray3 {
+        origin: cursor,
+        direction: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+    };
+    let profile = snap_profile_enabled();
+    let started = profile.then(Instant::now);
+    let result = MeasurementEngine::default().snap_targets(
+        targets,
+        &ray,
+        Some(&plane),
+        world_per_px,
+        Some(space.clone()),
+    );
+    if let Some(started) = started {
+        eprintln!(
+            "YACR_PROFILE_SNAP snap_candidates_resolve mode={mode} targets={} candidates={} elapsed_ms={:.3}",
+            targets.len(),
+            result.as_ref().map(|candidates| candidates.len()).unwrap_or(0),
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    result
+}
+
+/// Remember the candidate set a pointer move resolved, for the hint overlay.
+fn record_snap_query(key: SnapQueryKey, candidates: Arc<Vec<SnapCandidate>>) {
+    let stored = candidates
+        .first()
+        .map(|candidate| point_bits(candidate.point))
+        .unwrap_or(key.cursor);
+    SNAP_QUERY_CACHE.with(|cell| {
+        *cell.borrow_mut() = Some(SnapQueryCache {
+            key,
+            stored,
+            candidates,
+        })
+    });
+}
+
+/// The candidate set of the last move if `key` names the same query.
+///
+/// The hint overlay reads the *stored* tool cursor back, which is the snapped
+/// point; hence a key may match either the raw cursor the move resolved or the
+/// stored point it produced.
+fn cached_hint_candidates(key: &SnapQueryKey) -> Option<Arc<Vec<SnapCandidate>>> {
+    SNAP_QUERY_CACHE.with(|cell| {
+        let cached = cell.borrow();
+        let cached = cached.as_ref()?;
+        let same_cursor = key.cursor == cached.key.cursor || key.cursor == cached.stored;
+        (same_cursor
+            && key.scene == cached.key.scene
+            && key.document == cached.key.document
+            && key.space == cached.key.space
+            && key.world_per_px_bits == cached.key.world_per_px_bits)
+            .then(|| cached.candidates.clone())
+    })
+}
+
 /// Snap candidates near a world cursor on the model work plane.
 ///
 /// This is the pure bridge between the database and the object-snap overlay:
@@ -198,6 +454,12 @@ fn snap_targets_for(drawing: &DrawingDatabase, document: DocumentId) -> Vec<Snap
 /// [`crate::drawing_pick_items`] only walks **model** space, a non-model `space`
 /// honestly yields no candidates (paper-space snapping is not built here).
 ///
+/// The transform-baked targets are cached per scene identity
+/// ([`cached_snap_targets`]), so repeated pointer moves over an unchanged
+/// drawing do not re-expand or re-bake it. The resolved set is also recorded as
+/// the last move's query, so the hint overlay can reuse it
+/// ([`snap_candidates_for_hint`]).
+///
 /// Returns [`CadError::InvalidInput`] for a non-finite cursor or a
 /// non-positive/non-finite `world_per_px`; it never fabricates a candidate.
 pub fn snap_candidates_near(
@@ -207,43 +469,60 @@ pub fn snap_candidates_near(
     world_per_px: f64,
     space: SpaceId,
 ) -> CadResult<Vec<SnapCandidate>> {
-    if !cursor.x.is_finite() || !cursor.y.is_finite() || !cursor.z.is_finite() {
-        return Err(CadError::InvalidInput(
-            "snap cursor must be finite".to_string(),
-        ));
-    }
-    if !world_per_px.is_finite() || world_per_px <= 0.0 {
-        return Err(CadError::InvalidInput(
-            "snap world_per_px must be finite and positive".to_string(),
-        ));
-    }
-    let plane = WorkPlane {
-        origin: cursor,
-        u: Point3 {
-            x: 1.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        v: Point3 {
-            x: 0.0,
-            y: 1.0,
-            z: 0.0,
-        },
-    };
-    let ray = Ray3 {
-        origin: cursor,
-        direction: Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 1.0,
-        },
-    };
+    validate_snap_inputs(cursor, world_per_px)?;
+    let targets = cached_snap_targets(drawing, document);
+    let candidates = resolve_candidates(&targets, cursor, world_per_px, &space, "cached")?;
+    let key = SnapQueryKey::new(drawing, document, cursor, world_per_px, &space);
+    record_snap_query(key, Arc::new(candidates.clone()));
+    Ok(candidates)
+}
+
+/// Snap candidates over the exhaustive target build — the pre-cache reference
+/// path.
+///
+/// Kept as the differential-test reference for [`snap_candidates_near`]; it
+/// must return exactly the same candidates. It deliberately does not touch the
+/// target or query caches.
+pub fn snap_candidates_near_uncached(
+    drawing: &DrawingDatabase,
+    document: DocumentId,
+    cursor: Point3,
+    world_per_px: f64,
+    space: SpaceId,
+) -> CadResult<Vec<SnapCandidate>> {
+    validate_snap_inputs(cursor, world_per_px)?;
     let targets = snap_targets_for(drawing, document);
-    MeasurementEngine::default().snap_targets(
-        &targets,
-        &ray,
-        Some(&plane),
-        world_per_px,
-        Some(space),
-    )
+    resolve_candidates(&targets, cursor, world_per_px, &space, "uncached")
+}
+
+/// Snap candidates for the hint overlay at the tool's stored cursor.
+///
+/// When the active tool's stored point is the one the last move resolved (the
+/// snapped point, or the raw point when nothing snapped), the move's candidate
+/// set is returned instead of walking the drawing again. Otherwise the query is
+/// resolved normally. Either way the point the tool will commit is untouched:
+/// the stored tool point remains the single source for a commit.
+pub(super) fn snap_candidates_for_hint(
+    drawing: &DrawingDatabase,
+    document: DocumentId,
+    cursor: Point3,
+    world_per_px: f64,
+    space: SpaceId,
+) -> CadResult<Vec<SnapCandidate>> {
+    validate_snap_inputs(cursor, world_per_px)?;
+    let key = SnapQueryKey::new(drawing, document, cursor, world_per_px, &space);
+    let profile = snap_profile_enabled();
+    let started = profile.then(Instant::now);
+    if let Some(candidates) = cached_hint_candidates(&key) {
+        let reused = (*candidates).clone();
+        if let Some(started) = started {
+            eprintln!(
+                "YACR_PROFILE_SNAP snap_candidates_resolve mode=reused candidates={} elapsed_ms={:.3}",
+                reused.len(),
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        return Ok(reused);
+    }
+    snap_candidates_near(drawing, document, cursor, world_per_px, space)
 }

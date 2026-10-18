@@ -39,6 +39,15 @@ struct SceneVersion {
 pub struct PreparedScene {
     pub revision: u64,
     pub base_revision: u64,
+    /// Monotonic revision of the **entity-flag set** carried by this scene.
+    ///
+    /// Selection/hover/hidden are a separate publication axis: a flags-only
+    /// change republishes `entity_flags` without advancing `revision` (the
+    /// scene identity) or `base_revision`. The renderer uses it to apply the
+    /// delta in place while keeping the committed scene and its overlay suffix
+    /// intact. The engine overwrites this with its own publication revision on
+    /// every publish, exactly as it owns `revision`/`base_revision`.
+    pub flags_revision: u64,
     pub base: Arc<SceneDelta>,
     /// Transient sub-element-highlight and tool-preview batches.
     pub highlight: Arc<SceneDelta>,
@@ -60,6 +69,10 @@ pub struct CadSceneController {
     visual_version: Option<(u64, u64)>,
     /// Fingerprint of the entity-flag inputs (entity-level selection/hover/hidden).
     flags_version: Option<u64>,
+    /// Monotonic revision of the staged entity-flag set. Bumped only when the
+    /// flags themselves are re-resolved; the engine overwrites the published
+    /// value with its global publication revision.
+    flags_revision: u64,
     pub fonts_revision: u64,
     revision: u64,
     base_revision: u64,
@@ -349,25 +362,21 @@ impl CadSceneController {
 
         // Entity-level flags are resolved separately from the overlay batches, so
         // an entity-only selection change republishes the flags without touching
-        // the overlay delta (the same `Arc` is reused) or the base.
-        let (entity_flags, flags_diagnostics, flags_completeness) =
-            if flags_changed || self.entity_flags.is_none() {
-                match doc {
-                    Some(db) => {
-                        let scene = selection_entity_flags(db, overlays, document);
-                        (scene.flags, scene.diagnostics, scene.completeness)
-                    }
-                    None => (Vec::new(), Vec::new(), cad_domain::Completeness::Complete),
-                }
-            } else {
-                (
-                    self.entity_flags.clone().unwrap_or_default(),
-                    self.flags_diagnostics.clone().unwrap_or_default(),
-                    self.flags_completeness
-                        .clone()
-                        .unwrap_or(cad_domain::Completeness::Complete),
-                )
-            };
+        // the overlay delta (the same `Arc` is reused) or the base. The actual
+        // resolution lives in `refresh_flags_only` — the **single** flags truth,
+        // shared with the engine's synchronous flags publication and its
+        // publication-boundary race guard. `base_changed` forces a re-resolution
+        // because a new base can change what a ref resolves to (for example a
+        // hidden layer).
+        if flags_changed || self.entity_flags.is_none() {
+            self.refresh_flags(doc, document, overlays, flags_changed);
+        }
+        let entity_flags = self.entity_flags.clone().unwrap_or_default();
+        let flags_diagnostics = self.flags_diagnostics.clone().unwrap_or_default();
+        let flags_completeness = self
+            .flags_completeness
+            .clone()
+            .unwrap_or(cad_domain::Completeness::Complete);
 
         self.revision += 1;
         self.base_revision = next_base;
@@ -386,6 +395,7 @@ impl CadSceneController {
         self.ready = Some(PreparedScene {
             revision: self.revision,
             base_revision: next_base,
+            flags_revision: self.flags_revision,
             base,
             highlight: visual_delta,
             entity_flags,
@@ -394,6 +404,77 @@ impl CadSceneController {
             images: self.images.clone(),
         });
         Ok(())
+    }
+
+    /// Re-resolve the entity-level flags from `overlays` and publish them into
+    /// the staged (and, when present, the already published) scene.
+    ///
+    /// This is the **single** flags resolver: the full preparation and the
+    /// engine's synchronous flags-only path both go through it, so the renderer
+    /// flag table can never be fed by a second, divergent truth. It reuses
+    /// `flags_version` as the change fingerprint and `selection_entity_flags`
+    /// as the resolver.
+    ///
+    /// Returns whether the flags changed. Only the flags are touched:
+    /// `revision`, `base_revision`, the base `Arc` and the overlay `Arc` are
+    /// left exactly as they were, so a flags-only refresh never invalidates the
+    /// committed scene or its overlay suffix. `flags_revision` advances when the
+    /// flags change (the engine then stamps the global publication revision).
+    pub fn refresh_flags_only(
+        &mut self,
+        doc: Option<&DrawingDatabase>,
+        document: DocumentId,
+        overlays: &OverlayInputs,
+    ) -> bool {
+        self.refresh_flags(doc, document, overlays, false)
+    }
+
+    /// [`Self::refresh_flags_only`] with an explicit re-resolution override.
+    ///
+    /// `force` re-resolves even when the fingerprint is unchanged; the full
+    /// preparation passes its `flags_changed` (which includes `base_changed`)
+    /// because a new base can change what an unchanged ref resolves to.
+    fn refresh_flags(
+        &mut self,
+        doc: Option<&DrawingDatabase>,
+        document: DocumentId,
+        overlays: &OverlayInputs,
+        force: bool,
+    ) -> bool {
+        let flags_version = entity_flags_fingerprint(overlays);
+        if !force && self.flags_version == Some(flags_version) && self.entity_flags.is_some() {
+            return false;
+        }
+        let (flags, diagnostics, completeness) = match doc {
+            Some(db) => {
+                let scene = selection_entity_flags(db, overlays, document);
+                (scene.flags, scene.diagnostics, scene.completeness)
+            }
+            None => (Vec::new(), Vec::new(), cad_domain::Completeness::Complete),
+        };
+        self.flags_version = Some(flags_version);
+        self.flags_revision = self
+            .flags_revision
+            .checked_add(1)
+            .expect("flags revision exhausted");
+        self.entity_flags = Some(flags.clone());
+        self.flags_diagnostics = Some(diagnostics.clone());
+        self.flags_completeness = Some(completeness.clone());
+        if let Some(ready) = self.ready.as_mut() {
+            // Refresh the published flags in place. `revision`/`base_revision`
+            // and both geometry `Arc`s stay untouched: this is not a new scene.
+            let mut highlight_diagnostics = self.visual_diagnostics.clone().unwrap_or_default();
+            highlight_diagnostics.extend(diagnostics);
+            ready.entity_flags = flags;
+            ready.highlight_diagnostics = highlight_diagnostics;
+            ready.highlight_completeness = self
+                .visual_completeness
+                .clone()
+                .unwrap_or(cad_domain::Completeness::Complete)
+                .combine(completeness);
+            ready.flags_revision = self.flags_revision;
+        }
+        true
     }
 
     /// The cached transient overlay batches plus their diagnostics/completeness.

@@ -186,6 +186,15 @@ struct State {
     /// published scene stays valid because every overlay batch is world-space
     /// geometry that renders correctly under any camera.
     input_revision: u64,
+    /// Monotonic revision of the **flags publication** (entity-level
+    /// selection/hover/hidden). It advances only when the resolved flag set
+    /// changes and is stamped onto the published scene as
+    /// [`controller::PreparedScene::flags_revision`]. It deliberately does not
+    /// touch `input_revision` (scene identity) or `content_revision` (preparation
+    /// token): a flags-only change keeps the published scene current and never
+    /// schedules a worker preparation. A global counter (not the controller's)
+    /// keeps it monotonic across worker candidates that carry stale counters.
+    flags_publication_revision: u64,
     /// Monotonic revision of the **full preparation input**, including the
     /// camera-derived `viewport_bounds`. It is the async preparation token and
     /// publication gate: it advances on every input change (scene-identity
@@ -242,6 +251,7 @@ impl Default for State {
             overlays: OverlayInputs::default(),
             overlay_revision: 0,
             input_revision: 0,
+            flags_publication_revision: 0,
             content_revision: 0,
             view_revision: 0,
             prepared_token: None,
@@ -286,6 +296,41 @@ impl State {
             .checked_add(1)
             .expect("render content revision exhausted");
         self.clear_camera_settle();
+    }
+
+    /// Publish a flags-only change: re-resolve the staged flags from the current
+    /// [`OverlayInputs`] via the controller's single flags resolver, stamp the
+    /// global flags publication revision and invalidate the frame.
+    ///
+    /// Neither `input_revision` nor `content_revision` moves, so the published
+    /// scene stays current (`current_ready_scene` keeps returning it), no worker
+    /// preparation is scheduled, and a pending camera-settle grid refresh
+    /// survives. The scene revision and both geometry `Arc`s are untouched: the
+    /// renderer receives the new flags as a delta over the committed geometry.
+    fn refresh_flags_only(&mut self) {
+        let drawing = self.incoming.borrow().clone();
+        let changed = self.controller.refresh_flags_only(
+            drawing.as_deref(),
+            self.view.document,
+            &self.overlays,
+        );
+        if changed {
+            self.publish_flags_revision();
+        }
+    }
+
+    /// Advance the global flags publication revision and stamp it on the
+    /// published scene. The scene revision/base stay untouched.
+    fn publish_flags_revision(&mut self) -> u64 {
+        self.flags_publication_revision = self
+            .flags_publication_revision
+            .checked_add(1)
+            .expect("render flags revision exhausted");
+        if let Some(ready) = self.controller.ready.as_mut() {
+            ready.flags_revision = self.flags_publication_revision;
+        }
+        self.runtime.dirty.invalidate();
+        self.flags_publication_revision
     }
 
     /// Arm/refresh the deferred camera-only reference-grid refresh.
@@ -343,9 +388,47 @@ fn publish_controller(state: &mut State, mut candidate: CadSceneController, toke
     if token != state.content_revision || state.prepared_token == Some(token) {
         return false;
     }
+    // Race guard: a worker preparation captures its overlay inputs at submission
+    // time. A flags-only change (hover/selection/hidden) is applied synchronously
+    // to the state controller and does **not** submit a preparation, so a worker
+    // completion that lands afterwards still carries the older flags. Re-resolve
+    // them from the CURRENT `state.overlays` at every publication boundary: the
+    // controller's fingerprints make this a no-op when nothing changed, and it is
+    // O(refs) cheap. Publishing the stale set would regress the tint to an older
+    // hover.
+    let drawing = state.incoming.borrow().clone();
+    candidate.refresh_flags_only(drawing.as_deref(), state.view.document, &state.overlays);
     let Some(mut ready) = candidate.ready.clone() else {
         return false;
     };
+    let previous = state.controller.ready.clone();
+    let flags_changed = previous
+        .as_ref()
+        .is_none_or(|published| published.entity_flags != ready.entity_flags);
+    // A publication whose base and overlay geometry are the *same allocations* as
+    // the already published scene is a flags-only publication: it must keep the
+    // scene revision, otherwise a fresh un-applied `ready.revision` would make
+    // `scene_committed` false and re-enter the base-only/suppression path (F4).
+    let flags_only_publish = previous.as_ref().is_some_and(|published| {
+        published.base_revision == ready.base_revision
+            && Arc::ptr_eq(&published.base, &ready.base)
+            && Arc::ptr_eq(&published.highlight, &ready.highlight)
+            && same_arc_option(published.images.as_ref(), ready.images.as_ref())
+    });
+    if flags_only_publish {
+        let mut published = previous.expect("checked above");
+        published.entity_flags = ready.entity_flags;
+        published.highlight_diagnostics = ready.highlight_diagnostics;
+        published.highlight_completeness = ready.highlight_completeness;
+        if flags_changed {
+            published.flags_revision = state.publish_flags_revision();
+        }
+        candidate.ready = Some(published);
+        state.controller = candidate;
+        state.prepared_token = Some(token);
+        state.runtime.dirty.invalidate();
+        return true;
+    }
     let base_identity = BaseInputIdentity::from_state(state);
     if state.published_base_identity.as_ref() != Some(&base_identity) {
         state.base_publication_revision = state
@@ -360,6 +443,11 @@ fn publish_controller(state: &mut State, mut candidate: CadSceneController, toke
         .expect("scene publication revision exhausted");
     ready.revision = state.scene_publication_revision;
     ready.base_revision = state.base_publication_revision;
+    ready.flags_revision = if flags_changed {
+        state.publish_flags_revision()
+    } else {
+        state.flags_publication_revision
+    };
     candidate.ready = Some(ready);
     state.controller = candidate;
     state.prepared_token = Some(token);
@@ -369,6 +457,15 @@ fn publish_controller(state: &mut State, mut candidate: CadSceneController, toke
     state.prepared_identity = Some(state.input_revision);
     state.runtime.dirty.invalidate();
     true
+}
+
+/// Whether two optional `Arc`s are the same allocation (`None == None`).
+fn same_arc_option<T>(left: Option<&Arc<T>>, right: Option<&Arc<T>>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+        _ => false,
+    }
 }
 
 fn current_ready_scene(state: &State) -> Option<&controller::PreparedScene> {

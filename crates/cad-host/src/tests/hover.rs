@@ -56,28 +56,138 @@ fn a_hover_move_that_picks_nothing_clears_the_hovered_set() {
 }
 
 #[test]
-fn an_unchanged_hover_position_runs_no_second_pick() {
+fn hover_keeps_its_highlight_until_the_cursor_leaves_the_pickbox_aperture() {
     let core = core();
     core.controller.borrow_mut().fit().expect("the demo fits");
     let pixel = screen_of(&core, demo_circle_rim(&core));
+    let aperture = cad_domain::TolerancePolicy::default().interaction_logical_pixels;
 
     dispatch_pointer(&core, hover_cursor(&core, pixel));
-    assert_eq!(core.hover.queries.get(), 1);
-    // A repeated move at the same logical position is a cached no-op: no second
-    // pick query, and the tint is unchanged. (Observable behaviour, not time.)
-    dispatch_pointer(&core, hover_cursor(&core, pixel));
+    assert_eq!(core.hover_query_count(), 1, "the first move queries once");
+
+    // Several tiny moves that stay inside the pickbox re-run no pick: the
+    // highlight is sticky while the cursor is within the shared aperture.
+    for step in 1..=5 {
+        dispatch_pointer(
+            &core,
+            hover_cursor(&core, [pixel[0] + step as f64, pixel[1]]),
+        );
+    }
+    assert_eq!(
+        core.hover_query_count(),
+        1,
+        "moves inside the aperture must not re-run the hover query"
+    );
+    assert!(
+        !hovered_refs(&core).is_empty(),
+        "the highlight persists while the cursor stays in the pickbox"
+    );
+
+    // An exact repeat of the query position re-runs nothing either.
     dispatch_pointer(&core, hover_cursor(&core, pixel));
     assert_eq!(
-        core.hover.queries.get(),
+        core.hover_query_count(),
         1,
         "an unchanged position must not re-run the hover query"
     );
+
+    // The first move strictly beyond the aperture re-hits exactly once.
+    let outside = [pixel[0] + aperture + 1.0, pixel[1]];
+    dispatch_pointer(&core, hover_cursor(&core, outside));
+    assert_eq!(
+        core.hover_query_count(),
+        2,
+        "leaving the aperture re-runs exactly one hover query"
+    );
+}
+
+#[test]
+fn a_scene_identity_change_re_queries_an_unchanged_position() {
+    let core = core();
+    core.controller.borrow_mut().fit().expect("the demo fits");
+    let pixel = screen_of(&core, demo_circle_rim(&core));
+    dispatch_pointer(&core, hover_cursor(&core, pixel));
+    assert_eq!(core.hover_query_count(), 1);
     assert!(!hovered_refs(&core).is_empty());
 
-    // A different position queries again.
-    let moved = [pixel[0] + 1.0, pixel[1] + 1.0];
-    dispatch_pointer(&core, hover_cursor(&core, moved));
-    assert_eq!(core.hover.queries.get(), 2);
+    // A real content edit advances the drawing's scene identity. The cached
+    // query position then belongs to an older identity and must be re-resolved
+    // rather than keeping a highlight that no longer matches the drawing.
+    core.controller
+        .borrow_mut()
+        .create_line(p(0.0, 0.0), p(1.0, 0.0))
+        .expect("the edit succeeds");
+
+    dispatch_pointer(&core, hover_cursor(&core, pixel));
+    assert_eq!(
+        core.hover_query_count(),
+        2,
+        "a scene-identity change re-runs the hover query at the same position"
+    );
+}
+
+#[test]
+fn an_entity_on_a_hidden_layer_is_neither_hovered_nor_click_selected() {
+    let core = core();
+    core.controller.borrow_mut().fit().expect("the demo fits");
+    let pixel = screen_of(&core, demo_circle_rim(&core));
+    let layer = demo_circle_layer(&core);
+    assert!(
+        !picks_nothing(&core, pixel),
+        "the rim really is pickable while its layer is visible"
+    );
+
+    // Hide the circle's layer as a temporary session override — the same command
+    // the layer panel issues. It changes no database revision, so the persisted
+    // pick index is not rebuilt: the visibility rule must be applied at pick
+    // time, not cached with the index.
+    run_controller_command(
+        &core,
+        CommandId::SetLayerVisibilities,
+        CommandPayload::LayerVisibilities(vec![(layer, false)]),
+    );
+
+    // Hover: the hidden entity is not a candidate, so nothing is tinted and no
+    // non-resident ref can reach the flags producer (which is exactly what would
+    // otherwise be reported as `flags.unresolved`).
+    dispatch_pointer(&core, hover_cursor(&core, pixel));
+    assert!(
+        hovered_refs(&core).is_empty(),
+        "an entity on a hidden layer must not be hovered"
+    );
+    assert!(
+        core.render.overlays().hovered.is_empty(),
+        "no non-resident ref may reach the FLAG_HOVERED flags input"
+    );
+
+    // Click: the same pick path refuses it, so nothing is selected.
+    let revision = core.request_context().metrics_revision.unwrap();
+    dispatch_pointer(
+        &core,
+        InteractionRequest::SelectAt {
+            point: PointInput::CanvasLocal {
+                logical_position: pixel,
+                metrics_revision: revision,
+            },
+            mode: SelectionMode::Replace,
+        },
+    );
+    assert!(
+        core.controller.borrow().session.selection.is_empty(),
+        "a click must not select an entity on a hidden layer"
+    );
+    assert!(
+        core.render.overlays().selection.is_empty(),
+        "no FLAG_SELECTED may land on a non-resident key"
+    );
+
+    // Restoring the layer makes the same entity pickable again.
+    run_controller_command(&core, CommandId::RestoreLayers, CommandPayload::None);
+    dispatch_pointer(&core, hover_cursor(&core, pixel));
+    assert!(
+        !hovered_refs(&core).is_empty(),
+        "the same entity is hovered once the layer is shown again"
+    );
 }
 
 #[test]

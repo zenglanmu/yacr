@@ -58,3 +58,30 @@ units/source/precision），而不是只给格式化字符串。
 - UI 约定：撤销按钮绑定 `can_undo`，重做按钮绑定 `can_redo`，不得共用
   `can-undo`（`app.slint` 的 `can-redo` 属性与 `UiHandle::set_can_redo`
   由 UI crate 侧完成，见交接说明）。
+
+## 3. 鼠标语义基线（AutoCAD 对照，2026-10-18 外部查证）
+
+本节是**外部权威对照**（Autodesk Help 2024 / AutoCAD 官方文档），用于判定本项目鼠标行为是否
+"与 AutoCAD 一致"。**它不是本项目的已验证行为**；本项目当前状态见每条末尾。
+
+| 主题 | AutoCAD 权威事实 | 出处 | 本项目当前状态 |
+|---|---|---|---|
+| 空闲悬停高亮 | **默认开启**：`SELECTIONPREVIEW` 初值 **3**（no command 时 + "Select objects" 提示时都开）；文档只按"显示/视觉效果"描述，是**叠加高亮**而非重生成 | [SELECTIONPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-77B3B59F-95E5-4F8A-85E2-D9411D712AF0.htm) | 已实现（`FLAG_HOVERED`）。**但**每次悬停实体变化会推进渲染内容修订并触发 overlay 重准备，实测 180 次移动中出现 14 帧 `base_only_pending_overlays` —— 是**待修的性能缺陷**，非语义差异 |
+| 悬停命中口径 | 命中范围是 **pickbox 大小**（`PICKBOX` 初值 **3**），高亮"若此刻点击会选中的整个对象"；`PICKBOX=0` 关闭 preview | [About Cursors](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-566B8C0C-57BC-4986-942D-BC683C4F90A4.htm)、[PICKBOX](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-363698CF-C3DC-4770-81EF-CB09D86B3D3A.htm) | 与点击共用 `TolerancePolicy::interaction_logical_pixels`（**12.0** 逻辑像素）⇒ **高亮与"点击会得到什么"一致**，但容差比 pickbox 默认大（属既有设计选择，未改） |
+| 悬停排除项 | `PREVIEWFILTER` 初值 **3**：锁定图层对象与 xref 内对象**不高亮**（但仍可被选中） | [PREVIEWFILTER](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-9B75C028-6429-4FC0-9EC6-72C21E29A5D8.htm) | **未实现**：`pick_at_screen` 不做图层可见性过滤（`select_all`/`select_in_box` 才做）⇒ 临时隐藏图层上的对象仍可能被高亮/点中。**开放项** |
+| 悬停性能上限 | `SELECTIONPREVIEWLIMIT` 初值 **20000**：预览对象数超限时**整体停止**预览高亮 | [SELECTIONPREVIEWLIMIT](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-9CDDA4F9-5B88-428F-B0C8-345E9A9DC4F1.htm) | **未实现**（无上限、无开关）。**开放项** |
+| 命令预览优先 | `COMMANDPREVIEW=1` 时 `SELECTIONPREVIEW` **被忽略**（TRIM/EXTEND/ERASE 等） | [COMMANDPREVIEW](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-2B245436-029A-4E14-92C2-0ED4F4F1362E.htm) | 工具占用指针时宿主直接抑制 hover（`hover_suppressed`），效果一致 |
+| 空闲悬停的 OSNAP 标记 | **不显示**：文档明确 "Object snaps work only when you are prompted for a point"；空闲时既不显示标记也不显示追踪 | [About Using Object Snaps](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-8F5E5431-9EFB-414E-BC6D-2C65EFB2DAC3.htm) | 一致：无工具光标时 `snap_hints_near_cursor` 返回空 |
+| 空闲左键拖拽 | = **隐含窗口/交叉选择**（`PICKAUTO` 初值 **5**、`PICKDRAG` 初值 **2**）；左→右=window（完全包含），右→左=crossing（相交） | [PICKAUTO](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-7BAAA374-8409-4296-B520-C5355941C836.htm)、[To Select Objects](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-243E4DD0-8947-4905-AFE2-BE9B903A8C3F.htm) | **不一致**：当前 2D 左键拖拽是**平移**。ADR-0014 决策 B 已规定改为框选（P1b 实施） |
+| 平移 / 缩放 | **中键（滚轮）按住拖动 = 平移**（`MBUTTONPAN=1`）；滚轮 = 缩放；`PAN` 命令内才有左键平移 | [PAN](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-2F05DC89-7065-4655-BA49-AC149B0F5E1A.htm) | 需在 P1b 确认中键拖拽仍平移（现状 `pointer_move` 的非主键分支即平移） |
+| 高亮的两套 | 悬停=preselection（`PRESELECTIONEFFECT`），选中后=`HIGHLIGHT`/`SELECTIONEFFECT`；`HIGHLIGHT` **不随文件保存**（每会话回到 1） | [HIGHLIGHT](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-Core/files/GUID-A0543122-803C-4692-9EEB-090483C4025C.htm) | 本项目两种状态分别为 `FLAG_HOVERED`/`FLAG_SELECTED`，语义一致；无持久化设置项 |
+| 只读上下文 | **AutoCAD 未定义**只读/查看器的悬停策略；preview 由系统变量门控，与文件可编辑性无关（DWF Design Review 未查证） | 见 `SELECTIONPREVIEW` 条目 | 本项目按"显示特性 + 开关"处理，不绑定 Viewer/Work 模式 |
+
+**推断（非逐字文档）**：① "悬停不重生成图形"——Autodesk 未给逐字句，但从"视觉/显示效果"与
+`SELECTIONPREVIEWLIMIT` 的性能说明可推；② "点提示与对象选择提示互斥显示 OSNAP 标记/对象预选"由
+两处文档条目合成。
+
+**结论（本项目要补的）**：悬停高亮本身与 AutoCAD 一致，需要修的是**实现代价**（悬停不得触发
+overlay/几何重准备）与**命中过滤/上限**（`PREVIEWFILTER` 式隐藏图层排除、`SELECTIONPREVIEWLIMIT`
+式上限、用户可见开关）；左键拖拽语义按 ADR-0014 决策 B 改为框选。
+

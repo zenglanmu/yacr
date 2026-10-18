@@ -67,7 +67,7 @@ impl Application {
     }
 }
 
-fn validate_branch(
+pub(crate) fn validate_branch(
     database: &DrawingDatabase,
     session: &SessionState,
     entity: &DbEntity,

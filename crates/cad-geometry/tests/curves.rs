@@ -372,3 +372,43 @@ fn analytic_intersection_matches_sampled_intersection() {
         assert!(max_abs(distance(*q, p(3.0, 0.0)) - 4.0) < 1e-9);
     }
 }
+
+#[test]
+fn bulge_polyline_fallback_keeps_the_genuine_crossings() {
+    // A bulge polyline is not one conic primitive, so a circle x bulge-polyline
+    // pair takes the *approximate* discretisation fallback. The coarser,
+    // scale-relative chord must still find both genuine crossings.
+    //
+    // The polyline is the upper semicircle of radius 4 centred at (0,-2)
+    // (chord (-4,-2)-(4,-2), bulge -1); the circle has radius 3 about the
+    // origin. The exact crossings follow from circle/circle geometry:
+    // y = 3/4 and x = +/- 3*sqrt(15)/4.
+    let circle = circle_at(p(0.0, 0.0), 3.0);
+    let polyline = SemanticGeometry::Polyline {
+        points: vec![p(-4.0, -2.0), p(4.0, -2.0)],
+        bulges: vec![-1.0],
+        closed: false,
+    };
+    let hits = DefaultGeometryEngine
+        .intersect_local(&polyline, &circle, &TolerancePolicy::default())
+        .unwrap();
+    assert_eq!(hits.len(), 2, "{hits:?}");
+    let expected_y = 0.75;
+    let expected_x = 3.0 * 15.0f64.sqrt() / 4.0;
+    for q in &hits {
+        // The fallback is approximate: its chord error is bounded by 1e-4 of
+        // the entity extent, so 1e-2 is a safe assertion bound here.
+        assert!(
+            (q.y - expected_y).abs() < 1e-2,
+            "wrong crossing height: {q:?}"
+        );
+        assert!(
+            (q.x.abs() - expected_x).abs() < 1e-2,
+            "wrong crossing abscissa: {q:?}"
+        );
+    }
+    assert!(
+        hits.iter().any(|q| q.x < 0.0) && hits.iter().any(|q| q.x > 0.0),
+        "both sides of the chord are genuine crossings: {hits:?}"
+    );
+}

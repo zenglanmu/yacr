@@ -12,6 +12,66 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 悬停不再触发重准备：flags-only 发布 + 光圈粘滞 + pick 图层过滤 + snap/求交成本（2026-10-18）
+
+**范围**：`crates/cad-engine`（渲染输入分类与 `flags_revision`）、`crates/cad-app`（`render_scene` flags
+解析器、`picking` 可见性过滤、snap 目标缓存）、`crates/cad-host`（hover 光圈粘滞）、
+`crates/cad-geometry`（`intersect_local` 回退弦高/段预算）、`docs/adr/0012`、`docs/interaction.md`。
+**未**改 acadrust、wgpu、`Cargo.lock`、架构边界、UI 文案。
+
+- **用户报告**：鼠标左键**移动**（非拖拽/非点击）时 CAD 随鼠标刷新。**勘察纠正**：拾取本身很便宜
+  （实测 0.03–0.13 ms/次，`PickIndex` 线程本地缓存），病因在**渲染输入分类**：
+  `RenderSessionHandle::set_overlays` 把「悬停实体变化」当作内容变化，同时推进 `input_revision` 与
+  `content_revision` ⇒ `prepared_identity != input_revision` ⇒ `render()` 退回
+  `base_only_navigation_eligible` → `render_base_only` → `suppress_overlays` 截断 overlay 后缀，
+  **反而把已存在的 flags-only 快路径（`overlay_identity_matches`）挡掉**，每次悬停变化都重传 overlay。
+- **修复 A（引擎，根因）**：`set_overlays` 改三分类——视觉 overlay 指纹变化 → `advance_input()`（不变）；
+  仅 `viewport_bounds` → `advance_content()`（不变）；**仅实体标志指纹变化 → 只推进新增的
+  `flags_revision`**（`State::flags_publication_revision` / `PreparedScene::flags_revision` /
+  `CadRenderRuntime::applied_flags_revision`），两个既有修订都不动；`ready.revision` 与
+  `scene_publication_revision` 语义不变（避免 F4 陷阱：未应用的新 revision 会让 `scene_committed=false`
+  重新落回 base-only）。发布边界从**当前** overlay 重解析 flags，worker 结果无法回退更新的 hover。
+- **修复 B（宿主，AutoCAD 口径）**：悬停**光圈粘滞**——光标未离开 12 逻辑像素（
+  `TolerancePolicy::default().interaction_logical_pixels`，与点击同一光圈）且 hover 身份
+  （`scene_identity()` + 图层覆盖指纹）未变时不重跑拾取（AutoCAD：高亮持续到指针离开 pickbox）。
+- **修复 C（正确性）**：`pick_at_screen`/`pick_ray` 此前**完全没有**图层可见性过滤，hover/单击可命中
+  临时隐藏图层上的对象（渲染底图里并不存在）⇒ 产生 `flags.unresolved` 幽灵标志。现新增
+  `pick_at_screen_with_visibility`/`pick_ray_with_visibility`/`ref_is_visible`，复用既有
+  `LayerOverrideSet::is_entity_visible`；`resolve_hover` 与 `select_at_mode` 走可见性感知入口。
+- **修复 D（性能）**：① snap 目标按场景身份缓存（与 `PickIndex` 同一把钥匙），每次移动只解算一次
+  （原先 `move_tool_cursor`/`capture_tool_point` 解算一次、`sync_render` 再走一次）；②
+  `cad-geometry::intersect_local` 的非圆锥回退路径原本用 `computation_world.max(1e-9)` 作弦高，
+  实际把 **圆 × 带 bulge 折线** 细分到 4096 段上限做 ~1600 万次段测试 ⇒ **实测 209.9 ms/次**
+  （宿主 pump 阶段 264.5 ms，曾把 `cad-host` 队列的时间预算耗尽）。现改为**尺度相对 + 有界**
+  （`FALLBACK_CHORD_FRACTION = 1e-4` 乘自身尺度、`FALLBACK_MAX_SEGMENTS = 256`）⇒ **0.141 ms**。
+  解析圆锥曲线路径仍精确；**近似回退路径精度由 ~1e-9 绝对变为 ~1e-4 相对**，已在注释与测试中显式标注。
+- **证据（真实硬件 GPU；夹具 `fixtures/dwg/synthetic-four-lines.dwg`，未用 `complex-test.dwg`）**：
+  同一 `YACR_PROBE_HOVER=1 YACR_PROFILE_PICK=1 scripts/collect-evidence.sh --backend x11 --no-build`
+  （180 次纯 hover，X11 + Vulkan/Quadro P620）前后对比——hover 拾取 **181 → 100**；
+  `input_rev` 区间 **3→18 → 3→4**；`uploads_started` **0→16 → 0→5**；`suffix_commits` **0→26 → 0→3**；
+  `suppressed=true` **14 → 0**；`complete=base_only_pending_overlays` **14 → 0**。
+  前 `/tmp/opencode/yacr-hover-20261018T113344Z/`、后 `/tmp/opencode/yacr-hover-after-20261018T124227Z/`
+  （输入为**合成 DOM 事件，非真实鼠标**；单机单夹具，**不**构成 vendor/性能结论）。
+- **门禁**：`cargo fmt --check`、clippy（workspace，`-D warnings`）、`cargo check --workspace
+  --all-targets`、wasm `--lib` 目标、`check-architecture.py`/`check-i18n.py`/`check-fixture-manifest.py`/
+  `check-workflows.py`、UI `npm test` 70/70 全绿；测试 cad-geometry 104、cad-measure 52、cad-engine 103、
+  cad-app 411、cad-host 104、cad-ui-core 103 全通过（`cad-host` 队列测试在 **snap 打开**下恢复通过）。
+- **既有失败（非本轮引入，已在 HEAD `9839d8f` 的独立 worktree 复现）**：ignored 硬件测试
+  `render::contracts::gpu_base::pending_overlay_upload_never_labels_stale_suffix_current`
+  在 HEAD 与本树**同样失败**。
+- **NOT RUN**：全量 `cargo test --workspace` 未跑；原生 Wayland 后端未跑；硬件 `--ignored` 全套未跑
+  （仅单条相关项按需执行）；无 vendor/跨平台/性能结论。
+- **后续项**：`SELECTIONPREVIEW` 式用户可见开关与 `SELECTIONPREVIEWLIMIT` 式上限（当前 hover 恒为单
+  实体，上限尚不必要，已记录不变量）；`COMMANDPREVIEW` 式命令预览与 hover 互斥（等 TRIM/EXTEND 预览
+  命令落地再接线）；snap 候选的空间窄化（仅在缓存后仍实测到热点时再做）。
+- **已记录的 hover 残留风险（Oracle Gate H1 attempt 2，均非阻塞）**：① **相机变化**（滚轮缩放/键盘平移/
+  fit）不改变 hover 身份，静止光标上的高亮会留到指针移动 >12px，且 12px 的世界尺寸随缩放改变 ⇒ 建议把
+  `world_per_px`/`view_revision` 并入身份元组并在相机变化时清 `last_query`；② **空间切换**（模型↔布局）
+  不清 hover ⇒ 建议在切换路径清 hover；③ `DrawPreview::kind` **不在**任何指纹里，而预览几何按 kind
+  分支（`preview.rs`），kind-only 变化会落到防御性 else → 无效 worker 往返 + 预览几何陈旧 ⇒ 建议把
+  `kind` 哈希进 `overlay_fingerprint`（2 行 + 契约测试）；④ `flags_only_publish` 跳过 `prepared_identity`
+  的推理（`token == content_revision` 蕴含自提交以来无 `advance_input`）目前是隐式的，加一句注释锁住。
+
 ## React 宿主工具接线：命令准入单源 + 交互工具真正可用（2026-10-18）
 
 **范围**：`crates/cad-ui-core`（session 命令路由、捕捉点、`CadStatus.tool`、`admissible_names`）、

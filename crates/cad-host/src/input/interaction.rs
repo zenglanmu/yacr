@@ -274,7 +274,7 @@ impl HostCore {
             .get(&c.viewport_id)
             .ok_or(CadError::Cancelled)?;
         let drawing = c.drawing().ok_or(CadError::Cancelled)?;
-        let report = cad_app::picking::pick_at_screen(
+        let report = cad_app::picking::pick_at_screen_with_visibility(
             &drawing,
             c.document_id,
             &viewport.camera,
@@ -282,6 +282,7 @@ impl HostCore {
             viewport.logical_size,
             &cad_domain::TolerancePolicy::default(),
             cad_app::BackFacePolicy::Cull,
+            &c.session.layer_overrides,
         )?;
         let hit = report.hit.map(|hit| hit.source);
         let mut refs = c.session.selection.refs().to_vec();

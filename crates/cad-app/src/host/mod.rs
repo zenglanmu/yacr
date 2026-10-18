@@ -29,7 +29,9 @@ mod databases;
 #[cfg(test)]
 mod tests;
 
-pub use databases::{blank_database, demo_database, snap_candidates_near};
+pub use databases::{
+    blank_database, demo_database, snap_candidates_near, snap_candidates_near_uncached,
+};
 
 /// Result of a successful drawing open, for status lines and diagnostics.
 #[derive(Debug, Clone)]
@@ -123,12 +125,23 @@ impl HostController {
     }
 
     /// Capture a world point through the active session tool.
+    ///
+    /// The point is first resolved through [`HostController::resolve_snap`] so
+    /// the committed point is the snapped point (ADR 0014 A.2). When there is
+    /// no candidate the raw point is used unchanged; a resolution error (for
+    /// example a non-finite point) is propagated, never swallowed.
     pub fn capture_tool_point(&mut self, point: Point3) -> CadResult<bool> {
+        let point = self.resolve_snap(point)?.map_or(point, |snap| snap.point);
         self.session.capture_point(point)
     }
 
     /// Move the active tool preview cursor without advancing its generation.
+    ///
+    /// Like [`HostController::capture_tool_point`], the stored cursor is the
+    /// resolved snap point so the preview and the eventual commit share one
+    /// truth (ADR 0014 A.2).
     pub fn move_tool_cursor(&mut self, point: Point3) -> CadResult<()> {
+        let point = self.resolve_snap(point)?.map_or(point, |snap| snap.point);
         self.session.move_cursor(point)
     }
 
@@ -646,15 +659,88 @@ impl HostController {
 
     /// The live world cursor of the active tool, if any tool is capturing.
     ///
-    /// The cursor lives in the tool preview (`MeasurementPreview::cursor`).
-    /// The draw tool is not yet wired into [`SessionState`](crate::SessionState)
-    /// at this revision, so only the measurement cursor is available; the draw
-    /// cursor joins here once that state exists. Reading it dispatches no
+    /// The cursor lives in the tool preview: [`crate::MeasurementPreview::cursor`]
+    /// for a measurement tool and [`crate::DrawPreview::cursor`] for a drawing
+    /// tool. Both are read here (drawing tools were previously omitted, which
+    /// left LINE/CIRCLE/ARC without snap hints). Reading it dispatches no
     /// command.
     fn active_tool_cursor(&self) -> Option<Point3> {
         self.session
             .measurement_preview()
             .and_then(|preview| preview.cursor)
+            .or_else(|| {
+                self.session
+                    .draw_preview()
+                    .and_then(|preview| preview.cursor)
+            })
+    }
+
+    /// The session's object-snap switch (session state only).
+    pub fn snap_enabled(&self) -> bool {
+        self.session.snap_enabled()
+    }
+
+    /// Enable or disable object snapping for this session.
+    ///
+    /// Session state only: no database write, no history entry, and no change
+    /// to the persisted `view.overlays.snapHints` preference (ADR 0014 A.4).
+    pub fn set_snap_enabled(&mut self, enabled: bool) {
+        self.session.set_snap_enabled(enabled);
+    }
+
+    /// Flip object snapping and return the new state (F3 binding).
+    pub fn toggle_snap(&mut self) -> bool {
+        self.session.toggle_snap()
+    }
+
+    /// Resolve the single object-snap candidate for a raw world point.
+    ///
+    /// This is the one acquisition entry point used by both tool boundaries
+    /// ([`HostController::move_tool_cursor`] and
+    /// [`HostController::capture_tool_point`], ADR 0014 A.1–A.3). It reads the
+    /// exact same inputs as [`HostController::snap_hints_near_cursor`]: the
+    /// viewport's `world_per_px`, the session's active space, the drawing's
+    /// [`snap_candidates_near`] set and the default [`TolerancePolicy`] inside
+    /// the measurement engine.
+    ///
+    /// The transform-baked snap targets are cached per scene identity, so a
+    /// pointer move does not re-expand the drawing. The full candidate set this
+    /// call resolves is recorded as the last move's query; the hint overlay
+    /// reuses it for the stored cursor instead of walking the drawing again.
+    /// The snapped point itself is stored by the caller, so it stays the single
+    /// truth a commit reads.
+    ///
+    /// `Ok(None)` means only "nothing to snap to": snapping is disabled, the
+    /// document or viewport is absent, or no candidate is near the point. A
+    /// non-finite point or an unusable `world_per_px` is an explicit
+    /// [`CadError::InvalidInput`], never a silent raw-point success.
+    pub fn resolve_snap(&self, raw: Point3) -> CadResult<Option<SnapCandidate>> {
+        if !raw.x.is_finite() || !raw.y.is_finite() || !raw.z.is_finite() {
+            return Err(CadError::InvalidInput("snap cursor must be finite".into()));
+        }
+        if !self.session.snap_enabled() {
+            return Ok(None);
+        }
+        let Some(viewport) = self.application.workspace.viewports.get(&self.viewport_id) else {
+            return Ok(None);
+        };
+        let world_per_px = viewport.world_per_px();
+        if !world_per_px.is_finite() || world_per_px <= 0.0 {
+            return Err(CadError::InvalidInput(
+                "snap world_per_px must be finite and positive".into(),
+            ));
+        }
+        let Some(document) = self.application.workspace.documents.get(&self.document_id) else {
+            return Ok(None);
+        };
+        let candidates = snap_candidates_near(
+            document.drawing.as_ref(),
+            self.document_id,
+            raw,
+            world_per_px,
+            self.session.active_space.clone(),
+        )?;
+        Ok(candidates.into_iter().next())
     }
 
     /// The world units per logical pixel of the active viewport camera.
@@ -675,18 +761,29 @@ impl HostController {
 
     /// Real object-snap candidates under the active tool's world cursor.
     ///
-    /// Pure getter (audit U04): it reads the tool preview, the drawing and the
-    /// viewport, resolves the snap candidates through the shared
-    /// [`snap_candidates_near`] helper, and never dispatches a command or writes
-    /// a database. With no live cursor (idle, or a tool that has not moved yet)
-    /// it returns the explicit empty vector, so the host clears the snap-hint
-    /// overlay rather than leaving a stale marker. A missing viewport likewise
-    /// yields no hints — nothing is fabricated.
+    /// Pure getter (audit U04): it reads the tool preview (measurement **or**
+    /// drawing cursor), the drawing and the viewport, resolves the snap
+    /// candidates through the shared [`snap_candidates_near`] helper, and never
+    /// dispatches a command or writes a database. When snapping is disabled the
+    /// explicit empty vector is returned, so the host clears the snap-hint
+    /// overlay rather than showing markers that a click would not honour. With
+    /// no live cursor (idle, or a tool that has not moved yet) it also returns
+    /// the explicit empty vector. A missing viewport likewise yields no hints —
+    /// nothing is fabricated.
+    ///
+    /// The resolved candidate set is the **same one** the pointer move resolved
+    /// and stored: [`HostController::resolve_snap`] records it, and this getter
+    /// reuses it when the stored cursor (the snapped point) and the scene
+    /// identity are unchanged, instead of walking the drawing a second time.
+    /// The commit still reads the stored tool point, not this overlay set.
     ///
     /// The renderer independently gates the overlay on `view.overlays.snapHints`,
-    /// so a host may call this unconditionally; the early return only avoids
-    /// needless work when there is no cursor.
+    /// so a host may call this unconditionally; the early returns only avoid
+    /// needless work.
     pub fn snap_hints_near_cursor(&self) -> CadResult<Vec<SnapCandidate>> {
+        if !self.session.snap_enabled() {
+            return Ok(Vec::new());
+        }
         let Some(cursor) = self.active_tool_cursor() else {
             return Ok(Vec::new());
         };
@@ -694,7 +791,7 @@ impl HostController {
             return Ok(Vec::new());
         };
         let drawing = self.drawing_required()?;
-        snap_candidates_near(
+        databases::snap_candidates_for_hint(
             drawing,
             self.document_id,
             cursor,

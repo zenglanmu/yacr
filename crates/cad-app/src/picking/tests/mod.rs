@@ -1,4 +1,5 @@
 use super::*;
+use crate::layers::LayerOverrideSet;
 use crate::selection::SelectionSet;
 use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
 
@@ -219,6 +220,107 @@ fn perspective_pick_hits_3d_geometry_along_the_view_ray() {
         .expect("the line is picked through its own pixel");
     assert_eq!(hit.source.entity, EntityId(1));
     assert!(hit.distance > 0.0);
+}
+
+#[test]
+fn a_hidden_layer_entity_is_not_pickable_and_returns_when_shown_again() {
+    let db = drawing();
+    let options = PickOptions::new(0.05).unwrap();
+    // A ray along +x hits the block child of the first INSERT placement at
+    // x = 10, instance path [10].
+    let ray = Ray3 {
+        origin: p(0.0, 0.0, 0.0),
+        direction: p(1.0, 0.0, 0.0),
+    };
+
+    // No override: the visible set is unchanged and the pick still hits.
+    let shown = LayerOverrideSet::new();
+    let hit = pick_ray_with_visibility(&db, DocumentId(1), &ray, &options, &shown)
+        .unwrap()
+        .hit
+        .expect("the visible path still hits");
+    assert_eq!(hit.source.instance, InstancePath(vec![EntityId(10)]));
+
+    // Layer 0 temporarily hidden: every entity on it leaves the candidate set,
+    // so the ray hits nothing and no non-resident ref can become a pick result
+    // (which is what would otherwise surface as `flags.unresolved`).
+    let mut hidden = LayerOverrideSet::new();
+    hidden.set(LayerId(0), false);
+    let report = pick_ray_with_visibility(&db, DocumentId(1), &ray, &options, &hidden).unwrap();
+    assert!(
+        report.hit.is_none(),
+        "an entity on a hidden layer must not be pickable"
+    );
+    assert!(
+        report.skipped.is_empty(),
+        "exclusion is not a skip: the ref is simply not a candidate"
+    );
+
+    // Clearing the override makes it pickable again.
+    let mut reshown = LayerOverrideSet::new();
+    reshown.set(LayerId(0), true);
+    assert!(
+        pick_ray_with_visibility(&db, DocumentId(1), &ray, &options, &reshown)
+            .unwrap()
+            .hit
+            .is_some(),
+        "the same entity is pickable once the override is cleared"
+    );
+}
+
+#[test]
+fn the_screen_pick_honours_layer_visibility() {
+    let db = drawing();
+    // Orthographic top view whose centre column is x = 20: the second INSERT
+    // placement is the top-ranked hit, exactly as in
+    // `screen_pick_uses_camera_ray_and_returns_closest`.
+    let camera = Camera {
+        eye: p(20.0, 0.0, 1000.0),
+        target: p(20.0, 0.0, 0.0),
+        up: p(0.0, 1.0, 0.0),
+        projection: Projection::Orthographic { scale: 1.0 },
+    };
+    let size = [800.0, 600.0];
+    let centre = [size[0] * 0.5, size[1] * 0.5];
+
+    let visible = LayerOverrideSet::new();
+    let report = pick_at_screen_with_visibility(
+        &db,
+        DocumentId(1),
+        &camera,
+        centre,
+        size,
+        &TolerancePolicy::default(),
+        BackFacePolicy::Cull,
+        &visible,
+    )
+    .unwrap();
+    assert_eq!(
+        report
+            .hit
+            .expect("the visible instance is hit")
+            .source
+            .instance,
+        InstancePath(vec![EntityId(20)])
+    );
+
+    let mut hidden = LayerOverrideSet::new();
+    hidden.set(LayerId(0), false);
+    let report = pick_at_screen_with_visibility(
+        &db,
+        DocumentId(1),
+        &camera,
+        centre,
+        size,
+        &TolerancePolicy::default(),
+        BackFacePolicy::Cull,
+        &hidden,
+    )
+    .unwrap();
+    assert!(
+        report.hit.is_none(),
+        "the screen pick must not target a hidden-layer entity"
+    );
 }
 
 #[test]

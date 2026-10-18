@@ -62,6 +62,139 @@ impl TessellationParams {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Bounded sampling for the *approximate* intersection fallback.
+//
+// Only pairs without an analytic solution reach this code (a bulge polyline is
+// not a conic primitive). The two operands are flattened and tested pairwise,
+// so the cost is `O(n*m)` and both `n` and `m` must be tied to the geometry
+// rather than to an absolute tolerance.
+// ---------------------------------------------------------------------------
+
+/// Chord error of the fallback, as a fraction of the operand's own local
+/// extent (see [`fallback_scale`]).
+///
+/// 1e-4 keeps every sampled chord within 0.01% of the entity's overall size:
+/// well below the interaction/measurement resolution for snapping, while the
+/// sample count becomes scale-free (a full circle needs ~157 segments at any
+/// radius instead of always saturating the cap). The final acceptance test
+/// still uses `tolerance.computation_world`; only the candidate search is
+/// coarsened.
+pub(crate) const FALLBACK_CHORD_FRACTION: f64 = 1e-4;
+
+/// Hard cap on the number of tessellated segments per operand in the fallback.
+///
+/// The pair loop is `O(n*m)`, so this cap is what makes the cost predictable:
+/// at most `256 * 256 = 65_536` segment tests per pair regardless of drawing
+/// scale, arc count or spline wiggliness. A full circle or ellipse at
+/// [`FALLBACK_CHORD_FRACTION`] needs ~157 segments, so ordinary curves are not
+/// clipped; only pathological multi-arc polylines or very wiggly splines are
+/// uniformly decimated (see [`bound_fallback_samples`]) and are already
+/// approximate by construction.
+pub(crate) const FALLBACK_MAX_SEGMENTS: usize = 256;
+
+/// Tessellation parameters for one operand of the approximate fallback.
+///
+/// The chord is `(extent * FALLBACK_CHORD_FRACTION).max(computation_world)`,
+/// where `extent` is the geometry's own local extent ([`fallback_scale`]). It
+/// therefore follows the entity, not the drawing units or the view: scaling a
+/// probe by 1e3 does not change its sample count.
+pub(crate) fn fallback_tessellation_params(
+    geometry: &SemanticGeometry,
+    tolerance: &TolerancePolicy,
+) -> TessellationParams {
+    let extent = fallback_scale(geometry);
+    let chord = (extent * FALLBACK_CHORD_FRACTION).max(tolerance.computation_world.max(1e-12));
+    TessellationParams {
+        tolerance: chord,
+        max_segments: FALLBACK_MAX_SEGMENTS,
+        min_segments: 4,
+    }
+}
+
+/// A cheap local world-scale estimate for the fallback chord.
+///
+/// This deliberately does **not** call `GeometryEngine::bounds`: bounds
+/// tessellates, and doing that per pair on the per-pointer-move path would
+/// reintroduce the very cost this fallback is bounded against (a multi-arc
+/// polyline would be flattened at up to 256 samples per arc). The estimate is
+/// taken from vertices, radii and control points instead, so it is `O(n)` in
+/// the entity's own description and needs no allocation of samples.
+///
+/// Over-estimating the scale is safe: it only *coarsens* the chord and the
+/// fallback is approximate by construction.
+pub(crate) fn fallback_scale(geometry: &SemanticGeometry) -> f64 {
+    use SemanticGeometry as G;
+    match geometry {
+        G::Line { start, end } => distance(*start, *end),
+        G::Polyline { points, bulges, .. } => {
+            if points.is_empty() {
+                return 0.0;
+            }
+            let mut sagitta = 0.0f64;
+            for (i, a) in points.iter().enumerate() {
+                let b = points[(i + 1) % points.len()];
+                let chord = distance(*a, b);
+                sagitta = sagitta.max(bulges.get(i).copied().unwrap_or(0.0).abs() * 0.5 * chord);
+            }
+            // An arc's apex can lie outside the vertex box; add the largest
+            // sagitta on both sides as a cheap upper bound.
+            bbox_extent(points) + 2.0 * sagitta
+        }
+        G::Circle { radius, .. } | G::Arc { radius, .. } => 2.0 * radius.abs(),
+        G::Ellipse { major_axis, .. } => 2.0 * length(*major_axis),
+        G::Spline { control_points, .. } => bbox_extent(control_points),
+        G::Mask { boundary, .. } => bbox_extent(boundary),
+        G::Compound(children) => children.iter().map(fallback_scale).fold(0.0f64, f64::max),
+        // Point/Text have no closed extent; Mesh/Insert/Opaque/Shape/Image do
+        // not tessellate to a polyline, so the fallback yields nothing anyway.
+        _ => 0.0,
+    }
+}
+
+/// Diagonal of the axis-aligned box spanned by `points` (0.0 when empty).
+fn bbox_extent(points: &[Point3]) -> f64 {
+    let mut acc = BoundsAccumulator::new();
+    for p in points {
+        acc.add_point(*p);
+    }
+    acc.finish()
+        .map(|b| length(sub(b.max, b.min)))
+        .unwrap_or(0.0)
+}
+
+/// Truncate a tessellation to the fallback's per-operand point budget.
+///
+/// A single arc or curve is already capped by `TessellationParams::max_segments`,
+/// but a polyline made of many bulged segments can exceed it in total. In that
+/// case the samples are uniformly decimated (first/last vertices kept). This is
+/// deliberately a *bound*, not a refinement: the fallback is approximate, and a
+/// pair whose operands are this dense is outside the precision it promises.
+pub(crate) fn bound_fallback_samples(points: Vec<Point3>) -> Vec<Point3> {
+    let max_points = FALLBACK_MAX_SEGMENTS + 1;
+    if points.len() <= max_points || max_points < 2 {
+        return points;
+    }
+    let stride = (points.len() - 1).div_ceil(max_points - 1);
+    let last = match points.last() {
+        Some(p) => *p,
+        None => return points,
+    };
+    let mut out = Vec::with_capacity(max_points);
+    let mut i = 0;
+    while i < points.len() {
+        out.push(points[i]);
+        i += stride;
+    }
+    if out.last() != Some(&last) {
+        if out.len() == max_points {
+            out.pop();
+        }
+        out.push(last);
+    }
+    out
+}
+
 /// The production geometry engine.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultGeometryEngine;
@@ -361,26 +494,25 @@ impl GeometryEngine for DefaultGeometryEngine {
                 return Ok(unique);
             }
         }
-        // The chord tolerance is deliberately coarse relative to the predicate
-        // tolerance so a curved entity is approximated by segments while the
-        // final acceptance test stays geometric.
-        let chord = tolerance.computation_world.max(1e-9);
-        let pa = tessellate_geometry(
+        // Everything else (a bulge polyline is not one conic, for example) is
+        // **approximate**: the two entities are flattened and the crossing is
+        // found between sampled segments. The result is only as accurate as the
+        // chord below, and it is a candidate point, not an analytic solution.
+        //
+        // The sampling must stay scale-relative and bounded. An absolute chord
+        // (this used to be a fixed 1e-9) is finer than any display or
+        // measurement need, always saturates the segment cap at any drawing
+        // scale, and makes the `O(n*m)` pair test quadratic in the cap: the
+        // circle x bulge-polyline probe measured ~210 ms per pair in release
+        // before this change (tests/intersection_fallback_cost.rs).
+        let pa = bound_fallback_samples(tessellate_geometry(
             a,
-            TessellationParams {
-                tolerance: chord,
-                min_segments: 4,
-                ..Default::default()
-            },
-        );
-        let pb = tessellate_geometry(
+            fallback_tessellation_params(a, tolerance),
+        ));
+        let pb = bound_fallback_samples(tessellate_geometry(
             b,
-            TessellationParams {
-                tolerance: chord,
-                min_segments: 4,
-                ..Default::default()
-            },
-        );
+            fallback_tessellation_params(b, tolerance),
+        ));
         let mut out = Vec::new();
         for i in 0..pa.len().saturating_sub(1) {
             for j in 0..pb.len().saturating_sub(1) {

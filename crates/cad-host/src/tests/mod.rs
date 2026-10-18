@@ -424,6 +424,26 @@ fn demo_circle_rim(core: &HostCore) -> Point3 {
     }
 }
 
+/// The layer of the demo document's circle, for a temporary-hide test.
+fn demo_circle_layer(core: &HostCore) -> cad_domain::LayerId {
+    let drawing = core
+        .controller
+        .borrow()
+        .drawing()
+        .expect("the demo document");
+    drawing
+        .model_space()
+        .iter()
+        .find(|entity| {
+            matches!(
+                &entity.geometry,
+                cad_domain::SemanticGeometry::Circle { .. }
+            )
+        })
+        .map(|entity| entity.layer)
+        .expect("the demo document has a circle")
+}
+
 /// The reference `pick_at_screen` reports at a pixel, computed exactly the way
 /// `select_at_mode` computes it.
 fn picked_ref_at(core: &HostCore, pixel: [f64; 2]) -> cad_domain::SelectionRef {
