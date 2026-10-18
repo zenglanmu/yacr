@@ -13,6 +13,7 @@ use cad_platform::{
 use std::collections::BTreeMap;
 
 mod box_select;
+mod box_select_edge_cases;
 mod compat;
 mod engine_config;
 mod file_open_save;

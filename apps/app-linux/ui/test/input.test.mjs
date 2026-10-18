@@ -128,6 +128,13 @@ function mockEnvironment() {
   env.requestAnimationFrame = callback => { frames.set(++counter, callback); return counter; };
   env.cancelAnimationFrame = id => frames.delete(id);
   env.tick = () => { const tasks = [...frames.values()]; frames.clear(); tasks.forEach(callback => callback()); };
+  // Same env-injection style as the rAF stubs: fake timers the fallback path
+  // uses, driven explicitly by `runTimers` so a throttled rAF can be simulated.
+  const timers = new Map();
+  let timerCounter = 0;
+  env.setTimeout = callback => { timers.set(++timerCounter, callback); return timerCounter; };
+  env.clearTimeout = id => timers.delete(id);
+  env.runTimers = () => { const tasks = [...timers.values()]; timers.clear(); tasks.forEach(callback => callback()); };
   const media = [];
   env.matchMedia = () => { const target = new Target(); media.push(target); return target; };
   env.ResizeObserver = class {
@@ -135,7 +142,7 @@ function mockEnvironment() {
     observe(target) { env.observedTarget = target; }
     disconnect() { env.observerDisconnected = true; }
   };
-  return { env, element, frames, media, captured: () => captured };
+  return { env, element, frames, media, timers, captured: () => captured };
 }
 
 test('pointer capture, RAF flush, cancel, blur, overlay exclusion, wheel and DPR', () => {
@@ -410,4 +417,123 @@ test('resize is an ordered barrier that move coalescing cannot erase', async () 
   assert.equal(sent[2].y, 101);
   assert.equal(sent[3].x, 999);
   assert.ok(sent.every((input, i) => !i || input.sequence > sent[i - 1].sequence));
+});
+
+test('pointermove is still delivered by the timer fallback when rAF never ticks', () => {
+  const { env, element, frames, timers } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  const before = inputs.length;
+  element.emit('pointermove', { pointerId: 7, clientX: 11, clientY: 22, button: -1, buttons: 0 });
+  // A frame is pending, but an occluded/unfocused webview never runs it.
+  assert.equal(frames.size, 1);
+  assert.equal(timers.size, 1);
+  assert.equal(inputs.length, before, 'nothing is delivered before a flush');
+  env.runTimers();
+  assert.deepEqual(inputs.slice(before), [{ kind: 'pointer_move', x: 11, y: 22 }]);
+  // The fallback cancelled the still-pending frame: delivering once, not twice.
+  assert.equal(frames.size, 0);
+  assert.equal(timers.size, 0);
+  binding.dispose();
+});
+
+test('the fallback coalesces several moves into one latest-position delivery', () => {
+  const { env, element, timers } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  const before = inputs.length;
+  for (let x = 1; x <= 20; x++) element.emit('pointermove', { pointerId: 7, clientX: x, clientY: 1, button: -1, buttons: 0 });
+  // One fallback for the whole burst, not one per move.
+  assert.equal(timers.size, 1);
+  env.runTimers();
+  const moves = inputs.slice(before).filter(input => input.kind === 'pointer_move');
+  assert.equal(moves.length, 1);
+  assert.equal(moves[0].x, 20);
+  binding.dispose();
+});
+
+test('a pending fallback is cancelled by pointerup, pointerleave and blur', () => {
+  // pointerup: the buffered move flushes before the up, then the fallback is gone.
+  {
+    const { env, element, frames, timers } = mockEnvironment();
+    const inputs = [];
+    const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+    element.emit('pointerdown', { pointerId: 7, clientX: 1, clientY: 1, button: 0 });
+    element.emit('pointermove', { pointerId: 7, clientX: 2, clientY: 1, button: -1, buttons: 1 });
+    assert.equal(timers.size, 1);
+    const before = inputs.length;
+    element.emit('pointerup', { pointerId: 7, clientX: 2, clientY: 1, button: 0 });
+    assert.equal(timers.size, 0);
+    assert.equal(frames.size, 0);
+    assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_move', 'pointer_up']);
+    env.runTimers(); // a straggler must not deliver a second, stale move
+    assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_move', 'pointer_up']);
+    binding.dispose();
+  }
+  // pointerleave while idle: flush then leave, no stale move after.
+  {
+    const { env, element, timers } = mockEnvironment();
+    const inputs = [];
+    const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+    element.emit('pointermove', { pointerId: 7, clientX: 5, clientY: 5, button: -1, buttons: 0 });
+    assert.equal(timers.size, 1);
+    const before = inputs.length;
+    element.emit('pointerleave', { pointerId: 7, clientX: 6, clientY: 5, button: 0, buttons: 0 });
+    assert.equal(timers.size, 0);
+    assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_move', 'pointer_leave']);
+    env.runTimers();
+    assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_move', 'pointer_leave']);
+    binding.dispose();
+  }
+  // blur: the buffered move flushes before the cancel/blur, and nothing follows.
+  {
+    const { env, element, timers } = mockEnvironment();
+    const inputs = [];
+    const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+    element.emit('pointerdown', { pointerId: 7, clientX: 1, clientY: 1, button: 0 });
+    element.emit('pointermove', { pointerId: 7, clientX: 9, clientY: 1, button: -1, buttons: 1 });
+    assert.equal(timers.size, 1);
+    const before = inputs.length;
+    env.emit('blur');
+    assert.equal(timers.size, 0);
+    assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_move', 'pointer_cancel', 'blur']);
+    env.runTimers();
+    assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_move', 'pointer_cancel', 'blur']);
+    binding.dispose();
+  }
+});
+
+test('when rAF fires the pending fallback is cancelled, so a move is delivered once', () => {
+  const { env, element, frames, timers } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  const before = inputs.length;
+  for (let x = 1; x <= 5; x++) element.emit('pointermove', { pointerId: 7, clientX: x, clientY: 3, button: -1, buttons: 0 });
+  assert.equal(frames.size, 1);
+  assert.equal(timers.size, 1);
+  env.tick();
+  assert.equal(timers.size, 0);
+  assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_move']);
+  assert.equal(inputs.at(-1).x, 5);
+  env.runTimers(); // the cancelled fallback must not deliver a duplicate
+  assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_move']);
+  binding.dispose();
+});
+
+test('the first move after an idle period is still delivered promptly by the fallback', () => {
+  const { env, element, timers } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  // Idle: no buffered move, no pending fallback.
+  assert.equal(timers.size, 0);
+  element.emit('pointermove', { pointerId: 7, clientX: 100, clientY: 200, button: -1, buttons: 0 });
+  assert.equal(timers.size, 1);
+  env.runTimers();
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_move', x: 100, y: 200 });
+  // A later move on a fresh dirty buffer is delivered just the same.
+  element.emit('pointermove', { pointerId: 7, clientX: 101, clientY: 201, button: -1, buttons: 0 });
+  assert.equal(timers.size, 1);
+  env.runTimers();
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_move', x: 101, y: 201 });
+  binding.dispose();
 });

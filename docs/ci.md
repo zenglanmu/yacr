@@ -28,7 +28,7 @@
 
 | Job | Workflow | Runner | 门禁 |
 |---|---|---|---|
-| `core-quality` | core.yml | `ubuntu-latest` | fmt + clippy(exclude android/web) + 架构/fixture/workflow/迁移契约 + 全目标 debug 编译；并安装 GTK/WebKitGTK 前置 + 构建 React 前端（`npm test`/`npm run build`） |
+| `core-quality` | core.yml | `ubuntu-latest` | fmt + clippy(exclude android/web) + 架构/fixture/workflow/迁移契约 + **代码文件 ≤1000 行**（`check-file-size.py`）+ 全目标 debug 编译；并安装 GTK/WebKitGTK 前置 + 构建 React 前端（`npm test`/`npm run build`） |
 | `wasm-check` | core.yml | `ubuntu-latest` | 全 workspace wasm `--lib` 检查 + 单独 `app-web` 检查 |
 | `i18n-contracts` | core.yml | `ubuntu-latest` | `python3 scripts/check-i18n.py`（双语目录 / key / 占位符 / Rust + React 静态 key / 硬编码 CJK 扫描） |
 | `shader-validation` | build.yml | `ubuntu-latest` | 离线 WGSL 解析/校验（naga，无需 GPU），失败红灯 |
@@ -87,6 +87,7 @@ python3 scripts/check-architecture.py
 python3 scripts/check-fixture-manifest.py
 python3 scripts/check-workflows.py
 python3 scripts/check-i18n.py
+python3 scripts/check-file-size.py   # 代码文件 ≤1000 行；文档不计入；自测 scripts/test-check-file-size.py
 cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 # React 前端

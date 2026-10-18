@@ -78,6 +78,12 @@ export function parseCadStatus(value) {
   if (value.snapEnabled !== undefined && typeof value.snapEnabled !== 'boolean') {
     throw Error('CAD_STATUS_INVALID');
   }
+  // The current snap candidate kind is optional (`null`/absent when there is no
+  // candidate, or on an older host), but a present value must be a real string:
+  // a coercion would render a wrong label.
+  if (value.snapKind !== undefined && value.snapKind !== null && typeof value.snapKind !== 'string') {
+    throw Error('CAD_STATUS_INVALID');
+  }
   return value;
 }
 
@@ -126,6 +132,32 @@ export function objectSnapToggle(status, admitted) {
 /** Dispatch the toggle as the one command the router accepts. */
 export function dispatchObjectSnap(runCommand) {
   runCommand(OBJECT_SNAP_COMMAND);
+}
+
+// The snap engine's stable machine keys (`cad_measure::SnapKind::as_str`) and
+// their catalog labels. A key outside this set is rendered as nothing rather
+// than a guessed label.
+const SNAP_KIND_LABELS = {
+  endpoint: { labelKey: 'snap.kind.endpoint' },
+  midpoint: { labelKey: 'snap.kind.midpoint' },
+  center: { labelKey: 'snap.kind.center' },
+  quadrant: { labelKey: 'snap.kind.quadrant' },
+  perpendicular: { labelKey: 'snap.kind.perpendicular' },
+  intersection: { labelKey: 'snap.kind.intersection' },
+};
+
+/**
+ * The catalog label key for the current object-snap candidate kind, or `null`.
+ *
+ * The server's `snapKind` is the single source of truth (ADR 0014 A.7): it is
+ * the current best candidate's machine kind while a point prompt is active, and
+ * `null` otherwise. An absent/`null`/unknown kind yields `null`, so the caller
+ * renders nothing extra instead of a placeholder chip or a guessed label.
+ */
+export function snapKindLabelKey(status) {
+  const kind = status?.snapKind;
+  if (typeof kind !== 'string') return null;
+  return SNAP_KIND_LABELS[kind]?.labelKey ?? null;
 }
 
 /** The catalog label for a locale-independent import phase key. */

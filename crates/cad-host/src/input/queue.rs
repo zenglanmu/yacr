@@ -48,7 +48,7 @@ impl HostCore {
     }
 
     /// Clear the pointer life for a stale `Up`/`Cancel` without navigating.
-    fn clear_pointer_life(&self, id: PointerId) {
+    pub(super) fn clear_pointer_life(&self, id: PointerId) {
         let mut active = self.navigation.active.borrow_mut();
         active.retain(|active| active != &id);
         let empty = active.is_empty();

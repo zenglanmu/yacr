@@ -154,9 +154,12 @@ impl Application {
             ));
         }
         // Mirror `select_at_mode`: a drawing/measuring tool owns the pointer, so a
-        // box gesture must not rewrite the selection underneath it.
+        // box gesture must not rewrite the selection underneath it. The gesture is
+        // still a user action: report it with the same stable diagnostic and
+        // `count=0` rather than a silent empty success (ADR 0014 B.8: `0` is a
+        // result and must be shown). The outcome stays side-effect free.
         if !matches!(session.tool, ToolState::Idle | ToolState::Selecting) {
-            return Ok(CommandOutcome::none());
+            return Ok(box_selection_outcome(0, "none"));
         }
 
         let viewport = self
@@ -267,16 +270,23 @@ impl Application {
                 _ => "mixed",
             }
         };
-        Ok(CommandOutcome {
-            objects: Vec::new(),
-            changes: None,
-            diagnostics: vec![Diagnostic {
-                object: None,
-                code: "select.box.count".into(),
-                message: format!("count={count};precision={precision}"),
-            }],
-            measurement: None,
-        })
+        Ok(box_selection_outcome(count, precision))
+    }
+}
+
+/// The single stable box-selection diagnostic (`select.box.count`), shaped so a
+/// refusal and a real result are reported the same way. `count=0` is a result,
+/// never a silent empty success (ADR 0014 B.8).
+fn box_selection_outcome(count: usize, precision: &str) -> CommandOutcome {
+    CommandOutcome {
+        objects: Vec::new(),
+        changes: None,
+        diagnostics: vec![Diagnostic {
+            object: None,
+            code: "select.box.count".into(),
+            message: format!("count={count};precision={precision}"),
+        }],
+        measurement: None,
     }
 }
 

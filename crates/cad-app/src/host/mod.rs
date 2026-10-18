@@ -816,6 +816,23 @@ impl HostController {
         )
     }
 
+    /// The stable machine key of the current best object-snap candidate, or
+    /// `None`.
+    ///
+    /// ADR 0014 A.7: the status projection derives the current candidate kind
+    /// from here. It reuses [`HostController::snap_hints_near_cursor`] — the
+    /// same cached hint resolution the overlay consumes — so reading it per
+    /// frame never walks the drawing a second time. `None` means there is no
+    /// candidate near the active tool's cursor (or no point prompt is active);
+    /// the kind is never fabricated, and a genuine resolution failure is
+    /// propagated rather than swallowed into a silent `None`.
+    pub fn snap_hint_kind(&self) -> CadResult<Option<&'static str>> {
+        Ok(self
+            .snap_hints_near_cursor()?
+            .first()
+            .map(|candidate| candidate.kind.as_str()))
+    }
+
     /// Human-facing unit label of the open document, for the status area.
     ///
     /// Unknown units report the spec's "drawing units" default rather than

@@ -215,6 +215,17 @@ pub struct CadStatus {
     /// the `OSNAP` selector (F3). It is independent of the persisted
     /// `view.overlays.snapHints` preference, which only gates the hint overlay.
     pub snap_enabled: bool,
+    /// The best current object-snap candidate's stable kind string (ADR 0014
+    /// A.7), or `null`.
+    ///
+    /// One of the real `cad_measure::SnapKind` keys (`"endpoint"`,
+    /// `"midpoint"`, `"center"`, `"quadrant"`, `"perpendicular"`,
+    /// `"intersection"`), derived from the same cached hint resolution the snap
+    /// overlay uses. Present only while a point prompt is active and a
+    /// candidate is in tolerance; `null` otherwise (no candidate, no prompt, or
+    /// snapping disabled). A `null` is never a swallowed error: a resolution
+    /// failure leaves this `null` and surfaces through [`CadStatus::error`].
+    pub snap_kind: Option<String>,
     /// Count of verified successful authoritative document transitions caused by
     /// an import. It is **not** a parsed-entity count and must not be read as
     /// proof that no reparse happened.
@@ -243,6 +254,7 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         tool: None,
         hover_preview: false,
         snap_enabled: false,
+        snap_kind: None,
         import_count: 0,
         frame_count: 0,
     }
@@ -292,6 +304,7 @@ pub(super) fn assemble_status(
     tool: Option<CadTool>,
     hover_preview: bool,
     snap_enabled: bool,
+    snap_kind: Option<String>,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -308,6 +321,7 @@ pub(super) fn assemble_status(
         tool,
         hover_preview,
         snap_enabled,
+        snap_kind,
         import_count,
         frame_count,
     }

@@ -3,7 +3,7 @@
 // renders nothing when an older payload omits the field (never a guessed value).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dispatchHoverPreview, dispatchObjectSnap, HOVER_PREVIEW_COMMAND, hoverPreviewToggle, OBJECT_SNAP_COMMAND, objectSnapToggle } from '../src/cad.mjs';
+import { dispatchHoverPreview, dispatchObjectSnap, HOVER_PREVIEW_COMMAND, hoverPreviewToggle, OBJECT_SNAP_COMMAND, objectSnapToggle, snapKindLabelKey } from '../src/cad.mjs';
 import { readAppSource, readCatalog, readModule } from './helpers.mjs';
 
 const zh = await readCatalog('zh-CN');
@@ -105,4 +105,52 @@ test('F3 dispatches OSNAP through the command funnel with preventDefault', async
     source.includes("if (event.key === 'F3') { event.preventDefault(); void submitCommand('OSNAP'); return; }"),
     'F3 must run OSNAP through the same submit path as every other affordance',
   );
+});
+
+test('the current snap candidate kind maps to real catalog labels and never guesses', () => {
+  // Every real `cad_measure::SnapKind` machine key maps to its own label key.
+  const kinds = {
+    endpoint: 'snap.kind.endpoint',
+    midpoint: 'snap.kind.midpoint',
+    center: 'snap.kind.center',
+    quadrant: 'snap.kind.quadrant',
+    perpendicular: 'snap.kind.perpendicular',
+    intersection: 'snap.kind.intersection',
+  };
+  for (const [kind, key] of Object.entries(kinds)) {
+    assert.equal(snapKindLabelKey({ snapKind: kind }), key);
+  }
+  // No candidate (null), an older host (absent field), a non-string or an
+  // unknown kind renders nothing rather than a guessed label.
+  for (const status of [null, undefined, {}, { snapKind: null }, { snapKind: 1 }, { snapKind: 'future_osnap' }]) {
+    assert.equal(snapKindLabelKey(status), null);
+  }
+});
+
+test('the status bar shows the current snap kind next to OSNAP and nothing without one', async () => {
+  const source = await readModule('components/StatusBar.jsx');
+  assert.ok(source.includes('snapKindLabelKey(shell.status)'));
+  // Rendered only when a candidate kind is present: no placeholder chip.
+  assert.ok(source.includes('{snapKindKey ? ('));
+  // The label is localized through the catalog, never a hardcoded string.
+  assert.ok(source.includes('{t(snapKindKey)}'));
+});
+
+test('the snap-kind catalog keys exist in both locales with real copy', () => {
+  const keys = [
+    'snap.kind.endpoint',
+    'snap.kind.midpoint',
+    'snap.kind.center',
+    'snap.kind.quadrant',
+    'snap.kind.perpendicular',
+    'snap.kind.intersection',
+  ];
+  for (const key of keys) {
+    for (const locale of [zh, en]) {
+      assert.equal(typeof locale[key], 'string', `missing ${key}`);
+      assert.ok(locale[key].trim().length > 0, `empty ${key}`);
+    }
+  }
+  assert.match(zh['snap.kind.endpoint'], /端点/);
+  assert.match(en['snap.kind.endpoint'], /endpoint/i);
 });

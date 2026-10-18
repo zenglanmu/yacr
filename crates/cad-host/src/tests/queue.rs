@@ -324,6 +324,71 @@ fn stale_pointer_up_clears_pointer_life_without_navigating() {
 }
 
 #[test]
+fn a_direct_stale_pointer_up_clears_pointer_life() {
+    let core = core();
+    let client: &dyn EngineClient = &core;
+    let revision = client.request_context().metrics_revision.unwrap();
+    // Start a real single-contact gesture that crosses the threshold into a box
+    // gesture, so the pointer/box life is non-trivial.
+    client
+        .dispatch(EngineRequest::Interaction(mouse(
+            1,
+            cad_app::interaction::PointerPhase::Down,
+            [100.0, 100.0],
+            revision,
+        )))
+        .unwrap();
+    client
+        .dispatch(EngineRequest::Interaction(mouse(
+            1,
+            cad_app::interaction::PointerPhase::Move,
+            [200.0, 180.0],
+            revision,
+        )))
+        .unwrap();
+    assert!(
+        core.navigation.box_gesture.borrow().is_some(),
+        "the 2D primary drag starts a box gesture"
+    );
+
+    // A *synchronous* Up tagged with a stale metrics revision errors in
+    // `pointer_logical` before the release phase runs; it must still clear the
+    // pointer life exactly like the queue path's stale handling.
+    let stale = revision.wrapping_sub(1);
+    let error = client
+        .dispatch(EngineRequest::Interaction(InteractionRequest::Pointer {
+            id: PointerId(1),
+            kind: cad_app::interaction::PointerKind::Mouse,
+            phase: cad_app::interaction::PointerPhase::Up,
+            button: Some(PointerButton::Primary),
+            position: PointInput::CanvasLocal {
+                logical_position: [200.0, 180.0],
+                metrics_revision: stale,
+            },
+            modifiers: cad_app::interaction::Modifiers::default(),
+        }))
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            RequestError::Execution(CadError::InvalidInput(ref reason))
+                if reason == "stale canvas metrics revision"
+        ),
+        "a stale pointer Up must be an explicit refusal, got {error:?}"
+    );
+    assert!(
+        core.navigation.active.borrow().is_empty(),
+        "a refused direct Up must not leave the contact active"
+    );
+    assert!(core.navigation.button.get().is_none());
+    assert!(core.navigation.press_modifiers.get().is_none());
+    assert!(
+        core.navigation.box_gesture.borrow().is_none(),
+        "no box state dangles after a refused direct Up"
+    );
+}
+
+#[test]
 fn tick_does_not_implicitly_pump_the_queue() {
     let core = core();
     let client: &dyn EngineClient = &core;

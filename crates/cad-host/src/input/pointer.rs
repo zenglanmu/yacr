@@ -7,11 +7,14 @@ use cad_app::interaction::PointerPhase;
 const BOX_DASH_LOGICAL_PX: f64 = 5.0;
 /// Gap between two dashes of a CROSSING edge, in logical pixels.
 const BOX_GAP_LOGICAL_PX: f64 = 5.0;
-/// Safety cap on the number of world-space segments one rubber band emits.
+/// Upper bound on the number of world-space segments one crossed rubber band
+/// emits.
 ///
-/// A pathological drag across the whole canvas could otherwise ask for unbounded
-/// dashing; the generator stops at this many segments and the overlay batch stays
-/// bounded. It is a guard, not the normal count.
+/// The CROSSING dash/gap step is derived from the rectangle's logical-pixel
+/// perimeter so the count stays within this bound **without** truncating the
+/// geometry (ADR 0014 B.9): a fixed dash pattern used to drop whole trailing
+/// edges on a large window and draw an *open* rectangle. For a perimeter within
+/// the bound the nominal 5 px dash / 5 px gap is preserved.
 const BOX_MAX_SEGMENTS: usize = 512;
 
 impl HostCore {
@@ -138,9 +141,18 @@ impl HostCore {
         }
         // A draw/measure capture owns single-contact gestures: the UI delivers
         // those as MoveCursor / CapturePoint, so the pointer path never pans and
-        // never starts a box selection.
+        // never starts a box selection. A capture that becomes active *mid* box
+        // drag must also end the live gesture: otherwise its frozen band keeps
+        // drawing and the eventual release dispatches a `SelectInBox` the tool
+        // layer refuses, with no visible result (ADR 0014 B.6).
         if self.capturing() {
+            self.clear_box_gesture();
             return Ok(());
+        }
+        // A typed `ToolState::Panning` modal pan also owns the pointer (ADR 0014
+        // B.2): a 2D primary drag must neither start a box nor keep a stale one.
+        if self.pan_modal_active() {
+            self.clear_box_gesture();
         }
         // An active box gesture owns the single contact: track the live
         // rectangle. The camera must not move and no pan is emitted.
@@ -161,8 +173,12 @@ impl HostCore {
             nav.last.set(Some(anchor));
             // The single winner for this gesture (ADR 0014 B.2): a 2D
             // primary-button drag is a box selection, not a pan. A capture
-            // (handled above) and 3D keep their own behaviour.
-            if pressed == Some(PointerButton::Primary) && !self.mode_is_3d() {
+            // (handled above), a typed modal pan and 3D keep their own
+            // behaviour.
+            if pressed == Some(PointerButton::Primary)
+                && !self.mode_is_3d()
+                && !self.pan_modal_active()
+            {
                 self.begin_box_gesture(anchor, point);
                 return Ok(());
             }
@@ -199,6 +215,14 @@ impl HostCore {
             self.clear_box_gesture();
             self.navigation.anchor.set(None);
             self.navigation.nav_last.set(Some(point));
+            // The stored button/modifiers belong to the single-contact gesture
+            // whose contact has now left; a surviving contact must not inherit
+            // them (the UI reports no button change on a move), so a 2D
+            // primary-drag arbitration or a Shift merge can never leak from a
+            // released contact. A later single contact re-records them on its
+            // own press.
+            self.navigation.button.set(None);
+            self.navigation.press_modifiers.set(None);
             return Ok(());
         }
         let was_navigating = self.navigation.navigating.replace(false);
@@ -242,6 +266,11 @@ impl HostCore {
             // An OS/browser pointer cancel must not leave an open tool behind.
             self.controller.borrow_mut().cancel_tool()?;
             self.full_dirty.set(true);
+        } else {
+            // A surviving contact must not inherit the cancelled contact's
+            // button/modifiers (see `pointer_up`).
+            self.navigation.button.set(None);
+            self.navigation.press_modifiers.set(None);
         }
         Ok(())
     }
@@ -273,7 +302,7 @@ impl HostCore {
     }
 
     /// Drop an active box gesture (and therefore its preview input).
-    fn clear_box_gesture(&self) {
+    pub(super) fn clear_box_gesture(&self) {
         *self.navigation.box_gesture.borrow_mut() = None;
     }
 
@@ -288,13 +317,22 @@ impl HostCore {
     fn finish_box_gesture(&self, gesture: BoxGesture, modifiers: Modifiers) -> CadResult<()> {
         let rect_logical = [gesture.anchor, gesture.current];
         if !rect_logical.iter().flatten().all(|value| value.is_finite()) {
+            // ADR 0014 B.6: the command API refuses a non-finite rectangle with
+            // `InvalidInput`. The GUI keeps its behaviour (a non-finite drag is
+            // not a selection, so nothing is dispatched) but the refusal is
+            // surfaced rather than silently dropped.
+            let _ = self.set_external_status("box selection refused: non-finite rectangle");
             return Ok(());
         }
         let width = (gesture.current[0] - gesture.anchor[0]).abs();
         let height = (gesture.current[1] - gesture.anchor[1]).abs();
         if width <= 0.0 || height <= 0.0 {
             // A perfectly axis-aligned drag has no area to select; never dispatch
-            // a degenerate rectangle.
+            // a degenerate rectangle. ADR 0014 B.6: the same rectangle is
+            // `InvalidInput` at the command layer, so the host surfaces that
+            // refusal through its normal status channel instead of dropping it
+            // silently.
+            let _ = self.set_external_status("box selection refused: degenerate rectangle");
             return Ok(());
         }
         let crossing = gesture.current[0] < gesture.anchor[0];
@@ -319,9 +357,11 @@ impl HostCore {
     /// the viewport's own `screen_to_world` (the same mapping measurement picks
     /// use — never a hand-rolled second projection). A WINDOW rectangle emits its
     /// four solid edges; a CROSSING rectangle dashes them in **logical-pixel**
-    /// screen space (dash 5 px, gap 5 px) and converts each dash's endpoints, so
-    /// the dash length stays uniform on screen regardless of zoom. The total
-    /// segment count is capped at [`BOX_MAX_SEGMENTS`].
+    /// screen space (nominal 5 px dash, 5 px gap) and converts each dash's
+    /// endpoints, so the dash length stays uniform on screen regardless of zoom.
+    /// For a perimeter large enough to exceed [`BOX_MAX_SEGMENTS`] the step grows
+    /// uniformly, the final dash of each edge reaches its corner, and the count
+    /// stays bounded — the rectangle is always closed, never truncated.
     pub(crate) fn box_selection_preview(&self) -> Option<BoxSelectionPreview> {
         let gesture = *self.navigation.box_gesture.borrow();
         let gesture = gesture?;
@@ -338,10 +378,33 @@ impl HostCore {
         ];
         let crossing = current[0] < anchor[0];
         let mut segments: Vec<[Point3; 2]> = Vec::new();
+        // The CROSSING dash/gap step is derived from the rectangle's
+        // logical-pixel perimeter: the nominal 5 px dash / 5 px gap while the
+        // perimeter fits the segment bound, growing uniformly beyond it so the
+        // dashed perimeter is always fully covered and the count stays bounded
+        // (ADR 0014 B.9). A fixed pattern truncated whole trailing edges on a
+        // large window and drew an *open* rectangle.
+        let step = if crossing {
+            let perimeter: f64 = (0..4)
+                .map(|index| {
+                    let start = corners[index];
+                    let end = corners[(index + 1) % 4];
+                    let dx = end[0] - start[0];
+                    let dy = end[1] - start[1];
+                    (dx * dx + dy * dy).sqrt()
+                })
+                .filter(|length| length.is_finite())
+                .sum();
+            // Reserve room for the (at most) four edge-closing dashes so the
+            // total never exceeds the cap. A non-finite perimeter yields an
+            // infinite step, which degrades each edge to one solid segment
+            // rather than looping.
+            let cap = BOX_MAX_SEGMENTS.saturating_sub(8).max(1) as f64;
+            (perimeter / cap).max(BOX_DASH_LOGICAL_PX + BOX_GAP_LOGICAL_PX)
+        } else {
+            0.0
+        };
         for index in 0..4 {
-            if segments.len() >= BOX_MAX_SEGMENTS {
-                break;
-            }
             let start = corners[index];
             let end = corners[(index + 1) % 4];
             if crossing {
@@ -352,10 +415,17 @@ impl HostCore {
                     continue;
                 }
                 let (ux, uy) = (dx / length, dy / length);
-                let step = BOX_DASH_LOGICAL_PX + BOX_GAP_LOGICAL_PX;
+                let dash = step / 2.0;
                 let mut travelled = 0.0;
-                while travelled < length && segments.len() < BOX_MAX_SEGMENTS {
-                    let dash_end = (travelled + BOX_DASH_LOGICAL_PX).min(length);
+                while travelled < length {
+                    // The final dash absorbs the trailing gap so the edge always
+                    // reaches its corner: the rectangle is never drawn open and
+                    // the last segment returns to the start point.
+                    let dash_end = if length - travelled <= step {
+                        length
+                    } else {
+                        travelled + dash
+                    };
                     let from = [start[0] + ux * travelled, start[1] + uy * travelled];
                     let to = [start[0] + ux * dash_end, start[1] + uy * dash_end];
                     if let (Some(world_from), Some(world_to)) = (
@@ -381,6 +451,16 @@ impl HostCore {
             &self.controller.borrow().session.tool,
             ToolState::Drawing(_) | ToolState::Measuring(_)
         )
+    }
+
+    /// Whether a typed `ToolState::Panning` modal pan currently owns the pointer.
+    ///
+    /// `BeginPan` replaces any capture with a modal pan (`cad_app`'s
+    /// `begin_pan`); that pan owns the pointer, so a 2D primary drag must fall
+    /// through to pan navigation rather than start a box selection (ADR 0014
+    /// B.2).
+    fn pan_modal_active(&self) -> bool {
+        matches!(self.controller.borrow().session.tool, ToolState::Panning)
     }
 
     /// Whether the active view is in 3D navigation mode.

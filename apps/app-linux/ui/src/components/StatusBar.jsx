@@ -5,7 +5,7 @@ import React from 'react';
 import { Icon } from '../icons.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { commandById, toolLabelKey } from '../commands.mjs';
-import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle } from '../cad.mjs';
+import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle, snapKindLabelKey } from '../cad.mjs';
 
 // The drafting aids this build still has only as placeholders. OSNAP is a real
 // toggle (ADR 0014 A.4) and is rendered separately below.
@@ -45,6 +45,10 @@ export function StatusBar() {
   // never a local mirror (ADR 0014 A.4). An older payload without the field renders
   // no chip at all, exactly like the hover-preview chip above.
   const objectSnap = objectSnapToggle(shell.status, shell.canCommand('OSNAP'));
+  // The current object-snap candidate kind (ADR 0014 A.7) is real host state
+  // (`status.snapKind`). Without a candidate the key is null, so nothing extra
+  // is rendered — never a placeholder chip.
+  const snapKindKey = snapKindLabelKey(shell.status);
   // Announce only the phase here (rare changes); the steadily-incrementing
   // count/bytes stay in the document-tab bar, so a polite live region never
   // chatters on every tick.
@@ -99,6 +103,11 @@ export function StatusBar() {
             title={`${t('status.toggle.osnap')} (F3)`}
             onClick={() => dispatchObjectSnap(shell.runCommand)}
           />
+        ) : null}
+        {snapKindKey ? (
+          <span className="statusbar__snap-kind" title={t('overlay.snap_hints')}>
+            {t(snapKindKey)}
+          </span>
         ) : null}
         {hoverPreview ? (
           <Toggle

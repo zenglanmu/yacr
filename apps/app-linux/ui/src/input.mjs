@@ -2,6 +2,14 @@
 // never across a discrete gesture boundary. Capacity reserves terminal events.
 import { isReportableRect, metricsKey, pointerPosition, rectFromElement } from './metrics.mjs';
 
+// Upper bound (ms) on how long a coalesced `pointermove` may wait for the
+// animation frame. `requestAnimationFrame` is throttled or suspended in an
+// occluded/unfocused webview — exactly the last evidence runs — so relying on
+// the frame alone can buffer a move forever (until a press/release/leave forces
+// a flush). A short timer guarantees delivery within this bound while the rAF
+// path stays the preferred flush.
+const MOVE_FLUSH_FALLBACK_MS = 8;
+
 export function createInputLane(send, onError, capacity = 64) {
   const queue = [];
   let busy = false;
@@ -64,6 +72,7 @@ export function bindProbeInput(element, lane, env = window) {
   let active = null;
   let move = null;
   let frame = null;
+  let timer = null;
   let resizeFrame = null;
   let accepting = true;
   // `button` is the DOM `MouseEvent.button` (0 primary / 1 middle / 2 secondary).
@@ -79,6 +88,8 @@ export function bindProbeInput(element, lane, env = window) {
   const flush = () => {
     if (frame !== null) env.cancelAnimationFrame(frame);
     frame = null;
+    if (timer !== null) env.clearTimeout(timer);
+    timer = null;
     if (move) lane.push(move);
     move = null;
   };
@@ -103,7 +114,13 @@ export function bindProbeInput(element, lane, env = window) {
     if (!accepting || (active !== null && event.pointerId !== active)) return;
     resize();
     move = { kind: 'pointer_move', ...position(event) };
+    // Preferred flush: one coalescing frame for the whole move burst. The timer
+    // is scheduled exactly once per dirty buffer (both handles are cleared by
+    // `flush`), so at most one pending flush exists; whichever fires first wins
+    // and cancels the other, giving exactly-once, latest-wins delivery even
+    // when `requestAnimationFrame` never ticks.
     if (frame === null) frame = env.requestAnimationFrame(() => { frame = null; flush(); });
+    if (timer === null) timer = env.setTimeout(flush, MOVE_FLUSH_FALLBACK_MS);
   };
   const up = event => {
     if (event.pointerId !== active) return;

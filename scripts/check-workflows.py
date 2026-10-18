@@ -58,6 +58,7 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "cargo clippy",
         "check-architecture.py",
         "check-fixture-manifest.py",
+        "check-file-size.py",
         "cargo check --workspace --all-targets --locked",
         # core-quality also compiles app-linux (clippy + workspace check), so it
         # needs the same Tauri/GTK prerequisites and the frontend dist — and it

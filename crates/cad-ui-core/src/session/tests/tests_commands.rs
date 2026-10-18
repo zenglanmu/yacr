@@ -114,7 +114,7 @@ fn command_normalization_covers_every_variant() {
         assert_eq!(normalize_command(name), Some(*id), "{name}");
         assert_eq!(canonical_command_name(name), Some(*name), "{name}");
     }
-    for rejected in ["", "BOGUS", "open fit", "OPENX"] {
+    for rejected in ["", "BOGUS", "open fit", "OPENX", "SNAP"] {
         assert_eq!(normalize_command(rejected), None, "{rejected:?}");
         assert_eq!(canonical_command_name(rejected), None, "{rejected:?}");
     }
@@ -271,6 +271,7 @@ fn blank_status_reports_no_document_capabilities() {
         None,
         false,
         false,
+        None,
     );
     assert_eq!(status.document_label, None);
     assert_eq!(status.entity_count, None);
@@ -312,6 +313,7 @@ fn document_status_reports_counts_and_camera() {
         None,
         true,
         true,
+        None,
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
     assert_eq!(status.entity_count, Some(3));
@@ -341,11 +343,21 @@ fn object_snap_selector_toggles_the_projected_session_flag_only() {
         "object snapping defaults on and is projected"
     );
 
-    // The canonical selector and its alias both flip the session flag.
+    // The canonical selector flips the session flag. `SNAP` is AutoCAD's grid
+    // snap (F9), a different feature this build does not implement, so it must
+    // NOT be admitted as an object-snap selector.
+    assert_eq!(normalize_command("SNAP"), None);
+    assert_eq!(canonical_command_name("SNAP"), None);
     session.command("OSNAP").expect("OSNAP is admitted");
     assert!(!session.snapshot(None, None, 0).snap_enabled);
-    session.command("snap").expect("the SNAP alias is admitted");
-    assert!(session.snapshot(None, None, 0).snap_enabled);
+    assert!(
+        session.command("snap").is_err(),
+        "SNAP must not be accepted as an object-snap selector"
+    );
+    assert!(
+        !session.snapshot(None, None, 0).snap_enabled,
+        "a refused SNAP must leave the object-snap flag unchanged"
+    );
 
     // Session state only: no database revision, no undo entry.
     let after = session.core.controller.borrow().drawing().unwrap();

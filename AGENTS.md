@@ -107,10 +107,15 @@ python3 scripts/check-architecture.py
 python3 scripts/check-fixture-manifest.py
 python3 scripts/check-workflows.py
 python3 scripts/check-i18n.py
+python3 scripts/check-file-size.py   # 代码文件 ≤1000 行（.rs/.js/.jsx/.mjs/.cjs/.ts/.tsx/.py；文档不计入）
 cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 workspace，含 UI/宿主
 (cd apps/app-linux/ui && npm ci && npm test && npm run build)
 ```
+
+**代码文件行数上限**：任何**代码**文件不得超过 **1000 行**（`scripts/check-file-size.py`，含
+`scripts/test-check-file-size.py` 自测）。`.md` **不计入**（`docs/handoff.md` 等按设计就是长日志/清单）。
+文件接近上限时按模块拆分，**不要**加白名单豁免。
 
 默认 Linux host workspace 编译包含 `app-android` 与 `app-web` 包的 host target；这不替代
 下方独立的 WASM 与 Android 原生目标编译门禁，也不代表这些平台的运行验收。clippy 仍按

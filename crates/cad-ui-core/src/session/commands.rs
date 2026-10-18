@@ -60,6 +60,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
 
 /// Full-word command synonyms, always accepted, that map onto a canonical
 /// [`COMMAND_TABLE`] selector.
+///
+/// `SNAP` is deliberately absent: AutoCAD's `SNAP` is **grid snap** (F9), which
+/// this project does not implement and which is a different feature from the
+/// object snap (`OSNAP`) selector. Aliasing it onto `ToggleSnap` would silently
+/// turn a request for grid snap into an object-snap toggle.
 pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("EXPORT", "PLOT"),
     ("PRINT", "PLOT"),
@@ -67,7 +72,6 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("QSAVE", "SAVE"),
     ("ZOOM EXTENTS", "FIT"),
     ("ENTER", "CONFIRM"),
-    ("SNAP", "OSNAP"),
 ];
 
 /// The canonical, stable uppercase selector a command name resolves to, or

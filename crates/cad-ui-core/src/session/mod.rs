@@ -412,10 +412,19 @@ impl CadSession {
         } else {
             frame_count
         };
+        // The current best snap candidate kind (ADR 0014 A.7) reuses the cached
+        // hint resolution the snap overlay consumes, so a per-frame status read
+        // never walks the drawing a second time. A resolution failure is never a
+        // silent "no candidate": the field stays `null` and the technical reason
+        // is folded into `error`, exactly like the other host diagnostics.
+        let (snap_kind, snap_error) = match self.core.controller.borrow().snap_hint_kind() {
+            Ok(kind) => (kind.map(str::to_string), None),
+            Err(error) => (None, Some(cad_error_text(&error))),
+        };
         // Technical error sources, in priority order: a host status failure
         // (command/open/resource-install), a projected partial-resource report,
-        // the last recorded operation/completion failure, then the render
-        // session's own diagnostic.
+        // the last recorded operation/completion failure, the render session's
+        // own diagnostic, then a snap-resolution failure.
         let error = self
             .core
             .last_status()
@@ -423,7 +432,8 @@ impl CadSession {
             .and_then(status_error)
             .or_else(|| self.resource_error.borrow().clone())
             .or_else(|| self.error.borrow().clone())
-            .or_else(|| self.core.render.view_diagnostic());
+            .or_else(|| self.core.render.view_diagnostic())
+            .or(snap_error);
         let mut status = assemble_status(
             has_document,
             label,
@@ -440,6 +450,7 @@ impl CadSession {
             cad_tool(&self.core.tool_snapshot()),
             self.core.controller.borrow().hover_preview_enabled(),
             self.core.controller.borrow().snap_enabled(),
+            snap_kind,
         );
         // Real live open progress (running only) from the host snapshot, so the
         // chrome can show a determinate/indeterminate bar without inventing data.

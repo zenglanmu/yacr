@@ -427,7 +427,7 @@ fn opaque_geometry_is_refused_by_preflight_without_changing_selection() {
 }
 
 #[test]
-fn active_non_selecting_tool_leaves_the_selection_untouched() {
+fn active_non_selecting_tool_refuses_visibly_with_a_zero_count() {
     let (mut app, mut session) = fixture(AppMode::Work);
     session.selection = SelectionSet::from_refs([reference(OUTSIDE)]);
     session.begin_draw(cad_app::DrawToolKind::Line).unwrap();
@@ -444,6 +444,136 @@ fn active_non_selecting_tool_leaves_the_selection_untouched() {
         .unwrap();
     assert_eq!(session.selection, before);
     assert!(matches!(session.tool, ToolState::Drawing(_)));
-    assert!(outcome.diagnostics.is_empty());
+    // The refusal must be visible, not a silent empty success: the same stable
+    // diagnostic with `count=0` (ADR 0014 B.8).
+    assert_eq!(count(&outcome), 0);
+    assert_eq!(precision(&outcome), "none");
     assert!(outcome.changes.is_none());
+    assert!(outcome.objects.is_empty());
+}
+
+/// A one-entity document whose only geometry is `geometry`, on a visible layer,
+/// under the default plan camera. Keeps the reported `precision` unambiguous
+/// (a single class, never `mixed`).
+fn single_geometry_fixture(geometry: SemanticGeometry) -> (Application, SessionState) {
+    const ONLY: EntityId = EntityId(7);
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(entity(ONLY, LayerId(0), geometry))
+        .unwrap();
+
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DOC,
+        Document {
+            id: DOC,
+            drawing: Arc::new(builder.finish().unwrap()),
+            identity: DocumentIdentity::Temporary(3),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace
+        .viewports
+        .insert(VIEWPORT, Viewport::new(VIEWPORT, DOC, [800.0, 600.0]));
+    (app, SessionState::new(DOC, AppMode::Work))
+}
+
+/// Run one CROSSING box over `geometry` and return the reported precision.
+fn crossing_precision(geometry: SemanticGeometry) -> String {
+    let (mut app, mut session) = single_geometry_fixture(geometry);
+    let outcome = app
+        .execute(
+            &mut session,
+            box_command(
+                logical_rect((0.0, 0.0), (10.0, 10.0)),
+                true,
+                SelectionMode::Replace,
+            ),
+        )
+        .unwrap();
+    assert_eq!(count(&outcome), 1, "the geometry intersects the rectangle");
+    precision(&outcome)
+}
+
+#[test]
+fn crossing_a_straight_segment_is_reported_exact() {
+    // A straight segment has an exact rectangle clip: never approximate.
+    assert_eq!(
+        crossing_precision(line((5.0, 5.0), (15.0, 5.0))),
+        "exact",
+        "a straight segment crossing must be reported exact"
+    );
+}
+
+#[test]
+fn crossing_a_circle_or_arc_is_reported_approximate() {
+    let circle = SemanticGeometry::Circle {
+        center: point(5.0, 5.0),
+        normal: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+        radius: 2.0,
+    };
+    assert_eq!(
+        crossing_precision(circle),
+        "approximate",
+        "a chord-tessellated circle crossing must be reported approximate"
+    );
+
+    let arc = SemanticGeometry::Arc {
+        center: point(5.0, 5.0),
+        normal: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+        radius: 2.0,
+        start: 0.0,
+        sweep: std::f64::consts::PI,
+    };
+    assert_eq!(
+        crossing_precision(arc),
+        "approximate",
+        "a chord-tessellated arc crossing must be reported approximate"
+    );
+}
+
+#[test]
+fn crossing_a_bulge_polyline_or_spline_falls_back_to_aabb() {
+    // A bulge segment is a circular arc, not its chord, and no public
+    // segment-wise bulge tessellator is reachable here: the conservative AABB is
+    // used and must be reported as such, never as exact/approximate.
+    let bulged = SemanticGeometry::Polyline {
+        points: vec![point(5.0, 0.0), point(5.0, 10.0)],
+        bulges: vec![1.0],
+        closed: false,
+    };
+    assert_eq!(
+        crossing_precision(bulged),
+        "aabb",
+        "a bulge polyline crossing must be reported aabb"
+    );
+
+    // Splines likewise have no rectangle tessellator reachable here.
+    let spline = SemanticGeometry::Spline {
+        degree: 2,
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        control_points: vec![point(2.0, 2.0), point(5.0, 8.0), point(8.0, 2.0)],
+        weights: vec![1.0, 1.0, 1.0],
+    };
+    assert_eq!(
+        crossing_precision(spline),
+        "aabb",
+        "a spline crossing must be reported aabb"
+    );
 }

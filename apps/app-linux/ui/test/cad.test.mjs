@@ -17,7 +17,7 @@ test('status validates explicit empty document and rejects unknown or malformed 
   assert.equal(parseCadStatus(empty), empty);
   assert.equal(parseCadStatus(loaded), loaded);
   assert.equal(parseCadStatus(importing), importing);
-  for (const value of [null, {}, [], 'unknown', { ...empty, entityCount: undefined }, { ...empty, loading: 'false' }, { ...empty, camera: { center: [0], scale: 1 } }, { ...empty, camera: { center: [0, 0], scale: 0 } }, { ...empty, frameCount: -1 }, { ...empty, snapEnabled: 'true' }, { ...empty, snapEnabled: 1 }, { ...empty, hoverPreview: 'true' }]) {
+  for (const value of [null, {}, [], 'unknown', { ...empty, entityCount: undefined }, { ...empty, loading: 'false' }, { ...empty, camera: { center: [0], scale: 1 } }, { ...empty, camera: { center: [0, 0], scale: 0 } }, { ...empty, frameCount: -1 }, { ...empty, snapEnabled: 'true' }, { ...empty, snapEnabled: 1 }, { ...empty, hoverPreview: 'true' }, { ...empty, snapKind: 1 }, { ...empty, snapKind: {} }]) {
     assert.throws(() => parseCadStatus(value), /CAD_STATUS_INVALID/);
   }
   // The optional object-snap flag is accepted when it is a real boolean and
@@ -25,6 +25,11 @@ test('status validates explicit empty document and rejects unknown or malformed 
   const snapOff = { ...empty, snapEnabled: false };
   assert.equal(parseCadStatus(snapOff), snapOff);
   assert.equal(parseCadStatus(empty), empty);
+  // The optional current snap kind is accepted as a real string or `null`.
+  const snapKind = { ...empty, snapKind: 'endpoint' };
+  assert.equal(parseCadStatus(snapKind), snapKind);
+  const snapKindNull = { ...empty, snapKind: null };
+  assert.equal(parseCadStatus(snapKindNull), snapKindNull);
 });
 
 test('import progress is validated and never rendered from a malformed block', () => {

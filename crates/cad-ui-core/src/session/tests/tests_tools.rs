@@ -79,6 +79,46 @@ fn cancel_clears_the_started_tool() {
 }
 
 #[test]
+fn status_projects_the_best_snap_candidate_kind_or_none() {
+    let session = fresh_session();
+    // Idle: no point prompt, so no candidate kind is projected, never a
+    // placeholder.
+    assert_eq!(session.snapshot(None, None, 0).snap_kind, None);
+
+    session.command("LINE").expect("LINE is admitted");
+    // A live draw prompt with no cursor yet: still no candidate.
+    assert_eq!(session.snapshot(None, None, 0).snap_kind, None);
+
+    // The demo circle's 0° rim is a real quadrant candidate; the projection
+    // reports the same best-candidate kind the snap overlay resolves.
+    let rim = demo_circle_rim(&session);
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .move_tool_cursor(rim)
+        .expect("the cursor move is admitted");
+    assert_eq!(
+        session.snapshot(None, None, 0).snap_kind.as_deref(),
+        Some("quadrant")
+    );
+
+    // Far from any geometry the honest `None` is reported, never a fabricated
+    // kind.
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .move_tool_cursor(Point3 {
+            x: 1_000_000.0,
+            y: 1_000_000.0,
+            z: 0.0,
+        })
+        .expect("a far cursor move is admitted");
+    assert_eq!(session.snapshot(None, None, 0).snap_kind, None);
+}
+
+#[test]
 fn a_second_cancel_stays_idle_safe() {
     // Idle-safety only: the host-cancel forwarding of this selector is not
     // observable from this harness (no live import exists here).

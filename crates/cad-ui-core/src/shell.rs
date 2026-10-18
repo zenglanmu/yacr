@@ -236,6 +236,7 @@ mod tests {
             tool: None,
             hover_preview: false,
             snap_enabled: false,
+            snap_kind: None,
             import_count: 0,
             frame_count: 0,
         }

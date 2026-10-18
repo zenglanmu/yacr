@@ -84,9 +84,12 @@ jobs:
         run: python3 scripts/check-architecture.py
       - name: Fixture manifest
         run: python3 scripts/check-fixture-manifest.py
+      - name: Code file size (tracked code files must stay under the line ceiling)
+        run: python3 scripts/check-file-size.py
       - name: Workflow, packaging and migration contracts
         run: |
           python3 scripts/check-workflows.py
+          python3 scripts/test-check-file-size.py
           python3 scripts/test-linux-workflow.py
           python3 scripts/test-web-deploy-workflow.py
           python3 scripts/test-package-linux-release.py

@@ -1,5 +1,6 @@
 //! Interaction request dispatch and coordinate conversion.
 use super::*;
+use cad_app::interaction::PointerPhase;
 
 /// Which derived shell state one interaction invalidates.
 ///
@@ -66,6 +67,10 @@ impl HostCore {
         let outcome = match request {
             InteractionRequest::BeginDraw(kind) => {
                 self.controller.borrow_mut().begin_draw_tool(kind)?;
+                // A capture owns the pointer: any live box gesture ends with it,
+                // so no frozen band survives and no refused `SelectInBox` is
+                // dispatched on release (ADR 0014 B.6).
+                self.clear_box_gesture();
                 self.clear_hover();
                 InteractionOutcome::ToolStarted
             }
@@ -74,6 +79,7 @@ impl HostCore {
                     .borrow_mut()
                     .session
                     .begin_measurement(kind)?;
+                self.clear_box_gesture();
                 self.clear_hover();
                 InteractionOutcome::ToolStarted
             }
@@ -86,6 +92,8 @@ impl HostCore {
             }
             InteractionRequest::BeginPan => {
                 self.controller.borrow_mut().session.begin_pan();
+                // A modal pan owns the pointer: end any live box gesture.
+                self.clear_box_gesture();
                 self.clear_hover();
                 InteractionOutcome::PanStarted
             }
@@ -178,7 +186,16 @@ impl HostCore {
                 modifiers,
                 ..
             } => {
-                self.pointer(id, phase, button, position, modifiers)?;
+                if let Err(error) = self.pointer(id, phase, button, position, modifiers) {
+                    // A stale/invalid coordinate refuses the request before its
+                    // phase runs; a refusal of an `Up`/`Cancel` must still clear
+                    // the pointer life, exactly as the queue path's stale
+                    // handling does, so no `active`/`button`/box state dangles.
+                    if matches!(phase, PointerPhase::Up | PointerPhase::Cancel) {
+                        self.clear_pointer_life(id);
+                    }
+                    return Err(error);
+                }
                 InteractionOutcome::PointerObserved
             }
             InteractionRequest::Scroll {

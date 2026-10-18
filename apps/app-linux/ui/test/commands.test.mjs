@@ -21,7 +21,9 @@ import { RIBBON_TABS, ribbonCommandIds, ribbonTab } from '../src/ribbon-model.mj
 
 // Mirrors `cad_ui_core::session::admissible_names()` (canonical selectors plus
 // aliases) closely enough for admission tests. NEW/SAVE/PLOT are present because
-// the **router** accepts them; the chrome excludes them explicitly.
+// the **router** accepts them; the chrome excludes them explicitly. `SNAP` is
+// **absent** because the router refuses it (AutoCAD's `SNAP` is grid snap, a
+// different feature); `OSNAP` is the object-snap toggle the router does accept.
 const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
@@ -29,7 +31,7 @@ const HOST_NAMES = [
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'MOVE', 'TRIM',
   'EXTEND', 'ERASE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   'OFFSET', 'SETACTIVELAYER', 'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER',
-  'HOVERPREVIEW', 'OSNAP', 'SNAP',
+  'HOVERPREVIEW', 'OSNAP',
 ];
 setCommandCatalog(HOST_NAMES);
 
@@ -51,9 +53,11 @@ test('admission is the loaded host catalog: empty before load, exclusions stay e
   assert.equal(isSupportedCommand('MOVE'), true);
   assert.equal(isSupportedCommand('UNDO'), true);
   assert.equal(isSupportedCommand('CONFIRM'), true);
-  // The object-snap selector and its alias are part of the host vocabulary.
+  // The object-snap toggle is part of the host vocabulary, but grid snap is not:
+  // the router refuses `SNAP` (a different feature from object snap), so the
+  // grid-snap affordance stays visible yet disabled.
   assert.equal(isSupportedCommand('OSNAP'), true);
-  assert.equal(isSupportedCommand('snap'), true);
+  assert.equal(isSupportedCommand('snap'), false);
   // Host-owned names the React host cannot service are excluded explicitly.
   assert.deepEqual(excludedCommandNames(), ['NEW', 'SAVE', 'SAVEAS', 'QSAVE', 'PLOT', 'EXPORT', 'PRINT']);
   assert.deepEqual([...HOST_EXCLUDED_COMMANDS], ['NEW', 'SAVE', 'SAVEAS', 'QSAVE', 'PLOT', 'EXPORT', 'PRINT']);
@@ -65,6 +69,38 @@ test('admission is the loaded host catalog: empty before load, exclusions stay e
   // The setter normalizes and dedupes; then restore the canonical list.
   assert.deepEqual(setCommandCatalog(['line', 'LINE', ' circle ', '']), ['LINE', 'CIRCLE']);
   setCommandCatalog(HOST_NAMES);
+});
+
+test('the grid-snap affordance stays visible but router-disabled, and OSNAP stays reachable', async () => {
+  const { readModule } = await import('./helpers.mjs');
+  // The View tab's display panel keeps GRID/SNAP/ORTHO on screen. Grid snap is
+  // not in the router vocabulary, so `SNAP` must stay present yet disabled —
+  // never silently deleted and never re-pointed at the object-snap toggle.
+  const view = RIBBON_TABS.find(tab => tab.id === 'view');
+  const display = view.panels.find(panel => panel.id === 'display');
+  assert.ok(display, 'the View tab must keep its display panel');
+  assert.deepEqual(display.items.map(item => item.id), ['GRID', 'SNAP', 'ORTHO']);
+  const snap = display.items.find(item => item.id === 'SNAP');
+  assert.equal(snap.command, 'SNAP');
+  assert.equal(snap.labelKey, 'status.toggle.snap');
+  // Router admission is the disable mechanism: grid snap and the other unwired
+  // aids are refused, while the object-snap selector (a real toggle) is admitted.
+  for (const id of ['GRID', 'SNAP', 'ORTHO']) {
+    assert.equal(admitCommandText(id, { status: loaded }).kind, 'unsupported', id);
+  }
+  assert.equal(admitCommandText('OSNAP', { status: loaded }).kind, 'admitted');
+  // Autocomplete keeps the same split: `SNAP` shows unsupported, `OSNAP` supported.
+  const typedSnap = filterCommandSuggestions('SNAP');
+  assert.equal(typedSnap.find(suggestion => suggestion.id === 'SNAP').supported, false);
+  assert.equal(typedSnap.find(suggestion => suggestion.id === 'OSNAP').supported, true);
+  // The ribbon renderer disables every command item the router does not admit
+  // (the same gate GRID/ORTHO use), so the SNAP button is present but disabled.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(
+    ribbon.includes('const enabled = item.action ? true : item.command ? shell.canCommand(item.command) : false;'),
+    'a command ribbon item must be enabled only through router admission (`canCommand`)',
+  );
+  assert.ok(ribbon.includes('disabled hint={unavailable(t, item)}'), 'an unadmitted item renders disabled with the unsupported hint');
 });
 
 test('autocomplete prefers prefix matches, then usage, then alphabetical', () => {

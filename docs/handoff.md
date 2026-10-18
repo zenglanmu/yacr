@@ -21,17 +21,20 @@ metrics 竞态修复）、`crates/cad-ui-core`（`OSNAP` 选择子、`snapEnable
 
 - **手势仲裁（ADR-0014 决策 B，行为变更）**：**2D 左键拖拽（≥ `DRAG_THRESHOLD_LOGICAL_PX=4`）= 框选**，
   左→右 WINDOW / 右→左 CROSSING；`Shift`=Add、否则 Replace；**中键拖拽=平移**（2D/3D）；3D 左键仍轨道旋转；
-  阈值以下仍是单点 pick；捕获（Drawing/Measuring）期间不框选；Secondary/Back/Forward 行为**未改**（仍平移）。
+  阈值以下仍是单点 pick；捕获（Drawing/Measuring）期间不框选；Secondary 之外的非主键（Back/Forward）**在
+  协议层就被拒**（`crates/cad-ui-core/src/session/input.rs`），现状只有 Secondary 拖拽仍平移。
 - **橡皮筋**：宿主把两个逻辑角点经既有 `screen_to_world` 投到工作面，作为**瞬态 renderer overlay 输入**
   `OverlayInputs::selection_box: Option<BoxSelectionPreview { segments, crossing }>`（`BOX_SELECT_DRAW_ORDER
   = 1_750_000`，介于 SNAP_HINT 与 PREVIEW 之间；WINDOW 蓝实线 / CROSSING 绿虚线 screen-space 5px、
   总段数 ≤512）。**不是 DOM overlay**（CAD 面是 GTK 最上层子窗口）。只重建 overlay，不进数据库/ChangeSet/历史。
 - **提交**：抬起时经正常命令通路口派发 `SelectInBox` + `CommandPayload::BoxSelect { rect_logical, crossing,
   mode }`；失败显式上报，不吞成空成功。
-- **OSNAP/F3**：`CommandId::ToggleSnap`、选择子 `OSNAP`（`COMMAND_TABLE` 46→47）、别名 `SNAP`、
+- **OSNAP/F3**：`CommandId::ToggleSnap`、选择子 `OSNAP`（`COMMAND_TABLE` 46→47）、
   `CadStatus.snapEnabled`、状态栏 OSNAP 由禁用占位改为真实开关、**F3** 经正常命令通路派发；只切会话级
   `snap_enabled`，**不写**持久化 viewer config，无 ChangeSet/revision/历史。协议新增**可选** `shift`
   （缺省/null=false；非布尔拒绝，不强制转换），只供指针请求用。
+  **刻意不提供 `SNAP` 别名**（AutoCAD `SNAP`=栅格捕捉 F9，与本项目对象捕捉是两件事；曾短暂别名到 `OSNAP`，
+  会把"栅格捕捉"按钮接到对象捕捉上，已移除；`SNAP` 现与 `GRID`/`ORTHO` 一样是显式不可用占位）。
 - **本轮修掉的真实缺陷（重要）**：`crates/cad-host/src/lib.rs` 的 `set_canvas_metrics` 原先**无条件**
   `clear_gestures()`。真实 GUI 里布局 resize 与按下会同批到达（日志：`resize seq=2 width=926` 紧跟
   `pointer_down seq=3`），刚建立的按下被清掉 → 拖拽退化为零面积手势 → `SelectInBox` **从未派发**。
@@ -47,17 +50,48 @@ metrics 竞态修复）、`crates/cad-ui-core`（`OSNAP` 选择子、`snapEnable
   同轮日志 `input kind` 计数 3/3/3，与驱动自报一致 ⇒ 无污染输入）。
   命令级真实夹具测试 `crates/cad-app/tests/select_box_real_fixture.rs` 锁定同一组期望（全画布 WINDOW=4、
   2%→98% WINDOW=4、25%→60% WINDOW=0、60%→25% CROSSING=1）。
-  **视觉**（observer 读同一轮截图）：CAD 面上有**绿色虚线**、轴对齐、空心矩形，范围恰为 x 24.9–60.0%、
-  y 24.6–60.1%（与 60%→25% 保持中的拖拽一致）；无任何图元被高亮（选择在**抬起**后生效，符合 AutoCAD）；
-  窗口内无错误横幅/对话框。
+  **视觉（更正，2026-10-19）**：**本轮（修复后 `161400Z`）截图内没有任何橡皮筋像素** —— UI 输入通道会把
+  `pointermove` 合并到 rAF/按下/抬起时才 flush，因此"保持拖拽"期间宿主只收到 `pointer_down`，t≈30 截图时
+  橡皮筋并不存在（报告的**计数**仍然真实）。绿色虚线空心矩形**确实**在**更早一轮**（`153655Z`，那时驱动是
+  分步 paced 移动、且尚未加 W-wide 阶段、二进制也尚未修复）被读到：轴对齐、空心、范围 x 24.9–60.0% /
+  y 24.6–60.1%。⇒ 本轮**不主张**修复后的视觉验证（已派 lane 修驱动：保持期内周期发微移 + 机器像素判据后重跑）。
 - **NOT RUN / 未证**：WINDOW 的**正选**在真实 GUI 里只用"近乎全幅"矩形证到（夹具几何下 25%→60% 矩形
   本就无"完全包含"图元，0 是正确语义）；橡皮筋**无 probe 可见通道**（`box_overlay_channel=none`，未伪造）；
   全量 `cargo test --workspace` 未完成（`accelerated_tier` 二进制跑逾 10 分钟被杀 → 记 NOT RUN，其余 crate
-  均通过）；3D 框选/纸空间框选、`SELECTIONPREVIEWLIMIT`、`PREVIEWFILTER` 锁定图层/xref 排除、Secondary
-  右键菜单语义仍为开放项。
-- **遗留观察**：更早一轮（`153655Z`）日志里出现 23 次驱动未派发的 `pointer_move`，而同轮无其它驱动 banner；
-  该轮 `crossing_count=2` 因此**不作为结论**采用（本轮 3/3/3 的干净运行取 `crossing_count=1`）。夹具矩形边界
-  会擦到图元，crossing 计数对矩形精度敏感。
+  均通过）。
+- **开放项（尚未实现，勿当已对齐）**：`select.box.count` 的 `count`/`precision` **无 UI 显示通道**（命令侧
+  已产出，但只进控制器内部 `last_status`，无生产读取者；`SELECTALL` 亦然，只有 `selection.count` 可见）；
+  3D/纸空间框选；`SELECTIONPREVIEWLIMIT`；`PREVIEWFILTER` 锁定图层/xref 排除；Secondary 的右键快捷菜单语义；
+  把 `check-band-pixels.py` 接进 `scripts/collect-evidence.sh` 作为常规判据。
+- **已解释的观察（不再是疑问）**：更早一轮（`153655Z`）日志里 23 次驱动未派发的 `pointer_move` 与该轮截图里
+  真实存在的橡皮筋是**同一原因**——那版驱动把拖拽**分步 paced** 发送（因此每步都触发 flush、带是活的），
+  之后驱动被改写为"单步 move + 保持"才出现"保持期内 move 未送达"的问题（该问题的真正机制见下方
+  Oracle 收敛条目：rAF 被节流时合并通道永不 flush）；该轮 `crossing_count=2` 仍**不作为结论**采用
+  （干净运行取 `crossing_count=1`）。夹具矩形边界会擦到图元，crossing 计数对矩形精度敏感。
+- **Oracle P1 gate（ACCEPT-WITH-FIXES）后的收敛，2026-10-19**：
+  - blocker（证据表述）已按事实更正：见上"视觉（更正）"；驱动加了保持期周期微移与 `hold_moves` 计数，
+    并新增 `apps/app-linux/scripts/check-band-pixels.py`（PPM/PNG 像素判据，绿=带 / 蓝=window；已知带
+    1132Z=979、1365Z=1052 像素，无带=0）。
+  - **真实输入丢失缺陷（gate 引出，已修）**：`apps/app-linux/ui/src/input.mjs` 的 move 合并通道只在
+    `frame === null` 时排 rAF；rAF 被节流时句柄永不重置 ⇒ 后续 move 只覆盖缓冲，**直到按下/抬起才送达**
+    （实测保持期发 47 次 move，宿主只收到 3 次）。修复：加**有界兜底 flush**（短 timer），恰好一次、最新优先，
+    按下/抬起/离开/失焦仍即时并取消待发。
+  - **cad-host 硬化（4 项 + 1）**：捕获/模态平移中途接管框选 ⇒ 立即结束手势且不再派发被拒命令；局部抬起
+    不继承已离开接触点的 button/修饰键；CROSSING dash 改为按周长自适应（≥1080p 全屏不再截断成开口矩形，
+    始终回到起点、段数 ≤512）；退化/非有限矩形不再静默（走既有 `set_external_status` 通道，附 ADR B.6 引用）；
+    直接 API 的陈旧 metrics `Up` 现在与队列路径一致地清理指针生命。
+  - **cad-app / ui-core 三项**：工具占用时框选改为显式 `select.box.count count=0;precision=none`（不再静默
+    空成功）；CROSSING 逐类精度加回归测试（线段=exact、圆/弧=approximate、bulge 折线/spline=aabb）；
+    移除 `SNAP`→`OSNAP` 别名（AutoCAD `SNAP` 是栅格捕捉 F9，会把栅格按钮接到对象捕捉上），UI 侧该 ribbon 项
+    经路由器准入自动显式禁用，测试镜像同步。
+  - **ADR 验收补齐**：`CadStatus.snapKind`（复用已缓存 hint 路径，无二次扫描；6 个 `snap.kind.*` 双语键；
+    状态栏无候选时不渲染）。**仍未实现**：`select.box.count` 的 `count`/`precision` **无 UI 显示通道**
+    （命令侧已产出，但只进控制器内部 `last_status`，无生产读取者；`SELECTALL` 亦然，只有 `selection.count`
+    可见）——已钉住该事实的测试并记为开放项。
+  - **新增项目门禁**：`scripts/check-file-size.py`（代码文件 ≤1000 行；文档不计入）+ 自测 + `core.yml` +
+    `check-workflows.py` 契约；两个超限文件已按模块拆分（`apps/app-linux/src/evidence.rs` → `evidence/*`
+    模块树；`crates/cad-app/src/host/tests.rs` → `host/tests/{document,snap,status,toggles,tools}.rs`，
+    测试逐字未改、计数守恒）。
 
 ## 悬停预览开关 + pickbox/捕捉光圈分离 + 悬停停留延时（2026-10-18）
 
@@ -75,18 +109,18 @@ metrics 竞态修复）、`crates/cad-ui-core`（`OSNAP` 选择子、`snapEnable
   —— 这是 AutoCAD 原样行为，且现在是单一可调数值。
 - **悬停停留延时（显式偏离）**：`SessionState.hover_dwell_ms` 默认 **20**（由 300 下调，产品负责人决定；
   60Hz 下约 1 帧，只过滤帧内抖动，不再抑制刻意快速扫掠）；
-  `0` = 即时（AutoCAD 语义）。行为：离开光圈/身份变化后重新解算，但**同一候选需稳定满 300ms 才上色**；
+  `0` = 即时（AutoCAD 语义）。行为：离开光圈/身份变化后重新解算，但**同一候选需稳定满 `hover_dwell_ms`（默认 20ms）才上色**；
   换目标重新计时（快速扫过完全不亮）；离开图元**立即**清除；`clear_hover()`/工具启动/捕获/关闭开关
   同时清除 applied 与 pending。由既有每帧 `HostCore::tick` 的 `apply_due_hover()` 应用，未引入线程/定时器；
   测试用可注入 `Instant` seam（`#[cfg(test)] set_hover_clock_for_test`）确定性驱动。
 - **文献依据**：AutoCAD **没有**悬停延时概念（sysvar 集合无任何毫秒级悬停门控；`TOOLTIPDELAY` 不是
-  AutoCAD 系统变量；Options 的"seconds"只属于 ribbon/toolbar 工具提示）。因此 300ms 是**人机改善**，
+  AutoCAD 系统变量；Options 的"seconds"只属于 ribbon/toolbar 工具提示）。因此停留延时是**人机改善**，
   不是 parity，已在 `docs/interaction.md` §3 与代码注释中双处标注。
 - **证据**：`cargo test` cad-domain 25 / cad-app 371+42 / cad-host 114 / cad-ui-core 105 /
   cad-engine 103 / cad-geometry 104 / cad-measure 52 全通过；`cargo check --workspace --all-targets`、
   clippy（workspace，`-D warnings`）、wasm `--lib`、architecture/i18n 脚本、UI `npm test` 74/74 全绿。
   新增判别性测试：`pick_and_hover_use_the_pickbox_value_and_snap_keeps_the_wider_aperture`、
-  `dwell_defers_the_tint_until_the_deadline_then_tick_applies_it`（299ms 不上色/无修订churn，300ms 上色）、
+  `dwell_defers_the_tint_until_the_deadline_then_tick_applies_it`（在 300ms 覆盖下 299ms 不上色/无修订 churn，300ms 上色；默认值为 20ms）、
   `a_changed_pending_ref_restarts_the_dwell_timer`、`leaving_geometry_clears_the_applied_tint_immediately`、
   `idle_hover_preview_is_off_by_default_so_cursor_moves_run_no_pick`。
 - **NOT RUN**：真实 GPU 复测（改完即待用户手测）；全量 `cargo test --workspace`；原生 Wayland；跨平台。
