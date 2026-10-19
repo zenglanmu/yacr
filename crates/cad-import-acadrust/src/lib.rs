@@ -19,11 +19,9 @@ use cad_db::{
     EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency, Layer, Layout,
     LineType as DbLineType, LinetypePattern, PaperViewport, Style,
 };
+use cad_domain::hatch::{GradientDef, GradientKind, GradientStop, PatternLine};
 use cad_domain::*;
-use cad_geometry::{
-    arbitrary_axis, tessellate_bspline, GradientDef, GradientKind, GradientStop, PatternLine,
-    TessellationParams,
-};
+use cad_geometry::{arbitrary_axis, tessellate_bspline, TessellationParams};
 use cad_proxy::{DecodeLimits, ProxyPlayer, ProxySource};
 
 // `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not

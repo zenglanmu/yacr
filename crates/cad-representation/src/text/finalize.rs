@@ -139,7 +139,7 @@ fn fill_sfnt_glyph(
         failures.push(format!("SFNT fill: {reason}"));
         return;
     }
-    let fill = match cad_geometry::fill_rings(rings) {
+    let fill = match cad_domain::hatch::fill_rings(rings) {
         Ok(fill) => fill,
         Err(error) => {
             failures.push(format!("SFNT fill: {}", error.reason()));

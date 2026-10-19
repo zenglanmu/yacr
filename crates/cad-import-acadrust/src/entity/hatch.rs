@@ -78,7 +78,7 @@ impl<'a> ImporterBuilder<'a> {
             .filter_map(|loop2| {
                 let mut closed = loop2.clone();
                 closed.push(closed[0]);
-                let mut s = cad_geometry::simplify(&closed, fill_tolerance);
+                let mut s = cad_domain::hatch::simplify(&closed, fill_tolerance);
                 if s.len() > 1 && s.last() == s.first() {
                     s.pop();
                 }
@@ -102,9 +102,9 @@ impl<'a> ImporterBuilder<'a> {
                         "hatch plane normal is degenerate; boundary only".into(),
                     ]);
                 } else {
-                    match cad_geometry::fill_rings(&simplified) {
+                    match cad_domain::hatch::fill_rings(&simplified) {
                         Ok(fill) => {
-                            let colors = cad_geometry::gradient_vertex_colors(&fill, &def);
+                            let colors = cad_domain::hatch::gradient_vertex_colors(&fill, &def);
                             if colors.len() != fill.vertices.len() {
                                 completeness = Completeness::Partial(vec![
                                     "gradient hatch could not be baked; boundary only".into(),
@@ -139,7 +139,7 @@ impl<'a> ImporterBuilder<'a> {
                 } else {
                     // Multi-ring holes/islands go through the even-odd fill; a
                     // failure is reported as Partial (boundary only), never faked.
-                    match cad_geometry::fill_rings(&simplified) {
+                    match cad_domain::hatch::fill_rings(&simplified) {
                         Ok(fill) => {
                             let vertices: Vec<Point3> =
                                 fill.vertices.iter().map(|p| to_world(*p)).collect();
@@ -167,7 +167,7 @@ impl<'a> ImporterBuilder<'a> {
                     completeness =
                         Completeness::Partial(vec!["hatch pattern has no line families".into()]);
                 } else {
-                    for line in cad_geometry::pattern_polylines(&loops, &families) {
+                    for line in cad_domain::hatch::pattern_polylines(&loops, &families) {
                         if line.len() >= 2 {
                             children.push(SemanticGeometry::Polyline {
                                 points: line.iter().map(|p| to_world(*p)).collect(),

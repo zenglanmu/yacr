@@ -68,13 +68,24 @@ pub struct HatchPattern { name: String, angle: f64 /*rad*/, scale: f64, double: 
 pub struct PatternLine { angle: f64 /*rad*/, base_x: f64, base_y: f64, offset_x: f64, offset_y: f64, dashes: Vec<f64> }
 
 pub enum HatchGradient {                    // 导入保留 + 往返（B3）
-    TwoColor { name: String, angle: f64, shift: f64, stops: Vec<[f64; 4]> },
-    SingleColor { name: String, angle: f64, shift: f64, tint: f64, stops: Vec<[f64; 4]> },
+    TwoColor { name: String, reserved: i32, angle_raw: f64, shift: f64, stops: Vec<GradientStop> },
+    SingleColor { name: String, reserved: i32, angle_raw: f64, shift: f64, tint: f64, stops: Vec<GradientStop> },
+}
+pub struct GradientStop { value: f64, rgb: [u8; 3] }   // 463 / 63+421；color_name/book_name **导入即丢**（声明）
+
+pub enum BoundaryEdge {                     // 供导出写解析边（B4）
+    Line { start: [f64; 2], end: [f64; 2] },
+    CircularArc { center: [f64; 2], radius: f64, start_angle: f64, end_angle: f64, ccw: bool },
+    EllipticArc { center: [f64; 2], major_axis: [f64; 2], ratio: f64, start_angle: f64, end_angle: f64, ccw: bool },
+    Spline { /* degree/knots/control_points/weights/fit 数据，镜像 acadrust 的边类型 */ },
 }
 ```
 
 - **坐标与单位（B3）**：环/种子/图案定义点一律**帽面 OCS 2D** + `plane`；`plane` 负责世界↔帽面映射（显示关注）。
-  **角度一律弧度**（写入器自己 `to_degrees()`；P5e 的度/弧度事故同类陷阱，此处先钉死）。
+  **图案角 `52`/`53` 用弧度**（写入器自己 `to_degrees()`，已核实）。
+  **渐变角 `460` 例外（attempt 2 更正）**：写入器**原样写**、读取器**原样存**，而结构注释声称弧度 ⇒ **单位未验证**
+  ⇒ `HatchGradient.angle_raw` **按不透明往返数据保存**（U-13），**不**在导入时转换；现有 `gradient.rs` 把该值直接
+  喂给弧度 ramp ⇒ 方向可能已错，且**没有渐变夹具**能发现。
 - **`flags: u32` 原始位**（N3）：`BoundaryPathFlags` 实为 9 位（external/polyline/derived/textbox/outermost/
   not-closed/self-intersecting/text-island/duplicate），写入器**逐位照发**；用 5 个布尔会**静默归一化**掉 4 位。
   只对**承重位**给访问器（`derived` 决定组 47；`textbox` 保留但不解释 = U-5）。
@@ -88,8 +99,13 @@ pub enum HatchGradient {                    // 导入保留 + 往返（B3）
 - 采用 **(i) 存储派生显示**：`display` 由**唯一构造器**从 `loops + style + fill + plane` 算出（`fill_rings` /
   `pattern_polylines` / `gradient_vertex_colors`），与 `Dimension` 的 `synthesized()` 同构。
 - 为此把 `crates/cad-geometry/src/hatch/`（`mod/fill/pattern/gradient/simplify`，**纯 std f64 数学，已核实**）
-  **迁入 `crates/cad-domain/src/hatch/`**；`cad-geometry` 与 `cad-import-acadrust` 改为经 `cad_domain` 使用
-  （或保留薄 re-export）。**这是本 ADR 最大的一次代码搬迁，必须在实施前定案。**
+  **迁入 `crates/cad-domain/src/hatch/`**。**这不是偏好而是被迫**：`cad-geometry` **依赖** `cad-domain`（反向不允许），
+  所以"与类型同居的构造器"**无法回调 `cad-geometry`**。
+  **决定：不保留 re-export**（`cad-geometry` 永久转出 `cad-domain` 的条目属仓库不鼓励的别名）；四个调用点改为
+  `cad_domain::hatch::…`：`cad-import-acadrust/src/entity/hatch.rs:105,142`、
+  **`crates/cad-representation/src/text/finalize.rs:142`**（字形填充）、
+  **`crates/cad-representation/src/tests/basic.rs:257`**（更正：此前误写为 `cad-geometry/src/text/finalize.rs`）。
+- **拆成 P6a0**（零行为变更，验收 = 既有测试全绿 + 渲染逐字节不变），与 P6a 的三处**已声明渲染变化**分开归因。
 - **消费者清单（必须逐个决定）**：`cad-representation`（显示，递归 `display`）、`cad-spatial`（`pick/hit.rs:303`、
   `pick/bounds.rs:159`）、`cad-measure`（`snap/generate.rs` 的边界顶点）、`cad-db`（`bounds.rs`/`validate.rs`）、
   `export/entity.rs`、`app_drawing/helpers.rs::class_name`。
@@ -103,6 +119,7 @@ pub enum HatchGradient {                    // 导入保留 + 往返（B3）
   描述"偶数为实"——实施时勿差一）。
 - **权威是穿越奇偶**（DXF 组 75 原文 "Hatch **odd parity** area"）：在接受的域内（环两两**不相交或严格包含**），
   **奇偶 ≡ 深度**。
+- **`display` 保留全部边界环折线**（否则边界顶点不再可捕捉）；**样式筛选只作用于填充/图案/渐变区域**。
 - **样式 = 环集筛选**（复用 `fill_rings`/`pattern_polylines` 不动）：
   - `Normal`：全部环；`Outer`：**丢弃深度 ≥3 的环**；`Ignore`：**丢弃深度 ≥2 的环**。
 - **样式对图案与渐变同样生效**（N2）：`pattern_polylines` 的裁剪与渐变的烘焙区域都必须按筛选后的环集，验收要覆盖
@@ -130,7 +147,8 @@ pub enum HatchGradient {                    // 导入保留 + 往返（B3）
   **采样后的折线路径**而非解析边。**选择**：`HatchLoop.source_edges: Option<Vec<BoundaryEdge>>` 保留**源解析边**
   供导出使用；缺失时（如新建环）退回采样，并**在报告与能力表声明**"解析边界在无源边时降级为采样折线"。
   **便宜收益**：创建的 `Circle` 环可直接写成**两点带 bulge 的折线路径**（bulge 精确表示圆）或整圆 `CircularArc` 边。
-- **渐变**：保持导入支持（LINEAR/SPHERICAL/CYLINDER 精确，其余 `Partial`），并**往返**（B3 的字段 + 声明损失）。
+- **渐变**：保持导入支持（LINEAR/CYLINDER/SPHERICAL 的**方向**依赖未经核实的 `460` 单位 ⇒ 只能声明为"按原值烘焙"，
+  其余 `Partial`），并**往返**（B3 字段 + `reserved`/`angle_raw`/色标保留，`color_name`/`book_name` **导入即丢**）。
 - 无可用边界 ⇒ `Opaque{"AcDbHatch"}` + `Partial`（沿用）。
 
 ---
@@ -170,8 +188,13 @@ pub enum HatchGradient {                    // 导入保留 + 往返（B3）
 **通配符臂（不补就静默处理错）**：`cad-import-acadrust/src/support.rs:63` `_ => (Verified, Verified)`
 （填充会被报 **假 `Verified`**，须镜像 `Compound` 递归）、`cad-spatial/src/pick/bounds.rs:114` `_ => return None`
 与 `:164` `_ => local_pick_bounds`（失去精确局部包围盒 ⇒ 落 AABB）、`pick/hit.rs:118-124`（拾取族映射）、
-`cad-app/src/select_box.rs:377`（框选退化 AABB）、`cad-platform/src/{fonts,images}.rs` 递归、
-`cad-import-acadrust/src/{geometry.rs:389,entity/push.rs:253}`、`cad-proxy/src/lib.rs:490`。
+`cad-app/src/select_box.rs:~384`（框选退化 AABB；`:377` 是 Dimension 臂，attempt 2 更正）、
+**`cad-platform/src/font_keys.rs:45,60`**（递归；attempt 2 更正，此前误写 `fonts.rs`）、
+`cad-import-acadrust/src/{geometry.rs:389,entity/push.rs:253}`、`cad-proxy/src/lib.rs:490`、
+**`cad-measure/src/snap/resolve.rs:16`**（`is_intersectable` 的 `_ => false` ⇒ 填充会**静默失去交点捕捉**）、
+**`cad-app/src/select_all.rs:116`**（`_ => Ok(())` ⇒ 校验被**静默跳过**）、
+**`cad-app/src/app_drawing/explode.rs:419`**（**块内**填充今天按 insert-child 拒绝；变体化后须**保持该拒绝**）、
+**`cad-geometry/src/intersect.rs:161`**（`_ => None`，判定并记录）。
 
 **穷尽臂（编译器强制，照改即可）**：`cad-db/src/{transform,bounds,validate}.rs`、
 `cad-geometry/src/{tessellate,vector,engine}.rs`、`export/entity.rs:258/751`（`kind_name`）、
@@ -183,8 +206,8 @@ pub enum HatchGradient {                    // 导入保留 + 往返（B3）
 - **`EXPLODE`**：**保持今天的行为**——分解为边界折线 + 填充网格 + 图案折线（今天是 `Compound` 的分解，
   由 `tests/drawing/explode.rs:224` 钉住，且 `refuse_compound_type_key` 不含 `AcDbHatch`）⇒ 只把变体名换掉，
   **不改成拒绝**（拒绝会是白给的行为变更）。
-- **`STRETCH`**：沿用"非直线类保守处理"的既有口径（`compatibility.md:211` 已排除 HATCH）——**显式拒绝或整移**，
-  实施时择一并写明。
+- **`STRETCH`**：**采用 `compatibility.md:211` 的既有口径**（部分包围 ⇒ 不动 + 诊断；完全包围 ⇒ 整移），
+  **不重新开放该选择**（attempt 2）。
 - **`snap`**：边界顶点今天经折线子项**是**捕捉点 ⇒ 迁移后必须保持（`display` 含边界折线即可）。
 - **拾取**：填充内部可选中（`display` 含网格）。
 
@@ -208,6 +231,8 @@ pub enum HatchGradient {                    // 导入保留 + 往返（B3）
 - **U-11（新）用户自定义 `76=0` 时 `78` 的优先级**：文件同时带 `52/41/77` 与 `78>0` 时 AutoCAD 采哪一个——**未查证**。
   证据：`flange.dxf` 的 `76=0` 填充带 `78=1`。
 - **U-12（新）渐变不可往返项**：`color_name`/`book_name` 写入器不写 ⇒ 声明损失。
+- **U-13（新，attempt 2）渐变角 `460` 的单位**：写入器**原样写**、读取器**原样存**，结构注释称弧度但**无实证**；
+  且没有任何渐变夹具 ⇒ 按**不透明往返**处理，`gradient.rs` 的烘焙方向**可能已错**，声明为未验证。
 
 ---
 
@@ -217,7 +242,8 @@ pub enum HatchGradient {                    // 导入保留 + 往返（B3）
 
 | 子阶段 | 内容 | 验收 |
 |---|---|---|
-| **P6a** | 域变体 + 填充几何迁入 `cad-domain` + 导入迁移（保留字段、修**三处**既有缺陷）+ 导出真 `HATCH` + 显示按样式与定义重算 + 匹配点清单 | 往返保全（样式/`pattern_type`/种子/原始 `92` 位/图案行/渐变名与色标）+ **三种样式的填充分区与图案线总长**数值测试 + 导出组码断言（含 **`71` 恒 0** 与 **`47` 仅 derived**）+ **渲染变化声明** |
+| **P6a0** | **仅模块搬迁**：`cad-geometry/src/hatch/` → `cad-domain/src/hatch/`，四个调用点改路径、**不保留 re-export** | **零行为变更**：既有测试全绿 + 渲染逐字节不变 |
+| **P6a** | 域变体 + 导入迁移（保留字段、修**三处**既有缺陷）+ 导出真 `HATCH` + 显示按样式与定义重算 + 匹配点清单 | 往返保全（样式/`pattern_type`/种子/原始 `92` 位/图案行/渐变名与色标）+ **三种样式的填充分区与图案线总长**数值测试 + 导出组码断言（含 **`71` 恒 0** 与 **`47` 仅 derived**）+ **渲染变化声明** |
 | **P6b** | `HATCH` 创建：**预选闭合实体** → 环；`SOLID` + **用户自定义图案**（间距/角度/双线）+ 样式参数；一条事务 | 数值几何 + 拒绝面 + 导出往返 + 真机证据 |
 | ~~P6c~~ | 内部点求边界 / LINE 拼接 / 预定义图案名 / 渐变创建 / 关联性 / 用户自带 `.pat` | **NOT IMPLEMENTED**（显式记录） |
 

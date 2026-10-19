@@ -8,7 +8,8 @@
 //! The implementation is split across submodules: `common` (shared helpers),
 //! `simplify` (boundary reduction), `fill` (solid triangulation), `pattern`
 //! (line patterns) and `gradient` (gradient colouring). This module re-exports
-//! the public surface, so `cad_geometry::hatch::...` paths are unchanged.
+//! the public surface as `cad_domain::hatch::...`; it lives in `cad-domain`
+//! because the stored display derivation sits with `SemanticGeometry::Hatch`.
 
 mod common;
 mod fill;

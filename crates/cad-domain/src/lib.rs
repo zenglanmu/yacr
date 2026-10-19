@@ -3,6 +3,7 @@ use std::fmt;
 
 mod dimension;
 mod dimension_synthesis;
+pub mod hatch;
 
 #[cfg(test)]
 mod dimension_tests;

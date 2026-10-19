@@ -21,7 +21,8 @@
 
 ### HATCH 多环填充（`cad-geometry` → `cad-import-acadrust` → `cad-representation`）
 
-`cad_geometry::hatch::fill_rings` 按**奇偶规则**填充多环 HATCH：环按包含深度分层，偶数深度为实体、
+`cad_domain::hatch::fill_rings` 按**奇偶规则**填充多环 HATCH：环按包含深度分层（该函数用 **0 基**：偶数深度为实体，
+等价于 1 基的**奇数深度**；ADR-0018 用 1 基表述，勿差一）、
 奇数深度为孔、更深偶数深度为岛。实现是 y 波段梯形分解（波段只取顶点纵坐标，段内边单调，交点按序两两配对），
 每对生成两个一致的逆时针三角形，因此孔和岛都无需脆弱的桥接。结果用从嵌套关系推导的奇偶面积做交叉校验；
 不匹配即返回 `FillError::Degenerate`，绝不返回错误填充。

@@ -251,10 +251,10 @@ fn missing_sfnt_glyphs_are_explicitly_reported() {
 #[test]
 fn multi_ring_hatch_fill_flows_through_the_mesh_path() {
     // Donut: 10x10 outer with a 4x4 hole; the hole-aware fill from
-    // cad-geometry is what the importer feeds into the compound.
+    // cad-domain is what the importer feeds into the compound.
     let outer = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
     let hole = vec![[3.0, 3.0], [7.0, 3.0], [7.0, 7.0], [3.0, 7.0]];
-    let fill = cad_geometry::fill_rings(&[outer.clone(), hole.clone()]).expect("donut fill");
+    let fill = cad_domain::hatch::fill_rings(&[outer.clone(), hole.clone()]).expect("donut fill");
     assert!((fill.area() - 84.0).abs() < 1e-6, "area {}", fill.area());
     let to_world = |p: [f64; 2]| Point3 {
         x: p[0],
