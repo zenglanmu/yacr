@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 
 use cad_domain::*;
 
+use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::tables::{
     ActiveAnnotationScale, BlockDefinition, Layer, Layout, LineType, PlotSettingsRecord, Scale,
@@ -54,6 +55,14 @@ pub struct DrawingDatabase {
     /// Named annotation scales from the drawing's `ACAD_SCALELIST`. Empty for
     /// hand-built databases; the importer fills it from the source drawing.
     pub(crate) scales: BTreeMap<ScaleId, Scale>,
+    /// DIMSTYLE table entries (ADR 0017 B.1). Always contains a `Standard`
+    /// (the pinned metric default for a hand-built database, or the source
+    /// `Standard` when one was imported). Read-only after import: P5b provides
+    /// no style-edit command (ADR 0017 B.3).
+    pub(crate) dim_styles: BTreeMap<DimStyleId, DimStyle>,
+    /// Name index over [`Self::dim_styles`] so a style resolves by name without
+    /// scanning the table.
+    pub(crate) dim_style_ids_by_name: BTreeMap<String, DimStyleId>,
     /// Drawing-global active annotation scale (`CANNOSCALE`), when set.
     pub(crate) active_annotation_scale: Option<ActiveAnnotationScale>,
     /// Next entity id to hand out. Monotonic and never reset when entities are

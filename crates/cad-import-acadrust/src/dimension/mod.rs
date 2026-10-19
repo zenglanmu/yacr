@@ -31,11 +31,11 @@ use values::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::tables::DimStyle;
 
     fn style() -> DimensionStyleValues {
-        style_values(
-            &DimStyle::standard(),
+        // The pinned metric Standard, so these synthesis tests exercise the same
+        // resolved values the product uses (ADR 0017 N7).
+        cad_db::DimStyle::standard_metric(DimStyleId(0)).resolved(
             "Standard".to_string(),
             StyleId(0),
             None,
@@ -164,7 +164,8 @@ mod tests {
             y: -4.0,
             z: 0.0,
         };
-        let geometry = radial_synthesis(center, point, false, &style()).expect("synthesized");
+        let geometry =
+            radial_synthesis(center, point, center, false, &style()).expect("synthesized");
         assert!(approx(geometry.measurement, 5.0));
         // One leader line and one arrow.
         assert_eq!(line_ends(&geometry.children).len(), 1);
@@ -190,7 +191,12 @@ mod tests {
             y: 3.14803309378262,
             z: 0.0,
         };
-        let geometry = radial_synthesis(a, b, true, &style()).expect("synthesized");
+        let center = Point3 {
+            x: (a.x + b.x) / 2.0,
+            y: (a.y + b.y) / 2.0,
+            z: 0.0,
+        };
+        let geometry = radial_synthesis(a, b, center, true, &style()).expect("synthesized");
         assert!(approx(geometry.measurement, 28.0));
         assert_eq!(
             geometry
@@ -206,7 +212,7 @@ mod tests {
     fn measurement_text_suppresses_trailing_zeros_and_replaces_placeholder() {
         let mut style = style();
         style.decimals = 2;
-        style.suppress_trailing_zeros = true;
+        style.zero_suppression = 8;
         assert_eq!(resolve_measurement_text(None, "", "", 42.0, &style), "42");
         assert_eq!(resolve_measurement_text(None, "R", "", 5.0, &style), "R5");
         assert_eq!(

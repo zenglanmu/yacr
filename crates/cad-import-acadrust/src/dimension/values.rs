@@ -1,70 +1,88 @@
-//! Resolved DIMSTYLE values used to draw a synthesized dimension.
+//! Resolved DIMSTYLE values used to draw a synthesized dimension, and the
+//! acadrust -> database DIMSTYLE table mapping (ADR 0017 B.1/B.2).
 //!
-//! Submodule of [`crate::dimension`]. The domain owns the data type
-//! ([`DimensionStyleValues`]); this module only reads an acadrust `DimStyle`
-//! and resolves the text-style identity the measurement text needs.
+//! Submodule of [`crate::dimension`]. The domain owns the entity-level snapshot
+//! ([`DimensionStyleValues`]); the database owns the style table
+//! ([`cad_db::DimStyle`]). This module reads an acadrust `DimStyle`, maps it to
+//! the table entry (full B.2(a) + B.2(b)), and resolves the snapshot the
+//! synthesis consumes — so the importer, the database default and the creation
+//! path share one resolution.
 
 use super::*;
 use acadrust::tables::DimStyle;
 
-fn positive(value: f64, fallback: f64) -> f64 {
-    if value.is_finite() && value > 0.0 {
-        value
-    } else {
-        fallback
-    }
-}
-
-/// Build the domain style snapshot from an acadrust `DimStyle`, already scaled
-/// by `DIMSCALE` where AutoCAD scales them.
-pub(crate) fn style_values(
-    style: &DimStyle,
-    text_style_name: String,
-    text_style: StyleId,
-    text_font: Option<String>,
-) -> DimensionStyleValues {
-    let scale = positive(style.dimscale, 1.0);
-    DimensionStyleValues {
-        arrow_size: positive(style.dimasz, 2.5) * scale,
-        ext_offset: positive(style.dimexo, 0.625) * scale,
-        ext_beyond: positive(style.dimexe, 1.25) * scale,
-        text_height: positive(style.dimtxt, 2.5) * scale,
-        text_gap: positive(style.dimgap, 0.625) * scale,
-        text_above: style.dimtad != 0,
-        linear_factor: {
-            let factor = style.dimlfac;
-            if factor.is_finite() && factor.abs() > 1e-12 {
-                factor.abs()
-            } else {
-                1.0
-            }
-        },
-        decimals: style.dimdec.clamp(0, 8) as usize,
-        suppress_trailing_zeros: style.dimzin & 8 != 0,
-        text_style_name,
-        text_style,
-        text_font,
+/// Map an acadrust `DimStyle` to the database DIMSTYLE table entry, carrying the
+/// full B.2(a) display-driving set and the B.2(b) snapshot-only set (ADR 0017
+/// B.2). Every field is copied verbatim; the resolution to a display snapshot
+/// happens in [`cad_db::DimStyle::resolved`].
+pub(crate) fn db_dim_style(style: &DimStyle, id: DimStyleId) -> cad_db::DimStyle {
+    cad_db::DimStyle {
+        id,
+        name: style.name.clone(),
+        text_height: style.dimtxt,
+        arrow_size: style.dimasz,
+        ext_offset: style.dimexo,
+        ext_beyond: style.dimexe,
+        text_gap: style.dimgap,
+        text_vertical: style.dimtad,
+        text_vertical_position: style.dimtvp,
+        scale: style.dimscale,
+        decimals: style.dimdec,
+        zero_suppression: style.dimzin,
+        linear_factor: style.dimlfac,
+        rounding: style.dimrnd,
+        postfix: style.dimpost.clone(),
+        center_mark: style.dimcen,
+        text_style_name: style.dimtxsty.clone(),
+        suppress_ext1: style.dimse1,
+        suppress_ext2: style.dimse2,
+        suppress_dim1: style.dimsd1,
+        suppress_dim2: style.dimsd2,
+        linear_unit_format: style.dimlunit,
+        decimal_separator: style.dimdsep,
+        text_justification: style.dimjust,
+        text_inside_horizontal: style.dimtih,
+        text_outside_horizontal: style.dimtoh,
+        text_fit: style.dimatfit,
+        text_inside_extensions: style.dimtix,
+        text_outside_flow_line: style.dimtofl,
+        dim_line_color: style.dimclrd,
+        ext_line_color: style.dimclre,
+        text_color: style.dimclrt,
+        dim_line_extension: style.dimdle,
+        dim_line_increment: style.dimdli,
+        // DIMCONTINUEMODE is drawing-level and not modelled by acadrust; the
+        // table carries the documented On default (declared, ADR 0017 B.2(b)).
+        continue_mode: true,
     }
 }
 
 impl ImporterBuilder<'_> {
-    /// Resolve the DIMSTYLE for a dimension, falling back to the acadrust
-    /// defaults when the table entry is missing. The text style identity is
+    /// Read the drawing's DIMSTYLE table into the database (ADR 0017 B.1),
+    /// carrying the full B.2(a) + B.2(b) variable set. The pinned metric
+    /// `Standard` is added by the builder at `finish` when the source carried
+    /// none.
+    pub(crate) fn read_dim_styles(&mut self) -> CadResult<()> {
+        for (index, style) in self.acad.dim_styles.iter().enumerate() {
+            let id = DimStyleId(index as u128);
+            self.builder.insert_dim_style(db_dim_style(style, id))?;
+        }
+        Ok(())
+    }
+
+    /// Resolve the DIMSTYLE for a dimension, falling back to the pinned metric
+    /// `Standard` when the table entry is missing. The text style identity is
     /// resolved here so the domain synthesis never reaches back into the
     /// builder.
     pub(super) fn dim_style_values(&self, name: &str) -> DimensionStyleValues {
         let text_style_name = self.dim_text_style(name);
         let text_style = self.style_id(&text_style_name);
         let text_font = self.style_font(&text_style_name);
-        match self.acad.dim_styles.get(name) {
-            Some(style) => style_values(style, text_style_name, text_style, text_font),
-            None => style_values(
-                &DimStyle::standard(),
-                text_style_name,
-                text_style,
-                text_font,
-            ),
-        }
+        let entry = match self.acad.dim_styles.get(name) {
+            Some(style) => db_dim_style(style, DimStyleId(0)),
+            None => cad_db::DimStyle::standard_metric(DimStyleId(0)),
+        };
+        entry.resolved(text_style_name, text_style, text_font)
     }
 
     /// The TEXTSTYLE table name a handle points at, if any.

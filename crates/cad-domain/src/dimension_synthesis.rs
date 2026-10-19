@@ -151,7 +151,17 @@ pub fn linear_synthesis(
     let q1 = project_onto_line(definition, direction, first);
     let q2 = project_onto_line(definition, direction, second);
     let mut children = Vec::new();
-    for (point, foot) in [(first, q1), (second, q2)] {
+    // DIMSE1/DIMSE2 suppress the first/second extension line. The first line is
+    // the one from `first` (the first defining point); "suppress" removes the
+    // whole extension line, not just part of it.
+    for (index, (point, foot)) in [(first, q1), (second, q2)].into_iter().enumerate() {
+        let suppressed = match index {
+            0 => style.suppress_ext1,
+            _ => style.suppress_ext2,
+        };
+        if suppressed {
+            continue;
+        }
         let v = sub(foot, point);
         let len = length(v);
         if len > 1e-9 {
@@ -163,16 +173,39 @@ pub fn linear_synthesis(
             }
         }
     }
-    if let Some(line) = line_between(q1, q2) {
-        children.push(line);
+    let mid = scale(add(q1, q2), 0.5);
+    // DIMSD1/DIMSD2 suppress the first/second dimension-line segment and its
+    // arrow. With neither suppressed the line is one segment (unchanged from
+    // P5a); with one suppressed only the other half is drawn, split at the text
+    // midpoint (an approximation of AutoCAD's text-gap break, declared).
+    match (style.suppress_dim1, style.suppress_dim2) {
+        (false, false) => {
+            if let Some(line) = line_between(q1, q2) {
+                children.push(line);
+            }
+        }
+        (true, false) => {
+            if let Some(line) = line_between(mid, q2) {
+                children.push(line);
+            }
+        }
+        (false, true) => {
+            if let Some(line) = line_between(q1, mid) {
+                children.push(line);
+            }
+        }
+        (true, true) => {}
     }
     if style.arrow_size > 1e-9 {
-        children.push(arrowhead(q1, scale(direction, -1.0), style.arrow_size));
-        children.push(arrowhead(q2, direction, style.arrow_size));
+        if !style.suppress_dim1 {
+            children.push(arrowhead(q1, scale(direction, -1.0), style.arrow_size));
+        }
+        if !style.suppress_dim2 {
+            children.push(arrowhead(q2, direction, style.arrow_size));
+        }
     }
-    // Text sits on the side the dimension line is offset toward, `DIMGAP` plus
-    // half the text height away from the line (matches QCAD/AutoCAD default).
-    let mid = scale(add(q1, q2), 0.5);
+    // Text sits on the side the dimension line is offset toward. DIMTAD picks
+    // the vertical placement and DIMTVP the signed offset used when it is 0.
     let measured_mid = scale(add(first, second), 0.5);
     let mut side = dot(sub(measured_mid, mid), normal);
     if side.abs() < 1e-9 {
@@ -180,12 +213,7 @@ pub fn linear_synthesis(
     } else {
         side = side.signum();
     }
-    let offset = if style.text_above {
-        style.text_gap + style.text_height * 0.5
-    } else {
-        0.0
-    };
-    let text_position = add(mid, scale(normal, side * offset));
+    let text_position = add(mid, scale(normal, text_offset(style, side)));
     let text_rotation = readable_angle(direction.y.atan2(direction.x));
     let measurement = dot(sub(second, first), direction).abs();
     Some(SynthesizedDimension {
@@ -196,14 +224,51 @@ pub fn linear_synthesis(
     })
 }
 
+/// The signed offset of the measurement text from the dimension line, along the
+/// dimension line's normal (`+` is the text's "up"), for `DIMTAD`/`DIMTVP`.
+///
+/// `side` is `+1` when the measured geometry is on the `+normal` side of the
+/// dimension line and `-1` otherwise; it is what `DIMTAD = 2` (far side) flips.
+///
+/// - `0` centred: `DIMTVP * text_height` (signed by `DIMTVP`; `0` sits on the
+///   line);
+/// - `1` above: `DIMGAP + text_height/2` above the line;
+/// - `2` outside (far side): the same distance but on the side away from the
+///   measured points;
+/// - `3` JIS: the vertical placement equals `1`; the JIS-specific horizontal
+///   placement and text-fit rules are **not** modelled (declared);
+/// - `4` below: the same distance below the line;
+/// - any other code: treated as `1` (declared).
+fn text_offset(style: &DimensionStyleValues, side: f64) -> f64 {
+    let above = style.text_gap + style.text_height * 0.5;
+    match style.text_vertical {
+        0 => style.text_vertical_position * style.text_height,
+        2 => -side * above,
+        // 3 (JIS): the vertical placement equals "above"; the JIS-specific
+        // horizontal placement and text-fit rules are not modelled (declared).
+        3 => above,
+        4 => -above,
+        // 1 (above) and any unknown code.
+        _ => above,
+    }
+}
+
 /// Build a radius/diameter leader with arrow(s) (no text).
+///
+/// `from` is the DXF group-10 slot — the circle centre for a radius dimension,
+/// the **opposite chord point** for a diameter dimension (ADR 0017 A.3) — and
+/// `to` is group 15, a point on the circle. `center` is the true circle centre:
+/// the `DIMCEN` mark is drawn there and the centre-line reach is measured from
+/// it. For a radius dimension `center == from`; for a diameter dimension it is
+/// the midpoint of `from..to`.
 pub fn radial_synthesis(
     from: Point3,
     to: Point3,
+    center: Point3,
     two_arrows: bool,
     style: &DimensionStyleValues,
 ) -> Option<SynthesizedDimension> {
-    if !is_finite_point(from) || !is_finite_point(to) {
+    if !is_finite_point(from) || !is_finite_point(to) || !is_finite_point(center) {
         return None;
     }
     let v = sub(to, from);
@@ -215,6 +280,29 @@ pub fn radial_synthesis(
     let mut children = Vec::new();
     if let Some(line) = line_between(from, to) {
         children.push(line);
+    }
+    // DIMCEN: a centre mark (> 0) or centre line (< 0) at the circle centre,
+    // aligned with the dimension's own axes. The cross arms are `|DIMCEN|` long;
+    // a centre line extends to `radius + |DIMCEN|` so it reaches past the circle.
+    // The reach is relative to the **radius**, not the leader length, so a
+    // diameter dimension (whose leader is the full diameter) uses half of it.
+    if style.center_mark.is_finite() && style.center_mark != 0.0 {
+        let arm = style.center_mark.abs();
+        let radius = distance(center, to);
+        let reach = if style.center_mark > 0.0 {
+            arm
+        } else {
+            radius + arm
+        };
+        let cross = perpendicular(u);
+        for axis in [u, cross] {
+            if let Some(line) = line_between(
+                sub(center, scale(axis, reach)),
+                add(center, scale(axis, reach)),
+            ) {
+                children.push(line);
+            }
+        }
     }
     if style.arrow_size > 1e-9 {
         children.push(arrowhead(to, u, style.arrow_size));
@@ -347,11 +435,22 @@ pub fn ordinate_synthesis(
     })
 }
 
-/// Format a measurement with `DIMDEC` decimals and `DIMZIN` bit-3 zero
-/// suppression.
+/// Format a measurement with `DIMRND` rounding, `DIMDEC` decimals, `DIMZIN`
+/// leading/trailing zero suppression and the `DIMDSEP` decimal separator.
+///
+/// `DIMPOST` prefix/suffix is applied by [`resolve_measurement_text`], not here,
+/// because a user text override substitutes the fully-posted value into `<>`.
 pub fn format_measurement(value: f64, style: &DimensionStyleValues) -> String {
-    let mut text = format!("{:.*}", style.decimals, value.abs());
-    if style.suppress_trailing_zeros && text.contains('.') {
+    // DIMRND: round the displayed distance to the nearest multiple (`0`
+    // disables it). Group 42 keeps the unrounded measurement.
+    let rounded = if style.rounding.is_finite() && style.rounding > 0.0 {
+        (value / style.rounding).round() * style.rounding
+    } else {
+        value
+    };
+    let mut text = format!("{:.*}", style.decimals, rounded.abs());
+    // DIMZIN bit 3: suppress trailing zeros.
+    if style.suppress_trailing_zeros() && text.contains('.') {
         while text.ends_with('0') {
             text.pop();
         }
@@ -359,11 +458,43 @@ pub fn format_measurement(value: f64, style: &DimensionStyleValues) -> String {
             text.pop();
         }
     }
+    // DIMZIN bit 2: suppress the leading zero (`0.5` -> `.5`).
+    if style.suppress_leading_zeros() {
+        if let Some(rest) = text.strip_prefix("0.") {
+            text = format!(".{rest}");
+        } else if let Some(rest) = text.strip_prefix("-0.") {
+            text = format!("-.{rest}");
+        }
+    }
+    // DIMDSEP: replace the decimal point with the configured separator (46 is
+    // '.'). A code that is not a character leaves the point in place.
+    if style.decimal_separator != 46 && style.decimal_separator != 0 {
+        if let Some(separator) = char::from_u32(style.decimal_separator.max(0) as u32) {
+            if separator != '.' {
+                text = text.replace('.', &separator.to_string());
+            }
+        }
+    }
     text
 }
 
+/// Apply `DIMPOST`: the template with `<>` replaced by the formatted value.
+///
+/// An empty template (or the literal `<>`) renders the bare measurement. A
+/// template without a `<>` placeholder is treated as a suffix (our documented
+/// reading of a case the variable page does not spell out).
+fn apply_postfix(value: &str, postfix: &str) -> String {
+    if postfix.is_empty() || postfix == "<>" {
+        value.to_string()
+    } else if postfix.contains("<>") {
+        postfix.replace("<>", value)
+    } else {
+        format!("{value}{postfix}")
+    }
+}
+
 /// Resolve the displayed text: a user override with `<>` substituted, or the
-/// subtype's default prefix/suffix plus the formatted measurement.
+/// subtype's default prefix/suffix around the `DIMPOST`-wrapped measurement.
 pub fn resolve_measurement_text(
     text_override: Option<&str>,
     prefix: &str,
@@ -371,7 +502,8 @@ pub fn resolve_measurement_text(
     measurement: f64,
     style: &DimensionStyleValues,
 ) -> String {
-    let value = format_measurement(measurement * style.linear_factor, style);
+    let formatted = format_measurement(measurement * style.linear_factor, style);
+    let value = apply_postfix(&formatted, &style.postfix);
     match text_override {
         Some(template) => {
             if template.contains("<>") {
@@ -445,7 +577,7 @@ pub(crate) fn synthesize(
                 point_on_arc,
                 ..
             },
-        ) => radial_synthesis(*center, *point_on_arc, false, style),
+        ) => radial_synthesis(*center, *point_on_arc, *center, false, style),
         (
             DimensionKind::Diameter,
             DimensionPoints::Radial {
@@ -453,7 +585,15 @@ pub(crate) fn synthesize(
                 point_on_arc,
                 ..
             },
-        ) => radial_synthesis(*center, *point_on_arc, true, style),
+        ) => radial_synthesis(
+            // Group 10 is the opposite chord point; the true centre (and thus the
+            // DIMCEN mark centre) is the midpoint of the two chord points (B1).
+            *center,
+            *point_on_arc,
+            scale(add(*center, *point_on_arc), 0.5),
+            true,
+            style,
+        ),
         (
             DimensionKind::Angular2Ln,
             DimensionPoints::Angular2Ln {

@@ -24,10 +24,20 @@ fn style_values() -> DimensionStyleValues {
         ext_beyond: 1.25,
         text_height: 2.5,
         text_gap: 0.625,
-        text_above: true,
+        center_mark: 0.0,
+        text_vertical: 1,
+        text_vertical_position: 0.0,
+        suppress_ext1: false,
+        suppress_ext2: false,
+        suppress_dim1: false,
+        suppress_dim2: false,
         linear_factor: 1.0,
         decimals: 4,
-        suppress_trailing_zeros: false,
+        rounding: 0.0,
+        postfix: String::new(),
+        zero_suppression: 0,
+        linear_unit_format: 2,
+        decimal_separator: 46,
         text_style_name: "Standard".to_string(),
         text_style: StyleId(0),
         text_font: None,
@@ -204,6 +214,7 @@ fn dimension_export_report_declares_its_shape() {
         "group 70 bit 32",
         "bit 128",
         "ACAD_DIMASSOC",
+        "NOT-IMPLEMENTED",
     ] {
         assert!(
             text.contains(needle),
@@ -548,4 +559,160 @@ fn read_block_members(bytes: &[u8], block_name: &str) -> Vec<EntityType> {
         .entities_in_block(block_name)
         .cloned()
         .collect::<Vec<_>>()
+}
+
+/// P5b (ADR 0017 B.2(b)): the exported DIMSTYLE record carries the snapshot-only
+/// values too, not just the display-driving subset, so a re-reader resolves
+/// group 3 without falling back to its own `Standard`.
+#[test]
+fn dimension_dimstyle_record_carries_the_snapshot_only_values() {
+    let definition = aligned_definition();
+    let dimension =
+        DimensionGeometry::synthesized(definition, "Standard".to_string(), style_values(), None)
+            .expect("synthesized");
+    let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(dimension)));
+    let document = DxfReader::from_reader(Cursor::new(bytes))
+        .unwrap()
+        .read()
+        .unwrap();
+    let style = document
+        .dim_styles
+        .get("Standard")
+        .expect("the DIMSTYLE record is written");
+    // B.2(a): the resolved snapshot.
+    assert!((style.dimtxt - 2.5).abs() < 1e-9);
+    assert!((style.dimasz - 2.5).abs() < 1e-9);
+    // B.2(b): carried for export fidelity (from the pinned metric Standard).
+    assert_eq!(style.dimlunit, 2);
+    assert_eq!(style.dimdsep, 46);
+    assert!(style.dimtih, "the corrected DIMTIH row");
+    assert!(style.dimtoh, "the corrected DIMTOH row");
+    assert!(style.dimtofl, "DIMTOFL is a single pinned value");
+    assert!((style.dimdli - 3.75).abs() < 1e-9);
+}
+
+/// Review N1: `DIMLUNIT`/`DIMDSEP` drive the drawn text (they live in the
+/// entity snapshot), so the exported DIMSTYLE record must carry the snapshot's
+/// values, not the DB table's. Here the snapshot uses `,` (44) and architectural
+/// (4) against a table `Standard` of `.` (46) and decimal (2).
+#[test]
+fn dimension_dimstyle_record_writes_the_snapshot_dimlunit_and_dimdsep() {
+    let mut style = style_values();
+    style.decimals = 2;
+    style.decimal_separator = 44; // ','
+    style.linear_unit_format = 4; // architectural (declared degradation)
+    let dimension =
+        DimensionGeometry::synthesized(aligned_definition(), "Standard".to_string(), style, None)
+            .expect("synthesized");
+
+    // The drawn text used the snapshot separator, so the record must agree.
+    let drawn = dimension
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .expect("text child");
+    assert_eq!(drawn, "42,00", "the drawn text uses the snapshot DIMDSEP");
+
+    let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(dimension)));
+    let document = DxfReader::from_reader(Cursor::new(bytes))
+        .unwrap()
+        .read()
+        .unwrap();
+    let record = document
+        .dim_styles
+        .get("Standard")
+        .expect("the DIMSTYLE record is written");
+    assert_eq!(
+        record.dimdsep, 44,
+        "DIMDSEP must be the snapshot's value, not the table's 46"
+    );
+    assert_eq!(
+        record.dimlunit, 4,
+        "DIMLUNIT must be the snapshot's value, not the table's 2"
+    );
+}
+
+/// Review N2: a uniform scale scales the style snapshot's sizes, so the exported
+/// DIMSTYLE record's `DIMTXT`/`DIMASZ` match the scaled display rather than the
+/// pre-scale sizes (a re-import would otherwise render `1/k` text and arrows).
+#[test]
+fn uniform_scale_scales_the_exported_dimstyle_sizes() {
+    let dimension = DimensionGeometry::synthesized(
+        aligned_definition(),
+        "Standard".to_string(),
+        style_values(),
+        None,
+    )
+    .expect("synthesized");
+    let scaled = dimension
+        .transformed(&Transform3::scale(3.0))
+        .expect("scaled");
+
+    // The scaled display's text height is 3 * 2.5 = 7.5, and so is the snapshot.
+    let height = scaled
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Text { height, .. } => Some(*height),
+            _ => None,
+        })
+        .expect("text child");
+    assert!((height - 7.5).abs() < 1e-9, "scaled text height = {height}");
+    assert!((scaled.style().text_height - 7.5).abs() < 1e-9);
+    assert!((scaled.style().arrow_size - 7.5).abs() < 1e-9);
+
+    let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(scaled)));
+    let document = DxfReader::from_reader(Cursor::new(bytes))
+        .unwrap()
+        .read()
+        .unwrap();
+    let record = document
+        .dim_styles
+        .get("Standard")
+        .expect("the DIMSTYLE record is written");
+    assert!(
+        (record.dimtxt - 7.5).abs() < 1e-9,
+        "DIMTXT must match the scaled display: {}",
+        record.dimtxt
+    );
+    assert!(
+        (record.dimasz - 7.5).abs() < 1e-9,
+        "DIMASZ must match the scaled display: {}",
+        record.dimasz
+    );
+}
+
+/// Review N4: the export report is not silent about the pinned-Standard fallback
+/// (a style name absent from the table), the `DIMLUNIT` degradation, or the
+/// declared NOT-IMPLEMENTED variables written as `DimStyle::new` neutrals.
+#[test]
+fn dimension_export_report_declares_the_style_fallbacks() {
+    let mut style = style_values();
+    style.linear_unit_format = 4; // architectural: declared degradation
+    let dimension =
+        DimensionGeometry::synthesized(aligned_definition(), "Unlisted".to_string(), style, None)
+            .expect("synthesized");
+    let (_bytes, report) = export_one(SemanticGeometry::Dimension(Box::new(dimension)));
+    let text = report
+        .entries
+        .iter()
+        .filter(|e| e.code == "export.converted.dimension")
+        .map(|e| e.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains("not in the table"),
+        "the pinned-Standard fallback must be declared: {text}"
+    );
+    assert!(
+        text.contains("DIMLUNIT"),
+        "the DIMLUNIT degradation must be declared: {text}"
+    );
+    assert!(
+        text.contains("NOT-IMPLEMENTED"),
+        "the NOT-IMPLEMENTED variables must be declared: {text}"
+    );
 }

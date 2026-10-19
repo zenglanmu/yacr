@@ -8,6 +8,7 @@ use super::*;
 
 mod acis;
 mod basics;
+mod dimension;
 mod dxf;
 mod hatch;
 mod insert;

@@ -2,7 +2,7 @@
 //! limit).
 
 use crate::dimension::*;
-use crate::dimension_synthesis::synthesize;
+use crate::dimension_synthesis::{add, length, scale, sub, synthesize};
 use crate::*;
 
 fn style() -> DimensionStyleValues {
@@ -12,10 +12,20 @@ fn style() -> DimensionStyleValues {
         ext_beyond: 1.25,
         text_height: 2.5,
         text_gap: 0.625,
-        text_above: true,
+        center_mark: 0.0,
+        text_vertical: 1,
+        text_vertical_position: 0.0,
+        suppress_ext1: false,
+        suppress_ext2: false,
+        suppress_dim1: false,
+        suppress_dim2: false,
         linear_factor: 1.0,
         decimals: 4,
-        suppress_trailing_zeros: false,
+        rounding: 0.0,
+        postfix: String::new(),
+        zero_suppression: 0,
+        linear_unit_format: 2,
+        decimal_separator: 46,
         text_style_name: "Standard".to_string(),
         text_style: StyleId(0),
         text_font: None,
@@ -94,6 +104,7 @@ fn radial_synthesis_measures_the_leader() {
     let geometry = radial_synthesis(
         point(30.0, 0.0, 0.0),
         point(33.0, -4.0, 0.0),
+        point(30.0, 0.0, 0.0),
         false,
         &style(),
     )
@@ -127,7 +138,7 @@ fn angular_synthesis_measures_the_arc() {
 fn resolve_measurement_text_suppresses_trailing_zeros() {
     let mut style = style();
     style.decimals = 2;
-    style.suppress_trailing_zeros = true;
+    style.zero_suppression = 8;
     assert_eq!(resolve_measurement_text(None, "", "", 42.0, &style), "42");
     assert_eq!(resolve_measurement_text(None, "R", "", 5.0, &style), "R5");
     assert_eq!(
@@ -393,4 +404,339 @@ fn angular_synthesis_uses_the_definition_normal() {
         approx(arc_normal.z, -1.0),
         "arc normal must carry the definition's -Z extrusion: {arc_normal:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// P5b: one numeric contract test per newly consumed B.2(a) variable. Each fails
+// if the variable stops changing the synthesized display.
+// ---------------------------------------------------------------------------
+
+/// Linear synthesis of the standard 42-unit test dimension, with the dimension
+/// line at `line_y` (so `line_y < 0` puts the measured geometry above the line).
+fn linear_text_position(style: &DimensionStyleValues, line_y: f64) -> Point3 {
+    linear_synthesis(
+        point(-21.0, 0.0, 0.0),
+        point(21.0, 0.0, 0.0),
+        point(-21.0, line_y, 0.0),
+        point(1.0, 0.0, 0.0),
+        style,
+    )
+    .expect("synthesized")
+    .text_position
+}
+
+fn line_count(children: &[SemanticGeometry]) -> usize {
+    children
+        .iter()
+        .filter(|c| matches!(c, SemanticGeometry::Line { .. }))
+        .count()
+}
+
+fn arrow_count(children: &[SemanticGeometry]) -> usize {
+    children
+        .iter()
+        .filter(|c| matches!(c, SemanticGeometry::Mesh(_)))
+        .count()
+}
+
+#[test]
+fn dimtad_one_places_text_above_the_dimension_line() {
+    let mut style = style();
+    style.text_vertical = 1;
+    let position = linear_text_position(&style, -30.0);
+    // Line at y = -30, offset = DIMGAP + text_height/2 = 0.625 + 1.25.
+    assert!(approx(position.y, -28.125), "text y = {}", position.y);
+}
+
+#[test]
+fn dimtad_zero_centres_text_and_honours_dimtvp() {
+    let mut style = style();
+    style.text_vertical = 0;
+    style.text_vertical_position = 0.0;
+    assert!(
+        approx(linear_text_position(&style, -30.0).y, -30.0),
+        "DIMTAD=0 with DIMTVP=0 centres the text on the line"
+    );
+    // DIMTVP is a fraction of the text height: 0.5 * 2.5 = 1.25.
+    style.text_vertical_position = 0.5;
+    assert!(
+        approx(linear_text_position(&style, -30.0).y, -28.75),
+        "DIMTVP offsets the text by DIMTVP * text_height"
+    );
+}
+
+#[test]
+fn dimtad_two_is_the_far_side_from_the_measured_points() {
+    let mut style = style();
+    style.text_vertical = 2;
+    // Geometry above the line (y = -30): the far side is below.
+    let above = linear_text_position(&style, -30.0);
+    assert!(approx(above.y, -31.875), "far side below: y = {}", above.y);
+    // Geometry below the line (y = +30): the far side is above.
+    let below = linear_text_position(&style, 30.0);
+    assert!(
+        approx(below.y, 31.875),
+        "far side above when the points are below: y = {}",
+        below.y
+    );
+}
+
+#[test]
+fn dimtad_four_places_text_below_the_dimension_line() {
+    let mut style = style();
+    style.text_vertical = 4;
+    // "Below" is a fixed direction, unlike DIMTAD=2's far side: with the
+    // geometry below the line, DIMTAD=4 still sits below the line (whereas
+    // DIMTAD=2 would sit above).
+    let position = linear_text_position(&style, 30.0);
+    assert!(approx(position.y, 28.125), "below: y = {}", position.y);
+}
+
+#[test]
+fn dimtad_three_jis_places_text_above() {
+    // JIS is a distinct code (not collapsed to "above" silently): its vertical
+    // placement equals DIMTAD=1, and the JIS-specific horizontal/fit rules are
+    // declared unimplemented. This pins the chosen interpretation.
+    let mut style = style();
+    style.text_vertical = 3;
+    let position = linear_text_position(&style, -30.0);
+    assert!(approx(position.y, -28.125), "JIS above: y = {}", position.y);
+}
+
+#[test]
+fn dimse1_and_dimse2_suppress_extension_lines() {
+    let definition = aligned_definition();
+    let base =
+        |style: &DimensionStyleValues| synthesize(&definition, style).expect("synthesis").children;
+    // Neither suppressed: two extension lines plus the dimension line.
+    assert_eq!(line_count(&base(&style())), 3);
+    let mut only_first = style();
+    only_first.suppress_ext1 = true;
+    assert_eq!(
+        line_count(&base(&only_first)),
+        2,
+        "DIMSE1 removes the first extension line"
+    );
+    let mut only_second = style();
+    only_second.suppress_ext2 = true;
+    assert_eq!(
+        line_count(&base(&only_second)),
+        2,
+        "DIMSE2 removes the second extension line"
+    );
+    let mut both = style();
+    both.suppress_ext1 = true;
+    both.suppress_ext2 = true;
+    assert_eq!(
+        line_count(&base(&both)),
+        1,
+        "both suppressed leaves only the dimension line"
+    );
+}
+
+#[test]
+fn dimsd1_and_dimsd2_suppress_a_dimension_line_segment_and_arrow() {
+    let definition = aligned_definition();
+    let base =
+        |style: &DimensionStyleValues| synthesize(&definition, style).expect("synthesis").children;
+    let mut first = style();
+    first.suppress_dim1 = true;
+    let children = base(&first);
+    assert_eq!(arrow_count(&children), 1, "DIMSD1 removes the first arrow");
+    let mut both = style();
+    both.suppress_dim1 = true;
+    both.suppress_dim2 = true;
+    let children = base(&both);
+    assert_eq!(arrow_count(&children), 0, "both arrows removed");
+    assert_eq!(
+        line_count(&children),
+        2,
+        "only the two extension lines remain"
+    );
+}
+
+#[test]
+fn dimcen_draws_a_center_mark_or_center_lines_for_radial_dimensions() {
+    let center = point(0.0, 0.0, 0.0);
+    let on_arc = point(3.0, 4.0, 0.0);
+    let mark = |value: f64| {
+        let mut style = style();
+        style.center_mark = value;
+        radial_synthesis(center, on_arc, center, false, &style)
+            .expect("synthesized")
+            .children
+    };
+    // 0: no centre mark (leader + arrow only).
+    assert_eq!(line_count(&mark(0.0)), 1, "DIMCEN=0 draws nothing");
+    // > 0: a two-arm centre mark of half-length DIMCEN around the centre.
+    let marked = mark(2.5);
+    assert_eq!(line_count(&marked), 3, "DIMCEN>0 adds a centre mark");
+    // < 0: a centre line reaching past the circle (radius 5 + 2.5 = 7.5).
+    let lined = mark(-2.5);
+    assert_eq!(line_count(&lined), 3, "DIMCEN<0 adds centre lines");
+    let reaches = |children: &[SemanticGeometry]| {
+        children
+            .iter()
+            .filter_map(|c| match c {
+                SemanticGeometry::Line { start, end } => Some(length(sub(*end, *start))),
+                _ => None,
+            })
+            .fold(0.0_f64, f64::max)
+    };
+    assert!(
+        approx(reaches(&marked), 5.0),
+        "a centre mark spans 2 * DIMCEN"
+    );
+    assert!(
+        approx(reaches(&lined), 15.0),
+        "a centre line spans 2 * (radius + |DIMCEN|)"
+    );
+}
+
+/// Review B1: for a `Diameter` dimension the group-10 slot is the **opposite
+/// chord point**, not the centre, so the `DIMCEN` mark must be drawn at the
+/// midpoint of the two chord points (the true centre) — not on an arrow
+/// endpoint — and the centre-line reach is measured from the **radius** (half
+/// the leader length), not the full diameter.
+#[test]
+fn dimcen_centers_a_diameter_mark_on_the_midpoint_not_the_chord_point() {
+    let opposite = point(-3.0, -4.0, 0.0);
+    let on_arc = point(3.0, 4.0, 0.0);
+    let center = point(0.0, 0.0, 0.0);
+    let definition = DimensionDefinition {
+        kind: DimensionKind::Diameter,
+        points: DimensionPoints::Radial {
+            center: opposite,
+            point_on_arc: on_arc,
+            leader_length: 0.0,
+        },
+        text_middle: point(0.0, 0.0, 0.0),
+        text_rotation: 0.0,
+        normal: point(0.0, 0.0, 1.0),
+    };
+    // Lines as (midpoint, length): the leader (length = diameter = 10) plus the
+    // two DIMCEN arms.
+    let arms = |mark: f64| {
+        let mut style = style();
+        style.center_mark = mark;
+        let geometry =
+            DimensionGeometry::synthesized(definition.clone(), "Standard".to_string(), style, None)
+                .expect("synthesized");
+        geometry
+            .display()
+            .iter()
+            .filter_map(|child| match child {
+                SemanticGeometry::Line { start, end } => {
+                    Some((scale(add(*start, *end), 0.5), length(sub(*end, *start))))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    // DIMCEN > 0: the two arms are `2 * DIMCEN` long and centred on the true
+    // centre (the midpoint of the chord points), not on the group-10 slot.
+    let marked = arms(2.5);
+    let crosses: Vec<Point3> = marked
+        .iter()
+        .filter(|(_, len)| approx(*len, 5.0))
+        .map(|(mid, _)| *mid)
+        .collect();
+    assert_eq!(crosses.len(), 2, "two centre-mark arms");
+    for mid in &crosses {
+        assert!(
+            approx(length(sub(*mid, center)), 0.0),
+            "the centre mark must sit at the midpoint of the two chord points, got {mid:?}"
+        );
+    }
+
+    // DIMCEN < 0: the centre line reaches `radius + |DIMCEN| = 5 + 2.5 = 7.5`
+    // from the centre (span 15), i.e. relative to the radius, not the diameter.
+    let lined = arms(-2.5);
+    let longest = lined.iter().map(|(_, len)| *len).fold(0.0_f64, f64::max);
+    assert!(
+        approx(longest, 15.0),
+        "a diameter centre line spans 2 * (radius + |DIMCEN|), got {longest}"
+    );
+}
+
+#[test]
+fn dimrnd_rounds_the_displayed_distance_only() {
+    let mut style = style();
+    style.decimals = 2;
+    style.rounding = 0.5;
+    // 42.3 rounds to 42.5 at a 0.5 step.
+    assert_eq!(
+        resolve_measurement_text(None, "", "", 42.3, &style),
+        "42.50"
+    );
+    // Group 42 (the raw measurement) is unaffected; only the text is rounded.
+    let definition = aligned_definition();
+    let synthesized = synthesize(&definition, &style).expect("synthesis");
+    assert!(approx(synthesized.measurement, 42.0));
+}
+
+#[test]
+fn dimpost_wraps_the_measurement_with_a_prefix_or_suffix() {
+    let mut style = style();
+    style.decimals = 2;
+    style.postfix = "<> mm".to_string();
+    assert_eq!(
+        resolve_measurement_text(None, "", "", 42.0, &style),
+        "42.00 mm"
+    );
+    // The posted value is what a user override's `<>` substitutes.
+    assert_eq!(
+        resolve_measurement_text(Some("L=<>"), "", "", 42.0, &style),
+        "L=42.00 mm"
+    );
+}
+
+#[test]
+fn dimdsep_replaces_the_decimal_separator() {
+    let mut style = style();
+    style.decimals = 2;
+    style.decimal_separator = 44; // ','
+    assert_eq!(
+        resolve_measurement_text(None, "", "", 42.0, &style),
+        "42,00"
+    );
+}
+
+#[test]
+fn dimzin_bit_two_suppresses_the_leading_zero() {
+    let mut style = style();
+    style.decimals = 4;
+    style.zero_suppression = 4;
+    assert_eq!(
+        resolve_measurement_text(None, "", "", 0.5, &style),
+        ".5000",
+        "DIMZIN bit 2 drops the leading zero"
+    );
+}
+
+#[test]
+fn dimlunit_other_than_decimal_is_a_declared_degradation() {
+    // ADR 0017 F.4: a non-decimal unit format must be declared unimplemented,
+    // not silently rendered as decimal.
+    let mut style = style();
+    style.decimals = 2;
+    assert!(style.measurement_unit_degradation().is_none());
+    for code in [1_i16, 3, 4, 5] {
+        style.linear_unit_format = code;
+        let reason = style
+            .measurement_unit_degradation()
+            .unwrap_or_else(|| panic!("DIMLUNIT {code} must be declared unimplemented"));
+        assert!(
+            reason.contains("not implemented") && reason.contains(&code.to_string()),
+            "the declaration must name the format: {reason}"
+        );
+        // The render is the declared decimal fallback, not a silent success.
+        assert_eq!(
+            resolve_measurement_text(None, "", "", 42.0, &style),
+            "42.00"
+        );
+    }
+    style.linear_unit_format = 2;
+    assert!(style.measurement_unit_degradation().is_none());
 }

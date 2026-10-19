@@ -3,6 +3,7 @@
 use cad_domain::*;
 
 use super::DrawingDatabase;
+use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::tables::{
     ActiveAnnotationScale, BlockDefinition, DynamicBlockVisibility, Layer, Layout, LineType,
@@ -295,6 +296,57 @@ impl DrawingDatabase {
     /// The raw active annotation scale as set by the importer, when present.
     pub fn active_annotation_scale(&self) -> Option<&ActiveAnnotationScale> {
         self.active_annotation_scale.as_ref()
+    }
+
+    /// DIMSTYLE table entries (ADR 0017 B.1).
+    pub fn dim_styles(&self) -> impl Iterator<Item = &DimStyle> {
+        self.dim_styles.values()
+    }
+
+    /// A DIMSTYLE table entry by identity.
+    pub fn dim_style(&self, id: DimStyleId) -> Option<&DimStyle> {
+        self.dim_styles.get(&id)
+    }
+
+    /// A DIMSTYLE table entry by name, matched exactly then case-insensitively.
+    ///
+    /// The name index resolves the common case; the case-insensitive fallback
+    /// mirrors [`Self::scale_by_name`] and never invents a style.
+    pub fn dim_style_by_name(&self, name: &str) -> Option<&DimStyle> {
+        if let Some(id) = self.dim_style_ids_by_name.get(name) {
+            return self.dim_styles.get(id);
+        }
+        self.dim_styles
+            .values()
+            .find(|style| style.name.eq_ignore_ascii_case(name.trim()))
+    }
+
+    /// Resolve a named DIMSTYLE into the entity-level snapshot the creation path
+    /// (P5c) uses, applying `DIMSCALE` and resolving the text-style identity
+    /// from the STYLE table.
+    ///
+    /// The text style is resolved by name (exact then case-insensitive); its
+    /// font key is the first resource key. When the text style is absent the
+    /// snapshot falls back to `StyleId(0)` with no font rather than failing —
+    /// the measurement text is still drawn (its font is a host-gated `Partial`,
+    /// ADR 0017 D.2).
+    pub fn resolve_dim_style(&self, name: &str) -> Option<DimensionStyleValues> {
+        let style = self.dim_style_by_name(name)?;
+        let text_style_name = style.text_style_name.clone();
+        let resolved = self.style_by_name(&text_style_name);
+        let text_style = resolved.map(|s| s.id).unwrap_or(StyleId(0));
+        let text_font = resolved.and_then(|s| s.resource_keys.first().cloned());
+        Some(style.resolved(text_style_name, text_style, text_font))
+    }
+
+    /// A text style table entry by name, matched exactly then case-insensitively.
+    pub fn style_by_name(&self, name: &str) -> Option<&Style> {
+        if let Some(style) = self.styles.values().find(|s| s.name == name) {
+            return Some(style);
+        }
+        self.styles
+            .values()
+            .find(|s| s.name.eq_ignore_ascii_case(name.trim()))
     }
 
     /// The active annotation scale name, when one is set.

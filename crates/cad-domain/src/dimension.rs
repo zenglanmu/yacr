@@ -276,15 +276,20 @@ impl DimensionDefinition {
 // Resolved style snapshot (ADR 0017 B.2(a) — the display-driving subset).
 // ---------------------------------------------------------------------------
 
-/// The resolved DIMSTYLE values a synthesized dimension consumes, already scaled
-/// by `DIMSCALE` where AutoCAD scales them (ADR 0017 B.2(a)).
+/// The resolved DIMSTYLE values a synthesized dimension consumes (ADR 0017
+/// B.2(a)), already scaled by `DIMSCALE` where AutoCAD scales them.
 ///
 /// This is a **snapshot**: editing the DIMSTYLE table does not retroactively
 /// update an existing dimension (ADR 0017 B.1). The importer resolves the source
 /// `DimStyle` into this struct; the creation path builds it from the active
-/// style. Only the variables the synthesis actually consumes are carried — the
-/// remaining B.2(a) variables and the whole B.2(b) "snapshot only" set are the
-/// DIMSTYLE stage's concern (P5b).
+/// style (via `cad-db`'s `DimStyle::resolved` / `DrawingDatabase::resolve_dim_style`,
+/// P5b). Every field here is consumed by the synthesis or the formatting path, so
+/// storing one without honouring it is not possible by construction; the B.2(b)
+/// "snapshot only" set lives in `cad-db`'s DIMSTYLE table instead.
+///
+/// `DIMSCALE` (group 40) is not a field: it is already baked into the scaled
+/// sizes (`arrow_size`, `ext_offset`, `ext_beyond`, `text_height`, `text_gap`,
+/// `center_mark`) at resolve time, exactly as AutoCAD scales them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DimensionStyleValues {
     /// `DIMASZ`: arrowhead length in drawing units.
@@ -297,14 +302,45 @@ pub struct DimensionStyleValues {
     pub text_height: f64,
     /// `DIMGAP`: gap between the dimension line and the measurement text.
     pub text_gap: f64,
-    /// `DIMTAD`: place text above (`true`) rather than centred on the line.
-    pub text_above: bool,
+    /// `DIMCEN`: centre mark/line size. `> 0` draws a centre mark, `< 0` a
+    /// centre line (the cross extends past the circle), `0` draws nothing.
+    pub center_mark: f64,
+    /// `DIMTAD`: vertical text position, `0` centred / `1` above / `2` outside
+    /// (far side) / `3` JIS / `4` below. Any other code is treated as `1`.
+    ///
+    /// Applied to the linear/aligned text placement; radial and angular text
+    /// keep their own leader/arc placement and do not read this (declared).
+    pub text_vertical: i16,
+    /// `DIMTVP`: text vertical offset as a fraction of the text height, applied
+    /// only when `text_vertical == 0` (AutoCAD ignores it otherwise).
+    pub text_vertical_position: f64,
+    /// `DIMSE1`: suppress the first extension line.
+    pub suppress_ext1: bool,
+    /// `DIMSE2`: suppress the second extension line.
+    pub suppress_ext2: bool,
+    /// `DIMSD1`: suppress the first dimension-line segment and its arrow.
+    pub suppress_dim1: bool,
+    /// `DIMSD2`: suppress the second dimension-line segment and its arrow.
+    pub suppress_dim2: bool,
     /// `DIMLFAC`: linear measurement scale factor.
     pub linear_factor: f64,
     /// `DIMDEC`: decimal places for the measurement.
     pub decimals: usize,
-    /// `DIMZIN` bit 3: suppress trailing zeros in the measurement.
-    pub suppress_trailing_zeros: bool,
+    /// `DIMRND`: distance rounding applied to the displayed measurement (`0`
+    /// disables it). Group 42 keeps the unrounded measurement.
+    pub rounding: f64,
+    /// `DIMPOST`: measurement prefix/suffix template; `<>` is the measurement
+    /// placeholder. Empty (or `<>`) renders the bare measurement.
+    pub postfix: String,
+    /// `DIMZIN`: zero-suppression bit field. Bits 2 (suppress the leading zero)
+    /// and 3 (suppress trailing zeros) are consumed; the feet/inch bits
+    /// (`1`/`2`/`16`) are declared unimplemented.
+    pub zero_suppression: i16,
+    /// `DIMLUNIT`: linear unit format. Only `2` (decimal) is implemented; other
+    /// values are a declared degradation ([`Self::measurement_unit_degradation`]).
+    pub linear_unit_format: i16,
+    /// `DIMDSEP`: decimal separator character code (`46` = `.`).
+    pub decimal_separator: i16,
     /// Resolved `DIMTXSTY` name (DXF group 340 reference), kept so the DIMSTYLE
     /// table can be written without a dangling text-style reference.
     pub text_style_name: String,
@@ -312,6 +348,67 @@ pub struct DimensionStyleValues {
     pub text_style: StyleId,
     /// The font resource key the measurement `Text` child carries, when known.
     pub text_font: Option<String>,
+}
+
+impl DimensionStyleValues {
+    /// `DIMZIN` bit 3: suppress trailing zeros (`12.5000` -> `12.5`).
+    pub fn suppress_trailing_zeros(&self) -> bool {
+        self.zero_suppression & 8 != 0
+    }
+
+    /// `DIMZIN` bit 2: suppress the leading zero (`0.5000` -> `.5000`).
+    pub fn suppress_leading_zeros(&self) -> bool {
+        self.zero_suppression & 4 != 0
+    }
+
+    /// The six size/offset fields `DIMSCALE` scales, multiplied by `factor`
+    /// (ADR 0017 B.2(a)).
+    ///
+    /// Used by [`DimensionGeometry::transformed`] to keep the style snapshot in
+    /// step with the display under a uniform transform: after a ×k scale the
+    /// display and the measurement scale, so the snapshot's sizes must too — or a
+    /// re-export would write the pre-scale sizes with `DIMSCALE=1` and a
+    /// re-import would render `1/k` text and arrows (review N2).
+    pub fn scaled(&self, factor: f64) -> Self {
+        let mut scaled = self.clone();
+        scaled.arrow_size *= factor;
+        scaled.ext_offset *= factor;
+        scaled.ext_beyond *= factor;
+        scaled.text_height *= factor;
+        scaled.text_gap *= factor;
+        scaled.center_mark *= factor;
+        scaled
+    }
+
+    /// The declared degradation for a `DIMLUNIT` format this build does not
+    /// implement, or `None` when the format is decimal (the implemented case).
+    ///
+    /// The synthesis still renders a decimal measurement for every format, so
+    /// this is what keeps a non-decimal unit honest: the importer folds the
+    /// returned reason into the dimension's `Completeness::Partial` rather than
+    /// presenting a scientific/architectural/fractional format as decimal
+    /// (ADR 0017 F.4 / B.2(b)).
+    pub fn measurement_unit_degradation(&self) -> Option<String> {
+        let name = match self.linear_unit_format {
+            2 => return None,
+            1 => "scientific",
+            3 => "engineering",
+            4 => "architectural",
+            5 => "fractional",
+            _ => {
+                return Some(format!(
+                "DIMLUNIT {} is not a known linear unit format; the measurement is rendered as \
+                 decimal (declared degradation)",
+                self.linear_unit_format
+            ))
+            }
+        };
+        Some(format!(
+            "DIMLUNIT {} ({name}) is not implemented; the measurement is rendered as decimal \
+             (declared degradation)",
+            self.linear_unit_format
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -451,7 +548,7 @@ impl DimensionGeometry {
         Ok(DimensionGeometry {
             definition,
             style_name: self.style_name.clone(),
-            style: self.style.clone(),
+            style: self.style.scaled(scale_factor),
             measurement,
             text_override: self.text_override.clone(),
             display,

@@ -12,6 +12,61 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## P5b：DIMSTYLE 表 + B.2(a)/(b) 子集 + 公制默认 + 导入/导出接线（ADR-0017 决策 B，2026-10-19）
+
+**范围**：`crates/cad-db`（新 `dim_style.rs`：`DimStyle` 表 + `standard_metric`/`resolved`/`resolve_dim_style`/
+`dim_style_by_name`/`dim_style(s)`/`insert_dim_style`）、`crates/cad-domain`（`DimensionStyleValues` 扩到
+B.2(a) 全集 + 合成/格式化消费 + `transformed` 缩放快照）、`crates/cad-import-acadrust`（`read_dim_styles` 导入
+填充 + 导出 DIMSTYLE 记录来源拆分 + `DIMCEN` 直径修复）。**无 UI 命令**；**未**改 acadrust/架构边界。
+
+- **`cad-db` 新增 `DimStyle` 表**（`crates/cad-db/src/dim_style.rs`）：承载 **B.2(a)+B.2(b) 全量变量**；
+  `standard_metric` 为**钉住的公制默认**（决策 B.1/N7）；`resolved` 把 `DIMSCALE` **烘进各尺寸**（不含测量值）；
+  创建时 API `resolve_dim_style`/`dim_style_by_name`/`dim_style(s)` **供 P5c 使用**；`finish` 保证总有 `Standard`。
+- **`DimensionStyleValues` 扩到 B.2(a) 全集，且每个变量都被真正消费**（消费映射逐行写入 ADR-0017 P5b 表）：
+  `DIMTXT`/`DIMASZ`/`DIMEXO`/`DIMEXE`/`DIMGAP`/`DIMTAD`/`DIMTVP`/`DIMSCALE`/`DIMDEC`/`DIMZIN`/`DIMLFAC`/`DIMRND`/
+  `DIMPOST`/`DIMDSEP`/`DIMLUNIT`/`DIMCEN`/`DIMTXSTY`/`DIMSE1/2`/`DIMSD1/2`。
+- **导入填充**：`read_dim_styles`（`dimension/values.rs`）读入 DIMSTYLE 表 → `cad-db` `DimStyle`；缺失样式**回退到
+  钉住的 `Standard`**（非沉默的任意默认）。
+- **导出（N1 拆分）**：DIMSTYLE 记录携带**表中**的 B.2(b) 值，而**两个驱动显示的变量（`DIMLUNIT`/`DIMDSEP`）
+  从实体快照写出**——它们在实体里真正喂了格式化；该拆分**显式声明**。
+- **`transformed` 按均匀缩放同步缩放样式快照（N2）**，使导出记录的尺寸匹配**被缩放后**的显示。
+- **`DIMCEN` 直径修复（B1）**：中心标记画在**真实圆心**（`Diameter` 为两弦点中点，非组 10 的对径点）；
+  中心线**触及半径相对**（`radius + |DIMCEN|`）。
+- **F.4 债务结清**：两条 `DIMLUNIT` 诚实测试落地——`dimlunit_other_than_decimal_is_a_declared_degradation`
+  （`cad-domain/src/dimension_tests.rs`）与 `non_decimal_dimlunit_is_declared_partial_not_a_silent_decimal`
+  （`cad-import-acadrust/src/tests/dimension.rs`）。
+- **i18n：0 个新键**——P5b **无 UI 表面**；计划里 P5c 行写的 "+ i18n" 指 **P5b**，诚实计数为**零**（与 B.3 一致）。
+- **偏离/决策（逐条写入 ADR-0017 P5b「偏离/决策」与 `docs/compatibility.md` 的 DIMENSION 子表）**：
+  ① **渲染增量**——P5b 确实改变已导入标注的渲染输出（一般），是**正确性改进也是像素变化**；**已提交 QCAD flange
+  经验证不变**（其样式只设 DIMASZ 2.5/DIMEXO 0.625/DIMEXE 1.25/DIMTIH 0/DIMTAD 1/DIMZIN 8/DIMTXT 2.5/
+  DIMGAP 0.625，六条全 aligned/rotated linear 无 radial），**"不变"只限该夹具**；② `DIMCEN` 默认**刻意钉 0.0**
+  （非文档公制 2.5）——不静默改导入标注，但**新建** radial 标注在 AutoCAD 公制会画 2.5 处**不画**；③ `DIMCEN`
+  其余近似（AutoCAD 只在标注线落圆外画标记、**我们总是画**；负 `DIMCEN` 的带缺口中心线我们画**普通长十字**）；
+  ④ `DIMTAD=3`（JIS）为独立代码但**垂直放置等于"上方"**，JIS 特有水平放置/文字适配**未实现**；⑤ `DIMSD1/2`
+  在**文字中点**分割标注线（文字间隙断口的**近似**）；⑥ `DIMRND` 只取整**显示文字**（组 42 保留未取整）；⑦ `DIMPOST`
+  无 `<>` 按**后缀**处理、`DIMPOST="."` 的"无后缀"**未遵循**；⑧ `DIMLUNIT≠2` 为**声明降级**（导入 `Partial`）、
+  `DIMZIN` 英尺/英寸位未实现；⑨ `DIMCONTINUEMODE` 存储但**不可写**；⑩ `DIMTAD`/`DIMTVP` 仅 linear/aligned；
+  ⑪ DIMSTYLE 记录来源拆分 + NOT-IMPLEMENTED 变量写**中性值** + `DIMDLI`/`DIMDLE` 未缩放 + `DIMSCALE` 不保留；
+  ⑫ `insert_dim_style` **拒绝**已被别的名字占用的 id；⑬ **取代 P5a 偏离 11 的两条现已错误表述**（"DIMTAD 2/3/4
+  塌缩为 1" 与 "(b) 写未钉住默认值" 均**不再成立**）。
+- **B.2 拆分更正（追加注记）**：`DIMLUNIT`/`DIMDSEP` **被格式化消费**故实为 (a)；`DIMZIN` 现消费 **bits 2+3**
+  （B.2(a)"仅 bit 3"格过时）；`DIMSE/DIMSD` 仅 **linear/aligned**；`DIMGAP` 只影响**文字位置**，标注线断口**未建模**。
+- **决策 E 更新（追加注记）**：**U-4 结清**（公制 `DIMCEN` 初值 2.5，我们**刻意偏离**为 0.0，记为"已文档化、
+  刻意偏离"而非"未查证"）；**`DIMTAD=2` 从推断升级为文档化**（Autodesk："背离定义点的一侧"）；**新增 U 行**：
+  `DIMTIH`/`DIMTOH`/`DIMTOFL` 断言为"Autodesk 公制 Standard"，但只核实了**英制**初值（On/On，同 acadrust
+  `dxf_defaults`），文档化公制（ISO-25）为 off/off——B.2(b) 显示忽略故**显示安全**，但断言**需出处或降级**。
+- **门禁状态（诚实）**：受影响 crate 契约测试见 `cad-domain/src/dimension_tests.rs`、
+  `cad-import-acadrust/src/tests/dimension.rs`、`crates/cad-db/src/dim_style.rs` 内联测试。
+  **P5b gate 判定 = ACCEPT-WITH-FIXES（无阻塞）**；门禁**抓到两件事**：① **`DIMCEN` 直径 bug（B1）**——中心标记
+  画在组 10（对径点）而非**真实圆心**、中心线触及按引线全长而非**半径相对**；② **渲染增量（B2）**——P5b 会改变
+  已导入标注的渲染输出（正确性改进 + 像素变化），须**限定"不变"断言到 flange 夹具**。两者均已修/已声明。
+  **门禁（编排者复跑，2026-10-19）**：受影响 crate **1803 通过 / 0 失败**；`cargo check --workspace --all-targets --locked`、
+  wasm lib、clippy(workspace `-D warnings`)、fmt、architecture（27 包）、i18n（**489** 键，**P5b 新增 0 键**——
+  它无 UI 表面）、fixture（22）、file-size（**666**）、workflow、UI **126/126** + build。
+- **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；**真机证据**（P5b 无 UI 表面，
+  未跑）；跨平台；**第三方读取器验证**（本机无 ezdxf/dwgread/dxfgrabber）。
+- **待办**：P5c（`DIMLINEAR` + `DIMALIGNED`，将使用 P5b 的创建时解析 API）；P5d/P5e；P5f 已降级 NOT IMPLEMENTED。
+
 ## P5a：标注族域变体 + 导入迁移 + 导出（ADR-0017，2026-10-19）
 
 **范围**：`crates/cad-domain`（新 `dimension.rs`/`dimension_synthesis.rs`/`dimension_tests.rs`）、

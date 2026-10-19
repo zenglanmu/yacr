@@ -31,6 +31,7 @@ ids!(
     StyleId,
     LinetypeId,
     ScaleId,
+    DimStyleId,
     ViewportId,
     TransactionId,
     RequestId,

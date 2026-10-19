@@ -12,7 +12,7 @@ use acadrust::entities::{
 use acadrust::tables::{BlockRecord, DimStyle};
 use acadrust::types::Vector3;
 use acadrust::CadDocument;
-use cad_db::DbEntity;
+use cad_db::{DbEntity, DimStyle as DbDimStyle};
 use cad_domain::*;
 
 use super::entity::{common_for, emit, v3, EntityContext, ExportAccumulator};
@@ -92,7 +92,7 @@ pub(super) fn emit_dimension(
     // group 3 always resolves to the values the entity actually used rather
     // than to a stale table entry.
     doc.dim_styles
-        .add_or_replace(dimstyle_entry(style_name, dimension.style()));
+        .add_or_replace(dimstyle_entry(style_name, dimension.style(), ctx.database));
     let mut style_reason = format!("DIMSTYLE record '{style_name}' written so group 3 resolves");
     if !text_reasons.is_empty() {
         style_reason.push_str(&format!(" ({})", text_reasons.join("; ")));
@@ -149,6 +149,29 @@ pub(super) fn emit_dimension(
             .to_string(),
         "DIMSCALE is not preserved; the resolved values are written with DIMSCALE=1".to_string(),
     ];
+    // N4(i): when the dimension's style name is not in the table, the pinned
+    // metric Standard's B.2(b) values are written for it; say so rather than let
+    // the fallback be silent.
+    if ctx.database.dim_style_by_name(style_name).is_none() {
+        conversion.push(format!(
+            "DIMSTYLE '{style_name}' is not in the table; the pinned metric Standard's \
+             snapshot-only values are written for it (declared fallback)"
+        ));
+    }
+    // N4(ii): a DIMLUNIT format this build does not implement is a declared
+    // degradation on export (the record still writes the source code so it is
+    // not silently rewritten to decimal).
+    if let Some(reason) = dimension.style().measurement_unit_degradation() {
+        conversion.push(reason);
+    }
+    // N4(iii): the declared NOT-IMPLEMENTED style variables are written as
+    // `DimStyle::new` neutral defaults, not the source values.
+    conversion.push(
+        "declared NOT-IMPLEMENTED style variables (DIMALT*/DIMTOL*/DIMBLK*/DIMTFILL*/DIMLTYPE*/\
+         DIMFXL*/DIMARCSYM*/...) are written as DimStyle::new neutral defaults, not the source \
+         values"
+            .to_string(),
+    );
     // N1: the export forces the world-Z normal; a dimension on a non-+Z plane
     // loses group 210 rather than being silently re-oriented.
     if (definition.normal.z - 1.0).abs() > 1e-9
@@ -281,20 +304,58 @@ fn build_dimension(definition: &DimensionDefinition, base: DimensionBase) -> Cad
     })
 }
 
-/// A DIMSTYLE table record carrying the resolved (already-scaled) values, with
-/// `DIMSCALE=1` so reading it back reproduces the same display.
-fn dimstyle_entry(name: &str, style: &DimensionStyleValues) -> DimStyle {
+/// A DIMSTYLE table record carrying the resolved (already-scaled) B.2(a)
+/// values plus the remaining B.2(b) values from the database's style table,
+/// with `DIMSCALE=1` so reading it back reproduces the same display.
+fn dimstyle_entry(
+    name: &str,
+    style: &DimensionStyleValues,
+    database: &cad_db::DrawingDatabase,
+) -> DimStyle {
     let mut entry = DimStyle::new(name);
+    // B.2(a): the resolved snapshot, already scaled, so DIMSCALE=1 round-trips.
     entry.dimscale = 1.0;
     entry.dimasz = style.arrow_size;
     entry.dimexo = style.ext_offset;
     entry.dimexe = style.ext_beyond;
     entry.dimtxt = style.text_height;
     entry.dimgap = style.text_gap;
-    entry.dimtad = if style.text_above { 1 } else { 0 };
+    entry.dimtad = style.text_vertical;
+    entry.dimtvp = style.text_vertical_position;
     entry.dimlfac = style.linear_factor;
     entry.dimdec = style.decimals as i16;
-    entry.dimzin = if style.suppress_trailing_zeros { 8 } else { 0 };
+    entry.dimzin = style.zero_suppression;
+    entry.dimrnd = style.rounding;
+    entry.dimpost = style.postfix.clone();
+    entry.dimcen = style.center_mark;
+    entry.dimse1 = style.suppress_ext1;
+    entry.dimse2 = style.suppress_ext2;
+    entry.dimsd1 = style.suppress_dim1;
+    entry.dimsd2 = style.suppress_dim2;
     entry.dimtxsty = style.text_style_name.clone();
+    // N1: DIMLUNIT/DIMDSEP are display-driving (they live in the entity snapshot
+    // and feed the measurement formatting), so the record carries the snapshot's
+    // values — what the drawn text actually used — not the DB table's, which may
+    // differ from the entity's resolved style.
+    entry.dimlunit = style.linear_unit_format;
+    entry.dimdsep = style.decimal_separator;
+    // B.2(b): the stored style table entry (ADR 0017 B.2(b)); the pinned metric
+    // default when the style is not in the table. These exist for export
+    // fidelity (group 3 must resolve), not to drive the display.
+    let defaults = DbDimStyle::standard_metric(DimStyleId(0));
+    let table = database.dim_style_by_name(name).unwrap_or(&defaults);
+    entry.dimjust = table.text_justification;
+    entry.dimtih = table.text_inside_horizontal;
+    entry.dimtoh = table.text_outside_horizontal;
+    entry.dimatfit = table.text_fit;
+    entry.dimtix = table.text_inside_extensions;
+    entry.dimtofl = table.text_outside_flow_line;
+    entry.dimclrd = table.dim_line_color;
+    entry.dimclre = table.ext_line_color;
+    entry.dimclrt = table.text_color;
+    entry.dimdle = table.dim_line_extension;
+    entry.dimdli = table.dim_line_increment;
+    // DIMCONTINUEMODE is drawing-level and has no acadrust `DimStyle` field, so
+    // it cannot be written here (declared, ADR 0017 B.2(b)).
     entry
 }

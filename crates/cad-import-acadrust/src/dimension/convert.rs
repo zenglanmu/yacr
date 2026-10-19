@@ -145,12 +145,17 @@ impl ImporterBuilder<'_> {
                 text_override,
                 members,
             ) {
-                Ok(geometry) => (
-                    SemanticGeometry::Dimension(Box::new(geometry)),
+                Ok(geometry) => {
                     // N9: fold in the members' own completeness so a picture
-                    // built from lossy members is not reported `Complete`.
-                    member_completeness,
-                ),
+                    // built from lossy members is not reported `Complete`. P5b:
+                    // also fold in a declared non-decimal DIMLUNIT degradation.
+                    let completeness =
+                        member_completeness.combine(unit_degradation(geometry.style()));
+                    (
+                        SemanticGeometry::Dimension(Box::new(geometry)),
+                        completeness,
+                    )
+                }
                 Err(_) => {
                     Self::unsupported_dimension(base, "dimension points are degenerate".into())
                 }
@@ -164,10 +169,13 @@ impl ImporterBuilder<'_> {
                 style,
                 text_override,
             ) {
-                Ok(geometry) => (
-                    SemanticGeometry::Dimension(Box::new(geometry)),
-                    Completeness::Complete,
-                ),
+                Ok(geometry) => {
+                    let completeness = unit_degradation(geometry.style());
+                    (
+                        SemanticGeometry::Dimension(Box::new(geometry)),
+                        completeness,
+                    )
+                }
                 Err(_) => {
                     Self::unsupported_dimension(base, "dimension points are degenerate".into())
                 }
@@ -336,6 +344,16 @@ impl ImporterBuilder<'_> {
             }
         }
         (SemanticGeometry::Compound(children), completeness)
+    }
+}
+
+/// The declared degradation of a non-decimal `DIMLUNIT`, folded into the
+/// dimension's completeness so a scientific/architectural/fractional unit is
+/// reported `Partial` rather than silently rendered as decimal (ADR 0017 F.4).
+fn unit_degradation(style: &DimensionStyleValues) -> Completeness {
+    match style.measurement_unit_degradation() {
+        Some(reason) => Completeness::Partial(vec![reason]),
+        None => Completeness::Complete,
     }
 }
 

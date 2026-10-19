@@ -456,3 +456,97 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
 内容块的必要性依据**第三方文档**（ezdxf，引于 §0.6），但本机**没有**第三方读取器（无
 `ezdxf`/`dwgread`/`dxfgrabber`），故我们的往返只是**内部一致性**——只声称"采用了该出处所述 AutoCAD
 所需的结构"，**从不**声称 AutoCAD 兼容。**NOT RUN**。
+
+### P5b（DIMSTYLE 表 + B.2(a)/(b) 子集 + 默认 + 导入/导出接线；**无 UI 命令**，**0 个新 i18n 键**）
+
+- **`cad-db` 新增 `DimStyle` 表**（`crates/cad-db/src/dim_style.rs`）：承载 **B.2(a) + B.2(b) 的全量变量集**。
+  - `DimStyle::standard_metric`——**钉住的公制默认**（决策 B.1/N7 选定的一套）。
+  - `DimStyle::resolved`——把 `DIMSCALE` **烘进各尺寸**（距离/偏移），**不含测量值**。
+  - 创建时 API：`resolve_dim_style`（按名解析 + 把 `DIMTXSTY` 解析到 `StyleId`）、`dim_style_by_name`、
+    `dim_style(s)`——**P5c 将使用**这三者（创建命令用"当前样式"= `Standard`，B.3）。
+  - `finish` 保证库里**总有一个 `Standard`**（缺失即补建）。
+- **`DimensionStyleValues`（`cad-domain`）扩到 B.2(a) 全集，且每个变量都被合成/格式化真正消费**（不再有"存而不消费"）：
+
+  | 变量 | 消费点 | 适用 kind |
+  |---|---|---|
+  | `DIMTXT` | 合成文字子项高度 | 全部 |
+  | `DIMASZ` | 箭头网格尺寸 | 有箭头的 kind（linear/aligned/angular/radial/diameter） |
+  | `DIMEXO` / `DIMEXE` | 延长线起点 / 终点 | linear/aligned |
+  | `DIMGAP` | 文字离标注线偏移（`text_offset` / leader 文本位置） | 全部（文本位置） |
+  | `DIMTAD` | 文字垂直位置（`text_offset`） | **仅** linear/aligned |
+  | `DIMTVP` | `DIMTAD=0` 时的文字垂直偏移比例 | **仅** linear/aligned |
+  | `DIMSCALE` | 经 `resolved` 烘进各尺寸（构造期） | 全部 |
+  | `DIMDEC` | 测量值格式化小数位 | 全部（经 `format_measurement`） |
+  | `DIMZIN` | 零抑制（**现消费 bits 2+3**，见下） | 全部（格式化） |
+  | `DIMLFAC` | 线性测量比例（乘进格式化输入） | 全部（经 `resolve_measurement_text`） |
+  | `DIMRND` | 显示取整（**仅文字**，见偏离） | 全部 |
+  | `DIMPOST` | 测量值前后缀 | 全部 |
+  | `DIMDSEP` | 小数分隔符 | 全部（格式化） |
+  | `DIMLUNIT` | 单位制判定（≠2 声明降级） | 全部 |
+  | `DIMCEN` | 中心标记 / 中心线 | radius/diameter |
+  | `DIMTXSTY` | 文字样式名（解析到 `StyleId`） | 全部 |
+  | `DIMSE1`/`DIMSE2` | 抑制第一/二条延长线 | **仅** linear/aligned |
+  | `DIMSD1`/`DIMSD2` | 抑制第一/二段标注线 + 箭头 | **仅** linear/aligned |
+
+- **导入填充**：`read_dim_styles`（`crates/cad-import-acadrust/src/dimension/values.rs`）读入 DIMSTYLE 表并
+  转成 `cad-db` 的 `DimStyle`；**缺失样式回退到钉住的 `Standard`**（不是沉默的任意默认）。
+- **导出（N1 拆分）**：DIMSTYLE 记录携带**表中**的 B.2(b) 值，而**两个驱动显示的变量（`DIMLUNIT`/`DIMDSEP`）
+  从实体快照写出**——因为它们在实体里真正喂了测量值格式化；表里的值可能与该实体已解析的样式不同。
+  该拆分**显式声明**（不是"全从表写"）。
+- **`transformed` 按均匀缩放同步缩放样式快照（N2）**：使导出记录里的尺寸与**被缩放后**的显示一致。
+- **`DIMCEN` 直径修复（B1）**：中心标记画在**真实圆心**——对 `Diameter`，圆心是**两弦点的中点**，
+  **不是**组 10（组 10 是**对径点**）；中心线**触及半径相对**（`radius + |DIMCEN|`），不是引线全长。
+- **F.4 债务在此结清**：两条 `DIMLUNIT` 诚实测试落地——域
+  `dimlunit_other_than_decimal_is_a_declared_degradation`（`crates/cad-domain/src/dimension_tests.rs`）、
+  导入 `non_decimal_dimlunit_is_declared_partial_not_a_silent_decimal`
+  （`crates/cad-import-acadrust/src/tests/dimension.rs`）。
+- **i18n：0 个新键**——P5b **没有 UI 表面**（无命令、无面板、无状态投影）。计划里 P5c 行写的 "+ i18n" 指的是
+  **P5b**；诚实的计数是**零**，这与决策 B.3（P5b 只做样式存储 + `Standard` + 创建时解析，不做可交互样式管理器）
+  一致。
+
+#### B.2 拆分更正（追加注记，不改写决策文本）
+
+- `DIMLUNIT`/`DIMDSEP` **被格式化消费**，故实为 **(a)**（B.2 原表把它们列在 (b)）。
+- `DIMZIN` 现**消费 bits 2+3**，故 B.2(a) 表里"仅消费 bit 3"的格子**已过时**。
+- `DIMSE1/2` / `DIMSD1/2` 的消费**仅限 linear/aligned**（radial/angular 不读）。
+- B.2(a) 的 `DIMGAP` 行**过度承诺**：文字周围的**标注线断口未被建模**，`DIMGAP` 只影响**文字位置**。
+
+#### 偏离 / 决策（逐条，均须进能力表）
+
+1. **渲染增量（门禁 B2）**：P5b **确实会改变已导入标注的渲染输出**（一般而言）——`DIMTAD` 2/3/4 现**真正实现**
+   而不再塌缩为"上方"，且 `DIMSE1/2`、`DIMSD1/2`、`DIMCEN≠0`、`DIMRND`、`DIMPOST`、`DIMZIN` bit 2、`DIMDSEP`
+   **新被消费**。这是**正确性改进，也是像素变化**。**已提交的 QCAD flange 经验证不变**：其 `QCADDimStyle` 只设
+   `DIMASZ 2.5` / `DIMEXO 0.625` / `DIMEXE 1.25` / `DIMTIH 0` / **`DIMTAD 1`** / `DIMZIN 8` / `DIMTXT 2.5` /
+   `DIMGAP 0.625`，且其六条标注**全是 aligned/rotated linear（无 radial）**。**任何"不变"的断言只限于该夹具**。
+2. **`DIMCEN` 默认钉为 `0.0`**（而非文档化的公制 2.5，见下方 U-4 更新）；它**不会**静默改变已导入标注
+   （导入从源样式解析；钉住的默认只到达手工构造的库与缺失样式回退），但**新建**的 radial 标注（P5c/P5d）
+   在 AutoCAD 公制会画 2.5 中心标记处**不画中心标记**。
+3. **`DIMCEN` 除放置 bug 之外的近似**：AutoCAD 只在**标注线落在圆外**时为 radius/diameter 画标记，**我们总是画**；
+   负 `DIMCEN` 在 AutoCAD 是"中心标记 + 带缺口的中心线"，我们画**普通长十字**。
+4. **`DIMTAD=3`（JIS）**实现为一个**独立代码**，其**垂直放置等于"上方"**；JIS 特有的**水平放置与文字适配规则**
+   为**声明未实现**。
+5. **`DIMSD1`/`DIMSD2`** 在**文字中点**处分割标注线——是 AutoCAD 文字间隙断口的**近似**。
+6. **`DIMRND` 只取整显示文字**；组 42 保留**未取整**的测量值。
+7. **`DIMPOST`**：无 `<>` 的模板按**后缀**处理（我们对未言明情形的读法）；AutoCAD 的 `DIMPOST = "."` 表示
+   "无后缀"**未被遵循**（我们会渲染出 `42.5.`）。
+8. **`DIMLUNIT ≠ 2` 是声明降级**，导入时以 `Completeness::Partial` 浮出；`DIMZIN` 的英尺/英寸位（1/2/16）
+   **未实现**。
+9. **`DIMCONTINUEMODE` 是图纸级**，acadrust 未建模：表里带文档化默认值，导出**无法写出**。
+10. **`DIMTAD`/`DIMTVP` 只作用于 linear/aligned 文字**；radial/angular 保留各自的 leader/弧放置，**不读**它们。
+11. **DIMSTYLE 记录的来源拆分**：B.2(a) 驱动显示的值来自**实体快照**，B.2(b) 来自**表**，缺失样式名回退到
+    钉住的 `Standard`（一条**声明过的**报告行）。声明为 NOT IMPLEMENTED 的样式变量按 `DimStyle::new` 的
+    **中性值**写出，**不是源值**。`DIMDLI`/`DIMDLE` **未缩放**地写进 `DIMSCALE=1` 记录，`DIMSCALE` 本身
+    **不保留**（P5a 行保留）。
+12. **`insert_dim_style` 拒绝**一个**已被别的名字占用**的样式 id（调用方 bug），而不是覆盖并**遗弃**旧名的索引项。
+13. **取代 P5a 偏离 11 的两条现已错误的表述**："DIMTAD 2/3/4 塌缩为 1" 与 "(b) 写未钉住默认值" **都不再成立**
+    ——P5a 偏离 11 的这两句**已被本 P5b 作废**。
+
+#### 决策 E 更新（追加注记，不改写）
+
+- **U-4 结清**：变量页写明公制 `DIMCEN` 初值是 **2.5**；我们**刻意钉 0.0**（中性：它不给否则不变的显示添加中心
+  标记）。记为"**已文档化、刻意偏离**"，**不是**"未查证"。
+- **`DIMTAD = 2` 从推断升级为文档化**：Autodesk 的措辞是"在**背离定义点**的一侧的标注线上"
+  （on the side of the dimension line farthest away from the defining points），正是我们实现的。
+- **新增 U 行**：`DIMTIH`/`DIMTOH`/`DIMTOFL` 在 `standard_metric` 里被断言为"Autodesk 公制 Standard"，但只有
+  **英制**初值可被核实（On/On，与 acadrust `dxf_defaults` 一致）；文档化的公制样式（ISO-25）让文字**与标注线
+  对齐**（off/off）。这些是 B.2(b)（显示忽略）故**显示安全**，但该断言需要**引用出处**或**降级**。

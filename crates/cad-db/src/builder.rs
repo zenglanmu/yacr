@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use cad_domain::*;
 
+use crate::dim_style::DimStyle;
 use crate::drawing::DrawingDatabase;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::tables::{
@@ -36,6 +37,8 @@ impl DrawingDatabaseBuilder {
                 plot_settings: BTreeMap::new(),
                 render_attributes: BTreeMap::new(),
                 scales: BTreeMap::new(),
+                dim_styles: BTreeMap::new(),
+                dim_style_ids_by_name: BTreeMap::new(),
                 active_annotation_scale: None,
                 next_entity_id: 1,
                 bounds_cache: Default::default(),
@@ -140,6 +143,44 @@ impl DrawingDatabaseBuilder {
         Ok(())
     }
 
+    /// Insert a DIMSTYLE table entry (ADR 0017 B.1).
+    ///
+    /// A style with an empty name is rejected: it could never resolve group 3.
+    /// A style whose name already exists replaces the earlier entry in place
+    /// (keeping the first id), so a source `Standard` overrides the pinned
+    /// default without leaving a duplicate name in the index.
+    ///
+    /// A style whose **id** is already owned by a *different* name is rejected
+    /// (review N9): inserting it would overwrite `dim_styles[id]` and orphan the
+    /// old name's index entry, so the old name would silently resolve to the new
+    /// style. A caller that needs a fresh identity must allocate a new id.
+    pub fn insert_dim_style(&mut self, style: DimStyle) -> CadResult<()> {
+        if style.name.trim().is_empty() {
+            return Err(CadError::InvalidInput(
+                "dimension style name is empty".into(),
+            ));
+        }
+        if let Some(existing) = self.database.dim_style_ids_by_name.get(&style.name) {
+            let mut replaced = style;
+            replaced.id = *existing;
+            self.database.dim_styles.insert(*existing, replaced);
+            return Ok(());
+        }
+        if let Some(existing) = self.database.dim_styles.get(&style.id) {
+            if existing.name != style.name {
+                return Err(CadError::InvalidInput(format!(
+                    "dimension style id {:?} is already owned by '{}'; it cannot also own '{}'",
+                    style.id, existing.name, style.name
+                )));
+            }
+        }
+        self.database
+            .dim_style_ids_by_name
+            .insert(style.name.clone(), style.id);
+        self.database.dim_styles.insert(style.id, style);
+        Ok(())
+    }
+
     /// Set the drawing's active annotation scale (`CANNOSCALE`).
     ///
     /// `value` is the raw paper/drawing ratio from the header. An empty name is
@@ -199,6 +240,25 @@ impl DrawingDatabaseBuilder {
 
     /// Validate references and produce the immutable database.
     pub fn finish(mut self) -> CadResult<DrawingDatabase> {
+        // A DIMSTYLE table always carries a `Standard` (ADR 0017 B.1). A
+        // hand-built database, or a source drawing that had none, gets the
+        // pinned metric default; an imported `Standard` is left as read.
+        if !self.database.dim_style_ids_by_name.contains_key("Standard") {
+            let next = self
+                .database
+                .dim_styles
+                .keys()
+                .map(|id| id.0)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1);
+            let id = DimStyleId(next);
+            let style = DimStyle::standard_metric(id);
+            self.database
+                .dim_style_ids_by_name
+                .insert(style.name.clone(), id);
+            self.database.dim_styles.insert(id, style);
+        }
         // Every entity's layer must exist.
         for entity in self.database.entities.values() {
             if !self.database.layers.contains_key(&entity.layer) {

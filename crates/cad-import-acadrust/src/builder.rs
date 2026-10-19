@@ -101,6 +101,7 @@ impl<'a> ImporterBuilder<'a> {
         self.read_layers()?;
         self.read_linetypes()?;
         self.read_styles()?;
+        self.read_dim_styles()?;
         self.read_layouts()?;
         self.read_plot_settings()?;
         self.read_annotation_scales()?;

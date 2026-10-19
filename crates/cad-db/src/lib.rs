@@ -8,6 +8,7 @@
 mod bounds;
 mod builder;
 mod change;
+mod dim_style;
 mod drawing;
 mod entity;
 mod math;
@@ -19,6 +20,7 @@ mod validate;
 pub use bounds::*;
 pub use builder::*;
 pub use change::*;
+pub use dim_style::*;
 pub use drawing::*;
 pub use entity::*;
 pub use measurement::*;
