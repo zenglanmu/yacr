@@ -125,6 +125,84 @@ fn local_intersection_finds_crossing_lines() {
     assert!(distance(hits[0], p(0.0, 0.0)) < 1e-9);
 }
 
+#[test]
+fn infinite_line_intersection_distinguishes_point_parallel_and_collinear() {
+    let tol = 1e-9;
+    // Two crossing lines meet at exactly one point.
+    match infinite_line_intersection(p(-1.0, 0.0), p(1.0, 0.0), p(0.0, -1.0), p(0.0, 1.0), tol) {
+        LineIntersection::Point(c) => {
+            assert!(c.x.abs() < 1e-9 && c.y.abs() < 1e-9, "{c:?}");
+        }
+        other => panic!("crossing lines must report a point, got {other:?}"),
+    }
+    // Parallel, distinct lines: no intersection (never a fabricated corner).
+    assert_eq!(
+        infinite_line_intersection(p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0), p(1.0, 1.0), tol),
+        LineIntersection::Parallel
+    );
+    // Collinear lines share infinitely many points: distinct from Parallel.
+    assert_eq!(
+        infinite_line_intersection(p(0.0, 0.0), p(1.0, 0.0), p(2.0, 0.0), p(3.0, 0.0), tol),
+        LineIntersection::Collinear
+    );
+    // The extension case FILLET/CHAMFER need: the segments do not touch, but the
+    // infinite lines cross at (2, 0).
+    match infinite_line_intersection(p(0.0, 0.0), p(1.0, 0.0), p(2.0, 3.0), p(2.0, 1.0), tol) {
+        LineIntersection::Point(c) => {
+            assert!((c.x - 2.0).abs() < 1e-9, "corner x = {}", c.x);
+            assert!(c.y.abs() < 1e-9, "corner y = {}", c.y);
+        }
+        other => panic!("the lines cross beyond the segments, got {other:?}"),
+    }
+    // A degenerate (zero-length) line has no direction: reported as Parallel.
+    assert_eq!(
+        infinite_line_intersection(p(1.0, 1.0), p(1.0, 1.0), p(0.0, 0.0), p(1.0, 0.0), tol),
+        LineIntersection::Parallel
+    );
+}
+
+#[test]
+fn bulge_arc_geometry_recovers_a_semicircle_and_has_no_zero_bulge_arc() {
+    // bulge = 1 ⇒ tan(θ/4) = 1 ⇒ θ = π: a unit-radius semicircle over a 2-unit
+    // chord. The recovered arc must pass through the two chord endpoints.
+    let normal = Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    };
+    let arc = bulge_arc_geometry(p(0.0, 0.0), p(2.0, 0.0), 1.0, normal)
+        .expect("a nonzero bulge is an arc");
+    match arc {
+        SemanticGeometry::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+            ..
+        } => {
+            assert!((radius - 1.0).abs() < 1e-9, "radius = {radius}");
+            assert!(
+                (sweep.abs() - std::f64::consts::PI).abs() < 1e-9,
+                "sweep = {sweep}"
+            );
+            let at = |angle: f64| Point3 {
+                x: center.x + radius * angle.cos(),
+                y: center.y + radius * angle.sin(),
+                z: center.z,
+            };
+            let first = at(start);
+            let last = at(start + sweep);
+            assert!(
+                distance(first, p(0.0, 0.0)) < 1e-9 && distance(last, p(2.0, 0.0)) < 1e-9,
+                "the arc must span the chord: {first:?} .. {last:?}"
+            );
+        }
+        other => panic!("expected an Arc, got {other:?}"),
+    }
+    // A zero bulge is a straight segment: no arc to recover.
+    assert!(bulge_arc_geometry(p(0.0, 0.0), p(2.0, 0.0), 0.0, normal).is_none());
+}
+
 fn sample_image() -> SemanticGeometry {
     SemanticGeometry::Image {
         origin: p(1.0, 2.0),

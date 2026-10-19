@@ -262,6 +262,26 @@ pub enum DrawIntent {
     /// Offset the single selected LINE/CIRCLE; `side_point` gives both the side
     /// and the distance.
     Offset { side_point: Point3 },
+    /// CHAMFER the two picked straight lines (ADR 0016 decision C).
+    ///
+    /// `first`/`second` are the refs resolved at capture time, in pick order;
+    /// `pick_first`/`pick_second` are the raw click points that select each pick
+    /// side. The two distances are the session typed channel, read by the command
+    /// layer — never carried here.
+    Chamfer {
+        first: SelectionRef,
+        second: SelectionRef,
+        pick_first: Point3,
+        pick_second: Point3,
+    },
+    /// FILLET the two picked straight lines (ADR 0016 decision B); same shape as
+    /// [`DrawIntent::Chamfer`], with the radius from the session typed channel.
+    Fillet {
+        first: SelectionRef,
+        second: SelectionRef,
+        pick_first: Point3,
+        pick_second: Point3,
+    },
 }
 
 /// Drawing/editing capture state machine.
@@ -618,6 +638,22 @@ impl DrawTool {
             // OFFSET: the single captured point is the side/distance point; the
             // source is the session selection, resolved by the command layer.
             DrawToolKind::Offset => DrawIntent::Offset { side_point: a },
+            // CHAMFER/FILLET: the two resolved refs and the two raw pick points,
+            // in pick order. The distances/radius are the session typed channel,
+            // read by the command layer, so the intent stays the pure description
+            // of what the user clicked.
+            DrawToolKind::Chamfer => DrawIntent::Chamfer {
+                first: self.picks[0].clone(),
+                second: self.picks[1].clone(),
+                pick_first: a,
+                pick_second: b,
+            },
+            DrawToolKind::Fillet => DrawIntent::Fillet {
+                first: self.picks[0].clone(),
+                second: self.picks[1].clone(),
+                pick_first: a,
+                pick_second: b,
+            },
         })
     }
 }

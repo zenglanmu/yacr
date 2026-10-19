@@ -20,6 +20,8 @@ impl Application {
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
             CommandId::ExtendEntity => self.extend_entity(command),
+            CommandId::ChamferLines => self.chamfer_lines(session, command),
+            CommandId::FilletLines => self.fillet_lines(session, command),
             CommandId::EraseEntities => self.erase_entities(session, command),
             CommandId::CopyEntities => self.copy_entities(command),
             CommandId::RotateEntities => self.rotate_entities(command),

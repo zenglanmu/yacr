@@ -142,6 +142,37 @@ impl HostController {
                     side_point,
                 },
             ),
+            // CHAMFER/FILLET: the two captured refs and pick points travel on the
+            // payload; the distances/radius are the session typed channel the
+            // command layer reads, so they never ride the payload.
+            DrawIntent::Chamfer {
+                first,
+                second,
+                pick_first,
+                pick_second,
+            } => (
+                crate::CommandId::ChamferLines,
+                crate::CommandPayload::Chamfer(Box::new(crate::TwoLineCommand {
+                    first,
+                    second,
+                    pick_first,
+                    pick_second,
+                })),
+            ),
+            DrawIntent::Fillet {
+                first,
+                second,
+                pick_first,
+                pick_second,
+            } => (
+                crate::CommandId::FilletLines,
+                crate::CommandPayload::Fillet(Box::new(crate::TwoLineCommand {
+                    first,
+                    second,
+                    pick_first,
+                    pick_second,
+                })),
+            ),
         };
         Ok(Command {
             schema_version: 1,

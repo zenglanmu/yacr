@@ -122,6 +122,20 @@ pub enum CommandId {
     /// the picked end (the honest subset of EXTEND); anything else is an
     /// explicit refusal that changes nothing. Work-only.
     ExtendEntity,
+    /// CHAMFER two straight lines: trim/extend both to the corner of the two
+    /// infinite lines (when both distances are 0) or to the offset points, joining
+    /// them with one new LINE (ADR 0016 decision C). The two picks are the two
+    /// picked lines; the distances come from the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::ChamferDistanceA`]/`B`). One
+    /// transaction and one undo step. Work-only.
+    ChamferLines,
+    /// FILLET two straight lines: trim/extend both to the corner (radius 0) or to
+    /// the tangent points of a tangent ARC of the session radius, on the pick side
+    /// (ADR 0016 decision B). The two picks are the two picked lines; the radius
+    /// comes from the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::FilletRadius`]). One transaction and one
+    /// undo step. Work-only.
+    FilletLines,
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
@@ -188,6 +202,8 @@ impl CommandId {
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity
+                | Self::ChamferLines
+                | Self::FilletLines
                 | Self::EraseEntities
                 | Self::CopyEntities
                 | Self::RotateEntities

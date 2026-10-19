@@ -297,6 +297,19 @@ pub struct Workspace {
     pub viewports: BTreeMap<ViewportId, Viewport>,
 }
 
+/// The two straight-line picks of a CHAMFER/FILLET command (ADR 0016 decisions
+/// B/C): the two picked refs in pick order and the raw click point that selects
+/// each pick side.
+///
+/// Boxed inside [`CommandPayload::Chamfer`]/`Fillet` so the command enum stays
+/// small (the same reason [`CommandPayload::Geometry`] boxes its geometry).
+pub struct TwoLineCommand {
+    pub first: SelectionRef,
+    pub second: SelectionRef,
+    pub pick_first: Point3,
+    pub pick_second: Point3,
+}
+
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
@@ -398,6 +411,17 @@ pub enum CommandPayload {
         boundary: Vec<SelectionRef>,
         pick_point: Point3,
     },
+    /// CHAMFER two straight lines (ADR 0016 decision C). The two picks and their
+    /// raw click points travel in one boxed [`TwoLineCommand`] (boxed like
+    /// [`CommandPayload::Geometry`] so the command enum stays small); the two
+    /// distances are the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::ChamferDistanceA`]/`B`), read by the
+    /// handler so the session is the single authority for them.
+    Chamfer(Box<TwoLineCommand>),
+    /// FILLET two straight lines (ADR 0016 decision B). Same shape as
+    /// [`CommandPayload::Chamfer`]; the radius is the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::FilletRadius`]).
+    Fillet(Box<TwoLineCommand>),
     /// Set the session's active layer for new entities. Session state only.
     ActiveLayer(LayerId),
     /// A fully formed semantic geometry, used by `CreateLine` as the

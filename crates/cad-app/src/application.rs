@@ -235,6 +235,8 @@ impl Application {
             | CommandId::MoveEntities
             | CommandId::TrimEntity
             | CommandId::ExtendEntity
+            | CommandId::ChamferLines
+            | CommandId::FilletLines
             | CommandId::EraseEntities
             | CommandId::CopyEntities
             | CommandId::RotateEntities

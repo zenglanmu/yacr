@@ -162,13 +162,39 @@ pub enum DrawToolKind {
     Mirror,
     /// OFFSET: requires a single-entity selection, then one side/distance point.
     Offset,
+    /// CHAMFER: two straight-line entity picks (ADR 0016 decision C).
+    ///
+    /// The two clicks are **entity picks** (the TRIM/EXTEND capture shape), not
+    /// free points: the first-picked line is "the first object" and its raw click
+    /// point selects the pick side; the two distances are the session typed
+    /// channel (`ChamferDistanceA`/`B`). The geometry construction and every
+    /// refusal live in the command layer.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): the `Angle` method and
+    /// `CHAMMODE`, the `Polyline` mode, `Multiple`, in-command `Undo`, the
+    /// `Trim`/`No Trim` switch (the lines are always trimmed, `TRIMMODE=1`), the
+    /// "replace the intermediate arc" case, and 3D.
+    Chamfer,
+    /// FILLET: two straight-line entity picks (ADR 0016 decision B).
+    ///
+    /// Same capture shape as [`Self::Chamfer`]; the radius is the session typed
+    /// channel (`FilletRadius`, default 0 ⇒ corner only). The tangent-arc centre
+    /// construction is a labelled geometric inference (Autodesk publishes no
+    /// formula); the command layer builds it and trims both lines to the tangent
+    /// points.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): the `Polyline` mode,
+    /// `Multiple`, in-command `Undo`, the `Trim`/`No Trim` switch, the automatic
+    /// parallel-line radius adjustment (we refuse parallel lines explicitly),
+    /// Circle/Arc targets, 3D, and hatch associativity.
+    Fillet,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 17] = [
+    pub const ALL: [DrawToolKind; 19] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -186,6 +212,8 @@ impl DrawToolKind {
         DrawToolKind::Scale,
         DrawToolKind::Mirror,
         DrawToolKind::Offset,
+        DrawToolKind::Chamfer,
+        DrawToolKind::Fillet,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -208,6 +236,8 @@ impl DrawToolKind {
             Self::Scale => "scale",
             Self::Mirror => "mirror",
             Self::Offset => "offset",
+            Self::Chamfer => "chamfer",
+            Self::Fillet => "fillet",
         }
     }
 
@@ -232,6 +262,8 @@ impl DrawToolKind {
             "scale" => Some(Self::Scale),
             "mirror" => Some(Self::Mirror),
             "offset" => Some(Self::Offset),
+            "chamfer" => Some(Self::Chamfer),
+            "fillet" => Some(Self::Fillet),
             _ => None,
         }
     }
@@ -281,6 +313,11 @@ impl DrawToolKind {
             Self::Scale => "缩放",
             Self::Mirror => "镜像",
             Self::Offset => "偏移",
+            // CHAMFER/FILLET use locale-neutral ASCII fallback labels, exactly like
+            // POINT/SPLINE: the ADR fence forbids new CJK literals on the Rust side
+            // and the shell substitutes the catalog label for chrome anyway.
+            Self::Chamfer => "CHAMFER",
+            Self::Fillet => "FILLET",
         }
     }
 
@@ -309,7 +346,9 @@ impl DrawToolKind {
             | Self::Copy
             | Self::Extend
             | Self::Rotate
-            | Self::Mirror => PointArity::Exact(2),
+            | Self::Mirror
+            | Self::Chamfer
+            | Self::Fillet => PointArity::Exact(2),
         }
     }
 
@@ -343,7 +382,13 @@ impl DrawToolKind {
     /// an empty-space click is refused instead of being accepted as a point and
     /// resolved later. These kinds therefore resolve their refs at capture time
     /// and are only ready once both steps have a real entity behind them.
+    ///
+    /// CHAMFER and FILLET share that shape: each of their two steps picks an
+    /// existing straight line, so they are entity pickers too.
     pub fn needs_picked_entities(self) -> bool {
-        matches!(self, Self::Trim | Self::Extend)
+        matches!(
+            self,
+            Self::Trim | Self::Extend | Self::Chamfer | Self::Fillet
+        )
     }
 }

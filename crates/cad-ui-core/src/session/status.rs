@@ -159,16 +159,25 @@ impl CadSelection {
     }
 }
 
-/// The typed tool-parameter block of [`CadTool`] (ADR 0015 decision C).
+/// The typed tool-parameter block of [`CadTool`] (ADR 0015 decision C, extended
+/// by ADR 0016 decision A/B/C).
 ///
-/// A narrow, frozen frontend shape: today it carries only the POLYGON side count.
-/// `sides` is `null` whenever the active tool is not POLYGON (and the whole
-/// `tool` is `null` when no tool is active), so a UI stepper's enablement can be
-/// derived from `tool.key` and never from a stale local value.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// A frozen frontend shape. Each field is `null` whenever the active tool does not
+/// own that parameter (and the whole `tool` is `null` when no tool is active), so a
+/// UI control's enablement can be derived from `tool.key` and never from a stale
+/// local value. The legacy `sides` field keeps its exact name and meaning; the
+/// FILLET/CHAMFER parameters are added alongside it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CadToolParams {
     /// The POLYGON side count, or `null` for every other tool.
     pub sides: Option<u32>,
+    /// The FILLET radius, or `null` for every other tool.
+    pub fillet_radius: Option<f64>,
+    /// The CHAMFER first distance, or `null` for every other tool.
+    pub chamfer_distance_a: Option<f64>,
+    /// The CHAMFER second distance, or `null` for every other tool.
+    pub chamfer_distance_b: Option<f64>,
 }
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -291,7 +300,23 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
 /// measurement capture carries its `cad-app` machine key, the **real** captured
 /// point count and `cad-app`'s own readiness; nothing is inferred from the
 /// pointer stream or fabricated for a tool the state machine does not hold.
-pub(super) fn cad_tool(snapshot: &ToolSnapshot) -> Option<CadTool> {
+///
+/// `session` is the authoritative session whose typed parameter store supplies the
+/// projected values (POLYGON's `sides`, FILLET's `filletRadius`, CHAMFER's
+/// `chamferDistanceA`/`B`); each is present **only** while its own tool is active,
+/// so a control's enablement is derived from `tool.key` and never from a stale
+/// local value. No value is fabricated for an inactive tool.
+pub(super) fn cad_tool(
+    snapshot: &ToolSnapshot,
+    session: &cad_app::SessionState,
+) -> Option<CadTool> {
+    use cad_app::{DrawToolKind, ToolParameter};
+
+    let number = |parameter: ToolParameter, active: bool| {
+        active
+            .then(|| session.tool_parameter(parameter).number())
+            .flatten()
+    };
     match snapshot {
         ToolSnapshot::Drawing(preview) => Some(CadTool {
             key: format!("draw.{}", preview.kind.key()),
@@ -302,15 +327,27 @@ pub(super) fn cad_tool(snapshot: &ToolSnapshot) -> Option<CadTool> {
             // for a capture that still accepts points. Never inferred from the
             // captured count.
             open_ended: preview.is_open_ended(),
-            // The side count is present **only** for a POLYGON capture; every
-            // other draw tool reports `null`, and the session already clears the
-            // field for a non-POLYGON kind.
             params: CadToolParams {
-                sides: if preview.kind == cad_app::DrawToolKind::Polygon {
+                // The side count is present **only** for a POLYGON capture; every
+                // other draw tool reports `null`, and the session already clears
+                // the field for a non-POLYGON kind.
+                sides: if preview.kind == DrawToolKind::Polygon {
                     preview.polygon_sides
                 } else {
                     None
                 },
+                fillet_radius: number(
+                    ToolParameter::FilletRadius,
+                    preview.kind == DrawToolKind::Fillet,
+                ),
+                chamfer_distance_a: number(
+                    ToolParameter::ChamferDistanceA,
+                    preview.kind == DrawToolKind::Chamfer,
+                ),
+                chamfer_distance_b: number(
+                    ToolParameter::ChamferDistanceB,
+                    preview.kind == DrawToolKind::Chamfer,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -320,7 +357,12 @@ pub(super) fn cad_tool(snapshot: &ToolSnapshot) -> Option<CadTool> {
             // A measurement capture is never open-ended; report the honest
             // `false` rather than a fabricated `true`.
             open_ended: false,
-            params: CadToolParams { sides: None },
+            params: CadToolParams {
+                sides: None,
+                fillet_radius: None,
+                chamfer_distance_a: None,
+                chamfer_distance_b: None,
+            },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,
     }

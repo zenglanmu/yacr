@@ -216,7 +216,10 @@ pub(crate) fn affine_normal_fallback(t: &Transform3, n: Point3) -> Point3 {
 /// `bulge = tan(θ/4)`; the arc is the one bowing to the sign of the bulge. This
 /// mirrors the tessellator's construction so the analytic and sampled forms are
 /// the same curve (audit B23).
-pub(crate) fn bulge_arc_geometry(
+///
+/// Public so a caller outside this crate (EXPLODE's polyline decomposition) can
+/// reuse the single implementation instead of re-deriving the arc.
+pub fn bulge_arc_geometry(
     a: Point3,
     b: Point3,
     bulge: f64,

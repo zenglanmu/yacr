@@ -93,7 +93,11 @@ pub fn draw_preview_overlay(
         | DrawToolKind::Rotate
         | DrawToolKind::Scale
         | DrawToolKind::Mirror
-        | DrawToolKind::Offset => {
+        | DrawToolKind::Offset
+        // CHAMFER/FILLET are entity picks with two raw pick points; the live
+        // preview is the existing cursor/chain (no new overlay channel).
+        | DrawToolKind::Chamfer
+        | DrawToolKind::Fillet => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

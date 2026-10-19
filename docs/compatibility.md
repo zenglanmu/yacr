@@ -111,6 +111,17 @@
 
 - 创建命令均为 **Work 模式**（Viewer 显式拒绝）、**模型空间**（插入漏斗固定 `SpaceId::Model`）、
   **一次事务 + 一步撤销**；未支持选项一律显式拒绝，不用近似静默顶替。
+
+### 编辑命令（ADR-0016，逐条按实施状态）
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `FILLET` | **实现** | 两条**独立直线**：`R>0` ⇒ 两段修剪到切点 + **新增相切 ARC**；`R=0` ⇒ 只延伸/修剪到角点、不产生弧。新实体在**活动图层**（我们的选择，AutoCAD 规则未查证） | `Polyline` 模式、`Multiple`、命令内 `Undo`、`Trim/No Trim` 开关、**平行线自动调半径**（改为显式拒绝）、Circle/Arc 目标、3D、hatch 关联性；**圆心公式为几何推论（UNVERIFIED）** |
+| `CHAMFER` | **实现** | 两条独立直线：两距离**按拾取顺序**施加；`0/0` ⇒ 只做角点（与 `FILLET R=0` 有等价性对照测试）；否则两段修剪 + **新增 LINE** | `Angle` 方法/`CHAMMODE`、`Polyline` 模式、`Multiple`、`Undo`、`Trim/No Trim`、弧段替换、3D；**负距离行为未查证**（一律拒绝） |
+| `ARRAYRECT` / `ARRAYPOLAR` | 未实现（P4c 排期） | — | 计划：**独立副本**（AutoCAD 默认关联，记为有意偏离）；间距=**基点间距离**、左下角向上右；极坐标需声明旋转/仅平移规则；`Path`/`Levels`/`Total`/角度间隔/关联编辑/负间距反向均不做 |
+| `ALIGN` | 未实现（P4d 排期） | — | 计划：仅**两对点**（1 对点移动等价于 `MOVE`，不做）+ `AlignScale`（默认 false，均匀缩放）；3 对点 3D/非均匀缩放不做 |
+| `STRETCH` | 未实现（P4e 排期） | — | 计划：交叉窗口恒为 CROSSING；部分包围=逐顶点、完全包围=整移；圆/椭圆/块/ARC 不可拉伸（完全包围时移动、部分包围时不动+诊断）；**TEXT 未查证 ⇒ 拒绝**；**bulge 保留为未查证选择**；cpolygon/lasso/单独选取不做 |
+| `EXPLODE` | 未实现（P4f 排期） | — | 计划：一次一层（折线→线段+弧、INSERT→成员、Compound→**全部子项**含 hatch 填充）；`Dimension`/`MTable`/`MLeader` 按 `type_key` 显式拒绝；`TEXT`/`SPLINE`/`SHAPE`/`OPAQUE` 与镜像 Arc/Ellipse 按既有变换拒绝面整命令失败；`IMAGE`/`MASK` 按**策略**拒绝（AutoCAD 条文未查证）；多级到底/`EXPLMODE`/颜色线型变化/属性语义不做 |
 - **证据范围**：上述表格是**契约/场景**证据，不等于真实图纸兼容性。Linux 桌面宿主（React/Tauri）
   另有**真实硬件 GPU** 有界证据（Vulkan / Quadro P620 / X11）：打开与渲染、悬停、框选（含橡皮筋像素判据）、
   TRIM 的交互链（实体拾取/漏点拒绝/CONFIRM 到达命令层）、以及 **ERASE 的真实提交**（`entityCount` 4→3）。

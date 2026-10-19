@@ -50,6 +50,76 @@ pub(crate) fn segment_segment_intersection_3d(
     }
 }
 
+/// The result of intersecting two **infinite** 2D lines.
+///
+/// The three outcomes are distinct on purpose: only [`Self::Point`] is an
+/// intersection, while [`Self::Parallel`] and [`Self::Collinear`] are the two
+/// non-intersecting configurations a caller must refuse rather than treat as a
+/// (fabricated) corner.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LineIntersection {
+    /// The two lines cross at exactly one point. The `z` is taken from the first
+    /// line's first endpoint (the construction is a flat `+Z` one).
+    Point(Point3),
+    /// The lines are parallel and **distinct**: they never meet.
+    Parallel,
+    /// The lines are collinear: they share infinitely many points, so there is no
+    /// unique corner.
+    Collinear,
+}
+
+/// Intersect the **infinite** 2D lines through `(a1, a2)` and `(b1, b2)`.
+///
+/// Unlike [`segment_segment_intersection_3d`] this works on the full infinite
+/// lines, so a caller that needs the corner two lines define finds it even when
+/// the picked segments do not reach it (FILLET/CHAMFER's extension case). The
+/// parallel/collinear cases are reported as their own variants — they are **not**
+/// an intersection, so a caller can refuse instead of inventing a corner.
+///
+/// `tol` is an absolute world tolerance. The parallel test uses the relative
+/// cross product `|r × s| / (|r|·|s|)`, so it is scale-invariant; the collinear
+/// test then compares the perpendicular distance of `b1` from line `a` against
+/// `tol`. A degenerate (zero-length) input line has no direction and is reported
+/// as [`LineIntersection::Parallel`]; callers that care about degeneracy check
+/// the endpoints themselves.
+pub fn infinite_line_intersection(
+    a1: Point3,
+    a2: Point3,
+    b1: Point3,
+    b2: Point3,
+    tol: f64,
+) -> LineIntersection {
+    let r = (a2.x - a1.x, a2.y - a1.y);
+    let s = (b2.x - b1.x, b2.y - b1.y);
+    let r_len = r.0.hypot(r.1);
+    let s_len = s.0.hypot(s.1);
+    let floor = tol.max(1e-12);
+    if !r_len.is_finite() || !s_len.is_finite() || r_len <= floor || s_len <= floor {
+        return LineIntersection::Parallel;
+    }
+    let denom = r.0 * s.1 - r.1 * s.0;
+    let scale = (r_len * s_len).max(f64::MIN_POSITIVE);
+    if denom.abs() / scale <= floor {
+        // Parallel. Distinguish collinear by the perpendicular distance of `b1`
+        // from line `a`: `|(b1 - a1) × r| / |r|`.
+        let ca = (b1.x - a1.x, b1.y - a1.y);
+        let off = (ca.0 * r.1 - ca.1 * r.0).abs() / r_len;
+        if off <= floor {
+            LineIntersection::Collinear
+        } else {
+            LineIntersection::Parallel
+        }
+    } else {
+        let ca = (b1.x - a1.x, b1.y - a1.y);
+        let t = (ca.0 * s.1 - ca.1 * s.0) / denom;
+        LineIntersection::Point(Point3 {
+            x: a1.x + t * r.0,
+            y: a1.y + t * r.1,
+            z: a1.z,
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Analytic curve/curve intersection (audit B23/F06).
 //

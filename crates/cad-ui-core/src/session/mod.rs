@@ -264,6 +264,8 @@ impl CadSession {
             CommandId::OffsetEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Offset)),
             CommandId::TrimEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Trim)),
             CommandId::ExtendEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Extend)),
+            CommandId::ChamferLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Chamfer)),
+            CommandId::FilletLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Fillet)),
             CommandId::Measure => Some(InteractionRequest::BeginMeasurement(
                 MeasurementToolKind::Distance,
             )),
@@ -557,6 +559,13 @@ impl CadSession {
             .or_else(|| self.error.borrow().clone())
             .or_else(|| self.core.render.view_diagnostic())
             .or(snap_error);
+        // The projected tool carries the session's typed parameter values, so it is
+        // built from the tool snapshot **and** the authoritative session store.
+        let tool = {
+            let snapshot = self.core.tool_snapshot();
+            let controller = self.core.controller.borrow();
+            cad_tool(&snapshot, &controller.session)
+        };
         let mut status = assemble_status(
             has_document,
             label,
@@ -570,7 +579,7 @@ impl CadSession {
             selection,
             self.import_count.get(),
             frame_count,
-            cad_tool(&self.core.tool_snapshot()),
+            tool,
             self.core.controller.borrow().hover_preview_enabled(),
             self.core.controller.borrow().snap_enabled(),
             snap_kind,

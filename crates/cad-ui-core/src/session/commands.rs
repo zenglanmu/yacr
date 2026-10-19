@@ -50,6 +50,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
     ("EXTEND", CommandId::ExtendEntity),
+    ("CHAMFER", CommandId::ChamferLines),
+    ("FILLET", CommandId::FilletLines),
     ("ERASE", CommandId::EraseEntities),
     ("COPY", CommandId::CopyEntities),
     ("ROTATE", CommandId::RotateEntities),

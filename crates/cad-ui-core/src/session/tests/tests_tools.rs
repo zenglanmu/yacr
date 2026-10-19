@@ -3,7 +3,7 @@
 use super::super::*;
 use super::test_support::*;
 
-/// The 17 draw selectors mapped to their `cad-app` machine keys.
+/// The 19 draw selectors mapped to their `cad-app` machine keys.
 const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("LINE", "draw.line"),
     ("CIRCLE", "draw.circle"),
@@ -22,6 +22,8 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("SCALE", "draw.scale"),
     ("MIRROR", "draw.mirror"),
     ("OFFSET", "draw.offset"),
+    ("CHAMFER", "draw.chamfer"),
+    ("FILLET", "draw.fillet"),
 ];
 
 fn fresh_session() -> CadSession {
@@ -866,4 +868,96 @@ fn set_tool_parameter_replaces_polygon_sides_on_one_wire_path() {
         ToolValue::Number(1024.0),
         "a Viewer refusal leaves the value unchanged"
     );
+}
+
+#[test]
+fn chamfer_and_fillet_selectors_start_their_entity_pick_captures() {
+    // ADR 0016 decisions B/C: CHAMFER/FILLET are real `COMMAND_TABLE` draw
+    // selectors, disjoint from the measurement/zoom families, that start the
+    // entity-pick captures.
+    for (selector, key) in [("CHAMFER", "draw.chamfer"), ("FILLET", "draw.fillet")] {
+        assert!(admissible_names().contains(&selector), "{selector}");
+        assert_eq!(canonical_command_name(selector), Some(selector));
+        assert_eq!(measurement_selector_kind(selector), None, "{selector}");
+        assert_eq!(zoom_step_factor(selector), None, "{selector}");
+        let session = fresh_session();
+        session
+            .command(selector)
+            .unwrap_or_else(|error| panic!("{selector} refused: {error}"));
+        let tool = session
+            .snapshot(None, None, 0)
+            .tool
+            .unwrap_or_else(|| panic!("{selector} started no tool"));
+        assert_eq!(tool.key, key, "{selector}");
+        assert_eq!(tool.points, 0, "{selector} starts with no captured pick");
+        assert!(!tool.ready, "{selector} must not be ready before its picks");
+        // The two steps are entity picks, so no free point is offered.
+        assert_eq!(tool.params.sides, None, "{selector}");
+    }
+}
+
+#[test]
+fn cad_tool_params_project_fillet_and_chamfer_values_only_for_their_tools() {
+    // ADR 0016 decisions B/C (frozen frontend wire shape): the FILLET radius and
+    // the two CHAMFER distances each project **only** while their own tool is
+    // active; the legacy `sides` field is unchanged (never renamed).
+    let fillet = fresh_session();
+    fillet.command("FILLET").expect("FILLET is admitted");
+    let tool = fillet
+        .snapshot(None, None, 0)
+        .tool
+        .expect("FILLET is active");
+    assert_eq!(tool.key, "draw.fillet");
+    assert_eq!(
+        tool.params.fillet_radius,
+        Some(0.0),
+        "the default radius is 0"
+    );
+    assert_eq!(tool.params.chamfer_distance_a, None);
+    assert_eq!(tool.params.chamfer_distance_b, None);
+    fillet
+        .set_tool_parameter(ToolParameter::FilletRadius, ToolValue::Number(2.5))
+        .expect("a valid radius is admitted");
+    assert_eq!(
+        fillet
+            .snapshot(None, None, 0)
+            .tool
+            .expect("FILLET is active")
+            .params
+            .fillet_radius,
+        Some(2.5)
+    );
+
+    let chamfer = fresh_session();
+    chamfer.command("CHAMFER").expect("CHAMFER is admitted");
+    let tool = chamfer
+        .snapshot(None, None, 0)
+        .tool
+        .expect("CHAMFER is active");
+    assert_eq!(tool.key, "draw.chamfer");
+    assert_eq!(tool.params.chamfer_distance_a, Some(0.0));
+    assert_eq!(tool.params.chamfer_distance_b, Some(0.0));
+    assert_eq!(tool.params.fillet_radius, None);
+    chamfer
+        .set_tool_parameter(ToolParameter::ChamferDistanceA, ToolValue::Number(1.0))
+        .expect("a valid distance is admitted");
+    chamfer
+        .set_tool_parameter(ToolParameter::ChamferDistanceB, ToolValue::Number(3.0))
+        .expect("a valid distance is admitted");
+    let tool = chamfer
+        .snapshot(None, None, 0)
+        .tool
+        .expect("CHAMFER is active");
+    assert_eq!(tool.params.chamfer_distance_a, Some(1.0));
+    assert_eq!(tool.params.chamfer_distance_b, Some(3.0));
+
+    // A different tool reports none of them, never a carried-over value, and the
+    // legacy `sides` field stays absent.
+    let line = fresh_session();
+    line.command("LINE").expect("LINE is admitted");
+    let tool = line.snapshot(None, None, 0).tool.expect("LINE is active");
+    assert_eq!(tool.params.fillet_radius, None);
+    assert_eq!(tool.params.chamfer_distance_a, None);
+    assert_eq!(tool.params.chamfer_distance_b, None);
+    assert_eq!(tool.params.sides, None);
 }

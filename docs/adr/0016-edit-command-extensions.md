@@ -10,6 +10,24 @@
 - 相关：`docs/adr/0015-new-draw-commands.md`（参数通道先例，本 ADR **取代**其"单用途"结论）、`docs/interaction.md`、
   `docs/drawing-edit.md`、`docs/compatibility.md`、`CAD_IMPLEMENTATION_SPEC.md` §4.6/§4.7。
 
+## 实施状态（追加，不改写决策文本）
+
+- **P4a 完成（2026-10-19，提交 c739558）**：类型化参数通道落地（`ToolValue::{Number,Flag}` + 12 个参数成员 +
+  单一请求 `SetToolParameter`），**`SetPolygonSides` 及其 IPC/队列/注册全部删除**（每参数仅一个线上入口）；
+  各参数自带范围与显式拒绝（边数整型 3–1024、半径/距离 ≥0、计数 ≥1、填充角非零且非整圈、Flag 布尔）；
+  `params.sides` 线上字段**冻结不变**；React 侧边数控件泛化为"活动工具参数组"（数值步进 + 布尔开关），
+  并加测试断言 `cad_set_polygon_sides` 在 UI 源码中彻底消失。
+- **P4b 完成（2026-10-19）**：`CHAMFER`/`FILLET`（两条独立直线）落地，含几何前置：
+  `bulge_arc_geometry` 升 `pub`（单一实现）+ 新增 `infinite_line_intersection`（`Point`/`Parallel`/`Collinear`
+  三态可区分）。CHAMFER 两距离**按拾取顺序**、`0/0` 与 `FILLET R=0` 有**等价性对照测试**；
+  FILLET 相切弧数值验证（圆心到两线距离 = R、切点即修剪点），**圆心构造标注 UNVERIFIED（几何推论）**；
+  新实体在**活动图层**（我们的选择）；拒绝面含平行/共线、同实体两次、跨文档、非直线段、点在角点、
+  距离过长、缺层、Viewer。**实现偏离记录**：① `DrawPreview` 未扩展（`cad-host` 冻结，改由 `cad-ui-core`
+  直接读会话参数存储投影，线上结果相同）；② 载荷 boxed（`Chamfer(Box<TwoLineCommand>)`，避免 clippy
+  `large_enum_variant` 触发对冻结的 `cad-engine` 的告警）。
+- **待办**：P4c（`ARRAYRECT`/`ARRAYPOLAR`）、P4d（`ALIGN`）、P4e（`STRETCH`）、P4f（`EXPLODE`）；
+  P4 阶段门禁（Oracle）；真机证据（FILLET/CHAMFER + 因 IPC 改名而过期的 POLYGON 阶段）。
+
 ## 背景（勘察事实，2026-10-19；已按 SG-P4 逐条核对更正）
 
 1. **六个命令当前完全不存在**：无 `CommandId`/`CommandPayload`/`DrawToolKind`/选择子/ribbon 入口/测试；

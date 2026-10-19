@@ -27,6 +27,7 @@ use super::*;
 use cad_db::{transform_geometry, DbEntity};
 use cad_history::{drawing_patch, drawing_patch_deleted, DrawingPatch, DrawingUndoRecord};
 
+mod chamfer_fillet;
 mod clipboard;
 mod drawing_create;
 mod drawing_edit;
