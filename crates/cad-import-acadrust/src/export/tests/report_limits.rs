@@ -43,10 +43,15 @@ fn committed_fixtures_report_their_expected_losses() {
             &["export.note.bylayer_flattened", "export.note.units_missing"],
         ),
         (
+            // The flange's six DIMENSIONs now migrate to the domain variant and
+            // export as real DIMENSION entities with generated content blocks
+            // (ADR 0017 A.5/A.6), so `export.converted.dimension` replaces the
+            // former `export.converted.mesh` (their arrowhead meshes are now
+            // content-block members, recorded once through the dimension).
             "fixtures/dxf/qcad-flange/flange.dxf",
             &[
                 "export.converted.compound",
-                "export.converted.mesh",
+                "export.converted.dimension",
                 "export.dropped.paper_space",
                 "export.dropped.unreferenced_block",
                 "export.note.bylayer_flattened",

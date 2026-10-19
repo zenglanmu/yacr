@@ -248,6 +248,21 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                 validate_geometry(child)?;
             }
         }
+        SemanticGeometry::Dimension(dimension) => {
+            // Definition points and the measurement must be finite; an empty
+            // display is legal (a degenerate dimension that draws nothing).
+            if !dimension.definition().is_consistent() {
+                return Err(degenerate(
+                    "dimension definition is inconsistent or has a non-finite point",
+                ));
+            }
+            if !dimension.measurement().is_finite() {
+                return Err(degenerate("dimension measurement is non-finite"));
+            }
+            for child in dimension.display() {
+                validate_geometry(child)?;
+            }
+        }
     }
     Ok(())
 }

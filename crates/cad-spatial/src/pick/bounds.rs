@@ -82,6 +82,32 @@ pub(super) fn local_pick_bounds(geometry: &SemanticGeometry) -> Option<(Point3, 
             }
             radius = length3(*major_axis) * (1.0 + ratio.abs());
         }
+        // A dimension's bound is the union of its display children, exactly
+        // like a compound (ADR 0017 A.8): a child with no provable bound makes
+        // the whole dimension unbounded, matching the compound rule.
+        SemanticGeometry::Dimension(dimension) => {
+            if dimension.display().is_empty() {
+                return None;
+            }
+            for child in dimension.display() {
+                let (child_min, child_max) = local_pick_bounds(child)?;
+                bounds = Some(match bounds {
+                    Some((min, max)) => (
+                        Point3 {
+                            x: min.x.min(child_min.x),
+                            y: min.y.min(child_min.y),
+                            z: min.z.min(child_min.z),
+                        },
+                        Point3 {
+                            x: max.x.max(child_max.x),
+                            y: max.y.max(child_max.y),
+                            z: max.z.max(child_max.z),
+                        },
+                    ),
+                    None => (child_min, child_max),
+                });
+            }
+        }
         // Rational splines can leave the control-point hull for invalid or
         // non-positive weights; text bounds depend on shaping/font metrics.
         // Bulged polylines likewise need their true arc extrema.
@@ -127,11 +153,15 @@ pub(super) fn cached_local_pick_bounds(
     geometry: &SemanticGeometry,
     cache: &mut PickBoundsCache,
 ) -> Option<(Point3, Point3)> {
-    let SemanticGeometry::Compound(children) = geometry else {
+    // A dimension aggregates its display children like a compound, so it uses
+    // the same cached-union path (ADR 0017 A.8).
+    let children: &[SemanticGeometry] = match geometry {
+        SemanticGeometry::Compound(children) => children,
+        SemanticGeometry::Dimension(dimension) => dimension.display(),
         // Leaf bounds are cheap and common. Avoid hashing and inserting millions
         // of one-shot leaf pointers; only reusable compound aggregates belong
         // in the query cache.
-        return local_pick_bounds(geometry);
+        _ => return local_pick_bounds(geometry),
     };
     let key = geometry as *const SemanticGeometry;
     if let Some(bounds) = cache.get(&key) {
@@ -431,6 +461,31 @@ fn index_local_bounds(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
                 return None;
             }
             for child in children {
+                let child = index_local_bounds(child)?;
+                bounds = Some(match bounds {
+                    Some((min, max)) => (
+                        Point3 {
+                            x: min.x.min(child.0.x),
+                            y: min.y.min(child.0.y),
+                            z: min.z.min(child.0.z),
+                        },
+                        Point3 {
+                            x: max.x.max(child.1.x),
+                            y: max.y.max(child.1.y),
+                            z: max.z.max(child.1.z),
+                        },
+                    ),
+                    None => child,
+                });
+            }
+        }
+        // A dimension's conservative bound is the union of its display
+        // children, matching the compound rule (ADR 0017 A.8).
+        SemanticGeometry::Dimension(dimension) => {
+            if dimension.display().is_empty() {
+                return None;
+            }
+            for child in dimension.display() {
                 let child = index_local_bounds(child)?;
                 bounds = Some(match bounds {
                     Some((min, max)) => (

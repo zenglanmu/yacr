@@ -1,35 +1,11 @@
 //! Resolved DIMSTYLE values used to draw a synthesized dimension.
 //!
-//! Submodule of [`crate::dimension`].
+//! Submodule of [`crate::dimension`]. The domain owns the data type
+//! ([`DimensionStyleValues`]); this module only reads an acadrust `DimStyle`
+//! and resolves the text-style identity the measurement text needs.
 
 use super::*;
 use acadrust::tables::DimStyle;
-
-/// DIMSTYLE values needed to draw a synthesized dimension, already scaled by
-/// `DIMSCALE` where AutoCAD scales them.
-#[derive(Debug, Clone)]
-pub(crate) struct DimStyleValues {
-    /// `DIMASZ`: arrowhead length in drawing units.
-    pub arrow_size: f64,
-    /// `DIMEXO`: gap between the measured point and the extension line.
-    pub ext_offset: f64,
-    /// `DIMEXE`: how far the extension line runs past the dimension line.
-    pub ext_beyond: f64,
-    /// `DIMTXT`: measurement text height.
-    pub text_height: f64,
-    /// `DIMGAP`: gap between the dimension line and the measurement text.
-    pub text_gap: f64,
-    /// `DIMTAD`: place text above (true) rather than centred on the line.
-    pub text_above: bool,
-    /// `DIMLFAC`: linear measurement scale factor.
-    pub linear_factor: f64,
-    /// `DIMDEC`: decimal places for the measurement.
-    pub decimals: usize,
-    /// `DIMZIN` bit 3: suppress trailing zeros in the measurement.
-    pub suppress_trailing_zeros: bool,
-    /// Resolved `DIMTXSTY` name, used to pick the text font.
-    pub text_style: String,
-}
 
 fn positive(value: f64, fallback: f64) -> f64 {
     if value.is_finite() && value > 0.0 {
@@ -39,42 +15,55 @@ fn positive(value: f64, fallback: f64) -> f64 {
     }
 }
 
-impl DimStyleValues {
-    pub(crate) fn from_style(style: &DimStyle, text_style: String) -> Self {
-        let scale = positive(style.dimscale, 1.0);
-        Self {
-            arrow_size: positive(style.dimasz, 2.5) * scale,
-            ext_offset: positive(style.dimexo, 0.625) * scale,
-            ext_beyond: positive(style.dimexe, 1.25) * scale,
-            text_height: positive(style.dimtxt, 2.5) * scale,
-            text_gap: positive(style.dimgap, 0.625) * scale,
-            text_above: style.dimtad != 0,
-            linear_factor: {
-                let factor = style.dimlfac;
-                if factor.is_finite() && factor.abs() > 1e-12 {
-                    factor.abs()
-                } else {
-                    1.0
-                }
-            },
-            decimals: style.dimdec.clamp(0, 8) as usize,
-            suppress_trailing_zeros: style.dimzin & 8 != 0,
-            text_style,
-        }
+/// Build the domain style snapshot from an acadrust `DimStyle`, already scaled
+/// by `DIMSCALE` where AutoCAD scales them.
+pub(crate) fn style_values(
+    style: &DimStyle,
+    text_style_name: String,
+    text_style: StyleId,
+    text_font: Option<String>,
+) -> DimensionStyleValues {
+    let scale = positive(style.dimscale, 1.0);
+    DimensionStyleValues {
+        arrow_size: positive(style.dimasz, 2.5) * scale,
+        ext_offset: positive(style.dimexo, 0.625) * scale,
+        ext_beyond: positive(style.dimexe, 1.25) * scale,
+        text_height: positive(style.dimtxt, 2.5) * scale,
+        text_gap: positive(style.dimgap, 0.625) * scale,
+        text_above: style.dimtad != 0,
+        linear_factor: {
+            let factor = style.dimlfac;
+            if factor.is_finite() && factor.abs() > 1e-12 {
+                factor.abs()
+            } else {
+                1.0
+            }
+        },
+        decimals: style.dimdec.clamp(0, 8) as usize,
+        suppress_trailing_zeros: style.dimzin & 8 != 0,
+        text_style_name,
+        text_style,
+        text_font,
     }
 }
 
 impl ImporterBuilder<'_> {
     /// Resolve the DIMSTYLE for a dimension, falling back to the acadrust
-    /// defaults when the table entry is missing.
-    pub(super) fn dim_style_values(&self, name: &str) -> DimStyleValues {
-        let text_style = self.dim_text_style(name);
+    /// defaults when the table entry is missing. The text style identity is
+    /// resolved here so the domain synthesis never reaches back into the
+    /// builder.
+    pub(super) fn dim_style_values(&self, name: &str) -> DimensionStyleValues {
+        let text_style_name = self.dim_text_style(name);
+        let text_style = self.style_id(&text_style_name);
+        let text_font = self.style_font(&text_style_name);
         match self.acad.dim_styles.get(name) {
-            Some(style) => DimStyleValues::from_style(style, text_style),
-            None => {
-                let standard = DimStyle::standard();
-                DimStyleValues::from_style(&standard, text_style)
-            }
+            Some(style) => style_values(style, text_style_name, text_style, text_font),
+            None => style_values(
+                &DimStyle::standard(),
+                text_style_name,
+                text_style,
+                text_font,
+            ),
         }
     }
 

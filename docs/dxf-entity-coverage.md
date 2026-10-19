@@ -34,7 +34,7 @@ DXF 图元与 `../opencadstudio` 当前支持的图元，并要求“务必实�
 | SHAPE | ✅ | SHX 字形：`FontEngine::shape_glyph` 经 SHX `glyph_by_code` 生成折线；缺字体/按名引用显式 `Partial` |
 | TABLE | ⚠️ Partial | 单元格网格 + 文字 + 合并单元格跨格；**按 `CellStyle`/`CellBorder` 逐边绘制**（`invisible` 跳过、`double_spacing` 双线、合并抑制内边）；逐边颜色/线宽、`override_flags`、`border_type`、`additional_borders` 未应用 |
 | RASTERIMAGE | ✅/⚠️ | **新增端到端纹理显示**：importer 发 `SemanticGeometry::Image`；host 按相对路径解析 + PNG/JPEG 解码（`cad-resources`）；renderer 上传纹理（每键去重、UV 方向修正、裁剪多边形）；缺纹理→frame + `image.unresolved`；不支持编解码器、亮度/对比/淡出、outside 裁剪→`Partial` |
-| DIMENSION | ✅/⚠️ | 线性/对齐/半径/直径/角度(2Ln/3Pt)/坐标/弧长 `Complete`（弧长画引线）；`LargeRadial` 用 `jog_angle` 定向仍 `Partial`；`is_partial` 弧标注 `Partial` |
+| DIMENSION | ✅/⚠️ | **P5a**：无块与图片标注都导入为一级 `Dimension` 实体（`cad-domain`，`display` 私有、单写入路径）；线性/对齐/半径/直径/角度(2Ln/3Pt)/坐标 `Complete`；**圆弧长/大半径未迁移**，保留旧 `Compound` 合成（`Partial`，导出仍与从前一样有损）。导出为真实 DXF `DIMENSION` + 生成 `*D…` 内容块 + 组 42 + DIMSTYLE 记录（组 70 的 32 位不写、0x80 从不置位、210 不写、51/52/71/72 丢弃、DIMSCALE 不保留；**未用第三方读取器验证**） |
 | EXTENDED（RTEXT / ARCALIGNEDTEXT / GEOPOSITIONMARKER / SECTIONOBJECT / POINTCLOUD） | ⚠️ Partial | 基础表示：RTEXT→Text（flags/非 ±Z OCS 法向未处理则 `Partial`）、ARCALIGNEDTEXT→直线近似 Text、GEOPOSITIONMARKER→半径圆+注记+内嵌 MText、SECTIONOBJECT→折线、POINTCLOUD→范围盒（无点数据） |
 | CAMERA / 动态块参数与夹点 / COORDINATION_MODEL / OLEFRAME / LAYOUTPRINTCONFIG / FORMAT / LEGACY / REGISTEREDCLASS | ⛔ 无显示 | 按设计无几何或为外部内容，保持 `Opaque`/`Unverified`（见 §4） |
 | OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅/⚠️ | 外框/裁剪边界/符号折线/灯光字形；外部内容不加载，均 `Partial` |
@@ -78,7 +78,7 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 | WIPEOUT 掩码 | ✅ | ⚠️ Partial | `Mask` 语义（边界+inverted）已发；**掩码填充未渲染**，透明覆盖顺序洞仍在 |
 | EXTENDED 基础表示 | ✅ | ⚠️ Partial | RTEXT/ARCALIGNEDTEXT/GEOPOSITIONMARKER/SECTIONOBJECT/POINTCLOUD 基础表示已画（多为 `Partial`）；CAMERA/动态块参数夹点无几何、外部内容不加载 |
 | RAY / XLINE | ✅ | ✅ | 裁剪到模型 bounds；无范围回退为默认盒 `Partial` |
-| DIMENSION 子类 | ✅ | ✅/⚠️ | 线性/对齐/半径/直径/角度/坐标/圆弧长已画（弧长含引线）；大半径 jog 定向但仍 `Partial`，`is_partial` 弧标注 `Partial` |
+| DIMENSION 子类 | ✅ | ✅/⚠️ | **P5a**：线性/对齐/半径/直径/角度(2Ln/3Pt)/坐标 `Complete` 且导入为一级 `Dimension`；**圆弧长/大半径未迁移**（保留旧 `Compound` 合成，`Partial`，导出仍有损）；导出形状见 §2 的 DIMENSION 行（内容块/42/DIMSTYLE；多项丢弃，**未用第三方读取器验证**） |
 | OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | ✅/⚠️ | 外框/裁剪边界/符号/灯光字形已画；外部内容不加载，均 `Partial` |
 | 绘制顺序 `draw_order` | ✅ | ⛔ 未贯通 | `DbEntity::draw_order` 未经 `DisplayFragment` 传到 `RenderBatch`（本轮正式推迟）；绘制顺序=上传顺序 |
 | 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复三处：①纸张单位优先从标准纸名解析（acadrust 实际会把 `group 72` 应用到 LAYOUT，但纸名带单位记号时更可靠）；②默认选有 viewport 的纸空间布局；③acadrust 亦应用 `group 73` 旋转，仅在文件未声明旋转时才按 viewport 范围把纸张轴交换为横向（标题栏保持正立）。纸张/边框/标题栏已出图；**模型视图仍有错位/多余图元**（视口合成保真未通过） |

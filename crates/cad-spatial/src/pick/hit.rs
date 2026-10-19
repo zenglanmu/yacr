@@ -119,6 +119,9 @@ fn geometry_family(geometry: &SemanticGeometry) -> usize {
         SemanticGeometry::Insert { .. } => FAMILY_INSERT,
         SemanticGeometry::Opaque { .. } => FAMILY_OPAQUE,
         SemanticGeometry::Compound(_) => FAMILY_COMPOUND,
+        // A dimension is picked like a compound: recurse into its display
+        // children (ADR 0017 A.8).
+        SemanticGeometry::Dimension(_) => FAMILY_COMPOUND,
         SemanticGeometry::Text { .. } => FAMILY_TEXT,
         SemanticGeometry::Shape { .. } => FAMILY_SHAPE,
         SemanticGeometry::Mask { .. } => FAMILY_MASK,
@@ -331,6 +334,43 @@ fn hit_validated(
                     ..hit
                 }),
                 None if unsupported.is_some() => PickOutcome::Unsupported("compound-unsupported"),
+                None => PickOutcome::Miss,
+            }
+        }
+        // A dimension picks through its display children, exactly like a
+        // compound (ADR 0017 A.8).
+        SemanticGeometry::Dimension(dimension) => {
+            let mut best: Option<GeometryHit> = None;
+            let mut unsupported: Option<&'static str> = None;
+            for child in dimension.display() {
+                match hit_validated(
+                    ray,
+                    child,
+                    transform,
+                    options,
+                    params,
+                    profile.as_deref_mut(),
+                    bounds_cache,
+                )? {
+                    PickOutcome::Hit(hit) => {
+                        let better = best
+                            .as_ref()
+                            .map(|b| (hit.distance, hit.offset) < (b.distance, b.offset))
+                            .unwrap_or(true);
+                        if better {
+                            best = Some(hit);
+                        }
+                    }
+                    PickOutcome::Miss => {}
+                    PickOutcome::Unsupported(reason) => unsupported = Some(reason),
+                }
+            }
+            match best {
+                Some(hit) => PickOutcome::Hit(GeometryHit {
+                    geometry_source: GeometrySource::Analytic,
+                    ..hit
+                }),
+                None if unsupported.is_some() => PickOutcome::Unsupported("dimension-unsupported"),
                 None => PickOutcome::Miss,
             }
         }

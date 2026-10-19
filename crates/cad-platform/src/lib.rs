@@ -41,6 +41,9 @@ pub trait FontLoader {
 pub mod fonts;
 pub mod images;
 
+#[cfg(test)]
+mod dimension_font_tests;
+
 /// Drive a [`HostFuture`] to completion on a no-op waker.
 ///
 /// This is only sound for host futures whose steps are always ready (asset

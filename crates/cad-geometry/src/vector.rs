@@ -158,5 +158,16 @@ pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
         } => finite(*origin) && finite(*u) && finite(*v) && pixels.iter().all(|p| p.is_finite()),
         G::Mask { boundary, .. } => all_points(boundary),
         G::Compound(children) => children.iter().all(geometry_is_finite),
+        // A dimension is only finite when its definition points, its measurement
+        // and every display child are finite; checking the display alone would
+        // miss a poisoned definition point that the next transform/export reads
+        // (review N8).
+        G::Dimension(dimension) => {
+            let definition = dimension.definition();
+            definition.is_consistent()
+                && definition.text_rotation.is_finite()
+                && dimension.measurement().is_finite()
+                && dimension.display().iter().all(geometry_is_finite)
+        }
     }
 }

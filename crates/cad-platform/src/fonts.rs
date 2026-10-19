@@ -106,7 +106,11 @@ pub fn requested_fonts(database: &DrawingDatabase) -> Vec<String> {
     out
 }
 
-fn collect_fonts(database: &DrawingDatabase, geometry: &SemanticGeometry, out: &mut Vec<String>) {
+pub(crate) fn collect_fonts(
+    database: &DrawingDatabase,
+    geometry: &SemanticGeometry,
+    out: &mut Vec<String>,
+) {
     match geometry {
         SemanticGeometry::Text { font, style, .. } => {
             if let Some(font) = font {
@@ -118,6 +122,14 @@ fn collect_fonts(database: &DrawingDatabase, geometry: &SemanticGeometry, out: &
         }
         SemanticGeometry::Compound(parts) => {
             for part in parts {
+                collect_fonts(database, part, out);
+            }
+        }
+        // A dimension's measurement text is a display child; without this arm
+        // its font is never registered and the text is silently not drawn
+        // (ADR 0017 A.8).
+        SemanticGeometry::Dimension(dimension) => {
+            for part in dimension.display() {
                 collect_fonts(database, part, out);
             }
         }

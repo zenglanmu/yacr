@@ -259,6 +259,12 @@ fn explode_source(
         }
         SemanticGeometry::Image { .. } => Err(policy_refusal("IMAGE")),
         SemanticGeometry::Mask { .. } => Err(policy_refusal("MASK")),
+        // A dimension keeps the ADR-0016 refusal: EXPLODE refuses it by its
+        // stored `AcDbDimension` type key (ADR 0017 A.8).
+        SemanticGeometry::Dimension(_) => {
+            refuse_compound_type_key(source)?;
+            Err(policy_refusal("DIMENSION"))
+        }
         other => Err(CadError::Unsupported(format!(
             "EXPLODE cannot explode {}: only LWPOLYLINE, INSERT and Compound are \
              decomposable",
@@ -408,6 +414,7 @@ fn push_produced(
         | SemanticGeometry::Spline { .. }
         | SemanticGeometry::Shape { .. }
         | SemanticGeometry::Opaque { .. }
+        | SemanticGeometry::Dimension(_)
         | SemanticGeometry::Compound(_) => Err(child_refusal(&geometry)),
         _ => {
             let type_key = class_name(&geometry).to_string();

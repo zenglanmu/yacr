@@ -255,6 +255,9 @@ impl<'a> ImporterBuilder<'a> {
             SemanticGeometry::Mesh(_)
             | SemanticGeometry::Opaque { .. }
             | SemanticGeometry::Text { .. } => SupportStatus::Unsupported,
+            // A dimension is not a MEASURE target (ADR 0017 A.8); reporting it
+            // as measurable would be a silent over-claim.
+            SemanticGeometry::Dimension(_) => SupportStatus::Unsupported,
             _ => semantic,
         };
         let entry = self

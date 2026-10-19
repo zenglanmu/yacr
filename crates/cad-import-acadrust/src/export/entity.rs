@@ -47,6 +47,12 @@ pub(crate) struct ExportAccumulator {
     pub notes: Vec<ExportDiagnostic>,
     /// Block definitions reached by an INSERT expansion.
     pub expanded_blocks: BTreeSet<BlockId>,
+    /// Monotonic counter for generated `*D...` dimension content-block names.
+    pub dim_block_counter: usize,
+    /// While true, [`ExportAccumulator::record`] drops its entry: used to write
+    /// a dimension's content-block members without counting each one as a
+    /// separate source geometry (the dimension itself is one outcome).
+    pub suppress_records: bool,
 }
 
 impl ExportAccumulator {
@@ -57,10 +63,15 @@ impl ExportAccumulator {
             entries: Vec::new(),
             notes: Vec::new(),
             expanded_blocks: BTreeSet::new(),
+            dim_block_counter: 0,
+            suppress_records: false,
         }
     }
 
     pub(crate) fn record(&mut self, object: Option<ObjectId>, kind: &str, outcome: MappingOutcome) {
+        if self.suppress_records {
+            return;
+        }
         match outcome {
             MappingOutcome::Exact => self.counts.exact += 1,
             MappingOutcome::Converted(reasons) => {
@@ -86,7 +97,7 @@ impl ExportAccumulator {
         }
     }
 
-    fn push(&mut self, entity: EntityType, ctx: &EntityContext) -> CadResult<()> {
+    pub(super) fn push(&mut self, entity: EntityType, ctx: &EntityContext) -> CadResult<()> {
         if self.entities.len() >= ctx.limits.max_output_entities {
             return Err(CadError::InvalidInput(format!(
                 "export exceeds the {} entity output limit",
@@ -123,7 +134,7 @@ fn with_reasons(base: MappingOutcome, extra: Vec<String>) -> MappingOutcome {
 /// compounds. `transform` is the accumulated block placement (identity at the
 /// model root).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn emit(
+pub(super) fn emit(
     doc: &mut CadDocument,
     entity: &DbEntity,
     transform: &Transform3,
@@ -516,6 +527,9 @@ fn emit_leaf(
                 "opaque/proxy geometry '{type_key}' has no DXF representation"
             )]),
         ),
+        SemanticGeometry::Dimension(dimension) => {
+            super::dimension::emit_dimension(doc, entity, dimension, ctx, acc)?;
+        }
         // Insert and Compound are handled before this point; a leaf here would
         // be a programming error, and must not be silently dropped.
         SemanticGeometry::Insert { .. } | SemanticGeometry::Compound(_) => {
@@ -591,7 +605,7 @@ fn emit_polyline(
 }
 
 /// Build the common entity data and collect any per-entity conversion reasons.
-fn common_for(
+pub(super) fn common_for(
     doc: &mut CadDocument,
     entity: &DbEntity,
     ctx: &EntityContext,
@@ -729,7 +743,7 @@ fn mtext_attachment(align_h: TextAlignH, align_v: TextAlignV) -> (AttachmentPoin
     (attachment, reason)
 }
 
-fn v3(p: Point3) -> Vector3 {
+pub(super) fn v3(p: Point3) -> Vector3 {
     Vector3::new(p.x, p.y, p.z)
 }
 
@@ -749,6 +763,7 @@ pub(crate) fn kind_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Shape { .. } => "Shape",
         SemanticGeometry::Opaque { .. } => "Opaque",
         SemanticGeometry::Compound(_) => "Compound",
+        SemanticGeometry::Dimension(_) => "Dimension",
         SemanticGeometry::Image { .. } => "Image",
         SemanticGeometry::Mask { .. } => "Mask",
     }

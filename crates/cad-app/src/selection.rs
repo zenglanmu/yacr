@@ -419,6 +419,11 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
         SemanticGeometry::Compound(children) => {
             vec![PropertyRow::new("children", children.len().to_string())]
         }
+        SemanticGeometry::Dimension(dimension) => vec![
+            PropertyRow::new("subtype", format!("{:?}", dimension.kind())),
+            PropertyRow::new("measurement", format!("{:.6}", dimension.measurement())),
+            PropertyRow::new("display", dimension.display().len().to_string()),
+        ],
     }
 }
 

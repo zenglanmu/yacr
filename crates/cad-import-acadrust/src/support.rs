@@ -47,6 +47,19 @@ pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, Su
             }
             (render, pick)
         }
+        // A dimension inherits the weakest status of its display children, so a
+        // dimension with a `Text` child is `Unverified` (not the false
+        // `Verified` the wildcard arm would give it; ADR 0017 A.8).
+        SemanticGeometry::Dimension(dimension) => {
+            let mut render = SupportStatus::Verified;
+            let mut pick = SupportStatus::Verified;
+            for child in dimension.display() {
+                let (r, p) = display_support(child);
+                render = weaker(render, r);
+                pick = weaker(pick, p);
+            }
+            (render, pick)
+        }
         _ => (SupportStatus::Verified, SupportStatus::Verified),
     }
 }
@@ -209,5 +222,77 @@ pub(crate) trait HandleExt {
 impl HandleExt for acadrust::Handle {
     fn null_or_value_zero(&self) -> bool {
         self.value() == 0
+    }
+}
+
+#[cfg(test)]
+mod dimension_support_tests {
+    use super::*;
+    use cad_domain::{
+        DimensionDefinition, DimensionGeometry, DimensionKind, DimensionPoints,
+        DimensionStyleValues,
+    };
+
+    fn style() -> DimensionStyleValues {
+        DimensionStyleValues {
+            arrow_size: 2.5,
+            ext_offset: 0.625,
+            ext_beyond: 1.25,
+            text_height: 2.5,
+            text_gap: 0.625,
+            text_above: true,
+            linear_factor: 1.0,
+            decimals: 4,
+            suppress_trailing_zeros: false,
+            text_style_name: "Standard".into(),
+            text_style: StyleId(0),
+            text_font: None,
+        }
+    }
+
+    fn definition() -> DimensionDefinition {
+        DimensionDefinition {
+            kind: DimensionKind::Aligned,
+            points: DimensionPoints::Linear {
+                first: Point3 {
+                    x: -1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                second: Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                dimension_line: Point3 {
+                    x: -1.0,
+                    y: -2.0,
+                    z: 0.0,
+                },
+            },
+            text_middle: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            text_rotation: 0.0,
+            normal: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        }
+    }
+
+    /// ADR 0017 F.3 (wildcard regression): a dimension with a Text child must be
+    /// `Unverified`, not the false `Verified` the wildcard arm would give it.
+    #[test]
+    fn dimension_with_text_child_is_unverified() {
+        let dimension =
+            DimensionGeometry::synthesized(definition(), "Standard".into(), style(), None)
+                .expect("synthesized");
+        let (render, pick) = display_support(&SemanticGeometry::Dimension(Box::new(dimension)));
+        assert_eq!(render, SupportStatus::Unverified);
+        assert_eq!(pick, SupportStatus::Unverified);
     }
 }

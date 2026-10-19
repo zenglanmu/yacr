@@ -403,6 +403,11 @@ struct ImporterBuilder<'a> {
     /// Running model-space bounding box, used to clip RAY/XLINE construct lines
     /// (a fixed viewport has no per-view clip).
     model_bounds: Option<(Point3, Point3)>,
+    /// Block names on the current dimension picture-block (`*D...`) expansion
+    /// stack. A member DIMENSION that references a block already being expanded
+    /// is refused by the guard in `dimension_semantics` rather than recursing
+    /// without bound (review B3).
+    dimension_picture_stack: Vec<String>,
 }
 
 /// A block child classified for display, before nesting is resolved.
@@ -428,7 +433,6 @@ mod support;
 mod annotative;
 
 use annotative::*;
-use dimension::*;
 use dynamic::*;
 use geometry::*;
 use hatch::*;

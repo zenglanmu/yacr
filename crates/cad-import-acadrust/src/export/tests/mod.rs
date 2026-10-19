@@ -19,6 +19,7 @@ use super::report::{ExportCounts, ExportFormat, ExportLimits, ExportReport, Expo
 use super::{export, ExportRequest};
 use crate::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
+mod dimension;
 mod entities;
 mod report_limits;
 mod writer;

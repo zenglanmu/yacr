@@ -493,6 +493,14 @@ fn vertex_count(g: &SemanticGeometry) -> usize {
         SemanticGeometry::Line { .. }
         | SemanticGeometry::Point(_)
         | SemanticGeometry::Text { .. } => 2,
+        // A dimension is a rough estimate of its display children (appearance
+        // level only; ADR 0017 A.8).
+        SemanticGeometry::Dimension(dimension) => dimension
+            .display()
+            .iter()
+            .map(vertex_count)
+            .sum::<usize>()
+            .max(1),
         _ => 4,
     }
 }

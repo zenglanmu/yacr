@@ -2,6 +2,13 @@
 //! unsupported/degenerate fallbacks.
 //!
 //! Submodule of [`crate::dimension`].
+//!
+//! The seven modelled subtypes (ADR 0017 A.1/A.3) map to the domain
+//! [`DimensionGeometry`] via [`DimensionGeometry::synthesized`], so the
+//! block-less import and the creation path share one display builder (ADR 0017
+//! A.4 invariant 1). Arc-length and large-radial dimensions are **not** in the
+//! ADR kind set; they keep the pre-P5a compound synthesis (declared in the
+//! capability table), using the shared synthesis helpers the domain exposes.
 
 use super::*;
 use acadrust::entities::{Dimension, DimensionBase, Leader, LeaderPathType};
@@ -12,15 +19,15 @@ impl ImporterBuilder<'_> {
         content: &str,
         position: Point3,
         rotation: f64,
-        style: &DimStyleValues,
+        style: &DimensionStyleValues,
     ) -> SemanticGeometry {
         SemanticGeometry::Text {
             text: content.to_string(),
             position,
-            style: self.style_id(&style.text_style),
+            style: style.text_style,
             height: style.text_height,
             rotation,
-            font: self.style_font(&style.text_style),
+            font: style.text_font.clone(),
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Middle,
         }
@@ -31,8 +38,8 @@ impl ImporterBuilder<'_> {
     fn place_dimension_text(
         &self,
         base: &DimensionBase,
-        geometry: &DimensionGeometry,
-        style: &DimStyleValues,
+        geometry: &SynthesizedDimension,
+        style: &DimensionStyleValues,
         prefix: &str,
         suffix: &str,
     ) -> SemanticGeometry {
@@ -47,7 +54,13 @@ impl ImporterBuilder<'_> {
         } else {
             geometry.text_rotation
         };
-        let content = resolve_measurement_text(base, prefix, suffix, geometry.measurement, style);
+        let content = resolve_measurement_text(
+            base.text_override(),
+            prefix,
+            suffix,
+            geometry.measurement,
+            style,
+        );
         self.dimension_text(&content, position, rotation, style)
     }
 
@@ -66,10 +79,18 @@ impl ImporterBuilder<'_> {
         )
     }
 
-    /// Convert a dimension without a persisted anonymous block into drawable
-    /// geometry. The 2D synthesis assumes the world-XY plane; a tilted plane is
-    /// reported `Partial` instead of being flattened incorrectly.
-    pub(crate) fn dimension_semantics(&self, d: &Dimension) -> (SemanticGeometry, Completeness) {
+    /// Convert a dimension into drawable geometry. The 2D synthesis assumes the
+    /// world-XY plane; a tilted plane is reported `Partial` instead of being
+    /// flattened incorrectly.
+    ///
+    /// When the source carries a pre-rendered anonymous block (`*D...`), its
+    /// expanded members become the dimension's `display` via
+    /// [`DimensionGeometry::from_picture`] (ADR 0017 A.6). Otherwise the display
+    /// is our shared synthesis.
+    pub(crate) fn dimension_semantics(
+        &mut self,
+        d: &Dimension,
+    ) -> (SemanticGeometry, Completeness) {
         let base = d.base();
         let normal = p3(base.normal);
         if !cad_geometry::is_finite(normal) || (normal.z.abs() - 1.0).abs() > 1e-6 {
@@ -79,90 +100,149 @@ impl ImporterBuilder<'_> {
             );
         }
         let style = self.dim_style_values(&base.style_name);
-        let geometry = match d {
-            Dimension::Aligned(a) => {
-                let first = p3(a.first_point);
-                let second = p3(a.second_point);
-                let direction = cad_geometry::normalize(cad_geometry::sub(second, first));
-                linear_geometry(first, second, p3(a.definition_point), direction, &style)
+        let has_block =
+            !base.block_name.is_empty() && self.block_ids.contains_key(&base.block_name);
+        if has_block {
+            // Recursion guard (review B3): a `*D` block may contain a DIMENSION
+            // whose own block reference is already on the expansion stack
+            // (directly self-referential, or through a cycle). Without this the
+            // member conversion would recurse without bound and overflow the
+            // stack. The export side already guards with a block stack
+            // (`export/entity.rs`); this is the import-side equivalent. Beyond
+            // the guard the whole entity falls back to `Opaque` + `Partial`,
+            // never a panic and never a silent success.
+            if self
+                .dimension_picture_stack
+                .iter()
+                .any(|name| name == &base.block_name)
+            {
+                return Self::unsupported_dimension(
+                    base,
+                    "dimension picture block recursion (cycle) detected; block not expanded".into(),
+                );
             }
-            Dimension::Linear(l) => {
-                let first = p3(l.first_point);
-                let second = p3(l.second_point);
-                let direction = Point3 {
-                    x: l.rotation.cos(),
-                    y: l.rotation.sin(),
-                    z: 0.0,
-                };
-                linear_geometry(first, second, p3(l.definition_point), direction, &style)
+            if self.dimension_picture_stack.len() >= self.request.limits.max_block_depth {
+                return Self::unsupported_dimension(
+                    base,
+                    "dimension picture block nesting exceeds the import block-depth limit".into(),
+                );
             }
-            Dimension::Radius(r) => {
-                radial_geometry(p3(r.angle_vertex), p3(r.definition_point), false, &style)
+            let Some(definition) = dimension_definition(d) else {
+                return Self::unsupported_dimension(
+                    base,
+                    "dimension subtype is not modelled by the domain variant".into(),
+                );
+            };
+            let text_override = base.text_override().map(str::to_string);
+            let (members, member_completeness) = match self.dimension_picture_members(base) {
+                Ok(result) => result,
+                Err(reason) => return Self::unsupported_dimension(base, reason),
+            };
+            return match DimensionGeometry::from_picture(
+                definition,
+                base.style_name.clone(),
+                style,
+                text_override,
+                members,
+            ) {
+                Ok(geometry) => (
+                    SemanticGeometry::Dimension(Box::new(geometry)),
+                    // N9: fold in the members' own completeness so a picture
+                    // built from lossy members is not reported `Complete`.
+                    member_completeness,
+                ),
+                Err(_) => {
+                    Self::unsupported_dimension(base, "dimension points are degenerate".into())
+                }
+            };
+        }
+        if let Some(definition) = dimension_definition(d) {
+            let text_override = base.text_override().map(str::to_string);
+            return match DimensionGeometry::synthesized(
+                definition,
+                base.style_name.clone(),
+                style,
+                text_override,
+            ) {
+                Ok(geometry) => (
+                    SemanticGeometry::Dimension(Box::new(geometry)),
+                    Completeness::Complete,
+                ),
+                Err(_) => {
+                    Self::unsupported_dimension(base, "dimension points are degenerate".into())
+                }
+            };
+        }
+        self.dimension_semantics_unmodelled(d, base, &style)
+    }
+
+    /// Expand the anonymous `*D...` picture block into the dimension's display
+    /// members, placed by the dimension's block-insertion transform.
+    ///
+    /// Returns `Err(reason)` when a member cannot be placed under the transform
+    /// (for example a `Spline`/`Shape`/`Opaque`); the caller then refuses the
+    /// whole entity rather than store a partial picture (ADR 0017 A.5). The
+    /// members' combined completeness is returned alongside them so a lossy
+    /// picture is not reported `Complete` (review N9).
+    ///
+    /// The block name is pushed onto [`ImporterBuilder::dimension_picture_stack`]
+    /// before the members are converted, so a member dimension that references a
+    /// block already being expanded is caught by the guard in
+    /// [`ImporterBuilder::dimension_semantics`] instead of recursing (review B3).
+    fn dimension_picture_members(
+        &mut self,
+        base: &DimensionBase,
+    ) -> Result<(Vec<SemanticGeometry>, Completeness), String> {
+        let name = base.block_name.clone();
+        let transform = dimension_transform(base);
+        let entities: Vec<EntityType> = self.acad.entities_in_block(&name).cloned().collect();
+        self.dimension_picture_stack.push(name);
+        let mut members = Vec::with_capacity(entities.len());
+        let mut completeness = Completeness::Complete;
+        let mut failure: Option<String> = None;
+        for entity in entities {
+            let common = entity.common().clone();
+            let (geometry, member_completeness) = self.convert(&entity, &common);
+            match place_dimension_member(geometry, &transform) {
+                Some(placed) => {
+                    members.push(placed);
+                    completeness = completeness.combine(member_completeness);
+                }
+                None => {
+                    failure =
+                        Some("dimension picture block has geometry that cannot be placed".into());
+                    break;
+                }
             }
-            Dimension::Diameter(dd) => {
-                radial_geometry(p3(dd.angle_vertex), p3(dd.definition_point), true, &style)
-            }
-            Dimension::Angular2Ln(a) => angular_geometry(
-                p3(a.angle_vertex),
-                p3(a.first_point),
-                p3(a.definition_point),
-                cad_geometry::distance(p3(a.angle_vertex), p3(a.dimension_arc)),
-                p3(a.base.normal),
-                &style,
-            ),
-            Dimension::Angular3Pt(a) => angular_geometry(
-                p3(a.angle_vertex),
-                p3(a.first_point),
-                p3(a.second_point),
-                cad_geometry::distance(p3(a.angle_vertex), p3(a.definition_point)),
-                p3(a.base.normal),
-                &style,
-            ),
-            Dimension::Ordinate(o) => ordinate_geometry(
-                p3(o.feature_location),
-                p3(o.leader_endpoint),
-                o.is_ordinate_type_x,
-            ),
-            Dimension::Arc(a) => arc_length_geometry(
-                p3(a.center_point),
-                p3(a.first_extension_point),
-                p3(a.second_extension_point),
-                a.arc_start_parameter,
-                a.arc_end_parameter,
-                p3(a.base.normal),
-                &style,
-                a.has_leader
-                    .then(|| (p3(a.first_leader_point), p3(a.second_leader_point))),
-            ),
-            Dimension::LargeRadial(lr) => {
-                let override_center = p3(lr.override_center);
-                let center = if cad_geometry::length(override_center) > 1e-9 {
-                    override_center
-                } else {
-                    p3(lr.definition_point)
-                };
-                large_radial_geometry(center, p3(lr.chord_point), p3(lr.jog_point), lr.jog_angle)
-            }
-        };
-        let Some(geometry) = geometry else {
-            return Self::unsupported_dimension(base, "dimension points are degenerate".into());
-        };
-        let (prefix, suffix, completeness) = match d {
-            Dimension::Radius(_) => ("R", "", Completeness::Complete),
-            Dimension::Diameter(_) => ("\u{2300}", "", Completeness::Complete),
-            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => {
-                ("", "\u{00B0}", Completeness::Complete)
-            }
-            Dimension::LargeRadial(_) => (
-                "R",
-                "",
-                Completeness::Partial(vec![
-                    "large-radial jog is oriented by jog_angle; AutoCAD's true zigzag jog and text \
-                     landing are not reproduced"
-                        .into(),
-                ]),
-            ),
+        }
+        self.dimension_picture_stack.pop();
+        match failure {
+            Some(reason) => Err(reason),
+            None => Ok((members, completeness)),
+        }
+    }
+
+    /// The pre-P5a compound synthesis for the subtypes the domain variant does
+    /// not model (arc-length and large-radial).
+    fn dimension_semantics_unmodelled(
+        &self,
+        d: &Dimension,
+        base: &DimensionBase,
+        style: &DimensionStyleValues,
+    ) -> (SemanticGeometry, Completeness) {
+        let (geometry, prefix, suffix, completeness) = match d {
             Dimension::Arc(a) => (
+                arc_length_geometry(
+                    p3(a.center_point),
+                    p3(a.first_extension_point),
+                    p3(a.second_extension_point),
+                    a.arc_start_parameter,
+                    a.arc_end_parameter,
+                    p3(a.base.normal),
+                    style,
+                    a.has_leader
+                        .then(|| (p3(a.first_leader_point), p3(a.second_leader_point))),
+                ),
                 "",
                 "",
                 if a.is_partial {
@@ -174,9 +254,32 @@ impl ImporterBuilder<'_> {
                     Completeness::Complete
                 },
             ),
-            _ => ("", "", Completeness::Complete),
+            Dimension::LargeRadial(lr) => {
+                let override_center = p3(lr.override_center);
+                let center = if cad_geometry::length(override_center) > 1e-9 {
+                    override_center
+                } else {
+                    p3(lr.definition_point)
+                };
+                (
+                    large_radial_geometry(center, p3(lr.chord_point), p3(lr.jog_point), lr.jog_angle),
+                    "R",
+                    "",
+                    Completeness::Partial(vec![
+                        "large-radial jog is oriented by jog_angle; AutoCAD's true zigzag jog and text \
+                         landing are not reproduced"
+                            .into(),
+                    ]),
+                )
+            }
+            _ => {
+                return Self::unsupported_dimension(base, "dimension points are degenerate".into());
+            }
         };
-        let text = self.place_dimension_text(base, &geometry, &style, prefix, suffix);
+        let Some(geometry) = geometry else {
+            return Self::unsupported_dimension(base, "dimension points are degenerate".into());
+        };
+        let text = self.place_dimension_text(base, &geometry, style, prefix, suffix);
         let mut children = geometry.children;
         children.push(text);
         (SemanticGeometry::Compound(children), completeness)
@@ -234,4 +337,149 @@ impl ImporterBuilder<'_> {
         }
         (SemanticGeometry::Compound(children), completeness)
     }
+}
+
+/// Place one expanded picture-block member under the dimension's block
+/// insertion transform.
+///
+/// `Text` is placed here because the general transform surface refuses a
+/// standalone `Text` entity; the other kinds use the shared transform. A kind
+/// the shared transform refuses yields `None`, so the caller refuses the whole
+/// dimension (never a partially placed picture).
+fn place_dimension_member(
+    geometry: SemanticGeometry,
+    transform: &Transform3,
+) -> Option<SemanticGeometry> {
+    if let SemanticGeometry::Text {
+        text,
+        position,
+        style,
+        height,
+        rotation,
+        font,
+        h_align,
+        v_align,
+    } = geometry
+    {
+        let scale = transform.max_scale();
+        if !scale.is_finite() {
+            return None;
+        }
+        let v = transform.apply_vector(Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        let delta = v.y.atan2(v.x);
+        return Some(SemanticGeometry::Text {
+            text,
+            position: transform.apply_point(position),
+            style,
+            height: height * scale,
+            rotation: rotation + delta,
+            font,
+            h_align,
+            v_align,
+        });
+    }
+    cad_db::transform_geometry(&geometry, transform).ok()
+}
+
+/// Map an acadrust dimension to the domain definition points (ADR 0017 A.3).
+///
+/// Returns `None` for the subtypes the domain variant does not model
+/// (arc-length, large-radial).
+fn dimension_definition(d: &Dimension) -> Option<DimensionDefinition> {
+    let base = d.base();
+    let text_middle = p3(base.text_middle_point);
+    let text_rotation = base.text_rotation;
+    let normal = p3(base.normal);
+    let definition = match d {
+        Dimension::Aligned(a) => DimensionDefinition {
+            kind: DimensionKind::Aligned,
+            points: DimensionPoints::Linear {
+                first: p3(a.first_point),
+                second: p3(a.second_point),
+                dimension_line: p3(a.definition_point),
+            },
+            text_middle,
+            text_rotation,
+            normal,
+        },
+        Dimension::Linear(l) => DimensionDefinition {
+            kind: DimensionKind::Linear {
+                rotation: l.rotation,
+            },
+            points: DimensionPoints::Linear {
+                first: p3(l.first_point),
+                second: p3(l.second_point),
+                dimension_line: p3(l.definition_point),
+            },
+            text_middle,
+            text_rotation,
+            normal,
+        },
+        Dimension::Radius(r) => DimensionDefinition {
+            kind: DimensionKind::Radius,
+            points: DimensionPoints::Radial {
+                center: p3(r.angle_vertex),
+                point_on_arc: p3(r.definition_point),
+                leader_length: r.leader_length,
+            },
+            text_middle,
+            text_rotation,
+            normal,
+        },
+        Dimension::Diameter(dd) => DimensionDefinition {
+            kind: DimensionKind::Diameter,
+            points: DimensionPoints::Radial {
+                center: p3(dd.angle_vertex),
+                point_on_arc: p3(dd.definition_point),
+                leader_length: dd.leader_length,
+            },
+            text_middle,
+            text_rotation,
+            normal,
+        },
+        Dimension::Angular2Ln(a) => DimensionDefinition {
+            kind: DimensionKind::Angular2Ln,
+            points: DimensionPoints::Angular2Ln {
+                line1_start: p3(a.first_point),
+                line1_end: p3(a.second_point),
+                line2_start: p3(a.angle_vertex),
+                line2_end: p3(a.definition_point),
+                arc_point: p3(a.dimension_arc),
+            },
+            text_middle,
+            text_rotation,
+            normal,
+        },
+        Dimension::Angular3Pt(a) => DimensionDefinition {
+            kind: DimensionKind::Angular3Pt,
+            points: DimensionPoints::Angular3Pt {
+                vertex: p3(a.angle_vertex),
+                first: p3(a.first_point),
+                second: p3(a.second_point),
+                arc_point: p3(a.definition_point),
+            },
+            text_middle,
+            text_rotation,
+            normal,
+        },
+        Dimension::Ordinate(o) => DimensionDefinition {
+            kind: DimensionKind::Ordinate {
+                x_ordinate: o.is_ordinate_type_x,
+            },
+            points: DimensionPoints::Ordinate {
+                feature: p3(o.feature_location),
+                leader_end: p3(o.leader_endpoint),
+                base: p3(o.definition_point),
+            },
+            text_middle,
+            text_rotation,
+            normal,
+        },
+        _ => return None,
+    };
+    Some(definition)
 }

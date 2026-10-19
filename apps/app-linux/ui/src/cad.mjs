@@ -566,6 +566,9 @@ export function propertyRowLabel(t, key) {
     case 'boundary': return t('properties.row.boundary');
     case 'inverted': return t('properties.row.inverted');
     case 'children': return t('properties.row.children');
+    case 'subtype': return t('properties.row.subtype');
+    case 'measurement': return t('properties.row.measurement');
+    case 'display': return t('properties.row.display');
     // An unknown machine key is shown by its raw key, never fabricated.
     default: return key;
   }

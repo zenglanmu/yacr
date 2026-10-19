@@ -259,6 +259,14 @@ impl Application {
                     | SemanticGeometry::Insert { .. } => {
                         plan.push((owner, StretchAction::Unchanged));
                     }
+                    // A dimension is not stretchable: a partial enclosure leaves
+                    // it unchanged (like ARC) rather than failing the command,
+                    // and a full enclosure moves it as a whole (the
+                    // `Enclosure::Full` arm above; ADR 0017 A.8).
+                    SemanticGeometry::Dimension(_) => {
+                        diagnostics.push(stretch_unchanged_diagnostic(owner, "dimension"));
+                        plan.push((owner, StretchAction::Unchanged));
+                    }
                     // A kind with no per-vertex edit and no declared move-only
                     // rule fails the whole command (refusal granularity).
                     other => {

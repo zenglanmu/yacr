@@ -146,6 +146,13 @@ pub(crate) fn fallback_scale(geometry: &SemanticGeometry) -> f64 {
         G::Spline { control_points, .. } => bbox_extent(control_points),
         G::Mask { boundary, .. } => bbox_extent(boundary),
         G::Compound(children) => children.iter().map(fallback_scale).fold(0.0f64, f64::max),
+        // A dimension's fallback extent is the largest of its display children,
+        // exactly like a compound (ADR 0017 A.8).
+        G::Dimension(dimension) => dimension
+            .display()
+            .iter()
+            .map(fallback_scale)
+            .fold(0.0f64, f64::max),
         // Point/Text have no closed extent; Mesh/Insert/Opaque/Shape/Image do
         // not tessellate to a polyline, so the fallback yields nothing anyway.
         _ => 0.0,
@@ -435,6 +442,11 @@ impl GeometryEngine for DefaultGeometryEngine {
                 }
                 G::Compound(out)
             }
+            // A dimension moves its definition points, display children and
+            // measurement together (ADR 0017 A.5). This is the second transform
+            // surface (the snap path); `cad-db::transform_geometry` is the other
+            // and both delegate to the same domain method.
+            G::Dimension(dimension) => G::Dimension(Box::new(dimension.transformed(t)?)),
         };
         // A transform that maps a finite source to a non-finite point is not a
         // usable result; report it instead of returning poisoned geometry

@@ -248,6 +248,14 @@ pub fn transform_geometry(
                 "transform of compound entities is not supported".to_string(),
             ));
         }
+        // A dimension transforms its definition points, its display children
+        // (including the internal `Text`) and its measurement together, so a
+        // MOVE/COPY/ARRAY/ALIGN/STRETCH keeps them in sync (ADR 0017 A.5). A
+        // standalone `Text` entity is still refused above; a dimension's own
+        // text is not a standalone entity.
+        SemanticGeometry::Dimension(dimension) => {
+            SemanticGeometry::Dimension(Box::new(dimension.transformed(transform)?))
+        }
     };
     Ok(out)
 }
@@ -307,4 +315,116 @@ fn arc_point(center: Point3, radius: f64, angle: f64, u: Point3, v: Point3) -> P
             scale(v, radius * angle.sin()),
         ),
     )
+}
+
+#[cfg(test)]
+mod dimension_transform_tests {
+    use super::*;
+    use cad_domain::{
+        DimensionDefinition, DimensionGeometry, DimensionKind, DimensionPoints,
+        DimensionStyleValues, StyleId,
+    };
+
+    fn style() -> DimensionStyleValues {
+        DimensionStyleValues {
+            arrow_size: 2.5,
+            ext_offset: 0.625,
+            ext_beyond: 1.25,
+            text_height: 2.5,
+            text_gap: 0.625,
+            text_above: true,
+            linear_factor: 1.0,
+            decimals: 4,
+            suppress_trailing_zeros: false,
+            text_style_name: "Standard".into(),
+            text_style: StyleId(0),
+            text_font: None,
+        }
+    }
+
+    fn definition() -> DimensionDefinition {
+        DimensionDefinition {
+            kind: DimensionKind::Aligned,
+            points: DimensionPoints::Linear {
+                first: Point3 {
+                    x: -21.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                second: Point3 {
+                    x: 21.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                dimension_line: Point3 {
+                    x: -21.0,
+                    y: -30.0,
+                    z: 0.0,
+                },
+            },
+            text_middle: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            text_rotation: 0.0,
+            normal: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        }
+    }
+
+    fn dimension() -> SemanticGeometry {
+        let geometry =
+            DimensionGeometry::synthesized(definition(), "Standard".into(), style(), None)
+                .expect("synthesized");
+        SemanticGeometry::Dimension(Box::new(geometry))
+    }
+
+    /// ADR 0017 A.4 invariant 2 / A.5: a MOVE keeps definition and display in
+    /// sync (this is the transform arm that used to refuse a compound).
+    #[test]
+    fn dimension_translates_definition_and_display_together() {
+        let moved = transform_geometry(
+            &dimension(),
+            &Transform3::translation(Point3 {
+                x: 100.0,
+                y: -5.0,
+                z: 0.0,
+            }),
+        )
+        .expect("dimension transforms");
+        let SemanticGeometry::Dimension(moved) = moved else {
+            panic!("expected a dimension");
+        };
+        // Measurement is translation-invariant.
+        assert!((moved.measurement() - 42.0).abs() < 1e-9);
+        match moved.definition().points {
+            DimensionPoints::Linear { first, .. } => {
+                assert!((first.x - 79.0).abs() < 1e-9);
+                assert!((first.y + 5.0).abs() < 1e-9);
+            }
+            ref other => panic!("expected linear points, got {other:?}"),
+        }
+    }
+
+    /// ADR 0017 A.5: a mirror or non-uniform scale refuses the whole entity
+    /// rather than producing distorted geometry.
+    #[test]
+    fn dimension_refuses_mirror_and_non_uniform_scale() {
+        let mirror = Transform3::scale(-1.0);
+        assert!(matches!(
+            transform_geometry(&dimension(), &mirror),
+            Err(CadError::Unsupported(_))
+        ));
+        let mut matrix = Transform3::identity().matrix;
+        matrix[0][0] = 2.0;
+        matrix[1][1] = 3.0;
+        assert!(matches!(
+            transform_geometry(&dimension(), &Transform3 { matrix }),
+            Err(CadError::Unsupported(_))
+        ));
+    }
 }

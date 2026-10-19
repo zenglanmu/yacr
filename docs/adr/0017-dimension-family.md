@@ -373,3 +373,86 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
 - **能力表**：`docs/compatibility.md` 的 DIMENSION 行拆为"读取/显示"与"**创建**"两栏，**逐行**写明子阶段状态、
   决策 D 的八条边界、决策 E 的未查证项，以及"创建无 spec 授权"；并声明 A.8 的**两项行为变更**
   （标注**首次成为捕捉目标**；有块分支的 `EXPLODE` 由**成功转为拒绝**）。
+
+---
+
+## 实施状态（追加，不改写决策文本）
+
+### P5a（域变体 + 全部匹配臂 + 合成下沉 + 导入两分支迁移 + 导出；**无创建命令**）
+
+- **域表示（决策 A）**：`cad-domain` 新增 `SemanticGeometry::Dimension(Box<DimensionGeometry>)`
+  （`crates/cad-domain/src/dimension.rs`）。`DimensionGeometry` 字段**全部私有**，唯一写入路径为
+  `synthesized` / `from_picture` / `transformed`；`display` 由构造器自算（或来自外部图片块），故
+  "调用方传入与定义不一致的显示"在结构上不可能。`DimensionDefinition` 携带 `kind` + 逐 kind 定义点
+  （`DimensionPoints`）+ 组 11/53 + 组 210 法向。
+- **合成下沉（决策 A.5/A.7）**：合成从 `cad-import-acadrust::dimension` **原样迁入** `cad-domain`
+  （`dimension.rs` + `dimension_synthesis.rs`），创建路径与无块导入路径共用同一构造器；旧导入侧中间体改名
+  `SynthesizedDimension`，域类型保留 `DimensionGeometry`。迁移前后数值不变（有测试逐点断言）。
+- **导入迁移（决策 A.6，两分支都迁）**：无匿名块的 DIMENSION → 同一批合成子项包进 `Dimension`；
+  有匿名块（`*D…`）的 → `from_picture`，`display` = 展开后的块成员。**圆弧长/大半径不走域变体**，
+  保留 P5a 前的 `Compound` 合成。
+- **导出（决策 A.5）**：写出真实 DXF `DIMENSION` + **生成的 `*D…` 内容块**（成员 = `display` 子项）+
+  组 42 = `measurement()` + 为每个样式名 `add_or_replace` 一条 DIMSTYLE 记录（组 3 不悬空）。
+  `ExportReport` 逐条记录形状与声明的丢弃（`export.converted.dimension`）。
+- **匹配臂**：全部**穷尽**臂 + A.8 的 12 处**通配符**臂均已补显式 `Dimension` 臂
+  （`fonts.rs`/`images.rs`/`support.rs`/`select_box.rs`/`engine.rs`/`geometry.rs`/`push.rs`/`stretch.rs`/
+  `snap`/`pick/bounds.rs`/`proxy`）；`class_name` 映射 `"AcDbDimension"`。
+- **测试**：`cad-domain/src/dimension_tests.rs`（合成 / A.4 两条不变量 / 变换）；`cad-import-acadrust`
+  的 `dimension/mod.rs` 合成测试与 `export/tests/dimension.rs`（F.1 往返、内容块 == display、组码、
+  picture 分支逐成员往返）；`export/tests/report_limits.rs` 夹具期望（`export.converted.dimension`
+  取代旧的 `export.converted.mesh`）。
+
+### 偏离 / 决策（逐条，均须进能力表）
+
+1. **Kind 集合**：`DimensionKind` 恰为 A.1/A.3 的 **7** 个 kind。**ArcLength 与 LargeRadial 未迁移**——
+   ADR 未给它们点槽与组码，凭空造点槽是**未声明选择**，故保留 P5a 前的 `Compound` 合成。
+   **后果须明说：它们的导出仍与从前一样有损；P5 不声称 DIMENSION 完整往返。**
+2. `SemanticGeometry::Dimension(Box<DimensionGeometry>)` —— **boxed**，为仓库 `-D warnings` clippy 门禁
+   （仓库**无** `large_enum_variant` allow）。
+3. `definition` 携带 kind；**没有**可与之失同步的独立 `kind` 字段（`kind()` 委托 `definition.kind`）。
+4. 组 11/53 的**零哨兵**在变换下保留（`0` = "从标注线推导"），故"真实原点放置"与"未设置"被合并——
+   沿用自旧合成，**声明**。
+5. 导出写 `DIMSCALE=1` + 已解析值（**DIMSCALE 不保留**）；报告有对应条目。
+6. 导出总是 `add_or_replace` 该实体已解析快照的 DIMSTYLE 记录，故组 3 永不解析到陈旧条目。
+7. **Picture 分支**：成员不可放置（`Spline`/`Shape`/`Opaque`，或含 `Text` 的嵌套 `Compound`/`Insert`）⇒
+   **整个**标注 `Opaque`+`Partial`（A.5"绝不部分变换"）——**比 P5a 前更严**（旧代码里一个含坏成员的
+   `Insert` 仍会渲染其余部分）。
+8. **Picture 分支策略（B1）**：picture 分支的 `measurement` 与文字内容**冻结**（picture 是权威显示），
+   使组 42 与画面上的数字彼此一致，而不是让导出凭空造一个 picture 未显示的数字；**合成分支**则重算
+   measurement 并重推文字。**诚实残差**：均匀缩放后，picture 分支的**画面数字**不再匹配被缩放的几何
+   （picture 是不透明的外部几何）。
+9. **Ordinate 语义（B2）**：`measurement` 与画面文字**相对基准**（feature − datum 在 X 或 Y 轴上的投影），
+   与 acadrust 写入器重算进组 42 的口径一致，故文字、`measurement()` 与 42 一致。对**基准不在原点**的
+   导入 ordinate 标注，这是**渲染正确性修复**（此前取绝对坐标，与写出的 42 不符）。**核实**：导入侧
+   **从不做 datum 重基**（`dimension_definition` 原样取组 13/10），故旧的 `feature.x` 是**绝对值**。
+   **取绝对值**（而非带符号投影），因为共享的 `format_measurement` 与 acadrust 写入器
+   （`DimensionOrdinate::measurement` → `projected.abs()`）**都只有量值** ⇒ 这样三者对**任意输入**都一致。
+   **代价（声明）**：**带符号 ordinate 坐标未建模**。
+10. **递归护栏（B4）**：导入摊平现携带块栈（`dimension_picture_stack`，与导出侧对应），遇循环/超深回退
+    `Opaque`+`Partial` 而非递归。**P5a 前的代码没有等价护栏，只因为那时这条递归不存在**（旧路径不把
+    块成员放进变体）。
+11. **样式子集拆分（偏离 9）**：`DimensionStyleValues` 只携带 B.2(a) 中**被合成消费**的子集；其余 (a)
+    与全部 (b) 是 **P5b**。故凡"导出写已解析样式"的说法**必须软化**：DIMSTYLE 记录对 (b) 变量写的是
+    **未钉住的默认值**，且 **DIMTAD 2/3/4 在导入时塌缩为 1**。
+12. 组 70 **32 位不写**（acadrust 写入器无法置位），**0x80 位**（文字被用户定位）**从不置位**：对自建
+    标注正确（我们从不用户定位文字），但导入的、曾置该位的标注会**丢掉**它——报告中的**已声明丢弃**。
+13. 组 `210`（挤出）**不写**；−Z 挤出的角度标注保持 P5a 前的渲染（合成**重新取源法向**），但导出文件对
+    它们**丢失 210**（报告条目）。
+13b. **模型补充（A.3 修订项）**：`DimensionDefinition` 新增 **`normal: Point3`** 字段——**A.3 的点表原本
+    没有这一项**，但恢复"−Z 挤出角度标注的旧渲染"必须携带源法向（合成据其定弧的绕向），否则渲染会变。
+    该字段同时被 `is_consistent` 校验、被 `transformed` 映射。**A.3 的模型描述应按此补一行**。
+14. **F.4 拆分**：P5a 落地 = F.1 往返（含 picture 分支第二段 + **定义点** + **组 70** 断言）+ F.2 不变量 +
+    F.3 通配符回归三连 + **`DIMLFAC ≠ 1` 格式化测试**（已落地）+ picture 分支的不可放置成员拒绝、
+    `Linear{rotation}`/`text_rotation` 旋转增量、EXPLODE 的 `Dimension` 臂、角度法向、组 210 丢弃等补测。
+    **推迟到 P5b** 的只有 `DIMLUNIT ≠ 2` 诚实测试——且它是**结构性推迟**：`DimensionStyleValues`
+    **根本没有** `dimlunit`/`dimpost`/`dimdsep` 字段，故不存在"静默按小数处理"的回退面可断言。
+15. **N3 更正**：`flange_dimension_display_matches_shared_synthesis` 原先断言 `synthesized(d) == synthesized(d)`
+    （**自证**）且注释宣称"与改动前逐字节相同"。已改为**非平凡**断言（导入标注的显示 == 用其**自身定义 +
+    导入的样式值**做合成的结果，钉住"导入→合成"的交接），并把"逐字节相同"的措辞改为诚实表述——
+    数值不变的证据是**保留的合成数值测试**（另经 Oracle 逐字 diff 核对）。
+
+### 未用第三方读取器验证
+
+内容块的必要性依据**第三方文档**（ezdxf，引于 §0.6），但本机**没有**第三方读取器（无
+`ezdxf`/`dwgread`/`dxfgrabber`），故我们的往返只是**内部一致性**——只声称"采用了该出处所述 AutoCAD
+所需的结构"，**从不**声称 AutoCAD 兼容。**NOT RUN**。

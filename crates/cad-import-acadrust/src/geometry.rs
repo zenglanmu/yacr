@@ -386,6 +386,13 @@ pub(crate) fn referenced_blocks(geometry: &SemanticGeometry) -> Vec<BlockId> {
         SemanticGeometry::Compound(children) => {
             children.iter().flat_map(referenced_blocks).collect()
         }
+        // A dimension's display children may reference blocks (for example a
+        // picture-block dimension), so register them (ADR 0017 A.8).
+        SemanticGeometry::Dimension(dimension) => dimension
+            .display()
+            .iter()
+            .flat_map(referenced_blocks)
+            .collect(),
         _ => Vec::new(),
     }
 }

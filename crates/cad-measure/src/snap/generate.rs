@@ -69,6 +69,15 @@ pub(super) fn generate(
                 generate(child, probe, out, &format!("{prefix}child:{i}:"));
             }
         }
+        // A dimension's display children (including its dimension line and
+        // extension lines) are real snap vertices, exactly like a compound
+        // (ADR 0017 A.8): merging them into the empty arm would silently delete
+        // them.
+        G::Dimension(dimension) => {
+            for (i, child) in dimension.display().iter().enumerate() {
+                generate(child, probe, out, &format!("{prefix}child:{i}:"));
+            }
+        }
         G::Mesh(_)
         | G::Insert { .. }
         | G::Text { .. }

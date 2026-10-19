@@ -279,6 +279,7 @@ mod create_polyline;
 mod create_trim;
 mod ellipse;
 mod explode;
+mod explode_insert;
 mod explode_self_reference;
 mod offset;
 mod point;

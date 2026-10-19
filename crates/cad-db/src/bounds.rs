@@ -156,6 +156,13 @@ impl BoundsAccumulator {
                     self.add_geometry_transformed(child, transform);
                 }
             }
+            // A dimension's extent is the extent of its derived display
+            // children (extension lines, dimension line, arrows, text).
+            SemanticGeometry::Dimension(dimension) => {
+                for child in dimension.display() {
+                    self.add_geometry_transformed(child, transform);
+                }
+            }
         }
     }
 

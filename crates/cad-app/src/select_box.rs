@@ -369,6 +369,14 @@ fn classify_world(geometry: &SemanticGeometry, rect: Rect) -> Option<MatchPath> 
             .iter()
             .filter_map(|child| classify_world(child, rect))
             .min_by_key(|path| path.rank()),
+        // A dimension classifies exactly like the equivalent compound, so a
+        // box selection keeps precise per-child matching instead of degrading
+        // to AABB (ADR 0017 A.8).
+        SemanticGeometry::Dimension(dimension) => dimension
+            .display()
+            .iter()
+            .filter_map(|child| classify_world(child, rect))
+            .min_by_key(|path| path.rank()),
         // Splines have no rectangle tessellator reachable from this crate
         // without a Cargo dependency (frozen for this change); the honest path
         // is the conservative AABB with an `aabb` report.
@@ -560,4 +568,150 @@ fn validate_branch(
     stack: &mut Vec<BlockId>,
 ) -> CadResult<()> {
     crate::select_all::validate_branch(database, session, entity, stack)
+}
+
+#[cfg(test)]
+mod dimension_classify_tests {
+    use super::*;
+    use cad_domain::{
+        DimensionDefinition, DimensionGeometry, DimensionKind, DimensionPoints,
+        DimensionStyleValues, StyleId,
+    };
+
+    fn style() -> DimensionStyleValues {
+        DimensionStyleValues {
+            arrow_size: 2.5,
+            ext_offset: 0.625,
+            ext_beyond: 1.25,
+            text_height: 2.5,
+            text_gap: 0.625,
+            text_above: true,
+            linear_factor: 1.0,
+            decimals: 4,
+            suppress_trailing_zeros: false,
+            text_style_name: "Standard".into(),
+            text_style: StyleId(0),
+            text_font: None,
+        }
+    }
+
+    fn definition() -> DimensionDefinition {
+        DimensionDefinition {
+            kind: DimensionKind::Aligned,
+            points: DimensionPoints::Linear {
+                first: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                second: Point3 {
+                    x: 10.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                dimension_line: Point3 {
+                    x: 0.0,
+                    y: -5.0,
+                    z: 0.0,
+                },
+            },
+            text_middle: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            text_rotation: 0.0,
+            normal: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        }
+    }
+
+    /// ADR 0017 F.3 (wildcard regression): `select_box` classifies a dimension
+    /// exactly like the equivalent `Compound` of its display children.
+    #[test]
+    fn dimension_classifies_like_equivalent_compound() {
+        let members = vec![
+            SemanticGeometry::Line {
+                start: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 10.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            SemanticGeometry::Line {
+                start: Point3 {
+                    x: 0.0,
+                    y: -5.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 10.0,
+                    y: -5.0,
+                    z: 0.0,
+                },
+            },
+        ];
+        let dimension = DimensionGeometry::from_picture(
+            definition(),
+            "Standard".into(),
+            style(),
+            None,
+            members.clone(),
+        )
+        .expect("from_picture");
+        let rects = [
+            Rect::from_corners(
+                Point3 {
+                    x: -1.0,
+                    y: -1.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 5.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ),
+            Rect::from_corners(
+                Point3 {
+                    x: 2.0,
+                    y: -6.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 12.0,
+                    y: -4.0,
+                    z: 0.0,
+                },
+            ),
+            Rect::from_corners(
+                Point3 {
+                    x: 20.0,
+                    y: 20.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 30.0,
+                    y: 30.0,
+                    z: 0.0,
+                },
+            ),
+        ];
+        for (index, rect) in rects.into_iter().enumerate() {
+            let dimension_path = classify_world(
+                &SemanticGeometry::Dimension(Box::new(dimension.clone())),
+                rect,
+            );
+            let compound_path = classify_world(&SemanticGeometry::Compound(members.clone()), rect);
+            assert_eq!(dimension_path, compound_path, "rect index {index}");
+        }
+    }
 }

@@ -6,6 +6,7 @@
 //! [`ExportReport`] records every conversion and every drop explicitly. The
 //! caller (host/CLI) owns file I/O; this module only produces bytes.
 
+mod dimension;
 mod entity;
 mod report;
 mod tables;

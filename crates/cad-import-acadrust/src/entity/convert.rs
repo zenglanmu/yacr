@@ -163,27 +163,10 @@ impl<'a> ImporterBuilder<'a> {
             }
             EntityType::Extended(x) => self.extended_semantics(x),
             EntityType::Hatch(h) => Self::hatch_geometry(h),
-            EntityType::Dimension(d) => {
-                // Prefer the pre-rendered anonymous block (`*D...`) when the
-                // drawing stores it; expand it like an insert. Many producers
-                // (including the QCAD flange sample) omit the block and keep
-                // only the definition points, so synthesize the display
-                // geometry from those points and the DIMSTYLE instead.
-                let base = d.base();
-                let has_block =
-                    !base.block_name.is_empty() && self.block_ids.contains_key(&base.block_name);
-                if has_block {
-                    (
-                        SemanticGeometry::Insert {
-                            block: self.block_id(&base.block_name),
-                            transform: dimension_transform(base),
-                        },
-                        Completeness::Complete,
-                    )
-                } else {
-                    self.dimension_semantics(d)
-                }
-            }
+            // A DIMENSION becomes a `SemanticGeometry::Dimension`: with a
+            // pre-rendered `*D...` block its display is the expanded picture,
+            // otherwise it is our synthesis (ADR 0017 A.6).
+            EntityType::Dimension(d) => self.dimension_semantics(d),
             EntityType::Leader(l) => self.leader_semantics(l),
             EntityType::Polyline(pl) => (
                 polyline_semantics(

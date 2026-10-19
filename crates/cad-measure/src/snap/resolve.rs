@@ -21,6 +21,9 @@ fn is_intersectable(geometry: &SemanticGeometry) -> bool {
         | G::Ellipse { .. }
         | G::Spline { .. } => true,
         G::Compound(children) => children.iter().any(is_intersectable),
+        // A dimension is intersectable through its display children, exactly
+        // like a compound (ADR 0017 A.8).
+        G::Dimension(dimension) => dimension.display().iter().any(is_intersectable),
         _ => false,
     }
 }

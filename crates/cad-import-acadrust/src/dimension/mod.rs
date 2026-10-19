@@ -1,55 +1,45 @@
 //! Dimension display geometry synthesis.
 //!
 //! A DXF/DWG DIMENSION may carry a pre-rendered anonymous block (`*D...`); when
-//! it does, the importer expands it as an INSERT. Many producers (including the
-//! committed QCAD `flange` sample) store only the definition points and omit
-//! the block. Without synthesis those dimensions have no display geometry and
-//! are reported as unsupported.
+//! it does, the importer expands it into the dimension's display. Many
+//! producers (including the committed QCAD `flange` sample) store only the
+//! definition points and omit the block. Without synthesis those dimensions
+//! have no display geometry and are reported as unsupported.
 //!
-//! This module builds the standard linear/aligned, radius/diameter, angular,
-//! ordinate, arc-length and large-radius geometry from the dimension points and
-//! the resolved DIMSTYLE: extension lines, the dimension line, solid arrowheads,
-//! the arc-length leader and the measurement text. Every subtype is synthesized;
-//! only the large-radius jog is reported `Partial`, because its true zigzag is
-//! approximated by a segment oriented from `jog_angle`. Nothing here claims
-//! compatibility: it is a display representation for geometry that is already in
-//! the database.
+//! The seven subtypes the domain variant models (ADR 0017 A.1/A.3) are built by
+//! `cad-domain`'s shared synthesis (`DimensionGeometry::synthesized`), so the
+//! block-less import and the creation path share one builder. Arc-length and
+//! large-radial dimensions, which the ADR kind set does not cover, keep the
+//! pre-P5a compound synthesis (see [`crate::dimension::angular`]).
 
 use super::*;
 
 mod angular;
 mod convert;
-mod geom;
-mod linear;
 mod multileader;
 mod values;
 
-// Re-export every moved module-scope item so the names that resolved inside the
-// former single-file `dimension` module keep resolving, including through the
-// crate-root `use dimension::*` (`line_between` is used by `crate::primitives`).
 #[allow(unused_imports)]
 use angular::*;
 #[allow(unused_imports)]
 use convert::*;
 #[allow(unused_imports)]
-use linear::*;
-#[allow(unused_imports)]
 use multileader::*;
 #[allow(unused_imports)]
 use values::*;
-// Explicit import wins over the glob below, so `line_between` stays reachable
-// at crate scope.
-pub(crate) use geom::line_between;
-#[allow(unused_imports)]
-use geom::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use acadrust::tables::DimStyle;
 
-    fn style() -> DimStyleValues {
-        DimStyleValues::from_style(&DimStyle::standard(), "Standard".to_string())
+    fn style() -> DimensionStyleValues {
+        style_values(
+            &DimStyle::standard(),
+            "Standard".to_string(),
+            StyleId(0),
+            None,
+        )
     }
 
     fn line_ends(children: &[SemanticGeometry]) -> Vec<(Point3, Point3)> {
@@ -91,7 +81,7 @@ mod tests {
         let mut style = style();
         style.text_height = 2.5;
         style.text_gap = 0.625;
-        let geometry = linear_geometry(
+        let geometry = linear_synthesis(
             first,
             second,
             definition,
@@ -153,7 +143,7 @@ mod tests {
             z: 0.0,
         };
         let geometry =
-            linear_geometry(first, second, definition, direction, &style()).expect("synthesized");
+            linear_synthesis(first, second, definition, direction, &style()).expect("synthesized");
         assert!(approx(geometry.measurement, 6.0));
         assert!(
             approx(geometry.text_rotation, 90.0_f64.to_radians()),
@@ -174,7 +164,7 @@ mod tests {
             y: -4.0,
             z: 0.0,
         };
-        let geometry = radial_geometry(center, point, false, &style()).expect("synthesized");
+        let geometry = radial_synthesis(center, point, false, &style()).expect("synthesized");
         assert!(approx(geometry.measurement, 5.0));
         // One leader line and one arrow.
         assert_eq!(line_ends(&geometry.children).len(), 1);
@@ -200,7 +190,7 @@ mod tests {
             y: 3.14803309378262,
             z: 0.0,
         };
-        let geometry = radial_geometry(a, b, true, &style()).expect("synthesized");
+        let geometry = radial_synthesis(a, b, true, &style()).expect("synthesized");
         assert!(approx(geometry.measurement, 28.0));
         assert_eq!(
             geometry
@@ -217,17 +207,14 @@ mod tests {
         let mut style = style();
         style.decimals = 2;
         style.suppress_trailing_zeros = true;
-        let base = DimensionBase::new(acadrust::entities::DimensionType::Aligned);
-        assert_eq!(resolve_measurement_text(&base, "", "", 42.0, &style), "42");
-        assert_eq!(resolve_measurement_text(&base, "R", "", 5.0, &style), "R5");
+        assert_eq!(resolve_measurement_text(None, "", "", 42.0, &style), "42");
+        assert_eq!(resolve_measurement_text(None, "R", "", 5.0, &style), "R5");
         assert_eq!(
-            resolve_measurement_text(&base, "", "\u{00B0}", 45.0, &style),
+            resolve_measurement_text(None, "", "\u{00B0}", 45.0, &style),
             "45°"
         );
-        let mut overriding = base.clone();
-        overriding.set_text_override(Some("R<>".to_string()));
         assert_eq!(
-            resolve_measurement_text(&overriding, "R", "", 5.0, &style),
+            resolve_measurement_text(Some("R<>"), "R", "", 5.0, &style),
             "R5"
         );
     }
@@ -239,7 +226,7 @@ mod tests {
             y: 0.0,
             z: 0.0,
         };
-        let geometry = angular_geometry(
+        let geometry = angular_synthesis(
             vertex,
             Point3 {
                 x: 1.0,
@@ -285,7 +272,7 @@ mod tests {
 
     #[test]
     fn ordinate_dimension_reports_the_feature_coordinate() {
-        let geometry = ordinate_geometry(
+        let geometry = ordinate_synthesis(
             Point3 {
                 x: 10.0,
                 y: 3.0,
@@ -296,10 +283,45 @@ mod tests {
                 y: 8.0,
                 z: 0.0,
             },
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
             false,
         )
         .expect("ordinate geometry");
         assert!(approx(geometry.measurement, 3.0));
+    }
+
+    #[test]
+    fn ordinate_dimension_measures_relative_to_a_non_origin_datum() {
+        // Review B2: the ordinate measurement is datum-relative, matching the
+        // documented AutoCAD semantics and acadrust's writer.
+        let geometry = ordinate_synthesis(
+            Point3 {
+                x: 15.0,
+                y: 8.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 15.0,
+                y: 12.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 5.0,
+                y: 5.0,
+                z: 0.0,
+            },
+            true,
+        )
+        .expect("ordinate geometry");
+        assert!(
+            approx(geometry.measurement, 10.0),
+            "{}",
+            geometry.measurement
+        );
     }
 
     #[test]

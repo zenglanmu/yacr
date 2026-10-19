@@ -96,6 +96,14 @@ fn collect_images(geometry: &SemanticGeometry, out: &mut Vec<String>) {
                 collect_images(part, out);
             }
         }
+        // A dimension's display children are recursed like a compound, so an
+        // image inside a picture-block dimension is still collected (ADR 0017
+        // A.8).
+        SemanticGeometry::Dimension(dimension) => {
+            for part in dimension.display() {
+                collect_images(part, out);
+            }
+        }
         _ => {}
     }
 }

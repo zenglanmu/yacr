@@ -64,7 +64,8 @@ fn find_text(geometry: &SemanticGeometry) -> Option<&SemanticGeometry> {
 fn large_radial_jog_uses_the_jog_angle() {
     let req = request();
     let acad = acadrust::CadDocument::new();
-    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+    let mut builder =
+        ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
 
     let mut dim = acadrust::entities::DimensionLargeRadial {
         base: base(acadrust::entities::DimensionType::LargeRadial),
@@ -108,7 +109,8 @@ fn large_radial_jog_uses_the_jog_angle() {
 fn arc_length_dimension_draws_leader_when_present() {
     let req = request();
     let acad = acadrust::CadDocument::new();
-    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+    let mut builder =
+        ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
 
     let mut dim = acadrust::entities::DimensionArc {
         base: base(acadrust::entities::DimensionType::ArcLength),
@@ -142,7 +144,8 @@ fn arc_length_dimension_draws_leader_when_present() {
 fn partial_arc_dimension_is_reported_partial() {
     let req = request();
     let acad = acadrust::CadDocument::new();
-    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+    let mut builder =
+        ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
 
     let dim = acadrust::entities::DimensionArc {
         base: base(acadrust::entities::DimensionType::ArcLength),
@@ -172,6 +175,100 @@ fn partial_arc_dimension_is_reported_partial() {
         }
         other => panic!("expected Partial, got {other:?}"),
     }
+}
+
+#[test]
+fn self_referential_dimension_picture_block_is_opaque_not_a_stack_overflow() {
+    // Review B3: a `*D` block whose DIMENSION references itself must not recurse
+    // without bound; the guard falls back to Opaque + Partial instead of
+    // overflowing the stack.
+    let mut doc = acadrust::CadDocument::new();
+    let block_handle = doc.allocate_handle();
+    let mut record = acadrust::tables::BlockRecord::new("*D0");
+    record.handle = block_handle;
+    doc.block_records.add(record).expect("add block record");
+
+    let mut dim = acadrust::entities::DimensionAligned {
+        base: base(acadrust::entities::DimensionType::Aligned),
+        first_point: acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+        second_point: acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        definition_point: acadrust::types::Vector3::new(0.0, -5.0, 0.0),
+        ..Default::default()
+    };
+    dim.base.block_name = "*D0".to_string();
+    dim.base.common.owner_handle = block_handle;
+    let entity = acadrust::entities::Dimension::Aligned(dim);
+    doc.add_entity(acadrust::EntityType::Dimension(entity.clone()))
+        .expect("add block member");
+
+    let req = request();
+    let mut builder = ImporterBuilder::new(&req, &doc, ReadStats::default(), compute_identity(&[]));
+    builder
+        .block_ids
+        .insert("*D0".to_string(), cad_domain::BlockId(0));
+
+    let (geometry, completeness) = builder.dimension_semantics(&entity);
+    assert!(
+        matches!(geometry, SemanticGeometry::Opaque { .. }),
+        "expected Opaque, got {geometry:?}"
+    );
+    assert!(
+        matches!(completeness, Completeness::Partial(_)),
+        "expected Partial, got {completeness:?}"
+    );
+}
+
+#[test]
+fn picture_dimension_with_a_lossy_member_is_not_reported_complete() {
+    // Review N9: a picture built from lossy members must not be reported
+    // Complete; the members' own completeness is folded in.
+    let mut doc = acadrust::CadDocument::new();
+    let block_handle = doc.allocate_handle();
+    let mut record = acadrust::tables::BlockRecord::new("*D0");
+    record.handle = block_handle;
+    doc.block_records.add(record).expect("add block record");
+
+    // A tilted LWPOLYLINE with a two-vertex bulge imports Partial but is still
+    // placeable, so it stays a member and its completeness must propagate.
+    let mut polyline = acadrust::entities::LwPolyline::new();
+    polyline.normal = acadrust::types::Vector3::new(0.0, 0.5, 0.866_025_403_784_438_6);
+    let mut first = acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(0.0, 0.0));
+    first.bulge = 1.0;
+    let second = acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(1.0, 0.0));
+    polyline.vertices = vec![first, second];
+    polyline.common.owner_handle = block_handle;
+    doc.add_entity(acadrust::EntityType::LwPolyline(polyline))
+        .expect("add member");
+
+    let mut dim = acadrust::entities::DimensionAligned {
+        base: base(acadrust::entities::DimensionType::Aligned),
+        first_point: acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+        second_point: acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        definition_point: acadrust::types::Vector3::new(0.0, -5.0, 0.0),
+        ..Default::default()
+    };
+    dim.base.block_name = "*D0".to_string();
+    // The dimension lives in model space and references the block; it is not a
+    // member of it (unlike the self-referential B3 case).
+    let entity = acadrust::entities::Dimension::Aligned(dim);
+    doc.add_entity(acadrust::EntityType::Dimension(entity.clone()))
+        .expect("add block member");
+
+    let req = request();
+    let mut builder = ImporterBuilder::new(&req, &doc, ReadStats::default(), compute_identity(&[]));
+    builder
+        .block_ids
+        .insert("*D0".to_string(), cad_domain::BlockId(0));
+
+    let (geometry, completeness) = builder.dimension_semantics(&entity);
+    assert!(
+        matches!(geometry, SemanticGeometry::Dimension(_)),
+        "the picture dimension is still a Dimension, got {geometry:?}"
+    );
+    assert!(
+        matches!(completeness, Completeness::Partial(_)),
+        "a lossy member must make the dimension Partial, got {completeness:?}"
+    );
 }
 
 // ---- MULTILEADER ----

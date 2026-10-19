@@ -226,8 +226,15 @@ impl DefaultRepresentationProvider {
     ) -> CadResult<DisplayRepresentation> {
         // A compound entity (for example a HATCH) renders as a group; recurse
         // over borrowed children. Cloning the parent for each child copies the
-        // entire compound repeatedly and makes large hatches quadratic.
-        if let SemanticGeometry::Compound(children) = geometry {
+        // entire compound repeatedly and makes large hatches quadratic. A
+        // dimension renders the same way over its display children (ADR 0017
+        // A.5/A.8) with no new primitive or overlay.
+        let grouped: Option<&[SemanticGeometry]> = match geometry {
+            SemanticGeometry::Compound(children) => Some(children),
+            SemanticGeometry::Dimension(dimension) => Some(dimension.display()),
+            _ => None,
+        };
+        if let Some(children) = grouped {
             let mut representation = DisplayRepresentation {
                 fragments: Vec::new(),
                 completeness: Completeness::Complete,

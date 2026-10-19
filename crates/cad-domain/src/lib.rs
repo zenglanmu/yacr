@@ -1,5 +1,19 @@
 //! Platform-independent identities and semantic contracts.
 use std::fmt;
+
+mod dimension;
+mod dimension_synthesis;
+
+#[cfg(test)]
+mod dimension_tests;
+pub use dimension::{
+    DimensionDefinition, DimensionGeometry, DimensionKind, DimensionPoints, DimensionStyleValues,
+};
+pub use dimension_synthesis::{
+    angular_synthesis, arrowhead, format_measurement, line_between, linear_synthesis,
+    ordinate_synthesis, perpendicular, project_onto_line, radial_synthesis, readable_angle,
+    resolve_measurement_text, SynthesizedDimension,
+};
 macro_rules! ids {
     ($($name:ident),*) => {$(
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -372,6 +386,14 @@ pub enum SemanticGeometry {
     /// Used where one imported entity yields several primitives (for example a
     /// HATCH's boundary loops plus its fill or pattern). Consumers recurse.
     Compound(Vec<SemanticGeometry>),
+    /// A DIMENSION: subtype, definition points, style snapshot and derived
+    /// display geometry (ADR 0017). Consumers recurse into
+    /// [`DimensionGeometry::display`], exactly like `Compound`.
+    ///
+    /// Boxed because the payload is the largest variant by far; boxing keeps
+    /// `SemanticGeometry` small (the repo runs clippy with `-D warnings` and no
+    /// `large_enum_variant` exemption).
+    Dimension(Box<DimensionGeometry>),
     /// A raster image (DXF `IMAGE` / `AcDbRasterImage`).
     ///
     /// The image is placed by `origin` and two edge vectors: `u` and `v` span

@@ -12,6 +12,55 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## P5a：标注族域变体 + 导入迁移 + 导出（ADR-0017，2026-10-19）
+
+**范围**：`crates/cad-domain`（新 `dimension.rs`/`dimension_synthesis.rs`/`dimension_tests.rs`）、
+`crates/cad-db`（校验/变换/包围盒）、`crates/cad-geometry`（离散化/第二变换面）、`crates/cad-representation`
+（显示分派）、`crates/cad-import-acadrust`（导入迁移 + 导出 + 匹配臂）、`crates/cad-measure`/`cad-spatial`/
+`cad-proxy`/`cad-platform`/`cad-app`（通配符臂）。**未**改 acadrust/架构边界；**无创建命令**。
+
+- **域表示**：`SemanticGeometry::Dimension(Box<DimensionGeometry>)`；`display` 私有、唯一写入路径
+  `synthesized`/`from_picture`/`transformed`；`DimensionDefinition` = kind + 逐 kind 定义点 + 组 11/53 +
+  组 210 法向。
+- **合成下沉**：合成原样迁入 `cad-domain`（创建与无块导入共用同一构造器，数值不变）；旧导入中间体改名
+  `SynthesizedDimension`，域类型保留 `DimensionGeometry`。
+- **导入两分支都迁**：无块 → 合成进 `Dimension`；有匿名块（`*D…`）→ `from_picture`（`display` = 展开块成员）；
+  **圆弧长/大半径不迁**，保留旧 `Compound` 合成。
+- **导出**：真实 DXF `DIMENSION` + 生成 `*D…` 内容块（成员 = `display`）+ 组 42 + `add_or_replace` DIMSTYLE
+  记录（组 3 不悬空）；`ExportReport` 逐条声明形状与丢弃（`export.converted.dimension`）。
+- **通配符臂**：A.8 的 12 处 + 全部穷尽臂已补显式 `Dimension` 臂；`class_name` 映射 `"AcDbDimension"`。
+- **偏离/决策（16 条，逐条写入 ADR-0017「实施状态」与 `docs/compatibility.md` 的 DIMENSION 子表）**：
+  ① ArcLength/LargeRadial **不迁**、导出仍有损，P5 不声称完整往返；② boxed（`-D warnings` clippy 门禁）；
+  ③ kind 只在 `definition`；④ 组 11/53 零哨兵在变换下保留（"原点"与"未设置"合并，声明）；⑤ 导出
+  `DIMSCALE=1`（**不保留**）；⑥ 总 `add_or_replace` DIMSTYLE；⑦ picture 分支坏成员 ⇒ 整实体 `Opaque`+`Partial`
+  （**比 P5a 前更严**）；⑧ picture 分支 measurement/文字**冻结**（残差：均匀缩放后画面数字不匹配被缩放几何）；
+  ⑨ ordinate 改**基准相对**（基准非原点者渲染**正确性修复**；导入侧**从不做 datum 重基**，旧值是绝对值；
+  取**投影绝对值**——带符号 ordinate 坐标**未建模**，代价已声明）；⑩ 导入摊平加**块栈**护栏（此前无此递归，故无护栏）；
+  ⑪ 样式只带**合成消费子集**（其余 (a)+(b) 是 P5b；DIMTAD 2/3/4 导入塌缩为 1）；⑫ 组 70 的 32 位不写、
+  0x80 从不置位（导入曾置位者丢失，**声明丢弃**）；⑬ 组 210 不写（−Z 角度标注仍按源法向渲染，但导出丢 210）；
+  ⑭ `DIMLFAC ≠ 1` 测试**已落地**；只有 `DIMLUNIT≠2` 诚实测试**结构性推迟 P5b**（`DimensionStyleValues`
+  根本没有该字段）；⑮ **A.3 修订项**：`DimensionDefinition` 新增 `normal` 字段（A.3 点表原无此项，
+  恢复 −Z 挤出角度标注的旧绕向必需）；⑯ N3 自证测试已改为**非平凡**断言（导入显示 == 用其自身定义 +
+  导入的样式值做合成的结果），"逐字节相同"的措辞已改为诚实表述（数值不变的证据是保留的合成数值测试）。
+- **N9 矛盾已核**：`docs/compatibility.md` 旧称"角度/坐标/圆弧长/大半径仍 Partial"，而代码对
+  `Angular2Ln`/`Angular3Pt`/`Ordinate` 报 `Completeness::Complete`（`dimension/convert.rs`；ADR §N9 亦记录
+  代码对这三类报 `Complete`）。P5a 已让表与代码一致——**取代码的 `Complete`**（这三类在域变体里有完整点槽与
+  共享合成），表已改；`LargeRadial`/`is_partial` 弧标注仍 `Partial`。
+- **未用第三方读取器验证**：内容块必要性依据**第三方文档**（ezdxf，ADR §0.6），本机无
+  `ezdxf`/`dwgread`/`dxfgrabber` ⇒ 往返只是**内部一致性**，**不声称 AutoCAD 兼容**。**NOT RUN**。
+- **门禁（编排者复跑，2026-10-19）**：受影响 crate **1778 通过 / 0 失败**（含 `cad-import-acadrust` 的往返、
+  组码、内容块、picture 逐成员、递归护栏、N9 有损成员等新测试）；`cargo check --workspace --all-targets --locked`、
+  wasm lib、clippy(workspace `-D warnings`)、fmt、architecture（27 包）、i18n（**489** 键，含本轮新增
+  `properties.row.subtype/measurement/display`）、fixture（22）、file-size（**665**）、workflow、UI **126/126** + build。
+  **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；**真机证据**；跨平台；
+  **第三方读取器验证**（本机无 ezdxf/dwgread/dxfgrabber）。
+- **P5a 无真机证据的理由（诚实记录）**：P5a **不新增创建命令**，用户可见行为只有"导入的标注现在是一级实体"
+  与两项**行为变更**（标注首次成为捕捉目标；带块标注的 `EXPLODE` 由成功转拒绝）。这些的判据是**契约测试**
+  （导入形状、`support.rs` 的 `Unverified`、`select_box` 与 `Compound` 同分类），而**不是**截图；真机相位留到
+  P5c 有创建命令时再扩（沿用"真机只证提交成功 + 计数 + 内容存在，几何正确性由契约测试钉住"的既有边界）。
+- **待办**：P5b（DIMSTYLE 存储 + B.2(a)/(b) 子集 + 默认 + i18n + `DIMLUNIT≠2` 诚实测试）；P5c–P5e（创建命令）；
+  P5f 已降级 NOT IMPLEMENTED。
+
 ## P4：编辑命令扩展（ADR-0016，2026-10-19）
 
 **范围**：`crates/cad-app`（命令/工具/几何构造/宿主映射）、`crates/cad-geometry`（两处辅助）、

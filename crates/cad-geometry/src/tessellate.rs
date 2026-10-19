@@ -120,6 +120,9 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
         G::Mesh(_) | G::Insert { .. } | G::Opaque { .. } | G::Shape { .. } | G::Image { .. } => {
             Vec::new()
         }
+        // A dimension is drawn from its derived display children, which the
+        // representation layer handles one primitive at a time.
+        G::Dimension(_) => Vec::new(),
         // A mask is not a curve, but its closed boundary is a real polyline the
         // picker and bounds consumers should see.
         G::Mask { boundary, .. } => {

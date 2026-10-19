@@ -60,6 +60,7 @@ impl<'a> ImporterBuilder<'a> {
             model_drawable: false,
             model_render_types: BTreeSet::new(),
             model_bounds: None,
+            dimension_picture_stack: Vec::new(),
         }
     }
 

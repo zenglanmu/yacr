@@ -139,6 +139,19 @@ fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             }
             Ok(())
         }
+        // A dimension is selectable through its display children, exactly like
+        // a compound (ADR 0017 A.8).
+        SemanticGeometry::Dimension(dimension) => {
+            for child in dimension.display() {
+                validate_geometry(child)?;
+            }
+            if dimension.display().is_empty() {
+                return Err(CadError::Unsupported(
+                    "SelectAll cannot pick a dimension with no display geometry".into(),
+                ));
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
