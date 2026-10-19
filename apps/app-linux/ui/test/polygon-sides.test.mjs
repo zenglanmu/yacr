@@ -145,6 +145,37 @@ test('the pending delta resets on tool switch, cancel and an absent/null value',
   }
 });
 
+test('the pending delta resets on a host error even while the value is unchanged', () => {
+  const p = pending(8, 2);
+  // An in-queue refusal (queue full, Viewer edge) surfaces through `status.error`
+  // without changing the value. A stuck delta would leave `pending.base === sides`
+  // and compose the next click up to the cap away from the real value, so the
+  // error must drop it.
+  assert.equal(reconcilePolygonPending(p, { ...polygon(8), error: 'cad_set_polygon_sides: queue full' }), null);
+  // An absent or empty error string is not a real error: the delta is kept.
+  assert.equal(reconcilePolygonPending(p, polygon(8)), p);
+  assert.equal(reconcilePolygonPending(p, { ...polygon(8), error: '' }), p);
+  assert.equal(reconcilePolygonPending(p, { ...polygon(8), error: null }), p);
+  // After the error the next step builds on the real value (9), not the stale
+  // base+delta+1 (11).
+  const errored = { ...polygon(8), error: 'viewer mode' };
+  const view = polygonSidesView(errored, true, null);
+  assert.equal(view.sides, 8);
+  assert.equal(view.effective, 8);
+  assert.equal(view.increment, 9);
+});
+
+test('folding a step refuses a pending that no longer matches the status', () => {
+  const status = polygon(8);
+  // A pending measured against a different base (the host already echoed) is
+  // stale: the step is refused rather than composed off the wrong base.
+  assert.equal(stepPolygonPending(pending(7, 1), status, 9), null);
+  // A pending for a different tool is likewise refused.
+  assert.equal(stepPolygonPending({ key: 'draw.line', base: 8, delta: 1 }, status, 9), null);
+  // A matching pending folds normally.
+  assert.deepEqual(stepPolygonPending(pending(8, 1), status, 10), pending(8, 2));
+});
+
 test('the pending delta is capped and stops at the cap and the range bounds', () => {
   assert.equal(POLYGON_SIDES_PENDING_CAP, 10);
   // At the positive cap the `+` step is no longer offered.

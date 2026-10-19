@@ -187,6 +187,16 @@ pub struct CadTool {
     /// readiness ([`cad_app::DrawPreview::can_confirm`] /
     /// [`cad_app::MeasurementPreview::can_confirm`]).
     pub ready: bool,
+    /// Whether the capture accepts points **past** its minimum (ADR 0015
+    /// decision B), derived from `cad-app`'s own arity model
+    /// ([`cad_app::DrawPreview::is_open_ended`]).
+    ///
+    /// `true` only for the open-ended draw kinds (PLINE, SPLINE) while their
+    /// capture is active: they accept more points and finish with Enter, so the
+    /// UI must not report a fixed "remaining" count for them. Every fixed-arity
+    /// draw kind and **every** measurement tool reports `false` — never a
+    /// fabricated open-ness.
+    pub open_ended: bool,
     /// Typed tool parameters (see [`CadToolParams`]); always present, with `null`
     /// fields for a tool that has no such parameter.
     pub params: CadToolParams,
@@ -287,6 +297,11 @@ pub(super) fn cad_tool(snapshot: &ToolSnapshot) -> Option<CadTool> {
             key: format!("draw.{}", preview.kind.key()),
             points: preview.points.len(),
             ready: preview.can_confirm(),
+            // The real arity model: `true` only for the open-ended kinds (PLINE,
+            // SPLINE) while active, so the UI never reports a fixed "remaining"
+            // for a capture that still accepts points. Never inferred from the
+            // captured count.
+            open_ended: preview.is_open_ended(),
             // The side count is present **only** for a POLYGON capture; every
             // other draw tool reports `null`, and the session already clears the
             // field for a non-POLYGON kind.
@@ -302,6 +317,9 @@ pub(super) fn cad_tool(snapshot: &ToolSnapshot) -> Option<CadTool> {
             key: format!("measure.{}", preview.kind.key()),
             points: preview.points.len(),
             ready: preview.can_confirm(),
+            // A measurement capture is never open-ended; report the honest
+            // `false` rather than a fabricated `true`.
+            open_ended: false,
             params: CadToolParams { sides: None },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

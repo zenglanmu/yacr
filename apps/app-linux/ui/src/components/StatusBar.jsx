@@ -84,6 +84,11 @@ export function StatusBar() {
   const tool = shell.status?.tool ?? null;
   const toolNameKey = tool ? toolLabelKey(tool.key) : null;
   const toolPoints = tool && Number.isSafeInteger(tool.points) ? tool.points : 0;
+  // Whether the host reports this capture as open-ended (`status.tool.openEnded`,
+  // ADR 0015 decision B). Read from the status only — never inferred from the
+  // point count — so an open tool shows the honest "more points accepted, Enter
+  // finishes" copy instead of a numeric count that implies a fixed complement.
+  const toolOpenEnded = tool?.openEnded === true;
   // Idle hover preview is real host state (`status.hoverPreview`), never a local
   // mirror. An older payload without the field renders no chip at all.
   const hoverPreview = hoverPreviewToggle(shell.status, shell.canCommand('HOVERPREVIEW'));
@@ -129,7 +134,9 @@ export function StatusBar() {
         >
           <Icon name="snap" size={13} />
           {t(toolNameKey)}
-          <span className="mono">{t('tool.points', { count: toolPoints })}</span>
+          <span className="mono">
+            {toolOpenEnded ? t('tool.open_ended') : t('tool.points', { count: toolPoints })}
+          </span>
         </span>
       ) : null}
 

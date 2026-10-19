@@ -25,7 +25,7 @@
 | LWPOLYLINE/POLYLINE(bulge) | 实现 | 实现 | 实现(含 bulge) | 实现 | 折线长度实现 |
 | CIRCLE / ARC / ELLIPSE | 实现 | 实现(保留 normal/OCS)；非均匀仿射重解为真椭圆 | 实现 | 实现 | 距离实现；面积限共面环 |
 | SPLINE | 实现 | 实现(保留 degree/knots/weights，真实 NURBS) | 弦高自适应离散 | 实现 | 解析/采样(与显示 LOD 解耦) |
-| POINT | 实现 | 实现 | **无可见图元**（`tessellate` 退化为零长线段 ⇒ 当前等价"不可见"）；计划以 overlay 屏占比标记实现，见 ADR-0015 决策 E | 实现 | 部分 |
+| POINT | 实现 | 实现 | **overlay 屏占比十字标记**（draw_order 850 000，始终在 overlay 层、与基础场景实体遮挡关系不同）；尺寸 = 视口高的 5%；覆盖**顶层**导入 POINT；上限 4000 且只发一条诊断；**3D 不画**（`viewport_bounds` 为 `None`）；`PDMODE`/`PDSIZE`/点样式**未实现**；**块内 POINT 不标记**（限制已记录） | 实现 | 部分 |
 | SOLID / TRACE / 3DFACE | 实现 | 网格(四边形→三角) | 网格 | 实现 | 不支持 |
 | INSERT / 块 | 实现(定义与实例分离) | 实现 | 实例展开块几何(嵌套有界，保留 InstancePath) | 实现 | 不支持 |
 | TEXT / MTEXT | 实现(保留字体名/字高/旋转) | 实现 | 整形为线段：outline(TTF/OTF/WOFF)+SHX(shapes/unifont/bigfont)，缺失字体走回退链 | 同上 | 不支持 |

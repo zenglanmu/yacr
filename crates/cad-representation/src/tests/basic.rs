@@ -58,6 +58,39 @@ fn point_entity_emits_no_zero_length_line_in_the_base_scene() {
     assert_eq!(chord, vec![p(3.0, 4.0), p(3.0, 4.0)]);
 }
 
+/// A POINT nested in a compound composes its `Partial` verdict with the
+/// parent's instead of clobbering it: the Point arm uses `.combine` like every
+/// sibling branch, so the overlay reason and diagnostic survive composition.
+#[test]
+fn point_inside_a_compound_keeps_its_partial_verdict_and_diagnostic() {
+    let registry = ProviderRegistry::with_default_provider();
+    let e = curve_entity(
+        8,
+        "AcDbCompound",
+        SemanticGeometry::Compound(vec![
+            SemanticGeometry::Line {
+                start: p(0.0, 0.0),
+                end: p(1.0, 0.0),
+            },
+            SemanticGeometry::Point(p(3.0, 4.0)),
+        ]),
+    );
+    let r = registry.build(&e, &context()).unwrap();
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "representation.point_overlay"));
+    match &r.completeness {
+        Completeness::Partial(reasons) => assert!(
+            reasons
+                .iter()
+                .any(|reason| reason.contains("overlay marker")),
+            "the POINT reason survives composition: {reasons:?}"
+        ),
+        other => panic!("expected Partial, got {other:?}"),
+    }
+}
+
 #[test]
 fn sfnt_text_provider_emits_meshes_without_outline_lines() {
     let mut fonts = FontEngine::new();

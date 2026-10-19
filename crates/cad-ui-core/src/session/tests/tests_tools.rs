@@ -682,6 +682,63 @@ fn handle_input_captures_points_while_a_tool_is_active_and_status_reports_them()
 }
 
 #[test]
+fn cad_tool_open_ended_reports_only_the_open_arity_tools() {
+    // ADR 0015 decision B (frozen frontend wire shape): `CadTool.openEnded` is
+    // derived from the real `cad-app` arity model, `true` only for the
+    // open-ended draw kinds (PLINE, SPLINE) while their capture is active and
+    // `false` for every fixed-arity draw kind and every measurement tool. The
+    // whole `tool` stays `null` when idle, exactly like `params.sides`.
+    let idle = fresh_session();
+    assert_eq!(
+        idle.snapshot(None, None, 0).tool,
+        None,
+        "no active tool carries no `tool`/`openEnded` at all"
+    );
+
+    // PLINE is open-ended from the first point: it accepts more and finishes
+    // with Enter, so the flag is `true` even before the minimum is reached.
+    let pline = fresh_session();
+    pline.command("PLINE").expect("PLINE is admitted");
+    let tool = pline.snapshot(None, None, 0).tool.expect("PLINE is active");
+    assert_eq!(tool.key, "draw.polyline");
+    assert_eq!(tool.points, 0);
+    assert!(
+        tool.open_ended,
+        "PLINE is an open-ended capture and reports openEnded"
+    );
+
+    // SPLINE is the other open-ended kind (at least four fit points).
+    let spline = fresh_session();
+    spline.command("SPLINE").expect("SPLINE is admitted");
+    let tool = spline
+        .snapshot(None, None, 0)
+        .tool
+        .expect("SPLINE is active");
+    assert_eq!(tool.key, "draw.spline");
+    assert!(tool.open_ended, "SPLINE is an open-ended capture");
+
+    // A fixed-arity draw kind reports the honest `false`.
+    let line = fresh_session();
+    line.command("LINE").expect("LINE is admitted");
+    let tool = line.snapshot(None, None, 0).tool.expect("LINE is active");
+    assert_eq!(tool.key, "draw.line");
+    assert!(!tool.open_ended, "LINE has a fixed arity of two points");
+
+    // A measurement tool is never open-ended either.
+    let measure = fresh_session();
+    measure.command("MEASURE").expect("MEASURE is admitted");
+    let tool = measure
+        .snapshot(None, None, 0)
+        .tool
+        .expect("MEASURE is active");
+    assert_eq!(tool.key, "measure.distance");
+    assert!(
+        !tool.open_ended,
+        "a measurement capture is never open-ended"
+    );
+}
+
+#[test]
 fn cad_tool_params_report_the_polygon_side_count_only_for_polygon() {
     // ADR 0015 decision C (frozen frontend wire shape): `CadTool.params.sides` is
     // present **only** for a POLYGON capture (the session sysvar, default 4) and

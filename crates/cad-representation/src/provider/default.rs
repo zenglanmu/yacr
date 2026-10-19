@@ -684,9 +684,17 @@ impl DefaultRepresentationProvider {
             // `cad_geometry::tessellate_geometry` is deliberately unchanged: its
             // `[p, p]` output is what picking, bounds and snapping consume.
             SemanticGeometry::Point(_) => {
-                representation.completeness = Completeness::Partial(vec![
-                    "point is drawn by the overlay marker, not by base-scene geometry".into(),
-                ]);
+                // Compose like every sibling branch (rather than assigning a
+                // fresh `Partial`): harmless today because a fresh
+                // representation starts `Complete`, but it keeps the arm correct
+                // if it ever composes with another verdict.
+                representation.completeness =
+                    representation
+                        .completeness
+                        .combine(Completeness::Partial(vec![
+                            "point is drawn by the overlay marker, not by base-scene geometry"
+                                .into(),
+                        ]));
                 representation.diagnostics.push(Diagnostic {
                     object: Some(ObjectId(entity.id.0)),
                     code: "representation.point_overlay".into(),

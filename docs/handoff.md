@@ -36,8 +36,11 @@ i18n）、`crates/cad-geometry`（SPLINE 插值纯函数）、`crates/cad-repres
 - **POINT 渲染（本轮修掉的真缺口）**：基础场景加**显式 `Point =>` 跳过**（**不碰共享 `tessellate`**，因为拾取/
   包围盒/几何引擎仍依赖 `[p,p]`），可视标记走 overlay（draw_order 850 000，在网格之上、选中与实时反馈之下），
   尺寸 = 视口高的 5%（`PDSIZE=0` 式屏幕相关语义），**覆盖导入的 POINT**，上限 4000 且**只发一条诊断**，
-  **3D 显式不画**；相机变化只重算标记不重建底图；实测上限规模构建 ≈71 µs。`PDMODE`/`PDSIZE`/点样式
-  声明未实现（有意偏离）。
+  **3D 显式不画**；相机变化只重算标记不重建底图。上限规模（4000 点）构建为**单批次、每标记恰 4 顶点、单次
+  预分配顶点向量**；契约测试 `point_marker_overlay_cap_build_is_structurally_bounded` 断言该结构界与一条
+  **宽裕的墙钟 sanity 上限**（250 ms，仅用于捕捉量级退化，**非**性能目标）。**≈71 µs 为估算值，非实测**
+  （无 bench/工件支撑）。**块内 POINT 不标记**（限制已记录在代码与测试中，且此前同样不可见）；
+  `PDMODE`/`PDSIZE`/点样式声明未实现（有意偏离）。
 - **参数通道（POLYGON 边数）**：会话参数（默认 4、范围 3–1024、越界**显式拒绝不 clamp**、切工具/取消保持、
   文档编辑不重置、重建/新建回 4、Viewer 拒绝）+ 收窄的 `InteractionRequest::SetPolygonSides` +
   `CadTool.params.sides` 线格式契约测试；因 UI 只有"命令名"通道，另加**专用 IPC**
@@ -48,7 +51,8 @@ i18n）、`crates/cad-geometry`（SPLINE 插值纯函数）、`crates/cad-repres
 - **真实 GPU 证据（Vulkan / Quadro P620 / X11，`YACR_PROBE_DRAW_EVIDENCE`；输入为合成 DOM 指针事件、
   **非真实鼠标**）**：`PLINE` 三点+Enter → `entityCount 4→5`；`POLYGON` 经真实 IPC 设 6 → 状态可见
   `params.sides=6`、提交后 `+1`，**越界 2 被宿主真实拒绝**（`POLYGON side count must be between 3 and 1024, got 2`）
-  且可见值不变；`POINT` → `+1` 且截图含 **126 个标记像素、单个连通块**，其中心与点击位置吻合；`RECTANG` → `+1`。
+  且可见值不变；`POINT` → `+1` 且截图含 **126 个标记像素、单个连通块**，其中心与**相机换算的点击分数位置**
+  吻合（≤1 px；世界点本身无观测通道）；`RECTANG` → `+1`。
   像素判据脚本 `apps/app-linux/scripts/check-point-pixels.py`（容差 0.03，脚本内说明了为何比带判据的 0.06 更严：
   0.06 会被 CAD 网格灰主导）。**诚实限制**：`cad_status` **无顶点数通道**，故**不**声称多边形实体是 6 边。
 - **门禁**：cad-app 481 / cad-representation 187 / cad-host 143 / cad-ui-core 128 / cad-engine 104 /
@@ -57,9 +61,12 @@ i18n）、`crates/cad-geometry`（SPLINE 插值纯函数）、`crates/cad-repres
 - **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超 10 分钟被杀）；POLYGON 实体的**顶点数**
   （无观测通道）；`SPLINE` 的真实 GPU 端到端（本轮证据覆盖 PLINE/POLYGON/POINT/RECTANG）；跨平台。
 - **开放项**：PLINE 弧段/Close/Width/Undo；RECTANG 圆角/倒角等选项；ELLIPSE 中心法/椭圆弧/`PELLIPSE`；
-  POLYGON `Edge`/外切/边数跨会话持久化；POINT `PDMODE`/`PDSIZE`/重复放置/3D 标记；SPLINE CV 法/节点/阶数/
-  切向/公差/`Close`/2–3 点小样本/fit 点往返；六者的 3D/OCS 与纸空间造形；**文件行数已逼近门禁**
-  （`lib.rs` 996、`tests_commands.rs` 996、`host/mod.rs` 992、`draw_tool/mod.rs` 991）⇒ 下一阶段先拆再改。
+  POLYGON `Edge`/外切/边数跨会话持久化；POINT `PDMODE`/`PDSIZE`/重复放置/3D 标记/块内标记；SPLINE CV 法/节点/阶数/
+  切向/公差/`Close`/2–3 点小样本/fit 点往返；六者的 3D/OCS 与纸空间造形；**证据工具链**：`collect-evidence.sh`
+  的 README 模板会列出该次运行**未产出**的 wayland 工件（x11-only 运行也会列），且像素判据（
+  `check-band-pixels.py`/`check-point-pixels.py`）的输出**未落盘**到证据目录——两者都应修，属工具链而非产品；
+  **文件行数**：`lib.rs`/`tests_commands.rs`/`host/mod.rs`/`draw_tool/mod.rs` 已按门禁拆分（本轮），
+  `crates/cad-spatial/src/pick/tests.rs`（991）列入下一阶段待拆清单。
 
 ## P2：编辑工作流接线 + TRIM/EXTEND 取点 + chrome 死入口（2026-10-19）
 

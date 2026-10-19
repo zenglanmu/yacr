@@ -33,6 +33,7 @@
   "tool.confirm": "Confirm",
   "tool.cancel": "Cancel",
   "tool.points": "{count} points",
+  "tool.open_ended": "More points accepted; press Enter to finish",
   "tool.prompt.confirm": "Enter to confirm",
   "tool.prompt.cancel": "Esc to cancel",
   "tool.draw.line": "Line",

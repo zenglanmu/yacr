@@ -195,9 +195,13 @@ export const POLYGON_SIDES_PENDING_CAP = 10;
  * Returns the same `pending` while the host has not yet caught up (the status
  * value still equals the value the delta is measured against, `base`), and
  * `null` — dropping the delta — as soon as the status value changes, the tool
- * switches/cancels, the tool key changes, or the value becomes absent/`null`/
- * out-of-range. Returning the same reference on an unchanged poll lets the
- * caller `setState` without triggering a re-render.
+ * switches/cancels, the tool key changes, the value becomes absent/`null`/
+ * out-of-range, or the status carries an `error`. The error rule matters because
+ * an in-queue host refusal (queue full, Viewer edge) surfaces through
+ * `status.error` **without** changing the value: without it the delta would stay
+ * stuck at its `base` and the next click would compose an absolute target up to
+ * the cap away from the real value. Returning the same reference on an unchanged
+ * poll lets the caller `setState` without triggering a re-render.
  */
 export function reconcilePolygonPending(pending, status) {
   const tool = status?.tool;
@@ -205,6 +209,9 @@ export function reconcilePolygonPending(pending, status) {
   const active = tool && typeof tool === 'object' && tool.key === 'draw.polygon'
     && Number.isSafeInteger(sides) && sides >= POLYGON_SIDES_MIN && sides <= POLYGON_SIDES_MAX;
   if (!active) return null;
+  // A real host error (never an empty/absent string) drops the in-flight delta,
+  // so the next step builds on the value the host actually holds.
+  if (status?.error) return null;
   if (!pending || pending.key !== tool.key || pending.base !== sides) return null;
   return pending;
 }
@@ -217,11 +224,18 @@ export function reconcilePolygonPending(pending, status) {
  * zero delta (a step that lands back on the status value) and any delta beyond
  * [`POLYGON_SIDES_PENDING_CAP`] collapse to `null`, so the cap can never be
  * exceeded even if a caller bypasses the view's disabled buttons.
+ *
+ * `pending` is the in-flight delta the caller's `target` was built on. Folding
+ * is only meaningful onto the same tool and the same `base` value: a mismatch
+ * means the caller stepped off a stale target (the same class of drift the
+ * reconcile guards against), so the step is refused rather than composed into an
+ * absolute target the host never saw.
  */
 export function stepPolygonPending(pending, status, target) {
   const tool = status?.tool;
   const sides = tool?.params?.sides;
   if (!tool || typeof tool !== 'object' || !Number.isSafeInteger(sides)) return null;
+  if (pending && (pending.key !== tool.key || pending.base !== sides)) return null;
   const delta = target - sides;
   if (!Number.isSafeInteger(delta) || delta === 0 || Math.abs(delta) > POLYGON_SIDES_PENDING_CAP) return null;
   return { key: tool.key, base: sides, delta };

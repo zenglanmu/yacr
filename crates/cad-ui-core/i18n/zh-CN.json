@@ -33,6 +33,7 @@
   "tool.confirm": "确认",
   "tool.cancel": "取消",
   "tool.points": "{count} 个点",
+  "tool.open_ended": "可继续添加点，按回车结束",
   "tool.prompt.confirm": "回车确认",
   "tool.prompt.cancel": "Esc 取消",
   "tool.draw.line": "直线",

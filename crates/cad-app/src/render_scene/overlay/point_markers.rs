@@ -57,6 +57,15 @@ pub const POINT_MARKER_LIMIT: usize = 4000;
 /// filtering the rest of the overlay uses ([`LayerOverrideSet::is_entity_visible`]),
 /// so a hidden layer's points are excluded exactly like every other entity. This
 /// covers imported POINTs, not just newly created ones.
+///
+/// **Scope limitation (by design):** the scan walks top-level model/layout
+/// entities only, so a POINT nested inside a block definition is **not** marked.
+/// This is acceptable for now because such a point was equally invisible before
+/// this change: insert expansion went through the same chord fallback, which
+/// degenerated the point to a zero-length `[p, p]` segment. Expanding block
+/// members into the marker scan is a separate, larger change and is deliberately
+/// out of scope here. Pinned by
+/// [`tests::a_block_resident_point_is_not_marked_by_design`].
 pub fn visible_point_marker_positions(
     database: &DrawingDatabase,
     overrides: &LayerOverrideSet,
@@ -167,8 +176,8 @@ mod tests {
     use super::*;
     use crate::render_scene::CadSceneController;
     use crate::viewer_config::OverlayVisibility;
-    use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
-    use cad_domain::{DatabaseId, EntityId, LayerId, ObjectId, Revision, SpaceId};
+    use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+    use cad_domain::{BlockId, DatabaseId, EntityId, LayerId, ObjectId, Revision, SpaceId};
     use std::sync::Arc;
 
     fn p(x: f64, y: f64) -> Point3 {
@@ -257,6 +266,53 @@ mod tests {
         );
         assert!(overlay.diagnostics[0].message.contains("4000"));
         assert!(matches!(overlay.completeness, Completeness::Partial(_)));
+    }
+
+    /// The cap-sized build is **structurally bounded**, and only sanity-checked
+    /// for wall-clock so the docs' µs claim is not left unsupported.
+    ///
+    /// Structural bound: **one** batch, exactly four vertices per drawn marker
+    /// (two `LineList` segment pairs for the fixed plus), and no cap diagnostic
+    /// at the cap. No per-point allocation beyond the single capacity-reserved
+    /// vertex vector is enforced by construction in [`point_marker_overlay`]
+    /// (`Vec::with_capacity(drawn.len() * 4)` plus one `line_batch`), and pinned
+    /// here by the exact vertex count.
+    ///
+    /// The wall-clock ceiling is a **sanity bound, not a performance target**:
+    /// the build is tens of microseconds, so 250 ms is roughly four orders of
+    /// magnitude of headroom and cannot flake on scheduler noise. It only trips
+    /// on an order-of-magnitude regression (for example accidental per-point
+    /// work). The `71 µs` figure in the docs is an estimate, not a measurement;
+    /// this test does not measure it.
+    #[test]
+    fn point_marker_overlay_cap_build_is_structurally_bounded() {
+        let at_cap: Vec<Point3> = (0..POINT_MARKER_LIMIT as u64)
+            .map(|i| p(i as f64, 0.0))
+            .collect();
+        // Warm up first so the timed run does not pay one-off allocation growth.
+        let _ = point_marker_overlay(&at_cap, viewport(100.0), DocumentId(1));
+        let started = std::time::Instant::now();
+        let overlay = point_marker_overlay(&at_cap, viewport(100.0), DocumentId(1));
+        let elapsed = started.elapsed();
+
+        assert_eq!(overlay.drawn(), 1, "the whole cap is one bounded batch");
+        assert_eq!(
+            overlay.batches[0].vertices.len(),
+            POINT_MARKER_LIMIT * 4,
+            "exactly four vertices per drawn marker, no more"
+        );
+        assert!(
+            overlay.diagnostics.is_empty(),
+            "no diagnostic at exactly the cap"
+        );
+        assert_eq!(overlay.completeness, Completeness::Complete);
+
+        const SANITY_CEILING: std::time::Duration = std::time::Duration::from_millis(250);
+        assert!(
+            elapsed < SANITY_CEILING,
+            "cap-sized build took {elapsed:?}, over the {SANITY_CEILING:?} sanity ceiling; \
+             this guards against an order-of-magnitude regression, not a performance target"
+        );
     }
 
     #[test]
@@ -390,6 +446,81 @@ mod tests {
                 .iter()
                 .all(|batch| batch.vertices.len() != 2 || batch.vertices[0] != batch.vertices[1]),
             "the base scene must not carry a zero-length POINT segment"
+        );
+    }
+
+    /// A drawing with a top-level model POINT (entity 1) and a block definition
+    /// (block 7) whose sole member is a POINT at `(9, 9)` (entity 2).
+    fn drawing_with_a_block_resident_point() -> DrawingDatabase {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(point_entity(1, 0, p(1.0, 1.0))).unwrap();
+        b.insert_block(BlockDefinition {
+            id: BlockId(7),
+            entities: vec![EntityId(2)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+        let mut member = point_entity(2, 0, p(9.0, 9.0));
+        member.space = SpaceId::Block(BlockId(7));
+        b.insert_entity(member).unwrap();
+        b.finish().unwrap()
+    }
+
+    /// The marker scan walks top-level model/layout entities only, so a POINT
+    /// nested inside a block definition is **not** marked. This is pinned as
+    /// **by design**, not a bug: such a point was equally invisible before this
+    /// change (insert expansion used the same chord fallback, degenerating it to
+    /// a zero-length `[p, p]`). See the `visible_point_marker_positions` doc
+    /// comment; expanding block members is a separate change.
+    #[test]
+    fn a_block_resident_point_is_not_marked_by_design() {
+        let db = drawing_with_a_block_resident_point();
+        // The block really does own a POINT member, so the test is not vacuous.
+        let members = db.block_entities(BlockId(7));
+        assert_eq!(members.len(), 1, "the block owns one member entity");
+        assert!(matches!(members[0].geometry, SemanticGeometry::Point(_)));
+
+        // Only the top-level model POINT is in scope.
+        assert_eq!(
+            visible_point_marker_positions(&db, &LayerOverrideSet::new(), SpaceSelection::Model),
+            vec![p(1.0, 1.0)],
+            "only the top-level model POINT is marked; the block-resident one is not"
+        );
+
+        // End-to-end through the scene assembly: one marker batch, one cross —
+        // the block-resident POINT contributes nothing.
+        let db = Arc::new(db);
+        let layers = LayerOverrideSet::new();
+        let mut overlays = overlays_without_reference();
+        overlays.viewport_bounds = viewport(100.0);
+        let mut controller = CadSceneController::default();
+        controller
+            .prepare_shared_with_overlays(
+                Some(db),
+                DocumentId(1),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                &overlays,
+            )
+            .unwrap();
+        let scene = controller.ready.as_ref().unwrap();
+        let batches = marker_batches(scene);
+        assert_eq!(
+            batches.len(),
+            1,
+            "one marker batch for the one in-scope point"
+        );
+        assert_eq!(
+            batches[0].vertices.len(),
+            4,
+            "the block-resident POINT adds no cross"
         );
     }
 

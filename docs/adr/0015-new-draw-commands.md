@@ -22,7 +22,14 @@
 - **P3d 数学前置完成**：`cad-geometry/src/spline.rs`（`fit_points_to_cubic_spline`、`chord_parameters`、
   `cubic_spline_control_point_count`）= 三次/clamped/chord/**插值**、`knots.len()==n+4`、≥4 fit 点、
   重复与 1e-9 级近重合**显式拒绝**、10 条数值测试（含 chord≠uniform 判别、C2、共线、簇不误拒）。
-- **待办**：P3 阶段门禁（Oracle）+ 真实 GPU 绘制证据；P4 及以后见排期。
+- **待办**：P4 及以后见排期（P3 阶段门禁已执行，见下）。
+- **P3 阶段门禁（Oracle，2026-10-19）= ACCEPT-WITH-FIXES**：B1 决策 B 的 `CadTool.openEnded` 投影**此前遗漏**
+  （**已补**：`openEnded` 仅对开放元数工具为真、由 `DrawPreview::is_open_ended()` 派生、空闲时整个 `tool` 仍为
+  `null`，含线格式契约测试；状态栏对开放工具改显示 `tool.open_ended` 文案而非会误导的剩余点数）；
+  B2 能力表的 POINT 绘制格与工具行**自相矛盾**（已按实际改：标记已落地、覆盖顶层导入点，并记录"块内 POINT 不标记"的限制）；
+  B3 `polygon_sides` 的"文档更换不重置"与"重建/新建回 4"**自相矛盾**（已按"更换=重建=回 4、编辑=不重置"
+  更正决策措辞并记录）；另按非阻塞项更正了"同一有界主线程队列"（实为同规格的**第二条**队列）、
+  "逐字节一致"（实为**行为**一致）与 `ratio ≤ 1` 的适用范围（导入透传不保证）。
 - **P3c/P3d 命令完成（2026-10-19）**：`POINT`（单次放置，`SemanticGeometry::Point`，渲染标记此前已落地）与
   `SPLINE`（`AtLeast(4)` 开放捕获、调用 `cad_geometry::spline::fit_points_to_cubic_spline`、几何核心的
   重复/近重合/奇异错误**如实上抛**、预览为 ≤256 段插值曲线弦近似）端到端落地；选择子 53 个。
@@ -99,8 +106,9 @@ ELLIPSE 当第一轴实为**短轴**时 AutoCAD 是否静默交换；SPLINE 是�
   远大于手工描图规模，又给"指针卡住"一个明确边界），超限**显式拒绝**而非无界增长。
 - 就绪 = 达到最小点数（`AtLeast(n)`）⇒ 复用既有 Enter→`CONFIRM` 通路（路由已存在，但**必须补测**开放工具
   的"不自动确认 + Enter 在最小值处确认"，见验收）。
-- 定长工具（现有全部）行为**与今天逐字节一致**，用测试钉住；`DrawToolKind::ALL` ↔ `from_index`/`from_label`
-  的往返契约（`draw_tool/tests.rs`）在扩展 `ALL` 时必须保持。
+- 定长工具（现有全部）行为**与今天一致**，且由测试钉住（`fixed_arity_still_refuses_the_n_plus_one_point_and_ready_exactly_at_n`）；
+  注意这是**行为**一致，不是"逐字节"——`remaining()` 的类型与 `DrawPreview` 的字段确实变了（gate 已更正此处措辞）。
+  `DrawToolKind::ALL` ↔ `from_index`/`from_label` 的往返契约（`draw_tool/tests.rs`）在扩展 `ALL` 时必须保持。
 - **诚实的状态呈现**：`remaining()` 为 `Option<usize>`（`None` = 开放且已达最小，**不得**谎报 0）；
   `DrawPreview` 携带元数/开放性（`arity`/`is_open_ended`），并且**必须投影到前端线格式**
   （`CadTool` 增 `openEnded`，空值时规则与既有字段一致），否则 UI 只能显示"还需 0 点"这种错话。
@@ -121,9 +129,14 @@ AutoCAD 用提示行输入数字；本项目没有数值输入通道，且命令
 - 会话级参数 `polygon_sides`（默认 **4**，对齐 `POLYSIDES` 初值），**不**写持久化 config。
 - 通过**收窄的** typed 请求设置：`InteractionRequest::SetPolygonSides { sides: u32 }`（**不**做通用
   `SetToolParameter` 总线——单一消费者用泛型总线是 YAGNI；`SetMeasurementKind` 已是同形先例，且不违反 P0 决定）。
+  UI 侧经**专用 IPC** `cad_set_polygon_sides(sides)` 到达：它走**与 `cad_command` 同规格的第二条有界主线程队列**
+  （同一 `CAD_COMMAND_CAP`、同一 ack 语义、同一"只在主线程改状态"的纪律；**不是**同一条队列实例——总准入量
+  因此是 2×CAP+inputs，已按 gate 更正此处措辞），越界与 Viewer 拒绝经 `cad_status.error` 如实浮现。
 - **范围 3..=1024**（对齐 `POLYSIDES` 合法区间）；越界**显式拒绝**（不静默 clamp）。
-- **生命周期**（必须测试）：会话作用域；跨**切工具**与**取消**保持（sysvar 语义）；**文档更换不重置**；
-  会话重建/新建文档时回到 4；**Viewer 模式拒绝**（创建命令本就是 Work-only）。
+- **生命周期**（必须测试）：会话作用域；跨**切工具**与**取消**保持（sysvar 语义）；**文档更换/新建会重置为 4**
+  （更换即重建会话；**编辑提交不重置**——此项由 gate 更正：原决策文本写"文档更换不重置"，与"重建/新建回 4"
+  自相矛盾，实施按"更换=重建=回 4、编辑=不重置"落地并在此记录为**已更正的决策措辞**）；**Viewer 模式拒绝**
+  （创建命令本就是 Work-only）。
 - 投影：`CadTool` 增 `params.sides`；**规则是"活动工具不是 POLYGON 时 `sides` 为 `null`"**（无工具时整个 `tool`
   为 `null`），并用 `cad-ui-core` 契约测试钉住线格式；UI 步进控件的可用性由 `tool.key` 派生（不是本地状态）。
 
@@ -131,7 +144,8 @@ AutoCAD 用提示行输入数字；本项目没有数值输入通道，且命令
 
 - 存储 `Ellipse{center, normal:+Z, major_axis, ratio, start:0, sweep:2π}`；`ratio = 短轴/长轴`。
   **注意 `ratio ≤ 1` 不是 DB 不变量**（见背景 #1），必须由创建路径保证，否则会写出 DXF 组 40 > 1 的
-  **规范非法输出**（导出按原样写）。
+  **规范非法输出**（导出按原样写）。**适用范围**：本仓库的**创建**与**变换**路径保证 `≤ 1`；**导入透传**只检查
+  有限性 ⇒ 第三方非法 DXF 里组 40 > 1 会被**原样往返**（此为已知边界，不声称全链路保证）。
 - 用户两次点击给出第一轴（端点 A、B）：中心 = 中点，第一轴半长 = |AB|/2；第三次点击给出垂直于第一轴的
   半轴长度（点到第一轴直线的垂直距离）。
 - **重排规则（假设，未查证）**：若第一轴**短于**第三点给出的半轴，把**较长者存为 `major_axis`**（交换两轴角色）。
