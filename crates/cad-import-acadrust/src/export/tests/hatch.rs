@@ -370,6 +370,56 @@ fn a_pattern_hatch_writes_its_style_type_angle_scale_double_and_definition_rows(
         .any(|entry| entry.code == "export.converted.hatch"));
 }
 
+/// An in-plane rotation about world Z, applied to a hatch after import.
+fn rotation_z(theta: f64) -> Transform3 {
+    let (sin, cos) = theta.sin_cos();
+    let mut matrix = Transform3::identity().matrix;
+    matrix[0][0] = cos;
+    matrix[0][1] = -sin;
+    matrix[1][0] = sin;
+    matrix[1][1] = cos;
+    Transform3 { matrix }
+}
+
+#[test]
+fn a_rotated_pattern_writes_the_raw_rows_and_the_rotated_hatch_angle() {
+    // ADR U-1/U-7: the writer emits the *definition*, never `families()` output.
+    // A hatch rotated after import keeps its raw definition rows and records the
+    // rotation in group 52 only. Writing `families()` instead would bake the
+    // angle and scale into the rows and, with `77=1`, double the row count.
+    let angle = 10.0_f64.to_radians();
+    let spec = Spec {
+        fill: pattern_fill("CUSTOM_RIDGE", angle, 2.5, true),
+        pattern_type: cad_domain::HatchPatternType::Custom,
+        ..Spec::default()
+    };
+    let SemanticGeometry::Hatch(hatch) = build(spec) else {
+        panic!("expected a hatch geometry");
+    };
+    let rotated = hatch
+        .transformed(&rotation_z(25.0_f64.to_radians()))
+        .expect("an in-plane rotation is a similarity");
+    let (bytes, report) = export_one(SemanticGeometry::Hatch(Box::new(rotated)));
+    let record = hatch_record(&bytes);
+
+    // Group 52 carries the rotated hatch-level angle; group 41 is untouched.
+    assert!((number(&record, "52") - (10.0 + 25.0)).abs() < 1e-9);
+    assert!((number(&record, "41") - 2.5).abs() < 1e-9);
+    // One raw row, not the two families a `double` pattern composes to.
+    assert_eq!(integer(&record, "78"), 1, "raw definition rows only");
+    assert_eq!(integer(&record, "77"), 1, "the raw double flag");
+    // The row itself is the imported definition, not a rotated/scaled copy.
+    assert!((number(&record, "53") - 0.25_f64.to_degrees()).abs() < 1e-9);
+    assert!((number(&record, "43") - 0.5).abs() < 1e-12);
+    assert!((number(&record, "44") - 0.25).abs() < 1e-12);
+    assert!((number(&record, "45") - 0.0).abs() < 1e-12);
+    assert!((number(&record, "46") - 1.5).abs() < 1e-12);
+    assert_eq!(values(&record, "49"), vec!["0.5", "-0.25"]);
+    assert!(report.entries.iter().any(|entry| {
+        entry.code == "export.converted.hatch" && entry.message.contains("1 definition row")
+    }));
+}
+
 #[test]
 fn seeds_are_written_after_the_98_count() {
     let spec = Spec {

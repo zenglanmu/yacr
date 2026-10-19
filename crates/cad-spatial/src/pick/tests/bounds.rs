@@ -482,3 +482,18 @@ fn hatch_cached_pick_bounds_match_the_precise_leaf_bound() {
     let cached = cached_local_pick_bounds(&hatch, &mut cache).expect("cached hatch bounds");
     assert_eq!(cached, precise);
 }
+
+#[test]
+fn hatch_cached_pick_bounds_are_reused_like_a_compound() {
+    // Cache parity with compound/dimension (P6a-1 follow-up): a hatch is cached
+    // on its own key, so a shared placement computes its boundary bound once.
+    let hatch = hatch_semantics();
+    let mut cache = PickBoundsCache::new();
+    PICK_BOUNDS_COMPUTED.with(|count| count.set(0));
+    let first = cached_local_pick_bounds(&hatch, &mut cache).expect("cached hatch bounds");
+    let second = cached_local_pick_bounds(&hatch, &mut cache).expect("cached hatch bounds");
+    assert_eq!(first, second);
+    assert_eq!(cache.len(), 1, "the hatch is cached on its own key");
+    PICK_BOUNDS_COMPUTED
+        .with(|count| assert_eq!(count.get(), 1, "a repeated hatch reuses its cached bound"));
+}

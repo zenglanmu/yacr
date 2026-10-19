@@ -37,7 +37,8 @@
 | SOLID / TRACE / 3DFACE | 实现 | 网格(四边形→三角) | 网格 | 实现 | 不支持 |
 | INSERT / 块 | 实现(定义与实例分离) | 实现 | 实例展开块几何(嵌套有界，保留 InstancePath) | 实现 | 不支持 |
 | TEXT / MTEXT | 实现(保留字体名/字高/旋转) | 实现 | 整形为线段：outline(TTF/OTF/WOFF)+SHX(shapes/unifont/bigfont)，缺失字体走回退链 | 同上 | 不支持 |
-| HATCH | 实现 | 部分(椭圆/样条边界近似) | 边界环 + 多环实心填充(含孔洞，偶奇) / 图案线；超预算/自交降 Partial | 经边界(AABB) | 不支持 |
+| HATCH（读取/显示） | 实现 | 部分(椭圆/样条边界近似) | **P6a 起为一级 `Hatch` 实体**：边界环 + **样式感知**填充（`Normal`/`Outer`/`Ignore` 按**环集筛选**，1 基深度）+ 实心/图案/渐变；超预算/坏环降 `Partial`。**渲染变化（P6a 正确性修复）**：① `Outer`/`Ignore` 此前一律按 `Normal` 填（`Outer` **只在 ≥3 层**可见、`Ignore` 有岛屿即不同）；② 图案复合修正（**缩放基点、旋转 offset**；属 **U-1 我们的实现**，**非**外部保真验证）；③ 用户自定义图案（`76=0` 且 `78=0`）此前 `Partial`，现由 `52/41/77` **合成** | 精确局部包围盒（**bulge 环退回 AABB**，声明） | 不支持 |
+| HATCH（创建） | **NOT IMPLEMENTED** | — | **P6b 待实施**：计划只接受**选中的闭合实体** + `SOLID`/用户自定义图案（间距/角度/双线）+ 样式参数；**内部点求边界、LINE 拼接、预定义图案名、渐变创建、关联性均不实现**；**无真正创建预览**（ADR-0018）。**不得**因实体与导出已实现就暗示能创建 | — | 不支持 |
 | DIMENSION（读取/显示） | 实现 | 合成 | 无匿名块：按定义点+DIMSTYLE 合成线/箭头/测量文字；有匿名块（`*D…`）：展开块成员。**P5a 起无块与图片标注都导入为一级 `Dimension` 实体**（显示几何保留）。**线性/对齐/半径/直径/角度(2Ln/3Pt)/坐标的合成为 `Complete`**（与代码一致；未查证项见 ADR-0017 决策 E）；**圆弧长/大半径仍 `Partial`**（不在 ADR-0017 kind 集合内，保留旧 `Compound` 合成） | 经合成几何(AABB) | 不支持 |
 | DIMENSION（创建） | `DIMLINEAR`/`DIMALIGNED` **实现（P5c）**；`DIMRADIUS`/`DIMDIAMETER` **实现（P5d）**；`DIMANGULAR`/`DIMORDINATE` **实现（P5e）**；`DIMBASELINE`/`DIMCONTINUE` **NOT IMPLEMENTED（P5f 已降级）** | — | **P5c–P5e 实现创建命令**：`DIMLINEAR`/`DIMALIGNED` 为**三点流程**（两尺寸界线原点 + 尺寸线位置）；`DIMRADIUS`/`DIMDIAMETER` 为**实体拾取圆弧/圆 + 尺寸线位置**；`DIMANGULAR` 为**两线拾取 + 标注弧位置**（**三点形式仅命令层、无交互捕获**）；`DIMORDINATE` 为**特征点 + 引线端点**；`DIMCENTER` **不是** DIMENSION 实体（见绘图辅助行）。`DIMBASELINE`/`DIMCONTINUE` 因**会话级"最后标注"状态**的生命周期风险**降级为 NOT IMPLEMENTED**（P5f）。**不得因为有了实体类型就暗示其余能创建**；**创建无 spec 授权**（§3.2 只要求"常用 DIMENSION 可见表示"） | — | 不支持 |
 | MESH / PolyfaceMesh | 部分 | 网格契约 | 网格 | 实现 | 不支持 |
@@ -49,7 +50,7 @@
 | TEXT/MTEXT 格式 | 实现(格式 run 解析) | 部分(堆叠分数/颜色/装饰/行对齐为显式 Partial) | 按 run 整形/换行 | — | — |
 | 实体颜色/线宽 | 实现(ByObject/ByLayer/ByBlock，ACI/RGB) | 实现(颜色)；线宽仅携带 | 颜色进入 shader；线宽**显式不绘制** | — | — |
 | LINETYPE 虚线 | 实现(名称/表/线型比例) | 实现(ByObject/ByLayer/ByBlock) | 按弧长细分 dash/gap；复杂线型仅 dash、显式 Partial | — | — |
-| 渐变 HATCH | 实现(gradient_color) | 部分(LINEAR/SPHERICAL/CYLINDER 精确；其余显式 Partial) | 逐顶点颜色烘焙，裁剪于边界 | 经边界 | 不支持 |
+| 渐变 HATCH | 实现(gradient_color) | 部分(LINEAR/SPHERICAL/CYLINDER **按原值烘焙**；其余显式 Partial) | 逐顶点颜色烘焙，裁剪于边界。**角度组 460 的单位未查证**（写入器原样写、读取器原样存、结构注释称弧度）⇒ `angle_raw` 按**不透明往返**（ADR-0018 U-13）；`color_name`/`book_name` **不可写**（声明损失） | 经边界 | 不支持 |
 | 出图(打印) | 实现(PLOTSETTINGS/内嵌 Layout；plot-style 引用读取并显式 Unsupported) | 实现(纸张/边距/比例/旋转) | 光栅 PNG(host readback)；无矢量/CTB | — | — |
 | 异步导入 | 实现(进度阶段/取消) | 实现(唯一任务、过期丢弃) | — | — | — |
 | 天正/探索者代理 | 实现(仅公开缓存记录) | 仅 FillOff/UnicodeText 有证据 | 依解码结果 | 实现 | 标记缓存几何 |
@@ -209,7 +210,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | `ARRAYRECT` / `ARRAYPOLAR` | **实现** | **独立副本**（AutoCAD 默认关联，记为**有意偏离**）；矩形：间距=**基点间距离**、向上右生成、副本数 = `行×列−1`；极坐标：捕获中心点，副本数 = `项数−1`，**角度步长 = `i·填充角/项数`**（**我们的规则**：部分填充时 AutoCAD 是首尾跨满 `fill/(items−1)`，故 `180°/3 项` 我们为 0/60/120 而 AutoCAD 为 0/90/180——**刻意偏离**，已测试），`rotateItems` 决定绕中心旋转或仅平移（**未查证选择**） | `Path`/`Levels`/`Total`/角度间隔输入/关联编辑（`ARRAYEDIT`/grips）/`MAXARRAY` 可配置化/3D/**负间距反向**；1×1 或单项阵列**不产生副本并显式诊断**（不开事务） |
 | `ALIGN` | **实现** | **两对点**：平移（第一对）+ 旋转（两对方向夹角）+ `AlignScale` 为真时按"目标对长/源对长"做**均匀**缩放；以 `source1` 为枢轴，原位变换整个选择 | 3 对点 3D 对齐、**非均匀**缩放、**1 对点移动**（等价于 `MOVE`，不做） |
 | `STRETCH` | **实现** | 交叉窗口（**恒 CROSSING**）：**部分包围=逐顶点移动**（只动窗内顶点）、**完全包围=整移**；分类按几何类型分两种口径（直线/无 bulge 折线=逐顶点包含；圆/椭圆/块/ARC/含 bulge 折线=保守包围盒完全包含）；**bulge 数值保留**（未查证） | cpolygon/lasso、**单独选取即整移**、`TEXT`（未查证 ⇒ 整命令拒绝）、`SPLINE`/`ARC`/`HATCH`/`INSERT` 的**拉伸**（部分包围不动+诊断、完全包围整移）、3D；宽度未建模 |
-| `EXPLODE` | **实现** | **一次一层**：LWPOLYLINE→线段+ARC（bulge 还原）；INSERT→直接成员（placement 烘焙，**嵌套块引用保持为引用**，二次 EXPLODE 才展开）；`Compound`→**全部子项**（含 hatch 填充网格与图案线）；MINSERT（`Compound(Insert…)`）→先得 Insert 实例 | 多级一次到底（导出层的"摊平到叶子"是**另一条路径**，不在本命令内）、`EXPLMODE`、颜色/线型变化、Dimension（按 `type_key` 显式拒绝）、关联阵列（我们不存）、属性语义；`IMAGE`/`MASK` 按**策略**拒绝（其**可变换**，不得假称被变换拒绝）；`TEXT`/`SPLINE`/`SHAPE`/`OPAQUE` 与镜像 Arc/Ellipse 按既有变换拒绝面**整命令失败**；非均匀 INSERT 拒绝 |
+| `EXPLODE` | **实现** | **一次一层**：LWPOLYLINE→线段+ARC（bulge 还原）；INSERT→直接成员（placement 烘焙，**嵌套块引用保持为引用**，二次 EXPLODE 才展开）；`Compound`/`Hatch`→**全部子项**（`Hatch` 分解为**边界折线 + 填充网格 + 图案线**；P6a 保持既有行为，块内填充仍按 insert-child 拒绝）；MINSERT（`Compound(Insert…)`）→先得 Insert 实例 | 多级一次到底（导出层的"摊平到叶子"是**另一条路径**，不在本命令内）、`EXPLMODE`、颜色/线型变化、Dimension（按 `type_key` 显式拒绝）、关联阵列（我们不存）、属性语义；`IMAGE`/`MASK` 按**策略**拒绝（其**可变换**，不得假称被变换拒绝）；`TEXT`/`SPLINE`/`SHAPE`/`OPAQUE` 与镜像 Arc/Ellipse 按既有变换拒绝面**整命令失败**；非均匀 INSERT 拒绝 |
 - **证据范围**：上述表格是**契约/场景**证据，不等于真实图纸兼容性。Linux 桌面宿主（React/Tauri）
   另有**真实硬件 GPU** 有界证据（Vulkan / Quadro P620 / X11）：打开与渲染、悬停、框选（含橡皮筋像素判据）、
   TRIM 的交互链（实体拾取/漏点拒绝/CONFIRM 到达命令层）、以及 **ERASE 的真实提交**（`entityCount` 4→3）。

@@ -397,3 +397,40 @@ fn fallback_chord_never_drops_below_the_computation_tolerance() {
     assert_eq!(params.tolerance, 1e-7);
     assert_eq!(params.max_segments, FALLBACK_MAX_SEGMENTS);
 }
+
+#[test]
+fn fallback_extent_follows_a_hatch_like_the_compound_it_replaced() {
+    // ADR 0018 E: the hatch's fallback extent is the largest display child, as
+    // it was when a hatch was a `Compound`. The boundary polyline (a 10 x 10
+    // square) carries the size; the fall-through to 0.0 would instead clamp the
+    // chord to the computation tolerance.
+    let hatch = HatchGeometry::new(
+        vec![HatchLoop::new(
+            vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            Vec::new(),
+            HatchLoopFlags::default(),
+        )],
+        HatchPlane::default(),
+        HatchStyle::Normal,
+        HatchFill::Solid,
+        Vec::new(),
+        None,
+        HatchPatternType::UserDefined,
+    )
+    .expect("a 10 x 10 boundary is a valid hatch");
+    let geometry = SemanticGeometry::Hatch(Box::new(hatch));
+    let policy = TolerancePolicy::default();
+    let params = fallback_tessellation_params(&geometry, &policy);
+    let diagonal = (10.0f64 * 10.0 + 10.0 * 10.0).sqrt();
+    let floor = policy.computation_world.max(1e-12);
+    let expected = (diagonal * FALLBACK_CHORD_FRACTION).max(floor);
+    assert!(
+        (params.tolerance - expected).abs() <= expected * 1e-12,
+        "chord {} != {expected}",
+        params.tolerance
+    );
+    assert!(
+        params.tolerance > floor,
+        "the hatch extent must set the chord, not the tolerance floor"
+    );
+}

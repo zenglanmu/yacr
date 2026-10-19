@@ -162,14 +162,30 @@ pub(super) fn cached_local_pick_bounds(
     geometry: &SemanticGeometry,
     cache: &mut PickBoundsCache,
 ) -> Option<(Point3, Point3)> {
+    // A hatch's precise bound is a single O(vertices) pass over its loops
+    // (`HatchGeometry::local_bounds`), not an aggregate of display children, so
+    // it is cached on its own key rather than through the child union below. It
+    // is cached at all for parity with its peers: a hatch replaces the compound
+    // it used to be (P6a-1), and a shared placement should not recompute it.
+    if let SemanticGeometry::Hatch(hatch) = geometry {
+        let key = geometry as *const SemanticGeometry;
+        if let Some(bounds) = cache.get(&key) {
+            return *bounds;
+        }
+        #[cfg(test)]
+        super::PICK_BOUNDS_COMPUTED.with(|count| count.set(count.get() + 1));
+        let bounds = hatch.local_bounds();
+        cache.insert(key, bounds);
+        return bounds;
+    }
     // A dimension aggregates its display children like a compound, so it uses
     // the same cached-union path (ADR 0017 A.8).
     let children: &[SemanticGeometry] = match geometry {
         SemanticGeometry::Compound(children) => children,
         SemanticGeometry::Dimension(dimension) => dimension.display(),
         // Leaf bounds are cheap and common. Avoid hashing and inserting millions
-        // of one-shot leaf pointers; only reusable compound aggregates belong
-        // in the query cache.
+        // of one-shot leaf pointers; only reusable aggregates (compound,
+        // dimension, hatch) belong in the query cache.
         _ => return local_pick_bounds(geometry),
     };
     let key = geometry as *const SemanticGeometry;

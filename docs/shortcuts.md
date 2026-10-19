@@ -152,12 +152,16 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   - `Ctrl+O`（打开）与 `Ctrl+N/S/Shift+S/P` 在宿主缺少对应能力时同样报告 `shortcut.unsupported`。
   - 未列出的 `Ctrl+<其他字母/数字>` 与所有 `Alt+` 组合**未映射**：`Alt`/`Meta` 一律放行给系统，
     其余未映射组合不拦截。
-- **未实现的 AutoCAD 命令**：如 `HATCH`、`POLYLINE`、`SPLINE`、`ELLIPSE`、`XLINE`、`BLOCK`、
-  `WBLOCK`、`IMPORT`、`XREF`、`PUBLISH`，以及全部 `DIM` 族条目（`DIM`/`DIMALIGNED`/`DIMANGULAR`/
-  `DIMDIAMETER`/`DIMLINEAR`/`DIMRADIUS`/`DIMSTYLE`）在
-  `crates/cad-ui-slint/src/command_line.rs::UNSUPPORTED_COMMANDS` 中，提交时报告
-  `command.unsupported`（用原始输入保真显示）。不在该表中的其他 AutoCAD 名（如 `DIMORDINATE`/
-  `DIMCONTINUE`）落入 `command.unknown`，同样是显式反馈，不静默忽略。
+- **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
+  的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**67 个选择子**）；不在表内的名字报告
+  `command.unknown`；宿主**识别但未实现**的路径（如 `PLOT`/`SAVE` 的受限路径）由宿主报告
+  `command.unsupported`。两者都是显式反馈，**不静默忽略**。
+- **仍未实现的 AutoCAD 名（据实）**：`HATCH` **创建**（P6b 待实施；**实体/导入/导出已实现**，见
+  `docs/compatibility.md` 的 HATCH 行）、`POLYLINE`（我们有 `PLINE`）、`XLINE`、`BLOCK`、`WBLOCK`、
+  `IMPORT`、`XREF`、`PUBLISH`、`DIMSTYLE`（样式编辑未实现；DIMSTYLE **变量子集**已实现）、
+  `DIMBASELINE`/`DIMCONTINUE`（P5f **已降级**）。**已实现**：`DIMLINEAR`/`DIMALIGNED`/`DIMRADIUS`/
+  `DIMDIAMETER`/`DIMANGULAR`/`DIMORDINATE`/`DIMCENTER`。
 - **`OFFSET` 为有界子集**：仅支持 LINE 与 CIRCLE；其它几何（Polyline/Arc/Ellipse/Spline/Point/
   Mesh/Text/…）显式 `Unsupported("OFFSET supports LINE and CIRCLE only")`，不创建、不部分执行。
 - **`Ctrl+C/X/V` 是应用内剪贴板**，**不是**操作系统剪贴板：不与其他应用互通，也不跨文档

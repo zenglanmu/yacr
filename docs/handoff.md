@@ -1,3 +1,39 @@
+## P6a：填充族一等实体 + 样式正确填充 + 真 `HATCH` 导出（ADR-0018，2026-10-20）
+
+**范围**：`crates/cad-domain`（新 `hatch_entity` + 迁入的 `hatch/`）、`crates/cad-geometry`（迁出 hatch 模块）、
+`crates/cad-import-acadrust`（导入迁移 + 新 `export/hatch.rs`）、以及 `cad-db`/`cad-spatial`/`cad-app`/
+`cad-measure`/`cad-platform`/`cad-proxy`/`cad-representation` 的匹配点。**无创建命令**（P6b）。
+
+- **P6a0（`b639663`）**：hatch 几何 `cad-geometry` → **`cad-domain`**（`git mv`，**内容零变化**、不保留 re-export），
+  **零行为变更**（断言与期望值一个未改），为的是让后续三处**已声明渲染变化**可归因。
+- **P6a-1（`e8bfaf0`）**：`SemanticGeometry::Hatch`（私有字段 + `new`/`from_import`/`transformed`）；
+  `display` **保留全部边界环**、样式只筛填充区域；**样式 = 环集筛选**（`Normal` 全部 / `Outer` 去 1 基深度 ≥3 /
+  `Ignore` 去 ≥2）。**修三处既有缺陷（均声明为渲染变化）**：`Outer`/`Ignore` 曾按 `Normal` 填、用户自定义
+  `78=0` 曾 `Partial`、**图案复合**（缩放基点 + 旋转 offset，U-7 已修）。匹配点清单全部落实（复核：**无错臂**）。
+  `EXPLODE` 保持既有分解、`class_name = "AcDbHatch"`、非均匀/镜像拒绝。
+- **P6a-2（`0f7e859`）**：**真 `HATCH` 导出**（定义行、种子、原始 `92` 位、优先解析边、`47` 仅 derived、
+  渐变块仅渐变；**`71` 恒 0**；**永不写裁剪线段**），不再摊平 `display`；新增**合成多样式夹具**
+  `fixtures/dxf/hatch-styles/multi-style.dxf`（manifest 23 个）。
+- **复核（Oracle，聚焦）**：`ACCEPT-WITH-FIXES`**无阻塞**。关键判断：图案复合**不是纯循环**——一条**真判别性
+  不变量**（offset ⊥ 最终方向 + 幅值缩放，**旧代码会失败**），另两条为公式自证，**无外部保真比对** ⇒
+  **可保留**但"verified against fixture"**说法过强**，统一改为"**夹具值核对 + 一条形状不变量**"；
+  样式派发**算术独立重算通过**（68/64/100、34/32/50 能区分三样式与两个差一阈值）；匹配清单**无错臂**。
+- **复核后的修正**：`engine.rs::fallback_scale` 与 `pick/bounds.rs::cached_local_pick_bounds` 补 Hatch 臂；
+  修正 `hatch_entity/tests.rs` 的**陈旧注释**（图案行实际 `y=0,2,4,6,8`）；补**非循环**的相似变换等式测试；
+  两外环配置补**图案/渐变**覆盖。**ADR 的 i18n 计数更正**：P6a 实际 **+3 键**（属性行穷尽匹配所致），非 0。
+- **声明与已知局限**：实心写 `2 = SOLID`；折线路径形式**强制 `92` POLYLINE 位**（记为**转换**）；法兰 6 个填充
+  中 5 个在 `Title` 块、只被图纸空间引用 ⇒ **模型空间导出只出 1 个 `HATCH`**（已断言丢弃）；渐变 `460` 单位
+  **未查证**（U-13，`angle_raw` 不透明往返、**无渐变夹具**）；`loop_depths` 只探首点 ⇒ **导入路径相切环**可能误判
+  深度（`Normal` 与夹具不受影响）；**无图形级图案保真判据**。
+- **文档更正（本轮一并）**：`docs/shortcuts.md` 的"未实现命令"整条此前引用**已删除的 `cad-ui-slint`**，
+  且 `DIM` 族多已实现 ⇒ **据实重写**；`docs/compatibility.md` 的 HATCH 行拆**读取/显示**与**创建（NOT IMPLEMENTED）**、
+  渐变行补 `460` 未查证与不可写损失、`EXPLODE` 行补 `Hatch`；`docs/dxf-entity-coverage.md` 补 P6a 条目。
+- **门禁（编排者复跑）**：受影响 crate **1927 通过 / 0 失败**；workspace check(all-targets)、clippy(`-D warnings`)、
+  fmt、architecture(27)、i18n(**520**)、fixture(**23**)、file-size(**695**)、UI **154/154**。
+  **NOT RUN**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；**真机像素判读**（填充分区由契约测试钉住，
+  ADR 的像素读留待 P6a 证据批）；跨平台；第三方读取器验证。
+- **待办**：**P6b**（创建：预选闭合实体 + `SOLID`/用户自定义图案 + 样式参数）；之后 **P6 阶段门禁**。
+
 ## P5 阶段关闭（Oracle 门禁，2026-10-20）
 
 - **门禁**：`closed-with-fixes` → F1/F2/F3 修复 + F4 文档更正后 **P5 CLOSED**。门禁自跑受影响套件与全部卫生门禁，

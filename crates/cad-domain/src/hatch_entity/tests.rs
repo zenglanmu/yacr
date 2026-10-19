@@ -161,8 +161,9 @@ fn solid_style_areas_on_two_disjoint_outer_loops() {
 
 #[test]
 fn pattern_line_length_per_style() {
-    // Horizontal families at y = 1, 3, 5, 7, 9 (spacing 2). Rows inside the
-    // 2..8 hole band keep only the outer stubs.
+    // The raw base point (y = 1) is scaled with the pattern (scale 2), so the
+    // horizontal families land at y = 0, 2, 4, 6, 8 (spacing 2). Rows inside
+    // the 2..8 hole band keep only the outer stubs.
     let cases = [
         (HatchStyle::Normal, 34.0), // 10+4+6+4+10
         (HatchStyle::Outer, 32.0),  // 10+4+4+4+10
@@ -204,6 +205,64 @@ fn gradient_bake_region_per_style() {
             mesh.colors.len(),
             mesh.vertices.len(),
             "{style:?}: every vertex is baked"
+        );
+    }
+}
+
+/// A horizontal user pattern whose rows (`y = 0.5 + k`) never coincide with a
+/// loop edge, so the expected lengths do not depend on the half-open crossing
+/// rule at a boundary row.
+fn interior_pattern_fill() -> HatchFill {
+    HatchFill::Pattern(HatchPattern {
+        name: "USER".into(),
+        angle: 0.0,
+        scale: 1.0,
+        double: false,
+        lines: vec![HatchPatternLine {
+            angle: 0.0,
+            base_x: 0.0,
+            base_y: 0.5,
+            offset_x: 0.0,
+            offset_y: 1.0,
+            dashes: Vec::new(),
+        }],
+    })
+}
+
+#[test]
+fn pattern_and_gradient_styles_on_two_disjoint_outer_loops() {
+    // The solid case is covered above; the style filter also feeds the pattern
+    // and gradient regions, so the disjoint configuration is exercised for
+    // those fills too. Both loops are depth 1 (two 4x4 squares), so every style
+    // keeps both and no clipping difference is expected.
+    for style in [HatchStyle::Normal, HatchStyle::Outer, HatchStyle::Ignore] {
+        let hatch = build(two_disjoint(), style, interior_pattern_fill());
+        // Four rows per square (y = 0.5/1.5/2.5/3.5 and 10.5/11.5/12.5/13.5),
+        // each 4 long: 2 squares * 4 rows * 4 = 32.
+        let length = pattern_length(&hatch);
+        assert!(
+            (length - 32.0).abs() < 1e-6,
+            "{style:?}: expected 32 pattern length, got {length}"
+        );
+
+        let hatch = build(two_disjoint(), style, gradient_fill());
+        let area = display_area(&hatch);
+        assert!(
+            (area - 32.0).abs() < 1e-6,
+            "{style:?}: expected gradient region 32, got {area}"
+        );
+        let mesh = hatch
+            .display()
+            .iter()
+            .find_map(|g| match g {
+                SemanticGeometry::Mesh(mesh) => Some(mesh),
+                _ => None,
+            })
+            .expect("gradient mesh");
+        assert_eq!(
+            mesh.colors.len(),
+            mesh.vertices.len(),
+            "{style:?}: every gradient vertex is baked"
         );
     }
 }
@@ -251,6 +310,95 @@ fn pattern_composite_rotates_offset_and_scales_base() {
         family.angle
     );
     assert!((family.dashes[0] - 1.0).abs() < 1e-12);
+}
+
+/// The hatch-level similarity `scale * (x + iy) * exp(i * angle)`, written here
+/// as plain complex multiplication so the expectation does not reuse
+/// [`HatchPattern::families`]'s own expression.
+fn hatch_similarity(scale: f64, angle: f64, x: f64, y: f64) -> [f64; 2] {
+    let (sin, cos) = angle.sin_cos();
+    [scale * (cos * x - sin * y), scale * (sin * x + cos * y)]
+}
+
+#[test]
+fn pattern_families_are_the_similarity_transform_of_the_raw_rows() {
+    // A non-axis-aligned hatch angle so a rotation-sign or rotation-direction
+    // error cannot cancel, and rows that carry both a base and an offset so the
+    // comparison is not fixed by a single degree of freedom.
+    let hatch_angle = std::f64::consts::FRAC_PI_6; // 30 degrees
+    let scale = 1.5;
+    let rows = [
+        HatchPatternLine {
+            angle: std::f64::consts::FRAC_PI_4,
+            base_x: 2.0,
+            base_y: -1.0,
+            offset_x: 1.0,
+            offset_y: 3.0,
+            dashes: vec![2.0, -1.0],
+        },
+        HatchPatternLine {
+            angle: -1.0,
+            base_x: 0.5,
+            base_y: 4.0,
+            offset_x: -2.0,
+            offset_y: 0.5,
+            dashes: Vec::new(),
+        },
+    ];
+    let pattern = HatchPattern {
+        name: "ARBITRARY".into(),
+        angle: hatch_angle,
+        scale,
+        double: false,
+        lines: rows.to_vec(),
+    };
+    let families = pattern.families();
+    assert_eq!(families.len(), rows.len(), "one family per raw row");
+
+    for (row, family) in rows.iter().zip(&families) {
+        // The line direction is the raw row angle turned by the hatch angle.
+        let want_angle = row.angle + hatch_angle;
+        assert!(
+            (family.angle - want_angle).abs() < 1e-12,
+            "{:?}: angle {} != raw {} + hatch {}",
+            row,
+            family.angle,
+            row.angle,
+            hatch_angle
+        );
+        // Dashes are pattern-space lengths, so only the scale applies.
+        assert_eq!(family.dashes.len(), row.dashes.len());
+        for (got, dash) in family.dashes.iter().zip(&row.dashes) {
+            assert!(
+                (got - dash * scale).abs() < 1e-12,
+                "{:?}: dash {got} != raw {dash} * {scale}",
+                row
+            );
+        }
+        // Line `k` of a family is `base + k * offset`. The raw row defines the
+        // same lines in pattern space, so the similarity transform of
+        // `raw_base + k * raw_offset` must be exactly `base + k * offset`:
+        // `k = 0` pins the base, `k = 1` pins the offset, and the remaining
+        // samples pin the direction. Comparing transformed *points* keeps the
+        // expectation independent of how `families()` splits base and offset
+        // (and would fail if it applied the similarity twice).
+        for k in -2..=2 {
+            let raw = [
+                row.base_x + row.offset_x * k as f64,
+                row.base_y + row.offset_y * k as f64,
+            ];
+            let want = hatch_similarity(scale, hatch_angle, raw[0], raw[1]);
+            let got = [
+                family.base[0] + family.offset[0] * k as f64,
+                family.base[1] + family.offset[1] * k as f64,
+            ];
+            assert!(
+                (got[0] - want[0]).abs() < 1e-12 && (got[1] - want[1]).abs() < 1e-12,
+                "{:?}: line {k} point {got:?} != similarity transform {want:?}",
+                row
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -453,4 +601,39 @@ fn transform_moves_source_edges_with_the_loops() {
         }
         other => panic!("expected a line edge, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Import-path depth probes (ADR B6: the import path never rejects, so a loop
+// may touch another loop's boundary).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn import_depth_probes_several_vertices_when_the_first_touches_a_boundary() {
+    // The triangle's first vertex sits on the outer loop's right edge, where the
+    // even-odd crossing test reports "outside"; its other two vertices are
+    // strictly inside. The creation path would reject this set, but the import
+    // path keeps it, so a first-vertex-only depth would call the triangle an
+    // outer loop and `Ignore` would fill it instead of dropping it.
+    let loops = vec![
+        rect(0.0, 0.0, 10.0, 10.0),
+        HatchLoop::new(
+            vec![[10.0, 5.0], [2.0, 2.0], [2.0, 8.0]],
+            Vec::new(),
+            HatchLoopFlags::default(),
+        ),
+    ];
+    let (hatch, reasons) = HatchGeometry::from_import(
+        loops,
+        HatchPlane::default(),
+        HatchStyle::Ignore,
+        HatchFill::Solid,
+        Vec::new(),
+        None,
+        HatchPatternType::UserDefined,
+    );
+    assert!(reasons.is_empty(), "{reasons:?}");
+    // `Ignore` keeps depth-0 loops only: the outer square (100), not the
+    // triangle (24) that is nested inside it.
+    assert!((display_area(&hatch) - 100.0).abs() < 1e-6);
 }

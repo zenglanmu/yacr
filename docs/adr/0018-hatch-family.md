@@ -284,3 +284,61 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
 
 沿用既有：合成 DOM 指针事件（**非真实鼠标**）、`cad_status` **无几何通道** ⇒ 真机只证"提交成功 + 计数 + 内容存在"；
 **填充分区正确性由契约测试 + 像素判读共同钉住**（填错区域是可见的）。截图仅含应用窗口自身。
+
+---
+
+## 实施状态（追加，不改写决策文本）
+
+### P6a0（模块搬迁，提交 b639663）
+
+- `cad-geometry/src/hatch/` → **`cad-domain/src/hatch/`**（`git mv`，**内容零变化**，仅一处模块文档的路径句）；
+  **不保留 re-export**，四个调用点改 `cad_domain::hatch::…`（导入侧边界/填充/图案/渐变、**表示层的字形填充**
+  `cad-representation/src/text/finalize.rs`、一个测试导入路径）。
+- **验收 = 零行为变更**：既有测试全绿、**断言与期望值一个未改**、architecture 无向上依赖。**U-7 的缺陷被看到但
+ 刻意不修**（保持本片可归因），见 P6a-1。
+
+### P6a-1（域变体 + 样式正确填充 + 导入迁移，提交 e8bfaf0）
+
+- `crates/cad-domain/src/hatch_entity.rs`（+`validate/geometry/tests`）：`HatchGeometry`，**私有字段 + 唯一写入路径**
+  `new`/`from_import`/`transformed`；环在**帽面 OCS 2D**、**原始 `u32` flags**、可选 `source_edges`（`BoundaryEdge`）、
+  `plane`/`style`/`fill`/`seeds`/`pixel_size`/`pattern_type`/`display`；渐变 `reserved` + **不透明 `angle_raw`**。
+- **显示 = 单一构造器**：`display` **保留全部边界环折线**（边界顶点仍可捕捉、填充内部仍可选中），**样式只筛
+  填充/图案/渐变区域**；`filtered_loops`：`Normal` 全部、`Outer` 去 1 基深度 ≥3、`Ignore` 去 ≥2。
+- **修三处既有缺陷（均为渲染变化）**：① `Outer`/`Ignore` 曾按 `Normal` 填；② 用户自定义 `76=0`/`78=0` 曾
+  `Partial`，现由 `52/41/77` 合成；③ **图案复合**：`pattern_families` 并入 `HatchPattern::families`，
+  现在**缩放基点 + 旋转 offset**（U-7 已修）。
+- **匹配点清单**：ADR 决策 E 全部落实；复核逐个核对**无"编译通过但返回错"的臂**。
+- **行为**：变换（平移/旋转/均匀缩放，重建 `display`；非均匀/镜像**整实体拒绝**）；**EXPLODE 保持既有分解**且
+  既有测试期望不变（块内填充仍拒绝）；`STRETCH` 沿用能力表口径；边界顶点仍可捕捉；填充内部仍可选中；
+  `class_name` = **`"AcDbHatch"`**。
+
+### P6a-2（真 `HATCH` 导出，提交 0f7e859）
+
+- 新 `export/hatch.rs`：写**真 `HATCH`**（`10/20/30`、`210`、`2`、`70`、**`71` 恒 0**、`91` + 每环 `92` 原始位、
+  **优先解析边**、否则采样折线并**声明降级**、`75`/`76`/`52`/`41`/`77`/`78` + 定义行、`98` + 种子、
+  **`47` 仅 derived 环**、渐变块仅在渐变时）；**永不读 `display()` 的裁剪线段**。
+- **不再摊平**：`export/entity.rs` 把 `Hatch` 派发到写入器；**始终 `Converted` 而非 `Exact`**（须逐实体声明
+  style/type/seeds/`71=0`）。
+- **新增合成多样式夹具** `fixtures/dxf/hatch-styles/multi-style.dxf`（3 层嵌套 + 一个 `Outer` + 一个 `Ignore` +
+  两个不相交外环），manifest 记 provenance/SHA-256/已知限制。
+- **声明**：实心写 `2 = SOLID`（域不存实心图案名）；折线路径形式**强制 `92` POLYLINE 位**（无源边的合成环"加位"
+  记为**转换**而非静默归一化）；法兰 6 个填充中 5 个在 `Title` 块且只被图纸空间引用 ⇒ **模型空间导出只出 1 个 `HATCH`**
+  （已断言该丢弃）；acadrust 不能写渐变的 `color_name`/`book_name`（声明损失）。
+
+### 修正与复核结论（P6a 之后）
+
+- **i18n 计数更正**：ADR G 曾写"P6a **0 个**新键"，实际 **+3**（`properties.row.{loops,style,fill}`）——
+  属性行是**穷尽匹配**，新增变体必然新增行 ⇒ **是 ADR 的计数错，不是代码多做的**。i18n 现 **520** 键。
+- **图案复合的证据等级（复核）**：四条断言中**一条是真判别性不变量**（offset 与最终方向**垂直**且幅值按 `scale`
+  缩放——**旧复合会失败**），两条是公式自证，**没有任何**与独立实现/AutoCAD 的比对。⇒ 结论：**可以保留**
+  （它是两种复合法里唯一"定义的**相似变换**"），但**"verified against the fixture" 的说法过强**，
+  统一改为"**用夹具值核对 + 一条形状不变量**"；**U-7 已修但 U-1（生成公式）仍是"我们的实现"**。
+- **样式派发的算术**（复核独立重算）：10×10 / 6×6 / 2×2 ⇒ 区域 64/32/4 ⇒ `Normal={1,3}=68`、`Outer={1}=64`、
+  `Ignore=100`；图案行实际落在 `y = 0,2,4,6,8`（测试注释曾按旧复合写成 1,3,5,7,9，**已修正**），
+  总长 34/32/50 **能区分三种样式与两个差一阈值**。
+- **复核点出的两处未列通配符（已处理）**：`cad-geometry/src/engine.rs::fallback_scale` 补 Hatch 臂
+  （此前落 `_ => 0.0`，采样尺度被静默改变）；`cad-spatial/src/pick/bounds.rs::cached_local_pick_bounds`
+  补 Hatch 臂（此前**精确但未缓存**，与 `Compound`/`Dimension` 不一致）。
+- **仍存的局限（声明）**：`loop_depths` 只探测环的**首点** ⇒ **导入路径上相切环**可能被误判深度、从而误筛
+  `Outer`/`Ignore`（`Normal` 与所有已提交夹具不受影响）；**无渐变夹具** ⇒ `460` 单位（U-13）与渐变方向
+  **无回归覆盖**；**无图形层面的图案保真判据** ⇒ 图案复合只能由上述不变量与合成测试守住。

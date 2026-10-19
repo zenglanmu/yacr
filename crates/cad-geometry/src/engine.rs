@@ -153,8 +153,20 @@ pub(crate) fn fallback_scale(geometry: &SemanticGeometry) -> f64 {
             .iter()
             .map(fallback_scale)
             .fold(0.0f64, f64::max),
-        // Point/Text have no closed extent; Mesh/Insert/Opaque/Shape/Image do
-        // not tessellate to a polyline, so the fallback yields nothing anyway.
+        // A hatch is the same shape (ADR 0018 E): before P6a-1 it was a
+        // `Compound`, so the fallback extent was the children's maximum. The
+        // boundary polylines still carry the hatch's size (the fill mesh does
+        // not tessellate, and the pattern polylines stay inside the boundary),
+        // so keeping the arm preserves the pre-P6a sampling scale instead of
+        // silently falling through to 0.0.
+        G::Hatch(hatch) => hatch
+            .display()
+            .iter()
+            .map(fallback_scale)
+            .fold(0.0f64, f64::max),
+        // Point/Text have no closed extent, and Mesh/Insert/Opaque/Shape/Image
+        // do not tessellate to a polyline here (see `tessellate_geometry`), so
+        // the fallback yields nothing for them anyway.
         _ => 0.0,
     }
 }

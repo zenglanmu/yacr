@@ -183,18 +183,56 @@ fn point_in_ring(p: [f64; 2], ring: &[[f64; 2]]) -> bool {
     inside
 }
 
+/// How many vertices of a loop the containment probe samples.
+const DEPTH_PROBES: usize = 8;
+
 /// Containment count of each loop (0-based; 1-based depth = count + 1).
+///
+/// A loop is counted inside another one when the majority of [`probe_points`]
+/// lies inside it. One probe (the first vertex) is exact for a boundary set
+/// that reached the creation path, because the creation path rejects touching,
+/// crossing and duplicate rings; the import path keeps such sets (ADR B6), and
+/// there the first vertex of a loop can sit exactly on another loop's boundary,
+/// where the even-odd crossing test is arbitrary. Sampling several vertices
+/// spread around the loop keeps one unlucky boundary vertex from flipping an
+/// imported loop's depth and mis-filtering it as `Outer`/`Ignore`.
+///
+/// A ring whose probes split evenly (a partial overlap, which the import path
+/// also keeps) has no single containment answer; the first vertex decides so the
+/// result stays deterministic. This is a display-filter heuristic on the import
+/// path only, not a validity claim.
 pub(super) fn loop_depths(loops: &[HatchLoop]) -> Vec<usize> {
     let mut depths = vec![0usize; loops.len()];
     for (i, loop_) in loops.iter().enumerate() {
-        let Some(probe) = loop_.points.first() else {
-            continue;
-        };
         for (j, other) in loops.iter().enumerate() {
-            if i != j && point_in_ring(*probe, &other.points) {
+            if i != j && ring_is_inside(&loop_.points, &other.points) {
                 depths[i] += 1;
             }
         }
     }
     depths
+}
+
+/// Up to [`DEPTH_PROBES`] vertices evenly spread around the ring, starting at
+/// index 0 (so the first vertex is always probed).
+fn probe_points(ring: &[[f64; 2]]) -> Vec<[f64; 2]> {
+    let len = ring.len();
+    let count = len.min(DEPTH_PROBES);
+    (0..count).map(|k| ring[k * len / count]).collect()
+}
+
+fn ring_is_inside(ring: &[[f64; 2]], container: &[[f64; 2]]) -> bool {
+    let Some(&first) = ring.first() else {
+        return false;
+    };
+    let probes = probe_points(ring);
+    let inside = probes
+        .iter()
+        .filter(|p| point_in_ring(**p, container))
+        .count();
+    if probes.is_empty() || inside * 2 == probes.len() {
+        point_in_ring(first, container)
+    } else {
+        inside * 2 > probes.len()
+    }
 }
