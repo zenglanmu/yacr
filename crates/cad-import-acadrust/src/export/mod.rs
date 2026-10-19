@@ -8,6 +8,7 @@
 
 mod dimension;
 mod entity;
+mod hatch;
 mod report;
 mod tables;
 

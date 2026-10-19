@@ -50,9 +50,8 @@ fn committed_fixtures_report_their_expected_losses() {
             // content-block members, recorded once through the dimension).
             "fixtures/dxf/qcad-flange/flange.dxf",
             &[
-                // HATCH is now a first-class variant; the export slice that
-                // writes a real HATCH follows, so this slice still flattens its
-                // display and reports `export.converted.hatch` (was `compound`).
+                // HATCH exports as a real HATCH record (ADR 0018 C) and declares
+                // its conversions under one code (was `compound` before P6a).
                 "export.converted.dimension",
                 "export.converted.hatch",
                 "export.dropped.paper_space",

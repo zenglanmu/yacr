@@ -199,6 +199,30 @@
       ]
     },
     {
+      "id": "synthetic-hatch-multi-style",
+      "path": "fixtures/dxf/hatch-styles/multi-style.dxf",
+      "sha256": "585318c86bb031c2f9b8851c75ebe017711ee8de39266fe5bb203119468e771a",
+      "dwg_version": "AC1015 (ASCII DXF)",
+      "source": "synthetic, hand-authored ASCII DXF in this repository: a HEADER ($ACADVER/$INSUNITS) plus three edge-form HATCH records under ENTITIES, written out group by group in the ADR 0018 C order",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "HATCH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "Every committed QCAD fixture hatch is style 75=0, so the Outer (75=1) and Ignore (75=2) styles can only be exercised by this synthetic file; it is not vendor compatibility evidence.",
+        "Hatch 1 is a three-level nested set (100x100, 20..80, 40..60) with 75=1; hatch 2 repeats it with 75=2; hatch 3 has two disjoint 10x10 outer loops with 75=0.",
+        "All three HATCHes are SOLID with 76=1, empty seed lists and no derived boundary, so group 47 and the gradient block are absent.",
+        "Hand-written group codes are only as trustworthy as the parser that reads them; the fixture pins our importer/exporter agreement, not a third-party reader."
+      ]
+    },
+    {
       "id": "qcad-flange-dxf",
       "path": "fixtures/dxf/qcad-flange/flange.dxf",
       "sha256": "df469e7e91e38c901fced51c9621c8d2b6b6568678803e563b29c9ecf8dec84b",

@@ -238,31 +238,6 @@ pub(super) fn emit(
             );
             Ok(())
         }
-        // Interim: a first-class HATCH is not written as a `HATCH` yet (the
-        // export slice follows). Its derived display is flattened exactly like
-        // the compound it replaced, so this slice does not change the exported
-        // geometry for an imported hatch; the definition itself is lost and the
-        // report says so.
-        SemanticGeometry::Hatch(hatch) => {
-            let object = Some(entity.object.id);
-            for child in hatch.display() {
-                let child_entity = DbEntity {
-                    geometry: child.clone(),
-                    ..entity.clone()
-                };
-                emit(doc, &child_entity, transform, depth, ctx, acc, stack)?;
-            }
-            acc.record(
-                object,
-                "hatch",
-                MappingOutcome::Converted(vec![
-                    "hatch flattened into its display geometry; native HATCH export is not \
-                     implemented yet (style/pattern definition not written)"
-                        .into(),
-                ]),
-            );
-            Ok(())
-        }
         leaf => {
             let owned;
             let placed: &SemanticGeometry = if transform == &Transform3::identity() {
@@ -555,16 +530,17 @@ fn emit_leaf(
         SemanticGeometry::Dimension(dimension) => {
             super::dimension::emit_dimension(doc, entity, dimension, ctx, acc)?;
         }
-        // Insert, Compound and Hatch are handled before this point; a leaf here
-        // would be a programming error, and must not be silently dropped.
-        SemanticGeometry::Insert { .. }
-        | SemanticGeometry::Compound(_)
-        | SemanticGeometry::Hatch(_) => {
+        SemanticGeometry::Hatch(hatch) => {
+            super::hatch::emit_hatch(doc, entity, hatch, ctx, acc)?;
+        }
+        // Insert and Compound are handled before this point; a leaf here would be
+        // a programming error, and must not be silently dropped.
+        SemanticGeometry::Insert { .. } | SemanticGeometry::Compound(_) => {
             acc.record(
                 object,
                 "internal",
                 MappingOutcome::Dropped(vec![
-                    "insert/compound/hatch reached the leaf mapper; not emitted".into(),
+                    "insert/compound reached the leaf mapper; not emitted".into(),
                 ]),
             );
         }

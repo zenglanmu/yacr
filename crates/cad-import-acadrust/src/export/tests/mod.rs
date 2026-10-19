@@ -22,6 +22,7 @@ use crate::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 mod dimension;
 mod dimension_radial;
 mod entities;
+mod hatch;
 mod report_limits;
 mod writer;
 

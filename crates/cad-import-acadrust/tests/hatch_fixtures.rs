@@ -70,3 +70,27 @@ fn isometric_grid_hatches_import_as_hatch_with_their_loop_counts() {
     assert_eq!(hatch_loop_counts(&database), vec![1, 9]);
     assert_all_hatch_type_keys(&database);
 }
+
+#[test]
+fn the_synthetic_multi_style_fixture_carries_both_non_default_styles() {
+    // Every QCAD fixture hatch is style 75=0, so Outer/Ignore are only covered
+    // by this synthetic drawing (ADR 0018 G.4/N5).
+    let database = import("fixtures/dxf/hatch-styles/multi-style.dxf");
+    assert_eq!(hatch_loop_counts(&database), vec![2, 3, 3]);
+    assert_all_hatch_type_keys(&database);
+    let styles: Vec<cad_domain::HatchStyle> = database
+        .entities()
+        .filter_map(|entity| match &entity.geometry {
+            SemanticGeometry::Hatch(hatch) => Some(hatch.style()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        styles.contains(&cad_domain::HatchStyle::Outer),
+        "{styles:?}"
+    );
+    assert!(
+        styles.contains(&cad_domain::HatchStyle::Ignore),
+        "{styles:?}"
+    );
+}
