@@ -25,6 +25,7 @@ impl Application {
             CommandId::ArrayRectangular => self.array_rect(session, command),
             CommandId::ArrayPolar => self.array_polar(session, command),
             CommandId::AlignEntities => self.align_entities(session, command),
+            CommandId::StretchEntities => self.stretch_entities(session, command),
             CommandId::EraseEntities => self.erase_entities(session, command),
             CommandId::CopyEntities => self.copy_entities(command),
             CommandId::RotateEntities => self.rotate_entities(command),

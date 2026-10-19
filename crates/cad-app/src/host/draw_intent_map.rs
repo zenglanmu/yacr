@@ -6,7 +6,7 @@
 //! inherent method on [`HostController`] so the call sites in `host/mod.rs` are
 //! unchanged.
 
-use cad_domain::{CadResult, SelectionRef};
+use cad_domain::{CadError, CadResult, Point3, SelectionRef};
 
 use crate::{Command, DrawIntent};
 
@@ -208,6 +208,19 @@ impl HostController {
                     dest2,
                 },
             ),
+            // STRETCH: the two captured window corners are mapped back to canvas
+            // logical coordinates (the `BoxSelect` convention the payload uses),
+            // and the base/displacement points travel as world coordinates. The
+            // command maps the logical corners through the orthographic plan view
+            // and recomputes the enclosure classification.
+            DrawIntent::Stretch { rect, base, delta } => (
+                crate::CommandId::StretchEntities,
+                crate::CommandPayload::Stretch {
+                    rect_logical: self.world_rect_to_logical(rect)?,
+                    base,
+                    delta,
+                },
+            ),
         };
         Ok(Command {
             schema_version: 1,
@@ -216,5 +229,34 @@ impl HostController {
             viewport: self.viewport_id,
             payload,
         })
+    }
+
+    /// Map the two captured STRETCH window corners from world coordinates back to
+    /// canvas logical pixels (the convention [`crate::CommandPayload::Stretch`]
+    /// uses, matching `BoxSelect`/`ZoomAt`).
+    ///
+    /// The captured corners are world points, so they must be projected through
+    /// the active viewport. A perspective/3D view has no plan mapping and is an
+    /// explicit `Unsupported` (3D STRETCH is NOT IMPLEMENTED); a missing viewport
+    /// is an explicit `InvalidInput`. This is a pure projection: no database
+    /// write, no history.
+    fn world_rect_to_logical(&self, rect: [Point3; 2]) -> CadResult<[[f64; 2]; 2]> {
+        let viewport = self
+            .application
+            .workspace
+            .viewports
+            .get(&self.viewport_id)
+            .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+        let size = viewport.logical_size;
+        let mut out = [[0.0; 2]; 2];
+        for (slot, world) in out.iter_mut().zip(rect) {
+            *slot = viewport
+                .camera
+                .world_to_screen(world, size)
+                .ok_or_else(|| {
+                    CadError::Unsupported("STRETCH requires the orthographic plan view".into())
+                })?;
+        }
+        Ok(out)
     }
 }

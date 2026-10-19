@@ -104,9 +104,12 @@ pub fn draw_preview_overlay(
         // on the session parameters plus the selection, not on the cursor.
         | DrawToolKind::ArrayRect
         | DrawToolKind::ArrayPolar
-        // ALIGN captures four free points (two source/destination pairs); the live
-        // preview is the existing cursor/chain (no new overlay channel).
-        | DrawToolKind::Align => {
+        // ALIGN captures four free points (two source/destination pairs); STRETCH
+        // captures four free points (two window corners plus a base and a
+        // displacement point). Both use the existing cursor/chain preview (no new
+        // overlay channel).
+        | DrawToolKind::Align
+        | DrawToolKind::Stretch => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

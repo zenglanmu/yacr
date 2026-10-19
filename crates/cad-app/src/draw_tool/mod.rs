@@ -309,6 +309,19 @@ pub enum DrawIntent {
         source2: Point3,
         dest2: Point3,
     },
+    /// STRETCH the entities inside a crossing window (ADR 0016 decision E).
+    ///
+    /// The four points are the four clicks in AutoCAD's order: the two opposite
+    /// corners of the crossing window (`rect`), the base point, then the
+    /// displacement point. All four are **world** points exactly as captured;
+    /// the effective translation is `delta − base`. The window is always
+    /// CROSSING and the enclosure classification is recomputed by the command
+    /// layer from the rectangle and the geometry (never carried here).
+    Stretch {
+        rect: [Point3; 2],
+        base: Point3,
+        delta: Point3,
+    },
 }
 
 /// Drawing/editing capture state machine.
@@ -706,6 +719,15 @@ impl DrawTool {
                 dest1: self.points[1],
                 source2: self.points[2],
                 dest2: self.points[3],
+            },
+            // STRETCH: the two window corners, the base point and the displacement
+            // point, exactly as captured (the enclosure classification and the
+            // effective translation live in the command layer, so the intent stays
+            // the pure description of what the user clicked).
+            DrawToolKind::Stretch => DrawIntent::Stretch {
+                rect: [self.points[0], self.points[1]],
+                base: self.points[2],
+                delta: self.points[3],
             },
         })
     }

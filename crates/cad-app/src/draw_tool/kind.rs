@@ -262,13 +262,39 @@ pub enum DrawToolKind {
     /// exactly MOVE, and the `PointArity` model cannot express AutoCAD's
     /// even-point "2 or 4 points" prompt — see ADR 0016 decision F).
     Align,
+    /// STRETCH: the two opposite corners of a **crossing window**, then a base
+    /// point and a displacement point (`Exact(4)`, no entity picks; ADR 0016
+    /// decision E).
+    ///
+    /// The window itself defines the affected set, so this kind
+    /// [`DrawToolKind::requires_selection`] is **false**. The window is always
+    /// treated as **CROSSING** (AutoCAD requires a crossing window; cpolygon and
+    /// lasso selection are NOT IMPLEMENTED). The enclosure classification
+    /// (fully enclosed ⇒ whole-entity move; partially enclosed ⇒ per-vertex
+    /// stretch) is recomputed by the command layer from the rectangle and the
+    /// geometry, never stored here.
+    ///
+    /// The two window corners are captured as world points (the same free-point
+    /// capture every drawing tool uses); the host maps them back to canvas
+    /// logical corners for the payload's `rect_logical`, which the command maps
+    /// through the orthographic plan view exactly like `BoxSelect`.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): cpolygon/lasso selection,
+    /// the "select an object directly ⇒ move it whole" clause, stretching of
+    /// `TEXT`/`SPLINE`/`ARC`/`HATCH`/`INSERT` (TEXT fails the whole command;
+    /// the others are move-only when fully enclosed and unchanged when
+    /// partially enclosed), 3D, and width/tangency edits (polyline width is not
+    /// modelled). The bulge-preservation rule for a dragged bulge-segment
+    /// endpoint is **UNVERIFIED** (Autodesk does not document it) and is our
+    /// declared choice.
+    Stretch,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 22] = [
+    pub const ALL: [DrawToolKind; 23] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -291,6 +317,7 @@ impl DrawToolKind {
         DrawToolKind::ArrayRect,
         DrawToolKind::ArrayPolar,
         DrawToolKind::Align,
+        DrawToolKind::Stretch,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -318,6 +345,7 @@ impl DrawToolKind {
             Self::ArrayRect => "arrayrect",
             Self::ArrayPolar => "arraypolar",
             Self::Align => "align",
+            Self::Stretch => "stretch",
         }
     }
 
@@ -347,6 +375,7 @@ impl DrawToolKind {
             "arrayrect" => Some(Self::ArrayRect),
             "arraypolar" => Some(Self::ArrayPolar),
             "align" => Some(Self::Align),
+            "stretch" => Some(Self::Stretch),
             _ => None,
         }
     }
@@ -412,6 +441,11 @@ impl DrawToolKind {
             // literals on the Rust side and the shell substitutes the catalog label
             // for chrome anyway.
             Self::Align => "ALIGN",
+            // STRETCH uses a locale-neutral ASCII fallback label, exactly like
+            // POINT/SPLINE/CHAMFER/FILLET/ARRAY*/ALIGN: the ADR fence forbids new
+            // CJK literals on the Rust side and the shell substitutes the catalog
+            // label for chrome anyway.
+            Self::Stretch => "STRETCH",
         }
     }
 
@@ -427,8 +461,10 @@ impl DrawToolKind {
             // other-axis distance; or base, reference, target.
             Self::Arc | Self::Ellipse | Self::Scale => PointArity::Exact(3),
             // ALIGN: the first source point, its destination, then the second
-            // source point and its destination (ADR 0016 decision F).
-            Self::Align => PointArity::Exact(4),
+            // source point and its destination (ADR 0016 decision F). STRETCH: the
+            // two opposite corners of the crossing window, then the base point and
+            // the displacement point (ADR 0016 decision E).
+            Self::Align | Self::Stretch => PointArity::Exact(4),
             // One side/distance point, one point placement, or the ARRAYPOLAR
             // centre.
             Self::Offset | Self::Point | Self::ArrayPolar => PointArity::Exact(1),

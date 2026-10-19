@@ -240,6 +240,7 @@ impl Application {
             | CommandId::ArrayRectangular
             | CommandId::ArrayPolar
             | CommandId::AlignEntities
+            | CommandId::StretchEntities
             | CommandId::EraseEntities
             | CommandId::CopyEntities
             | CommandId::RotateEntities

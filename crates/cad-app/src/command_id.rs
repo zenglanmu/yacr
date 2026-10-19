@@ -168,6 +168,16 @@ pub enum CommandId {
     /// selection or untransformable geometry is an explicit refusal that changes
     /// nothing. Work-only.
     AlignEntities,
+    /// STRETCH the entities inside a **crossing window**: a fully enclosed entity
+    /// is translated by the displacement; a partially enclosed LINE/LWPOLYLINE
+    /// has only its in-window vertices moved (bulge preserved, UNVERIFIED). The
+    /// window is always CROSSING (AutoCAD requires one); the enclosure
+    /// classification is recomputed from the rectangle and the geometry — never
+    /// stored in the selection. Payload is
+    /// `Stretch { rect_logical, base, delta }`. One transaction and one undo
+    /// step for the whole command; an in-window entity that cannot be handled
+    /// fails the whole command (nothing written). Work-only.
+    StretchEntities,
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
@@ -239,6 +249,7 @@ impl CommandId {
                 | Self::ArrayRectangular
                 | Self::ArrayPolar
                 | Self::AlignEntities
+                | Self::StretchEntities
                 | Self::EraseEntities
                 | Self::CopyEntities
                 | Self::RotateEntities

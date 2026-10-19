@@ -332,6 +332,7 @@ impl SessionState {
             DrawToolKind::ArrayRect => CommandId::ArrayRectangular,
             DrawToolKind::ArrayPolar => CommandId::ArrayPolar,
             DrawToolKind::Align => CommandId::AlignEntities,
+            DrawToolKind::Stretch => CommandId::StretchEntities,
         })?;
         let selection = self.selection.refs().to_vec();
         let tool = DrawTool::new(kind, selection.len());

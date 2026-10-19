@@ -15,6 +15,7 @@ mod draw_pick;
 mod polygon;
 mod snap;
 mod status;
+mod stretch;
 mod toggles;
 mod tool_parameter;
 mod tools;

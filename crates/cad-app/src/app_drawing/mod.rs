@@ -35,6 +35,7 @@ mod drawing_create;
 mod drawing_edit;
 mod drawing_transform;
 mod helpers;
+mod stretch;
 mod trim_extend;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};

@@ -285,4 +285,5 @@ mod rectangle;
 mod reports;
 mod selection_reconcile;
 mod spline;
+mod stretch;
 mod transform;

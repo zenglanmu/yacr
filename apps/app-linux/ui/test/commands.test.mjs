@@ -32,7 +32,7 @@ const HOST_NAMES = [
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'MOVE', 'TRIM',
-  'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'ERASE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
+  'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'OSNAP',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
   'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT',
@@ -511,6 +511,46 @@ test('ALIGN is a modify affordance in the ribbon and catalog, enabled only by ro
   assert.equal(typeof zh['tool.draw.align'], 'string');
   assert.equal(typeof en['tool.draw.align'], 'string');
   assert.equal(toolLabelKey('draw.align'), 'tool.draw.align');
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(ribbon.includes('if (item.command) return shell.runCommand(item.command);'));
+});
+
+test('STRETCH is a modify affordance in the ribbon and catalog, enabled only by router admission', async () => {
+  const { readModule, readCatalog } = await import('./helpers.mjs');
+  const id = 'STRETCH';
+  const entry = COMMAND_CATALOG.find(command => command.id === id);
+  assert.ok(entry, `${id} must be in the command catalog`);
+  assert.equal(entry.labelKey, 'draw.kind.stretch');
+  assert.equal(entry.icon, 'stretch');
+  assert.equal(entry.group, 'modify');
+  // Placed with the other modify actions on the Home and Draw tabs.
+  for (const tabId of ['home', 'draw']) {
+    const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
+    assert.ok(modify, `${tabId} must keep its modify panel`);
+    const item = modify.items.find(candidate => candidate.id === id);
+    assert.ok(item, `${tabId}/modify must carry the ${id} affordance`);
+    assert.equal(item.command, id);
+    assert.equal(item.labelKey, 'draw.kind.stretch');
+    assert.equal(item.action, undefined, `${id} must not be a local shell action`);
+  }
+  // The measurement panel never dispatches it.
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  assert.equal(measurePanel.items.some(item => item.command === id), false);
+  // Router admission is the single enable gate.
+  assert.equal(isSupportedCommand(id), true, id);
+  assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand(id), false, id);
+  assert.equal(admitCommandText(id, { status: loaded }).kind, 'unsupported', id);
+  setCommandCatalog(HOST_NAMES);
+  // The catalog keys resolve in both catalogs, including the active-tool chip.
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  assert.equal(typeof zh['draw.kind.stretch'], 'string');
+  assert.equal(typeof en['draw.kind.stretch'], 'string');
+  assert.equal(typeof zh['tool.draw.stretch'], 'string');
+  assert.equal(typeof en['tool.draw.stretch'], 'string');
+  assert.equal(toolLabelKey('draw.stretch'), 'tool.draw.stretch');
   const ribbon = await readModule('components/Ribbon.jsx');
   assert.ok(ribbon.includes('if (item.command) return shell.runCommand(item.command);'));
 });

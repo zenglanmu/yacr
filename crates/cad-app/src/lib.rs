@@ -458,6 +458,26 @@ pub enum CommandPayload {
         source2: Point3,
         dest2: Point3,
     },
+    /// STRETCH the entities inside a crossing window (ADR 0016 decision E).
+    ///
+    /// `rect_logical` is the two opposite corners of the **crossing window** in
+    /// **canvas logical pixels** — the same convention as
+    /// [`CommandPayload::BoxSelect`] and [`CommandPayload::ZoomAt`]; the command
+    /// maps them through the active viewport's orthographic work plane and
+    /// recomputes the enclosure classification from the rectangle and the
+    /// geometry (it is **never** stored in the selection: single source of
+    /// truth). The window is **always treated as CROSSING** (AutoCAD requires a
+    /// crossing window; cpolygon/lasso are NOT IMPLEMENTED).
+    ///
+    /// `base` is the captured base point and `delta` the captured displacement
+    /// point, both world coordinates; the effective translation is
+    /// `delta − base`. A zero displacement (`delta == base`) is refused rather
+    /// than a silent no-op.
+    Stretch {
+        rect_logical: [[f64; 2]; 2],
+        base: Point3,
+        delta: Point3,
+    },
     /// Set the session's active layer for new entities. Session state only.
     ActiveLayer(LayerId),
     /// A fully formed semantic geometry, used by `CreateLine` as the

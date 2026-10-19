@@ -39,7 +39,7 @@ fn required_points_and_selection_are_explicit_per_kind() {
     for kind in DrawToolKind::ALL {
         let expected = match kind {
             DrawToolKind::Arc | DrawToolKind::Ellipse | DrawToolKind::Scale => 3,
-            DrawToolKind::Spline | DrawToolKind::Align => 4,
+            DrawToolKind::Spline | DrawToolKind::Align | DrawToolKind::Stretch => 4,
             DrawToolKind::Offset | DrawToolKind::Point | DrawToolKind::ArrayPolar => 1,
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot.
@@ -80,6 +80,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
     assert!(DrawToolKind::Scale.requires_selection());
     assert!(DrawToolKind::Mirror.requires_selection());
     assert!(DrawToolKind::Offset.requires_selection());
+    // STRETCH is Exact(4) with no entity picks; the window itself defines the set.
+    assert_eq!(DrawToolKind::Stretch.arity(), PointArity::Exact(4));
+    assert!(!DrawToolKind::Stretch.requires_selection());
+    assert!(!DrawToolKind::Stretch.needs_picked_entities());
 }
 
 #[test]

@@ -193,6 +193,7 @@ impl CadSession {
     /// | `SPLINE` | `BeginDraw(Spline)` |
     /// | `ARRAYRECT` / `ARRAYPOLAR` | `BeginDraw(ArrayRect)` / `BeginDraw(ArrayPolar)` |
     /// | `ALIGN` | `BeginDraw(Align)` |
+    /// | `STRETCH` | `BeginDraw(Stretch)` |
     /// | `MEASURE` / `DIST` | `BeginMeasurement(Distance)` |
     /// | `MEASUREPOLYLINE` | `BeginMeasurement(PolylineLength)` |
     /// | `MEASUREANGLE` | `BeginMeasurement(Angle)` |
@@ -273,6 +274,9 @@ impl CadSession {
             }
             CommandId::ArrayPolar => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayPolar)),
             CommandId::AlignEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Align)),
+            CommandId::StretchEntities => {
+                Some(InteractionRequest::BeginDraw(DrawToolKind::Stretch))
+            }
             CommandId::Measure => Some(InteractionRequest::BeginMeasurement(
                 MeasurementToolKind::Distance,
             )),

@@ -66,24 +66,24 @@ impl MatchPath {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Rect {
+pub(crate) struct Rect {
     min: (f64, f64),
     max: (f64, f64),
 }
 
 impl Rect {
-    fn from_corners(a: Point3, b: Point3) -> Self {
+    pub(crate) fn from_corners(a: Point3, b: Point3) -> Self {
         Rect {
             min: (a.x.min(b.x), a.y.min(b.y)),
             max: (a.x.max(b.x), a.y.max(b.y)),
         }
     }
 
-    fn width(self) -> f64 {
+    pub(crate) fn width(self) -> f64 {
         self.max.0 - self.min.0
     }
 
-    fn height(self) -> f64 {
+    pub(crate) fn height(self) -> f64 {
         self.max.1 - self.min.1
     }
 
@@ -97,7 +97,7 @@ impl Rect {
         )
     }
 
-    fn contains_point(self, point: Point3) -> bool {
+    pub(crate) fn contains_point(self, point: Point3) -> bool {
         point.x >= self.min.0
             && point.x <= self.max.0
             && point.y >= self.min.1
@@ -105,7 +105,7 @@ impl Rect {
     }
 
     /// Whether a conservative world AABB is fully inside (WINDOW).
-    fn contains_aabb(self, min: Point3, max: Point3) -> bool {
+    pub(crate) fn contains_aabb(self, min: Point3, max: Point3) -> bool {
         min.x >= self.min.0 && max.x <= self.max.0 && min.y >= self.min.1 && max.y <= self.max.1
     }
 
@@ -312,6 +312,20 @@ fn crossing_path(
         }
     };
     classify_world(&world, rect)
+}
+
+/// Whether a geometry (with its transform) intersects or touches the rectangle,
+/// reusing the exact CROSSING hit test.
+///
+/// This is the shared "partial" predicate for the STRETCH enclosure classifier
+/// (ADR 0016 decision E): STRETCH must not keep a second, drifting copy of the
+/// crossing test, so the two commands consume one implementation.
+pub(crate) fn geometry_hits_rect(
+    geometry: &SemanticGeometry,
+    transform: &Transform3,
+    rect: Rect,
+) -> bool {
+    crossing_path(geometry, transform, rect).is_some()
 }
 
 /// Classify a geometry already in world coordinates against the rectangle.
