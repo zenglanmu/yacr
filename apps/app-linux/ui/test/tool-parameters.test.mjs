@@ -67,8 +67,12 @@ test('the parameter group renders only for an active tool with a projected value
 });
 
 test('the per-tool map and the spec table stay consistent', () => {
-  // Only POLYGON is reachable today; its row is the one live control.
+  // POLYGON and HATCH are reachable today; HATCH's row is its five parameters.
   assert.deepEqual(TOOL_PARAMETERS['draw.polygon'], { command: 'POLYGON', keys: ['polygonSides'] });
+  assert.deepEqual(TOOL_PARAMETERS['draw.hatch'], {
+    command: 'HATCH',
+    keys: ['hatchPatternType', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle'],
+  });
   // Every key a tool maps to has a spec, and every spec is reachable through the
   // map — so a later phase only adds a row (the specs already exist).
   const mapped = new Set();
@@ -83,10 +87,12 @@ test('the per-tool map and the spec table stay consistent', () => {
   assert.deepEqual(Object.keys(TOOL_PARAMETER_SPECS).sort(), [
     'alignScale', 'arrayColumnSpacing', 'arrayColumns', 'arrayFillAngle', 'arrayItems',
     'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'chamferDistanceA',
-    'chamferDistanceB', 'filletRadius', 'polygonSides',
+    'chamferDistanceB', 'filletRadius', 'hatchAngle', 'hatchDouble',
+    'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'polygonSides',
   ]);
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');
   assert.equal(TOOL_PARAMETER_SPECS.arrayRotateItems.kind, 'flag');
+  assert.equal(TOOL_PARAMETER_SPECS.hatchDouble.kind, 'flag');
 });
 
 test('a numeric step dispatches exactly one cad_set_tool_parameter with {parameter, number}', async () => {

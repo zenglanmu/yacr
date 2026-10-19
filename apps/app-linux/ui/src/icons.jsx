@@ -71,6 +71,13 @@ const P = {
   rectang: <><rect x="4" y="6" width="16" height="12" /><circle cx="4" cy="6" r="1.5" /><circle cx="20" cy="18" r="1.5" /></>,
   ellipse: <><ellipse cx="12" cy="12" rx="9" ry="5.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="3" cy="12" r="1.4" /><circle cx="21" cy="12" r="1.4" /></>,
   polygon: <><path d="M12 3.5 19.5 9l-2.9 8.8H7.4L4.5 9z" /><circle cx="12" cy="12" r="1.2" /><circle cx="12" cy="3.5" r="1.4" /></>,
+  // Hatch: a closed boundary holding three parallel diagonal fill lines, the
+  // conventional picture of a line-pattern fill. The loop is a rounded square so
+  // it never reads as `rectang` (sharp rectangle with corner grips) or `polygon`
+  // (regular pentagon with vertex/centre dots), the diagonals stay clipped to the
+  // loop, and there is no dimension line, tick or arrowhead, so it cannot be
+  // mistaken for a dimension glyph.
+  hatch: <><rect x="4" y="4" width="16" height="16" rx="1.5" /><path d="M4 10 10 4" /><path d="M4 18 18 4" /><path d="M10 20 20 10" /></>,
   point: <><circle cx="12" cy="12" r="2.2" /><path d="M12 4v4M12 16v4M4 12h4M16 12h4" /></>,
   spline: <><path d="M3 16c3-7 6 7 9 0s6-7 9 0" /><circle cx="3" cy="16" r="1.4" /><circle cx="12" cy="16" r="1.4" /><circle cx="21" cy="16" r="1.4" /></>,
   angle: <><path d="M4 19h16M4 19 16 5" /><path d="M12 19a8 8 0 0 0-2-5.3" /></>,

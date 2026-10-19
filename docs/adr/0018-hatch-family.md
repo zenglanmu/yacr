@@ -342,3 +342,35 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
 - **仍存的局限（声明）**：`loop_depths` 只探测环的**首点** ⇒ **导入路径上相切环**可能被误判深度、从而误筛
   `Outer`/`Ignore`（`Normal` 与所有已提交夹具不受影响）；**无渐变夹具** ⇒ `460` 单位（U-13）与渐变方向
   **无回归覆盖**；**无图形层面的图案保真判据** ⇒ 图案复合只能由上述不变量与合成测试守住。
+
+### P6b（`HATCH` 创建：预选闭合实体，提交 6dbf536）
+
+- **命令面**：`CommandId::Hatch` 贯通（`COMMAND_TABLE` 选择子 `HATCH`，`EXPECTED_COMMAND_COUNT` **67 → 68**）。
+- **形态 = 预选**：`DrawToolKind::Hatch` 用 `arity() = Exact(0)` + `requires_selection() = true`（与 `ARRAY`/`MOVE` 同型），
+  `picked_step_count() = 0` ⇒ **未引入新的捕获状态机**（ADR 原标注的"最大实现风险"确实消失）。
+- **参数**：走**唯一** `ToolParameter` 通道（不新增第二套请求类型）——`hatchPatternType`（`0` 实心 / `1` 用户自定义）、
+  `hatchSpacing`（有限且 **> 0**，默认 `1.0`）、`hatchAngle`（**通道用度**、域内弧度；有限、**不做取模**）、
+  `hatchDouble`（标志）、`hatchStyle`（`0` Normal / `1` Outer / `2` Ignore）；每参数**具名校验**并列出可接受集合。
+- **边界**：`Circle`、完整 `Ellipse`、**闭合** `Polyline`；每个实体成一环；**全部共面**（`dot(p,n) = elevation` 容差
+  `1e-9·(1+|p|)`）；**圆/椭圆另须法向一致**（反向拒绝），折线只要求共面。
+- **创建走 `HatchGeometry::new`** ⇒ A.3 的拒绝面（自交/相切/重复/部分重叠/未闭合/退化/非有限）为**整命令拒绝且不开事务**。
+- **用户自定义图案**：与导入侧 `import_pattern` **同一条合成规则**（一行 `angle 0, offset (0,1)`、`scale = spacing`、`double`、
+  实体级 `52 = angle`），图案名用不透明 `"USER"`（无图案表）；**实心**记 `pattern_type = Predefined` 以与已提交 SOLID 夹具一致。
+- **其它**：边界实体**保留**（无关联性/`DELOBJ`）、种子为空、`pixel_size = None`、环 flags 仅 `POLYLINE`
+  （`EXTERNAL` 不由我们推导；嵌套仍按几何重算）；插入走单一漏斗，`type_key`/`class_name` = **`AcDbHatch`**，
+  一条事务/一步撤销/活动图层。
+
+#### 与决策 D 的**更正**（实施中发现，必须写明）
+
+1. **圆的环是 4 段精确圆弧，不是 ADR 原写的"两点带 bulge"**。原因：**已提交的校验器**要求环 **≥3 个顶点**、
+   且 `ring_degenerate` 按**弦**测面积 ⇒ 两点环必然被判退化。故圆用**四个象限顶点 + `bulge = tan(π/8)`**（四段精确
+   四分之一弧），**仍是精确圆**、**仍导出为精确的 bulge 折线边界**；`source_edges = None`。
+   把校验器改成 bulge 感知（含 `rings_touch`/`loop_depths`）是**大得多且未经复核的语义改动**，本相不做。
+2. **椭圆按 64/圈采样**（真椭圆不是圆弧，用 bulge 会是**假**几何）；**椭圆弧不是闭合环 ⇒ 拒绝**。
+3. **折线**须 `closed == true` 且 ≥3 顶点；3D 折线共面时接受；其自身 2D 点与 bulge 保留。
+4. **声明局限**：创建校验基于**弦**，两段 bulge 环的**弦之间**相切可能漏检（"精确圆接触但其内接正方形相切"会被拒绝并有测试）。
+5. **参数单位**：通道**度**、域**弧度**——与 P5e 的度/弧度事故同类陷阱，此处显式分层并在测试中钉住。
+6. **未实现项**（与决策 D 一致，且 UI 不得暗示）：内部点求边界、LINE 拼接、预定义图案名、渐变创建、关联性、
+   **真正的填充预览**（`preview.rs` 对 `Hatch` 明确返回无预览链）。
+7. **i18n**：P6b **+14 键**（`draw.kind.hatch`、`tool.draw.hatch`、`tool.prompt.hatch.{select_boundary,ready}`、
+   `status.tool_parameter.hatch_{pattern_type,spacing,angle,double,style}` + `.hint`），两目录一致；总数 **534**。

@@ -66,6 +66,11 @@ export const RIBBON_TABS = Object.freeze([
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },
+          // HATCH closes the draw group, the way AutoCAD's Draw panel puts Hatch
+          // at its end. It is a small button: unlike LINE/CIRCLE it is not a
+          // primary creation tool, and it has no variant popover (the unimplemented
+          // pattern-name/gradient forms must not appear as menu entries).
+          { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', command: 'HATCH' },
         ],
       },
       {
@@ -135,6 +140,9 @@ export const RIBBON_TABS = Object.freeze([
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },
+          // Same draw-group tail on the Draw tab: Hatch stays the last draw
+          // command, and the small-button decision matches the Home panel.
+          { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', command: 'HATCH' },
         ],
       },
       {

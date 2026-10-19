@@ -168,6 +168,14 @@ const integerInRange = (min, max) => value => Number.isSafeInteger(value) && val
 const integerAtLeast = min => value => Number.isSafeInteger(value) && value >= min;
 const finiteAtLeast = min => value => Number.isFinite(value) && value >= min;
 const finiteAny = () => value => Number.isFinite(value);
+const finiteAbove = low => value => Number.isFinite(value) && value > low;
+// A closed set of integer codes (HATCH pattern type / style). The host refuses a
+// code outside the set rather than clamping, so only the listed codes are offered.
+const integerIn = (...values) => value => Number.isSafeInteger(value) && values.includes(value);
+const closedSet = (...values) => Object.freeze({
+  choices: Object.freeze([...values]),
+  offered: integerIn(...values),
+});
 // Finite, non-zero and within a single turn (0 < |angle| <= 360): 360/-360 (the
 // full-circle default) ARE offered targets, while 0 and anything beyond a turn
 // (±720, …) are refused — a fill angle is always an explicitly-bounded sweep.
@@ -185,6 +193,11 @@ const partialTurn = () => value => Number.isFinite(value) && value !== 0 && Math
  *   by 1; the fill angle steps by 15°);
  * - `offered`   — the host's own predicate: whether the host would **accept** a
  *   value as a target (the stepper never offers a value this rejects);
+ * - `choices`   — for a closed-set numeric parameter, the exact integer codes the
+ *   host accepts (and therefore the only ones the stepper can reach). It is
+ *   machine metadata, not copy: the status bar has no choice control and the
+ *   catalog carries no per-choice label keys, so the choice names are spoken by
+ *   the parameter's `hintKey` ("0 Normal, 1 Outer, 2 Ignore");
  * - `projectable` — whether a value from `cad_status` may be **rendered**. It
  *   defaults to `offered` (an out-of-range projection is a contract violation and
  *   renders nothing), so no parameter currently overrides it;
@@ -262,22 +275,68 @@ export const TOOL_PARAMETER_SPECS = Object.freeze({
     labelKey: 'status.tool_parameter.array_rotate_items',
     hintKey: 'status.tool_parameter.array_rotate_items.hint',
   },
+  // HATCH (ADR 0018 decision D, P6b). The five rows mirror
+  // `cad_app::draw_tool::parameter`: the two closed sets use `choices` so the
+  // stepper can only reach the implemented codes, spacing must be finite and
+  // strictly positive, the angle is any finite number of degrees (no implicit
+  // wrap — the host accepts it as typed) and `double` is a flag. Predefined
+  // pattern names, gradients and associativity have no parameter here because
+  // they are not implemented; nothing in this table may imply otherwise.
+  hatchPatternType: {
+    kind: 'number', statusKey: 'hatchPatternType', step: 1,
+    ...closedSet(0, 1),
+    labelKey: 'status.tool_parameter.hatch_pattern_type',
+    hintKey: 'status.tool_parameter.hatch_pattern_type.hint',
+  },
+  hatchSpacing: {
+    // A real length: the 1-unit step every other length uses would make every
+    // spacing below the default 1 unreachable, so this one steps by 0.5. The
+    // host accepts any finite spacing > 0; the stepper cannot enter arbitrary
+    // decimals (there is no free-entry field).
+    kind: 'number', statusKey: 'hatchSpacing', step: 0.5,
+    offered: finiteAbove(0),
+    labelKey: 'status.tool_parameter.hatch_spacing',
+    hintKey: 'status.tool_parameter.hatch_spacing.hint',
+  },
+  hatchAngle: {
+    kind: 'number', statusKey: 'hatchAngle', step: 15,
+    offered: finiteAny(),
+    labelKey: 'status.tool_parameter.hatch_angle',
+    hintKey: 'status.tool_parameter.hatch_angle.hint',
+  },
+  hatchDouble: {
+    kind: 'flag', statusKey: 'hatchDouble',
+    labelKey: 'status.tool_parameter.hatch_double',
+    hintKey: 'status.tool_parameter.hatch_double.hint',
+  },
+  hatchStyle: {
+    kind: 'number', statusKey: 'hatchStyle', step: 1,
+    ...closedSet(0, 1, 2),
+    labelKey: 'status.tool_parameter.hatch_style',
+    hintKey: 'status.tool_parameter.hatch_style.hint',
+  },
 });
 
 /**
  * Which parameters belong to which active tool (`cad_status.tool.key`), and the
  * command whose admission gates the control (`shell.canCommand`).
  *
- * Only `draw.polygon` is reachable today — the other tools are not implemented
- * and the host projects no value for their parameters, so nothing renders for
- * them (a control appears only when the tool is active **and** its value is
- * projected). A later phase makes a tool live by adding one row here (and, in
- * the host, projecting its values). The non-POLYGON tool keys are the anticipated
- * `draw.<kind>` form of the frozen `CadTool.key` convention (ADR 0016 decisions
- * B–E); the host must use the same key for the row to light up.
+ * Only `draw.polygon` and `draw.hatch` are reachable today: POLYGON projects its
+ * side count and HATCH its five parameters while the tool is active (HATCH
+ * captures no points). The other tools are not implemented and the host projects
+ * no value for their parameters, so nothing renders for them (a control appears
+ * only when the tool is active **and** its value is projected). A later phase
+ * makes a tool live by adding one row here (and, in the host, projecting its
+ * values). The non-POLYGON/HATCH tool keys are the anticipated `draw.<kind>` form
+ * of the frozen `CadTool.key` convention (ADR 0016 decisions B–E); the host must
+ * use the same key for the row to light up.
  */
 export const TOOL_PARAMETERS = Object.freeze({
   'draw.polygon': { command: 'POLYGON', keys: ['polygonSides'] },
+  'draw.hatch': {
+    command: 'HATCH',
+    keys: ['hatchPatternType', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle'],
+  },
   'draw.fillet': { command: 'FILLET', keys: ['filletRadius'] },
   'draw.chamfer': { command: 'CHAMFER', keys: ['chamferDistanceA', 'chamferDistanceB'] },
   'draw.align': { command: 'ALIGN', keys: ['alignScale'] },
@@ -548,22 +607,52 @@ export const TOOL_READY_PROMPTS = Object.freeze({
   'draw.dimcenter': 'tool.prompt.dim.center_ready',
 });
 
+/**
+ * Pre-selection tools: the boundary already exists before the command starts, so
+ * the chip has no pick to name and cannot use a point index (ADR 0018 decision D,
+ * P6b).
+ *
+ * HATCH's point arity is the zero-point exact complement — `tool.points` stays 0
+ * from the moment the tool starts to the moment it commits — so an entry in
+ * [`TOOL_STEP_PROMPTS`] could not express it: an empty step list makes that
+ * derivation report "ready" before anything is selected, and any non-empty list
+ * would invent a pick the tool never takes. The host's real `tool.ready`
+ * (`DrawPreview::can_confirm`, true only for a non-empty selection) is the
+ * authority, so idle and ready are the only two states. Keeping this in its own
+ * table also guarantees a pre-selection tool can never inherit the shared
+ * dimension ready copy.
+ */
+export const PRESELECT_PROMPTS = Object.freeze({
+  'draw.hatch': Object.freeze({
+    idle: 'tool.prompt.hatch.select_boundary',
+    ready: 'tool.prompt.hatch.ready',
+  }),
+});
+
 /** The shared ready prompt for a capture that produced a dimension entity. */
 const DEFAULT_READY_PROMPT = 'tool.prompt.dim.ready';
 
 /**
  * The catalog key for the next expected pick of the active `tool`, or `null`.
  *
- * `null` for a tool with no named steps (every existing tool) so the chip stays
- * exactly as it was. Once the exact complement is captured the capture is ready
- * and waits for Enter, so the ready prompt names that instead of repeating the
- * last pick (a per-tool override from [`TOOL_READY_PROMPTS`], else the shared
- * dimension ready prompt). The point count is read as the host's real value; a
- * malformed one is treated as "no points yet" rather than a fabricated later
- * step.
+ * A pre-selection tool (see [`PRESELECT_PROMPTS`]) captures no picks at all, so
+ * its chip is chosen by the host's readiness instead: the "select the boundary
+ * objects first" copy while it waits for a selection, the "boundary ready" copy
+ * once the host reports it can be confirmed. `ready` must be the literal `true`;
+ * a missing or malformed readiness never claims the selection is sufficient.
+ *
+ * `null` for a tool with no named steps and no pre-selection prompt (every other
+ * existing tool) so the chip stays exactly as it was. Once the exact complement
+ * is captured the capture is ready and waits for Enter, so the ready prompt names
+ * that instead of repeating the last pick (a per-tool override from
+ * [`TOOL_READY_PROMPTS`], else the shared dimension ready prompt). The point
+ * count is read as the host's real value; a malformed one is treated as "no
+ * points yet" rather than a fabricated later step.
  */
 export function toolStepPromptKey(tool) {
   if (!tool || typeof tool !== 'object' || typeof tool.key !== 'string') return null;
+  const preselect = PRESELECT_PROMPTS[tool.key];
+  if (preselect) return tool.ready === true ? preselect.ready : preselect.idle;
   const steps = TOOL_STEP_PROMPTS[tool.key];
   if (!steps) return null;
   const points = Number.isSafeInteger(tool.points) && tool.points >= 0 ? tool.points : 0;
