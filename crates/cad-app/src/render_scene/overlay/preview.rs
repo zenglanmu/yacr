@@ -109,7 +109,13 @@ pub fn draw_preview_overlay(
         // displacement point). Both use the existing cursor/chain preview (no new
         // overlay channel).
         | DrawToolKind::Align
-        | DrawToolKind::Stretch => {
+        | DrawToolKind::Stretch
+        // DIMLINEAR/DIMALIGNED capture three free points (two origins plus the
+        // dimension-line location); the live preview is the existing cursor/chain
+        // (no new overlay channel — the visible dimension affordance is the
+        // command's, not a preview overlay).
+        | DrawToolKind::DimLinear
+        | DrawToolKind::DimAligned => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

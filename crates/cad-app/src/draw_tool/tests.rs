@@ -38,7 +38,11 @@ fn keys_indices_and_labels_round_trip_and_reject_unknowns() {
 fn required_points_and_selection_are_explicit_per_kind() {
     for kind in DrawToolKind::ALL {
         let expected = match kind {
-            DrawToolKind::Arc | DrawToolKind::Ellipse | DrawToolKind::Scale => 3,
+            DrawToolKind::Arc
+            | DrawToolKind::Ellipse
+            | DrawToolKind::Scale
+            | DrawToolKind::DimLinear
+            | DrawToolKind::DimAligned => 3,
             DrawToolKind::Spline | DrawToolKind::Align | DrawToolKind::Stretch => 4,
             DrawToolKind::Offset | DrawToolKind::Point | DrawToolKind::ArrayPolar => 1,
             // ARRAYRECT captures no points: it is defined entirely by the session
@@ -84,6 +88,35 @@ fn required_points_and_selection_are_explicit_per_kind() {
     assert_eq!(DrawToolKind::Stretch.arity(), PointArity::Exact(4));
     assert!(!DrawToolKind::Stretch.requires_selection());
     assert!(!DrawToolKind::Stretch.needs_picked_entities());
+}
+
+#[test]
+fn dimension_tools_capture_three_points_and_produce_their_intent() {
+    for kind in [DrawToolKind::DimLinear, DrawToolKind::DimAligned] {
+        let mut tool = DrawTool::new(kind, 0);
+        assert_eq!(tool.remaining(), Some(3), "{kind:?}");
+        assert!(!kind.requires_selection(), "{kind:?}");
+        assert!(!kind.needs_picked_entities(), "{kind:?}");
+        tool.push_point(p(0.0, 0.0)).unwrap();
+        tool.push_point(p(10.0, 0.0)).unwrap();
+        assert!(!tool.is_ready(), "{kind:?} still needs the location pick");
+        tool.push_point(p(5.0, 4.0)).unwrap();
+        assert!(tool.is_ready(), "{kind:?}");
+        assert_eq!(tool.remaining(), Some(0));
+        let expected = match kind {
+            DrawToolKind::DimLinear => DrawIntent::DimLinear {
+                first: p(0.0, 0.0),
+                second: p(10.0, 0.0),
+                location: p(5.0, 4.0),
+            },
+            _ => DrawIntent::DimAligned {
+                first: p(0.0, 0.0),
+                second: p(10.0, 0.0),
+                location: p(5.0, 4.0),
+            },
+        };
+        assert_eq!(tool.intent().unwrap(), expected);
+    }
 }
 
 #[test]

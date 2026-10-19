@@ -5,7 +5,7 @@ import React from 'react';
 import { Icon } from '../icons.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { commandById, toolLabelKey } from '../commands.mjs';
-import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle, snapKindLabelKey, toolParameterViews } from '../cad.mjs';
+import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle, snapKindLabelKey, toolParameterViews, toolStepPromptKey } from '../cad.mjs';
 
 // The drafting aids this build still has only as placeholders. OSNAP is a real
 // toggle (ADR 0014 A.4) and is rendered separately below.
@@ -102,6 +102,10 @@ export function StatusBar() {
   const tool = shell.status?.tool ?? null;
   const toolNameKey = tool ? toolLabelKey(tool.key) : null;
   const toolPoints = tool && Number.isSafeInteger(tool.points) ? tool.points : 0;
+  // The next expected pick for a tool whose steps have names (the dimension
+  // family). `null` for every other tool, so its chip is unchanged. Derived from
+  // the host's real `tool.key` + captured count, never a local guess.
+  const toolStepKey = tool ? toolStepPromptKey(tool) : null;
   // Whether the host reports this capture as open-ended (`status.tool.openEnded`,
   // ADR 0015 decision B). Read from the status only — never inferred from the
   // point count — so an open tool shows the honest "more points accepted, Enter
@@ -152,6 +156,9 @@ export function StatusBar() {
         >
           <Icon name="snap" size={13} />
           {t(toolNameKey)}
+          {toolStepKey ? (
+            <span className="statusbar__tool-step">{t(toolStepKey)}</span>
+          ) : null}
           <span className="mono">
             {toolOpenEnded ? t('tool.open_ended') : t('tool.points', { count: toolPoints })}
           </span>

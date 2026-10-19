@@ -288,13 +288,46 @@ pub enum DrawToolKind {
     /// endpoint is **UNVERIFIED** (Autodesk does not document it) and is our
     /// declared choice.
     Stretch,
+    /// DIMLINEAR: a horizontal/vertical linear dimension through two
+    /// extension-line origins plus the dimension-line location (`Exact(3)`, ADR
+    /// 0017 decision C, P5c).
+    ///
+    /// Capture order follows AutoCAD: the first extension-line origin, the second
+    /// origin, then the dimension-line location. The **location pick decides
+    /// horizontal vs vertical** (AutoCAD's rule — the location determines the
+    /// direction): if the location is offset more vertically than horizontally
+    /// from the origins' midpoint the dimension is horizontal (measures X), else
+    /// vertical (measures Y). The command layer builds the `DimensionGeometry`
+    /// through the shared synthesis and owns every refusal (non-plan triple,
+    /// coincident origins, ambiguous direction, zero measurement).
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): the **object-selection**
+    /// variant (pick a line/circle/arc to derive the origins), a `Text`/`Mtext`
+    /// text override (the automatic measurement is always drawn),
+    /// associativity (`DIMASSOC=2`), and the object-selection prompts. The
+    /// location→direction rule and the exact prompt state machine are our
+    /// declared reading (the strict AutoCAD prompt sequence is unverified).
+    DimLinear,
+    /// DIMALIGNED: a dimension whose line is parallel to the line joining the two
+    /// extension-line origins (`Exact(3)`, ADR 0017 decision C, P5c).
+    ///
+    /// Same three-pick capture as [`Self::DimLinear`] (two origins then the
+    /// dimension-line location); the measurement is the true origin-to-origin
+    /// distance and the dimension line runs parallel to that segment. The command
+    /// layer owns every refusal (non-plan triple, coincident origins, zero
+    /// measurement).
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): the **object-selection**
+    /// variant, a text override, associativity (`DIMASSOC=2`), and the
+    /// object-selection prompts.
+    DimAligned,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 23] = [
+    pub const ALL: [DrawToolKind; 25] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -318,6 +351,8 @@ impl DrawToolKind {
         DrawToolKind::ArrayPolar,
         DrawToolKind::Align,
         DrawToolKind::Stretch,
+        DrawToolKind::DimLinear,
+        DrawToolKind::DimAligned,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -346,6 +381,8 @@ impl DrawToolKind {
             Self::ArrayPolar => "arraypolar",
             Self::Align => "align",
             Self::Stretch => "stretch",
+            Self::DimLinear => "dimlinear",
+            Self::DimAligned => "dimaligned",
         }
     }
 
@@ -376,6 +413,8 @@ impl DrawToolKind {
             "arraypolar" => Some(Self::ArrayPolar),
             "align" => Some(Self::Align),
             "stretch" => Some(Self::Stretch),
+            "dimlinear" => Some(Self::DimLinear),
+            "dimaligned" => Some(Self::DimAligned),
             _ => None,
         }
     }
@@ -446,6 +485,12 @@ impl DrawToolKind {
             // CJK literals on the Rust side and the shell substitutes the catalog
             // label for chrome anyway.
             Self::Stretch => "STRETCH",
+            // DIMLINEAR/DIMALIGNED use locale-neutral ASCII fallback labels,
+            // exactly like POINT/SPLINE/CHAMFER/FILLET/ARRAY*/ALIGN/STRETCH: the
+            // ADR fence forbids new CJK literals on the Rust side and the shell
+            // substitutes the catalog label for chrome anyway.
+            Self::DimLinear => "DIMLINEAR",
+            Self::DimAligned => "DIMALIGNED",
         }
     }
 
@@ -458,8 +503,11 @@ impl DrawToolKind {
             Self::Polyline => PointArity::AtLeast(2),
             Self::Spline => PointArity::AtLeast(4),
             // Start, a point on the arc, end; two axis endpoints plus the
-            // other-axis distance; or base, reference, target.
-            Self::Arc | Self::Ellipse | Self::Scale => PointArity::Exact(3),
+            // other-axis distance; base, reference, target; or the two dimension
+            // origins plus the dimension-line location.
+            Self::Arc | Self::Ellipse | Self::Scale | Self::DimLinear | Self::DimAligned => {
+                PointArity::Exact(3)
+            }
             // ALIGN: the first source point, its destination, then the second
             // source point and its destination (ADR 0016 decision F). STRETCH: the
             // two opposite corners of the crossing window, then the base point and

@@ -232,6 +232,8 @@ impl Application {
             | CommandId::CreatePolygon
             | CommandId::CreatePoint
             | CommandId::CreateSpline
+            | CommandId::DimLinear
+            | CommandId::DimAligned
             | CommandId::MoveEntities
             | CommandId::TrimEntity
             | CommandId::ExtendEntity

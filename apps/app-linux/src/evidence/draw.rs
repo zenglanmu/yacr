@@ -53,9 +53,15 @@
 //! 12. **EXPLODE**: draw a closed polyline (`RECTANG`), click-select it, then
 //!     dispatch the payload-free `EXPLODE` selector: the polyline is deleted and
 //!     four LINEs are inserted ⇒ `entityCount` **+3**.
+//! 13. **DIMLINEAR** (P5c, ADR 0017 decision C): start the real `DIMLINEAR`
+//!     selector, feed three synthetic picks (two extension-line origins, then the
+//!     dimension-line location), `CONFIRM`, and read `entityCount` **+1** and
+//!     `tool` `null`.
+//! 14. **DIMALIGNED** (P5c): the same three-pick funnel ⇒ `entityCount` **+1**.
 //!
-//! The P4 edit-command phases (8–12) and the combined single-line report live in
-//! [`super::draw_edit`] (this file was split at the 1000-line code-file gate).
+//! The P4 edit-command phases (8–12) live in [`super::draw_edit`] and the P5c
+//! dimension-creation phases (13–14) in [`super::draw_dimension`] (this file was
+//! split at the 1000-line code-file gate).
 //!
 //! Synthetic input, **not a real mouse**: the events are dispatched on
 //! `.native-input` and never touch the kernel/evdev/XInput path. Every reported
@@ -114,7 +120,8 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
         "[probe] draw evidence: enabled (YACR_PROBE_DRAW_EVIDENCE); synthetic DOM pointer events, NOT a real mouse; \
          phases: LINE pair + FILLET(radius, deliberate miss) + LINE pair + CHAMFER(a/b) + PLINE(3pt+CONFIRM) \
          POLYGON(sides=6, out-of-range=2) POINT(visible) RECTANG + P4 edit commands \
-         ARRAYRECT(rows=2,cols=3) ARRAYPOLAR(items=4) ALIGN(4pt) STRETCH(4pt) EXPLODE"
+         ARRAYRECT(rows=2,cols=3) ARRAYPOLAR(items=4) ALIGN(4pt) STRETCH(4pt) EXPLODE \
+         + P5c dimensions DIMLINEAR(3pt) DIMALIGNED(3pt)"
     );
     let webview = webview.clone();
     if let Err(error) = std::thread::Builder::new()
@@ -161,11 +168,14 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
 /// * **RECTANG**: t=93s start `RECTANG`; t=94/95s click two corners; t=96s read
 ///   (`points` = 2); t=97s `CONFIRM`; t=98s read (`entityCount` +1);
 /// * then the **P4 edit-command phases** (ARRAYRECT / ARRAYPOLAR / ALIGN /
-///   STRETCH / EXPLODE) run on a sub-second step (t=100s..135.5s) and the
-///   combined single-line report lands at t=137s — all in [`super::draw_edit`],
-///   which documents the per-step timeline. An external `--capture-at` should
-///   land **after** the P4 phases (≈ driver t=137..) so a reviewer sees the
-///   arrays and the EXPLODE result on screen.
+///   STRETCH / EXPLODE) run on a sub-second step (t=100s..135.5s), the **P5c
+///   dimension-creation phases** (DIMLINEAR / DIMALIGNED, [`super::draw_dimension`])
+///   at t=137s..144.5s, and the combined single-line report lands at t=146s — the
+///   P4 phases and report in [`super::draw_edit`], which documents the per-step
+///   timeline. An external `--capture-at` should land **after** the dimension
+///   phases commit (≈ driver t=145s.., i.e. a launch delay of ≈ 155s) so a
+///   reviewer sees the arrays, the EXPLODE result **and** the new dimensions on
+///   screen.
 ///
 /// Every step is a dispatch only; the **real** outcome is the `cad_status`
 /// snapshot read from the host, never a value synthesized here. Pointer
@@ -517,10 +527,13 @@ fn run_draw_evidence(webview: tauri::Webview) {
     });
 
     // P4 edit-command phases (ARRAYRECT / ARRAYPOLAR / ALIGN / STRETCH / EXPLODE)
-    // run after the drawing phases above, followed by the single-line report.
-    // They are sub-second-stepped (`schedule_draw_ms`) so the whole pass finishes
-    // inside the bounded evidence timeout; see [`super::draw_edit`].
+    // run after the drawing phases above, then the P5c dimension-creation phases
+    // (DIMLINEAR / DIMALIGNED), followed by the single-line report. They are
+    // sub-second-stepped (`schedule_draw_ms`) so the whole pass finishes inside
+    // the bounded evidence timeout; see [`super::draw_edit`] and
+    // [`super::draw_dimension`].
     super::draw_edit::schedule_draw_edit_phases(&webview, &start);
+    super::draw_dimension::schedule_dimension_phases(&webview, &start);
     super::draw_edit::schedule_draw_report(&webview, &start);
 }
 

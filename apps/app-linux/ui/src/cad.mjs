@@ -447,6 +447,50 @@ export async function setToolParameterFlag(invoke, key, flag) {
   } catch (error) { return { kind: 'failed', error: String(error) }; }
 }
 
+/**
+ * Per-step capture prompts for tools whose picks have names (ADR 0017 P5c).
+ *
+ * The dimension commands are three-pick captures — two extension-line origins,
+ * then the dimension-line location — and a bare point count ("1 point") does not
+ * tell the user *what* to pick next. This table names each pick; the step is
+ * derived from the host's real `tool.key` and `tool.points` (the captured count),
+ * never inferred from the pointer stream. Every other tool has no entry, so it
+ * renders no prompt at all and its chip is unchanged.
+ *
+ * `location_linear` vs `location_aligned` differ on purpose: for DIMLINEAR the
+ * location pick also decides horizontal vs vertical, which the user must know
+ * before clicking.
+ */
+export const TOOL_STEP_PROMPTS = Object.freeze({
+  'draw.dimlinear': [
+    'tool.prompt.dim.origin_first',
+    'tool.prompt.dim.origin_second',
+    'tool.prompt.dim.location_linear',
+  ],
+  'draw.dimaligned': [
+    'tool.prompt.dim.origin_first',
+    'tool.prompt.dim.origin_second',
+    'tool.prompt.dim.location_aligned',
+  ],
+});
+
+/**
+ * The catalog key for the next expected pick of the active `tool`, or `null`.
+ *
+ * `null` for a tool with no named steps (every existing tool) so the chip stays
+ * exactly as it was. Once the exact complement is captured the capture is ready
+ * and waits for Enter, so the ready prompt names that instead of repeating the
+ * last pick. The point count is read as the host's real value; a malformed one
+ * is treated as "no points yet" rather than a fabricated later step.
+ */
+export function toolStepPromptKey(tool) {
+  if (!tool || typeof tool !== 'object' || typeof tool.key !== 'string') return null;
+  const steps = TOOL_STEP_PROMPTS[tool.key];
+  if (!steps) return null;
+  const points = Number.isSafeInteger(tool.points) && tool.points >= 0 ? tool.points : 0;
+  return points < steps.length ? steps[points] : 'tool.prompt.dim.ready';
+}
+
 // The snap engine's stable machine keys (`cad_measure::SnapKind::as_str`) and
 // their catalog labels. A key outside this set is rendered as nothing rather
 // than a guessed label.

@@ -427,11 +427,12 @@ pub(super) fn schedule_draw_edit_phases(webview: &tauri::Webview, start: &Instan
 
 /// Schedule the combined single-line report relative to the driver start.
 ///
-/// It lands after every phase (default t=137 s), so the arrays and the EXPLODE
-/// result are already committed; the report carries the real before/after reads
-/// and the real refusals.
+/// It lands after every phase (default t=146 s), so the arrays, the EXPLODE
+/// result and the P5c dimensions (DIMLINEAR/DIMALIGNED, [`super::draw_dimension`],
+/// which end at t=144.5 s) are already committed; the report carries the real
+/// before/after reads and the real refusals.
 pub(super) fn schedule_draw_report(webview: &tauri::Webview, start: &Instant) {
-    schedule_draw_ms(start, 137_000, "draw evidence report", || {
+    schedule_draw_ms(start, 146_000, "draw evidence report", || {
         webview.eval_with_callback(DRAW_REPORT_JS, |payload| {
             eprintln!(
                 "[probe] draw evidence report: {}",
@@ -468,6 +469,14 @@ fn decode_draw_report(payload: &str) -> String {
 /// `align_delta` / `stretch_delta` are expected to be `0` (in-place transforms)
 /// and the report states "accepted, no error, count unchanged" rather than
 /// implying a geometry change it cannot observe.
+///
+/// The P5c dimension fields ([`super::draw_dimension`]) follow the same
+/// discipline: `dimlinear_delta` / `dimaligned_delta` are the real `entityCount`
+/// deltas (expected `+1` each), `*_after_tool` must be `-` (the tool cleared) and
+/// `*_after_error` must be `-`; `dimension_geometry_channel=none_...` is the
+/// honest statement that `cad_status` exposes no per-entity geometry, so the
+/// created dimension's real geometry is pinned by the `cad-app` contract tests,
+/// not by this channel.
 const DRAW_REPORT_JS: &str = r#"
 (function () {
   var d = window.__yacr_draw || {};
@@ -506,13 +515,15 @@ const DRAW_REPORT_JS: &str = r#"
     d.s_align_points_failed || d.s_align_after_failed || d.s_stretch_src_after_failed ||
     d.s_stretch_active_failed || d.s_stretch_points_failed || d.s_stretch_after_failed ||
     d.s_explode_src_after_failed || d.s_explode_select_failed || d.s_explode_after_failed ||
+    d.s_dimlinear_active_failed || d.s_dimlinear_points_failed || d.s_dimlinear_after_failed ||
+    d.s_dimaligned_active_failed || d.s_dimaligned_points_failed || d.s_dimaligned_after_failed ||
     d.confirm_a_h_failed || d.confirm_a_v_failed || d.confirm_fillet_failed ||
     d.confirm_b_h_failed || d.confirm_b_v_failed || d.confirm_chamfer_failed ||
     d.confirm_pline_failed || d.confirm_polygon_failed || d.confirm_point_failed ||
     d.confirm_rectang_failed || d.confirm_arr_src_failed || d.confirm_arrayrect_failed ||
     d.confirm_pol_src_failed || d.confirm_arraypolar_failed || d.confirm_align_src_failed ||
     d.confirm_align_failed || d.confirm_stretch_src_failed || d.confirm_stretch_failed ||
-    d.confirm_explode_rect_failed;
+    d.confirm_explode_rect_failed || d.confirm_dimlinear_failed || d.confirm_dimaligned_failed;
   var text = 'draw_synthetic=1_not_a_real_mouse' +
     ' baseline_count=' + v(d.s_base_count) +
     ' geom_a_before_count=' + v(d.s_base_count) +
@@ -637,7 +648,32 @@ const DRAW_REPORT_JS: &str = r#"
     ' explode_delta=' + delta(d.s_explode_src_after_count, d.s_explode_after_count) +
     ' explode_after_tool=' + v(d.s_explode_after_tool) +
     ' explode_after_error=' + v(d.s_explode_after_error) +
+    ' dimlinear_start_ack=' + v(d['dimlinear_ack']) +
+    ' dimlinear_active_tool=' + v(d.s_dimlinear_active_tool) +
+    ' dimlinear_active_points=' + v(d.s_dimlinear_active_points) +
+    ' dimlinear_points=' + v(d.s_dimlinear_points_points) +
+    ' dimlinear_points_ready=' + v(d.s_dimlinear_points_ready) +
+    ' dimlinear_confirm_ack=' + v(d.confirm_dimlinear_ack) +
+    ' dimlinear_before_count=' + v(d.s_explode_after_count) +
+    ' dimlinear_after_count=' + v(d.s_dimlinear_after_count) +
+    ' dimlinear_delta=' + delta(d.s_explode_after_count, d.s_dimlinear_after_count) +
+    ' dimlinear_after_tool=' + v(d.s_dimlinear_after_tool) +
+    ' dimlinear_after_error=' + v(d.s_dimlinear_after_error) +
+    ' dimaligned_start_ack=' + v(d['dimaligned_ack']) +
+    ' dimaligned_active_tool=' + v(d.s_dimaligned_active_tool) +
+    ' dimaligned_active_points=' + v(d.s_dimaligned_active_points) +
+    ' dimaligned_points=' + v(d.s_dimaligned_points_points) +
+    ' dimaligned_points_ready=' + v(d.s_dimaligned_points_ready) +
+    ' dimaligned_confirm_ack=' + v(d.confirm_dimaligned_ack) +
+    ' dimaligned_before_count=' + v(d.s_dimlinear_after_count) +
+    ' dimaligned_after_count=' + v(d.s_dimaligned_after_count) +
+    ' dimaligned_delta=' + delta(d.s_dimlinear_after_count, d.s_dimaligned_after_count) +
+    ' dimaligned_after_tool=' + v(d.s_dimaligned_after_tool) +
+    ' dimaligned_after_error=' + v(d.s_dimaligned_after_error) +
+    ' dimlinear_loc_frac=' + arr(d.dimlinear_loc_frac) +
+    ' dimaligned_loc_frac=' + arr(d.dimaligned_loc_frac) +
     ' vertex_count_channel=none_cad_status_has_no_vertex_or_entity_geometry' +
+    ' dimension_geometry_channel=none_cad_status_has_no_entity_geometry' +
     ' fillet_geometry_channel=none_cad_status_has_no_entity_geometry' +
     ' chamfer_geometry_channel=none_cad_status_has_no_entity_geometry' +
     ' array_geometry_channel=none_cad_status_has_no_entity_geometry' +
@@ -710,7 +746,15 @@ const DRAW_REPORT_JS: &str = r#"
     ' explode_rect_a_failed=' + v(d.explode_rect_a_failed) +
     ' explode_rect_b_failed=' + v(d.explode_rect_b_failed) +
     ' explode_select_failed=' + v(d.explode_select_failed) +
-    ' explode_failed=' + v(d.explode_failed);
+    ' explode_failed=' + v(d.explode_failed) +
+    ' dimlinear_failed=' + v(d.dimlinear_failed) +
+    ' dimlinear_o1_failed=' + v(d.dimlinear_o1_failed) +
+    ' dimlinear_o2_failed=' + v(d.dimlinear_o2_failed) +
+    ' dimlinear_loc_failed=' + v(d.dimlinear_loc_failed) +
+    ' dimaligned_failed=' + v(d.dimaligned_failed) +
+    ' dimaligned_o1_failed=' + v(d.dimaligned_o1_failed) +
+    ' dimaligned_o2_failed=' + v(d.dimaligned_o2_failed) +
+    ' dimaligned_loc_failed=' + v(d.dimaligned_loc_failed);
   try { console.log('[probe] draw evidence report: ' + text); } catch (err) {}
   return text;
 })()

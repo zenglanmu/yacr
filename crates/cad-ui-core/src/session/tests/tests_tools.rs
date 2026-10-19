@@ -3,7 +3,7 @@
 use super::super::*;
 use super::test_support::*;
 
-/// The 21 draw selectors mapped to their `cad-app` machine keys.
+/// The 23 draw selectors mapped to their `cad-app` machine keys.
 const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("LINE", "draw.line"),
     ("CIRCLE", "draw.circle"),
@@ -26,6 +26,8 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("FILLET", "draw.fillet"),
     ("ARRAYRECT", "draw.arrayrect"),
     ("ARRAYPOLAR", "draw.arraypolar"),
+    ("DIMLINEAR", "draw.dimlinear"),
+    ("DIMALIGNED", "draw.dimaligned"),
 ];
 
 fn fresh_session() -> CadSession {

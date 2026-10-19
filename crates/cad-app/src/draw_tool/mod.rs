@@ -322,6 +322,30 @@ pub enum DrawIntent {
         base: Point3,
         delta: Point3,
     },
+    /// DIMLINEAR: insert a horizontal or vertical linear dimension through the
+    /// two extension-line origins `first`/`second` and the dimension-line
+    /// location `location`, on the active layer (ADR 0017 decision C, P5c).
+    ///
+    /// The three points are exactly the three clicks, in order. The command layer
+    /// decides horizontal vs vertical from `location` (AutoCAD's rule), builds
+    /// the definition and every refusal lives there, so the tool never invents a
+    /// direction or a measurement.
+    DimLinear {
+        first: Point3,
+        second: Point3,
+        location: Point3,
+    },
+    /// DIMALIGNED: insert a dimension whose line is parallel to the line joining
+    /// the two origins, through `first`/`second`/`location` on the active layer
+    /// (ADR 0017 decision C, P5c).
+    ///
+    /// The three points are exactly the three clicks, in order; the command layer
+    /// measures the true origin-to-origin distance and owns every refusal.
+    DimAligned {
+        first: Point3,
+        second: Point3,
+        location: Point3,
+    },
 }
 
 /// Drawing/editing capture state machine.
@@ -728,6 +752,21 @@ impl DrawTool {
                 rect: [self.points[0], self.points[1]],
                 base: self.points[2],
                 delta: self.points[3],
+            },
+            // DIMLINEAR/DIMALIGNED: the two origins and the dimension-line
+            // location exactly as clicked, in order. The horizontal/vertical
+            // decision (DIMLINEAR), the definition construction and every refusal
+            // live in the command layer, so the capture never invents a direction
+            // or a measurement.
+            DrawToolKind::DimLinear => DrawIntent::DimLinear {
+                first: a,
+                second: b,
+                location: self.points[2],
+            },
+            DrawToolKind::DimAligned => DrawIntent::DimAligned {
+                first: a,
+                second: b,
+                location: self.points[2],
             },
         })
     }

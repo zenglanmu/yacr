@@ -221,6 +221,27 @@ impl HostController {
                     delta,
                 },
             ),
+            // DIMLINEAR/DIMALIGNED: the two captured origins and the
+            // dimension-line location travel in click order as `Points` (the
+            // construction input the create path already reads, exactly like
+            // ELLIPSE/RECTANG); the handler decides horizontal vs vertical
+            // (DIMLINEAR) and builds the dimension.
+            DrawIntent::DimLinear {
+                first,
+                second,
+                location,
+            } => (
+                crate::CommandId::DimLinear,
+                crate::CommandPayload::Points(vec![first, second, location]),
+            ),
+            DrawIntent::DimAligned {
+                first,
+                second,
+                location,
+            } => (
+                crate::CommandId::DimAligned,
+                crate::CommandPayload::Points(vec![first, second, location]),
+            ),
         };
         Ok(Command {
             schema_version: 1,

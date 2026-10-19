@@ -56,7 +56,7 @@ test('the active-tool chip keys exist in both catalogs with matching placeholder
     'tool.draw.offset', 'tool.draw.rectang', 'tool.draw.ellipse',
     'tool.draw.chamfer', 'tool.draw.fillet',
     'tool.draw.arrayrect', 'tool.draw.arraypolar', 'tool.draw.align', 'tool.draw.stretch',
-    'tool.draw.point', 'tool.draw.spline',
+    'tool.draw.point', 'tool.draw.spline', 'tool.draw.dimlinear', 'tool.draw.dimaligned',
     'tool.measure.distance', 'tool.measure.polyline', 'tool.measure.angle',
     'tool.measure.area', 'tool.points', 'tool.prompt.confirm', 'tool.prompt.cancel',
   ];

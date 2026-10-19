@@ -191,6 +191,7 @@ impl CadSession {
     /// | `POLYGON` | `BeginDraw(Polygon)` |
     /// | `POINT` | `BeginDraw(Point)` |
     /// | `SPLINE` | `BeginDraw(Spline)` |
+    /// | `DIMLINEAR` / `DIMALIGNED` | `BeginDraw(DimLinear)` / `BeginDraw(DimAligned)` |
     /// | `ARRAYRECT` / `ARRAYPOLAR` | `BeginDraw(ArrayRect)` / `BeginDraw(ArrayPolar)` |
     /// | `ALIGN` | `BeginDraw(Align)` |
     /// | `STRETCH` | `BeginDraw(Stretch)` |
@@ -259,6 +260,8 @@ impl CadSession {
             CommandId::CreatePolygon => Some(InteractionRequest::BeginDraw(DrawToolKind::Polygon)),
             CommandId::CreatePoint => Some(InteractionRequest::BeginDraw(DrawToolKind::Point)),
             CommandId::CreateSpline => Some(InteractionRequest::BeginDraw(DrawToolKind::Spline)),
+            CommandId::DimLinear => Some(InteractionRequest::BeginDraw(DrawToolKind::DimLinear)),
+            CommandId::DimAligned => Some(InteractionRequest::BeginDraw(DrawToolKind::DimAligned)),
             CommandId::MoveEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Move)),
             CommandId::CopyEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Copy)),
             CommandId::RotateEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Rotate)),

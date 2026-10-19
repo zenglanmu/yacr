@@ -47,6 +47,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("POLYGON", CommandId::CreatePolygon),
     ("POINT", CommandId::CreatePoint),
     ("SPLINE", CommandId::CreateSpline),
+    ("DIMLINEAR", CommandId::DimLinear),
+    ("DIMALIGNED", CommandId::DimAligned),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
     ("EXTEND", CommandId::ExtendEntity),

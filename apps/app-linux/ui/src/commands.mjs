@@ -158,6 +158,8 @@ export const COMMAND_CATALOG = Object.freeze([
   { id: 'MEASUREPOLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },
   { id: 'MEASUREANGLE', labelKey: 'measure.kind.angle', icon: 'angle', group: 'measure' },
   { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', group: 'measure' },
+  { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DIMALIGNED', labelKey: 'draw.kind.dimaligned', icon: 'dimaligned', group: 'annotate' },
   { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', group: 'annotate' },
   { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', group: 'annotate' },
   { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', group: 'annotate' },

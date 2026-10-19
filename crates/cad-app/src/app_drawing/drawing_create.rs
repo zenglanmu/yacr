@@ -17,6 +17,8 @@ impl Application {
             CommandId::CreatePolygon => self.create_polygon(session, command),
             CommandId::CreatePoint => self.create_point(session, command),
             CommandId::CreateSpline => self.create_spline(session, command),
+            CommandId::DimLinear => self.dim_linear(session, command),
+            CommandId::DimAligned => self.dim_aligned(session, command),
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
             CommandId::ExtendEntity => self.extend_entity(command),

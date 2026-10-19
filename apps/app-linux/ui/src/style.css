@@ -441,6 +441,15 @@ button, input, select { font: inherit; color: inherit; }
 .statusbar__coords { display: inline-flex; align-items: center; gap: 6px; min-width: 108px; color: var(--text-dim); }
 .mono { font-family: var(--font-mono); }
 .statusbar__state { color: var(--text-muted); }
+/* Active-tool chip: the tool name, an optional per-step prompt (the named picks
+   of the dimension family) and the captured count. The prompt is guidance, so it
+   is tinted and bounded — a long prompt ellipsizes instead of pushing the
+   right-side status group, and it never changes the fixed status-bar height. */
+.statusbar__tool { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.statusbar__tool-step {
+  color: var(--accent-text);
+  max-width: 64ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .statusbar__group { display: flex; align-items: center; gap: 3px; }
 .statusbar__spacer { flex: 1 1 auto; }
 .statusbar__error { display: inline-flex; align-items: center; gap: 5px; color: var(--danger); max-width: 44ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

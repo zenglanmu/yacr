@@ -550,3 +550,67 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
 - **新增 U 行**：`DIMTIH`/`DIMTOH`/`DIMTOFL` 在 `standard_metric` 里被断言为"Autodesk 公制 Standard"，但只有
   **英制**初值可被核实（On/On，与 acadrust `dxf_defaults` 一致）；文档化的公制样式（ISO-25）让文字**与标注线
   对齐**（off/off）。这些是 B.2(b)（显示忽略）故**显示安全**，但该断言需要**引用出处**或**降级**。
+
+### P5c（`DIMLINEAR` + `DIMALIGNED` 创建命令 + React 标注面板/步进提示；**首批创建命令**）
+
+- **命令面**：`CommandId::{DimLinear,DimAligned}` 贯通命令面——`crates/cad-app/src/command_id.rs` 新增变体
+  （`requires_work_mode()`）、`crates/cad-ui-core` 的选择子表（`commands.rs`：`("DIMLINEAR", …)`/`("DIMALIGNED", …)`）
+  与 `session/mod.rs` 的 `InteractionRequest::BeginDraw(DrawToolKind::{DimLinear,DimAligned})` 映射；
+  `EXPECTED_COMMAND_COUNT` **60 → 62** 断言与选择子契约（每个变体在 `COMMAND_TABLE` 恰出现一次）同步更新。
+- **绘制工具种类**：`DrawToolKind::{DimLinear,DimAligned}`（`ALL` 共 25 种），`arity = PointArity::Exact(3)`
+  （两次尺寸界线原点 + 尺寸线位置）；机器键 `"dimlinear"`/`"dimaligned"`（永不翻译），标签走 i18n。
+- **`DrawIntent` 变体**：`DrawIntent::DimLinear{first,second,location}` / `DrawIntent::DimAligned{…}`；宿主
+  `draw_intent_map.rs` 把两者映射为 `CommandPayload::Points([first, second, location])`（**复用**既有 payload，
+  不新增变体）。
+- **命令实现**（`crates/cad-app/src/app_drawing/dimension.rs`）：校验 → 从**当前样式**（`Standard`，经 P5b 的
+  `DrawingDatabase::resolve_dim_style`）解析样式快照 → 经**共享合成** `DimensionGeometry::synthesized` 构造
+  → 经**单一漏斗** `commit_new_entity` 插入**一个**实体（`type_key` `"AcDbDimension"`，一条事务、一步撤销、
+  活动图层）。**非关联**（不写 `ACAD_DIMASSOC`）。
+- **React 面**：`ribbon-model.mjs` 把标注族放在既有 annotate 面板**首位**（linear 在前、aligned 在后），
+  `commands.mjs` 目录项、`icons.jsx` 专用图标（两条竖直尺寸界线 + 一条尺寸线；aligned 旋转 45°）；
+  `cad.mjs` 的 `TOOL_STEP_PROMPTS` 按**宿主真实** `tool.key`/`tool.points` 派生每步提示（`StatusBar.jsx` 经
+  `toolStepPromptKey`），从不来自本地镜像。**i18n 新增 9 键**：`tool.prompt.dim.{origin_first,origin_second,
+  location_linear,location_aligned,ready}`、`tool.draw.{dimlinear,dimaligned}`、`draw.kind.{dimlinear,dimaligned}`。
+
+#### 声明的决策（实现者逐条标记，未静默选择）
+
+1. **三个拾取复用 `CommandPayload::Points([first, second, location])`**，**不新增** payload 变体（构造输入，
+   与 ELLIPSE/RECTANG/POLYGON 一致；预构造几何臂会是第二个真值源）。
+2. **`DIMLINEAR` 的 H/V 规则**：以两原点**中点**为基准，`|Δy| > |Δx|` ⇒ 水平（`rotation 0`，量 X），否则垂直
+   （`rotation π/2`，量 Y）；**平局（含恰在中点拾取）是显式拒绝**，不做任意打破平局。平局规则标记为**我们的
+   选择**（AutoCAD 对该退化拾取的行为**未查证**）。
+3. **"非平面视图"拒绝**实现为 ADR **D.6 的平面外**情形（定义点必须共一个 `+Z` 平面），**不是**视口相机检查
+   ——命令接收世界点、**无视口依赖**。显式声明，以免 ADR 措辞被读成相机检查。
+4. **ADR 清单之外的额外拒绝**：**零测量值**（所选方向把两不同原点投影到同一点，`measurement ≤ 1e-9`）**按名
+   拒绝**——否则会存下一个结构性退化的标注。
+5. **当前样式硬编码为 `"Standard"`**（ADR B.3：P5 **无交互式样式管理器**）；数据库**没有** `Standard` 时是
+   **防御性的显式拒绝**。
+6. **每步提示派生自宿主真实工具状态**，从不来自本地镜像；`DIMLINEAR` 的位置提示写明该拾取**决定水平/垂直**，
+   `DIMALIGNED` 的**刻意不写**（该说法对它为假）。
+7. **声明的缺口——放置期间没有真正的标注预览**。实时预览是后端**橡皮筋链**
+   （`crates/cad-app/src/render_scene/overlay/preview.rs` 把两种 kind 都路由到 `preview_chain`），故用户看到已
+   捕获的原点与到光标的链，但**看不到**合成后的标注（偏移的尺寸线、尺寸界线、箭头、测量文字）。真正的预览需要
+   **后端 overlay 分支**；React UI **根本无法**绘制 overlay（原生 CAD 分区无子窗口，DOM 不得浮于其上——ADR-0002）。
+   记为**声明限制**并附原因，并注明 React 宿主因此**改为获得步进提示**。**不**把它当作已完成。
+8. **未加 ribbon 激活态高亮**——今天没有任何 ribbon 命令有激活态；这两个命令**与邻居一致**，而不是为两个按钮
+   发明高亮。
+9. **一处值得记录的潜在发现**：后端 `DrawPreview::status_line()` 携带**硬编码中文**的每步文本，它**不在 React
+   线上**（`CadTool` 只携带 `key/points/ready/openEnded/params`）。它是**既有且已冻结**的：
+   `crates/cad-app/src/tests/cjk_baseline.rs` 守护一份记录的 CJK 基线，仅在**增长**时失败。P5c **未新增**任何
+   CJK。记为**已基线化的债务**，不是新的违规。
+
+#### 真机证据（占位，由证据 lane 填写）
+
+- **真机证据：待填（运行目录 / 计数增量 / 截图）**——数字来自**证据 lane**（`scripts/collect-evidence.sh`
+  扩展 `YACR_PROBE_DRAW_EVIDENCE` 的标注相位：合成 DOM 指针事件、**非真实鼠标**），本文件 lane **未**运行、
+  **不**臆造数字。诚实边界沿用 P4：`cad_status` **无几何通道** ⇒ 真机只证"提交成功 + 计数 + 内容存在"，
+  **几何正确性一律由契约测试钉住**。
+
+#### 门禁（数字待编排者填）
+
+- **门禁：待填**（编排者复跑）；受影响 crate 契约测试见 `crates/cad-app/src/tests/drawing/dimension.rs`、
+  `crates/cad-app/src/draw_tool/tests.rs`、`crates/cad-app/src/host/tests/dimension.rs`、
+  `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs`、React
+  `apps/app-linux/ui/test/{dimension-tools,commands,i18n}.test.mjs`。
+- **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；本文件 lane 未独立复跑门禁；
+  跨平台；**第三方读取器验证**（本机无 `ezdxf`/`dwgread`/`dxfgrabber`）。

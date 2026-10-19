@@ -186,6 +186,13 @@ export const RIBBON_TABS = Object.freeze([
         id: 'annotation',
         titleKey: 'ribbon.panel.annotation',
         items: [
+          // Dimension creation leads the annotate panel, the way AutoCAD's
+          // Annotate tab puts its Dimensions panel first. Both are three-pick
+          // captures (two extension-line origins, then the dimension-line
+          // location); the linear/aligned pair stays together and in a fixed
+          // order so the panel never reorders between sessions.
+          { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', command: 'DIMLINEAR', large: true },
+          { id: 'DIMALIGNED', labelKey: 'draw.kind.dimaligned', icon: 'dimaligned', command: 'DIMALIGNED', large: true },
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', command: 'PROPERTIES', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
           { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', command: 'SELECTALL' },

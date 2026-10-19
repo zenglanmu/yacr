@@ -40,6 +40,11 @@ const P = {
   erase: <><path d="M9 20.5H6.9l-3.3-3.3a1.8 1.8 0 0 1 0-2.5l8.9-8.9a1.8 1.8 0 0 1 2.5 0l3.3 3.3a1.8 1.8 0 0 1 0 2.5L11.5 20.5z" /><path d="M7.2 13.8 12.2 18.8" /><path d="M4 20.5h16" /></>,
   explode: <><circle cx="12" cy="12" r="2" /><path d="M12 6.5V3M12 21v-3.5M6.5 12H3M21 12h-3.5M8.1 8.1 5.6 5.6M18.4 18.4l-2.5-2.5M15.9 8.1l2.5-2.5M8.1 15.9l-2.5 2.5" /></>,
   distance: <><path d="M4 8v8M20 8v8M4 12h16" /><path d="M7 9 4 12l3 3M17 9l3 3-3 3" /></>,
+  // Linear dimension: two vertical extension lines, a horizontal dimension line
+  // between them and outward arrowheads. The aligned variant is the same shape
+  // rotated 45°, so the pair reads as one dimension family in two orientations.
+  dimlinear: <><path d="M5 5v14M19 5v14" /><path d="M5 12h14" /><path d="M8.5 9.5 5 12l3.5 2.5M15.5 9.5 19 12l-3.5 2.5" /></>,
+  dimaligned: <g transform="rotate(-45 12 12)"><path d="M5 5v14M19 5v14" /><path d="M5 12h14" /><path d="M8.5 9.5 5 12l3.5 2.5M15.5 9.5 19 12l-3.5 2.5" /></g>,
   polyline: <><path d="M4 18 9 8l5 6 6-10" /><circle cx="4" cy="18" r="1.5" /><circle cx="9" cy="8" r="1.5" /><circle cx="20" cy="4" r="1.5" /></>,
   rectang: <><rect x="4" y="6" width="16" height="12" /><circle cx="4" cy="6" r="1.5" /><circle cx="20" cy="18" r="1.5" /></>,
   ellipse: <><ellipse cx="12" cy="12" rx="9" ry="5.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="3" cy="12" r="1.4" /><circle cx="21" cy="12" r="1.4" /></>,

@@ -111,6 +111,24 @@ pub enum CommandId {
     /// payload, a missing active layer, and every degenerate-chord / numerically
     /// singular input the geometry core raises. Work-only.
     CreateSpline,
+    /// DIMLINEAR: draw a **horizontal or vertical** linear dimension through two
+    /// extension-line origins and a dimension-line location (ADR 0017 decision C,
+    /// P5c). Payload is `Points([first, second, location])` in click order. The
+    /// handler decides horizontal vs vertical from the location pick — AutoCAD's
+    /// rule: the location determines the direction — and refuses a non-plan
+    /// (off-one-`+Z`-plane) triple, coincident origins, an ambiguous direction and
+    /// a zero measurement. The dimension is built through the shared synthesis
+    /// ([`cad_domain::DimensionGeometry::synthesized`]) from the resolved current
+    /// style (`Standard`) and inserted on the active layer in one transaction /
+    /// one undo step. Non-associative. Work-only.
+    DimLinear,
+    /// DIMALIGNED: draw a dimension whose line is **parallel** to the line joining
+    /// the two extension-line origins (ADR 0017 decision C, P5c). Payload is
+    /// `Points([first, second, location])`; the handler measures the true
+    /// origin-to-origin distance and refuses a non-plan triple, coincident origins
+    /// and a zero measurement. Same single-entity / one-transaction / active-layer
+    /// funnel as [`CommandId::DimLinear`]. Non-associative. Work-only.
+    DimAligned,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
@@ -254,6 +272,8 @@ impl CommandId {
                 | Self::CreatePolygon
                 | Self::CreatePoint
                 | Self::CreateSpline
+                | Self::DimLinear
+                | Self::DimAligned
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity

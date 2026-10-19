@@ -12,6 +12,65 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## P5c：`DIMLINEAR` + `DIMALIGNED` 创建命令（ADR-0017 决策 C，2026-10-19）
+
+**范围**：`crates/cad-app`（`command_id.rs` 两个变体 + `app_drawing/dimension.rs` 命令体 + `draw_tool/{kind,mod}.rs`
+工具种类与 `DrawIntent` + `host/draw_intent_map.rs` 映射 + 合成/宿主契约测试）、`crates/cad-ui-core`（选择子 +
+`InteractionRequest::BeginDraw` 映射 + `EXPECTED_COMMAND_COUNT` 60→62）、React 宿主 UI
+（`ribbon-model.mjs`/`commands.mjs`/`icons.jsx`/`cad.mjs`/`StatusBar.jsx` + 测试 + i18n 9 键）。
+**未**改 acadrust/架构边界；创建命令**非关联**。
+
+- **命令面**：`CommandId::{DimLinear,DimAligned}`（`requires_work_mode()`）贯通命令面；`cad-ui-core` 选择子表
+  `("DIMLINEAR", …)`/`("DIMALIGNED", …)` 与 `session/mod.rs` 的 `BeginDraw(DrawToolKind::{DimLinear,DimAligned})`
+  映射；`EXPECTED_COMMAND_COUNT` **60 → 62** 断言 + 选择子契约同步。
+- **绘制工具**：`DrawToolKind::{DimLinear,DimAligned}`（`ALL` 25 种），`arity = PointArity::Exact(3)`；
+  机器键 `"dimlinear"`/`"dimaligned"`；`DrawIntent::{DimLinear,DimAligned}{first,second,location}` 经
+  `draw_intent_map.rs` 映射为 **复用**的 `CommandPayload::Points([first,second,location])`。
+- **命令实现**（`app_drawing/dimension.rs`）：校验 → 从**当前样式** `Standard`（P5b `resolve_dim_style`）解析
+  快照 → 经**共享合成** `DimensionGeometry::synthesized` 构造 → 经**单一漏斗** `commit_new_entity` 插入**一个**
+  `AcDbDimension` 实体（一条事务、一步撤销、活动图层）。
+- **React 面**：标注族放在既有 annotate 面板**首位**（linear 在前、aligned 在后）；专用图标（两竖直尺寸界线 +
+  尺寸线，aligned 旋转 45°）；`TOOL_STEP_PROMPTS` 按**宿主真实** `tool.key`/`tool.points` 派生每步提示
+  （`StatusBar.jsx` 经 `toolStepPromptKey`），**从不**来自本地镜像。
+- **声明的决策（逐条写入 ADR-0017 P5c「声明的决策」与 `docs/compatibility.md` DIMENSION 子表）**：
+  ① 三点拾取**复用** `CommandPayload::Points`，**不新增** payload 变体；② **`DIMLINEAR` 的 H/V 规则**——以两原点
+  **中点**为基准 `|Δy| > |Δx|` ⇒ 水平（`rotation 0`，量 X）否则垂直（`rotation π/2`，量 Y）；**平局（含中点拾取）
+  是显式拒绝**（标记为**我们的选择**，AutoCAD 对该退化拾取**未查证**）；③ **"非平面视图"拒绝 = ADR D.6 的平面外**
+  情形，**不是**相机检查（命令接收世界点、无视口依赖）；④ **额外拒绝：零测量值**（所选方向把两原点投影到同一点）
+  按名拒绝；⑤ **当前样式硬编码 `Standard`**（B.3：无交互式样式管理器），数据库无它时**防御性显式拒绝**；
+  ⑥ 每步提示**派生自宿主真实工具状态**，`DIMLINEAR` 位置提示写明决定水平/垂直、`DIMALIGNED` **刻意不写**；
+  ⑦ **声明缺口——放置期间无真正标注预览**（见下）；⑧ **未加 ribbon 激活态高亮**（今天无命令有，故与邻居一致）；
+  ⑨ **潜在发现**：后端 `DrawPreview::status_line()` 携带**硬编码中文**、**不在 React 线上**（`CadTool` 只有
+  `key/points/ready/openEnded/params`）——**既有且已冻结**（`tests/cjk_baseline.rs` 仅在**增长**时失败），P5c
+  **未新增** CJK，记为**已基线化债务**。
+- **声明缺口（必须记）**：放置期间**没有真正的标注预览**——实时预览是后端**橡皮筋链**
+  （`render_scene/overlay/preview.rs` 把两种 kind 路由到 `preview_chain`），用户看到已捕获原点 + 到光标的链，
+  **看不到**合成标注（尺寸线/尺寸界线/箭头/测量文字）。真预览需**后端 overlay 分支**；React UI **无法**绘制
+  overlay（原生 CAD 分区无子窗口、DOM 不得浮于其上——ADR-0002）。React 宿主因此**改为每步提示**。**不**当作已完成。
+- **真机证据（2026-10-19）**：真实硬件 GPU（Vulkan / **Quadro P620** / `device_type=discrete_gpu`）+ X11；驱动扩展
+  `YACR_PROBE_DRAW_EVIDENCE` 的标注相位（合成 DOM 指针事件、**非真实鼠标**）：派发选择子 → **三次合成点击** → CONFIRM。
+  **`DIMLINEAR` `entityCount` 30→31（+1）、`DIMALIGNED` 31→32（+1）**，两者 `after_tool` 为 `null`（工具清空）、
+  `after_error` 为 `-`，无任何 `*_failed`；总点击 50（此前 44 + 新 6）。运行目录
+  `/tmp/opencode/yacr-evidence-20261019T111646Z`（verdict `PLANNED_TIMEOUT` / exit 143 属预期，截图 `captured`）。
+  **像素判据**：墨迹恰好出现在两个标注的世界区域（DIMLINEAR 区 0.1003、DIMALIGNED 区 0.0405，对比此前无标注帧的
+  0.0015 / 0.0017）；`DIMLINEAR` 的尺寸线横跨 cols 839–944，**两端有箭头**（端点带墨迹 0.42 / 0.40）。
+  **诚实边界**：① 输入是 Rust 经 `webview.eval` 派发的**合成 DOM 指针事件**（不经 evdev/XTest）；② `cad_status`
+  **无几何通道**（报告含 `dimension_geometry_channel=none_...`）⇒ 真机只证"**提交成功 + 计数 + 无错误 + 内容存在**"，
+  **几何正确性由 `cad-app` 契约测试钉住**（15 条通过）；③ 截图仅含**应用窗口自身**（X11 `XGetImage`），非根/整屏抓取，
+  不含视觉正确性/vendor 结论；④ 对比基线帧**窗口尺寸不同**（926×341 vs 960×439），故为**世界区域对齐**比较，**非**像素相同。
+- **门禁（编排者复跑，2026-10-19）**：受影响 crate **1814 通过 / 0 失败**（`cad-app` 595、`cad-ui-core` 140）；
+  workspace check(all-targets)、wasm lib、clippy(workspace `-D warnings`)、fmt、architecture(27)、i18n(**498**，P5c **+9**)、
+  fixture(22)、file-size(**668**)、workflow、UI **133/133** + build 全通过。
+- **受影响 crate 契约测试**：见
+  `crates/cad-app/src/tests/drawing/dimension.rs`、`crates/cad-app/src/draw_tool/tests.rs`、
+  `crates/cad-app/src/host/tests/dimension.rs`、`crates/cad-ui-core/.../command_vocabulary.rs`、React
+  `apps/app-linux/ui/test/{dimension-tools,commands,i18n}.test.mjs`。**本文件 lane 已跑**：
+  `python3 scripts/check-i18n.py`（**498** 键，P5c **+9**）与 `python3 scripts/check-file-size.py`（**668** 文件）
+  均通过。
+- **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；本文件 lane 未独立复跑其余门禁；
+  跨平台；**第三方读取器验证**（本机无 `ezdxf`/`dwgread`/`dxfgrabber`）。
+- **待办**：P5d（`DIMRADIUS`+`DIMDIAMETER`+`DIMCENTER`）；P5e（`DIMANGULAR`+`DIMORDINATE`）；P5f 已降级 NOT IMPLEMENTED。
+
 ## P5b：DIMSTYLE 表 + B.2(a)/(b) 子集 + 公制默认 + 导入/导出接线（ADR-0017 决策 B，2026-10-19）
 
 **范围**：`crates/cad-db`（新 `dim_style.rs`：`DimStyle` 表 + `standard_metric`/`resolved`/`resolve_dim_style`/

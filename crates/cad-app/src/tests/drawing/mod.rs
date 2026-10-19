@@ -277,6 +277,7 @@ mod chamfer_fillet;
 mod clipboard;
 mod create_polyline;
 mod create_trim;
+mod dimension;
 mod ellipse;
 mod explode;
 mod explode_insert;

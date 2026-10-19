@@ -25,6 +25,8 @@
 //! - [`draw`]: the `YACR_PROBE_DRAW_EVIDENCE` new drawing-command driver;
 //! - [`draw_edit`]: the `YACR_PROBE_DRAW_EVIDENCE` P4 edit-command phases
 //!   (ARRAYRECT/ARRAYPOLAR/ALIGN/STRETCH/EXPLODE) and the combined report;
+//! - [`draw_dimension`]: the `YACR_PROBE_DRAW_EVIDENCE` P5c dimension-creation
+//!   phases (DIMLINEAR/DIMALIGNED);
 //! - [`hover`]: the `YACR_PROBE_HOVER` hover-cost driver;
 //! - [`box_select`]: the `YACR_PROBE_BOX_EVIDENCE` box-selection driver.
 
@@ -32,6 +34,7 @@ use std::time::{Duration, Instant};
 
 mod box_select;
 mod draw;
+mod draw_dimension;
 mod draw_edit;
 mod edit;
 mod hover;

@@ -31,7 +31,7 @@ const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
-  'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'MOVE', 'TRIM',
+  'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'MOVE', 'TRIM',
   'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'OSNAP',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
@@ -592,6 +592,68 @@ test('STRETCH is a modify affordance in the ribbon and catalog, enabled only by 
   assert.equal(toolLabelKey('draw.stretch'), 'tool.draw.stretch');
   const ribbon = await readModule('components/Ribbon.jsx');
   assert.ok(ribbon.includes('if (item.command) return shell.runCommand(item.command);'));
+});
+
+test('DIMLINEAR and DIMALIGNED are annotate affordances in the ribbon and catalog, enabled only by router admission', async () => {
+  const { readModule, readCatalog } = await import('./helpers.mjs');
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  const expected = [
+    { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', tool: 'tool.draw.dimlinear', toolKey: 'draw.dimlinear' },
+    { id: 'DIMALIGNED', labelKey: 'draw.kind.dimaligned', icon: 'dimaligned', tool: 'tool.draw.dimaligned', toolKey: 'draw.dimaligned' },
+  ];
+  const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate');
+  assert.ok(annotate, 'the annotate tab must exist');
+  const panel = annotate.panels.find(entry => entry.id === 'annotation');
+  assert.ok(panel, 'the annotate tab must keep its annotation panel');
+  // The dimension pair leads the annotation panel, linear before aligned, so a
+  // CAD user finds dimension creation where AutoCAD's Annotate tab puts it.
+  assert.deepEqual(panel.items.slice(0, 2).map(item => item.id), ['DIMLINEAR', 'DIMALIGNED']);
+  for (const { id, labelKey, icon, tool, toolKey } of expected) {
+    // The catalog entry mirrors the draw/measure creation commands (`draw.kind.*`).
+    const entry = COMMAND_CATALOG.find(command => command.id === id);
+    assert.ok(entry, `${id} must be in the command catalog`);
+    assert.equal(entry.labelKey, labelKey);
+    assert.equal(entry.icon, icon);
+    assert.equal(entry.group, 'annotate');
+    // Ribbon entry: the annotation panel, wired as a router command (never a
+    // local shell action), rendered as a large creation button.
+    const item = panel.items.find(candidate => candidate.id === id);
+    assert.ok(item, `annotate/annotation must carry the ${id} affordance`);
+    assert.equal(item.command, id);
+    assert.equal(item.labelKey, labelKey);
+    assert.equal(item.icon, icon);
+    assert.equal(item.large, true);
+    assert.equal(item.action, undefined, `${id} must not be a local shell action`);
+    // No other tab's panel dispatches it (it is an annotate affordance only).
+    for (const tab of RIBBON_TABS) {
+      for (const other of tab.panels) {
+        if (other === panel) continue;
+        assert.equal(other.items.some(candidate => candidate.command === id), false, `${tab.id}/${other.id} must not dispatch ${id}`);
+      }
+    }
+    // Router admission is the single enable gate: admitted when the host
+    // vocabulary carries it, unsupported (never locally enabled) when it does not.
+    assert.equal(isSupportedCommand(id), true, id);
+    assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
+    setCommandCatalog([]);
+    assert.equal(isSupportedCommand(id), false, id);
+    assert.equal(admitCommandText(id, { status: loaded }).kind, 'unsupported', id);
+    setCommandCatalog(HOST_NAMES);
+    // The label keys resolve in both catalogs, and the active-tool chip key is
+    // what the host key maps onto.
+    assert.equal(typeof zh[labelKey], 'string');
+    assert.equal(typeof en[labelKey], 'string');
+    assert.equal(typeof zh[tool], 'string');
+    assert.equal(typeof en[tool], 'string');
+    assert.equal(toolLabelKey(toolKey), tool);
+  }
+  // The renderer dispatches the selector through the normal command funnel.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(
+    ribbon.includes('if (item.command) return shell.runCommand(item.command);'),
+    'ribbon items dispatch through shell.runCommand, never an action',
+  );
 });
 
 // Chrome catalog entries the router does not accept: they stay **visible but
