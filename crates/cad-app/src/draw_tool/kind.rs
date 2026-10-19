@@ -402,13 +402,38 @@ pub enum DrawToolKind {
     /// payload override forces one. The text override prompt and the object
     /// selection variant are NOT IMPLEMENTED.
     DimOrdinate,
+    /// HATCH: fill the **pre-selection** (ADR 0018 decision D, P6b).
+    ///
+    /// This kind captures **no points** — its arity is the zero-point exact
+    /// complement, exactly like [`Self::ArrayRect`] — and takes **no in-command
+    /// entity picks** ([`Self::picked_step_count`] is `0`). It is defined by the
+    /// selection snapshot taken at tool start (each selected entity becomes one
+    /// boundary loop) plus the session typed parameters
+    /// ([`super::ToolParameter::HatchPatternType`], `HatchSpacing`, `HatchAngle`,
+    /// `HatchDouble`, `HatchStyle`), so it is ready as soon as the selection is
+    /// non-empty.
+    ///
+    /// Accepted boundaries are `Circle`, a full `Ellipse` and a **closed**
+    /// `Polyline` (bulges handled); every other kind is an explicit named refusal
+    /// that opens no transaction. The command layer owns the plane/normal
+    /// consistency check, the loop construction, the pattern synthesis and every
+    /// `HatchGeometry::new` creation-path rejection.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): boundary from an internal
+    /// point, drawn boundaries, `remove boundaries`, predefined/custom pattern
+    /// names (no pattern table and no `.pat` parser — the refusal suggests
+    /// spacing/angle), gradient creation, associativity (`HPASSOC`), LINE/ARC
+    /// boundary stitching, spline boundaries, island detection beyond the style
+    /// semantics, and a live hatch preview (the React host cannot paint an
+    /// overlay above the native CAD partition).
+    Hatch,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 30] = [
+    pub const ALL: [DrawToolKind; 31] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -439,6 +464,7 @@ impl DrawToolKind {
         DrawToolKind::DimCenter,
         DrawToolKind::DimAngular,
         DrawToolKind::DimOrdinate,
+        DrawToolKind::Hatch,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -474,6 +500,7 @@ impl DrawToolKind {
             Self::DimCenter => "dimcenter",
             Self::DimAngular => "dimangular",
             Self::DimOrdinate => "dimordinate",
+            Self::Hatch => "hatch",
         }
     }
 
@@ -511,6 +538,7 @@ impl DrawToolKind {
             "dimcenter" => Some(Self::DimCenter),
             "dimangular" => Some(Self::DimAngular),
             "dimordinate" => Some(Self::DimOrdinate),
+            "hatch" => Some(Self::Hatch),
             _ => None,
         }
     }
@@ -600,6 +628,11 @@ impl DrawToolKind {
             // catalog label for chrome anyway.
             Self::DimAngular => "DIMANGULAR",
             Self::DimOrdinate => "DIMORDINATE",
+            // HATCH uses a locale-neutral ASCII fallback label, exactly like the
+            // other post-ADR-0015 kinds: the ADR fence forbids new CJK literals on
+            // the Rust side and the shell substitutes the catalog label for chrome
+            // anyway.
+            Self::Hatch => "HATCH",
         }
     }
 
@@ -632,8 +665,10 @@ impl DrawToolKind {
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot, so its complement is
             // the zero-point exact arity (ready as soon as the selection is
-            // non-empty).
-            Self::ArrayRect => PointArity::Exact(0),
+            // non-empty). HATCH has the same pre-selection shape: its boundary is
+            // the selected entities and the parameters are the typed channel, so
+            // it captures no points either.
+            Self::ArrayRect | Self::Hatch => PointArity::Exact(0),
             // Two endpoints, centre+radius point, two opposite rectangle
             // corners, a move/copy delta, target+boundary, or a rotate angle /
             // mirror axis.
@@ -672,7 +707,8 @@ impl DrawToolKind {
     /// MOVE transforms existing entities, COPY duplicates them, and
     /// ROTATE/SCALE/MIRROR transform (or mirror) them; all refuse to run with no
     /// selection rather than acting on nothing. OFFSET needs exactly one selected
-    /// source (enforced by the command layer).
+    /// source (enforced by the command layer). HATCH fills the selected boundary
+    /// entities, so it too needs a non-empty selection before it can run.
     pub fn requires_selection(self) -> bool {
         matches!(
             self,
@@ -685,6 +721,7 @@ impl DrawToolKind {
                 | Self::ArrayRect
                 | Self::ArrayPolar
                 | Self::Align
+                | Self::Hatch
         )
     }
 

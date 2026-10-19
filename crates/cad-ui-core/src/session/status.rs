@@ -194,6 +194,18 @@ pub struct CadToolParams {
     pub array_rotate_items: Option<bool>,
     /// The ALIGN scale flag, or `null` for every other tool.
     pub align_scale: Option<bool>,
+    /// The HATCH pattern type (`0` solid, `1` user-defined), or `null` for every
+    /// other tool (ADR 0018 decision D, P6b).
+    pub hatch_pattern_type: Option<f64>,
+    /// The HATCH user-defined pattern spacing, or `null` for every other tool.
+    pub hatch_spacing: Option<f64>,
+    /// The HATCH pattern angle in degrees, or `null` for every other tool.
+    pub hatch_angle: Option<f64>,
+    /// The HATCH `HPDOUBLE` flag, or `null` for every other tool.
+    pub hatch_double: Option<bool>,
+    /// The HATCH style (`0` Normal, `1` Outer, `2` Ignore), or `null` for every
+    /// other tool.
+    pub hatch_style: Option<f64>,
 }
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -421,6 +433,29 @@ pub(super) fn cad_tool(
                     ToolParameter::AlignScale,
                     preview.kind == DrawToolKind::Align,
                 ),
+                // The five HATCH parameters are present **only** while a HATCH
+                // capture is active (ADR 0018 decision D, P6b): the tool captures
+                // no points, so these are its whole definition.
+                hatch_pattern_type: number(
+                    ToolParameter::HatchPatternType,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
+                hatch_spacing: number(
+                    ToolParameter::HatchSpacing,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
+                hatch_angle: number(
+                    ToolParameter::HatchAngle,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
+                hatch_double: flag(
+                    ToolParameter::HatchDouble,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
+                hatch_style: number(
+                    ToolParameter::HatchStyle,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -443,6 +478,11 @@ pub(super) fn cad_tool(
                 array_fill_angle: None,
                 array_rotate_items: None,
                 align_scale: None,
+                hatch_pattern_type: None,
+                hatch_spacing: None,
+                hatch_angle: None,
+                hatch_double: None,
+                hatch_style: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

@@ -293,6 +293,16 @@ impl HostController {
                     axis: None,
                 })),
             ),
+            // HATCH: the selection snapshot is the boundary (the tool captures no
+            // points); the pattern type/spacing/angle/double/style are the session
+            // typed channel the command layer reads, so they never ride the
+            // payload.
+            DrawIntent::Hatch => (
+                crate::CommandId::Hatch,
+                crate::CommandPayload::Hatch {
+                    refs: selection.to_vec(),
+                },
+            ),
         };
         Ok(Command {
             schema_version: 1,

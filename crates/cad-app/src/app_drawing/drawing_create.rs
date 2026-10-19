@@ -24,6 +24,7 @@ impl Application {
             CommandId::DimCenter => self.dim_center(session, command),
             CommandId::DimAngular => self.dim_angular(session, command),
             CommandId::DimOrdinate => self.dim_ordinate(session, command),
+            CommandId::Hatch => self.create_hatch(session, command),
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
             CommandId::ExtendEntity => self.extend_entity(command),

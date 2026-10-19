@@ -50,8 +50,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::ArrayPolar
             | DrawToolKind::DimCenter => 1,
             // ARRAYRECT captures no points: it is defined entirely by the session
-            // typed parameters plus the selection snapshot.
-            DrawToolKind::ArrayRect => 0,
+            // typed parameters plus the selection snapshot. HATCH has the same
+            // pre-selection shape: the selected entities are the boundary and the
+            // pattern parameters are the typed channel.
+            DrawToolKind::ArrayRect | DrawToolKind::Hatch => 0,
             _ => 2,
         };
         assert_eq!(kind.required_points(), expected, "{kind:?}");
@@ -886,6 +888,7 @@ fn polygon_intent_carries_the_two_picks_exactly_and_is_ready_at_two() {
 
 mod array;
 mod dimension;
+mod hatch;
 mod point_spline;
 
 #[test]

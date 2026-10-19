@@ -35,6 +35,7 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("DIMCENTER", "draw.dimcenter"),
     ("DIMANGULAR", "draw.dimangular"),
     ("DIMORDINATE", "draw.dimordinate"),
+    ("HATCH", "draw.hatch"),
 ];
 
 fn fresh_session() -> CadSession {

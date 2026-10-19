@@ -66,6 +66,22 @@ impl ToolValue {
     }
 }
 
+/// HATCH pattern-type closed set (ADR 0018 decision D, P6b): the fill kind the
+/// command synthesizes. `0` is a solid fill; `1` is a user-defined pattern
+/// (angle/spacing/double). A predefined/custom **pattern name** is NOT
+/// IMPLEMENTED — there is no pattern table and no `.pat` parser.
+pub const HATCH_PATTERN_TYPE_SOLID: f64 = 0.0;
+/// The user-defined pattern type code (see [`HATCH_PATTERN_TYPE_SOLID`]).
+pub const HATCH_PATTERN_TYPE_USER_DEFINED: f64 = 1.0;
+
+/// HATCH style closed set (DXF group 75, ADR 0018 A.3): `0` Normal (odd-parity
+/// area), `1` Outer (outermost area only), `2` Ignore (through the entire area).
+pub const HATCH_STYLE_NORMAL: f64 = 0.0;
+/// The `Outer` style code (see [`HATCH_STYLE_NORMAL`]).
+pub const HATCH_STYLE_OUTER: f64 = 1.0;
+/// The `Ignore` style code (see [`HATCH_STYLE_NORMAL`]).
+pub const HATCH_STYLE_IGNORE: f64 = 2.0;
+
 /// A session-scoped tool parameter with a stable machine key (ADR 0016 decision A).
 ///
 /// The member set and the machine keys are the frozen channel vocabulary: the
@@ -85,11 +101,28 @@ pub enum ToolParameter {
     ArrayItems,
     ArrayFillAngle,
     ArrayRotateItems,
+    /// HATCH pattern type: a **closed set** — `0` solid, `1` user-defined
+    /// (ADR 0018 decision D, P6b). Predefined/custom pattern names are NOT
+    /// IMPLEMENTED (there is no pattern table and no `.pat` parser).
+    HatchPatternType,
+    /// HATCH user-defined pattern spacing: the perpendicular distance between
+    /// the synthesized pattern lines. Finite and **strictly positive** (a
+    /// non-positive spacing has no line family; it is refused, not clamped).
+    HatchSpacing,
+    /// HATCH pattern angle in **degrees** (AutoCAD's prompt unit); the command
+    /// converts it to the radians the domain stores. Any finite value is
+    /// accepted — no implicit wrap (declared).
+    HatchAngle,
+    /// HATCH `HPDOUBLE` flag: draw the perpendicular second line family.
+    HatchDouble,
+    /// HATCH style: a **closed set** — `0` Normal, `1` Outer, `2` Ignore
+    /// (ADR 0018 A.3).
+    HatchStyle,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 12] = [
+    pub const ALL: [ToolParameter; 17] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -102,10 +135,15 @@ impl ToolParameter {
         ToolParameter::ArrayItems,
         ToolParameter::ArrayFillAngle,
         ToolParameter::ArrayRotateItems,
+        ToolParameter::HatchPatternType,
+        ToolParameter::HatchSpacing,
+        ToolParameter::HatchAngle,
+        ToolParameter::HatchDouble,
+        ToolParameter::HatchStyle,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 17;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -122,6 +160,11 @@ impl ToolParameter {
             Self::ArrayItems => 9,
             Self::ArrayFillAngle => 10,
             Self::ArrayRotateItems => 11,
+            Self::HatchPatternType => 12,
+            Self::HatchSpacing => 13,
+            Self::HatchAngle => 14,
+            Self::HatchDouble => 15,
+            Self::HatchStyle => 16,
         }
     }
 
@@ -144,6 +187,11 @@ impl ToolParameter {
             Self::ArrayItems => "arrayItems",
             Self::ArrayFillAngle => "arrayFillAngle",
             Self::ArrayRotateItems => "arrayRotateItems",
+            Self::HatchPatternType => "hatchPatternType",
+            Self::HatchSpacing => "hatchSpacing",
+            Self::HatchAngle => "hatchAngle",
+            Self::HatchDouble => "hatchDouble",
+            Self::HatchStyle => "hatchStyle",
         }
     }
 
@@ -157,7 +205,7 @@ impl ToolParameter {
     /// The kind of value this parameter accepts.
     pub fn kind(self) -> ToolValueKind {
         match self {
-            Self::AlignScale | Self::ArrayRotateItems => ToolValueKind::Flag,
+            Self::AlignScale | Self::ArrayRotateItems | Self::HatchDouble => ToolValueKind::Flag,
             _ => ToolValueKind::Number,
         }
     }
@@ -174,6 +222,13 @@ impl ToolParameter {
     /// * `ArrayRowSpacing` / `ArrayColumnSpacing` **0**.
     /// * `ArrayFillAngle` **360** — AutoCAD's full-circle ARRAYPOLAR default.
     /// * `ArrayRotateItems` **false**.
+    /// * `HatchPatternType` **0 (solid)** — with no pattern table the solid fill is
+    ///   the only definition that needs no spacing/pattern name.
+    /// * `HatchSpacing` **1** — AutoCAD's `HPSCALE` initial value (and a *valid*
+    ///   spacing, so the default never limps into a forced refusal at commit).
+    /// * `HatchAngle` **0** degrees.
+    /// * `HatchDouble` **false** — `HPDOUBLE` initial 0.
+    /// * `HatchStyle` **0 (Normal)** — DXF `75=0`, the odd-parity area.
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -193,6 +248,11 @@ impl ToolParameter {
             Self::ArrayItems => ToolValue::Number(1.0),
             Self::ArrayFillAngle => ToolValue::Number(360.0),
             Self::ArrayRotateItems => ToolValue::Flag(false),
+            Self::HatchPatternType => ToolValue::Number(HATCH_PATTERN_TYPE_SOLID),
+            Self::HatchSpacing => ToolValue::Number(1.0),
+            Self::HatchAngle => ToolValue::Number(0.0),
+            Self::HatchDouble => ToolValue::Flag(false),
+            Self::HatchStyle => ToolValue::Number(HATCH_STYLE_NORMAL),
         }
     }
 
@@ -218,8 +278,25 @@ impl ToolParameter {
             (Self::ArrayRowSpacing, ToolValue::Number(number))
             | (Self::ArrayColumnSpacing, ToolValue::Number(number)) => finite(self, number),
             (Self::ArrayFillAngle, ToolValue::Number(number)) => fill_angle(self, number),
+            (Self::HatchPatternType, ToolValue::Number(number)) => closed_choice(
+                self,
+                number,
+                &[HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED],
+                "0 (solid) or 1 (user-defined)",
+            ),
+            (Self::HatchSpacing, ToolValue::Number(number)) => {
+                finite_greater_than(self, number, 0.0)
+            }
+            (Self::HatchAngle, ToolValue::Number(number)) => finite(self, number),
+            (Self::HatchStyle, ToolValue::Number(number)) => closed_choice(
+                self,
+                number,
+                &[HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER, HATCH_STYLE_IGNORE],
+                "0 (Normal), 1 (Outer) or 2 (Ignore)",
+            ),
             (Self::AlignScale, ToolValue::Flag(_))
-            | (Self::ArrayRotateItems, ToolValue::Flag(_)) => Ok(()),
+            | (Self::ArrayRotateItems, ToolValue::Flag(_))
+            | (Self::HatchDouble, ToolValue::Flag(_)) => Ok(()),
             // Any other pairing is a kind mismatch: a `Flag` for a numeric
             // parameter, or a `Number` for a flag parameter.
             _ => Err(CadError::InvalidInput(format!(
@@ -276,6 +353,37 @@ fn finite(parameter: ToolParameter, number: f64) -> CadResult<()> {
     } else {
         Err(CadError::InvalidInput(format!(
             "tool parameter '{}' must be finite, got {number}",
+            parameter.key()
+        )))
+    }
+}
+
+/// A finite value **strictly above** `low` (the HATCH spacing: a zero or negative
+/// spacing has no line family and is refused, never clamped to a minimum).
+fn finite_greater_than(parameter: ToolParameter, number: f64, low: f64) -> CadResult<()> {
+    if number.is_finite() && number > low {
+        Ok(())
+    } else {
+        Err(CadError::InvalidInput(format!(
+            "tool parameter '{}' must be finite and > {low}, got {number}",
+            parameter.key()
+        )))
+    }
+}
+
+/// A value from a closed integer set, named in the refusal with its accepted
+/// codes (`description` is the human-readable choice list).
+fn closed_choice(
+    parameter: ToolParameter,
+    number: f64,
+    choices: &[f64],
+    description: &str,
+) -> CadResult<()> {
+    if number.is_finite() && number.fract() == 0.0 && choices.contains(&number) {
+        Ok(())
+    } else {
+        Err(CadError::InvalidInput(format!(
+            "tool parameter '{}' must be one of {description}, got {number}",
             parameter.key()
         )))
     }
@@ -592,6 +700,143 @@ mod tests {
         assert_eq!(
             store.get(ToolParameter::ArrayFillAngle),
             ToolValue::Number(360.0)
+        );
+    }
+
+    #[test]
+    fn hatch_defaults_are_valid_and_documented() {
+        assert_eq!(
+            ToolParameter::HatchPatternType.default_value(),
+            ToolValue::Number(HATCH_PATTERN_TYPE_SOLID)
+        );
+        assert_eq!(
+            ToolParameter::HatchSpacing.default_value(),
+            ToolValue::Number(1.0)
+        );
+        assert_eq!(
+            ToolParameter::HatchAngle.default_value(),
+            ToolValue::Number(0.0)
+        );
+        assert_eq!(
+            ToolParameter::HatchDouble.default_value(),
+            ToolValue::Flag(false)
+        );
+        assert_eq!(
+            ToolParameter::HatchStyle.default_value(),
+            ToolValue::Number(HATCH_STYLE_NORMAL)
+        );
+        // A default the channel would refuse at commit would make the tool limp
+        // into a forced error, so every HATCH default must itself be valid.
+        for parameter in [
+            ToolParameter::HatchPatternType,
+            ToolParameter::HatchSpacing,
+            ToolParameter::HatchAngle,
+            ToolParameter::HatchDouble,
+            ToolParameter::HatchStyle,
+        ] {
+            parameter
+                .validate(parameter.default_value())
+                .unwrap_or_else(|error| panic!("{parameter:?} default refused: {error}"));
+        }
+        assert_eq!(ToolParameter::HatchDouble.kind(), ToolValueKind::Flag);
+        for parameter in [
+            ToolParameter::HatchPatternType,
+            ToolParameter::HatchSpacing,
+            ToolParameter::HatchAngle,
+            ToolParameter::HatchStyle,
+        ] {
+            assert_eq!(parameter.kind(), ToolValueKind::Number, "{parameter:?}");
+        }
+    }
+
+    #[test]
+    fn hatch_spacing_is_finite_and_strictly_positive() {
+        for accepted in [1e-9, 0.5, 1.0, 1e9] {
+            ToolParameter::HatchSpacing
+                .validate(ToolValue::Number(accepted))
+                .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
+        }
+        for refused in [0.0, -1e-9, -2.0, f64::NAN, f64::INFINITY] {
+            assert_refusal_names_parameter(
+                ToolParameter::HatchSpacing
+                    .validate(ToolValue::Number(refused))
+                    .unwrap_err(),
+                "hatchSpacing",
+            );
+        }
+        assert_refusal_names_parameter(
+            ToolParameter::HatchSpacing
+                .validate(ToolValue::Flag(true))
+                .unwrap_err(),
+            "hatchSpacing",
+        );
+    }
+
+    #[test]
+    fn hatch_angle_accepts_any_finite_value_and_refuses_non_finite() {
+        for accepted in [0.0, 90.0, -270.0, 1e6] {
+            ToolParameter::HatchAngle
+                .validate(ToolValue::Number(accepted))
+                .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
+        }
+        for refused in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_refusal_names_parameter(
+                ToolParameter::HatchAngle
+                    .validate(ToolValue::Number(refused))
+                    .unwrap_err(),
+                "hatchAngle",
+            );
+        }
+        assert_refusal_names_parameter(
+            ToolParameter::HatchAngle
+                .validate(ToolValue::Flag(false))
+                .unwrap_err(),
+            "hatchAngle",
+        );
+    }
+
+    #[test]
+    fn hatch_pattern_type_and_style_are_closed_sets() {
+        // Pattern type: 0 solid, 1 user-defined. 2 (custom) and 3 are outside the
+        // implemented set (no pattern table / .pat parser).
+        for accepted in [HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED] {
+            ToolParameter::HatchPatternType
+                .validate(ToolValue::Number(accepted))
+                .unwrap();
+        }
+        for refused in [2.0, 3.0, -1.0, 0.5, f64::NAN, f64::INFINITY] {
+            let message = match ToolParameter::HatchPatternType
+                .validate(ToolValue::Number(refused))
+                .unwrap_err()
+            {
+                CadError::InvalidInput(message) => message,
+                other => panic!("expected an InvalidInput refusal, got {other:?}"),
+            };
+            assert!(message.contains("hatchPatternType"), "{message}");
+            assert!(message.contains("user-defined"), "{message}");
+        }
+        // Style: 0 Normal, 1 Outer, 2 Ignore.
+        for accepted in [HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER, HATCH_STYLE_IGNORE] {
+            ToolParameter::HatchStyle
+                .validate(ToolValue::Number(accepted))
+                .unwrap();
+        }
+        for refused in [3.0, -1.0, 1.5, f64::NAN] {
+            let message = match ToolParameter::HatchStyle
+                .validate(ToolValue::Number(refused))
+                .unwrap_err()
+            {
+                CadError::InvalidInput(message) => message,
+                other => panic!("expected an InvalidInput refusal, got {other:?}"),
+            };
+            assert!(message.contains("hatchStyle"), "{message}");
+            assert!(message.contains("Ignore"), "{message}");
+        }
+        assert_refusal_names_parameter(
+            ToolParameter::HatchStyle
+                .validate(ToolValue::Flag(true))
+                .unwrap_err(),
+            "hatchStyle",
         );
     }
 }

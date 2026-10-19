@@ -340,6 +340,7 @@ impl SessionState {
             DrawToolKind::DimCenter => CommandId::DimCenter,
             DrawToolKind::DimAngular => CommandId::DimAngular,
             DrawToolKind::DimOrdinate => CommandId::DimOrdinate,
+            DrawToolKind::Hatch => CommandId::Hatch,
         })?;
         let selection = self.selection.refs().to_vec();
         let tool = DrawTool::new(kind, selection.len());
@@ -589,5 +590,13 @@ fn authorizing_command(parameter: ToolParameter) -> CommandId {
         // ALIGN (P4d): `AlignScale` is authorized against the ALIGN edit command,
         // so a Viewer-mode set is refused exactly like the other edit parameters.
         ToolParameter::AlignScale => CommandId::AlignEntities,
+        // HATCH (P6b): every hatch parameter is authorized against the HATCH
+        // create command, so a Viewer-mode set is refused exactly like the create
+        // commands.
+        ToolParameter::HatchPatternType
+        | ToolParameter::HatchSpacing
+        | ToolParameter::HatchAngle
+        | ToolParameter::HatchDouble
+        | ToolParameter::HatchStyle => CommandId::Hatch,
     }
 }

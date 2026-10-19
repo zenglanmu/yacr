@@ -284,6 +284,7 @@ mod ellipse;
 mod explode;
 mod explode_insert;
 mod explode_self_reference;
+mod hatch;
 mod offset;
 mod point;
 mod polygon;

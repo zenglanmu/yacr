@@ -101,9 +101,12 @@ pub fn draw_preview_overlay(
         // ARRAYPOLAR captures one point (the centre); the live cursor is the
         // existing chain. ARRAYRECT captures no points at all, so `preview_chain`
         // yields nothing for it (no fabricated preview) — the array result depends
-        // on the session parameters plus the selection, not on the cursor.
+        // on the session parameters plus the selection, not on the cursor. HATCH
+        // has the same zero-point pre-selection shape (ADR 0018 decision D), so it
+        // also yields no chain.
         | DrawToolKind::ArrayRect
         | DrawToolKind::ArrayPolar
+        | DrawToolKind::Hatch
         // ALIGN captures four free points (two source/destination pairs); STRETCH
         // captures four free points (two window corners plus a base and a
         // displacement point). Both use the existing cursor/chain preview (no new

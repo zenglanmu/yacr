@@ -46,7 +46,8 @@ pub use camera::{
 pub use command_id::*;
 pub use draw_tool::{
     circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity, ToolParameter,
-    ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,
+    ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES, HATCH_PATTERN_TYPE_SOLID,
+    HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
 };
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
@@ -566,6 +567,17 @@ pub enum CommandPayload {
     /// (world-origin-relative) X or Y coordinate magnitude, matching P5b's
     /// ordinate semantics and the acadrust writer's group 42.
     DimOrdinate(Box<OrdinateDimensionCommand>),
+    /// HATCH the pre-selected boundary entities (ADR 0018 decision D, P6b).
+    ///
+    /// `refs` is the selection snapshot the tool started with (the tool captures
+    /// no points; each selected entity becomes one boundary loop). The pattern
+    /// type (solid vs user-defined), spacing, angle, double flag and style are the
+    /// session typed channel
+    /// ([`crate::draw_tool::ToolParameter::HatchPatternType`] … `HatchStyle`), read
+    /// by the handler so the session stays the single authority for them.
+    Hatch {
+        refs: Vec<SelectionRef>,
+    },
     /// A fully formed semantic geometry, used by `CreateLine` as the
     /// programmatic alternative to a point list.
     Geometry(Box<SemanticGeometry>),

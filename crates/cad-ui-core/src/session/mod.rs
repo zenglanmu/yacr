@@ -195,6 +195,7 @@ impl CadSession {
     /// | `DIMRADIUS` / `DIMDIAMETER` / `DIMCENTER` | `BeginDraw(DimRadius)` / `BeginDraw(DimDiameter)` / `BeginDraw(DimCenter)` |
     /// | `DIMANGULAR` / `DIMORDINATE` | `BeginDraw(DimAngular)` / `BeginDraw(DimOrdinate)` |
     /// | `ARRAYRECT` / `ARRAYPOLAR` | `BeginDraw(ArrayRect)` / `BeginDraw(ArrayPolar)` |
+    /// | `HATCH` | `BeginDraw(Hatch)` (boundary = the current selection) |
     /// | `ALIGN` | `BeginDraw(Align)` |
     /// | `STRETCH` | `BeginDraw(Stretch)` |
     /// | `MEASURE` / `DIST` | `BeginMeasurement(Distance)` |
@@ -287,6 +288,9 @@ impl CadSession {
                 Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayRect))
             }
             CommandId::ArrayPolar => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayPolar)),
+            // HATCH has the pre-selection shape: its boundary is the current
+            // selection, so the selector only starts the tool (no payload).
+            CommandId::Hatch => Some(InteractionRequest::BeginDraw(DrawToolKind::Hatch)),
             CommandId::AlignEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Align)),
             CommandId::StretchEntities => {
                 Some(InteractionRequest::BeginDraw(DrawToolKind::Stretch))

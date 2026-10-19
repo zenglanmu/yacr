@@ -54,6 +54,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("DIMCENTER", CommandId::DimCenter),
     ("DIMANGULAR", CommandId::DimAngular),
     ("DIMORDINATE", CommandId::DimOrdinate),
+    ("HATCH", CommandId::Hatch),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
     ("EXTEND", CommandId::ExtendEntity),

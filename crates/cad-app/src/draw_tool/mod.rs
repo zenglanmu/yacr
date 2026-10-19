@@ -397,6 +397,15 @@ pub enum DrawIntent {
     /// The axis follows the command layer's auto rule (the interactive form never
     /// forces one); every refusal lives there.
     DimOrdinate { feature: Point3, leader: Point3 },
+    /// HATCH the current selection (ADR 0018 decision D, P6b).
+    ///
+    /// Carries no field: the boundary is the selection snapshot the caller
+    /// supplies, and the pattern type/spacing/angle/double/style are the session
+    /// typed channel ([`ToolParameter::HatchPatternType`] … `HatchStyle`), so the
+    /// intent stays the pure description of what the user asked for. This kind
+    /// captures **no points** (the zero-point exact complement) and takes no
+    /// in-command picks.
+    Hatch,
 }
 
 /// Drawing/editing capture state machine.
@@ -646,6 +655,12 @@ impl DrawTool {
         if self.kind == DrawToolKind::ArrayRect {
             return Ok(DrawIntent::ArrayRect);
         }
+        // HATCH has the same zero-point pre-selection shape: its boundary is the
+        // selection snapshot and its parameters are the typed channel, so it is
+        // ready as soon as the selection is non-empty and never reads a point.
+        if self.kind == DrawToolKind::Hatch {
+            return Ok(DrawIntent::Hatch);
+        }
         let a = self.points[0];
         // One-point tools (OFFSET, ARRAYPOLAR) never index a second point;
         // `unwrap_or(a)` is a harmless placeholder only ever used when a kind's arm
@@ -858,6 +873,9 @@ impl DrawTool {
                 feature: a,
                 leader: b,
             },
+            // HATCH: handled by the early return above (zero captured points). The
+            // arm is unreachable here but keeps the match exhaustive over kinds.
+            DrawToolKind::Hatch => DrawIntent::Hatch,
         })
     }
 }
@@ -883,7 +901,10 @@ mod geometry;
 mod parameter;
 // The general typed tool-parameter model (ADR 0016 decision A); re-exported so
 // `crate::draw_tool::<name>` and the public `cad_app::<name>` paths resolve.
-pub use parameter::{ToolParameter, ToolParameterStore, ToolValue, ToolValueKind};
+pub use parameter::{
+    ToolParameter, ToolParameterStore, ToolValue, ToolValueKind, HATCH_PATTERN_TYPE_SOLID,
+    HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
+};
 // Re-exported so the historical `crate::draw_tool::<name>` paths and the public
 // `cad_app::circle_radius` (via `lib.rs`) stay valid for the callers that used the
 // pre-split module layout.

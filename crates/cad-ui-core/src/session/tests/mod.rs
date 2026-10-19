@@ -10,6 +10,7 @@ mod tests_align;
 mod tests_array;
 mod tests_commands;
 mod tests_explode;
+mod tests_hatch;
 mod tests_hover;
 mod tests_input;
 mod tests_stretch;

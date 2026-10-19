@@ -239,6 +239,7 @@ impl Application {
             | CommandId::DimCenter
             | CommandId::DimAngular
             | CommandId::DimOrdinate
+            | CommandId::Hatch
             | CommandId::MoveEntities
             | CommandId::TrimEntity
             | CommandId::ExtendEntity
