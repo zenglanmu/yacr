@@ -41,12 +41,33 @@
   与 0.05 相符）并由 12.4 px 的 45° 段连接；窗口内无错误/告警样式。
   **诚实边界**：`cad_status` 无几何/顶点通道，故真机只证"提交成功 + 计数 +1 + 像素存在"，
   弧的半径/相切与修剪距离由 crate 契约测试数值钉住（不在真机证据内）。
-- **门禁**：cad-app 516 / cad-ui-core 131 / cad-representation 188 / cad-host 143 / cad-geometry 79 / cad-spatial 47 /
+- **P4c（提交 bad87c2）**：`ARRAYRECT`/`ARRAYPOLAR`（**独立副本**、一条事务一步撤销、源对象保留；矩形间距=**基点间距离**、
+  向上右生成；极坐标捕获中心点、`rotateItems` 决定绕中心旋转或仅平移）。**首版两条规则有误并已修**：
+  ① 填充角规则与自己的默认值矛盾（默认 360 却拒绝整圈 ⇒ 用户步进后**回不到默认**）→ 改为**有限、非零、`|angle| ≤ 360`**，
+  并同步 UI 步进边界；② 副本数多一个（`rows×cols`/`items` 是**含原对象的总数**）→ 改为 `rows×cols−1` / `items−1`，
+  1×1 与单项阵列**不产生副本并显式诊断**、不开事务不留撤销。所有受影响期望（实体数/坐标/DXF/一条撤销）已同步。
+- **P4d（提交 b43e1e3）**：`ALIGN`（两对点 `Exact(4)`、`AlignScale` 默认关、以 `source1` 为枢轴
+  `translate∘rotate∘[scale]`、**原位**变换、一条事务一步撤销）；数值测试钉住 90° 旋转与 3 倍均匀缩放、
+  矩形保持 2:1 边长比（证明均匀）。**1 对点移动显式未实现**（等价于 `MOVE`）。
+- **P4e（提交 95bb7ff）**：`STRETCH`（4 点、窗口**恒 CROSSING**、分类在命令内重算且按几何类型分两种口径、
+  **部分包围=逐顶点移动 / 完全包围=整移**、圆/椭圆/块/ARC 部分包围不动+诊断、`TEXT` **整命令拒绝**、
+  **bulge 数值保留**并数值钉住 0.5、无变化时**不开事务**只给诊断）；载荷 `delta` 为**位移点**（平移 = `delta − base`）。
+- **P4f（提交 a492186）**：`EXPLODE`（**一次一层**；与 `ERASE` 一样是**无载荷直命令**，不需要工具状态，故只有
+  `draw.kind.explode` 而无 `tool.draw.explode`）。**首版与决策文本矛盾并已修**：lane 照搬导出层的递归走查
+  （把嵌套块**摊平到叶子**）与"一次一层"冲突 ⇒ 改为成员按一层产出、**嵌套块引用保持为引用**（placement 复合进去）、
+  二次 EXPLODE 才展开；导出层的循环栈/深度上限**整段删除**（一层走查下不可达，保留即等于假装加固）。
+  `Compound` 分解为**全部子项**（含 hatch 填充网格与图案线，只取环是静默丢失）；`Dimension`/`MTable`/`MLeader`
+  按 `type_key` 显式拒绝；`IMAGE`/`MASK` 按**策略**拒绝（它们**可变换**，不得假称被变换拒绝）。
+- **真实 GPU 证据（Vulkan / Quadro P620 / X11；`YACR_PROBE_DRAW_EVIDENCE`，44 次合成 DOM 指针事件、非真实鼠标）**：
+  `ARRAYRECT`（2×3）`entityCount` **+5**、`ARRAYPOLAR`（4 项）**+3**、`EXPLODE`（闭合矩形→四段线）**+3**；
+  `ALIGN` 与 `STRETCH` 为**原位**变换故计数**不变**且无错误（诚实：`cad_status` 无几何通道，故真机只证"提交成功 + 计数 +
+  像素存在"，几何正确性由 crate 契约测试数值钉住）。像素判据显示数组与分解后的矩形确实出现在预期投影位置。
+- **门禁**：cad-app 578 / cad-ui-core 140 / cad-representation 188 / cad-host 143 / cad-geometry 79 / cad-spatial 47 /
   cad-engine 104 / cad-measure 52；clippy(workspace)、fmt、check(workspace+all-targets)、wasm、architecture、
-  i18n 477、fixture、file-size 639、workflow、UI 122。
+  i18n 486、fixture 22、file-size 659、workflow、UI 126。
 - **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超 10 分钟被杀）；真机**几何精度**
   （无观测通道）；跨平台。
-- **进行中/待办**：P4c（`ARRAYRECT`/`ARRAYPOLAR`）→ P4d（`ALIGN`）→ P4e（`STRETCH`）→ P4f（`EXPLODE`）→ P4 阶段门禁。
+- **待办**：P4 阶段门禁（Oracle）；P5（DIM 族）及以后见排期。
 - **开放项（本轮新增）**：UI 的 `draw.fillet/chamfer/arrayrect/arraypolar/align` 工具行是**前瞻性占位**
   （`tool.key` 若与假设不符需改行）；`statusKey` 假设等于机器键（仅 `polygonSides→sides` 是历史例外）；
   填充角 `projectable` 放宽以显示默认 360；Flag 参数无待发累积；证据工具链的 README 模板仍会列出未产出的

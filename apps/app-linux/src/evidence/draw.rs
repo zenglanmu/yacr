@@ -36,6 +36,26 @@
 //! 6. **POINT visibility**: start `POINT`, click one point, `CONFIRM`, read
 //!    `entityCount` +1, and leave the created POINT on screen.
 //! 7. **RECTANG end to end** (same funnel): `entityCount` delta +1.
+//! 8. **ARRAYRECT**: click-select one entity, set `arrayRows`/`arrayColumns`
+//!    through the real IPC, start `ARRAYRECT`, `CONFIRM`, read `entityCount`
+//!    **+5** (`rows × columns − 1` copies; the source is retained).
+//! 9. **ARRAYPOLAR**: click-select one entity, set `arrayItems`, start
+//!    `ARRAYPOLAR`, click the centre, `CONFIRM`, read `entityCount` **+3**
+//!    (`items − 1` copies).
+//! 10. **ALIGN**: draw a LINE, click-select it, start `ALIGN`, capture the four
+//!     points (source pair, destination pair) with `alignScale` left at its
+//!     default `false`, `CONFIRM`. This is an **in-place** transform, so
+//!     `entityCount` is **unchanged**; the honest observables are "accepted, no
+//!     error, count unchanged" plus the screenshot.
+//! 11. **STRETCH**: draw a LINE, start `STRETCH`, capture a crossing window that
+//!     encloses **one** endpoint, then the base and displacement points,
+//!     `CONFIRM`. Also in-place: `entityCount` unchanged.
+//! 12. **EXPLODE**: draw a closed polyline (`RECTANG`), click-select it, then
+//!     dispatch the payload-free `EXPLODE` selector: the polyline is deleted and
+//!     four LINEs are inserted ⇒ `entityCount` **+3**.
+//!
+//! The P4 edit-command phases (8–12) and the combined single-line report live in
+//! [`super::draw_edit`] (this file was split at the 1000-line code-file gate).
 //!
 //! Synthetic input, **not a real mouse**: the events are dispatched on
 //! `.native-input` and never touch the kernel/evdev/XInput path. Every reported
@@ -93,7 +113,8 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
     eprintln!(
         "[probe] draw evidence: enabled (YACR_PROBE_DRAW_EVIDENCE); synthetic DOM pointer events, NOT a real mouse; \
          phases: LINE pair + FILLET(radius, deliberate miss) + LINE pair + CHAMFER(a/b) + PLINE(3pt+CONFIRM) \
-         POLYGON(sides=6, out-of-range=2) POINT(visible) RECTANG"
+         POLYGON(sides=6, out-of-range=2) POINT(visible) RECTANG + P4 edit commands \
+         ARRAYRECT(rows=2,cols=3) ARRAYPOLAR(items=4) ALIGN(4pt) STRETCH(4pt) EXPLODE"
     );
     let webview = webview.clone();
     if let Err(error) = std::thread::Builder::new()
@@ -126,8 +147,7 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
 ///   t=47s pick the horizontal; t=48s read (points = 1); t=49s pick the vertical;
 ///   t=50s read (points = 2, ready); t=51s `CONFIRM`; t=52s read (`entityCount`
 ///   +1, `tool` `null`). The FILLET ARC and the CHAMFER LINE are now on screen;
-///   an external `--capture-at` lands **in the t=52..68 gap** so a reviewer sees
-///   the rounded corner / the cut corner without the later phases' clutter;
+///   the PLINE/POLYGON/POINT/RECTANG phases follow in the t=68..98 span;
 /// * **PLINE**: t=68s start `PLINE`; t=69/70/71s click three world points; t=72s
 ///   read (`points` = 3); t=73s `CONFIRM`; t=74s read (`entityCount` +1);
 /// * **POLYGON**: t=76s `cad_set_tool_parameter polygonSides=6`; t=77s start
@@ -140,7 +160,12 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
 ///   (`points` = 1); t=90s `CONFIRM`; t=91s read (`entityCount` +1);
 /// * **RECTANG**: t=93s start `RECTANG`; t=94/95s click two corners; t=96s read
 ///   (`points` = 2); t=97s `CONFIRM`; t=98s read (`entityCount` +1);
-/// * t=101s log one single-line report via the eval callback.
+/// * then the **P4 edit-command phases** (ARRAYRECT / ARRAYPOLAR / ALIGN /
+///   STRETCH / EXPLODE) run on a sub-second step (t=100s..135.5s) and the
+///   combined single-line report lands at t=137s — all in [`super::draw_edit`],
+///   which documents the per-step timeline. An external `--capture-at` should
+///   land **after** the P4 phases (≈ driver t=137..) so a reviewer sees the
+///   arrays and the EXPLODE result on screen.
 ///
 /// Every step is a dispatch only; the **real** outcome is the `cad_status`
 /// snapshot read from the host, never a value synthesized here. Pointer
@@ -369,10 +394,10 @@ fn run_draw_evidence(webview: tauri::Webview) {
         "chamfer-after cad_status (entityCount +1)",
         || webview.eval(draw_status_js("s_chamfer_after")),
     );
-    // The FILLET ARC and CHAMFER LINE are now on screen. The next phase starts at
-    // t=68, so an external `--capture-at` in t=52..68 lands on a host that shows
-    // exactly the fillet/chamfer result (fixture + the two trimmed pairs + the
-    // arc + the chamfer line), without the later phases' clutter.
+    // The FILLET ARC and CHAMFER LINE are now on screen; the PLINE/POLYGON/
+    // POINT/RECTANG phases follow, then the P4 edit-command phases in
+    // `super::draw_edit`. The recommended external `--capture-at` lands after
+    // those P4 phases so the arrays and the EXPLODE result are on screen.
 
     // PLINE: three points + CONFIRM.
     schedule_draw(&start, 68, "cad_command PLINE", || {
@@ -491,28 +516,12 @@ fn run_draw_evidence(webview: tauri::Webview) {
         webview.eval(draw_status_js("s_rectang_after"))
     });
 
-    // The report is logged from Rust through the eval callback; the JS also
-    // `console.log`s it. A dispatch that merely posts is not a pass — the report
-    // carries the real before/after reads and the real refusals.
-    schedule_draw(&start, 101, "draw evidence report", || {
-        webview.eval_with_callback(DRAW_REPORT_JS, |payload| {
-            eprintln!(
-                "[probe] draw evidence report: {}",
-                decode_draw_report(&payload)
-            );
-        })
-    });
-}
-
-/// Decode the JSON-quoted eval-callback payload into the raw report string.
-fn decode_draw_report(payload: &str) -> String {
-    let trimmed = payload.trim();
-    if trimmed.starts_with('"') {
-        if let Ok(decoded) = serde_json::from_str::<String>(trimmed) {
-            return decoded;
-        }
-    }
-    trimmed.to_string()
+    // P4 edit-command phases (ARRAYRECT / ARRAYPOLAR / ALIGN / STRETCH / EXPLODE)
+    // run after the drawing phases above, followed by the single-line report.
+    // They are sub-second-stepped (`schedule_draw_ms`) so the whole pass finishes
+    // inside the bounded evidence timeout; see [`super::draw_edit`].
+    super::draw_edit::schedule_draw_edit_phases(&webview, &start);
+    super::draw_edit::schedule_draw_report(&webview, &start);
 }
 
 /// Sleep until `seconds` after `start`, run `action`, and log the dispatch
@@ -535,21 +544,58 @@ fn schedule_draw(
     }
 }
 
+/// Millisecond-resolution variant of [`schedule_draw`], shared with
+/// [`super::draw_edit`].
+///
+/// The P4 edit-command phases use a sub-second step so the whole pass fits inside
+/// the bounded evidence timeout; the dispatch semantics (sleep to the target,
+/// run, log under the draw prefix) are identical to [`schedule_draw`]. Only the
+/// **dispatch** is reported here; the observable outcome comes from the
+/// `cad_status` reads.
+pub(super) fn schedule_draw_ms(
+    start: &Instant,
+    millis: u64,
+    label: &str,
+    action: impl FnOnce() -> tauri::Result<()>,
+) {
+    let target = Duration::from_millis(millis);
+    let elapsed = start.elapsed();
+    if target > elapsed {
+        std::thread::sleep(target - elapsed);
+    }
+    match action() {
+        Ok(()) => eprintln!("[probe] draw evidence step: {label} -> dispatched"),
+        Err(error) => eprintln!("[probe] draw evidence step: {label} -> dispatch error: {error}"),
+    }
+}
+
 /// Build the named status-read script (`s_base`, `s_fillet_miss`, ...).
-fn draw_status_js(name: &str) -> String {
+pub(super) fn draw_status_js(name: &str) -> String {
     DRAW_STATUS_TEMPLATE.replace("__NAME__", name)
 }
 
 /// Build the start script for one draw selector (`PLINE` / `POLYGON` / ...).
-fn draw_start_js(tool: &str) -> String {
+pub(super) fn draw_start_js(tool: &str) -> String {
     DRAW_START_TEMPLATE.replace("__TOOL__", tool)
+}
+
+/// Build a labeled `cad_command` dispatch for any selector (`LINE` / `ARRAYRECT`
+/// / `EXPLODE` / ...), recording the ack under `__LABEL__`.
+///
+/// Unlike [`draw_start_js`] this carries a per-command label, so the P4 edit
+/// phases report one ack per selector (including the payload-free `EXPLODE`)
+/// instead of overwriting a single shared `start_ack`.
+pub(super) fn draw_command_js(command: &str, label: &str) -> String {
+    DRAW_COMMAND_TEMPLATE
+        .replace("__COMMAND__", command)
+        .replace("__LABEL__", label)
 }
 
 /// Build the `cad_set_tool_parameter` script for one numeric parameter value.
 ///
 /// `__PARAM__` is the parameter's stable machine key (e.g. `polygonSides`),
 /// `__NUMBER__` the numeric value and `__LABEL__` the report slot name.
-fn draw_set_parameter_number_js(parameter: &str, value: f64, label: &str) -> String {
+pub(super) fn draw_set_parameter_number_js(parameter: &str, value: f64, label: &str) -> String {
     DRAW_SET_PARAMETER_TEMPLATE
         .replace("__PARAM__", parameter)
         .replace("__NUMBER__", &value.to_string())
@@ -560,7 +606,7 @@ fn draw_set_parameter_number_js(parameter: &str, value: f64, label: &str) -> Str
 /// `cad_status.camera` and the live `.native-input` rect and converts the world
 /// point to rect fractions before dispatching the pointer events. Synthetic,
 /// **not a real mouse**.
-fn draw_click_world_js(wx: f64, wy: f64, label: &str) -> String {
+pub(super) fn draw_click_world_js(wx: f64, wy: f64, label: &str) -> String {
     DRAW_CLICK_TEMPLATE
         .replace("__WX__", &wx.to_string())
         .replace("__WY__", &wy.to_string())
@@ -594,6 +640,10 @@ const DRAW_STATUS_TEMPLATE: &str = r#"
       d[name + '_fillet'] = (params && typeof params.filletRadius !== 'undefined') ? params.filletRadius : null;
       d[name + '_chamfer_a'] = (params && typeof params.chamferDistanceA !== 'undefined') ? params.chamferDistanceA : null;
       d[name + '_chamfer_b'] = (params && typeof params.chamferDistanceB !== 'undefined') ? params.chamferDistanceB : null;
+      d[name + '_array_rows'] = (params && typeof params.arrayRows !== 'undefined') ? params.arrayRows : null;
+      d[name + '_array_columns'] = (params && typeof params.arrayColumns !== 'undefined') ? params.arrayColumns : null;
+      d[name + '_array_items'] = (params && typeof params.arrayItems !== 'undefined') ? params.arrayItems : null;
+      d[name + '_align_scale'] = (params && typeof params.alignScale !== 'undefined') ? params.alignScale : null;
       d[name + '_selection'] = s.selection ? s.selection.count : null;
       d[name + '_error'] = s.error;
       if (s.camera && s.camera.center && s.camera.center.length === 2) {
@@ -627,6 +677,36 @@ const DRAW_START_TEMPLATE: &str = r#"
     return 'start-dispatched';
   } catch (err) {
     try { d.start_failed = 'fatal:' + err; } catch (_) {}
+    return 'error:' + err;
+  }
+})()
+"#;
+
+/// Dispatch any real selector through the public `cad_command` command,
+/// recording the ack under `__LABEL__`.
+///
+/// `__COMMAND__` is the canonical selector (`LINE` / `ARRAYRECT` / `ARRAYPOLAR` /
+/// `ALIGN` / `STRETCH` / `RECTANG` / `EXPLODE`). This is [`DRAW_START_TEMPLATE`]
+/// with a per-command label so the P4 edit phases never conflate two acks; the
+/// payload-free `EXPLODE` selector rides the exact same funnel.
+const DRAW_COMMAND_TEMPLATE: &str = r#"
+(function () {
+  var d = window.__yacr_draw = window.__yacr_draw || {};
+  var label = '__LABEL__';
+  try {
+    var internals = window.__TAURI_INTERNALS__;
+    if (!internals || typeof internals.invoke !== 'function') {
+      d[label + '_failed'] = 'no-tauri-internals';
+      return 'no-tauri-internals';
+    }
+    internals.invoke('cad_command', { command: '__COMMAND__' }).then(function (ack) {
+      d[label + '_ack'] = (ack && typeof ack.accepted !== 'undefined')
+        ? 'accepted=' + ack.accepted
+        : String(JSON.stringify(ack));
+    }).catch(function (err) { d[label + '_failed'] = String(err); });
+    return label + '-dispatched';
+  } catch (err) {
+    try { d[label + '_failed'] = 'fatal:' + err; } catch (_) {}
     return 'error:' + err;
   }
 })()
@@ -671,7 +751,7 @@ const DRAW_SET_PARAMETER_TEMPLATE: &str = r#"
 /// `entityCount` unchanged; `CONFIRM` (Enter) is what commits the entity. Each
 /// commit carries its own label so the report never conflates two confirms.
 /// Synthetic input, **not a real mouse**.
-fn draw_confirm_js(label: &str) -> String {
+pub(super) fn draw_confirm_js(label: &str) -> String {
     DRAW_CONFIRM_TEMPLATE.replace("__LABEL__", label)
 }
 
@@ -768,148 +848,5 @@ const DRAW_CLICK_TEMPLATE: &str = r#"
     try { d[label + '_failed'] = 'fatal:' + err; } catch (_) {}
     return 'error:' + err;
   }
-})()
-"#;
-
-/// Single-line report over `window.__yacr_draw`.
-///
-/// Fields are whitespace-flattened so the line stays tokenizable; `-` means
-/// absent and `-1` a count/value that was never read. Each `*_delta` is only a
-/// real number when both counts were read. `polygon_sides_visible` and
-/// `polygon_bad_refused` are derived from the real reads (never asserted);
-/// `fillet_miss_advanced` is derived from the real capture-point counts.
-/// `vertex_count_channel=none_...` is the honest statement that `cad_status`
-/// exposes no vertex/geometry count, so neither the polygon's real sidedness nor
-/// the FILLET/CHAMFER geometry can be read from the status channel.
-const DRAW_REPORT_JS: &str = r#"
-(function () {
-  var d = window.__yacr_draw || {};
-  function v(x) {
-    if (x === null || typeof x === 'undefined') { return '-'; }
-    try { return String(x).replace(/\s+/g, '_'); } catch (err) { return '?'; }
-  }
-  function n(x) { return (typeof x === 'number') ? x : -1; }
-  function arr(x) {
-    if (!x || !x.length) { return '-'; }
-    try { return x.map(function (k) { return String(k); }).join(','); } catch (err) { return '?'; }
-  }
-  function delta(before, after) {
-    var b = n(before), a = n(after);
-    return (b >= 0 && a >= 0) ? (a - b) : -1;
-  }
-  var active_sides = d.s_polygon_active_sides;
-  var bad_sides = d.s_polygon_bad_sides;
-  var bad_error = d.s_polygon_bad_error;
-  var sides_visible = (active_sides === 6);
-  var bad_refused = (typeof bad_error === 'string' && bad_error.length > 0) &&
-    (bad_sides === active_sides);
-  var fillet_miss_advanced = n(d.s_fillet_miss_points) > n(d.s_fillet_active_points);
-  var status_failed = d.s_base_failed || d.s_line_a_h_after_failed || d.s_line_a_v_after_failed ||
-    d.s_fillet_active_failed || d.s_fillet_miss_failed || d.s_fillet_pick1_failed ||
-    d.s_fillet_pick2_failed || d.s_fillet_after_failed || d.s_line_b_h_after_failed ||
-    d.s_line_b_v_after_failed || d.s_chamfer_active_failed || d.s_chamfer_pick1_failed ||
-    d.s_chamfer_pick2_failed || d.s_chamfer_after_failed || d.s_pline_points_failed ||
-    d.s_pline_after_failed || d.s_polygon_active_failed || d.s_polygon_bad_failed ||
-    d.s_polygon_points_failed || d.s_polygon_after_failed || d.s_point_points_failed ||
-    d.s_point_after_failed || d.s_rectang_points_failed || d.s_rectang_after_failed ||
-    d.confirm_a_h_failed || d.confirm_a_v_failed || d.confirm_fillet_failed ||
-    d.confirm_b_h_failed || d.confirm_b_v_failed || d.confirm_chamfer_failed ||
-    d.confirm_pline_failed || d.confirm_polygon_failed || d.confirm_point_failed ||
-    d.confirm_rectang_failed;
-  var text = 'draw_synthetic=1_not_a_real_mouse' +
-    ' baseline_count=' + v(d.s_base_count) +
-    ' geom_a_before_count=' + v(d.s_base_count) +
-    ' geom_a_after_count=' + v(d.s_line_a_v_after_count) +
-    ' geom_a_delta=' + delta(d.s_base_count, d.s_line_a_v_after_count) +
-    ' fillet_radius_set_ack=' + v(d['fillet_radius_ack']) +
-    ' fillet_active_tool=' + v(d.s_fillet_active_tool) +
-    ' fillet_active_radius=' + v(d.s_fillet_active_fillet) +
-    ' fillet_miss_points_before=' + v(d.s_fillet_active_points) +
-    ' fillet_miss_points_after=' + v(d.s_fillet_miss_points) +
-    ' fillet_miss_advanced=' + fillet_miss_advanced +
-    ' fillet_miss_error=' + v(d.s_fillet_miss_error) +
-    ' fillet_pick1_points=' + v(d.s_fillet_pick1_points) +
-    ' fillet_pick2_points=' + v(d.s_fillet_pick2_points) +
-    ' fillet_pick2_ready=' + v(d.s_fillet_pick2_ready) +
-    ' fillet_confirm_ack=' + v(d.confirm_fillet_ack) +
-    ' fillet_after_count=' + v(d.s_fillet_after_count) +
-    ' fillet_delta=' + delta(d.s_line_a_v_after_count, d.s_fillet_after_count) +
-    ' fillet_after_tool=' + v(d.s_fillet_after_tool) +
-    ' fillet_after_error=' + v(d.s_fillet_after_error) +
-    ' geom_b_before_count=' + v(d.s_fillet_after_count) +
-    ' geom_b_after_count=' + v(d.s_line_b_v_after_count) +
-    ' geom_b_delta=' + delta(d.s_fillet_after_count, d.s_line_b_v_after_count) +
-    ' chamfer_a_set_ack=' + v(d['chamfer_a_ack']) +
-    ' chamfer_b_set_ack=' + v(d['chamfer_b_ack']) +
-    ' chamfer_active_tool=' + v(d.s_chamfer_active_tool) +
-    ' chamfer_active_a=' + v(d.s_chamfer_active_chamfer_a) +
-    ' chamfer_active_b=' + v(d.s_chamfer_active_chamfer_b) +
-    ' chamfer_pick1_points=' + v(d.s_chamfer_pick1_points) +
-    ' chamfer_pick2_points=' + v(d.s_chamfer_pick2_points) +
-    ' chamfer_pick2_ready=' + v(d.s_chamfer_pick2_ready) +
-    ' chamfer_confirm_ack=' + v(d.confirm_chamfer_ack) +
-    ' chamfer_after_count=' + v(d.s_chamfer_after_count) +
-    ' chamfer_delta=' + delta(d.s_line_b_v_after_count, d.s_chamfer_after_count) +
-    ' chamfer_after_tool=' + v(d.s_chamfer_after_tool) +
-    ' chamfer_after_error=' + v(d.s_chamfer_after_error) +
-    ' pline_points=' + v(d.s_pline_points_points) +
-    ' pline_after_count=' + v(d.s_pline_after_count) +
-    ' pline_delta=' + delta(d.s_chamfer_after_count, d.s_pline_after_count) +
-    ' pline_after_tool=' + v(d.s_pline_after_tool) +
-    ' polygon_set6_ack=' + v(d['sides_6_ack']) +
-    ' polygon_active_tool=' + v(d.s_polygon_active_tool) +
-    ' polygon_active_sides=' + v(active_sides) +
-    ' polygon_sides_visible=(' + v(active_sides) + '==6)=' + sides_visible +
-    ' polygon_bad_ack=' + v(d['sides_2_ack']) +
-    ' polygon_bad_sides=' + v(bad_sides) +
-    ' polygon_bad_error=' + v(bad_error) +
-    ' polygon_bad_refused=' + bad_refused +
-    ' polygon_points=' + v(d.s_polygon_points_points) +
-    ' polygon_after_count=' + v(d.s_polygon_after_count) +
-    ' polygon_delta=' + delta(d.s_pline_after_count, d.s_polygon_after_count) +
-    ' polygon_after_tool=' + v(d.s_polygon_after_tool) +
-    ' point_points=' + v(d.s_point_points_points) +
-    ' point_after_count=' + v(d.s_point_after_count) +
-    ' point_delta=' + delta(d.s_polygon_after_count, d.s_point_after_count) +
-    ' point_after_tool=' + v(d.s_point_after_tool) +
-    ' rectang_points=' + v(d.s_rectang_points_points) +
-    ' rectang_after_count=' + v(d.s_rectang_after_count) +
-    ' rectang_delta=' + delta(d.s_point_after_count, d.s_rectang_after_count) +
-    ' rectang_after_tool=' + v(d.s_rectang_after_tool) +
-    ' vertex_count_channel=none_cad_status_has_no_vertex_or_entity_geometry' +
-    ' fillet_geometry_channel=none_cad_status_has_no_entity_geometry' +
-    ' chamfer_geometry_channel=none_cad_status_has_no_entity_geometry' +
-    ' point_world=' + arr(d.point_world) +
-    ' point_frac=' + arr(d.point_frac) +
-    ' camera=' + arr(d.camera) +
-    ' rect=' + arr(d.rect) +
-    ' clicks=' + n(d.clicks) +
-    ' start_failed=' + v(d.start_failed) +
-    ' sides_failed=' + v(d.sides_failed) +
-    ' confirm_failed=' + v(d.confirm_failed) +
-    ' status_failed=' + v(status_failed) +
-    ' a_h1_failed=' + v(d.a_h1_failed) +
-    ' a_h2_failed=' + v(d.a_h2_failed) +
-    ' a_v1_failed=' + v(d.a_v1_failed) +
-    ' a_v2_failed=' + v(d.a_v2_failed) +
-    ' fillet_miss_failed=' + v(d.fillet_miss_failed) +
-    ' fillet_pick1_failed=' + v(d.fillet_pick1_failed) +
-    ' fillet_pick2_failed=' + v(d.fillet_pick2_failed) +
-    ' b_h1_failed=' + v(d.b_h1_failed) +
-    ' b_h2_failed=' + v(d.b_h2_failed) +
-    ' b_v1_failed=' + v(d.b_v1_failed) +
-    ' b_v2_failed=' + v(d.b_v2_failed) +
-    ' chamfer_pick1_failed=' + v(d.chamfer_pick1_failed) +
-    ' chamfer_pick2_failed=' + v(d.chamfer_pick2_failed) +
-    ' pline_a_failed=' + v(d.pline_a_failed) +
-    ' pline_b_failed=' + v(d.pline_b_failed) +
-    ' pline_c_failed=' + v(d.pline_c_failed) +
-    ' polygon_center_failed=' + v(d.polygon_center_failed) +
-    ' polygon_radius_failed=' + v(d.polygon_radius_failed) +
-    ' point_failed=' + v(d.point_failed) +
-    ' rectang_a_failed=' + v(d.rectang_a_failed) +
-    ' rectang_b_failed=' + v(d.rectang_b_failed);
-  try { console.log('[probe] draw evidence report: ' + text); } catch (err) {}
-  return text;
 })()
 "#;

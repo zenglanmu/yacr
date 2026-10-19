@@ -36,7 +36,13 @@
 - **P4e 完成（提交 95bb7ff）**：`STRETCH`（4 点、窗口恒 CROSSING、分类在命令内重算且按几何类型分两种口径、
   部分包围=逐顶点、完全包围=整移、圆/椭圆/块/ARC 部分包围不动+诊断、`TEXT` 整命令拒绝、
   **bulge 数值保留**并数值钉住 0.5、无变化时不开事务只给诊断）；载荷 `delta` 为**位移点**（平移 = `delta − base`）。
-- **待办**：P4f（`EXPLODE`）→ P4 阶段门禁（Oracle）→ 真机证据（ALIGN/STRETCH/EXPLODE 尚未取）。
+- **P4f 完成（提交 a492186）**：`EXPLODE`（**一次一层**；EXPLODE 与 ERASE 一样是**无载荷直命令**、不需要工具状态，
+  故只有 `draw.kind.explode` 而没有 `tool.draw.explode`）。**首版与决策文本矛盾并已修**：lane 曾照搬导出层的
+  递归走查（把嵌套块**摊平到叶子**），与"一次一层"冲突 ⇒ 改为成员按一层产出、**嵌套块引用保持为引用**（placement
+  复合进去）、二次 EXPLODE 才展开；导出层的循环栈/深度上限**整段删除**（一层走查下不可达，保留即等于假装加固），
+  ADR 的"与导出层的关系"也改为明确写"导出=摊平到叶子、EXPLODE=一次一层，**刻意不同**；要摊平是另一个命令"。
+  另将 `polyline_plane_normal` 升 `pub`（EXPLODE 需在与 tessellator 同一平面内还原 bulge 弧，避免重推导 Newell 法向）。
+- **待办**：P4 阶段门禁（Oracle）；真机证据（`ARRAYRECT`/`ARRAYPOLAR`/`ALIGN`/`STRETCH`/`EXPLODE` 本轮正在采集）。
 
 ## 背景（勘察事实，2026-10-19；已按 SG-P4 逐条核对更正）
 
