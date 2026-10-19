@@ -57,6 +57,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("ALIGN", CommandId::AlignEntities),
     ("STRETCH", CommandId::StretchEntities),
     ("ERASE", CommandId::EraseEntities),
+    ("EXPLODE", CommandId::ExplodeEntities),
     ("COPY", CommandId::CopyEntities),
     ("ROTATE", CommandId::RotateEntities),
     ("SCALE", CommandId::ScaleEntities),

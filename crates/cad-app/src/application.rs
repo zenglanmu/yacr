@@ -242,6 +242,7 @@ impl Application {
             | CommandId::AlignEntities
             | CommandId::StretchEntities
             | CommandId::EraseEntities
+            | CommandId::ExplodeEntities
             | CommandId::CopyEntities
             | CommandId::RotateEntities
             | CommandId::ScaleEntities

@@ -74,6 +74,7 @@ export const RIBBON_TABS = Object.freeze([
         items: [
           { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', command: 'TRIM', large: true },
           { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', command: 'ERASE' },
+          { id: 'EXPLODE', labelKey: 'draw.kind.explode', icon: 'explode', command: 'EXPLODE' },
           { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', command: 'EXTEND' },
           { id: 'CHAMFER', labelKey: 'draw.kind.chamfer', icon: 'chamfer', command: 'CHAMFER' },
           { id: 'FILLET', labelKey: 'draw.kind.fillet', icon: 'fillet', command: 'FILLET' },
@@ -142,6 +143,7 @@ export const RIBBON_TABS = Object.freeze([
         launcher: true,
         items: [
           { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', command: 'ERASE' },
+          { id: 'EXPLODE', labelKey: 'draw.kind.explode', icon: 'explode', command: 'EXPLODE' },
           { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', command: 'MOVE' },
           { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', command: 'COPY' },
           { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', command: 'TRIM' },

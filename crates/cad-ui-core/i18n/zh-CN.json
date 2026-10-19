@@ -210,6 +210,7 @@
   "draw.kind.align": "对齐",
   "draw.kind.stretch": "拉伸",
   "draw.kind.erase": "删除",
+  "draw.kind.explode": "分解",
   "draw.status.idle": "选择 直线 / 圆 / 圆弧 / 移动 / 修剪 / 复制 / 延伸 / 旋转 / 缩放 / 镜像 / 偏移 开始绘制或编辑",
   "draw.error.read_only": "只读模式（查看）不允许绘制或编辑",
   "draw.error.unknown_geometry": "未知或不支持的图元",

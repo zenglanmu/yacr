@@ -181,6 +181,19 @@ pub enum CommandId {
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
+    /// EXPLODE the current selection one level at a time (ADR 0016 decision G):
+    /// a LWPOLYLINE becomes straight segments plus ARCs (bulge segments through
+    /// `bulge_arc_geometry`), a uniformly scaled INSERT becomes its block members
+    /// with the placement baked in (nested inserts expanded under a cycle stack
+    /// and a depth cap of 32), and a Compound becomes **all** of its children (a
+    /// MINSERT yields its Insert instances). Members keep their own
+    /// block-definition layers. Refusals (nothing written): a selection with
+    /// nothing decomposable; `TEXT`/`SPLINE`/`SHAPE`/`OPAQUE` and mirrored
+    /// Arc/Ellipse children via the transform surface; `IMAGE`/`MASK` by policy;
+    /// `Dimension`/`MTable`/`MLeader` compounds by `type_key`; a non-uniformly
+    /// scaled INSERT; and an INSERT with an untransformable member (the whole
+    /// command fails). One transaction and one undo step. Work-only.
+    ExplodeEntities,
     /// Clone every entity in the current selection with a fresh id, translating
     /// its geometry by a world delta, in one transaction. An empty selection or
     /// a geometry that cannot be transformed is an explicit refusal. Work-only.
@@ -251,6 +264,7 @@ impl CommandId {
                 | Self::AlignEntities
                 | Self::StretchEntities
                 | Self::EraseEntities
+                | Self::ExplodeEntities
                 | Self::CopyEntities
                 | Self::RotateEntities
                 | Self::ScaleEntities

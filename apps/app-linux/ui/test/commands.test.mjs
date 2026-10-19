@@ -32,7 +32,7 @@ const HOST_NAMES = [
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'MOVE', 'TRIM',
-  'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
+  'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'OSNAP',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
   'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT',
@@ -146,6 +146,45 @@ test('ERASE is a modify affordance in the ribbon and catalog, enabled only by ro
     ribbon.includes('if (item.command) return shell.runCommand(item.command);'),
     'ribbon items dispatch through shell.runCommand, never an action',
   );
+});
+
+test('EXPLODE is a modify affordance in the ribbon and catalog, enabled only by router admission', async () => {
+  const { readModule, readCatalog } = await import('./helpers.mjs');
+  const id = 'EXPLODE';
+  // The catalog entry mirrors the neighbouring edit commands (`draw.kind.*`).
+  const entry = COMMAND_CATALOG.find(command => command.id === id);
+  assert.ok(entry, `${id} must be in the command catalog`);
+  assert.equal(entry.labelKey, 'draw.kind.explode');
+  assert.equal(entry.icon, 'explode');
+  assert.equal(entry.group, 'modify');
+  // Placed with the other modify actions on the Home and Draw tabs, wired as a
+  // router command (no local shell action).
+  for (const tabId of ['home', 'draw']) {
+    const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
+    assert.ok(modify, `${tabId} must keep its modify panel`);
+    const item = modify.items.find(candidate => candidate.id === id);
+    assert.ok(item, `${tabId}/modify must carry the ${id} affordance`);
+    assert.equal(item.command, id);
+    assert.equal(item.labelKey, 'draw.kind.explode');
+    assert.equal(item.action, undefined, `${id} must not be a local shell action`);
+  }
+  // EXPLODE runs on the current selection with no capture, so it has no
+  // active-tool chip key: only the catalog key exists (unlike the draw tools).
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  assert.equal(typeof zh['draw.kind.explode'], 'string');
+  assert.equal(typeof en['draw.kind.explode'], 'string');
+  // Router admission is the single enable gate: admitted when the host vocabulary
+  // carries EXPLODE, unsupported (never locally enabled) when it does not.
+  assert.equal(isSupportedCommand(id), true, id);
+  assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand(id), false, id);
+  assert.equal(admitCommandText(id, { status: loaded }).kind, 'unsupported', id);
+  setCommandCatalog(HOST_NAMES);
+  // The renderer dispatches the EXPLODE selector through the normal command funnel.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(ribbon.includes('if (item.command) return shell.runCommand(item.command);'));
 });
 
 test('PLINE is a draw affordance in the ribbon and catalog, enabled only by router admission', async () => {

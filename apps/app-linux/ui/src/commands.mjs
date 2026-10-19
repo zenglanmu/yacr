@@ -153,6 +153,7 @@ export const COMMAND_CATALOG = Object.freeze([
   { id: 'ALIGN', labelKey: 'draw.kind.align', icon: 'align', group: 'modify' },
   { id: 'STRETCH', labelKey: 'draw.kind.stretch', icon: 'stretch', group: 'modify' },
   { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', group: 'modify' },
+  { id: 'EXPLODE', labelKey: 'draw.kind.explode', icon: 'explode', group: 'modify' },
   { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', group: 'measure' },
   { id: 'MEASUREPOLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },
   { id: 'MEASUREANGLE', labelKey: 'measure.kind.angle', icon: 'angle', group: 'measure' },

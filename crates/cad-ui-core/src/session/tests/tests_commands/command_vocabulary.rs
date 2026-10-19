@@ -66,6 +66,7 @@ command_selector_contract! {
     AlignEntities => "ALIGN",
     StretchEntities => "STRETCH",
     EraseEntities => "ERASE",
+    ExplodeEntities => "EXPLODE",
     CopyEntities => "COPY",
     RotateEntities => "ROTATE",
     ScaleEntities => "SCALE",
@@ -91,7 +92,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 59,
+        EXPECTED_COMMAND_COUNT, 60,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

@@ -12,6 +12,7 @@ mod array;
 mod chamfer_fillet;
 mod document;
 mod draw_pick;
+mod explode;
 mod polygon;
 mod snap;
 mod status;

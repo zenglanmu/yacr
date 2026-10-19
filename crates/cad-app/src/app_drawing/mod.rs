@@ -34,6 +34,7 @@ mod clipboard;
 mod drawing_create;
 mod drawing_edit;
 mod drawing_transform;
+mod explode;
 mod helpers;
 mod stretch;
 mod trim_extend;

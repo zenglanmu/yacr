@@ -210,6 +210,7 @@
   "draw.kind.align": "Align",
   "draw.kind.stretch": "Stretch",
   "draw.kind.erase": "Erase",
+  "draw.kind.explode": "Explode",
   "draw.status.idle": "Pick Line / Circle / Arc / Move / Trim / Copy / Extend / Rotate / Scale / Mirror / Offset to start drawing or editing",
   "draw.error.read_only": "Read-only (Viewer) mode does not allow drawing or editing",
   "draw.error.unknown_geometry": "Unknown or unsupported geometry",

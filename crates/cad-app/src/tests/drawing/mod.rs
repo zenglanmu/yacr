@@ -278,6 +278,7 @@ mod clipboard;
 mod create_polyline;
 mod create_trim;
 mod ellipse;
+mod explode;
 mod offset;
 mod point;
 mod polygon;

@@ -202,7 +202,11 @@ pub(crate) fn polyline_with_bulges(
 /// The closing edge is always included so the polygon normal is well defined
 /// even for an open polyline. Falls back to world Z for degenerate input
 /// (fewer than three points, or collinear points).
-pub(crate) fn polyline_plane_normal(points: &[Point3]) -> Point3 {
+///
+/// Public so a caller outside this crate (EXPLODE's polyline decomposition) can
+/// recover a bulge arc in the **same** plane the tessellator draws it in,
+/// instead of re-deriving the normal and possibly diverging.
+pub fn polyline_plane_normal(points: &[Point3]) -> Point3 {
     let world_z = Point3 {
         x: 0.0,
         y: 0.0,
