@@ -31,8 +31,11 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
                 CliOperation::Plot => domain(run_plot(invocation))?,
                 CliOperation::Benchmark => {
                     let controller = domain(load_document(invocation))?;
-                    let fonts =
-                        domain(load_fonts(&invocation.fonts, &fonts_requested(&controller)))?;
+                    let fonts = domain(load_fonts(
+                        &invocation.fonts,
+                        &fonts_requested(&controller),
+                        drawing_needs_text(&controller),
+                    ))?;
                     domain(run_benchmark(&controller, invocation, fonts.as_ref()))?
                 }
                 _ => unreachable!(),
@@ -53,7 +56,7 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
             // system-default face. Otherwise every text run is shaped into line
             // geometry and `kind_counts.texts` is always 0, making the report
             // depend on the host's installed fonts.
-            let fonts = domain(load_fonts(&invocation.fonts, &[]))?;
+            let fonts = domain(load_fonts(&invocation.fonts, &[], false))?;
             domain(run_build_representation(&controller, fonts.as_ref()))?
         }
         CliOperation::Benchmark => unreachable!(),

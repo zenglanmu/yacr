@@ -122,16 +122,75 @@ fn radial_synthesis_measures_the_leader() {
 
 #[test]
 fn angular_synthesis_measures_the_arc() {
+    // The arc-location pick sits in the counter-clockwise sector from +X to +Y,
+    // so the measured angle is 90 degrees and the arc radius is its distance to
+    // the vertex.
     let geometry = angular_synthesis(
         point(0.0, 0.0, 0.0),
         point(1.0, 0.0, 0.0),
         point(0.0, 1.0, 0.0),
-        5.0,
+        point(1.0, 1.0, 0.0),
         point(0.0, 0.0, 1.0),
         &style(),
     )
     .expect("angular geometry");
     assert!(approx(geometry.measurement, 90.0));
+}
+
+/// P5e / ADR 0017 U-1: the arc-location pick selects which angle is measured.
+/// On the reflex side the same two rays measure 270 degrees.
+#[test]
+fn angular_synthesis_uses_the_arc_location_to_select_the_angle() {
+    let geometry = angular_synthesis(
+        point(0.0, 0.0, 0.0),
+        point(1.0, 0.0, 0.0),
+        point(0.0, 1.0, 0.0),
+        point(-1.0, -1.0, 0.0),
+        point(0.0, 0.0, 1.0),
+        &style(),
+    )
+    .expect("angular geometry");
+    assert!(
+        approx(geometry.measurement, 270.0),
+        "the reflex sector contains the arc pick: {}",
+        geometry.measurement
+    );
+}
+
+/// P5e / ADR 0017 U-8, pinned against the committed QCAD fixture `*D65` in
+/// `fixtures/dxf/qcad-examples/entities.dxf`: line 1 is 13->14, line 2 is
+/// 15->10, the vertex is their **intersection** (90, 40), and group 16 selects
+/// the 113.172-degree sector. Group 42 in the fixture is the same value in
+/// radians, and the anonymous block's ARC is centred on the intersection.
+#[test]
+fn angular_lines_synthesis_uses_the_intersection_and_the_arc_sector() {
+    let geometry = angular_lines_synthesis(
+        point(42.36353347545233, 19.58437148947957, 0.0),
+        point(90.57446564376129, 40.24619956161199, 0.0),
+        point(89.99999999999999, 39.37500000000001, 0.0),
+        point(89.99999999999999, 71.31330052888579, 0.0),
+        point(79.36581327116616, 53.74273154912756, 0.0),
+        point(0.0, 0.0, 1.0),
+        &style(),
+    )
+    .expect("angular line geometry");
+    assert!(
+        approx(geometry.measurement, 113.198_590_513_648_18),
+        "group 42 is 1.975688113 rad = 113.19859 deg: {}",
+        geometry.measurement
+    );
+    let arc = geometry
+        .children
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Arc { center, .. } => Some(*center),
+            _ => None,
+        })
+        .expect("an angular arc child");
+    assert!(
+        approx(arc.x, 90.0) && approx(arc.y, 40.0),
+        "the arc is centred on the lines' intersection, got {arc:?}"
+    );
 }
 
 #[test]
@@ -383,7 +442,7 @@ fn angular_synthesis_uses_the_definition_normal() {
             vertex: point(0.0, 0.0, 0.0),
             first: point(1.0, 0.0, 0.0),
             second: point(0.0, 1.0, 0.0),
-            arc_point: point(0.0, 0.0, 0.0),
+            arc_point: point(1.0, 1.0, 0.0),
         },
         text_middle: point(0.0, 0.0, 0.0),
         text_rotation: 0.0,

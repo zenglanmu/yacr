@@ -189,6 +189,150 @@ fn dimradius_capture_picks_the_circle_then_takes_the_location() {
     assert_eq!(entity.object.type_key, "AcDbDimension");
 }
 
+/// Replace the controller's drawing with two crossing lines and a `Standard`
+/// DIMSTYLE, for the two-line angular capture.
+fn crossing_lines_fixture() -> HostController {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(host_entity(
+            401,
+            SemanticGeometry::Line {
+                start: p(-50.0, 0.0),
+                end: p(50.0, 0.0),
+            },
+            0,
+        ))
+        .unwrap();
+    builder
+        .insert_entity(host_entity(
+            402,
+            SemanticGeometry::Line {
+                start: p(0.0, -50.0),
+                end: p(0.0, 50.0),
+            },
+            1,
+        ))
+        .unwrap();
+    builder
+        .insert_dim_style(cad_db::DimStyle::standard_metric(cad_domain::DimStyleId(0)))
+        .unwrap();
+    controller
+        .application
+        .workspace
+        .documents
+        .get_mut(&controller.document_id)
+        .unwrap()
+        .drawing = Arc::new(builder.finish().unwrap());
+    controller.set_snap_enabled(false);
+    controller
+}
+
+#[test]
+fn dimangular_capture_picks_both_lines_then_the_arc_location() {
+    let mut controller = crossing_lines_fixture();
+    let count = controller.drawing().unwrap().entity_count();
+
+    controller
+        .begin_draw_tool(DrawToolKind::DimAngular)
+        .unwrap();
+    // The two leading steps are entity picks; the third is a free point.
+    controller.capture_tool_point(p(25.0, 0.0)).unwrap();
+    let preview = controller.session.draw_preview().unwrap();
+    assert_eq!(preview.picks.len(), 1);
+    assert_eq!(preview.remaining_points(), Some(2));
+
+    controller.capture_tool_point(p(0.0, 25.0)).unwrap();
+    let preview = controller.session.draw_preview().unwrap();
+    assert_eq!(preview.picks.len(), 2);
+    assert!(!preview.can_confirm(), "the arc location is still needed");
+    assert_eq!(preview.remaining_points(), Some(1));
+
+    let location = p(25.0, 25.0);
+    controller.capture_tool_point(location).unwrap();
+    let intent = controller.session.draw_intent().unwrap();
+    let command = controller.command_for_draw_intent(intent, &[]).unwrap();
+    assert_eq!(command.id, crate::CommandId::DimAngular);
+    match command.payload {
+        crate::CommandPayload::DimAngular(input) => match input.as_ref() {
+            crate::AngularDimensionInput::TwoLine {
+                first,
+                second,
+                location: arc_location,
+            } => {
+                assert_eq!(first.entity, cad_domain::EntityId(401));
+                assert_eq!(second.entity, cad_domain::EntityId(402));
+                assert_eq!(*arc_location, location);
+            }
+            other => panic!("expected a TwoLine input, got {other:?}"),
+        },
+        _ => panic!("expected a DimAngular payload"),
+    }
+
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 1);
+    assert_eq!(controller.drawing().unwrap().entity_count(), count + 1);
+    let entity = controller
+        .drawing()
+        .unwrap()
+        .entity(cad_domain::EntityId(outcome.objects[0].0))
+        .cloned()
+        .expect("the created dimension");
+    assert_eq!(entity.object.type_key, "AcDbDimension");
+}
+
+#[test]
+fn dimordinate_capture_takes_the_feature_and_leader_points() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    controller.new_blank_document().unwrap();
+    let count = controller.drawing().unwrap().entity_count();
+
+    controller
+        .begin_draw_tool(DrawToolKind::DimOrdinate)
+        .unwrap();
+    let feature = p(10.0, 10.0);
+    let leader = p(10.0, 30.0);
+    controller.capture_tool_point(feature).unwrap();
+    let preview = controller.session.draw_preview().unwrap();
+    assert_eq!(preview.remaining_points(), Some(1));
+    controller.capture_tool_point(leader).unwrap();
+
+    let intent = controller.session.draw_intent().unwrap();
+    assert_eq!(intent, crate::DrawIntent::DimOrdinate { feature, leader });
+    let command = controller.command_for_draw_intent(intent, &[]).unwrap();
+    assert_eq!(command.id, crate::CommandId::DimOrdinate);
+    match command.payload {
+        crate::CommandPayload::DimOrdinate(input) => {
+            assert_eq!(input.feature, feature);
+            assert_eq!(input.leader, leader);
+            assert_eq!(
+                input.axis, None,
+                "the interactive form auto-selects the axis"
+            );
+        }
+        _ => panic!("expected a DimOrdinate payload"),
+    }
+
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 1);
+    assert_eq!(controller.drawing().unwrap().entity_count(), count + 1);
+    let entity = controller
+        .drawing()
+        .unwrap()
+        .entity(cad_domain::EntityId(outcome.objects[0].0))
+        .cloned()
+        .expect("the created dimension");
+    assert_eq!(entity.object.type_key, "AcDbDimension");
+}
+
 #[test]
 fn dimcenter_capture_picks_the_circle_and_commits_plain_lines() {
     let mut controller = circle_fixture(2.5);

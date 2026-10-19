@@ -32,6 +32,8 @@ mod array;
 mod chamfer_fillet;
 mod clipboard;
 mod dimension;
+mod dimension_angular;
+mod dimension_ordinate;
 mod drawing_create;
 mod drawing_edit;
 mod drawing_transform;

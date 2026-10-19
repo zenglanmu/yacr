@@ -136,7 +136,7 @@ impl FontEngine {
             ));
         }
         let Some(face) = self.lookup(font_key) else {
-            return Err(self.chain_error(font_key));
+            return Err(self.chain_error(Some(font_key)));
         };
         let FaceData::Shx(font) = &*face else {
             return Err(CadError::Unsupported(format!(
@@ -187,6 +187,48 @@ impl FontEngine {
         h_align: TextAlignH,
         v_align: TextAlignV,
     ) -> CadResult<ShapedText> {
+        self.shape_with(
+            Some(font_key),
+            raw,
+            origin,
+            height,
+            rotation,
+            h_align,
+            v_align,
+        )
+    }
+
+    /// Shape text whose style names no font.
+    ///
+    /// A missing font name is not an error: the glyphs resolve through the
+    /// registered fallback chain, exactly like a requested-but-unavailable font
+    /// (the sanctioned fallback mechanism). When the chain holds no usable face
+    /// the caller gets `ResourceMissing` and keeps the unshaped placeholder
+    /// instead of showing fabricated glyphs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn shape_unstyled(
+        &self,
+        raw: &str,
+        origin: Point3,
+        height: f64,
+        rotation: f64,
+        h_align: TextAlignH,
+        v_align: TextAlignV,
+    ) -> CadResult<ShapedText> {
+        self.shape_with(None, raw, origin, height, rotation, h_align, v_align)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn shape_with(
+        &self,
+        font_key: Option<&str>,
+        raw: &str,
+        origin: Point3,
+        height: f64,
+        rotation: f64,
+        h_align: TextAlignH,
+        v_align: TextAlignV,
+    ) -> CadResult<ShapedText> {
         let size = height.abs();
         if !size.is_finite() || size <= 0.0 {
             return Err(CadError::InvalidInput(
@@ -199,13 +241,16 @@ impl FontEngine {
 
         let parsed = parse_mtext(raw, size);
         let mut issues = parsed.issues.clone();
-        if !self.contains(font_key) {
-            issues.push(TextFormatIssue::new(
+        match font_key {
+            Some(key) if !self.contains(key) => issues.push(TextFormatIssue::new(
                 "text.font_fallback",
-                format!(
-                    "font '{font_key}' unavailable; rendering with the registered fallback chain"
-                ),
-            ));
+                format!("font '{key}' unavailable; rendering with the registered fallback chain"),
+            )),
+            None => issues.push(TextFormatIssue::new(
+                "text.font_fallback",
+                "the text style names no font; rendering with the registered fallback chain",
+            )),
+            Some(_) => {}
         }
 
         // Shape each paragraph. A run that names an unregistered font is
@@ -213,14 +258,17 @@ impl FontEngine {
         let mut missing_font: Option<String> = None;
         let mut missing_glyphs = Vec::new();
         let lines = layout_parsed(&parsed, size, |run, text| {
-            let key = run.font.as_deref().unwrap_or(font_key);
+            let key = run.font.as_deref().or(font_key);
             match self.measure_run(key, text, run.effective_height(size)) {
                 Some(shaped) => {
                     missing_glyphs.extend(shaped.missing_glyphs);
                     Some(shaped.geometry)
                 }
                 None => {
-                    missing_font.get_or_insert_with(|| key.to_string());
+                    missing_font.get_or_insert_with(|| {
+                        key.map(str::to_string)
+                            .unwrap_or_else(|| "the text style's font".into())
+                    });
                     None
                 }
             }
@@ -320,16 +368,18 @@ impl FontEngine {
     }
 
     /// Whether `font_key` or the fallback chain holds any decodable face.
-    fn has_usable_face(&self, font_key: &str) -> bool {
+    fn has_usable_face(&self, font_key: Option<&str>) -> bool {
         self.chain(font_key)
             .iter()
             .any(|face| matches!(&**face, FaceData::Sfnt(_) | FaceData::Shx(_)))
     }
 
-    fn chain(&self, font_key: &str) -> Vec<Arc<FaceData>> {
+    fn chain(&self, font_key: Option<&str>) -> Vec<Arc<FaceData>> {
         let mut chain: Vec<Arc<FaceData>> = Vec::new();
-        if let Some(face) = self.lookup(font_key) {
-            chain.push(face);
+        if let Some(key) = font_key {
+            if let Some(face) = self.lookup(key) {
+                chain.push(face);
+            }
         }
         for key in &self.fallback {
             if let Some(face) = self.lookup(key) {
@@ -342,14 +392,18 @@ impl FontEngine {
     /// The error to report when [`has_usable_face`](Self::has_usable_face) is
     /// `false`: an explicit `Unsupported` reason if one was recognised, else
     /// `ResourceMissing`. Preserves the pre-MTEXT behaviour.
-    fn chain_error(&self, font_key: &str) -> CadError {
+    fn chain_error(&self, font_key: Option<&str>) -> CadError {
         for face in self.chain(font_key) {
             if let FaceData::Unsupported(reason) = &*face {
                 return CadError::Unsupported(reason.clone());
             }
         }
+        let label = match font_key {
+            Some(key) => format!("font '{key}'"),
+            None => "the text style's font".into(),
+        };
         CadError::ResourceMissing(format!(
-            "font '{font_key}' is not registered and no fallback is available"
+            "{label} is not registered and no fallback is available"
         ))
     }
 
@@ -359,7 +413,7 @@ impl FontEngine {
     /// Width factor and oblique are applied by [`layout_parsed`], not here, so
     /// the per-glyph fallback/kerning logic stays independent of the MTEXT
     /// style overrides. `None` means no usable face was available.
-    fn measure_run(&self, font_key: &str, text: &str, size: f64) -> Option<MeasuredRun> {
+    fn measure_run(&self, font_key: Option<&str>, text: &str, size: f64) -> Option<MeasuredRun> {
         let chain = self.chain(font_key);
         if chain.is_empty() {
             return None;

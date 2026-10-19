@@ -39,6 +39,7 @@ pub(crate) fn load_fonts(requested: &[String]) -> (Option<Arc<FontEngine>>, Font
     let engine = cad_platform::fonts::local::load_engine(
         dir.as_deref(),
         requested,
+        false,
         &[],
         cad_platform::fonts::local::cached_system_default_candidates(),
     )

@@ -266,6 +266,33 @@ impl HostController {
                 crate::CommandId::DimCenter,
                 crate::CommandPayload::DimCenter(target),
             ),
+            // DIMANGULAR: the two picked line refs and the arc-location point
+            // travel on the boxed payload; the handler resolves the lines and
+            // derives the vertex and the measured angle.
+            DrawIntent::DimAngular {
+                first,
+                second,
+                location,
+            } => (
+                crate::CommandId::DimAngular,
+                crate::CommandPayload::DimAngular(Box::new(
+                    crate::AngularDimensionInput::TwoLine {
+                        first,
+                        second,
+                        location,
+                    },
+                )),
+            ),
+            // DIMORDINATE: the feature and leader points travel on the payload;
+            // the interactive form never forces an axis (`axis = None`).
+            DrawIntent::DimOrdinate { feature, leader } => (
+                crate::CommandId::DimOrdinate,
+                crate::CommandPayload::DimOrdinate(Box::new(crate::OrdinateDimensionCommand {
+                    feature,
+                    leader,
+                    axis: None,
+                })),
+            ),
         };
         Ok(Command {
             schema_version: 1,

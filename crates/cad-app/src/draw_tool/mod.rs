@@ -378,6 +378,25 @@ pub enum DrawIntent {
     /// with `DIMCEN = 0`, nothing plus a diagnostic and no transaction) and owns
     /// every refusal. This is **not** a `DIMENSION` entity.
     DimCenter { target: SelectionRef },
+    /// DIMANGULAR: insert an angular dimension between the two picked straight
+    /// lines, with `location` selecting the dimensioned angle (ADR 0017 decision C,
+    /// P5e).
+    ///
+    /// `first`/`second` are the refs resolved at capture time (the vertex is their
+    /// intersection); `location` is the dimension-arc pick. The command layer
+    /// resolves the lines, builds the definition and owns every refusal, so the
+    /// capture never invents an intersection or an angle.
+    DimAngular {
+        first: SelectionRef,
+        second: SelectionRef,
+        location: Point3,
+    },
+    /// DIMORDINATE: insert an ordinate dimension for `feature` with the leader
+    /// ending at `leader` (ADR 0017 decision C, P5e).
+    ///
+    /// The axis follows the command layer's auto rule (the interactive form never
+    /// forces one); every refusal lives there.
+    DimOrdinate { feature: Point3, leader: Point3 },
 }
 
 /// Drawing/editing capture state machine.
@@ -824,6 +843,20 @@ impl DrawTool {
             // the resolved `DIMCEN` and produces plain geometry (or nothing).
             DrawToolKind::DimCenter => DrawIntent::DimCenter {
                 target: self.picks[0].clone(),
+            },
+            // DIMANGULAR: the two refs resolved at capture time plus the free
+            // dimension-arc location. The intersection, the angle selection and
+            // every refusal live in the command layer.
+            DrawToolKind::DimAngular => DrawIntent::DimAngular {
+                first: self.picks[0].clone(),
+                second: self.picks[1].clone(),
+                location: self.points[2],
+            },
+            // DIMORDINATE: the feature point and the leader endpoint exactly as
+            // clicked; the axis is derived by the command layer.
+            DrawToolKind::DimOrdinate => DrawIntent::DimOrdinate {
+                feature: a,
+                leader: b,
             },
         })
     }

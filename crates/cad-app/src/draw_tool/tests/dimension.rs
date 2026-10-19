@@ -87,3 +87,57 @@ fn radial_tools_start_with_an_entity_pick_then_take_the_location() {
         DrawIntent::DimCenter { target: pick(9) }
     );
 }
+
+#[test]
+fn dimangular_picks_two_lines_then_takes_the_arc_location() {
+    let kind = DrawToolKind::DimAngular;
+    assert_eq!(kind.arity(), PointArity::Exact(3));
+    assert!(kind.needs_picked_entities());
+    assert_eq!(kind.picked_step_count(), 2);
+    assert!(!kind.requires_selection());
+    let mut tool = DrawTool::new(kind, 0);
+    // Both leading steps are entity picks: free points are refused.
+    assert!(tool.push_point(p(0.0, 0.0)).is_err());
+    tool.push_pick(p(5.0, 0.0), pick(21)).unwrap();
+    assert!(tool.push_point(p(0.0, 0.0)).is_err());
+    tool.push_pick(p(0.0, 5.0), pick(22)).unwrap();
+    assert!(!tool.requires_entity_pick());
+    assert!(!tool.is_ready(), "the arc location is still needed");
+    assert_eq!(tool.remaining(), Some(1));
+    // A third pick is refused: the pending step is the free location point.
+    assert!(tool.push_pick(p(0.0, 0.0), pick(23)).is_err());
+    tool.push_point(p(4.0, 4.0)).unwrap();
+    assert!(tool.is_ready());
+    assert_eq!(tool.remaining(), Some(0));
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::DimAngular {
+            first: pick(21),
+            second: pick(22),
+            location: p(4.0, 4.0),
+        }
+    );
+}
+
+#[test]
+fn dimordinate_captures_the_feature_point_and_leader_endpoint() {
+    let kind = DrawToolKind::DimOrdinate;
+    assert_eq!(kind.arity(), PointArity::Exact(2));
+    assert!(!kind.needs_picked_entities());
+    assert_eq!(kind.picked_step_count(), 0);
+    assert!(!kind.requires_selection());
+    let mut tool = DrawTool::new(kind, 0);
+    assert_eq!(tool.remaining(), Some(2));
+    tool.push_point(p(3.0, 4.0)).unwrap();
+    assert!(!tool.is_ready());
+    assert_eq!(tool.remaining(), Some(1));
+    tool.push_point(p(3.0, 9.0)).unwrap();
+    assert!(tool.is_ready());
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::DimOrdinate {
+            feature: p(3.0, 4.0),
+            leader: p(3.0, 9.0),
+        }
+    );
+}

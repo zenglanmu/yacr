@@ -22,6 +22,8 @@ impl Application {
             CommandId::DimRadius => self.dim_radius(session, command),
             CommandId::DimDiameter => self.dim_diameter(session, command),
             CommandId::DimCenter => self.dim_center(session, command),
+            CommandId::DimAngular => self.dim_angular(session, command),
+            CommandId::DimOrdinate => self.dim_ordinate(session, command),
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
             CommandId::ExtendEntity => self.extend_entity(command),

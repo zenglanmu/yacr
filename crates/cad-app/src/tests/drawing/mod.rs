@@ -278,6 +278,7 @@ mod clipboard;
 mod create_polyline;
 mod create_trim;
 mod dimension;
+mod dimension_angular_ordinate;
 mod dimension_radial;
 mod ellipse;
 mod explode;

@@ -18,6 +18,7 @@ mod capture_candidate;
 mod compat;
 mod engine_config;
 mod file_open_save;
+mod fonts;
 mod gate;
 mod hover;
 mod navigation;

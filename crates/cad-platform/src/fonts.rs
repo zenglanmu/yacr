@@ -19,8 +19,7 @@ use std::sync::Arc;
 
 use std::collections::HashSet;
 
-use cad_db::DrawingDatabase;
-use cad_domain::{CadError, CadResult, SemanticGeometry};
+use cad_domain::{CadError, CadResult};
 use cad_representation::FontEngine;
 use cad_resources::{face_url, plan_fonts, plan_fonts_report, FontCatalog};
 
@@ -90,54 +89,13 @@ pub fn catalog_url(base: &str) -> String {
     format!("{}/fonts.json", base.trim_end_matches('/'))
 }
 
-/// Font keys a drawing references, read from the public database API.
-///
-/// This only collects logical keys from `TEXT`/`MTEXT` geometry and the text
-/// styles those entities point at (`Style::resource_keys`, which the importer
-/// populates with the style's SHX/big-font/TTF names). It performs no catalog
-/// lookup, no network access and no path resolution: a hostile drawing can
-/// therefore only supply names, which `plan_fonts` later sanitises to catalog
-/// entries. Names that resolve to nothing remain explicit in the loading report.
-pub fn requested_fonts(database: &DrawingDatabase) -> Vec<String> {
-    let mut out = Vec::new();
-    for entity in database.entities() {
-        collect_fonts(database, &entity.geometry, &mut out);
-    }
-    out
-}
-
-pub(crate) fn collect_fonts(
-    database: &DrawingDatabase,
-    geometry: &SemanticGeometry,
-    out: &mut Vec<String>,
-) {
-    match geometry {
-        SemanticGeometry::Text { font, style, .. } => {
-            if let Some(font) = font {
-                out.push(font.clone());
-            }
-            if let Some(style) = database.style(*style) {
-                out.extend(style.resource_keys.iter().cloned());
-            }
-        }
-        SemanticGeometry::Compound(parts) => {
-            for part in parts {
-                collect_fonts(database, part, out);
-            }
-        }
-        // A dimension's measurement text is a display child; without this arm
-        // its font is never registered and the text is silently not drawn
-        // (ADR 0017 A.8).
-        SemanticGeometry::Dimension(dimension) => {
-            for part in dimension.display() {
-                collect_fonts(database, part, out);
-            }
-        }
-        _ => {}
-    }
-}
+pub use crate::font_keys::{needs_text_shaping, requested_fonts};
 
 /// Fetch the catalog, plan the `requested` names and register the bytes.
+///
+/// `text_needed` says the drawing contains text even when `requested` is empty
+/// (see [`needs_text_shaping`]): the last-resort default face is then registered
+/// so that text shapes through the fallback chain instead of being dropped.
 ///
 /// Returns the populated engine plus a [`FontLoadReport`]. An empty catalog or
 /// an empty plan is not an error: the caller decides whether an empty engine
@@ -145,6 +103,7 @@ pub(crate) fn collect_fonts(
 pub fn load_font_engine<'a>(
     loader: &'a dyn FontLoader,
     requested: &'a [String],
+    text_needed: bool,
     base: &'a str,
 ) -> HostFuture<'a, (Arc<FontEngine>, FontLoadReport)> {
     Box::pin(async move {
@@ -194,8 +153,14 @@ pub fn load_font_engine<'a>(
         // reported. This is what lets a missing drawing font shape with a
         // default instead of being dropped.
         let attempted: HashSet<&String> = plan.iter().map(|font| &font.file).collect();
-        let needs_default = !report.unresolved.is_empty() || !report.failed.is_empty();
-        if !requested.is_empty() && needs_default {
+        // The default face is needed when something the drawing named could not
+        // be resolved, or when the drawing has text but names no font at all
+        // (`registered` is empty in that case). A drawing whose named fonts all
+        // registered pays no extra multi-MB default fetch.
+        let needs_default = (text_needed && report.registered.is_empty())
+            || !report.unresolved.is_empty()
+            || !report.failed.is_empty();
+        if needs_default {
             for name in DEFAULT_FALLBACK_NAMES {
                 let Some(face) = catalog.get(name) else {
                     continue;
@@ -492,22 +457,28 @@ pub mod local {
     /// Build a shaping engine from the `fonts/` package, explicit entries and a
     /// system default, or `None` when nothing is needed.
     ///
-    /// `requested` are the drawing's font keys, `explicit` the `--font` entries
-    /// and `system_default` the ordered default-face candidates.
+    /// `requested` are the drawing's font keys, `text_needed` whether the drawing
+    /// contains text that must be shaped even though it names no font, `explicit`
+    /// the `--font` entries and `system_default` the ordered default-face
+    /// candidates. A drawing with neither text nor a named font installs nothing;
+    /// a text-bearing drawing always gets an engine so its glyphs resolve through
+    /// the fallback chain instead of being silently dropped.
     pub fn load_engine(
         font_dir: Option<&Path>,
         requested: &[String],
+        text_needed: bool,
         explicit: &[(String, PathBuf)],
         system_default: &[Arc<[u8]>],
     ) -> CadResult<Option<Arc<FontEngine>>> {
-        if requested.is_empty() && explicit.is_empty() {
+        if requested.is_empty() && explicit.is_empty() && !text_needed {
             return Ok(None);
         }
         let mut engine = match font_dir {
             Some(dir) => {
                 let base = dir.to_string_lossy().to_string();
                 let loader = DirFontLoader::new(dir.to_path_buf());
-                let (loaded, _report) = block_on(load_font_engine(&loader, requested, &base))?;
+                let (loaded, _report) =
+                    block_on(load_font_engine(&loader, requested, text_needed, &base))?;
                 // `load_font_engine` returns a uniquely owned engine; unwrapping it
                 // lets the explicit/system registrations below extend the same set.
                 Arc::try_unwrap(loaded)
@@ -574,8 +545,43 @@ pub mod local {
 
         #[test]
         fn nothing_requested_and_no_explicit_fonts_installs_nothing() {
-            let engine = load_engine(None, &[], &[], &[]).unwrap();
+            let engine = load_engine(None, &[], false, &[], &[]).unwrap();
             assert!(engine.is_none());
+        }
+
+        #[test]
+        fn text_with_no_named_font_installs_a_fallback_engine() {
+            // A drawing can hold text whose style names no font. It still needs
+            // shaping, so the default face must be installed instead of returning
+            // `None`; the glyphs then come from the fallback chain.
+            let engine = load_engine(None, &[], true, &[], &[Arc::from(synthetic_shx())])
+                .unwrap()
+                .expect("text without a named font installs an engine");
+            assert_eq!(
+                engine.fallback_keys().first().map(String::as_str),
+                Some(DEFAULT_FALLBACK_KEY)
+            );
+        }
+
+        #[test]
+        fn text_without_a_named_font_loads_the_font_package_default() {
+            // `--fonts-dir` (or the sibling package) alone must rescue text with
+            // no named font: the catalog default is registered even though
+            // `requested` is empty.
+            let dir =
+                std::env::temp_dir().join(format!("yacr-font-package-test-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("fonts.json"),
+                br#"[{ "file": "osifont.shx", "name": ["osifont"], "type": "shx" }]"#,
+            )
+            .unwrap();
+            std::fs::write(dir.join("osifont.shx"), synthetic_shx()).unwrap();
+            let engine = load_engine(Some(&dir), &[], true, &[], &[])
+                .unwrap()
+                .expect("the package default installs an engine");
+            assert!(engine.contains("osifont.shx"));
+            let _ = std::fs::remove_dir_all(&dir);
         }
 
         #[test]
@@ -587,6 +593,7 @@ pub mod local {
             let engine = load_engine(
                 None,
                 &["missing.shx".to_string()],
+                false,
                 &[("MyFont".to_string(), path.clone())],
                 &[],
             )
@@ -601,6 +608,7 @@ pub mod local {
             let engine = load_engine(
                 None,
                 &["missing.shx".to_string()],
+                false,
                 &[],
                 &[Arc::from(synthetic_shx())],
             )
@@ -629,10 +637,10 @@ pub mod local {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer, Style};
+    use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Style};
     use cad_domain::{
-        CadResult, DatabaseId, EntityId, LayerId, ObjectId, Point3, Revision, SpaceId, StyleId,
-        TextAlignH, TextAlignV,
+        CadResult, DatabaseId, EntityId, LayerId, ObjectId, Point3, Revision, SemanticGeometry,
+        SpaceId, StyleId, TextAlignH, TextAlignV,
     };
     use std::collections::HashMap;
     use std::future::Future;
@@ -796,6 +804,7 @@ mod tests {
         let (engine, report) = block_on(load_font_engine(
             &loader,
             &requested,
+            false,
             "https://example/fonts",
         ))
         .unwrap();
@@ -823,6 +832,7 @@ mod tests {
         let (_engine, report) = block_on(load_font_engine(
             &loader,
             &requested,
+            false,
             "https://example/fonts",
         ))
         .unwrap();
@@ -850,6 +860,7 @@ mod tests {
         let (engine, report) = block_on(load_font_engine(
             &loader,
             &requested,
+            false,
             "https://example/fonts",
         ))
         .unwrap();
@@ -885,6 +896,7 @@ mod tests {
         let (engine, report) = block_on(load_font_engine(
             &loader,
             &requested,
+            false,
             "https://example/fonts",
         ))
         .unwrap();
@@ -908,6 +920,38 @@ mod tests {
     }
 
     #[test]
+    fn a_resolved_named_font_does_not_fetch_the_unused_default() {
+        // `text_needed` must not turn every text-bearing drawing into an extra
+        // default-font fetch: the default is only for text with no usable named
+        // font.
+        let loader = FakeLoader {
+            catalog: Arc::from(
+                br#"[{"file":"simplex.shx","name":["simplex"],"type":"shx"},
+                     {"file":"osifont.ttf","name":["osifont"],"type":"mesh"}]"#
+                    .as_slice(),
+            ),
+            files: Mutex::new(HashMap::from([(
+                "https://example/fonts/simplex.shx".into(),
+                Ok(synthetic_shx()),
+            )])),
+            seen: Mutex::new(Vec::new()),
+        };
+        let requested = vec!["simplex".to_string()];
+        let (engine, report) = block_on(load_font_engine(
+            &loader,
+            &requested,
+            true,
+            "https://example/fonts",
+        ))
+        .unwrap();
+        assert_eq!(report.registered, vec!["simplex.shx"]);
+        assert_eq!(report.default_face, None);
+        assert!(engine.contains("simplex.shx"));
+        // Catalog + the one font: the unused `osifont` file was never requested.
+        assert_eq!(loader.seen.lock().unwrap().len(), 2);
+    }
+
+    #[test]
     fn catalog_fetch_error_is_propagated() {
         struct NoCatalog;
         impl FontLoader for NoCatalog {
@@ -920,6 +964,7 @@ mod tests {
         let result = block_on(load_font_engine(
             &NoCatalog,
             &requested,
+            false,
             "https://example/fonts",
         ));
         assert!(matches!(result, Err(CadError::ResourceMissing(_))));

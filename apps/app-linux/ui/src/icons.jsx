@@ -54,6 +54,19 @@ const P = {
   dimradius: <><circle cx="12" cy="12" r="7" /><path d="M12 12 17 7" /><path d="M16.4 9.6 17 7 14.4 7.6" /></>,
   dimdiameter: <><circle cx="12" cy="12" r="7" /><path d="M5 12h14" /><path d="M8.5 9.5 5 12l3.5 2.5M15.5 9.5 19 12l-3.5 2.5" /></>,
   dimcenter: <><circle cx="12" cy="12" r="7" /><path d="M12 8.5v7M8.5 12h7" /></>,
+  // Angular dimension (two-line form): two diverging rays drawn as the measure-
+  // angle glyph does, but with the dimension family's arrowheads on the arc the
+  // pick selects — that pair of arrowheads is what tells the measuring glyph and
+  // the dimension glyph apart. Both rays run past the arc (the measured lines are
+  // real lines, not stubs) and there is no vertex dot and no third ray: the tool
+  // selects two lines, never a vertex point.
+  dimangular: <><path d="M5 19h15" /><path d="M5 19 13 5.1" /><path d="M17 19A12 12 0 0 0 11 8.6" /><path d="M15.8 17.6 17 19l1.2-1.4" /><path d="M11.6 10.3 11 8.6 12.8 8.3" /></>,
+  // Ordinate dimension: the feature point (the measured object) with a leader
+  // leaving it at 45°, a horizontal landing line and the short end tick that
+  // anchors the ordinate value. The circled feature echoes the point glyph and the
+  // straight landing echoes the linear pair's extension lines, so the family reads
+  // as one vocabulary.
+  dimordinate: <><circle cx="5.2" cy="18.2" r="1.7" /><path d="M6.6 16.9 12.9 10.6 19.5 10.6" /><path d="M19.5 8.2v4.8" /></>,
   polyline: <><path d="M4 18 9 8l5 6 6-10" /><circle cx="4" cy="18" r="1.5" /><circle cx="9" cy="8" r="1.5" /><circle cx="20" cy="4" r="1.5" /></>,
   rectang: <><rect x="4" y="6" width="16" height="12" /><circle cx="4" cy="6" r="1.5" /><circle cx="20" cy="18" r="1.5" /></>,
   ellipse: <><ellipse cx="12" cy="12" rx="9" ry="5.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="3" cy="12" r="1.4" /><circle cx="21" cy="12" r="1.4" /></>,

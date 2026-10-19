@@ -193,6 +193,7 @@ impl CadSession {
     /// | `SPLINE` | `BeginDraw(Spline)` |
     /// | `DIMLINEAR` / `DIMALIGNED` | `BeginDraw(DimLinear)` / `BeginDraw(DimAligned)` |
     /// | `DIMRADIUS` / `DIMDIAMETER` / `DIMCENTER` | `BeginDraw(DimRadius)` / `BeginDraw(DimDiameter)` / `BeginDraw(DimCenter)` |
+    /// | `DIMANGULAR` / `DIMORDINATE` | `BeginDraw(DimAngular)` / `BeginDraw(DimOrdinate)` |
     /// | `ARRAYRECT` / `ARRAYPOLAR` | `BeginDraw(ArrayRect)` / `BeginDraw(ArrayPolar)` |
     /// | `ALIGN` | `BeginDraw(Align)` |
     /// | `STRETCH` | `BeginDraw(Stretch)` |
@@ -268,6 +269,10 @@ impl CadSession {
                 Some(InteractionRequest::BeginDraw(DrawToolKind::DimDiameter))
             }
             CommandId::DimCenter => Some(InteractionRequest::BeginDraw(DrawToolKind::DimCenter)),
+            CommandId::DimAngular => Some(InteractionRequest::BeginDraw(DrawToolKind::DimAngular)),
+            CommandId::DimOrdinate => {
+                Some(InteractionRequest::BeginDraw(DrawToolKind::DimOrdinate))
+            }
             CommandId::MoveEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Move)),
             CommandId::CopyEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Copy)),
             CommandId::RotateEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Rotate)),

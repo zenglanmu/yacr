@@ -311,7 +311,7 @@ impl HostCore {
     /// The representation context for plotting, with the desktop font engine so
     /// text is shaped exactly as the render path shapes it.
     fn plot_context(&self) -> CadResult<cad_representation::RepresentationContext> {
-        let (document, generation, requested) = {
+        let (document, generation, requested, text_needed) = {
             let controller = self.controller.borrow();
             (
                 controller.document_id,
@@ -320,6 +320,10 @@ impl HostCore {
                     .drawing()
                     .map(|drawing| cad_platform::fonts::requested_fonts(drawing.as_ref()))
                     .unwrap_or_default(),
+                controller
+                    .drawing()
+                    .map(|drawing| cad_platform::fonts::needs_text_shaping(drawing.as_ref()))
+                    .unwrap_or(false),
             )
         };
         let mut context = cad_representation::RepresentationContext::new(
@@ -327,7 +331,7 @@ impl HostCore {
             cad_domain::TolerancePolicy::default(),
             cad_domain::TaskStamp::new(document, generation),
         );
-        if let Some(engine) = self.load_plot_fonts(&requested)? {
+        if let Some(engine) = self.load_plot_fonts(&requested, text_needed)? {
             context = context.with_fonts(engine);
         }
         Ok(context)

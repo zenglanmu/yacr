@@ -13,20 +13,32 @@ pub(crate) fn fonts_requested(controller: &HostController) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Whether the drawing contains text that needs shaping even if it names no
+/// font (a created dimension, or TEXT in a style with no STYLE entry).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn drawing_needs_text(controller: &HostController) -> bool {
+    controller
+        .drawing()
+        .map(|drawing| cad_platform::fonts::needs_text_shaping(drawing.as_ref()))
+        .unwrap_or(false)
+}
+
 /// Load the `--font` entries plus the sibling `fonts/` package into a shaping
 /// engine, if any are needed.
 ///
 /// Native hosts also auto-load the `fonts/` directory next to the executable
 /// (`cad_platform::fonts::local`) and a system default fallback face, so a
-/// packaged CLI shapes text whose font is missing. Wasm keeps the explicit
-/// `--font` registrations only.
+/// packaged CLI shapes text whose font is missing. `text_needed` keeps a
+/// text-bearing drawing engine-backed even when it names no font. Wasm keeps the
+/// explicit `--font` registrations only.
 pub(crate) fn load_fonts(
     entries: &[(String, PathBuf)],
     requested: &[String],
+    text_needed: bool,
 ) -> CadResult<Option<Arc<cad_representation::FontEngine>>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        if entries.is_empty() && requested.is_empty() {
+        if entries.is_empty() && requested.is_empty() && !text_needed {
             return Ok(None);
         }
         let exe = std::env::current_exe().unwrap_or_default();
@@ -34,6 +46,7 @@ pub(crate) fn load_fonts(
         cad_platform::fonts::local::load_engine(
             font_dir.as_deref(),
             requested,
+            text_needed,
             entries,
             cad_platform::fonts::local::cached_system_default_candidates(),
         )
@@ -44,6 +57,7 @@ pub(crate) fn load_fonts(
             return Ok(None);
         }
         let _ = requested;
+        let _ = text_needed;
         let mut engine = cad_representation::FontEngine::new();
         let mut keys = Vec::new();
         for (key, path) in entries {

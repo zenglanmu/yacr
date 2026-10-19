@@ -155,6 +155,32 @@ pub enum CommandId {
     /// non-arc/circle pick, an off-plane entity, a degenerate radius and a missing
     /// active layer. Work-only.
     DimCenter,
+    /// DIMANGULAR: draw an angular dimension (ADR 0017 decision C, P5e). The
+    /// interactive tool captures **two straight-line picks** plus the dimension-arc
+    /// location; the vertex is the intersection of the two infinite lines (U-8,
+    /// pinned against the committed QCAD fixtures) and the location pick selects
+    /// one of the four angles. The command also accepts the **three-point**
+    /// construction (vertex, two side points, arc location) through
+    /// [`crate::AngularDimensionInput::ThreePoint`] — it has no interactive capture
+    /// yet because the capture state machine cannot express AutoCAD's
+    /// "select a line *or* specify a vertex" first step. Refuses a non-line pick,
+    /// parallel/collinear lines, coincident points, an off-plane input, a location
+    /// at the vertex and a missing active layer. Built through the shared synthesis
+    /// from the resolved current style (`Standard`) and inserted as one
+    /// `AcDbDimension` in one transaction / one undo step. Non-associative.
+    /// Work-only.
+    DimAngular,
+    /// DIMORDINATE: draw an ordinate dimension from a feature point and a leader
+    /// endpoint (ADR 0017 decision C, P5e). The axis follows the documented auto
+    /// rule (a greater Y difference measures the X ordinate; the unstated equal
+    /// case is **our** declared choice of Y) unless
+    /// [`crate::OrdinateDimensionCommand::axis`] forces one. The measurement is the
+    /// feature's datum-relative (world-origin-relative) X or Y coordinate
+    /// **magnitude** (P5b: signed ordinates are not modelled). Refuses a zero-length
+    /// leader, an off-plane input, non-finite points and a missing active layer.
+    /// One transaction / one undo step on the active layer. Non-associative.
+    /// Work-only.
+    DimOrdinate,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
@@ -303,6 +329,8 @@ impl CommandId {
                 | Self::DimRadius
                 | Self::DimDiameter
                 | Self::DimCenter
+                | Self::DimAngular
+                | Self::DimOrdinate
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity

@@ -427,14 +427,16 @@ pub(super) fn schedule_draw_edit_phases(webview: &tauri::Webview, start: &Instan
 
 /// Schedule the combined single-line report relative to the driver start.
 ///
-/// It lands after every phase (default t=165 s), so the arrays, the EXPLODE
+/// It lands after every phase (default t=180 s), so the arrays, the EXPLODE
 /// result, the P5c dimensions (DIMLINEAR/DIMALIGNED, [`super::draw_dimension`],
-/// which end at t=144.5 s) and the P5d radial dimensions (DIMRADIUS/DIMDIAMETER/
-/// DIMCENTER, [`super::draw_dimension_radial`], which end at t=163 s) are already
+/// which end at t=144.5 s), the P5d radial dimensions (DIMRADIUS/DIMDIAMETER/
+/// DIMCENTER, [`super::draw_dimension_radial`], which end at t=163 s) and the P5e
+/// angular/ordinate dimensions (DIMANGULAR/DIMORDINATE,
+/// [`super::draw_dimension_angular_ordinate`], which end at t=177.5 s) are already
 /// committed; the report carries the real before/after reads and the real
 /// refusals.
 pub(super) fn schedule_draw_report(webview: &tauri::Webview, start: &Instant) {
-    schedule_draw_ms(start, 165_000, "draw evidence report", || {
+    schedule_draw_ms(start, 180_000, "draw evidence report", || {
         webview.eval_with_callback(DRAW_REPORT_JS, |payload| {
             eprintln!(
                 "[probe] draw evidence report: {}",
@@ -490,6 +492,16 @@ fn decode_draw_report(payload: &str) -> String {
 /// fraction the synthetic click dispatched at;
 /// `radial_dimension_geometry_channel=none_...` restates that no per-entity
 /// geometry is observable here.
+///
+/// The P5e angular/ordinate fields ([`super::draw_dimension_angular_ordinate`])
+/// follow the same discipline: `dimangular_delta` / `dimordinate_delta` are the
+/// real `entityCount` deltas (expected `+1` each), `dimangular_lines_delta` is the
+/// real delta of the two `LINE`s the phase draws as pick targets, and
+/// `*_after_tool` must be `-` with `*_after_error` also `-`. Every
+/// `*_frac` (line body picks, arc location, feature, leader, cursor park) is the
+/// real rect fraction the synthetic event was dispatched at;
+/// `angular_ordinate_geometry_channel=none_...` states that neither the measured
+/// sector nor any definition point is readable here.
 const DRAW_REPORT_JS: &str = r#"
 (function () {
   var d = window.__yacr_draw || {};
@@ -536,6 +548,11 @@ const DRAW_REPORT_JS: &str = r#"
     d.s_dimdiameter_points_failed || d.s_dimdiameter_after_failed ||
     d.s_center_circle_after_failed || d.s_dimcenter_active_failed || d.s_dimcenter_pick_failed ||
     d.s_dimcenter_after_failed ||
+    d.s_ang_line1_after_failed || d.s_ang_line2_after_failed ||
+    d.s_dimangular_active_failed || d.s_dimangular_pick1_failed || d.s_dimangular_pick2_failed ||
+    d.s_dimangular_points_failed || d.s_dimangular_after_failed || d.s_dimordinate_active_failed ||
+    d.s_dimordinate_feature_failed || d.s_dimordinate_points_failed ||
+    d.s_dimordinate_after_failed ||
     d.confirm_a_h_failed || d.confirm_a_v_failed || d.confirm_fillet_failed ||
     d.confirm_b_h_failed || d.confirm_b_v_failed || d.confirm_chamfer_failed ||
     d.confirm_pline_failed || d.confirm_polygon_failed || d.confirm_point_failed ||
@@ -544,7 +561,9 @@ const DRAW_REPORT_JS: &str = r#"
     d.confirm_align_failed || d.confirm_stretch_src_failed || d.confirm_stretch_failed ||
     d.confirm_explode_rect_failed || d.confirm_dimlinear_failed || d.confirm_dimaligned_failed ||
     d.confirm_rad_circle_failed || d.confirm_dimradius_failed || d.confirm_dia_circle_failed ||
-    d.confirm_dimdiameter_failed || d.confirm_center_circle_failed || d.confirm_dimcenter_failed;
+    d.confirm_dimdiameter_failed || d.confirm_center_circle_failed || d.confirm_dimcenter_failed ||
+    d.confirm_ang_line1_failed || d.confirm_ang_line2_failed || d.confirm_dimangular_failed ||
+    d.confirm_dimordinate_failed;
   var text = 'draw_synthetic=1_not_a_real_mouse' +
     ' baseline_count=' + v(d.s_base_count) +
     ' geom_a_before_count=' + v(d.s_base_count) +
@@ -733,6 +752,43 @@ const DRAW_REPORT_JS: &str = r#"
     ' dimcenter_after_error=' + v(d.s_dimcenter_after_error) +
     ' dimcenter_output=plain_line_geometry_not_a_dimension' +
     ' dimcenter_dimstyle_channel=none_cad_status_has_no_dimstyle_channel' +
+    ' dimangular_line1_ack=' + v(d['ang_line1_ack']) +
+    ' dimangular_line2_ack=' + v(d['ang_line2_ack']) +
+    ' dimangular_start_ack=' + v(d['dimangular_ack']) +
+    ' dimangular_active_tool=' + v(d.s_dimangular_active_tool) +
+    ' dimangular_active_points=' + v(d.s_dimangular_active_points) +
+    ' dimangular_pick1_points=' + v(d.s_dimangular_pick1_points) +
+    ' dimangular_pick2_points=' + v(d.s_dimangular_pick2_points) +
+    ' dimangular_points=' + v(d.s_dimangular_points_points) +
+    ' dimangular_points_ready=' + v(d.s_dimangular_points_ready) +
+    ' dimangular_confirm_ack=' + v(d.confirm_dimangular_ack) +
+    ' dimangular_before_count=' + v(d.s_ang_line2_after_count) +
+    ' dimangular_after_count=' + v(d.s_dimangular_after_count) +
+    ' dimangular_delta=' + delta(d.s_ang_line2_after_count, d.s_dimangular_after_count) +
+    ' dimangular_after_tool=' + v(d.s_dimangular_after_tool) +
+    ' dimangular_after_error=' + v(d.s_dimangular_after_error) +
+    ' dimangular_geometry_before_count=' + v(d.s_dimcenter_after_count) +
+    ' dimangular_geometry_after_count=' + v(d.s_ang_line2_after_count) +
+    ' dimangular_geometry_delta=' + delta(d.s_dimcenter_after_count, d.s_ang_line2_after_count) +
+    ' dimordinate_start_ack=' + v(d['dimordinate_ack']) +
+    ' dimordinate_active_tool=' + v(d.s_dimordinate_active_tool) +
+    ' dimordinate_active_points=' + v(d.s_dimordinate_active_points) +
+    ' dimordinate_feature_points=' + v(d.s_dimordinate_feature_points) +
+    ' dimordinate_points=' + v(d.s_dimordinate_points_points) +
+    ' dimordinate_points_ready=' + v(d.s_dimordinate_points_ready) +
+    ' dimordinate_confirm_ack=' + v(d.confirm_dimordinate_ack) +
+    ' dimordinate_before_count=' + v(d.s_dimangular_after_count) +
+    ' dimordinate_after_count=' + v(d.s_dimordinate_after_count) +
+    ' dimordinate_delta=' + delta(d.s_dimangular_after_count, d.s_dimordinate_after_count) +
+    ' dimordinate_after_tool=' + v(d.s_dimordinate_after_tool) +
+    ' dimordinate_after_error=' + v(d.s_dimordinate_after_error) +
+    ' dimangular_pick1_frac=' + arr(d.dimangular_pick1_frac) +
+    ' dimangular_pick2_frac=' + arr(d.dimangular_pick2_frac) +
+    ' dimangular_loc_frac=' + arr(d.dimangular_loc_frac) +
+    ' dimordinate_feature_frac=' + arr(d.dimordinate_feature_frac) +
+    ' dimordinate_leader_frac=' + arr(d.dimordinate_leader_frac) +
+    ' dim_park_frac=' + arr(d.dim_park_frac) +
+    ' angular_ordinate_geometry_channel=none_cad_status_has_no_entity_geometry_or_measured_sector' +
     ' dimradius_pick_frac=' + arr(d.dimradius_pick_frac) +
     ' dimradius_loc_frac=' + arr(d.dimradius_loc_frac) +
     ' dimdiameter_pick_frac=' + arr(d.dimdiameter_pick_frac) +
@@ -840,7 +896,21 @@ const DRAW_REPORT_JS: &str = r#"
     ' center_circle_failed=' + v(d.center_circle_failed) +
     ' center_circle_center_failed=' + v(d.center_circle_center_failed) +
     ' center_circle_radius_failed=' + v(d.center_circle_radius_failed) +
-    ' dimcenter_pick_failed=' + v(d.dimcenter_pick_failed);
+    ' dimcenter_pick_failed=' + v(d.dimcenter_pick_failed) +
+    ' dimangular_failed=' + v(d.dimangular_failed) +
+    ' ang_line1_failed=' + v(d.ang_line1_failed) +
+    ' ang_l1_v_failed=' + v(d.ang_l1_v_failed) +
+    ' ang_l1_end_failed=' + v(d.ang_l1_end_failed) +
+    ' ang_line2_failed=' + v(d.ang_line2_failed) +
+    ' ang_l2_v_failed=' + v(d.ang_l2_v_failed) +
+    ' ang_l2_end_failed=' + v(d.ang_l2_end_failed) +
+    ' dimangular_pick1_failed=' + v(d.dimangular_pick1_failed) +
+    ' dimangular_pick2_failed=' + v(d.dimangular_pick2_failed) +
+    ' dimangular_loc_failed=' + v(d.dimangular_loc_failed) +
+    ' dimordinate_failed=' + v(d.dimordinate_failed) +
+    ' dimordinate_feature_failed=' + v(d.dimordinate_feature_failed) +
+    ' dimordinate_leader_failed=' + v(d.dimordinate_leader_failed) +
+    ' dim_park_failed=' + v(d.dim_park_failed);
   try { console.log('[probe] draw evidence report: ' + text); } catch (err) {}
   return text;
 })()

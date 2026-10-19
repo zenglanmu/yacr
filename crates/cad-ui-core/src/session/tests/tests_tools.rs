@@ -33,6 +33,8 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("DIMRADIUS", "draw.dimradius"),
     ("DIMDIAMETER", "draw.dimdiameter"),
     ("DIMCENTER", "draw.dimcenter"),
+    ("DIMANGULAR", "draw.dimangular"),
+    ("DIMORDINATE", "draw.dimordinate"),
 ];
 
 fn fresh_session() -> CadSession {

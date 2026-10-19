@@ -126,6 +126,40 @@ fn sfnt_text_provider_emits_meshes_without_outline_lines() {
 }
 
 #[test]
+fn text_with_no_named_font_shapes_through_the_fallback_chain() {
+    // A Text child whose style names no font must not be silently dropped: the
+    // registered fallback chain supplies the glyphs, and the fallback is
+    // reported (never passed off as the requested face).
+    let mut fonts = FontEngine::new();
+    fonts
+        .register(
+            "osifont.ttf",
+            Arc::from(include_bytes!("../../../../fonts/osifont.ttf").as_slice()),
+        )
+        .unwrap();
+    fonts.set_fallback(vec!["osifont.ttf".into()]);
+    let mut e = text_entity(94, 20.0);
+    if let SemanticGeometry::Text { text, .. } = &mut e.geometry {
+        *text = "12.5".into();
+    }
+    let r = ProviderRegistry::with_default_provider()
+        .build(&e, &context().with_fonts(Arc::new(fonts)))
+        .unwrap();
+    assert!(!r.fragments.is_empty(), "fallback glyphs were not emitted");
+    assert!(r.fragments.iter().all(|fragment| matches!(
+        fragment.primitive,
+        DisplayPrimitive::MeshWithoutEdgeOverlay(_) | DisplayPrimitive::Lines(_)
+    )));
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "text.font_fallback"),
+        "{:?}",
+        r.diagnostics
+    );
+}
+
+#[test]
 fn shx_text_provider_keeps_outline_lines_when_font_is_available() {
     let Ok(path) = std::env::var("YACR_TEST_SHX") else {
         return;

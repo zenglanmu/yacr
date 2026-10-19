@@ -240,6 +240,7 @@ fn run_fixture(
     let fonts = cad_platform::fonts::local::load_engine(
         font_dir,
         &requested,
+        false,
         &[],
         cad_platform::fonts::local::cached_system_default_candidates(),
     )

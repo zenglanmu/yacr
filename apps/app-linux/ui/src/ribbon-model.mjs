@@ -190,22 +190,37 @@ export const RIBBON_TABS = Object.freeze([
           // Annotate tab puts its Dimensions panel first. The linear/aligned pair
           // are three-pick captures (two extension-line origins, then the
           // dimension-line location); the radial pair are two-pick captures (an
-          // arc/circle entity pick, then the dimension-line location) and the
-          // centre mark is a single arc/circle pick producing plain geometry.
+          // arc/circle entity pick, then the dimension-line location); the centre
+          // mark is a single arc/circle pick producing plain geometry; the angular
+          // dimension is a two-line capture (two straight-line entity picks, then
+          // the arc location that selects which angle is measured) and the
+          // ordinate dimension is a two-point capture (a feature point, then the
+          // leader endpoint).
           // The whole family stays together in one fixed order — linear, aligned,
-          // radius, diameter, centre mark — so the panel never reorders between
-          // sessions and the radial pair sits right next to the linear pair.
+          // radius, diameter, centre mark, angular, ordinate — so the panel never
+          // reorders between sessions and no already-shipped button moves: the
+          // angular/ordinate pair is appended in AutoCAD's own angular-before-
+          // ordinate sequence instead of slotting between aligned and radius.
+          //
+          // DIMANGULAR is offered here as the **two-line** form only. The
+          // three-point form exists at command level but has no interactive
+          // capture, so no part of this button implies a vertex-first workflow.
           //
           // Each command carries its own glyph in the shared 24px stroke language
-          // (`dimlinear`/`dimaligned`/`dimradius`/`dimdiameter`/`dimcenter`), so
-          // the family reads as one set: the radial pair draws its arc/circle
-          // target with the linear pair's dimension-line + arrowhead vocabulary,
-          // and the centre mark shows the crossed mark at the circle's centre.
+          // (`dimlinear`/`dimaligned`/`dimradius`/`dimdiameter`/`dimcenter`/
+          // `dimangular`/`dimordinate`), so the family reads as one set: the radial
+          // pair draws its arc/circle target with the linear pair's dimension-line
+          // + arrowhead vocabulary, the centre mark shows the crossed mark at the
+          // circle's centre, the angular glyph adds dimension arrowheads to the
+          // measure-angle rays-plus-arc, and the ordinate glyph is a feature point
+          // whose leader ends in a dimension tick.
           { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', command: 'DIMLINEAR', large: true },
           { id: 'DIMALIGNED', labelKey: 'draw.kind.dimaligned', icon: 'dimaligned', command: 'DIMALIGNED', large: true },
           { id: 'DIMRADIUS', labelKey: 'draw.kind.dimradius', icon: 'dimradius', command: 'DIMRADIUS', large: true },
           { id: 'DIMDIAMETER', labelKey: 'draw.kind.dimdiameter', icon: 'dimdiameter', command: 'DIMDIAMETER', large: true },
           { id: 'DIMCENTER', labelKey: 'draw.kind.dimcenter', icon: 'dimcenter', command: 'DIMCENTER', large: true },
+          { id: 'DIMANGULAR', labelKey: 'draw.kind.dimangular', icon: 'dimangular', command: 'DIMANGULAR', large: true },
+          { id: 'DIMORDINATE', labelKey: 'draw.kind.dimordinate', icon: 'dimordinate', command: 'DIMORDINATE', large: true },
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', command: 'PROPERTIES', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
           { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', command: 'SELECTALL' },

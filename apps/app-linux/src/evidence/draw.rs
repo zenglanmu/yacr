@@ -70,11 +70,20 @@
 //!     `DIMENSION`; the committed line count follows the drawing's active
 //!     `Standard` `DIMCEN`, which `cad_status` does **not** expose, so the report
 //!     states the real delta and never asserts a count it cannot read.
+//! 18. **DIMANGULAR** (P5e, two-line form): draw two non-parallel `LINE`s that
+//!     share a vertex (`+2`), start the real `DIMANGULAR` selector, click **each
+//!     line's body** (two entity picks), click the dimension-arc location inside
+//!     the intended 0°..45° sector, `CONFIRM`, and read `entityCount` **+1** and
+//!     `tool` `null`.
+//! 19. **DIMORDINATE** (P5e): feature point, leader endpoint, `CONFIRM` ⇒
+//!     `entityCount` **+1**.
 //!
 //! The P4 edit-command phases (8–12) live in [`super::draw_edit`], the P5c
-//! dimension-creation phases (13–14) in [`super::draw_dimension`], and the P5d
-//! radial-dimension phases (15–17) in [`super::draw_dimension_radial`] (this file
-//! was split at the 1000-line code-file gate).
+//! dimension-creation phases (13–14) in [`super::draw_dimension`], the P5d
+//! radial-dimension phases (15–17) in [`super::draw_dimension_radial`] and the
+//! P5e angular/ordinate phases (18–19) in
+//! [`super::draw_dimension_angular_ordinate`] (this file was split at the
+//! 1000-line code-file gate).
 //!
 //! Synthetic input, **not a real mouse**: the events are dispatched on
 //! `.native-input` and never touch the kernel/evdev/XInput path. Every reported
@@ -135,7 +144,8 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
          POLYGON(sides=6, out-of-range=2) POINT(visible) RECTANG + P4 edit commands \
          ARRAYRECT(rows=2,cols=3) ARRAYPOLAR(items=4) ALIGN(4pt) STRETCH(4pt) EXPLODE \
          + P5c dimensions DIMLINEAR(3pt) DIMALIGNED(3pt) \
-         + P5d radial dimensions DIMRADIUS(circle+pick+loc) DIMDIAMETER(circle+pick+loc) DIMCENTER(circle+pick)"
+         + P5d radial dimensions DIMRADIUS(circle+pick+loc) DIMDIAMETER(circle+pick+loc) DIMCENTER(circle+pick) \
+         + P5e dimensions DIMANGULAR(2 lines+2 picks+arc loc) DIMORDINATE(feature+leader)"
     );
     let webview = webview.clone();
     if let Err(error) = std::thread::Builder::new()
@@ -186,12 +196,14 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
 ///   dimension-creation phases** (DIMLINEAR / DIMALIGNED, [`super::draw_dimension`])
 ///   at t=137s..144.5s, the **P5d radial-dimension phases** (DIMRADIUS /
 ///   DIMDIAMETER / DIMCENTER, [`super::draw_dimension_radial`]) at
-///   t=145s..163s, and the combined single-line report lands at t=165s — the P4
-///   phases and report in [`super::draw_edit`], which documents the per-step
-///   timeline. An external `--capture-at` should land **after** every P5d command
-///   commits (≈ driver t=163s.., i.e. a launch delay of ≈ 170s) so a reviewer sees
-///   the arrays, the EXPLODE result, the P5c dimensions **and** the P5d circles +
-///   radial dimensions on screen.
+///   t=145s..163s, the **P5e angular/ordinate phases** (DIMANGULAR /
+///   DIMORDINATE, [`super::draw_dimension_angular_ordinate`]) at
+///   t=163.5s..177.5s, and the combined single-line report lands at t=180s — the
+///   P4 phases and report in [`super::draw_edit`], which documents the per-step
+///   timeline. An external `--capture-at` should land **after** every P5e command
+///   commits (≈ driver t=177.5s, i.e. a launch delay of ≈ 185s) so a reviewer
+///   sees the arrays, the EXPLODE result, the P5c dimensions, the P5d circles +
+///   radial dimensions **and** the P5e angular/ordinate dimensions on screen.
 ///
 /// Every step is a dispatch only; the **real** outcome is the `cad_status`
 /// snapshot read from the host, never a value synthesized here. Pointer
@@ -552,6 +564,7 @@ fn run_draw_evidence(webview: tauri::Webview) {
     super::draw_edit::schedule_draw_edit_phases(&webview, &start);
     super::draw_dimension::schedule_dimension_phases(&webview, &start);
     super::draw_dimension_radial::schedule_radial_dimension_phases(&webview, &start);
+    super::draw_dimension_angular_ordinate::schedule_angular_ordinate_phases(&webview, &start);
     super::draw_edit::schedule_draw_report(&webview, &start);
 }
 
@@ -639,6 +652,20 @@ pub(super) fn draw_set_parameter_number_js(parameter: &str, value: f64, label: &
 /// **not a real mouse**.
 pub(super) fn draw_click_world_js(wx: f64, wy: f64, label: &str) -> String {
     DRAW_CLICK_TEMPLATE
+        .replace("__WX__", &wx.to_string())
+        .replace("__WY__", &wy.to_string())
+        .replace("__LABEL__", label)
+}
+
+/// Build one **click-free** synthetic pointer move at a **world** point.
+///
+/// Same world→rect-fraction conversion as [`draw_click_world_js`], but it
+/// dispatches only `pointermove` (button `-1`, buttons `0`): no press, no release
+/// and no `d.clicks` increment. Used by the P5e phases to park the cursor so the
+/// renderer's viewport-spanning crosshair does not run through the regions the
+/// presence check measures. Synthetic, **not a real mouse**.
+pub(super) fn draw_move_world_js(wx: f64, wy: f64, label: &str) -> String {
+    DRAW_MOVE_TEMPLATE
         .replace("__WX__", &wx.to_string())
         .replace("__WY__", &wy.to_string())
         .replace("__LABEL__", label)
@@ -875,6 +902,69 @@ const DRAW_CLICK_TEMPLATE: &str = r#"
       d[label + '_dispatched'] = true;
     }).catch(function (err) { d[label + '_failed'] = String(err); });
     return label + '-dispatched';
+  } catch (err) {
+    try { d[label + '_failed'] = 'fatal:' + err; } catch (_) {}
+    return 'error:' + err;
+  }
+})()
+"#;
+
+/// One **click-free** synthetic pointer move at a **world** point.
+///
+/// Same camera/rect conversion and the same recorded diagnostics as
+/// [`DRAW_CLICK_TEMPLATE`] (`__LABEL___world`, `__LABEL___frac`, `__LABEL___px`),
+/// but only `pointermove` is dispatched and `d.clicks` is left untouched: no
+/// press, no release, no selection change. `__WX__`/`__WY__` are world
+/// coordinates; `__LABEL__` names the move. Synthetic, **not a real mouse**.
+const DRAW_MOVE_TEMPLATE: &str = r#"
+(function () {
+  var d = window.__yacr_draw = window.__yacr_draw || {};
+  var label = '__LABEL__';
+  try {
+    var el = document.querySelector('.native-input');
+    if (!el) { d[label + '_failed'] = 'no-element'; return 'no-element'; }
+    var r = el.getBoundingClientRect();
+    if (!(r.width > 20 && r.height > 20)) {
+      d[label + '_failed'] = 'tiny-rect:' + r.width + 'x' + r.height;
+      return 'tiny-rect:' + r.width + 'x' + r.height;
+    }
+    var internals = window.__TAURI_INTERNALS__;
+    if (!internals || typeof internals.invoke !== 'function') {
+      d[label + '_failed'] = 'no-tauri-internals';
+      return 'no-tauri-internals';
+    }
+    internals.invoke('cad_status').then(function (s) {
+      if (!s.camera || !(s.camera.scale > 0)) {
+        d[label + '_failed'] = 'no-camera';
+        return;
+      }
+      var cx = s.camera.center[0];
+      var cy = s.camera.center[1];
+      var sc = s.camera.scale;
+      var fx = 0.5 + (__WX__ - cx) / (sc * r.width);
+      var fy = 0.5 - (__WY__ - cy) / (sc * r.height);
+      d[label + '_world'] = [__WX__, __WY__];
+      d[label + '_frac'] = [fx, fy];
+      d.camera = [cx, cy, sc];
+      d.rect = [r.left, r.top, r.width, r.height];
+      if (!(fx >= 0 && fx <= 1 && fy >= 0 && fy <= 1)) {
+        d[label + '_failed'] = 'outside-canvas:' + fx + ',' + fy;
+        return;
+      }
+      el.setPointerCapture = function () {};
+      el.hasPointerCapture = function () { return false; };
+      el.releasePointerCapture = function () {};
+      var x = r.left + r.width * fx;
+      var y = r.top + r.height * fy;
+      el.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 1, pointerType: 'mouse', isPrimary: true,
+        button: -1, buttons: 0,
+        clientX: x, clientY: y, bubbles: true, cancelable: true
+      }));
+      d[label + '_px'] = [Math.round(x - r.left), Math.round(y - r.top)];
+      d[label + '_dispatched'] = true;
+    }).catch(function (err) { d[label + '_failed'] = String(err); });
+    return label + '-moved';
   } catch (err) {
     try { d[label + '_failed'] = 'fatal:' + err; } catch (_) {}
     return 'error:' + err;

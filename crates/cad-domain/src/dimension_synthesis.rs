@@ -318,37 +318,176 @@ pub fn radial_synthesis(
     })
 }
 
-/// Angular dimension: an arc between two rays from `vertex`, with extension
-/// lines, tangential arrows and the angle text.
+/// Angular dimension (three-point form): an arc between the two rays
+/// `vertex -> point1` and `vertex -> point2`, with extension lines, tangential
+/// arrows and the angle text.
+///
+/// The **arc location** (`arc_point`, DXF group 10 for a three-point angular
+/// dimension) selects which of the two angles the two rays bound is dimensioned
+/// (ADR 0017 U-1: Autodesk does not document the exact rule, so this is our
+/// declared reading): the sector that contains `arc_point` is measured, so a
+/// point on the reflex side yields the reflex angle. A selector exactly on one
+/// of the rays is treated as belonging to the counter-clockwise sector from that
+/// ray (the same boundary convention as [`angular_lines_synthesis`]).
 pub fn angular_synthesis(
     vertex: Point3,
     point1: Point3,
     point2: Point3,
-    radius: f64,
+    arc_point: Point3,
     normal: Point3,
     style: &DimensionStyleValues,
 ) -> Option<SynthesizedDimension> {
-    let d1 = sub(point1, vertex);
-    let d2 = sub(point2, vertex);
+    angular_synthesis_rays(
+        vertex,
+        sub(point1, vertex),
+        sub(point2, vertex),
+        point1,
+        point2,
+        arc_point,
+        normal,
+        style,
+    )
+}
+
+/// Angular dimension between two **lines** (two-line form, ADR 0017 U-8).
+///
+/// Line 1 is `line1_start -> line1_end` (DXF groups 13/14), line 2 is
+/// `line2_start -> line2_end` (groups 15/10). The vertex is the **intersection
+/// of the two infinite lines**, and `arc_point` (group 16) selects which of the
+/// four angles is measured. This reading is pinned against the committed QCAD
+/// fixtures (`entities.dxf` `*D65`, `example01.dxf` `*D6`, …): the group-42
+/// radians and the anonymous block's ARC centre both match it, and acadrust's
+/// own reader/`measurement_radians` implementation agrees.
+///
+/// Returns `None` for a degenerate line, parallel/collinear lines (no vertex), or
+/// an `arc_point` at the vertex (no sector direction).
+#[allow(clippy::too_many_arguments)]
+pub fn angular_lines_synthesis(
+    line1_start: Point3,
+    line1_end: Point3,
+    line2_start: Point3,
+    line2_end: Point3,
+    arc_point: Point3,
+    normal: Point3,
+    style: &DimensionStyleValues,
+) -> Option<SynthesizedDimension> {
+    if !is_finite_point(line1_start)
+        || !is_finite_point(line1_end)
+        || !is_finite_point(line2_start)
+        || !is_finite_point(line2_end)
+        || !is_finite_point(arc_point)
+    {
+        return None;
+    }
+    let d1 = sub(line1_end, line1_start);
+    let d2 = sub(line2_end, line2_start);
     if length(d1) < 1e-9 || length(d2) < 1e-9 {
+        return None;
+    }
+    let vertex = line_intersection(line1_start, d1, line2_start, d2)?;
+    if !is_finite_point(vertex) {
+        return None;
+    }
+    let selector = sub(arc_point, vertex);
+    if length(selector) < 1e-9 {
         return None;
     }
     let u1 = normalize(d1);
     let u2 = normalize(d2);
+    let selector_angle = selector.y.atan2(selector.x);
+    // Each line contributes two opposite boundary rays. The four angle sectors
+    // are the counter-clockwise sweeps of at most PI from one boundary ray to the
+    // other line's boundary ray; the sector containing the arc location is the one
+    // dimensioned. A sector may start on either line, so both orders are tried. A
+    // location on a boundary belongs to the sector that starts at it (the same
+    // convention the three-point form uses).
+    let rays1 = [u1, scale(u1, -1.0)];
+    let rays2 = [u2, scale(u2, -1.0)];
+    let mut chosen = None;
+    for (start_is_line1, starts, ends) in [(true, &rays1, &rays2), (false, &rays2, &rays1)] {
+        for start_ray in starts {
+            for end_ray in ends {
+                let sweep =
+                    wrap_positive(end_ray.y.atan2(end_ray.x) - start_ray.y.atan2(start_ray.x));
+                if sweep > std::f64::consts::PI + 1e-9 {
+                    continue;
+                }
+                let delta = wrap_positive(selector_angle - start_ray.y.atan2(start_ray.x));
+                if delta + 1e-12 < sweep || delta <= 1e-12 {
+                    chosen = Some((*start_ray, *end_ray, start_is_line1));
+                    break;
+                }
+            }
+            if chosen.is_some() {
+                break;
+            }
+        }
+        if chosen.is_some() {
+            break;
+        }
+    }
+    let (ray1, ray2, start_is_line1) = chosen?;
+    // The extension lines start at the endpoint of each picked segment that lies
+    // furthest along the bounding ray; the segment itself may stop short of the
+    // vertex, which AutoCAD also extends.
+    let (ext1, ext2) = if start_is_line1 {
+        (
+            outward_endpoint(line1_start, line1_end, vertex, ray1),
+            outward_endpoint(line2_start, line2_end, vertex, ray2),
+        )
+    } else {
+        (
+            outward_endpoint(line2_start, line2_end, vertex, ray1),
+            outward_endpoint(line1_start, line1_end, vertex, ray2),
+        )
+    };
+    angular_synthesis_rays(vertex, ray1, ray2, ext1, ext2, arc_point, normal, style)
+}
+
+/// The shared angular arc builder: `ray1`/`ray2` are the directions of the two
+/// bounding rays (from `vertex`), `ext1`/`ext2` the points the extension lines
+/// start at, and `arc_point` selects the sector.
+#[allow(clippy::too_many_arguments)]
+fn angular_synthesis_rays(
+    vertex: Point3,
+    ray1: Point3,
+    ray2: Point3,
+    ext1: Point3,
+    ext2: Point3,
+    arc_point: Point3,
+    normal: Point3,
+    style: &DimensionStyleValues,
+) -> Option<SynthesizedDimension> {
+    if !is_finite_point(vertex)
+        || !is_finite_point(ext1)
+        || !is_finite_point(ext2)
+        || !is_finite_point(arc_point)
+    {
+        return None;
+    }
+    if length(ray1) < 1e-9 || length(ray2) < 1e-9 {
+        return None;
+    }
+    let selector = sub(arc_point, vertex);
+    let r = length(selector);
+    if !r.is_finite() || r < 1e-9 {
+        return None;
+    }
+    let u1 = normalize(ray1);
+    let u2 = normalize(ray2);
     let a1 = u1.y.atan2(u1.x);
     let a2 = u2.y.atan2(u2.x);
-    let mut sweep = a2 - a1;
-    use std::f64::consts::PI;
-    while sweep > PI {
-        sweep -= 2.0 * PI;
+    let sweep_ccw = wrap_positive(a2 - a1);
+    if sweep_ccw < 1e-9 || std::f64::consts::TAU - sweep_ccw < 1e-9 {
+        return None;
     }
-    while sweep < -PI {
-        sweep += 2.0 * PI;
-    }
-    let r = if radius.is_finite() && radius > 1e-9 {
-        radius
+    // Which of the two sectors (counter-clockwise or reflex) contains the arc
+    // location. The selector on a boundary picks the counter-clockwise sector.
+    let selected = wrap_positive(selector.y.atan2(selector.x) - a1);
+    let sweep = if selected <= sweep_ccw + 1e-12 {
+        sweep_ccw
     } else {
-        1.0
+        sweep_ccw - std::f64::consts::TAU
     };
     let dir_at = |angle: f64| Point3 {
         x: angle.cos(),
@@ -364,10 +503,10 @@ pub fn angular_synthesis(
         start: a1,
         sweep,
     }];
-    if let Some(line) = line_between(point1, end1) {
+    if let Some(line) = line_between(ext1, end1) {
         children.push(line);
     }
-    if let Some(line) = line_between(point2, end2) {
+    if let Some(line) = line_between(ext2, end2) {
         children.push(line);
     }
     if style.arrow_size > 1e-9 {
@@ -397,6 +536,47 @@ pub fn angular_synthesis(
         text_position,
         text_rotation: readable_angle(a1 + sweep / 2.0),
     })
+}
+
+/// Normalize an angle to `[0, 2π)`.
+fn wrap_positive(angle: f64) -> f64 {
+    let tau = std::f64::consts::TAU;
+    let mut wrapped = angle % tau;
+    if wrapped < 0.0 {
+        wrapped += tau;
+    }
+    if wrapped >= tau {
+        wrapped -= tau;
+    }
+    wrapped
+}
+
+/// Intersection of two infinite XY lines through `o1`/`o2` with directions
+/// `d1`/`d2`; `None` for parallel/collinear directions.
+fn line_intersection(o1: Point3, d1: Point3, o2: Point3, d2: Point3) -> Option<Point3> {
+    let cross = d1.x * d2.y - d1.y * d2.x;
+    let scale = length(d1) * length(d2);
+    if !cross.is_finite() || cross.abs() <= scale * 1e-12 {
+        return None;
+    }
+    let offset = sub(o2, o1);
+    let t = (offset.x * d2.y - offset.y * d2.x) / cross;
+    Some(Point3 {
+        x: o1.x + d1.x * t,
+        y: o1.y + d1.y * t,
+        z: o1.z,
+    })
+}
+
+/// The endpoint of `start..end` furthest along `direction` from `vertex`.
+fn outward_endpoint(start: Point3, end: Point3, vertex: Point3, direction: Point3) -> Point3 {
+    let first = dot(sub(start, vertex), direction);
+    let second = dot(sub(end, vertex), direction);
+    if second >= first {
+        end
+    } else {
+        start
+    }
 }
 
 /// Ordinate dimension: a leader from the feature point to the dimension line,
@@ -598,19 +778,21 @@ pub(crate) fn synthesize(
             DimensionKind::Angular2Ln,
             DimensionPoints::Angular2Ln {
                 line1_start,
-                line1_end: _,
+                line1_end,
                 line2_start,
                 line2_end,
                 arc_point,
             },
-        ) => angular_synthesis(
-            // Matches the pre-P5a import: the vertex is line 2's start (`15`),
-            // the two rays are `13` and `10`. Group `14` is retained in the
-            // definition but not consumed (ADR 0017 U-8; resolved in P5e).
-            *line2_start,
+        ) => angular_lines_synthesis(
+            // U-8 resolved in P5e: line 1 is groups 13->14, line 2 is 15->10, the
+            // vertex is the intersection of the two infinite lines, and group 16
+            // selects the measured sector. Pinned against the committed QCAD
+            // angular fixtures (see `angular_lines_synthesis`).
             *line1_start,
+            *line1_end,
+            *line2_start,
             *line2_end,
-            distance(*line2_start, *arc_point),
+            *arc_point,
             definition.normal,
             style,
         ),
@@ -626,7 +808,7 @@ pub(crate) fn synthesize(
             *vertex,
             *first,
             *second,
-            distance(*vertex, *arc_point),
+            *arc_point,
             definition.normal,
             style,
         ),

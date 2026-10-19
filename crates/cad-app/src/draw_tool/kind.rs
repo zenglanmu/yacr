@@ -374,13 +374,41 @@ pub enum DrawToolKind {
     /// mark plus **gapped** centrelines; we draw a plain cross, the same declared
     /// approximation as the radial synthesis (ADR 0017 P5b deviation 3).
     DimCenter,
+    /// DIMANGULAR (two-line form): two straight-line entity picks followed by the
+    /// dimension-arc location (`Exact(3)`, ADR 0017 decision C, P5e).
+    ///
+    /// The first two steps are **entity picks** (the TRIM/EXTEND capture shape,
+    /// [`Self::picked_step_count`] is `2`); the last is a free point. The vertex is
+    /// the intersection of the two infinite lines and the location pick selects
+    /// which of the four angles is dimensioned (ADR 0017 U-1: our declared rule is
+    /// "the sector containing the location pick"; U-8 is pinned by the committed
+    /// QCAD fixtures). The command layer owns every refusal (non-line pick,
+    /// parallel/collinear lines, coincident points, off-plane input, a location at
+    /// the vertex).
+    ///
+    /// Declared subset: only the **two-line** construction is captured here. The
+    /// **three-point** construction (vertex + two side points + arc location) is
+    /// supported by the command payload but has no interactive capture yet — the
+    /// fixed-step state machine cannot express AutoCAD's "select a line **or**
+    /// specify a vertex" first step. Arc/circle objects and angular dimensions
+    /// derived from them are NOT IMPLEMENTED.
+    DimAngular,
+    /// DIMORDINATE: a feature point and a leader endpoint (`Exact(2)`, ADR 0017
+    /// decision C, P5e).
+    ///
+    /// Both steps are free points (no entity pick). The command layer derives the
+    /// axis from the documented auto rule (a greater Y difference measures the X
+    /// ordinate; the unstated equal case is our declared choice of Y), unless a
+    /// payload override forces one. The text override prompt and the object
+    /// selection variant are NOT IMPLEMENTED.
+    DimOrdinate,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 28] = [
+    pub const ALL: [DrawToolKind; 30] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -409,6 +437,8 @@ impl DrawToolKind {
         DrawToolKind::DimRadius,
         DrawToolKind::DimDiameter,
         DrawToolKind::DimCenter,
+        DrawToolKind::DimAngular,
+        DrawToolKind::DimOrdinate,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -442,6 +472,8 @@ impl DrawToolKind {
             Self::DimRadius => "dimradius",
             Self::DimDiameter => "dimdiameter",
             Self::DimCenter => "dimcenter",
+            Self::DimAngular => "dimangular",
+            Self::DimOrdinate => "dimordinate",
         }
     }
 
@@ -477,6 +509,8 @@ impl DrawToolKind {
             "dimradius" => Some(Self::DimRadius),
             "dimdiameter" => Some(Self::DimDiameter),
             "dimcenter" => Some(Self::DimCenter),
+            "dimangular" => Some(Self::DimAngular),
+            "dimordinate" => Some(Self::DimOrdinate),
             _ => None,
         }
     }
@@ -560,6 +594,12 @@ impl DrawToolKind {
             Self::DimRadius => "DIMRADIUS",
             Self::DimDiameter => "DIMDIAMETER",
             Self::DimCenter => "DIMCENTER",
+            // DIMANGULAR/DIMORDINATE use locale-neutral ASCII fallback labels,
+            // exactly like the other post-ADR-0015 kinds: the ADR fence forbids
+            // new CJK literals on the Rust side and the shell substitutes the
+            // catalog label for chrome anyway.
+            Self::DimAngular => "DIMANGULAR",
+            Self::DimOrdinate => "DIMORDINATE",
         }
     }
 
@@ -574,9 +614,13 @@ impl DrawToolKind {
             // Start, a point on the arc, end; two axis endpoints plus the
             // other-axis distance; base, reference, target; or the two dimension
             // origins plus the dimension-line location.
-            Self::Arc | Self::Ellipse | Self::Scale | Self::DimLinear | Self::DimAligned => {
-                PointArity::Exact(3)
-            }
+            Self::Arc
+            | Self::Ellipse
+            | Self::Scale
+            | Self::DimLinear
+            | Self::DimAligned
+            // DIMANGULAR: two entity picks plus the dimension-arc location.
+            | Self::DimAngular => PointArity::Exact(3),
             // ALIGN: the first source point, its destination, then the second
             // source point and its destination (ADR 0016 decision F). STRETCH: the
             // two opposite corners of the crossing window, then the base point and
@@ -608,7 +652,9 @@ impl DrawToolKind {
             // DIMRADIUS/DIMDIAMETER: the entity pick plus the dimension-line
             // location.
             | Self::DimRadius
-            | Self::DimDiameter => PointArity::Exact(2),
+            | Self::DimDiameter
+            // DIMORDINATE: the feature point and the leader endpoint.
+            | Self::DimOrdinate => PointArity::Exact(2),
         }
     }
 
@@ -658,6 +704,9 @@ impl DrawToolKind {
         match self {
             Self::Trim | Self::Extend | Self::Chamfer | Self::Fillet => self.required_points(),
             Self::DimRadius | Self::DimDiameter | Self::DimCenter => 1,
+            // DIMANGULAR's two-line form picks both lines; its third step is the
+            // free dimension-arc location.
+            Self::DimAngular => 2,
             _ => 0,
         }
     }

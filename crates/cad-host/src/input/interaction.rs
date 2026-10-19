@@ -339,6 +339,12 @@ impl HostCore {
             traced.result?;
         }
         self.full_dirty.set(true);
+        // A draw tool may have created the drawing's first text (a dimension's
+        // measurement): install its fallback engine before the rebuild, so the
+        // new text is shaped rather than silently left unshaped.
+        if let Err(error) = self.ensure_fonts_for_text() {
+            self.note_post_commit_error(&error);
+        }
         if let Err(error) = self.sync_render() {
             self.note_post_commit_error(&error);
         }

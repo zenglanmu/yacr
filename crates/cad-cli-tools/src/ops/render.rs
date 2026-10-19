@@ -39,7 +39,11 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
 
     let registry = cad_representation::ProviderRegistry::with_default_provider();
-    let fonts = load_fonts(&invocation.fonts, &fonts_requested(&controller))?;
+    let fonts = load_fonts(
+        &invocation.fonts,
+        &fonts_requested(&controller),
+        drawing_needs_text(&controller),
+    )?;
     let requested_images = images_requested(&controller);
     let (image_cache, image_report) = load_images(invocation, &requested_images)?;
     let mut context = representation_context(&controller, fonts.as_ref());
@@ -249,7 +253,11 @@ pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Valu
 fn run_plot_vector(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
     let started = std::time::Instant::now();
     let controller = load_document(invocation)?;
-    let fonts = load_fonts(&invocation.fonts, &fonts_requested(&controller))?;
+    let fonts = load_fonts(
+        &invocation.fonts,
+        &fonts_requested(&controller),
+        drawing_needs_text(&controller),
+    )?;
     let context = representation_context(&controller, fonts.as_ref());
     let registry = cad_representation::ProviderRegistry::with_default_provider();
 
@@ -369,7 +377,11 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
 
     let started = std::time::Instant::now();
     let controller = load_document(invocation)?;
-    let fonts = load_fonts(&invocation.fonts, &fonts_requested(&controller))?;
+    let fonts = load_fonts(
+        &invocation.fonts,
+        &fonts_requested(&controller),
+        drawing_needs_text(&controller),
+    )?;
     let requested_images = images_requested(&controller);
     let (image_cache, image_report) = load_images(invocation, &requested_images)?;
     let mut context = representation_context(&controller, fonts.as_ref());

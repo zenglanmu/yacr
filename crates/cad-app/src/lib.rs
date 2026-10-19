@@ -322,6 +322,59 @@ pub struct RadialDimensionCommand {
     pub location: Point3,
 }
 
+/// The two supported DIMANGULAR constructions (ADR 0017 decision C, P5e).
+///
+/// * [`Self::TwoLine`] — the interactive form: two picked straight lines plus the
+///   dimension-arc location. The vertex is the intersection of the two infinite
+///   lines (ADR 0017 U-8, pinned against the committed QCAD fixtures).
+/// * [`Self::ThreePoint`] — the command-level form: a vertex, the two side
+///   points and the dimension-arc location. It has no interactive capture yet:
+///   AutoCAD's first prompt ("select a line **or** specify a vertex") cannot be
+///   expressed by the fixed-step capture state machine. This is declared in the
+///   capability notes, not hidden.
+///
+/// Which variant it is is part of the input, not a second command: both produce
+/// one `DIMENSION` entity through the same funnel.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AngularDimensionInput {
+    /// Vertex, first side point, second side point, dimension-arc location.
+    ThreePoint {
+        vertex: Point3,
+        first: Point3,
+        second: Point3,
+        location: Point3,
+    },
+    /// Two picked straight lines plus the dimension-arc location.
+    TwoLine {
+        first: SelectionRef,
+        second: SelectionRef,
+        location: Point3,
+    },
+}
+
+/// The axis a DIMORDINATE measures (ADR 0017 decision C/E, P5e).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrdinateAxis {
+    /// X ordinate: group 70 bit `0x40` set.
+    X,
+    /// Y ordinate: group 70 bit `0x40` clear.
+    Y,
+}
+
+/// The input of a DIMORDINATE command (ADR 0017 decision C, P5e): the feature
+/// point, the leader endpoint and an optional explicit axis.
+///
+/// `axis = None` is the interactive form and applies the documented auto rule —
+/// "if the Y difference is greater, measure the X ordinate" — comparing the
+/// feature and leader points. Autodesk does not state the equal case; our
+/// declared reading is **Y** (the documented rule's "otherwise" branch).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrdinateDimensionCommand {
+    pub feature: Point3,
+    pub leader: Point3,
+    pub axis: Option<OrdinateAxis>,
+}
+
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
@@ -503,6 +556,16 @@ pub enum CommandPayload {
     /// entity, reads the resolved `DIMCEN` and inserts ordinary LINE geometry
     /// (never a `DIMENSION`); `DIMCEN = 0` inserts nothing and reports it.
     DimCenter(SelectionRef),
+    /// DIMANGULAR: the two-line construction (interactive) or the three-point
+    /// construction (command-level), ADR 0017 decision C, P5e. The handler builds
+    /// an `AcDbDimension` through the shared synthesis and inserts it on the
+    /// active layer in one transaction / one undo step.
+    DimAngular(Box<AngularDimensionInput>),
+    /// DIMORDINATE: the feature point, leader endpoint and optional axis override
+    /// (ADR 0017 decision C, P5e). The measurement is the feature's datum-relative
+    /// (world-origin-relative) X or Y coordinate magnitude, matching P5b's
+    /// ordinate semantics and the acadrust writer's group 42.
+    DimOrdinate(Box<OrdinateDimensionCommand>),
     /// A fully formed semantic geometry, used by `CreateLine` as the
     /// programmatic alternative to a point list.
     Geometry(Box<SemanticGeometry>),

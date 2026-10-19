@@ -10,9 +10,9 @@ pub use dimension::{
     DimensionDefinition, DimensionGeometry, DimensionKind, DimensionPoints, DimensionStyleValues,
 };
 pub use dimension_synthesis::{
-    angular_synthesis, arrowhead, format_measurement, line_between, linear_synthesis,
-    ordinate_synthesis, perpendicular, project_onto_line, radial_synthesis, readable_angle,
-    resolve_measurement_text, SynthesizedDimension,
+    angular_lines_synthesis, angular_synthesis, arrowhead, format_measurement, line_between,
+    linear_synthesis, ordinate_synthesis, perpendicular, project_onto_line, radial_synthesis,
+    readable_angle, resolve_measurement_text, SynthesizedDimension,
 };
 macro_rules! ids {
     ($($name:ident),*) => {$(

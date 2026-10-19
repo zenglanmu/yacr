@@ -122,7 +122,13 @@ pub fn draw_preview_overlay(
         // host's capture tint, and the dimension affordance is the command's).
         | DrawToolKind::DimRadius
         | DrawToolKind::DimDiameter
-        | DrawToolKind::DimCenter => {
+        | DrawToolKind::DimCenter
+        // DIMANGULAR captures two line picks plus the arc location; DIMORDINATE
+        // captures the feature point and the leader endpoint. Both use the
+        // existing cursor/chain preview (no new overlay channel; the picked lines
+        // are shown by the host's capture tint).
+        | DrawToolKind::DimAngular
+        | DrawToolKind::DimOrdinate => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

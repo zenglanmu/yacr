@@ -698,3 +698,85 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
   `apps/app-linux/ui/test/{dimension-tools,dimension-radial-tools,commands,i18n}.test.mjs`（**React 面由 designer lane 落地**）。
 - **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；
   **第三方读取器验证**（本机无 `ezdxf`/`dwgread`/`dxfgrabber`）。
+
+### P5e（`DIMANGULAR` + `DIMORDINATE`；**U-8 以真实夹具钉住**；修复一处潜伏单位损坏）
+
+#### 落地
+
+- **命令面**：`CommandId::{DimAngular,DimOrdinate}` 贯通命令面（`EXPECTED_COMMAND_COUNT` 65 → 67）、draw-tool 种类、
+  `DrawIntent`、宿主映射、单一插入漏斗（`AcDbDimension`、一条事务/一步撤销、活动图层）、显式命名拒绝且拒绝时不开事务。
+- **`DIMANGULAR`**：**两线交互形式**（两次实体拾取 + 标注弧位置）；**三点形式**在命令/载荷层支持并有测试
+  （`AngularDimensionInput::ThreePoint`）但**尚无交互捕获**——固定步数状态机表达不了 AutoCAD 的"选一条线
+  **或**指定顶点"首步。**声明**（`DrawToolKind::DimAngular` 与命令文档均写明）。
+- **`DIMORDINATE`**：特征点 + 引线端点；`OrdinateDimensionCommand::axis` 可强制 X 或 Y。
+- **i18n**：+9 键（两目录键集一致）。
+
+#### U-8 结案（**真实工件**，非"选一种读法"）
+
+- **证据**：解码 `fixtures/dxf/qcad-examples/{entities,example01,isometric_grid}.dxf` 中 **9 条 type flag = 34**
+  （块位 32 + 角度 2）的 `DIMENSION`。判别性用例 `*D65`（`14 ≠ 15` 且 `15` **不是**交点）：**组 42 =
+  `1.975688113` rad = 113.19859°**，**恰好等于"顶点=两线交点"**的读法；把 `15` 当顶点得 112.56°，
+  "忽略 14"的读法复现不出 42。且其**匿名块的 `ARC` 圆心在 `(90, 40)`**——两线交点——而非组 15 的 `(90, 39.375)`。
+- **九条记录在该读法下全部数值复现组 42**，acadrust 自己的读取器与 `DimensionAnalg2Ln::measurement_radians`
+  口径一致。
+- **结论**：line 1 = 组 `13→14`、line 2 = `15→10`，**顶点是两条无限直线的交点**，**组 `16` 选择被测扇区**。
+  新增 `angular_two_line_reading_is_pinned_by_the_committed_qcad_fixture`（导入夹具、断言组 42 弧度与块 ARC 圆心）
+  与 `angular_lines_synthesis_uses_the_intersection_and_the_arc_sector`（域侧同数值）。
+- ⇒ **决策 E 的 U-8 关闭**（不再是未查证项）。
+
+#### 修复一处潜伏单位损坏（**重要**）
+
+- **角度标注的组 42 曾按"度"写出**，而 DXF 语义是**弧度**（夹具全部为弧度）⇒ 此前导出的角度标注**数值是错的**。
+  现 `measurement()` 仍以**度**用于文字格式化，但**导出把角度组 42 转为弧度**；报告有条目声明。新增
+  `angular group 42 radians vs degrees-text` 测试。
+
+#### 声明的决策（逐条，均须进能力表）
+
+1. **U-1（四选一）**：被测角 = **包含标注弧位置拾取的扇区**；拾取**恰在边界射线上**时取**自该射线起的逆时针扇区**；
+   三点形式同规则（可选**优角/劣角**）。**我们的规则**（U-1 仍标未查证）。
+2. **U-5（自动 X/Y）**：按 feature 与 leader 的 `|Δy| > |Δx|` ⇒ **X**，否则 **Y** ⇒ **相等取 Y**（文档条件式的
+   "otherwise"分支）。**我们的规则**（相等边界 Autodesk 未述）。
+3. **仅接受 `Line` 拾取**：两线形式对 `Arc`/`Circle`/折线为显式 `Unsupported` 拒绝（ADR 范围排除弧/圆角度变体）。
+4. **ordinate 基准 = 世界原点 `(0,0,0)`**，测量 = feature 的 X/Y **量值**（沿用 P5b 的基准相对取绝对值）；
+   **零 ordinate 合法**（不拒绝）；引线长必须非零；输入必须为 `+Z` 平面。
+5. **渲染变化（须声明）**：角度合成改为"交点顶点 + 扇区选择"后，**已导入的角度标注渲染输出会变**——
+   这是**正确性修复 + 像素变化**（与 P5b 的渲染增量同性质）。文字仍是度，导出组 42 是弧度。
+6. **三点形式无交互捕获**（见上）。
+
+#### 真机证据（2026-10-19）
+
+- 真实硬件 GPU（Vulkan / **Quadro P620** / `device_type=discrete_gpu`）+ X11；驱动新增 P5e 相位
+  （先画两条共享顶点 `(−0.60,0.90)` 的直线：0° 射线与 45° 射线 → `DIMANGULAR` 点两条线**线身** + 弧位置
+  （落在 0°…45° 扇区内）→ `CONFIRM`；再 `DIMORDINATE` 特征点 + 引线端点）。合成 DOM 指针事件、**非真实鼠标**。
+- **`DIMANGULAR` 41→42（+1）、`DIMORDINATE` 42→43（+1）**；两者 `after_tool` 为 `null`、`after_error` 为 `-`、
+  所有 `*_failed` 为 `-`；27 个 P5e 派发 **0 错误**；`clicks=70`。运行目录
+  `/tmp/opencode/yacr-evidence-p5e-run2`（verdict `PLANNED_TIMEOUT` / exit 143 属预期，截图 `captured`）。
+- **像素判据（空间性判据，较强）**：两条线的取样覆盖率 **110/110 = 1.000** 与 **71/71 = 1.000**；
+  **角度弧在 `r = 0.25` 世界、3°…42° 处 40/40 = 1.000**，而**同半径 55°…85° 的空扇区对照弧 0/31 = 0.000**、
+  `r = 0.60` 对照弧 0/36 = 0.000 ⇒ **画的是被选中的那个扇区**；ordinate 引线 53/53 = 1.000。区域对照：
+  角度区墨迹 0.1086 vs 同尺寸空区 0.0000；ordinate 区 0.0403 vs 0.0000。
+- **诚实边界**：① 输入是 Rust 经 `webview.eval` 派发的**合成 DOM 指针事件**（不经 evdev/XTest）；
+  ② `cad_status` **无几何通道**（无定义点、无测量值、无扇区）⇒ 真机只证"提交成功 + 计数 + 无错误 + 工具清空 +
+  墨迹存在"；**哪个扇区被量、U-8 点语义、组 42 弧度修复**均由契约测试钉住，**不由本帧证明**；
+  ③ 截图仅含**应用窗口自身**（X11 `XGetImage`），非合成器帧；④ 单次有界本地运行（GNOME/Mutter + XWayland、
+  P620、`scale=1`），无跨平台结论。
+- **两处如实记录的未达成（其一已定位并修复）**：① 一次点击**被对象捕捉吸附**——目标是 `(−0.05,0.90)`，
+  实际捕获到 `x ≈ 0.0`（落在夹具 `x=0` 竖线的 12 px 捕捉孔径内）；不影响结论（两次拾取仍各自落在自家线身上、
+  顶点与扇区不变），但记录的 `−0.05` 是**点击目标**而非**捕获点**。② **标注测量文字**：独立全域判读确认该帧
+  **全无字形簇**、**同帧所有标注都没有文字** ⇒ **不是分辨率问题，而是缺陷**。根因有**三道闸**：`load_engine`
+  在 `requested` 与 `explicit` 皆空时**在使用 `font_dir` 之前**早退（连 `--fonts-dir` 也救不回）；表示层**只在
+  `font: Some(..)` 时整形**（自建标注 `text_font: None` ⇒ 永不整形）；字体只在**打开漏斗**安装（新建标注后不重装）。
+  **已修**（`needs_text_shaping(database)` 与"是否命名字体"解耦、`shape_unstyled` 走**既有回退链**且无引擎时报
+  `ResourceMissing`（**绝不伪造字形**）、提交漏斗内 `ensure_fonts_for_text`），并保留"无文字就不加载多兆字体"的优化。
+  **真机复验**：与修复前帧差分 **+1856 墨迹像素 / 0 移除**；读到 **`DIMORDINATE` "0.1"**（簇 `[102,190..147,216]`）、
+  **`DIMALIGNED` "0.45"**、**`DIMRADIUS` "R0.18"`**；`DIMLINEAR`/`DIMANGULAR` 的文字**被画布顶边裁切**
+  （驱动固定放置所致，非路径差异）⇒ **文字路径已证**，但 `DIMANGULAR` 的完整字形**未测量**（需改驱动放置）。
+
+#### 门禁（编排者复跑，2026-10-19）
+
+- **门禁（编排者复跑，2026-10-19）**：受影响 crate 全绿（`cad-app`、`cad-ui-core`、`cad-domain`、`cad-db`、
+  `cad-import-acadrust`，合计 **1850 通过 / 0 失败**）；workspace check(all-targets)、wasm lib、
+  clippy(workspace `-D warnings`)、fmt、architecture(27)、i18n(**517**，P5e **+9**、文案补正 **0 新键**)、
+  fixture(22)、file-size(**682**)、workflow、UI **154/154** + build。
+- **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；第三方读取器验证；
+  **标注文字渲染**（见上，独立判读中）。

@@ -40,7 +40,7 @@ impl HostResources for UnsupportedResources {
 }
 
 impl HostCore {
-    /// (Re)load shaping fonts for the current drawing through the host strategy.
+    /// (Re)load shaping fonts through the host strategy.
     pub fn install_fonts(&self) -> CadResult<()> {
         self.resources.install_fonts(self, &self.render)
     }
@@ -48,6 +48,30 @@ impl HostCore {
     /// (Re)load the drawing's raster images through the host strategy.
     pub fn install_images(&self) -> CadResult<()> {
         self.resources.install_images(self, &self.render)
+    }
+
+    /// Install fonts when a committed command introduced the drawing's first
+    /// text after the open funnel already ran.
+    ///
+    /// Opening a drawing without text installs no engine (the optimisation), but
+    /// creating its first dimension afterwards makes the measurement text
+    /// shapeable: without this the new text stays an unshaped primitive and is
+    /// not drawn. The check is a cheap `fonts().is_some()` first, so a drawing
+    /// that already has an engine (or still has no text) is untouched.
+    pub(crate) fn ensure_fonts_for_text(&self) -> CadResult<()> {
+        if self.render.fonts().is_some() {
+            return Ok(());
+        }
+        let text_needed = self
+            .controller
+            .borrow()
+            .drawing()
+            .map(|drawing| cad_platform::fonts::needs_text_shaping(drawing.as_ref()))
+            .unwrap_or(false);
+        if text_needed {
+            self.install_fonts()?;
+        }
+        Ok(())
     }
 }
 
@@ -65,13 +89,18 @@ impl HostResources for DesktopResources {
     /// `--font` entries and installs a best-effort system default face as the
     /// first fallback.
     fn install_fonts(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()> {
-        let requested = core
+        let (requested, text_needed) = core
             .controller
             .borrow()
             .drawing()
-            .map(|drawing| cad_platform::fonts::requested_fonts(drawing.as_ref()))
+            .map(|drawing| {
+                (
+                    cad_platform::fonts::requested_fonts(drawing.as_ref()),
+                    cad_platform::fonts::needs_text_shaping(drawing.as_ref()),
+                )
+            })
             .unwrap_or_default();
-        match core.load_font_engine(&requested)? {
+        match core.load_font_engine(&requested, text_needed)? {
             Some(engine) => {
                 render.set_fonts(Some(engine));
             }
@@ -128,9 +157,14 @@ impl HostResources for DesktopResources {
 impl HostCore {
     /// The desktop font engine for the current drawing, or `None` when nothing
     /// is requested/registered.
+    ///
+    /// `text_needed` keeps the optimisation honest: a drawing with no text and
+    /// no named font installs nothing, while a text-bearing drawing with no
+    /// font-bearing style still gets the fallback engine.
     pub(crate) fn load_font_engine(
         &self,
         requested: &[String],
+        text_needed: bool,
     ) -> CadResult<Option<Arc<cad_representation::FontEngine>>> {
         let exe = std::env::current_exe().unwrap_or_default();
         let font_dir =
@@ -139,6 +173,7 @@ impl HostCore {
         cad_platform::fonts::local::load_engine(
             font_dir.as_deref(),
             requested,
+            text_needed,
             &self.options.fonts,
             system_default,
         )
@@ -148,8 +183,9 @@ impl HostCore {
     pub(crate) fn load_plot_fonts(
         &self,
         requested: &[String],
+        text_needed: bool,
     ) -> CadResult<Option<Arc<cad_representation::FontEngine>>> {
-        self.load_font_engine(requested)
+        self.load_font_engine(requested, text_needed)
     }
 }
 
@@ -165,8 +201,9 @@ impl HostCore {
     pub(crate) fn load_plot_fonts(
         &self,
         requested: &[String],
+        text_needed: bool,
     ) -> CadResult<Option<Arc<cad_representation::FontEngine>>> {
-        if requested.is_empty() {
+        if requested.is_empty() && !text_needed {
             return Ok(None);
         }
         match self.render.fonts() {

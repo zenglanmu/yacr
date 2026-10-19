@@ -103,13 +103,24 @@ pub(super) fn emit_dimension(
     // `text`/`user_text` mirror `DimensionBase::set_text_override`: the group-1
     // override is stored in both.
     let text_override = dimension.text_override().map(str::to_string);
+    // DXF group 42 is the raw DXF measurement: an **angle in radians** for the
+    // angular subtypes, a distance for every other kind. Our `measurement()` is in
+    // degrees for angular dimensions because the drawn text formats it with the
+    // degree suffix, so the export converts the unit here (the fixtures' group 42
+    // values, e.g. 1.975688 for 113.2 degrees, confirm radians).
+    let measurement = match definition.kind {
+        DimensionKind::Angular2Ln | DimensionKind::Angular3Pt => {
+            dimension.measurement().to_radians()
+        }
+        _ => dimension.measurement(),
+    };
     let base = DimensionBase {
         common,
         text_middle_point: v3(definition.text_middle),
         text_rotation: definition.text_rotation,
         style_name: style_name.to_string(),
         block_name: block_name.clone(),
-        actual_measurement: dimension.measurement(),
+        actual_measurement: measurement,
         normal: Vector3::UNIT_Z,
         text: text_override.clone().unwrap_or_default(),
         user_text: text_override,
@@ -131,6 +142,9 @@ pub(super) fn emit_dimension(
         match definition.kind {
             DimensionKind::Ordinate { .. } => "group 42 written; the writer recomputes it for \
                  Ordinate as the datum-relative projection, which equals our measurement"
+                .to_string(),
+            DimensionKind::Angular2Ln | DimensionKind::Angular3Pt => "group 42 written in \
+                 radians (the DXF angle unit); the drawn text stays in degrees"
                 .to_string(),
             _ => "group 42 measurement written explicitly".to_string(),
         },

@@ -58,6 +58,21 @@ fn aligned_definition() -> DimensionDefinition {
     }
 }
 
+fn angular_definition() -> DimensionDefinition {
+    DimensionDefinition {
+        kind: DimensionKind::Angular3Pt,
+        points: DimensionPoints::Angular3Pt {
+            vertex: p(0.0, 0.0, 0.0),
+            first: p(10.0, 0.0, 0.0),
+            second: p(0.0, 10.0, 0.0),
+            arc_point: p(5.0, 5.0, 0.0),
+        },
+        text_middle: p(0.0, 0.0, 0.0),
+        text_rotation: 0.0,
+        normal: p(0.0, 0.0, 1.0),
+    }
+}
+
 /// A rounded, order-stable rendering of a dimension's definition points plus its
 /// group-11 middle point and group-53 rotation, for round-trip comparison.
 fn rounded_definition(d: &DimensionGeometry) -> String {
@@ -494,6 +509,52 @@ fn dimension_group_70_flags() {
     assert_eq!(flags & 0x0F, 0, "linear subtype flag: {flags:#x}");
     assert_eq!(flags & 0x20, 0, "bit 32 must be absent: {flags:#x}");
     assert_eq!(flags & 0x80, 0, "0x80 must be clear: {flags:#x}");
+}
+
+/// P5e: group 42 is the DXF measurement unit. For an angular dimension that is
+/// **radians** (the committed fixtures carry 0.785398 for 45 degrees), while the
+/// drawn text stays in degrees. A degrees value written to group 42 would be a
+/// silent unit corruption that no internal round trip would catch.
+#[test]
+fn angular_export_writes_group_42_in_radians_and_the_text_in_degrees() {
+    let dimension = DimensionGeometry::synthesized(
+        angular_definition(),
+        "Standard".to_string(),
+        style_values(),
+        None,
+    )
+    .expect("synthesized");
+    assert!(
+        (dimension.measurement() - 90.0).abs() < 1e-9,
+        "the drawn measurement is degrees: {}",
+        dimension.measurement()
+    );
+    let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(dimension)));
+    let entities = read_entities(&bytes);
+    let dxf_dimension = entities
+        .iter()
+        .find_map(|e| match e {
+            EntityType::Dimension(d) => Some(d),
+            _ => None,
+        })
+        .expect("a DIMENSION was written");
+    assert!(
+        (dxf_dimension.base().actual_measurement - std::f64::consts::FRAC_PI_2).abs() < 1e-9,
+        "group 42 is 90 degrees in radians: {}",
+        dxf_dimension.base().actual_measurement
+    );
+    let drawn = read_block_members(&bytes, &dxf_dimension.base().block_name)
+        .iter()
+        .find_map(|member| match member {
+            EntityType::MText(text) => Some(text.value.clone()),
+            EntityType::Text(text) => Some(text.value.clone()),
+            _ => None,
+        })
+        .expect("the content block carries the measurement text");
+    assert!(
+        drawn.contains("90"),
+        "the drawn text stays in degrees: {drawn}"
+    );
 }
 
 /// ADR 0017 F.1 / review B2: an Ordinate dimension's written group 42 equals the

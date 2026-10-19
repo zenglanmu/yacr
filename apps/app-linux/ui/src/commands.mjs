@@ -163,6 +163,8 @@ export const COMMAND_CATALOG = Object.freeze([
   { id: 'DIMRADIUS', labelKey: 'draw.kind.dimradius', icon: 'dimradius', group: 'annotate' },
   { id: 'DIMDIAMETER', labelKey: 'draw.kind.dimdiameter', icon: 'dimdiameter', group: 'annotate' },
   { id: 'DIMCENTER', labelKey: 'draw.kind.dimcenter', icon: 'dimcenter', group: 'annotate' },
+  { id: 'DIMANGULAR', labelKey: 'draw.kind.dimangular', icon: 'dimangular', group: 'annotate' },
+  { id: 'DIMORDINATE', labelKey: 'draw.kind.dimordinate', icon: 'dimordinate', group: 'annotate' },
   { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', group: 'annotate' },
   { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', group: 'annotate' },
   { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', group: 'annotate' },

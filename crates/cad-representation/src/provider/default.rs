@@ -333,16 +333,32 @@ impl DefaultRepresentationProvider {
                     None => (*position, height.abs(), *rotation),
                 };
                 let mut shaped = false;
-                if let (Some(engine), Some(key)) = (&context.fonts, font_key) {
-                    match engine.shape(
-                        key,
-                        text,
-                        eff_position,
-                        eff_height,
-                        eff_rotation,
-                        *h_align,
-                        *v_align,
-                    ) {
+                // A style that names no font still shapes through the engine's
+                // fallback chain: dropping the text because the drawing has no
+                // font-bearing STYLE entry would silently hide every created
+                // dimension's measurement.
+                if let Some(engine) = &context.fonts {
+                    let font_label = font_key.unwrap_or("the text style's font");
+                    let result = match font_key {
+                        Some(key) => engine.shape(
+                            key,
+                            text,
+                            eff_position,
+                            eff_height,
+                            eff_rotation,
+                            *h_align,
+                            *v_align,
+                        ),
+                        None => engine.shape_unstyled(
+                            text,
+                            eff_position,
+                            eff_height,
+                            eff_rotation,
+                            *h_align,
+                            *v_align,
+                        ),
+                    };
+                    match result {
                         Ok(shaped_text) => {
                             let has_renderable_content = shaped_text.has_renderable_content;
                             for mesh in shaped_text.meshes {
@@ -392,7 +408,7 @@ impl DefaultRepresentationProvider {
                                     object: Some(ObjectId(entity.id.0)),
                                     code: "text.empty_outline".into(),
                                     message: format!(
-                                        "font '{key}' produced no outline for the text"
+                                        "font '{font_label}' produced no outline for the text"
                                     ),
                                 });
                             }
@@ -420,7 +436,7 @@ impl DefaultRepresentationProvider {
                         }
                         Err(error) => {
                             representation.completeness = Completeness::Partial(vec![format!(
-                                "text font '{key}' unavailable: {error}"
+                                "text font '{font_label}' unavailable: {error}"
                             )]);
                             representation.diagnostics.push(Diagnostic {
                                 object: Some(ObjectId(entity.id.0)),

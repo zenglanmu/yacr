@@ -6,6 +6,66 @@
 
 use super::*;
 
+/// ADR 0017 U-8, pinned with (a) a **real artifact**: `entities.dxf` `*D65` is a
+/// QCAD-written two-line angular dimension whose groups 13->14 and 15->10 are
+/// non-collinear and whose group 15 is **not** at their intersection. The reading
+/// is line 1 = 13->14, line 2 = 15->10, vertex = their intersection, and group 16
+/// selects the sector: group 42 (1.975688113 rad = 113.19859 degrees) and the
+/// anonymous block's ARC centre (90, 40) both confirm it. The synthesis now agrees
+/// with the block picture; the `-Z` reading (vertex = group 15, ignore group 14)
+/// would measure 112.56 degrees and place the arc at (90, 39.375).
+#[test]
+fn angular_two_line_reading_is_pinned_by_the_committed_qcad_fixture() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let bytes = std::fs::read(root.join("fixtures/dxf/qcad-examples/entities.dxf"))
+        .expect("fixture readable");
+    let drawing = AcadrustImporter::new()
+        .import(&request(bytes), &|| false)
+        .expect("import");
+
+    let mut inspected = 0;
+    for entity in drawing.database.entities() {
+        let SemanticGeometry::Dimension(dimension) = &entity.geometry else {
+            continue;
+        };
+        let DimensionPoints::Angular2Ln {
+            line1_start,
+            line1_end: _,
+            line2_start: _,
+            line2_end: _,
+            arc_point: _,
+        } = &dimension.definition().points
+        else {
+            continue;
+        };
+        if (line1_start.x - 42.363_533_475_452_33).abs() > 1e-6 {
+            continue;
+        }
+        inspected += 1;
+        assert!(
+            (dimension.measurement().to_radians() - 1.975_688_113_079_98).abs() < 1e-9,
+            "group 42 is 1.975688113 rad; the imported measurement is {} deg = {} rad",
+            dimension.measurement(),
+            dimension.measurement().to_radians()
+        );
+        // The anonymous block picture is the authority for the vertex: its ARC is
+        // centred on the intersection of the two lines, not on group 15.
+        let arc_center = dimension.display().iter().find_map(|child| match child {
+            SemanticGeometry::Arc { center, .. } => Some(*center),
+            _ => None,
+        });
+        let arc_center = arc_center.expect("the picture carries an angular ARC");
+        assert!(
+            (arc_center.x - 90.0).abs() < 1e-6 && (arc_center.y - 40.0).abs() < 1e-6,
+            "the block's ARC is centred on the lines' intersection (90, 40), got {arc_center:?}"
+        );
+    }
+    assert_eq!(
+        inspected, 1,
+        "one *D65 two-line angular dimension is inspected"
+    );
+}
+
 /// A synthetic DXF with a linear dimension whose style sets `DIMLUNIT`.
 fn dxf_with_dimlunit(format: i16) -> Vec<u8> {
     use acadrust::entities::{Dimension, DimensionLinear, EntityType};

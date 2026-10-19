@@ -46,9 +46,48 @@
 **修复结果（2026-10-19，已落地）**：根因比初诊更精确——`reparent_webview` 把绘图区从 `GtkOverlay` 的**主 child** 移成 **overlay child** 后，GTK 把位置放在一个**中间原生窗口**里；`set_margin_*` 只**排入一个宿主从不排空的 resize**，而 **GtkOverlay 对 overlay child 忽略位置边距** ⇒ 安装期边距 101/60 **永久生效**。修法：`apply_layout` 显式驱动布局（沿祖先链 `queue_resize` + `GtkWindow::check_resize()`，**同步**完成尺寸协商），`tick` 在呈现前**校验** `drawing_area == dom rect`（±1 逻辑像素、`None` 永不算匹配），不一致先驱动一次，**仍不一致则显式报错**而不是画出去；`present_texture` 对尺寸不匹配返回 `ProbeError::TextureInvalid`。
 **验证（竞态缺陷，故多次运行）**：修前基线比例 **1.174**（横 304.0 / 纵 259.0 px/单位，表面 960×439 vs 纹理 626×341）；**修后 4 次运行全部 0.987**（1166×541，横 198.0 / 纵 200.7 px/单位），拾取框 **8×8 px、纵横比 1.000**（修前 13×17），零 `does not match the DOM` / `refusing to stretch` / 呈现错误，每次尺寸变化都触发 `resize configure`。**这是既有缺陷**（2026-10-18 的运行里同样可见），修好后此前"圆是圆的"那次只是**恰好对齐**。
 
+## P5e：`DIMANGULAR` + `DIMORDINATE`；U-8 以真实夹具结案；标注文字缺陷修复（ADR-0017 决策 C，2026-10-19）
+
+**范围**：`crates/cad-app`（命令/工具/几何/宿主映射）、`crates/cad-domain`（角度合成）、`crates/cad-import-acadrust`
+（角度组 42 单位 + 夹具钉住）、`crates/cad-ui-core`（选择子/i18n）、React 标注面板；另含**标注文字渲染**的跨层修复
+（`cad-platform`/`cad-representation`/`cad-host`/`cad-cli-tools`）。
+
+- **命令面**：`DIMANGULAR`（**两线交互形式**：两次实体拾取 + 标注弧位置）与 `DIMORDINATE`（特征点 + 引线端点）；
+  `EXPECTED_COMMAND_COUNT` 65 → 67；单一插入漏斗、一条事务/一步撤销、活动图层、显式命名拒绝且拒绝时不开事务。
+- **U-8 结案（真实工件）**：解码 `fixtures/dxf/qcad-examples/*` 中 **9 条 type flag=34** 的角度标注；判别用例 `*D65`
+  （`14 ≠ 15` 且 15 不是交点）的 **组 42 = 1.975688113 rad = 113.19859°** 只匹配"**顶点 = 两条无限直线的交点**"，
+  且匿名块 **ARC 圆心在交点** ⇒ line 1 = `13→14`、line 2 = `15→10`、**组 16 选扇区**。九条全部数值复现；两条测试钉住
+  （夹具 + 域）。**U-8 不再是未查证项**。
+- **修掉一处潜伏单位损坏**：角度标注导出组 42 曾写**度**（DXF 语义为**弧度**）⇒ 旧导出**数值错误**。现文字仍用度、
+  **导出租 42 转弧度**，并加"弧度 vs 度数文字"对照测试。
+- **声明的选择**：U-1 四选一 = **包含弧位置拾取的扇区**（落在边界射线取逆时针扇区，三点同规则）——**我们的规则**；
+  U-5 自动 X/Y = `|Δy| > |Δx|` ⇒ X，否则 **Y（相等取 Y）**——**我们的规则**；三点形式**仅命令/载荷层**
+  （固定步数状态机表达不了"选线**或**指定顶点"，**无交互捕获**）；两线形式**只收 `Line`**；
+  ordinate 基准 = 世界原点、量值取绝对值（**带符号未建模**）、零 ordinate 合法；角度合成改为交点顶点后
+  **已导入角度标注的渲染会变**（正确性修复 = 像素变化）。
+- **标注文字缺陷（P5 暴露，已修）**：独立全域像素判读发现该帧**全无字形簇、同帧所有标注都没有文字**。
+  根因**三道闸**：① `load_engine` 在 `requested`/`explicit` 皆空时**在使用 `font_dir` 之前**早退（`--fonts-dir`
+  也救不回）；② 表示层**只在 `font: Some(..)` 时整形**（自建标注 `text_font: None` ⇒ 永不整形）；③ 字体只在
+  **打开漏斗**安装（新建标注后不重装）。修复：`needs_text_shaping(database)` 与"是否命名字体"解耦、`shape_unstyled`
+  走**既有回退链**（无引擎 ⇒ `ResourceMissing`，**绝不伪造字形**）、提交漏斗内 `ensure_fonts_for_text`；
+  **保留**"无文字就不加载多兆字体"的优化（有测试钉住）。
+- **真机证据（X11 / Quadro P620 / Vulkan；合成 DOM 指针事件、非真实鼠标）**：`DIMANGULAR` 41→42、`DIMORDINATE`
+  42→43（各 **+1**），工具清空、无错误、27 个派发 0 错误。**空间判据**：两线取样 1.000/1.000；角度弧在 `r=0.25`
+  的 3°…42° **40/40 = 1.000**，而**同半径空扇区 0/31 = 0.000**、`r=0.60` 对照 0/36 ⇒ **画的是选中扇区**。
+  **文字修复后**：与修复前帧差分 **+1856 墨迹像素 / 0 移除**；读到 **"0.1"**（`DIMORDINATE`）、**"0.45"**、
+  **"R0.18"`**；`DIMLINEAR`/`DIMANGULAR` 文字**被画布顶边裁切**（驱动固定放置所致）⇒ 路径已证、`DIMANGULAR`
+  完整字形**未测量**。
+- **诚实边界**：合成 DOM 事件非真实鼠标；`cad_status` **无几何通道** ⇒ 真机只证"计数 + 无错误 + 内容存在"，
+  **哪一扇区被量 / U-8 / 组 42 弧度**均由契约测试钉住；截图仅含应用窗口自身；单次有界本地运行，无跨平台结论。
+- **门禁（编排者复跑）**：受影响 crate **1881 通过 / 0 失败**；workspace check(all-targets)、wasm、clippy(`-D warnings`)、
+  fmt、architecture(27)、i18n(**517**)、fixture(22)、file-size(**682**)、workflow、UI **154/154** + build 全通过。
+  **NOT RUN**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；第三方读取器验证。
+
+
+
+
+
 ## P5d：`DIMRADIUS` + `DIMDIAMETER` + `DIMCENTER`（ADR-0017 决策 C，2026-10-19）
-
-
 
 **范围**：`crates/cad-app`（`command_id.rs` 三个变体 + `app_drawing/dimension.rs` 命令体与纯辅助 + `draw_tool/{kind,mod}.rs`
 工具种类、`picked_step_count` 与 `DrawIntent` + `app_drawing/trim_extend.rs` 的**批量漏斗** `commit_new_entities` +

@@ -454,16 +454,18 @@ export async function setToolParameterFlag(invoke, key, flag) {
 }
 
 /**
- * Per-step capture prompts for tools whose picks have names (ADR 0017 P5c/P5d).
+ * Per-step capture prompts for tools whose picks have names (ADR 0017 P5c–P5e).
  *
  * The dimension commands capture named picks — the linear/aligned pair three
  * (two extension-line origins, then the dimension-line location), the radial
- * pair two (an arc/circle entity pick, then the dimension-line location) and
- * DIMCENTER one (an arc/circle entity pick) — and a bare point count ("1 point")
- * does not tell the user *what* to pick next. This table names each pick; the
- * step is derived from the host's real `tool.key` and `tool.points` (the captured
- * count), never inferred from the pointer stream. Every other tool has no entry,
- * so it renders no prompt at all and its chip is unchanged.
+ * pair two (an arc/circle entity pick, then the dimension-line location),
+ * DIMCENTER one (an arc/circle entity pick), DIMANGULAR three (two straight-line
+ * entity picks, then the arc location) and DIMORDINATE two (a feature point, then
+ * the leader endpoint) — and a bare point count ("1 point") does not tell the user
+ * *what* to pick next. This table names each pick; the step is derived from the
+ * host's real `tool.key` and `tool.points` (the captured count), never inferred
+ * from the pointer stream. Every other tool has no entry, so it renders no prompt
+ * at all and its chip is unchanged.
  *
  * `location_linear` vs `location_aligned` differ on purpose: for DIMLINEAR the
  * location pick also decides horizontal vs vertical, which the user must know
@@ -473,6 +475,21 @@ export async function setToolParameterFlag(invoke, key, flag) {
  * the text: the location pick only sets the leader's direction from the centre,
  * and the synthesis derives the text placement itself. Its prompt asks only for
  * the "dimension location" so it never claims the user places the text.
+ *
+ * DIMANGULAR is the **two-line** form only: its first two steps are line entity
+ * picks, never a vertex point. The two lines' infinite intersection is the vertex
+ * and the third pick is the arc location, which selects which of the four angles
+ * is measured — the backend's rule is "the sector the location falls in". The copy
+ * asks for the arc location and makes no quadrant-picker claim, because no such
+ * picker exists. The three-point (vertex + two side points) construction is
+ * supported by the command payload only and has **no interactive capture**, so no
+ * prompt may imply a vertex-first workflow.
+ *
+ * DIMORDINATE's two steps are free points (no entity pick) and the interactive
+ * tool never forces an axis: the backend derives it from the documented auto rule
+ * (a greater Y difference measures the X ordinate; the unstated equal case is our
+ * declared choice of Y). The prompts name the two points only, so they promise no
+ * axis control the tool does not offer.
  *
  * Only the **named picks** live here, as an ordered list (a step is chosen by the
  * captured count). A completed capture's ready prompt is not positional, so it is
@@ -500,6 +517,15 @@ export const TOOL_STEP_PROMPTS = Object.freeze({
   'draw.dimcenter': [
     'tool.prompt.dim.select_arc',
   ],
+  'draw.dimangular': [
+    'tool.prompt.dim.select_line',
+    'tool.prompt.dim.select_second_line',
+    'tool.prompt.dim.location_angular',
+  ],
+  'draw.dimordinate': [
+    'tool.prompt.dim.feature',
+    'tool.prompt.dim.leader_endpoint',
+  ],
 });
 
 /**
@@ -512,8 +538,11 @@ export const TOOL_STEP_PROMPTS = Object.freeze({
  * **dimension** is defined, which is correct for the real dimension commands.
  * DIMCENTER is the one exception: it emits plain line geometry (a centre mark or
  * centrelines), not a dimension entity, so it must not claim a dimension was
- * defined and gets `tool.prompt.dim.center_ready` instead. A tool not listed
- * here falls back to the shared dimension ready prompt.
+ * defined and gets `tool.prompt.dim.center_ready` instead. DIMANGULAR and
+ * DIMORDINATE both commit real `DIMENSION` entities, so they deliberately have no
+ * entry here and fall through to the shared dimension ready copy; reusing the
+ * centre-mark copy for them would be false. A tool not listed here falls back to
+ * the shared dimension ready prompt.
  */
 export const TOOL_READY_PROMPTS = Object.freeze({
   'draw.dimcenter': 'tool.prompt.dim.center_ready',

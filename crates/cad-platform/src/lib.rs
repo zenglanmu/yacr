@@ -38,6 +38,7 @@ pub trait FontLoader {
     }
 }
 
+mod font_keys;
 pub mod fonts;
 pub mod images;
 

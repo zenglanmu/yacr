@@ -237,6 +237,8 @@ impl Application {
             | CommandId::DimRadius
             | CommandId::DimDiameter
             | CommandId::DimCenter
+            | CommandId::DimAngular
+            | CommandId::DimOrdinate
             | CommandId::MoveEntities
             | CommandId::TrimEntity
             | CommandId::ExtendEntity

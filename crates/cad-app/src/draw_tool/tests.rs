@@ -42,7 +42,8 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::Ellipse
             | DrawToolKind::Scale
             | DrawToolKind::DimLinear
-            | DrawToolKind::DimAligned => 3,
+            | DrawToolKind::DimAligned
+            | DrawToolKind::DimAngular => 3,
             DrawToolKind::Spline | DrawToolKind::Align | DrawToolKind::Stretch => 4,
             DrawToolKind::Offset
             | DrawToolKind::Point

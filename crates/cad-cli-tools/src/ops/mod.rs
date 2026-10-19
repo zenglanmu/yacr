@@ -31,4 +31,4 @@ pub(crate) use inspect::representation_context;
 pub(crate) use render::{run_plot, run_plot_png, run_render, synthetic_plot_database};
 pub(crate) use resources::load_fonts;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use resources::{fonts_requested, images_requested, load_images};
+pub(crate) use resources::{drawing_needs_text, fonts_requested, images_requested, load_images};

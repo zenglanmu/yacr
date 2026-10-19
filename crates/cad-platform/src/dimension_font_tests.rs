@@ -7,7 +7,7 @@ use cad_domain::{
     DimensionStyleValues, LayerId, Point3, SemanticGeometry, StyleId,
 };
 
-use crate::fonts::collect_fonts;
+use crate::font_keys::{collect_fonts, needs_text_shaping};
 
 fn db() -> DrawingDatabase {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
@@ -100,4 +100,90 @@ fn collect_fonts_returns_a_dimensions_text_font() {
         &mut out,
     );
     assert!(out.iter().any(|f| f == "arial.ttf"), "{out:?}");
+}
+
+/// A dimension whose text style names no font still needs shaping: the host must
+/// install an engine (and resolve through the fallback chain) even though
+/// `requested_fonts` is empty. This is the created-dimension defect.
+#[test]
+fn a_dimension_with_no_font_still_needs_text_shaping() {
+    let mut style = style();
+    style.text_font = None;
+    let dimension = DimensionGeometry::synthesized(definition(), "Standard".into(), style, None)
+        .expect("synthesized");
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_style(Style {
+            id: StyleId(0),
+            name: "Standard".into(),
+            resource_keys: Vec::new(),
+        })
+        .unwrap();
+    builder
+        .insert_entity(cad_db::DbEntity {
+            object: cad_db::DbObject {
+                id: cad_domain::ObjectId(1),
+                type_key: "AcDbDimension".into(),
+                revision: cad_domain::Revision(0),
+                source_handle: None,
+            },
+            id: cad_domain::EntityId(1),
+            layer: LayerId(0),
+            space: cad_domain::SpaceId::Model,
+            geometry: SemanticGeometry::Dimension(Box::new(dimension)),
+            draw_order: 0,
+        })
+        .unwrap();
+    let drawing = builder.finish().unwrap();
+    assert!(crate::fonts::requested_fonts(&drawing).is_empty());
+    assert!(needs_text_shaping(&drawing));
+}
+
+/// The optimisation is preserved: a drawing with only geometry installs no font
+/// engine, and whitespace-only text needs no glyphs.
+#[test]
+fn geometry_and_whitespace_only_text_need_no_shaping() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(cad_db::DbEntity {
+            object: cad_db::DbObject {
+                id: cad_domain::ObjectId(1),
+                type_key: "AcDbLine".into(),
+                revision: cad_domain::Revision(0),
+                source_handle: None,
+            },
+            id: cad_domain::EntityId(1),
+            layer: LayerId(0),
+            space: cad_domain::SpaceId::Model,
+            geometry: SemanticGeometry::Line {
+                start: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+    let drawing = builder.finish().unwrap();
+    assert!(!needs_text_shaping(&drawing));
 }

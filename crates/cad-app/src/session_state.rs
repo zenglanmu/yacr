@@ -338,6 +338,8 @@ impl SessionState {
             DrawToolKind::DimRadius => CommandId::DimRadius,
             DrawToolKind::DimDiameter => CommandId::DimDiameter,
             DrawToolKind::DimCenter => CommandId::DimCenter,
+            DrawToolKind::DimAngular => CommandId::DimAngular,
+            DrawToolKind::DimOrdinate => CommandId::DimOrdinate,
         })?;
         let selection = self.selection.refs().to_vec();
         let tool = DrawTool::new(kind, selection.len());
