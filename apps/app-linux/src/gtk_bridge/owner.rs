@@ -15,8 +15,9 @@ use raw_window_handle::{
 };
 
 use super::native::{
-    apply_input_passthrough, checked_physical_size, classify_native, init_allowed,
-    panic_payload_message, pending_reason_changed, wayland_buffer_scale, NativeStatus,
+    apply_input_passthrough, checked_physical_size, classify_native, drawing_area_matches_dom,
+    init_allowed, panic_payload_message, pending_reason_changed, wayland_buffer_scale,
+    NativeStatus,
 };
 use super::{BridgeState, GtkOverlayOwner, OVERLAYS, REPARENT_DONE};
 
@@ -102,15 +103,86 @@ impl GtkOverlayOwner {
         self.drawing_area.set_margin_end(margins.end);
         // Re-assert the empty input region on every (re)layout.
         apply_input_passthrough(&self.overlay, &self.drawing_area);
+        // Drive the layout explicitly. Setting a margin only *queues* a GTK
+        // resize, and that queued resize is never drained in this host: the
+        // drawing area kept its install-time geometry and no `resize configure`
+        // ever arrived. The webview reparent also leaves the drawing area as a
+        // GtkOverlay **overlay** child, for which GtkOverlay ignores the
+        // position margins, so `set_margin_*` alone can never place it on the
+        // DOM CAD rect. `GtkWindow::check_resize` runs GTK's size negotiation
+        // synchronously, which is what actually re-lays out the drawing area
+        // (and the widget window that carries its margins) onto the DOM rect.
+        let origin = self.drive_drawing_area_layout();
         // Wayland: the subsurface position follows the drawing area's logical
         // origin within the toplevel (the native region is app-owned, not a GTK
-        // child window). Re-synced again per frame in `resize_to` once GTK has
-        // re-allocated.
+        // child window). Read it *after* the explicit layout above. Re-synced
+        // again per frame in `resize_to`.
         self.sync_wayland_layout();
         eprintln!(
-            "[probe] bridge layout: margins top={} bottom={} start={} end={}",
-            margins.top, margins.bottom, margins.start, margins.end
+            "[probe] bridge layout: margins top={} bottom={} start={} end={} origin={:?}",
+            margins.top, margins.bottom, margins.start, margins.end, origin
         );
+    }
+
+    /// Drive GTK's size negotiation so the drawing area lands on the DOM CAD
+    /// rect, and return its resulting toplevel-relative origin.
+    ///
+    /// The queued resize that `set_margin_*` schedules is never drained in this
+    /// host, so the margins must be applied by an explicit synchronous
+    /// `GtkWindow::check_resize` (after queueing the resize up the ancestor
+    /// chain). Returns `None` while the widgets are not realized/allocated.
+    pub fn drive_drawing_area_layout(&mut self) -> Option<(i32, i32)> {
+        assert!(
+            gtk::is_initialized_main_thread(),
+            "gtk bridge drive_drawing_area_layout must run on the GTK main thread"
+        );
+        self.drawing_area.queue_resize();
+        self.overlay.queue_resize();
+        self.vbox.queue_resize();
+        self.top_level.queue_resize();
+        self.top_level.check_resize();
+        self.drawing_area_origin()
+    }
+
+    /// The drawing area's origin translated into the toplevel, in logical px
+    /// (`None` until both widgets are realized/allocated). The DOM CAD rect is
+    /// relative to the container, so this must equal the container origin plus
+    /// the DOM rect origin for pointer input to line up.
+    pub fn drawing_area_origin(&self) -> Option<(i32, i32)> {
+        self.drawing_area
+            .translate_coordinates(&self.top_level, 0, 0)
+    }
+
+    /// The margin-receiving container's (the overlay's) origin in the toplevel.
+    pub fn container_origin(&self) -> Option<(i32, i32)> {
+        self.overlay.translate_coordinates(&self.top_level, 0, 0)
+    }
+
+    /// The drawing area's current allocation `(x, y, width, height)`, relative
+    /// to its parent (the overlay == the DOM/CSS container), in logical px.
+    pub fn drawing_area_allocation(&self) -> (i32, i32, i32, i32) {
+        let allocation = self.drawing_area.allocation();
+        (
+            allocation.x(),
+            allocation.y(),
+            allocation.width(),
+            allocation.height(),
+        )
+    }
+
+    /// Whether the drawing area currently occupies exactly the React DOM CAD
+    /// rect (within one logical pixel). See [`drawing_area_matches_dom`].
+    pub fn drawing_area_matches_dom(&self, dom: (f32, f32, f32, f32)) -> bool {
+        let size = (
+            self.drawing_area.allocated_width(),
+            self.drawing_area.allocated_height(),
+        );
+        drawing_area_matches_dom(
+            self.container_origin(),
+            self.drawing_area_origin(),
+            size,
+            dom,
+        )
     }
 
     /// Log the native window tree / map state / surface identity (diagnostics).

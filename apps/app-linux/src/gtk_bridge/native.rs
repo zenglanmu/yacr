@@ -138,6 +138,36 @@ pub(super) fn checked_physical_size(
     Ok((width, height))
 }
 
+/// Whether the native drawing area occupies exactly the React DOM CAD rect.
+///
+/// The DOM rect is relative to the margin-receiving container (the overlay), so
+/// the drawing area's **toplevel-relative** origin must equal the container's
+/// toplevel origin plus the DOM rect origin, and its size must equal the DOM
+/// rect size. Both are logical (CSS) pixels. The surface is blitted 1:1 and
+/// pointer input maps through the DOM rect, so a disagreement stretches the
+/// image or offsets the pointer. A tolerance of one logical pixel absorbs GTK's
+/// integer rounding.
+///
+/// `None` origins mean the widgets are not realized/allocated yet: not a match
+/// (the caller must wait or drive the layout), never a silent success.
+pub(super) fn drawing_area_matches_dom(
+    container_origin: Option<(i32, i32)>,
+    drawing_area_origin: Option<(i32, i32)>,
+    drawing_area_size: (i32, i32),
+    dom: (f32, f32, f32, f32),
+) -> bool {
+    let (Some((container_x, container_y)), Some((area_x, area_y))) =
+        (container_origin, drawing_area_origin)
+    else {
+        return false;
+    };
+    let close = |a: i32, b: f32| (a as f32 - b).abs() <= 1.0;
+    close(area_x, container_x as f32 + dom.0)
+        && close(area_y, container_y as f32 + dom.1)
+        && close(drawing_area_size.0, dom.2)
+        && close(drawing_area_size.1, dom.3)
+}
+
 /// A bounded, human-readable summary of a caught panic payload.
 ///
 /// The panic message from `catch_unwind` is preserved for diagnostics but capped

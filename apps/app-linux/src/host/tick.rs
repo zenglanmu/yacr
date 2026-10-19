@@ -260,11 +260,19 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                 // the margin-receiving container, the drawing area + its
                 // translated origin, the integer scale and the physical extent.
                 eprintln!(
-                    "[probe] geometry top={}x{} container={:.0}x{:.0} dom={}x{} dom_xy=({},{}) drawing_area={}x{} origin=({},{}) scale={} native_surface={}x{} margins top={} bottom={} start={} end={} revalidated={}",
+                    "[probe] geometry top={}x{} container={:.0}x{:.0} container_xy=({},{}) dom={}x{} dom_xy=({},{}) drawing_area={}x{} origin=({},{}) scale={} native_surface={}x{} margins top={} bottom={} start={} end={} revalidated={}",
                     top.map(|s| s.width).unwrap_or(0),
                     top.map(|s| s.height).unwrap_or(0),
                     bounds.0,
                     bounds.1,
+                    geometry
+                        .and_then(|g| g.container_origin)
+                        .map(|o| o.0)
+                        .unwrap_or(-1),
+                    geometry
+                        .and_then(|g| g.container_origin)
+                        .map(|o| o.1)
+                        .unwrap_or(-1),
                     rect.width,
                     rect.height,
                     rect.x,
@@ -486,7 +494,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
     // ---- GPU work, without holding the shared lock ----
     let surface = BRIDGE.with(|cell| cell.borrow().as_ref().and_then(|o| o.surface_size()));
     if cad_mode {
-        let (logical, scale) = {
+        let (logical, scale, dom_rect) = {
             let rect = lock(shared).shell.input.last_rect();
             let scale = lock(shared)
                 .window
@@ -498,6 +506,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                 rect.map(|rect| [f64::from(rect.width), f64::from(rect.height)])
                     .unwrap_or([0.0, 0.0]),
                 scale,
+                rect.map(|rect| (rect.x, rect.y, rect.width, rect.height)),
             )
         };
         // Draw one CAD frame through the bound render session (main thread, no
@@ -528,6 +537,25 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                 // a genuine error, never a wait (no global "no presenter" success).
                 if owner.failure().is_some() {
                     return Ok(None);
+                }
+                // The native surface must occupy exactly the React DOM CAD rect:
+                // the blit is 1:1 and pointer input maps through the DOM rect, so
+                // a size or origin disagreement stretches the image or offsets the
+                // pointer. Drive the layout once, then refuse to render through a
+                // residual disagreement — it is a bug, not a state.
+                if let Some(dom) = dom_rect {
+                    if !owner.drawing_area_matches_dom(dom) {
+                        owner.drive_drawing_area_layout();
+                    }
+                    if !owner.drawing_area_matches_dom(dom) {
+                        return Err(format!(
+                            "native drawing area origin={:?} size={}x{} does not match the DOM CAD rect {:?}",
+                            owner.drawing_area_origin(),
+                            owner.drawing_area_allocation().2,
+                            owner.drawing_area_allocation().3,
+                            dom
+                        ));
+                    }
                 }
                 let (w, h) = owner.desired_size();
                 if w == 0 || h == 0 {

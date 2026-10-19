@@ -1,8 +1,70 @@
 use super::native::{
-    checked_physical_size, init_allowed, panic_payload_message, pending_prerequisite,
-    pending_reason_changed, render_error_class, wayland_buffer_scale,
+    checked_physical_size, drawing_area_matches_dom, init_allowed, panic_payload_message,
+    pending_prerequisite, pending_reason_changed, render_error_class, wayland_buffer_scale,
 };
 use super::BridgeState;
+
+#[test]
+fn drawing_area_matches_dom_within_one_logical_pixel() {
+    let dom = (300.0, 175.0, 626.0, 341.0);
+    // Exact match: the drawing area's toplevel origin is the container origin
+    // plus the DOM rect origin, and its size is the DOM rect size.
+    assert!(drawing_area_matches_dom(
+        Some((0, 0)),
+        Some((300, 175)),
+        (626, 341),
+        dom
+    ));
+    // Sub-pixel rounding passes.
+    assert!(drawing_area_matches_dom(
+        Some((0, 0)),
+        Some((300, 175)),
+        (626, 341),
+        (300.4, 174.6, 625.6, 341.4)
+    ));
+    // A non-zero container origin is accounted for: 101 + 175 = 276.
+    assert!(drawing_area_matches_dom(
+        Some((0, 101)),
+        Some((300, 276)),
+        (626, 341),
+        dom
+    ));
+    // The observed defect: the install-time geometry (margins 101/60) against
+    // the real DOM CAD rect — a size *and* origin disagreement.
+    assert!(!drawing_area_matches_dom(
+        Some((0, 0)),
+        Some((0, 101)),
+        (960, 439),
+        dom
+    ));
+    // An origin-only disagreement fails (the pointer would be offset).
+    assert!(!drawing_area_matches_dom(
+        Some((0, 0)),
+        Some((0, 0)),
+        (626, 341),
+        dom
+    ));
+    // A two-pixel size disagreement is beyond tolerance.
+    assert!(!drawing_area_matches_dom(
+        Some((0, 0)),
+        Some((300, 175)),
+        (628, 341),
+        dom
+    ));
+    // Unrealized/not-allocated widgets are never a silent match.
+    assert!(!drawing_area_matches_dom(
+        None,
+        Some((300, 175)),
+        (626, 341),
+        dom
+    ));
+    assert!(!drawing_area_matches_dom(
+        Some((0, 0)),
+        None,
+        (626, 341),
+        dom
+    ));
+}
 
 #[test]
 fn desired_physical_size_is_allocation_times_scale() {

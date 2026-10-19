@@ -267,12 +267,15 @@ fn present_native_texture_checkerboard() {
     let mut presenter =
         SurfaceProbePresenter::new(window, 320, 240).expect("presenter must initialize");
     let (device, queue) = presenter.device_queue();
-    let size = 64u32;
-    let mut pixels = vec![0u8; (size * size * 4) as usize];
-    for y in 0..size {
-        for x in 0..size {
+    // `present_texture` requires the texture to match the configured surface
+    // size (it refuses to stretch a mismatched texture), so the checkerboard is
+    // the surface size.
+    let (size_w, size_h) = presenter.surface_size();
+    let mut pixels = vec![0u8; (size_w * size_h * 4) as usize];
+    for y in 0..size_h {
+        for x in 0..size_w {
             let c = if (x / 8 + y / 8) % 2 == 0 { 255 } else { 0 };
-            let i = ((y * size + x) * 4) as usize;
+            let i = ((y * size_w + x) * 4) as usize;
             pixels[i] = c;
             pixels[i + 1] = c;
             pixels[i + 2] = c;
@@ -282,8 +285,8 @@ fn present_native_texture_checkerboard() {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("checkerboard"),
         size: wgpu::Extent3d {
-            width: size,
-            height: size,
+            width: size_w,
+            height: size_h,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -303,12 +306,12 @@ fn present_native_texture_checkerboard() {
         &pixels,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(size * 4),
-            rows_per_image: Some(size),
+            bytes_per_row: Some(size_w * 4),
+            rows_per_image: Some(size_h),
         },
         wgpu::Extent3d {
-            width: size,
-            height: size,
+            width: size_w,
+            height: size_h,
             depth_or_array_layers: 1,
         },
     );
@@ -316,7 +319,7 @@ fn present_native_texture_checkerboard() {
     let key = NativeTextureKey {
         device_epoch: 1,
         texture_revision: 1,
-        size: (size, size),
+        size: (size_w, size_h),
     };
     let first = presenter
         .present_texture(&texture, key)
@@ -331,7 +334,7 @@ fn present_native_texture_checkerboard() {
     let rebound = NativeTextureKey {
         device_epoch: 2,
         texture_revision: 1,
-        size: (size, size),
+        size: (size_w, size_h),
     };
     assert!(presenter.present_texture(&texture, rebound).is_ok());
 
@@ -343,6 +346,35 @@ fn present_native_texture_checkerboard() {
     };
     assert!(matches!(
         presenter.present_texture(&texture, bad),
+        Err(ProbeError::TextureInvalid(_))
+    ));
+
+    // A texture that matches its key but NOT the configured surface size is
+    // rejected rather than stretched anisotropically: the blit covers the whole
+    // surface with no aspect correction. The guard runs before the surface is
+    // touched, so a 64x64 texture with a 64x64 key is refused on a 320x240
+    // surface.
+    let small = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mismatched-surface"),
+        size: wgpu::Extent3d {
+            width: 64,
+            height: 64,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let mismatched_surface = NativeTextureKey {
+        device_epoch: 3,
+        texture_revision: 1,
+        size: (64, 64),
+    };
+    assert!(matches!(
+        presenter.present_texture(&small, mismatched_surface),
         Err(ProbeError::TextureInvalid(_))
     ));
 }

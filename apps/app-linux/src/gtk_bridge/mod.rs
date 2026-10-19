@@ -160,6 +160,11 @@ pub struct FrameCadStages {
 pub struct LayoutGeometry {
     /// Overlay allocation (the margin-receiving container), logical px.
     pub container: (i32, i32),
+    /// Overlay origin translated into the toplevel, logical px (`None` until
+    /// both widgets are realized/allocated). The DOM CAD rect is relative to
+    /// this container, so the drawing area's toplevel origin must equal this
+    /// plus the DOM rect origin for pointer input to line up.
+    pub container_origin: Option<(i32, i32)>,
     /// Drawing area allocation, logical px.
     pub drawing_area: (i32, i32),
     /// Drawing area origin translated into the toplevel, logical px (`None` until

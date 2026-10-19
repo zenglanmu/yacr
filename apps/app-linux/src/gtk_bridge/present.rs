@@ -280,6 +280,7 @@ impl GtkOverlayOwner {
                 self.overlay.allocated_width(),
                 self.overlay.allocated_height(),
             ),
+            container_origin: self.overlay.translate_coordinates(&self.top_level, 0, 0),
             drawing_area: (
                 self.drawing_area.allocated_width(),
                 self.drawing_area.allocated_height(),

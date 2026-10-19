@@ -539,6 +539,27 @@ impl SurfaceProbePresenter {
         }
         validate_texture_key(&key, self.max_dimension)?;
         validate_texture(texture, &key)?;
+        // The blit draws this texture across the WHOLE surface with a
+        // fullscreen triangle and no aspect correction (see `TEXTURE_SHADER`),
+        // so a texture whose size disagrees with the configured surface size
+        // would be stretched anisotropically (a defect observed as ~1.24x
+        // vertical stretch when the native drawing area did not match the React
+        // DOM CAD rect). Reject it explicitly instead of presenting a distorted
+        // frame.
+        //
+        // Do NOT "fix" this by rendering the texture at the surface size: that
+        // keeps the image square but misaligns every pointer event, which maps
+        // through the DOM CAD rect, not the native surface. The correct remedy
+        // is to make the native drawing area match the DOM rect (the GTK bridge
+        // layout does that); this guard only turns a residual disagreement into
+        // an explicit error rather than a silent stretch.
+        if key.size != self.size {
+            return Err(ProbeError::TextureInvalid(format!(
+                "native texture {}x{} does not match the {}x{} surface; refusing to stretch it \
+                 (the native drawing area must match the DOM CAD rect)",
+                key.size.0, key.size.1, self.size.0, self.size.1
+            )));
+        }
         let mut timings = ProbeStageTimings::default();
 
         let stage = std::time::Instant::now();
