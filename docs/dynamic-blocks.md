@@ -7,7 +7,7 @@
 > 能力限制（见 §6），因此本轮以“内存合成 acadrust 文档 + 纯映射函数”验证读取与
 > 映射；真实导出样本仍是待补证据。
 
-## 1. 数据来源（acadrust 0.6.3，只读）
+## 1. 数据来源（acadrust 0.6.5，只读）
 
 - `document.rs`
   - `block_visibility_params: HashMap<Handle, BlockVisibilityParameter>`

@@ -134,6 +134,43 @@ fn rounded_definition(d: &DimensionGeometry) -> String {
     )
 }
 
+/// The `(group 70, group 42)` pairs of every DIMENSION record in draw order.
+fn dimension_records(bytes: &[u8]) -> Vec<(i64, f64)> {
+    let text = String::from_utf8_lossy(bytes);
+    let lines: Vec<&str> = text.lines().collect();
+    let mut records = Vec::new();
+    let mut i = 0;
+    while i + 1 < lines.len() {
+        if lines[i].trim() == "0" && lines[i + 1].trim() == "DIMENSION" {
+            let mut flags = None;
+            let mut measurement = None;
+            let mut j = i + 2;
+            while j + 1 < lines.len() {
+                let code = lines[j].trim();
+                if code == "0" {
+                    break;
+                }
+                match code {
+                    "70" if flags.is_none() => {
+                        flags = Some(lines[j + 1].trim().parse().expect("group 70 integer"))
+                    }
+                    "42" => {
+                        measurement = Some(lines[j + 1].trim().parse().expect("group 42 double"))
+                    }
+                    _ => {}
+                }
+                j += 2;
+            }
+            records.push((
+                flags.expect("DIMENSION group 70"),
+                measurement.expect("DIMENSION group 42"),
+            ));
+        }
+        i += 1;
+    }
+    records
+}
+
 /// The group-70 type flags of the first DIMENSION record in the ENTITIES section.
 fn dimension_group_70(bytes: &[u8]) -> i64 {
     let text = String::from_utf8_lossy(bytes);
@@ -198,6 +235,77 @@ fn blockless_dimensions_round_trip_as_dimensions() {
     assert!(
         report.counts.converted >= before.len(),
         "each dimension is recorded as converted"
+    );
+}
+
+/// P5e re-verified against acadrust 0.6.5: the committed QCAD fixture's angular
+/// dimensions (group 70 = `34`/`162`, group 42 in **radians**) survive
+/// import→export→re-import with kind, style and measurement, and the re-exported
+/// group 42 is still the radian value.
+///
+/// This fixture's dimensions are **block members** placed by INSERTs, so the
+/// definition points are block-local before and world-space after the export
+/// (INSERT expansion bakes the placement, a documented lossy export behaviour);
+/// point preservation is asserted by the block-less flange test instead.
+#[test]
+fn qcad_angular_dimensions_round_trip_with_radian_group_42() {
+    let is_angular = |d: &DimensionGeometry| {
+        matches!(
+            d.kind(),
+            DimensionKind::Angular2Ln | DimensionKind::Angular3Pt
+        )
+    };
+    let imported = import_bytes(&fixture_bytes("fixtures/dxf/qcad-examples/entities.dxf"));
+    let before: Vec<_> = dimensions(&imported)
+        .into_iter()
+        .filter(is_angular)
+        .collect();
+    assert!(
+        !before.is_empty(),
+        "the QCAD fixture carries angular dimensions"
+    );
+
+    let (bytes, _report) = export_db(&imported);
+    let reimported = import_bytes(&bytes);
+    let after: Vec<_> = dimensions(&reimported)
+        .into_iter()
+        .filter(is_angular)
+        .collect();
+    assert_eq!(
+        after.len(),
+        before.len(),
+        "every angular dimension survives the round trip"
+    );
+
+    let key = |d: &DimensionGeometry| {
+        (
+            format!("{:?}", d.kind()),
+            (d.measurement() * 1e6).round() as i64,
+            d.style_name().to_string(),
+        )
+    };
+    let mut a: Vec<_> = before.iter().map(key).collect();
+    let mut b: Vec<_> = after.iter().map(key).collect();
+    a.sort();
+    b.sort();
+    assert_eq!(a, b, "kind/measurement/style preserved");
+
+    // The written group 42 must stay in radians: every angular DIMENSION record
+    // carries one of the imported measurements converted with `to_radians`.
+    let mut written: Vec<i64> = dimension_records(&bytes)
+        .into_iter()
+        .filter(|(flags, _)| matches!(flags & 0x0F, 2 | 5))
+        .map(|(_, measurement)| (measurement * 1e6).round() as i64)
+        .collect();
+    let mut expected: Vec<i64> = before
+        .iter()
+        .map(|d| (d.measurement().to_radians() * 1e6).round() as i64)
+        .collect();
+    written.sort();
+    expected.sort();
+    assert_eq!(
+        written, expected,
+        "angular group 42 is written in radians for every subtype"
     );
 }
 
@@ -411,7 +519,7 @@ fn dimension_group_codes_round_trip() {
     assert!((base.text_middle_point.x - 1.0).abs() < 1e-9); // group 11
     assert!((base.text_middle_point.y + 2.0).abs() < 1e-9); // group 11
     assert_eq!(base.text_override(), Some("<> mm")); // group 1
-    match dimension {
+    match dimension.as_ref() {
         acadrust::entities::Dimension::Aligned(aligned) => {
             assert!((aligned.first_point.x + 21.0).abs() < 1e-9); // group 13
             assert!((aligned.second_point.x - 21.0).abs() < 1e-9); // group 14
@@ -509,6 +617,44 @@ fn dimension_group_70_flags() {
     assert_eq!(flags & 0x0F, 0, "linear subtype flag: {flags:#x}");
     assert_eq!(flags & 0x20, 0, "bit 32 must be absent: {flags:#x}");
     assert_eq!(flags & 0x80, 0, "0x80 must be clear: {flags:#x}");
+
+    // Angular subtypes are the ones AutoCAD writes as 34/37 (2|32, 5|32) when
+    // the dimension owns its `*D` block. The acadrust 0.6.5 writer still has no
+    // way to set bit 32, so the recorded deviation (ADR 0017 A.5 / decision D.4)
+    // holds: the emitted flag is exactly 2 or 5.
+    let angular_2ln = DimensionGeometry::synthesized(
+        DimensionDefinition {
+            kind: DimensionKind::Angular2Ln,
+            points: DimensionPoints::Angular2Ln {
+                line1_start: p(0.0, 0.0, 0.0),
+                line1_end: p(10.0, 0.0, 0.0),
+                line2_start: p(10.0, 0.0, 0.0),
+                line2_end: p(10.0, 10.0, 0.0),
+                arc_point: p(7.0, 2.0, 0.0),
+            },
+            text_middle: p(0.0, 0.0, 0.0),
+            text_rotation: 0.0,
+            normal: p(0.0, 0.0, 1.0),
+        },
+        "Standard".to_string(),
+        style_values(),
+        None,
+    )
+    .expect("synthesized");
+    let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(angular_2ln)));
+    let flags = dimension_group_70(&bytes);
+    assert_eq!(flags, 2, "angular two-line subtype flag: {flags:#x}");
+
+    let angular_3pt = DimensionGeometry::synthesized(
+        angular_definition(),
+        "Standard".to_string(),
+        style_values(),
+        None,
+    )
+    .expect("synthesized");
+    let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(angular_3pt)));
+    let flags = dimension_group_70(&bytes);
+    assert_eq!(flags, 5, "angular three-point subtype flag: {flags:#x}");
 }
 
 /// P5e: group 42 is the DXF measurement unit. For an angular dimension that is

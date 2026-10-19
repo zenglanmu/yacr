@@ -1,6 +1,6 @@
 # 第三方来源与许可
 
-- acadrust：正式 0.6.3，唯一依赖入口 cad-import-acadrust；未修改上游，未使用 Cargo patch。
+- acadrust：正式 0.6.5，唯一依赖入口 cad-import-acadrust；未修改上游，未使用 Cargo patch。
   当前导入仍占位；采用 API 与对外分发前审计锁定包许可及其传递依赖。
 - wgpu / Tauri / GTK：桌面 UI 与渲染技术方向。wgpu 仅由 `cad-render-wgpu` 依赖；桌面宿主使用
   Tauri 2（WebView）+ GTK3/WebKitGTK 4.1 + 原生 GTK/wgpu CAD 分区。Slint 依赖已随桌面 UI 迁移

@@ -62,7 +62,7 @@ cad-platform = { path = "crates/cad-platform" }
 cad-diagnostics = { path = "crates/cad-diagnostics" }
 
 # Integration candidates only: not linked or validated by the scaffold.
-acadrust = { version = "0.6.3", features = ["serde", "import"] }
+acadrust = { version = "0.6.5", features = ["serde", "import"] }
 wgpu = "=30.0.1"
 glam = { version = "0.33", features = ["serde", "bytemuck"] }
 serde = { version = "1", features = ["derive"] }

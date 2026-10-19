@@ -476,7 +476,7 @@ fn emit_leaf(
                     reasons.push(reason);
                 }
                 mtext.common = common;
-                acc.push(EntityType::MText(mtext), ctx)?;
+                acc.push(EntityType::MText(Box::new(mtext)), ctx)?;
                 reasons.push("multi-line text written as MTEXT".into());
                 acc.record(object, "text_mtext", MappingOutcome::Converted(reasons));
             } else {

@@ -119,6 +119,7 @@ fn gradient_hatch(name: &str, stops: &[(f64, (u8, u8, u8))]) -> acadrust::entiti
         g.colors.push(acadrust::entities::GradientColorEntry {
             value: *value,
             color: acadrust::Color::from_rgb(*r, *gg, *b),
+            ..Default::default()
         });
     }
     hatch
@@ -232,6 +233,7 @@ fn single_color_gradient_hatch_is_complete_and_graded() {
     g.colors.push(acadrust::entities::GradientColorEntry {
         value: 0.0,
         color: acadrust::Color::from_rgb(255, 0, 0),
+        ..Default::default()
     });
     let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
     assert_eq!(completeness, Completeness::Complete, "{completeness:?}");

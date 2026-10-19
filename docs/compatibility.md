@@ -116,13 +116,15 @@ P5a 让标注成为一级域实体并迁入两分支导入 + 导出；**P5b** �
 | i18n | P5b **0 新键**；P5c **+9 键** | P5b **无 UI 表面**（无命令/面板/状态投影），诚实计数为**零**（计划里 P5c 行写的 "+ i18n" 指 **P5b**）；**P5c** 新增 9 键：`tool.prompt.dim.{origin_first,origin_second,location_linear,location_aligned,ready}`、`tool.draw.{dimlinear,dimaligned}`、`draw.kind.{dimlinear,dimaligned}` |
 
 
-## acadrust 依赖能力（0.6.3 增量）
+## acadrust 依赖能力（0.6.5）
 
-`acadrust` 已由 0.5.5 升级到 0.6.3（features `serde` + `import`）。`cad-import-acadrust`
-是唯一消费方；`cad-proxy` 不依赖 acadrust，只消费原始字节。下表为源码核对后的能力增量，
-「本项目处理」一列说明 yacr 当前的读取/建模，不改变任何 Unsupported 语义。
+`acadrust` 已由 0.5.5 → 0.6.3 → **0.6.5**（features `serde` + `import`，registry `rsproxy`；无
+`[patch]`、未修改上游）。`cad-import-acadrust` 是唯一消费方；`cad-proxy` 不依赖 acadrust，只消费
+原始字节。下表为源码核对后的能力增量，「本项目处理」一列说明 yacr 当前的读取/建模，不改变任何
+Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增量」小节；只有被我们**实际执行**过的
+能力才写"已接入/已验证"，其余明确标注"上游已提供、本项目未消费"。
 
-| 能力 | acadrust 0.6.3 | 本项目处理 |
+| 能力 | acadrust 0.6.5 | 本项目处理 |
 |---|---|---|
 | STYLE xdata 字体面 | **支持（已类型化）**：`TextStyle.true_type_font` / `true_type_font_flags`；DXF 读 `1001 ACAD`/`1000`，DWG 经 `io/dwg/typeface_eed.rs` 按 APPID 名解析 | 已接入字体解析，链为 `类型化 true_type_font > group 3/4 声明字体 > 字节扫描`（`read_styles` 对 DXF/DWG 统一，DWG 经此通道自动生效）；字节扫描自身仍不覆盖 group 3/4 |
 | LAYOUT `group 72`/`group 73` | **支持**：`read_layout`/`read_plot_settings` 映射到 `Layout.plot_paper_units`/`plot_rotation`（0.5.5 亦然，旧文档「未暴露」有误） | `record_from_layout` 直接读取这两个字段；标准纸名带单位记号时仍优先用纸名（不伪造），仅当文件未声明旋转时才按视口范围推断 |
@@ -131,6 +133,22 @@ P5a 让标注成为一级域实体并迁入两分支导入 + 导出；**P5b** �
 | DWG xdata（实体/对象） | **部分**：实体 EED 仅在 APPID 句柄经 `document.app_ids` 解析时解码，否则保留 `raw_dwg_eed`；新增 `document.object_xdata`（对象 EED 解码，但为 crate-private，未向消费者暴露） | 显式 Partial：未解码 EED 保留原字节，不猜测 |
 | DXF 已知实体上的未知码 | **不支持（DXF）**：未知码不保留 | 显式 Unsupported；DWG 侧新增 `EntityCommon.raw_record`（仅 DWG、可变访问即失效）与 `layer_handle`，本项目暂未使用 |
 | UnknownEntity 原始 DWG 数据 | 不变 | 现有 raw 保留路径不变 |
+
+### 0.6.3 → 0.6.5 增量（源码核对，2026-10-20）
+
+| 变更 | acadrust 0.6.5 行为 | 对 yacr 的影响 |
+|---|---|---|
+| **标注标志映射修正** | 只改 **DWG** 标志字节位 0：0.6.3 把位 0 当"文字被用户定位"，0.6.5 反转为"文字在默认位置"（`text_user_positioned = (flags & 0x01) == 0`）。**DXF 组 70 的 `0x80` 读取路径未变** | **无影响**：本项目不消费 `text_user_positioned`/`dwg_flags_byte`（见 ADR-0017 P5d） |
+| **标注数据保留** | `DimensionBase` 新增组 12（插入点）写出（仅非零时）；`Dimension(Box<..>)`/`MText(Box<..>)` 装箱（API 破坏性变更） | 已适配 `Box::new`；我们从不设置 `insertion_point`（零值 ⇒ 不写出）⇒ **输出无变化** |
+| **DIMSTYLE 表 / 默认值** | `DimStyle` 结构、`DimStyle::new()` 默认值、`write_dimstyle_table`/`write_dimstyle_entry` 的组码（含组 3）与 xref 标志**逐行未变**；读取器仅新增把 DIMSTYLE 组 50（`DIMJOGANG`）由**度**转弧度存储 | 导出"每个样式名一条 DIMSTYLE 记录"的行为不变，组 3 仍可解析（往返测试通过）；本项目不建模 `DIMJOGANG` ⇒ 无可见变化 |
+| **DIMJOGANG（0.6.4）** | DXF 头 `$DIMJOGANG` 按弧度写出并夹在 5°..90°；DIMSTYLE 组 50 改为**度** | 本项目**不建模** `DIMJOGANG`（默认 `π/4` ⇒ 不写组 50），导出新建空文档 ⇒ 仅多出默认头变量，**无语义变化** |
+| **DXF 头保留（#127，0.6.4）** | 写出/往返 `$ANGBASE`、`$ANGDIR`、`$ELEVATION`、`$THICKNESS`、`$FILLETRAD`、`$CHAMFER{A,B}`（另有 R2004+ 摘要信息、`$HYPERLINKBASE` 等） | 导出**不复用源 header**（`CadDocument::new()` + 仅 `$INSUNITS`）⇒ **无影响**；导入侧这些字段本不消费 |
+| **旧代码页（0.6.4，`oem_cp`）** | 精确 OEM / Mac Roman / Johab 解码与编码（`Cargo.lock` 因此新增 `oem_cp 2.1.2`、`phf 0.11.3`） | 经 `DxfReader`/`DwgReader` 间接受益（legacy `$DWGCODEPAGE` 文本更准）。**未**用 legacy 编码样本验证 ⇒ 不宣称已验证 |
+| **线型元素（#128，0.6.4）** | 原生零缩放的普通虚线不再被误解析为复杂 shape 元素 | 导入线型模式（`LinetypePattern`）的输入因此更准；**未**用该缺陷样本做对比验证 |
+| **CTB/STB 绘图样式编解码** | 新增 `acadrust::plot_style::PlotStyleTable`（`from_bytes`/`to_bytes`/`resolve_color`/`resolve_lineweight`），**文件级**编解码；DXF/DWG 文档内 `PlotSettings` 仍只有样式表**名**与标志，无逐 ACI 解析值 | **未消费**：yacr 打印用显示解析色，不读 `.ctb`/`.stb` ⇒ 上方 plot-style 行仍为显式 Unsupported（颜色/线宽/alpha 不应用） |
+| **图层透明度 XDATA 解码** | 新增 `Transparency::from_layer_alpha_value`：图层 `AcCmTransparency` 值 `0` = **不透明**（0.6.3 会解成 `ByLayer`），未知 method 字节不再被默认成已知模式（DXF 与 DWG 读取器均改用）；实体侧 `from_alpha_value` 未变 | 导入的 `layer_opacity` 直接消费该值 ⇒ 对带显式 `AcCmTransparency` XDATA 的图层，**透明度解析结果会变**（更符合"图层 0 = 不透明"）。**无专门夹具验证**，不声称已回归 |
+| **审计与恢复** | `CadDocument::audit()`、`DxfReader::recover()`、`DwgReader::recover()`（保留有界辅助记录、孤立几何不入模型空间） | **未消费**：导入失败仍走既有显式错误/诊断，不把恢复结果当成功 |
+| **R12 原生写出 / 动态块默认值 / ACIS 颜色** | `DxfWriter::with_version(AC1009)` 真 R12；动态块默认值与实例属性；ACIS 面/边颜色 | **未消费**：导出固定默认版本（AC1024）；动态块仍按既有代理/部分支持记录；ACIS 颜色未接入 |
 
 ## Linux 宿主（2026-10-03 新增，主验收入口）
 
@@ -275,6 +293,6 @@ TIFF/CCITT/EPS 等编解码器、亮度/对比/淡出/透明、outside/mask 裁�
 Web/Android 宿主未接图像加载器；**`draw_order` 未贯通**（绘制顺序=上传顺序）；
 **WIPEOUT 掩码填充未渲染**（仅边界，`inverted` 未被消费）。**外部内容** PDF/DWF/DGN
 underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、ACIS 全内核（3DSOLID/REGION/
-BODY/SURFACE 仅子集离散）、点云点数据（acadrust 0.6.3 未暴露）均不加载/不实现，显式
+BODY/SURFACE 仅子集离散）、点云点数据（acadrust 0.6.5 仍只暴露元数据/范围，未暴露点数据）均不加载/不实现，显式
 `Partial`/`Unsupported`，不计入完成。代理 opcode 厂商记录仍按用户要求排除（见
 `docs/proxy-support.md`）。图元逐项状态见 `docs/dxf-entity-coverage.md`。

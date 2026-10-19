@@ -54,7 +54,7 @@ apps/app-linux (React + Tauri)   apps/app-{windows,macos,android,web} (NOT IMPLE
 
 - **renderer-only wgpu** — `cad-render-wgpu` is the only crate that depends on wgpu.
 - **importer-only acadrust** — `cad-import-acadrust` is the only crate that depends on acadrust
-  (unmodified **0.6.3**); **Cargo patches are forbidden**.
+  (unmodified **0.6.5**); **Cargo patches are forbidden**.
 - `cad-host` depends on **no** UI toolkit; platform I/O lives only in `apps/app-*` behind the
   `cad-platform` contracts (`PlatformFiles` / `ConfigStore` / `SurfaceSource` / `FontLoader` / …,
   event-style, no futures, no `Send`).

@@ -23,8 +23,8 @@
    随后**丢弃**定义点与样式；`DbObject.type_key` 仅留字符串 `"AcDbDimension"`。
 2. **导出按几何分派，`Compound` 被摊平、`Opaque` 被丢弃**（`cad-import-acadrust/src/export/entity.rs:210`、
    `:512`）。⇒ 只要 DB 里存的还是合成后的 `Compound`，存盘就会把标注退化成散落的线+文字（或丢失）。
-3. **acadrust 0.6.3 的写入侧完整支持标注**（`io/dxf/writer/section_writer.rs:4196 write_dimension`），
-   **无需修改 acadrust**。
+3. **acadrust 的写入侧完整支持标注**（0.6.3 的 `io/dxf/writer/section_writer.rs:4196 write_dimension`；
+   0.6.5 为同文件 `:4327`，写入路径逐行复核未变），**无需修改 acadrust**。
 4. **spec 权威缺口**：§3.2 只要求"**常用 DIMENSION 可见表示**"（读取/显示）；§3.1 的批注类特性（F07–F09）
    已于 2026-10-05 移除。**"创建标注"是项目自选范围，无 spec 条款授权**——能力表必须**逐行**写明这一点
    （不是脚注），全部行为选择标为**我们的选择**而非"符合规范"。
@@ -148,15 +148,22 @@ pub struct DimensionGeometry {                   // display 为私有字段，�
 - **导出（修正 B1/B2/N4/N5）**：
   - **必须生成内容块**：为每个标注写 `BLOCK_RECORD` + `BLOCK`（成员 = `display` 子项）+ 组 2 = 块名
     （`DimensionBase.block_name`）。依据见 §0.6；acadrust 写入/读取侧均支持块记录，**不改 acadrust**。
-  - **组 42 = `measurement`**：写入器**总是**写组 42（`section_writer.rs:4289`，Ordinate 路径还重算），
-    不写等于写出 **`42 = 0.0` 的假测量值**。"只读"指**用户不能输入**，不是"不写"。
+  - **组 42 = `measurement`**：写入器**总是**写组 42（0.6.3 `section_writer.rs:4289`；0.6.5 `:4367`
+    `write_double(42, base.actual_measurement)`，Ordinate 路径仍重算），不写等于写出 **`42 = 0.0` 的假测量值**。
+    "只读"指**用户不能输入**，不是"不写"。**0.6.5 复核**：`actual_measurement` 的语义/单位未变（全 crate diff
+    只命中一处测试），0.6.5 的"dimension flag mapping 修正"只改 DWG 标志字节，**不改组 42**。
   - **组 70 的 32 位不写**：该位语义是"组 2 的块仅被本标注引用"（R13+ 恒置），而 acadrust 写入器**无法置位**
-    （按 kind 的常量只含 `0x40`/`0x80`，`section_writer.rs:4283-4288`/`4397`）⇒ **删去原"类型标志 + 32 位"
-    的表述**，改为**显式偏离记录**："32 位不写（acadrust 写入器约束）"。`0x40`（坐标 X 型）/`0x80`
-    （文字被用户定位）与 Autodesk 参考一致。
-  - **导出 DIMSTYLE 表**（N5）：写入器支持（`section_writer.rs:1500-1534`）；我们为每个被写出的样式名写一条
-    DIMSTYLE 记录（含决策 B 子集值），**否则组 3 悬空、外部 CAD 用它自己的 `Standard` 解析** ⇒ 静默显示漂移。
-    若某样式无法写出，记入 `ExportReport` 的 `Converted/Dropped` 条目，**不得沉默**。
+    （按 kind 的常量只含 `0x40`/`0x80`，0.6.3 `section_writer.rs:4283-4288`/`4397`；0.6.5 `:4360-4366`/`4473`
+    **逐行相同**）⇒ **删去原"类型标志 + 32 位"的表述**，改为**显式偏离记录**："32 位不写（acadrust 写入器
+    约束）"。`0x40`（坐标 X 型）/`0x80`（文字被用户定位）与 Autodesk 参考一致。**0.6.5 复核结论：仍然不能
+    置位**——DXF 写入器只写 `type_flags | 0x80`，`dwg_flags_byte` 仅由 DWG 写入器消费、DXF 侧完全不读；
+    故本次**不改变**该偏离（否则必须用非公开/伪造记录绕过写入器，违反"不修改 acadrust"）。
+  - **导出 DIMSTYLE 表**（N5）：写入器支持（0.6.3 `section_writer.rs:1500-1534`；0.6.5 `:1620-1660`）；我们为
+    每个被写出的样式名写一条 DIMSTYLE 记录（含决策 B 子集值），**否则组 3 悬空、外部 CAD 用它自己的
+    `Standard` 解析** ⇒ 静默显示漂移。若某样式无法写出，记入 `ExportReport` 的 `Converted/Dropped` 条目，
+    **不得沉默**。**0.6.5 复核**：`write_dimstyle_entry` 的组码/组 3 行为逐行未变，`DimStyle` 结构与
+    `DimStyle::new` 默认值**零 diff**；唯一写入变化是 DIMSTYLE 组 50（`DIMJOGANG`）改按**度**写出
+    ——本项目**不建模** `DIMJOGANG`（默认 `π/4` ⇒ 该组不写出），故对我们无影响。
 - **校验**：`cad-db` validate 臂要求定义点与显示子项均有限；`display` 为空视为合法（退化但可显示为空）。
 
 ### A.6 导入迁移（**两个分支都迁**，以保住往返）
@@ -321,7 +328,8 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
    `fonts.rs` 臂必须补上，否则是**静默不绘制**而非"有诊断的 Partial"。
 3. **spec 权威缺口**：创建是项目自选范围（§3.2 只要求可见表示）。
 4. **导出形状与已知损失**：写出**内容块**（AutoCAD 必需）、**组 42 = 测量值**、DIMSTYLE 表；
-   **不写组 70 的 32 位**（acadrust 写入器约束）、**丢弃**组 51/52/71/72；非关联、无 `ACAD_DIMASSOC`。
+   **不写组 70 的 32 位**（acadrust 写入器约束；0.6.5 复核仍无法置位）、**丢弃**组 51/52/71/72；非关联、
+   无 `ACAD_DIMASSOC`。
 5. **样式不追溯**（B.1）。**`DIMSTYLE` 编辑命令未实现**（B.3）。
 6. **平面外拒绝**：定义点不在 XY 平面时创建**整命令拒绝**并诊断，不猜工作平面。
 7. **`DIMCENTER` 不是标注**：产出普通几何（文档明确），能力表按"绘图辅助"而非 DIMENSION 记录。
@@ -434,8 +442,9 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
 11. **样式子集拆分（偏离 9）**：`DimensionStyleValues` 只携带 B.2(a) 中**被合成消费**的子集；其余 (a)
     与全部 (b) 是 **P5b**。故凡"导出写已解析样式"的说法**必须软化**：DIMSTYLE 记录对 (b) 变量写的是
     **未钉住的默认值**，且 **DIMTAD 2/3/4 在导入时塌缩为 1**。
-12. 组 70 **32 位不写**（acadrust 写入器无法置位），**0x80 位**（文字被用户定位）**从不置位**：对自建
-    标注正确（我们从不用户定位文字），但导入的、曾置该位的标注会**丢掉**它——报告中的**已声明丢弃**。
+12. 组 70 **32 位不写**（acadrust 写入器无法置位；0.6.5 复核仍无法置位，见 P5d 小节），**0x80 位**
+    （文字被用户定位）**从不置位**：对自建标注正确（我们从不用户定位文字），但导入的、曾置该位的标注会
+    **丢掉**它——报告中的**已声明丢弃**。
 13. 组 `210`（挤出）**不写**；−Z 挤出的角度标注保持 P5a 前的渲染（合成**重新取源法向**），但导出文件对
     它们**丢失 210**（报告条目）。
 13b. **模型补充（A.3 修订项）**：`DimensionDefinition` 新增 **`normal: Point3`** 字段——**A.3 的点表原本
@@ -780,3 +789,51 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
   fixture(22)、file-size(**682**)、workflow、UI **154/154** + build。
 - **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；第三方读取器验证；
   **标注文字渲染**（见上，独立判读中）。
+
+---
+
+## P5d：acadrust 0.6.3 → 0.6.5 复核（2026-10-20，**不改写决策文本**）
+
+**触发**：依赖从 `acadrust 0.6.3` 升到 `0.6.5`（上游 0.6.5 说明含 *"corrects dimension flag mapping"*、
+更完整地保留标注数据）。本 ADR 中若干**偏离**是以"acadrust 写入器只能这样"为依据记录的；按项目规则，
+被后续变更影响的决定**必须在文中更正**，不能悄悄失效。本节逐条给出复核结论与依据。
+
+**方法**：对照 `~/.cargo/registry/src/rsproxy.cn-*/acadrust-0.6.3` 与 `acadrust-0.6.5` 的源码逐函数 diff
+（`write_dimension*`、`write_dimstyle_entry`、`entities/dimension.rs`、`tables/dimstyle.rs`、DWG/DXF 读取器），
+再用契约测试读回**导出字节**，最后跑真实夹具往返。**未**修改 acadrust，**无** `[patch]`。
+
+### 结论矩阵（"原记录" → "0.6.5 实测"）
+
+| 记录项 | 原依据（0.6.3） | 0.6.5 复核结果 | 处置 |
+|---|---|---|---|
+| **组 70 位 32**（内容块仅被本标注引用） | 写入器按 kind 的常量只含 `0x40`/`0x80`，**无法置位** ⇒ "32 位不写" | **仍然无法置位**：`write_dimension_base` 只写 `type_flags \| 0x80`；`type_flags` 常量逐行相同；`dwg_flags_byte` 只被 DWG 写入器消费，DXF 写入器**不读**它 | **偏离保持**（决策 D.4 / 偏离 12 已加复核注记）。新增断言：角度两种子类型的组 70 恰为 **2 / 5**（不是 34/37） |
+| **组 42** 总写出、取自 `actual_measurement` | `write_double(42, base.actual_measurement)`；Ordinate 另重算 | **未变**：0.6.5 同行仍是 `write_double(42, base.actual_measurement)`；全 crate diff 中 `actual_measurement` 只命中一处测试；"corrected dimension flag mapping" 改的是 **DWG 标志字节**，与组 42 无关 | 不需要改；角度"弧度写 42 / 度写文字"的断言继续成立 |
+| **角度组 70 = 2 / 5**（U-2） | Autodesk DXF 参考逐字列出；写入器常量 2/5 | **未变**：`write_dimension_angular_2line(..., 2, ...)`（`:4448`）、`..._angular_3point(..., 5, ...)`（`:4463`）两行逐字相同 | 新增契约测试钉住真实导出字节的标志值 |
+| **DIMSTYLE 表**（组 3 解析） | `write_dimstyle_entry` 写出全部记录；我们按样式名各写一条 | **未变**：组码、组 3（`DIMPOST`）、xref 标志逐行相同；`DimStyle` 结构与 `new()` 默认值**零 diff**；`write_dimstyle_table` 零 diff。标注相关的唯一变化：写侧 DIMSTYLE 组 50 `DIMJOGANG` 改按**度**写（0.6.3 误把弧度夹在度区间），读侧对应把组 50 由度转弧度存储 | 我们**不建模** `DIMJOGANG`（默认 `π/4` ⇒ 不写出、不消费）⇒ 输出/导入无变化；导出 DIMSTYLE 往返测试继续通过 |
+| **DIMJOGANG（0.6.4）** | —（0.6.3 不写 `$DIMJOGANG`，DIMSTYLE 组 50 单位有误） | 0.6.5 为 AC1021+ 写 `$DIMJOGANG`（弧度、夹在 5°..90°），DIMSTYLE 组 50 写度 | 本项目**不读不写** `DIMJOGANG`：导出新建空文档 ⇒ 只多出一个默认值头变量；**无**导入/导出语义变化 |
+| **DXF 头保留（#127，0.6.4）** | —（`$ANGBASE`/`$ANGDIR`/`$ELEVATION`/`$THICKNESS`/`$FILLETRAD`/`$CHAMFER*` 不写出） | 0.6.5 写出这些变量（另加摘要信息、`$HYPERLINKBASE`、若干 R2004+ 变量） | 我们导出**从不复用源 header**（`CadDocument::new()`，只写 `$INSUNITS`）⇒ **无行为变化**；导入侧这些字段本就不消费 |
+| **DWG 标志字节位 0**（"corrected dimension flag mapping"） | 0.6.3 把位 0 当作"文字被用户定位" | 0.6.5 **反转**：位 0 置位 = 文字在默认位置（`text_user_positioned = (flags & 0x01) == 0`），并同步 `dwg_flags_byte` | yacr **不使用** `text_user_positioned`/`dwg_flags_byte`（DXF 组 70 的 `0x80` 读取路径未变）⇒ 无影响；记录为上游语义修正 |
+
+**结论**：**没有任何一条以"acadrust 写入器约束"为依据的偏离被 0.6.5 推翻**。最需要警惕的组 70 位 32
+仍然不可置位（也没有公开 API 可绕开，绕过就只能伪造记录，违反"不修改 acadrust"），故能力表与
+`docs/compatibility.md` 的表述**保持**，但已补上"0.6.5 复核"字样，避免读者以为是未复核的旧结论。
+
+### 往返证据（真实夹具，本机 CPU/无 GPU）
+
+- `fixtures/dxf/qcad-flange/flange.dxf`（**6 条无内容块的 DIMENSION**，组 70 = 32/36/35，`-1.0` 测量值）：
+  `blockless_dimensions_round_trip_as_dimensions` 通过 ⇒ 数量、kind、测量值、样式名、
+  **定义点 + 组 11/53**、文字覆盖全部保持。
+- `fixtures/dxf/qcad-examples/entities.dxf`（44 条 K 块内标注，其中 **8 条角度**，组 70 = 34/162，
+  组 42 为弧度）：新增 `qcad_angular_dimensions_round_trip_with_radian_group_42` 通过 ⇒ kind、样式名、
+  测量值保持，且重新导出的**角度组 42 仍是弧度**（与 `measurement().to_radians()` 逐条一致）。
+  **诚实边界**：该夹具的角度标注是**块成员**、由 INSERT 放置，导出会**烘焙 INSERT 变换**（既有、已声明的
+  有损导出行为）⇒ 定义点由块坐标变为世界坐标，因此该测试**不**断言点相等；点保持由无块的法兰夹具覆盖。
+- 本轮**未**采真实 GPU 帧（无渲染/UI 行为变化，纯依赖升级）；不声称任何像素结论。
+
+### 本轮实际代码改动（仅 API 适配）
+
+- `Dimension(Box<Dimension>)`、`MText(Box<MText>)`（0.6.5 把大实体装箱）：导出与测试构造改 `Box::new`，
+  测试匹配改 `dimension.as_ref()`。
+- `GradientColorEntry` 新增 `color_name`/`book_name`（颜色簿名）：测试构造用 `..Default::default()`（不伪造来源）。
+- **未**新增/删除依赖；`Cargo.lock` 由 `cargo update -p acadrust --precise 0.6.5` 生成（传递新增
+  `oem_cp 2.1.2` 及其 `phf 0.11.3`/`phf_shared 0.11.3` 依赖，用于 0.6.4 的旧代码页精确解码）。

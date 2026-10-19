@@ -128,7 +128,7 @@ pub(super) fn emit_dimension(
     };
 
     let dxf = build_dimension(definition, base)?;
-    acc.push(EntityType::Dimension(dxf), ctx)?;
+    acc.push(EntityType::Dimension(Box::new(dxf)), ctx)?;
 
     let mut conversion = vec![
         format!(

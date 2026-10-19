@@ -84,7 +84,7 @@ fn dxf_with_dimlunit(format: i16) -> Vec<u8> {
     dim.base.style_name = "Arch".to_string();
     dim.base.normal = Vector3::UNIT_Z;
     dim.definition_point = Vector3::new(0.0, -5.0, 0.0);
-    doc.add_entity(EntityType::Dimension(Dimension::Linear(dim)))
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Linear(dim))))
         .expect("add dimension");
 
     acadrust::DxfWriter::new(&doc)

@@ -198,7 +198,7 @@ fn self_referential_dimension_picture_block_is_opaque_not_a_stack_overflow() {
     dim.base.block_name = "*D0".to_string();
     dim.base.common.owner_handle = block_handle;
     let entity = acadrust::entities::Dimension::Aligned(dim);
-    doc.add_entity(acadrust::EntityType::Dimension(entity.clone()))
+    doc.add_entity(acadrust::EntityType::Dimension(Box::new(entity.clone())))
         .expect("add block member");
 
     let req = request();
@@ -251,7 +251,7 @@ fn picture_dimension_with_a_lossy_member_is_not_reported_complete() {
     // The dimension lives in model space and references the block; it is not a
     // member of it (unlike the self-referential B3 case).
     let entity = acadrust::entities::Dimension::Aligned(dim);
-    doc.add_entity(acadrust::EntityType::Dimension(entity.clone()))
+    doc.add_entity(acadrust::EntityType::Dimension(Box::new(entity.clone())))
         .expect("add block member");
 
     let req = request();

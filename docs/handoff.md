@@ -12,6 +12,38 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## acadrust 0.6.3 → 0.6.5 升级与标注结论复核（2026-10-20）
+
+**范围**：工作区依赖升到 `acadrust 0.6.5`（features `serde` + `import`，registry `rsproxy`），
+`cargo update -p acadrust --precise 0.6.5`；**未改 acadrust、无 `[patch]`**。传递新增
+`oem_cp 2.1.2`、`phf 0.11.3`、`phf_shared 0.11.3`（0.6.4 旧代码页解码）。
+
+**编译修复（0.6.5 破坏性 API）**：`EntityType::Dimension(Box<Dimension>)`、
+`EntityType::MText(Box<MText>)` ⇒ 导出/测试构造加 `Box::new`、测试匹配改 `as_ref()`；
+`GradientColorEntry` 新增 `color_name`/`book_name` ⇒ 测试用 `..Default::default()`。
+
+**复核 ADR-0017 中"因 acadrust 写入器而偏离"的条目**（源码逐函数 diff + 导出字节断言）：
+- **组 70 位 32：仍然无法置位**（0.6.5 `write_dimension_base` 只写 `type_flags | 0x80`；`dwg_flags_byte`
+  只被 DWG 写入器消费）⇒ 偏离保持，已在 ADR 标注复核。
+- **组 42：未变**（仍总写、仍取 `actual_measurement`；角度弧度断言继续成立）。
+- **角度组 70：仍为 2 / 5**（新增断言，导出字节实测；不是 34/37）。
+- **DIMSTYLE：组码/组 3 未变**，`DimStyle` 结构零 diff；仅组 50 `DIMJOGANG` 改按度写，本项目不建模
+  该变量 ⇒ 无影响。
+- **0.6.5 的"dimension flag mapping"修正只改 DWG 标志字节位 0 的语义**（文字默认位置），本项目不消费
+  `text_user_positioned`；DXF 组 70 `0x80` 读取未变。
+- **#127 头保留 / DIMJOGANG 0.6.4**：导出新建空文档、不复用源 header ⇒ 无影响。
+
+**往返证据**：法兰 `flange.dxf` 6 条无块标注（kind/定义点/样式/测量/文字覆盖保持）；新增
+`qcad_angular_dimensions_round_trip_with_radian_group_42` 覆盖 `entities.dxf` 的 8 条角度标注
+（kind/样式/测量保持，**组 42 仍为弧度**）。诚实边界：该夹具角度标注是块成员，导出烘焙 INSERT 变换
+⇒ 定义点由块坐标变世界坐标（既有有损导出行为），故该测试不断言点相等。
+
+**门禁（本机执行）**：workspace check(all-targets)、wasm lib check、`cad-import-acadrust`（197 + 新增
+1 条 = 198 通过）、`cad-app`、`cad-cli-tools`、clippy(workspace `-D warnings`)、fmt、architecture、
+i18n、file-size、fixture、workflow **全部通过**。**NOT RUN**：真实 GPU 帧（无渲染/UI 行为变化）、
+全量 `cargo test --workspace`、跨平台、vendor 兼容。文档更新见 `docs/compatibility.md`「0.6.5 增量」、
+`docs/adr/0017-dimension-family.md`「P5d」。
+
 ## 人工复测修复：视口十字光标 + 对象捕捉标记（2026-10-19，**非** ADR-0017 范围）
 
 **来源**：用户人工复测报告两处缺陷（视口是系统默认箭头、捕捉标记过小且形状不辨）。**不是** ADR-0017 的一部分，属交互/overlay 修复。

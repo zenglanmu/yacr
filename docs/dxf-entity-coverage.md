@@ -82,7 +82,7 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 | OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | ✅/⚠️ | 外框/裁剪边界/符号/灯光字形已画；外部内容不加载，均 `Partial` |
 | 绘制顺序 `draw_order` | ✅ | ⛔ 未贯通 | `DbEntity::draw_order` 未经 `DisplayFragment` 传到 `RenderBatch`（本轮正式推迟）；绘制顺序=上传顺序 |
 | 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复三处：①纸张单位优先从标准纸名解析（acadrust 实际会把 `group 72` 应用到 LAYOUT，但纸名带单位记号时更可靠）；②默认选有 viewport 的纸空间布局；③acadrust 亦应用 `group 73` 旋转，仅在文件未声明旋转时才按 viewport 范围把纸张轴交换为横向（标题栏保持正立）。纸张/边框/标题栏已出图；**模型视图仍有错位/多余图元**（视口合成保真未通过） |
-| DXF STYLE XDATA 字体 | — | ✅（DXF/DWG） | acadrust 0.6.3 已把 STYLE 的 `1001 ACAD`/`1000` 字体面类型化为 `TextStyle.true_type_font`（DXF 读取；DWG 经 `io/dwg/typeface_eed.rs`）。解析链为 `类型化 true_type_font > group 3/4 声明字体 > dxf_style_xdata_fonts 字节扫描`；字节扫描自身仍不覆盖组件 group 3/4（不改 acadrust）。DXF/DWG 文本现可按宿主 `--font <face>=<path>` 解析 |
+| DXF STYLE XDATA 字体 | — | ✅（DXF/DWG） | acadrust 0.6.5 已把 STYLE 的 `1001 ACAD`/`1000` 字体面类型化为 `TextStyle.true_type_font`（DXF 读取；DWG 经 `io/dwg/typeface_eed.rs`）。解析链为 `类型化 true_type_font > group 3/4 声明字体 > dxf_style_xdata_fonts 字节扫描`；字节扫描自身仍不覆盖组件 group 3/4（不改 acadrust）。DXF/DWG 文本现可按宿主 `--font <face>=<path>` 解析 |
 
 `entity.rs` 的 `convert` 现覆盖所有可绘制 `EntityType`；仅结构性 `Block`/`BlockEnd`/
 `Seqend` 不产生几何（本来就不应绘制）。`MultiLeader`/`MLine`/`Tolerance`/`Table`/
@@ -104,7 +104,7 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 QCAD 字体：`osifont.ttf`（GPL-3 + 字体例外）已提交到 `fonts/` 作为默认轮廓回退面；
 `Standard/ltypeshp/qcadshp.cxf`（public domain）留在本机缓存（**不入库；CXF 当前引擎不支持**）。
 文本仍因**宿主字体缺失时走回退**而标 `Partial`，但图元类型本身**已支持**，STYLE xdata
-字体面也已由 acadrust 0.6.3 类型化（DXF+DWG）。
+字体面也已由 acadrust 0.6.5 类型化（DXF+DWG；`tables/textstyle.rs` 与 0.6.3 相同）。
 
 ## 6. 结论
 
@@ -120,5 +120,5 @@ QCAD 字体：`osifont.ttf`（GPL-3 + 字体例外）已提交到 `fonts/` 作�
   jog、外部内容加载、纸空间视口合成，见 §4。
 - **显式不可实现**（记录、不伪造）：代理 opcode 厂商记录（本轮排除）、外部 PDF/DWF/DGN
   underlay 与 OLE2 嵌入、CoordinationModel/Navisworks NWD、ACIS 全内核、点云点数据、
-  完全顺序正确的 WIPEOUT 透明覆盖掩码。STYLE xdata 字体名已由 acadrust 0.6.3 类型化
+  完全顺序正确的 WIPEOUT 透明覆盖掩码。STYLE xdata 字体名已由 acadrust 0.6.5 类型化
   （DXF+DWG）。
